@@ -1143,6 +1143,142 @@ fn the_session_folder_has_the_names_the_cli_can_use() {
     assert!(!prepare_resume(&config, &cwd, "gone"));
 }
 
+/// Windows: what Codex's own Windows sandbox (off unless the user's Codex config turns it on;
+/// the daemon's runs do not use it, they have full access) does to `chat-run`. With the
+/// sandbox switched on by hand (`windows.sandbox = "unelevated"`, `workspace-write`), the real
+/// CLI runs the real client through `command/exec` against the run's named pipe and against
+/// the request folder, and a write outside the working folder shows whether the sandbox was
+/// in effect at all. What happened is written to `codex-windows-sandbox.json` in the test
+/// folder (CI prints it), and checked: whatever the sandbox does, `chat-run` either answers
+/// or says that the sandbox blocks it; it never hangs and never answers with something else.
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread")]
+async fn codex_windows_sandbox_and_chat_run() {
+    let Some(codex) = real_codex() else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("codex-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let mut s = spec(tmp.path(), "codex", "codex", &[], "hi");
+    s.note = Some(daemon::chat_run::note());
+    let mut args = runtime::codex::app_server_args(&s).unwrap();
+    args.extend(
+        [
+            "-c",
+            "sandbox_mode=\"workspace-write\"",
+            "-c",
+            "windows.sandbox=\"unelevated\"",
+        ]
+        .map(String::from),
+    );
+    daemon::chat_run::set_exe(std::path::PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
+    let bin = daemon::chat_run::install_link(tmp.path()).unwrap();
+    let outputs = std::sync::Arc::new(daemon::chat_run::Outputs::default());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let tx2 = tx.clone();
+    let server = daemon::chat_run::Server::start(
+        daemon::chat_run::socket_path(tmp.path()),
+        outputs.clone(),
+        move |e| {
+            let _ = tx2.send(e);
+        },
+        daemon::chat_run::TIMEOUT,
+    )
+    .unwrap();
+    let spool = daemon::chat_run::Spool::start(
+        daemon::chat_run::spool_dir(&s.cwd, "x1"),
+        outputs.clone(),
+        move |e| {
+            let _ = tx.send(e);
+        },
+        daemon::chat_run::TIMEOUT,
+    )
+    .unwrap();
+    // The daemon's side: every request that arrives is answered.
+    let answering = {
+        let outputs = outputs.clone();
+        tokio::spawn(async move {
+            let mut arrived = 0;
+            while let Some(ev) = rx.recv().await {
+                if let RunEvent::Output { output_id, .. } = ev {
+                    arrived += 1;
+                    outputs.resolve(daemon::proto::RunOutputResult {
+                        run_id: "r1".into(),
+                        output_id,
+                        ok: true,
+                        result: Some(serde_json::json!({ "resolved": true })),
+                        error: None,
+                    });
+                }
+            }
+            arrived
+        })
+    };
+    let chat_run: Vec<String> = [
+        bin.join(daemon::chat_run::link_name())
+            .to_string_lossy()
+            .to_string(),
+        "resolve".into(),
+        "--event".into(),
+        "EV1".into(),
+        "--result".into(),
+        "ignored".into(),
+    ]
+    .into();
+    let exec = |command: Vec<String>, env: serde_json::Value| {
+        let (codex, args, home, cwd) = (codex.clone(), args.clone(), home.clone(), s.cwd.clone());
+        tokio::task::spawn_blocking(move || codex_exec(&codex, &args, &home, &cwd, &command, env))
+    };
+    let outside = tempfile::tempdir().unwrap();
+    let target = outside.path().join("written.txt");
+    let write = exec(
+        vec![
+            "cmd.exe".into(),
+            "/c".into(),
+            format!("echo x> \"{}\"", target.display()),
+        ],
+        serde_json::json!({}),
+    )
+    .await
+    .unwrap();
+    let sandboxed = !target.exists();
+    let pipe = exec(
+        chat_run.clone(),
+        serde_json::json!({ "CHAT_RUN_SOCKET": server.path().to_string_lossy() }),
+    )
+    .await
+    .unwrap();
+    let folder = exec(
+        chat_run,
+        serde_json::json!({ "CHAT_RUN_DIR": spool.path().to_string_lossy() }),
+    )
+    .await
+    .unwrap();
+    let report = serde_json::json!({
+        "sandbox in effect (a write outside the working folder was refused)": sandboxed,
+        "write outside": write,
+        "chat-run through the named pipe": pipe,
+        "chat-run through the request folder": folder,
+    });
+    std::fs::write(
+        std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("codex-windows-sandbox.json"),
+        serde_json::to_string_pretty(&report).unwrap(),
+    )
+    .unwrap();
+    drop((server, spool));
+    let _ = tokio::time::timeout(Duration::from_secs(5), answering).await;
+    for (what, out) in [("pipe", &pipe), ("folder", &folder)] {
+        let stdout = out["result"]["stdout"].as_str().unwrap_or_default();
+        let answered = out["result"]["exitCode"] == 0 && stdout.contains("resolved");
+        let blocked = stdout.contains("sandbox.blocked");
+        // The sandbox may also refuse to start the program at all (an error of the call).
+        let refused = out.get("error").is_some_and(|e| !e.is_null());
+        assert!(
+            answered || blocked || refused,
+            "chat-run through the {what} neither answered nor named the sandbox: {out}"
+        );
+    }
+}
+
 /// A Codex run always has full access, whatever `daemon.toml` says, so `chat-run` always works
 /// and the daemon adds no sandbox overrides. A user's own args stay as written.
 #[test]
