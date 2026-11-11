@@ -172,6 +172,11 @@ export const DEFAULT_GATE_PATTERNS: Record<GateKind, readonly string[]> = {
   deleteData: [
     // rm with flags of the root or the home folder itself
     "\\brm\\s+(-\\S+\\s+)+(/|/\\*|~/?|~/\\*|\\$HOME/?|\\$HOME/\\*)(\\s|$)",
+    // The same on Windows: PowerShell (`Remove-Item -Recurse -Force C:\\`, `ri`), cmd (`rd /s /q C:\\`,
+    // `rmdir`, `del`, `erase`) and Git Bash (`rm -rf /c/`), of a drive's root or the home folder itself
+    "\\b(remove-item|ri|rm|rmdir|rd|del|erase)\\s+(\\S+\\s+)*([a-z]:[\\\\/]?\\*?|[\\\\/]\\*?|~[\\\\/]?\\*?)(\\s|$)",
+    "\\b(remove-item|ri|rm|rmdir|rd|del|erase)\\s+(\\S+\\s+)*(\\$home|\\$env:(userprofile|homedrive|systemdrive)|%(userprofile|homedrive|systemdrive)%)[\\\\/]?\\*?(\\s|$)",
+    "\\brm\\s+(-\\S+\\s+)+/[a-z]/?\\*?(\\s|$)",
     "\\b(wrangler d1 execute|psql|mysql|sqlite3)\\b.*\\b(drop\\s+(table|database|schema)|truncate\\s+table)\\b",
     "\\bwrangler d1 execute\\b.*(--remote\\b.*\\bdelete\\s+from\\b|\\bdelete\\s+from\\b.*--remote\\b)",
     "\\bwrangler (d1|kv (namespace|key|bulk)|r2 (bucket|object)) delete\\b",

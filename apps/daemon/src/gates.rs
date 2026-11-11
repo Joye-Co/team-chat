@@ -23,6 +23,11 @@ use tokio::sync::oneshot;
 
 /// The `chat-run` op of the hook.
 pub const OP: &str = "gate.check";
+/// The `chat-run` op of the start-up hook: the CLI runs this run's hooks ([`alive_main`]).
+pub const ALIVE_OP: &str = "gate.alive";
+/// How long a gated run waits for the CLI's start-up hook before it gives up
+/// ([`claude_settings`]). The real CLI runs it within a few seconds of starting.
+pub const HOOKS_START: Duration = Duration::from_secs(45);
 /// Approval ids of this module start with this.
 const PREFIX: &str = "daemon-gate-";
 /// Longest command in `approval.request` (the protocol's limit of `command`).
@@ -40,10 +45,12 @@ pub fn enforced_by(kind: &str) -> bool {
     kind == "claude"
 }
 
-/// The oldest Claude Code whose runs are gated on Windows: 2.1.295 added `onFailure: "block"`
-/// for command hooks (and 2.1.139 the `args` form the hook uses there, see
-/// [`claude_settings`]). An older CLI lets a command through when the hook cannot start.
-pub const WINDOWS_MIN_CLAUDE: [u32; 3] = [2, 1, 295];
+/// The oldest Claude Code whose runs are gated on Windows: the version the Windows tests run
+/// against (CI installs exactly this one). `onFailure: "block"` for command hooks came with
+/// 2.1.295 and the `args` form the hook uses there with 2.1.139 (see [`claude_settings`]): an
+/// older CLI lets a command through when the hook cannot start, and what lies between was
+/// never seen on Windows.
+pub const WINDOWS_MIN_CLAUDE: [u32; 3] = [2, 1, 322];
 
 /// Whether runs of this CLI stop at gated commands (`CliInfo.gates`): `version` is the first
 /// line of its `--version`. Unix: every Claude Code. Windows: a Claude Code of at least
@@ -105,6 +112,41 @@ pub fn commands(line: &str) -> Vec<String> {
         .collect()
 }
 
+/// A simple command as its plain words, for the patterns to match besides the command as
+/// written: the program without its folder, quotes and program extension, and the arguments
+/// without quotes. So `"C:\Program Files\GitHub CLI\gh.exe" pr merge 5`, `gh.exe pr merge 5`
+/// and `'gh' pr merge 5` are all `gh pr merge 5`, and `git push origin "main"` is
+/// `git push origin main`. A pattern written for the plain command (the server's defaults, a
+/// team's own) then holds for every spelling a shell accepts, on Windows and on Unix.
+pub fn plain_command(command: &str) -> String {
+    let c = command.trim_start();
+    let quoted = c.chars().next().filter(|q| matches!(q, '"' | '\''));
+    let (program, rest) = match quoted {
+        Some(q) => match c[1..].find(q) {
+            Some(i) => (&c[1..1 + i], &c[i + 2..]),
+            None => (&c[1..], ""),
+        },
+        None => match c.find(' ') {
+            Some(i) => (&c[..i], &c[i..]),
+            None => (c, ""),
+        },
+    };
+    let base = program.rsplit(['/', '\\']).next().unwrap_or(program);
+    let lower = base.to_ascii_lowercase();
+    let stem = [".exe", ".cmd", ".bat", ".com", ".ps1"]
+        .iter()
+        .find(|e| lower.len() > e.len() && lower.ends_with(**e))
+        .map_or(base, |e| &base[..base.len() - e.len()]);
+    let rest: String = rest
+        .chars()
+        .filter(|ch| !matches!(ch, '"' | '\''))
+        .collect();
+    format!("{stem}{rest}")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 struct Kind {
     name: String,
     patterns: Vec<Regex>,
@@ -126,6 +168,8 @@ pub struct Gates {
     /// One approval at a time (the server keeps one open approval per run): a second gated
     /// command waits here until the first one is answered.
     asking: tokio::sync::Mutex<()>,
+    /// True once the CLI ran the run's start-up hook: its hooks are on.
+    alive: tokio::sync::watch::Sender<bool>,
 }
 
 impl Gates {
@@ -173,7 +217,18 @@ impl Gates {
             kinds,
             state: Mutex::default(),
             asking: tokio::sync::Mutex::new(()),
+            alive: tokio::sync::watch::channel(false).0,
         }
+    }
+
+    /// The CLI ran the run's start-up hook ([`ALIVE_OP`]).
+    pub fn mark_alive(&self) {
+        self.alive.send_replace(true);
+    }
+
+    /// Becomes true when the CLI has run the run's start-up hook.
+    pub fn alive(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.alive.subscribe()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -189,9 +244,16 @@ impl Gates {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// The first kind whose pattern matches one of the line's commands.
+    /// The first kind whose pattern matches one of the line's commands, as written or as its
+    /// plain words ([`plain_command`]).
     pub fn matches(&self, line: &str) -> Option<&str> {
-        let cmds = commands(line);
+        let cmds: Vec<String> = commands(line)
+            .into_iter()
+            .flat_map(|c| {
+                let plain = plain_command(&c);
+                if plain == c { vec![c] } else { vec![c, plain] }
+            })
+            .collect();
         self.kinds
             .iter()
             .find(|k| {
@@ -416,8 +478,33 @@ pub fn hook_main() -> i32 {
     0
 }
 
+/// `chat-run gate-alive`: the run's SessionStart hook. Tells the daemon that this CLI runs the
+/// run's hooks; the daemon gives a gated run its prompt only after that. Always exits 0 and
+/// prints nothing (what a SessionStart hook prints goes into the conversation).
+pub fn alive_main() -> i32 {
+    if let Some(socket) = std::env::var_os(crate::chat_run::ENV_SOCKET).filter(|s| !s.is_empty())
+        && let Err(e) = crate::chat_run::call(
+            std::path::Path::new(&socket),
+            ALIVE_OP,
+            json!({}),
+            Duration::from_secs(20),
+        )
+    {
+        eprintln!("chat-run gate-alive: {e}");
+    }
+    0
+}
+
 /// The run's Claude Code settings that install the hook (`--settings`): `chat_run` is the
 /// run's `chat-run` link.
+///
+/// Hooks can be turned off outside the run: `disableAllHooks` in the user's or the project's
+/// settings, or managed settings that allow only managed hooks. The run's settings say
+/// `disableAllHooks: false`, which wins over the user's and the project's files (`--settings`
+/// ranks above them). Managed settings rank above the run's, so the settings also install a
+/// SessionStart hook (`chat-run gate-alive`): the CLI runs it when it starts, before it takes
+/// any input, and the daemon gives a gated run its prompt only after it has run
+/// ([`HOOKS_START`]). A CLI whose hooks are off never gets a gated run's prompt.
 ///
 /// Unix: the hook is a shell line, `'<link>' gate`.
 ///
@@ -451,7 +538,20 @@ pub fn claude_settings_as(chat_run: &std::path::Path, exec_form: bool) -> Value 
             "timeout": HOOK_WAIT.as_secs(),
         })
     };
-    json!({ "hooks": { "PreToolUse": [{ "matcher": matcher(), "hooks": [hook] }] } })
+    let mut alive = hook.clone();
+    if exec_form {
+        alive["args"] = json!(["gate-alive"]);
+    } else {
+        alive["command"] = json!(format!("{} gate-alive", shell_quote(&path)));
+    }
+    alive["timeout"] = json!(30);
+    json!({
+        "disableAllHooks": false,
+        "hooks": {
+            "PreToolUse": [{ "matcher": matcher(), "hooks": [hook] }],
+            "SessionStart": [{ "hooks": [alive] }],
+        },
+    })
 }
 
 /// The tools the hook runs before: the shell tools and every MCP tool.
@@ -575,6 +675,104 @@ mod tests {
         }
     }
 
+    /// Every spelling of a program a shell accepts is the plain command to the patterns: with
+    /// an extension, a folder, quotes, in any case; and quoted arguments are their words.
+    #[test]
+    fn spellings_of_a_command_match_like_the_plain_command() {
+        for (written, plain) in [
+            ("gh.exe pr merge 5", "gh pr merge 5"),
+            ("GH.EXE pr merge 5", "GH pr merge 5"),
+            (
+                r#""C:\Program Files\GitHub CLI\gh.exe" pr merge 5"#,
+                "gh pr merge 5",
+            ),
+            ("'/usr/local/bin/gh' pr merge 5", "gh pr merge 5"),
+            (r"C:\tools\git.exe push origin main", "git push origin main"),
+            ("git.exe push origin \"main\"", "git push origin main"),
+            ("git push origin 'HEAD:main'", "git push origin HEAD:main"),
+            ("npm.cmd publish", "npm publish"),
+            ("./deploy.ps1 -Env prod", "deploy -Env prod"),
+            (
+                "wrangler.cmd deploy --env \"production\"",
+                "wrangler deploy --env production",
+            ),
+            ("gh pr merge 5", "gh pr merge 5"),
+            ("ls", "ls"),
+            (".exe", ".exe"),
+            ("\"unclosed", "unclosed"),
+        ] {
+            assert_eq!(plain_command(written), plain, "{written}");
+        }
+        let gates = Gates::new(&defaults());
+        let hits = [
+            ("gh.exe pr merge 12 --squash", "mergeMain"),
+            (
+                r#"& "C:\Program Files\GitHub CLI\gh.exe" pr merge 12"#,
+                "mergeMain",
+            ),
+            ("git.exe push origin main", "mergeMain"),
+            ("GIT.EXE PUSH origin HEAD:main", "mergeMain"),
+            ("git push origin \"main\"", "mergeMain"),
+            ("git push origin 'main'", "mergeMain"),
+            (
+                r"C:\Users\me\AppData\Roaming\npm\wrangler.cmd deploy --env production",
+                "deployProd",
+            ),
+            ("npx.cmd wrangler deploy --env=prod", "deployProd"),
+            ("vercel.cmd --prod", "deployProd"),
+            ("flyctl.exe deploy", "deployProd"),
+            ("npm.cmd run deploy:prod", "deployProd"),
+            ("wrangler.cmd secret put API_KEY --env prod", "prodConfig"),
+            ("fly.exe secrets set A=1", "prodConfig"),
+            ("Remove-Item -Recurse -Force C:\\", "deleteData"),
+            ("remove-item C:\\ -recurse -force", "deleteData"),
+            ("Remove-Item -Recurse -Force $HOME", "deleteData"),
+            ("Remove-Item -Recurse -Force $env:USERPROFILE", "deleteData"),
+            (
+                "Remove-Item -Recurse -Force \"$env:USERPROFILE\\*\"",
+                "deleteData",
+            ),
+            ("ri -r -fo ~", "deleteData"),
+            ("rm -r -fo C:/", "deleteData"),
+            ("cmd /c rd /s /q C:\\", "deleteData"),
+            ("rmdir /s /q %USERPROFILE%", "deleteData"),
+            ("del /s /q C:\\*", "deleteData"),
+            ("erase /s /q D:\\", "deleteData"),
+            ("rm -rf \"/\"", "deleteData"),
+            ("rm -rf /c/", "deleteData"),
+            ("rm.exe -rf /", "deleteData"),
+            ("psql.exe $URL -c 'drop table users'", "deleteData"),
+            ("gh.exe repo delete org/x --yes", "deleteData"),
+            ("npm.cmd publish --access public", "externalPublish"),
+            ("cargo.exe publish -p chat-protocol", "externalPublish"),
+            ("gh.exe release create v1.2.3", "externalPublish"),
+            ("twine.exe upload dist/*", "externalPublish"),
+        ];
+        for (cmd, want) in hits {
+            assert_eq!(gates.matches(cmd), Some(want), "{cmd}");
+        }
+        let misses = [
+            "gh.exe pr view 12",
+            "git.exe push origin main-fix",
+            "git.exe push -u origin claude/m4",
+            "wrangler.cmd deploy --env staging",
+            "Remove-Item -Recurse -Force .\\build",
+            "Remove-Item -Recurse -Force C:\\Users\\me\\repo\\target",
+            "rd /s /q build",
+            "rmdir /s /q .\\node_modules",
+            "del /s /q *.tmp",
+            "del /q C:\\temp\\x.log",
+            "rm -rf C:/Users/me/repo/target",
+            "Get-ChildItem C:\\",
+            "dir /s C:\\",
+            "npm.cmd install",
+            "cargo.exe build --release",
+        ];
+        for cmd in misses {
+            assert_eq!(gates.matches(cmd), None, "{cmd}");
+        }
+    }
+
     #[test]
     fn commands_split_at_separators() {
         assert_eq!(
@@ -657,6 +855,18 @@ mod tests {
         let hook = claude_settings_as(path, false)["hooks"]["PreToolUse"][0]["hooks"][0].clone();
         assert_eq!(hook["command"], "'/tmp/run dir/bin/chat-run' gate");
         assert!(hook.get("args").is_none() && hook.get("onFailure").is_none());
+        // Both forms turn hooks on for the run and install the start-up hook.
+        for exec_form in [false, true] {
+            let s = claude_settings_as(path, exec_form);
+            assert_eq!(s["disableAllHooks"], false);
+            let alive = &s["hooks"]["SessionStart"][0]["hooks"][0];
+            if exec_form {
+                assert_eq!(alive["args"], json!(["gate-alive"]));
+                assert_eq!(alive["onFailure"], "block");
+            } else {
+                assert_eq!(alive["command"], "'/tmp/run dir/bin/chat-run' gate-alive");
+            }
+        }
         assert_eq!(
             claude_settings(path),
             claude_settings_as(path, cfg!(windows))
@@ -667,18 +877,19 @@ mod tests {
     /// failure; Unix reports every Claude Code, and no other runtime anywhere.
     #[test]
     fn gates_are_reported_for_a_claude_code_that_can_block() {
-        assert!(windows_can_gate("2.1.295 (Claude Code)"));
         assert!(windows_can_gate("2.1.322 (Claude Code)"));
+        assert!(windows_can_gate("2.1.400 (Claude Code)"));
         assert!(windows_can_gate("2.2.0"));
         assert!(windows_can_gate("3.0.1 (Claude Code)"));
         for old in [
-            "2.1.294 (Claude Code)",
+            "2.1.321 (Claude Code)",
+            "2.1.295 (Claude Code)",
             "2.0.999",
             "1.9.400",
             "",
             "found",
             "2.1",
-            "v2.1.300",
+            "v2.1.400",
         ] {
             assert!(!windows_can_gate(old), "{old}");
         }

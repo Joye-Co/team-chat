@@ -773,7 +773,12 @@ impl Daemon {
         } else {
             self.keys.env_for(&a.bot_member_id)
         };
+        let gated = self
+            .clis
+            .iter()
+            .any(|c| c.runtime == a.runtime && c.gates == Some(true));
         tokio::spawn(crate::run::supervise(RunCtx {
+            gated,
             cfg: self.cfg.clone(),
             token: self.token.clone(),
             assign: a,
