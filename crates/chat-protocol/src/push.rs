@@ -11,7 +11,7 @@ use crate::settings::NotifyEvent;
 
 /// Max quick answers a push offers.
 pub const MAX_PUSH_ACTIONS: usize = 3;
-/// APNs category of a push that offers answers.
+/// Prefix of the APNs category of a push that offers answers: `tc.ask.<messageId>.<rev>`.
 pub const PUSH_CATEGORY_ASK: &str = "tc.ask";
 
 fn invalid(field: &'static str, message: &str) -> Validation {

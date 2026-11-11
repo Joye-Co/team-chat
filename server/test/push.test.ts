@@ -127,7 +127,7 @@ describe("pushes", () => {
     const m = (await cbot.ok({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "", cardV2: askCard([alice.id]) })).message;
     const waiting = await waitUntil(() => pushes.find((p) => p.body.tc?.reason === "waiting"), 5000, "waiting push");
     expect(waiting.body.aps.badge).toBe(1);
-    expect(waiting.body.aps.category).toBe("tc.ask");
+    expect(waiting.body.aps.category).toBe(`tc.ask.${m.id}.1`);
     expect(waiting.body.aps.alert.body).toContain("等你回复");
     expect(waiting.body.tc.ask).toEqual({ messageId: m.id, rev: 1, actions: [{ id: "ok", label: "发" }, { id: "no", label: "先不发" }] });
     expect((await api("/v1/me/badge", { token: alice.token })).body).toEqual({ waiting: 1 });

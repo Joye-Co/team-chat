@@ -2207,7 +2207,9 @@ Rules:
   notification extension may replace it from its cache), `aps.badge` = `BadgeResponse.waiting`,
   `aps.sound` `"default"`, `aps.thread-id` = topic id (or group id), `aps.mutable-content: 1`,
   and `tc: PushData`. `apns-collapse-id` = the topic id (a newer push for the same topic
-  replaces the older one). A push with `ask` has `aps.category` `"tc.ask"`.
+  replaces the older one). A push with `ask` has `aps.category` `"tc.ask.<messageId>.<rev>"`: the
+  app registers that category with the ask's answers as buttons (its notification extension
+  when the push arrives) and adds 打开.
 - `ask` is set for an open card ask of the topic (`reason` `waiting`, or a `mention` on the ask
   message) when the card's footer actions can be pressed without more input: kind `submit` or
   `reject`, no `confirm`, no `inputs`, style not `danger`, role not `approve`, and the ask has no

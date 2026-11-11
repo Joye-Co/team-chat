@@ -94,5 +94,5 @@ export const AnswerCardRequest = z.object({
 });
 export type AnswerCardRequest = z.infer<typeof AnswerCardRequest>;
 
-/** APNs category of a push that offers answers; others have none (tap opens). */
+/** Prefix of the APNs category of a push that offers answers: `tc.ask.<messageId>.<rev>`. */
 export const PUSH_CATEGORY_ASK = "tc.ask";

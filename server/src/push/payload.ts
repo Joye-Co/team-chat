@@ -92,6 +92,15 @@ export function alertText(i: AlertInput): { title: string; body: string } {
   }
 }
 
+/**
+ * The category of a push with answers: one per card and rev, so its buttons are that card's
+ * answers. The app registers it (the notification extension when the push arrives, the app for
+ * notifications it finds delivered); until then the notification has no buttons and a tap opens.
+ */
+export function askCategory(ask: PushAsk): string {
+  return `${PUSH_CATEGORY_ASK}.${ask.messageId}.${ask.rev}`;
+}
+
 /** The APNs JSON body of an alert push. */
 export function alertPayload(data: PushData, alert: { title: string; body: string }, badge: number): Record<string, unknown> {
   const aps: Record<string, unknown> = {
@@ -101,7 +110,7 @@ export function alertPayload(data: PushData, alert: { title: string; body: strin
     "thread-id": data.topicId ?? data.groupId,
     "mutable-content": 1,
   };
-  if (data.ask) aps.category = PUSH_CATEGORY_ASK;
+  if (data.ask) aps.category = askCategory(data.ask);
   return { aps, tc: data };
 }
 
