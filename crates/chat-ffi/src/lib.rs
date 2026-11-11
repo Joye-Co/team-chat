@@ -15,9 +15,11 @@ use chat_core::{
 use chat_protocol::{ErrorCode, GroupKind, main_topic_id};
 
 mod auth;
+mod cards;
 mod token;
 
 pub use auth::{SignedIn, email_sign_in, request_email_code};
+pub use cards::{CardRecord, HandOffPlace, HomeData, HomeItem};
 pub use token::{clear_token, load_token, save_token};
 
 uniffi::setup_scaffolding!();
