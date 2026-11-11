@@ -870,6 +870,46 @@ pub fn open_email_code(
     Ok(handle)
 }
 
+/// The 用手机扫码登录 sheet with a QR code waiting for the phone.
+pub fn open_phone_qr(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::Account, cx)?;
+    after_fit(handle, cx, move |window, cx| {
+        let phone = view.read(cx).account().read(cx).phone().clone();
+        super::account_phone::PhoneSignIn::open_qr_sheet(phone.clone(), window, cx);
+        phone.update(cx, |p, cx| {
+            p.preview_offer(
+                crate::data::PhoneOffer {
+                    id: "offer".into(),
+                    code: "7K2M-9QPX".into(),
+                    qr_text: "tc-sign-in:7K2M-9QPX?server=https%3A%2F%2Fchat.example.com".into(),
+                    expires_at: 0,
+                },
+                crate::data::PhoneOfferState::Waiting,
+                cx,
+            )
+        });
+    });
+    Ok(handle)
+}
+
+/// The 输入手机上的码 sheet.
+pub fn open_phone_code(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::Account, cx)?;
+    after_fit(handle, cx, move |window, cx| {
+        let phone = view.read(cx).account().read(cx).phone().clone();
+        super::account_phone::PhoneSignIn::open_code_sheet(phone, window, cx);
+    });
+    Ok(handle)
+}
+
 /// The 编辑资料 sheet after 完成 with an empty name: the field error.
 pub fn open_profile_error(
     services: Services,
@@ -1170,6 +1210,20 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedIn,
         setup: |_, _| {},
         open: open_email_code,
+    },
+    Scene {
+        name: "settings-phone-qr",
+        about: "Settings: the 用手机扫码登录 sheet with the QR code",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: open_phone_qr,
+    },
+    Scene {
+        name: "settings-phone-code",
+        about: "Settings: the 输入手机上的码 sheet",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: open_phone_code,
     },
     Scene {
         name: "settings-sign-out",

@@ -144,28 +144,37 @@ fn mac_menus(state: MenuState) -> Vec<Menu> {
     ]
 }
 
+/// The commands that exist only on macOS: 隐藏, 隐藏其他 and 全部显示 hide whole apps, which
+/// Windows does not do (its own keys minimize: Win+↓, Win+Home, Win+D). 服务 is left out
+/// with them (a system submenu).
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn mac_only_actions() -> [&'static str; 3] {
+    use gpui::Action as _;
+    [Hide.name(), HideOthers.name(), ShowAll.name()]
+}
+
 /// The menus for a system without a Mac menu bar (Windows shows them in the window, see
-/// [`window_menu_bar`]): without the commands only macOS has (服务, hiding apps, 前置全部
-/// 窗口, the character viewer), without menus that end up empty (帮助 is the system's
-/// menu search on macOS), and with the separators tidied.
+/// [`window_menu_bar`]): without the commands only macOS has ([`mac_only_actions`], 服务),
+/// with 关于 under 帮助, where Windows apps keep it (WINDOWS.md §2; on macOS that menu
+/// holds the system's menu search), and with the separators tidied.
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 fn without_mac_only(menus: Vec<Menu>) -> Vec<Menu> {
     use gpui::Action as _;
-    let mac_only = [
-        Hide.name(),
-        HideOthers.name(),
-        ShowAll.name(),
-        BringAllToFront.name(),
-        ShowCharacterPalette.name(),
-    ];
+    let mac_only = mac_only_actions();
+    let help: gpui::SharedString = nav::MENU_HELP.into();
     menus
         .into_iter()
         .filter_map(|mut menu| {
             let mut items: Vec<MenuItem> = Vec::new();
+            if menu.name == help {
+                items.push(MenuItem::action(product(nav::MENU_ABOUT), About));
+            }
             for item in std::mem::take(&mut menu.items) {
                 let keep = match &item {
                     MenuItem::SystemMenu(_) => false,
-                    MenuItem::Action { action, .. } => !mac_only.contains(&action.name()),
+                    MenuItem::Action { action, .. } => {
+                        !mac_only.contains(&action.name()) && action.name() != About.name()
+                    }
                     // No separator first, and never two in a row.
                     MenuItem::Separator => {
                         !matches!(items.last(), None | Some(MenuItem::Separator))
@@ -272,12 +281,95 @@ fn register_system_menus() {
 fn register_system_menus() {}
 
 /// 编辑 › 表情与符号: the system's character viewer, which types into the
-/// focused field.
+/// focused field. On Windows that is the emoji panel (Win+.), which has no API of its own:
+/// the key press is sent to the system, as browsers do for their 表情符号 menu item.
 fn show_character_palette(cx: &mut App) {
     let _ = cx;
     #[cfg(target_os = "macos")]
     if let Some(mtm) = objc2::MainThreadMarker::new() {
         objc2_app_kit::NSApplication::sharedApplication(mtm).orderFrontCharacterPalette(None);
+    }
+    #[cfg(target_os = "windows")]
+    cx.defer(|_| win::show_emoji_panel());
+}
+
+/// 窗口 › 缩放. On Windows the command maximizes the window, and restores a maximized
+/// one (GPUI's zoom only maximizes there).
+fn zoom(window: &mut gpui::Window) {
+    #[cfg(target_os = "windows")]
+    if window.is_maximized() {
+        win::restore(window);
+        return;
+    }
+    window.zoom_window();
+}
+
+/// 窗口 › 前置全部窗口: every window of the app comes in front of the other apps'
+/// windows, the active one on top. macOS does it for the app; elsewhere each window is
+/// raised in turn.
+fn bring_all_to_front(cx: &mut App) {
+    cx.activate(true);
+    #[cfg(not(target_os = "macos"))]
+    {
+        let active = cx.active_window();
+        let mut windows = cx.windows();
+        // The active window last, so it ends on top with the focus.
+        windows.sort_by_key(|w| Some(*w) == active);
+        cx.defer(move |cx| {
+            for handle in windows {
+                let _ = handle.update(cx, |_, window, _| window.activate_window());
+            }
+        });
+    }
+}
+
+#[cfg(target_os = "windows")]
+mod win {
+    use windows::Win32::UI::{
+        Input::KeyboardAndMouse::{
+            INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_LWIN,
+            VK_OEM_PERIOD,
+        },
+        WindowsAndMessaging::{SW_RESTORE, ShowWindow},
+    };
+
+    /// Presses Win+. for the person: Windows opens its emoji panel at the caret of the
+    /// focused field.
+    pub fn show_emoji_panel() {
+        let key = |vk, up: bool| INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    dwFlags: if up {
+                        KEYEVENTF_KEYUP
+                    } else {
+                        Default::default()
+                    },
+                    ..Default::default()
+                },
+            },
+        };
+        let keys = [
+            key(VK_LWIN, false),
+            key(VK_OEM_PERIOD, false),
+            key(VK_OEM_PERIOD, true),
+            key(VK_LWIN, true),
+        ];
+        // SAFETY: four valid keyboard inputs of the stated size.
+        unsafe {
+            SendInput(&keys, std::mem::size_of::<INPUT>() as i32);
+        }
+    }
+
+    /// Restores a maximized window to its size before.
+    pub fn restore(window: &gpui::Window) {
+        if let Some(hwnd) = crate::win32::hwnd(window) {
+            // SAFETY: a live window of this thread.
+            unsafe {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+            }
+        }
     }
 }
 
@@ -319,11 +411,11 @@ pub fn install(cx: &mut App) {
         }
         with_key_window(cx, |window| window.remove_window())
     });
-    cx.on_action(|_: &Zoom, cx| with_key_window(cx, |window| window.zoom_window()));
+    cx.on_action(|_: &Zoom, cx| with_key_window(cx, zoom));
     cx.on_action(|_: &ToggleFullScreen, cx| {
         with_key_window(cx, |window| window.toggle_fullscreen())
     });
-    cx.on_action(|_: &BringAllToFront, cx| cx.activate(true));
+    cx.on_action(|_: &BringAllToFront, cx| bring_all_to_front(cx));
     cx.on_action(|_: &ShowCharacterPalette, cx| show_character_palette(cx));
     set_menus(app_menus(), cx);
     cx.set_dock_menu(dock_menu());
@@ -341,7 +433,8 @@ fn with_key_window(cx: &mut App, f: impl FnOnce(&mut gpui::Window) + 'static) {
 }
 
 /// The standard macOS about panel (name, version and icon from the bundle). Other systems
-/// have no such panel: 设置 › 通用 shows the version there.
+/// have no such panel: the app's own 关于 window shows the same three things
+/// ([`super::about`]).
 pub fn show_about(cx: &mut App) {
     cx.activate(true);
     #[cfg(target_os = "macos")]
@@ -350,7 +443,7 @@ pub fn show_about(cx: &mut App) {
         app.orderFrontStandardAboutPanel(None);
     }
     #[cfg(not(target_os = "macos"))]
-    cx.dispatch_action(&OpenSettings);
+    cx.defer(super::about::open);
 }
 
 // --- v12/behavior ---
@@ -646,39 +739,28 @@ mod tests {
         assert!(cx.update(|cx| cx.windows().is_empty()), "cmd-w closed it");
     }
 
-    /// The menus a window shows on Windows: no command that only macOS has, no empty
-    /// menu, no stray separator; everything else stays.
+    /// The menus a window shows on Windows: every command of the Mac menus except the
+    /// three that hide apps, 关于 under 帮助, no empty menu, no stray separator.
     #[test]
-    fn the_window_menus_drop_what_only_macos_has() {
+    fn the_window_menus_drop_only_what_macos_alone_has() {
         use gpui::Action as _;
         let mac = mac_menus(MenuState::default());
         let win = without_mac_only(mac_menus(MenuState::default()));
         let names =
             |menus: &[Menu]| -> Vec<String> { menus.iter().map(|m| m.name.to_string()).collect() };
-        assert!(names(&mac).iter().any(|n| n == nav::MENU_HELP));
-        assert!(
-            !names(&win).iter().any(|n| n == nav::MENU_HELP),
-            "帮助 is empty"
-        );
-        assert_eq!(names(&win).len(), names(&mac).len() - 1);
-        let actions = |menus: &[Menu]| -> Vec<String> {
-            menus
+        assert_eq!(names(&win), names(&mac), "the same menus in the same order");
+        let actions = |menu: &Menu| -> Vec<String> {
+            menu.items
                 .iter()
-                .flat_map(|m| &m.items)
                 .filter_map(|i| match i {
                     MenuItem::Action { action, .. } => Some(action.name().to_string()),
                     _ => None,
                 })
                 .collect()
         };
-        let gone = [
-            Hide.name(),
-            HideOthers.name(),
-            ShowAll.name(),
-            BringAllToFront.name(),
-            ShowCharacterPalette.name(),
-        ];
-        let (mac_actions, win_actions) = (actions(&mac), actions(&win));
+        let all = |menus: &[Menu]| -> Vec<String> { menus.iter().flat_map(actions).collect() };
+        let gone = mac_only_actions();
+        let (mac_actions, win_actions) = (all(&mac), all(&win));
         for action in &mac_actions {
             assert_eq!(
                 win_actions.contains(action),
@@ -686,7 +768,14 @@ mod tests {
                 "{action}"
             );
         }
+        assert_eq!(win_actions.len(), mac_actions.len() - gone.len());
+        // 关于 moved from the first menu to 帮助, where it is the only item.
+        assert!(!actions(&win[0]).contains(&About.name().to_string()));
+        let help = win.last().expect("帮助");
+        assert_eq!(help.name.as_ref(), nav::MENU_HELP);
+        assert_eq!(actions(help), vec![About.name().to_string()]);
         for menu in &win {
+            assert!(!menu.items.is_empty(), "{}", menu.name);
             assert!(!matches!(menu.items.first(), Some(MenuItem::Separator)));
             assert!(!matches!(menu.items.last(), Some(MenuItem::Separator)));
             assert!(
@@ -704,9 +793,9 @@ mod tests {
                 menu.name
             );
         }
-        // The app menu keeps 设置… and 退出, and the 服务器 submenu.
-        assert!(win_actions.contains(&OpenSettings.name().to_string()));
-        assert!(win_actions.contains(&Quit.name().to_string()));
+        // The first menu keeps 设置… and 退出, and the 服务器 submenu.
+        assert!(actions(&win[0]).contains(&OpenSettings.name().to_string()));
+        assert!(actions(&win[0]).contains(&Quit.name().to_string()));
         assert!(
             win[0]
                 .items

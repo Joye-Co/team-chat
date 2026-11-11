@@ -1482,6 +1482,11 @@ pub fn bind_view_keys(cx: &mut App) {
         KeyBinding::new("shift-tab", FocusPrev, None),
         KeyBinding::new("f6", FocusNextRegion, None),
         KeyBinding::new("shift-f6", FocusPrevRegion, None),
+    ]);
+    // ⌥Tab on the Mac. Windows keeps Alt+Tab for its own window switcher and
+    // never hands it to an app: F6 is the key there, as in every Windows app.
+    #[cfg(target_os = "macos")]
+    cx.bind_keys([
         KeyBinding::new("alt-tab", FocusNextRegion, None),
         KeyBinding::new("alt-shift-tab", FocusPrevRegion, None),
     ]);

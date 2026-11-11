@@ -78,7 +78,7 @@ pub fn native_alert(dialog: Dialog, cx: &App) -> Dialog {
     let k = native_colors(cx);
     dialog
         .entrance(SHEET_ENTRANCE)
-        .margin_top(metrics::TOOLBAR_ROW)
+        .margin_top(super::window_chrome::sheet_top())
         .width(metrics::ALERT_WIDTH)
         .close_button(false)
         .keyboard(true)
@@ -100,7 +100,8 @@ pub fn spotlight(dialog: Dialog, cx: &App) -> Dialog {
     let k = native_colors(cx);
     dialog
         .entrance(DialogEntrance::None)
-        .margin_top(spot::TOP)
+        // Measured from the content's top: the caption strip adds its height off the Mac.
+        .margin_top(spot::TOP + super::window_chrome::sheet_top() - metrics::TOOLBAR_ROW)
         .width(spot::WIDTH)
         .close_button(false)
         .keyboard(true)

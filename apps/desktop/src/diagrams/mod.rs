@@ -486,7 +486,7 @@ pub fn clear_memory(cx: &mut App) {
 const DIAGRAM_FONTS: &str =
     "-apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Helvetica Neue\", sans-serif";
 #[cfg(windows)]
-const DIAGRAM_FONTS: &str = "\"Segoe UI\", \"Microsoft YaHei UI\", \"Microsoft YaHei\", sans-serif";
+const DIAGRAM_FONTS: &str = "\"Segoe UI Variable Text\", \"Segoe UI\", \"Microsoft YaHei UI\", \"Microsoft YaHei\", sans-serif";
 
 #[cfg(any(target_os = "macos", windows))]
 fn ensure_renderer(cx: &mut App) -> bool {

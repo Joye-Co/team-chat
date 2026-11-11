@@ -8,6 +8,7 @@
 //! through a [`crate::data::AdminReply`], awaited off the UI thread.
 
 mod account;
+mod account_phone;
 pub mod ai_service;
 pub mod appearance;
 pub(crate) mod general;

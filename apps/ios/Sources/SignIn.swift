@@ -1,23 +1,50 @@
 import SwiftUI
 
-/// Sign-in: the email, then the 6-digit code. A build without a server address asks for it.
+/// Sign-in: the choice of a way (LoginStart), then that way's screens. A build without a server
+/// address asks for it on the first screen.
 struct SignInFlow: View {
     @EnvironmentObject private var model: AppModel
     @State private var server = Session.defaultServer ?? ""
     @State private var email = ""
-    @State private var path: [Step] = []
+    @State private var path: [Step] = SignInFlow.debugPath
+
+    /// Debug builds open a step from the launch environment (`TC_OPEN=password`), for screenshots.
+    private static var debugPath: [Step] {
+        #if DEBUG
+            switch ProcessInfo.processInfo.environment["TC_OPEN"] {
+            case "email": return [.email]
+            case "password": return [.password]
+            case "scan": return [.scan]
+            case "invite": return [.invite]
+            case "ask": return [.ask]
+            default: return []
+            }
+        #else
+            return []
+        #endif
+    }
 
     enum Step: Hashable {
+        case email
         case code(email: String)
+        case password
+        case scan
+        case invite
+        case ask
         case credential
     }
 
     var body: some View {
         NavigationStack(path: $path) {
-            EmailScreen(server: $server, email: $email) { path.append($0) }
+            LoginStartScreen(server: $server) { path.append($0) }
                 .navigationDestination(for: Step.self) { step in
                     switch step {
+                    case .email: EmailScreen(server: $server, email: $email) { path.append($0) }
                     case .code(let email): CodeScreen(server: server, email: email)
+                    case .password: PasswordSignInScreen(server: server, email: $email) { path.append($0) }
+                    case .scan: ScanSignInScreen(server: $server)
+                    case .invite: InviteScreen(server: server)
+                    case .ask: AskSignInScreen(server: server)
                     case .credential: CredentialScreen(server: $server)
                     }
                 }
@@ -34,19 +61,13 @@ private struct EmailScreen: View {
     @State private var failure: String?
     @FocusState private var focused: Bool
 
-    private var asksServer: Bool { Session.defaultServer == nil }
     private var ready: Bool { email.contains("@") && !server.isEmpty && !busy }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text(Copy.signInTitle).font(.largeTitle.bold())
+                Text(Copy.wayEmail).font(.largeTitle.bold())
                 Text(Copy.signInEmailHint).font(.subheadline).foregroundStyle(.secondary)
-                if asksServer {
-                    TextField(Copy.signInServer, text: $server)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                        .modifier(FieldStyle())
-                }
                 TextField(Copy.signInEmail, text: $email)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .keyboardType(.emailAddress).textContentType(.emailAddress)
@@ -63,14 +84,12 @@ private struct EmailScreen: View {
                 }
                 .buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
                 .disabled(!ready)
-                Button(Copy.signInOtherWay) { go(.credential) }
-                    .font(.subheadline).frame(maxWidth: .infinity, minHeight: 44)
             }
             .padding(24)
         }
         .scrollDismissesKeyboard(.interactively)
         .background(Theme.page)
-        .onAppear { focused = !asksServer }
+        .onAppear { focused = true }
     }
 
     private func send() {
@@ -212,14 +231,14 @@ private struct CredentialScreen: View {
     }
 }
 
-private struct FieldStyle: ViewModifier {
+struct FieldStyle: ViewModifier {
     func body(content: Content) -> some View {
         content.padding(.horizontal, 16).frame(minHeight: 52)
             .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.rowRadius))
     }
 }
 
-private struct FailureLine: View {
+struct FailureLine: View {
     let text: String
 
     var body: some View {

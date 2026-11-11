@@ -310,6 +310,8 @@ crate::copy! {
     ACT_DENY = "{actor} 拒绝了 {target} 的一步",
     ACT_RULES = "{actor} 改了默认规则",
     ACT_EMAIL_SIGN_IN = "{actor} 用邮箱登录",
+    ACT_PASSWORD_SIGN_IN = "{actor} 用密码登录",
+    ACT_QR_SIGN_IN = "{actor} 扫码登录",
     ACT_CLI_LOGIN = "{actor} 在 {machine} 上登录 {cli}",
     ACT_MACHINE_CREATE = "{actor} 添加了电脑 {machine}",
     ACT_MACHINE_REVOKE = "{actor} 停用了电脑 {machine}",
