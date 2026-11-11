@@ -132,6 +132,7 @@ impl Host {
     /// Puts the preview at this rectangle of the parent's client area, in pixels.
     pub fn place(&self, x: i32, y: i32, width: i32, height: i32) {
         let (width, height) = (width.max(1), height.max(1));
+        PLACED.set(self.child.0 as isize);
         if self.placed.replace((x, y, width, height)) == (x, y, width, height) {
             return;
         }
@@ -191,6 +192,40 @@ unsafe fn initialize(handler: &IPreviewHandler, path: &Path) -> Option<()> {
         let item: IShellItem = SHCreateItemFromParsingName(&name, None).ok()?;
         init.Initialize(&item, STGM_READ.0).ok()
     }
+}
+
+thread_local! {
+    /// The child window of the preview that was placed last, for [`screen_probe`].
+    static PLACED: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
+}
+
+/// For the screenshot self-test: what the screen shows where the last preview is, as a
+/// PNG. The self-test captures the app's window, which does not include what another
+/// process (the handler's) draws into it; the screen does. Brings the app's window above
+/// the others first.
+pub fn screen_probe() -> Option<Vec<u8>> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GA_ROOT, GetAncestor, HWND_TOPMOST, IsWindow, SWP_NOMOVE, SWP_NOSIZE,
+    };
+    let child = HWND(PLACED.get() as *mut _);
+    // SAFETY: the handle is checked before use; the calls only raise the app's window.
+    unsafe {
+        if !IsWindow(Some(child)).as_bool() {
+            return None;
+        }
+        let _ = SetWindowPos(
+            GetAncestor(child, GA_ROOT),
+            Some(HWND_TOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
+    }
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let (x, y, w, h) = artifact_view::win_support::client_rect_on_screen(child.0 as isize);
+    artifact_view::win_support::capture_screen_png(x, y, w, h)
 }
 
 /// The handler of one open preview, kept while its sheet is drawn.

@@ -390,9 +390,27 @@ thread_local! {
 /// preview handler, a page in the isolated view): true once that content had time to
 /// load.
 pub fn quick_look_settled(_: &App) -> bool {
-    OPENED
+    let settled = OPENED
         .get()
-        .is_some_and(|at| at.elapsed() >= std::time::Duration::from_secs(4))
+        .is_some_and(|at| at.elapsed() >= std::time::Duration::from_secs(4));
+    // On Windows the handler's view belongs to another process, which the window
+    // capture leaves out: keep what the screen shows there next to the screenshots.
+    #[cfg(target_os = "windows")]
+    if settled && let Some(dir) = std::env::var_os("TC_PROBE_DIR") {
+        thread_local! {
+            static SAVED: std::cell::Cell<Option<std::time::Instant>> =
+                const { std::cell::Cell::new(None) };
+        }
+        if SAVED.get() != OPENED.get() {
+            SAVED.set(OPENED.get());
+            if let Some(png) = super::preview_handler::screen_probe() {
+                let _ = std::fs::create_dir_all(&dir);
+                let file = std::path::Path::new(&dir).join("quick-look-handler-on-screen.png");
+                let _ = std::fs::write(file, png);
+            }
+        }
+    }
+    settled
 }
 
 /// The `files` scene with the preview sheet of a file named `name` holding `bytes`.

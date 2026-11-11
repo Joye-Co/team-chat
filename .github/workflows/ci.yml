@@ -319,6 +319,9 @@ jobs:
         env:
           SCENES: ${{ inputs.windows_scenes }}
           RUST_BACKTRACE: "1"
+          # What the screen shows where another process draws into the app's window (the
+          # system's preview handler): the window capture leaves that out.
+          TC_PROBE_DIR: ${{ runner.temp }}/windows-screenshots/probes
         run: scripts/windows-screenshots.sh "$RUNNER_TEMP/windows-screenshots"
       - name: Upload the screenshots
         if: always()
