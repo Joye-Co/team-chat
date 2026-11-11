@@ -28,9 +28,21 @@ Every screenshot comes from the app's own screenshot self-test, with the sample 
 desktop --screenshot <dir> --theme both --size 1440x900 --scenes desk,topic-v2,…
 ```
 
-Then convert with `cwebp -q 88 -m 6`. `settings-machines` is the settings window without its
+Then convert with `cwebp -q 88 -m 6`.
+
+`settings-machines` is the settings window without its
 toolbar (`-crop 0 190 1280 900`). Card images (`img/card-*`) are crops of the card gallery
 scenes (`compose-*`, `cards-v2-*`) taken at `--size 1440x1700`.
+
+The cards start at (compare `compose` 1449,506; diff, chart and
+approve `cards-v2-*` 137,216; draft 137,217; time 137,198 and poll 1450,198 in `compose-choice-3`;
+image `compose-choice-2` 137,198) and end where the card ends; the English cards run taller.
+
+The English page (`src/en.html`) uses its own copies in `src/img/en/`, drawn in English by the same
+self-test with `--lang en`: it swaps every shown string through
+`apps/desktop/src/selftest/english.txt` and lists the ones it has no entry for in
+`<dir>/untranslated.txt`. Add the missing lines until that file is gone, then look at each shot:
+English runs longer than Chinese, so shorten a label where it no longer fits.
 
 ## Phones
 
