@@ -2,7 +2,7 @@
 //! files with mode 600; nothing here prints them.
 
 use anyhow::{Context, Result, anyhow, bail};
-use chat_core::proto::{Member, MemberKind, MemberLevel};
+use chat_core::proto::{GroupKind, Member, MemberKind, MemberLevel};
 use chat_core::{Client, ClientConfig, ClientUpdate, ConnectionState, DropLiveEvent, HttpClient};
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -179,9 +179,13 @@ impl Harness {
             name: m.name,
             token,
         };
-        // New members join the default groups; leave them so runs stay apart.
+        // New members join the default groups; leave them so runs stay apart. A new person's
+        // first DM with the default bot cannot be left and stays.
         let http = self.http(&acc);
         for g in http.groups().await.context("groups")? {
+            if g.group.kind == GroupKind::Dm {
+                continue;
+            }
             http.remove_group_member(&g.group.id, &acc.id)
                 .await
                 .context("leave default group")?;

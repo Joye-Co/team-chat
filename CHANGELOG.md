@@ -3,6 +3,34 @@
 Each release is tagged `v<version>` and has a GitHub Release with the DMG, the machine daemon
 and their `.sha256` files. Release notes for the team are in Chinese in `docs/releases/`.
 
+## 1.2.7 (unreleased)
+
+Notes: [docs/releases/1.2.7.md](docs/releases/1.2.7.md). D1 migrations `0013_activity`,
+`0014_model_prices`, `0014_release_assets` and `0015_budget_grants`. Protocol: additive
+(`heartbeat.metrics`, the `accounts` feature with `account.login` and `secret.set|delete`,
+`run.done.usage.models`, `ActivityEntry`, `TeamUsage` with `pairs`,
+`CreateInviteRequest.expiresInHours`, `UpdateInfo.platform`). The server is redeployed before
+the release. 1.2.6 clients and daemons keep working.
+
+- 团队管理 window for owners (account menu, ⌥⌘,): 总览, 成员, 用量, 活动记录 and 机器; the team
+  panes moved there from Settings.
+- Machine monitor: the daemon reports host and VM metrics; 机器 › 概览 shows them with 要注意.
+- Accounts and keys: owners sign a machine's Claude Code and Codex in and give it sealed API keys
+  per member from 团队管理.
+- Team usage priced per model from the daemon's per-model tokens (prices from models.dev);
+  Codex cost is estimated and marked ≈; 谁在用 pairs people with the AI members they ask.
+- Weekly budgets hold a run at the line and ask the owners to add this week, edit or stop
+  (`budget_grants`).
+- 活动记录 keeps 90 days of admin events plus failed runs, machines offline and online, and
+  budgets reached.
+- Invites can end sooner (`expiresInHours`, 1–168).
+- One resizable right pane width; command boxes scroll. An avatar click mentions once without a
+  quote. 改预算 opens on the current budget.
+- Windows: the desktop app, daemon, installer and in-app updater build and are tested in CI, and
+  the Release workflow publishes a Windows installer.
+- The iPhone client foundation (M0, M1 first part) and the product website are in the repo; they
+  are not part of this release.
+
 ## 1.2.6 (2026-11-09)
 
 Notes: [docs/releases/1.2.6.md](docs/releases/1.2.6.md). D1 migrations `0011_runner_effort` and
