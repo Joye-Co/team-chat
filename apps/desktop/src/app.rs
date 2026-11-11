@@ -1495,6 +1495,18 @@ pub fn bind_view_keys(cx: &mut App) {
         KeyBinding::new("alt-tab", FocusNextRegion, None),
         KeyBinding::new("alt-shift-tab", FocusPrevRegion, None),
     ]);
+    // Windows' other keys for redo, paste and copy, which its users' hands know
+    // beside Ctrl+Y, Ctrl+V and Ctrl+C (the Mac has no such second set).
+    #[cfg(not(target_os = "macos"))]
+    {
+        use gpui_component::input::{Copy, Paste, Redo};
+        cx.bind_keys([
+            KeyBinding::new("ctrl-shift-z", Redo, Some("Input")),
+            KeyBinding::new("shift-insert", Paste, Some("Input")),
+            KeyBinding::new("ctrl-insert", Copy, Some("Input")),
+            KeyBinding::new("ctrl-insert", Copy, Some("TextView")),
+        ]);
+    }
     crate::views::topic_list::bind_keys(cx);
     // --- v12/behavior ---
     crate::views::rail::bind_keys(cx);

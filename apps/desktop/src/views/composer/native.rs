@@ -67,8 +67,50 @@ impl ComposerView {
         .detach();
     }
 
+    /// 截图 on Windows: the system's snipping overlay (`ms-screenclip:`, the one
+    /// Win+Shift+S opens). It has no output file: the picture goes to the
+    /// clipboard, so the composer waits for the clipboard to change and takes
+    /// the picture from it as a chip. A snip that is cancelled changes nothing,
+    /// and the wait ends by itself.
+    #[cfg(target_os = "windows")]
+    fn take_screenshot(&mut self, cx: &mut Context<Self>) {
+        use crate::ui::clipboard::windows::sequence;
+        const POLL: std::time::Duration = std::time::Duration::from_millis(250);
+        const GIVE_UP: std::time::Duration = std::time::Duration::from_secs(120);
+        let mut seen = sequence();
+        cx.open_url("ms-screenclip:");
+        cx.spawn(async move |this, cx| {
+            let started = std::time::Instant::now();
+            while started.elapsed() < GIVE_UP {
+                cx.background_executor().timer(POLL).await;
+                let now = sequence();
+                if now == seen {
+                    continue;
+                }
+                seen = now;
+                let picture = cx.update(|cx| {
+                    cx.read_from_clipboard().and_then(|item| {
+                        item.entries().iter().find_map(|entry| match entry {
+                            gpui::ClipboardEntry::Image(image) => {
+                                Some(super::clipboard_image(image))
+                            }
+                            _ => None,
+                        })
+                    })
+                });
+                // Something else was copied meanwhile: keep waiting for the snip.
+                if let Some(picture) = picture {
+                    let _ = this.update(cx, |this, cx| this.attach(vec![picture], cx));
+                    return;
+                }
+            }
+        })
+        .detach();
+    }
+
     /// 截图: the system's interactive screenshot (`screencapture -i`); the
     /// picture becomes a chip when the person took one.
+    #[cfg(not(target_os = "windows"))]
     fn take_screenshot(&mut self, cx: &mut Context<Self>) {
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

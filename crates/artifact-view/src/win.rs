@@ -2546,6 +2546,25 @@ fn shell_open(url: &str) -> bool {
     result.0 as usize > 32
 }
 
+/// Whether a program on this computer opens URLs of `scheme` (`vnc`, `https`).
+pub fn has_url_handler(scheme: &str) -> bool {
+    use windows::Win32::UI::Shell::{ASSOCF_NONE, ASSOCSTR_EXECUTABLE, AssocQueryStringW};
+    let mut length = 0u32;
+    // SAFETY: asks only for the length of the handler's path; no buffer is written.
+    let found = unsafe {
+        AssocQueryStringW(
+            ASSOCF_NONE,
+            ASSOCSTR_EXECUTABLE,
+            &HSTRING::from(scheme),
+            PCWSTR::null(),
+            None,
+            &mut length,
+        )
+    };
+    // `S_FALSE` with the length needed when there is a handler; an error when none.
+    found.is_ok() && length > 1
+}
+
 /// Opens a machine's screen sharing address (see [`crate::is_screen_share_url`]) with the
 /// system's handler. Returns false for anything else. Call it only after the user agreed.
 pub fn open_screen_share_url(url: &str) -> bool {
@@ -2736,5 +2755,12 @@ mod tests {
         assert!(agree_enabled(AGREE_DELAY_MS));
         // A held key repeats within half a second; the delay is longer.
         const { assert!(AGREE_DELAY_MS >= 500) };
+    }
+
+    #[test]
+    fn a_scheme_has_a_handler_only_when_a_program_registered_it() {
+        // Every Windows opens `https` with something; nothing registers this one.
+        assert!(has_url_handler("https"));
+        assert!(!has_url_handler("artifact-view-no-such-scheme"));
     }
 }

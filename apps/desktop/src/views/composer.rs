@@ -1133,22 +1133,51 @@ fn strip_marks(body: &str) -> String {
 }
 
 /// Files and images on the clipboard (a copied Finder file, a screenshot).
+///
+/// Text that comes with a picture of itself is text: cells copied from a spreadsheet
+/// and text copied from an office program carry both on Windows, and the Mac's
+/// pasteboard hands over only the text then. No file is returned, so the field pastes
+/// the text.
 fn clipboard_files(entries: &[ClipboardEntry]) -> Vec<NewFile> {
+    let has_files = entries
+        .iter()
+        .any(|e| matches!(e, ClipboardEntry::ExternalPaths(_)));
+    let has_text = entries
+        .iter()
+        .any(|e| matches!(e, ClipboardEntry::String(s) if !s.text().trim().is_empty()));
+    if has_text && !has_files {
+        return Vec::new();
+    }
     let mut files = Vec::new();
     for entry in entries {
         match entry {
             ClipboardEntry::ExternalPaths(paths) => {
                 files.extend(paths.paths().iter().cloned().map(NewFile::Path));
             }
-            ClipboardEntry::Image(image) => files.push(NewFile::Image {
-                mime: image.format.mime_type().to_string(),
-                extension: image.format.extension().to_string(),
-                bytes: image.bytes.clone().into(),
-            }),
+            ClipboardEntry::Image(image) => files.push(clipboard_image(image)),
             ClipboardEntry::String(_) => {}
         }
     }
     files
+}
+
+/// A picture from the clipboard as a file to send. Windows hands a clipboard bitmap
+/// over as an uncompressed BMP: it is sent as the PNG a screenshot is on the Mac.
+fn clipboard_image(image: &gpui::Image) -> NewFile {
+    if image.format == gpui::ImageFormat::Bmp
+        && let Some(png) = crate::ui::clipboard::png_of_bmp(image.bytes())
+    {
+        return NewFile::Image {
+            mime: gpui::ImageFormat::Png.mime_type().to_string(),
+            extension: gpui::ImageFormat::Png.extension().to_string(),
+            bytes: png.into(),
+        };
+    }
+    NewFile::Image {
+        mime: image.format.mime_type().to_string(),
+        extension: image.format.extension().to_string(),
+        bytes: image.bytes.clone().into(),
+    }
 }
 
 /// A Markdown format the format bar and ⌘B / ⌘I / ⌘⇧X apply.

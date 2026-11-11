@@ -576,11 +576,25 @@ fn ask_to_open_link(url: String) {
 
 /// Asks before a machine's screen sharing address (接管) opens, and opens
 /// only a `vnc`, `http` or `https` address.
-pub(crate) fn ask_before_screen_share(name: &str, url: String) {
+pub(crate) fn ask_before_screen_share(name: &str, url: String, cx: &mut App) {
     if !artifact_view::is_screen_share_url(&url) {
         tracing::warn!("screen sharing address refused");
         return;
     }
+    // The Mac opens a `vnc:` address in its own 屏幕共享. Windows has no such app:
+    // without a viewer that registered the scheme nothing would happen after the
+    // question, so the person is told what is missing and gets the address to use
+    // once a viewer is there.
+    #[cfg(windows)]
+    if let Some((scheme, _)) = url.split_once(':')
+        && !artifact_view::has_url_handler(scheme)
+    {
+        use crate::copy::live as cl;
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string(url.clone()));
+        notify_error(fill(cl::LIVE_SHARE_NO_APP, &[("url", &url)]), cx);
+        return;
+    }
+    let _ = &cx;
     #[cfg(any(target_os = "macos", windows))]
     {
         use crate::copy::live as cl;

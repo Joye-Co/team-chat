@@ -28,7 +28,7 @@ sha2 = "0.10"
 # Updater on Windows: the command line of the update helper (src/updater/install/windows.rs).
 update-helper = { path = "../update-helper" }
 # Thumbnails of image attachments (src/provider/files.rs).
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
 # The 产出 window (src/views/artifacts/window.rs) and pages inside the window
 # (src/ui/web_embed.rs). Its native parts build only on macOS.
 artifact-view = { path = "../../crates/artifact-view" }
@@ -95,7 +95,9 @@ windows = { version = "0.62", features = [
     "Win32_Networking_WinSock",
     "Win32_Storage_Xps",
     "Win32_System_Com",
+    "Win32_System_DataExchange",
     "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
     "Win32_System_Ole",
     "Win32_System_SystemServices",
     "Win32_System_Threading",

@@ -464,7 +464,7 @@ impl DiagramViewer {
                     .disabled(image.is_none())
                     .on_click(move |_, _, cx| {
                         if let Some(i) = &image {
-                            cx.write_to_clipboard(ClipboardItem::new_image(i));
+                            ui::clipboard::write_image(i, cx);
                         }
                     })
             })
