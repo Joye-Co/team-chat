@@ -345,19 +345,29 @@ fn frame(cx: &App) -> gpui::Div {
 }
 
 fn file(spec: &FullSpec, cx: &App) -> AnyElement {
-    let k = theme::colors(cx);
     let path = spec.media.entry_path();
+    let header = head(
+        spec,
+        spec.media.kind.icon(),
+        spec.media.file_name().to_string(),
+        Head {
+            meta: Some(super::size_text(spec.media.bytes).into()),
+            ..Head::default()
+        },
+        cx,
+    );
+    let k = theme::colors(cx);
+    // On Windows a type the app has no viewer for is not a failure: the sheet says that
+    // there is no preview (Space leads here, where the Mac has Quick Look; the app never
+    // hands a downloaded file to a system preview handler, see `views::files::quick_look`).
+    // The Mac keeps its words.
+    let hint = if cfg!(target_os = "windows") && !spec.media.preview_failed {
+        cm::STATE_NO_PREVIEW
+    } else {
+        super::states::failed_hint(&spec.media.entry).1
+    };
     frame(cx)
-        .child(head(
-            spec,
-            spec.media.kind.icon(),
-            spec.media.file_name().to_string(),
-            Head {
-                meta: Some(super::size_text(spec.media.bytes).into()),
-                ..Head::default()
-            },
-            cx,
-        ))
+        .child(header)
         .child(
             div()
                 .flex_1()
@@ -369,7 +379,7 @@ fn file(spec: &FullSpec, cx: &App) -> AnyElement {
                 .t_small()
                 .text_color(k.text_3)
                 .child(ui::icon(Sym::Alert, px(20.), k.text_3))
-                .child(cm::STATE_FAILED_DETAIL)
+                .child(hint)
                 .child(
                     ui::native::push_button(
                         id(spec, "sysbig"),
@@ -1179,14 +1189,14 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
 /// `time` event while it plays.
 const PLAYER_HTML: &str = r##"<!doctype html><html><head><meta charset="utf-8"><style>
 :root{color-scheme:dark}
-html,body{margin:0;height:100%;background:#16161A;color:#C9C9D1;font:12px -apple-system,"PingFang SC",sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden}
+html,body{margin:0;height:100%;background:#16161A;color:#C9C9D1;font:12px -apple-system,"Segoe UI Variable Text","Segoe UI","PingFang SC","Microsoft YaHei UI",sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden}
 @media (prefers-color-scheme: dark){html,body{background:#0B0B0D}}
 .wrap{position:absolute;inset:0;display:flex;flex-direction:column}
 .stage{flex:1;position:relative;min-height:0}
 video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:transparent}
 .big{position:absolute;left:50%;top:50%;width:52px;height:52px;margin:-26px 0 0 -26px;border-radius:50%;border:0;background:rgba(255,255,255,.8);cursor:pointer;display:flex;align-items:center;justify-content:center}
 .big svg{width:20px;height:20px;margin-left:3px}
-.bar{height:44px;display:flex;align-items:center;gap:12px;padding:0 14px;font:12px -apple-system,"PingFang SC",sans-serif;font-variant-numeric:tabular-nums}
+.bar{height:44px;display:flex;align-items:center;gap:12px;padding:0 14px;font:12px -apple-system,"Segoe UI Variable Text","Segoe UI","PingFang SC","Microsoft YaHei UI",sans-serif;font-variant-numeric:tabular-nums}
 .bar button{background:none;border:0;color:#C9C9D1;cursor:pointer;padding:4px;display:flex;align-items:center;border-radius:6px}
 .bar button:hover{background:rgba(255,255,255,.08)}
 .bar svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
@@ -1196,7 +1206,7 @@ video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;backgr
 .seg{height:4px;border-radius:2px;background:rgba(255,255,255,.22);position:relative;overflow:hidden}
 .seg b{position:absolute;left:0;top:0;bottom:0;background:#C9C9D1}
 .thumb{position:absolute;top:3px;width:10px;height:10px;margin-left:-5px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3)}
-.speed{padding:2px 7px!important;font:12px -apple-system,sans-serif;font-variant-numeric:tabular-nums}
+.speed{padding:2px 7px!important;font:12px -apple-system,"Segoe UI Variable Text","Segoe UI",sans-serif;font-variant-numeric:tabular-nums}
 </style></head><body><div class="wrap">
 <div class="stage"><video id="v" src="{SRC}" poster="{POSTER}" playsinline preload="metadata"></video>
 <button class="big" id="big" aria-label="{PLAY}"><svg viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z" fill="#141416"/></svg></button></div>
@@ -1224,7 +1234,8 @@ function toggle(){if(v.paused)v.play();else v.pause()}
 document.getElementById('big').onclick=toggle;document.getElementById('pp').onclick=toggle;v.onclick=toggle;
 var speeds=[1,1.25,1.5,2,0.75],si=0;document.getElementById('sp').onclick=function(){si=(si+1)%speeds.length;v.playbackRate=speeds[si];this.textContent=speeds[si]+'×'};
 document.getElementById('mu').onclick=function(){v.muted=!v.muted;this.style.opacity=v.muted?.45:1};
-document.getElementById('pip').onclick=function(){try{v.webkitSetPresentationMode(v.webkitPresentationMode==='picture-in-picture'?'inline':'picture-in-picture')}catch(e){}};
+document.getElementById('pip').onclick=function(){try{if(v.webkitSetPresentationMode){v.webkitSetPresentationMode(v.webkitPresentationMode==='picture-in-picture'?'inline':'picture-in-picture')}else if(document.pictureInPictureElement){document.exitPictureInPicture()}else{v.requestPictureInPicture()}}catch(e){}};
+if(!v.webkitSetPresentationMode&&!document.pictureInPictureEnabled)document.getElementById('pip').style.display='none';
 document.getElementById('tr').onclick=function(e){var r=this.getBoundingClientRect();v.currentTime=(e.clientX-r.left)/r.width*dur()};
 window.seekTo=function(t){v.currentTime=t;draw();report()};
 v.addEventListener('loadedmetadata',function(){layout();draw()});

@@ -21,7 +21,7 @@ use crate::{
         native::{
             Alert, AlertTone, Empty, NativeTextField, NativeType as _, PushSize, PushStyle,
             Segment, Segmented, TruncText, card_surface, native_colors, progress, push_button,
-            tokens::{avatar, height, monitor as t, radius, space, text},
+            tokens::{avatar, height, layout, monitor as t, radius, space, text},
         },
     },
     views::settings::widgets::answer,
@@ -663,14 +663,40 @@ impl AdminView {
         let line = budget_cents.filter(|b| *b > 0).map(|b| {
             let per_day = b as f64 / 100. / 7.;
             let frac = (1. - per_day / max).clamp(0., 1.) as f32;
-            div()
+            let line = div()
                 .absolute()
                 .left_0()
                 .right_0()
-                .top(relative(frac * 0.86))
-                .border_t_1()
-                .border_dashed()
-                .border_color(k.amber)
+                .top(relative(frac * 0.86));
+            // GPUI's Direct3D renderer draws nothing for a dashed border on a box
+            // without a height (seen in the Windows screenshots): there the same
+            // dashes are painted as quads across whatever width the chart has.
+            if cfg!(target_os = "windows") {
+                let ink = k.amber;
+                line.h(layout::BORDER).child(
+                    gpui::canvas(
+                        |_, _, _| {},
+                        move |bounds, _, window, _| {
+                            let (dash, gap) = layout::RULE_DASH;
+                            let mut x = bounds.left();
+                            while x < bounds.right() {
+                                let width = dash.min(bounds.right() - x);
+                                window.paint_quad(gpui::fill(
+                                    gpui::Bounds::new(
+                                        gpui::point(x, bounds.top()),
+                                        gpui::size(width, layout::BORDER),
+                                    ),
+                                    ink,
+                                ));
+                                x += dash + gap;
+                            }
+                        },
+                    )
+                    .size_full(),
+                )
+            } else {
+                line.border_t_1().border_dashed().border_color(k.amber)
+            }
         });
         let legend = top
             .iter()

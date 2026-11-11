@@ -1,0 +1,14 @@
+{
+  "kind": "UpdateInfo",
+  "valid": true,
+  "description": "the Windows installer",
+  "value": {
+    "version": "1.2.10",
+    "notes": "## 新功能\n\n- 卡片",
+    "size": 48000000,
+    "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "publishedAt": 1762128000000,
+    "downloadUrl": "https://chat-api-e2e.example.workers.dev/v1/updates/1.2.10/download?platform=windows",
+    "platform": "windows"
+  }
+}

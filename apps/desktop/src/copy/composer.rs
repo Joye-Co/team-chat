@@ -14,7 +14,7 @@ crate::copy! {
     BULLETED = "项目列表",
     QUOTE_BLOCK = "引用",
     CODE = "代码",
-    SEND_HINT = "发送（↵），换行（⇧↵）",
+    SEND_HINT = crate::copy::per_system("发送（↵），换行（⇧↵）", "发送（Enter），换行（Shift+Enter）"),
     PLACEHOLDER_NEW_TOPIC = "写下新话题的第一条消息，第一行会作为标题",
     PLACEHOLDER_EDIT = "修改消息，Enter 保存，Esc 取消",
     SEND = "发送",

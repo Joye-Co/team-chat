@@ -87,6 +87,6 @@ crate::copy! {
     ACCOUNT_ADD = "添加账号…",
     ACCOUNT_SIGN_OUT = "退出这个账号…",
     ACCOUNT_SIGN_OUT_TITLE = "退出这个账号？",
-    ACCOUNT_SIGN_OUT_BODY = "退出后，这台 Mac 不再收到这个账号的消息。其他账号仍保持登录。",
+    ACCOUNT_SIGN_OUT_BODY = crate::copy::per_system("退出后，这台 Mac 不再收到这个账号的消息。其他账号仍保持登录。", "退出后，这台电脑不再收到这个账号的消息。其他账号仍保持登录。"),
     ACCOUNT_SIGN_OUT_CONFIRM = "退出",
 }

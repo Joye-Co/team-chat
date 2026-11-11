@@ -27,6 +27,7 @@ mod menu;
 pub(crate) mod model;
 pub mod plan;
 pub mod preview;
+mod resume;
 mod row;
 // --- v12/fx-topic: Messages-style tapbacks ---
 mod tapback;
@@ -226,6 +227,14 @@ pub struct TimelineView {
     /// frame; its divider is not drawn, so no slice of it shows above the
     /// pill.
     sticky_row: Option<String>,
+    /// Where each 话题 was left (`timeline/resume.rs`).
+    resume: std::collections::HashMap<(GroupId, TopicId), resume::Anchor>,
+    /// Renders left before the opened 话题 may move to its first unread
+    /// message (`timeline/resume.rs`).
+    land_unread: Option<u8>,
+    /// A jump to a message came from another place: the pill that goes
+    /// back there (its name, and the jump's serial).
+    came_from: Option<(String, u64)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -366,6 +375,9 @@ impl TimelineView {
             divider_painted: false,
             date_marks: Default::default(),
             sticky_row: None,
+            resume: Default::default(),
+            land_unread: None,
+            came_from: None,
             _subscriptions: subscriptions,
         };
         let open = this.services.nav.read(cx).topic.clone();
@@ -387,12 +399,16 @@ impl TimelineView {
             .as_ref()
             .and_then(|(g, t)| self.services.provider.topic(g, t))
             .map_or(0, |t| t.unread);
+        self.remember_place();
         self.open = open;
         self.messages.clear();
         self.list.reset(0);
         self.list.set_follow_mode(FollowMode::Tail);
         self.visible_end.set(0);
         self.wanted = (unread as usize + 10).clamp(WINDOW, WINDOW + PAGE);
+        if let Some(wanted) = self.resume_wanted() {
+            self.wanted = self.wanted.max(wanted);
+        }
         self.has_older = false;
         self.provider_len = 0;
         self.provider_has_older = false;
@@ -423,6 +439,13 @@ impl TimelineView {
         });
         self.unread_at_open = self.topic.as_ref().map_or(0, |t| t.unread);
         self.unread_seen = self.divider_key.is_none();
+        // Back where the person left it; else the first unread message
+        // when it is more than a screen up.
+        self.land_unread = None;
+        self.came_from = None;
+        if !self.restore_place() {
+            self.plan_unread_landing();
+        }
     }
 
     /// Scrolls so the first unread message (the divider) is at the top.
@@ -881,7 +904,9 @@ impl Render for TimelineView {
         // whether a card is on screen, draw the header again.
         // The divider row drawn last frame is on screen: the unread
         // messages are seen, and the jump pill goes (or never shows).
-        if std::mem::take(&mut self.divider_painted) && !self.unread_seen {
+        let divider_drawn = std::mem::take(&mut self.divider_painted);
+        self.land_on_unread(divider_drawn, window);
+        if divider_drawn && !self.unread_seen {
             self.unread_seen = true;
             cx.defer_in(window, |_, _, cx| cx.notify());
         }
@@ -929,6 +954,7 @@ impl Render for TimelineView {
                 )
         });
         let search_bar = self.render_search_bar(cx);
+        let came_from = self.render_came_from(cx);
         let find_bar = self.render_find_bar(cx);
         let jump_unread = self.first_unread_above().then(|| {
             div()
@@ -951,6 +977,8 @@ impl Render for TimelineView {
                     })),
                 )
         });
+        // One pill at the top at a time: the unread jump wins.
+        let jump_unread = jump_unread.map(IntoElement::into_any_element).or(came_from);
         // §2.14: older messages loading show 2 message skeleton rows in the
         // flow above the first message: row 0 draws them, so they scroll
         // with the messages and never clip the first one (`row.rs`).
@@ -1232,11 +1260,29 @@ impl TimelineView {
 /// A 28 pt level-1 pill: the jump to the first unread or to the latest.
 fn jump_pill(id: &'static str, label: String, glyph: Sym, cx: &App) -> gpui::Stateful<gpui::Div> {
     let colors = theme::colors(cx);
+    pill_base(id, cx)
+        .pl(space::S12)
+        .pr(space::S10)
+        .child(label)
+        .child(ui::icon(glyph, theme::icon::CHIP, colors.text_2))
+}
+
+/// The same pill with its glyph leading: 返回 to the place a jump came
+/// from (`timeline/resume.rs`).
+fn back_pill(id: &'static str, label: String, cx: &App) -> gpui::Stateful<gpui::Div> {
+    let colors = theme::colors(cx);
+    pill_base(id, cx)
+        .pl(space::S10)
+        .pr(space::S12)
+        .child(ui::icon(Sym::ChevronLeft, theme::icon::CHIP, colors.text_2))
+        .child(label)
+}
+
+fn pill_base(id: &'static str, cx: &App) -> gpui::Stateful<gpui::Div> {
+    let colors = theme::colors(cx);
     ui::float_surface(cx)
         .id(id)
         .h(px(28.))
-        .pl(space::S12)
-        .pr(space::S10)
         .rounded_full()
         .gap(space::S6)
         .t_ui()
@@ -1245,8 +1291,6 @@ fn jump_pill(id: &'static str, label: String, glyph: Sym, cx: &App) -> gpui::Sta
         .text_color(colors.text_1)
         .hover(|el| el.bg(colors.raised))
         .active(|el| el.bg(colors.pressed))
-        .child(label)
-        .child(ui::icon(glyph, theme::icon::CHIP, colors.text_2))
 }
 
 #[cfg(test)]

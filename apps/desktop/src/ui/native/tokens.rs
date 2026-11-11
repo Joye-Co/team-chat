@@ -279,6 +279,11 @@ pub const DESTRUCTIVE_FILL: u32 = 0xDC2626FF;
 /// it is now `primary` of the light palette (#171717).
 pub const GRAPHITE: u32 = 0x171717FF;
 
+/// A QR image's modules and its quiet zone: pure black on white in both modes,
+/// since phone cameras read dark-on-light codes (账号 › 在手机上登录).
+pub const QR_INK: u32 = 0x000000FF;
+pub const QR_PAPER: u32 = 0xFFFFFFFF;
+
 impl NativeColors {
     pub fn from_palette(p: &Palette) -> Self {
         Self {
@@ -895,7 +900,13 @@ pub mod layout {
     /// The red light's origin: the lights centre on the toolbar row's centre
     /// line (y 32), with the page title and the sidebar toggle.
     pub const TRAFFIC_LIGHTS: (Pixels, Pixels) = (px(18.), px(25.));
-    pub const TRAFFIC_LIGHTS_INSET: Pixels = px(84.);
+    /// The room the traffic lights take at the leading edge; off the Mac
+    /// there are none, and only the sidebar toggle sits there.
+    pub const TRAFFIC_LIGHTS_INSET: Pixels = if cfg!(target_os = "macos") {
+        px(84.)
+    } else {
+        px(56.)
+    };
     /// The sidebar toggle (隐藏侧栏 / 显示侧栏) sits right after the traffic
     /// lights, on the toolbar row's center line, and stays there whether the
     /// sidebar is shown or hidden.
@@ -927,6 +938,9 @@ pub mod layout {
     pub const CONTENT_GUTTER: Pixels = space::S24;
     pub const HAIRLINE: Pixels = px(1.);
     pub const BORDER: Pixels = px(1.);
+    /// A dashed rule of [`BORDER`] thickness: 2 on, 1 off (what GPUI's dashed border
+    /// draws at that thickness; the 用量 chart's budget line).
+    pub const RULE_DASH: (Pixels, Pixels) = (px(2.), px(1.));
     pub const EMBED_FADE: Pixels = space::S48;
 }
 
@@ -939,7 +953,13 @@ pub mod metrics {
     pub const FOCUS_RING: Pixels = px(3.);
 
     // Window (§2.1, §2.2)
+    /// The caption strip of a window off the Mac (`window_chrome`): the
+    /// height of a Windows title bar at 100 %.
+    pub const CAPTION: Pixels = height::DEFAULT;
     pub const TOOLBAR_ROW: Pixels = height::TOOLBAR;
+    /// How much of their ink the caption strip's menus and window buttons keep in a
+    /// window that is not the active one (`label` towards `tertiary`; WINDOWS.md §1).
+    pub const CAPTION_INACTIVE: f32 = 0.5;
     pub const TOOLBAR_GROUP: Pixels = height::DEFAULT;
     pub const TOOLBAR_ITEM: Pixels = height::DEFAULT;
     pub const TOOLBAR_PILL: Pixels = height::SM;
@@ -1181,6 +1201,68 @@ pub mod card_v21 {
     pub const CHART_PICK_FILL: f32 = 0.06;
     pub const CHART_HOVER_FILL: f32 = 0.035;
     pub const REMOVE_OUT: Duration = Duration::from_millis(240);
+}
+
+/// The images of a message (files::gallery): one picture keeps its ratio, more sit in a
+/// mosaic with hairline gaps and one rounded outline, like Photos and Messages.
+pub mod gallery {
+    use gpui::{Pixels, px};
+    /// The width of a mosaic, and the widest a single picture gets.
+    pub const WIDTH: Pixels = px(480.);
+    /// The tallest a single picture gets.
+    pub const SINGLE_MAX_H: Pixels = px(360.);
+    /// The shortest side a single picture keeps (a thin strip still reads as a picture).
+    pub const SINGLE_MIN: Pixels = px(96.);
+    /// The hairline between tiles.
+    pub const GAP: Pixels = px(3.);
+    /// Height over width of a tile in a row of two.
+    pub const PAIR_RATIO: f32 = 0.75;
+    /// Tiles drawn at most; the last one says how many more.
+    pub const MAX_TILES: usize = 9;
+    /// The `+N` cover on the last tile: black at this opacity.
+    pub const MORE_SCRIM: f32 = 0.5;
+    /// The tile under the pointer darkens by this much (black).
+    pub const HOVER_DIM: f32 = 0.08;
+    /// The little GIF mark: black at this opacity under white text.
+    pub const BADGE_SCRIM: f32 = 0.55;
+    pub const BADGE_H: Pixels = px(18.);
+    /// The composer's thumbnails of images not sent yet.
+    pub const DRAFT_THUMB: Pixels = px(64.);
+}
+
+/// The image viewer (files::lightbox): every picture of a 话题 on a dark screen over the
+/// whole window, a top bar, a filmstrip, zoom and pan.
+pub mod lightbox {
+    use gpui::{Pixels, px};
+    use std::time::Duration;
+    /// The dark screen over the window: opaque, so the picture has no busy surround (any
+    /// translucency lets the window's text read through).
+    pub const BACKDROP: f32 = 1.0;
+    /// The top bar and the filmstrip float on black at this opacity.
+    pub const BAR_SCRIM: f32 = 0.35;
+    pub const BAR_H: Pixels = px(52.);
+    /// Room kept around the fitted picture.
+    pub const PAD: Pixels = px(24.);
+    /// The round previous / next buttons at the sides.
+    pub const NAV: Pixels = px(40.);
+    pub const NAV_INSET: Pixels = px(16.);
+    /// Filmstrip thumbnails.
+    pub const THUMB: Pixels = px(44.);
+    pub const THUMB_GAP: Pixels = px(6.);
+    pub const THUMB_RADIUS: Pixels = px(6.);
+    pub const STRIP_H: Pixels = px(68.);
+    /// Unselected thumbnails dim to this opacity.
+    pub const THUMB_DIM: f32 = 0.55;
+    /// Zoom range (1.0 = one image pixel per point) and the step of a key or button.
+    pub const ZOOM_MIN: f32 = 0.05;
+    pub const ZOOM_MAX: f32 = 8.0;
+    pub const ZOOM_STEP: f32 = 1.25;
+    /// ⌘ + wheel: zoom changes by this much per point scrolled.
+    pub const WHEEL_ZOOM: f32 = 0.01;
+    /// Arrow keys pan a zoomed picture this far.
+    pub const PAN_STEP: f32 = 80.;
+    /// The screen fades in.
+    pub const OPEN: Duration = Duration::from_millis(160);
 }
 
 /// The desk terminal thumbnail (a miniature, not reading text);

@@ -27,10 +27,12 @@ mod email;
 pub mod files;
 #[cfg(test)]
 mod files_live;
+pub mod instance;
 #[cfg(target_os = "macos")]
 pub mod macos;
 mod panes;
 pub mod persist;
+mod phone_sign_in;
 #[cfg(target_os = "windows")]
 pub mod windows;
 // Proof chips from done cards (1.1.0).
@@ -1252,6 +1254,22 @@ impl ChatProvider for CoreProvider {
         self.my_email_inner()
     }
 
+    fn offer_phone_sign_in(&self) -> crate::data::EmailReply<crate::data::PhoneOffer> {
+        self.offer_phone_sign_in_inner()
+    }
+
+    fn phone_offer_state(&self, id: &str) -> crate::data::EmailReply<crate::data::PhoneOfferState> {
+        self.phone_offer_state_inner(id)
+    }
+
+    fn peek_phone_code(&self, code: &str) -> crate::data::EmailReply<String> {
+        self.peek_phone_code_inner(code)
+    }
+
+    fn approve_phone_code(&self, code: &str) -> crate::data::EmailReply<()> {
+        self.approve_phone_code_inner(code)
+    }
+
     fn add_email_code(&self, email: &str) -> crate::data::EmailReply<()> {
         self.add_email_code_inner(email)
     }
@@ -1991,6 +2009,14 @@ impl ChatProvider for CoreProvider {
 
     fn upload_avatar(&self, path: PathBuf) -> AdminReply<Member> {
         self.upload_avatar_inner(path)
+    }
+
+    fn upload_member_avatar(&self, member_id: &str, path: PathBuf) -> AdminReply<Member> {
+        self.upload_member_avatar_inner(member_id.to_string(), path)
+    }
+
+    fn remove_member_avatar(&self, member_id: &str) -> AdminReply<Member> {
+        self.remove_member_avatar_inner(member_id.to_string())
     }
 
     fn create_invite(&self, request: InviteRequest) -> AdminReply<InviteCreated> {

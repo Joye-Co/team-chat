@@ -261,11 +261,11 @@ pub fn appended(old: &[Message], new: &[Message]) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::data::SendState;
 
-    fn msg(id: &str, author: &str, at: Millis) -> Message {
+    pub(in crate::views::timeline) fn msg(id: &str, author: &str, at: Millis) -> Message {
         Message {
             id: id.into(),
             client_msg_id: format!("c-{id}"),

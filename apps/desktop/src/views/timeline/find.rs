@@ -50,9 +50,15 @@ gpui::actions!(
 /// switcher's key context, deeper than this one.
 pub fn install(cx: &mut App) {
     cx.bind_keys([
-        KeyBinding::new("cmd-f", FindInTopic, None),
-        KeyBinding::new("cmd-g", FindNext, None),
-        KeyBinding::new("cmd-shift-g", FindPrevious, None),
+        KeyBinding::new(crate::secondary!("f"), FindInTopic, None),
+        KeyBinding::new(crate::secondary!("g"), FindNext, None),
+        KeyBinding::new(crate::secondary!("shift-g"), FindPrevious, None),
+    ]);
+    // Windows' own keys for the next and the previous match.
+    #[cfg(not(target_os = "macos"))]
+    cx.bind_keys([
+        KeyBinding::new("f3", FindNext, None),
+        KeyBinding::new("shift-f3", FindPrevious, None),
     ]);
     cx.on_action(|_: &FindInTopic, cx| {
         crate::views::nav::in_main_window(cx, |window, cx| {

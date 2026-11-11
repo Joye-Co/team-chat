@@ -39,7 +39,28 @@ pub fn cache_base() -> PathBuf {
     base.unwrap_or_else(std::env::temp_dir)
 }
 
-/// The user's Downloads folder.
+/// The user's Downloads folder. On Windows it is the folder 下载 points at now (a person
+/// can move it to another drive in its properties), not always `%USERPROFILE%\Downloads`.
 pub fn downloads() -> Option<PathBuf> {
+    #[cfg(windows)]
+    if let Some(folder) = known_downloads() {
+        return Some(folder);
+    }
     home().map(|h| h.join("Downloads"))
+}
+
+#[cfg(windows)]
+fn known_downloads() -> Option<PathBuf> {
+    use std::os::windows::ffi::OsStringExt as _;
+    use windows::Win32::{
+        System::Com::CoTaskMemFree,
+        UI::Shell::{FOLDERID_Downloads, KF_FLAG_DEFAULT, SHGetKnownFolderPath},
+    };
+    // SAFETY: the shell returns a NUL-terminated path it allocated, freed here.
+    unsafe {
+        let path = SHGetKnownFolderPath(&FOLDERID_Downloads, KF_FLAG_DEFAULT, None).ok()?;
+        let folder = PathBuf::from(std::ffi::OsString::from_wide(path.as_wide()));
+        CoTaskMemFree(Some(path.as_ptr().cast()));
+        (!folder.as_os_str().is_empty()).then_some(folder)
+    }
 }

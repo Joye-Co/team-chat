@@ -591,6 +591,7 @@ mod tests {
             sha256: "0".repeat(64),
             published_at: 0,
             download_url: "http://127.0.0.1/v1/updates/1.2.3/download".into(),
+            platform: None,
         }
     }
 

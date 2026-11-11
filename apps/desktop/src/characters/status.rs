@@ -1,8 +1,9 @@
-//! The live status a member's character shows.
+//! The live look (status and emotion) a member's character shows.
 //!
-//! [`status_of`] is the rule; [`StatusTracker`] collects its inputs from the
-//! provider's snapshots and change batches and publishes the result in the
-//! [`StatusBoard`] global, which avatars read while they render.
+//! [`status_of`] and [`look_of`] are the rules; [`StatusTracker`] collects
+//! their inputs from the provider's snapshots and change batches and publishes
+//! the result in the [`StatusBoard`] global, which avatars read while they
+//! render.
 //!
 //! The rule for a bot, across all its topics and runs, first match wins
 //! (needs input > error > working > idle):
@@ -19,6 +20,17 @@
 //!    it owns becomes `done`;
 //! 6. idle.
 //!
+//! The face follows the status ([`Emotion::of_status`]), told apart where the
+//! tracker knows more:
+//! - working: think while its runs are only created (it reads the task),
+//!   focus once one runs or it writes;
+//! - needs input: shy when a topic it owns waits for a review of its work,
+//!   curious when it asks;
+//! - success: celebrate when a topic it owns becomes done, happy when a reply
+//!   ends;
+//! - error: aggrieved when it is stuck in two or more places, puzzled in one;
+//! - idle calm, offline sleepy.
+//!
 //! Runs are read at start for the topics that are not done and again on
 //! each `Change::Runs`. A person with a character shows idle or offline.
 
@@ -30,7 +42,7 @@ use std::{
 
 use gpui::{App, AppContext as _, Context, Entity, Global, Subscription};
 
-use super::CharacterStatus;
+use super::{CharacterStatus, Emotion, Look};
 use crate::{
     app::{ChangeHub, Changes},
     data::{
@@ -57,6 +69,14 @@ pub struct Signals {
     pub waits_on_person: bool,
     pub blocked: bool,
     pub recent_success: bool,
+    /// Its active runs are all only created: it has not started writing.
+    pub starting: bool,
+    /// A topic it owns waits for a review.
+    pub waits_on_review: bool,
+    /// Its recent success is a topic that became done.
+    pub finished_topic: bool,
+    /// How many places it is stuck in (blocked or failed runs and topics).
+    pub stuck: u8,
 }
 
 /// The status rule (see the module docs).
@@ -78,6 +98,20 @@ pub fn status_of(s: Signals) -> CharacterStatus {
     }
 }
 
+/// The look rule: the status, and the face that tells its case apart (see the
+/// module docs).
+pub fn look_of(s: Signals) -> Look {
+    let status = status_of(s);
+    let emotion = match status {
+        CharacterStatus::Working if s.starting => Emotion::Think,
+        CharacterStatus::NeedsInput if s.waits_on_review => Emotion::Shy,
+        CharacterStatus::Success if s.finished_topic => Emotion::Celebrate,
+        CharacterStatus::Error if s.stuck >= 2 => Emotion::Aggrieved,
+        _ => Emotion::of_status(status),
+    };
+    Look { status, emotion }
+}
+
 /// The status of a member for whom the tracker has no entry yet.
 pub fn fallback(member: &Member) -> CharacterStatus {
     status_of(Signals {
@@ -86,24 +120,29 @@ pub fn fallback(member: &Member) -> CharacterStatus {
     })
 }
 
-/// The statuses avatars draw. Set by [`StatusTracker`].
+/// The looks avatars draw. Set by [`StatusTracker`].
 #[derive(Clone, Debug, Default)]
 pub struct StatusBoard {
-    statuses: HashMap<MemberId, CharacterStatus>,
+    looks: HashMap<MemberId, Look>,
 }
 
 impl Global for StatusBoard {}
 
 impl StatusBoard {
     pub fn get(&self, member_id: &str) -> Option<CharacterStatus> {
-        self.statuses.get(member_id).copied()
+        self.looks.get(member_id).map(|l| l.status)
     }
 
-    /// The status of a member: the board's entry, else [`fallback`].
-    pub fn status(cx: &App, member: &Member) -> CharacterStatus {
+    pub fn get_look(&self, member_id: &str) -> Option<Look> {
+        self.looks.get(member_id).copied()
+    }
+
+    /// The look of a member: the board's entry, else [`fallback`] with its
+    /// default face.
+    pub fn look(cx: &App, member: &Member) -> Look {
         cx.try_global::<StatusBoard>()
-            .and_then(|b| b.get(&member.id))
-            .unwrap_or_else(|| fallback(member))
+            .and_then(|b| b.get_look(&member.id))
+            .unwrap_or_else(|| fallback(member).into())
     }
 }
 
@@ -126,6 +165,8 @@ pub struct StatusTracker {
     /// Bots with an unanswered ask or draft card, per topic.
     asks: HashMap<(GroupId, TopicId), HashSet<MemberId>>,
     success_until: HashMap<MemberId, Instant>,
+    /// Bots whose recent success is a topic that became done.
+    finished: HashSet<MemberId>,
     _changes: Subscription,
 }
 
@@ -149,6 +190,7 @@ impl StatusTracker {
                 runs: HashMap::new(),
                 asks: HashMap::new(),
                 success_until: HashMap::new(),
+                finished: HashSet::new(),
                 _changes: changes,
             };
             this.scan_all();
@@ -245,6 +287,7 @@ impl StatusTracker {
 
     fn apply(&mut self, changes: &Changes, cx: &mut Context<Self>) {
         let mut ended: Vec<MemberId> = Vec::new();
+        let mut finished: Vec<MemberId> = Vec::new();
         for change in &changes.0 {
             match change {
                 Change::Messages { group_id, topic_id } => {
@@ -258,7 +301,7 @@ impl StatusTracker {
                 Change::Topics { group_id } => {
                     let next = owned_of(&self.provider.topics(group_id));
                     let before = self.owned.insert(group_id.clone(), next.clone());
-                    ended.extend(newly_done(before.as_deref().unwrap_or(&[]), &next));
+                    finished.extend(newly_done(before.as_deref().unwrap_or(&[]), &next));
                 }
                 Change::Groups | Change::Session => {
                     for group in self.provider.groups() {
@@ -271,9 +314,15 @@ impl StatusTracker {
                 _ => {}
             }
         }
-        if !ended.is_empty() {
+        if !ended.is_empty() || !finished.is_empty() {
             let until = cx.background_executor().now() + SUCCESS_FOR;
-            for id in ended {
+            for id in &ended {
+                // A reply that ends replaces an earlier topic's celebration.
+                self.finished.remove(id);
+                self.success_until.insert(id.clone(), until);
+            }
+            for id in finished {
+                self.finished.insert(id.clone());
                 self.success_until.insert(id, until);
             }
             cx.spawn(async move |this, cx| {
@@ -290,17 +339,23 @@ impl StatusTracker {
         let mut out: HashMap<MemberId, Signals> = members
             .iter()
             .map(|m| {
+                let recent_success = self.success_until.get(&m.id).is_some_and(|&t| t > now);
                 let s = Signals {
                     bot: m.is_bot(),
                     present: m.online && !m.deactivated,
-                    recent_success: self.success_until.get(&m.id).is_some_and(|&t| t > now),
+                    recent_success,
+                    finished_topic: recent_success && self.finished.contains(&m.id),
                     ..Signals::default()
                 };
                 (m.id.clone(), s)
             })
             .collect();
+        // Writing: a streaming message or a running run. Only created runs are
+        // `starting` until one of these shows.
+        let mut writing: HashSet<&str> = HashSet::new();
         for bots in self.streaming.values() {
             for id in bots {
+                writing.insert(id);
                 if let Some(s) = out.get_mut(id) {
                     s.streaming = true;
                 }
@@ -321,13 +376,26 @@ impl StatusTracker {
                 let Some(s) = out.get_mut(id) else { continue };
                 match status {
                     RunStatus::Waiting => s.waits_on_person = true,
-                    RunStatus::Blocked => s.blocked = true,
+                    RunStatus::Blocked => {
+                        s.blocked = true;
+                        s.stuck = s.stuck.saturating_add(1);
+                    }
                     RunStatus::Failed
                         if !done.contains(&(group_id.as_str(), topic_id.as_str())) =>
                     {
-                        s.blocked = true
+                        s.blocked = true;
+                        s.stuck = s.stuck.saturating_add(1);
                     }
-                    RunStatus::Created | RunStatus::Running => s.streaming = true,
+                    RunStatus::Created => {
+                        s.streaming = true;
+                        if !writing.contains(id.as_str()) {
+                            s.starting = true;
+                        }
+                    }
+                    RunStatus::Running => {
+                        s.streaming = true;
+                        writing.insert(id);
+                    }
                     _ => {}
                 }
             }
@@ -345,12 +413,23 @@ impl StatusTracker {
         for topic in self.owned.values().flatten() {
             if let Some(s) = out.get_mut(&topic.owner) {
                 match topic.status {
-                    TopicStatus::WaitingAnswer | TopicStatus::WaitingReview => {
-                        s.waits_on_person = true
+                    TopicStatus::WaitingAnswer => s.waits_on_person = true,
+                    TopicStatus::WaitingReview => {
+                        s.waits_on_person = true;
+                        s.waits_on_review = true;
                     }
-                    TopicStatus::Blocked => s.blocked = true,
+                    TopicStatus::Blocked => {
+                        s.blocked = true;
+                        s.stuck = s.stuck.saturating_add(1);
+                    }
                     _ => {}
                 }
+            }
+        }
+        // A bot writing anywhere has started, whatever order its runs came in.
+        for id in writing {
+            if let Some(s) = out.get_mut(id) {
+                s.starting = false;
             }
         }
         out
@@ -360,17 +439,19 @@ impl StatusTracker {
         // The executor's clock, so tests can move it.
         let now = cx.background_executor().now();
         self.success_until.retain(|_, t| *t > now);
+        let success_until = &self.success_until;
+        self.finished.retain(|id| success_until.contains_key(id));
         let members = self.provider.members();
-        let statuses: HashMap<MemberId, CharacterStatus> = self
+        let looks: HashMap<MemberId, Look> = self
             .signals(&members, now)
             .into_iter()
-            .map(|(id, s)| (id, status_of(s)))
+            .map(|(id, s)| (id, look_of(s)))
             .collect();
         let changed = cx
             .try_global::<StatusBoard>()
-            .is_none_or(|b| b.statuses != statuses);
+            .is_none_or(|b| b.looks != looks);
         if changed {
-            cx.set_global(StatusBoard { statuses });
+            cx.set_global(StatusBoard { looks });
             cx.refresh_windows();
         }
     }
@@ -458,6 +539,8 @@ mod tests {
         provider.set_topic_status("g-ops", "t-alert", TopicStatus::Done, vec![]);
         cx.run_until_parked();
         assert_eq!(status(cx, "m-sentry"), Some(Success));
+        let look = cx.read(|cx| cx.global::<StatusBoard>().get_look("m-sentry"));
+        assert_eq!(look.map(|l| l.emotion), Some(Emotion::Celebrate));
         cx.executor()
             .advance_clock(SUCCESS_FOR + Duration::from_millis(100));
         cx.run_until_parked();
@@ -521,6 +604,70 @@ mod tests {
         );
         // People show presence only.
         assert_eq!(status_of(Signals { bot: false, ..all }), Idle);
+    }
+
+    #[test]
+    fn the_face_tells_the_case_apart() {
+        let face = |s: Signals| look_of(s).emotion;
+        assert_eq!(face(bot()), Emotion::Calm);
+        assert_eq!(
+            face(Signals {
+                present: false,
+                ..bot()
+            }),
+            Emotion::Sleepy
+        );
+        let working = Signals {
+            streaming: true,
+            ..bot()
+        };
+        assert_eq!(face(working), Emotion::Focus);
+        assert_eq!(
+            face(Signals {
+                starting: true,
+                ..working
+            }),
+            Emotion::Think
+        );
+        let asks = Signals {
+            waits_on_person: true,
+            ..bot()
+        };
+        assert_eq!(face(asks), Emotion::Curious);
+        assert_eq!(
+            face(Signals {
+                waits_on_review: true,
+                ..asks
+            }),
+            Emotion::Shy
+        );
+        let done = Signals {
+            recent_success: true,
+            ..bot()
+        };
+        assert_eq!(face(done), Emotion::Happy);
+        assert_eq!(
+            face(Signals {
+                finished_topic: true,
+                ..done
+            }),
+            Emotion::Celebrate
+        );
+        let stuck = Signals {
+            blocked: true,
+            stuck: 1,
+            ..bot()
+        };
+        assert_eq!(face(stuck), Emotion::Puzzled);
+        assert_eq!(face(Signals { stuck: 2, ..stuck }), Emotion::Aggrieved);
+        // A face never changes the status: thinking while it waits is still waiting.
+        let both = Signals {
+            starting: true,
+            streaming: true,
+            ..asks
+        };
+        assert_eq!(look_of(both).status, CharacterStatus::NeedsInput);
+        assert_eq!(face(both), Emotion::Curious);
     }
 
     #[test]

@@ -20,8 +20,9 @@ mod proto {
     use std::time::{Duration, Instant};
 
     use artifact_view::win_support::{
-        capture_screen_png, client_rect_on_screen, create_host_window, png_pixel, pump, scale_of,
-        screen_size, set_dpi_aware,
+        capture_screen_png, click_at_screen, client_rect_on_screen, create_host_window,
+        find_window, host_wheel, png_pixel, press_chord, press_key, pump, scale_of, screen_size,
+        set_dpi_aware, wheel_at_screen,
     };
     use artifact_view::{
         ArtifactEvent, ArtifactWindow, Capabilities, Content, EmbedOptions, EmbeddedArtifact,
@@ -231,6 +232,70 @@ mod proto {
             text.borrow().clone().flatten().as_deref() == Some("clicked"),
         );
 
+        // A shortcut of the host (here Ctrl+K), pressed while the page has the keyboard:
+        // the page does not get the key, the host window gets the keyboard back, and
+        // what is typed next (the query of whatever the shortcut opened) stays out of
+        // the page too.
+        embed.evaluate_script(
+            "window.__seen = ''; addEventListener('keydown', function (e) { \
+             if (e.key.length === 1) window.__seen += e.key.toLowerCase(); }, true);",
+        );
+        pump(Duration::from_millis(200), || false);
+        press_key(0x42); // "b": the page hears ordinary typing
+        pump(Duration::from_millis(300), || false);
+        artifact_view::set_host_keys(vec![artifact_view::HostKey {
+            ctrl: true,
+            alt: false,
+            shift: false,
+            key: 0x4B,
+        }]);
+        press_chord(0x11, 0x4B);
+        pump(Duration::from_millis(400), || false);
+        check("hostKeyGivesTheHostTheKeyboard", !embed.is_focused());
+        press_key(0x41);
+        pump(Duration::from_millis(400), || false);
+        let heard: Rc<RefCell<Option<Option<String>>>> = Rc::new(RefCell::new(None));
+        let heard2 = heard.clone();
+        embed.evaluate_text("window.__seen", move |t| *heard2.borrow_mut() = Some(t));
+        pump(Duration::from_secs(10), || heard.borrow().is_some());
+        details.insert("keysThePageHeard".into(), json!(heard.borrow().clone()));
+        check(
+            "pageHearsNeitherTheHostKeyNorWhatFollows",
+            heard.borrow().clone().flatten().as_deref() == Some("b"),
+        );
+        artifact_view::set_host_keys(Vec::new());
+
+        // Wheel scrolling that goes to the host: from the system's input only.
+        let (ox0, oy0, _, _) = client_rect_on_screen(host);
+        let over_page = (
+            ox0 + ((60.0 + 300.0) * scale) as i32,
+            oy0 + ((60.0 + 250.0) * scale) as i32,
+        );
+        let wheel_before = host_wheel();
+        wheel_at_screen(over_page.0, over_page.1, -120);
+        pump(Duration::from_millis(600), || false);
+        check("pageKeepsItsWheelByDefault", host_wheel() == wheel_before);
+        embed.set_pass_scroll(true);
+        wheel_at_screen(over_page.0, over_page.1, -120);
+        pump(Duration::from_secs(3), || host_wheel().0 > wheel_before.0);
+        let passed = host_wheel();
+        check(
+            "wheelOverPageScrollsHost",
+            passed == (wheel_before.0 + 1, wheel_before.1 - 120),
+        );
+        // A page cannot scroll the host by saying so.
+        embed.evaluate_script(
+            "for (var i = 0; i < 50; i++) window.chrome.webview.postMessage({ __wheel: [0, 99999, 0] });\
+             window.dispatchEvent(new WheelEvent('wheel', { deltaY: 99999, bubbles: true }));",
+        );
+        pump(Duration::from_millis(800), || false);
+        check("pageCannotForgeWheel", host_wheel() == passed);
+        embed.set_pass_scroll(false);
+        wheel_at_screen(over_page.0, over_page.1, -120);
+        pump(Duration::from_millis(600), || false);
+        check("wheelBackToPage", host_wheel() == passed);
+        details.insert("hostWheel".into(), json!([passed.0, passed.1]));
+
         // The page's own capture (what the host draws under an overlay).
         let snap: Rc<RefCell<Option<Option<Vec<u8>>>>> = Rc::new(RefCell::new(None));
         let snap2 = snap.clone();
@@ -284,6 +349,9 @@ mod proto {
         // The 产出 window: a top-level window with the version picker above the page.
         let win_seen = Rc::new(RefCell::new((false, None::<String>)));
         let win_seen2 = win_seen.clone();
+        // `probe` events of the window's page: name → sent as the viewer's action.
+        let probes: Rc<RefCell<Vec<(String, bool)>>> = Rc::new(RefCell::new(Vec::new()));
+        let probes2 = probes.clone();
         let mut options = OpenOptions::new(
             "产出 window · v2",
             ARTIFACT_ID,
@@ -305,6 +373,15 @@ mod proto {
         let window = ArtifactWindow::open(main, options, move |event| match event {
             ArtifactEvent::Loaded { .. } => win_seen2.borrow_mut().0 = true,
             ArtifactEvent::LoadFailed { reason, .. } => win_seen2.borrow_mut().1 = Some(reason),
+            ArtifactEvent::Emit {
+                payload,
+                user_action,
+                ..
+            } => {
+                if let Some(probe) = payload["probe"].as_str() {
+                    probes2.borrow_mut().push((probe.to_string(), user_action));
+                }
+            }
             _ => {}
         })
         .expect("open the window");
@@ -320,6 +397,70 @@ mod proto {
             let _ = std::fs::write(out.join("window.png"), png);
         }
         check("windowScreenshot", screen.is_some());
+        // The user-action gate: a click on the version picker (the host's own control) is
+        // not input to the page; a click in the page is.
+        let probe = |name: &str| {
+            window.evaluate_script(&format!(
+                "window.artifact.emitEvent('probe', {{ probe: '{name}' }});"
+            ));
+            let name = name.to_string();
+            pump(Duration::from_secs(5), || {
+                probes.borrow().iter().any(|(n, _)| *n == name)
+            });
+            probes
+                .borrow()
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, user_action)| *user_action)
+        };
+        let frame = find_window("产出 window · v2");
+        let (wx, wy, ww, _) = client_rect_on_screen(frame);
+        let wscale = scale_of(frame);
+        check("windowFound", frame != 0 && ww > 0);
+        check("noInputNoAction", probe("idle") == Some(false));
+        // The picker: 180 pt wide, 12 pt from the right edge, in the 40 pt strip.
+        click_at_screen(
+            wx + ww - ((12.0 + 90.0) * wscale) as i32,
+            wy + (20.0 * wscale) as i32,
+        );
+        pump(Duration::from_millis(500), || false);
+        check("pickerClickIsNotPageInput", probe("picker") == Some(false));
+        // Esc closes the picker's list.
+        press_key(0x1b);
+        pump(Duration::from_millis(400), || false);
+        click_at_screen(
+            wx + (300.0 * wscale) as i32,
+            wy + ((40.0 + 250.0) * wscale) as i32,
+        );
+        pump(Duration::from_millis(500), || false);
+        check("pageClickIsPageInput", probe("page") == Some(true));
+        let screen2 = capture_screen_png(0, 0, sw, sh);
+        if let Some(png) = &screen2 {
+            let _ = std::fs::write(out.join("window-after-clicks.png"), png);
+        }
+        // Typing counts as the viewer's input too: once the click is old, a letter key
+        // typed into the page (it has the focus since the click) opens the gate again.
+        pump(
+            artifact_view::gate::USER_ACTION_WINDOW + Duration::from_millis(500),
+            || false,
+        );
+        check("oldClickIsNoInput", probe("stale") == Some(false));
+        press_key(0x41);
+        pump(Duration::from_millis(300), || false);
+        check("typedKeyIsPageInput", probe("typed") == Some(true));
+        details.insert("probes".into(), json!(probes.borrow().clone()));
+        // The frame in the host's dark theme: title bar, picker strip, picker, page.
+        window.set_chrome(artifact_view::Chrome {
+            dark: true,
+            caption: [10, 10, 10],
+            text: [250, 250, 250],
+            border: [38, 38, 38],
+        });
+        pump(Duration::from_millis(1200), || false);
+        if let Some(png) = capture_screen_png(0, 0, sw, sh) {
+            let _ = std::fs::write(out.join("window-dark.png"), png);
+        }
+
         let page_png: Rc<RefCell<Option<Result<Vec<u8>, String>>>> = Rc::new(RefCell::new(None));
         let page_png2 = page_png.clone();
         window.snapshot(Rect::new(0.0, 0.0, 300.0, 200.0), 2.0, move |png| {

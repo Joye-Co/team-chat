@@ -1,0 +1,9 @@
+{
+  "kind": "AnswerCardRequest",
+  "valid": false,
+  "description": "rev starts at 1",
+  "value": {
+    "rev": 0,
+    "actionId": "ok"
+  }
+}

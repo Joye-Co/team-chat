@@ -1,0 +1,9 @@
+{
+  "kind": "QrClaimRequest",
+  "valid": false,
+  "description": "deviceName is not empty",
+  "value": {
+    "code": "7K2M-9QPX",
+    "deviceName": ""
+  }
+}

@@ -125,6 +125,9 @@ pub struct ComposerView {
     key: Option<DraftKey>,
     /// The text the composer last saw or set, to tell user edits from ours.
     last_text: String,
+    /// Counts the 截图 clicks on Windows: only the latest one waits for its picture.
+    #[cfg(target_os = "windows")]
+    snip: u64,
     /// Members picked from the @ list for the current draft.
     picked: Vec<MemberId>,
     quote: Option<QuoteChip>,
@@ -207,6 +210,8 @@ impl ComposerView {
             input,
             key: None,
             last_text: String::new(),
+            #[cfg(target_os = "windows")]
+            snip: 0,
             picked: Vec::new(),
             quote: None,
             files: Vec::new(),
@@ -1133,22 +1138,51 @@ fn strip_marks(body: &str) -> String {
 }
 
 /// Files and images on the clipboard (a copied Finder file, a screenshot).
+///
+/// Text that comes with a picture of itself is text: cells copied from a spreadsheet
+/// and text copied from an office program carry both on Windows, and the Mac's
+/// pasteboard hands over only the text then. No file is returned, so the field pastes
+/// the text.
 fn clipboard_files(entries: &[ClipboardEntry]) -> Vec<NewFile> {
+    let has_files = entries
+        .iter()
+        .any(|e| matches!(e, ClipboardEntry::ExternalPaths(_)));
+    let has_text = entries
+        .iter()
+        .any(|e| matches!(e, ClipboardEntry::String(s) if !s.text().trim().is_empty()));
+    if has_text && !has_files {
+        return Vec::new();
+    }
     let mut files = Vec::new();
     for entry in entries {
         match entry {
             ClipboardEntry::ExternalPaths(paths) => {
                 files.extend(paths.paths().iter().cloned().map(NewFile::Path));
             }
-            ClipboardEntry::Image(image) => files.push(NewFile::Image {
-                mime: image.format.mime_type().to_string(),
-                extension: image.format.extension().to_string(),
-                bytes: image.bytes.clone().into(),
-            }),
+            ClipboardEntry::Image(image) => files.push(clipboard_image(image)),
             ClipboardEntry::String(_) => {}
         }
     }
     files
+}
+
+/// A picture from the clipboard as a file to send. Windows hands a clipboard bitmap
+/// over as an uncompressed BMP: it is sent as the PNG a screenshot is on the Mac.
+fn clipboard_image(image: &gpui::Image) -> NewFile {
+    if image.format == gpui::ImageFormat::Bmp
+        && let Some(png) = crate::ui::clipboard::png_of_bmp(image.bytes())
+    {
+        return NewFile::Image {
+            mime: gpui::ImageFormat::Png.mime_type().to_string(),
+            extension: gpui::ImageFormat::Png.extension().to_string(),
+            bytes: png.into(),
+        };
+    }
+    NewFile::Image {
+        mime: image.format.mime_type().to_string(),
+        extension: image.format.extension().to_string(),
+        bytes: image.bytes.clone().into(),
+    }
 }
 
 /// A Markdown format the format bar and ⌘B / ⌘I / ⌘⇧X apply.
@@ -1378,7 +1412,14 @@ impl ComposerView {
         cx: &mut Context<Self>,
     ) {
         let k = &event.keystroke;
-        if !k.modifiers.platform || k.modifiers.control || k.modifiers.alt {
+        // ⌘B on the Mac, Ctrl+B elsewhere: the command key alone (with ⇧ for
+        // strikethrough), never together with the other one or with ⌥.
+        let (command, other) = if cfg!(target_os = "macos") {
+            (k.modifiers.platform, k.modifiers.control)
+        } else {
+            (k.modifiers.control, k.modifiers.platform)
+        };
+        if !command || other || k.modifiers.alt {
             return;
         }
         let format = match (k.key.as_str(), k.modifiers.shift) {
@@ -1883,7 +1924,7 @@ impl Render for ComposerView {
                                 .t_mono()
                                 .text_size(crate::ui::native::tokens::text::META.0)
                                 .line_height(px(18.))
-                                .child("⌘;"),
+                                .child(crate::copy::topic_rail::SIDE_CHAT_KEY),
                         )
                         .child(crate::copy::topic_rail::TITLE_SIDE_CHAT)
                         .on_click(cx.listener(|this, _, _, cx| {

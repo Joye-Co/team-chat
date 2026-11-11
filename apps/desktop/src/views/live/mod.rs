@@ -206,21 +206,19 @@ impl LivePane {
             .n_subheadline()
             .n_figures()
             .text_color(n.secondary);
-        // T-16, F3: empty parts are skipped (never `· ·`); the computer's
-        // and the machine's names cut with "…" before the time does.
+        // T-16, F3: the time always; the computer's name (the machine's when known, else
+        // the bot's) only in the wide pane. Beside the title, the badge and three buttons a
+        // 400 pt pane has no room for a name: it was cut to `J… · ·`.
         let mut parts: Vec<AnyElement> = Vec::new();
-        if !bot.trim().is_empty() {
+        let computer = screen
+            .machine_name
+            .clone()
+            .filter(|m| !m.trim().is_empty())
+            .or_else(|| (!bot.trim().is_empty()).then(|| fill(c::LIVE_COMPUTER, &[("name", bot)])));
+        if let Some(name) = computer.filter(|_| self.expanded) {
             parts.push(
-                crate::ui::truncate::TruncText::new(fill(c::LIVE_COMPUTER, &[("name", bot)]))
+                crate::ui::truncate::TruncText::new(name)
                     .flex_shrink(1.)
-                    .into_any_element(),
-            );
-        }
-        if let Some(m) = screen.machine_name.clone().filter(|m| !m.trim().is_empty()) {
-            parts.push(
-                // The machine's name gives way first.
-                crate::ui::truncate::TruncText::new(m)
-                    .flex_shrink(4.)
                     .into_any_element(),
             );
         }
@@ -328,8 +326,8 @@ impl LivePane {
                 PushSize::Regular,
                 cx,
             )
-            .on_click(move |_, _, _| {
-                crate::views::artifacts::window::ask_before_screen_share(&name, url.clone())
+            .on_click(move |_, _, cx| {
+                crate::views::artifacts::window::ask_before_screen_share(&name, url.clone(), cx)
             })
         });
         let hand_back = {

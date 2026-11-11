@@ -66,7 +66,11 @@ const REFRESH_EVERY: Duration = Duration::from_secs(5);
 
 /// Binds [`OpenTeamAdmin`] and ⌥⌘,. The window itself checks again that I am an owner.
 pub fn install(services: Services, cx: &mut App) {
-    cx.bind_keys([gpui::KeyBinding::new("cmd-alt-,", OpenTeamAdmin, None)]);
+    cx.bind_keys([gpui::KeyBinding::new(
+        crate::secondary!("alt-,"),
+        OpenTeamAdmin,
+        None,
+    )]);
     cx.on_action(move |_: &OpenTeamAdmin, cx| {
         if i_am_owner(&services) {
             open(services.clone(), cx)
@@ -461,6 +465,14 @@ fn error_text(e: AdminError) -> String {
 
 impl Render for AdminView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let body = self.window_body(window, cx).into_any_element();
+        crate::ui::native::window_chrome::framed(m::WINDOW_TITLE, body, window, cx)
+    }
+}
+
+impl AdminView {
+    /// The window's content, under the caption strip off the Mac.
+    fn window_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_budget_field(window, cx);
         let k = native_colors(cx);
         div()
@@ -689,10 +701,16 @@ impl AdminView {
             .bg(k.admin_window())
             .child(
                 // The traffic lights' row; dragging it moves the window.
+                // Off the Mac the caption strip above holds the window
+                // buttons: only the header's top margin is left here.
                 div()
                     .id("admin-lights")
                     .flex_none()
-                    .h(height::TOOLBAR)
+                    .h(if crate::ui::native::window_chrome::drawn() {
+                        crate::ui::native::tokens::space::S12
+                    } else {
+                        height::TOOLBAR
+                    })
                     .w_full()
                     .on_mouse_down(MouseButton::Left, |e, window, _| {
                         if e.click_count >= 2 {
@@ -860,7 +878,7 @@ impl AdminView {
 
     fn toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = native_colors(cx);
-        let active = window.is_window_active();
+        let active = crate::ui::native::emphasized(window);
         let machine_name = self
             .machine()
             .map(|x| x.name.clone())

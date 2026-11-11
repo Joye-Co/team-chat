@@ -623,6 +623,11 @@ pub const ASIDE_CONFIG: &[&str] = &[
     "features.computer_use=false",
 ];
 
+/// Windows: Codex enforces `read-only` only through its own Windows sandbox, which is off
+/// unless the config turns it on: without it a command of a side chat run writes files. This
+/// turns on the mode that needs no administrator.
+pub const ASIDE_WINDOWS_SANDBOX: &str = "windows.sandbox=\"unelevated\"";
+
 /// Names of the MCP servers in the Codex config files a run can load, each with whether its
 /// transport is a URL: `$CODEX_HOME/config.toml` and `.codex/config.toml` in the working
 /// directory and each folder above it (Codex loads these only for a trusted project). The first
@@ -672,6 +677,9 @@ pub fn app_server_args(spec: &RunSpec) -> Result<Vec<String>, String> {
                 .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
     };
     let mut overrides: Vec<String> = ASIDE_CONFIG.iter().map(|c| c.to_string()).collect();
+    if cfg!(windows) {
+        overrides.push(ASIDE_WINDOWS_SANDBOX.to_string());
+    }
     for (name, url) in configured_mcp_servers(spec)? {
         if !plain(&name) {
             return Err(format!(

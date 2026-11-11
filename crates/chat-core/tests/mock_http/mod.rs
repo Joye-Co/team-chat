@@ -27,6 +27,10 @@ pub struct HttpState {
     pub avatars: BTreeMap<String, Vec<u8>>,
     pub hooks: Vec<Hook>,
     pub release: Option<(UpdateInfo, Vec<u8>)>,
+    /// The Windows installer of the newest release (`?platform=windows`).
+    pub windows_release: Option<(UpdateInfo, Vec<u8>)>,
+    /// Answer like a server from before the Windows client: ignore `platform`.
+    pub ignores_platform: bool,
     pub diagnostics: Vec<Vec<u8>>,
     pub runs: BTreeMap<String, (BotRun, Vec<chat_core::proto::machine::RunLogEntry>)>,
     // --- settings-backend track ---
@@ -537,14 +541,32 @@ async fn handle(st: Arc<Mutex<HttpState>>, req: Request<Incoming>) -> Response<F
             let last = log.iter().map(seq).max().unwrap_or(0);
             ok(json!({"run": r, "entries": page, "hasMore": rest.len() > limit, "lastSeq": last}))
         }
-        (&Method::GET, ["v1", "updates", "latest"]) => match &s.release {
-            Some((u, _)) => ok(u),
-            None => err(StatusCode::NOT_FOUND, "not_found"),
-        },
-        (&Method::GET, ["v1", "updates", v, "download"]) => match &s.release {
-            Some((u, b)) if u.version == *v => bytes(b.clone(), "application/x-apple-diskimage"),
-            _ => err(StatusCode::NOT_FOUND, "not_found"),
-        },
+        (&Method::GET, ["v1", "updates", "latest"]) => {
+            let windows = !s.ignores_platform
+                && query_value(&query, "platform").as_deref() == Some("windows");
+            match if windows {
+                &s.windows_release
+            } else {
+                &s.release
+            } {
+                Some((u, _)) => ok(u),
+                None => err(StatusCode::NOT_FOUND, "not_found"),
+            }
+        }
+        (&Method::GET, ["v1", "updates", v, "download"]) => {
+            let windows = !s.ignores_platform
+                && query_value(&query, "platform").as_deref() == Some("windows");
+            match if windows {
+                &s.windows_release
+            } else {
+                &s.release
+            } {
+                Some((u, b)) if u.version == *v => {
+                    bytes(b.clone(), "application/x-apple-diskimage")
+                }
+                _ => err(StatusCode::NOT_FOUND, "not_found"),
+            }
+        }
         (&Method::POST, ["v1", "diagnostics"]) => {
             if content_type != "application/gzip" {
                 return err(StatusCode::BAD_REQUEST, "invalid");

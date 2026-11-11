@@ -12,6 +12,9 @@
 //! - [`banner::UpdateBanner`] (main window; the settings 通用 pane draws its own version row)
 //!   renders the state. It reads only this entity; the network and the cache stay here.
 //! - On start, [`install::finish_on_launch`] removes the old bundle of the previous update.
+//! - On Windows the download is the installer (`-setup.exe`) and the install step hands it
+//!   to the update helper, which replaces the install folder after the app has quit
+//!   ([`install::windows`]). Check, download, verification and the views are the same.
 
 pub mod banner;
 pub mod install;
@@ -139,11 +142,25 @@ fn marker_path(data_root: &std::path::Path) -> PathBuf {
     updates_dir(data_root).join("pending.json")
 }
 
-/// The running `.app` bundle, if the app runs from one.
+/// The running `.app` bundle, if the app runs from one. On Windows: the install folder,
+/// if the installer put the app there.
 pub fn running_bundle() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
+    if cfg!(windows) {
+        // Not canonical: the installer does not take a `\\?\` path.
+        return install::windows::install_dir_from_exe(&exe);
+    }
     let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
     install::bundle_from_exe(&exe)
+}
+
+/// The file name of the download of `version`: the DMG, or the installer on Windows.
+pub fn download_name(version: &str) -> String {
+    if cfg!(windows) {
+        install::windows::installer_name(version)
+    } else {
+        format!("{}-{version}.dmg", env!("PRODUCT_NAME"))
+    }
 }
 
 /// Creates the updater, finishes a previous update and starts the schedule. Call once
@@ -226,6 +243,17 @@ pub fn install(source: ClientSource, data_root: PathBuf, cx: &mut App) -> Entity
             let bundle = running_bundle();
             let done = install::finish_on_launch(&marker, bundle.as_deref(), version::CURRENT);
             tracing::info!(?done, "update finish on launch");
+            if cfg!(windows) {
+                // An update that was cut short is undone (or found finished) by the helper.
+                if let Some(updates) = marker.parent() {
+                    install::windows::recover_interrupted(updates);
+                }
+                if done != install::Finish::NotForMe
+                    && let Some(dir) = &bundle
+                {
+                    install::windows::remove_stale_backups(dir);
+                }
+            }
         })
         .detach();
     let updater = cx.new(|_| Updater {
@@ -437,7 +465,7 @@ impl Updater {
             return;
         };
         let dir = updates_dir(&self.data_root);
-        let dest = dir.join(format!("{}-{}.dmg", env!("PRODUCT_NAME"), info.version));
+        let dest = dir.join(download_name(&info.version));
         self.postponed = None;
         self.phase = Phase::Downloading {
             info: info.clone(),
@@ -602,16 +630,15 @@ impl Updater {
         };
         let task = cx
             .background_executor()
-            .spawn(async move { install::install(&plan).map(|m| (m, plan)) });
+            .spawn(async move { install::install_update(&plan) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |u, cx| match result {
-                Ok((marker, plan)) => {
-                    tracing::info!(version = %marker.version, "update installed, relaunching");
-                    let _ = std::fs::remove_file(&plan.dmg);
+                Ok(installed) => {
+                    tracing::info!(version = %installed.marker.version, "update installed, relaunching");
                     match install::relaunch(
                         std::process::id(),
-                        &install::Launch::Open(marker.bundle),
+                        &install::launch_after(installed),
                     ) {
                         Ok(()) => cx.quit(),
                         Err(e) => {
@@ -654,11 +681,25 @@ impl Updater {
         .detach();
     }
 
-    /// Opens the DMG in Finder so the user can drag the app over the old one.
+    /// Opens the DMG in Finder so the user can drag the app over the old one. On Windows:
+    /// shows the installer in its folder, for the user to run.
     fn open_manually(&mut self, info: UpdateInfo, dmg: &std::path::Path, cx: &mut Context<Self>) {
         tracing::info!("bundle not replaceable; opening the image");
-        let opened = std::process::Command::new("/usr/bin/open")
-            .arg(dmg)
+        let mut open = if cfg!(windows) {
+            let mut select = std::ffi::OsString::from("/select,");
+            select.push(dmg);
+            // By its full path: a bare name is looked up in the app's folder first.
+            let windows = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+            let mut cmd =
+                std::process::Command::new(std::path::Path::new(&windows).join("explorer.exe"));
+            cmd.arg(select);
+            cmd
+        } else {
+            let mut cmd = std::process::Command::new("/usr/bin/open");
+            cmd.arg(dmg);
+            cmd
+        };
+        let opened = open
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -697,7 +738,10 @@ fn remove_other_dmgs(keep: &std::path::Path) {
     };
     for e in entries.flatten() {
         let p = e.path();
-        if p != keep && p.extension().is_some_and(|x| x == "dmg" || x == "part") {
+        let installer = p
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().ends_with("-setup.exe"));
+        if p != keep && (installer || p.extension().is_some_and(|x| x == "dmg" || x == "part")) {
             let _ = std::fs::remove_file(p);
         }
     }

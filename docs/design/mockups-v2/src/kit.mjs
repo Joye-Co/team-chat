@@ -1,19 +1,14 @@
 // Shared CSS and render helpers for the v2.1 mockups. Every page is self-contained: system fonts,
-// inline Lucide SVG icons (the same set gpui-kit ships, plus `type`), and the optional character
-// pack (TC_OPS_DIR/characters, else ~/.config/team-chat/ops/characters) embedded as data URIs.
-// Without the pack a bot's tile shows its initials.
+// inline Lucide SVG icons (the same set gpui-kit ships, plus `type`), and the Jojo & Friends
+// avatar pack (apps/desktop/assets/characters, CC BY 4.0) embedded as data URIs.
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cssVars, dark, light } from "./tokens.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO = join(HERE, "../../../..");
-export const CHAR_DIR = join(
-  process.env.TC_OPS_DIR ?? join(process.env.TEAM_CHAT_CONFIG_DIR ?? join(homedir(), ".config/team-chat"), "ops"),
-  "characters",
-);
+export const CHAR_DIR = join(REPO, "apps/desktop/assets/characters");
 const HAS_ART = existsSync(CHAR_DIR);
 const ICONS = JSON.parse(readFileSync(join(HERE, "icons.json"), "utf8"));
 
@@ -60,11 +55,13 @@ export function smallArt(svg) {
 }
 
 const SIZES = [16, 20, 24, 32, 48, 64, 128];
-const BOXES = JSON.parse(readFileSync(join(HERE, "char-boxes.json"), "utf8"));
+const BOXES = JSON.parse(readFileSync(join(CHAR_DIR, "boxes.json"), "utf8"));
+/** The default face of each status (apps/desktop/src/characters/emotion.rs). */
+const FACE = { idle: "calm", working: "focus", "needs-input": "curious", success: "happy", error: "puzzled", offline: "offline" };
 const charCache = new Map();
 /**
  * A bot's character at its live status (idle, working, needs-input, success, error, offline).
- * `fit` crops the art to its visible bounds (the idle pose, so a status change does not move it),
+ * `fit` crops the art to its visible bounds (the calm face, so a change of face does not move it),
  * square by the larger side and centered: every character then fills the same box (DESIGN §7.9).
  */
 export function character(id, status = "idle", size = 32, { fit = false, fill = 1 } = {}) {
@@ -72,9 +69,9 @@ export function character(id, status = "idle", size = 32, { fit = false, fill = 
   const small = size <= 64;
   const key = `${id}/${status}-${file}-${small}-${fit}-${fill}`;
   if (!charCache.has(key)) {
-    let svg = readFileSync(join(CHAR_DIR, `${id}/${status}-${file}.svg`), "utf8");
+    let svg = readFileSync(join(CHAR_DIR, `${id}/${FACE[status] ?? status}-${file}.svg`), "utf8");
     if (small) svg = smallArt(svg);
-    const b = BOXES[`${id}__idle`];
+    const b = BOXES[`${id}__calm`];
     if (fit && b) {
       // The art's larger side takes `fill` of the box; its painted center sits at the box center,
       // 2 % above the middle so the face line lands near 46-48 % of the tile (§7.9).

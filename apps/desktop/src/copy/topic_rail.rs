@@ -109,6 +109,7 @@ crate::copy! {
     // The composer of a 话题 page.
     COMPOSER_PLACEHOLDER = "回复，或 @ 成员交代…",
     JUST_ASK = "只想问问？",
+    SIDE_CHAT_KEY = crate::copy::per_system("⌘;", "Ctrl+;"),
     // Topic rail cards.
     PLAN_ALL_DONE = "{n} 步都做完了",
     PLAN_STEP = "第 {n} 步：{text}",

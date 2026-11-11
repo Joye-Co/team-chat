@@ -491,7 +491,53 @@ pub struct MachineForm {
     labels: Entity<InputState>,
     status: Status,
     created: Option<MachineCreated>,
+    /// The system of the computer being added (it need not be this one's): which
+    /// install command the sheet shows.
+    target: InstallTarget,
     _subscriptions: Vec<gpui::Subscription>,
+}
+
+/// The system of a computer that is being added as a machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InstallTarget {
+    /// A Mac or a Linux computer: POSIX shell lines.
+    Unix,
+    /// A Windows computer: PowerShell lines.
+    Windows,
+}
+
+impl InstallTarget {
+    const ALL: [InstallTarget; 2] = [InstallTarget::Unix, InstallTarget::Windows];
+
+    /// The system this app runs on: the likeliest one for the next computer.
+    pub fn of_this_computer() -> Self {
+        if cfg!(target_os = "windows") {
+            InstallTarget::Windows
+        } else {
+            InstallTarget::Unix
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            InstallTarget::Unix => s::MACHINE_TARGET_UNIX,
+            InstallTarget::Windows => s::MACHINE_TARGET_WINDOWS,
+        }
+    }
+
+    /// The command for this system and the line under it.
+    pub fn command(self, created: &MachineCreated) -> (String, &'static str) {
+        match self {
+            InstallTarget::Unix => (
+                created.install_command.expose().to_string(),
+                s::MACHINE_INSTALL_HINT,
+            ),
+            InstallTarget::Windows => (
+                created.install_command_windows.expose().to_string(),
+                s::MACHINE_INSTALL_HINT_WINDOWS,
+            ),
+        }
+    }
 }
 
 impl MachineForm {
@@ -511,6 +557,7 @@ impl MachineForm {
                 .new(|cx| InputState::new(window, cx).placeholder(s::RUNNER_LABELS_PLACEHOLDER)),
             status: Status::Idle,
             created: None,
+            target: InstallTarget::of_this_computer(),
             _subscriptions: subscriptions,
         }
     }
@@ -521,6 +568,16 @@ impl MachineForm {
 
     pub fn status(&self) -> &Status {
         &self.status
+    }
+
+    /// Shows the install command for a computer of this system.
+    pub fn set_target(&mut self, target: InstallTarget, cx: &mut Context<Self>) {
+        self.target = target;
+        cx.notify();
+    }
+
+    pub fn target(&self) -> InstallTarget {
+        self.target
     }
 
     pub fn fill(&mut self, name: &str, labels: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -570,6 +627,7 @@ impl Render for MachineForm {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = native_colors(cx);
         if let Some(created) = &self.created {
+            let (command, hint) = self.target.command(created);
             let secret = |id: &'static str, label: &'static str, value: &str| {
                 let value: gpui::SharedString = value.to_string().into();
                 div()
@@ -611,12 +669,30 @@ impl Render for MachineForm {
             };
             return SheetLayout::new(fill(s::MACHINE_CREATED, &[("name", &created.machine.name)]))
                 .explanation(s::SHOWN_ONCE)
-                .body(secret(
-                    "machine-install",
-                    s::MACHINE_INSTALL,
-                    created.install_command.expose(),
+                .body(widgets::field(
+                    s::MACHINE_TARGET,
+                    widgets::choice(
+                        "machine-target",
+                        &InstallTarget::ALL.map(InstallTarget::label),
+                        InstallTarget::ALL
+                            .iter()
+                            .position(|t| *t == self.target)
+                            .unwrap_or(0),
+                        false,
+                        {
+                            let form = cx.entity().downgrade();
+                            move |ix: usize, _: &mut Window, cx: &mut gpui::App| {
+                                let _ = form.update(cx, |this, cx| {
+                                    this.set_target(InstallTarget::ALL[ix.min(1)], cx)
+                                });
+                            }
+                        },
+                        cx,
+                    ),
+                    cx,
                 ))
-                .body(widgets::quiet(s::MACHINE_INSTALL_HINT, cx))
+                .body(secret("machine-install", s::MACHINE_INSTALL, &command))
+                .body(widgets::quiet(hint, cx))
                 .body(secret(
                     "machine-credential",
                     s::MACHINE_CREDENTIAL,
@@ -737,6 +813,31 @@ pub fn open_add_machine(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The computer being added may run another system than this one: each choice shows
+    /// its own command and its own line about where to run it.
+    #[test]
+    fn each_system_gets_its_own_install_command() {
+        let created = MachineCreated {
+            machine: MachineInfo::default(),
+            credential: crate::data::SecretText::new("tm_x"),
+            install_command: crate::data::SecretText::new("posix"),
+            install_command_windows: crate::data::SecretText::new("powershell"),
+        };
+        assert_eq!(
+            InstallTarget::Unix.command(&created),
+            ("posix".to_string(), s::MACHINE_INSTALL_HINT)
+        );
+        assert_eq!(
+            InstallTarget::Windows.command(&created),
+            ("powershell".to_string(), s::MACHINE_INSTALL_HINT_WINDOWS)
+        );
+        assert!(s::MACHINE_INSTALL_HINT_WINDOWS.contains("PowerShell"));
+        assert_eq!(
+            InstallTarget::of_this_computer() == InstallTarget::Windows,
+            cfg!(target_os = "windows")
+        );
+    }
 
     fn machine(name: &str, labels: &[&str]) -> MachineInfo {
         MachineInfo {

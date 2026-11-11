@@ -1,0 +1,11 @@
+{
+  "kind": "PushData",
+  "valid": true,
+  "description": "an event without topic or message",
+  "value": {
+    "v": 1,
+    "reason": "result",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "seq": 1
+  }
+}

@@ -151,6 +151,10 @@ pub fn open(
     Ok(handle)
 }
 
+/// How long a page may take to show. A CI runner without a graphics card starts two web
+/// views and a video in about 12 s; 15 s was too close on Windows.
+const PAGE_WAIT: Duration = Duration::from_secs(45);
+
 async fn wait_for<T>(
     cx: &mut AsyncApp,
     timeout: Duration,
@@ -186,12 +190,34 @@ const MEDIA: &str = "(function(){var v=document.getElementById('v'),a=document.g
 return JSON.stringify({playing:v.currentTime>0&&v.videoWidth>0,audio:a.duration||0});})()";
 
 async fn run(handle: AnyWindowHandle, mode: Mode, cx: &mut AsyncApp) -> Result<(), String> {
-    let inline = wait_for(cx, Duration::from_secs(15), |cx| {
-        embed(INLINE_ID, cx).filter(|e| e.read(cx).shown() && e.read(cx).bounds().is_some())
-    })
-    .await
-    .ok_or("the inline page did not load")?;
-    let pane = wait_for(cx, Duration::from_secs(15), |cx| {
+    // The scrolled scene opens at the end of a long 话题: whether a sliver of the page is
+    // in view then depends on the window's content height (32 less under the Windows
+    // caption strip, where it starts out of view and is not shown). Wheel the thread
+    // back until the page is there.
+    let mut inline = None;
+    let started = Instant::now();
+    while inline.is_none() && started.elapsed() < PAGE_WAIT {
+        inline = wait_for(cx, Duration::from_secs(2), |cx| {
+            embed(INLINE_ID, cx).filter(|e| e.read(cx).shown() && e.read(cx).bounds().is_some())
+        })
+        .await;
+        if inline.is_none() && mode == Mode::Scrolled {
+            let _ = cx.update(|cx| {
+                handle.update(cx, |_, window, cx| {
+                    window.dispatch_event(
+                        gpui::PlatformInput::Scroll(gpui::ScrollEvent {
+                            position: point(px(700.), px(400.)),
+                            delta: gpui::ScrollDelta::Pixels(point(px(0.), px(120.))),
+                            ..Default::default()
+                        }),
+                        cx,
+                    );
+                })
+            });
+        }
+    }
+    let inline = inline.ok_or("the inline page did not load")?;
+    let pane = wait_for(cx, PAGE_WAIT, |cx| {
         embed(PANE_ID, cx).filter(|e| e.read(cx).shown())
     })
     .await
@@ -230,7 +256,7 @@ return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2});})()",
             .timer(Duration::from_millis(100))
             .await;
     }
-    let clip_top = crate::ui::native::metrics::TOOLBAR_ROW;
+    let clip_top = crate::ui::native::window_chrome::sheet_top();
     match mode {
         Mode::Topic => {}
         Mode::Scrolled => {
@@ -316,11 +342,48 @@ return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2});})()",
             .ok_or("no menu covered the inline page")?;
         }
     }
+    // A page that loaded but drew nothing must not pass: both pages have painted (a
+    // page hidden under the menu of the covered scene draws no frames, its snapshot
+    // shows instead).
+    if mode != Mode::Covered {
+        // Looked up again: scrolling can give the page a new view.
+        let inline = cx.update(|cx| embed(INLINE_ID, cx)).unwrap_or(inline);
+        let pane = cx.update(|cx| embed(PANE_ID, cx)).unwrap_or(pane);
+        painted(cx, &inline, "the inline page").await?;
+        painted(cx, &pane, "the 产出 pane page").await?;
+    }
     // Let the last frame draw.
     cx.background_executor()
         .timer(Duration::from_millis(250))
         .await;
     Ok(())
+}
+
+/// Waits until `page` has drawn: the browser runs animation-frame callbacks only when it
+/// draws the page, so two of them in a row mean a picture of the page exists.
+async fn painted(
+    cx: &mut AsyncApp,
+    page: &Entity<WebEmbedState>,
+    what: &str,
+) -> Result<(), String> {
+    const MARK: &str = "window.__tcDrew || (window.__tcDrew = 0, \
+        requestAnimationFrame(function () { requestAnimationFrame(function () { \
+        window.__tcDrew = 1; }); })); String(window.__tcDrew)";
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut last = String::new();
+    while Instant::now() < deadline {
+        let drew = eval(cx, page, MARK).await;
+        if drew == "1" {
+            return Ok(());
+        }
+        last = drew;
+        cx.background_executor()
+            .timer(Duration::from_millis(100))
+            .await;
+    }
+    Err(format!(
+        "{what} did not paint (its script answered {last:?})"
+    ))
 }
 
 /// True once the scene reached its end state.
@@ -430,7 +493,7 @@ video{display:block;width:100%;border-radius:8px;background:#000;aspect-ratio:16
 audio{display:block;width:100%;margin-top:12px}
 h2{font-size:13px;margin:16px 0 4px;font-weight:600}
 ul{margin:0;padding-left:18px;color:var(--t1)}
-code{font:12px ui-monospace,Menlo,monospace;background:var(--line);padding:1px 4px;border-radius:4px}
+code{font:12px ui-monospace,Menlo,"Cascadia Mono",Consolas,monospace;background:var(--line);padding:1px 4px;border-radius:4px}
 "#,
     r#"</style></head><body><div class="wrap">
 <div class="sub">视频和提示音都在这个产出里</div>

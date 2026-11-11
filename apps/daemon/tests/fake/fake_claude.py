@@ -6,7 +6,8 @@ Prompt words: "slow" streams 5 deltas 0.3 s apart; "hang" writes fake.pid and sl
 writes fake.pid and appends to ticks.txt 30 times, 0.1 s apart (a stopped process stops ticking);
 "spawn" starts two tool children like a CLI's shell tool, one in a new session (setsid) and one
 in a new process group (setpgid), each appending to <name>.ticks every 0.05 s, writes their pids
-to children.txt and then hangs like "hang";
+to children.txt and then hangs like "hang" (Windows: one without a console and one in a new
+process group);
 "orphan" starts a ticker that daemonizes (its parent exits; it appends to orphan.ticks every
 0.05 s and its pid goes to orphan.txt), then hangs like "hang";
 "chatrun" runs `chat-run card patch` from PATH and writes its exit code, output and the socket's
@@ -54,21 +55,53 @@ if "--settings" in args:
     os.environ.update(seen.get("env", {}))
     open(os.path.join(rec, "settings-seen.json"), "w").write(json.dumps({"settings": seen, "probe": os.environ.get("ASIDE_PROBE")}))
     hooks = seen.get("hooks", {}).get("PreToolUse", [])
+    # Like Claude Code: the SessionStart hooks run when the CLI starts, before it takes input.
+    # FAKE_HOOKS_OFF is a CLI whose hooks are turned off above the run's settings (managed
+    # settings that allow only managed hooks): it runs none.
+    if os.environ.get("FAKE_HOOKS_OFF"):
+        hooks = []
+    else:
+        for group in seen.get("hooks", {}).get("SessionStart", []):
+            for h in group.get("hooks", []):
+                try:
+                    if "args" in h:
+                        subprocess.run([h["command"], *h["args"]], stdin=subprocess.DEVNULL, capture_output=True, timeout=h.get("timeout", 60))
+                    else:
+                        subprocess.run(h["command"], shell=True, stdin=subprocess.DEVNULL, capture_output=True, timeout=h.get("timeout", 60))
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
 
 
 def pre_tool_use(tool, tool_input):
     """Runs the PreToolUse hooks like Claude Code: the hook input on stdin; a deny decision on
-    stdout blocks the tool. Returns the deny reason, or None."""
+    stdout or exit code 2 blocks the tool. A hook with `args` is started without a shell (the
+    exec form), any other through the shell. A hook that cannot start, times out or ends with
+    another code lets the tool run, unless it says `onFailure: "block"`. Returns the deny
+    reason, or None."""
     for group in hooks:
         if not re.fullmatch(group.get("matcher", ""), tool):
             continue
         for h in group.get("hooks", []):
             hook_in = {"hook_event_name": "PreToolUse", "session_id": sid, "cwd": os.getcwd(),
                        "tool_name": tool, "tool_input": tool_input}
-            r = subprocess.run(h["command"], shell=True, input=json.dumps(hook_in), capture_output=True,
-                               text=True, timeout=h.get("timeout", 60))
+            block = h.get("onFailure") == "block"
+            try:
+                if "args" in h:
+                    r = subprocess.run([h["command"], *h["args"]], input=json.dumps(hook_in), capture_output=True,
+                                       text=True, timeout=h.get("timeout", 60))
+                else:
+                    r = subprocess.run(h["command"], shell=True, input=json.dumps(hook_in), capture_output=True,
+                                       text=True, timeout=h.get("timeout", 60))
+            except (OSError, subprocess.TimeoutExpired) as e:
+                if block:
+                    return "hook failed: %s" % e
+                continue
             if r.returncode == 2:
                 return r.stderr
+            if r.returncode != 0:
+                if block:
+                    return "hook failed with code %d" % r.returncode
+                continue
             if r.stdout.strip():
                 o = json.loads(r.stdout).get("hookSpecificOutput", {})
                 if o.get("permissionDecision") == "deny":
@@ -97,8 +130,13 @@ for line in sys.stdin:
     if "spawn" in cue:
         loop = "import time\nwhile True:\n    open(%r, 'a').write('x\\n')\n    time.sleep(0.05)\n"
         quiet = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL}
-        kids = [subprocess.Popen([sys.executable, "-c", loop % "session.ticks"], start_new_session=True, **quiet),
-                subprocess.Popen([sys.executable, "-c", loop % "group.ticks"], process_group=0, **quiet)]
+        if os.name == "nt":
+            # No sessions or setpgid there: a tool without a console, and one in a new process group.
+            apart = [{"creationflags": subprocess.DETACHED_PROCESS}, {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}]
+        else:
+            apart = [{"start_new_session": True}, {"process_group": 0}]
+        kids = [subprocess.Popen([sys.executable, "-c", loop % "session.ticks"], **apart[0], **quiet),
+                subprocess.Popen([sys.executable, "-c", loop % "group.ticks"], **apart[1], **quiet)]
         open("children.txt", "w").write(" ".join(str(k.pid) for k in kids))
         open("fake.pid", "w").write(str(os.getpid()))
         time.sleep(600)
@@ -106,7 +144,15 @@ for line in sys.stdin:
         # A tool that daemonizes: the shell starts a ticker in the background and exits, so the
         # ticker's parent is pid 1 and it is no longer below the CLI.
         loop = "import time\nwhile True:\n    open('orphan.ticks', 'a').write('x\\n')\n    time.sleep(0.05)\n"
-        subprocess.run(["/bin/sh", "-c", "%s -c \"$0\" >/dev/null 2>&1 </dev/null & echo $! > orphan.txt" % sys.executable, loop], check=True)
+        if os.name == "nt":
+            # The same without a shell: a helper starts the ticker without a console and exits.
+            helper = ("import subprocess, sys\n"
+                      "p = subprocess.Popen([sys.executable, '-c', sys.argv[1]], creationflags=subprocess.DETACHED_PROCESS,\n"
+                      "                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+                      "open('orphan.txt', 'w').write(str(p.pid))\n")
+            subprocess.run([sys.executable, "-c", helper, loop], check=True)
+        else:
+            subprocess.run(["/bin/sh", "-c", "%s -c \"$0\" >/dev/null 2>&1 </dev/null & echo $! > orphan.txt" % sys.executable, loop], check=True)
         open("fake.pid", "w").write(str(os.getpid()))
         time.sleep(600)
     if "hang" in cue:
@@ -120,7 +166,8 @@ for line in sys.stdin:
             time.sleep(0.1)
     if "chatrun" in cue:
         sock = os.environ.get("CHAT_RUN_SOCKET", "")
-        mode = oct(os.stat(sock).st_mode & 0o777) if sock and os.path.exists(sock) else "none"
+        # Windows: the socket is a named pipe, and looking at one would use up a connection.
+        mode = "pipe" if os.name == "nt" else oct(os.stat(sock).st_mode & 0o777) if sock and os.path.exists(sock) else "none"
         open("ops.json", "w").write(json.dumps([{"op": "set", "id": "note", "props": {"text": "key tm_fakefakefakefakefakefake01"}}]))
         r = subprocess.run(["chat-run", "card", "patch", "--message", "M", "--base-rev", "1", "--ops", "ops.json", "--cause", "EV1"],
                            capture_output=True, text=True)

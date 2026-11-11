@@ -1,16 +1,18 @@
 //! The whole daemon against an in-process mock server and a fake Claude CLI:
 //! hello, assign, events, follow-up input, reject, cancel, reconnect with replay, session upload.
 //!
-//! Unix only: the fake CLIs are Python scripts started by their `#!` line, and the cases use
-//! `/bin/sh`, signals and file modes. Windows has `tests/process_tree.rs`.
+//! The fake CLIs are Python scripts. Unix starts them by their `#!` line. Windows needs the
+//! `fake-cli` launcher of the `test-fakes` feature (`cargo test --features test-fakes`) and
+//! `python` on PATH; without the feature this file has no tests there.
 
-#![cfg(unix)]
+#![cfg(any(unix, feature = "test-fakes"))]
 
 use daemon::config::Config;
 use daemon::proto::*;
 use futures_util::{SinkExt, StreamExt};
 use std::collections::BTreeMap;
 use std::io::Read;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -22,7 +24,105 @@ use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 
+#[path = "fake/model.rs"]
+mod model;
+
 const TOKEN: &str = "tm_test_token_value";
+
+/// The `[runtimes.<name>]` section of a fake CLI script (`fake_claude.py`, `fake_codex.py`):
+/// the script itself on Unix; on Windows the `fake-cli` launcher with the script in
+/// `FAKE_CLI_SCRIPT`. `env` is more of the runtime's `env` table (`K = 'v'`, or empty).
+fn fake_runtime(name: &str, kind: &str, script: &str, env: &str) -> String {
+    let script = format!("{}/tests/fake/{script}", env!("CARGO_MANIFEST_DIR"));
+    #[cfg(windows)]
+    let (command, env) = (
+        env!("CARGO_BIN_EXE_fake-cli").to_string(),
+        format!(
+            "FAKE_CLI_SCRIPT = '{script}'{}{env}",
+            if env.is_empty() { "" } else { ", " }
+        ),
+    );
+    #[cfg(not(windows))]
+    let command = script;
+    format!("[runtimes.{name}]\nkind = \"{kind}\"\ncommand = '{command}'\nenv = {{ {env} }}\n")
+}
+
+/// True while the process `pid` is there.
+fn alive(pid: i32) -> bool {
+    #[cfg(unix)]
+    // SAFETY: probing a pid with signal 0.
+    unsafe {
+        libc::kill(pid, 0) == 0
+    }
+    #[cfg(windows)]
+    daemon::winjob::pid_alive(pid as u32)
+}
+
+/// True when the process `pid` is stopped: state `T` on Unix; on Windows every one of its
+/// threads is suspended (a suspend that is taken back at once tells the count before it).
+fn stopped(pid: i32) -> bool {
+    #[cfg(unix)]
+    {
+        let o = std::process::Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&o.stdout).contains('T')
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+        use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
+        };
+        use windows_sys::Win32::System::Threading::{
+            OpenThread, ResumeThread, SuspendThread, THREAD_SUSPEND_RESUME,
+        };
+        let (mut threads, mut running) = (0, 0);
+        // SAFETY: a snapshot of the system's threads, read entry by entry into a struct of the
+        // size the call is told; each thread handle is closed again.
+        unsafe {
+            let snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+            assert_ne!(snap, INVALID_HANDLE_VALUE);
+            let mut e: THREADENTRY32 = std::mem::zeroed();
+            e.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+            let mut more = Thread32First(snap, &mut e) != 0;
+            while more {
+                if e.th32OwnerProcessID == pid as u32 {
+                    let t = OpenThread(THREAD_SUSPEND_RESUME, 0, e.th32ThreadID);
+                    if !t.is_null() {
+                        threads += 1;
+                        let before = SuspendThread(t);
+                        if before != u32::MAX {
+                            ResumeThread(t);
+                            if before == 0 {
+                                running += 1;
+                            }
+                        }
+                        CloseHandle(t);
+                    }
+                }
+                more = Thread32Next(snap, &mut e) != 0;
+            }
+            CloseHandle(snap);
+        }
+        threads > 0 && running == 0
+    }
+}
+
+/// Ends a process the fake CLI started, whatever state it is in.
+fn kill(pid: i32) {
+    #[cfg(unix)]
+    // SAFETY: plain syscalls on a pid that this test's fake CLI started.
+    unsafe {
+        libc::kill(pid, libc::SIGCONT);
+        libc::kill(pid, libc::SIGKILL);
+    }
+    #[cfg(windows)]
+    let _ = std::process::Command::new("taskkill")
+        .args(["/F", "/PID", &pid.to_string()])
+        .output();
+}
 
 #[derive(Debug, Clone)]
 struct Put {
@@ -271,32 +371,38 @@ fn write_config(dir: &Path, url: &str) -> Config {
 fn write_config_with(dir: &Path, url: &str, extra: &str) -> Config {
     let token = dir.join("token");
     std::fs::write(&token, format!("{TOKEN}\n")).unwrap();
-    std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600)).unwrap();
-    let fake = format!("{}/tests/fake/fake_claude.py", env!("CARGO_MANIFEST_DIR"));
+    // Only this user may read it: mode 600, on Windows an access list of its own.
+    daemon::sys::set_mode(&token, 0o600).unwrap();
+    let fake = fake_runtime(
+        "fake",
+        "claude",
+        "fake_claude.py",
+        &format!("CLAUDE_CONFIG_DIR = '{}'", dir.join("claude").display()),
+    );
     let text = format!(
         r#"
 server_url = "{url}"
-token_file = "{token}"
+token_file = '{token}'
 name = "test-mac"
 labels = ["test"]
-work_root = "{work}"
+work_root = '{work}'
 max_parallel_runs = 3
 min_free_gb = 0
 heartbeat_secs = 1
 takeover_url = "vnc://mac-mini.tailnet"
 
-[runtimes.fake]
-kind = "claude"
-command = "{fake}"
-env = {{ CLAUDE_CONFIG_DIR = "{claude}" }}
+{fake}
 {extra}
 "#,
         token = token.display(),
         work = dir.join("work").display(),
-        claude = dir.join("claude").display(),
     );
     let cfg = Config::parse(&text).unwrap();
     assert!(cfg.problems().is_empty(), "{:?}", cfg.problems());
+    // The same config as a file, for a daemon started as a process of its own.
+    let file = dir.join("daemon.toml");
+    std::fs::write(&file, &text).unwrap();
+    daemon::sys::set_mode(&file, 0o600).unwrap();
     cfg
 }
 
@@ -495,17 +601,8 @@ async fn daemon_end_to_end() {
     })
     .await;
     assert!(matches!(start[0], Up::RunAccept { .. }));
-    for _ in 0..200 {
-        if pidfile.exists() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    let pid: i32 = std::fs::read_to_string(&pidfile)
-        .unwrap()
-        .trim()
-        .parse()
-        .unwrap();
+    // The file can be there before its content.
+    let pid: i32 = wait_file(&pidfile).await.trim().parse().unwrap();
     send(
         &mut ws,
         &Down::RunCancel {
@@ -516,8 +613,7 @@ async fn daemon_end_to_end() {
     .await;
     let fr = collect(&mut ws, "r3", true, |f| matches!(f, Up::RunDone(_))).await;
     assert_eq!(done(&fr).status, "cancelled");
-    // SAFETY: probing a pid with signal 0.
-    assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "fake CLI still alive");
+    assert!(!alive(pid), "fake CLI still alive");
 
     // 4. Link drop: the run keeps going, then the daemon replays from the server's ackedSeq.
     send(&mut ws, &assign("r4", "fake", "slow replay", None)).await;
@@ -607,17 +703,8 @@ async fn unknown_run_after_reconnect_is_cancelled() {
     })
     .await;
     let pidfile = tmp.path().join("work/runs/r9/work/fake.pid");
-    for _ in 0..200 {
-        if pidfile.exists() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    let pid: i32 = std::fs::read_to_string(&pidfile)
-        .unwrap()
-        .trim()
-        .parse()
-        .unwrap();
+    // The file can be there before its content.
+    let pid: i32 = wait_file(&pidfile).await.trim().parse().unwrap();
     drop(ws);
     let (mut ws, _) = tokio::time::timeout(Duration::from_secs(40), m.conns.recv())
         .await
@@ -631,8 +718,7 @@ async fn unknown_run_after_reconnect_is_cancelled() {
     send(&mut ws, &welcome(vec![])).await;
     let mut gone = false;
     for _ in 0..100 {
-        // SAFETY: probing a pid with signal 0.
-        if unsafe { libc::kill(pid, 0) } != 0 {
+        if !alive(pid) {
             gone = true;
             break;
         }
@@ -653,26 +739,29 @@ async fn unknown_run_after_reconnect_is_cancelled() {
 /// ack of run.done before it exits.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn restart_recovers_unfinished_runs() {
+    #[cfg(unix)]
     use std::os::unix::process::CommandExt;
     let tmp = tempfile::tempdir().unwrap();
     let mut m = mock().await;
     let cfg = write_config(tmp.path(), &m.url);
 
     // What the crashed daemon left: a CLI in its own process group, run.json, two frames.
+    // Windows: no CLI can be left. It was in a Job Object whose only handle the daemon held,
+    // so it ended with the daemon (`tests/process_tree.rs` has the case); the run folder is
+    // all there is.
+    #[cfg(unix)]
     let mut left = std::process::Command::new("/bin/sleep")
         .arg("600")
         .process_group(0)
         .spawn()
         .unwrap();
-    let pid = left.id() as i32;
     let dir = tmp.path().join("work/runs/rc1");
     std::fs::create_dir_all(dir.join("work")).unwrap();
-    std::fs::write(
-        dir.join("run.json"),
-        serde_json::json!({ "runId": "rc1", "startedAt": now_ms() - 5000, "pgid": pid, "program": "/bin/sleep" })
-            .to_string(),
-    )
-    .unwrap();
+    #[cfg(unix)]
+    let meta = serde_json::json!({ "runId": "rc1", "startedAt": now_ms() - 5000, "pgid": left.id(), "program": "/bin/sleep" });
+    #[cfg(windows)]
+    let meta = serde_json::json!({ "runId": "rc1", "startedAt": now_ms() - 5000 });
+    std::fs::write(dir.join("run.json"), meta.to_string()).unwrap();
     let frame = |seq: u64, event: RunEvent| {
         serde_json::to_string(&Up::RunEvent {
             run_id: "rc1".into(),
@@ -720,15 +809,18 @@ async fn restart_recovers_unfinished_runs() {
         f => panic!("{f:?}"),
     }
     // The leftover CLI is stopped.
-    let mut stopped = false;
-    for _ in 0..100 {
-        if left.try_wait().unwrap().is_some() {
-            stopped = true;
-            break;
+    #[cfg(unix)]
+    {
+        let mut stopped = false;
+        for _ in 0..100 {
+            if left.try_wait().unwrap().is_some() {
+                stopped = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(stopped, "leftover CLI still runs");
     }
-    assert!(stopped, "leftover CLI still runs");
 
     send(
         &mut ws,
@@ -784,14 +876,6 @@ async fn wait_file(p: &Path) -> String {
     panic!("{} never written", p.display());
 }
 
-fn proc_state(pid: i32) -> String {
-    let o = std::process::Command::new("ps")
-        .args(["-o", "stat=", "-p", &pid.to_string()])
-        .output()
-        .unwrap();
-    String::from_utf8_lossy(&o.stdout).trim().to_string()
-}
-
 fn is_paused(f: &Up, want: bool) -> bool {
     matches!(f, Up::RunEvent { event: RunEvent::Paused { paused, .. }, .. } if *paused == want)
 }
@@ -808,7 +892,11 @@ async fn pause_resume_answer_acceptance_and_aside() {
     let cfg = write_config_with(
         tmp.path(),
         &m.url,
-        "[runtimes.sh]\nkind = \"pty\"\ncommand = \"/bin/sh\"\nargs = [\"-c\", \"{prompt}\"]\n",
+        if cfg!(windows) {
+            "[runtimes.sh]\nkind = \"pty\"\ncommand = \"cmd.exe\"\nargs = [\"/c\", \"{prompt}\"]\n"
+        } else {
+            "[runtimes.sh]\nkind = \"pty\"\ncommand = \"/bin/sh\"\nargs = [\"-c\", \"{prompt}\"]\n"
+        },
     );
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
     let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
@@ -877,11 +965,7 @@ async fn pause_resume_answer_acceptance_and_aside() {
     frames.extend(collect(&mut ws, "p1", true, |f| is_paused(f, true)).await);
     assert!(frames.iter().any(|f| matches!(f,
         Up::RunEvent { event: RunEvent::Paused { paused: true, by: Some(b) }, .. } if b == "u1")));
-    assert!(
-        proc_state(pid).contains('T'),
-        "CLI not stopped: {}",
-        proc_state(pid)
-    );
+    assert!(stopped(pid), "CLI not stopped");
     // A second pause while stopped (its resume was lost) is reported again, so the server
     // can clear pausedBy on the next `paused: false` (SB-16).
     send(
@@ -895,7 +979,7 @@ async fn pause_resume_answer_acceptance_and_aside() {
     let again = collect(&mut ws, "p1", true, |f| is_paused(f, true)).await;
     assert!(again.iter().any(|f| matches!(f,
         Up::RunEvent { event: RunEvent::Paused { paused: true, by: Some(b) }, .. } if b == "u2")));
-    assert!(proc_state(pid).contains('T'), "CLI not stopped");
+    assert!(stopped(pid), "CLI not stopped");
     frames.extend(again);
     let ticks = std::fs::read_to_string(dir.join("ticks.txt")).unwrap();
     tokio::time::sleep(Duration::from_millis(600)).await;
@@ -913,7 +997,7 @@ async fn pause_resume_answer_acceptance_and_aside() {
     )
     .await;
     frames.extend(collect(&mut ws, "p1", true, |f| is_paused(f, false)).await);
-    assert!(!proc_state(pid).contains('T'), "CLI still stopped");
+    assert!(!stopped(pid), "CLI still stopped");
     let mut inputs = BTreeMap::new();
     inputs.insert("choice".to_string(), serde_json::json!("B"));
     send(
@@ -1010,7 +1094,7 @@ async fn pause_resume_answer_acceptance_and_aside() {
     )
     .await;
     collect(&mut ws, "p2", true, |f| is_paused(f, true)).await;
-    assert!(proc_state(pid).contains('T'));
+    assert!(stopped(pid));
     send(
         &mut ws,
         &Down::RunCancel {
@@ -1021,8 +1105,7 @@ async fn pause_resume_answer_acceptance_and_aside() {
     .await;
     let fr = collect(&mut ws, "p2", true, |f| matches!(f, Up::RunDone(_))).await;
     assert_eq!(done(&fr).status, "cancelled");
-    // SAFETY: probing a pid with signal 0.
-    assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "fake CLI still alive");
+    assert!(!alive(pid), "fake CLI still alive");
 
     // 3. Aside: Claude Code in plan mode with only the read tools, no MCP servers and no
     // settings files; no PTY aside; no unknown kinds.
@@ -1071,7 +1154,9 @@ async fn pause_resume_answer_acceptance_and_aside() {
     .unwrap();
     assert_eq!(write["name"], "EACCES", "{write}");
     let work = tmp.path().join("work/runs/s1/work");
+    #[cfg(unix)]
     assert!(std::fs::metadata(&work).unwrap().permissions().mode() & 0o200 != 0);
+    std::fs::write(work.join("after-the-run.txt"), "x").expect("writable again");
     // The settings file (auth values) is gone after the run and never on the command line.
     let settings = argv.iter().position(|a| a == "--settings").unwrap();
     assert!(!Path::new(&argv[settings + 1]).exists());
@@ -1103,22 +1188,13 @@ async fn pause_resume_answer_acceptance_and_aside() {
         .unwrap();
 }
 
-fn alive(pid: i32) -> bool {
-    // SAFETY: probing a pid with signal 0.
-    unsafe { libc::kill(pid, 0) == 0 }
-}
-
 /// Kills the fake CLI's tool children when a test ends, so a failed assertion leaks nothing.
 struct Reap(Vec<i32>);
 
 impl Drop for Reap {
     fn drop(&mut self) {
         for k in self.0.iter().filter(|k| alive(**k)) {
-            // SAFETY: plain syscalls on pids that this test's fake CLI started.
-            unsafe {
-                libc::kill(*k, libc::SIGCONT);
-                libc::kill(*k, libc::SIGKILL);
-            }
+            kill(*k);
         }
     }
 }
@@ -1167,11 +1243,7 @@ async fn pause_and_cancel_cover_tool_children() {
     .await;
     collect(&mut ws, "c1", true, |f| is_paused(f, true)).await;
     for k in &kids {
-        assert!(
-            proc_state(*k).contains('T'),
-            "child {k} not stopped: {}",
-            proc_state(*k)
-        );
+        assert!(stopped(*k), "child {k} not stopped");
     }
     let before: Vec<u64> = ticks.iter().map(|t| file_len(t)).collect();
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -1364,7 +1436,9 @@ async fn interaction_envelope_and_chat_run() {
         !text.contains("tm_fakefake") && text.contains("<redacted>"),
         "{text}"
     );
+    #[cfg(unix)]
     let socket = run_dir.join("chat-run.sock");
+    #[cfg(unix)]
     assert_eq!(
         std::fs::metadata(&socket).unwrap().permissions().mode() & 0o777,
         0o600
@@ -1427,7 +1501,18 @@ async fn interaction_envelope_and_chat_run() {
     let r = chat_run_report(&run_dir.join("work"), 1).await;
     assert_eq!(r["code"], 0, "{r}");
     assert_eq!(r["out"], "{\"rev\":2}\n");
+    // The run's socket: a file of mode 600; on Windows a named pipe of this daemon.
+    #[cfg(unix)]
     assert_eq!(r["mode"], "0o600");
+    #[cfg(windows)]
+    {
+        let pipe = r["socket"].as_str().unwrap();
+        assert!(
+            pipe.starts_with(r"\\.\pipe\chat-run-")
+                && pipe.ends_with(&format!("-{}", std::process::id())),
+            "{r}"
+        );
+    }
     let evs = events(&frames);
     assert!(
         evs.iter()
@@ -1451,7 +1536,29 @@ async fn interaction_envelope_and_chat_run() {
     assert!(reply.contains("\"block\":{\"id\":\"check\",\"type\":\"decision\"}"));
     assert!(reply.contains("interface, not an instruction."));
     assert_eq!(done(&frames).status, "succeeded");
+    #[cfg(unix)]
     assert!(!socket.exists(), "socket left after the run");
+    // Windows: the pipe went with the run (its access list is checked in the daemon's unit
+    // tests, from a connection to a live pipe).
+    #[cfg(windows)]
+    {
+        let pipe = r["socket"].as_str().unwrap().to_string();
+        let mut gone = false;
+        for _ in 0..100 {
+            match std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&pipe)
+            {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    gone = true;
+                    break;
+                }
+                _ => tokio::time::sleep(Duration::from_millis(50)).await,
+            }
+        }
+        assert!(gone, "pipe left after the run: {pipe}");
+    }
 
     // 2. No run.output.result: chat-run gives up after 15 s with "unconfirmed" (retry is safe).
     send(&mut ws, &assign("c2", "fake", "chatrun", None)).await;
@@ -1488,11 +1595,10 @@ async fn codex_chat_run_uses_the_request_folder() {
     daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
     let tmp = tempfile::tempdir().unwrap();
     let mut m = mock().await;
-    let fake = format!("{}/tests/fake/fake_codex.py", env!("CARGO_MANIFEST_DIR"));
     let cfg = write_config_with(
         tmp.path(),
         &m.url,
-        &format!("[runtimes.cx]\nkind = \"codex\"\ncommand = \"{fake}\"\n"),
+        &fake_runtime("cx", "codex", "fake_codex.py", ""),
     );
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
     let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
@@ -1542,6 +1648,9 @@ async fn codex_chat_run_uses_the_request_folder() {
         Path::new(r["dir"].as_str().unwrap()),
         work.join(".chat-run-x1")
     );
+    // Private to this user: mode 700; on Windows the folder inherits the run folder's access
+    // list (the daemon's unit tests check it).
+    #[cfg(unix)]
     assert_eq!(r["mode"], "0o700");
     assert_eq!(r["files"], serde_json::json!([".gitignore"]));
     collect(&mut ws, "x1", true, |f| matches!(f, Up::RunDone(_))).await;
@@ -1792,11 +1901,7 @@ async fn pause_and_cancel_cover_orphaned_tools() {
     )
     .await;
     collect(&mut ws, "o1", true, |f| is_paused(f, true)).await;
-    assert!(
-        proc_state(orphan).contains('T'),
-        "orphan not stopped: {}",
-        proc_state(orphan)
-    );
+    assert!(stopped(orphan), "orphan not stopped");
     let before = file_len(&ticks);
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(file_len(&ticks), before, "a stopped orphan made progress");
@@ -1971,4 +2076,563 @@ async fn gated_commands_wait_for_a_person() {
         .unwrap()
         .unwrap()
         .unwrap();
+}
+
+/// The real `claude` of this machine, or None (skip) when it has none; a failure instead when
+/// `TC_REQUIRE_REAL_CLI` is set (CI installs the CLI and sets it).
+fn real_claude() -> Option<PathBuf> {
+    let found = daemon::health::which("claude");
+    if found.is_none() {
+        assert!(
+            std::env::var_os("TC_REQUIRE_REAL_CLI").is_none(),
+            "TC_REQUIRE_REAL_CLI is set and claude is not on PATH"
+        );
+        eprintln!("skipped: claude is not on PATH");
+    }
+    found
+}
+
+/// The `[runtimes.real]` section: the real CLI with the fake model, its config in
+/// `<dir>/real-claude`. Windows: with the PowerShell tool, the shell tool of a machine
+/// without Git Bash.
+fn real_runtime(dir: &Path, claude: &Path, model: &model::Model) -> String {
+    let mut env: Vec<String> = model
+        .env()
+        .into_iter()
+        .map(|(k, v)| format!("{k} = '{v}'"))
+        .collect();
+    env.push(format!(
+        "CLAUDE_CONFIG_DIR = '{}'",
+        dir.join("real-claude").display()
+    ));
+    if cfg!(windows) {
+        env.push("CLAUDE_CODE_USE_POWERSHELL_TOOL = '1'".into());
+    }
+    format!(
+        "[runtimes.real]\nkind = \"claude\"\ncommand = '{}'\nenv = {{ {} }}\n",
+        claude.display(),
+        env.join(", ")
+    )
+}
+
+/// A folder by its path (what `tempfile::TempDir::path` gives).
+struct Dir(PathBuf);
+
+impl Dir {
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+/// The server's default patterns (`DEFAULT_GATE_PATTERNS` of packages/protocol), as the
+/// server sends them in `run.assign.gates`.
+fn default_gates() -> Vec<RunGate> {
+    let src = include_str!("../../../packages/protocol/src/settings.ts");
+    let body = &src[src.find("export const DEFAULT_GATE_PATTERNS").unwrap()..];
+    let body = &body[..body.find("\n};").unwrap()];
+    let mut out: Vec<RunGate> = vec![];
+    for line in body.lines().skip(1) {
+        let t = line.trim();
+        if let Some(kind) = t.strip_suffix(": [") {
+            out.push(RunGate {
+                kind: kind.into(),
+                patterns: vec![],
+            });
+        } else if t.starts_with('"') {
+            let p: String = serde_json::from_str(t.trim_end_matches(',')).unwrap();
+            out.last_mut().unwrap().patterns.push(p);
+        }
+    }
+    assert_eq!(out.len(), 5);
+    out
+}
+
+/// The same with the real Claude Code CLI of this machine and a fake model
+/// (`tests/fake/model.rs`): the daemon reports the CLI as gated, the model calls the Bash tool,
+/// the CLI starts the hook, the hook asks the daemon, the daemon asks a person. Declined: the
+/// command does not run and the model reads why. Approved: it runs. Skipped when `claude` is
+/// not on PATH, unless `TC_REQUIRE_REAL_CLI` is set (CI).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_real_cli_waits_for_a_person_at_a_gated_command() {
+    let Some(claude) = real_claude() else { return };
+    daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
+    let tmp = tempfile::tempdir().unwrap();
+    // Every path of the run (its folder, the hook in it, the CLI's config) has spaces, text
+    // outside ASCII and the characters shells give a meaning.
+    let base = tmp.path().join("运行 dir &()^%!");
+    std::fs::create_dir_all(base.join("real-claude")).unwrap();
+    // The user turned hooks off in their own settings: the run's settings turn them on again.
+    std::fs::write(
+        base.join("real-claude").join("settings.json"),
+        r#"{"disableAllHooks": true}"#,
+    )
+    .unwrap();
+    let mut m = mock().await;
+    let model = model::Model::start().await;
+    let cfg = write_config_with(&base, &m.url, &real_runtime(&base, &claude, &model));
+    let tmp = Dir(base);
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    match next(&mut ws).await {
+        Up::Hello { clis, .. } => {
+            let real = clis.iter().find(|c| c.runtime == "real").expect("real");
+            assert!(real.available);
+            let version = real.version.clone().expect("the CLI says its version");
+            assert!(version.contains("Claude Code"), "{version}");
+            assert_eq!(real.gates, Some(true), "{version} is gated");
+        }
+        f => panic!("{f:?}"),
+    }
+    send(&mut ws, &welcome(vec![])).await;
+    let gated = |run: &str, marker: &str| {
+        let mut a = assign(
+            run,
+            "real",
+            &format!("Run the tool.\nTOOL Bash echo {marker}"),
+            None,
+        );
+        if let Down::RunAssign(r) = &mut a {
+            r.gates = Some(vec![RunGate {
+                kind: "mergeMain".into(),
+                patterns: vec!["gated-marker".into()],
+            }]);
+        }
+        a
+    };
+    let stderr = |run: &str| {
+        std::fs::read_to_string(tmp.path().join(format!("work/runs/{run}/stderr.log")))
+            .unwrap_or_default()
+    };
+
+    // 1. Declined: the command does not run and the model reads why.
+    send(&mut ws, &gated("rg1", "gated-marker-declined")).await;
+    let fr = collect(&mut ws, "rg1", true, is_request).await;
+    let (id, kind, command) = gate_request(&fr);
+    assert_eq!(kind.as_deref(), Some("mergeMain"));
+    assert_eq!(command.as_deref(), Some("echo gated-marker-declined"));
+    send(&mut ws, &approval("rg1", &id, "deny", None)).await;
+    let fr = collect(&mut ws, "rg1", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "succeeded", "{}", stderr("rg1"));
+    let results = model.tool_results();
+    assert_eq!(results.len(), 1, "{results:?}");
+    assert!(results[0].0, "an error result: {results:?}");
+    assert!(
+        results[0].1.contains("a person declined it"),
+        "the model reads why: {results:?}"
+    );
+    // The model's words after the result carry it, not the command's output.
+    assert!(
+        !done(&fr)
+            .result_text
+            .unwrap_or_default()
+            .contains("\ngated-marker-declined"),
+        "the command ran"
+    );
+
+    // 2. Approved: the command runs.
+    send(&mut ws, &gated("rg2", "gated-marker-approved")).await;
+    let fr = collect(&mut ws, "rg2", true, is_request).await;
+    let (id, _, _) = gate_request(&fr);
+    send(&mut ws, &approval("rg2", &id, "approve", None)).await;
+    let fr = collect(&mut ws, "rg2", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "succeeded", "{}", stderr("rg2"));
+    let results = model.tool_results();
+    assert!(
+        results
+            .iter()
+            .any(|(is_error, text)| !is_error && text.contains("gated-marker-approved")),
+        "{results:?}"
+    );
+
+    // 3. A command no gate names never asks.
+    send(&mut ws, &gated("rg3", "plain-marker")).await;
+    let fr = collect(&mut ws, "rg3", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert!(!fr.iter().any(is_request));
+    assert!(
+        model
+            .tool_results()
+            .iter()
+            .any(|(is_error, text)| !is_error && text.contains("plain-marker"))
+    );
+
+    // 4. The server's default patterns and the way commands are spelled on Windows: with an
+    // extension, a folder, quotes; PowerShell's and cmd's own words for deleting. Each is
+    // stopped as its kind (and declined: none of them runs). On Windows the model calls the
+    // PowerShell tool, elsewhere Bash: the hook sees the same line.
+    let tool = if cfg!(windows) { "PowerShell" } else { "Bash" };
+    let spellings = [
+        ("mergeMain", "gh.exe pr merge 5"),
+        (
+            "mergeMain",
+            r#"& "C:\Program Files\GitHub CLI\gh.exe" pr merge 5"#,
+        ),
+        ("mergeMain", "git.exe push origin main"),
+        ("deployProd", "wrangler.cmd deploy --env production"),
+        ("prodConfig", "fly.exe secrets set A=1"),
+        ("deleteData", r"Remove-Item -Recurse -Force C:\"),
+        ("deleteData", r"cmd /c rd /s /q C:\"),
+        ("externalPublish", "npm.cmd publish"),
+    ];
+    for (i, (want, command)) in spellings.iter().enumerate() {
+        let run = format!("rw{i}");
+        let mut a = assign(
+            &run,
+            "real",
+            &format!("Run the tool.\nTOOL {tool} {command}"),
+            None,
+        );
+        if let Down::RunAssign(r) = &mut a {
+            r.gates = Some(default_gates());
+        }
+        send(&mut ws, &a).await;
+        let fr = collect(&mut ws, &run, true, |f| {
+            is_request(f) || matches!(f, Up::RunDone(_))
+        })
+        .await;
+        assert!(
+            fr.last().is_some_and(is_request),
+            "{command} was not stopped: {}",
+            stderr(&run)
+        );
+        let (id, kind, asked) = gate_request(&fr);
+        assert_eq!(kind.as_deref(), Some(*want), "{command}");
+        assert_eq!(asked.as_deref(), Some(*command));
+        send(&mut ws, &approval(&run, &id, "deny", None)).await;
+        let fr = collect(&mut ws, &run, true, |f| matches!(f, Up::RunDone(_))).await;
+        assert_eq!(done(&fr).status, "succeeded", "{}", stderr(&run));
+    }
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+/// Managed settings that allow only managed hooks drop the run's hook, and nothing in the
+/// run's own settings can bring it back. A gated run then never starts: the CLI does not run
+/// the start-up hook, so the daemon gives it no prompt and the run fails with the reason.
+///
+/// Needs such managed settings on this machine, so it runs only where `TC_MANAGED_HOOKS_ONLY`
+/// is set: CI writes the file (`/etc/claude-code/managed-settings.json`, on Windows
+/// `C:\Program Files\ClaudeCode\managed-settings.json`) around this one test.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cli_whose_hooks_are_managed_only_never_starts_a_gated_run() {
+    if std::env::var_os("TC_MANAGED_HOOKS_ONLY").is_none() {
+        eprintln!("skipped: TC_MANAGED_HOOKS_ONLY is not set");
+        return;
+    }
+    let claude = daemon::health::which("claude").expect("claude on PATH");
+    daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let model = model::Model::start().await;
+    let cfg = write_config_with(
+        tmp.path(),
+        &m.url,
+        &real_runtime(tmp.path(), &claude, &model),
+    );
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
+    send(&mut ws, &welcome(vec![])).await;
+
+    let tool = if cfg!(windows) { "PowerShell" } else { "Bash" };
+    let mut a = assign(
+        "mh1",
+        "real",
+        &format!("Run the tool.\nTOOL {tool} echo gated-marker-managed"),
+        None,
+    );
+    if let Down::RunAssign(r) = &mut a {
+        r.gates = Some(vec![RunGate {
+            kind: "mergeMain".into(),
+            patterns: vec!["gated-marker".into()],
+        }]);
+    }
+    send(&mut ws, &a).await;
+    let mut frames = vec![];
+    let fr = tokio::time::timeout(Duration::from_secs(120), async {
+        loop {
+            let f = next(&mut ws).await;
+            let end = matches!(&f, Up::RunDone(d) if d.run_id == "mh1");
+            if let Some(seq) = f.seq() {
+                send(
+                    &mut ws,
+                    &Down::Ack {
+                        run_id: "mh1".into(),
+                        seq,
+                    },
+                )
+                .await;
+            }
+            frames.push(f);
+            if end {
+                break;
+            }
+        }
+        frames
+    })
+    .await
+    .expect("the run ended");
+    let d = done(&fr);
+    assert_eq!(d.status, "failed", "{d:?}");
+    assert!(
+        d.error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("the approval hook did not start"),
+        "{d:?}"
+    );
+    assert!(!fr.iter().any(is_request), "nobody was asked");
+    // The model was never given the prompt, so no command ran.
+    assert!(
+        model.tool_results().is_empty(),
+        "{:?}",
+        model.tool_results()
+    );
+    assert!(
+        !model
+            .requests()
+            .iter()
+            .any(|r| r["messages"].to_string().contains("gated-marker-managed")),
+        "the prompt reached the model"
+    );
+
+    // A run without gates still works on this machine.
+    send(&mut ws, &assign("mh2", "real", "say ok", None)).await;
+    let fr = collect(&mut ws, "mh2", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "succeeded");
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+/// The same rule with the fake CLI, on every system and without managed settings: a CLI that
+/// runs none of the run's hooks (`FAKE_HOOKS_OFF`) is given no prompt of a gated run. The run
+/// fails with the reason; the same CLI runs a run without gates.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cli_that_runs_no_hooks_gets_no_gated_prompt() {
+    daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let cfg = write_config_with(
+        tmp.path(),
+        &m.url,
+        &fake_runtime(
+            "nohooks",
+            "claude",
+            "fake_claude.py",
+            &format!(
+                "CLAUDE_CONFIG_DIR = '{}', FAKE_HOOKS_OFF = '1'",
+                tmp.path().join("claude").display()
+            ),
+        ),
+    );
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
+    send(&mut ws, &welcome(vec![])).await;
+
+    let mut a = assign("nh1", "nohooks", "gated", None);
+    if let Down::RunAssign(r) = &mut a {
+        r.gates = Some(vec![RunGate {
+            kind: "mergeMain".into(),
+            patterns: vec![r"\bgh pr merge\b".into()],
+        }]);
+    }
+    send(&mut ws, &a).await;
+    let mut fr = vec![];
+    tokio::time::timeout(Duration::from_secs(120), async {
+        loop {
+            let f = next(&mut ws).await;
+            let end = matches!(&f, Up::RunDone(d) if d.run_id == "nh1");
+            if let Some(seq) = f.seq() {
+                let run_id = "nh1".to_string();
+                send(&mut ws, &Down::Ack { run_id, seq }).await;
+            }
+            fr.push(f);
+            if end {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("the run ended");
+    let d = done(&fr);
+    assert_eq!(d.status, "failed", "{d:?}");
+    assert!(
+        d.error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("the approval hook did not start"),
+        "{d:?}"
+    );
+    assert!(!fr.iter().any(is_request));
+    // The CLI started (it wrote its arguments) and never got the prompt (no command ran).
+    let work = tmp.path().join("work/runs/nh1/work");
+    assert!(work.join("argv.json").is_file());
+    assert!(!work.join("gate-1.json").exists());
+
+    send(&mut ws, &assign("nh2", "nohooks", "hello", None)).await;
+    let fr = collect(&mut ws, "nh2", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "succeeded");
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+/// A machine that slept: every process stops and the clocks go on. Here the daemon is a
+/// process of its own that is frozen for longer than `stall_minutes` (what a closed lid does
+/// to it) while a run is in progress. When it runs again it connects to the server again at
+/// once (the old connection is dead on the server's side), the run is still there and is not
+/// reported as stalled (the CLI was asleep too, not silent), and a cancel still ends it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_machine_that_slept_connects_again_at_once_and_its_run_is_not_stalled() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    write_config(tmp.path(), &m.url);
+    let config = tmp.path().join("daemon.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    assert!(text.contains("heartbeat_secs = 1\n"));
+    std::fs::write(
+        &config,
+        text.replace(
+            "heartbeat_secs = 1\n",
+            "heartbeat_secs = 1\nstall_minutes = 1\n",
+        ),
+    )
+    .unwrap();
+    let log = tmp.path().join("daemon.err");
+    let mut cmd = tokio::process::Command::new(env!("CARGO_BIN_EXE_daemon"));
+    cmd.arg("run")
+        .arg("--config")
+        .arg(&config)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::fs::File::create(&log).unwrap())
+        .kill_on_drop(true);
+    // Frozen and thawed the way each system stops a process: SIGSTOP, or every thread of the
+    // job suspended.
+    #[cfg(unix)]
+    let mut child = cmd.spawn().unwrap();
+    #[cfg(unix)]
+    let freeze = |on: bool| {
+        let pid = child.id().unwrap() as i32;
+        // SAFETY: a signal to the daemon process this test started.
+        unsafe { libc::kill(pid, if on { libc::SIGSTOP } else { libc::SIGCONT }) };
+    };
+    #[cfg(windows)]
+    let (mut child, job) = daemon::winjob::spawn(&mut cmd, false).unwrap();
+    #[cfg(windows)]
+    let freeze = |on: bool| {
+        if on {
+            job.suspend();
+        } else {
+            job.resume();
+        }
+    };
+    let daemon_log = || std::fs::read_to_string(&log).unwrap_or_default();
+
+    let (mut ws, _) = tokio::time::timeout(Duration::from_secs(30), m.conns.recv())
+        .await
+        .unwrap_or_else(|_| panic!("the daemon did not connect: {}", daemon_log()))
+        .unwrap();
+    assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
+    send(&mut ws, &welcome(vec![])).await;
+    send(&mut ws, &assign("z1", "fake", "hang", None)).await;
+    let before = collect(&mut ws, "z1", true, |f| {
+        matches!(
+            f,
+            Up::RunEvent {
+                event: RunEvent::TurnStarted { .. },
+                ..
+            }
+        )
+    })
+    .await;
+    let acked = before.iter().filter_map(Up::seq).max().unwrap_or(0);
+    let pid: i32 = wait_file(&tmp.path().join("work/runs/z1/work/fake.pid"))
+        .await
+        .trim()
+        .parse()
+        .unwrap();
+
+    // Asleep for longer than a silent CLI is given (`stall_minutes = 1`).
+    freeze(true);
+    tokio::time::sleep(Duration::from_secs(66)).await;
+    drop(ws);
+    let woke = std::time::Instant::now();
+    freeze(false);
+
+    // Awake: a new connection, at once, with the run still in it.
+    let (mut ws, _) = tokio::time::timeout(Duration::from_secs(15), m.conns.recv())
+        .await
+        .unwrap_or_else(|_| panic!("no new connection after the sleep: {}", daemon_log()))
+        .unwrap();
+    println!("  connected again {:?} after waking", woke.elapsed());
+    match next(&mut ws).await {
+        Up::Hello { runs, .. } => {
+            assert!(runs.iter().any(|c| c.run_id == "z1" && !c.done), "{runs:?}");
+        }
+        f => panic!("{f:?}"),
+    }
+    assert!(
+        daemon_log().contains("the machine was asleep"),
+        "{}",
+        daemon_log()
+    );
+    send(
+        &mut ws,
+        &welcome(vec![KnownRun {
+            run_id: "z1".into(),
+            acked_seq: acked,
+        }]),
+    )
+    .await;
+    // The run is not called stalled: nothing comes for it (the supervisor looks every 15 s,
+    // and looked when it woke).
+    let stalled = |f: &Up| matches!(f, Up::RunEvent { event: RunEvent::Status { state, .. }, .. } if state == "stalled");
+    let quiet = tokio::time::timeout(
+        Duration::from_secs(20),
+        collect(&mut ws, "z1", true, |f| {
+            stalled(f) || matches!(f, Up::RunDone(_))
+        }),
+    )
+    .await;
+    assert!(quiet.is_err(), "the run after the sleep: {quiet:?}");
+    assert!(alive(pid), "the CLI is still there");
+
+    // The run goes on as before: a cancel ends it.
+    send(
+        &mut ws,
+        &Down::RunCancel {
+            run_id: "z1".into(),
+            reason: None,
+        },
+    )
+    .await;
+    let fr = collect(&mut ws, "z1", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "cancelled");
+    assert!(!fr.iter().any(stalled));
+    let _ = child.start_kill();
+    let _ = child.wait().await;
 }

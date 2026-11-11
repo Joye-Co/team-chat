@@ -7,7 +7,9 @@ crate::copy! {
     DOWNLOADING = "正在下载新版本 {version}… {percent}%",
     WAITING_SENDS = "还有消息正在发出，发完后自动更新",
     INSTALLING = "正在安装新版本，马上重新打开…",
-    MANUAL = "无法自动替换当前的应用，安装盘已在访达中打开。请退出 {product}，把安装盘里的 {product} 拖到“应用程序”文件夹，替换旧版本后再打开。",
+    // When the app cannot replace itself. On a Mac the disk image is open in Finder; elsewhere
+    // the installer is selected in the file manager and running it installs over the old one.
+    MANUAL = crate::copy::per_system("无法自动替换当前的应用，安装盘已在访达中打开。请退出 {product}，把安装盘里的 {product} 拖到“应用程序”文件夹，替换旧版本后再打开。", "无法自动替换当前的应用，安装包已在文件资源管理器中选中。请退出 {product}，双击安装包，装完后再打开。"),
     FAILED_DOWNLOAD = "新版本下载失败",
     FAILED_CHECKSUM = "下载的文件不完整，已删除，请重试",
     FAILED_INSTALL = "新版本安装失败",
@@ -25,7 +27,7 @@ crate::copy! {
     BANNER_DOWNLOADING = "正在下载 {version}",
     BANNER_PERCENT = "{percent}%",
     BANNER_MANUAL = "需要手动安装新版本",
-    BANNER_MANUAL_DETAIL = "安装盘已在访达中打开",
+    BANNER_MANUAL_DETAIL = crate::copy::per_system("安装盘已在访达中打开", "安装包已在文件资源管理器中选中"),
     // --- v14/t4 update ---
     VERSION_TITLE = "版本 {version}",
     // The detail under 版本 {current}: the title already names the current one.
@@ -36,10 +38,10 @@ crate::copy! {
     NOTES_TITLE = "{version} 更新内容",
     NOTES_DESCRIPTION = "这个版本改了什么。",
     NOTES_OK = "好",
-    MANUAL_STEPS = "安装盘已在访达中打开：",
+    MANUAL_STEPS = crate::copy::per_system("安装盘已在访达中打开：", "安装包已在文件资源管理器中选中："),
     MANUAL_STEP_1 = "1. 退出 {product}",
-    MANUAL_STEP_2 = "2. 把安装盘里的 {product} 拖到“应用程序”",
-    MANUAL_STEP_3 = "3. 替换旧版本后再打开",
+    MANUAL_STEP_2 = crate::copy::per_system("2. 把安装盘里的 {product} 拖到“应用程序”", "2. 双击安装包，等它装完"),
+    MANUAL_STEP_3 = crate::copy::per_system("3. 替换旧版本后再打开", "3. 再打开 {product}"),
     READY_TITLE = "{product} {version} 已经下载好了",
     READY_BODY = "当前 {current} → {version}，安装时会重启。",
     PREVIEW_NOTES = "· 消息列表滚动更顺\n· 登录后不再偶尔漏掉新消息\n· 产出页可以按话题筛选",
@@ -52,7 +54,7 @@ crate::copy! {
     CARD_READY = "{version} 已经下载好了",
     CARD_READY_DETAIL = "重启后就是新版本，大约一分钟。",
     CARD_WAITING = "等消息发完再装",
-    CARD_MANUAL_DETAIL = "安装盘已在访达中打开：退出 {product}，把它拖到“应用程序”替换旧版本。",
+    CARD_MANUAL_DETAIL = crate::copy::per_system("安装盘已在访达中打开：退出 {product}，把它拖到“应用程序”替换旧版本。", "安装包已在文件资源管理器中选中：退出 {product}，双击安装包装上新版本。"),
     NOTES_PUBLISHED = "{date}发布 · 你现在用的是 {current}",
     NOTES_CURRENT = "你现在用的是 {current}",
     NOTES_FOOTER = "更新时应用会重新打开，大约一分钟",

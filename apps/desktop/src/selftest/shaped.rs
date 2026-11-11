@@ -318,6 +318,12 @@ impl ChatProvider for Shaped {
     fn update_bot_member(&self, member_id: &str, edit: BotMemberEdit) -> AdminReply<()> {
         self.inner.update_bot_member(member_id, edit)
     }
+    fn upload_member_avatar(&self, member_id: &str, path: PathBuf) -> AdminReply<Member> {
+        self.inner.upload_member_avatar(member_id, path)
+    }
+    fn remove_member_avatar(&self, member_id: &str) -> AdminReply<Member> {
+        self.inner.remove_member_avatar(member_id)
+    }
     fn set_member_character(
         &self,
         member_id: &str,

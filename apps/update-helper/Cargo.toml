@@ -1,0 +1,42 @@
+[package]
+name = "update-helper"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Windows update helper: replaces the installed app after it exits, restarts it, and rolls back when the new version does not start"
+
+[lib]
+name = "update_helper"
+path = "src/lib.rs"
+
+[[bin]]
+name = "update-helper"
+path = "src/main.rs"
+
+[features]
+# Only for the interruption test on a real machine (scripts/test-windows-update.sh): lets
+# UPDATE_HELPER_TEST_PAUSE_AT hold the helper at a step. Never in a build that ships.
+test-pause = []
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+
+# Waiting for the app's process, and the Start menu shortcut with its AppUserModelID.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Storage_EnhancedStorage",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_PropertiesSystem",
+] }
+
+[dev-dependencies]
+tempfile = "3"

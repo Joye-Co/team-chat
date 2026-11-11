@@ -200,12 +200,20 @@ pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("up", PickPrevious, Some(PICK_FILTER_CONTEXT)),
         KeyBinding::new("down", PickNext, Some(PICK_FILTER_CONTEXT)),
-        KeyBinding::new("cmd-enter", PickSubmit, Some(PICK_FILTER_CONTEXT)),
+        KeyBinding::new(
+            crate::secondary!("enter"),
+            PickSubmit,
+            Some(PICK_FILTER_CONTEXT),
+        ),
         KeyBinding::new("up", PickPrevious, Some(PICK_LIST_CONTEXT)),
         KeyBinding::new("down", PickNext, Some(PICK_LIST_CONTEXT)),
         KeyBinding::new("space", PickToggle, Some(PICK_LIST_CONTEXT)),
         KeyBinding::new("enter", PickSubmit, Some(PICK_LIST_CONTEXT)),
-        KeyBinding::new("cmd-enter", PickSubmit, Some(PICK_LIST_CONTEXT)),
+        KeyBinding::new(
+            crate::secondary!("enter"),
+            PickSubmit,
+            Some(PICK_LIST_CONTEXT),
+        ),
     ]);
 }
 
@@ -473,7 +481,7 @@ pub fn window_alert(
     let k = native_colors(cx);
     dialog
         .entrance(crate::ui::native::sheet::SHEET_ENTRANCE)
-        .margin_top(metrics::TOOLBAR_ROW)
+        .margin_top(crate::ui::native::window_chrome::sheet_top())
         .width(metrics::ALERT_WIDTH)
         .close_button(false)
         .keyboard(true)
@@ -1240,6 +1248,9 @@ fn leave(services: &Services, group_id: &str, cx: &mut App) {
             .into_iter()
             .find(|g| g.id != group_id)
             .map(|g| g.id);
+        services
+            .nav
+            .update(cx, |nav, _| nav.forget_gone(|g, _| g != group_id));
         services.nav.update(cx, |nav, cx| match next {
             Some(g) => nav.open_group_chat(g, cx),
             None => {

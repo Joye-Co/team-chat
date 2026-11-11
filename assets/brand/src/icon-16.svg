@@ -1,9 +1,13 @@
-<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-<!-- Pixel-fitted drawing for 16 px only: 1 px brackets on the pixel grid, 4 px shapes, no shadow. -->
-<defs><linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#e9e9ee"/></linearGradient></defs>
-<rect x="1" y="1" width="14" height="14" rx="3.25" fill="url(#b)"/>
-<rect x="1.5" y="1.5" width="13" height="13" rx="2.75" fill="none" stroke="#000" stroke-opacity=".18"/>
-<path d="M2 2h4v1H3v6H2z M14 14h-4v-1h3V7h1z" fill="#2c2c30"/>
-<circle cx="6" cy="6" r="2" fill="#1a84f8"/>
-<rect x="8" y="7" width="4" height="4" rx="1" fill="#56565c"/>
+<svg width="16" height="16" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+<!-- The app icon for 16 px only: a larger body, flat fills, no shadow. Jojo is drawn by jojo-friends (renderSvg, character jojo, emotion calm); do not redraw it by hand. -->
+<rect x="64" y="64" width="896" height="896" rx="208" fill="#f6eedf"/>
+<rect x="96" y="96" width="832" height="832" rx="176" fill="none" stroke="#5e4828" stroke-opacity=".2" stroke-width="64"/>
+<g transform="translate(-90.4 -59.68) scale(0.96)">
+  <path d="M260,380 C260,312 310,262 365,262 C396,262 418,288 422,318 A80,80 0 0 0 582,318 C590,284 622,258 670,258 L875,258 A120,120 0 0 1 995,378 L995,838 A120,120 0 0 1 875,958 L380,958 A120,120 0 0 1 260,838 Z" fill="#2d3272"/>
+  <path d="M418,582 A130,130 0 0 1 548,452 L925,452 A70,70 0 0 1 995,522 L995,838 A120,120 0 0 1 875,958 L498,958 A80,80 0 0 1 418,878 Z" fill="#cff0e6"/>
+  <rect x="555" y="592" width="68" height="196" rx="34" fill="#2d3272"/>
+  <rect x="747" y="572.5" width="110" height="215" rx="55" fill="#2d3272"/>
+  <rect x="723" y="823" width="162" height="47" rx="23.5" fill="#2d3272"/>
+  <circle cx="501" cy="297" r="53" fill="#fe6a4a"/>
+</g>
 </svg>

@@ -16,25 +16,33 @@ real machine shows otherwise.
 
 ## 1. Title bar and window buttons
 
-- The app draws its own title bar; Windows draws none. It is the same 64 px toolbar row as on the
-  Mac (NATIVE.md §2), so the page title, subtitle and toolbar groups do not move.
+- The app draws its own title bar; Windows draws none. It is a 32 px caption strip above the
+  same 64 px toolbar row as on the Mac (NATIVE.md §2), so the page title, subtitle and toolbar
+  groups do not move (`ui::native::window_chrome`). The strip holds what the Mac keeps outside
+  the window: the app's menus in the main window (§2), the window's title in every other
+  window, and the window buttons.
 - There are no traffic lights. The window buttons are Windows' own three at the trailing edge of
-  the row, in Windows' order: minimize, maximize or restore, close. Each is 46 px wide and as
-  tall as the caption strip (32 px), flush with the top and the trailing edge, glyph 10 px in
-  `label`; hover is `fill-hover`, and the close button's hover is Windows' red (`#C42B1C`) with a
-  white glyph: the one place a Windows system color enters the palette. An inactive window draws
-  the glyphs in `tertiary`.
-- Toolbar groups end 12 px before the window buttons. With the inspector or a wide pane open the
-  buttons sit over the pane's top row, so a pane header keeps its trailing 138 px free.
-- The leading edge follows the Mac's full-screen layout, which also has no lights (NATIVE.md §2,
-  Sidebar): the sidebar toggle sits at x 16 and the search row moves up onto the title line.
-- The row is the drag area except over controls. Double-click maximizes; the system menu opens
-  on Alt+Space and on a right-click of the row. Hovering the maximize button shows Windows 11's
-  Snap layouts (the button answers `HTMAXBUTTON`). Windows draws the window's shadow and, on
-  Windows 11, its rounded corners; a maximized window has neither and no border.
-- Full screen is F11 and hides the window buttons, like the Mac hides the lights.
+  the strip, in Windows' order: minimize, maximize or restore, close. Each is 46 px wide and as
+  tall as the strip, flush with the top and the trailing edge, glyph 10 px in `label`; hover is
+  `fill-hover`, and the close button's hover is Windows' red (`#C42B1C`) with a white glyph: the
+  one place a Windows system color enters the palette. An inactive window draws the glyphs in
+  `tertiary`. A window that cannot be resized (登录, 设置) dims the maximize button.
+- The sidebar keeps the windowed Mac's layout (NATIVE.md §2, Sidebar): the top row with the
+  filter and 新话题 at its trailing end, the search field with the whole width under it. Only
+  the lights are missing from that row, so the sidebar toggle sits at its leading edge (x 16)
+  instead of after them. Full screen (F11) uses the Mac's full-screen layout.
+- The strip is the drag area except over controls, as a title bar is in every Windows app; the
+  toolbar row under it does not move the window. Double-click maximizes;
+  the system menu opens on Alt+Space and on a right-click of the strip. Hovering the maximize
+  button shows Windows 11's Snap layouts (the button answers `HTMAXBUTTON`). Windows draws the
+  window's shadow and, on Windows 11, its rounded corners; a maximized window has neither and no
+  border.
+- Full screen is F11 and hides the strip, like the Mac hides the lights.
+- The 产出 window is a system window on both systems (a standard `NSWindow` on the Mac), so on
+  Windows it keeps the system's title bar, colored from the theme (`sidebar` fill, `label` text,
+  `separator` border; dark when the app is dark) and with the app's icon.
 
-Only compiled. The title bar belongs to the window code (`views/nav`), not to this file's owner.
+Looked at in the Windows CI screenshots (100 % scale).
 
 ## 2. Menus and the tray
 
@@ -60,7 +68,7 @@ Only compiled.
   copy that names a key all use this form (`settings::shortcuts::shortcut_text`). Return is
   `Enter`, Delete is `Backspace`, Escape is `Esc`.
 - Differences in the bindings themselves: 设置 is `Ctrl+,`; close window `Ctrl+W`; full screen
-  `F11`; 显示侧栏 `Ctrl+Alt+S`. Hide, Hide Others and Minimize have no binding (Windows has its own:
+  `F11`; 显示侧栏 `Ctrl+Alt+S`; 返回 / 前进 `Alt+←` / `Alt+→`. Hide, Hide Others and Minimize have no binding (Windows has its own:
   `Win+Down`).
 
 Only compiled.
@@ -325,8 +333,9 @@ Only compiled.
 
 ## 9. What the system decides
 
-- Light or dark follows the system's app mode. The accent follows the system's accent color as
-  on the Mac, and is graphite when the system gives none.
+- Light or dark follows the system's app mode. The accent follows the accent color the person
+  chose in Windows' settings, as on the Mac; the two blues Windows ships with count as "not
+  chosen" and give graphite, so a fresh system keeps the black-and-white finish.
 - Reduce Motion follows 设置 › 辅助功能 › 视觉效果 › 动画效果 (`SPI_GETCLIENTAREAANIMATION`).
 - Display scale: every size is in device-independent pixels; check 100 %, 125 %, 150 % and
   200 %, and a window dragged between two displays of different scale.

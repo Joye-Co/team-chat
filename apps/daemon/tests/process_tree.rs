@@ -29,6 +29,8 @@ fn main() {
     match args.get(1).map(String::as_str) {
         Some("--fake-tick") => fake_tick(Path::new(&args[2])),
         Some("--fake-mid") => fake_mid(),
+        Some("--fake-churn") => fake_churn(),
+        Some("--fake-once") => fake_once(Path::new(&args[2])),
         _ => {}
     }
     if std::env::var(FAKE).as_deref() == Ok("cli") {
@@ -49,8 +51,24 @@ fn main() {
             Box::pin(pause_stops_the_tree_and_resume_lets_it_go_on()),
         ),
         (
+            "pause_holds_a_tree_that_keeps_starting_processes",
+            Box::pin(pause_holds_a_tree_that_keeps_starting_processes()),
+        ),
+        (
             "an_npm_shim_starts_the_cli_without_cmd_exe",
             Box::pin(an_npm_shim_starts_the_cli_without_cmd_exe()),
+        ),
+        (
+            "a_batch_wrapper_gets_no_argument_with_a_line_break",
+            Box::pin(a_batch_wrapper_gets_no_argument_with_a_line_break()),
+        ),
+        (
+            "a_helper_process_ends_with_everything_it_started",
+            Box::pin(a_helper_process_ends_with_everything_it_started()),
+        ),
+        (
+            "the_pty_runtime_runs_a_program_in_a_pseudoconsole",
+            Box::pin(the_pty_runtime_runs_a_program_in_a_pseudoconsole()),
         ),
     ];
     println!("\nrunning {} tests", cases.len());
@@ -80,6 +98,43 @@ fn fake_tick(file: &Path) -> ! {
             let _ = f.write_all(b"x\n");
         }
         std::thread::sleep(Duration::from_millis(50));
+    }
+    std::process::exit(0)
+}
+
+/// Appends one line to `file`, stays for a moment and ends: one of the short-lived processes
+/// of [`fake_churn`].
+fn fake_once(file: &Path) -> ! {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(file)
+    {
+        let _ = f.write_all(b"x\n");
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    std::process::exit(0)
+}
+
+/// A tool under load: starts a new short-lived process every 20 ms (a build, a test runner),
+/// each of which writes a line to `churn.ticks`.
+fn fake_churn() -> ! {
+    std::fs::write("churn.pid", std::process::id().to_string()).unwrap();
+    let end = Instant::now() + FAKE_LIFE;
+    let mut running: Vec<std::process::Child> = vec![];
+    while Instant::now() < end {
+        let mut c = std::process::Command::new(std::env::current_exe().unwrap());
+        c.arg("--fake-once")
+            .arg("churn.ticks")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        if let Ok(child) = c.spawn() {
+            running.push(child);
+        }
+        running.retain_mut(|c| !matches!(c.try_wait(), Ok(Some(_))));
+        std::thread::sleep(Duration::from_millis(20));
     }
     std::process::exit(0)
 }
@@ -165,6 +220,17 @@ fn fake_cli(args: &[String]) -> ! {
         }
         n += 1;
         let mid = format!("msg_{n}");
+        if text.contains("churn") {
+            std::fs::write("cli.pid", std::process::id().to_string()).unwrap();
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .arg("--fake-churn")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .unwrap();
+            fake_tick(Path::new("cli.ticks"));
+        }
         if text.contains("spawn") {
             std::fs::write("cli.pid", std::process::id().to_string()).unwrap();
             let child = ticker("child.ticks").spawn().unwrap();
@@ -257,6 +323,7 @@ fn spec(dir: &Path, command: &str, prompt: &str) -> RunSpec {
         note: None,
         resume_session_id: None,
         gate_hook: None,
+        gate_alive: None,
         exec: daemon::executor::local(),
     }
 }
@@ -458,6 +525,55 @@ async fn pause_stops_the_tree_and_resume_lets_it_go_on() {
     assert!(ticks_stand_still(&work).await, "something still ticks");
 }
 
+/// Pause under load: a tool of the run starts a new process every 20 ms. After the pause no
+/// process of the run makes progress (none that was just being started slips through), resume
+/// lets the work go on, and a cancel while paused leaves nothing behind.
+async fn pause_holds_a_tree_that_keeps_starting_processes() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = spec(dir.path(), &this_program(), "churn");
+    let (work, run_dir, exec) = (s.cwd.clone(), s.run_dir.clone(), s.exec.clone());
+    let run = start(s);
+    let ticks = [work.join("churn.ticks"), work.join("cli.ticks")];
+    let sizes = || -> Vec<u64> { ticks.iter().map(|f| size(f)).collect() };
+    wait_for("the churn to be under way", || {
+        sizes().iter().all(|n| *n > 20)
+    })
+    .await;
+    let churn: u32 = std::fs::read_to_string(work.join("churn.pid"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+
+    for round in 0..3 {
+        let stopped = exec
+            .stop(&run_dir)
+            .expect("the CLI runs: it can be stopped");
+        // A write that had begun may still land.
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let held = sizes();
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        assert_eq!(sizes(), held, "round {round}: a stopped tree made progress");
+        assert!(alive(churn), "stopped, not ended");
+        stopped.resume();
+        wait_for("the churn to go on", || {
+            sizes().iter().zip(&held).all(|(now, then)| now > then)
+        })
+        .await;
+    }
+
+    let stopped = exec.stop(&run_dir).expect("stopped again");
+    run.control.send(Control::Cancel).unwrap();
+    let o = run.outcome.await.unwrap();
+    assert_eq!(o.status, Status::Cancelled, "{o:?}");
+    drop(stopped);
+    wait_for("the churn to end", || !alive(churn)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let end = sizes();
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    assert_eq!(sizes(), end, "a process of the run outlived the cancel");
+}
+
 /// Windows: a CLI installed by npm is `<name>.cmd`. The run finds it by its bare name in the
 /// run's PATH, starts the program the shim names (not `cmd.exe`), and an argument full of
 /// `cmd.exe` syntax arrives as it was given.
@@ -498,3 +614,157 @@ async fn an_npm_shim_starts_the_cli_without_cmd_exe() {
 /// Unix starts the program file the kernel is given: there is no shim to resolve.
 #[cfg(not(windows))]
 async fn an_npm_shim_starts_the_cli_without_cmd_exe() {}
+
+/// Windows: a `.cmd` that is not an npm shim runs in `cmd.exe`. An argument with a line break
+/// cannot get through it: the run fails and says why, before anything starts. Arguments
+/// without one arrive unchanged, whatever `cmd.exe` syntax is in them.
+#[cfg(windows)]
+async fn a_batch_wrapper_gets_no_argument_with_a_line_break() {
+    let dir = tempfile::tempdir().unwrap();
+    let tools = dir.path().join("tools");
+    std::fs::create_dir_all(&tools).unwrap();
+    // An absolute path: not what npm writes, so the daemon cannot start the target itself.
+    std::fs::write(
+        tools.join("wrapped.cmd"),
+        format!("@echo off\r\n\"{}\" %*\r\n", this_program()),
+    )
+    .unwrap();
+    let wrapper = tools.join("wrapped.cmd").to_string_lossy().into_owned();
+
+    let mut s = spec(&dir.path().join("r1"), &wrapper, "hello");
+    s.note = Some("first line\nsecond line & echo owned".into());
+    let work = s.cwd.clone();
+    let o = start(s).outcome.await.unwrap();
+    assert_eq!(o.status, Status::Failed, "{o:?}");
+    let why = o.error.unwrap_or_default();
+    assert!(
+        why.contains("line break") && why.contains("wrapped.cmd"),
+        "{why}"
+    );
+    assert!(
+        !work.join("argv.json").exists(),
+        "the CLI must not have started"
+    );
+
+    let mut s = spec(&dir.path().join("r2"), &wrapper, "hello");
+    let note = "say \"hi\" & echo %PATH% ^ | more > x 'q' !e! (a) %";
+    s.note = Some(note.into());
+    let work = s.cwd.clone();
+    let o = start(s).outcome.await.unwrap();
+    assert_eq!(o.status, Status::Succeeded, "{o:?}");
+    let argv: Vec<String> =
+        serde_json::from_slice(&std::fs::read(work.join("argv.json")).unwrap()).unwrap();
+    assert!(argv.iter().any(|a| a == note), "{argv:?}");
+}
+
+#[cfg(not(windows))]
+async fn a_batch_wrapper_gets_no_argument_with_a_line_break() {}
+
+/// Windows: a probe or a sign-in the daemon starts is in a job of its own, so giving it up
+/// (a timeout, a cancel) also ends what it started; killing a `.cmd` wrapper alone would
+/// leave the real program running.
+#[cfg(windows)]
+async fn a_helper_process_ends_with_everything_it_started() {
+    let dir = tempfile::tempdir().unwrap();
+    let work = dir.path().to_path_buf();
+    let mut cmd = tokio::process::Command::new(std::env::current_exe().unwrap());
+    cmd.arg("--fake-mid")
+        .current_dir(&work)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true);
+    let helper = daemon::health::spawn(&mut cmd).unwrap();
+    wait_for("the helper's children", || work.join("mid.ready").exists()).await;
+    let pid = |name: &str| -> u32 {
+        std::fs::read_to_string(work.join(name))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap()
+    };
+    let pids = [pid("mid.pid"), pid("grandchild.pid"), pid("detached.pid")];
+    assert!(pids.iter().all(|p| alive(*p)), "{pids:?}");
+    drop(helper);
+    wait_for("the helper and its children to end", || {
+        pids.iter().all(|p| !alive(*p))
+    })
+    .await;
+}
+
+/// Unix: a helper is a plain child; the CLIs there are not started through wrappers.
+#[cfg(not(windows))]
+async fn a_helper_process_ends_with_everything_it_started() {}
+
+/// A run of the `pty` runtime with `cmd.exe` and `args`.
+#[cfg(windows)]
+fn pty_spec(dir: &Path, args: &[&str], prompt: &str) -> RunSpec {
+    let mut s = spec(dir, "cmd.exe", prompt);
+    s.runtime_name = "shell".into();
+    s.cfg.kind = "pty".into();
+    s.cfg.args = args.iter().map(|a| a.to_string()).collect();
+    s
+}
+
+/// Windows: the `pty` kind starts the program in a pseudoconsole (ConPTY). Its output comes
+/// back as text, a prompt without a placeholder is typed into it, and a cancel ends it.
+#[cfg(windows)]
+async fn the_pty_runtime_runs_a_program_in_a_pseudoconsole() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // The prompt as an argument.
+    let s = pty_spec(
+        &dir.path().join("r1"),
+        &["/d", "/c", "echo {prompt}"],
+        "conpty-hello",
+    );
+    let log = s.run_dir.join("pty.log");
+    let o = start(s).outcome.await.unwrap();
+    assert_eq!(o.status, Status::Succeeded, "{o:?}");
+    assert_eq!(o.exit_code, Some(0));
+    let text = o.result_text.unwrap_or_default();
+    assert!(text.contains("conpty-hello"), "{text:?}");
+    assert!(size(&log) > 0, "the raw output is kept");
+
+    // The prompt typed into the console; the exit code is the program's.
+    let s = pty_spec(
+        &dir.path().join("r2"),
+        &["/d", "/q"],
+        "echo typed-marker& exit 7",
+    );
+    let o = start(s).outcome.await.unwrap();
+    assert_eq!(o.status, Status::Failed, "{o:?}");
+    assert_eq!(o.exit_code, Some(7));
+    assert!(
+        o.result_text.unwrap_or_default().contains("typed-marker"),
+        "the typed command ran"
+    );
+
+    // A shell that waits for input is ended by a cancel.
+    let s = pty_spec(&dir.path().join("r3"), &["/d", "/q", "/k"], "echo started");
+    let run_dir = s.run_dir.clone();
+    let mut run = start(s);
+    let mut seen = String::new();
+    while !seen.contains("started") {
+        match run.events.recv().await {
+            Some(RunEvent::MessageDelta { text, .. }) => seen.push_str(&text),
+            Some(_) => {}
+            None => panic!("the run ended before it printed: {seen:?}"),
+        }
+    }
+    let pid = workspace::read_meta(&run_dir).unwrap().pgid.unwrap() as u32;
+    assert!(alive(pid));
+    // 接管 finds the pseudoconsole program too.
+    let stopped = daemon::executor::local()
+        .stop(&run_dir)
+        .expect("a pty run can be stopped");
+    stopped.resume();
+    run.control.send(Control::Cancel).unwrap();
+    let o = run.outcome.await.unwrap();
+    assert_eq!(o.status, Status::Cancelled, "{o:?}");
+    wait_for("the shell to end", || !alive(pid)).await;
+}
+
+/// Unix: `tests/runtimes.rs` covers the pty runtime there.
+#[cfg(not(windows))]
+async fn the_pty_runtime_runs_a_program_in_a_pseudoconsole() {}

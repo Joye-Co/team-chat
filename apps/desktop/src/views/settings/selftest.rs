@@ -870,6 +870,46 @@ pub fn open_email_code(
     Ok(handle)
 }
 
+/// The 用手机扫码登录 sheet with a QR code waiting for the phone.
+pub fn open_phone_qr(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::Account, cx)?;
+    after_fit(handle, cx, move |window, cx| {
+        let phone = view.read(cx).account().read(cx).phone().clone();
+        super::account_phone::PhoneSignIn::open_qr_sheet(phone.clone(), window, cx);
+        phone.update(cx, |p, cx| {
+            p.preview_offer(
+                crate::data::PhoneOffer {
+                    id: "offer".into(),
+                    code: "7K2M-9QPX".into(),
+                    qr_text: "tc-sign-in:7K2M-9QPX?server=https%3A%2F%2Fchat.example.com".into(),
+                    expires_at: 0,
+                },
+                crate::data::PhoneOfferState::Waiting,
+                cx,
+            )
+        });
+    });
+    Ok(handle)
+}
+
+/// The 输入手机上的码 sheet.
+pub fn open_phone_code(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::Account, cx)?;
+    after_fit(handle, cx, move |window, cx| {
+        let phone = view.read(cx).account().read(cx).phone().clone();
+        super::account_phone::PhoneSignIn::open_code_sheet(phone, window, cx);
+    });
+    Ok(handle)
+}
+
 /// The 编辑资料 sheet after 完成 with an empty name: the field error.
 pub fn open_profile_error(
     services: Services,
@@ -1124,6 +1164,28 @@ pub fn open_machine_dialog(
     )
 }
 
+/// 机器 after 添加电脑 succeeded: the one-time sheet with the system picker on Windows and
+/// that system's install command.
+pub fn open_machine_created(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Machines,
+        |s, w, cx| {
+            let form = super::machines::open_add_machine(s, w, cx);
+            form.update(cx, |form, cx| {
+                form.fill("会议室的电脑", "windows", w, cx);
+                form.submit(cx);
+                form.set_target(super::machines::InstallTarget::Windows, cx);
+            });
+        },
+        cx,
+    )
+}
+
 // --- v12/settings track: the scenes of the new panes and their sheets ---
 
 use crate::selftest::scenes::{Scene, Start};
@@ -1172,6 +1234,20 @@ pub const SCENES: &[Scene] = &[
         open: open_email_code,
     },
     Scene {
+        name: "settings-phone-qr",
+        about: "Settings: the 用手机扫码登录 sheet with the QR code",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: open_phone_qr,
+    },
+    Scene {
+        name: "settings-phone-code",
+        about: "Settings: the 输入手机上的码 sheet",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: open_phone_code,
+    },
+    Scene {
         name: "settings-sign-out",
         about: "Settings: the 退出登录 alert with its checkbox",
         start: Start::SignedIn,
@@ -1201,6 +1277,13 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedIn,
         setup: |_, _| {},
         open: open_devices_failed,
+    },
+    Scene {
+        name: "settings-machine-created",
+        about: "机器 › 添加电脑 done: the system picker (Mac 或 Linux / Windows) and the Windows install command",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: open_machine_created,
     },
     Scene {
         name: "settings-machines-loading",

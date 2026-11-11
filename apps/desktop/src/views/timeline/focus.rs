@@ -78,6 +78,7 @@ impl TimelineView {
             return;
         }
         self.focus.serial = request.serial;
+        self.note_came_from(request.serial, request.search.is_some(), cx);
         self.focus.search = request.search;
         self.focus.target = Some((request.message_id, request.seq));
         self.focus.grows = 0;
