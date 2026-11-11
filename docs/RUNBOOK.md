@@ -366,7 +366,10 @@ Each group room (SQLite-backed Durable Object) can go back to any time in the la
 
 ## Daily archive (R2)
 
-The cron `0 3 * * *` on `chat-api-*` writes to the env's own bucket:
+The Worker has two crons: `0 * * * *` (hourly: the memory consolidation runs after 03:00 in the
+team's time zone and retries a failed scope the next hour) and `0 3 * * *`. The deployed config in
+the ops checkout (`deploy/server.wrangler.jsonc`) needs both in every env. The cron `0 3 * * *` on
+`chat-api-*` writes to the env's own bucket:
 
 | Key | Content |
 | --- | --- |

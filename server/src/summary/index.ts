@@ -5,6 +5,7 @@
 import { type ModelConfig, callModel } from "../aiservice/providers";
 import { loadModelConfig } from "../aiservice/store";
 import { type ContextRow, HISTORY_BODY_CHARS, renderMessage } from "../context/render";
+import { teamZone } from "../memory/consolidate";
 import type { Env } from "../core/env";
 import { registerAfterCommit, registerRoomMigration } from "../core/registry";
 import { contextRows } from "../bots/room";
@@ -108,7 +109,7 @@ registerAfterCommit(async (event, h) => {
     let used = 0;
     let last = upto;
     for (const r of rows) {
-      const line = renderMessage(r, name, Math.min(1200, HISTORY_BODY_CHARS));
+      const line = renderMessage(r, name, Math.min(1200, HISTORY_BODY_CHARS), "", teamZone(h.env));
       if (parts.length > 0 && used + line.length > SUMMARY_INPUT_CHARS) break;
       parts.push(line);
       used += line.length + 1;

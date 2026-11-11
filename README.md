@@ -15,7 +15,8 @@ Server: Cloudflare Workers, Durable Objects, D1 and R2. The product name is a va
 ## Install the app
 
 Latest release: <https://github.com/Joye-Co/team-chat/releases/latest>. A team's owner sends each
-new member a download link with their invite code.
+new member a download link with their invite code. No team server yet: set one up first with
+[docs/SELF-HOSTING.md](docs/SELF-HOSTING.md).
 
 - New members (Chinese): [docs/ONBOARDING.zh.md](docs/ONBOARDING.zh.md) (download, first open,
   sign in, 群, 话题, 待办, 产出, @ a bot, notifications, diagnostics) and
@@ -38,7 +39,13 @@ the operator's private ops checkout (`deploy/servers.json`, see
 | staging | `https://chat-api-staging.<your-subdomain>.workers.dev` | checks before production, `--selftest-live` |
 | production | `https://chat-api-prod.<your-subdomain>.workers.dev` | the team |
 
-Deploy the server with `cd server && bun run deploy:<e2e|staging|production>`
+**Run your own server**: every team, and every person using the app alone, deploys its own
+server on its own Cloudflare account; there is no hosted service. Follow
+[docs/SELF-HOSTING.md](docs/SELF-HOSTING.md) (中文: [docs/SELF-HOSTING.zh.md](docs/SELF-HOSTING.zh.md)):
+from a fresh Ubuntu machine to the app signed in, with `scripts/setup-server.sh`, and the Linux
+host that runs AI members in microVMs.
+
+Later deploys: `cd server && bun run deploy:<e2e|staging|production>`
 (`scripts/deploy-server.sh`: the Worker config from your ops checkout, D1 migrations, then the Worker; `/v1/health` reports
 `DEPLOY_VERSION`, else the `v<semver>` tag at HEAD, else the short commit). Secrets, setup and
 the deploy steps: [docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md). Incidents and rollback:

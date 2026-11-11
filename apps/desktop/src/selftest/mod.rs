@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! desktop --screenshot <dir> [--theme light|dark|both] [--scenes main,login,...]
-//!         [--worst-case] [--size 1440x900] [--settle-ms 400] [--list]
+//!         [--worst-case] [--size 1440x900] [--settle-ms 400] [--lang en] [--list]
 //! ```
 //!
 //! For each scene and theme it opens the window with the fake provider
@@ -24,6 +24,7 @@ pub mod artifact_window;
 pub mod capture;
 pub mod clock;
 pub mod drawn;
+pub mod english;
 pub mod interact;
 // --- v13/ux-pages ---
 pub mod page_states;
@@ -69,6 +70,8 @@ struct Options {
     worst_case: bool,
     size: Size<Pixels>,
     settle: Duration,
+    /// `--lang en`: draw the text in English ([`english`]), for the English homepage.
+    english: bool,
 }
 
 /// Waits until every embedded page that is on screen has painted. "Ready" is the page's
@@ -124,7 +127,7 @@ async fn wait_for_first_paint(cx: &mut AsyncApp) {
 const NATIVE_READY: Duration = Duration::from_secs(60);
 
 const USAGE: &str = "usage: desktop --screenshot <dir> [--theme light|dark|both] \
-[--scenes a,b,...] [--worst-case] [--size WxH] [--settle-ms n] [--list]";
+[--scenes a,b,...] [--worst-case] [--size WxH] [--settle-ms n] [--lang en] [--list]";
 
 /// Runs a self-test when the arguments ask for one and returns its exit code.
 pub fn main_if_requested() -> Option<i32> {
@@ -170,6 +173,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         worst_case: false,
         size: size(px(1440.), px(900.)),
         settle: Duration::from_millis(400),
+        english: false,
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -205,6 +209,11 @@ fn parse(args: &[String]) -> Result<Options, String> {
                 options.settle =
                     Duration::from_millis(v.parse().map_err(|_| format!("bad --settle-ms {v}"))?);
             }
+            "--lang" => match value("--lang")?.as_str() {
+                "en" => options.english = true,
+                "zh" => options.english = false,
+                other => return Err(format!("unknown language: {other}")),
+            },
             other => return Err(format!("unknown argument: {other}")),
         }
     }
@@ -312,6 +321,9 @@ fn run(options: Options) -> i32 {
         eprintln!("cannot create {}: {error}", options.dir.display());
         return 1;
     }
+    if options.english {
+        english::install();
+    }
     let code = std::rc::Rc::new(std::cell::Cell::new(1));
     let result = code.clone();
     // At least the old 20-shot budget; more shots get 15 s each.
@@ -342,6 +354,9 @@ fn run(options: Options) -> i32 {
             let started = Instant::now();
             cx.spawn(async move |cx| {
                 let ok = run_all(&options, cx).await;
+                if options.english {
+                    english::write_misses(&options.dir);
+                }
                 eprintln!(
                     "screenshots done in {:.1} s",
                     started.elapsed().as_secs_f32()

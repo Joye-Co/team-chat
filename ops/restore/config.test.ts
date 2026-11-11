@@ -52,6 +52,8 @@ test("API Worker: logs on and the daily archive cron in every env", () => {
     // Invocation logs record the full URL with its query string (invite codes on /download).
     expect(e.observability?.logs?.invocation_logs, name).toBe(false);
     expect(e.triggers?.crons, name).toContain("0 3 * * *");
+    // Hourly: the memory consolidation after 03:00 team time, and its retry (server/src/memory).
+    expect(e.triggers?.crons, name).toContain("0 * * * *");
     expect(e.r2_buckets?.[0]?.binding, name).toBe("FILES");
   }
 });
