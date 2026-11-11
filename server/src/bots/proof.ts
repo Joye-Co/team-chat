@@ -220,6 +220,39 @@ export function hasProof(card: CardV2): boolean {
   return card.blocks.some((b) => b.id !== "result");
 }
 
+type EvidenceLeaf = Extract<CardV2Block, { type: "evidence" }>;
+
+/** 接 5.1 on a done card the CLI posted itself: its evidence lines tell only what the run shows. */
+function truthfulEvidence(b: EvidenceLeaf, logged: TestCounts | null): EvidenceLeaf {
+  if (b.tests) {
+    const { tests: said, ...rest } = b;
+    // Counts the run's log shows replace the card's; counts it does not show are a claim.
+    if (logged) return { ...rest, label: PROOF_TEXT.tests(logged.passed, logged.failed), state: logged.failed > 0 ? "fail" : "pass", tests: logged };
+    return { ...rest, label: PROOF_TEXT.testsClaimed(said.passed, said.failed), state: said.failed > 0 ? "fail" : "info" };
+  }
+  if (b.state === "pass" && !b.fileId && !b.url && !b.artifact && !b.recording) {
+    return { ...b, state: "info", detail: cutUnits(b.detail ? `${PROOF_TEXT.claimed}：${b.detail}` : PROOF_TEXT.claimed, 1000) };
+  }
+  return b;
+}
+
+/**
+ * 接 5.1 / problem 5: a done card a run posts with `chat-run card post` is the run's result, so it
+ * follows the rules of the server's own (`doneCard`): test counts come from the run's recorded
+ * tool results (`testsFromLog`), and a line marked passed with nothing to show it reads as a
+ * claim. Other cards pass unchanged.
+ */
+export function truthfulDoneCard<C>(card: C, logged: TestCounts | null): C {
+  const c = card as { intent?: unknown; blocks?: unknown } | null;
+  if (!c || c.intent !== "done" || !Array.isArray(c.blocks)) return card;
+  const fix = (b: CardV2Block): CardV2Block => {
+    if (b.type === "evidence") return truthfulEvidence(b, logged);
+    if (b.type === "group" && b.blocks) return { ...b, blocks: b.blocks.map((x) => (x.type === "evidence" ? truthfulEvidence(x, logged) : x)) };
+    return b;
+  };
+  return { ...c, blocks: (c.blocks as CardV2Block[]).map(fix) } as C;
+}
+
 /**
  * The v1 card 1.0.x clients get for a done card: the derived one without the fallback text
  * and the `result` block. The message body holds the result, and 1.0.x draws it above the card.

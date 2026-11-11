@@ -156,7 +156,13 @@ export abstract class DeskEvents extends DeskRuns {
           await this.output(r, ev as { outputId?: unknown; op?: unknown; body?: unknown }, f);
           break;
         case "input.accepted": {
-          this.sql.exec("UPDATE inputs SET accepted = 1 WHERE id = ? AND run_id = ?", String(ev.inputId), r.id);
+          const taken = this.sql.exec("UPDATE inputs SET accepted = 1 WHERE id = ? AND run_id = ?", String(ev.inputId), r.id).rowsWritten;
+          // 接 4.2: a person's message reached the run after its report: that report no longer
+          // says how the work ends (the run reports again, or ends normally as done).
+          if (taken > 0 && r.report) {
+            r.report = null;
+            this.sql.exec("UPDATE runs SET report = NULL WHERE id = ?", r.id);
+          }
           await this.answerTaken(r, String(ev.inputId));
           break;
         }
@@ -427,8 +433,11 @@ export abstract class DeskEvents extends DeskRuns {
         if (await this.continuePromise(r, raw)) return;
       }
     } else if (f.status === "cancelled") {
-      // 接 5.4: stopped on the machine reads like stopped by a person (input.ts `stop`).
-      await this.end(r, "cancelled", TEXT.cancelled, "open", TEXT.cancelled);
+      // 接 5.4: a plain stop on the machine reads like stopped by a person (input.ts `stop`). A
+      // cancel the daemon gives a reason for (it ran past maxDurationMs) is work that did not
+      // finish: the topic stays blocked, as before.
+      const aborted = typeof f.error === "string" && f.error.trim() !== "";
+      await this.end(r, "cancelled", TEXT.cancelled, aborted ? "blocked" : "open", TEXT.cancelled);
     } else {
       const why = firstLine(readableError(f.error ?? f.summary ?? ""), 300);
       await this.end(r, "failed", TEXT.failed(why), "blocked", cut(TEXT.failed(why), 280));

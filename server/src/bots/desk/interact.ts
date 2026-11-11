@@ -15,6 +15,7 @@ import { answerBlocks, cardEventText, pageEventText } from "../answers";
 import { linkStub } from "../env";
 import { ETA_MS, type InteractionIn } from "../interact";
 import type { CardAnswerIn } from "../room";
+import { truthfulDoneCard } from "../proof";
 import { loadRunner } from "../store";
 import { type RunRow, result } from "./core";
 import { DeskTakeover } from "./takeover";
@@ -432,6 +433,9 @@ export abstract class DeskInteract extends DeskTakeover {
       const c = this.outputContext();
       for (const v of [...(frameValidators.get("*") ?? []), ...(frameValidators.get(frame.t) ?? [])]) await v(frame as never, c);
       if (frame.t === "send") {
+        // 接 5.1: a done card the CLI posts is the run's result (problem 5): it shows test counts
+        // from the run's log only, and passes without evidence as claims.
+        if (frame.cardV2 !== undefined) frame.cardV2 = truthfulDoneCard(frame.cardV2, this.loggedTests(r));
         const sent = await this.room(r).send(r.group_id, this.actor(), frame as never);
         if (!sent.ok) throw new ApiError(sent.error.code, sent.error.message, sent.error.reason);
         // Problem 5: a done card the CLI posted in the run's topic is the run's result (postResult).

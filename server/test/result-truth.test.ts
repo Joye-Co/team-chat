@@ -7,7 +7,7 @@ import { ACK_EMOJI } from "@chat/protocol";
 import { afterAll, describe, expect, it } from "vitest";
 import type { BotsEnv } from "../src/bots/env";
 import { endedPhase } from "../src/bots/desk/report";
-import { PROOF_TEXT, doneCard, testsFromLog } from "../src/bots/proof";
+import { PROOF_TEXT, doneCard, testsFromLog, truthfulDoneCard } from "../src/bots/proof";
 import { UNDELIVERED_TEXT } from "../src/bots/room";
 import { TEXT } from "../src/bots/dispatch";
 import { Daemon, type World, downViolations, mention, world } from "./daemon";
@@ -129,6 +129,22 @@ describe("chat-run report (接 4.2 / 5.2)", () => {
     d.close();
   });
 
+  it("a person's message that reaches the run after its report clears it", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["output"] });
+    const { c } = await Client.connect(w.human.token);
+    const { topicId, runId } = await started(w, c, d);
+    await output(d, runId, "o1", "run.report", { state: "blocked", text: "需要测试账号" });
+    await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "账号在 1Password 里" });
+    const input = await d.next((f) => f.t === "run.input" && f.runId === runId);
+    d.event(runId, { type: "input.accepted", inputId: input.inputId });
+    await d.acked(runId, d.done(runId, { status: "succeeded", resultText: "登录修好了。" }));
+    expect(await ended(c, runId)).toMatchObject({ status: "done", phase: "done" });
+    await waitUntil(() => lastTopic(c, topicId)?.status === "done", 5000, "done after the answer");
+    c.close();
+    d.close();
+  });
+
   it("a failed run ignores its report", async () => {
     const w = await world();
     const { d } = await Daemon.connect(w.machineToken, { features: ["output"] });
@@ -164,6 +180,20 @@ describe("stop (接 5.4)", () => {
   });
 });
 
+describe("a cancel the daemon gives a reason for (接 5.4)", () => {
+  it("leaves the topic blocked: the work did not finish", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["output"] });
+    const { c } = await Client.connect(w.human.token);
+    const { topicId, runId } = await started(w, c, d);
+    await d.acked(runId, d.done(runId, { status: "cancelled", error: "run took longer than maxDurationMs" }));
+    expect(await ended(c, runId)).toMatchObject({ status: "cancelled", phase: "stopped" });
+    await waitUntil(() => lastTopic(c, topicId)?.status === "blocked", 5000, "timed out: blocked");
+    c.close();
+    d.close();
+  });
+});
+
 describe("one result per run (problem 5)", () => {
   it("a done card the CLI posted itself is the result: the last message is not posted again", async () => {
     const w = await world();
@@ -182,6 +212,58 @@ describe("one result per run (problem 5)", () => {
     await new Promise((r) => setTimeout(r, 200));
     const mine = botMessages(c, topicId, w.bot.id);
     expect(mine.map((m) => m.cardV2?.intent ?? "text")).toEqual(["working", "done"]);
+    c.close();
+    d.close();
+  });
+});
+
+describe("a done card the CLI posts tells the truth (接 5.1 with problem 5)", () => {
+  const card = (blocks: unknown[]) => ({ v: 2, rev: 1, intent: "done", title: "做完了", fallback: "做完了", blocks });
+
+  it("takes test counts from the log, and shows counts or passes without evidence as claims", () => {
+    const blocks = [
+      { type: "text", id: "t", text: "好了" },
+      { type: "evidence", id: "tests", label: "测试：40 个通过", state: "pass", tests: { passed: 40, failed: 0 } },
+      { type: "evidence", id: "a1", label: "能登录", state: "pass" },
+      { type: "evidence", id: "a2", label: "E2E", state: "pass", url: "https://ci.example.com/1" },
+      { type: "group", id: "g", blocks: [{ type: "evidence", id: "a3", label: "文档", state: "pass", detail: "写了" }] },
+    ];
+    const none = truthfulDoneCard(card(blocks), null) as any;
+    expect(none.blocks[1]).toEqual({ type: "evidence", id: "tests", label: PROOF_TEXT.testsClaimed(40, 0), state: "info" });
+    expect(none.blocks[2]).toEqual({ type: "evidence", id: "a1", label: "能登录", state: "info", detail: PROOF_TEXT.claimed });
+    expect(none.blocks[3]).toEqual(blocks[3]);
+    expect(none.blocks[4].blocks[0]).toEqual({ type: "evidence", id: "a3", label: "文档", state: "info", detail: `${PROOF_TEXT.claimed}：写了` });
+    const logged = truthfulDoneCard(card(blocks), { passed: 9, failed: 1 }) as any;
+    expect(logged.blocks[1]).toEqual({ type: "evidence", id: "tests", label: PROOF_TEXT.tests(9, 1), state: "fail", tests: { passed: 9, failed: 1 } });
+    // A card that is not a done card passes unchanged.
+    const working = { ...card(blocks), intent: "working" };
+    expect(truthfulDoneCard(working, null)).toBe(working);
+  });
+
+  it("the CLI's own done card shows only the tests the run's log shows", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["output"] });
+    const { c } = await Client.connect(w.human.token);
+    const { topicId, runId } = await started(w, c, d);
+    const claims = card([
+      { type: "text", id: "t", text: "好了" },
+      { type: "evidence", id: "tests", label: "测试：40 个通过", state: "pass", tests: { passed: 40, failed: 0 } },
+      { type: "evidence", id: "a1", label: "能登录", state: "pass" },
+    ]);
+    expect(await output(d, runId, "o1", "card.post", { cardV2: claims })).toMatchObject({ ok: true });
+    await d.acked(runId, d.done(runId, { status: "succeeded", resultText: "好了" }));
+    await ended(c, runId);
+    const posted = await waitUntil(() => botMessages(c, topicId, w.bot.id).find((m) => m.cardV2?.intent === "done"), 5000, "done card");
+    expect(posted.cardV2.blocks).toContainEqual({ type: "evidence", id: "tests", label: PROOF_TEXT.testsClaimed(40, 0), state: "info" });
+    expect(posted.cardV2.blocks).toContainEqual({ type: "evidence", id: "a1", label: "能登录", state: "info", detail: PROOF_TEXT.claimed });
+    expect(botMessages(c, topicId, w.bot.id).filter((m) => m.cardV2?.intent === "done")).toHaveLength(1);
+
+    const b = await started(w, c, d, "@dev 再跑一次");
+    d.event(b.runId, { type: "tool.call", itemId: "c1", tool: "shell", title: "bun test", input: { command: "bun test" } });
+    d.event(b.runId, { type: "tool.result", itemId: "c1", ok: true, output: " 9 pass\n 0 fail" });
+    const res = await output(d, b.runId, "o1", "card.post", { cardV2: claims });
+    expect(res).toMatchObject({ ok: true });
+    expect(res.result.message.cardV2.blocks).toContainEqual({ type: "evidence", id: "tests", label: PROOF_TEXT.tests(9, 0), state: "pass", tests: { passed: 9, failed: 0 } });
     c.close();
     d.close();
   });
