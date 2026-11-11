@@ -200,6 +200,17 @@ run ok "a Worker without HOOK_SECRET_KEY gets it" production
 check "  from the file" cmp -s "$S/hook-secret-key" "$FAKE_STATE/secrets/HOOK_SECRET_KEY"
 check "  and only that one" test "$(count 'secret put')" = 1
 
+mv "$S/owner-token" "$WORK/owner-token.saved"
+: >"$FAKE_STATE/calls"
+run ok "an update without owner-token still deploys" production
+check "  deploys" test "$(count '^deploy')" = 1
+check "  and says the owner tasks were skipped" grep -q "owner tasks were skipped" "$WORK/out.log"
+check "  and points to the right steps" grep -q "steps 5 and 6" "$WORK/out.log"
+run ok "--owner-name on a server with an owner" production --owner-name Other
+check "  says it has an owner" grep -q "has an owner already" "$WORK/out.log"
+check "  saves no owner token" test ! -e "$S/owner-token"
+mv "$WORK/owner-token.saved" "$S/owner-token"
+
 # --- a first deploy learns its URL ------------------------------------------------------------
 rm "$TC_OPS_DIR/deploy/servers.json"
 # No network: the health check of the made-up address fails at once, after the URL is written.

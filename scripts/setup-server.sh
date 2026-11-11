@@ -230,21 +230,27 @@ if [ -s "$SECRETS/owner-token" ]; then
   log "owner token exists: $SECRETS/owner-token"
 else
   if [ -z "$OWNER_NAME" ] && [ -t 0 ]; then
-    read -r -p "Your name, as the team's first owner: " OWNER_NAME
+    read -r -p "Your name, as the team's first owner (empty if this server has an owner already): " OWNER_NAME
   fi
-  [ -n "$OWNER_NAME" ] || die "no owner yet: run again with --owner-name <your name>"
-  [ "$secrets_changed" = 0 ] || sleep "${SECRET_SETTLE_SECONDS:-5}"
+  no_owner_token_note() {
+    log "warning: this computer has no $SECRETS/owner-token. The deploy is done; owner tasks were skipped."
+    log "  If this server has no owner yet, run again with --owner-name <your name>."
+    log "  If it has one, copy owner-token from the computer that made the owner, or do owner tasks in the app."
+  }
+  [ -n "$OWNER_NAME" ] || no_owner_token_note
+  [ -z "$OWNER_NAME" ] || [ "$secrets_changed" = 0 ] || sleep "${SECRET_SETTLE_SECONDS:-5}"
   waited=0
   out="$WORK/bootstrap.log"
-  while :; do
+  while [ -n "$OWNER_NAME" ]; do
     if admin bootstrap --name "$OWNER_NAME" >"$out" 2>&1; then
       cat "$out" >&2
       made_owner=1
       break
     fi
     if grep -q "409\|conflict" "$out"; then
-      cat "$out" >&2
-      die "this server has an owner already, and this computer has no $SECRETS/owner-token. Copy that file from the computer that made the owner, or sign in from the app with a sign-in code from an owner."
+      log "this server has an owner already"
+      no_owner_token_note
+      break
     fi
     if [ "$waited" -ge "$BOOTSTRAP_WAIT" ]; then
       cat "$out" >&2
@@ -256,7 +262,7 @@ else
   done
 fi
 CODE_FILE=""
-if [ "$made_owner" = 1 ] || [ "$SIGN_IN_CODE" = 1 ]; then
+if [ "$made_owner" = 1 ] || { [ "$SIGN_IN_CODE" = 1 ] && [ -s "$SECRETS/owner-token" ]; }; then
   out="$WORK/invite.log"
   admin invite --self >"$out" 2>&1 || { cat "$out" >&2; die "could not make a sign-in code (above)"; }
   cat "$out" >&2
@@ -269,10 +275,10 @@ step "9. next step"
   printf 'The server of %s is running: %s\n\n' "$ENV_NAME" "$BASE"
   if [ -n "$CODE_FILE" ]; then
     printf 'Your sign-in code (single use, valid 7 days) is in %s. Show it with:\n  cat %s\n\n' "$CODE_FILE" "$CODE_FILE"
-  else
+  elif [ -s "$SECRETS/owner-token" ]; then
     printf 'For a new sign-in code for the owner, run: scripts/setup-server.sh %s --sign-in-code\n\n' "$ENV_NAME"
   fi
-  printf 'Next, on your Mac or Windows computer (docs/SELF-HOSTING.md step 7):\n'
+  printf 'Next, on your Mac or Windows computer (docs/SELF-HOSTING.md steps 5 and 6):\n'
   printf '  1. install the app from the GitHub releases page\n'
   printf '  2. at sign-in, choose 使用其他服务器… and enter %s\n' "$BASE"
   printf '  3. enter the sign-in code\n'
