@@ -93,6 +93,9 @@ jobs:
               - scripts/previous-windows-installer.sh
               - scripts/check-logs-for-servers.sh
               - scripts/test-release-scripts.sh
+              - scripts/setup-server.sh
+              - scripts/test-setup-server.sh
+              - server/scripts/admin.ts
               - Cargo.toml
               - CHANGELOG.md
               - docs/releases/**
@@ -283,6 +286,8 @@ jobs:
         run: scripts/ci-run.sh test ops/*
       - name: Release script guards
         run: scripts/test-release-scripts.sh
+      - name: Self-hosting setup (fake wrangler)
+        run: scripts/test-setup-server.sh
 
   desktop-test:
     name: Desktop tests (macOS)
