@@ -7,6 +7,9 @@ import type { ModelConfig } from "../aiservice/providers";
 import { type ToolSpec, callTool } from "../aiservice/tools";
 import type { CallOptions } from "../aiservice/providers";
 
+/** The client message id prefix of the front desk's posts (`fd:<request id>`); its question cards route talk (接 1.8). */
+export const FRONT_DESK_ASK_PREFIX = "fd:";
+
 /** Below this the front desk does not trust its own answer: the request goes to the executor. */
 export const MIN_CONFIDENCE = 0.6;
 /** Topic characters the front desk reads (the executor gets more). */

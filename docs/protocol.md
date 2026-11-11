@@ -889,12 +889,15 @@ Rules:
   running ones, with its own result and its own session. A message that quotes a run's request,
   progress or approval card, or an input it took, goes to that run; an approval answer to the run
   that waits for it; the requester's own words to their newest run; a message that starts with
-  新任务 (or answers the front desk's question) starts a new run. In a topic the bot has one run
+  新任务 (or answers the front desk's question) starts a new run. An answer or a live event on a
+  card goes to the run that posted the card, and a part handed back to the run that gave it out.
+  A retry or a hand-over may start next to the running ones. In a topic the bot has one run
   at a time, as above.
 - The room hands messages to bots in lanes, one per (topic, bot) (usable 接 1.9): in order within
   a lane, lanes at the same time, so one bot's front desk call does not delay another bot's 👀. A
-  failed hand-off holds only the later messages of its lane until it is retried; a message
-  without an @ is routed after the topic's earlier hand-offs are done.
+  failed hand-off holds only the later messages of its lane until it is retried; in a topic a
+  message without an @ is routed after the topic's earlier hand-offs are done, without holding
+  back later messages that name their bots.
 - The bot acknowledges the message that started the run with one reaction (👀; before 1.1, a
   short text line). It posts nothing while it works: progress lives in the run (`plan`, the run
   log; before 1.1, one streaming message). When the run ends it posts one result message and
@@ -1002,8 +1005,8 @@ and makes one forced tool call `decide`, which answers with one of four actions:
 - `ask`: the bot posts one question as a Card v2 ask (`intent: "ask"`, `ask.from` = the
   requester, blocking, `expiresAt` in an hour, one `textarea` input `answer` with the submit
   action `send`) and, in a topic, becomes its `ownerId`; the topic shows `waiting_answer`. For an
-  hour the requester's next message in the topic (in the 群聊 too, where an open card ask of a
-  bot that waits on a person routes that person's messages to the bot) counts as addressed to the
+  hour the requester's next message in the topic (in the 群聊 too, where the front desk's open,
+  unexpired question routes that person's messages to the bot; other card asks do not) counts as addressed to the
   bot without an @; the front desk then decides again with the answer in the topic, and the card
   stops waiting (its ask, action and input are removed). An answer in the card starts a run with
   that answer (in the 群聊 next to any running one).
@@ -1624,7 +1627,7 @@ Rules:
   topic as it is (bots that report a run's status keep working); a card ask in it does not set
   its status or `waitingOn`; posting or being mentioned in it does not auto-follow it.
 - Bots: a message in the 群聊 goes only to the bot it mentions (in a DM with a bot, to that bot),
-  or to a bot whose open card ask waits on its author. No bot becomes the 群聊's responsible
+  or to a bot whose front desk question (an open, unexpired card ask) waits on its author. No bot becomes the 群聊's responsible
   member, so each @mention can go to a different bot; a bot with an active run there takes a
   later mention from that run's requester as a follow-up of that run, and a mention from someone
   else as a new request next to it. A card press in

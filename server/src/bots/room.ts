@@ -22,6 +22,7 @@ import { CONTEXT_MESSAGES, type ContextMessage } from "./dispatch";
 import type { Env } from "../core/env";
 import type { Logger } from "../core/logger";
 import { deskStub } from "./env";
+import { FRONT_DESK_ASK_PREFIX } from "../agent/frontdesk";
 import { type RefSource, resolveRefs, stripRefPrefix } from "./refs";
 import { type ContextRow, type RequestExt, parseExt, requestExt } from "../context/render";
 import { PARTICIPANTS_MIGRATION, type WorkState, addressedParticipants, claimTopic, isParticipant, onRunUpdated, publishWorkState, routingOwner, topicBots, workState } from "./participants";
@@ -422,23 +423,24 @@ function dmPeer(sql: SqlStorage, authorId: string): string | undefined {
 const ASK_SCAN = 200;
 
 /**
- * 接 1.8: in a 群聊, where nothing routes a message without an @, the members whose open card ask
- * waits on `authorId` (for example the front desk's question): the person's message goes to them.
+ * 接 1.8: in a 群聊, where nothing routes a message without an @, the members whose front desk
+ * question waits on `authorId`: the person's next message goes to them while the question is
+ * open and not expired. Other open card asks (a run's own cards) do not route talk: they are
+ * answered in the card, or with an @ or a reply (接 1.6).
  */
 export function askingMembers(sql: SqlStorage, topicId: string, authorId: string, now = Date.now()): string[] {
   if (!isMainTopicId(topicId)) return [];
   return sql
     .exec<{ author_id: string }>(
       `SELECT DISTINCT m.author_id FROM (
-         SELECT author_id, ext FROM messages WHERE topic_id = ? AND deleted_at IS NULL ORDER BY created_seq DESC LIMIT ?
+         SELECT author_id, client_msg_id, ext FROM messages WHERE topic_id = ? AND deleted_at IS NULL ORDER BY created_seq DESC LIMIT ?
        ) m, json_each(json_extract(m.ext, '$.cardState.ask.from')) f
-       WHERE json_extract(m.ext, '$.cardState.ask.status') = 'open' AND f.value = ? AND m.author_id != ?
-         AND coalesce(json_extract(m.ext, '$.cardState.ask.expiresAt'), ?) > ?`,
+       WHERE m.client_msg_id LIKE '${FRONT_DESK_ASK_PREFIX}%' AND json_extract(m.ext, '$.cardState.ask.status') = 'open'
+         AND f.value = ? AND m.author_id != ? AND json_extract(m.ext, '$.cardState.ask.expiresAt') > ?`,
       topicId,
       ASK_SCAN,
       authorId,
       authorId,
-      now + 1,
       now,
     )
     .toArray()
@@ -564,10 +566,8 @@ interface DeliverContext {
 }
 
 /**
- * One outbox row's hand-offs: the members it goes to and how it goes to one of them. `route`
- * waits for the topic's earlier hand-offs before a message without an @ is routed (the routing
- * owner may change when one of them starts a run). Null: nobody gets the row. Throws when it
- * must be tried again.
+ * One outbox row's hand-offs: the members it goes to and how it goes to one of them. Null: nobody
+ * gets the row. Throws when it must be tried again.
  */
 interface Plan {
   targets: string[];
@@ -576,7 +576,7 @@ interface Plan {
   record(done: string[]): void;
 }
 
-async function plan(c: DeliverContext, row: OutboxRow, route: () => Promise<void>): Promise<Plan | null> {
+async function plan(c: DeliverContext, row: OutboxRow): Promise<Plan | null> {
   const single = (botId: string, send: () => Promise<unknown>): Plan => ({ targets: [botId], done: [], send, record: () => {} });
   if (row.kind === "card") {
     const p = JSON.parse(row.payload) as OutboxCard;
@@ -600,15 +600,13 @@ async function plan(c: DeliverContext, row: OutboxRow, route: () => Promise<void
   }
   const m = JSON.parse(row.payload) as OutboxMessage;
   const peer = dmPeer(c.sql, m.authorId);
-  // A message without an @ goes where the topic routes it once the earlier hand-offs are done.
-  if (!m.targets && m.mentions.length === 0 && !peer) await route();
   // The routing owner now (a run may have started in the topic since the message was written).
   const owner = m.targets ? null : routingOwner(c.sql, m.topicId);
   const ext = c.sql.exec<{ ext: string | null }>("SELECT ext FROM messages WHERE id = ?", m.messageId).toArray()[0]?.ext ?? null;
   const parsed = parseExt(ext);
   const quoted = parsed.replyTo?.authorId;
   // A message without an @ that quotes a participant or answers its approval goes to that member;
-  // in a 群聊, one that an open card ask waits on goes to the member that asked (接 1.8).
+  // in a 群聊, one that the front desk's open question waits on goes to the member that asked (接 1.8).
   const addressed =
     !m.targets && m.mentions.length === 0 && !peer
       ? [...addressedParticipants(c.sql, m.topicId, m.authorId, m.body, quoted), ...askingMembers(c.sql, m.topicId, m.authorId)]
@@ -770,6 +768,8 @@ interface DrainState {
   inflight: Set<number>;
   lanes: Map<string, Lane>;
   topics: Map<string, Promise<unknown>>;
+  /** Each topic's rows without an @ that wait for the topic to be idle before they are routed. */
+  routes: Map<string, Promise<unknown>>;
 }
 const drains = new WeakMap<SqlStorage, DrainState>();
 
@@ -783,7 +783,7 @@ export class LaneWaits extends Error {
 function drainState(sql: SqlStorage): DrainState {
   let st = drains.get(sql);
   if (!st) {
-    st = { inflight: new Set(), lanes: new Map(), topics: new Map() };
+    st = { inflight: new Set(), lanes: new Map(), topics: new Map(), routes: new Map() };
     drains.set(sql, st);
   }
   return st;
@@ -857,12 +857,28 @@ function heldLanes(sql: SqlStorage, now: number): { lanes: Set<string>; topics: 
   return { lanes, topics };
 }
 
+/**
+ * A message without an @ in a 话题 goes where the topic routes it, and the routing owner may change
+ * when an earlier hand-off starts a run: it is routed once the topic's earlier hand-offs are done.
+ * The 群聊 and a DM have no routing owner to wait for.
+ */
+function routesLater(c: DeliverContext, row: OutboxRow): boolean {
+  if (row.kind !== "message" || isMainTopicId(row.topic_id)) return false;
+  const m = JSON.parse(row.payload) as OutboxMessage;
+  return !m.targets && m.mentions.length === 0 && !dmPeer(c.sql, m.authorId);
+}
+
 /** Delivers one row through its lanes, then deletes it, or stores its retry. */
 async function deliverRow(c: DeliverContext, st: DrainState, row: OutboxRow, held: Set<string>): Promise<void> {
   try {
-    // The rows of a topic are routed one after another, so their hand-offs join each lane in order.
-    const step = (st.topics.get(row.topic_id) ?? Promise.resolve()).then(async () => {
-      const p = await plan(c, row, () => topicIdle(st, row.topic_id));
+    // The rows of a topic are routed one after another, so their hand-offs join each lane in
+    // order. A row that waits for the topic to be idle before it is routed (routesLater) waits on
+    // its own chain: later rows with fixed members (an @, a DM) do not wait behind it.
+    const later = routesLater(c, row);
+    const chains = later ? st.routes : st.topics;
+    const before = later ? Promise.all([st.topics.get(row.topic_id), st.routes.get(row.topic_id)]).then(() => topicIdle(st, row.topic_id)) : (st.topics.get(row.topic_id) ?? Promise.resolve());
+    const step = before.then(async () => {
+      const p = await plan(c, row);
       if (!p) return null;
       const started = new Map<string, Promise<void>>();
       for (const id of p.targets) {
@@ -875,9 +891,9 @@ async function deliverRow(c: DeliverContext, st: DrainState, row: OutboxRow, hel
       return { p, started };
     });
     const tail = step.catch(() => {});
-    st.topics.set(row.topic_id, tail);
+    chains.set(row.topic_id, tail);
     void tail.then(() => {
-      if (st.topics.get(row.topic_id) === tail) st.topics.delete(row.topic_id);
+      if (chains.get(row.topic_id) === tail) chains.delete(row.topic_id);
     });
     const routed = await step;
     if (routed) {

@@ -91,7 +91,7 @@ export abstract class DeskInput extends DeskDelegate {
   /** Whether a message is the run's own: its request, its progress or approval card, or an input it took. */
   protected runMessage(r: RunRow, messageId: string): boolean {
     if (messageId === r.trigger_message_id || messageId === r.progress_message_id || messageId === r.result_message_id) return true;
-    if (messageId === this.approvalCard(r)?.messageId) return true;
+    if (messageId === this.approvalCard(r)?.messageId || this.meta(`runCard:${messageId}`) === r.id) return true;
     return this.sql.exec("SELECT 1 FROM inputs WHERE run_id = ? AND message_id = ? LIMIT 1", r.id, messageId).toArray().length > 0;
   }
 
@@ -332,7 +332,7 @@ export abstract class DeskInput extends DeskDelegate {
       // it starts its own run next to any running one.
       const asked = this.askOfCard(a.answer.messageId);
       if (asked) this.sql.exec("UPDATE decisions SET answered = 1 WHERE message_id = ?", asked.message_id);
-      const active = asked && isMainTopicId(a.topicId) ? undefined : this.activeRun(a.topicId);
+      const active = asked && isMainTopicId(a.topicId) ? undefined : this.runOfCard(a.topicId, a.answer.messageId);
       // cards2 (F5): an answer that starts a run closes its retract window first. It starts a
       // run only while its ask still stands: an answer to a closed ask of an ended run does not.
       if (!active) {

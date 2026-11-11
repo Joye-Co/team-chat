@@ -474,6 +474,23 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
     return !isMainTopicId(topicId) && this.activeRun(topicId) !== undefined;
   }
 
+  /**
+   * The active run a card of this bot belongs to (its answers and live events go there). A topic
+   * (话题) has one run at a time. In a chat area (接 1.5) it is the run that posted the card, while
+   * it is active; a card no run is known to have posted goes to the only active run, if there is
+   * just one. Undefined: no run takes it (an answer may start one).
+   */
+  protected runOfCard(topicId: string, messageId: string): RunRow | undefined {
+    if (!isMainTopicId(topicId)) return this.activeRun(topicId);
+    const owner = this.meta(`runCard:${messageId}`);
+    if (owner !== null) {
+      const r = this.run(owner);
+      return r && r.ended_at === null ? r : undefined;
+    }
+    const runs = this.activeRuns(topicId);
+    return runs.length === 1 ? runs[0] : undefined;
+  }
+
   protected toRun(r: RunRow): BotRun {
     const run: BotRun = {
       id: r.id,

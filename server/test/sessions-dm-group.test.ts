@@ -289,3 +289,112 @@ describe("hand-offs (接 1.9, 1.13)", () => {
     joye.close();
   });
 });
+
+describe("parallel runs in the 群聊 (review of 接 1.5)", () => {
+  it("give a card's answer to the run that posted it, and let a failed run be retried next to a running one", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["interact", "output", "resume"], maxParallelRuns: 4 });
+    const { c: alice } = await Client.connect(w.human.token);
+    const { c: joye } = await Client.connect(w.owner.token);
+    const main = mainTopicId(w.gid);
+
+    await send(alice, w.gid, main, "@dev 看下 CI", { mentions: [w.bot.id] });
+    const a = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId: a.runId });
+    await alice.waitEvent((e) => e.type === "run.updated" && e.data.run.id === a.runId && e.data.run.status === "running");
+    // Alice's run asks her something in a card.
+    d.event(a.runId, { type: "output", outputId: "o1", op: "card.post", body: { card: askCard("哪个分支？", w.human.id, Date.now() + 60_000) } });
+    const posted = await d.next((f) => f.t === "run.output.result" && f.runId === a.runId && f.outputId === "o1");
+    expect(posted, JSON.stringify(posted)).toMatchObject({ ok: true });
+    const cardId = posted.result.messageId as string;
+
+    // Joye's request runs next to it.
+    await send(joye, w.gid, main, "@dev 写一下周报", { mentions: [w.bot.id] });
+    const b = await d.next((f) => f.t === "run.assign" && f.runId !== a.runId);
+    d.send({ t: "run.accept", runId: b.runId });
+    await joye.waitEvent((e) => e.type === "run.updated" && e.data.run.id === b.runId && e.data.run.status === "running");
+
+    // Alice answers the card of her run: it reaches her run, not the newest one.
+    await alice.ok({ t: "card.answer", groupId: w.gid, messageId: cardId, rev: 1, actionId: "send", inputs: { answer: "main" } });
+    const got = await d.next((f) => (f.t === "run.answer" || f.t === "run.input") && f.runId === a.runId);
+    expect(JSON.stringify(got)).toContain("main");
+    await new Promise((r) => setTimeout(r, 200));
+    expect(d.frames.some((f) => (f.t === "run.answer" || f.t === "run.input") && f.runId === b.runId)).toBe(false);
+
+    // Alice's run fails; she retries it while Joye's still runs.
+    await d.acked(a.runId, d.done(a.runId, { status: "failed", error: "tests failed" }));
+    await alice.waitEvent((e) => e.type === "run.updated" && e.data.run.id === a.runId && e.data.run.status === "failed");
+    const again = await api(`/v1/runs/${a.runId}/retry`, { token: w.human.token, body: {} });
+    expect(again.status, JSON.stringify(again.body)).toBe(200);
+    await d.next((f) => f.t === "run.assign" && f.runId === again.body.id);
+    d.send({ t: "run.accept", runId: again.body.id });
+    await d.acked(again.body.id, d.done(again.body.id, { status: "succeeded", resultText: "ok" }));
+    await d.acked(b.runId, d.done(b.runId, { status: "succeeded", resultText: "ok" }));
+    d.close();
+    alice.close();
+    joye.close();
+  });
+
+  it("keep a person's talk without an @ out of a run whose own card asks them", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["interact", "output"] });
+    const { c } = await Client.connect(w.human.token);
+    const main = mainTopicId(w.gid);
+    await send(c, w.gid, main, "@dev 看下 CI", { mentions: [w.bot.id] });
+    const a = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId: a.runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === a.runId && e.data.run.status === "running");
+    // A run's own ask card, with no end time: it is answered in the card, not by chat.
+    const card = askCard("哪个分支？", w.human.id, Date.now() + 60_000) as any;
+    delete card.ask.expiresAt;
+    d.event(a.runId, { type: "output", outputId: "o1", op: "card.post", body: { card, clientMsgId: "fd:not-the-desk" } });
+    const posted = await d.next((f) => f.t === "run.output.result" && f.outputId === "o1");
+    expect(posted, JSON.stringify(posted)).toMatchObject({ ok: true });
+    const msg = (await c.waitEvent((e) => e.type === "message.created" && e.data.message.id === posted.result.messageId)).data.message;
+    expect(msg.cardState.ask).toMatchObject({ status: "open" });
+
+    await send(c, w.gid, main, "大家中午吃什么");
+    await new Promise((r) => setTimeout(r, 500));
+    expect(d.frames.some((f) => f.t === "run.input" || f.t === "run.answer")).toBe(false);
+    await d.acked(a.runId, d.done(a.runId, { status: "succeeded", resultText: "ok" }));
+    d.close();
+    c.close();
+  });
+});
+
+describe("hand-offs without an @ (review of 接 1.9)", () => {
+  it("a message without an @ waiting to be routed does not hold back a later @ of another member", async () => {
+    const w = await world();
+    const ops = await addBot(w, "ops");
+    await aiOn(w.owner.token);
+    fakeDesk({
+      dev: [
+        { d: { action: "dispatch", reason: "work", confidence: 0.9, brief: { goal: "修登录页" } } },
+        { d: { action: "reply", reason: "hi", confidence: 0.9, reply: "dev 在" }, delayMs: 2500 },
+        { d: { action: "reply", reason: "hi", confidence: 0.9, reply: "dev 在" } },
+        { d: { action: "reply", reason: "hi", confidence: 0.9, reply: "dev 在" } },
+      ],
+      ops: [{ d: { action: "reply", reason: "hi", confidence: 0.9, reply: "ops 在" } }],
+    });
+    const { d } = await Daemon.connect(w.machineToken, {});
+    const { c } = await Client.connect(w.human.token);
+    const { c: joye } = await Client.connect(w.owner.token);
+    // dev ran in this topic: it routes messages without an @ there.
+    const first = await send(c, w.gid, undefined, "@dev 登录页坏了", { mentions: [w.bot.id] });
+    const topicId = first.message.topicId as string;
+    const a = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId: a.runId });
+    await d.acked(a.runId, d.done(a.runId, { status: "succeeded", resultText: "ok" }));
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === a.runId && e.data.run.status === "done");
+
+    await send(c, w.gid, topicId, "@dev 你还在吗", { mentions: [w.bot.id] });
+    await send(joye, w.gid, topicId, "补充一下");
+    await send(c, w.gid, topicId, "@ops 你在吗", { mentions: [ops.id] });
+    const opsReply = await c.waitEvent((e) => e.type === "message.created" && e.data.message.authorId === ops.id, 2000);
+    expect(opsReply.data.message.body).toBe("ops 在");
+    await c.waitEvent((e) => e.type === "message.created" && e.data.message.authorId === w.bot.id && e.data.message.body === "dev 在", 8000);
+    d.close();
+    c.close();
+    joye.close();
+  });
+});
