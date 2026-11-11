@@ -199,6 +199,37 @@ pub fn status_item_ok(services: &Services, cx: &App) -> bool {
     }
 }
 
+/// Whether the app keeps running when its last window closes, with a way back to it: on
+/// macOS always (the Dock icon), on Windows while the notification-area icon is shown.
+/// Closing the last window from the keyboard is only offered then.
+pub fn app_outlives_windows(cx: &App) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = cx;
+        true
+    }
+    #[cfg(target_os = "windows")]
+    {
+        status_item::outlives_windows(cx)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = cx;
+        false
+    }
+}
+
+/// What 关闭窗口 (⌘W, Ctrl+W) does to a window: it closes unless that would end the app
+/// (the last window of an app that does not outlive its windows), and the main window
+/// only closes when the app stays reachable without it.
+pub fn close_command_closes(outlives: bool, windows: usize, main_window: bool) -> bool {
+    if main_window {
+        outlives
+    } else {
+        outlives || windows > 1
+    }
+}
+
 /// Registers the main window, where the navigation dialogs open.
 pub fn attach_window(window: &Window, cx: &mut App) {
     if cx.has_global::<NavGlobal>() {
@@ -554,6 +585,31 @@ fn go_to_unread(forward: bool, cx: &mut App) {
             nav.open_group(g.clone(), cx);
             nav.open_topic(g, t, cx);
         });
+    }
+}
+
+#[cfg(test)]
+mod close_tests {
+    use super::close_command_closes;
+
+    /// ⌘W on the Mac and Ctrl+W on Windows with the notification-area icon close any
+    /// window, the main one too (the app stays in the Dock or the tray). Without the icon
+    /// Ctrl+W never closes the main window or the last window: that would quit.
+    #[test]
+    fn the_close_command_never_ends_the_app() {
+        for windows in [1, 2, 3] {
+            assert!(close_command_closes(true, windows, true), "main, app stays");
+            assert!(close_command_closes(true, windows, false));
+            assert!(
+                !close_command_closes(false, windows, true),
+                "main, no way back"
+            );
+        }
+        assert!(!close_command_closes(false, 1, false), "the last window");
+        assert!(
+            close_command_closes(false, 2, false),
+            "设置 next to the main window"
+        );
     }
 }
 

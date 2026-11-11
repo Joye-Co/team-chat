@@ -384,9 +384,53 @@ mod win {
     /// Restores a maximized window to its size before.
     pub fn restore(window: &gpui::Window) {
         if let Some(hwnd) = crate::win32::hwnd(window) {
-            // SAFETY: a live window of this thread.
+            restore_hwnd(hwnd);
+        }
+    }
+
+    pub fn restore_hwnd(hwnd: windows::Win32::Foundation::HWND) {
+        // SAFETY: a live window of this thread.
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use windows::{
+            Win32::UI::WindowsAndMessaging::{
+                CreateWindowExW, DestroyWindow, IsZoomed, SW_MAXIMIZE, SW_SHOW, ShowWindow,
+                WINDOW_EX_STYLE, WS_OVERLAPPEDWINDOW,
+            },
+            core::w,
+        };
+
+        /// 窗口 › 最大化或还原: a maximized window goes back to its size.
+        #[test]
+        fn a_maximized_window_is_restored() {
+            // SAFETY: a plain window of this thread, destroyed below.
             unsafe {
-                let _ = ShowWindow(hwnd, SW_RESTORE);
+                let hwnd = CreateWindowExW(
+                    WINDOW_EX_STYLE(0),
+                    w!("STATIC"),
+                    w!("zoom test"),
+                    WS_OVERLAPPEDWINDOW,
+                    80,
+                    80,
+                    400,
+                    300,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .expect("a window");
+                let _ = ShowWindow(hwnd, SW_SHOW);
+                let _ = ShowWindow(hwnd, SW_MAXIMIZE);
+                assert!(IsZoomed(hwnd).as_bool(), "maximized");
+                super::restore_hwnd(hwnd);
+                assert!(!IsZoomed(hwnd).as_bool(), "restored");
+                let _ = DestroyWindow(hwnd);
             }
         }
     }
@@ -421,11 +465,12 @@ pub fn install(cx: &mut App) {
     }
     cx.on_action(|_: &Minimize, cx| with_key_window(cx, |window| window.minimize_window()));
     // Like the red traffic light: the app keeps running, and a click on the
-    // Dock icon opens the main window again.
+    // Dock icon (the notification-area icon on Windows) opens the main window again.
     cx.on_action(|_: &CloseWindow, cx| {
-        // Off the Mac the app ends with its last window: Ctrl+W never closes
-        // that one (the close button and Alt+F4 do).
-        if cfg!(not(target_os = "macos")) && cx.windows().len() <= 1 {
+        // Never the window whose closing would end the app (Windows without the
+        // notification-area icon). The main window answers the command itself.
+        if !super::close_command_closes(super::app_outlives_windows(cx), cx.windows().len(), false)
+        {
             return;
         }
         with_key_window(cx, |window| window.remove_window())
@@ -437,6 +482,12 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &BringAllToFront, cx| bring_all_to_front(cx));
     cx.on_action(|_: &ShowCharacterPalette, cx| show_character_palette(cx));
     set_menus(app_menus(), cx);
+    // On Windows the Dock menu is the taskbar's jump list, which the shell files under
+    // the process's AppUserModelID at the moment it is committed: the id must be set
+    // first, or the list lands under the default identity and the app's taskbar button
+    // never shows it.
+    #[cfg(target_os = "windows")]
+    cx.set_app_identity(crate::provider::session::app_id(), env!("PRODUCT_NAME"));
     cx.set_dock_menu(dock_menu());
 }
 
@@ -756,6 +807,65 @@ mod tests {
         vcx.simulate_keystrokes("cmd-w");
         cx.run_until_parked();
         assert!(cx.update(|cx| cx.windows().is_empty()), "cmd-w closed it");
+    }
+
+    /// The keys of the menu commands off the Mac, as `install` binds them: Ctrl+W closes a
+    /// window, F11 is full screen, and the commands Windows has its own keys for (最小化,
+    /// 表情与符号) or no counterpart of (隐藏) have none. Every command of the Windows menus
+    /// that is this module's has its handler.
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn the_window_menu_commands_have_their_windows_keys(cx: &mut gpui::TestAppContext) {
+        use gpui::Action as _;
+        cx.update(|cx| {
+            install(cx);
+            let keymap = cx.key_bindings();
+            let keys = |action: &dyn gpui::Action| -> Vec<String> {
+                keymap
+                    .borrow()
+                    .bindings()
+                    .filter(|b| b.action().partial_eq(action))
+                    .map(|b| {
+                        b.keystrokes()
+                            .iter()
+                            .map(|k| {
+                                let k = k.inner();
+                                let ctrl = if k.modifiers.control { "ctrl-" } else { "" };
+                                format!("{ctrl}{}", k.key)
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                    .collect()
+            };
+            assert_eq!(keys(&CloseWindow), ["ctrl-w"]);
+            assert_eq!(keys(&ToggleFullScreen), ["f11"]);
+            for none in [
+                Minimize.boxed_clone(),
+                Hide.boxed_clone(),
+                HideOthers.boxed_clone(),
+                ShowCharacterPalette.boxed_clone(),
+                Zoom.boxed_clone(),
+            ] {
+                assert!(keys(none.as_ref()).is_empty(), "{}", none.name());
+            }
+            for handled in [
+                CloseWindow.boxed_clone(),
+                Minimize.boxed_clone(),
+                Zoom.boxed_clone(),
+                ToggleFullScreen.boxed_clone(),
+                BringAllToFront.boxed_clone(),
+                ShowCharacterPalette.boxed_clone(),
+                UseProductionServer.boxed_clone(),
+                UseStagingServer.boxed_clone(),
+            ] {
+                assert!(
+                    cx.is_action_available(handled.as_ref()),
+                    "{} has a handler",
+                    handled.name()
+                );
+            }
+        });
     }
 
     /// The menus a window shows on Windows: every command of the Mac menus except the
