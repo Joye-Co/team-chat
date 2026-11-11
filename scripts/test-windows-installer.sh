@@ -130,19 +130,25 @@ check "shortcut target" is "$(ARG1="$(cygpath -w "$LNK")" ps_out '(New-Object -C
 check "shortcut AppUserModelID" is "$(ARG1="$(cygpath -w "$(dirname "$LNK")")" ARG2="$(basename "$LNK")" ps_out \
   '(New-Object -ComObject Shell.Application).Namespace($env:ARG1).ParseName($env:ARG2).ExtendedProperty("System.AppUserModel.ID")')" "$BUNDLE_ID"
 
-# The notification activator, when the app has one: the class on the shortcut is the class
-# in the registry, and it starts the installed app.
-TOAST_CLSID="$(toast_activator_clsid)"
-if [ -n "$TOAST_CLSID" ]; then
-  check "install log: notification activator" grep -qix "toast activator {$TOAST_CLSID}" <(tr -d '\r' <"$DIR/install.log")
-  check "notification activator: starts the app" is "$(reg_value "Software\\Classes\\CLSID\\{$TOAST_CLSID}\\LocalServer32" "")" "\"$WIN_DIR\\$NAME.exe\" -ToastActivated"
-  check "notification activator: named for the app id" is "$(reg_value "Software\\Classes\\AppUserModelId\\$BUNDLE_ID" CustomActivator | tr 'A-F' 'a-f')" "{$TOAST_CLSID}"
-  check "notification activator: on the shortcut" is "$(ARG1="$(cygpath -w "$(dirname "$LNK")")" ARG2="$(basename "$LNK")" ps_out \
-    '"$((New-Object -ComObject Shell.Application).Namespace($env:ARG1).ParseName($env:ARG2).ExtendedProperty("System.AppUserModel.ToastActivatorCLSID"))"' | tr 'A-F' 'a-f' | tr -d '{}')" "$TOAST_CLSID"
-else
-  printf 'note  the app defines no notification activator (TOAST_ACTIVATOR_CLSID); none is registered\n'
-  check "no notification activator on the shortcut" is "$(ARG1="$(cygpath -w "$(dirname "$LNK")")" ARG2="$(basename "$LNK")" ps_out \
-    '"$((New-Object -ComObject Shell.Application).Namespace($env:ARG1).ParseName($env:ARG2).ExtendedProperty("System.AppUserModel.ToastActivatorCLSID"))"')" ""
+# A notification that is clicked after the app has exited: the app's toasts are protocol
+# activated (their link is <scheme>://…), so Windows needs the URL scheme above and the
+# AppUserModelID on the shortcut, and no COM activator. Opening a link of the scheme the way
+# Windows does must start the installed app.
+if [ "${SKIP_WINDOW:-0}" != 1 ]; then
+  app_pids() { ARG1="$WIN_DIR\\$NAME.exe" ps_out '(Get-Process | Where-Object { $_.Path -ieq $env:ARG1 } | ForEach-Object { $_.Id }) -join " "'; }
+  check "the app is not running before the link" is "$(app_pids)" ""
+  ARG1="$SCHEME://group/installer-test/topic/installer-test" ps_out 'Start-Process $env:ARG1'
+  started=""
+  for _ in $(seq 1 60); do
+    started="$(app_pids)"
+    [ -z "$started" ] || break
+    sleep 0.5
+  done
+  check "a $SCHEME:// link starts the installed app" test -n "$started"
+  # Only the processes this step started, by the path of the install.
+  ARG1="$WIN_DIR\\$NAME.exe" ps_out 'Get-Process | Where-Object { $_.Path -ieq $env:ARG1 } | Stop-Process -Force' >/dev/null 2>&1 || true
+  for _ in $(seq 1 40); do [ -z "$(app_pids)" ] && break; sleep 0.5; done
+  check "the app has stopped again" is "$(app_pids)" ""
 fi
 
 # The installed app starts: it reports itself, takes a link as its argument, and the
