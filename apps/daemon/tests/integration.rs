@@ -399,6 +399,10 @@ takeover_url = "vnc://mac-mini.tailnet"
     );
     let cfg = Config::parse(&text).unwrap();
     assert!(cfg.problems().is_empty(), "{:?}", cfg.problems());
+    // The same config as a file, for a daemon started as a process of its own.
+    let file = dir.join("daemon.toml");
+    std::fs::write(&file, &text).unwrap();
+    daemon::sys::set_mode(&file, 0o600).unwrap();
     cfg
 }
 
@@ -2494,4 +2498,141 @@ async fn a_cli_that_runs_no_hooks_gets_no_gated_prompt() {
         .unwrap()
         .unwrap()
         .unwrap();
+}
+
+/// A machine that slept: every process stops and the clocks go on. Here the daemon is a
+/// process of its own that is frozen for longer than `stall_minutes` (what a closed lid does
+/// to it) while a run is in progress. When it runs again it connects to the server again at
+/// once (the old connection is dead on the server's side), the run is still there and is not
+/// reported as stalled (the CLI was asleep too, not silent), and a cancel still ends it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_machine_that_slept_connects_again_at_once_and_its_run_is_not_stalled() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    write_config(tmp.path(), &m.url);
+    let config = tmp.path().join("daemon.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    assert!(text.contains("heartbeat_secs = 1\n"));
+    std::fs::write(
+        &config,
+        text.replace(
+            "heartbeat_secs = 1\n",
+            "heartbeat_secs = 1\nstall_minutes = 1\n",
+        ),
+    )
+    .unwrap();
+    let log = tmp.path().join("daemon.err");
+    let mut cmd = tokio::process::Command::new(env!("CARGO_BIN_EXE_daemon"));
+    cmd.arg("run")
+        .arg("--config")
+        .arg(&config)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::fs::File::create(&log).unwrap())
+        .kill_on_drop(true);
+    // Frozen and thawed the way each system stops a process: SIGSTOP, or every thread of the
+    // job suspended.
+    #[cfg(unix)]
+    let mut child = cmd.spawn().unwrap();
+    #[cfg(unix)]
+    let freeze = |on: bool| {
+        let pid = child.id().unwrap() as i32;
+        // SAFETY: a signal to the daemon process this test started.
+        unsafe { libc::kill(pid, if on { libc::SIGSTOP } else { libc::SIGCONT }) };
+    };
+    #[cfg(windows)]
+    let (mut child, job) = daemon::winjob::spawn(&mut cmd, false).unwrap();
+    #[cfg(windows)]
+    let freeze = |on: bool| {
+        if on {
+            job.suspend();
+        } else {
+            job.resume();
+        }
+    };
+    let daemon_log = || std::fs::read_to_string(&log).unwrap_or_default();
+
+    let (mut ws, _) = tokio::time::timeout(Duration::from_secs(30), m.conns.recv())
+        .await
+        .unwrap_or_else(|_| panic!("the daemon did not connect: {}", daemon_log()))
+        .unwrap();
+    assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
+    send(&mut ws, &welcome(vec![])).await;
+    send(&mut ws, &assign("z1", "fake", "hang", None)).await;
+    let before = collect(&mut ws, "z1", true, |f| {
+        matches!(
+            f,
+            Up::RunEvent {
+                event: RunEvent::TurnStarted { .. },
+                ..
+            }
+        )
+    })
+    .await;
+    let acked = before.iter().filter_map(Up::seq).max().unwrap_or(0);
+    let pid: i32 = wait_file(&tmp.path().join("work/runs/z1/work/fake.pid"))
+        .await
+        .trim()
+        .parse()
+        .unwrap();
+
+    // Asleep for longer than a silent CLI is given (`stall_minutes = 1`).
+    freeze(true);
+    tokio::time::sleep(Duration::from_secs(66)).await;
+    drop(ws);
+    let woke = std::time::Instant::now();
+    freeze(false);
+
+    // Awake: a new connection, at once, with the run still in it.
+    let (mut ws, _) = tokio::time::timeout(Duration::from_secs(15), m.conns.recv())
+        .await
+        .unwrap_or_else(|_| panic!("no new connection after the sleep: {}", daemon_log()))
+        .unwrap();
+    println!("  connected again {:?} after waking", woke.elapsed());
+    match next(&mut ws).await {
+        Up::Hello { runs, .. } => {
+            assert!(runs.iter().any(|c| c.run_id == "z1" && !c.done), "{runs:?}");
+        }
+        f => panic!("{f:?}"),
+    }
+    assert!(
+        daemon_log().contains("the machine was asleep"),
+        "{}",
+        daemon_log()
+    );
+    send(
+        &mut ws,
+        &welcome(vec![KnownRun {
+            run_id: "z1".into(),
+            acked_seq: acked,
+        }]),
+    )
+    .await;
+    // The run is not called stalled: nothing comes for it (the supervisor looks every 15 s,
+    // and looked when it woke).
+    let stalled = |f: &Up| matches!(f, Up::RunEvent { event: RunEvent::Status { state, .. }, .. } if state == "stalled");
+    let quiet = tokio::time::timeout(
+        Duration::from_secs(20),
+        collect(&mut ws, "z1", true, |f| {
+            stalled(f) || matches!(f, Up::RunDone(_))
+        }),
+    )
+    .await;
+    assert!(quiet.is_err(), "the run after the sleep: {quiet:?}");
+    assert!(alive(pid), "the CLI is still there");
+
+    // The run goes on as before: a cancel ends it.
+    send(
+        &mut ws,
+        &Down::RunCancel {
+            run_id: "z1".into(),
+            reason: None,
+        },
+    )
+    .await;
+    let fr = collect(&mut ws, "z1", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "cancelled");
+    assert!(!fr.iter().any(stalled));
+    let _ = child.start_kill();
+    let _ = child.wait().await;
 }

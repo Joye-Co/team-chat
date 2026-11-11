@@ -516,7 +516,9 @@ async fn run_runtime(
     let mut deadline = assign
         .max_duration_ms
         .map(|ms| tokio::time::Instant::now() + Duration::from_millis(ms));
-    let mut tick = tokio::time::interval(Duration::from_secs(15));
+    const TICK: Duration = Duration::from_secs(15);
+    let mut tick = tokio::time::interval(TICK);
+    let mut ticked = Instant::now();
     let mut paused: Option<Paused> = None;
     let mut resumes = 0u32;
     let mut control_open = true;
@@ -621,6 +623,15 @@ async fn run_runtime(
                 }
             }
             _ = tick.tick() => {
+                // The machine was asleep (or the daemon was not run) since the last tick:
+                // the CLI did not run either. That time is no silence of the CLI and no part
+                // of the run's time limit.
+                let now = Instant::now();
+                if let Some(asleep) = crate::sys::slept(now.duration_since(ticked), TICK) {
+                    last = (last + asleep).min(now);
+                    deadline = deadline.map(|d| d + asleep);
+                }
+                ticked = now;
                 if paused.is_some() {
                     continue;
                 }

@@ -256,18 +256,30 @@ async fn acp_follow_up_is_next_prompt() {
     );
 }
 
-#[cfg(unix)]
+/// The `pty` kind: the prompt reaches the program, what it prints comes back as its lines,
+/// text sent to the run while it works is typed into the terminal, and the exit code is the
+/// program's. The same program on both systems, in each one's shell.
 #[tokio::test]
 async fn pty_prompt_input_and_exit_code() {
     let dir = tempfile::tempdir().unwrap();
-    let s = spec(
-        dir.path(),
-        "pty",
+    #[cfg(unix)]
+    let (shell, args) = (
         "/bin/sh",
-        &["-c", "echo start:{prompt}; read x; echo got:$x; exit 3"],
-        "hi",
+        vec!["-c", "echo start:{prompt}; read x; echo got:$x; exit 3"],
     );
+    #[cfg(windows)]
+    let (shell, args) = (
+        "cmd.exe",
+        vec![
+            "/d",
+            "/v:on",
+            "/c",
+            "echo start:{prompt}& set /p x=& echo got:!x!& exit 3",
+        ],
+    );
+    let s = spec(dir.path(), "pty", shell, &args, "hi");
     let mut sent = false;
+    let mut accepted = false;
     let (o, _evs) = drive(s, |e| match e {
         RunEvent::MessageDelta { text, .. } if text.contains("start:hi") && !sent => {
             sent = true;
@@ -276,13 +288,219 @@ async fn pty_prompt_input_and_exit_code() {
                 text: "abc".into(),
             })
         }
+        RunEvent::InputAccepted { input_id } if input_id == "i" => {
+            accepted = true;
+            None
+        }
         _ => None,
     })
     .await;
+    assert!(accepted, "the input was taken");
     assert_eq!(o.status, Status::Failed);
     assert_eq!(o.exit_code, Some(3));
-    assert!(o.result_text.unwrap().contains("got:abc"));
+    let text = o.result_text.unwrap();
+    assert!(text.contains("got:abc"), "{text:?}");
+    // Lines, as the program wrote them (a Windows console sends a screen, not lines).
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    assert!(lines.contains(&"got:abc"), "{lines:?}");
     assert!(dir.path().join("pty.log").is_file());
+}
+
+/// Windows: a batch file is a `pty` program like any other. Its arguments arrive as they
+/// were given (a prompt with spaces, `&`, `%` and quotes is one argument, not commands), what
+/// is typed goes to the program the batch file reads with, and its exit code is the run's.
+#[cfg(windows)]
+#[tokio::test]
+async fn pty_runs_a_batch_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("agent with space.cmd");
+    std::fs::write(
+        &script,
+        "@echo off\r\necho arg1:\"%~1\"\r\necho arg2:\"%~2\"\r\nset /p line=\r\necho got:%line%\r\nexit /b 5\r\n",
+    )
+    .unwrap();
+    let prompt = "hello world & echo injected > injected.txt | 100% %PATH% \"q\"";
+    let s = spec(
+        dir.path(),
+        "pty",
+        &script.to_string_lossy(),
+        &["{prompt}", "second arg"],
+        prompt,
+    );
+    let work = s.cwd.clone();
+    let mut sent = false;
+    let (o, _evs) = drive(s, |e| match e {
+        RunEvent::MessageDelta { text, .. } if text.contains("arg2:") && !sent => {
+            sent = true;
+            Some(Control::Input {
+                input_id: "i".into(),
+                text: "typed".into(),
+            })
+        }
+        _ => None,
+    })
+    .await;
+    let raw = std::fs::read_to_string(dir.path().join("pty.log")).unwrap_or_default();
+    assert_eq!(o.exit_code, Some(5), "{o:?} raw: {raw:?}");
+    assert_eq!(o.status, Status::Failed);
+    let text = o.result_text.unwrap();
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    // `%~1` gives a quote inside the argument back doubled: that is the batch file's own
+    // reading; every other character is as it was given.
+    let arg1 = format!("arg1:\"{}\"", prompt.replace('"', "\"\""));
+    assert!(lines.contains(&arg1.as_str()), "{lines:?} raw: {raw:?}");
+    assert!(lines.contains(&"arg2:\"second arg\""), "{lines:?}");
+    assert!(lines.contains(&"got:typed"), "{lines:?}");
+    assert!(
+        !work.join("injected.txt").exists(),
+        "the prompt ran as a command"
+    );
+
+    // An argument with a line break cannot be written for a batch file: the run says so.
+    let s = spec(
+        &dir.path().join("r2"),
+        "pty",
+        &script.to_string_lossy(),
+        &["{prompt}"],
+        "two\nlines",
+    );
+    let (o, _) = drive(s, |_| None).await;
+    assert_eq!(o.status, Status::Failed);
+    assert!(
+        o.error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("line break"),
+        "{o:?}"
+    );
+}
+
+/// Windows: 接管 really stops a `pty` run (every thread of the program and of what it started
+/// is suspended and nothing is written), handing it back lets it go on, and a cancel ends the
+/// program and what it started. Unix: `pty_cancel_kills_group` and the pause cases of
+/// `tests/integration.rs`.
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pty_pause_holds_and_cancel_ends_the_tree() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("ticker.py");
+    std::fs::write(
+        &script,
+        "import os, subprocess, sys, time\n\
+kid = subprocess.Popen([sys.executable, '-c', \"import time\\nwhile True:\\n    open('kid.ticks', 'a').write('x\\\\n')\\n    time.sleep(0.05)\"])\n\
+open('pids', 'w').write('%d %d' % (os.getpid(), kid.pid))\n\
+print('ready', flush=True)\n\
+while True:\n    open('own.ticks', 'a').write('x\\n')\n    time.sleep(0.05)\n",
+    )
+    .unwrap();
+    let s = spec(dir.path(), "pty", &script.to_string_lossy(), &[], "go");
+    let (work, run_dir, exec) = (s.cwd.clone(), s.run_dir.clone(), s.exec.clone());
+    let rt = runtime::for_kind("pty").unwrap();
+    let (etx, _erx) = mpsc::unbounded_channel();
+    let (ctx, crx) = mpsc::unbounded_channel();
+    let run = tokio::spawn(rt.start(s, etx, crx));
+    let ticks = [work.join("own.ticks"), work.join("kid.ticks")];
+    let sizes = || -> Vec<u64> {
+        ticks
+            .iter()
+            .map(|f| std::fs::metadata(f).map_or(0, |m| m.len()))
+            .collect()
+    };
+    let wait = |what: &'static str, done: &dyn Fn() -> bool| {
+        let end = std::time::Instant::now() + Duration::from_secs(60);
+        while !done() {
+            assert!(std::time::Instant::now() < end, "timed out: {what}");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    };
+    wait("both processes tick", &|| sizes().iter().all(|n| *n > 10));
+    let pids: Vec<u32> = std::fs::read_to_string(work.join("pids"))
+        .unwrap()
+        .split_whitespace()
+        .map(|p| p.parse().unwrap())
+        .collect();
+    assert_eq!(pids.len(), 2);
+
+    let paused = exec.stop(&run_dir).expect("a pty run can be stopped");
+    // A write that had begun may still land.
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let held = sizes();
+    for pid in &pids {
+        assert_eq!(
+            procs::stopped(*pid),
+            Some(true),
+            "process {pid} is not stopped"
+        );
+    }
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(sizes(), held, "a paused run made progress");
+    paused.resume();
+    wait("both processes tick again", &|| {
+        sizes().iter().zip(&held).all(|(now, then)| now > then)
+    });
+    assert_eq!(procs::stopped(pids[0]), Some(false));
+
+    ctx.send(Control::Cancel).unwrap();
+    let o = tokio::time::timeout(Duration::from_secs(20), run)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(o.status, Status::Cancelled, "{o:?}");
+    wait("the program and its child end", &|| {
+        pids.iter().all(|p| procs::stopped(*p).is_none())
+    });
+    let end = sizes();
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert_eq!(sizes(), end, "something of the run still writes");
+}
+
+/// Windows: whether a process is stopped, for the pause tests.
+#[cfg(windows)]
+mod procs {
+    /// `Some(true)` when every thread of the process `pid` is suspended (a suspend that is
+    /// taken back at once tells the count before it), `Some(false)` when one runs, `None` when
+    /// the process is gone.
+    pub fn stopped(pid: u32) -> Option<bool> {
+        use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+        use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
+        };
+        use windows_sys::Win32::System::Threading::{
+            OpenThread, ResumeThread, SuspendThread, THREAD_SUSPEND_RESUME,
+        };
+        if !daemon::winjob::pid_alive(pid) {
+            return None;
+        }
+        let (mut threads, mut running) = (0, 0);
+        // SAFETY: a snapshot of the system's threads, read entry by entry into a struct of the
+        // size the call is told; each thread handle is closed again.
+        unsafe {
+            let snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+            assert_ne!(snap, INVALID_HANDLE_VALUE);
+            let mut e: THREADENTRY32 = std::mem::zeroed();
+            e.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+            let mut more = Thread32First(snap, &mut e) != 0;
+            while more {
+                if e.th32OwnerProcessID == pid {
+                    let t = OpenThread(THREAD_SUSPEND_RESUME, 0, e.th32ThreadID);
+                    if !t.is_null() {
+                        threads += 1;
+                        let before = SuspendThread(t);
+                        if before != u32::MAX {
+                            ResumeThread(t);
+                            if before == 0 {
+                                running += 1;
+                            }
+                        }
+                        CloseHandle(t);
+                    }
+                }
+                more = Thread32Next(snap, &mut e) != 0;
+            }
+            CloseHandle(snap);
+        }
+        (threads > 0).then_some(running == 0)
+    }
 }
 
 #[cfg(unix)]

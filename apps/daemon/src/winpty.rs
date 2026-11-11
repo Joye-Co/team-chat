@@ -193,6 +193,18 @@ pub fn spawn(
     args: &[String],
     cwd: &Path,
     env: &[(String, String)],
+    size: (i16, i16),
+) -> std::io::Result<(Pty, std::fs::File, std::fs::File)> {
+    spawn_line(&command_line(program, args), cwd, env, size)
+}
+
+/// [`spawn`] with the command line as it is given to the system (the program is its first
+/// word): for a batch file, whose line is written for `cmd.exe`, not for a program's own
+/// argument parser.
+pub fn spawn_line(
+    command_line: &str,
+    cwd: &Path,
+    env: &[(String, String)],
     (cols, rows): (i16, i16),
 ) -> std::io::Result<(Pty, std::fs::File, std::fs::File)> {
     let (input_read, input_write) = pipe()?;
@@ -268,10 +280,7 @@ pub fn spawn(
     si.StartupInfo.hStdError = INVALID_HANDLE_VALUE;
     si.lpAttributeList = list_ptr;
 
-    let mut line: Vec<u16> = command_line(program, args)
-        .encode_utf16()
-        .chain([0])
-        .collect();
+    let mut line: Vec<u16> = command_line.encode_utf16().chain([0]).collect();
     let block = environment_block(env);
     let dir: Vec<u16> = cwd.as_os_str().encode_wide().chain([0]).collect();
     // SAFETY: a plain C struct; zeroes are a valid value.
