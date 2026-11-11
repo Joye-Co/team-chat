@@ -33,6 +33,12 @@ set +e
 window_code="${PIPESTATUS[0]}"
 set -e
 echo "artifact window exit code: $window_code"
+# What is on the screen for scenes with embedded pages (the PNGs above ask each window for
+# its picture, and a WebView2 child window does not always answer): <dir>/screen/.
+set +e
+TC_CAPTURE_SCREEN=1 "$exe" --screenshot "$dir/screen" --scenes web-embed,artifact-pane-v2 2>&1 \
+  | tee -a "$dir/selftest.log"
+set -e
 if [ "$code" = 0 ]; then
   code="$window_code"
 fi

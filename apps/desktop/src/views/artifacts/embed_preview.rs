@@ -151,6 +151,10 @@ pub fn open(
     Ok(handle)
 }
 
+/// How long a page may take to show. A CI runner without a graphics card starts two web
+/// views and a video in about 12 s; 15 s was too close on Windows.
+const PAGE_WAIT: Duration = Duration::from_secs(45);
+
 async fn wait_for<T>(
     cx: &mut AsyncApp,
     timeout: Duration,
@@ -186,12 +190,12 @@ const MEDIA: &str = "(function(){var v=document.getElementById('v'),a=document.g
 return JSON.stringify({playing:v.currentTime>0&&v.videoWidth>0,audio:a.duration||0});})()";
 
 async fn run(handle: AnyWindowHandle, mode: Mode, cx: &mut AsyncApp) -> Result<(), String> {
-    let inline = wait_for(cx, Duration::from_secs(15), |cx| {
+    let inline = wait_for(cx, PAGE_WAIT, |cx| {
         embed(INLINE_ID, cx).filter(|e| e.read(cx).shown() && e.read(cx).bounds().is_some())
     })
     .await
     .ok_or("the inline page did not load")?;
-    let pane = wait_for(cx, Duration::from_secs(15), |cx| {
+    let pane = wait_for(cx, PAGE_WAIT, |cx| {
         embed(PANE_ID, cx).filter(|e| e.read(cx).shown())
     })
     .await
