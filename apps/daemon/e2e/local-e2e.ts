@@ -785,11 +785,17 @@ async function serviceChecks(
       return pids.length === 1 && pids[0] !== third ? pids[0] : undefined;
     }, 120_000);
     await until("the daemon is connected again", connected, 90_000);
+    // The daemon reports the run as ended by its restart, and the server continues the work in
+    // a new run of the same topic (the old one shows as cancelled: restarted), not as failed.
     const ended = await until("the lost run is reported", () => (["failed", "cancelled", "done"].includes(lost.status()) ? lost.status() : undefined), 120_000);
-    if (ended !== "failed") throw new Error(`the run the logoff ended is ${ended}, not failed`);
+    if (ended !== "cancelled") throw new Error(`the run the logoff ended is ${ended}, not continued`);
+    const resumed = await until("the work goes on in a new run", () => runsOf(lost.topic).find((r: any) => r.id !== lost.id && r.status === "running"), 120_000);
+    const stopResumed = spawnSync(example, [BASE, join(TMP, "alice-token"), resumed.id, join(TMP, "client-data")], { encoding: "utf8" });
+    if (stopResumed.status !== 0) throw new Error(`cancel_run failed (${stopResumed.status})`);
+    await until("the continued run is cancelled", () => runsOf(lost.topic).filter((r: any) => r.id === resumed.id).at(-1)?.status === "cancelled", 30_000);
     await quickRun("after the logon");
-    out.logoff = { before: third, after: back, lostRun: ended };
-    step("logoff during a run: the CLI ended with the daemon; after the logon the daemon reported the run as failed and ran a new one");
+    out.logoff = { before: third, after: back, lostRun: ended, continuedIn: resumed.id };
+    step("logoff during a run: the CLI ended with the daemon; after the logon the work went on in a new run, and a new run ran");
 
     // 4. Uninstall.
     const un = spawnSync(s.exe, ["uninstall-service"], { encoding: "utf8" });
