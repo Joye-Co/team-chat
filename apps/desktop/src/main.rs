@@ -76,6 +76,7 @@ mod drafts;
 #[allow(dead_code)]
 mod fake;
 mod fake_extra;
+mod history;
 mod markdown;
 mod paths;
 mod provider;

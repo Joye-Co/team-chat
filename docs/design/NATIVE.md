@@ -467,6 +467,13 @@ Panes:
 - Labels are not selectable; message text is selectable.
 - Motion: menus and popovers fade 0.12 s; sheets slide 0.25 s; no spring bounce on frequent
   interactions; honour Reduce Motion.
+- Continuity across places (owner decision 2026-11-12): a move never loses where the person
+  was. Each 话题 reopens at the message it was left at (at its newest one when it was left
+  there); a 话题 whose unread messages start more than a screen up opens at the first one. 前往 ›
+  返回 / 前进 (⌘[ / ⌘]) walk back and forth through the places the window went through; a walk
+  with ↑/↓ in the sidebar is one step. The sidebar scrolls the open 话题's row into view (and
+  unfolds its 群) however it was opened. A jump to one message from another place shows a
+  "返回 …" pill at the top of the thread for 8 s. Each 群 page keeps its own scroll place.
 
 ## 11. How to check a screen
 

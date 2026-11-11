@@ -8,7 +8,8 @@ use gpui::{App, KeyBinding, Menu, MenuItem, OsAction, SystemMenuType};
 use gpui_component::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 
 use super::{
-    About, NewGroup, NextUnreadTopic, PreviousUnreadTopic, QuickSwitch, ShowMainWindow, StartDm,
+    About, GoBack, GoForward, NewGroup, NextUnreadTopic, PreviousUnreadTopic, QuickSwitch,
+    ShowMainWindow, StartDm,
 };
 use crate::{
     app::{
@@ -104,6 +105,9 @@ fn mac_menus(state: MenuState) -> Vec<Menu> {
         ]),
         Menu::new(nav::MENU_GO).items([
             MenuItem::action(nav::MENU_QUICK_SWITCH, QuickSwitch),
+            MenuItem::separator(),
+            MenuItem::action(nav::MENU_BACK, GoBack),
+            MenuItem::action(nav::MENU_FORWARD, GoForward),
             MenuItem::separator(),
             MenuItem::action(rail::RAIL_DESK, OpenDesk),
             MenuItem::action(rail::RAIL_ARTIFACTS, OpenArtifacts),
