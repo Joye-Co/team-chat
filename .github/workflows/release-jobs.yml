@@ -9,27 +9,38 @@ name: Release jobs
 # Not on a tag push: the release commit (version and CHANGELOG date) must come before the tag,
 # so a tag trigger would put that step back on somebody's Mac; and a dispatch can be a dry run.
 #
+# A release is one thing for both systems. The job "Windows installer" runs first: it builds,
+# signs and tests <name>-<version>-setup.exe on a Windows runner (install, uninstall, and the
+# update from the previous release with the daemon running). Only when it is green does the
+# macOS job publish: one GitHub Release with the DMG, the installer and the daemons, and both
+# files on production. A Windows build that fails stops the release before anything is public.
+#
 # Modes:
-#   dry-run      (default, any branch) preflight and plan, then set the version in the working
-#                tree, build, sign and check the DMG and the daemon; commits, tags and uploads
-#                nothing. The built files are kept as a workflow artifact for 7 days.
-#   release      (main only) the whole release.
-#   upload-only  (main only) download the DMG from the GitHub Release v<version> and upload it to
-#                production again (retry after a failed or skipped upload).
+#   dry-run       (default, any branch) preflight and plan, then set the version in the working
+#                 tree, build, sign and check the DMG, the daemon and the Windows installer;
+#                 commits, tags and uploads nothing. The built files are kept as workflow
+#                 artifacts for 7 days.
+#   release       (main only) the whole release, both systems.
+#   upload-only   (main only) download the DMG and the installer from the GitHub Release
+#                 v<version> and upload them to production again (retry after a failed or
+#                 skipped upload). A file that is missing on GitHub fails the run.
+#   windows-only  (main only) give a release that exists its Windows installer: build and test
+#                 it from main with that version, then add it to production and to the GitHub
+#                 Release (scripts/release.sh --add-windows). For a release that was published
+#                 without one. A version that has an installer on production is refused: a
+#                 published file is never replaced, release a higher version.
 #
 # Secrets (docs/RUNBOOK.md, "Release from GitHub Actions"): SIGNING_KEY_PEM, SIGNING_CERT_PEM,
 # ADMIN_SECRET_PRODUCTION. A release refuses to run without them: an ad-hoc signature would
 # change the designated requirement and the Keychain would stop trusting the app.
 #
-# Windows: the job "Windows installer" builds, signs and tests <name>-<version>-setup.exe on a
-# Windows runner in the modes dry-run and release, from the same commit with the version set in
-# its working tree. "Publish the Windows installer" then adds it to the GitHub Release and
-# uploads it to production as the Windows file of the release (release), or uploads the
-# installer of the GitHub Release again (upload-only). Both wait for nothing a Mac does except
-# the GitHub Release itself. A prerelease gets its installer on the GitHub Release only, as it
-# gets its DMG (the app updates only to MAJOR.MINOR.PATCH). Optional secrets WINDOWS_SIGN_PFX_BASE64 and WINDOWS_SIGN_PASSWORD (a
-# code-signing certificate as a base64 PFX): without them the installer is not signed and
-# Windows shows the SmartScreen warning.
+# Windows code signing: WINDOWS_SIGN_PFX_BASE64 and WINDOWS_SIGN_PASSWORD (a certificate as a
+# base64 PFX), or WINDOWS_SIGN_CMD (a command that signs the file given as its last argument,
+# for a certificate in a cloud key store) with WINDOWS_SIGN_ENV (NAME=value lines the command
+# needs). Without either, a release refuses to run too, unless it is started with
+# windows_unsigned=true: an unsigned installer (SmartScreen warning) is published only on
+# purpose. A prerelease gets its installer on the GitHub Release only, as it gets its DMG (the
+# app updates only to MAJOR.MINOR.PATCH).
 
 # This file holds the jobs; release.yml is the manual trigger that calls it. The split exists for
 # the server URLs: a value handed to a called workflow as a secret is masked in every log line,
@@ -45,6 +56,10 @@ on:
       mode:
         required: true
         type: string
+      windows_unsigned:
+        required: false
+        type: boolean
+        default: false
     secrets:
       SERVERS_JSON:
         description: The repository variable SERVERS_JSON
@@ -59,6 +74,10 @@ on:
         required: false
       WINDOWS_SIGN_PASSWORD:
         required: false
+      WINDOWS_SIGN_CMD:
+        required: false
+      WINDOWS_SIGN_ENV:
+        required: false
 
 permissions:
   contents: write
@@ -71,6 +90,13 @@ env:
 jobs:
   release:
     name: Release ${{ inputs.version }} (${{ inputs.mode }})
+    # A release is one thing for both systems: this job publishes, and it starts only after the
+    # Windows job has built and tested the installer. A Windows build that fails stops the
+    # release before the DMG is anywhere. (A dry run goes on without the installer.)
+    needs: [windows]
+    if: >-
+      !cancelled() && inputs.mode != 'windows-only' &&
+      (inputs.mode != 'release' || needs.windows.result == 'success')
     runs-on: macos-15
     timeout-minutes: 120
     env:
@@ -224,6 +250,13 @@ jobs:
           echo "comparing with $prev: $(basename "$dmg")"
           echo "SAME_AS_DMG=$dmg" >>"$GITHUB_ENV"
 
+      - name: Get the Windows installer built by the Windows job
+        if: inputs.mode != 'upload-only' && needs.windows.result == 'success'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-installer-${{ env.VERSION }}
+          path: ${{ runner.temp }}/windows
+
       - name: Release (${{ inputs.mode }})
         env:
           TC_SERVERS_JSON: ${{ secrets.SERVERS_JSON }}
@@ -233,14 +266,37 @@ jobs:
           # Without the notes file the preflight reports it (dry run) or stops (release).
           [ -f "$notes" ] && args+=(--notes "$notes")
           [ -n "${SAME_AS_DMG:-}" ] && args+=(--same-as "$SAME_AS_DMG")
+          # The installer and the Windows daemon alone, as the Windows job built and tested
+          # them: checked after the transfer, then published together with the DMG.
+          windows=()
+          if [ -d "$RUNNER_TEMP/windows" ]; then
+            (cd "$RUNNER_TEMP/windows" && for sum in ./*.sha256; do shasum -a 256 -c "$sum"; done)
+            setup="$(find "$RUNNER_TEMP/windows" -name '*-setup.exe' | head -n 1)"
+            windows=(--windows-installer "$setup")
+            for f in "$RUNNER_TEMP/windows"/*.exe; do
+              [ "$f" = "$setup" ] || windows+=(--asset "$f")
+            done
+          fi
           case "$MODE" in
-            dry-run) scripts/release.sh "${args[@]}" --dry-run --build ;;
-            release) scripts/release.sh "${args[@]}" ;;
+            dry-run) scripts/release.sh "${args[@]}" ${windows[@]+"${windows[@]}"} --dry-run --build ;;
+            release)
+              # release.sh refuses to publish without the installer.
+              scripts/release.sh "${args[@]}" ${windows[@]+"${windows[@]}"} ;;
             upload-only)
+              # Both files of the GitHub Release go to the server again. One that is not
+              # there fails the job, the same for both systems.
               mkdir -p dist
               gh release download "v$VERSION" --pattern '*.dmg' --dir dist
               scripts/check-release-digest.sh "v$VERSION" dist/*.dmg
-              scripts/release.sh "$VERSION" --env production --upload-only ;;
+              scripts/release.sh "$VERSION" --env production --upload-only
+              if ! gh release download "v$VERSION" --pattern '*-setup.exe' --dir dist; then
+                echo "::error::release v$VERSION has no Windows installer on GitHub. Add one with mode=windows-only (it builds the installer of this version from main and publishes it)"
+                exit 1
+              fi
+              scripts/check-release-digest.sh "v$VERSION" dist/*-setup.exe
+              up=("$VERSION" --env production --upload-only --platform windows)
+              [ -f "$notes" ] && up+=(--notes "$notes")
+              scripts/release.sh "${up[@]}" ;;
           esac
 
       - name: Keep the dry run's build
@@ -258,7 +314,9 @@ jobs:
 
   windows:
     name: Windows installer ${{ inputs.version }} (${{ inputs.mode }})
-    # A prerelease gets an installer too, as it gets a DMG: on GitHub only.
+    # First in a release: it builds, signs and tests the installer, and the macOS job publishes
+    # only when this job is green. A prerelease gets an installer too, as it gets a DMG: on
+    # GitHub only.
     if: inputs.mode != 'upload-only'
     runs-on: windows-2025
     timeout-minutes: 120
@@ -310,31 +368,64 @@ jobs:
             exit 1
           fi
 
-      - name: Import the signing certificate
-        # Into the runner user's certificate store, so no password is on a command line. The
-        # thumbprint is public: it is in every signed file.
+      - name: Set up code signing
+        # Three ways: a certificate as a PFX (imported into the runner user's store, so no
+        # password is on a command line; the thumbprint is public, it is in every signed
+        # file), a signing command for a certificate that has no PFX (a cloud key store, as
+        # new certificates are issued), or none. A release without signing is the operator's
+        # explicit choice (windows_unsigned), as a Mac release without its certificate is
+        # refused: never the silent default.
         shell: pwsh
         env:
           WINDOWS_SIGN_PFX_BASE64: ${{ secrets.WINDOWS_SIGN_PFX_BASE64 }}
           WINDOWS_SIGN_PASSWORD: ${{ secrets.WINDOWS_SIGN_PASSWORD }}
+          WINDOWS_SIGN_CMD: ${{ secrets.WINDOWS_SIGN_CMD }}
+          WINDOWS_SIGN_ENV: ${{ secrets.WINDOWS_SIGN_ENV }}
+          UNSIGNED: ${{ inputs.windows_unsigned }}
         run: |
-          if (-not $env:WINDOWS_SIGN_PFX_BASE64) {
-            Write-Output "::warning::WINDOWS_SIGN_PFX_BASE64 is missing: the installer is not signed, and Windows shows the SmartScreen warning when it runs"
+          if ($env:WINDOWS_SIGN_PFX_BASE64) {
+            $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_SIGN_PFX_BASE64))
+            try {
+              $password = New-Object System.Security.SecureString
+              foreach ($c in $env:WINDOWS_SIGN_PASSWORD.ToCharArray()) { $password.AppendChar($c) }
+              $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+            } finally {
+              Remove-Item -LiteralPath $pfx -Force
+            }
+            "WINDOWS_SIGN_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
+            # A time stamp keeps the signature valid after the certificate expires.
+            "WINDOWS_SIGN_TIMESTAMP_URL=http://timestamp.digicert.com" >> $env:GITHUB_ENV
+            "EXPECT_SIGNED=1" >> $env:GITHUB_ENV
+            Write-Output "signing as: $($cert.Subject)"
             exit 0
           }
-          $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_SIGN_PFX_BASE64))
-          try {
-            $password = New-Object System.Security.SecureString
-            foreach ($c in $env:WINDOWS_SIGN_PASSWORD.ToCharArray()) { $password.AppendChar($c) }
-            $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
-          } finally {
-            Remove-Item -LiteralPath $pfx -Force
+          if ($env:WINDOWS_SIGN_CMD) {
+            # The command signs the file given as its last argument (scripts/windows/sign.sh).
+            # What it needs from the environment (the key store's credentials) comes as
+            # NAME=value lines in WINDOWS_SIGN_ENV; every value is masked in the logs.
+            foreach ($line in ($env:WINDOWS_SIGN_ENV -split "`r?`n")) {
+              if ($line -notmatch '^([A-Za-z_][A-Za-z0-9_]*)=(.+)$') { continue }
+              Write-Output "::add-mask::$($Matches[2])"
+              "$($Matches[1])=$($Matches[2])" >> $env:GITHUB_ENV
+            }
+            "WINDOWS_SIGN_CMD=$($env:WINDOWS_SIGN_CMD)" >> $env:GITHUB_ENV
+            "EXPECT_SIGNED=1" >> $env:GITHUB_ENV
+            Write-Output "signing with the signing command"
+            exit 0
           }
-          "WINDOWS_SIGN_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
-          # A time stamp keeps the signature valid after the certificate expires.
-          "WINDOWS_SIGN_TIMESTAMP_URL=http://timestamp.digicert.com" >> $env:GITHUB_ENV
-          Write-Output "signing as: $($cert.Subject)"
+          if ($env:MODE -ne "dry-run" -and $env:UNSIGNED -ne "true") {
+            Write-Output "::error::no code signing is set up (the secrets WINDOWS_SIGN_PFX_BASE64 and WINDOWS_SIGN_PASSWORD, or WINDOWS_SIGN_CMD; docs/RUNBOOK.md). To publish an unsigned installer on purpose, run again with windows_unsigned=true: Windows then shows the SmartScreen warning, and once a release was signed, installed apps refuse an unsigned update"
+            exit 1
+          }
+          $why = if ($env:UNSIGNED -eq "true") { "windows_unsigned=true" } else { "a release would refuse to run without signing or windows_unsigned=true" }
+          Write-Output "::warning::the Windows installer is NOT signed ($why): Windows shows the SmartScreen warning when it runs"
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.10
+      # wrangler, for the local server of the update test.
+      - run: bun install --frozen-lockfile
 
       - name: Install NSIS
         run: |
@@ -358,6 +449,15 @@ jobs:
           set_workspace_version "$VERSION"
           cargo update --workspace --offline
 
+      - name: Build the update helper of the interruption test
+        # With the pause switch that the shipped helper does not have; built first, so the
+        # installer's build replaces it in the target folder.
+        run: |
+          cargo build --release --locked -p update-helper --features test-pause
+          mkdir -p .tmp/test-helper
+          cp "${CARGO_TARGET_DIR:-target}/release/update-helper.exe" .tmp/test-helper/update-helper-pause.exe
+          echo "PAUSE_HELPER=$PWD/.tmp/test-helper/update-helper-pause.exe" >>"$GITHUB_ENV"
+
       - name: Build the installer
         env:
           TC_SERVERS_JSON: ${{ secrets.SERVERS_JSON }}
@@ -368,25 +468,51 @@ jobs:
         shell: pwsh
         run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
 
+      - name: Test the installer (install, check, start, uninstall)
+        env:
+          TC_SERVERS_JSON: ${{ secrets.SERVERS_JSON }}
+        # EXPECT_SIGNED is set by "Set up code signing" for a PFX and for a signing command.
+        run: scripts/test-windows-installer.sh
+
       - name: Get the previous release's installer
-        # test-windows-installer.sh --same-as then proves that apps installed from the last
-        # release accept this one as an update (the update helper takes only the same
-        # publisher), as the Mac job does with the previous DMG. The newest release that is
-        # not this version and has an installer; a failed download fails the job.
+        # The newest release that is not this version and has an installer; a failed
+        # download fails the job.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           setup="$(scripts/previous-windows-installer.sh "$VERSION" "$RUNNER_TEMP/previous")"
-          if [ -n "$setup" ]; then echo "SAME_AS_SETUP=$setup" >>"$GITHUB_ENV"; fi
+          if [ -n "$setup" ]; then echo "PREVIOUS_SETUP=$setup" >>"$GITHUB_ENV"; fi
 
-      - name: Test the installer (install, check, start, uninstall)
-        env:
-          TC_SERVERS_JSON: ${{ secrets.SERVERS_JSON }}
+      - name: Test the update from the previous release
+        # The real thing an installed app will do: the previous release is installed, signs
+        # in, makes this runner a machine, and updates itself to this build with its own
+        # update helper deciding (so a publisher it would refuse fails the release here),
+        # then the rollback and the interruptions. A prerelease is not offered as an update.
+        if: env.PREVIOUS_SETUP != '' && !contains(inputs.version, '-')
         run: |
-          if [ -n "${WINDOWS_SIGN_THUMBPRINT:-}" ]; then export EXPECT_SIGNED=1; fi
-          args=()
-          [ -n "${SAME_AS_SETUP:-}" ] && args+=(--same-as "$SAME_AS_SETUP")
-          scripts/test-windows-installer.sh ${args[@]+"${args[@]}"}
+          . scripts/lib.sh
+          . scripts/windows/lib.sh
+          new="dist/$(product name)-$VERSION-setup.exe"
+          # The signature checks of the test need both ends signed.
+          if [ "${EXPECT_SIGNED:-0}" = 1 ] && [ "$(signature_status "$PREVIOUS_SETUP")" = Valid ]; then
+            export EXPECT_SIGNED=1
+          else
+            export EXPECT_SIGNED=0
+          fi
+          scripts/test-windows-update.sh "$PREVIOUS_SETUP" "$new"
+
+      - name: Keep the test logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-release-test-logs-${{ env.VERSION }}
+          path: |
+            .tmp/windows-installer
+            .tmp/windows-update
+            !.tmp/windows-update/state
+            !.tmp/windows-update/**/*.exe
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Keep the installer
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -405,14 +531,15 @@ jobs:
             Remove-Item -LiteralPath "Cert:\CurrentUser\My\$env:WINDOWS_SIGN_THUMBPRINT" -DeleteKey -ErrorAction SilentlyContinue
           }
 
-  windows-publish:
-    name: Publish the Windows installer ${{ inputs.version }} (${{ inputs.mode }})
-    # After the GitHub Release exists. In upload-only mode the Windows job did not run.
-    needs: [release, windows]
-    # A prerelease: the installer goes to the GitHub Release and not to the server, as its DMG.
-    if: >-
-      !cancelled() && needs.release.result == 'success' &&
-      ((inputs.mode == 'release' && needs.windows.result == 'success') || inputs.mode == 'upload-only')
+  windows-add:
+    name: Add the Windows installer to ${{ inputs.version }} (${{ inputs.mode }})
+    # mode windows-only: the release exists without a Windows installer (its Windows build
+    # failed and is fixed on main since, or it was published for the Mac alone). The Windows
+    # job has built and tested the installer of this version from main; this job gives it to
+    # the server and to the GitHub Release (scripts/release.sh --add-windows). A server that
+    # already has an installer for the version refuses: a published file is never replaced.
+    needs: [windows]
+    if: inputs.mode == 'windows-only' && needs.windows.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -440,15 +567,6 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Check the server URLs
-        env:
-          TC_SERVERS_JSON: ${{ secrets.SERVERS_JSON }}
-        run: |
-          if ! printf '%s' "$TC_SERVERS_JSON" | jq -e '.production | strings' >/dev/null 2>&1; then
-            echo "::error::set the repository variable SERVERS_JSON; see docs/ENVIRONMENTS.md"
-            exit 1
-          fi
-
       - name: Write the admin secret
         env:
           ADMIN_SECRET_PRODUCTION: ${{ secrets.ADMIN_SECRET_PRODUCTION }}
@@ -466,39 +584,21 @@ jobs:
           echo "TEAM_CHAT_CONFIG_DIR=$config" >>"$GITHUB_ENV"
 
       - name: Get the installer built by the Windows job
-        if: inputs.mode == 'release'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: windows-installer-${{ env.VERSION }}
           path: dist
 
-      - name: Get the installer of the GitHub Release
-        if: inputs.mode == 'upload-only'
-        run: |
-          mkdir -p dist
-          if ! gh release download "v$VERSION" --pattern '*-setup.exe' --dir dist; then
-            echo "::notice::release v$VERSION has no Windows installer; nothing to upload"
-            echo "NO_INSTALLER=1" >>"$GITHUB_ENV"
-          fi
-
-      - name: Publish
-        if: env.NO_INSTALLER != '1'
+      - name: Add the installer to the release
         env:
           TC_SERVERS_JSON: ${{ secrets.SERVERS_JSON }}
         run: |
-          if [ "$MODE" = release ]; then
-            # The artifact carries the build's .sha256 files: check the transfer, then add the
-            # installer and the Windows daemon alone (GitHub keeps their digests).
-            (cd dist && for sum in ./*.sha256; do sha256sum -c "$sum"; done)
-            gh release upload "v$VERSION" dist/*.exe --clobber
-          else
-            scripts/check-release-digest.sh "v$VERSION" dist/*-setup.exe
-          fi
-          if [[ "$VERSION" == *-* ]]; then
-            echo "$VERSION is a prerelease: on GitHub only, the app updates only to MAJOR.MINOR.PATCH releases"
-            exit 0
-          fi
-          args=("$VERSION" --env production --upload-only --platform windows)
+          (cd dist && for sum in ./*.sha256; do sha256sum -c "$sum"; done)
+          setup="$(find dist -name '*-setup.exe' | head -n 1)"
+          args=("$VERSION" --env production --add-windows "$setup")
+          for f in dist/*.exe; do
+            [ "$f" = "$setup" ] || args+=(--asset "$f")
+          done
           notes="docs/releases/$VERSION.md"
           [ -f "$notes" ] && args+=(--notes "$notes")
           scripts/release.sh "${args[@]}"
@@ -511,7 +611,7 @@ jobs:
     name: No server address in the logs
     # The logs of a public repository are public. Reads the log of every finished job of this
     # run and fails when one shows a server host.
-    needs: [release, windows, windows-publish]
+    needs: [release, windows, windows-add]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 10

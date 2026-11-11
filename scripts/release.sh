@@ -5,10 +5,20 @@
 # the server so the app can update itself.
 #
 # Usage: scripts/release.sh <version> [--env staging|production] [--notes <file>]
-#                           [--dry-run [--build]] [--upload-only [--platform windows]]
-#                           [--same-as <dmg>]
+#                           (--windows-installer <setup.exe> [--asset <file>]... | --without-windows)
+#                           [--dry-run [--build]] [--same-as <dmg>]
+#        scripts/release.sh <version> --upload-only [--platform windows]
+#        scripts/release.sh <version> --add-windows <setup.exe> [--asset <file>]...
 #   --env          server to upload to (default production)
 #   --notes        Markdown release notes (default: notes that GitHub generates)
+#   --windows-installer  the Windows installer of this version, built and tested before
+#                  (scripts/build-windows-installer.sh on Windows; the Release workflow's
+#                  Windows job). A release is one thing for both systems: the GitHub Release
+#                  is created with the DMG and the installer together, and both go to the
+#                  server. Without it a release stops before it changes anything
+#   --asset        another file for the GitHub Release (the Windows daemon alone)
+#   --without-windows  publish the Mac alone, on purpose: Windows apps are offered nothing
+#                  for this version until --add-windows
 #   --dry-run      run the checks and print the plan; change nothing
 #   --build        with --dry-run: also set the version in the working tree, build and check the
 #                  DMG and the daemon into dist/, then restore Cargo.toml, Cargo.lock, CHANGELOG.md
@@ -17,9 +27,12 @@
 #   --upload-only  only upload the existing dist/<name>-<version>.dmg to the server
 #                  (retry after the endpoint was missing or the upload failed)
 #   --platform     with --upload-only: macos (default, the DMG) or windows, which uploads
-#                  dist/<name>-<version>-setup.exe as the Windows file of the release. The
-#                  installer is built on Windows by scripts/build-windows-installer.sh (the
-#                  Release workflow's Windows job); this script only publishes it.
+#                  dist/<name>-<version>-setup.exe as the Windows file of the release
+#   --add-windows  give a release that exists its Windows installer (it was published
+#                  --without-windows, or its Windows build failed and was fixed since): the
+#                  installer goes to the server first, then to the GitHub Release. A server
+#                  that already has an installer for this version refuses: a published file is
+#                  never replaced, release a higher version instead
 # Env: CHAT_API_BASE overrides the server URL. The admin secret is read from
 #      ~/.config/team-chat/<env>/admin-secret (TEAM_CHAT_CONFIG_DIR overrides
 #      ~/.config/team-chat) and is never printed. The Release workflow
@@ -36,6 +49,10 @@ UPLOAD_ONLY=0
 BUILD=0
 SAME_AS=""
 PLATFORM=macos
+WINDOWS_INSTALLER=""
+WITHOUT_WINDOWS=0
+ADD_WINDOWS=""
+ASSETS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --env) ENV_NAME="${2:-}"; shift 2 ;;
@@ -47,18 +64,30 @@ while [ $# -gt 0 ]; do
     --platform) PLATFORM="${2:-}"; shift 2 ;;
     --platform=*) PLATFORM="${1#*=}"; shift ;;
     --build) BUILD=1; shift ;;
+    --windows-installer) WINDOWS_INSTALLER="${2:-}"; shift 2 ;;
+    --windows-installer=*) WINDOWS_INSTALLER="${1#*=}"; shift ;;
+    --without-windows) WITHOUT_WINDOWS=1; shift ;;
+    --add-windows) ADD_WINDOWS="${2:-}"; shift 2 ;;
+    --add-windows=*) ADD_WINDOWS="${1#*=}"; shift ;;
+    --asset) ASSETS+=("${2:-}"); shift 2 ;;
+    --asset=*) ASSETS+=("${1#*=}"); shift ;;
     --same-as) SAME_AS="${2:-}"; shift 2 ;;
     --same-as=*) SAME_AS="${1#*=}"; shift ;;
-    -h | --help) sed -n '2,28p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,41p' "$0"; exit 0 ;;
     -*) die "unknown option: $1" ;;
     *) [ -z "$VERSION" ] || die "more than one version given"; VERSION="$1"; shift ;;
   esac
 done
 
-[ -n "$VERSION" ] || die "usage: scripts/release.sh <version> [--env staging|production] [--notes <file>] [--dry-run [--build]] [--upload-only] [--same-as <dmg>]"
+[ -n "$VERSION" ] || die "usage: scripts/release.sh <version> [--env staging|production] [--notes <file>] (--windows-installer <setup.exe> | --without-windows) [--dry-run [--build]] [--same-as <dmg>] | --upload-only [--platform windows] | --add-windows <setup.exe>"
 [ "$BUILD" = 0 ] || [ "$DRY_RUN" = 1 ] || die "--build goes with --dry-run (a real run always builds)"
 case "$PLATFORM" in macos | windows) ;; *) die "--platform must be macos or windows" ;; esac
 [ "$PLATFORM" = macos ] || [ "$UPLOAD_ONLY" = 1 ] || die "--platform windows goes with --upload-only: the installer is built on Windows by scripts/build-windows-installer.sh"
+[ -z "$WINDOWS_INSTALLER" ] || [ "$WITHOUT_WINDOWS" = 0 ] || die "--windows-installer and --without-windows contradict each other"
+if [ -n "$ADD_WINDOWS" ]; then
+  [ "$UPLOAD_ONLY" = 0 ] && [ "$BUILD" = 0 ] && [ -z "$WINDOWS_INSTALLER" ] && [ "$WITHOUT_WINDOWS" = 0 ] ||
+    die "--add-windows stands alone (with --env, --notes, --asset, --dry-run)"
+fi
 VERSION="${VERSION#v}"
 valid_semver "$VERSION" || die "version '$VERSION' is not semver (for example 0.2.0 or 0.2.0-rc.1)"
 # The server takes only MAJOR.MINOR.PATCH for app updates. A prerelease goes to GitHub only.
@@ -69,6 +98,8 @@ if ! valid_release_version "$VERSION"; then
   SERVER_UPLOAD=0
 fi
 case "$ENV_NAME" in staging | production) ;; *) die "--env must be staging or production" ;; esac
+# abs <file>: its absolute path (the script changes folder later).
+abs() { printf '%s/%s' "$(cd "$(dirname "$1")" && pwd)" "$(basename "$1")"; }
 if [ -n "$SAME_AS" ]; then [ -r "$SAME_AS" ] || die "cannot read $SAME_AS"; SAME_AS="$(cd "$(dirname "$SAME_AS")" && pwd)/$(basename "$SAME_AS")"; fi
 if [ -n "$NOTES" ]; then [ -r "$NOTES" ] || die "cannot read notes file $NOTES"; NOTES="$(cd "$(dirname "$NOTES")" && pwd)/$(basename "$NOTES")"; fi
 
@@ -76,12 +107,36 @@ need git jq curl shasum base64
 NAME="$(product name)"
 TAG="v$VERSION"
 DMG="$DIST/$NAME-$VERSION.dmg"
-# What upload_to_server sends: the DMG to the release route every server has, or the Windows
-# installer to the route for the files of other platforms (docs/protocol.md).
-case "$PLATFORM" in
-  macos) ASSET="$DMG"; ASSET_ROUTE="/v1/admin/releases/$VERSION"; ASSET_TYPE="application/x-apple-diskimage" ;;
-  windows) ASSET="$DIST/$NAME-$VERSION-setup.exe"; ASSET_ROUTE="/v1/admin/releases/$VERSION/assets/windows"; ASSET_TYPE="application/vnd.microsoft.portable-executable" ;;
-esac
+SETUP_NAME="$NAME-$VERSION-setup.exe"
+# windows_installer_problem <file>: why <file> cannot be this version's Windows installer;
+# prints nothing when it can.
+windows_installer_problem() {
+  if [ ! -s "$1" ]; then printf 'no Windows installer at %s' "$1"
+  elif [ "$(basename "$1")" != "$SETUP_NAME" ]; then printf 'the Windows installer must be %s, not %s' "$SETUP_NAME" "$(basename "$1")"
+  fi
+}
+# (Counted loops and ${ASSETS[@]+...}: an empty array is "unbound" to the bash of macOS.)
+i=0
+while [ "$i" -lt "${#ASSETS[@]}" ]; do
+  [ -s "${ASSETS[$i]}" ] || die "no file at ${ASSETS[$i]} (--asset)"
+  ASSETS[$i]="$(abs "${ASSETS[$i]}")"
+  i=$((i + 1))
+done
+if [ -n "$WINDOWS_INSTALLER" ] && [ -e "$WINDOWS_INSTALLER" ]; then WINDOWS_INSTALLER="$(abs "$WINDOWS_INSTALLER")"; fi
+if [ -n "$ADD_WINDOWS" ] && [ -e "$ADD_WINDOWS" ]; then ADD_WINDOWS="$(abs "$ADD_WINDOWS")"; fi
+# use_platform <macos|windows> [<file>]: what upload_to_server sends next: the DMG to the release
+# route every server has, or the Windows installer to the route for the files of other
+# platforms (docs/protocol.md).
+use_platform() {
+  PLATFORM="$1"
+  case "$1" in
+    macos) ASSET="${2:-$DMG}"; ASSET_ROUTE="/v1/admin/releases/$VERSION"; ASSET_TYPE="application/x-apple-diskimage" ;;
+    windows) ASSET="${2:-$DIST/$SETUP_NAME}"; ASSET_ROUTE="/v1/admin/releases/$VERSION/assets/windows"; ASSET_TYPE="application/vnd.microsoft.portable-executable" ;;
+  esac
+}
+use_platform "$PLATFORM"
+# 1 when the last upload_to_server was refused because the server has that file already.
+UPLOAD_CONFLICT=0
 SECRET_FILE="${TEAM_CHAT_CONFIG_DIR:-$HOME/.config/team-chat}/$ENV_NAME/admin-secret"
 
 # Empty when this machine has no ops checkout; the upload and the preflight report it.
@@ -97,6 +152,7 @@ release_notes_b64() {
 }
 
 upload_to_server() {
+  UPLOAD_CONFLICT=0
   if [ "$SERVER_UPLOAD" = 0 ]; then
     log "skip server upload: $VERSION is a prerelease; the app updates only to MAJOR.MINOR.PATCH releases"
     return 0
@@ -134,6 +190,10 @@ upload_to_server() {
       log "skip server upload: $BASE has no release endpoint yet (404)"
       log "when it exists, run: $again" ;;
     401 | 403) rm -f "$resp"; die "the server rejected the admin secret ($code); check $SECRET_FILE" ;;
+    409)
+      rm -f "$resp"
+      UPLOAD_CONFLICT=1
+      die "the server has a $PLATFORM file for $VERSION already (409). A published file is never replaced: withdraw the version if it is bad and release a higher one" ;;
     *)
       log "server answered $code: $(head -c 300 "$resp" | tr -d '\r')"
       rm -f "$resp"
@@ -141,6 +201,26 @@ upload_to_server() {
   esac
   rm -f "$resp"
 }
+
+# --add-windows: the release exists; give it its Windows installer. The server first (it
+# refuses a second installer for a version), then the GitHub Release.
+if [ -n "$ADD_WINDOWS" ]; then
+  need gh
+  why="$(windows_installer_problem "$ADD_WINDOWS")"
+  [ -z "$why" ] || die "$why"
+  gh release view "$TAG" --json tagName >/dev/null 2>&1 || die "there is no GitHub Release $TAG to add the installer to; make the release first"
+  if [ "$SERVER_UPLOAD" = 1 ] && [ ! -s "$SECRET_FILE" ]; then die "no admin secret at $SECRET_FILE: the installer cannot go to the server"; fi
+  if [ "$DRY_RUN" = 1 ]; then
+    log "dry run: would upload $(basename "$ADD_WINDOWS") to $BASE/v1/admin/releases/$VERSION/assets/windows and add it to the GitHub Release $TAG"
+    exit 0
+  fi
+  use_platform windows "$ADD_WINDOWS"
+  upload_to_server
+  log "adding $(basename "$ADD_WINDOWS") to the GitHub Release $TAG"
+  gh release upload "$TAG" "$ADD_WINDOWS" ${ASSETS[@]+"${ASSETS[@]}"} --clobber || die "the installer is on the server but not on the GitHub Release $TAG; add it there by hand: gh release upload $TAG <file>"
+  log "release $TAG has its Windows installer"
+  exit 0
+fi
 
 if [ "$UPLOAD_ONLY" = 1 ]; then
   [ "$DRY_RUN" = 0 ] || { log "dry run: would upload $ASSET to $BASE$ASSET_ROUTE"; exit 0; }
@@ -156,6 +236,15 @@ problem() {
 
 cd "$ROOT"
 need gh
+# A release is for both systems. This comes first: nothing below matters without it.
+if [ -n "$WINDOWS_INSTALLER" ]; then
+  why="$(windows_installer_problem "$WINDOWS_INSTALLER")"
+  [ -z "$why" ] || problem "$why"
+elif [ "$WITHOUT_WINDOWS" = 0 ]; then
+  problem "a release needs the Windows installer of $VERSION: --windows-installer <$SETUP_NAME> (the Release workflow builds and tests it first), or --without-windows to publish the Mac alone on purpose"
+else
+  log "note: --without-windows: this release has no Windows installer; add it later with --add-windows"
+fi
 [ -z "$(git status --porcelain)" ] || problem "the working tree is not clean"
 # Any worktree works (main may be checked out elsewhere) as long as HEAD is origin/main.
 git fetch --quiet origin main --tags || problem "git fetch origin failed"
@@ -216,6 +305,7 @@ Release plan (dry run, nothing changed):
   push           origin HEAD:main, then tag $TAG
   GitHub         ${REPO:-?}: release $TAG$([[ "$VERSION" == *-* ]] && printf ' (prerelease)')
                  assets: $NAME-$VERSION.dmg, daemon (GitHub shows their SHA-256)
+  Windows        $(if [ -n "$WINDOWS_INSTALLER" ]; then printf '%s and %s more file(s), on the GitHub Release and the server with the DMG' "$(basename "$WINDOWS_INSTALLER")" "${#ASSETS[@]}"; elif [ "$WITHOUT_WINDOWS" = 1 ]; then printf 'none, on purpose (--without-windows)'; else printf 'missing: a real run would stop'; fi)
   notes          ${NOTES:-generated by GitHub}
   server         $([ "$SERVER_UPLOAD" = 1 ] && printf 'PUT %s/v1/admin/releases/%s (%s)' "$BASE" "$VERSION" "$ENV_NAME" || printf 'none: a prerelease is not offered as an app update')
   admin secret   $SECRET_FILE ($([ -s "$SECRET_FILE" ] && echo present || echo missing))
@@ -251,9 +341,15 @@ git push --quiet origin "refs/tags/$TAG"
 
 log "creating GitHub release $TAG"
 gh_args=(release create "$TAG" "$DMG" "$DAEMON" --verify-tag --title "$NAME $VERSION")
+# Both systems in one step: the release never exists with the DMG alone.
+if [ -n "$WINDOWS_INSTALLER" ]; then gh_args+=("$WINDOWS_INSTALLER" ${ASSETS[@]+"${ASSETS[@]}"}); fi
 if [ -n "$NOTES" ]; then gh_args+=(--notes-file "$NOTES"); else gh_args+=(--generate-notes); fi
 if [[ "$VERSION" == *-* ]]; then gh_args+=(--prerelease); fi
 gh "${gh_args[@]}"
 
 upload_to_server
+if [ -n "$WINDOWS_INSTALLER" ]; then
+  use_platform windows "$WINDOWS_INSTALLER"
+  upload_to_server
+fi
 log "release $TAG done"

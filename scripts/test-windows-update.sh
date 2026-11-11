@@ -315,6 +315,17 @@ RECOVERY="$NAME.update-recovery"
 [ -z "$(reg_value "$RUN_ONCE" "$RECOVERY")" ] || fail "the recovery is still registered after the update"
 log "ok: $A -> $B, version $B runs"
 
+# The installer that stands in for "an update that goes wrong" below: the one of A, started
+# so that its app never confirms. When B is signed and A is not (the first signed release),
+# B's helper rightly refuses A, so B's own installer stands in.
+R_SETUP="$A_SETUP"
+R="$A"
+if [ "$(signature_status "$EXE")" = Valid ] && [ "$(signature_status "$A_SETUP")" != Valid ]; then
+  R_SETUP="$B_SETUP"
+  R="$B"
+  log "note: $B is signed and $A is not: the failing updates below use the installer of $B"
+fi
+
 # The helper outside the install folder, as the app copies it.
 HELPER="$WORK/helper.exe"
 cp "$DIR/$SLUG-update.exe" "$HELPER"
@@ -327,7 +338,7 @@ helper() {
   if [ "${DAEMON:-1}" = 1 ]; then args+=(--keep "$SLUG-daemon.exe"); fi
   "$HELPER" --installer "$(m "$installer")" --sha256 "$(sha "$installer")" \
     --install-dir "$(cygpath -w "$DIR")" --backup-dir "$(cygpath -w "${BACKUPS}test")" \
-    --app-exe "$NAME.exe" --version "$A" --marker "$(m "$WORK/$name-pending.json")" \
+    --app-exe "$NAME.exe" --version "$R" --marker "$(m "$WORK/$name-pending.json")" \
     --result "$(m "$WORK/$name-result.json")" --log "$(m "$WORK/$name.log")" \
     --uninstall-key "$KEY" --confirm-secs 60 "${args[@]}" && echo 0 || echo $?
 }
@@ -336,7 +347,7 @@ snapshot() { (cd "$DIR" && sha256sum ./*.exe | sort); }
 # 5. Rollback: the installer of A as "the update", started so that it never finishes the
 #    update (it is told another marker, finds none and exits).
 log "rollback"
-RC="$(helper rollback "$A_SETUP" --selftest-updated "$(m "$WORK/no-such-marker.json")")"
+RC="$(helper rollback "$R_SETUP" --selftest-updated "$(m "$WORK/no-such-marker.json")")"
 show_log "$WORK/rollback.log"
 [ "$RC" = 3 ] || fail "the helper's exit code after a failed update is $RC, not 3"
 [ "$(jq -r .outcome "$WORK/rollback-result.json")" = rolled_back ] || fail "not rolled back: $(jq -c . "$WORK/rollback-result.json")"
@@ -386,9 +397,9 @@ for STAGE in journaled moved-one moved installed marker started; do
   K="$WORK/kill-$STAGE"
   mkdir -p "$K"
   JOURNAL="$K/update-journal.json"
-  UPDATE_HELPER_TEST_PAUSE_AT="$STAGE" "$PAUSE" --installer "$(m "$A_SETUP")" --sha256 "$(sha "$A_SETUP")" \
+  UPDATE_HELPER_TEST_PAUSE_AT="$STAGE" "$PAUSE" --installer "$(m "$R_SETUP")" --sha256 "$(sha "$R_SETUP")" \
     --install-dir "$(cygpath -w "$DIR")" --backup-dir "$(cygpath -w "${BACKUPS}test")" \
-    --app-exe "$NAME.exe" --version "$A" --marker "$(m "$K/pending.json")" \
+    --app-exe "$NAME.exe" --version "$R" --marker "$(m "$K/pending.json")" \
     --result "$(m "$K/result.json")" --log "$(m "$K/update.log")" \
     --uninstall-key "$KEY" ${KEEP[@]+"${KEEP[@]}"} --launch-arg --selftest-installed &
   HELPER_PID=$!
@@ -408,7 +419,7 @@ for STAGE in journaled moved-one moved installed marker started; do
       [ ! -e "$EXE" ] || fail "the app is still in the install folder at the kill"
       [ -f "${BACKUPS}test/$NAME.exe" ] || fail "the old app is not in the backup" ;;
     installed | marker | started)
-      [ "$(product_version "$EXE")" = "$A" ] || fail "at '$STAGE' the install folder does not hold the new version" ;;
+      [ "$(product_version "$EXE")" = "$R" ] || fail "at '$STAGE' the install folder does not hold the new version" ;;
   esac
   # Windows runs this at the next sign-in.
   REGISTERED="$(reg_value "$RUN_ONCE" "$RECOVERY")"
@@ -444,9 +455,9 @@ for STAGE in journaled moved-one moved installed marker started; do
 done
 
 # A changed installer is refused before anything moves.
-RC="$("$HELPER" --installer "$(m "$A_SETUP")" --sha256 "$(printf '0%.0s' $(seq 1 64))" \
+RC="$("$HELPER" --installer "$(m "$R_SETUP")" --sha256 "$(printf '0%.0s' $(seq 1 64))" \
   --install-dir "$(cygpath -w "$DIR")" --backup-dir "$(cygpath -w "${BACKUPS}test")" \
-  --app-exe "$NAME.exe" --version "$A" --marker "$(m "$WORK/checksum-pending.json")" \
+  --app-exe "$NAME.exe" --version "$R" --marker "$(m "$WORK/checksum-pending.json")" \
   --result "$(m "$WORK/checksum-result.json")" --launch-arg --selftest-installed && echo 0 || echo $?)"
 [ "$RC" = 2 ] || fail "a wrong checksum ended with exit code $RC, not 2"
 [ "$(snapshot)" = "$BEFORE" ] || fail "a wrong checksum changed the install folder"

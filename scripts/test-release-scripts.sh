@@ -35,6 +35,9 @@ fails=0
 expect() { # expect <ok|fail> <name> <command...>
   local want="$1" name="$2" got
   shift 2
+  # The output of the command before this one stays readable in prev.log: a check about what
+  # a command printed is itself a command.
+  if [ -f "$WORK/out.log" ]; then cp "$WORK/out.log" "$WORK/prev.log"; fi
   if "$@" >"$WORK/out.log" 2>&1; then got=ok; else got=fail; fi
   if [ "$got" = "$want" ]; then
     printf 'pass  %s\n' "$name"
@@ -133,7 +136,7 @@ expect ok "and says so" test ! -e "$WORK/upload.json"
 
 printf 'another secret\n' >"$TEAM_CHAT_CONFIG_DIR/staging/admin-secret"
 expect fail "a rejected admin secret fails the upload" "$R" 9.9.9 --env staging --upload-only --platform windows
-expect ok "the secret is not in the output" bash -c "! grep -q 'another secret' '$WORK/out.log'"
+expect ok "the secret is not in the output" bash -c "! grep -q 'another secret' '$WORK/prev.log'"
 printf '%s\n' "$UPLOAD_SECRET" >"$TEAM_CHAT_CONFIG_DIR/staging/admin-secret"
 upload_stub 404
 expect ok "a server without the route is skipped, not an error" "$R" 9.9.9 --env staging --upload-only --platform windows
@@ -158,6 +161,10 @@ case "$1 $2" in
       v9.9.7) printf 'X-9.9.7.dmg\nX-9.9.7-setup.exe\nx-daemon-9.9.7-x86_64-pc-windows-msvc.exe\n' ;;
       v9.9.6) printf 'X-9.9.6-setup.exe\n' ;;
     esac ;;
+  "release upload")
+    [ "${GH_FAIL:-}" != upload ] || exit 1
+    shift 2
+    printf '%s\n' "$*" >>"$GH_LOG" ;;
   "release download")
     [ "${GH_FAIL:-}" != download ] || exit 1
     dir=""; name=""; tag="$3"; shift 3
@@ -179,6 +186,52 @@ for step in list view download; do
   expect fail "a failed 'gh release $step' fails the check" env PATH="$FAKE_BIN:$PATH" GH_FAIL="$step" "$P" 9.9.9 "$WORK/previous"
 done
 
+# --- a release is for both systems --------------------------------------------------------------
+# The preflight of a release, as a dry run prints it ("would stop: ..."): never a real run here.
+plan() { "$R" 9.9.9 --env staging --dry-run "$@" 2>&1; }
+SETUP="$DIST/$NAME-9.9.9-setup.exe"
+printf 'a daemon' >"$DIST/x-daemon-9.9.9-x86_64-pc-windows-msvc.exe"
+has() { case "$1" in *"$2"*) ;; *) printf 'want "%s" in:\n%s\n' "$2" "$1"; return 1 ;; esac; }
+hasnt() { case "$1" in *"$2"*) printf 'do not want "%s" in:\n%s\n' "$2" "$1"; return 1 ;; esac; }
+out="$(plan)"
+expect ok "a release without the Windows installer would stop" has "$out" "would stop: a release needs the Windows installer of 9.9.9"
+expect ok "and the plan says it is missing" has "$out" "missing: a real run would stop"
+out="$(plan --windows-installer "$SETUP" --asset "$DIST/x-daemon-9.9.9-x86_64-pc-windows-msvc.exe")"
+expect ok "with the installer nothing about Windows stops it" hasnt "$out" "Windows installer"
+expect ok "and the plan publishes it with the DMG" has "$out" "$NAME-9.9.9-setup.exe and 1 more file(s), on the GitHub Release and the server with the DMG"
+out="$(plan --without-windows)"
+expect ok "the Mac alone is possible only on purpose" hasnt "$out" "would stop: a release needs the Windows installer"
+expect ok "and the plan says so" has "$out" "none, on purpose (--without-windows)"
+expect ok "an installer of another version would stop it" has "$(plan --windows-installer "$DIST/x-daemon-9.9.9-x86_64-pc-windows-msvc.exe")" "would stop: the Windows installer must be $NAME-9.9.9-setup.exe"
+expect ok "a missing installer would stop it" has "$(plan --windows-installer "$DIST/nope-setup.exe")" "would stop: no Windows installer at"
+expect fail "the installer and --without-windows contradict" "$R" 9.9.9 --env staging --dry-run --windows-installer "$SETUP" --without-windows
+expect fail "a missing --asset is an error" "$R" 9.9.9 --env staging --dry-run --windows-installer "$SETUP" --asset "$DIST/nope.exe"
+
+# --- --add-windows: a release that exists gets its installer ------------------------------------
+export GH_LOG="$WORK/gh.log"
+add() { PATH="$FAKE_BIN:$PATH" "$R" 9.9.9 --env staging --add-windows "$SETUP" --asset "$DIST/x-daemon-9.9.9-x86_64-pc-windows-msvc.exe" "$@"; }
+upload_stub 200
+rm -f "$GH_LOG"
+expect ok "add-windows uploads the installer" add
+expect ok "to the Windows route of the server" is "$(got '.method + " " + .path')" "PUT /v1/admin/releases/9.9.9/assets/windows"
+expect ok "and then to the GitHub Release, with the daemon" is "$(cat "$GH_LOG")" "v9.9.9 $SETUP $DIST/x-daemon-9.9.9-x86_64-pc-windows-msvc.exe --clobber"
+upload_stub 409
+rm -f "$GH_LOG"
+expect fail "a version that has an installer on the server is refused" add
+expect ok "and says that a published file is never replaced" bash -c "grep -q 'never replaced' '$WORK/prev.log'"
+expect ok "and GitHub is left alone" test ! -e "$GH_LOG"
+upload_stub 200
+rm -f "$WORK/upload.json"
+expect fail "a release that does not exist gets nothing" env GH_FAIL=view PATH="$FAKE_BIN:$PATH" "$R" 9.9.9 --env staging --add-windows "$SETUP"
+expect ok "and the server is not asked" test ! -e "$WORK/upload.json"
+expect fail "an installer of another version is refused" env PATH="$FAKE_BIN:$PATH" "$R" 9.9.8 --env staging --add-windows "$SETUP"
+expect ok "a dry run of add-windows changes nothing" add --dry-run
+expect ok "nothing reached the server or GitHub" bash -c "[ ! -e '$WORK/upload.json' ] && [ ! -e '$GH_LOG' ]"
+expect fail "add-windows does not mix with a release" env PATH="$FAKE_BIN:$PATH" "$R" 9.9.9 --env staging --add-windows "$SETUP" --without-windows
+upload_stub 200
+expect fail "a failed GitHub upload fails add-windows" env GH_FAIL=upload PATH="$FAKE_BIN:$PATH" "$R" 9.9.9 --env staging --add-windows "$SETUP"
+expect ok "and says the installer is on the server" bash -c "grep -q 'on the server but not on the GitHub Release' '$WORK/prev.log'"
+
 # --- the logs of a run must not show a server address -----------------------------------------
 L="$ROOT/scripts/check-logs-for-servers.sh"
 rm -rf "$WORK/logs" && mkdir -p "$WORK/logs"
@@ -187,7 +240,7 @@ SERVERS='{"staging":"https://staging.chat.example.org","production":"https://cha
 expect ok "masked logs pass" env TC_SERVERS_JSON="$SERVERS" LOG_DIR="$WORK/logs" "$L"
 printf 'GET https://chat.example.org:8443/api/v1/health\n' >"$WORK/logs/2.log"
 expect fail "a log with the production host fails" env TC_SERVERS_JSON="$SERVERS" LOG_DIR="$WORK/logs" "$L"
-expect ok "the failure does not print the host" bash -c "! grep -q 'example.org' '$WORK/out.log'"
+expect ok "the failure does not print the host" bash -c "! grep -q 'example.org' '$WORK/prev.log'"
 printf 'TC_SERVERS_JSON: {"staging":"https://staging.chat.example.org"}\n' >"$WORK/logs/2.log"
 expect fail "a log with the staging host fails" env TC_SERVERS_JSON="$SERVERS" LOG_DIR="$WORK/logs" "$L"
 expect ok "a run without server URLs has nothing to check" env TC_SERVERS_JSON= LOG_DIR="$WORK/logs" "$L"

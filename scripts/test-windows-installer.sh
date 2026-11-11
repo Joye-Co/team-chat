@@ -7,10 +7,7 @@
 # the app is left. Like scripts/test-dmg.sh for the DMG, but it does install: run it on a
 # CI runner or a test machine, not where the app is in use.
 #
-# Usage: scripts/test-windows-installer.sh [dist/<name>-<version>-setup.exe] [--same-as <setup.exe>]
-#   --same-as   the installer of the previous release: an app installed from it must accept
-#               the new one as an update, by the update helper's own rule (`--accepts`), as
-#               scripts/test-dmg.sh --same-as proves for the DMG's designated requirement
+# Usage: scripts/test-windows-installer.sh [dist/<name>-<version>-setup.exe]
 # Env: DAEMON=0            the installer was built without the machine daemon
 #      TC_SERVERS_JSON     the server URLs the build was given (build-windows-installer.sh):
 #                          the installed app must carry exactly them. Unset: it must carry none
@@ -30,18 +27,8 @@ SLUG="$(product slug)"
 BUNDLE_ID="$(product bundleId)"
 SCHEME="$(product urlScheme)"
 VERSION="$(workspace_version)"
-SETUP=""
-SAME_AS=""
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --same-as) SAME_AS="${2:-}"; shift 2 ;;
-    --same-as=*) SAME_AS="${1#*=}"; shift ;;
-    -*) die "unknown option: $1" ;;
-    *) [ -z "$SETUP" ] || die "more than one installer given"; SETUP="$1"; shift ;;
-  esac
-done
+SETUP="${1:-}"
 SETUP="${SETUP:-$DIST/$NAME-$VERSION-setup.exe}"
-[ -z "$SAME_AS" ] || [ -f "$SAME_AS" ] || die "no installer at $SAME_AS"
 [ -f "$SETUP" ] || die "no installer at $SETUP"
 SETUP="$(cd "$(dirname "$SETUP")" && pwd)/$(basename "$SETUP")"
 WORK="$ROOT/.tmp/windows-installer"
@@ -80,11 +67,6 @@ check "silent install" silent_install "$SETUP"
 check "app installed" test -f "$EXE"
 check "update helper installed" test -f "$DIR/$SLUG-update.exe"
 check "uninstaller installed" test -f "$DIR/uninstall.exe"
-# The installed update helper says whether an app of the previous release would take this
-# installer: the rule of a real update, asked before the release goes out.
-if [ -n "$SAME_AS" ]; then
-  check "an app of $(basename "$SAME_AS") accepts this installer" same_publisher "$DIR/$SLUG-update.exe" "$SAME_AS" "$SETUP"
-fi
 if [ "${DAEMON:-1}" = 1 ]; then check "machine daemon installed" test -f "$DIR/$SLUG-daemon.exe"; fi
 printf 'install log:\n'; sed 's/^/      /' "$DIR/install.log" 2>/dev/null || true
 # The installer refuses a Windows older than the one the docs promise (10 version 22H2).
