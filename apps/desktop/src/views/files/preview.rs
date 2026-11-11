@@ -380,6 +380,21 @@ fetch("https://example.com/").then(() => "联网成功", () => "联网被拦住"
     open_quick_look_of(services, content, "第三季度复盘.html", PAGE.as_bytes(), cx)
 }
 
+thread_local! {
+    /// When the last preview scene opened its sheet.
+    static OPENED: std::cell::Cell<Option<std::time::Instant>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// For the scenes whose sheet shows content GPUI's frames do not cover (the system's
+/// preview handler, a page in the isolated view): true once that content had time to
+/// load.
+pub fn quick_look_settled(_: &App) -> bool {
+    OPENED
+        .get()
+        .is_some_and(|at| at.elapsed() >= std::time::Duration::from_secs(4))
+}
+
 /// The `files` scene with the preview sheet of a file named `name` holding `bytes`.
 fn open_quick_look_of(
     services: Services,
@@ -395,6 +410,7 @@ fn open_quick_look_of(
     let _ = std::fs::create_dir_all(&dir);
     let _ = std::fs::write(&path, bytes);
     let name = name.to_string();
+    OPENED.set(Some(std::time::Instant::now()));
     handle
         .update(cx, |_, window, cx| {
             if let Some(key) = super::quick_look::request_attachment(&name, "", &path, cx) {

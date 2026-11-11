@@ -1243,6 +1243,9 @@ pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
     }
     // --- end inc-refs ---
     match name {
+        "files-quick-look-handler" | "files-quick-look-page" => {
+            Some(crate::views::files::preview::quick_look_settled)
+        }
         "artifact-v2-leave" => Some(crate::views::artifact_page::scenes::left),
         "web-embed" => Some(|cx| embed_preview::ready(EmbedMode::Topic, cx)),
         "web-embed-scrolled" => Some(|cx| embed_preview::ready(EmbedMode::Scrolled, cx)),

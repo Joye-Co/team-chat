@@ -319,6 +319,16 @@ mod tests {
                 None,
             )
             .expect("a window");
+            // Above the windows other tests of this process show, so the screen has it.
+            let _ = SetWindowPos(
+                parent,
+                Some(windows::Win32::UI::WindowsAndMessaging::HWND_TOPMOST),
+                60,
+                60,
+                640,
+                480,
+                SWP_NOACTIVATE,
+            );
             let host = Host::open(parent, &file);
             println!("preview handler started: {}", host.is_some());
             let host = host.expect("the handler took the file");
@@ -334,6 +344,33 @@ mod tests {
             let drawn = children(host.child());
             println!("windows the handler made in the app's child: {drawn}");
             assert!(drawn > 0, "the handler put its view into the child window");
+            // What is on the screen where the preview is: the page's text, drawn by
+            // the handler's process (a capture of the app's window would not show it).
+            let (x, y, w, h) =
+                artifact_view::win_support::client_rect_on_screen(host.child().0 as isize);
+            let png = artifact_view::win_support::capture_screen_png(x, y, w, h);
+            let ink = png
+                .as_deref()
+                .and_then(|png| image::load_from_memory(png).ok())
+                .map(|image| {
+                    image
+                        .to_rgb8()
+                        .pixels()
+                        .filter(|p| p.0.iter().all(|c| *c < 96))
+                        .count()
+                });
+            println!("dark pixels where the preview is: {ink:?} of {}", w * h);
+            if let (Some(png), Some(dir)) = (&png, std::env::var_os("TC_PROBE_DIR")) {
+                let _ = std::fs::create_dir_all(&dir);
+                let _ = std::fs::write(
+                    std::path::Path::new(&dir).join("preview-handler-rtf.png"),
+                    png,
+                );
+            }
+            assert!(
+                ink.is_some_and(|ink| ink > 200),
+                "the handler drew the document's text on screen"
+            );
             drop(host);
             let _ = DestroyWindow(parent);
         }
