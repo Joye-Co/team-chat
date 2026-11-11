@@ -413,13 +413,23 @@ async fn acp_permission_without_a_gate_is_allowed_at_once() {
 #[tokio::test]
 async fn acp_follow_up_is_next_prompt() {
     let dir = tempfile::tempdir().unwrap();
-    let s = spec(dir.path(), "acp", &fake("fake_acp.py"), &[], "approve");
+    // A gated command holds the first turn at an approval, so the follow-up surely comes
+    // while it runs (a permission without a gate is allowed at once).
+    let mut s = spec(
+        dir.path(),
+        "acp",
+        &fake("fake_acp.py"),
+        &[],
+        "approve merge",
+    );
+    let gates = merge_gates();
+    s.gates = Some(gates.clone());
     let mut sent = false;
     let (o, evs) = drive(s, |e| match e {
-        RunEvent::ApprovalRequest { approval_id, .. } => Some(Control::Approval {
-            approval_id: approval_id.clone(),
-            approve: true,
-        }),
+        RunEvent::ApprovalRequest { approval_id, .. } => {
+            assert!(gates.answer(approval_id, true, false).is_some());
+            None
+        }
         RunEvent::MessageDelta { .. } if !sent => {
             sent = true;
             Some(Control::Input {
