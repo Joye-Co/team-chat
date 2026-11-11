@@ -706,7 +706,17 @@ impl Render for DiagramViewer {
                                     .size_full()
                                     .overflow_scroll()
                                     .track_scroll(&self.scroll)
-                                    .cursor_grab()
+                                    // The open hand on the Mac. Windows has no grab
+                                    // cursor of its own and GPUI draws the Mac's as an
+                                    // arrow there: its hand (the system's one hand
+                                    // cursor) says "this can be dragged".
+                                    .map(|d| {
+                                        if cfg!(target_os = "windows") {
+                                            d.cursor_pointer()
+                                        } else {
+                                            d.cursor_grab()
+                                        }
+                                    })
                                     .on_scroll(cx.listener(|this, e: &ScrollEvent, _, cx| {
                                         if crate::command_key(&e.modifiers) {
                                             let dy = f32::from(e.delta.pixel_delta(px(16.)).y);

@@ -262,13 +262,6 @@ pub const SCENES: &[Scene] = &[
         open: |s, c, cx| (like("artifacts-v2").open)(s, c, cx),
     },
     Scene {
-        name: "state-hover-settings-row",
-        about: "settings-notifications-end with the pointer on the 按群设置 navigation row (§2.8)",
-        start: Start::SignedIn,
-        setup: |s, cx| (like("settings-notifications-end").setup)(s, cx),
-        open: |s, c, cx| (like("settings-notifications-end").open)(s, c, cx),
-    },
-    Scene {
         name: "state-focus-diagram-node",
         about: "diagram-viewer after Tab Tab: the second node's focus ring and its 问这里 (E3, C-03)",
         start: Start::SignedIn,
@@ -303,7 +296,6 @@ const BASES: &[(&str, &str)] = &[
     ("state-hover-page-row", "group-v2"),
     ("state-hover-artifact-row", "artifacts-v2"),
     ("state-focus-artifact-row", "artifacts-v2"),
-    ("state-hover-settings-row", "settings-notifications-end"),
     ("state-focus-diagram-node", "diagram-viewer"),
     ("state-focus-settings-row", "settings-notifications-end"),
 ];

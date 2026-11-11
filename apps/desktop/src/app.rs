@@ -728,7 +728,9 @@ impl Navigation {
     /// the leading edge in full screen. It stays there whether the sidebar is
     /// shown or hidden.
     pub fn sidebar_toggle_x(&self) -> gpui::Pixels {
-        if self.fullscreen {
+        // No lights in full screen, and none off the Mac (the window buttons
+        // are in the caption strip above).
+        if self.fullscreen || crate::ui::native::window_chrome::drawn() {
             theme::SIDEBAR_TOGGLE_X_FULLSCREEN
         } else {
             theme::SIDEBAR_TOGGLE_X
@@ -1319,9 +1321,11 @@ impl RootView {
         // flush with the window edge (traffic lights inside it), the page
         // column with its toolbar row, and the inspector edge to edge.
         use crate::views::columns::Column;
-        // Off the Mac there are no traffic lights either: the sidebar's top
-        // row takes the full-screen layout (the toggle at the leading edge).
-        let fullscreen = window.is_fullscreen() || crate::ui::native::window_chrome::drawn();
+        // Off the Mac the sidebar keeps the windowed layout too (the tools at
+        // the end of the top row, the search field with the whole width under
+        // it): only the traffic lights are missing, so the toggle takes their
+        // place at the leading edge (`sidebar_toggle_x`).
+        let fullscreen = window.is_fullscreen();
         self.services
             .nav
             .update(cx, |nav, cx| nav.set_fullscreen(fullscreen, cx));
