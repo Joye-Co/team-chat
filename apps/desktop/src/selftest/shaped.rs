@@ -297,8 +297,8 @@ impl ChatProvider for Shaped {
     fn create_invite(&self, request: InviteRequest) -> AdminReply<InviteCreated> {
         self.inner.create_invite(request)
     }
-    fn set_member_level(&self, member_id: &str, level: MemberLevel) -> AdminReply<Member> {
-        self.inner.set_member_level(member_id, level)
+    fn set_member_role(&self, member_id: &str, role: crate::data::TeamRole) -> AdminReply<Member> {
+        self.inner.set_member_role(member_id, role)
     }
     fn set_member_deactivated(&self, member_id: &str, deactivated: bool) -> AdminReply<Member> {
         self.inner.set_member_deactivated(member_id, deactivated)

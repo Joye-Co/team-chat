@@ -16,7 +16,7 @@ use chat_core::proto::{TeamRoster, TeamUsage};
 use super::{AdminView, model};
 use crate::{
     copy::{admin as m, fill},
-    data::{Member, MemberKind, MemberLevel},
+    data::{Member, MemberKind, TeamRole},
     ui::{
         MemberAvatar, Sym,
         icons::sym as sym_icon,
@@ -56,6 +56,8 @@ pub struct Team {
     pub tab: TeamTab,
     pub sort: (TeamSortKey, bool),
     pub selected: Option<String>,
+    /// Why the last 「设为…」 did not go through.
+    pub role_error: Option<String>,
     search: Entity<InputState>,
 }
 
@@ -68,6 +70,7 @@ impl Team {
             tab: TeamTab::default(),
             sort: (TeamSortKey::Spend, true),
             selected: None,
+            role_error: None,
             search: cx.new(|cx| InputState::new(window, cx).placeholder(m::TEAM_SEARCH)),
         }
     }
@@ -77,6 +80,8 @@ impl Team {
 #[derive(Clone, Debug)]
 pub struct Row {
     pub member: Member,
+    /// 身份 (所有者, 管理员, 普通成员).
+    pub role: TeamRole,
     pub topics: u32,
     pub spend: f64,
     pub budget_cents: Option<u64>,
@@ -93,12 +98,10 @@ pub fn sort_rows(mut rows: Vec<Row>, key: TeamSortKey, desc: bool) -> Vec<Row> {
             .to_lowercase()
             .cmp(&b.member.name.to_lowercase())
     });
-    let level = |r: &Row| {
-        if r.member.level == MemberLevel::Owner {
-            1.
-        } else {
-            0.
-        }
+    let level = |r: &Row| match r.role {
+        TeamRole::Owner => 2.,
+        TeamRole::Admin => 1.,
+        TeamRole::Member => 0.,
     };
     let val = |r: &Row| -> f64 {
         match key {
@@ -175,9 +178,8 @@ impl AdminView {
     fn team_rows(&self, cx: &Context<Self>) -> Vec<Row> {
         let week = self.team.week.as_ref();
         let query = self.team.search.read(cx).value().trim().to_lowercase();
-        self.services
-            .provider
-            .members()
+        let all = self.services.provider.members();
+        all.clone()
             .into_iter()
             .filter(|x| match self.team.tab {
                 TeamTab::All => !x.deactivated,
@@ -216,6 +218,7 @@ impl AdminView {
                 };
                 Row {
                     ai_state: bot.then(|| self.ai_state(&id)),
+                    role: TeamRole::of(&x, &all),
                     member: x,
                     topics,
                     spend,
@@ -330,6 +333,11 @@ impl AdminView {
                     .tone(AlertTone::Destructive)
                     .description(e)
             }))
+            .children(self.team.role_error.clone().map(|e| {
+                Alert::new(Sym::Failed, m::TEAM_ROLE_FAILED)
+                    .tone(AlertTone::Destructive)
+                    .description(e)
+            }))
             .child(
                 div()
                     .flex()
@@ -362,6 +370,8 @@ impl AdminView {
         let (key, desc) = self.team.sort;
         let rows = sort_rows(self.team_rows(cx), key, desc);
         let max_spend = rows.iter().map(|r| r.spend).fold(0., f64::max);
+        // One person alone sees no 身份 (design-roles 3.10).
+        let solo = crate::views::settings::solo(&self.services);
         let cols: [(TeamSortKey, &'static str, Option<gpui::Pixels>, bool); 5] = [
             (TeamSortKey::Name, m::TEAM_COL_MEMBER, None, false),
             (
@@ -409,45 +419,49 @@ impl AdminView {
             .bg(k.group)
             .border_b_1()
             .border_color(k.separator)
-            .children(cols.iter().map(|(sk, label, w, right)| {
-                let on = key == *sk;
-                let sk = *sk;
-                let view = cx.entity();
-                let arrow = if on {
-                    if desc { Sym::ArrowDown } else { Sym::ArrowUp }
-                } else {
-                    Sym::Sort
-                };
-                cell(*w, *right).child(
-                    div()
-                        .id(SharedString::from(format!("team-sort-{sk:?}")))
-                        .flex()
-                        .items_center()
-                        .gap(space::S4)
-                        .px(space::S4)
-                        .rounded(radius::ITEM)
-                        .hover(|s| s.bg(k.fill_hover))
-                        .n_section()
-                        .text_color(if on { k.label } else { k.secondary })
-                        .on_click(move |_, _, cx| {
-                            view.update(cx, |v, cx| {
-                                let (cur, d) = v.team.sort;
-                                v.team.sort = if cur == sk {
-                                    (sk, !d)
-                                } else {
-                                    (sk, sk != TeamSortKey::Name)
-                                };
-                                cx.notify();
-                            })
-                        })
-                        .child(*label)
-                        .child(sym_icon(
-                            arrow,
-                            SymSize::INLINE_SMALL,
-                            if on { k.label } else { k.tertiary },
-                        )),
-                )
-            }))
+            .children(
+                cols.iter()
+                    .filter(|c| !(solo && c.0 == TeamSortKey::Level))
+                    .map(|(sk, label, w, right)| {
+                        let on = key == *sk;
+                        let sk = *sk;
+                        let view = cx.entity();
+                        let arrow = if on {
+                            if desc { Sym::ArrowDown } else { Sym::ArrowUp }
+                        } else {
+                            Sym::Sort
+                        };
+                        cell(*w, *right).child(
+                            div()
+                                .id(SharedString::from(format!("team-sort-{sk:?}")))
+                                .flex()
+                                .items_center()
+                                .gap(space::S4)
+                                .px(space::S4)
+                                .rounded(radius::ITEM)
+                                .hover(|s| s.bg(k.fill_hover))
+                                .n_section()
+                                .text_color(if on { k.label } else { k.secondary })
+                                .on_click(move |_, _, cx| {
+                                    view.update(cx, |v, cx| {
+                                        let (cur, d) = v.team.sort;
+                                        v.team.sort = if cur == sk {
+                                            (sk, !d)
+                                        } else {
+                                            (sk, sk != TeamSortKey::Name)
+                                        };
+                                        cx.notify();
+                                    })
+                                })
+                                .child(*label)
+                                .child(sym_icon(
+                                    arrow,
+                                    SymSize::INLINE_SMALL,
+                                    if on { k.label } else { k.tertiary },
+                                )),
+                        )
+                    }),
+            )
             .child(div().w(height::LG).flex_none());
         let n = rows.len();
         let now = now_ms();
@@ -463,11 +477,7 @@ impl AdminView {
                     (true, None) => m::TEAM_AI.to_string(),
                     (false, role) => role.unwrap_or_default().to_string(),
                 };
-                let level = if r.member.level == MemberLevel::Owner {
-                    m::LEVEL_OWNER
-                } else {
-                    m::LEVEL_MEMBER
-                };
+                let level = role_word(r.role);
                 let recent = if r.member.deactivated {
                     (m::TEAM_OFF.to_string(), k.secondary)
                 } else if let Some(s) = r.ai_state {
@@ -505,7 +515,7 @@ impl AdminView {
                     None if bot && max_spend > 0. => Some((r.spend / max_spend) as f32),
                     None => None,
                 };
-                let more = self.member_menu(&r.member, window, cx);
+                let more = self.member_menu(&r.member, r.role, window, cx);
                 let view = cx.entity();
                 let sel_id = id.clone();
                 div()
@@ -545,7 +555,9 @@ impl AdminView {
                                     }),
                             ),
                     )
-                    .child(cell(Some(t::TEAM_COL_LEVEL), false).child(Badge::new(level)))
+                    .when(!solo, |d| {
+                        d.child(cell(Some(t::TEAM_COL_LEVEL), false).child(Badge::new(level)))
+                    })
                     .child(cell(Some(t::TEAM_COL_TOPICS), true).child(r.topics.to_string()))
                     .child(
                         cell(Some(t::TEAM_COL_SPEND), false).child(
@@ -599,11 +611,25 @@ impl AdminView {
             .into_any_element()
     }
 
-    fn member_menu(&self, x: &Member, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn member_menu(
+        &self,
+        x: &Member,
+        role: TeamRole,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let services = self.services.clone();
         let id = x.id.to_string();
         let off = x.deactivated;
         let view = cx.entity();
+        // 「设为…」 (the 所有者 only) and 停用 (a 管理员 or 所有者 target needs the 所有者).
+        let team_owner = crate::views::settings::i_am_team_owner(&self.services);
+        let me = self.services.me();
+        let offer = crate::views::settings::roles_to_offer(x, role, me.as_deref(), team_owner);
+        let may_stop = crate::views::settings::may_deactivate(role, team_owner);
+        if !crate::views::settings::has_member_menu(x, &offer, may_stop) {
+            return div().into_any_element();
+        }
         // The roster's member, for the AI member sheets.
         let member = x.is_bot().then(|| x.clone());
         crate::views::settings::widgets::more_button(
@@ -615,6 +641,7 @@ impl AdminView {
             let (services, id, view) = (services.clone(), id.clone(), view.clone());
             // An AI member: 更换电脑… (常用设置) and 编辑… (everything). Without them 团队管理
             // had no way to change an AI member's computer.
+            let bot_items = member.is_some() && !off;
             let menu = match member.clone().filter(|_| !off) {
                 Some(bot) => {
                     let (s1, b1) = (services.clone(), bot.clone());
@@ -631,19 +658,40 @@ impl AdminView {
                             },
                         ),
                     )
-                    .item(PopupMenuItem::new(crate::copy::settings::EDIT).on_click(
-                        move |_, window, cx| {
-                            crate::views::settings::members::open_edit_bot(
-                                s2.clone(),
-                                &b2,
-                                window,
-                                cx,
-                            );
-                        },
-                    ))
-                    .separator()
+                    .item(
+                        PopupMenuItem::new(crate::copy::settings::EDIT).on_click(
+                            move |_, window, cx| {
+                                crate::views::settings::members::open_edit_bot(
+                                    s2.clone(),
+                                    &b2,
+                                    window,
+                                    cx,
+                                );
+                            },
+                        ),
+                    )
                 }
                 None => menu,
+            };
+            let menu = if bot_items && !offer.is_empty() {
+                menu.separator()
+            } else {
+                menu
+            };
+            let menu = offer.iter().fold(menu, |menu, &role| {
+                let (services, id, view) = (services.clone(), id.clone(), view.clone());
+                menu.item(
+                    PopupMenuItem::new(crate::views::settings::set_role_text(role))
+                        .on_click(move |_, _, cx| set_role(&services, &id, role, &view, cx)),
+                )
+            });
+            if !may_stop {
+                return menu;
+            }
+            let menu = if offer.is_empty() && !bot_items {
+                menu
+            } else {
+                menu.separator()
             };
             menu.item(
                 PopupMenuItem::new(if off {
@@ -854,35 +902,37 @@ impl AdminView {
                 None => date,
             }
         });
-        let level_word = if x.level == MemberLevel::Owner {
-            m::LEVEL_OWNER
+        let all = self.services.provider.members();
+        let role = TeamRole::of(&x, &all);
+        let solo = crate::views::settings::solo_in(&all);
+        let level_word = role_word(role);
+        let offer = crate::views::settings::roles_to_offer(
+            &x,
+            role,
+            self.services.me().as_deref(),
+            crate::views::settings::i_am_team_owner(&self.services),
+        );
+        // The 所有者 changes it here too; everyone else reads the word.
+        let level: AnyElement = if offer.is_empty() {
+            div().child(level_word).into_any_element()
         } else {
-            m::LEVEL_MEMBER
-        };
-        let services = self.services.clone();
-        let view = cx.entity();
-        let mid = id.clone();
-        let level =
+            let services = self.services.clone();
+            let view = cx.entity();
+            let mid = id.clone();
             crate::ui::native::pull_down("team-level", level_word, PushSize::Small, window, cx)
                 .dropdown_menu(move |menu, _, _| {
-                    let mut menu = menu;
-                    for (lv, word) in [
-                        (MemberLevel::Owner, m::LEVEL_OWNER),
-                        (MemberLevel::Member, m::LEVEL_MEMBER),
-                    ] {
+                    offer.iter().fold(menu, |menu, &role| {
                         let (services, id, view) = (services.clone(), mid.clone(), view.clone());
-                        menu = menu.item(PopupMenuItem::new(word).on_click(move |_, _, cx| {
-                            let reply = services.provider.set_member_level(&id, lv);
-                            let view = view.clone();
-                            cx.spawn(async move |cx| {
-                                let _ = answer(reply).await;
-                                let _ = view.update(cx, |v, cx| v.fetch_team(cx));
-                            })
-                            .detach();
-                        }));
-                    }
-                    menu
-                });
+                        menu.item(
+                            PopupMenuItem::new(crate::views::settings::set_role_text(role))
+                                .on_click(move |_, _, cx| {
+                                    set_role(&services, &id, role, &view, cx)
+                                }),
+                        )
+                    })
+                })
+                .into_any_element()
+        };
         let stat = |v: String, l: &'static str| {
             div()
                 .flex_1()
@@ -947,11 +997,18 @@ impl AdminView {
                             )
                             .child(
                                 TruncText::new(
-                                    [x.role.clone().unwrap_or_default(), level_word.to_string()]
-                                        .into_iter()
-                                        .filter(|s| !s.is_empty())
-                                        .collect::<Vec<_>>()
-                                        .join(" · "),
+                                    [
+                                        x.role.clone().unwrap_or_default(),
+                                        if solo {
+                                            String::new()
+                                        } else {
+                                            level_word.to_string()
+                                        },
+                                    ]
+                                    .into_iter()
+                                    .filter(|s| !s.is_empty())
+                                    .collect::<Vec<_>>()
+                                    .join(" · "),
                                 )
                                 .n_footnote()
                                 .text_color(k.secondary),
@@ -1051,7 +1108,7 @@ impl AdminView {
                     .flex()
                     .flex_col()
                     .gap(space::S12)
-                    .child(fact(m::TEAM_LEVEL, level.into_any_element()))
+                    .when(!solo, |d| d.child(fact(m::TEAM_LEVEL, level)))
                     .children(
                         joined.map(|j| fact(m::TEAM_JOINED, div().child(j).into_any_element())),
                     )
@@ -1093,6 +1150,37 @@ impl AdminView {
     }
 }
 
+/// The word of a 身份 in 团队管理.
+pub fn role_word(role: TeamRole) -> &'static str {
+    match role {
+        TeamRole::Owner => m::ROLE_OWNER,
+        TeamRole::Admin => m::LEVEL_OWNER,
+        TeamRole::Member => m::LEVEL_MEMBER,
+    }
+}
+
+/// Gives `id` a 身份 and reads the team again; a refusal shows on the page.
+fn set_role(
+    services: &crate::app::Services,
+    id: &str,
+    role: TeamRole,
+    view: &Entity<AdminView>,
+    cx: &mut gpui::App,
+) {
+    let reply = services.provider.set_member_role(id, role);
+    let view = view.clone();
+    cx.spawn(async move |cx| {
+        let result = answer(reply).await;
+        let _ = view.update(cx, |v, cx| {
+            v.team.role_error = result
+                .err()
+                .map(|e| crate::views::settings::role_error_text(e).to_string());
+            v.fetch_team(cx)
+        });
+    })
+    .detach();
+}
+
 fn usd(x: f64) -> String {
     format!("${x:.2}")
 }
@@ -1106,6 +1194,7 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data::MemberLevel;
 
     fn row(name: &str, spend: f64, topics: u32, owner: bool) -> Row {
         Row {
@@ -1123,6 +1212,12 @@ mod tests {
                 deactivated: false,
                 online: false,
                 character: None,
+                team_owner: false,
+            },
+            role: if owner {
+                TeamRole::Admin
+            } else {
+                TeamRole::Member
             },
             topics,
             spend,
@@ -1153,5 +1248,21 @@ mod tests {
             ["Forge", "Ledger", "Scout"]
         );
         assert_eq!(names(sort_rows(rows, TeamSortKey::Level, true))[0], "Forge");
+    }
+
+    #[test]
+    fn the_owner_sorts_above_admins_and_members() {
+        let mut owner = row("Ana", 0., 0, true);
+        owner.role = TeamRole::Owner;
+        let rows = vec![row("Bo", 0., 0, false), row("Cy", 0., 0, true), owner];
+        let names = |r: Vec<Row>| r.into_iter().map(|r| r.member.name).collect::<Vec<_>>();
+        assert_eq!(
+            names(sort_rows(rows, TeamSortKey::Level, true)),
+            ["Ana", "Cy", "Bo"]
+        );
+        assert_eq!(
+            [TeamRole::Owner, TeamRole::Admin, TeamRole::Member].map(role_word),
+            ["所有者", "管理员", "普通成员"]
+        );
     }
 }

@@ -15,7 +15,7 @@ export interface TestMember {
 
 /** Inserts a member and a token straight into D1 (bypasses bootstrap, which works once per DB). */
 export async function createMember(
-  opts: { level?: "owner" | "member"; kind?: "human" | "bot"; name?: string } = {},
+  opts: { level?: "owner" | "member"; kind?: "human" | "bot"; name?: string; teamOwner?: boolean } = {},
 ): Promise<TestMember> {
   const id = ulid();
   const tokenId = ulid();
@@ -23,11 +23,13 @@ export async function createMember(
   const name = opts.name ?? `m-${id.slice(-6)}`;
   const now = Date.now();
   await env.DB.batch([
-    env.DB.prepare("INSERT INTO members (id, kind, name, level, created_at) VALUES (?, ?, ?, ?, ?)").bind(
+    // A human owner is a 所有者 unless the test says otherwise, as migration 0017_roles makes them.
+    env.DB.prepare("INSERT INTO members (id, kind, name, level, team_owner, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(
       id,
       opts.kind ?? "human",
       name,
       opts.level ?? "member",
+      (opts.teamOwner ?? (opts.level === "owner" && (opts.kind ?? "human") === "human")) ? 1 : 0,
       now,
     ),
     env.DB.prepare("INSERT INTO tokens (id, token_hash, member_id, label, created_at) VALUES (?, ?, ?, 'test', ?)").bind(

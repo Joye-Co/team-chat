@@ -116,6 +116,12 @@ pub fn sentence(
     };
     match e.action.as_str() {
         "member.update" => {
+            // A 所有者 change writes `teamOwner` beside `level` (design-roles 3.1).
+            if let Some((_, after)) = change(e, "teamOwner")
+                && after.as_bool() == Some(true)
+            {
+                return (f(m::ACT_LEVEL, &[("level", m::ROLE_OWNER)]), None);
+            }
             if let Some((_, after)) = change(e, "level") {
                 return (f(m::ACT_LEVEL, &[("level", level_word(after))]), None);
             }
@@ -659,7 +665,25 @@ mod tests {
                 serde_json::json!({"level": ["member", "owner"]})
             )
             .0,
-            "Joye 把 Forge 的级别改成负责人"
+            "Joye 把 Forge 的身份改成管理员"
+        );
+        assert_eq!(
+            s(
+                "member.update",
+                "level",
+                serde_json::json!({"level": ["owner", "owner"], "teamOwner": [false, true]})
+            )
+            .0,
+            "Joye 把 Forge 的身份改成所有者"
+        );
+        assert_eq!(
+            s(
+                "member.update",
+                "level",
+                serde_json::json!({"level": ["owner", "owner"], "teamOwner": [true, false]})
+            )
+            .0,
+            "Joye 把 Forge 的身份改成管理员"
         );
         assert_eq!(
             s(

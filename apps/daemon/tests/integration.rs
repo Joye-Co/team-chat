@@ -2105,6 +2105,95 @@ async fn gated_commands_wait_for_a_person() {
         .unwrap();
 }
 
+/// 盯 2.2 and verification log problem 3: pushes to main written another way. The run's git
+/// shim decides on the branch a push would really update. `git -C . push origin main` asks
+/// once (the hook asks, its shim does not ask again), a plain `git push` on main and
+/// `B=main; git push origin HEAD:$B` ask at the shim, and a declined one does not run. Real git
+/// in a repository with no remote: an approved push then fails for want of the remote.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pushes_to_main_written_another_way_ask_once() {
+    daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
+    if daemon::health::which("git").is_none() {
+        eprintln!("skipped: git is not on PATH");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let cfg = write_config(tmp.path(), &m.url);
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    next(&mut ws).await;
+    send(&mut ws, &welcome(vec![])).await;
+    let mut a = assign("p1", "fake", "pushes", None);
+    if let Down::RunAssign(r) = &mut a {
+        r.gates = Some(default_gates());
+    }
+    send(&mut ws, &a).await;
+
+    // `git -C . push origin main`: the hook asks; approved, the shim lets it run.
+    let fr = collect(&mut ws, "p1", true, is_request).await;
+    let (id, kind, command) = gate_request(&fr);
+    assert_eq!(kind.as_deref(), Some("mergeMain"));
+    assert_eq!(command.as_deref(), Some("git -C . push origin main"));
+    send(&mut ws, &approval("p1", &id, "approve", None)).await;
+
+    // A plain `git push` on main: the hook sees nothing, the shim asks.
+    let fr = collect(&mut ws, "p1", true, is_request).await;
+    let (id, kind, command) = gate_request(&fr);
+    assert_eq!(kind.as_deref(), Some("mergeMain"));
+    let command = command.unwrap();
+    assert!(command.starts_with("git push\n"), "{command}");
+    assert!(
+        command.contains("git push origin HEAD:refs/heads/main"),
+        "{command}"
+    );
+    send(&mut ws, &approval("p1", &id, "deny", None)).await;
+
+    // `B=main; git push origin HEAD:$B`: the shim sees `HEAD:main`.
+    if cfg!(unix) {
+        let fr = collect(&mut ws, "p1", true, is_request).await;
+        let (id, _, command) = gate_request(&fr);
+        let command = command.unwrap();
+        assert!(command.contains("HEAD:refs/heads/main"), "{command}");
+        send(&mut ws, &approval("p1", &id, "deny", None)).await;
+    }
+    let fr = collect(&mut ws, "p1", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert!(!fr.iter().any(is_request), "asked a second time");
+    assert_eq!(done(&fr).status, "succeeded");
+
+    let r: serde_json::Value =
+        serde_json::from_str(&wait_file(&work_of(tmp.path(), "p1").join("push-1.json")).await)
+            .unwrap();
+    let cmds = r["commands"].as_array().unwrap();
+    assert_eq!(cmds[0]["ran"]["code"], 0, "{r}");
+    // Approved: git ran and failed only for the missing remote.
+    let approved = &cmds[1]["ran"];
+    assert_ne!(approved["code"], 0, "{r}");
+    assert!(
+        !approved["stderr"].as_str().unwrap().contains("approval"),
+        "{r}"
+    );
+    // Declined at the shim: git never ran, and the CLI reads why.
+    for c in &cmds[2..] {
+        assert!(c["denied"].is_null(), "{r}");
+        assert_eq!(c["ran"]["code"], 1, "{r}");
+        assert!(
+            c["ran"]["stderr"].as_str().unwrap().contains("declined"),
+            "{r}"
+        );
+    }
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
 /// The real `claude` of this machine, or None (skip) when it has none; a failure instead when
 /// `TC_REQUIRE_REAL_CLI` is set (CI installs the CLI and sets it).
 fn real_claude() -> Option<PathBuf> {
@@ -2330,6 +2419,51 @@ async fn the_real_cli_waits_for_a_person_at_a_gated_command() {
         send(&mut ws, &approval(&run, &id, "deny", None)).await;
         let fr = collect(&mut ws, &run, true, |f| matches!(f, Up::RunDone(_))).await;
         assert_eq!(done(&fr).status, "succeeded", "{}", stderr(&run));
+    }
+
+    // 5. A plain `git push` on main, which no pattern names: the CLI's Bash finds the run's
+    // git shim first on PATH (after the user's shell profile, see CLAUDE_ENV_FILE), the shim
+    // asks, and declined, git never runs and the model reads why.
+    if cfg!(unix) && daemon::health::which("git").is_some() {
+        let mut a = assign(
+            "rs1",
+            "real",
+            "Run the tool.\nTOOL Bash git init -q -b main shimrepo && cd shimrepo && git -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m x && git push",
+            None,
+        );
+        if let Down::RunAssign(r) = &mut a {
+            r.gates = Some(default_gates());
+        }
+        send(&mut ws, &a).await;
+        let fr = collect(&mut ws, "rs1", true, |f| {
+            is_request(f) || matches!(f, Up::RunDone(_))
+        })
+        .await;
+        assert!(
+            fr.last().is_some_and(is_request),
+            "the plain push was not stopped: {}",
+            stderr("rs1")
+        );
+        let (id, kind, asked) = gate_request(&fr);
+        assert_eq!(kind.as_deref(), Some("mergeMain"));
+        assert!(
+            asked
+                .as_deref()
+                .unwrap()
+                .contains("git push origin HEAD:refs/heads/main"),
+            "{asked:?}"
+        );
+        send(&mut ws, &approval("rs1", &id, "deny", None)).await;
+        let fr = collect(&mut ws, "rs1", true, |f| matches!(f, Up::RunDone(_))).await;
+        assert_eq!(done(&fr).status, "succeeded", "{}", stderr("rs1"));
+        assert!(
+            model
+                .tool_results()
+                .iter()
+                .any(|(_, text)| text.contains("a person declined it")),
+            "{:?}",
+            model.tool_results()
+        );
     }
 
     stop_tx.send(()).unwrap();

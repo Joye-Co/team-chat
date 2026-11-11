@@ -181,6 +181,37 @@ async fn prepare_with_github(
     }
 }
 
+/// The run works in a repository (`repo.url` or `repo.path`), so it has a code location.
+fn has_repo(a: &RunAssign) -> bool {
+    a.repo
+        .as_ref()
+        .is_some_and(|r| r.url.is_some() || r.path.is_some())
+}
+
+/// The environment of the daemon's fetch at the end of a run (the code location's "pushed"):
+/// the person's GitHub as for [`prepare_with_github`], nothing without one. A `repo.path` run
+/// whose folder's `origin` is on GitHub gets the token too: the CLI pushed with it.
+async fn code_git_env(
+    a: &RunAssign,
+    work: &std::path::Path,
+    github: Option<&crate::github::Run>,
+    event: &(dyn Fn(RunEvent) + Send + Sync),
+) -> Vec<(String, Option<String>)> {
+    let Some(g) = github.filter(|g| g.app()) else {
+        return vec![];
+    };
+    let origin = workspace::origin_url(work).await;
+    let token = if crate::github::code_fetch_from_github(a.repo.as_ref(), origin.as_deref()) {
+        match g.fetch(event).await {
+            crate::github::Got::Token(t) => Some(t.token),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    crate::github::fetch_env(&g.spec, token.as_deref())
+}
+
 /// What a resumed CLI session must know when its working folder is not the one its earlier
 /// turns used (the line was cleaned up after being idle, or this is the first run since the
 /// daemon kept lines). None when the folder is the same one.
@@ -430,8 +461,8 @@ pub async fn supervise(ctx: RunCtx) {
         eprintln!("{} run {run_id}: removed an old GitHub sign-in", now_ms());
     }
     let prepared = prepare_with_github(&cfg, &assign, github.as_deref(), &event).await;
-    let (outcome, timed_out) = match prepared {
-        Err(e) => (Outcome::failed(e), false),
+    let (outcome, timed_out, code) = match prepared {
+        Err(e) => (Outcome::failed(e), false, None),
         Ok((cwd, line, line_note)) => {
             event(RunEvent::Status {
                 state: "running".into(),
@@ -499,6 +530,63 @@ pub async fn supervise(ctx: RunCtx) {
                     .unwrap_or_default(),
             ));
             outputs.set_gates(gates.clone());
+            // Shims first on PATH for the programs the kinds are about: commands inside scripts
+            // and spellings the patterns miss stop too (crate::shim). In a VM they are on the
+            // tools disk.
+            if !gates.is_empty() && chat_run.is_some() {
+                let bin = if exec.isolated() {
+                    crate::github::GUEST_BIN.to_string()
+                } else {
+                    let path = env
+                        .iter()
+                        .find(|(k, _)| k == "PATH")
+                        .map(|(_, v)| std::ffi::OsString::from(v))
+                        .unwrap_or_default();
+                    if let Err(e) = crate::shim::install(&dir.join("bin"), &path) {
+                        eprintln!("{} run {run_id}: shims left out: {e}", now_ms());
+                    }
+                    dir.join("bin").display().to_string()
+                };
+                env.retain(|(k, _)| k != crate::shim::ENV_GATES);
+                env.push((crate::shim::ENV_GATES.into(), "1".into()));
+                // Claude Code runs Bash with the PATH of the user's shell profile: put the shims
+                // first again before each command. (Windows: Git Bash, not done there.)
+                if rt.kind == "claude"
+                    && cfg!(unix)
+                    && !env.iter().any(|(k, _)| k == crate::shim::CLAUDE_ENV_FILE)
+                {
+                    match crate::shim::claude_env_file(&dir, &bin) {
+                        Ok(f) => {
+                            env.push((crate::shim::CLAUDE_ENV_FILE.into(), f.display().to_string()))
+                        }
+                        Err(e) => eprintln!("{} run {run_id}: no Claude env file: {e}", now_ms()),
+                    }
+                }
+                // Codex (and an ACP agent) runs each command in the user's login shell
+                // (`zsh -lc`): on macOS path_helper, or a profile, would put the shims last.
+                // A zsh of the run reads the user's own files, then puts them first again.
+                // (A login bash re-reads the system profile with no such hook: not covered.)
+                if rt.kind != "claude" && cfg!(unix) && !exec.isolated() {
+                    match crate::shim::zsh_dotdir(&dir, &bin) {
+                        Ok(zdot) => {
+                            let own = env
+                                .iter()
+                                .find(|(k, _)| k == crate::shim::ZDOTDIR)
+                                .map(|(_, v)| v.clone())
+                                .or_else(|| std::env::var(crate::shim::ZDOTDIR).ok())
+                                .filter(|v| !v.is_empty());
+                            env.retain(|(k, _)| {
+                                k != crate::shim::ZDOTDIR && k != crate::shim::ENV_USER_ZDOTDIR
+                            });
+                            if let Some(own) = own {
+                                env.push((crate::shim::ENV_USER_ZDOTDIR.into(), own));
+                            }
+                            env.push((crate::shim::ZDOTDIR.into(), zdot.display().to_string()));
+                        }
+                        Err(e) => eprintln!("{} run {run_id}: no zsh files: {e}", now_ms()),
+                    }
+                }
+            }
             let gate_hook =
                 (!gates.is_empty()).then(|| dir.join("bin").join(crate::chat_run::link_name()));
             let gate_alive = (!gates.is_empty()).then(|| gates.alive());
@@ -580,9 +668,18 @@ this machine cannot be made to stop at them (update it)",
             if aside {
                 workspace::set_read_only(&work, false);
             }
+            // Where the code is (design-relay R5), read while the run still holds the line.
+            let code = if aside || !has_repo(&assign) {
+                None
+            } else {
+                let fallback = workspace::read_meta(&dir).and_then(|m| m.branch);
+                let env = code_git_env(&assign, &work, github.as_deref(), &event).await;
+                workspace::with_git_env(env, workspace::code_location(&work, fallback.as_deref()))
+                    .await
+            };
             // The CLI is done: the next run of this member in this topic may use the line.
             drop(line);
-            res
+            (res.0, res.1, code)
         }
     };
 
@@ -625,7 +722,7 @@ this machine cannot be made to stop at them (update it)",
         session_id: outcome.session_id.clone(),
         usage: outcome.usage.clone(),
         duration_ms: started.elapsed().as_millis() as u64,
-        code: None,
+        code,
     }));
     if let Some(mut meta) = workspace::read_meta(&dir) {
         meta.finished_at = Some(now_ms());

@@ -1,6 +1,7 @@
 // 成员 of 团队管理 (docs/protocol.md "Team roster"): for owners, when each member joined and who
 // added them, when they were last seen, their signed-in devices, and invites not accepted yet.
 import type { TeamRoster } from "@chat/protocol";
+import { isTeamOwner } from "../core/db";
 import { registerRoute } from "../core/registry";
 
 registerRoute({
@@ -10,7 +11,7 @@ registerRoute({
   async handler({ env }) {
     const now = Date.now();
     const [members, tokens, invites] = await env.DB.batch([
-      env.DB.prepare("SELECT id, created_at, created_by FROM members ORDER BY created_at, id"),
+      env.DB.prepare("SELECT id, kind, level, team_owner, created_at, created_by FROM members ORDER BY created_at, id"),
       env.DB.prepare(
         "SELECT member_id, label, created_at, last_used_at FROM tokens WHERE revoked_at IS NULL ORDER BY COALESCE(last_used_at, created_at) DESC",
       ),
@@ -25,7 +26,9 @@ registerRoute({
       byMember.set(t.member_id, list);
     }
     const out: TeamRoster = {
-      members: (members.results as { id: string; created_at: number; created_by: string | null }[]).map((m) => {
+      members: (
+        members.results as { id: string; kind: "human" | "bot"; level: "owner" | "member"; team_owner: number; created_at: number; created_by: string | null }[]
+      ).map((m) => {
         const devices = byMember.get(m.id) ?? [];
         const seen = devices.reduce<number | undefined>((a, d) => (d.last_used_at && (!a || d.last_used_at > a) ? d.last_used_at : a), undefined);
         return {
@@ -38,6 +41,7 @@ registerRoute({
             createdAt: d.created_at,
             ...(d.last_used_at ? { lastUsedAt: d.last_used_at } : {}),
           })),
+          ...(isTeamOwner(m) ? { teamOwner: true } : {}),
         };
       }),
       invites: (invites.results as { id: string; name: string; kind: "human" | "bot"; level: "owner" | "member"; role: string | null; created_by: string; created_at: number; expires_at: number }[]).map((i) => ({
