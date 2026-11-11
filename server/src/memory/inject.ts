@@ -3,6 +3,7 @@
 import { utf8Bytes } from "@chat/protocol";
 import type { Env } from "../core/env";
 import { logger } from "../core/logger";
+import { fitsGroupSql } from "./access";
 import type { MemoryRow } from "./store";
 
 /** Bytes of memory in a run's prompt. */
@@ -41,10 +42,12 @@ export async function memoryIndex(env: Env, o: MemoryFor): Promise<string | unde
     const scopes = { team: "team", group: `group:${o.groupId}`, member: `member:${o.botId}`, person: o.requesterId ? `person:${o.requesterId}` : null };
     const rows = (
       await env.DB.prepare(
-        `SELECT * FROM memories WHERE (status = 'active' AND scope IN (?1, ?2, ?3, ?4)) OR (status = 'pending' AND scope = ?3 AND author_id = ?5)
+        // A memory learned in a group goes only where everyone in this group is in that group.
+        `SELECT * FROM memories m WHERE ((status = 'active' AND scope IN (?1, ?2, ?3, ?4)) OR (status = 'pending' AND scope = ?3 AND author_id = ?5))
+           AND ${fitsGroupSql("m", 6)}
          ORDER BY updated_at DESC LIMIT 400`,
       )
-        .bind(scopes.team, scopes.group, scopes.member, scopes.person ?? "", o.botId)
+        .bind(scopes.team, scopes.group, scopes.member, scopes.person ?? "", o.botId, o.groupId)
         .all<MemoryRow>()
     ).results;
     if (rows.length === 0) return undefined;
