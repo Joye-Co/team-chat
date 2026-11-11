@@ -62,6 +62,9 @@ fn main() {
             if !problems.is_empty() {
                 exit_with(&problems.join("\n"));
             }
+            // Windows: the first reading of the machine's load takes half a second; take it
+            // here, not on a thread of the runtime.
+            let _ = daemon::sys::load_avg();
             let rt = tokio::runtime::Runtime::new().unwrap_or_else(|e| exit_with(&e.to_string()));
             let res = rt.block_on(daemon::daemon::run(cfg, async {
                 #[cfg(unix)]
