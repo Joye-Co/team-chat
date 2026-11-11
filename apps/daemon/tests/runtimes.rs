@@ -1076,16 +1076,15 @@ async fn codex_elevated_side_chat_report() {
     let mut report = Vec::new();
     for (i, (mode, kind)) in [
         ("unelevated", "plain"),
-        ("elevated", "plain"),
-        ("elevated", "private"),
-        ("elevated", "plain"),
-        ("elevated", "private"),
+        ("elevated", "plain granted"),
+        ("elevated", "private granted"),
+        ("elevated", "plain granted"),
     ]
     .into_iter()
     .enumerate()
     {
         let root = base.path().join(format!("root-{i}"));
-        if kind == "private" {
+        if kind.starts_with("private") {
             daemon::winacl::create_dir(&root).unwrap();
         } else {
             std::fs::create_dir_all(&root).unwrap();
@@ -1093,6 +1092,15 @@ async fn codex_elevated_side_chat_report() {
         let cwd = root.join("work");
         std::fs::create_dir_all(&cwd).unwrap();
         std::fs::write(cwd.join("seed.txt"), "seed-text").unwrap();
+        if kind.ends_with("granted") {
+            for user in ["CodexSandboxOffline", "CodexSandboxOnline"] {
+                let out = std::process::Command::new("icacls.exe")
+                    .arg(&cwd)
+                    .args(["/grant", &format!("{user}:(OI)(CI)RX")])
+                    .output();
+                println!("grant {user}: {:?}", out.map(|o| o.status));
+            }
+        }
         let args: Vec<String> = [
             "app-server",
             "-c",
@@ -1110,24 +1118,40 @@ async fn codex_elevated_side_chat_report() {
         let outside = base.path().join(format!("outside-{i}.txt"));
         let mut calls = serde_json::Map::new();
         calls.insert("mode".into(), format!("{mode}, {kind} folder").into());
-        for (what, line) in [
-            ("read", "type seed.txt".to_string()),
-            ("write inside", "echo x> written.txt".to_string()),
-            ("write outside", format!("echo x> {}", outside.display())),
+        let raw = |host: &str| -> Vec<String> {
+            vec![
+                "powershell.exe".into(),
+                "-NoProfile".into(),
+                "-Command".into(),
+                format!(
+                    "try {{ (New-Object Net.Sockets.TcpClient).Connect('{host}', {port}); 'connected' }} catch {{ 'failed' }}"
+                ),
+            ]
+        };
+        let cmd = |line: String| -> Vec<String> { vec!["cmd.exe".into(), "/c".into(), line] };
+        for (what, command) in [
+            ("read", cmd("type seed.txt".into())),
+            ("write inside", cmd("echo x> written.txt".into())),
             (
-                "loopback",
-                format!("curl.exe -s -m 5 http://127.0.0.1:{port}/"),
+                "write outside",
+                cmd(format!("echo x> {}", outside.display())),
             ),
             (
-                "own address",
-                format!("curl.exe -s -m 5 http://{own_ip}:{port}/"),
+                "curl loopback",
+                cmd(format!("curl.exe -s -m 5 http://127.0.0.1:{port}/")),
             ),
             (
-                "internet",
-                "curl.exe -s -m 10 -o NUL https://github.com/".to_string(),
+                "curl own address",
+                cmd(format!("curl.exe -s -m 5 http://{own_ip}:{port}/")),
             ),
+            (
+                "curl internet",
+                cmd("curl.exe -s -m 10 -o NUL https://github.com/".into()),
+            ),
+            ("socket loopback", raw("127.0.0.1")),
+            ("socket own address", raw(&own_ip)),
+            ("env", cmd("set | findstr /i proxy".into())),
         ] {
-            let command: Vec<String> = vec!["cmd.exe".into(), "/c".into(), line];
             let (codex, args, home, dir) = (codex.clone(), args.clone(), home.clone(), cwd.clone());
             let answer = tokio::task::spawn_blocking(move || {
                 codex_exec(&codex, &args, &home, &dir, &command, serde_json::json!({}))
@@ -1171,7 +1195,8 @@ async fn codex_elevated_side_chat_report() {
         }
     }
     let mut files = vec![];
-    names(&home, 2, &mut files);
+    names(&home, 1, &mut files);
+    files.retain(|f| f.contains("sandbox"));
     let users = std::process::Command::new("net.exe").arg("user").output();
     let all = serde_json::json!({
         "own address": own_ip,
