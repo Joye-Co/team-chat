@@ -944,17 +944,28 @@ by what the CLI reports, its typed fields first and its words only when it has n
 | `not_installed` | the program was not found when the daemon started it | same |
 | `other` | anything else | same |
 
+Claude Code's words in the stderr of a run that exited early say `signed_out` only when they are
+the CLI's own ("Not logged in", "Please run /login", "Invalid API key"): that tail can hold an MCP
+server's or a hook's "401 Unauthorized", which reads as `other`.
+
 A run that failed with `signed_out` marks its runtime signed out at once: `metrics.logins` says
 `logged_out` for it until the CLI's own status check says it is signed in again (a sign-in from
 the app, or the check every 10 minutes) or a later run of it succeeds.
 
+`CliLogin += { confirmed?: boolean }` (usable): `true` when a `logged_out` is certain: the CLI's
+own status check said so, or a run just failed with `signed_out`. A `logged_out` from the
+credential files alone (they do not know every way a CLI signs in, such as Claude Code's
+`apiKeyHelper` or a token in its env) or from an older daemon has no `confirmed`; it is shown to
+people but keeps no runs away.
+
 The sign-in state in `metrics.logins` is the CLI's own status check when the daemon has one
 (feature `accounts`, every 10 minutes and after each sign-in): `claude auth status --json`
-(`loggedIn`) and `codex login status` ("Logged in" / "Not logged in"). A check that cannot run or
-says nothing clear falls back to the credential files. An API key the CLI gets (its runtime's
-env, the daemon's env or a key saved from the app) counts as signed in. The server gives no run
-to a runtime whose login is `logged_out` (protocol.md, "Failure kinds and the model a run
-used").
+(`loggedIn`) and `codex login status` ("Logged in" / "Not logged in"), run with the env a run
+gets (the runtime's env and the daemon's `env_passthrough` variables), so it sees an
+`apiKeyHelper` or a token passed that way. A check that cannot run or says nothing clear falls
+back to the credential files. An API key the CLI gets (its runtime's env, the daemon's env or a
+key saved from the app) counts as signed in. The server gives no run to a runtime whose login is
+a confirmed `logged_out` (protocol.md, "Failure kinds and the model a run used").
 
 The `session` event's `effort` is the 思考强度 the daemon passed to the CLI (`run.assign.effort`
 after the check in "Models and effort"), or the one Codex's `thread/start` answered with.

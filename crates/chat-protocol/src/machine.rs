@@ -190,6 +190,12 @@ pub struct CliLogin {
     pub email: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<String>,
+    /// Usable: `true` when a `logged_out` state is certain: the CLI's own status check, run with
+    /// the env its runs get, said so, or a run just failed because it is not signed in. `None` =
+    /// from the credential files only (or an older daemon). Only a confirmed `logged_out` keeps
+    /// runs away from the runtime.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirmed: Option<bool>,
 }
 
 /// An API key the machine holds: never the value, only its last 4 characters.

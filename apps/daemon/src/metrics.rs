@@ -620,6 +620,7 @@ pub fn claude_login(cfg: &Config, rt: &RuntimeConfig) -> CliLogin {
         method: method.map(str::to_string),
         email: None,
         plan: None,
+        confirmed: None,
     }
 }
 
@@ -647,6 +648,7 @@ pub fn codex_login(cfg: &Config, rt: &RuntimeConfig) -> CliLogin {
         method: method.map(str::to_string),
         email: None,
         plan: None,
+        confirmed: None,
     }
 }
 
@@ -687,6 +689,7 @@ pub fn apply_sign_in(
         Some(SignIn::Out) if l.method.as_deref() != Some("api_key") => {
             l.state = login_state::LOGGED_OUT.into();
             l.method = None;
+            l.confirmed = Some(true);
         }
         _ => {}
     }
@@ -697,6 +700,10 @@ pub fn apply_sign_in(
     if failed_sign_in {
         l.state = login_state::LOGGED_OUT.into();
         l.method = None;
+        l.confirmed = Some(true);
+    }
+    if l.state != login_state::LOGGED_OUT {
+        l.confirmed = None;
     }
 }
 
@@ -877,14 +884,26 @@ mod tests {
             method: method.map(str::to_string),
             email: None,
             plan: None,
+            confirmed: None,
         };
         // The files are there, the CLI says its sign-in is gone (expired or revoked).
         let mut l = files(login_state::LOGGED_IN, Some("subscription"));
         apply_sign_in(&mut l, Some(&SignIn::Out), false, false);
         assert_eq!(
-            (l.state.as_str(), l.method),
+            (l.state.as_str(), l.method, l.confirmed),
+            (login_state::LOGGED_OUT, None, Some(true))
+        );
+        // The files alone say signed out (an apiKeyHelper or an env token they do not know),
+        // and the check could not run: shown, but not confirmed, so runs still go there.
+        let mut l = files(login_state::LOGGED_OUT, None);
+        apply_sign_in(&mut l, Some(&SignIn::Unknown), false, false);
+        assert_eq!(
+            (l.state.as_str(), l.confirmed),
             (login_state::LOGGED_OUT, None)
         );
+        let mut l = files(login_state::LOGGED_OUT, None);
+        apply_sign_in(&mut l, None, false, false);
+        assert_eq!(l.confirmed, None);
         // A key the CLI gets from the daemon's env still counts.
         let mut l = files(login_state::LOGGED_IN, Some("api_key"));
         apply_sign_in(&mut l, Some(&SignIn::Out), false, false);
@@ -914,7 +933,10 @@ mod tests {
         // A run that just failed to sign in wins over everything.
         let mut l = files(login_state::LOGGED_IN, Some("subscription"));
         apply_sign_in(&mut l, None, true, true);
-        assert_eq!(l.state, login_state::LOGGED_OUT);
+        assert_eq!(
+            (l.state.as_str(), l.confirmed),
+            (login_state::LOGGED_OUT, Some(true))
+        );
         assert_eq!(api_key_name("codex"), Some("OPENAI_API_KEY"));
         assert_eq!(api_key_name("acp"), None);
     }

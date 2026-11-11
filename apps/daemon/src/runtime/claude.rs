@@ -67,6 +67,9 @@ pub struct ClaudeNormalizer {
     tasks: Vec<(Option<String>, String, String)>,
 }
 
+/// The start of a run's error when the CLI exited before its turn ended; the stderr tail follows.
+pub const EXITED_EARLY: &str = "claude exited before the turn ended: ";
+
 impl ClaudeNormalizer {
     /// Called when the daemon writes a user line. Returns turn.started when no turn is open;
     /// otherwise the line joins the running turn, or starts the next one when that turn ends
@@ -90,7 +93,12 @@ impl ClaudeNormalizer {
     /// else from `error` (the run's error text). A limit gets the reset the CLI last named.
     pub fn failure_of(&self, error: Option<&str>) -> Option<crate::proto::RunFailure> {
         let typed = self.failure.clone().filter(|_| self.last_is_error);
-        let mut f = typed.or_else(|| error.and_then(crate::failure::from_text))?;
+        // An early exit's error is the stderr tail, which may hold other programs' words.
+        let words = |e: &str| match e.strip_prefix(EXITED_EARLY) {
+            Some(tail) => crate::failure::from_stderr(tail),
+            None => crate::failure::from_text(e),
+        };
+        let mut f = typed.or_else(|| error.and_then(words))?;
         if f.kind == crate::proto::failure_kind::LIMIT {
             f.resets_at = f.resets_at.or(self.limit_resets_at);
         }
@@ -789,10 +797,7 @@ run unasked. The run was not started.",
     let sid = norm.session_id.clone().unwrap_or(session_id);
     let failed = exited_early || norm.last_is_error || norm.last_result.is_none();
     let error = if exited_early {
-        Some(format!(
-            "claude exited before the turn ended: {}",
-            p.stderr_tail()
-        ))
+        Some(format!("{EXITED_EARLY}{}", p.stderr_tail()))
     } else if failed {
         norm.last_result.clone()
     } else {

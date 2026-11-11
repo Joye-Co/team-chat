@@ -41,18 +41,22 @@ export async function failedOn(env: BotsEnv, machineId: string, runtime: string 
 
 /**
  * Who may sign the computers' CLI in again, as the requester reads it: the requester when they
- * may manage every one of them (a personal computer's owner; an admin for a team computer), else
- * those who may (their names, and the ones in the group are mentioned).
+ * may manage every one of them (a personal computer's owner; a 负责人 for a team computer), from
+ * 团队管理 when they are a 负责人 and on the computer itself otherwise (团队管理 opens only for
+ * 负责人); else those who may (personal owners and, for a team computer or as the ones who can
+ * help through 团队管理, the 负责人; the ones in the group are mentioned).
  */
 async function signInBy(env: BotsEnv, machines: FailedOn[], requesterId: string, groupId: string): Promise<{ by: SignInBy; mentions: string[] }> {
   const requester = await env.DB.prepare("SELECT level FROM members WHERE id = ? AND deactivated = 0")
     .bind(requesterId)
     .first<{ level: string }>()
     .catch(() => null);
-  const manages = (m: FailedOn) => (m.ownerId ? m.ownerId === requesterId : requester?.level === "owner");
-  if (machines.length > 0 && machines.every(manages)) return { by: { self: true }, mentions: [] };
+  const admin = requester?.level === "owner";
+  const manages = (m: FailedOn) => (m.ownerId ? m.ownerId === requesterId : admin);
+  if (machines.length > 0 && machines.every(manages)) return { by: { self: admin ? "admin" : "machine" }, mentions: [] };
   const owners = [...new Set(machines.filter((m) => m.ownerId).map((m) => m.ownerId as string))];
-  const admins = machines.some((m) => !m.ownerId);
+  // A personal computer's owner may not open 团队管理: the 负责人 are asked too.
+  const admins = machines.length > 0;
   const rows = await env.DB.prepare(
     `SELECT m.id, m.name, EXISTS (SELECT 1 FROM group_members g WHERE g.group_id = ? AND g.member_id = m.id) AS here
      FROM members m WHERE m.kind = 'human' AND m.deactivated = 0
@@ -84,13 +88,15 @@ export async function failureNote(
     resetsAt?: number;
     started: boolean;
     now?: number;
+    /** `model`: the AI member has its own model (运行设置), the one that failed. */
+    ownModel?: boolean;
   },
 ): Promise<FailureNote> {
   const now = o.now ?? Date.now();
   const cli = cliName(o.machines.find((m) => m.kind)?.kind, o.runtime);
   const sign: { by: SignInBy; mentions: string[] } =
     o.kind === "signed_out" ? await signInBy(env, o.machines, o.requesterId, o.groupId) : { by: { names: [] }, mentions: [] };
-  const words = failureWords(o.kind, { machines: o.machines.map((m) => m.name), cli, resetsAt: o.resetsAt, now, zone: teamZone(env), signIn: sign.by });
+  const words = failureWords(o.kind, { machines: o.machines.map((m) => m.name), cli, resetsAt: o.resetsAt, now, zone: teamZone(env), signIn: sign.by, ownModel: o.ownModel });
   const text = o.started ? TEXT.failedWith(words.sentence, words.next) : TEXT.notStartedWith(words.sentence, words.next);
   return { text, mentions: sign.mentions };
 }

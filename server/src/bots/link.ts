@@ -111,19 +111,21 @@ export interface LinkStatus {
 export const SIGNED_OUT_MARK_MS = 15 * 60_000;
 
 /**
- * 模 3.1, 机 2.5: the runtimes that take no runs: the latest heartbeat says `logged_out`, or a
- * run failed with `signed_out` (`marks`: runtime -> when) and no later heartbeat says
- * `logged_in`. A mark older than `SIGNED_OUT_MARK_MS` leaves it to the heartbeat.
+ * 模 3.1, 机 2.5: the runtimes that take no runs: the latest heartbeat says a confirmed
+ * `logged_out` (the CLI's own check, or a run that just failed to sign in; the credential files
+ * alone do not know every way a CLI signs in), or a run failed with `signed_out` (`marks`:
+ * runtime -> when) and no later heartbeat says `logged_in`. A mark older than
+ * `SIGNED_OUT_MARK_MS` leaves it to the heartbeat.
  */
 export function signedOutRuntimes(
-  logins: { runtime: string; state: string }[] | undefined,
+  logins: { runtime: string; state: string; confirmed?: boolean }[] | undefined,
   metricsAt: number | null,
   marks: Record<string, number>,
   now: number,
 ): string[] {
   const state = new Map((logins ?? []).map((l) => [l.runtime, l.state]));
   const out = new Set<string>();
-  for (const [rt, s] of state) if (s === "logged_out") out.add(rt);
+  for (const l of logins ?? []) if (l.state === "logged_out" && l.confirmed === true) out.add(l.runtime);
   for (const [rt, at] of Object.entries(marks)) {
     if (now - at > SIGNED_OUT_MARK_MS) continue;
     if (metricsAt !== null && metricsAt > at && state.get(rt) === "logged_in") continue;

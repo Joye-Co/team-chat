@@ -1120,11 +1120,15 @@ impl Daemon {
             .collect();
         let (usage, accounts) = (self.usage.clone(), self.accounts.clone());
         let marks = self.signed_out.clone();
+        let passthrough = self.cfg.env_passthrough.clone();
         tokio::spawn(async move {
             let started = Instant::now();
             let mut found = HashMap::new();
             for (name, rt) in &runtimes {
-                found.insert(name.clone(), crate::accounts::sign_in_of(rt).await);
+                found.insert(
+                    name.clone(),
+                    crate::accounts::sign_in_of(rt, &passthrough).await,
+                );
             }
             // Signed in again since a run failed to sign in: the mark goes.
             marks

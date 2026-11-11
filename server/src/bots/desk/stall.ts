@@ -1,7 +1,7 @@
 // BotDesk stall detection: the alarm that marks silent runs blocked and fails runs whose start
 // never reached a machine. Paused runs (接管) have no stall deadline until they resume.
 import { RUN_KIND_ASIDE } from "@chat/protocol";
-import { HEARTBEAT_STALE_MS, type MachineView, STALL_MS, TEXT, isOnline } from "../dispatch";
+import { HEARTBEAT_STALE_MS, type MachineView, STALL_MS, TEXT, cut, isOnline } from "../dispatch";
 import { CONTINUE_TEXT, LOOP_LIMIT, LOOP_TEXT, MACHINE_GONE_MS, MACHINE_MOVE_MS, MAX_AUTO_CONTINUE, MAX_INTERVENTIONS, NUDGE_MS, NUDGE_TEXT, TOOL_STALL_MS, isPromiseOnly, loopKey } from "../../agent/supervise";
 import { ulid } from "../../core/ids";
 import { linkStub } from "../env";
@@ -92,6 +92,12 @@ export abstract class DeskStall extends DeskEvents {
           const r = this.run(id);
           if (!r || r.ended_at !== null || r.machine_id || !r.queued_at) return;
           const none = runner ? this.whyNone(r, runner, machines) : null;
+          if (runner && r.kind !== RUN_KIND_ASIDE && none?.why === "signed_out") {
+            // 模 3.1: what it waited for is a sign-in: say which computer needs it.
+            const note = await this.signedOutNote(r, runner.runtime, none.machines);
+            await this.end(r, "failed", note.text, "blocked", cut(note.text, 280), false, note.mentions);
+            return;
+          }
           const why = r.kind === RUN_KIND_ASIDE ? TEXT.noAsideMachine : TEXT.queueExpired(hours, none?.why === "offline" ? none.names : undefined);
           await this.end(r, "failed", why, "blocked", why);
         });

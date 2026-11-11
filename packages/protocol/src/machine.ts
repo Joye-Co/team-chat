@@ -132,6 +132,12 @@ export const CliLogin = z.object({
   /** Feature "accounts": the signed-in account and plan, when the CLI says. */
   email: z.string().max(320).optional(),
   plan: z.string().max(64).optional(),
+  /**
+   * Usable: `true` when a `logged_out` state is certain (the CLI's own status check, run with the
+   * env its runs get, said so, or a run just failed because it is not signed in). Absent = from
+   * the credential files only, or an older daemon. Only a confirmed `logged_out` keeps runs away.
+   */
+  confirmed: z.boolean().optional(),
 });
 export type CliLogin = z.infer<typeof CliLogin>;
 /** VM boot times of the last (at most 50) runs. */

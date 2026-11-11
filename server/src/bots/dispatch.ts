@@ -101,15 +101,27 @@ export const TEXT = {
   },
   /** The next step after the sentence. */
   next: {
-    /** The requester manages the computer (模 3.5). */
+    /**
+     * The requester manages the computers and may open 团队管理 (a 负责人, 模 3.5): its sign-in
+     * is in 账号与密钥 › 订阅账号, with the computer chosen there.
+     */
     signInSelf: (machines: string[]) =>
-      machines.length === 1 ? `请到 团队管理 › 机器 › ${machines[0]} 重新登录，然后再 @我。` : `请到 团队管理 › 机器 里给 ${machines.join("、")} 重新登录，然后再 @我。`,
+      machines.length === 1
+        ? `请到 团队管理 › 账号与密钥 › 订阅账号，选 ${machines[0]}，点「重新登录」，然后再 @我。`
+        : `请到 团队管理 › 账号与密钥 › 订阅账号，给 ${machines.join("、")} 重新登录，然后再 @我。`,
+    /** The requester owns the personal computers but cannot open 团队管理: sign in there. */
+    signInOnMachine: (machines: string[], cli: string) =>
+      `请在 ${machines.join("、")} 上重新登录 ${cli}，或者请负责人在 团队管理 › 账号与密钥 › 订阅账号 里帮忙，然后再 @我。`,
     /** Someone else does: they are mentioned. */
-    signInAsk: (names: string[]) => `请 ${names.join("、")} 到 团队管理 › 机器 里重新登录，然后再 @我。`,
-    signInAdmin: "请管理员到 团队管理 › 机器 里重新登录，然后再 @我。",
+    signInAsk: (names: string[]) =>
+      `请 ${names.join("、")} 重新登录（团队管理 › 账号与密钥 › 订阅账号，或者在那台电脑上），然后再 @我。`,
+    signInAdmin: "请负责人到 团队管理 › 账号与密钥 › 订阅账号 重新登录，然后再 @我。",
     limitAt: (when: string) => `额度在 ${when} 恢复，到时再 @我。`,
     limitLater: "额度恢复后再 @我。",
-    model: "请到 设置 › 模型 换一个模型，然后再 @我。",
+    /** The AI member's own model (运行设置) is the one that failed. */
+    modelOwn: "请到 设置 › 成员 里我的 运行设置 › 模型 换一个模型，然后再 @我。",
+    /** The shared model (设置 › 通用 › 模型, only 负责人 change it). */
+    model: "请负责人到 设置 › 通用 › 模型 换一个模型，然后再 @我。",
     network: "请稍后再 @我；一直这样的话，看看那台电脑的网络。",
     notInstalled: "装好后再 @我。",
     other: "需要的话再 @我 试一次。",
@@ -163,13 +175,16 @@ export function clockText(at: number, now: number, zone: string): string {
   return `${p.month} 月 ${p.day} 日 ${time}`;
 }
 
-/** Who may sign a computer's CLI in again (模 3.5). */
-export type SignInBy = { self: true } | { names: string[] };
+/**
+ * Who may sign a computer's CLI in again (模 3.5): the requester from 团队管理 (`admin`), the
+ * requester on their own personal computers (`machine`: they cannot open 团队管理), or others.
+ */
+export type SignInBy = { self: "admin" | "machine" } | { names: string[] };
 
 /** The sentence and next step of a failure kind. */
 export function failureWords(
   kind: FailureKind,
-  ctx: { machines: string[]; cli: string; resetsAt?: number; now: number; zone: string; signIn: SignInBy },
+  ctx: { machines: string[]; cli: string; resetsAt?: number; now: number; zone: string; signIn: SignInBy; ownModel?: boolean },
 ): { sentence: string; next: string } {
   const f = TEXT.failure;
   const n = TEXT.next;
@@ -178,7 +193,14 @@ export function failureWords(
     case "signed_out":
       return {
         sentence: f.signedOut(machine, ctx.cli),
-        next: "self" in ctx.signIn ? n.signInSelf(ctx.machines) : ctx.signIn.names.length > 0 ? n.signInAsk(ctx.signIn.names) : n.signInAdmin,
+        next:
+          "self" in ctx.signIn
+            ? ctx.signIn.self === "admin"
+              ? n.signInSelf(ctx.machines)
+              : n.signInOnMachine(ctx.machines, ctx.cli)
+            : ctx.signIn.names.length > 0
+              ? n.signInAsk(ctx.signIn.names)
+              : n.signInAdmin,
       };
     case "limit":
       return {
@@ -186,7 +208,7 @@ export function failureWords(
         next: ctx.resetsAt && ctx.resetsAt > ctx.now ? n.limitAt(clockText(ctx.resetsAt, ctx.now, ctx.zone)) : n.limitLater,
       };
     case "model":
-      return { sentence: f.model(ctx.cli), next: n.model };
+      return { sentence: f.model(ctx.cli), next: ctx.ownModel ? n.modelOwn : n.model };
     case "network":
       return { sentence: f.network(machine), next: n.network };
     case "not_installed":

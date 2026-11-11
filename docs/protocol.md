@@ -2664,12 +2664,17 @@ RunLogEntry: run.done += { failure?: RunFailure }; session event += { effort?: s
 
 - The topic gets one sentence and one next step per kind, in product words; the CLI's own text
   stays in the run log (`run.done.error`) for the process view. `signed_out` names the computer
-  and the CLI: when the requester may manage that computer (an admin for a team computer, the
-  owner for a personal one) it points to 团队管理 › 机器; otherwise it mentions the people who
-  may and asks them to sign in again. `limit` says when it resets when the time is known; `model`
-  asks to change the model. A run without `failure` (an older daemon) reads as `other`, except
-  that a JSON body with `model_not_found` reads as `model`.
-- A runtime whose latest `metrics.logins` state is `logged_out`, or whose last run failed with
-  `signed_out` and no later heartbeat says `logged_in`, takes no runs. When every computer that has
-  the runtime is signed out, the run does not start and the topic says which computer needs
+  and the CLI: when the requester may manage that computer (a 负责人 for a team computer, the
+  owner for a personal one) and is a 负责人, it points to 团队管理 › 账号与密钥 › 订阅账号 (where
+  the sign-in is; 团队管理 opens only for 负责人); the owner of a personal computer who is not a
+  负责人 is asked to sign in on that computer. Otherwise it mentions the people who may (the
+  personal owner and the 负责人) and asks them to sign in again. `limit` says when it resets when
+  the time is known; `model` asks to change the model: the AI member's own 运行设置 › 模型 when it
+  has one, else 设置 › 通用 › 模型 (负责人). A run without `failure` (an older daemon) reads as
+  `other`, except that a JSON body with `model_not_found` reads as `model`.
+- A runtime whose latest `metrics.logins` state is a confirmed `logged_out` (`CliLogin.confirmed`:
+  the CLI's own status check, or a run that just failed to sign in; the credential files alone
+  do not count), or whose last run failed with `signed_out` and no later heartbeat says
+  `logged_in`, takes no runs. When every computer that has the runtime is signed out, the run does
+  not start, or a queued run (排队) stops waiting, and the topic says which computer needs
   signing in (the same sentence and next step).

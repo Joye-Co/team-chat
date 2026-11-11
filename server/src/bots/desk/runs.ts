@@ -296,7 +296,18 @@ export abstract class DeskRuns extends DeskCore {
         const r = this.run(id);
         if (!r || r.ended_at !== null || r.machine_id || r.status !== "created" || !r.queued_at) return false;
         const prompt = this.meta(`prompt:${id}`);
-        const machine = prompt === null ? null : this.pick(r, runner, this.machinesFor(r, await loadMachines(this.env)), JSON.parse(r.excluded) as string[]);
+        const machines = this.machinesFor(r, await loadMachines(this.env));
+        const machine = prompt === null ? null : this.pick(r, runner, machines, JSON.parse(r.excluded) as string[]);
+        if (!machine && prompt !== null && r.kind !== RUN_KIND_ASIDE) {
+          // 模 3.1: the computers' CLI was signed out while the run waited: it does not wait
+          // for a sign-in nobody knows is needed; the topic says which computer needs it.
+          const none = this.whyNone(r, runner, machines);
+          if (none.why === "signed_out") {
+            const note = await this.signedOutNote(r, runner.runtime, none.machines);
+            await this.end(r, "failed", note.text, "blocked", cut(note.text, 280), false, note.mentions);
+            return false;
+          }
+        }
         if (!machine || prompt === null) return null;
         if (await this.budgetGate(r, prompt)) return false;
         await this.assign(r, runner, machine, prompt);

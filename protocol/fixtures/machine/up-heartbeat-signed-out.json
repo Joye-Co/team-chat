@@ -1,0 +1,34 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "usable: a confirmed logged_out (the CLI's own check said so) and one from the credential files only",
+  "value": {
+    "t": "heartbeat",
+    "at": 1793627520000,
+    "health": {
+      "diskFreeBytes": 120000000000,
+      "diskTotalBytes": 494000000000,
+      "load1": 0.5,
+      "load5": 0.4,
+      "load15": 0.3,
+      "cpuCount": 10,
+      "activeRuns": 0
+    },
+    "runs": [],
+    "metrics": {
+      "at": 1793627519900,
+      "runs": [],
+      "logins": [
+        {
+          "runtime": "claude",
+          "state": "logged_out",
+          "confirmed": true
+        },
+        {
+          "runtime": "codex",
+          "state": "logged_out"
+        }
+      ]
+    }
+  }
+}

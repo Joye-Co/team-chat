@@ -287,7 +287,9 @@ pub fn find_user_code(line: &str) -> Option<String> {
 }
 
 /// The environment of a sign-in: what a run gets from the daemon, plus the runtime's own env.
-fn login_env(rt: &RuntimeConfig) -> Vec<(String, String)> {
+/// `passthrough`: names of the daemon's variables a run may get too (`env_passthrough`), so a
+/// status check sees a token the runs get that way.
+fn login_env(rt: &RuntimeConfig, passthrough: &[String]) -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = [
         "PATH",
         "HOME",
@@ -304,6 +306,12 @@ fn login_env(rt: &RuntimeConfig) -> Vec<(String, String)> {
     .chain(crate::sys::OS_ENV)
     .filter_map(|k| std::env::var(k).ok().map(|v| (k.to_string(), v)))
     .collect();
+    for k in passthrough {
+        if let Ok(v) = std::env::var(k) {
+            env.retain(|(n, _)| n != k);
+            env.push((k.clone(), v));
+        }
+    }
     for (k, v) in &rt.env {
         env.retain(|(n, _)| n != k);
         env.push((k.clone(), v.clone()));
@@ -356,7 +364,7 @@ pub async fn run_login(
         crate::health::command(&program)
             .args(&args)
             .env_clear()
-            .envs(login_env(&rt))
+            .envs(login_env(&rt, &[]))
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -527,8 +535,11 @@ pub fn codex_status(text: &str) -> SignIn {
     }
 }
 
-/// Whether the CLI is signed in now, by its own status check.
-pub async fn sign_in_of(rt: &RuntimeConfig) -> SignIn {
+/// Whether the CLI is signed in now, by its own status check, in the env its runs get
+/// (`passthrough`: the daemon's `env_passthrough` names). Claude Code's check also counts an
+/// `apiKeyHelper` in its settings and a `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_AUTH_TOKEN` in
+/// its env as signed in.
+pub async fn sign_in_of(rt: &RuntimeConfig, passthrough: &[String]) -> SignIn {
     let Some(program) = crate::health::which(&rt.command()) else {
         return SignIn::Unknown;
     };
@@ -543,7 +554,7 @@ pub async fn sign_in_of(rt: &RuntimeConfig) -> SignIn {
             crate::health::command(&program)
                 .args(args)
                 .env_clear()
-                .envs(login_env(rt))
+                .envs(login_env(rt, passthrough))
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
@@ -567,7 +578,7 @@ pub async fn sign_in_of(rt: &RuntimeConfig) -> SignIn {
 
 /// Who the CLI is signed in as now, when it says.
 pub async fn account_of(rt: &RuntimeConfig) -> Option<LoginAccount> {
-    match sign_in_of(rt).await {
+    match sign_in_of(rt, &[]).await {
         SignIn::In(a) => Some(a),
         _ => None,
     }
@@ -586,6 +597,25 @@ pub async fn read_lines<R: tokio::io::AsyncRead + Unpin>(r: R) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 模 3.2: the status check sees a token the runs get through `env_passthrough`.
+    #[test]
+    fn the_status_check_env_has_the_passed_through_variables() {
+        unsafe { std::env::set_var("TC_LOGIN_ENV_TEST_TOKEN", "t0ken") };
+        let rt: RuntimeConfig =
+            toml::from_str("kind = \"claude\"\nenv = { TC_LOGIN_ENV_TEST_FIXED = \"f\" }").unwrap();
+        let has = |env: &[(String, String)], k: &str| env.iter().any(|(n, _)| n == k);
+        let plain = login_env(&rt, &[]);
+        assert!(!has(&plain, "TC_LOGIN_ENV_TEST_TOKEN") && has(&plain, "TC_LOGIN_ENV_TEST_FIXED"));
+        let check = login_env(
+            &rt,
+            &[
+                "TC_LOGIN_ENV_TEST_TOKEN".into(),
+                "TC_LOGIN_ENV_TEST_UNSET".into(),
+            ],
+        );
+        assert!(has(&check, "TC_LOGIN_ENV_TEST_TOKEN") && !has(&check, "TC_LOGIN_ENV_TEST_UNSET"));
+    }
 
     #[test]
     fn a_sealed_key_opens_only_with_the_machine_key() {

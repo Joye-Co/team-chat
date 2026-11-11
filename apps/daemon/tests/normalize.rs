@@ -2,7 +2,7 @@
 
 use daemon::proto::RunEvent;
 use daemon::runtime::acp::AcpNormalizer;
-use daemon::runtime::claude::ClaudeNormalizer;
+use daemon::runtime::claude::{ClaudeNormalizer, EXITED_EARLY};
 use daemon::runtime::codex::CodexNormalizer;
 use serde_json::Value;
 
@@ -699,5 +699,19 @@ fn codex_reports_its_model_with_cached_input_apart() {
             m.cache_read_tokens
         ),
         ("gpt-5.1-codex", 400, 100, Some(600))
+    );
+}
+
+#[test]
+fn claude_early_exit_with_another_programs_401_is_not_signed_out() {
+    let n = ClaudeNormalizer::default();
+    let tail = format!("{EXITED_EARLY}mcp server: HTTP 401 Unauthorized");
+    assert_eq!(n.failure_of(Some(&tail)).unwrap().kind, "other");
+    let own = format!("{EXITED_EARLY}Not logged in · Please run /login");
+    assert_eq!(n.failure_of(Some(&own)).unwrap().kind, "signed_out");
+    // The CLI's own result text keeps every sign-in word.
+    assert_eq!(
+        n.failure_of(Some("401 Unauthorized")).unwrap().kind,
+        "signed_out"
     );
 }

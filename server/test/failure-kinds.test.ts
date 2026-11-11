@@ -30,7 +30,7 @@ function botMessages(c: Client, topicId: string, botId: string): any[] {
     .map((e) => e.data.message);
 }
 
-const login = (runtime: string, state: string) => ({ runtime, state });
+const login = (runtime: string, state: string, confirmed?: boolean) => ({ runtime, state, ...(confirmed ? { confirmed } : {}) });
 
 describe("failure kinds: pure rules", () => {
   const now = Date.UTC(2026, 10, 12, 4, 0); // 12:00 in Shanghai
@@ -48,17 +48,23 @@ describe("failure kinds: pure rules", () => {
   });
 
   it("give one sentence and one next step per kind", () => {
-    const ctx = { machines: ["mac-mini"], cli: "Claude Code", now, zone: "Asia/Shanghai", signIn: { self: true as const } };
+    const ctx = { machines: ["mac-mini"], cli: "Claude Code", now, zone: "Asia/Shanghai", signIn: { self: "admin" as const } };
+    // A 负责人 signs in from 团队管理's 订阅账号, where the sign-in is.
     expect(failureWords("signed_out", ctx)).toEqual({
       sentence: "mac-mini 上的 Claude Code 没有登录，或者登录已经过期",
-      next: "请到 团队管理 › 机器 › mac-mini 重新登录，然后再 @我。",
+      next: "请到 团队管理 › 账号与密钥 › 订阅账号，选 mac-mini，点「重新登录」，然后再 @我。",
     });
+    // The owner of a personal computer who cannot open 团队管理 signs in on the computer.
+    expect(failureWords("signed_out", { ...ctx, signIn: { self: "machine" } }).next).toBe(
+      "请在 mac-mini 上重新登录 Claude Code，或者请负责人在 团队管理 › 账号与密钥 › 订阅账号 里帮忙，然后再 @我。",
+    );
     expect(failureWords("signed_out", { ...ctx, signIn: { names: ["Joye"] } }).next).toBe(TEXT.next.signInAsk(["Joye"]));
     expect(failureWords("signed_out", { ...ctx, signIn: { names: [] } }).next).toBe(TEXT.next.signInAdmin);
     expect(failureWords("limit", { ...ctx, resetsAt: now + 3 * 3600_000 }).next).toBe("额度在 今天 15:00 恢复，到时再 @我。");
     // A reset in the past, or none: no time.
     expect(failureWords("limit", { ...ctx, resetsAt: now - 1 }).next).toBe(TEXT.next.limitLater);
-    expect(failureWords("model", ctx).next).toBe(TEXT.next.model);
+    expect(failureWords("model", ctx).next).toBe("请负责人到 设置 › 通用 › 模型 换一个模型，然后再 @我。");
+    expect(failureWords("model", { ...ctx, ownModel: true }).next).toBe("请到 设置 › 成员 里我的 运行设置 › 模型 换一个模型，然后再 @我。");
     expect(failureWords("network", ctx).sentence).toContain("mac-mini");
     expect(failureWords("not_installed", ctx).sentence).toBe("mac-mini 上没有装 Claude Code");
     expect(failureWords("other", ctx)).toEqual({ sentence: TEXT.failure.other, next: TEXT.next.other });
@@ -70,7 +76,9 @@ describe("failure kinds: pure rules", () => {
   });
 
   it("take the runtime out while a heartbeat or a failed run says it is signed out", () => {
-    expect(signedOutRuntimes([login("claude", "logged_out"), login("codex", "logged_in")], 100, {}, 200)).toEqual(["claude"]);
+    expect(signedOutRuntimes([login("claude", "logged_out", true), login("codex", "logged_in")], 100, {}, 200)).toEqual(["claude"]);
+    // The credential files alone (or an older daemon) do not know every way a CLI signs in.
+    expect(signedOutRuntimes([login("claude", "logged_out")], 100, {}, 200)).toEqual([]);
     // A run failed to sign in after the last heartbeat: out, until a later heartbeat says signed in.
     expect(signedOutRuntimes([login("codex", "logged_in")], 100, { codex: 150 }, 200)).toEqual(["codex"]);
     expect(signedOutRuntimes([login("codex", "logged_in")], 160, { codex: 150 }, 200)).toEqual([]);
@@ -184,6 +192,60 @@ describe("failure kinds in the topic", () => {
     );
     await waitUntil(() => botMessages(c, topic2, w.bot.id)[0], 5000, "model note");
     expect(botMessages(c, topic2, w.bot.id)[0].body).toBe(TEXT.failedWith(TEXT.failure.model("Codex"), TEXT.next.model));
+    c.close();
+    d.close();
+  });
+  it("end a queued run with the sign-in note when its computer's CLI is signed out while it waits", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { maxParallelRuns: 1 });
+    const { c } = await Client.connect(w.human.token);
+    const t1 = await mention(c, w, "@dev 第一件事");
+    const first = await d.next((f) => f.t === "run.assign" && f.topicId === t1);
+    d.send({ t: "run.accept", runId: first.runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === first.runId && e.data.run.status === "running");
+    const t2 = await mention(c, w, "@dev 第二件事");
+    const q2 = (await c.waitEvent((e) => e.type === "run.updated" && e.data.run.topicId === t2 && e.data.run.queuePosition !== undefined)).data.run;
+    await d.acked(first.runId, d.done(first.runId, { status: "failed", error: "Not logged in", failure: { kind: "signed_out" } }));
+    const ended = (await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === q2.id && e.data.run.status === "failed", 20_000)).data.run;
+    expect(ended.failure).toEqual({ kind: "signed_out" });
+    const note = await waitUntil(() => botMessages(c, t2, w.bot.id)[0], 5000, "queued sign-in note");
+    expect(note.body).toBe(TEXT.notStartedWith(TEXT.failure.signedOut("mac-mini", "Codex"), TEXT.next.signInAsk(["Joye"])));
+    expect(note.mentions).toEqual([w.owner.id]);
+    // It never went to the signed-out computer.
+    expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(1);
+    c.close();
+    d.close();
+  }, 40_000);
+
+  it("still send work when only the credential files say signed out", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken);
+    const { c } = await Client.connect(w.human.token);
+    // An older daemon, or one whose status check could not run: logged_out without `confirmed`.
+    d.send({
+      t: "heartbeat",
+      at: Date.now(),
+      health: HEALTH,
+      runs: [],
+      metrics: { at: Date.now(), runs: [], logins: [{ runtime: "codex", state: "logged_out" }] },
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    const t = await mention(c, w);
+    const a = await d.next((f) => f.t === "run.assign" && f.topicId === t);
+    expect(a.runtime).toBe("codex");
+    // The CLI's own check said so: no more work goes there.
+    d.send({
+      t: "heartbeat",
+      at: Date.now(),
+      health: HEALTH,
+      runs: [],
+      metrics: { at: Date.now(), runs: [], logins: [{ runtime: "codex", state: "logged_out", confirmed: true }] },
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    const t2 = await mention(c, w, "@dev again");
+    const note = await waitUntil(() => botMessages(c, t2, w.bot.id)[0], 5000, "signed-out note");
+    expect(note.body).toBe(TEXT.notStartedWith(TEXT.failure.signedOut("mac-mini", "Codex"), TEXT.next.signInAsk(["Joye"])));
+    expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(1);
     c.close();
     d.close();
   });

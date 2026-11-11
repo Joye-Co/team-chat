@@ -5,6 +5,7 @@ import { ApiError, unwrap } from "../../core/errors";
 import { MAX_RESULT_CHARS, Progress, TEXT, cut, failureKind, firstLine, readableError, stripAcceptance } from "../dispatch";
 import { type FailureNote, failedOn, failureNote } from "./failure";
 import { linkStub } from "../env";
+import { loadRunner } from "../store";
 import type { SeqFrame } from "../link";
 import { type RunProof, doneCard, doneCardV1, hasProof, mergePrs, prRefs } from "../proof";
 import { TOPIC_LINK_RPC } from "../../integrations/links";
@@ -431,7 +432,9 @@ export abstract class DeskEvents extends DeskRuns {
     r.failure = JSON.stringify(stored);
     this.sql.exec("UPDATE runs SET failure = ? WHERE id = ?", r.failure, r.id);
     const on = r.machine_id ? await failedOn(this.env, r.machine_id, r.runtime) : null;
+    const ownModel = kind === "model" && !!(await loadRunner(this.env.DB, this.botId as string).catch(() => null))?.model;
     return failureNote(this.env, {
+      ownModel,
       kind,
       machines: on ? [on] : [],
       runtime: r.runtime ?? "",

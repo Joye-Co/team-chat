@@ -95,6 +95,21 @@ pub fn from_text(text: &str) -> Option<RunFailure> {
     None
 }
 
+/// A kind from the stderr tail of a CLI that exited early. That tail may hold another program's
+/// words (an MCP server's or a hook's "401 Unauthorized"), so it says `signed_out` only with the
+/// CLI's own sign-in words; other sign-in words read as `other`, which takes no runtime out.
+pub fn from_stderr(text: &str) -> Option<RunFailure> {
+    let f = from_text(text)?;
+    if f.kind != kind::SIGNED_OUT {
+        return Some(f);
+    }
+    let t = text.to_lowercase();
+    let own = ["not logged in", "please run /login", "invalid api key"]
+        .iter()
+        .any(|w| t.contains(w));
+    if own { Some(f) } else { of(kind::OTHER) }
+}
+
 /// Claude Code: the `error` of an assistant message that ends a turn with an API error, with its
 /// `api_error`. `usage_limit`: the CLI also said the account's limit refused the request (a
 /// `rate_limit_event` with status "rejected").
@@ -269,6 +284,21 @@ mod tests {
         assert_eq!(of_run(None, Some("Not logged in")).kind, "signed_out");
         let typed = RunFailure::new("model");
         assert_eq!(of_run(Some(&typed), Some("Not logged in")).kind, "model");
+    }
+
+    #[test]
+    fn a_stderr_tail_signs_out_only_with_the_cli_s_own_words() {
+        assert_eq!(
+            k(from_stderr("mcp server github: 401 Unauthorized")),
+            "other"
+        );
+        assert_eq!(k(from_stderr("hook: login required")), "other");
+        assert_eq!(
+            k(from_stderr("Not logged in · Please run /login")),
+            "signed_out"
+        );
+        assert_eq!(k(from_stderr("Error: connect ECONNREFUSED")), "network");
+        assert_eq!(from_stderr("something odd"), None);
     }
 
     #[test]
