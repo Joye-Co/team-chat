@@ -21,6 +21,10 @@
 代码只在那里运行）。下文「CI 跑过」都指后者。daemon 的测试在三个系统的 CI 上都跑：`Rust`（Ubuntu）、
 `Daemon tests (Windows)`、`Daemon tests (macOS)`（macOS 15，真的 Claude Code 和 Codex 对着假模型）。
 
+`main` 上所有修复合在一起的一次完整 CI（钉在提交 `b0a34d89` 的分支 `ci/main-b0a34d89` 上手动触发，后面的合并取消不了它），
+全部任务通过，标准用户那一步走的是真的登录会话：
+<https://github.com/Joye-Co/team-chat/actions/runs/43075190501>。
+
 ## 0. 缺口和它们的结局
 
 清单第一版列出 20 个缺口，真 CLI 的测试在 Windows 上又抓出一个（G32），三轮评审又指出 19 个（G33 到 G51），修评审意见时自己又查出一个（G52：有的是
