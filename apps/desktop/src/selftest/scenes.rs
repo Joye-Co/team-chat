@@ -320,6 +320,20 @@ pub const SCENES: &[Scene] = &[
         open: settings_scenes::open_edit_bot_dialog,
     },
     Scene {
+        name: "settings-bot-quick",
+        about: "常用设置 of a bot over the main window: 在哪台电脑干活 (a computer or any free one), 更多设置…, 完成",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_bot_quick_dialog,
+    },
+    Scene {
+        name: "bot-quick-avatar-menu",
+        about: "A right-click on an AI member's avatar in a message: the message menu ending in 更换 … 的电脑…",
+        start: Start::SignedIn,
+        setup: settings_scenes::open_topic_led_by_bot,
+        open: settings_scenes::open_bot_quick_avatar_menu,
+    },
+    Scene {
         name: "settings-add-machine",
         about: "Settings: the add-machine dialog over 机器",
         start: Start::SignedIn,
