@@ -26,13 +26,27 @@ if [ -n "${LOG_DIR:-}" ]; then
   cp "$LOG_DIR"/*.log "$WORK/"
 else
   need gh
+  # Finished jobs that ran (a skipped job has no log). This job itself is still running.
   jobs="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/${GITHUB_RUN_ATTEMPT:-1}/jobs?per_page=100" \
-    -q '.jobs[] | select(.status == "completed") | .id')"
+    -q '.jobs[] | select(.status == "completed" and .conclusion != "skipped") | "\(.id)\t\(.name)"')"
   [ -n "$jobs" ] || die "this run has no finished job to read"
-  for id in $jobs; do
-    # A job that was skipped has no log.
-    gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$id/logs" >"$WORK/$id.log" 2>/dev/null || rm -f "$WORK/$id.log"
-  done
+  missing=0
+  while IFS=$'\t' read -r id name; do
+    got=0
+    for _ in 1 2 3; do
+      if gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$id/logs" >"$WORK/$id.log" 2>"$WORK/err"; then got=1; break; fi
+      sleep 5
+    done
+    if [ "$got" = 1 ]; then
+      printf 'read  %s (%s bytes)\n' "$name" "$(wc -c <"$WORK/$id.log" | tr -d ' ')"
+    else
+      # A log that cannot be read cannot be shown clean.
+      printf '::error::cannot read the log of job %s: %s\n' "$name" "$(head -n 1 "$WORK/err" | cut -c1-200)"
+      rm -f "$WORK/$id.log"
+      missing=1
+    fi
+  done <<<"$jobs"
+  [ "$missing" = 0 ] || die "some job logs could not be read"
 fi
 
 bad=0 read=0
