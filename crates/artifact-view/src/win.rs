@@ -51,13 +51,14 @@ use windows::Win32::Graphics::Dwm::{DWMWINDOWATTRIBUTE, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Gdi::{
     COLOR_WINDOW, CreateFontIndirectW, CreateSolidBrush, DeleteObject, FillRect, GetMonitorInfoW,
     HBRUSH, HDC, HFONT, InvalidateRect, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+    SetBkColor, SetTextColor,
 };
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, IStream};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, LoadLibraryW};
 use windows::Win32::UI::Controls::{
-    SetWindowTheme, TASKDIALOG_BUTTON, TASKDIALOG_NOTIFICATIONS, TASKDIALOGCONFIG,
-    TDF_ALLOW_DIALOG_CANCELLATION, TDF_CALLBACK_TIMER, TDF_POSITION_RELATIVE_TO_WINDOW,
-    TDM_ENABLE_BUTTON, TDN_CREATED, TDN_TIMER,
+    COMBOBOXINFO, GetComboBoxInfo, SetWindowTheme, TASKDIALOG_BUTTON, TASKDIALOG_NOTIFICATIONS,
+    TASKDIALOGCONFIG, TDF_ALLOW_DIALOG_CANCELLATION, TDF_CALLBACK_TIMER,
+    TDF_POSITION_RELATIVE_TO_WINDOW, TDM_ENABLE_BUTTON, TDN_CREATED, TDN_TIMER,
 };
 use windows::Win32::UI::HiDpi::{AdjustWindowRectExForDpi, GetDpiForSystem, GetDpiForWindow};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -1062,8 +1063,7 @@ impl Page {
                     if let Some(args) = args
                         && trim_context_menu(&args).is_err()
                     {
-                        // SAFETY: a COM call on the event's own arguments.
-                        unsafe { args.SetHandled(true)? };
+                        args.SetHandled(true)?;
                     }
                     Ok(())
                 }));
@@ -1894,13 +1894,30 @@ const DWMWA_TEXT: i32 = 36;
 ///
 /// SAFETY: `picker` is a live combo box of this thread.
 unsafe fn theme_picker(picker: HWND, dark: bool) {
-    // SAFETY: see above; the theme names are the ones Explorer's own dialogs use.
+    // SAFETY: see above; the theme names are the ones Explorer's own dialogs use. The
+    // drop-down list is a window of its own (its scrollbar takes the theme; its colors
+    // come from `WM_CTLCOLORLISTBOX` in the window procedure).
     unsafe {
         let _ = SetWindowTheme(
             picker,
             if dark { w!("DarkMode_CFD") } else { w!("CFD") },
             PCWSTR::null(),
         );
+        let mut info = COMBOBOXINFO {
+            cbSize: std::mem::size_of::<COMBOBOXINFO>() as u32,
+            ..Default::default()
+        };
+        if GetComboBoxInfo(picker, &mut info).is_ok() && !info.hwndList.is_invalid() {
+            let _ = SetWindowTheme(
+                info.hwndList,
+                if dark {
+                    w!("DarkMode_Explorer")
+                } else {
+                    w!("Explorer")
+                },
+                PCWSTR::null(),
+            );
+        }
     }
 }
 
@@ -1927,6 +1944,20 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM
                 );
             }
             LRESULT(1)
+        }
+        (WM_CTLCOLORLISTBOX, Some(data)) if data.strip.get() != 0 => {
+            // The version list's drop-down in the frame's colors (it asks its combo box's
+            // parent how to draw).
+            if let Some(chrome) = data.chrome.get() {
+                let rgb =
+                    |c: [u8; 3]| COLORREF(c[0] as u32 | (c[1] as u32) << 8 | (c[2] as u32) << 16);
+                // SAFETY: sets the colors of the device context Windows gave for the list.
+                unsafe {
+                    SetTextColor(HDC(w.0 as *mut _), rgb(chrome.text));
+                    SetBkColor(HDC(w.0 as *mut _), rgb(chrome.caption));
+                }
+            }
+            LRESULT(data.strip.get())
         }
         (WM_MOVE | WM_MOVING, Some(data)) => {
             if let Some(page) = data.page() {

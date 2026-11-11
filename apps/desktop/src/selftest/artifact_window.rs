@@ -20,7 +20,8 @@ use windows::{
         Foundation::{HWND, LPARAM, RECT, WPARAM},
         Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
         UI::WindowsAndMessaging::{
-            CB_SHOWDROPDOWN, FindWindowExW, FindWindowW, SendMessageW, SetForegroundWindow,
+            CB_SHOWDROPDOWN, FindWindowExW, FindWindowW, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE,
+            SWP_SHOWWINDOW, SendMessageW, SetForegroundWindow, SetWindowPos,
         },
     },
     core::{HSTRING, PCWSTR, w},
@@ -101,8 +102,18 @@ async fn shoot(
     if !cx.update(|cx| crate::views::artifacts::window::sample_loaded(cx)) {
         return Err("the page did not load within 60 s".into());
     }
-    // SAFETY: brings this process's own window to the front for the capture.
+    // SAFETY: puts this process's own window above every other one for the capture
+    // (the screen is read, and a CI runner keeps a console window open).
     unsafe {
+        let _ = SetWindowPos(
+            hwnd,
+            Some(HWND_TOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+        );
         let _ = SetForegroundWindow(hwnd);
     }
     wait(cx, 1500).await;
