@@ -309,7 +309,7 @@ mod windows {
     /// (as the Task Scheduler can, while the first shuts down) ends at once and leaves the
     /// first one's pid file alone; with another config it runs.
     pub fn a_second_daemon_of_the_config_does_not_run() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = own_folder();
         let exe = tmp.path().join("stand-in-2.exe");
         std::fs::copy(std::env::current_exe().unwrap(), &exe).unwrap();
         let start = |dir: &str| {
@@ -376,7 +376,7 @@ mod windows {
     /// An install whose task cannot be registered leaves nothing: no definition file (the
     /// app reads it as "this computer is set up"), no repair copy, no folder.
     pub fn a_failed_install_leaves_nothing() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = own_folder();
         let dir = tmp.path().join("state");
         let exe = tmp.path().join("stand-in-3.exe");
         std::fs::copy(std::env::current_exe().unwrap(), &exe).unwrap();
@@ -394,6 +394,17 @@ mod windows {
             "nothing left: {:?}",
             std::fs::read_dir(&dir).map(|d| d.count())
         );
+    }
+
+    /// A folder for a test's program and state, where a person's programs are: under the
+    /// user's own local application data. Not the temp folder: other tools add their own
+    /// accounts to it (Codex's elevated sandbox gives its sandbox user write access there),
+    /// and a program in a folder another account can change is rightly refused.
+    fn own_folder() -> tempfile::TempDir {
+        match std::env::var_os("LOCALAPPDATA") {
+            Some(local) => tempfile::tempdir_in(local).unwrap(),
+            None => tempfile::tempdir().unwrap(),
+        }
     }
 
     /// A program that other users of the computer can replace is not registered: the task
@@ -420,7 +431,7 @@ mod windows {
     }
 
     pub fn the_task_keeps_the_daemon_running() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = own_folder();
         let dir = tmp.path().join("with space & more");
         std::fs::create_dir_all(&dir).unwrap();
         let exe = dir.join("stand-in.exe");

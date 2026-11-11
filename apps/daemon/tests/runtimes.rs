@@ -987,7 +987,8 @@ async fn codex_read_only_sandbox_writes_nothing() {
             vec![
                 "cmd.exe".into(),
                 "/c".into(),
-                format!("echo x> \"{}\"", target.display()),
+                // No quotes: the path has no space, and cmd.exe reads quotes its own way.
+                format!("echo x> {}", target.display()),
             ]
         } else {
             vec![
@@ -1296,7 +1297,8 @@ async fn codex_windows_sandbox_mode(
         vec![
             "cmd.exe".into(),
             "/c".into(),
-            format!("echo x> \"{}\"", target.display()),
+            // No quotes: the path has no space, and cmd.exe reads quotes its own way.
+            format!("echo x> {}", target.display()),
         ],
         serde_json::json!({}),
     )
