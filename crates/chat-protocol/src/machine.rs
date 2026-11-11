@@ -45,6 +45,23 @@ pub mod feature {
     pub const TAKEOVER: &str = "takeover";
     /// Usable: with `takeover`, a person's commands run as another user than the run (VM runs).
     pub const TAKEOVER_ISOLATED: &str = "takeover-isolated";
+    /// Usable: the `homes` metrics and `home.clear` (VM hosts: each AI member's home folder).
+    pub const HOMES: &str = "homes";
+}
+
+/// Most entries of `MachineMetrics.homes`.
+pub const MAX_HOMES: usize = 500;
+
+/// Usable, feature "homes": one AI member's kept home folder on a VM host.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HomeUse {
+    pub member_id: String,
+    /// Bytes the home takes on the host disk.
+    pub used_bytes: u64,
+    /// Its fixed size; absent = no limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
 }
 
 /// `run.approval.scope = "run"` (这件事里都同意): later matches of the same kind in the run pass.
@@ -313,6 +330,9 @@ pub struct MachineMetrics {
     /// Feature "accounts": subscription usage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<Vec<CliUsage>>,
+    /// Usable, feature "homes": each AI member's home folder (at most [`MAX_HOMES`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub homes: Option<Vec<HomeUse>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -982,6 +1002,10 @@ pub enum Down {
     /// Feature "accounts": forget an API key.
     #[serde(rename = "secret.delete", rename_all = "camelCase")]
     SecretDelete { name: String },
+    /// Usable, feature "homes": empty one AI member's home folder. Sent only while connected;
+    /// the daemon refuses while that member has a run on the machine.
+    #[serde(rename = "home.clear", rename_all = "camelCase")]
+    HomeClear { member_id: String },
     /// Usable, feature "takeover": run one command of the person holding the run in its work
     /// folder. Sent only while the link is up; never queued.
     #[serde(rename = "run.command", rename_all = "camelCase")]

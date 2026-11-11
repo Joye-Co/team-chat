@@ -216,9 +216,11 @@ optional: a platform may not have it.
 ```ts
 MachineMetrics = { at /* sample time, machine clock */, uptimeSecs?, cpuPct? /* 0-100 */, cpuThreads?,
                    memTotalBytes?, memAvailableBytes?, netRxBps?, netTxBps?, vmSlots?,
-                   boot?: { avgMs, maxMs, samples }, runs: VmRunMetrics[] /* <= 64 */, logins?: CliLogin[] }
+                   boot?: { avgMs, maxMs, samples }, runs: VmRunMetrics[] /* <= 64 */, logins?: CliLogin[],
+                   homes?: HomeUse[] /* <= 500, feature "homes" */ }
 VmRunMetrics   = { runId, phase: "booting" | "running" | "paused", startedAt, bootMs?, cpuCores?, memBytes?, scratchBytes? }
 CliLogin       = { runtime, state: "logged_in" | "logged_out" | "unknown", method?: "subscription" | "api_key" }
+HomeUse        = { memberId, usedBytes /* on the host disk */, sizeBytes? /* absent = no limit */ }
 ```
 
 - **Host**: CPU busy since the previous sample over all threads (Linux `/proc/stat`, macOS
@@ -232,6 +234,8 @@ CliLogin       = { runtime, state: "logged_in" | "logged_out" | "unknown", metho
   touched); `scratchBytes` the blocks the sparse scratch disk uses. `vmSlots` is
   `max_parallel_runs`; `boot` covers the last 50 boots. Without `[vm]`, `runs` lists the daemon's
   unfinished runs with `phase: "running"` and their start, nothing else.
+- **Homes** (`[vm]` with home images): each AI member's home image (see "MicroVM runs"), its size
+  and the blocks it takes on the host disk.
 - **Logins**: for `claude` and `codex` runtimes only, checked for presence, never read out:
   Claude Code is `logged_in` (`subscription`) with `claudeAiOauth` tokens in
   `$CLAUDE_CONFIG_DIR/.credentials.json` (on macOS, where the credential is in the Keychain, an
@@ -890,6 +894,7 @@ safe default named below). Protocol side: protocol.md, "Usable extensions".
 | `github` | Reports `hello.machine.runsIn`. Takes `run.assign.github`: sets the commit identity and, with `source: "app"`, lets git and `gh` ask it for the person's token for each use; emits the `github` run event. |
 | `takeover` | Takes `run.pause.hold = "takeover"`, `run.command` and `run.command.cancel`; emits the `hand.*` run events. |
 | `takeover-isolated` | With `takeover` (VM runs, `runsIn: "vm"`): a person's commands run as another user than the run, so they cannot read the run's own credentials. |
+| `homes` | VM hosts (`[vm]`): reports `metrics.homes` (each AI member's home folder) and takes `home.clear`. |
 
 ```ts
 // daemon -> server
@@ -916,6 +921,8 @@ RunGithub = {
 { t: "run.pause", runId, by?, hold?: "takeover" }                  // feature "takeover"; absent hold = a pause
 { t: "run.command", runId, commandId, command /* 1..4000 */, by }  // feature "takeover"; only while connected
 { t: "run.command.cancel", runId, commandId }                      // feature "takeover"
+{ t: "home.clear", memberId }   // feature "homes"; only while connected: empty that AI member's home
+                                 // folder (refused, and logged, while a run of it is on the machine)
 ```
 
 GitHub (feature `github`), over HTTP with the machine token:
@@ -1048,25 +1055,74 @@ process of the daemon's machine. Nothing in this protocol changes. The VM boots 
 base image (`scripts/runner/build-base-image.sh`: Ubuntu with git, Node, Claude Code, Codex,
 Pi, bun, uv, gh) with a per-run sparse scratch disk as its writable overlay, and a tools disk
 that holds the daemon binary as `vm-agent` (PID 1 after `vm-init`) and `chat-run`. The run
-folder, the working folder (the line's `work/`, see Run folders), the run's git dir and
-`[vm].shares` (default `~/.claude`, `~/.codex`, `~/.pi`) are NFS shares of the host, mounted at
-their host paths, so the worktree, session files, `stderr.log` and 产出 stay where the daemon
-reads them, and the member's next run in the topic, in a new VM, finds its working folder as
-it was left. Stdin and stdout go over vsock (port 1024) as
+folder, the working folder (the line's `work/`, see Run folders), the run's git dir, the AI
+member's own folder (below) and any `[vm].shares` (default none) are NFS shares of the host,
+mounted at their host paths, so the worktree, session files, `stderr.log` and 产出 stay where
+the daemon reads them, and the member's next run in the topic, in a new VM, finds its working
+folder as it was left. Stdin and stdout go over vsock (port 1024) as
 frames; `chat-run` in the VM uses the socket `/run/chat-run.sock`, which the agent relays to
 the run's socket over vsock (port 1025), so Codex runs use the socket instead of the request
 folder. With `[vm].homes` (default `/srv/runner/homes`) the folder `<homes>/<bot member id>` is
-one more share, mounted as the VM's `$HOME`: what a bot clones, installs and signs in to
-(`gh auth login`) is there again in its next run, in every VM of that bot; the rest of the
-disk still goes with the VM. The CLI's system note says what is kept (the working folder for
-the next run in the topic, the home folder for all runs), and that processes left running
-when the turn ends are killed. 接管 pauses and resumes the whole VM. When the CLI exits the agent syncs the shares
-before the daemon reads them; then the VM, its tap, its exports and its scratch disk go.
+the member's own folder, mounted at its host path and as the VM's `$HOME`: what a bot clones,
+installs and signs in to is there again in its next run, in every VM of that bot; the rest of
+the disk still goes with the VM. With `[vm].home_gb` (default 20) that folder is a disk image
+of that size (`<homes>/../home-images/<id>.ext4`, sparse, mounted with `discard`) that the root
+helper makes on first use and mounts (`runner-vm home-up`), so one member cannot fill the host;
+a larger `home_gb` grows existing images, a smaller one leaves them. A home folder from before
+the images moves into its image the first time it is used (when it does not fit it stays a
+plain folder without a limit until it is emptied). `home_gb = 0` keeps plain folders. Without
+`homes` the member's own folder is `<[vm].dir>/cli/<id>` and only holds its CLIs' folders.
+`home.clear` (feature `homes`) empties a member's home: the image goes, its next run starts with
+a new one; the daemon refuses while a run of that member is on the machine and holds that
+member's new runs (`busy`) while it empties. The CLI's system note says what is kept (the working
+folder for the next run in the topic, the home folder for all runs), and that processes left
+running when the turn ends are killed. 接管 pauses and resumes the whole VM. When the CLI exits
+the agent syncs the shares before the daemon reads them; then the VM, its tap, its exports and
+its scratch disk go.
+
+**Sign-ins and session records.** The host's own CLI folders (`~/.claude`, `~/.codex`, `~/.pi`)
+are never shared with a VM: the daemon skips any share that is the daemon user's home or in one
+of its dot folders, and the root helper refuses to export them. A run's CLI uses its member's
+own folders, so session records stay per member: `CLAUDE_CONFIG_DIR=<member>/.claude`,
+`CODEX_HOME=<member>/.codex`, `PI_CODING_AGENT_DIR=<member>/.pi/agent` (host paths, mounted at
+the same paths in the VM). The host's `settings.json` / `config.toml` are copied in for each
+run. The sign-in reaches the run in a form it cannot use to change the host's:
+
+- Claude Code: `CLAUDE_CODE_OAUTH_TOKEN`. A long-lived token (`claude setup-token` as the
+  daemon user) given to the machine as an API key with that name (团队管理 › 订阅账号) is used as
+  it is, and so is `ANTHROPIC_API_KEY` from the runtime's env; otherwise the host's current
+  access token from `.credentials.json` (never its refresh token). When that token would run out
+  before the run's limit plus 30 minutes, the host's CLI refreshes it first.
+- Codex: `<member>/.codex/auth.json`, a copy of the host's with `refresh_token` set to `""`
+  (Codex reads a file without the field as no sign-in). The access token lasts 10 days; when it
+  would run out before the run's limit plus 30 minutes, the host's Codex refreshes it first
+  (`codex app-server`, `account/read` with `refreshToken: true`), so a refresh never happens in
+  a VM and never rotates the host's refresh token away.
+- Pi: a copy of its `auth.json` with every `refresh` emptied. When an OAuth access token would
+  run out before the run's limit plus 30 minutes, the host's Pi refreshes it first
+  (`pi auth print-bearer-token --provider <p> --min-expiry <s>s`, output discarded); when every
+  sign-in in it has run out and cannot be renewed, the run fails before it starts.
+
+Refreshes on the host take turns (one at a time per daemon; each first rereads the host's file
+and skips when another run just renewed it), so a refresh token is never used twice. Runs of one
+member that start together take turns preparing its home (the daemon, and `flock` in the root
+helper) and writing its sign-in copy.
+
+A run that resumes a session from before per-member folders gets that one session file copied
+from the host's folder into its member's.
+
+**Capacity.** Besides `max_parallel_runs` and the free disk (of `work_root` and of the disk the
+homes are on, whichever has less free; `health.diskFreeBytes` reports that one), a VM host
+refuses a run (`run.reject`, `busy`) when `MemAvailable` does not cover `[vm].mem_mib` for the
+new VM and for each accepted VM that has not booted yet, above a reserve of a fifth of the
+memory (at least 2 GiB) for the running VMs to grow into.
 
 The VMs reach the internet. A static nftables table (`scripts/runner/runner-vm.nft`) drops
-their traffic to the host (except NFS), to private, link-local and metadata ranges and to each
-other; strict reverse-path filtering stops address spoofing. The daemon runs as an unprivileged
-user; the tap device and the NFS exports go through the root helper `runner-vm` with `sudo -n`.
+their traffic to the host (except NFS on the host address of their own tap), to private,
+link-local and metadata ranges and to each other; strict reverse-path filtering stops address
+spoofing. Each VM's exports name only its own guest address. The daemon runs as an unprivileged
+user; the tap device, the NFS exports and the home images go through the root helper
+`runner-vm` with `sudo -n`.
 `scripts/runner/host-setup.sh` installs all of it; `scripts/runner/net-check.py` boots a VM and
 checks its network.
 
@@ -1115,7 +1171,7 @@ example-config` prints a commented example. Keys: `server_url`, `token_file`, `m
 `command`, `args`, `env`, `model`, `asks_permission` (ACP: the agent asks before its tool
 calls, see "Gated actions"), and `[vm]` with `kernel`, `rootfs`, `dir`, `vcpus`, `mem_mib`
 (a cap: the host gives only the pages the VM touches), `scratch_gb`, `firecracker`, `helper`,
-`shares`, `homes`. `approval_policy`, `sandbox`, `permission_mode` and
+`shares` (default none; never the daemon user's home or its dot folders), `homes`, `home_gb`. `approval_policy`, `sandbox`, `permission_mode` and
 `allowed_tools` still parse (1.1 configs) but are ignored since 1.2.1. Without `[runtimes.*]`, `codex` and `claude` are added when
 found on PATH.
 

@@ -10,8 +10,11 @@
 # (install-daemon.sh; DAEMON_VERSION picks one, default latest), /srv/runner for images, the
 # daemon's runs and the VMs, and
 # the VM network: IP forwarding, the NFS server, the static firewall (runner-vm.nft, loaded at
-# boot by runner-vm-net.service) and the root helper runner-vm that the daemon runs with sudo.
+# boot by runner-vm-net.service) and the root helper runner-vm that the daemon runs with sudo
+# (the tap devices, the NFS exports and the AI members' home images in /srv/runner/home-images).
 # It does not touch SSH settings. Run it from its folder in a checkout (it installs siblings).
+# After an update of runner-vm or runner-vm.nft, run it again: it reinstalls both and reloads
+# the firewall; the members' homes in /srv/runner/homes are kept.
 set -euo pipefail
 
 FC_VERSION="${FC_VERSION:-latest}"
@@ -64,6 +67,11 @@ loginctl enable-linger "$RUNNER_USER"
 install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 750 \
   "$RUNNER_HOME_DATA" "$RUNNER_HOME_DATA/images" "$RUNNER_HOME_DATA/kernels" \
   "$RUNNER_HOME_DATA/cache" "$RUNNER_HOME_DATA/daemon" "$RUNNER_HOME_DATA/vms"
+# The AI members' home folders (the daemon's [vm].homes) and their fixed-size disk images, which
+# only root reads (the runner's group lists the folder) (runner-vm home-up makes and mounts each; existing homes move into theirs on
+# first use and are kept). Existing folders are left as they are.
+[[ -d "$RUNNER_HOME_DATA/homes" ]] || install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 755 "$RUNNER_HOME_DATA/homes"
+install -d -o root -g "$RUNNER_USER" -m 750 "$RUNNER_HOME_DATA/home-images"
 # The daemon user gets its own copy of root's keys so an operator can log in as it.
 if [[ -s /root/.ssh/authorized_keys ]]; then
   install -d -o "$RUNNER_USER" -g "$RUNNER_USER" -m 700 "/home/$RUNNER_USER/.ssh"

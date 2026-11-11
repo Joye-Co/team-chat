@@ -102,6 +102,11 @@ stopped on this machine: update Claude Code to {a}.{b}.{patch} or later"
             cfg.min_free_gb
         );
     }
+    if let Some(vm) = cfg.vm.as_ref().filter(|vm| crate::vm_home::images_on(vm))
+        && crate::vm_home::helper_has_homes(vm) == Some(false)
+    {
+        let _ = writeln!(s, "warning: {}", crate::vm_home::OLD_HELPER);
+    }
     for p in &problems {
         let _ = writeln!(s, "problem: {p}");
     }
