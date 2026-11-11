@@ -70,7 +70,7 @@ choosing **Replace**. A copy that you download by hand needs step 3 again.
 | --- | --- |
 | The app | `/Applications/TeamChat.app` |
 | Local cache (messages, files you opened, settings) | `~/Library/Application Support/co.joye.teamchat/` |
-| Logs | `~/Library/Logs/co.joye.teamchat/` |
+| Logs | `~/Library/Application Support/co.joye.teamchat/logs/` |
 | Sign-in token | Keychain item with the name `co.joye.teamchat` (open **Keychain Access** and search for it) |
 
 The server keeps the full history. If you delete the local cache, the app downloads it again
@@ -79,22 +79,21 @@ after you sign in.
 ## Send diagnostics
 
 When something goes wrong, open **Settings → 诊断** and send the diagnostics. They contain the
-app version, macOS version, connection state and recent logs with tokens and invite codes
+text you write, the app version, the kind of system and recent logs with tokens and invite codes
 removed; they do not contain your messages. Then tell your team's owner in the app what happened and at
 what time.
 
 If the app does not start, zip the log folder and send it to your team's owner another way:
 
 ```sh
-cd ~/Library/Logs && zip -r ~/Desktop/teamchat-logs.zip co.joye.teamchat
+cd ~/Library/Application\ Support/co.joye.teamchat && zip -r ~/Desktop/teamchat-logs.zip logs
 ```
 
 ## Uninstall
 
 1. Quit TeamChat (also from the menu bar item) and move `/Applications/TeamChat.app` to the
    Bin.
-2. Optional: delete `~/Library/Application Support/co.joye.teamchat/` and
-   `~/Library/Logs/co.joye.teamchat/`.
+2. Optional: delete `~/Library/Application Support/co.joye.teamchat/` (the logs are in it).
 3. Optional: remove the sign-in token: in Keychain Access, delete the `co.joye.teamchat` item,
    or run `security delete-generic-password -s co.joye.teamchat`.
 
@@ -103,12 +102,21 @@ cd ~/Library/Logs && zip -r ~/Desktop/teamchat-logs.zip co.joye.teamchat
 TeamChat for Windows needs 64-bit Windows 10 (version 22H2) or Windows 11. The installer needs
 no administrator rights: it installs for your user account only.
 
+The installer is x64. A Windows 11 computer with an ARM processor installs and runs it through
+the system's x64 emulation; we have not tried it on such a computer. Windows 10 on ARM has no
+x64 emulation and cannot run it.
+
 ### Download and install
 
 1. Get `TeamChat-<version>-setup.exe`: open your invite link in a browser on the Windows
    computer (it downloads the installer there, and the DMG on a Mac), or download it from
-   Assets on <https://github.com/Joye-Co/team-chat/releases>. Keep the invite code for the
-   sign-in.
+   Assets on <https://github.com/Joye-Co/team-chat/releases>, or run:
+
+   ```powershell
+   gh release download --repo Joye-Co/team-chat --pattern 'TeamChat-*-setup.exe*'
+   ```
+
+   Keep the invite code for the sign-in.
 2. Optional check that the file is complete, in PowerShell (compare with the `.sha256` file
    of the release):
 
@@ -134,7 +142,8 @@ As on the Mac, the app checks the server, downloads the new installer, checks it
 and offers 重启安装. The app then quits, a small update program
 (`team-chat-update.exe`) replaces the files and opens the new version. If the new version
 does not start, the update program puts the old version back and opens it. To update by
-hand, run a newer installer over the installed app.
+hand, quit the app and run a newer installer over the installed app; until the installer is
+signed, each installer you download by hand shows the SmartScreen warning again.
 
 ### Where your data is
 
@@ -142,19 +151,45 @@ hand, run a newer installer over the installed app.
 | --- | --- |
 | The app | `%LOCALAPPDATA%\Programs\TeamChat\` |
 | Local cache (messages, files you opened, settings) and logs | `%APPDATA%\co.joye.teamchat\` (logs in `logs\`) |
-| Sign-in token | Windows Credential Manager, the entry named `co.joye.teamchat` |
+| Sign-in token | Windows Credential Manager → Windows Credentials, the entries that start with `co.joye.teamchat:` (the server address follows) |
+| Caches the app can make again (产出 pages, diagrams) | `%LOCALAPPDATA%\team-chat\` |
 | Start menu shortcut | `%APPDATA%\Microsoft\Windows\Start Menu\Programs\TeamChat.lnk` |
 
 Paste a path with `%...%` into the address bar of File Explorer to open it.
+
+### Send diagnostics
+
+As on the Mac: **Settings → 诊断**. If the app does not start, zip the log folder in PowerShell
+and send it to your team's owner another way:
+
+```powershell
+Compress-Archive -Path "$env:APPDATA\co.joye.teamchat\logs" -DestinationPath "$env:USERPROFILE\Desktop\teamchat-logs.zip"
+```
+
+When an update did not install, `updates\update.log` next to that folder says what the update
+program did at each step; send it too.
 
 ### Uninstall
 
 1. Quit TeamChat (also from the icon in the notification area).
 2. Open **Settings → Apps → Installed apps**, find TeamChat and choose **Uninstall**. Or run
    `"%LOCALAPPDATA%\Programs\TeamChat\uninstall.exe"` (add `/S` for no window).
-3. The uninstaller removes the app, its Start menu shortcut and its registry entries. It
-   keeps your local data. Optional: delete `%APPDATA%\co.joye.teamchat\`, and remove the
-   `co.joye.teamchat` entry in **Credential Manager → Windows Credentials**.
+3. The uninstaller removes the app, its Start menu shortcut, its registry entries (the
+   uninstall entry, `teamchat://` links, the app id of its notifications, 登录时打开), its
+   caches (`%LOCALAPPDATA%\team-chat\`) and the background task that 用这台电脑 registered.
+   It keeps your local data and your sign-in, as a Mac does when the app goes to the Bin, so
+   a reinstall needs no new sign-in.
+4. Optional, to remove everything: delete `%APPDATA%\co.joye.teamchat\`; in **Credential
+   Manager → Windows Credentials** delete the entries that start with `co.joye.teamchat:`, or
+   run in PowerShell:
+
+   ```powershell
+   cmdkey /list | Select-String 'co\.joye\.teamchat:\S+' | ForEach-Object { cmdkey /delete:$($_.Matches[0].Value) }
+   ```
+
+   If this computer was one of the team's machines, there are also
+   `%USERPROFILE%\.config\team-chat\` (the machine's identity) and
+   `%LOCALAPPDATA%\team-chat-daemon\` (logs).
 
 ## For maintainers
 

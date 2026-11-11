@@ -224,8 +224,11 @@ every client checks for updates every 6 hours.
    `GET /v1/updates/latest` offers the previous good release again and the bad DMG cannot be
    downloaded. Clients that did not install it yet stay on their version.
 2. Tell the people who installed it in the ops group: download the previous DMG from the
-   GitHub release of that version and drag it over the app. The app does not go back by
-   itself, and it never offers an older version as an update.
+   GitHub release of that version and drag it over the app; on Windows, quit the app and run
+   the previous `-setup.exe` of that release over it (the installer installs an older version
+   over a newer one; data and sign-in stay). The app does not go back by itself, and it never
+   offers an older version as an update. A version is withdrawn for both systems at once: when
+   only one system's build is bad, withdraw it and release a higher version for both.
 3. Fix forward: release a higher version with `scripts/release.sh` or the Release workflow; it
    is offered to everyone.
 4. A withdrawn version cannot be uploaded again. `withdraw-release ... --restore` offers it
