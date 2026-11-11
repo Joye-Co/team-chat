@@ -30,32 +30,12 @@ signature_status() {
   ARG1="$(cygpath -w "$1")" ps_out '(Get-AuthenticodeSignature -LiteralPath $env:ARG1).Status'
 }
 
-# signer <file>: "<status>|<certificate subject>|<certificate thumbprint>" of its signature;
-# the last two are empty for a file that is not signed.
-signer() {
-  ARG1="$(cygpath -w "$1")" ps_out \
-    '$s = Get-AuthenticodeSignature -LiteralPath $env:ARG1; "$($s.Status)|$($s.SignerCertificate.Subject)|$($s.SignerCertificate.Thumbprint)"'
-}
-
-# same_publisher <previous signer> <new signer>: whether an app installed from the previous
-# installer takes the new one as an update. The rule of apps/update-helper (signer_allows):
-# a validly signed app takes only a valid signature of the same subject; an app whose
-# certificate this machine does not trust takes only the same certificate; an unsigned app
-# takes an unsigned or a validly signed installer.
+# same_publisher <update helper> <previous installer> <new installer>: whether an app
+# installed from the previous installer takes the new one as an update. The helper answers
+# with the rule an update goes by (`--accepts`, signer_allows in apps/update-helper), so
+# this check and the update cannot disagree. Prints the helper's reason when it says no.
 same_publisher() {
-  local old_status old_subject old_thumb new_status new_subject new_thumb
-  IFS='|' read -r old_status old_subject old_thumb <<<"$1"
-  IFS='|' read -r new_status new_subject new_thumb <<<"$2"
-  case "$old_status" in
-    NotSigned)
-      case "$new_status" in NotSigned | Valid) return 0 ;; esac
-      printf 'the new installer has a signature that does not verify (%s)\n' "$new_status"; return 1 ;;
-    Valid)
-      [ "$new_status" = Valid ] || { printf 'the previous release is signed (%s); the new installer is %s, so installed apps would refuse it\n' "$old_subject" "$new_status"; return 1; }
-      [ "$new_subject" = "$old_subject" ] || { printf 'another publisher: "%s", before "%s"; installed apps would refuse the update\n' "$new_subject" "$old_subject"; return 1; } ;;
-    *)
-      [ -n "$old_thumb" ] && [ "$new_thumb" = "$old_thumb" ] || { printf 'the previous release is signed by a certificate this machine does not trust (%s); only the same certificate updates it\n' "$old_status"; return 1; } ;;
-  esac
+  "$1" --accepts "$(cygpath -w "$2")" "$(cygpath -w "$3")" 2>&1
 }
 
 # pe_machine <exe>: the machine field of its PE header in hex (8664 = x64, aa64 = ARM64).
