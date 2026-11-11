@@ -1057,6 +1057,135 @@ async fn codex_read_only_on_windows_report() {
     .unwrap();
 }
 
+/// Windows, experiment: Codex's elevated sandbox with one Codex home, in a plain folder and in
+/// a folder private to the user (as run folders are). Report only.
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread")]
+async fn codex_elevated_side_chat_report() {
+    if std::env::var_os("TC_CODEX_ELEVATED_SANDBOX").is_none() {
+        return;
+    }
+    let Some(codex) = real_codex() else { return };
+    let base = outside_temp();
+    let home = base.path().join("codex-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let own_ip = std::net::UdpSocket::bind("0.0.0.0:0")
+        .and_then(|u| u.connect("8.8.8.8:53").and_then(|_| u.local_addr()))
+        .map(|a| a.ip().to_string())
+        .unwrap_or_else(|_| "127.0.0.1".into());
+    let mut report = Vec::new();
+    for (i, (mode, kind)) in [
+        ("unelevated", "plain"),
+        ("elevated", "plain"),
+        ("elevated", "private"),
+        ("elevated", "plain"),
+        ("elevated", "private"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let root = base.path().join(format!("root-{i}"));
+        if kind == "private" {
+            daemon::winacl::create_dir(&root).unwrap();
+        } else {
+            std::fs::create_dir_all(&root).unwrap();
+        }
+        let cwd = root.join("work");
+        std::fs::create_dir_all(&cwd).unwrap();
+        std::fs::write(cwd.join("seed.txt"), "seed-text").unwrap();
+        let args: Vec<String> = [
+            "app-server",
+            "-c",
+            "sandbox_mode=\"read-only\"",
+            "-c",
+            "approval_policy=\"never\"",
+            "-c",
+            &format!("windows.sandbox=\"{mode}\""),
+        ]
+        .map(String::from)
+        .into();
+        let listener = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let outside = base.path().join(format!("outside-{i}.txt"));
+        let mut calls = serde_json::Map::new();
+        calls.insert("mode".into(), format!("{mode}, {kind} folder").into());
+        for (what, line) in [
+            ("read", "type seed.txt".to_string()),
+            ("write inside", "echo x> written.txt".to_string()),
+            ("write outside", format!("echo x> {}", outside.display())),
+            (
+                "loopback",
+                format!("curl.exe -s -m 5 http://127.0.0.1:{port}/"),
+            ),
+            (
+                "own address",
+                format!("curl.exe -s -m 5 http://{own_ip}:{port}/"),
+            ),
+            (
+                "internet",
+                "curl.exe -s -m 10 -o NUL https://github.com/".to_string(),
+            ),
+        ] {
+            let command: Vec<String> = vec!["cmd.exe".into(), "/c".into(), line];
+            let (codex, args, home, dir) = (codex.clone(), args.clone(), home.clone(), cwd.clone());
+            let answer = tokio::task::spawn_blocking(move || {
+                codex_exec(&codex, &args, &home, &dir, &command, serde_json::json!({}))
+            })
+            .await
+            .unwrap();
+            let mut arrived = 0;
+            while listener.accept().is_ok() {
+                arrived += 1;
+            }
+            calls.insert(
+                what.into(),
+                serde_json::json!({ "answer": answer.get("result").or(answer.get("error")), "connections": arrived }),
+            );
+        }
+        calls.insert(
+            "written inside".into(),
+            cwd.join("written.txt").exists().into(),
+        );
+        calls.insert("written outside".into(), outside.exists().into());
+        calls.insert(
+            "daemon's privacy check of the root".into(),
+            format!("{:?}", daemon::winacl::check(&root)).into(),
+        );
+        let icacls = std::process::Command::new("icacls.exe").arg(&cwd).output();
+        calls.insert(
+            "icacls of the working folder".into(),
+            icacls
+                .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+                .unwrap_or_default()
+                .into(),
+        );
+        report.push(serde_json::Value::Object(calls));
+    }
+    fn names(dir: &std::path::Path, depth: usize, out: &mut Vec<String>) {
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            out.push(e.path().display().to_string());
+            if depth > 0 && e.path().is_dir() {
+                names(&e.path(), depth - 1, out);
+            }
+        }
+    }
+    let mut files = vec![];
+    names(&home, 2, &mut files);
+    let users = std::process::Command::new("net.exe").arg("user").output();
+    let all = serde_json::json!({
+        "own address": own_ip,
+        "runs": report,
+        "codex home": files,
+        "users": users.map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default(),
+    });
+    std::fs::write(
+        std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("codex-elevated.json"),
+        serde_json::to_string_pretty(&all).unwrap(),
+    )
+    .unwrap();
+}
+
 /// A side chat run of Codex is read-only on every system: with the sandbox the daemon sends
 /// for it (`read-only`, approval `never`) the real CLI does not let a command write a file,
 /// in the working folder or outside it. Through `command/exec` (the server's sandbox, no
