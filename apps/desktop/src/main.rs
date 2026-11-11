@@ -130,8 +130,17 @@ struct Args {
 }
 
 fn parse_args() -> Result<Args, String> {
+    parse_args_from(std::env::args().skip(1).collect())
+}
+
+fn parse_args_from(list: Vec<String>) -> Result<Args, String> {
     let mut args = Args::default();
-    let mut it = std::env::args().skip(1);
+    // A launch for a link is only that: Windows starts the app as `"<exe>" "%1"` with
+    // text a web page chose, so nothing after (or before) a link is read as an option.
+    if list.iter().any(|arg| provider::instance::is_link(arg)) {
+        return Ok(args);
+    }
+    let mut it = list.into_iter();
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--selftest-smoke" => args.selftest_smoke = true,
@@ -166,11 +175,9 @@ fn parse_args() -> Result<Args, String> {
                     .ok_or("--hold-ms needs a number")?
             }
             "--help" | "-h" => return Err(String::new()),
-            // Windows starts the app with the link as its argument when the user opens a
-            // `<scheme>://` link (the installer registers the scheme) or clicks a
-            // notification, and with `--dock-action <n>` for a task of the taskbar's jump
-            // list. `provider::instance` reads both and hands them to the running app.
-            link if provider::instance::is_link(link) => {}
+            // Windows starts the app with `--dock-action <n>` for a task of the taskbar's
+            // jump list (and with a link as its one argument, handled above).
+            // `provider::instance` reads both and hands them to the running app.
             "--dock-action" => {
                 it.next()
                     .and_then(|v| v.parse::<usize>().ok())
@@ -446,4 +453,45 @@ fn finish(path: &PathBuf, json: serde_json::Value, ok: bool, cx: &mut App) {
 /// like the mockups (`-webkit-font-smoothing: antialiased`) and the Electron chat apps.
 pub(crate) fn render_text_like_the_mockups(cx: &mut App) {
     cx.text_system().set_font_smoothing(false);
+}
+
+#[cfg(test)]
+mod launch_tests {
+    use super::*;
+
+    /// A link's launch reads no option, whatever follows or precedes the link: the
+    /// developer options (a server URL, a token file) cannot be reached through a link.
+    #[test]
+    fn a_launch_with_a_link_reads_no_options() {
+        let link = concat!(env!("PRODUCT_URL_SCHEME"), "://group/g1/topic/t1");
+        let args = |list: &[&str]| parse_args_from(list.iter().map(|s| s.to_string()).collect());
+        for list in [
+            vec![link],
+            vec![
+                link,
+                "--selftest-live",
+                "https://evil.example",
+                "--token-file",
+                "x",
+                "--report",
+                "y",
+            ],
+            vec!["--fake", link],
+            vec![link, "--sandbox", "dir"],
+            vec![link, "--no-such-option"],
+        ] {
+            let parsed = args(&list).expect("a link launch always parses");
+            assert!(
+                parsed.live_url.is_none() && parsed.token_file.is_none(),
+                "{list:?}"
+            );
+            assert!(!parsed.fake && parsed.sandbox.is_none() && parsed.report.is_none());
+        }
+        // Without a link the options are read as before, and a non-ASCII argument is an
+        // unknown argument, not a crash.
+        assert!(args(&["--fake"]).unwrap().fake);
+        assert!(args(&["中文中文中文参数"]).is_err());
+        assert!(args(&["--dock-action", "1"]).is_ok());
+        assert!(args(&["--dock-action", "x"]).is_err());
+    }
 }
