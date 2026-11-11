@@ -680,6 +680,21 @@ describe("releases and updates", () => {
     expect(await (await post({ code })).text()).toBe("the dmg of 30.2.0");
     expect(await (await post({ code, platform: "amiga" })).text()).toBe("the dmg of 30.2.0");
     expect(await (await raw("/download", { headers: ip })).text()).toContain('"windows"');
+    // A link from before the fragment form, opened in a browser on Windows: the request names no
+    // platform, so the browser's own words decide. Edge and Chrome on Windows 10 and 11, x64 and
+    // ARM, all say "Windows NT 10.0".
+    const edge = { ...ip, "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0" };
+    const safari = { ...ip, "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15" };
+    const old = await raw(`/download?code=${code}`, { headers: edge });
+    expect(old.headers.get("content-disposition")).toContain('filename="team-chat-30.1.0-setup.exe"');
+    expect(new Uint8Array(await old.arrayBuffer())).toEqual(exe31);
+    expect(await (await raw(`/download?code=${code}`, { headers: safari })).text()).toBe("the dmg of 30.2.0");
+    // A named platform wins over the browser: a Mac can fetch the installer and Windows the DMG.
+    expect(await (await raw(`/download?code=${code}&platform=macos`, { headers: edge })).text()).toBe("the dmg of 30.2.0");
+    expect((await raw(`/download?code=${code}&platform=windows`, { headers: safari })).headers.get("content-disposition")).toContain("-setup.exe");
+    const posted = await raw("/download", { method: "POST", headers: { ...edge, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code }).toString() });
+    expect(posted.headers.get("content-disposition")).toContain('filename="team-chat-30.1.0-setup.exe"');
+    await posted.arrayBuffer();
 
     // Withdrawing a version takes every platform's file of it.
     const withdraw = (version: string, body: unknown) =>

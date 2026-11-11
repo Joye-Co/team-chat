@@ -957,8 +957,23 @@ pub fn job_args(job: &Job) -> Vec<OsString> {
     args
 }
 
-/// The program's entry: an update job, `--recover <journal>` after an interrupted one, or
-/// `--shortcut` for the installer.
+/// `--accepts <installed> <installer>`: whether an app signed as `installed` is (a program of
+/// the install, or the installer it came from: one certificate signs them all) would take
+/// `installer` as an update, by the very rule an update goes by ([`signer_allows`]). The
+/// release check asks this about the previous release's installer before a new one is
+/// published (`scripts/test-windows-installer.sh --same-as`), so the check and the update
+/// cannot disagree.
+pub(crate) fn accepts(sys: &dyn Sys, installed: &Path, installer: &Path) -> Result<(), String> {
+    for file in [installed, installer] {
+        if !file.is_file() {
+            return Err(format!("no file at {}", file.display()));
+        }
+    }
+    signer_allows(&sys.signer(installed), &sys.signer(installer))
+}
+
+/// The program's entry: an update job, `--recover <journal>` after an interrupted one,
+/// `--accepts` for the release check, or `--shortcut` for the installer.
 pub fn main(args: Vec<OsString>) -> i32 {
     if args.first().is_some_and(|a| a == "--shortcut") {
         return match sys::shortcut_from_args(&args[1..]) {
@@ -966,6 +981,19 @@ pub fn main(args: Vec<OsString>) -> i32 {
             Err(e) => {
                 eprintln!("{e}");
                 1
+            }
+        };
+    }
+    if args.first().is_some_and(|a| a == "--accepts") {
+        let (Some(installed), Some(installer)) = (args.get(1), args.get(2)) else {
+            eprintln!("usage: --accepts <installed program or its installer> <installer>");
+            return 64;
+        };
+        return match accepts(&Os, Path::new(installed), Path::new(installer)) {
+            Ok(()) => 0,
+            Err(why) => {
+                eprintln!("{why}");
+                2
             }
         };
     }

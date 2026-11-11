@@ -31,7 +31,8 @@
 //! helper then replaces the install folder and starts the new version with
 //! `--selftest-updated`, which finishes the update as the app does at start (removes the
 //! marker and the backup) and writes its version to `--finish-report`.
-//! `--selftest-installed` reports the version and the install folder of an installed copy.
+//! `--selftest-installed` reports the version and the install folder of an installed copy,
+//! and which server URLs the build carries (as digests).
 
 use std::{
     ffi::OsString,
@@ -222,9 +223,27 @@ fn report_installed(report: Option<PathBuf>) -> i32 {
             "exe": std::env::current_exe().ok(),
             "app_id": env!("PRODUCT_BUNDLE_ID"),
             "url_scheme": env!("PRODUCT_URL_SCHEME"),
+            // The server URLs compiled into this build (the 正式服务器 / 测试服务器 menu and
+            // the sign-in default), as SHA-256 so a test log never shows a deployment's
+            // address; null when the build has none and sign-in asks for the address.
+            "servers": {
+                "production": url_digest(env!("PRODUCT_PRODUCTION_URL")),
+                "staging": url_digest(env!("PRODUCT_STAGING_URL")),
+            },
         }),
     );
     if ok { 0 } else { 1 }
+}
+
+/// SHA-256 (hex) of a compiled-in server URL; `None` when the build has none.
+fn url_digest(url: &str) -> Option<String> {
+    use sha2::{Digest as _, Sha256};
+    (!url.is_empty()).then(|| {
+        Sha256::digest(url.as_bytes())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    })
 }
 
 /// `--selftest-updated <marker>`: the first start of the new version after an update, as

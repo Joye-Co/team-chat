@@ -14,6 +14,11 @@ path = "src/lib.rs"
 name = "update-helper"
 path = "src/main.rs"
 
+[features]
+# Only for the interruption test on a real machine (scripts/test-windows-update.sh): lets
+# UPDATE_HELPER_TEST_PAUSE_AT hold the helper at a step. Never in a build that ships.
+test-pause = []
+
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true

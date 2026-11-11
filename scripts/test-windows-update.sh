@@ -22,6 +22,8 @@
 #
 # Usage: scripts/test-windows-update.sh <a-setup.exe> <b-setup.exe> [port]   (default 8826)
 # Env: EXPECT_SIGNED=1, DAEMON=0 (the installers hold no daemon).
+#      PAUSE_HELPER (required): an update helper built with `--features test-pause`, for the
+#      interruption of step 5. The helper inside the installers must not have that switch.
 # Secrets go to ~/.config/team-chat/local-<port>/ and are never printed. Everything else
 # lives in <worktree>/.tmp/windows-update/. Installs and removes the app: for a CI runner or
 # a test machine.
@@ -36,6 +38,8 @@ A_SETUP="${1:?usage: test-windows-update.sh <a-setup.exe> <b-setup.exe> [port]}"
 B_SETUP="${2:?usage: test-windows-update.sh <a-setup.exe> <b-setup.exe> [port]}"
 PORT="${3:-8826}"
 [ -f "$A_SETUP" ] && [ -f "$B_SETUP" ] || die "an installer is missing"
+[ -f "${PAUSE_HELPER:-}" ] || die "PAUSE_HELPER is not a file: build one with cargo build --release -p update-helper --features test-pause and copy it out of the target folder"
+PAUSE_HELPER="$(cd "$(dirname "$PAUSE_HELPER")" && pwd)/$(basename "$PAUSE_HELPER")"
 A_SETUP="$(cd "$(dirname "$A_SETUP")" && pwd)/$(basename "$A_SETUP")"
 B_SETUP="$(cd "$(dirname "$B_SETUP")" && pwd)/$(basename "$B_SETUP")"
 NAME="$(product name)"
@@ -204,13 +208,17 @@ log "ok: a version that does not start is rolled back to $B"
 
 # Interruption: the helper is killed while the install folder holds no app (the old files
 # are in the backup and the installer has not run), as a sign-out or a power cut would
-# leave it. The helper is held at that step for the kill (UPDATE_HELPER_TEST_PAUSE_AT).
+# leave it. The helper is held at that step for the kill (UPDATE_HELPER_TEST_PAUSE_AT), which
+# only a helper built with the test-pause feature obeys: the installed one has no such switch.
 log "interrupted update"
+if grep -qa UPDATE_HELPER_TEST_PAUSE_AT "$HELPER"; then fail "the installed update helper holds the test's pause switch"; fi
+PAUSE="$WORK/helper-pause.exe"
+cp "$PAUSE_HELPER" "$PAUSE"
 mkdir -p "$WORK/kill"
 JOURNAL="$WORK/kill/update-journal.json"
 KEEP=()
 if [ "${DAEMON:-1}" = 1 ]; then KEEP=(--keep "$SLUG-daemon.exe"); fi
-UPDATE_HELPER_TEST_PAUSE_AT=moved "$HELPER" --installer "$(m "$A_SETUP")" --sha256 "$(sha "$A_SETUP")" \
+UPDATE_HELPER_TEST_PAUSE_AT=moved "$PAUSE" --installer "$(m "$A_SETUP")" --sha256 "$(sha "$A_SETUP")" \
   --install-dir "$(cygpath -w "$DIR")" --backup-dir "$(cygpath -w "${BACKUPS}test")" \
   --app-exe "$NAME.exe" --version "$A" --marker "$(m "$WORK/kill/pending.json")" \
   --result "$(m "$WORK/kill/result.json")" --log "$(m "$WORK/kill/update.log")" \
@@ -230,10 +238,10 @@ wait "$HELPER_PID" 2>/dev/null || true
 # Windows runs this at the next sign-in.
 REGISTERED="$(reg_value "$RUN_ONCE" "$RECOVERY")"
 case "$REGISTERED" in
-  *"$(cygpath -w "$HELPER")"*"--recover"*"update-journal.json"*) ;;
+  *"$(cygpath -w "$PAUSE")"*"--recover"*"update-journal.json"*) ;;
   *) fail "the recovery is not registered for the next sign-in: '$REGISTERED'" ;;
 esac
-"$HELPER" --recover "$(cygpath -w "$JOURNAL")" || fail "the recovery failed"
+"$PAUSE" --recover "$(cygpath -w "$JOURNAL")" || fail "the recovery failed"
 show_log "$WORK/kill/update.log"
 [ "$(snapshot)" = "$BEFORE" ] || { ls -la "$DIR" >&2; fail "the install folder is not what it was before the interrupted update"; }
 [ "$(reg_value "$KEY" DisplayVersion)" = "$B" ] || fail "Windows shows $(reg_value "$KEY" DisplayVersion) after the recovery"
@@ -243,7 +251,7 @@ if compgen -G "$BACKUPS*" >/dev/null; then fail "a backup folder is left after t
 "$EXE" --selftest-installed --report "$(m "$WORK/after-recovery.json")" || fail "the app does not start after the recovery"
 [ "$(jq -r .version "$WORK/after-recovery.json")" = "$B" ] || fail "the app after the recovery is not $B"
 # A second run finds nothing to do.
-"$HELPER" --recover "$(cygpath -w "$JOURNAL")" || fail "a second recovery failed"
+"$PAUSE" --recover "$(cygpath -w "$JOURNAL")" || fail "a second recovery failed"
 [ "$(snapshot)" = "$BEFORE" ] || fail "a second recovery changed the install folder"
 log "ok: an update killed with an empty install folder is undone by the recovery"
 

@@ -270,7 +270,10 @@ impl Sys for Os {
     }
 
     /// A test on a real machine can hold the helper at a step (to kill it there):
-    /// `UPDATE_HELPER_TEST_PAUSE_AT=<step>`. Nothing sets it outside that test.
+    /// `UPDATE_HELPER_TEST_PAUSE_AT=<step>`. Only a helper built with the `test-pause`
+    /// feature reads it (scripts/test-windows-update.sh builds one); the helper in the
+    /// installer is built without the feature and has no such switch.
+    #[cfg(feature = "test-pause")]
     fn checkpoint(&self, step: &str) {
         if std::env::var("UPDATE_HELPER_TEST_PAUSE_AT").is_ok_and(|at| at == step) {
             std::thread::sleep(Duration::from_secs(600));

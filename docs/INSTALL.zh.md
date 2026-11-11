@@ -67,28 +67,27 @@ App 会自己检查服务器上有没有新版本,有的话会提示你安装,�
 | --- | --- |
 | App 本身 | `/Applications/TeamChat.app` |
 | 本地缓存(消息、打开过的文件、设置) | `~/Library/Application Support/co.joye.teamchat/` |
-| 日志 | `~/Library/Logs/co.joye.teamchat/` |
+| 日志 | `~/Library/Application Support/co.joye.teamchat/logs/` |
 | 登录凭证 | 钥匙串里名为 `co.joye.teamchat` 的项目(打开"钥匙串访问"搜索即可) |
 
 完整的历史记录都在服务器上。删掉本地缓存后,重新登录 App 会再下载回来。
 
 ## 发送诊断信息
 
-遇到问题时,打开 **设置 → 诊断**,发送诊断信息。里面有 App 版本、macOS 版本、连接状态和最近的日志,
+遇到问题时,打开 **设置 → 诊断**,发送诊断信息。里面有你写的说明、App 版本、系统类型和最近的日志,
 其中的登录凭证和邀请码都已经去掉,**不包含你的消息内容**。发送后,在 App 里告诉管理员
 发生了什么、大概是几点。
 
 如果 App 打不开,把日志文件夹打包,用别的方式发给管理员:
 
 ```sh
-cd ~/Library/Logs && zip -r ~/Desktop/teamchat-logs.zip co.joye.teamchat
+cd ~/Library/Application\ Support/co.joye.teamchat && zip -r ~/Desktop/teamchat-logs.zip logs
 ```
 
 ## 卸载
 
 1. 退出 TeamChat(菜单栏图标里也要退出),把 `/Applications/TeamChat.app` 移到废纸篓。
-2. 可选:删除 `~/Library/Application Support/co.joye.teamchat/` 和
-   `~/Library/Logs/co.joye.teamchat/`。
+2. 可选:删除 `~/Library/Application Support/co.joye.teamchat/`(日志也在里面)。
 3. 可选:删除登录凭证:在"钥匙串访问"里删除 `co.joye.teamchat` 项目,或在终端运行
    `security delete-generic-password -s co.joye.teamchat`。
 
@@ -96,11 +95,20 @@ cd ~/Library/Logs && zip -r ~/Desktop/teamchat-logs.zip co.joye.teamchat
 
 需要 64 位的 Windows 10(22H2)或 Windows 11。安装不需要管理员权限,只装给当前登录的用户。
 
+安装包是 x64 的。ARM 芯片的 Windows 11 电脑(比如骁龙本)靠系统自带的 x64 模拟也能装、能用,但我们没有在
+这样的电脑上试过;ARM 的 Windows 10 不支持 x64 模拟,装不了。
+
 ### 下载和安装
 
 1. 拿到 `TeamChat-<版本号>-setup.exe`:在这台 Windows 电脑的浏览器里打开邀请链接(在 Windows 上
    下载的是安装包,在 Mac 上是 DMG),或者到 <https://github.com/Joye-Co/team-chat/releases>
-   的 Assets 里下载。邀请码留着,登录时要用。
+   的 Assets 里下载,或在终端里运行:
+
+   ```powershell
+   gh release download --repo Joye-Co/team-chat --pattern 'TeamChat-*-setup.exe'
+   ```
+
+   邀请码留着,登录时要用。
 2. 可选:在 PowerShell 里检查文件是否完整(和该版本 Assets 里安装包旁边显示的 `sha256:` 对比):
 
    ```powershell
@@ -122,7 +130,8 @@ cd ~/Library/Logs && zip -r ~/Desktop/teamchat-logs.zip co.joye.teamchat
 
 和 Mac 一样:App 检查服务器,下载新的安装包,校验 SHA-256,然后提示"重启安装"。点了以后 App 退出,
 一个很小的更新程序(`team-chat-update.exe`)替换文件并打开新版本。如果新版本打不开,更新程序会把
-旧版本放回去并重新打开。想手动更新:直接运行新的安装包,覆盖安装。
+旧版本放回去并重新打开。想手动更新:先退出 App,再运行新的安装包,覆盖安装;手动下载的安装包在签名之前
+每次都会再出现 SmartScreen 提示。
 
 ### 数据存在哪里
 
@@ -130,18 +139,40 @@ cd ~/Library/Logs && zip -r ~/Desktop/teamchat-logs.zip co.joye.teamchat
 | --- | --- |
 | App 本身 | `%LOCALAPPDATA%\Programs\TeamChat\` |
 | 本地缓存(消息、打开过的文件、设置)和日志 | `%APPDATA%\co.joye.teamchat\`(日志在 `logs\` 里) |
-| 登录凭证 | "Windows 凭据管理器"里名为 `co.joye.teamchat` 的项目 |
+| 登录凭证 | "Windows 凭据管理器 → Windows 凭据"里以 `co.joye.teamchat:` 开头的项目(后面是服务器地址) |
+| 可以重新生成的缓存(产出页面、图表) | `%LOCALAPPDATA%\team-chat\` |
 | 开始菜单快捷方式 | `%APPDATA%\Microsoft\Windows\Start Menu\Programs\TeamChat.lnk` |
 
 把带 `%...%` 的路径粘到资源管理器的地址栏里就能打开。
+
+### 发送诊断信息
+
+和 Mac 一样:打开 **设置 → 诊断** 发送。如果 App 打不开,在 PowerShell 里把日志文件夹打包,用别的方式
+发给管理员:
+
+```powershell
+Compress-Archive -Path "$env:APPDATA\co.joye.teamchat\logs" -DestinationPath "$env:USERPROFILE\Desktop\teamchat-logs.zip"
+```
+
+更新没装上时,同一个文件夹旁边的 `updates\update.log` 写着更新程序每一步做了什么,一起发过来。
 
 ### 卸载
 
 1. 退出 TeamChat(通知区域的图标里也要退出)。
 2. 打开 **设置 → 应用 → 安装的应用**,找到 TeamChat,选 **卸载**。或者运行
    `"%LOCALAPPDATA%\Programs\TeamChat\uninstall.exe"`(加 `/S` 不显示窗口)。
-3. 卸载会删掉 App、开始菜单快捷方式和它的注册表项,**保留你的本地数据**。可选:删除
-   `%APPDATA%\co.joye.teamchat\`,并在 **凭据管理器 → Windows 凭据** 里删除 `co.joye.teamchat`。
+3. 卸载会删掉 App、开始菜单快捷方式、它的注册表项(卸载项、`teamchat://` 链接、通知用的应用 ID、
+   "登录时打开")、缓存(`%LOCALAPPDATA%\team-chat\`),以及"用这台电脑"注册的后台任务。
+   **保留你的本地数据和登录凭证**,和 Mac 上把 App 拖进废纸篓一样,重新安装后不用再登录。
+4. 可选,想删干净:删除 `%APPDATA%\co.joye.teamchat\`;在 **凭据管理器 → Windows 凭据** 里删除以
+   `co.joye.teamchat:` 开头的项目,或在 PowerShell 里运行:
+
+   ```powershell
+   cmdkey /list | Select-String 'co\.joye\.teamchat:\S+' | ForEach-Object { cmdkey /delete:$($_.Matches[0].Value) }
+   ```
+
+   这台电脑当过团队的机器的话,还有 `%USERPROFILE%\.config\team-chat\`(机器的身份)和
+   `%LOCALAPPDATA%\team-chat-daemon\`(日志)。
 
 ## 常见问题
 

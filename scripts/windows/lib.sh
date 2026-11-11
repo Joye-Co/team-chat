@@ -30,6 +30,20 @@ signature_status() {
   ARG1="$(cygpath -w "$1")" ps_out '(Get-AuthenticodeSignature -LiteralPath $env:ARG1).Status'
 }
 
+# same_publisher <update helper> <previous installer> <new installer>: whether an app
+# installed from the previous installer takes the new one as an update. The helper answers
+# with the rule an update goes by (`--accepts`, signer_allows in apps/update-helper), so
+# this check and the update cannot disagree. Prints the helper's reason when it says no.
+same_publisher() {
+  "$1" --accepts "$(cygpath -w "$2")" "$(cygpath -w "$3")" 2>&1
+}
+
+# pe_machine <exe>: the machine field of its PE header in hex (8664 = x64, aa64 = ARM64).
+pe_machine() {
+  ARG1="$(cygpath -w "$1")" ps_out \
+    '$b = [IO.File]::ReadAllBytes($env:ARG1); $pe = [BitConverter]::ToInt32($b, 0x3C); "{0:x4}" -f [BitConverter]::ToUInt16($b, $pe + 4)'
+}
+
 # run_native <program> <args...>: runs a Windows program with its arguments untouched (Git
 # Bash would turn /S into a path).
 run_native() {
@@ -47,6 +61,20 @@ start_menu_shortcut() {
 
 uninstall_key() {
   printf 'Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\%s' "$(product bundleId)"
+}
+
+RUN_KEY='Software\Microsoft\Windows\CurrentVersion\Run'
+STARTUP_APPROVED_KEY='Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
+
+# app_cache_dir: where the app keeps what it can make again (the WebView2 user data, the drawn
+# diagrams); the name of scripts/build-windows-installer.sh (CACHE_DIR).
+app_cache_dir() {
+  printf '%s/team-chat' "$(cygpath -u "$LOCALAPPDATA")"
+}
+
+# app_data_dir: the user's messages, settings and logs, which an uninstall keeps.
+app_data_dir() {
+  printf '%s/%s' "$(cygpath -u "$APPDATA")" "$(product bundleId)"
 }
 
 # silent_install <setup.exe>: installs for this user into the default folder.
@@ -78,5 +106,11 @@ assert_uninstalled() {
   if reg_key_exists "Software\\Classes\\$scheme"; then printf 'left: the URL scheme\n' >&2; left=1; fi
   if reg_key_exists "Software\\Classes\\AppUserModelId\\$id"; then printf 'left: the app id entry\n' >&2; left=1; fi
   if compgen -G "$(dirname "$dir")/.$(product name).old-*" >/dev/null; then printf 'left: an update backup\n' >&2; left=1; fi
+  if [ -n "$(reg_value "$RUN_KEY" "$id")" ]; then printf 'left: the sign-in start entry\n' >&2; left=1; fi
+  if [ -n "$(reg_value "$STARTUP_APPROVED_KEY" "$id")" ]; then printf 'left: the startup-approved record\n' >&2; left=1; fi
+  if [ -n "$(reg_value "${RUN_KEY}Once" "$(product name).update-recovery")" ]; then printf 'left: the update recovery\n' >&2; left=1; fi
+  for cache in webview2 diagrams; do
+    if [ -e "$(app_cache_dir)/$cache" ]; then printf 'left: the %s cache\n' "$cache" >&2; left=1; fi
+  done
   return "$left"
 }
