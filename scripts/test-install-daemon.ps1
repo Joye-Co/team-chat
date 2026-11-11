@@ -88,7 +88,7 @@ try {
     Assert $refused 'a download without -Sha256 is refused'
     Assert (-not (Test-Path -LiteralPath $exe)) 'and nothing was installed'
 
-    # The install, files only: this computer has no coding CLI yet, see below.
+    # The install, files only: the task is registered below, with a runtime of this test.
     & $install @common -Sha256 $hash -NoService
     Assert (Test-Path -LiteralPath $exe) 'the daemon is installed'
     $config = Get-Content -Raw -LiteralPath (Join-Path $configDir 'daemon.toml')
@@ -109,15 +109,19 @@ try {
     }
     Assert ((Get-Acl -LiteralPath $configDir).AreAccessRulesProtected) 'the config folder inherits no access from its parent'
 
-    # A daemon that would stop at start-up is not registered: this computer has no coding CLI,
-    # so there is no runtime.
+    # A daemon that would stop at start-up is not registered. The reason here is a config it
+    # refuses (no run may ever start), whatever coding CLIs this computer has.
+    $configFile = Join-Path $configDir 'daemon.toml'
+    $good = [IO.File]::ReadAllText($configFile)
+    [IO.File]::WriteAllText($configFile, $good + "max_parallel_runs = 0`n", (New-Object Text.UTF8Encoding $false))
     $ErrorActionPreference = 'Continue'
-    & $exe install-service --config (Join-Path $configDir 'daemon.toml') 2>&1 | Out-Host
+    & $exe install-service --config $configFile 2>&1 | Out-Host
     $code = $LASTEXITCODE
     & $schtasks /Query /TN $taskName 2>&1 | Out-Null
     $registered = $LASTEXITCODE -eq 0
     $ErrorActionPreference = 'Stop'
-    Assert ($code -ne 0 -and -not $registered) 'without a runtime install-service refuses and registers nothing'
+    Assert ($code -ne 0 -and -not $registered) 'with a config the daemon refuses, install-service refuses and registers nothing'
+    [IO.File]::WriteAllText($configFile, $good, (New-Object Text.UTF8Encoding $false))
 
     # With a runtime (a program that is never started here) the scheduled task runs the
     # daemon, hidden, and the daemon writes its log.
