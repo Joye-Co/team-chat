@@ -327,16 +327,49 @@ pub fn line_key(bot_member_id: &str, topic_id: &str, repo: Option<&RepoSpec>) ->
         .to_string()
 }
 
-/// The line folders a run or the cleanup is using in this daemon. A line is used by one at a
-/// time.
-static BUSY_LINES: std::sync::Mutex<std::collections::BTreeSet<PathBuf>> =
-    std::sync::Mutex::new(std::collections::BTreeSet::new());
+/// The line folders a run or the cleanup is using in this daemon, and whether the holder is the
+/// cleanup. A line is used by one at a time.
+static BUSY_LINES: std::sync::Mutex<std::collections::BTreeMap<PathBuf, bool>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
 
-fn claim_line(dir: &Path) -> bool {
-    BUSY_LINES
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(dir.to_path_buf())
+/// Takes the line for a run (`cleanup` false) or for the cleanup. `Err(holder_is_cleanup)`
+/// when it is held already.
+fn claim_line(dir: &Path, cleanup: bool) -> Result<(), bool> {
+    let mut busy = BUSY_LINES.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(&c) = busy.get(dir) {
+        return Err(c);
+    }
+    busy.insert(dir.to_path_buf(), cleanup);
+    Ok(())
+}
+
+/// The folder that work which could not be committed is moved to instead of being deleted.
+pub fn kept_dir(cfg: &Config) -> PathBuf {
+    cfg.work_root.join("kept")
+}
+
+/// Moves `src` to `<kept>/<label>-<ms>` so its files survive; false when it could not be moved.
+fn move_aside(kept: &Path, src: &Path, label: &str) -> bool {
+    let to = kept.join(format!("{label}-{}", now_ms()));
+    match crate::sys::create_private_dir(kept).and_then(|_| std::fs::rename(src, &to)) {
+        Ok(()) => {
+            eprintln!(
+                "{} cleanup: moved {} to {} to keep its files",
+                now_ms(),
+                src.display(),
+                to.display()
+            );
+            true
+        }
+        Err(e) => {
+            eprintln!(
+                "{} cleanup: {} not moved aside: {e}",
+                now_ms(),
+                src.display()
+            );
+            false
+        }
+    }
 }
 
 fn release_line(dir: &Path) {
@@ -385,8 +418,18 @@ pub async fn prepare_line(
     let repo = repo.filter(|r| r.url.is_some() || r.path.is_some());
     let key = line_key(bot_member_id, topic_id, repo);
     let line = lines_dir(cfg).join(&key);
-    if !claim_line(&line) {
-        return Ok(None);
+    // The cleanup's hold is short (a commit and a removal): wait for it instead of giving the
+    // run a folder of its own. Another run's hold lasts the whole run.
+    let mut waited = Duration::ZERO;
+    loop {
+        match claim_line(&line, false) {
+            Ok(()) => break,
+            Err(true) if waited < Duration::from_secs(600) => {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                waited += Duration::from_millis(200);
+            }
+            Err(_) => return Ok(None),
+        }
     }
     let mut guard = LineGuard {
         dir: line.clone(),
@@ -434,7 +477,11 @@ pub async fn prepare_line(
                 guard.fresh = true;
                 if work.exists() {
                     set_read_only(&work, false);
-                    let _ = tokio::fs::remove_dir_all(&work).await;
+                    // Not a worktree git can use: its files may still be work, so they are
+                    // moved aside, not deleted.
+                    if !move_aside(&kept_dir(cfg), &work, &format!("line-{key}-lost")) {
+                        let _ = tokio::fs::remove_dir_all(&work).await;
+                    }
                 }
                 let _ = git(Some(&git_dir), &["worktree", "prune"]).await;
                 let w = work.to_string_lossy().to_string();
@@ -530,12 +577,37 @@ async fn keep_uncommitted(work: &Path, branch: Option<&str>) -> Result<bool, Str
     Ok(true)
 }
 
+/// Removes `git_dir`'s index lock of the worktree `work`. Only for a worktree no run holds: a
+/// lock there was left by a git that was killed (a cancelled run, a VM torn down).
+async fn remove_stale_index_lock(work: &Path) {
+    if let Ok(p) = git(Some(work), &["rev-parse", "--git-path", "index.lock"]).await {
+        let p = PathBuf::from(p);
+        let p = if p.is_absolute() { p } else { work.join(p) };
+        if std::fs::remove_file(&p).is_ok() {
+            eprintln!("{} cleanup: removed a stale {}", now_ms(), p.display());
+        }
+    }
+}
+
 /// Removes the worktree `work` of `git_dir` after its uncommitted changes are committed, and
-/// `branch` when all its commits are also elsewhere. False (nothing removed) when the changes
-/// could not be committed: the folder stays for the next cleanup.
-async fn remove_worktree(git_dir: &Path, work: &Path, branch: Option<&str>, what: &str) -> bool {
+/// `branch` when all its commits are also elsewhere. When the changes cannot be committed (also
+/// after a stale index lock is removed), the folder is moved to `kept` with its files instead,
+/// so that it never blocks the cleanup. False (nothing removed) only when that fails too.
+async fn remove_worktree(
+    git_dir: &Path,
+    work: &Path,
+    branch: Option<&str>,
+    what: &str,
+    kept: &Path,
+    label: &str,
+) -> bool {
     if work.join(".git").exists() {
-        match keep_uncommitted(work, branch).await {
+        let mut res = keep_uncommitted(work, branch).await;
+        if res.is_err() {
+            remove_stale_index_lock(work).await;
+            res = keep_uncommitted(work, branch).await;
+        }
+        match res {
             Ok(true) => eprintln!(
                 "{} cleanup: {what} had uncommitted changes; committed them to {}",
                 now_ms(),
@@ -544,10 +616,12 @@ async fn remove_worktree(git_dir: &Path, work: &Path, branch: Option<&str>, what
             Ok(false) => {}
             Err(e) => {
                 eprintln!(
-                    "{} cleanup: {what} kept: its uncommitted changes could not be committed ({e})",
+                    "{} cleanup: {what}: its uncommitted changes could not be committed ({e})",
                     now_ms()
                 );
-                return false;
+                if !move_aside(kept, work, label) {
+                    return false;
+                }
             }
         }
     }
@@ -663,7 +737,7 @@ fn set_mode_bits(dir: &Path, read_only: bool) {
 /// commits are also on a remote or another branch, otherwise it is kept (it costs no disk
 /// beyond its objects) and the daemon log says so. A run that worked in a line leaves the line
 /// alone ([`cleanup_lines`] removes it). False when the folder was kept.
-pub async fn remove_run(dir: &Path) -> bool {
+pub async fn remove_run(cfg: &Config, dir: &Path) -> bool {
     // A side chat run's checkout is read-only, also after a crash.
     set_read_only(&dir.join("work"), false);
     if let Some(meta) = read_meta(dir)
@@ -672,7 +746,13 @@ pub async fn remove_run(dir: &Path) -> bool {
     {
         let _guard = GIT_LOCK.lock().await;
         let what = format!("run {}", meta.run_id);
-        if !remove_worktree(gd, &dir.join("work"), meta.branch.as_deref(), &what).await {
+        let label = format!(
+            "run-{}",
+            dir.file_name().unwrap_or_default().to_string_lossy()
+        );
+        let work = dir.join("work");
+        let branch = meta.branch.as_deref();
+        if !remove_worktree(gd, &work, branch, &what, &kept_dir(cfg), &label).await {
             return false;
         }
     }
@@ -706,7 +786,7 @@ pub async fn cleanup_lines(cfg: &Config, active: &[String]) -> usize {
             .map(|m| m.last_used_at)
             .or_else(|| modified_ms(&path))
             .unwrap_or(0);
-        if at > cutoff || !claim_line(&path) {
+        if at > cutoff || claim_line(&path, true).is_err() {
             continue;
         }
         let work = path.join("work");
@@ -716,7 +796,8 @@ pub async fn cleanup_lines(cfg: &Config, active: &[String]) -> usize {
                 let _guard = GIT_LOCK.lock().await;
                 let what = format!("line {key}");
                 let branch = meta.as_ref().and_then(|m| m.branch.as_deref());
-                remove_worktree(&gd, &work, branch, &what).await
+                let label = format!("line-{key}");
+                remove_worktree(&gd, &work, branch, &what, &kept_dir(cfg), &label).await
             }
             None => true,
         };
@@ -843,11 +924,35 @@ pub async fn cleanup(cfg: &Config, active: &[String]) -> usize {
     let mut removed = 0;
     for (at, path) in finished {
         let low_disk = crate::health::disk(&cfg.work_root).0 < min_free;
-        if (at <= cutoff || low_disk) && remove_run(&path).await {
+        if (at <= cutoff || low_disk) && remove_run(cfg, &path).await {
             removed += 1;
         }
     }
-    removed + cleanup_lines(cfg, active).await
+    removed + cleanup_lines(cfg, active).await + cleanup_kept(cfg).await
+}
+
+/// Removes the oldest folders that were moved to `kept` while free disk is below `min_free_gb`.
+async fn cleanup_kept(cfg: &Config) -> usize {
+    let Ok(rd) = std::fs::read_dir(kept_dir(cfg)) else {
+        return 0;
+    };
+    let mut kept: Vec<(u64, PathBuf)> = rd
+        .flatten()
+        .map(|e| (modified_ms(&e.path()).unwrap_or(0), e.path()))
+        .collect();
+    kept.sort();
+    let min_free = cfg.min_free_gb * (1 << 30);
+    let mut removed = 0;
+    for (_, path) in kept {
+        if crate::health::disk(&cfg.work_root).0 >= min_free {
+            break;
+        }
+        set_read_only(&path, false);
+        remove_dir(&path).await;
+        eprintln!("{} cleanup: disk low, removed {}", now_ms(), path.display());
+        removed += 1;
+    }
+    removed
 }
 
 pub fn hex(b: &[u8]) -> String {
@@ -1029,7 +1134,7 @@ keep_runs_hours = {keep_hours}\nmin_free_gb = 0\n",
         assert_eq!(line.last_run_id.as_deref(), Some("r2"));
 
         // Removing a run that used the line leaves the line.
-        assert!(remove_run(&run_dir(&cfg, "r1")).await);
+        assert!(remove_run(&cfg, &run_dir(&cfg, "r1")).await);
         assert!(!run_dir(&cfg, "r1").exists());
         assert!(w1.join("draft.txt").is_file());
     }
@@ -1053,7 +1158,7 @@ keep_runs_hours = {keep_hours}\nmin_free_gb = 0\n",
         let mut lm = read_line(&line).unwrap();
         lm.last_used_at = now_ms() - 2 * 3_600_000;
         write_line(&line, &lm);
-        assert!(claim_line(&line));
+        assert!(claim_line(&line, false).is_ok());
         assert_eq!(cleanup_lines(&cfg, &[]).await, 0);
         release_line(&line);
         // Idle for longer than keep_runs_hours: committed, then removed; the branch stays.
@@ -1073,6 +1178,134 @@ keep_runs_hours = {keep_hours}\nmin_free_gb = 0\n",
             std::fs::read_to_string(w2.join("draft.txt")).unwrap(),
             "uncommitted"
         );
+    }
+
+    /// A line with a draft in its worktree, idle for two hours.
+    async fn idle_line_with_draft(cfg: &Config, repo: &RepoSpec) -> (PathBuf, PathBuf, String) {
+        let (w, m, g) = prepare_line(cfg, "r1", "BOT1", "T1", Some(repo))
+            .await
+            .unwrap()
+            .unwrap();
+        std::fs::write(w.join("draft.txt"), "uncommitted").unwrap();
+        drop(g);
+        let line = m.line.clone().unwrap();
+        let mut lm = read_line(&line).unwrap();
+        lm.last_used_at = now_ms() - 2 * 3_600_000;
+        write_line(&line, &lm);
+        (w, line, m.branch.unwrap())
+    }
+
+    /// A git killed in the middle of a command (a cancelled run) leaves `index.lock`: the
+    /// cleanup removes it and still commits the line's uncommitted work.
+    #[tokio::test]
+    async fn cleanup_gets_past_a_stale_index_lock() {
+        let (_d, cfg, repo) = setup(1);
+        let (w, line, branch) = idle_line_with_draft(&cfg, &repo).await;
+        let lock = PathBuf::from(sh_git(
+            &w,
+            &[
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-path",
+                "index.lock",
+            ],
+        ));
+        std::fs::write(&lock, "").unwrap();
+        assert_eq!(cleanup_lines(&cfg, &[]).await, 1);
+        assert!(!line.exists());
+        let repo_dir = PathBuf::from(repo.path.clone().unwrap());
+        let files = sh_git(&repo_dir, &["ls-tree", "--name-only", &branch]);
+        assert!(files.lines().any(|f| f == "draft.txt"), "{files}");
+    }
+
+    /// When the work cannot be committed at all, the folder is moved to `kept` with its files
+    /// and the line is still cleaned up; `kept` is emptied only when disk is low.
+    #[tokio::test]
+    async fn work_that_cannot_be_committed_is_moved_aside() {
+        let (_d, cfg, repo) = setup(1);
+        let (w, line, _) = idle_line_with_draft(&cfg, &repo).await;
+        // A lock that is a folder: nothing removes it, every commit fails.
+        let lock = PathBuf::from(sh_git(
+            &w,
+            &[
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-path",
+                "index.lock",
+            ],
+        ));
+        std::fs::create_dir(&lock).unwrap();
+        assert_eq!(cleanup_lines(&cfg, &[]).await, 1);
+        assert!(!line.exists());
+        let kept: Vec<_> = std::fs::read_dir(kept_dir(&cfg))
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .collect();
+        assert_eq!(kept.len(), 1);
+        assert!(
+            kept[0]
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("line-")
+        );
+        assert_eq!(
+            std::fs::read_to_string(kept[0].join("draft.txt")).unwrap(),
+            "uncommitted"
+        );
+        // min_free_gb = 0: disk is never low, kept stays.
+        assert_eq!(cleanup_kept(&cfg).await, 0);
+        assert!(kept[0].exists());
+        let _ = std::fs::remove_dir(&lock);
+    }
+
+    /// A run that meets the cleanup's hold on its line waits for it and then takes the line,
+    /// instead of getting a folder of its own.
+    #[tokio::test]
+    async fn a_run_waits_for_the_cleanups_hold() {
+        let (_d, cfg, repo) = setup(72);
+        let line = lines_dir(&cfg).join(line_key("BOT1", "T1", Some(&repo)));
+        assert!(claim_line(&line, true).is_ok());
+        let held = line.clone();
+        let release = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            release_line(&held);
+        });
+        let (w, _, g) = prepare_line(&cfg, "r1", "BOT1", "T1", Some(&repo))
+            .await
+            .unwrap()
+            .expect("the line, after the cleanup let go");
+        assert!(w.starts_with(&line));
+        release.await.unwrap();
+        drop(g);
+    }
+
+    /// A line folder git cannot use is moved aside with its files when a run starts, not
+    /// deleted.
+    #[tokio::test]
+    async fn an_unusable_line_folder_is_moved_aside() {
+        let (_d, cfg, repo) = setup(72);
+        let key = line_key("BOT1", "T1", Some(&repo));
+        let work = lines_dir(&cfg).join(&key).join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        std::fs::write(work.join(".git"), "gitdir: /nowhere\n").unwrap();
+        std::fs::write(work.join("draft.txt"), "x").unwrap();
+        let (w, _, g) = prepare_line(&cfg, "r1", "BOT1", "T1", Some(&repo))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(g.fresh);
+        assert!(!w.join("draft.txt").exists());
+        let kept: Vec<_> = std::fs::read_dir(kept_dir(&cfg))
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .collect();
+        assert_eq!(kept.len(), 1);
+        let name = kept[0].file_name().unwrap().to_string_lossy().to_string();
+        assert!(name.starts_with(&format!("line-{key}-lost-")), "{name}");
+        assert!(kept[0].join("draft.txt").is_file());
     }
 
     /// A line without a repository is a scratch folder that is kept between runs.
@@ -1121,7 +1354,7 @@ keep_runs_hours = {keep_hours}\nmin_free_gb = 0\n",
         let (_d, cfg, repo) = setup(72);
         let (w, meta) = prepare(&cfg, "r1", Some(&repo)).await.unwrap();
         std::fs::write(w.join("draft.txt"), "uncommitted").unwrap();
-        assert!(remove_run(&run_dir(&cfg, "r1")).await);
+        assert!(remove_run(&cfg, &run_dir(&cfg, "r1")).await);
         assert!(!run_dir(&cfg, "r1").exists());
         let repo_dir = PathBuf::from(repo.path.clone().unwrap());
         let branch = meta.branch.unwrap();
@@ -1130,7 +1363,7 @@ keep_runs_hours = {keep_hours}\nmin_free_gb = 0\n",
 
         // A run without changes: its branch goes with it.
         let (_, meta) = prepare(&cfg, "r2", Some(&repo)).await.unwrap();
-        assert!(remove_run(&run_dir(&cfg, "r2")).await);
+        assert!(remove_run(&cfg, &run_dir(&cfg, "r2")).await);
         let b = meta.branch.unwrap();
         assert_eq!(sh_git(&repo_dir, &["branch", "--list", &b]), "");
     }

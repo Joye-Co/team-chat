@@ -813,7 +813,13 @@ later audits have the complete record:
   Before a worktree (a line's or a run's own) is removed with `git worktree remove`, its
   uncommitted changes are committed to the branch it has checked out (`wip: uncommitted
   changes kept by cleanup`, hooks and signing off; a detached HEAD gets a branch
-  `<branch>-kept-<ms>`); when that commit fails the folder stays. The branch is then deleted
+  `<branch>-kept-<ms>`). When that commit fails, also after a stale `index.lock` of the
+  worktree is removed (a git killed with a cancelled run), the folder is moved with its files to
+  `<work_root>/kept/<run-<runId> | line-<key>>-<ms>` instead, so it never blocks the cleanup;
+  a line `work/` that git cannot use when a run starts is moved there too
+  (`line-<key>-lost-<ms>`). Folders in `kept/` stay until free disk is below `min_free_gb`,
+  then the oldest go first. A run that starts while the cleanup holds its line waits for it.
+  The branch is then deleted
   only when all its commits are on a remote-tracking branch or another local branch; a branch
   with unpushed commits is kept, and the daemon log names it, so the line's next run checks it
   out again. Below half of `min_free_gb` new runs are rejected with `disk_low`.

@@ -147,7 +147,8 @@ pub fn line_note(
     let what = match (branch, restored) {
         (Some(b), true) => format!(
             "It is a new checkout of your branch {b}: what you committed there is here, and what \
-you left uncommitted was committed there for you before the old folder was removed."
+you left uncommitted was committed for you before the old folder was removed, to {b} (or, if \
+that folder was not on a branch, to a branch {b}-kept-<time>). Check before you build on it."
         ),
         (Some(_), false) => "It is a new checkout of the base branch: changes from your earlier \
 turns are not in it. Check before you build on them."
@@ -852,6 +853,7 @@ mod tests {
         let restored = line_note(cwd, Some("bot/k"), true, true, true).unwrap();
         assert!(restored.contains("/w/lines/k/work"), "{restored}");
         assert!(restored.contains("branch bot/k"), "{restored}");
+        assert!(restored.contains("bot/k-kept-"), "{restored}");
         let new = line_note(cwd, Some("bot/k"), true, true, false).unwrap();
         assert!(new.contains("not in it"), "{new}");
         let scratch = line_note(cwd, None, true, true, false).unwrap();
