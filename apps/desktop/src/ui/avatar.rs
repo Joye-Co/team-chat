@@ -621,6 +621,7 @@ mod tests {
             deactivated: false,
             online: true,
             character: Some(characters::CharacterId::O08),
+            team_owner: false,
         };
         let avatar = MemberAvatar::new(Some(&member), px(32.));
         assert!(avatar.bot);

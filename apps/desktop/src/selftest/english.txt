@@ -25,6 +25,20 @@
 运营实习	Marketing intern
 负责人	Owner
 同事	Teammates
+# --- 身份 (design-roles) ---
+所有者	Owner
+管理员	Admin
+普通成员	Member
+身份	Role
+设为所有者	Make owner
+设为管理员	Make admin
+设为普通成员	Make member
+身份没有改	Role not changed
+只有所有者能改身份。	Only the owner can change roles.
+团队至少要有一位所有者。	The team needs at least one owner.
+所有者和管理员能打开	Owners and admins can open this
+只有所有者和管理员能打开团队管理	Only owners and admins can open Team admin
+请让团队的管理员打开。	Ask an admin of your team to open it.
 成员	Team
 
 # --- navigation and labels ---

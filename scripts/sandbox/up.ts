@@ -204,7 +204,7 @@ async function main() {
   if (args.includes("--stop")) return stop();
   if (args.includes("--reset")) {
     stop();
-    for (const f of ["state", "seed.json", "owner-token", "machine-token", "app"]) rmSync(join(DIR, f), { recursive: true, force: true });
+    for (const f of ["state", "seed.json", "owner-token", "admin-token", "member-token", "machine-token", "app"]) rmSync(join(DIR, f), { recursive: true, force: true });
     log("reset");
   }
   // A seed that stopped halfway leaves data without seed.json: start over.

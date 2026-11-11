@@ -282,6 +282,11 @@ fn provider(start: Start, worst_case: bool) -> Arc<dyn ChatProvider> {
             fake
         }
         Start::V2RefParts => fake::v2::V2Samples::with_card_parts(),
+        Start::Roles(view) => {
+            let fake = fake::FakeProvider::new();
+            fake.set_role_view(view);
+            fake
+        }
         // --- provider track ---
         Start::Core => {
             static SHOT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);

@@ -1748,6 +1748,7 @@ mod tests {
             deactivated: false,
             online: true,
             character: None,
+            team_owner: false,
         }
     }
 

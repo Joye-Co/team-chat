@@ -30,7 +30,7 @@ use crate::{
     data::{
         ApprovalDefaults, ApproverRole, BotCreated, BotMemberEdit, Change, InviteCreated,
         InviteRequest, MachineInfo, Member, MemberKind, MemberLevel, ModelChoice, RunnerChange,
-        RunnerSetup,
+        RunnerSetup, TeamRole,
     },
     theme,
     ui::{
@@ -104,6 +104,12 @@ fn spend_text(n: Option<u32>) -> String {
 #[derive(Default)]
 struct Roster {
     owner: bool,
+    /// I am the 所有者: the 「设为…」 items show and I can stop 管理员.
+    team_owner: bool,
+    /// One person uses the team: no 身份 shows (design-roles 3.10).
+    solo: bool,
+    /// Each member's 身份 by member id.
+    roles: std::collections::HashMap<String, TeamRole>,
     me: Option<String>,
     /// Sorted for the pane (`sorted`).
     members: Vec<Member>,
@@ -116,7 +122,12 @@ struct Roster {
 impl Roster {
     fn read(services: &Services) -> Self {
         let me = services.me();
-        let members = sorted(services.provider.members(), me.as_deref());
+        let all = services.provider.members();
+        let roles = all
+            .iter()
+            .map(|m| (m.id.clone(), TeamRole::of(m, &all)))
+            .collect();
+        let members = sorted(all, me.as_deref());
         let mut seen = std::collections::HashMap::<String, usize>::new();
         for m in &members {
             *seen.entry(one_line(&m.name).to_lowercase()).or_default() += 1;
@@ -129,6 +140,9 @@ impl Roster {
         let words = Self::words(services, me.as_deref(), &members);
         Roster {
             owner: i_am_owner(services),
+            team_owner: super::i_am_team_owner(services),
+            solo: super::solo_in(&members),
+            roles,
             me,
             members,
             same_names,
@@ -241,9 +255,21 @@ impl MembersPage {
         self.rules.as_ref()
     }
 
-    pub fn set_level(&mut self, id: String, level: MemberLevel, cx: &mut Context<Self>) {
-        let reply = self.services.provider.set_member_level(&id, level);
-        self.run(reply, cx);
+    /// 所有者: gives a member a 身份 (「设为…」).
+    pub fn set_role(&mut self, id: String, role: TeamRole, cx: &mut Context<Self>) {
+        let reply = self.services.provider.set_member_role(&id, role);
+        self.status = Status::Idle;
+        cx.spawn(async move |this, cx| {
+            let result = answer(reply).await;
+            let _ = this.update(cx, |this, cx| {
+                this.status = match result {
+                    Ok(_) => Status::Idle,
+                    Err(e) => Status::Failed(super::role_error_text(e).into()),
+                };
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     pub fn set_deactivated(&mut self, id: String, off: bool, cx: &mut Context<Self>) {
@@ -482,55 +508,23 @@ impl MembersPage {
             .chain(std::iter::once(role.as_str()))
             .collect::<Vec<_>>()
             .join(" · ");
-        let value: gpui::AnyElement = if m.deactivated {
-            StatusBadge::new(BadgeState::Deactivated, common::MEMBER_DEACTIVATED).into_any_element()
-        } else if owner {
-            // One select width down the column; my own is the same select,
-            // disabled (I cannot change my own level).
-            let current = m.level;
-            let target = id.clone();
-            let page = page.clone();
-            let select = widgets::popup_fixed(
-                ElementId::Name(format!("level-{id}").into()),
-                widgets::level_text(m.level),
-                SELECT_WIDTH,
-                window,
-                cx,
-            );
-            if is_me {
-                div()
-                    .id(ElementId::Name(format!("level-self-{id}").into()))
-                    .tooltip(|window, cx| {
-                        gpui_component::tooltip::Tooltip::new(s::LEVEL_SELF).build(window, cx)
-                    })
-                    .child(disabled_push(select, true, cx))
-                    .into_any_element()
-            } else {
-                select
-                    .dropdown_menu(move |menu, _, _| {
-                        [MemberLevel::Owner, MemberLevel::Member].into_iter().fold(
-                            menu,
-                            |menu, level| {
-                                let (page, target) = (page.clone(), target.clone());
-                                menu.item(
-                                    PopupMenuItem::new(widgets::level_text(level))
-                                        .checked(level == current)
-                                        .on_click(move |_, _, cx| {
-                                            if level != current {
-                                                let target = target.clone();
-                                                page.update(cx, |p, cx| {
-                                                    p.set_level(target, level, cx)
-                                                });
-                                            }
-                                        }),
-                                )
-                            },
-                        )
-                    })
-                    .into_any_element()
-            }
+        // 身份 (design-roles 3.9): a word down the column for everyone; a 所有者 changes it from
+        // the "⋯" menu. One person alone sees no 身份 at all.
+        let role = self
+            .roster
+            .roles
+            .get(&m.id)
+            .copied()
+            .unwrap_or(TeamRole::Member);
+        let value: Option<gpui::AnyElement> = if m.deactivated {
+            Some(
+                StatusBadge::new(BadgeState::Deactivated, common::MEMBER_DEACTIVATED)
+                    .into_any_element(),
+            )
+        } else if self.roster.solo {
+            None
         } else {
-            outline_badge(widgets::level_text(m.level), cx)
+            Some(outline_badge(super::role_text(role), cx))
         };
         let row = widgets::ItemRow::new(
             ElementId::Name(format!("member-{id}").into()),
@@ -544,16 +538,19 @@ impl MembersPage {
         )
         .when(is_me, |r| r.title_lead(outline_badge(s::MEMBER_ME, cx)))
         .description(detail)
-        .value(value)
+        .when_some(value, |r, v| r.value(v))
         .muted(m.deactivated);
         if !owner {
             return row.into_any_element();
         }
-        if is_me {
-            // Keep the "⋯" column so the selects line up.
+        let team_owner = self.roster.team_owner;
+        let offer = super::roles_to_offer(m, role, me, team_owner);
+        let may_stop = super::may_deactivate(role, team_owner);
+        if is_me || (!m.is_bot() && offer.is_empty() && !may_stop) {
+            // Keep the "⋯" column so the badges line up.
             return row.menu(div().size(tokens::height::SM)).into_any_element();
         }
-        // "⋯": 编辑… and 更换形象… for an AI member, 停用…; or 恢复.
+        // "⋯": 编辑… and 更换形象… for an AI member, 「设为…」 for the 所有者, 停用…; or 恢复.
         let member = m.clone();
         let deactivated = m.deactivated;
         let more = widgets::more_button(
@@ -564,6 +561,9 @@ impl MembersPage {
         .dropdown_menu(move |menu, _, _| {
             let page = page.clone();
             if deactivated {
+                if !may_stop {
+                    return menu;
+                }
                 let target = member.id.clone();
                 return menu.item(PopupMenuItem::new(s::REACTIVATE).on_click(move |_, _, cx| {
                     let target = target.clone();
@@ -610,7 +610,30 @@ impl MembersPage {
             } else {
                 menu
             };
+            let menu = if offer.is_empty() {
+                menu
+            } else {
+                let menu = if member.is_bot() {
+                    menu.separator()
+                } else {
+                    menu
+                };
+                offer.iter().fold(menu, |menu, &role| {
+                    let (page, target) = (page.clone(), member.id.clone());
+                    menu.item(PopupMenuItem::new(super::set_role_text(role)).on_click(
+                        move |_, _, cx| {
+                            let target = target.clone();
+                            page.update(cx, |p, cx| p.set_role(target, role, cx));
+                        },
+                    ))
+                })
+            };
+            if !may_stop {
+                return menu;
+            }
+            let lead = member.is_bot() || !offer.is_empty();
             let member = member.clone();
+            let menu = if lead { menu.separator() } else { menu };
             menu.item(
                 PopupMenuItem::new(s::DEACTIVATE_MENU).on_click(move |_, window, cx| {
                     Self::confirm_deactivate(page.clone(), &member, window, cx)
@@ -1168,7 +1191,6 @@ pub struct InviteForm {
     name: Entity<InputState>,
     role: Entity<InputState>,
     kind: MemberKind,
-    level: MemberLevel,
     status: Status,
     created: Option<InviteCreated>,
     _subscriptions: Vec<Subscription>,
@@ -1191,7 +1213,6 @@ impl InviteForm {
             name,
             role,
             kind: MemberKind::Human,
-            level: MemberLevel::Member,
             status: Status::Idle,
             created: None,
             _subscriptions: subscriptions,
@@ -1236,7 +1257,8 @@ impl InviteForm {
         let reply = self.services.provider.create_invite(InviteRequest {
             name,
             kind: self.kind,
-            level: self.level,
+            // design-roles 3.9: everyone joins as 普通成员; a 所有者 gives 身份 afterwards.
+            level: MemberLevel::Member,
             role: (!role.is_empty()).then_some(role),
         });
         self.status = Status::Busy(s::SAVING.into());
@@ -1291,8 +1313,7 @@ impl Render for InviteForm {
             self.name.read(cx).value().trim(),
             self.role.read(cx).value().trim(),
         );
-        let (kind_page, level_page, submit, retry) =
-            (cx.entity(), cx.entity(), cx.entity(), cx.entity());
+        let (kind_page, submit, retry) = (cx.entity(), cx.entity(), cx.entity());
         let failed = refusal(
             "invite-failed",
             &self.status,
@@ -1330,25 +1351,6 @@ impl Render for InviteForm {
                                     MemberKind::Bot
                                 } else {
                                     MemberKind::Human
-                                };
-                                cx.notify();
-                            })
-                        },
-                        window,
-                        cx,
-                    ))
-                    .child(choice_row(
-                        s::MEMBER_LEVEL,
-                        "invite-level",
-                        [s::LEVEL_MEMBER, s::LEVEL_OWNER],
-                        self.level == MemberLevel::Owner,
-                        busy,
-                        move |owner, _, cx| {
-                            level_page.update(cx, |f, cx| {
-                                f.level = if owner {
-                                    MemberLevel::Owner
-                                } else {
-                                    MemberLevel::Member
                                 };
                                 cx.notify();
                             })
@@ -2843,6 +2845,7 @@ mod tests {
             deactivated: off,
             online: false,
             character: None,
+            team_owner: false,
         }
     }
 

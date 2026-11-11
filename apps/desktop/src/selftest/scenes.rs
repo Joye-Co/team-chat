@@ -73,6 +73,8 @@ pub enum Start {
     V2Memory(crate::fake::memory::MemoryShape),
     /// The sample data whose 团队约定 answer in one shape (memory scenes).
     Memory(crate::fake::memory::MemoryShape),
+    /// The sample data seen as a 所有者, 管理员, 普通成员 or alone (身份 scenes).
+    Roles(crate::fake::RoleView),
 }
 
 pub struct Scene {

@@ -59,6 +59,9 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
   in UI text.
 - The settings window may also use 岗位 (role and how the member works), 权限 (permissions),
   机器 (machines) and 成本 (cost).
+- The three 身份 of a team (design-roles): 所有者, 管理员 and 普通成员, with 身份 itself and the menu
+  items 设为所有者, 设为管理员, 设为普通成员. 负责人 stays the member a 话题 is assigned to and is
+  never a 身份.
 - Developer words appear only in the developer view (开发者视图) and in logs: session, CLI,
   model names, router, worker, runner, trigger, token, agent, bot, chat, thread, channel, DM,
   task, ticket, artifact, attachment, and their Chinese forms 会话, 机器人, 智能体, 频道, 线程,

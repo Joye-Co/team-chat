@@ -83,7 +83,7 @@ use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 
 use crate::data::{
     AdminReply, BotCreated, GroupPrefs, InviteCreated, InviteRequest, MachineCreated, MachineInfo,
-    MemberLevel, NotifyLevel, RunnerSetup,
+    NotifyLevel, RunnerSetup,
 };
 use crate::{
     data::{
@@ -2028,8 +2028,8 @@ impl ChatProvider for CoreProvider {
         self.create_invite_inner(request)
     }
 
-    fn set_member_level(&self, member_id: &str, level: MemberLevel) -> AdminReply<Member> {
-        self.set_member_level_inner(member_id, level)
+    fn set_member_role(&self, member_id: &str, role: crate::data::TeamRole) -> AdminReply<Member> {
+        self.set_member_role_inner(member_id, role)
     }
 
     fn set_member_deactivated(&self, member_id: &str, deactivated: bool) -> AdminReply<Member> {
