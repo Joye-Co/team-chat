@@ -106,6 +106,29 @@ pub fn framed_fixed(
     frame(title.into(), Kind::Fixed, content, window, cx)
 }
 
+/// A window root that shows `content` under the caption strip ([`framed`]): for windows
+/// whose own root view does not draw it (the screenshot self-test's sample windows), so
+/// that they look like the app's windows off the Mac. On the Mac it is `content` alone.
+pub struct Framed {
+    title: SharedString,
+    content: gpui::AnyView,
+}
+
+impl Framed {
+    pub fn new(title: impl Into<SharedString>, content: impl Into<gpui::AnyView>) -> Self {
+        Self {
+            title: title.into(),
+            content: content.into(),
+        }
+    }
+}
+
+impl gpui::Render for Framed {
+    fn render(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        framed(self.title.clone(), self.content.clone(), window, cx)
+    }
+}
+
 /// What a window's caption strip holds.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {

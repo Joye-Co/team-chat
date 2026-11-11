@@ -30,7 +30,12 @@ mod isolation {
     use serde_json::{Value, json};
 
     const ARTIFACT_ID: &str = "selftest-a1";
-    const TIMEOUT: Duration = Duration::from_secs(120);
+    const TIMEOUT: Duration = Duration::from_secs(300);
+    /// How long the escape page (v4) may take to report its results. It needs about 15 s;
+    /// on the macOS 15 CI runner its scripts sometimes stop part-way and it never reports.
+    const V4_PATIENCE: Duration = Duration::from_secs(40);
+    /// How often a page that stalled is loaded again before the test fails.
+    const V4_RELOADS: u32 = 2;
 
     /// 1x1 PNG.
     const PIXEL_PNG: &[u8] = &[
@@ -159,7 +164,10 @@ mod isolation {
       var port = __PORT__, local = 'http://127.0.0.1:' + port + '/';
       function sleep(ms) { return new Promise(function (res) { setTimeout(res, ms); }); }
       function within(ms, p, late) { return Promise.race([p, sleep(ms).then(function () { return late; })]); }
+      // Where the page is, for the host: a page that stalls is reported with its last step.
+      function step(name) { try { window.artifact.emitEvent('v4-step', { step: name }); } catch (e) {} }
       try {
+        step('start');
         try { localStorage.setItem('isolation-k', 'v4'); r.storageWrote = localStorage.getItem('isolation-k') === 'v4'; }
         catch (e) { r.storageWrote = false; }
 
@@ -184,6 +192,7 @@ mod isolation {
             await sleep(3000);
           } catch (e) { r.frameRtcError = String(e); }
         }
+        step('webrtc done');
         var nativePrint = function (w) { try { return /native code/.test(Function.prototype.toString.call(w.print)); } catch (e) { return String(e); } };
         r.printNative = nativePrint(window);
         r.framePrintNative = nativePrint(byIndex || byGetter);
@@ -203,6 +212,8 @@ mod isolation {
           var x = document.createElement('iframe'); x[a[0]] = a[1]; document.body.appendChild(x);
         });
 
+        step('frames made');
+        __STALL__
         // The listener, every way a page has.
         try { await within(3000, fetch(local + 'fetch'), null); } catch (e) {}
         new Image().src = local + 'img';
@@ -210,6 +221,7 @@ mod isolation {
         try { navigator.sendBeacon(local + 'beacon', 'x'); } catch (e) {}
         try { window.open(local + 'popup'); } catch (e) {}
 
+        step('listener tried');
         // Permission prompts: nothing is granted and nothing waits for the viewer.
         r.geolocation = await new Promise(function (res) {
           if (!navigator.geolocation) return res('absent');
@@ -218,21 +230,25 @@ mod isolation {
             function () { clearTimeout(t); res('granted'); },
             function (e) { clearTimeout(t); res('denied:' + e.code); });
         });
+        step('geolocation done');
         r.microphone = await (async function () {
           if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return 'absent';
           try { var s = await within(3000, navigator.mediaDevices.getUserMedia({ audio: true }), 'timeout'); return s === 'timeout' ? s : 'granted'; }
           catch (e) { return 'denied:' + e.name; }
         })();
+        step('microphone done');
         r.notification = await (async function () {
           if (typeof Notification === 'undefined') return 'absent';
           try { return await within(3000, Notification.requestPermission(), 'timeout'); } catch (e) { return 'error'; }
         })();
+        step('notification done');
         r.clipboard = await (async function () {
           if (!navigator.clipboard || !navigator.clipboard.readText) return 'absent';
           try { var t = await within(3000, navigator.clipboard.readText(), { late: 1 }); return t && t.late ? 'timeout' : 'granted'; }
           catch (e) { return 'denied:' + e.name; }
         })();
 
+        step('clipboard done');
         // Another app's URL scheme and the listener as navigations: the page stays.
         location.href = 'artifact-view-isolation-test://location';
         await sleep(200);
@@ -244,6 +260,7 @@ mod isolation {
         r.innerRan = window.__innerRan === true;
         r.srcdocRan = window.__srcdocRan === true;
         r.href = location.href;
+        step('navigations done');
       } catch (e) { r.error = String(e); }
       await window.artifact.emitEvent('v4-results', r);
       // The late report is scheduled first: whatever the download does, it still comes.
@@ -305,6 +322,12 @@ mod isolation {
         frame_events: u32,
         closed: u32,
         late_seen: bool,
+        /// The escape page's last reported step, whether its results arrived, how often
+        /// it was loaded again, and the step each stalled load had reached.
+        v4_step: String,
+        v4_done: bool,
+        v4_reloads: u32,
+        v4_stalls: Vec<String>,
     }
 
     impl Report {
@@ -342,6 +365,53 @@ mod isolation {
     thread_local! {
         /// Work for the main thread that waits for its time ([`platform::later`]).
         static LATER: RefCell<Vec<Box<dyn FnOnce()>>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// Waits for the escape page's results until `deadline`. A page that has not reported
+    /// by then has stalled (its scripts stopped: seen on the macOS 15 CI runner, never
+    /// with a failing check): it is loaded again, at most [`V4_RELOADS`] times, and every
+    /// stall is written to the report with the step it had reached. The checks are the
+    /// same for whichever load reports; a page that never reports fails the test.
+    fn watch_v4(
+        report: Arc<Mutex<Report>>,
+        slot: Rc<RefCell<Option<ArtifactWindow>>>,
+        spec: Rc<dyn Fn() -> VersionSpec>,
+        deadline: Instant,
+    ) {
+        // `later` runs every queued job when any timer fires: look at the clock here.
+        let wait = deadline
+            .saturating_duration_since(Instant::now())
+            .max(Duration::from_millis(200));
+        platform::later(wait, move || {
+            let mut r = report.lock().unwrap();
+            if r.v4_done {
+                return;
+            }
+            if Instant::now() < deadline {
+                drop(r);
+                return watch_v4(report, slot, spec, deadline);
+            }
+            let step = std::mem::take(&mut r.v4_step);
+            eprintln!("isolation: the escape page stalled after step {step:?}");
+            r.v4_stalls.push(step);
+            let stalls = r.v4_stalls.clone();
+            r.details.insert("v4Stalls".into(), json!(stalls));
+            if r.v4_reloads >= V4_RELOADS {
+                r.check("escapePageRan", false);
+                r.write(false);
+                eprintln!("isolation: FAILED: the escape page never reported");
+                std::process::exit(1);
+            }
+            r.v4_reloads += 1;
+            drop(r);
+            let ok = slot
+                .borrow()
+                .as_ref()
+                .map(|w| w.show_version(spec(), Capabilities::ALL).is_ok())
+                .unwrap_or(false);
+            report.lock().unwrap().check("showEscapeVersion", ok);
+            watch_v4(report, slot, spec, Instant::now() + V4_PATIENCE);
+        });
     }
 
     /// Runs what [`platform::later`] queued. Main thread only.
@@ -436,6 +506,10 @@ mod isolation {
             frame_events: 0,
             closed: 0,
             late_seen: false,
+            v4_step: String::new(),
+            v4_done: false,
+            v4_reloads: 0,
+            v4_stalls: Vec::new(),
         }));
 
         // Counts every TCP connection a page manages to make to this computer.
@@ -458,6 +532,25 @@ mod isolation {
         let v4_page = V4_HTML
             .replace("__PORT__", &port.to_string())
             .replace("__DOWNLOAD__", &download_name);
+        // `ARTIFACT_VIEW_ISOLATION_STALLS=n` makes the first n loads of the escape page
+        // stop where the macOS 15 runner's page sometimes does, to try the watchdog:
+        // 1 or 2 must still pass (with the stalls in the report), 3 must fail.
+        let stalls: u32 = std::env::var("ARTIFACT_VIEW_ISOLATION_STALLS")
+            .ok()
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(0);
+        let loads = Rc::new(std::cell::Cell::new(0u32));
+        let v4_page = move || {
+            let load = loads.replace(loads.get() + 1);
+            v4_page.replace(
+                "__STALL__",
+                if load < stalls {
+                    "await new Promise(function () {});"
+                } else {
+                    ""
+                },
+            )
+        };
         let v4_spec = move |html: &str| {
             VersionSpec::new(
                 4,
@@ -625,7 +718,14 @@ mod isolation {
                         }
                         "v3-denied" => r.denied_events += 1,
                         "from-frame" => r.frame_events += 1,
+                        // Results of a load that was given up on (it was slow, not
+                        // stalled) are dropped: one load is judged.
+                        "v4-results" if r.v4_done => {}
                         "v4-results" => {
+                            r.v4_done = true;
+                            let stalls = r.v4_stalls.clone();
+                            r.details.insert("v4Stalls".into(), json!(stalls));
+                            r.check("escapePageRan", true);
                             let is = |k: &str, v: &str| payload[k] == json!(v);
                             r.check("v4NoPageError", payload.get("error").is_none());
                             r.check(
@@ -699,6 +799,9 @@ mod isolation {
                             });
                         }
                         "v4-late" => r.late_seen = true,
+                        "v4-step" => {
+                            r.v4_step = payload["step"].as_str().unwrap_or("?").to_string();
+                        }
                         "store-results" => {
                             r.check("storageGoneWithTheView", payload["value"].is_null());
                             drop(r);
@@ -735,13 +838,20 @@ mod isolation {
                     r.check("refusedCallsNeverReachTheHost", denied == 0);
                     r.check("readStillAllowed", payload["data"] == v3_data());
                     drop(r);
-                    let spec = v4_spec(&v4_page);
+                    let spec = v4_spec(&v4_page());
                     let ok = slot2
                         .borrow()
                         .as_ref()
                         .map(|w| w.show_version(spec, Capabilities::ALL).is_ok())
                         .unwrap_or(false);
                     report2.lock().unwrap().check("showEscapeVersion", ok);
+                    let page = v4_page.clone();
+                    watch_v4(
+                        report2.clone(),
+                        slot2.clone(),
+                        Rc::new(move || v4_spec(&page())),
+                        Instant::now() + V4_PATIENCE,
+                    );
                 }
                 ArtifactEvent::Closed => {
                     r.closed += 1;
