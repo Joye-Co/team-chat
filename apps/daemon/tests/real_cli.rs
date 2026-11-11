@@ -484,6 +484,14 @@ async fn the_real_clis_are_found_by_name_and_say_their_version() {
     let (report, _) = daemon::doctor::report(&cfg).await;
     assert!(!report.contains("NOT FOUND"), "{report}");
     assert!(report.contains("Claude Code"), "{report}");
+    // Windows: the owner is told what a side chat of Codex can still do.
+    #[cfg(windows)]
+    if cfg.runtimes.values().any(|rt| rt.kind == "codex") {
+        assert!(
+            report.contains(daemon::doctor::CODEX_SIDE_CHAT_ON_WINDOWS),
+            "{report}"
+        );
+    }
     eprintln!("{report}");
 
     // What a run starts.
