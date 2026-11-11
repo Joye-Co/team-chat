@@ -261,6 +261,7 @@ export function addV1Fixtures({ ok, bad, add, T0, ID, topic, message, generalSum
   const update = { version: "1.2.10", notes: "## 新功能\n\n- 卡片", size: 48_000_000, sha256: SHA_B, publishedAt: T0, downloadUrl: "https://chat-api-e2e.example.workers.dev/v1/updates/1.2.10/download" };
   ok("http/update-info.json", "UpdateInfo", update);
   ok("http/update-info-windows.json", "UpdateInfo", { ...update, platform: "windows", downloadUrl: `${update.downloadUrl}?platform=windows` }, "the Windows installer");
+  ok("http/update-info-linux.json", "UpdateInfo", { ...update, size: 30_000_000, platform: "linux-x86_64", downloadUrl: "https://chat-api-e2e.example.workers.dev/v1/machine/updates/1.2.10/download?platform=linux-x86_64" }, "the Linux daemon, as a machine gets it");
   ok("http/update-info-macos.json", "UpdateInfo", { ...update, platform: "macos" }, "a server that knows platforms names macos too");
   bad("http/update-info-bad-version.json", "UpdateInfo", { ...update, version: "1.2" }, "version must be MAJOR.MINOR.PATCH");
   bad("http/update-info-leading-zero.json", "UpdateInfo", { ...update, version: "1.02.3" }, "no leading zeros");

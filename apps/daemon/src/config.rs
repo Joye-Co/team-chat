@@ -46,6 +46,11 @@ pub struct Config {
     /// `hello`. The owner turns on macOS Screen Sharing by hand; never put credentials here.
     #[serde(default)]
     pub takeover_url: Option<String>,
+    /// A daemon installed on its own (a Linux host) updates itself from the server's releases
+    /// ([`crate::selfupdate::Updater`]). `false` turns that off; a daemon the app installed is
+    /// updated by the app and never updates itself.
+    #[serde(default = "default_self_update")]
+    pub self_update: bool,
     /// Runtimes by name. When empty, `codex` and `claude` are added if found on PATH.
     #[serde(default)]
     pub runtimes: BTreeMap<String, RuntimeConfig>,
@@ -221,6 +226,9 @@ fn default_stall_minutes() -> u64 {
 }
 fn default_heartbeat_secs() -> u64 {
     30
+}
+fn default_self_update() -> bool {
+    true
 }
 
 pub fn home() -> PathBuf {
@@ -415,6 +423,7 @@ repo_roots = []                     # e.g. ["~/code"]; empty allows any local re
 env_passthrough = []                # e.g. ["GITHUB_TOKEN"]; assignments pick from these
 gated_env = []                      # e.g. ["CLOUDFLARE_API_TOKEN"]; only after approval (chat-run secret)
 # takeover_url = "vnc://mac-mini.tailnet"   # 接管: Screen Sharing address (turn Sharing on by hand; no passwords)
+# self_update = false               # a Linux daemon installed on its own updates itself from releases; false turns it off
 
 # AI members always run with every permission (no approvals); there is nothing to set.
 [runtimes.codex]
@@ -460,6 +469,16 @@ mod tests {
         assert!(p("vnc://").is_some());
         assert!(p("vnc://mac mini").is_some());
         assert!(p(&format!("vnc://{}", "a".repeat(2050))).is_some());
+    }
+
+    #[test]
+    fn self_update_is_on_unless_turned_off() {
+        let base = "server_url = \"https://chat.example.org\"\ntoken_file = \"/tmp/t\"\n";
+        assert!(super::Config::parse(base).unwrap().self_update);
+        let off = format!("{base}self_update = false\n");
+        assert!(!super::Config::parse(&off).unwrap().self_update);
+        let example = super::EXAMPLE.replace("# self_update = false", "self_update = false");
+        assert!(!super::Config::parse(&example).unwrap().self_update);
     }
 
     /// `asks_permission` is off unless a runtime sets it.
