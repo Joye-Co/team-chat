@@ -6,7 +6,8 @@ Prompt words: "slow" streams 5 deltas 0.3 s apart; "hang" writes fake.pid and sl
 writes fake.pid and appends to ticks.txt 30 times, 0.1 s apart (a stopped process stops ticking);
 "spawn" starts two tool children like a CLI's shell tool, one in a new session (setsid) and one
 in a new process group (setpgid), each appending to <name>.ticks every 0.05 s, writes their pids
-to children.txt and then hangs like "hang";
+to children.txt and then hangs like "hang" (Windows: one without a console and one in a new
+process group);
 "orphan" starts a ticker that daemonizes (its parent exits; it appends to orphan.ticks every
 0.05 s and its pid goes to orphan.txt), then hangs like "hang";
 "chatrun" runs `chat-run card patch` from PATH and writes its exit code, output and the socket's
@@ -97,8 +98,13 @@ for line in sys.stdin:
     if "spawn" in cue:
         loop = "import time\nwhile True:\n    open(%r, 'a').write('x\\n')\n    time.sleep(0.05)\n"
         quiet = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL}
-        kids = [subprocess.Popen([sys.executable, "-c", loop % "session.ticks"], start_new_session=True, **quiet),
-                subprocess.Popen([sys.executable, "-c", loop % "group.ticks"], process_group=0, **quiet)]
+        if os.name == "nt":
+            # No sessions or setpgid there: a tool without a console, and one in a new process group.
+            apart = [{"creationflags": subprocess.DETACHED_PROCESS}, {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}]
+        else:
+            apart = [{"start_new_session": True}, {"process_group": 0}]
+        kids = [subprocess.Popen([sys.executable, "-c", loop % "session.ticks"], **apart[0], **quiet),
+                subprocess.Popen([sys.executable, "-c", loop % "group.ticks"], **apart[1], **quiet)]
         open("children.txt", "w").write(" ".join(str(k.pid) for k in kids))
         open("fake.pid", "w").write(str(os.getpid()))
         time.sleep(600)
@@ -106,7 +112,15 @@ for line in sys.stdin:
         # A tool that daemonizes: the shell starts a ticker in the background and exits, so the
         # ticker's parent is pid 1 and it is no longer below the CLI.
         loop = "import time\nwhile True:\n    open('orphan.ticks', 'a').write('x\\n')\n    time.sleep(0.05)\n"
-        subprocess.run(["/bin/sh", "-c", "%s -c \"$0\" >/dev/null 2>&1 </dev/null & echo $! > orphan.txt" % sys.executable, loop], check=True)
+        if os.name == "nt":
+            # The same without a shell: a helper starts the ticker without a console and exits.
+            helper = ("import subprocess, sys\n"
+                      "p = subprocess.Popen([sys.executable, '-c', sys.argv[1]], creationflags=subprocess.DETACHED_PROCESS,\n"
+                      "                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+                      "open('orphan.txt', 'w').write(str(p.pid))\n")
+            subprocess.run([sys.executable, "-c", helper, loop], check=True)
+        else:
+            subprocess.run(["/bin/sh", "-c", "%s -c \"$0\" >/dev/null 2>&1 </dev/null & echo $! > orphan.txt" % sys.executable, loop], check=True)
         open("fake.pid", "w").write(str(os.getpid()))
         time.sleep(600)
     if "hang" in cue:
@@ -120,7 +134,8 @@ for line in sys.stdin:
             time.sleep(0.1)
     if "chatrun" in cue:
         sock = os.environ.get("CHAT_RUN_SOCKET", "")
-        mode = oct(os.stat(sock).st_mode & 0o777) if sock and os.path.exists(sock) else "none"
+        # Windows: the socket is a named pipe, and looking at one would use up a connection.
+        mode = "pipe" if os.name == "nt" else oct(os.stat(sock).st_mode & 0o777) if sock and os.path.exists(sock) else "none"
         open("ops.json", "w").write(json.dumps([{"op": "set", "id": "note", "props": {"text": "key tm_fakefakefakefakefakefake01"}}]))
         r = subprocess.run(["chat-run", "card", "patch", "--message", "M", "--base-rev", "1", "--ops", "ops.json", "--cause", "EV1"],
                            capture_output=True, text=True)
