@@ -550,6 +550,7 @@ mod tests {
             sandbox: None,
             permission_mode: None,
             allowed_tools: None,
+            asks_permission: false,
         }
     }
 

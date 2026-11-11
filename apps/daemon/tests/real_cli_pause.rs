@@ -215,6 +215,7 @@ async fn pause_stops_the_real_cli_and_its_tool_and_resume_lets_them_go_on() {
             sandbox: None,
             permission_mode: None,
             allowed_tools: None,
+            asks_permission: false,
         },
         prompt: prompt.into(),
         model: None,
@@ -227,6 +228,7 @@ async fn pause_stops_the_real_cli_and_its_tool_and_resume_lets_them_go_on() {
         resume_session_id: None,
         gate_hook: None,
         gate_alive: None,
+        gates: None,
         exec: daemon::executor::local(),
     };
     let (run_dir, exec) = (spec.run_dir.clone(), spec.exec.clone());

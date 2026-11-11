@@ -337,6 +337,8 @@ export interface TopicMessage {
   refs?: RefSource[];
   /** Author of the message this one quotes (`replyTo`), if any. */
   replyToAuthorId?: string;
+  /** The message this one quotes (`replyTo`), if any: a reply to an approval card answers it. */
+  replyToMessageId?: string;
   /** The message's files, 产出 and the message it quotes: rendered after the body for the run and the front desk. */
   ext?: RequestExt;
   /** The group is a direct chat (私聊) with the bot. */
@@ -554,6 +556,7 @@ async function deliver(c: DeliverContext, row: OutboxRow): Promise<void> {
   const parsed = parseExt(ext);
   const quoted = parsed.replyTo?.authorId;
   if (quoted) args.replyToAuthorId = quoted;
+  if (parsed.replyTo?.messageId) args.replyToMessageId = parsed.replyTo.messageId;
   const carried = requestExt(parsed);
   if (carried) args.ext = carried;
   if (peer) args.dm = true;

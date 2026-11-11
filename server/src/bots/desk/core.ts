@@ -615,7 +615,18 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
    * (mentions must be group members; owners outside the group can still answer).
    */
   protected async approvers(r: Pick<RunRow, "requested_by" | "group_id">, kind?: string | null): Promise<string[]> {
-    if ((await this.approver(kind)) !== "owners") return this.requester(r);
+    return (await this.approversOrRequester(r, kind)).ids;
+  }
+
+  /**
+   * {@link approvers}, and whether they are the requester only because the group has no owner
+   * to ask (`noOwner`): then the requester is asked and may answer, and the card says so.
+   */
+  protected async approversOrRequester(
+    r: Pick<RunRow, "requested_by" | "group_id">,
+    kind?: string | null,
+  ): Promise<{ ids: string[]; noOwner: boolean }> {
+    if ((await this.approver(kind)) !== "owners") return { ids: this.requester(r), noOwner: false };
     const owners = await this.env.DB.prepare(
       `SELECT m.id FROM members m JOIN group_members g ON g.member_id = m.id AND g.group_id = ?
        WHERE m.level = 'owner' AND m.kind = 'human' AND m.deactivated = 0 ORDER BY m.id LIMIT 20`,
@@ -623,7 +634,31 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
       .bind(r.group_id)
       .all<{ id: string }>()
       .catch(() => ({ results: [] as { id: string }[] }));
-    return owners.results.map((x) => x.id);
+    const ids = owners.results.map((x) => x.id);
+    if (ids.length > 0) return { ids, noOwner: false };
+    const requester = this.requester(r);
+    return { ids: requester, noOwner: requester.length > 0 };
+  }
+
+  /**
+   * The open approval's card (meta `approvalCard:{runId}`): its message id, once posted, and
+   * whether the requester answers it because the group has no owner. Null for another approval.
+   */
+  protected approvalCard(r: Pick<RunRow, "id" | "approval_id">): { messageId?: string; noOwner: boolean } | null {
+    const raw = this.meta(`approvalCard:${r.id}`);
+    if (!raw || !r.approval_id) return null;
+    try {
+      const v = JSON.parse(raw) as { approvalId?: string; messageId?: string; noOwner?: boolean };
+      if (v.approvalId !== r.approval_id) return null;
+      return { ...(typeof v.messageId === "string" ? { messageId: v.messageId } : {}), noOwner: v.noOwner === true };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Who answers the run's open approval: the requester when its card says the group has no owner. */
+  protected async approverOfOpen(r: Pick<RunRow, "id" | "approval_id">, kind?: string | null): Promise<Approver> {
+    return this.approvalCard(r)?.noOwner ? "requester" : this.approver(kind);
   }
 
   protected async topic(r: RunRow, status: TopicStatus, waitingOn: string[] = []): Promise<void> {
