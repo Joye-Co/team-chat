@@ -29,6 +29,8 @@ crate::copy! {
     JUMP_NEW = "{n} 条新消息",
     JUMP_LATEST = "回到最新",
     JUMP_UNREAD = "{n} 条新消息",
+    JUMP_BACK = "返回{place}",
+    JUMP_BACK_TOPIC = "「{title}」",
     MEMBER_COUNT = "{n} 位成员",
     WAITING_ANSWER = "等回答",
     WAITING_REVIEW = "等审",

@@ -626,6 +626,27 @@ pub const SCENES: &[Scene] = &[
         open: open_main,
     },
     Scene {
+        name: "topic-came-from",
+        about: "A reference opened 开发 / 断线重连后消息重复 at its first message from 首页: the message is highlighted and the 返回首页 pill offers the way back",
+        start: Start::V2,
+        setup: |s, cx| {
+            use crate::fake::v2::{DEV, T_RECONNECT};
+            s.nav.update(cx, |n, cx| n.open_desk(cx));
+            let first = s
+                .provider
+                .messages(DEV, T_RECONNECT, 200)
+                .messages
+                .into_iter()
+                .next();
+            if let Some(m) = first {
+                s.nav.update(cx, |n, cx| {
+                    n.open_message(DEV.into(), T_RECONNECT.into(), m.id, m.created_seq, cx)
+                });
+            }
+        },
+        open: open_main,
+    },
+    Scene {
         name: "topic-find",
         about: "⌘F in 开发 / 断线重连后消息重复: the find bar with 重连 typed, every match marked, the current one stronger",
         start: Start::V2,

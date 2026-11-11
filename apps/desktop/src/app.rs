@@ -243,6 +243,35 @@ pub struct Navigation {
     /// Where an 产出 page was opened from (the place and the open 话题), so its back
     /// button returns there. Set when the page opens from somewhere else.
     pub artifact_return: Option<(Option<Place>, Option<(GroupId, TopicId)>)>,
+    /// Places left behind and ahead (⌘[ / ⌘]).
+    history: crate::history::History<Location>,
+    /// The next move is a step of a walk with ↑↓ through the sidebar.
+    replace_next: bool,
+    /// The last move was such a step: the next step replaces the place
+    /// instead of keeping it, so ⌘[ goes back to where the walk began.
+    walking: bool,
+}
+
+/// One place of the window's history: the place and the open 话题.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Location {
+    pub place: Option<Place>,
+    pub topic: Option<(GroupId, TopicId)>,
+}
+
+impl Location {
+    /// A move from `self` to `next` that only changes what one page shows
+    /// (another member on 成员, another version of one 产出): it replaces
+    /// the place instead of adding one.
+    fn same_page(&self, next: &Location) -> bool {
+        match (&self.place, &next.place) {
+            (Some(Place::Members(_)), Some(Place::Members(_))) => self.topic == next.topic,
+            (Some(Place::Artifact { id: a, .. }), Some(Place::Artifact { id: b, .. })) => {
+                a == b && self.topic == next.topic
+            }
+            _ => false,
+        }
+    }
 }
 
 /// Scroll the open topic to this message and highlight it. `serial` grows
@@ -281,6 +310,9 @@ impl Navigation {
         self.side_panel_auto_at = None;
         self.right_pane = RightPane::default();
         self.artifact_return = None;
+        self.history.clear();
+        self.replace_next = false;
+        self.walking = false;
         cx.notify();
     }
 
@@ -300,7 +332,83 @@ impl Navigation {
             right_pane: RightPane::default(),
             rail_mode: RailMode::default(),
             artifact_return: None,
+            history: Default::default(),
+            replace_next: false,
+            walking: false,
         }
+    }
+
+    /// Where the window is.
+    pub fn here(&self) -> Location {
+        Location {
+            place: self.place.clone(),
+            topic: self.topic.clone(),
+        }
+    }
+
+    /// Moves to `place` with `topic` open, keeping the place it leaves to go
+    /// back to. `false` when it is there already.
+    fn go(&mut self, place: Option<Place>, topic: Option<(GroupId, TopicId)>) -> bool {
+        let next = Location { place, topic };
+        let here = self.here();
+        let step = std::mem::take(&mut self.replace_next);
+        if here == next {
+            return false;
+        }
+        let blank = here.place.is_none() && here.topic.is_none();
+        let replace = step && self.walking;
+        self.walking = step;
+        if !replace && !blank && !here.same_page(&next) {
+            self.history.push(here);
+        }
+        self.place = next.place;
+        self.topic = next.topic;
+        true
+    }
+
+    /// The next move is a step of a walk with ↑↓ through the sidebar.
+    pub fn replace_next(&mut self) {
+        self.replace_next = true;
+    }
+
+    /// Where ⌘[ leads now.
+    pub fn previous(&self) -> Option<&Location> {
+        self.history.peek_back(&self.here())
+    }
+
+    /// ⌘[: back to the place before. Its 话题 opens where it was left
+    /// (`timeline/resume.rs`).
+    pub fn go_back(&mut self, cx: &mut Context<Self>) {
+        if let Some(to) = self.history.back(self.here()) {
+            self.arrive(to, cx);
+        }
+    }
+
+    /// ⌘]: forward again after going back.
+    pub fn go_forward(&mut self, cx: &mut Context<Self>) {
+        if let Some(to) = self.history.forward(self.here()) {
+            self.arrive(to, cx);
+        }
+    }
+
+    fn arrive(&mut self, to: Location, cx: &mut Context<Self>) {
+        self.replace_next = false;
+        self.walking = false;
+        self.place = to.place;
+        self.topic = to.topic;
+        cx.notify();
+    }
+
+    /// Forgets the kept places that no longer exist (a 群 left, a 话题
+    /// deleted): `exists` says whether a 群 and 话题 are still there.
+    pub fn forget_gone(&mut self, exists: impl Fn(&GroupId, Option<&TopicId>) -> bool) {
+        self.history.retain(|l| {
+            let group_ok = match &l.place {
+                Some(Place::Group(g)) => exists(g, None),
+                _ => true,
+            };
+            group_ok && l.topic.as_ref().is_none_or(|(g, t)| exists(g, Some(t)))
+        });
     }
 
     /// The page to show (v2 shell).
@@ -317,22 +425,19 @@ impl Navigation {
 
     /// 首页.
     pub fn open_desk(&mut self, cx: &mut Context<Self>) {
-        self.place = Some(Place::Desk);
-        self.topic = None;
+        self.go(Some(Place::Desk), None);
         cx.notify();
     }
 
     /// 成员, with `member` selected.
     pub fn open_members(&mut self, member: Option<MemberId>, cx: &mut Context<Self>) {
-        self.place = Some(Place::Members(member));
-        self.topic = None;
+        self.go(Some(Place::Members(member)), None);
         cx.notify();
     }
 
     /// 产出: the list.
     pub fn open_artifacts(&mut self, cx: &mut Context<Self>) {
-        self.place = Some(Place::Artifacts);
-        self.topic = None;
+        self.go(Some(Place::Artifacts), None);
         cx.notify();
     }
 
@@ -346,8 +451,7 @@ impl Navigation {
         if matches!(&self.right_pane, RightPane::Artifact { id: open, .. } if *open == id) {
             self.right_pane = RightPane::None;
         }
-        self.place = Some(Place::Artifact { id, version });
-        self.topic = None;
+        self.go(Some(Place::Artifact { id, version }), None);
         cx.notify();
     }
 
@@ -356,8 +460,7 @@ impl Navigation {
     pub fn back_from_artifact(&mut self, cx: &mut Context<Self>) {
         match self.artifact_return.take() {
             Some((place, topic)) if place.is_some() || topic.is_some() => {
-                self.place = place;
-                self.topic = topic;
+                self.go(place, topic);
                 cx.notify();
             }
             _ => self.open_artifacts(cx),
@@ -468,14 +571,13 @@ impl Navigation {
     }
 
     pub fn open_todo(&mut self, cx: &mut Context<Self>) {
-        self.place = Some(Place::Todo);
+        self.go(Some(Place::Todo), self.topic.clone());
         cx.notify();
     }
 
     pub fn open_group(&mut self, group_id: GroupId, cx: &mut Context<Self>) {
         if self.place.as_ref() != Some(&Place::Group(group_id.clone())) {
-            self.place = Some(Place::Group(group_id));
-            self.topic = None;
+            self.go(Some(Place::Group(group_id)), None);
             cx.notify();
         }
     }
@@ -491,8 +593,7 @@ impl Navigation {
     /// The 群 page (its 话题 lists) also from its 群聊 or one of its 话题,
     /// which [`Navigation::open_group`] leaves open.
     pub fn open_group_page(&mut self, group_id: GroupId, cx: &mut Context<Self>) {
-        self.place = Some(Place::Group(group_id));
-        self.topic = None;
+        self.go(Some(Place::Group(group_id)), None);
         cx.notify();
     }
 
@@ -505,10 +606,12 @@ impl Navigation {
     }
 
     pub fn open_topic(&mut self, group_id: GroupId, topic_id: TopicId, cx: &mut Context<Self>) {
-        if self.place != Some(Place::Todo) {
-            self.place = Some(Place::Group(group_id.clone()));
-        }
-        self.topic = Some((group_id, topic_id));
+        let place = if self.place == Some(Place::Todo) {
+            self.place.clone()
+        } else {
+            Some(Place::Group(group_id.clone()))
+        };
+        self.go(place, Some((group_id, topic_id)));
         cx.notify();
     }
 
@@ -549,8 +652,10 @@ impl Navigation {
         cx: &mut Context<Self>,
     ) {
         let serial = self.focus.as_ref().map_or(0, |f| f.serial) + 1;
-        self.place = Some(Place::Group(group_id.clone()));
-        self.topic = Some((group_id.clone(), topic_id.clone()));
+        self.go(
+            Some(Place::Group(group_id.clone())),
+            Some((group_id.clone(), topic_id.clone())),
+        );
         self.focus = Some(FocusRequest {
             group_id,
             topic_id,
@@ -564,7 +669,7 @@ impl Navigation {
 
     /// Clears the open topic so the composer starts a new one in the current group.
     pub fn new_topic(&mut self, cx: &mut Context<Self>) {
-        self.topic = None;
+        self.go(self.place.clone(), None);
         cx.notify();
     }
 
@@ -1615,6 +1720,70 @@ mod tests {
             assert_eq!(n.page(), Page::Artifact);
             n.back_from_artifact(cx);
             assert_eq!(n.page(), Page::Artifacts);
+        });
+    }
+
+    /// ⌘[ and ⌘] walk the places the window went through; a new move drops
+    /// what lay ahead.
+    #[gpui::test]
+    fn back_and_forward_walk_the_places_of_the_window(cx: &mut TestAppContext) {
+        let nav = cx.new(|_| Navigation::new());
+        nav.update(cx, |n, cx| {
+            n.open_desk(cx);
+            n.open_topic("g1".into(), "t1".into(), cx);
+            n.open_message("g2".into(), "t2".into(), "m1".into(), 4, cx);
+            assert_eq!(n.topic, Some(("g2".into(), "t2".into())));
+            assert_eq!(
+                n.previous().and_then(|l| l.topic.clone()),
+                Some(("g1".into(), "t1".into()))
+            );
+            n.go_back(cx);
+            assert_eq!(n.topic, Some(("g1".into(), "t1".into())));
+            n.go_back(cx);
+            assert_eq!(n.page(), Page::Desk);
+            n.go_back(cx);
+            assert_eq!(n.page(), Page::Desk, "nothing before the first place");
+            n.go_forward(cx);
+            assert_eq!(n.topic, Some(("g1".into(), "t1".into())));
+            n.open_members(None, cx);
+            n.go_forward(cx);
+            assert_eq!(n.page(), Page::Members, "a new move drops what lay ahead");
+            // Another member on 成员 is the same page: one step back leaves it.
+            n.open_members(Some("m2".into()), cx);
+            n.go_back(cx);
+            assert_eq!(n.topic, Some(("g1".into(), "t1".into())));
+        });
+    }
+
+    /// A walk with ↑↓ through the sidebar is one step of history: ⌘[ goes
+    /// back to where it began.
+    #[gpui::test]
+    fn a_sidebar_walk_goes_back_to_where_it_began(cx: &mut TestAppContext) {
+        let nav = cx.new(|_| Navigation::new());
+        nav.update(cx, |n, cx| {
+            n.open_desk(cx);
+            for t in ["t1", "t2", "t3"] {
+                n.replace_next();
+                n.open_topic("g1".into(), t.into(), cx);
+            }
+            n.go_back(cx);
+            assert_eq!(n.page(), Page::Desk);
+            n.go_forward(cx);
+            assert_eq!(n.topic, Some(("g1".into(), "t3".into())));
+        });
+    }
+
+    /// A 群 the person left drops out of the history.
+    #[gpui::test]
+    fn a_group_left_is_forgotten_by_the_history(cx: &mut TestAppContext) {
+        let nav = cx.new(|_| Navigation::new());
+        nav.update(cx, |n, cx| {
+            n.open_desk(cx);
+            n.open_topic("gone".into(), "t1".into(), cx);
+            n.open_artifacts(cx);
+            n.forget_gone(|g, _| g != "gone");
+            n.go_back(cx);
+            assert_eq!(n.page(), Page::Desk);
         });
     }
 

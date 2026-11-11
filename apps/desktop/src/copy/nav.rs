@@ -114,6 +114,8 @@ crate::copy! {
     MENU_SELECT_ALL = "全选",
     MENU_GO = "前往",
     MENU_QUICK_SWITCH = "快速切换…",
+    MENU_BACK = "返回",
+    MENU_FORWARD = "前进",
     MENU_NEW_TOPIC = "新话题",
     MENU_NEW_GROUP = "新建群…",
     MENU_START_DM = "发起私聊…",

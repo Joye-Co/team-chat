@@ -67,7 +67,7 @@ Only compiled.
   copy that names a key all use this form (`settings::shortcuts::shortcut_text`). Return is
   `Enter`, Delete is `Backspace`, Escape is `Esc`.
 - Differences in the bindings themselves: 设置 is `Ctrl+,`; close window `Ctrl+W`; full screen
-  `F11`; 显示侧栏 `Ctrl+Alt+S`. Hide, Hide Others and Minimize have no binding (Windows has its own:
+  `F11`; 显示侧栏 `Ctrl+Alt+S`; 返回 / 前进 `Alt+←` / `Alt+→`. Hide, Hide Others and Minimize have no binding (Windows has its own:
   `Win+Down`).
 
 Only compiled.

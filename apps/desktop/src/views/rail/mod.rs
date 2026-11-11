@@ -41,7 +41,7 @@ pub use model::RowState;
 use crate::{
     app::{Changes, NewTopic, Page, Place, RailMode, Services},
     copy::{common, rail as c},
-    data::{GroupId, MemberId, Topic},
+    data::{GroupId, MemberId, Topic, TopicId},
     ui::{
         Sym,
         native::{SearchField, metrics, tokens::space},
@@ -52,6 +52,9 @@ use crate::{
 
 use model::{Bucket, MemberSort};
 use modes::{Entry, Inputs};
+
+/// The open 话题 and the selected 群 of the rail.
+type Selection = (Option<(GroupId, TopicId)>, Option<GroupId>);
 
 /// Rows drawn beyond the visible part of the rail list.
 const LIST_OVERDRAW: gpui::Pixels = px(240.);
@@ -101,6 +104,9 @@ pub struct RailView {
     /// C: the order of members.
     member_sort: MemberSort,
     cache: Option<Cache>,
+    /// The open 话题 and selected 群 the list last scrolled into view: a
+    /// move from anywhere (search, a card, ⌘[) shows its row here too.
+    revealed: Option<Selection>,
     /// The virtual list of [`Cache::entries`].
     list: ListState,
     // --- v12/behavior ---
@@ -165,6 +171,7 @@ impl RailView {
             _subscriptions: subscriptions,
             services,
             cache: None,
+            revealed: None,
             list: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
             // Tab reaches the rows themselves (FocusRow); the list keeps a
             // handle for the arrow keys when it is focused as a whole.
@@ -211,6 +218,16 @@ impl RailView {
     /// changed; otherwise keeps what it has.
     fn refresh(&mut self, cx: &App) {
         let mut inputs = self.inputs(cx);
+        let selection = (inputs.open.clone(), inputs.group_page.clone());
+        let reveal = self.revealed.as_ref() != Some(&selection);
+        // A 话题 opened from elsewhere in a folded 群: unfold it, so its row
+        // shows where the person is.
+        if reveal
+            && let Some((g, _)) = &inputs.open
+            && self.folded_groups.remove(g)
+        {
+            inputs.folded_groups = self.folded_groups.clone();
+        }
         if self.cache.as_ref().is_some_and(|c| c.inputs == inputs) {
             return;
         }
@@ -261,6 +278,26 @@ impl RailView {
             entries: Rc::new(entries),
             inputs,
         });
+        if reveal {
+            self.revealed = Some(selection);
+            if let Some(ix) = self.selected_index() {
+                self.list.scroll_to_reveal_item(ix);
+            }
+        }
+    }
+
+    /// The row of the open 话题, 私聊 or 群, if the list shows it.
+    fn selected_index(&self) -> Option<usize> {
+        self.cache
+            .as_ref()?
+            .entries
+            .iter()
+            .position(|e| match &e.item {
+                modes::Item::Topic(t) => t.selected,
+                modes::Item::Dm { selected, .. } => *selected,
+                modes::Item::GroupHeader { selected, .. } => *selected,
+                _ => false,
+            })
     }
 
     /// One row of the virtual list.
@@ -946,6 +983,9 @@ impl RailView {
             None => 0,
         };
         let nav = self.services.nav.clone();
+        // A walk through the rows replaces the place: ⌘[ goes back to where
+        // the walk began, not row by row.
+        nav.update(cx, |nav, _| nav.replace_next());
         match stops[next] {
             Stop::Desk => nav.update(cx, |nav, cx| nav.open_desk(cx)),
             Stop::Artifacts => nav.update(cx, |nav, cx| nav.open_artifacts(cx)),
