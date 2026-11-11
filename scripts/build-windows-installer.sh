@@ -115,6 +115,22 @@ log "staging $NAME $VERSION"
 cp "$APP_BIN" "$STAGE/$NAME.exe"
 cp "$HELPER_BIN" "$STAGE/$SLUG-update.exe"
 defines=()
+# The names the product had before (product.json formerNames): the installer keeps each as a
+# second name of the app's program, because an app installed under that name starts
+# <former name>.exe after its update (scripts/windows/installer.nsi, FormerNames).
+FORMER_NSH="$WORK/former-names.nsh"
+{
+  printf '!macro FormerNames ACTION\n'
+  jq -r '.formerNames // [] | .[]' "$ROOT/product.json" | tr -d '\r' | while IFS= read -r former; do
+    case "$former" in
+      "$NAME") die "product.json formerNames holds the current name" ;;
+      *[!A-Za-z0-9._\ -]* | "") die "product.json formerNames: '$former' is not a plain file name" ;;
+    esac
+    printf '  !insertmacro ${ACTION} "%s"\n' "$former"
+  done
+  printf '!macroend\n'
+} >"$FORMER_NSH"
+defines+=("-DFORMER_NSH=$(native "$FORMER_NSH")")
 if [ "$WITH_DAEMON" = 1 ]; then
   cp "$DAEMON_BIN" "$STAGE/$SLUG-daemon.exe"
   defines+=("-DHAS_DAEMON=1")

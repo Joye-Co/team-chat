@@ -149,7 +149,7 @@ signed, each installer you download by hand shows the SmartScreen warning again.
 
 | What | Where |
 | --- | --- |
-| The app | `%LOCALAPPDATA%\Programs\Cahoots\` |
+| The app | `%LOCALAPPDATA%\Programs\Cahoots\` (an app first installed as TeamChat stays in `Programs\TeamChat\` and keeps a `TeamChat.exe` next to `Cahoots.exe`) |
 | Local cache (messages, files you opened, settings) and logs | `%APPDATA%\co.joye.teamchat\` (logs in `logs\`) |
 | Sign-in token | Windows Credential Manager → Windows Credentials, the entries that start with `co.joye.teamchat:` (the server address follows) |
 | Caches the app can make again (产出 pages, diagrams) | `%LOCALAPPDATA%\team-chat\` |

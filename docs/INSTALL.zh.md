@@ -137,7 +137,7 @@ cd ~/Library/Application\ Support/co.joye.teamchat && zip -r ~/Desktop/teamchat-
 
 | 内容 | 位置 |
 | --- | --- |
-| App 本身 | `%LOCALAPPDATA%\Programs\Cahoots\` |
+| App 本身 | `%LOCALAPPDATA%\Programs\Cahoots\`(最早以 TeamChat 这个名字安装的,仍然在 `Programs\TeamChat\`,里面除了 `Cahoots.exe` 还会留一个 `TeamChat.exe`) |
 | 本地缓存(消息、打开过的文件、设置)和日志 | `%APPDATA%\co.joye.teamchat\`(日志在 `logs\` 里) |
 | 登录凭证 | "Windows 凭据管理器 → Windows 凭据"里以 `co.joye.teamchat:` 开头的项目(后面是服务器地址) |
 | 可以重新生成的缓存(产出页面、图表) | `%LOCALAPPDATA%\team-chat\` |
