@@ -189,16 +189,19 @@ fn has_repo(a: &RunAssign) -> bool {
 }
 
 /// The environment of the daemon's fetch at the end of a run (the code location's "pushed"):
-/// the person's GitHub as for [`prepare_with_github`], nothing without one.
+/// the person's GitHub as for [`prepare_with_github`], nothing without one. A `repo.path` run
+/// whose folder's `origin` is on GitHub gets the token too: the CLI pushed with it.
 async fn code_git_env(
     a: &RunAssign,
+    work: &std::path::Path,
     github: Option<&crate::github::Run>,
     event: &(dyn Fn(RunEvent) + Send + Sync),
 ) -> Vec<(String, Option<String>)> {
     let Some(g) = github.filter(|g| g.app()) else {
         return vec![];
     };
-    let token = if crate::github::fetches_from_github(a.repo.as_ref()) {
+    let origin = workspace::origin_url(work).await;
+    let token = if crate::github::code_fetch_from_github(a.repo.as_ref(), origin.as_deref()) {
         match g.fetch(event).await {
             crate::github::Got::Token(t) => Some(t.token),
             _ => None,
@@ -613,7 +616,7 @@ this machine cannot be made to stop at them (update it)",
                 None
             } else {
                 let fallback = workspace::read_meta(&dir).and_then(|m| m.branch);
-                let env = code_git_env(&assign, github.as_deref(), &event).await;
+                let env = code_git_env(&assign, &work, github.as_deref(), &event).await;
                 workspace::with_git_env(env, workspace::code_location(&work, fallback.as_deref()))
                     .await
             };

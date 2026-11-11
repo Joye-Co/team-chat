@@ -696,6 +696,14 @@ async fn unpushed_commits(git_dir: &Path, branch: &str) -> Result<u64, String> {
 /// `origin` into its remote-tracking ref and the head must be in it; uncommitted changes to
 /// tracked files, a failed fetch or a branch the remote lacks all read as not pushed. `None`
 /// when `work` is not a git worktree with a commit. Run it with the run's [`with_git_env`].
+/// The URL of `work`'s `origin` remote, None when it has none.
+pub async fn origin_url(work: &Path) -> Option<String> {
+    git(Some(work), &["remote", "get-url", "origin"])
+        .await
+        .ok()
+        .filter(|u| !u.is_empty())
+}
+
 pub async fn code_location(work: &Path, fallback: Option<&str>) -> Option<RunCode> {
     git(Some(work), &["rev-parse", "--is-inside-work-tree"])
         .await
@@ -1185,6 +1193,7 @@ keep_runs_hours = {keep_hours}\nmin_free_gb = 0\n",
             .unwrap()
             .unwrap();
         let branch = m.branch.clone().unwrap();
+        assert_eq!(origin_url(&w).await.as_deref(), Some(r.as_str()));
         // A new branch the remote does not have: not pushed.
         let c = code_location(&w, None).await.unwrap();
         assert_eq!(c.branch, branch);
