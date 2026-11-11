@@ -35,6 +35,16 @@ enum Copy {
     static let failServer = "服务器地址不对。"
     static let failOther = "出了点问题，再试一次。"
 
+    // Tabs and shared screens. A feature keeps its own words in `Copy+<Feature>.swift`
+    // (`extension Copy { ... }`), so parallel work does not edit this file.
+    static let tabHome = "首页"
+    static let tabGroups = "群"
+    static let tabArtifacts = "产出"
+    static let tabMembers = "成员"
+    static let search = "搜索"
+    static let me = "我"
+    static let comingSoon = "还在做"
+
     // 群
     static let groupsTitle = "群"
     static let directSection = "私聊"

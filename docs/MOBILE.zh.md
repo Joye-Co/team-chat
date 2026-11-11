@@ -141,6 +141,17 @@ chat-protocol（协议类型）
 - 按产品属性定义里的体验指标验收。
 - 内测分发。
 
+## 并行开发约定
+
+M2 到 M5 分开并行做，各自一个分支和 PR。为了少冲突：
+
+- **界面**：每个功能有自己的屏幕文件（`HomeScreen.swift`、`CardView.swift`、`ArtifactsScreen.swift`、`MembersScreen.swift`、`SearchScreen.swift`、`MeScreen.swift` 等），只改自己的；新屏幕放新文件。跳转用 `Route` 和 `RouteView`（`Components.swift`），新增路由只在这两处各加一行。
+- **文字**：自己的文字放 `Copy+<功能>.swift`（`extension Copy { ... }`），不改 `Copy.swift`。
+- **模型**：自己的读写放 `AppModel+<功能>.swift`，经 `model.client` 调核心；数据变化看 `model.ticks["<键>"]`。
+- **桥接**：自己的导出放 `crates/chat-ffi/src/<功能>.rs`，`lib.rs` 里只加 `mod` 和 `pub use` 两行；新的变化种类在 `Update` 和 `listen` 里各加一项。
+- **服务器和协议**：按仓库规则，协议变更四处同一个提交；新功能放 `server/src/<功能>/`。
+- **方案文档**：各分支不改本文件，由总负责的会话合并后统一更新。
+
 ## 7. 测试
 
 - **核心**：`chat-core` 的测试在 CI 的模拟器里跑，和在电脑上跑的是同一批。

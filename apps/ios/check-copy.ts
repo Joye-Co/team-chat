@@ -1,6 +1,7 @@
 // Checks the iPhone client's interface text, with the same rules as the desktop catalog test
 // (apps/desktop/src/copy/mod.rs):
-//   1. no developer word (the list in docs/PRODUCT.md) in the catalog, apps/ios/Sources/Copy.swift
+//   1. no developer word (the list in docs/PRODUCT.md) in the catalog: apps/ios/Sources/Copy.swift
+//      and the feature parts Copy+<Feature>.swift
 //   2. the product name is never typed
 //   3. no Chinese text in a string of any other Swift file: it must come from the catalog
 // Run: bun apps/ios/check-copy.ts
@@ -9,7 +10,7 @@ import { join, relative } from "node:path";
 
 const root = join(import.meta.dir, "../..");
 const ios = join(root, "apps/ios");
-const catalog = join(ios, "Sources/Copy.swift");
+const isCatalog = (file: string) => /^Copy(\+[A-Za-z]+)?\.swift$/.test(file.split("/").pop() ?? "");
 
 function developerWords(): { ascii: string[]; cjk: string[] } {
   const product = readFileSync(join(root, "docs/PRODUCT.md"), "utf8");
@@ -77,10 +78,10 @@ for (const file of swiftFiles(ios)) {
   const name = relative(root, file);
   for (const { line, text } of strings(readFileSync(file, "utf8"))) {
     if (text.toLowerCase().includes(productName.toLowerCase())) bad.push(`${name}:${line} types the product name`);
-    if (file === catalog) {
+    if (isCatalog(file)) {
       const words = found(text.replace(/\\\([^)]*\)/g, " "));
       if (words.length) bad.push(`${name}:${line} "${text}" uses ${words.join(", ")}`);
-    } else if (han.test(text)) bad.push(`${name}:${line} "${text}" belongs in the catalog (Sources/Copy.swift)`);
+    } else if (han.test(text)) bad.push(`${name}:${line} "${text}" belongs in the catalog (Sources/Copy.swift or Copy+<Feature>.swift)`);
   }
 }
 if (bad.length) {

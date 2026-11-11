@@ -366,23 +366,14 @@ private struct MessageRow: View {
     private var content: some View {
         if message.deleted {
             Text(Copy.deleted).italic().foregroundStyle(.secondary)
-        } else if !message.body.isEmpty {
+        } else if !message.body.isEmpty && message.cardJson == nil {
             Text(text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-        } else if let title = cardTitle {
-            Text(title).fontWeight(.semibold).padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.rowRadius))
+        } else if let json = message.cardJson {
+            CardView(message: message, json: json)
         } else if message.streaming {
             Label(Copy.writing, systemImage: "ellipsis").font(.subheadline).foregroundStyle(.secondary)
                 .symbolEffect(.variableColor.iterative, options: .repeating)
         }
-    }
-
-    /// The card's title, until cards are drawn in full.
-    private var cardTitle: String? {
-        guard let json = message.cardJson?.data(using: .utf8),
-            let card = try? JSONSerialization.jsonObject(with: json) as? [String: Any]
-        else { return nil }
-        return card["title"] as? String
     }
 
     @ViewBuilder
