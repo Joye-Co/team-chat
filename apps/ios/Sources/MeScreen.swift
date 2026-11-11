@@ -8,6 +8,7 @@ struct MeScreen: View {
     var body: some View {
         List {
             Section { Text(model.myName).font(.headline) }
+            Section { NavigationLink(value: Route.notifySettings) { Label(Copy.notifyTitle, systemImage: "bell") } }
             Section {
                 Button(Copy.signOut, role: .destructive) { model.signOut() }
             }

@@ -4,7 +4,9 @@ import SwiftUI
 /// `ChatClient`.
 @main
 struct MobileApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel()
+    @ObservedObject private var push = PushCenter.shared
     @Environment(\.scenePhase) private var phase
 
     var body: some Scene {
@@ -18,10 +20,17 @@ struct MobileApp: App {
             }
             .environmentObject(model)
             .tint(Theme.accent)
+            .sheet(isPresented: Binding(get: { push.asking && model.signedIn }, set: { if !$0 { push.putOff() } })) {
+                AllowNotifyScreen()
+            }
+            .onChange(of: model.groups) { _, _ in model.offerNotificationsIfUseful() }
         }
         .onChange(of: phase) { _, now in
             // The system drops the connection in the background: reconnect and catch up.
-            if now == .active { model.cameToForeground() }
+            if now == .active {
+                model.cameToForeground()
+                if model.signedIn { model.notifyCameToForeground() }
+            }
         }
     }
 }

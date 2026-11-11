@@ -10,6 +10,7 @@ enum Route: Hashable {
     case member(id: String)
     case artifact(id: String)
     case me
+    case notifySettings
 }
 
 /// The screen of a route, for every navigation stack. Each feature owns its screen file.
@@ -24,6 +25,7 @@ struct RouteView: View {
         case .member(let id): MemberScreen(memberId: id)
         case .artifact(let id): ArtifactScreen(artifactId: id)
         case .me: MeScreen()
+        case .notifySettings: NotifySettingsScreen()
         }
     }
 }
