@@ -545,7 +545,15 @@ pub mod output_op {
     pub const MEMBER_HANDOFF: &str = "member.handoff";
     /// 分出去: a part goes to another AI member in a new topic; the result comes back.
     pub const MEMBER_ASSIGN: &str = "member.assign";
+    /// Usable: how the run ended in the CLI's own words, body `{ state, text }`
+    /// ([`super::RUN_REPORT_STATES`]); the latest report counts when the run ends.
+    pub const RUN_REPORT: &str = "run.report";
 }
+
+/// Known `run.report` states: done, blocked (needs something to go on), waiting (for a person).
+pub const RUN_REPORT_STATES: &[&str] = &["done", "blocked", "waiting"];
+/// Longest `run.report` text, in characters.
+pub const MAX_RUN_REPORT_CHARS: usize = 2000;
 
 /// An event from an interactive 产出 page given to a run (`run.input.artifactEvent`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

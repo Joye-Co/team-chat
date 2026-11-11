@@ -229,6 +229,12 @@ export function addUsableFixtures({ ok, bad, T0, ID, base, topic }: UsableCtx) {
     durationMs: 64000,
     code: { branch: "main", pushed: true },
   }, "code.head is required");
+  ok("machine/up-run.event-output-run-report.json", "MachineUpFrame", runEventFrame(22, {
+    type: "output",
+    outputId: "o3",
+    op: "run.report",
+    body: { state: "blocked", text: "需要 staging 的数据库密码才能接着做" },
+  }), "chat-run report: the CLI says how its work ended (done, blocked, waiting)");
   ok("machine/run-event-github-used.json", "RunEvent", { type: "github", state: "used", login: "alice-dev" });
   ok("machine/run-event-github-missing.json", "RunEvent", { type: "github", state: "missing" });
   ok("machine/run-event-hand.command.json", "RunEvent", { type: "hand.command", commandId: "c1", command: "npm test", by: ID.owner });
