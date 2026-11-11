@@ -136,12 +136,12 @@
 
 每个场景一行的明细在 [interface-scenes.zh.md](interface-scenes.zh.md)（270 个场景：Mac、Windows、第一轮看到的差别、现在的状态）。
 
-修完 #156 到 #167 之后的一轮是 run 43000800678（`windows_scenes=all`，产物 `windows-screenshots`）。失败的场景：
+最后一轮是 run 43020519758（`windows_scenes=all`，产物 `windows-screenshots`，在 #176 的分支上）；下面那张「看哪张」的表里的图，在 run 43000800678 和这一轮里都有。失败的场景：
 
 | 场景 | Mac | Windows | 状态 |
 | --- | --- | --- | --- |
 | `artifact_ask_pending`、`state-hover-settings-row` | 失败 | 失败 | 两边都失败，和 Windows 无关（`main` 上就是这样） |
-| `web-embed-scrolled` | 通过 | 全量那一轮失败：「the inline page did not load」；改完后通过（run 43011129892） | 已修（#167） | 场景打开时停在长话题的末尾，页面有没有一条边露在视口里取决于内容区高度；Windows 的内容区矮 32，页面一开始完全在视口外，不算「显示」。场景现在先把页面滚进来。和应用本身无关 |
+| `web-embed-scrolled` | 通过 | 原来失败：「the inline page did not load」；最后一轮通过 | 已修（#171） | 场景打开时停在长话题的末尾，页面有没有一条边露在视口里取决于内容区高度；Windows 的内容区矮 32，页面一开始完全在视口外，不算「显示」。场景现在先把页面滚进来。和应用本身无关 |
 | `live-takeover`（浅色） | 那一次没等到帧（偶发） | 通过 | 一样 |
 
 已修的行对应的截图（都在上面那个产物里，下载后看过）：
@@ -177,16 +177,16 @@
 | 内嵌页面的滚动条 | 没有（浮动的细滚动条） | Chromium 的经典滚动条，带箭头，深色下是白的 | 已修（#162） | 见第 3 节 |
 | 内嵌页面里的等宽字 | 等宽西文字体 | 中文系统上落到宽的中文等宽字体（页面只写了 `Menlo, monospace`） | 已修（#162） | 页面是给两个系统写的，常常只写苹果的字体名。Windows 上给每个页面注入字体别名：`-apple-system`、`PingFang SC`、`Menlo`、`SF Mono` 等指到 Segoe UI、微软雅黑、Cascadia Mono、Consolas |
 | 内嵌页面的深色（`artifact-page-back` 深色） | 深色 | 白底 | 已修（#162） | 除了 profile 的设置，再直接设这个页面的 `prefers-color-scheme`（DevTools 协议） |
-| 内嵌页面在截图里是空白（第一轮的 `web-embed`、`compose-extend`） | 有内容 | 截图那一刻页面还没画出来 | 已修（#171） | 是截图抢在页面前面，不是用户会看到的空白：从屏幕上读、等 4 秒的 6 张（`screen/web-embed-*`、`screen/artifact-pane-v2-*`、`screen/compose-extend-*`）页面全部在。截图自测现在等每个显示着的页面画完第一帧再截（页面用两次 `requestAnimationFrame` 报告，只在 Windows 上需要）。CI 没有显卡，整个进程的第一个页面最长用了 46 秒，等待放宽到 60 秒并记录用时；真机上的用时见第 7 节 |
+| 内嵌页面在截图里是空白（`web-embed` 的两个页面；第一轮还有 `compose-extend`） | 有内容 | 普通截图（`PrintWindow`）里有时是空白 | 一样（截图方法的限制）；真机确认 | 不是用户会看到的空白。同一轮里从屏幕上读的截图（`screen/web-embed-light`、`screen/web-embed-dark`、`screen/artifact-pane-v2-*`、`screen/compose-extend-*`，run 43020519758）页面全部在，浅色深色都对。`PrintWindow` 是向每个窗口要画面，另一个进程的 WebView2 子窗口不一定给；#176 让截图先等页面画完第一帧（两次 `requestAnimationFrame`），`compose-extend` 之后都有了，`web-embed` 仍然时有时无，所以内嵌页面以 `screen/` 那一遍为准。CI 没有显卡，整个进程的第一个页面最长用了 46 秒，等待放宽到 60 秒并记录用时；真机上的用时见第 7 节 |
 | 页面里的音频控件（`web-embed`） | WebKit 的深色控件条 | Chromium 自己的控件 | 已修（#162）；样子没有对应 | 页面的 `color-scheme` 和 `prefers-color-scheme` 跟随主题，深色下控件是深色（`screen/web-embed-dark`）。控件本身是两个浏览器引擎各自的，长得不一样 |
-| 产出缩略图（`artifacts-grid`） | 页面上一次显示时的样子，缩小放进格子 | 同样的做法；第一轮里右边有一条滚动条，起始位置比 Mac 低一段 | 滚动条已修（#171）；起始位置真机确认 | 缩略图就是页面上一次在屏幕上时的快照。滚动条：页面里的滚动条改成只在指针在页面上时出现，快照里不再有。起始位置不同是因为两边「上一次显示」时页面滚动到的位置不同，我没有查到是哪个场景滚动了它；真机上看第 7 节第 15 条 |
+| 产出缩略图（`artifacts-grid`） | 页面上一次显示时的样子，缩小放进格子 | 同样的做法；第一轮里右边有一条滚动条，起始位置比 Mac 低一段 | 滚动条已修（#176）；起始位置真机确认 | 缩略图就是页面上一次在屏幕上时的快照。滚动条：页面里的滚动条改成只在指针在页面上时出现，快照里不再有。起始位置不同是因为两边「上一次显示」时页面滚动到的位置不同，我没有查到是哪个场景滚动了它；真机上看第 7 节第 15 条 |
 | 群资料里人的头像（`group-chat-info`） | 字母是常规字重 | 字母是粗体，整个圆看起来发黑 | 已修（#156） | 同第一行（500 字重） |
 | 表情 | Apple Color Emoji | Segoe UI Emoji，同样大小的格子里图形略小一点，样子不同 | 一样 | 系统的表情字体 |
 | 「群说明」等设置里的窗口高度、设置的标题出现两次、设置的分页没有文字 | | 设置窗口比内容矮 32，最后一行被切 | 系统集成清单 | 已告知（`views/settings` 归那边） |
 | Tab 键先走到窗口里的菜单栏 | 菜单不在窗口里 | 焦点环落在菜单「显示」上 | 系统集成清单 | 已告知：Windows 的菜单用 Alt 进入，不该在 Tab 顺序里 |
 | 文件右键菜单里的「快速查看」、手动安装更新的说明里的「访达」「应用程序」 | | Mac 的说法留在 Windows 上 | 系统集成、发布清单 | 已告知 |
 | 非活动窗口的标题条（`window-inactive`） | 红绿灯变灰 | 工具栏和标题变灰了，标题条里的菜单和窗口按钮没有变 | 已修（#162） | 非活动窗口的菜单和窗口按钮变淡 |
-| 卡片样例窗、`interact_*`、`artifact-quiet-page` 这些自测专用的窗口 | 有红绿灯 | 没有标题条 | 已修（#171） | 这些窗口也套上标题条（`window_chrome::Framed`），和应用里的窗口一致；场景 `cards-v2-states`、`interact_notes`、`artifact-quiet-page` |
+| 卡片样例窗、`interact_*`、`artifact-quiet-page` 这些自测专用的窗口 | 有红绿灯 | 没有标题条 | 已修（#176） | 这些窗口也套上标题条（`window_chrome::Framed`），和应用里的窗口一致；看 `cards-v2-states-light`、`artifact-quiet-page-light`、`compose-extend-light` |
 | 全角标点「」（）【】｜“” | 苹方的标点靠近文字 | 微软雅黑的标点占满一格，前后空隙大，个别行因此多折一行 | 没有对应 | 字体本身的差别 |
 | 文字宽度：个别句子在 Windows 上多折一行（登录页副标题、更新说明、卡片提示） | | 微软雅黑比苹方宽 | 一样（没有被切的） | 布局按内容自适应，多折一行时下面的内容跟着下移。逐个看过会折行的场景（`login-email`、`whats-new`、`update-notes`、`interact_report_rev1`、`topic`）：没有文字被切或重叠。第一轮里 `whats-new` 的脚注被切是当时那一版更新说明更长；现在的内容在两边都完整（和这台 Mac 上重新截的图比过），弹窗本身有最大高度和滚动 |
 | 内容区矮 32 带来的：消息列表第一行被日期标签压住、右侧面板最后一块看不全 | | 窗口同样大时内容少 32 | 一样（标题栏差别） | 和把 Mac 窗口拉矮 32 是同一个结果 |
