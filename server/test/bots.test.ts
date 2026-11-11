@@ -173,7 +173,8 @@ describe("machines", () => {
   it("make a token, upgrade the daemon, report health, revoke", async () => {
     const owner = await createMember({ level: "owner" });
     const member = await createMember();
-    expect((await api("/v1/machines", { token: member.token, body: { name: "x" } })).status).toBe(403);
+    // Usable: a member adds only his own machine (machine-owner.test.ts).
+    expect((await api("/v1/machines", { token: member.token, body: { name: "x", personal: false } })).status).toBe(403);
     const m = await api("/v1/machines", { token: owner.token, body: { name: "mac-mini", labels: ["main"] } });
     expect(m.body.token).toMatch(/^tm_[A-Za-z0-9_-]{43}$/);
     expect(m.body.machine).toMatchObject({ connected: false, healthy: false, labels: ["main"], runningRuns: [] });

@@ -187,7 +187,7 @@ END;
 - 普通成员想把自己的电脑给团队：请管理员在那台电脑上登记团队的电脑。这一版不做转交流程。
 - 移除（`DELETE /v1/machines/:id`）：团队电脑由管理员，个人电脑由主人。做的事和今天一样（设 `revoked_at`、解除指定、吊销连接、审计 `machine.revoke`），另外删 `machine_bots` 行。机 1.5 的改名、移除界面复用这两个路由。
 
-**停用一个人**：R3 在 `server/src/bots/` 里注册一个 `memberDeactivatedHooks` 钩子，不改 `core/routes.ts`。它对这个人的每台个人电脑做和 `DELETE /v1/machines/:id` 一样的事：先一批写库（`revoked_at`、解除指定、删 `machine_bots`、审计 `machine.revoke`，`actor_id` 是停用他的人），再吊销连接。写库成功后令牌已经失效，daemon 下一次请求就被拒；吊销连接失败重试一次，再失败写 warn 日志，下次活动页看得到 `machine.revoke`。这些电脑上跑着的运行按线 3 结束成「中断」，话题里照常有说明。解除指定的 AI 成员回到按标签匹配团队的电脑；活动页的 `machine.revoke` 条目就是给管理员的通知，不另发。
+**停用一个人**：R3 在 `server/src/bots/` 里注册一个 `memberDeactivatedHooks` 钩子，不改 `core/routes.ts`。它对这个人的每台个人电脑做和 `DELETE /v1/machines/:id` 一样的事：先一批写库（`revoked_at`、解除指定、删 `machine_bots`、审计 `machine.revoke`，`actor_id` 是停用他的人；钩子只拿到被停用的人，所以从最近一条停用他的审计行里取，见 `server/src/bots/deactivate.ts`），再吊销连接。写库成功后令牌已经失效，daemon 下一次请求就被拒；吊销连接失败重试一次，再失败写 warn 日志，下次活动页看得到 `machine.revoke`。这些电脑上跑着的运行按线 3 结束成「中断」，话题里照常有说明。解除指定的 AI 成员回到按标签匹配团队的电脑；活动页的 `machine.revoke` 条目就是给管理员的通知，不另发。
 
 **电脑上的路由按归属判断**：`/v1/machines/:id/logins*`、`/secrets*`、`/monitor`、`PATCH`、`DELETE`、`PUT/DELETE /v1/machines/:id/bots/:botId` 改成 `auth:"member"`，handler 里调新函数 `requireMachineManager(db, auth, machineId)`（`server/src/bots/store.ts`）：团队电脑要管理员，个人电脑要主人。
 

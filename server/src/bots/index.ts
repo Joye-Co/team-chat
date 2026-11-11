@@ -3,6 +3,7 @@
 // docs/machine-protocol.md.
 import { registerMemberDeactivated } from "../core/registry";
 import { deskStub } from "./env";
+import "./deactivate";
 import "./interact";
 import "./room";
 import { registerBotRoutes } from "./routes";

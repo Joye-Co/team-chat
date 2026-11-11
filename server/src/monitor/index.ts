@@ -11,6 +11,8 @@ import {
   type MonitorRun,
 } from "@chat/protocol";
 import { linkStub, deskStub } from "../bots/env";
+import { requireMachineManager } from "../bots/store";
+import type { AuthContext } from "../core/auth";
 import { ApiError } from "../core/errors";
 import { registerRoute } from "../core/registry";
 import type { DeskRollup } from "./rollup";
@@ -200,8 +202,10 @@ export function buildMonitor(input: {
 registerRoute({
   method: "GET",
   path: "/v1/machines/:id/monitor",
-  auth: "owner",
-  async handler({ env, params, url }) {
+  auth: "member",
+  async handler({ env, params, url, auth }) {
+    // A team machine: an admin; a personal machine: its owner. A removed machine still answers.
+    const row = await requireMachineManager(env.DB, auth as AuthContext, params.id, { includeRevoked: true });
     const q = MonitorQuery.safeParse({
       range: url.searchParams.get("range") ?? undefined,
       dayStart: url.searchParams.get("dayStart") ?? undefined,
@@ -210,10 +214,6 @@ registerRoute({
     const now = Date.now();
     // Without the viewer's midnight, 今天 is the last 24 hours.
     const dayStart = Math.min(q.data.dayStart ?? now - DAY_MS, now);
-    const row = await env.DB.prepare("SELECT id, name, revoked_at FROM machines WHERE id = ?")
-      .bind(params.id)
-      .first<{ id: string; name: string; revoked_at: number | null }>();
-    if (!row) throw new ApiError("not_found", "machine not found");
     const bots = await env.DB.prepare(
       "SELECT r.member_id AS id FROM bot_runners r JOIN members m ON m.id = r.member_id WHERE m.deactivated = 0 ORDER BY r.member_id",
     ).all<{ id: string }>();

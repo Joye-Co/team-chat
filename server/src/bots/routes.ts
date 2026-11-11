@@ -5,13 +5,17 @@ import {
   CreateMachineRequest,
   EndRunRequest,
   MAX_FILE_BYTES,
+  MAX_PERSONAL_BOTS,
+  type Machine,
   MachineCreateArtifactRequest,
   RUN_KIND_ASIDE,
   ResumeRunRequest,
   SetBotRunnerRequest,
+  SetMachineBotRequest,
   SetRunAcceptanceRequest,
   SetRunPlanRequest,
   StartRunRequest,
+  UpdateMachineRequest,
 } from "@chat/protocol";
 import { auditStatement } from "../core/audit";
 import type { AuthContext } from "../core/auth";
@@ -26,7 +30,17 @@ import { toMachine } from "./dispatch";
 import { deskStub, linkStub } from "./env";
 import type { TakeoverActor } from "./desk/takeover";
 import { MACHINE_HEADER } from "./link";
-import { authenticateMachine, loadMachineViews, loadRunner, newMachineToken, runIndex } from "./store";
+import type { Env } from "../core/env";
+import {
+  type ManagedMachine,
+  authenticateMachine,
+  loadMachineViews,
+  loadRunner,
+  newMachineToken,
+  requireMachineManager,
+  revokeMachines,
+  runIndex,
+} from "./store";
 
 /** Raw sessions are gzip of the CLI's own file, at most 100 MiB. */
 const MAX_SESSION_BYTES = 100 * 1024 * 1024;
@@ -46,6 +60,71 @@ async function visibleRun(db: D1Database, auth: AuthContext, runId: string) {
   const row = await runIndex(db, runId);
   if (!row || !(await isGroupMember(db, row.group_id, auth.memberId))) throw new ApiError("not_found", "run not found");
   return row;
+}
+
+/**
+ * `GET /v1/machines` for the caller: team machines in full for admins and cut down for members
+ * (as before); my own personal machines in full with my checked AI members; other people's
+ * personal machines cut down, with `ownerId`. A cut-down machine keeps its screen sharing
+ * address (接管) for the person a run on it works for.
+ */
+async function visibleMachines(env: Env, a: AuthContext, only?: string): Promise<Machine[]> {
+  const now = Date.now();
+  const admin = a.member.level === "owner";
+  const out: Machine[] = [];
+  for (const { row, view } of await loadMachineViews(env, { includeRevoked: true })) {
+    if (only !== undefined && row.id !== only) continue;
+    const m = toMachine(view, row.created_by, row.created_at, now);
+    if (view.ownerId !== undefined && view.ownerId === a.memberId) {
+      const personalBots = [...(view.personalBots ?? new Map<string, string | null>())].map(([botId, repoPath]) =>
+        repoPath ? { botId, repoPath } : { botId },
+      );
+      out.push({ ...m, personalBots });
+      continue;
+    }
+    if (view.ownerId === undefined && admin) {
+      out.push(m);
+      continue;
+    }
+    let mine = false;
+    if (m.takeoverUrl) {
+      for (const runId of m.runningRuns) {
+        const ix = await runIndex(env.DB, runId);
+        const run = ix ? await deskStub(env, ix.bot_id).getRun(ix.bot_id, ix.id) : null;
+        if (run && (run.requestedFor ?? run.requestedBy) === a.memberId) mine = true;
+      }
+    }
+    out.push({
+      ...(mine ? { takeoverUrl: m.takeoverUrl } : {}),
+      id: m.id,
+      name: m.name,
+      labels: [],
+      createdBy: m.createdBy,
+      createdAt: m.createdAt,
+      ...(m.ownerId ? { ownerId: m.ownerId } : {}),
+      ...(m.revoked ? { revoked: true } : {}),
+      connected: m.connected,
+      healthy: m.healthy,
+      runningRuns: [],
+    });
+  }
+  return out;
+}
+
+/** One machine as `visibleMachines` shows it to the caller. */
+async function oneMachine(env: Env, a: AuthContext, id: string): Promise<Machine> {
+  const [m] = await visibleMachines(env, a, id);
+  if (!m) throw new ApiError("not_found", "machine not found");
+  return m;
+}
+
+/** A personal machine of the caller (checked AI members live only there). */
+async function requirePersonalOwner(db: D1Database, a: AuthContext, machineId: string): Promise<ManagedMachine> {
+  const m = await requireMachineManager(db, a, machineId);
+  if (m.owner_id !== a.memberId) {
+    throw new ApiError("forbidden", "AI members are checked only on your own personal machine", "machine.not_yours");
+  }
+  return m;
 }
 
 /**
@@ -80,12 +159,24 @@ export function registerBotRoutes(): void {
     async handler({ env, params, auth, body }) {
       const req = await body(SetBotRunnerRequest);
       await requireBot(env.DB, params.id);
+      const a = auth as AuthContext;
       if (req.machineId) {
-        const m = await env.DB.prepare("SELECT id FROM machines WHERE id = ? AND revoked_at IS NULL").bind(req.machineId).first();
+        const m = await env.DB.prepare("SELECT id, owner_id FROM machines WHERE id = ? AND revoked_at IS NULL")
+          .bind(req.machineId)
+          .first<{ id: string; owner_id: string | null }>();
         if (!m) throw new ApiError("not_found", "machine not found");
+        // Placing an AI member on a personal machine is its owner's call; sending the stored
+        // machine back (an edit of the model, runtime or labels) is always allowed.
+        if (m.owner_id && m.owner_id !== a.memberId) {
+          const stored = await env.DB.prepare("SELECT machine_id FROM bot_runners WHERE member_id = ?")
+            .bind(params.id)
+            .first<{ machine_id: string | null }>();
+          if (stored?.machine_id !== req.machineId) {
+            throw new ApiError("forbidden", "only its owner places an AI member on a personal machine", "machine.not_yours");
+          }
+        }
       }
       const now = Date.now();
-      const a = auth as AuthContext;
       // machineId: absent keeps the stored machine (clients before 1.2.2 send none), null clears.
       const keepMachine = req.machineId === undefined ? 1 : 0;
       // effort: the same rule (absent keeps, null clears).
@@ -157,27 +248,46 @@ export function registerBotRoutes(): void {
   registerRoute({
     method: "POST",
     path: "/v1/machines",
-    auth: "owner",
+    auth: "member",
     async handler({ env, auth, body }) {
       const req = await body(CreateMachineRequest);
       const a = auth as AuthContext;
+      // An admin without `personal` makes a team machine (as before); a member always makes his own.
+      const admin = a.member.level === "owner";
+      const personal = req.personal ?? !admin;
+      if (!personal && !admin) throw new ApiError("forbidden", "only an admin adds a team machine", "machine.team_admin_only");
+      if (personal && a.member.kind !== "human") throw new ApiError("forbidden", "only people have personal machines");
+      const ownerId = personal ? a.memberId : null;
       const now = Date.now();
       const id = ulid(now);
       const token = newMachineToken();
       const labels = [...new Set(req.labels ?? [])].sort();
       await env.DB.batch([
         env.DB.prepare(
-          "INSERT INTO machines (id, name, labels, token_hash, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-        ).bind(id, req.name, JSON.stringify(labels), await sha256Hex(token), a.memberId, now),
-        auditStatement(env.DB, a, { action: "machine.create", target: id, details: { name: req.name, labels } }, now),
+          "INSERT INTO machines (id, name, labels, token_hash, created_by, created_at, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ).bind(id, req.name, JSON.stringify(labels), await sha256Hex(token), a.memberId, now, ownerId),
+        auditStatement(
+          env.DB,
+          a,
+          { action: "machine.create", target: id, details: { name: req.name, labels, ...(personal ? { personal: true } : {}) } },
+          now,
+        ),
       ]);
       const machine = toMachine(
-        { id, name: req.name, labels, revoked: false, connected: false, runningRuns: [] },
+        {
+          id,
+          name: req.name,
+          labels,
+          revoked: false,
+          connected: false,
+          runningRuns: [],
+          ...(ownerId ? { ownerId, personalBots: new Map() } : {}),
+        },
         a.memberId,
         now,
         now,
       );
-      return { machine, token };
+      return { machine: ownerId ? { ...machine, personalBots: [] } : machine, token };
     },
   });
 
@@ -186,52 +296,119 @@ export function registerBotRoutes(): void {
     path: "/v1/machines",
     auth: "member",
     async handler({ env, auth }) {
-      const now = Date.now();
-      const views = await loadMachineViews(env, { includeRevoked: true });
-      const all = views.map(({ row, view }) => toMachine(view, row.created_by, row.created_at, now));
+      return visibleMachines(env, auth as AuthContext);
+    },
+  });
+
+  registerRoute({
+    method: "PATCH",
+    path: "/v1/machines/:id",
+    auth: "member",
+    async handler({ env, params, auth, body }) {
+      const req = await body(UpdateMachineRequest);
       const a = auth as AuthContext;
-      if (a.member.level === "owner") return all;
-      // Members see which machine ran a run, nothing about the machine itself; the requester of
-      // a run that runs on a machine also gets its screen sharing address (接管).
-      const mine = new Set<string>();
-      for (const m of all) {
-        if (!m.takeoverUrl) continue;
-        for (const runId of m.runningRuns) {
-          const row = await runIndex(env.DB, runId);
-          const run = row ? await deskStub(env, row.bot_id).getRun(row.bot_id, row.id) : null;
-          if (run?.requestedBy === a.memberId) mine.add(m.id);
-        }
+      const m = await requireMachineManager(env.DB, a, params.id);
+      const now = Date.now();
+      const stmts: D1PreparedStatement[] = [];
+      const details: Record<string, unknown> = {};
+      if (req.name !== undefined && req.name !== m.name) {
+        stmts.push(env.DB.prepare("UPDATE machines SET name = ? WHERE id = ?").bind(req.name, m.id));
+        details.name = req.name;
       }
-      return all.map((m) => ({
-        ...(mine.has(m.id) ? { takeoverUrl: m.takeoverUrl } : {}),
-        id: m.id,
-        name: m.name,
-        labels: [],
-        createdBy: m.createdBy,
-        createdAt: m.createdAt,
-        ...(m.revoked ? { revoked: true } : {}),
-        connected: m.connected,
-        healthy: m.healthy,
-        runningRuns: [],
-      }));
+      if (req.owner === null && m.owner_id) {
+        // 交给团队: only an owner who is an admin; the checked AI members were his own choice.
+        if (a.member.level !== "owner") throw new ApiError("forbidden", "only an admin gives a machine to the team", "machine.team_admin_only");
+        stmts.push(
+          env.DB.prepare("UPDATE machines SET owner_id = NULL WHERE id = ?").bind(m.id),
+          env.DB.prepare("DELETE FROM machine_bots WHERE machine_id = ?").bind(m.id),
+        );
+        details.owner = null;
+      } else if (req.owner === "me" && !m.owner_id) {
+        // 改成我的电脑 (requireMachineManager: an admin). AI members someone else placed here are
+        // unpinned; my work for them keeps running here through a checked row.
+        stmts.push(
+          env.DB.prepare(
+            `INSERT OR IGNORE INTO machine_bots (machine_id, bot_id, repo_path, created_at)
+             SELECT ?, r.member_id, NULL, ? FROM bot_runners r JOIN members b ON b.id = r.member_id
+             WHERE r.machine_id = ? AND r.updated_by IS NOT ? AND b.deactivated = 0`,
+          ).bind(m.id, now, m.id, a.memberId),
+          env.DB.prepare("UPDATE bot_runners SET machine_id = NULL WHERE machine_id = ? AND updated_by IS NOT ?").bind(m.id, a.memberId),
+          env.DB.prepare("UPDATE machines SET owner_id = ? WHERE id = ?").bind(a.memberId, m.id),
+        );
+        details.owner = "me";
+      }
+      if (stmts.length > 0) {
+        stmts.push(auditStatement(env.DB, a, { action: "machine.update", target: m.id, details }, now));
+        await env.DB.batch(stmts);
+      }
+      return oneMachine(env, a, m.id);
     },
   });
 
   registerRoute({
     method: "DELETE",
     path: "/v1/machines/:id",
-    auth: "owner",
+    auth: "member",
     async handler({ env, params, auth }) {
-      const now = Date.now();
-      const res = await env.DB.batch([
-        env.DB.prepare("UPDATE machines SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").bind(now, params.id),
-        // Bots pinned to it go back to any machine with their labels.
-        env.DB.prepare("UPDATE bot_runners SET machine_id = NULL WHERE machine_id = ?").bind(params.id),
-        auditStatement(env.DB, auth as AuthContext, { action: "machine.revoke", target: params.id }, now),
-      ]);
-      if (!res[0].meta.changes) throw new ApiError("not_found", "machine not found");
-      await linkStub(env, params.id).revoke(params.id);
+      const a = auth as AuthContext;
+      await requireMachineManager(env.DB, a, params.id);
+      const removed = await revokeMachines(env, a, [params.id]);
+      if (removed.length === 0) throw new ApiError("not_found", "machine not found");
       return { ok: true };
+    },
+  });
+
+  // "My work for this AI member runs on my machine" (personal machines only, by the owner).
+  registerRoute({
+    method: "PUT",
+    path: "/v1/machines/:id/bots/:botId",
+    auth: "member",
+    async handler({ env, params, auth, body }) {
+      const req = await body(SetMachineBotRequest);
+      const a = auth as AuthContext;
+      await requirePersonalOwner(env.DB, a, params.id);
+      const bot = await getMember(env.DB, params.botId);
+      if (!bot || bot.kind !== "bot" || bot.deactivated) throw new ApiError("not_found", "bot not found");
+      if (!(await loadRunner(env.DB, bot.id))) throw new ApiError("invalid", "the AI member does not run on machines");
+      const n = await env.DB.prepare(
+        "SELECT count(*) AS n, coalesce(sum(bot_id = ?), 0) AS has FROM machine_bots WHERE machine_id = ?",
+      )
+        .bind(bot.id, params.id)
+        .first<{ n: number; has: number }>();
+      if (n && !n.has && n.n >= MAX_PERSONAL_BOTS) throw new ApiError("conflict", `at most ${MAX_PERSONAL_BOTS} AI members on one machine`);
+      const now = Date.now();
+      // repoPath: absent keeps the stored folder, null clears it.
+      const keep = req.repoPath === undefined ? 1 : 0;
+      await env.DB.batch([
+        env.DB.prepare(
+          `INSERT INTO machine_bots (machine_id, bot_id, repo_path, created_at) VALUES (?, ?, ?, ?)
+           ON CONFLICT (machine_id, bot_id) DO UPDATE SET
+             repo_path = CASE WHEN ? = 1 THEN machine_bots.repo_path ELSE excluded.repo_path END`,
+        ).bind(params.id, bot.id, req.repoPath ?? null, now, keep),
+        // The folder itself is the owner's local path: the audit says only whether one is set.
+        auditStatement(
+          env.DB,
+          a,
+          { action: "machine.bots.set", target: params.id, details: { botId: bot.id, ...(keep ? {} : { repoPath: req.repoPath !== null }) } },
+          now,
+        ),
+      ]);
+      return oneMachine(env, a, params.id);
+    },
+  });
+
+  registerRoute({
+    method: "DELETE",
+    path: "/v1/machines/:id/bots/:botId",
+    auth: "member",
+    async handler({ env, params, auth }) {
+      const a = auth as AuthContext;
+      await requirePersonalOwner(env.DB, a, params.id);
+      const res = await env.DB.prepare("DELETE FROM machine_bots WHERE machine_id = ? AND bot_id = ?").bind(params.id, params.botId).run();
+      if (res.meta.changes) {
+        await auditStatement(env.DB, a, { action: "machine.bots.delete", target: params.id, details: { botId: params.botId } }).run();
+      }
+      return oneMachine(env, a, params.id);
     },
   });
 

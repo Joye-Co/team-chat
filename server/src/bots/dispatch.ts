@@ -94,6 +94,10 @@ export interface MachineView {
   health?: Health;
   clis?: CliInfo[];
   runningRuns: string[];
+  /** Usable: the person whose own machine this is; absent = a team machine. */
+  ownerId?: string;
+  /** Usable: the owner's checked AI members on a personal machine (bot id -> repo path). */
+  personalBots?: Map<string, string | null>;
 }
 
 export function mergeLabels(owner: string[], daemon: string[] | undefined): string[] {
@@ -162,6 +166,7 @@ export function toMachine(m: MachineView, createdBy: string, createdAt: number, 
     runningRuns: m.runningRuns,
   };
   if (m.revoked) out.revoked = true;
+  if (m.ownerId) out.ownerId = m.ownerId;
   if (m.lastHeartbeatAt !== undefined) out.lastHeartbeatAt = m.lastHeartbeatAt;
   if (m.info) {
     out.daemonVersion = m.info.daemonVersion;
