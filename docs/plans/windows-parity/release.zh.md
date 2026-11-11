@@ -25,7 +25,7 @@ Windows 现在的做法，都是从代码和脚本里读出来的（括号里是
 | 这个平台还没有版本时 | 404「No release yet.」 | 404「No release for this system yet.」，不会给 DMG | 相同 |
 | 客户端里的下载接口 `GET /v1/updates/latest`、`/v1/updates/:version/download` | 不带参数 | 带 `?platform=windows`；回答的 `platform` 不是 `windows` 就当没有（`crates/chat-core/src/updates.rs`） | 相同 |
 | GitHub Releases | `<名字>-<版本>.dmg`；校验和是 GitHub 在 Assets 里显示的 `sha256:` | `<名字>-<版本>-setup.exe`，同样看 `sha256:`（`release.yml` 的 `windows-publish`，`check-release-digest.sh`） | 相同。1.2.7 起每个版本的 Assets 里都有安装包（`TeamChat-1.2.7-setup.exe` 是第一个） |
-| 官网（`apps/website`） | 没有下载按钮，只有文字 | 没有下载按钮；文字写着 Windows「正在开发」 | 相同（都没有按钮）。1.2.7 已经有 Windows 版，这句文字该改了：官网首页正被另外两个 PR 重写，留给运营方，见第三节 |
+| 官网（`apps/website`） | 原来没有下载按钮，只有文字 | 原来没有下载按钮，文字还写着 Windows「正在开发」 | **已补**：首页和页尾各有「下载 macOS 版」「下载 Windows 版」两个按钮。不开脚本时都指向 GitHub 的最新 Release 页面；开着脚本时，访客所在系统的那个排在前面、是实心的，并直接指向最新版本里自己的文件（`.dmg` / `-setup.exe`，文件名从 GitHub 读）。「正在开发」只剩手机版。用无界面的浏览器分别以 Mac 和 Windows 的 User-Agent 截图看过 |
 | 不装客户端、只装 daemon | `<slug>-daemon-<版本>-aarch64-apple-darwin`（`build-daemon.sh`） | `<slug>-daemon-<版本>-x86_64-pc-windows-msvc.exe`（`build-windows-installer.sh`），配 `scripts/install-daemon.ps1` | 相同 |
 
 ### 2. 校验
@@ -48,7 +48,7 @@ Windows 现在的做法，都是从代码和脚本里读出来的（括号里是
 | 内嵌网页的运行时 | 系统自带 WKWebView | Windows 11 自带 WebView2；没有时安装包联网装 Evergreen runtime，装不上也不拦安装 | 无对应的部分已有替代。CI 只走过「已经有」这条路，「没有」要真机（第三节） |
 | 服务器地址 | 发版的构建从 `deploy/servers.json`（或 `TC_SERVERS_JSON`）嵌进去，登录页默认连正式服务器（`release.sh` 的 `release_ops`、`apps/desktop/build.rs`） | 发版 workflow 的 Windows 任务原来自己拼了一个 ops 目录；CI 的安装包没有地址，登录时要手填 | **已补**（PR 1）：`build-windows-installer.sh` 自己做和 `release_ops` 一样的事（只嵌 `servers.json`，不嵌 ops 目录里别的东西）；发版时 `REQUIRE_SERVERS=1`，没有地址就停；CI 从仓库变量 `SERVERS_JSON` 拿，仓库里不放地址。`--selftest-installed` 报告嵌进去的地址的 SHA-256（日志里不出现地址），`test-windows-installer.sh` 核对它和给构建的一致；没给地址时核对确实没有 |
 | 登录 | 邀请码或邮箱验证码；凭证进钥匙串（service = bundle id，account = 服务器地址） | 同一个登录页；凭证进凭据管理器（`<bundle id>:<服务器地址>`） | 相同（只编译和单元测试；真机见第三节） |
-| 登录窗口里换服务器 | 系统菜单栏里有「正式服务器 / 测试服务器」 | 菜单只挂在主窗口标题栏里，登录窗口没有；可以点「使用其他服务器…」手填 | 待补，属界面会话（已写进交接笔记） |
+| 登录窗口里换服务器 | 系统菜单栏在登录窗口也在，里面有「服务器 › 正式服务器 / 测试服务器 / 使用其他服务器…」 | 登录窗口没有菜单栏；原来只有「使用其他服务器…」，要手填地址 | **已补**：Windows 上点开「使用其他服务器…」后，「取消」旁边多出「正式服务器」「测试服务器」两个链接（构建里有哪个地址才出现哪个，两个地址相同只出现一个），点了就填好并回到邀请码。Mac 上不显示（菜单栏里已经有）。逻辑有单元测试，Windows 编译通过；CI 的截图构建不带服务器地址，所以这两个链接没有在截图里出现过，样式和旁边的「取消」是同一个控件。真机看一眼列在第三节 |
 | `<scheme>://` 链接打开客户端 | `Info.plist` 登记了 scheme，系统启动或激活客户端 | 安装包登记 `HKCU\Software\Classes\<scheme>`，链接作为参数启动客户端；客户端按链接打开自己账号里的群或话题 | 相同。安装包这一半 CI 实测（PR 2：打开一条链接，装好的客户端被启动）；跳转由系统集成会话补上，见 `system.zh.md` 第 4 节 |
 | 点一条通知时客户端已经退出 | 系统启动客户端（`UNUserNotificationCenter`） | 原来点了没反应。系统集成会话把通知做成了协议激活（通知带的是 `<scheme>://group/…/topic/…` 链接），所以不需要 COM 激活器，只需要安装包登记 URL scheme、快捷方式带 AppUserModelID | **已补**（PR 2）：这两样安装包本来就登记、测试逐项核对；新增一步在 runner 上像 Windows 那样打开一条 `<scheme>://` 链接，检查装好的客户端被启动。我先前给 COM 激活器写的那一支（安装包、更新程序、测试）已经删掉。真的在通知中心里点一条旧通知要真机看 |
 | 客户端已在运行时再点链接或再启动一次 | 系统只激活已有的那一个 | 原来会启动第二个完整的进程 | 已由系统集成会话补上（单实例，见 `system.zh.md` 第 4 节）；不在本清单的改动里 |
@@ -228,17 +228,30 @@ gh run list --branch claude/win-parity-release-76fdb9 --limit 50 --json database
 
 ### 3. 真机上看一遍（一台 Windows 11 x64；有条件再加一台 Windows 10 22H2 和一台 ARM 的 Windows 11）
 
-1. 用 Edge 打开邀请链接：下载下来的是 `-setup.exe`。
-2. 双击安装：SmartScreen 的样子和 INSTALL 文档写的一致；安装界面是中文；装完开始菜单里有图标。
-3. 打开，登录页默认连的是正式服务器，用邀请码登录；关掉再开不用再登录。
-4. 设置 › 关于 › 检查更新。发下一个版本后：提示条出现 → 下载有进度 → 「重启安装」→ 一分钟内新版本打开，
-   「已更新到」的说明出现。
-5. 设置里点过「用这台电脑」的：更新后几分钟内，设置 › 机器里这台电脑的 daemon 版本变成新的，期间在跑的
-   bot 没有被打断。
-6. 设置 › 诊断 › 发送诊断信息，管理员那边能收到。
-7. Windows 10 上没有 WebView2 的电脑：安装时联网装上了 runtime，产出页面能显示。
-8. 卸载：设置 › 应用里卸载后，开始菜单、`teamchat://` 链接、计划任务都没了；重装后不用再登录。
-9. ARM 的 Windows 11：能装、能打开、产出页面能显示、「用这台电脑」能跑一个 bot。
+不需要先发版的（用 CI 产物 `windows-installer`，或一次 `mode=dry-run` 的产物 `windows-installer-<版本>`）：
+
+1. 双击安装：SmartScreen 的样子和 INSTALL 文档写的一致；安装界面是中文；装完开始菜单里有图标。
+2. 打开，登录页默认连的是正式服务器；点「使用其他服务器…」，「取消」旁边有「正式服务器」「测试服务器」。
+   用邀请码登录；关掉再开不用再登录。
+3. 设置 › 诊断 › 发送诊断信息，管理员那边能收到。
+4. 退出客户端后，在通知中心里点一条旧通知：客户端启动并打开那个话题。
+5. Windows 10 上没有 WebView2 的电脑：安装时联网装上了 runtime，产出页面能显示。
+6. 卸载：设置 › 应用里卸载后，开始菜单、`teamchat://` 链接、计划任务都没了；重装后不用再登录。
+7. ARM 的 Windows 11：能装、能打开、产出页面能显示、「用这台电脑」能跑一个 bot。
+
+要先有一个正式发出去的更新版本的（装上一个正式版本，等下一个版本发布；或在 staging 上发一个测试版本）：
+
+8. 用 Edge 打开邀请链接：下载下来的是 `-setup.exe`。
+9. 设置 › 关于 › 检查更新：提示条出现 → 下载有进度 → 「重启安装」→ 一分钟内新版本打开，「已更新到」的
+   说明出现。
+10. 设置里点过「用这台电脑」的：更新后几分钟内，设置 › 机器里这台电脑的 daemon 版本变成新的，期间在跑的
+    bot 没有被打断。
+11. 更新被打断：点「重启安装」后、新版本打开之前，立刻注销（或直接关机）。再登录后，旧版本自己回来了、
+    能打开，`%APPDATA%\<bundle id>\updates\update.log` 里有「the old version is back」；再点一次更新能成功。
+12. 回滚：这一条只有新版本真的起不来才会发生，没法在正式版本上故意触发；CI 上每个 PR 都测。真机上只需
+    确认第 11 条。
+13. 有了证书之后，从一个签名的版本更新到下一个签名的版本（同一张证书）：和第 9 条一样顺利；从没签名的
+    版本更新到第一个签名的版本也一样。
 
 ### 4. SmartScreen 信誉
 
