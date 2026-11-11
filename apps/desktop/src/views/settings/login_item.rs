@@ -117,12 +117,29 @@ fn approved(record: Option<&[u8]>) -> bool {
         .is_none_or(|flag| flag & 1 == 0)
 }
 
-/// What the registry says: on when the Run value starts this exe and the person has not
-/// turned it off.
+/// The program a Run value starts (quoted, or the first word).
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-fn registry_status(run: Option<&str>, record: Option<&[u8]>, exe: &std::path::Path) -> Status {
-    match run {
-        Some(value) if runs_exe(value, exe) && approved(record) => Status::Enabled,
+fn run_value_exe(value: &str) -> Option<std::path::PathBuf> {
+    let value = value.trim();
+    let program = match value.strip_prefix('"') {
+        Some(rest) => rest.split('"').next()?,
+        None => value.split_whitespace().next()?,
+    };
+    (!program.is_empty()).then(|| program.into())
+}
+
+/// What the registry says: on when the Run value starts this app and the person has not
+/// turned it off. `is_ours` says whether a program is this app's exe: the same path, or
+/// another name of the same file (after the product was renamed the installer keeps the
+/// old exe name as a hard link, and a value written before still names it).
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn registry_status(
+    run: Option<&str>,
+    record: Option<&[u8]>,
+    is_ours: impl Fn(&std::path::Path) -> bool,
+) -> Status {
+    match run.and_then(run_value_exe) {
+        Some(program) if is_ours(&program) && approved(record) => Status::Enabled,
         _ => Status::NotRegistered,
     }
 }
@@ -142,8 +159,17 @@ mod imp {
         crate::provider::session::app_id()
     }
 
+    /// Whether `program` is `exe`: the same path, or the same file under another name.
+    fn is_exe(program: &std::path::Path, exe: &std::path::Path) -> bool {
+        super::runs_exe(&super::run_command(program), exe)
+            || same_file::is_same_file(program, exe).unwrap_or(false)
+    }
+
     pub(super) fn status_of(name: &str) -> Option<Status> {
-        let exe = std::env::current_exe().ok()?;
+        Some(status_for(name, &std::env::current_exe().ok()?))
+    }
+
+    pub(super) fn status_for(name: &str, exe: &std::path::Path) -> Status {
         let run = CURRENT_USER
             .open(RUN)
             .and_then(|key| key.get_string(name))
@@ -152,11 +178,35 @@ mod imp {
             .open(APPROVED)
             .and_then(|key| key.get_value(name))
             .ok();
-        Some(super::registry_status(
-            run.as_deref(),
-            record.as_deref(),
-            &exe,
-        ))
+        super::registry_status(run.as_deref(), record.as_deref(), |program| {
+            is_exe(program, exe)
+        })
+    }
+
+    /// Points the Run value at `exe` when it names another path of the same file (the
+    /// exe's former name): the next rename or clean-up of old names then cannot turn the
+    /// login item off. Leaves a value of another program, and the person's on/off record,
+    /// alone. True when it rewrote the value.
+    pub(super) fn adopt_for(name: &str, exe: &std::path::Path) -> bool {
+        let Ok(key) = CURRENT_USER.create(RUN) else {
+            return false;
+        };
+        let Some(program) = key
+            .get_string(name)
+            .ok()
+            .and_then(|value| super::run_value_exe(&value))
+        else {
+            return false;
+        };
+        let same_path = super::runs_exe(&super::run_command(&program), exe);
+        if same_path || !same_file::is_same_file(&program, exe).unwrap_or(false) {
+            return false;
+        }
+        key.set_string(name, super::run_command(exe)).is_ok()
+    }
+
+    pub fn adopt() -> bool {
+        std::env::current_exe().is_ok_and(|exe| adopt_for(name(), &exe))
     }
 
     pub(super) fn set_of(name: &str, on: bool) -> Result<Status, String> {
@@ -230,6 +280,16 @@ pub fn status() -> Option<Status> {
     LAST.with(|l| l.get()).unwrap_or_else(refresh)
 }
 
+/// At app start on Windows: a login item written under the exe's former name now names
+/// the exe that is running (see `imp::adopt_for`).
+pub fn adopt_current_exe() {
+    #[cfg(target_os = "windows")]
+    if super::prefs::saving() && imp::adopt() {
+        tracing::info!("the login item now names the current exe");
+        refresh();
+    }
+}
+
 /// Whether the switch shows on: the system's state, else the saved choice.
 pub fn shown_on(saved: bool) -> bool {
     status().map_or(saved, Status::is_on)
@@ -286,7 +346,10 @@ mod tests {
         let on = [2u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         let off = [3u8, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8];
         let status = |run: Option<&str>, record: Option<&[u8]>| {
-            super::registry_status(run, record, exe).is_on()
+            super::registry_status(run, record, |program| {
+                super::runs_exe(&super::run_command(program), exe)
+            })
+            .is_on()
         };
         assert!(status(Some(&run), None));
         assert!(status(Some(&run), Some(&on)));
@@ -311,6 +374,69 @@ mod tests {
         assert_eq!(super::imp::set_of(&name, false), Ok(Status::NotRegistered));
         assert_eq!(super::imp::set_of(&name, false), Ok(Status::NotRegistered));
         assert_eq!(super::imp::status_of(&name), Some(Status::NotRegistered));
+    }
+
+    #[test]
+    fn a_run_value_names_its_program() {
+        use std::path::Path;
+        let exe = |value| super::run_value_exe(value);
+        assert_eq!(
+            exe(r#""C:\Program Files\App\app.exe" --hidden"#).as_deref(),
+            Some(Path::new(r"C:\Program Files\App\app.exe"))
+        );
+        assert_eq!(
+            exe(r"C:\App\app.exe --hidden").as_deref(),
+            Some(Path::new(r"C:\App\app.exe"))
+        );
+        assert_eq!(exe(""), None);
+        assert_eq!(exe("\"\""), None);
+    }
+
+    /// After a rename the install keeps the exe under its old name as a hard link, and a
+    /// login item written before names that one. Started under the new name the switch
+    /// still reads on, and the app rewrites the value to the exe that runs; a value of
+    /// some other program is neither ours nor touched.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn a_login_item_under_the_former_exe_name_is_still_on_and_is_adopted() {
+        use windows_registry::CURRENT_USER;
+        const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+        let dir = tempfile::tempdir().unwrap();
+        let (old, new, other) = (
+            dir.path().join("OldName.exe"),
+            dir.path().join("New Name.exe"),
+            dir.path().join("Other.exe"),
+        );
+        std::fs::write(&old, b"MZ the app").unwrap();
+        std::fs::hard_link(&old, &new).unwrap();
+        std::fs::write(&other, b"MZ another program").unwrap();
+        let name = format!("desktop-test-{}", chat_core::new_id());
+        let key = CURRENT_USER.create(RUN).unwrap();
+        let value = || CURRENT_USER.open(RUN).unwrap().get_string(&name).unwrap();
+
+        // Written while the exe had its old name; the app now runs under the new one.
+        key.set_string(&name, super::run_command(&old)).unwrap();
+        assert_eq!(super::imp::status_for(&name, &new), Status::Enabled);
+        assert!(super::imp::adopt_for(&name, &new), "rewritten");
+        assert_eq!(value(), super::run_command(&new));
+        assert_eq!(super::imp::status_for(&name, &new), Status::Enabled);
+        assert!(
+            !super::imp::adopt_for(&name, &new),
+            "nothing to do the second time"
+        );
+
+        // Another program under this name is not this app.
+        key.set_string(&name, super::run_command(&other)).unwrap();
+        assert_eq!(super::imp::status_for(&name, &new), Status::NotRegistered);
+        assert!(!super::imp::adopt_for(&name, &new));
+        assert_eq!(value(), super::run_command(&other), "left alone");
+
+        // A value that names a file that is gone is off, and left alone.
+        key.set_string(&name, super::run_command(&dir.path().join("Gone.exe")))
+            .unwrap();
+        assert_eq!(super::imp::status_for(&name, &new), Status::NotRegistered);
+        assert!(!super::imp::adopt_for(&name, &new));
+        key.remove_value(&name).unwrap();
     }
 
     #[test]
