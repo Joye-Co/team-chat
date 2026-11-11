@@ -54,6 +54,12 @@ pub fn install(cx: &mut App) {
         KeyBinding::new(crate::secondary!("g"), FindNext, None),
         KeyBinding::new(crate::secondary!("shift-g"), FindPrevious, None),
     ]);
+    // Windows' own keys for the next and the previous match.
+    #[cfg(not(target_os = "macos"))]
+    cx.bind_keys([
+        KeyBinding::new("f3", FindNext, None),
+        KeyBinding::new("shift-f3", FindPrevious, None),
+    ]);
     cx.on_action(|_: &FindInTopic, cx| {
         crate::views::nav::in_main_window(cx, |window, cx| {
             use gpui_component::WindowExt as _;

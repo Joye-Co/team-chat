@@ -19,6 +19,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var ticks: [String: Int] = [:]
     /// The newest refusal of a card answer of mine (key: message id).
     @Published private(set) var cardRefusals: [String: String] = [:]
+    /// Files on their way up, per topic (`AppModel+Files.swift`).
+    @Published var uploads: [String: [UploadItem]] = [:]
     /// Topics whose `loadOlder` answer said there is nothing older.
     @Published private(set) var historyEnded: Set<String> = []
 

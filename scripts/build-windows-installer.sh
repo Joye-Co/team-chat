@@ -62,7 +62,9 @@ SLUG="$(product slug)"
 BUNDLE_ID="$(product bundleId)"
 SCHEME="$(product urlScheme)"
 VERSION="$(workspace_version)"
-valid_release_version "$VERSION" || die "version '$VERSION' is not MAJOR.MINOR.PATCH: the installer and the app's updater take no other form"
+# A prerelease (1.3.0-rc.1) gets an installer too, as it gets a DMG: for a download from GitHub.
+# The app updates only to MAJOR.MINOR.PATCH releases, on every system.
+valid_semver "$VERSION" || die "version '$VERSION' is not semver (for example 1.3.0 or 1.3.0-rc.1)"
 # The folder under %LOCALAPPDATA% of the app's caches, which the uninstaller removes: the name
 # in apps/desktop/src/ui/web_embed.rs (webview2) and src/diagrams/cache.rs (diagrams). It is an
 # infra name and does not follow the product name.
@@ -180,7 +182,7 @@ log "packing $(basename "$OUT")"
 if ! is_windows; then export LC_ALL=en_US.UTF-8; fi
 if ! "$MAKENSIS" -V2 -INPUTCHARSET UTF8 \
   "-DNAME=$NAME" "-DSLUG=$SLUG" "-DAPP_ID=$BUNDLE_ID" "-DSCHEME=$SCHEME" \
-  "-DVERSION=$VERSION" "-DVERSION4=$VERSION.0" "-DCACHE_DIR=$CACHE_DIR" \
+  "-DVERSION=$VERSION" "-DVERSION4=${VERSION%%-*}.0" "-DCACHE_DIR=$CACHE_DIR" \
   "-DSTAGE=$(native "$STAGE")" "-DICON=$(native "$ICON")" "-DOUT=$(native "$OUT")" \
   ${defines[@]+"${defines[@]}"} \
   "$(native "$ROOT/scripts/windows/installer.nsi")" >"$WORK/makensis.log" 2>&1; then

@@ -24,8 +24,8 @@ Windows 现在的做法，都是从代码和脚本里读出来的（括号里是
 | 旧式链接 `/download?code=<邀请码>`（邀请码在地址里，老版本客户端生成的） | 给 DMG | 原来也给 DMG，Windows 上没法用 | **已补**（PR 1）：请求没写 `platform` 时，服务器看 `User-Agent`，是 Windows 就给安装包；写了 `platform` 的以写的为准。新增测试：Edge 的 UA 拿到安装包，Safari 的 UA 拿到 DMG，`platform=macos` 能让 Windows 浏览器拿 DMG。`docs/protocol.md` 已更新 |
 | 这个平台还没有版本时 | 404「No release yet.」 | 404「No release for this system yet.」，不会给 DMG | 相同 |
 | 客户端里的下载接口 `GET /v1/updates/latest`、`/v1/updates/:version/download` | 不带参数 | 带 `?platform=windows`；回答的 `platform` 不是 `windows` 就当没有（`crates/chat-core/src/updates.rs`） | 相同 |
-| GitHub Releases | `<名字>-<版本>.dmg`；校验和是 GitHub 在 Assets 里显示的 `sha256:` | `<名字>-<版本>-setup.exe`，同样看 `sha256:`（`release.yml` 的 `windows-publish`，`check-release-digest.sh`） | 相同（第一次真实发版后才有文件，见第三节） |
-| 官网（`apps/website`） | 没有下载按钮，只有文字 | 没有下载按钮；文字写着 Windows「正在开发」 | 相同（都没有按钮）。文字要在第一次 Windows 发版后改，见第三节 |
+| GitHub Releases | `<名字>-<版本>.dmg`；校验和是 GitHub 在 Assets 里显示的 `sha256:` | `<名字>-<版本>-setup.exe`，同样看 `sha256:`（`release.yml` 的 `windows-publish`，`check-release-digest.sh`） | 相同。1.2.7 起每个版本的 Assets 里都有安装包（`TeamChat-1.2.7-setup.exe` 是第一个） |
+| 官网（`apps/website`） | 没有下载按钮，只有文字 | 没有下载按钮；文字写着 Windows「正在开发」 | 相同（都没有按钮）。1.2.7 已经有 Windows 版，这句文字该改了：官网首页正被另外两个 PR 重写，留给运营方，见第三节 |
 | 不装客户端、只装 daemon | `<slug>-daemon-<版本>-aarch64-apple-darwin`（`build-daemon.sh`） | `<slug>-daemon-<版本>-x86_64-pc-windows-msvc.exe`（`build-windows-installer.sh`），配 `scripts/install-daemon.ps1` | 相同 |
 
 ### 2. 校验
@@ -75,6 +75,7 @@ Windows 现在的做法，都是从代码和脚本里读出来的（括号里是
 | 不能自动装的时候（装在不可写的位置、开发构建） | 在访达里打开 DMG，文字教人拖到「应用程序」 | 在资源管理器里选中安装包；但文字还是访达和「应用程序」那一套 | **已补**（PR 1）：这几句文案按系统分开（`copy/update.rs` 的 `per_system`），Windows 上说「安装包已在文件资源管理器中选中，退出后双击安装」 |
 | daemon 跟着客户端换 | daemon 在 `.app` 里，文件被换掉后空闲时自己退出，launchd 拉起新的 | 安装包按「改名替换」协议换文件，不停进程；daemon 空闲时退出，计划任务一分钟内拉起新的 | **已补**（PR 2）：原来 CI 只验证了文件被换掉。现在 `test-windows-update.sh` 在 runner 上跑整条链路，见下面「整条链路」 |
 | 几个账号 | 更新只看当前账号的服务器；装的是同一个客户端 | 同上 | 相同 |
+| 还有消息没发出去时点了安装 | 先等发件箱清空（每 2 秒看一次，`SEND_POLL`），界面写「还有消息正在发出，发完后自动更新」；点「稍后」就不等了 | 同一份代码，等完之后才启动更新程序、退出客户端 | 相同 |
 | 更新程序里的测试开关 | 没有更新程序 | `UPDATE_HELPER_TEST_PAUSE_AT` 原来在发出去的程序里 | **已补**（PR 1）：只有带 `test-pause` feature 编译的更新程序才认这个变量；CI 单独编一个给「打断」测试用，并检查装好的更新程序里没有这个字符串 |
 
 ### 整条链路（PR 2，`scripts/test-windows-update.sh`，CI 的 `windows-installer` 任务）
@@ -154,13 +155,15 @@ Mac 只出 Apple 芯片的版本；Windows 只出 x64 的版本。ARM 的 Window
 
 | 项 | Mac | Windows | 状态 |
 | --- | --- | --- | --- |
+| 预发布版本（`1.3.0-rc.1`） | 出 DMG，只放 GitHub，不上传服务器（客户端只更新到正式版本） | 原来什么都不出：workflow 跳过 Windows 任务，构建脚本也拒绝这种版本号 | **已补**（PR 1）：Windows 任务照样构建、测试安装包，`windows-publish` 只把它加进 GitHub Release、不上传服务器；安装包的四段数字版本取 `-` 前面的部分。本机用 `1.3.0-rc.1` 编过 NSIS 脚本；整条 workflow 要等下一次预发布才真的跑到 |
+| 服务器地址不进日志 | 原来 `release.yml` 把仓库变量放进 `env` 和 `GITHUB_ENV`，每一步的日志开头都会把地址印出来（仓库是公开的，日志也是） | 我在 PR 1 第一版里给 CI 的安装包任务也这么传了，同样印了出来 | **已补**（PR 1）：用到地址的任务都挪进被调用的 workflow（`release-jobs.yml`、`windows-installer.yml`），地址作为它的 secret 传进去，日志里是 `***`；每个任务第一步再把每个地址和主机名登记成要遮掉的字符串；不再写进 `GITHUB_ENV`；最后一个任务 `No server address in the logs` 读本次运行每个已完成任务的日志，出现主机名就失败（`scripts/check-logs-for-servers.sh`，有测试）。**以前的运行日志里还有这些地址**，只有运营方能删，见第三节 |
 | 发版入口 | `scripts/release.sh <版本>`（本机或 `release.yml` 的 macOS 任务）：检查、改版本号、构建、测试、提交、打 tag、建 GitHub Release、上传服务器 | `release.yml` 的 `windows` 任务构建、签名、测试；`windows-publish` 把安装包加进同一个 GitHub Release 并上传服务器 | 相同。Windows 的构建只能在 Windows 上跑，所以没有「本机发版」；`release.sh` 对 `--platform windows` 只做上传 |
 | `release.sh` 的模式 | `--dry-run [--build]`、正式、`--upload-only`、`--same-as` | workflow 的 `dry-run`（构建、签名、测试，不发）、`release`、`upload-only`（从 GitHub Release 取回安装包再上传） | 相同 |
 | 版本号 | `release.sh` 改 `Cargo.toml`、`Cargo.lock`、CHANGELOG 日期并提交 | Windows 任务在自己的工作区里设同一个版本号，不提交 | 相同 |
 | 说明 | `docs/releases/<版本>.md` 上传给服务器，也编进客户端 | 同一个文件 | 相同 |
 | 嵌进去的服务器地址 | `release_ops`：只嵌 `servers.json` | 见上「服务器地址」 | 已补（PR 1） |
 | 签名 | `SIGNING_KEY_PEM`、`SIGNING_CERT_PEM`；正式发版没有就拒绝 | `WINDOWS_SIGN_PFX_BASE64`、`WINDOWS_SIGN_PASSWORD`，或 `WINDOWS_SIGN_CMD`；没有就不签，照样发 | 相同（Windows 允许不签：没有证书时也要能发，这是本次的前提） |
-| 和上一个版本是同一个发布者 | `test-dmg.sh --same-as <上一版 DMG>`：designated requirement 不变，钥匙串才继续信任 | 原来没有：换了证书或忘了签，已安装的客户端会拒绝更新，发出去才知道 | **已补**（PR 1）：`test-windows-installer.sh --same-as <上一版安装包>` 按更新程序的规则（`signer_allows`）判断，`release.yml` 取上一个 Release 的安装包来比；CI 用本次运行的四个安装包和一个别家签名的程序测这条规则 |
+| 和上一个版本是同一个发布者 | `test-dmg.sh --same-as <上一版 DMG>`：designated requirement 不变，钥匙串才继续信任 | 原来没有：换了证书或忘了签，已安装的客户端会拒绝更新，发出去才知道 | **已补**（PR 1）：`scripts/previous-windows-installer.sh` 取「不是本次版本、且带安装包的最新一个 Release」的安装包（Mac 任务先建好本次的 Release 也不会拿错；列表、读取、下载任何一步失败都让任务失败，只有「以前没有任何安装包」才跳过），`test-windows-installer.sh --same-as` 再让**装好的更新程序自己**回答「上一版的客户端收不收这个安装包」（`<slug>-update.exe --accepts`，就是更新时用的 `signer_allows`，所以发版检查和真实更新不会判得不一样）。测试：`test-release-scripts.sh` 用假的 `gh` 测选哪个版本和各种失败；CI 用本次运行的四个安装包、一个别家签名的程序、以及把测试证书从受信任的根里拿掉之后的情况测这条规则 |
 | 构建产物的检查 | `test-dmg.sh`：校验和、镜像完整、bundle id、名字、版本、最低系统、URL scheme、图标、带了 daemon、arm64、签名 | `test-windows-installer.sh`：校验和、真的安装、文件和版本资源、注册表、快捷方式和 AppUserModelID、x64、图标、带了 daemon、签名、启动并画一屏、覆盖安装、卸载后没有残留、数据还在 | 相同（Windows 的更重：真的装） |
 | 上传 | `PUT /v1/admin/releases/<版本>` | `PUT /v1/admin/releases/<版本>/assets/windows` | 相同 |
 | 撤回 | `withdraw-release`：这个版本不再被提供、不能下载 | 同一个命令，两个平台的文件一起撤回 | 相同。不能只撤一个平台：RUNBOOK 已写明做法（撤回后两边一起发更高的版本） |
@@ -187,18 +190,37 @@ Mac 只出 Apple 芯片的版本；Windows 只出 x64 的版本。ARM 的 Window
 5. 从签名的第一个版本起，以后每个版本都要用同一个主体（Subject）的证书签；`--same-as` 那一步会在发版前
    拦住不一致的情况。
 
-### 2. 第一次真实发版
+### 2. 发版（1.2.7 已经带着 Windows 安装包发过一次）
 
-1. 先部署服务器（`scripts/deploy-server.sh`），让它有 `release_assets` 表和 Windows 的上传接口。
-2. 确认仓库变量 `SERVERS_JSON` 是 `{"staging": "<地址>", "production": "<地址>"}`（Mac 发版已经在用）。
-3. Actions › Release：`version` 填新版本号，先 `mode=dry-run`，看 `Windows installer` 任务全绿，从产物
-   `windows-installer-<版本>` 里拿安装包在一台 Windows 电脑上装一次（见下一条）。
-4. 再跑 `mode=release`。完成后检查：GitHub Release 的 Assets 里有 `-setup.exe` 和 Windows 的
-   daemon；`curl -H "Authorization: Bearer <token>" "<服务器>/v1/updates/latest?platform=windows"` 返回这个版本。
+1. 服务器要先部署到有 `release_assets` 表和 Windows 上传接口的版本（1.2.7 时已经是）。
+2. 仓库变量 `SERVERS_JSON` 是 `{"staging": "<地址>", "production": "<地址>"}`，不用动。
+3. Actions › Release：`version` 填新版本号，先 `mode=dry-run`，看 `Windows installer` 任务全绿；想先在
+   Windows 电脑上装一次，从产物 `windows-installer-<版本>` 里拿安装包。
+4. 再跑 `mode=release`。完成后检查：GitHub Release 的 Assets 里有 `-setup.exe` 和 Windows 的 daemon；
+   `curl -H "Authorization: Bearer <token>" "<服务器>/v1/updates/latest?platform=windows"` 返回这个版本；
+   最后一个任务 `No server address in the logs` 是绿的。
 5. Windows 任务失败而 Mac 已经发出去：在 `main` 上修好，在那次运行上点 **Re-run failed jobs**。
-6. 把官网（`apps/website/src/index.html`）里「Windows 正在开发」的文字改掉，加上下载说明。
-7. 以后写 `docs/releases/<版本>.md` 时，只和一个系统有关的条目标明「Mac：」或「Windows：」，因为两边的
+6. 官网（`apps/website/src/index.html`）还写着「Windows 版正在开发」，改成已支持并加上下载说明。
+7. 写 `docs/releases/<版本>.md` 时，只和一个系统有关的条目标明「Mac：」或「Windows：」，因为两边的
    「更新记录」显示的是同一份说明。
+
+### 2b. 删掉旧日志里的服务器地址
+
+这个仓库是公开的，Actions 的日志任何人都能看。PR #149 合并之前的运行（`Release` workflow 的每一次运行，
+以及 PR #149 自己最早的几次 CI 运行）日志里有 staging 和 production 的地址。新的运行不会再有。旧的只有
+仓库管理员能删：
+
+```bash
+# 列出 Release workflow 的所有运行，逐个删掉日志（运行记录本身还在）
+gh run list --workflow release.yml --limit 200 --json databaseId -q '.[].databaseId' |
+  xargs -I{} gh api -X DELETE repos/Joye-Co/team-chat/actions/runs/{}/logs
+# PR #149 分支在修好之前的 CI 运行
+gh run list --branch claude/win-parity-release-76fdb9 --limit 50 --json databaseId -q '.[].databaseId' |
+  xargs -I{} gh api -X DELETE repos/Joye-Co/team-chat/actions/runs/{}/logs
+```
+
+地址本身不是密钥（发出去的客户端里就有），但仓库的规则是部署信息不出现在仓库里；如果介意已经被人看到，
+换地址是另一回事，这里不替运营方决定。
 
 ### 3. 真机上看一遍（一台 Windows 11 x64；有条件再加一台 Windows 10 22H2 和一台 ARM 的 Windows 11）
 

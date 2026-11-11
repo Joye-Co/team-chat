@@ -3,7 +3,7 @@
 :root{color-scheme:light dark;--ink:var(--tc-fg,#0A0A0A);--ink2:var(--tc-muted,#737373);--ink3:var(--tc-muted,#737373);--line:var(--tc-border,#E5E5E5);--sunk:var(--tc-fill,#F5F5F5);--bar:var(--tc-primary,#171717);--card:transparent}
 @media (prefers-color-scheme:dark){:root{--ink:var(--tc-fg,#FAFAFA);--ink2:var(--tc-muted,#A1A1A1);--ink3:var(--tc-muted,#A1A1A1);--line:var(--tc-border,#2E2E2E);--sunk:var(--tc-fill,#262626);--bar:var(--tc-primary,#E5E5E5)}}
 *{box-sizing:border-box}
-body{margin:0;padding:16px;font:14px/22px -apple-system,"PingFang SC",sans-serif;color:var(--ink);background:var(--card)}
+body{margin:0;padding:16px;font:14px/22px -apple-system,"Segoe UI Variable Text","Segoe UI","PingFang SC","Microsoft YaHei UI",sans-serif;color:var(--ink);background:var(--card)}
 header{display:flex;align-items:flex-start;justify-content:space-between}
 h2{margin:0;font-size:16px;font-weight:600}
 .sub{margin:2px 0 0;color:var(--ink3);font-size:12px}
@@ -17,9 +17,9 @@ button{font:inherit;font-size:14px;color:inherit;background:var(--card);border:1
 .bars{display:flex;align-items:flex-end;justify-content:space-around;height:118px;margin-top:6px;border-bottom:1px solid var(--line)}
 .col{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;width:20%;height:100%}
 .col i{display:block;width:38px;background:var(--bar);border-radius:4px 4px 0 0;transition:height .2s}
-.col em{font-style:normal;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--ink2);margin-bottom:4px}
+.col em{font-style:normal;font-family:ui-monospace,Menlo,"Cascadia Mono",Consolas,monospace;font-size:12px;color:var(--ink2);margin-bottom:4px}
 .dim .col i{background:color-mix(in srgb,var(--bar) 20%,transparent)}
-.wk{display:flex;justify-content:space-around;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--ink3);margin-top:4px}
+.wk{display:flex;justify-content:space-around;font-family:ui-monospace,Menlo,"Cascadia Mono",Consolas,monospace;font-size:12px;color:var(--ink3);margin-top:4px}
 #qa{display:none;min-height:120px;margin:0 0 12px;padding:12px 16px;border:1px solid var(--line);border-radius:10px}
 #qa .row{display:flex;gap:12px;align-items:baseline}
 #qa .row+.row{margin-top:12px}

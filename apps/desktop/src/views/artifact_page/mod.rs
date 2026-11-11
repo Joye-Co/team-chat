@@ -632,7 +632,9 @@ impl ArtifactPage {
         // The page fills the content area under the toolbar row and the
         // Alert; what it may do is in the inspector's `这一页` (no footer
         // strip that cuts the page, F37).
-        let height = window.viewport_size().height - crate::ui::native::metrics::TOOLBAR_ROW;
+        let height = window.viewport_size().height
+            - crate::ui::native::metrics::TOOLBAR_ROW
+            - crate::ui::native::window_chrome::height(window);
         let body = match folder {
             Some(Ok(folder)) if folder.is_page => embed(
                 &self.services,

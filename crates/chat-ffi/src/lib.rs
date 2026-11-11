@@ -16,6 +16,7 @@ use chat_protocol::{ErrorCode, GroupKind, main_topic_id};
 
 mod auth;
 mod devices;
+mod files;
 mod pages;
 mod token;
 
@@ -279,7 +280,7 @@ pub trait UpdateListener: Send + Sync {
 
 #[derive(uniffi::Object)]
 pub struct ChatClient {
-    inner: Client,
+    pub(crate) inner: Client,
 }
 
 /// The wire form of a protocol enum (`in_progress`, `system`, ...).

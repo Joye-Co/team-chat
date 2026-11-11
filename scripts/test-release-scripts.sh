@@ -139,6 +139,58 @@ upload_stub 404
 expect ok "a server without the route is skipped, not an error" "$R" 9.9.9 --env staging --upload-only --platform windows
 upload_stub 500
 expect fail "a server error fails the upload" "$R" 9.9.9 --env staging --upload-only --platform windows
+# --- the previous Windows installer, for the publisher comparison of a release -----------------
+# A stand-in for gh: releases newest first; v9.9.9 is the release being made (the macOS job has
+# created it already), v9.9.8 has no installer, v9.9.7 has one. GH_FAIL makes one call fail.
+FAKE_BIN="$WORK/fake-bin"
+rm -rf "$FAKE_BIN" "$WORK/previous" && mkdir -p "$FAKE_BIN"
+cat >"$FAKE_BIN/gh" <<'GH'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "release list")
+    [ "${GH_FAIL:-}" != list ] || exit 1
+    printf '%s\n' ${GH_TAGS:-v9.9.9 v9.9.8 v9.9.7 v9.9.6} ;;
+  "release view")
+    [ "${GH_FAIL:-}" != view ] || exit 1
+    case "$3" in
+      v9.9.9) printf 'X-9.9.9.dmg\nX-9.9.9-setup.exe\n' ;;
+      v9.9.8) printf 'X-9.9.8.dmg\n' ;;
+      v9.9.7) printf 'X-9.9.7.dmg\nX-9.9.7-setup.exe\nx-daemon-9.9.7-x86_64-pc-windows-msvc.exe\n' ;;
+      v9.9.6) printf 'X-9.9.6-setup.exe\n' ;;
+    esac ;;
+  "release download")
+    [ "${GH_FAIL:-}" != download ] || exit 1
+    dir=""; name=""; tag="$3"; shift 3
+    while [ $# -gt 0 ]; do case "$1" in --dir) dir="$2"; shift 2 ;; --pattern) name="$2"; shift 2 ;; *) shift ;; esac; done
+    printf 'installer of %s' "$tag" >"$dir/$name" ;;
+  *) exit 2 ;;
+esac
+GH
+chmod +x "$FAKE_BIN/gh"
+P="$ROOT/scripts/previous-windows-installer.sh"
+prev() { PATH="$FAKE_BIN:$PATH" "$P" "$@" 2>"$WORK/prev.err"; }
+expect ok "the release being made is not its own previous one" is "$(prev 9.9.9 "$WORK/previous")" "$WORK/previous/X-9.9.7-setup.exe"
+expect ok "a release without an installer is passed over" is "$(cat "$WORK/previous/X-9.9.7-setup.exe")" "installer of v9.9.7"
+expect ok "a version given with v works" is "$(prev v9.9.9 "$WORK/previous")" "$WORK/previous/X-9.9.7-setup.exe"
+expect ok "the newest other release with an installer wins" is "$(prev 9.9.10 "$WORK/previous")" "$WORK/previous/X-9.9.9-setup.exe"
+expect ok "no earlier installer is not an error" env PATH="$FAKE_BIN:$PATH" GH_TAGS="v9.9.9 v9.9.8" "$P" 9.9.9 "$WORK/previous"
+expect ok "and names nothing" is "$(GH_TAGS="v9.9.9 v9.9.8" prev 9.9.9 "$WORK/previous")" ""
+for step in list view download; do
+  expect fail "a failed 'gh release $step' fails the check" env PATH="$FAKE_BIN:$PATH" GH_FAIL="$step" "$P" 9.9.9 "$WORK/previous"
+done
+
+# --- the logs of a run must not show a server address -----------------------------------------
+L="$ROOT/scripts/check-logs-for-servers.sh"
+rm -rf "$WORK/logs" && mkdir -p "$WORK/logs"
+printf 'build\nuploading to ***\n' >"$WORK/logs/1.log"
+SERVERS='{"staging":"https://staging.chat.example.org","production":"https://chat.example.org:8443/api"}'
+expect ok "masked logs pass" env TC_SERVERS_JSON="$SERVERS" LOG_DIR="$WORK/logs" "$L"
+printf 'GET https://chat.example.org:8443/api/v1/health\n' >"$WORK/logs/2.log"
+expect fail "a log with the production host fails" env TC_SERVERS_JSON="$SERVERS" LOG_DIR="$WORK/logs" "$L"
+expect ok "the failure does not print the host" bash -c "! grep -q 'example.org' '$WORK/out.log'"
+printf 'TC_SERVERS_JSON: {"staging":"https://staging.chat.example.org"}\n' >"$WORK/logs/2.log"
+expect fail "a log with the staging host fails" env TC_SERVERS_JSON="$SERVERS" LOG_DIR="$WORK/logs" "$L"
+expect ok "a run without server URLs has nothing to check" env TC_SERVERS_JSON= LOG_DIR="$WORK/logs" "$L"
 
 jq -n --argjson fails "$fails" --arg version "$(workspace_version)" '{ version: $version, failures: $fails }' >"$WORK/report.json"
 [ "$fails" = 0 ] || die "$fails release script test(s) failed"

@@ -3151,7 +3151,7 @@ impl DeviceKind {
     /// The kind a device name suggests.
     pub fn from_name(name: &str) -> Self {
         let n = name.to_lowercase();
-        if n.contains("iphone") || n.contains("ipad") {
+        if n.contains("iphone") || n.contains("ipad") || n.contains("android") {
             DeviceKind::Phone
         } else if [
             "imac",
@@ -3164,6 +3164,8 @@ impl DeviceKind {
         .iter()
         .any(|k| n.contains(k))
             && !n.contains("macbook")
+            // Windows names a new PC `DESKTOP-…` or `LAPTOP-…`.
+            || n.starts_with("desktop-")
         {
             DeviceKind::Desktop
         } else {
