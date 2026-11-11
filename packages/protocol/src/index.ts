@@ -142,6 +142,15 @@ import {
   UpdateNotifySettingsRequest,
 } from "./settings.ts";
 import {
+  AnswerCardRequest,
+  BadgeResponse,
+  PushData,
+  PushDevice,
+  PushDevicesResponse,
+  RegisterPushDeviceRequest,
+  RemovePushDeviceResponse,
+} from "./push.ts";
+import {
   CreateMemoryRequest,
   MachineMemoryNoteRequest,
   MemoriesResponse,
@@ -180,6 +189,7 @@ export * from "./roster.ts";
 export * from "./bots.ts";
 export * from "./plan.ts";
 export * from "./settings.ts";
+export * from "./push.ts";
 
 // ---------------------------------------------------------------------------
 // Entities
@@ -865,6 +875,14 @@ export const schemas = {
   MemoryVersionsResponse,
   MemoryUpdatesResponse,
   MachineMemoryNoteRequest,
+  // push
+  RegisterPushDeviceRequest,
+  PushDevice,
+  PushDevicesResponse,
+  RemovePushDeviceResponse,
+  BadgeResponse,
+  PushData,
+  AnswerCardRequest,
 } as const;
 export type SchemaName = keyof typeof schemas;
 

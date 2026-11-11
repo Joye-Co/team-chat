@@ -79,7 +79,10 @@ check!(
     CreateMemoryRequest,
     UpdateMemoryRequest,
     MemoryUpdatesResponse,
-    MachineMemoryNoteRequest
+    MachineMemoryNoteRequest,
+    RegisterPushDeviceRequest,
+    PushData,
+    AnswerCardRequest
 );
 
 fn validated<T: DeserializeOwned + Serialize + Check>(v: &Value) -> Result<Value, String> {
@@ -289,6 +292,20 @@ const KINDS: &[(&str, RoundTrip)] = &[
         "PutArtifactMediaResponse",
         plain::<PutArtifactMediaResponse>,
     ),
+    // Push
+    (
+        "RegisterPushDeviceRequest",
+        validated::<RegisterPushDeviceRequest>,
+    ),
+    ("PushDevice", plain::<PushDevice>),
+    ("PushDevicesResponse", plain::<PushDevicesResponse>),
+    (
+        "RemovePushDeviceResponse",
+        plain::<RemovePushDeviceResponse>,
+    ),
+    ("BadgeResponse", plain::<BadgeResponse>),
+    ("PushData", validated::<PushData>),
+    ("AnswerCardRequest", validated::<AnswerCardRequest>),
 ];
 
 fn fixtures_root() -> PathBuf {

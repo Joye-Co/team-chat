@@ -1,0 +1,26 @@
+{
+  "kind": "PushDevicesResponse",
+  "valid": true,
+  "value": {
+    "devices": [
+      {
+        "id": "01JBX0PUSH00000000000000AA",
+        "platform": "apns",
+        "appId": "dev.example.chat",
+        "environment": "production",
+        "createdAt": 1762128000000,
+        "updatedAt": 1762128001000,
+        "current": true
+      },
+      {
+        "id": "01JBX0PUSH00000000000000AB",
+        "platform": "apns",
+        "appId": "dev.example.chat",
+        "environment": "sandbox",
+        "createdAt": 1762128000000,
+        "updatedAt": 1762128001000,
+        "current": false
+      }
+    ]
+  }
+}

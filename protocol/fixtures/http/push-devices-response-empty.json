@@ -1,0 +1,7 @@
+{
+  "kind": "PushDevicesResponse",
+  "valid": true,
+  "value": {
+    "devices": []
+  }
+}
