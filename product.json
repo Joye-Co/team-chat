@@ -6,5 +6,6 @@
   "slug": "team-chat",
   "bundleId": "co.joye.teamchat",
   "urlScheme": "teamchat",
-  "tagline": "Desktop work chat where people and bots are equal members"
+  "tagline": "Desktop work chat where people and bots are equal members",
+  "githubClientId": ""
 }
