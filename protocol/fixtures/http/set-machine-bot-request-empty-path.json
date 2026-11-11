@@ -1,0 +1,8 @@
+{
+  "kind": "SetMachineBotRequest",
+  "valid": false,
+  "description": "a folder is 1..1024 characters",
+  "value": {
+    "repoPath": ""
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "value": {
+    "type": "github",
+    "state": "missing"
+  }
+}

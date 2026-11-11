@@ -1,0 +1,8 @@
+{
+  "kind": "ChainStopResponse",
+  "valid": false,
+  "description": "a count is not negative",
+  "value": {
+    "stoppedRuns": -1
+  }
+}

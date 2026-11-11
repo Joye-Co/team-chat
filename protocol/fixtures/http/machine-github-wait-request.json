@@ -1,0 +1,7 @@
+{
+  "kind": "MachineGithubWaitRequest",
+  "valid": true,
+  "value": {
+    "reason": "not_connected"
+  }
+}

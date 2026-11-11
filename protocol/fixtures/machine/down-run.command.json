@@ -1,0 +1,11 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "value": {
+    "t": "run.command",
+    "runId": "01JBX0RUN000000000000000AU",
+    "commandId": "c1",
+    "command": "git status",
+    "by": "01JBX0OWNER0000000000000AA"
+  }
+}

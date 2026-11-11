@@ -1,0 +1,22 @@
+{
+  "kind": "GithubStatusResponse",
+  "valid": true,
+  "description": "GitHub refused the token",
+  "value": {
+    "available": true,
+    "account": {
+      "login": "alice-dev",
+      "status": "invalid",
+      "connectedAt": 1762128000000
+    },
+    "waits": [
+      {
+        "runId": "01JBX0RUN000000000000000AU",
+        "groupId": "01JBX0GENERAL000000000000A",
+        "topicId": "01JBX0TOPIC0000000000000AD",
+        "botId": "01JBX0BOT000000000000000AC",
+        "reason": "invalid"
+      }
+    ]
+  }
+}

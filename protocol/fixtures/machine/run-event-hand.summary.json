@@ -1,0 +1,15 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "value": {
+    "type": "hand.summary",
+    "by": "01JBX0OWNER0000000000000AA",
+    "heldMs": 720000,
+    "commands": 3,
+    "files": [
+      ".env.example"
+    ],
+    "headFrom": "a1b2c3d",
+    "headTo": "d4e5f6a"
+  }
+}

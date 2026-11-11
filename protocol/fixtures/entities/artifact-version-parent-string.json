@@ -1,0 +1,21 @@
+{
+  "kind": "ArtifactVersion",
+  "valid": false,
+  "description": "parentVersion is a number",
+  "value": {
+    "artifactId": "01JBX0ART000000000000000AM",
+    "version": 3,
+    "entry": "index.html",
+    "files": [
+      {
+        "path": "index.html",
+        "fileId": "01JBX0FILE00000000000000AH",
+        "size": 120,
+        "mime": "text/html"
+      }
+    ],
+    "createdBy": "01JBX0BOT000000000000000AC",
+    "createdAt": 1762128000000,
+    "parentVersion": "1"
+  }
+}

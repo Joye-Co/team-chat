@@ -1,0 +1,8 @@
+{
+  "kind": "RunCommandRequest",
+  "valid": false,
+  "description": "a command is 1..4000 characters",
+  "value": {
+    "command": ""
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "kind": "TeamRoster",
+  "valid": true,
+  "value": {
+    "members": [
+      {
+        "memberId": "01JBX0OWNER0000000000000AA",
+        "joinedAt": 1762128000000,
+        "devices": [],
+        "teamOwner": true
+      },
+      {
+        "memberId": "01JBX0ALICE0000000000000AB",
+        "joinedAt": 1762128001000,
+        "addedBy": "01JBX0OWNER0000000000000AA",
+        "devices": []
+      }
+    ],
+    "invites": []
+  }
+}
