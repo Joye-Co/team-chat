@@ -1,29 +1,33 @@
 //! Member characters (docs/PRODUCT.md, "Bot members"): a member with a
-//! character draws it instead of the monogram, with its live status as the
-//! character's signal (idle, working, needs-input, success, error, offline).
+//! character draws it instead of the monogram, with its live [`Look`]: the
+//! status (idle, working, needs-input, success, error, offline) and the
+//! emotion its face shows.
 //!
-//! The art is the optional character pack (from TC_OPS_DIR, see `build.rs`).
-//! A build without it still knows the 26 ids (they are a protocol field) but
-//! has no art: [`has_art`] is false and every member draws its initial.
+//! The art is the Jojo & Friends avatar pack (CC BY 4.0), vendored in
+//! `apps/desktop/assets/characters/` by `scripts/characters/sync.sh` and
+//! embedded by `build.rs`: every character at each of the 16 emotions and
+//! 7 sizes, plus offline.
 //!
 //! The pieces are small so the design layer can wrap them:
-//! - [`image`]: character, status and size in, an `Img` out;
-//! - [`status`]: the status of a bot from what the provider knows, and the
+//! - [`image`]: character, look and size in, an `Img` out;
+//! - [`status`]: the look of a bot from what the provider knows, and the
 //!   [`StatusBoard`] global that avatars read;
-//! - [`assets`]: the bundled SVGs of the character pack, served through the
-//!   app's asset source.
+//! - [`emotion`]: the 16 emotions and the default face of each status;
+//! - [`assets`]: the bundled SVGs of the pack, served through the app's
+//!   asset source.
 
 pub mod assets;
+pub mod emotion;
 pub mod status;
 pub mod tile;
 
 use gpui::{Img, Pixels, Styled as _, img};
 
 pub use chat_core::proto::CharacterId;
+pub use emotion::{Emotion, Look};
 pub use status::StatusTracker;
 
-/// The status a character shows. The wire and file names are the character
-/// pack's status ids.
+/// The status a character shows: the six statuses of the avatar pack.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum CharacterStatus {
     #[default]
@@ -45,17 +49,6 @@ impl CharacterStatus {
         CharacterStatus::Error,
         CharacterStatus::Offline,
     ];
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            CharacterStatus::Idle => "idle",
-            CharacterStatus::Working => "working",
-            CharacterStatus::NeedsInput => "needs-input",
-            CharacterStatus::Success => "success",
-            CharacterStatus::Error => "error",
-            CharacterStatus::Offline => "offline",
-        }
-    }
 }
 
 /// The bundled sizes in points. Each file is drawn for its size (16 to 32 pt
@@ -75,38 +68,34 @@ pub fn bundled_size(size: Pixels) -> u32 {
 }
 
 /// The asset path of one bundled image, for example
-/// `characters/o03/needs-input-24.svg`.
+/// `characters/o03/curious-24.svg`.
 #[cfg(test)]
-pub fn image_path(
-    character: CharacterId,
-    status: CharacterStatus,
-    size: Pixels,
-) -> gpui::SharedString {
+pub fn image_path(character: CharacterId, look: Look, size: Pixels) -> gpui::SharedString {
     format!(
         "characters/{}/{}-{}.svg",
         character.as_str(),
-        status.as_str(),
+        look.face(),
         bundled_size(size)
     )
     .into()
 }
 
-/// The character at `size` showing `status`, without the lamp, bubble, ring
-/// or sleep marks up to 64 pt. The character is its own shape: do not clip
-/// it to a circle.
-pub fn image(character: CharacterId, status: CharacterStatus, size: Pixels) -> Img {
-    img(tile::clean_path(character, status, size))
+/// The character at `size` with `look` (a [`Look`], or a [`CharacterStatus`]
+/// with its default face), without the lamp, bubble, ring or sleep marks up
+/// to 64 pt. The character is its own shape: do not clip it to a circle.
+pub fn image(character: CharacterId, look: impl Into<Look>, size: Pixels) -> Img {
+    img(tile::clean_path(character, look.into(), size))
         .size(size)
         .flex_none()
 }
 
-/// Whether this build has the art of `character` (the optional character pack).
-/// Without it the member draws its initial, like a member with no character.
+/// Whether this build has the art of `character`. Every character of the pack
+/// is bundled; a member whose art is missing draws its initial.
 pub fn has_art(character: CharacterId) -> bool {
     assets::has_character(character.as_str())
 }
 
-/// Whether this build has any character art: without it the look pickers hide.
+/// Whether this build has any character art (the look pickers need it).
 pub fn available() -> bool {
     assets::count() > 0
 }
@@ -159,18 +148,22 @@ mod tests {
     }
 
     #[test]
-    fn every_character_status_and_size_is_bundled() {
+    fn every_character_emotion_and_size_is_bundled() {
         assert_eq!(CharacterId::ALL.len(), 26);
-        if !available() {
-            // A build without the character pack has no art at all.
-            assert_eq!(assets::count(), 0);
-            assert!(CharacterId::ALL.iter().all(|&c| !has_art(c)));
-            return;
-        }
+        assert!(available());
+        let mut looks: Vec<Look> = Emotion::ALL
+            .iter()
+            .map(|&emotion| Look {
+                status: CharacterStatus::Working,
+                emotion,
+            })
+            .collect();
+        looks.push(CharacterStatus::Offline.into());
         for &c in CharacterId::ALL {
-            for s in CharacterStatus::ALL {
+            assert!(has_art(c), "{}", c.as_str());
+            for &look in &looks {
                 for size in SIZES {
-                    let path = image_path(c, s, px(size as f32));
+                    let path = image_path(c, look, px(size as f32));
                     let bytes = assets::load(&path).unwrap_or_else(|| panic!("missing {path}"));
                     let text = std::str::from_utf8(bytes).unwrap();
                     assert!(text.starts_with("<svg"), "{path}");
@@ -178,6 +171,6 @@ mod tests {
                 }
             }
         }
-        assert_eq!(assets::count(), 26 * 6 * SIZES.len());
+        assert_eq!(assets::count(), 26 * 17 * SIZES.len());
     }
 }

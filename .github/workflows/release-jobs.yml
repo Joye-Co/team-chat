@@ -117,7 +117,7 @@ jobs:
       - name: Check the server URLs
         # The URLs the app's server menu offers and release.sh uploads to: the repository variable
         # SERVERS_JSON, { "staging": "<url>", "production": "<url>" }. Releases embed nothing else
-        # from an ops checkout (no character pack).
+        # from an ops checkout (no roster).
         env:
           TC_SERVERS_JSON: ${{ secrets.SERVERS_JSON }}
         run: |

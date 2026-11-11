@@ -10,7 +10,7 @@
 //! - Bots are rounded-square tiles (radius 0.25 x size) in the bot's tint,
 //!   with its character at its live status fitted inside
 //!   (`characters::tile`). A member whose character has no art in this
-//!   build (no optional character pack) draws its initial, as if it had no
+//!   build draws its initial, as if it had no
 //!   character: a bot in its squircle, a person in its circle. The status shows as a pip with the size and
 //!   offset of a person's presence dot, only for working, needs-input and
 //!   error; callers that already show a status label skip `presence`.
@@ -120,7 +120,7 @@ impl MemberAvatar {
         self
     }
 
-    /// Draws the character at a fixed status.
+    /// Draws the character at a fixed status, with its default face.
     pub fn status(mut self, status: CharacterStatus) -> Self {
         self.status_override = Some(status);
         self
@@ -191,10 +191,10 @@ impl RenderOnce for MemberAvatar {
 
         // Bots: a tinted tile with the fitted character.
         if self.bot || self.character.is_some() {
-            let status = match (&self.character, self.status_override) {
-                (_, Some(s)) => s,
-                (Some((_, member)), None) => StatusBoard::status(cx, member),
-                (None, None) => CharacterStatus::Idle,
+            let look: characters::Look = match (&self.character, self.status_override) {
+                (_, Some(s)) => s.into(),
+                (Some((_, member)), None) => StatusBoard::look(cx, member),
+                (None, None) => CharacterStatus::Idle.into(),
             };
             // v3: the named member tint (`--c-<name>`), by name when it is
             // a roster name, else by the roster character, else by id.
@@ -239,7 +239,7 @@ impl RenderOnce for MemberAvatar {
                     )
                     .into_any_element();
             };
-            let art = characters::tile::tile_image(*c, status, size, window.scale_factor())
+            let art = characters::tile::tile_image(*c, look, size, window.scale_factor())
                 .into_any_element();
             let _ = (self.show_status, surface, &dot);
             return div()

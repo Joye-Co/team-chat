@@ -26,13 +26,13 @@ Member = {
   level: "owner" | "member"    // owner = full admin
   avatarUrl?: string | null
   deactivated?: boolean
-  character?: CharacterId | null // the avatar's character from the optional character pack; absent or null = none
+  character?: CharacterId | null // the avatar's character (Jojo & Friends avatar pack); absent or null = none
   reportsTo?: string           // 1.1: the member it reports to (汇报给); absent = nobody
   weeklyBudgetCents?: number   // 1.1: weekly spending limit in US cents (限额), 0..100,000,000; absent = none
 }
 
 CharacterId = "jojo" | "h02" | "h03" | "h04" | "h05" | "h06"
-            | "o01" | "o02" | ... | "o20"   // the 26 character pack ids, lower case
+            | "o01" | "o02" | ... | "o20"   // the 26 Jojo & Friends character ids, lower case
 
 Group = {
   id: string
@@ -571,7 +571,7 @@ Rules:
   connections. Every change is audited and pushed to every connection as `directory` with the
   changed `members`.
 - `character` is owner only (`forbidden` for a member, also on self); `null` clears it. Only
-  the 26 character pack ids are accepted (`invalid` otherwise); a new id is a protocol change,
+  the 26 Jojo & Friends character ids are accepted (`invalid` otherwise); a new id is a protocol change,
   because clients bundle the images and reject unknown ids. Clients draw the character with the
   member's live status (idle, working, needs-input, success, error, offline); members without
   one keep their initial avatar. `welcome`, `directory`, `GET /v1/members` and `GET /v1/me`

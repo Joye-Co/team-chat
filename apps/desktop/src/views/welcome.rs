@@ -35,7 +35,7 @@ impl RenderOnce for Welcome {
                     .flex_col()
                     .items_center()
                     .text_center()
-                    // The character pack is optional: no art, no picture.
+                    // Jojo greets with its calm face.
                     .when(characters::has_art(CharacterId::Jojo), |el| {
                         el.child(characters::image(
                             CharacterId::Jojo,

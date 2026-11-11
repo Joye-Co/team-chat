@@ -516,15 +516,26 @@ fn with_key_window(cx: &mut App, f: impl FnOnce(&mut gpui::Window) + 'static) {
     }
 }
 
-/// The standard macOS about panel (name, version and icon from the bundle). Other systems
-/// have no such panel: the app's own 关于 window shows the same three things
-/// ([`super::about`]).
+/// The standard macOS about panel (name, version and icon from the bundle), with the credit
+/// of the member art. Other systems have no such panel: the app's own 关于 window shows the
+/// same things ([`super::about`]).
 pub fn show_about(cx: &mut App) {
     cx.activate(true);
     #[cfg(target_os = "macos")]
     if let Some(mtm) = objc2::MainThreadMarker::new() {
+        use objc2::{AnyThread as _, rc::Retained, runtime::AnyObject};
+        use objc2_foundation::{NSAttributedString, NSDictionary, NSString};
         let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
-        app.orderFrontStandardAboutPanel(None);
+        let credits = NSAttributedString::initWithString(
+            NSAttributedString::alloc(),
+            &NSString::from_str(&super::about::credits_line()),
+        );
+        let credits: Retained<AnyObject> = credits.into();
+        // SAFETY: an AppKit constant, valid for the life of the process.
+        let key = unsafe { objc2_app_kit::NSAboutPanelOptionCredits };
+        let options = NSDictionary::from_slices(&[key], &[&*credits]);
+        // SAFETY: the options are the documented credits key with an attributed string.
+        unsafe { app.orderFrontStandardAboutPanelWithOptions(&options) };
     }
     #[cfg(not(target_os = "macos"))]
     cx.defer(super::about::open);

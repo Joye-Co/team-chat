@@ -1,6 +1,7 @@
 //! The 关于 window off the Mac. macOS has a standard about panel
 //! (`orderFrontStandardAboutPanel`: the icon, the name and the version from the bundle);
-//! Windows has none, so the app draws the same three things in a small window of its own.
+//! Windows has none, so the app draws the same things in a small window of its own. Both show
+//! the credit the member art's licence asks for ([`credits_line`]).
 //! One window: 关于 again brings it to the front. Esc closes it.
 #![cfg_attr(target_os = "macos", allow(dead_code))]
 
@@ -21,7 +22,7 @@ use crate::{
 /// The content size: the standard about panel's width, and room for the icon and two lines.
 pub const WINDOW_SIZE: Size<Pixels> = Size {
     width: px(284.),
-    height: px(204.),
+    height: px(228.),
 };
 
 /// The icon's side, as in the standard about panel.
@@ -30,6 +31,11 @@ const ICON: Pixels = px(64.);
 /// The window's title and the menu item: 关于 and the product's name.
 pub fn title() -> String {
     fill(nav::MENU_ABOUT, &[("product", env!("PRODUCT_NAME"))])
+}
+
+/// The credit of the member art (Jojo & Friends, CC BY 4.0).
+pub fn credits_line() -> String {
+    nav::ABOUT_CREDITS.to_string()
 }
 
 /// The version line, as the about panel words it.
@@ -87,6 +93,13 @@ impl Render for AboutView {
                     .tnum()
                     .text_color(k.secondary)
                     .child(version_line()),
+            )
+            .child(
+                div()
+                    .pt(space::S8)
+                    .n_footnote()
+                    .text_color(k.secondary)
+                    .child(credits_line()),
             );
         window_chrome::framed_fixed(title(), body, window, cx)
     }

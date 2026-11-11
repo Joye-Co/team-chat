@@ -41,7 +41,7 @@ Build: `. "$HOME/.cargo/env"; export RUSTC_WRAPPER=sccache CARGO_BUILD_JOBS=6; c
 | `src/theme.rs` | skeleton | Follows system light or dark; `theme::colors(cx)`, status chip colors, layout sizes |
 | `src/data.rs` | chat-core provider | `ChatProvider` trait and plain data types |
 | `src/fake.rs` | all | `FakeProvider` with sample data; its bots are sample members |
-| `src/characters/` | bot identity | Member characters: `image(character, status, size)`, the bot status rule and `StatusBoard`, the optional character pack (from `TC_OPS_DIR`, embedded by `build.rs`) |
+| `src/characters/` | bot identity | Member characters: `image(character, status, size)`, the bot status rule and `StatusBoard`, the 16 emotions and the look rule, the vendored Jojo & Friends avatar pack (`assets/characters/`, embedded by `build.rs`) |
 | `src/copy/` | all | The copy catalog, one file per area; `dev.rs` is the developer view |
 | `src/views/sidebar.rs`, `topic_list.rs` | navigation | 待办, 群, 私聊; topic list |
 | `src/views/timeline.rs` | timeline | Topic header and message list |
