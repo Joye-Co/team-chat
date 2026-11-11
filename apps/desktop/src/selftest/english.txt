@@ -1,0 +1,477 @@
+# English for the screenshot self-test (`--lang en`, see english.rs): 中文<TAB>English.
+# `{}` matches any text; see english.rs. Sample people, groups and products get English names.
+
+# --- people, groups, roles ---
+小王	Will
+王	W
+李雪	Lisa
+李	L
+陈晨	Chloe
+陈	C
+开发	Engineering
+运维	Ops
+拾光增长	Keepsake Growth
+全员	Everyone
+私聊	DMs
+开发群	Engineering
+主助手	Front desk
+产品负责人	Head of Product
+幕僚长	Chief of Staff
+测试验收	QA
+数据	Data
+前端实习	Frontend intern
+后端实习	Backend intern
+设计实习	Design intern
+运营实习	Marketing intern
+负责人	Owner
+同事	Teammates
+成员	Team
+
+# --- navigation and labels ---
+首页	Home
+话题	Topics
+产出	Artifacts
+交代	Ask
+交代给成员	Ask a member
+交给…	Hand to…
+交给 {}	Hand to {}
+交给 Jojo 安排	Let Jojo decide
+搜索	Search
+单独问	Side chat
+实时查看	Live view
+机器	Machines
+窗口	Window
+外观	Appearance
+通用	General
+通知	Notifications
+账号	Account
+快捷键	Shortcuts
+全部	All
+其他	Other
+关注	Following
+关注的话题有结果、等你处理时会提醒你。	You'll be notified when a topic you follow has results or needs you.
+提醒	Reminders
+关闭	Close
+打开	Open
+展开	Expand
+详情	Info
+编辑	Edit
+修改	Edit
+回复	Reply
+回复，或 @ 成员交代…	Reply, or @ a member to ask…
+插一句…	Chime in…
+看看	View
+选择	Choose
+重试	Retry
+撤回	Undo
+停用	Off
+停止…	Stop…
+接管	Take over
+交还	Hand back
+回放	Replay
+终端	Terminal
+计划	Plan
+检查	Checks
+达标	Met
+要求	Requirements
+验收标准	Acceptance criteria
+改动	Diff
+看改动	View changes
+录屏	Recording
+录屏 {}	Recording {}
+文件	Files
+状态	Status
+名称	Name
+版本	Version
+时间	Time
+用时	Time taken
+成本	Cost
+花费	Spend
+用时和成本	Time and cost
+在哪	Where
+在哪干活	Where it works
+做的人	Made by
+提出	Requested by
+来自话题	From topic
+被引用	Cited in
+用到的决定	Decisions used
+话题信息	Topic info
+产出信息	Artifact info
+在右侧打开	Open on the right
+和 v2 对比	Compare with v2
+和 v1 对比	Compare with v1
+回到 v3	Back to v3
+你在看 v2，不是最新版	You're viewing v2, not the latest
+有 v3	v3 available
+这一页	This page
+场景	Scenarios
+做法	Practice
+经验	Lessons
+新增	Added
+改了	Changed
+已撤回	Undone
+可能过时	Stale
+记一条	Add a note
+记得的事	Memory
+汇报给	Reports to
+汇报和限额	Reporting and limits
+每周限额	Weekly limit
+能用的工具	Tools it can use
+只读	Read-only
+可以提 PR	Can open PRs
+可以部署和回滚	Can deploy and roll back
+添加成员…	Add member…
+添加电脑	Add computer
+用这台电脑	Use this computer
+团队的电脑	Team computers
+团队 VPS	Team VPS
+办公室 Mac mini	Office Mac mini
+旧笔记本	Old laptop
+云端	Cloud
+即将推出	Coming soon
+还没有开放	Not available yet
+开放后，AI 成员也能在云端干活，不占团队的电脑。	Once available, AI members can work in the cloud without tying up team computers.
+AI 成员被 @ 后，在这些电脑上干活。	AI members work here when you @ them.
+在线	Online
+离线	Offline
+空闲	Idle
+已	
+已用	
+现在	Now
+刚刚	Just now
+今天	Today
+昨天	Yesterday
+这周	This week
+分钟	min
+
+# --- status and counts ---
+等你	For you
+等你回答	Needs your answer
+等你审	To review
+等你审 {}	Review {}
+等小王回答	Waiting on Will
+需要你拍板	Needs your call
+刚处理	Just handled
+已回答	Answered
+你选了「{}」	You chose “{}”
+你选了 A：一个输入框，粘贴自动识别	You chose A: a single field
+需要你批准的事	Needs your approval
+{} 件事等你拍板	{} things need your call
+正在做	In progress
+在做	Working
+在做事	Busy
+在做 {}	Working {}
+现在在做	Working on now
+排队	Queued
+完成	Done
+已交付	Delivered
+交付	Delivered
+今天交付	Done today
+最近交付	Recently delivered
+最近的产出	Recent artifacts
+最近的问题	Recent issues
+已合并	Merged
+未合并	Not merged
+正在合并	Merging
+已暂停	Paused
+卡住了	Stuck
+共 {} 件	{} total
+{} 个成员在干活	{} members working
+{} 步都做完了	All {} steps done
+{} 项检查通过	{} checks passed
+{} 项通过	{} passed
+{} 个文件	{} files
+{} 位	
+{} 分钟	{} min
+{} 天前在线	Online {} days ago
+已用 {}	{} elapsed
+平均 {}	Avg {}
+最早 {}	Earliest {}
+最近 {}	Latest {}
+完成 {}	Done {}
+今天 {}	Today {}
+周二 {}	Tue {}
+正在打开…	Opening…
+正在处理 {} 个话题	Working on {} topics
+正在处理 1 个话题	Working on 1 topic
+已停用 {} 条	{} turned off
+新增 1 条，改了 1 条，停用 1 条，1 条可能过时	1 added, 1 changed, 1 turned off, 1 may be outdated
+记忆更新	Memory update
+明天生效	Takes effect tomorrow
+第一版	First draft
+{} / 上限 {}	{} of {} limit
+内存 {}	Memory {}
+现在 {}	Now {}
+磁盘 {}	Disk {}
+测试 {} 项通过	{} tests passed
+{} PR	{} PRs
+{} 月	{}
+10 月	October 
+11 月 3 日 周二	Tuesday, November 3
+网页	Page
+办公室	Office
+
+# --- members and their state ---
+Forge 在用	Used by Forge
+Tata、Jojo 在用	Used by Tata, Jojo
+Forge 的电脑	Forge's computer
+Forge 用完了	Forge finished
+Forge 已暂停	Forge paused
+Forge 正在合并	Forge merging
+Forge 在做 {}	Forge working {}
+Forge 正在做：{}	Forge is working on: {}
+Forge 会在下一步前看到	Forge sees this before its next step
+Jojo 的提醒	Note from Jojo
+Jojo 转给了 Forge	Jojo handed it to Forge
+Jojo 看完再分给合适的成员	Jojo reads it and hands it to the right member
+Jojo	Jojo
+Joye 在 开发 发起	Joye started this in Engineering
+小王 在 开发 发起	Will started this in Engineering
+Joye 选了「{}」	Joye chose “{}”
+选了「{}」	Chose “{}”
+Joye 改过	Edited by Joye
+Joye 记的	Noted by Joye
+Forge 干活时记下	Noted by Forge on the job
+从两次复盘里整理出来	Distilled from two retros
+来自 Joye 的要求	Requested by Joye
+你在操作 Forge 的电脑	You're controlling Forge's computer
+你在操作它的电脑	You're controlling its computer
+接管时 Forge 先停下；交还后，它从这一步接着做。	Forge pauses while you take over. Hand it back and it continues from this step.
+你选好输入框后开始	Starts once you pick an input box
+你批准了，Forge 正在合并到 main	You approved. Forge is merging to main
+回答会记在 Ledger 的工作记录里	Your answer goes into Ledger's work log
+页面里的回应	Responses from the page
+页面里的操作会发给 Ledger	Actions on this page go to Ledger
+按渠道看	By channel
+数据有问题	Data looks off
+负责	Owns
+负责人 · 你 · 在线	Owner · You · Online
+联系	Contact
+离开	Away
+在线 · 10:12 看过断线重连的修复	Online · Looked at the reconnect fix at 10:12
+离开 · 08:50 后没回来	Away · Out since 08:50
+离线 · 周三回来	Offline · Back Wednesday
+空闲 · 明早 08:00 发晨报	Idle · Morning brief at 08:00 tomorrow
+空闲 · 09:40 交了 10 月数据月报	Idle · Delivered the October report at 09:40
+空闲 · 09:12 巡检 staging，24 项都通过	Idle · Checked staging at 09:12, all 24 passed
+在线 · 09:30 发了拾光 3.0 的文案	Online · Posted the Keepsake 3.0 copy at 09:30
+向 Tata 汇报	Reports to Tata
+在开发、运维两个群	In Engineering and Ops
+在跑压测	Running a load test
+本周 4 个话题	4 topics this week
+这周的进度、排队的事和在用的电脑	This week's progress, queue and computers in use
+来龙去脉、版本和页面能做的	Background, versions and what the page can do
+Scout 巡检 staging	Scout checks staging
+Scout	Scout
+24 项都通过	All 24 passed
+Pocket 发晨报	Pocket sends the morning brief
+巡检了 staging	Checked staging
+做好了 10 月数据月报	Finished the October report
+在话题里接着算预算	Keep working the budget in the topic
+
+# --- topics, artifacts and sample work ---
+断线重连后消息重复	Reconnect duplicates
+话题列表虚拟滚动	Virtual scrolling for the topic list
+登录页支持邀请码	Invite codes on the sign-in page
+搜索支持中文两字词	Search for two-character Chinese words
+orderbot v2.14 上线	Ship orderbot v2.14
+staging 每日巡检	Daily staging check
+拾光 3.0 宣传	Keepsake 3.0 launch
+拾光 4.0 需求	Keepsake 4.0 spec
+拾光 4.0 需求（第二版）	Keepsake 4.0 spec (v2)
+本周周报	Weekly report
+数据月报	data report
+10 月数据月报	October data report
+重连测试报告	Reconnect test report
+测试报告	Test report
+产出「{}」	Artifact “{}”
+产出「{}」{}	Artifact “{}” {}
+v2	v2
+v3	v3
+Ledger 做的	Made by Ledger
+社媒发布	Social posts
+确认微博草稿，周四 20:00 发	Approve the X post, goes out Thu 20:00
+这条微博确认后，周四 20:00 发出	Once approved, this X post goes out Thursday at 20:00
+写第二版需求	Writing spec v2
+等它们交稿	Waiting on their drafts
+跑一万条消息的压测	Load test with 10,000 messages
+Mac mini — 跑一万条消息的压测	Mac mini — Load test with 10,000 messages
+PR #58 话题加载更快	PR #58 Faster topic loading
+PR #61 按 seq 去重	PR #61 Dedupe by seq
+提 PR	Open PR
+提 PR #61	Opened PR #61
+审 PR #61	Review PR #61
+合并到 main	Merge to main
+批准合并	Approve & merge
+要求修改…	Request changes…
+发布到生产	Ship to production
+把 orderbot v2.14 发布到生产吗？	Ship orderbot v2.14 to production?
+批准 orderbot v2.14 发布到生产	Approve orderbot v2.14 for production
+批准后 Forge 合并到 main，话题完成	Once approved, Forge merges to main and the topic closes
+改好了重连后的重复消息	Fixed duplicate messages after reconnect
+改好了，请你审 PR #61	Done. Please review PR #61
+改好了：重连后不再重复	Fixed: no more duplicates after reconnect
+改成指数退避	Switch to exponential backoff
+改成指数退避，放进同一个 PR	Exponential backoff, same PR
+按 seq 去重并从确认处续传	Dedupe by seq and resume from the last ack
+按 seq 去重，从最后确认的 seq 续传	Dedupe by seq, resume from the last acked seq
+复现重复消息	Reproduce the duplicates
+找到重复的原因	Find the cause
+换成虚拟列表	Switch to a virtual list
+读现有列表实现	Read the current list code
+修滚动锚点	Fix the scroll anchor
+修正日活口径	Fix the DAU definition
+加了渠道拆分	Added a per-channel breakdown
+日活按去重设备算	DAU counts unique devices
+一万条消息滚动不卡	Smooth scrolling at 10,000 messages
+内存不涨	Memory stays flat
+跳到第 8,000 条后位置不跳	Position holds after jumping to message 8,000
+跳到第 8,000 条，检查滚动位置…	Jumping to message 8,000, checking scroll position…
+生成 10,000 条消息… 完成	Generating 10,000 messages… done
+打开话题列表，自动滚动 60 秒	Opening the topic list, auto-scrolling for 60 s
+滚动 60 秒：平均 118 fps，最低 57 fps	60 s scroll: avg 118 fps, min 57 fps
+断网 5 秒	Offline 5 s
+断网 60 秒	Offline 60 s
+最长重连	Longest reconnect
+合盖休眠 10 分钟	Lid closed 10 min
+CI 超时，PR #59 的检查没跑完	CI timed out before PR #59's checks finished
+重连后重复.mov	duplicate-after-reconnect.mov
+重连之后同一条消息会出现两次，录屏在这里。	After a reconnect the same message shows up twice. Recording attached.
+收到，先复现，大约 30 分钟。	On it. Reproducing first, about 30 min.
+收到。先读现有实现，再换虚拟列表，最后用一万条消息压测。	On it. I'll read the current code, switch to a virtual list, then load-test with 10,000 messages.
+原因是客户端重连后从旧的 seq 重新拉取，服务器把已经收到的消息又推了一遍。现在按 seq 去重，重连时从最后一个确认过的 seq 继续；重连间隔也改成了指数退避。	The client was re-fetching from a stale seq after reconnecting, so the server pushed messages it already had. Now it dedupes by seq and resumes from the last acknowledged one, and the reconnect delay uses exponential backoff.
+本地试了，没再出现重复。	Tried it locally, no more duplicates.
+重连间隔用固定 5 秒，还是改成指数退避？要不要放进同一个 PR？	Keep the fixed 5 s reconnect delay or switch to exponential backoff? And in the same PR?
+话题列表到一万条会卡，换成虚拟列表，滚动要稳在 60 fps 以上。	The topic list stutters at 10,000 messages. Switch to a virtual list and keep scrolling above 60 fps.
+登录只用邀请码，不做手机号	Sign in with invite codes only, no phone numbers
+邀请码输入框用哪种？	Which invite code input should we use?
+先批 Watch 的发布。晚上 8 点是群里的高峰，越早发越稳。	Approve Watch's release first. 8 PM is peak time in the groups, so earlier is safer.
+开一个话题：拉一下 10 月各渠道的新增	New topic: pull October signups by channel
+让 Ledger 拉一下 10 月各渠道的新增	Ledger, pull October signups by channel
+发到 拾光增长	Post to Keepsake Growth
+orderbot、拾光、TeamChat 三个仓库	The orderbot, Keepsake and TeamChat repos
+单次花费超过 ¥50	Any single run over $50
+改生产环境配置	Change production config
+做这些事之前会先发卡片，等交代的人或管理员批准。	Before doing any of these, it sends a card and waits for the requester or an admin to approve.
+压测用 1000 条消息就够了。	1,000 messages is enough for a load test.
+被「{}」取代	Replaced by “{}”
+依据：11 月 1 日和 2 日两次回滚，都是没跑压测就合并了	Why: both rollbacks on Nov 1 and 2 were merged without a load test
+发版的做法里少了「更新下载页」这一步，可能过时了	The release steps are missing “update the download page” and may be outdated
+原来：构建失败就重试一次。	Before: retry once when a build fails.
+Forge 干活时会参考这些。每天整理一次，记错了直接改或停用。	Forge uses these while it works. They're reviewed daily; edit or turn off anything that's wrong.
+合并前先在 staging 跑一万条消息的压测，过了再开 PR。	Before merging, run a 10,000-message load test on staging. Open the PR only after it passes.
+Swift 构建报找不到模块时，先清掉 DerivedData 再构建一次，别急着改代码。	If a Swift build can't find a module, clear DerivedData and rebuild before touching any code.
+交付说明写三行以内：做了什么、怎么验的、还差什么。	Keep delivery notes to three lines: what changed, how it was verified, what's left.
+接口超时先查 D1 的慢查询，再看 Worker 日志。	On API timeouts, check D1 slow queries first, then the Worker logs.
+日志里看到 429 就把并发降到 1。	If the logs show 429s, drop concurrency to 1.
+界面改动的 PR 描述里放浅色和深色两张截图，Joye 审的时候先看图。	UI PRs include light and dark screenshots in the description. Joye looks at those first.
+发版：改版本号 → 写更新说明 → 打 tag → 等 CI 出安装包 → 先在 staging 装一遍，再发正式。	Release: bump the version → write release notes → tag → wait for CI to build installers → install on staging, then ship.
+重现重连问题：两台 Mac 登同一个账号，一台断网 30 秒再连上，看消息有没有重复或丢失。	To reproduce the reconnect bug: sign in to one account on two Macs, take one offline for 30 s, reconnect, and check for duplicate or missing messages.
+适用：{}	When: {}
+Mac 上构建失败	a build fails on the Mac
+staging 巡检报超时	the staging check reports timeouts
+开界面相关的 PR	opening a UI PR
+改了消息同步或重连的代码	changing message sync or reconnect code
+要发新版本	shipping a new version
+B 站	YouTube
+{} 后没回来	Out since {}
+{} 巡检 staging，24 项都通过	Checked staging at {}, all 24 passed
+{} 巡检 staging	Checked staging at {}
+{} 发了拾光 3.0 的文案	Posted the Keepsake 3.0 copy at {}
+{} 交了 10 月数据月报	Delivered the October report at {}
+{} 看过断线重连的修复	Looked at the reconnect fix at {}
+Joye 提出	Requested by Joye
+周三回来	Back Wednesday
+明早 08:00 发晨报	Morning brief at 08:00 tomorrow
+版本 {}	v{}
+已用 {} 分钟	{} min elapsed
+{} 小时 {}	{} h {}
+合并前先在 staging 跑一万条消息的压测	Run a 10,000-message load test on staging before merging
+单独问 {}	Side chat with {}
+昨天 {}	Mon {}
+1 网页	1 page
+
+# --- the eight homepage cards ---
+2 个方案选一个	Pick 1 of 2
+今天 12:00 前	Due today 12:00
+拾光 4.0 首页用哪个方案？	Which home screen for Keepsake 4.0?
+两个都做成了能点的原型。访谈了 6 位群主，5 位说在群里找照片最难。	Both are clickable prototypes. Of the 6 group owners we interviewed, 5 said finding photos is the hardest part.
+按活动整理	Sorted by event
+推荐	Recommended
+找照片最快，5 位群主都提到	Fastest way to find photos, all 5 owners asked for it
+每个活动要先归类，第一次打开要等几秒	Events need sorting first, so the first open takes a few seconds
+按时间排	Sorted by date
+不用整理，做起来最快	No sorting needed, quickest to build
+照片一多就难找，和 3.0 差别不大	Hard to search once photos pile up, barely different from 3.0
+选这个	Choose this
+说说为什么，Tata 会写进需求（可选）	Say why (optional), and Tata will add it to the spec
+确定	Confirm
+打开原型	Open prototypes
+Forge 在等你批准	Forge is waiting for your approval
+Watch 在等你批准	Watch is waiting for your approval
+Taro 在等你确认	Taro is waiting for your OK
+PR #61 重连后按 seq 去重	PR #61 Dedupe by seq after reconnect
+通过	Approve
+要改	Request changes
+在 GitHub 打开	Open in GitHub
+10 月数据月报 v3	October data report v3
+10 月的三个数	October in three numbers
+新增群	New groups
+日活	DAU
+平均回复	Avg reply
+比 9	vs Sep
+秒	s
+{} 秒	{} s
+越低越好	lower is better
+近 4 周	last 4 weeks
+9 月	September
+包含	Includes
+验收	Verified
+影响	Impact
+群相册分享、撤回同步、告警降噪，共 3 个 PR	3 PRs: album sharing, recall sync, quieter alerts
+Scout 今天 09:10 在 staging 验收通过	Scout verified it on staging today at 09:10
+所有群重启约 2 分钟；出问题可以一键回到 v2.13	All groups restart for about 2 minutes. One click rolls back to v2.13
+先不发	Not yet
+验收报告	QA report
+要输入名字确认	Type the name to confirm
+确认发布	Approve & post
+拾光 3.0｜群里的照片，一键分享回群	Keepsake 3.0 | Share group photos back in one tap
+拾光 3.0｜群里的照片一键分享回群	Keepsake 3.0 | Share group photos back in one tap
+以前在群里找一张合照要翻半天。3.0 把群里的照片按活动自动整理好，点一下就能分享回群。	Finding one group photo used to take forever. 3.0 sorts your group's photos by event, and one tap shares them back.
+在群里找一张合照，以前要翻半天。3.0 把群里的照片按活动自动整理好，点一下就能分享回群。周四晚上 8 点，群里见。	Finding one group photo used to take forever. 3.0 sorts your group's photos by event, and one tap shares them back. See you in the group Thursday at 8 PM.
+改一下	Edit
+不发了	Don't post
+发出后不能撤回	Can't be undone once sent
+选一个时间段	Pick a time
+下周周会定在哪个时间？	When should next week's team meeting be?
+我看了每个人的日历。三个时间都能来，周二 14:00 离周一的计划会最近。	I checked everyone's calendar. Three slots work for all; Tue 14:00 is closest to Monday's planning.
+周三 {}	Wed {}
+周四 {}	Thu {}
+缺 2 人	2 can't come
+缺 3 人	3 can't come
+缺 {}	{} can't come
+都能来	Everyone's free
+定了以后 Pocket 发日历邀请	Pocket sends calendar invites once it's set
+定这个时间	Book this time
+等 2 位成员回答	Waiting on 2 members
+已投 {}	{} voted
+今天 18:00 截止	closes today 18:00
+orderbot 下个版本先做哪个？每人一票	What should orderbot tackle next? One vote each
+群相册按人物整理	Group albums by person
+定时提醒	Scheduled reminders
+入群欢迎卡片	Welcome card for new members
+1 票	1 vote
+{} 票	{} votes
+还没投：{}	Not voted yet: {}
+Alex Chen、陈晨	Alex Chen, Chloe
+投票公开，谁投了什么大家都看得到	Votes are public: everyone sees who picked what
+截止前可以改票	You can change your vote until it closes
+图片选择	Image choice
+微博封面用哪张？	Which cover for the X post?
+合照拼图	Group collage
+大字标题	Big headline
+手机截图	Phone screenshot
+Taro 推荐大字标题：上一条大字封面的点击率高了 40%。	Taro recommends the big headline: the last big-type cover got 40% more clicks.
+选好后草稿里的封面会换掉	Your pick replaces the cover in the draft
+用这张	Use this one
+已 {}	{}

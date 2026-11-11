@@ -51,6 +51,12 @@ export const MemoryItem = z.object({
   version: z.int().min(1),
   createdAt: Millis,
   updatedAt: Millis,
+  /**
+   * An AI member's memory learned in a group or a direct conversation: the group's id. Only people
+   * in that group read it, and only runs whose whole group is in it carry it. `"unknown"`: noted
+   * before the group was recorded; only owners read it until one releases it. Absent: no limit.
+   */
+  fromGroup: z.string().min(1).max(64).optional(),
 });
 export type MemoryItem = z.infer<typeof MemoryItem>;
 
@@ -123,5 +129,7 @@ export const MachineMemoryNoteRequest = z.object({
   kind: MemoryKind,
   text: MemoryText,
   when: MemoryWhen.optional(),
+  /** `group`: the person's message in this group the convention comes from. Without one (or not a person's), the note goes to the member's own memory. */
+  sourceMessageId: Id.optional(),
 });
 export type MachineMemoryNoteRequest = z.infer<typeof MachineMemoryNoteRequest>;

@@ -47,6 +47,8 @@ export function addMemoryFixtures({ ok, bad, T0, ID }: MemoryCtx) {
   ok("entities/memory-item-pending-lesson.json", "MemoryItem", lesson, "an AI member's lesson from a run, waiting for the daily consolidation");
   bad("entities/memory-item-bad-scope.json", "MemoryItem", { ...item, scope: "everyone" }, "scope is team, group:<id>, member:<id> or person:<id>");
   bad("entities/memory-item-long-text.json", "MemoryItem", { ...item, text: "记".repeat(501) }, "text is at most 500 characters");
+  ok("entities/memory-item-from-group.json", "MemoryItem", { ...lesson, fromGroup: ID.general }, "an AI member's lesson learned in one group: only that group's people read it");
+  bad("entities/memory-item-from-group-empty.json", "MemoryItem", { ...lesson, fromGroup: "" }, "fromGroup is a group id or \"unknown\", never empty");
 
   ok("http/create-memory-request.json", "CreateMemoryRequest", { scope: `group:${ID.general}`, kind: "convention", text: "周五不上线", when: "要发布的时候", source: { kind: "message", ids: [ID.msg] } });
   ok("http/create-memory-request-minimal.json", "CreateMemoryRequest", { scope: `person:${ID.alice}`, kind: "preference", text: "回复要短" });
@@ -88,5 +90,6 @@ export function addMemoryFixtures({ ok, bad, T0, ID }: MemoryCtx) {
   bad("http/memory-updates-response-bad-day.json", "MemoryUpdatesResponse", { day: "9 Nov", updates: [] }, "day is YYYY-MM-DD");
 
   ok("machine/memory-note-request.json", "MachineMemoryNoteRequest", { scope: "member", kind: "lesson", text: "这个仓库的测试要先 bun install", when: "跑测试之前" });
+  ok("machine/memory-note-request-group-source.json", "MachineMemoryNoteRequest", { scope: "group", kind: "convention", text: "这个群周五不上线", sourceMessageId: ID.msg }, "a group convention with the person's message it comes from");
   bad("machine/memory-note-request-team.json", "MachineMemoryNoteRequest", { scope: "team", kind: "convention", text: "x" }, "a run never writes team memory");
 }

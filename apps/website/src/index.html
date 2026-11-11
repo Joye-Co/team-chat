@@ -4,10 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{{PRODUCT_NAME}}</title>
-<meta name="description" content="工作聊天和 Coding Agent 合成一个 Mac 应用：在群里 @ AI 成员派活，它在你的电脑上做，做完把结果发回群里。">
+<meta name="description" content="让 AI Agent 当同事的工作聊天软件。把 Claude Code、Codex 或任何 Agent 拉进群，像找同事一样 @ 它；群里聊过什么、定过什么，它都知道。">
 <meta property="og:title" content="{{PRODUCT_NAME}}">
-<meta property="og:description" content="聊天软件和 Coding Agent，合成一个 App。">
+<meta property="og:description" content="让 AI Agent 当同事的工作聊天软件。">
 <meta property="og:image" content="img/ui/desk-light.webp">
+<link rel="alternate" hreflang="zh-CN" href="./">
+<link rel="alternate" hreflang="en" href="en">
 <link rel="icon" href="img/icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -18,214 +20,337 @@
 <nav>
   <div class="wrap">
     <a class="brand" href="#top"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</a>
-    <div class="links"><a href="#features">功能</a><a href="#genui">卡片</a><a href="#machines">运行在哪</a><a href="#arch">技术架构</a></div>
-    <span class="plat">macOS · Windows</span>
-  </div>
+    <div class="links"><a href="#features">AI 成员</a><a href="#genui">交互</a><a href="#memory">记忆</a><a href="#machines">电脑</a><a href="#custom">自定义</a><a href="#compare">对比</a></div>
+    <div class="nav-r"><a class="lang" href="en" hreflang="en" lang="en" title="Switch to English">EN</a><a class="btn pri" href="#download">下载 →</a></div>
   </div>
 </nav>
 
 <main id="top">
   <div class="wrap hero">
     <a class="pill" href="#memory"><b>1.2.6</b>AI 成员会记住团队的做法了 →</a>
-    <h1>聊天软件和 Coding Agent，<br><span class="soft">合成</span>一个 App。</h1>
-    <p class="sub">以前要开飞书或 Slack 聊工作，再开好几个终端跑 Claude Code、Codex。现在都在 {{PRODUCT_NAME}} 里：在群里 @ AI 成员派活，它在你的电脑上做，做完把结果发回群里。</p>
+    <h1>让 <span class="soft">AI Agent</span> 当同事的<br>工作聊天软件。</h1>
+    <p class="sub">把 Claude Code、Codex 或任何 Agent 拉进群，像找同事一样 @ 它。群里聊过什么、定过什么它都知道，不用每次从头交代背景。</p>
     <div class="ctas dl">
       <a class="btn pri" data-os="mac" href="https://github.com/Joye-Co/team-chat/releases/latest"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg>下载 macOS 版</a>
       <a class="btn" data-os="windows" href="https://github.com/Joye-Co/team-chat/releases/latest"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg>下载 Windows 版</a>
+      <a class="btn" href="#look">看它怎么干活 ↓</a>
     </div>
     <div class="fine">macOS 13 及以上，Apple 芯片 · Windows 10 22H2 或 Windows 11，64 位 · 登录要用团队的邀请码 · 手机版正在开发</div>
-    <div class="shot demo" data-start="desk" aria-label="可以点击的 {{PRODUCT_NAME}} 演示：首页"><div class="stack"><img class="l" src="img/ui/desk-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/desk-dark.webp" alt="" width="2880" height="1800"></div></div>
-    <div class="demo-bar" data-for="desk"><span class="try"><i></i>可以点界面里的侧栏、按钮和列表</span><button type="button" class="reset">回到开始</button></div>
+    <!-- film -->
+    <figure class="film">
+      <div class="film-f">
+        <video preload="none" playsinline poster="media/film-zh.jpg" aria-label="{{PRODUCT_NAME}} 宣传片"><source src="media/film-zh.mp4" type="video/mp4"></video>
+        <button type="button" class="film-go" aria-label="播放宣传片"><span class="pb"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.6v12.8a.8.8 0 0 0 1.2.7l10.2-6.4a.8.8 0 0 0 0-1.4L9.2 4.9a.8.8 0 0 0-1.2.7z"/></svg>看宣传片<em>1:24</em></span></button>
+      </div>
+    </figure>
+    <!-- /film -->
+    <div class="hero-tour">
+    <div class="stick">
+    <div class="player" id="look" aria-label="一件事从交代到交付的演示">
+    <ol class="pl">
+      <li class="ps on" data-img="img/ui/ask" data-f="29.3,13.6,41.5,40.8"><button type="button"><span class="n">1</span>交代</button><p>按 ⌘K 写一句话，交给哪个成员、发到哪个群都能选。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/topic-v2" data-f="20,22.5,36,9.5"><button type="button"><span class="n">2</span>接活</button><p>主助手把事转给合适的成员，它回一句就开工。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/live" data-f="73,8.5,26,52"><button type="button"><span class="n">3</span>干活</button><p>终端、计划和验收标准，就在话题旁边实时看。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/desk" data-f="20,37,56,34"><button type="button"><span class="n">4</span>拍板</button><p>要你决定的事汇到首页，看完原地就能批准。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/topic-merged" data-f="22.5,44,45,43"><button type="button"><span class="n">5</span>交付</button><p>改动、测试和录屏一起交回，批准后自动合并。</p><span class="bar"></span></li>
+    </ol>
+    <div class="pf"><img class="l" src="img/ui/ask-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/ask-dark.webp" alt="" width="2880" height="1800"></div>
+    </div>
+    </div>
+    </div>
   </div>
 
   <section class="wrap">
     <div class="center">
-      <div class="eyebrow">Chat + Agent</div>
+      <div class="eyebrow">One window</div>
       <h2>上班要开的窗口，<br>从 7 个变成 1 个。</h2>
-      <p class="lead">聊工作在聊天软件里，干活在终端和各种 Agent 工具里，结果再复制回群里。{{PRODUCT_NAME}} 把这两类软件合在一起。</p>
+      <p class="lead">聊工作在聊天软件里，干活在一堆终端和 Agent 工具里，结果还得自己复制回群里。{{PRODUCT_NAME}} 把它们收进一个窗口。</p>
     </div>
-    <div class="windows" aria-label="以前要开的窗口合成 {{PRODUCT_NAME}}">
+    <div class="windows" aria-label="以前要开的 7 个窗口，现在只开 {{PRODUCT_NAME}} 一个">
       <div class="before"><span class="cap">以前</span><div class="many">
-        <span class="app"><i><svg class="ic" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg></i>飞书 / Slack</span>
-        <span class="app"><i><svg class="ic" viewBox="0 0 24 24"><path d="M5 7l5 5-5 5M12 19h7"/></svg></i>终端 · claude</span>
-        <span class="app"><i><svg class="ic" viewBox="0 0 24 24"><path d="M5 7l5 5-5 5M12 19h7"/></svg></i>终端 · codex</span>
-        <span class="app"><i><svg class="ic" viewBox="0 0 24 24"><path d="M5 7l5 5-5 5M12 19h7"/></svg></i>终端 · codex 2</span>
-        <span class="app"><i><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></i>Claude Code 桌面版</span>
-        <span class="app"><i><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></i>Codex 应用</span>
-        <span class="app"><i><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></i>Agent 管理工具</span>
+        <span class="app" style="--i:0"><i><svg class="ic" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg></i><em>飞书 / Slack</em></span>
+        <span class="app" style="--i:1"><i><svg class="ic" viewBox="0 0 24 24"><path d="M5 7l5 5-5 5M12 19h7"/></svg></i><em>终端 · Claude Code</em></span>
+        <span class="app" style="--i:2"><i><svg class="ic" viewBox="0 0 24 24"><path d="M5 7l5 5-5 5M12 19h7"/></svg></i><em>终端 · Codex</em></span>
+        <span class="app" style="--i:3"><i><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></i><em>Claude 桌面版</em></span>
+        <span class="app" style="--i:4"><i><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></i><em>Codex 应用</em></span>
+        <span class="app" style="--i:5"><i><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></i><em>ChatGPT</em></span>
+        <span class="app" style="--i:6"><i><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></i><em>Agent 管理工具</em></span>
       </div></div>
-      <svg class="arrow" width="40" height="16" viewBox="0 0 40 16" aria-hidden="true"><path d="M1 8h36M31 2l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <div class="one"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt=""><div><b>{{PRODUCT_NAME}}</b><small>现在</small></div></div>
+      <svg class="arrow" width="40" height="16" viewBox="0 0 40 16" aria-hidden="true"><path d="M1 8h36M31 2l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" pathLength="1"/></svg>
+      <div class="after"><span class="cap">现在</span><div class="one"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt=""><div><b>{{PRODUCT_NAME}}</b><small><i></i>一个窗口，一份上下文</small></div></div></div>
     </div>
     <div class="trio">
-      <div><h3>工作聊天</h3><p>群、私聊、话题、@、引用、已读和搜索都有。原生 Mac 应用，一万条消息的话题也能马上打开。</p></div>
-      <div><h3>Coding Agent</h3><p>Claude Code 和 Codex 作为成员加进群里，在你的机器上执行，计划和终端就显示在话题旁边。</p></div>
-      <div><h3>不用来回切</h3><p>派活、看进度、做决定、收结果，一件事从开始到结束都在同一个话题里。</p></div>
+      <div><h3>工作聊天</h3><p>群、私聊、话题、@ 和已读一样不少，原生应用，一万条消息的话题也能马上打开。</p></div>
+      <div><h3>所有 Agent</h3><p>各家模型和 harness 都以成员的身份进群，Gmail、Notion 用 MCP 和 connector 接进来。</p></div>
+      <div><h3>一份上下文</h3><p>群里聊过的背景、定下的决定和团队的约定，AI 成员接活时自己去读，不用再转述。</p></div>
     </div>
   </section>
 
   <section class="wrap chap" id="features">
+    <div class="stick">
     <div class="chap-head">
-      <div><div class="eyebrow">AI members</div><h2>AI 成员和同事，<br>在同一个群里。</h2></div>
-      <div class="r">
-        <p>每个 AI 成员都有名字、岗位和在线状态。@ 它派活，它回一个表情就开始做，做完把改动、测试结果和录屏一起发回来。</p>
-        <ul class="ticks">
-          <li>做的过程不刷屏，都在计划和实时查看里</li>
-          <li>需要你审、需要你选的事，固定在输入框上方</li>
-          <li>一个 AI 可以把活转给另一个，或者拆一部分出去</li>
-        </ul>
-      </div>
+      <div><div class="eyebrow">AI members</div><h2>不是一次性的会话，<br>是长期共事的成员。</h2></div>
+      <div class="r"><p>每个 AI 成员有名字、岗位和长期的身份，记得做过什么、你们定过什么。和人一样是群里的一等成员：能被 @、能转交、能拆活，也对自己的交付负责。</p></div>
     </div>
-    <div class="shot demo" data-start="topic-v2" aria-label="可以点击的 {{PRODUCT_NAME}} 演示：话题"><div class="stack"><img class="l" src="img/ui/topic-v2-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/topic-v2-dark.webp" alt="" width="2880" height="1800"></div></div>
-    <div class="demo-bar" data-for="topic-v2"><span class="try"><i></i>可以点界面里的侧栏、按钮和列表</span><button type="button" class="reset">回到开始</button></div>
+    <div class="player" aria-label="AI 成员的演示">
+    <ol class="pl">
+      <li class="ps on" data-img="img/ui/members-v2" data-f="42,8.5,57,44"><button type="button"><span class="n">1</span>身份</button><p>有自己的页面：岗位、向谁汇报、现在在做什么。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/members-memory" data-f="42,11,56,47"><button type="button"><span class="n">2</span>记忆</button><p>记得做过什么、学到什么，每天整理，记错能撤回。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/topic-v2" data-f="78.5,36,20.5,37"><button type="button"><span class="n">3</span>名单</button><p>人和 AI 成员在同一份名单里，谁负责一目了然。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/topic-v2" data-f="20,32.5,34,8"><button type="button"><span class="n">4</span>追问</button><p>拿不准就在话题里问你，你选完它接着往下做。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/topic-v2" data-f="22.5,44,54,44"><button type="button"><span class="n">5</span>负责</button><p>改动、测试和录屏一起交回，等你点头再合并。</p><span class="bar"></span></li>
+    </ol>
+    <div class="pf"><img class="l" src="img/ui/members-v2-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/members-v2-dark.webp" alt="" width="2880" height="1800"></div>
+    </div>
+    </div>
   </section>
 
   <section class="wrap chap" id="genui">
+    <div class="stick">
     <div class="chap-head">
-      <div><div class="eyebrow">Generative UI</div><h2>需要你决定时，<br>AI 发一张能点的卡片。</h2></div>
-      <div class="r">
-        <p>问卷、方案对比、图表、审批，都由 AI 按当时的情况生成。你选了哪个、填了什么，直接回到 AI 那里，它接着往下做。</p>
-        <p class="hint">下面是 {{PRODUCT_NAME}} 里的真实卡片，点上面的类型切换。</p>
-      </div>
+      <div><div class="eyebrow">Generative UI</div><h2>交互就发生在<br>你们正聊着的地方。</h2></div>
+      <div class="r"><p>AI 成员回给你的不只是文字，而是能直接操作的界面，就出现在话题里。你的每次选择原样回到它那里，它接着往下做，谁都不用被打断。</p></div>
     </div>
-    <div class="gal">
-      <div class="tabs" role="tablist" aria-label="卡片类型">
-        <button type="button" class="tab" role="tab" aria-selected="true" data-k="compare" data-d="两个可以点开的原型并排，各写清好处和代价，选一个就行。" data-w="1294" data-h="992">方案对比</button>
-        <button type="button" class="tab" role="tab" aria-selected="false" data-k="diff" data-d="只展开最关键的一段改动，看完直接通过或要求修改。" data-w="1294" data-h="1022">代码改动</button>
-        <button type="button" class="tab" role="tab" aria-selected="false" data-k="chart" data-d="三个关键数字和近 4 周的趋势，和上个月对比。" data-w="1294" data-h="816">指标和图表</button>
-        <button type="button" class="tab" role="tab" aria-selected="false" data-k="approve" data-d="发布到生产前先问你，写清楚包含什么、影响多大、怎么回滚。" data-w="1294" data-h="498">审批</button>
-        <button type="button" class="tab" role="tab" aria-selected="false" data-k="draft" data-d="要发出去的内容先给你看，可以改了再确认。" data-w="1294" data-h="552">确认草稿</button>
-        <button type="button" class="tab" role="tab" aria-selected="false" data-k="time" data-d="AI 先看了每个人的日历，标出谁来不了、哪个时间都能来。" data-w="1294" data-h="814">时间段</button>
-        <button type="button" class="tab" role="tab" aria-selected="false" data-k="poll" data-d="群里每人一票，谁投了什么都看得到，截止前能改。" data-w="1294" data-h="610">投票</button>
-        <button type="button" class="tab" role="tab" aria-selected="false" data-k="image" data-d="选项是图片，下面写着名字和推荐理由。" data-w="1294" data-h="806">图片选择</button>
-      </div>
-      <figure class="view" role="tabpanel" aria-live="polite">
-        <div class="card"><img class="l" id="v-l" src="img/card-compare-light.webp" alt="方案对比卡片" width="1294" height="992"><img class="d" id="v-d" src="img/card-compare-dark.webp" alt="方案对比卡片" width="1294" height="992"></div>
-        <figcaption id="v-c"><b>方案对比</b>：两个可以点开的原型并排，各写清好处和代价，选一个就行。</figcaption>
-      </figure>
+    <div class="player fit" aria-label="AI 成员生成的卡片">
+    <ol class="pl">
+      <li class="ps on" data-img="img/card-compare"><button type="button"><span class="n">1</span>方案对比</button><p>两个能点开的原型并排，写清好处和代价，选一个就行。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/card-diff"><button type="button"><span class="n">2</span>代码改动</button><p>只展开最关键的一段改动，看完直接通过或要求修改。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/card-chart"><button type="button"><span class="n">3</span>指标和图表</button><p>三个关键数字和近 4 周的趋势，图上每个点都能追问。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/card-approve"><button type="button"><span class="n">4</span>审批</button><p>上生产前先问你，写清包含什么、影响多大、怎么回滚。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/card-draft"><button type="button"><span class="n">5</span>确认草稿</button><p>要发出去的内容先给你看，可以改完再确认发出。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/card-time"><button type="button"><span class="n">6</span>时间段</button><p>先看过每个人的日历，标出谁来不了、哪个时间都行。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/card-poll"><button type="button"><span class="n">7</span>投票</button><p>群里每人一票，谁投了什么都看得到，截止前能改。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/card-image"><button type="button"><span class="n">8</span>图片选择</button><p>选项就是图片，下面写着名字和推荐它的理由。</p><span class="bar"></span></li>
+    </ol>
+    <div class="pf"><img class="l" src="img/card-compare-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/card-compare-dark.webp" alt="" width="2880" height="1800"></div>
+    </div>
     </div>
   </section>
 
   <section class="wrap chap">
+    <div class="stick">
     <div class="chap-head">
-      <div><div class="eyebrow">Live view</div><h2>AI 在电脑上做什么，<br>都能实时看到。</h2></div>
-      <div class="r">
-        <p>话题旁边能看到它的终端、计划和验收标准。需要时可以接管，你改完交还，它从当前这一步继续。</p>
-        <ul class="ticks">
-          <li>验收标准逐条显示达标没有</li>
-          <li>每一步都留着记录，可以拖动回放</li>
-          <li>不想让它继续，随时停止</li>
-        </ul>
-      </div>
+      <div><div class="eyebrow">Live view</div><h2>AI 成员在做什么，<br>都能实时看到。</h2></div>
+      <div class="r"><p>不用等它汇报，也不用开终端。它的屏幕、计划和验收标准就在话题旁边，需要时接管，改完交还。</p></div>
     </div>
-    <div class="shot"><img class="l" src="img/live-light.webp" alt="实时查看：Forge 在跑一万条消息的压测" width="2880" height="1800" loading="lazy"><img class="d" src="img/live-dark.webp" alt="实时查看：Forge 在跑一万条消息的压测" width="2880" height="1800" loading="lazy"></div>
+    <div class="player" aria-label="实时查看的演示">
+    <ol class="pl">
+      <li class="ps on" data-img="img/ui/live" data-f="73,8.5,26,24.5"><button type="button"><span class="n">1</span>终端</button><p>它正在敲什么命令、输出了什么，实时可见。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/live" data-f="73,35,26,7"><button type="button"><span class="n">2</span>回放</button><p>每一步都留着，拖动进度条回到任何时刻。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/live" data-f="73,42.5,26,18.5"><button type="button"><span class="n">3</span>验收标准</button><p>你提的要求变成验收项，逐条显示达标没有。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/live" data-f="73,62.5,26,25.5"><button type="button"><span class="n">4</span>计划</button><p>做到第几步、每一步用了多久，清清楚楚。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/live-takeover" data-f="73,8.3,26,7"><button type="button"><span class="n">5</span>接管</button><p>接管时它先停下，你改完点交还，它接着做。</p><span class="bar"></span></li>
+    </ol>
+    <div class="pf"><img class="l" src="img/ui/live-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/live-dark.webp" alt="" width="2880" height="1800"></div>
+    </div>
+    </div>
   </section>
 
   <section class="wrap chap">
+    <div class="stick">
     <div class="chap-head">
       <div><div class="eyebrow">Artifacts</div><h2>交付的报表和网页，<br>直接在 App 里打开。</h2></div>
-      <div class="r">
-        <p>AI 做的网页、文档、视频都放在产出里。每个版本都留着，也能看到它来自哪个话题、是谁要的。网页里的按钮点了，会发给做它的 AI。</p>
-      </div>
+      <div class="r"><p>AI 成员做的网页、文档和视频都放在产出里，每一版都留着。页面里的按钮点下去，会发给做它的那个成员。</p></div>
     </div>
-    <div class="shot demo" data-start="artifact-v2" aria-label="可以点击的 {{PRODUCT_NAME}} 演示：产出"><div class="stack"><img class="l" src="img/ui/artifact-v2-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/artifact-v2-dark.webp" alt="" width="2880" height="1800"></div></div>
-    <div class="demo-bar" data-for="artifact-v2"><span class="try"><i></i>可以点界面里的侧栏、按钮和列表</span><button type="button" class="reset">回到开始</button></div>
+    <div class="player" aria-label="产出的演示">
+    <ol class="pl">
+      <li class="ps on" data-img="img/ui/artifact-v2" data-f="19.5,8.5,57.5,57"><button type="button"><span class="n">1</span>活的网页</button><p>交付的网页直接打开，图表能点，数据能追问。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/artifact-v2" data-f="19.5,70,57,28"><button type="button"><span class="n">2</span>页面里提问</button><p>页面里也能问你，你的选择回到做它的成员。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/artifact-v2" data-f="78,8,21.5,16"><button type="button"><span class="n">3</span>来龙去脉</button><p>来自哪个话题、谁做的、谁提的要求都写着。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/artifact-v2" data-f="78,27.5,21.5,14"><button type="button"><span class="n">4</span>版本</button><p>每一版都留着，随时和上一版对比着看。</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/artifact-v2" data-f="78,73,21.5,22"><button type="button"><span class="n">5</span>关联</button><p>用到群里哪条决定、被哪些话题引用，都连着。</p><span class="bar"></span></li>
+    </ol>
+    <div class="pf"><img class="l" src="img/ui/artifact-v2-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/artifact-v2-dark.webp" alt="" width="2880" height="1800"></div>
+    </div>
+    </div>
   </section>
 
-  <section class="wrap chap" id="memory">
-    <div class="chap-head">
-      <div><div class="eyebrow">Memory</div><h2>AI 会记住<br>你们团队的做法。</h2></div>
-      <div class="r">
-        <p>每天早上，AI 成员会整理前一天学到的经验，告诉你新增、改了、停用了哪几条，每一条都能撤回。几个成员都记下的做法，会变成全队的约定。</p>
+  <section class="wrap" id="memory">
+    <div class="mem2">
+      <div class="txt">
+        <div class="eyebrow">Team memory</div>
+        <h2>团队的做法，<br>成为每个成员的常识。</h2>
+        <p class="lead">谁负责什么、对外怎么说、哪些事要先问谁，原本靠老同事口口相传。现在它们是团队约定，每个 AI 成员接活前必读。</p>
+        <ul class="src">
+          <li><b>群里说一句</b><span>明确说过的约定，自动记下来</span></li>
+          <li><b>经验升级</b><span>几个成员都记下的，升为约定</span></li>
+          <li><b>手动记一条</b><span>马上生效，看得见，能撤回</span></li>
+        </ul>
       </div>
+    <div class="team" aria-label="团队约定的例子">
+      <div class="team-h"><b>团队约定</b><span>每个成员做事前都会读到</span></div>
+      <ul>
+        <li><span class="kd">约定</span><div><p>对外报价先给负责人过目，再发给客户。</p><small>来自商务群里的一句话 · 3 周前</small></div></li>
+        <li><span class="kd">约定</span><div><p>活动文案要附上竞品同期活动的截图。</p><small>两个 AI 成员的经验里都有这一条，升为团队约定 · 今天</small></div></li>
+        <li><span class="kd">事实</span><div><p>增长数据以周一早上的看板为准，口径有疑问先问数据同事。</p><small>手动记下 · 上个月</small></div></li>
+        <li><span class="kd">约定</span><div><p>周五下午不发版，也不群发邮件。</p><small>手动记下 · 2 周前</small></div></li>
+        <li><span class="kd">术语</span><div><p>对外统一说「AI 成员」，不说「机器人」。</p><small>来自产品群里的决定 · 上周</small></div></li>
+      </ul>
     </div>
-    <div class="cycle" aria-label="一件事的流程：派活、执行、确认、交付、记录经验，下次接活前先读记录">
-      <div class="steps">
-        <div class="st"><span class="n">1</span><b>派活</b><span>在群里 @ 它，或按 ⌘K</span></div>
-        <div class="st"><span class="n">2</span><b>执行</b><span>在你的机器上做</span></div>
-        <div class="st"><span class="n">3</span><b>确认</b><span>需要决定时发卡片问你</span></div>
-        <div class="st"><span class="n">4</span><b>交付</b><span>带着改动和测试结果</span></div>
-        <div class="st"><span class="n">5</span><b>记录经验</b><span>写进它记得的事</span></div>
-      </div>
-      <div class="back"><svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"><path d="M100 0 V24 Q100 36 88 36 H12 Q0 36 0 24 V0"/></svg><em>下次接活前，先读这些记录</em></div>
     </div>
-    <div class="mem"><img class="l" src="img/memory-light.webp" alt="Forge 记得的事：今天新增、改了、停用的经验，每条都能撤回" width="1650" height="920" loading="lazy"><img class="d" src="img/memory-dark.webp" alt="Forge 记得的事：今天新增、改了、停用的经验，每条都能撤回" width="1650" height="920" loading="lazy"></div>
   </section>
 
   <section class="wrap" id="machines">
     <div class="split">
-      <div class="shot"><img class="l" src="img/settings-machines-light.webp" alt="设置里的机器：团队的电脑和在线状态" width="2880" height="1800" loading="lazy"><img class="d" src="img/settings-machines-dark.webp" alt="设置里的机器：团队的电脑和在线状态" width="2880" height="1800" loading="lazy"></div>
+      <div class="shot pan sm"><img class="l" src="img/settings-machines-light.webp" alt="设置里的机器：团队的电脑、VPS 和在线状态" width="1280" height="900" loading="lazy"><img class="d" src="img/settings-machines-dark.webp" alt="设置里的机器：团队的电脑、VPS 和在线状态" width="1280" height="900" loading="lazy"></div>
       <div class="txt">
-        <div class="eyebrow">Your machines</div>
-        <h2>AI 在你自己的<br>机器上运行。</h2>
-        <p class="lead">在机器上装一个守护进程，它就能给 AI 成员用。守护进程主动连接服务器，不需要开放端口，代码和密钥都留在这台机器上。</p>
+        <div class="eyebrow">Machines</div>
+        <h2>给每个 AI 成员，<br>分配一台电脑。</h2>
+        <p class="lead">团队的电脑统一管理。每个 AI 成员用哪一台，或者任意一台空闲的，由你指定；守护进程主动连出来，不用开端口。</p>
         <div class="envs">
-          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg></span><div><h3>你的 Mac</h3><p>用你装好的工具和登录过的账号。</p></div></div>
-          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01"/></svg></span><div><h3>Linux 服务器</h3><p>每个任务在单独的虚拟机里运行，做完就删，多个任务互不影响。</p></div></div>
-          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><path d="M7 18a4 4 0 0 1-.5-8 5.5 5.5 0 0 1 10.6-1.5A4.5 4.5 0 0 1 17 18z"/></svg></span><div><h3>云主机</h3><p>阿里云、AWS 等都可以，装好后会出现在设置的机器列表里。</p></div></div>
-          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7"/></svg></span><div><h3>托管虚拟机 <span class="soon">开发中</span></h3><p>不想自己维护机器，可以用我们提供的虚拟机，按需开启，用完回收。</p></div></div>
+          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg></span><div><h3>同事的 Mac</h3><p>点「用这台电脑」就加入，用现成的工具和账号。</p></div></div>
+          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01"/></svg></span><div><h3>团队的 VPS</h3><p>常开的 Linux 服务器，每个任务一台虚拟机。</p></div></div>
+          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><path d="M7 18a4 4 0 0 1-.5-8 5.5 5.5 0 0 1 10.6-1.5A4.5 4.5 0 0 1 17 18z"/></svg></span><div><h3>云主机</h3><p>阿里云、AWS 都行，装好守护进程就能分配。</p></div></div>
+          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7"/></svg></span><div><h3>托管虚拟机 <span class="soon">开发中</span></h3><p>不想维护机器，就用我们的，按需开启。</p></div></div>
         </div>
       </div>
     </div>
   </section>
 
-  <section class="wrap">
-    <div class="center"><div class="eyebrow">More</div><h2>还有这些常用功能。</h2></div>
-    <div class="grid4">
-      <div class="tile">
-        <div><h3>交代或搜索 <kbd>⌘K</kbd></h3><p>输入一句话，交给指定的成员，或交给主助手安排。话题、产出和成员也在这里搜。</p></div>
-        <div class="shot"><img class="l" src="img/ask-light.webp" alt="⌘K 交代或搜索" width="2880" height="1800" loading="lazy"><img class="d" src="img/ask-dark.webp" alt="⌘K 交代或搜索" width="2880" height="1800" loading="lazy"></div>
+  <section class="wrap chap" id="custom">
+    <div class="chap-head">
+      <div><div class="eyebrow">Open source</div><h2>每个 AI 成员，<br>按你们的方式搭。</h2></div>
+      <div class="r"><p>模型、harness、工具，三样自由组合，搭出适合这个岗位的 AI 成员。{{PRODUCT_NAME}} 是开源的，工作流、定时任务、插件，不够用的地方自己加。</p></div>
+    </div>
+    <div class="mk">
+      <div class="mk-l">
+        <div class="mk-row"><span class="mk-k">从一个岗位开始</span><div class="mk-opts" role="tablist" aria-label="示例成员">
+          <button type="button" class="pre" role="tab" aria-selected="true" data-p="forge">开发</button><button type="button" class="pre" role="tab" aria-selected="false" data-p="tata">产品</button><button type="button" class="pre" role="tab" aria-selected="false" data-p="nova">增长</button><button type="button" class="pre" role="tab" aria-selected="false" data-p="watch">运维</button>
+        </div></div>
+        <div class="mk-row" data-g="m"><span class="mk-k">模型</span><div class="mk-opts"><button type="button" class="opt" data-v="Claude" aria-pressed="true">Claude</button><button type="button" class="opt" data-v="GPT" aria-pressed="false">GPT</button><button type="button" class="opt" data-v="DeepSeek" aria-pressed="false">DeepSeek</button><button type="button" class="opt" data-v="Gemini" aria-pressed="false">Gemini</button><button type="button" class="opt" data-v="本地模型" aria-pressed="false">本地模型</button></div></div>
+        <div class="mk-row" data-g="h"><span class="mk-k">Harness</span><div class="mk-opts"><button type="button" class="opt" data-v="Claude Code" aria-pressed="true">Claude Code</button><button type="button" class="opt" data-v="Codex" aria-pressed="false">Codex</button><button type="button" class="opt" data-v="你自己的" aria-pressed="false">你自己的</button></div></div>
+        <div class="mk-row" data-g="t"><span class="mk-k">工具<small>MCP 和 connector</small></span><div class="mk-opts"><button type="button" class="opt" data-v="GitHub" aria-pressed="true">GitHub</button><button type="button" class="opt" data-v="Gmail" aria-pressed="false">Gmail</button><button type="button" class="opt" data-v="Notion" aria-pressed="false">Notion</button><button type="button" class="opt" data-v="日历" aria-pressed="false">日历</button><button type="button" class="opt" data-v="数据库" aria-pressed="true">数据库</button><button type="button" class="opt" data-v="自定义 connector" aria-pressed="false">自定义 connector</button></div></div>
       </div>
-      <div class="tile">
-        <div><h3>单独问 <kbd>⌘;</kbd></h3><p>在话题旁边私下问 AI。它看过整个话题，只有你能看到，觉得有用再放回话题。</p></div>
-        <div class="shot"><img class="l" src="img/side-chat-light.webp" alt="单独问：在话题旁边私下问 Jojo" width="2880" height="1800" loading="lazy"><img class="d" src="img/side-chat-dark.webp" alt="单独问：在话题旁边私下问 Jojo" width="2880" height="1800" loading="lazy"></div>
+      <div class="mk-r" aria-live="polite">
+        <div class="mk-card">
+          <div class="mk-top"><span class="mk-av" id="mk-av">F</span><div><b id="mk-n">Forge</b><span class="mk-role" id="mk-role">开发</span></div><span class="mk-on"><i></i>在线</span></div>
+          <dl>
+            <div><dt>模型</dt><dd id="mk-m">Claude</dd></div>
+            <div><dt>Harness</dt><dd id="mk-h">Claude Code</dd></div>
+            <div><dt>工具</dt><dd id="mk-t">GitHub、数据库</dd></div>
+          </dl>
+          <p id="mk-s">Forge 用 Claude 跑在 Claude Code 上，能用 GitHub 和数据库。</p>
+        </div>
       </div>
-      <div class="tile">
-        <div><h3>引用提问 <kbd>⌥ 点击</kbd></h3><p>表格的一格、图表的一个点、一行代码改动，选中就能提问，AI 知道你问的是哪个值。</p></div>
-        <div class="shot"><img class="l" src="img/refs-hover-light.webp" alt="引用提问：选中渠道表里的一行" width="2880" height="1800" loading="lazy"><img class="d" src="img/refs-hover-dark.webp" alt="引用提问：选中渠道表里的一行" width="2880" height="1800" loading="lazy"></div>
-      </div>
-      <div class="tile">
-        <div><h3>图表直接显示</h3><p>流程图、时序图、甘特图在消息里直接显示，跟着深浅色变，点开能缩放。</p></div>
-        <div class="shot"><img class="l" src="img/diagram-inline-light.webp" alt="话题里的时序图、流程图和甘特图" width="2880" height="1800" loading="lazy"><img class="d" src="img/diagram-inline-dark.webp" alt="话题里的时序图、流程图和甘特图" width="2880" height="1800" loading="lazy"></div>
-      </div>
+    </div>
+    <div class="more3">
+      <div><span class="mono">workflow</span><h3>工作流</h3><p>把几个成员串成一条流程：谁先做、谁来审、哪一步停下来等人点头。</p></div>
+      <div><span class="mono">cron</span><h3>定时任务</h3><p>每天早上巡检、每周五出周报，到点自己开工，结果发回群里。</p></div>
+      <div><span class="mono">plugin</span><h3>插件</h3><p>缺一种卡片、一个入口、一种接法，写一个插件加进来，不用等我们排期。</p></div>
     </div>
   </section>
 
-  <section class="wrap" id="arch">
-    <div class="center">
-      <div class="eyebrow">Architecture</div>
-      <h2>技术架构</h2>
-      <p class="lead">Rust 写的原生客户端，Cloudflare 上的实时服务，AI 在你的机器上执行。</p>
-    </div>
-    <div class="arch">
-      <div class="blk">
-        <span class="k">Client · Rust</span>
-        <div><h3>Mac 客户端</h3><p>Rust 和 GPUI 写的原生应用，界面读本地缓存，不用等网络。</p></div>
-        <ul><li><span>一万条消息的话题打开</span><span>&lt;100ms</span></li><li><span>冷启动到可用</span><span>&lt;1s</span></li><li><span>离线一天后补齐</span><span>&lt;2s</span></li></ul>
-      </div>
-      <div class="conn"><svg viewBox="0 0 72 12" preserveAspectRatio="none" aria-hidden="true"><path d="M4 6H68M4 6l5-4M4 6l5 4M68 6l-5-4M68 6l-5 4" stroke="currentColor" stroke-width="1.3" fill="none" vector-effect="non-scaling-stroke"/></svg>WebSocket</div>
-      <div class="blk">
-        <span class="k">Edge · Cloudflare</span>
-        <div><h3>实时服务</h3><p>每个群、每个成员、每台机器各用一个 Durable Object，消息按顺序保存，断线重连不丢也不重复。</p></div>
-        <ul><li><span>消息送达 p95</span><span>&lt;300ms</span></li><li><span>数据库和文件</span><span>D1 · R2</span></li><li><span>全部记录</span><span>每天归档</span></li></ul>
-      </div>
-      <div class="conn"><svg viewBox="0 0 72 12" preserveAspectRatio="none" aria-hidden="true"><path d="M4 6H68M4 6l5-4M4 6l5 4M68 6l-5-4M68 6l-5 4" stroke="currentColor" stroke-width="1.3" fill="none" vector-effect="non-scaling-stroke"/></svg>出站连接</div>
-      <div class="blk">
-        <span class="k">Runner · Rust</span>
-        <div><h3>你的机器</h3><p>守护进程运行 Claude Code、Codex。在 Linux 上，每个任务用一台 Firecracker 虚拟机。</p></div>
-        <ul><li><span>Agent</span><span>Claude Code · Codex</span></li><li><span>隔离</span><span>microVM</span></li><li><span>过程</span><span>逐步回放</span></li></ul>
-      </div>
+  <section class="wrap more">
+    <div class="eyebrow">More</div>
+    <div class="more4">
+      <div><h3>交代或搜索 <kbd>⌘K</kbd></h3><p>一句话交给成员，话题、产出和成员也在这里搜。</p></div>
+      <div><h3>单独问 <kbd>⌘;</kbd></h3><p>在话题旁边私下问 AI 成员，只有你看得到。</p></div>
+      <div><h3>话题</h3><p>一件事开一个话题，就是一份独立的上下文。</p></div>
+      <div><h3>权限和记录</h3><p>每个成员单独的电脑和凭证，改动都留记录。</p></div>
     </div>
   </section>
 
-  <section class="wrap cta">
+  <section class="wrap" id="compare">
+    <div class="chap-head">
+      <div><div class="eyebrow">Compare</div><h2>为什么不直接在<br>Slack、飞书里<span class="nb">加个 bot？</span></h2></div>
+      <div class="r"><p>在现有的聊天软件里加 bot，或者另装一个 bot 应用，各有卡住的地方。{{PRODUCT_NAME}} 是照着这些地方做的。</p></div>
+    </div>
+    <div class="cmp">
+      <div class="tabs" role="tablist" aria-label="和哪种做法比">
+        <button type="button" class="ctab" role="tab" aria-selected="true" data-i="1">Slack + Claude Tag</button>
+        <button type="button" class="ctab" role="tab" aria-selected="false" data-i="2">飞书 + MetaBot</button>
+        <button type="button" class="ctab" role="tab" aria-selected="false" data-i="3">飞书 + 豆包工作伙伴</button>
+        <button type="button" class="ctab" role="tab" aria-selected="false" data-i="4">Grok Bot</button>
+        <button type="button" class="ctab" role="tab" aria-selected="false" data-i="5">OpenBot · DS Bot</button>
+        <button type="button" class="ctab" role="tab" aria-selected="false" data-i="6">终端和 Agent 应用</button>
+      </div>
+      <div class="vs on" data-i="1" role="tabpanel" aria-label="Slack + Claude Tag">
+        <p class="vs-what"><b>Anthropic 官方的做法。</b>在 Slack 频道里 @Claude，它在云端做完，把结果回到线程里。</p>
+        <div class="vs-grid">
+          <div class="vs-head"><span></span><span class="them">Slack + Claude Tag</span><span class="us"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</span></div>
+          <div class="vs-row" style="--i:0"><b>身份</b><p class="them">只有一个 @Claude。它是工作区里装的一个应用，谁叫都是同一个。</p><p class="us">每个 AI 成员有名字、岗位和自己记得的事，是可以长期共事的身份。</p></div>
+          <div class="vs-row" style="--i:1"><b>模型</b><p class="them">只能用 Claude。</p><p class="us">不绑定哪一家。harness 和模型自由搭配：Claude Code 加 Codex，或者 DeepSeek 加别的方案，前台和执行者各配各的。</p></div>
+          <div class="vs-row" style="--i:2"><b>在哪运行</b><p class="them">每个线程配一个临时的云端沙箱，闲置几分钟就释放，只留在沙箱里的文件不保留。</p><p class="us">在团队分配给它的电脑上做，同事的 Mac、团队的 VPS 都行，文件一直都在。</p></div>
+          <div class="vs-row" style="--i:3"><b>看过程</b><p class="them">一份清单，做完一项勾一项。Slack 改消息不发通知，线程看起来像没动。</p><p class="us">话题旁边实时看它的终端和计划，随时可以接管，改完再交还。</p></div>
+          <div class="vs-row" style="--i:4"><b>做决定</b><p class="them">它的提问是线程里的一条回复，和别的消息排在一起。</p><p class="us">等你决定的事是话题里可以直接操作的界面，固定在输入框上方，首页也会列出来。</p></div>
+        </div>
+        <p class="vs-when"><b>什么时候选它</b>团队已经在 Slack 里、只用 Claude、也不想自己管机器时，它更省事。</p>
+      </div>
+      <div class="vs" data-i="2" role="tabpanel" aria-label="飞书 + MetaBot">
+        <p class="vs-what"><b>开源的桥接服务。</b>把本机的 Codex、Claude Code 接成飞书里的机器人。同类项目很多，MetaBot 是其中一个。</p>
+        <div class="vs-grid">
+          <div class="vs-head"><span></span><span class="them">飞书 + MetaBot</span><span class="us"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</span></div>
+          <div class="vs-row" style="--i:0"><b>界面</b><p class="them">进度是飞书里的一张流式卡片，能显示什么由飞书的卡片格式决定。</p><p class="us">聊天软件就是为 AI 成员做的，计划、终端、改动各有自己的位置。</p></div>
+          <div class="vs-row" style="--i:1"><b>看过程</b><p class="them">工具调用和输出的文件，要到装它那台机器的网页控制台里看。</p><p class="us">同事在各自的电脑上都能实时看，还能拖动回放每一步。</p></div>
+          <div class="vs-row" style="--i:2"><b>做决定</b><p class="them">Agent 的提问在网页控制台里回答。用 Codex、Kimi 时，还不能在飞书里中途插话。</p><p class="us">提问直接出现在话题里，谁该答就显示给谁。想插话，在话题里说一句就行。</p></div>
+          <div class="vs-row" style="--i:3"><b>搭建</b><p class="them">要自己建飞书应用、填机器人配置，再用 PM2 守着几个服务。</p><p class="us">电脑上装一个守护进程，AI 成员在设置里添加。</p></div>
+        </div>
+        <p class="vs-when"><b>什么时候选它</b>团队不打算离开飞书，也愿意自己维护一套桥接服务时，它合适。</p>
+      </div>
+      <div class="vs" data-i="3" role="tabpanel" aria-label="飞书 + 豆包工作伙伴">
+        <p class="vs-what"><b>飞书官方的团队智能体，原名飞书 aily。</b>在群里 @ 它，它在云端做。</p>
+        <div class="vs-grid">
+          <div class="vs-head"><span></span><span class="them">飞书 + 豆包工作伙伴</span><span class="us"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</span></div>
+          <div class="vs-row" style="--i:0"><b>在哪运行</b><p class="them">在飞书的云端运行环境里做。</p><p class="us">在团队自己的电脑上做，代码和密钥不离开这些电脑。</p></div>
+          <div class="vs-row" style="--i:1"><b>模型</b><p class="them">模型由平台按任务匹配。</p><p class="us">前台和执行者的模型各自可配，harness 用哪一家也由你选。</p></div>
+          <div class="vs-row" style="--i:2"><b>看过程</b><p class="them">到工作台里查看进度和结果。</p><p class="us">话题旁边实时看它的终端和计划，随时可以接管。</p></div>
+          <div class="vs-row" style="--i:3"><b>费用</b><p class="them">按席位收费，每次任务再按用量扣 AI 额度。</p><p class="us">开源。模型用团队自己的账号和 API key。</p></div>
+        </div>
+        <p class="vs-when"><b>什么时候选它</b>团队的工作都在飞书文档和多维表格里，也接受在飞书的云端运行时，它合适。</p>
+      </div>
+      <div class="vs" data-i="4" role="tabpanel" aria-label="Grok Bot">
+        <p class="vs-what"><b>xAI 的 Bot 团队。</b>每个 Bot 有名字和分工，在云端电脑上替你做事。</p>
+        <div class="vs-grid">
+          <div class="vs-head"><span></span><span class="them">Grok Bot</span><span class="us"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</span></div>
+          <div class="vs-row" style="--i:0"><b>权限</b><p class="them">一个账号下的所有 Bot 共用一台云端电脑，文件、浏览器和登录状态全部共享。官方也提醒，不要把不同的 Bot 当作安全边界。</p><p class="us">每个 AI 成员单独指定电脑和凭证，要紧的动作等人点头，谁动了什么都有记录。</p></div>
+          <div class="vs-row" style="--i:1"><b>模型</b><p class="them">模型由它自动选，不能指定，也不显示这次用的是哪个。</p><p class="us">每个成员的 harness、模型和思考强度，都由你定。</p></div>
+          <div class="vs-row" style="--i:2"><b>给谁用</b><p class="them">官方的例子是一个人的邮件、日程和文档，结果写进 Gmail、Notion、Google Drive。</p><p class="us">面向整个团队：开发、产品、增长都在同一个群里派活。Gmail、Notion 这些工具，用 MCP 和自定义 connector 接进来。</p></div>
+          <div class="vs-row" style="--i:3"><b>开源</b><p class="them">闭源，包含在 X 和 SuperGrok 的付费订阅里。</p><p class="us">开源（AGPL-3.0），代码能看，服务能自己部署。</p></div>
+        </div>
+        <p class="vs-when"><b>什么时候选它</b>主要是一个人处理邮件、日程、文档这类事，不想管机器时，它合适。</p>
+      </div>
+      <div class="vs" data-i="5" role="tabpanel" aria-label="OpenBot · DS Bot">
+        <p class="vs-what"><b>开源的桌面应用。</b>在自己电脑上带一队 bot，能接很多种模型。</p>
+        <div class="vs-grid">
+          <div class="vs-head"><span></span><span class="them">OpenBot · DS Bot</span><span class="us"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</span></div>
+          <div class="vs-row" style="--i:0"><b>同事</b><p class="them">DS Bot 是一个人的 bot 团队。OpenBot 要请同事进来，得另开多人模式。</p><p class="us">本来就是团队的工作聊天：群、私聊、话题、已读，同事和 AI 成员都是成员。</p></div>
+          <div class="vs-row" style="--i:1"><b>合上电脑</b><p class="them">bot 默认跑在你这台电脑上，电脑休眠，活就停了。</p><p class="us">AI 成员可以分配到团队的 VPS 上，你合上电脑，它接着做。</p></div>
+          <div class="vs-row" style="--i:2"><b>做决定</b><p class="them">OpenBot 的审批要事先在工作流里设好。DS Bot 是敏感操作前弹出确认。</p><p class="us">AI 成员按当时的情况生成界面：问卷、方案对比、审批，直接在话题里答。</p></div>
+          <div class="vs-row" style="--i:3"><b>许可</b><p class="them">OpenBot 是非商用许可，公司用要另买授权。DS Bot 建在 DeepSeek Harness 上。</p><p class="us">开源（AGPL-3.0），公司可以直接用，harness 不绑定。</p></div>
+        </div>
+        <p class="vs-when"><b>什么时候选它</b>一个人想在自己电脑上用很多种模型带一队 bot 时，它们合适。</p>
+      </div>
+      <div class="vs" data-i="6" role="tabpanel" aria-label="终端和 Agent 应用">
+        <p class="vs-what"><b>最常见的做法。</b>Claude Code 桌面版、Codex 应用，再多开几个终端。</p>
+        <div class="vs-grid">
+          <div class="vs-head"><span></span><span class="them">终端和 Agent 应用</span><span class="us"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</span></div>
+          <div class="vs-row" style="--i:0"><b>同事</b><p class="them">过程只在你自己的窗口里，同事看不到。</p><p class="us">活在话题里做，同事能看进度，也能接着往下说。</p></div>
+          <div class="vs-row" style="--i:1"><b>结果</b><p class="them">做完要自己把结论和链接贴回群里。</p><p class="us">结果直接回到派活的那个话题，带着改动和测试结果。</p></div>
+          <div class="vs-row" style="--i:2"><b>窗口</b><p class="them">一家 Agent 一个应用，活一多，要在好几个窗口之间找。</p><p class="us">所有 AI 成员都在一个侧栏里，谁在做、谁在等你，一眼看到。</p></div>
+          <div class="vs-row" style="--i:3"><b>做决定</b><p class="them">每个窗口各自弹确认，要一个个切过去点。</p><p class="us">等你决定的事都汇在首页，原地就能答。</p></div>
+        </div>
+        <p class="vs-when"><b>什么时候选它</b>一个人写代码、不需要同事看到过程时，这些就够用。</p>
+      </div>
+      <p class="cmp-note">依据各产品的公开文档和仓库整理，2026 年 11 月。产品名称归各自所有者。</p>
+    </div>
+  </section>
+
+  <section class="wrap cta" id="download">
     <img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">
-    <h2>聊天和 AI，<br>在同一个 App 里。</h2>
+    <h2>同事和 AI 成员，<br>在同一个 App 里。</h2>
     <p class="lead">macOS 和 Windows 都能用，手机版正在开发。</p>
     <div class="ctas dl">
       <a class="btn pri" data-os="mac" href="https://github.com/Joye-Co/team-chat/releases/latest"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg>下载 macOS 版</a>
       <a class="btn" data-os="windows" href="https://github.com/Joye-Co/team-chat/releases/latest"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg>下载 Windows 版</a>
     </div>
+    <p class="lead">手机版上线时通知你：留个邮箱，只发这一封，不转给任何人。</p>
+    <form class="wl" novalidate>
+      <label class="sr" for="wl-email">你的邮箱</label>
+      <input id="wl-email" type="email" name="email" autocomplete="email" inputmode="email" placeholder="你的邮箱" maxlength="254" required>
+      <button class="btn pri" type="submit">通知我</button>
+    </form>
+    <p class="wl-msg" role="status" aria-live="polite"></p>
+    <div class="fine"><span class="wl-count" hidden>已有 <b></b> 人在等 · </span>macOS 13 及以上，Apple 芯片 · Windows 10 22H2 或 Windows 11，64 位 · 登录要用团队的邀请码</div>
   </section>
 </main>
 
