@@ -52,6 +52,8 @@ nav .wrap{height:60px;display:flex;align-items:center;justify-content:space-betw
 .links a:hover,.links a.on{color:var(--ink)}
 .nav-r{display:flex;gap:10px;align-items:center}
 .nav-r .btn{height:34px;padding:0 14px;font-size:13.5px}
+.lang{height:34px;display:inline-flex;align-items:center;padding:0 8px;font-size:13.5px;color:var(--ink-2);border-radius:8px;transition:color .2s ease}
+.lang:hover{color:var(--ink)}
 .cta .ctas{margin-top:32px}
 
 /* hero */
@@ -326,7 +328,7 @@ footer a:hover{color:var(--ink)}
 .player.auto .ps.on .bar::after{animation:fill var(--ms,3s) linear forwards}
 .player.held .ps.on .bar::after,.player.away .ps.on .bar::after{animation-play-state:paused}
 @keyframes fill{to{transform:none}}
-.pf{position:relative;aspect-ratio:16/10;border-radius:12px;overflow:hidden;background:var(--bg);box-shadow:0 0 0 1px var(--shot-edge),var(--shot-shadow)}
+.pf{position:relative;width:100%;justify-self:center;aspect-ratio:16/10;border-radius:12px;overflow:hidden;background:var(--bg);box-shadow:0 0 0 1px var(--shot-edge),var(--shot-shadow)}
 .pf>img{width:100%;height:100%}
 .pl-layer{position:absolute;inset:0;opacity:0;transform-origin:0 0;transition:opacity .55s ease,transform 1.05s cubic-bezier(.65,0,.35,1)}
 .pl-layer.on{opacity:1}

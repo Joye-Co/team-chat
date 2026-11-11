@@ -44,7 +44,9 @@ Bun.serve({
   port,
   async fetch(req) {
     const path = decodeURIComponent(new URL(req.url).pathname);
-    const file = Bun.file(join(dist, path.endsWith("/") ? `${path}index.html` : path));
+    let file = Bun.file(join(dist, path.endsWith("/") ? `${path}index.html` : path));
+    // Like the static host: /en serves en.html.
+    if (!(await file.exists()) && !path.includes(".")) file = Bun.file(join(dist, `${path}.html`));
     return (await file.exists()) ? new Response(file) : new Response("Not found", { status: 404 });
   },
 });
