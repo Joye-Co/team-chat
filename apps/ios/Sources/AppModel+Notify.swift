@@ -155,20 +155,43 @@ final class PushCenter: NSObject, ObservableObject {
 }
 
 extension PushCenter: UNUserNotificationCenterDelegate {
+    // The completion-handler forms, finished on the main thread: with the async forms the system
+    // gets the answer on a background thread and UIKit aborts ("Call must be made on main
+    // thread") when a tap launches the app.
     nonisolated func userNotificationCenter(
-        _ center: UNUserNotificationCenter, willPresent notification: UNNotification
-    ) async -> UNNotificationPresentationOptions {
+        _ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
         // In front, the chat shows the message itself; a push still arrives while the
         // connection is down, so show it then, with its answers.
-        if let push = AskCategory.push(notification.request.content.userInfo), let made = AskCategory.make(push, openTitle: Copy.notifyOpen) {
-            await AskCategory.register([made])
+        let done = Unchecked(completionHandler)
+        let info = Unchecked(notification.request.content.userInfo)
+        Task { @MainActor in
+            if let push = AskCategory.push(info.value), let made = AskCategory.make(push, openTitle: Copy.notifyOpen) {
+                await AskCategory.register([made])
+            }
+            done.value([.banner, .list, .sound, .badge])
         }
-        return [.banner, .list, .sound, .badge]
     }
 
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        await handle(response: response)
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let done = Unchecked(completionHandler)
+        let response = Unchecked(response)
+        Task { @MainActor in
+            await self.handle(response: response.value)
+            done.value()
+        }
     }
+}
+
+/// Carries a value the compiler cannot prove Sendable (a system callback) across to the main
+/// actor; each one is used once, there.
+private struct Unchecked<T>: @unchecked Sendable {
+    let value: T
+    init(_ value: T) { self.value = value }
 }
 
 /// Registers with APNs and receives the device token (`UIApplicationDelegateAdaptor`).
