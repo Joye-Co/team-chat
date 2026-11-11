@@ -667,6 +667,29 @@ pub fn open_memory_add(
     open_memory_sheet(false, services, cx)
 }
 
+/// 我的偏好 (我的约定 when one person uses the server).
+pub fn open_mine(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_page(services, Page::Mine, cx).map(|(h, _)| h)
+}
+
+/// 我的偏好 (or 我的约定) with the 记一条 sheet open.
+pub fn open_mine_add(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::Mine, cx)?;
+    after_fit(handle, cx, move |window, cx| {
+        let board = view.read(cx).mine().clone();
+        board.update(cx, |b, cx| b.open_for_scene(false, window, cx));
+    });
+    Ok(handle)
+}
+
 /// 团队约定 with the 编辑 sheet of the newest convention open.
 pub fn open_memory_edit(
     services: Services,

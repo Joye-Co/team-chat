@@ -64,24 +64,28 @@ pub enum Page {
     Members,
     /// 团队约定 (沉淀, team scope).
     Memory,
+    /// 我的偏好 (沉淀, my own scope); 我的约定 when one person uses the server.
+    Mine,
     Machines,
     Appearance,
     Shortcuts,
 }
 
 impl Page {
-    pub const ALL: [Page; 8] = [
+    pub const ALL: [Page; 9] = [
         Page::General,
         Page::Account,
         Page::Notifications,
         Page::Members,
         Page::Memory,
+        Page::Mine,
         Page::Machines,
         Page::Appearance,
         Page::Shortcuts,
     ];
 
-    /// The pane name: the tab label and the window title.
+    /// The pane name: the tab label and the window title. [`SettingsView::title_of`]
+    /// says 我的约定 for [`Page::Mine`] when one person uses the server.
     pub fn title(self) -> &'static str {
         match self {
             Page::General => s::PANE_GENERAL,
@@ -89,6 +93,7 @@ impl Page {
             Page::Notifications => s::PANE_NOTIFICATIONS,
             Page::Members => s::PANE_MEMBERS,
             Page::Memory => crate::copy::memory::TEAM_TITLE,
+            Page::Mine => crate::copy::memory::PERSON_TITLE,
             Page::Machines => s::PANE_MACHINES,
             Page::Appearance => s::PANE_APPEARANCE,
             Page::Shortcuts => s::PANE_SHORTCUTS,
@@ -102,7 +107,7 @@ impl Page {
             Page::Account => Sym::Account,
             Page::Notifications => Sym::Bell,
             Page::Members => Sym::Members,
-            Page::Memory => Sym::Book,
+            Page::Memory | Page::Mine => Sym::Book,
             // desktopcomputer: its ink fills the 18 box; macmini is 22 × 10
             // (2.19, C1-09).
             Page::Machines => Sym::Computer,
@@ -119,6 +124,7 @@ impl Page {
             Page::Notifications => "notifications",
             Page::Members => "members",
             Page::Memory => "memory",
+            Page::Mine => "mine",
             Page::Machines => "machines",
             Page::Appearance => "appearance",
             Page::Shortcuts => "shortcuts",
@@ -127,10 +133,11 @@ impl Page {
 
     /// The tabs of the settings window: my own preferences. 成员 (with 默认规则), 团队约定 and
     /// 机器 live in 团队管理 (`views::admin`); their panes stay here for the self-tests.
-    pub const TABS: [Page; 5] = [
+    pub const TABS: [Page; 6] = [
         Page::General,
         Page::Account,
         Page::Notifications,
+        Page::Mine,
         Page::Appearance,
         Page::Shortcuts,
     ];
@@ -178,6 +185,8 @@ pub struct SettingsView {
     notifications: Entity<NotificationsPage>,
     members: Entity<MembersPage>,
     memory: Entity<crate::views::memory::MemoryBoard>,
+    /// 我的偏好, or 我的约定 when one person uses the server.
+    mine: Entity<crate::views::memory::MemoryBoard>,
     machines: Entity<MachinesPage>,
     appearance: Entity<AppearancePage>,
     shortcuts: Entity<ShortcutsPage>,
@@ -191,7 +200,7 @@ pub struct SettingsView {
     focus: gpui::FocusHandle,
     /// The pane whose name the window title shows, so the title is set when
     /// the pane changes, not on every frame.
-    titled: Option<Page>,
+    titled: Option<&'static str>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -219,6 +228,19 @@ impl SettingsView {
                 cx,
             )
         });
+        // The board follows the signed-in person itself: this window outlives an account
+        // change, and before sign-in it reads nothing.
+        let mine = cx.new(|cx| {
+            crate::views::memory::MemoryBoard::new(
+                services.clone(),
+                crate::data::memory::MemoryScope::Person(services.me().unwrap_or_default()),
+                crate::views::memory::Host::Settings,
+                String::new(),
+                cx,
+            )
+        });
+        // Its name (我的偏好 or 我的约定) is the tab's and the window's.
+        let mine_changed = cx.observe(&mine, |_, _, cx| cx.notify());
         let machines = cx.new(|cx| MachinesPage::new(services.clone(), window, cx));
         let appearance = cx.new(|cx| AppearancePage::new(services.clone(), window, cx));
         let shortcuts = cx.new(|cx| ShortcutsPage::new(window, cx));
@@ -231,6 +253,7 @@ impl SettingsView {
             notifications,
             members,
             memory,
+            mine,
             machines,
             appearance,
             shortcuts,
@@ -239,6 +262,7 @@ impl SettingsView {
             focus,
             titled: None,
             _subscriptions: vec![
+                mine_changed,
                 theme::follow_system(window, cx),
                 // Back in front: the login item may have changed in 系统设置.
                 cx.observe_window_activation(window, |this, window, cx| {
@@ -267,8 +291,9 @@ impl SettingsView {
             self.scroll.set_offset(gpui::point(px(0.), px(0.)));
         }
         self.page = page;
-        window.set_window_title(page.title());
-        self.titled = Some(page);
+        let title = self.title_of(page, cx);
+        window.set_window_title(title);
+        self.titled = Some(title);
         prefs::update(|p| p.last_pane = Some(page.slug().to_string()));
         match page {
             Page::General => {
@@ -282,6 +307,7 @@ impl SettingsView {
             Page::Notifications => self.notifications.update(cx, |n, cx| n.refresh(cx)),
             Page::Members => self.members.update(cx, |m, cx| m.refresh_rules(window, cx)),
             Page::Memory => self.memory.update(cx, |m, cx| m.load(cx)),
+            Page::Mine => self.mine.update(cx, |m, cx| m.load(cx)),
             _ => {}
         }
         cx.notify();
@@ -324,8 +350,21 @@ impl SettingsView {
         &self.memory
     }
 
+    /// 我的偏好 (我的约定 when one person uses the server).
+    pub fn mine(&self) -> &Entity<crate::views::memory::MemoryBoard> {
+        &self.mine
+    }
+
     pub fn machines(&self) -> &Entity<MachinesPage> {
         &self.machines
+    }
+
+    /// The name of `page` as the tab and the window title say it.
+    fn title_of(&self, page: Page, cx: &App) -> &'static str {
+        match page {
+            Page::Mine => self.mine.read(cx).title(),
+            _ => page.title(),
+        }
     }
 
     fn render_page(&self) -> gpui::AnyElement {
@@ -335,6 +374,7 @@ impl SettingsView {
             Page::Notifications => self.notifications.clone().into_any_element(),
             Page::Members => self.members.clone().into_any_element(),
             Page::Memory => self.memory.clone().into_any_element(),
+            Page::Mine => self.mine.clone().into_any_element(),
             Page::Machines => self.machines.clone().into_any_element(),
             Page::Appearance => self.appearance.clone().into_any_element(),
             Page::Shortcuts => self.shortcuts.clone().into_any_element(),
@@ -348,7 +388,7 @@ impl SettingsView {
         crate::ui::native::toolbar_tab(
             gpui::SharedString::from(format!("settings-page-{}", page.slug())),
             page.symbol(),
-            page.title(),
+            self.title_of(page, cx),
             page == self.page,
             emphasized(window),
             cx,
@@ -360,7 +400,12 @@ impl SettingsView {
 impl Render for SettingsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = self.window_body(window, cx).into_any_element();
-        crate::ui::native::window_chrome::framed_fixed(self.page.title(), body, window, cx)
+        crate::ui::native::window_chrome::framed_fixed(
+            self.title_of(self.page, cx),
+            body,
+            window,
+            cx,
+        )
     }
 }
 
@@ -370,9 +415,10 @@ impl SettingsView {
         let k = native_colors(cx);
         let active = emphasized(window);
         // The self-test walks the panes without the window: keep the title.
-        if self.titled != Some(self.page) {
-            window.set_window_title(self.page.title());
-            self.titled = Some(self.page);
+        let title = self.title_of(self.page, cx);
+        if self.titled != Some(title) {
+            window.set_window_title(title);
+            self.titled = Some(title);
         }
         let tabs: Vec<Button> = Page::TABS
             .into_iter()
@@ -425,7 +471,7 @@ impl SettingsView {
                                 div()
                                     .n_headline()
                                     .text_color(if active { k.label } else { k.secondary })
-                                    .child(self.page.title()),
+                                    .child(title),
                             ),
                     )
                     .child(
