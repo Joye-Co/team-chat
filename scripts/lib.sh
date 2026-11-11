@@ -156,3 +156,12 @@ health_version() {
 placeholder_version() {
   [[ "$1" == 0.0.0 || "$1" == 0.0.0-* ]]
 }
+
+# toast_activator_clsid: the class id the app registers for clicks on its notifications
+# (lower case, no braces), read from the app's source; empty when the app has none. The
+# installer registers it only then, so a build never points Windows at a class the app does
+# not serve.
+toast_activator_clsid() {
+  grep -rhoE 'TOAST_ACTIVATOR_CLSID: &str = "\{?[0-9A-Fa-f-]{36}\}?"' "$ROOT/apps/desktop/src" 2>/dev/null |
+    head -n 1 | grep -oE '[0-9A-Fa-f-]{36}' | tr 'A-F' 'a-f' || true
+}
