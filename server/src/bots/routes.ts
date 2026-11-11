@@ -311,35 +311,55 @@ export function registerBotRoutes(): void {
       const now = Date.now();
       const stmts: D1PreparedStatement[] = [];
       const details: Record<string, unknown> = {};
-      if (req.name !== undefined && req.name !== m.name) {
-        stmts.push(env.DB.prepare("UPDATE machines SET name = ? WHERE id = ?").bind(req.name, m.id));
-        details.name = req.name;
-      }
+      // An ownership change re-checks the owner it was decided on in every statement, with the
+      // owner UPDATE last: of two concurrent changes only the first wins, the other changes nothing.
+      let guard = "";
+      let guardArgs: unknown[] = [];
       if (req.owner === null && m.owner_id) {
         // 交给团队: only an owner who is an admin; the checked AI members were his own choice.
         if (a.member.level !== "owner") throw new ApiError("forbidden", "only an admin gives a machine to the team", "machine.team_admin_only");
+        guard = " AND EXISTS (SELECT 1 FROM machines WHERE id = ? AND owner_id = ?)";
+        guardArgs = [m.id, a.memberId];
+      } else if (req.owner === "me" && !m.owner_id) {
+        // 改成我的电脑 (requireMachineManager: an admin, and a person: only people have personal machines).
+        if (a.member.kind !== "human") throw new ApiError("forbidden", "only people have personal machines");
+        guard = " AND EXISTS (SELECT 1 FROM machines WHERE id = ? AND owner_id IS NULL)";
+        guardArgs = [m.id];
+      }
+      if (req.name !== undefined && req.name !== m.name) {
+        stmts.push(env.DB.prepare(`UPDATE machines SET name = ? WHERE id = ?${guard}`).bind(req.name, m.id, ...guardArgs));
+        details.name = req.name;
+      }
+      if (req.owner === null && m.owner_id) {
         stmts.push(
-          env.DB.prepare("UPDATE machines SET owner_id = NULL WHERE id = ?").bind(m.id),
-          env.DB.prepare("DELETE FROM machine_bots WHERE machine_id = ?").bind(m.id),
+          env.DB.prepare(`DELETE FROM machine_bots WHERE machine_id = ?${guard}`).bind(m.id, ...guardArgs),
+          env.DB.prepare("UPDATE machines SET owner_id = NULL WHERE id = ? AND owner_id = ?").bind(m.id, a.memberId),
         );
         details.owner = null;
       } else if (req.owner === "me" && !m.owner_id) {
-        // 改成我的电脑 (requireMachineManager: an admin). AI members someone else placed here are
-        // unpinned; my work for them keeps running here through a checked row.
+        // AI members someone else placed here are unpinned; my work for them keeps running here
+        // through a checked row.
         stmts.push(
           env.DB.prepare(
             `INSERT OR IGNORE INTO machine_bots (machine_id, bot_id, repo_path, created_at)
              SELECT ?, r.member_id, NULL, ? FROM bot_runners r JOIN members b ON b.id = r.member_id
-             WHERE r.machine_id = ? AND r.updated_by IS NOT ? AND b.deactivated = 0`,
-          ).bind(m.id, now, m.id, a.memberId),
-          env.DB.prepare("UPDATE bot_runners SET machine_id = NULL WHERE machine_id = ? AND updated_by IS NOT ?").bind(m.id, a.memberId),
-          env.DB.prepare("UPDATE machines SET owner_id = ? WHERE id = ?").bind(a.memberId, m.id),
+             WHERE r.machine_id = ? AND r.updated_by IS NOT ? AND b.deactivated = 0${guard}`,
+          ).bind(m.id, now, m.id, a.memberId, ...guardArgs),
+          env.DB.prepare(`UPDATE bot_runners SET machine_id = NULL WHERE machine_id = ? AND updated_by IS NOT ?${guard}`).bind(
+            m.id,
+            a.memberId,
+            ...guardArgs,
+          ),
+          env.DB.prepare("UPDATE machines SET owner_id = ? WHERE id = ? AND owner_id IS NULL").bind(a.memberId, m.id),
         );
         details.owner = "me";
       }
       if (stmts.length > 0) {
-        stmts.push(auditStatement(env.DB, a, { action: "machine.update", target: m.id, details }, now));
-        await env.DB.batch(stmts);
+        const results = await env.DB.batch(stmts);
+        if (guard && !results[results.length - 1].meta.changes) {
+          throw new ApiError("conflict", "the machine's owner changed meanwhile");
+        }
+        await auditStatement(env.DB, a, { action: "machine.update", target: m.id, details }, now).run();
       }
       return oneMachine(env, a, m.id);
     },

@@ -202,6 +202,48 @@ describe("personal and team machines", () => {
     expect(acts.results.map((r) => JSON.parse(r.details))).toEqual([{ owner: null }, { owner: "me" }]);
   });
 
+  it("lets only one of two concurrent ownership changes win", async () => {
+    const { admin, admin2 } = await team();
+    const teamId = (await addMachine(admin, { name: "linux" })).body.machine.id as string;
+    const bot = await runnerBot(admin, { machineId: teamId });
+    // admin2 makes it his between admin's check and admin's write: admin's write changes nothing.
+    const batch = env.DB.batch.bind(env.DB);
+    let raced = false;
+    env.DB.batch = (async (stmts: D1PreparedStatement[]) => {
+      if (!raced) {
+        raced = true;
+        await env.DB.prepare("UPDATE machines SET owner_id = ? WHERE id = ?").bind(admin2.id, teamId).run();
+      }
+      return batch(stmts);
+    }) as typeof env.DB.batch;
+    let r;
+    try {
+      r = await api(`/v1/machines/${teamId}`, { method: "PATCH", token: admin.token, body: { owner: "me", name: "renamed" } });
+    } finally {
+      env.DB.batch = batch;
+    }
+    expect(raced).toBe(true);
+    expect(r.status, JSON.stringify(r.body)).toBe(409);
+    const row = await env.DB.prepare("SELECT owner_id, name FROM machines WHERE id = ?").bind(teamId).first<{ owner_id: string; name: string }>();
+    expect(row).toEqual({ owner_id: admin2.id, name: "linux" });
+    expect((await env.DB.prepare("SELECT count(*) AS n FROM machine_bots WHERE machine_id = ?").bind(teamId).first<{ n: number }>())!.n).toBe(0);
+    expect((await api(`/v1/bots/${bot.id}/runner`, { token: admin.token })).body.machineId).toBe(teamId);
+    const acts = await env.DB.prepare("SELECT count(*) AS n FROM activity WHERE machine_id = ? AND action = 'machine.update'")
+      .bind(teamId)
+      .first<{ n: number }>();
+    expect(acts!.n).toBe(0);
+  });
+
+  it("keeps personal machines for people: an admin AI member cannot make a team machine its own", async () => {
+    const { admin } = await team();
+    const botAdmin = await createMember({ kind: "bot", level: "owner" });
+    const teamId = (await addMachine(admin, { name: "linux" })).body.machine.id as string;
+    const r = await api(`/v1/machines/${teamId}`, { method: "PATCH", token: botAdmin.token, body: { owner: "me" } });
+    expect(r.status).toBe(403);
+    const row = await env.DB.prepare("SELECT owner_id FROM machines WHERE id = ?").bind(teamId).first<{ owner_id: string | null }>();
+    expect(row!.owner_id).toBeNull();
+  });
+
   it("checks AI members on a personal machine, by its owner only", async () => {
     const { admin, alice, bob } = await team();
     const aliceId = (await addMachine(alice, { name: "alice-mac" })).body.machine.id as string;
