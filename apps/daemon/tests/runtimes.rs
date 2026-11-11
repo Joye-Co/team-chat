@@ -450,6 +450,127 @@ async fn acp_follow_up_is_next_prompt() {
     );
 }
 
+fn messages(evs: &[RunEvent]) -> Vec<String> {
+    evs.iter()
+        .filter_map(|e| match e {
+            RunEvent::Message { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// ACP resume (接 3.6): the next run of the topic loads the session of the last one, in its own
+/// working folder; the agent remembers the first turn and its replay of it is not reported.
+#[tokio::test]
+async fn acp_resume_loads_the_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = spec(
+        dir.path(),
+        "acp",
+        &fake("fake_acp.py"),
+        &[],
+        "the code word is PELICAN",
+    );
+    let (o, evs) = drive(s.clone(), |_| None).await;
+    assert_eq!(o.status, Status::Succeeded, "{o:?}");
+    assert_eq!(o.session_id.as_deref(), Some("s1"));
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, RunEvent::Session { session_id, .. } if session_id == "s1"))
+    );
+
+    // The follow-up run: another process, another folder, the session id from the server.
+    let mut next = s.clone();
+    next.cwd = dir.path().join("work2");
+    std::fs::create_dir_all(&next.cwd).unwrap();
+    next.prompt = "recall".into();
+    next.note = Some("NOTE".into());
+    next.resume_session_id = Some("s1".into());
+    let (o, evs) = drive(next.clone(), |_| None).await;
+    assert_eq!(o.status, Status::Succeeded, "{o:?}");
+    assert_eq!(o.session_id.as_deref(), Some("s1"));
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, RunEvent::Session { session_id, .. } if session_id == "s1"))
+    );
+    // The agent knows the first turn and works in the new folder.
+    let want = format!(
+        "acp: remembered [the code word is PELICAN] in {}",
+        next.cwd.to_string_lossy()
+    );
+    assert_eq!(o.result_text.as_deref(), Some(want.as_str()));
+    // The replay of the old session ("old answer") is not reported; one turn, one message.
+    assert_eq!(messages(&evs), vec![want]);
+    assert_eq!(
+        evs.iter()
+            .filter(|e| matches!(e, RunEvent::TurnStarted { .. }))
+            .count(),
+        1
+    );
+}
+
+/// ACP resume of a session the agent no longer has: a new session, and the agent is told its
+/// earlier conversation is gone.
+#[tokio::test]
+async fn acp_resume_of_an_unknown_session_starts_a_new_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = spec(dir.path(), "acp", &fake("fake_acp.py"), &[], "go on");
+    s.resume_session_id = Some("gone".into());
+    let (o, _) = drive(s, |_| None).await;
+    assert_eq!(o.status, Status::Succeeded, "{o:?}");
+    assert_eq!(o.session_id.as_deref(), Some("s1"));
+    let text = o.result_text.unwrap();
+    assert!(
+        text.contains(runtime::acp::LOST_SESSION_NOTE) && text.ends_with("go on"),
+        "{text}"
+    );
+}
+
+/// ACP resume with an agent that does not advertise `loadSession`: it never gets
+/// `session/load`; a new session, told so.
+#[tokio::test]
+async fn acp_resume_without_load_session_starts_a_new_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = spec(dir.path(), "acp", &fake("fake_acp.py"), &[], "first");
+    let (o, _) = drive(s.clone(), |_| None).await;
+    assert_eq!(o.session_id.as_deref(), Some("s1"));
+    s.env.push(("FAKE_ACP_NO_LOAD".into(), "1".into()));
+    s.resume_session_id = Some("s1".into());
+    s.prompt = "recall".into();
+    let (o, _) = drive(s, |_| None).await;
+    assert_eq!(o.status, Status::Succeeded, "{o:?}");
+    assert_eq!(o.session_id.as_deref(), Some("s2"));
+    // A new session remembers nothing; the prompt it got said so.
+    assert!(o.result_text.unwrap().starts_with("acp: remembered []"));
+    let raw = std::fs::read_to_string(dir.path().join("acp-sessions/s2.json")).unwrap();
+    assert!(raw.contains("could not be"), "{raw}");
+    assert!(!raw.contains("session/load"));
+}
+
+/// `CliInfo.resume` of an ACP agent comes from its `initialize` answer.
+#[cfg(unix)]
+#[tokio::test]
+async fn acp_probe_reads_load_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = spec(dir.path(), "acp", &fake("fake_acp.py"), &[], "-");
+    let program = std::path::PathBuf::from(fake("fake_acp.py"));
+    assert_eq!(
+        runtime::acp::probe_load_session(&program, &s.cfg).await,
+        Some(true)
+    );
+    let mut cfg = s.cfg.clone();
+    cfg.env.insert("FAKE_ACP_NO_LOAD".into(), "1".into());
+    assert_eq!(
+        runtime::acp::probe_load_session(&program, &cfg).await,
+        Some(false)
+    );
+    // A program that ends without answering: unknown.
+    let mut cfg = s.cfg.clone();
+    cfg.args = vec!["-c".into(), "exit 0".into()];
+    let sh = std::path::PathBuf::from("/bin/sh");
+    assert_eq!(runtime::acp::probe_load_session(&sh, &cfg).await, None);
+}
+
 /// The `pty` kind: the prompt reaches the program, what it prints comes back as its lines,
 /// text sent to the run while it works is typed into the terminal, and the exit code is the
 /// program's. The same program on both systems, in each one's shell.

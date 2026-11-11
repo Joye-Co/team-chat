@@ -1830,6 +1830,160 @@ async fn a_follow_up_run_resumes_the_session() {
         .unwrap();
 }
 
+/// An AI member on an ACP agent through acceptance paths 3, 4 and 5 (usable, 接 3.6): hello says
+/// the agent continues sessions but has no effort and no read-only mode; the request and the
+/// run note reach the agent; a follow-up during a turn becomes the next prompt and a stop ends
+/// the run; the topic's next run loads the session in the same work folder and the agent
+/// remembers the first turn.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_acp_member_takes_a_task_follows_up_and_continues() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let store = tmp.path().join("acp-sessions");
+    let acp = fake_runtime(
+        "agent",
+        "acp",
+        "fake_acp.py",
+        &format!("FAKE_ACP_STORE = '{}'", store.display()),
+    );
+    // A configured effort list is not reported for an agent that takes none.
+    let cfg = write_config_with(tmp.path(), &m.url, &format!("{acp}efforts = [\"high\"]\n"));
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = tokio::time::timeout(Duration::from_secs(30), m.conns.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    match next(&mut ws).await {
+        Up::Hello { clis, .. } => {
+            let agent = clis.iter().find(|c| c.runtime == "agent").expect("agent");
+            assert_eq!(agent.resume, Some(true), "{agent:?}");
+            assert_eq!(agent.aside, Some(false));
+            assert_eq!(agent.efforts, None);
+            let claude = clis.iter().find(|c| c.runtime == "fake").expect("fake");
+            assert_eq!((claude.resume, claude.aside), (Some(true), Some(true)));
+        }
+        f => panic!("{f:?}"),
+    }
+    assert!(!store.exists(), "the probe started no session");
+    send(&mut ws, &welcome(vec![])).await;
+
+    // Path 3: the request (with its file line) and the run note reach the agent.
+    let request = "@dev fix the login page\n  [file f 01J · shot.png · image/png]";
+    send(&mut ws, &assign("a1", "agent", request, None)).await;
+    let fr = collect(&mut ws, "a1", true, |f| matches!(f, Up::RunDone(_))).await;
+    let d1 = done(&fr);
+    assert_eq!(d1.status, "succeeded", "{d1:?}");
+    let s1 = d1.session_id.clone().expect("session");
+    let first: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(store.join(format!("{s1}.json"))).unwrap())
+            .unwrap();
+    let got = first["prompts"][0].as_str().unwrap();
+    assert!(got.ends_with(request), "{got}");
+    assert!(got.contains("chat-run"), "the run note: {got}");
+    assert_eq!(
+        first["cwd"].as_str().unwrap(),
+        work_of(tmp.path(), "a1").to_string_lossy()
+    );
+
+    // Path 4: the work is visible as it goes, a follow-up during the turn is the next prompt,
+    // and a stop ends the run.
+    send(&mut ws, &assign("a2", "agent", "slow job", None)).await;
+    let mut fr = collect(&mut ws, "a2", true, |f| {
+        matches!(
+            f,
+            Up::RunEvent {
+                event: RunEvent::MessageDelta { .. },
+                ..
+            }
+        )
+    })
+    .await;
+    send(
+        &mut ws,
+        &Down::RunInput {
+            answer: None,
+            artifact_event: None,
+            run_id: "a2".into(),
+            input_id: "in1".into(),
+            text: "also the docs".into(),
+            author_id: Some("u1".into()),
+        },
+    )
+    .await;
+    fr.extend(collect(&mut ws, "a2", true, |f| matches!(f, Up::RunDone(_))).await);
+    let evs = events(&fr);
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, RunEvent::InputAccepted { input_id } if input_id == "in1"))
+    );
+    assert_eq!(
+        evs.iter()
+            .filter(|e| matches!(e, RunEvent::TurnCompleted { .. }))
+            .count(),
+        2
+    );
+    assert_eq!(done(&fr).result_text.as_deref(), Some("acp: also the docs"));
+
+    send(&mut ws, &assign("a3", "agent", "slow again", None)).await;
+    collect(&mut ws, "a3", true, |f| {
+        matches!(
+            f,
+            Up::RunEvent {
+                event: RunEvent::TurnStarted { .. },
+                ..
+            }
+        )
+    })
+    .await;
+    send(
+        &mut ws,
+        &Down::RunCancel {
+            run_id: "a3".into(),
+            reason: None,
+        },
+    )
+    .await;
+    let fr = collect(&mut ws, "a3", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "cancelled");
+
+    // Path 5: the topic's next run continues the session, in the same work folder.
+    let mut a = assign("a4", "agent", "recall", None);
+    if let Down::RunAssign(r) = &mut a {
+        r.resume_session_id = Some(s1.clone());
+        r.topic_id = "a1".into();
+    }
+    send(&mut ws, &a).await;
+    let fr = collect(&mut ws, "a4", true, |f| matches!(f, Up::RunDone(_))).await;
+    let d4 = done(&fr);
+    assert_eq!(d4.status, "succeeded", "{d4:?}");
+    assert_eq!(d4.session_id.as_deref(), Some(s1.as_str()));
+    let text = d4.result_text.unwrap();
+    assert!(
+        text.starts_with("acp: remembered [") && text.contains(request),
+        "{text}"
+    );
+    assert!(
+        text.ends_with(&format!("in {}", work_of(tmp.path(), "a1").display())),
+        "{text}"
+    );
+    // The replayed history is not reported as this run's messages.
+    assert!(!events(&fr).iter().any(|e| matches!(
+        e,
+        RunEvent::Message { text, .. } | RunEvent::MessageDelta { text, .. } if text == "old answer"
+    )));
+    assert!(!tmp.path().join("work/runs/a4/work").exists());
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
 /// Feature `effort`: hello reports the CLI's models and efforts; a run with an effort the CLI
 /// reported starts it with `--effort`, one with an effort it did not report runs without.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -268,6 +268,10 @@ async fn discover_cli(name: &str, rt: &RuntimeConfig) -> CliInfo {
     let can_run = crate::models::discover(rt, found.as_deref()).await;
     let gates = crate::gates::reported_for(&rt.kind, version.as_deref(), rt.asks_permission)
         .then_some(true);
+    let resume = match (rt.kind.as_str(), &found) {
+        ("acp", Some(p)) => acp_resumes(p, rt, version.as_deref()).await,
+        (kind, _) => resumes(kind),
+    };
     CliInfo {
         runtime: name.to_string(),
         kind: rt.kind.clone(),
@@ -275,10 +279,54 @@ async fn discover_cli(name: &str, rt: &RuntimeConfig) -> CliInfo {
         version,
         available: found.is_some(),
         models: can_run.models,
-        efforts: can_run.efforts,
+        // Only Claude Code and Codex take an effort; a configured list for another kind would
+        // offer a setting the run ignores.
+        efforts: can_run.efforts.filter(|_| takes_effort(&rt.kind)),
         // Claude Code (a PreToolUse hook), Codex and ACP agents (their own approval requests).
         gates,
+        resume: Some(resume),
+        aside: Some(crate::run::aside_capable(&rt.kind)),
     }
+}
+
+/// Runtime kinds whose runs continue `run.assign.resumeSessionId` without asking the CLI: Claude
+/// Code (`--resume`) and Codex (`thread/resume`). An ACP agent is asked
+/// ([`crate::runtime::acp::probe_load_session`]); the PTY never continues.
+pub fn resumes(kind: &str) -> bool {
+    matches!(kind, "claude" | "codex")
+}
+
+/// Whether an ACP agent loads sessions, asked once per program, args, env and version: every
+/// hello reports it, and starting the agent again on each reconnect would delay the hello.
+async fn acp_resumes(program: &Path, rt: &RuntimeConfig, version: Option<&str>) -> bool {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static KNOWN: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
+    let known = KNOWN.get_or_init(Default::default);
+    let key = format!(
+        "{}|{:?}|{:?}|{version:?}",
+        program.display(),
+        rt.args,
+        rt.env
+    );
+    if let Some(v) = known.lock().ok().and_then(|k| k.get(&key).copied()) {
+        return v;
+    }
+    match crate::runtime::acp::probe_load_session(program, rt).await {
+        Some(v) => {
+            if let Ok(mut k) = known.lock() {
+                k.insert(key, v);
+            }
+            v
+        }
+        // No answer (not signed in, slow start): not promised; asked again on the next hello.
+        None => false,
+    }
+}
+
+/// Runtime kinds that pass `run.assign.effort` to the CLI.
+pub fn takes_effort(kind: &str) -> bool {
+    matches!(kind, "claude" | "codex")
 }
 
 pub fn disk(path: &Path) -> (u64, u64) {
