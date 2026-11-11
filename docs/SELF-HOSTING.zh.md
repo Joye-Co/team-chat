@@ -55,10 +55,14 @@ exec "$SHELL" -l      # 开一个新 shell，让 bun 进 PATH
 git clone https://github.com/Joye-Co/team-chat.git
 cd team-chat
 git checkout "$(git describe --tags --abbrev=0 origin/main)"   # 最新的发布标签 v<版本号>
+[ -x scripts/setup-server.sh ] || git checkout main             # v1.2.7 及更早的发布没有它
 bun install --frozen-lockfile
 ```
 
-检查：`git describe --tags` 输出 `v<版本号>`；`ls server/node_modules/.bin/wrangler` 能找到 wrangler。
+`scripts/setup-server.sh` 从 v1.2.7 之后的下一个发布版开始才有。那个版本发布前，第二行让你留在 `main` 上；
+应用照样装最新的发布版。
+
+检查：`git describe --tags` 输出 `v<版本号>`（在 `main` 上是 `v<版本号>-<n>-g<提交>`）；`ls server/node_modules/.bin/wrangler` 能找到 wrangler。
 部署后服务器在 `/v1/health` 报告的就是这个版本。
 
 ### 3. 准备 Cloudflare 账号
@@ -125,7 +129,8 @@ bun server/scripts/admin.ts members --env production
 1. 从 <https://github.com/Joye-Co/team-chat/releases> 下载同一版本的应用：Mac 用 `.dmg`，Windows 用
    `-setup.exe`。按 [INSTALL.zh.md](INSTALL.zh.md) 安装并第一次打开（第 2、3 步，或[在 Windows 上安装](INSTALL.zh.md#在-windows-上安装)）。
 2. 在登录界面选 **使用其他服务器…**，填你的服务器地址 `https://chat-api-prod.<你的子域名>.workers.dev`。
-3. 在 Ubuntu 上看登录码：`cat ~/.config/team-chat/production/signin-*.txt`（准确路径是第 4 步最后打印的）。
+3. 在 Ubuntu 上看最新的登录码：`cat "$(ls -t ~/.config/team-chat/production/signin-*.txt | head -n 1)"`
+   （准确路径是第 4 步最后打印的；更早的文件里是已经用过的码）。
    把它填进 **邀请码** 的格子，点 **加入**。
 
 登录码只能用一次，7 天内有效。要新的就运行 `scripts/setup-server.sh production --sign-in-code`。
@@ -159,6 +164,7 @@ bun server/scripts/admin.ts members --env production
 cd team-chat
 git fetch --tags origin
 git checkout "$(git describe --tags --abbrev=0 origin/main)"
+[ -x scripts/setup-server.sh ] || { git checkout main && git pull --ff-only; }
 bun install --frozen-lockfile
 scripts/setup-server.sh production
 ```
@@ -224,7 +230,7 @@ AI 成员。
 
    ```sh
    git clone https://github.com/Joye-Co/team-chat.git /root/team-chat
-   cd /root/team-chat && git checkout v<版本号>      # 和服务器同一版本
+   cd /root/team-chat && git checkout v<版本号>      # 和服务器同一版本，或 main
    bash scripts/runner/host-setup.sh
    ```
 
@@ -246,10 +252,10 @@ AI 成员。
    curl --proto '=https' -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
    . "$HOME/.cargo/env"
    git clone https://github.com/Joye-Co/team-chat.git ~/team-chat
-   cd ~/team-chat && git checkout v<版本号>
-   scripts/build-daemon.sh            # rustup 会装 rust-toolchain.toml 指定的工具链
+   cd ~/team-chat && git checkout v<版本号>      # 和服务器同一版本，或 main
+   out="$(scripts/build-daemon.sh)"   # rustup 会装 rust-toolchain.toml 指定的工具链
    mkdir -p ~/.local/bin
-   install -m 755 dist/team-chat-daemon-*-x86_64-unknown-linux-gnu ~/.local/bin/team-chat-daemon.new
+   install -m 755 "$out" ~/.local/bin/team-chat-daemon.new
    mv -f ~/.local/bin/team-chat-daemon.new ~/.local/bin/team-chat-daemon
    ```
 
@@ -317,8 +323,8 @@ AI 成员。
 
 ### 更新
 
-- **daemon**：用 runner，`cd ~/team-chat && git fetch --tags && git checkout v<新版本号>`，再执行第 4 步的编译和
-  两行安装命令。不要停服务：daemon 发现程序文件换了，等手上没有任务时自己退出，systemd 启动新版本。
+- **daemon**：用 runner，`cd ~/team-chat && git fetch --tags && git checkout v<新版本号>`，再执行第 4 步从
+  `out="$(scripts/build-daemon.sh)"` 起的最后四行。不要停服务：daemon 发现程序文件换了，等手上没有任务时自己退出，systemd 启动新版本。
   等发布物里有了 Linux 的 daemon，这里改成它的自动更新。
 - **基础镜像**：用 root，在 `/root/team-chat` 里 `git checkout` 新版本，再运行一次
   `bash scripts/runner/build-base-image.sh`。已经开始的任务继续用旧镜像。

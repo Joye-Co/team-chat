@@ -61,10 +61,14 @@ Deploy the same version as the app you will install: the newest release.
 git clone https://github.com/Joye-Co/team-chat.git
 cd team-chat
 git checkout "$(git describe --tags --abbrev=0 origin/main)"   # the newest release tag, v<version>
+[ -x scripts/setup-server.sh ] || git checkout main             # releases up to v1.2.7 lack it
 bun install --frozen-lockfile
 ```
 
-Check: `git describe --tags` prints `v<version>`, and `ls server/node_modules/.bin/wrangler`
+`scripts/setup-server.sh` first ships in the release after v1.2.7. Until that release exists,
+the second line keeps you on `main`; install the newest app all the same.
+
+Check: `git describe --tags` prints `v<version>` (on `main`, `v<version>-<n>-g<commit>`), and `ls server/node_modules/.bin/wrangler`
 finds wrangler. The server reports this version at `/v1/health` after the deploy.
 
 ### 3. Prepare the Cloudflare account
@@ -140,8 +144,9 @@ If a step fails, the message says what to do; see also [When something goes wron
    [INSTALL.md](INSTALL.md) describes (steps 2 and 3, or [Windows](INSTALL.md#windows)).
 2. On the sign-in screen, choose **使用其他服务器…** and enter your server address,
    `https://chat-api-prod.<your-subdomain>.workers.dev`.
-3. On Ubuntu, show your sign-in code: `cat ~/.config/team-chat/production/signin-*.txt`
-   (the path is the last thing step 4 printed). Type it into the **邀请码** field and click
+3. On Ubuntu, show your newest sign-in code:
+   `cat "$(ls -t ~/.config/team-chat/production/signin-*.txt | head -n 1)"`
+   (the path is the last thing step 4 printed; older files hold codes already used). Type it into the **邀请码** field and click
    **加入**.
 
 The code works once and for 7 days. For a new one, run
@@ -180,6 +185,7 @@ Keep the server at the version of the app: update it when a new release comes ou
 cd team-chat
 git fetch --tags origin
 git checkout "$(git describe --tags --abbrev=0 origin/main)"
+[ -x scripts/setup-server.sh ] || { git checkout main && git pull --ff-only; }
 bun install --frozen-lockfile
 scripts/setup-server.sh production
 ```
@@ -251,7 +257,7 @@ and people who sign in with an invite code use these AI members without setting 
 
    ```sh
    git clone https://github.com/Joye-Co/team-chat.git /root/team-chat
-   cd /root/team-chat && git checkout v<version>      # the version of your server
+   cd /root/team-chat && git checkout v<version>      # the version of your server, or main
    bash scripts/runner/host-setup.sh
    ```
 
@@ -275,10 +281,10 @@ and people who sign in with an invite code use these AI members without setting 
    curl --proto '=https' -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
    . "$HOME/.cargo/env"
    git clone https://github.com/Joye-Co/team-chat.git ~/team-chat
-   cd ~/team-chat && git checkout v<version>
-   scripts/build-daemon.sh            # rustup installs the toolchain of rust-toolchain.toml
+   cd ~/team-chat && git checkout v<version>      # the version of your server, or main
+   out="$(scripts/build-daemon.sh)"   # rustup installs the toolchain of rust-toolchain.toml
    mkdir -p ~/.local/bin
-   install -m 755 dist/team-chat-daemon-*-x86_64-unknown-linux-gnu ~/.local/bin/team-chat-daemon.new
+   install -m 755 "$out" ~/.local/bin/team-chat-daemon.new
    mv -f ~/.local/bin/team-chat-daemon.new ~/.local/bin/team-chat-daemon
    ```
 
@@ -353,7 +359,7 @@ and people who sign in with an invite code use these AI members without setting 
 ### Update
 
 - **Daemon**: as runner, `cd ~/team-chat && git fetch --tags && git checkout v<new version>`,
-  then the build and the two install lines of step 4. Do not stop the service: the daemon sees
+  then the last four lines of step 4, from `out="$(scripts/build-daemon.sh)"` on. Do not stop the service: the daemon sees
   the new file, waits until no run is active, exits, and systemd starts the new version.
   When releases carry a Linux daemon, this is where its self-update replaces these steps.
 - **Base image**: as root, `git checkout` the new version in `/root/team-chat` and run
