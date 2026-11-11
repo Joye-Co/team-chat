@@ -25,7 +25,7 @@ mod probe {
     use windows::{
         Win32::{
             Foundation::HWND,
-            System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance},
+            System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, CoIncrementMTAUsage},
             UI::{
                 Shell::{DestinationList, ICustomDestinationList},
                 WindowsAndMessaging::{
@@ -159,17 +159,52 @@ mod probe {
                 // deleting the list of exactly this app id removes that file, so the list
                 // was filed under the id set above and not under a default identity.
                 let dir = destinations();
-                let mut list_file = None;
-                let deadline = Instant::now() + Duration::from_secs(15);
-                while list_file.is_none() && Instant::now() < deadline {
-                    if let Some(dir) = &dir {
-                        list_file = files(dir).into_iter().find_map(|(path, modified)| {
+                let find = |before: &HashMap<PathBuf, SystemTime>| {
+                    dir.as_ref().and_then(|dir| {
+                        files(dir).into_iter().find_map(|(path, modified)| {
                             let fresh = before.get(&path).is_none_or(|old| *old < modified);
                             (fresh && holds(&path, "--dock-action 1")).then_some(path)
-                        });
-                    }
+                        })
+                    })
+                };
+                // First as a bare GPUI app commits it: its background threads have no COM
+                // apartment unless the process has a multithreaded one.
+                let mut list_file = None;
+                let deadline = Instant::now() + Duration::from_secs(6);
+                while list_file.is_none() && Instant::now() < deadline {
+                    list_file = find(&before);
                     settle(cx).await;
                 }
+                let without_apartment = list_file.is_some();
+                // Then as the app does it: the process joins the multithreaded apartment
+                // before it sets the Dock menu.
+                if list_file.is_none() {
+                    // SAFETY: keeps the process's multithreaded apartment alive for good.
+                    let joined = unsafe { CoIncrementMTAUsage().is_ok() };
+                    println!("joined the multithreaded apartment: {joined}");
+                    cx.update(|cx| {
+                        cx.set_dock_menu(vec![
+                            MenuItem::action("First task", First),
+                            MenuItem::separator(),
+                            MenuItem::action("Second task", Second),
+                        ])
+                    });
+                    let deadline = Instant::now() + Duration::from_secs(15);
+                    while list_file.is_none() && Instant::now() < deadline {
+                        list_file = find(&before);
+                        settle(cx).await;
+                    }
+                }
+                let new_files: Vec<String> = dir
+                    .as_ref()
+                    .map(|dir| {
+                        files(dir)
+                            .into_keys()
+                            .filter(|path| !before.contains_key(path))
+                            .map(|path| path.display().to_string())
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 let deleted = unsafe {
                     CoCreateInstance::<_, ICustomDestinationList>(
                         &DestinationList,
@@ -201,6 +236,10 @@ mod probe {
                     "leave_fullscreen": windowed,
                     // Reported, not required: a CI session may refuse the foreground.
                     "second_window_in_front": second_in_front,
+                    // Reported: whether GPUI's own commit worked before the process had a
+                    // multithreaded apartment (the app joins one first).
+                    "jump_list_without_apartment": without_apartment,
+                    "new_destination_files": new_files,
                     "jump_list_file": list_file.as_ref().map(|f| f.display().to_string()),
                     "jump_list_deleted_by_app_id": deleted,
                     "jump_list_under_app_id": under_app_id,
