@@ -585,32 +585,15 @@ impl CoreProvider {
             return reply_now(Err(AdminError::Unsupported));
         };
         self.request(move |client, server_url| async move {
-            let new = if super::this_mac::config_path().is_file() {
-                None
-            } else {
-                let name = super::this_mac::computer_name();
-                let labels = super::this_mac::default_labels();
-                let req = CreateMachineRequest {
-                    name: name.clone(),
-                    labels: Some(labels.clone()),
-                };
-                let r = client
-                    .http()
-                    .create_machine(&req)
-                    .await
-                    .map_err(|e| api_error(&e))?;
-                Some(super::this_mac::NewMachine {
-                    server_url,
-                    id: r.machine.id.clone(),
-                    name: r.machine.name.clone(),
-                    labels,
-                    token: r.token,
+            super::this_mac::set_up(&daemon, &client.http(), server_url)
+                .await
+                .map_err(|e| match e {
+                    super::this_mac::SetUpError::Api(e) => api_error(&e),
+                    super::this_mac::SetUpError::Install(e) => {
+                        tracing::warn!(error = %e, "用这台电脑: install failed");
+                        AdminError::Other
+                    }
                 })
-            };
-            super::this_mac::install(&daemon, new.as_ref()).map_err(|e| {
-                tracing::warn!(error = %e, "用这台电脑: install failed");
-                AdminError::Other
-            })
         })
     }
 

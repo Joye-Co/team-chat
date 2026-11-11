@@ -1,7 +1,7 @@
 use daemon::config::{self, Config};
 use std::path::PathBuf;
 
-const USAGE: &str = "usage: daemon <run|doctor|install-service|uninstall-service|restart-service|example-config> [--config <file>] [--no-load] [--log-file <file>]";
+const USAGE: &str = "usage: daemon <run|doctor|install-service|uninstall-service|restart-service|example-config> [--config <file>] [--no-load] [--log-file <file>]\n       daemon private-dir <folder>";
 
 fn main() {
     // The same binary is `chat-run` inside a run (a link named chat-run on the run's PATH).
@@ -22,6 +22,28 @@ fn main() {
     if cmd == "repair-program" {
         if let Some(exe) = args.next() {
             daemon::selfupdate::repair(std::path::Path::new(&exe));
+        }
+        return;
+    }
+    // Makes a folder that only this user can open, private from the moment it exists (the app
+    // runs this for the daemon's config folder before it writes the token there). A folder
+    // that is already there is taken when it is private, or made private while it is still
+    // empty; anything else is refused.
+    if cmd == "private-dir" {
+        let dir = PathBuf::from(args.next().unwrap_or_else(|| exit_with(USAGE)));
+        let made = daemon::sys::create_private_dir(&dir).or_else(|e| {
+            let empty = std::fs::read_dir(&dir).is_ok_and(|mut d| d.next().is_none());
+            if empty {
+                daemon::sys::set_mode(&dir, 0o700)
+            } else {
+                Err(e)
+            }
+        });
+        if let Err(e) = made.and_then(|()| daemon::sys::set_mode(&dir, 0o700)) {
+            exit_with(&format!("cannot make {} private: {e}", dir.display()));
+        }
+        if let Some(why) = daemon::sys::acl_problem(&dir) {
+            exit_with(&format!("{} is not private: {why}", dir.display()));
         }
         return;
     }
@@ -48,6 +70,15 @@ fn main() {
             // The Windows scheduled task: its headless console shows nothing.
             if let Some(file) = &log_file
                 && let Err(e) = daemon::service::log_to(file)
+            {
+                exit_with(&e);
+            }
+            // Windows: the only daemon of this user and config, or none (the Task Scheduler
+            // can start a second one while the first shuts down). Held until the process ends.
+            let _instance =
+                daemon::service::single_instance(&config_path).unwrap_or_else(|e| exit_with(&e));
+            if let Some(file) = &log_file
+                && let Err(e) = daemon::service::stoppable(file)
             {
                 exit_with(&e);
             }

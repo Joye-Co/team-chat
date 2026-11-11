@@ -32,6 +32,9 @@
 // above the script updates it by the replace protocol while it is idle and while a run is
 // active, ends it the way a logoff does, and starts the task again the way a logon does. It
 // refuses to run on a computer that is a machine already (a config, a task, a running daemon).
+// With --server-only <folder> the script only starts the local server, writes its address to
+// <folder>/url and an owner's token to <folder>/owner-token, and keeps it running until a file
+// <folder>/stop appears (the desktop's 「用这台电脑」 test on Windows CI runs against it).
 // Needs: `bun install`, and the daemon binary (built here with cargo when missing).
 // Tokens stay in memory or in files of mode 600 inside the temp folder; nothing is printed.
 import { spawn, spawnSync } from "node:child_process";
@@ -57,6 +60,7 @@ const VM_DIR = join(process.env.TMPDIR ?? tmpdir(), `vms-${process.pid}`);
 const REMOTE = flag("--base-url")?.replace(/\/$/, "");
 const OWNER_TOKEN_FILE = flag("--owner-token-file")?.replace(/^~/, process.env.HOME ?? "~");
 const SERVICE = args.includes("--service");
+const SERVER_ONLY = flag("--server-only");
 if (SERVICE && !WIN) throw new Error("--service is for Windows (the daemon as a scheduled task)");
 const BASE = REMOTE ?? `http://127.0.0.1:${PORT}`;
 const TMP = mkdtempSync(join(tmpdir(), "bots-e2e-"));
@@ -159,6 +163,14 @@ async function main() {
     groupId = g.group.id;
   } else {
     ({ owner, groupId, alice, bot } = await localServer(server));
+  }
+  if (SERVER_ONLY) {
+    mkdirSync(SERVER_ONLY, { recursive: true });
+    writeFileSync(join(SERVER_ONLY, "url"), BASE);
+    writeFileSync(join(SERVER_ONLY, "owner-token"), owner, { mode: 0o600 });
+    step(`the server runs at ${BASE} until ${join(SERVER_ONLY, "stop")} appears`);
+    await until("the stop file", () => existsSync(join(SERVER_ONLY, "stop")), 3 * 3600_000);
+    return;
   }
   await call("PUT", `/v1/bots/${bot.member.id}/runner`, { token: owner, body: { runtime: "claude", labels: [LABEL] } });
   const machine = await call("POST", "/v1/machines", { token: owner, body: { name: `mac-${LABEL}`, labels: [LABEL] } });

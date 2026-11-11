@@ -22,8 +22,8 @@
 
 ## 0. 缺口和它们的结局
 
-清单第一版列出 20 个缺口，真 CLI 的测试在 Windows 上又抓出一个（G32）。现在全部补完；剩下的只有 CI
-做不到的事，在第 8 节。
+清单第一版列出 20 个缺口，真 CLI 的测试在 Windows 上又抓出一个（G32），评审又指出 11 个（G33 到 G43：有的是
+清单第一版把没验证过的行写成了「一致」，有的是两个系统上都有的洞）。现在全部补完；剩下的只有 CI 做不到的事，在第 8 节。
 
 | 编号 | 缺口 | 结局 | 证据（都在 CI 上） |
 | --- | --- | --- | --- |
@@ -48,6 +48,17 @@
 | G27 | `doctor` 不查 Git for Windows | 不需要查：Claude Code 2.1 起没有 Git Bash 就用 PowerShell。`doctor` 现在写明它用哪个 | 读 CLI 更新日志和随包代码 |
 | G32 | 会话 id 是从 `/dev/urandom` 读的，Windows 没有这个文件：每个 Claude Code 会话的 id 都是同一个全零的值，续接可能接到别的话题的会话 | 改用系统的随机数源（三个系统同一段代码） | `runtimes.rs::session_ids_are_random_on_every_system`；是 `real_cli.rs` 在 Windows 上第一次跑时暴露的 |
 | G31 | 整条链没连起来跑过 | 安装命令、计划任务、本地服务器、run、取消、空闲时更新、run 进行中更新、注销和登录、卸载，一条龙 | `Daemon chain (Windows…)` |
+| G33 | 守住「bot 读写不出 run 目录」的三个单元测试只在 Unix 上跑；Windows 上那两段检查从没对着 `..\`、`C:foo`、别的盘、`\\server\share`、`\\?\`、junction、短文件名、结尾的点和空格、`file::$DATA`、大小写跑过 | 三个测试在 Windows 上跑，加了这些写法的用例。查出并补了一类真的问题：网络路径（`\\server\share\…`）会让 daemon 以用户的身份去登录 CLI 指定的服务器，设备和 `\\?\` 写法能绕过规则。现在这些写法在碰文件系统之前就按文本拒绝（`sys::windows_path_problem`） | `chat_run_files.rs`、`chat_run_context.rs`、`sys.rs` 的单元测试 |
+| G34 | `apps/daemon/e2e/real-cli-pause.ts` 是「真 CLI 的暂停」唯一的证明，它读 Unix 的进程状态 `T`，要登录，清单里没列 | 加了不用登录的对应测试：真的 Claude Code 对着假模型，在它的 Bash 工具里跑一个每秒写一行的循环；暂停后 run 下面每个进程都停住（Unix 是状态 `T`，Windows 是进程的每个线程都被挂起）、不再写行，继续后接着写，取消后全部结束 | `tests/real_cli_pause.rs`（三个系统）。原脚本仍是 Mac / Linux 上带登录、真模型的手动检查 |
+| G35 | Windows 的负载：`doctor` 是一次性进程，永远打印 0；每个 daemon 启动后从 0 起步，约三分钟才收敛，所以每次重启或更新之后，忙的 Windows 机器会报「很闲」并在派活时被优先选中 | 第一次读取时先实测半秒，三个平均值都从实测值起步 | `sys.rs::the_first_windows_load_is_measured_not_zero` |
+| G36 | 登录状态那一行写过头了，还说「本 PR 已补」，其实没改登录的代码 | 改正了那一行（第 1 节）：没有改代码，Windows 和 Linux 用同一条规则 | — |
+| G37 | 把测试搬到 Windows 时放松了两处：管道「run 结束后没了」没断言；「权限 600 / 700」换成了只看管道名 | 补上：run 结束后连不上管道（不存在）；从一个连接上读出管道的所有者和访问列表，只有本用户 | `integration.rs`、`chat_run.rs` 的单元测试 |
+| G38 | 默认的审批规则认不出 Windows 上的写法：`gh.exe pr merge`、带路径带引号的程序、`Remove-Item -Recurse -Force C:\`、`rd /s /q`、`del`、`erase`。而机器一旦上报 `gates`，服务器就告诉 bot「机器会问，你别自己问」 | daemon 匹配时除了原样，还按「去掉目录、引号、`.exe`/`.cmd`/`.bat`/`.com`/`.ps1` 的程序名加去掉引号的参数」再匹配一次（默认规则和团队自己写的规则都受益，Unix 上带引号的写法也补上了）；默认的删除规则加了 PowerShell、cmd、Git Bash 删盘根和用户目录的写法。原有的 Unix 命中和不命中一个没变 | `gates.rs` 单元测试（每一类、两种系统的写法）；`integration.rs` 里真 CLI 经 PowerShell 工具逐条被拦 |
+| G39 | 用户或项目的 Claude Code 设置里 `disableAllHooks: true`，或者受管设置只允许受管钩子，审批钩子就被去掉，而机器仍在说自己会拦。Mac 和 Linux 上一样 | 对着真 CLI 证实了这个洞。run 的设置里写明 `disableAllHooks: false`（它的优先级高于用户和项目的设置，真 CLI 上验证）；受管设置优先级更高、改不了，所以再装一个启动钩子：CLI 一启动就跑它，daemon 等它跑过才把提示词交给 CLI。钩子被关掉的 CLI 永远拿不到带审批的 run 的提示词，run 以明确的原因失败 | `integration.rs`：真 CLI 加用户的 `disableAllHooks`；CI 上写入受管设置后真 CLI 的 run 不启动（Linux 和 Windows）；假 CLI 的同一条规则 |
+| G40 | 运行时用的判断（`enforced_by`）和上报用的（`reported_for`）不是同一个：审批规则如果到了一个低于版本下限的 Windows CLI，钩子失败会放行。下限 2.1.295 也没测过 | 没被上报为「会拦」的 CLI 收到带审批的 run，run 直接失败；下限改成 CI 实际测的 2.1.322 | `gates.rs` 单元测试 |
+| G41 | 重启和每分钟触发器抢跑：结束任务只结束 conhost，触发器这时可能再起一个 daemon，它覆盖 pid 文件；前一个退出时 pid 文件被无条件删掉，之后卸载找不到 daemon，第二个继续接活而界面显示「未设置」。没有单实例保证 | 每个用户、每份配置一把全机的锁（命名互斥量，daemon 活着就拿着）：第二个 daemon 立刻退出。pid 文件只在它还写着被停掉的那个进程时才删。安装失败不留东西 | `service_task.rs`：同配置的第二个 daemon 不运行；停得慢的 daemon 加不断触发的启动之下重启、卸载，最后恰好一个（或零个）daemon，pid 文件指着它 |
+| G42 | `task.xml` 在注册任务之前就写下了，注册失败它还在，「用这台电脑」读成「正常」 | `task.xml` 只在注册成功之后出现；客户端的状态先问任务计划程序任务在不在（`schtasks /Query` 的退出码），再读 `task.xml` 看它跑的是哪个 daemon | `service_task.rs::a_failed_install_leaves_nothing`；`this_mac.rs` 的测试里有「有文件、没任务」读成未设置 |
+| G43 | `local-e2e.ts --service` 的自我保护太窄，清理按进程名杀：在开发者的电脑上可能覆盖他的任务、杀掉他的 daemon | 任务已存在、状态目录已存在、有同名进程在跑、`HOME` 下有配置、设了 `CHAT_DAEMON_CONFIG`，任何一条都拒绝运行；清理只杀脚本自己看见启动的进程 | 代码 |
 
 ## 1. 上报给服务器的能力
 
@@ -63,16 +74,16 @@
 | `CliInfo.available` / `command` | 按 `PATH` 找 | 按 `PATH` 加 `PATHEXT` 找，只认 `.com/.exe/.bat/.cmd` | 一致（真 CLI 见 G11） | — |
 | `CliInfo.version` | `<cli> --version` 第一行，10 秒 | 同，子进程在 job 里 | 一致（真 CLI 见 G11） | — |
 | `CliInfo.models` / `efforts` | `claude --help`、`codex app-server` 的 `model/list` | 同（`runtimes.rs` 在 CI 上对着假 CLI 跑过） | 一致 | — |
-| `CliInfo.gates` | Claude Code：`true` | Claude Code 2.1.295 及以上：`true`。更旧的、或者读不出版本的：不上报，服务器把规则留在提示词里（和对 Codex 一样） | 一致（G1） | 版本下限的原因见第 6 节 |
+| `CliInfo.gates` | Claude Code：`true` | Claude Code 2.1.322 及以上（CI 实际测的版本）：`true`。更旧的、或者读不出版本的：不上报，服务器把规则留在提示词里（和对 Codex 一样）；这样的 CLI 如果仍收到带审批的 run，run 失败 | 一致（G1、G40） | 版本下限的原因见第 6 节 |
 | `health.diskFreeBytes` / `diskTotalBytes` | `statvfs` | `GetDiskFreeSpaceExW` | 一致 | — |
-| `health.load1/5/15` | `getloadavg` | 以前是 0。现在 daemon 自己算：每 5 秒取一次「忙的处理器个数」（忙的比例 × 处理器数），按 1、5、15 分钟做和 Unix 内核一样的指数平均 | 一致（本 PR，G4） | 满载以下和 Unix 的数同义（2.0 = 两个处理器在忙）；满载以上停在处理器数，Unix 会继续数排队的。服务器只用它在两台机器里挑闲的那台。启动后头 5 秒是 0 |
+| `health.load1/5/15` | `getloadavg` | daemon 自己算：进程第一次读取时实测半秒「忙的处理器个数」（忙的比例 × 处理器数），三个平均值都从这个值起步；之后每 5 秒取一次，按 1、5、15 分钟做和 Unix 内核一样的指数平均 | 一致（G4、G35） | 满载以下和 Unix 的数同义（2.0 = 两个处理器在忙）；满载以上停在处理器数，Unix 会继续数排队的。服务器只用它在两台机器里挑闲的那台。刚启动的 daemon 和 `doctor` 报的是「现在」，不是过去 1、5、15 分钟：Windows 不记过去 |
 | `health.cpuCount` / `activeRuns` | 同一段代码 | 同 | 一致 | — |
 | `metrics.cpuPct` | Linux `/proc/stat`，macOS `host_statistics` | 以前没有。现在 `GetSystemTimes` | 一致（本 PR，G3） | — |
 | `metrics.memTotalBytes` / `memAvailableBytes` | `/proc/meminfo`，macOS `sysctl` + `host_statistics64` | 以前没有。现在 `GlobalMemoryStatusEx` | 一致（本 PR，G3） | — |
 | `metrics.uptimeSecs` | `/proc/uptime`，macOS `kern.boottime` | 以前没有。现在 `GetTickCount64` | 一致（本 PR，G3） | — |
 | `metrics.netRxBps` / `netTxBps` | 只有 Linux 有（`/proc/net/dev`）；macOS 不报 | 不报 | 一致（和 Mac 一样不报） | — |
 | `metrics.vmSlots` / `boot` / 每个 VM 的 CPU、内存、盘 | 只有配了 `[vm]` 的 Linux 主机 | 没有 | 无对应 | Firecracker 只在 Linux 上有，Mac 也没有；本机 run 两边都只报 run id 和开始时间 |
-| `metrics.logins`（Claude Code） | Linux：`.credentials.json` 里有令牌；macOS：`.claude.json` 里有账号（凭据在钥匙串）；否则看 `ANTHROPIC_API_KEY` | 和 Linux 同一条规则（凭据文件）；另外 CLI 自己说已登录时（`claude auth status`），不论系统都算已登录（`daemon.rs` 里补的那一步） | 一致（G5：CLI 的 Windows 版把凭据写在 `<配置目录>\.credentials.json`，只有打开 `CLAUDE_CODE_FORCE_WINDOWS_CREDMAN` 才用凭据管理器；那种情况由 `auth status` 那一步兜住） | — |
+| `metrics.logins`（Claude Code） | Linux：`.credentials.json` 里有令牌；macOS：`.claude.json` 里有账号（凭据在钥匙串）；否则看 `ANTHROPIC_API_KEY` | 和 Linux 同一条规则（凭据文件）。这里没有改代码：读了 CLI 的 Windows 包，凭据就写在 `<配置目录>\.credentials.json`。只有用户打开 `CLAUDE_CODE_FORCE_WINDOWS_CREDMAN`（凭据进凭据管理器）时这条规则会判成未登录；那时，如果机器有 `machine.key`（功能 `accounts`），daemon 会用 `claude auth status` 的结果改判成已登录，没有 `machine.key` 就仍是未登录 | 一致（G5、G36：和 Linux 相同，包括 Linux 上没有 `machine.key` 时的同一个局限） | — |
 | `metrics.logins`（Codex） | `$CODEX_HOME/auth.json` | 同 | 一致 | — |
 | `metrics.secrets`、`metrics.usage` | 钥匙库、`claude -p /usage`、ChatGPT 用量接口 | 同一段代码；子进程在 job 里 | 一致（真 CLI 见 G11） | — |
 
@@ -158,7 +169,10 @@
 | `chat_run.rs`（`socket_path`、`Server`、`call`） | CLI 到 daemon 的通道 | Unix socket，600，另查对端 uid；路径太长时放临时目录 | 命名管道 `\\.\pipe\chat-run-<哈希>-<pid>`，访问列表只给当前用户，拒绝远程，必须是这个名字的第一个实例；客户端只许对方识别身份 | 一致（CI 跑过） | — |
 | `chat_run.rs`（文件传输）、`chat_run_files.rs` | Codex 用的请求目录 | 目录 700，请求文件按属主过滤 | 目录继承 run 目录的访问列表，请求文件按所有者和访问列表过滤；读结果时遇到「正在被换上去」重试 | 一致（假 CLI CI 跑过；真 Codex 的沙箱见 G13） | — |
 | `chat_run.rs` 的每个 op（`card.post`、`card.patch`、`interaction.resolve`、`artifact.*`、`desk.note`、`member.*`、`secret`、`gate.check`、文件上传、产出） | — | 同一段代码 | 同一段代码；`integration.rs` 现在在 CI 上跑（card patch、artifact create、resolve、超时两种说法） | 一致 | — |
-| `gates.rs`（`enforced_by`、`reported_for`） | 谁的 run 会拦命令 | Claude Code | Claude Code 2.1.295 及以上 | 一致（G1） | 见第 6 节 |
+| `gates.rs`（`enforced_by`、`reported_for`）、`run.rs` | 谁的 run 会拦命令 | Claude Code | Claude Code 2.1.322 及以上；上报和运行用同一个判断，没被上报的 CLI 收到带审批的 run 就失败 | 一致（G1、G40） | 见第 6 节 |
+| `gates.rs`（`plain_command`、`matches`） | 命令怎么和规则对 | 每条简单命令原样匹配 | 两边都改成：原样匹配，再按「程序名去掉目录、引号和扩展名，参数去掉引号」匹配一次 | 一致（G38；Unix 上只多拦了带引号的写法） | — |
+| `gates.rs`（`claude_settings` 的 `disableAllHooks`、`SessionStart`、`alive_main`）、`runtime/claude.rs` | 钩子被设置关掉时 | 以前：照常跑，命令不被拦 | 两边都改成：run 的设置把钩子打开；启动钩子没跑过，CLI 拿不到提示词，run 失败 | 一致（G39；Unix 的变化只是堵上这个洞） | — |
+| `chat_run_files.rs`（`inside`）、`chat_run_context.rs`（`resolve_out`）、`sys.rs`（`windows_path_problem`） | bot 给的路径不出 run 目录 | 解析（含符号链接）后必须在工作目录里 | 同，另外先按文本拒绝 Windows 才有的写法：网络路径、设备和 `\\?\` 路径、带冒号的（`C:foo`、`file:stream`）、以点或空格结尾的名字、设备名（`NUL`、`CON`、`COM1`…） | 一致（G33） | junction、短文件名、大小写、别的盘由「解析后比较」挡住，CI 上逐条测了 |
 | `gates.rs`（`fails_closed`、`hook_failure`） | 钩子问不到 daemon | 放行（一直如此） | 拒绝 | 一致（Windows 更严，有意的） | — |
 | `gates.rs`（`claude_settings`） | 钩子怎么写 | 一行 shell：`'<路径>' gate` | 不经过 shell：`command` 是程序，`args` 是 `["gate"]`，另加 `onFailure: "block"` | 一致（G1） | 见第 6 节 |
 | `gates.rs`（`matcher`、`SHELL_TOOLS`） | 钩子匹配哪些工具 | `^(Bash\|PowerShell\|Monitor\|mcp__.*)$`（原来只有 `Bash` 和 MCP；这是 Mac 和 Linux 上唯一变了的地方） | 同 | 一致（G2） | — |
@@ -167,7 +181,8 @@
 
 | 文件 | 事 | Mac / Linux | Windows 现在 | 状态 |
 | --- | --- | --- | --- | --- |
-| `service.rs`（`install`、`install_systemd`、`install_task` 及其辅助）、`wintrust.rs` | 开机 / 登录自启、退出后重启 | launchd `KeepAlive`、systemd `Restart=always` | 计划任务：登录时启动，每分钟触发器把退出的 daemon 一分钟内拉起，单实例，无时限 | 一致（CI 对着真的任务计划程序跑过；真的注销登录、重启见「要在真机上确认」） |
+| `service.rs`（`install`、`install_systemd`、`install_task` 及其辅助）、`wintrust.rs` | 开机 / 登录自启、退出后重启 | launchd `KeepAlive`、systemd `Restart=always` | 计划任务：登录时启动，每分钟触发器把退出的 daemon 一分钟内拉起，单实例，无时限。`task.xml` 只在注册成功后出现，失败不留东西（G42） | 一致（CI 对着真的任务计划程序跑过；真的注销登录、重启见「要在真机上确认」） |
+| `service.rs`（`single_instance`、`stoppable`、`stop_daemon`）、`main.rs` | 同一份配置只有一个 daemon | launchd、systemd 不会把一个服务起两份 | 任务计划程序会（结束任务只结束 conhost，触发器可能在旧 daemon 收尾时再起一个）。所以 daemon 自己拿一把锁：全机可见的命名互斥量，按用户和配置文件命名，进程活着就拿着；第二个 daemon 立刻退出。pid 文件只属于拿到锁的那个 | 无对应，替代做法给出同样的保证（G41；CI 上在不断触发启动的情况下重启、卸载） |
 | `service.rs`（`uid`、`launchctl`） | launchd 的用户域 | `gui/<uid>` | 不用（任务属于当前用户的 SID） | 无对应：launchd 的概念 |
 | `service.rs`（PATH） | 服务的 `PATH` | 安装时把当时的 `PATH` 写进 plist / unit | 不写：计划任务每次启动拿用户当前的环境变量 | 一致（Windows 的更新得更勤；常见安装目录由 daemon 自己补，G24） |
 | `service.rs`（`log_to`、`wait_stop`、`restart_task`、`task_*`） | 日志、停止、重启 | launchd / systemd 提供 | daemon 自己做 | 一致 |
@@ -185,11 +200,13 @@
 
 | 测试 | Mac / Linux CI | Windows CI | 状态 | 怎么补 |
 | --- | --- | --- | --- | --- |
-| 单元测试（`src/**`） | 跑 | 跑（另有 Windows 专有的：访问列表、命名管道、任务 XML、命令行引号） | 一致 | — |
+| 单元测试（`src/**`） | 跑 | 跑。两个测试只在 Unix 上有，各有 Windows 的对应：`a_blocked_connect_names_the_sandbox`（socket 连不上）对 `a_blocked_pipe_names_the_sandbox`（管道打不开）；`a_long_run_folder_gets_a_short_socket_path` 对 `a_long_run_folder_gets_a_short_pipe_name`。路径规则的三个测试原来只在 Unix 上跑，现在两边都跑（G33）。Windows 另有专有的：访问列表、命名管道（往返、访问列表、结束后消失）、任务 XML、命令行引号、Windows 路径写法 | 一致（G33、G37） | — |
 | `tests/normalize.rs`、`redact.rs`、`chat_run.rs` | 跑 | 跑 | 一致 | — |
 | `tests/process_tree.rs` | 跑 | 跑（另有 `.cmd`、job、ConPTY 的用例） | 一致 | — |
 | `tests/runtimes.rs` | 跑 | 跑，除了两个 `pty` 用例（Windows 的在 `process_tree.rs` 里）和 Unix 沙箱那一个（它测的是 seatbelt / landlock 挡住 socket 和网络；Windows 上对应的是 `codex_on_windows_reaches_the_daemon_through_the_request_folder`） | 一致（G8） | — |
 | `tests/real_cli.rs`（真的 Claude Code，假模型） | Linux 跑（装了 CLI）；Mac 本地有 CLI 就跑 | 跑，CLI 必须在 | 一致 | — |
+| `tests/real_cli_pause.rs`（真的 Claude Code 和它的工具进程，暂停、继续、取消） | Linux 跑；Mac 本地有 CLI 就跑 | 跑 | 一致（G34） | — |
+| `apps/daemon/e2e/real-cli-pause.ts`（登录过的真 CLI、真模型，暂停十分钟） | 手动，Mac / Linux | 不能跑（读 Unix 的进程状态，要登录） | 无对应：它要一台登录过的机器。不用登录的那部分是上一行；带登录的在第 8 节 | — |
 | `tests/integration.rs`（13 个用例：整个 daemon 对着进程内的假服务器和假 CLI） | 跑 | 以前不跑。现在跑（本 PR，G6）：假 CLI 经 `fake-cli.exe` 启动；「是否停住」在 Windows 上用线程挂起计数判断；崩溃后留下 CLI 的那一段是 Unix 专有的（见第 3 节 `kill_leftover`） | 一致 | — |
 | `tests/setup.rs`（协议 fixture、配置、doctor、worktree、镜像、清理、只读目录） | 跑 | 以前不跑。现在跑（本 PR，G7），除了 launchd 和 systemd 两个用例（Windows 的是 `service_task.rs`） | 一致 | — |
 | `tests/service_task.rs` | 不适用 | 跑（真的任务计划程序） | 无对应（反过来的）：Mac 的 launchd 只测 plist 文本 | — |
@@ -216,7 +233,10 @@ runner 能装真的 Claude Code 和 Codex（npm），不能登录。办法是把
 | --- | --- | --- |
 | 钩子用哪个 shell | 钩子写成一行命令时：找得到 Git Bash 就用 `bash -c`，否则用 PowerShell；从不用 `cmd.exe`。带引号的路径加参数（`"C:/…/chat-run.exe" gate`）在 bash 里是命令，在 PowerShell 里是语法错误，没有一种写法两边都行 | 读代码 |
 | 所以 Windows 上钩子怎么写 | 不经过 shell 的写法：`command` 是程序路径，`args: ["gate"]`（CLI 直接启动它），再加 `onFailure: "block"`（钩子启动不了、超时、以意外的退出码结束，都拦下命令）。加上钩子自己「问不到 daemon 就拒绝」，没有哪种失败会放行 | 读代码；CI 上三个用例：钩子问不到 daemon → 命令被拒绝；钩子程序不存在 → 命令被拦；一切正常 → 问到 daemon、等人答 |
-| 版本下限 | `args` 是 2.1.139 加的，`onFailure` 是 2.1.295 加的（CLI 的更新日志）。更旧的 CLI 遇到启动不了的钩子会放行，所以 Windows 只对 2.1.295 及以上上报 `gates` | 更新日志；`gates.rs` 单元测试 |
+| 版本下限 | `args` 是 2.1.139 加的，`onFailure` 是 2.1.295 加的（CLI 的更新日志）。更旧的 CLI 遇到启动不了的钩子会放行。Windows 只对 CI 实际测的版本（2.1.322）及以上上报 `gates`；2.1.295 到 2.1.321 理论上也行，没测过就不算 | 更新日志；`gates.rs` 单元测试 |
+| 钩子被设置关掉 | 用户或项目设置里的 `disableAllHooks: true` 会去掉 run 的钩子；run 的设置里写 `disableAllHooks: false` 能压过它（`--settings` 的优先级更高）。受管设置（`allowManagedHooksOnly`，或那里的 `disableAllHooks`）压不过。`SessionStart` 钩子在 CLI 启动时、读入任何输入之前就跑，钩子被关时不跑：daemon 用它判断这个 CLI 的钩子是不是开着 | 在 Mac 上对着真 CLI 试了三种组合；CI 上 Linux 和 Windows 各写入一份受管设置跑一遍 |
+| 钩子的路径里有空格、中文、`&()^%!` | 照常启动：Windows 上钩子不经过 shell，路径是一个参数 | `integration.rs` 的真 CLI 用例，整个 run 目录、配置目录都放在这样命名的目录下（三个系统） |
+| 真 CLI 的测试会不会悄悄跳过 | 不会：CI 装了 CLI 的任务（Linux、Windows）都设了 `TC_REQUIRE_REAL_CLI`，找不到 CLI 就失败；Windows 另设 `TC_REQUIRE_REAL_CODEX` | `ci.yml` |
 | 同一套写法在 Mac 和 Linux 上 | 也成立（CLI 跑钩子的是同一段代码）。Mac 和 Linux 的钩子没有改，仍是一行 shell、失败放行；但 Windows 的写法在这两个系统的真 CLI 上也验证了 | `real_cli.rs::the_windows_form_of_the_hook_blocks_when_it_cannot_start`（三个系统都跑） |
 | 能执行命令的工具 | `Bash`（Windows 上没有 Git Bash 时没有这个工具）、`PowerShell`（Windows 上没有 Git Bash 时启用，或用 `CLAUDE_CODE_USE_POWERSHELL_TOOL=1`）、`Monitor`。三个的输入都有 `command`。钩子都匹配 | 读代码；CI 上打开 PowerShell 工具跑了一遍 |
 | 默认的审批规则认不认 PowerShell 的写法 | `gh pr merge`、`git push origin main`、`wrangler deploy` 这类在哪个 shell 里都一样。`rm -rf /` 这类删除规则是按 POSIX 写的，`Remove-Item -Recurse` 不在默认规则里 | 这是服务器的默认规则（`packages/protocol`），不归 daemon；已告知负责服务器的人。装了 Git for Windows 的机器走 Bash，不受影响 |
@@ -233,12 +253,12 @@ runner 能装真的 Claude Code 和 Codex（npm），不能登录。办法是把
 | 事 | Mac | Windows 现在 | 状态 | 怎么补 |
 | --- | --- | --- | --- | --- |
 | daemon 在哪 | 应用包里 `Contents/MacOS/<slug>-daemon` | 安装目录里客户端旁边的 `<slug>-daemon.exe`；debug 构建和 `target` 目录下一律当作没有 | 一致 | — |
-| 写配置和 token | 目录 700，文件 600，先写临时文件再改名 | 目录先设成只有当前用户、SYSTEM、Administrators（`icacls`），再写文件 | 一致 | — |
+| 写配置和 token | 目录 700，文件 600，先写临时文件再改名 | 目录由 daemon 建（`<daemon> private-dir`），建出来的那一下就只有当前用户、SYSTEM、Administrators，不是先建再收紧；已有的目录只有本来就私有、或者还是空的才用。再写文件 | 一致 | — |
 | 注册服务 | `<daemon> install-service`，把登录 shell 的 `PATH` 加常见安装目录传给它 | `<daemon> install-service`，不传 `PATH`。daemon 每次启动自己把存在的常见目录补到 `PATH` 后面：`%USERPROFILE%\.local\bin`（Claude Code 的安装程序把 `claude.exe` 放在这里，不一定加进 `PATH`）、`.claude\local`、`%APPDATA%\npm`、`.bun\bin`、`.cargo\bin`、`nodejs`、Git | 一致（G24） | — |
-| 状态 | 读 launchd 的 plist | 读 `task.xml`（UTF-16） | 一致 | — |
-| 重启 | `launchctl kickstart -k` | `<daemon> restart-service` | 一致 | — |
+| 状态 | 读 launchd 的 plist（plist 在就是已注册） | 先问任务计划程序任务在不在（`schtasks /Query` 的退出码，不看它的文字），再读 `task.xml` 看任务跑的是哪个 daemon；有文件没任务是「未设置」，有任务没文件是「别处」 | 一致（G42） | — |
+| 重启 | `launchctl kickstart -k` | `<daemon> restart-service`：让 daemon 收尾退出，再启动任务。期间触发器起的第二个 daemon 拿不到锁，立刻退出（G41） | 一致 | — |
 | 机器名、标签 | `scutil --get ComputerName`、`mac` | `COMPUTERNAME`、`windows` | 一致 | — |
-| 实际运行过 | 是 | 是：CI 的 `Desktop build and tests (Windows)` 里，客户端的代码写配置和 token（目录只有当前用户、SYSTEM、Administrators），刚编译的真 daemon 注册任务，状态读成「正常」，daemon 在跑、写了日志，重启换了一个进程，卸载后什么都不剩 | 一致（G10） | — |
+| 实际运行过 | 是 | 是：CI 的 `Desktop build and tests (Windows)` 里，设置页调用的那段代码（`this_mac::set_up`）对着本地服务器（`wrangler dev`）跑：按安装目录找到 daemon，以 owner 身份向服务器注册这台电脑，写配置和 token，真 daemon 注册任务并在服务器上显示在线；再点一次不会重复注册；重启后换了一个进程、重新在线；日志里没有 token；卸载后任务、进程都没了，服务器上离线 | 一致（G10） | 没覆盖的只有 `current_exe()` 这一步（测试进程不是安装好的客户端）和设置页的按钮本身 |
 | 安装命令 | `curl … \| bash`（`docs/bots.md` 第 6 节） | `scripts/install-daemon.ps1`：https、必填 SHA-256、token 不上命令行、私有目录、`doctor`、`install-service`、`-Update` | 一致（CI 跑过，Windows PowerShell 5.1） | 设置页「添加机器」里给出 Windows 命令归客户端那条线 |
 
 ## 8. 要在真机上确认

@@ -9,7 +9,8 @@
 //! the app's exe in the install folder; `install-service` registers a scheduled task of this
 //! user (`daemon::service`), whose definition the daemon keeps in
 //! `%LOCALAPPDATA%\<slug>-daemon\task.xml`, read here the way the launchd plist is on a Mac.
-//! The config folder gets an access list with this user alone before the token is written.
+//! The daemon makes the config folder, private from its creation, before the token is
+//! written there; whether the task is registered is asked of the Task Scheduler.
 
 use std::io::Write as _;
 #[cfg(unix)]
@@ -158,8 +159,93 @@ fn runs(definition: &str, daemon: &Path, task: bool) -> bool {
 }
 
 pub(super) fn state() -> ThisMac {
-    let definition = std::fs::read(service_file()).ok().map(|b| service_text(&b));
-    state_of(bundled_daemon().as_deref(), definition.as_deref())
+    state_of(bundled_daemon().as_deref(), definition().as_deref())
+}
+
+/// The definition of the daemon's service when the service manager has it. A Mac: the
+/// launchd agent's file is the registration. Windows: the Task Scheduler is asked whether
+/// the task is registered (a definition file alone does not say so); its text is the copy
+/// `install-service` keeps, empty when that copy is gone (a task somebody registered by hand).
+fn definition() -> Option<String> {
+    let text = std::fs::read(service_file()).ok().map(|b| service_text(&b));
+    #[cfg(windows)]
+    let text = task_registered().then(|| text.unwrap_or_default());
+    text
+}
+
+/// Windows: whether the Task Scheduler has the daemon's task, asked through `schtasks`
+/// (its exit code; its text depends on the system's language). The answer is kept for two
+/// seconds: the settings page asks whenever it draws.
+#[cfg(windows)]
+fn task_registered() -> bool {
+    let mut seen = TASK_STATE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((at, registered)) = *seen
+        && at.elapsed() < std::time::Duration::from_secs(2)
+    {
+        return registered;
+    }
+    let mut cmd = system_command("schtasks.exe");
+    cmd.args(["/Query", "/TN", &task_name()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let registered = cmd.status().is_ok_and(|s| s.success());
+    *seen = Some((std::time::Instant::now(), registered));
+    registered
+}
+
+#[cfg(windows)]
+static TASK_STATE: std::sync::Mutex<Option<(std::time::Instant, bool)>> =
+    std::sync::Mutex::new(None);
+
+/// The daemon's scheduled task, as the daemon names it (`daemon::service::task_name`).
+#[cfg(windows)]
+fn task_name() -> String {
+    format!("{}.daemon", env!("PRODUCT_BUNDLE_ID"))
+}
+
+/// What was last heard from the service manager may be out of date now (an install, a
+/// restart, an uninstall just ran).
+fn forget_task_state() {
+    #[cfg(windows)]
+    {
+        *TASK_STATE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+}
+
+/// Why 用这台电脑 did not work.
+pub(super) enum SetUpError {
+    /// The server did not register the machine.
+    Api(chat_core::ApiError),
+    /// The config or the service could not be put in place (for the log; never a secret).
+    Install(String),
+}
+
+/// 用这台电脑, the whole of it: a computer with a daemon config keeps it (its machine and
+/// token) and only moves the service to the app's own daemon; a new one is registered with
+/// the server first (as an owner), then gets its config, its token and the service.
+pub(super) async fn set_up(
+    daemon: &Path,
+    http: &chat_core::HttpClient,
+    server_url: String,
+) -> Result<(), SetUpError> {
+    let new = if config_path().is_file() {
+        None
+    } else {
+        let labels = default_labels();
+        let req = chat_core::proto::CreateMachineRequest {
+            name: computer_name(),
+            labels: Some(labels.clone()),
+        };
+        let r = http.create_machine(&req).await.map_err(SetUpError::Api)?;
+        Some(NewMachine {
+            server_url,
+            id: r.machine.id.clone(),
+            name: r.machine.name.clone(),
+            labels,
+            token: r.token,
+        })
+    };
+    install(daemon, new.as_ref()).map_err(SetUpError::Install)
 }
 
 fn xml_escape(s: &str) -> String {
@@ -386,6 +472,7 @@ pub(super) fn restart() -> Result<(), String> {
 #[cfg(windows)]
 fn restart_with(daemon: &Path) -> Result<(), String> {
     use std::os::windows::process::CommandExt as _;
+    forget_task_state();
     let mut cmd = Command::new(daemon);
     cmd.arg("restart-service")
         .stdin(Stdio::null())
@@ -393,44 +480,25 @@ fn restart_with(daemon: &Path) -> Result<(), String> {
     run_quiet(cmd, "restart-service").map(|_| ())
 }
 
-/// The security id (`S-1-5-…`) of the user this app runs as, from `whoami /user`.
+/// Makes `dir` a folder of this user alone, private from the moment it exists: the daemon
+/// makes it (`<daemon> private-dir`), with its access list as part of the creation (this
+/// user, SYSTEM and Administrators, nothing inherited), the way it makes its own run folders.
+/// A folder that is already there is taken when it is private, or made private while it is
+/// still empty; anything else is refused, so the token is never written where somebody else
+/// can read it.
 #[cfg(windows)]
-fn user_sid() -> Result<String, String> {
-    let mut cmd = system_command("whoami.exe");
-    cmd.args(["/user", "/fo", "csv", "/nh"]);
-    let out = run_quiet(cmd, "whoami")?;
-    sid_in(&String::from_utf8_lossy(&out)).ok_or_else(|| "whoami printed no user id".to_string())
-}
-
-/// The id in `"domain\user","S-1-5-21-…"`. The name may be in any code page; the id is ASCII.
-#[cfg(any(windows, test))]
-fn sid_in(csv: &str) -> Option<String> {
-    let last = csv.trim().rsplit(',').next()?.trim().trim_matches('"');
-    let ok = last.starts_with("S-1-")
-        && last.len() > 6
-        && last.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
-    ok.then(|| last.to_string())
-}
-
-/// Makes `dir` a private folder: nothing inherited from the parent folder, and exactly three
-/// entries, full control for this user, SYSTEM and Administrators (who can read any file on
-/// the computer anyway), inherited by the files made in it afterwards. The same set the
-/// install script writes and the daemon accepts. Two `icacls` runs, because the app has no
-/// access-list code: the first drops everything inherited, the second sets the three entries.
-/// The daemon checks this set when it starts (`daemon::sys::acl_problem`) and could write it
-/// itself in `install-service` (`daemon::sys::protect`); then this call goes away.
-#[cfg(windows)]
-fn only_this_user(dir: &Path) -> Result<(), String> {
-    let sid = user_sid()?;
-    let mut cut = system_command("icacls.exe");
-    cut.arg(dir).arg("/inheritance:r");
-    run_quiet(cut, "icacls")?;
-    let mut grant = system_command("icacls.exe");
-    grant.arg(dir).arg("/grant:r");
-    for who in [sid.as_str(), "S-1-5-18", "S-1-5-32-544"] {
-        grant.arg(format!("*{who}:(OI)(CI)F"));
+fn private_dir(daemon: &Path, dir: &Path) -> Result<(), String> {
+    use std::os::windows::process::CommandExt as _;
+    if let Some(parent) = dir.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot make {}: {e}", parent.display()))?;
     }
-    run_quiet(grant, "icacls").map(|_| ())
+    let mut cmd = Command::new(daemon);
+    cmd.arg("private-dir")
+        .arg(dir)
+        .stdin(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW);
+    run_quiet(cmd, "private-dir").map(|_| ())
 }
 
 /// Restarts the daemon service now (`launchctl kickstart -k`): it starts again from the
@@ -468,16 +536,20 @@ pub(super) struct NewMachine {
     pub token: String,
 }
 
-/// Writes the config and token of a new machine (folder 700, files 600; on Windows a private
-/// folder, made so before the token is written into it). An existing config is
+/// Writes the config and token of a new machine (folder 700, files 600; on Windows a folder
+/// that is private from its creation, see [`private_dir`]). An existing config is
 /// kept as it is: it already names a machine and its token.
-fn write_config(new: &NewMachine) -> Result<(), String> {
+fn write_config(daemon: &Path, new: &NewMachine) -> Result<(), String> {
     let dir = config_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot make {}: {e}", dir.display()))?;
+    #[cfg(not(windows))]
+    {
+        let _ = daemon;
+        std::fs::create_dir_all(&dir).map_err(|e| format!("cannot make {}: {e}", dir.display()))?;
+    }
     #[cfg(unix)]
     let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
     #[cfg(windows)]
-    only_this_user(&dir)?;
+    private_dir(daemon, &dir)?;
     let token_file = dir.join("machine-token");
     let write = |path: &Path, text: &str| -> Result<(), String> {
         let tmp = path.with_extension("new");
@@ -512,8 +584,9 @@ fn write_config(new: &NewMachine) -> Result<(), String> {
 /// on a command line).
 pub(super) fn install(daemon: &Path, new: Option<&NewMachine>) -> Result<(), String> {
     if let Some(new) = new {
-        write_config(new)?;
+        write_config(daemon, new)?;
     }
+    forget_task_state();
     let config = config_path();
     if !config.is_file() {
         return Err(format!("no daemon config at {}", config.display()));
@@ -623,17 +696,6 @@ mod tests {
     }
 
     #[test]
-    fn the_user_id_is_the_last_field_of_whoami() {
-        let csv = "\"pc\\李\",\"S-1-5-21-1004336348-1177238915-682003330-1001\"\r\n";
-        assert_eq!(
-            sid_in(csv).as_deref(),
-            Some("S-1-5-21-1004336348-1177238915-682003330-1001")
-        );
-        assert_eq!(sid_in("ERROR: something"), None);
-        assert_eq!(sid_in(""), None);
-    }
-
-    #[test]
     fn the_machine_id_comes_from_the_config() {
         let c = "server_url = \"https://x\"\nmachine_id = \"01M6N4A0P5\"  # mine\nname = \"m\"\n";
         assert_eq!(machine_id_in(c).as_deref(), Some("01M6N4A0P5"));
@@ -699,15 +761,20 @@ mod tests {
         }
     }
 
-    /// 「用这台电脑」 from end to end on a real Windows, with a real daemon and the real Task
-    /// Scheduler: the app writes the config and the token into a folder of this user alone,
-    /// the daemon accepts them and registers its task, the state reads 正常, the daemon runs,
-    /// a restart starts another one, and after the daemon's own uninstall nothing is left.
+    /// 「用这台电脑」 from end to end on a real Windows, with a real daemon, the real Task
+    /// Scheduler and a real server (a local one): the code the settings page runs
+    /// ([`set_up`]) finds the daemon the installer put next to the app, registers this
+    /// computer with the server as an owner, writes the config and the token into a folder of
+    /// this user alone, and has the daemon register its task. The machine then comes online
+    /// at the server under the id in the config; the state reads 正常; a restart starts
+    /// another daemon, which comes online again; the token is in no log; and after the
+    /// daemon's own uninstall the machine is offline and nothing is left.
     ///
     /// It changes this user's profile (the daemon config, the scheduled task), so it runs only
-    /// where `TC_THIS_COMPUTER_DAEMON` names a built daemon (CI), on a computer that is not a
-    /// machine yet, and removes all it made. A coding CLI must be installed: a machine
-    /// without one is not registered (the daemon would stop at once).
+    /// where `TC_THIS_COMPUTER_DAEMON` names a built daemon, `TC_THIS_COMPUTER_SERVER` a
+    /// local server and `TC_THIS_COMPUTER_OWNER_TOKEN` a file with an owner's token (CI), on
+    /// a computer that is not a machine yet, and removes all it made. A coding CLI must be
+    /// installed: a machine without one is not registered (the daemon would stop at once).
     #[cfg(windows)]
     #[test]
     fn this_computer_becomes_a_machine_and_stops_being_one() {
@@ -715,19 +782,28 @@ mod tests {
             eprintln!("skipped: TC_THIS_COMPUTER_DAEMON is not set");
             return;
         };
+        let server = std::env::var("TC_THIS_COMPUTER_SERVER").expect("TC_THIS_COMPUTER_SERVER");
+        let owner = std::fs::read_to_string(
+            std::env::var_os("TC_THIS_COMPUTER_OWNER_TOKEN").expect("TC_THIS_COMPUTER_OWNER_TOKEN"),
+        )
+        .expect("the owner token file")
+        .trim()
+        .to_string();
         assert!(built.is_file(), "no daemon at {}", built.display());
         let image = format!("{}-daemon.exe", env!("PRODUCT_SLUG"));
         assert!(
-            !config_dir().exists() && pids_of(&image).is_empty(),
+            !config_dir().exists() && pids_of(&image).is_empty() && !task_registered(),
             "this computer already is a machine: not touching it"
         );
-        // Where the installer puts the daemon: a folder of this user under Programs.
+        // Where the installer puts the app and its daemon: a folder of this user under
+        // Programs. The daemon is found the way the installed app finds it.
         let programs = PathBuf::from(std::env::var_os("LOCALAPPDATA").expect("LOCALAPPDATA"))
             .join("Programs")
             .join(format!("{}-this-computer-test", env!("PRODUCT_SLUG")));
         std::fs::create_dir_all(&programs).unwrap();
-        let daemon = programs.join(&image);
-        std::fs::copy(&built, &daemon).unwrap();
+        std::fs::copy(&built, programs.join(&image)).unwrap();
+        let daemon = daemon_next_to(&programs.join("app.exe"), false)
+            .expect("the daemon next to the installed app");
 
         struct Remove(PathBuf, PathBuf);
         impl Drop for Remove {
@@ -751,24 +827,49 @@ mod tests {
         }
         let _remove = Remove(daemon.clone(), programs.clone());
         let read_state = || {
-            let definition = std::fs::read(service_file()).ok().map(|b| service_text(&b));
-            state_of(Some(&daemon), definition.as_deref())
+            forget_task_state();
+            state_of(Some(&daemon), definition().as_deref())
         };
         assert_eq!(read_state(), ThisMac::NotSetUp);
+        // A definition file without a registered task (an install that failed half way, a
+        // task removed by hand) is not "set up": the Task Scheduler is what is asked.
+        let stale = service_file();
+        std::fs::create_dir_all(stale.parent().unwrap()).unwrap();
+        std::fs::write(&stale, format!("\"{}\" run ", daemon.display())).unwrap();
+        assert_eq!(read_state(), ThisMac::NotSetUp);
+        std::fs::remove_file(&stale).unwrap();
 
-        let new = NewMachine {
-            server_url: "http://127.0.0.1:9".into(),
-            id: "01THISCOMPUTERTEST".into(),
-            name: computer_name(),
-            labels: default_labels(),
-            token: format!("tm_test_{}", std::process::id()),
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let http = chat_core::HttpClient::new(&server, Some(owner)).expect("client");
+        let online = |id: &str| -> Option<bool> {
+            rt.block_on(http.machines())
+                .ok()?
+                .into_iter()
+                .find(|m| m.id == id)
+                .map(|m| m.connected)
         };
-        install(&daemon, Some(&new)).expect("install");
+        if let Err(e) = rt.block_on(set_up(&daemon, &http, server.clone())) {
+            panic!(
+                "用这台电脑 failed: {}",
+                match e {
+                    SetUpError::Api(e) => format!("the server: {e:?}"),
+                    SetUpError::Install(e) => e,
+                }
+            );
+        }
 
-        // What the app wrote, where the daemon looks for it.
-        assert_eq!(machine_id().as_deref(), Some("01THISCOMPUTERTEST"));
+        // What the app wrote, where the daemon looks for it; the server knows the machine.
+        let id = machine_id().expect("a machine id in the config");
+        assert!(online(&id).is_some(), "the server has the machine {id}");
         let token_file = config_dir().join("machine-token");
-        assert_eq!(std::fs::read_to_string(&token_file).unwrap(), new.token);
+        let token = std::fs::read_to_string(&token_file).unwrap();
+        assert!(
+            token.starts_with("tm_") && token.trim() == token,
+            "a machine token"
+        );
         // The folder is this user's alone: nothing inherited, three entries.
         let mut acl = system_command("icacls.exe");
         acl.arg(config_dir());
@@ -776,33 +877,34 @@ mod tests {
         assert!(!acl.contains("(I)"), "inherited entries: {acl}");
         assert_eq!(acl.matches("(OI)(CI)(F)").count(), 3, "{acl}");
 
-        // The task is registered and runs this daemon, without a window.
+        // The task is registered and runs this daemon, without a window; the machine is
+        // online at the server with the token the app wrote.
         assert_eq!(read_state(), ThisMac::Working);
         assert_eq!(
             state_of(
                 Some(Path::new(r"C:\Elsewhere\daemon.exe")),
-                std::fs::read(service_file())
-                    .ok()
-                    .map(|b| service_text(&b))
-                    .as_deref()
+                definition().as_deref()
             ),
             ThisMac::Elsewhere
         );
-        let first = wait_for("the task started the daemon", 90, || {
-            pids_of(&image).first().copied()
+        let first = wait_for("one daemon runs", 90, || {
+            let p = pids_of(&image);
+            (p.len() == 1).then(|| p[0])
+        });
+        wait_for("the machine is online", 90, || {
+            online(&id).filter(|c| *c).map(|_| ())
         });
         let log = service_file().with_file_name("daemon.log");
-        wait_for("the daemon wrote its log", 60, || {
-            std::fs::read_to_string(&log)
-                .ok()
-                .filter(|t| t.contains("daemon started"))
-        });
 
-        // Setting it up again keeps the machine it already is.
-        install(&daemon, None).expect("install again");
-        assert_eq!(machine_id().as_deref(), Some("01THISCOMPUTERTEST"));
+        // Setting it up again keeps the machine it already is (nothing is registered twice).
+        let machines = rt.block_on(http.machines()).unwrap().len();
+        rt.block_on(set_up(&daemon, &http, server.clone()))
+            .unwrap_or_else(|_| panic!("set up again"));
+        assert_eq!(machine_id().as_deref(), Some(id.as_str()));
+        assert_eq!(rt.block_on(http.machines()).unwrap().len(), machines);
+        assert_eq!(std::fs::read_to_string(&token_file).unwrap(), token);
 
-        // 重启: another daemon process, one only.
+        // 重启: another daemon process, one only, online again.
         let before = wait_for("one daemon runs", 90, || {
             let p = pids_of(&image);
             (p.len() == 1).then(|| p[0])
@@ -813,12 +915,15 @@ mod tests {
             (p.len() == 1 && p[0] != before).then(|| p[0])
         });
         assert!(after != before && after != first);
-        assert!(
-            !std::fs::read_to_string(&log).unwrap().contains(&new.token),
-            "the token is in the log"
-        );
+        wait_for("the machine is online again", 90, || {
+            online(&id).filter(|c| *c).map(|_| ())
+        });
+        // The daemon has signed in to the server three times by now: its log has no token.
+        let text = std::fs::read_to_string(&log).unwrap();
+        assert!(text.contains("daemon started"), "{text}");
+        assert!(!text.contains(&token), "the token is in the log");
 
-        // The daemon's own uninstall: no task definition, no process.
+        // The daemon's own uninstall: no task, no process, the machine offline.
         let mut cmd = Command::new(&daemon);
         cmd.arg("uninstall-service").stdin(Stdio::null());
         let out = cmd.output().unwrap();
@@ -831,5 +936,8 @@ mod tests {
             pids_of(&image).is_empty().then_some(())
         });
         assert_eq!(read_state(), ThisMac::NotSetUp);
+        wait_for("the machine is offline", 90, || {
+            online(&id).filter(|c| !*c).map(|_| ())
+        });
     }
 }
