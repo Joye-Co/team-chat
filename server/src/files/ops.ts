@@ -379,6 +379,17 @@ async function publishRelease(env: Env, request: Request, url: URL, version: str
   const [platformColumn, platformValue] = platform === "macos" ? ["", ""] : ["platform, ", `'${platform}', `];
   const conflict = platform === "macos" ? "version" : "version, platform";
 
+  // The same file again (a release script that repeats its uploads after one of them failed):
+  // nothing to store, the answer is the one of the first upload. Another file for a version
+  // that is published stays a conflict below.
+  const published = await env.DB.prepare(`SELECT * FROM ${p.table} WHERE ${p.where}version = ? AND status = 'ready'`)
+    .bind(version)
+    .first<ReleaseRow>();
+  if (published && published.sha256 === sha256 && published.size === size) {
+    await request.body?.cancel();
+    return toUpdateInfo(published, url.origin, platform);
+  }
+
   // Claim the version first, so two uploads of one version never overwrite each other.
   const claim = await env.DB.prepare(
     `INSERT INTO ${p.table} (${platformColumn}version, major, minor, patch, file_name, size, sha256, notes, status, created_at)
@@ -399,14 +410,14 @@ async function publishRelease(env: Env, request: Request, url: URL, version: str
       .run();
     throw err;
   }
-  const published = Date.now();
+  const publishedAt = Date.now();
   // The DMG's audit entry keeps its shape; another platform names itself.
   const details = platform === "macos" ? { size, sha256 } : { size, sha256, platform };
   await env.DB.batch([
     env.DB.prepare(
       `UPDATE ${p.table} SET status = 'ready', published_at = ? WHERE ${p.where}version = ? AND created_at = ?`,
-    ).bind(published, version, now),
-    auditStatement(env.DB, null, { action: "release.publish", target: version, details }, published),
+    ).bind(publishedAt, version, now),
+    auditStatement(env.DB, null, { action: "release.publish", target: version, details }, publishedAt),
   ]);
   const row = await env.DB.prepare(`SELECT * FROM ${p.table} WHERE ${p.where}version = ?`).bind(version).first<ReleaseRow>();
   return toUpdateInfo(row as ReleaseRow, url.origin, platform);

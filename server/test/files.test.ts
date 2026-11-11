@@ -539,7 +539,14 @@ describe("releases and updates", () => {
     expect(p9.status).toBe(200);
     expect(info9).toMatchObject({ version: "0.9.0", notes: "修复 **bugs**", size: dmg9.length });
     expect(info9.downloadUrl).toBe(`${BASE}/v1/updates/0.9.0/download`);
-    expect((await publish("0.9.0", dmg9)).status).toBe(409);
+    // The same file again is done already (a release script repeats its uploads after one of
+    // them failed): the answer of the first upload, nothing stored twice. Another file for the
+    // version is a conflict.
+    const again9 = await publish("0.9.0", dmg9);
+    expect(again9.status).toBe(200);
+    expect(UpdateInfo.parse(await again9.json())).toEqual(info9);
+    expect((await publish("0.9.0", enc.encode("another dmg"))).status).toBe(409);
+    expect((await env.DB.prepare("SELECT count(*) AS n FROM audit WHERE action = 'release.publish' AND target = '0.9.0'").first<{ n: number }>())?.n).toBe(1);
     expect((await publish("0.10.0", dmg10)).status).toBe(200);
 
     const latest = await api("/v1/updates/latest", { token: member.token });
@@ -668,7 +675,12 @@ describe("releases and updates", () => {
     const info = UpdateInfo.parse(await published.json());
     expect(info).toMatchObject({ version: "30.0.0", platform: "windows", size: exe.length, sha256: await sha(exe), notes: "notes" });
     expect(info.downloadUrl).toBe(`${BASE}/v1/updates/30.0.0/download?platform=windows`);
-    expect((await publishWindows("30.0.0", exe)).status).toBe(409);
+    const sameExe = await publishWindows("30.0.0", exe);
+    expect(sameExe.status).toBe(200);
+    expect(UpdateInfo.parse(await sameExe.json())).toEqual(info);
+    expect((await publishWindows("30.0.0", enc.encode("another installer"))).status).toBe(409);
+    // The secret is asked before anything else, for the same file too.
+    expect((await publishWindows("30.0.0", exe, "wrong")).status).toBe(401);
 
     // Each platform has its own latest: a newer installer does not move the Mac, and the other way round.
     const exe31 = enc.encode("MZ the installer of 30.1.0");
