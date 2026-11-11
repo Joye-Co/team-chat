@@ -118,6 +118,14 @@ if [ "$WITH_DAEMON" = 1 ]; then
   defines+=("-DHAS_DAEMON=1")
 fi
 
+# The notification activator, when the app has one (see toast_activator_clsid).
+TOAST_CLSID="$(toast_activator_clsid)"
+if [ -n "$TOAST_CLSID" ]; then
+  defines+=("-DTOAST_CLSID=$TOAST_CLSID")
+else
+  log "the app defines no notification activator: a notification clicked after the app exited does nothing"
+fi
+
 # The WebView2 Evergreen bootstrapper: a small Microsoft program that downloads and installs
 # the runtime. It is fetched at build time, not kept in the repository, and must carry a
 # valid Microsoft signature.

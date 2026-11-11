@@ -88,6 +88,8 @@ jobs:
               - server/src/ops/index.ts
               - scripts/deploy-server.sh
               - scripts/release-check.sh
+              - scripts/release.sh
+              - scripts/lib.sh
               - scripts/test-release-scripts.sh
               - Cargo.toml
               - CHANGELOG.md
@@ -549,7 +551,9 @@ jobs:
       - name: Test the update (the installed app updates itself, then a rollback)
         run: scripts/test-windows-update.sh "dist/unsigned/$APP_NAME-$A_VERSION-setup.exe" "dist/unsigned/$APP_NAME-$B_VERSION-setup.exe"
       - name: Test the update of a signed app
-        run: EXPECT_SIGNED=1 scripts/test-windows-update.sh "dist/signed/$APP_NAME-$A_VERSION-setup.exe" "dist/signed/$APP_NAME-$B_VERSION-setup.exe" 8836
+        # The chain with the sign-in and the daemon's task ran once above; this run is about
+        # the signatures.
+        run: EXPECT_SIGNED=1 CHAIN=0 scripts/test-windows-update.sh "dist/signed/$APP_NAME-$A_VERSION-setup.exe" "dist/signed/$APP_NAME-$B_VERSION-setup.exe" 8836
       - name: Upload the test logs
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

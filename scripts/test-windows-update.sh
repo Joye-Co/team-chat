@@ -20,6 +20,20 @@
 #      changed installer and a program of another publisher;
 #   7. uninstall and check that nothing is left.
 #
+# With CHAIN=1 (the default when the installers hold the daemon) it is the whole chain a
+# person goes through, in one piece:
+#   a. the installed app signs in to the local server with an invite code, starts a 话题,
+#      sends a message, restores the session and signs out (`--selftest-live`);
+#   b. this computer becomes a machine of the team as 用这台电脑 makes it one: a machine is
+#      registered on the server, its config and token are written into a private folder, and
+#      the installed daemon registers itself as the user's scheduled task (`install-service`)
+#      and connects;
+#   c. after the app's update (step 3 and 4) the running daemon finds its new program, leaves
+#      when idle, the task starts the new one, and the server sees the machine connected
+#      with the daemon of version B. Nothing stops the daemon during the update;
+#   d. the rollback and the interruption run with the daemon alive;
+#   e. the uninstall removes the task and the daemon's process.
+#
 # Usage: scripts/test-windows-update.sh <a-setup.exe> <b-setup.exe> [port]   (default 8826)
 # Env: EXPECT_SIGNED=1, DAEMON=0 (the installers hold no daemon).
 #      PAUSE_HELPER (required): an update helper built with `--features test-pause`, for the
@@ -64,6 +78,20 @@ sha() { sha256sum "$1" | cut -d' ' -f1; }
 if reg_key_exists "$KEY" || [ -e "$DIR" ]; then
   die "$NAME is installed on this machine already; this test installs and removes it"
 fi
+BUNDLE_ID="$(product bundleId)"
+CHAIN="${CHAIN:-${DAEMON:-1}}"
+[ "${DAEMON:-1}" = 1 ] || CHAIN=0
+# Where 用这台电脑 keeps the machine's config and token, and the daemon its task and log.
+MACHINE_CONFIG="$(cygpath -u "$USERPROFILE")/.config/$SLUG"
+MACHINE_STATE="$(cygpath -u "$LOCALAPPDATA")/$SLUG-daemon"
+TASK="$BUNDLE_ID.daemon"
+task_exists() { run_native "$(cygpath -u "$SYSTEMROOT")/System32/schtasks.exe" /Query /TN "$TASK" >/dev/null 2>&1; }
+daemon_runs() { run_native "$(cygpath -u "$SYSTEMROOT")/System32/tasklist.exe" /FI "IMAGENAME eq $SLUG-daemon.exe" /FO CSV /NH 2>/dev/null | grep -qi "$SLUG-daemon.exe"; }
+if [ "$CHAIN" = 1 ]; then
+  if [ -e "$MACHINE_CONFIG" ] || [ -e "$MACHINE_STATE" ] || task_exists; then
+    die "this computer is a machine already ($MACHINE_CONFIG, $MACHINE_STATE or the task $TASK): not touching it"
+  fi
+fi
 mkdir -p "$ROOT/.tmp"
 (cd "$ROOT/.tmp" && rm -rf windows-update && mkdir windows-update)
 mkdir -p "$SECRETS"
@@ -80,6 +108,18 @@ cleanup() {
     kill "$WRANGLER_PID" 2>/dev/null || true
   fi
   silent_uninstall "$DIR" >/dev/null 2>&1 || true
+  if [ "$CHAIN" = 1 ]; then
+    # Whatever a failed run left of the machine: the task, the process, its folders (this
+    # test made them: it refuses to start when they exist).
+    if task_exists; then
+      run_native "$(cygpath -u "$SYSTEMROOT")/System32/schtasks.exe" /End /TN "$TASK" >/dev/null 2>&1 || true
+      run_native "$(cygpath -u "$SYSTEMROOT")/System32/schtasks.exe" /Delete /TN "$TASK" /F >/dev/null 2>&1 || true
+    fi
+    run_native "$(cygpath -u "$SYSTEMROOT")/System32/taskkill.exe" /F /IM "$SLUG-daemon.exe" >/dev/null 2>&1 || true
+    run_native "$(cygpath -u "$SYSTEMROOT")/System32/taskkill.exe" /F /IM repair.exe >/dev/null 2>&1 || true
+    mkdir -p "$WORK/daemon" && cp "$MACHINE_STATE"/daemon.log* "$WORK/daemon/" 2>/dev/null || true
+    rm -rf "$MACHINE_CONFIG" "$MACHINE_STATE"
+  fi
 }
 trap cleanup EXIT
 
@@ -124,6 +164,65 @@ log "publish $B for Windows: HTTP $STATUS"
 [ "$(curl -s -o /dev/null -w '%{http_code}' -H "@$(m "$HEADERS")" "$URL/v1/updates/latest")" = 404 ] ||
   fail "the server offers the Windows file as a DMG"
 
+# machine_field <jq filter>: a field of this test's machine as the server sees it now.
+machine_field() {
+  curl -s -H "@$(m "$HEADERS")" "$URL/v1/machines" | jq -r --arg id "$MACHINE_ID" ".[] | select(.id == \$id) | $1"
+}
+# wait_daemon <version> <seconds>: until the server sees the machine connected with the
+# daemon of that version.
+wait_daemon() {
+  local _
+  for _ in $(seq 1 "$2"); do
+    [ "$(machine_field '"\(.connected) \(.daemonVersion)"')" = "true $1" ] && return 0
+    sleep 1
+  done
+  printf 'the machine as the server sees it: %s\n' "$(machine_field '{connected, daemonVersion, healthy}' | tr -d '\n')" >&2
+  printf 'daemon log:\n' >&2; tail -n 40 "$MACHINE_STATE/daemon.log" 2>/dev/null | sed 's/^/      /' >&2 || true
+  return 1
+}
+
+if [ "$CHAIN" = 1 ]; then
+  # a. A new member signs in with an invite code in the installed app.
+  log "the installed app signs in with an invite code"
+  curl -sf -X POST "$URL/v1/invites" -H "@$(m "$HEADERS")" -H 'Content-Type: application/json' \
+    -d '{"name":"Windows","kind":"human","level":"member"}' | jq -r .code >"$SECRETS/invite-code"
+  [ -s "$SECRETS/invite-code" ] || fail "no invite code"
+  "$EXE" --selftest-live "$URL" --token-file "$(m "$SECRETS/invite-code")" --report "$(m "$WORK/live.json")" && RC=0 || RC=$?
+  jq 'del(.. | .token?, .code?)' "$WORK/live.json" >&2 || true
+  [ "$RC" = 0 ] || fail "the installed app did not sign in and send a message (exit $RC)"
+  [ "$(jq -r .ok "$WORK/live.json")" = true ] || fail "the sign-in report is not ok"
+
+  # b. This computer as a machine of the team, the way 用这台电脑 sets it up
+  #    (apps/desktop/src/provider/this_mac.rs): register the machine, write its config and
+  #    token into a folder only this user, SYSTEM and Administrators can open, then let the
+  #    installed daemon register its task.
+  log "this computer becomes a machine (the daemon's scheduled task)"
+  curl -sf -X POST "$URL/v1/machines" -H "@$(m "$HEADERS")" -H 'Content-Type: application/json' \
+    -d '{"name":"ci-runner","labels":["windows"]}' >"$SECRETS/machine.json" || fail "cannot register a machine"
+  MACHINE_ID="$(jq -r .machine.id "$SECRETS/machine.json")"
+  [ -n "$MACHINE_ID" ] && [ "$MACHINE_ID" != null ] || fail "no machine id"
+  SYS32="$(cygpath -u "$SYSTEMROOT")/System32"
+  SID="$(run_native "$SYS32/whoami.exe" /user /fo csv /nh | tr -d '\r"' | awk -F, '{ print $NF }')"
+  case "$SID" in S-1-*) ;; *) fail "cannot read this user's SID" ;; esac
+  mkdir -p "$MACHINE_CONFIG"
+  WIN_CONFIG="$(cygpath -w "$MACHINE_CONFIG")"
+  run_native "$SYS32/icacls.exe" "$WIN_CONFIG" /inheritance:r >/dev/null || fail "icacls /inheritance:r"
+  run_native "$SYS32/icacls.exe" "$WIN_CONFIG" /grant:r "*$SID:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" >/dev/null || fail "icacls /grant:r"
+  jq -j .token "$SECRETS/machine.json" >"$MACHINE_CONFIG/machine-token"
+  rm -f "$SECRETS/machine.json"
+  # TOML literal strings: a Windows path needs no escaping in them.
+  printf "server_url = '%s'\ntoken_file = '%s'\nmachine_id = '%s'\nname = 'ci-runner'\nlabels = ['windows']\n" \
+    "$URL" "$WIN_CONFIG\\machine-token" "$MACHINE_ID" >"$MACHINE_CONFIG/daemon.toml"
+  "$DIR/$SLUG-daemon.exe" install-service --config "$WIN_CONFIG\\daemon.toml" >"$WORK/install-service.log" 2>&1 ||
+    { sed 's/^/      /' "$WORK/install-service.log" >&2; fail "install-service"; }
+  task_exists || fail "the daemon's task is not registered"
+  # The task definition the daemon keeps (UTF-16) names the daemon of the install folder.
+  iconv -f UTF-16 -t UTF-8 "$MACHINE_STATE/task.xml" | grep -qF "$(cygpath -w "$DIR/$SLUG-daemon.exe")" ||
+    fail "the task does not run the daemon of the install folder"
+  wait_daemon "$A" 120 || fail "the daemon of $A did not connect to the server"
+  log "ok: the machine is connected, daemon $A, started by the task"
+fi
+
 # 3. The installed app updates itself.
 log "the installed app updates itself"
 "$EXE" --selftest-update "$URL" --token-file "$(m "$SECRETS/owner-token")" --install-dir "$(m "$DIR")" \
@@ -164,7 +263,21 @@ if [ "${DAEMON:-1}" = 1 ]; then
   [ -f "$DIR/$SLUG-daemon.exe" ] || fail "the daemon is missing after the update"
   # The daemon is replaced with the app: its file is the one of the B build.
   [ "$(grep "$SLUG-daemon.exe" <<<"$A_FILES")" != "$(grep "$SLUG-daemon.exe" <<<"$BEFORE")" ] || fail "the daemon was not replaced"
-  # By its rename protocol; with no daemon running, the renamed old file is gone again.
+  if [ "$CHAIN" = 1 ]; then
+    # c. The daemon was running a machine through the update: it was not stopped (the old
+    #    process lives on from its renamed file), finds the new program within a minute,
+    #    leaves when idle, and the task starts version B, which removes the renamed file.
+    daemon_runs || fail "the daemon was stopped by the update"
+    task_exists || fail "the daemon's task is gone after the update"
+    log "waiting for the running daemon to move to $B"
+    wait_daemon "$B" 420 || fail "the daemon did not restart on $B after the app's update"
+    for _ in $(seq 1 60); do
+      compgen -G "$DIR/$SLUG-daemon.exe.*" >/dev/null || break
+      sleep 1
+    done
+    log "ok: the machine is connected again, daemon $B, without anyone stopping it"
+  fi
+  # By its rename protocol; with no daemon running from it, the renamed old file is gone again.
   if compgen -G "$DIR/$SLUG-daemon.exe.*" >/dev/null; then ls "$DIR" >&2; fail "files of the daemon's replacement are left"; fi
 fi
 [ ! -e "$UPDATES/update-journal.json" ] || fail "the journal is left after the update"
@@ -289,8 +402,26 @@ if [ "${EXPECT_SIGNED:-0}" = 1 ]; then
 fi
 
 # 7. Uninstall.
+if [ "$CHAIN" = 1 ]; then
+  # d. The rollback and the interruption above ran with the daemon alive; it is still this
+  #    computer's machine, on version B.
+  wait_daemon "$B" 420 || fail "the daemon is not connected on $B after the rollback and the recovery"
+fi
 silent_uninstall "$DIR" || fail "uninstall"
 assert_uninstalled "$DIR" || fail "the uninstall left something"
+if [ "$CHAIN" = 1 ]; then
+  # e. The uninstall took the task and the process; the machine's identity and log stay.
+  if task_exists; then fail "the uninstall left the daemon's task"; fi
+  for _ in $(seq 1 30); do daemon_runs || break; sleep 1; done
+  if daemon_runs; then fail "the uninstall left the daemon running"; fi
+  [ -f "$MACHINE_CONFIG/daemon.toml" ] || fail "the uninstall removed the machine's config"
+  for _ in $(seq 1 60); do
+    [ "$(machine_field .connected)" = false ] && break
+    sleep 1
+  done
+  [ "$(machine_field .connected)" = false ] || fail "the server still sees the machine connected after the uninstall"
+  log "ok: the uninstall removed the task and the daemon; the machine's config stays"
+fi
 jq -n --arg a "$A" --arg b "$B" --arg signed "${EXPECT_SIGNED:-0}" \
   --slurpfile update "$WORK/update.json" --slurpfile finish "$WORK/finish.json" --slurpfile rollback "$WORK/rollback-result.json" \
   '{ok: true, from: $a, to: $b, signed: ($signed == "1"), update: $update[0], finish: $finish[0], rollback: $rollback[0]}' >"$WORK/report.json"

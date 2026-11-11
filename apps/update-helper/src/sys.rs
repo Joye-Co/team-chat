@@ -281,10 +281,12 @@ impl Sys for Os {
     }
 }
 
-/// `--shortcut <lnk> --target <exe> --app-id <id>`: writes a shortcut to the app that
-/// carries its AppUserModelID.
+/// `--shortcut <lnk> --target <exe> --app-id <id> [--toast-activator <clsid>]`: writes a
+/// shortcut to the app that carries its AppUserModelID and, when given, the class id Windows
+/// starts for a click on one of the app's notifications after the app has exited.
 pub fn shortcut_from_args(args: &[OsString]) -> Result<(), String> {
     let (mut lnk, mut target, mut app_id) = (None, None, None);
+    let mut activator = None;
     let mut it = args.iter();
     if let Some(first) = it.next() {
         lnk = Some(first.clone());
@@ -293,35 +295,73 @@ pub fn shortcut_from_args(args: &[OsString]) -> Result<(), String> {
         match arg.to_string_lossy().as_ref() {
             "--target" => target = it.next().cloned(),
             "--app-id" => app_id = it.next().cloned(),
+            "--toast-activator" => activator = it.next().cloned(),
             other => return Err(format!("unknown argument: {other}")),
         }
     }
     let (Some(lnk), Some(target), Some(app_id)) = (lnk, target, app_id) else {
-        return Err("usage: --shortcut <lnk> --target <exe> --app-id <id>".into());
+        return Err(
+            "usage: --shortcut <lnk> --target <exe> --app-id <id> [--toast-activator <clsid>]"
+                .into(),
+        );
     };
+    let activator = activator
+        .map(|a| class_id(&a.to_string_lossy()))
+        .transpose()?;
     write_shortcut(
         Path::new(&lnk),
         Path::new(&target),
         &app_id.to_string_lossy(),
+        activator.as_deref(),
     )
 }
 
+/// A class id as `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` (lower case), from that form with or
+/// without braces.
+pub fn class_id(text: &str) -> Result<String, String> {
+    let inner = text.trim();
+    let inner = inner
+        .strip_prefix('{')
+        .and_then(|t| t.strip_suffix('}'))
+        .unwrap_or(inner);
+    let groups: Vec<&str> = inner.split('-').collect();
+    let well_formed = groups.iter().map(|g| g.len()).eq([8, 4, 4, 4, 12])
+        && groups
+            .iter()
+            .all(|g| g.bytes().all(|b| b.is_ascii_hexdigit()));
+    if well_formed {
+        Ok(inner.to_ascii_lowercase())
+    } else {
+        Err(format!("not a class id: {text}"))
+    }
+}
+
 #[cfg(windows)]
-fn write_shortcut(lnk: &Path, target: &Path, app_id: &str) -> Result<(), String> {
+fn write_shortcut(
+    lnk: &Path,
+    target: &Path,
+    app_id: &str,
+    activator: Option<&str>,
+) -> Result<(), String> {
     use windows::{
         Win32::{
-            Storage::EnhancedStorage::PKEY_AppUserModel_ID,
+            Storage::EnhancedStorage::{
+                PKEY_AppUserModel_ID, PKEY_AppUserModel_ToastActivatorCLSID,
+            },
             System::{
                 Com::{
                     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance,
-                    CoInitializeEx, IPersistFile, StructuredStorage::PROPVARIANT,
+                    CoInitializeEx, CoTaskMemAlloc, IPersistFile, StructuredStorage::PROPVARIANT,
                 },
-                Variant::VT_LPWSTR,
+                Variant::{VT_CLSID, VT_LPWSTR},
             },
             UI::Shell::{IShellLinkW, PropertiesSystem::IPropertyStore, SHStrDupW, ShellLink},
         },
-        core::{HSTRING, Interface as _},
+        core::{GUID, HSTRING, Interface as _},
     };
+    let activator = activator
+        .map(|a| GUID::try_from(a).map_err(|e| format!("not a class id: {a} ({e})")))
+        .transpose()?;
     if let Some(dir) = lnk.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
@@ -346,6 +386,24 @@ fn write_shortcut(lnk: &Path, target: &Path, app_id: &str) -> Result<(), String>
                 inner.Anonymous.pwszVal = text;
             }
             store.SetValue(&PKEY_AppUserModel_ID, &value)?;
+            if let Some(class) = activator {
+                // A VT_CLSID holds a pointer to a GUID that COM allocated; dropping the
+                // PROPVARIANT frees it.
+                let mut value = PROPVARIANT::default();
+                let guid = CoTaskMemAlloc(std::mem::size_of::<GUID>()).cast::<GUID>();
+                if guid.is_null() {
+                    return Err(windows::core::Error::from(
+                        windows::Win32::Foundation::E_OUTOFMEMORY,
+                    ));
+                }
+                guid.write(class);
+                {
+                    let inner = &mut *value.Anonymous.Anonymous;
+                    inner.vt = VT_CLSID;
+                    inner.Anonymous.puuid = guid;
+                }
+                store.SetValue(&PKEY_AppUserModel_ToastActivatorCLSID, &value)?;
+            }
             store.Commit()?;
             let file: IPersistFile = link.cast()?;
             file.Save(&HSTRING::from(lnk.as_os_str()), true)?;
@@ -356,6 +414,11 @@ fn write_shortcut(lnk: &Path, target: &Path, app_id: &str) -> Result<(), String>
 }
 
 #[cfg(not(windows))]
-fn write_shortcut(_lnk: &Path, _target: &Path, _app_id: &str) -> Result<(), String> {
+fn write_shortcut(
+    _lnk: &Path,
+    _target: &Path,
+    _app_id: &str,
+    _activator: Option<&str>,
+) -> Result<(), String> {
     Err("shortcuts exist only on Windows".into())
 }

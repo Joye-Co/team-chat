@@ -129,6 +129,21 @@ check "shortcut target" is "$(ARG1="$(cygpath -w "$LNK")" ps_out '(New-Object -C
 check "shortcut AppUserModelID" is "$(ARG1="$(cygpath -w "$(dirname "$LNK")")" ARG2="$(basename "$LNK")" ps_out \
   '(New-Object -ComObject Shell.Application).Namespace($env:ARG1).ParseName($env:ARG2).ExtendedProperty("System.AppUserModel.ID")')" "$BUNDLE_ID"
 
+# The notification activator, when the app has one: the class on the shortcut is the class
+# in the registry, and it starts the installed app.
+TOAST_CLSID="$(toast_activator_clsid)"
+if [ -n "$TOAST_CLSID" ]; then
+  check "install log: notification activator" grep -qix "toast activator {$TOAST_CLSID}" <(tr -d '\r' <"$DIR/install.log")
+  check "notification activator: starts the app" is "$(reg_value "Software\\Classes\\CLSID\\{$TOAST_CLSID}\\LocalServer32" "")" "\"$WIN_DIR\\$NAME.exe\" -ToastActivated"
+  check "notification activator: named for the app id" is "$(reg_value "Software\\Classes\\AppUserModelId\\$BUNDLE_ID" CustomActivator | tr 'A-F' 'a-f')" "{$TOAST_CLSID}"
+  check "notification activator: on the shortcut" is "$(ARG1="$(cygpath -w "$(dirname "$LNK")")" ARG2="$(basename "$LNK")" ps_out \
+    '"$((New-Object -ComObject Shell.Application).Namespace($env:ARG1).ParseName($env:ARG2).ExtendedProperty("System.AppUserModel.ToastActivatorCLSID"))"' | tr 'A-F' 'a-f' | tr -d '{}')" "$TOAST_CLSID"
+else
+  printf 'note  the app defines no notification activator (TOAST_ACTIVATOR_CLSID); none is registered\n'
+  check "no notification activator on the shortcut" is "$(ARG1="$(cygpath -w "$(dirname "$LNK")")" ARG2="$(basename "$LNK")" ps_out \
+    '"$((New-Object -ComObject Shell.Application).Namespace($env:ARG1).ParseName($env:ARG2).ExtendedProperty("System.AppUserModel.ToastActivatorCLSID"))"')" ""
+fi
+
 # The installed app starts: it reports itself, takes a link as its argument, and the
 # release program draws a screen.
 "$EXE" --selftest-installed --report "$(cygpath -m "$WORK/installed.json")" && RC=0 || RC=$?

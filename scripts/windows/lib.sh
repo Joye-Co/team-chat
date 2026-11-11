@@ -125,6 +125,7 @@ assert_uninstalled() {
   if reg_key_exists "$(uninstall_key)"; then printf 'left: the uninstall entry\n' >&2; left=1; fi
   if reg_key_exists "Software\\Classes\\$scheme"; then printf 'left: the URL scheme\n' >&2; left=1; fi
   if reg_key_exists "Software\\Classes\\AppUserModelId\\$id"; then printf 'left: the app id entry\n' >&2; left=1; fi
+  if [ -n "$(toast_activator_clsid)" ] && reg_key_exists "Software\\Classes\\CLSID\\{$(toast_activator_clsid)}"; then printf 'left: the notification activator\n' >&2; left=1; fi
   if compgen -G "$(dirname "$dir")/.$(product name).old-*" >/dev/null; then printf 'left: an update backup\n' >&2; left=1; fi
   if [ -n "$(reg_value "$RUN_KEY" "$id")" ]; then printf 'left: the sign-in start entry\n' >&2; left=1; fi
   if [ -n "$(reg_value "$STARTUP_APPROVED_KEY" "$id")" ]; then printf 'left: the startup-approved record\n' >&2; left=1; fi

@@ -50,6 +50,7 @@ Windows 现在的做法，都是从代码和脚本里读出来的（括号里是
 | 登录 | 邀请码或邮箱验证码；凭证进钥匙串（service = bundle id，account = 服务器地址） | 同一个登录页；凭证进凭据管理器（`<bundle id>:<服务器地址>`） | 相同（只编译和单元测试；真机见第三节） |
 | 登录窗口里换服务器 | 系统菜单栏里有「正式服务器 / 测试服务器」 | 菜单只挂在主窗口标题栏里，登录窗口没有；可以点「使用其他服务器…」手填 | 待补，属界面会话（已写进交接笔记） |
 | `<scheme>://` 链接打开客户端 | `Info.plist` 登记了 scheme，系统会启动或激活客户端；客户端没有注册 `on_open_urls`，不跳到链接指的地方 | 安装包登记 `HKCU\Software\Classes\<scheme>`，链接作为参数启动客户端；参数被忽略，不跳转 | 相同（两边都只打开客户端）。跳转属系统集成会话 |
+| 点一条通知时客户端已经退出 | 系统启动客户端（`UNUserNotificationCenter`） | 没有登记 COM 激活器，点了没反应 | 待补，两半：安装包这一半**已补**（PR 2）：客户端源码里一旦有常量 `TOAST_ACTIVATOR_CLSID`，安装包就登记 `HKCU\Software\Classes\CLSID\{…}\LocalServer32`（`"<客户端>" -ToastActivated`）、应用 ID 下的 `CustomActivator`、快捷方式上的 `System.AppUserModel.ToastActivatorCLSID`，卸载时删掉，测试逐项核对；没有这个常量就什么都不登记（否则 Windows 会去启动一个客户端并不提供的类）。客户端这一半（实现激活器、定这个常量）属系统集成会话，约定已写进交接笔记 |
 | 客户端已在运行时再点链接或再启动一次 | 系统只激活已有的那一个 | 会启动第二个完整的进程（没有单实例） | 待补，属系统集成会话（已写进交接笔记） |
 
 ### 4. 更新
@@ -72,9 +73,28 @@ Windows 现在的做法，都是从代码和脚本里读出来的（括号里是
 | 新版本起不来 | 换文件这一步失败会放回旧的；新版本启动后崩溃没有回滚 | 新版本 90 秒内没有确认，更新程序把旧版本放回去并重新打开 | 相同（Windows 多一层）。CI 实测 |
 | 更新被打断（断电、注销） | 旧 bundle 留在旁边，下次启动清理 | 日志（journal）加 `RunOnce`：下次登录、下次启动、下次更新前恢复 | 相同。CI 实测（真的杀掉更新程序再恢复） |
 | 不能自动装的时候（装在不可写的位置、开发构建） | 在访达里打开 DMG，文字教人拖到「应用程序」 | 在资源管理器里选中安装包；但文字还是访达和「应用程序」那一套 | **已补**（PR 1）：这几句文案按系统分开（`copy/update.rs` 的 `per_system`），Windows 上说「安装包已在文件资源管理器中选中，退出后双击安装」 |
-| daemon 跟着客户端换 | daemon 在 `.app` 里，文件被换掉后空闲时自己退出，launchd 拉起新的 | 安装包按「改名替换」协议换文件，不停进程；daemon 空闲时退出，计划任务一分钟内拉起新的 | 待补（PR 2）：文件被换掉 CI 已实测；「正在跑的 daemon 换到新版本」整条链路在 PR 2 里放到 runner 上跑 |
+| daemon 跟着客户端换 | daemon 在 `.app` 里，文件被换掉后空闲时自己退出，launchd 拉起新的 | 安装包按「改名替换」协议换文件，不停进程；daemon 空闲时退出，计划任务一分钟内拉起新的 | **已补**（PR 2）：原来 CI 只验证了文件被换掉。现在 `test-windows-update.sh` 在 runner 上跑整条链路，见下面「整条链路」 |
 | 几个账号 | 更新只看当前账号的服务器；装的是同一个客户端 | 同上 | 相同 |
 | 更新程序里的测试开关 | 没有更新程序 | `UPDATE_HELPER_TEST_PAUSE_AT` 原来在发出去的程序里 | **已补**（PR 1）：只有带 `test-pause` feature 编译的更新程序才认这个变量；CI 单独编一个给「打断」测试用，并检查装好的更新程序里没有这个字符串 |
+
+### 整条链路（PR 2，`scripts/test-windows-update.sh`，CI 的 `windows-installer` 任务）
+
+以前每一段都单独测过，没有连起来跑过。现在在 runner 上一口气跑完：
+
+1. 静默安装版本 A。
+2. 启动本地服务器（`wrangler dev`），发布版本 B 的安装包。
+3. 装好的客户端用**邀请码**登录本地服务器，开一个话题、发一条消息、恢复会话、退出登录（`--selftest-live`）。
+4. 这台 runner 变成团队的一台机器，做法和「用这台电脑」一样（`provider/this_mac.rs`）：在服务器上登记机器，
+   把配置和机器 token 写进只有当前用户、SYSTEM、Administrators 能打开的文件夹，运行安装目录里的
+   `<slug>-daemon.exe install-service`。检查：计划任务登记了，任务定义指向安装目录里的 daemon，服务器看到
+   这台机器在线、daemon 版本是 A。
+5. 装好的客户端自己更新到 B（检查、下载、校验、更新程序、新版本确认）。
+6. 更新期间没有人停 daemon：检查进程还在、任务还在；几分钟内服务器看到这台机器重新在线、daemon 版本是 B，
+   改名留下的旧文件被新 daemon 删掉。
+7. 回滚、打断再恢复（daemon 一直开着）；之后机器仍然在线、版本是 B。
+8. 卸载：任务没了、daemon 进程没了、服务器看到机器离线；机器的配置留着。
+
+第 4 步是用脚本按客户端的写法写配置，不是点设置里的按钮；按钮本身（界面）属机器会话。
 
 ### 5. 诊断和日志
 
@@ -99,7 +119,7 @@ Mac 没有卸载程序：把 `.app` 拖进废纸篓，别的都留下。Windows 
 | 开始菜单快捷方式、卸载项、URL scheme、AppUserModelID | 无对应（Launch Services 自己忘掉） | 删 | 无对应；已删。CI 实测 |
 | 「登录时打开」 | 系统管的登录项，App 没了就失效 | 删 `Run` 下的值；原来留下任务管理器记的那条 `StartupApproved\Run` | **已补**（PR 1）：两处都删，CI 实测 |
 | 更新的恢复登记（`RunOnce`） | 无对应 | 删 | 无对应；已删 |
-| daemon 的开机自启 | **留下** `~/Library/LaunchAgents/<bundle id>.daemon.plist`，指向一个已经不在的程序 | 先跑 `<daemon> uninstall-service` 删掉计划任务，再结束进程 | 相同（Windows 更干净）。PR 2 在 CI 上实测 |
+| daemon 的开机自启 | **留下** `~/Library/LaunchAgents/<bundle id>.daemon.plist`，指向一个已经不在的程序 | 先跑 `<daemon> uninstall-service` 删掉计划任务，再结束进程 | 相同（Windows 更干净）。CI 实测（PR 2：卸载后任务和进程都没了，服务器看到机器离线，机器的配置还在） |
 | 缓存（能再生成的） | 留下 `~/Library/Caches/team-chat/diagrams` | 原来留下 `%LOCALAPPDATA%\team-chat\webview2` 和 `diagrams` | **已补**（PR 1）：卸载时删，CI 实测。理由：Windows 用户认为卸载会清掉缓存，WebView2 的用户数据目录还可能有几十 MB |
 | 消息缓存、设置、日志 | 留下 `~/Library/Application Support/<bundle id>` | 留下 `%APPDATA%\<bundle id>` | 相同。CI 实测「卸载后数据还在」 |
 | 登录凭证 | 留在钥匙串里 | 留在凭据管理器里 | 相同。重装后不用再登录 |
@@ -146,7 +166,7 @@ Mac 只出 Apple 芯片的版本；Windows 只出 x64 的版本。ARM 的 Window
 | 撤回 | `withdraw-release`：这个版本不再被提供、不能下载 | 同一个命令，两个平台的文件一起撤回 | 相同。不能只撤一个平台：RUNBOOK 已写明做法（撤回后两边一起发更高的版本） |
 | 退回上一个版本 | 让人下载上一版 DMG 拖进去 | 原来没写 | **已补**（PR 1）：RUNBOOK 写了「退出客户端，运行上一版的 `-setup.exe` 覆盖安装」 |
 | `release-check.sh` | 检查版本号、`Cargo.lock`、CHANGELOG、说明、tag、服务器健康 | 同一个脚本，和平台无关 | 相同 |
-| `test-release-scripts.sh` | 测 `deploy-server.sh` 和 `release-check.sh` 的防呆；不测 `release.sh` | 同左；`release.sh --upload-only --platform windows` 没有测试 | 待补（PR 2）：给 `release.sh` 的上传加一个对着本地假服务器的测试，两个平台的路由都测 |
+| `test-release-scripts.sh` | 测 `deploy-server.sh` 和 `release-check.sh` 的防呆；原来不测 `release.sh` | 同左；`release.sh --upload-only --platform windows` 原来没有测试 | **已补**（PR 2）：对着本地的假服务器测上传。DMG 和安装包各走各的路由、类型、校验和、说明都对；`--platform windows` 不带 `--upload-only`、未知平台、预发布版本、文件不存在都被拒绝且没有请求发出去；密钥不对算失败且不出现在输出里；服务器没有这个接口（404）算跳过；`ci.yml` 里改 `release.sh` 也会触发这个测试 |
 | staging 冒烟（`staging-smoke.ts`） | 不查更新和下载接口 | 同左 | 相同 |
 | CI | DMG 的构建和测试只在手动触发时跑 | 安装包的构建、安装、更新、回滚、恢复、卸载在每个碰到相关文件的 PR 上跑 | 相同（Windows 的更多） |
 
@@ -203,5 +223,5 @@ Azure Trusted Signing 一开始就有信誉。这段时间 INSTALL 文档里「�
 ## 四、PR
 
 - PR 1：本清单；服务器地址、邀请链接、测试开关、卸载、ARM、同一发布者检查、文案、文档。
-- PR 2：整条链路在 runner 上跑（安装 → 连本地服务器 → daemon 的计划任务 → 更新 → daemon 换到新版本 →
-  卸载）；通知的 COM 激活器登记；`release.sh` 上传的测试。
+- PR 2：整条链路在 runner 上跑（安装 → 邀请码登录本地服务器 → daemon 的计划任务 → 更新 → daemon 换到
+  新版本 → 回滚和恢复 → 卸载）；通知的 COM 激活器在安装包这一半；`release.sh` 上传的测试。

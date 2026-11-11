@@ -788,3 +788,40 @@ fn real_processes() {
     assert!(!job.backup_dir.exists());
     assert!(!job.journal().exists());
 }
+
+#[test]
+fn a_class_id_is_read_with_or_without_braces() {
+    let id = "0f6c3a52-7d1e-4b9a-9c55-2e8f4a1b6d03";
+    assert_eq!(crate::sys::class_id(id).unwrap(), id);
+    assert_eq!(
+        crate::sys::class_id(" {0F6C3A52-7D1E-4B9A-9C55-2E8F4A1B6D03} ").unwrap(),
+        id
+    );
+    for bad in [
+        "",
+        "{}",
+        "0f6c3a52",
+        "0f6c3a52-7d1e-4b9a-9c55-2e8f4a1b6dzz",
+        "0f6c3a527d1e4b9a9c552e8f4a1b6d03",
+    ] {
+        assert!(crate::sys::class_id(bad).is_err(), "{bad}");
+    }
+    // An argument the helper does not know stops it; a bad class id too.
+    let args = |list: &[&str]| {
+        list.iter()
+            .map(std::ffi::OsString::from)
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        crate::sys::shortcut_from_args(&args(&[
+            "a.lnk",
+            "--target",
+            "a.exe",
+            "--app-id",
+            "x",
+            "--toast-activator",
+            "nope"
+        ]))
+        .is_err()
+    );
+}
