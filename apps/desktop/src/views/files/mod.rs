@@ -10,8 +10,6 @@ pub mod export;
 pub mod extra;
 pub mod native;
 pub mod preview;
-#[cfg(target_os = "windows")]
-pub mod preview_handler;
 pub mod quick_look;
 #[cfg(target_os = "windows")]
 mod win_drag;

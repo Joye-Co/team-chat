@@ -345,20 +345,19 @@ pub fn open_quick_look(
     )
 }
 
-/// The `files-quick-look-handler` scene: Space on a type the app has no viewer for (RTF).
-/// On Windows the system's preview handler draws it in the sheet; without a handler (and
-/// on the Mac, where Quick Look does this) the sheet says that there is no preview.
-pub fn open_quick_look_handler(
+/// The `files-quick-look-no-preview` scene: Space on a type the app has no viewer for (a
+/// Word document). The sheet says that there is no preview and offers 用系统应用打开 (on
+/// the Mac, where Quick Look does this, the full view keeps its own words).
+pub fn open_quick_look_no_preview(
     services: Services,
     content: Size<Pixels>,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
-    const RTF: &str = r"{\rtf1\ansi\deff0{\fonttbl{\f0 Segoe UI;}}\f0\fs40 Quarterly report\par\fs24 This page is drawn by the preview handler Windows has for RTF files.\par\par 1. Revenue\par 2. Costs\par 3. Plan\par}";
     open_quick_look_of(
         services,
         content,
-        "Quarterly report.rtf",
-        RTF.as_bytes(),
+        "第三季度复盘.docx",
+        b"PK\x03\x04 not a real document",
         cx,
     )
 }
@@ -386,34 +385,12 @@ thread_local! {
         const { std::cell::Cell::new(None) };
 }
 
-/// For the scenes whose sheet shows content GPUI's frames do not cover (the system's
-/// preview handler, a page in the isolated view): true once that content had time to
-/// load.
+/// For the scene whose sheet shows content GPUI's frames do not cover (a page in the
+/// isolated view): true once that content had time to load.
 pub fn quick_look_settled(_: &App) -> bool {
-    let settled = OPENED
+    OPENED
         .get()
-        .is_some_and(|at| at.elapsed() >= std::time::Duration::from_secs(4));
-    // On Windows the handler's view belongs to another process, which the window
-    // capture leaves out: keep what the screen shows there next to the screenshots.
-    #[cfg(target_os = "windows")]
-    if settled && let Some(dir) = std::env::var_os("TC_PROBE_DIR") {
-        thread_local! {
-            static SAVED: std::cell::Cell<Option<std::time::Instant>> =
-                const { std::cell::Cell::new(None) };
-        }
-        if SAVED.get() != OPENED.get() {
-            SAVED.set(OPENED.get());
-            if let Some(png) = super::preview_handler::screen_probe() {
-                let _ = std::fs::create_dir_all(&dir);
-                // One file per capture (the light scene, then the dark one).
-                let n = std::fs::read_dir(&dir).map_or(0, |d| d.count());
-                let file = std::path::Path::new(&dir)
-                    .join(format!("quick-look-handler-on-screen-{n}.png"));
-                let _ = std::fs::write(file, png);
-            }
-        }
-    }
-    settled
+        .is_some_and(|at| at.elapsed() >= std::time::Duration::from_secs(4))
 }
 
 /// The `files` scene with the preview sheet of a file named `name` holding `bytes`.

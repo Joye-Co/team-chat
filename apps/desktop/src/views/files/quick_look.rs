@@ -6,11 +6,21 @@
 //!
 //! A 产出 opens in its own viewer (its page runs in the isolated view). An attachment is
 //! read from its local copy: the viewer only decodes or prints it, so even a script
-//! previews safely as text, and an attached page runs in the isolated 产出 view. A type
-//! the app has no viewer for is drawn by the system's preview handler for it
-//! ([`super::preview_handler`]), the counterpart of Quick Look's plug-ins; without one the
-//! sheet says that there is no preview and offers 用系统应用打开. Only a file Windows
-//! would run is never previewed: it is shown in Explorer.
+//! previews safely as text, and an attached page runs in the isolated 产出 view.
+//!
+//! A type the app has no viewer for (Office documents, archives, …) has no preview: the
+//! sheet says so and offers 用系统应用打开, behind the guard of 打开. This is narrower than
+//! Quick Look, on purpose. macOS previews any file in a sandboxed system service; the
+//! Windows counterpart, a shell preview handler, is whatever program
+//! registered for the type, running outside any sandbox the app controls, and it can
+//! make Office fetch a remote template or linked object. File Explorer itself no longer
+//! previews files that carry the Mark of the Web for that reason. Every file this sheet
+//! can show comes from the app's download cache ([`chat_core`] marks each one as from
+//! the internet, also the copies of files the person sent) or is a 产出 version, so the
+//! app follows Explorer: none is ever handed to a system preview handler, and the app
+//! hosts none. Opened with its program instead, an Office file opens in Protected View.
+//!
+//! A file Windows would run is never previewed: it is shown in Explorer.
 #![cfg_attr(target_os = "macos", allow(dead_code))]
 
 use std::{cell::RefCell, path::Path};
@@ -55,8 +65,8 @@ pub fn close_if_open(cx: &mut App) -> bool {
 /// What previews an attachment whose local copy is `path`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Preview {
-    /// The app's preview sheet: the viewer for this kind; for a plain file the system's
-    /// preview handler when the type has one, else the "no preview" state.
+    /// The app's preview sheet: the viewer for this kind, or for a plain file the "no
+    /// preview" state with 用系统应用打开.
     Viewer(MediaKind),
     /// A file Windows would run: never previewed, only shown in Explorer.
     Reveal,
@@ -66,9 +76,9 @@ pub enum Preview {
 ///
 /// A page previews in the isolated 产出 view (the viewer's HTML view: no network, no
 /// bridge capabilities), as 打开 shows it in the 产出 window and as Quick Look renders it;
-/// its source would tell the reader less. A plain file previews only when 打开 would hand
-/// it to the system: a program, a script host's file or a shortcut is never given to a
-/// viewer or a handler.
+/// its source would tell the reader less. A plain file gets the sheet only when 打开
+/// would hand it to the system: a program, a script host's file or a shortcut is shown in
+/// Explorer and nothing else.
 pub fn preview_of(path: &Path) -> Preview {
     let name = path
         .file_name()
@@ -192,8 +202,8 @@ mod tests {
     use super::*;
 
     /// What the app can show previews in the app; a script is shown as text, never run; a
-    /// page runs in the isolated view; a type without a viewer goes to the system's
-    /// preview handler; what the system would run is never previewed.
+    /// page runs in the isolated view; a type without a viewer gets the sheet's "no
+    /// preview" state; what the system would run is never previewed.
     #[test]
     fn files_the_app_can_show_preview_in_the_app() {
         let p = |n: &str| preview_of(Path::new(&format!("/cache/abc/{n}")));
@@ -226,6 +236,45 @@ mod tests {
             assert_eq!(p(name), Preview::Reveal, "{name}");
         }
         assert_eq!(preview_of(Path::new("/")), Preview::Reveal);
+    }
+
+    /// The app hosts no system preview handler: a downloaded file (every file this sheet
+    /// shows carries the Mark of the Web) is never given to one, as in File Explorer.
+    /// The source has no such call, and the types a handler would serve are plain files
+    /// to the sheet.
+    #[test]
+    fn no_file_is_handed_to_a_system_preview_handler() {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let (handler, clsid) = (
+            ["IPreview", "Handler"].concat(),
+            ["8895b1c6", "-b41f-4c1c-a562-0d564250836f"].concat(),
+        );
+        let mut stack = vec![src];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    let text = std::fs::read_to_string(&path).unwrap_or_default();
+                    assert!(
+                        !text.contains(&handler) && !text.to_lowercase().contains(&clsid),
+                        "{} talks to a preview handler",
+                        path.display()
+                    );
+                }
+            }
+        }
+        for name in [
+            "a.docx", "a.doc", "a.xlsx", "a.pptx", "a.rtf", "a.eml", "a.ttf",
+        ] {
+            let path = Path::new("/cache/abc").join(name);
+            assert_eq!(
+                preview_of(&path),
+                Preview::Viewer(MediaKind::File),
+                "{name}"
+            );
+        }
     }
 
     #[test]

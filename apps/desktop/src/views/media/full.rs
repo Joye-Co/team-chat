@@ -75,7 +75,7 @@ pub fn render(
         Data::Pdf(p) => pdf(spec, p, state, cx),
         Data::Code(c) => code(spec, c, state, cx),
         Data::Table(t) => table(spec, t, state, cx),
-        Data::File => file(spec, window, cx),
+        Data::File => file(spec, cx),
     }
 }
 
@@ -344,7 +344,7 @@ fn frame(cx: &App) -> gpui::Div {
         .overflow_hidden()
 }
 
-fn file(spec: &FullSpec, window: &mut Window, cx: &mut App) -> AnyElement {
+fn file(spec: &FullSpec, cx: &App) -> AnyElement {
     let path = spec.media.entry_path();
     let header = head(
         spec,
@@ -356,51 +356,11 @@ fn file(spec: &FullSpec, window: &mut Window, cx: &mut App) -> AnyElement {
         },
         cx,
     );
-    // A document the app has no viewer for: on Windows the system's own preview handler
-    // for it draws the body, when one may (`preview_handler`); Quick Look's plug-ins on
-    // the Mac belong to its own panel.
-    #[cfg(target_os = "windows")]
-    if !spec.media.preview_failed {
-        use crate::views::files::preview_handler::{self, Body};
-        match preview_handler::body(id(spec, "handler"), &path, window, cx) {
-            Body::Showing(body) => {
-                return frame(cx)
-                    .child(header)
-                    .child(div().flex_1().min_h_0().w_full().child(body))
-                    .into_any_element();
-            }
-            // The handler is starting: the body is empty until it shows or gives up.
-            Body::Starting(body) => {
-                return frame(cx)
-                    .child(header)
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_h_0()
-                            .w_full()
-                            .relative()
-                            .child(div().absolute().size_full().child(body))
-                            .child(
-                                div()
-                                    .size_full()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .t_small()
-                                    .text_color(theme::colors(cx).text_3)
-                                    .child(crate::copy::artifacts::OPENING),
-                            ),
-                    )
-                    .into_any_element();
-            }
-            Body::None => {}
-        }
-    }
-    #[cfg(not(target_os = "windows"))]
-    let _ = window;
     let k = theme::colors(cx);
-    // On Windows a type without a viewer and without a handler that may preview it is
-    // not a failure: the sheet says that there is no preview. The Mac keeps its words.
+    // On Windows a type the app has no viewer for is not a failure: the sheet says that
+    // there is no preview (Space leads here, where the Mac has Quick Look; the app never
+    // hands a downloaded file to a system preview handler, see `views::files::quick_look`).
+    // The Mac keeps its words.
     let hint = if cfg!(target_os = "windows") && !spec.media.preview_failed {
         cm::STATE_NO_PREVIEW
     } else {

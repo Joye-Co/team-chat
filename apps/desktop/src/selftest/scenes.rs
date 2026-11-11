@@ -492,11 +492,11 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::files::preview::open_quick_look,
     },
     Scene {
-        name: "files-quick-look-handler",
-        about: "Space on a type without a viewer (RTF): the system's preview handler in the sheet on Windows, the no-preview state elsewhere",
+        name: "files-quick-look-no-preview",
+        about: "Space on a type without a viewer (a Word document): the sheet's no-preview state with 用系统应用打开",
         start: Start::SignedIn,
         setup: |_, _| {},
-        open: crate::views::files::preview::open_quick_look_handler,
+        open: crate::views::files::preview::open_quick_look_no_preview,
     },
     Scene {
         name: "files-quick-look-page",
@@ -1243,9 +1243,7 @@ pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
     }
     // --- end inc-refs ---
     match name {
-        "files-quick-look-handler" | "files-quick-look-page" => {
-            Some(crate::views::files::preview::quick_look_settled)
-        }
+        "files-quick-look-page" => Some(crate::views::files::preview::quick_look_settled),
         "artifact-v2-leave" => Some(crate::views::artifact_page::scenes::left),
         "web-embed" => Some(|cx| embed_preview::ready(EmbedMode::Topic, cx)),
         "web-embed-scrolled" => Some(|cx| embed_preview::ready(EmbedMode::Scrolled, cx)),
