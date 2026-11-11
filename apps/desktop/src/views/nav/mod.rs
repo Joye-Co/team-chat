@@ -281,6 +281,12 @@ pub fn close_command_closes(outlives: bool, windows: usize, main_window: bool) -
     }
 }
 
+/// Whether `window` is the main window ([`attach_window`]).
+pub fn is_main_window(window: AnyWindowHandle, cx: &App) -> bool {
+    cx.try_global::<NavGlobal>()
+        .is_some_and(|nav| nav.window == Some(window))
+}
+
 /// Registers the main window, where the navigation dialogs open.
 pub fn attach_window(window: &Window, cx: &mut App) {
     if cx.has_global::<NavGlobal>() {

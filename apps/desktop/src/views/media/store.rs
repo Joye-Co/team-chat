@@ -228,6 +228,12 @@ pub fn request_folder(key: &MediaKey, title: &str, dir: PathBuf, entry: String, 
     .detach();
 }
 
+/// Records that a version could not be read, for a caller that failed before
+/// [`request_folder`] (a view of it then shows the failed state).
+pub fn fail(key: &MediaKey, error: FileError, cx: &mut App) {
+    set(key.clone(), Load::Failed(error), cx);
+}
+
 /// Forgets one version, so the next view reads it again (重试 after a failure).
 pub fn forget(key: &MediaKey, cx: &mut App) {
     cx.default_global::<Store>().map.remove(key);

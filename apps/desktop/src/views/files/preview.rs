@@ -499,15 +499,14 @@ fn open_quick_look_of(
     OPENED.set(Some(std::time::Instant::now()));
     handle
         .update(cx, |_, window, cx| {
-            if let Some(key) = super::quick_look::request_attachment(&name, "", &path, cx) {
-                super::quick_look::open_sheet_in(
-                    window,
-                    key,
-                    name.clone(),
-                    crate::views::media::state::Target::none(),
-                    cx,
-                );
-            }
+            let key = super::quick_look::request_attachment(&name, "", &path, cx);
+            super::quick_look::open_sheet_in(
+                window,
+                key,
+                name.clone(),
+                crate::views::media::state::Target::none(),
+                cx,
+            );
         })
         .map_err(|e| e.to_string())?;
     Ok(handle)
