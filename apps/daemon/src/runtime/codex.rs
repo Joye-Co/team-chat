@@ -751,6 +751,17 @@ pub const ASIDE_CONFIG: &[&str] = &[
 /// Windows: Codex enforces `read-only` only through its own Windows sandbox, which is off
 /// unless the config turns it on: without it a command of a side chat run writes files. This
 /// turns on the mode that needs no administrator.
+///
+/// The network is not cut off as it is on macOS and Linux. In this mode Codex only points the
+/// proxy settings of a command's environment at a dead port: a program that ignores them
+/// connects. Codex's `elevated` mode blocks the internet with a firewall rule for accounts of
+/// its own, and is not used: an administrator has to set it up, its accounts cannot open a
+/// run folder (private to the daemon's user; every command fails) nor the repository a
+/// checkout points to, and it still lets a command reach this computer's own addresses.
+/// Windows has no way for a program without administrator rights to cut the network of
+/// processes another program starts: an AppContainer would have to hold the CLI itself, which
+/// needs the network for the model, and firewall or filtering rules need elevation.
+/// `tests/runtimes.rs::codex_side_chat_network_on_windows` pins what happens.
 pub const ASIDE_WINDOWS_SANDBOX: &str = "windows.sandbox=\"unelevated\"";
 
 /// Names of the MCP servers in the Codex config files a run can load, each with whether its

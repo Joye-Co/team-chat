@@ -16,6 +16,7 @@ import { linkStub } from "../env";
 import type { ClaimResult, SourceContext, TopicMessage } from "../room";
 import { refsText } from "../refs";
 import { EXECUTOR_MEMORY_BYTES, memoryIndex } from "../../memory/inject";
+import { groupMembers, membersText } from "../../context/read";
 import { loadMachines, loadRunner } from "../store";
 import { DeskCore, QUEUED, type RunRow } from "./core";
 import { type FailureNote, failureNote } from "./failure";
@@ -403,6 +404,8 @@ export abstract class DeskRuns extends DeskCore {
       ...(brief ? { brief: briefText(brief) } : {}),
       // 沉淀: what the team, the group, this member and the requester keep (reference material).
       memory: await memoryIndex(this.env, { botId, groupId: m.groupId, requesterId: m.authorId, requesterName: name(m.authorId), maxBytes: EXECUTOR_MEMORY_BYTES }),
+      // Who is in the group and their 岗位: hand-offs and parts go to members by name.
+      members: membersText(await groupMembers(this.env.DB, m.groupId), botId),
     });
     const out: Prompts = { prompt, manifest: manifestOf(sel, false) };
     if (since) {

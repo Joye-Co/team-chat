@@ -18,7 +18,8 @@ export interface ContextRow {
 export interface MessageExt {
   replyTo?: { messageId: string; authorId: string; excerpt: string };
   attachments?: { fileId: string; name: string; mime: string; size: number; width?: number; height?: number }[];
-  artifactRefs?: { artifactId: string; version: number }[];
+  /** `title` is the 产出's current title, added when the row is read (bots/room.ts `contextRows`). */
+  artifactRefs?: { artifactId: string; version: number; title?: string }[];
   card?: { title?: string };
   cardV2?: { title?: string; fallback?: string };
   cardState?: { answers?: { actorId: string; value?: unknown; inputs?: Record<string, unknown>; retractedAt?: number }[]; answerCount?: number };
@@ -130,7 +131,7 @@ function fileLines(x: MessageExt): string[] {
     const dim = f.width && f.height ? ` · ${f.width}×${f.height}` : "";
     lines.push(`  [file f ${f.fileId} · ${short(f.name, 120)} · ${f.mime} · ${bytes(f.size)}${dim}]`);
   }
-  for (const a of x.artifactRefs ?? []) lines.push(`  [产出 a ${a.artifactId} v${a.version}]`);
+  for (const a of x.artifactRefs ?? []) lines.push(`  [产出 a ${a.artifactId} v${a.version}${a.title ? ` · ${short(a.title, 120)}` : ""}]`);
   return lines;
 }
 

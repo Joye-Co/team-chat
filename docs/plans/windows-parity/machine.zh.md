@@ -21,10 +21,25 @@
 代码只在那里运行）。下文「CI 跑过」都指后者。daemon 的测试在三个系统的 CI 上都跑：`Rust`（Ubuntu）、
 `Daemon tests (Windows)`、`Daemon tests (macOS)`（macOS 15，真的 Claude Code 和 Codex 对着假模型）。
 
+`main` 上所有修复合在一起的一次完整 CI（钉在提交 `b0a34d89` 的分支 `ci/main-b0a34d89` 上手动触发，后面的合并取消不了它），
+全部任务通过，标准用户那一步走的是真的登录会话：
+<https://github.com/Joye-Co/team-chat/actions/runs/43075190501>。
+
 ## 0. 缺口和它们的结局
 
 清单第一版列出 20 个缺口，真 CLI 的测试在 Windows 上又抓出一个（G32），三轮评审又指出 19 个（G33 到 G51），修评审意见时自己又查出一个（G52：有的是
-清单第一版把没验证过的行写成了「一致」，有的是两个系统上都有的洞）。现在全部补完；剩下的只有 CI 做不到的事，在第 8 节。
+清单第一版把没验证过的行写成了「一致」，有的是两个系统上都有的洞）。除了下面声明的两处差别，现在全部补完；剩下的是 CI 做不到的事，在第 8 节。
+
+声明的差别（不是「一致」，清单里每一处都按这个写）：
+
+1. **Codex 旁聊的命令在 Windows 上没有被断网**（G52 的后半）。Mac 和 Linux 上 Codex 的 `read-only` 沙箱同时挡住写文件和联网；
+   Windows 上 daemon 给旁聊打开的是 Codex 沙箱里不需要管理员的 `unelevated` 档，它挡住写文件，联网只是把命令环境里的
+   代理设置指向一个不通的端口：守规矩读代理设置的程序（curl、git、npm、pip）连不出去，不理会代理设置的程序照样连得上。
+   为什么补不上，见第 6 节「Codex 的旁聊」那一行。机器主人看到的：Windows 上 Codex 的旁聊改不了任何文件，但它跑的命令
+   能连网络，也就是能把它读到的工作目录内容发出去；`daemon doctor` 在配了 Codex 的 Windows 机器上有一行
+   `codex side chat: read-only (no writes); its commands can still reach the network on Windows`。Claude Code 的旁聊不受影响
+   （它在三个系统上都只有读文件的工具，不跑命令）。
+2. **`CliInfo.gates` 在 Windows 上有版本前提**（G1、G40）：低于 2.1.322 或读不出版本的 Claude Code 不拦命令，见第 1 节那一行。
 
 | 编号 | 缺口 | 结局 | 证据（都在 CI 上） |
 | --- | --- | --- | --- |
@@ -68,7 +83,7 @@
 | G49 | 暂停着的 run 遇上睡眠，Windows 上时长上限被推后两次：暂停时钟本来就停着，睡着的时间又加了一遍 | 睡着的时间只算一次：run 暂停着时不再另加（`run.rs` 的 `after_sleep`） | `run.rs` 单元测试 `a_sleep_is_counted_once_also_for_a_paused_run`（三个系统） |
 | G50 | 「是不是睡过去了」用墙上时钟判断：改系统时间、对时会被当成睡眠，连接被白白断开重连 | 心跳改读「开机以来」的时钟，它把睡着的时间算进去、不受改时间影响（Linux `CLOCK_BOOTTIME`，macOS `CLOCK_MONOTONIC`，Windows `GetTickCount64`） | `sys.rs::the_time_since_boot_moves_forward`、`integration.rs` 的冻住 66 秒那一条（三个系统）。「改时间不被当成睡眠」没有测试（CI 上不改系统时间），靠的是这三个时钟的定义 |
 | G51 | ConPTY 屏幕转成行时，「光标右移 N 格」没有上限：一个程序输出很多 `ESC[999C` 就能让一行无限变长 | 右移不超过屏幕宽度（200 列），一行的总长也封顶 | `pty.rs` 单元测试（转换的代码不分系统，三个系统的 CI 都跑） |
-| G52 | Codex 的旁聊在 Windows 上并不只读：Codex 的 `read-only` 只靠它自己的 Windows 沙箱执行，而那个沙箱默认不开，命令照样能写文件（工作目录里有 daemon 的访问列表挡着，目录外没有）。原来的测试在 Windows 上通过，是因为测试里那条写文件的命令引号写错、命令本身失败了 | 旁聊的 run 在 Windows 上打开 Codex 沙箱里不需要管理员的那一档（`windows.sandbox="unelevated"`）：写文件被拒绝，读文件照常。还剩一处不同：这一档不挡联网（见第 6 节） | `runtimes.rs::codex_read_only_sandbox_writes_nothing`（改对了命令，目录外的目标不放在临时目录下，加了「读得到文件」；三个系统）；`codex_read_only_on_windows_report` 把三种设置下的结果打在 CI 日志里 |
+| G52 | Codex 的旁聊在 Windows 上并不只读：Codex 的 `read-only` 只靠它自己的 Windows 沙箱执行，而那个沙箱默认不开，命令照样能写文件（工作目录里有 daemon 的访问列表挡着，目录外没有），也能联网。原来的测试在 Windows 上通过，是因为测试里那条写文件的命令引号写错、命令本身失败了 | **补了一半**。写文件：补上了，旁聊的 run 在 Windows 上打开 Codex 沙箱里不需要管理员的那一档（`windows.sandbox="unelevated"`），写被拒绝，读照常。联网：**没有补上，是声明的差别**（本节开头第 1 条，原因在第 6 节） | 写文件：`runtimes.rs::codex_read_only_sandbox_writes_nothing`（改对了命令，目录外的目标不放在临时目录下，加了「读得到文件」；三个系统）。联网：`runtimes.rs::codex_side_chat_network_on_windows` 用 daemon 实际发的参数断言「读代理设置的程序连不到本机地址上的监听端口」，并把「不理会代理设置的程序连上了」记在 CI 日志里 |
 
 ## 1. 上报给服务器的能力
 
@@ -180,7 +195,7 @@
 | `chat_run.rs`（`socket_path`、`Server`、`call`） | CLI 到 daemon 的通道 | Unix socket，600，另查对端 uid；路径太长时放临时目录 | 命名管道 `\\.\pipe\chat-run-<哈希>-<pid>`，访问列表只给当前用户，拒绝远程，必须是这个名字的第一个实例；客户端只许对方识别身份 | 一致（CI 跑过） | — |
 | `chat_run.rs`（文件传输）、`chat_run_files.rs` | Codex 用的请求目录 | 目录 700，请求文件按属主过滤 | 目录继承 run 目录的访问列表，请求文件按所有者和访问列表过滤；读结果时遇到「正在被换上去」重试 | 一致（假 CLI CI 跑过；真 Codex 的沙箱见 G13） | — |
 | `chat_run.rs` 的每个 op（`card.post`、`card.patch`、`interaction.resolve`、`artifact.*`、`desk.note`、`member.*`、`secret`、`gate.check`、文件上传、产出） | — | 同一段代码 | 同一段代码；`integration.rs` 现在在 CI 上跑（card patch、artifact create、resolve、超时两种说法） | 一致 | — |
-| `gates.rs`（`enforced_by`、`reported_for`）、`run.rs` | 谁的 run 会拦命令 | Claude Code | Claude Code 2.1.322 及以上；上报和运行用同一个判断，没被上报的 CLI 收到带审批的 run 就失败 | 一致（G1、G40） | 见第 6 节 |
+| `gates.rs`（`enforced_by`、`reported_for`）、`run.rs` | 谁的 run 会拦命令 | Claude Code | Claude Code 2.1.322 及以上；上报和运行用同一个判断，没被上报的 CLI 收到带审批的 run 就失败 | **有条件的差别**，和第 1 节 `CliInfo.gates` 那一行是同一件事（G1、G40）：Windows 上低于 2.1.322 或读不出版本的 Claude Code 不拦命令，Unix 上每个版本都拦。2.1.322 及以上两边一致 | 见第 1 节那一行和第 6 节 |
 | `gates.rs`（`plain_command`、`matches`） | 命令怎么和规则对 | 每条简单命令原样匹配 | 两边都改成：原样匹配，再按「程序名去掉目录、引号和扩展名，参数去掉引号」匹配一次 | 一致（G38；Unix 上只多拦了带引号的写法） | — |
 | `gates.rs`（`claude_settings` 的 `disableAllHooks`、`SessionStart`、`alive_main`）、`runtime/claude.rs` | 钩子被设置关掉时 | 以前：照常跑，命令不被拦 | 两边都改成：run 的设置把钩子打开；启动钩子没跑过，CLI 拿不到提示词，run 失败 | 一致（G39；Unix 的变化只是堵上这个洞） | — |
 | `chat_run_files.rs`（`inside`）、`chat_run_context.rs`（`resolve_out`）、`sys.rs`（`windows_path_problem`） | bot 给的路径不出 run 目录 | 解析（含符号链接）后必须在工作目录里 | 同，另外先按文本拒绝 Windows 才有的写法：网络路径、设备和 `\\?\` 路径、带冒号的（`C:foo`、`file:stream`）、以点或空格结尾的名字、设备名（`NUL`、`CON`、`COM1`…） | 一致（G33） | junction、短文件名、大小写、别的盘由「解析后比较」挡住，CI 上逐条测了 |
@@ -204,7 +219,7 @@
 | 运行时 | Mac / Linux | Windows 现在 | 状态 |
 | --- | --- | --- | --- |
 | Claude Code（stream-json、插话、续接、effort、旁聊的只读模式、会话文件上传） | — | 同一段代码；假 CLI 的 `runtimes.rs` 和整个 daemon 的 `integration.rs` CI 跑过；真 CLI 见第 6 节 | 一致（假 CLI 和真 CLI 加假模型都跑过） |
-| Codex（app-server、审批、插话、续接、effort、旁聊的 MCP 关闭） | — | 同上 | 一致（假 CLI；真 CLI 的不需要模型的部分跑过） |
+| Codex（app-server、审批、插话、续接、effort、旁聊的 MCP 关闭、旁聊的只读） | — | 同一段代码；旁聊多一个参数 `windows.sandbox="unelevated"` | 一致（假 CLI；真 CLI 的不需要模型的部分跑过），**除了旁聊的联网：声明的差别**（第 0 节开头第 1 条）。旁聊写不了文件这一点一致 |
 | ACP | — | 同一段代码，`runtimes.rs` CI 跑过 | 一致 |
 | `pty` | `openpty` | ConPTY；输出还原成行；批处理文件可以当程序 | 一致（G44；差别只在「画屏幕」的程序，见第 3 节） |
 
@@ -212,7 +227,7 @@
 
 | 测试 | Mac / Linux CI | Windows CI | 状态 | 怎么补 |
 | --- | --- | --- | --- | --- |
-| 单元测试（`src/**`） | 跑 | 跑。两个测试只在 Unix 上有，各有 Windows 的对应：`a_blocked_connect_names_the_sandbox`（socket 连不上）对 `a_blocked_pipe_names_the_sandbox`（管道打不开）；`a_long_run_folder_gets_a_short_socket_path` 对 `a_long_run_folder_gets_a_short_pipe_name`。路径规则的三个测试原来只在 Unix 上跑，现在两边都跑（G33）。`a_folder_the_sandbox_will_not_write_names_the_sandbox`（请求目录写不进去时报成沙箱）原来只在 Unix 上跑，现在两边同一个测试：Unix 去掉目录的写权限位，Windows 加一条拒绝写的访问列表项（G47）。Windows 另有专有的：访问列表、命名管道（往返、访问列表、结束后消失）、任务 XML、命令行引号、Windows 路径写法 | 一致（G33、G37） | — |
+| 单元测试（`src/**`） | 跑 | 跑。不在 Windows 上跑的单元测试一共七个，分三组。（一）`chat_run.rs` 两个，各有 Windows 的对应：`a_blocked_connect_names_the_sandbox`（socket 连不上）对 `a_blocked_pipe_names_the_sandbox`（管道打不开）；`a_long_run_folder_gets_a_short_socket_path` 对 `a_long_run_folder_gets_a_short_pipe_name`。（二）`proctree.rs` 两个（整个文件是 Unix 的实现，Windows 的实现是 `proctree_windows.rs`，它没有单元测试，由 `tests/process_tree.rs` 测）：`orphans_are_found_by_the_run_marker`（脱离父进程的工具靠环境里的 run 标记找到）在 Windows 上没有同名的事，Job Object 里的进程脱离不了，对应的是 `tests/process_tree.rs::cancel_leaves_no_process_of_the_tree` 和 `a_helper_process_ends_with_everything_it_started`；`signal_skips_a_pid_that_is_another_process_now`（pid 被别的进程重用时不发信号）在 Windows 上不会发生，daemon 拿着的是 Job 和进程的句柄，不按 pid 找进程，没有对应的测试。（三）`executor/firecracker.rs` 的三个（这个文件只在 Unix 上编译，功能只有 Linux 有，Windows 无对应）：`a_bot_gets_its_own_kept_home`、`slots_get_their_own_slash_30`、`guest_env_replaces_path_and_relays_chat_run`。同属 Firecracker 的 `executor/vmwire.rs` 不分系统，它的三个测试（`frames_round_trip_and_end_cleanly`、`unknown_tags_and_huge_frames_are_refused`、`async_and_blocking_sides_agree`）在 Windows 上也跑，只是 Windows 上没有用到这段代码的功能。路径规则的三个测试原来只在 Unix 上跑，现在两边都跑（G33）。`a_folder_the_sandbox_will_not_write_names_the_sandbox`（请求目录写不进去时报成沙箱）原来只在 Unix 上跑，现在两边同一个测试：Unix 去掉目录的写权限位，Windows 加一条拒绝写的访问列表项（G47）。Windows 另有专有的：访问列表、命名管道（往返、访问列表、结束后消失）、任务 XML、命令行引号、Windows 路径写法，以及另外六个只在 Windows 上跑的：`chat_run.rs::a_request_others_could_write_is_not_taken`、`chat_run_files.rs::windows_spellings_do_not_leave_the_working_folder`、`health.rs::launch_resolves_an_npm_shim`、`sys.rs` 的 `windows_cpu_times_move_forward` 和 `the_first_windows_load_is_measured_not_zero`、`workspace.rs::a_run_folder_is_private_under_an_open_work_root` | 一致（G33、G37）；`firecracker.rs` 的三个无对应 | — |
 | `tests/normalize.rs`、`redact.rs`、`chat_run.rs` | 跑 | 跑 | 一致 | — |
 | `tests/process_tree.rs` | 跑 | 跑（另有 `.cmd`、job、ConPTY 的用例） | 一致 | — |
 | `tests/runtimes.rs` | 跑 | 跑。`pty_prompt_input_and_exit_code` 两边是同一个测试（各用自己的 shell）。`pty_cancel_kills_group` 是 Unix 的，Windows 的对应是 `pty_pause_holds_and_cancel_ends_the_tree`（还多测了暂停）和 `pty_runs_a_batch_file`。`codex_sandbox_lets_chat_run_answer_without_network` 是 Unix 的（seatbelt / landlock 挡住 socket 和网络）；Windows 的对应是两个：`codex_on_windows_reaches_the_daemon_through_the_request_folder`（run 实际的情形，含用户自己的 Codex 配置打开了 Codex 的 Windows 沙箱）和 `codex_windows_sandbox_modes_start_nothing_or_name_the_sandbox`（手动打开 Codex 的 Windows 沙箱会怎样，见第 6 节；它不证明沙箱里的 `chat-run` 能用） | run 实际的情形一致（G8、G44）；沙箱里的 `chat-run` 在 Windows 上没有证明（G46），第 8 节第 2 条 | — |
@@ -223,7 +238,7 @@
 | `tests/setup.rs`（协议 fixture、配置、doctor、worktree、镜像、清理、只读目录） | 跑 | 以前不跑。现在跑（本 PR，G7），除了 launchd 和 systemd 两个用例（Windows 的是 `service_task.rs`） | 一致 | — |
 | `tests/service_task.rs` | 不适用 | 跑（真的任务计划程序） | 无对应（反过来的）：Mac 的 launchd 只测 plist 文本 | — |
 | `scripts/test-install-daemon.ps1` | 不适用 | 跑 | 同上 | — |
-| `scripts/test-daemon-standard-user.ps1`（以没有管理员权限的用户跑 daemon 的测试） | 不适用：Mac / Linux 的 CI 用户本来就不是 root | 跑，必须通过。建一个标准用户（中等完整性级别，不在 Administrators 里），以它的身份、用它自己的用户目录跑三个测试程序：`process_tree`（run、取消、暂停、ConPTY）、`integration`（整个 daemon：run 目录、命名管道、请求目录、只读目录、审批、真 CLI）、`service_task`（计划任务） | 一致（G45）。脚本先让这个用户经远程桌面登录到 runner 自己（`mstsc` 连 `127.0.0.2`），得到一个真的登录会话：任务带「登录时」触发器注册，由任务计划程序在这个会话里启动，其余断言照常（单实例、被杀后再起、替换协议更新、重启、更新中途断电后修复、卸载后不再起）；随后以这个用户跑安装命令的测试（`scripts/test-install-daemon.ps1`）。登录不成时脚本退回去自己按任务定义启动动作、并跳过安装命令，日志里写明走的是哪条路；现在 CI 上走的是真会话这条。没看到的只有：用户在登录界面登录那一下触发任务 | 第 8 节第 8 条 |
+| `scripts/test-daemon-standard-user.ps1`（以没有管理员权限的用户跑 daemon 的测试） | 不适用：Mac / Linux 的 CI 用户本来就不是 root | 跑，必须通过。建一个标准用户（中等完整性级别，不在 Administrators 里），以它的身份、用它自己的用户目录跑三个测试程序：`process_tree`（run、取消、暂停、ConPTY）、`integration`（整个 daemon：run 目录、命名管道、请求目录、只读目录、审批、真 CLI）、`service_task`（计划任务） | 一致（G45）。脚本先让这个用户经远程桌面登录到 runner 自己（`mstsc` 连 `127.0.0.2`，最多试三次），得到一个真的登录会话：任务带「登录时」触发器注册，由任务计划程序在这个会话里启动，其余断言照常（单实例、被杀后再起、替换协议更新、重启、更新中途断电后修复、卸载后不再起）；随后以这个用户跑安装命令的测试（`scripts/test-install-daemon.ps1`）。登录不成时脚本仍然跑完（自己按任务定义启动动作、跳过安装命令），然后**让这一步失败**并写明「没有登录会话，任务计划程序启动任务没有被证明」：这一步是绿的，就一定是真会话。没看到的只有：用户在登录界面登录那一下触发任务 | 第 8 节第 8 条 |
 | `apps/daemon/e2e/local-e2e.ts`（`wrangler dev`、真 daemon、假 CLI） | Linux 跑 | 跑，而且 daemon 是装出来的计划任务（`--service`） | 一致（G9） | — |
 | `tools/e2e`（客户端和服务器的场景；`runs_v11` 自己扮演一台机器，不用 daemon） | 对着已部署的环境手动跑，CI 只编译 | 同。默认的密钥目录在 `~` 下，Windows 上原来找不到用户目录（`HOME` 没设），现在用 `USERPROFILE` | 一致 | 这个工具不经过 daemon，和系统无关。经过 daemon 的端到端是上一行的 `local-e2e.ts`，它也能对着已部署的环境跑（`--base-url`） |
 | 整条链（安装、任务、run、取消、两种更新、注销登录、卸载） | 没有对应的自动测试（Mac 的 launchd 只测 plist 文本） | 跑（`Daemon chain (Windows…)`） | 一致（G31；Windows 测得更多） | — |
@@ -257,7 +272,7 @@ runner 能装真的 Claude Code 和 Codex（npm），不能登录。办法是把
 | 登录放在哪 | Claude Code：`<CLAUDE_CONFIG_DIR 或 %USERPROFILE%\.claude>\.credentials.json`，明文文件，和 Linux 一样。Codex：`<CODEX_HOME 或 %USERPROFILE%\.codex>\auth.json`。daemon 现有的判断就是这两个文件 | 读代码 |
 | 会话文件放在哪 | `<配置目录>\projects\<工作目录，非字母数字换成 ->\<会话 id>.jsonl`。工作目录按 CLI 自己看到的算：链接解析掉，短文件名（`RUNNER~1`）原样留着 | CI：第一次跑时文件不在 daemon 算的目录里（daemon 把短文件名展开了），改完后就在 |
 | Codex 的 Windows 沙箱 | Codex 自己的 Windows 沙箱默认不开（要在 Codex 配置里写 `[windows] sandbox`）。daemon 给 run 的是 `danger-full-access`，不论用户的 Codex 配置里开没开，这时都不加任何限制，`chat-run` 的请求目录照常用。手动把它打开会怎样：`unelevated` 那一档在 `workspace-write` 下拒绝启动任何命令（「cannot enforce split writable root sets directly; refusing to run unsandboxed」），一条命令也跑不起来；`elevated` 那一档在 runner 上（管理员身份，Codex 自己建了沙箱账户）时好时坏：有时能启动 `cmd.exe`，有时连它也启动不了（`CreateProcessWithLogonW failed: 1326`、`267`）；启动 run 目录里的 `chat-run.exe` 时被拒绝（`CreateProcessAsUserW failed: 5`；最可能是沙箱账户读不了只对用户自己开放的目录，没有再查）。两档都没能让 `chat-run` 在沙箱里跑起来，所以这里没有「沙箱里的 `chat-run` 能用」的证明；daemon 的 run 不用这个沙箱，不受影响。顺带看到：`elevated` 那一档会把它的沙箱账户的写权限加到用户的临时目录上，daemon 的程序和 run 目录不在那里 | 读代码；CI：真 Codex 的 `command/exec` 启动真 `chat-run`，请求到达 daemon，回答送回（用户配置开和不开沙箱各一遍）；手动开沙箱的两档，每次调用的回答原文在 CI 的日志里（`Daemon tests (Windows)` 的最后一步；`elevated` 单独放在最后跑，因为装它会改这台电脑） |
-| Codex 的旁聊（`read-only`） | Mac / Linux：命令写不了文件（工作目录里外都一样），Codex 的沙箱同时挡住联网。Windows：同样写不了文件、读得到文件，靠的是 daemon 给旁聊打开的 Codex 沙箱 `unelevated` 档（G52）；**不一致的一处**：这一档不挡联网，旁聊里的命令连得上网络。能挡联网的 `elevated` 档要管理员安装，在 runner 上装好后启动命令时好时坏（`CreateProcessWithLogonW failed: 1326`、`267`），所以没有用它。旁聊本来就读得到工作目录里的全部内容，多出来的风险是命令能把读到的东西发出去 | CI：`runtimes.rs::codex_read_only_sandbox_writes_nothing`（三个系统都跑）；联网那一条是 `codex_read_only_on_windows_report` 打在日志里的结果，没有断言 |
+| Codex 的旁聊（`read-only`） | **写文件：一致。联网：声明的差别。** Mac / Linux：命令写不了文件（工作目录里外都一样），Codex 的沙箱同时挡住联网。Windows：同样写不了文件、读得到文件，靠的是 daemon 给旁聊打开的 Codex 沙箱 `unelevated` 档（G52）。联网在这一档只是环境变量：`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`GIT_HTTP(S)_PROXY` 被指到 `127.0.0.1:9`，读这些设置的程序连不出去，`curl --noproxy *` 这样不理会它们的程序连得上本机地址，也连得上外网。为什么补不上，三条路都试过或查过：（一）Codex 的 `elevated` 档用防火墙规则挡住它自己的沙箱账户，要管理员安装一次，标准用户用不了；装好之后它的沙箱账户进不了 run 目录（run 目录只对 daemon 的用户开放，每条命令都以 `CreateProcessWithLogonW failed: 267` 失败），要用就得把旁聊的工作目录和它指向的仓库都开放给这两个账户，等于在放 token 和代码的私有目录上开口子；即使开了，它也只挡外网，本机地址照样连得上。（二）AppContainer：不带网络能力的 AppContainer 不需要管理员，但命令是 Codex 自己启动的，daemon 只能把整个 CLI 放进去，而 CLI 要连模型，断了网就不能用。（三）按进程的防火墙规则或 Windows Filtering Platform 过滤器都要提升权限。所以没有管理员权限就挡不住别的程序启动的进程联网。旁聊本来就读得到工作目录里的全部内容，多出来的风险是命令能把读到的东西发出去 | CI：`runtimes.rs::codex_read_only_sandbox_writes_nothing`（三个系统都跑）；`codex_side_chat_network_on_windows`（Windows，断言见 G52；`elevated` 档的三种情形在 `Daemon tests (Windows)` 最后一步的日志里）；`real_cli.rs` 断言 `doctor` 有那一行 |
 | 登录时的浏览器 | 见第 3 节 `login_env` 一行 | 读代码；CI |
 | Git for Windows | 不需要。没有它时 Claude Code 用 PowerShell 当命令工具（2.1 起） | 更新日志；读代码 |
 

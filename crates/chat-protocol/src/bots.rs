@@ -742,6 +742,150 @@ pub struct ContextSearchResponse {
     pub hits: Vec<ContextHit>,
 }
 
+/// `GET /v1/machine/runs/:id/artifacts?scope=topic|group`: the 产出 of the run's topic or group.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunArtifactsResponse {
+    pub artifacts: Vec<crate::files::Artifact>,
+}
+
+/// Characters of a 产出's entry text that `artifact get` carries.
+pub const MAX_RUN_ARTIFACT_TEXT: usize = 200_000;
+
+/// `GET /v1/machine/runs/:id/artifacts/:artifactId?version=`: one 产出 with its versions (newest
+/// first), the version read and its entry text when that is text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunArtifactResponse {
+    pub artifact: crate::files::Artifact,
+    pub versions: Vec<crate::files::ArtifactVersion>,
+    pub version: u32,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub text: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub truncated: Option<bool>,
+}
+
+/// One answer of a card as a run reads it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunCardAnswer {
+    pub actor_id: String,
+    pub actor_name: String,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub at: Option<Millis>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inputs: Option<serde_json::Value>,
+}
+
+/// The open ask of a card as a run reads it: who is waited on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunCardAsk {
+    pub status: String,
+    pub from: Vec<String>,
+}
+
+/// `GET /v1/machine/runs/:id/cards/:messageId`: a card of the run's group, whole.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunCardResponse {
+    pub topic_id: String,
+    pub message: ContextMessage,
+    pub card: serde_json::Value,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub ask: Option<RunCardAsk>,
+    pub answers: Vec<RunCardAnswer>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub answer_count: Option<u64>,
+}
+
+/// A group decision with the answerer's name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunDecision {
+    #[serde(flatten)]
+    pub decision: crate::card2::GroupDecision,
+    pub answered_by_name: String,
+}
+
+/// `GET /v1/machine/runs/:id/decisions?limit=`: the group's decisions, newest first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunDecisionsResponse {
+    pub decisions: Vec<RunDecision>,
+    pub has_more: bool,
+    /// Decisions recorded by hand (记一条), newest first.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub recorded: Option<Vec<RunRecordedDecision>>,
+}
+
+/// A decision recorded by hand with the recorder's name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunRecordedDecision {
+    #[serde(flatten)]
+    pub decision: crate::card2::RecordedDecision,
+    pub recorded_by_name: String,
+}
+
+/// One member of the run's group: name, 岗位 and whether it is an AI member.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunMember {
+    pub id: String,
+    pub name: String,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub role: Option<String>,
+    pub ai: bool,
+}
+
+/// `GET /v1/machine/runs/:id/members`
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunMembersResponse {
+    pub members: Vec<RunMember>,
+}
+
+/// `GET /v1/machine/runs/:id/topic/state?topic=`: one compact state card of a topic.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopicStateResponse {
+    pub topic_id: String,
+    pub title: String,
+    pub text: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunnerRepo {
