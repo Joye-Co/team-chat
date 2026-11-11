@@ -401,10 +401,31 @@ mod proto {
         );
         pump(Duration::from_millis(500), || false);
         check("pageClickIsPageInput", probe("page") == Some(true));
-        details.insert("probes".into(), json!(probes.borrow().clone()));
         let screen2 = capture_screen_png(0, 0, sw, sh);
         if let Some(png) = &screen2 {
             let _ = std::fs::write(out.join("window-after-clicks.png"), png);
+        }
+        // Typing counts as the viewer's input too: once the click is old, a letter key
+        // typed into the page (it has the focus since the click) opens the gate again.
+        pump(
+            artifact_view::gate::USER_ACTION_WINDOW + Duration::from_millis(500),
+            || false,
+        );
+        check("oldClickIsNoInput", probe("stale") == Some(false));
+        press_key(0x41);
+        pump(Duration::from_millis(300), || false);
+        check("typedKeyIsPageInput", probe("typed") == Some(true));
+        details.insert("probes".into(), json!(probes.borrow().clone()));
+        // The frame in the host's dark theme: title bar, picker strip, picker, page.
+        window.set_chrome(artifact_view::Chrome {
+            dark: true,
+            caption: [10, 10, 10],
+            text: [250, 250, 250],
+            border: [38, 38, 38],
+        });
+        pump(Duration::from_millis(1200), || false);
+        if let Some(png) = capture_screen_png(0, 0, sw, sh) {
+            let _ = std::fs::write(out.join("window-dark.png"), png);
         }
 
         let page_png: Rc<RefCell<Option<Result<Vec<u8>, String>>>> = Rc::new(RefCell::new(None));

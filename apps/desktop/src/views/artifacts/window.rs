@@ -265,6 +265,8 @@ fn open_window_with(
         options.viewer = super::host::viewer(p.as_ref());
         options.ref_menu = Some(super::host::ref_menu(cx));
     }
+    options.chrome = Some(chrome(cx));
+    watch_theme(cx);
     let (tx, mut rx) = futures::channel::mpsc::unbounded();
     let win = match ArtifactWindow::open(mtm, options, move |event| {
         let _ = tx.unbounded_send(event);
@@ -455,6 +457,42 @@ fn reload_window(provider: &Arc<dyn ChatProvider>, artifact_id: &str, version: u
 
 // --- end inc-host track ---
 
+/// The 产出 window's frame in the app's theme. The Mac's window takes the
+/// app's appearance by itself; on Windows the title bar is the system's, so
+/// it gets the colors of the app's own caption strip
+/// (`ui::native::window_chrome`).
+#[cfg(any(target_os = "macos", windows))]
+fn chrome(cx: &App) -> artifact_view::Chrome {
+    let k = crate::ui::native::native_colors(cx);
+    let rgb = |c: gpui::Hsla, under: gpui::Hsla| {
+        let (t, u) = (gpui::Rgba::from(c), gpui::Rgba::from(under));
+        let mix = |a: f32, b: f32| ((a * t.a + b * (1. - t.a)).clamp(0., 1.) * 255.).round() as u8;
+        [mix(t.r, u.r), mix(t.g, u.g), mix(t.b, u.b)]
+    };
+    artifact_view::Chrome {
+        dark: crate::theme::is_dark(cx),
+        caption: rgb(k.sidebar, k.content),
+        text: rgb(k.label, k.sidebar),
+        border: rgb(k.separator, k.sidebar),
+    }
+}
+
+/// Recolors the open 产出 windows when the theme changes (once per app).
+#[cfg(any(target_os = "macos", windows))]
+fn watch_theme(cx: &mut App) {
+    static WATCHING: AtomicBool = AtomicBool::new(false);
+    if WATCHING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    cx.observe_global::<gpui_component::Theme>(|cx| {
+        let chrome = chrome(cx);
+        for window in windows(cx).open.values() {
+            window.set_chrome(chrome);
+        }
+    })
+    .detach();
+}
+
 /// Asks before a 产出 page opens a web link (also for pages embedded in the
 /// main window).
 pub(crate) fn ask_before_link(url: String) {
@@ -507,21 +545,26 @@ pub(crate) fn ask_before_screen_share(name: &str, url: String) {
 struct Ask {
     title: String,
     detail: String,
-    // The Windows message box has the system's own 确定 / 取消 buttons.
-    #[cfg_attr(windows, allow(dead_code))]
     open: &'static str,
-    #[cfg_attr(windows, allow(dead_code))]
     cancel: &'static str,
 }
 
-/// Shows `ask` as a native message box on a later turn of the message loop (outside any
-/// GPUI update) and calls `open` with `url` only when the user agrees.
+/// Shows `ask` as a task dialog with the alert's own two buttons, the first the
+/// default as in the Mac's alert, on a later turn of the message loop (outside
+/// any GPUI update), and calls `open` with `url` only when the user agrees.
 #[cfg(windows)]
 fn ask_then_open(ask: Ask, url: String, open: fn(&str) -> bool) {
     if PROMPTING.swap(true, Ordering::SeqCst) {
         return;
     }
-    artifact_view::confirm_later(&ask.title, &ask.detail, move |agreed| {
+    let confirm = artifact_view::Confirm {
+        app: env!("PRODUCT_NAME").to_string(),
+        title: ask.title,
+        detail: ask.detail,
+        agree: ask.open.to_string(),
+        cancel: ask.cancel.to_string(),
+    };
+    artifact_view::confirm_later(confirm, move |agreed| {
         if agreed && !open(&url) {
             tracing::warn!("external link refused");
         }

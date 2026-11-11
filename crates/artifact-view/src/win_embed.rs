@@ -175,6 +175,7 @@ impl EmbeddedArtifact {
                 transparent: true,
                 fixed_scale: false,
                 report_focus: true,
+                host_keys: true,
             },
         );
         page.set_visible(false);

@@ -35,39 +35,47 @@ use serde_json::{Value, json};
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{
     AcceleratorKeyPressedEventHandler, AddScriptToExecuteOnDocumentCreatedCompletedHandler,
-    CallDevToolsProtocolMethodCompletedHandler, CoreWebView2CustomSchemeRegistration,
-    CoreWebView2EnvironmentOptions, CreateCoreWebView2ControllerCompletedHandler,
-    CreateCoreWebView2EnvironmentCompletedHandler, DownloadStartingEventHandler,
-    ExecuteScriptCompletedHandler, FocusChangedEventHandler,
+    CallDevToolsProtocolMethodCompletedHandler, ContextMenuRequestedEventHandler,
+    CoreWebView2CustomSchemeRegistration, CoreWebView2EnvironmentOptions,
+    CreateCoreWebView2ControllerCompletedHandler, CreateCoreWebView2EnvironmentCompletedHandler,
+    DownloadStartingEventHandler, ExecuteScriptCompletedHandler, FocusChangedEventHandler,
     LaunchingExternalUriSchemeEventHandler, MoveFocusRequestedEventHandler,
     NavigationCompletedEventHandler, NavigationStartingEventHandler,
     NewWindowRequestedEventHandler, PermissionRequestedEventHandler, ProcessFailedEventHandler,
     WebMessageReceivedEventHandler, WebResourceRequestedEventHandler, take_pwstr,
 };
 use windows::Win32::Foundation::{
-    E_POINTER, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM,
+    COLORREF, E_POINTER, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM,
 };
+use windows::Win32::Graphics::Dwm::{DWMWINDOWATTRIBUTE, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Gdi::{
-    COLOR_WINDOW, CreateFontIndirectW, GetMonitorInfoW, HBRUSH, HFONT, MONITOR_DEFAULTTONEAREST,
-    MONITORINFO, MonitorFromWindow,
+    COLOR_WINDOW, CreateFontIndirectW, CreateSolidBrush, DeleteObject, FillRect, GetMonitorInfoW,
+    HBRUSH, HDC, HFONT, InvalidateRect, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
 };
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, IStream};
-use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, LoadLibraryW};
+use windows::Win32::UI::Controls::{
+    SetWindowTheme, TASKDIALOG_BUTTON, TASKDIALOGCONFIG, TDF_ALLOW_DIALOG_CANCELLATION,
+    TDF_POSITION_RELATIVE_TO_WINDOW,
+};
 use windows::Win32::UI::HiDpi::{AdjustWindowRectExForDpi, GetDpiForSystem, GetDpiForWindow};
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetActiveWindow, SetFocus};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetActiveWindow, GetKeyState, SetFocus, VK_CONTROL, VK_MENU, VK_SHIFT,
+};
 use windows::Win32::UI::Input::{
-    GetRawInputData, HRAWINPUT, RAWINPUT, RAWINPUTDEVICE, RAWINPUTHEADER, RID_INPUT,
-    RIDEV_INPUTSINK, RIDEV_REMOVE, RIM_TYPEMOUSE, RegisterRawInputDevices,
+    GetRawInputData, HRAWINPUT, RAWINPUT, RAWINPUTDEVICE, RAWINPUTDEVICE_FLAGS, RAWINPUTHEADER,
+    RID_INPUT, RIDEV_INPUTSINK, RIDEV_REMOVE, RIM_TYPEKEYBOARD, RIM_TYPEMOUSE,
+    RegisterRawInputDevices,
 };
 use windows::Win32::UI::Shell::{SHCreateMemStream, ShellExecuteW};
 use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::core::{BOOL, HSTRING, Interface, PCWSTR, PWSTR, w};
+use windows::core::{BOOL, HRESULT, HSTRING, Interface, PCWSTR, PWSTR, s, w};
 
 use crate::page::{self, Nav, State};
 use crate::resolve::{self, SCHEME};
 use crate::win_support::decode_base64;
 use crate::{
-    ArtifactEvent, Capabilities, Error, OpenOptions, Presentation, Rect, Reject, Snapshot,
+    ArtifactEvent, Capabilities, Chrome, Error, OpenOptions, Presentation, Rect, Reject, Snapshot,
     VersionItem, VersionSpec, bridge, gate,
 };
 
@@ -103,7 +111,7 @@ thread_local! {
 
 unsafe extern "system" fn dispatch_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
     if msg == WM_INPUT {
-        route_wheel(l);
+        route_input(l);
         // SAFETY: the default handling frees the input of a foreground WM_INPUT.
         return unsafe { DefWindowProcW(hwnd, msg, w, l) };
     }
@@ -223,13 +231,59 @@ pub(crate) fn set_wheel_route(container: HWND, host: Option<HWND>) {
     }
 }
 
-/// Handles one WM_INPUT: a wheel step with the pointer over a routed container becomes a
-/// wheel message for its host.
-fn route_wheel(input: LPARAM) {
+// --- Keys typed into a page ---------------------------------------------------------------
+
+thread_local! {
+    /// The page that has the keyboard focus, while one has it.
+    static FOCUSED_PAGE: RefCell<std::rc::Weak<Page>> = const { RefCell::new(std::rc::Weak::new()) };
+}
+
+/// Remembers the page with the keyboard focus and, while there is one, asks for the
+/// system's raw keyboard input.
+///
+/// A key typed into a page goes to the web view's process, and WebView2 tells the host
+/// only about keys that are not text. The viewer's typing must count as their input all
+/// the same (see [`gate`]), and the page must not be able to claim it: raw input comes
+/// from the system, a page cannot produce it. Only that a key went down is read, never
+/// which one, and only while this app is in front (no `RIDEV_INPUTSINK`).
+fn set_focused_page(page: Option<&Rc<Page>>) {
+    let had = FOCUSED_PAGE.with(|f| f.borrow().upgrade().is_some());
+    FOCUSED_PAGE.with(|f| {
+        *f.borrow_mut() = page.map(Rc::downgrade).unwrap_or_default();
+    });
+    if had == page.is_some() {
+        return;
+    }
+    // Generic desktop page, keyboard.
+    let device = RAWINPUTDEVICE {
+        usUsagePage: 1,
+        usUsage: 6,
+        dwFlags: if page.is_some() {
+            RAWINPUTDEVICE_FLAGS(0)
+        } else {
+            RIDEV_REMOVE
+        },
+        hwndTarget: if page.is_some() {
+            dispatcher()
+        } else {
+            HWND::default()
+        },
+    };
+    // SAFETY: registers (or removes) this thread's message-only window for raw keyboard
+    // input.
+    unsafe {
+        let _ = RegisterRawInputDevices(&[device], std::mem::size_of::<RAWINPUTDEVICE>() as u32);
+    }
+}
+
+/// Handles one WM_INPUT: a key going down counts as input of the page with the focus; a
+/// wheel step with the pointer over a routed container becomes a wheel message for its
+/// host.
+fn route_input(input: LPARAM) {
     let mut raw = RAWINPUT::default();
     let mut size = std::mem::size_of::<RAWINPUT>() as u32;
     // SAFETY: reads one raw input record into a buffer of the size given; a record that
-    // does not fit (not a mouse) fails and is ignored.
+    // does not fit (neither mouse nor keyboard) fails and is ignored.
     let read = unsafe {
         GetRawInputData(
             HRAWINPUT(input.0 as *mut _),
@@ -239,7 +293,24 @@ fn route_wheel(input: LPARAM) {
             std::mem::size_of::<RAWINPUTHEADER>() as u32,
         )
     };
-    if read == u32::MAX || read == 0 || raw.header.dwType != RIM_TYPEMOUSE.0 {
+    if read == u32::MAX || read == 0 {
+        return;
+    }
+    if raw.header.dwType == RIM_TYPEKEYBOARD.0 {
+        // SAFETY: the record is a keyboard record (checked above).
+        let released = unsafe { raw.data.keyboard.Flags } as u32 & RI_KEY_BREAK != 0;
+        if !released && let Some(page) = FOCUSED_PAGE.with(|f| f.borrow().upgrade()) {
+            page.note_input();
+        }
+        return;
+    }
+    route_wheel(&raw);
+}
+
+/// A wheel step with the pointer over a routed container becomes a wheel message for its
+/// host.
+fn route_wheel(raw: &RAWINPUT) {
+    if raw.header.dwType != RIM_TYPEMOUSE.0 {
         return;
     }
     // SAFETY: the record is a mouse record (checked above).
@@ -469,7 +540,69 @@ pub(crate) struct PageConfig {
     pub(crate) fixed_scale: bool,
     /// Send `FocusChanged` events.
     pub(crate) report_focus: bool,
+    /// The page sits in a window of the host's: the host's own shortcuts
+    /// ([`set_host_keys`]) go to that window, not to the page.
+    pub(crate) host_keys: bool,
 }
+
+/// One of the host's shortcuts: a key with Ctrl or Alt, or a function key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HostKey {
+    pub ctrl: bool,
+    pub alt: bool,
+    pub shift: bool,
+    /// The virtual-key code (`VK_*`).
+    pub key: u32,
+}
+
+thread_local! {
+    static HOST_KEYS: RefCell<Vec<HostKey>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Names the shortcuts of the host app. An embedded page with the keyboard focus gets
+/// every key first, in another process; these keys are taken back and sent to the host's
+/// window, so the app's commands (the switcher, 新话题, 设置) work while a page has the
+/// focus, as they do on macOS, where such keys reach the menu bar.
+pub fn set_host_keys(keys: Vec<HostKey>) {
+    HOST_KEYS.with(|k| *k.borrow_mut() = keys);
+}
+
+/// The system's part of how a page looks, which WebKit gives a page on macOS by itself:
+/// thin scrollbars without arrow buttons, and the fonts behind the Apple family names
+/// that pages written for both systems use (`-apple-system`, `PingFang SC`, `Menlo`).
+/// Without the aliases Chromium falls through to its generic family, which on a Chinese
+/// system is SimSun for `monospace`. The scrollbar rules sit in a cascade layer, so any
+/// rule of the page wins.
+const PAGE_LOOK_CSS: &str = concat!(
+    "@layer tc-system{*{scrollbar-width:thin}",
+    "html{scrollbar-color:rgba(128,128,128,.5) transparent}}",
+    "@font-face{font-family:\"-apple-system\";src:local(\"Segoe UI\");font-weight:100 500}",
+    "@font-face{font-family:\"-apple-system\";src:local(\"Segoe UI Semibold\");font-weight:600}",
+    "@font-face{font-family:\"-apple-system\";src:local(\"Segoe UI Bold\");font-weight:700 900}",
+    "@font-face{font-family:\"BlinkMacSystemFont\";src:local(\"Segoe UI\");font-weight:100 500}",
+    "@font-face{font-family:\"BlinkMacSystemFont\";src:local(\"Segoe UI Semibold\");font-weight:600}",
+    "@font-face{font-family:\"BlinkMacSystemFont\";src:local(\"Segoe UI Bold\");font-weight:700 900}",
+    "@font-face{font-family:\"PingFang SC\";src:local(\"Microsoft YaHei UI\");font-weight:100 500}",
+    "@font-face{font-family:\"PingFang SC\";src:local(\"Microsoft YaHei UI Bold\");font-weight:600 900}",
+    "@font-face{font-family:\"Menlo\";src:local(\"Consolas\");font-weight:100 500}",
+    "@font-face{font-family:\"Menlo\";src:local(\"Consolas Bold\");font-weight:600 900}",
+    "@font-face{font-family:\"SF Mono\";src:local(\"Consolas\");font-weight:100 500}",
+    "@font-face{font-family:\"SF Mono\";src:local(\"Consolas Bold\");font-weight:600 900}",
+    "@font-face{font-family:\"Monaco\";src:local(\"Consolas\");font-weight:100 500}",
+    "@font-face{font-family:\"Monaco\";src:local(\"Consolas Bold\");font-weight:600 900}",
+    "@font-face{font-family:\"ui-monospace\";src:local(\"Consolas\");font-weight:100 500}",
+    "@font-face{font-family:\"ui-monospace\";src:local(\"Consolas Bold\");font-weight:600 900}",
+);
+
+/// Adds [`PAGE_LOOK_CSS`] to the document before the page's own code runs, as a
+/// constructed style sheet (there is no element to hold a `<style>` yet).
+const PAGE_LOOK_SCRIPT: &str = r#"(function(){
+  try {
+    var sheet = new CSSStyleSheet();
+    sheet.replaceSync('__CSS__');
+    document.adoptedStyleSheets = document.adoptedStyleSheets.concat([sheet]);
+  } catch (e) {}
+})();"#;
 
 /// The virtual-key code of Esc.
 const VK_ESCAPE_CODE: u32 = 0x1b;
@@ -542,6 +675,8 @@ pub(crate) struct Page {
     bounds: Cell<RECT>,
     visible: Cell<bool>,
     dark: Cell<Option<bool>>,
+    /// The color scheme the web view was last given.
+    scheme: Cell<Option<bool>>,
     focused: Cell<bool>,
     reloads: Cell<u32>,
     /// The host scrolls on the wheel, the page stays still.
@@ -586,6 +721,7 @@ impl Page {
             bounds: Cell::new(RECT::default()),
             visible: Cell::new(true),
             dark: Cell::new(None),
+            scheme: Cell::new(None),
             focused: Cell::new(false),
             reloads: Cell::new(0),
             pass_wheel: Cell::new(false),
@@ -708,7 +844,7 @@ impl Page {
             settings.SetIsWebMessageEnabled(true)?;
             settings.SetAreHostObjectsAllowed(false)?;
             settings.SetAreDefaultScriptDialogsEnabled(false)?;
-            settings.SetAreDefaultContextMenusEnabled(config.inspectable)?;
+            settings.SetAreDefaultContextMenusEnabled(true)?;
             settings.SetAreDevToolsEnabled(config.inspectable)?;
             settings.SetIsStatusBarEnabled(false)?;
             settings.SetIsZoomControlEnabled(false)?;
@@ -912,6 +1048,21 @@ impl Page {
                 .cast::<ICoreWebView2_18>()?
                 .add_LaunchingExternalUriScheme(&launches, &mut token)?;
 
+            // The right-click menu keeps what WebKit's menu gives a page on macOS that makes
+            // sense for an isolated page: copy, cut, paste, select all. Everything that
+            // leaves the page (back, reload, save, print, share, search) is taken out.
+            if !config.inspectable {
+                let menus = ContextMenuRequestedEventHandler::create(Box::new(|_, args| {
+                    if let Some(args) = args {
+                        trim_context_menu(&args)?;
+                    }
+                    Ok(())
+                }));
+                webview
+                    .cast::<ICoreWebView2_11>()?
+                    .add_ContextMenuRequested(&menus, &mut token)?;
+            }
+
             let weak = Rc::downgrade(self);
             let failed = ProcessFailedEventHandler::create(Box::new(move |_, args| {
                 if let (Some(page), Some(args)) = (weak.upgrade(), args) {
@@ -965,10 +1116,28 @@ impl Page {
                         || kind == COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN
                     {
                         page.note_input();
-                        // Esc: the page still gets the key, and the host gets the keyboard
-                        // back (an embedded page; the window has no host to give it to).
                         let mut key = 0u32;
                         args.VirtualKey(&mut key)?;
+                        if page.config.host_keys && is_host_key(key) {
+                            let mut lparam = 0i32;
+                            args.KeyEventLParam(&mut lparam)?;
+                            args.SetHandled(true)?;
+                            let message = if kind == COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN {
+                                WM_SYSKEYDOWN
+                            } else {
+                                WM_KEYDOWN
+                            };
+                            let host = GetAncestor(page.parent, GA_ROOT);
+                            let _ = PostMessageW(
+                                Some(host),
+                                message,
+                                WPARAM(key as usize),
+                                LPARAM(lparam as isize),
+                            );
+                            return Ok(());
+                        }
+                        // Esc: the page still gets the key, and the host gets the keyboard
+                        // back (an embedded page; the window has no host to give it to).
                         if key == VK_ESCAPE_CODE
                             && let Some(take) = page.focus_taker()
                         {
@@ -1102,7 +1271,13 @@ impl Page {
         }
     }
 
-    fn focus_changed(&self, focused: bool) {
+    fn focus_changed(self: &Rc<Self>, focused: bool) {
+        if focused {
+            set_focused_page(Some(self));
+        } else if FOCUSED_PAGE.with(|f| f.borrow().upgrade().is_some_and(|p| Rc::ptr_eq(&p, self)))
+        {
+            set_focused_page(None);
+        }
         if self.focused.replace(focused) != focused && self.config.report_focus {
             self.emit(ArtifactEvent::FocusChanged { focused });
         }
@@ -1149,6 +1324,8 @@ impl Page {
             script.push_str("\nif(window===window.top&&location.protocol==='");
             script.push_str(SCHEME);
             script.push_str(":'){\n");
+            script.push_str(&PAGE_LOOK_SCRIPT.replace("__CSS__", PAGE_LOOK_CSS));
+            script.push('\n');
             script.push_str(&bridge::page_script(&init));
             if st.bridge.caps().r#ref
                 && let Some(menu) = &st.ref_menu
@@ -1314,6 +1491,9 @@ impl Page {
             self.dark.set(Some(dark));
             return;
         };
+        if self.scheme.replace(Some(dark)) == Some(dark) {
+            return;
+        }
         // SAFETY: a COM call on this page's profile.
         unsafe {
             let _ = profile.SetPreferredColorScheme(if dark {
@@ -1322,6 +1502,17 @@ impl Page {
                 COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT
             });
         }
+        // The profile's setting reached a page late or not at all in the Windows
+        // screenshots (a dark app with a white page); the media feature of this one
+        // web view is set directly as well.
+        self.call_devtools(
+            w!("Emulation.setEmulatedMedia"),
+            &json!({ "features": [{
+                "name": "prefers-color-scheme",
+                "value": if dark { "dark" } else { "light" },
+            }] }),
+            None,
+        );
     }
 
     /// Keeps the page still on the wheel (true: the host scrolls) or lets it scroll.
@@ -1476,6 +1667,48 @@ impl Page {
 }
 
 /// The answer to every request that is not a file of the version shown.
+/// True when `key`, with the modifiers held now, is one of the host's shortcuts.
+fn is_host_key(key: u32) -> bool {
+    // SAFETY: reads the state of three keys as of the message being handled.
+    let down = |vk: u16| unsafe { GetKeyState(vk as i32) } < 0;
+    let pressed = HostKey {
+        ctrl: down(VK_CONTROL.0),
+        alt: down(VK_MENU.0),
+        shift: down(VK_SHIFT.0),
+        key,
+    };
+    HOST_KEYS.with(|keys| keys.borrow().contains(&pressed))
+}
+
+/// Leaves only the editing commands in a page's right-click menu, and no menu when none
+/// of them applies.
+fn trim_context_menu(args: &ICoreWebView2ContextMenuRequestedEventArgs) -> WinResult<()> {
+    const KEPT: [&str; 4] = ["copy", "cut", "paste", "selectAll"];
+    // SAFETY: COM calls on the menu WebView2 is about to show, on its own thread.
+    unsafe {
+        let items = args.MenuItems()?;
+        let mut count = 0u32;
+        items.Count(&mut count)?;
+        let mut kept = 0u32;
+        for index in (0..count).rev() {
+            let item = items.GetValueAtIndex(index)?;
+            let mut kind = COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND;
+            item.Kind(&mut kind)?;
+            let name = text_of!(item, Name).unwrap_or_default();
+            if kind == COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND && KEPT.contains(&name.as_str())
+            {
+                kept += 1;
+            } else {
+                items.RemoveValueAtIndex(index)?;
+            }
+        }
+        if kept == 0 {
+            args.SetHandled(true)?;
+        }
+    }
+    Ok(())
+}
+
 fn blocked_response(
     environment: &ICoreWebView2Environment,
 ) -> WinResult<ICoreWebView2WebResourceResponse> {
@@ -1526,6 +1759,10 @@ struct WindowData {
     page: RefCell<Option<Rc<Page>>>,
     picker: Cell<isize>,
     font: Cell<isize>,
+    /// The frame's colors, when the host gave them.
+    chrome: Cell<Option<Chrome>>,
+    /// The brush of the picker strip, in the chrome's color.
+    strip: Cell<isize>,
     /// One point is one pixel (a window that is never shown).
     fixed_scale: bool,
 }
@@ -1546,6 +1783,54 @@ impl WindowData {
     fn picker(&self) -> Option<HWND> {
         let picker = self.picker.get();
         (picker != 0).then(|| HWND(picker as *mut _))
+    }
+
+    /// Colors the frame Windows draws and the strip this window draws: the title bar in
+    /// the host's theme (dark or light, and on Windows 11 its fill, text and border), the
+    /// picker strip, the picker itself, and the page's `prefers-color-scheme`.
+    fn apply_chrome(&self, hwnd: HWND, chrome: Chrome) {
+        self.chrome.set(Some(chrome));
+        let rgb = |c: [u8; 3]| COLORREF(c[0] as u32 | (c[1] as u32) << 8 | (c[2] as u32) << 16);
+        // SAFETY: sets attributes of this window, swaps a brush this window owns and
+        // themes its own combo box. Windows 10 knows only the dark-mode attribute; the
+        // others fail there and the title bar keeps the system's color.
+        unsafe {
+            let set = |attribute: i32, value: *const core::ffi::c_void, size: usize| {
+                let _ =
+                    DwmSetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE(attribute), value, size as u32);
+            };
+            let dark = BOOL::from(chrome.dark);
+            set(
+                DWMWA_DARK_MODE,
+                (&dark as *const BOOL).cast(),
+                std::mem::size_of::<BOOL>(),
+            );
+            for (attribute, color) in [
+                (DWMWA_BORDER, chrome.border),
+                (DWMWA_CAPTION, chrome.caption),
+                (DWMWA_TEXT, chrome.text),
+            ] {
+                let color = rgb(color);
+                set(
+                    attribute,
+                    (&color as *const COLORREF).cast(),
+                    std::mem::size_of::<COLORREF>(),
+                );
+            }
+            let old = self
+                .strip
+                .replace(CreateSolidBrush(rgb(chrome.caption)).0 as isize);
+            if old != 0 {
+                let _ = DeleteObject(HBRUSH(old as *mut _).into());
+            }
+            if let Some(picker) = self.picker() {
+                theme_picker(picker, chrome.dark);
+            }
+            let _ = InvalidateRect(Some(hwnd), None, true);
+        }
+        if let Some(page) = self.page() {
+            page.set_dark(chrome.dark);
+        }
     }
 
     /// Places the picker strip and the page from the client area.
@@ -1582,6 +1867,28 @@ impl WindowData {
     }
 }
 
+/// `DWMWA_USE_IMMERSIVE_DARK_MODE`, `DWMWA_BORDER_COLOR`, `DWMWA_CAPTION_COLOR` and
+/// `DWMWA_TEXT_COLOR`.
+const DWMWA_DARK_MODE: i32 = 20;
+const DWMWA_BORDER: i32 = 34;
+const DWMWA_CAPTION: i32 = 35;
+const DWMWA_TEXT: i32 = 36;
+
+/// Draws the version picker in the dark or the light look of the system's own combo
+/// boxes.
+///
+/// SAFETY: `picker` is a live combo box of this thread.
+unsafe fn theme_picker(picker: HWND, dark: bool) {
+    // SAFETY: see above; the theme names are the ones Explorer's own dialogs use.
+    unsafe {
+        let _ = SetWindowTheme(
+            picker,
+            if dark { w!("DarkMode_CFD") } else { w!("CFD") },
+            PCWSTR::null(),
+        );
+    }
+}
+
 fn window_data<'a>(hwnd: HWND) -> Option<&'a WindowData> {
     // SAFETY: the pointer is the box `open` stored; it is cleared before it is freed.
     unsafe { (GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const WindowData).as_ref() }
@@ -1593,6 +1900,18 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM
         (WM_SIZE, Some(data)) => {
             data.layout(hwnd);
             LRESULT(0)
+        }
+        (WM_ERASEBKGND, Some(data)) if data.strip.get() != 0 => {
+            // The picker strip (the page covers the rest) in the title bar's color.
+            // SAFETY: fills this window's client area on the device context Windows gave.
+            unsafe {
+                FillRect(
+                    HDC(w.0 as *mut _),
+                    &client_rect(hwnd),
+                    HBRUSH(data.strip.get() as *mut _),
+                );
+            }
+            LRESULT(1)
         }
         (WM_MOVE | WM_MOVING, Some(data)) => {
             if let Some(page) = data.page() {
@@ -1671,9 +1990,11 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM
                     let data = Box::from_raw(data);
                     let font = data.font.get();
                     if font != 0 {
-                        let _ = windows::Win32::Graphics::Gdi::DeleteObject(
-                            HFONT(font as *mut _).into(),
-                        );
+                        let _ = DeleteObject(HFONT(font as *mut _).into());
+                    }
+                    let strip = data.strip.get();
+                    if strip != 0 {
+                        let _ = DeleteObject(HBRUSH(strip as *mut _).into());
                     }
                 }
                 DefWindowProcW(hwnd, msg, w, l)
@@ -1697,6 +2018,10 @@ fn register_window_class() -> PCWSTR {
                 hInstance: module(),
                 lpszClassName: class,
                 hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
+                // The app's own icon (resource 1 of the exe), so the title bar and the
+                // taskbar show it instead of the system's blank window icon; a program
+                // without one (a test) keeps the system's.
+                hIcon: LoadIconW(Some(module()), PCWSTR(1 as *const u16)).unwrap_or_default(),
                 hbrBackground: HBRUSH((COLOR_WINDOW.0 + 1) as usize as *mut _),
                 ..Default::default()
             };
@@ -1738,6 +2063,7 @@ impl ArtifactWindow {
             transparent,
             viewer,
             ref_menu,
+            chrome,
         } = options;
         let state = page::new_state(artifact_id, version, capabilities)?;
         {
@@ -1789,6 +2115,8 @@ impl ArtifactWindow {
                 page: RefCell::new(None),
                 picker: Cell::new(0),
                 font: Cell::new(0),
+                chrome: Cell::new(None),
+                strip: Cell::new(0),
                 fixed_scale,
             });
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(data) as isize);
@@ -1804,10 +2132,14 @@ impl ArtifactWindow {
                 transparent,
                 fixed_scale,
                 report_focus: false,
+                host_keys: false,
             },
         );
         if let Some(data) = window_data(hwnd) {
             *data.page.borrow_mut() = Some(page.clone());
+            if let Some(chrome) = chrome {
+                data.apply_chrome(hwnd, chrome);
+            }
             data.layout(hwnd);
         }
         let this = Self {
@@ -1965,6 +2297,9 @@ impl ArtifactWindow {
                     );
                 }
                 data.picker.set(picker.0 as isize);
+                if let Some(chrome) = data.chrome.get() {
+                    theme_picker(picker, chrome.dark);
+                }
             }
             if let Some(picker) = data.picker() {
                 SendMessageW(picker, CB_RESETCONTENT, None, None);
@@ -1998,6 +2333,16 @@ impl ArtifactWindow {
         }
         self.select_in_picker(self.version());
         data.layout(self.hwnd);
+    }
+
+    /// Gives the window's frame the host's theme (see [`Chrome`]): on open through
+    /// [`OpenOptions::chrome`], and again whenever the theme changes.
+    pub fn set_chrome(&self, chrome: Chrome) {
+        if let Some(data) = self.data()
+            && data.chrome.get() != Some(chrome)
+        {
+            data.apply_chrome(self.hwnd, chrome);
+        }
     }
 
     pub fn set_title(&self, title: &str) {
@@ -2171,21 +2516,104 @@ pub fn open_external_url(url: &str) -> bool {
         && shell_open(url)
 }
 
-/// Asks the user to confirm with a system message box (确定 / 取消), on a later turn of the
-/// message loop so it never runs inside the caller's own work. `done` gets true only for
-/// 确定.
-pub fn confirm_later(title: &str, detail: &str, done: impl FnOnce(bool) + 'static) {
-    let (title, detail) = (HSTRING::from(title), HSTRING::from(detail));
+/// What [`confirm_later`] shows.
+#[derive(Clone, Debug)]
+pub struct Confirm {
+    /// The dialog's title bar: the app's name.
+    pub app: String,
+    /// The question, in the dialog's large text.
+    pub title: String,
+    pub detail: String,
+    /// The button that agrees (the default, as in the Mac's alert) and the one that
+    /// cancels.
+    pub agree: String,
+    pub cancel: String,
+}
+
+/// Asks the user to confirm, on a later turn of the message loop so it never runs inside
+/// the caller's own work. `done` gets true only for the agreeing button.
+///
+/// The dialog is a task dialog with the app's own two buttons. Task dialogs need version
+/// 6 of the common controls (the app's manifest asks for it); a program without it (a
+/// test) gets a plain message box with the system's 确定 and 取消.
+pub fn confirm_later(ask: Confirm, done: impl FnOnce(bool) + 'static) {
     post(move || {
-        // SAFETY: a modal message box owned by this thread's active window.
-        let answer = unsafe {
-            MessageBoxW(
-                Some(GetActiveWindow()),
-                &detail,
-                &title,
-                MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2,
-            )
-        };
-        done(answer == IDOK);
+        // SAFETY: a modal dialog owned by this thread's active window.
+        let owner = unsafe { GetActiveWindow() };
+        let agreed = task_dialog(owner, &ask).unwrap_or_else(|| {
+            // SAFETY: as above.
+            let answer = unsafe {
+                MessageBoxW(
+                    Some(owner),
+                    &HSTRING::from(ask.detail.as_str()),
+                    &HSTRING::from(ask.title.as_str()),
+                    MB_OKCANCEL | MB_ICONWARNING,
+                )
+            };
+            answer == IDOK
+        });
+        done(agreed);
     });
+}
+
+/// Shows `ask` as a task dialog. `None` when this process has no task dialogs.
+fn task_dialog(owner: HWND, ask: &Confirm) -> Option<bool> {
+    type TaskDialogIndirect = unsafe extern "system" fn(
+        *const TASKDIALOGCONFIG,
+        *mut i32,
+        *mut i32,
+        *mut BOOL,
+    ) -> HRESULT;
+    const AGREE: i32 = 100;
+    let (app, title, detail) = (
+        HSTRING::from(ask.app.as_str()),
+        HSTRING::from(ask.title.as_str()),
+        HSTRING::from(ask.detail.as_str()),
+    );
+    let (agree, cancel) = (
+        HSTRING::from(ask.agree.as_str()),
+        HSTRING::from(ask.cancel.as_str()),
+    );
+    let buttons = [
+        TASKDIALOG_BUTTON {
+            nButtonID: AGREE,
+            pszButtonText: PCWSTR(agree.as_ptr()),
+        },
+        TASKDIALOG_BUTTON {
+            nButtonID: IDCANCEL.0,
+            pszButtonText: PCWSTR(cancel.as_ptr()),
+        },
+    ];
+    let mut config = TASKDIALOGCONFIG {
+        cbSize: std::mem::size_of::<TASKDIALOGCONFIG>() as u32,
+        hwndParent: owner,
+        dwFlags: TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW,
+        pszWindowTitle: PCWSTR(app.as_ptr()),
+        pszMainInstruction: PCWSTR(title.as_ptr()),
+        pszContent: PCWSTR(detail.as_ptr()),
+        cButtons: buttons.len() as u32,
+        pButtons: buttons.as_ptr(),
+        nDefaultButton: AGREE,
+        ..Default::default()
+    };
+    // The warning sign (`TD_WARNING_ICON`, a resource id, not a string).
+    config.Anonymous1.pszMainIcon = PCWSTR(0xFFFF as *const u16);
+    // SAFETY: looks the function up in the common controls this process loaded (version
+    // 5 has no such export) and calls it with a config whose strings and buttons outlive
+    // the call.
+    unsafe {
+        let library = LoadLibraryW(w!("comctl32.dll")).ok()?;
+        let show = GetProcAddress(library, s!("TaskDialogIndirect"))?;
+        let show: TaskDialogIndirect = std::mem::transmute(show);
+        let mut pressed = 0i32;
+        show(
+            &config,
+            &mut pressed,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+        .ok()
+        .ok()?;
+        Some(pressed == AGREE)
+    }
 }
