@@ -53,6 +53,7 @@ targets:
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSSupportsLiveActivities: true
+        NSFaceIDUsageDescription: 批准不能撤回的事情前，确认是你本人。
         AppGroup: $(APP_GROUP)
         AppBundleId: $(APP_BUNDLE_ID)
         # The operator's server (from the ops checkout at build time); empty asks at sign-in.
