@@ -54,7 +54,7 @@ pub use store::{
 };
 #[cfg(target_os = "windows")]
 pub use token::CredentialTokenStore;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub use token::KeychainTokenStore;
 pub use token::{FileTokenStore, TokenStore, TokenStoreError, credential_target};
 

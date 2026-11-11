@@ -11,3 +11,7 @@ build/
 .env.*
 .tmp/
 wrangler.deploy.jsonc
+
+# The iPhone client: XcodeGen writes these (apps/ios/build-sim.sh)
+apps/ios/*.xcodeproj
+apps/ios/Generated/

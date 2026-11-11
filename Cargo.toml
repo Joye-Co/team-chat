@@ -4,6 +4,7 @@ members = [
     "crates/chat-protocol",
     "crates/chat-core",
     "crates/artifact-view",
+    "crates/chat-ffi",
     "apps/desktop",
     "apps/daemon",
     "apps/update-helper",

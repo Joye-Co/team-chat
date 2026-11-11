@@ -1,0 +1,111 @@
+# The iPhone client's Xcode project, generated with XcodeGen (the .xcodeproj is not in the repo).
+# apps/ios/build-sim.sh builds the Rust core, writes .tmp/ios/Product.xcconfig (product name,
+# bundle id and version from product.json and Cargo.toml, paths of the built core) and runs
+# `xcodegen` on this file.
+name: Mobile
+options:
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+configFiles:
+  Debug: ../../.tmp/ios/Product.xcconfig
+  Release: ../../.tmp/ios/Product.xcconfig
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: $(APP_VERSION)
+    CURRENT_PROJECT_VERSION: 1
+    TARGETED_DEVICE_FAMILY: 1
+    CODE_SIGN_STYLE: Automatic
+    # The app and its extensions share the Keychain item, the defaults and the cache through
+    # this group.
+    APP_GROUP: group.$(APP_BUNDLE_ID)
+
+targets:
+  Mobile:
+    type: application
+    platform: iOS
+    scheme: {}
+    sources:
+      - Sources
+      - Shared
+      - path: ../../.tmp/ios/gen/chat_ffi.swift
+        group: Generated
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID)
+        # The generated bindings import the C module of the Rust core.
+        OTHER_SWIFT_FLAGS: $(inherited) -Xcc -fmodule-map-file=$(CORE_GEN_DIR)/chat_ffiFFI.modulemap
+        SWIFT_INCLUDE_PATHS: $(CORE_GEN_DIR)
+        LIBRARY_SEARCH_PATHS: $(CORE_LIB_DIR)
+        OTHER_LDFLAGS: $(inherited) -lchat_ffi
+    dependencies:
+      - sdk: SystemConfiguration.framework
+      - sdk: Security.framework
+      - target: Notify
+      - target: Live
+    info:
+      path: Generated/Mobile-Info.plist
+      properties:
+        CFBundleDisplayName: $(PRODUCT_DISPLAY_NAME)
+        CFBundleDevelopmentRegion: zh-Hans
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSSupportsLiveActivities: true
+        AppGroup: $(APP_GROUP)
+        AppBundleId: $(APP_BUNDLE_ID)
+    entitlements:
+      path: Generated/Mobile.entitlements
+      properties:
+        com.apple.security.application-groups: [$(APP_GROUP)]
+
+  # Notification service extension: a shell for now. Later it fills a push with the message it
+  # announces before the system shows it.
+  Notify:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Extensions/Notify
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID).notify
+    info:
+      path: Generated/Notify-Info.plist
+      properties:
+        CFBundleDisplayName: $(PRODUCT_DISPLAY_NAME)
+        AppGroup: $(APP_GROUP)
+        AppBundleId: $(APP_BUNDLE_ID)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
+    entitlements:
+      path: Generated/Notify.entitlements
+      properties:
+        com.apple.security.application-groups: [$(APP_GROUP)]
+
+  # Live Activity extension: a shell for now. Later it shows a run's progress on the lock screen.
+  Live:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Extensions/Live
+      - Shared
+    dependencies:
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID).live
+    info:
+      path: Generated/Live-Info.plist
+      properties:
+        CFBundleDisplayName: $(PRODUCT_DISPLAY_NAME)
+        AppGroup: $(APP_GROUP)
+        AppBundleId: $(APP_BUNDLE_ID)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: Generated/Live.entitlements
+      properties:
+        com.apple.security.application-groups: [$(APP_GROUP)]
