@@ -14,18 +14,16 @@ use gpui::{
 use gpui_component::{
     Disableable as _,
     menu::{ContextMenuExt as _, PopupMenuItem},
-    tooltip::Tooltip,
 };
 
 use super::{
-    AUTO_DOWNLOAD_MAX_BYTES, FILE_ROW_H, FILE_ROW_W, OpenAction, error_text,
+    FILE_ROW_H, FILE_ROW_W, OpenAction, error_text,
     export::{self, FileItem as _, FileRef},
-    open_file, preview_size, size_text,
+    open_file, size_text,
 };
 use crate::{
     copy::{files as f, fill},
     data::{ChatProvider, FileAttachment, Message, TransferState, download_key, upload_key},
-    provider::files::THUMB_SOURCE_MAX_BYTES,
     theme::{self, Type as _, space},
     ui::{
         self, Sym,
@@ -57,18 +55,15 @@ impl MessageExtra for AttachmentsExtra {
         } else {
             message.id.as_str()
         };
-        let n_shown_images = message
+        let images: Vec<(usize, FileAttachment)> = message
             .attachments
             .iter()
-            .filter(|f| f.is_uploaded() && f.is_image() && f.size <= THUMB_SOURCE_MAX_BYTES)
-            .count();
-        let mut images = div()
-            .max_w(FILE_ROW_W)
-            .flex()
-            .flex_wrap()
-            .gap(super::PREVIEW_GAP);
+            .enumerate()
+            .filter(|(_, f)| super::gallery::shows_inline(f))
+            .map(|(i, f)| (i, f.clone()))
+            .collect();
         let mut files = div().flex().flex_col().gap(space::S8);
-        let (mut n_images, mut n_files) = (0, 0);
+        let mut n_files = 0;
         for (index, file) in message.attachments.iter().enumerate() {
             let id = |part: &str| -> ElementId {
                 ElementId::Name(SharedString::from(format!("att-{row_key}-{index}-{part}")))
@@ -105,16 +100,8 @@ impl MessageExtra for AttachmentsExtra {
                     }
                 }
                 n_files += 1;
-            } else if file.is_image() && file.size <= THUMB_SOURCE_MAX_BYTES {
-                images = images.child(image_preview(
-                    message,
-                    file,
-                    n_shown_images,
-                    ctx.provider,
-                    id,
-                    cx,
-                ));
-                n_images += 1;
+            } else if super::gallery::shows_inline(file) {
+                // Drawn by the gallery below.
             } else {
                 files = files.child(file_row(message, file, ctx.provider, id, cx));
                 n_files += 1;
@@ -126,111 +113,17 @@ impl MessageExtra for AttachmentsExtra {
                 .flex()
                 .flex_col()
                 .gap(space::S8)
-                .when(n_images > 0, |el| el.child(images))
+                .children(super::gallery::render(
+                    message,
+                    &images,
+                    ctx.provider,
+                    row_key,
+                    cx,
+                ))
                 .when(n_files > 0, |el| el.child(files))
                 .into_any_element(),
         )
     }
-}
-
-fn image_preview(
-    message: &Message,
-    file: &FileAttachment,
-    images: usize,
-    provider: &Arc<dyn ChatProvider>,
-    id: impl Fn(&str) -> ElementId,
-    cx: &mut App,
-) -> AnyElement {
-    let k = theme::colors(cx);
-    let (w, h) = preview_size(file.width, file.height, images);
-    let (g, t) = (message.group_id.clone(), message.topic_id.clone());
-    let thumb = provider.thumbnail(&g, &t, file);
-    let state = provider.file_transfer(&download_key(file));
-    if thumb.is_none()
-        && state.is_none()
-        && file.size <= AUTO_DOWNLOAD_MAX_BYTES
-        && provider.cached_file(file).is_none()
-    {
-        // Fetch it once for the preview; the provider shares the transfer.
-        drop(provider.fetch_file(&g, &t, file));
-    }
-    // While it loads: a `field` skeleton of the final size with the image
-    // glyph and the name (§7.11, U30).
-    let skeleton = |line: AnyElement| {
-        div()
-            .flex()
-            .flex_col()
-            .items_center()
-            .gap(space::S6)
-            .px(space::S12)
-            .max_w_full()
-            .child(ui::icon(Sym::Image, theme::icon::EMPTY, k.text_3))
-            .child(line)
-            .into_any_element()
-    };
-    let name_line = crate::ui::truncate::file_name(file.name.clone())
-        .id(SharedString::from(format!("{}-name", id("image"))))
-        .max_w_full()
-        .t_meta()
-        .text_color(k.text_3)
-        .into_any_element();
-    let inner = match (&thumb, state) {
-        // GPUI's `overflow_hidden` clips to the box, not to its corner
-        // radius: round the picture itself, inside the 1 pt border.
-        (Some(path), _) => img(path.clone())
-            .size_full()
-            .object_fit(ObjectFit::Cover)
-            .rounded(theme::radius::MD)
-            .into_any_element(),
-        (None, Some(TransferState::Failed(e))) => skeleton(
-            div()
-                .t_meta()
-                .text_color(native_colors(cx).red)
-                .child(fill(f::DOWNLOAD_FAILED, &[("reason", error_text(e))]))
-                .into_any_element(),
-        ),
-        _ => skeleton(name_line),
-    };
-    let progress = match (&thumb, state) {
-        (None, Some(s @ TransferState::Running { .. })) => Some(s.percent()),
-        _ => None,
-    };
-    let target = FileRef::attachment(provider, &g, &t, file);
-    let menu_target = target.clone();
-    let (provider3, file3, g3, t3) = (provider.clone(), file.clone(), g.clone(), t.clone());
-    let provider = provider.clone();
-    let file2 = file.clone();
-    div()
-        .id(id("image"))
-        .relative()
-        .w(w)
-        .h(h)
-        .flex_none()
-        .rounded(theme::radius::MD)
-        .overflow_hidden()
-        .bg(native_colors(cx).fill)
-        .flex()
-        .items_center()
-        .justify_center()
-        .child(inner)
-        .when_some(progress, |el, p| el.child(track(p, cx)))
-        .tooltip(move |window, cx| Tooltip::new(f::OPEN_IMAGE).build(window, cx))
-        .on_click(move |_, _, cx| open_file(&provider, &g, &t, &file2, OpenAction::Open, cx))
-        .file_item(target, Sym::Image)
-        .context_menu(move |menu, window, _| {
-            let at = window.mouse_position();
-            let item = |label: &'static str, what: OpenAction| {
-                let (provider, file) = (provider3.clone(), file3.clone());
-                let (g, t) = (g3.clone(), t3.clone());
-                PopupMenuItem::new(label)
-                    .on_click(move |_, _, cx| open_file(&provider, &g, &t, &file, what, cx))
-            };
-            let menu = menu
-                .item(item(f::OPEN, OpenAction::Open))
-                .item(item(f::REVEAL, OpenAction::RevealInFinder));
-            export::menu_items(menu, &menu_target, at)
-        })
-        .into_any_element()
 }
 
 /// The type glyph of a file tile.

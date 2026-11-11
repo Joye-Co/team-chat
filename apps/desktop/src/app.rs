@@ -857,6 +857,11 @@ pub struct RootView {
     /// The account the window shows (server, member id): another account
     /// signed in opens a fresh window for it.
     account: Option<(String, String)>,
+    /// The image viewer over the whole window, while it is open.
+    lightbox: Option<(
+        Entity<crate::views::files::lightbox::Lightbox>,
+        Subscription,
+    )>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -969,6 +974,7 @@ impl RootView {
             last_pane: RightPane::None,
             focus,
             account: shown_account(&services_for_account),
+            lightbox: None,
             _subscriptions: subscriptions,
         }
     }
@@ -1223,6 +1229,7 @@ impl RootView {
         let root = div()
             .id("root")
             .track_focus(&self.focus)
+            .relative()
             .size_full()
             .bg(k.bg)
             .text_color(k.ink);
@@ -1505,6 +1512,32 @@ impl RootView {
             .child(page_el)
             .children(pane_el)
             .child(toggle)
+            .children(self.lightbox.as_ref().map(|(v, _)| v.clone()))
+    }
+}
+
+impl RootView {
+    /// The provider this window shows.
+    pub fn provider(&self) -> Arc<dyn ChatProvider> {
+        self.services.provider.clone()
+    }
+
+    /// Opens the image viewer over the window at `opening` (files::lightbox).
+    pub fn open_lightbox(
+        &mut self,
+        opening: crate::views::files::lightbox::Opening,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::views::files::lightbox::{Dismiss, Lightbox};
+        let services = self.services.clone();
+        let viewer = cx.new(|cx| Lightbox::new(&services, opening, window, cx));
+        let sub = cx.subscribe(&viewer, |this, _, _: &Dismiss, cx| {
+            this.lightbox = None;
+            cx.notify();
+        });
+        self.lightbox = Some((viewer, sub));
+        cx.notify();
     }
 }
 

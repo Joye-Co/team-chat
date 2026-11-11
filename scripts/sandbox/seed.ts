@@ -22,6 +22,7 @@ import {
   type Target,
 } from "../../packages/bot-sdk/src/index.ts";
 import { mainTopicId } from "../../packages/protocol/src/topic.ts";
+import { picture } from "./pictures.ts";
 
 type Json = Record<string, unknown>;
 
@@ -426,6 +427,42 @@ export async function seed(o: SeedOptions): Promise<Json> {
       await pocket.updateTopic(weekly.groupId, weekly.topicId, { status: "done" });
     }
 
+    // 夹夹增长 / 3.0 宣传图: pictures in every layout (one, three, four, eleven).
+    const art = await topic("chenchen", growth, "3.0 宣传图", "海报出了三版，大家看看哪版好", []);
+    {
+      const pics = async (who: Key, specs: [number, number, number, boolean?][], prefix: string) => {
+        const bot = await as(who);
+        const refs = [];
+        for (const [i, [w, h, p, phone]] of specs.entries()) {
+          refs.push(
+            await bot.uploadFile({ ...art, name: `${prefix}-${i + 1}.png`, mime: "image/png", data: picture(w, h, p, phone), width: w, height: h }),
+          );
+        }
+        return refs;
+      };
+      await (await as("chenchen")).send(art, {
+        body: "A 竖版、B 方图、C 横版",
+        attachments: await pics("chenchen", [[900, 1200, 0], [1000, 1000, 1], [1200, 800, 2]], "海报"),
+      });
+      await say("joye", art, "A 版好看，主色再亮一点");
+      await (await as("chenchen")).send(art, {
+        body: "改好了，顺便出了首页横幅",
+        attachments: await pics("chenchen", [[1600, 900, 3]], "首页横幅"),
+      });
+      await (await as("taro")).send(art, {
+        body: "微博配图四宫格",
+        attachments: await pics("taro", [[800, 800, 4], [800, 800, 5], [800, 800, 6], [800, 800, 7]], "微博配图"),
+      });
+      await (await as("chenchen")).send(art, {
+        body: "App Store 截图 11 张，按顺序",
+        attachments: await pics(
+          "chenchen",
+          Array.from({ length: 11 }, (_, i) => [390, 844, i, true] as [number, number, number, boolean]),
+          "截图",
+        ),
+      });
+    }
+
     // Decisions recorded by hand.
     await call(url, "POST", `/v1/groups/${dev}/decisions`, { token: owner, body: { text: "登录只用邀请码，不做手机号" } });
     await call(url, "POST", `/v1/groups/${growth}/decisions`, { token: owner, body: { text: "日活按去重设备算", topicId: report.topicId } });
@@ -435,7 +472,7 @@ export async function seed(o: SeedOptions): Promise<Json> {
     await topic("jojo", jojoDm.id, "今天的待办", "早上好！今天有 3 件事等你：PR #61、v2.14 上线和一条微博文案。");
     const xwDm = (await (await as("xiaowang")).http.dm(ids.joye)).group;
     await topic("xiaowang", xwDm.id, "搜索高亮", "Joye，高亮那块我下午看。");
-    log("topics: 14");
+    log("topics: 15");
 
     const machineId = await seedMachine(o, owner, ids, { dev, growth });
     const out = { url, members: ids, groups: { all, dev, ops, growth }, machineId, seededAt: Date.now() };

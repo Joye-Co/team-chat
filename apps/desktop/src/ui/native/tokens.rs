@@ -1203,6 +1203,68 @@ pub mod card_v21 {
     pub const REMOVE_OUT: Duration = Duration::from_millis(240);
 }
 
+/// The images of a message (files::gallery): one picture keeps its ratio, more sit in a
+/// mosaic with hairline gaps and one rounded outline, like Photos and Messages.
+pub mod gallery {
+    use gpui::{Pixels, px};
+    /// The width of a mosaic, and the widest a single picture gets.
+    pub const WIDTH: Pixels = px(480.);
+    /// The tallest a single picture gets.
+    pub const SINGLE_MAX_H: Pixels = px(360.);
+    /// The shortest side a single picture keeps (a thin strip still reads as a picture).
+    pub const SINGLE_MIN: Pixels = px(96.);
+    /// The hairline between tiles.
+    pub const GAP: Pixels = px(3.);
+    /// Height over width of a tile in a row of two.
+    pub const PAIR_RATIO: f32 = 0.75;
+    /// Tiles drawn at most; the last one says how many more.
+    pub const MAX_TILES: usize = 9;
+    /// The `+N` cover on the last tile: black at this opacity.
+    pub const MORE_SCRIM: f32 = 0.5;
+    /// The tile under the pointer darkens by this much (black).
+    pub const HOVER_DIM: f32 = 0.08;
+    /// The little GIF mark: black at this opacity under white text.
+    pub const BADGE_SCRIM: f32 = 0.55;
+    pub const BADGE_H: Pixels = px(18.);
+    /// The composer's thumbnails of images not sent yet.
+    pub const DRAFT_THUMB: Pixels = px(64.);
+}
+
+/// The image viewer (files::lightbox): every picture of a 话题 on a dark screen over the
+/// whole window, a top bar, a filmstrip, zoom and pan.
+pub mod lightbox {
+    use gpui::{Pixels, px};
+    use std::time::Duration;
+    /// The dark screen over the window: opaque, so the picture has no busy surround (any
+    /// translucency lets the window's text read through).
+    pub const BACKDROP: f32 = 1.0;
+    /// The top bar and the filmstrip float on black at this opacity.
+    pub const BAR_SCRIM: f32 = 0.35;
+    pub const BAR_H: Pixels = px(52.);
+    /// Room kept around the fitted picture.
+    pub const PAD: Pixels = px(24.);
+    /// The round previous / next buttons at the sides.
+    pub const NAV: Pixels = px(40.);
+    pub const NAV_INSET: Pixels = px(16.);
+    /// Filmstrip thumbnails.
+    pub const THUMB: Pixels = px(44.);
+    pub const THUMB_GAP: Pixels = px(6.);
+    pub const THUMB_RADIUS: Pixels = px(6.);
+    pub const STRIP_H: Pixels = px(68.);
+    /// Unselected thumbnails dim to this opacity.
+    pub const THUMB_DIM: f32 = 0.55;
+    /// Zoom range (1.0 = one image pixel per point) and the step of a key or button.
+    pub const ZOOM_MIN: f32 = 0.05;
+    pub const ZOOM_MAX: f32 = 8.0;
+    pub const ZOOM_STEP: f32 = 1.25;
+    /// ⌘ + wheel: zoom changes by this much per point scrolled.
+    pub const WHEEL_ZOOM: f32 = 0.01;
+    /// Arrow keys pan a zoomed picture this far.
+    pub const PAN_STEP: f32 = 80.;
+    /// The screen fades in.
+    pub const OPEN: Duration = Duration::from_millis(160);
+}
+
 /// The desk terminal thumbnail (a miniature, not reading text);
 /// `theme::desk_screen`.
 pub mod desk_screen {

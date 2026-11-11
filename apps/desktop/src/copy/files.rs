@@ -47,4 +47,26 @@ crate::copy! {
     SAVE_AS = "存储为…",
     SAVE_FAILED = "无法存储「{name}」：{reason}",
     // --- end mac-files ---
+    // --- the image viewer (files::lightbox) ---
+    VIEWER_POSITION = "{i} / {n}",
+    VIEWER_DIMS = "{w} × {h}",
+    VIEWER_PREV = "上一张",
+    VIEWER_NEXT = "下一张",
+    VIEWER_ZOOM_IN = "放大",
+    VIEWER_ZOOM_OUT = "缩小",
+    VIEWER_ZOOM = "{n}%",
+    VIEWER_COPY = crate::copy::per_system("拷贝图片", "复制图片"),
+    VIEWER_SAVE = "存到「下载」",
+    VIEWER_OPEN = crate::copy::per_system("用「预览」打开", "用默认应用打开"),
+    VIEWER_SHARE = "共享",
+    VIEWER_CLOSE = "关闭",
+    VIEWER_LOADING = "正在载入原图 {p}%",
+    VIEWER_LOADING_START = "正在载入原图",
+    VIEWER_FAILED = "原图没能载入：{reason}",
+    VIEWER_HINT = crate::copy::per_system(
+        "← → 切换 · 双击放大 · ⌘ 加滚轮缩放 · Esc 关闭",
+        "← → 切换 · 双击放大 · Ctrl 加滚轮缩放 · Esc 关闭"
+    ),
+    // --- the composer's image thumbnails ---
+    DRAFT_IMAGE_REMOVE = "移除这张图片",
 }
