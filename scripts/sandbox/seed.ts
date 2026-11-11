@@ -39,6 +39,8 @@ export interface SeedOptions {
 
 /** The sample owner's sign-in email. */
 export const OWNER_EMAIL = "owner@example.com";
+/** The sample owner's password (sandbox only), for 邮箱和密码 sign-in. */
+export const OWNER_PASSWORD = "sandbox-password";
 
 /** AI members that run on the sample machine, and their runtime. */
 const RUNNERS = [
@@ -164,6 +166,7 @@ export async function seed(o: SeedOptions): Promise<Json> {
     admin: o.adminSecret,
   });
   await call(url, "POST", "/v1/me/email", { token: owner, body: { email: OWNER_EMAIL, code: sent.codes[0].code } });
+  await call(url, "PUT", "/v1/me/password", { token: owner, body: { password: OWNER_PASSWORD } });
   await call(url, "PATCH", `/v1/members/${boot.member.id}`, { token: owner, body: { role: "负责人" } });
   const ids = { joye: boot.member.id } as Record<Key, string>;
   const tokens = { joye: owner } as Record<Key, string>;

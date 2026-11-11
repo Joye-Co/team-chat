@@ -1,0 +1,8 @@
+{
+  "kind": "QrPeekResponse",
+  "valid": true,
+  "value": {
+    "deviceName": "Joye 的 MacBook Pro",
+    "expiresAt": 1762800300000
+  }
+}

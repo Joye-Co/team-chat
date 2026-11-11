@@ -14,6 +14,7 @@
 //! [`Client::reconnect_now`]. Before a client exists (sign-in), run
 //! [`HttpClient::redeem`] on [`background`] and keep the token in a [`TokenStore`].
 
+pub mod account;
 pub mod artifacts;
 pub mod backoff;
 pub mod client;

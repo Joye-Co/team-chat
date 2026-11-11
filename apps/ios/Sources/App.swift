@@ -13,7 +13,7 @@ struct MobileApp: App {
         WindowGroup {
             Group {
                 if model.signedIn {
-                    RootTabs()
+                    RootTabs().modifier(FaceLock())
                 } else {
                     SignInFlow()
                 }

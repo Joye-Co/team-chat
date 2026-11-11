@@ -29,7 +29,7 @@ pub(super) fn email_error(e: &ApiError, code_request: bool) -> EmailError {
 }
 
 impl CoreProvider {
-    fn email_request<T, F>(&self, work: impl FnOnce(Arc<Client>) -> F) -> EmailReply<T>
+    pub(super) fn email_request<T, F>(&self, work: impl FnOnce(Arc<Client>) -> F) -> EmailReply<T>
     where
         T: Send + 'static,
         F: Future<Output = Result<T, EmailError>> + Send + 'static,
