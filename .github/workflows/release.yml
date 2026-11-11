@@ -14,6 +14,9 @@ name: Release
 # update from the previous release with the daemon running). Only when it is green does the
 # macOS job publish: one GitHub Release with the DMG, the installer and the daemons, and both
 # files on production. A Windows build that fails stops the release before anything is public.
+# A release that stopped after its tag was pushed and before the GitHub Release was made is
+# resumed by starting mode release again: both jobs then build the tag. The Mac alone is
+# released only with release_mac_without_windows (an emergency; the run says so loudly).
 #
 # Modes:
 #   dry-run       (default, any branch) preflight and plan, then set the version in the working
@@ -22,10 +25,11 @@ name: Release
 #                 artifacts for 7 days.
 #   release       (main only) the whole release, both systems.
 #   upload-only   (main only) download the DMG and the installer from the GitHub Release
-#                 v<version> and upload them to production again (retry after a failed or
-#                 skipped upload). A file that is missing on GitHub fails the run.
+#                 v<version> and upload them to production again (scripts/release.sh
+#                 --reupload: the repair after an upload that failed). A file production has
+#                 already counts as done; one that is missing on GitHub or refused fails the run.
 #   windows-only  (main only) give a release that exists its Windows installer: build and test
-#                 it from main with that version, then add it to production and to the GitHub
+#                 it from the release's tag, then add it to production and to the GitHub
 #                 Release (scripts/release.sh --add-windows). For a release that was published
 #                 without one. A version that has an installer on production is refused: a
 #                 published file is never replaced, release a higher version.
@@ -61,6 +65,10 @@ on:
         description: Publish the Windows installer without a signature, on purpose (SmartScreen warning). Needed while no signing is set up
         type: boolean
         default: false
+      release_mac_without_windows:
+        description: "EMERGENCY ONLY: release the Mac alone, with no Windows installer (mode release). Windows apps get nothing until mode=windows-only adds it"
+        type: boolean
+        default: false
 
 concurrency:
   group: release
@@ -79,6 +87,7 @@ jobs:
       version: ${{ inputs.version }}
       mode: ${{ inputs.mode }}
       windows_unsigned: ${{ inputs.windows_unsigned }}
+      release_mac_without_windows: ${{ inputs.release_mac_without_windows }}
     secrets:
       SERVERS_JSON: ${{ vars.SERVERS_JSON }}
       SIGNING_KEY_PEM: ${{ secrets.SIGNING_KEY_PEM }}

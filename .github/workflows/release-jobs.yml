@@ -14,6 +14,9 @@ name: Release jobs
 # update from the previous release with the daemon running). Only when it is green does the
 # macOS job publish: one GitHub Release with the DMG, the installer and the daemons, and both
 # files on production. A Windows build that fails stops the release before anything is public.
+# A release that stopped after its tag was pushed and before the GitHub Release was made is
+# resumed by starting mode release again: both jobs then build the tag. The Mac alone is
+# released only with release_mac_without_windows (an emergency; the run says so loudly).
 #
 # Modes:
 #   dry-run       (default, any branch) preflight and plan, then set the version in the working
@@ -22,10 +25,11 @@ name: Release jobs
 #                 artifacts for 7 days.
 #   release       (main only) the whole release, both systems.
 #   upload-only   (main only) download the DMG and the installer from the GitHub Release
-#                 v<version> and upload them to production again (retry after a failed or
-#                 skipped upload). A file that is missing on GitHub fails the run.
+#                 v<version> and upload them to production again (scripts/release.sh
+#                 --reupload: the repair after an upload that failed). A file production has
+#                 already counts as done; one that is missing on GitHub or refused fails the run.
 #   windows-only  (main only) give a release that exists its Windows installer: build and test
-#                 it from main with that version, then add it to production and to the GitHub
+#                 it from the release's tag, then add it to production and to the GitHub
 #                 Release (scripts/release.sh --add-windows). For a release that was published
 #                 without one. A version that has an installer on production is refused: a
 #                 published file is never replaced, release a higher version.
@@ -57,6 +61,10 @@ on:
         required: true
         type: string
       windows_unsigned:
+        required: false
+        type: boolean
+        default: false
+      release_mac_without_windows:
         required: false
         type: boolean
         default: false
@@ -96,7 +104,7 @@ jobs:
     needs: [windows]
     if: >-
       !cancelled() && inputs.mode != 'windows-only' &&
-      (inputs.mode != 'release' || needs.windows.result == 'success')
+      (inputs.mode != 'release' || needs.windows.result == 'success' || inputs.release_mac_without_windows)
     runs-on: macos-15
     timeout-minutes: 120
     env:
@@ -139,6 +147,37 @@ jobs:
         with:
           # release.sh compares HEAD with origin/main, checks tags and pushes the release commit.
           fetch-depth: 0
+
+      - name: Use the source of the tag (windows-only, or a release that stopped after its tag)
+        # windows-only adds an installer to a release that exists: it is built from that
+        # release's tag, never from what reached main since. A release whose tag exists and
+        # whose GitHub Release does not stopped in between: it is resumed from the tag, with no
+        # new commit. Both keep the scripts and workflows of the commit this run started from.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v$VERSION"
+          from_tag=0
+          if [ "$MODE" = windows-only ]; then
+            from_tag=1
+          elif [ "$MODE" = release ] && [ -n "$(git ls-remote --tags origin "refs/tags/$tag")" ] &&
+            ! gh release view "$tag" --json tagName >/dev/null 2>&1; then
+            echo "::warning::tag $tag exists and the GitHub Release does not: an earlier run stopped in between. This run resumes the release from the tag"
+            echo "RESUME=1" >>"$GITHUB_ENV"
+            from_tag=1
+          fi
+          [ "$from_tag" = 1 ] || exit 0
+          git fetch --quiet origin main "refs/tags/$tag:refs/tags/$tag" ||
+            { echo "::error::there is no tag $tag: mode $MODE needs a release that exists"; exit 1; }
+          git merge-base --is-ancestor "$tag" origin/main || { echo "::error::tag $tag is not on main"; exit 1; }
+          git checkout --quiet --detach "$tag"
+          git checkout --quiet "$GITHUB_SHA" -- scripts .github
+          . scripts/lib.sh
+          if [ "$(workspace_version)" != "$VERSION" ]; then
+            echo "::error::tag $tag holds version $(workspace_version), not $VERSION"
+            exit 1
+          fi
+          echo "building the source of $tag ($(git rev-parse --short "$tag^{commit}"))"
 
       - name: Check the server URLs
         # The URLs the app's server menu offers and release.sh uploads to: the repository variable
@@ -260,8 +299,10 @@ jobs:
       - name: Release (${{ inputs.mode }})
         env:
           TC_SERVERS_JSON: ${{ secrets.SERVERS_JSON }}
+          MAC_ONLY: ${{ inputs.release_mac_without_windows }}
         run: |
           args=("$VERSION" --env production)
+          [ "${RESUME:-0}" = 1 ] && args+=(--resume)
           notes="docs/releases/$VERSION.md"
           # Without the notes file the preflight reports it (dry run) or stops (release).
           [ -f "$notes" ] && args+=(--notes "$notes")
@@ -269,7 +310,20 @@ jobs:
           # The installer and the Windows daemon alone, as the Windows job built and tested
           # them: checked after the transfer, then published together with the DMG.
           windows=()
-          if [ -d "$RUNNER_TEMP/windows" ]; then
+          if [ "$MODE" = release ] && [ "$MAC_ONLY" = true ]; then
+            # The Mac alone, because the operator said so when starting the run.
+            windows=(--without-windows)
+            echo "::warning::release_mac_without_windows: $VERSION is published for the Mac ALONE. Windows apps are offered nothing for it. Add the installer afterwards: gh workflow run release.yml --ref main -f version=$VERSION -f mode=windows-only"
+            {
+              echo "## $VERSION was released for the Mac alone"
+              echo
+              echo "Windows apps are offered nothing for this version. Add its installer when the Windows build works again:"
+              echo
+              echo '```'
+              echo "gh workflow run release.yml --ref main -f version=$VERSION -f mode=windows-only"
+              echo '```'
+            } >>"$GITHUB_STEP_SUMMARY"
+          elif [ -d "$RUNNER_TEMP/windows" ]; then
             (cd "$RUNNER_TEMP/windows" && for sum in ./*.sha256; do shasum -a 256 -c "$sum"; done)
             setup="$(find "$RUNNER_TEMP/windows" -name '*-setup.exe' | head -n 1)"
             windows=(--windows-installer "$setup")
@@ -283,18 +337,9 @@ jobs:
               # release.sh refuses to publish without the installer.
               scripts/release.sh "${args[@]}" ${windows[@]+"${windows[@]}"} ;;
             upload-only)
-              # Both files of the GitHub Release go to the server again. One that is not
-              # there fails the job, the same for both systems.
-              mkdir -p dist
-              gh release download "v$VERSION" --pattern '*.dmg' --dir dist
-              scripts/check-release-digest.sh "v$VERSION" dist/*.dmg
-              scripts/release.sh "$VERSION" --env production --upload-only
-              if ! gh release download "v$VERSION" --pattern '*-setup.exe' --dir dist; then
-                echo "::error::release v$VERSION has no Windows installer on GitHub. Add one with mode=windows-only (it builds the installer of this version from main and publishes it)"
-                exit 1
-              fi
-              scripts/check-release-digest.sh "v$VERSION" dist/*-setup.exe
-              up=("$VERSION" --env production --upload-only --platform windows)
+              # Both files of the GitHub Release go to the server again; one the server has
+              # already counts as done, one that is missing or refused fails the run.
+              up=("$VERSION" --env production --reupload)
               [ -f "$notes" ] && up+=(--notes "$notes")
               scripts/release.sh "${up[@]}" ;;
           esac
@@ -316,8 +361,8 @@ jobs:
     name: Windows installer ${{ inputs.version }} (${{ inputs.mode }})
     # First in a release: it builds, signs and tests the installer, and the macOS job publishes
     # only when this job is green. A prerelease gets an installer too, as it gets a DMG: on
-    # GitHub only.
-    if: inputs.mode != 'upload-only'
+    # GitHub only. Not run for a release of the Mac alone (release_mac_without_windows).
+    if: inputs.mode != 'upload-only' && !(inputs.mode == 'release' && inputs.release_mac_without_windows)
     runs-on: windows-2025
     timeout-minutes: 120
     defaults:
@@ -354,6 +399,40 @@ jobs:
           echo "VERSION=$version" >>"$GITHUB_ENV"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The tag of a release that is resumed or completed (the step below).
+          fetch-depth: 0
+
+      - name: Use the source of the tag (windows-only, or a release that stopped after its tag)
+        # windows-only adds an installer to a release that exists: it is built from that
+        # release's tag, never from what reached main since. A release whose tag exists and
+        # whose GitHub Release does not stopped in between: it is resumed from the tag, with no
+        # new commit. Both keep the scripts and workflows of the commit this run started from.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v$VERSION"
+          from_tag=0
+          if [ "$MODE" = windows-only ]; then
+            from_tag=1
+          elif [ "$MODE" = release ] && [ -n "$(git ls-remote --tags origin "refs/tags/$tag")" ] &&
+            ! gh release view "$tag" --json tagName >/dev/null 2>&1; then
+            echo "::warning::tag $tag exists and the GitHub Release does not: an earlier run stopped in between. This run resumes the release from the tag"
+            echo "RESUME=1" >>"$GITHUB_ENV"
+            from_tag=1
+          fi
+          [ "$from_tag" = 1 ] || exit 0
+          git fetch --quiet origin main "refs/tags/$tag:refs/tags/$tag" ||
+            { echo "::error::there is no tag $tag: mode $MODE needs a release that exists"; exit 1; }
+          git merge-base --is-ancestor "$tag" origin/main || { echo "::error::tag $tag is not on main"; exit 1; }
+          git checkout --quiet --detach "$tag"
+          git checkout --quiet "$GITHUB_SHA" -- scripts .github
+          . scripts/lib.sh
+          if [ "$(workspace_version)" != "$VERSION" ]; then
+            echo "::error::tag $tag holds version $(workspace_version), not $VERSION"
+            exit 1
+          fi
+          echo "building the source of $tag ($(git rev-parse --short "$tag^{commit}"))"
 
       - name: Check the server URLs
         # The same URLs the Mac build embeds (the app's server menu): the repository variable

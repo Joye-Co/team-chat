@@ -68,10 +68,12 @@ expect fail "release-check fails for another version" "$ROOT/scripts/release-che
 
 # --- release.sh --upload-only: each platform's file goes to its own route ---------------------
 # upload_stub <status>: answers every PUT with <status> when the admin secret is the test's
-# (401 otherwise) and writes what it got to $WORK/upload.json.
+# (401 otherwise) and writes what it got to $WORK/upload.json. STUB_MACOS and STUB_WINDOWS give
+# the DMG's route and the installer's route a status of their own; $WORK/uploads.log gets one
+# line per upload, in order.
 upload_stub() {
   cleanup
-  rm -f "$WORK/upload.json"
+  rm -f "$WORK/upload.json" "$WORK/uploads.log"
   UPLOAD_OUT="$WORK/upload.json" UPLOAD_SECRET="$UPLOAD_SECRET" bun -e '
     const { createHash } = require("node:crypto");
     Bun.serve({ hostname: "127.0.0.1", port: Number(process.argv[1]), async fetch(req) {
@@ -85,7 +87,10 @@ upload_stub() {
         sha256Body: createHash("sha256").update(body).digest("hex"),
         notes: Buffer.from(req.headers.get("x-release-notes") ?? "", "base64").toString("utf8"),
       }));
-      return new Response("{}", { status: ok ? Number(process.argv[2]) : 401 });
+      const windows = url.pathname.endsWith("/assets/windows");
+      require("node:fs").appendFileSync(process.env.UPLOAD_OUT.replace(/upload\.json$/, "uploads.log"), (windows ? "windows" : "macos") + "\n");
+      const status = (windows ? process.env.STUB_WINDOWS : process.env.STUB_MACOS) || process.argv[2];
+      return new Response("{}", { status: ok ? Number(status) : 401 });
     } })' "$PORT" "$1" >"$WORK/stub.log" 2>&1 &
   STUB_PID=$!
   local _
@@ -139,7 +144,9 @@ expect fail "a rejected admin secret fails the upload" "$R" 9.9.9 --env staging 
 expect ok "the secret is not in the output" bash -c "! grep -q 'another secret' '$WORK/prev.log'"
 printf '%s\n' "$UPLOAD_SECRET" >"$TEAM_CHAT_CONFIG_DIR/staging/admin-secret"
 upload_stub 404
-expect ok "a server without the route is skipped, not an error" "$R" 9.9.9 --env staging --upload-only --platform windows
+expect fail "a server without the route fails the upload" "$R" 9.9.9 --env staging --upload-only --platform windows
+expect ok "and says that nothing was uploaded" bash -c "grep -q 'has no route for the windows file' '$WORK/prev.log'"
+expect ok "unless the operator says the server has no such route" "$R" 9.9.9 --env staging --upload-only --platform windows --allow-missing-route
 upload_stub 500
 expect fail "a server error fails the upload" "$R" 9.9.9 --env staging --upload-only --platform windows
 # --- the previous Windows installer, for the publisher comparison of a release -----------------
@@ -179,9 +186,15 @@ prev() { PATH="$FAKE_BIN:$PATH" "$P" "$@" 2>"$WORK/prev.err"; }
 expect ok "the release being made is not its own previous one" is "$(prev 9.9.9 "$WORK/previous")" "$WORK/previous/X-9.9.7-setup.exe"
 expect ok "a release without an installer is passed over" is "$(cat "$WORK/previous/X-9.9.7-setup.exe")" "installer of v9.9.7"
 expect ok "a version given with v works" is "$(prev v9.9.9 "$WORK/previous")" "$WORK/previous/X-9.9.7-setup.exe"
-expect ok "the newest other release with an installer wins" is "$(prev 9.9.10 "$WORK/previous")" "$WORK/previous/X-9.9.9-setup.exe"
+expect ok "the newest older release with an installer wins" is "$(prev 9.9.10 "$WORK/previous")" "$WORK/previous/X-9.9.9-setup.exe"
+# An installer added to an older release is tested as an update from below it, never as a
+# downgrade from a newer one. Versions compare as numbers (9.9.10 is above 9.9.9).
+expect ok "an older version takes the release below it" is "$(prev 9.9.8 "$WORK/previous")" "$WORK/previous/X-9.9.7-setup.exe"
+expect ok "numbers, not text, order the versions" is "$(GH_TAGS="v9.9.9 v9.9.10 v9.9.6" prev 9.9.11 "$WORK/previous")" "$WORK/previous/X-9.9.9-setup.exe"
+expect ok "a prerelease takes the release below its version" is "$(prev 9.9.9-rc.1 "$WORK/previous")" "$WORK/previous/X-9.9.7-setup.exe"
 expect ok "no earlier installer is not an error" env PATH="$FAKE_BIN:$PATH" GH_TAGS="v9.9.9 v9.9.8" "$P" 9.9.9 "$WORK/previous"
 expect ok "and names nothing" is "$(GH_TAGS="v9.9.9 v9.9.8" prev 9.9.9 "$WORK/previous")" ""
+expect ok "the lowest release has nothing below it" is "$(prev 9.9.6 "$WORK/previous")" ""
 for step in list view download; do
   expect fail "a failed 'gh release $step' fails the check" env PATH="$FAKE_BIN:$PATH" GH_FAIL="$step" "$P" 9.9.9 "$WORK/previous"
 done
@@ -231,6 +244,173 @@ expect fail "add-windows does not mix with a release" env PATH="$FAKE_BIN:$PATH"
 upload_stub 200
 expect fail "a failed GitHub upload fails add-windows" env GH_FAIL=upload PATH="$FAKE_BIN:$PATH" "$R" 9.9.9 --env staging --add-windows "$SETUP"
 expect ok "and says the installer is on the server" bash -c "grep -q 'on the server but not on the GitHub Release' '$WORK/prev.log'"
+
+upload_stub 404
+rm -f "$GH_LOG"
+expect fail "add-windows fails on a server without the route" add
+expect ok "and leaves GitHub alone" test ! -e "$GH_LOG"
+
+# --- the real publish path, in a sandbox ---------------------------------------------------------
+# The real scripts/release.sh in a throwaway repository with its own "origin": the builds are
+# stand-ins that write a file, gh is a stand-in that keeps releases in a folder, the server is
+# the stub. Nothing here can reach the real repository, GitHub or a server.
+SB="$WORK/sandbox"
+sandbox() {
+  rm -rf "$SB" && mkdir -p "$SB/home" "$SB/gh" "$SB/bin" "$SB/win"
+  git init -q --bare "$SB/origin.git"
+  git init -q -b main "$SB/repo"
+  mkdir -p "$SB/repo/scripts" "$SB/repo/docs/releases"
+  cp "$ROOT/scripts/release.sh" "$ROOT/scripts/lib.sh" "$ROOT/scripts/check-release-digest.sh" "$SB/repo/scripts/"
+  cp "$ROOT/product.json" "$SB/repo/"
+  printf '[workspace.package]\nversion = "9.9.8"\n' >"$SB/repo/Cargo.toml"
+  : >"$SB/repo/Cargo.lock"
+  printf '# Changelog\n\n## 9.9.9 (unreleased)\n\n- a change\n' >"$SB/repo/CHANGELOG.md"
+  printf '# 9.9.9\n\nnotes\n' >"$SB/repo/docs/releases/9.9.9.md"
+  printf 'dist/\n.tmp/\n' >"$SB/repo/.gitignore"
+  # The builds: one file each, named as the real ones name them.
+  cat >"$SB/repo/scripts/build-dmg.sh" <<'B'
+#!/usr/bin/env bash
+. "$(dirname "$0")/lib.sh"
+mkdir -p "$DIST" && printf 'dmg of %s' "$(workspace_version)" >"$DIST/$(product name)-$(workspace_version).dmg"
+B
+  cat >"$SB/repo/scripts/build-daemon.sh" <<'B'
+#!/usr/bin/env bash
+. "$(dirname "$0")/lib.sh"
+mkdir -p "$DIST" && printf 'daemon' >"$DIST/x-daemon-$(workspace_version)-aarch64-apple-darwin" && printf '%s\n' "$DIST/x-daemon-$(workspace_version)-aarch64-apple-darwin"
+B
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$SB/repo/scripts/test-dmg.sh"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$SB/repo/scripts/release-check.sh"
+  chmod +x "$SB/repo/scripts/"*.sh
+  git -C "$SB/repo" config user.name test
+  git -C "$SB/repo" config user.email test@example.invalid
+  git -C "$SB/repo" add -A
+  git -C "$SB/repo" commit -q -m "feat: something to release"
+  git -C "$SB/repo" remote add origin "$SB/origin.git"
+  git -C "$SB/repo" push -q origin main
+  git -C "$SB/repo" fetch -q origin
+  printf 'installer of 9.9.9' >"$SB/win/$NAME-9.9.9-setup.exe"
+  printf 'windows daemon' >"$SB/win/x-daemon-9.9.9-x86_64-pc-windows-msvc.exe"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$SB/bin/cargo"
+  # gh: releases are folders under $SB/gh; every call is a line of $SB/gh.log.
+  cat >"$SB/bin/gh" <<'GH'
+#!/usr/bin/env bash
+S="$GH_SANDBOX"
+printf '%s\n' "$*" >>"$S.log"
+case "$1 $2" in
+  "auth status") exit 0 ;;
+  "repo view") echo "sandbox/repo" ;;
+  "release view")
+    [ -d "$S/$3" ] || exit 1
+    case "$*" in
+      *assets*) for f in "$S/$3"/*; do printf '%s\tsha256:%s\n' "$(basename "$f")" "$(shasum -a 256 "$f" | awk '{ print $1 }')"; done ;;
+      *) echo "$3" ;;
+    esac ;;
+  "release create")
+    [ "${GH_FAIL:-}" != create ] || exit 1
+    tag="$3"; shift 3
+    mkdir -p "$S/$tag"
+    while [ $# -gt 0 ]; do
+      case "$1" in --title | --notes-file) shift 2 ;; --*) shift ;; *) cp "$1" "$S/$tag/"; shift ;; esac
+    done ;;
+  "release upload")
+    tag="$3"; shift 3
+    [ -d "$S/$tag" ] || exit 1
+    for f in "$@"; do case "$f" in --*) ;; *) cp "$f" "$S/$tag/" ;; esac; done ;;
+  "release download")
+    tag="$3"; shift 3; dir=""; pattern=""
+    while [ $# -gt 0 ]; do case "$1" in --dir) dir="$2"; shift 2 ;; --pattern) pattern="$2"; shift 2 ;; *) shift ;; esac; done
+    found=0
+    for f in "$S/$tag"/*; do
+      # shellcheck disable=SC2254
+      case "$(basename "$f")" in $pattern) mkdir -p "$dir" && cp "$f" "$dir/" && found=1 ;; esac
+    done
+    [ "$found" = 1 ] ;;
+  *) exit 2 ;;
+esac
+GH
+  chmod +x "$SB/bin/cargo" "$SB/bin/gh"
+}
+# rel <args...>: scripts/release.sh of the sandbox for 9.9.9 on staging.
+rel() {
+  (cd "$SB/repo" && env HOME="$SB/home" PATH="$SB/bin:$PATH" GH_SANDBOX="$SB/gh" DIST="$SB/repo/dist" \
+    TC_SERVERS_JSON='{"staging":"http://127.0.0.1:1"}' scripts/release.sh 9.9.9 --env staging "$@")
+}
+# The same with a GitHub that cannot create the release.
+rel_create_fails() { GH_FAIL=create rel "$@"; }
+BOTH=(--notes docs/releases/9.9.9.md --windows-installer "$SB/win/$NAME-9.9.9-setup.exe" --asset "$SB/win/x-daemon-9.9.9-x86_64-pc-windows-msvc.exe")
+origin_log() { git -C "$SB/origin.git" log --format=%s "$@"; }
+released() { ls "$SB/gh/v9.9.9" 2>/dev/null | sort | tr '\n' ' '; }
+# uploads: the uploads the server saw, in order (curl's retries of a failed one count once).
+uploads() { uniq "$WORK/uploads.log" 2>/dev/null | tr '\n' ' ' || true; }
+
+# A release of both systems.
+sandbox; upload_stub 200
+expect ok "a release runs to the end" rel "${BOTH[@]}"
+expect ok "the GitHub Release is made once, with the DMG, the installer and both daemons" is "$(released)" "$NAME-9.9.9-setup.exe $NAME-9.9.9.dmg x-daemon-9.9.9-aarch64-apple-darwin x-daemon-9.9.9-x86_64-pc-windows-msvc.exe "
+expect ok "by one gh release create" is "$(grep -c '^release create v9.9.9 ' "$SB/gh.log")" 1
+expect ok "the DMG goes to the server first, then the installer" is "$(uploads)" "macos windows "
+expect ok "main has the release commit" is "$(origin_log -1 main)" "chore(release): v9.9.9"
+expect ok "the tag is on that commit" is "$(git -C "$SB/origin.git" rev-parse 'v9.9.9^{commit}')" "$(git -C "$SB/origin.git" rev-parse main)"
+expect ok "the changelog has the date" grep -qE '^## 9\.9\.9 \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$' "$SB/repo/CHANGELOG.md"
+expect fail "the same version cannot be released twice" rel "${BOTH[@]}"
+
+# The installer's upload fails after the DMG's: the repair is --reupload.
+sandbox; STUB_WINDOWS=500 upload_stub 200
+expect fail "a release whose installer upload fails is red" rel "${BOTH[@]}"
+expect ok "and names the repair" bash -c "grep -q -- '--reupload' '$WORK/prev.log'"
+expect ok "the DMG arrived, the installer was tried" is "$(uploads)" "macos windows "
+expect ok "the GitHub Release holds both files all the same" is "$(released)" "$NAME-9.9.9-setup.exe $NAME-9.9.9.dmg x-daemon-9.9.9-aarch64-apple-darwin x-daemon-9.9.9-x86_64-pc-windows-msvc.exe "
+upload_stub 200
+expect ok "reupload sends both again (the server answers 200 for the DMG it has)" rel --reupload
+expect ok "both, the DMG first" is "$(uploads)" "macos windows "
+# A server from before it took the same file twice answers 409 for the DMG: the installer
+# must still arrive, and the run says that the DMG could not be confirmed.
+STUB_MACOS=409 upload_stub 200
+expect fail "a 409 for the DMG fails the reupload" rel --reupload
+expect ok "and the run names what is not confirmed" bash -c "grep -q 'not on the server after --reupload: macos' '$WORK/prev.log'"
+expect ok "but the installer is uploaded all the same" is "$(uploads)" "macos windows "
+upload_stub 200
+rm -f "$SB/gh/v9.9.9/$NAME-9.9.9.dmg"
+expect fail "a file missing on GitHub fails the reupload, for the DMG" rel --reupload
+expect ok "and the other file is still uploaded" is "$(uploads)" "windows "
+
+# The run stops between the tag and the GitHub Release: --resume finishes it.
+sandbox; upload_stub 200
+expect fail "a release that cannot create the GitHub Release is red" rel_create_fails "${BOTH[@]}"
+expect ok "the tag is on main, there is no release" bash -c "git -C '$SB/origin.git' rev-parse -q --verify refs/tags/v9.9.9 >/dev/null && [ ! -d '$SB/gh/v9.9.9' ]"
+expect ok "nothing was uploaded" test ! -e "$WORK/uploads.log"
+expect fail "the same command again stops" rel "${BOTH[@]}"
+expect ok "and says how to go on" bash -c "grep -q 'Finish it with --resume' '$WORK/prev.log'"
+before="$(git -C "$SB/origin.git" rev-parse main)"
+expect ok "--resume finishes the release" rel "${BOTH[@]}" --resume
+expect ok "without another commit on main" is "$(git -C "$SB/origin.git" rev-parse main)" "$before"
+expect ok "with the GitHub Release of both systems" is "$(released)" "$NAME-9.9.9-setup.exe $NAME-9.9.9.dmg x-daemon-9.9.9-aarch64-apple-darwin x-daemon-9.9.9-x86_64-pc-windows-msvc.exe "
+expect ok "and both uploads" is "$(uploads)" "macos windows "
+expect fail "--resume has nothing to finish afterwards" rel "${BOTH[@]}" --resume
+sandbox
+expect fail "--resume without a tag is refused" rel "${BOTH[@]}" --resume
+sandbox; upload_stub 200
+rel_create_fails "${BOTH[@]}" >/dev/null 2>&1 || true
+echo "// later work" >>"$SB/repo/Cargo.toml"
+expect fail "--resume refuses a source that is not the tag's" rel "${BOTH[@]}" --resume
+
+# The Mac alone, on purpose, and its installer later.
+sandbox; upload_stub 200
+expect ok "a release --without-windows runs" rel --notes docs/releases/9.9.9.md --without-windows
+expect ok "with the Mac's files only" is "$(released)" "$NAME-9.9.9.dmg x-daemon-9.9.9-aarch64-apple-darwin "
+expect ok "and one upload" is "$(uploads)" "macos "
+upload_stub 200
+expect fail "its reupload says the installer is missing" rel --reupload
+expect ok "and how to add it" bash -c "grep -q -- '--add-windows' '$WORK/prev.log'"
+upload_stub 200
+expect ok "add-windows completes it" rel --add-windows "$SB/win/$NAME-9.9.9-setup.exe" --asset "$SB/win/x-daemon-9.9.9-x86_64-pc-windows-msvc.exe"
+expect ok "the server got the installer" is "$(uploads)" "windows "
+expect ok "and the GitHub Release has both systems" is "$(released)" "$NAME-9.9.9-setup.exe $NAME-9.9.9.dmg x-daemon-9.9.9-aarch64-apple-darwin x-daemon-9.9.9-x86_64-pc-windows-msvc.exe "
+
+# A server without the installer's route in a release: red, not a silent skip.
+sandbox; STUB_WINDOWS=404 upload_stub 200
+expect fail "a 404 for the installer fails the release" rel "${BOTH[@]}"
+expect ok "after the DMG arrived" is "$(uploads)" "macos windows "
 
 # --- the logs of a run must not show a server address -----------------------------------------
 L="$ROOT/scripts/check-logs-for-servers.sh"

@@ -59,7 +59,13 @@ A_SETUP="$(cd "$(dirname "$A_SETUP")" && pwd)/$(basename "$A_SETUP")"
 B_SETUP="$(cd "$(dirname "$B_SETUP")" && pwd)/$(basename "$B_SETUP")"
 NAME="$(product name)"
 SLUG="$(product slug)"
-version_of() { basename "$1" | sed -E "s/^$NAME-(.*)-setup\.exe$/\1/"; }
+# The file name of an installer is <product name>-<version>-setup.exe. The product may have
+# had another name when A was released (product.json formerNames): A then installs into a
+# folder of that name, with a program of that name, and B keeps the folder.
+version_of() { basename "$1" | sed -E 's/^.*-([0-9]+\.[0-9]+\.[0-9]+)-setup\.exe$/\1/'; }
+name_of() { basename "$1" | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+-setup\.exe$//'; }
+A_NAME="$(name_of "$A_SETUP")"
+[ "$(name_of "$B_SETUP")" = "$NAME" ] || die "the installer of B is not one of $NAME"
 A="$(version_of "$A_SETUP")"
 B="$(version_of "$B_SETUP")"
 valid_release_version "$A" && valid_release_version "$B" || die "cannot read the versions from the file names"
@@ -68,10 +74,12 @@ valid_release_version "$A" && valid_release_version "$B" || die "cannot read the
 WORK="$ROOT/.tmp/windows-update"
 SECRETS="$HOME/.config/team-chat/local-$PORT"
 URL="http://127.0.0.1:$PORT"
-DIR="$(default_install_dir)"
-EXE="$DIR/$NAME.exe"
+DIR="$(cygpath -u "$LOCALAPPDATA")/Programs/$A_NAME"
+# The app's program: A's until the update, then B's (the same file name unless the product
+# was renamed in between).
+EXE="$DIR/$A_NAME.exe"
 KEY="$(uninstall_key)"
-BACKUPS="$(dirname "$DIR")/.$NAME.old-"
+BACKUPS="$(dirname "$DIR")/.$A_NAME.old-"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 m() { cygpath -m "$1"; }
 sha() { sha256sum "$1" | cut -d' ' -f1; }
@@ -267,6 +275,8 @@ jq . "$WORK/finish.json" >&2 || fail "version $B wrote no report"
 [ "$(jq -r .version "$WORK/finish.json")" = "$B" ] || fail "the program that started is not $B"
 [ "$(jq -r .ok "$WORK/finish.json")" = true ] || fail "$B did not finish the update"
 [ "$(jq -r .old_removed "$WORK/finish.json")" = true ] || fail "$B did not remove the backup"
+EXE="$DIR/$NAME.exe"
+[ -f "$EXE" ] || { ls "$DIR" >&2; fail "the update did not write $NAME.exe into the install folder"; }
 "$EXE" --selftest-installed --report "$(m "$WORK/b.json")" || fail "the updated app does not report"
 [ "$(jq -r .version "$WORK/b.json")" = "$B" ] || fail "the install folder does not hold $B"
 [ "$(product_version "$EXE")" = "$B" ] || fail "the program's version resource is not $B"
@@ -324,6 +334,11 @@ if [ "$(signature_status "$EXE")" = Valid ] && [ "$(signature_status "$A_SETUP")
   R_SETUP="$B_SETUP"
   R="$B"
   log "note: $B is signed and $A is not: the failing updates below use the installer of $B"
+elif [ "$A_NAME" != "$NAME" ]; then
+  # A's installer writes a program of the former name, which is no update of B.
+  R_SETUP="$B_SETUP"
+  R="$B"
+  log "note: $A was released as $A_NAME: the failing updates below use the installer of $B"
 fi
 
 # The helper outside the install folder, as the app copies it.

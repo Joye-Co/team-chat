@@ -153,8 +153,8 @@ set up (below): without it they refuse to run.
 A release is one thing for both systems. The Windows job runs first (build, sign, install,
 uninstall, and the update from the previous release with the daemon running); the macOS job
 publishes only when it is green, and it creates the GitHub Release with the DMG and the
-installer together. A Windows build that fails stops the release before anything is public: fix
-it on `main` and start the release again.
+installer together, then uploads the DMG and the installer to production. A Windows build that
+fails stops the release before anything is public: fix it on `main` and start the release again.
 
 - `dry-run` (default): preflight and plan, then builds, signs and checks the DMG, the daemon
   (against the previous release's DMG too) and the Windows installer, and keeps them as workflow
@@ -164,20 +164,40 @@ it on `main` and start the release again.
   DMG, the installer and the daemons, then `PUT /v1/admin/releases/<v>` and
   `PUT /v1/admin/releases/<v>/assets/windows` on production.
   The release commit is pushed with the workflow token, which starts no CI run on `main`.
-- `upload-only` (main only): downloads the DMG and the installer of release `v<v>`, checks them
-  against the release's SHA-256 digests (`scripts/check-release-digest.sh`) and uploads them to
-  production again. A file that is not on the GitHub Release fails the run, for either system.
-- `windows-only` (main only): for a release that exists without a Windows installer (one made
-  with `scripts/release.sh --without-windows`, or from before releases were made for both
-  systems). Builds and tests the installer of that version from `main`, then gives it to
-  production and to the GitHub Release (`scripts/release.sh <v> --add-windows <setup.exe>`). A
-  version that already has an installer on production is refused (409): a published file is
-  never replaced; withdraw the version and release a higher one.
+  Both jobs build the commit the run was started on, and the release commit goes on top of it:
+  a commit that reaches `main` while the Windows job runs (about half an hour) stops the release
+  at the macOS job's preflight ("HEAD is not origin/main"), before anything is public. Start it
+  again.
+- `upload-only` (main only): `scripts/release.sh <v> --reupload`. Downloads the DMG and the
+  installer of release `v<v>`, checks them against the release's SHA-256 digests and uploads
+  each to production. A file production already has with the same content counts as done; both
+  are tried; one that is missing on GitHub or refused fails the run.
+- `windows-only` (main only): for a release that exists without a Windows installer. Builds and
+  tests the installer from the release's tag (never from what reached `main` since), then
+  gives it to production and to the GitHub Release (`scripts/release.sh <v> --add-windows`).
+
+When a release stops half way:
+
+| What happened | What is public | Repair |
+| --- | --- | --- |
+| The Windows job failed | nothing | fix on `main`, `mode=release` again |
+| The macOS job failed before the tag (build, signing, "HEAD is not origin/main") | nothing | fix or just start `mode=release` again |
+| It failed between the tag and the GitHub Release (the tag `v<v>` is on `main`, the release does not exist) | the tag | `mode=release` again: the run sees the tag without a release and resumes from it (`release.sh --resume`: both jobs build the tag, no new commit) |
+| The GitHub Release exists, an upload to production failed (the DMG arrived, the installer did not, or neither) | the GitHub Release; Mac apps may update already | `mode=upload-only`; it sends what is missing and passes over what is there |
+| Production answered 404 to an upload | the GitHub Release | the server has no release routes yet: deploy it, then `mode=upload-only` |
+| Production answers 409 in `upload-only` | | production has *another* file for that version (or is a server from before it accepted the same file twice: deploy it). A published file is never replaced: withdraw the version and release a higher one |
+| The release was made for the Mac alone | DMG only | `mode=windows-only` |
+
+**The Mac alone, in an emergency.** `-f mode=release -f release_mac_without_windows=true`
+skips the Windows job and publishes the DMG without an installer (`release.sh
+--without-windows`). Use it only when a Mac fix cannot wait for a Windows runner outage or a
+broken Windows build. Windows apps are offered nothing for that version; the run says so in a
+warning and in its summary. Add the installer as soon as the Windows build works:
+`-f mode=windows-only`.
 
 On a Mac, `scripts/release.sh <v>` asks for the same: `--windows-installer <setup.exe>` (take
 it from the artifact `windows-installer-<v>` of a dry run of that commit), or
-`--without-windows` to publish the Mac alone on purpose and add the installer later with
-`mode=windows-only`.
+`--without-windows`; `--resume`, `--reupload` and `--add-windows` are the repairs above.
 
 Repository secrets (Settings, Secrets and variables, Actions). The workflow never prints them:
 
