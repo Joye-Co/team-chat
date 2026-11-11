@@ -306,6 +306,80 @@ describe("a machine that goes away", () => {
   });
 });
 
+describe("review follow-ups", () => {
+  it("retries a silent run in the same session on its own machine even when that machine is full", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["resume"], maxParallelRuns: 1 });
+    const { c } = await Client.connect(w.human.token);
+    await mention(c, w);
+    const a = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId: a.runId });
+    await d.acked(a.runId, d.event(a.runId, { type: "session", sessionId: "sess-a" }));
+    const other = await secondMachine(w, "mbp");
+    const { d: b } = await Daemon.connect(other.token, { features: ["resume"] });
+
+    // The cancelled run still holds the only slot until the daemon answers: the retry stays here.
+    await silence(w.bot.id, a.runId, STALL_MS + 1000);
+    await runDurableObjectAlarm(deskOf(w.bot.id));
+    await d.next((f) => f.t === "run.cancel" && f.runId === a.runId);
+    const same = await d.next((f) => f.t === "run.assign" && f.runId !== a.runId);
+    expect(same.resumeSessionId).toBe("sess-a");
+    expect(await deskRow(w.bot.id, same.runId)).toMatchObject({ stall_step: 1 });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(b.frames.filter((f) => f.t === "run.assign")).toHaveLength(0);
+    d.send({ t: "run.accept", runId: same.runId });
+    await d.acked(same.runId, d.done(same.runId, { status: "succeeded", resultText: "ok" }));
+    d.close();
+    b.close();
+    c.close();
+  });
+
+  it("says the computers are busy when the only one turns a run down", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, {});
+    const { c } = await Client.connect(w.human.token);
+    const topicId = await mention(c, w);
+    const a = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.reject", runId: a.runId, reason: "busy", message: "max_parallel_runs reached" });
+    await waitUntil(() => botNotes(c, topicId, w.bot.id).includes(TEXT.allBusy), 5000, "busy note");
+    expect(botNotes(c, topicId, w.bot.id)).not.toContain(TEXT.noMachine);
+    d.close();
+    c.close();
+  });
+
+  it("names only the tries that happened, and says the computer is back only when it shows the run", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, {});
+    const { c } = await Client.connect(w.human.token);
+    const topicId = await mention(c, w);
+    const a = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId: a.runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === a.runId && e.data.run.status === "running");
+
+    // Away, then online again without replaying anything: the wait ends, but no "back" note.
+    d.close();
+    await waitUntil(() => d.closed, 5000, "closed");
+    await staleHeartbeat(w.machineId, 3 * 60_000);
+    await runDurableObjectAlarm(deskOf(w.bot.id));
+    await waitUntil(() => botNotes(c, topicId, w.bot.id).includes(TEXT.machineAway("mac-mini")), 5000, "away note");
+    const { d: d2 } = await Daemon.connect(w.machineToken, {});
+    await runDurableObjectAlarm(deskOf(w.bot.id));
+    expect((await deskRow(w.bot.id, a.runId)).away_since).toBeNull();
+    await new Promise((r) => setTimeout(r, 200));
+    expect(botNotes(c, topicId, w.bot.id)).not.toContain(TEXT.machineBack("mac-mini"));
+
+    // Loop reminders and restarts raised the count, but no nudge was sent: the note leaves 提醒 out.
+    await runInDurableObject(deskOf(w.bot.id), (_o, state: DurableObjectState) => {
+      state.storage.sql.exec("UPDATE runs SET interventions = 3, stall_step = 2, nudge_sent = 0, last_event_at = ? WHERE id = ?", Date.now() - STALL_MS - 1000, a.runId);
+    });
+    await runDurableObjectAlarm(deskOf(w.bot.id));
+    const gaveUp = TEXT.gaveUp(10, ["打断后重来", "换电脑重来"]);
+    await waitUntil(() => botNotes(c, topicId, w.bot.id).includes(gaveUp), 5000, "gave up note");
+    d2.close();
+    c.close();
+  });
+});
+
 describe("a member pinned to a computer that is offline (机 2.2)", () => {
   it("queues with the computer's name, can be stopped, says why when it waited too long, and starts when the computer is back", async () => {
     const w = await world();

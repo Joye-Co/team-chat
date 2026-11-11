@@ -119,6 +119,8 @@ export type RunRow = {
   away_since: number | null;
   /** How far the desk got with a silent piece of work: 1 = restarted in the same session, 2 = moved to another machine. Carried over. */
   stall_step: number;
+  /** A nudge was really sent for this piece of work (盯 1.12: the note names only real tries). Carried over. */
+  nudge_sent: number;
 };
 
 /** A CLI session id BotDesk keeps and sends back (`run.assign.resumeSessionId`). */
@@ -411,6 +413,10 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
             ALTER TABLE runs ADD COLUMN away_since INTEGER;
             ALTER TABLE runs ADD COLUMN stall_step INTEGER NOT NULL DEFAULT 0;
           `,
+        },
+        {
+          name: "desk-nudge-sent",
+          up: `ALTER TABLE runs ADD COLUMN nudge_sent INTEGER NOT NULL DEFAULT 0;`,
         },
       ]);
       const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'bot_id'").toArray()[0];

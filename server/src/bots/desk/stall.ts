@@ -120,8 +120,9 @@ export abstract class DeskStall extends DeskEvents {
       await this.serial(id, async () => {
         const r = this.run(id);
         if (!r || r.ended_at !== null || r.nudged || r.stalled || r.open_tools > 0 || r.interventions >= MAX_INTERVENTIONS || r.approval_id || r.paused_by || r.away_since !== null || r.stall_step > 0 || !r.machine_id) return;
-        this.sql.exec("UPDATE runs SET nudged = 1, interventions = interventions + 1 WHERE id = ?", r.id);
+        this.sql.exec("UPDATE runs SET nudged = 1, nudge_sent = 1, interventions = interventions + 1 WHERE id = ?", r.id);
         r.nudged = 1;
+        r.nudge_sent = 1;
         r.interventions += 1;
         await this.tell(r, NUDGE_TEXT, "nudge");
       });
@@ -140,7 +141,8 @@ export abstract class DeskStall extends DeskEvents {
         const r = this.run(id);
         if (!r || r.ended_at !== null || r.machine_id !== machine_id) return;
         if (gone) await this.machineAway(r, m, now);
-        else if (r.away_since !== null && m && isOnline(m, now)) await this.machineBack(r);
+        // Online again, but only replayed frames show it still has the run (events.ts): no note yet.
+        else if (r.away_since !== null && m && isOnline(m, now)) await this.machineBack(r, false);
       });
     }
   }
@@ -174,8 +176,8 @@ export abstract class DeskStall extends DeskEvents {
     return false;
   }
 
-  /** The run's machine is back: the run goes on, and its silence counts from now. */
-  protected async machineBack(r: RunRow): Promise<void> {
+  /** The run's machine is back: the run goes on, and its silence counts from now. `say`: it showed it still has the run. */
+  protected async machineBack(r: RunRow, say = true): Promise<void> {
     if (r.away_since === null || r.ended_at !== null) return;
     const now = Date.now();
     this.sql.exec("UPDATE runs SET away_since = NULL, last_event_at = max(last_event_at, ?), nudged = 0 WHERE id = ?", now, r.id);
@@ -183,7 +185,7 @@ export abstract class DeskStall extends DeskEvents {
     r.last_event_at = Math.max(r.last_event_at, now);
     r.nudged = 0;
     this.log.info("supervise", { runId: r.id, why: "machine back", machineId: r.machine_id });
-    const row = r.machine_id
+    const row = say && r.machine_id
       ? await this.env.DB.prepare("SELECT name FROM machines WHERE id = ?")
           .bind(r.machine_id)
           .first<{ name: string }>()
@@ -285,10 +287,12 @@ export abstract class DeskStall extends DeskEvents {
     const ack = request.m.ackMessageId ?? (r.trigger_message_id.includes(":") ? undefined : r.trigger_message_id);
     // A new session starts fresh with the full topic; the same session gets what is new.
     if (!how.sameSession) this.sql.exec("UPDATE runs SET session_id = NULL WHERE id = ?", r.id);
-    this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `restart:${r.id}`, JSON.stringify(how));
+    // The same session lives on its machine: the retry stays there (it waits when that is full).
+    const keep: Restart = how.sameSession && r.machine_id ? { ...how, machine: r.machine_id } : how;
+    this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `restart:${r.id}`, JSON.stringify(keep));
     await this.start({ ...request.m, messageId: key, ackMessageId: ack, mentioned: true }, undefined, request.followUps, r.id, request.brief);
     const next = this.sql.exec<{ id: string }>("SELECT id FROM runs WHERE trigger_message_id = ?", key).toArray()[0];
-    if (next) this.sql.exec("UPDATE runs SET interventions = ?, stall_step = ? WHERE id = ?", r.interventions + (count ? 1 : 0), opts.step ?? r.stall_step, next.id);
+    if (next) this.sql.exec("UPDATE runs SET interventions = ?, stall_step = ?, nudge_sent = ? WHERE id = ?", r.interventions + (count ? 1 : 0), opts.step ?? r.stall_step, r.nudge_sent, next.id);
     this.log.info("supervise", { runId: r.id, why: `restart: ${why}`, next: next?.id });
     return true;
   }
@@ -309,7 +313,7 @@ export abstract class DeskStall extends DeskEvents {
     r.stalled = 1;
     // 盯 1.12: the true silence, and the tries that really happened.
     const minutes = Math.max(1, Math.round((Date.now() - r.last_event_at) / 60_000));
-    const tries = [...(r.interventions > r.stall_step ? ["提醒"] : []), ...(r.stall_step >= 1 ? ["打断后重来"] : []), ...(r.stall_step >= 2 ? ["换电脑重来"] : [])];
+    const tries = [...(r.nudge_sent ? ["提醒"] : []), ...(r.stall_step >= 1 ? ["打断后重来"] : []), ...(r.stall_step >= 2 ? ["换电脑重来"] : [])];
     try {
       await this.note(r, tries.length > 0 ? TEXT.gaveUp(minutes, tries) : TEXT.stalled(minutes));
     } catch (err) {

@@ -607,7 +607,7 @@ describe("runner-backed bots", () => {
     d.send({ t: "run.accept", runId });
     await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "running");
     const alarm = await runInDurableObject(deskOf(w.bot.id), async (_o, state) => {
-      state.storage.sql.exec("UPDATE runs SET last_event_at = ?, interventions = 3 WHERE id = ?", Date.now() - STALL_MS - 1000, runId);
+      state.storage.sql.exec("UPDATE runs SET last_event_at = ?, interventions = 3, nudge_sent = 1 WHERE id = ?", Date.now() - STALL_MS - 1000, runId);
       return state.storage.getAlarm();
     });
     expect(alarm).toBeTypeOf("number");

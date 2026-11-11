@@ -23,7 +23,7 @@ export abstract class DeskEvents extends DeskRuns {
   /** 盯活 (stall.ts): continues a run that only promised work; true when it did. */
   protected abstract continuePromise(r: RunRow, result: string): Promise<boolean>;
   /** 盯 1.1 (stall.ts): the machine of a run that waited for it is back. */
-  protected abstract machineBack(r: RunRow): Promise<void>;
+  protected abstract machineBack(r: RunRow, say?: boolean): Promise<void>;
 
   /** Stores run frames idempotently by (runId, seq) and applies their effects. */
   async ingest(runId: string, frames: SeqFrame[]): Promise<{ lastSeq: number }> {

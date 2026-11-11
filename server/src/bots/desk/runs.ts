@@ -46,6 +46,8 @@ export interface Restart {
   sameSession?: boolean;
   /** Machines the new run must not go to. */
   exclude?: string[];
+  /** The only machine the new run may go to (a same-session restart stays on its machine). */
+  machine?: string;
 }
 
 /** What started a run (meta `request:{runId}`): the message and the follow-ups it carried. */
@@ -134,7 +136,7 @@ export abstract class DeskRuns extends DeskCore {
         await this.setStatus(r, "created");
         await this.topic(r, "in_progress");
 
-        const machines = await loadMachines(this.env);
+        const machines = this.machinesFor(r, await loadMachines(this.env));
         const machine = this.pick(r, runner, machines, how?.exclude ?? []);
         // Every machine that could take it is busy, or (机 2.2) offline: the run waits (排队)
         // instead of failing, and starts by itself when one is free or online again.
@@ -217,10 +219,37 @@ export abstract class DeskRuns extends DeskCore {
     }
   }
 
+  /**
+   * The machines a run may go to. A same-session restart (盯 1.3) stays on its own machine, where
+   * the run it replaces no longer takes a slot (the daemon has not answered the cancel yet); when
+   * that machine is busy or away, the restart waits for it (排队) instead of going elsewhere.
+   */
+  protected machinesFor(r: RunRow, machines: MachineView[]): MachineView[] {
+    const how = r.retry_of ? this.restartOf(r.retry_of) : null;
+    if (!how?.machine) return machines;
+    const old = r.retry_of as string;
+    return machines
+      .filter((x) => x.id === how.machine)
+      .map((x) =>
+        x.runningRuns.includes(old)
+          ? { ...x, runningRuns: x.runningRuns.filter((id) => id !== old), ...(x.health ? { health: { ...x.health, activeRuns: Math.max(0, x.health.activeRuns - 1) } } : {}) }
+          : x,
+      );
+  }
+
   /** Why no machine takes the run now (机 2.10); an aside run needs a daemon that runs it read-only. */
   protected whyNone(r: RunRow, runner: BotRunner, machines: MachineView[]): NoMachine {
     const usable = r.kind === RUN_KIND_ASIDE ? machines.filter((x) => hasFeature(x, "aside")) : machines;
     return whyNoMachine(usable, runner, Date.now());
+  }
+
+  /** Why a rejected run did not start: the machines left decide, else the daemon's reason. */
+  protected rejectText(none: NoMachine | null, reason: string): string {
+    if (reason === "busy" || reason === "draining" || none?.why === "busy") return TEXT.allBusy;
+    if (none?.why === "runtime" || none?.why === "disk") return this.noMachineText(none);
+    if (reason === "runtime_unavailable") return TEXT.noRuntime;
+    if (reason === "disk_low") return TEXT.noDisk;
+    return TEXT.failed("");
   }
 
   protected noMachineText(none: NoMachine | null): string {
@@ -244,7 +273,7 @@ export abstract class DeskRuns extends DeskCore {
         const r = this.run(id);
         if (!r || r.ended_at !== null || r.machine_id || r.status !== "created" || !r.queued_at) return false;
         const prompt = this.meta(`prompt:${id}`);
-        const machine = prompt === null ? null : this.pick(r, runner, await loadMachines(this.env), JSON.parse(r.excluded) as string[]);
+        const machine = prompt === null ? null : this.pick(r, runner, this.machinesFor(r, await loadMachines(this.env)), JSON.parse(r.excluded) as string[]);
         if (!machine || prompt === null) return null;
         if (await this.budgetGate(r, prompt)) return false;
         await this.assign(r, runner, machine, prompt);
@@ -493,10 +522,13 @@ export abstract class DeskRuns extends DeskCore {
       const excluded = [...(JSON.parse(r.excluded) as string[]), machineId];
       this.sql.exec("UPDATE runs SET excluded = ? WHERE id = ?", JSON.stringify(excluded), runId);
       const runner = await loadRunner(this.env.DB, this.botId as string);
-      const machine = runner?.enabled ? this.pick(r, runner, await loadMachines(this.env), excluded) : null;
+      const machines = await loadMachines(this.env);
+      const machine = runner?.enabled ? this.pick(r, runner, machines, excluded) : null;
       const prompt = this.meta(`prompt:${runId}`);
       if (!runner || !machine || prompt === null) {
-        const why = r.kind === RUN_KIND_ASIDE ? TEXT.noAsideMachine : TEXT.noMachine;
+        // 机 2.10: the true reason, from the machines left or else from the daemon's answer.
+        const none = runner ? this.whyNone(r, runner, machines.filter((x) => !excluded.includes(x.id))) : null;
+        const why = r.kind === RUN_KIND_ASIDE ? TEXT.noAsideMachine : this.rejectText(none, reason);
         return this.end(r, "failed", why, "blocked", why);
       }
       await this.assign(r, runner, machine, prompt);

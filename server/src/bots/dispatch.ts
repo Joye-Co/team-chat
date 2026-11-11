@@ -36,6 +36,8 @@ export const TEXT = {
   noMachine: "现在没有能接手的电脑，给我配好电脑后再 @我。",
   noRuntime: "没有电脑装了我用的运行方式，这次没有开始。装好后再 @我。",
   noDisk: "电脑的磁盘空间不够，这次没有开始。清出空间后再 @我。",
+  /** The computers that could take it are busy (a computer turned the run down). */
+  allBusy: "能接手的电脑都在忙，这次没有开始。请稍后再 @我。",
   /** The member's computers are offline: the run waits (排队) and starts when one comes online. */
   waitOffline: (names: string[]) => `${names.join("、")} 不在线，等它上线后自动开始；不需要了可以停止。`,
   /** A queued run that waited too long, by the reason it waited. */
