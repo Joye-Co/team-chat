@@ -91,7 +91,8 @@ Or on the Mac that holds `~/.config/team-chat/production/admin-secret` and the s
 
 ```sh
 scripts/release.sh 1.2.3 --dry-run                      # checks only; prints the plan
-scripts/release.sh 1.2.3 --env production --notes docs/releases/1.2.3.md
+scripts/release.sh 1.2.3 --env production --notes docs/releases/1.2.3.md \
+  --windows-installer dist/<name>-1.2.3-setup.exe      # both systems; see docs/RUNBOOK.md
 scripts/release.sh 1.2.3 --env staging --upload-only    # the same DMG for staging
 ```
 
