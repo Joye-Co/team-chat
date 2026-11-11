@@ -6,9 +6,11 @@
 //!
 //! A 产出 opens in its own viewer (its page runs in the isolated view). An attachment is
 //! read from its local copy: the viewer only decodes or prints it, so even a script
-//! previews safely as text. Only a file no viewer shows, and an attached page (it could
-//! run only in the 产出 view), go on to the system, behind the same guard as 打开
-//! ([`super::native::preview_opens`]): what Windows would run is shown in Explorer.
+//! previews safely as text, and an attached page runs in the isolated 产出 view. A type
+//! the app has no viewer for is drawn by the system's preview handler for it
+//! ([`super::preview_handler`]), the counterpart of Quick Look's plug-ins; without one the
+//! sheet says that there is no preview and offers 用系统应用打开. Only a file Windows
+//! would run is never previewed: it is shown in Explorer.
 #![cfg_attr(target_os = "macos", allow(dead_code))]
 
 use std::{cell::RefCell, path::Path};
@@ -53,21 +55,27 @@ pub fn close_if_open(cx: &mut App) -> bool {
 /// What previews an attachment whose local copy is `path`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Preview {
-    /// The app's viewer for this kind.
+    /// The app's preview sheet: the viewer for this kind; for a plain file the system's
+    /// preview handler when the type has one, else the "no preview" state.
     Viewer(MediaKind),
-    /// No viewer shows it: the system does, behind the guard of 打开.
-    System,
+    /// A file Windows would run: never previewed, only shown in Explorer.
+    Reveal,
 }
 
 /// Decides by the name on disk (what is read), never by the name the sender gave.
+///
+/// A page previews in the isolated 产出 view (the viewer's HTML view: no network, no
+/// bridge capabilities), as 打开 shows it in the 产出 window and as Quick Look renders it;
+/// its source would tell the reader less. A plain file previews only when 打开 would hand
+/// it to the system: a program, a script host's file or a shortcut is never given to a
+/// viewer or a handler.
 pub fn preview_of(path: &Path) -> Preview {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     match media::file_kind(&name, media::mime_for(&name)) {
-        // A page needs the isolated 产出 view; a plain file has no viewer.
-        MediaKind::Html | MediaKind::File => Preview::System,
+        MediaKind::File if !media::parts::opens_with_system(path) => Preview::Reveal,
         kind => Preview::Viewer(kind),
     }
 }
@@ -171,7 +179,7 @@ pub fn open_sheet_in(
     OPEN.with_borrow_mut(|open| *open = Some((window.window_handle(), viewer.downgrade())));
 }
 
-/// A file no viewer shows: its default app, or Explorer when opening it is not safe.
+/// A file that is never previewed: shown in Explorer (the guard of 打开 decides).
 fn system_preview(path: &Path) {
     #[cfg(target_os = "windows")]
     super::native::system_preview(path);
@@ -184,7 +192,8 @@ mod tests {
     use super::*;
 
     /// What the app can show previews in the app; a script is shown as text, never run; a
-    /// page and an unknown type go to the system's guard.
+    /// page runs in the isolated view; a type without a viewer goes to the system's
+    /// preview handler; what the system would run is never previewed.
     #[test]
     fn files_the_app_can_show_preview_in_the_app() {
         let p = |n: &str| preview_of(Path::new(&format!("/cache/abc/{n}")));
@@ -195,18 +204,28 @@ mod tests {
         assert_eq!(p("notes.md"), Preview::Viewer(MediaKind::Markdown));
         assert_eq!(p("data.csv"), Preview::Viewer(MediaKind::Table));
         assert_eq!(p("main.rs"), Preview::Viewer(MediaKind::Code));
-        assert_eq!(p("notes.txt"), Preview::Viewer(MediaKind::Code));
-        for name in [
-            "page.html",
-            "page.HTM",
-            "setup.exe",
-            "deck.pptx",
-            "a.msi",
-            "noext",
-        ] {
-            assert_eq!(p(name), Preview::System, "{name}");
+        // A script is text to the viewer.
+        assert_eq!(p("run.sh"), Preview::Viewer(MediaKind::Code));
+        // What only Windows runs is only kept from a preview there.
+        if cfg!(target_os = "windows") {
+            assert_eq!(p("a.msi"), Preview::Reveal);
         }
-        assert_eq!(preview_of(Path::new("/")), Preview::System);
+        assert_eq!(p("notes.txt"), Preview::Viewer(MediaKind::Code));
+        assert_eq!(p("page.html"), Preview::Viewer(MediaKind::Html));
+        assert_eq!(p("page.HTM"), Preview::Viewer(MediaKind::Html));
+        for name in [
+            "deck.pptx",
+            "report.docx",
+            "sheet.xlsx",
+            "letter.rtf",
+            "a.zip",
+        ] {
+            assert_eq!(p(name), Preview::Viewer(MediaKind::File), "{name}");
+        }
+        for name in ["setup.exe", "noext", "a.lnk", "tool.command"] {
+            assert_eq!(p(name), Preview::Reveal, "{name}");
+        }
+        assert_eq!(preview_of(Path::new("/")), Preview::Reveal);
     }
 
     #[test]

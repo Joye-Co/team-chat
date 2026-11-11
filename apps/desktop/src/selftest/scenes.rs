@@ -492,6 +492,20 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::files::preview::open_quick_look,
     },
     Scene {
+        name: "files-quick-look-handler",
+        about: "Space on a type without a viewer (RTF): the system's preview handler in the sheet on Windows, the no-preview state elsewhere",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::files::preview::open_quick_look_handler,
+    },
+    Scene {
+        name: "files-quick-look-page",
+        about: "Space on an attached HTML page: the isolated 产出 view inside the sheet",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::files::preview::open_quick_look_page,
+    },
+    Scene {
         name: "cards",
         about: "The 话题 of sample cards: status, fields, table, progress, list, code and actions",
         start: Start::SignedIn,

@@ -417,10 +417,13 @@ impl FakeProvider {
         self.settings.lock().unwrap().machines.push(machine.clone());
         let token = format!("tm_fake{n:040}");
         let install = format!("# fake\nprintf '%s' '{token}' > machine-token");
+        let install_windows =
+            format!("# fake\n[IO.File]::WriteAllText(\"machine-token\", '{token}')");
         reply_now(Ok(MachineCreated {
             machine,
             credential: SecretText::new(token),
             install_command: SecretText::new(install),
+            install_command_windows: SecretText::new(install_windows),
         }))
     }
 

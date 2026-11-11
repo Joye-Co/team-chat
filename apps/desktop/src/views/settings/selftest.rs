@@ -1164,6 +1164,28 @@ pub fn open_machine_dialog(
     )
 }
 
+/// 机器 after 添加电脑 succeeded: the one-time sheet with the system picker on Windows and
+/// that system's install command.
+pub fn open_machine_created(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Machines,
+        |s, w, cx| {
+            let form = super::machines::open_add_machine(s, w, cx);
+            form.update(cx, |form, cx| {
+                form.fill("会议室的电脑", "windows", w, cx);
+                form.submit(cx);
+                form.set_target(super::machines::InstallTarget::Windows, cx);
+            });
+        },
+        cx,
+    )
+}
+
 // --- v12/settings track: the scenes of the new panes and their sheets ---
 
 use crate::selftest::scenes::{Scene, Start};
@@ -1255,6 +1277,13 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedIn,
         setup: |_, _| {},
         open: open_devices_failed,
+    },
+    Scene {
+        name: "settings-machine-created",
+        about: "机器 › 添加电脑 done: the system picker (Mac 或 Linux / Windows) and the Windows install command",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: open_machine_created,
     },
     Scene {
         name: "settings-machines-loading",

@@ -75,7 +75,7 @@ pub fn render(
         Data::Pdf(p) => pdf(spec, p, state, cx),
         Data::Code(c) => code(spec, c, state, cx),
         Data::Table(t) => table(spec, t, state, cx),
-        Data::File => file(spec, cx),
+        Data::File => file(spec, window, cx),
     }
 }
 
@@ -344,20 +344,41 @@ fn frame(cx: &App) -> gpui::Div {
         .overflow_hidden()
 }
 
-fn file(spec: &FullSpec, cx: &App) -> AnyElement {
-    let k = theme::colors(cx);
+fn file(spec: &FullSpec, window: &mut Window, cx: &mut App) -> AnyElement {
     let path = spec.media.entry_path();
+    let header = head(
+        spec,
+        spec.media.kind.icon(),
+        spec.media.file_name().to_string(),
+        Head {
+            meta: Some(super::size_text(spec.media.bytes).into()),
+            ..Head::default()
+        },
+        cx,
+    );
+    // A type the app has no viewer for: on Windows the system's preview handler for it
+    // draws the body (Quick Look's plug-ins on the Mac belong to its own panel).
+    #[cfg(target_os = "windows")]
+    if !spec.media.preview_failed
+        && let Some(body) =
+            crate::views::files::preview_handler::body(id(spec, "handler"), &path, window, cx)
+    {
+        return frame(cx)
+            .child(header)
+            .child(div().flex_1().min_h_0().w_full().child(body))
+            .into_any_element();
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = window;
+    let k = theme::colors(cx);
+    // No viewer and no handler is not a failure: say that there is no preview.
+    let hint = if spec.media.preview_failed {
+        super::states::failed_hint(&spec.media.entry).1
+    } else {
+        cm::STATE_NO_PREVIEW
+    };
     frame(cx)
-        .child(head(
-            spec,
-            spec.media.kind.icon(),
-            spec.media.file_name().to_string(),
-            Head {
-                meta: Some(super::size_text(spec.media.bytes).into()),
-                ..Head::default()
-            },
-            cx,
-        ))
+        .child(header)
         .child(
             div()
                 .flex_1()
@@ -369,7 +390,7 @@ fn file(spec: &FullSpec, cx: &App) -> AnyElement {
                 .t_small()
                 .text_color(k.text_3)
                 .child(ui::icon(Sym::Alert, px(20.), k.text_3))
-                .child(super::states::failed_hint(&spec.media.entry).1)
+                .child(hint)
                 .child(
                     ui::native::push_button(
                         id(spec, "sysbig"),
