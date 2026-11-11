@@ -2091,6 +2091,11 @@ impl ChatProvider for FakeProvider {
         reply_now(Ok(()))
     }
 
+    /// The demo computer has Claude Code.
+    fn this_computer_clis(&self) -> AdminReply<Vec<String>> {
+        reply_now(Ok(vec!["claude".into()]))
+    }
+
     fn use_this_mac(&self) -> AdminReply<()> {
         self.this_mac_used
             .store(true, std::sync::atomic::Ordering::Relaxed);

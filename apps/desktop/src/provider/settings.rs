@@ -169,6 +169,7 @@ pub(super) fn machine(m: &proto::Machine) -> MachineInfo {
             .filter(|c| c.available)
             .map(|c| CliChoice {
                 runtime: c.runtime.clone(),
+                kind: c.kind.clone(),
                 models: c
                     .models
                     .iter()

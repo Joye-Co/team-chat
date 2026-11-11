@@ -125,6 +125,88 @@ fn open_member_ai(
     )
 }
 
+/// 机器 with this computer's three lines (用这台电脑) in the state `inputs` describe.
+fn open_this_computer(
+    services: Services,
+    inputs: super::this_computer::Inputs,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with(
+        services,
+        AdminPage::Machines,
+        |v| v.fleet.this.pinned = Some(inputs),
+        cx,
+    )
+}
+
+fn login(kind: &str, state: &str) -> chat_core::proto::monitor::MonitorCli {
+    chat_core::proto::monitor::MonitorCli {
+        runtime: kind.into(),
+        kind: kind.into(),
+        available: true,
+        version: None,
+        login: state.into(),
+        failed_today: 0,
+        method: None,
+        email: None,
+        plan: None,
+        usage: None,
+        usage_at: None,
+    }
+}
+
+/// The service is in, but this computer has neither Claude Code nor Codex.
+fn open_this_computer_no_cli(
+    services: Services,
+    _content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let inputs = super::this_computer::Inputs {
+        installed: true,
+        local: Some(vec![]),
+        ..Default::default()
+    };
+    open_this_computer(services, inputs, cx)
+}
+
+/// Online with Claude Code, which is not signed in.
+fn open_this_computer_sign_in(
+    services: Services,
+    _content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let inputs = super::this_computer::Inputs {
+        installed: true,
+        connected: true,
+        reported: vec![("claude".into(), "claude".into())],
+        logins: Some(vec![login("claude", "logged_out")]),
+        ..Default::default()
+    };
+    open_this_computer(services, inputs, cx)
+}
+
+/// All three done, right after 用这台电脑.
+fn open_this_computer_ready(
+    services: Services,
+    _content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let inputs = super::this_computer::Inputs {
+        installed: true,
+        connected: true,
+        reported: vec![
+            ("claude".into(), "claude".into()),
+            ("codex".into(), "codex".into()),
+        ],
+        logins: Some(vec![
+            login("claude", "logged_in"),
+            login("codex", "logged_out"),
+        ]),
+        ..Default::default()
+    };
+    open_this_computer(services, inputs, cx)
+}
+
 macro_rules! opener {
     ($name:ident, $page:expr) => {
         fn $name(
@@ -213,6 +295,21 @@ pub const SCENES: &[Scene] = &[
         "admin-machines",
         "团队管理 › 机器: a card per computer and 添加电脑",
         open_machines
+    ),
+    scene!(
+        "admin-this-computer-no-cli",
+        "团队管理 › 机器 after 用这台电脑 on a computer without Claude Code or Codex: the install command and 重新检查",
+        open_this_computer_no_cli
+    ),
+    scene!(
+        "admin-this-computer-sign-in",
+        "团队管理 › 机器 after 用这台电脑: Claude Code found but not signed in, with 登录",
+        open_this_computer_sign_in
+    ),
+    scene!(
+        "admin-this-computer-ready",
+        "团队管理 › 机器 after 用这台电脑: all three lines done",
+        open_this_computer_ready
     ),
     scene!(
         "admin-overview",
