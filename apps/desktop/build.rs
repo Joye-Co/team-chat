@@ -59,42 +59,6 @@ fn main() {
     embed_windows_resources(&manifest, json["name"].as_str().unwrap_or_default());
 }
 
-/// The application manifest of the Windows exe. Without one Windows treats the process as
-/// not DPI aware and stretches its windows as a bitmap on any display above 100 % (GPUI
-/// never sets the awareness itself), draws the system's controls (message boxes, the tray
-/// menu, the 产出 window's version list) in the Windows 2000 look, and reports itself as
-/// Windows 8. Same content as GPUI's own `gpui.manifest.xml`, plus long paths.
-#[cfg(windows)]
-const WINDOWS_MANIFEST: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
-    <security>
-      <requestedPrivileges>
-        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
-      </requestedPrivileges>
-    </security>
-  </trustInfo>
-  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
-    <application>
-      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
-    </application>
-  </compatibility>
-  <application xmlns="urn:schemas-microsoft-com:asm.v3">
-    <windowsSettings>
-      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
-      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
-      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
-    </windowsSettings>
-  </application>
-  <dependency>
-    <dependentAssembly>
-      <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0"
-        processorArchitecture="*" publicKeyToken="6595b64144ccf1df" />
-    </dependentAssembly>
-  </dependency>
-</assembly>
-"#;
-
 /// Windows: gives the exe its icon and its version block (file and product version from the
 /// Cargo version, the product name from product.json), which Explorer, the taskbar and
 /// 应用和功能 show. Needs the resource compiler of the Windows SDK, so it runs only when the
@@ -117,7 +81,6 @@ fn embed_windows_resources(manifest: &Path, name: &str) {
         res.set("FileDescription", name);
         res.set("InternalName", name);
         res.set("OriginalFilename", &format!("{name}.exe"));
-        res.set_manifest(WINDOWS_MANIFEST);
         res.compile().expect("compile the Windows resources");
     }
     #[cfg(not(windows))]

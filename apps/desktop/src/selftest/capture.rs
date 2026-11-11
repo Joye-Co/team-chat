@@ -74,8 +74,9 @@ pub fn order_front(_window: &Window) -> Result<(), String> {
 }
 
 /// Whether Windows treats this process as per-monitor DPI aware. Only the exe's manifest
-/// (`build.rs`) says so: without it Windows stretches every window as a bitmap on a display
-/// above 100 %, which a 100 % CI screenshot cannot show.
+/// says so (GPUI embeds one through its `windows-manifest` feature, which
+/// `gpui-pre-platform` turns on): without it Windows stretches every window as a bitmap on
+/// a display above 100 %, which a 100 % CI screenshot cannot show.
 #[cfg(target_os = "windows")]
 pub fn dpi_aware() -> bool {
     use windows::Win32::UI::HiDpi::{
