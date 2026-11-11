@@ -1,0 +1,55 @@
+{
+  "kind": "Event",
+  "valid": true,
+  "value": {
+    "seq": 42,
+    "groupId": "01JBX0GENERAL000000000000A",
+    "at": 1762128005000,
+    "actorId": "01JBX0OWNER0000000000000AA",
+    "type": "topic.updated",
+    "data": {
+      "topicId": "01JBX0TOPIC0000000000000AD",
+      "status": "in_progress",
+      "ownerId": "01JBX0BOT000000000000000AX",
+      "participants": [
+        {
+          "memberId": "01JBX0BOT000000000000000AC",
+          "working": false,
+          "lastRunAt": 1762128001000
+        },
+        {
+          "memberId": "01JBX0BOT000000000000000AX",
+          "working": true,
+          "lastRunAt": 1762128005000
+        }
+      ],
+      "relay": {
+        "id": "01JBX0RELAY0000000000000AZ",
+        "startedBy": "01JBX0OWNER0000000000000AA",
+        "goal": "给设置页加深色模式",
+        "current": 1,
+        "state": "running",
+        "updatedAt": 1762128005000,
+        "steps": [
+          {
+            "memberId": "01JBX0BOT000000000000000AC",
+            "note": "写",
+            "state": "done",
+            "runId": "01JBX0RUN000000000000000AU"
+          },
+          {
+            "memberId": "01JBX0BOT000000000000000AX",
+            "note": "审",
+            "state": "working",
+            "runId": "01JBX0RUN000000000000000AW"
+          },
+          {
+            "memberId": "01JBX0BOT000000000000000AC",
+            "note": "按意见改",
+            "state": "pending"
+          }
+        ]
+      }
+    }
+  }
+}

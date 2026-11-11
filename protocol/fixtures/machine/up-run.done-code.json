@@ -1,0 +1,18 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "the run's branch is not pushed",
+  "value": {
+    "t": "run.done",
+    "runId": "01JBX0RUN000000000000000AU",
+    "seq": 20,
+    "at": 1762128000020,
+    "status": "succeeded",
+    "durationMs": 64000,
+    "code": {
+      "branch": "tc/run-01jbx0",
+      "head": "d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3",
+      "pushed": false
+    }
+  }
+}

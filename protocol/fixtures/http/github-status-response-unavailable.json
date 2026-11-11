@@ -1,0 +1,9 @@
+{
+  "kind": "GithubStatusResponse",
+  "valid": true,
+  "value": {
+    "available": false,
+    "unavailableReason": "no_secret_key",
+    "waits": []
+  }
+}

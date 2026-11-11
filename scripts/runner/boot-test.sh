@@ -2,7 +2,7 @@
 # Boots the base image once (read-only root, 2 vCPU, 4 GiB cap) and times it. Run on the host
 # as the runner user after host-setup.sh and build-base-image.sh.
 set -euo pipefail
-d=$(mktemp -d /srv/runner/runs/boottest.XXXX)
+d=$(mktemp -d /srv/runner/vms/boottest.XXXX)
 cat > $d/vm.json <<J
 { "boot-source": { "kernel_image_path": "/srv/runner/kernels/vmlinux",
     "boot_args": "console=ttyS0 reboot=k panic=1 pci=off quiet ro init=/sbin/vm-init" },

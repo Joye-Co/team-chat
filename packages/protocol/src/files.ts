@@ -225,6 +225,8 @@ export const ArtifactVersion = z.object({
   dataRev: Count.optional(),
   /** 1.1: the author's preview card text and figures. */
   preview: ArtifactPreview.optional(),
+  /** Usable: the version this one was made from; absent = `version - 1` (version 1 has none). */
+  parentVersion: z.int().positive().optional(),
 });
 export type ArtifactVersion = z.infer<typeof ArtifactVersion>;
 
@@ -264,6 +266,8 @@ export const AddArtifactVersionRequest = z.object({
   ...versionInput,
   /** Renames the 产出. */
   title: Title.optional(),
+  /** Usable: an existing version this one was made from; absent = the current version. */
+  parentVersion: z.int().positive().optional(),
 });
 export type AddArtifactVersionRequest = z.infer<typeof AddArtifactVersionRequest>;
 /**

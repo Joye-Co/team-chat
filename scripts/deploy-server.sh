@@ -6,7 +6,10 @@
 #   3. otherwise the short commit, with "-dirty" when server/, packages/ or protocol/ have
 #      uncommitted changes (what is deployed then is not exactly that commit).
 #
-# The env config comes from the private ops checkout (TC_OPS_DIR, deploy/server.wrangler.jsonc).
+# The env config comes from the private ops checkout (TC_OPS_DIR, deploy/server.wrangler.jsonc;
+# scripts/setup-server.sh makes it for a new server). When the ops checkout has no URL for the
+# env yet (deploy/servers.json), the first deploy takes the workers.dev address that wrangler
+# prints and writes it there.
 # A version that starts with 0.0.0 (the static VERSION values in the wrangler config) is refused.
 # After the deploy it reads GET /v1/health until it reports that version (up to
 # HEALTH_WAIT_SECONDS, default 60) and fails when it does not, or when it reports 0.0.0*.
@@ -93,14 +96,29 @@ if [ "$PRINT" = 1 ]; then
   exit 0
 fi
 
+[ -n "${WRANGLER:-}" ] || need bun
+[ -n "${WRANGLER:-}" ] || [ -x "$ROOT/server/node_modules/.bin/wrangler" ] ||
+  die "wrangler is not installed in server/: run 'bun install --frozen-lockfile' at the repository root"
 CONFIG="$(deploy_wrangler_config server)"
 cd "$ROOT/server"
 if [ "$DRY_RUN" = 1 ]; then
   log "dry run: $ENV_NAME version $VERSION (no D1 migrations, nothing uploaded)"
-  exec bunx wrangler deploy -c "$CONFIG" --env "$ENV_NAME" --var "VERSION:$VERSION" --dry-run
+  wrangler deploy -c "$CONFIG" --env "$ENV_NAME" --var "VERSION:$VERSION" --dry-run
+  exit
 fi
+need curl jq
+# Known before the deploy, or learned from what wrangler prints (a first deploy).
+KNOWN_BASE="$( (env_base "$ENV_NAME") 2>/dev/null || true)"
 log "applying D1 migrations ($ENV_NAME)"
-bunx wrangler d1 migrations apply DB -c "$CONFIG" --env "$ENV_NAME" --remote
+wrangler d1 migrations apply DB -c "$CONFIG" --env "$ENV_NAME" --remote
 log "deploying chat API ($ENV_NAME) version $VERSION"
-bunx wrangler deploy -c "$CONFIG" --env "$ENV_NAME" --var "VERSION:$VERSION"
+DEPLOY_LOG="$(mktemp)"
+trap 'rm -f "$DEPLOY_LOG"' EXIT
+wrangler deploy -c "$CONFIG" --env "$ENV_NAME" --var "VERSION:$VERSION" | tee "$DEPLOY_LOG"
+if [ -z "$KNOWN_BASE" ]; then
+  url="$(workers_dev_url <"$DEPLOY_LOG")"
+  [ -n "$url" ] || die "deployed, but wrangler printed no workers.dev address: put the server's URL into $(ops_dir_path)/deploy/servers.json as \"$ENV_NAME\", then run scripts/deploy-server.sh $ENV_NAME --check-health"
+  record_server_url "$ENV_NAME" "$url"
+  log "first deploy of $ENV_NAME: wrote $url into $(ops_dir_path)/deploy/servers.json"
+fi
 check_health "$VERSION"

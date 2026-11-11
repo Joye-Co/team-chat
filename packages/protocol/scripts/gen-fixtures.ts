@@ -14,6 +14,7 @@ import { addFilesFixtures } from "./fixtures-v11-files.ts";
 import { addMemberFixtures } from "./fixtures-members.ts";
 import { addMemoryFixtures } from "./fixtures-memory.ts";
 import { addPushFixtures } from "./fixtures-push.ts";
+import { addUsableFixtures } from "./fixtures-usable.ts";
 
 type Fixture = {
   kind: string;
@@ -361,6 +362,7 @@ addFilesFixtures({ ok, bad, T0, ID, base, message });
 addMemberFixtures({ ok, bad, T0, ID, base, message });
 addMemoryFixtures({ ok, bad, T0, ID });
 addPushFixtures({ ok, bad, T0, ID });
+addUsableFixtures({ ok, bad, T0, ID, base, topic });
 
 // ---------------------------------------------------------------------------
 

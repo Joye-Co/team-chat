@@ -1,0 +1,8 @@
+{
+  "kind": "RunCommandResponse",
+  "valid": false,
+  "description": "command ids are [A-Za-z0-9_-]",
+  "value": {
+    "commandId": "c 1"
+  }
+}

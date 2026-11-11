@@ -1,0 +1,7 @@
+{
+  "kind": "UpdateMachineRequest",
+  "valid": true,
+  "value": {
+    "name": "构建机"
+  }
+}

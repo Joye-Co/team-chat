@@ -1,0 +1,8 @@
+{
+  "kind": "CreateMachineRequest",
+  "valid": true,
+  "value": {
+    "name": "我的 Mac",
+    "personal": true
+  }
+}

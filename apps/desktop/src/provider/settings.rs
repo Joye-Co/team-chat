@@ -250,8 +250,8 @@ fn powershell_quote(s: &str) -> String {
 /// or Linux one: write the daemon config and the token into a folder only that user,
 /// SYSTEM and Administrators can open (the daemon refuses anything wider), then run the
 /// daemon's `doctor` and `install-service` (a scheduled task of that user). The daemon is
-/// the one the installed app ships (`%LOCALAPPDATA%\Programs\<name>\<slug>-daemon.exe`);
-/// a `<slug>-daemon` on `PATH` is the fallback; with neither the command says so in a
+/// the one the installed app ships (`<install folder>\<slug>-daemon.exe`, see
+/// [`install_command_windows_for`]); a `<slug>-daemon` on `PATH` is the fallback; with neither the command says so in a
 /// sentence and stops. Nothing is downloaded, so no hash is needed; a computer without the app uses `scripts/install-daemon.ps1` (docs/bots.md).
 ///
 /// Works in Windows PowerShell 5.1. The config is a literal here-string: the values are
@@ -262,8 +262,33 @@ pub(super) fn install_command_windows(
     machine: &proto::Machine,
     token: &str,
 ) -> String {
+    install_command_windows_for(server_url, machine, token, env!("PRODUCT_BUNDLE_ID"))
+}
+
+/// [`install_command_windows`] for an install recorded under the uninstall key
+/// `uninstall_id` (the app id; tests use one of their own).
+///
+/// Where the daemon is looked for, in this order: the folder the installer recorded
+/// (`InstallLocation` of the app's uninstall key; an install made under an earlier name
+/// of the product stays in that name's folder when it updates), the folder of the current
+/// name, the folders of the earlier names, then `PATH`.
+pub(super) fn install_command_windows_for(
+    server_url: &str,
+    machine: &proto::Machine,
+    token: &str,
+    uninstall_id: &str,
+) -> String {
     let slug = env!("PRODUCT_SLUG");
     let app = env!("PRODUCT_NAME");
+    let names = std::iter::once(app)
+        .chain(env!("PRODUCT_FORMER_NAMES").split('|'))
+        .filter(|name| !name.is_empty())
+        .map(powershell_quote)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let uninstall = powershell_quote(&format!(
+        r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{uninstall_id}"
+    ));
     let labels = machine
         .labels
         .iter()
@@ -284,8 +309,10 @@ pub(super) fn install_command_windows(
          '@\n\
          $toml += \"`ntoken_file = `\"$($d.Replace('\\', '/'))/machine-token`\"`n\"\n\
          [IO.File]::WriteAllText(\"$d\\daemon.toml\", $toml)\n\
-         $D = \"$env:LOCALAPPDATA\\Programs\\{app}\\{slug}-daemon.exe\"\n\
-         if (-not (Test-Path $D)) {{ $D = (Get-Command {slug}-daemon -ErrorAction SilentlyContinue).Source }}\n\
+         $dirs = @((Get-ItemProperty {uninstall} -ErrorAction SilentlyContinue).InstallLocation)\n\
+         $dirs += @({names}) | ForEach-Object {{ Join-Path $env:LOCALAPPDATA \"Programs\\$_\" }}\n\
+         $D = $dirs | Where-Object {{ $_ }} | ForEach-Object {{ Join-Path $_ '{slug}-daemon.exe' }} | Where-Object {{ Test-Path $_ }} | Select-Object -First 1\n\
+         if (-not $D) {{ $D = (Get-Command {slug}-daemon -ErrorAction SilentlyContinue).Source }}\n\
          if ($D) {{ & $D doctor; if ($LASTEXITCODE -eq 0) {{ & $D install-service }} }} else {{ Write-Host {missing} }}",
         token = powershell_quote(token),
         missing = powershell_quote(&crate::copy::fill(
@@ -642,6 +669,7 @@ impl CoreProvider {
             let req = CreateMachineRequest {
                 name,
                 labels: (!labels.is_empty()).then_some(labels),
+                personal: None,
             };
             let r = client
                 .http()
@@ -844,10 +872,30 @@ mod tests {
         // The here-string is literal and closes on its own line.
         assert!(line("$toml = @'") < line("'@"));
         assert!(cmd.contains("token_file = `\"$($d.Replace('\\', '/'))/machine-token`\""));
-        let (slug, app) = (env!("PRODUCT_SLUG"), env!("PRODUCT_NAME"));
+        // The daemon is looked for where the installer says the app is, then under the
+        // current and the former names, then on PATH.
+        let (slug, app, id) = (
+            env!("PRODUCT_SLUG"),
+            env!("PRODUCT_NAME"),
+            env!("PRODUCT_BUNDLE_ID"),
+        );
         assert!(cmd.contains(&format!(
-            "$env:LOCALAPPDATA\\Programs\\{app}\\{slug}-daemon.exe"
+            "Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{id}' -ErrorAction SilentlyContinue).InstallLocation"
         )));
+        let names = line("$dirs += @(");
+        let names = cmd.lines().nth(names).unwrap();
+        assert!(names.contains(&format!("'{app}'")), "{names}");
+        for former in env!("PRODUCT_FORMER_NAMES")
+            .split('|')
+            .filter(|n| !n.is_empty())
+        {
+            assert!(names.contains(&format!("'{former}'")), "{names}");
+        }
+        assert!(
+            line("$dirs = @(") < line("$dirs += @(") && line("$dirs += @(") < line("$D = $dirs")
+        );
+        assert!(cmd.contains(&format!("Join-Path $_ '{slug}-daemon.exe'")));
+        assert!(cmd.contains(&format!("Get-Command {slug}-daemon")));
         assert!(cmd.contains(
             "if ($D) { & $D doctor; if ($LASTEXITCODE -eq 0) { & $D install-service } }"
         ));
@@ -869,6 +917,99 @@ mod tests {
             "{cmd}"
         );
         assert!(!cmd.contains("$(calc)"), "{cmd}");
+    }
+
+    /// Runs an install command in Windows PowerShell 5.1 with `home` as the user's
+    /// profile and `home\local` as its local app data.
+    #[cfg(target_os = "windows")]
+    fn run_install(cmd: &str, home: &std::path::Path) -> std::process::Output {
+        let script = home.join("install.ps1");
+        // With a BOM, as Windows PowerShell needs to read a UTF-8 script file.
+        std::fs::write(&script, format!("\u{feff}{cmd}\n")).unwrap();
+        let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        std::process::Command::new(
+            std::path::Path::new(&root).join(r"System32\WindowsPowerShell\v1.0\powershell.exe"),
+        )
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+        ])
+        .arg(&script)
+        .env("USERPROFILE", home)
+        .env("LOCALAPPDATA", home.join("local"))
+        .output()
+        .unwrap()
+    }
+
+    /// The command finds the daemon of an installed app wherever the install is: where
+    /// the installer's uninstall key says (an install made under the product's former
+    /// name stays in that name's folder after it updates), else in the folder of a
+    /// former name, else in the folder of the current name. The "daemon" here is this
+    /// test program under the daemon's name: run with `doctor` it runs no test and exits
+    /// with 0, and says so.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn the_windows_install_command_finds_an_install_under_a_former_name() {
+        use windows_registry::CURRENT_USER;
+        let id = format!("tc-test-{}", chat_core::new_id());
+        let key = format!(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{id}");
+        let cmd = install_command_windows_for("https://x.example", &sample_machine(), "tm_x", &id);
+        let daemon = concat!(env!("PRODUCT_SLUG"), "-daemon.exe");
+        let me = std::env::current_exe().unwrap();
+        let sentence = crate::copy::fill(
+            crate::copy::settings::MACHINE_INSTALL_NO_DAEMON,
+            &[("app", env!("PRODUCT_NAME"))],
+        );
+        let ran = |out: &std::process::Output| {
+            let said = String::from_utf8_lossy(&out.stdout);
+            println!("{said}\n{}", String::from_utf8_lossy(&out.stderr));
+            (
+                said.contains("running"),
+                said.contains(env!("PRODUCT_NAME")) && !said.contains("running"),
+            )
+        };
+        let _ = sentence;
+
+        // 1. Recorded by the installer, in a folder no name would guess.
+        let home = tempfile::tempdir().unwrap();
+        let install = home
+            .path()
+            .join("local")
+            .join("Programs")
+            .join("An Older Name");
+        std::fs::create_dir_all(&install).unwrap();
+        std::fs::copy(&me, install.join(daemon)).unwrap();
+        CURRENT_USER
+            .create(&key)
+            .unwrap()
+            .set_string("InstallLocation", install.display().to_string())
+            .unwrap();
+        let out = run_install(&cmd, home.path());
+        let _ = CURRENT_USER.remove_tree(&key);
+        assert_eq!(ran(&out), (true, false), "found through InstallLocation");
+
+        // 2. No record: the folder of a former name, then of the current name.
+        let mut names: Vec<&str> = env!("PRODUCT_FORMER_NAMES")
+            .split('|')
+            .filter(|n| !n.is_empty())
+            .collect();
+        names.push(env!("PRODUCT_NAME"));
+        for name in names {
+            let home = tempfile::tempdir().unwrap();
+            let install = home.path().join("local").join("Programs").join(name);
+            std::fs::create_dir_all(&install).unwrap();
+            std::fs::copy(&me, install.join(daemon)).unwrap();
+            let out = run_install(&cmd, home.path());
+            assert_eq!(ran(&out), (true, false), "found in Programs\\{name}");
+        }
+
+        // 3. Nowhere: the sentence, and nothing is run.
+        let home = tempfile::tempdir().unwrap();
+        let out = run_install(&cmd, home.path());
+        assert_eq!(ran(&out), (false, true), "says to install the app");
     }
 
     /// The command really runs in Windows PowerShell 5.1: it leaves a config the daemon

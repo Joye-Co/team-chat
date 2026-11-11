@@ -470,15 +470,7 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &Minimize, cx| with_key_window(cx, |window| window.minimize_window()));
     // Like the red traffic light: the app keeps running, and a click on the
     // Dock icon (the notification-area icon on Windows) opens the main window again.
-    cx.on_action(|_: &CloseWindow, cx| {
-        // Never the window whose closing would end the app (Windows without the
-        // notification-area icon). The main window answers the command itself.
-        if !super::close_command_closes(super::app_outlives_windows(cx), cx.windows().len(), false)
-        {
-            return;
-        }
-        with_key_window(cx, |window| window.remove_window())
-    });
+    cx.on_action(|_: &CloseWindow, cx| close_key_window(cx));
     cx.on_action(|_: &Zoom, cx| with_key_window(cx, zoom));
     cx.on_action(|_: &ToggleFullScreen, cx| {
         with_key_window(cx, |window| window.toggle_fullscreen())
@@ -503,6 +495,24 @@ pub fn install(cx: &mut App) {
         }
     }
     cx.set_dock_menu(dock_menu());
+}
+
+/// 关闭窗口 (⌘W, Ctrl+W) for the window that has the keys: one handler for every window,
+/// the main one included. It closes unless that would end the app or leave it without a
+/// way back ([`super::close_command_closes`]): on Windows without the notification-area
+/// icon the main window and the last window stay.
+fn close_key_window(cx: &mut App) {
+    let Some(window) = cx.active_window() else {
+        return;
+    };
+    if !super::close_command_closes(
+        super::app_outlives_windows(cx),
+        cx.windows().len(),
+        super::is_main_window(window, cx),
+    ) {
+        return;
+    }
+    with_key_window(cx, |window| window.remove_window())
 }
 
 /// Runs `f` on the main GPUI window. When a 产出 window (not a GPUI window)

@@ -1,0 +1,16 @@
+{
+  "kind": "Machine",
+  "valid": true,
+  "description": "someone else's personal machine: the minimal row",
+  "value": {
+    "id": "01JBX0MACHINE00000000000AV",
+    "name": "Alice 的 MacBook",
+    "labels": [],
+    "createdBy": "01JBX0ALICE0000000000000AB",
+    "createdAt": 1762128000000,
+    "connected": false,
+    "healthy": false,
+    "runningRuns": [],
+    "ownerId": "01JBX0ALICE0000000000000AB"
+  }
+}

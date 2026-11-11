@@ -1,0 +1,12 @@
+{
+  "kind": "Member",
+  "valid": true,
+  "description": "a 所有者: level owner and teamOwner",
+  "value": {
+    "id": "01JBX0OWNER0000000000000AA",
+    "kind": "human",
+    "name": "Joye",
+    "level": "owner",
+    "teamOwner": true
+  }
+}

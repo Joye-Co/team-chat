@@ -428,7 +428,8 @@ How the 1.1 daemon does each one:
   itself is sent unchanged. The server's `run.assign.prompt` for a machine with this feature
   says how to write the block (format, states and limits); side chat prompts do not.
 
-`takeoverUrl` comes from `daemon.toml` (`takeover_url`, for example `vnc://build-mac.tailnet`).
+`takeoverUrl` comes from `daemon.toml` (`takeover_url`, for example `vnc://<host>`). It is not
+how a person takes over a run: that is feature `takeover` (see "Usable features").
 It must be `scheme://host...`, at most 2048 bytes, with no spaces and no password (`daemon
 doctor` reports a bad one, and the daemon does not send it). A value that redaction would
 change is not sent either.
@@ -760,6 +761,90 @@ MachineMemoryNoteRequest = { scope: "member" | "person" | "group", kind: MemoryK
   consolidation. The member's own pending lessons are already in its next runs' prompts.
 - Text is redacted before it is stored. At most 10 notes per run (`rate_limited` after that).
 
+## Usable features
+
+Additive, like the 1.1 features: the server sends a usable frame or field only to a daemon that
+reports its feature, and every new value is an open string (an unknown one is treated as the
+safe default named below). Protocol side: protocol.md, "Usable extensions".
+
+| Feature | What the daemon does |
+| --- | --- |
+| `github` | Reports `hello.machine.runsIn`. Takes `run.assign.github`: sets the commit identity and, with `source: "app"`, lets git and `gh` ask it for the person's token for each use; emits the `github` run event. |
+| `takeover` | Takes `run.pause.hold = "takeover"`, `run.command` and `run.command.cancel`; emits the `hand.*` run events. |
+| `takeover-isolated` | With `takeover` (VM runs, `runsIn: "vm"`): a person's commands run as another user than the run, so they cannot read the run's own credentials. |
+
+```ts
+// daemon -> server
+hello.machine += { runsIn?: "host" | "vm" }       // where runs execute; required with feature "github"
+run.done += { code?: { branch, head /* hex */, pushed: boolean } }  // any daemon; absent = not known
+RunEvent +=
+  | { type: "github", state: "used" | "missing" | "invalid", login? }        // feature "github"
+  | { type: "hand.command", commandId, command /* 1..4000 */, by }           // feature "takeover"
+  | { type: "hand.output",  commandId, text /* <= 16 KiB per event */ }
+  | { type: "hand.result",  commandId, ok, exitCode?, ms, timedOut?,
+      error?: "not_held" | "busy" | "unsupported" }
+  | { type: "hand.summary", by, heldMs, commands, files /* <= 20 */, headFrom?, headTo? }
+
+// server -> daemon
+run.assign += { github?: RunGithub }              // feature "github"
+RunGithub = {
+  source: "app" | "machine",     // "app": git and gh get the person's token from the daemon; "machine": the machine's own sign-in; unknown = "machine"
+  memberId,                      // the person whose GitHub the run uses
+  login?,                        // with "app" when connected
+  author?: { name, email },      // absent = the machine's own git config
+  committer: { name, email },    // the AI member
+  rewriteSsh?: boolean           // rewrite git@github.com: and ssh://git@github.com/ to HTTPS, drop SSH_AUTH_SOCK
+}
+{ t: "run.pause", runId, by?, hold?: "takeover" }                  // feature "takeover"; absent hold = a pause
+{ t: "run.command", runId, commandId, command /* 1..4000 */, by }  // feature "takeover"; only while connected
+{ t: "run.command.cancel", runId, commandId }                      // feature "takeover"
+```
+
+GitHub (feature `github`), over HTTP with the machine token:
+
+```ts
+GET  /v1/machine/runs/:id/github        -> MachineGithubTokenResponse { token, login }
+POST /v1/machine/runs/:id/github/wait   MachineGithubWaitRequest { reason: "not_connected" | "invalid" } -> { ok: true }
+POST /v1/machine/runs/:id/github/rejected                                                               -> { ok: true }
+```
+
+- The token is given only for a run on the calling machine that has not ended, and only when the
+  machine may use that person's GitHub; it is fetched for each git or `gh` use and never cached,
+  written to a file, logged or put in the CLI's environment. Errors: `not_found` with reason
+  `github.not_connected`, `conflict` with `github.invalid` (GitHub refused the token), `forbidden`
+  with `github.not_allowed` (another machine, an ended run, or no right to it).
+- `/wait` reports that the run needs a GitHub the person has not connected; the server asks the
+  person once, and the run then ends waiting (its CLI stops and reports it). `/rejected` reports
+  that git got an authentication failure, so the server checks the token once.
+- The `chat-run` ops `git-credential` and `github.token` are answered by the daemon itself, like
+  `secret`; they are never `output` run events.
+
+Take-over (feature `takeover`):
+
+- `run.pause` with `hold: "takeover"` stops the CLI as a pause does, or upgrades a pause, and the
+  daemon records the work folder (HEAD and `git status --short`) for the hand-back. `run.command`
+  is taken only while the run is held by a take-over of the same `by`; else `hand.result` with
+  `ok: false` and `error: "not_held"` (`"busy"` while another command runs). A command runs in
+  the work folder, one at a time, at most 10 minutes, with no `chat-run` and none of the run's
+  secrets. `run.resume` ends a running command, sends `hand.summary` and gives the CLI a note on
+  what the person did before `note`.
+- `hand.*` events are not the AI member's progress: they reset no stall timer and count as no
+  tool call. The server never queues `run.command` or `run.command.cancel` for a daemon that is
+  away.
+
+Other usable changes:
+
+- `run.done.code` comes from the run's worktree: its branch, its head commit and whether every
+  commit is on the remote. A daemon that cannot tell leaves it out.
+- `chat-run artifact version --parent <n>` sends `parentVersion` in the body of `artifact.version`
+  (`AddArtifactVersionRequest`).
+- `member.handoff` and `member.assign` keep their bodies and results; their errors may carry the
+  new reasons `delegation.cycle`, `delegation.stopped` and `delegation.not_for_requester`
+  (protocol.md, "Participants, chains and relays"). An older `chat-run` prints them as they come.
+- Machine ownership: a machine is the team's or one person's (protocol.md, "Roles: 所有者 and
+  personal machines"). The daemon does not know which; the server only assigns a run to a
+  personal machine when the run works for its owner.
+
 ## Raw session upload
 
 After `run.done` the daemon uploads the CLI's own raw session file, so the process view and
@@ -785,22 +870,47 @@ later audits have the complete record:
 
 ## Run folders
 
-- `<work_root>/runs/<runId>/` with `work/` (the CLI's working directory), `run.json`,
-  `events.jsonl` (the sequenced frames), `stream.jsonl` (raw CLI stdout), `stderr.log`, and
-  `session.jsonl` (the copied raw session). `runId` must match `[A-Za-z0-9_-]{1,64}`.
+- `<work_root>/runs/<runId>/` with `run.json`, `events.jsonl` (the sequenced frames),
+  `stream.jsonl` (raw CLI stdout), `stderr.log`, and `session.jsonl` (the copied raw session).
+  `runId` must match `[A-Za-z0-9_-]{1,64}`.
+- Work lines: the runs of one member in one topic on one repository share a working folder
+  and a branch, so a follow-up run (an answer, "再改一下") finds the files, commits and
+  uncommitted changes of the run before it, and a resumed CLI session is in the folder it
+  knows. The line is `<work_root>/lines/<key>/` with `work/` (the CLI's working directory)
+  and `line.json`; `<key>` is the first 16 hex digits of SHA-256 of
+  `botMemberId \n topicId \n url:<repo.url> | path:<repo.path> | ""`, its branch is
+  `bot/<key>`. A line is used by one run at a time: a run of the same member in the topic that
+  starts while another holds the line gets its own folder `<run folder>/work` and branch
+  `bot/<runId>`, and its CLI is told so. A read-only side chat run (`kind: "aside"`) always
+  gets its own `<run folder>/work`. `run.json` names the line (`line`) when the run used one.
 - `repo.path`: a local repository (inside `repo_roots` when configured). `repo.url`: a bare
   mirror under `<work_root>/repos/` is cloned once and fetched before each run with
-  `+refs/heads/*:refs/remotes/origin/*`, so remote branches never touch the local
-  `bot/<runId>` branches of other runs. Either way the daemon runs
-  `git worktree add --no-track -b bot/<runId> work <start>`, where `<start>` is
-  `origin/<branch>` when it exists, else `<branch>`, else `HEAD`; `<branch>` is `baseBranch`,
-  or the branch HEAD names. Without `repo` the run gets an empty scratch folder.
-- Cleanup at start and every 30 minutes: finished runs older than `keep_runs_hours`
-  (default 72) are removed with `git worktree remove`; while free disk is below `min_free_gb`
-  (default 10) the oldest finished runs go first. `bot/<runId>` is deleted only when all its
-  commits are on a remote-tracking branch or another local branch; a branch with unpushed
-  commits is kept, and the daemon log names it. Below half of `min_free_gb` new runs are
-  rejected with `disk_low`.
+  `+refs/heads/*:refs/remotes/origin/*`, so remote branches never touch the local `bot/*`
+  branches of lines and runs. A line's `work/` that is there is used as it is (the base
+  branch is not merged in). Otherwise the daemon runs `git worktree add work bot/<key>` when
+  that branch is still there, else `git worktree add --no-track -b <branch> work <start>`,
+  where `<start>` is `origin/bot/<key>` for a line whose branch was pushed under its own name,
+  else `origin/<base>` when it exists, else `<base>`, else `HEAD`; `<base>` is `baseBranch`,
+  or the branch HEAD names. Without `repo` the line (or the run) gets a scratch folder, kept
+  like a worktree. When a resumed run (`resumeSessionId`) gets a line folder that was made
+  again, its CLI is told that its folder changed and what is in it.
+- Cleanup at start and every 30 minutes: finished run folders older than `keep_runs_hours`
+  (default 72) are removed, and while free disk is below `min_free_gb` (default 10) the
+  oldest finished ones go first; a run that used a line leaves the line alone. A line goes only
+  when no run has used it for `keep_runs_hours` (also when disk is low) and no run holds it.
+  Before a worktree (a line's or a run's own) is removed with `git worktree remove`, its
+  uncommitted changes are committed to the branch it has checked out (`wip: uncommitted
+  changes kept by cleanup`, hooks and signing off; a detached HEAD gets a branch
+  `<branch>-kept-<ms>`). When that commit fails, also after a stale `index.lock` of the
+  worktree is removed (a git killed with a cancelled run), the folder is moved with its files to
+  `<work_root>/kept/<run-<runId> | line-<key>>-<ms>` instead, so it never blocks the cleanup;
+  a line `work/` that git cannot use when a run starts is moved there too
+  (`line-<key>-lost-<ms>`). Folders in `kept/` stay until free disk is below `min_free_gb`,
+  then the oldest go first. A run that starts while the cleanup holds its line waits for it.
+  The branch is then deleted
+  only when all its commits are on a remote-tracking branch or another local branch; a branch
+  with unpushed commits is kept, and the daemon log names it, so the line's next run checks it
+  out again. Below half of `min_free_gb` new runs are rejected with `disk_low`.
 
 ## MicroVM runs (`[vm]`, Linux)
 
@@ -809,15 +919,18 @@ process of the daemon's machine. Nothing in this protocol changes. The VM boots 
 base image (`scripts/runner/build-base-image.sh`: Ubuntu with git, Node, Claude Code, Codex,
 Pi, bun, uv, gh) with a per-run sparse scratch disk as its writable overlay, and a tools disk
 that holds the daemon binary as `vm-agent` (PID 1 after `vm-init`) and `chat-run`. The run
-folder, the run's git dir and `[vm].shares` (default `~/.claude`, `~/.codex`, `~/.pi`) are NFS
-shares of the host, mounted at their host paths, so the worktree, session files, `stderr.log`
-and 产出 stay where the daemon reads them. Stdin and stdout go over vsock (port 1024) as
+folder, the working folder (the line's `work/`, see Run folders), the run's git dir and
+`[vm].shares` (default `~/.claude`, `~/.codex`, `~/.pi`) are NFS shares of the host, mounted at
+their host paths, so the worktree, session files, `stderr.log` and 产出 stay where the daemon
+reads them, and the member's next run in the topic, in a new VM, finds its working folder as
+it was left. Stdin and stdout go over vsock (port 1024) as
 frames; `chat-run` in the VM uses the socket `/run/chat-run.sock`, which the agent relays to
 the run's socket over vsock (port 1025), so Codex runs use the socket instead of the request
 folder. With `[vm].homes` (default `/srv/runner/homes`) the folder `<homes>/<bot member id>` is
 one more share, mounted as the VM's `$HOME`: what a bot clones, installs and signs in to
 (`gh auth login`) is there again in its next run, in every VM of that bot; the rest of the
-disk still goes with the VM. The CLI's system note says so, and that processes left running
+disk still goes with the VM. The CLI's system note says what is kept (the working folder for
+the next run in the topic, the home folder for all runs), and that processes left running
 when the turn ends are killed. 接管 pauses and resumes the whole VM. When the CLI exits the agent syncs the shares
 before the daemon reads them; then the VM, its tap, its exports and its scratch disk go.
 

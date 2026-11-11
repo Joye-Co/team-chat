@@ -1,0 +1,11 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": false,
+  "description": "by is required",
+  "value": {
+    "t": "run.command",
+    "runId": "01JBX0RUN000000000000000AU",
+    "commandId": "c1",
+    "command": "ls"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "value": {
+    "type": "hand.command",
+    "commandId": "c1",
+    "command": "npm test",
+    "by": "01JBX0OWNER0000000000000AA"
+  }
+}

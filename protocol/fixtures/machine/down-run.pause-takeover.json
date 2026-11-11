@@ -1,0 +1,10 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "value": {
+    "t": "run.pause",
+    "runId": "01JBX0RUN000000000000000AU",
+    "by": "01JBX0OWNER0000000000000AA",
+    "hold": "takeover"
+  }
+}
