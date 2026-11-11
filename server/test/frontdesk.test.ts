@@ -4,7 +4,8 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { jsonIn } from "../src/aiservice/tools";
 import { MIN_CONFIDENCE, settle } from "../src/agent/frontdesk";
 import { Daemon, downViolations, mention, world } from "./daemon";
-import { Client, api, clientMsgId, protocolViolations, waitUntil } from "./helpers";
+import { SELF } from "cloudflare:test";
+import { BASE, Client, api, clientMsgId, protocolViolations, waitUntil } from "./helpers";
 
 afterAll(async () => {
   await new Promise((r) => setTimeout(r, 300));
@@ -87,6 +88,33 @@ describe("front desk", () => {
     expect(list.body.decisions[1]).toMatchObject({ reason: "a greeting", inputTokens: 900, model: "deepseek-chat" });
     expect((await api(`/v1/bots/${w.bot.id}/decisions?groupId=${w.gid}&topicId=${topicId}`, { token: w.human.token })).status).toBe(403);
     d.close();
+    c.close();
+  });
+
+  it("knows a direct chat and reads the request's files", async () => {
+    const w = await world();
+    await aiOn(w.owner.token);
+    const seen = fakeDesk([{ action: "reply", reason: "a look", confidence: 0.95, reply: "收到图了。" }]);
+    const { c } = await Client.connect(w.human.token);
+    const dm = await api("/v1/dms", { token: w.human.token, body: { memberId: w.bot.id } });
+    expect(dm.status).toBe(200);
+    const bytes = new TextEncoder().encode("png");
+    const sum = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
+    const f = await api("/v1/files", { token: w.human.token, body: { groupId: dm.body.group.id, name: "图.png", size: 3, mime: "image/png", sha256: sum } });
+    expect(f.status, JSON.stringify(f.body)).toBe(200);
+    const put = await SELF.fetch(`${BASE}/v1/files/${f.body.file.id}/content`, { method: "PUT", headers: { authorization: `Bearer ${w.human.token}` }, body: bytes });
+    expect(put.status).toBe(200);
+    await c.ok({
+      t: "send",
+      groupId: dm.body.group.id,
+      clientMsgId: clientMsgId(),
+      body: "看下这张",
+      attachments: [{ fileId: f.body.file.id, name: "图.png", size: bytes.length, mime: "image/png", sha256: "0".repeat(64) }],
+    });
+    await c.waitEvent((e) => e.type === "message.created" && e.data.message.authorId === w.bot.id && e.data.message.body === "收到图了。");
+    const input = seen[0].body.messages[1].content as string;
+    expect(input).toContain("(a direct conversation with you)");
+    expect(input).toContain(`[file f ${f.body.file.id} · 图.png`);
     c.close();
   });
 

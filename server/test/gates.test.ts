@@ -141,6 +141,11 @@ describe("gated approvals", () => {
     expect(d.frames.filter((f) => f.t === "run.approval")).toEqual([]);
     await co.ok({ t: "card.action", groupId: w.gid, messageId: card.id, actionId: "approveall:daemon-gate-1" });
     expect(await d.next((f) => f.t === "run.approval")).toMatchObject({ approvalId: "daemon-gate-1", decision: "approve", scope: "run" });
+    // The card changes in place: no buttons, the outcome in the title, who and when in one line.
+    const closed = (await c.waitEvent((e) => e.type === "message.updated" && e.data.messageId === card.id && e.data.card?.actions.length === 0)).data;
+    expect(closed.card).toMatchObject({ title: "已同意：合并到 main", tone: "success" });
+    expect(closed.card.blocks[0]).toEqual({ type: "code", text: "gh pr merge 12" });
+    expect(closed.card.blocks[1].text).toMatch(/同意了，这件事里同类的操作不再问 · \d\d:\d\d$/);
     d.event(runId, { type: "approval.resolved", approvalId: "daemon-gate-1", decision: "approve" });
 
     // The requester's message the CLI never took becomes a follow-up run: the same piece of
@@ -183,6 +188,20 @@ describe("gated approvals", () => {
     const ans = await d.next((f) => f.t === "run.approval");
     expect(ans).toMatchObject({ approvalId: "daemon-gate-1", decision: "approve" });
     expect(ans.scope).toBeUndefined();
+    const closed = (await c.waitEvent((e) => e.type === "message.updated" && e.data.messageId === card.id && e.data.card)).data;
+    expect(closed.card).toMatchObject({ title: "已同意：对外发布", actions: [] });
+    d.event(a.runId, { type: "approval.resolved", approvalId: "daemon-gate-1", decision: "approve" });
+
+    // A second card that the run ends without: it says it was not needed, the buttons go.
+    d.event(a.runId, { type: "approval.request", approvalId: "daemon-gate-2", title: "对外发布", kind: "externalPublish", command: "npm publish --tag next" });
+    const second = await waitUntil(
+      () => c.events().find((e) => e.type === "message.created" && e.data.message.kind === "card" && e.data.message.id !== card.id)?.data.message,
+      5000,
+      "second approval card",
+    );
+    await d.acked(a.runId, d.done(a.runId, { status: "failed", error: "gave up" }));
+    const expired = (await c.waitEvent((e) => e.type === "message.updated" && e.data.messageId === second.id && e.data.card)).data;
+    expect(expired.card).toMatchObject({ title: "没用上：对外发布", tone: "neutral", actions: [] });
     c.close();
     d.close();
   });

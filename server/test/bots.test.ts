@@ -7,6 +7,7 @@ import {
   STALL_MS,
   TEXT,
   approvalDecision,
+  readableError,
   candidates,
   isHealthy,
   labelsMatch,
@@ -102,6 +103,11 @@ describe("dispatch rules", () => {
   });
 
   it("read approval answers", () => {
+    expect(readableError('{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The \'gpt-6.1-sol\' model is not supported when using Codex with a ChatGPT account.","code":"model_not_found"}}')).toBe(
+      "这台电脑上的账号用不了模型 gpt-6.1-sol，换个模型再试",
+    );
+    expect(readableError('{"error":{"message":"rate limited"}}')).toBe("rate limited");
+    expect(readableError("exit 1")).toBe("exit 1");
     expect(approvalDecision("同意")).toBe("approve");
     expect(approvalDecision("@dev 同意。")).toBe("approve");
     expect(approvalDecision("拒绝")).toBe("deny");

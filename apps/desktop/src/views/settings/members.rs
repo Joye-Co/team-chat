@@ -1502,7 +1502,7 @@ pub fn runtime_options(
 /// The models and 思考强度 a runtime offers on the computers that can run the member: the
 /// picked computer only, else every computer that has the runtime. Models keep their first
 /// report; efforts are the union in order.
-fn cli_choices(
+pub(super) fn cli_choices(
     machines: &[MachineInfo],
     runtime: &str,
     machine: Option<&str>,
@@ -1531,7 +1531,11 @@ fn cli_choices(
 
 /// The 思考强度 levels for a model: its own list, else the runtime's. With no model picked,
 /// the default model's.
-fn effort_options(models: &[ModelChoice], efforts: &[String], model: Option<&str>) -> Vec<String> {
+pub(super) fn effort_options(
+    models: &[ModelChoice],
+    efforts: &[String],
+    model: Option<&str>,
+) -> Vec<String> {
     let chosen = match model {
         Some(id) => models.iter().find(|m| m.id == id),
         None => models.iter().find(|m| m.is_default),
@@ -1542,12 +1546,12 @@ fn effort_options(models: &[ModelChoice], efforts: &[String], model: Option<&str
     }
 }
 
-fn model_text(m: &ModelChoice) -> String {
+pub(super) fn model_text(m: &ModelChoice) -> String {
     m.name.clone().unwrap_or_else(|| m.id.clone())
 }
 
 /// 默认, with the default model's name when a computer said which it is.
-fn default_model_text(models: &[ModelChoice]) -> String {
+pub(super) fn default_model_text(models: &[ModelChoice]) -> String {
     match models.iter().find(|m| m.is_default) {
         Some(m) => s::RUNNER_MODEL_DEFAULT_NAMED.replace("{name}", &model_text(m)),
         None => s::RUNNER_MODEL_DEFAULT.to_string(),
@@ -1555,7 +1559,7 @@ fn default_model_text(models: &[ModelChoice]) -> String {
 }
 
 /// A 思考强度 level in words; one this build does not know shows as the CLI spells it.
-fn effort_text(e: &str) -> String {
+pub(super) fn effort_text(e: &str) -> String {
     match e {
         "minimal" => s::EFFORT_MINIMAL,
         "low" => s::EFFORT_LOW,

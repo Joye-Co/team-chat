@@ -405,6 +405,12 @@ pub fn memory_body(body: &Value) -> Result<Value, Value> {
         }
         out["when"] = Value::from(w);
     }
+    if let Some(m) = body.get("sourceMessageId").filter(|m| !m.is_null()) {
+        let Some(m) = m.as_str().filter(|m| valid_id(m)) else {
+            return Err(err("invalid", None, "--source must be a message id"));
+        };
+        out["sourceMessageId"] = Value::from(m);
+    }
     Ok(out)
 }
 

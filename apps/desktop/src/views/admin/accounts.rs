@@ -177,6 +177,7 @@ impl AdminView {
         self.show_page(page, cx);
         if page == Page::Ai {
             self.ai.update(cx, |a, cx| a.refresh(window, cx));
+            self.models.update(cx, |m, cx| m.refresh(cx));
         }
         if page == Page::Rules {
             self.rules.update(cx, |m, cx| m.refresh_rules(window, cx));

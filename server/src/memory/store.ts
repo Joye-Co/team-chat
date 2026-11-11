@@ -23,7 +23,12 @@ export type MemoryRow = {
   version: number;
   created_at: number;
   updated_at: number;
+  /** The group an AI member's memory was learned in (UNKNOWN_GROUP: before it was recorded); null = no limit. */
+  from_group: string | null;
 };
+
+/** `from_group` of AI member memories noted before the group was recorded (migration 0017). */
+export const UNKNOWN_GROUP = "unknown";
 
 type UpdateRow = {
   id: string;
@@ -71,6 +76,7 @@ export function toItem(r: MemoryRow): MemoryItem {
   };
   if (r.when_text) item.when = r.when_text;
   if (r.note) item.note = r.note;
+  if (r.from_group) item.fromGroup = r.from_group;
   return item;
 }
 
@@ -109,6 +115,8 @@ export interface NewMemory {
   human: boolean;
   status: MemoryStatus;
   confidence: number;
+  /** An AI member's memory: the group it was learned in. */
+  fromGroup?: string | null;
 }
 
 function versionStatement(db: D1Database, row: MemoryRow, by: string | null, now: number): D1PreparedStatement {
@@ -136,15 +144,16 @@ export function insertStatements(db: D1Database, m: NewMemory, by: string | null
     version: 1,
     created_at: now,
     updated_at: now,
+    from_group: m.fromGroup ?? null,
   };
   if (row.text === "") throw new ApiError("invalid", "text is empty");
   const stmts = [
     db
       .prepare(
-        `INSERT INTO memories (id, scope, kind, text, when_text, source, note, author_id, human, status, confidence, uses, last_used_at, version, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, 1, ?, ?)`,
+        `INSERT INTO memories (id, scope, kind, text, when_text, source, note, author_id, human, status, confidence, uses, last_used_at, version, created_at, updated_at, from_group)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, 1, ?, ?, ?)`,
       )
-      .bind(row.id, row.scope, row.kind, row.text, row.when_text, row.source, row.note, row.author_id, row.human, row.status, row.confidence, now, now),
+      .bind(row.id, row.scope, row.kind, row.text, row.when_text, row.source, row.note, row.author_id, row.human, row.status, row.confidence, now, now, row.from_group),
     versionStatement(db, row, by, now),
   ];
   return { row, stmts };
@@ -163,6 +172,8 @@ export interface MemoryChange {
   note?: string | null;
   status?: MemoryStatus;
   human?: boolean;
+  /** null releases the memory to everyone who reads its scope. */
+  fromGroup?: string | null;
 }
 
 /** The row after `change`, as a new version; null when nothing would change. */
@@ -174,7 +185,8 @@ export function changed(row: MemoryRow, change: MemoryChange, now: number): Memo
   if (change.note !== undefined) next.note = cleanNote(change.note);
   if (change.status !== undefined) next.status = change.status;
   if (change.human !== undefined) next.human = change.human ? 1 : 0;
-  const same = (["kind", "text", "when_text", "note", "status", "human"] as const).every((k) => next[k] === row[k]);
+  if (change.fromGroup !== undefined) next.from_group = change.fromGroup;
+  const same = (["kind", "text", "when_text", "note", "status", "human", "from_group"] as const).every((k) => next[k] === row[k]);
   if (same) return null;
   next.version = row.version + 1;
   next.updated_at = now;
@@ -186,10 +198,10 @@ export function saveStatements(db: D1Database, prev: MemoryRow, next: MemoryRow,
   return [
     db
       .prepare(
-        `UPDATE memories SET kind = ?, text = ?, when_text = ?, note = ?, status = ?, human = ?, version = ?, updated_at = ?
+        `UPDATE memories SET kind = ?, text = ?, when_text = ?, note = ?, status = ?, human = ?, from_group = ?, version = ?, updated_at = ?
          WHERE id = ? AND version = ?`,
       )
-      .bind(next.kind, next.text, next.when_text, next.note, next.status, next.human, next.version, now, prev.id, prev.version),
+      .bind(next.kind, next.text, next.when_text, next.note, next.status, next.human, next.from_group, next.version, now, prev.id, prev.version),
     // The version row's primary key fails the batch when another write took this version first.
     versionStatement(db, next, by, now),
   ];

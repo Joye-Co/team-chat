@@ -2,11 +2,12 @@
 // cards), and the end of a run (result, status, follow-up runs).
 import { type Card, RUN_KIND_ASIDE, type RunStatus, type TopicStatus } from "@chat/protocol";
 import { ApiError, unwrap } from "../../core/errors";
-import { MAX_RESULT_CHARS, Progress, TEXT, cut, firstLine, stripAcceptance } from "../dispatch";
+import { MAX_RESULT_CHARS, Progress, TEXT, cut, firstLine, readableError, stripAcceptance } from "../dispatch";
 import { linkStub } from "../env";
 import type { SeqFrame } from "../link";
 import { type RunProof, doneCard, doneCardV1, hasProof, mergePrs, prRefs } from "../proof";
 import { TOPIC_LINK_RPC } from "../../integrations/links";
+import { stamp } from "../../context/render";
 import { MAX_FOLLOW_UPS, type RunRow, isStallStatus, sanitizeAcceptance, sanitizePlan, sanitizeUsage, sessionIdOf } from "./core";
 import { DeskRuns, type RunRequest } from "./runs";
 import { briefText } from "../../agent/frontdesk";
@@ -244,6 +245,43 @@ export abstract class DeskEvents extends DeskRuns {
   }
 
   /**
+   * The approval card changes in place once it is answered or no longer needed (DESIGN.md §7.10):
+   * the buttons go, the title says the outcome and one line says who and when. Never throws.
+   */
+  protected async closeApprovalCard(r: RunRow, outcome: "approve" | "approve_run" | "deny" | "expired", actorId?: string): Promise<void> {
+    const raw = this.meta(`approvalCard:${r.id}`);
+    if (!raw) return;
+    this.sql.exec("DELETE FROM meta WHERE key = ?", `approvalCard:${r.id}`);
+    try {
+      const saved = JSON.parse(raw) as { messageId?: string; shown?: string; card?: Card };
+      // Only a posted card changes (not the text form, nor a card that was never posted).
+      if (!saved.messageId || !saved.card || saved.shown === undefined) return;
+      const who = actorId ? ((await this.names([actorId])).get(actorId) ?? "") : "";
+      const text = TEXT.approvalClosed[outcome];
+      const line = text.line(who, stamp(Date.now()).slice(-5));
+      const card: Card = {
+        ...saved.card,
+        title: cut(text.title(saved.shown), 200),
+        tone: outcome === "deny" ? "danger" : outcome === "expired" ? "neutral" : "success",
+        blocks: [...(saved.card.blocks ?? []), { type: "text", text: line }],
+        actions: [],
+      };
+      unwrap(
+        await this.room(r).edit(r.group_id, this.actor(), {
+          t: "edit",
+          rid: "bot",
+          groupId: r.group_id,
+          messageId: saved.messageId,
+          body: `${card.title}\n\n${line}`,
+          card,
+        } as never),
+      );
+    } catch (err) {
+      this.log.warn("approval card close failed", { runId: r.id, err });
+    }
+  }
+
+  /**
    * Posts the approval card (and its text form) to the approver. `gate` (feature "gates"): the
    * daemon stopped a command of that kind; the card names the kind, shows the command, goes to
    * the kind's approver and offers 这件事里都同意.
@@ -257,11 +295,11 @@ export abstract class DeskEvents extends DeskRuns {
     const what = gate ? (gate.command ?? detail) : detail;
     // The approvers; with none among the owners, the requester (and the card says why).
     const { ids: askWho, noOwner } = await this.approversOrRequester(r, gate?.kind);
-    const cardMeta = (messageId?: string) =>
+    const cardMeta = (messageId?: string, posted?: { shown: string; card: Card }) =>
       this.sql.exec(
         "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
         `approvalCard:${r.id}`,
-        JSON.stringify({ approvalId, noOwner, ...(messageId ? { messageId } : {}) }),
+        JSON.stringify({ approvalId, noOwner, ...(messageId ? { messageId } : {}), ...(posted ?? {}) }),
       );
     cardMeta();
     const asked = gate ? TEXT.approvalGate(cut(shown, 500), what ? cut(what, 4000) : undefined) : TEXT.approval(cut(title, 500), detail ? cut(detail, 4000) : undefined);
@@ -279,8 +317,9 @@ export abstract class DeskEvents extends DeskRuns {
     };
     const cmid = `run:${r.id}:approval:${cut(approvalId, 24)}`;
     try {
-      // A reply that quotes this message answers it (approvalDecision).
-      cardMeta(await this.post(r, cmid, body, { card, mentions: askWho }));
+      // A reply that quotes this message answers it (approvalDecision); the card changes in
+      // place once answered (closeApprovalCard).
+      cardMeta(await this.post(r, cmid, body, { card, mentions: askWho }), { shown: cut(shown, 180), card });
     } catch (err) {
       // A card the room rejects (for example an action id that is too long) falls back to text.
       this.log.warn("approval card failed", { runId: r.id, err });
@@ -378,7 +417,7 @@ export abstract class DeskEvents extends DeskRuns {
     } else if (f.status === "cancelled") {
       await this.end(r, "cancelled", TEXT.cancelled, "blocked", TEXT.cancelled);
     } else {
-      const why = firstLine(f.error ?? f.summary ?? "", 300);
+      const why = firstLine(readableError(f.error ?? f.summary ?? ""), 300);
       await this.end(r, "failed", TEXT.failed(why), "blocked", cut(TEXT.failed(why), 280));
     }
     // Follow-ups the CLI never took start a new run with the topic context.
@@ -449,6 +488,7 @@ export abstract class DeskEvents extends DeskRuns {
   protected async end(r: RunRow, status: RunStatus, body: string, topicStatus: TopicStatus, summary: string, success = false): Promise<void> {
     const now = Date.now();
     await this.closeProgress(r);
+    await this.closeApprovalCard(r, "expired");
     this.sql.exec("UPDATE runs SET approval_id = NULL, paused_by = NULL, paused_at = NULL WHERE id = ?", r.id);
     r.approval_id = null;
     r.paused_by = null;
@@ -477,6 +517,7 @@ export abstract class DeskEvents extends DeskRuns {
       const input = {
         botId: this.botId as string,
         runId: r.id,
+        groupId: r.group_id,
         status,
         requesterId: req.m.authorId,
         request: [req.m.body, ...req.followUps.map((f) => f.body)].join("\n\n"),

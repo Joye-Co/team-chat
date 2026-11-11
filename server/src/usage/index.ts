@@ -204,8 +204,9 @@ registerRoute({
   },
 });
 
-// Per-model prices from models.dev, once a day (the 03:00 cron); a failure keeps the last copy.
-registerScheduled("*", async ({ env, log }) => {
+// Per-model prices from models.dev, once a day (the 03:00 UTC cron, ARCHIVE_CRON; the other cron
+// is hourly); a failure keeps the last copy.
+registerScheduled("0 3 * * *", async ({ env, log }) => {
   try {
     const n = await syncPrices(env);
     log.info("model prices synced", { models: n });

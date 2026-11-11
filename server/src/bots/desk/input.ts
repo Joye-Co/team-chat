@@ -8,6 +8,7 @@ import { TEXT, approvalDecision, approvesWholeWork } from "../dispatch";
 import { linkStub } from "../env";
 import { answerText } from "../answers";
 import { refsText } from "../refs";
+import { requestAuthors, requestText } from "../../context/render";
 import type { CardAnswerIn, CardPress, TopicMessage } from "../room";
 import { ACTIVE, type RunRow, result } from "./core";
 import { DeskDelegate } from "./delegate";
@@ -116,6 +117,7 @@ export abstract class DeskInput extends DeskDelegate {
       );
       if (whole && kind) this.approveGateForWork(r.id, kind);
       await link.toRun({ t: "run.approval", runId: r.id, approvalId: r.approval_id, decision, ...(whole ? { scope: "run" } : {}) } as never);
+      await this.closeApprovalCard(r, whole ? "approve_run" : decision, m.authorId);
       return;
     }
     // 盯活: "进展怎么样了" is answered from the run's own state; the CLI is not interrupted.
@@ -157,13 +159,16 @@ export abstract class DeskInput extends DeskDelegate {
 
   /**
    * The `run.input` text of a topic message: the body, and with refs (引用提问) the question
-   * and the references section; context only for sources the run did not see yet.
+   * and the references section; context only for sources the run did not see yet. Files, 产出
+   * and the quoted message follow the body as indented lines, so an image alone is not empty.
    */
   protected async inputText(r: RunRow, m: TopicMessage): Promise<string> {
-    if (!m.refs || m.refs.length === 0) return m.body;
-    const ids = m.refs.map((x) => x.fromId).filter((x): x is string => Boolean(x));
-    const names = await this.names([m.authorId, ...ids]);
-    const text = [m.body, refsText(names.get(m.authorId) ?? m.authorId, m.refs, names, this.seenRefs(r.id))].filter((x) => x !== "").join("\n\n");
+    if ((!m.refs || m.refs.length === 0) && !m.ext) return m.body;
+    const ids = (m.refs ?? []).map((x) => x.fromId).filter((x): x is string => Boolean(x));
+    const names = await this.names([...new Set([m.authorId, ...ids, ...requestAuthors(m.ext)])]);
+    const body = requestText(m.body, m.ext, (id) => names.get(id) ?? id);
+    if (!m.refs || m.refs.length === 0) return body;
+    const text = [body, refsText(names.get(m.authorId) ?? m.authorId, m.refs, names, this.seenRefs(r.id))].filter((x) => x !== "").join("\n\n");
     this.seeRefs(r.id, m.refs.map((x) => x.messageId));
     return text;
   }
@@ -188,6 +193,7 @@ export abstract class DeskInput extends DeskDelegate {
     await this.auditApproval(r, a.actorId, whole ? "approve_run" : decision, "card");
     if (whole && kind) this.approveGateForWork(r.id, kind);
     await linkStub(this.env, r.machine_id).toRun({ t: "run.approval", runId: r.id, approvalId: r.approval_id, decision, ...(whole ? { scope: "run" } : {}) } as never);
+    await this.closeApprovalCard(r, whole ? "approve_run" : decision, a.actorId);
   }
 
   // -------------------------------------------------------------------------
