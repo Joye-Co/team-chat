@@ -1,0 +1,7 @@
+{
+  "kind": "QrRequestRequest",
+  "valid": true,
+  "value": {
+    "deviceName": "Joye 的 MacBook Pro"
+  }
+}

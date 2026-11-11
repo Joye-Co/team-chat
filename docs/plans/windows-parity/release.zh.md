@@ -24,7 +24,7 @@ Windows 现在的做法，都是从代码和脚本里读出来的（括号里是
 | 旧式链接 `/download?code=<邀请码>`（邀请码在地址里，老版本客户端生成的） | 给 DMG | 原来也给 DMG，Windows 上没法用 | **已补**（PR 1）：请求没写 `platform` 时，服务器看 `User-Agent`，是 Windows 就给安装包；写了 `platform` 的以写的为准。新增测试：Edge 的 UA 拿到安装包，Safari 的 UA 拿到 DMG，`platform=macos` 能让 Windows 浏览器拿 DMG。`docs/protocol.md` 已更新 |
 | 这个平台还没有版本时 | 404「No release yet.」 | 404「No release for this system yet.」，不会给 DMG | 相同 |
 | 客户端里的下载接口 `GET /v1/updates/latest`、`/v1/updates/:version/download` | 不带参数 | 带 `?platform=windows`；回答的 `platform` 不是 `windows` 就当没有（`crates/chat-core/src/updates.rs`） | 相同 |
-| GitHub Releases | `<名字>-<版本>.dmg` 和 `.sha256` | `<名字>-<版本>-setup.exe` 和 `.sha256`（`release.yml` 的 `windows-publish`） | 相同（第一次真实发版后才有文件，见第三节） |
+| GitHub Releases | `<名字>-<版本>.dmg`；校验和是 GitHub 在 Assets 里显示的 `sha256:` | `<名字>-<版本>-setup.exe`，同样看 `sha256:`（`release.yml` 的 `windows-publish`，`check-release-digest.sh`） | 相同（第一次真实发版后才有文件，见第三节） |
 | 官网（`apps/website`） | 没有下载按钮，只有文字 | 没有下载按钮；文字写着 Windows「正在开发」 | 相同（都没有按钮）。文字要在第一次 Windows 发版后改，见第三节 |
 | 不装客户端、只装 daemon | `<slug>-daemon-<版本>-aarch64-apple-darwin`（`build-daemon.sh`） | `<slug>-daemon-<版本>-x86_64-pc-windows-msvc.exe`（`build-windows-installer.sh`），配 `scripts/install-daemon.ps1` | 相同 |
 
@@ -32,7 +32,7 @@ Windows 现在的做法，都是从代码和脚本里读出来的（括号里是
 
 | 项 | Mac | Windows | 状态 |
 | --- | --- | --- | --- |
-| 人手动校验 | `shasum -a 256 -c <dmg>.sha256` | `Get-FileHash`，和 `.sha256` 对比（INSTALL 文档） | 相同 |
+| 人手动校验 | `shasum -a 256 <dmg>`，和 Assets 里的 `sha256:` 对比 | `Get-FileHash`，和 Assets 里的 `sha256:` 对比（INSTALL 文档） | 相同 |
 | 系统对来源的检查 | 没有公证：第一次打开要去「隐私与安全性」点「仍要打开」，或 `xattr -dr com.apple.quarantine` | 没有证书时 SmartScreen：「更多信息 → 仍要运行」；有证书后按信誉逐步消失 | 相同（都要手动放行一次；证书见第三节） |
 | 签名 | 自签证书，designated requirement 固定到证书（`build-dmg.sh`、`test-dmg.sh`） | Authenticode，可选；`scripts/windows/sign.sh` 给客户端、更新程序、daemon、卸载程序、安装包签名 | 相同（签名路径 CI 用临时证书实测） |
 
@@ -193,7 +193,7 @@ Mac 只出 Apple 芯片的版本；Windows 只出 x64 的版本。ARM 的 Window
 2. 确认仓库变量 `SERVERS_JSON` 是 `{"staging": "<地址>", "production": "<地址>"}`（Mac 发版已经在用）。
 3. Actions › Release：`version` 填新版本号，先 `mode=dry-run`，看 `Windows installer` 任务全绿，从产物
    `windows-installer-<版本>` 里拿安装包在一台 Windows 电脑上装一次（见下一条）。
-4. 再跑 `mode=release`。完成后检查：GitHub Release 的 Assets 里有 `-setup.exe`、`.sha256` 和 Windows 的
+4. 再跑 `mode=release`。完成后检查：GitHub Release 的 Assets 里有 `-setup.exe` 和 Windows 的
    daemon；`curl -H "Authorization: Bearer <token>" "<服务器>/v1/updates/latest?platform=windows"` 返回这个版本。
 5. Windows 任务失败而 Mac 已经发出去：在 `main` 上修好，在那次运行上点 **Re-run failed jobs**。
 6. 把官网（`apps/website/src/index.html`）里「Windows 正在开发」的文字改掉，加上下载说明。

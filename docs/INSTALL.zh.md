@@ -16,13 +16,13 @@ English version: [INSTALL.md](INSTALL.md)。Windows 电脑看下面的[在 Windo
   `TeamChat-<版本号>.dmg`。也可以在终端里运行:
 
   ```sh
-  gh release download --repo Joye-Co/team-chat --pattern 'TeamChat-*.dmg*'
+  gh release download --repo Joye-Co/team-chat --pattern 'TeamChat-*.dmg'
   ```
 
-可选:检查文件是否完整(同一个版本里有对应的 `.sha256` 文件):
+可选:检查文件是否完整(输出要和该版本 Assets 里 DMG 旁边显示的 `sha256:` 一致):
 
 ```sh
-shasum -a 256 -c TeamChat-<版本号>.dmg.sha256   # 显示 "OK" 就是完整的
+shasum -a 256 TeamChat-<版本号>.dmg
 ```
 
 ## 2. 安装
@@ -105,11 +105,11 @@ cd ~/Library/Application\ Support/co.joye.teamchat && zip -r ~/Desktop/teamchat-
    的 Assets 里下载,或在终端里运行:
 
    ```powershell
-   gh release download --repo Joye-Co/team-chat --pattern 'TeamChat-*-setup.exe*'
+   gh release download --repo Joye-Co/team-chat --pattern 'TeamChat-*-setup.exe'
    ```
 
    邀请码留着,登录时要用。
-2. 可选:在 PowerShell 里检查文件是否完整(和同一个版本里的 `.sha256` 文件对比):
+2. 可选:在 PowerShell 里检查文件是否完整(和该版本 Assets 里安装包旁边显示的 `sha256:` 对比):
 
    ```powershell
    Get-FileHash .\TeamChat-<版本号>-setup.exe -Algorithm SHA256
