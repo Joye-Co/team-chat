@@ -563,6 +563,10 @@ expect ok "the failure does not print the host" bash -c "! grep -q 'example.org'
 printf 'TC_SERVERS_JSON: {"staging":"https://staging.chat.example.org"}\n' >"$WORK/logs/2.log"
 expect fail "a log with the staging host fails" env TC_SERVERS_JSON="$SERVERS" LOG_DIR="$WORK/logs" "$L"
 expect ok "a run without server URLs has nothing to check" env TC_SERVERS_JSON= LOG_DIR="$WORK/logs" "$L"
+# A rerun of only the failed jobs: each job's newest finished attempt is read, also when the
+# newest attempt holds one job.
+expect ok "a rerun reads the jobs of the earlier attempts too" is \
+  "$(printf '11\tBuild\n12\tLog scan\n\n21\tLog scan\n' | "$L" --newest-per-job)" "$(printf '11\tBuild\n21\tLog scan')"
 
 jq -n --argjson fails "$fails" --arg version "$(workspace_version)" '{ version: $version, failures: $fails }' >"$WORK/report.json"
 [ "$fails" = 0 ] || die "$fails release script test(s) failed"

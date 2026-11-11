@@ -13,6 +13,17 @@ set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 need jq
 
+# Lines "<job id>\t<job name>", oldest attempt first: the last id of each name, in first-seen order.
+newest_per_job() {
+  printf '%s' "$1" | awk -F'\t' 'NF >= 2 { if (!($2 in id)) order[++k] = $2; id[$2] = $1 }
+    END { for (i = 1; i <= k; i++) printf "%s\t%s\n", id[order[i]], order[i] }'
+}
+if [ "${1:-}" = "--newest-per-job" ]; then
+  # (tests) the choice of jobs across attempts, from stdin
+  newest_per_job "$(cat)"
+  exit 0
+fi
+
 hosts="$(printf '%s' "${TC_SERVERS_JSON:-}" | jq -r '.. | strings' 2>/dev/null |
   sed -E 's#^[A-Za-z][A-Za-z0-9+.-]*://##; s#[/:?].*$##' | awk 'length($0) > 3' | sort -u || true)"
 if [ -z "$hosts" ]; then
@@ -32,8 +43,16 @@ else
   (umask 077; printf 'Authorization: Bearer %s\n' "${GH_TOKEN:-$(gh auth token)}" >"$auth")
   api="${GITHUB_API_URL:-https://api.github.com}"
   # Finished jobs that ran (a skipped job has no log). This job itself is still running.
-  jobs="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/${GITHUB_RUN_ATTEMPT:-1}/jobs?per_page=100" \
-    -q '.jobs[] | select(.status == "completed" and .conclusion != "skipped") | "\(.id)\t\(.name)"')"
+  # A rerun of only the failed jobs is a new attempt that holds only those jobs, so this attempt
+  # alone can be empty: read every attempt up to this one and keep each job's newest finished one.
+  all=""
+  for n in $(seq 1 "${GITHUB_RUN_ATTEMPT:-1}"); do
+    part="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$n/jobs?per_page=100" \
+      -q '.jobs[] | select(.status == "completed" and .conclusion != "skipped") | "\(.id)\t\(.name)"')" ||
+      die "cannot list the jobs of attempt $n"
+    all="$all$part"$'\n'
+  done
+  jobs="$(newest_per_job "$all")"
   [ -n "$jobs" ] || die "this run has no finished job to read"
   missing=0
   while IFS=$'\t' read -r id name; do
