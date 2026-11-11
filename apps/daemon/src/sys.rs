@@ -270,6 +270,40 @@ pub fn slept(
     (between > period + LATE).then(|| between - period)
 }
 
+/// How long the machine has been up, counting the time it was asleep, on a clock that a
+/// change of the date does not move (an NTP correction, a person setting the time). The
+/// clock a program asks "did the machine sleep since I last looked?": `Instant` does not
+/// count the sleep on Unix, and the date can jump for other reasons.
+/// Linux `CLOCK_BOOTTIME`, macOS `CLOCK_MONOTONIC` (its continuous time), Windows the tick
+/// count.
+pub fn since_boot() -> std::time::Duration {
+    #[cfg(unix)]
+    {
+        #[cfg(target_os = "linux")]
+        const CLOCK: libc::clockid_t = libc::CLOCK_BOOTTIME;
+        #[cfg(not(target_os = "linux"))]
+        const CLOCK: libc::clockid_t = libc::CLOCK_MONOTONIC;
+        let mut t = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        // SAFETY: the out pointer is a valid timespec.
+        if unsafe { libc::clock_gettime(CLOCK, &mut t) } != 0 {
+            return std::time::Duration::ZERO;
+        }
+        std::time::Duration::new(t.tv_sec as u64, t.tv_nsec as u32)
+    }
+    #[cfg(windows)]
+    {
+        // SAFETY: plain call without arguments.
+        std::time::Duration::from_millis(unsafe {
+            windows_sys::Win32::System::SystemInformation::GetTickCount64()
+        })
+    }
+    #[cfg(not(any(unix, windows)))]
+    std::time::Duration::ZERO
+}
+
 /// The 1, 5 and 15 minute load averages. Windows keeps none, so the daemon keeps its own
 /// ([`windows_load`]). The first call there measures for half a second and starts all three
 /// averages at what it saw, so the first report of a daemon (and `doctor`, which asks once) is
@@ -558,6 +592,19 @@ pub fn windows_plain_path(path: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The clock that counts sleep moves forward and does not stand still.
+    #[test]
+    fn the_time_since_boot_moves_forward() {
+        let a = since_boot();
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        let b = since_boot();
+        assert!(a > std::time::Duration::ZERO, "{a:?}");
+        assert!(
+            b > a && b - a < std::time::Duration::from_secs(5),
+            "{a:?} {b:?}"
+        );
+    }
 
     /// A tick that comes on time, or a little late, is a tick; one that comes much later
     /// than its period means the machine slept for the rest.

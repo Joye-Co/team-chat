@@ -216,6 +216,31 @@ jobs:
           trap 'sudo rm -f /etc/claude-code/managed-settings.json' EXIT
           TC_MANAGED_HOOKS_ONLY=1 cargo test --locked -p daemon --test integration a_cli_whose_hooks_are_managed_only -- --nocapture
 
+  # The daemon's tests on the Mac, where most production daemons run: the same suites as on
+  # Linux (process groups, the Unix socket, launchd's plist, the pty) on the system's own
+  # process and file rules, with the real Claude Code and Codex CLIs (no login) against the
+  # fake model, Codex's Seatbelt sandbox among them.
+  daemon-macos:
+    name: Daemon tests (macOS)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: macos-daemon
+      - name: Install the real Claude Code and Codex CLIs
+        run: npm install -g @anthropic-ai/claude-code@2.1.322 @openai/codex@0.167.1
+      - name: cargo test (daemon)
+        env:
+          TC_REQUIRE_REAL_CLI: "1"
+          TC_REQUIRE_REAL_CODEX: "1"
+        run: cargo test --locked -p daemon --no-fail-fast
+
   daemon-e2e:
     name: Daemon local e2e (Linux, fake Claude and Codex)
     needs: changes
