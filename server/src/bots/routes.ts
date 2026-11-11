@@ -132,13 +132,14 @@ async function requirePersonalOwner(db: D1Database, a: AuthContext, machineId: s
  * active, not a side chat, and its runner member still in the group. The member writes, with
  * `machine:{id}` as the audit credential.
  */
-export async function machineRun(request: Request, env: Parameters<typeof deskStub>[0], runId: string) {
+/** `read`: the route only reads, so a read-only side chat run (单独问) may call it too. */
+export async function machineRun(request: Request, env: Parameters<typeof deskStub>[0], runId: string, opts: { read?: boolean } = {}) {
   const machine = await authenticateMachine(request, env.DB);
   const run = await runIndex(env.DB, runId);
   if (!run || run.machine_id !== machine.id) throw new ApiError("not_found", "run not found");
   const info = await deskStub(env, run.bot_id).getRun(run.bot_id, run.id);
   if (!info || info.endedAt !== undefined) throw new ApiError("conflict", "the run ended", "run.ended");
-  if (info.kind === RUN_KIND_ASIDE) throw new ApiError("forbidden", "a side chat run is read only", "output.read_only");
+  if (info.kind === RUN_KIND_ASIDE && !opts.read) throw new ApiError("forbidden", "a side chat run is read only", "output.read_only");
   const bot = await getMember(env.DB, run.bot_id);
   if (!bot || bot.deactivated || !(await isGroupMember(env.DB, run.group_id, run.bot_id))) {
     throw new ApiError("forbidden", "the run's member is not in the group");

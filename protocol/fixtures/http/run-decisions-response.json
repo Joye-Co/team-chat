@@ -1,0 +1,21 @@
+{
+  "kind": "RunDecisionsResponse",
+  "valid": true,
+  "value": {
+    "decisions": [
+      {
+        "seq": 52,
+        "messageId": "01JBX0MSG000000000000000AE",
+        "topicId": "01JBX0TOPIC0000000000000AD",
+        "rev": 1,
+        "title": "发布吗？",
+        "actionId": "ship",
+        "actionLabel": "发布",
+        "answeredBy": "01JBX0ALICE0000000000000AB",
+        "answeredAt": 1762128000000,
+        "answeredByName": "Alice"
+      }
+    ],
+    "hasMore": false
+  }
+}
