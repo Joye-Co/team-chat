@@ -325,6 +325,9 @@ pub fn capture(number: isize, png: &Path) -> Result<(), String> {
     const PW_RENDERFULLCONTENT: PRINT_WINDOW_FLAGS = PRINT_WINDOW_FLAGS(2);
 
     let hwnd = HWND(number as *mut core::ffi::c_void);
+    if std::env::var_os("TC_CAPTURE_SCREEN").is_some_and(|v| v != "0") {
+        return capture_from_screen(hwnd, png);
+    }
     // SAFETY: plain Win32 calls on a live HWND of this process. The DIB
     // section's memory (`bits`, `width * height * 4` bytes) lives until
     // `DeleteObject`, after the copy.
@@ -420,6 +423,35 @@ pub fn capture(number: isize, png: &Path) -> Result<(), String> {
     image
         .save(png)
         .map_err(|e| format!("cannot write {}: {e}", png.display()))
+}
+
+/// `TC_CAPTURE_SCREEN=1`: reads the window's client area from the screen instead of from
+/// the window. `PrintWindow` asks each window for its picture and an embedded page (a
+/// WebView2 child window of another process) does not always answer, so a page can be
+/// blank in the PNG while it shows on screen; this is the picture a person would see.
+/// The window is put above every other one first.
+#[cfg(target_os = "windows")]
+fn capture_from_screen(hwnd: windows::Win32::Foundation::HWND, png: &Path) -> Result<(), String> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SetWindowPos,
+    };
+    // SAFETY: restacks a live window of this process.
+    unsafe {
+        let _ = SetWindowPos(
+            hwnd,
+            Some(HWND_TOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+        );
+    }
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    let (x, y, width, height) = artifact_view::win_support::client_rect_on_screen(hwnd.0 as isize);
+    let bytes = artifact_view::win_support::capture_screen_png(x, y, width, height)
+        .ok_or("the screen could not be read")?;
+    std::fs::write(png, bytes).map_err(|e| format!("cannot write {}: {e}", png.display()))
 }
 
 /// Runs `screencapture -l <number> -o -x <png>`: one window, no shadow, no sound.
