@@ -25,7 +25,12 @@ trap 'rm -rf "$WORK"' EXIT
 if [ -n "${LOG_DIR:-}" ]; then
   cp "$LOG_DIR"/*.log "$WORK/"
 else
-  need gh
+  need gh curl
+  # The logs come through curl: gh refuses to print a response with terminal escape sequences,
+  # and build logs are full of them. The token goes in a header file, never on a command line.
+  auth="$WORK/auth"
+  (umask 077; printf 'Authorization: Bearer %s\n' "${GH_TOKEN:-$(gh auth token)}" >"$auth")
+  api="${GITHUB_API_URL:-https://api.github.com}"
   # Finished jobs that ran (a skipped job has no log). This job itself is still running.
   jobs="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/${GITHUB_RUN_ATTEMPT:-1}/jobs?per_page=100" \
     -q '.jobs[] | select(.status == "completed" and .conclusion != "skipped") | "\(.id)\t\(.name)"')"
@@ -34,7 +39,8 @@ else
   while IFS=$'\t' read -r id name; do
     got=0
     for _ in 1 2 3; do
-      if gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$id/logs" >"$WORK/$id.log" 2>"$WORK/err"; then got=1; break; fi
+      if curl -fsSL -H @"$auth" -H 'Accept: application/vnd.github+json' -o "$WORK/$id.log" \
+        "$api/repos/$GITHUB_REPOSITORY/actions/jobs/$id/logs" 2>"$WORK/err"; then got=1; break; fi
       sleep 5
     done
     if [ "$got" = 1 ]; then
@@ -60,5 +66,6 @@ for f in "$WORK"/*.log; do
   fi
 done
 [ "$read" -gt 0 ] || die "no job log could be read"
+rm -f "$WORK/auth" "$WORK/err"
 [ "$bad" = 0 ] || die "server addresses are in the logs of this run: mask them before the step that prints them"
 log "read $read job log(s): no server address in them"
