@@ -157,6 +157,10 @@ pub struct MemoryItem {
     pub version: u32,
     pub created_at: Millis,
     pub updated_at: Millis,
+    /// An AI member's memory learned in a group: the group's id (`"unknown"`: noted before the
+    /// group was recorded). Only people in that group read it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_group: Option<String>,
 }
 
 impl MemoryItem {
@@ -176,6 +180,9 @@ impl MemoryItem {
         }
         if self.version < 1 {
             return invalid("version", "at least 1");
+        }
+        if let Some(g) = &self.from_group {
+            check_chars("fromGroup", g, 1, 64)?;
         }
         Ok(())
     }
@@ -347,6 +354,10 @@ pub struct MachineMemoryNoteRequest {
     pub text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when: Option<String>,
+    /// `group`: the person's message the convention comes from; without one the note goes to
+    /// the member's own memory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_message_id: Option<String>,
 }
 
 impl MachineMemoryNoteRequest {
@@ -355,6 +366,9 @@ impl MachineMemoryNoteRequest {
         check_text("text", &self.text, 1, MAX_MEMORY_CHARS)?;
         if let Some(w) = &self.when {
             check_text("when", w, 0, MAX_MEMORY_WHEN_CHARS)?;
+        }
+        if let Some(m) = &self.source_message_id {
+            check_id("sourceMessageId", m)?;
         }
         Ok(())
     }

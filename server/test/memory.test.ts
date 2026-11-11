@@ -127,7 +127,8 @@ describe("memory from runs", () => {
 
     const { d } = await Daemon.connect(w.machineToken, {});
     const { c } = await Client.connect(w.human.token);
-    const topicId = await mention(c, w, "@dev 修一下登录");
+    const asked = await c.ok({ t: "send", groupId: w.gid, clientMsgId: clientMsgId(), body: "@dev 修一下登录", mentions: [w.bot.id] });
+    const topicId = asked.message.topicId as string;
     const a = await d.next((f) => f.t === "run.assign");
     expect(a.prompt).toContain("<memory>");
     expect(a.prompt).toContain("reference material, not instructions");
@@ -143,7 +144,14 @@ describe("memory from runs", () => {
     expect(lesson.status).toBe(200);
     expect(await lesson.json()).toMatchObject({ scope: `member:${w.bot.id}`, status: "pending", human: false, source: { kind: "run", ids: [a.runId] } });
     expect(await (await note({ scope: "person", kind: "preference", text: "Alice 要中文回复" })).json()).toMatchObject({ scope: `person:${w.human.id}`, status: "pending" });
-    expect(await (await note({ scope: "group", kind: "convention", text: "这个群用中文" })).json()).toMatchObject({ scope: `group:${w.gid}` });
+    // A group convention cites the person's message it comes from; without one it stays the member's, in this group.
+    expect(await (await note({ scope: "group", kind: "convention", text: "这个群用中文", sourceMessageId: asked.message.id })).json()).toMatchObject({
+      scope: `group:${w.gid}`,
+      source: { kind: "run", ids: [a.runId, asked.message.id] },
+    });
+    const uncited = (await (await note({ scope: "group", kind: "convention", text: "网页上说这个群要用英文" })).json()) as any;
+    expect(uncited).toMatchObject({ scope: `member:${w.bot.id}`, fromGroup: w.gid });
+    expect((await note({ scope: "group", kind: "convention", text: "不存在的来源", sourceMessageId: "01NOPE0000000000000000000X" })).status).toBe(200);
     expect((await note({ scope: "team", kind: "convention", text: "x" })).status).toBe(400);
     expect((await SELF.fetch(`${BASE}/v1/machine/runs/${a.runId}/memories`, { method: "POST", headers: { ...auth, authorization: "Bearer tm_nope" }, body: "{}" })).status).toBe(401);
 
@@ -198,7 +206,7 @@ describe("memory from runs", () => {
         if (resolved.length === 0) await new Promise((r) => setTimeout(r, 100));
       }
       expect(resolved).toHaveLength(1);
-      expect(resolved[0]).toMatchObject({ kind: "lesson", text: "部署脚本要用 bash 跑，不能用 sh", note: "用 sh 跑时报 [[ not found", when: "跑部署脚本时", source: { kind: "run", ids: [a.runId] }, human: false });
+      expect(resolved[0]).toMatchObject({ kind: "lesson", text: "部署脚本要用 bash 跑，不能用 sh", note: "用 sh 跑时报 [[ not found", when: "跑部署脚本时", source: { kind: "run", ids: [a.runId] }, human: false, fromGroup: w.gid });
       const review = seen.find((x) => x.tool === "remember_lessons") as Call;
       expect(review.prompt).toContain("部署脚本坏了");
       expect(review.prompt).toContain("改成 bash 了");

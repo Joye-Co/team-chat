@@ -1,8 +1,12 @@
 // 每天整理 (agent-harness.zh.md 7.3, like Claude's dreaming): once a day after 03:00 in the
-// team's time zone, each scope with pending memories is consolidated once. With an AI service one
+// team's time zone (the cron fires hourly; a failed scope is tried again the next hour), each
+// scope with pending memories is consolidated once. With an AI service one
 // forced tool call returns operations (add, merge, retire, keep, promote); without one, pending
 // memories become active as they are. Memories a person wrote are never changed, only flagged.
-// Every change is a 记忆更新 line of the day and a new version (by null).
+// Every change is a 记忆更新 line of the day and a new version (by null). A memory learned in a
+// group (`from_group`) never reaches a wider audience by itself: it merges only with memories of
+// the same group, other members' lessons shown to the model are unlimited ones only, and a
+// promotion with such a source is only proposed (a flagged line) for a person to decide.
 import { MemoryKind, type MemoryUpdate } from "@chat/protocol";
 import { z } from "zod";
 import { loadModelConfig } from "../aiservice";
@@ -13,7 +17,7 @@ import type { Logger } from "../core/logger";
 import { type MemoryChange, type MemoryRow, changed, cleanNote, insertStatements, runBatch, saveStatements, updateStatement } from "./store";
 
 export const DEFAULT_TEAM_ZONE = "Asia/Shanghai";
-/** The consolidation runs at the first cron at or after this local hour. */
+/** The consolidation runs at the first (hourly) cron at or after this local hour. */
 export const CONSOLIDATE_HOUR = 3;
 /** AI-written active memories unused this long are retired. */
 export const STALE_MS = 60 * 24 * 60 * 60_000;
@@ -25,6 +29,7 @@ export const NOTE = {
   stale: "60 天没用到，停用了",
   mergedInto: (id: string) => `并入了 ${id}`,
   promotedFrom: (ids: string[]) => `从这几条升为团队约定：${ids.join("、")}`,
+  promoteHeld: (text: string) => `来自群里或私聊的经验，没有自动升为团队约定，请决定要不要写进团队约定：${text}`,
   undo: "撤回了",
 } as const;
 
@@ -137,7 +142,10 @@ async function withModel(c: Ctx, cfg: ModelConfig, scope: string, pending: Memor
   const others = memberScope
     ? (
         await c.db
-          .prepare("SELECT * FROM memories WHERE scope LIKE 'member:%' AND scope != ? AND status IN ('active', 'pending') AND kind IN ('lesson', 'playbook') ORDER BY updated_at DESC LIMIT 100")
+          // Only lessons without a source group: one learned in a group must not reach this scope's text.
+          .prepare(
+            "SELECT * FROM memories WHERE scope LIKE 'member:%' AND scope != ? AND status IN ('active', 'pending') AND kind IN ('lesson', 'playbook') AND from_group IS NULL ORDER BY updated_at DESC LIMIT 100",
+          )
           .bind(scope)
           .all<MemoryRow>()
       ).results
@@ -206,7 +214,8 @@ async function runOp(
       return;
     case "merge": {
       const into = op.into ? act.get(op.into) : undefined;
-      if (!p || !into) return;
+      // Only within one audience: a note of one group does not go into a memory others read.
+      if (!p || !into || (p.from_group ?? null) !== (into.from_group ?? null)) return;
       done.add(p.id);
       if (into.human) await flag(c, into, op.reason ?? p.text);
       else {
@@ -238,6 +247,12 @@ async function runOp(
       if (new Set(sources.map((r) => r.scope)).size < 2) return;
       const text = op.text.trim();
       if (team.some((t) => t.text.trim() === text)) return;
+      // Learned in a group: the whole team would read it. A person decides.
+      const limited = sources.find((r) => r.from_group);
+      if (limited) {
+        await flag(c, limited, NOTE.promoteHeld(text));
+        return;
+      }
       const srcIds = [...new Set(sources.flatMap((r) => (JSON.parse(r.source) as { ids: string[] }).ids))].slice(0, 20);
       const firstKind = (JSON.parse(sources[0].source) as { kind: "message" | "run" | "card" | "manual" }).kind;
       const { row, stmts } = insertStatements(
@@ -292,7 +307,7 @@ export interface ConsolidateResult {
 
 /**
  * The daily consolidation. Does nothing before 03:00 local time; each scope runs once a day
- * (a failed model call frees the scope for a later trigger the same day).
+ * (a failed model call frees the scope for the next hourly trigger the same day).
  */
 export async function consolidateAll(env: Env, opts: { now?: number; log?: Logger; call?: CallOptions } = {}): Promise<ConsolidateResult> {
   const now = opts.now ?? Date.now();
@@ -315,8 +330,8 @@ export async function consolidateAll(env: Env, opts: { now?: number; log?: Logge
     } catch (err) {
       opts.log?.warn("memory consolidation failed", { scope, err });
       out.ops += c.ops;
-      // Nothing (or only part) was done: a later trigger today tries the rest again.
-      if (c.ops === 0) await db.prepare("DELETE FROM memory_runs WHERE day = ? AND scope = ?").bind(day, scope).run();
+      // Nothing (or only part) was done: the next hourly trigger today tries the rest again.
+      await db.prepare("DELETE FROM memory_runs WHERE day = ? AND scope = ?").bind(day, scope).run();
     }
   }
   if (await claim(db, day, STALE_RUN, now)) {

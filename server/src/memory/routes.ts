@@ -11,11 +11,13 @@ import {
   UpdateMemoryRequest,
 } from "@chat/protocol";
 import type { AuthContext } from "../core/auth";
+import type { Env } from "../core/env";
 import { getGroup } from "../core/db";
-import { ApiError } from "../core/errors";
-import { registerRoute } from "../core/registry";
+import { roomStub } from "../core/env";
+import { ApiError, unwrap } from "../core/errors";
+import { type Actor, registerRoute } from "../core/registry";
 import { machineRun } from "../bots/routes";
-import { type Who, requireAccess } from "./access";
+import { type Who, canReadSource, readableSql, requireAccess } from "./access";
 import { type MemoryChange, type MemoryRow, createMemory, getRow, getUpdate, saveChange, toItem, toUpdate } from "./store";
 
 /** Notes one run may write. */
@@ -38,7 +40,9 @@ function intParam(url: URL, name: string, min: number, max: number, fallback: nu
 async function visible(db: D1Database, w: Who, id: string, write: boolean): Promise<MemoryRow> {
   const row = await getRow(db, id);
   if (!row) throw new ApiError("not_found", "memory not found");
-  await requireAccess(db, w, row.scope, write);
+  await requireAccess(db, w, row.scope, false);
+  if (!(await canReadSource(db, w, row))) throw new ApiError("not_found", "memory not found");
+  if (write) await requireAccess(db, w, row.scope, true);
   return row;
 }
 
@@ -50,16 +54,18 @@ export function registerMemoryRoutes(): void {
     async handler({ env, auth, url }): Promise<MemoriesResponse> {
       const scope = url.searchParams.get("scope") ?? "";
       if (scope === "") throw new ApiError("invalid", "scope is required");
-      await requireAccess(env.DB, who(auth), scope, false);
+      const w = who(auth);
+      await requireAccess(env.DB, w, scope, false);
       const status = url.searchParams.get("status") ?? "active";
       if (!["active", "pending", "retired", "all"].includes(status)) throw new ApiError("invalid", "status is active, pending, retired or all");
       const q = (url.searchParams.get("q") ?? "").trim().toLowerCase().slice(0, 200);
       const limit = intParam(url, "limit", 1, 500, 200);
       const rows = await env.DB.prepare(
-        `SELECT * FROM memories WHERE scope = ?1 AND (?2 = 'all' OR status = ?2) AND (?3 = '' OR instr(lower(text), ?3) > 0 OR instr(lower(coalesce(when_text, '')), ?3) > 0)
+        `SELECT * FROM memories m WHERE scope = ?1 AND (?2 = 'all' OR status = ?2) AND (?3 = '' OR instr(lower(text), ?3) > 0 OR instr(lower(coalesce(when_text, '')), ?3) > 0)
+           AND ${readableSql("m", 5, 6)}
          ORDER BY updated_at DESC, id DESC LIMIT ?4`,
       )
-        .bind(scope, status, q, limit)
+        .bind(scope, status, q, limit, w.memberId, w.level === "owner" ? 1 : 0)
         .all<MemoryRow>();
       return { memories: rows.results.map(toItem) };
     },
@@ -101,15 +107,23 @@ export function registerMemoryRoutes(): void {
     async handler({ env, auth, url }): Promise<MemoryUpdatesResponse> {
       const scope = url.searchParams.get("scope") ?? "";
       if (scope === "") throw new ApiError("invalid", "scope is required");
-      await requireAccess(env.DB, who(auth), scope, false);
+      const w = who(auth);
+      await requireAccess(env.DB, w, scope, false);
+      // Lines of memories the caller may not read are left out, the day too when all of them are.
+      const readable = (p: number) => `EXISTS (SELECT 1 FROM memories m WHERE m.id = u.memory_id AND ${readableSql("m", p, p + 1)})`;
+      const reader = [w.memberId, w.level === "owner" ? 1 : 0];
       let day = url.searchParams.get("day");
       if (day !== null && !/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new ApiError("invalid", "day is YYYY-MM-DD");
       if (day === null) {
-        const last = await env.DB.prepare("SELECT max(day) AS day FROM memory_updates WHERE scope = ?").bind(scope).first<{ day: string | null }>();
+        const last = await env.DB.prepare(`SELECT max(day) AS day FROM memory_updates u WHERE scope = ?1 AND ${readable(2)}`)
+          .bind(scope, ...reader)
+          .first<{ day: string | null }>();
         day = last?.day ?? null;
       }
       if (day === null) return { day: null, updates: [] };
-      const rows = await env.DB.prepare("SELECT * FROM memory_updates WHERE scope = ? AND day = ? ORDER BY at, id LIMIT 500").bind(scope, day).all();
+      const rows = await env.DB.prepare(`SELECT * FROM memory_updates u WHERE scope = ?1 AND day = ?2 AND ${readable(3)} ORDER BY at, id LIMIT 500`)
+        .bind(scope, day, ...reader)
+        .all();
       return { day, updates: rows.results.map((r) => toUpdate(r as never)) };
     },
   });
@@ -122,11 +136,12 @@ export function registerMemoryRoutes(): void {
       const w = who(auth);
       const u = await getUpdate(env.DB, params.id);
       if (!u) throw new ApiError("not_found", "update not found");
+      await requireAccess(env.DB, w, u.scope, false);
+      const row = await getRow(env.DB, u.memory_id);
+      if (!row || !(await canReadSource(env.DB, w, row))) throw new ApiError("not_found", "memory not found");
       await requireAccess(env.DB, w, u.scope, true);
       if (u.undone_at !== null) throw new ApiError("conflict", "already undone");
       if (u.change === "flagged") throw new ApiError("invalid", "a flagged memory was not changed");
-      const row = await getRow(env.DB, u.memory_id);
-      if (!row) throw new ApiError("not_found", "memory not found");
       const before = u.before_json ? (JSON.parse(u.before_json) as MemoryItem) : null;
       let change: MemoryChange;
       if (u.change === "added") change = { status: "retired" };
@@ -166,6 +181,20 @@ export function registerMemoryRoutes(): void {
       // An AI member cannot activate its own pending memory.
       if (w.kind !== "human" && req.status === "active" && row.status === "pending") delete change.status;
       return toItem(await saveChange(env.DB, row, change, w.memberId));
+    },
+  });
+
+  // A person releases an AI member's memory learned in a group to everyone who reads its scope.
+  registerRoute({
+    method: "POST",
+    path: "/v1/memories/:id/release",
+    auth: "member",
+    async handler({ env, auth, params }): Promise<MemoryItem> {
+      const w = who(auth);
+      // Readers of its group (owners for one of an unknown group) who may also change the scope.
+      const row = await visible(env.DB, w, params.id, true);
+      if (w.kind !== "human") throw new ApiError("forbidden", "only a person releases a memory");
+      return toItem(await saveChange(env.DB, row, { fromGroup: null }, w.memberId));
     },
   });
 
@@ -211,18 +240,29 @@ export function registerMemoryRoutes(): void {
     async handler({ request, env, params, body }): Promise<MemoryItem> {
       const { run, info } = await machineRun(request, env, params.id);
       const req = await body(MachineMemoryNoteRequest);
-      let scope: string;
-      if (req.scope === "member") scope = `member:${run.bot_id}`;
-      else if (req.scope === "person") {
+      // What a run learns about itself stays with the group (or direct conversation) it learned it in.
+      let scope = `member:${run.bot_id}`;
+      let fromGroup: string | null = run.group_id;
+      const ids = [run.id];
+      if (req.scope === "member") {
+        // the default above
+      } else if (req.scope === "person") {
         if (!info?.requestedBy) throw new ApiError("invalid", "the run has no requester");
         const person = await env.DB.prepare("SELECT kind FROM members WHERE id = ?").bind(info.requestedBy).first<{ kind: string }>();
         if (person?.kind !== "human") throw new ApiError("invalid", "the run was not asked for by a person");
         scope = `person:${info.requestedBy}`;
+        fromGroup = null;
       } else {
         // A direct conversation is private: what it says goes to the member or the person only.
         const group = await getGroup(env.DB, run.group_id);
         if (!group || group.kind !== "group") throw new ApiError("forbidden", "a direct conversation has no group memory");
-        scope = `group:${run.group_id}`;
+        // A group convention comes from a person's message in the group; anything else (a web page,
+        // a file, the AI member's own idea) stays in the member's own memory of this group.
+        if (req.sourceMessageId && (await sourceAuthor(env, run, req.sourceMessageId)) === "human") {
+          scope = `group:${run.group_id}`;
+          fromGroup = null;
+          ids.push(req.sourceMessageId);
+        }
       }
       const notes = await env.DB.prepare("SELECT count(*) AS n FROM memories WHERE author_id = ? AND json_extract(source, '$.kind') = 'run' AND json_extract(source, '$.ids[0]') = ?")
         .bind(run.bot_id, run.id)
@@ -230,9 +270,19 @@ export function registerMemoryRoutes(): void {
       if ((notes?.n ?? 0) >= MAX_NOTES_PER_RUN) throw new ApiError("rate_limited", `at most ${MAX_NOTES_PER_RUN} memory notes per run`);
       return createMemory(
         env.DB,
-        { scope, kind: req.kind, text: req.text, when: req.when, source: { kind: "run", ids: [run.id] }, authorId: run.bot_id, human: false, status: "pending", confidence: 0.6 },
+        // ids[0] stays the run: the per-run limit counts by it.
+        { scope, kind: req.kind, text: req.text, when: req.when, source: { kind: "run", ids }, authorId: run.bot_id, human: false, status: "pending", confidence: 0.6, fromGroup },
         run.bot_id,
       );
     },
   });
+}
+
+/** The kind of the author of a message in the run's group; null when there is no such message. */
+async function sourceAuthor(env: Env, run: { bot_id: string; group_id: string }, messageId: string): Promise<string | null> {
+  const actor: Actor = { id: run.bot_id, level: "member", kind: "bot" };
+  const m = unwrap(await roomStub(env, run.group_id).rpc(run.group_id, "bots.request", actor, { messageId })) as { authorId: string } | null;
+  if (!m) return null;
+  const author = await env.DB.prepare("SELECT kind FROM members WHERE id = ?").bind(m.authorId).first<{ kind: string }>();
+  return author?.kind ?? null;
 }
