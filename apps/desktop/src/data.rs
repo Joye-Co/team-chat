@@ -1262,6 +1262,8 @@ pub struct MachineInfo {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CliChoice {
     pub runtime: String,
+    /// What the runtime runs: "claude", "codex", "acp" or "pty".
+    pub kind: String,
     /// Empty = the computer did not say: the model is typed.
     pub models: Vec<ModelChoice>,
     pub efforts: Vec<String>,
@@ -1981,6 +1983,11 @@ pub trait ChatProvider: Send + Sync + 'static {
     }
     /// Restarts this Mac's daemon service (it then runs the daemon file now on disk).
     fn restart_this_mac(&self) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// The coding programs on this computer ("claude", "codex"), looked up the way its daemon
+    /// looks for them when it starts. `Unsupported` where the app cannot look.
+    fn this_computer_clis(&self) -> AdminReply<Vec<String>> {
         reply_now(Err(AdminError::Unsupported))
     }
     /// My mute and notify level of a group, from the cache.

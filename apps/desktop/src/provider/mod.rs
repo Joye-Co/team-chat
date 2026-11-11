@@ -2255,6 +2255,14 @@ impl ChatProvider for CoreProvider {
         rx
     }
 
+    fn this_computer_clis(&self) -> AdminReply<Vec<String>> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(Ok(this_mac::local_clis()));
+        });
+        rx
+    }
+
     fn group_prefs(&self, group_id: &str) -> GroupPrefs {
         self.group_prefs_inner(group_id)
     }

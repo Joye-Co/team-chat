@@ -36,7 +36,10 @@ pub struct Fleet {
     pub monitors: HashMap<String, MachineMonitor>,
     /// 用这台电脑 is setting this Mac up; then its answer.
     pub using: bool,
+    /// Why the last 用这台电脑 failed.
     pub using_note: Option<String>,
+    /// What this computer still lacks (用这台电脑).
+    pub this: super::this_computer::ThisComputer,
 }
 
 impl AdminView {
@@ -64,10 +67,11 @@ impl AdminView {
             })
             .detach();
         }
+        self.look_on_this_computer(cx);
     }
 
     /// 用这台电脑: sets this Mac up with the app's own daemon (as Settings › 机器 did).
-    fn use_this_mac(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn use_this_mac(&mut self, cx: &mut Context<Self>) {
         if self.fleet.using {
             return;
         }
@@ -78,11 +82,16 @@ impl AdminView {
             let result = answer(reply).await;
             let _ = this.update(cx, |this, cx| {
                 this.fleet.using = false;
-                this.fleet.using_note = Some(match result {
-                    Ok(()) => crate::copy::settings::THIS_MAC_DONE.to_string(),
-                    Err(e) => crate::views::settings::widgets::error_text(e).to_string(),
-                });
+                // Whether it can work is what the three lines say, not that the service is in.
+                let t = &mut this.fleet.this;
+                t.set_up_here = true;
+                t.failed = result.is_err();
+                t.local = None;
+                this.fleet.using_note = result
+                    .err()
+                    .map(|e| crate::views::settings::widgets::error_text(e).to_string());
                 this.retry(cx);
+                this.look_on_this_computer(cx);
             });
         })
         .detach();
@@ -180,18 +189,15 @@ impl AdminView {
             ThisMac::Unavailable | ThisMac::Working => None,
         };
         let view = cx.entity();
-        let use_row = (this_mac.is_some() || self.fleet.using_note.is_some()).then(|| {
+        // After a failed try the three lines below say what is wrong and offer 再试一次.
+        let this_mac =
+            this_mac.filter(|_| !self.fleet.this.failed && self.fleet.this.pinned.is_none());
+        let use_row = this_mac.is_some().then(|| {
             div()
                 .flex()
                 .items_center()
                 .gap(space::S12)
-                .child(
-                    div()
-                        .flex_1()
-                        .n_body()
-                        .text_color(k.secondary)
-                        .children(self.fleet.using_note.clone()),
-                )
+                .child(div().flex_1())
                 .children(this_mac.map(|label| {
                     crate::ui::native::loading_push(
                         push_button(
@@ -213,6 +219,7 @@ impl AdminView {
             .flex_col()
             .gap(space::S16)
             .children(use_row)
+            .children(self.this_computer_card(cx))
             .children(rows)
             .child(
                 Alert::new(Sym::Info, m::FLEET_NOTE_TITLE)

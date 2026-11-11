@@ -1109,6 +1109,24 @@ pub fn open_bot_dialog_new_name(
     )
 }
 
+/// 成员 with the 添加 AI 成员 sheet set to work on the team's computers: 运行方式 lists what
+/// the computers report by name, the ones not signed in marked.
+pub fn open_bot_dialog_runner(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Members,
+        |s, w, cx| {
+            let form = super::members::open_add_bot(s, w, cx);
+            form.update(cx, |f, cx| f.fill("发布巡检", Some(""), w, cx));
+        },
+        cx,
+    )
+}
+
 /// 成员 with the look sheet of the first AI member open.
 pub fn open_character_dialog(
     services: Services,
