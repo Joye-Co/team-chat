@@ -99,6 +99,10 @@
 产出信息	Artifact info
 在右侧打开	Open on the right
 和 v2 对比	Compare with v2
+和 v1 对比	Compare with v1
+回到 v3	Back to v3
+你在看 v2，不是最新版	You're viewing v2, not the latest
+有 v3	v3 available
 这一页	This page
 场景	Scenarios
 做法	Practice
@@ -147,6 +151,10 @@ AI 成员被 @ 后，在这些电脑上干活。	AI members work here when you @
 等你审 {}	Review {}
 等小王回答	Waiting on Will
 需要你拍板	Needs your call
+刚处理	Just handled
+已回答	Answered
+你选了「{}」	You chose “{}”
+你选了 A：一个输入框，粘贴自动识别	You chose A: a single field
 需要你批准的事	Needs your approval
 {} 件事等你拍板	{} things need your call
 正在做	In progress

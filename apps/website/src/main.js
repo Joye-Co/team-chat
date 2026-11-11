@@ -118,3 +118,13 @@ var EN=document.documentElement.lang==="en";
   ["m","h"].forEach(function(g){opts(g).forEach(function(b){b.addEventListener("click",function(){set(g,[b.dataset.v]);render();});});});
   opts("t").forEach(function(b){b.addEventListener("click",function(){b.setAttribute("aria-pressed",b.getAttribute("aria-pressed")==="true"?"false":"true");render();});});
 })();
+
+/* the film: its poster and a play button until it is played, then the video with sound and its own controls;
+   it pauses when scrolled out of view */
+(function(){
+  [].forEach.call(document.querySelectorAll(".film"),function(f){
+    var v=f.querySelector("video"),go=f.querySelector(".film-go");
+    go.addEventListener("click",function(){f.classList.add("on");v.controls=true;var p=v.play();if(p&&p.catch)p.catch(function(){});v.focus({preventScroll:true});});
+    if("IntersectionObserver" in window)new IntersectionObserver(function(es){es.forEach(function(e){if(!e.isIntersecting&&!v.paused)v.pause();});},{threshold:.25}).observe(f);
+  });
+})();
