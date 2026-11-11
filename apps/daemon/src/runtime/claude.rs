@@ -331,13 +331,37 @@ fn tool_title(name: &str, input: &Value) -> String {
     }
 }
 
-/// `~/.claude/projects` folder name for a working directory.
+/// `~/.claude/projects` folder name for a working directory: the first of
+/// [`project_dir_names`].
 pub fn project_dir_name(cwd: &Path) -> String {
-    let real = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
-    project_dir_name_of(&real.to_string_lossy())
+    project_dir_names(cwd).remove(0)
 }
 
-/// [`project_dir_name`] of a path as the CLI sees it. Windows: `canonicalize` gives the
+/// The `projects` folder names the CLI can use for the working directory `cwd`, the likeliest
+/// first. The CLI names the folder after the real path of its working directory.
+///
+/// Unix: one name, of the canonical path.
+///
+/// Windows: the CLI resolves links but keeps a short (8.3) name as it is
+/// (`C:\Users\RUNNER~1\…` stays; seen with the real CLI), while `canonicalize` here also
+/// makes short names long. So two names: of the path as the daemon gives it to the CLI (right
+/// when there is no link in it, which is the usual case), then of the canonical path (right
+/// when there is a link and no short name).
+pub fn project_dir_names(cwd: &Path) -> Vec<String> {
+    let real = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
+    let canonical = project_dir_name_of(&real.to_string_lossy());
+    if !cfg!(windows) {
+        return vec![canonical];
+    }
+    let given = project_dir_name_of(&cwd.to_string_lossy());
+    if given == canonical {
+        vec![given]
+    } else {
+        vec![given, canonical]
+    }
+}
+
+/// The folder name of a path as the CLI sees it. Windows: `canonicalize` gives the
 /// `\\?\` form (`\\?\C:\Users\me\work`), which the CLI never sees; without that prefix
 /// `C:\Users\me\work` is `C--Users-me-work`.
 pub fn project_dir_name_of(path: &str) -> String {
@@ -357,22 +381,25 @@ pub fn project_dir_name_of(path: &str) -> String {
 
 pub fn find_session_file(config_dir: &Path, cwd: &Path, session_id: &str) -> Option<PathBuf> {
     let projects = config_dir.join("projects");
-    let direct = projects
-        .join(project_dir_name(cwd))
-        .join(format!("{session_id}.jsonl"));
-    if direct.is_file() {
+    let file = format!("{session_id}.jsonl");
+    if let Some(direct) = project_dir_names(cwd)
+        .into_iter()
+        .map(|name| projects.join(name).join(&file))
+        .find(|f| f.is_file())
+    {
         return Some(direct);
     }
     std::fs::read_dir(&projects).ok()?.flatten().find_map(|d| {
-        let f = d.path().join(format!("{session_id}.jsonl"));
+        let f = d.path().join(&file);
         f.is_file().then_some(f)
     })
 }
 
 /// Readies `--resume <session_id>`: Claude Code looks for the session in the project folder of
 /// its working directory, and a follow-up run has a new one, so the earlier run's session file
-/// (found under any project of `config_dir`) is copied there. False when the file is gone: the
-/// run then starts a new session.
+/// (found under any project of `config_dir`) is copied there (on Windows into each folder the
+/// CLI can take for its own, see [`project_dir_names`]). False when the file is gone: the run
+/// then starts a new session.
 pub fn prepare_resume(config_dir: &Path, cwd: &Path, session_id: &str) -> bool {
     if !super::valid_session_id(session_id) {
         return false;
@@ -380,12 +407,13 @@ pub fn prepare_resume(config_dir: &Path, cwd: &Path, session_id: &str) -> bool {
     let Some(found) = find_session_file(config_dir, cwd, session_id) else {
         return false;
     };
-    let dir = config_dir.join("projects").join(project_dir_name(cwd));
-    let target = dir.join(format!("{session_id}.jsonl"));
-    if found == target {
-        return true;
-    }
-    std::fs::create_dir_all(&dir).is_ok() && std::fs::copy(&found, &target).is_ok()
+    project_dir_names(cwd).into_iter().all(|name| {
+        let dir = config_dir.join("projects").join(name);
+        let target = dir.join(format!("{session_id}.jsonl"));
+        target == found
+            || target.is_file()
+            || (std::fs::create_dir_all(&dir).is_ok() && std::fs::copy(&found, &target).is_ok())
+    })
 }
 
 /// The only tools a side chat run has: built-in tools that read files.

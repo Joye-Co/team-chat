@@ -319,11 +319,11 @@ pub const OUTPUT_LIMIT: usize = 16 * 1024;
 
 /// A random UUID v4 string.
 pub fn uuid_v4() -> String {
+    use crypto_box::aead::rand_core::RngCore as _;
     let mut b = [0u8; 16];
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        use std::io::Read;
-        let _ = f.read_exact(&mut b);
-    }
+    // The system's random source on every system (not `/dev/urandom`, which Windows has not:
+    // every session there had the same id).
+    crypto_box::aead::OsRng.fill_bytes(&mut b);
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
     let h: String = b.iter().map(|x| format!("{x:02x}")).collect();
