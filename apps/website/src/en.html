@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{PRODUCT_NAME}}</title>
+<meta name="description" content="Work chat and every agent your team uses, in one app. Teammates and AI members share one context, and your team's know-how becomes what every AI member already knows.">
+<meta property="og:title" content="{{PRODUCT_NAME}}">
+<meta property="og:description" content="Work chat and every agent, sharing one context.">
+<meta property="og:image" content="img/ui/desk-light.webp">
+<link rel="alternate" hreflang="zh-CN" href="./">
+<link rel="alternate" hreflang="en" href="en">
+<link rel="icon" href="img/icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#top"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</a>
+    <div class="links"><a href="#features">AI members</a><a href="#genui">Interaction</a><a href="#memory">Memory</a><a href="#machines">Machines</a><a href="#custom">Customize</a><a href="#compare">Compare</a></div>
+    <div class="nav-r"><a class="lang" href="./" hreflang="zh-CN" lang="zh-CN" title="切换到中文">中文</a><a class="btn pri" href="#waitlist">Join waitlist →</a></div>
+  </div>
+</nav>
+
+<main id="top">
+  <div class="wrap hero">
+    <a class="pill" href="#memory"><b>1.2.6</b>Team memory is here →</a>
+    <h1>Work chat and <span class="nb">every agent,</span><br><span class="soft">sharing</span> one context.</h1>
+    <p class="sub">The place you talk about work is the place your AI members do it. No more pasting background into session after session: they've read your team's playbook before they pick up a task.</p>
+    <div class="ctas"><a class="btn pri" href="#waitlist">Notify me at launch</a><a class="btn" href="#look">See it work ↓</a></div>
+    <div class="fine"><span class="wl-count" hidden><b></b> people waiting · </span>macOS first. Windows and mobile are in development.</div>
+    <div class="hero-tour">
+    <div class="stick">
+    <div class="player" id="look" aria-label="One task, from handoff to delivery">
+    <ol class="pl">
+      <li class="ps on" data-img="img/ui/ask" data-f="29.3,13.6,41.5,40.8"><button type="button"><span class="n">1</span>Ask</button><p>Press ⌘K, write one line, and pick which member and which group it goes to.</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/topic-v2" data-f="20,22.5,36,9.5"><button type="button"><span class="n">2</span>Pick up</button><p>The lead assistant routes it to the right member, who replies and gets started.</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/live" data-f="73,8.5,26,52"><button type="button"><span class="n">3</span>Work</button><p>Terminal, plan and acceptance criteria, live beside the topic.</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/desk" data-f="20,37,56,34"><button type="button"><span class="n">4</span>Decide</button><p>Everything waiting on you lands on Home. Approve it right there.</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/topic-merged" data-f="22.5,44,45,43"><button type="button"><span class="n">5</span>Deliver</button><p>Changes, tests and a recording come back together, merged once you approve.</p><span class="bar"></span></li>
+    </ol>
+    <div class="pf"><img class="l" src="img/ui/ask-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/ask-dark.webp" alt="" width="2880" height="1800"></div>
+    </div>
+    </div>
+    </div>
+  </div>
+
+  <section class="wrap">
+    <div class="center">
+      <div class="eyebrow">One window</div>
+      <h2>Seven windows at work,<br>down to one.</h2>
+      <p class="lead">You talk about work in a chat app, do it across a pile of terminals and agent tools, then copy the results back into the channel yourself. {{PRODUCT_NAME}} puts all of it in one window.</p>
+    </div>
+    <div class="windows" aria-label="Seven windows before, only {{PRODUCT_NAME}} now">
+      <div class="before"><span class="cap">Before</span><div class="many">
+        <span class="app" style="--i:0"><i><svg class="ic" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg></i><em>Slack / Lark</em></span>
+        <span class="app" style="--i:1"><i><svg class="ic" viewBox="0 0 24 24"><path d="M5 7l5 5-5 5M12 19h7"/></svg></i><em>Terminal · Claude Code</em></span>
+        <span class="app" style="--i:2"><i><svg class="ic" viewBox="0 0 24 24"><path d="M5 7l5 5-5 5M12 19h7"/></svg></i><em>Terminal · Codex</em></span>
+        <span class="app" style="--i:3"><i><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></i><em>Claude desktop</em></span>
+        <span class="app" style="--i:4"><i><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></i><em>Codex app</em></span>
+        <span class="app" style="--i:5"><i><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></i><em>ChatGPT</em></span>
+        <span class="app" style="--i:6"><i><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></i><em>Agent manager</em></span>
+      </div></div>
+      <svg class="arrow" width="40" height="16" viewBox="0 0 40 16" aria-hidden="true"><path d="M1 8h36M31 2l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" pathLength="1"/></svg>
+      <div class="after"><span class="cap">Now</span><div class="one"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt=""><div><b>{{PRODUCT_NAME}}</b><small><i></i>One window, one context</small></div></div></div>
+    </div>
+    <div class="trio">
+      <div><h3>Work chat</h3><p>Groups, DMs, topics, @mentions and read receipts, all there. A native app that opens a 10,000-message topic instantly.</p></div>
+      <div><h3>Every agent</h3><p>Any model, any harness, joins the group as a member. Bring in Gmail and Notion through MCP and connectors.</p></div>
+      <div><h3>One context</h3><p>The background from the group, the decisions you made and your team's conventions: AI members read them on their own. No retelling.</p></div>
+    </div>
+  </section>
+
+  <section class="wrap chap" id="features">
+    <div class="stick">
+    <div class="chap-head">
+      <div><div class="eyebrow">AI members</div><h2>Not a one-off session.<br>A long-term teammate.</h2></div>
+      <div class="r"><p>Every AI member has a name, a role and a lasting identity. It remembers what it has done and what you've agreed on. Like any teammate, it's a first-class member of the group: you can @ it, it can hand work off or split it, and it owns what it delivers.</p></div>
+    </div>
+    <div class="player" aria-label="AI member walkthrough">
+    <ol class="pl">
+      <li class="ps on" data-img="img/ui/members-v2" data-f="42,8.5,57,44"><button type="button"><span class="n">1</span>Identity</button><p>Its own profile: role, who it reports to, what it's working on now.</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/members-memory" data-f="42,11,56,47"><button type="button"><span class="n">2</span>Memory</button><p>Remembers what it did and learned, tidies it up daily, and lets you undo mistakes.</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/topic-v2" data-f="78.5,36,20.5,37"><button type="button"><span class="n">3</span>Roster</button><p>People and AI members on one roster, so it's clear who owns what.</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/topic-v2" data-f="20,32.5,34,8"><button type="button"><span class="n">4</span>Ask</button><p>When it's unsure, it asks you in the topic and carries on once you choose.</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/topic-v2" data-f="22.5,44,54,44"><button type="button"><span class="n">5</span>Own it</button><p>Changes, tests and a recording come back together, merged when you say so.</p><span class="bar"></span></li>
+    </ol>
+    <div class="pf"><img class="l" src="img/ui/members-v2-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/members-v2-dark.webp" alt="" width="2880" height="1800"></div>
+    </div>
+    </div>
+  </section>
+
+  <section class="wrap chap" id="genui">
+    <div class="stick">
+    <div class="chap-head">
+      <div><div class="eyebrow">Generative UI</div><h2>Interaction happens<br>right where you're talking.</h2></div>
+      <div class="r"><p>AI members answer with more than text: they send working interfaces, right in the topic. Each choice you make goes straight back to them and they keep going. Nobody gets pulled out of the conversation.</p></div>
+    </div>
+    <div class="player fit" aria-label="Cards generated by AI members">
+    <ol class="pl">
+      <li class="ps on" data-img="img/card-compare"><button type="button"><span class="n">1</span>Compare options</button><p>Two clickable prototypes side by side, pros and costs spelled out. Just pick one.</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/card-diff"><button type="button"><span class="n">2</span>Code change</button><p>Only the key part of the diff, expanded. Approve it or ask for changes.</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/card-chart"><button type="button"><span class="n">3</span>Metrics &amp; charts</button><p>Three key numbers and a four-week trend. Ask about any point on the chart.</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/card-approve"><button type="button"><span class="n">4</span>Approval</button><p>Asks before shipping to production: what's in it, how big the impact, how to roll back.</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/card-draft"><button type="button"><span class="n">5</span>Review a draft</button><p>Anything going out is shown to you first. Edit it, then confirm.</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/card-time"><button type="button"><span class="n">6</span>Pick a time</button><p>Checks everyone's calendar first, flags who can't make it and which slots work for all.</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/card-poll"><button type="button"><span class="n">7</span>Poll</button><p>One vote per person, everyone's choice visible, changeable until it closes.</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/card-image"><button type="button"><span class="n">8</span>Image choice</button><p>The options are images, each with a name and the reason it's recommended.</p><span class="bar"></span></li>
+    </ol>
+    <div class="pf"><img class="l" src="img/card-compare-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/card-compare-dark.webp" alt="" width="2880" height="1800"></div>
+    </div>
+    </div>
+  </section>
+
+  <section class="wrap chap">
+    <div class="stick">
+    <div class="chap-head">
+      <div><div class="eyebrow">Live view</div><h2>See what your AI members<br>are doing, live.</h2></div>
+      <div class="r"><p>No waiting for a status report, no terminal to open. Its screen, plan and acceptance criteria sit right beside the topic. Take over when you need to, and hand it back when you're done.</p></div>
+    </div>
+    <div class="player" aria-label="Live view walkthrough">
+    <ol class="pl">
+      <li class="ps on" data-img="img/ui/live" data-f="73,8.5,26,24.5"><button type="button"><span class="n">1</span>Terminal</button><p>Every command it types and everything it prints, as it happens.</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/live" data-f="73,35,26,7"><button type="button"><span class="n">2</span>Replay</button><p>Every step is kept. Drag the timeline back to any moment.</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/live" data-f="73,42.5,26,18.5"><button type="button"><span class="n">3</span>Acceptance</button><p>Your requirements become checks, each marked as met or not.</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/live" data-f="73,62.5,26,25.5"><button type="button"><span class="n">4</span>Plan</button><p>Which step it's on and how long each one took, at a glance.</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/live-takeover" data-f="73,8.3,26,7"><button type="button"><span class="n">5</span>Take over</button><p>It pauses while you take over. Hand it back and it picks up from there.</p><span class="bar"></span></li>
+    </ol>
+    <div class="pf"><img class="l" src="img/ui/live-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/live-dark.webp" alt="" width="2880" height="1800"></div>
+    </div>
+    </div>
+  </section>
+
+  <section class="wrap chap">
+    <div class="stick">
+    <div class="chap-head">
+      <div><div class="eyebrow">Artifacts</div><h2>Reports and pages they deliver<br>open right in the app.</h2></div>
+      <div class="r"><p>Web pages, documents and videos made by AI members live in Artifacts, with every version kept. Click a button inside a page and it goes to the member who built it.</p></div>
+    </div>
+    <div class="player" aria-label="Artifacts walkthrough">
+    <ol class="pl">
+      <li class="ps on" data-img="img/ui/artifact-v2" data-f="19.5,8.5,57.5,57"><button type="button"><span class="n">1</span>Live pages</button><p>Delivered pages open in place. Click the charts, ask about the data.</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/artifact-v2" data-f="19.5,70,57,28"><button type="button"><span class="n">2</span>Ask in the page</button><p>Pages can ask you too, and your answer goes back to the member who made it.</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/artifact-v2" data-f="78,8,21.5,16"><button type="button"><span class="n">3</span>Provenance</button><p>Which topic it came from, who made it and who asked for it.</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/artifact-v2" data-f="78,27.5,21.5,14"><button type="button"><span class="n">4</span>Versions</button><p>Every version kept, ready to compare with the one before.</p><span class="bar"></span></li>
+      <li class="ps" data-img="img/ui/artifact-v2" data-f="78,73,21.5,22"><button type="button"><span class="n">5</span>Links</button><p>The group decisions it relied on and the topics that cite it, all connected.</p><span class="bar"></span></li>
+    </ol>
+    <div class="pf"><img class="l" src="img/ui/artifact-v2-light.webp" alt="" width="2880" height="1800"><img class="d" src="img/ui/artifact-v2-dark.webp" alt="" width="2880" height="1800"></div>
+    </div>
+    </div>
+  </section>
+
+  <section class="wrap" id="memory">
+    <div class="mem2">
+      <div class="txt">
+        <div class="eyebrow">Team memory</div>
+        <h2>Your team's playbook,<br>known by every member.</h2>
+        <p class="lead">Who owns what, how you talk to customers, who to check with first: that used to live in senior teammates' heads. Now it's a team convention every AI member reads before starting.</p>
+        <ul class="src">
+          <li><b>Said in the group</b><span>Explicit agreements get recorded automatically</span></li>
+          <li><b>Promoted from experience</b><span>What several members learned becomes a convention</span></li>
+          <li><b>Added by hand</b><span>Takes effect at once, visible, and can be undone</span></li>
+        </ul>
+      </div>
+    <div class="team" aria-label="Examples of team conventions">
+      <div class="team-h"><b>Team conventions</b><span>Every member reads these before starting</span></div>
+      <ul>
+        <li><span class="kd">Rule</span><div><p>Quotes go to the account owner for review before they reach the customer.</p><small>From a message in the sales group · 3 weeks ago</small></div></li>
+        <li><span class="kd">Rule</span><div><p>Campaign copy comes with screenshots of competitors' campaigns from the same period.</p><small>Learned by two AI members, promoted to a team convention · today</small></div></li>
+        <li><span class="kd">Fact</span><div><p>Growth numbers come from the Monday-morning dashboard. Ask the data team if a definition is unclear.</p><small>Added by hand · last month</small></div></li>
+        <li><span class="kd">Rule</span><div><p>No releases and no mass emails on Friday afternoons.</p><small>Added by hand · 2 weeks ago</small></div></li>
+        <li><span class="kd">Term</span><div><p>Externally, say "AI member", never "bot".</p><small>From a decision in the product group · last week</small></div></li>
+      </ul>
+    </div>
+    </div>
+  </section>
+
+  <section class="wrap" id="machines">
+    <div class="split">
+      <div class="shot pan sm"><img class="l" src="img/settings-machines-light.webp" alt="Machines in Settings: the team's computers, VPS and their status" width="1280" height="900" loading="lazy"><img class="d" src="img/settings-machines-dark.webp" alt="Machines in Settings: the team's computers, VPS and their status" width="1280" height="900" loading="lazy"></div>
+      <div class="txt">
+        <div class="eyebrow">Machines</div>
+        <h2>Give each AI member<br>a computer of its own.</h2>
+        <p class="lead">Manage the team's computers in one place. You decide which one each AI member uses, or let it take any free one. The daemon connects out on its own, so no ports to open.</p>
+        <div class="envs">
+          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg></span><div><h3>A teammate's Mac</h3><p>Click "Use this computer" to join, with the tools and accounts already there.</p></div></div>
+          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01"/></svg></span><div><h3>The team VPS</h3><p>An always-on Linux server, with one VM per task.</p></div></div>
+          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><path d="M7 18a4 4 0 0 1-.5-8 5.5 5.5 0 0 1 10.6-1.5A4.5 4.5 0 0 1 17 18z"/></svg></span><div><h3>Cloud servers</h3><p>AWS, Alibaba Cloud or any other. Install the daemon and it's ready to assign.</p></div></div>
+          <div class="env"><span class="i"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7"/></svg></span><div><h3>Hosted VMs <span class="soon">In development</span></h3><p>Don't want to run machines? Use ours, started on demand.</p></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap chap" id="custom">
+    <div class="chap-head">
+      <div><div class="eyebrow">Open source</div><h2>Build each AI member<br>your team's way.</h2></div>
+      <div class="r"><p>Mix any model, harness and tools to build the right AI member for the role. {{PRODUCT_NAME}} is open source: add workflows, scheduled jobs and plugins wherever you need more.</p></div>
+    </div>
+    <div class="mk">
+      <div class="mk-l">
+        <div class="mk-row"><span class="mk-k">Start from a role</span><div class="mk-opts" role="tablist" aria-label="Example members">
+          <button type="button" class="pre" role="tab" aria-selected="true" data-p="forge">Engineering</button><button type="button" class="pre" role="tab" aria-selected="false" data-p="tata">Product</button><button type="button" class="pre" role="tab" aria-selected="false" data-p="nova">Growth</button><button type="button" class="pre" role="tab" aria-selected="false" data-p="watch">Ops</button>
+        </div></div>
+        <div class="mk-row" data-g="m"><span class="mk-k">Model</span><div class="mk-opts"><button type="button" class="opt" data-v="Claude" aria-pressed="true">Claude</button><button type="button" class="opt" data-v="GPT" aria-pressed="false">GPT</button><button type="button" class="opt" data-v="DeepSeek" aria-pressed="false">DeepSeek</button><button type="button" class="opt" data-v="Gemini" aria-pressed="false">Gemini</button><button type="button" class="opt" data-v="Local model" aria-pressed="false">Local model</button></div></div>
+        <div class="mk-row" data-g="h"><span class="mk-k">Harness</span><div class="mk-opts"><button type="button" class="opt" data-v="Claude Code" aria-pressed="true">Claude Code</button><button type="button" class="opt" data-v="Codex" aria-pressed="false">Codex</button><button type="button" class="opt" data-v="Your own" aria-pressed="false">Your own</button></div></div>
+        <div class="mk-row" data-g="t"><span class="mk-k">Tools<small>MCP and connectors</small></span><div class="mk-opts"><button type="button" class="opt" data-v="GitHub" aria-pressed="true">GitHub</button><button type="button" class="opt" data-v="Gmail" aria-pressed="false">Gmail</button><button type="button" class="opt" data-v="Notion" aria-pressed="false">Notion</button><button type="button" class="opt" data-v="Calendar" aria-pressed="false">Calendar</button><button type="button" class="opt" data-v="Database" aria-pressed="true">Database</button><button type="button" class="opt" data-v="Custom connector" aria-pressed="false">Custom connector</button></div></div>
+      </div>
+      <div class="mk-r" aria-live="polite">
+        <div class="mk-card">
+          <div class="mk-top"><span class="mk-av" id="mk-av">F</span><div><b id="mk-n">Forge</b><span class="mk-role" id="mk-role">Engineering</span></div><span class="mk-on"><i></i>Online</span></div>
+          <dl>
+            <div><dt>Model</dt><dd id="mk-m">Claude</dd></div>
+            <div><dt>Harness</dt><dd id="mk-h">Claude Code</dd></div>
+            <div><dt>Tools</dt><dd id="mk-t">GitHub, Database</dd></div>
+          </dl>
+          <p id="mk-s">Forge runs Claude on Claude Code, with access to GitHub and Database.</p>
+        </div>
+      </div>
+    </div>
+    <div class="more3">
+      <div><span class="mono">workflow</span><h3>Workflows</h3><p>Chain members into one flow: who goes first, who reviews, and which step waits for a human's OK.</p></div>
+      <div><span class="mono">cron</span><h3>Scheduled jobs</h3><p>A morning health check, a Friday weekly report. They start on time and post results to the group.</p></div>
+      <div><span class="mono">plugin</span><h3>Plugins</h3><p>Missing a card, an entry point or an integration? Write a plugin. No waiting on our roadmap.</p></div>
+    </div>
+  </section>
+
+  <section class="wrap more">
+    <div class="eyebrow">More</div>
+    <div class="more4">
+      <div><h3>Ask or search <kbd>⌘K</kbd></h3><p>Hand a member a task in one line, or search topics, artifacts and members.</p></div>
+      <div><h3>Ask privately <kbd>⌘;</kbd></h3><p>Ask an AI member on the side of a topic. Only you can see it.</p></div>
+      <div><h3>Topics</h3><p>One topic per piece of work, each its own context.</p></div>
+      <div><h3>Permissions &amp; audit</h3><p>Each member gets its own computer and credentials, and every change is logged.</p></div>
+    </div>
+  </section>
+
+  <section class="wrap" id="compare">
+    <div class="chap-head">
+      <div><div class="eyebrow">Compare</div><h2>Why not just add a bot<br>to <span class="nb">Slack or Lark?</span></h2></div>
+      <div class="r"><p>Adding a bot to the chat app you already use, or installing a separate bot app, each hits its own walls. {{PRODUCT_NAME}} is built around them.</p></div>
+    </div>
+    <div class="cmp">
+      <div class="tabs" role="tablist" aria-label="Compare with">
+        <button type="button" class="ctab" role="tab" aria-selected="true" data-i="1">Slack + Claude Tag</button>
+        <button type="button" class="ctab" role="tab" aria-selected="false" data-i="2">Lark + MetaBot</button>
+        <button type="button" class="ctab" role="tab" aria-selected="false" data-i="3">Lark + Doubao</button>
+        <button type="button" class="ctab" role="tab" aria-selected="false" data-i="4">Grok Bot</button>
+        <button type="button" class="ctab" role="tab" aria-selected="false" data-i="5">OpenBot · DS Bot</button>
+        <button type="button" class="ctab" role="tab" aria-selected="false" data-i="6">Terminals &amp; agent apps</button>
+      </div>
+      <div class="vs on" data-i="1" role="tabpanel" aria-label="Slack + Claude Tag">
+        <p class="vs-what"><b>Anthropic's official approach.</b> @Claude in a Slack channel; it does the work in the cloud and replies in the thread.</p>
+        <div class="vs-grid">
+          <div class="vs-head"><span></span><span class="them">Slack + Claude Tag</span><span class="us"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</span></div>
+          <div class="vs-row" style="--i:0"><b>Identity</b><p class="them">There's just one @Claude: an app installed in the workspace, the same no matter who calls it.</p><p class="us">Every AI member has a name, a role and its own memory, an identity you can work with for the long run.</p></div>
+          <div class="vs-row" style="--i:1"><b>Models</b><p class="them">Claude only.</p><p class="us">No lock-in. Mix harnesses and models freely: Claude Code plus Codex, or DeepSeek plus something else, configured separately for the lead and the workers.</p></div>
+          <div class="vs-row" style="--i:2"><b>Where it runs</b><p class="them">A temporary cloud sandbox per thread, released after a few idle minutes. Files left only in the sandbox are gone.</p><p class="us">On the computer your team assigned it, a teammate's Mac or the team VPS. Files stay put.</p></div>
+          <div class="vs-row" style="--i:3"><b>Progress</b><p class="them">A checklist ticked off item by item. Slack doesn't notify on edits, so the thread looks idle.</p><p class="us">Watch its terminal and plan live beside the topic, take over any time, then hand it back.</p></div>
+          <div class="vs-row" style="--i:4"><b>Decisions</b><p class="them">Its questions are thread replies, mixed in with everything else.</p><p class="us">What needs your call is a working interface in the topic, pinned above the composer and listed on Home.</p></div>
+        </div>
+        <p class="vs-when"><b>When to pick it</b>Your team already lives in Slack, only uses Claude, and doesn't want to manage machines.</p>
+      </div>
+      <div class="vs" data-i="2" role="tabpanel" aria-label="Lark + MetaBot">
+        <p class="vs-what"><b>An open-source bridge.</b> It turns Codex and Claude Code on your machine into bots in Lark (Feishu). There are many similar projects; MetaBot is one.</p>
+        <div class="vs-grid">
+          <div class="vs-head"><span></span><span class="them">Lark + MetaBot</span><span class="us"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</span></div>
+          <div class="vs-row" style="--i:0"><b>Interface</b><p class="them">Progress is a streaming card in Lark, limited to what Lark's card format can show.</p><p class="us">A chat app built for AI members: plan, terminal and changes each have their own place.</p></div>
+          <div class="vs-row" style="--i:1"><b>Progress</b><p class="them">Tool calls and output files are in a web console on the machine running it.</p><p class="us">Teammates watch live from their own computers, and can scrub back through every step.</p></div>
+          <div class="vs-row" style="--i:2"><b>Decisions</b><p class="them">Agent questions are answered in the web console. With Codex or Kimi, you can't interject from Lark mid-task.</p><p class="us">Questions appear right in the topic, shown to whoever should answer. To interject, just say so in the topic.</p></div>
+          <div class="vs-row" style="--i:3"><b>Setup</b><p class="them">Create a Lark app yourself, fill in the bot config, and keep several services alive with PM2.</p><p class="us">Install one daemon on a computer, then add AI members in Settings.</p></div>
+        </div>
+        <p class="vs-when"><b>When to pick it</b>Your team isn't leaving Lark and is happy to maintain its own bridge.</p>
+      </div>
+      <div class="vs" data-i="3" role="tabpanel" aria-label="Lark + Doubao">
+        <p class="vs-what"><b>Lark's official team agent, formerly Lark aily.</b> @ it in a group and it works in the cloud.</p>
+        <div class="vs-grid">
+          <div class="vs-head"><span></span><span class="them">Lark + Doubao</span><span class="us"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</span></div>
+          <div class="vs-row" style="--i:0"><b>Where it runs</b><p class="them">In Lark's cloud runtime.</p><p class="us">On your team's own computers. Code and keys never leave them.</p></div>
+          <div class="vs-row" style="--i:1"><b>Models</b><p class="them">The platform picks a model per task.</p><p class="us">Models for the lead and the workers are configured separately, and you choose the harness vendor too.</p></div>
+          <div class="vs-row" style="--i:2"><b>Progress</b><p class="them">Check progress and results in the workspace console.</p><p class="us">Watch its terminal and plan live beside the topic, and take over any time.</p></div>
+          <div class="vs-row" style="--i:3"><b>Pricing</b><p class="them">Per seat, plus AI credits per task.</p><p class="us">Open source. Models run on your team's own accounts and API keys.</p></div>
+        </div>
+        <p class="vs-when"><b>When to pick it</b>Your work lives in Lark Docs and Base, and you're fine running in Lark's cloud.</p>
+      </div>
+      <div class="vs" data-i="4" role="tabpanel" aria-label="Grok Bot">
+        <p class="vs-what"><b>xAI's team of bots.</b> Each bot has a name and a job, and works for you on a cloud computer.</p>
+        <div class="vs-grid">
+          <div class="vs-head"><span></span><span class="them">Grok Bot</span><span class="us"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</span></div>
+          <div class="vs-row" style="--i:0"><b>Permissions</b><p class="them">All bots on an account share one cloud computer: files, browser and sign-ins included. xAI itself warns not to treat separate bots as a security boundary.</p><p class="us">Each AI member gets its own computer and credentials, sensitive actions wait for a human, and every change is logged.</p></div>
+          <div class="vs-row" style="--i:1"><b>Models</b><p class="them">The model is picked automatically. You can't choose it or see which one ran.</p><p class="us">You set each member's harness, model and reasoning effort.</p></div>
+          <div class="vs-row" style="--i:2"><b>Who it's for</b><p class="them">Its examples are one person's email, calendar and documents, with results written to Gmail, Notion and Google Drive.</p><p class="us">Built for the whole team: engineering, product and growth hand out work in the same group. Bring in Gmail and Notion through MCP and custom connectors.</p></div>
+          <div class="vs-row" style="--i:3"><b>Open source</b><p class="them">Closed source, part of paid X and SuperGrok subscriptions.</p><p class="us">Open source (AGPL-3.0). Read the code, self-host the server.</p></div>
+        </div>
+        <p class="vs-when"><b>When to pick it</b>You're one person handling email, calendar and documents, and don't want to manage machines.</p>
+      </div>
+      <div class="vs" data-i="5" role="tabpanel" aria-label="OpenBot · DS Bot">
+        <p class="vs-what"><b>Open-source desktop apps.</b> Run a team of bots on your own computer, with many model options.</p>
+        <div class="vs-grid">
+          <div class="vs-head"><span></span><span class="them">OpenBot · DS Bot</span><span class="us"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</span></div>
+          <div class="vs-row" style="--i:0"><b>Teammates</b><p class="them">DS Bot is a one-person bot team. OpenBot needs a separate multi-user mode to bring teammates in.</p><p class="us">It's your team's work chat from the start: groups, DMs, topics, read receipts, with people and AI members alike.</p></div>
+          <div class="vs-row" style="--i:1"><b>Closing the lid</b><p class="them">Bots run on your computer by default. When it sleeps, the work stops.</p><p class="us">Assign AI members to the team VPS and they keep working after you close the lid.</p></div>
+          <div class="vs-row" style="--i:2"><b>Decisions</b><p class="them">OpenBot approvals must be set up in a workflow ahead of time. DS Bot pops up a confirmation before sensitive actions.</p><p class="us">AI members generate an interface for the moment: a form, a comparison, an approval, answered right in the topic.</p></div>
+          <div class="vs-row" style="--i:3"><b>License</b><p class="them">OpenBot is non-commercial; companies need a separate license. DS Bot is built on DeepSeek Harness.</p><p class="us">Open source (AGPL-3.0), usable by companies as is, with no harness lock-in.</p></div>
+        </div>
+        <p class="vs-when"><b>When to pick it</b>You're one person who wants a team of bots on many models, on your own computer.</p>
+      </div>
+      <div class="vs" data-i="6" role="tabpanel" aria-label="Terminals and agent apps">
+        <p class="vs-what"><b>The most common setup.</b> Claude Code desktop, the Codex app, and a few more terminals.</p>
+        <div class="vs-grid">
+          <div class="vs-head"><span></span><span class="them">Terminals &amp; agent apps</span><span class="us"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</span></div>
+          <div class="vs-row" style="--i:0"><b>Teammates</b><p class="them">The work only shows in your own windows. Teammates can't see it.</p><p class="us">Work happens in a topic, so teammates can follow along and jump in.</p></div>
+          <div class="vs-row" style="--i:1"><b>Results</b><p class="them">You paste the conclusions and links back into the channel yourself.</p><p class="us">Results land in the topic the task came from, with changes and test results attached.</p></div>
+          <div class="vs-row" style="--i:2"><b>Windows</b><p class="them">One app per agent vendor. With more tasks, you're hunting across windows.</p><p class="us">Every AI member in one sidebar: who's working and who's waiting on you, at a glance.</p></div>
+          <div class="vs-row" style="--i:3"><b>Decisions</b><p class="them">Each window asks for its own confirmations, so you click through them one by one.</p><p class="us">Everything waiting on you is gathered on Home, answered in place.</p></div>
+        </div>
+        <p class="vs-when"><b>When to pick it</b>You're coding solo and nobody else needs to see the work.</p>
+      </div>
+      <p class="cmp-note">Based on each product's public docs and repositories, November 2026. Product names belong to their owners.</p>
+    </div>
+  </section>
+
+  <section class="wrap cta" id="waitlist">
+    <img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">
+    <h2>Teammates and AI members,<br>in one app.</h2>
+    <p class="lead">Leave your email and we'll tell you the moment it's ready. One email, never shared.</p>
+    <form class="wl" novalidate>
+      <label class="sr" for="wl-email">Your email</label>
+      <input id="wl-email" type="email" name="email" autocomplete="email" inputmode="email" placeholder="you@company.com" maxlength="254" required>
+      <button class="btn pri" type="submit">Join waitlist →</button>
+    </form>
+    <p class="wl-msg" role="status" aria-live="polite"></p>
+    <div class="fine"><span class="wl-count" hidden><b></b> people waiting · </span>macOS first. Windows and mobile are in development.</div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap"><span>{{PRODUCT_NAME}}</span><span>macOS · Windows and mobile in development</span></div>
+</footer>
+<script src="main.js"></script>
+</body>
+</html>

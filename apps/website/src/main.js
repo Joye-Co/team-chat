@@ -74,36 +74,39 @@
   function upd(){tick=false;if(cm&&!cm.classList.contains("in")&&cm.getBoundingClientRect().top<innerHeight*.8)cm.classList.add("in");}
   addEventListener("scroll",function(){if(!tick){tick=true;requestAnimationFrame(upd);}},{passive:true});upd();
 })();
+var EN=document.documentElement.lang==="en";
 /* waitlist: GET /api/waitlist gives {count}; POST {email} books and gives the new {count}. The host serves that endpoint. */
 (function(){
   var form=document.querySelector(".wl");if(!form)return;
   var KEY="waitlist",input=form.querySelector("input"),btn=form.querySelector("button"),msg=document.querySelector(".wl-msg"),counts=document.querySelectorAll(".wl-count");
   function count(n){if(typeof n!=="number"||n<10)return;[].forEach.call(counts,function(c){c.querySelector("b").textContent=n;c.hidden=false;});}
   function say(t,cls){msg.className="wl-msg"+(cls?" "+cls:"");msg.textContent=t;}
-  function done(email){form.classList.add("done");say("已预约，上线时会发到 "+email,"ok");var b=document.createElement("button");b.type="button";b.textContent="换一个邮箱";
+  function done(email){form.classList.add("done");say((EN?"You're on the list. We'll email ":"已预约，上线时会发到 ")+email,"ok");var b=document.createElement("button");b.type="button";b.textContent=EN?"Use a different email":"换一个邮箱";
     b.addEventListener("click",function(){try{localStorage.removeItem(KEY);}catch(e){}form.classList.remove("done");say("");input.value="";input.focus();});msg.appendChild(b);}
   try{var saved=JSON.parse(localStorage.getItem(KEY)||"null");if(saved&&saved.email)done(saved.email);}catch(e){}
   fetch("/api/waitlist").then(function(r){return r.ok?r.json():null;}).then(function(d){if(d)count(d.count);}).catch(function(){});
   input.addEventListener("input",function(){input.removeAttribute("aria-invalid");if(msg.classList.contains("bad"))say("");});
   form.addEventListener("submit",function(e){e.preventDefault();var email=input.value.trim();
-    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){input.setAttribute("aria-invalid","true");say("这个邮箱看起来不太对","bad");input.focus();return;}
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){input.setAttribute("aria-invalid","true");say(EN?"That email doesn't look right":"这个邮箱看起来不太对","bad");input.focus();return;}
     btn.disabled=true;say("");
     fetch("/api/waitlist",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({email:email})})
       .then(function(r){return r.json().catch(function(){return null;}).then(function(d){if(!r.ok)throw new Error("rejected");return d;});})
       .then(function(d){if(d)count(d.count);try{localStorage.setItem(KEY,JSON.stringify({email:email}));}catch(e){}done(email);})
-      .catch(function(err){say(err&&err.message==="rejected"?"提交没成功，过一会儿再试一次":"网络不太顺，过一会儿再试一次","bad");})
+      .catch(function(err){say(err&&err.message==="rejected"?(EN?"That didn't go through. Try again in a moment.":"提交没成功，过一会儿再试一次"):(EN?"Network trouble. Try again in a moment.":"网络不太顺，过一会儿再试一次"),"bad");})
       .then(function(){btn.disabled=false;});});
 })();
 /* build a member: the chips on the left drive the member card on the right */
 (function(){
   var mk=document.querySelector(".mk");if(!mk)return;
   var P={forge:["Forge","开发","Claude","Claude Code",["GitHub","数据库"]],tata:["Tata","产品","GPT","Codex",["Notion","日历"]],nova:["Nova","增长","DeepSeek","你自己的",["Gmail","自定义 connector"]],watch:["Watch","运维","Gemini","Claude Code",["GitHub","数据库","日历"]]};
+  if(EN)P={forge:["Forge","Engineering","Claude","Claude Code",["GitHub","Database"]],tata:["Tata","Product","GPT","Codex",["Notion","Calendar"]],nova:["Nova","Growth","DeepSeek","Your own",["Gmail","Custom connector"]],watch:["Watch","Ops","Gemini","Claude Code",["GitHub","Database","Calendar"]]};
   var cur=P.forge,pres=[].slice.call(mk.querySelectorAll(".pre"));
   function $(id){return document.getElementById(id);}
   function opts(g){return [].slice.call(mk.querySelectorAll('[data-g="'+g+'"] .opt'));}
   function on(g){return opts(g).filter(function(b){return b.getAttribute("aria-pressed")==="true";}).map(function(b){return b.dataset.v;});}
   function put(id,t){var el=$(id);if(el.textContent===t)return;el.textContent=t;el.classList.remove("tick");void el.offsetWidth;el.classList.add("tick");}
-  function render(){var m=on("m")[0],h=on("h")[0],t=on("t");put("mk-av",cur[0].charAt(0));put("mk-n",cur[0]);put("mk-role",cur[1]);put("mk-m",m);put("mk-h",h);put("mk-t",t.length?t.join("、"):"还没选");
+  function render(){var m=on("m")[0],h=on("h")[0],t=on("t");put("mk-av",cur[0].charAt(0));put("mk-n",cur[0]);put("mk-role",cur[1]);put("mk-m",m);put("mk-h",h);put("mk-t",t.length?t.join(EN?", ":"、"):(EN?"None yet":"还没选"));
+    if(EN){put("mk-s",cur[0]+" runs "+m+" on "+(h==="Your own"?"your own harness":h)+(t.length?", with access to "+(t.length>1?t.slice(0,-1).join(", ")+(t.length>2?",":"")+" and "+t[t.length-1]:t[0]):"")+".");return;}
     var text=cur[0]+" 用 "+m+" 跑在"+(h==="你自己的"?"你自己的 harness":h)+"上"+(t.length?"，能用"+(t.length>1?t.slice(0,-1).join("、")+"和"+t[t.length-1]:t[0]):"")+"。";
     /* a space between Chinese and Latin text, none before punctuation */
     put("mk-s",text.replace(/([\u4e00-\u9fff])([A-Za-z])/g,"$1 $2").replace(/([A-Za-z])([\u4e00-\u9fff])/g,"$1 $2"));}

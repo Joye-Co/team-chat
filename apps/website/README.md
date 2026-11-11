@@ -13,6 +13,7 @@ dependencies.
 | Path | What it holds |
 | --- | --- |
 | `src/index.html` | The page. Write `{{PRODUCT_NAME}}` wherever the product name appears; the build fills it from `product.json`. |
+| `src/en.html` | The English page, served at `/en`. Same sections as `index.html`: change both together. `main.js` picks its strings from `<html lang>`. |
 | `src/styles.css` | Tokens for light and dark mode, layout, and the scroll motion (only under `.motion`, which `main.js` adds unless the viewer asked for reduced motion) |
 | `src/main.js` | Scroll reveals, the screenshot tours, the comparison (one panel per alternative, each with its own rows; the tabs pick the panel), the sliding pill of the tab rows, the nav link of the section in view, the member builder (chips drive the member card) and the waitlist form |
 | `src/img/` | WebP screenshots in light and dark pairs (`*-light.webp`, `*-dark.webp`) and the app icon |

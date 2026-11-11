@@ -52,6 +52,8 @@ nav .wrap{height:60px;display:flex;align-items:center;justify-content:space-betw
 .links a:hover,.links a.on{color:var(--ink)}
 .nav-r{display:flex;gap:10px;align-items:center}
 .nav-r .btn{height:34px;padding:0 14px;font-size:13.5px}
+.lang{height:34px;display:inline-flex;align-items:center;padding:0 8px;font-size:13.5px;color:var(--ink-2);border-radius:8px;transition:color .2s ease}
+.lang:hover{color:var(--ink)}
 .cta .ctas{margin-top:32px}
 
 /* hero */
