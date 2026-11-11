@@ -62,29 +62,68 @@ pub fn fit_zoom(w: f32, viewport_w: f32) -> f32 {
     ((viewport_w - 2. * MARGIN).max(1.) / w.max(1.)).clamp(FIT_FLOOR, 1.0)
 }
 
+/// `name` as a file name every system takes: Windows refuses `< > : " / \ | ? *`,
+/// control characters and a name that ends in a dot or a space, and reads `CON`, `NUL`
+/// and their kind as devices whatever follows the dot.
+fn file_stem(name: &str) -> String {
+    let safe: String = name
+        .chars()
+        .map(|ch| match ch {
+            '/' | ':' | '\\' | '<' | '>' | '"' | '|' | '?' | '*' => '-',
+            ch if ch.is_control() => '-',
+            ch => ch,
+        })
+        .collect();
+    let safe = safe.trim_end_matches(['.', ' ']).trim_start();
+    let device = matches!(
+        safe.split('.')
+            .next()
+            .unwrap_or("")
+            .to_ascii_uppercase()
+            .as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    );
+    if safe.is_empty() || device {
+        format!("diagram-{safe}")
+    } else {
+        safe.to_string()
+    }
+}
+
 /// Writes the drawn picture to `<temp>/<slug>-diagrams/<name>.png`, for 存到本机 (copied
 /// into 下载 from there) and 用系统应用打开.
 fn export_png(image: &gpui::Image, name: &str) -> Option<std::path::PathBuf> {
     let dir = std::env::temp_dir().join(format!("{}-diagrams", env!("PRODUCT_SLUG")));
     std::fs::create_dir_all(&dir).ok()?;
-    let safe: String = name
-        .chars()
-        .map(|ch| {
-            if matches!(ch, '/' | ':' | '\\') {
-                '-'
-            } else {
-                ch
-            }
-        })
-        .collect();
-    let path = dir.join(format!("{safe}.png"));
+    let path = dir.join(format!("{}.png", file_stem(name)));
     std::fs::write(&path, image.bytes()).ok()?;
     Some(path)
 }
 
 /// The sheet height: the window under the toolbar row, 48 short, at most 760.
 fn sheet_height(window: &Window) -> Pixels {
-    (window.viewport_size().height - ui::native::metrics::TOOLBAR_ROW - space::S48)
+    (window.viewport_size().height - ui::native::window_chrome::sheet_top() - space::S48)
         .min(px(760.))
         .max(px(320.))
 }
@@ -794,6 +833,20 @@ impl Render for DiagramViewer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_exported_picture_gets_a_name_windows_takes() {
+        assert_eq!(file_stem("登录流程"), "登录流程");
+        assert_eq!(file_stem("a/b: c?"), "a-b- c-");
+        assert_eq!(
+            file_stem("为什么慢？ <v2> \"x\"|*"),
+            "为什么慢？ -v2- -x---"
+        );
+        assert_eq!(file_stem("结束. "), "结束");
+        assert_eq!(file_stem("con"), "diagram-con");
+        assert_eq!(file_stem("NUL.v2"), "diagram-NUL.v2");
+        assert_eq!(file_stem(" . "), "diagram-");
+    }
 
     #[test]
     fn fit_never_upscales_and_stays_in_range() {

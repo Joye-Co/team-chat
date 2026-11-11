@@ -125,6 +125,8 @@ pub struct AccountPage {
     /// The last step change went back (换个邮箱): the step slides in from
     /// the leading side instead of the trailing one.
     email_back: bool,
+    /// 在手机上登录: show a QR code a phone scans, or approve a phone's code.
+    phone: Entity<super::account_phone::PhoneSignIn>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -157,7 +159,13 @@ impl AccountPage {
         });
         let email_code =
             cx.new(|cx| CodeInput::new(crate::views::login::EMAIL_CODE_LEN, 3, window, cx));
+        let phone =
+            cx.new(|cx| super::account_phone::PhoneSignIn::new(services.clone(), window, cx));
         let subscriptions = vec![
+            cx.subscribe(
+                &phone,
+                |this, _, _: &super::account_phone::PhoneSignedIn, cx| this.refresh_devices(cx),
+            ),
             cx.subscribe_in(
                 &services.hub,
                 window,
@@ -219,6 +227,7 @@ impl AccountPage {
             email_error: None,
             email_step: 0,
             email_back: false,
+            phone,
             _subscriptions: subscriptions,
         };
         this.fill_from_me(window, cx);
@@ -747,6 +756,10 @@ impl AccountPage {
 
     pub fn field_error(&self) -> Option<&FieldError> {
         self.field_error.as_ref()
+    }
+
+    pub fn phone(&self) -> &Entity<super::account_phone::PhoneSignIn> {
+        &self.phone
     }
 
     pub fn devices(&self) -> Option<&[DeviceInfo]> {
@@ -1366,6 +1379,7 @@ impl Render for AccountPage {
         widgets::pane()
             .child(GroupedForm::new().row(self.header(cx)))
             .child(self.email_section(window, cx))
+            .child(self.phone.clone())
             .child(self.devices_section(window, cx))
             .child(
                 div().flex().child(

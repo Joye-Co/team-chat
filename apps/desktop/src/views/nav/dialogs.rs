@@ -481,7 +481,7 @@ pub fn window_alert(
     let k = native_colors(cx);
     dialog
         .entrance(crate::ui::native::sheet::SHEET_ENTRANCE)
-        .margin_top(metrics::TOOLBAR_ROW)
+        .margin_top(crate::ui::native::window_chrome::sheet_top())
         .width(metrics::ALERT_WIDTH)
         .close_button(false)
         .keyboard(true)

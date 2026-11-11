@@ -764,7 +764,7 @@ const REF_TEMPLATE: &str = r#"(function(){
     var root = host.attachShadow({ mode: 'closed' });
     var b = document.createElement('button');
     b.textContent = m.label;
-    b.style.cssText = 'position:fixed;left:' + e.clientX + 'px;top:' + e.clientY + 'px;font:13px -apple-system,system-ui;padding:6px 12px;border-radius:8px;cursor:default;' +
+    b.style.cssText = 'position:fixed;left:' + e.clientX + 'px;top:' + e.clientY + 'px;font:13px -apple-system,system-ui,"Segoe UI","Microsoft YaHei UI",sans-serif;padding:6px 12px;border-radius:8px;cursor:default;' +
       'background:' + m.bg + ';color:' + m.ink + ';border:1px solid ' + m.line + ';box-shadow:0 4px 16px rgba(0,0,0,.16)';
     b.addEventListener('click', function (ev) { ev.stopPropagation(); close(); send(el); });
     root.appendChild(b);

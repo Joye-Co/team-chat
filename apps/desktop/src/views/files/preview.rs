@@ -337,8 +337,8 @@ pub fn open_quick_look(
 ) -> Result<AnyWindowHandle, String> {
     let handle = open(services, content, cx)?;
     let file = photo();
-    // In a folder of its own, as a downloaded attachment is in the cache.
-    let dir = std::env::temp_dir().join("team-chat-quick-look");
+    // Under the name it was sent with, as a downloaded attachment is in the cache.
+    let dir = std::env::temp_dir().join("team-chat-quick-look-scene");
     let path = dir.join(&file.name);
     let _ = std::fs::create_dir_all(&dir);
     let _ = std::fs::copy(

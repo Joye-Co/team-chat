@@ -18,9 +18,8 @@
 //! - **Sound**: the toast names the system's notification sound when 设置 › 通用 › 声音 is
 //!   on, and Windows plays it, so Focus Assist silences it with the toast.
 //!
-//! Next to every toast the taskbar button flashes until the app comes forward, so a
-//! notification is noticed even when toasts are off for the app or Focus Assist holds
-//! them back.
+//! Nothing else draws attention (no taskbar flash), as the Mac app does not bounce in the
+//! Dock: the unread count is on the taskbar button (`views::nav`'s badge).
 //!
 //! Reconnects: GPUI's `on_system_wake` (`WM_POWERBROADCAST`), plus a watcher thread that
 //! compares the network adapters' addresses every few seconds and notices clock jumps (a
@@ -51,7 +50,7 @@ use super::{
 /// How notifications are shown in this process.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NotifyMode {
-    /// WinRT toasts under the app's AppUserModelID, with the taskbar flash.
+    /// WinRT toasts under the app's AppUserModelID.
     Toast,
 }
 
@@ -237,9 +236,9 @@ fn show_toast(app_id: &str, spec: &ToastSpec) -> windows::core::Result<()> {
 }
 
 /// Shows a notification, with the system's notification sound when `sound` (设置 › 通用 ›
-/// 声音), and flashes the taskbar button. `group_name` is the 群's name for the header its
+/// 声音). `group_name` is the 群's name for the header its
 /// notifications share. Call on the main thread.
-pub fn post(notice: &Notice, group_name: &str, sound: bool, cx: &mut App) {
+pub fn post(notice: &Notice, group_name: &str, sound: bool) {
     let spec = toast_spec(notice, group_name, sound, &chat_core::new_id());
     match show_toast(super::session::app_id(), &spec) {
         Ok(()) => {
@@ -250,32 +249,6 @@ pub fn post(notice: &Notice, group_name: &str, sound: bool, cx: &mut App) {
                 .insert(notice.group_id.clone());
         }
         Err(error) => tracing::warn!(%error, "cannot show a notification"),
-    }
-    flash_taskbar(cx);
-}
-
-/// Flashes the taskbar button of the app's first window until the app comes forward.
-fn flash_taskbar(cx: &mut App) {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        FLASHW_TIMERNOFG, FLASHW_TRAY, FLASHWINFO, FlashWindowEx,
-    };
-    let Some(hwnd) = cx.windows().into_iter().find_map(|handle| {
-        handle
-            .update(cx, |_, window, _| crate::win32::hwnd(window))
-            .ok()?
-    }) else {
-        return;
-    };
-    let info = FLASHWINFO {
-        cbSize: std::mem::size_of::<FLASHWINFO>() as u32,
-        hwnd,
-        dwFlags: FLASHW_TRAY | FLASHW_TIMERNOFG,
-        uCount: 0,
-        dwTimeout: 0,
-    };
-    // SAFETY: `info` is a valid FLASHWINFO for a window of this thread.
-    unsafe {
-        let _ = FlashWindowEx(&info);
     }
 }
 

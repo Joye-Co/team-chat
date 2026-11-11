@@ -81,7 +81,7 @@ pub fn install(core: Arc<CoreProvider>, services: Services, cx: &mut App) {
             while let Some(notice) = notices.next().await {
                 // Runs on the main thread.
                 if !windows::app_is_active() {
-                    cx.update(|cx| {
+                    cx.update(|_| {
                         let group_name = services
                             .provider
                             .groups()
@@ -93,7 +93,6 @@ pub fn install(core: Arc<CoreProvider>, services: Services, cx: &mut App) {
                             &notice,
                             &group_name,
                             crate::views::settings::prefs::get().sound,
-                            cx,
                         )
                     });
                 }

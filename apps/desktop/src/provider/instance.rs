@@ -32,22 +32,32 @@ fn scheme_prefix() -> &'static str {
     concat!(env!("PRODUCT_URL_SCHEME"), ":")
 }
 
-/// True for a `<scheme>:` link.
+/// True for a `<scheme>:` link. Compares bytes: the text comes from outside the app and
+/// may be anything.
 pub fn is_link(arg: &str) -> bool {
-    arg.len() > scheme_prefix().len()
-        && arg[..scheme_prefix().len()].eq_ignore_ascii_case(scheme_prefix())
+    let (arg, prefix) = (arg.as_bytes(), scheme_prefix().as_bytes());
+    arg.len() > prefix.len() && arg[..prefix.len()].eq_ignore_ascii_case(prefix)
 }
 
 impl Command {
     /// The command of a launch with these arguments. `None` when the process was started
     /// for something else (any other argument), which never joins the running app.
+    ///
+    /// A launch with a link is that link's launch whatever else is on the command line
+    /// (as `main` reads it). A link longer than the app reads only brings the app forward.
     pub fn from_args(args: impl IntoIterator<Item = String>) -> Option<Self> {
+        let args: Vec<String> = args.into_iter().collect();
+        if let Some(link) = args.iter().find(|arg| is_link(arg)) {
+            return Some(if link.len() <= MAX_LINK {
+                Command::Link(link.clone())
+            } else {
+                Command::Show
+            });
+        }
         let mut command = Command::Show;
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
-            if is_link(&arg) {
-                command = Command::Link(arg);
-            } else if arg == "--dock-action" {
+            if arg == "--dock-action" {
                 command = Command::DockAction(args.next()?.parse().ok()?);
             } else {
                 return None;
@@ -290,22 +300,34 @@ mod win {
         }
         let until = Instant::now() + FIND_FOR;
         loop {
-            if send(&window, command) {
-                return Claim::Forwarded;
+            match send(&window, command) {
+                // Taken, or looked at and refused: either way the app runs, and a
+                // second one must never start next to it.
+                Sent::Taken | Sent::Refused => return Claim::Forwarded,
+                Sent::NoWindow => {}
             }
             if Instant::now() >= until {
-                // The other process never showed up (it is exiting, or hung before its
-                // window): better two apps than none.
-                tracing::warn!("the running app did not answer; starting another");
+                // The other process never showed a window (it is exiting, or hung
+                // before it): better two apps than none.
+                tracing::warn!("the running app has no window to ask; starting another");
                 return Claim::First(instance);
             }
             std::thread::sleep(Duration::from_millis(100));
         }
     }
 
-    /// Sends `command` to the window named `window`. False when there is no such window
-    /// or it did not take the command.
-    fn send(window: &[u16], command: &Command) -> bool {
+    /// What became of a command sent to the running app.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Sent {
+        Taken,
+        /// The app's window answered and did not take the command.
+        Refused,
+        /// The app has no window (yet), or it does not answer.
+        NoWindow,
+    }
+
+    /// Sends `command` to the window named `window`.
+    fn send(window: &[u16], command: &Command) -> Sent {
         let text = command.encode();
         let data = COPYDATASTRUCT {
             dwData: COPY_TAG,
@@ -316,7 +338,7 @@ mod win {
         // send; the target copies the bytes before it returns.
         unsafe {
             let Ok(hwnd) = FindWindowW(CLASS, PCWSTR(window.as_ptr())) else {
-                return false;
+                return Sent::NoWindow;
             };
             // The person asked for the app by starting it again: let the running process
             // come to the front (only the foreground process can pass that right on).
@@ -333,7 +355,13 @@ mod win {
                 5000,
                 Some(&mut answer),
             );
-            sent.0 != 0 && answer == 1
+            if sent.0 == 0 {
+                Sent::NoWindow
+            } else if answer == 1 {
+                Sent::Taken
+            } else {
+                Sent::Refused
+            }
         }
     }
 
@@ -342,6 +370,35 @@ mod win {
             const { std::cell::RefCell::new(None) };
     }
 
+    /// The command in a `WM_COPYDATA` message, when it is one of this app's.
+    ///
+    /// # Safety
+    /// `lparam` must be the `LPARAM` of a `WM_COPYDATA` message (null, or a
+    /// `COPYDATASTRUCT` valid for this call, which is what the system delivers).
+    unsafe fn read_command(lparam: LPARAM) -> Option<Command> {
+        let data = lparam.0 as *const COPYDATASTRUCT;
+        if data.is_null() {
+            return None;
+        }
+        // SAFETY: not null, and valid for this call by the function's contract; the
+        // buffer holds `cbData` bytes.
+        let bytes = unsafe {
+            let data = &*data;
+            if data.dwData != COPY_TAG
+                || data.lpData.is_null()
+                || data.cbData == 0
+                || data.cbData as usize > MAX_MESSAGE
+            {
+                return None;
+            }
+            std::slice::from_raw_parts(data.lpData as *const u8, data.cbData as usize)
+        };
+        Command::decode(std::str::from_utf8(bytes).ok()?)
+    }
+
+    /// The most bytes a command may have: a link of the longest length and its word.
+    const MAX_MESSAGE: usize = super::MAX_LINK + 16;
+
     unsafe extern "system" fn proc(
         hwnd: HWND,
         msg: u32,
@@ -349,23 +406,19 @@ mod win {
         lparam: LPARAM,
     ) -> LRESULT {
         if msg == WM_COPYDATA {
-            // SAFETY: for WM_COPYDATA the system passes a valid COPYDATASTRUCT whose
-            // buffer holds `cbData` bytes for the length of this call.
-            let command = unsafe {
-                let data = &*(lparam.0 as *const COPYDATASTRUCT);
-                (data.dwData == COPY_TAG && !data.lpData.is_null() && data.cbData <= 4096)
-                    .then(|| {
-                        std::slice::from_raw_parts(data.lpData as *const u8, data.cbData as usize)
+            // Any process of the session can send this: nothing in the message may
+            // unwind out of the window procedure.
+            let taken = std::panic::catch_unwind(|| {
+                // SAFETY: the system passes this message's own LPARAM.
+                let command = unsafe { read_command(lparam) };
+                command.is_some_and(|command| {
+                    COMMANDS.with_borrow(|tx| {
+                        tx.as_ref()
+                            .is_some_and(|tx| tx.unbounded_send(command).is_ok())
                     })
-                    .and_then(|bytes| std::str::from_utf8(bytes).ok())
-                    .and_then(Command::decode)
-            };
-            let taken = command.is_some_and(|command| {
-                COMMANDS.with_borrow(|tx| {
-                    tx.as_ref()
-                        .is_some_and(|tx| tx.unbounded_send(command).is_ok())
                 })
-            });
+            })
+            .unwrap_or(false);
             return LRESULT(taken as isize);
         }
         // SAFETY: the arguments are the ones this procedure was called with.
@@ -472,6 +525,49 @@ mod win {
                 got,
                 vec![Command::Link(link), Command::DockAction(2), Command::Show]
             );
+            // What the app refuses never starts a second app: the launch still ends.
+            let window = names(&app_id).1;
+            let raw = |tag: usize, bytes: &[u8]| {
+                let data = COPYDATASTRUCT {
+                    dwData: tag,
+                    cbData: bytes.len() as u32,
+                    lpData: bytes.as_ptr() as *mut _,
+                };
+                // SAFETY: a window of this thread; the data outlives the call.
+                unsafe {
+                    let hwnd = FindWindowW(CLASS, PCWSTR(window.as_ptr())).unwrap();
+                    proc(
+                        hwnd,
+                        WM_COPYDATA,
+                        WPARAM(0),
+                        LPARAM(&data as *const _ as isize),
+                    )
+                    .0
+                }
+            };
+            assert_eq!(raw(COPY_TAG, b"show"), 1);
+            assert_eq!(
+                raw(COPY_TAG, "link ab中文中".as_bytes()),
+                0,
+                "not a link, no panic"
+            );
+            assert_eq!(raw(COPY_TAG, &[0xff, 0xfe, 0x00]), 0, "not UTF-8");
+            assert_eq!(raw(COPY_TAG, b""), 0);
+            assert_eq!(raw(COPY_TAG + 1, b"show"), 0, "another sender's message");
+            assert_eq!(raw(COPY_TAG, &vec![b'a'; MAX_MESSAGE + 1]), 0);
+            // SAFETY: a null LPARAM is handled, not read.
+            unsafe {
+                let hwnd = FindWindowW(CLASS, PCWSTR(window.as_ptr())).unwrap();
+                assert_eq!(proc(hwnd, WM_COPYDATA, WPARAM(0), LPARAM(0)).0, 0);
+            }
+            while rx.try_recv().is_ok() {}
+            assert_eq!(send(&window, &Command::Show), Sent::Taken);
+            COMMANDS.with_borrow_mut(|slot| *slot = None);
+            assert_eq!(
+                send(&window, &Command::Show),
+                Sent::Refused,
+                "a window that takes nothing still means the app runs"
+            );
             // Once the first is gone, the next launch is the app again.
             drop(first);
             assert!(matches!(
@@ -497,6 +593,20 @@ mod tests {
         assert_eq!(args(&[link]), Some(Command::Link(link.into())));
         assert_eq!(args(&["--dock-action", "2"]), Some(Command::DockAction(2)));
         // A self-test or a sandbox never joins the running app.
+        // A link's launch is the link, whatever else is on the command line; a link too
+        // long to read only shows the app.
+        assert_eq!(
+            args(&[link, "--selftest-live", "https://x", "--token-file", "y"]),
+            Some(Command::Link(link.into()))
+        );
+        assert_eq!(args(&["--fake", link]), Some(Command::Link(link.into())));
+        let long = format!("{link}/{}", "a".repeat(MAX_LINK));
+        assert_eq!(args(&[&long]), Some(Command::Show));
+        // Text that is not ASCII is never sliced inside a character.
+        assert!(!is_link("ab中文中文中文"));
+        assert!(!is_link("中"));
+        assert_eq!(args(&["ab中文中文中文"]), None);
+        assert_eq!(Command::decode("link ab中文中"), None);
         assert_eq!(args(&["--fake"]), None);
         assert_eq!(args(&["--screenshot", "out"]), None);
         assert_eq!(args(&["--dock-action"]), None);

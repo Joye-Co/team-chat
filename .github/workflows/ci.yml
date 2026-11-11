@@ -396,7 +396,9 @@ jobs:
       # tests/process_tree.rs (a fake CLI in a Job Object: run, cancel, pause, wrappers, ConPTY)
       # and tests/runtimes.rs (the Codex, ACP and Claude runtimes against the Python fake CLIs,
       # started through the fake-cli launcher of the test-fakes feature). See
-      # docs/plans/windows.zh.md, M1 and M2. tests/integration.rs and tests/setup.rs are Unix only.
+      # docs/plans/windows.zh.md, M1 and M2. tests/integration.rs (the whole daemon against a
+      # mock server and the fake CLIs) and tests/setup.rs run here too; what is left Unix only
+      # is listed in docs/plans/windows-parity/machine.zh.md.
       # Also tests/service_task.rs: the scheduled task of the runner's own user with a stand-in
       # daemon, against the real Task Scheduler (docs/plans/windows.zh.md, M3).
       - name: cargo test (daemon)
@@ -570,6 +572,10 @@ jobs:
         run: command -v xcodegen || HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
       - name: Bridge lint
         run: cargo clippy --locked -p chat-ffi --all-targets -- -D warnings
+        env:
+          CARGO_TARGET_DIR: .tmp/target-ios
+      - name: Bridge tests
+        run: cargo test --locked -p chat-ffi
         env:
           CARGO_TARGET_DIR: .tmp/target-ios
       - name: Build the bridge, the app and its extensions
