@@ -650,6 +650,56 @@ pub fn codex_login(cfg: &Config, rt: &RuntimeConfig) -> CliLogin {
     }
 }
 
+/// The API key a CLI of this kind reads instead of a sign-in.
+pub fn api_key_name(kind: &str) -> Option<&'static str> {
+    match kind {
+        "claude" => Some("ANTHROPIC_API_KEY"),
+        "codex" => Some("OPENAI_API_KEY"),
+        _ => None,
+    }
+}
+
+/// The login a heartbeat reports (模 3.2): what the credential files say (`l`), then the CLI's
+/// own status check (`check`) over it, an API key saved from the app (`key_saved`) and, last, a
+/// run that failed because the CLI is not signed in (`failed_sign_in`), which stands until the
+/// status check says it is signed in again.
+pub fn apply_sign_in(
+    l: &mut CliLogin,
+    check: Option<&crate::accounts::SignIn>,
+    key_saved: bool,
+    failed_sign_in: bool,
+) {
+    use crate::accounts::SignIn;
+    match check {
+        Some(SignIn::In(a)) => {
+            l.email = a.email.clone();
+            l.plan = a.plan.clone();
+            l.state = login_state::LOGGED_IN.into();
+            if a.plan.as_deref() == Some("api_key") {
+                l.method = Some("api_key".into());
+            } else if l.method.is_none() {
+                // The CLI itself says it is signed in (macOS keeps Claude's in the Keychain).
+                l.method = Some("subscription".into());
+            }
+        }
+        // The files may still be there after the sign-in expired or was revoked. A key the CLI
+        // gets from the daemon's env is not in the check's env, so it still counts.
+        Some(SignIn::Out) if l.method.as_deref() != Some("api_key") => {
+            l.state = login_state::LOGGED_OUT.into();
+            l.method = None;
+        }
+        _ => {}
+    }
+    if key_saved && l.state == login_state::LOGGED_OUT {
+        l.state = login_state::LOGGED_IN.into();
+        l.method = Some("api_key".into());
+    }
+    if failed_sign_in {
+        l.state = login_state::LOGGED_OUT.into();
+        l.method = None;
+    }
+}
+
 /// The login of every Claude Code and Codex runtime (others have no login the daemon knows).
 pub fn logins(cfg: &Config) -> Vec<CliLogin> {
     cfg.runtimes
@@ -815,5 +865,57 @@ mod tests {
         // The value never leaves this module: only state and method are reported.
         let json = serde_json::to_string(&logins(&cfg)).unwrap();
         assert!(!json.contains("sk-test") && !json.contains("\"x\""));
+    }
+
+    /// 模 3.2: the CLI's own check wins over the credential files.
+    #[test]
+    fn the_status_check_decides_the_login() {
+        use crate::accounts::SignIn;
+        let files = |state: &str, method: Option<&str>| CliLogin {
+            runtime: "claude".into(),
+            state: state.into(),
+            method: method.map(str::to_string),
+            email: None,
+            plan: None,
+        };
+        // The files are there, the CLI says its sign-in is gone (expired or revoked).
+        let mut l = files(login_state::LOGGED_IN, Some("subscription"));
+        apply_sign_in(&mut l, Some(&SignIn::Out), false, false);
+        assert_eq!(
+            (l.state.as_str(), l.method),
+            (login_state::LOGGED_OUT, None)
+        );
+        // A key the CLI gets from the daemon's env still counts.
+        let mut l = files(login_state::LOGGED_IN, Some("api_key"));
+        apply_sign_in(&mut l, Some(&SignIn::Out), false, false);
+        assert_eq!(l.state, login_state::LOGGED_IN);
+        // macOS keeps Claude's credential in the Keychain: the check says signed in.
+        let mut l = files(login_state::LOGGED_OUT, None);
+        let a = crate::proto::LoginAccount {
+            email: Some("a@example.com".into()),
+            plan: Some("max".into()),
+        };
+        apply_sign_in(&mut l, Some(&SignIn::In(a)), false, false);
+        assert_eq!(
+            (l.state.as_str(), l.method.as_deref(), l.plan.as_deref()),
+            (login_state::LOGGED_IN, Some("subscription"), Some("max"))
+        );
+        // A check that could not run leaves the files' answer.
+        let mut l = files(login_state::LOGGED_IN, Some("subscription"));
+        apply_sign_in(&mut l, Some(&SignIn::Unknown), false, false);
+        assert_eq!(l.state, login_state::LOGGED_IN);
+        // An API key saved from the app.
+        let mut l = files(login_state::LOGGED_OUT, None);
+        apply_sign_in(&mut l, Some(&SignIn::Out), true, false);
+        assert_eq!(
+            (l.state.as_str(), l.method.as_deref()),
+            (login_state::LOGGED_IN, Some("api_key"))
+        );
+        // A run that just failed to sign in wins over everything.
+        let mut l = files(login_state::LOGGED_IN, Some("subscription"));
+        apply_sign_in(&mut l, None, true, true);
+        assert_eq!(l.state, login_state::LOGGED_OUT);
+        assert_eq!(api_key_name("codex"), Some("OPENAI_API_KEY"));
+        assert_eq!(api_key_name("acp"), None);
     }
 }

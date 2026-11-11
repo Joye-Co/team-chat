@@ -478,72 +478,97 @@ pub async fn run_login(
     });
 }
 
-/// Who the CLI is signed in as now, when it says.
-pub async fn account_of(rt: &RuntimeConfig) -> Option<LoginAccount> {
-    let program = crate::health::which(&rt.command())?;
-    match rt.kind.as_str() {
-        "claude" => {
-            let out = tokio::time::timeout(
-                Duration::from_secs(20),
-                crate::health::output(
-                    crate::health::command(&program)
-                        .args(["auth", "status", "--json"])
-                        .env_clear()
-                        .envs(login_env(rt))
-                        .stdin(std::process::Stdio::null())
-                        .stdout(std::process::Stdio::piped())
-                        .stderr(std::process::Stdio::piped())
-                        .kill_on_drop(true),
-                ),
-            )
-            .await
-            .ok()?
-            .ok()?;
-            let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
-            if v.get("loggedIn").and_then(|x| x.as_bool()) != Some(true) {
-                return None;
-            }
+/// What the CLI's own status check says (`claude auth status --json`, `codex login status`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum SignIn {
+    /// Signed in, as this account when the CLI says.
+    In(LoginAccount),
+    /// The CLI says it is not signed in.
+    Out,
+    /// The check could not run or said nothing clear.
+    Unknown,
+}
+
+/// `claude auth status --json`: `loggedIn` with the account's email and plan.
+pub fn claude_status(stdout: &[u8]) -> SignIn {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(stdout) else {
+        return SignIn::Unknown;
+    };
+    match v.get("loggedIn").and_then(|x| x.as_bool()) {
+        Some(true) => {
             let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
-            Some(LoginAccount {
+            SignIn::In(LoginAccount {
                 email: s("email"),
                 plan: s("subscriptionType").or_else(|| s("authMethod")),
             })
         }
-        "codex" => {
-            let out = tokio::time::timeout(
-                Duration::from_secs(20),
-                crate::health::output(
-                    crate::health::command(&program)
-                        .args(["login", "status"])
-                        .env_clear()
-                        .envs(login_env(rt))
-                        .stdin(std::process::Stdio::null())
-                        .stdout(std::process::Stdio::piped())
-                        .stderr(std::process::Stdio::piped())
-                        .kill_on_drop(true),
-                ),
-            )
-            .await
-            .ok()?
-            .ok()?;
-            let text = format!(
-                "{}{}",
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr)
-            );
-            // Only the words are read: the line may hold part of an API key.
-            let plan = if text.contains("ChatGPT") {
-                "chatgpt"
-            } else if text.contains("API key") {
-                "api_key"
-            } else {
-                return None;
-            };
-            Some(LoginAccount {
-                email: None,
-                plan: Some(plan.into()),
-            })
-        }
+        Some(false) => SignIn::Out,
+        None => SignIn::Unknown,
+    }
+}
+
+/// `codex login status`: "Logged in using ChatGPT", "Logged in using an API key - …" or "Not
+/// logged in". Only the words are read: the line may hold part of an API key.
+pub fn codex_status(text: &str) -> SignIn {
+    if text.contains("Not logged in") {
+        SignIn::Out
+    } else if text.contains("ChatGPT") {
+        SignIn::In(LoginAccount {
+            email: None,
+            plan: Some("chatgpt".into()),
+        })
+    } else if text.contains("API key") {
+        SignIn::In(LoginAccount {
+            email: None,
+            plan: Some("api_key".into()),
+        })
+    } else {
+        SignIn::Unknown
+    }
+}
+
+/// Whether the CLI is signed in now, by its own status check.
+pub async fn sign_in_of(rt: &RuntimeConfig) -> SignIn {
+    let Some(program) = crate::health::which(&rt.command()) else {
+        return SignIn::Unknown;
+    };
+    let args: &[&str] = match rt.kind.as_str() {
+        "claude" => &["auth", "status", "--json"],
+        "codex" => &["login", "status"],
+        _ => return SignIn::Unknown,
+    };
+    let out = tokio::time::timeout(
+        Duration::from_secs(20),
+        crate::health::output(
+            crate::health::command(&program)
+                .args(args)
+                .env_clear()
+                .envs(login_env(rt))
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true),
+        ),
+    )
+    .await;
+    let Ok(Ok(out)) = out else {
+        return SignIn::Unknown;
+    };
+    if rt.kind == "claude" {
+        claude_status(&out.stdout)
+    } else {
+        codex_status(&format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        ))
+    }
+}
+
+/// Who the CLI is signed in as now, when it says.
+pub async fn account_of(rt: &RuntimeConfig) -> Option<LoginAccount> {
+    match sign_in_of(rt).await {
+        SignIn::In(a) => Some(a),
         _ => None,
     }
 }
@@ -623,5 +648,30 @@ mod tests {
         let c = plain("   \u{1b}[94mABCD-12345\u{1b}[0m");
         assert_eq!(find_user_code(&c).as_deref(), Some("ABCD-12345"));
         assert_eq!(find_user_code("codex-cli 0.167.0"), None);
+    }
+
+    /// The status checks as Claude Code 2.1 and Codex 0.159 print them.
+    #[test]
+    fn the_clis_own_status_checks() {
+        let out = br#"{ "loggedIn": false, "authMethod": "none", "apiProvider": "firstParty" }"#;
+        assert_eq!(claude_status(out), SignIn::Out);
+        let out = br#"{ "loggedIn": true, "authMethod": "claude.ai", "email": "a@example.com", "subscriptionType": "max" }"#;
+        assert_eq!(
+            claude_status(out),
+            SignIn::In(LoginAccount {
+                email: Some("a@example.com".into()),
+                plan: Some("max".into())
+            })
+        );
+        assert_eq!(claude_status(b"error: unknown command"), SignIn::Unknown);
+        assert_eq!(claude_status(b"{}"), SignIn::Unknown);
+        assert_eq!(codex_status("Not logged in\n"), SignIn::Out);
+        assert!(
+            matches!(codex_status("Logged in using ChatGPT\n"), SignIn::In(a) if a.plan.as_deref() == Some("chatgpt"))
+        );
+        assert!(
+            matches!(codex_status("Logged in using an API key - sk-***\n"), SignIn::In(a) if a.plan.as_deref() == Some("api_key"))
+        );
+        assert_eq!(codex_status("Error loading configuration"), SignIn::Unknown);
     }
 }

@@ -349,7 +349,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                         }
                         let code = p.kill_group(Duration::from_secs(3)).await;
                         return Outcome { status: Status::Cancelled, exit_code: code, result_text: norm.last_message,
-                            error: None, session_id: session, session_file: None, usage: None };
+                            error: None, session_id: session, session_file: None, usage: None, failure: None };
                     }
                 }
             }
@@ -372,6 +372,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
         session_id: session,
         session_file: None,
         usage: None,
+        failure: None,
     }
 }
 

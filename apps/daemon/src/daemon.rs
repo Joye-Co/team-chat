@@ -71,6 +71,8 @@ struct RunEntry {
     /// The run's own redactor: the daemon's rules and the values the run learns (its GitHub
     /// tokens).
     redactor: Arc<crate::redact::Redactor>,
+    /// The runtime the run uses; None for a run recovered after a restart.
+    runtime: Option<String>,
 }
 
 pub struct Daemon {
@@ -106,7 +108,10 @@ pub struct Daemon {
     logins: HashMap<String, mpsc::UnboundedSender<crate::accounts::LoginCtl>>,
     login_tx: mpsc::UnboundedSender<crate::proto::LoginStatus>,
     usage: Arc<std::sync::Mutex<Vec<crate::proto::CliUsage>>>,
-    accounts: Arc<std::sync::Mutex<HashMap<String, crate::proto::LoginAccount>>>,
+    accounts: Arc<std::sync::Mutex<HashMap<String, crate::accounts::SignIn>>>,
+    /// Runtimes whose last run failed because the CLI is not signed in, and since when: they
+    /// report `logged_out` until the CLI's status check says signed in again (模 3.2).
+    signed_out: Arc<std::sync::Mutex<HashMap<String, Instant>>>,
     /// Values masked besides the config's: every key this process has held.
     key_values: Vec<String>,
 }
@@ -152,6 +157,7 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
         login_tx,
         usage: Arc::new(std::sync::Mutex::new(vec![])),
         accounts: Arc::new(std::sync::Mutex::new(HashMap::new())),
+        signed_out: Arc::new(std::sync::Mutex::new(HashMap::new())),
         key_values,
     };
     d.read_accounts();
@@ -359,7 +365,9 @@ impl Daemon {
                         usage: None,
                         duration_ms: now.saturating_sub(meta.started_at),
                         code: None,
-                        failure: None,
+                        failure: Some(crate::proto::RunFailure::new(
+                            crate::proto::failure_kind::OTHER,
+                        )),
                     }),
                     &mut buffer,
                     last,
@@ -401,6 +409,7 @@ impl Daemon {
                     log: None,
                     outputs: Arc::default(),
                     redactor: Arc::new(self.redactor.for_run()),
+                    runtime: None,
                 },
             );
         }
@@ -840,6 +849,7 @@ impl Daemon {
                 log: None,
                 outputs: outputs.clone(),
                 redactor: redactor.clone(),
+                runtime: Some(a.runtime.clone()),
             },
         );
         log!("run {id} accepted ({})", a.runtime);
@@ -902,6 +912,9 @@ impl Daemon {
                         d.seq = seq;
                         r.done = true;
                         log!("run {id} done: {}", d.status);
+                        if let Some(rt) = &r.runtime {
+                            note_sign_in(&self.signed_out, rt, d);
+                        }
                     }
                     Up::RunSession(s) => s.seq = seq,
                     _ => {}
@@ -1106,13 +1119,21 @@ impl Daemon {
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         let (usage, accounts) = (self.usage.clone(), self.accounts.clone());
+        let marks = self.signed_out.clone();
         tokio::spawn(async move {
+            let started = Instant::now();
             let mut found = HashMap::new();
             for (name, rt) in &runtimes {
-                if let Some(a) = crate::accounts::account_of(rt).await {
-                    found.insert(name.clone(), a);
-                }
+                found.insert(name.clone(), crate::accounts::sign_in_of(rt).await);
             }
+            // Signed in again since a run failed to sign in: the mark goes.
+            marks
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .retain(|name, at| {
+                    *at >= started
+                        || !matches!(found.get(name), Some(crate::accounts::SignIn::In(_)))
+                });
             *accounts.lock().unwrap_or_else(|e| e.into_inner()) = found;
             let u = crate::usage::read_all(runtimes).await;
             *usage.lock().unwrap_or_else(|e| e.into_inner()) = u;
@@ -1143,28 +1164,81 @@ impl Daemon {
             m.secrets = Some(self.keys.infos());
             m.usage = Some(self.usage.lock().unwrap_or_else(|e| e.into_inner()).clone());
             let accounts = self.accounts.lock().unwrap_or_else(|e| e.into_inner());
+            let saved = self.keys.infos();
             for l in m.logins.iter_mut().flatten() {
-                if let Some(a) = accounts.get(&l.runtime) {
-                    l.email = a.email.clone();
-                    l.plan = a.plan.clone();
-                    if a.plan.as_deref() == Some("api_key") {
-                        l.state = crate::proto::login_state::LOGGED_IN.into();
-                        l.method = Some("api_key".into());
-                    } else if l.state != crate::proto::login_state::LOGGED_IN {
-                        // The CLI itself says it is signed in (macOS keeps Claude's in the Keychain).
-                        l.state = crate::proto::login_state::LOGGED_IN.into();
-                        l.method = Some("subscription".into());
-                    }
-                }
+                let kind = self.cfg.runtimes.get(&l.runtime).map(|rt| rt.kind.as_str());
+                let key_saved = kind
+                    .and_then(crate::metrics::api_key_name)
+                    .is_some_and(|k| saved.iter().any(|s| s.name == k));
+                crate::metrics::apply_sign_in(l, accounts.get(&l.runtime), key_saved, false);
             }
         }
+        // A run that failed to sign in marks its CLI signed out at once (模 3.2).
+        let marks = self.signed_out.lock().unwrap_or_else(|e| e.into_inner());
+        for l in m.logins.iter_mut().flatten() {
+            // The status check (every 10 minutes) clears it sooner; a machine where it cannot
+            // run goes back to the credential files after a while.
+            if marks
+                .get(&l.runtime)
+                .is_some_and(|at| at.elapsed() < SIGNED_OUT_MARK)
+            {
+                crate::metrics::apply_sign_in(l, None, false, true);
+            }
+        }
+        drop(marks);
         m
+    }
+}
+
+/// How long a run that failed to sign in keeps its CLI reported signed out at most.
+const SIGNED_OUT_MARK: Duration = Duration::from_secs(15 * 60);
+
+/// A run of `runtime` ended: one that failed because the CLI is not signed in marks it signed
+/// out; one that succeeded shows the CLI works, so the mark goes.
+fn note_sign_in(marks: &std::sync::Mutex<HashMap<String, Instant>>, runtime: &str, d: &RunDone) {
+    let mut m = marks.lock().unwrap_or_else(|e| e.into_inner());
+    if d.failure
+        .as_ref()
+        .is_some_and(|f| f.kind == crate::proto::failure_kind::SIGNED_OUT)
+    {
+        m.insert(runtime.to_string(), Instant::now());
+    } else if d.status == "succeeded" {
+        m.remove(runtime);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_run_that_failed_to_sign_in_marks_its_cli_until_one_succeeds() {
+        let marks = std::sync::Mutex::new(HashMap::new());
+        let done = |status: &str, kind: Option<&str>| RunDone {
+            run_id: "r1".into(),
+            seq: 1,
+            at: 0,
+            status: status.into(),
+            exit_code: None,
+            result_text: None,
+            summary: None,
+            error: None,
+            session_id: None,
+            usage: None,
+            duration_ms: 0,
+            code: None,
+            failure: kind.map(crate::proto::RunFailure::new),
+        };
+        note_sign_in(&marks, "claude", &done("failed", Some("network")));
+        assert!(marks.lock().unwrap().is_empty());
+        note_sign_in(&marks, "claude", &done("failed", Some("signed_out")));
+        assert!(marks.lock().unwrap().contains_key("claude"));
+        // Another runtime's success leaves it.
+        note_sign_in(&marks, "codex", &done("succeeded", None));
+        assert!(marks.lock().unwrap().contains_key("claude"));
+        note_sign_in(&marks, "claude", &done("succeeded", None));
+        assert!(marks.lock().unwrap().is_empty());
+    }
 
     #[test]
     fn a_key_saved_during_a_run_is_masked_in_that_run() {
@@ -1184,6 +1258,7 @@ mod tests {
                 log: None,
                 outputs: Arc::default(),
                 redactor: run_redactor.clone(),
+                runtime: None,
             },
         );
         // The clone the run's task holds shares the list with the entry's.

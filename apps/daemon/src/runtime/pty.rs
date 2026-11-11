@@ -685,6 +685,7 @@ fn conclude(spec: &RunSpec, emit: &Emit, out: &str, code: Option<i64>, cancelled
         session_id: None,
         session_file: Some(spec.run_dir.join("pty.log")),
         usage: None,
+        failure: None,
     }
 }
 

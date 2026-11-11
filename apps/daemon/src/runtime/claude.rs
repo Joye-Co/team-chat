@@ -45,6 +45,13 @@ pub struct ClaudeNormalizer {
     pub last_result: Option<String>,
     pub last_is_error: bool,
     pub usage: Option<Usage>,
+    /// The `--effort` the run passes, reported in the `session` event.
+    pub effort: Option<String>,
+    /// Why the last turn that ended with an API error failed ([`crate::failure::from_claude`]).
+    pub failure: Option<crate::proto::RunFailure>,
+    /// A `rate_limit_event` said the account's limit refused a request, and when it resets (ms).
+    limit_rejected: bool,
+    limit_resets_at: Option<u64>,
     /// The open turn.
     open: Option<String>,
     /// User lines written to the CLI that it has not taken up yet.
@@ -79,6 +86,17 @@ impl ClaudeNormalizer {
         RunEvent::TurnStarted { turn_id: id }
     }
 
+    /// Why the run failed: the typed reason of the last turn when it ended with an API error,
+    /// else from `error` (the run's error text). A limit gets the reset the CLI last named.
+    pub fn failure_of(&self, error: Option<&str>) -> Option<crate::proto::RunFailure> {
+        let typed = self.failure.clone().filter(|_| self.last_is_error);
+        let mut f = typed.or_else(|| error.and_then(crate::failure::from_text))?;
+        if f.kind == crate::proto::failure_kind::LIMIT {
+            f.resets_at = f.resets_at.or(self.limit_resets_at);
+        }
+        Some(f)
+    }
+
     /// 1 while a turn runs or is due (a written line the CLI has not answered), else 0.
     pub fn open_turns(&self) -> usize {
         usize::from(self.open.is_some())
@@ -98,7 +116,7 @@ impl ClaudeNormalizer {
                         session_id: sid,
                         runtime: "claude".into(),
                         model: v["model"].as_str().map(str::to_string),
-                        effort: None,
+                        effort: self.effort.clone(),
                     }]
                 }
                 Some("api_retry") => vec![RunEvent::Status {
@@ -107,6 +125,18 @@ impl ClaudeNormalizer {
                 }],
                 _ => vec![],
             },
+            // The account's limits as the CLI last heard them; "rejected" = the limit refused
+            // the request, `resetsAt` in seconds.
+            "rate_limit_event" => {
+                let info = &v["rate_limit_info"];
+                if info["status"] == "rejected" {
+                    self.limit_rejected = true;
+                    if let Some(s) = info["resetsAt"].as_u64() {
+                        self.limit_resets_at = Some(s * 1000);
+                    }
+                }
+                vec![]
+            }
             "stream_event" => {
                 let e = &v["event"];
                 match e["type"].as_str() {
@@ -127,6 +157,27 @@ impl ClaudeNormalizer {
             }
             "assistant" => {
                 let m = &v["message"];
+                // A turn that ended with an API error: its typed reason (the text is the
+                // fallback).
+                if let Some(error) = v["error"].as_str() {
+                    let text = m["content"][0]["text"].as_str().unwrap_or_default();
+                    let reset = v["api_error_params"]["rate_limit_info"]["resetsAt"].as_u64();
+                    if reset.is_some() {
+                        self.limit_resets_at = reset.map(|s| s * 1000);
+                    }
+                    self.failure = crate::failure::from_claude(
+                        error,
+                        v["api_error"].as_str(),
+                        text,
+                        self.limit_rejected,
+                    )
+                    .map(|mut f| {
+                        if f.kind == crate::proto::failure_kind::LIMIT {
+                            f.resets_at = f.resets_at.or(self.limit_resets_at);
+                        }
+                        f
+                    });
+                }
                 let msg = m["id"].as_str().unwrap_or("m").to_string();
                 let blocks = m["content"].as_array().cloned().unwrap_or_default();
                 let base = *self.consumed.get(&msg).unwrap_or(&0);
@@ -678,7 +729,10 @@ run unasked. The run was not started.",
             );
         }
     }
-    let mut norm = ClaudeNormalizer::default();
+    let mut norm = ClaudeNormalizer {
+        effort: spec.effort.clone(),
+        ..ClaudeNormalizer::default()
+    };
     for ev in norm.queue_turn() {
         let _ = emit.send(ev);
     }
@@ -724,7 +778,7 @@ run unasked. The run was not started.",
                         return Outcome {
                             status: Status::Cancelled, exit_code: code, result_text: norm.last_result,
                             error: None, session_file: find_session_file(&config_dir, &spec.cwd, &sid),
-                            session_id: Some(sid), usage: norm.usage,
+                            session_id: Some(sid), usage: norm.usage, failure: None,
                         };
                     }
                 }
@@ -734,6 +788,16 @@ run unasked. The run was not started.",
     let code = p.finish(Duration::from_secs(30)).await;
     let sid = norm.session_id.clone().unwrap_or(session_id);
     let failed = exited_early || norm.last_is_error || norm.last_result.is_none();
+    let error = if exited_early {
+        Some(format!(
+            "claude exited before the turn ended: {}",
+            p.stderr_tail()
+        ))
+    } else if failed {
+        norm.last_result.clone()
+    } else {
+        None
+    };
     Outcome {
         status: if failed {
             Status::Failed
@@ -741,16 +805,12 @@ run unasked. The run was not started.",
             Status::Succeeded
         },
         exit_code: code,
-        error: if exited_early {
-            Some(format!(
-                "claude exited before the turn ended: {}",
-                p.stderr_tail()
-            ))
-        } else if failed {
-            norm.last_result.clone()
+        failure: if failed {
+            norm.failure_of(error.as_deref())
         } else {
             None
         },
+        error,
         result_text: norm.last_result,
         session_file: find_session_file(&config_dir, &spec.cwd, &sid),
         session_id: Some(sid),

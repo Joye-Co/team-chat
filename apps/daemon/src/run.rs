@@ -626,7 +626,8 @@ this machine cannot be made to stop at them (update it)",
         usage: outcome.usage.clone(),
         duration_ms: started.elapsed().as_millis() as u64,
         code: None,
-        failure: None,
+        failure: (status == "failed")
+            .then(|| crate::failure::of_run(outcome.failure.as_ref(), outcome.error.as_deref())),
     }));
     if let Some(mut meta) = workspace::read_meta(&dir) {
         meta.finished_at = Some(now_ms());

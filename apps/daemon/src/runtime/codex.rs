@@ -20,6 +20,10 @@ pub struct CodexNormalizer {
     pub usage: Option<Usage>,
     /// The model the thread runs, from `thread/start` (or the one asked for).
     pub model: Option<String>,
+    /// Why the last failed turn failed, from its `codexErrorInfo` ([`crate::failure::from_codex`]).
+    pub failure: Option<crate::proto::RunFailure>,
+    /// When the account's exhausted limit resets (ms), from `account/rateLimits/updated`.
+    pub limit_resets_at: Option<u64>,
     plan: PlanTracker,
 }
 
@@ -28,6 +32,19 @@ fn s(v: &Value, k: &str) -> Option<String> {
 }
 
 impl CodexNormalizer {
+    /// Why the run failed: the typed reason of the last failed turn, else from `error`. A limit
+    /// gets the reset the account's windows named.
+    pub fn failure_of(&self, error: Option<&str>) -> Option<crate::proto::RunFailure> {
+        let mut f = self
+            .failure
+            .clone()
+            .or_else(|| error.and_then(crate::failure::from_text))?;
+        if f.kind == crate::proto::failure_kind::LIMIT {
+            f.resets_at = f.resets_at.or(self.limit_resets_at);
+        }
+        Some(f)
+    }
+
     pub fn on_notification(&mut self, method: &str, p: &Value) -> Vec<RunEvent> {
         let turn_id = s(p, "turnId");
         match method {
@@ -44,8 +61,9 @@ impl CodexNormalizer {
                 };
                 let error = t["error"]["message"].as_str().map(str::to_string);
                 self.last_turn_status = Some(status.to_string());
-                if error.is_some() {
+                if let Some(e) = &error {
                     self.last_error = error.clone();
+                    self.failure = crate::failure::from_codex(&t["error"]["codexErrorInfo"], e);
                 }
                 vec![RunEvent::TurnCompleted {
                     turn_id: t["id"].as_str().unwrap_or_default().to_string(),
@@ -67,6 +85,19 @@ impl CodexNormalizer {
                     }))
                     .into_iter()
                     .collect()
+            }
+            // The account's windows; one used up says when the limit resets (seconds).
+            "account/rateLimits/updated" => {
+                let l = &p["rateLimits"];
+                let reset = [&l["primary"], &l["secondary"]]
+                    .into_iter()
+                    .filter(|w| w["usedPercent"].as_f64().is_some_and(|u| u >= 100.0))
+                    .filter_map(|w| w["resetsAt"].as_u64())
+                    .max();
+                if let Some(s) = reset {
+                    self.limit_resets_at = Some(s * 1000);
+                }
+                vec![]
             }
             "item/agentMessage/delta" => vec![RunEvent::MessageDelta {
                 item_id: s(p, "itemId").unwrap_or_default(),
@@ -118,6 +149,7 @@ impl CodexNormalizer {
                     }]
                 } else {
                     self.last_error = Some(msg.clone());
+                    self.failure = crate::failure::from_codex(&p["error"]["codexErrorInfo"], &msg);
                     vec![RunEvent::Status {
                         state: "error".into(),
                         message: Some(msg),
@@ -471,7 +503,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                                     session_id: tid.clone(),
                                     runtime: spec.runtime_name.clone(),
                                     model: r["model"].as_str().map(str::to_string),
-                                    effort: None,
+                                    effort: spec.effort.clone().or_else(|| r["reasoningEffort"].as_str().map(str::to_string)),
                                 });
                                 thread_id = Some(tid.clone());
                                 let id = ids.next_id();
@@ -577,7 +609,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                         let code = p.kill_group(Duration::from_secs(3)).await;
                         return Outcome {
                             status: Status::Cancelled, exit_code: code, result_text: norm.last_message,
-                            error: None, session_id: thread_id, session_file, usage: norm.usage,
+                            error: None, session_id: thread_id, session_file, usage: norm.usage, failure: None,
                         };
                     }
                 }
@@ -604,10 +636,16 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
         }
     }
     let code = p.finish(Duration::from_secs(3)).await;
+    let failure = if outcome_status == Status::Failed {
+        norm.failure_of(norm.last_error.as_deref())
+    } else {
+        None
+    };
     Outcome {
         status: outcome_status,
         exit_code: code,
         result_text: norm.last_message,
+        failure,
         error: if outcome_status == Status::Failed {
             norm.last_error
         } else {
