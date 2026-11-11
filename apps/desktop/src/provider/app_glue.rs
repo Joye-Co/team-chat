@@ -62,6 +62,8 @@ pub fn install(core: Arc<CoreProvider>, services: Services, cx: &mut App) {
     #[cfg(target_os = "windows")]
     {
         use super::windows;
+        // A login item written under the exe's former name follows the rename.
+        crate::views::settings::login_item::adopt_current_exe();
         let mode = windows::install_notifications(cx);
         tracing::info!(?mode, "notifications");
 

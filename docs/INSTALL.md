@@ -3,6 +3,11 @@
 Chinese version for interns: [INSTALL.zh.md](INSTALL.zh.md). For a Windows computer, see
 [Windows](#windows) below.
 
+The app signs in to your team's server. If you have none yet (you use the app alone, or you set
+up the team), deploy your own first: [SELF-HOSTING.md](SELF-HOSTING.md). It ends with this app
+signed in with a sign-in code that you enter in step 4, after choosing 使用其他服务器… and your
+server's address.
+
 Cahoots needs a Mac with Apple silicon (M1 or later) and macOS 13 or later. The app is not
 notarized by Apple, so macOS asks you to approve it once (step 3).
 

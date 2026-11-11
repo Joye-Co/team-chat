@@ -85,18 +85,18 @@
 
 ### 3.2 切换表
 
-服务端 desk 是唯一裁判，不合法的切换回 `conflict`。「管理员」是线 13 的管理员（含 owner）；「电脑主人」是线 13 的个人电脑的主人。
+服务端 desk 是唯一裁判，不合法的切换回 `conflict`。「管理员」是线 13 的管理员（含 owner）；「电脑主人」是线 13 的个人电脑的主人；「请求人」是运行的 `requested_for`（协议 `BotRun.requestedFor`，design-roles 3.3；旧运行没有时用 `requestedBy`）。权限和 design-roles 3.2、3.6 对齐：个人的电脑上管理员不能暂停、继续或替人交还。
 
 | 从 | 动作 | 到 | 谁能做 | 理由 |
 | --- | --- | --- | --- | --- |
-| working、waiting_person、waiting_approval | 暂停 | paused | 请求人、管理员、电脑主人 | 先让它停下，说句话再继续 |
+| working、waiting_person、waiting_approval | 暂停 | paused | 请求人；团队的电脑上加管理员；个人的电脑上加电脑主人，管理员不行（design-roles 3.6） | 先让它停下，说句话再继续 |
 | working、waiting_person、waiting_approval、paused | 接管 | taken_over | 见下面「谁能接管」 | 接管等于在这台电脑上跑命令 |
-| paused | 继续（可带一句话） | working | 暂停的人、请求人、管理员 | — |
-| taken_over | 交还（可带一句话） | working | 持有人；管理员可「替 {who} 交还」 | 防止忘了交还 |
+| paused | 继续（可带一句话） | working | 暂停的人、请求人；团队的电脑上加管理员，个人的电脑上加电脑主人 | — |
+| taken_over | 交还（可带一句话） | working | 持有人；团队的电脑上管理员可「替 {who} 交还」 | 防止忘了交还 |
 | paused、taken_over，电脑不在线 | 继续 / 交还 | waiting_computer | 同上 | `run.resume` 进 outbox，电脑回来后补发 |
 | paused、taken_over | 电脑失联 | 不变（命令框不能用） | 系统 | 人持有的状态不被系统改掉，见 3.5 的租约 |
 | paused、taken_over | 持有人被移出团队或这个群 | working（自动交还，留言「{who} 已离开，自动交还」） | 系统 | 不然提醒发给不在的人，任务永远停着 |
-| 还没结束的任何状态 | 停止 | stopped | 请求人、管理员 | 已有逻辑；正在跑的人的命令一起结束 |
+| 还没结束的任何状态 | 停止 | stopped | 群里任何一个人（已有逻辑，`POST /v1/runs/:id/cancel`，`routes.ts:451`；design-relay 的停止也靠这条） | 正在跑的人的命令一起结束 |
 | waiting_computer | 暂停 / 接管 | 拒绝：「电脑还没准备好」 | — | 没有可停的东西 |
 | needs_reply | 人在话题里回复 | 新的跟进任务（线 2 同会话续上）；旧任务按 3.1 变成 done 或 failed | 和今天回复一样 | CLI 已退出，没法暂停或接管，界面上不出这两个按钮 |
 | done、failed、stopped | 任何持有动作 | 拒绝，只能「重试」 | — | 已有逻辑 |
@@ -277,7 +277,7 @@ ALTER TABLE runs ADD COLUMN last_handback TEXT;          -- hand.summary 的 JSO
 ### 3.10 一个人用和团队用
 
 - **一个人用**：他是 owner、请求人、电脑主人，所有判断直接放行。点「接管」，在命令框里跑命令，点「交还」，没有多出的步骤、概念或画面。命令在他自己的 Mac 或 Windows 上、以他自己的身份跑，能推送，能在访达里打开工作目录。
-- **团队用**：请求人和管理员能暂停；个人电脑只有主人能接管；团队电脑只有请求人、只在虚拟机里能接管，命令换 uid 跑、碰不到 AI 成员家目录里的登录和别人的东西；其他人看到「{who} 在操作」和话题里的两行，看不到命令输出；管理员能替忘了交还的人交还。
+- **团队用**：请求人能暂停，团队电脑上管理员也能，个人电脑上是电脑主人能、管理员不能；个人电脑只有主人能接管；团队电脑只有请求人、只在虚拟机里能接管，命令换 uid 跑、碰不到 AI 成员家目录里的登录和别人的东西；其他人看到「{who} 在操作」和话题里的两行，看不到命令输出；管理员能替忘了交还的人交还。
 
 ## 4. 兼容和迁移
 
@@ -307,7 +307,7 @@ ALTER TABLE runs ADD COLUMN last_handback TEXT;          -- hand.summary 的 JSO
 
 | PR | 做什么 | 主要文件 | 依赖 | 怎么测 |
 | --- | --- | --- | --- | --- |
-| T1 协议 | 3.6 的全部新增；换掉 tailnet 示例 | `docs/protocol.md`、`docs/machine-protocol.md`、`packages/protocol/src/{bots,machine}.ts`、`crates/chat-protocol`、`protocol/fixtures` | — | 两边的 fixture 测试，含未知 `phase` |
+| T1 协议（并进四份设计共用的协议 PR，新模块 `takeover.ts` / `takeover.rs`） | 3.6 的全部新增；换掉 tailnet 示例 | `docs/protocol.md`、`docs/machine-protocol.md`、`packages/protocol/src/{bots,machine}.ts`、`crates/chat-protocol`、`protocol/fixtures` | — | 两边的 fixture 测试，含未知 `phase` |
 | T2 服务端状态和持有 | `phase.ts`、`desk-hold-1`、`/takeover`、resume 写法、link 的 `held` 和 `noQueue`、`runLost` 的持有判断、提醒、`releaseHolds`、2 分钟规则、daemon 重启的处理 | `server/src/bots/desk/{phase,takeover,core,events,stall,runs}.ts`、`server/src/bots/link.ts`、`server/src/bots/routes.ts`（只 `/takeover`）、`server/src/core/routes.ts` 一处 | T1、线 3；主人判断要线 13，之前按 3.2 的回退 | vitest：`phaseOf` 每条规则、切换表每一行和每种拒绝、A 的电脑跑 B 的任务、持有中租约过期后仍是 taken_over、`runLost` 不动持有中的任务、旧数据读取 |
 | T3 服务端命令 | 命令路由、`hand.*` 处理、`/events` 过滤 `hand.output`、审计 | 新文件 `server/src/bots/desk/hand.ts`、`server/src/bots/routes.ts` | T2 | vitest：离线时 `conflict` 且 outbox 为空、一次一条、非持有人被拒、`hand.output` 对非持有人过滤 |
 | T4 daemon 持有和交还 | `hold` 升级、resume 新行为、输入暂存、`handback.rs`、`hand.summary`、`takeover` 特性、本机和 Windows 的 `Process::hand` | `apps/daemon/src/{run,daemon,handback,proto}.rs`、`executor/{mod,local,local_windows}.rs` | T1（可和 T2 并行） | cargo test：从 paused 升级并记快照、没暂停时 resume 回 `paused: false`、交还说明拼法和长度、环境去掉密钥和任务 bin、10 分钟超时、停止时结束命令 |

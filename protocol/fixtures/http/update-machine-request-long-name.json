@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateMachineRequest",
+  "valid": false,
+  "description": "name is 1..64",
+  "value": {
+    "name": "名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名"
+  }
+}

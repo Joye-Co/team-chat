@@ -1,0 +1,12 @@
+{
+  "kind": "GithubDeviceResponse",
+  "valid": true,
+  "description": "the user code is a fake placeholder",
+  "value": {
+    "deviceId": "01JBX0DEVICE000000000000BA",
+    "userCode": "WDJB-MJHT",
+    "verificationUri": "https://github.com/login/device",
+    "interval": 5,
+    "expiresAt": 1762128900000
+  }
+}

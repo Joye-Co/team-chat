@@ -190,6 +190,8 @@ upload_to_server() {
   # The GitHub Release holds both files once it exists: --reupload sends what is missing.
   local again="scripts/release.sh $VERSION --env $ENV_NAME --reupload"
   if [ ! -s "$SECRET_FILE" ]; then
+    # A run that was asked to upload (--reupload, --upload-only) and cannot must not look done.
+    [ "$REUPLOAD" = 0 ] && [ "$UPLOAD_ONLY" = 0 ] || die "no admin secret at $SECRET_FILE: nothing can be uploaded to $ENV_NAME"
     log "skip server upload: no admin secret at $SECRET_FILE"
     log "after you add it, run: $again"
     return 0
@@ -264,6 +266,7 @@ if [ "$REUPLOAD" = 1 ]; then
     log "dry run: would download the DMG and the Windows installer of $TAG and upload them to $BASE"
     exit 0
   fi
+  [ -s "$SECRET_FILE" ] || die "no admin secret at $SECRET_FILE: nothing can be uploaded to $ENV_NAME"
   WORK="$(mktemp -d "${TMPDIR:-/tmp}/reupload.XXXXXX")"
   trap 'rm -rf "$WORK"' EXIT
   failed=""

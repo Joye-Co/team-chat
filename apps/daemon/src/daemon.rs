@@ -346,6 +346,7 @@ impl Daemon {
                         session_id: None,
                         usage: None,
                         duration_ms: now.saturating_sub(meta.started_at),
+                        code: None,
                     }),
                     &mut buffer,
                     last,
@@ -537,6 +538,8 @@ impl Daemon {
                         ),
                         takeover_url: self.takeover_url(),
                         public_key: self.machine_key.as_ref().map(|k| k.public_b64()),
+                        // usable: reported with feature "github" (not yet).
+                        runs_in: None,
                     },
                     clis: self.clis.clone(),
                     health: health::health(&self.cfg, self.active_count()),
@@ -639,7 +642,8 @@ impl Daemon {
                     let _ = r.control.send(Control::Cancel.into());
                 }
             }
-            Down::RunPause { run_id, by } => {
+            // usable: `hold` is for feature "takeover", which this daemon does not report yet.
+            Down::RunPause { run_id, by, .. } => {
                 if let Some(r) = self.runs.get(&run_id).filter(|r| !r.done) {
                     log!("run {run_id} paused");
                     let _ = r.control.send(RunCtl::Pause { by });
@@ -696,6 +700,10 @@ impl Daemon {
                 } else {
                     log!("key {} removed", crate::chat_run::safe_word(&name));
                 }
+            }
+            // usable: feature "takeover" is not reported yet, so the server sends neither.
+            Down::RunCommand { run_id, .. } | Down::RunCommandCancel { run_id, .. } => {
+                log!("run {run_id}: take-over commands are not supported");
             }
             Down::RunOutputResult(res) => {
                 let run_id = res.run_id.clone();

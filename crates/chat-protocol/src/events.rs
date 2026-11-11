@@ -167,6 +167,20 @@ pub struct TopicUpdatedData {
         skip_serializing_if = "Option::is_none"
     )]
     pub context_of: Option<TopicContext>,
+    /// Usable: present = the topic's participants now.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub participants: Option<Vec<crate::relay::TopicParticipant>>,
+    /// Usable: present = the topic's relay now; `Some(None)` = it has none any more.
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub relay: Option<Option<crate::relay::TopicRelay>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -298,6 +312,9 @@ pub enum TransientEvent {
     // Settings: sent only to connections whose hello has feature "settings/1".
     #[serde(rename = "digest")]
     Digest(crate::settings::DigestTransient),
+    // Usable: sent only to the person's own connections whose hello has feature "github/1".
+    #[serde(rename = "github.status")]
+    GithubStatus(crate::github::GithubStatusTransient),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

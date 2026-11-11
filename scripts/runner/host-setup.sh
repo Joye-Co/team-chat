@@ -31,7 +31,7 @@ apt-get install -yq --no-install-recommends \
   nftables iproute2 iptables e2fsprogs acl \
   build-essential pkg-config \
   docker.io docker-buildx nfs-kernel-server \
-  unattended-upgrades htop
+  unattended-upgrades htop bc
 systemctl enable --now docker
 # The stock nftables.service flushes the whole ruleset on start, which drops Docker's NAT rules.
 # The daemon adds its own nftables table for the VMs instead.

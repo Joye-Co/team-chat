@@ -1,0 +1,37 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "a VM host with the usable features",
+  "value": {
+    "t": "hello",
+    "protocol": 1,
+    "machine": {
+      "name": "linux-host",
+      "labels": [
+        "linux"
+      ],
+      "daemonVersion": "1.4.0",
+      "os": "linux",
+      "arch": "x86_64",
+      "maxParallelRuns": 4,
+      "features": [
+        "pause",
+        "github",
+        "takeover",
+        "takeover-isolated"
+      ],
+      "runsIn": "vm"
+    },
+    "clis": [],
+    "health": {
+      "diskFreeBytes": 1,
+      "diskTotalBytes": 2,
+      "load1": 0.5,
+      "load5": 0.25,
+      "load15": 0.125,
+      "cpuCount": 8,
+      "activeRuns": 0
+    },
+    "runs": []
+  }
+}

@@ -599,8 +599,7 @@ impl Render for GeneralPage {
                         NativeSwitch::new("general-menu-bar", p.menu_bar)
                             .name(s::MENU_BAR)
                             .on_change(|next, window, cx| {
-                                prefs::update(|p| p.menu_bar = next);
-                                crate::views::nav::show_status_item(next, cx);
+                                set_menu_bar(next, cx);
                                 window.refresh();
                             }),
                     ),
@@ -883,4 +882,11 @@ fn admin_card(cx: &App) -> impl IntoElement {
                 }),
             ),
     )
+}
+
+/// 菜单栏里显示 (通知区域里显示 on Windows): what the switch does. Remembers the choice and
+/// shows or hides the item.
+pub fn set_menu_bar(shown: bool, cx: &mut App) {
+    prefs::update(|p| p.menu_bar = shown);
+    crate::views::nav::show_status_item(shown, cx);
 }

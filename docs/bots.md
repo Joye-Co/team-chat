@@ -449,6 +449,9 @@ set it up once per machine:
    `team-chat-daemon doctor` and `team-chat-daemon install-service` from a Terminal where the
    CLI is on `PATH`.
 
+   A Linux host that runs each run in a Firecracker microVM is set up as in
+   [SELF-HOSTING.md, Part 2](SELF-HOSTING.md#part-2-a-linux-host-for-the-teams-ai-members).
+
    On Windows the manual way is one PowerShell command, run as the user whose CLI logins the
    bots should use (no administrator rights). Register the machine first (the `admin.ts machine`
    command above, or 设置 › 机器 in the app), then on the Windows computer:

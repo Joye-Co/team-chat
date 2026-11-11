@@ -653,6 +653,11 @@ impl TextLayout {
         } else {
             vec![text_style.to_run(text.len())]
         };
+        // Translate before truncation, which cuts the text it measured.
+        let (text, runs) = match crate::text_system::translate_runs(&text, &runs) {
+            Some(translated) => translated,
+            None => (text, runs),
+        };
         window.request_measured_layout(Default::default(), {
             let element_state = self.clone();
 

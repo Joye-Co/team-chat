@@ -62,11 +62,11 @@ pub fn aside_capable(kind: &str) -> bool {
 /// What a CLI must know about a run in a microVM: what is kept and what goes with the VM.
 pub fn vm_note(vm: &crate::config::VmConfig) -> String {
     let kept = if vm.homes.as_os_str().is_empty() {
-        "Nothing outside your working folder is kept for your next run."
+        "Your working folder is kept for your next run in this topic; nothing outside it is kept."
     } else {
-        "Only your home folder ($HOME) is kept for your next run: clone repositories, install \
-tools and sign in there, and look there first for what an earlier run left. /tmp and \
-everything else outside it are gone after this run."
+        "Your working folder is kept for your next run in this topic, and your home folder \
+($HOME) for all your runs: install tools and sign in there, and look there for what a run in \
+another topic left. /tmp and everything else outside these two are gone after this run."
     };
     format!(
         "You run in a virtual machine that was started for this run and is deleted when you end \
@@ -74,6 +74,92 @@ your turn. {kept} Every process still running when your turn ends is killed: whe
 something you need the result of (a sign-in that waits for a person, a build, a test run), wait \
 for it in the foreground before you finish, never in the background."
     )
+}
+
+/// The run's working folder. A side chat run gets its own (read-only) checkout; every other
+/// run works in its member's line for the topic, so a follow-up run finds what the earlier ones
+/// left. When another run holds the line the run gets its own folder too. Also returns the
+/// hold on the line and what the CLI must know about the folder.
+async fn prepare_work(
+    cfg: &Config,
+    a: &RunAssign,
+) -> Result<
+    (
+        std::path::PathBuf,
+        Option<workspace::LineGuard>,
+        Option<String>,
+    ),
+    String,
+> {
+    let own = async {
+        workspace::prepare(cfg, &a.run_id, a.repo.as_ref())
+            .await
+            .map(|(cwd, _)| cwd)
+    };
+    if a.kind.as_deref() == Some(KIND_ASIDE) {
+        return Ok((own.await?, None, None));
+    }
+    let resumed = a.resume_session_id.is_some();
+    match workspace::prepare_line(
+        cfg,
+        &a.run_id,
+        &a.bot_member_id,
+        &a.topic_id,
+        a.repo.as_ref(),
+    )
+    .await?
+    {
+        Some((cwd, meta, guard)) => {
+            let note = line_note(
+                &cwd,
+                meta.branch.as_deref(),
+                resumed,
+                guard.fresh,
+                guard.restored,
+            );
+            Ok((cwd, Some(guard), note))
+        }
+        None => {
+            let cwd = own.await?;
+            let note = format!(
+                "Another run of yours in this topic is using your usual working folder, so this \
+run has a separate one ({}): changes you make here are not in that folder.",
+                cwd.display()
+            );
+            Ok((cwd, None, Some(note)))
+        }
+    }
+}
+
+/// What a resumed CLI session must know when its working folder is not the one its earlier
+/// turns used (the line was cleaned up after being idle, or this is the first run since the
+/// daemon kept lines). None when the folder is the same one.
+pub fn line_note(
+    cwd: &std::path::Path,
+    branch: Option<&str>,
+    resumed: bool,
+    fresh: bool,
+    restored: bool,
+) -> Option<String> {
+    if !resumed || !fresh {
+        return None;
+    }
+    let what = match (branch, restored) {
+        (Some(b), true) => format!(
+            "It is a new checkout of your branch {b}: what you committed there is here, and what \
+you left uncommitted was committed for you before the old folder was removed, to {b} (or, if \
+that folder was not on a branch, to a branch {b}-kept-<time>). Check before you build on it."
+        ),
+        (Some(_), false) => "It is a new checkout of the base branch: changes from your earlier \
+turns are not in it. Check before you build on them."
+            .to_string(),
+        (None, _) => "It is empty: files from your earlier turns are not in it.".to_string(),
+    };
+    Some(format!(
+        "Your working folder ({}) is not the one your earlier turns in this conversation used. \
+{what}",
+        cwd.display()
+    ))
 }
 
 /// A run that waits for a tool call it started counts as stalled only after this long.
@@ -274,9 +360,9 @@ pub async fn supervise(ctx: RunCtx) {
     });
 
     let dir = workspace::run_dir(&cfg, &run_id);
-    let (outcome, timed_out) = match workspace::prepare(&cfg, &run_id, assign.repo.as_ref()).await {
+    let (outcome, timed_out) = match prepare_work(&cfg, &assign).await {
         Err(e) => (Outcome::failed(e), false),
-        Ok((cwd, _meta)) => {
+        Ok((cwd, line, line_note)) => {
             event(RunEvent::Status {
                 state: "running".into(),
                 message: None,
@@ -337,10 +423,15 @@ pub async fn supervise(ctx: RunCtx) {
             // the tested version, or one whose version changed since `hello`): its hook could
             // let a command through, so the run does not start.
             let ungated = !gates.is_empty() && !gated;
-            let notes: Vec<String> = [gate.note(), gates.note(), cfg.vm.as_ref().map(vm_note)]
-                .into_iter()
-                .flatten()
-                .collect();
+            let notes: Vec<String> = [
+                line_note,
+                gate.note(),
+                gates.note(),
+                cfg.vm.as_ref().map(vm_note),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
             let spec = RunSpec {
                 run_id: run_id.clone(),
                 runtime_name: assign.runtime.clone(),
@@ -401,6 +492,8 @@ this machine cannot be made to stop at them (update it)",
             if aside {
                 workspace::set_read_only(&work, false);
             }
+            // The CLI is done: the next run of this member in this topic may use the line.
+            drop(line);
             res
         }
     };
@@ -439,6 +532,7 @@ this machine cannot be made to stop at them (update it)",
         session_id: outcome.session_id.clone(),
         usage: outcome.usage.clone(),
         duration_ms: started.elapsed().as_millis() as u64,
+        code: None,
     }));
     if let Some(mut meta) = workspace::read_meta(&dir) {
         meta.finished_at = Some(now_ms());
@@ -748,5 +842,69 @@ mod tests {
         assert_eq!((l, d), (last, Some(deadline)));
         let handed_back = d.map(|d| d + now.duration_since(last));
         assert_eq!(handed_back, Some(deadline + Duration::from_secs(990)));
+    }
+
+    /// A resumed session is told when its working folder is not the one its earlier turns
+    /// used, and what is in the new one; otherwise nothing is said.
+    #[test]
+    fn a_resumed_session_hears_when_its_folder_is_new() {
+        let cwd = std::path::Path::new("/w/lines/k/work");
+        assert_eq!(line_note(cwd, Some("bot/k"), true, false, false), None);
+        assert_eq!(line_note(cwd, Some("bot/k"), false, true, false), None);
+        let restored = line_note(cwd, Some("bot/k"), true, true, true).unwrap();
+        assert!(restored.contains("/w/lines/k/work"), "{restored}");
+        assert!(restored.contains("branch bot/k"), "{restored}");
+        assert!(restored.contains("bot/k-kept-"), "{restored}");
+        let new = line_note(cwd, Some("bot/k"), true, true, false).unwrap();
+        assert!(new.contains("not in it"), "{new}");
+        let scratch = line_note(cwd, None, true, true, false).unwrap();
+        assert!(scratch.contains("empty"), "{scratch}");
+    }
+
+    /// Every non-side-chat run of a member in a topic gets the same line; a side chat gets
+    /// its own folder; a second run while the line is held gets its own folder and is told.
+    #[tokio::test]
+    async fn runs_in_a_topic_share_the_members_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = Config::parse(&format!(
+            "server_url = \"http://127.0.0.1:1\"\ntoken_file = '{}'\nwork_root = '{}'\n",
+            dir.path().join("token").display(),
+            dir.path().join("root").display()
+        ))
+        .unwrap();
+        let a = |run: &str, kind: Option<&str>| RunAssign {
+            run_id: run.into(),
+            bot_member_id: "BOTRUN".into(),
+            group_id: "G".into(),
+            topic_id: "TRUN".into(),
+            runtime: "fake".into(),
+            prompt: "p".into(),
+            model: None,
+            effort: None,
+            repo: None,
+            env_allowlist: vec![],
+            lease_ms: 1,
+            max_duration_ms: None,
+            session_upload: None,
+            kind: kind.map(str::to_string),
+            resume_session_id: None,
+            gates: None,
+        };
+        let (w1, g1, n1) = prepare_work(&cfg, &a("r1", None)).await.unwrap();
+        assert!(g1.is_some() && n1.is_none());
+        assert!(w1.starts_with(workspace::lines_dir(&cfg)));
+        let (w2, g2, n2) = prepare_work(&cfg, &a("r2", None)).await.unwrap();
+        assert_eq!(w2, workspace::run_dir(&cfg, "r2").join("work"));
+        assert!(g2.is_none());
+        assert!(n2.unwrap().contains("separate"));
+        drop(g1);
+        let (w3, g3, _) = prepare_work(&cfg, &a("r3", None)).await.unwrap();
+        assert_eq!(w3, w1);
+        drop(g3);
+        let (w4, g4, n4) = prepare_work(&cfg, &a("r4", Some(KIND_ASIDE)))
+            .await
+            .unwrap();
+        assert_eq!(w4, workspace::run_dir(&cfg, "r4").join("work"));
+        assert!(g4.is_none() && n4.is_none());
     }
 }

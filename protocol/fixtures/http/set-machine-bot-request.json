@@ -1,0 +1,7 @@
+{
+  "kind": "SetMachineBotRequest",
+  "valid": true,
+  "value": {
+    "repoPath": "/Users/alice/code/app"
+  }
+}

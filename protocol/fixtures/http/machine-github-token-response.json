@@ -1,0 +1,9 @@
+{
+  "kind": "MachineGithubTokenResponse",
+  "valid": true,
+  "description": "the token is a fake placeholder",
+  "value": {
+    "token": "placeholder-not-a-real-token",
+    "login": "alice-dev"
+  }
+}

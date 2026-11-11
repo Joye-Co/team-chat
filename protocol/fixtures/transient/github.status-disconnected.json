@@ -1,0 +1,8 @@
+{
+  "kind": "TransientEvent",
+  "valid": true,
+  "description": "no account = disconnected",
+  "value": {
+    "type": "github.status"
+  }
+}

@@ -27,6 +27,8 @@ export interface MessageExt {
 
 /** Body characters of one message in the prompt; the rest is read by id. */
 export const LINE_BODY_CHARS = 600;
+/** Body characters of the topic's first message in the prompt: the request is carried whole. */
+export const FIRST_BODY_CHARS = 4000;
 /** Body characters of one message in `topic.history`. */
 export const HISTORY_BODY_CHARS = 4000;
 
@@ -42,11 +44,23 @@ export function parseExt(ext: string | null): MessageExt {
   }
 }
 
-/** `11-08 14:02` in UTC+8, the team's clock (the prompt only needs a stable, short stamp). */
-export function stamp(at: number): string {
-  const d = new Date(at + 8 * 3600_000);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+/** The clock of a team that set no time zone (`teamZone` in memory/consolidate.ts). */
+export const DEFAULT_STAMP_ZONE = "Asia/Shanghai";
+
+/** `11-08 14:02` on the team's clock `zone` (the prompt only needs a stable, short stamp). */
+export function stamp(at: number, zone = DEFAULT_STAMP_ZONE): string {
+  let parts: Record<string, string>;
+  try {
+    parts = Object.fromEntries(
+      new Intl.DateTimeFormat("en-CA", { timeZone: zone, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+        .formatToParts(new Date(at))
+        .map((x) => [x.type, x.value]),
+    ) as Record<string, string>;
+  } catch {
+    // An unknown zone: the default clock.
+    return zone === DEFAULT_STAMP_ZONE ? "" : stamp(at);
+  }
+  return `${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
 }
 
 function oneLine(text: string): string {
@@ -69,9 +83,9 @@ export interface RenderStats {
  * One message as a header line plus indented detail lines. `bodyChars` cuts the body (0 = whole);
  * `more` is the hint after a cut body (how to read the rest), or none.
  */
-export function renderMessage(r: ContextRow, names: Names, bodyChars = LINE_BODY_CHARS, more = ""): string {
+export function renderMessage(r: ContextRow, names: Names, bodyChars = LINE_BODY_CHARS, more = "", zone = DEFAULT_STAMP_ZONE): string {
   const who = names(r.authorId);
-  const head = `[#${r.seq} m ${r.id} · ${who} · ${stamp(r.at)}]`;
+  const head = `[#${r.seq} m ${r.id} · ${who} · ${stamp(r.at, zone)}]`;
   const lines: string[] = [];
   const body = r.body.trim();
   if (r.kind === "system") {
@@ -82,16 +96,12 @@ export function renderMessage(r: ContextRow, names: Names, bodyChars = LINE_BODY
     lines.push(text === "" ? head : `${head} ${text}`);
   }
   const x = r.ext;
-  if (x.replyTo) lines.push(`  ↪ quotes m ${x.replyTo.messageId} (${names(x.replyTo.authorId)}: ${short(x.replyTo.excerpt, 120)})`);
+  if (x.replyTo) lines.push(quoteLine(x.replyTo, names));
   for (const b of x.blockRefs ?? []) {
     const src = b.messageId ? `m ${b.messageId}` : b.artifact ? `产出 a ${b.artifact.artifactId} v${b.artifact.version}` : "";
     lines.push(`  ↪ asks about ${src}${b.label ? ` (${short(b.label, 120)})` : ""}`);
   }
-  for (const f of x.attachments ?? []) {
-    const dim = f.width && f.height ? ` · ${f.width}×${f.height}` : "";
-    lines.push(`  [file f ${f.fileId} · ${short(f.name, 120)} · ${f.mime} · ${bytes(f.size)}${dim}]`);
-  }
-  for (const a of x.artifactRefs ?? []) lines.push(`  [产出 a ${a.artifactId} v${a.version}]`);
+  lines.push(...fileLines(x));
   const title = x.cardV2?.title ?? x.card?.title;
   if (x.cardV2 || x.card) {
     const answers = (x.cardState?.answers ?? []).filter((a) => a.retractedAt === undefined);
@@ -108,6 +118,49 @@ export function renderMessage(r: ContextRow, names: Names, bodyChars = LINE_BODY
     lines.push(`  [card · ${short(title ?? "", 120)}${state}]`);
   }
   return lines.join("\n");
+}
+
+function quoteLine(q: NonNullable<MessageExt["replyTo"]>, names: Names): string {
+  return `  ↪ quotes m ${q.messageId} (${names(q.authorId)}: ${short(q.excerpt, 120)})`;
+}
+
+function fileLines(x: MessageExt): string[] {
+  const lines: string[] = [];
+  for (const f of x.attachments ?? []) {
+    const dim = f.width && f.height ? ` · ${f.width}×${f.height}` : "";
+    lines.push(`  [file f ${f.fileId} · ${short(f.name, 120)} · ${f.mime} · ${bytes(f.size)}${dim}]`);
+  }
+  for (const a of x.artifactRefs ?? []) lines.push(`  [产出 a ${a.artifactId} v${a.version}]`);
+  return lines;
+}
+
+/** What a request or follow-up message carries besides its text (`TopicMessage.ext`). */
+export type RequestExt = Pick<MessageExt, "replyTo" | "attachments" | "artifactRefs">;
+
+/** The parts of a stored message's ext that a request carries along with its body. */
+export function requestExt(x: MessageExt): RequestExt | undefined {
+  const out: RequestExt = {};
+  if (x.replyTo) out.replyTo = x.replyTo;
+  if (x.attachments && x.attachments.length > 0) out.attachments = x.attachments;
+  if (x.artifactRefs && x.artifactRefs.length > 0) out.artifactRefs = x.artifactRefs;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * A request or follow-up as the run and the front desk read it: the body, then the same
+ * indented lines a context row has for the message it quotes, its files and its 产出, so a
+ * file is an id the run can fetch (`chat-run file get`). A message with only an image is not empty.
+ */
+export function requestText(body: string, ext: RequestExt | undefined, names: Names): string {
+  if (!ext) return body;
+  const lines = [...(ext.replyTo ? [quoteLine(ext.replyTo, names)] : []), ...fileLines(ext)];
+  if (lines.length === 0) return body;
+  return body.trim() === "" ? lines.join("\n") : `${body}\n${lines.join("\n")}`;
+}
+
+/** The author ids a request's lines name. */
+export function requestAuthors(ext: RequestExt | undefined): string[] {
+  return ext?.replyTo ? [ext.replyTo.authorId] : [];
 }
 
 function bytes(n: number): string {
@@ -144,10 +197,10 @@ export function selectLines(
   total: number,
   names: Names,
   budget: number,
-  opts: { more?: (r: ContextRow) => string; gap?: (omitted: number, beforeSeq: number) => string } = {},
+  opts: { more?: (r: ContextRow) => string; gap?: (omitted: number, beforeSeq: number) => string; zone?: string } = {},
 ): Selection {
-  const render = (r: ContextRow) => renderMessage(r, names, LINE_BODY_CHARS, opts.more?.(r) ?? "");
-  const head = first ? render(first) : "";
+  const render = (r: ContextRow, chars = LINE_BODY_CHARS) => renderMessage(r, names, chars, opts.more?.(r) ?? "", opts.zone);
+  const head = first ? render(first, FIRST_BODY_CHARS) : "";
   let used = [...head].length;
   const tail: { r: ContextRow; text: string }[] = [];
   for (const r of newest) {

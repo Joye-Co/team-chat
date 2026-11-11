@@ -81,6 +81,12 @@ function killTree(pid: number): void {
   }
 }
 
+/** The CLI's working folder of a run: its work line's `work/` (run.json `line`), else `<run>/work`. */
+function workOf(work: string, runId: string): string {
+  const meta = JSON.parse(readFileSync(join(work, "runs", runId, "run.json"), "utf8"));
+  return meta.line ? join(meta.line, "work") : join(work, "runs", runId, "work");
+}
+
 function step(s: string): void {
   (report.steps as string[]).push(s);
   console.log(`- ${s}`);
@@ -338,7 +344,7 @@ async function runDaemonCheck(
   const outputBody = JSON.stringify(output.event.body);
   if (outputBody.includes("tm_fakefakefakefakefakefake01") || !outputBody.includes("<redacted>")) throw new Error("output body not redacted");
   const runDir = join(work, "runs", runId);
-  const chatRun = JSON.parse(readFileSync(join(runDir, "work", "chatcard-1.json"), "utf8"));
+  const chatRun = JSON.parse(readFileSync(join(workOf(work, runId), "chatcard-1.json"), "utf8"));
   const sockets = readdirSync(runDir).filter((f) => f.endsWith(".sock"));
   if (sockets.length > 0) throw new Error("chat-run socket left after the run");
   // The card came from `chat-run card schema`; the post, its retry and the patch all worked.
@@ -390,7 +396,7 @@ async function runDaemonCheck(
  * fake CLI with `--resume` of the first run's session.
  */
 async function resumeCheck(groupId: string, topicId: string, firstRunId: string, bot: { member: { id: string } }, work: string, events: any[], ws: WebSocket) {
-  const argvOf = (runId: string) => JSON.parse(readFileSync(join(work, "runs", runId, "work", "argv.json"), "utf8")) as string[];
+  const argvOf = (runId: string) => JSON.parse(readFileSync(join(workOf(work, runId), "argv.json"), "utf8")) as string[];
   const first = argvOf(firstRunId);
   const s1 = first[first.indexOf("--session-id") + 1];
   if (!s1) throw new Error("the first run has no --session-id");
@@ -421,7 +427,7 @@ async function codexCheck(owner: string, groupId: string, work: string, events: 
   const topicId = ack.frame.result.message.topicId as string;
   const run = await until("codex run done", () => events.find((e) => e.type === "run.updated" && e.data.run.topicId === topicId && ["done", "failed"].includes(e.data.run.status))?.data.run, 60_000);
   if (run.status !== "done") throw new Error(`codex run ${run.status}`);
-  const runWork = join(work, "runs", run.id, "work");
+  const runWork = workOf(work, run.id);
   const r = JSON.parse(readFileSync(join(runWork, "chatcard.json"), "utf8"));
   if (VM) {
     // In a VM chat-run always uses the socket the agent relays.

@@ -1,0 +1,9 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "value": {
+    "type": "github",
+    "state": "used",
+    "login": "alice-dev"
+  }
+}

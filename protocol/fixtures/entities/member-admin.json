@@ -1,0 +1,11 @@
+{
+  "kind": "Member",
+  "valid": true,
+  "description": "an admin: level owner without teamOwner",
+  "value": {
+    "id": "01JBX0ALICE0000000000000AB",
+    "kind": "human",
+    "name": "Alice",
+    "level": "owner"
+  }
+}

@@ -104,7 +104,8 @@ fn attachment_key(sha256: &str, path: &Path) -> MediaKey {
     MediaKey::new(id, 0)
 }
 
-/// Previews `target`, whose local copy is `local`.
+/// Previews `target`, whose local copy is `local`: always the sheet, except for a file
+/// Windows would run, which is shown in Explorer. Space never starts another program.
 pub fn show(target: &FileRef, local: Local, cx: &mut App) {
     match target {
         FileRef::Artifact {
@@ -112,31 +113,34 @@ pub fn show(target: &FileRef, local: Local, cx: &mut App) {
             id,
             title,
         } => {
-            let Some(detail) = provider.artifact(id) else {
-                return system_preview(&local.preview);
-            };
-            let key = MediaKey::new(id.clone(), detail.summary.version);
+            // A 产出 the provider no longer knows still gets the sheet: its viewer says
+            // that the version could not be read.
+            let version = provider.artifact(id).map_or(0, |d| d.summary.version);
+            let key = MediaKey::new(id.clone(), version);
             let target = viewer::target_for(provider, id);
             open_sheet(key, title.clone(), target, cx);
         }
         FileRef::Attachment { file, .. } => {
-            match request_attachment(&file.name, &file.sha256, &local.preview, cx) {
-                Some(key) => open_sheet(key, file.name.clone(), Target::none(), cx),
-                None => system_preview(&local.preview),
+            if preview_of(&local.preview) == Preview::Reveal {
+                return reveal(&local.preview);
             }
+            let key = request_attachment(&file.name, &file.sha256, &local.preview, cx);
+            open_sheet(key, file.name.clone(), Target::none(), cx);
         }
     }
 }
 
-/// Starts reading the attachment at `path` for the viewer. `None` when no viewer shows it.
-pub fn request_attachment(name: &str, sha256: &str, path: &Path, cx: &mut App) -> Option<MediaKey> {
-    let Preview::Viewer(_) = preview_of(path) else {
-        return None;
-    };
+/// Starts reading the attachment at `path` for the viewer and returns its key in the
+/// store. When the file cannot be put in a folder of its own (the temp folder is full or
+/// gone) the store gets a failure for the key, so the sheet opens on its "could not be
+/// read" state instead of nothing.
+pub fn request_attachment(name: &str, sha256: &str, path: &Path, cx: &mut App) -> MediaKey {
     let key = attachment_key(sha256, path);
-    let (dir, entry) = stage(&key.artifact_id, path)?;
-    store::request_folder(&key, name, dir, entry, cx);
-    Some(key)
+    match stage(&key.artifact_id, path) {
+        Some((dir, entry)) => store::request_folder(&key, name, dir, entry, cx),
+        None => store::fail(&key, crate::data::FileError::Unreadable, cx),
+    }
+    key
 }
 
 /// A folder that holds only this file, for the viewer to read: the viewer takes a folder
@@ -189,10 +193,10 @@ pub fn open_sheet_in(
     OPEN.with_borrow_mut(|open| *open = Some((window.window_handle(), viewer.downgrade())));
 }
 
-/// A file that is never previewed: shown in Explorer (the guard of 打开 decides).
-fn system_preview(path: &Path) {
+/// A file that is never previewed: selected in Explorer, nothing else.
+fn reveal(path: &Path) {
     #[cfg(target_os = "windows")]
-    super::native::system_preview(path);
+    super::native::reveal(path);
     #[cfg(not(target_os = "windows"))]
     let _ = path;
 }
@@ -263,6 +267,19 @@ mod tests {
                         path.display()
                     );
                 }
+            }
+        }
+        // Space never starts another program either: the preview code has no call that
+        // opens a file with the system.
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/files");
+        for file in ["quick_look.rs", "native.rs"] {
+            let text = std::fs::read_to_string(dir.join(file)).unwrap();
+            let code = text.split("#[cfg(test)]").next().unwrap();
+            for opener in [
+                ["open_with", "_system"].concat(),
+                ["shell", "_open"].concat(),
+            ] {
+                assert!(!code.contains(&opener), "{file} calls {opener}");
             }
         }
         for name in [

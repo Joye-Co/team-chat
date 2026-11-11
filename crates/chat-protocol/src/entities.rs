@@ -81,9 +81,21 @@ pub struct Member {
         skip_serializing_if = "Option::is_none"
     )]
     pub weekly_budget_cents: Option<u64>,
+    /// Usable: `Some(true)` for a 所有者 (always level owner); sent only when true.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub team_owner: Option<bool>,
 }
 
 impl Member {
+    /// Usable: a 所有者 (team owner). Every 所有者 is also an admin (`level` owner).
+    pub fn is_team_owner(&self) -> bool {
+        self.team_owner == Some(true)
+    }
+
     pub fn character(&self) -> Option<CharacterId> {
         self.character.flatten()
     }
@@ -230,6 +242,20 @@ pub struct Topic {
         skip_serializing_if = "Option::is_none"
     )]
     pub main: Option<bool>,
+    /// Usable: AI members that ran in the topic; `None` = none.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub participants: Option<Vec<crate::relay::TopicParticipant>>,
+    /// Usable: the topic's latest relay (按顺序做); `None` = none.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub relay: Option<crate::relay::TopicRelay>,
 }
 
 impl Topic {

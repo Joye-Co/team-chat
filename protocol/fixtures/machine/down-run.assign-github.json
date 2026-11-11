@@ -1,0 +1,30 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "a team machine: the person's GitHub, author and committer set",
+  "value": {
+    "t": "run.assign",
+    "runId": "01JBX0RUN000000000000000AU",
+    "botMemberId": "01JBX0BOT000000000000000AC",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "runtime": "claude",
+    "prompt": "Topic: 修好登录\n\nJoye: @dev 修一下",
+    "envAllowlist": [],
+    "leaseMs": 600000,
+    "github": {
+      "source": "app",
+      "memberId": "01JBX0OWNER0000000000000AA",
+      "login": "joye-dev",
+      "author": {
+        "name": "Joye",
+        "email": "1234+joye-dev@users.noreply.github.com"
+      },
+      "committer": {
+        "name": "dev",
+        "email": "ai-01JBX0BOT000000000000000AC@users.noreply.invalid"
+      },
+      "rewriteSsh": true
+    }
+  }
+}

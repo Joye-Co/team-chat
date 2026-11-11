@@ -1,0 +1,11 @@
+{
+  "kind": "MachineMemoryNoteRequest",
+  "valid": true,
+  "description": "a group convention with the person's message it comes from",
+  "value": {
+    "scope": "group",
+    "kind": "convention",
+    "text": "这个群周五不上线",
+    "sourceMessageId": "01JBX0MSG000000000000000AE"
+  }
+}

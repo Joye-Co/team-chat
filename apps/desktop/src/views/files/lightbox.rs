@@ -472,11 +472,7 @@ impl Lightbox {
 
     fn on_key(&mut self, e: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let m = &e.keystroke.modifiers;
-        let cmd = if cfg!(target_os = "macos") {
-            m.platform
-        } else {
-            m.control
-        };
+        let cmd = crate::command_key(m);
         let key = e.keystroke.key.as_str();
         match key {
             "escape" | "space" if !cmd => self.close(window, cx),

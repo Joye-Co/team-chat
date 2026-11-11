@@ -505,6 +505,7 @@ export abstract class DeskEvents extends DeskRuns {
       const input = {
         botId: this.botId as string,
         runId: r.id,
+        groupId: r.group_id,
         status,
         requesterId: req.m.authorId,
         request: [req.m.body, ...req.followUps.map((f) => f.body)].join("\n\n"),

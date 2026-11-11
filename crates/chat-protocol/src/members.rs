@@ -58,6 +58,13 @@ pub struct UpdateMemberRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub weekly_budget_cents: Option<Option<u64>>,
+    /// Usable, 所有者 only: `Some(true)` makes a person a 所有者 (and level owner).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub team_owner: Option<bool>,
 }
 
 /// Largest weekly spending limit (US cents): 1,000,000 USD.

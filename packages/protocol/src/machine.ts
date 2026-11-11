@@ -3,8 +3,11 @@
 // clients read with `GET /v1/runs/:id/events`.
 import { z } from "zod";
 import { CardRev } from "./card2.ts";
-import { Id, Millis, Seq } from "./common.ts";
+import { Id, Millis, Seq, utf8Bytes } from "./common.ts";
 import { RunPlan } from "./plan.ts";
+import { RunGithub } from "./github.ts";
+import { RunCode } from "./relay.ts";
+import { HandCommandId, MAX_HAND_COMMAND_CHARS, MAX_HAND_OUTPUT_BYTES, RunHandback } from "./takeover.ts";
 
 export const MACHINE_PROTOCOL_VERSION = 1 as const;
 
@@ -20,6 +23,12 @@ export const MachineFeature = z.string().min(1).max(64);
 export const MAX_MACHINE_FEATURES = 32;
 /** Features of the 1.1 daemon. The server sends a 1.1 frame or field only to a daemon that has its feature. */
 export const MACHINE_FEATURES = ["pause", "answer", "aside", "acceptance", "interact", "output", "resume", "context", "effort", "gates", "accounts"] as const;
+/** Usable features (docs/machine-protocol.md): `run.assign.github` and the GitHub ops. */
+export const MACHINE_FEATURE_GITHUB = "github";
+/** Usable: `run.pause.hold`, `run.command`, `run.command.cancel` and the `hand.*` run events. */
+export const MACHINE_FEATURE_TAKEOVER = "takeover";
+/** Usable: with `takeover`, a person's commands run as another user than the run (VM runs). */
+export const MACHINE_FEATURE_TAKEOVER_ISOLATED = "takeover-isolated";
 
 export const MachineInfo = z.object({
   /** The id configured on the machine (optional); the token is authoritative. */
@@ -32,10 +41,12 @@ export const MachineInfo = z.object({
   maxParallelRuns: z.int().nonnegative(),
   /** 1.1: what this daemon supports, e.g. "pause", "answer", "aside", "acceptance". */
   features: z.array(MachineFeature).max(MAX_MACHINE_FEATURES).optional(),
-  /** 1.1: a screen sharing address (e.g. `vnc://mac-mini.tailnet`) people use for 接管. */
+  /** 1.1: a screen sharing address (e.g. `vnc://<host>`); not the usable take-over (feature "takeover"). */
   takeoverUrl: z.string().min(1).max(2048).optional(),
   /** Feature "accounts": the machine's X25519 public key (base64, 32 bytes); API keys are sealed to it. */
   publicKey: z.string().regex(/^[A-Za-z0-9+/]{43}=$/).optional(),
+  /** Usable (feature "github" requires it): where runs execute, "host" | "vm" (`MACHINE_RUNS_IN`). */
+  runsIn: z.string().min(1).max(16).optional(),
 });
 export type MachineInfo = z.infer<typeof MachineInfo>;
 
@@ -328,6 +339,22 @@ export const RunEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("paused"), paused: z.boolean(), by: Id.optional() }),
   /** 1.1 (feature "output", `chat-run`): the CLI asks the server to post or patch a card, resolve an event or answer a 产出. */
   z.object({ type: z.literal("output"), outputId: z.string().min(1).max(64), op: RunOutputOp, body: z.json() }),
+  // Usable (feature "github"): git or gh used the person's GitHub, or could not.
+  z.object({ type: z.literal("github"), state: z.string().min(1).max(32), login: z.string().min(1).max(100).optional() }),
+  // Usable (feature "takeover"): a person's command while holding the run. Not the AI member's progress.
+  z.object({ type: z.literal("hand.command"), commandId: HandCommandId, command: z.string().min(1).max(MAX_HAND_COMMAND_CHARS), by: Id }),
+  z.object({ type: z.literal("hand.output"), commandId: HandCommandId, text: z.string().refine((t) => utf8Bytes(t) <= MAX_HAND_OUTPUT_BYTES, { message: "hand.output text is at most 16 KiB" }) }),
+  z.object({
+    type: z.literal("hand.result"),
+    commandId: HandCommandId,
+    ok: z.boolean(),
+    exitCode: z.int().optional(),
+    ms: z.int().nonnegative(),
+    timedOut: z.boolean().optional(),
+    /** "not_held" | "busy" | "unsupported" (`HAND_ERRORS`). */
+    error: z.string().min(1).max(32).optional(),
+  }),
+  z.object({ type: z.literal("hand.summary"), ...RunHandback.shape }),
 ]);
 export type RunEvent = z.infer<typeof RunEvent>;
 export type RunEventType = RunEvent["type"];
@@ -359,6 +386,8 @@ export const RunDoneFrame = z.object({
   sessionId: z.string().optional(),
   usage: Usage.optional(),
   durationMs: z.int().nonnegative(),
+  /** Usable: the run's branch, its head and whether it is pushed; absent = not known. */
+  code: RunCode.optional(),
 });
 export const RunSessionFrame = z.object({
   t: z.literal("run.session"),
@@ -442,6 +471,8 @@ export const RunAssignFrame = z.object({
   resumeSessionId: z.string().min(1).max(128).optional(),
   /** Feature "gates": the action kinds the run stops at for a person's approval. */
   gates: z.array(RunGate).max(MAX_RUN_GATES).optional(),
+  /** Usable, feature "github": whose GitHub the run uses and how. */
+  github: RunGithub.optional(),
 });
 export type RunAssignFrame = z.infer<typeof RunAssignFrame>;
 
@@ -558,7 +589,13 @@ export const MachineDownFrame = z.discriminatedUnion("t", [
   }),
   z.object({ t: z.literal("run.cancel"), runId: RunId, reason: z.string().optional() }),
   /** 1.1 (feature "pause"): stop the CLI (SIGSTOP of its process group) for 接管; deadlines stop too. */
-  z.object({ t: z.literal("run.pause"), runId: RunId, by: Id.optional() }),
+  z.object({
+    t: z.literal("run.pause"),
+    runId: RunId,
+    by: Id.optional(),
+    /** Usable, feature "takeover": "takeover" = a person takes over (`RUN_HOLD_KINDS`); absent = a pause. */
+    hold: z.string().min(1).max(32).optional(),
+  }),
   /** 1.1 (feature "pause"): go on after a pause; `note` becomes the CLI's next input when set. */
   z.object({ t: z.literal("run.resume"), runId: RunId, note: z.string().max(2000).optional() }),
   z.object({ t: z.literal("ack"), runId: RunId, seq: Seq }),
@@ -584,6 +621,15 @@ export const MachineDownFrame = z.discriminatedUnion("t", [
     members: z.array(Id).max(100),
   }),
   z.object({ t: z.literal("secret.delete"), name: SecretName }),
+  // Usable, feature "takeover": a command of the person holding the run; sent only while connected.
+  z.object({
+    t: z.literal("run.command"),
+    runId: RunId,
+    commandId: HandCommandId,
+    command: z.string().min(1).max(MAX_HAND_COMMAND_CHARS),
+    by: Id,
+  }),
+  z.object({ t: z.literal("run.command.cancel"), runId: RunId, commandId: HandCommandId }),
 ]);
 export type MachineDownFrame = z.infer<typeof MachineDownFrame>;
 

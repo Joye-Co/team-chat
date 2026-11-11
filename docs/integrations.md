@@ -7,13 +7,10 @@ member, so its messages show the hook name as the author. The wire contract is i
 ## Server setup
 
 Hook secrets are stored AES-GCM encrypted with the Worker secret `HOOK_SECRET_KEY` (GitHub signs
-with the raw secret, so a digest is not enough). Set it once per environment, before the first
-hook is made. Do not change it later: hooks made with the old key stop working.
-
-```sh
-cd server
-openssl rand -base64 32 | bunx wrangler secret put HOOK_SECRET_KEY --env staging
-```
+with the raw secret, so a digest is not enough). `scripts/setup-server.sh <env>` sets it on a
+deployed environment: it makes `~/.config/team-chat/<env>/hook-secret-key` (mode 600) and puts
+it on the Worker when the Worker lacks it (see [SELF-HOSTING.md](SELF-HOSTING.md) step 4). Do not
+change it later: hooks made with the old key stop working.
 
 For `wrangler dev`, add a line `HOOK_SECRET_KEY=<random text, 16 characters or more>` to
 `server/.dev.vars`. Without the key, `POST /v1/hooks` answers 500 `internal`.

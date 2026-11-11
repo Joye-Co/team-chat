@@ -1,0 +1,15 @@
+{
+  "kind": "ErrorResponse",
+  "valid": true,
+  "description": "a refused arrow message names who cannot take it",
+  "value": {
+    "error": {
+      "code": "invalid",
+      "message": "these members cannot take this work now",
+      "reason": "relay.member_unavailable",
+      "memberIds": [
+        "01JBX0BOT000000000000000AX"
+      ]
+    }
+  }
+}

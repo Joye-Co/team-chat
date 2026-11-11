@@ -99,6 +99,7 @@ fn version(id: &str, v: u32) -> ArtifactVersion {
         run_id: Some("R1".into()),
         media: None,
         data_rev: None,
+        parent_version: None,
         artifact_id: id.into(),
         version: v,
         entry: "index.html".into(),
@@ -150,6 +151,15 @@ fn run(id: &str, topic: &str, status: RunStatus, created: u64) -> BotRun {
             RunPlanItem::new("开 PR", RunPlanState::Pending),
         ]),
         retry_of: None,
+        requested_for: None,
+        chain_id: None,
+        code: None,
+        phase: None,
+        waiting_for: None,
+        hold_kind: None,
+        held_at: None,
+        takeover: None,
+        last_handback: None,
     }
 }
 

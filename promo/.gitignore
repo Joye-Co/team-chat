@@ -1,0 +1,4 @@
+# Rendered films and posters carry the operator's private character art: they stay out of the repository.
+out/*.mp4
+out/*.png
+out/*.jpg

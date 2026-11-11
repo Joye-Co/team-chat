@@ -1,0 +1,15 @@
+{
+  "kind": "AddArtifactVersionRequest",
+  "valid": false,
+  "description": "versions start at 1",
+  "value": {
+    "entry": "index.html",
+    "files": [
+      {
+        "path": "index.html",
+        "fileId": "01JBX0FILE00000000000000AH"
+      }
+    ],
+    "parentVersion": 0
+  }
+}
