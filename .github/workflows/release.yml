@@ -9,27 +9,42 @@ name: Release
 # Not on a tag push: the release commit (version and CHANGELOG date) must come before the tag,
 # so a tag trigger would put that step back on somebody's Mac; and a dispatch can be a dry run.
 #
+# A release is one thing for both systems. The job "Windows installer" runs first: it builds,
+# signs and tests <name>-<version>-setup.exe on a Windows runner (install, uninstall, and the
+# update from the previous release with the daemon running). Only when it is green does the
+# macOS job publish: one GitHub Release with the DMG, the installer and the daemons, and both
+# files on production. A Windows build that fails stops the release before anything is public.
+# A release that stopped after its tag was pushed and before the GitHub Release was made is
+# resumed by starting mode release again: both jobs then build the tag. The Mac alone is
+# released only with release_mac_without_windows (an emergency; the run says so loudly).
+#
 # Modes:
-#   dry-run      (default, any branch) preflight and plan, then set the version in the working
-#                tree, build, sign and check the DMG and the daemon; commits, tags and uploads
-#                nothing. The built files are kept as a workflow artifact for 7 days.
-#   release      (main only) the whole release.
-#   upload-only  (main only) download the DMG from the GitHub Release v<version> and upload it to
-#                production again (retry after a failed or skipped upload).
+#   dry-run       (default, any branch) preflight and plan, then set the version in the working
+#                 tree, build, sign and check the DMG, the daemon and the Windows installer;
+#                 commits, tags and uploads nothing. The built files are kept as workflow
+#                 artifacts for 7 days.
+#   release       (main only) the whole release, both systems.
+#   upload-only   (main only) download the DMG and the installer from the GitHub Release
+#                 v<version> and upload them to production again (scripts/release.sh
+#                 --reupload: the repair after an upload that failed). A file production has
+#                 already counts as done; one that is missing on GitHub or refused fails the run.
+#   windows-only  (main only) give a release that exists its Windows installer: build and test
+#                 it from the release's tag, then add it to production and to the GitHub
+#                 Release (scripts/release.sh --add-windows). For a release that was published
+#                 without one. A version that has an installer on production is refused: a
+#                 published file is never replaced, release a higher version.
 #
 # Secrets (docs/RUNBOOK.md, "Release from GitHub Actions"): SIGNING_KEY_PEM, SIGNING_CERT_PEM,
 # ADMIN_SECRET_PRODUCTION. A release refuses to run without them: an ad-hoc signature would
 # change the designated requirement and the Keychain would stop trusting the app.
 #
-# Windows: the job "Windows installer" builds, signs and tests <name>-<version>-setup.exe on a
-# Windows runner in the modes dry-run and release, from the same commit with the version set in
-# its working tree. "Publish the Windows installer" then adds it to the GitHub Release and
-# uploads it to production as the Windows file of the release (release), or uploads the
-# installer of the GitHub Release again (upload-only). Both wait for nothing a Mac does except
-# the GitHub Release itself. A prerelease gets its installer on the GitHub Release only, as it
-# gets its DMG (the app updates only to MAJOR.MINOR.PATCH). Optional secrets WINDOWS_SIGN_PFX_BASE64 and WINDOWS_SIGN_PASSWORD (a
-# code-signing certificate as a base64 PFX): without them the installer is not signed and
-# Windows shows the SmartScreen warning.
+# Windows code signing: WINDOWS_SIGN_PFX_BASE64 and WINDOWS_SIGN_PASSWORD (a certificate as a
+# base64 PFX), or WINDOWS_SIGN_CMD (a command that signs the file given as its last argument,
+# for a certificate in a cloud key store) with WINDOWS_SIGN_ENV (NAME=value lines the command
+# needs). Without either, a release refuses to run too, unless it is started with
+# windows_unsigned=true: an unsigned installer (SmartScreen warning) is published only on
+# purpose. A prerelease gets its installer on the GitHub Release only, as it gets its DMG (the
+# app updates only to MAJOR.MINOR.PATCH).
 
 # The jobs are in release-jobs.yml (a called workflow, so that the server URLs are masked in
 # the logs).
@@ -44,8 +59,16 @@ on:
       mode:
         description: dry-run builds and checks only; release and upload-only run on main
         type: choice
-        options: [dry-run, release, upload-only]
+        options: [dry-run, release, upload-only, windows-only]
         default: dry-run
+      windows_unsigned:
+        description: Publish the Windows installer without a signature, on purpose (SmartScreen warning). Needed while no signing is set up
+        type: boolean
+        default: false
+      release_mac_without_windows:
+        description: "EMERGENCY ONLY: release the Mac alone, with no Windows installer (mode release). Windows apps get nothing until mode=windows-only adds it"
+        type: boolean
+        default: false
 
 concurrency:
   group: release
@@ -63,6 +86,8 @@ jobs:
     with:
       version: ${{ inputs.version }}
       mode: ${{ inputs.mode }}
+      windows_unsigned: ${{ inputs.windows_unsigned }}
+      release_mac_without_windows: ${{ inputs.release_mac_without_windows }}
     secrets:
       SERVERS_JSON: ${{ vars.SERVERS_JSON }}
       SIGNING_KEY_PEM: ${{ secrets.SIGNING_KEY_PEM }}
@@ -70,3 +95,5 @@ jobs:
       ADMIN_SECRET_PRODUCTION: ${{ secrets.ADMIN_SECRET_PRODUCTION }}
       WINDOWS_SIGN_PFX_BASE64: ${{ secrets.WINDOWS_SIGN_PFX_BASE64 }}
       WINDOWS_SIGN_PASSWORD: ${{ secrets.WINDOWS_SIGN_PASSWORD }}
+      WINDOWS_SIGN_CMD: ${{ secrets.WINDOWS_SIGN_CMD }}
+      WINDOWS_SIGN_ENV: ${{ secrets.WINDOWS_SIGN_ENV }}
