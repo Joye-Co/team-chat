@@ -131,6 +131,56 @@ run has a separate one ({}): changes you make here are not in that folder.",
     }
 }
 
+/// [`prepare_work`] with the run's GitHub (feature "github", `app` mode): the daemon's own
+/// clone and fetch use the person's token. Without one they go without credentials (a public
+/// repository works); when that fails, the run reports that it waits for the person and ends
+/// before its CLI starts.
+async fn prepare_with_github(
+    cfg: &Config,
+    a: &RunAssign,
+    github: Option<&crate::github::Run>,
+    event: &(dyn Fn(RunEvent) + Send + Sync),
+) -> Result<
+    (
+        std::path::PathBuf,
+        Option<workspace::LineGuard>,
+        Option<String>,
+    ),
+    String,
+> {
+    let Some(g) = github.filter(|g| g.app()) else {
+        return prepare_work(cfg, a).await;
+    };
+    let mut lacking = None;
+    let token = if crate::github::fetches_from_github(a.repo.as_ref()) {
+        match g.fetch(event).await {
+            crate::github::Got::Token(t) => Some(t.token),
+            crate::github::Got::Missing => {
+                lacking = Some(false);
+                None
+            }
+            crate::github::Got::Invalid => {
+                lacking = Some(true);
+                None
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+    let env = crate::github::fetch_env(&g.spec, token.as_deref());
+    match (
+        workspace::with_git_env(env, prepare_work(cfg, a)).await,
+        lacking,
+    ) {
+        (Err(e), Some(invalid)) => {
+            g.wait(invalid, event).await;
+            Err(format!("{} ({e})", g.waiting(invalid)))
+        }
+        (r, _) => r,
+    }
+}
+
 /// What a resumed CLI session must know when its working folder is not the one its earlier
 /// turns used (the line was cleaned up after being idle, or this is the first run since the
 /// daemon kept lines). None when the folder is the same one.
@@ -208,6 +258,10 @@ pub fn build_env(cfg: &Config, rt: &RuntimeConfig, a: &RunAssign) -> Vec<(String
     put("CHAT_GROUP_ID", a.group_id.clone());
     put("CHAT_TOPIC_ID", a.topic_id.clone());
     put("CHAT_BOT_MEMBER_ID", a.bot_member_id.clone());
+    // Feature "github": who commits, and in `app` mode git's helper and the gh proxy's name.
+    if let Some(g) = a.github.as_ref().filter(|_| !aside) {
+        crate::github::put_env(g, &mut env);
+    }
     env
 }
 
@@ -360,7 +414,23 @@ pub async fn supervise(ctx: RunCtx) {
     });
 
     let dir = workspace::run_dir(&cfg, &run_id);
-    let (outcome, timed_out) = match prepare_work(&cfg, &assign).await {
+    let github = assign.github.clone().map(|g| {
+        Arc::new(crate::github::Run::new(
+            &cfg.server_url,
+            token.clone(),
+            &run_id,
+            g,
+            redactor.clone(),
+        ))
+    });
+    // A VM member's kept home: no GitHub sign-in of an earlier run is used again.
+    if let (Some(vm), Some(_)) = (&cfg.vm, &github)
+        && crate::github::clear_home(&vm.homes, &assign.bot_member_id)
+    {
+        eprintln!("{} run {run_id}: removed an old GitHub sign-in", now_ms());
+    }
+    let prepared = prepare_with_github(&cfg, &assign, github.as_deref(), &event).await;
+    let (outcome, timed_out) = match prepared {
         Err(e) => (Outcome::failed(e), false),
         Ok((cwd, line, line_note)) => {
             event(RunEvent::Status {
@@ -390,6 +460,9 @@ pub async fn supervise(ctx: RunCtx) {
                 aside,
             ));
             outputs.set_gate(gate.clone());
+            if let Some(g) = github.as_ref().filter(|g| g.app() && !aside) {
+                outputs.set_github(g.clone());
+            }
             // Lives until the CLI is done; dropping it removes the socket.
             let chat_run = if aside {
                 None
@@ -404,7 +477,17 @@ pub async fn supervise(ctx: RunCtx) {
                     root: cwd.clone(),
                     redactor: redactor.clone(),
                 });
-                start_chat_run(&dir, &cwd, files, &run_id, &out, outputs.clone(), &mut env)
+                let host =
+                    start_chat_run(&dir, &cwd, files, &run_id, &out, outputs.clone(), &mut env);
+                // `gh` asks the daemon for the person's token (in a VM: the tools disk's).
+                if host.is_some()
+                    && !exec.isolated()
+                    && github.as_ref().is_some_and(|g| g.app())
+                    && let Err(e) = crate::github::install_gh(&dir.join("bin"))
+                {
+                    eprintln!("{} run {run_id}: no gh proxy: {e}", now_ms());
+                }
+                host
             };
             // Gated actions: only runtimes that can stop a command get them (the server sends
             // them only for CLIs that report `gates`), never a side chat.
@@ -428,6 +511,10 @@ pub async fn supervise(ctx: RunCtx) {
                 gate.note(),
                 gates.note(),
                 cfg.vm.as_ref().map(vm_note),
+                github
+                    .as_ref()
+                    .filter(|_| !aside)
+                    .and_then(|g| crate::github::note(&g.spec)),
             ]
             .into_iter()
             .flatten()
@@ -498,6 +585,11 @@ this machine cannot be made to stop at them (update it)",
             res
         }
     };
+
+    // A token the run fetched may be in what the CLI wrote to stderr.
+    if redactor.has_added() {
+        redactor.file(&dir.join("stderr.log"));
+    }
 
     // Keep a copy of the CLI's own session file next to the run.
     let mut upload_file = None;
@@ -860,6 +952,110 @@ mod tests {
         assert!(new.contains("not in it"), "{new}");
         let scratch = line_note(cwd, None, true, true, false).unwrap();
         assert!(scratch.contains("empty"), "{scratch}");
+    }
+
+    /// Feature "github": the person has not connected GitHub and the daemon's own clone fails
+    /// without credentials: the server is told once, the run reports `missing` and ends with
+    /// what the CLI would have said, before any CLI starts.
+    #[tokio::test]
+    async fn a_clone_that_needs_a_missing_github_ends_the_run_waiting() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", l.local_addr().unwrap());
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let s2 = seen.clone();
+        tokio::spawn(async move {
+            while let Ok((mut s, _)) = l.accept().await {
+                let mut buf = vec![0; 4096];
+                let n = s.read(&mut buf).await.unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let line = req.lines().next().unwrap_or_default().to_string();
+                let status = if line.starts_with("GET") {
+                    "404 Not Found"
+                } else {
+                    "200 OK"
+                };
+                s2.lock().unwrap().push(line);
+                let _ = s
+                    .write_all(
+                        format!("HTTP/1.1 {status}\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}")
+                            .as_bytes(),
+                    )
+                    .await;
+            }
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = Config::parse(&format!(
+            "server_url = \"{url}\"\ntoken_file = '{}'\nwork_root = '{}'\n",
+            dir.path().join("token").display(),
+            dir.path().join("root").display()
+        ))
+        .unwrap();
+        let spec = chat_protocol::github::RunGithub {
+            source: "app".into(),
+            member_id: "U1".into(),
+            login: None,
+            author: Some(chat_protocol::github::GitIdentity {
+                name: "Ann".into(),
+                email: "U1@users.noreply.invalid".into(),
+            }),
+            committer: chat_protocol::github::GitIdentity {
+                name: "Bot".into(),
+                email: "ai-B1@users.noreply.invalid".into(),
+            },
+            rewrite_ssh: Some(true),
+        };
+        let a = RunAssign {
+            run_id: "rg".into(),
+            bot_member_id: "BOTRUN".into(),
+            group_id: "G".into(),
+            topic_id: "TG".into(),
+            runtime: "fake".into(),
+            prompt: "p".into(),
+            model: None,
+            effort: None,
+            // Nothing listens there: the clone fails at once, no network needed.
+            repo: Some(crate::proto::RepoSpec {
+                url: Some("https://127.0.0.1:1/github.com/o/private.git".into()),
+                path: None,
+                base_branch: None,
+            }),
+            env_allowlist: vec![],
+            lease_ms: 1,
+            max_duration_ms: None,
+            session_upload: None,
+            kind: None,
+            resume_session_id: None,
+            gates: None,
+            github: Some(spec.clone()),
+        };
+        let g = crate::github::Run::new(
+            &cfg.server_url,
+            Arc::new("tm_test_machine_token".into()),
+            "rg",
+            spec,
+            Arc::new(crate::redact::Redactor::default()),
+        );
+        let events = std::sync::Mutex::new(vec![]);
+        let emit = |e: RunEvent| events.lock().unwrap().push(e);
+        let err = prepare_with_github(&cfg, &a, Some(&g), &emit)
+            .await
+            .unwrap_err();
+        assert!(err.starts_with("GitHub is not connected for Ann"), "{err}");
+        assert_eq!(
+            events.into_inner().unwrap(),
+            vec![RunEvent::Github {
+                state: "missing".into(),
+                login: None
+            }]
+        );
+        assert_eq!(
+            seen.lock().unwrap().clone(),
+            vec![
+                "GET /v1/machine/runs/rg/github HTTP/1.1".to_string(),
+                "POST /v1/machine/runs/rg/github/wait HTTP/1.1".to_string()
+            ]
+        );
     }
 
     /// Every non-side-chat run of a member in a topic gets the same line; a side chat gets

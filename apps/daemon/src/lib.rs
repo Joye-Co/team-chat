@@ -11,6 +11,7 @@ pub mod daemon;
 pub mod doctor;
 pub mod executor;
 pub mod gates;
+pub mod github;
 pub mod health;
 pub mod input;
 pub mod metrics;

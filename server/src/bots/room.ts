@@ -1,8 +1,10 @@
-// Group room side of the bots feature: the one responsible bot per topic, `run.updated` events,
-// and the hand-off of human messages and card presses to the responsible bot's BotDesk. The
-// hand-off is written to an outbox in the same transaction as the event and delivered after
-// commit; a failed delivery is retried by the room alarm until the desk accepts it.
-import { type BlockRef, type BotRun, type CardV2, type Event, isMainTopicId, type Message, type TopicContext } from "@chat/protocol";
+// Group room side of the bots feature: the AI members working in each topic (participants.ts),
+// `run.updated` events, and the hand-off of human messages and card presses to the BotDesks of
+// the members they are for: each AI member a message mentions, else the topic's routing owner
+// (the member that most recently started a run there), or the DM's other member. The hand-off is
+// written to an outbox in the same transaction as the event and delivered after commit; a failed
+// delivery is retried by the room alarm until every desk accepted it.
+import { type BlockRef, type BotRun, type CardV2, type Event, isMainTopicId, type Message, RUN_KIND_ASIDE, type TopicContext } from "@chat/protocol";
 import { ApiError } from "../core/errors";
 import {
   type ArchivedEvent,
@@ -22,6 +24,7 @@ import type { Logger } from "../core/logger";
 import { deskStub } from "./env";
 import { type RefSource, resolveRefs, stripRefPrefix } from "./refs";
 import { type ContextRow, type RequestExt, parseExt, requestExt } from "../context/render";
+import { PARTICIPANTS_MIGRATION, type WorkState, addressedParticipants, claimTopic, isParticipant, onRunUpdated, publishWorkState, routingOwner, topicBots, workState } from "./participants";
 
 registerRoomMigration({
   name: "bots-1",
@@ -49,18 +52,15 @@ registerRoomMigration({
   `,
 });
 
-function claimedBot(sql: SqlStorage, topicId: string): string | null {
-  return (
-    sql.exec<{ bot_id: string }>("SELECT bot_id FROM bot_topics WHERE topic_id = ?", topicId).toArray()[0]?.bot_id ?? null
-  );
-}
+// Usable (design-relay R1): the AI members that ran in each topic. After bots-1, which it reads.
+registerRoomMigration({ name: "participants-1", up: PARTICIPANTS_MIGRATION });
 
 /**
- * The bot a card press in this topic goes to: the responsible bot, or in the 群聊 (which has
- * none) the card's author when that bot has run there.
+ * The bot a card press in this topic goes to: the card's author when it ran in the topic (in
+ * the 群聊, when it has run there), otherwise the topic's routing owner.
  */
-function cardOwner(sql: SqlStorage, topicId: string, authorId: string): string | null {
-  if (!isMainTopicId(topicId)) return claimedBot(sql, topicId);
+export function cardOwner(sql: SqlStorage, topicId: string, authorId: string): string | null {
+  if (!isMainTopicId(topicId)) return isParticipant(sql, topicId, authorId) ? authorId : routingOwner(sql, topicId);
   const ran = sql
     .exec("SELECT 1 FROM events WHERE type = 'run.updated' AND topic_id = ? AND actor_id = ? LIMIT 1", topicId, authorId)
     .toArray();
@@ -68,7 +68,7 @@ function cardOwner(sql: SqlStorage, topicId: string, authorId: string): string |
 }
 
 export interface ClaimResult {
-  /** The topic's responsible bot after the claim (this bot, or the one that was first). */
+  /** The calling bot (several AI members may work in one topic). */
   botId: string;
   title: string;
   messages: ContextMessage[];
@@ -135,24 +135,17 @@ function topicCount(sql: SqlStorage, topicId: string, where = "", params: unknow
 export const SIDE_CHAT_CONTEXT_MESSAGES = 60;
 
 /**
- * Makes the calling bot the topic's responsible bot unless another bot already is. The 群聊
- * has no responsible bot: every bot it mentions may work there (docs/protocol.md, "群聊").
+ * Reads a topic for a run and makes the calling bot its routing owner (`ownerId`: a follow-up
+ * without an @ goes to it). Several AI members may work in one topic; the 群聊 has no owner.
  */
 registerRoomRpc("bots.claim", (room, actor, args): ClaimResult => {
-  // peek: read the topic without becoming its responsible bot (the front desk reads first).
+  // peek: read the topic without becoming its routing owner (the front desk reads first).
   const { topicId, peek } = args as { topicId: string; peek?: boolean };
   if (!actor || actor.kind !== "bot") throw new ApiError("forbidden", "bots only");
   const topic = room.sql.exec<{ title: string; context: string | null }>("SELECT title, context FROM topics WHERE id = ?", topicId).toArray()[0];
   if (!topic) throw new ApiError("not_found", "topic not found");
   const main = isMainTopicId(topicId);
-  if (!main && !peek) {
-    room.sql.exec(
-      "INSERT OR IGNORE INTO bot_topics (topic_id, bot_id, claimed_at) VALUES (?, ?, ?)",
-      topicId,
-      actor.id,
-      Date.now(),
-    );
-  }
+  if (!main && !peek) room.commit((tx) => claimTopic(room, tx, actor.id, topicId));
   const messages = room.sql
     .exec<{ id: string; author_id: string; body: string }>(
       `SELECT id, author_id, body FROM messages WHERE topic_id = ? AND deleted_at IS NULL
@@ -163,7 +156,7 @@ registerRoomRpc("bots.claim", (room, actor, args): ClaimResult => {
     .toArray()
     .reverse()
     .map((m) => ({ id: m.id, authorId: m.author_id, body: m.body }));
-  const out: ClaimResult = { botId: main ? actor.id : (claimedBot(room.sql, topicId) ?? actor.id), title: topic.title, messages };
+  const out: ClaimResult = { botId: actor.id, title: topic.title, messages };
   out.newest = contextRows(room.sql, actor.id, topicId, "", [], "DESC", CONTEXT_SCAN);
   out.first = contextRows(room.sql, actor.id, topicId, "", [], "ASC", 1)[0];
   out.total = topicCount(room.sql, topicId);
@@ -282,16 +275,34 @@ registerRoomRpc("bots.runUpdated", (room, actor, args) => {
   return { seq: event.seq };
 });
 
-// Restore from the archive: the responsible bot of a topic is the bot of its first run.
+/**
+ * A run's latest report for its topic (usable, design-relay R1): the desk sends it in place of
+ * a `topic.update`; the room keeps it on the bot's row and rolls the topic's status up from all
+ * the AI members working there.
+ */
+registerRoomRpc("bots.workState", (room, actor, args) => {
+  const s = args as WorkState;
+  if (!actor || actor.kind !== "bot") throw new ApiError("forbidden", "bots only");
+  if (!room.isMember(actor.id)) throw new ApiError("forbidden", "not a member of this group");
+  const topic = room.sql.exec("SELECT 1 FROM topics WHERE id = ?", s.topicId).toArray()[0];
+  if (!topic) throw new ApiError("not_found", "topic not found");
+  room.commit((tx) => workState(room, tx, actor.id, s));
+  return { ok: true };
+});
+
+// Restore from the archive: the routing owner of a topic is the bot of its latest run (the
+// event writer below rebuilds the participants).
 registerEventImporter((event, sql) => {
   if (event.type !== "run.updated") return;
   const run = (event.data as { run?: BotRun }).run;
-  if (!run?.topicId || !run.botId || isMainTopicId(run.topicId)) return;
+  if (!run?.topicId || !run.botId || isMainTopicId(run.topicId) || run.kind === RUN_KIND_ASIDE) return;
   sql.exec(
-    "INSERT OR IGNORE INTO bot_topics (topic_id, bot_id, claimed_at) VALUES (?, ?, ?)",
+    `INSERT INTO bot_topics (topic_id, bot_id, claimed_at) VALUES (?, ?, ?)
+     ON CONFLICT (topic_id) DO UPDATE SET bot_id = excluded.bot_id, claimed_at = excluded.claimed_at
+     WHERE excluded.bot_id = bot_topics.bot_id OR excluded.claimed_at >= bot_topics.claimed_at`,
     run.topicId,
     run.botId,
-    event.at,
+    run.createdAt,
   );
 });
 
@@ -301,8 +312,8 @@ registerRoomRpc("bots.transfer", (room, actor, args) => {
   if (!actor || actor.kind !== "bot") throw new ApiError("forbidden", "bots only");
   if (!room.isMember(to)) throw new ApiError("forbidden", "not a member of this group");
   if (isMainTopicId(topicId)) return { transferred: false };
-  const owner = claimedBot(room.sql, topicId);
-  if (owner && owner !== actor.id) throw new ApiError("forbidden", "only the responsible member hands a topic over");
+  const owner = routingOwner(room.sql, topicId);
+  if (owner && owner !== actor.id && !isParticipant(room.sql, topicId, actor.id)) throw new ApiError("forbidden", "only a member working in the topic hands it over");
   room.sql.exec(
     "INSERT INTO bot_topics (topic_id, bot_id, claimed_at) VALUES (?, ?, ?) ON CONFLICT (topic_id) DO UPDATE SET bot_id = excluded.bot_id, claimed_at = excluded.claimed_at",
     topicId,
@@ -312,11 +323,22 @@ registerRoomRpc("bots.transfer", (room, actor, args) => {
   return { transferred: true };
 });
 
-/** Removes a bot's topic claims in this group (the bot was deactivated). Internal. */
+/** Removes a bot's topic claims and participant rows in this group (the bot was deactivated). Internal. */
 registerRoomRpc("bots.release", (room, actor, args) => {
   const { botId } = args as { botId: string };
   if (actor) throw new ApiError("forbidden", "internal only");
+  const topics = room.sql.exec<{ topic_id: string }>("SELECT topic_id FROM topic_bots WHERE bot_id = ?", botId).toArray().map((x) => x.topic_id);
+  room.sql.exec("DELETE FROM topic_bots WHERE bot_id = ?", botId);
   const r = room.sql.exec("DELETE FROM bot_topics WHERE bot_id = ?", botId);
+  // Clients drop the member from the topic's participants and see the status of the rest.
+  if (topics.length > 0) {
+    room.commit((tx) => {
+      for (const t of topics) {
+        if (topicBots(room.sql, t).length > 0) publishWorkState(room, tx, botId, t);
+        else room.updateTopic(tx, botId, t, { extra: { participants: [] } });
+      }
+    });
+  }
   return { released: r.rowsWritten };
 });
 
@@ -403,7 +425,8 @@ export const HANDOFF_GIVE_UP_MS = 60 * 60_000;
 const RETRY_MAX_MS = 5 * 60_000;
 
 type OutboxCard = { botId: string; messageId: string; actionId: string; actorId: string };
-type OutboxMessage = Omit<TopicMessage, "mentioned" | "groupId" | "refs"> & { mentions: string[]; blockRefs?: BlockRef[] };
+/** `done`: the bots that already took the message (a retry skips them). */
+type OutboxMessage = Omit<TopicMessage, "mentioned" | "groupId" | "refs"> & { mentions: string[]; blockRefs?: BlockRef[]; done?: string[] };
 /**
  * The card as it was answered: the author may edit it before the hand-off is delivered.
  * `anonymous`: the card is private (cards2/privacy), so the run gets no actor; such a row holds
@@ -429,6 +452,11 @@ type OutboxRow = {
   next_at: number;
   created_at: number;
 };
+
+// In the commit transaction: the AI members working in a topic.
+registerEventWriter((event: ArchivedEvent, sql) => {
+  if (event.type === "run.updated") onRunUpdated(event, sql);
+});
 
 // In the commit transaction: the messages and card presses that may go to a bot.
 registerEventWriter((event: ArchivedEvent, sql) => {
@@ -465,9 +493,8 @@ registerEventWriter((event: ArchivedEvent, sql) => {
   if (event.type !== "message.created") return;
   const message = (event.data as { message: Message }).message;
   if (message.kind === "system") return;
-  const claimed = claimedBot(sql, message.topicId);
-  if (claimed === message.authorId) return;
-  if (!claimed && message.mentions.length === 0 && !dmPeer(sql, message.authorId)) return;
+  const owner = routingOwner(sql, message.topicId);
+  if (message.mentions.length === 0 && (!owner || owner === message.authorId) && !dmPeer(sql, message.authorId)) return;
   const payload: OutboxMessage = {
     topicId: message.topicId,
     messageId: message.id,
@@ -517,50 +544,100 @@ async function deliver(c: DeliverContext, row: OutboxRow): Promise<void> {
   if (row.kind === "artifact") return;
   if (row.kind === "answer") return deliverAnswer(c, row);
   const m = JSON.parse(row.payload) as OutboxMessage;
-  // The responsible bot now (a run may have claimed the topic since the message was written).
-  const claimed = claimedBot(c.sql, m.topicId);
-  if (claimed === m.authorId) return;
+  // The routing owner now (a run may have started in the topic since the message was written).
+  const owner = routingOwner(c.sql, m.topicId);
   const peer = dmPeer(c.sql, m.authorId);
-  if (!claimed && m.mentions.length === 0 && !peer) return;
-  const byId = await memberInfo(c.env.DB, [m.authorId, ...m.mentions, ...(claimed ? [claimed] : []), ...(peer ? [peer] : [])]);
-  const usable = (id: string | undefined) => {
-    const x = id ? byId.get(id) : undefined;
-    return Boolean(x && x.kind === "bot" && x.runner && !x.deactivated);
-  };
+  const ext = c.sql.exec<{ ext: string | null }>("SELECT ext FROM messages WHERE id = ?", m.messageId).toArray()[0]?.ext ?? null;
+  const parsed = parseExt(ext);
+  const quoted = parsed.replyTo?.authorId;
+  // A message without an @ that quotes a participant or answers its approval goes to that member.
+  const addressed = m.mentions.length === 0 && !peer ? addressedParticipants(c.sql, m.topicId, m.authorId, m.body, quoted) : [];
+  if (m.mentions.length === 0 && !owner && !peer && addressed.length === 0) return;
+  const byId = await memberInfo(c.env.DB, [m.authorId, ...m.mentions, ...addressed, ...(owner ? [owner] : []), ...(peer ? [peer] : [])]);
   // A bot's messages never reach another bot: no loops.
   const author = byId.get(m.authorId);
   if (!author || author.kind !== "human" || author.deactivated) return;
-  let target: string | undefined;
-  if (claimed) {
-    // A deactivated (or runner-disabled) bot gets no more work in topics it claimed.
-    if (!usable(claimed)) return;
-    target = claimed;
-  } else {
-    target = m.mentions.find((id) => usable(id)) ?? (usable(peer) ? peer : undefined);
-  }
-  if (!target) return;
-  const args: TopicMessage = {
+  const targets = messageTargets(
+    m,
+    owner,
+    peer,
+    (id) => {
+      const x = byId.get(id);
+      return Boolean(x && x.kind === "bot" && x.runner && !x.deactivated);
+    },
+    addressed,
+  );
+  if (targets.length === 0) return;
+  const base: TopicMessage = {
     groupId: c.groupId,
     topicId: m.topicId,
     messageId: m.messageId,
     authorId: m.authorId,
     authorLevel: author.level as "owner" | "member",
     body: m.body,
-    mentioned: m.mentions.includes(target) || target === peer,
+    mentioned: false,
   };
   if (m.blockRefs && m.blockRefs.length > 0) {
-    args.body = stripRefPrefix(m.body, m.blockRefs);
-    args.refs = resolveRefs(c.sql, m.blockRefs);
+    base.body = stripRefPrefix(m.body, m.blockRefs);
+    base.refs = resolveRefs(c.sql, m.blockRefs);
   }
-  const ext = c.sql.exec<{ ext: string | null }>("SELECT ext FROM messages WHERE id = ?", m.messageId).toArray()[0]?.ext ?? null;
-  const parsed = parseExt(ext);
-  const quoted = parsed.replyTo?.authorId;
-  if (quoted) args.replyToAuthorId = quoted;
-  if (parsed.replyTo?.messageId) args.replyToMessageId = parsed.replyTo.messageId;
+  if (quoted) base.replyToAuthorId = quoted;
+  if (parsed.replyTo?.messageId) base.replyToMessageId = parsed.replyTo.messageId;
   const carried = requestExt(parsed);
-  if (carried) args.ext = carried;
-  if (peer) args.dm = true;
-  await deskStub(c.env, target).onMessage(target, args);
+  if (carried) base.ext = carried;
+  if (peer) base.dm = true;
+  await handOffEach(targets, m.done ?? [], (t) => deskStub(c.env, t.id).onMessage(t.id, { ...base, mentioned: t.mentioned }), (done) => {
+    if (targets.length > 1) c.sql.exec("UPDATE bot_outbox SET payload = ? WHERE id = ?", JSON.stringify({ ...m, done }), row.id);
+  });
+}
+
+/**
+ * Each member gets its own hand-off: every target not yet done is tried, one that took it is
+ * not handed it again on a retry, and one member's failure does not hold back the others (the
+ * row is retried for the failed ones only).
+ */
+export async function handOffEach<T extends { id: string }>(
+  targets: T[],
+  alreadyDone: string[],
+  send: (t: T) => Promise<unknown>,
+  record: (done: string[]) => void,
+): Promise<void> {
+  const done = new Set(alreadyDone);
+  let failure: unknown = null;
+  for (const t of targets) {
+    if (done.has(t.id)) continue;
+    try {
+      await send(t);
+    } catch (err) {
+      failure ??= err;
+      continue;
+    }
+    done.add(t.id);
+    record([...done]);
+  }
+  if (failure !== null) throw failure;
+}
+
+/**
+ * Who a person's message goes to (接 1.1, 1.2): in a DM the other member; otherwise each AI
+ * member it mentions, each on its own (`mentioned`); a message without any @ to the participants
+ * it quotes or answers (`addressed`), else to the topic's routing owner (`mentioned: false`: the
+ * desk decides whether it is a follow-up). Only usable runner bots.
+ */
+export function messageTargets(
+  m: { authorId: string; mentions: string[] },
+  owner: string | null,
+  peer: string | undefined,
+  usable: (id: string) => boolean,
+  addressed: string[] = [],
+): { id: string; mentioned: boolean }[] {
+  if (peer) return usable(peer) ? [{ id: peer, mentioned: true }] : [];
+  const named = [...new Set(m.mentions)].filter((id) => id !== m.authorId && usable(id));
+  if (named.length > 0) return named.map((id) => ({ id, mentioned: true }));
+  const to = m.mentions.length === 0 ? [...new Set(addressed)].filter((id) => id !== m.authorId && usable(id)) : [];
+  if (to.length > 0) return to.map((id) => ({ id, mentioned: false }));
+  if (m.mentions.length === 0 && owner && owner !== m.authorId && usable(owner)) return [{ id: owner, mentioned: false }];
+  return [];
 }
 
 /** The voter of a stored answer, from the room's card event (private cards keep it only there). */

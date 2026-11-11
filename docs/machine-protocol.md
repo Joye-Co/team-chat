@@ -292,10 +292,19 @@ CliUsage   = { runtime, at, windows: { kind, label?, usedPct, resetsAt? }[] }
 - `run.assign.leaseMs` is the time the server waits without hearing about a run before it
   declares the run lost. Every `heartbeat` lists the daemon's runs and renews each listed
   run's lease to `now + leaseMs`; any `run.*` frame for a run also renews it.
-- When a lease expires, the server marks the run lost and leaves it out of later
-  `welcome.runs`, so the daemon stops it on reconnect. BotDesk sets the run and the topic to
-  `blocked` with one short note. A lost run is never assigned again: a new run needs a new
-  mention. Late frames of a lost or closed run are acked and dropped.
+- When a lease expires while the machine is away (no heartbeat), BotDesk keeps waiting: the
+  run stays open with a new lease and stays in `welcome.runs`, so a daemon that comes back
+  still holding it replays its frames and goes on. The topic gets one note that the run waits
+  for its computer, and one when it is back; a waiting run is not counted as silent. After
+  30 minutes away the run moves to another healthy machine that can take it (a new run, a new
+  session); with no such machine it waits on. A removed machine is not waited for.
+- When a lease expires while the machine is connected (the daemon no longer reports the run),
+  the server marks the run lost and leaves it out of later `welcome.runs`, so the daemon stops
+  it. BotDesk starts it again or sets the run and the topic to `blocked` with one short note.
+  Late frames of a lost or closed run are acked and dropped.
+- The daemon's own `stalled` status is a signal only: the server does not restart a run for
+  it. A silent run gets one nudge, then is restarted in the same session on the same machine,
+  then on another machine when one can take it, and only then is it marked `blocked`.
 - The server's lease is 10 minutes (`leaseMs = 600000`) and `maxDurationMs` is 2 hours.
 - The server closes the link when it hears nothing for 90 s. The daemon drops the link when
   it receives nothing for 3 heartbeat intervals and reconnects with exponential backoff
@@ -839,6 +848,17 @@ POST /v1/machine/runs/:id/github/rejected                                       
   that git got an authentication failure, so the server checks the token once.
 - The `chat-run` ops `git-credential` and `github.token` are answered by the daemon itself, like
   `secret`; they are never `output` run events.
+- What the daemon does with `run.assign.github`: `GIT_COMMITTER_*` is the AI member and
+  `GIT_AUTHOR_*` the person when `author` is given. With `source: "app"` it clears github.com's
+  credential helpers and sets `!chat-run git-credential` instead (`GIT_CONFIG_COUNT/KEY/VALUE`),
+  puts a `gh` proxy first on `PATH` (`<run folder>/bin/gh`; in a VM `/opt/runner/bin/gh` on the
+  tools disk) that runs the real `gh` with `GH_TOKEN` for that one command, and sets
+  `CHAT_GITHUB_AS` to the person's name (`gh auth login|logout|refresh|setup-git` are refused).
+  Its own clone and fetch of the mirror use the token as an HTTP header of those git processes
+  only. Every token it gets is masked in that run's frames, files, session upload and
+  `stderr.log`. Before a VM run it removes an earlier GitHub sign-in from the member's kept home
+  (`.config/gh/hosts.yml`, `.git-credentials`, github.com credential and token `url.*` sections
+  of `.gitconfig`). Any other `source` gets only the committer.
 
 Take-over (feature `takeover`):
 
@@ -1003,7 +1023,7 @@ secret split over two deltas is redacted whole.
 `~/.config/<slug>/daemon.toml` (or `--config`, or `CHAT_DAEMON_CONFIG`); `daemon
 example-config` prints a commented example. Keys: `server_url`, `token_file`, `machine_id`,
 `name`, `labels`, `work_root`, `max_parallel_runs`, `keep_runs_hours`, `min_free_gb`,
-`stall_minutes`, `repo_roots`, `env_passthrough`, `gated_env`, `takeover_url` (1.1), `[runtimes.<name>]` with `kind`,
+`stall_minutes`, `repo_roots`, `env_passthrough`, `gated_env`, `takeover_url` (1.1), `self_update`, `[runtimes.<name>]` with `kind`,
 `command`, `args`, `env`, `model`, `asks_permission` (ACP: the agent asks before its tool
 calls, see "Gated actions"), and `[vm]` with `kernel`, `rootfs`, `dir`, `vcpus`, `mem_mib`
 (a cap: the host gives only the pages the VM touches), `scratch_gb`, `firecracker`, `helper`,
@@ -1046,6 +1066,22 @@ found on PATH.
   action (`repair.exe repair-program <daemon>`, a copy of the daemon that `install-service`
   keeps next to the log and updates never touch) renames the newest `<name>.exe.old-*` back
   before the daemon is started.
+- Updating itself (a daemon installed on its own, today the Linux x86_64 daemon of a host; the
+  app updates the daemon it ships on macOS and Windows): when systemd started it (`daemon
+  install-service`) and `self_update` is not `false`, the daemon asks
+  `GET /v1/machine/updates/latest?platform=linux-x86_64` with its machine token 10 minutes after
+  it starts and then every hour (docs/protocol.md, "Updates and downloads"). A release newer than
+  its own version (never an older one) is downloaded from the answer's `downloadUrl`, which must
+  be on the configured server, to `<program>.new` next to the program, and checked against the
+  answer's size and SHA-256; a file that does not match is deleted. Once no run is active the
+  daemon renames it over its program (on Windows it would follow the replace steps above) and
+  exits; systemd's `Restart=always` starts the new version. If somebody else replaced the
+  program file meanwhile, theirs wins and the download is dropped. Every step is logged; a
+  failed check is tried again an hour later. A download that waits for the daemon to be idle is
+  put in place even if the release was withdrawn on the server meanwhile: withdraw a bad release
+  before hosts download it, or replace the program by hand (which wins over the download).
+  `scripts/runner/install-daemon.sh` (run by
+  `scripts/runner/host-setup.sh`) installs the released daemon of a host the first time.
 
 ## Tests
 

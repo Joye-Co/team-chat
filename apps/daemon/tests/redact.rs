@@ -200,3 +200,37 @@ fn device_sign_in_codes_are_shown() {
     assert_eq!(red.text("输入验证码 7AB5-DFD1"), "输入验证码 7AB5-DFD1");
     assert!(red.text("invite code 7K2M-9QXR").contains(MASK));
 }
+
+/// Feature "github": a run's redactor takes the tokens the run fetched while it runs; its
+/// clones (the run's frames, its files, its session upload) see them, other runs do not.
+#[test]
+fn a_runs_list_grows_and_stays_with_the_run() {
+    let daemon_wide = Redactor::new(vec!["machine-secret-1".to_string()]);
+    let run = daemon_wide.for_run();
+    let other = daemon_wide.for_run();
+    let shared = run.clone();
+    // Not a pattern the rules know: only the exact value masks it.
+    let token = "plainvalue1234567890";
+    assert_eq!(run.text(token), token);
+    assert!(!run.has_added());
+    run.add(token);
+    run.add("short");
+    assert!(run.has_added());
+    assert_eq!(
+        shared.text(&format!("pushed with {token}")),
+        "pushed with <redacted>"
+    );
+    assert_eq!(other.text(token), token);
+    assert_eq!(daemon_wide.text(token), token);
+    // The daemon's own values still apply in the run.
+    assert_eq!(run.text("machine-secret-1"), MASK);
+    // `stderr.log`, which the CLI writes itself, is masked in place after the run.
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("stderr.log");
+    std::fs::write(&log, format!("remote: token {token} rejected\n")).unwrap();
+    run.file(&log);
+    assert_eq!(
+        std::fs::read_to_string(&log).unwrap(),
+        "remote: token <redacted> rejected\n"
+    );
+}

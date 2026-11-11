@@ -33,6 +33,7 @@ import { ROOM_REACT_RPC } from "../../reactions";
 import type { BotsEnv } from "../env";
 import { ACK_EMOJI } from "../proof";
 import type { TopicMessage } from "../room";
+import type { WorkState } from "../participants";
 import type { Brief } from "../../agent/frontdesk";
 
 export type RunRow = {
@@ -114,6 +115,13 @@ export type RunRow = {
   open_tools: number;
   /** Runs in a row the desk continued because the CLI only promised work. */
   auto_continues: number;
+  // desk-machine-away (盯 1.1, 盯 1.3)
+  /** Since when the run waits for its machine to come back; null while the machine is there. */
+  away_since: number | null;
+  /** How far the desk got with a silent piece of work: 1 = restarted in the same session, 2 = moved to another machine. Carried over. */
+  stall_step: number;
+  /** A nudge was really sent for this piece of work (盯 1.12: the note names only real tries). Carried over. */
+  nudge_sent: number;
 };
 
 /** A CLI session id BotDesk keeps and sends back (`run.assign.resumeSessionId`). */
@@ -124,8 +132,8 @@ export function sessionIdOf(v: unknown): string | null {
 export const ACTIVE = "ended_at IS NULL";
 /** Runs waiting for a free machine (排队): created, no machine yet, queued. */
 export const QUEUED = "ended_at IS NULL AND status = 'created' AND machine_id IS NULL AND queued_at IS NOT NULL";
-/** A queued run that gets no machine this long after it was queued fails. */
-export const QUEUE_MAX_MS = 60 * 60_000;
+/** A queued run that gets no machine this long after it was queued fails (机 2.2: a computer may be closed overnight). */
+export const QUEUE_MAX_MS = 24 * 60 * 60_000;
 /** How often the desk tries its queued runs again (machines free up in other desks too). */
 export const QUEUE_RETRY_MS = 15_000;
 /** A run still `created` with no machine this long after it was made failed to start. */
@@ -398,6 +406,19 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
             ALTER TABLE decisions ADD COLUMN input TEXT;
           `,
         },
+        {
+          // 盯 1.1, 盯 1.3: a run waits for a machine that went away, and a silent run is
+          // restarted in its own session before it moves. Old rows: NULL / 0.
+          name: "desk-machine-away",
+          up: `
+            ALTER TABLE runs ADD COLUMN away_since INTEGER;
+            ALTER TABLE runs ADD COLUMN stall_step INTEGER NOT NULL DEFAULT 0;
+          `,
+        },
+        {
+          name: "desk-nudge-sent",
+          up: `ALTER TABLE runs ADD COLUMN nudge_sent INTEGER NOT NULL DEFAULT 0;`,
+        },
       ]);
       const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'bot_id'").toArray()[0];
       this.botId = row?.value ?? null;
@@ -664,17 +685,17 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
   protected async topic(r: RunRow, status: TopicStatus, waitingOn: string[] = []): Promise<void> {
     // A side chat answers in the asker's DM; its topic keeps no work status.
     if (r.kind === RUN_KIND_ASIDE) return;
+    // Usable (design-relay R1): the room keeps this run's report and rolls the topic's status up
+    // from every AI member working there; the routing owner is set when a run claims the topic.
     try {
       unwrap(
-        await this.room(r).topicUpdate(r.group_id, this.actor(), {
-          t: "topic.update",
-          rid: "bot",
-          groupId: r.group_id,
+        await this.room(r).rpc(r.group_id, "bots.workState", this.actor(), {
           topicId: r.topic_id,
+          runId: r.id,
           status,
           waitingOn,
-          ownerId: this.botId,
-        } as never),
+          ended: r.ended_at !== null,
+        } satisfies WorkState),
       );
     } catch (err) {
       this.log.warn("topic update failed", { runId: r.id, status, err });
@@ -687,6 +708,15 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
       unwrap(await this.room(r).rpc(r.group_id, ROOM_REACT_RPC, this.actor(), { messageId, emoji: ACK_EMOJI, on: true }));
     } catch (err) {
       this.log.warn("ack reaction failed", { runId: r.id, err });
+    }
+  }
+
+  /** Takes the acknowledgement back (接 1.11: the front desk decided the message is not for it). */
+  protected async unack(groupId: string, messageId: string): Promise<void> {
+    try {
+      unwrap(await roomStub(this.env, groupId).rpc(groupId, ROOM_REACT_RPC, this.actor(), { messageId, emoji: ACK_EMOJI, on: false }));
+    } catch (err) {
+      this.log.warn("ack removal failed", { messageId, err });
     }
   }
 

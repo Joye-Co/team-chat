@@ -266,7 +266,7 @@ Module: `topic.ts` / `topic.rs`.
 ```ts
 Topic += {
   waitingOn?: string[]          // member ids the topic waits on; absent = []; at most 20
-  ownerId?: string | null       // the one responsible member; absent or null = none
+  ownerId?: string | null       // usable: the AI member that most recently started a run here (a follow-up without an @ goes to it); absent or null = none
   lastMessageAt?: number        // createdAt of the newest non-deleted message
 }
 { t: "topic.update", ..., waitingOn?: string[], ownerId?: string | null }
@@ -654,6 +654,8 @@ Module: `updates.ts` / `updates.rs`.
 | `GET /v1/updates/:version/download?platform=` | member | | the file of that platform (`Range` supported) |
 | `PUT /v1/admin/releases/:version` | header `X-Admin-Secret` | raw DMG; headers `X-Sha256` (hex), `X-Release-Notes` (base64 of UTF-8 Markdown) | `UpdateInfo` |
 | `PUT /v1/admin/releases/:version/assets/:platform` | header `X-Admin-Secret` | the raw file of that platform; same headers | `UpdateInfo` |
+| `GET /v1/machine/updates/latest?platform=` | machine token | | `UpdateInfo` of the newest release for that platform, `downloadUrl` the machine route below; 404 when there is none |
+| `GET /v1/machine/updates/:version/download?platform=` | machine token | | the file of that platform (`Range` supported) |
 | `POST /v1/admin/releases/:version/withdraw` | header `X-Admin-Secret` | `{ restore? }` | `{ version, withdrawn, latest: UpdateInfo \| null }` (`latest` is the newest DMG); a withdrawn release is not `latest` and not downloadable, on every platform |
 | `GET /download` | anyone | | a small page that reads the code from the fragment (`/download#code=<invite code>`) and posts it |
 | `POST /download` | anyone with a valid invite code | form `code=<invite code>`, `platform?` | the latest file of that platform |
@@ -669,7 +671,9 @@ other request the DMG. The page of `GET /download` posts `platform=windows` from
 Windows. When that platform has no release the answer is 404, never the other platform's file.
 
 ```ts
-ReleasePlatform = "macos" | "windows"   // macos = the DMG; windows = the installer (-setup.exe, x64)
+ReleasePlatform = "macos" | "windows" | "linux-x86_64"
+  // macos = the DMG; windows = the installer (-setup.exe, x64);
+  // linux-x86_64 = the machine daemon alone (<slug>-daemon-<version>-x86_64-unknown-linux-gnu)
 UpdateInfo = { version, notes, size, sha256, publishedAt, downloadUrl, platform?: ReleasePlatform }
   // version "MAJOR.MINOR.PATCH" without leading zeros; notes Markdown <= 20,000; downloadUrl absolute
   // platform: sent by every server that knows platforms; missing = "macos"
@@ -691,8 +695,14 @@ Platforms (added for the Windows client; old clients and scripts are not affecte
   `macos`) is another one. A Windows client therefore never takes the DMG: a server without a
   Windows release answers 404, and a server from before platforms ignores the parameter and
   answers with an `UpdateInfo` that has no `platform`.
-- `/download`: the page posts `platform=windows` when the browser runs on Windows; any other
-  value, or none, serves the DMG.
+- `/download`: the page posts `platform=windows` when the browser runs on Windows;
+  `platform=linux-x86_64` serves the Linux daemon (the page never posts it); any other value, or
+  none, serves the DMG.
+- `linux-x86_64` (added for Linux hosts): the release flow uploads the daemon binary with
+  `PUT /v1/admin/releases/:version/assets/linux-x86_64`. A daemon installed on its own asks
+  `GET /v1/machine/updates/latest?platform=linux-x86_64` with its machine token, downloads the
+  `downloadUrl` (the machine route, same origin) and checks size and SHA-256 before it puts the
+  file in place (docs/machine-protocol.md, "Updating itself"). The member routes serve it too.
 
 `GET /download` accepts an invite code that is not expired (used or
 not), is rate limited per IP, answers 404 with a plain-text body for a bad code or when the
@@ -858,16 +868,22 @@ Rules:
   1.2.2: a runner with `machineId` runs only on that machine (its labels do not count; the other
   conditions do). `PUT` without `machineId` keeps the stored one, `null` clears it, and an
   unknown or revoked machine is `not_found`. Revoking the machine clears it.
-- Trigger: a `message.created` by a human that mentions a runner-backed bot starts a run in
-  that topic, unless the topic already has a responsible bot. The first bot that starts a run
-  in a topic becomes its only responsible bot. Messages written by bots never start runs or
-  reach a run (no loops). In a DM with a runner-backed bot every human message counts as a
-  mention of it. A deactivated bot, or one whose runner is disabled, gets no more messages; on
-  deactivation its active runs are cancelled and its topics released.
-- While a run of the topic's bot is active (`created`, `running`, `waiting`, `blocked`), every
-  later human message in the topic goes to that run as input. A message that reaches the run
-  after its last turn ended starts a new run. When no run is active, only a new mention of the
-  bot starts a run.
+- Trigger: a `message.created` by a human goes to each runner-backed bot it mentions, each on
+  its own, whether or not another bot works in the topic. A message without any @ goes to the
+  topic's `ownerId`: the bot that most recently started a run there. Several bots may work in
+  one topic (`Topic.participants`); the topic's status is rolled up from all of them. Messages
+  written by bots never start runs or reach a run (no loops). In a DM with a runner-backed bot
+  every human message counts as a mention of it. A deactivated bot, or one whose runner is
+  disabled, gets no more messages; on deactivation its active runs are cancelled and its topics
+  released.
+- While a run of a bot is active in the topic (`created`, `running`, `waiting`, `blocked`), a
+  later human message that reaches the bot goes to that run as input when it mentions the bot,
+  quotes it, comes from the run's requester, answers its approval or asks how it goes; other
+  people's talk stays in the topic and reaches the next turn as context. A plain 停 / 别做了
+  from the requester stops the run when no front desk is configured. A message that reaches the
+  run after its last turn ended starts a new run. When no run is active, a mention starts a run,
+  and so does a message without an @ from the last run's requester within 30 minutes after it
+  ended (with a front desk, the front desk decides; small talk gets no answer).
 - The bot acknowledges the message that started the run with one reaction (👀; before 1.1, a
   short text line). It posts nothing while it works: progress lives in the run (`plan`, the run
   log; before 1.1, one streaming message). When the run ends it posts one result message and
@@ -879,16 +895,19 @@ Rules:
   requester or an owner can answer, every answer is audited as `run.approval`; when the question
   cannot be posted the answer is no), `done` on success, `blocked` with one
   short note when the run fails, its machine stays away past the lease, or no event comes for
-  10 minutes, after the desk's own tries (see "Supervision") (the daemon's own `status: stalled` report marks it blocked at once and does not
-  count as progress). A blocked run that sends events again goes back to `running`. A run that
+  10 minutes, after the desk's own tries (see "Supervision") (the daemon's own `status: stalled` report is a signal only: it
+  neither blocks nor restarts the run, and it does not count as progress). A blocked run that sends events again goes back to `running`. A run that
   never reaches a machine ends as `failed` after 2 minutes.
-- 1.1 queue (排队): when every machine that could take a run is busy (`maxParallelRuns`), the run
+- 1.1 queue (排队): when every machine that could take a run is busy (`maxParallelRuns`), or
+  offline (a machine that said hello once, for example a runner pinned to one machine whose
+  computer is closed; the bot posts one note naming the computer it waits for), the run
   waits instead of failing: it stays `created` with no `machineId` and gets `queuedAt` and
   `queuePosition` (1-based among the bot's queued runs, oldest first), stored with `run.updated`.
   When a run of the bot ends, and every 15 s, the oldest queued run gets a free machine; the
   runs behind it get a `run.updated` with their new place. A queued run is not failed by the
-  2-minute rule; it fails with the "no free machine" note after 60 minutes. With no machine
-  that could ever take it (labels, runtime, health), the run fails at once as before. Readers:
+  2-minute rule; it fails after 24 hours with a note that says what it waited for. With no
+  machine that could ever take it (labels, runtime, free disk), the run fails at once with a
+  note that names the reason. Readers:
   "created with no `machineId`" and `queuedAt` = 排队 at `queuePosition`.
 - Input left over when a run ends starts a follow-up run, at most 5 in a row; then the bot
   posts one note. A person in the run's group stops a run with `POST /v1/runs/:id/cancel`: the
@@ -915,11 +934,22 @@ stops trying, and the topic gets one note.
   A run with a `tool.call` that has no `tool.result` yet waits for a step it started (a build, a
   test run): it gets no nudge, and it counts as silent only after 30 minutes. A run out of tries
   gets no nudge either.
-- **Silent 10 minutes (30 with a step open), the daemon's `stalled` report, or the machine gone** (no heartbeat for
-  2 minutes, or `runLost` past the lease): the run is cancelled without a message (`cancelled`,
-  summary `restarted: …`), and its request starts again with the same work order on a healthy
-  machine. The topic hears nothing. Out of tries, the old behavior applies: `blocked` with one
-  note ("我自己试了几次…还是没有进展").
+- **Silent 10 minutes (30 with a step open)**, in a fixed order, one step each time the run is
+  silent that long again: first the run is cancelled without a message (`cancelled`, summary
+  `restarted: …`) and its request starts again in the same CLI session on the same machine
+  (`resumeSessionId`; when that machine is full the retry waits for it, it never goes elsewhere);
+  then, when another healthy machine can take it, it starts there in a fresh session; only then
+  the run turns `blocked` with one note that names the minutes of silence and only the tries that
+  really happened (提醒, 打断后重来, 换电脑重来). The nudge comes once per piece of work. The
+  daemon's `stalled` report is a signal only and never restarts a run.
+- **The machine goes away** (no heartbeat for 2 minutes, or `runLost` past the lease): the run is
+  waited for, not restarted. It keeps its lease (MachineLink renews it), the topic gets one note
+  naming the computer, and the run is neither nudged nor marked stalled while it waits. A daemon
+  that comes back still holding the run replays its frames and the run goes on (one note when
+  replayed frames arrive). After 30 minutes away the run moves to another healthy machine in a
+  fresh session when one can take it; with no other machine it waits without limit. A machine
+  that is removed, or that is connected again without the run, ends the wait: the run restarts
+  elsewhere when it can, else it turns `blocked` with one note.
 - **The same step 4 times in a row** (equal `tool.call` titles): one reminder (`desk-loop-…`).
 - **A promise without work**: a run that succeeds with a short result such as "我来看看" and called
   no tool gets a follow-up run that continues its session ("do the work now"). At most 3 in a row.
@@ -936,7 +966,7 @@ id. It must be a bot member of the group with an enabled runner. An unknown name
 Bots' own messages never start runs, so the hand-over goes desk to desk, and a visible message says
 who took what.
 
-- **转交** (`member.handoff`): the other member becomes the topic's responsible member, and the
+- **转交** (`member.handoff`): the other member becomes the topic's `ownerId`, and the
   calling bot posts "@B 转交给你：goal". B starts a run in the same topic, whose prompt carries the
   work order (`goal`, `doneWhen`, `notes`). The calling run should stop.
 - **分出去** (`member.assign`): the calling bot opens a new topic with "@B goal". B works there.
@@ -958,10 +988,10 @@ and makes one forced tool call `decide`, which answers with one of four actions:
   No run, no machine.
 - `dispatch`: a run as before. Its prompt carries the work order (`WorkBrief`: goal, done-when
   checks, notes) after the request.
-- `ask`: the bot posts one question and becomes the topic's responsible bot. For an hour the
+- `ask`: the bot posts one question and becomes the topic's `ownerId`. For an hour the
   requester's next message in the topic counts as addressed to the bot without an @; the front
   desk then decides again with the answer in the topic.
-- `skip`: nothing is posted.
+- `skip`: nothing is posted, and the 👀 it put on the request is taken back.
 
 The 👀 reaction goes on the request while the front desk reads it. A decision is stored before
 it is acted on, so a retried delivery never posts twice. Any doubt becomes a `dispatch`: an
