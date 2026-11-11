@@ -118,7 +118,7 @@ pub fn open(
         nav.open_topic(d::GROWTH.into(), d::T_REPORT.into(), cx)
     });
     let handle = crate::selftest::scenes::open_main(services, content, cx)?;
-    cx.spawn(async move |cx: &mut AsyncApp| finish(run(mode, cx).await))
+    cx.spawn(async move |cx: &mut AsyncApp| finish(run(handle, mode, cx).await))
         .detach();
     Ok(handle)
 }
@@ -200,10 +200,62 @@ return r.height>0&&r.bottom<=window.innerHeight-h?'ok':'qa '+r.top+'..'+r.bottom
 const ASK_AT: &str = "(function(){var r=document.getElementById('ask').getBoundingClientRect();\
 return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2});})()";
 
-async fn run(mode: Mode, cx: &mut AsyncApp) -> Result<(), String> {
+/// Wheels the 话题 until the inline page's top sits a little under the toolbar row. The
+/// 话题 opens at its newest message, and the page's message is far enough up that only
+/// the page's last rows were in view: its buttons could not be clicked (the ask scene
+/// failed on both systems) and the captures showed almost none of the page.
+async fn bring_into_view(
+    handle: AnyWindowHandle,
+    page: &Entity<WebEmbedState>,
+    cx: &mut AsyncApp,
+) -> Result<(), String> {
+    use gpui::{point, px};
+    for _ in 0..40 {
+        let bounds = cx
+            .update(|cx| page.read(cx).bounds())
+            .ok_or("the inline page left the layout")?;
+        // Under the caption strip (off the Mac), the toolbar row and the date pill.
+        let strip = cx.update(|cx| {
+            handle
+                .update(cx, |_, window, _| {
+                    crate::ui::native::window_chrome::height(window)
+                })
+                .unwrap_or_default()
+        });
+        let want = strip + crate::ui::native::metrics::TOOLBAR_ROW + px(72.);
+        let delta = want - bounds.origin.y;
+        if delta.abs() < px(3.) {
+            return Ok(());
+        }
+        let at = point(
+            bounds.origin.x - px(24.),
+            (bounds.origin.y + bounds.size.height / 2.).clamp(px(200.), px(600.)),
+        );
+        let _ = cx.update(|cx| {
+            handle.update(cx, |_, window, cx| {
+                window.dispatch_event(
+                    gpui::PlatformInput::Scroll(gpui::ScrollEvent {
+                        position: at,
+                        delta: gpui::ScrollDelta::Pixels(point(px(0.), delta)),
+                        ..Default::default()
+                    }),
+                    cx,
+                );
+            })
+        });
+        cx.background_executor()
+            .timer(Duration::from_millis(120))
+            .await;
+    }
+    // The 话题 may be too short to put the page exactly there: as far as it goes.
+    Ok(())
+}
+
+async fn run(handle: AnyWindowHandle, mode: Mode, cx: &mut AsyncApp) -> Result<(), String> {
     let p3 = wait_for(cx, Duration::from_secs(15), |cx| page(3, cx))
         .await
         .ok_or("the 产出 page did not load")?;
+    bring_into_view(handle, &p3, cx).await?;
     // The page got its snapshot (GET …/data) through onData.
     until(cx, &p3, REV, "1").await?;
     // The page's own ask on load never went out.
