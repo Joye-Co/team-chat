@@ -250,8 +250,8 @@ fn powershell_quote(s: &str) -> String {
 /// SYSTEM and Administrators can open (the daemon refuses anything wider), then run the
 /// daemon's `doctor` and `install-service` (a scheduled task of that user). The daemon is
 /// the one the installed app ships (`%LOCALAPPDATA%\Programs\<name>\<slug>-daemon.exe`);
-/// a `<slug>-daemon` on `PATH` is the fallback. Nothing is downloaded, so no hash is
-/// needed; a computer without the app uses `scripts/install-daemon.ps1` (docs/bots.md).
+/// a `<slug>-daemon` on `PATH` is the fallback; with neither the command says so in a
+/// sentence and stops. Nothing is downloaded, so no hash is needed; a computer without the app uses `scripts/install-daemon.ps1` (docs/bots.md).
 ///
 /// Works in Windows PowerShell 5.1. The config is a literal here-string: the values are
 /// TOML strings on one line each ([`toml_str`] escapes quotes, `$`, backticks and control
@@ -285,8 +285,12 @@ pub(super) fn install_command_windows(
          [IO.File]::WriteAllText(\"$d\\daemon.toml\", $toml)\n\
          $D = \"$env:LOCALAPPDATA\\Programs\\{app}\\{slug}-daemon.exe\"\n\
          if (-not (Test-Path $D)) {{ $D = (Get-Command {slug}-daemon -ErrorAction SilentlyContinue).Source }}\n\
-         & $D doctor; if ($LASTEXITCODE -eq 0) {{ & $D install-service }}",
+         if ($D) {{ & $D doctor; if ($LASTEXITCODE -eq 0) {{ & $D install-service }} }} else {{ Write-Host {missing} }}",
         token = powershell_quote(token),
+        missing = powershell_quote(&crate::copy::fill(
+            crate::copy::settings::MACHINE_INSTALL_NO_DAEMON,
+            &[("app", app)]
+        )),
         server = toml_str(server_url),
         id = toml_str(&machine.id),
         name = toml_str(&machine.name),
@@ -822,7 +826,13 @@ mod tests {
         assert!(cmd.contains(&format!(
             "$env:LOCALAPPDATA\\Programs\\{app}\\{slug}-daemon.exe"
         )));
-        assert!(cmd.ends_with("{ & $D install-service }"));
+        assert!(cmd.contains(
+            "if ($D) { & $D doctor; if ($LASTEXITCODE -eq 0) { & $D install-service } }"
+        ));
+        // Without a daemon the last line says what to do (one statement, so it also
+        // works pasted line by line).
+        assert!(cmd.ends_with("。' }"), "{cmd}");
+        assert!(cmd.lines().last().unwrap().contains("else { Write-Host '"));
         // No POSIX shell in it.
         for posix in ["chmod", "umask", "<<EOF", "$HOME", "/Applications"] {
             assert!(!cmd.contains(posix), "{posix}");
@@ -872,6 +882,15 @@ mod tests {
                 script.as_os_str(),
             ],
         );
+        // No daemon in this profile: the command says what to do, not a PowerShell error.
+        let said = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success(), "the script ends cleanly");
+        assert!(
+            out.stderr.is_empty(),
+            "no PowerShell error: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(said.contains(env!("PRODUCT_NAME")), "{said}");
         println!(
             "powershell: {}\n{}",
             String::from_utf8_lossy(&out.stdout),

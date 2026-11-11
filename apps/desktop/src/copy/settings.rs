@@ -142,6 +142,7 @@ crate::copy! {
     MACHINE_INSTALL = "安装命令",
     MACHINE_INSTALL_HINT = "先在那台电脑上安装应用，再在它的终端里运行。命令里含有凭证，不要发到群里。",
     MACHINE_INSTALL_HINT_WINDOWS = "先在那台电脑上安装应用，再在它的 PowerShell 里运行（用成员干活时要用的那个 Windows 用户，不需要管理员）。命令里含有凭证，不要发到群里。",
+    MACHINE_INSTALL_NO_DAEMON = "这台电脑上没有找到 {app} 的机器程序。请先安装 {app}，再运行一次这条命令。",
     MACHINE_TARGET = "那台电脑的系统",
     MACHINE_TARGET_UNIX = "Mac 或 Linux",
     MACHINE_TARGET_WINDOWS = "Windows",

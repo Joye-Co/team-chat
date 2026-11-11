@@ -909,6 +909,62 @@ mod tests {
         assert!(!item.added, "hidden: not added again");
     }
 
+    struct Empty;
+
+    impl gpui::Render for Empty {
+        fn render(
+            &mut self,
+            _: &mut gpui::Window,
+            _: &mut gpui::Context<Self>,
+        ) -> impl gpui::IntoElement {
+            gpui::div()
+        }
+    }
+
+    /// Ctrl+W through the app's own handler and the icon's real state: without the icon
+    /// in the notification area it closes a window but never the last one (the app would
+    /// quit); with the icon there it closes the last one too, and the app stays.
+    #[gpui::test]
+    fn ctrl_w_closes_the_last_window_only_with_the_icon(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::views::nav::menus::install);
+        let press = |window: gpui::AnyWindowHandle, cx: &mut gpui::TestAppContext| {
+            let mut vcx = gpui::VisualTestContext::from_window(window, cx);
+            vcx.update(|window, _| window.activate_window());
+            vcx.run_until_parked();
+            vcx.simulate_keystrokes("ctrl-w");
+            cx.run_until_parked();
+        };
+        let first = cx.add_window(|_, _| Empty);
+        let second = cx.add_window(|_, _| Empty);
+        cx.run_until_parked();
+        assert!(!cx.update(|cx| crate::views::nav::app_outlives_windows(cx)));
+        press(second.into(), cx);
+        assert_eq!(
+            cx.update(|cx| cx.windows().len()),
+            1,
+            "a second window closes"
+        );
+        press(first.into(), cx);
+        assert_eq!(cx.update(|cx| cx.windows().len()), 1, "the last one stays");
+        // The icon is in the notification area: the app outlives its windows.
+        cx.update(|cx| {
+            cx.set_global(StatusItem {
+                hwnd: 0,
+                added: true,
+                visible: true,
+                shown: None,
+                tooltip: String::new(),
+                icon: None,
+            });
+            assert!(crate::views::nav::app_outlives_windows(cx));
+        });
+        press(first.into(), cx);
+        assert!(
+            cx.update(|cx| cx.windows().is_empty()),
+            "now the last one closes"
+        );
+    }
+
     #[test]
     fn the_app_outlives_its_windows_only_with_the_icon() {
         assert_eq!(quit_mode(true), gpui::QuitMode::Explicit);
