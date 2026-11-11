@@ -8,6 +8,8 @@
 //   local-secret                       make a local ADMIN_SECRET and write server/.dev.vars
 //   bootstrap --name <ownerName>       make the first owner, save its token
 //   invite --name <n> [--kind human|bot] [--level member|owner] [--role <r>]
+//   invite --self | --member <id>      sign-in code for the saved owner or an existing member
+//                                      (signs in as that member, adds a device; single use)
 //   bot --name <n> [--role <r>] [--character <id>]
 //                                      make a bot member, save its token; <id> is a character id
 //   set-member --member <id> [--character <id>|none] [--role <r>|none] [--level member|owner]
@@ -129,7 +131,7 @@ async function call(
 async function main() {
   const { command, flags } = parseArgs(process.argv.slice(2));
   if (!command || command === "help" || flags.help) {
-    console.log(readFileSync(new URL(import.meta.url).pathname, "utf8").split("\n").slice(1, 28).join("\n"));
+    console.log(readFileSync(new URL(import.meta.url).pathname, "utf8").split("\n").slice(1, 30).join("\n"));
     return;
   }
   const envName = (str(flags, "env") ?? "local") as EnvName;
@@ -166,6 +168,19 @@ async function main() {
       return;
     }
     case "invite": {
+      const memberId = flags.self ? ((await call(base, "GET", "/v1/me", { token: ownerToken() })) as any).id : str(flags, "member");
+      if (memberId) {
+        // The server signs the code in as that member: name, kind and level come from it.
+        const r = await call(base, "POST", "/v1/invites", {
+          token: ownerToken(),
+          body: { name: "sign-in", kind: "human", level: "member", memberId },
+        });
+        const path = join(dir, `signin-${memberId}-${Date.now()}.txt`);
+        writeSecret(path, r.code);
+        console.log(`sign-in code for member ${memberId}, expires ${new Date(r.expiresAt).toISOString()}`);
+        console.log(`sign-in code (XXXX-XXXX, single use): ${path}`);
+        return;
+      }
       const name = str(flags, "name", true) as string;
       const body = {
         name,

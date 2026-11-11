@@ -104,11 +104,46 @@ designated_requirement() {
   codesign -d -r- "$1" 2>/dev/null | sed -n 's/^\(# \)\{0,1\}designated => //p' | head -n 1
 }
 
+# ops_dir_path: where the ops checkout is or would be: TC_OPS_DIR, else ~/.config/team-chat/ops.
+ops_dir_path() {
+  printf '%s' "${TC_OPS_DIR:-${TEAM_CHAT_CONFIG_DIR:-$HOME/.config/team-chat}/ops}"
+}
+
 # ops_dir: the private ops checkout of the operator (deploy config, server URLs, character
 # pack). TC_OPS_DIR, else ~/.config/team-chat/ops. Empty when neither exists.
 ops_dir() {
-  local d="${TC_OPS_DIR:-${TEAM_CHAT_CONFIG_DIR:-$HOME/.config/team-chat}/ops}"
+  local d
+  d="$(ops_dir_path)"
   if [ -d "$d" ]; then printf '%s' "$d"; fi
+}
+
+# wrangler <args...>: the repository's wrangler (bunx, from server/node_modules). WRANGLER names
+# another program to run instead (the tests use a fake one).
+wrangler() {
+  if [ -n "${WRANGLER:-}" ]; then "$WRANGLER" "$@"; else bunx wrangler "$@"; fi
+}
+
+# workers_dev_url: the first https://<name>.<subdomain>.workers.dev address in its input (what
+# `wrangler deploy` prints), or nothing.
+workers_dev_url() {
+  grep -Eo 'https://[A-Za-z0-9.-]+\.workers\.dev' | head -n 1 || true
+}
+
+# record_server_url <env> <url>: puts the env's base URL into <ops>/deploy/servers.json (made
+# when missing), keeping the other envs.
+record_server_url() {
+  local ops file tmp
+  ops="$(ops_dir_path)"
+  file="$ops/deploy/servers.json"
+  mkdir -p "$ops/deploy"
+  tmp="$(mktemp)"
+  if [ -s "$file" ]; then
+    jq --arg e "$1" --arg u "${2%/}" '.[$e] = $u' "$file" >"$tmp" || { rm -f "$tmp"; die "cannot read $file"; }
+  else
+    jq -n --arg e "$1" --arg u "${2%/}" '{($e): $u}' >"$tmp"
+  fi
+  cat "$tmp" >"$file"
+  rm -f "$tmp"
 }
 
 # servers_json: the server URLs as JSON ({ "e2e", "staging", "production" }): TC_SERVERS_JSON
@@ -139,7 +174,12 @@ env_base() {
 deploy_wrangler_config() {
   local ops dir
   ops="$(ops_dir)"
-  [ -n "$ops" ] && [ -f "$ops/deploy/$1.wrangler.jsonc" ] || die "no $1 deploy config: set TC_OPS_DIR (needs deploy/$1.wrangler.jsonc)"
+  if [ -z "$ops" ] || [ ! -f "$ops/deploy/$1.wrangler.jsonc" ]; then
+    if [ "$1" = server ]; then
+      die "no server deploy config at $(ops_dir_path)/deploy/server.wrangler.jsonc: run scripts/setup-server.sh first (docs/SELF-HOSTING.md), or set TC_OPS_DIR to your ops checkout"
+    fi
+    die "no $1 deploy config: set TC_OPS_DIR (needs deploy/$1.wrangler.jsonc)"
+  fi
   case "$1" in server) dir="$ROOT/server" ;; monitor) dir="$ROOT/ops/monitor" ;; *) die "unknown worker '$1'" ;; esac
   cp "$ops/deploy/$1.wrangler.jsonc" "$dir/wrangler.deploy.jsonc"
   printf 'wrangler.deploy.jsonc'
