@@ -411,6 +411,53 @@ pub(super) fn merge_path(from_shell: &str, home: &Path, exists: impl Fn(&Path) -
     parts.join(":")
 }
 
+/// The coding programs the daemon would find on this computer ("claude", "codex"): it adds a
+/// runtime for each one it finds in its PATH when it starts, and stops when there is none. A
+/// Mac looks in the PATH the service gets ([`service_path`]); Windows in the app's PATH and
+/// the folders the official installers use, which the scheduled task's PATH has.
+pub(super) fn local_clis() -> Vec<String> {
+    #[cfg(not(windows))]
+    let path = service_path();
+    #[cfg(windows)]
+    let path = {
+        let mut path = std::env::var("PATH").unwrap_or_default();
+        for extra in [
+            Some(home().join(".local").join("bin")),
+            std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("npm")),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            path.push(';');
+            path.push_str(&extra.to_string_lossy());
+        }
+        path
+    };
+    found_in(&path, cfg!(windows), executable)
+}
+
+/// [`local_clis`] in `path` (`;` between folders on Windows, where a program has an extension).
+fn found_in(path: &str, windows: bool, exists: impl Fn(&Path) -> bool) -> Vec<String> {
+    let sep = if windows { ';' } else { ':' };
+    ["claude", "codex"]
+        .into_iter()
+        .filter(|cmd| {
+            let names: Vec<String> = if windows {
+                [".exe", ".cmd", ".bat", ".com"]
+                    .iter()
+                    .map(|ext| format!("{cmd}{ext}"))
+                    .collect()
+            } else {
+                vec![cmd.to_string()]
+            };
+            path.split(sep)
+                .filter(|d| !d.trim().is_empty())
+                .any(|d| names.iter().any(|n| exists(&Path::new(d.trim()).join(n))))
+        })
+        .map(str::to_string)
+        .collect()
+}
+
 /// The machine id in this Mac's daemon config (`machine_id = "…"`), if it has one.
 pub(super) fn machine_id() -> Option<String> {
     machine_id_in(&std::fs::read_to_string(config_path()).ok()?)
@@ -693,6 +740,24 @@ mod tests {
         );
         std::fs::remove_file(install.join(&name)).unwrap();
         assert_eq!(daemon_next_to(&app, false), None, "no daemon installed");
+    }
+
+    #[test]
+    fn the_coding_programs_are_looked_up_in_the_services_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("claude"), "x").unwrap();
+        std::fs::write(bin.join("codex.cmd"), "x").unwrap();
+        let is_file = |p: &Path| p.is_file();
+        // A folder of Windows has a drive letter and a colon: only a Unix path splits on ':'.
+        if !cfg!(windows) {
+            let unix = format!("/nowhere:{}", bin.display());
+            assert_eq!(found_in(&unix, false, is_file), ["claude"]);
+        }
+        let win = format!("C:\\nowhere; {}", bin.display());
+        assert_eq!(found_in(&win, true, is_file), ["codex"]);
+        assert!(found_in("", false, is_file).is_empty());
     }
 
     #[test]

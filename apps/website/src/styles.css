@@ -288,7 +288,7 @@ h2{margin:14px 0 0;font-size:clamp(30px,4vw,48px);line-height:1.18;letter-spacin
 .wl-msg button{font:inherit;font-size:13.5px;margin-left:10px;padding:0;border:0;background:none;color:var(--ink-3);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
 .wl-count[hidden]{display:none}
 .wl-count b{font-weight:600;color:var(--ink-2)}
-#look,#waitlist{scroll-margin-top:84px}
+#look,#download{scroll-margin-top:84px}
 footer{border-top:1px solid var(--line)}
 footer .wrap{padding-block:32px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;font-size:13.5px;color:var(--ink-3)}
 footer .fl{display:flex;gap:22px;flex-wrap:wrap}

@@ -128,3 +128,39 @@ var EN=document.documentElement.lang==="en";
     if("IntersectionObserver" in window)new IntersectionObserver(function(es){es.forEach(function(e){if(!e.isIntersecting&&!v.paused)v.pause();});},{threshold:.25}).observe(f);
   });
 })();
+
+// Downloads. Each button links to the newest release page, which works without this script.
+// With it: the button of the visitor's system comes first and is the filled one, and both
+// point straight at their file (the .dmg, the -setup.exe) once GitHub has named the newest
+// release's files. Any failure leaves the release page link.
+(function () {
+  var groups = document.querySelectorAll(".ctas.dl");
+  if (!groups.length) return;
+  var ua = navigator.userAgent || "";
+  var mine = /Windows/.test(ua) ? "windows" : /Macintosh|Mac OS X/.test(ua) && !/iPhone|iPad/.test(ua) ? "mac" : "";
+  groups.forEach(function (group) {
+    var buttons = group.querySelectorAll("a[data-os]");
+    buttons.forEach(function (a) {
+      a.classList.toggle("pri", mine ? a.dataset.os === mine : a.dataset.os === "mac");
+    });
+    var own = mine && group.querySelector('a[data-os="' + mine + '"]');
+    if (own) group.insertBefore(own, group.firstChild);
+  });
+  var page = groups[0].querySelector("a[data-os]").href;
+  var repo = /github\.com\/([^/]+\/[^/]+)\/releases/.exec(page);
+  if (!repo || !window.fetch) return;
+  fetch("https://api.github.com/repos/" + repo[1] + "/releases/latest", { headers: { Accept: "application/vnd.github+json" } })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (release) {
+      if (!release || !release.assets) return;
+      var file = { mac: /\.dmg$/, windows: /-setup\.exe$/ };
+      document.querySelectorAll(".ctas.dl a[data-os]").forEach(function (a) {
+        var asset = release.assets.filter(function (x) { return file[a.dataset.os].test(x.name); })[0];
+        if (asset && /^https:\/\/github\.com\//.test(asset.browser_download_url)) {
+          a.href = asset.browser_download_url;
+          a.title = asset.name;
+        }
+      });
+    })
+    .catch(function () {});
+})();

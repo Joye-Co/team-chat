@@ -61,6 +61,7 @@ fn sample_clis() -> Vec<crate::data::CliChoice> {
     vec![
         CliChoice {
             runtime: "claude".into(),
+            kind: "claude".into(),
             models: vec![
                 model("fable", None, &[], false),
                 model("opus", None, &[], true),
@@ -71,6 +72,7 @@ fn sample_clis() -> Vec<crate::data::CliChoice> {
         },
         CliChoice {
             runtime: "codex".into(),
+            kind: "codex".into(),
             models: vec![
                 model(
                     "gpt-6-astra",

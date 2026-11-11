@@ -16,6 +16,7 @@ mod overview;
 pub mod scenes;
 mod spark;
 mod team;
+mod this_computer;
 mod usage;
 
 use std::time::Duration;
@@ -51,7 +52,7 @@ use crate::{
 };
 
 pub use accounts::Page as AdminPage;
-pub use model::Range;
+pub use model::{Range, cli_name};
 
 gpui::actions!(
     admin,
@@ -414,7 +415,7 @@ impl AdminView {
 }
 
 /// Local midnight in ms: 今天 for the server.
-fn day_start() -> u64 {
+pub(crate) fn day_start() -> u64 {
     crate::selftest::clock::local_now()
         .date_naive()
         .and_hms_opt(0, 0, 0)

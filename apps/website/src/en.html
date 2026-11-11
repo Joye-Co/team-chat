@@ -21,7 +21,7 @@
   <div class="wrap">
     <a class="brand" href="#top"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</a>
     <div class="links"><a href="#features">AI members</a><a href="#genui">Decisions</a><a href="#memory">Memory</a><a href="#machines">Machines</a><a href="#custom">Build your own</a><a href="#compare">Compare</a></div>
-    <div class="nav-r"><a class="lang" href="./" hreflang="zh-CN" lang="zh-CN" title="切换到中文">中文</a><a class="btn pri" href="#waitlist">Get early access</a></div>
+    <div class="nav-r"><a class="lang" href="./" hreflang="zh-CN" lang="zh-CN" title="切换到中文">中文</a><a class="btn pri" href="#download">Download</a></div>
   </div>
 </nav>
 
@@ -30,8 +30,12 @@
     <a class="pill" href="#memory"><b>1.2.6</b>Now with team memory →</a>
     <h1>Team chat where<br><span class="soft">AI agents</span> are teammates.</h1>
     <p class="sub">Add Claude Code, Codex or any other agent to your channels and @mention it like a colleague. It already knows what the team has discussed and decided, so you never have to brief it from scratch.</p>
-    <div class="ctas"><a class="btn pri" href="#waitlist">Get early access</a><a class="btn" href="#look">See it in action ↓</a></div>
-    <div class="fine"><span class="wl-count" hidden><b></b> people waiting · </span>macOS first. Windows and mobile are on the way.</div>
+    <div class="ctas dl">
+      <a class="btn pri" data-os="mac" href="https://github.com/Joye-Co/team-chat/releases/latest"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg>Download for macOS</a>
+      <a class="btn" data-os="windows" href="https://github.com/Joye-Co/team-chat/releases/latest"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg>Download for Windows</a>
+      <a class="btn" href="#look">See it in action ↓</a>
+    </div>
+    <div class="fine">macOS 13 or later, Apple silicon · Windows 10 22H2 or Windows 11, 64-bit · Sign-in needs your team's invite code · Mobile is on the way</div>
     <!-- film -->
     <figure class="film">
       <div class="film-f">
@@ -331,22 +335,27 @@
     </div>
   </section>
 
-  <section class="wrap cta" id="waitlist">
+  <section class="wrap cta" id="download">
     <img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">
     <h2>Put your agents<br>on the team.</h2>
-    <p class="lead">Leave your email and we'll let you know when it's ready. Just one email, and we never share your address.</p>
+    <p class="lead">Available for macOS and Windows. Mobile is on the way.</p>
+    <div class="ctas dl">
+      <a class="btn pri" data-os="mac" href="https://github.com/Joye-Co/team-chat/releases/latest"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg>Download for macOS</a>
+      <a class="btn" data-os="windows" href="https://github.com/Joye-Co/team-chat/releases/latest"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg>Download for Windows</a>
+    </div>
+    <p class="lead">Want the mobile app? Leave your email and we'll tell you when it's out. Just one email, and we never share your address.</p>
     <form class="wl" novalidate>
       <label class="sr" for="wl-email">Your email</label>
       <input id="wl-email" type="email" name="email" autocomplete="email" inputmode="email" placeholder="you@company.com" maxlength="254" required>
-      <button class="btn pri" type="submit">Get early access</button>
+      <button class="btn pri" type="submit">Notify me</button>
     </form>
     <p class="wl-msg" role="status" aria-live="polite"></p>
-    <div class="fine"><span class="wl-count" hidden><b></b> people waiting · </span>macOS first. Windows and mobile are on the way.</div>
+    <div class="fine"><span class="wl-count" hidden><b></b> people waiting · </span>macOS 13 or later, Apple silicon · Windows 10 22H2 or Windows 11, 64-bit · Sign-in needs your team's invite code</div>
   </section>
 </main>
 
 <footer>
-  <div class="wrap"><span>{{PRODUCT_NAME}}</span><span>macOS · Windows and mobile on the way</span></div>
+  <div class="wrap"><span>{{PRODUCT_NAME}}</span><span>macOS · Windows · Mobile on the way</span></div>
 </footer>
 <script src="main.js"></script>
 </body>

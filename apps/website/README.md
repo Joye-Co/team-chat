@@ -60,7 +60,8 @@ scroll in one line, and the comparison stacks each row (theirs, then ours).
 
 ## Waitlist
 
-The page has no download link yet. The buttons lead to the form at the end (`#waitlist`), which talks
+The download buttons (`.ctas.dl`, in the hero and in the closing section `#download`) link to the newest
+release. The waitlist form in `#download` is for the phone app: it talks
 to `/api/waitlist` on the same host: `GET` answers `{ "count": n }`, `POST { "email": "…" }` books
 the address and answers the new count (a repeated address is not counted twice). The static build
 does not include that endpoint: the host that serves the page provides it. Without it (also in

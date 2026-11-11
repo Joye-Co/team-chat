@@ -21,7 +21,7 @@
   <div class="wrap">
     <a class="brand" href="#top"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</a>
     <div class="links"><a href="#features">AI 成员</a><a href="#genui">交互</a><a href="#memory">记忆</a><a href="#machines">电脑</a><a href="#custom">自定义</a><a href="#compare">对比</a></div>
-    <div class="nav-r"><a class="lang" href="en" hreflang="en" lang="en" title="Switch to English">EN</a><a class="btn pri" href="#waitlist">预约 →</a></div>
+    <div class="nav-r"><a class="lang" href="en" hreflang="en" lang="en" title="Switch to English">EN</a><a class="btn pri" href="#download">下载 →</a></div>
   </div>
 </nav>
 
@@ -30,8 +30,12 @@
     <a class="pill" href="#memory"><b>1.2.6</b>AI 成员会记住团队的做法了 →</a>
     <h1>让 <span class="soft">AI Agent</span> 当同事的<br>工作聊天软件。</h1>
     <p class="sub">把 Claude Code、Codex 或任何 Agent 拉进群，像找同事一样 @ 它。群里聊过什么、定过什么它都知道，不用每次从头交代背景。</p>
-    <div class="ctas"><a class="btn pri" href="#waitlist">上线时通知我</a><a class="btn" href="#look">看它怎么干活 ↓</a></div>
-    <div class="fine"><span class="wl-count" hidden>已有 <b></b> 人在等 · </span>先支持 macOS，Windows 版和手机版正在开发</div>
+    <div class="ctas dl">
+      <a class="btn pri" data-os="mac" href="https://github.com/Joye-Co/team-chat/releases/latest"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg>下载 macOS 版</a>
+      <a class="btn" data-os="windows" href="https://github.com/Joye-Co/team-chat/releases/latest"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg>下载 Windows 版</a>
+      <a class="btn" href="#look">看它怎么干活 ↓</a>
+    </div>
+    <div class="fine">macOS 13 及以上，Apple 芯片 · Windows 10 22H2 或 Windows 11，64 位 · 登录要用团队的邀请码 · 手机版正在开发</div>
     <!-- film -->
     <figure class="film">
       <div class="film-f">
@@ -331,22 +335,27 @@
     </div>
   </section>
 
-  <section class="wrap cta" id="waitlist">
+  <section class="wrap cta" id="download">
     <img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">
     <h2>同事和 AI 成员，<br>在同一个 App 里。</h2>
-    <p class="lead">留个邮箱，可以用的时候第一时间通知你。只发这一封，不转给任何人。</p>
+    <p class="lead">macOS 和 Windows 都能用，手机版正在开发。</p>
+    <div class="ctas dl">
+      <a class="btn pri" data-os="mac" href="https://github.com/Joye-Co/team-chat/releases/latest"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg>下载 macOS 版</a>
+      <a class="btn" data-os="windows" href="https://github.com/Joye-Co/team-chat/releases/latest"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg>下载 Windows 版</a>
+    </div>
+    <p class="lead">手机版上线时通知你：留个邮箱，只发这一封，不转给任何人。</p>
     <form class="wl" novalidate>
       <label class="sr" for="wl-email">你的邮箱</label>
       <input id="wl-email" type="email" name="email" autocomplete="email" inputmode="email" placeholder="你的邮箱" maxlength="254" required>
-      <button class="btn pri" type="submit">预约 →</button>
+      <button class="btn pri" type="submit">通知我</button>
     </form>
     <p class="wl-msg" role="status" aria-live="polite"></p>
-    <div class="fine"><span class="wl-count" hidden>已有 <b></b> 人在等 · </span>先支持 macOS，Windows 版和手机版正在开发</div>
+    <div class="fine"><span class="wl-count" hidden>已有 <b></b> 人在等 · </span>macOS 13 及以上，Apple 芯片 · Windows 10 22H2 或 Windows 11，64 位 · 登录要用团队的邀请码</div>
   </section>
 </main>
 
 <footer>
-  <div class="wrap"><span>{{PRODUCT_NAME}}</span><span>macOS · Windows 和手机版开发中</span></div>
+  <div class="wrap"><span>{{PRODUCT_NAME}}</span><span>macOS · Windows · 手机版开发中</span></div>
 </footer>
 <script src="main.js"></script>
 </body>
