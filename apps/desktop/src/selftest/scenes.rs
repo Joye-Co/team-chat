@@ -492,6 +492,20 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::files::preview::open_quick_look,
     },
     Scene {
+        name: "files-quick-look-no-preview",
+        about: "Space on a type without a viewer (a Word document): the sheet's no-preview state with 用系统应用打开",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::files::preview::open_quick_look_no_preview,
+    },
+    Scene {
+        name: "files-quick-look-page",
+        about: "Space on an attached HTML page: the isolated 产出 view inside the sheet",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::files::preview::open_quick_look_page,
+    },
+    Scene {
         name: "cards",
         about: "The 话题 of sample cards: status, fields, table, progress, list, code and actions",
         start: Start::SignedIn,
@@ -1250,6 +1264,7 @@ pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
     }
     // --- end inc-refs ---
     match name {
+        "files-quick-look-page" => Some(crate::views::files::preview::quick_look_settled),
         "artifact-v2-leave" => Some(crate::views::artifact_page::scenes::left),
         "web-embed" => Some(|cx| embed_preview::ready(EmbedMode::Topic, cx)),
         "web-embed-scrolled" => Some(|cx| embed_preview::ready(EmbedMode::Scrolled, cx)),

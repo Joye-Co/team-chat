@@ -1295,8 +1295,11 @@ pub enum ThisMac {
 pub struct MachineCreated {
     pub machine: MachineInfo,
     pub credential: SecretText,
-    /// Shell lines that install the machine service with this credential.
+    /// Shell lines that install the machine service with this credential on a Mac or a
+    /// Linux computer.
     pub install_command: SecretText,
+    /// The same for a Windows computer: PowerShell lines.
+    pub install_command_windows: SecretText,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

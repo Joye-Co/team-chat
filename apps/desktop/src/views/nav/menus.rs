@@ -893,6 +893,40 @@ mod tests {
         });
     }
 
+    /// 窗口 › 前置全部窗口 through the app's handler: every window is raised and the one
+    /// that was active is the active one again at the end (it is raised last).
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn bring_all_to_front_ends_on_the_window_that_was_active(cx: &mut gpui::TestAppContext) {
+        cx.update(install);
+        let first = cx.add_window(|_, _| Empty);
+        let second = cx.add_window(|_, _| Empty);
+        let third = cx.add_window(|_, _| Empty);
+        cx.run_until_parked();
+        first
+            .update(cx, |_, window, _| window.activate_window())
+            .unwrap();
+        cx.run_until_parked();
+        let active = |cx: &mut gpui::TestAppContext| cx.update(|cx| cx.active_window());
+        assert_eq!(active(cx), Some(first.into()));
+        cx.update(|cx| cx.dispatch_action(&BringAllToFront));
+        cx.run_until_parked();
+        assert_eq!(
+            active(cx),
+            Some(first.into()),
+            "the active window ends on top"
+        );
+        // From another active window the order follows it.
+        third
+            .update(cx, |_, window, _| window.activate_window())
+            .unwrap();
+        cx.run_until_parked();
+        cx.update(|cx| cx.dispatch_action(&BringAllToFront));
+        cx.run_until_parked();
+        assert_eq!(active(cx), Some(third.into()));
+        let _ = second;
+    }
+
     /// The menus a window shows on Windows: every command of the Mac menus except the
     /// three that hide apps, 关于 under 帮助, no empty menu, no stray separator.
     #[test]

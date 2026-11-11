@@ -218,6 +218,7 @@ mod probe {
                 let under_app_id = list_file.as_ref().is_some_and(|f| !f.exists());
 
                 let ok = minimized
+                    && second_in_front
                     && zoomed
                     && says_maximized
                     && restored
@@ -234,7 +235,7 @@ mod probe {
                     "restore": restored,
                     "fullscreen": fullscreen,
                     "leave_fullscreen": windowed,
-                    // Reported, not required: a CI session may refuse the foreground.
+                    // Activating windows in turn leaves the last one in front.
                     "second_window_in_front": second_in_front,
                     // Reported: whether GPUI's own commit worked before the process had a
                     // multithreaded apartment (the app joins one first).
