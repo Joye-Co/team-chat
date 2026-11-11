@@ -1,4 +1,4 @@
-# 在 Mac 上安装 TeamChat
+# 在 Mac 上安装 Cahoots
 
 English version: [INSTALL.md](INSTALL.md)。Windows 电脑看下面的[在 Windows 上安装](#在-windows-上安装)。
 
@@ -9,41 +9,41 @@ English version: [INSTALL.md](INSTALL.md)。Windows 电脑看下面的[在 Windo
 
 两种方式任选一种:
 
-- **邀请链接**:打开管理员发给你的链接,会下载最新的 `TeamChat-<版本号>.dmg`。
+- **邀请链接**:打开管理员发给你的链接,会下载最新的 `Cahoots-<版本号>.dmg`。
   链接附带的**邀请码**请保存好,第 4 步要用。
 - **GitHub Releases**(有仓库权限的同学):打开
   <https://github.com/Joye-Co/team-chat/releases>,选最新的版本,在 Assets 里下载
-  `TeamChat-<版本号>.dmg`。也可以在终端里运行:
+  `Cahoots-<版本号>.dmg`。也可以在终端里运行:
 
   ```sh
-  gh release download --repo Joye-Co/team-chat --pattern 'TeamChat-*.dmg'
+  gh release download --repo Joye-Co/team-chat --pattern 'Cahoots-*.dmg'
   ```
 
 可选:检查文件是否完整(输出要和该版本 Assets 里 DMG 旁边显示的 `sha256:` 一致):
 
 ```sh
-shasum -a 256 TeamChat-<版本号>.dmg
+shasum -a 256 Cahoots-<版本号>.dmg
 ```
 
 ## 2. 安装
 
 1. 双击下载好的 DMG。
-2. 在弹出的窗口里,把 **TeamChat** 拖到 **Applications(应用程序)** 文件夹上。
+2. 在弹出的窗口里,把 **Cahoots** 拖到 **Applications(应用程序)** 文件夹上。
 3. 推出磁盘映像(在访达侧边栏里点它旁边的推出按钮)。
 
 ## 3. 第一次打开
 
-从"应用程序"或启动台打开 TeamChat。macOS 会提示"无法验证"这个 App。点 **完成**
+从"应用程序"或启动台打开 Cahoots。macOS 会提示"无法验证"这个 App。点 **完成**
 (**不要**点"移到废纸篓"),然后:
 
 1. 打开 **系统设置 → 隐私与安全性**。
-2. 往下滑,找到关于 TeamChat 的提示,点 **仍要打开**。
+2. 往下滑,找到关于 Cahoots 的提示,点 **仍要打开**。
 3. 输入 Mac 的登录密码,再点一次 **仍要打开**。
 
 每次手动安装新的一份只需要做一次。也可以不走上面的步骤,在终端里运行下面这行,然后正常打开:
 
 ```sh
-xattr -dr com.apple.quarantine /Applications/TeamChat.app
+xattr -dr com.apple.quarantine /Applications/Cahoots.app
 ```
 
 ## 4. 登录
@@ -65,7 +65,7 @@ App 会自己检查服务器上有没有新版本,有的话会提示你安装,�
 
 | 内容 | 位置 |
 | --- | --- |
-| App 本身 | `/Applications/TeamChat.app` |
+| App 本身 | `/Applications/Cahoots.app` |
 | 本地缓存(消息、打开过的文件、设置) | `~/Library/Application Support/co.joye.teamchat/` |
 | 日志 | `~/Library/Application Support/co.joye.teamchat/logs/` |
 | 登录凭证 | 钥匙串里名为 `co.joye.teamchat` 的项目(打开"钥匙串访问"搜索即可) |
@@ -86,7 +86,7 @@ cd ~/Library/Application\ Support/co.joye.teamchat && zip -r ~/Desktop/teamchat-
 
 ## 卸载
 
-1. 退出 TeamChat(菜单栏图标里也要退出),把 `/Applications/TeamChat.app` 移到废纸篓。
+1. 退出 Cahoots(菜单栏图标里也要退出),把 `/Applications/Cahoots.app` 移到废纸篓。
 2. 可选:删除 `~/Library/Application Support/co.joye.teamchat/`(日志也在里面)。
 3. 可选:删除登录凭证:在"钥匙串访问"里删除 `co.joye.teamchat` 项目,或在终端运行
    `security delete-generic-password -s co.joye.teamchat`。
@@ -100,31 +100,31 @@ cd ~/Library/Application\ Support/co.joye.teamchat && zip -r ~/Desktop/teamchat-
 
 ### 下载和安装
 
-1. 拿到 `TeamChat-<版本号>-setup.exe`:在这台 Windows 电脑的浏览器里打开邀请链接(在 Windows 上
+1. 拿到 `Cahoots-<版本号>-setup.exe`:在这台 Windows 电脑的浏览器里打开邀请链接(在 Windows 上
    下载的是安装包,在 Mac 上是 DMG),或者到 <https://github.com/Joye-Co/team-chat/releases>
    的 Assets 里下载,或在终端里运行:
 
    ```powershell
-   gh release download --repo Joye-Co/team-chat --pattern 'TeamChat-*-setup.exe'
+   gh release download --repo Joye-Co/team-chat --pattern 'Cahoots-*-setup.exe'
    ```
 
    邀请码留着,登录时要用。
 2. 可选:在 PowerShell 里检查文件是否完整(和该版本 Assets 里安装包旁边显示的 `sha256:` 对比):
 
    ```powershell
-   Get-FileHash .\TeamChat-<版本号>-setup.exe -Algorithm SHA256
+   Get-FileHash .\Cahoots-<版本号>-setup.exe -Algorithm SHA256
    ```
 
 3. 双击安装包。在安装包用 Windows 认可的证书签名之前,会出现
    **Windows 已保护你的电脑**(SmartScreen):点 **更多信息**,再点 **仍要运行**。
    如果浏览器先拦住了下载,选 **保留**。
-4. 装好后开始菜单里会有 TeamChat,安装程序也会问你要不要立刻打开。登录方法和上面第 4 步一样。
+4. 装好后开始菜单里会有 Cahoots,安装程序也会问你要不要立刻打开。登录方法和上面第 4 步一样。
    在 Windows 上,登录凭证存在"Windows 凭据管理器"里。
 
 如果电脑上没有 Microsoft Edge WebView2 Runtime(Windows 11 自带,部分 Windows 10 没有),安装程序会
 联网下载并安装它。没有它 App 也能用,但产出页面和图表显示不出来。
 
-脚本里静默安装:`TeamChat-<版本号>-setup.exe /S`。
+脚本里静默安装:`Cahoots-<版本号>-setup.exe /S`。
 
 ### 更新
 
@@ -137,11 +137,11 @@ cd ~/Library/Application\ Support/co.joye.teamchat && zip -r ~/Desktop/teamchat-
 
 | 内容 | 位置 |
 | --- | --- |
-| App 本身 | `%LOCALAPPDATA%\Programs\TeamChat\` |
+| App 本身 | `%LOCALAPPDATA%\Programs\Cahoots\` |
 | 本地缓存(消息、打开过的文件、设置)和日志 | `%APPDATA%\co.joye.teamchat\`(日志在 `logs\` 里) |
 | 登录凭证 | "Windows 凭据管理器 → Windows 凭据"里以 `co.joye.teamchat:` 开头的项目(后面是服务器地址) |
 | 可以重新生成的缓存(产出页面、图表) | `%LOCALAPPDATA%\team-chat\` |
-| 开始菜单快捷方式 | `%APPDATA%\Microsoft\Windows\Start Menu\Programs\TeamChat.lnk` |
+| 开始菜单快捷方式 | `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Cahoots.lnk` |
 
 把带 `%...%` 的路径粘到资源管理器的地址栏里就能打开。
 
@@ -158,9 +158,9 @@ Compress-Archive -Path "$env:APPDATA\co.joye.teamchat\logs" -DestinationPath "$e
 
 ### 卸载
 
-1. 退出 TeamChat(通知区域的图标里也要退出)。
-2. 打开 **设置 → 应用 → 安装的应用**,找到 TeamChat,选 **卸载**。或者运行
-   `"%LOCALAPPDATA%\Programs\TeamChat\uninstall.exe"`(加 `/S` 不显示窗口)。
+1. 退出 Cahoots(通知区域的图标里也要退出)。
+2. 打开 **设置 → 应用 → 安装的应用**,找到 Cahoots,选 **卸载**。或者运行
+   `"%LOCALAPPDATA%\Programs\Cahoots\uninstall.exe"`(加 `/S` 不显示窗口)。
 3. 卸载会删掉 App、开始菜单快捷方式、它的注册表项(卸载项、`teamchat://` 链接、通知用的应用 ID、
    "登录时打开")、缓存(`%LOCALAPPDATA%\team-chat\`),以及"用这台电脑"注册的后台任务。
    **保留你的本地数据和登录凭证**,和 Mac 上把 App 拖进废纸篓一样,重新安装后不用再登录。

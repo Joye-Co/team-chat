@@ -1,9 +1,9 @@
-# Install TeamChat on a Mac
+# Install Cahoots on a Mac
 
 Chinese version for interns: [INSTALL.zh.md](INSTALL.zh.md). For a Windows computer, see
 [Windows](#windows) below.
 
-TeamChat needs a Mac with Apple silicon (M1 or later) and macOS 13 or later. The app is not
+Cahoots needs a Mac with Apple silicon (M1 or later) and macOS 13 or later. The app is not
 notarized by Apple, so macOS asks you to approve it once (step 3).
 
 ## 1. Download
@@ -11,42 +11,42 @@ notarized by Apple, so macOS asks you to approve it once (step 3).
 Use one of these:
 
 - **Invite link**: open the link your team's owner sent you. It downloads the newest
-  `TeamChat-<version>.dmg`. Keep the invite code that came with it: you need it in step 4.
+  `Cahoots-<version>.dmg`. Keep the invite code that came with it: you need it in step 4.
 - **GitHub Releases** (team members with repository access): open
   <https://github.com/Joye-Co/team-chat/releases>, pick the newest release, and download
-  `TeamChat-<version>.dmg` from Assets. Or in Terminal:
+  `Cahoots-<version>.dmg` from Assets. Or in Terminal:
 
   ```sh
-  gh release download --repo Joye-Co/team-chat --pattern 'TeamChat-*.dmg'
+  gh release download --repo Joye-Co/team-chat --pattern 'Cahoots-*.dmg'
   ```
 
 Optional check that the file is complete: compare the output with the `sha256:` digest shown
 next to the DMG under Assets of the release:
 
 ```sh
-shasum -a 256 TeamChat-<version>.dmg
+shasum -a 256 Cahoots-<version>.dmg
 ```
 
 ## 2. Install
 
 1. Double-click the DMG.
-2. Drag **TeamChat** onto the **Applications** folder in the window that opens.
+2. Drag **Cahoots** onto the **Applications** folder in the window that opens.
 3. Eject the disk image (the eject button next to it in Finder).
 
 ## 3. Open the app the first time
 
-Open TeamChat from Applications or Launchpad. macOS says it cannot verify the app. Click
+Open Cahoots from Applications or Launchpad. macOS says it cannot verify the app. Click
 **Done** (do not move it to the Bin), then:
 
 1. Open **System Settings → Privacy & Security**.
-2. Scroll down to the message about TeamChat and click **Open Anyway**.
+2. Scroll down to the message about Cahoots and click **Open Anyway**.
 3. Enter your Mac password, and click **Open Anyway** again.
 
 You do this once per installed copy. Instead of the steps above, you can also run this in
 Terminal and then open the app normally:
 
 ```sh
-xattr -dr com.apple.quarantine /Applications/TeamChat.app
+xattr -dr com.apple.quarantine /Applications/Cahoots.app
 ```
 
 ## 4. Sign in
@@ -68,7 +68,7 @@ choosing **Replace**. A copy that you download by hand needs step 3 again.
 
 | What | Where |
 | --- | --- |
-| The app | `/Applications/TeamChat.app` |
+| The app | `/Applications/Cahoots.app` |
 | Local cache (messages, files you opened, settings) | `~/Library/Application Support/co.joye.teamchat/` |
 | Logs | `~/Library/Application Support/co.joye.teamchat/logs/` |
 | Sign-in token | Keychain item with the name `co.joye.teamchat` (open **Keychain Access** and search for it) |
@@ -91,7 +91,7 @@ cd ~/Library/Application\ Support/co.joye.teamchat && zip -r ~/Desktop/teamchat-
 
 ## Uninstall
 
-1. Quit TeamChat (also from the menu bar item) and move `/Applications/TeamChat.app` to the
+1. Quit Cahoots (also from the menu bar item) and move `/Applications/Cahoots.app` to the
    Bin.
 2. Optional: delete `~/Library/Application Support/co.joye.teamchat/` (the logs are in it).
 3. Optional: remove the sign-in token: in Keychain Access, delete the `co.joye.teamchat` item,
@@ -99,7 +99,7 @@ cd ~/Library/Application\ Support/co.joye.teamchat && zip -r ~/Desktop/teamchat-
 
 ## Windows
 
-TeamChat for Windows needs 64-bit Windows 10 (version 22H2) or Windows 11. The installer needs
+Cahoots for Windows needs 64-bit Windows 10 (version 22H2) or Windows 11. The installer needs
 no administrator rights: it installs for your user account only.
 
 The installer is x64. A Windows 11 computer with an ARM processor installs and runs it through
@@ -108,12 +108,12 @@ x64 emulation and cannot run it.
 
 ### Download and install
 
-1. Get `TeamChat-<version>-setup.exe`: open your invite link in a browser on the Windows
+1. Get `Cahoots-<version>-setup.exe`: open your invite link in a browser on the Windows
    computer (it downloads the installer there, and the DMG on a Mac), or download it from
    Assets on <https://github.com/Joye-Co/team-chat/releases>, or run:
 
    ```powershell
-   gh release download --repo Joye-Co/team-chat --pattern 'TeamChat-*-setup.exe'
+   gh release download --repo Joye-Co/team-chat --pattern 'Cahoots-*-setup.exe'
    ```
 
    Keep the invite code for the sign-in.
@@ -121,7 +121,7 @@ x64 emulation and cannot run it.
    shown next to the installer under Assets of the release):
 
    ```powershell
-   Get-FileHash .\TeamChat-<version>-setup.exe -Algorithm SHA256
+   Get-FileHash .\Cahoots-<version>-setup.exe -Algorithm SHA256
    ```
 
 3. Double-click the installer. Until the installer is signed with a certificate that Windows
@@ -134,7 +134,7 @@ If the computer has no Microsoft Edge WebView2 Runtime (Windows 11 has it; some 
 computers do not), the installer downloads and installs it. That step needs a network
 connection. Without the runtime the app works, but 产出 pages and diagrams do not show.
 
-Silent install, for scripts: `TeamChat-<version>-setup.exe /S`.
+Silent install, for scripts: `Cahoots-<version>-setup.exe /S`.
 
 ### Updates
 
@@ -149,11 +149,11 @@ signed, each installer you download by hand shows the SmartScreen warning again.
 
 | What | Where |
 | --- | --- |
-| The app | `%LOCALAPPDATA%\Programs\TeamChat\` |
+| The app | `%LOCALAPPDATA%\Programs\Cahoots\` |
 | Local cache (messages, files you opened, settings) and logs | `%APPDATA%\co.joye.teamchat\` (logs in `logs\`) |
 | Sign-in token | Windows Credential Manager → Windows Credentials, the entries that start with `co.joye.teamchat:` (the server address follows) |
 | Caches the app can make again (产出 pages, diagrams) | `%LOCALAPPDATA%\team-chat\` |
-| Start menu shortcut | `%APPDATA%\Microsoft\Windows\Start Menu\Programs\TeamChat.lnk` |
+| Start menu shortcut | `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Cahoots.lnk` |
 
 Paste a path with `%...%` into the address bar of File Explorer to open it.
 
@@ -171,9 +171,9 @@ program did at each step; send it too.
 
 ### Uninstall
 
-1. Quit TeamChat (also from the icon in the notification area).
-2. Open **Settings → Apps → Installed apps**, find TeamChat and choose **Uninstall**. Or run
-   `"%LOCALAPPDATA%\Programs\TeamChat\uninstall.exe"` (add `/S` for no window).
+1. Quit Cahoots (also from the icon in the notification area).
+2. Open **Settings → Apps → Installed apps**, find Cahoots and choose **Uninstall**. Or run
+   `"%LOCALAPPDATA%\Programs\Cahoots\uninstall.exe"` (add `/S` for no window).
 3. The uninstaller removes the app, its Start menu shortcut, its registry entries (the
    uninstall entry, `teamchat://` links, the app id of its notifications, 登录时打开), its
    caches (`%LOCALAPPDATA%\team-chat\`) and the background task that 用这台电脑 registered.
