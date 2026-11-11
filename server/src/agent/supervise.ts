@@ -45,6 +45,19 @@ export function isProgressQuestion(body: string): boolean {
   return [...t].length > 0 && [...t].length <= 30 && PROGRESS.test(t);
 }
 
+/** 接 1.12: plain words that stop a run (only the whole message, @s and end punctuation aside). */
+const STOP_WORDS = new Set(["停", "停下", "停一下", "停止", "先停", "先停下", "别做了", "不要做了", "不用做了", "别弄了", "算了，别做了", "stop"]);
+
+/** A plain "停" / "别做了": the requester wants the run stopped (no front desk to decide it). */
+export function isStopRequest(body: string): boolean {
+  const t = body
+    .replace(/@\S+/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[。.!！~～\s]+$/u, "");
+  return STOP_WORDS.has(t);
+}
+
 export interface ProgressState {
   startedAt: number | null;
   now: number;

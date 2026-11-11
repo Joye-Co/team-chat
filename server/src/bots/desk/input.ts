@@ -1,6 +1,7 @@
 // BotDesk input: topic messages for the bot (new runs, follow-up input, text approvals), card
 // presses on approval cards, and stopping runs (cancel by a member, a deactivated bot).
-import type { Approver, BotRun } from "@chat/protocol";
+import { type Approver, type BotRun, isMainTopicId, RUN_KIND_ASIDE } from "@chat/protocol";
+import { loadModelConfig } from "../../aiservice";
 import { roomStub } from "../../core/env";
 import { ApiError, type Result, unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
@@ -12,18 +13,24 @@ import { requestAuthors, requestText } from "../../context/render";
 import type { CardAnswerIn, CardPress, TopicMessage } from "../room";
 import { ACTIVE, type RunRow, result } from "./core";
 import { DeskDelegate } from "./delegate";
-import { isProgressQuestion, progressAnswer } from "../../agent/supervise";
+import { isProgressQuestion, isStopRequest, progressAnswer } from "../../agent/supervise";
+
+/**
+ * 接 1.4 (usable section 4): a message without an @ from the person who asked for the last run in
+ * a topic counts as a follow-up for this long after the bot's last answer there.
+ */
+export const FOLLOW_UP_WINDOW_MS = 30 * 60_000;
 
 export abstract class DeskInput extends DeskDelegate {
   // -------------------------------------------------------------------------
   // Messages from the topic
   // -------------------------------------------------------------------------
 
-  /** A human message in a topic this bot is responsible for, or one that mentions it. */
   /**
-   * A message for this bot, from the room's outbox. The room retries until this returns, so it
-   * throws on failure and is idempotent by message id: a message that started a run or was
-   * passed to one is not handled again.
+   * A message for this bot, from the room's outbox: one that mentions it, a DM, or (`mentioned`
+   * false) one without any @ in a topic it most recently started a run in. The room retries
+   * until this returns, so it throws on failure and is idempotent by message id: a message that
+   * started a run or was passed to one is not handled again.
    */
   async onMessage(botId: string, m: TopicMessage): Promise<void> {
     this.bind(botId);
@@ -33,10 +40,15 @@ export abstract class DeskInput extends DeskDelegate {
     try {
       if (!(await this.botActive())) return;
       const active = this.activeRun(m.topicId);
-      if (active) return await this.serial(active.id, () => this.toActive(active.id, m));
-      // Without an @, only the answer to the front desk's open question counts.
-      if (!m.mentioned && !this.openAsk(m)) return;
-      await this.admit({ ...m, mentioned: true });
+      if (active) {
+        // 接 1.6: while it works, only what is meant for it reaches the CLI; the rest of the talk
+        // stays in the topic and reaches the next turn as context.
+        if (!this.meantForRun(active, m)) return;
+        return await this.serial(active.id, () => this.toActive(active.id, m));
+      }
+      // Without an @: the answer to the front desk's open question, or a follow-up (接 1.4).
+      if (m.mentioned || this.openAsk(m)) return await this.admit({ ...m, mentioned: true });
+      if (this.isFollowUp(m)) await this.admit({ ...m, mentioned: true }, true);
     } catch (err) {
       this.log.error("onMessage failed", { err, topicId: m.topicId });
       throw err;
@@ -46,6 +58,38 @@ export abstract class DeskInput extends DeskDelegate {
   }
 
   protected readonly messagesInFlight = new Set<string>();
+
+  /**
+   * 接 1.6: a message is input for the running run when it mentions the bot (or is in its DM),
+   * quotes the bot, comes from the run's requester, answers its approval or asks how it goes.
+   */
+  protected meantForRun(r: RunRow, m: TopicMessage): boolean {
+    if (m.mentioned || m.replyToAuthorId === this.botId || m.authorId === r.requested_by) return true;
+    if (r.approval_id && (approvalDecision(m.body) !== null || approvesWholeWork(m.body))) return true;
+    return isProgressQuestion(m.body);
+  }
+
+  /**
+   * 接 1.4: a message without an @ in a topic is a follow-up when it comes from the person the
+   * bot last answered there (a run's requester, or the front desk's reply), soon after.
+   */
+  protected isFollowUp(m: TopicMessage): boolean {
+    if (isMainTopicId(m.topicId) || m.dm) return false;
+    const since = Date.now() - FOLLOW_UP_WINDOW_MS;
+    const last = this.sql
+      .exec<{ requested_by: string; ended_at: number | null }>(
+        "SELECT requested_by, ended_at FROM runs WHERE topic_id = ? AND (kind IS NULL OR kind != ?) ORDER BY created_at DESC LIMIT 1",
+        m.topicId,
+        RUN_KIND_ASIDE,
+      )
+      .toArray()[0];
+    if (last && last.ended_at !== null && last.ended_at >= since && last.requested_by === m.authorId) return true;
+    return (
+      this.sql
+        .exec("SELECT 1 FROM decisions WHERE topic_id = ? AND author_id = ? AND reply_message_id IS NOT NULL AND at >= ? LIMIT 1", m.topicId, m.authorId, since)
+        .toArray().length > 0
+    );
+  }
 
   protected handledMessage(messageId: string): boolean {
     return (
@@ -91,8 +135,9 @@ export abstract class DeskInput extends DeskDelegate {
     const r = this.run(runId);
     if (!r) return;
     if (r.ended_at !== null) {
-      // Ended meanwhile: treat as a new request when it mentions the bot.
+      // Ended meanwhile: treat as a new request when it mentions the bot or follows its answer.
       if (m.mentioned) await this.admit(m);
+      else if (this.isFollowUp(m)) await this.admit({ ...m, mentioned: true }, true);
       return;
     }
     const link = r.machine_id ? linkStub(this.env, r.machine_id) : null;
@@ -116,6 +161,22 @@ export abstract class DeskInput extends DeskDelegate {
       if (whole && kind) this.approveGateForWork(r.id, kind);
       await link.toRun({ t: "run.approval", runId: r.id, approvalId: r.approval_id, decision, ...(whole ? { scope: "run" } : {}) } as never);
       await this.closeApprovalCard(r, whole ? "approve_run" : decision, m.authorId);
+      return;
+    }
+    // 接 1.12: a plain "停" from the requester stops the run (with a front desk, it decides).
+    if (m.authorId === r.requested_by && isStopRequest(m.body) && !(await loadModelConfig(this.env))) {
+      // Recorded as a taken input, so a retried delivery does not stop or start anything again.
+      this.sql.exec(
+        "INSERT INTO inputs (id, run_id, message_id, author_id, body, at, accepted) VALUES (?, ?, ?, ?, ?, ?, 1)",
+        ulid(),
+        r.id,
+        m.messageId,
+        m.authorId,
+        m.body,
+        Date.now(),
+      );
+      await this.stop(r);
+      this.log.info("run stopped by text", { runId: r.id, actorId: m.authorId });
       return;
     }
     // 盯活: "进展怎么样了" is answered from the run's own state; the CLI is not interrupted.

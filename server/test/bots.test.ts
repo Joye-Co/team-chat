@@ -401,7 +401,7 @@ describe("runner-backed bots", () => {
     d.close();
   });
 
-  it("never let bot messages trigger bots, and keep one responsible bot per topic", async () => {
+  it("never let bot messages trigger bots, and give a mention in another bot's topic to the bot it names", async () => {
     const w = await world();
     const other = await createMember({ kind: "bot", name: "ops" });
     await api(`/v1/groups/${w.gid}/members`, { token: w.owner.token, body: { memberId: other.id } });
@@ -412,20 +412,22 @@ describe("runner-backed bots", () => {
 
     // A bot mentioning a runner-backed bot starts nothing.
     const fromBot = await botClient.ok({ t: "send", groupId: w.gid, clientMsgId: clientMsgId(), body: "@ops look", mentions: [other.id] });
-    // A human mention of dev claims the topic; a later mention of ops in it goes to dev's run.
+    // A human mention of dev starts dev's run; a later mention of ops in its topic starts ops's own run (接 1.1).
     const topicId = await mention(c, w, "@dev start");
     const first = await d.next((f) => f.t === "run.assign");
     expect(first.botMemberId).toBe(w.bot.id);
     d.send({ t: "run.accept", runId: first.runId });
     await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "@ops help", mentions: [other.id] });
-    const input = await d.next((f) => f.t === "run.input");
-    expect(input).toMatchObject({ runId: first.runId, text: "@ops help" });
-    // The bot's own messages in its topic do not reach its run.
+    const second = await d.next((f) => f.t === "run.assign" && f.runId !== first.runId);
+    expect(second).toMatchObject({ botMemberId: other.id, topicId });
+    d.send({ t: "run.accept", runId: second.runId });
+    // The bot's own messages in its topic do not reach any run.
     await botClient.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "note from dev" });
+    // Without an @ the requester's message goes to the member that most recently started a run.
     await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "sync" });
     await d.next((f) => f.t === "run.input" && f.text === "sync");
-    expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(1);
-    expect(d.frames.filter((f) => f.t === "run.input").map((f) => f.text)).toEqual(["@ops help", "sync"]);
+    expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(2);
+    expect(d.frames.filter((f) => f.t === "run.input").map((f) => [f.runId, f.text])).toEqual([[second.runId, "sync"]]);
     expect(botMessages(c, fromBot.message.topicId, other.id)).toEqual([]);
     c.close();
     botClient.close();

@@ -74,7 +74,6 @@ export abstract class DeskRuns extends DeskCore {
     const claim = unwrap(
       await roomStub(this.env, m.groupId).rpc(m.groupId, "bots.claim", this.actor(), { topicId: m.topicId }),
     ) as ClaimResult;
-    if (claim.botId !== botId) return; // Another bot is responsible for this topic.
     if (this.activeRun(m.topicId)) return; // Raced with another message.
 
     const now = Date.now();

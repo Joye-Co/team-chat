@@ -168,8 +168,9 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
   topic: reading one topic does not mark the other topics of the 群 read.
 - @mentioning a bot asks it to take the work. It acknowledges with a reaction, works quietly
   (progress shows in its plan and in 实时查看, not as messages in the topic), and comes back only
-  with a result card with proof, a decision it needs, or when it is stuck. One responsible member
-  per topic.
+  with a result card with proof, a decision it needs, or when it is stuck. Several members can
+  work in one topic, at once or one after the other: each @mention goes to the member it names,
+  and a follow-up without an @ goes to the member that most recently started work there.
 - Cards are declarative JSON. Card v1 (status, fields, table, progress, list, code, image,
   actions) still works. Card v2 adds intents (ask, done, working, info), typed blocks and states
   (pending, waiting on someone, sent, answered, executing, done, failed, expired, superseded).
