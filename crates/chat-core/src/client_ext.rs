@@ -190,6 +190,18 @@ impl Client {
         })
     }
 
+    /// Removes a member's avatar and stores the member.
+    pub fn remove_avatar(&self, member_id: &str) -> JoinHandle<Result<Member, ClientError>> {
+        let http = self.http();
+        let shared = self.shared().clone();
+        let id = member_id.to_string();
+        self.spawn(async move {
+            let m = http.remove_avatar(&id).await?;
+            store_member(&shared, &m)?;
+            Ok(m)
+        })
+    }
+
     /// A member's avatar image on disk (`avatars/<sha256 of the URL>`), downloaded
     /// once per `avatarUrl` (the URL changes with each new avatar). `None` when the
     /// member has no avatar.

@@ -470,6 +470,29 @@ export function registerFileRoutes(): void {
   });
 
   registerRoute({
+    method: "DELETE",
+    path: "/v1/members/:id/avatar",
+    auth: "member",
+    async handler({ env, ctx, params, auth }) {
+      const a = auth as AuthContext;
+      if (params.id !== a.memberId && a.member.level !== "owner") {
+        throw new ApiError("forbidden", "only the member or an owner can change an avatar");
+      }
+      const target = await getMember(env.DB, params.id);
+      if (!target) throw new ApiError("not_found", "member not found");
+      if (target.avatar_url === null) return toMember(target);
+      await env.FILES.delete(avatarKey(target.id));
+      await env.DB.batch([
+        env.DB.prepare("UPDATE members SET avatar_url = NULL WHERE id = ?").bind(target.id),
+        auditStatement(env.DB, a, { action: "member.avatar.remove", target: target.id, details: {} }),
+      ]);
+      const updated = { ...target, avatar_url: null };
+      await notifyMembersChanged(env, (p) => ctx.waitUntil(p), [updated]);
+      return toMember(updated);
+    },
+  });
+
+  registerRoute({
     method: "GET",
     path: "/v1/members/:id/avatar",
     auth: "member",

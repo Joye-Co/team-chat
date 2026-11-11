@@ -85,6 +85,8 @@ crate::copy! {
     BOT_CHARACTER_HINT = "成员的头像和状态动画。",
     CHANGE_CHARACTER = "更换形象",
     CHANGE_CHARACTER_TITLE = "更换 {name} 的形象",
+    REMOVE_AVATAR = "移除头像",
+    BOT_CHARACTER_REPLACES_PHOTO = "选一个形象会替换现在的头像。",
     BOT_MODE_EXTERNAL = "外部接入",
     BOT_MODE_EXTERNAL_HINT = "由你自己的程序接入，生成一个登录凭证。",
     BOT_MODE_RUNNER = "在机器上工作",

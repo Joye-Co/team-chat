@@ -477,6 +477,7 @@ file's group.
 | `GET /v1/files/:id/content` | | the bytes; supports `Range` (206) |
 | `PUT /v1/members/:id/avatar` | raw image bytes | `Member` (new `avatarUrl`) |
 | `GET /v1/members/:id/avatar` | | the image |
+| `DELETE /v1/members/:id/avatar` | | `Member` (`avatarUrl: null`) |
 
 ```ts
 FileMeta = { id, groupId, topicId?: string | null, name, size, mime, sha256, width?, height?,
@@ -510,7 +511,9 @@ Rules:
   `image/webp`. Files are never served as `text/html` inline from the API origin.
 - Avatars: self or an owner; `image/png`, `image/jpeg` or `image/webp`, at most 1 MiB. The server
   sets `avatarUrl` to `/v1/members/:id/avatar?v=<n>` (absolute) and pushes a `directory` frame with
-  the member. Reading an avatar needs a member token.
+  the member. Reading an avatar needs a member token. `DELETE` (same callers) removes the image,
+  sets `avatarUrl` to null and pushes the member again; a member without one gets it unchanged.
+  An AI member with an avatar is drawn with it instead of its character.
 
 ## 产出 (artifacts)
 

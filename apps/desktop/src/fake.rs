@@ -1885,6 +1885,18 @@ impl ChatProvider for FakeProvider {
         self.upload_avatar_fake(path)
     }
 
+    fn upload_member_avatar(
+        &self,
+        member_id: &str,
+        path: std::path::PathBuf,
+    ) -> AdminReply<Member> {
+        self.upload_member_avatar_fake(member_id, path)
+    }
+
+    fn remove_member_avatar(&self, member_id: &str) -> AdminReply<Member> {
+        self.remove_member_avatar_fake(member_id)
+    }
+
     fn create_invite(&self, request: InviteRequest) -> AdminReply<InviteCreated> {
         self.create_invite_fake(request)
     }

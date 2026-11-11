@@ -109,6 +109,16 @@ impl HttpClient {
         Self::json(resp).await
     }
 
+    /// Removes a member's avatar (`DELETE /v1/members/:id/avatar`); `avatarUrl` becomes null.
+    pub async fn remove_avatar(&self, member_id: &str) -> ApiResult<Member> {
+        let req = self.authed(
+            Method::DELETE,
+            &self.url(&format!("/v1/members/{}/avatar", enc(member_id))),
+        )?;
+        let resp = self.send_checked(req).await?;
+        Self::json(resp).await
+    }
+
     /// The bytes of an avatar URL (`Member.avatarUrl`). Only URLs on this server get
     /// the token; others are refused.
     pub async fn avatar_bytes(&self, avatar_url: &str) -> ApiResult<Vec<u8>> {
