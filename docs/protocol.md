@@ -2639,3 +2639,19 @@ Rules:
 - `GET /v1/runs/:id/events` carries the run events `hand.command`, `hand.result` and
   `hand.summary` to everyone who may read the run, and `hand.output` only to the person holding
   it and admins. They are not the AI member's progress.
+
+## Machine homes (VM hosts)
+
+On a Linux host that runs each run in a VM, every AI member has a home folder of fixed size
+(machine-protocol.md, "MicroVM runs"). A daemon with feature `homes` reports them with its
+heartbeat, and the monitor passes the latest report on:
+
+```ts
+HomeUse = { memberId, usedBytes /* on the host disk */, sizeBytes? /* absent = no limit */ }
+MachineMetrics += { homes?: HomeUse[] /* <= 500 */ }
+MachineMonitor += { homes?: HomeUse[] /* <= 500; absent on other machines */ }
+```
+
+| Method and path | Who | Body | Response |
+| --- | --- | --- | --- |
+| `POST /v1/machines/:id/homes/:memberId/clear` | whoever manages the machine (team machine: an admin; personal machine: its owner) | | `{ ok: true }` once `home.clear` is sent to the daemon; `conflict` when the machine is offline (`machine.offline`, never queued) or keeps no homes (`machine.too_old`); `not_found` for an id that is not `[A-Za-z0-9]{1,64}`; audited as `machine.home.clear`. The daemon refuses while a run of that member is on the machine; the next heartbeat shows the result |

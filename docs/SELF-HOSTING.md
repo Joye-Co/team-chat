@@ -246,9 +246,11 @@ and people who sign in with an invite code use these AI members without setting 
 - KVM: a bare-metal server, or a virtual machine with nested virtualization. Check:
   `ls -l /dev/kvm` exists, and `grep -Ecw 'vmx|svm' /proc/cpuinfo` is more than 0.
 - Memory: each running VM may use up to 4 GiB (`[vm] mem_mib`); plan for that times the runs
-  you allow at once (`max_parallel_runs`).
-- Disk: the base image (a few GB), 32 GB of sparse scratch space per running VM, and the AI
-  members' home folders in `/srv/runner/homes`. Start with 200 GB free.
+  you allow at once (`max_parallel_runs`). The daemon refuses a new run when the free memory
+  does not cover one more VM above a fifth of the memory kept free.
+- Disk: the base image (a few GB), 32 GB of sparse scratch space per running VM, and each AI
+  member's home folder: a disk image of 20 GB (`[vm] home_gb`) in `/srv/runner/home-images`,
+  taking only what the member uses. Start with 200 GB free.
 - Your server from Part 1, and the Ubuntu machine with its `~/.config/team-chat/production/`.
 
 ### Install
@@ -312,8 +314,13 @@ and people who sign in with an invite code use these AI members without setting 
 
 7. **CLI sign-ins.** As root, install Node.js 22 (the NodeSource lines of Part 1 step 1) and
    the CLIs: `npm install -g @anthropic-ai/claude-code @openai/codex`. Then as runner sign in:
-   run `claude` and follow its sign-in, and `codex login --device-auth`. The VMs use these
-   sign-ins: `~/.claude` and `~/.codex` of the runner user are shared with every VM.
+   run `claude` and follow its sign-in, and `codex login --device-auth` (or sign them in from
+   the app, 团队管理 › 订阅账号). These sign-ins are never shared with the VMs: each run gets a
+   copy it cannot use to change them (Codex: without the refresh token; the host refreshes it),
+   and each AI member keeps its own session records in its home folder. For Claude Code, a
+   long-lived token is best: run `claude setup-token` as runner and give its token to the host
+   as an API key named `CLAUDE_CODE_OAUTH_TOKEN` (团队管理 › 订阅账号, for all members); without
+   it each run gets the host's current access token.
 8. **Config**, as runner: `team-chat-daemon example-config > ~/.config/team-chat/daemon.toml`,
    then edit it:
 
@@ -365,7 +372,16 @@ and people who sign in with an invite code use these AI members without setting 
 - **Base image**: as root, `git checkout` the new version in `/root/team-chat` and run
   `bash scripts/runner/build-base-image.sh` again. Runs that already started keep their image.
 - **Host**: `unattended-upgrades` installs security updates; `host-setup.sh` may be run again
-  after `git checkout` of a new version.
+  after `git checkout` of a new version. Run it again whenever `scripts/runner/runner-vm` or
+  `runner-vm.nft` changed (it reinstalls the root helper and reloads the firewall); the AI
+  members' homes are kept.
+- **From a version that shared the sign-in folders with the VMs** (before home images): as root,
+  `git checkout` the new version in `/root/team-chat` and run `bash scripts/runner/host-setup.sh`
+  again, then let the daemon update. Remove `shares = [...]` from `[vm]` in `daemon.toml` if you
+  added it (the daemon skips those folders anyway). Each AI member's existing home folder moves
+  into its 20 GB image on its next run; one that is larger stays a folder without a limit until
+  it is emptied. Sessions from before continue: a run that resumes one gets it copied into its
+  member's folder.
 
 ## What nobody has run for real yet
 

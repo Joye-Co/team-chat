@@ -1,0 +1,36 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "usable, feature homes: a VM host reports each AI member's home folder",
+  "value": {
+    "t": "heartbeat",
+    "at": 1793627430000,
+    "health": {
+      "diskFreeBytes": 412000000000,
+      "diskTotalBytes": 996000000000,
+      "load1": 1.2,
+      "load5": 1.1,
+      "load15": 0.9,
+      "cpuCount": 12,
+      "activeRuns": 0
+    },
+    "runs": [],
+    "metrics": {
+      "at": 1793627429900,
+      "vmSlots": 4,
+      "runs": [],
+      "homes": [
+        {
+          "memberId": "01JBX0BOT000000000000000AC",
+          "usedBytes": 3221225472,
+          "sizeBytes": 21474836480
+        },
+        {
+          "memberId": "01JBX0BOT000000000000000AD",
+          "usedBytes": 0,
+          "sizeBytes": 21474836480
+        }
+      ]
+    }
+  }
+}

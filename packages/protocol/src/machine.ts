@@ -29,6 +29,8 @@ export const MACHINE_FEATURE_GITHUB = "github";
 export const MACHINE_FEATURE_TAKEOVER = "takeover";
 /** Usable: with `takeover`, a person's commands run as another user than the run (VM runs). */
 export const MACHINE_FEATURE_TAKEOVER_ISOLATED = "takeover-isolated";
+/** Usable: the `homes` metrics and `home.clear` (VM hosts: each AI member's home folder). */
+export const MACHINE_FEATURE_HOMES = "homes";
 
 export const MachineInfo = z.object({
   /** The id configured on the machine (optional); the token is authoritative. */
@@ -141,6 +143,16 @@ export const BootStats = z.object({
   samples: z.int().nonnegative(),
 });
 export type BootStats = z.infer<typeof BootStats>;
+export const MAX_HOMES = 500;
+/** Usable, feature "homes": one AI member's kept home folder on a VM host. */
+export const HomeUse = z.object({
+  memberId: Id,
+  /** Bytes the home takes on the host disk. */
+  usedBytes: z.int().nonnegative(),
+  /** Its fixed size; absent = no limit. */
+  sizeBytes: z.int().nonnegative().optional(),
+});
+export type HomeUse = z.infer<typeof HomeUse>;
 /** Host and VM numbers the daemon sends with each heartbeat; every number is optional (a platform may not have it). */
 // ---------------------------------------------------------------------------
 // Accounts and API keys (feature "accounts", docs/machine-protocol.md "Accounts and keys")
@@ -210,6 +222,8 @@ export const MachineMetrics = z.object({
   secrets: z.array(SecretInfo).max(100).optional(),
   /** Feature "accounts": subscription usage windows, read every 10 minutes. */
   usage: z.array(CliUsage).max(16).optional(),
+  /** Usable, feature "homes": each AI member's home folder on a VM host. */
+  homes: z.array(HomeUse).max(MAX_HOMES).optional(),
 });
 export type MachineMetrics = z.infer<typeof MachineMetrics>;
 
@@ -621,6 +635,8 @@ export const MachineDownFrame = z.discriminatedUnion("t", [
     members: z.array(Id).max(100),
   }),
   z.object({ t: z.literal("secret.delete"), name: SecretName }),
+  // Usable, feature "homes": empty one AI member's home folder; sent only while connected.
+  z.object({ t: z.literal("home.clear"), memberId: Id }),
   // Usable, feature "takeover": a command of the person holding the run; sent only while connected.
   z.object({
     t: z.literal("run.command"),
