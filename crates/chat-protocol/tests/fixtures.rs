@@ -200,6 +200,12 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ("TopicHistoryResponse", plain::<TopicHistoryResponse>),
     ("TopicMessageResponse", plain::<TopicMessageResponse>),
     ("ContextSearchResponse", plain::<ContextSearchResponse>),
+    ("RunArtifactsResponse", plain::<RunArtifactsResponse>),
+    ("RunArtifactResponse", plain::<RunArtifactResponse>),
+    ("RunCardResponse", plain::<RunCardResponse>),
+    ("RunDecisionsResponse", plain::<RunDecisionsResponse>),
+    ("RunMembersResponse", plain::<RunMembersResponse>),
+    ("TopicStateResponse", plain::<TopicStateResponse>),
     ("FrontDeskDecision", plain::<FrontDeskDecision>),
     ("BotMetrics", plain::<BotMetrics>),
     (

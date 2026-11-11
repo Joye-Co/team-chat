@@ -585,13 +585,20 @@ export class MachineLink extends DurableObject<BotsEnv> {
       .exec<RunRow>("SELECT * FROM runs WHERE state IN ('assigned','accepted') AND lease_until < ?", now)
       .toArray() as RunRow[];
     for (const r of expired) {
-      this.sql.exec("UPDATE runs SET state = 'lost', updated_at = ? WHERE run_id = ?", now, r.run_id);
-      this.sql.exec("DELETE FROM outbox WHERE run_id = ?", r.run_id);
+      // BotDesk decides: a run that waits for this machine (盯 1.1) stays open with a new lease,
+      // so a daemon that comes back still holding it replays and goes on.
+      let keep = false;
       try {
-        await deskStub(this.env, r.bot_id).runLost(r.run_id, this.machineId as string);
+        keep = (await deskStub(this.env, r.bot_id).runLost(r.run_id, this.machineId as string)) === true;
       } catch (err) {
         this.log.error("runLost failed", { runId: r.run_id, err });
       }
+      if (keep) {
+        this.sql.exec("UPDATE runs SET lease_until = ? + lease_ms WHERE run_id = ? AND state IN ('assigned','accepted')", Date.now(), r.run_id);
+        continue;
+      }
+      this.sql.exec("UPDATE runs SET state = 'lost', updated_at = ? WHERE run_id = ? AND state IN ('assigned','accepted')", now, r.run_id);
+      this.sql.exec("DELETE FROM outbox WHERE run_id = ?", r.run_id);
     }
   }
 

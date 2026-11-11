@@ -1,0 +1,9 @@
+{
+  "kind": "TopicStateResponse",
+  "valid": true,
+  "value": {
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "title": "发布",
+    "text": "话题「发布」\n产出：上线方案 v2"
+  }
+}

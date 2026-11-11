@@ -305,11 +305,15 @@ async fn drive(
         mentions: Vec::new(),
         quote_of: None,
     });
+    // "At once" is the point: on a fast local server the ack can land before this read, so a
+    // message that is already sent counts as shown too.
     let shown_pending_message = provider
         .messages(&group.id, &topic_id, 50)
         .messages
         .iter()
-        .any(|m| m.client_msg_id == cid2 && m.send_state == SendState::Pending);
+        .any(|m| {
+            m.client_msg_id == cid2 && matches!(m.send_state, SendState::Pending | SendState::Sent)
+        });
     json["pending_message_shown"] = shown_pending_message.into();
     let message_id = wait_for(cx, deadline, |_| provider.acked_message(&cid2))
         .await

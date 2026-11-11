@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Fake ACP agent (JSON-RPC 2.0 on stdio, Agent Client Protocol v1): streams message chunks,
-one tool call, and asks permission when the prompt says "approve"."""
+one tool call, and asks permission when the prompt says "approve": for a file write, or with
+"merge" in the prompt for the shell command `gh pr merge 5`."""
 import json, sys
 
 def out(o):
@@ -23,7 +24,8 @@ for line in sys.stdin:
         upd({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "acp: "}})
         if "approve" in text:
             out({"id": 500, "method": "session/request_permission", "params": {"sessionId": "s1",
-                "toolCall": {"toolCallId": "call_1", "title": "Write file"},
+                "toolCall": {"toolCallId": "call_1", "title": "Run shell", "kind": "execute", "rawInput": {"command": "gh pr merge 5"}}
+                    if "merge" in text else {"toolCallId": "call_1", "title": "Write file"},
                 "options": [{"optionId": "yes", "name": "Allow", "kind": "allow_once"}, {"optionId": "no", "name": "Reject", "kind": "reject_once"}]}})
             continue
         upd({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}})

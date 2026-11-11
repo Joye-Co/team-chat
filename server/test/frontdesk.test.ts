@@ -118,6 +118,40 @@ describe("front desk", () => {
     c.close();
   });
 
+  it("takes its 👀 back when it skips, and decides a follow-up without an @ quietly", async () => {
+    const w = await world();
+    await aiOn(w.owner.token);
+    const seen = fakeDesk([
+      { action: "skip", reason: "for someone else", confidence: 0.9 },
+      { action: "dispatch", reason: "work", confidence: 0.9, brief: { goal: "修设置页" } },
+      { action: "skip", reason: "small talk", confidence: 0.9 },
+    ]);
+    const { d } = await Daemon.connect(w.machineToken, {});
+    const { c } = await Client.connect(w.human.token);
+    const topicId = await mention(c, w, "@dev 这个给 Bob 看");
+    const request = (await c.waitEvent((e) => e.type === "message.created" && e.data.message.topicId === topicId)).data.message;
+    // 接 1.11: the 👀 it put while reading goes away on skip.
+    await c.waitEvent((e) => e.type === "reaction.changed" && e.data.messageId === request.id && e.data.on === false);
+    expect(c.events().filter((e) => e.type === "reaction.changed" && e.data.messageId === request.id).map((e) => e.data.on)).toEqual([true, false]);
+
+    await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "@dev 修设置页", mentions: [w.bot.id] });
+    const a = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId: a.runId });
+    await d.acked(a.runId, d.done(a.runId, { status: "succeeded", resultText: "ok" }));
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === a.runId && e.data.run.status === "done");
+
+    // 接 1.4: the requester's message without an @ right after the answer goes to the front desk, which is told so.
+    const thanks = await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "谢谢" });
+    await waitUntil(() => seen.length === 3, 5000, "third decision");
+    expect(seen[2].body.messages[1].content).toContain("This message does not @ you");
+    await new Promise((r) => setTimeout(r, 300));
+    // Small talk: no 👀 at all, no run.
+    expect(c.events().some((e) => e.type === "reaction.changed" && e.data.messageId === thanks.message.id)).toBe(false);
+    expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(1);
+    d.close();
+    c.close();
+  });
+
   it("asks one question, takes the answer without an @, and runs on a model error", async () => {
     const w = await world();
     await aiOn(w.owner.token);

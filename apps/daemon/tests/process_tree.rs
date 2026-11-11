@@ -312,6 +312,7 @@ fn spec(dir: &Path, command: &str, prompt: &str) -> RunSpec {
             sandbox: None,
             permission_mode: None,
             allowed_tools: None,
+            asks_permission: false,
         },
         prompt: prompt.into(),
         model: None,
@@ -324,6 +325,7 @@ fn spec(dir: &Path, command: &str, prompt: &str) -> RunSpec {
         resume_session_id: None,
         gate_hook: None,
         gate_alive: None,
+        gates: None,
         exec: daemon::executor::local(),
     }
 }

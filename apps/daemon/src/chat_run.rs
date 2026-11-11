@@ -85,6 +85,14 @@ upload --file <path>` uploads one file. The prompt carries only part of the topi
 messages, whole messages, search and files with `chat-run topic history [--before <seq>] \
 [--after <seq>] [--limit <n>]`, `chat-run topic message --id <messageId>`, `chat-run search \
 --query <text> [--group] [--limit <n>]` and `chat-run file get --id <fileId> [--out <path>]`. \
+Members work together through 产出 and state; read them (`--topic <id>` reads another topic of \
+this group, also for topic history and topic message):
+- `chat-run topic state [--topic <id>]`: who did what, the 产出 and their versions, open cards, decisions
+- `chat-run artifact list [--group | --topic <id>]`: the 产出 of this topic or group
+- `chat-run artifact get --id <id> [--version <n>] [--out <path>]`: a 产出's versions and content
+- `chat-run card get --message <id>`: a card's whole content and answers
+- `chat-run decisions list [--limit <n>]`: the decisions of this group
+- `chat-run member list`: the members of this group, their 岗位 and which are AI members
 Keep what will matter in later work with `chat-run memory note --scope member|person|group --kind \
 lesson|playbook|preference|convention|fact|decision --text <text> [--when <text>] [--source \
 <messageId>]`: member for your own lessons and how-tos (only this group reads them), person for the \
@@ -161,6 +169,8 @@ pub struct Outputs {
     gate: OnceLock<Arc<crate::secrets::Gate>>,
     /// The run's gated actions (`chat-run gate`, the CLI's hook).
     gates: OnceLock<Arc<crate::gates::Gates>>,
+    /// Feature "github", `app` mode: the run's GitHub (`git-credential`, the `gh` proxy).
+    github: OnceLock<Arc<crate::github::Run>>,
 }
 
 impl Outputs {
@@ -185,6 +195,11 @@ impl Outputs {
     /// Lets the run's hook (`chat-run gate`) check commands against the run's gates.
     pub fn set_gates(&self, gates: Arc<crate::gates::Gates>) {
         let _ = self.gates.set(gates);
+    }
+
+    /// Lets the run's git credential helper and `gh` proxy ask for the person's GitHub.
+    pub fn set_github(&self, github: Arc<crate::github::Run>) {
+        let _ = self.github.set(github);
     }
 
     fn add(&self) -> (String, oneshot::Receiver<RunOutputResult>) {
@@ -243,7 +258,7 @@ pub fn set_exe(p: PathBuf) {
     let _ = EXE.set(p);
 }
 
-fn exe() -> std::io::Result<PathBuf> {
+pub(crate) fn exe() -> std::io::Result<PathBuf> {
     match EXE.get() {
         Some(p) => Ok(p.clone()),
         None => std::env::current_exe(),
@@ -659,6 +674,31 @@ pub async fn handle(
         );
         return answer;
     }
+    // GitHub: answered here, never sent up (the token must not become a run event).
+    if let Some(op) = req["op"]
+        .as_str()
+        .filter(|o| crate::github::OPS.contains(o))
+    {
+        let Some(github) = outputs.github.get().cloned() else {
+            return error(
+                "not_found",
+                Some("github.off"),
+                "this run does not use a GitHub sign-in from the app",
+            );
+        };
+        let body = req.get("body").cloned().unwrap_or(Value::Null);
+        let answer = github.handle(op, &body, emit).await;
+        eprintln!(
+            "{} chat-run {op}: {}",
+            crate::proto::now_ms(),
+            if answer["ok"] == json!(true) {
+                "ok".to_string()
+            } else {
+                safe_word(answer["error"]["code"].as_str().unwrap_or("failed"))
+            }
+        );
+        return answer;
+    }
     if req["op"] == crate::gates::ALIVE_OP {
         if let Some(gates) = outputs.gates.get() {
             gates.mark_alive();
@@ -884,10 +924,16 @@ pub const USAGE: &str = "usage:
   chat-run file upload --file <path> [--name <name>] [--mime <type>]
   chat-run artifact create --title <title> (--dir <folder> | --file <path>) [--entry <path>] [--kind html|file] [--note <text>] [--events events.json] [--media media.json] [--data data.json]
   chat-run artifact version --artifact <artifactId> (--dir <folder> | --file <path>) [--entry <path>] [--title <title>] [--note <text>] [--events events.json] [--media media.json] [--data data.json]
-  chat-run topic history [--before <seq>] [--after <seq>] [--limit <1-100>]
-  chat-run topic message --id <messageId>
+  chat-run topic history [--before <seq>] [--after <seq>] [--limit <1-100>] [--topic <topicId>]
+  chat-run topic message --id <messageId> [--topic <topicId>]
+  chat-run topic state [--topic <topicId>]
   chat-run search --query <text> [--group] [--limit <1-50>]
   chat-run file get --id <fileId> [--out <path>]
+  chat-run artifact list [--group | --topic <topicId>]
+  chat-run artifact get --id <artifactId> [--version <n>] [--out <path>]
+  chat-run card get --message <messageId>
+  chat-run decisions list [--limit <1-100>]
+  chat-run member list
   chat-run memory note --scope member|person|group --kind lesson|playbook|preference|convention|fact|decision --text <text> [--when <text>] [--source <messageId>]
 
 card.json is a Card v2 document (or {\"cardV2\": ..., \"body\": ...}); `chat-run card schema`
@@ -897,7 +943,9 @@ patch ops (or {\"ops\": [...]}). A file name of - reads standard input. Files, f
 says otherwise. The prompt carries only part of the topic: topic history (oldest first, seqs
 exclusive), topic message (the whole message), search (this topic, or every topic of the
 group with --group) and file get (into --out, else .chat-files/<fileId>/ of the working
-folder) read the rest. Each command waits up to 15 s (topic and search: 30 s; file
+folder) read the rest. --topic reads another topic of the run's group, never another group.
+artifact get prints the 产出's versions and the entry file's text when it is text; --out also
+writes the entry file there (inside the working folder). Each command waits up to 15 s (topic and search: 30 s; file
 upload/get and artifact create/version: 5 minutes) and prints the JSON result (exit 0) or {\"ok\":false,\"error\":{code,reason,message}}
 (exit 1). When the CLI's sandbox blocks the connection to the daemon, the reason is
 sandbox.blocked. `chat-run secret` prints only the value (exit 0), or the error on standard
@@ -970,9 +1018,13 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
             _ => Err("usage: chat-run secret <NAME>".into()),
         };
     }
-    // `search --group` is the one flag without a value.
-    let group = args.first().map(String::as_str) == Some("search")
-        && args.iter().skip(1).any(|a| a == "--group");
+    // `search --group` and `artifact list --group` are the flags without a value.
+    let takes_group = match args.first().map(String::as_str) {
+        Some("search") => true,
+        Some("artifact") => args.get(1).map(String::as_str) == Some("list"),
+        _ => false,
+    };
+    let group = takes_group && args.iter().skip(1).any(|a| a == "--group");
     let without_group: Vec<String>;
     let args = if group {
         without_group = args.iter().filter(|a| *a != "--group").cloned().collect();
@@ -1036,9 +1088,31 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
         ["topic", "history"] => (
             crate::chat_run_context::TOPIC_HISTORY,
             &args[2..],
-            &["before", "after", "limit"],
+            &["before", "after", "limit", "topic"],
         ),
-        ["topic", "message"] => (crate::chat_run_context::TOPIC_MESSAGE, &args[2..], &["id"]),
+        ["topic", "message"] => (
+            crate::chat_run_context::TOPIC_MESSAGE,
+            &args[2..],
+            &["id", "topic"],
+        ),
+        ["topic", "state"] => (crate::chat_run_context::TOPIC_STATE, &args[2..], &["topic"]),
+        ["artifact", "list"] => (
+            crate::chat_run_context::ARTIFACT_LIST,
+            &args[2..],
+            &["topic"],
+        ),
+        ["artifact", "get"] => (
+            crate::chat_run_context::ARTIFACT_GET,
+            &args[2..],
+            &["id", "version", "out"],
+        ),
+        ["card", "get"] => (crate::chat_run_context::CARD_GET, &args[2..], &["message"]),
+        ["decisions", "list"] => (
+            crate::chat_run_context::DECISIONS_LIST,
+            &args[2..],
+            &["limit"],
+        ),
+        ["member", "list"] => (crate::chat_run_context::MEMBER_LIST, &args[2..], &[]),
         ["search", ..] => (
             crate::chat_run_context::CONTEXT_SEARCH,
             &args[1..],
@@ -1075,6 +1149,14 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
         }
         Ok(n)
     };
+    // `--topic`: another topic of the run's group.
+    let topic = |f: &Flags| -> Result<Option<String>, String> {
+        match f.opt("topic") {
+            None => Ok(None),
+            Some(t) if crate::chat_run_context::valid_id(t) => Ok(Some(t.to_string())),
+            Some(_) => Err("--topic must be a topic id (letters, digits, - and _)".into()),
+        }
+    };
     match op {
         crate::chat_run_context::TOPIC_HISTORY => {
             for k in ["before", "after"] {
@@ -1085,8 +1167,60 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
             if let Some(n) = limit(&f, crate::chat_run_context::MAX_HISTORY_LIMIT)? {
                 put("limit", json!(n));
             }
+            if let Some(t) = topic(&f)? {
+                put("topicId", json!(t));
+            }
         }
-        crate::chat_run_context::TOPIC_MESSAGE => put("messageId", json!(id(&f)?)),
+        crate::chat_run_context::TOPIC_MESSAGE => {
+            put("messageId", json!(id(&f)?));
+            if let Some(t) = topic(&f)? {
+                put("topicId", json!(t));
+            }
+        }
+        crate::chat_run_context::TOPIC_STATE => {
+            if let Some(t) = topic(&f)? {
+                put("topicId", json!(t));
+            }
+        }
+        crate::chat_run_context::ARTIFACT_LIST => {
+            let t = topic(&f)?;
+            if group && t.is_some() {
+                return Err("--group and --topic do not go together".into());
+            }
+            if group {
+                put("scope", json!("group"));
+            }
+            if let Some(t) = t {
+                put("topicId", json!(t));
+            }
+        }
+        crate::chat_run_context::ARTIFACT_GET => {
+            put("artifactId", json!(id(&f)?));
+            if let Some(n) = f.num("version")? {
+                if n == 0 || n > u32::MAX as u64 {
+                    return Err("--version must be a version number from 1".into());
+                }
+                put("version", json!(n));
+            }
+            if let Some(out) = f.opt("out") {
+                if out.is_empty() {
+                    return Err("--out needs a path".into());
+                }
+                put("out", json!(absolute_new(out)?));
+            }
+        }
+        crate::chat_run_context::CARD_GET => {
+            let m = f.req("message")?;
+            if !crate::chat_run_context::valid_id(m) {
+                return Err("--message must be a message id (letters, digits, - and _)".into());
+            }
+            put("messageId", json!(m));
+        }
+        crate::chat_run_context::DECISIONS_LIST => {
+            if let Some(n) = limit(&f, crate::chat_run_context::MAX_DECISIONS_LIMIT)? {
+                put("limit", json!(n));
+            }
+        }
         crate::chat_run_context::MEMORY_NOTE => {
             let mut b =
                 json!({ "scope": f.req("scope")?, "kind": f.req("kind")?, "text": f.req("text")? });
@@ -1257,6 +1391,7 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
             }
             put("text", json!(text));
         }
+        crate::chat_run_context::MEMBER_LIST => {}
         _ => {
             put("eventId", json!(f.req("event")?));
             match (f.opt("file"), f.opt("decline")) {
@@ -1503,6 +1638,10 @@ pub fn main(args: Vec<String>) -> i32 {
     // The CLI's SessionStart hook of a gated run: this CLI runs the run's hooks.
     if args.len() == 1 && args[0] == "gate-alive" {
         return crate::gates::alive_main();
+    }
+    // git's credential helper in a run that uses the app's GitHub (crate::github).
+    if args[0] == crate::github::OP_CREDENTIAL {
+        return crate::github::credential_main(&args[1..]);
     }
     let fail = |code: &str, msg: String| {
         println!("{}", error(code, None, msg));
@@ -2030,6 +2169,80 @@ mod tests {
             &["file", "get"],
             &["file", "get", "--id", "F/1"],
             &["file", "get", "--id", "F1", "--out", ""],
+        ] {
+            assert!(r(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn group_read_commands_build_their_bodies() {
+        let r = |a: &[&str]| request(&args(a));
+        assert_eq!(
+            r(&["topic", "history", "--topic", "T2", "--limit", "5"]).unwrap(),
+            ("topic.history", json!({ "limit": 5, "topicId": "T2" }))
+        );
+        assert_eq!(
+            r(&["topic", "message", "--id", "M1", "--topic", "T2"]).unwrap(),
+            (
+                "topic.message",
+                json!({ "messageId": "M1", "topicId": "T2" })
+            )
+        );
+        assert_eq!(r(&["topic", "state"]).unwrap(), ("topic.state", json!({})));
+        assert_eq!(
+            r(&["topic", "state", "--topic", "T2"]).unwrap(),
+            ("topic.state", json!({ "topicId": "T2" }))
+        );
+        assert_eq!(
+            r(&["artifact", "list"]).unwrap(),
+            ("artifact.list", json!({}))
+        );
+        assert_eq!(
+            r(&["artifact", "list", "--group"]).unwrap(),
+            ("artifact.list", json!({ "scope": "group" }))
+        );
+        assert_eq!(
+            r(&["artifact", "list", "--topic", "T2"]).unwrap(),
+            ("artifact.list", json!({ "topicId": "T2" }))
+        );
+        assert_eq!(
+            r(&["artifact", "get", "--id", "A1", "--version", "2"]).unwrap(),
+            ("artifact.get", json!({ "artifactId": "A1", "version": 2 }))
+        );
+        let (_, body) = r(&["artifact", "get", "--id", "A1", "--out", "plan.md"]).unwrap();
+        assert!(Path::new(body["out"].as_str().unwrap()).is_absolute());
+        assert_eq!(
+            r(&["card", "get", "--message", "M1"]).unwrap(),
+            ("card.get", json!({ "messageId": "M1" }))
+        );
+        assert_eq!(
+            r(&["decisions", "list", "--limit", "100"]).unwrap(),
+            ("decisions.list", json!({ "limit": 100 }))
+        );
+        assert_eq!(r(&["member", "list"]).unwrap(), ("member.list", json!({})));
+        for op in [
+            "artifact.list",
+            "artifact.get",
+            "card.get",
+            "decisions.list",
+            "member.list",
+            "topic.state",
+        ] {
+            assert!(crate::chat_run_context::OPS.contains(&op), "{op}");
+        }
+        for bad in [
+            &["topic", "history", "--topic", "../G"][..],
+            &["topic", "state", "--topic", ""],
+            &["artifact", "list", "--group", "--topic", "T2"],
+            &["artifact", "list", "--all"],
+            &["artifact", "get"],
+            &["artifact", "get", "--id", "A/1"],
+            &["artifact", "get", "--id", "A1", "--version", "0"],
+            &["artifact", "get", "--id", "A1", "--out", ""],
+            &["card", "get"],
+            &["card", "get", "--message", "M 1"],
+            &["decisions", "list", "--limit", "101"],
+            &["member", "list", "--group"],
         ] {
             assert!(r(bad).is_err(), "{bad:?}");
         }

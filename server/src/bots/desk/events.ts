@@ -11,7 +11,6 @@ import { stamp } from "../../context/render";
 import { MAX_FOLLOW_UPS, type RunRow, isStallStatus, sanitizeAcceptance, sanitizePlan, sanitizeUsage, sessionIdOf } from "./core";
 import { DeskRuns, type RunRequest } from "./runs";
 import { briefText } from "../../agent/frontdesk";
-import { TOOL_STALL_MS } from "../../agent/supervise";
 import { retroAfterRun } from "../../memory/retro";
 
 /** Room RPC of the cards feature: a run's CLI took the answer with this seq (`{ seq, runId, inputId }`). */
@@ -24,6 +23,8 @@ export abstract class DeskEvents extends DeskRuns {
   protected abstract watchTool(r: RunRow, title: string): Promise<void>;
   /** 盯活 (stall.ts): continues a run that only promised work; true when it did. */
   protected abstract continuePromise(r: RunRow, result: string): Promise<boolean>;
+  /** 盯 1.1 (stall.ts): the machine of a run that waited for it is back. */
+  protected abstract machineBack(r: RunRow, say?: boolean): Promise<void>;
 
   /** Stores run frames idempotently by (runId, seq) and applies their effects. */
   async ingest(runId: string, frames: SeqFrame[]): Promise<{ lastSeq: number }> {
@@ -77,10 +78,13 @@ export abstract class DeskEvents extends DeskRuns {
     const progressed = frames.some((f) => f.t !== "run.event" || !isStallStatus(f.event));
     const stallReported = frames.some((f) => f.t === "run.event" && isStallStatus(f.event) && (f.event as { state?: unknown }).state === "stalled");
     if (!progressed) {
-      // A daemon that reports a stall while the CLI waits for a long step (a test run): not yet.
-      if (stallReported && !(r.open_tools > 0 && now - r.last_event_at < TOOL_STALL_MS)) await this.markStalled(r);
+      // 盯 1.3: the daemon's stall report is a signal only. The desk's own order (nudge, wait,
+      // restart in the same session, another machine) decides; the report never restarts a run.
+      if (stallReported) this.log.info("supervise", { runId: r.id, why: "daemon reports stalled", silentMs: now - r.last_event_at });
       return;
     }
+    // Frames from a machine the run waited for: it is back (盯 1.1).
+    if (r.away_since !== null) await this.machineBack(r);
     this.sql.exec("UPDATE runs SET last_event_at = ?, nudged = 0 WHERE id = ?", now, r.id);
     r.last_event_at = now;
     r.nudged = 0;
@@ -253,7 +257,9 @@ export abstract class DeskEvents extends DeskRuns {
     if (!raw) return;
     this.sql.exec("DELETE FROM meta WHERE key = ?", `approvalCard:${r.id}`);
     try {
-      const saved = JSON.parse(raw) as { messageId: string; shown: string; card: Card };
+      const saved = JSON.parse(raw) as { messageId?: string; shown?: string; card?: Card };
+      // Only a posted card changes (not the text form, nor a card that was never posted).
+      if (!saved.messageId || !saved.card || saved.shown === undefined) return;
       const who = actorId ? ((await this.names([actorId])).get(actorId) ?? "") : "";
       const text = TEXT.approvalClosed[outcome];
       const line = text.line(who, stamp(Date.now()).slice(-5));
@@ -291,12 +297,22 @@ export abstract class DeskEvents extends DeskRuns {
     else this.sql.exec("DELETE FROM meta WHERE key = ?", `approval:${r.id}`);
     const shown = gate ? (TEXT.gateKinds[gate.kind] ?? title) : title;
     const what = gate ? (gate.command ?? detail) : detail;
-    const body = gate ? TEXT.approvalGate(cut(shown, 500), what ? cut(what, 4000) : undefined) : TEXT.approval(cut(title, 500), detail ? cut(detail, 4000) : undefined);
+    // The approvers; with none among the owners, the requester (and the card says why).
+    const { ids: askWho, noOwner } = await this.approversOrRequester(r, gate?.kind);
+    const cardMeta = (messageId?: string, posted?: { shown: string; card: Card }) =>
+      this.sql.exec(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+        `approvalCard:${r.id}`,
+        JSON.stringify({ approvalId, noOwner, ...(messageId ? { messageId } : {}), ...(posted ?? {}) }),
+      );
+    cardMeta();
+    const asked = gate ? TEXT.approvalGate(cut(shown, 500), what ? cut(what, 4000) : undefined) : TEXT.approval(cut(title, 500), detail ? cut(detail, 4000) : undefined);
+    const body = noOwner ? `${TEXT.approvalNoOwner}\n\n${asked}` : asked;
     const card: Card = {
       v: 1,
       title: cut(`需要你确认：${shown}`, 200),
       tone: "warning",
-      blocks: what ? [{ type: "code", text: cut(what, 8000) }] : [],
+      blocks: [...(noOwner ? [{ type: "text" as const, text: TEXT.approvalNoOwner }] : []), ...(what ? [{ type: "code" as const, text: cut(what, 8000) }] : [])],
       actions: [
         { id: cut(`approve:${approvalId}`, 64), label: TEXT.approve, style: "primary" },
         ...(gate ? [{ id: cut(`approveall:${approvalId}`, 64), label: TEXT.approveRun, confirm: TEXT.approveRunConfirm }] : []),
@@ -304,15 +320,15 @@ export abstract class DeskEvents extends DeskRuns {
       ],
     };
     const cmid = `run:${r.id}:approval:${cut(approvalId, 24)}`;
-    const askWho = await this.approvers(r, gate?.kind);
     try {
-      const messageId = await this.post(r, cmid, body, { card, mentions: askWho });
-      this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `approvalCard:${r.id}`, JSON.stringify({ messageId, approvalId, shown: cut(shown, 180), card }));
+      // A reply that quotes this message answers it (approvalDecision); the card changes in
+      // place once answered (closeApprovalCard).
+      cardMeta(await this.post(r, cmid, body, { card, mentions: askWho }), { shown: cut(shown, 180), card });
     } catch (err) {
       // A card the room rejects (for example an action id that is too long) falls back to text.
       this.log.warn("approval card failed", { runId: r.id, err });
       try {
-        await this.post(r, `${cmid}:text`, body, { mentions: askWho });
+        cardMeta(await this.post(r, `${cmid}:text`, body, { mentions: askWho }));
       } catch (err2) {
         // Nobody can be asked (for example the bot left the group): the answer is no.
         this.log.warn("approval post failed, denying", { runId: r.id, err: err2 });
