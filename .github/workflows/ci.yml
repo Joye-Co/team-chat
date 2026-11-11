@@ -490,13 +490,6 @@ jobs:
           TC_REQUIRE_REAL_CLI: "1"
           TC_REQUIRE_REAL_CODEX: "1"
         run: cargo test --locked -p daemon --features test-fakes --no-fail-fast
-      # What Codex's own Windows sandbox did to chat-run (tests/runtimes.rs writes it down).
-      - name: Codex Windows sandbox and chat-run (what happened)
-        if: always()
-        shell: bash
-        run: |
-          cat target/tmp/codex-windows-sandbox.json || true
-          cat target/tmp/codex-windows-read-only.json || true
       # The same as on Linux: with managed settings that allow only managed hooks, the real CLI
       # never gets the prompt of a gated run.
       - name: A gated run does not start when only managed hooks are allowed
@@ -542,6 +535,19 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "a standard user's CLI could change a read-only checkout (exit code $($p.ExitCode))" }
       - name: cargo check (e2e tool)
         run: cargo check --locked -p e2e --all-targets
+      # What Codex's own Windows sandbox does to a command and to chat-run, with each of its
+      # settings (tests/runtimes.rs writes it down). Last, and a report only: setting up the
+      # elevated one changes this computer (sandbox accounts that may write the temp folder).
+      - name: Codex's Windows sandbox, every setting (what happened)
+        if: always()
+        shell: bash
+        env:
+          TC_REQUIRE_REAL_CODEX: "1"
+          TC_CODEX_ELEVATED_SANDBOX: "1"
+        run: |
+          cargo test --locked -p daemon --features test-fakes --test runtimes -- codex_windows_sandbox_modes codex_read_only_on_windows_report || true
+          cat target/tmp/codex-windows-sandbox.json || true
+          cat target/tmp/codex-windows-read-only.json || true
 
   # The Windows release from end to end (docs/plans/windows.zh.md, R1): a release build of the
   # app, the update helper and the daemon, the NSIS installer, a silent install with its files,

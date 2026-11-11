@@ -967,9 +967,23 @@ fn outside_temp() -> tempfile::TempDir {
     }
 }
 
+/// The settings of Codex's own Windows sandbox a report test tries. `elevated` only when
+/// `TC_CODEX_ELEVATED_SANDBOX` is set: its setup changes the computer (it makes sandbox
+/// accounts and lets them write the user's temp folder, after which the daemon rightly
+/// refuses run folders there), so CI tries it in a last step of its own.
+#[cfg(windows)]
+fn windows_sandbox_modes(always: &[&'static str]) -> Vec<&'static str> {
+    let mut modes = always.to_vec();
+    if std::env::var_os("TC_CODEX_ELEVATED_SANDBOX").is_some() {
+        modes.push("elevated");
+    }
+    modes
+}
+
 /// Windows: what Codex's `read-only` does to a command with each setting of Codex's own
 /// Windows sandbox (none, `unelevated`, `elevated`): a write in the working folder, a write
-/// outside it and outside the temp folder, and reading a file. Written to
+/// outside it and outside the temp folder, reading a file, and a connection to a port of this
+/// computer. Written to
 /// `codex-windows-read-only.json` in the test folder (CI prints it). Asserts nothing but that
 /// no call hangs; [`codex_read_only_sandbox_writes_nothing`] asserts for what the daemon sends.
 #[cfg(windows)]
@@ -977,7 +991,7 @@ fn outside_temp() -> tempfile::TempDir {
 async fn codex_read_only_on_windows_report() {
     let Some(codex) = real_codex() else { return };
     let mut report = serde_json::Map::new();
-    for mode in ["none", "unelevated", "elevated"] {
+    for mode in windows_sandbox_modes(&["none", "unelevated"]) {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("codex-home");
         std::fs::create_dir_all(&home).unwrap();
@@ -993,6 +1007,9 @@ async fn codex_read_only_on_windows_report() {
         let outside = outside_temp();
         let inside_file = s.cwd.join("written.txt");
         let outside_file = outside.path().join("written.txt");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
         let mut calls = serde_json::Map::new();
         for (what, line) in [
             (
@@ -1004,6 +1021,10 @@ async fn codex_read_only_on_windows_report() {
                 format!("echo x> {}", outside_file.display()),
             ),
             ("reading a file", "type seed.txt".to_string()),
+            (
+                "a connection to a local port",
+                format!("curl.exe -s -m 5 http://127.0.0.1:{port}/"),
+            ),
         ] {
             let command: Vec<String> = vec!["cmd.exe".into(), "/c".into(), line];
             let (codex, args, home, cwd) =
@@ -1022,6 +1043,10 @@ async fn codex_read_only_on_windows_report() {
         calls.insert(
             "the file outside exists".into(),
             outside_file.exists().into(),
+        );
+        calls.insert(
+            "the connection arrived".into(),
+            listener.accept().is_ok().into(),
         );
         report.insert(mode.into(), calls.into());
     }
@@ -1052,6 +1077,28 @@ async fn codex_read_only_sandbox_writes_nothing() {
     let mut args = runtime::codex::app_server_args(&s).unwrap();
     args.extend(["-c".to_string(), format!("sandbox_mode=\"{sandbox}\"")]);
     args.extend(["-c".to_string(), format!("approval_policy=\"{approval}\"")]);
+    // Reading works: a side chat answers from the files.
+    std::fs::write(s.cwd.join("seed.txt"), "seed-text").unwrap();
+    let read: Vec<String> = if cfg!(windows) {
+        vec!["cmd.exe".into(), "/c".into(), "type seed.txt".into()]
+    } else {
+        vec!["/bin/sh".into(), "-c".into(), "cat seed.txt".into()]
+    };
+    let out = {
+        let (codex, args, home, cwd) = (codex.clone(), args.clone(), home.clone(), s.cwd.clone());
+        tokio::task::spawn_blocking(move || {
+            codex_exec(&codex, &args, &home, &cwd, &read, serde_json::json!({}))
+        })
+        .await
+        .unwrap()
+    };
+    assert!(
+        out["result"]["stdout"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("seed-text"),
+        "{out}"
+    );
     let outside = outside_temp();
     for target in [
         s.cwd.join("written.txt"),
@@ -1262,7 +1309,7 @@ fn the_session_folder_has_the_names_the_cli_can_use() {
 async fn codex_windows_sandbox_modes_start_nothing_or_name_the_sandbox() {
     let Some(codex) = real_codex() else { return };
     let mut report = serde_json::Map::new();
-    for mode in ["unelevated", "elevated"] {
+    for mode in windows_sandbox_modes(&["unelevated"]) {
         report.insert(mode.into(), codex_windows_sandbox_mode(&codex, mode).await);
     }
     std::fs::write(
