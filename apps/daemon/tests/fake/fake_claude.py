@@ -18,7 +18,14 @@ posts it again (a retry: the idempotency key gives the same message), patches th
 with `chat-run card patch` at its rev and writes each answer to chatcard-<n>.json;
 "gated" calls the Bash tool with `gh pr merge 12 --squash` and `ls` ("gated twice": and
 `gh pr merge 13`), each after the PreToolUse hooks of --settings, and writes what the hooks
-decided to gate-<n>.json.
+decided to gate-<n>.json;
+"hold" reads the next stdin line (a follow-up the daemon sends while the turn is open) before it
+answers, writes its text to held.json and takes it as the next turn;
+"seefile" writes to seefile.json whether kept.txt is in the working folder, the git branch there
+and `git status --porcelain`; "keepfile" then writes kept.txt and leaves it uncommitted;
+"memo:<text>" runs `chat-run memory note --scope member --kind lesson --text <text>` and
+writes its exit code and output to remember.json.
+Every turn's text goes to prompts.jsonl ({"pid", "sid", "n", "text"}, one line each, appended).
 The arguments are written to argv.json in the working directory (in the run folder above it, with
 the failed write's errno in aside-write.json, when the working directory is read-only); with --settings, the settings
 and the ASIDE_PROBE variable they set go to settings-seen.json.
@@ -115,14 +122,50 @@ session = open(os.path.join(proj, sid + ".jsonl"), "a")
 def out(o):
     sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
 
+def turn_text(line):
+    return "".join(c.get("text", "") for c in json.loads(line)["message"]["content"])
+
+def git_out(*a):
+    try:
+        return subprocess.run(["git", *a], capture_output=True, text=True).stdout.strip()
+    except OSError:
+        return None
+
 n = 0
-for line in sys.stdin:
+# Lines read ahead by "hold", taken as the next turns.
+pending = []
+while True:
+    line = pending.pop(0) if pending else sys.stdin.readline()
+    if not line:
+        break
+    if not line.strip():
+        continue
     msg = json.loads(line)
     text = "".join(c.get("text", "") for c in msg["message"]["content"])
     # Modes come from the request and what follows it, not from the rules the server puts in
     # front of it (the acceptance rule says "changes" and "artifact").
     cue = text.rsplit("\nRequest from ", 1)[-1]
     session.write(json.dumps({"type": "user", "text": text}) + "\n"); session.flush()
+    with open(os.path.join(rec, "prompts.jsonl"), "a") as pf:
+        pf.write(json.dumps({"pid": os.getpid(), "sid": sid, "n": n + 1, "text": text}) + "\n")
+    if "hold" in cue:
+        nxt = sys.stdin.readline()
+        open("held.json", "w").write(json.dumps({"text": turn_text(nxt) if nxt.strip() else None}))
+        if nxt:
+            pending.append(nxt)
+    if "seefile" in cue:
+        open("seefile.json", "w").write(json.dumps({"kept": os.path.exists("kept.txt"), "branch": git_out("rev-parse", "--abbrev-ref", "HEAD"),
+                                                    "status": git_out("status", "--porcelain")}))
+    if "keepfile" in cue:
+        open("kept.txt", "w").write("kept by %d\n" % os.getpid())
+    m = re.search(r"memo:(\S+)", cue)
+    if m:
+        r = subprocess.run(["chat-run", "memory", "note", "--scope", "member", "--kind", "lesson", "--text", m.group(1)], capture_output=True, text=True)
+        try:
+            v = json.loads(r.stdout)
+        except ValueError:
+            v = None
+        open("remember.json", "w").write(json.dumps({"code": r.returncode, "out": v, "err": r.stderr[-400:]}))
     if n == 0:
         out({"type": "system", "subtype": "init", "cwd": os.getcwd(), "session_id": sid, "model": "fake-model"})
     n += 1
