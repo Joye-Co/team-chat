@@ -323,6 +323,7 @@ fn spec(dir: &Path, command: &str, prompt: &str) -> RunSpec {
         note: None,
         resume_session_id: None,
         gate_hook: None,
+        gate_alive: None,
         exec: daemon::executor::local(),
     }
 }

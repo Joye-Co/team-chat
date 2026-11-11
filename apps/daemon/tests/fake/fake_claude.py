@@ -55,6 +55,21 @@ if "--settings" in args:
     os.environ.update(seen.get("env", {}))
     open(os.path.join(rec, "settings-seen.json"), "w").write(json.dumps({"settings": seen, "probe": os.environ.get("ASIDE_PROBE")}))
     hooks = seen.get("hooks", {}).get("PreToolUse", [])
+    # Like Claude Code: the SessionStart hooks run when the CLI starts, before it takes input.
+    # FAKE_HOOKS_OFF is a CLI whose hooks are turned off above the run's settings (managed
+    # settings that allow only managed hooks): it runs none.
+    if os.environ.get("FAKE_HOOKS_OFF"):
+        hooks = []
+    else:
+        for group in seen.get("hooks", {}).get("SessionStart", []):
+            for h in group.get("hooks", []):
+                try:
+                    if "args" in h:
+                        subprocess.run([h["command"], *h["args"]], stdin=subprocess.DEVNULL, capture_output=True, timeout=h.get("timeout", 60))
+                    else:
+                        subprocess.run(h["command"], shell=True, stdin=subprocess.DEVNULL, capture_output=True, timeout=h.get("timeout", 60))
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
 
 
 def pre_tool_use(tool, tool_input):

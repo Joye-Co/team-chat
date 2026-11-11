@@ -31,7 +31,7 @@
 // `scripts/install-daemon.ps1` and runs as the scheduled task of this user, and after the checks
 // above the script updates it by the replace protocol while it is idle and while a run is
 // active, ends it the way a logoff does, and starts the task again the way a logon does. It
-// refuses to run on a computer that already has a daemon config.
+// refuses to run on a computer that is a machine already (a config, a task, a running daemon).
 // Needs: `bun install`, and the daemon binary (built here with cargo when missing).
 // Tokens stay in memory or in files of mode 600 inside the temp folder; nothing is printed.
 import { spawn, spawnSync } from "node:child_process";
@@ -545,7 +545,17 @@ async function cancelCheck(
 // --service: the daemon as the scheduled task of this user (Windows)
 // ---------------------------------------------------------------------------
 
-type Service = { exe: string; config: string; binDir: string; stateDir: string; taskName: string; image: string; asset: string };
+type Service = {
+  exe: string;
+  config: string;
+  binDir: string;
+  stateDir: string;
+  taskName: string;
+  image: string;
+  asset: string;
+  /** The daemon processes this script saw: none ran before it installed one, so they are its own. */
+  pids: Set<number>;
+};
 
 function powershell(argv: string[]): { status: number | null; out: string } {
   const exe = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
@@ -556,7 +566,20 @@ function powershell(argv: string[]): { status: number | null; out: string } {
 /** The pids of the running daemons of the task (by image name). */
 function daemonPids(s: Service): number[] {
   const r = spawnSync("tasklist", ["/FI", `IMAGENAME eq ${s.image}`, "/FO", "CSV", "/NH"], { encoding: "utf8" });
+  const pids = [...(r.stdout ?? "").matchAll(/^"[^"]+","(\d+)"/gm)].map((m) => Number(m[1]));
+  for (const pid of pids) s.pids.add(pid);
+  return pids;
+}
+
+/** The pids of the processes named `image` right now. */
+function daemonPidsNow(image: string): number[] {
+  const r = spawnSync("tasklist", ["/FI", `IMAGENAME eq ${image}`, "/FO", "CSV", "/NH"], { encoding: "utf8" });
   return [...(r.stdout ?? "").matchAll(/^"[^"]+","(\d+)"/gm)].map((m) => Number(m[1]));
+}
+
+function taskExists(name: string): boolean {
+  const schtasks = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "schtasks.exe");
+  return spawnSync(schtasks, ["/Query", "/TN", name], { stdio: "ignore" }).status === 0;
 }
 
 function daemonLog(s: Service): string {
@@ -581,14 +604,31 @@ function installService(daemonBin: string, machineId: string, tokenFile: string,
   const binDir = join(local, "Programs", product.slug);
   const stateDir = join(local, `${product.slug}-daemon`);
   const image = `${product.slug}-daemon.exe`;
-  const s: Service = { exe: join(binDir, image), config: join(configDir, "daemon.toml"), binDir, stateDir, taskName: `${product.bundleId}.daemon`, image, asset: "" };
-  if (existsSync(configDir) || existsSync(s.exe)) throw new Error(`this computer already has a daemon (${configDir} or ${s.exe}): not touching it`);
+  const s: Service = { exe: join(binDir, image), config: join(configDir, "daemon.toml"), binDir, stateDir, taskName: `${product.bundleId}.daemon`, image, asset: "", pids: new Set() };
+  // This computer must not be a machine in any way: the task has one name per user, so an
+  // install here would replace a real one and stop its daemon. A daemon can have its config
+  // anywhere (`--config`, CHAT_DAEMON_CONFIG, under HOME instead of the profile), so the
+  // task, its state folder and a running daemon are looked for too, not only the usual files.
+  const running = spawnSync("tasklist", ["/FI", `IMAGENAME eq ${image}`, "/FO", "CSV", "/NH"], { encoding: "utf8" }).stdout ?? "";
+  const signs = [
+    existsSync(configDir) && configDir,
+    process.env.HOME && existsSync(join(process.env.HOME, ".config", product.slug)) && join(process.env.HOME, ".config", product.slug),
+    process.env.CHAT_DAEMON_CONFIG && "CHAT_DAEMON_CONFIG is set",
+    existsSync(s.exe) && s.exe,
+    existsSync(stateDir) && stateDir,
+    taskExists(s.taskName) && `the scheduled task ${s.taskName}`,
+    running.includes(`"${image}"`) && `a running ${image}`,
+  ].filter(Boolean);
+  if (signs.length > 0) throw new Error(`this computer already has a daemon (${signs.join("; ")}): not touching it`);
   children.push({
     name: "service",
     pid: 0,
     kill: () => {
+      // Only what this script made: its task (by the daemon it installed), the daemons it
+      // saw start, and the three folders that were not there before.
       if (existsSync(s.exe)) spawnSync(s.exe, ["uninstall-service"], { stdio: "ignore" });
-      for (const pid of daemonPids(s)) killTree(pid);
+      const now = new Set(daemonPidsNow(image));
+      for (const pid of s.pids) if (now.has(pid)) killTree(pid);
       for (const dir of [configDir, binDir, stateDir]) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
     },
   });
@@ -604,6 +644,7 @@ function installService(daemonBin: string, machineId: string, tokenFile: string,
   appendFileSync(s.config, `\n${rest.join("\n")}\n`);
   const reg = spawnSync(s.exe, ["install-service", "--config", s.config], { encoding: "utf8" });
   if (reg.status !== 0) throw new Error(`install-service failed (${reg.status}): ${(reg.stderr ?? "").slice(-600)}`);
+  daemonPids(s);
   step(`the daemon is the scheduled task ${s.taskName}`);
   return s;
 }
@@ -736,7 +777,7 @@ async function serviceChecks(
     const un = spawnSync(s.exe, ["uninstall-service"], { encoding: "utf8" });
     if (un.status !== 0) throw new Error(`uninstall-service failed (${un.status}): ${(un.stderr ?? "").slice(-400)}`);
     await until("no daemon runs", () => daemonPids(s).length === 0, 30_000);
-    if (spawnSync(schtasks, ["/Query", "/TN", s.taskName], { stdio: "ignore" }).status === 0) throw new Error("the task is still registered");
+    if (taskExists(s.taskName)) throw new Error("the task is still registered");
     await until("the machine is disconnected", async () => !(await connected()), 60_000);
     step("uninstall-service: no task, no daemon, the machine is offline");
     const log = daemonLog(s);

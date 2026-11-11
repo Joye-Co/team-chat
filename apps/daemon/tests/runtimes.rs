@@ -71,6 +71,7 @@ fn spec(dir: &std::path::Path, kind: &str, command: &str, args: &[&str], prompt:
         note: None,
         resume_session_id: None,
         gate_hook: None,
+        gate_alive: None,
         exec: daemon::executor::local(),
     }
 }
@@ -527,12 +528,12 @@ fn codex_aside_mcp_overrides_load_in_real_cli() {
 
 /// The real `codex` of this machine and how to start it (on Windows npm's `codex.cmd` is
 /// resolved to what it starts, as for a run). None (skip) when there is none; a failure
-/// instead when `TC_REQUIRE_REAL_CLI` is set (CI installs the CLI and sets it).
+/// instead when `TC_REQUIRE_REAL_CODEX` is set (CI installs the CLI and sets it).
 fn real_codex() -> Option<daemon::health::Launch> {
     let Some(found) = daemon::health::which("codex") else {
         assert!(
-            std::env::var_os("TC_REQUIRE_REAL_CLI").is_none(),
-            "TC_REQUIRE_REAL_CLI is set and codex is not on PATH"
+            std::env::var_os("TC_REQUIRE_REAL_CODEX").is_none(),
+            "TC_REQUIRE_REAL_CODEX is set and codex is not on PATH"
         );
         eprintln!("codex not on PATH; skipped");
         return None;

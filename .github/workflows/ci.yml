@@ -193,7 +193,17 @@ jobs:
       - name: Install the real Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code@2.1.322
       - name: cargo test
+        env:
+          TC_REQUIRE_REAL_CLI: "1"
         run: cargo test --locked -p chat-protocol -p chat-core -p daemon -p update-helper
+      # Managed settings that allow only managed hooks drop the approval hook of a gated run:
+      # the real CLI then never gets the run's prompt (apps/daemon/src/gates.rs).
+      - name: A gated run does not start when only managed hooks are allowed
+        run: |
+          sudo mkdir -p /etc/claude-code
+          echo '{"allowManagedHooksOnly": true}' | sudo tee /etc/claude-code/managed-settings.json >/dev/null
+          trap 'sudo rm -f /etc/claude-code/managed-settings.json' EXIT
+          TC_MANAGED_HOOKS_ONLY=1 cargo test --locked -p daemon --test integration a_cli_whose_hooks_are_managed_only -- --nocapture
 
   daemon-e2e:
     name: Daemon local e2e (Linux, fake Claude and Codex)
@@ -411,7 +421,16 @@ jobs:
       - name: cargo test (daemon)
         env:
           TC_REQUIRE_REAL_CLI: "1"
+          TC_REQUIRE_REAL_CODEX: "1"
         run: cargo test --locked -p daemon --features test-fakes --no-fail-fast
+      # The same as on Linux: with managed settings that allow only managed hooks, the real CLI
+      # never gets the prompt of a gated run.
+      - name: A gated run does not start when only managed hooks are allowed
+        run: |
+          mkdir -p "/c/Program Files/ClaudeCode"
+          echo '{"allowManagedHooksOnly": true}' > "/c/Program Files/ClaudeCode/managed-settings.json"
+          trap 'rm -f "/c/Program Files/ClaudeCode/managed-settings.json"' EXIT
+          TC_MANAGED_HOOKS_ONLY=1 cargo test --locked -p daemon --features test-fakes --test integration a_cli_whose_hooks_are_managed_only -- --nocapture
       # The install command for machines without the app, in Windows PowerShell 5.1, with the
       # daemon just built: SHA-256 check, config and token for this user only, the real daemon
       # as a scheduled task, an update by the replace protocol, uninstall.

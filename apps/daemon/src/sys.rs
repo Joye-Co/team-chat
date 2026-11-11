@@ -254,7 +254,9 @@ pub fn disk(path: &Path) -> (u64, u64) {
 }
 
 /// The 1, 5 and 15 minute load averages. Windows keeps none, so the daemon keeps its own
-/// ([`windows_load`]): zeroes until its first sample, five seconds after the first call.
+/// ([`windows_load`]). The first call there measures for half a second and starts all three
+/// averages at what it saw, so the first report of a daemon (and `doctor`, which asks once) is
+/// the machine's load now, not zero.
 pub fn load_avg() -> [f64; 3] {
     #[cfg(unix)]
     {
@@ -311,11 +313,28 @@ mod windows_load {
     use std::time::Duration;
 
     const STEP: Duration = Duration::from_secs(5);
+    /// How long the first call measures.
+    const FIRST: Duration = Duration::from_millis(500);
     static LOAD: OnceLock<&'static Mutex<[f64; 3]>> = OnceLock::new();
+
+    /// How many processors were busy between two readings.
+    fn busy(before: Option<(u64, u64)>, after: Option<(u64, u64)>, cpus: f64) -> Option<f64> {
+        let ((t0, i0), (t1, i1)) = (before?, after?);
+        (t1 > t0 && i1 >= i0)
+            .then(|| (1.0 - ((i1 - i0) as f64 / (t1 - t0) as f64).clamp(0.0, 1.0)) * cpus)
+    }
 
     pub fn get() -> [f64; 3] {
         let load = LOAD.get_or_init(|| {
-            let load: &'static Mutex<[f64; 3]> = Box::leak(Box::new(Mutex::new([0.0; 3])));
+            // The load now: a restarted daemon (after every update) on a busy machine must
+            // not say it is idle, or the server prefers it for the next run.
+            let cpus = std::thread::available_parallelism()
+                .map(|n| n.get() as f64)
+                .unwrap_or(1.0);
+            let before = super::cpu_times();
+            std::thread::sleep(FIRST);
+            let now = busy(before, super::cpu_times(), cpus).unwrap_or(0.0);
+            let load: &'static Mutex<[f64; 3]> = Box::leak(Box::new(Mutex::new([now; 3])));
             let _ = std::thread::Builder::new()
                 .name("load".into())
                 .spawn(move || sample(load));
@@ -332,19 +351,73 @@ mod windows_load {
         loop {
             std::thread::sleep(STEP);
             let now = super::cpu_times();
-            if let (Some((t0, i0)), Some((t1, i1))) = (prev, now)
-                && t1 > t0
-                && i1 >= i0
-            {
-                let busy = 1.0 - ((i1 - i0) as f64 / (t1 - t0) as f64).clamp(0.0, 1.0);
+            if let Some(busy) = busy(prev, now, cpus) {
                 let mut l = load.lock().unwrap_or_else(|e| e.into_inner());
                 for (v, window) in l.iter_mut().zip([60.0, 300.0, 900.0]) {
-                    *v = super::load_step(*v, busy * cpus, STEP.as_secs_f64(), window);
+                    *v = super::load_step(*v, busy, STEP.as_secs_f64(), window);
                 }
             }
             prev = now;
         }
     }
+}
+
+/// Why a path that a run's CLI names (a file to send, a place to save one) is not taken on
+/// Windows, before the file system is asked anything about it. None for a plain path: a
+/// relative one, or `X:\…`. The resolved path is still checked against the working folder
+/// afterwards; this refuses the spellings that reach outside the file system or that Windows
+/// reads as something else than they say:
+///
+/// - `\\server\share\…`, `\\?\…`, `\\.\…` (and with forward slashes): a network share makes
+///   the daemon sign in to a server of the CLI's choosing with the user's identity; the
+///   device and verbatim forms name pipes, disks and paths that skip the rules below;
+/// - a `:` anywhere but in a leading `X:\`: `C:name` is relative to another folder than the
+///   working folder, and `file.txt:stream` is another data stream of a file;
+/// - a name that ends in a dot or a space: Windows drops them, so `secret.txt.` is
+///   `secret.txt`, and a file made with them through a verbatim path cannot be removed by
+///   ordinary means;
+/// - a device name (`NUL`, `CON`, `COM1`, `LPT1`, …, with or without an extension).
+///
+/// Unix has none of these forms: there the function is not applied.
+pub fn windows_path_problem(path: &str) -> Option<&'static str> {
+    let is_sep = |c: char| c == '\\' || c == '/';
+    let mut chars = path.chars();
+    let (a, b) = (chars.next(), chars.next());
+    if a.is_some_and(is_sep) && b.is_some_and(is_sep) {
+        return Some("a network, device or verbatim path");
+    }
+    let drive = a.is_some_and(|c| c.is_ascii_alphabetic()) && b == Some(':');
+    let rest = if drive { &path[2..] } else { path };
+    if drive && !rest.starts_with(is_sep) {
+        return Some("a path relative to a drive's current folder");
+    }
+    if rest.contains(':') {
+        return Some("a path with a colon (another data stream of a file)");
+    }
+    for name in rest.split(is_sep) {
+        if name.is_empty() || name == "." || name == ".." {
+            continue;
+        }
+        if name.ends_with('.') || name.ends_with(' ') {
+            return Some("a name that ends in a dot or a space");
+        }
+        let stem = name.split('.').next().unwrap_or(name).trim_end();
+        let upper = stem.to_ascii_uppercase();
+        let numbered = |prefix: &str| {
+            upper
+                .strip_prefix(prefix)
+                .is_some_and(|n| n.len() == 1 && n != "0" && n.chars().all(|c| c.is_ascii_digit()))
+        };
+        if matches!(
+            upper.as_str(),
+            "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+        ) || numbered("COM")
+            || numbered("LPT")
+        {
+            return Some("a device name");
+        }
+    }
+    None
 }
 
 /// Folders under the user's profile and the system's program folders where coding CLIs and
@@ -373,24 +446,17 @@ fn usual_program_folders(
     out
 }
 
-/// `path` with each of `more` that is not in it yet added at the end (what is on `PATH`
-/// already wins), compared the way Windows compares paths: without case, and a trailing
-/// separator does not count.
+/// True when two entries of `PATH` name the same folder, compared the way Windows compares
+/// paths: without case, and a trailing separator does not count.
 #[cfg(any(windows, test))]
-fn path_with(path: &str, more: &[std::path::PathBuf], sep: char) -> String {
-    let key = |p: &str| p.trim().trim_end_matches(['\\', '/']).to_ascii_lowercase();
-    let mut parts: Vec<String> = path
-        .split(sep)
-        .filter(|p| !p.trim().is_empty())
-        .map(str::to_string)
-        .collect();
-    for m in more {
-        let m = m.to_string_lossy().into_owned();
-        if !parts.iter().any(|p| key(p) == key(&m)) {
-            parts.push(m);
-        }
-    }
-    parts.join(&sep.to_string())
+fn same_folder(a: &Path, b: &Path) -> bool {
+    let key = |p: &Path| {
+        p.to_string_lossy()
+            .trim()
+            .trim_end_matches(['\\', '/'])
+            .to_ascii_lowercase()
+    };
+    key(a) == key(b)
 }
 
 /// Windows: adds the usual program folders that exist to this process's `PATH`, after what
@@ -409,9 +475,16 @@ pub fn add_usual_program_folders() {
         .into_iter()
         .filter(|p| p.is_dir())
         .collect();
-        let path = std::env::var("PATH").unwrap_or_default();
-        let next = path_with(&path, &folders, PATH_SEP);
-        if next != path {
+        // As the system gives it, also when it is not Unicode: what is there stays as it is.
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let have: Vec<std::path::PathBuf> = std::env::split_paths(&path).collect();
+        let more: Vec<std::path::PathBuf> = folders
+            .into_iter()
+            .filter(|f| !have.iter().any(|h| same_folder(h, f)))
+            .collect();
+        if !more.is_empty()
+            && let Ok(next) = std::env::join_paths(have.into_iter().chain(more))
+        {
             // SAFETY: called at the start of `main`, before any other thread exists.
             unsafe { std::env::set_var("PATH", next) };
         }
@@ -470,8 +543,61 @@ mod tests {
         assert!(l[0] < 0.01);
     }
 
+    /// The spellings Windows reads as something else than a file under the working folder
+    /// are refused by their text alone; plain paths pass.
+    #[test]
+    fn windows_spellings_that_leave_the_file_system_are_refused() {
+        for plain in [
+            "a.html",
+            "docs/report.pdf",
+            r"docs\report.pdf",
+            r".\new\dir\",
+            "../x",
+            r"C:\Users\me\runs\r1\work\a.txt",
+            "C:/Users/me/runs/r1/work/a.txt",
+            r"\Users\me",
+            "报告 1.html",
+            "a..b",
+            ".hidden",
+            "console.log",
+            "com10.txt",
+            "nullable.rs",
+        ] {
+            assert_eq!(windows_path_problem(plain), None, "{plain}");
+        }
+        for bad in [
+            r"\\evil.example\share\x",
+            "//evil.example/share/x",
+            r"\\?\C:\Windows\win.ini",
+            r"\\.\pipe\chat-run-x",
+            r"\\.\PhysicalDrive0",
+            r"\\?\GLOBALROOT\Device\HarddiskVolume1\x",
+            "C:secret.txt",
+            "C:",
+            "D:..\\x",
+            "a.txt:stream",
+            "a.txt::$DATA",
+            r"docs\a.txt:$DATA",
+            r"C:\Users\me\a.txt:s",
+            "secret.txt.",
+            "secret.txt ",
+            r"docs.\a.txt",
+            "docs /a.txt",
+            "...",
+            "NUL",
+            "nul.txt",
+            r"docs\CON",
+            "COM1",
+            "lpt9.log",
+            "aux .txt",
+            "CONOUT$",
+        ] {
+            assert!(windows_path_problem(bad).is_some(), "{bad}");
+        }
+    }
+
     /// The usual program folders come from the profile and program variables that are set,
-    /// and are added to a PATH after what is there, once, compared as Windows compares paths.
+    /// and one that is on the PATH already (compared as Windows compares paths) is not added again.
     #[test]
     fn usual_program_folders_are_added_after_the_path_once() {
         let var = |k: &str| match k {
@@ -494,17 +620,14 @@ mod tests {
                 r"C:\Users\me\.cargo\bin",
             ]
         );
-        let more = [
-            std::path::PathBuf::from(r"C:\Users\me\.local\bin"),
-            std::path::PathBuf::from(r"C:\Users\Me\AppData\Roaming\NPM"),
-        ];
-        assert_eq!(
-            path_with(r"C:\Windows;;c:\users\me\appdata\roaming\npm\", &more, ';'),
-            r"C:\Windows;c:\users\me\appdata\roaming\npm\;C:\Users\me\.local\bin"
-        );
-        assert_eq!(path_with("", &more[..1], ';'), r"C:\Users\me\.local\bin");
-        let same = r"C:\Windows;C:\Users\me\.local\bin";
-        assert_eq!(path_with(same, &more[..1], ';'), same);
+        assert!(same_folder(
+            Path::new(r"c:\users\me\appdata\roaming\npm\"),
+            Path::new(r"C:\Users\Me\AppData\Roaming\NPM")
+        ));
+        assert!(!same_folder(
+            Path::new(r"C:\Users\me\.local\bin"),
+            Path::new(r"C:\Users\me\.local")
+        ));
     }
 
     /// Windows: the machine's processor time moves forward and the idle part is within it.
@@ -516,5 +639,40 @@ mod tests {
         let (t1, i1) = cpu_times().unwrap();
         assert!(t1 > t0 && i1 >= i0 && i1 - i0 <= t1 - t0);
         assert!(load_avg().iter().all(|v| *v >= 0.0));
+    }
+
+    /// Windows: the first load a process reports is what the machine does now. With every
+    /// processor kept busy from before the first call, it is not zero (it was, for the first
+    /// minutes of every daemon and always in `doctor`).
+    #[cfg(windows)]
+    #[test]
+    fn the_first_windows_load_is_measured_not_zero() {
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
+        let workers: Vec<_> = (0..cpus)
+            .map(|_| {
+                let stop = stop.clone();
+                std::thread::spawn(move || {
+                    let mut x = 0u64;
+                    while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                        x = std::hint::black_box(x.wrapping_mul(31).wrapping_add(1));
+                    }
+                })
+            })
+            .collect();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let first = load_avg();
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        for w in workers {
+            w.join().unwrap();
+        }
+        // The other tests of this program may have asked first, at a calmer moment: then the
+        // averages are at least not negative; when this was the first call, all three are
+        // the load of busy processors.
+        assert!(first.iter().all(|v| *v >= 0.0), "{first:?}");
+        assert!(
+            first[0] == first[1] && first[1] == first[2] || first[0] > 0.0,
+            "{first:?}"
+        );
     }
 }
