@@ -24,7 +24,11 @@ answers, writes its text to held.json and takes it as the next turn;
 "seefile" writes to seefile.json whether kept.txt is in the working folder, the git branch there
 and `git status --porcelain`; "keepfile" then writes kept.txt and leaves it uncommitted;
 "memo:<text>" runs `chat-run memory note --scope member --kind lesson --text <text>` and
-writes its exit code and output to remember.json.
+writes its exit code and output to remember.json;
+"readback" runs the read commands `chat-run member list`, `topic state` and `artifact list`
+(with "topic:<id>", of that topic), `artifact get --id <first listed>`, `decisions list` and, with "card:<message id>", `card get`,
+and writes each answer to readback.json.
+`--version` prints the version of the Claude Code the Windows tests gate (2.1.322).
 Every turn's text goes to prompts.jsonl ({"pid", "sid", "n", "text"}, one line each, appended).
 The arguments are written to argv.json in the working directory (in the run folder above it, with
 the failed write's errno in aside-write.json, when the working directory is read-only); with --settings, the settings
@@ -39,6 +43,9 @@ if args == ["--help"]:
     print("Options:\n  --effort <level>          Effort level for the current session\n"
           "                            (low, medium, high, xhigh, max)\n"
           "  --model <model>           Model for the current session")
+    sys.exit(0)
+if args == ["--version"]:
+    print("2.1.322 (Claude Code)")
     sys.exit(0)
 sid = args[args.index("--session-id") + 1] if "--session-id" in args else "fake-session"
 if "--resume" in args:
@@ -125,6 +132,14 @@ def out(o):
 def turn_text(line):
     return "".join(c.get("text", "") for c in json.loads(line)["message"]["content"])
 
+def chat_run(*a):
+    r = subprocess.run(["chat-run", *a], capture_output=True, text=True)
+    try:
+        v = json.loads(r.stdout)
+    except ValueError:
+        v = None
+    return {"code": r.returncode, "out": v, "err": r.stderr[-400:]}
+
 def git_out(*a):
     try:
         return subprocess.run(["git", *a], capture_output=True, text=True).stdout.strip()
@@ -166,6 +181,18 @@ while True:
         except ValueError:
             v = None
         open("remember.json", "w").write(json.dumps({"code": r.returncode, "out": v, "err": r.stderr[-400:]}))
+    if "readback" in cue:
+        topic = re.search(r"topic:(\S+)", cue)
+        where = ["--topic", topic.group(1)] if topic else []
+        got = {"members": chat_run("member", "list"), "state": chat_run("topic", "state", *where), "artifacts": chat_run("artifact", "list", *where)}
+        arts = (got["artifacts"]["out"] or {}).get("artifacts") or []
+        if arts:
+            got["artifact"] = chat_run("artifact", "get", "--id", arts[0]["id"])
+        got["decisions"] = chat_run("decisions", "list")
+        card = re.search(r"card:(\S+)", cue)
+        if card:
+            got["card"] = chat_run("card", "get", "--message", card.group(1))
+        open("readback.json", "w").write(json.dumps(got))
     if n == 0:
         out({"type": "system", "subtype": "init", "cwd": os.getcwd(), "session_id": sid, "model": "fake-model"})
     n += 1

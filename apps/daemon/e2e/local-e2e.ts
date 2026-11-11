@@ -17,7 +17,10 @@
 // Then the usable milestone's fixes (local runs only, see `landedChecks`): a request with a quote
 // and an image, and an image-only follow-up, reach the CLI whole; a member's runs in one topic
 // share a work folder and branch; a lesson learned in a group stays with that group; approval
-// cards close in place (同意, 拒绝, 没用上); the team's model is used by a member without one.
+// cards close in place (同意, 拒绝, 没用上); the team's model is used by a member without one;
+// each mention reaches its own member and a follow-up without one goes to the topic's latest;
+// a request for an offline computer waits for it; Codex and ACP runs stop gated actions by code;
+// a run reads the group's members, 产出, cards, decisions and topic state with `chat-run`.
 //
 // Usage (from the repo root): bun apps/daemon/e2e/local-e2e.ts [--port 8793] [--keep]
 // With --vm on a Linux runner host (scripts/runner/host-setup.sh), every run's CLI runs in a
@@ -252,6 +255,8 @@ async function runDaemonCheck(
   chmodSync(fake, 0o755);
   const fakeCodex = join(ROOT, "apps/daemon/tests/fake/fake_codex.py");
   chmodSync(fakeCodex, 0o755);
+  const fakeAcp = join(ROOT, "apps/daemon/tests/fake/fake_acp.py");
+  chmodSync(fakeAcp, 0o755);
   const work = join(TMP, "work");
   const claudeHome = join(TMP, "claude-home");
   mkdirSync(claudeHome, { recursive: true });
@@ -273,6 +278,12 @@ async function runDaemonCheck(
     'sandbox = "workspace-write"',
     'approval_policy = "never"',
     "",
+    // An ACP agent that asks before its tools (its runs are gated by code).
+    "[runtimes.acp]",
+    'kind = "acp"',
+    ...fakeRuntime(fakeAcp, []),
+    "asks_permission = true",
+    "",
     ...(VM
       ? [
           "[vm]",
@@ -286,11 +297,23 @@ async function runDaemonCheck(
       : []),
   ];
   let service: Service | undefined;
+  /** Stops and starts the daemon this script started (not the scheduled task of --service). */
+  let daemon: Landed["daemon"];
   if (SERVICE) {
     service = installService(daemonBin, machine.machine.id, tokenFile, rest);
   } else {
     writeFileSync(config, [...identity, ...rest].join("\n"));
     start("daemon", daemonBin, ["run", "--config", config], { cwd: TMP });
+    daemon = {
+      stop: async () => {
+        const i = children.findIndex((c) => c.name === "daemon");
+        if (i < 0) throw new Error("no daemon to stop");
+        const [c] = children.splice(i, 1);
+        c.kill();
+        await until("the daemon ended", () => !alive(c.pid), 30_000);
+      },
+      start: () => start("daemon", daemonBin, ["run", "--config", config], { cwd: TMP }),
+    };
   }
   const healthy = await until("machine healthy", async () => {
     const list = (await call("GET", "/v1/machines", { token: owner })) as any[];
@@ -371,7 +394,7 @@ async function runDaemonCheck(
   const stop = await cancelCheck(groupId, alice, bot, work, events, ws);
   // The usable milestone's fixes (local runs only: they change team settings and need the
   // fake CLI's files on this computer).
-  if (!REMOTE && !VM) report.landed = await landedChecks({ owner, groupId, alice: alice as Person, bot, work, events, ws });
+  if (!REMOTE && !VM) report.landed = await landedChecks({ owner, groupId, alice: alice as Person, bot, work, events, ws, machineId: machine.machine.id, daemon });
   if (service) report.service = await serviceChecks(service, owner, groupId, alice, bot, machine.machine.id, work, events, ws);
   ws.close();
   report.cancel = stop;
@@ -572,7 +595,18 @@ async function cancelCheck(
 // ---------------------------------------------------------------------------
 
 type Person = { token: string; member: { id: string } };
-type Landed = { owner: string; groupId: string; alice: Person; bot: { member: { id: string } }; work: string; events: any[]; ws: WebSocket };
+type Landed = {
+  owner: string;
+  groupId: string;
+  alice: Person;
+  bot: { member: { id: string } };
+  work: string;
+  events: any[];
+  ws: WebSocket;
+  machineId: string;
+  /** The daemon this script started; absent with --service. */
+  daemon?: { stop: () => Promise<void>; start: () => void };
+};
 
 let landedRid = 0;
 
@@ -643,6 +677,10 @@ async function landedChecks(x: Landed) {
   out.memoryAudience = await memoryAudienceCheck(x);
   out.approvalCards = await approvalCardCheck(x);
   out.teamModel = await teamModelCheck(x);
+  out.routing = await routingCheck(x);
+  out.gatesByCode = await gatesByCodeCheck(x);
+  out.readCommands = await readCommandsCheck(x);
+  if (x.daemon) out.offlineComputer = await offlineComputerCheck(x);
   return out;
 }
 
@@ -835,6 +873,179 @@ async function teamModelCheck({ owner, groupId, bot, work, events, ws }: Landed)
   }
   step("team model: a member without its own model ran with the team's model and 思考强度; its own model wins");
   return { model: "team-model-e2e", effort: "high" };
+}
+
+/** A new AI member on this run's machine with the runtime `runtime`; returns its member id. */
+async function aiMember(owner: string, name: string, runtime: string): Promise<string> {
+  const b = await call("POST", "/v1/bots", { token: owner, body: { name, role: "开发" } });
+  await call("PUT", `/v1/bots/${b.member.id}/runner`, { token: owner, body: { runtime, labels: [LABEL] } });
+  return b.member.id as string;
+}
+
+/** The stored message `id` as the socket saw it created. */
+const messageOf = (events: any[], id: string | undefined) => events.find((e) => e.type === "message.created" && e.data.message.id === id)?.data.message;
+
+/**
+ * Routing (PR #215, 接 1.1, 接 1.4, 盯 3.1): a message that mentions two AI members starts a run
+ * for each in the topic, each posts its own done card and the topic lists both as participants;
+ * after another @, a follow-up without any @ from the requester goes to the member that ran last.
+ */
+async function routingCheck({ owner, groupId, bot, events, ws }: Landed) {
+  const two = await aiMember(owner, "two", "claude");
+  const ids = [bot.member.id, two];
+  const m = await say(events, ws, groupId, "@dev @two 一起看看", { mentions: ids });
+  const t = m.topicId;
+  const both = await until(
+    "routing: both members' runs end",
+    () => {
+      const ended = runsIn(events, t).filter((r: any) => ENDED.includes(r.status));
+      const by = new Map(ended.map((r: any) => [r.botId as string, r]));
+      return ids.every((id) => by.has(id)) ? ids.map((id) => by.get(id)) : undefined;
+    },
+    90_000,
+  );
+  for (const r of both) {
+    if (r.status !== "done") throw new Error(`routing: the run of ${r.botId} ended ${r.status}`);
+    const card = messageOf(events, r.resultMessageId);
+    if (card?.authorId !== r.botId || card.cardV2?.intent !== "done") throw new Error(`routing: ${r.botId} has no done card of its own`);
+  }
+  const first = new Set(runsIn(events, t).map((r: any) => r.id as string));
+  if (first.size !== 2) throw new Error(`routing: two mentions started ${first.size} runs`);
+  await until("routing: the topic lists both members", () => {
+    const p = events.filter((e) => e.type === "topic.updated" && e.data.topicId === t && e.data.participants).at(-1)?.data.participants as any[] | undefined;
+    return p && ids.every((id) => p.some((x) => x.memberId === id)) ? p : undefined;
+  });
+  await say(events, ws, groupId, "@two 再看一眼", { topicId: t, mentions: [two] });
+  const again = (await ranDone(events, t, "routing: @two again", [...first])) as any;
+  if (again.botId !== two) throw new Error(`routing: @two reached ${again.botId}`);
+  await say(events, ws, groupId, "还有一点", { topicId: t });
+  const follow = (await ranDone(events, t, "routing: a follow-up without @", [...first, again.id])) as any;
+  if (follow.botId !== two) throw new Error(`routing: a follow-up without @ went to ${follow.botId}, not the member that ran last`);
+  step("routing: two mentions started a run for each member with its own done card, both listed in the topic; a follow-up without @ went to the member that ran last");
+  return { topicId: t, runs: [...first, again.id, follow.id] };
+}
+
+/**
+ * Gates by code for Codex and ACP (PR #202, 盯 2.1, 盯 2.10): a gated Codex run starts with
+ * approval policy `untrusted`; the daemon answers `ls`, a file change and a GitHub MCP merge (no
+ * built-in pattern) itself, and `git push origin main` waits for a person's card (拒绝 in words).
+ * An ACP agent that asks before its tools gets a card for `gh pr merge` and none for a
+ * file write.
+ */
+async function gatesByCodeCheck({ owner, groupId, work, events, ws }: Landed) {
+  const TITLE = "需要你确认：合并到 main";
+  const cardsIn = (topicId: string, author: string) =>
+    events
+      .filter((e) => e.type === "message.created" && e.data.message.topicId === topicId && e.data.message.authorId === author && e.data.message.card?.title === TITLE)
+      .map((e) => e.data.message);
+  const closedAs = (messageId: string, title: string) =>
+    until(`card closed as ${title}`, () => events.filter((e) => e.type === "message.updated" && e.data.messageId === messageId && e.data.card).at(-1)?.data.card.title === title);
+  const press = async (card: any) => {
+    const approve = card.card.actions.find((a: any) => a.id.startsWith("approve:"));
+    if (!approve) throw new Error(`the approval card has no 同意: ${JSON.stringify(card.card.actions)}`);
+    const rid = `landed-${++landedRid}`;
+    ws.send(JSON.stringify({ t: "card.action", rid, groupId, messageId: card.id, actionId: approve.id }));
+    const ack = await until("card.action ack", () => events.find((e) => e.frame?.rid === rid));
+    if (!ack.frame.ok) throw new Error(`pressing 同意 failed: ${JSON.stringify(ack.frame.error)}`);
+  };
+
+  const gx = await aiMember(owner, "gx", "codex");
+  const t = await say(events, ws, groupId, "@gx gated", { mentions: [gx] });
+  const push = await until("codex: the push asks a person", () => cardsIn(t.topicId, gx)[0], 60_000);
+  await say(events, ws, groupId, "拒绝", { topicId: t.topicId });
+  await closedAs(push.id, "已拒绝：合并到 main");
+  const run = await ranDone(events, t.topicId, "codex gates");
+  const dir = workOf(work, run.id);
+  const answers = JSON.parse(readFileSync(join(dir, "gated.json"), "utf8")) as any[];
+  const decided = answers.map((a) => a?.decision ?? a?.action ?? null);
+  if (JSON.stringify(decided) !== JSON.stringify(["accept", "accept", "decline", "accept"])) throw new Error(`codex: the requests were answered ${JSON.stringify(answers)}`);
+  const policies = JSON.parse(readFileSync(join(dir, "policies.json"), "utf8")) as string[];
+  if (policies.at(-1) !== "untrusted") throw new Error(`codex: a gated run started with approval policy ${JSON.stringify(policies)}`);
+  if (cardsIn(t.topicId, gx).length !== 1) throw new Error(`codex: ${cardsIn(t.topicId, gx).length} cards for one gated request`);
+
+  const ac = await aiMember(owner, "ac", "acp");
+  const a = await say(events, ws, groupId, "@ac approve merge", { mentions: [ac] });
+  const acpCard = await until("acp: gh pr merge asks a person", () => cardsIn(a.topicId, ac)[0], 60_000);
+  await press(acpCard);
+  await closedAs(acpCard.id, "已同意：合并到 main");
+  const ar = await ranDone(events, a.topicId, "acp gates");
+  const allowed = messageOf(events, ar.resultMessageId);
+  if (!allowed?.body.includes("permission yes")) throw new Error(`acp: the approved merge answered ${JSON.stringify(allowed?.body)}`);
+  const w = await say(events, ws, groupId, "@ac approve", { mentions: [ac] });
+  const wr = await ranDone(events, w.topicId, "acp: a file write");
+  if (cardsIn(w.topicId, ac).length !== 0) throw new Error("acp: a file write nobody gates asked a person");
+  const written = messageOf(events, wr.resultMessageId);
+  if (!written?.body.includes("permission yes")) throw new Error(`acp: the file write answered ${JSON.stringify(written?.body)}`);
+  step("gates by code: Codex (untrusted) asked a person only for the push (拒绝); ACP asked for gh pr merge and not for a file write");
+  return { codexRun: run.id, acpRuns: [ar.id, wr.id] };
+}
+
+/**
+ * chat-run read commands (PR #199, 接 2.2, 接 2.3, 接 2.6, 接 4.1): a run makes a 产出 and a card
+ * in one topic; a run in another topic reads the group's members, that topic's state and 产出,
+ * the 产出 itself, the card and the group's decisions.
+ */
+async function readCommandsCheck({ alice, bot, groupId, work, events, ws }: Landed) {
+  const made = await say(events, ws, groupId, "@dev artifact chatcard", { mentions: [bot.member.id] });
+  const r1 = await ranDone(events, made.topicId, "read: a 产出 and a card");
+  const madeDir = workOf(work, r1.id);
+  const art = JSON.parse(readFileSync(join(madeDir, "chatrun-1.json"), "utf8"));
+  if (art.code !== 0) throw new Error(`chat-run artifact create failed: ${JSON.stringify(art)}`);
+  const cardId = JSON.parse(readFileSync(join(madeDir, "chatcard-1.json"), "utf8")).post.out?.messageId as string;
+  if (!cardId) throw new Error("read: the first run posted no card");
+  const ask = await say(events, ws, groupId, `@dev readback topic:${made.topicId} card:${cardId}`, { mentions: [bot.member.id] });
+  const r2 = await ranDone(events, ask.topicId, "read: readback");
+  const got = JSON.parse(readFileSync(join(workOf(work, r2.id), "readback.json"), "utf8"));
+  const ok = (k: string) => {
+    if (got[k]?.code !== 0 || !got[k].out) throw new Error(`chat-run ${k} failed: ${JSON.stringify(got[k])}`);
+    return got[k].out;
+  };
+  const members = ok("members").members as any[];
+  if (!members.some((x) => x.id === alice.member.id && x.ai === false) || !members.some((x) => x.id === bot.member.id && x.ai === true)) {
+    throw new Error(`member list: ${JSON.stringify(members)}`);
+  }
+  const state = ok("state");
+  if (state.topicId !== made.topicId || !String(state.text).includes("看板")) throw new Error(`topic state: ${JSON.stringify(state)}`);
+  const listed = (ok("artifacts").artifacts as any[]).find((x) => x.title === "看板");
+  if (!listed || listed.topicId !== made.topicId || listed.createdBy !== bot.member.id) throw new Error(`artifact list: ${JSON.stringify(got.artifacts.out)}`);
+  const one = ok("artifact");
+  if (one.artifact?.id !== listed.id || !(one.versions?.length >= 1) || !String(one.text ?? "").includes("app.js")) throw new Error(`artifact get: ${JSON.stringify(one).slice(0, 400)}`);
+  const card = ok("card");
+  if (card.topicId !== made.topicId || card.card?.title !== "chat-run card") throw new Error(`card get: ${JSON.stringify(card).slice(0, 400)}`);
+  if (!Array.isArray(ok("decisions").decisions)) throw new Error(`decisions list: ${JSON.stringify(got.decisions)}`);
+  step("chat-run read commands: a run in another topic read the members, that topic's state and 产出, the 产出's text, the card and the decisions");
+  return { artifactId: listed.id, cardId };
+}
+
+/**
+ * Waiting for an offline computer (PR #195, 机 2.2, 接 6.3): with the only computer offline, a
+ * request queues with a note that names it instead of failing, and the run starts by itself
+ * once the computer is back.
+ */
+async function offlineComputerCheck({ owner, groupId, bot, events, ws, machineId, daemon }: Landed) {
+  if (!daemon) throw new Error("no daemon of this script to stop");
+  await daemon.stop();
+  await until(
+    "the computer is offline",
+    async () => !((await call("GET", "/v1/machines", { token: owner })) as any[]).find((x) => x.id === machineId)?.connected,
+    60_000,
+  );
+  const t = await say(events, ws, groupId, "@dev 等电脑回来", { mentions: [bot.member.id] });
+  const note = await until(
+    "offline: the waiting note",
+    () =>
+      events.find(
+        (e) => e.type === "message.created" && e.data.message.topicId === t.topicId && e.data.message.authorId === bot.member.id && e.data.message.body.includes("不在线，等它上线后自动开始"),
+      )?.data.message,
+    60_000,
+  );
+  const queued = runsIn(events, t.topicId).at(-1);
+  if (!queued || ENDED.includes(queued.status) || queued.machineId) throw new Error(`offline: the run did not wait: ${JSON.stringify(queued)}`);
+  daemon.start();
+  const done = await ranDone(events, t.topicId, "offline: the run once the computer is back");
+  if (done.id !== queued.id) throw new Error("offline: another run started instead of the waiting one");
+  step("offline computer: the request waited with a note naming the computer and ran once the daemon was back");
+  return { runId: done.id, note: note.body };
 }
 
 // ---------------------------------------------------------------------------
