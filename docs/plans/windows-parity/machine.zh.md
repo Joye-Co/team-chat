@@ -22,7 +22,8 @@
 
 ## 0. 缺口和它们的结局
 
-清单第一版列出 20 个缺口。现在全部补完；剩下的只有 CI 做不到的事，在第 8 节。
+清单第一版列出 20 个缺口，真 CLI 的测试在 Windows 上又抓出一个（G32）。现在全部补完；剩下的只有 CI
+做不到的事，在第 8 节。
 
 | 编号 | 缺口 | 结局 | 证据（都在 CI 上） |
 | --- | --- | --- | --- |
@@ -37,7 +38,7 @@
 | G9 | `local-e2e.ts` 只在 Linux 上跑 | 在 Windows 上跑 | `Daemon chain (Windows…)` |
 | G10 | 「用这台电脑」只编译过 | 在 runner 上从头到尾跑一遍 | `this_mac.rs::this_computer_becomes_a_machine_and_stops_being_one` |
 | G11 | 真的 `claude`、`codex` 没见过 | 按名字找到、`.cmd` 解析到 `.exe`、有版本、`doctor` 报出来 | `real_cli.rs::the_real_clis_are_found_by_name_and_say_their_version` |
-| G12 | 会话目录名规则是推断的 | 对着真 CLI 核对：文件就在 daemon 算出的目录里 | `real_cli.rs::the_real_cli_runs_a_turn_and_keeps_its_session_where_the_daemon_looks` |
+| G12 | 会话目录名规则是推断的 | 推断错了一处，已改：CLI 在 Windows 上不把短文件名（`RUNNER~1`）展开，daemon 原来会展开。对着真 CLI 核对：文件就在 daemon 算出的目录里 | `real_cli.rs::the_real_cli_runs_a_turn_and_keeps_its_session_where_the_daemon_looks` |
 | G13 | Codex 沙箱下的 `chat-run` | run 实际拿到的沙箱下（`danger-full-access`）真 Codex 启动真 `chat-run`，经请求目录往返 | `runtimes.rs::codex_on_windows_reaches_the_daemon_through_the_request_folder` |
 | G14 | 登录时会不会开本机浏览器 | 不会：CLI 在 Windows 上只会运行 `BROWSER` 指的程序，没有别的路 | 读 CLI 随包代码；`real_cli.rs::a_sign_in_with_the_real_cli_reports_the_link_and_can_be_cancelled` |
 | G18 | 只读目录在普通用户身份下没测全 | 以没有管理员权限的用户跑了一遍，八种改动全被拒绝 | `Daemon tests (Windows)` 里的一步 |
@@ -45,6 +46,7 @@
 | G20 | `git` 超时后留下子进程 | `git` 进 job | 代码 |
 | G24 | 不在 `PATH` 上的常见安装目录 | daemon 每次启动把存在的常见目录补到 `PATH` 后面 | `sys.rs` 单元测试 |
 | G27 | `doctor` 不查 Git for Windows | 不需要查：Claude Code 2.1 起没有 Git Bash 就用 PowerShell。`doctor` 现在写明它用哪个 | 读 CLI 更新日志和随包代码 |
+| G32 | 会话 id 是从 `/dev/urandom` 读的，Windows 没有这个文件：每个 Claude Code 会话的 id 都是同一个全零的值，续接可能接到别的话题的会话 | 改用系统的随机数源（三个系统同一段代码） | `runtimes.rs::session_ids_are_random_on_every_system`；是 `real_cli.rs` 在 Windows 上第一次跑时暴露的 |
 | G31 | 整条链没连起来跑过 | 安装命令、计划任务、本地服务器、run、取消、空闲时更新、run 进行中更新、注销和登录、卸载，一条龙 | `Daemon chain (Windows…)` |
 
 ## 1. 上报给服务器的能力
@@ -110,7 +112,8 @@
 ## 3. 代码里按平台分开的每一处
 
 `apps/daemon/src` 和 `tools/e2e/src` 里所有 `cfg(unix)`、`cfg(windows)`、`cfg(target_os = …)`、`cfg!(…)`
-（共 180 处，测试里的另列在第 5 节）。同一件事的几处并成一行。
+（共 180 处，测试里的另列在第 5 节）。同一件事的几处并成一行。没有写 `cfg` 却只在 Unix 上成立的代码
+（写死的 `/dev/…`、`/bin/…`、`ps`、`sh`）也搜了一遍：只有一处，G32。
 
 ### 进程
 
@@ -142,7 +145,8 @@
 | `workspace.rs`（`git`） | 长路径 | — | `git -c core.longpaths=true` | 一致 | — |
 | `chat_run.rs`（`install_link`、`link_name`、`started_as`） | `bin/chat-run` | 指向 daemon 的符号链接 | 硬链接，跨盘复制 | 一致 | — |
 | `selfupdate.rs`（`Stamp`、`clean_stale`、`repair`） | 认出程序文件被换了 | 设备号、inode、大小、修改时间、可执行位 | 卷序列号、文件索引、大小、写入时间；启动时删 `.old-*` | 一致（CI 跑过整个替换协议） | — |
-| `runtime/claude.rs`（`project_dir_name_of`） | Claude Code 的会话目录名 | 路径里非字母数字的都换成 `-` | 先去掉 `\\?\` 前缀再换（`C:\Users\me\work` → `C--Users-me-work`） | 一致（G12） | CLI 的规则是 `s.replace(/[^a-zA-Z0-9]/g, "-")`，按 UTF-16 单元算（daemon 原来按字符算，基本平面以外的字符差一个 `-`，两边一起改了）。超过 200 个字符时 CLI 截断并加哈希后缀，daemon 没有照做：两个系统上一样，这时退回「在所有项目目录里按会话 id 找」，续接会开新会话。run 目录的路径远短于 200 |
+| `runtime/claude.rs`（`project_dir_name_of`） | Claude Code 的会话目录名 | 路径里非字母数字的都换成 `-` | 先去掉 `\\?\` 前缀再换（`C:\Users\me\work` → `C--Users-me-work`） | 一致（G12） | Windows 上有两个候选名：按 daemon 交给 CLI 的路径算（CLI 解析链接但保留短文件名，通常就是这个），和按规范路径算；找会话和续接两个都照顾到。CLI 的规则是 `s.replace(/[^a-zA-Z0-9]/g, "-")`，按 UTF-16 单元算（daemon 原来按字符算，基本平面以外的字符差一个 `-`，两边一起改了）。超过 200 个字符时 CLI 截断并加哈希后缀，daemon 没有照做：两个系统上一样，这时退回「在所有项目目录里按会话 id 找」，续接会开新会话。run 目录的路径远短于 200 |
+| `runtime/mod.rs`（`uuid_v4`） | 会话 id | 读 `/dev/urandom` | 以前读不到，id 全零。现在两边都用系统的随机数源 | 一致（G32） | — |
 | `runtime/mod.rs`（`RunSpec::home`）、`config.rs`（`home`、`expand`） | 用户目录 | `HOME` | `HOME`，没有就 `USERPROFILE` | 一致 | — |
 | `sys.rs`（`PATH_SEP`、`is_executable`、`host_name`、`disk`、`load_avg`、`cpu_times`） | 系统的小差别 | — | 见第 1 节 | 一致 | — |
 | `tools/e2e/src/harness.rs`（`write_secret`）、`main.rs`（`home`） | 端到端工具存 owner token | 600，在 `~` 下 | 不设权限，靠用户目录本身私有（`%USERPROFILE%` 下，默认只有本用户、SYSTEM、管理员能读） | 一致（开发工具，不在机器上运行；放到别处由运行的人负责） | — |
@@ -218,7 +222,7 @@ runner 能装真的 Claude Code 和 Codex（npm），不能登录。办法是把
 | 默认的审批规则认不认 PowerShell 的写法 | `gh pr merge`、`git push origin main`、`wrangler deploy` 这类在哪个 shell 里都一样。`rm -rf /` 这类删除规则是按 POSIX 写的，`Remove-Item -Recurse` 不在默认规则里 | 这是服务器的默认规则（`packages/protocol`），不归 daemon；已告知负责服务器的人。装了 Git for Windows 的机器走 Bash，不受影响 |
 | npm 的 `claude.cmd`、`codex.cmd` | `claude.cmd` 指向包里的 `bin\claude.exe`（安装时换成真的程序），daemon 解析后直接启动 exe。`codex.cmd` 是 `node bin\codex.js`，daemon 解析成 `node.exe` 加脚本，脚本再启动包里的 `codex.exe`。两边都不经过 `cmd.exe` | 读代码；CI 断言解析结果是 `.exe`、`--version` 有输出、`doctor` 报出来 |
 | 登录放在哪 | Claude Code：`<CLAUDE_CONFIG_DIR 或 %USERPROFILE%\.claude>\.credentials.json`，明文文件，和 Linux 一样。Codex：`<CODEX_HOME 或 %USERPROFILE%\.codex>\auth.json`。daemon 现有的判断就是这两个文件 | 读代码 |
-| 会话文件放在哪 | `<配置目录>\projects\<工作目录，非字母数字换成 ->\<会话 id>.jsonl`，和 daemon 算的一致 | CI：真 CLI 跑完一轮，文件就在 daemon 算出的路径上 |
+| 会话文件放在哪 | `<配置目录>\projects\<工作目录，非字母数字换成 ->\<会话 id>.jsonl`。工作目录按 CLI 自己看到的算：链接解析掉，短文件名（`RUNNER~1`）原样留着 | CI：第一次跑时文件不在 daemon 算的目录里（daemon 把短文件名展开了），改完后就在 |
 | Codex 的 Windows 沙箱 | 默认没有（要在 Codex 配置里写 `[windows] sandbox` 才有）。daemon 给 run 的是 `danger-full-access`，这时不加任何限制，`chat-run` 的请求目录照常用 | 读代码；CI：真 Codex 的 `command/exec` 启动真 `chat-run`，请求到达 daemon，回答送回 |
 | Codex 的旁聊（`read-only`） | 命令写不了文件，工作目录里外都一样 | CI：`runtimes.rs::codex_read_only_sandbox_writes_nothing`（三个系统都跑） |
 | 登录时的浏览器 | 见第 3 节 `login_env` 一行 | 读代码；CI |
