@@ -4,6 +4,8 @@ import { z } from "zod";
 import { eventBase, Id, Millis, Name, Seq } from "./common.ts";
 import { AcceptanceItem, CliInfo, Effort, Health, Labels, MAX_ACCEPTANCE_ITEMS, MachineFeature, RunLogEntry, Usage } from "./machine.ts";
 import { RunPlan } from "./plan.ts";
+import { Artifact, ArtifactVersion } from "./files.ts";
+import { GroupDecision, RecordedDecision } from "./card2.ts";
 import { RunCode } from "./relay.ts";
 import { runPhaseFields } from "./takeover.ts";
 
@@ -208,6 +210,73 @@ export type BotMetrics = z.infer<typeof BotMetrics>;
 /** `GET /v1/machine/runs/:id/search` */
 export const ContextSearchResponse = z.object({ hits: z.array(ContextHit).max(50) });
 export type ContextSearchResponse = z.infer<typeof ContextSearchResponse>;
+
+/** `GET /v1/machine/runs/:id/artifacts?scope=topic|group`: the 产出 of the run's topic or group, newest first. */
+export const RunArtifactsResponse = z.object({ artifacts: z.array(Artifact) });
+export type RunArtifactsResponse = z.infer<typeof RunArtifactsResponse>;
+
+/** Characters of a 产出's entry text that `artifact get` carries. */
+export const MAX_RUN_ARTIFACT_TEXT = 200_000;
+
+/**
+ * `GET /v1/machine/runs/:id/artifacts/:artifactId?version=`: one 产出 of the run's group with its
+ * versions, newest first; `version` is the one read (default the current one) and `text` its entry
+ * file when that is text (cut to `MAX_RUN_ARTIFACT_TEXT`, then `truncated`).
+ */
+export const RunArtifactResponse = z.object({
+  artifact: Artifact,
+  versions: z.array(ArtifactVersion),
+  version: z.int().positive(),
+  text: z.string().optional(),
+  truncated: z.boolean().optional(),
+});
+export type RunArtifactResponse = z.infer<typeof RunArtifactResponse>;
+
+/** One answer of a card as a run reads it. */
+export const RunCardAnswer = z.object({
+  actorId: Id,
+  actorName: z.string(),
+  at: Millis.optional(),
+  value: z.json().optional(),
+  inputs: z.json().optional(),
+});
+export type RunCardAnswer = z.infer<typeof RunCardAnswer>;
+
+/**
+ * `GET /v1/machine/runs/:id/cards/:messageId`: a card of the run's group, whole: the message as a
+ * compact line, the card document (v2, or the 1.0 card) and its live answers.
+ */
+export const RunCardResponse = z.object({
+  topicId: Id,
+  message: ContextMessage,
+  card: z.json(),
+  /** The open ask: who is waited on. */
+  ask: z.object({ status: z.string(), from: z.array(z.string()) }).optional(),
+  answers: z.array(RunCardAnswer),
+  answerCount: Count.optional(),
+});
+export type RunCardResponse = z.infer<typeof RunCardResponse>;
+
+/** `GET /v1/machine/runs/:id/decisions?limit=`: the group's decisions, newest first. */
+export const RunDecisionsResponse = z.object({
+  decisions: z.array(GroupDecision.extend({ answeredByName: z.string() })),
+  hasMore: z.boolean(),
+  /** Decisions recorded by hand (记一条), newest first. */
+  recorded: z.array(RecordedDecision.extend({ recordedByName: z.string() })).optional(),
+});
+export type RunDecisionsResponse = z.infer<typeof RunDecisionsResponse>;
+
+/** One member of the run's group as a run reads it: name, 岗位 and whether it is an AI member. */
+export const RunMember = z.object({ id: Id, name: z.string(), role: z.string().optional(), ai: z.boolean() });
+export type RunMember = z.infer<typeof RunMember>;
+
+/** `GET /v1/machine/runs/:id/members` */
+export const RunMembersResponse = z.object({ members: z.array(RunMember) });
+export type RunMembersResponse = z.infer<typeof RunMembersResponse>;
+
+/** `GET /v1/machine/runs/:id/topic/state?topic=`: one compact state card of a topic (at most 2,000 characters). */
+export const TopicStateResponse = z.object({ topicId: Id, title: z.string(), text: z.string().max(2000) });
+export type TopicStateResponse = z.infer<typeof TopicStateResponse>;
 
 /**
  * `POST /v1/runs` (a bot that is not runner-backed, member of the group): starts a run of the
