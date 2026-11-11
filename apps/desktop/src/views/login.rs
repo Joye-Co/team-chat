@@ -49,6 +49,23 @@ pub fn default_server_url() -> &'static str {
     }
 }
 
+/// The servers a build knows by name, for the login window's server step: 正式服务器 and
+/// 测试服务器, each only when the build has its URL, and the second only when it is another
+/// server than the first. A build without URLs (an open-source build) has none.
+pub fn server_presets(
+    production: &'static str,
+    staging: &'static str,
+) -> Vec<(&'static str, &'static str, &'static str)> {
+    let mut out = Vec::new();
+    if !production.is_empty() {
+        out.push(("login-server-production", l::SERVER_PRODUCTION, production));
+    }
+    if !staging.is_empty() && staging != production {
+        out.push(("login-server-staging", l::SERVER_STAGING, staging));
+    }
+    out
+}
+
 /// Characters in an invite code (`XXXX-XXXX`, server `newInviteCode`).
 pub const CODE_LEN: usize = 8;
 /// Characters of a code made before the 8-character format
@@ -606,8 +623,32 @@ impl LoginView {
                 .font_weight(gpui::FontWeight::NORMAL)
         };
         if server_step {
-            return link("login-server-cancel", common::CANCEL, cx)
-                .on_click(cx.listener(|this, _, window, cx| this.close_server_field(window, cx)))
+            let cancel = link("login-server-cancel", common::CANCEL, cx)
+                .on_click(cx.listener(|this, _, window, cx| this.close_server_field(window, cx)));
+            // The servers this build knows by name. On the Mac they are in the app menu's
+            // 服务器 submenu, which the menu bar shows at the login window too; off the Mac
+            // the login window has no menu bar, so they are links here, next to 取消.
+            let presets = if crate::ui::native::window_chrome::drawn() {
+                server_presets(env!("PRODUCT_PRODUCTION_URL"), env!("PRODUCT_STAGING_URL"))
+            } else {
+                Vec::new()
+            };
+            if presets.is_empty() {
+                return cancel.into_any_element();
+            }
+            return div()
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap(space::S16)
+                .children(presets.into_iter().map(|(id, label, url)| {
+                    link(id, label, cx).on_click(cx.listener(move |this, _, window, cx| {
+                        this.server
+                            .update(cx, |st, cx| st.set_value(url.to_string(), window, cx));
+                        this.close_server_field(window, cx);
+                    }))
+                }))
+                .child(cancel)
                 .into_any_element();
         }
         // The email steps: back to the invite code, and on the code step
@@ -1061,6 +1102,35 @@ fn move_to_login_window(services: Services, window: &mut Window, cx: &mut gpui::
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_login_window_names_only_the_servers_the_build_has() {
+        let names = |production, staging| -> Vec<&'static str> {
+            server_presets(production, staging)
+                .into_iter()
+                .map(|(_, label, _)| label)
+                .collect()
+        };
+        // An open-source build has no server of its own: nothing to pick.
+        assert!(names("", "").is_empty());
+        assert_eq!(
+            names("https://chat.example", "https://staging.example"),
+            [l::SERVER_PRODUCTION, l::SERVER_STAGING]
+        );
+        assert_eq!(names("https://chat.example", ""), [l::SERVER_PRODUCTION]);
+        assert_eq!(names("", "https://staging.example"), [l::SERVER_STAGING]);
+        // One server under both names is offered once.
+        assert_eq!(
+            names("https://chat.example", "https://chat.example"),
+            [l::SERVER_PRODUCTION]
+        );
+        // Each link fills in its own URL.
+        let urls: Vec<_> = server_presets("https://a.example", "https://b.example")
+            .into_iter()
+            .map(|(_, _, url)| url)
+            .collect();
+        assert_eq!(urls, ["https://a.example", "https://b.example"]);
+    }
 
     #[test]
     fn code_input_reads_codes_and_tokens() {

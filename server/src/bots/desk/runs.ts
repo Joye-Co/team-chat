@@ -1,5 +1,7 @@
 // BotDesk runs: starting a run from a mention (claim, ack, machine, prompt, assign) and the
 // MachineLink answers to an assignment (accepted, rejected, lost).
+import { workerModel } from "../../settings/models";
+import type { WorkerModel } from "@chat/protocol";
 import { type BotRunner, isMainTopicId, RUN_KIND_ASIDE, type RunAssignFrame, type RunContextManifest, type TopicContext } from "@chat/protocol";
 import { roomStub } from "../../core/env";
 import { unwrap } from "../../core/errors";
@@ -456,7 +458,7 @@ export abstract class DeskRuns extends DeskCore {
     });
   }
 
-  protected assignFrame(r: RunRow, runner: BotRunner, prompt: string, machine?: MachineView): RunAssignFrame {
+  protected assignFrame(r: RunRow, runner: BotRunner, prompt: string, machine?: MachineView, team?: WorkerModel | null): RunAssignFrame {
     const frame: RunAssignFrame = {
       t: "run.assign",
       runId: r.id,
@@ -469,9 +471,12 @@ export abstract class DeskRuns extends DeskCore {
       leaseMs: LEASE_MS,
       maxDurationMs: MAX_RUN_MS,
     };
-    if (runner.model) frame.model = runner.model;
+    // The member's own choice wins, then the team's for this CLI (设置 › 模型), then the CLI's default.
+    const model = runner.model ?? team?.model;
+    const effort = runner.effort ?? team?.effort;
+    if (model) frame.model = model;
     // 思考强度 only to a daemon that knows the field (an old one would ignore it silently).
-    if (runner.effort && machine && hasFeature(machine, "effort")) frame.effort = runner.effort;
+    if (effort && machine && hasFeature(machine, "effort")) frame.effort = effort;
     if (r.kind === RUN_KIND_ASIDE) frame.kind = RUN_KIND_ASIDE;
     if (runner.repo) frame.repo = { ...runner.repo, ...(runner.baseBranch ? { baseBranch: runner.baseBranch } : {}) };
     // Continue the topic's last session when this run goes to the machine that has it.
@@ -481,7 +486,7 @@ export abstract class DeskRuns extends DeskCore {
   }
 
   protected async assign(r: RunRow, runner: BotRunner, machine: MachineView, prompt: string): Promise<void> {
-    const frame = this.assignFrame(r, runner, prompt, machine);
+    const frame = this.assignFrame(r, runner, prompt, machine, await workerModel(this.env.DB, runner.runtime));
     // Gated actions: the team's checked kinds, to a machine whose CLI stops them; kinds a person
     // approved for this piece of work are left out.
     if (r.kind !== RUN_KIND_ASIDE && gatesRuntime(machine, runner.runtime)) {

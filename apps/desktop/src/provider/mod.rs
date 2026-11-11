@@ -2255,6 +2255,14 @@ impl ChatProvider for CoreProvider {
         rx
     }
 
+    fn this_computer_clis(&self) -> AdminReply<Vec<String>> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(Ok(this_mac::local_clis()));
+        });
+        rx
+    }
+
     fn group_prefs(&self, group_id: &str) -> GroupPrefs {
         self.group_prefs_inner(group_id)
     }
@@ -2321,6 +2329,15 @@ impl ChatProvider for CoreProvider {
     }
     fn ai_service(&self) -> AdminReply<crate::data::AiServiceSettings> {
         self.ai_service_inner()
+    }
+    fn worker_models(&self) -> AdminReply<Vec<crate::data::WorkerModelSetting>> {
+        self.worker_models_inner()
+    }
+    fn set_worker_model(
+        &self,
+        setting: crate::data::WorkerModelSetting,
+    ) -> AdminReply<crate::data::WorkerModelSetting> {
+        self.set_worker_model_inner(setting)
     }
     fn set_ai_service(
         &self,

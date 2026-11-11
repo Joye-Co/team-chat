@@ -731,6 +731,24 @@ pub(crate) fn open_end(
     Ok(handle)
 }
 
+/// 通用 scrolled to 模型 (drawn here as before it moved to 团队管理): the front desk's model and
+/// the team's model per runtime.
+pub fn open_models(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::General, cx)?;
+    handle
+        .update(cx, |_, window, cx| {
+            let general = view.read(cx).general().clone();
+            general.update(cx, |g, cx| g.show_ai_here(cx));
+            window.on_next_frame(move |_, cx| view.read(cx).scroll_to_y(gpui::px(560.)));
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(handle)
+}
+
 /// 成员 scrolled to its end: 默认规则.
 pub fn open_members_end(
     services: Services,
@@ -1104,6 +1122,24 @@ pub fn open_bot_dialog_new_name(
         |s, w, cx| {
             let form = super::members::open_add_bot(s, w, cx);
             form.update(cx, |f, cx| f.fill("发布巡检", None, w, cx));
+        },
+        cx,
+    )
+}
+
+/// 成员 with the 添加 AI 成员 sheet set to work on the team's computers: 运行方式 lists what
+/// the computers report by name, the ones not signed in marked.
+pub fn open_bot_dialog_runner(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Members,
+        |s, w, cx| {
+            let form = super::members::open_add_bot(s, w, cx);
+            form.update(cx, |f, cx| f.fill("发布巡检", Some(""), w, cx));
         },
         cx,
     )

@@ -1,0 +1,8 @@
+{
+  "kind": "SetWorkerModelRequest",
+  "valid": false,
+  "description": "space in model",
+  "value": {
+    "model": "gpt 6"
+  }
+}

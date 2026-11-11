@@ -1,0 +1,11 @@
+{
+  "kind": "WorkerModel",
+  "valid": false,
+  "description": "runtime names are lower-case words",
+  "value": {
+    "runtime": "Claude Code",
+    "model": "opus",
+    "effort": "high",
+    "updatedAt": 1762128000000
+  }
+}

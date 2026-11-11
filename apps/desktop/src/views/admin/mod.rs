@@ -16,6 +16,7 @@ mod overview;
 pub mod scenes;
 mod spark;
 mod team;
+mod this_computer;
 mod usage;
 
 use std::time::Duration;
@@ -51,7 +52,7 @@ use crate::{
 };
 
 pub use accounts::Page as AdminPage;
-pub use model::Range;
+pub use model::{Range, cli_name};
 
 gpui::actions!(
     admin,
@@ -200,6 +201,8 @@ pub struct AdminView {
     rules: Entity<crate::views::settings::members::MembersPage>,
     memory: Entity<crate::views::memory::MemoryBoard>,
     ai: Entity<crate::views::settings::ai_service::AiServicePanel>,
+    /// 模型, under AI 服务 on the same page.
+    models: Entity<crate::views::settings::worker_models::WorkerModelsPanel>,
 }
 
 impl AdminView {
@@ -251,6 +254,13 @@ impl AdminView {
         let ai = cx.new(|cx| {
             crate::views::settings::ai_service::AiServicePanel::new(services.clone(), window, cx)
         });
+        let models = cx.new(|cx| {
+            crate::views::settings::worker_models::WorkerModelsPanel::new(
+                services.clone(),
+                window,
+                cx,
+            )
+        });
         let mut this = Self {
             services,
             owner,
@@ -272,6 +282,7 @@ impl AdminView {
             rules,
             memory,
             ai,
+            models,
             _poll: poll,
             _subs: subs,
         };
@@ -414,7 +425,7 @@ impl AdminView {
 }
 
 /// Local midnight in ms: 今天 for the server.
-fn day_start() -> u64 {
+pub(crate) fn day_start() -> u64 {
     crate::selftest::clock::local_now()
         .date_naive()
         .and_hms_opt(0, 0, 0)
@@ -1102,7 +1113,12 @@ impl AdminView {
                     .child(self.memory.clone())
                     .into_any_element();
             }
-            accounts::Page::Ai => return pad.child(self.ai.clone()).into_any_element(),
+            accounts::Page::Ai => {
+                return pad
+                    .child(self.ai.clone())
+                    .child(self.models.clone())
+                    .into_any_element();
+            }
             accounts::Page::Activity => {
                 return pad.child(self.activity_page(window, cx)).into_any_element();
             }
