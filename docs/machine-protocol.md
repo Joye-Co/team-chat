@@ -848,6 +848,17 @@ POST /v1/machine/runs/:id/github/rejected                                       
   that git got an authentication failure, so the server checks the token once.
 - The `chat-run` ops `git-credential` and `github.token` are answered by the daemon itself, like
   `secret`; they are never `output` run events.
+- What the daemon does with `run.assign.github`: `GIT_COMMITTER_*` is the AI member and
+  `GIT_AUTHOR_*` the person when `author` is given. With `source: "app"` it clears github.com's
+  credential helpers and sets `!chat-run git-credential` instead (`GIT_CONFIG_COUNT/KEY/VALUE`),
+  puts a `gh` proxy first on `PATH` (`<run folder>/bin/gh`; in a VM `/opt/runner/bin/gh` on the
+  tools disk) that runs the real `gh` with `GH_TOKEN` for that one command, and sets
+  `CHAT_GITHUB_AS` to the person's name (`gh auth login|logout|refresh|setup-git` are refused).
+  Its own clone and fetch of the mirror use the token as an HTTP header of those git processes
+  only. Every token it gets is masked in that run's frames, files, session upload and
+  `stderr.log`. Before a VM run it removes an earlier GitHub sign-in from the member's kept home
+  (`.config/gh/hosts.yml`, `.git-credentials`, github.com credential and token `url.*` sections
+  of `.gitconfig`). Any other `source` gets only the committer.
 
 Take-over (feature `takeover`):
 
