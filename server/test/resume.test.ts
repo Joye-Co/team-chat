@@ -1,8 +1,9 @@
 // 1.1 resume (docs/machine-protocol.md "resume"): BotDesk keeps the CLI session of a run and
 // gives the topic's next run on the same machine `run.assign.resumeSessionId`.
 import { afterAll, describe, expect, it } from "vitest";
+import { asideRuntime, resumesRuntime } from "../src/bots/dispatch";
 import { Daemon, downViolations, mention, world } from "./daemon";
-import { Client, clientMsgId, protocolViolations } from "./helpers";
+import { Client, api, clientMsgId, protocolViolations } from "./helpers";
 
 afterAll(async () => {
   await new Promise((r) => setTimeout(r, 300));
@@ -57,5 +58,67 @@ describe("resume", () => {
     expect(b.resumeSessionId).toBeUndefined();
     old.d.close();
     c2.close();
+  });
+
+  // 接 3.6: an ACP agent continues its session only when the machine says its CLI can
+  // (session/load); otherwise the next run gets the full prompt, as a first run does.
+  for (const [name, cli, resumes] of [
+    ["an ACP agent with session/load", { kind: "acp", command: "opencode", resume: true }, true],
+    ["an ACP agent without it", { kind: "acp", command: "gemini", resume: false }, false],
+    ["an ACP agent of a daemon that does not say", { kind: "acp", command: "gemini" }, false],
+  ] as const) {
+    it(`continue the session of ${name}: ${resumes}`, async () => {
+      const w = await world({ runtime: "agent" });
+      const { d } = await Daemon.connect(w.machineToken, { features: ["resume"], runtime: "agent", cli });
+      const { c } = await Client.connect(w.human.token);
+      const topicId = await mention(c, w, "@dev 第一件事：修好登录");
+      const first = await d.next((f) => f.t === "run.assign");
+      expect(first.prompt).toContain("修好登录");
+      await finish(d, first.runId, "ses_1");
+      await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === first.runId && e.data.run.status === "done");
+
+      await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "@dev 接着加测试", mentions: [w.bot.id] });
+      const second = await d.next((f) => f.t === "run.assign" && f.runId !== first.runId);
+      expect(second.prompt).toContain("接着加测试");
+      if (resumes) {
+        expect(second.resumeSessionId).toBe("ses_1");
+        // Only what the session has not seen.
+        expect(second.prompt).not.toContain("修好登录");
+      } else {
+        expect(second.resumeSessionId).toBeUndefined();
+        // The full topic, as for a first run.
+        expect(second.prompt).toContain("修好登录");
+      }
+      const ctx = await api(`/v1/runs/${second.runId}/context`, { token: w.owner.token });
+      expect(ctx.status).toBe(200);
+      expect(ctx.body.manifest.resumed).toBe(resumes);
+      d.send({ t: "run.accept", runId: second.runId });
+      await d.acked(second.runId, d.done(second.runId, { status: "succeeded", resultText: "ok" }));
+      d.close();
+      c.close();
+    });
+  }
+
+  it("know per CLI which runtimes continue sessions and run side chats read-only", () => {
+    const m = (features: string[], cli: Record<string, unknown>) => ({
+      info: { features } as never,
+      clis: [{ runtime: "rt", command: "x", available: true, ...cli } as never],
+    });
+    // A daemon that reports the fields.
+    expect(resumesRuntime(m(["resume"], { kind: "acp", resume: true }), "rt")).toBe(true);
+    expect(resumesRuntime(m(["resume"], { kind: "acp", resume: false }), "rt")).toBe(false);
+    expect(resumesRuntime(m(["resume"], { kind: "claude", resume: false }), "rt")).toBe(false);
+    expect(asideRuntime(m(["aside"], { kind: "acp", aside: false }), "rt")).toBe(false);
+    expect(asideRuntime(m(["aside"], { kind: "codex", aside: true }), "rt")).toBe(true);
+    // An older daemon: by kind.
+    expect(resumesRuntime(m(["resume"], { kind: "codex" }), "rt")).toBe(true);
+    expect(resumesRuntime(m(["resume"], { kind: "acp" }), "rt")).toBe(false);
+    expect(resumesRuntime(m(["resume"], { kind: "pty" }), "rt")).toBe(false);
+    expect(asideRuntime(m(["aside"], { kind: "claude" }), "rt")).toBe(true);
+    expect(asideRuntime(m(["aside"], { kind: "acp" }), "rt")).toBe(false);
+    // The feature is still needed, and the runtime must be on the machine.
+    expect(resumesRuntime(m([], { kind: "acp", resume: true }), "rt")).toBe(false);
+    expect(asideRuntime(m([], { kind: "claude", aside: true }), "rt")).toBe(false);
+    expect(resumesRuntime(m(["resume"], { kind: "claude" }), "other")).toBe(false);
   });
 });

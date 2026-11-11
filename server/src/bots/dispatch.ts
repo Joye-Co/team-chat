@@ -102,6 +102,28 @@ export function gatesRuntime(m: Pick<MachineView, "info" | "clis">, runtime: str
   return hasFeature(m, "gates") && (m.clis ?? []).some((c) => c.runtime === runtime && c.gates === true);
 }
 
+/** Kinds that continue a session and have a read-only mode when a daemon does not say (`CliInfo.resume` / `aside` absent). */
+const SESSION_KINDS: readonly string[] = ["claude", "codex"];
+
+function cliOf(m: Pick<MachineView, "clis">, runtime: string): CliInfo | undefined {
+  return (m.clis ?? []).find((c) => c.runtime === runtime);
+}
+
+/**
+ * Runs of this runtime on the machine continue `resumeSessionId` (接 3.6): feature "resume" and
+ * the CLI's `resume`; a daemon that does not report it continues only Claude Code and Codex.
+ */
+export function resumesRuntime(m: Pick<MachineView, "info" | "clis">, runtime: string): boolean {
+  const cli = cliOf(m, runtime);
+  return hasFeature(m, "resume") && cli !== undefined && (cli.resume ?? SESSION_KINDS.includes(cli.kind));
+}
+
+/** The machine runs a side chat (单独问) of this runtime read-only: feature "aside" and the CLI's `aside` (absent: Claude Code and Codex). */
+export function asideRuntime(m: Pick<MachineView, "info" | "clis">, runtime: string): boolean {
+  const cli = cliOf(m, runtime);
+  return hasFeature(m, "aside") && cli !== undefined && (cli.aside ?? SESSION_KINDS.includes(cli.kind));
+}
+
 export interface MachineView {
   id: string;
   name: string;
