@@ -329,20 +329,14 @@ impl EmbeddedArtifact {
             win::post(move || done(None));
             return;
         }
-        // The whole view, as WKWebView's snapshot is: what the page shows in its own
-        // viewport at its own scroll position, also where the host clips the view (a page
-        // half under the toolbar). A capture without a clip is only what is on screen,
-        // which made the 产出 list's thumbnail a strip from the middle of the page.
+        // Diagnosis of the 产出 thumbnail (it starts below the page's top on Windows): what
+        // the page's viewport is when its picture is taken.
         let page = self.page.clone();
-        let scale = win::window_scale(self.host);
         self.page.evaluate_text(
-            "JSON.stringify([scrollX, scrollY, innerWidth, innerHeight])",
+            "JSON.stringify([scrollX, scrollY, innerWidth, innerHeight, document.documentElement.scrollHeight, location.host])",
             move |view| {
-                let view: Option<[f64; 4]> = view.and_then(|v| serde_json::from_str(&v).ok());
-                let clip = view
-                    .filter(|v| v[2] >= 1.0 && v[3] >= 1.0)
-                    .map(|v| (Rect::new(v[0], v[1], v[2], v[3]), scale));
-                page.capture(clip, move |png| done(png.ok()));
+                eprintln!("artifact-view snapshot: {view:?}");
+                page.capture(None, move |png| done(png.ok()));
             },
         );
     }
