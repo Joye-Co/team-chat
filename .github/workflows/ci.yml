@@ -465,6 +465,10 @@ jobs:
           TC_REQUIRE_REAL_CLI: "1"
           TC_REQUIRE_REAL_CODEX: "1"
         run: cargo test --locked -p daemon --features test-fakes --no-fail-fast
+      # What Codex's own Windows sandbox did to chat-run (tests/runtimes.rs writes it down).
+      - name: Codex Windows sandbox and chat-run (what happened)
+        if: always()
+        run: cat target/tmp/codex-windows-sandbox.json || true
       # The same as on Linux: with managed settings that allow only managed hooks, the real CLI
       # never gets the prompt of a gated run.
       - name: A gated run does not start when only managed hooks are allowed
@@ -479,34 +483,13 @@ jobs:
       - name: PowerShell install command (real daemon as a scheduled task)
         shell: powershell
         run: ./scripts/test-install-daemon.ps1
-      # Report only: whether a user without administrator rights may register the task (the
-      # runner's own user is an administrator). The answer is in this step's output: that user is
-      # not logged on, so starting the task (schtasks /Run) may fail; /Create is what is asked.
-      - name: Register the task as a standard user (report only)
-        continue-on-error: true
+      # As a person's computer is: a user without administrator rights (the runner's own user
+      # is an elevated administrator). The same test programs, started as a standard user
+      # made for it: runs, cancel and pause, the whole daemon against the mock server, and the
+      # scheduled task of that user (install, restart, one daemon only, update, uninstall).
+      - name: The daemon as a standard user (runs, the scheduled task)
         shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $user = 'tcstandard'
-          $secret = 'Tc!' + [guid]::NewGuid().ToString('N') + 'aA1'
-          $secure = ConvertTo-SecureString $secret -AsPlainText -Force
-          New-LocalUser -Name $user -Password $secure -AccountNeverExpires | Out-Null
-          Add-LocalGroupMember -Group 'Users' -Member $user
-          $cred = New-Object Management.Automation.PSCredential("$env:COMPUTERNAME\$user", $secure)
-          # A folder that user may read but not change (install-service refuses a daemon that
-          # others can replace, such as one under C:\Users\Public).
-          $dir = 'C:\tc-standard'
-          New-Item -ItemType Directory -Force -Path $dir | Out-Null
-          & icacls.exe $dir /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' "${user}:(OI)(CI)RX" | Out-Null
-          Copy-Item target\debug\daemon.exe "$dir\daemon.exe"
-          [IO.File]::WriteAllText("$dir\daemon.toml", "server_url = `"http://127.0.0.1:9`"`ntoken_file = `"C:\\tc-standard\\token`"`n[runtimes.ci]`nkind = `"claude`"`ncommand = 'C:\Windows\System32\whoami.exe'`n")
-          [IO.File]::WriteAllText("$dir\token", 'tm_test_not_a_real_token')
-          foreach ($verb in 'install-service', 'uninstall-service') {
-            $p = Start-Process -FilePath "$dir\daemon.exe" -ArgumentList $verb, '--config', "$dir\daemon.toml" -Credential $cred -WorkingDirectory $dir -Wait -PassThru -RedirectStandardOutput "$dir\out.txt" -RedirectStandardError "$dir\err.txt"
-            Write-Host "$verb as a standard user: exit code $($p.ExitCode)"
-            Get-Content "$dir\out.txt", "$dir\err.txt"
-          }
-          Remove-LocalUser -Name $user
+        run: ./scripts/test-daemon-standard-user.ps1
       # A side chat's checkout is read-only to its CLI. The runner's own user is an elevated
       # administrator, whom a restore privilege lets remove files and make folders past an
       # access list (as root is past file modes), so the tests above cannot show the whole of

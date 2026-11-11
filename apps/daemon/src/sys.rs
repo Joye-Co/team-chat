@@ -253,6 +253,23 @@ pub fn disk(path: &Path) -> (u64, u64) {
     }
 }
 
+/// How long the machine was asleep (or this process was not run at all) between two ticks
+/// of a timer with the period `period` that came `between` apart: what is over the period,
+/// when that is more than a pause the scheduler or a busy machine explains. None for an
+/// ordinary tick.
+///
+/// A closed lid stops every clock a program can wait on, but not what the program measures
+/// afterwards: on Windows a monotonic clock counts the time asleep, on Unix a stopped process
+/// sees the time it was stopped. Whoever times "nothing happened for five minutes" or "the
+/// server has been silent" asks this first.
+pub fn slept(
+    between: std::time::Duration,
+    period: std::time::Duration,
+) -> Option<std::time::Duration> {
+    const LATE: std::time::Duration = std::time::Duration::from_secs(20);
+    (between > period + LATE).then(|| between - period)
+}
+
 /// The 1, 5 and 15 minute load averages. Windows keeps none, so the daemon keeps its own
 /// ([`windows_load`]). The first call there measures for half a second and starts all three
 /// averages at what it saw, so the first report of a daemon (and `doctor`, which asks once) is
@@ -541,6 +558,24 @@ pub fn windows_plain_path(path: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A tick that comes on time, or a little late, is a tick; one that comes much later
+    /// than its period means the machine slept for the rest.
+    #[test]
+    fn a_tick_that_is_far_too_late_means_the_machine_slept() {
+        use std::time::Duration as D;
+        assert_eq!(slept(D::from_secs(15), D::from_secs(15)), None);
+        assert_eq!(slept(D::from_secs(0), D::from_secs(15)), None);
+        assert_eq!(slept(D::from_secs(34), D::from_secs(15)), None);
+        assert_eq!(
+            slept(D::from_secs(36), D::from_secs(15)),
+            Some(D::from_secs(21))
+        );
+        assert_eq!(
+            slept(D::from_secs(8 * 3600), D::from_secs(30)),
+            Some(D::from_secs(8 * 3600 - 30))
+        );
+    }
 
     /// A steady load of two busy processors is 2.0 after a few windows, on each average at
     /// its own pace, and falls back to nothing when the machine goes idle.
