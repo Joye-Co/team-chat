@@ -2032,7 +2032,10 @@ impl ChatProvider for FakeProvider {
             expires_at: 0,
         }))
     }
-    fn phone_offer_state(&self, _id: &str) -> crate::data::EmailReply<crate::data::PhoneOfferState> {
+    fn phone_offer_state(
+        &self,
+        _id: &str,
+    ) -> crate::data::EmailReply<crate::data::PhoneOfferState> {
         crate::data::email_reply_now(Ok(crate::data::PhoneOfferState::Waiting))
     }
     fn add_email_code(&self, _email: &str) -> crate::data::EmailReply<()> {
