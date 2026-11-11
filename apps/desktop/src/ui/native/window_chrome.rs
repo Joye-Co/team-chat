@@ -10,6 +10,8 @@
 //! Windows 11 shows Snap Layouts over the maximize button. GPUI insets a
 //! maximized window by the frame thickness itself.
 
+#[cfg(not(target_os = "macos"))]
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, IntoElement, ParentElement as _, SharedString, Styled as _, Window, div,
 };
@@ -85,6 +87,10 @@ pub fn framed_fixed(
     frame(title.into(), Kind::Fixed, content, window, cx)
 }
 
+/// How much of the menus' ink an inactive window keeps (`label` to `tertiary`).
+#[cfg(not(target_os = "macos"))]
+const INACTIVE_MENUS: f32 = 0.5;
+
 /// What a window's caption strip holds.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -134,6 +140,8 @@ fn caption(title: SharedString, kind: Kind, window: &mut Window, cx: &mut App) -
         div()
             .flex_none()
             .h_full()
+            // The menus dim with the rest of an inactive window's title.
+            .when(!emphasized(window), |d| d.opacity(INACTIVE_MENUS))
             .child(crate::views::nav::menus::window_menu_bar(cx))
     });
     #[cfg(target_os = "macos")]

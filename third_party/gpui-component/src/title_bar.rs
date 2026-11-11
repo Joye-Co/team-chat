@@ -210,7 +210,7 @@ impl ControlIcon {
 }
 
 impl RenderOnce for ControlIcon {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let is_linux = cfg!(target_os = "linux");
         let is_windows = cfg!(target_os = "windows");
         let hover_fg = self.hover_fg(cx);
@@ -234,7 +234,12 @@ impl RenderOnce for ControlIcon {
             .justify_center()
             .content_center()
             .items_center()
-            .text_color(cx.theme().foreground)
+            // An inactive window dims its buttons, as Windows' own title bars do.
+            .text_color(if window.is_window_active() {
+                cx.theme().foreground
+            } else {
+                cx.theme().muted_foreground
+            })
             .when(disabled, |this| {
                 this.text_color(cx.theme().muted_foreground).opacity(0.5)
             })

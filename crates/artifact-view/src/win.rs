@@ -399,13 +399,16 @@ fn user_data_dir(autoplay: bool) -> PathBuf {
 ///   for WebRTC, which the request filter does not see; the script that removes the
 ///   constructors is only the first layer.
 /// - The browser's own background requests are off.
+/// - Scrollbars are the thin ones of Windows 11 that lie over the content and fade out
+///   (as WebKit's do on macOS), not the classic bar with arrow buttons that takes 17 px
+///   of the page's width.
 fn browser_arguments(autoplay: bool) -> String {
     let mut args = String::from(
         "--host-resolver-rules=\"MAP * ~NOTFOUND\" \
          --proxy-server=\"http://0.0.0.0:1\" --proxy-bypass-list=\"<-loopback>\" \
          --force-webrtc-ip-handling-policy=disable_non_proxied_udp \
          --disable-background-networking --disable-domain-reliability --no-pings \
-         --dns-prefetch-disable",
+         --dns-prefetch-disable --enable-features=FluentOverlayScrollbar",
     );
     args.push_str(if autoplay {
         " --autoplay-policy=no-user-gesture-required"
