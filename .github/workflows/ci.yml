@@ -188,6 +188,10 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: linux-test
+      # The real Claude Code CLI, without a login: the daemon's tests drive it against a fake
+      # model (the approval hook of a gated run; see the Windows job, which pins the same version).
+      - name: Install the real Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code@2.1.322
       - name: cargo test
         run: cargo test --locked -p chat-protocol -p chat-core -p daemon -p update-helper
 
@@ -397,7 +401,16 @@ jobs:
       # is listed in docs/plans/windows-parity/machine.zh.md.
       # Also tests/service_task.rs: the scheduled task of the runner's own user with a stand-in
       # daemon, against the real Task Scheduler (docs/plans/windows.zh.md, M3).
+      # The real Claude Code and Codex CLIs, without a login: tests/real_cli.rs and the real
+      # cases of tests/integration.rs and tests/runtimes.rs drive them against a fake model
+      # (how the CLI starts the approval hook, what a failed hook does, its shell tools, its
+      # session files, Codex's sandbox). Pinned, so a new CLI release cannot break an unrelated
+      # change: raise the versions on purpose.
+      - name: Install the real Claude Code and Codex CLIs
+        run: npm install -g @anthropic-ai/claude-code@2.1.322 @openai/codex@0.167.1
       - name: cargo test (daemon)
+        env:
+          TC_REQUIRE_REAL_CLI: "1"
         run: cargo test --locked -p daemon --features test-fakes --no-fail-fast
       # The install command for machines without the app, in Windows PowerShell 5.1, with the
       # daemon just built: SHA-256 check, config and token for this user only, the real daemon

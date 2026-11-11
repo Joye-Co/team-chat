@@ -345,8 +345,13 @@ pub fn project_dir_name_of(path: &str) -> String {
         Some(share) => format!(r"\\{share}"),
         None => path.strip_prefix(r"\\?\").unwrap_or(path).to_string(),
     };
-    path.chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+    // As the CLI does it (`s.replace(/[^a-zA-Z0-9]/g, "-")` in JavaScript): one `-` for each
+    // UTF-16 unit, so a character outside the basic plane gives two.
+    path.encode_utf16()
+        .map(|u| match char::from_u32(u32::from(u)) {
+            Some(c) if c.is_ascii_alphanumeric() => c,
+            _ => '-',
+        })
         .collect()
 }
 

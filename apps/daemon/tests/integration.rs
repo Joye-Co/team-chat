@@ -24,6 +24,9 @@ use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 
+#[path = "fake/model.rs"]
+mod model;
+
 const TOKEN: &str = "tm_test_token_value";
 
 /// The `[runtimes.<name>]` section of a fake CLI script (`fake_claude.py`, `fake_codex.py`):
@@ -2001,13 +2004,6 @@ async fn gated_commands_wait_for_a_person() {
     match next(&mut ws).await {
         Up::Hello { machine, clis, .. } => {
             assert!(machine.features.unwrap().iter().any(|f| f == "gates"));
-            // A system whose Claude Code runs are not gated yet says so (no `gates`), and
-            // the server then sends such a machine no gates: nothing more to check there.
-            if !daemon::gates::enforced_by("claude") {
-                assert_eq!(clis[0].gates, None);
-                stop_tx.send(()).unwrap();
-                return;
-            }
             assert_eq!(clis[0].gates, Some(true), "a claude runtime is gated");
         }
         f => panic!("{f:?}"),
@@ -2066,6 +2062,138 @@ async fn gated_commands_wait_for_a_person() {
     assert!(!fr.iter().any(is_request));
     let r: serde_json::Value = serde_json::from_str(&wait_file(&report("g3")).await).unwrap();
     assert_eq!(r["hooks"], 0);
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+/// The same with the real Claude Code CLI of this machine and a fake model
+/// (`tests/fake/model.rs`): the daemon reports the CLI as gated, the model calls the Bash tool,
+/// the CLI starts the hook, the hook asks the daemon, the daemon asks a person. Declined: the
+/// command does not run and the model reads why. Approved: it runs. Skipped when `claude` is
+/// not on PATH, unless `TC_REQUIRE_REAL_CLI` is set (CI).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_real_cli_waits_for_a_person_at_a_gated_command() {
+    let Some(claude) = daemon::health::which("claude") else {
+        assert!(
+            std::env::var_os("TC_REQUIRE_REAL_CLI").is_none(),
+            "TC_REQUIRE_REAL_CLI is set and claude is not on PATH"
+        );
+        eprintln!("skipped: claude is not on PATH");
+        return;
+    };
+    daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let model = model::Model::start().await;
+    let env: Vec<String> = model
+        .env()
+        .into_iter()
+        .map(|(k, v)| format!("{k} = '{v}'"))
+        .chain([format!(
+            "CLAUDE_CONFIG_DIR = '{}'",
+            tmp.path().join("real-claude").display()
+        )])
+        .collect();
+    let cfg = write_config_with(
+        tmp.path(),
+        &m.url,
+        &format!(
+            "[runtimes.real]\nkind = \"claude\"\ncommand = '{}'\nenv = {{ {} }}\n",
+            claude.display(),
+            env.join(", ")
+        ),
+    );
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    match next(&mut ws).await {
+        Up::Hello { clis, .. } => {
+            let real = clis.iter().find(|c| c.runtime == "real").expect("real");
+            assert!(real.available);
+            let version = real.version.clone().expect("the CLI says its version");
+            assert!(version.contains("Claude Code"), "{version}");
+            assert_eq!(real.gates, Some(true), "{version} is gated");
+        }
+        f => panic!("{f:?}"),
+    }
+    send(&mut ws, &welcome(vec![])).await;
+    let gated = |run: &str, marker: &str| {
+        let mut a = assign(
+            run,
+            "real",
+            &format!("Run the tool.\nTOOL Bash echo {marker}"),
+            None,
+        );
+        if let Down::RunAssign(r) = &mut a {
+            r.gates = Some(vec![RunGate {
+                kind: "mergeMain".into(),
+                patterns: vec!["gated-marker".into()],
+            }]);
+        }
+        a
+    };
+    let stderr = |run: &str| {
+        std::fs::read_to_string(tmp.path().join(format!("work/runs/{run}/stderr.log")))
+            .unwrap_or_default()
+    };
+
+    // 1. Declined: the command does not run and the model reads why.
+    send(&mut ws, &gated("rg1", "gated-marker-declined")).await;
+    let fr = collect(&mut ws, "rg1", true, is_request).await;
+    let (id, kind, command) = gate_request(&fr);
+    assert_eq!(kind.as_deref(), Some("mergeMain"));
+    assert_eq!(command.as_deref(), Some("echo gated-marker-declined"));
+    send(&mut ws, &approval("rg1", &id, "deny", None)).await;
+    let fr = collect(&mut ws, "rg1", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "succeeded", "{}", stderr("rg1"));
+    let results = model.tool_results();
+    assert_eq!(results.len(), 1, "{results:?}");
+    assert!(results[0].0, "an error result: {results:?}");
+    assert!(
+        results[0].1.contains("a person declined it"),
+        "the model reads why: {results:?}"
+    );
+    // The model's words after the result carry it, not the command's output.
+    assert!(
+        !done(&fr)
+            .result_text
+            .unwrap_or_default()
+            .contains("\ngated-marker-declined"),
+        "the command ran"
+    );
+
+    // 2. Approved: the command runs.
+    send(&mut ws, &gated("rg2", "gated-marker-approved")).await;
+    let fr = collect(&mut ws, "rg2", true, is_request).await;
+    let (id, _, _) = gate_request(&fr);
+    send(&mut ws, &approval("rg2", &id, "approve", None)).await;
+    let fr = collect(&mut ws, "rg2", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "succeeded", "{}", stderr("rg2"));
+    let results = model.tool_results();
+    assert!(
+        results
+            .iter()
+            .any(|(is_error, text)| !is_error && text.contains("gated-marker-approved")),
+        "{results:?}"
+    );
+
+    // 3. A command no gate names never asks.
+    send(&mut ws, &gated("rg3", "plain-marker")).await;
+    let fr = collect(&mut ws, "rg3", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert!(!fr.iter().any(is_request));
+    assert!(
+        model
+            .tool_results()
+            .iter()
+            .any(|(is_error, text)| !is_error && text.contains("plain-marker"))
+    );
 
     stop_tx.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(20), daemon)

@@ -474,17 +474,9 @@ fn aside_runs_ignore_widening_config() {
 /// loads a server's config file: here an untrusted project's `.codex/config.toml`, which Codex
 /// skips, and a user config with a stdio and a URL server. Every server ends up disabled.
 /// `codex mcp list` reads the config without a model call. Skipped without `codex` on PATH.
-#[cfg(unix)]
 #[test]
 fn codex_aside_mcp_overrides_load_in_real_cli() {
-    let Some(codex) = std::env::var_os("PATH").and_then(|p| {
-        std::env::split_paths(&p)
-            .map(|d| d.join("codex"))
-            .find(|f| f.is_file())
-    }) else {
-        eprintln!("codex not on PATH; skipped");
-        return;
-    };
+    let Some(codex) = real_codex() else { return };
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("codex-home");
     std::fs::create_dir_all(&home).unwrap();
@@ -505,12 +497,14 @@ fn codex_aside_mcp_overrides_load_in_real_cli() {
     )
     .unwrap();
     let args = runtime::codex::app_server_args(&s).unwrap();
-    let out = std::process::Command::new(codex)
+    let out = std::process::Command::new(&codex.program)
+        .args(&codex.args)
         .args(["mcp", "list", "--json"])
         .args(&args[1..])
         .current_dir(&s.cwd)
         .env("CODEX_HOME", &home)
         .env("HOME", tmp.path())
+        .stdin(std::process::Stdio::null())
         .output()
         .unwrap();
     assert!(
@@ -531,11 +525,25 @@ fn codex_aside_mcp_overrides_load_in_real_cli() {
     }
 }
 
-#[cfg(unix)]
+/// The real `codex` of this machine and how to start it (on Windows npm's `codex.cmd` is
+/// resolved to what it starts, as for a run). None (skip) when there is none; a failure
+/// instead when `TC_REQUIRE_REAL_CLI` is set (CI installs the CLI and sets it).
+fn real_codex() -> Option<daemon::health::Launch> {
+    let Some(found) = daemon::health::which("codex") else {
+        assert!(
+            std::env::var_os("TC_REQUIRE_REAL_CLI").is_none(),
+            "TC_REQUIRE_REAL_CLI is set and codex is not on PATH"
+        );
+        eprintln!("codex not on PATH; skipped");
+        return None;
+    };
+    Some(daemon::health::launch(&found))
+}
+
 /// `codex app-server` with `args`: runs `command` through `command/exec` (the server's sandbox,
 /// no model call) and returns its result.
 fn codex_exec(
-    codex: &std::path::Path,
+    codex: &daemon::health::Launch,
     args: &[String],
     home: &std::path::Path,
     cwd: &std::path::Path,
@@ -543,7 +551,8 @@ fn codex_exec(
     env: serde_json::Value,
 ) -> serde_json::Value {
     use std::io::{BufRead, Write};
-    let mut p = std::process::Command::new(codex)
+    let mut p = std::process::Command::new(&codex.program)
+        .args(&codex.args)
         .args(args)
         .current_dir(cwd)
         .env("CODEX_HOME", home)
@@ -587,14 +596,7 @@ fn codex_exec(
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn codex_sandbox_lets_chat_run_answer_without_network() {
-    let Some(codex) = std::env::var_os("PATH").and_then(|p| {
-        std::env::split_paths(&p)
-            .map(|d| d.join("codex"))
-            .find(|f| f.is_file())
-    }) else {
-        eprintln!("codex not on PATH; skipped");
-        return;
-    };
+    let Some(codex) = real_codex() else { return };
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("codex-home");
     std::fs::create_dir_all(&home).unwrap();
@@ -636,7 +638,9 @@ async fn codex_sandbox_lets_chat_run_answer_without_network() {
     )
     .unwrap();
     let command: Vec<String> = [
-        bin.join("chat-run").to_string_lossy().to_string(),
+        bin.join(daemon::chat_run::link_name())
+            .to_string_lossy()
+            .to_string(),
         "resolve".into(),
         "--event".into(),
         "EV1".into(),
@@ -721,6 +725,136 @@ async fn codex_sandbox_lets_chat_run_answer_without_network() {
     .unwrap();
     let out = net["result"]["stdout"].as_str().unwrap_or_default();
     assert!(out.starts_with("closed"), "{net}");
+}
+
+/// A side chat run of Codex is read-only on every system: with the sandbox the daemon sends
+/// for it (`read-only`, approval `never`) the real CLI does not let a command write a file,
+/// in the working folder or outside it. Through `command/exec` (the server's sandbox, no
+/// model call). Skipped without `codex` on PATH.
+#[tokio::test(flavor = "multi_thread")]
+async fn codex_read_only_sandbox_writes_nothing() {
+    let Some(codex) = real_codex() else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("codex-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let mut s = spec(tmp.path(), "codex", "codex", &[], "hi");
+    s.aside = true;
+    let (approval, sandbox) = runtime::codex::thread_policy(&s);
+    assert_eq!(
+        (approval.as_str(), sandbox.as_str()),
+        ("never", "read-only")
+    );
+    let mut args = runtime::codex::app_server_args(&s).unwrap();
+    args.extend(["-c".to_string(), format!("sandbox_mode=\"{sandbox}\"")]);
+    args.extend(["-c".to_string(), format!("approval_policy=\"{approval}\"")]);
+    let outside = tempfile::tempdir().unwrap();
+    for target in [
+        s.cwd.join("written.txt"),
+        outside.path().join("written.txt"),
+    ] {
+        let command: Vec<String> = if cfg!(windows) {
+            vec![
+                "cmd.exe".into(),
+                "/c".into(),
+                format!("echo x> \"{}\"", target.display()),
+            ]
+        } else {
+            vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                format!("echo x > '{}'", target.display()),
+            ]
+        };
+        let (codex, args, home, cwd) = (codex.clone(), args.clone(), home.clone(), s.cwd.clone());
+        let out = tokio::task::spawn_blocking(move || {
+            codex_exec(&codex, &args, &home, &cwd, &command, serde_json::json!({}))
+        })
+        .await
+        .unwrap();
+        assert!(
+            !target.exists(),
+            "a read-only run wrote {}: {out}",
+            target.display()
+        );
+    }
+}
+
+/// Windows: a Codex run reaches the daemon through the request folder. With the sandbox the
+/// daemon sends for a run (`danger-full-access`) the real CLI starts the real `chat-run`
+/// client, the request arrives, and the answer comes back; the folder is left clean. Through
+/// `command/exec` (no model call). Skipped without `codex` on PATH.
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread")]
+async fn codex_on_windows_reaches_the_daemon_through_the_request_folder() {
+    let Some(codex) = real_codex() else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("codex-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let mut s = spec(tmp.path(), "codex", "codex", &[], "hi");
+    s.note = Some(daemon::chat_run::note());
+    assert!(runtime::codex::chat_run_works(&s));
+    let (_, sandbox) = runtime::codex::thread_policy(&s);
+    let mut args = runtime::codex::app_server_args(&s).unwrap();
+    args.extend(["-c".to_string(), format!("sandbox_mode=\"{sandbox}\"")]);
+
+    daemon::chat_run::set_exe(std::path::PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
+    let bin = daemon::chat_run::install_link(tmp.path()).unwrap();
+    let outputs = std::sync::Arc::new(daemon::chat_run::Outputs::default());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let spool = daemon::chat_run::Spool::start(
+        daemon::chat_run::spool_dir(&s.cwd, "x1"),
+        outputs.clone(),
+        move |e| {
+            let _ = tx.send(e);
+        },
+        daemon::chat_run::TIMEOUT,
+    )
+    .unwrap();
+    let command: Vec<String> = [
+        bin.join(daemon::chat_run::link_name())
+            .to_string_lossy()
+            .to_string(),
+        "resolve".into(),
+        "--event".into(),
+        "EV1".into(),
+        "--result".into(),
+        "ignored".into(),
+    ]
+    .into();
+    let run = tokio::task::spawn_blocking({
+        let (home, cwd) = (home.clone(), s.cwd.clone());
+        let env = serde_json::json!({ "CHAT_RUN_DIR": spool.path().to_string_lossy() });
+        move || codex_exec(&codex, &args, &home, &cwd, &command, env)
+    });
+    let ev = tokio::time::timeout(Duration::from_secs(60), rx.recv())
+        .await
+        .expect("chat-run did not reach the daemon")
+        .unwrap();
+    let RunEvent::Output { output_id, op, .. } = ev else {
+        panic!("not an output event: {ev:?}");
+    };
+    assert_eq!(op, "interaction.resolve");
+    assert!(outputs.resolve(daemon::proto::RunOutputResult {
+        run_id: "r1".into(),
+        output_id,
+        ok: true,
+        result: Some(serde_json::json!({ "resolved": true })),
+        error: None,
+    }));
+    let done = run.await.unwrap();
+    assert_eq!(done["result"]["exitCode"], 0, "{done}");
+    assert!(
+        done["result"]["stdout"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("resolved"),
+        "{done}"
+    );
+    let left: Vec<_> = std::fs::read_dir(spool.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(left, [std::ffi::OsString::from(".gitignore")]);
 }
 
 /// A Codex run always has full access, whatever `daemon.toml` says, so `chat-run` always works
