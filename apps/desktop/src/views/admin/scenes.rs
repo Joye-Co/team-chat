@@ -125,6 +125,23 @@ fn open_member_ai(
     )
 }
 
+/// 成员 with the ⋯ menu of an AI member's row open: 更换电脑…, 编辑…, 停用. `TC_CLICK=x,y`
+/// moves the click while you look for the spot.
+fn open_member_ai_menu(
+    services: Services,
+    _content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let handle = open(services, AdminPage::Members, cx)?;
+    crate::views::settings::selftest::click_when_drawn(
+        handle,
+        (817., 220.),
+        gpui::MouseButton::Left,
+        cx,
+    )?;
+    Ok(handle)
+}
+
 macro_rules! opener {
     ($name:ident, $page:expr) => {
         fn $name(
@@ -178,6 +195,11 @@ pub const SCENES: &[Scene] = &[
         "admin-member-ai",
         "团队管理 › 成员 with Forge selected: 最常找它的人",
         open_member_ai
+    ),
+    scene!(
+        "admin-member-ai-menu",
+        "团队管理 › 成员 with an AI member's ⋯ menu open: 更换电脑…, 编辑…, 停用",
+        open_member_ai_menu
     ),
     scene!(
         "admin-nav-end",
