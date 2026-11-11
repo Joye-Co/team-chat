@@ -216,6 +216,27 @@ impl FakeProvider {
     }
 
     pub(super) fn upload_avatar_fake(&self, path: std::path::PathBuf) -> AdminReply<Member> {
+        self.upload_member_avatar_fake(ME, path)
+    }
+
+    pub(super) fn remove_member_avatar_fake(&self, id: &str) -> AdminReply<Member> {
+        if id != ME && !self.is_owner() {
+            return reply_now(Err(AdminError::Forbidden));
+        }
+        reply_now(self.change_member(id, |m, _| {
+            m.avatar_url = None;
+            Ok(())
+        }))
+    }
+
+    pub(super) fn upload_member_avatar_fake(
+        &self,
+        id: &str,
+        path: std::path::PathBuf,
+    ) -> AdminReply<Member> {
+        if id != ME && !self.is_owner() {
+            return reply_now(Err(AdminError::Forbidden));
+        }
         let Ok(meta) = std::fs::metadata(&path) else {
             return reply_now(Err(AdminError::NotFound));
         };
@@ -223,7 +244,7 @@ impl FakeProvider {
             return reply_now(Err(AdminError::TooLarge));
         }
         let url = format!("file://{}", path.display());
-        reply_now(self.change_member(ME, |m, _| {
+        reply_now(self.change_member(id, |m, _| {
             m.avatar_url = Some(url);
             Ok(())
         }))

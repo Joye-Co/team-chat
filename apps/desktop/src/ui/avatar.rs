@@ -151,6 +151,44 @@ impl RenderOnce for MemberAvatar {
                 .bg(color)
         };
 
+        // The provider gives the downloaded file; a remote URL is not drawn (it needs the
+        // token), so the fallback shows until the file is on disk.
+        let local = self
+            .photo
+            .as_deref()
+            .map(|p| p.strip_prefix("file://").unwrap_or(p))
+            .filter(|p| is_local_file(p))
+            .map(str::to_string);
+
+        // An AI member with an uploaded photo: the photo in the agent squircle,
+        // in place of its character.
+        if self.bot
+            && let Some(path) = &local
+        {
+            return div()
+                .relative()
+                .flex_none()
+                .size(size)
+                .when(self.dimmed, |el| el.opacity(0.5))
+                .child(
+                    div()
+                        .size(size)
+                        .rounded(theme::radius::bot(size))
+                        .bg(k.avatar_bg)
+                        .shadow(k.tile_edge())
+                        .when(self.selected, |el| el.border_1().border_color(k.tile_ring))
+                        .overflow_hidden()
+                        .child(
+                            Avatar::new()
+                                .src(std::path::PathBuf::from(path))
+                                .size(size)
+                                .border_0()
+                                .rounded(theme::radius::bot(size)),
+                        ),
+                )
+                .into_any_element();
+        }
+
         // Bots: a tinted tile with the fitted character.
         if self.bot || self.character.is_some() {
             let status = match (&self.character, self.status_override) {
@@ -229,14 +267,6 @@ impl RenderOnce for MemberAvatar {
         let text = monogram(&self.name, size);
         let font = initial_size(size);
         let line = size;
-        // The provider gives the downloaded file; a remote URL is not drawn (it needs the
-        // token), so the monogram shows until the file is on disk.
-        let local = self
-            .photo
-            .as_deref()
-            .map(|p| p.strip_prefix("file://").unwrap_or(p))
-            .filter(|p| is_local_file(p))
-            .map(str::to_string);
         let face = match local {
             Some(path) => Avatar::new()
                 .src(std::path::PathBuf::from(path))

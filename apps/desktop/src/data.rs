@@ -1789,6 +1789,15 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn upload_avatar(&self, _path: PathBuf) -> AdminReply<Member> {
         reply_now(Err(AdminError::Unsupported))
     }
+    /// Self or owner: uploads a member's avatar (an AI member's photo) from a png, jpeg or
+    /// webp file of at most 1 MiB. An AI member with a photo is drawn with it, not its character.
+    fn upload_member_avatar(&self, _member_id: &str, _path: PathBuf) -> AdminReply<Member> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Self or owner: removes a member's avatar (`DELETE /v1/members/:id/avatar`).
+    fn remove_member_avatar(&self, _member_id: &str) -> AdminReply<Member> {
+        reply_now(Err(AdminError::Unsupported))
+    }
     /// Owner: makes an invite code.
     fn create_invite(&self, _request: InviteRequest) -> AdminReply<InviteCreated> {
         reply_now(Err(AdminError::Unsupported))
