@@ -18,6 +18,7 @@ import {
   type RunPlan,
   RunPlanItem,
   RUN_KIND_ASIDE,
+  RunCode,
   type RunStatus,
   type TopicStatus,
   Usage,
@@ -122,7 +123,25 @@ export type RunRow = {
   stall_step: number;
   /** A nudge was really sent for this piece of work (盯 1.12: the note names only real tries). Carried over. */
   nudge_sent: number;
+  // desk-run-code (design-relay R5)
+  /** JSON of `RunCode` from run.done (branch, head, pushed), or null when not known. */
+  code: string | null;
 };
+
+/** A stored or reported code location (`run.done.code`), or null when it is not a valid one. */
+export function codeOf(v: unknown): RunCode | null {
+  if (v === null || v === undefined) return null;
+  let raw = v;
+  if (typeof v === "string") {
+    try {
+      raw = JSON.parse(v);
+    } catch {
+      return null;
+    }
+  }
+  const parsed = RunCode.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
 
 /** A CLI session id BotDesk keeps and sends back (`run.assign.resumeSessionId`). */
 export function sessionIdOf(v: unknown): string | null {
@@ -419,6 +438,11 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
           name: "desk-nudge-sent",
           up: `ALTER TABLE runs ADD COLUMN nudge_sent INTEGER NOT NULL DEFAULT 0;`,
         },
+        {
+          // Usable (design-relay R5): where the run left its code (`run.done.code`, JSON).
+          name: "desk-run-code",
+          up: `ALTER TABLE runs ADD COLUMN code TEXT;`,
+        },
       ]);
       const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'bot_id'").toArray()[0];
       this.botId = row?.value ?? null;
@@ -486,6 +510,8 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
     if (r.paused_by) run.pausedBy = r.paused_by;
     if (r.kind) run.kind = r.kind;
     if (r.retry_of) run.retryOf = r.retry_of;
+    const code = codeOf(r.code);
+    if (code) run.code = code;
     if (r.queued_at && r.ended_at === null && r.status === "created" && !r.machine_id) {
       run.queuedAt = r.queued_at;
       run.queuePosition = this.queuePosition(r);

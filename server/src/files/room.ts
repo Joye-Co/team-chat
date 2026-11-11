@@ -121,6 +121,13 @@ registerRoomMigration({
   `,
 });
 
+// Usable (design-relay R4): the version a version was made from. Old rows keep NULL and read as
+// `version - 1`; new rows always store it.
+registerRoomMigration({
+  name: "files-parent-1",
+  up: `ALTER TABLE artifact_versions ADD COLUMN parent_version INTEGER;`,
+});
+
 // Files that only deleted messages used, waiting for D1 and R2 to forget them (see below).
 registerRoomMigration({
   name: "files-2",
@@ -164,6 +171,7 @@ export type VersionRow = {
   media?: string | null;
   data_rev?: number;
   preview?: string | null;
+  parent_version?: number | null;
 };
 
 export interface RegisterFileArgs {
@@ -193,6 +201,8 @@ export interface VersionInput {
   data?: unknown;
   /** 1.1: the author's preview card (GAPS SF-11). */
   preview?: ArtifactPreview;
+  /** Usable: the version this one was made from (checked by `artifacts.addVersion`). */
+  parentVersion?: number;
 }
 
 export function fileRecord(room: RoomContext, id: string): FileRecordRow | undefined {
@@ -243,6 +253,9 @@ export function toVersion(r: VersionRow): ArtifactVersion {
   if (r.media) v.media = JSON.parse(r.media) as MediaInfo;
   if (r.data_rev) v.dataRev = r.data_rev;
   if (r.preview) v.preview = JSON.parse(r.preview) as ArtifactPreview;
+  // Usable: rows from before `files-parent-1` read as made from the version before them.
+  const parent = r.parent_version ?? (r.version > 1 ? r.version - 1 : null);
+  if (parent !== null) v.parentVersion = parent;
   return v;
 }
 
@@ -318,8 +331,8 @@ function insertVersion(
   now: number,
 ): void {
   room.sql.exec(
-    `INSERT INTO artifact_versions (artifact_id, version, entry, files, note, created_by, created_at, run_id, events, media, data_rev, preview)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO artifact_versions (artifact_id, version, entry, files, note, created_by, created_at, run_id, events, media, data_rev, preview, parent_version)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     artifactId,
     version,
     input.entry,
@@ -332,6 +345,7 @@ function insertVersion(
     input.media ? JSON.stringify(input.media) : null,
     input.data !== undefined ? 1 : 0,
     input.preview ? JSON.stringify(input.preview) : null,
+    input.parentVersion ?? null,
   );
   // A new version starts with the data of its request, or none (INTERACT §5.3).
   if (input.data !== undefined) {
@@ -412,7 +426,7 @@ registerRoomRpc("artifacts.create", async (room, actor, args) => {
       now,
       now,
     );
-    insertVersion(room, req.id, 1, req, files, a.id, now);
+    insertVersion(room, req.id, 1, { ...req, parentVersion: undefined }, files, a.id, now);
     const artifact = toArtifact(room, artifactRow(room, req.id) as ArtifactRow);
     const version = toVersion(versionRow(room, req.id, 1) as VersionRow);
     const seq = tx.nextSeq();
@@ -434,8 +448,14 @@ registerRoomRpc("artifacts.addVersion", async (room, actor, args) => {
   const files = resolveVersionFiles(room, row.kind, req);
   const now = Date.now();
   const next = row.current_version + 1;
+  // Usable (design-relay R4): the parent is an existing version below the new one; absent = the
+  // current version, so every new version stores its parent.
+  const parentVersion = given.parentVersion ?? row.current_version;
+  if (!Number.isInteger(parentVersion) || parentVersion < 1 || parentVersion >= next || !versionRow(room, row.id, parentVersion)) {
+    throw new ApiError("invalid", "parentVersion is not an existing version of this 产出", "artifact.bad_parent");
+  }
   return room.commit((tx) => {
-    insertVersion(room, row.id, next, req, files, a.id, now);
+    insertVersion(room, row.id, next, { ...req, parentVersion }, files, a.id, now);
     room.sql.exec(
       "UPDATE artifacts SET current_version = ?, updated_at = ?, title = ? WHERE id = ?",
       next,
@@ -574,8 +594,8 @@ registerEventImporter((e, sql) => {
     a.updatedAt,
   );
   sql.exec(
-    `INSERT OR REPLACE INTO artifact_versions (artifact_id, version, entry, files, note, created_by, created_at, run_id, events, media, preview)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO artifact_versions (artifact_id, version, entry, files, note, created_by, created_at, run_id, events, media, preview, parent_version)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     v.artifactId,
     v.version,
     v.entry,
@@ -587,6 +607,7 @@ registerEventImporter((e, sql) => {
     v.events && v.events.length > 0 ? JSON.stringify(v.events) : null,
     v.media ? JSON.stringify(v.media) : null,
     v.preview ? JSON.stringify(v.preview) : null,
+    v.parentVersion ?? null,
   );
 });
 
