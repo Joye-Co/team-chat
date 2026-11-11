@@ -704,11 +704,14 @@ An AI member runs with every permission; only the few kinds the team checked nee
   app-server` (0.159): the requests come with no delay a person would notice, an accepted
   command and a file change run as before, a declined one does not run and the turn goes on.
   A run without gates keeps approval `never`.
-- **ACP** (`CliInfo.gates = true`): each `session/request_permission` is matched as the tool
-  call's `rawInput.command` (a string or a list of words), else `<title> <rawInput JSON>`. No
-  match (or a run without gates): the first `allow_*` option at once, no card. A match: the
-  same `approval.request` and wait, then the first `allow_*` or `reject_*` option. An agent that
-  never asks (its own permissions set to allow everything) is not stopped.
+- **ACP** (`CliInfo.gates = true` only when its `[runtimes.<name>]` sets `asks_permission =
+  true`): each `session/request_permission` is matched as the tool call's `rawInput.command` (a
+  string or a list of words), else `<title> <rawInput JSON>`. No match (or a run without
+  gates): the first `allow_*` option at once, no card. A match: the same `approval.request` and
+  wait, then the first `allow_*` or `reject_*` option. An agent that never asks (OpenCode by
+  default, any agent whose own permissions allow everything) would not be stopped, so without
+  `asks_permission` the daemon does not report `gates` for it and the server keeps the plain
+  "Team rule" paragraph in its prompt.
 - Side chat runs and the PTY runtime are never gated.
 
 ### Topic context (`chat-run`, daemon over HTTP; feature `context`)
@@ -885,7 +888,8 @@ secret split over two deltas is redacted whole.
 example-config` prints a commented example. Keys: `server_url`, `token_file`, `machine_id`,
 `name`, `labels`, `work_root`, `max_parallel_runs`, `keep_runs_hours`, `min_free_gb`,
 `stall_minutes`, `repo_roots`, `env_passthrough`, `gated_env`, `takeover_url` (1.1), `[runtimes.<name>]` with `kind`,
-`command`, `args`, `env`, `model`, and `[vm]` with `kernel`, `rootfs`, `dir`, `vcpus`, `mem_mib`
+`command`, `args`, `env`, `model`, `asks_permission` (ACP: the agent asks before its tool
+calls, see "Gated actions"), and `[vm]` with `kernel`, `rootfs`, `dir`, `vcpus`, `mem_mib`
 (a cap: the host gives only the pages the VM touches), `scratch_gb`, `firecracker`, `helper`,
 `shares`, `homes`. `approval_policy`, `sandbox`, `permission_mode` and
 `allowed_tools` still parse (1.1 configs) but are ignored since 1.2.1. Without `[runtimes.*]`, `codex` and `claude` are added when

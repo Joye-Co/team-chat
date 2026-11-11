@@ -2051,9 +2051,10 @@ only at the moment a command would run: the machine stops the command and asks
   `patterns` of that kind. Side chat runs get none. The run's prompt then says that the machine
   asks for these and the CLI should ask in the topic only when it does such an action another
   way (an API call, a web page) or spends over `maxSpendCny`. Claude Code, Codex and ACP agents
-  report `gates` (the rule is enforced by the daemon, not only written in the prompt); a run on
-  a CLI that cannot stop commands (the PTY runtime, an older daemon, an older Claude Code on
-  Windows) keeps the plain "Team rule" paragraph. A queued run gets the gated
+  configured as asking for permission (daemon.toml `asks_permission`) report `gates` (the rule
+  is enforced by the daemon, not only written in the prompt); a run on a CLI that cannot stop
+  commands (the PTY runtime, an ACP agent not known to ask, an older daemon, an older Claude
+  Code on Windows) keeps the plain "Team rule" paragraph. A queued run gets the gated
   wording only when every machine with its runtime stops commands.
 - Patterns are regular expressions matched case-insensitively against each simple command of a
   shell line (split at newlines, `;`, `&&`, `||`, `|`; whitespace runs count as one space), and

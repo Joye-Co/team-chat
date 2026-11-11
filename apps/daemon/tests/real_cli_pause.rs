@@ -215,6 +215,7 @@ async fn pause_stops_the_real_cli_and_its_tool_and_resume_lets_them_go_on() {
             sandbox: None,
             permission_mode: None,
             allowed_tools: None,
+            asks_permission: false,
         },
         prompt: prompt.into(),
         model: None,

@@ -64,6 +64,7 @@ fn spec(dir: &Path, claude: &Path, model: &model::Model, prompt: &str) -> RunSpe
             sandbox: None,
             permission_mode: None,
             allowed_tools: None,
+            asks_permission: false,
         },
         prompt: prompt.into(),
         model: None,
@@ -388,6 +389,7 @@ async fn a_sign_in_with_the_real_cli_reports_the_link_and_can_be_cancelled() {
         sandbox: None,
         permission_mode: None,
         allowed_tools: None,
+        asks_permission: false,
     };
     let (ctl_tx, ctl_rx) = mpsc::unbounded_channel();
     let (tx, mut rx) = mpsc::unbounded_channel();

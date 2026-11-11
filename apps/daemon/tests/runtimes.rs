@@ -60,6 +60,7 @@ fn spec(dir: &std::path::Path, kind: &str, command: &str, args: &[&str], prompt:
             sandbox: None,
             permission_mode: None,
             allowed_tools: None,
+            asks_permission: false,
         },
         prompt: prompt.into(),
         model: None,

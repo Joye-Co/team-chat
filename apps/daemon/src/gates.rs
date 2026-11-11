@@ -56,12 +56,15 @@ pub fn enforced_by(kind: &str) -> bool {
 pub const WINDOWS_MIN_CLAUDE: [u32; 3] = [2, 1, 322];
 
 /// Whether runs of this CLI stop at gated commands (`CliInfo.gates`): `version` is the first
-/// line of its `--version`. Codex and ACP agents: always (the daemon answers their own
-/// approval requests). Claude Code on Unix: always. Claude Code on Windows: one of at least
+/// line of its `--version`. Codex: always (the daemon answers its approval requests). ACP
+/// agents: only when `asks` (daemon.toml `asks_permission`): an agent that never sends
+/// `session/request_permission` (OpenCode by default, any agent set to allow everything) is not
+/// stopped, so the server keeps the rules in its prompt. Claude Code on Unix: always. Claude Code on Windows: one of at least
 /// [`WINDOWS_MIN_CLAUDE`]; one that is older, or that does not say its version, is not
 /// reported as gated, and the server keeps the rules in the prompt for it.
-pub fn reported_for(kind: &str, version: Option<&str>) -> bool {
+pub fn reported_for(kind: &str, version: Option<&str>, asks: bool) -> bool {
     enforced_by(kind)
+        && (kind != "acp" || asks)
         && (kind != "claude" || !cfg!(windows) || version.is_some_and(windows_can_gate))
 }
 
@@ -153,11 +156,20 @@ pub fn plain_command(command: &str) -> String {
 }
 
 /// The script of a shell wrapper the way Codex reports a command (`/bin/zsh -lc 'git push
-/// origin main'`, `bash -c "…"`, `powershell.exe -Command '…'`): the word after `-c`, `-lc` or
-/// `-Command`, unquoted as a POSIX shell reads it. Any other command comes back as it is.
+/// origin main'`, `bash -c "…"`, `powershell.exe -NoProfile -Command '…'`): the last word, when
+/// it follows `-c`, `-lc` or `-Command` and only flags come between the shell and that one,
+/// unquoted as a POSIX shell reads it. Any other command comes back as it is.
 pub fn shell_script(command: &str) -> String {
     match shell_words(command).as_deref() {
-        Some([shell, flag, script]) if is_shell(shell) && is_script_flag(flag) => script.clone(),
+        Some([shell, flags @ .., flag, script])
+            if is_shell(shell)
+                && is_script_flag(flag)
+                && flags
+                    .iter()
+                    .all(|f| f.starts_with('-') || f.starts_with('/')) =>
+        {
+            script.clone()
+        }
         _ => command.to_string(),
     }
 }
@@ -1000,17 +1012,20 @@ mod tests {
         ] {
             assert!(!windows_can_gate(old), "{old}");
         }
-        assert!(reported_for("claude", Some("2.1.322 (Claude Code)")));
+        assert!(reported_for("claude", Some("2.1.322 (Claude Code)"), false));
         assert_eq!(
-            reported_for("claude", Some("2.1.100 (Claude Code)")),
+            reported_for("claude", Some("2.1.100 (Claude Code)"), false),
             cfg!(unix)
         );
-        assert_eq!(reported_for("claude", None), cfg!(unix));
-        // Codex and ACP agents: the daemon answers their own approval requests, on every system.
-        assert!(reported_for("codex", Some("codex-cli 0.159.0")));
-        assert!(reported_for("codex", None));
-        assert!(reported_for("acp", None));
-        assert!(!reported_for("pty", None));
+        assert_eq!(reported_for("claude", None, false), cfg!(unix));
+        // Codex: the daemon answers its own approval requests, on every system.
+        assert!(reported_for("codex", Some("codex-cli 0.159.0"), false));
+        assert!(reported_for("codex", None, false));
+        // ACP: only an agent configured as one that asks (`asks_permission`); one that never
+        // asks is not stopped, so the server keeps the rules in its prompt.
+        assert!(reported_for("acp", None, true));
+        assert!(!reported_for("acp", None, false));
+        assert!(!reported_for("pty", None, true));
         assert!(enforced_by("claude") && enforced_by("codex") && enforced_by("acp"));
         assert!(!enforced_by("pty"));
     }
@@ -1034,6 +1049,15 @@ mod tests {
                 "echo 'hi' && git push origin HEAD:main",
             ),
             ("powershell.exe -Command 'gh pr merge 7'", "gh pr merge 7"),
+            (
+                "powershell.exe -NoProfile -Command 'git push origin main'",
+                "git push origin main",
+            ),
+            (
+                "pwsh -NoLogo -NonInteractive -Command 'gh pr merge 8'",
+                "gh pr merge 8",
+            ),
+            ("cmd.exe /d /c \"gh pr merge 9\"", "gh pr merge 9"),
         ] {
             assert_eq!(shell_script(wrapped), script, "{wrapped}");
         }
@@ -1043,6 +1067,7 @@ mod tests {
             "python -c 'print(1)'",
             "/bin/zsh -lc 'unclosed",
             "bash -lc 'a' extra",
+            "bash script.sh -c 'a'",
         ] {
             assert_eq!(shell_script(plain), plain);
         }
@@ -1054,6 +1079,12 @@ mod tests {
         assert_eq!(
             gates.matches(&shell_script("/bin/zsh -lc 'git push origin feature'")),
             None
+        );
+        assert_eq!(
+            gates.matches(&shell_script(
+                "powershell.exe -NoProfile -Command 'git push origin main'"
+            )),
+            Some("mergeMain")
         );
     }
 
