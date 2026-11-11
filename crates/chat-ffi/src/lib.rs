@@ -15,10 +15,12 @@ use chat_core::{
 use chat_protocol::{ErrorCode, GroupKind, main_topic_id};
 
 mod auth;
+mod pages;
 mod push;
 mod token;
 
 pub use auth::{SignedIn, email_sign_in, request_email_code};
+pub use pages::*;
 pub use push::{
     NotifyPrefs, PushActionItem, PushInfo, answer_from_notification, notify_prefs, parse_push,
     push_badge, register_push_device, set_notify_prefs, unregister_push_device,
