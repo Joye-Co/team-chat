@@ -1,7 +1,7 @@
 # Changelog
 
 Each release is tagged `v<version>` and has a GitHub Release with the DMG, the machine daemon
-and their `.sha256` files. Release notes for the team are in Chinese in `docs/releases/`.
+and the Windows installer; GitHub shows each file's SHA-256. Release notes for the team are in Chinese in `docs/releases/`.
 
 ## 1.2.7 (2026-11-11)
 
