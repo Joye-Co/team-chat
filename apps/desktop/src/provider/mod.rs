@@ -1443,6 +1443,11 @@ impl ChatProvider for CoreProvider {
             }
         } else {
             let n = limit.max(1) + extra;
+            // Read the outbox before the messages: an ack moves a send from the outbox into the
+            // messages in one transaction, so in this order a send is always in at least one of
+            // the two reads (in both when the ack lands between them; `known` drops the copy).
+            // The other order can miss it in both, and the message is gone for one render.
+            let pending = a.client.pending_sends(&real).unwrap_or_default();
             let mut msgs = a.client.messages(&real, None, n + 1).unwrap_or_default();
             self.shared.cards.remember(&msgs);
             self.shared.cards_v2.remember(&msgs);
@@ -1480,7 +1485,7 @@ impl ChatProvider for CoreProvider {
                     crate::data::apply_reaction(&mut m.reactions, &emoji, me, on);
                 }
             }
-            for item in a.client.pending_sends(&real).unwrap_or_default() {
+            for item in pending {
                 if known.contains(&item.id) {
                     continue;
                 }
