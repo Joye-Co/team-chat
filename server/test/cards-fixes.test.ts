@@ -612,7 +612,9 @@ describe("private answers in the runner hand-off", () => {
     await cb.ok({ t: "card.event", groupId: w.gid, messageId: m2, rev: 1, clientEventId: crypto.randomUUID(), blockId: "q", event: "action.press", inputs: { mood: { value: "不错" } } });
     const next = await d.next((f) => f.t === "run.assign" && f.runId !== runId, 10_000);
     expect(next.prompt).toContain("不错");
-    hidden(next);
+    // The prompt's member list names every member of the group, not who answered.
+    expect(next.prompt).toContain("Members of this group");
+    hidden({ ...next, prompt: next.prompt.replace(/Members of this group[^\n]*\n(- [^\n]*\n)*/, "") });
     const started = await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === next.runId);
     expect(started.data.run.requestedBy).toBe("anonymous");
     for (const x of [c, cb, cbot, d]) x.close();

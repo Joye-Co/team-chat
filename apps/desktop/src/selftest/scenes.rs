@@ -73,6 +73,12 @@ pub enum Start {
     V2Memory(crate::fake::memory::MemoryShape),
     /// The sample data whose 团队约定 answer in one shape (memory scenes).
     Memory(crate::fake::memory::MemoryShape),
+    /// The v2 sample team in one memory shape on a server as the second part says: only
+    /// me with the AI members, or no AI 服务 (memory scenes).
+    V2MemoryTeam(
+        crate::fake::memory::MemoryShape,
+        crate::fake::memory::MemoryTeam,
+    ),
 }
 
 pub struct Scene {
@@ -318,6 +324,20 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedIn,
         setup: |_, _| {},
         open: settings_scenes::open_edit_bot_dialog,
+    },
+    Scene {
+        name: "settings-bot-quick",
+        about: "常用设置 of a bot over the main window: 在哪台电脑干活 (a computer or any free one), 更多设置…, 完成",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_bot_quick_dialog,
+    },
+    Scene {
+        name: "bot-quick-avatar-menu",
+        about: "A right-click on an AI member's avatar in a message: the message menu ending in 更换 … 的电脑…",
+        start: Start::SignedIn,
+        setup: settings_scenes::open_topic_led_by_bot,
+        open: settings_scenes::open_bot_quick_avatar_menu,
     },
     Scene {
         name: "settings-add-machine",

@@ -9,7 +9,7 @@
 #                           [--dry-run [--build]] [--same-as <dmg>]
 #        scripts/release.sh <version> ... --resume
 #        scripts/release.sh <version> --reupload
-#        scripts/release.sh <version> --upload-only [--platform windows]
+#        scripts/release.sh <version> --upload-only [--platform windows|linux-x86_64]
 #        scripts/release.sh <version> --add-windows <setup.exe> [--asset <file>]...
 #   --env          server to upload to (default production)
 #   --notes        Markdown release notes (default: notes that GitHub generates)
@@ -40,7 +40,11 @@
 #   --upload-only  only upload the existing dist/<name>-<version>.dmg to the server
 #                  (retry after the endpoint was missing or the upload failed)
 #   --platform     with --upload-only: macos (default, the DMG) or windows, which uploads
-#                  dist/<name>-<version>-setup.exe as the Windows file of the release
+#                  dist/<name>-<version>-setup.exe as the Windows file of the release;
+#                  linux-x86_64 uploads the daemon alone,
+#                  dist/<slug>-daemon-<version>-x86_64-unknown-linux-gnu, which Linux hosts
+#                  install and update themselves from (built on Linux by scripts/build-daemon.sh,
+#                  the Release workflow's Linux job)
 #   --add-windows  give a release that exists its Windows installer (it was published
 #                  --without-windows, or its Windows build failed and was fixed since): the
 #                  installer goes to the server first, then to the GitHub Release. A server
@@ -92,16 +96,16 @@ while [ $# -gt 0 ]; do
     --asset=*) ASSETS+=("${1#*=}"); shift ;;
     --same-as) SAME_AS="${2:-}"; shift 2 ;;
     --same-as=*) SAME_AS="${1#*=}"; shift ;;
-    -h | --help) sed -n '2,54p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,58p' "$0"; exit 0 ;;
     -*) die "unknown option: $1" ;;
     *) [ -z "$VERSION" ] || die "more than one version given"; VERSION="$1"; shift ;;
   esac
 done
 
-[ -n "$VERSION" ] || die "usage: scripts/release.sh <version> [--env staging|production] [--notes <file>] (--windows-installer <setup.exe> | --without-windows) [--dry-run [--build]] [--same-as <dmg>] | --upload-only [--platform windows] | --add-windows <setup.exe>"
+[ -n "$VERSION" ] || die "usage: scripts/release.sh <version> [--env staging|production] [--notes <file>] (--windows-installer <setup.exe> | --without-windows) [--dry-run [--build]] [--same-as <dmg>] | --upload-only [--platform windows|linux-x86_64] | --add-windows <setup.exe>"
 [ "$BUILD" = 0 ] || [ "$DRY_RUN" = 1 ] || die "--build goes with --dry-run (a real run always builds)"
-case "$PLATFORM" in macos | windows) ;; *) die "--platform must be macos or windows" ;; esac
-[ "$PLATFORM" = macos ] || [ "$UPLOAD_ONLY" = 1 ] || die "--platform windows goes with --upload-only: the installer is built on Windows by scripts/build-windows-installer.sh"
+case "$PLATFORM" in macos | windows | linux-x86_64) ;; *) die "--platform must be macos, windows or linux-x86_64" ;; esac
+[ "$PLATFORM" = macos ] || [ "$UPLOAD_ONLY" = 1 ] || die "--platform $PLATFORM goes with --upload-only: that file is built on its own system (the Release workflow's Windows and Linux jobs)"
 [ -z "$WINDOWS_INSTALLER" ] || [ "$WITHOUT_WINDOWS" = 0 ] || die "--windows-installer and --without-windows contradict each other"
 if [ -n "$ADD_WINDOWS" ]; then
   [ "$UPLOAD_ONLY" = 0 ] && [ "$BUILD" = 0 ] && [ -z "$WINDOWS_INSTALLER" ] && [ "$WITHOUT_WINDOWS" = 0 ] && [ "$RESUME" = 0 ] && [ "$REUPLOAD" = 0 ] ||
@@ -156,6 +160,7 @@ use_platform() {
   case "$1" in
     macos) ASSET="${2:-$DMG}"; ASSET_ROUTE="/v1/admin/releases/$VERSION"; ASSET_TYPE="application/x-apple-diskimage" ;;
     windows) ASSET="${2:-$DIST/$SETUP_NAME}"; ASSET_ROUTE="/v1/admin/releases/$VERSION/assets/windows"; ASSET_TYPE="application/vnd.microsoft.portable-executable" ;;
+    linux-x86_64) ASSET="${2:-$DIST/$(product slug)-daemon-$VERSION-x86_64-unknown-linux-gnu}"; ASSET_ROUTE="/v1/admin/releases/$VERSION/assets/linux-x86_64"; ASSET_TYPE="application/octet-stream" ;;
   esac
 }
 use_platform "$PLATFORM"
@@ -395,7 +400,8 @@ Release plan (dry run, nothing changed):
   commit         chore(release): $TAG  (Cargo.toml, Cargo.lock, CHANGELOG.md date)
   push           origin HEAD:main, then tag $TAG
   GitHub         ${REPO:-?}: release $TAG$([[ "$VERSION" == *-* ]] && printf ' (prerelease)')
-                 assets: $NAME-$VERSION.dmg, daemon (GitHub shows their SHA-256)
+                 assets: $NAME-$VERSION.dmg, daemon (GitHub shows their SHA-256); the
+                 Linux daemon comes from its own job
   Windows        $(if [ -n "$WINDOWS_INSTALLER" ]; then printf '%s and %s more file(s), on the GitHub Release and the server with the DMG' "$(basename "$WINDOWS_INSTALLER")" "${#ASSETS[@]}"; elif [ "$WITHOUT_WINDOWS" = 1 ]; then printf 'none, on purpose (--without-windows)'; else printf 'missing: a real run would stop'; fi)
   notes          ${NOTES:-generated by GitHub}
   server         $([ "$SERVER_UPLOAD" = 1 ] && printf 'PUT %s/v1/admin/releases/%s (%s)' "$BASE" "$VERSION" "$ENV_NAME" || printf 'none: a prerelease is not offered as an app update')

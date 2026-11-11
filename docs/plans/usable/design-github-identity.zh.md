@@ -196,12 +196,13 @@ RunGithub = {
 - `rewriteSsh` 时加 `url.https://github.com/.insteadOf` = `git@github.com:` 和 `ssh://git@github.com/`，并去掉 `SSH_AUTH_SOCK`。
 - 不把令牌放进任何环境变量。
 
-**daemon 自己的 git**：镜像克隆、fetch、`git worktree add` 在 `app` 模式下用同一套环境，助手由 daemon 进程内直接取（不经 socket）。取不到（没连或失效）时不带凭证试一次，公开仓库照常；私有仓库失败就报 `/wait`，运行以等待结束（发 `github` 事件 `missing`），不启动 CLI。镜像按仓库地址在一台电脑上共用，不按人分：B 的运行能读到 A 的令牌 fetch 下来的分支。这一版接受，写进第 5 节。
+**daemon 自己的 git**：镜像克隆、fetch、`git worktree add` 在 `app` 模式下用同一套环境（清掉 github.com 的助手、`rewriteSsh` 的改写），令牌由 daemon 进程内直接取（不经 socket），只作为这几条 git 子进程的 `http.https://github.com/.extraHeader`（`GIT_CONFIG_*`，不进镜像配置、不进 CLI 环境）；这时 CLI 还没启动。取不到（没连或失效）时不带凭证试一次，公开仓库照常；私有仓库失败就报 `/wait`，运行以等待结束（发 `github` 事件 `missing`），不启动 CLI。镜像按仓库地址在一台电脑上共用，不按人分：B 的运行能读到 A 的令牌 fetch 下来的分支。这一版接受，写进第 5 节。
 
 **`gh` 代理**（`app` 模式）：
 
 - 本机：`install_link`（`chat_run.rs:296`）在 `bin/` 里多放一个指向 daemon 的 `gh`（Windows 上 `gh.exe`）。
-- 虚拟机：工具盘加 `/opt/runner/bin/gh` 指向 agent 程序（`firecracker.rs:4,87`），因为虚拟机里 PATH 是 `GUEST_PATH`，`bin/` 不在上面。
+- 虚拟机：工具盘加 `/opt/runner/bin/gh` 指向 agent 程序（`firecracker.rs:4,87`），因为虚拟机里 PATH 是 `GUEST_PATH`，`bin/` 不在上面。工具盘由 daemon 自己做（`firecracker.rs` `stage_tools`），不是 `scripts/runner/` 的脚本。
+- 代理只在环境里有 `CHAT_GITHUB_AS`（`app` 模式才设，值是身份人的名字，不是秘密）时取令牌和拦 `gh auth login`；没有时原样运行真 gh，所以旧服务器、`machine` 模式下虚拟机里的 gh 行为不变。
 - 代理按启动名分流：向 daemon 要令牌，从 PATH 里跳过 `bin/` 和 `/opt/runner/bin` 找真 `gh`，带 `GH_TOKEN` 运行它，透传输入输出和退出码。真 gh 及它起的子进程（扩展、别名）会继承 `GH_TOKEN`，这一版接受。
 - `gh auth login|logout|refresh|setup-git` 直接拦下，输出 `GitHub sign-in is handled by the app for <name>; do not sign in here.`，退出码 1。
 - 没装 gh 就照原样报没装。
@@ -213,7 +214,7 @@ RunGithub = {
 - 404/409：发 `github` 事件 `missing`/`invalid`，调 `/wait`，立刻返回失败。助手在 stderr 写一行：`GitHub is not connected for <name> (they have been asked). Stop and report that you are waiting for them to connect GitHub.` git 随即报认证失败。
 - 文件通道（Codex）：答案照现有规则写 mode 600 的 `.res`，`chat-run` 读完即删；测试确认调用后没有 `.res` 留下。
 
-**脱敏**：每个运行的 redactor 改成可追加：`run.rs` 里给运行一个 `Arc<RwLock<Vec<String>>>` 额外值列表，运行事件、`stderr.log`、会话上传（`run.rs:462`）的脱敏都读它；github 模块每取到一次令牌就追加。`redact.rs:41` 的规则继续兜底。chat-run 的操作日志只记 ok 或失败。
+**脱敏**：每个运行的 redactor 改成可追加：`Redactor::for_run` 给运行一个 `Arc<RwLock<Vec<String>>>` 额外值列表，daemon 循环里这次运行的帧、`events.jsonl`、产出文件、会话上传（`run.rs:462`）的脱敏都读它；`stderr.log` 是 CLI 直接写的文件，运行结束后有追加值时整份过一遍脱敏重写；github 模块每取到一次令牌就追加。`redact.rs:41` 的规则继续兜底。chat-run 的操作日志只记 ok 或失败。
 
 **虚拟机家目录**：有 `github` 字段的运行开始前，在宿主机上删掉 `<homes>/<botId>/.config/gh/hosts.yml` 和 `.git-credentials`，并把家目录 `.gitconfig` 里 github.com 的 `credential.*helper` 和带令牌的 `url.*` 段删掉（`firecracker.rs:377` 附近）。日志只写 `removed an old GitHub sign-in`。所有虚拟机运行都走 `app`，所以这一步每次都做。
 
@@ -311,7 +312,7 @@ AI 成员替你拉代码、推代码、开 PR 时用这个账号
 | G1 协议（并进四份设计共用的协议 PR，新模块 `github.ts` / `github.rs`） | 3.5 的字段、事件、`runsIn`、`github` RunEvent、fixtures；确认未知事件被忽略 | `docs/protocol.md`、`docs/machine-protocol.md`、`packages/protocol/src/`、`crates/chat-protocol/src/`、`protocol/fixtures/` | — | 两边 fixture 测试；未知事件解码测试 |
 | G2 服务端连接 | `0017_github_accounts.sql`、加密存储、设备码路由、`/v1/me/github`（`waits` 先返回空数组）、断开、`available` 和原因、对照表、`onMemberDeactivated` 钩子、`github/index.ts` 注册点 | `server/src/github/{index,routes,store,device}.ts`、`server/src/core/routes.ts`（钩子一处）、`server/src/features.ts` | G1 | vitest：mock GitHub fetch，覆盖 pending、slow_down、done、expired、denied、taken；库里和日志没有明文；对照表不覆盖手工行；停用后行被删 |
 | G3 服务端派活 | 身份人规则（含 anonymous、离开团队）、`frame.github`、`0017_github_runs.sql`、机器取令牌、`/wait`、`/rejected`、恢复跟进、desk RPC `run.live` 和 `github.resume`、`waits` 查询、话题 @ 文案 | `server/src/github/{assign,machine,resume,text}.ts`；`server/src/bots/desk/runs.ts:397` 一行；`server/src/bots/desk/github.ts`（新，两个 RPC）；往 `github/index.ts` 追加 | G1、G2。design-roles 没合并就按 3.2 的临时规则 | vitest：3.2 表格每一格；规则 1–3 和回落；别的电脑取令牌被拒；完成、取消、超时、租约丢失、转电脑后取令牌都被拒；`/wait` 并发只发一次 @；连上后起跟进且只起一次 |
-| G4 daemon | `github` 功能和 `runsIn`、署名环境、助手、`gh` 代理（本机和工具盘）、daemon 自己 fetch 的凭证、可追加脱敏、家目录清理、系统说明 | `apps/daemon/src/github.rs`（新）、`run.rs`、`chat_run.rs`（本地分支、`install_link`）、`daemon.rs`（FEATURES、hello）、`executor/firecracker.rs`、工具盘构建脚本 `scripts/runner/` | G1 | cargo test：mock 服务器，本地 http 远端上跑 `git credential fill`、`git push`；`gh auth login` 被拦；404 立刻失败并报 `/wait`；`stderr.log` 和会话上传里令牌被遮；文件通道调用后无 `.res`；guest PATH 解析 `gh` 到代理；Windows CI 上 `gh.exe` 分流，并验证空助手清掉系统级 `credential.helper=manager` |
+| G4 daemon | `github` 功能和 `runsIn`、署名环境、助手、`gh` 代理（本机和工具盘）、daemon 自己 fetch 的凭证、可追加脱敏、家目录清理、系统说明 | `apps/daemon/src/github.rs`（新）、`run.rs`、`chat_run.rs`（本地分支）、`daemon.rs`（FEATURES、hello、每次运行的 redactor）、`workspace.rs`（daemon 自己 git 的环境）、`redact.rs`、`executor/firecracker.rs`（工具盘由 daemon 做） | G1 | cargo test：mock 服务器，本地 http 远端上跑 `git credential fill`、`git push`；`gh auth login` 被拦；404 立刻失败并报 `/wait`；`stderr.log` 和会话上传里令牌被遮；文件通道调用后无 `.res`；guest PATH 解析 `gh` 到代理；Windows CI 上 `gh.exe` 分流，并验证空助手清掉系统级 `credential.helper=manager` |
 | G5 桌面端 | 连接 sheet、账号页一组、上手弹一次、话题横幅、电脑页提示、文案、截图自测数据 | `apps/desktop/src/views/settings/{github,account}.rs`、`copy/settings.rs`、`data.rs`、`provider/` 的 HTTP 调用、`fake/`（只为截图自测） | G1；横幅的数据要 G3，之前按 G2 的空 `waits` 做 | 文案目录测试；截图自测（浅色、深色、Mac、Windows）：未连接、等确认、已连接、失效、不可用、横幅 |
 | G6 文档、部署和端到端 | 自部署脚本生成 `HOOK_SECRET_KEY`；INSTALL 写 client id 覆盖和自建 OAuth App；上手指南加连接 GitHub；改 `machine-protocol.md:816` 那段；`tools/e2e` 场景 | `scripts/deploy-server.sh`、`docs/INSTALL*.md`、`docs/ONBOARDING.zh.md`、`docs/machine-protocol.md`、`tools/e2e/` | G3、G4 | 照文档在新 Ubuntu 上部署一遍；e2e：假 GitHub（`GITHUB_API_BASE`）下，没连 → @ → 连接 → 自动跟进推送成功；集成事件用 hook 建立人；重试仍用原交代人 |
 

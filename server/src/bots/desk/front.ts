@@ -35,8 +35,11 @@ export abstract class DeskFront extends DeskStall {
       .toArray()[0] as DecisionRow | undefined;
   }
 
-  /** A new human request: the front desk decides, then acts. */
-  protected async admit(m: TopicMessage): Promise<void> {
+  /**
+   * A new human request: the front desk decides, then acts. `followUp` (接 1.4): the message does
+   * not @ this bot but follows its last answer; it gets no 👀 unless it becomes a run.
+   */
+  protected async admit(m: TopicMessage, followUp = false): Promise<void> {
     // Card answers, live events and retries carry synthetic keys: they go straight to a run.
     if (m.messageId.includes(":")) return this.start(m);
     const botId = this.botId as string;
@@ -47,10 +50,9 @@ export abstract class DeskFront extends DeskStall {
       const peek = unwrap(
         await roomStub(this.env, m.groupId).rpc(m.groupId, "bots.claim", this.actor(), { topicId: m.topicId, peek: true }),
       ) as ClaimResult;
-      // A side chat (单独问) is read-only and private: it keeps its own run. Another bot's topic is not ours.
+      // A side chat (单独问) is read-only and private: it keeps its own run.
       if (peek.contextOf) return this.start(m);
-      if (peek.botId !== botId) return;
-      await this.react(m);
+      if (!followUp) await this.react(m);
       const notRequest = (x: { id: string }) => x.id !== m.messageId;
       const newest = (peek.newest ?? []).filter(notRequest);
       const first = peek.first && notRequest(peek.first) ? peek.first : undefined;
@@ -68,6 +70,7 @@ export abstract class DeskFront extends DeskStall {
         requester: name(m.authorId),
         request: requestText(m.body, m.ext, name),
         dm: m.dm === true,
+        ...(followUp ? { followUp: true } : {}),
         memory: await memoryIndex(this.env, { botId, groupId: m.groupId, requesterId: m.authorId, requesterName: name(m.authorId), maxBytes: FRONT_DESK_MEMORY_BYTES }),
       });
       this.sql.exec(
@@ -110,6 +113,8 @@ export abstract class DeskFront extends DeskStall {
         return;
       }
       case "skip":
+        // 接 1.11: the 👀 it put while reading goes away; nothing happens.
+        if (!followUp) await this.unack(m.groupId, m.messageId);
         return;
     }
   }

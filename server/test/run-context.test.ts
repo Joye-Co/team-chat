@@ -165,8 +165,11 @@ describe("run context", () => {
     await finish(d, a.runId, "thread-1");
     await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === a.runId && e.data.run.status === "done");
 
-    // Two new messages, then the next mention: the resumed session gets only those.
-    await send(c, w.gid, topicId, "补充：还要支持邮箱");
+    // Two new messages, then the next mention: the resumed session gets only those. (Another
+    // person's note without an @ is not a follow-up; the requester's would start a run, 接 1.4.)
+    const { c: co } = await Client.connect(w.owner.token);
+    await send(co, w.gid, topicId, "补充：还要支持邮箱");
+    co.close();
     await send(c, w.gid, topicId, "@dev 再加一下", { mentions: [w.bot.id] });
     const b = await d.next((f) => f.t === "run.assign" && f.runId !== a.runId);
     expect(b.resumeSessionId).toBe("thread-1");

@@ -27,7 +27,8 @@ pub mod feature {
     pub const OUTPUT: &str = "output";
     /// `run.assign.resumeSessionId`: continue the CLI session of the topic's last run.
     pub const RESUME: &str = "resume";
-    /// chat-run topic context ops: `topic.history`, `topic.message`, `context.search`, `file.get`.
+    /// chat-run topic context ops: `topic.history`, `topic.message`, `context.search`, `file.get`,
+    /// `topic.state`, `artifact.list`, `artifact.get`, `card.get`, `decisions.list`, `member.list`.
     pub const CONTEXT: &str = "context";
     /// `CliInfo.models` / `efforts` and `run.assign.effort`.
     pub const EFFORT: &str = "effort";

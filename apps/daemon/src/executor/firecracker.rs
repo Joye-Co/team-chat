@@ -1,11 +1,13 @@
 //! `firecracker`: each run's CLI runs in its own Firecracker microVM (`[vm]` in `daemon.toml`).
 //!
 //! The VM boots the read-only base image with a per-run scratch disk as its writable layer and
-//! the tools disk (this binary as `vm-agent` and `chat-run`). The run folder, the run's git dir
-//! and the CLIs' config folders (`[vm].shares`) are NFS shares of this host, mounted in the VM
-//! at their host paths, so everything the daemon reads and writes (worktree, session files,
-//! 产出, `stderr.log`) stays where it is. Stdin and stdout go over vsock to `vm-agent`
-//! ([`super::vmwire`]); `chat-run` reaches the run's socket through vsock as well.
+//! the tools disk (this binary as `vm-agent`, `chat-run` and the `gh` proxy of feature
+//! "github", which finds the image's real `gh` after `/opt/runner/bin` on `GUEST_PATH`). The
+//! run folder, the run's git dir and the CLIs' config folders (`[vm].shares`) are NFS shares
+//! of this host, mounted in the VM at their host paths, so everything the daemon reads and
+//! writes (worktree, session files, 产出, `stderr.log`) stays where it is. Stdin and stdout go
+//! over vsock to `vm-agent` ([`super::vmwire`]); `chat-run` reaches the run's socket through
+//! vsock as well.
 //!
 //! Root-only steps (the VM's tap device, NFS exports) go through `[vm].helper` with `sudo -n`
 //! (`scripts/runner/host-setup.sh` installs it). The network rules are static: VMs reach the
@@ -75,18 +77,27 @@ impl Firecracker {
     }
 }
 
-fn make_tools_disk(exe: &[u8], disk: &Path) -> std::io::Result<()> {
+/// The files of the tools disk (mounted at `/opt/runner`): the binary as `vm-agent`, and in
+/// `bin/` the names it is started by in a run.
+fn stage_tools(exe: &[u8], stage: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    let stage = disk.with_extension(format!("stage-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&stage);
+    let _ = std::fs::remove_dir_all(stage);
     std::fs::create_dir_all(stage.join("bin"))?;
     let agent = stage.join(crate::vm_agent::NAME);
     std::fs::write(&agent, exe)?;
     std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o755))?;
-    std::os::unix::fs::symlink(
-        format!("/opt/runner/{}", crate::vm_agent::NAME),
-        stage.join("bin").join(crate::chat_run::NAME),
-    )?;
+    for name in [crate::chat_run::NAME, crate::github::GH] {
+        std::os::unix::fs::symlink(
+            format!("/opt/runner/{}", crate::vm_agent::NAME),
+            stage.join("bin").join(name),
+        )?;
+    }
+    Ok(())
+}
+
+fn make_tools_disk(exe: &[u8], disk: &Path) -> std::io::Result<()> {
+    let stage = disk.with_extension(format!("stage-{}", std::process::id()));
+    stage_tools(exe, &stage)?;
     let tmp = disk.with_extension("tmp");
     let size_mb = exe.len() / (1 << 20) * 2 + 16;
     let out = std::process::Command::new(mkfs_ext4())
@@ -767,6 +778,23 @@ mod tests {
         assert!(bot_home(&tmp, &env("../x")).is_none());
         assert!(bot_home(Path::new(""), &env("01BOTHOME0000000000000TEST")).is_none());
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Feature "github": in the VM, `gh` on `GUEST_PATH` is the tools disk's proxy, and the
+    /// proxy skips the tools folder when it looks for the real one.
+    #[test]
+    fn the_guest_path_finds_the_gh_proxy_first() {
+        let tmp = tempfile::tempdir().unwrap();
+        let stage = tmp.path().join("tools");
+        stage_tools(b"agent", &stage).unwrap();
+        let agent = format!("/opt/runner/{}", crate::vm_agent::NAME);
+        for name in [crate::chat_run::NAME, crate::github::GH] {
+            let link = std::fs::read_link(stage.join("bin").join(name)).unwrap();
+            assert_eq!(link, Path::new(&agent), "{name}");
+        }
+        assert_eq!(GUEST_PATH.split(':').next(), Some(crate::github::GUEST_BIN));
+        let (env, _) = guest_env(&[("CHAT_GITHUB_AS".to_string(), "Ann".to_string())]);
+        assert!(env.contains(&("CHAT_GITHUB_AS".to_string(), "Ann".to_string())));
     }
 
     #[test]

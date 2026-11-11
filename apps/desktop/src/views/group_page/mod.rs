@@ -5,8 +5,9 @@
 //! the 群's name and purpose; the content is a Mail-like list of 进行中 and
 //! 最近完成 话题 (a 话题 starts from 新话题 in the toolbar or the sidebar, or
 //! ⌘N, which open the 新话题 sheet preset to this 群; there is no inline
-//! post box). The page shows only 话题: the 群's info (成员, 通知, 群里的决定 …)
-//! is 群资料, the 群聊's 详情 pane ([`info`]).
+//! post box). The page shows its 话题, then 群里的约定 (what members keep for this
+//! 群, `views::memory`); the 群's info (成员, 通知, 群里的决定 …) is 群资料, the
+//! 群聊's 详情 pane ([`info`]).
 //!
 //! The page draws its own toolbar row ([`PageView::draws_own_header`]).
 
@@ -49,7 +50,22 @@ pub struct GroupPage {
     services: Services,
     /// 进行中 shows every 话题 (`看全部`), not the first [`ACTIVE_ROWS`].
     show_all: bool,
+    /// 群里的约定 of the 群 on show, read again when another 群 opens.
+    memory: Option<Entity<crate::views::memory::MemoryBoard>>,
+    /// The page's scroll of each 群 (each keeps its own place) and where 群里的约定
+    /// starts in it (a scene scrolls to it).
+    scrolls: std::cell::RefCell<std::collections::HashMap<String, gpui::ScrollHandle>>,
+    memory_top: std::rc::Rc<std::cell::Cell<gpui::Pixels>>,
     _subscriptions: Vec<Subscription>,
+}
+
+/// Set by a screenshot scene: the page scrolls to 群里的约定 once it has its answer.
+static SCENE_SCROLL_MEMORY: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Set by a screenshot scene before the page opens.
+pub fn scroll_to_memory_for_scene() {
+    SCENE_SCROLL_MEMORY.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 impl GroupPage {
@@ -64,7 +80,43 @@ impl GroupPage {
             _subscriptions: watch(&services, cx),
             services,
             show_all: false,
+            memory: None,
+            scrolls: Default::default(),
+            memory_top: std::rc::Rc::new(std::cell::Cell::new(gpui::Pixels::ZERO)),
         }
+    }
+
+    fn scroll_of(&self, g: &str) -> gpui::ScrollHandle {
+        self.scrolls
+            .borrow_mut()
+            .entry(g.to_string())
+            .or_insert_with(gpui::ScrollHandle::new)
+            .clone()
+    }
+
+    /// 群里的约定 (沉淀, the 群's scope) of `g`: one board per 群 on show.
+    fn memory_board(
+        &mut self,
+        g: &str,
+        cx: &mut Context<Self>,
+    ) -> Entity<crate::views::memory::MemoryBoard> {
+        use crate::{data::memory::MemoryScope, views::memory};
+        let scope = MemoryScope::Group(g.to_string());
+        if let Some(b) = self
+            .memory
+            .as_ref()
+            .filter(|b| *b.read(cx).scope() == scope)
+        {
+            return b.clone();
+        }
+        let services = self.services.clone();
+        let board = gpui::AppContext::new(cx, |cx| {
+            memory::MemoryBoard::new(services, scope, memory::Host::Page, String::new(), cx)
+        });
+        // The page draws again when the board's answers arrive (it may hide itself).
+        cx.observe(&board, |_, _, cx| cx.notify()).detach();
+        self.memory = Some(board.clone());
+        board
     }
 
     fn group_id(&self, cx: &App) -> Option<String> {
@@ -694,6 +746,42 @@ impl Render for GroupPage {
                 ));
             }
         }
+        // 群里的约定 under the 话题 of a 群 (not a 私聊: nothing is kept for one there).
+        let is_group = p
+            .groups()
+            .into_iter()
+            .any(|x| x.id == g && x.kind == crate::data::GroupKind::Group);
+        if load == PageLoad::Ready && is_group {
+            let board = self.memory_board(&g, cx);
+            if !board.read(cx).hidden() {
+                let top = self.memory_top.clone();
+                content = content.child(
+                    div().relative().child(board.clone()).child(
+                        // Measures where the card starts (a scene scrolls to it).
+                        gpui::canvas(
+                            move |bounds, _, _| top.set(bounds.origin.y),
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full(),
+                    ),
+                );
+            }
+            // A scene's scroll: kept until the board has its answer, since it grows then.
+            if SCENE_SCROLL_MEMORY.load(std::sync::atomic::Ordering::Relaxed) {
+                if board.read(cx).loaded() {
+                    SCENE_SCROLL_MEMORY.store(false, std::sync::atomic::Ordering::Relaxed);
+                }
+                let (scroll, top) = (self.scroll_of(&g), self.memory_top.clone());
+                window.on_next_frame(move |window, _| {
+                    let y = top.get() - scroll.bounds().origin.y - scroll.offset().y;
+                    scroll.set_offset(gpui::point(gpui::Pixels::ZERO, -(y - page::m::GUTTER)));
+                    window.refresh();
+                });
+            }
+        }
         // One scroll place per 群: GPUI keeps it by element id, so a shared
         // id opened every 群 at the place the last one was left.
         let list = div()
@@ -701,6 +789,7 @@ impl Render for GroupPage {
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
+            .track_scroll(&self.scroll_of(&g))
             .child(content);
         div()
             .size_full()

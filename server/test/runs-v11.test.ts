@@ -287,7 +287,7 @@ describe("1.1 runs", () => {
     await runInDurableObject(deskOf(w.bot.id), (o) => (o as unknown as { alarm(): Promise<void> }).alarm());
     d.event(runId, { type: "paused", paused: true, by: w.human.id });
     await new Promise((r) => setTimeout(r, 200));
-    expect(botMessages(c, topicId, w.bot.id).some((m) => m.body === TEXT.stalled)).toBe(false);
+    expect(botMessages(c, topicId, w.bot.id).some((m) => String(m.body).startsWith("卡住了"))).toBe(false);
     expect(lastRun(c, runId).status).toBe("running");
 
     // An owner hands it back with a note for the CLI; the stall clock starts again.
@@ -369,7 +369,7 @@ describe("1.1 runs", () => {
       state.storage.sql.exec("UPDATE runs SET last_event_at = ? WHERE id = ?", Date.now() - STALL_MS - 1000, runId);
     });
     await runInDurableObject(deskOf(w.bot.id), (o) => (o as unknown as { alarm(): Promise<void> }).alarm());
-    expect(botMessages(c, topicId, w.bot.id).some((m) => m.body === TEXT.stalled)).toBe(false);
+    expect(botMessages(c, topicId, w.bot.id).some((m) => String(m.body).startsWith("卡住了"))).toBe(false);
     const back = await resume();
     expect(back.status, JSON.stringify(back.body)).toBe(200);
     expect(back.body.pausedBy).toBeUndefined();

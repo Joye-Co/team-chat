@@ -89,6 +89,8 @@ jobs:
               - scripts/deploy-server.sh
               - scripts/release-check.sh
               - scripts/release.sh
+              - scripts/build-daemon.sh
+              - scripts/runner/install-daemon.sh
               - scripts/lib.sh
               - scripts/previous-windows-installer.sh
               - scripts/check-logs-for-servers.sh
