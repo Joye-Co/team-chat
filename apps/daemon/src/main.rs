@@ -13,6 +13,8 @@ fn main() {
     if daemon::chat_run::started_as(&argv0, daemon::vm_agent::NAME) {
         std::process::exit(daemon::vm_agent::main());
     }
+    // Windows: CLIs installed where the user's PATH does not reach (see the function).
+    daemon::sys::add_usual_program_folders();
     let mut args = std::env::args().skip(1);
     let cmd = args.next().unwrap_or_default();
     // The scheduled task's first action on Windows: put the program file back after an update

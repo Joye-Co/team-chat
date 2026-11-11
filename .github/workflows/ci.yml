@@ -446,6 +446,28 @@ jobs:
             Get-Content "$dir\out.txt", "$dir\err.txt"
           }
           Remove-LocalUser -Name $user
+      # A side chat's checkout is read-only to its CLI. The runner's own user is an elevated
+      # administrator, whom a restore privilege lets remove files and make folders past an
+      # access list (as root is past file modes), so the tests above cannot show the whole of
+      # it: here the same check runs as a user without administrator rights.
+      - name: Read-only checkout of a side chat, as a standard user
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $user = 'tcaside'
+          $secret = 'Tc!' + [guid]::NewGuid().ToString('N') + 'aA1'
+          $secure = ConvertTo-SecureString $secret -AsPlainText -Force
+          New-LocalUser -Name $user -Password $secure -AccountNeverExpires | Out-Null
+          Add-LocalGroupMember -Group 'Users' -Member $user
+          $cred = New-Object Management.Automation.PSCredential("$env:COMPUTERNAME\$user", $secure)
+          $dir = 'C:\tc-aside'
+          New-Item -ItemType Directory -Force -Path "$dir\work" | Out-Null
+          & icacls.exe $dir /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' "${user}:(OI)(CI)M" | Out-Null
+          Copy-Item target\debug\fake-cli.exe "$dir\fake-cli.exe"
+          $p = Start-Process -FilePath "$dir\fake-cli.exe" -ArgumentList '--read-only-check', "$dir\work" -Credential $cred -WorkingDirectory $dir -Wait -PassThru -RedirectStandardOutput "$dir\out.txt" -RedirectStandardError "$dir\err.txt"
+          Get-Content "$dir\out.txt", "$dir\err.txt"
+          Remove-LocalUser -Name $user
+          if ($p.ExitCode -ne 0) { throw "a standard user's CLI could change a read-only checkout (exit code $($p.ExitCode))" }
       - name: cargo check (e2e tool)
         run: cargo check --locked -p e2e --all-targets
 

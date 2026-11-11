@@ -347,6 +347,102 @@ mod windows_load {
     }
 }
 
+/// Folders under the user's profile and the system's program folders where coding CLIs and
+/// the tools they need are usually installed, in the order they are added to `PATH`. Not all
+/// of them are on a Windows user's `PATH`: the Claude Code installer puts `claude.exe` in
+/// `.local\bin` and only says so. `var` reads an environment variable.
+#[cfg(any(windows, test))]
+fn usual_program_folders(
+    var: impl Fn(&str) -> Option<std::path::PathBuf>,
+) -> Vec<std::path::PathBuf> {
+    let mut out = vec![];
+    let mut add = |base: &str, rest: &[&str]| {
+        if let Some(mut p) = var(base) {
+            p.extend(rest);
+            out.push(p);
+        }
+    };
+    add("USERPROFILE", &[".local", "bin"]);
+    add("USERPROFILE", &[".claude", "local"]);
+    add("APPDATA", &["npm"]);
+    add("USERPROFILE", &[".bun", "bin"]);
+    add("USERPROFILE", &[".cargo", "bin"]);
+    add("ProgramFiles", &["nodejs"]);
+    add("ProgramFiles", &["Git", "cmd"]);
+    add("LOCALAPPDATA", &["Programs", "Git", "cmd"]);
+    out
+}
+
+/// `path` with each of `more` that is not in it yet added at the end (what is on `PATH`
+/// already wins), compared the way Windows compares paths: without case, and a trailing
+/// separator does not count.
+#[cfg(any(windows, test))]
+fn path_with(path: &str, more: &[std::path::PathBuf], sep: char) -> String {
+    let key = |p: &str| p.trim().trim_end_matches(['\\', '/']).to_ascii_lowercase();
+    let mut parts: Vec<String> = path
+        .split(sep)
+        .filter(|p| !p.trim().is_empty())
+        .map(str::to_string)
+        .collect();
+    for m in more {
+        let m = m.to_string_lossy().into_owned();
+        if !parts.iter().any(|p| key(p) == key(&m)) {
+            parts.push(m);
+        }
+    }
+    parts.join(&sep.to_string())
+}
+
+/// Windows: adds the usual program folders that exist to this process's `PATH`, after what
+/// is there. On a Mac the app does this when it installs the service (the service keeps the
+/// login shell's `PATH` plus the usual folders); a scheduled task gets the user's `PATH`
+/// fresh at every start, so the daemon adds them itself, each time it starts. Call it before
+/// any thread is started. Unix: nothing.
+pub fn add_usual_program_folders() {
+    #[cfg(windows)]
+    {
+        let folders: Vec<_> = usual_program_folders(|k| {
+            std::env::var_os(k)
+                .filter(|v| !v.is_empty())
+                .map(Into::into)
+        })
+        .into_iter()
+        .filter(|p| p.is_dir())
+        .collect();
+        let path = std::env::var("PATH").unwrap_or_default();
+        let next = path_with(&path, &folders, PATH_SEP);
+        if next != path {
+            // SAFETY: called at the start of `main`, before any other thread exists.
+            unsafe { std::env::set_var("PATH", next) };
+        }
+    }
+}
+
+/// Windows: the Git Bash that Claude Code would use for its Bash tool and for shell hooks,
+/// found the way the CLI finds it: `CLAUDE_CODE_GIT_BASH_PATH`, Git's usual install folders,
+/// then next to the `git` on `PATH`. None: the CLI uses PowerShell as its shell tool.
+#[cfg(windows)]
+pub fn git_bash() -> Option<std::path::PathBuf> {
+    use std::path::PathBuf;
+    let var = |k: &str| {
+        std::env::var_os(k)
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+    };
+    let mut tries: Vec<PathBuf> = var("CLAUDE_CODE_GIT_BASH_PATH").into_iter().collect();
+    for base in ["ProgramFiles", "ProgramFiles(x86)"] {
+        if let Some(p) = var(base) {
+            tries.push(p.join("Git").join("bin").join("bash.exe"));
+        }
+    }
+    if let Some(git) = crate::health::which("git")
+        && let Some(root) = git.parent().and_then(Path::parent)
+    {
+        tries.push(root.join("bin").join("bash.exe"));
+    }
+    tries.into_iter().find(|p| p.is_file())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,6 +468,43 @@ mod tests {
             l[0] = load_step(l[0], 0.0, 5.0, 60.0);
         }
         assert!(l[0] < 0.01);
+    }
+
+    /// The usual program folders come from the profile and program variables that are set,
+    /// and are added to a PATH after what is there, once, compared as Windows compares paths.
+    #[test]
+    fn usual_program_folders_are_added_after_the_path_once() {
+        let var = |k: &str| match k {
+            "USERPROFILE" => Some(std::path::PathBuf::from(r"C:\Users\me")),
+            "APPDATA" => Some(std::path::PathBuf::from(r"C:\Users\me\AppData\Roaming")),
+            _ => None,
+        };
+        let folders = usual_program_folders(var);
+        let names: Vec<String> = folders
+            .iter()
+            .map(|p| p.to_string_lossy().replace('/', "\\"))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                r"C:\Users\me\.local\bin",
+                r"C:\Users\me\.claude\local",
+                r"C:\Users\me\AppData\Roaming\npm",
+                r"C:\Users\me\.bun\bin",
+                r"C:\Users\me\.cargo\bin",
+            ]
+        );
+        let more = [
+            std::path::PathBuf::from(r"C:\Users\me\.local\bin"),
+            std::path::PathBuf::from(r"C:\Users\Me\AppData\Roaming\NPM"),
+        ];
+        assert_eq!(
+            path_with(r"C:\Windows;;c:\users\me\appdata\roaming\npm\", &more, ';'),
+            r"C:\Windows;c:\users\me\appdata\roaming\npm\;C:\Users\me\.local\bin"
+        );
+        assert_eq!(path_with("", &more[..1], ';'), r"C:\Users\me\.local\bin");
+        let same = r"C:\Windows;C:\Users\me\.local\bin";
+        assert_eq!(path_with(same, &more[..1], ';'), same);
     }
 
     /// Windows: the machine's processor time moves forward and the idle part is within it.
