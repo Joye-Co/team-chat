@@ -244,7 +244,7 @@ AddArtifactVersionRequest += { parentVersion?: number }
 ### 3.5 daemon
 
 - `chat_run.rs` 的提示词（`chat_run.rs:92-95`）交接那段改为：要知道群里有谁，用 `chat-run member list`；只有确实该换人时才转交，交出去就停；不要交回给交给你的成员；分出去的结果会自己回来，不要轮询；你从来不需要给别的成员留言，要说的写进结果或产出。USAGE 同步。
-- `run.done` 带 `code { branch, head, pushed }`：从 `workspace.rs` 已有的分支和 `unpushed_commits`（`workspace.rs:267`）取，取不到就不带。
+- `run.done` 带 `code { branch, head, pushed }`：run 结束、还占着工作线时由 `workspace::code_location` 取：分支是工作目录当前检出的分支（游离 HEAD 时用 run 记录的分支），head 是当前提交。`pushed` 不用 `unpushed_commits`（它把别的本地分支也算作「在别处」），也不信 CLI 说的：用这次 run 的 GitHub 凭证从 `origin` 拉这个分支到它的远程跟踪引用，head 在里面才算推上去；已跟踪文件有没提交的改动、拉取失败、远端没有这个分支，都算没推。不在 git 仓库（没给 repo）、旁聊 run，就不带。
 - `chat_run_files.rs` 的 `artifact version` 加 `--parent <n>`。
 
 ### 3.6 桌面端（Mac、Windows 同一份）

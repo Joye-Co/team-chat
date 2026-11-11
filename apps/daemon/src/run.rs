@@ -181,6 +181,34 @@ async fn prepare_with_github(
     }
 }
 
+/// The run works in a repository (`repo.url` or `repo.path`), so it has a code location.
+fn has_repo(a: &RunAssign) -> bool {
+    a.repo
+        .as_ref()
+        .is_some_and(|r| r.url.is_some() || r.path.is_some())
+}
+
+/// The environment of the daemon's fetch at the end of a run (the code location's "pushed"):
+/// the person's GitHub as for [`prepare_with_github`], nothing without one.
+async fn code_git_env(
+    a: &RunAssign,
+    github: Option<&crate::github::Run>,
+    event: &(dyn Fn(RunEvent) + Send + Sync),
+) -> Vec<(String, Option<String>)> {
+    let Some(g) = github.filter(|g| g.app()) else {
+        return vec![];
+    };
+    let token = if crate::github::fetches_from_github(a.repo.as_ref()) {
+        match g.fetch(event).await {
+            crate::github::Got::Token(t) => Some(t.token),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    crate::github::fetch_env(&g.spec, token.as_deref())
+}
+
 /// What a resumed CLI session must know when its working folder is not the one its earlier
 /// turns used (the line was cleaned up after being idle, or this is the first run since the
 /// daemon kept lines). None when the folder is the same one.
@@ -430,8 +458,8 @@ pub async fn supervise(ctx: RunCtx) {
         eprintln!("{} run {run_id}: removed an old GitHub sign-in", now_ms());
     }
     let prepared = prepare_with_github(&cfg, &assign, github.as_deref(), &event).await;
-    let (outcome, timed_out) = match prepared {
-        Err(e) => (Outcome::failed(e), false),
+    let (outcome, timed_out, code) = match prepared {
+        Err(e) => (Outcome::failed(e), false, None),
         Ok((cwd, line, line_note)) => {
             event(RunEvent::Status {
                 state: "running".into(),
@@ -580,9 +608,18 @@ this machine cannot be made to stop at them (update it)",
             if aside {
                 workspace::set_read_only(&work, false);
             }
+            // Where the code is (design-relay R5), read while the run still holds the line.
+            let code = if aside || !has_repo(&assign) {
+                None
+            } else {
+                let fallback = workspace::read_meta(&dir).and_then(|m| m.branch);
+                let env = code_git_env(&assign, github.as_deref(), &event).await;
+                workspace::with_git_env(env, workspace::code_location(&work, fallback.as_deref()))
+                    .await
+            };
             // The CLI is done: the next run of this member in this topic may use the line.
             drop(line);
-            res
+            (res.0, res.1, code)
         }
     };
 
@@ -625,7 +662,7 @@ this machine cannot be made to stop at them (update it)",
         session_id: outcome.session_id.clone(),
         usage: outcome.usage.clone(),
         duration_ms: started.elapsed().as_millis() as u64,
-        code: None,
+        code,
     }));
     if let Some(mut meta) = workspace::read_meta(&dir) {
         meta.finished_at = Some(now_ms());
