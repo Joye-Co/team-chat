@@ -11,8 +11,10 @@ export const TOOL_STALL_MS = 30 * 60_000;
 export const LOOP_LIMIT = 4;
 /** The desk fixes a run by itself at most this often (nudge, loop reminder, restart, continue); then it tells people once. */
 export const MAX_INTERVENTIONS = 3;
-/** A run whose machine has sent no heartbeat for this long is restarted elsewhere. */
+/** A run whose machine has sent no heartbeat for this long waits for it (盯 1.1): no stall, no restart. */
 export const MACHINE_GONE_MS = 2 * 60_000;
+/** A run waits this long for its machine before it moves to another healthy one; with none it waits on. */
+export const MACHINE_MOVE_MS = 30 * 60_000;
 /** Runs in a row that the desk continued because the CLI only promised to work. */
 export const MAX_AUTO_CONTINUE = 3;
 

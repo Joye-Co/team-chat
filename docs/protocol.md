@@ -879,16 +879,19 @@ Rules:
   requester or an owner can answer, every answer is audited as `run.approval`; when the question
   cannot be posted the answer is no), `done` on success, `blocked` with one
   short note when the run fails, its machine stays away past the lease, or no event comes for
-  10 minutes, after the desk's own tries (see "Supervision") (the daemon's own `status: stalled` report marks it blocked at once and does not
-  count as progress). A blocked run that sends events again goes back to `running`. A run that
+  10 minutes, after the desk's own tries (see "Supervision") (the daemon's own `status: stalled` report is a signal only: it
+  neither blocks nor restarts the run, and it does not count as progress). A blocked run that sends events again goes back to `running`. A run that
   never reaches a machine ends as `failed` after 2 minutes.
-- 1.1 queue (排队): when every machine that could take a run is busy (`maxParallelRuns`), the run
+- 1.1 queue (排队): when every machine that could take a run is busy (`maxParallelRuns`), or
+  offline (a machine that said hello once, for example a runner pinned to one machine whose
+  computer is closed; the bot posts one note naming the computer it waits for), the run
   waits instead of failing: it stays `created` with no `machineId` and gets `queuedAt` and
   `queuePosition` (1-based among the bot's queued runs, oldest first), stored with `run.updated`.
   When a run of the bot ends, and every 15 s, the oldest queued run gets a free machine; the
   runs behind it get a `run.updated` with their new place. A queued run is not failed by the
-  2-minute rule; it fails with the "no free machine" note after 60 minutes. With no machine
-  that could ever take it (labels, runtime, health), the run fails at once as before. Readers:
+  2-minute rule; it fails after 24 hours with a note that says what it waited for. With no
+  machine that could ever take it (labels, runtime, free disk), the run fails at once with a
+  note that names the reason. Readers:
   "created with no `machineId`" and `queuedAt` = 排队 at `queuePosition`.
 - Input left over when a run ends starts a follow-up run, at most 5 in a row; then the bot
   posts one note. A person in the run's group stops a run with `POST /v1/runs/:id/cancel`: the
@@ -915,11 +918,22 @@ stops trying, and the topic gets one note.
   A run with a `tool.call` that has no `tool.result` yet waits for a step it started (a build, a
   test run): it gets no nudge, and it counts as silent only after 30 minutes. A run out of tries
   gets no nudge either.
-- **Silent 10 minutes (30 with a step open), the daemon's `stalled` report, or the machine gone** (no heartbeat for
-  2 minutes, or `runLost` past the lease): the run is cancelled without a message (`cancelled`,
-  summary `restarted: …`), and its request starts again with the same work order on a healthy
-  machine. The topic hears nothing. Out of tries, the old behavior applies: `blocked` with one
-  note ("我自己试了几次…还是没有进展").
+- **Silent 10 minutes (30 with a step open)**, in a fixed order, one step each time the run is
+  silent that long again: first the run is cancelled without a message (`cancelled`, summary
+  `restarted: …`) and its request starts again in the same CLI session on the same machine
+  (`resumeSessionId`; when that machine is full the retry waits for it, it never goes elsewhere);
+  then, when another healthy machine can take it, it starts there in a fresh session; only then
+  the run turns `blocked` with one note that names the minutes of silence and only the tries that
+  really happened (提醒, 打断后重来, 换电脑重来). The nudge comes once per piece of work. The
+  daemon's `stalled` report is a signal only and never restarts a run.
+- **The machine goes away** (no heartbeat for 2 minutes, or `runLost` past the lease): the run is
+  waited for, not restarted. It keeps its lease (MachineLink renews it), the topic gets one note
+  naming the computer, and the run is neither nudged nor marked stalled while it waits. A daemon
+  that comes back still holding the run replays its frames and the run goes on (one note when
+  replayed frames arrive). After 30 minutes away the run moves to another healthy machine in a
+  fresh session when one can take it; with no other machine it waits without limit. A machine
+  that is removed, or that is connected again without the run, ends the wait: the run restarts
+  elsewhere when it can, else it turns `blocked` with one note.
 - **The same step 4 times in a row** (equal `tool.call` titles): one reminder (`desk-loop-…`).
 - **A promise without work**: a run that succeeds with a short result such as "我来看看" and called
   no tool gets a follow-up run that continues its session ("do the work now"). At most 3 in a row.

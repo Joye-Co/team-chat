@@ -8,7 +8,7 @@ import { unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
 import { effectivePolicy } from "../../settings/approvals";
 import { policyPrompt, runGates } from "../../settings/rules";
-import { CONTEXT_CHARS, LEASE_MS, MAX_RUN_MS, type MachineView, TEXT, buildAsidePrompt, buildPrompt, buildResumePrompt, candidates, cut, gatesRuntime, hasFeature, hasRuntime, pickMachine } from "../dispatch";
+import { CONTEXT_CHARS, LEASE_MS, MAX_RUN_MS, type MachineView, type NoMachine, TEXT, buildAsidePrompt, buildPrompt, buildResumePrompt, cut, gatesRuntime, hasFeature, hasRuntime, pickMachine, whyNoMachine } from "../dispatch";
 import { type ContextRow, type Selection, requestAuthors, requestText, selectLines, withSummary } from "../../context/render";
 import { teamZone } from "../../memory/consolidate";
 import { type Brief, briefText } from "../../agent/frontdesk";
@@ -43,6 +43,16 @@ function manifestOf(sel: Selection, resumed: boolean): RunContextManifest {
   return out;
 }
 
+/** How a restarted run goes on (meta `restart:{runId}` of the run it restarts). */
+export interface Restart {
+  /** Continue the CLI session on the same machine (盯 1.3: interrupt and retry). */
+  sameSession?: boolean;
+  /** Machines the new run must not go to. */
+  exclude?: string[];
+  /** The only machine the new run may go to (a same-session restart stays on its machine). */
+  machine?: string;
+}
+
 /** What started a run (meta `request:{runId}`): the message and the follow-ups it carried. */
 export interface RunRequest {
   m: TopicMessage;
@@ -55,7 +65,9 @@ export interface RunRequest {
 
 export abstract class DeskRuns extends DeskCore {
   /** 盯活 (stall.ts): ends the run quietly and starts the same request again; false when out of tries. */
-  protected abstract restartElsewhere(r: RunRow, why: string): Promise<boolean>;
+  protected abstract restartElsewhere(r: RunRow, why: string, how?: Restart): Promise<boolean>;
+  /** 盯 1.1 (stall.ts): the lease of a run ran out; true when the run keeps waiting for its machine. */
+  protected abstract machineLost(r: RunRow): Promise<boolean>;
 
   // -------------------------------------------------------------------------
   // Starting a run
@@ -99,7 +111,10 @@ export abstract class DeskRuns extends DeskCore {
     // Run context: in the 群聊 only a follow-up, or a request that quotes this bot, continues
     // the bot's last session; any other request is a new piece of work.
     const quotesBot = m.replyToAuthorId === botId || (m.refs ?? []).some((x) => x.fromId === botId);
-    if (isMainTopicId(m.topicId) && !followUpOf && !quotesBot) this.sql.exec("UPDATE runs SET fresh = 1 WHERE id = ?", runId);
+    // 盯活: a restart says whether it continues the session and which machines it leaves out.
+    const how = retryOf ? this.restartOf(retryOf) : null;
+    if (isMainTopicId(m.topicId) && !followUpOf && !quotesBot && !how?.sameSession) this.sql.exec("UPDATE runs SET fresh = 1 WHERE id = ?", runId);
+    if (how?.exclude && how.exclude.length > 0) this.sql.exec("UPDATE runs SET excluded = ? WHERE id = ?", JSON.stringify(how.exclude), runId);
     if (claim.newest?.[0]) this.sql.exec("UPDATE runs SET context_seq = ? WHERE id = ?", claim.newest[0].seq, runId);
     // The request as it came, so the run can be retried with the same one. A follow-up or a
     // retry is the same piece of work: it keeps the kinds a person approved for all of it.
@@ -124,12 +139,14 @@ export abstract class DeskRuns extends DeskCore {
         await this.setStatus(r, "created");
         await this.topic(r, "in_progress");
 
-        const machines = await loadMachines(this.env);
-        const machine = this.pick(r, runner, machines);
-        // Every machine that could take it is busy: the run waits (排队) instead of failing.
-        const busy = !machine && this.couldTake(r, runner, machines);
-        if (!machine && !busy) {
-          const why = kind ? TEXT.noAsideMachine : TEXT.noMachine;
+        const machines = this.machinesFor(r, await loadMachines(this.env));
+        const machine = this.pick(r, runner, machines, how?.exclude ?? []);
+        // Every machine that could take it is busy, or (机 2.2) offline: the run waits (排队)
+        // instead of failing, and starts by itself when one is free or online again.
+        const none = machine ? null : this.whyNone(r, runner, machines);
+        const waits = none !== null && (none.why === "busy" || (none.why === "offline" && !kind));
+        if (!machine && !waits) {
+          const why = kind ? TEXT.noAsideMachine : this.noMachineText(none);
           return this.end(r, "failed", why, "blocked", why);
         }
 
@@ -158,6 +175,8 @@ export abstract class DeskRuns extends DeskCore {
           r.queued_at = Date.now();
           this.sql.exec("UPDATE runs SET queued_at = ? WHERE id = ?", r.queued_at, r.id);
           await this.setStatus(r, "created");
+          // Waiting for a machine to come online: the topic says which one.
+          if (none?.why === "offline") await this.note(r, TEXT.waitOffline(none.names)).catch((err) => this.log.warn("wait note failed", { runId, err }));
           await this.scheduleStall();
           return;
         }
@@ -192,11 +211,54 @@ export abstract class DeskRuns extends DeskCore {
     }
   }
 
-  /** A machine would take the run but has no free slot (`maxParallelRuns`). */
-  protected couldTake(r: RunRow, runner: BotRunner, machines: MachineView[]): boolean {
-    const roomy = machines.map((x) => (x.info ? { ...x, info: { ...x.info, maxParallelRuns: Number.MAX_SAFE_INTEGER } } : x));
-    const usable = r.kind === RUN_KIND_ASIDE ? roomy.filter((x) => hasFeature(x, "aside")) : roomy;
-    return candidates(usable, runner, Date.now()).length > 0;
+  /** How a restart of `runId` goes on (meta `restart:{runId}`), or null when it was no restart. */
+  protected restartOf(runId: string): Restart | null {
+    const raw = this.meta(`restart:${runId}`);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as Restart;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The machines a run may go to. A same-session restart (盯 1.3) stays on its own machine, where
+   * the run it replaces no longer takes a slot (the daemon has not answered the cancel yet); when
+   * that machine is busy or away, the restart waits for it (排队) instead of going elsewhere.
+   */
+  protected machinesFor(r: RunRow, machines: MachineView[]): MachineView[] {
+    const how = r.retry_of ? this.restartOf(r.retry_of) : null;
+    if (!how?.machine) return machines;
+    const old = r.retry_of as string;
+    return machines
+      .filter((x) => x.id === how.machine)
+      .map((x) =>
+        x.runningRuns.includes(old)
+          ? { ...x, runningRuns: x.runningRuns.filter((id) => id !== old), ...(x.health ? { health: { ...x.health, activeRuns: Math.max(0, x.health.activeRuns - 1) } } : {}) }
+          : x,
+      );
+  }
+
+  /** Why no machine takes the run now (机 2.10); an aside run needs a daemon that runs it read-only. */
+  protected whyNone(r: RunRow, runner: BotRunner, machines: MachineView[]): NoMachine {
+    const usable = r.kind === RUN_KIND_ASIDE ? machines.filter((x) => hasFeature(x, "aside")) : machines;
+    return whyNoMachine(usable, runner, Date.now());
+  }
+
+  /** Why a rejected run did not start: the machines left decide, else the daemon's reason. */
+  protected rejectText(none: NoMachine | null, reason: string): string {
+    if (reason === "busy" || reason === "draining" || none?.why === "busy") return TEXT.allBusy;
+    if (none?.why === "runtime" || none?.why === "disk") return this.noMachineText(none);
+    if (reason === "runtime_unavailable") return TEXT.noRuntime;
+    if (reason === "disk_low") return TEXT.noDisk;
+    return TEXT.failed("");
+  }
+
+  protected noMachineText(none: NoMachine | null): string {
+    if (none?.why === "runtime") return TEXT.noRuntime;
+    if (none?.why === "disk") return TEXT.noDisk;
+    return TEXT.noMachine;
   }
 
   /**
@@ -214,7 +276,7 @@ export abstract class DeskRuns extends DeskCore {
         const r = this.run(id);
         if (!r || r.ended_at !== null || r.machine_id || r.status !== "created" || !r.queued_at) return false;
         const prompt = this.meta(`prompt:${id}`);
-        const machine = prompt === null ? null : this.pick(r, runner, await loadMachines(this.env), JSON.parse(r.excluded) as string[]);
+        const machine = prompt === null ? null : this.pick(r, runner, this.machinesFor(r, await loadMachines(this.env)), JSON.parse(r.excluded) as string[]);
         if (!machine || prompt === null) return null;
         if (await this.budgetGate(r, prompt)) return false;
         await this.assign(r, runner, machine, prompt);
@@ -467,23 +529,28 @@ export abstract class DeskRuns extends DeskCore {
       const excluded = [...(JSON.parse(r.excluded) as string[]), machineId];
       this.sql.exec("UPDATE runs SET excluded = ? WHERE id = ?", JSON.stringify(excluded), runId);
       const runner = await loadRunner(this.env.DB, this.botId as string);
-      const machine = runner?.enabled ? this.pick(r, runner, await loadMachines(this.env), excluded) : null;
+      const machines = await loadMachines(this.env);
+      const machine = runner?.enabled ? this.pick(r, runner, machines, excluded) : null;
       const prompt = this.meta(`prompt:${runId}`);
       if (!runner || !machine || prompt === null) {
-        const why = r.kind === RUN_KIND_ASIDE ? TEXT.noAsideMachine : TEXT.noMachine;
+        // 机 2.10: the true reason, from the machines left or else from the daemon's answer.
+        const none = runner ? this.whyNone(r, runner, machines.filter((x) => !excluded.includes(x.id))) : null;
+        const why = r.kind === RUN_KIND_ASIDE ? TEXT.noAsideMachine : this.rejectText(none, reason);
         return this.end(r, "failed", why, "blocked", why);
       }
       await this.assign(r, runner, machine, prompt);
     });
   }
 
-  async runLost(runId: string, machineId: string): Promise<void> {
-    await this.serial(runId, async () => {
+  /**
+   * The run's lease ran out (machine-protocol.md, "Leases"). True: the run waits for its machine
+   * and MachineLink keeps it, so a daemon that comes back still holding it goes on (盯 1.1).
+   */
+  async runLost(runId: string, machineId: string): Promise<boolean> {
+    return this.serial(runId, async () => {
       const r = this.run(runId);
-      if (!r || r.ended_at !== null || r.machine_id !== machineId) return;
-      // 盯活: the work goes on on another computer while the desk has tries left.
-      if (await this.restartElsewhere(r, "machine lost")) return;
-      await this.end(r, "blocked", TEXT.lost, "blocked", TEXT.lost);
+      if (!r || r.ended_at !== null || r.machine_id !== machineId) return false;
+      return this.machineLost(r);
     });
   }
 }

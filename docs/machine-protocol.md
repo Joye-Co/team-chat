@@ -292,10 +292,19 @@ CliUsage   = { runtime, at, windows: { kind, label?, usedPct, resetsAt? }[] }
 - `run.assign.leaseMs` is the time the server waits without hearing about a run before it
   declares the run lost. Every `heartbeat` lists the daemon's runs and renews each listed
   run's lease to `now + leaseMs`; any `run.*` frame for a run also renews it.
-- When a lease expires, the server marks the run lost and leaves it out of later
-  `welcome.runs`, so the daemon stops it on reconnect. BotDesk sets the run and the topic to
-  `blocked` with one short note. A lost run is never assigned again: a new run needs a new
-  mention. Late frames of a lost or closed run are acked and dropped.
+- When a lease expires while the machine is away (no heartbeat), BotDesk keeps waiting: the
+  run stays open with a new lease and stays in `welcome.runs`, so a daemon that comes back
+  still holding it replays its frames and goes on. The topic gets one note that the run waits
+  for its computer, and one when it is back; a waiting run is not counted as silent. After
+  30 minutes away the run moves to another healthy machine that can take it (a new run, a new
+  session); with no such machine it waits on. A removed machine is not waited for.
+- When a lease expires while the machine is connected (the daemon no longer reports the run),
+  the server marks the run lost and leaves it out of later `welcome.runs`, so the daemon stops
+  it. BotDesk starts it again or sets the run and the topic to `blocked` with one short note.
+  Late frames of a lost or closed run are acked and dropped.
+- The daemon's own `stalled` status is a signal only: the server does not restart a run for
+  it. A silent run gets one nudge, then is restarted in the same session on the same machine,
+  then on another machine when one can take it, and only then is it marked `blocked`.
 - The server's lease is 10 minutes (`leaseMs = 600000`) and `maxDurationMs` is 2 hours.
 - The server closes the link when it hears nothing for 90 s. The daemon drops the link when
   it receives nothing for 3 heartbeat intervals and reconnects with exponential backoff
