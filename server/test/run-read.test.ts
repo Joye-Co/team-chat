@@ -176,6 +176,9 @@ describe("chat-run reads", () => {
     expect(state.body.text).toContain(`上线方案 · a ${plan.id} v1`);
     expect(state.body.text).toContain(`m ${open.message.id} · 要通知客户吗？ · waiting on Alice`);
     expect(state.body.text).toContain("今天发版吗？ → 发");
+    // A decision recorded by hand (记一条) in the topic is there too, newest first.
+    expect(state.body.text).toContain("- 周五不发版 (recorded by Alice");
+    expect(state.body.text.indexOf("周五不发版")).toBeLessThan(state.body.text.indexOf("今天发版吗？ → 发"));
     expect(state.body.text).toContain("Alice:");
     expect([...state.body.text].length).toBeLessThanOrEqual(2000);
     expect((await get(`/topic/state?topic=${otherTopic}`)).body.text).toContain("产出: none yet");

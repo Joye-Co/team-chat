@@ -90,16 +90,28 @@ registerRoomRpc("context.topicState", (room, actor, args): TopicStateData => {
       }
     })
     .slice(0, 5);
-  const decisions = room.sql
-    .exec<{ title: string; action_label: string; choices: string | null; actor_id: string; at: number }>(
-      `SELECT d.title, d.action_label, d.choices, d.actor_id, d.at FROM card_decisions d
+  const answered = room.sql
+    .exec<{ seq: number; title: string; action_label: string; choices: string | null; actor_id: string; at: number }>(
+      `SELECT d.seq, d.title, d.action_label, d.choices, d.actor_id, d.at FROM card_decisions d
        JOIN messages m ON m.id = d.message_id AND m.deleted_at IS NULL
        WHERE d.topic_id = ? AND d.message_id NOT IN (SELECT message_id FROM card_private)
        ORDER BY d.seq DESC LIMIT 5`,
       topicId,
     )
     .toArray()
-    .map((d) => ({ title: d.title, label: d.action_label, choices: d.choices ? (JSON.parse(d.choices) as string[]) : [], by: d.actor_id, at: d.at }));
+    .map((d) => ({ seq: d.seq, title: d.title, label: d.action_label, choices: d.choices ? (JSON.parse(d.choices) as string[]) : [], by: d.actor_id, at: d.at }));
+  // Decisions recorded by hand (记一条) in this topic; `label` "" marks them.
+  const recorded = room.sql
+    .exec<{ seq: number; text: string; recorded_by: string; recorded_at: number }>(
+      "SELECT seq, text, recorded_by, recorded_at FROM recorded_decisions WHERE topic_id = ? ORDER BY seq DESC LIMIT 5",
+      topicId,
+    )
+    .toArray()
+    .map((r) => ({ seq: r.seq, title: r.text, label: "", choices: [] as string[], by: r.recorded_by, at: r.recorded_at }));
+  const decisions = [...answered, ...recorded]
+    .sort((a, b) => b.seq - a.seq)
+    .slice(0, 5)
+    .map(({ seq: _seq, ...d }) => d);
   return { title: topic.title, messages, authors, artifacts, openCards, decisions };
 });
 
@@ -133,6 +145,10 @@ export function topicStateText(d: TopicStateData, name: Names): string {
   if (d.decisions.length > 0) {
     parts.push("Latest decisions:");
     for (const x of d.decisions) {
+      if (x.label === "") {
+        parts.push(`- ${cut(oneLine(x.title), 120)} (recorded by ${name(x.by)} ${stamp(x.at)})`);
+        continue;
+      }
       const what = x.choices.length > 0 ? `${x.label}: ${x.choices.join(", ")}` : x.label;
       parts.push(`- ${cut(oneLine(x.title), 60)} → ${cut(oneLine(what), 60)} (${name(x.by)} ${stamp(x.at)})`);
     }
