@@ -316,6 +316,13 @@ impl Config {
                         self.token_file.display()
                     ));
                 }
+                // Windows: the same question, asked of the owner and the access list.
+                if let Some(why) = crate::sys::acl_problem(&self.token_file) {
+                    out.push(format!(
+                        "token file {} must be private to this user: {why}",
+                        self.token_file.display()
+                    ));
+                }
             }
         }
         for (name, rt) in &self.runtimes {

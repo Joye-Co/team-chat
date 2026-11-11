@@ -19,6 +19,8 @@
 //! its entry, or the first that failed under `error`.
 //! Scenes live in [`scenes::all`].
 
+#[cfg(target_os = "windows")]
+pub mod artifact_window;
 pub mod capture;
 pub mod clock;
 pub mod drawn;
@@ -69,6 +71,9 @@ struct Options {
     settle: Duration,
 }
 
+/// How long a scene's native content (a web page) may take to draw.
+const NATIVE_READY: Duration = Duration::from_secs(60);
+
 const USAGE: &str = "usage: desktop --screenshot <dir> [--theme light|dark|both] \
 [--scenes a,b,...] [--worst-case] [--size WxH] [--settle-ms n] [--list]";
 
@@ -80,6 +85,10 @@ pub fn main_if_requested() -> Option<i32> {
             println!("{:<12} {}", s.name, s.about);
         }
         return Some(0);
+    }
+    #[cfg(target_os = "windows")]
+    if let Some(code) = artifact_window::main_if_requested(&args) {
+        return Some(code);
     }
     if !args.iter().any(|a| a == "--screenshot") {
         return None;
@@ -318,6 +327,10 @@ fn exit_now(code: i32) -> ! {
 
 async fn run_all(options: &Options, cx: &mut AsyncApp) -> bool {
     let mut all_ok = true;
+    if !capture::dpi_aware() {
+        eprintln!("the process is not per-monitor DPI aware: the exe has no manifest");
+        all_ok = false;
+    }
     let mut shots = Vec::new();
     for &mode in &options.modes {
         cx.update(|cx| {
@@ -496,16 +509,27 @@ async fn shoot(
         }
         // web-embed: native content (a web page) draws on its own schedule.
         if let Some(ready) = scenes::ready_check(scene.name) {
-            let deadline = Instant::now() + Duration::from_secs(20);
+            // The first page of a run also starts the web view's own processes, which on
+            // a CI runner without a graphics card took longer than 20 s.
+            let waiting = Instant::now();
+            let deadline = waiting + NATIVE_READY;
             while !cx.update(|cx| ready(cx)) {
                 if Instant::now() > deadline {
-                    return Err("the native content was not ready within 20 s".into());
+                    return Err(format!(
+                        "the native content was not ready within {} s",
+                        NATIVE_READY.as_secs()
+                    ));
                 }
                 cx.background_executor()
                     .timer(Duration::from_millis(100))
                     .await;
                 let _ = next_frame(handle, cx).await;
             }
+            eprintln!(
+                "{}: native content ready after {:.1} s",
+                scene.name,
+                waiting.elapsed().as_secs_f32()
+            );
             for _ in 0..2 {
                 let _ = next_frame(handle, cx).await;
             }
@@ -584,6 +608,12 @@ async fn shoot(
 fn park_pointer(handle: AnyWindowHandle, at: gpui::Point<Pixels>, cx: &mut AsyncApp) {
     let _ = cx.update(|cx| {
         handle.update(cx, |_, window, cx| {
+            // Hover points are measured on the Mac's layout; off the Mac the
+            // caption strip pushes the content down.
+            let mut at = at;
+            if at.y >= gpui::px(0.) {
+                at.y += crate::ui::native::window_chrome::height(window);
+            }
             window.dispatch_event(
                 gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
                     position: at,

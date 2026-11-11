@@ -14,13 +14,9 @@ crate::copy! {
     // The palette footer (COMPLETENESS 2.11): one Kbd cap per key.
     KEY_UP = "↑",
     KEY_DOWN = "↓",
-    KEY_RETURN = "↩",
-    KEY_COMMAND = if cfg!(target_os = "macos") {
-        "⌘"
-    } else {
-        "Ctrl"
-    },
-    KEY_ESCAPE = "esc",
+    KEY_RETURN = crate::copy::per_system("↩", "Enter"),
+    KEY_COMMAND = crate::copy::per_system("⌘", "Ctrl"),
+    KEY_ESCAPE = crate::copy::per_system("esc", "Esc"),
     HINT_SELECT = "选择",
     HINT_OPEN = "打开",
     HINT_CLOSE = "关闭",

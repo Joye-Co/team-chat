@@ -150,9 +150,9 @@ gh workflow run release.yml --ref main -f version=<v> -f mode=upload-only # uplo
   (against the previous release's DMG too) and keeps them as a workflow artifact for 7 days.
   Nothing is committed, tagged or uploaded. "would stop" lines name what a release would refuse.
 - `release` (main only): `chore(release): v<v>` on `main`, tag `v<v>`, GitHub Release with the
-  DMG, the daemon and the `.sha256` files, then `PUT /v1/admin/releases/<v>` on production.
+  DMG and the daemon, then `PUT /v1/admin/releases/<v>` on production.
   The release commit is pushed with the workflow token, which starts no CI run on `main`.
-- `upload-only` (main only): downloads the DMG of release `v<v>`, checks its `.sha256` and uploads
+- `upload-only` (main only): downloads the DMG of release `v<v>`, checks it against the release's SHA-256 digest (`scripts/check-release-digest.sh`) and uploads
   it to production again.
 
 Repository secrets (Settings, Secrets and variables, Actions). The workflow never prints them:
@@ -172,6 +172,49 @@ belong to the certificate; a non-prerelease release and `upload-only` also refus
 `ADMIN_SECRET_PRODUCTION`. A dry run only warns and signs ad hoc. After rotating `ADMIN_SECRET`
 (below), set `ADMIN_SECRET_PRODUCTION` again.
 
+### Windows installer
+
+The same workflow builds the Windows installer on a Windows runner (job **Windows installer**:
+`scripts/build-windows-installer.sh`, then `scripts/test-windows-installer.sh`, which installs,
+checks, starts and uninstalls it there) in the modes `dry-run` and `release`, and keeps it as
+the artifact `windows-installer-<v>`. In `release` the job **Publish the Windows installer**
+adds `<name>-<v>-setup.exe` and the Windows daemon to the GitHub Release and uploads it with
+`scripts/release.sh <v> --env production --upload-only --platform windows`
+(`PUT /v1/admin/releases/<v>/assets/windows`); `upload-only` uploads the installer of the GitHub
+Release again. A prerelease has no Windows installer.
+
+- Deploy the server before the first release with a Windows installer: an older server answers
+  404 to the upload (the script says so and the release still succeeds), and Windows apps are
+  then offered nothing until the upload is repeated with `mode=upload-only`.
+- The Windows build failed but the Mac release went out: fix it on `main`, then use
+  **Re-run failed jobs** on that run. The Windows job sets the version in its own working tree,
+  so it builds the same version again.
+- Code signing is optional. Without it the installer is unsigned and Windows shows the
+  SmartScreen warning ([INSTALL.md](INSTALL.md#windows)). To sign, add two secrets; the workflow
+  imports the certificate into the runner user's store for the run and signs the programs, the
+  uninstaller and the installer with `signtool` and a time stamp:
+
+  | Secret | Value |
+  | --- | --- |
+  | `WINDOWS_SIGN_PFX_BASE64` | the code-signing certificate with its private key as a PFX file, base64 on one line |
+  | `WINDOWS_SIGN_PASSWORD` | the password of the PFX |
+
+  A certificate whose key lives in a cloud key store or on a hardware token has no PFX: set
+  `WINDOWS_SIGN_CMD` for the build step instead (`scripts/windows/sign.sh`).
+- Once a release is signed, the app's update helper only installs an update with a valid
+  signature of the same publisher (the certificate's subject). So keep signing every later
+  release, with a certificate of the same subject; an unsigned or differently signed installer
+  is refused and the installed version stays. Users of an unsigned version take a signed update
+  without any step. Use a certificate Windows trusts: an app signed with a certificate the
+  user's computer does not trust (self-signed) only takes updates signed with that very
+  certificate, so it cannot be renewed. If the helper cannot read a signature at all (PowerShell
+  is blocked on the computer), it installs nothing.
+- An update that is cut short (sign-out, power cut, the helper killed) is undone at the user's
+  next sign-in, at the next start of the app or before the next update, from the journal
+  `%APPDATA%\<bundle id>\updates\update-journal.json`; `update.log` next to it says what
+  happened. To run it by hand: `"<updates folder>\<slug>-update-run.exe" --recover "<journal>"`.
+- Withdrawing a version (`withdraw-release`) withdraws its Windows installer too.
+
 ## Bad app release
 
 A release that breaks the app (crash at launch, lost sign-in) must stop being offered at once:
@@ -181,8 +224,11 @@ every client checks for updates every 6 hours.
    `GET /v1/updates/latest` offers the previous good release again and the bad DMG cannot be
    downloaded. Clients that did not install it yet stay on their version.
 2. Tell the people who installed it in the ops group: download the previous DMG from the
-   GitHub release of that version and drag it over the app. The app does not go back by
-   itself, and it never offers an older version as an update.
+   GitHub release of that version and drag it over the app; on Windows, quit the app and run
+   the previous `-setup.exe` of that release over it (the installer installs an older version
+   over a newer one; data and sign-in stay). The app does not go back by itself, and it never
+   offers an older version as an update. A version is withdrawn for both systems at once: when
+   only one system's build is bad, withdraw it and release a higher version for both.
 3. Fix forward: release a higher version with `scripts/release.sh` or the Release workflow; it
    is offered to everyone.
 4. A withdrawn version cannot be uploaded again. `withdraw-release ... --restore` offers it

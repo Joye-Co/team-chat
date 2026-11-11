@@ -1,0 +1,11 @@
+{
+  "kind": "RegisterPushDeviceRequest",
+  "valid": false,
+  "description": "unknown platform",
+  "value": {
+    "platform": "sms",
+    "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+    "appId": "dev.example.chat",
+    "environment": "production"
+  }
+}

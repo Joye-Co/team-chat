@@ -326,8 +326,8 @@ impl LivePane {
                 PushSize::Regular,
                 cx,
             )
-            .on_click(move |_, _, _| {
-                crate::views::artifacts::window::ask_before_screen_share(&name, url.clone())
+            .on_click(move |_, _, cx| {
+                crate::views::artifacts::window::ask_before_screen_share(&name, url.clone(), cx)
             })
         });
         let hand_back = {

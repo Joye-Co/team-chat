@@ -62,29 +62,78 @@ pub fn fit_zoom(w: f32, viewport_w: f32) -> f32 {
     ((viewport_w - 2. * MARGIN).max(1.) / w.max(1.)).clamp(FIT_FLOOR, 1.0)
 }
 
+/// `name` as a file name. Every system: `/`, `:` and `\` become `-`, as before. Windows
+/// also refuses `< > " | ? *`, control characters and a name that ends in a dot or a
+/// space, and reads `CON`, `NUL` and their kind as devices whatever follows the dot;
+/// those are changed only there, so a title that made a valid file name on the Mac keeps
+/// that name on the Mac.
+fn file_stem(name: &str) -> String {
+    file_stem_on(name, cfg!(windows))
+}
+
+fn file_stem_on(name: &str, windows: bool) -> String {
+    let safe: String = name
+        .chars()
+        .map(|ch| match ch {
+            '/' | ':' | '\\' => '-',
+            '<' | '>' | '"' | '|' | '?' | '*' if windows => '-',
+            ch if windows && ch.is_control() => '-',
+            ch => ch,
+        })
+        .collect();
+    if !windows {
+        return safe;
+    }
+    let safe = safe.trim_end_matches(['.', ' ']).trim_start();
+    let device = matches!(
+        safe.split('.')
+            .next()
+            .unwrap_or("")
+            .to_ascii_uppercase()
+            .as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    );
+    if safe.is_empty() || device {
+        format!("diagram-{safe}")
+    } else {
+        safe.to_string()
+    }
+}
+
 /// Writes the drawn picture to `<temp>/<slug>-diagrams/<name>.png`, for 存到本机 (copied
 /// into 下载 from there) and 用系统应用打开.
 fn export_png(image: &gpui::Image, name: &str) -> Option<std::path::PathBuf> {
     let dir = std::env::temp_dir().join(format!("{}-diagrams", env!("PRODUCT_SLUG")));
     std::fs::create_dir_all(&dir).ok()?;
-    let safe: String = name
-        .chars()
-        .map(|ch| {
-            if matches!(ch, '/' | ':' | '\\') {
-                '-'
-            } else {
-                ch
-            }
-        })
-        .collect();
-    let path = dir.join(format!("{safe}.png"));
+    let path = dir.join(format!("{}.png", file_stem(name)));
     std::fs::write(&path, image.bytes()).ok()?;
     Some(path)
 }
 
 /// The sheet height: the window under the toolbar row, 48 short, at most 760.
 fn sheet_height(window: &Window) -> Pixels {
-    (window.viewport_size().height - ui::native::metrics::TOOLBAR_ROW - space::S48)
+    (window.viewport_size().height - ui::native::window_chrome::sheet_top() - space::S48)
         .min(px(760.))
         .max(px(320.))
 }
@@ -415,7 +464,7 @@ impl DiagramViewer {
                     .disabled(image.is_none())
                     .on_click(move |_, _, cx| {
                         if let Some(i) = &image {
-                            cx.write_to_clipboard(ClipboardItem::new_image(i));
+                            ui::clipboard::write_image(i, cx);
                         }
                     })
             })
@@ -794,6 +843,29 @@ impl Render for DiagramViewer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_exported_picture_gets_a_name_windows_takes() {
+        assert_eq!(file_stem_on("登录流程", true), "登录流程");
+        assert_eq!(file_stem_on("a/b: c?", true), "a-b- c-");
+        assert_eq!(
+            file_stem_on("为什么慢？ <v2> \"x\"|*", true),
+            "为什么慢？ -v2- -x---"
+        );
+        assert_eq!(file_stem_on("结束. ", true), "结束");
+        assert_eq!(file_stem_on("con", true), "diagram-con");
+        assert_eq!(file_stem_on("NUL.v2", true), "diagram-NUL.v2");
+        assert_eq!(file_stem_on(" . ", true), "diagram-");
+    }
+
+    /// The Mac's names do not change: only `/`, `:` and `\` were ever replaced there.
+    #[test]
+    fn an_exported_picture_keeps_its_name_on_the_mac() {
+        for title in ["登录流程", "why? <v2> \"x\"|*", "结束. ", "con", " . "] {
+            assert_eq!(file_stem_on(title, false), title);
+        }
+        assert_eq!(file_stem_on("a/b: c\\d", false), "a-b- c-d");
+    }
 
     #[test]
     fn fit_never_upscales_and_stays_in_range() {

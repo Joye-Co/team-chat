@@ -15,6 +15,7 @@ use crate::{
 
 /// Removes the WebRTC constructors in every frame: WebRTC (STUN/TURN) goes around the CSP
 /// and the request blocking, so a page could reach the network or learn the viewer's IP.
+#[cfg(target_os = "macos")]
 pub(crate) const NO_NETWORK_SCRIPT: &str = "(()=>{for(const k of ['RTCPeerConnection','webkitRTCPeerConnection','RTCDataChannel','RTCIceCandidate','RTCSessionDescription','RTCRtpSender','RTCRtpReceiver','RTCRtpTransceiver']){try{delete window[k]}catch(e){}try{Object.defineProperty(window,k,{value:undefined,configurable:false,writable:false})}catch(e){}}})();";
 
 /// At most one `ExternalLink` event in this time.

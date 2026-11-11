@@ -186,6 +186,21 @@ pub enum Target {
 /// `out` (absolute, or relative to the working folder) resolved inside the working folder:
 /// what exists is resolved with its symbolic links, the rest must be plain names.
 pub fn resolve_out(root: &Path, out: &str) -> Result<Target, Value> {
+    // Windows: see `chat_run_files::inside`.
+    let out = if cfg!(windows) {
+        crate::sys::windows_plain_path(out)
+    } else {
+        out
+    };
+    if cfg!(windows)
+        && let Some(why) = crate::sys::windows_path_problem(out)
+    {
+        return Err(err(
+            "forbidden",
+            Some("file.outside_workspace"),
+            format!("{out} is {why}, not a place in the run's working folder"),
+        ));
+    }
     let root = std::fs::canonicalize(root).map_err(|e| {
         err(
             "unavailable",
@@ -428,6 +443,68 @@ pub async fn handle(op: &str, body: &Value, local: &Local) -> Value {
     answer(c.get(u).bearer_auth(local.token.as_str()).send().await).await
 }
 
+/// Links that lead out of a working folder, for the tests of the path rules here and in
+/// `chat_run_files`.
+#[cfg(test)]
+pub(crate) mod test_links {
+    use std::path::Path;
+
+    /// A link `link` to the folder `target`: a symbolic link, on Windows a junction (which a
+    /// user without privileges can make, so it is what a repository can really bring).
+    pub fn dir_link(target: &Path, link: &Path) {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, link).unwrap();
+        #[cfg(windows)]
+        {
+            let out = std::process::Command::new("cmd")
+                .args(["/c", "mklink", "/J"])
+                .arg(link)
+                .arg(target)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "mklink /J: {out:?}");
+        }
+    }
+
+    /// Makes `<root>/away`, a link to the folder `other`, and when this user may make one
+    /// `<root>/link`, a link to the file `<other>/secret`. Returns paths, relative to `root`,
+    /// that lead out through them.
+    pub fn make(root: &Path, other: &Path) -> Vec<String> {
+        let _ = std::fs::write(other.join("secret"), "x");
+        dir_link(other, &root.join("away"));
+        let mut out = vec!["away/secret".to_string()];
+        #[cfg(unix)]
+        let linked = std::os::unix::fs::symlink(other.join("secret"), root.join("link")).is_ok();
+        // Windows: a symbolic link needs a privilege (or developer mode).
+        #[cfg(windows)]
+        let linked =
+            std::os::windows::fs::symlink_file(other.join("secret"), root.join("link")).is_ok();
+        if linked {
+            out.push("link".to_string());
+        }
+        out
+    }
+
+    /// Windows: the path of `dir` with its last name in the 8.3 short form, when the volume
+    /// keeps one that differs.
+    #[cfg(windows)]
+    pub fn short_name(dir: &Path) -> Option<String> {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
+        let wide: Vec<u16> = dir.as_os_str().encode_wide().chain([0]).collect();
+        let mut buf = vec![0u16; 1024];
+        // SAFETY: `wide` is NUL-terminated and `buf` has the length given.
+        let n = unsafe { GetShortPathNameW(wide.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) };
+        if n == 0 || n as usize >= buf.len() {
+            return None;
+        }
+        let short = std::ffi::OsString::from_wide(&buf[..n as usize])
+            .to_string_lossy()
+            .into_owned();
+        (!short.eq_ignore_ascii_case(&dir.to_string_lossy())).then_some(short)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -497,7 +574,6 @@ mod tests {
         assert!(safe_name(&"长".repeat(200), "F1").len() <= 255);
     }
 
-    #[cfg(unix)]
     #[test]
     fn out_paths_must_stay_in_the_working_folder() {
         let root = tempfile::tempdir().unwrap();
@@ -521,22 +597,43 @@ mod tests {
             resolve_out(root.path(), abs.to_str().unwrap()).unwrap(),
             Target::File(real.join("x.bin"))
         );
-        std::os::unix::fs::symlink(other.path(), root.path().join("away")).unwrap();
-        for bad in [
+        // A link to a folder outside (on Windows a junction).
+        test_links::make(root.path(), other.path());
+        let mut bad = vec![
             "../x".to_string(),
             "new/../../x".to_string(),
             "away/x".to_string(),
+            "away/new/x".to_string(),
             other.path().join("x").display().to_string(),
-        ] {
+        ];
+        if cfg!(windows) {
+            let outside = other.path().join("x").display().to_string();
+            bad.extend([
+                format!(r"\\?\{outside}"),
+                format!(r"\\localhost\{}$\{}", &outside[..1], &outside[3..]),
+                format!("{}{}", &outside[..2], &outside[3..]),
+                r"\Windows\x".to_string(),
+                r"..\..\..\..\..\..\Windows\x".to_string(),
+                r"AWAY\x".to_string(),
+                "new.txt:stream".to_string(),
+                "new.txt::$DATA".to_string(),
+                "new.txt.".to_string(),
+                "new /a.txt".to_string(),
+                "NUL".to_string(),
+                r"new\COM1.txt".to_string(),
+                r"\\.\pipe\x".to_string(),
+            ]);
+        }
+        for bad in bad {
             assert_eq!(
                 resolve_out(root.path(), &bad).unwrap_err()["error"]["reason"],
                 "file.outside_workspace",
                 "{bad}"
             );
         }
+        assert!(!other.path().join("x").exists() && !other.path().join("new").exists());
     }
 
-    #[cfg(unix)]
     #[test]
     fn the_default_folder_is_ignored_by_git_and_stays_inside() {
         let root = tempfile::tempdir().unwrap();
@@ -550,7 +647,7 @@ mod tests {
         // A `.chat-files` link that leads out is refused.
         let other = tempfile::tempdir().unwrap();
         let root2 = tempfile::tempdir().unwrap();
-        std::os::unix::fs::symlink(other.path(), root2.path().join(".chat-files")).unwrap();
+        test_links::dir_link(other.path(), &root2.path().join(".chat-files"));
         assert_eq!(
             default_dir(root2.path(), "F1").unwrap_err()["error"]["reason"],
             "file.outside_workspace"

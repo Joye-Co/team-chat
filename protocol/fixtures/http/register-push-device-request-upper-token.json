@@ -1,0 +1,11 @@
+{
+  "kind": "RegisterPushDeviceRequest",
+  "valid": false,
+  "description": "token must be lower-case hex",
+  "value": {
+    "platform": "apns",
+    "token": "A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1",
+    "appId": "dev.example.chat",
+    "environment": "production"
+  }
+}

@@ -104,7 +104,7 @@ impl ShortcutsPage {
         let function_key = keystroke.key.len() > 1
             && keystroke.key.starts_with('f')
             && keystroke.key[1..].chars().all(|c| c.is_ascii_digit());
-        if !(m.platform || m.control || m.alt || function_key) {
+        if !accepts(m, function_key, cfg!(target_os = "windows")) {
             self.refused = Some(s::SHORTCUT_NEEDS_MODIFIER.into());
             return cx.notify();
         }
@@ -431,6 +431,17 @@ fn reset(action: Option<&str>, cx: &mut App) {
     rebind(&prefs::get().shortcuts, cx);
 }
 
+/// Whether a key press can be a shortcut: it needs ⌘, ⌃ or ⌥, or is a function key. On
+/// Windows the Windows key never counts and is never part of one: the system keeps its
+/// combinations for itself, and the hint there asks for Ctrl or Alt.
+pub fn accepts(m: gpui::Modifiers, function_key: bool, windows: bool) -> bool {
+    if windows {
+        !m.platform && (m.control || m.alt || function_key)
+    } else {
+        m.platform || m.control || m.alt || function_key
+    }
+}
+
 /// The source form of a key press ("ctrl-alt-shift-cmd-k").
 pub fn keystroke_source(k: &Keystroke) -> String {
     let m = k.modifiers;
@@ -537,6 +548,32 @@ impl Render for ShortcutsPage {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_shortcut_needs_a_modifier_and_never_the_windows_key() {
+        let m = |control, alt, platform| gpui::Modifiers {
+            control,
+            alt,
+            platform,
+            ..Default::default()
+        };
+        for windows in [false, true] {
+            assert!(accepts(m(true, false, false), false, windows));
+            assert!(accepts(m(false, true, false), false, windows));
+            assert!(accepts(m(false, false, false), true, windows), "F5");
+            assert!(
+                !accepts(m(false, false, false), false, windows),
+                "a bare key"
+            );
+        }
+        assert!(
+            accepts(m(false, false, true), false, false),
+            "⌘K on the Mac"
+        );
+        assert!(!accepts(m(false, false, true), false, true), "Win+K");
+        assert!(!accepts(m(true, false, true), false, true), "Ctrl+Win+K");
+        assert!(!accepts(m(false, false, true), true, true), "Win+F5");
+    }
+
     /// Recording: a click arms the row, the next key press with ⌘ becomes
     /// the command's shortcut (the old one is gone), a key another command
     /// holds is refused, and 恢复默认 puts the default back.
@@ -547,8 +584,8 @@ mod tests {
         cx.update(|cx| {
             gpui_component::init(cx);
             cx.bind_keys([
-                KeyBinding::new("cmd-,", crate::app::OpenSettings, None),
-                KeyBinding::new("cmd-q", crate::app::Quit, None),
+                KeyBinding::new(crate::secondary!(","), crate::app::OpenSettings, None),
+                KeyBinding::new(crate::secondary!("q"), crate::app::Quit, None),
             ]);
         });
         let (page, cx) = cx.add_window_view(|window, cx| ShortcutsPage::new(window, cx));
@@ -563,15 +600,21 @@ mod tests {
                     .and_then(|r| r.keys)
             })
         };
-        // The test binds the platform key itself (⌘, the Windows key).
-        let (comma, shift_k) = if cfg!(target_os = "macos") {
-            ("⌘,", "⇧⌘K")
+        // ⌘ on the Mac, Ctrl elsewhere (the Windows key is never part of a shortcut).
+        let (comma, shift_k, quit, record, saved) = if cfg!(target_os = "macos") {
+            ("⌘,", "⇧⌘K", "cmd-q", "cmd-shift-k", "shift-cmd-k")
         } else {
-            ("Win+,", "Shift+Win+K")
+            (
+                "Ctrl+,",
+                "Ctrl+Shift+K",
+                "ctrl-q",
+                "ctrl-shift-k",
+                "ctrl-shift-k",
+            )
         };
         assert_eq!(keys(cx).as_deref(), Some(comma));
         page.update(cx, |p, cx| p.start(settings.clone(), cx));
-        cx.simulate_keystrokes("cmd-q");
+        cx.simulate_keystrokes(quit);
         page.read_with(cx, |p, _| {
             assert!(p.recording.is_some(), "⌘Q belongs to 退出: still recording");
             assert!(p.refused.is_some());
@@ -580,13 +623,23 @@ mod tests {
         page.read_with(cx, |p, _| {
             assert!(p.recording.is_some(), "K alone is refused")
         });
-        cx.simulate_keystrokes("cmd-shift-k");
+        cx.simulate_keystrokes(record);
         page.read_with(cx, |p, _| assert!(p.recording.is_none(), "recorded"));
         assert_eq!(keys(cx).as_deref(), Some(shift_k));
         assert_eq!(
             prefs::get().shortcuts.get(&settings).map(String::as_str),
-            Some("shift-cmd-k")
+            Some(saved)
         );
+        #[cfg(not(target_os = "macos"))]
+        {
+            // The Windows key is refused, with or without Ctrl.
+            page.update(cx, |p, cx| p.start(settings.clone(), cx));
+            cx.simulate_keystrokes("cmd-k");
+            page.read_with(cx, |p, _| {
+                assert!(p.recording.is_some() && p.refused.is_some(), "Win+K")
+            });
+            cx.simulate_keystrokes("escape");
+        }
         cx.update(|_, cx| reset(Some(&settings), cx));
         assert_eq!(keys(cx).as_deref(), Some(comma));
     }

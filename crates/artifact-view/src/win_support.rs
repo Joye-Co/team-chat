@@ -1,6 +1,7 @@
 //! Helpers for the Windows examples and self-tests: a message pump with a deadline, a plain
 //! host window, and a PNG of a part of the screen. Not part of the crate's API.
 
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
@@ -13,11 +14,21 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow, SetProcessDpiAwarenessContext,
 };
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP,
+    MOUSE_EVENT_FLAGS, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
+    MOUSEEVENTF_MOVE, MOUSEEVENTF_VIRTUALDESK, MOUSEEVENTF_WHEEL, MOUSEINPUT, SendInput,
+    VIRTUAL_KEY,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     AdjustWindowRectEx, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect,
     IDC_ARROW, LoadCursorW, MSG, MsgWaitForMultipleObjects, PM_REMOVE, PeekMessageW, QS_ALLINPUT,
     RegisterClassW, SW_SHOWNORMAL, SetForegroundWindow, ShowWindow, TranslateMessage,
     WINDOW_EX_STYLE, WM_QUIT, WNDCLASSW, WS_CLIPCHILDREN, WS_OVERLAPPEDWINDOW,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    FindWindowW, GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
+    SM_YVIRTUALSCREEN, WM_MOUSEWHEEL,
 };
 use windows::core::{HSTRING, PCWSTR};
 
@@ -61,9 +72,130 @@ pub fn pump(timeout: Duration, mut done: impl FnMut() -> bool) -> bool {
     }
 }
 
+/// Wheel messages the host windows of [`create_host_window`] got: how many, and the sum of
+/// their deltas.
+static WHEEL_COUNT: AtomicI32 = AtomicI32::new(0);
+static WHEEL_DELTA: AtomicI32 = AtomicI32::new(0);
+
 unsafe extern "system" fn host_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
+    if msg == WM_MOUSEWHEEL {
+        WHEEL_COUNT.fetch_add(1, Ordering::Relaxed);
+        WHEEL_DELTA.fetch_add(
+            ((w.0 >> 16) & 0xffff) as u16 as i16 as i32,
+            Ordering::Relaxed,
+        );
+        return LRESULT(0);
+    }
     // SAFETY: forwards to the default procedure with the arguments Windows gave.
     unsafe { DefWindowProcW(hwnd, msg, w, l) }
+}
+
+/// `(count, sum of deltas)` of the wheel messages the test host windows got so far.
+pub fn host_wheel() -> (i32, i32) {
+    (
+        WHEEL_COUNT.load(Ordering::Relaxed),
+        WHEEL_DELTA.load(Ordering::Relaxed),
+    )
+}
+
+fn mouse_input(x: i32, y: i32, flags: MOUSE_EVENT_FLAGS, data: i32) -> INPUT {
+    // SAFETY: plain system metrics.
+    let (left, top, width, height) = unsafe {
+        (
+            GetSystemMetrics(SM_XVIRTUALSCREEN),
+            GetSystemMetrics(SM_YVIRTUALSCREEN),
+            GetSystemMetrics(SM_CXVIRTUALSCREEN).max(1),
+            GetSystemMetrics(SM_CYVIRTUALSCREEN).max(1),
+        )
+    };
+    // Absolute coordinates run from 0 to 65535 over the virtual screen.
+    let normalize = |v: i32, origin: i32, size: i32| {
+        (((v - origin) as f64 + 0.5) * 65535.0 / size as f64).round() as i32
+    };
+    INPUT {
+        r#type: INPUT_MOUSE,
+        Anonymous: INPUT_0 {
+            mi: MOUSEINPUT {
+                dx: normalize(x, left, width),
+                dy: normalize(y, top, height),
+                mouseData: data as u32,
+                dwFlags: flags | MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    }
+}
+
+fn send(inputs: &[INPUT]) -> bool {
+    // SAFETY: synthetic input on the calling desktop.
+    unsafe { SendInput(inputs, std::mem::size_of::<INPUT>() as i32) == inputs.len() as u32 }
+}
+
+/// Clicks the left mouse button at a screen position through the system's input queue
+/// (the pointer moves there), as the viewer's own click.
+pub fn click_at_screen(x: i32, y: i32) -> bool {
+    send(&[
+        mouse_input(x, y, MOUSE_EVENT_FLAGS(0), 0),
+        mouse_input(x, y, MOUSEEVENTF_LEFTDOWN, 0),
+        mouse_input(x, y, MOUSEEVENTF_LEFTUP, 0),
+    ])
+}
+
+/// Turns the wheel by `delta` (120 is one notch away from the user) with the pointer at a
+/// screen position, through the system's input queue.
+pub fn wheel_at_screen(x: i32, y: i32, delta: i32) -> bool {
+    send(&[
+        mouse_input(x, y, MOUSE_EVENT_FLAGS(0), 0),
+        mouse_input(x, y, MOUSEEVENTF_WHEEL, delta),
+    ])
+}
+
+/// Presses and releases one key (a virtual-key code) through the system's input queue.
+pub fn press_key(virtual_key: u16) -> bool {
+    let key = |flags| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VIRTUAL_KEY(virtual_key),
+                wScan: 0,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    send(&[key(KEYBD_EVENT_FLAGS(0)), key(KEYEVENTF_KEYUP)])
+}
+
+/// Presses `virtual_key` while `modifier` (a virtual-key code such as Ctrl's 0x11) is held.
+pub fn press_chord(modifier: u16, virtual_key: u16) -> bool {
+    let key = |vk, flags| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VIRTUAL_KEY(vk),
+                wScan: 0,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    send(&[
+        key(modifier, KEYBD_EVENT_FLAGS(0)),
+        key(virtual_key, KEYBD_EVENT_FLAGS(0)),
+        key(virtual_key, KEYEVENTF_KEYUP),
+        key(modifier, KEYEVENTF_KEYUP),
+    ])
+}
+
+/// The top-level window of this thread with exactly this title (0 when there is none).
+pub fn find_window(title: &str) -> isize {
+    // SAFETY: a lookup by title.
+    unsafe { FindWindowW(PCWSTR::null(), &HSTRING::from(title)) }
+        .map(|h| h.0 as isize)
+        .unwrap_or(0)
 }
 
 /// Opens a plain top-level window with a solid background (`0x00BBGGRR`) and a client area
@@ -139,7 +271,7 @@ pub fn client_rect_on_screen(hwnd: isize) -> (i32, i32, i32, i32) {
 pub fn screen_size() -> (i32, i32) {
     // SAFETY: plain system queries.
     unsafe {
-        use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+        use windows::Win32::UI::WindowsAndMessaging::{SM_CXSCREEN, SM_CYSCREEN};
         (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN))
     }
 }

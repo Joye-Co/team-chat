@@ -1,0 +1,11 @@
+{
+  "kind": "RegisterPushDeviceRequest",
+  "valid": false,
+  "description": "app id needs a dot",
+  "value": {
+    "platform": "apns",
+    "token": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+    "appId": "chat",
+    "environment": "production"
+  }
+}

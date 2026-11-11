@@ -22,6 +22,7 @@
 
 pub mod avatar;
 pub mod chip;
+pub mod clipboard;
 pub mod composer;
 pub mod controls;
 pub mod emoji;

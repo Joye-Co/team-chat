@@ -1230,7 +1230,7 @@ fn poster_png(i: usize) -> Vec<u8> {
 
 /// `seconds` of speech-like sound: syllable bursts of noise under a slow envelope, with
 /// pauses between sentences. 16-bit mono PCM at 8 kHz.
-fn speech_wav(seconds: u32) -> Vec<u8> {
+pub(super) fn speech_wav(seconds: u32) -> Vec<u8> {
     let rate = 8000u32;
     let n = rate * seconds;
     let mut seed = 0x2545F491u32;
@@ -1271,7 +1271,7 @@ fn speech_wav(seconds: u32) -> Vec<u8> {
 }
 
 /// A 6-page inspection report: a summary page and table pages (ASCII text, Helvetica).
-fn report_pdf() -> Vec<u8> {
+pub(super) fn report_pdf() -> Vec<u8> {
     let checks = [
         "Login",
         "Send message",
@@ -1482,13 +1482,13 @@ export function resumeFrom(s: SyncState) {
 const REPORT_HTML: &str = r##"<!doctype html><html><head><meta charset="utf-8"><style>
 :root{color-scheme:light dark;--t1:var(--tc-fg,#0A0A0A);--t2:var(--tc-muted,#737373);--t3:var(--tc-muted,#737373);--line:var(--tc-border,#E5E5E5);--ok:var(--tc-fg,#0A0A0A);--bg:var(--tc-bg,#fff)}
 @media (prefers-color-scheme: dark){:root{--t1:var(--tc-fg,#FAFAFA);--t2:var(--tc-muted,#A1A1A1);--t3:var(--tc-muted,#A1A1A1);--line:var(--tc-border,#2E2E2E);--ok:var(--tc-fg,#FAFAFA);--bg:var(--tc-bg,#0A0A0A)}}
-html,body{margin:0;background:transparent;color:var(--t1);font:13px/1.5 -apple-system,"PingFang SC",sans-serif;-webkit-font-smoothing:antialiased}
+html,body{margin:0;background:transparent;color:var(--t1);font:13px/1.5 -apple-system,"Segoe UI Variable Text","Segoe UI","PingFang SC","Microsoft YaHei UI",sans-serif;-webkit-font-smoothing:antialiased}
 .w{padding:0}h1{font-size:16px;margin:0;font-weight:600}.s{color:var(--t3);font-size:12px;margin:2px 0 14px}
 .k{display:flex;gap:10px}.k div{flex:1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
-.k i{display:block;font-style:normal;color:var(--t2);font-size:12px}.k b{display:block;font:600 17px ui-monospace,Menlo,monospace}.k em{display:block;font-style:normal;color:var(--ok);font:12px ui-monospace,Menlo,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.k i{display:block;font-style:normal;color:var(--t2);font-size:12px}.k b{display:block;font:600 17px ui-monospace,Menlo,"Cascadia Mono",Consolas,monospace}.k em{display:block;font-style:normal;color:var(--ok);font:12px ui-monospace,Menlo,"Cascadia Mono",Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 h2{font-size:12px;font-weight:600;margin:16px 0 6px;color:var(--t2)}svg{width:100%;height:110px}
 table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:6px 0;border-bottom:1px solid var(--line);text-align:right}td:first-child,th:first-child{text-align:left}th{color:var(--t2);font-weight:500}
-td{font-family:ui-monospace,Menlo,monospace}td:first-child{font-family:inherit}
+td{font-family:ui-monospace,Menlo,"Cascadia Mono",Consolas,monospace}td:first-child{font-family:inherit}
 .q{margin-top:14px;border:1px solid var(--line);border-radius:10px;padding:10px 12px}.q p{margin:0 0 8px;color:var(--t2)}
 .o{display:grid;grid-template-columns:1fr 1fr;gap:6px}.o span{border:1px solid var(--line);border-radius:7px;padding:5px 9px}.o .on{border-color:var(--t1);font-weight:600}
 </style></head><body><div class="w">

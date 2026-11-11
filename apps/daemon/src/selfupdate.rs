@@ -3,9 +3,21 @@
 //! code. The daemon notices the new file and, once no run is active, exits so that the service
 //! manager (launchd `KeepAlive`, systemd `Restart=always`) starts the new version. Nobody has to restart anything by hand.
 //!
-//! Windows: a running program file cannot be written, but it can be renamed, so an update
-//! moves it aside and puts the new file in its place; the stamp there is the file's size,
-//! write time and creation time.
+//! Windows: a running program file cannot be written or deleted, but it can be renamed. The
+//! replace protocol every updater follows there (the app's updater, the PowerShell install
+//! command, a person doing it by hand):
+//!
+//! 1. write the new program completely under another name in the same folder
+//!    (`<name>.exe.new`), and check it (SHA-256);
+//! 2. rename the running `<name>.exe` to `<name>.exe.old-<anything unique>` in the same folder;
+//! 3. rename `<name>.exe.new` to `<name>.exe`. If that fails, rename the old file back.
+//!
+//! The updater never stops the daemon or its scheduled task (that would cancel the runs). The
+//! daemon does the rest: it sees another file (file index, size, write time)
+//! at its own path, waits until the stamp is the same at two checks and no run is active, and
+//! exits; the scheduled task starts the new file within a minute ([`crate::service`]). When a
+//! daemon starts it deletes the `<name>.exe.old-*` files next to it ([`clean_stale`]); one
+//! that is still running (the old daemon has not exited yet) stays until the next start.
 
 use std::path::{Path, PathBuf};
 
@@ -33,15 +45,31 @@ impl Stamp {
         })
     }
 
-    /// Windows keeps no inode number in the standard metadata: the creation time stands in
-    /// for it (a new file moved into place has a new one).
+    /// Windows: the volume serial number and the file index are what the device and inode
+    /// are on Unix. The times alone would not do: a file renamed into a name that was just
+    /// freed gets the creation time of the file that had the name (NTFS tunneling), and a
+    /// copied file keeps its write time.
     #[cfg(windows)]
     pub fn of(path: &Path) -> Option<Stamp> {
         use std::os::windows::fs::MetadataExt as _;
-        let m = std::fs::metadata(path).ok()?;
-        m.is_file().then(|| Stamp {
-            dev: 0,
-            ino: m.creation_time(),
+        use std::os::windows::io::AsRawHandle as _;
+        use windows_sys::Win32::Storage::FileSystem::{
+            BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+        };
+        let file = std::fs::File::open(path).ok()?;
+        let m = file.metadata().ok()?;
+        if !m.is_file() {
+            return None;
+        }
+        // SAFETY: an all-zero BY_HANDLE_FILE_INFORMATION is a valid value to be filled in.
+        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+        // SAFETY: the handle is an open file and `info` is a valid place to write.
+        if unsafe { GetFileInformationByHandle(file.as_raw_handle() as _, &mut info) } == 0 {
+            return None;
+        }
+        Some(Stamp {
+            dev: u64::from(info.dwVolumeSerialNumber),
+            ino: (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
             size: m.file_size(),
             mtime: m.last_write_time() as i64,
             mtime_nsec: 0,
@@ -68,9 +96,13 @@ impl Watch {
         }
     }
 
-    /// The running program's file.
+    /// The running program's file. On Windows this is also when the program files an update
+    /// moved aside are deleted.
     pub fn current() -> Option<Watch> {
-        std::env::current_exe().ok().map(Watch::new)
+        let exe = std::env::current_exe().ok()?;
+        #[cfg(windows)]
+        clean_stale(&exe);
+        Some(Watch::new(exe))
     }
 
     /// True when a new program file has been in place since the previous check.
@@ -93,9 +125,110 @@ impl Watch {
     }
 }
 
+/// What an updater puts after the program's file name when it moves the running file aside
+/// (`daemon.exe` becomes `daemon.exe.old-<anything>`).
+pub const STALE_MARK: &str = ".old-";
+
+/// The files next to `exe` that an update moved aside.
+pub fn stale_files(exe: &Path) -> Vec<PathBuf> {
+    let (Some(dir), Some(name)) = (exe.parent(), exe.file_name()) else {
+        return vec![];
+    };
+    let prefix = format!("{}{STALE_MARK}", name.to_string_lossy());
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return vec![];
+    };
+    entries
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(&prefix))
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .map(|e| e.path())
+        .collect()
+}
+
+/// Deletes the program files an update moved aside; returns how many are gone. One that
+/// cannot be deleted (it is still running) is left for the next start.
+pub fn clean_stale(exe: &Path) -> usize {
+    stale_files(exe)
+        .iter()
+        .filter(|p| std::fs::remove_file(p).is_ok())
+        .count()
+}
+
+/// Puts the program file back after an update that was interrupted between its two renames
+/// (a power loss): when `exe` is missing and files moved aside are there, the newest of them
+/// is renamed to `exe`. Returns the file it renamed. The scheduled task runs this before it
+/// starts the daemon ([`crate::service`]), from a copy of the program that updates never touch.
+pub fn repair(exe: &Path) -> Option<PathBuf> {
+    if exe.exists() {
+        return None;
+    }
+    let newest = stale_files(exe).into_iter().max_by_key(|p| {
+        std::fs::metadata(p)
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::UNIX_EPOCH)
+    })?;
+    std::fs::rename(&newest, exe).ok().map(|()| newest)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_missing_program_comes_back_from_the_file_moved_aside() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("x-daemon.exe");
+        let aside = dir.path().join("x-daemon.exe.old-7");
+        // Nothing to repair: the program is there, or nothing was moved aside.
+        assert_eq!(repair(&exe), None);
+        std::fs::write(&exe, "v2").unwrap();
+        std::fs::write(&aside, "v1").unwrap();
+        assert_eq!(repair(&exe), None);
+        assert_eq!(std::fs::read_to_string(&exe).unwrap(), "v2");
+        // The update stopped after its first rename.
+        std::fs::remove_file(&exe).unwrap();
+        assert_eq!(repair(&exe), Some(aside.clone()));
+        assert_eq!(std::fs::read_to_string(&exe).unwrap(), "v1");
+        assert!(!aside.exists());
+    }
+
+    #[test]
+    fn only_the_files_an_update_moved_aside_are_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("x-daemon.exe");
+        for name in [
+            "x-daemon.exe",
+            "x-daemon.exe.old-1",
+            "x-daemon.exe.old-20261110",
+            "x-daemon.exe.new",
+            "x-daemon.exe.older",
+            "y-daemon.exe.old-1",
+            "x-daemon.toml",
+        ] {
+            std::fs::write(dir.path().join(name), "x").unwrap();
+        }
+        std::fs::create_dir(dir.path().join("x-daemon.exe.old-dir")).unwrap();
+        assert_eq!(stale_files(&exe).len(), 2);
+        assert_eq!(clean_stale(&exe), 2);
+        let mut left: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            [
+                "x-daemon.exe",
+                "x-daemon.exe.new",
+                "x-daemon.exe.old-dir",
+                "x-daemon.exe.older",
+                "x-daemon.toml",
+                "y-daemon.exe.old-1",
+            ]
+        );
+        assert_eq!(clean_stale(&exe), 0);
+    }
 
     fn write_exe(path: &Path, body: &str) {
         let tmp = path.with_extension("new");

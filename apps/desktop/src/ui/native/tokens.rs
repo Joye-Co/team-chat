@@ -279,6 +279,11 @@ pub const DESTRUCTIVE_FILL: u32 = 0xDC2626FF;
 /// it is now `primary` of the light palette (#171717).
 pub const GRAPHITE: u32 = 0x171717FF;
 
+/// A QR image's modules and its quiet zone: pure black on white in both modes,
+/// since phone cameras read dark-on-light codes (账号 › 在手机上登录).
+pub const QR_INK: u32 = 0x000000FF;
+pub const QR_PAPER: u32 = 0xFFFFFFFF;
+
 impl NativeColors {
     pub fn from_palette(p: &Palette) -> Self {
         Self {
@@ -933,6 +938,9 @@ pub mod layout {
     pub const CONTENT_GUTTER: Pixels = space::S24;
     pub const HAIRLINE: Pixels = px(1.);
     pub const BORDER: Pixels = px(1.);
+    /// A dashed rule of [`BORDER`] thickness: 2 on, 1 off (what GPUI's dashed border
+    /// draws at that thickness; the 用量 chart's budget line).
+    pub const RULE_DASH: (Pixels, Pixels) = (px(2.), px(1.));
     pub const EMBED_FADE: Pixels = space::S48;
 }
 
@@ -949,6 +957,9 @@ pub mod metrics {
     /// height of a Windows title bar at 100 %.
     pub const CAPTION: Pixels = height::DEFAULT;
     pub const TOOLBAR_ROW: Pixels = height::TOOLBAR;
+    /// How much of their ink the caption strip's menus and window buttons keep in a
+    /// window that is not the active one (`label` towards `tertiary`; WINDOWS.md §1).
+    pub const CAPTION_INACTIVE: f32 = 0.5;
     pub const TOOLBAR_GROUP: Pixels = height::DEFAULT;
     pub const TOOLBAR_ITEM: Pixels = height::DEFAULT;
     pub const TOOLBAR_PILL: Pixels = height::SM;

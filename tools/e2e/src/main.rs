@@ -33,8 +33,12 @@ struct Args {
     list: bool,
 }
 
+/// The user's folder: `HOME`, or on Windows the profile folder when `HOME` is not set.
 fn home() -> PathBuf {
-    PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
+    let home = std::env::var_os("HOME").filter(|h| !h.is_empty());
+    #[cfg(windows)]
+    let home = home.or_else(|| std::env::var_os("USERPROFILE").filter(|h| !h.is_empty()));
+    home.map(PathBuf::from).unwrap_or_else(|| ".".into())
 }
 
 fn expand(p: &str) -> PathBuf {

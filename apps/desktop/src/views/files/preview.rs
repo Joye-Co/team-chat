@@ -328,6 +328,41 @@ pub fn open(
     open_main(services, content, cx)
 }
 
+/// The `files-quick-look` scene: the `files` scene after Space on the image off the Mac
+/// (the Mac shows the system's Quick Look panel): the app's viewer as a sheet.
+pub fn open_quick_look(
+    services: Services,
+    content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let handle = open(services, content, cx)?;
+    let file = photo();
+    // Under the name it was sent with, as a downloaded attachment is in the cache.
+    let dir = std::env::temp_dir().join("team-chat-quick-look-scene");
+    let path = dir.join(&file.name);
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::copy(
+        std::env::temp_dir().join("team-chat-files-preview.png"),
+        &path,
+    );
+    handle
+        .update(cx, |_, window, cx| {
+            if let Some(key) =
+                super::quick_look::request_attachment(&file.name, &file.sha256, &path, cx)
+            {
+                super::quick_look::open_sheet_in(
+                    window,
+                    key,
+                    file.name.clone(),
+                    crate::views::media::state::Target::none(),
+                    cx,
+                );
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(handle)
+}
+
 /// The `files-menu` scene: the `files` scene with the image's context menu open
 /// (打开, 在访达中显示, 快速查看, 共享…, 存储为…), opened by a right-click once drawn.
 pub fn open_menu(

@@ -13,17 +13,9 @@ crate::copy! {
     NO_GROUPS = "还没有群",
     NO_GROUPS_HINT = "新建一个群，或等管理员把你加进群。",
     QUICK_SWITCH = "快速切换",
-    QUICK_SWITCH_SHORTCUT = if cfg!(target_os = "macos") {
-        "⌘K"
-    } else {
-        "Ctrl+K"
-    },
+    QUICK_SWITCH_SHORTCUT = crate::copy::per_system("⌘K", "Ctrl+K"),
     NEW_TOPIC = "新话题",
-    NEW_TOPIC_TIP = if cfg!(target_os = "macos") {
-        "新话题 ⌘N"
-    } else {
-        "新话题 Ctrl+N"
-    },
+    NEW_TOPIC_TIP = crate::copy::per_system("新话题 ⌘N", "新话题 Ctrl+N"),
     TOPICS_EMPTY = "这个群还没有话题",
     TOPICS_EMPTY_HINT = "写下第一条消息就会开始一个话题，标题默认取第一行。",
     SELECT_GROUP = "选择一个群",
@@ -109,6 +101,7 @@ crate::copy! {
     WEEKDAY_SUN = "周日",
     // app menu
     MENU_ABOUT = "关于 {product}",
+    ABOUT_VERSION = "版本 {version}",
     MENU_HIDE = "隐藏 {product}",
     MENU_HIDE_OTHERS = "隐藏其他",
     MENU_SHOW_ALL = "全部显示",
@@ -130,7 +123,7 @@ crate::copy! {
     MENU_MINIMIZE = "最小化",
     MENU_SHOW_MAIN = "显示主窗口",
     MENU_CLOSE_WINDOW = "关闭窗口",
-    MENU_ZOOM = "缩放",
+    MENU_ZOOM = crate::copy::per_system("缩放", "最大化或还原"),
     MENU_BRING_ALL_TO_FRONT = "前置全部窗口",
     MENU_VIEW = "显示",
     MENU_SIDE_PANEL = "话题详情",

@@ -152,6 +152,9 @@ pub struct RunCtx {
     pub exec: Arc<dyn Executor>,
     /// Feature "accounts": the API keys this run's member gets (none for side chats).
     pub keys: Vec<(String, String)>,
+    /// The daemon reported this run's CLI as one whose runs stop at gated commands
+    /// (`CliInfo.gates`, [`crate::gates::reported_for`]).
+    pub gated: bool,
 }
 
 /// The `chat-run` transport of one run. Dropping it removes the socket or the folder.
@@ -247,6 +250,7 @@ pub async fn supervise(ctx: RunCtx) {
         outputs,
         exec,
         keys,
+        gated,
     } = ctx;
     let run_id = assign.run_id.clone();
     let started = Instant::now();
@@ -305,8 +309,7 @@ pub async fn supervise(ctx: RunCtx) {
                 None
             } else {
                 // In a VM `chat-run` always goes through the relayed socket.
-                // Windows has no socket transport yet: every run there uses the files.
-                let files = cfg!(windows) || (rt.kind == "codex" && !exec.isolated());
+                let files = rt.kind == "codex" && !exec.isolated();
                 // Files and 产出 go up over HTTP as the run's member, from its working folder.
                 outputs.set_local(crate::chat_run_files::Local {
                     server_url: cfg.server_url.clone(),
@@ -329,6 +332,11 @@ pub async fn supervise(ctx: RunCtx) {
             outputs.set_gates(gates.clone());
             let gate_hook =
                 (!gates.is_empty()).then(|| dir.join("bin").join(crate::chat_run::link_name()));
+            let gate_alive = (!gates.is_empty()).then(|| gates.alive());
+            // Gates for a CLI the daemon did not report as gated (on Windows one older than
+            // the tested version, or one whose version changed since `hello`): its hook could
+            // let a command through, so the run does not start.
+            let ungated = !gates.is_empty() && !gated;
             let notes: Vec<String> = [gate.note(), gates.note(), cfg.vm.as_ref().map(vm_note)]
                 .into_iter()
                 .flatten()
@@ -355,11 +363,21 @@ pub async fn supervise(ctx: RunCtx) {
                     .clone()
                     .filter(|s| runtime::valid_session_id(s)),
                 gate_hook,
+                gate_alive,
                 exec: exec.clone(),
             };
             let work = spec.cwd.clone();
             // The hook asks through chat-run: a gated run never goes on without it.
-            let res = if spec.gate_hook.is_some() && chat_run.is_none() {
+            let res = if ungated {
+                (
+                    Outcome::failed(format!(
+                        "this run has commands that need a person's approval, and the {} on \
+this machine cannot be made to stop at them (update it)",
+                        rt.command()
+                    )),
+                    false,
+                )
+            } else if spec.gate_hook.is_some() && chat_run.is_none() {
                 (
                     Outcome::failed("cannot ask for approvals: chat-run did not start"),
                     false,

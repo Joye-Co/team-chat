@@ -25,14 +25,30 @@
 // own group, member, bot runner and machine, then removes the runner and the machine):
 //   bun apps/daemon/e2e/local-e2e.ts --base-url https://chat-api-e2e.<account>.workers.dev \
 //     --owner-token-file ~/.config/team-chat/e2e/owner-token
+// On Windows the fake CLIs are started through the `fake-cli` launcher (`cargo build -p daemon
+// --features test-fakes`, built here when missing; `python` on PATH). With --service (Windows
+// only) the daemon is not a child of this script: it is installed with
+// `scripts/install-daemon.ps1` and runs as the scheduled task of this user, and after the checks
+// above the script updates it by the replace protocol while it is idle and while a run is
+// active, ends it the way a logoff does, and starts the task again the way a logon does. It
+// refuses to run on a computer that is a machine already (a config, a task, a running daemon).
+// With --server-only <folder> the script only starts the local server, writes its address to
+// <folder>/url and an owner's token to <folder>/owner-token, and keeps it running until a file
+// <folder>/stop appears (the desktop's 「用这台电脑」 test on Windows CI runs against it).
 // Needs: `bun install`, and the daemon binary (built here with cargo when missing).
 // Tokens stay in memory or in files of mode 600 inside the temp folder; nothing is printed.
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const ROOT = resolve(dirname(new URL(import.meta.url).pathname), "../../..");
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const WIN = process.platform === "win32";
+const EXE = WIN ? ".exe" : "";
+const TARGET = process.env.CARGO_TARGET_DIR ?? join(ROOT, "target");
+// `bunx`, by the path of the bun that runs this script (Windows has no `bunx` to start by name).
+const BUNX = [process.execPath, "x"];
 const args = process.argv.slice(2);
 const flag = (name: string) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
 const PORT = Number(flag("--port") || 0) || 8793;
@@ -43,12 +59,27 @@ const VM_ROOTFS = flag("--vm-rootfs") ?? "/srv/runner/images/base.ext4";
 const VM_DIR = join(process.env.TMPDIR ?? tmpdir(), `vms-${process.pid}`);
 const REMOTE = flag("--base-url")?.replace(/\/$/, "");
 const OWNER_TOKEN_FILE = flag("--owner-token-file")?.replace(/^~/, process.env.HOME ?? "~");
+const SERVICE = args.includes("--service");
+const SERVER_ONLY = flag("--server-only");
+if (SERVICE && !WIN) throw new Error("--service is for Windows (the daemon as a scheduled task)");
 const BASE = REMOTE ?? `http://127.0.0.1:${PORT}`;
 const TMP = mkdtempSync(join(tmpdir(), "bots-e2e-"));
 // A label of its own on a shared env, so no other machine takes the run.
 const LABEL = REMOTE ? `e2e-${crypto.randomUUID().slice(0, 8)}` : "e2e";
 const report: Record<string, unknown> = { base: BASE, tmp: TMP, steps: [] as string[] };
 const children: { name: string; pid: number; kill: () => void }[] = [];
+/** A path as a TOML string: a literal one, so a Windows path keeps its backslashes. */
+const q = (path: string) => `'${path}'`;
+
+/** Ends the process `pid` and everything it started. */
+function killTree(pid: number): void {
+  try {
+    if (WIN) spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
+    else process.kill(-pid, "SIGTERM");
+  } catch {
+    /* gone */
+  }
+}
 
 function step(s: string): void {
   (report.steps as string[]).push(s);
@@ -65,11 +96,12 @@ function secretFile(name: string, value: string): string {
 function start(name: string, cmd: string, argv: string[], opts: { cwd: string; env?: Record<string, string> }) {
   const log = join(TMP, `${name}.log`);
   const fd = openSync(log, "a");
-  const child = spawn(cmd, argv, { cwd: opts.cwd, env: { ...process.env, ...opts.env }, stdio: ["ignore", fd, fd], detached: true });
+  const child = spawn(cmd, argv, { cwd: opts.cwd, env: { ...process.env, ...opts.env }, stdio: ["ignore", fd, fd], detached: !WIN, windowsHide: true });
   if (!child.pid) throw new Error(`${name} did not start`);
   const pid = child.pid;
-  // Stop by the PID we started (its process group: wrangler runs workerd as a child).
-  children.push({ name, pid, kill: () => { try { process.kill(-pid, "SIGTERM"); } catch { /* gone */ } } });
+  // Stop by the PID we started (its process group, on Windows its process tree: wrangler runs
+  // workerd as a child).
+  children.push({ name, pid, kill: () => killTree(pid) });
   step(`${name} started (pid ${pid}, log ${log})`);
 }
 
@@ -132,6 +164,14 @@ async function main() {
   } else {
     ({ owner, groupId, alice, bot } = await localServer(server));
   }
+  if (SERVER_ONLY) {
+    mkdirSync(SERVER_ONLY, { recursive: true });
+    writeFileSync(join(SERVER_ONLY, "url"), BASE);
+    writeFileSync(join(SERVER_ONLY, "owner-token"), owner, { mode: 0o600 });
+    step(`the server runs at ${BASE} until ${join(SERVER_ONLY, "stop")} appears`);
+    await until("the stop file", () => existsSync(join(SERVER_ONLY, "stop")), 3 * 3600_000);
+    return;
+  }
   await call("PUT", `/v1/bots/${bot.member.id}/runner`, { token: owner, body: { runtime: "claude", labels: [LABEL] } });
   const machine = await call("POST", "/v1/machines", { token: owner, body: { name: `mac-${LABEL}`, labels: [LABEL] } });
   if (REMOTE) {
@@ -147,7 +187,7 @@ async function localServer(server: string) {
   const state = join(TMP, "wrangler-state");
   const adminSecret = crypto.randomUUID();
   // A throwaway admin secret for this fresh local state only.
-  const mig = spawnSync("bunx", ["wrangler", "d1", "migrations", "apply", "DB", "--local", "--persist-to", state], {
+  const mig = spawnSync(BUNX[0], [...BUNX.slice(1), "wrangler", "d1", "migrations", "apply", "DB", "--local", "--persist-to", state], {
     cwd: server,
     encoding: "utf8",
     env: { ...process.env, CI: "1" },
@@ -156,8 +196,8 @@ async function localServer(server: string) {
   step("local D1 migrated");
   start(
     "wrangler",
-    "bunx",
-    ["wrangler", "dev", "--port", String(PORT), "--inspector-port", String(PORT + 1000), "--ip", "127.0.0.1", "--persist-to", state, "--var", `ADMIN_SECRET:${adminSecret}`],
+    BUNX[0],
+    [...BUNX.slice(1), "wrangler", "dev", "--port", String(PORT), "--inspector-port", String(PORT + 1000), "--ip", "127.0.0.1", "--persist-to", state, "--var", `ADMIN_SECRET:${adminSecret}`],
     { cwd: server },
   );
   await until("server health", async () => (await fetch(`${BASE}/v1/health`)).ok, 90_000);
@@ -183,11 +223,21 @@ async function runDaemonCheck(
 ) {
 
   // The daemon with the fake Claude Code CLI.
-  const daemonBin = join(process.env.CARGO_TARGET_DIR ?? join(ROOT, "target"), "debug", "daemon");
-  if (!existsSync(daemonBin)) {
-    const b = spawnSync("cargo", ["build", "-p", "daemon"], { cwd: ROOT, stdio: "inherit" });
+  const daemonBin = join(TARGET, "debug", `daemon${EXE}`);
+  // Windows starts a Python fake through the launcher of the daemon's `test-fakes` feature.
+  const fakeCli = join(TARGET, "debug", "fake-cli.exe");
+  if (!existsSync(daemonBin) || (WIN && !existsSync(fakeCli))) {
+    const b = spawnSync("cargo", ["build", "-p", "daemon", ...(WIN ? ["--features", "test-fakes"] : [])], { cwd: ROOT, stdio: "inherit" });
     if (b.status !== 0) throw new Error("cargo build -p daemon failed");
   }
+  /** The `command` and `env` lines of a runtime whose CLI is the fake `script`. */
+  // The scheduled task's daemon has the user's PATH, not this script's: name python by its path.
+  const python = WIN ? ((spawnSync("where", ["python"], { encoding: "utf8" }).stdout ?? "").split(/\r?\n/)[0] ?? "").trim() : "";
+  if (WIN && !python) throw new Error("python is not on PATH (the fake CLIs are Python scripts)");
+  const fakeRuntime = (script: string, env: string[]) => {
+    const all = WIN ? [`FAKE_CLI_SCRIPT = ${q(script)}`, `FAKE_CLI_PYTHON = ${q(python)}`, ...env] : env;
+    return [`command = ${q(WIN ? fakeCli : script)}`, ...(all.length ? [`env = { ${all.join(", ")} }`] : [])];
+  };
   const fake = join(ROOT, "apps/daemon/tests/fake/fake_claude.py");
   chmodSync(fake, 0o755);
   const fakeCodex = join(ROOT, "apps/daemon/tests/fake/fake_codex.py");
@@ -196,42 +246,42 @@ async function runDaemonCheck(
   const claudeHome = join(TMP, "claude-home");
   mkdirSync(claudeHome, { recursive: true });
   const config = join(TMP, "daemon.toml");
-  writeFileSync(
-    config,
-    [
-      `server_url = "${BASE}"`,
-      `token_file = "${tokenFile}"`,
-      `name = "mac-${LABEL}"`,
-      `labels = ["${LABEL}"]`,
-      `work_root = "${work}"`,
-      "max_parallel_runs = 2",
-      "min_free_gb = 1",
-      "",
-      "[runtimes.claude]",
-      'kind = "claude"',
-      `command = "${fake}"`,
-      `env = { CLAUDE_CONFIG_DIR = "${claudeHome}" }`,
-      "",
-      "[runtimes.codex]",
-      'kind = "codex"',
-      `command = "${fakeCodex}"`,
-      'sandbox = "workspace-write"',
-      'approval_policy = "never"',
-      "",
-      ...(VM
-        ? [
-            "[vm]",
-            `kernel = "${VM_KERNEL}"`,
-            `rootfs = "${VM_ROOTFS}"`,
-            `dir = "${VM_DIR}"`,
-            // The fake CLIs and the fake Claude config are not in the base image: share them.
-            `shares = ["${claudeHome}", "${dirname(fake)}"]`,
-            "",
-          ]
-        : []),
-    ].join("\n"),
-  );
-  start("daemon", daemonBin, ["run", "--config", config], { cwd: TMP });
+  // What the machine is: the install command writes these itself.
+  const identity = [`server_url = "${BASE}"`, `token_file = ${q(tokenFile)}`, `name = "mac-${LABEL}"`, `labels = ["${LABEL}"]`];
+  const rest = [
+    `work_root = ${q(work)}`,
+    "max_parallel_runs = 2",
+    "min_free_gb = 1",
+    "",
+    "[runtimes.claude]",
+    'kind = "claude"',
+    ...fakeRuntime(fake, [`CLAUDE_CONFIG_DIR = ${q(claudeHome)}`]),
+    "",
+    "[runtimes.codex]",
+    'kind = "codex"',
+    ...fakeRuntime(fakeCodex, []),
+    'sandbox = "workspace-write"',
+    'approval_policy = "never"',
+    "",
+    ...(VM
+      ? [
+          "[vm]",
+          `kernel = ${q(VM_KERNEL)}`,
+          `rootfs = ${q(VM_ROOTFS)}`,
+          `dir = ${q(VM_DIR)}`,
+          // The fake CLIs and the fake Claude config are not in the base image: share them.
+          `shares = [${q(claudeHome)}, ${q(dirname(fake))}]`,
+          "",
+        ]
+      : []),
+  ];
+  let service: Service | undefined;
+  if (SERVICE) {
+    service = installService(daemonBin, machine.machine.id, tokenFile, rest);
+  } else {
+    writeFileSync(config, [...identity, ...rest].join("\n"));
+    start("daemon", daemonBin, ["run", "--config", config], { cwd: TMP });
+  }
   const healthy = await until("machine healthy", async () => {
     const list = (await call("GET", "/v1/machines", { token: owner })) as any[];
     return list.find((m) => m.id === machine.machine.id && m.healthy);
@@ -309,6 +359,7 @@ async function runDaemonCheck(
   report.resume = await resumeCheck(groupId, topicId, runId, bot, work, events, ws);
   if (!REMOTE) report.codex = await codexCheck(owner, groupId, work, events, ws);
   const stop = await cancelCheck(groupId, alice, bot, work, events, ws);
+  if (service) report.service = await serviceChecks(service, owner, groupId, alice, bot, machine.machine.id, work, events, ws);
   ws.close();
   report.cancel = stop;
   Object.assign(report, {
@@ -403,6 +454,10 @@ function findFile(dir: string, name: string): string | undefined {
 }
 
 function alive(pid: number): boolean {
+  if (WIN) {
+    const r = spawnSync("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], { encoding: "utf8" });
+    return (r.stdout ?? "").includes(`"${pid}"`);
+  }
   try {
     process.kill(pid, 0);
     return true;
@@ -426,7 +481,7 @@ async function cancelCheck(
   events: any[],
   ws: WebSocket,
 ) {
-  const example = join(process.env.CARGO_TARGET_DIR ?? join(ROOT, "target"), "debug", "examples", "cancel_run");
+  const example = join(TARGET, "debug", "examples", `cancel_run${EXE}`);
   if (!existsSync(example)) {
     const b = spawnSync("cargo", ["build", "-p", "chat-core", "--example", "cancel_run"], { cwd: ROOT, stdio: "inherit" });
     if (b.status !== 0) throw new Error("cargo build -p chat-core --example cancel_run failed");
@@ -434,7 +489,7 @@ async function cancelCheck(
   const aliceTokenFile = secretFile("alice-token", alice.token);
   const cancel = (runId: string) => {
     const r = spawnSync(example, [BASE, aliceTokenFile, runId, join(TMP, "client-data")], { encoding: "utf8" });
-    const line = (r.stdout ?? "").trim().split("\n").at(-1) ?? "";
+    const line = (r.stdout ?? "").trim().split(/\r?\n/).at(-1) ?? "";
     let out: any = {};
     try {
       out = JSON.parse(line);
@@ -496,6 +551,254 @@ async function cancelCheck(
     note: note.body,
     topicStatuses: statuses(),
   };
+}
+
+// ---------------------------------------------------------------------------
+// --service: the daemon as the scheduled task of this user (Windows)
+// ---------------------------------------------------------------------------
+
+type Service = {
+  exe: string;
+  config: string;
+  binDir: string;
+  stateDir: string;
+  taskName: string;
+  image: string;
+  asset: string;
+  /** The daemon processes this script saw: none ran before it installed one, so they are its own. */
+  pids: Set<number>;
+};
+
+function powershell(argv: string[]): { status: number | null; out: string } {
+  const exe = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  const r = spawnSync(exe, ["-NoProfile", "-ExecutionPolicy", "Bypass", ...argv], { encoding: "utf8" });
+  return { status: r.status, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
+}
+
+/** The pids of the running daemons of the task (by image name). */
+function daemonPids(s: Service): number[] {
+  const r = spawnSync("tasklist", ["/FI", `IMAGENAME eq ${s.image}`, "/FO", "CSV", "/NH"], { encoding: "utf8" });
+  const pids = [...(r.stdout ?? "").matchAll(/^"[^"]+","(\d+)"/gm)].map((m) => Number(m[1]));
+  for (const pid of pids) s.pids.add(pid);
+  return pids;
+}
+
+/** The pids of the processes named `image` right now. */
+function daemonPidsNow(image: string): number[] {
+  const r = spawnSync("tasklist", ["/FI", `IMAGENAME eq ${image}`, "/FO", "CSV", "/NH"], { encoding: "utf8" });
+  return [...(r.stdout ?? "").matchAll(/^"[^"]+","(\d+)"/gm)].map((m) => Number(m[1]));
+}
+
+function taskExists(name: string): boolean {
+  const schtasks = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "schtasks.exe");
+  return spawnSync(schtasks, ["/Query", "/TN", name], { stdio: "ignore" }).status === 0;
+}
+
+function daemonLog(s: Service): string {
+  try {
+    return readFileSync(join(s.stateDir, "daemon.log"), "utf8");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Installs the daemon with the PowerShell install command (files only), adds this run's runtimes
+ * to the config it wrote, and registers the scheduled task. Everything is removed again when
+ * the script ends.
+ */
+function installService(daemonBin: string, machineId: string, tokenFile: string, rest: string[]): Service {
+  const product = JSON.parse(readFileSync(join(ROOT, "product.json"), "utf8")) as { slug: string; bundleId: string };
+  const profile = process.env.USERPROFILE ?? "";
+  const local = process.env.LOCALAPPDATA ?? "";
+  if (!profile || !local) throw new Error("USERPROFILE and LOCALAPPDATA must be set");
+  const configDir = join(profile, ".config", product.slug);
+  const binDir = join(local, "Programs", product.slug);
+  const stateDir = join(local, `${product.slug}-daemon`);
+  const image = `${product.slug}-daemon.exe`;
+  const s: Service = { exe: join(binDir, image), config: join(configDir, "daemon.toml"), binDir, stateDir, taskName: `${product.bundleId}.daemon`, image, asset: "", pids: new Set() };
+  // This computer must not be a machine in any way: the task has one name per user, so an
+  // install here would replace a real one and stop its daemon. A daemon can have its config
+  // anywhere (`--config`, CHAT_DAEMON_CONFIG, under HOME instead of the profile), so the
+  // task, its state folder and a running daemon are looked for too, not only the usual files.
+  const running = spawnSync("tasklist", ["/FI", `IMAGENAME eq ${image}`, "/FO", "CSV", "/NH"], { encoding: "utf8" }).stdout ?? "";
+  const signs = [
+    existsSync(configDir) && configDir,
+    process.env.HOME && existsSync(join(process.env.HOME, ".config", product.slug)) && join(process.env.HOME, ".config", product.slug),
+    process.env.CHAT_DAEMON_CONFIG && "CHAT_DAEMON_CONFIG is set",
+    existsSync(s.exe) && s.exe,
+    existsSync(stateDir) && stateDir,
+    taskExists(s.taskName) && `the scheduled task ${s.taskName}`,
+    running.includes(`"${image}"`) && `a running ${image}`,
+  ].filter(Boolean);
+  if (signs.length > 0) throw new Error(`this computer already has a daemon (${signs.join("; ")}): not touching it`);
+  children.push({
+    name: "service",
+    pid: 0,
+    kill: () => {
+      // Only what this script made: its task (by the daemon it installed), the daemons it
+      // saw start, and the three folders that were not there before.
+      if (existsSync(s.exe)) spawnSync(s.exe, ["uninstall-service"], { stdio: "ignore" });
+      const now = new Set(daemonPidsNow(image));
+      for (const pid of s.pids) if (now.has(pid)) killTree(pid);
+      for (const dir of [configDir, binDir, stateDir]) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+    },
+  });
+  s.asset = join(TMP, `${product.slug}-daemon-0.0.0-x86_64-pc-windows-msvc.exe`);
+  copyFileSync(daemonBin, s.asset);
+  const install = powershell([
+    "-File", join(ROOT, "scripts", "install-daemon.ps1"),
+    "-ServerUrl", BASE, "-MachineId", machineId, "-Name", `mac-${LABEL}`, "-Labels", LABEL,
+    "-DaemonFile", s.asset, "-TokenFile", tokenFile, "-NoService",
+  ]);
+  if (install.status !== 0 || !existsSync(s.config)) throw new Error(`install-daemon.ps1 failed (${install.status}): ${install.out.slice(-600)}`);
+  step("install-daemon.ps1 installed the daemon and wrote its config and token");
+  appendFileSync(s.config, `\n${rest.join("\n")}\n`);
+  const reg = spawnSync(s.exe, ["install-service", "--config", s.config], { encoding: "utf8" });
+  if (reg.status !== 0) throw new Error(`install-service failed (${reg.status}): ${(reg.stderr ?? "").slice(-600)}`);
+  daemonPids(s);
+  step(`the daemon is the scheduled task ${s.taskName}`);
+  return s;
+}
+
+/**
+ * What a machine owner's updates and a logoff do to the task's daemon, with runs going through
+ * the server all the while:
+ * 1. an update by the replace protocol while the daemon is idle: it restarts on the new file by
+ *    itself and the next run works;
+ * 2. the same while a run is active: the daemon keeps the run going on the old file for as long
+ *    as it takes, and restarts only after the run ended;
+ * 3. a logoff (the task and the daemon end at once) while a run is active: the run's CLI ends
+ *    with the daemon; at the next logon (the task starts) the daemon reports the run as failed
+ *    and takes new runs.
+ * Then the uninstall: no task, no process.
+ */
+async function serviceChecks(
+  s: Service,
+  owner: string,
+  groupId: string,
+  alice: { token: string },
+  bot: { member: { id: string } },
+  machineId: string,
+  work: string,
+  events: any[],
+  ws: WebSocket,
+) {
+  const out: Record<string, unknown> = {};
+  let n = 0;
+  const mention = async (body: string) => {
+    const rid = `svc-${++n}`;
+    ws.send(JSON.stringify({ t: "send", rid, groupId, clientMsgId: crypto.randomUUID(), body: `@dev ${body}`, mentions: [bot.member.id] }));
+    const ack = await until(`send ack (${rid})`, () => events.find((e) => e.frame?.rid === rid));
+    if (!ack.frame.ok) throw new Error(`send failed: ${JSON.stringify(ack.frame.error)}`);
+    return ack.frame.result.message.topicId as string;
+  };
+  const runsOf = (topicId: string) => events.filter((e) => e.type === "run.updated" && e.data.run.topicId === topicId).map((e) => e.data.run);
+  const quickRun = async (what: string) => {
+    const topic = await mention("你好");
+    const run = await until(`${what}: a run ends`, () => runsOf(topic).find((r: any) => ["done", "failed", "cancelled"].includes(r.status)), 90_000);
+    if (run.status !== "done") throw new Error(`${what}: the run ended as ${run.status}`);
+  };
+  const hangingRun = async () => {
+    for (let f = findFile(work, "fake.pid"); f; f = findFile(work, "fake.pid")) rmSync(f);
+    const topic = await mention("hang");
+    const run = await until("run running", () => runsOf(topic).find((r: any) => r.status === "running"), 60_000);
+    const pidFile = await until("fake CLI hangs", () => {
+      const f = findFile(work, "fake.pid");
+      return f && readFileSync(f, "utf8").trim() ? f : undefined;
+    }, 60_000);
+    const cli = Number(readFileSync(pidFile, "utf8").trim());
+    if (!alive(cli)) throw new Error("the fake CLI is not running");
+    return { topic, id: run.id as string, cli, status: () => runsOf(topic).filter((r: any) => r.id === run.id).at(-1)?.status as string };
+  };
+  const connected = async () => ((await call("GET", "/v1/machines", { token: owner })) as any[]).find((m) => m.id === machineId)?.connected === true;
+  const theDaemon = () => {
+    const pids = daemonPids(s);
+    if (pids.length !== 1) throw new Error(`${pids.length} daemons run: ${pids.join(", ")}`);
+    return pids[0] as number;
+  };
+  /** Replaces the daemon's program file the way every updater does. */
+  const update = () => {
+    const r = powershell(["-File", join(ROOT, "scripts", "install-daemon.ps1"), "-Update", "-DaemonFile", s.asset]);
+    if (r.status !== 0) throw new Error(`install-daemon.ps1 -Update failed (${r.status}): ${r.out.slice(-600)}`);
+    if (readdirSync(s.binDir).filter((f) => f.includes(".old-")).length !== 1) throw new Error("the running program was not renamed aside");
+  };
+  const restarted = async (what: string, before: number, ms: number) => {
+    const t0 = Date.now();
+    const pid = await until(`${what}: the task started the new daemon`, () => {
+      const pids = daemonPids(s);
+      return pids.length === 1 && pids[0] !== before ? pids[0] : undefined;
+    }, ms);
+    await until(`${what}: the new daemon is connected`, connected, 90_000);
+    await until(`${what}: the old program file is deleted`, () => readdirSync(s.binDir).filter((f) => f.includes(".old-")).length === 0, 60_000);
+    return { pid, seconds: Math.round((Date.now() - t0) / 1000) };
+  };
+  try {
+    // 1. Idle.
+    const first = theDaemon();
+    update();
+    const idle = await restarted("update while idle", first, 300_000);
+    await quickRun("after the idle update");
+    out.idleUpdate = { before: first, after: idle.pid, seconds: idle.seconds };
+    step(`update while idle: the daemon restarted on the new file by itself after ${idle.seconds} s and ran a run`);
+
+    // 2. During a run: more than two looks at the program file (one a minute) pass and the
+    // daemon and the run are still there.
+    const busy = await hangingRun();
+    const second = theDaemon();
+    update();
+    for (const t0 = Date.now(); Date.now() - t0 < 150_000; await sleep(5000)) {
+      if (!alive(second)) throw new Error("the daemon restarted while a run was active");
+      if (!alive(busy.cli) || busy.status() !== "running") throw new Error(`the run did not survive the update: ${busy.status()}`);
+    }
+    if (theDaemon() !== second) throw new Error("another daemon runs");
+    const example = join(TARGET, "debug", "examples", "cancel_run.exe");
+    const stop = spawnSync(example, [BASE, join(TMP, "alice-token"), busy.id, join(TMP, "client-data")], { encoding: "utf8" });
+    if (stop.status !== 0) throw new Error(`cancel_run failed (${stop.status})`);
+    await until("the run is cancelled", () => busy.status() === "cancelled", 30_000);
+    await until("the fake CLI is stopped", () => !alive(busy.cli), 30_000);
+    const after = await restarted("update during a run", second, 300_000);
+    await quickRun("after the update during a run");
+    out.busyUpdate = { before: second, after: after.pid, heldSeconds: 150, restartSeconds: after.seconds };
+    step(`update during a run: the daemon kept the run for 150 s, and restarted ${after.seconds} s after the run was stopped`);
+
+    // 3. Logoff and logon. A logoff ends every process of the session at once: the task and
+    // the daemon are ended, not asked. The run's CLI must end with the daemon (nothing is left
+    // to clean up at the next start).
+    const lost = await hangingRun();
+    const third = theDaemon();
+    const schtasks = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "schtasks.exe");
+    spawnSync(schtasks, ["/End", "/TN", s.taskName], { stdio: "ignore" });
+    spawnSync("taskkill", ["/PID", String(third), "/F"], { stdio: "ignore" });
+    await until("the daemon is gone", () => !alive(third), 15_000);
+    await until("the run's CLI ended with the daemon", () => !alive(lost.cli), 15_000);
+    // The logon: the task starts (its every-minute trigger may have done it already).
+    spawnSync(schtasks, ["/Run", "/TN", s.taskName], { stdio: "ignore" });
+    const back = await until("the task started the daemon again", () => {
+      const pids = daemonPids(s);
+      return pids.length === 1 && pids[0] !== third ? pids[0] : undefined;
+    }, 120_000);
+    await until("the daemon is connected again", connected, 90_000);
+    const ended = await until("the lost run is reported", () => (["failed", "cancelled", "done"].includes(lost.status()) ? lost.status() : undefined), 120_000);
+    if (ended !== "failed") throw new Error(`the run the logoff ended is ${ended}, not failed`);
+    await quickRun("after the logon");
+    out.logoff = { before: third, after: back, lostRun: ended };
+    step("logoff during a run: the CLI ended with the daemon; after the logon the daemon reported the run as failed and ran a new one");
+
+    // 4. Uninstall.
+    const un = spawnSync(s.exe, ["uninstall-service"], { encoding: "utf8" });
+    if (un.status !== 0) throw new Error(`uninstall-service failed (${un.status}): ${(un.stderr ?? "").slice(-400)}`);
+    await until("no daemon runs", () => daemonPids(s).length === 0, 30_000);
+    if (taskExists(s.taskName)) throw new Error("the task is still registered");
+    await until("the machine is disconnected", async () => !(await connected()), 60_000);
+    step("uninstall-service: no task, no daemon, the machine is offline");
+    const log = daemonLog(s);
+    if (log.includes(readFileSync(join(dirname(s.config), "machine-token"), "utf8").trim())) throw new Error("the machine token is in the daemon log");
+    return out;
+  } catch (err) {
+    console.error(`--- daemon.log (last lines)\n${daemonLog(s).split(/\r?\n/).slice(-60).join("\n")}`);
+    throw err;
+  }
 }
 
 let code = 0;

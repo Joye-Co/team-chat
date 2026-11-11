@@ -151,6 +151,27 @@ pub fn shim_target(text: &str) -> Option<String> {
     plain.then(|| rest.to_string())
 }
 
+/// Why `args` cannot be given to `program` (what [`launch`] says to start). A `.cmd` or `.bat`
+/// file runs in `cmd.exe`, whose command line ends at the first line break: an argument with
+/// one (a run's instructions have several) would be cut off there, and what follows it would
+/// be read as more commands. None for a program that is not a batch file.
+pub fn batch_problem(program: &Path, args: &[String]) -> Option<String> {
+    let ext = program
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    if ext != "cmd" && ext != "bat" {
+        return None;
+    }
+    args.iter().any(|a| a.contains(['\n', '\r'])).then(|| {
+        format!(
+            "{} is a batch file that is not an npm shim, and cmd.exe cannot carry an argument \
+with a line break. Set the runtime's command to the program that the batch file starts",
+            program.display()
+        )
+    })
+}
+
 /// A command that starts the program file `program` (see [`launch`]).
 pub fn command(program: &Path) -> tokio::process::Command {
     let l = launch(program);
@@ -159,14 +180,67 @@ pub fn command(program: &Path) -> tokio::process::Command {
     c
 }
 
+/// A helper process of the daemon (a probe of a CLI, a sign-in). Windows: it is in a Job
+/// Object of its own, so ending it also ends what it started: killing only the `.cmd` wrapper
+/// of an npm-installed CLI would leave the real program running. Unix: the child as it is.
+pub struct Helper {
+    child: tokio::process::Child,
+    #[cfg(windows)]
+    _job: crate::winjob::Job,
+}
+
+impl std::ops::Deref for Helper {
+    type Target = tokio::process::Child;
+    fn deref(&self) -> &Self::Target {
+        &self.child
+    }
+}
+
+impl std::ops::DerefMut for Helper {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.child
+    }
+}
+
+/// Starts a helper process (see [`Helper`]).
+pub fn spawn(cmd: &mut tokio::process::Command) -> std::io::Result<Helper> {
+    #[cfg(windows)]
+    {
+        let (child, job) = crate::winjob::spawn(cmd, false)?;
+        Ok(Helper { child, _job: job })
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(Helper {
+            child: cmd.spawn()?,
+        })
+    }
+}
+
+/// Runs a helper process to its end and collects its output, like `Command::output`. The
+/// caller sets `stdout` and `stderr` (what it does not set is inherited on Windows). When the
+/// caller gives up (a timeout drops this future) the process and what it started are ended.
+pub async fn output(cmd: &mut tokio::process::Command) -> std::io::Result<std::process::Output> {
+    #[cfg(windows)]
+    {
+        let Helper { child, _job } = spawn(cmd)?;
+        child.wait_with_output().await
+    }
+    #[cfg(not(windows))]
+    {
+        cmd.output().await
+    }
+}
+
 /// First line of `<cmd> --version`, with a 10 s limit.
 pub async fn cli_version(cmd: &str) -> Option<String> {
     let mut c = command(Path::new(cmd));
     c.arg("--version")
         .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true);
-    let out = tokio::time::timeout(Duration::from_secs(10), c.output())
+    let out = tokio::time::timeout(Duration::from_secs(10), output(&mut c))
         .await
         .ok()?
         .ok()?;
@@ -192,6 +266,7 @@ async fn discover_cli(name: &str, rt: &RuntimeConfig) -> CliInfo {
         _ => None,
     };
     let can_run = crate::models::discover(rt, found.as_deref()).await;
+    let gates = crate::gates::reported_for(&rt.kind, version.as_deref()).then_some(true);
     CliInfo {
         runtime: name.to_string(),
         kind: rt.kind.clone(),
@@ -201,7 +276,7 @@ async fn discover_cli(name: &str, rt: &RuntimeConfig) -> CliInfo {
         models: can_run.models,
         efforts: can_run.efforts,
         // Only Claude Code runs stop at gated commands (a PreToolUse hook); Codex cannot yet.
-        gates: crate::gates::enforced_by(&rt.kind).then_some(true),
+        gates,
     }
 }
 
@@ -283,6 +358,19 @@ mod tests {
         assert_eq!(shim_target("\"C:\\tools\\x.exe\" %*"), None);
         assert_eq!(shim_target("\"%dp0%\\\" %*"), None);
         assert_eq!(shim_target("node %*"), None);
+    }
+
+    #[test]
+    fn a_batch_file_takes_no_argument_with_a_line_break() {
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let multi = args(&["-p", "first line\nsecond line"]);
+        assert!(batch_problem(Path::new("C:/tools/claude.exe"), &multi).is_none());
+        assert!(
+            batch_problem(Path::new("C:/tools/wrap.cmd"), &args(&["-p", "one line"])).is_none()
+        );
+        let why = batch_problem(Path::new("C:/tools/wrap.CMD"), &multi).unwrap();
+        assert!(why.contains("line break"), "{why}");
+        assert!(batch_problem(Path::new("wrap.bat"), &args(&["a\rb"])).is_some());
     }
 
     #[test]

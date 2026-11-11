@@ -1093,7 +1093,12 @@ impl RootView {
 impl Render for RootView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = self.window_body(window, cx).into_any_element();
-        crate::ui::native::window_chrome::framed_main(env!("PRODUCT_NAME"), body, window, cx)
+        use crate::ui::native::window_chrome;
+        if self.show_inactive {
+            window_chrome::framed_main_inactive(env!("PRODUCT_NAME"), body, window, cx)
+        } else {
+            window_chrome::framed_main(env!("PRODUCT_NAME"), body, window, cx)
+        }
     }
 }
 
@@ -1482,9 +1487,26 @@ pub fn bind_view_keys(cx: &mut App) {
         KeyBinding::new("shift-tab", FocusPrev, None),
         KeyBinding::new("f6", FocusNextRegion, None),
         KeyBinding::new("shift-f6", FocusPrevRegion, None),
+    ]);
+    // ⌥Tab on the Mac. Windows keeps Alt+Tab for its own window switcher and
+    // never hands it to an app: F6 is the key there, as in every Windows app.
+    #[cfg(target_os = "macos")]
+    cx.bind_keys([
         KeyBinding::new("alt-tab", FocusNextRegion, None),
         KeyBinding::new("alt-shift-tab", FocusPrevRegion, None),
     ]);
+    // Windows' other keys for redo, paste and copy, which its users' hands know
+    // beside Ctrl+Y, Ctrl+V and Ctrl+C (the Mac has no such second set).
+    #[cfg(not(target_os = "macos"))]
+    {
+        use gpui_component::input::{Copy, Paste, Redo};
+        cx.bind_keys([
+            KeyBinding::new("ctrl-shift-z", Redo, Some("Input")),
+            KeyBinding::new("shift-insert", Paste, Some("Input")),
+            KeyBinding::new("ctrl-insert", Copy, Some("Input")),
+            KeyBinding::new("ctrl-insert", Copy, Some("TextView")),
+        ]);
+    }
     crate::views::topic_list::bind_keys(cx);
     // --- v12/behavior ---
     crate::views::rail::bind_keys(cx);

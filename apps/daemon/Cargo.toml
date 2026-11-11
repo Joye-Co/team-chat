@@ -13,9 +13,25 @@ path = "src/lib.rs"
 name = "daemon"
 path = "src/main.rs"
 
+[features]
+# Builds `fake-cli`, which starts the tests' Python fake CLIs on Windows.
+test-fakes = []
+
+[[bin]]
+name = "fake-cli"
+path = "tests/fake/launcher.rs"
+required-features = ["test-fakes"]
+test = false
+doc = false
+
 # Its own fake CLI: the test program starts itself as the processes of a run.
 [[test]]
 name = "process_tree"
+harness = false
+
+# Its own stand-in daemon: the scheduled task starts the test program (Windows).
+[[test]]
+name = "service_task"
 harness = false
 
 [dependencies]
@@ -40,10 +56,13 @@ base64 = "0.22"
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Security",
+  "Win32_Security_Authorization",
   "Win32_Storage_FileSystem",
   "Win32_System_Console",
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_JobObjects",
+  "Win32_System_Pipes",
+  "Win32_System_SystemInformation",
   "Win32_System_Threading",
 ] }
 

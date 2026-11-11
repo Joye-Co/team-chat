@@ -19,26 +19,44 @@ use crate::data::{
     reply_now,
 };
 
-/// This Mac's IANA time zone, from `TZ` or the `/etc/localtime` link
-/// (`/var/db/timezone/zoneinfo/Asia/Shanghai`). `None` when it cannot be read: the server
-/// then keeps the zone it has.
+/// This computer's IANA time zone. On the Mac from `TZ` or the `/etc/localtime` link
+/// (`/var/db/timezone/zoneinfo/Asia/Shanghai`); on Windows from the system's calendar,
+/// which names the zone the IANA way. `None` when it cannot be read: the server then keeps
+/// the zone it has.
 pub(super) fn local_time_zone() -> Option<String> {
-    let valid = |z: &str| {
-        !z.is_empty()
-            && z.len() <= 64
-            && z.chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '+' | '-' | '/'))
-    };
     if let Ok(tz) = std::env::var("TZ") {
         let tz = tz.trim_start_matches(':');
-        if valid(tz) && tz.contains('/') {
+        if valid_zone(tz) && tz.contains('/') {
             return Some(tz.to_string());
         }
     }
+    system_time_zone().filter(|zone| valid_zone(zone))
+}
+
+/// A zone name the server takes: an IANA id, nothing else.
+fn valid_zone(zone: &str) -> bool {
+    !zone.is_empty()
+        && zone.len() <= 64
+        && zone
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '+' | '-' | '/'))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn system_time_zone() -> Option<String> {
     let link = std::fs::read_link("/etc/localtime").ok()?;
     let text = link.to_string_lossy();
-    let zone = text.split("zoneinfo/").nth(1)?;
-    valid(zone).then(|| zone.to_string())
+    text.split("zoneinfo/").nth(1).map(str::to_string)
+}
+
+/// `Windows.Globalization.Calendar` reports the system zone as an IANA id
+/// (`Asia/Shanghai`), unlike Win32, which names it Windows' own way (`China Standard Time`).
+#[cfg(target_os = "windows")]
+fn system_time_zone() -> Option<String> {
+    let zone = windows::Globalization::Calendar::new()
+        .and_then(|calendar| calendar.GetTimeZone())
+        .ok()?;
+    Some(zone.to_string())
 }
 
 /// A read on a server without the settings routes (404) means the server is too old.
@@ -307,6 +325,24 @@ impl CoreProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 勿扰 and 每日摘要 are in this computer's zone: Windows reports one the server takes.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_names_its_time_zone_the_iana_way() {
+        let zone = system_time_zone().expect("a time zone");
+        println!("system time zone: {zone}");
+        assert!(valid_zone(&zone), "{zone:?}");
+        assert!(!zone.contains(' '), "not a Windows zone name: {zone:?}");
+    }
+
+    #[test]
+    fn only_iana_names_are_sent() {
+        assert!(valid_zone("Asia/Shanghai"));
+        assert!(valid_zone("Etc/GMT+8"));
+        assert!(!valid_zone("China Standard Time"));
+        assert!(!valid_zone(""));
+    }
 
     #[test]
     fn preferences_round_trip_through_the_wire_request() {

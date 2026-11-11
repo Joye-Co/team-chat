@@ -1,5 +1,5 @@
-//! Token storage: the macOS Keychain or the Windows Credential Manager in the app, a
-//! mode-600 file for tests and Linux CI.
+//! Token storage: the Keychain (macOS and iOS) or the Windows Credential Manager in the
+//! apps, a mode-600 file for tests and Linux CI.
 
 use std::path::{Path, PathBuf};
 
@@ -79,33 +79,53 @@ impl TokenStore for FileTokenStore {
     }
 }
 
-/// Stores the token as a generic password in the login Keychain.
-/// `service` comes from the bundle id in product.json; `account` names the server.
-#[cfg(target_os = "macos")]
+/// Stores the token as a generic password in the Keychain (the login Keychain on macOS, the
+/// app's Keychain on iOS). `service` comes from the bundle id in product.json; `account` names
+/// the server.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 #[derive(Debug, Clone)]
 pub struct KeychainTokenStore {
     service: String,
     account: String,
+    access_group: Option<String>,
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 impl KeychainTokenStore {
     pub fn new(service: impl Into<String>, account: impl Into<String>) -> Self {
         KeychainTokenStore {
             service: service.into(),
             account: account.into(),
+            access_group: None,
         }
+    }
+
+    /// Shares the item with the app's extensions. The app must be signed with this group in its
+    /// entitlements, or every call fails.
+    pub fn with_access_group(mut self, group: impl Into<String>) -> Self {
+        self.access_group = Some(group.into());
+        self
+    }
+
+    fn options(&self) -> security_framework::passwords_options::PasswordOptions {
+        let mut o = security_framework::passwords_options::PasswordOptions::new_generic_password(
+            &self.service,
+            &self.account,
+        );
+        if let Some(group) = &self.access_group {
+            o.set_access_group(group);
+        }
+        o
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 impl TokenStore for KeychainTokenStore {
     fn load(&self) -> Result<Option<String>, TokenStoreError> {
-        use security_framework::passwords::get_generic_password;
-        match get_generic_password(&self.service, &self.account) {
+        match security_framework::passwords::generic_password(self.options()) {
             Ok(bytes) => {
                 Ok(Some(String::from_utf8(bytes).map_err(|_| {
                     TokenStoreError::Keychain("token is not UTF-8".into())
@@ -117,17 +137,15 @@ impl TokenStore for KeychainTokenStore {
     }
 
     fn save(&self, token: &str) -> Result<(), TokenStoreError> {
-        security_framework::passwords::set_generic_password(
-            &self.service,
-            &self.account,
+        security_framework::passwords::set_generic_password_options(
             token.as_bytes(),
+            self.options(),
         )
         .map_err(|e| TokenStoreError::Keychain(e.to_string()))
     }
 
     fn clear(&self) -> Result<(), TokenStoreError> {
-        use security_framework::passwords::delete_generic_password;
-        match delete_generic_password(&self.service, &self.account) {
+        match security_framework::passwords::delete_generic_password_options(self.options()) {
             Ok(()) => Ok(()),
             Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(()),
             Err(e) => Err(TokenStoreError::Keychain(e.to_string())),
