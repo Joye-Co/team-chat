@@ -2133,14 +2133,22 @@ only at the moment a command would run: the machine stops the command and asks
 
   | Kind | Matches |
   | --- | --- |
-  | `mergeMain` | `gh pr merge`; `git push` naming `main`/`master` as a branch or refspec target (`origin main`, `HEAD:main`, `x:refs/heads/master`) |
+  | `mergeMain` | `gh pr merge`; `git push` naming `main`/`master` as a branch or refspec target (`origin main`, `HEAD:main`, `x:refs/heads/master`), also with git's options first (`git -C repo push origin main`); a merge through the GitHub API (`gh api`/`curl` with `PUT` to `…/pulls/<n>/merge`, GraphQL `mergePullRequest` or `enablePullRequestAutoMerge`); an MCP tool `mcp__<server>__merge_pull_request`, and `…__push_files`/`…__create_or_update_file` with `"branch":"main"` |
   | `deployProd` | `wrangler deploy`/`publish` with `--env`/`-e` `prod`/`production`; `vercel … --prod`; `netlify deploy … --prod`; `fly deploy`/`flyctl deploy`; `npm`/`bun`/`pnpm`/`yarn run deploy:prod` (also `deploy-prod`, `deploy_prod`, `production`) |
   | `prodConfig` | `wrangler secret put`/`delete`/`bulk` with `--env prod`; `vercel env add`/`rm` … `production`; `fly secrets set`/`unset`/`import` |
   | `deleteData` | `rm` with flags of `/`, `/*`, `~`, `~/`, `~/*`, `$HOME`; on Windows `Remove-Item`/`ri`/`rm`/`rmdir`/`rd`/`del`/`erase` of a drive's root (`C:\`, `C:\*`, `\`), of `~`, `$HOME`, `$env:USERPROFILE` or `%USERPROFILE%` itself, and `rm` with flags of a Git Bash drive (`/c/`); `DROP TABLE`/`DATABASE`/`SCHEMA` or `TRUNCATE TABLE` through `wrangler d1 execute`, `psql`, `mysql`, `sqlite3`; `DELETE FROM` through `wrangler d1 execute --remote`; `wrangler d1 delete`, `wrangler kv namespace`/`key`/`bulk delete`, `wrangler r2 bucket`/`object delete`; `gh repo delete` |
   | `externalPublish` | `npm`/`bun`/`pnpm`/`yarn publish`; `cargo publish`; `gh release create`; `twine upload` |
 
   A force push to a work branch is not gated (the agent rebases its own PR branch); a force push
-  to `main` is `mergeMain`. A plain `git push` while `main` is checked out is not seen.
+  to `main` is `mergeMain`. The run's shims (machine-protocol.md, "Gated actions") match the same
+  patterns against the facts of each invocation, so a plain `git push` while `main` is checked
+  out, `git -C`, a variable in the refspec and a deploy inside a script or package script stop
+  too.
+- **What this is**: a guard against mistakes, not a security boundary. A member that starts a
+  program by its full path or acts through a web page is not stopped. The real floor is GitHub
+  branch protection on `main` and a production environment that requires its own approval; the
+  settings page says so. `maxSpendCny` is never enforced: it is only a line in the run's prompt
+  that reminds the member to ask.
 - The daemon's `approval.request` carries `kind` and `command` (redacted). BotDesk posts the
   approval card titled `需要你确认：<kind's 设置 name>` with the command, mentions the kind's
   approver (`approvers[kind]`, else `approver`) and has three actions: 同意 (`approve:<id>`),

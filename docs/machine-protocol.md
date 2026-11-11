@@ -722,7 +722,56 @@ An AI member runs with every permission; only the few kinds the team checked nee
   default, any agent whose own permissions allow everything) would not be stopped, so without
   `asks_permission` the daemon does not report `gates` for it and the server keeps the plain
   "Team rule" paragraph in its prompt.
-- Side chat runs and the PTY runtime are never gated.
+- **Shims** (every gated run; see below for the shells that are not covered): the runtime's own gate sees only the line as
+  the CLI wrote it, so the daemon also puts shims first on the run's `PATH`: links to its own
+  binary in `<run folder>/bin` (`.exe` on Windows; in a VM the tools disk's `/opt/runner/bin`)
+  named `git`, `gh`, `wrangler`, `npm`, `npx`, `pnpm`, `yarn`, `bun`, `bunx`, `cargo`,
+  `vercel`, `netlify`, `fly`, `flyctl`, `twine`, `psql`, `mysql`, `sqlite3` (on the host only
+  those the run's `PATH` has), and sets `CHAT_RUN_GATES=1`. Started by such a name, the binary
+  sends `gate.check { tool: "shim", via: "shim", command }` over the run's `chat-run` transport
+  (socket or request folder) and then runs the real program found after the tools folder on
+  `PATH` (on Unix in its place), or refuses: exit code 1, the reason on standard error. When
+  the daemon cannot be asked it refuses too, like the hook. `command` is decided on the parsed
+  program and arguments, not on a shell line: the invocation as plain words (each argument
+  with newlines, `;`, `&` and `|` made spaces, so one invocation is one command), then one line
+  per fact: for git the command with its options before the subcommand dropped and aliases put
+  in (`git push …`), and for a push one line `git push <remote> <source>:refs/heads/<branch>`
+  per remote branch it would update (a plain `git push` from the checked-out branch, the
+  remote, `remote.<name>.push` and `push.default`; `HEAD`, `@`, `--all`, `--mirror`,
+  `--delete`, `:branch`; the shell already put in variables), and for `npm`/`pnpm`/`yarn`/`bun`
+  running a package script the script's lines (`pre`, the script, `post`) from the
+  `package.json` it runs in (its programs come from `node_modules/.bin`, where no shim is). The
+  same patterns decide. So a command inside a script, `git -C . push origin main`, a plain
+  `git push` while `main` is checked out and `B=main; git push origin HEAD:$B` all stop.
+  Claude Code runs Bash with the `PATH` of the user's shell profile, so a gated Claude Code run
+  on Unix also gets `CLAUDE_ENV_FILE=<run folder>/.claude-env.sh`, which puts the shims first
+  again before each command. Codex (and an ACP agent) runs each command in the user's login
+  shell (`zsh -lc`); on macOS `/etc/zprofile` runs `path_helper`, which puts the system folders
+  before the inherited `PATH`. So a gated Codex or ACP run on the host (Unix) gets
+  `ZDOTDIR=<run folder>/zsh`, whose `.zshenv`, `.zprofile`, `.zshrc` and `.zlogin` each read the
+  user's own file of that name (from `CHAT_RUN_USER_ZDOTDIR`, the user's own `ZDOTDIR`, else
+  `$HOME`) and then put the shims first again.
+- **Waiting at a shim**: a shim waits inside the CLI's own command, which the CLI kills after
+  its command timeout (Claude Code's Bash tool: two minutes by default). So a shim's check waits
+  at most 90 seconds (the shim's call 100). With no answer by then the command does not run: the
+  answer is `deny` with `waiting: true` and a reason that tells the model to go on and run the
+  same command again later. The card stays open, and the one-question turn is free again. A
+  retry of the same command (same kind and `command`) before the answer waits for that card
+  again; an answer that comes when no shim waits is kept and taken by the next retry of that
+  command, once (approve: it runs, no second card; decline: it is refused). Another command's
+  card waits until the open one is answered (one open approval per run).
+- **One decision per action**: a check without `via` is the runtime's own (the hook, a Codex or
+  ACP request, matched or not) and starts the runtime's next command. A kind a person approves
+  there holds for the shims of that command: they pass it without a second card, however often
+  (a script that pushes twice). The runtime's next command ends that. Another kind in the same
+  command asks at its shim; what a shim asks and a person approves holds the same way.
+- **Not a security boundary**: this guards against mistakes. A program started by its full
+  path, a login shell other than zsh whose system profile resets `PATH` (Codex with `bash` as
+  the user's shell, a login shell inside the VM image, Git Bash on Windows with `/mingw64/bin`
+  ahead of the shims), or a merge through a web page is not seen. The floor is the repository's
+  branch protection and the production environment's own required approval.
+- Side chat runs and the PTY runtime are never gated (the server sends no gates to a CLI that
+  does not report `gates`).
 
 ### Topic context (`chat-run`, daemon over HTTP; feature `context`)
 

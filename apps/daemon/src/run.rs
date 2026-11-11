@@ -530,6 +530,63 @@ pub async fn supervise(ctx: RunCtx) {
                     .unwrap_or_default(),
             ));
             outputs.set_gates(gates.clone());
+            // Shims first on PATH for the programs the kinds are about: commands inside scripts
+            // and spellings the patterns miss stop too (crate::shim). In a VM they are on the
+            // tools disk.
+            if !gates.is_empty() && chat_run.is_some() {
+                let bin = if exec.isolated() {
+                    crate::github::GUEST_BIN.to_string()
+                } else {
+                    let path = env
+                        .iter()
+                        .find(|(k, _)| k == "PATH")
+                        .map(|(_, v)| std::ffi::OsString::from(v))
+                        .unwrap_or_default();
+                    if let Err(e) = crate::shim::install(&dir.join("bin"), &path) {
+                        eprintln!("{} run {run_id}: shims left out: {e}", now_ms());
+                    }
+                    dir.join("bin").display().to_string()
+                };
+                env.retain(|(k, _)| k != crate::shim::ENV_GATES);
+                env.push((crate::shim::ENV_GATES.into(), "1".into()));
+                // Claude Code runs Bash with the PATH of the user's shell profile: put the shims
+                // first again before each command. (Windows: Git Bash, not done there.)
+                if rt.kind == "claude"
+                    && cfg!(unix)
+                    && !env.iter().any(|(k, _)| k == crate::shim::CLAUDE_ENV_FILE)
+                {
+                    match crate::shim::claude_env_file(&dir, &bin) {
+                        Ok(f) => {
+                            env.push((crate::shim::CLAUDE_ENV_FILE.into(), f.display().to_string()))
+                        }
+                        Err(e) => eprintln!("{} run {run_id}: no Claude env file: {e}", now_ms()),
+                    }
+                }
+                // Codex (and an ACP agent) runs each command in the user's login shell
+                // (`zsh -lc`): on macOS path_helper, or a profile, would put the shims last.
+                // A zsh of the run reads the user's own files, then puts them first again.
+                // (A login bash re-reads the system profile with no such hook: not covered.)
+                if rt.kind != "claude" && cfg!(unix) && !exec.isolated() {
+                    match crate::shim::zsh_dotdir(&dir, &bin) {
+                        Ok(zdot) => {
+                            let own = env
+                                .iter()
+                                .find(|(k, _)| k == crate::shim::ZDOTDIR)
+                                .map(|(_, v)| v.clone())
+                                .or_else(|| std::env::var(crate::shim::ZDOTDIR).ok())
+                                .filter(|v| !v.is_empty());
+                            env.retain(|(k, _)| {
+                                k != crate::shim::ZDOTDIR && k != crate::shim::ENV_USER_ZDOTDIR
+                            });
+                            if let Some(own) = own {
+                                env.push((crate::shim::ENV_USER_ZDOTDIR.into(), own));
+                            }
+                            env.push((crate::shim::ZDOTDIR.into(), zdot.display().to_string()));
+                        }
+                        Err(e) => eprintln!("{} run {run_id}: no zsh files: {e}", now_ms()),
+                    }
+                }
+            }
             let gate_hook =
                 (!gates.is_empty()).then(|| dir.join("bin").join(crate::chat_run::link_name()));
             let gate_alive = (!gates.is_empty()).then(|| gates.alive());

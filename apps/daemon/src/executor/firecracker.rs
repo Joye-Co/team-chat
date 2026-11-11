@@ -86,7 +86,10 @@ fn stage_tools(exe: &[u8], stage: &Path) -> std::io::Result<()> {
     let agent = stage.join(crate::vm_agent::NAME);
     std::fs::write(&agent, exe)?;
     std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o755))?;
-    for name in [crate::chat_run::NAME, crate::github::GH] {
+    // `gh` is the proxy of feature "github" and a shim; the others are shims of gated
+    // actions (crate::shim), each finding the image's real program after the tools folder.
+    let names = std::iter::once(crate::chat_run::NAME).chain(crate::shim::NAMES.iter().copied());
+    for name in names {
         std::os::unix::fs::symlink(
             format!("/opt/runner/{}", crate::vm_agent::NAME),
             stage.join("bin").join(name),

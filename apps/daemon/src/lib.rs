@@ -29,6 +29,7 @@ pub mod runtime;
 pub mod secrets;
 pub mod selfupdate;
 pub mod service;
+pub mod shim;
 pub mod sys;
 pub mod upload;
 pub mod usage;

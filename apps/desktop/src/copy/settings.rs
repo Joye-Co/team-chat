@@ -315,7 +315,7 @@ crate::copy! {
     RULES_APPROVER = "谁来批准",
     APPROVER_REQUESTER = "交代的人或管理员",
     APPROVER_OWNERS = "只有管理员",
-    RULES_FOOTER = "AI 成员做这些事之前，会先停下来等人批准。",
+    RULES_FOOTER = "AI 成员做这些事之前，会先停下来等人批准。这是防止失手，不是安全防线：真正的底线是 GitHub 的分支保护和生产环境自己的审批。花费上限只是提醒成员，不会拦下。",
     RULES_READONLY = "只有管理员可以改默认规则。",
     SPEND_INVALID = "请填 1 到 1,000,000 之间的整数",
     INVITE_KIND = "类型",
