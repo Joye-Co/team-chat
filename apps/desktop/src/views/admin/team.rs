@@ -16,7 +16,7 @@ use chat_core::proto::{TeamRoster, TeamUsage};
 use super::{AdminView, model};
 use crate::{
     copy::{admin as m, fill},
-    data::{Member, MemberKind, MemberLevel, TeamRole},
+    data::{Member, MemberKind, TeamRole},
     ui::{
         MemberAvatar, Sym,
         icons::sym as sym_icon,
@@ -1194,6 +1194,7 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data::MemberLevel;
 
     fn row(name: &str, spend: f64, topics: u32, owner: bool) -> Row {
         Row {
