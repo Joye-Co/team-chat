@@ -359,6 +359,7 @@ impl Daemon {
                         usage: None,
                         duration_ms: now.saturating_sub(meta.started_at),
                         code: None,
+                        failure: None,
                     }),
                     &mut buffer,
                     last,

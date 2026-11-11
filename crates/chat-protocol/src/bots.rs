@@ -251,6 +251,27 @@ pub struct BotRun {
         skip_serializing_if = "Option::is_none"
     )]
     pub code: Option<crate::relay::RunCode>,
+    /// The model the CLI really ran with (the `session` run event).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub model: Option<String>,
+    /// The 思考强度 the CLI really ran with (the `session` run event); `None` = its default.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub effort: Option<String>,
+    /// Why a failed run failed (`run.done.failure`); `None` = not known.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub failure: Option<crate::machine::RunFailure>,
     /// The one state people see ([`crate::takeover::RUN_PHASES`], or a newer value).
     #[serde(
         default,

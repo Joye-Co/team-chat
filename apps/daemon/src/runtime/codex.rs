@@ -471,6 +471,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                                     session_id: tid.clone(),
                                     runtime: spec.runtime_name.clone(),
                                     model: r["model"].as_str().map(str::to_string),
+                                    effort: None,
                                 });
                                 thread_id = Some(tid.clone());
                                 let id = ids.next_id();

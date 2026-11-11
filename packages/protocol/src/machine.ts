@@ -287,7 +287,14 @@ export const RunOutputOp = z.enum(["card.post", "card.patch", "interaction.resol
 export type RunOutputOp = z.infer<typeof RunOutputOp>;
 
 export const RunEvent = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("session"), sessionId: z.string(), runtime: z.string(), model: z.string().optional() }),
+  z.object({
+    type: z.literal("session"),
+    sessionId: z.string(),
+    runtime: z.string(),
+    model: z.string().optional(),
+    /** Usable: the 思考强度 the CLI runs with; absent = its default or not known. */
+    effort: z.string().optional(),
+  }),
   z.object({ type: z.literal("turn.started"), turnId: z.string() }),
   z.object({
     type: z.literal("turn.completed"),
@@ -362,6 +369,19 @@ export type RunEventType = RunEvent["type"];
 export const RunDoneStatus = z.enum(["succeeded", "failed", "cancelled", "timeout"]);
 export type RunDoneStatus = z.infer<typeof RunDoneStatus>;
 
+/**
+ * Usable: why a run failed, as the daemon sorted it (machine-protocol.md, "Failure kinds"). The
+ * kind is an open string: an unknown one reads as `other`.
+ */
+export const RUN_FAILURE_KINDS = ["signed_out", "limit", "model", "network", "not_installed", "other"] as const;
+export type RunFailureKind = (typeof RUN_FAILURE_KINDS)[number];
+export const RunFailure = z.object({
+  kind: z.string().min(1).max(32),
+  /** `limit`: when the limit resets (ms since the epoch), when the CLI said. */
+  resetsAt: Millis.optional(),
+});
+export type RunFailure = z.infer<typeof RunFailure>;
+
 // ---------------------------------------------------------------------------
 // Daemon to server
 // ---------------------------------------------------------------------------
@@ -388,6 +408,8 @@ export const RunDoneFrame = z.object({
   durationMs: z.int().nonnegative(),
   /** Usable: the run's branch, its head and whether it is pushed; absent = not known. */
   code: RunCode.optional(),
+  /** Usable: with `status: "failed"`, why it failed; absent = not sorted (older daemons). */
+  failure: RunFailure.optional(),
 });
 export const RunSessionFrame = z.object({
   t: z.literal("run.session"),

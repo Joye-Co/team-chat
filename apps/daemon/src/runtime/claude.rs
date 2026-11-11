@@ -98,6 +98,7 @@ impl ClaudeNormalizer {
                         session_id: sid,
                         runtime: "claude".into(),
                         model: v["model"].as_str().map(str::to_string),
+                        effort: None,
                     }]
                 }
                 Some("api_retry") => vec![RunEvent::Status {

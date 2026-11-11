@@ -1,0 +1,14 @@
+{
+  "kind": "RunLogEntry",
+  "valid": false,
+  "description": "Usable: a failure without a kind",
+  "value": {
+    "t": "run.done",
+    "runId": "01JBX0RUN000000000000000AU",
+    "seq": 9,
+    "at": 1762128060000,
+    "status": "failed",
+    "durationMs": 10,
+    "failure": { "resetsAt": 1762142400000 }
+  }
+}

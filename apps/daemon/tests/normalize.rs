@@ -162,7 +162,8 @@ fn claude_success_sample() {
         RunEvent::Session {
             session_id: "s-1".into(),
             runtime: "claude".into(),
-            model: Some("claude-test".into())
+            model: Some("claude-test".into()),
+            effort: None
         }
     );
     // Tool use ids from the stream; block indices continue across assistant events.

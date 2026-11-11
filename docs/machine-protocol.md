@@ -807,6 +807,10 @@ safe default named below). Protocol side: protocol.md, "Usable extensions".
 // daemon -> server
 hello.machine += { runsIn?: "host" | "vm" }       // where runs execute; required with feature "github"
 run.done += { code?: { branch, head /* hex */, pushed: boolean } }  // any daemon; absent = not known
+run.done += { failure?: RunFailure }              // any daemon; with status "failed"; absent = not sorted
+RunFailure = { kind: "signed_out" | "limit" | "model" | "network" | "not_installed" | "other",  // open: unknown = "other"
+               resetsAt?: number /* limit: ms since the epoch, when the CLI said */ }
+RunEvent.session += { effort?: string }            // the 思考强度 the CLI runs with; absent = its default or not known
 RunEvent +=
   | { type: "github", state: "used" | "missing" | "invalid", login? }        // feature "github"
   | { type: "hand.command", commandId, command /* 1..4000 */, by }           // feature "takeover"
@@ -885,6 +889,36 @@ Other usable changes:
 - Machine ownership: a machine is the team's or one person's (protocol.md, "Roles: 所有者 and
   personal machines"). The daemon does not know which; the server only assigns a run to a
   personal machine when the run works for its owner.
+
+### Failure kinds and the sign-in state
+
+A failed run says why in `run.done.failure`, so the topic gets one plain sentence and a next
+step while the CLI's own words stay in `run.done.error` for the process view. The daemon sorts
+by what the CLI reports, its typed fields first and its words only when it has none:
+
+| Kind | Claude Code (`stream-json`) | Codex (`app-server`) |
+| --- | --- | --- |
+| `signed_out` | assistant `error: "authentication_failed"` (or `oauth_org_not_allowed`), `api_error` `stored_login_refused` / `gateway_signin_required` / `gateway_session_expired`; words: "Not logged in", "Please run /login", "Invalid API key", "token has expired" | `codexErrorInfo: "unauthorized"`; words: "401 Unauthorized", "not logged in" |
+| `limit` | assistant `error: "billing_error"`, or `error: "rate_limit"` with `api_error: "usage_limit_reached"` or a `rate_limit_event` with `status: "rejected"`; `resetsAt` from that event's `rate_limit_info.resetsAt` (seconds) or the old `…limit reached\|<epoch>` text; words: "You've hit your … limit", "usage limit reached", "Credit balance is too low" | `codexErrorInfo: "usageLimitExceeded"`; `resetsAt` from the latest `account/rateLimits/updated` window at 100 % |
+| `model` | assistant `error: "model_not_found"`, `api_error` `model_requires_usage_credits` / `no_allowed_fallback`; words: "issue with the selected model", `not_found_error` with "model" | `badRequest` or words with `model_not_found`, "model … does not exist", "model is not supported" |
+| `network` | `api_error` `connection_failed` / `stream_idle_timeout` / `no_response` / `network_edge_blocked` / `tls_untrusted_ca`, assistant `error` `overloaded` / `server_error`; words: "Connection error", "ECONNREFUSED", "ENOTFOUND", "fetch failed", "timed out" | `httpConnectionFailed`, `responseStreamConnectionFailed`, `responseStreamDisconnected`, `responseTooManyFailedAttempts`, `serverOverloaded`, `internalServerError` |
+| `not_installed` | the program was not found when the daemon started it | same |
+| `other` | anything else | same |
+
+A run that failed with `signed_out` marks its runtime signed out at once: `metrics.logins` says
+`logged_out` for it until the CLI's own status check says it is signed in again (a sign-in from
+the app, or the check every 10 minutes) or a later run of it succeeds.
+
+The sign-in state in `metrics.logins` is the CLI's own status check when the daemon has one
+(feature `accounts`, every 10 minutes and after each sign-in): `claude auth status --json`
+(`loggedIn`) and `codex login status` ("Logged in" / "Not logged in"). A check that cannot run or
+says nothing clear falls back to the credential files. An API key the CLI gets (its runtime's
+env, the daemon's env or a key saved from the app) counts as signed in. The server gives no run
+to a runtime whose login is `logged_out` (protocol.md, "Failure kinds and the model a run
+used").
+
+The `session` event's `effort` is the 思考强度 the daemon passed to the CLI (`run.assign.effort`
+after the check in "Models and effort"), or the one Codex's `thread/start` answered with.
 
 ## Raw session upload
 

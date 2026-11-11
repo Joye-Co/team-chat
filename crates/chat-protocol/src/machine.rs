@@ -611,6 +611,9 @@ pub enum RunEvent {
         runtime: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         model: Option<String>,
+        /// Usable: the 思考强度 the CLI runs with; `None` = its default or not known.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        effort: Option<String>,
     },
     #[serde(rename = "turn.started", rename_all = "camelCase")]
     TurnStarted { turn_id: String },
@@ -791,6 +794,46 @@ pub struct RunDone {
     /// Usable: the run's branch, its head and whether it is pushed; `None` = not known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code: Option<crate::relay::RunCode>,
+    /// Usable: with status "failed", why it failed; `None` = not sorted (older daemons).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<RunFailure>,
+}
+
+/// `RunFailure.kind` values (machine-protocol.md, "Failure kinds"). Open: an unknown kind reads
+/// as [`failure_kind::OTHER`].
+pub mod failure_kind {
+    /// The CLI is not signed in, or its sign-in expired or was revoked.
+    pub const SIGNED_OUT: &str = "signed_out";
+    /// The subscription's usage limit is reached.
+    pub const LIMIT: &str = "limit";
+    /// The model does not exist or the account cannot use it.
+    pub const MODEL: &str = "model";
+    /// The machine cannot reach the model service, or the service is down for now.
+    pub const NETWORK: &str = "network";
+    /// The CLI is not installed (its program was not found).
+    pub const NOT_INSTALLED: &str = "not_installed";
+    pub const OTHER: &str = "other";
+    pub const ALL: [&str; 6] = [SIGNED_OUT, LIMIT, MODEL, NETWORK, NOT_INSTALLED, OTHER];
+}
+
+/// Usable: why a run failed, as the daemon sorted it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunFailure {
+    /// [`failure_kind`]
+    pub kind: String,
+    /// `limit`: when the limit resets (ms since the epoch), when the CLI said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_at: Option<u64>,
+}
+
+impl RunFailure {
+    pub fn new(kind: &str) -> RunFailure {
+        RunFailure {
+            kind: kind.to_string(),
+            resets_at: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
