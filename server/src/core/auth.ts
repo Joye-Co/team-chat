@@ -1,5 +1,5 @@
 import { sha256Hex } from "./crypto";
-import { type MemberRow, toMember } from "./db";
+import { type MemberRow, isTeamOwner, toMember } from "./db";
 import { ApiError } from "./errors";
 import type { Member } from "@chat/protocol";
 
@@ -62,4 +62,9 @@ export async function authenticateToken(
 
 export function requireOwner(auth: AuthContext): void {
   if (auth.member.level !== "owner") throw new ApiError("forbidden", "owner only");
+}
+
+/** Only a 所有者 passes (design-roles 3.2): changing roles, managing admins and 所有者. */
+export function requireTeamOwner(auth: AuthContext, what = "only a team owner can do this"): void {
+  if (!isTeamOwner(auth.row)) throw new ApiError("forbidden", what, "role.owner_only");
 }

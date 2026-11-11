@@ -2484,7 +2484,8 @@ Rules:
 
 - Every route that was `owner` is now "an admin (管理员, `level: "owner"`)". Only a 所有者 changes
   a member's `level` or `teamOwner` (`forbidden`, reason `role.owner_only`), makes an invite with
-  `level: "owner"` (not a sign-in code), and deactivates, revokes or edits an admin or a 所有者.
+  `level: "owner"`, makes a sign-in code (`memberId`) for another admin or 所有者, and deactivates,
+  revokes or edits (including the avatar) an admin or a 所有者.
   The team keeps at least one active human 所有者 (`conflict`, `role.last_owner`). `teamOwner:
   true` for an AI member is `invalid`.
 - `DELETE /v1/machines/:id`, `…/logins*`, `…/secrets*` and `…/monitor` need an admin on a team

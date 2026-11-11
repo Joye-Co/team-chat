@@ -16,7 +16,7 @@ import {
 } from "@chat/protocol";
 import { z } from "zod";
 import { auditStatement } from "../core/audit";
-import type { AuthContext } from "../core/auth";
+import { type AuthContext, requireTeamOwner } from "../core/auth";
 import { getMember, isGroupMember, toMember } from "../core/db";
 import { type Env, roomStub } from "../core/env";
 import { ApiError, unwrap } from "../core/errors";
@@ -450,6 +450,7 @@ export function registerFileRoutes(): void {
       }
       const target = await getMember(env.DB, params.id);
       if (!target) throw new ApiError("not_found", "member not found");
+      if (params.id !== a.memberId && target.level === "owner") requireTeamOwner(a, "only a team owner can change an admin");
       const bytes = await readBytes(request, MAX_AVATAR_BYTES);
       const type = IMAGE_TYPES.find((t) => t.test(bytes));
       if (!type) throw new ApiError("invalid", "avatar must be a PNG, JPEG or WebP image");
@@ -480,6 +481,7 @@ export function registerFileRoutes(): void {
       }
       const target = await getMember(env.DB, params.id);
       if (!target) throw new ApiError("not_found", "member not found");
+      if (params.id !== a.memberId && target.level === "owner") requireTeamOwner(a, "only a team owner can change an admin");
       if (target.avatar_url === null) return toMember(target);
       await env.FILES.delete(avatarKey(target.id));
       await env.DB.batch([
