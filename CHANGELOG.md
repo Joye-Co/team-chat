@@ -3,7 +3,7 @@
 Each release is tagged `v<version>` and has a GitHub Release with the DMG, the machine daemon
 and their `.sha256` files. Release notes for the team are in Chinese in `docs/releases/`.
 
-## 1.2.7 (unreleased)
+## 1.2.7 (2026-11-11)
 
 Notes: [docs/releases/1.2.7.md](docs/releases/1.2.7.md). D1 migrations `0013_activity`,
 `0014_model_prices`, `0014_release_assets` and `0015_budget_grants`. Protocol: additive
