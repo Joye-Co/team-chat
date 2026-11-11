@@ -15,6 +15,7 @@ use chat_core::{
 use chat_protocol::{ErrorCode, GroupKind, main_topic_id};
 
 mod auth;
+mod files;
 mod token;
 
 pub use auth::{SignedIn, email_sign_in, request_email_code};
@@ -267,7 +268,7 @@ pub trait UpdateListener: Send + Sync {
 
 #[derive(uniffi::Object)]
 pub struct ChatClient {
-    inner: Client,
+    pub(crate) inner: Client,
 }
 
 /// The wire form of a protocol enum (`in_progress`, `system`, ...).

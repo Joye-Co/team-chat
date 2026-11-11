@@ -1053,9 +1053,13 @@ version = "1.2.6"
 dependencies = [
  "chat-core",
  "chat-protocol",
+ "futures-util",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
+ "tokio",
+ "tokio-tungstenite",
  "uniffi",
 ]
 

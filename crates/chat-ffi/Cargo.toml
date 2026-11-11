@@ -25,3 +25,10 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror = "2"
 uniffi = "0.32"
+
+[dev-dependencies]
+# The bridge tests reuse chat-core's in-process mock server (crates/chat-core/tests/mock).
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "macros"] }
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "handshake"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+tempfile = "3"
