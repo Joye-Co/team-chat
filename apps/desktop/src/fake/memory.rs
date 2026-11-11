@@ -53,6 +53,30 @@ impl MemoryShape {
     }
 }
 
+/// Who uses the server in a memory scene, and whether it has an AI 服务.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MemoryTeam {
+    /// Only me, with the AI members (盯 4.12: 我的约定).
+    pub solo: bool,
+    /// The server has an AI 服务 (盯 4.6).
+    pub ai: bool,
+}
+
+impl MemoryTeam {
+    pub const TEAM: MemoryTeam = MemoryTeam {
+        solo: false,
+        ai: true,
+    };
+    pub const SOLO: MemoryTeam = MemoryTeam {
+        solo: true,
+        ai: true,
+    };
+    pub const NO_AI: MemoryTeam = MemoryTeam {
+        solo: false,
+        ai: false,
+    };
+}
+
 #[derive(Default)]
 struct Scope {
     memories: Vec<Memory>,
@@ -283,6 +307,153 @@ fn team_samples() -> Vec<Sample> {
         .note("改成一个人审就行：Joye 11 月 5 日在开发群说的")
         .age(0),
     ]
+}
+
+/// 群里的约定 of every 群: what its members said in it.
+fn group_samples() -> Vec<Sample> {
+    use MemoryKind::*;
+    use MemorySourceKind::*;
+    vec![
+        s(
+            "group-zh",
+            Convention,
+            "这个群的产出都用中文写，代码注释除外。",
+            None,
+            Manual,
+        )
+        .age(14),
+        s(
+            "group-shots",
+            Convention,
+            "合并前在群里贴浅色和深色两张截图，Joye 看过再合。",
+            Some("界面相关的改动"),
+            Message,
+        )
+        .note("Joye 11 月 10 日在群里说的")
+        .age(0),
+        s(
+            "group-staging",
+            Fact,
+            "staging 的地址和账号在群公告里，别写进代码或产出。",
+            None,
+            Message,
+        )
+        .age(6),
+        s(
+            "group-standup",
+            Convention,
+            "每天早上 10 点前在群里说一句今天做什么。",
+            None,
+            Message,
+        )
+        .status(MemoryStatus::Pending)
+        .age(0),
+        s(
+            "group-weekly",
+            Convention,
+            "每周一早上开一次同步会。",
+            None,
+            Message,
+        )
+        .status(MemoryStatus::Retired)
+        .note("撤回了：改成在话题里随时说")
+        .age(0),
+    ]
+}
+
+/// 我的偏好: what I said I like.
+fn person_samples() -> Vec<Sample> {
+    use MemoryKind::*;
+    use MemorySourceKind::*;
+    vec![
+        s(
+            "pref-short",
+            Preference,
+            "回复写短一点，先说结论，再说怎么做的。",
+            None,
+            Manual,
+        )
+        .age(10),
+        s(
+            "pref-pr",
+            Preference,
+            "PR 标题用英文，描述用中文。",
+            Some("开 PR"),
+            Message,
+        )
+        .note("你在开发群里说过两次")
+        .age(0),
+        s(
+            "pref-quiet",
+            Fact,
+            "晚上十点以后别发提醒，第二天早上再说。",
+            None,
+            Message,
+        )
+        .age(4),
+        s(
+            "pref-shots",
+            Preference,
+            "交付时附浅色和深色两张截图。",
+            Some("界面相关的产出"),
+            Message,
+        )
+        .status(MemoryStatus::Pending)
+        .age(0),
+    ]
+}
+
+fn group_day(ms: &[Memory]) -> MemoryDay {
+    let (day, at) = today();
+    let mut updates = Vec::new();
+    if let Some(m) = find(ms, "/group-shots") {
+        updates.push(line(
+            "u-group-shots",
+            &day,
+            at,
+            MemoryChange::Added,
+            None,
+            Some(m),
+            m.note.as_deref(),
+        ));
+    }
+    if let Some(m) = find(ms, "/group-weekly") {
+        let mut before = m.clone();
+        before.status = MemoryStatus::Active;
+        updates.push(line(
+            "u-group-weekly",
+            &day,
+            at,
+            MemoryChange::Retired,
+            Some(&before),
+            Some(m),
+            m.note.as_deref(),
+        ));
+    }
+    MemoryDay {
+        day: Some(day),
+        updates,
+    }
+}
+
+fn person_day(ms: &[Memory]) -> MemoryDay {
+    let (day, at) = today();
+    let mut updates = Vec::new();
+    if let Some(m) = find(ms, "/pref-pr") {
+        updates.push(line(
+            "u-pref-pr",
+            &day,
+            at - MIN,
+            MemoryChange::Added,
+            None,
+            Some(m),
+            m.note.as_deref(),
+        ));
+    }
+    MemoryDay {
+        day: Some(day),
+        updates,
+    }
 }
 
 const LONG_TEXT: &str = "合并前先在 staging 跑一万条消息的压测，覆盖断线重连、两台设备同时在线、休眠唤醒和切换网络这四种情况；每种情况至少跑三轮，记下每轮的丢失数、重复数和 p95 送达时间，和上一个版本的数字放在一起比较；任何一项比上一个版本差就先别开 PR，回去找原因，找到以后在 PR 描述里写清楚是哪一次提交引入的、为什么、怎么修的。压测脚本在仓库的 scripts 目录里，跑之前先确认 staging 上没有别人在跑同一个脚本，不然两边的数字会互相干扰；跑完把结果贴进话题，并且附上 Grafana 的截图链接。如果压测本身挂了（比如 staging 重启），不要把挂掉当成通过，等它恢复以后整轮重跑。这一条是从十一月一日和二日两次回滚里得出来的：两次都是改了重连的代码，单元测试都过了，但是没有跑压测，上线后半小时内出现了消息重复，最后只能整体回滚。以后凡是动到消息同步、重连、已读位置或者未读计数的代码，都按这一条来做，没有例外，也不要因为改动看起来很小就跳过。";
@@ -550,6 +721,22 @@ impl FakeMemory {
                     member_day(&memories)
                 };
                 Scope { memories, day }
+            } else if scope.starts_with("group:") || scope.starts_with("person:") {
+                let group = scope.starts_with("group:");
+                let samples = if group {
+                    group_samples()
+                } else {
+                    person_samples()
+                };
+                let memories = build(samples, scope, "b-forge", long);
+                let day = if long {
+                    long_day(&memories)
+                } else if group {
+                    group_day(&memories)
+                } else {
+                    person_day(&memories)
+                };
+                Scope { memories, day }
             } else {
                 Scope::default()
             }
@@ -811,5 +998,40 @@ mod tests {
         let ms = now(p.memories_fake(&MemoryScope::Team)).unwrap();
         assert!(ms.iter().all(|m| m.text.chars().count() <= 500));
         assert!(ms.len() > 10);
+    }
+
+    #[test]
+    fn groups_and_people_keep_their_own_memories_and_lines() {
+        let p = FakeProvider::new();
+        let group = MemoryScope::Group("g1".into());
+        let mine = MemoryScope::Person(ME.into());
+        let gs = now(p.memories_fake(&group)).unwrap();
+        assert!(gs.iter().all(|m| m.scope == "group:g1"));
+        assert!(gs.iter().any(|m| m.status == MemoryStatus::Pending));
+        let ps = now(p.memories_fake(&mine)).unwrap();
+        assert!(ps.iter().any(|m| m.kind == MemoryKind::Preference));
+        let day = now(p.memory_updates_fake(&mine)).unwrap();
+        let line = day.updates.first().expect("a line today").clone();
+        // 撤回 of my own line works as on the team.
+        let undone = now(p.undo_memory_update_fake(&line.id)).unwrap();
+        assert!(undone.undone_at.is_some());
+        let after = now(p.memories_fake(&mine)).unwrap();
+        let m = after.iter().find(|m| m.id == line.memory_id).unwrap();
+        assert_eq!(m.status, MemoryStatus::Retired);
+        // 记一条 lands in the scope it names.
+        let added = now(p.create_memory_fake(NewMemory {
+            scope: group.clone(),
+            kind: MemoryKind::Convention,
+            text: "周报写在话题里".into(),
+            when: None,
+        }))
+        .unwrap();
+        assert_eq!(added.scope, "group:g1");
+        assert!(
+            now(p.memories_fake(&group))
+                .unwrap()
+                .iter()
+                .any(|m| m.id == added.id)
+        );
     }
 }

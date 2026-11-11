@@ -276,6 +276,9 @@ fn provider(start: Start, worst_case: bool) -> Arc<dyn ChatProvider> {
         Start::V2Refs => fake::v2::V2Samples::with_refs(),
         // Worst data: the longest memories.
         Start::V2Memory(shape) => fake::v2::V2Samples::with_memory(worst_memory(shape, worst_case)),
+        Start::V2MemoryTeam(shape, team) => {
+            fake::v2::V2Samples::with_memory_team(worst_memory(shape, worst_case), team)
+        }
         Start::Memory(shape) => {
             let fake = fake::FakeProvider::new();
             fake.set_memory_shape(worst_memory(shape, worst_case));

@@ -1,7 +1,10 @@
 //! Screenshot scenes of 记得的事 (the 成员 page) and 团队约定 (设置), in every state.
 
 use crate::{
-    fake::{memory::MemoryShape, v2 as d},
+    fake::{
+        memory::{MemoryShape, MemoryTeam},
+        v2 as d,
+    },
     selftest::scenes::{Scene, Start, open_main},
     views::settings::selftest as settings_scenes,
 };
@@ -22,7 +25,91 @@ fn forge_memory_end(s: &crate::app::Services, cx: &mut gpui::App) {
         .update(cx, |nav, cx| nav.open_members(Some(d::FORGE.into()), cx))
 }
 
+/// 开发's 群 page, scrolled to its 群里的约定 card.
+fn dev_group_memory(s: &crate::app::Services, cx: &mut gpui::App) {
+    crate::views::group_page::scroll_to_memory_for_scene();
+    s.nav
+        .update(cx, |nav, cx| nav.open_group(d::DEV.into(), cx))
+}
+
 pub const SCENES: &[Scene] = &[
+    Scene {
+        name: "group-memory",
+        about: "群: 开发's 群里的约定 under its 话题: today's 记忆更新 with 撤回, 约定, 事实 and 已停用",
+        start: Start::V2Memory(MemoryShape::Normal),
+        setup: dev_group_memory,
+        open: open_main,
+    },
+    Scene {
+        name: "group-memory-empty",
+        about: "群: 群里的约定 before anything is kept (compact empty with 记一条)",
+        start: Start::V2Memory(MemoryShape::Empty),
+        setup: dev_group_memory,
+        open: open_main,
+    },
+    Scene {
+        name: "group-memory-solo",
+        about: "群: 群里的约定 when one person uses the server: shown because an AI member kept something, no 记一条",
+        start: Start::V2MemoryTeam(MemoryShape::Normal, MemoryTeam::SOLO),
+        setup: dev_group_memory,
+        open: open_main,
+    },
+    Scene {
+        name: "group-memory-long",
+        about: "群: 群里的约定 at its longest (break-ui)",
+        start: Start::V2Memory(MemoryShape::Long),
+        setup: dev_group_memory,
+        open: open_main,
+    },
+    Scene {
+        name: "settings-mine",
+        about: "Settings: 我的偏好 with today's 记忆更新, 偏好, 事实 and one 明天生效",
+        start: Start::V2MemoryTeam(MemoryShape::Normal, MemoryTeam::TEAM),
+        setup: |_, _| {},
+        open: settings_scenes::open_mine,
+    },
+    Scene {
+        name: "settings-mine-empty",
+        about: "Settings: 我的偏好 before anything is kept",
+        start: Start::V2MemoryTeam(MemoryShape::Empty, MemoryTeam::TEAM),
+        setup: |_, _| {},
+        open: settings_scenes::open_mine,
+    },
+    Scene {
+        name: "settings-mine-add",
+        about: "Settings: 我的偏好 with the 记一条 sheet open (偏好 first)",
+        start: Start::V2MemoryTeam(MemoryShape::Normal, MemoryTeam::TEAM),
+        setup: |_, _| {},
+        open: settings_scenes::open_mine_add,
+    },
+    Scene {
+        name: "settings-mine-solo",
+        about: "Settings: 我的约定 when one person uses the server: the team's and my own on one board",
+        start: Start::V2MemoryTeam(MemoryShape::Normal, MemoryTeam::SOLO),
+        setup: |_, _| {},
+        open: settings_scenes::open_mine,
+    },
+    Scene {
+        name: "settings-mine-solo-add",
+        about: "Settings: 我的约定 with the 记一条 sheet open (约定, 偏好, 事实)",
+        start: Start::V2MemoryTeam(MemoryShape::Normal, MemoryTeam::SOLO),
+        setup: |_, _| {},
+        open: settings_scenes::open_mine_add,
+    },
+    Scene {
+        name: "settings-mine-no-ai",
+        about: "Settings: 我的偏好 on a server without an AI 服务: the notice with 去设置 (owner)",
+        start: Start::V2MemoryTeam(MemoryShape::Normal, MemoryTeam::NO_AI),
+        setup: |_, _| {},
+        open: settings_scenes::open_mine,
+    },
+    Scene {
+        name: "members-memory-no-ai",
+        about: "成员: Forge's 记得的事 on a server without an AI 服务: the notice with 去设置 (owner)",
+        start: Start::V2MemoryTeam(MemoryShape::Normal, MemoryTeam::NO_AI),
+        setup: forge_memory,
+        open: open_main,
+    },
     Scene {
         name: "members-memory",
         about: "成员: Forge's 记得的事: today's 记忆更新 with 撤回, 经验, 做法, 其他 and 已停用",

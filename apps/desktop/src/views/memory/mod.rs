@@ -4,6 +4,13 @@
 //! when it applies, its evidence, where it came from and "⋯" (编辑, 停用); then what was
 //! 停用, folded, with 恢复. Nothing asks before it is kept: people correct afterwards.
 //! Writers (owners; an AI member for its own) change it, everyone else reads.
+//!
+//! The same board shows 群里的约定 on a 群's page (its members write it) and 我的偏好 in
+//! 设置 (only I read and write it). It shows what the server returns and nothing else: the
+//! server leaves out what was learned in a group I am not in. When one person uses the
+//! server (盯 4.12) 我的偏好 becomes 我的约定, the team's and mine on one board, and a
+//! group's board shows only when an AI member kept something there. Without an AI 服务
+//! (盯 4.6) an owner reads that nothing is summed up or tidied, with the way to set it up.
 
 pub mod model;
 pub mod scenes;
@@ -63,6 +70,10 @@ pub struct MemoryBoard {
     /// The last 停用, 恢复 or 撤回 the server refused: its title and why.
     failure: Option<(&'static str, AdminError)>,
     show_retired: bool,
+    /// One person uses the server ([`model::single_user`]).
+    folded: bool,
+    /// An owner learned that the server has no AI 服务.
+    ai_off: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -74,12 +85,20 @@ impl MemoryBoard {
         name: String,
         cx: &mut Context<Self>,
     ) -> Self {
-        let subscriptions = vec![cx.subscribe(&services.hub, |_, _, changes: &Changes, cx| {
-            // Who may write follows my level.
-            if changes.any(|c| matches!(c, Change::Members | Change::Session)) {
-                cx.notify();
-            }
-        })];
+        let subscriptions = vec![cx.subscribe(
+            &services.hub,
+            |this: &mut Self, _, changes: &Changes, cx| {
+                // Who may write follows my level; 我的约定 follows who uses the server.
+                if changes.any(|c| matches!(c, Change::Members | Change::Session)) {
+                    let folded = this.single_user();
+                    if folded != this.folded {
+                        this.folded = folded;
+                        this.load(cx);
+                    }
+                    cx.notify();
+                }
+            },
+        )];
         let mut this = Self {
             services,
             scope,
@@ -92,14 +111,68 @@ impl MemoryBoard {
             busy: HashSet::new(),
             failure: None,
             show_retired: false,
+            folded: false,
+            ai_off: false,
             _subscriptions: subscriptions,
         };
+        this.folded = this.single_user();
         this.load(cx);
         this
     }
 
     pub fn scope(&self) -> &MemoryScope {
         &self.scope
+    }
+
+    /// True when one person uses the server. Before the first sync the cache holds only
+    /// me, so it waits for the connection.
+    fn single_user(&self) -> bool {
+        let p = &self.services.provider;
+        p.connection() != crate::data::ConnectionState::Connecting
+            && model::single_user(&p.members())
+    }
+
+    /// One person uses the server: 团队约定 has no place of its own, it is in 我的约定.
+    pub fn folded(&self) -> bool {
+        self.folded
+    }
+
+    /// 我的约定: my own board while one person uses the server.
+    pub fn folded_mine(&self) -> bool {
+        self.folded && matches!(self.scope, MemoryScope::Person(_))
+    }
+
+    /// The scopes the board reads: its own, and the team's in 我的约定.
+    fn scopes(&self) -> Vec<MemoryScope> {
+        let mut out = vec![self.scope.clone()];
+        if self.folded_mine() {
+            out.push(MemoryScope::Team);
+        }
+        out
+    }
+
+    /// The board's name: 记得的事, 团队约定, 群里的约定, 我的偏好 or 我的约定.
+    pub fn title(&self) -> &'static str {
+        match &self.scope {
+            _ if self.folded_mine() => c::MINE_TITLE,
+            MemoryScope::Team => c::TEAM_TITLE,
+            MemoryScope::Member(_) => c::MEMORY_TITLE,
+            MemoryScope::Group(_) => c::GROUP_TITLE,
+            MemoryScope::Person(_) => c::PERSON_TITLE,
+        }
+    }
+
+    /// A group's board while one person uses the server, with nothing kept: the page
+    /// leaves it out, 我的约定 is the one place to write.
+    pub fn hidden(&self) -> bool {
+        if !(self.folded && matches!(self.scope, MemoryScope::Group(_))) {
+            return false;
+        }
+        let empty_day = match &self.day {
+            Some(Ok(d)) => d.updates.is_empty(),
+            _ => true,
+        };
+        matches!(&self.memories, Some(Ok(ms)) if ms.is_empty()) && empty_day
     }
 
     /// The first answer arrived (or failed).
@@ -114,18 +187,40 @@ impl MemoryBoard {
         let generation = self.generation;
         self.loading = true;
         let p = &self.services.provider;
-        let memories = p.memories(&self.scope);
-        let day = p.memory_updates(&self.scope);
+        let reads: Vec<_> = self
+            .scopes()
+            .iter()
+            .map(|s| (p.memories(s), p.memory_updates(s)))
+            .collect();
+        // Only an owner can read the AI 服务; anyone else is never told (盯 4.6).
+        let ai = crate::views::settings::i_am_owner(&self.services).then(|| p.ai_service());
         cx.spawn(async move |this, cx| {
-            let memories = memories.await.unwrap_or(Err(AdminError::Other));
-            let day = day.await.unwrap_or(Err(AdminError::Other));
+            let mut memories: Result<Vec<Memory>, AdminError> = Ok(Vec::new());
+            let mut days: Result<Vec<MemoryDay>, AdminError> = Ok(Vec::new());
+            for (ms, day) in reads {
+                let ms = ms.await.unwrap_or(Err(AdminError::Other));
+                let day = day.await.unwrap_or(Err(AdminError::Other));
+                memories = memories.and_then(|mut all| {
+                    all.extend(ms?);
+                    Ok(all)
+                });
+                days = days.and_then(|mut all| {
+                    all.push(day?);
+                    Ok(all)
+                });
+            }
+            let ai_off = match ai {
+                Some(reply) => matches!(reply.await, Ok(Ok(s)) if s.provider.is_none()),
+                None => false,
+            };
             let _ = this.update(cx, |this, cx| {
                 if this.generation != generation {
                     return;
                 }
                 this.loading = false;
                 this.memories = Some(memories);
-                this.day = Some(day);
+                this.day = Some(days.map(model::merge_days));
+                this.ai_off = ai_off;
                 cx.notify();
             });
         })
@@ -134,11 +229,28 @@ impl MemoryBoard {
     }
 
     fn writer(&self) -> bool {
+        self.writer_of(&self.scope)
+    }
+
+    fn writer_of(&self, scope: &MemoryScope) -> bool {
         let me = match self.services.provider.session() {
             SessionState::SignedIn { me, .. } => Some(me),
             _ => None,
         };
-        model::can_write(&self.scope, me.as_ref())
+        model::can_write(scope, me.as_ref())
+    }
+
+    /// Whether I may change one memory: by its own scope (我的约定 holds two).
+    fn writes(&self, m: &Memory) -> bool {
+        match MemoryScope::parse(&m.scope) {
+            Some(s) if s != self.scope => self.writer_of(&s),
+            _ => self.writer(),
+        }
+    }
+
+    /// 记一条 shows: I write the board, and a group's board is not folded away.
+    fn adds(&self) -> bool {
+        self.writer() && !(self.folded && matches!(self.scope, MemoryScope::Group(_)))
     }
 
     fn name_of(&self, id: &str) -> String {
@@ -215,6 +327,9 @@ impl MemoryBoard {
             services: self.services.clone(),
             board: cx.entity().downgrade(),
             scope: self.scope.clone(),
+            folded: self
+                .folded_mine()
+                .then(|| self.writer_of(&MemoryScope::Team)),
             host: self.host,
             member_name: self.name.clone(),
         };
@@ -239,6 +354,9 @@ impl MemoryBoard {
 
     fn about(&self, writer: bool) -> SharedString {
         match (&self.scope, writer) {
+            _ if self.folded_mine() => c::MINE_ABOUT.into(),
+            (MemoryScope::Group(_), _) => c::GROUP_ABOUT.into(),
+            (MemoryScope::Person(_), _) => c::PERSON_ABOUT.into(),
             (MemoryScope::Team, true) => c::TEAM_ABOUT.into(),
             (MemoryScope::Team, false) => c::TEAM_ABOUT_READONLY.into(),
             (MemoryScope::Member(_), true) => fill(c::MEMORY_ABOUT, &[("name", &self.name)]).into(),
@@ -265,11 +383,16 @@ impl MemoryBoard {
     }
 
     fn id(&self, part: impl std::fmt::Display) -> ElementId {
-        let host = match self.host {
-            Host::Page => "member-memory",
-            Host::Settings => "team-memory",
-        };
-        ElementId::Name(format!("{host}-{part}").into())
+        ElementId::Name(format!("{}-{part}", self.id_prefix()).into())
+    }
+
+    fn id_prefix(&self) -> &'static str {
+        match self.scope {
+            MemoryScope::Member(_) => "member-memory",
+            MemoryScope::Team => "team-memory",
+            MemoryScope::Group(_) => "group-memory",
+            MemoryScope::Person(_) => "my-memory",
+        }
     }
 
     /// The rows of one list: inside the card (lines between rows), or a settings group.
@@ -546,7 +669,13 @@ impl MemoryBoard {
             let rows = day
                 .updates
                 .iter()
-                .map(|u| self.update_row(model::update_line(u, writer), cx))
+                .map(|u| {
+                    let writes = match u.after.as_ref().or(u.before.as_ref()) {
+                        Some(m) => self.writes(m),
+                        None => writer,
+                    };
+                    self.update_row(model::update_line(u, writes), cx)
+                })
                 .collect();
             self.frame(rows, cx)
         };
@@ -572,17 +701,16 @@ impl MemoryBoard {
     fn lists_block(
         &self,
         memories: &[Memory],
-        writer: bool,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
-        let lists = model::lists(&self.scope, memories);
+        let lists = model::lists_in(self.kind_order(), memories);
         let mut out: Vec<AnyElement> = Vec::new();
         for g in &lists.groups {
             let rows = g
                 .items
                 .iter()
-                .map(|m| self.memory_row(m, writer, window, cx))
+                .map(|m| self.memory_row(m, self.writes(m), window, cx))
                 .collect();
             out.push(
                 div()
@@ -622,7 +750,7 @@ impl MemoryBoard {
                 let rows = lists
                     .retired
                     .iter()
-                    .map(|m| self.memory_row(m, writer, window, cx))
+                    .map(|m| self.memory_row(m, self.writes(m), window, cx))
                     .collect();
                 block = block.child(self.frame(rows, cx));
             }
@@ -652,8 +780,11 @@ impl MemoryBoard {
             self.id("failed"),
             AlertKind::Error,
             match self.scope {
+                _ if self.folded_mine() => c::MINE_FAILED,
                 MemoryScope::Team => c::TEAM_FAILED,
                 MemoryScope::Member(_) => c::MEMBER_FAILED,
+                MemoryScope::Group(_) => c::GROUP_FAILED,
+                MemoryScope::Person(_) => c::PERSON_FAILED,
             },
             Some(widgets::error_text(e).into()),
             Some(
@@ -677,8 +808,11 @@ impl MemoryBoard {
     /// Nothing kept yet. 记一条 sits in the header already, so the line has no action.
     fn empty(&self, cx: &mut Context<Self>) -> AnyElement {
         let text: SharedString = match &self.scope {
+            _ if self.folded_mine() => c::MINE_EMPTY.into(),
             MemoryScope::Team => c::TEAM_EMPTY.into(),
             MemoryScope::Member(_) => fill(c::MEMBER_EMPTY, &[("name", &self.name)]).into(),
+            MemoryScope::Group(_) => c::GROUP_EMPTY.into(),
+            MemoryScope::Person(_) => c::PERSON_EMPTY.into(),
         };
         let action = None;
         match self.host {
@@ -690,12 +824,54 @@ impl MemoryBoard {
     }
 
     fn skeleton(&self, cx: &App) -> AnyElement {
+        let id = format!("{}-sk", self.id_prefix());
         match self.host {
             Host::Settings => GroupedForm::new()
-                .row(widgets::list_loading("team-memory-sk", 3, true, cx))
+                .row(widgets::list_loading(&id, 3, true, cx))
                 .into_any_element(),
-            Host::Page => page::skeleton_rows("member-memory-sk", SkeletonKind::Compact, 4, cx),
+            Host::Page => page::skeleton_rows(&id, SkeletonKind::Compact, 4, cx),
         }
+    }
+
+    /// The kind groups this board shows, in order.
+    fn kind_order(&self) -> &'static [crate::data::memory::MemoryKind] {
+        model::kind_order(&self.scope, self.folded_mine())
+    }
+
+    /// No AI 服务 on the server (盯 4.6): nothing is summed up after work and nothing is
+    /// tidied at night. Only an owner learns it, and gets the way to the setting.
+    fn ai_off_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.ai_off {
+            return None;
+        }
+        let services = self.services.clone();
+        Some(
+            page::page_alert(
+                self.id("ai-off"),
+                AlertKind::Info,
+                c::AI_OFF_TITLE,
+                Some(c::AI_OFF_BODY.into()),
+                Some(
+                    push_button(
+                        self.id("ai-off-setup"),
+                        c::AI_OFF_SETUP,
+                        PushStyle::Outline,
+                        PushSize::Small,
+                        cx,
+                    )
+                    .on_click(move |_, _, cx| {
+                        crate::views::admin::open_at(
+                            services.clone(),
+                            crate::views::admin::AdminPage::Ai,
+                            cx,
+                        )
+                    })
+                    .into_any_element(),
+                ),
+                cx,
+            )
+            .into_any_element(),
+        )
     }
 
     /// Everything under the header: the failure of an action, 记忆更新 and the lists; or
@@ -703,6 +879,7 @@ impl MemoryBoard {
     fn body(&self, writer: bool, window: &Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let mut out: Vec<AnyElement> = Vec::new();
         out.extend(self.failure_alert(cx));
+        out.extend(self.ai_off_notice(cx));
         let memories = match &self.memories {
             None => {
                 out.push(self.skeleton(cx));
@@ -724,10 +901,13 @@ impl MemoryBoard {
             return out;
         }
         out.extend(self.updates_block(&day, writer, cx));
-        if model::lists(&self.scope, &memories).groups.is_empty() {
+        if model::lists_in(self.kind_order(), &memories)
+            .groups
+            .is_empty()
+        {
             out.push(self.empty(cx));
         }
-        out.extend(self.lists_block(&memories, writer, window, cx));
+        out.extend(self.lists_block(&memories, window, cx));
         out
     }
 }
@@ -740,19 +920,21 @@ impl Render for MemoryBoard {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let writer = self.writer();
         let body = self.body(writer, window, cx);
-        let action = writer.then(|| self.add_button(cx));
+        let action = self.adds().then(|| self.add_button(cx));
         crate::selftest::drawn::mark(
             "memory-board",
             format!(
-                "scope={} writer={writer} loaded={}",
+                "scope={} writer={writer} loaded={} folded={} ai_off={}",
                 self.scope.wire(),
-                self.memories.is_some()
+                self.memories.is_some(),
+                self.folded,
+                self.ai_off
             ),
         );
         match self.host {
             Host::Page => page::titled_card(
-                "member-memory",
-                c::MEMORY_TITLE,
+                self.id_prefix(),
+                self.title(),
                 Some(self.about(writer)),
                 action,
                 div()
@@ -776,7 +958,7 @@ impl Render for MemoryBoard {
                     ),
                     _ => None,
                 };
-                let mut header = SectionTitle::new(c::TEAM_TITLE).description(self.about(writer));
+                let mut header = SectionTitle::new(self.title()).description(self.about(writer));
                 if let Some(n) = count {
                     header = header.count(n);
                 }

@@ -73,6 +73,12 @@ pub enum Start {
     V2Memory(crate::fake::memory::MemoryShape),
     /// The sample data whose 团队约定 answer in one shape (memory scenes).
     Memory(crate::fake::memory::MemoryShape),
+    /// The v2 sample team in one memory shape on a server as the second part says: only
+    /// me with the AI members, or no AI 服务 (memory scenes).
+    V2MemoryTeam(
+        crate::fake::memory::MemoryShape,
+        crate::fake::memory::MemoryTeam,
+    ),
 }
 
 pub struct Scene {
