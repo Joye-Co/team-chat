@@ -319,7 +319,14 @@ jobs:
         run: cargo test --locked -p chat-protocol -p chat-core
       # Required, every desktop test (this replaces the Windows system integration subset and
       # the report-only full run).
+      # 「用这台电脑」 (src/provider/this_mac.rs) runs for real in the desktop tests: the app's
+      # code writes the config and token, the daemon just built registers the scheduled task of
+      # the runner's user, and the real Claude Code CLI (no login) is the runtime it finds.
+      - name: Build the daemon and install a coding CLI for 「用这台电脑」
+        run: cargo build --locked -p daemon && npm install -g @anthropic-ai/claude-code@2.1.322
       - name: cargo test (desktop)
+        env:
+          TC_THIS_COMPUTER_DAEMON: ${{ github.workspace }}\target\debug\daemon.exe
         run: cargo test --locked -p desktop
       # An embedded 产出 page (WebView2 child window) in a real GPUI window: with GPUI presenting
       # to the HWND, as the app runs, the page must show. The DirectComposition run is the

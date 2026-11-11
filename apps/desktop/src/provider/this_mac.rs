@@ -379,8 +379,13 @@ fn run_quiet(mut cmd: Command, what: &str) -> Result<Vec<u8>, String> {
 /// would not do: that ends only the console host in front of the daemon.
 #[cfg(windows)]
 pub(super) fn restart() -> Result<(), String> {
+    restart_with(&bundled_daemon().ok_or("this build has no daemon next to it")?)
+}
+
+/// [`restart`] with the daemon to ask.
+#[cfg(windows)]
+fn restart_with(daemon: &Path) -> Result<(), String> {
     use std::os::windows::process::CommandExt as _;
-    let daemon = bundled_daemon().ok_or("this build has no daemon next to it")?;
     let mut cmd = Command::new(daemon);
     cmd.arg("restart-service")
         .stdin(Stdio::null())
@@ -668,5 +673,163 @@ mod tests {
             p == Path::new("/usr/bin") || p == Path::new("/Users/a/.claude/local")
         });
         assert_eq!(p, "/Users/a/.claude/local:/usr/bin");
+    }
+
+    /// The pids of the running programs named `image`.
+    #[cfg(windows)]
+    fn pids_of(image: &str) -> Vec<u32> {
+        let mut cmd = system_command("tasklist.exe");
+        cmd.args(["/FI", &format!("IMAGENAME eq {image}"), "/FO", "CSV", "/NH"]);
+        let out = run_quiet(cmd, "tasklist").unwrap_or_default();
+        String::from_utf8_lossy(&out)
+            .lines()
+            .filter_map(|l| l.split(',').nth(1)?.trim_matches('"').parse().ok())
+            .collect()
+    }
+
+    #[cfg(windows)]
+    fn wait_for<T>(what: &str, seconds: u64, mut ready: impl FnMut() -> Option<T>) -> T {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
+        loop {
+            if let Some(v) = ready() {
+                return v;
+            }
+            assert!(std::time::Instant::now() < end, "timed out: {what}");
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+    }
+
+    /// 「用这台电脑」 from end to end on a real Windows, with a real daemon and the real Task
+    /// Scheduler: the app writes the config and the token into a folder of this user alone,
+    /// the daemon accepts them and registers its task, the state reads 正常, the daemon runs,
+    /// a restart starts another one, and after the daemon's own uninstall nothing is left.
+    ///
+    /// It changes this user's profile (the daemon config, the scheduled task), so it runs only
+    /// where `TC_THIS_COMPUTER_DAEMON` names a built daemon (CI), on a computer that is not a
+    /// machine yet, and removes all it made. A coding CLI must be installed: a machine
+    /// without one is not registered (the daemon would stop at once).
+    #[cfg(windows)]
+    #[test]
+    fn this_computer_becomes_a_machine_and_stops_being_one() {
+        let Some(built) = std::env::var_os("TC_THIS_COMPUTER_DAEMON").map(PathBuf::from) else {
+            eprintln!("skipped: TC_THIS_COMPUTER_DAEMON is not set");
+            return;
+        };
+        assert!(built.is_file(), "no daemon at {}", built.display());
+        let image = format!("{}-daemon.exe", env!("PRODUCT_SLUG"));
+        assert!(
+            !config_dir().exists() && pids_of(&image).is_empty(),
+            "this computer already is a machine: not touching it"
+        );
+        // Where the installer puts the daemon: a folder of this user under Programs.
+        let programs = PathBuf::from(std::env::var_os("LOCALAPPDATA").expect("LOCALAPPDATA"))
+            .join("Programs")
+            .join(format!("{}-this-computer-test", env!("PRODUCT_SLUG")));
+        std::fs::create_dir_all(&programs).unwrap();
+        let daemon = programs.join(&image);
+        std::fs::copy(&built, &daemon).unwrap();
+
+        struct Remove(PathBuf, PathBuf);
+        impl Drop for Remove {
+            fn drop(&mut self) {
+                let mut cmd = Command::new(&self.0);
+                cmd.arg("uninstall-service").stdin(Stdio::null());
+                let _ = cmd.output();
+                let state = service_file().parent().map(Path::to_path_buf);
+                for dir in [Some(config_dir()), Some(self.1.clone()), state]
+                    .into_iter()
+                    .flatten()
+                {
+                    for _ in 0..20 {
+                        if std::fs::remove_dir_all(&dir).is_ok() || !dir.exists() {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(300));
+                    }
+                }
+            }
+        }
+        let _remove = Remove(daemon.clone(), programs.clone());
+        let read_state = || {
+            let definition = std::fs::read(service_file()).ok().map(|b| service_text(&b));
+            state_of(Some(&daemon), definition.as_deref())
+        };
+        assert_eq!(read_state(), ThisMac::NotSetUp);
+
+        let new = NewMachine {
+            server_url: "http://127.0.0.1:9".into(),
+            id: "01THISCOMPUTERTEST".into(),
+            name: computer_name(),
+            labels: default_labels(),
+            token: format!("tm_test_{}", std::process::id()),
+        };
+        install(&daemon, Some(&new)).expect("install");
+
+        // What the app wrote, where the daemon looks for it.
+        assert_eq!(machine_id().as_deref(), Some("01THISCOMPUTERTEST"));
+        let token_file = config_dir().join("machine-token");
+        assert_eq!(std::fs::read_to_string(&token_file).unwrap(), new.token);
+        // The folder is this user's alone: nothing inherited, three entries.
+        let mut acl = system_command("icacls.exe");
+        acl.arg(config_dir());
+        let acl = String::from_utf8_lossy(&run_quiet(acl, "icacls").unwrap()).into_owned();
+        assert!(!acl.contains("(I)"), "inherited entries: {acl}");
+        assert_eq!(acl.matches("(OI)(CI)(F)").count(), 3, "{acl}");
+
+        // The task is registered and runs this daemon, without a window.
+        assert_eq!(read_state(), ThisMac::Working);
+        assert_eq!(
+            state_of(
+                Some(Path::new(r"C:\Elsewhere\daemon.exe")),
+                std::fs::read(service_file())
+                    .ok()
+                    .map(|b| service_text(&b))
+                    .as_deref()
+            ),
+            ThisMac::Elsewhere
+        );
+        let first = wait_for("the task started the daemon", 90, || {
+            pids_of(&image).first().copied()
+        });
+        let log = service_file().with_file_name("daemon.log");
+        wait_for("the daemon wrote its log", 60, || {
+            std::fs::read_to_string(&log)
+                .ok()
+                .filter(|t| t.contains("daemon started"))
+        });
+
+        // Setting it up again keeps the machine it already is.
+        install(&daemon, None).expect("install again");
+        assert_eq!(machine_id().as_deref(), Some("01THISCOMPUTERTEST"));
+
+        // 重启: another daemon process, one only.
+        let before = wait_for("one daemon runs", 90, || {
+            let p = pids_of(&image);
+            (p.len() == 1).then(|| p[0])
+        });
+        restart_with(&daemon).expect("restart");
+        let after = wait_for("the restart started another daemon", 90, || {
+            let p = pids_of(&image);
+            (p.len() == 1 && p[0] != before).then(|| p[0])
+        });
+        assert!(after != before && after != first);
+        assert!(
+            !std::fs::read_to_string(&log).unwrap().contains(&new.token),
+            "the token is in the log"
+        );
+
+        // The daemon's own uninstall: no task definition, no process.
+        let mut cmd = Command::new(&daemon);
+        cmd.arg("uninstall-service").stdin(Stdio::null());
+        let out = cmd.output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        wait_for("the daemon ended", 60, || {
+            pids_of(&image).is_empty().then_some(())
+        });
+        assert_eq!(read_state(), ThisMac::NotSetUp);
     }
 }

@@ -56,6 +56,10 @@ GPUI、gpui-component 和 `chat-core` 不用改就能为 Windows 编译；W0 修
 
 ### 机器（`apps/daemon`，约 1.15 万行）
 
+和 Mac 机器逐项对齐的清单在 [`windows-parity/machine.zh.md`](windows-parity/machine.zh.md)：下面 M1 到 M3
+里「还没做的」「要在真机上核实的」大多已经在 Windows CI 上补完（审批、真 CLI、整条链、「用这台电脑」），
+以那份清单为准；这里保留当时的记录。
+
 M1 之前为 Windows 编译有 68 处错误（加上测试 115 处），M1 之后是 0。协议、运行时对各 CLI 的解析、
 脱敏、模型列表、配置这些大头和平台无关。下表是每一块的 Windows 方案；M1 做了哪些见「阶段」里的 M1。
 
