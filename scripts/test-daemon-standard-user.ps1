@@ -12,7 +12,12 @@ and runs, as that user, with that user's own profile and environment:
 - tests\integration.rs: the whole daemon against a mock server and the fake CLIs (run
   folders, the named pipe, the request folder, a side chat's read-only checkout, gates);
 - tests\service_task.rs: the scheduled task of that user: install, restart, the single
-  daemon, an update by the replace protocol, uninstall.
+  daemon, an update by the replace protocol, uninstall. The user has no logon session here
+  (it was never at the logon screen), and the daemon's task runs only in its user's session:
+  the Task Scheduler registers the task, with its logon trigger, and never starts it. The test
+  then starts the task's own actions, read from the registered definition, the way the
+  scheduler does. What stays unseen is the scheduler itself starting the task for a standard
+  user; it does for the runner's own user, by the same definition.
 
 The user is removed at the end. A test that fails fails this script.
 #>
@@ -66,6 +71,9 @@ try {
             'set "TEMP=%LOCALAPPDATA%\Temp"'
             'set "TMP=%LOCALAPPDATA%\Temp"'
             'set "HOME="'
+            # This user has no logon session of its own: its scheduled task is registered but
+            # never started (tests\service_task.rs then starts the task's actions itself).
+            'set "TC_NO_LOGON_SESSION=1"'
             'if not exist "%TEMP%" mkdir "%TEMP%"'
             'echo running as %USERNAME% with profile %USERPROFILE%'
             'whoami /groups | findstr /c:"S-1-16-"'
