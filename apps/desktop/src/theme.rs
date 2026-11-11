@@ -189,7 +189,45 @@ fn set_app_appearance(choice: ThemeChoice) {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows: what the system draws for this process follows the choice too: its
+/// pop-up menus (the notification-area icon's menu, a window's system menu) and
+/// the drop-down lists of system controls (the 产出 window's version list). Title
+/// bars are set per window (`views::artifacts::window::chrome`).
+///
+/// The call is `SetPreferredAppMode` of `uxtheme.dll`, which has no name, only
+/// ordinal 135 (since Windows 10 1903; Explorer, Terminal and Notepad use it);
+/// `FlushMenuThemes` (136) makes open menus take it. Without them nothing
+/// changes: those parts stay in the system's mode.
+#[cfg(target_os = "windows")]
+fn set_app_appearance(choice: ThemeChoice) {
+    use windows::{
+        Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW},
+        core::{PCSTR, w},
+    };
+    // `PreferredAppMode`: follow the system, always dark, always light.
+    let mode: i32 = match choice {
+        ThemeChoice::System => 1,
+        ThemeChoice::Dark => 2,
+        ThemeChoice::Light => 3,
+    };
+    // SAFETY: both functions exist at these ordinals with these signatures on
+    // every supported Windows (10 22H2 and later); a missing one is skipped.
+    unsafe {
+        let Ok(uxtheme) = LoadLibraryW(w!("uxtheme.dll")) else {
+            return;
+        };
+        if let Some(set) = GetProcAddress(uxtheme, PCSTR(135 as *const u8)) {
+            let set: unsafe extern "system" fn(i32) -> i32 = std::mem::transmute(set);
+            set(mode);
+        }
+        if let Some(flush) = GetProcAddress(uxtheme, PCSTR(136 as *const u8)) {
+            let flush: unsafe extern "system" fn() = std::mem::transmute(flush);
+            flush();
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn set_app_appearance(_choice: ThemeChoice) {}
 
 /// Applies the theme choice in `window` now.

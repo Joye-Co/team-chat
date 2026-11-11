@@ -53,8 +53,8 @@ use serde_json::Value;
 pub use mac::{ArtifactWindow, open_external_url, open_screen_share_url};
 #[cfg(windows)]
 pub use win::{
-    ArtifactWindow, MainThread, confirm_later, open_external_url, open_screen_share_url,
-    set_user_data_dir,
+    ArtifactWindow, Confirm, HostKey, MainThread, confirm_later, open_external_url,
+    open_screen_share_url, set_host_keys, set_user_data_dir,
 };
 
 /// Proof that the caller is on the main thread.
@@ -191,6 +191,26 @@ pub struct OpenOptions {
     pub viewer: Option<Viewer>,
     /// The ⌥-click outline and `就这里提问` menu, when the page may `ref`.
     pub ref_menu: Option<RefMenu>,
+    /// The colors of the window's frame (Windows; see [`Chrome`]).
+    pub chrome: Option<Chrome>,
+}
+
+/// How the frame of an 产出 window is drawn where the host has to say it.
+///
+/// On macOS the window takes the app's appearance by itself (title bar, version pop-up
+/// and the page's `prefers-color-scheme` follow `NSApp.appearance`), so this is not read
+/// there. On Windows the title bar is the system's and knows nothing of the app's theme:
+/// the host gives its colors, as `[r, g, b]`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Chrome {
+    /// The app shows its dark theme.
+    pub dark: bool,
+    /// The fill of the title bar and of the strip that holds the version picker.
+    pub caption: [u8; 3],
+    /// The title's text.
+    pub text: [u8; 3],
+    /// The window's 1 px border.
+    pub border: [u8; 3],
 }
 
 impl OpenOptions {
@@ -214,6 +234,7 @@ impl OpenOptions {
             transparent: false,
             viewer: None,
             ref_menu: None,
+            chrome: None,
         }
     }
 }
