@@ -21,19 +21,22 @@ struct RunLiveActivity: Widget {
                     Initial(name: context.attributes.memberName, size: 28)
                     VStack(alignment: .leading, spacing: 0) {
                         Text(context.attributes.memberName).font(.subheadline.weight(.semibold)).lineLimit(1)
-                        Text(context.attributes.title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            .foregroundStyle(.white)
+                        Text(context.attributes.title).font(.caption).foregroundStyle(.white.opacity(0.65)).lineLimit(1)
                     }
                     Spacer(minLength: 8)
                     Text(context.state.statusWord).font(.caption.weight(.semibold))
-                        .foregroundStyle(context.state.ended ? Color.secondary : accent)
+                        .foregroundStyle(context.state.ended ? Color.white.opacity(0.65) : accent)
                 }
-                Text(context.state.step).font(.subheadline).lineLimit(2)
+                Text(context.state.step).font(.subheadline).lineLimit(2).foregroundStyle(.white)
                 if let progress = context.state.progress {
                     ProgressView(value: progress).tint(accent)
                 }
             }
             .padding(16)
-            .activityBackgroundTint(nil)
+            // A fixed dark card: the lock screen draws over any wallpaper, light or dark.
+            .activityBackgroundTint(Color.black.opacity(0.72))
+            .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {

@@ -1093,7 +1093,12 @@ impl RootView {
 impl Render for RootView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = self.window_body(window, cx).into_any_element();
-        crate::ui::native::window_chrome::framed_main(env!("PRODUCT_NAME"), body, window, cx)
+        use crate::ui::native::window_chrome;
+        if self.show_inactive {
+            window_chrome::framed_main_inactive(env!("PRODUCT_NAME"), body, window, cx)
+        } else {
+            window_chrome::framed_main(env!("PRODUCT_NAME"), body, window, cx)
+        }
     }
 }
 

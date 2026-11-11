@@ -3148,7 +3148,9 @@ pub struct DeviceInfo {
 }
 
 impl DeviceKind {
-    /// The kind a device name suggests.
+    /// The kind a device name suggests. The name comes from the server and is the
+    /// same in every client, so the Windows and Android names read the same way on
+    /// the Mac (a Windows PC in the list of a Mac user's devices).
     pub fn from_name(name: &str) -> Self {
         let n = name.to_lowercase();
         if n.contains("iphone") || n.contains("ipad") || n.contains("android") {
@@ -3175,6 +3177,29 @@ impl DeviceKind {
 }
 
 // --- end settings-backend track ---
+
+#[cfg(test)]
+mod device_kind_tests {
+    /// Device names of the other systems, on every client: an Android phone is a
+    /// phone, and Windows' own default names say what the computer is.
+    #[test]
+    fn windows_and_android_device_names_get_their_kind() {
+        use super::DeviceKind;
+        for (name, kind) in [
+            ("DESKTOP-4F2K9QA", DeviceKind::Desktop),
+            ("desktop-abc", DeviceKind::Desktop),
+            ("LAPTOP-7HG21", DeviceKind::Laptop),
+            ("Pixel 9 (Android)", DeviceKind::Phone),
+            ("My desktop-ish laptop", DeviceKind::Laptop),
+            // The Mac names keep their kinds.
+            ("Joye 的 MacBook Pro", DeviceKind::Laptop),
+            ("Mac mini", DeviceKind::Desktop),
+            ("Joye 的 iPhone", DeviceKind::Phone),
+        ] {
+            assert_eq!(DeviceKind::from_name(name), kind, "{name}");
+        }
+    }
+}
 
 #[cfg(test)]
 mod pinned_ask_tests {

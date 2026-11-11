@@ -3,6 +3,7 @@ import SwiftUI
 /// The four tabs of the design: 首页, 群, 产出, 成员. Each tab keeps its own navigation stack.
 struct RootTabs: View {
     @State private var tab = Tab.groups
+    @ObservedObject private var push = PushCenter.shared
 
     enum Tab: Hashable { case home, groups, artifacts, members }
 
@@ -13,6 +14,8 @@ struct RootTabs: View {
             ArtifactsScreen().tabItem { Label(Copy.tabArtifacts, systemImage: "square.stack") }.tag(Tab.artifacts)
             MembersScreen().tabItem { Label(Copy.tabMembers, systemImage: "person.2") }.tag(Tab.members)
         }
+        // A tapped notification opens its chat in the 群 tab.
+        .onChange(of: push.route) { _, route in if route != nil { tab = .groups } }
     }
 }
 

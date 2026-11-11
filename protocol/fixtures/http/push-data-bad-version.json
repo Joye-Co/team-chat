@@ -1,0 +1,11 @@
+{
+  "kind": "PushData",
+  "valid": false,
+  "description": "unknown version",
+  "value": {
+    "v": 2,
+    "reason": "message",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "seq": 1
+  }
+}

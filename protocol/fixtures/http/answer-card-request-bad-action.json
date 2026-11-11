@@ -1,0 +1,9 @@
+{
+  "kind": "AnswerCardRequest",
+  "valid": false,
+  "description": "action ids are ASCII",
+  "value": {
+    "rev": 1,
+    "actionId": "可以"
+  }
+}

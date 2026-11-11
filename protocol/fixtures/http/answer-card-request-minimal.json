@@ -1,0 +1,8 @@
+{
+  "kind": "AnswerCardRequest",
+  "valid": true,
+  "value": {
+    "rev": 1,
+    "actionId": "no"
+  }
+}

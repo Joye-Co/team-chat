@@ -10,6 +10,8 @@
 //! Windows 11 shows Snap Layouts over the maximize button. GPUI insets a
 //! maximized window by the frame thickness itself.
 
+#[cfg(not(target_os = "macos"))]
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, IntoElement, ParentElement as _, SharedString, Styled as _, Window, div,
 };
@@ -22,10 +24,18 @@ pub const fn drawn() -> bool {
     cfg!(not(target_os = "macos"))
 }
 
+thread_local! {
+    /// The windows whose content sits under a caption strip ([`frame`]).
+    static FRAMED: std::cell::RefCell<std::collections::HashSet<gpui::WindowId>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
+}
+
 /// The height the caption strip takes above `window`'s content: none on the
-/// Mac and in full screen.
+/// Mac, in full screen, and in a window that draws no strip (the self-tests'
+/// own sample windows).
 pub fn height(window: &Window) -> gpui::Pixels {
-    if drawn() && !window.is_fullscreen() {
+    let framed = FRAMED.with(|f| f.borrow().contains(&window.window_handle().window_id()));
+    if drawn() && framed && !window.is_fullscreen() {
         metrics::CAPTION
     } else {
         gpui::px(0.)
@@ -66,6 +76,25 @@ pub fn framed_main(
     frame(title.into(), Kind::Main, content, window, cx)
 }
 
+/// [`framed_main`] drawn as in a window that is not the active one, whatever the
+/// window's real state (the `window-inactive` screenshot scene).
+pub fn framed_main_inactive(
+    title: impl Into<SharedString>,
+    content: impl IntoElement,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    SHOW_INACTIVE.with(|s| s.set(true));
+    let framed = frame(title.into(), Kind::Main, content, window, cx);
+    SHOW_INACTIVE.with(|s| s.set(false));
+    framed
+}
+
+thread_local! {
+    /// Set while [`framed_main_inactive`] builds its caption.
+    static SHOW_INACTIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// [`framed`] for a window that cannot be resized (login, 设置): its maximize
 /// button is drawn dimmed and does nothing, as the Mac dims the zoom button.
 pub fn framed_fixed(
@@ -98,6 +127,7 @@ fn frame(
     if !drawn() || window.is_fullscreen() {
         return content.into_any_element();
     }
+    FRAMED.with(|f| f.borrow_mut().insert(window.window_handle().window_id()));
     let k = native_colors(cx);
     div()
         .size_full()
@@ -114,23 +144,28 @@ fn frame(
 fn caption(title: SharedString, kind: Kind, window: &mut Window, cx: &mut App) -> impl IntoElement {
     let k = native_colors(cx);
     // Like every title in the app, the title dims in an inactive window.
-    let ink = if emphasized(window) {
-        k.secondary
-    } else {
-        k.tertiary
-    };
+    let active = emphasized(window) && !SHOW_INACTIVE.with(std::cell::Cell::get);
+    let ink = if active { k.secondary } else { k.tertiary };
     // gpui-component's menu bar over the app's menus (`views::nav::menus`).
     #[cfg(not(target_os = "macos"))]
     let menus = (kind == Kind::Main).then(|| {
         div()
             .flex_none()
             .h_full()
+            // The menus dim with the rest of an inactive window's title.
+            .when(!active, |d| d.opacity(metrics::CAPTION_INACTIVE))
             .child(crate::views::nav::menus::window_menu_bar(cx))
     });
     #[cfg(target_os = "macos")]
     let menus: Option<gpui::Div> = None;
-    TitleBar::new()
-        .maximizable(kind != Kind::Fixed)
+    let bar = TitleBar::new();
+    // The window buttons dim with the menus (WINDOWS.md §1).
+    let bar = if active {
+        bar
+    } else {
+        bar.controls_opacity(metrics::CAPTION_INACTIVE)
+    };
+    bar.maximizable(kind != Kind::Fixed)
         .h(metrics::CAPTION)
         .pl(space::S12)
         .bg(k.sidebar)

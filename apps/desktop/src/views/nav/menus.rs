@@ -205,6 +205,25 @@ fn dock_menu() -> Vec<MenuItem> {
     ]
 }
 
+/// Runs the Dock menu's command number `index` (separators do not count): what a task of
+/// the Windows taskbar's jump list asks for. GPUI builds that list from [`dock_menu`] and
+/// starts the app with the task's number; the launch hands it to the running app
+/// ([`crate::provider::instance`]).
+pub fn run_dock_action(index: usize, cx: &mut App) {
+    let action = dock_menu()
+        .into_iter()
+        .filter_map(|item| match item {
+            MenuItem::Action { action, .. } => Some(action),
+            _ => None,
+        })
+        .nth(index);
+    match action {
+        Some(action) => super::run_in_main_window(action, cx),
+        // A task of an older version's list: the app still comes forward.
+        None => super::show_main_window(cx),
+    }
+}
+
 /// Sets the menu bar and tells AppKit which menus are 窗口 and 帮助: GPUI
 /// only knows an English "Window" menu and no help menu, so without this the
 /// window list and the menu search are missing.

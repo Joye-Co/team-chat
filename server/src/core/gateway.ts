@@ -731,6 +731,9 @@ export class MemberGateway extends DurableObject<Env> {
       log: this.log,
       broadcast: (f) => this.broadcastFrame(f),
       online: () => this.openSockets().length > 0,
+      openTokenIds: () => [
+        ...new Set(this.readySockets().map((ws) => (ws.deserializeAttachment() as SocketState | null)?.tokenId).filter((t): t is string => !!t)),
+      ],
       memberId: this.memberId,
       wakeAt: (at) => this.wakeAt(at),
     };

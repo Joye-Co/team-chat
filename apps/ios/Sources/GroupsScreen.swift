@@ -4,6 +4,7 @@ import SwiftUI
 struct GroupsScreen: View {
     @EnvironmentObject private var model: AppModel
     @State private var path: [Route] = []
+    @ObservedObject private var push = PushCenter.shared
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -45,6 +46,13 @@ struct GroupsScreen: View {
             }
             .navigationDestination(for: Route.self) { RouteView(route: $0) }
         }
+        .onChange(of: push.route) { _, _ in openNotified() }
+        .onAppear { openNotified() }
+    }
+
+    /// The chat of a tapped notification.
+    private func openNotified() {
+        if let route = model.takeNotifiedRoute() { path = [route] }
     }
 }
 
