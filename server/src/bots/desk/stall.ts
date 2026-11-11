@@ -192,6 +192,7 @@ export abstract class DeskStall extends DeskEvents {
       }
     }
     await this.closeProgress(r);
+    await this.closeApprovalCard(r, "expired");
     this.sql.exec("UPDATE runs SET approval_id = NULL, paused_by = NULL, paused_at = NULL WHERE id = ?", r.id);
     await this.setStatus(r, "cancelled", { ended_at: Date.now(), summary: `restarted: ${why}` });
     const key = `restart:${ulid()}`;

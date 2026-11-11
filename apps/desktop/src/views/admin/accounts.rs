@@ -177,6 +177,7 @@ impl AdminView {
         self.show_page(page, cx);
         if page == Page::Ai {
             self.ai.update(cx, |a, cx| a.refresh(window, cx));
+            self.models.update(cx, |m, cx| m.refresh(cx));
         }
         if page == Page::Rules {
             self.rules.update(cx, |m, cx| m.refresh_rules(window, cx));
@@ -213,7 +214,7 @@ impl AdminView {
         .detach();
     }
 
-    fn start_login(&mut self, runtime: String, cx: &mut Context<Self>) {
+    pub(super) fn start_login(&mut self, runtime: String, cx: &mut Context<Self>) {
         let Some(machine_id) = self.selected.clone() else {
             return;
         };

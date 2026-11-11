@@ -292,6 +292,13 @@ pub const SCENES: &[Scene] = &[
         open: settings_scenes::open_bot_dialog,
     },
     Scene {
+        name: "settings-add-bot-runner",
+        about: "Settings: the add-bot dialog working on the team's computers: 运行方式 by name, not signed in marked",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_bot_dialog_runner,
+    },
+    Scene {
         name: "settings-add-bot-new",
         about: "Settings: the add-bot dialog with a name outside the roster: the first free character is selected",
         start: Start::SignedIn,
@@ -360,6 +367,13 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedIn,
         setup: |_, _| {},
         open: settings_scenes::open_ai_service,
+    },
+    Scene {
+        name: "settings-models",
+        about: "Settings: 通用 › 模型 (owner): 前台 from AI 服务, and a model and 思考强度 per runtime",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_models,
     },
     Scene {
         name: "settings-ai-service-failed",

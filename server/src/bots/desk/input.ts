@@ -114,6 +114,7 @@ export abstract class DeskInput extends DeskDelegate {
       );
       if (whole && kind) this.approveGateForWork(r.id, kind);
       await link.toRun({ t: "run.approval", runId: r.id, approvalId: r.approval_id, decision, ...(whole ? { scope: "run" } : {}) } as never);
+      await this.closeApprovalCard(r, whole ? "approve_run" : decision, m.authorId);
       return;
     }
     // 盯活: "进展怎么样了" is answered from the run's own state; the CLI is not interrupted.
@@ -186,6 +187,7 @@ export abstract class DeskInput extends DeskDelegate {
     await this.auditApproval(r, a.actorId, whole ? "approve_run" : decision, "card");
     if (whole && kind) this.approveGateForWork(r.id, kind);
     await linkStub(this.env, r.machine_id).toRun({ t: "run.approval", runId: r.id, approvalId: r.approval_id, decision, ...(whole ? { scope: "run" } : {}) } as never);
+    await this.closeApprovalCard(r, whole ? "approve_run" : decision, a.actorId);
   }
 
   // -------------------------------------------------------------------------
