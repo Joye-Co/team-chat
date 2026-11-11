@@ -38,21 +38,12 @@ struct GroupsScreen: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { ConnectionBadge(state: model.connection) }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button(Copy.signOut, systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
-                            model.signOut()
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle").accessibilityLabel(Copy.more)
+                    NavigationLink(value: Route.search) {
+                        Image(systemName: "magnifyingglass").accessibilityLabel(Copy.search)
                     }
                 }
             }
-            .navigationDestination(for: Route.self) { route in
-                switch route {
-                case .chat(let group, let topic): ChatScreen(groupId: group, topicId: topic)
-                case .topics(let group): TopicsScreen(groupId: group)
-                }
-            }
+            .navigationDestination(for: Route.self) { RouteView(route: $0) }
         }
     }
 }

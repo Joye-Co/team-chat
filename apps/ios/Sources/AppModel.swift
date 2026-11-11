@@ -14,10 +14,16 @@ final class AppModel: ObservableObject {
     @Published private(set) var topicTicks: [String: Int] = [:]
     /// Bumped when the 话题 list of a group changed (key: group id).
     @Published private(set) var groupTicks: [String: Int] = [:]
+    /// Bumped per key when a feature's data changed: `artifacts:<topic>`, `runs:<topic>`,
+    /// `card:<message>`. Screens watch their key.
+    @Published private(set) var ticks: [String: Int] = [:]
+    /// The newest refusal of a card answer of mine (key: message id).
+    @Published private(set) var cardRefusals: [String: String] = [:]
     /// Topics whose `loadOlder` answer said there is nothing older.
     @Published private(set) var historyEnded: Set<String> = []
 
-    private var client: ChatClient?
+    /// Feature files (`AppModel+<Feature>.swift`) reach the core through this.
+    private(set) var client: ChatClient?
     private var groupsReloadQueued = false
 
     init() {
@@ -56,6 +62,8 @@ final class AppModel: ObservableObject {
         connection = "stopped"
         topicTicks = [:]
         groupTicks = [:]
+        ticks = [:]
+        cardRefusals = [:]
         historyEnded = []
     }
 
@@ -198,6 +206,13 @@ final class AppModel: ObservableObject {
             topicTicks[topic, default: 0] += 1
         case .presence:
             members = (try? client.members()) ?? members
+        case .artifacts(_, let topic):
+            ticks["artifacts:\(topic)", default: 0] += 1
+        case .runs(_, let topic):
+            ticks["runs:\(topic)", default: 0] += 1
+        case .cardAnswered(let message, let ok, let reason):
+            if ok { cardRefusals[message] = nil } else { cardRefusals[message] = reason ?? "" }
+            ticks["card:\(message)", default: 0] += 1
         case .other:
             break
         }

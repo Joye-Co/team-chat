@@ -11,7 +11,7 @@ struct MobileApp: App {
         WindowGroup {
             Group {
                 if model.signedIn {
-                    GroupsScreen()
+                    RootTabs()
                 } else {
                     SignInFlow()
                 }

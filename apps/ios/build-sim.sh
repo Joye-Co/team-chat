@@ -10,6 +10,7 @@
 #   apps/ios/build-sim.sh            build
 #   apps/ios/build-sim.sh --run      build, install on the booted simulator and launch it signed
 #                                    in to this worktree's sandbox (bun scripts/sandbox/up.ts)
+#   SIM_DEVICE=<udid> picks the simulator when several are booted (parallel worktrees).
 #   apps/ios/build-sim.sh --run-signed-out
 #                                    the same, at the sign-in screen (the sandbox owner's email
 #                                    is owner@example.com; its code is in the local outbox)
@@ -70,13 +71,13 @@ xcodebuild -quiet -project "$ROOT/apps/ios/Mobile.xcodeproj" -scheme Mobile -con
 if [[ "${1:-}" == "--run" || "${1:-}" == "--run-signed-out" ]]; then
   SANDBOX="$ROOT/.tmp/sandbox"
   [[ -f "$SANDBOX/server-url" && -f "$SANDBOX/owner-token" ]] || { echo "no sandbox: run bun scripts/sandbox/up.ts first" >&2; exit 1; }
-  xcrun simctl install booted "$APP"
-  xcrun simctl terminate booted "$BUNDLE_ID" >/dev/null 2>&1 || true
+  xcrun simctl install "${SIM_DEVICE:-booted}" "$APP"
+  xcrun simctl terminate "${SIM_DEVICE:-booted}" "$BUNDLE_ID" >/dev/null 2>&1 || true
   # --run signs in as the sandbox's owner: the token goes to the app through the environment
   # and is never printed. --run-signed-out only names the server, to try the sign-in screens.
   TOKEN=""
   [[ "$1" == "--run" ]] && TOKEN="$(cat "$SANDBOX/owner-token")"
   SIMCTL_CHILD_TC_SERVER_URL="$(cat "$SANDBOX/server-url")" SIMCTL_CHILD_TC_TOKEN="$TOKEN" \
-    xcrun simctl launch booted "$BUNDLE_ID" >/dev/null
+    xcrun simctl launch "${SIM_DEVICE:-booted}" "$BUNDLE_ID" >/dev/null
 fi
 echo "$APP"

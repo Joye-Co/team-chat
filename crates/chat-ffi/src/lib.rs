@@ -239,6 +239,22 @@ pub enum Update {
     Presence {
         member_id: String,
     },
+    /// The 产出 of a topic changed.
+    Artifacts {
+        group_id: String,
+        topic_id: String,
+    },
+    /// Runs of a topic changed (progress, done, failed).
+    Runs {
+        group_id: String,
+        topic_id: String,
+    },
+    /// The server answered one of my card answers; `reason` names a refusal.
+    CardAnswered {
+        message_id: String,
+        ok: bool,
+        reason: Option<String>,
+    },
     /// Something the screens of this version do not show.
     Other,
 }
@@ -686,6 +702,19 @@ impl ChatClient {
                         topic_id, has_more, ..
                     } => Update::History { topic_id, has_more },
                     ClientUpdate::Presence { member_id, .. } => Update::Presence { member_id },
+                    ClientUpdate::ArtifactsChanged { group_id, topic_id } => {
+                        Update::Artifacts { group_id, topic_id }
+                    }
+                    ClientUpdate::RunsChanged { group_id, topic_id } => {
+                        Update::Runs { group_id, topic_id }
+                    }
+                    ClientUpdate::CardEventAcked {
+                        message_id, result, ..
+                    } => Update::CardAnswered {
+                        message_id,
+                        ok: result.is_ok(),
+                        reason: result.err().and_then(|e| e.reason),
+                    },
                     ClientUpdate::SendFailed(f) => match f.topic_id {
                         Some(topic_id) => Update::Messages {
                             group_id: f.group_id,
