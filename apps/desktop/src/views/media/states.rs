@@ -238,6 +238,19 @@ pub fn failed_row(spec: &InlineSpec, cx: &App) -> gpui::Stateful<Div> {
     .max_w_full()
 }
 
+/// Why a version on disk has no preview: the Alert's second line, and the one-line
+/// form of the full view. On Windows a video that does not decode is almost always
+/// one whose decoder the system does not have (HEVC needs an extension from the
+/// Store), so the text says that; the Mac decodes these and keeps the general words.
+pub fn failed_hint(entry: &str) -> (&'static str, &'static str) {
+    let video = super::file_kind(entry, super::mime_for(entry)) == super::MediaKind::Video;
+    if cfg!(target_os = "windows") && video {
+        (cm::STATE_FAILED_CODEC, cm::STATE_FAILED_CODEC_DETAIL)
+    } else {
+        (cm::STATE_FAILED_HINT, cm::STATE_FAILED_DETAIL)
+    }
+}
+
 /// The version is on disk but this machine cannot make a preview of it: the
 /// inline Alert (§2.15) with 用系统应用打开 (a retry would fail the same way).
 pub fn failed_media_row(spec: &InlineSpec, media: &Media, cx: &App) -> gpui::Stateful<Div> {
@@ -247,7 +260,7 @@ pub fn failed_media_row(spec: &InlineSpec, media: &Media, cx: &App) -> gpui::Sta
         ElementId::Name(format!("{}-failed", spec.id).into()),
         AlertKind::Error,
         cm::STATE_FAILED,
-        Some(cm::STATE_FAILED_HINT.into()),
+        Some(failed_hint(&media.entry).0.into()),
         Some(
             small_button(
                 format!("{}-sys", spec.id),

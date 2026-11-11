@@ -369,7 +369,7 @@ fn file(spec: &FullSpec, cx: &App) -> AnyElement {
                 .t_small()
                 .text_color(k.text_3)
                 .child(ui::icon(Sym::Alert, px(20.), k.text_3))
-                .child(cm::STATE_FAILED_DETAIL)
+                .child(super::states::failed_hint(&spec.media.entry).1)
                 .child(
                     ui::native::push_button(
                         id(spec, "sysbig"),

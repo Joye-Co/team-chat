@@ -53,8 +53,8 @@ use serde_json::Value;
 pub use mac::{ArtifactWindow, open_external_url, open_screen_share_url};
 #[cfg(windows)]
 pub use win::{
-    ArtifactWindow, Confirm, HostKey, MainThread, confirm_later, open_external_url,
-    open_screen_share_url, set_host_keys, set_user_data_dir,
+    ArtifactWindow, Confirm, HostKey, MainThread, confirm_later, has_url_handler,
+    open_external_url, open_screen_share_url, set_host_keys, set_user_data_dir,
 };
 
 /// Proof that the caller is on the main thread.

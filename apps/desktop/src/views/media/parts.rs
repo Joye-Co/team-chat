@@ -4,8 +4,8 @@
 use std::{path::Path, sync::Arc};
 
 use gpui::{
-    App, ClipboardEntry, ClipboardItem, Div, ElementId, Hsla, ImageFormat, IntoElement,
-    ParentElement, SharedString, Styled, div, px,
+    App, Div, ElementId, Hsla, ImageFormat, IntoElement, ParentElement, SharedString, Styled, div,
+    px,
 };
 use gpui_component::button::Button;
 
@@ -154,17 +154,20 @@ pub fn copy_image_file(path: &Path, cx: &mut App) {
 }
 
 pub fn copy_image(format: ImageFormat, bytes: Vec<u8>, cx: &mut App) {
-    cx.write_to_clipboard(ClipboardItem {
-        entries: vec![ClipboardEntry::Image(gpui::Image::from_bytes(
-            format, bytes,
-        ))],
-    });
+    crate::ui::clipboard::write_image(&gpui::Image::from_bytes(format, bytes), cx);
     toast(cm::COPIED, cx);
 }
 
 /// Copies files into ~/Downloads (keeping their names, adding ` 2` on a clash).
 pub fn save_to_downloads(paths: &[&Path], cx: &mut App) {
+    // A folder that is gone or cannot be written says so (F: no silent miss).
+    let failed = |cx: &mut App| {
+        crate::ui::overlay::Toast::new(Sym::Alert, cm::SAVE_FAILED.to_string())
+            .tone(crate::ui::overlay::Tone::Danger)
+            .push(cx)
+    };
     let Some(dir) = crate::paths::downloads() else {
+        failed(cx);
         return;
     };
     for p in paths {
@@ -182,6 +185,7 @@ pub fn save_to_downloads(paths: &[&Path], cx: &mut App) {
             n += 1;
         }
         if std::fs::copy(p, &out).is_err() {
+            failed(cx);
             return;
         }
     }
