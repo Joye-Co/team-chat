@@ -167,9 +167,15 @@ fn parse_args() -> Result<Args, String> {
             }
             "--help" | "-h" => return Err(String::new()),
             // Windows starts the app with the link as its argument when the user opens a
-            // `<scheme>://` link (the installer registers the scheme). The app opens; it
-            // does not go to the link's target yet.
-            link if link.starts_with(concat!(env!("PRODUCT_URL_SCHEME"), ":")) => {}
+            // `<scheme>://` link (the installer registers the scheme) or clicks a
+            // notification, and with `--dock-action <n>` for a task of the taskbar's jump
+            // list. `provider::instance` reads both and hands them to the running app.
+            link if provider::instance::is_link(link) => {}
+            "--dock-action" => {
+                it.next()
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .ok_or("--dock-action needs a number")?;
+            }
             other => return Err(format!("unknown argument: {other}")),
         }
     }
@@ -224,6 +230,16 @@ fn main() {
             );
             std::process::exit(2);
         }
+    };
+
+    // What this launch asks for. On Windows a later launch of the app hands it to the
+    // process that runs already and ends here (macOS does that for every app).
+    let launch = provider::instance::Command::from_args(std::env::args().skip(1));
+    #[cfg(target_os = "windows")]
+    let _instance = match launch.as_ref().map(provider::instance::claim) {
+        Some(provider::instance::Claim::Forwarded) => return,
+        Some(provider::instance::Claim::First(instance)) => Some(instance),
+        None => None,
     };
 
     let application = gpui_kit::application().with_assets(ui::AppAssets);
@@ -322,6 +338,9 @@ fn main() {
             );
         } else {
             views::nav::restore(&services, cx);
+            // Later launches reach this process (Windows); a launch for a link or a
+            // jump-list task does what it asks once the window below is open.
+            provider::instance::install(launch.clone(), services.clone(), cx);
             // v12/fx-overlays: signed out, the app opens the small login
             // window (NATIVE.md §9.7) instead of the main window.
             if views::login::show_login_window(services.clone(), cx) {

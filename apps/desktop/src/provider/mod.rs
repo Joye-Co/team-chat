@@ -27,6 +27,7 @@ mod email;
 pub mod files;
 #[cfg(test)]
 mod files_live;
+pub mod instance;
 #[cfg(target_os = "macos")]
 pub mod macos;
 mod panes;

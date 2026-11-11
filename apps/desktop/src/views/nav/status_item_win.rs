@@ -405,18 +405,7 @@ pub fn install(services: Services, cx: &mut App) {
                             cx.dispatch_action(action.as_ref());
                             return;
                         }
-                        super::show_main_window(cx);
-                        // After the window is shown (that is deferred too). The commands
-                        // of the main window (新话题) are handled in it, so dispatch
-                        // there; signed out there is none, and the app's handlers get it.
-                        cx.defer(move |cx| {
-                            let in_window = action.boxed_clone();
-                            if !super::with_main_window(cx, |window, cx| {
-                                window.dispatch_action(in_window, cx)
-                            }) {
-                                cx.dispatch_action(action.as_ref());
-                            }
-                        });
+                        super::run_in_main_window(action, cx);
                     });
                 }
                 Event::Refresh => cx.update(|cx| {
@@ -490,7 +479,7 @@ fn update(services: &Services, cx: &mut App) {
         .filter(|g| g.unread == 0 && g.mentions == 0)
         .map(|g| g.id.as_str())
         .collect();
-    crate::provider::windows::withdraw_read(&read, cx);
+    crate::provider::windows::withdraw_read(&read);
     let state = cx.global_mut::<StatusItem>();
     if state.shown == Some((unread, mentions)) {
         return;

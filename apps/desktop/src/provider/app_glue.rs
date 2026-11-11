@@ -74,35 +74,29 @@ pub fn install(core: Arc<CoreProvider>, services: Services, cx: &mut App) {
             cx,
         );
 
+        // A click on a toast opens its 话题 through the toast's link, which reaches the
+        // app as a launch (`provider::instance`), also after the app quit.
         let mut notices = core.notices();
         cx.spawn(async move |cx| {
             while let Some(notice) = notices.next().await {
                 // Runs on the main thread.
                 if !windows::app_is_active() {
                     cx.update(|cx| {
-                        windows::post(&notice, crate::views::settings::prefs::get().sound, cx)
+                        let group_name = services
+                            .provider
+                            .groups()
+                            .into_iter()
+                            .find(|g| g.id == notice.group_id)
+                            .map(|g| g.name)
+                            .unwrap_or_default();
+                        windows::post(
+                            &notice,
+                            &group_name,
+                            crate::views::settings::prefs::get().sound,
+                            cx,
+                        )
                     });
                 }
-            }
-        })
-        .detach();
-
-        let mut clicks = windows::clicks();
-        cx.spawn(async move |cx| {
-            while let Some((group_id, topic_id)) = clicks.next().await {
-                let nav = services.nav.clone();
-                cx.update(|cx| {
-                    // The window may be closed (the app lives on in the notification
-                    // area): open it, then go to the 话题.
-                    crate::views::nav::show_main_window(cx);
-                    nav.update(cx, |nav, cx| {
-                        if topic_id.is_empty() {
-                            nav.open_group_chat(group_id, cx)
-                        } else {
-                            nav.open_topic(group_id, topic_id, cx)
-                        }
-                    });
-                });
             }
         })
         .detach();

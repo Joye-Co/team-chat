@@ -315,10 +315,10 @@ jobs:
         run: cargo test --locked -p chat-protocol -p chat-core
       # Required, every desktop test (this replaces the Windows system integration subset and
       # the report-only full run).
-      # The system-integration tests that talk to the shell (taskbar, share, time zone) say
+      # The system-integration tests that talk to the shell (taskbar, share, toasts, time zone) say
       # in the log what this runner's session gave them.
       - name: cargo test (system integration, with output)
-        run: cargo test --locked -p desktop -- --nocapture the_taskbar_takes the_share_ui windows_names
+        run: cargo test --locked -p desktop -- --nocapture the_taskbar_takes the_share_ui windows_names a_toast_reaches the_toast_xml a_second_launch
       - name: cargo test (desktop)
         run: cargo test --locked -p desktop
       # An embedded 产出 page (WebView2 child window) in a real GPUI window: with GPUI presenting
