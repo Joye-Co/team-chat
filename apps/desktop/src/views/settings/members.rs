@@ -546,7 +546,7 @@ impl MembersPage {
         let team_owner = self.roster.team_owner;
         let offer = super::roles_to_offer(m, role, me, team_owner);
         let may_stop = super::may_deactivate(role, team_owner);
-        if is_me || (!m.is_bot() && offer.is_empty() && !may_stop) {
+        if is_me || !super::has_member_menu(m, &offer, may_stop) {
             // Keep the "⋯" column so the badges line up.
             return row.menu(div().size(tokens::height::SM)).into_any_element();
         }

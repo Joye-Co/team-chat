@@ -35,6 +35,7 @@
 设为普通成员	Make member
 身份没有改	Role not changed
 只有所有者能改身份。	Only the owner can change roles.
+成员、身份、邀请、密钥、批准、预算、登录和机器的改动会记在这里。	Changes to members, roles, invites, keys, approvals, budgets, sign-ins and machines show up here.
 团队至少要有一位所有者。	The team needs at least one owner.
 所有者和管理员能打开	Owners and admins can open this
 只有所有者和管理员能打开团队管理	Only owners and admins can open Team admin

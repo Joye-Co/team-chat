@@ -627,7 +627,7 @@ impl AdminView {
         let me = self.services.me();
         let offer = crate::views::settings::roles_to_offer(x, role, me.as_deref(), team_owner);
         let may_stop = crate::views::settings::may_deactivate(role, team_owner);
-        if !x.is_bot() && offer.is_empty() && !may_stop {
+        if !crate::views::settings::has_member_menu(x, &offer, may_stop) {
             return div().into_any_element();
         }
         // The roster's member, for the AI member sheets.
@@ -641,6 +641,7 @@ impl AdminView {
             let (services, id, view) = (services.clone(), id.clone(), view.clone());
             // An AI member: 更换电脑… (常用设置) and 编辑… (everything). Without them 团队管理
             // had no way to change an AI member's computer.
+            let bot_items = member.is_some() && !off;
             let menu = match member.clone().filter(|_| !off) {
                 Some(bot) => {
                     let (s1, b1) = (services.clone(), bot.clone());
@@ -657,19 +658,25 @@ impl AdminView {
                             },
                         ),
                     )
-                    .item(PopupMenuItem::new(crate::copy::settings::EDIT).on_click(
-                        move |_, window, cx| {
-                            crate::views::settings::members::open_edit_bot(
-                                s2.clone(),
-                                &b2,
-                                window,
-                                cx,
-                            );
-                        },
-                    ))
-                    .separator()
+                    .item(
+                        PopupMenuItem::new(crate::copy::settings::EDIT).on_click(
+                            move |_, window, cx| {
+                                crate::views::settings::members::open_edit_bot(
+                                    s2.clone(),
+                                    &b2,
+                                    window,
+                                    cx,
+                                );
+                            },
+                        ),
+                    )
                 }
                 None => menu,
+            };
+            let menu = if bot_items && !offer.is_empty() {
+                menu.separator()
+            } else {
+                menu
             };
             let menu = offer.iter().fold(menu, |menu, &role| {
                 let (services, id, view) = (services.clone(), id.clone(), view.clone());
@@ -681,7 +688,7 @@ impl AdminView {
             if !may_stop {
                 return menu;
             }
-            let menu = if offer.is_empty() {
+            let menu = if offer.is_empty() && !bot_items {
                 menu
             } else {
                 menu.separator()

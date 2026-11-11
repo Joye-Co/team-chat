@@ -225,6 +225,12 @@ pub fn may_deactivate(target_role: TeamRole, i_am_team_owner: bool) -> bool {
     i_am_team_owner || target_role == TeamRole::Member
 }
 
+/// True when a member's "⋯" menu has an item: an active AI member's own items, a 「设为…」, or
+/// 停用 / 恢复. A deactivated AI member a 管理员 may not bring back has none, so no button.
+pub fn has_member_menu(target: &crate::data::Member, offer: &[TeamRole], may_stop: bool) -> bool {
+    may_stop || !offer.is_empty() || (target.is_bot() && !target.deactivated)
+}
+
 /// The text of a failed 身份 change: refused means only the 所有者 may do it.
 pub fn role_error_text(e: crate::data::AdminError) -> &'static str {
     match e {
@@ -693,6 +699,45 @@ mod tests {
     use gpui::{TestAppContext, VisualTestContext};
 
     use super::*;
+
+    fn member(kind: crate::data::MemberKind, deactivated: bool) -> crate::data::Member {
+        crate::data::Member {
+            id: "m-1".into(),
+            name: "Scout".into(),
+            kind,
+            level: crate::data::MemberLevel::Owner,
+            role: None,
+            avatar_url: None,
+            deactivated,
+            online: false,
+            character: None,
+            team_owner: false,
+        }
+    }
+
+    /// No "⋯" for a deactivated AI 管理员 that a 管理员 (not the 所有者) sees: nothing to pick.
+    #[test]
+    fn member_menu_only_when_it_has_items() {
+        use crate::data::MemberKind::{Bot, Human};
+        let off_bot = member(Bot, true);
+        let may_stop = may_deactivate(TeamRole::Admin, false);
+        let offer = roles_to_offer(&off_bot, TeamRole::Admin, Some("me"), false);
+        assert!(!has_member_menu(&off_bot, &offer, may_stop));
+        assert!(
+            has_member_menu(&off_bot, &[], true),
+            "the 所有者 can bring it back"
+        );
+        assert!(
+            has_member_menu(&member(Bot, false), &[], false),
+            "an active AI member"
+        );
+        assert!(!has_member_menu(&member(Human, false), &[], false));
+        assert!(has_member_menu(
+            &member(Human, false),
+            &[TeamRole::Member],
+            false
+        ));
+    }
 
     /// Tab walks the Settings window (E3): the root holds the focus in a
     /// fresh window, Tab moves it to a control, and ⇧Tab moves it on.

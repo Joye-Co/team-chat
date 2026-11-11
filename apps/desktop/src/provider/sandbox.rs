@@ -67,3 +67,28 @@ impl Sandbox {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    /// `up.ts --reset` and the restart after a half-finished seed must remove every data root
+    /// this file opens, or a role restores a stale token and another server's cache.
+    #[test]
+    fn up_script_removes_every_data_root() {
+        let up = include_str!("../../../../scripts/sandbox/up.ts");
+        let line = up
+            .lines()
+            .find(|l| l.starts_with("const APP_ROOTS = "))
+            .expect("up.ts lists APP_ROOTS");
+        for root in ["app", "app-admin", "app-member"] {
+            assert!(
+                line.contains(&format!("\"{root}\"")),
+                "{root} missing from APP_ROOTS"
+            );
+        }
+        assert_eq!(
+            up.matches("APP_ROOTS").count(),
+            3,
+            "both reset paths use APP_ROOTS"
+        );
+    }
+}
