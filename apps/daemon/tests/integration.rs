@@ -318,7 +318,8 @@ fn assign(run: &str, runtime: &str, prompt: &str, upload: Option<String>) -> Dow
         run_id: run.into(),
         bot_member_id: "bot1".into(),
         group_id: "g1".into(),
-        topic_id: "t1".into(),
+        // Each run its own topic, so each has its own work line (`work_of`).
+        topic_id: run.into(),
         runtime: runtime.into(),
         prompt: prompt.into(),
         model: None,
@@ -332,6 +333,17 @@ fn assign(run: &str, runtime: &str, prompt: &str, upload: Option<String>) -> Dow
             headers: BTreeMap::new(),
         }),
     })
+}
+
+/// The working folder of run `run` of [`assign`]: the line of bot1 in the topic named like
+/// the run.
+fn work_of(tmp: &Path, run: &str) -> PathBuf {
+    line_of(tmp, run).join("work")
+}
+
+fn line_of(tmp: &Path, topic: &str) -> PathBuf {
+    tmp.join("work/lines")
+        .join(daemon::workspace::line_key("bot1", topic, None))
 }
 
 fn welcome(runs: Vec<KnownRun>) -> Down {
@@ -589,7 +601,7 @@ async fn daemon_end_to_end() {
 
     // 3. Cancel kills the CLI's process group.
     send(&mut ws, &assign("r3", "fake", "hang", None)).await;
-    let pidfile = tmp.path().join("work/runs/r3/work/fake.pid");
+    let pidfile = work_of(tmp.path(), "r3").join("fake.pid");
     let start = collect(&mut ws, "r3", true, |f| {
         matches!(
             f,
@@ -702,7 +714,7 @@ async fn unknown_run_after_reconnect_is_cancelled() {
         )
     })
     .await;
-    let pidfile = tmp.path().join("work/runs/r9/work/fake.pid");
+    let pidfile = work_of(tmp.path(), "r9").join("fake.pid");
     // The file can be there before its content.
     let pid: i32 = wait_file(&pidfile).await.trim().parse().unwrap();
     drop(ws);
@@ -937,7 +949,7 @@ async fn pause_resume_answer_acceptance_and_aside() {
 
     // 1. Pause and resume with a note, then an answer with an acceptance block.
     send(&mut ws, &assign("p1", "fake", "tick", None)).await;
-    let dir = tmp.path().join("work/runs/p1/work");
+    let dir = work_of(tmp.path(), "p1");
     let mut frames = collect(&mut ws, "p1", true, |f| {
         matches!(
             f,
@@ -1080,7 +1092,7 @@ async fn pause_resume_answer_acceptance_and_aside() {
         )
     })
     .await;
-    let pid: i32 = wait_file(&tmp.path().join("work/runs/p2/work/fake.pid"))
+    let pid: i32 = wait_file(&work_of(tmp.path(), "p2").join("fake.pid"))
         .await
         .trim()
         .parse()
@@ -1219,7 +1231,7 @@ async fn pause_and_cancel_cover_tool_children() {
     send(&mut ws, &welcome(vec![])).await;
 
     send(&mut ws, &assign("c1", "fake", "spawn", None)).await;
-    let dir = tmp.path().join("work/runs/c1/work");
+    let dir = work_of(tmp.path(), "c1");
     wait_file(&dir.join("fake.pid")).await;
     let kids: Vec<i32> = wait_file(&dir.join("children.txt"))
         .await
@@ -1326,7 +1338,7 @@ async fn chat_run_artifact_create_uploads_the_folder_and_makes_the_artifact() {
     send(&mut ws, &assign("a1", "fake", "artifact", None)).await;
     let frames = collect(&mut ws, "a1", true, |f| matches!(f, Up::RunDone(_))).await;
     assert_eq!(done(&frames).status, "succeeded");
-    let report = chat_run_report(&tmp.path().join("work/runs/a1/work"), 1).await;
+    let report = chat_run_report(&work_of(tmp.path(), "a1"), 1).await;
     assert_eq!(report["code"], 0, "{report}");
     let out: serde_json::Value = serde_json::from_str(report["out"].as_str().unwrap()).unwrap();
     assert_eq!(out["artifact"]["id"], "A1");
@@ -1443,9 +1455,10 @@ async fn interaction_envelope_and_chat_run() {
         std::fs::metadata(&socket).unwrap().permissions().mode() & 0o777,
         0o600
     );
-    let argv: Vec<String> =
-        serde_json::from_str(&std::fs::read_to_string(run_dir.join("work/argv.json")).unwrap())
-            .unwrap();
+    let argv: Vec<String> = serde_json::from_str(
+        &std::fs::read_to_string(work_of(tmp.path(), "c1").join("argv.json")).unwrap(),
+    )
+    .unwrap();
     let note = argv
         .iter()
         .position(|a| a == "--append-system-prompt")
@@ -1498,7 +1511,7 @@ async fn interaction_envelope_and_chat_run() {
     )
     .await;
     frames.extend(collect(&mut ws, "c1", true, |f| matches!(f, Up::RunDone(_))).await);
-    let r = chat_run_report(&run_dir.join("work"), 1).await;
+    let r = chat_run_report(&work_of(tmp.path(), "c1"), 1).await;
     assert_eq!(r["code"], 0, "{r}");
     assert_eq!(r["out"], "{\"rev\":2}\n");
     // The run's socket: a file of mode 600; on Windows a named pipe of this daemon.
@@ -1568,7 +1581,7 @@ async fn interaction_envelope_and_chat_run() {
             .iter()
             .any(|e| matches!(e, RunEvent::Output { .. }))
     );
-    let r = chat_run_report(&tmp.path().join("work/runs/c2/work"), 1).await;
+    let r = chat_run_report(&work_of(tmp.path(), "c2"), 1).await;
     assert_eq!(r["code"], 1, "{r}");
     let err: serde_json::Value = serde_json::from_str(r["out"].as_str().unwrap()).unwrap();
     assert_eq!(err["error"]["reason"], "output.unconfirmed");
@@ -1609,7 +1622,7 @@ async fn codex_chat_run_uses_the_request_folder() {
     send(&mut ws, &welcome(vec![])).await;
 
     send(&mut ws, &assign("x1", "cx", "chatrun", None)).await;
-    let work = tmp.path().join("work/runs/x1/work");
+    let work = work_of(tmp.path(), "x1");
     let frames = collect(&mut ws, "x1", true, |f| {
         matches!(
             f,
@@ -1695,12 +1708,12 @@ async fn chat_run_without_a_link_is_not_connected() {
     m.refuse.store(true, std::sync::atomic::Ordering::SeqCst);
     drop(ws);
     // chat-run gives up after 15 s; wait_file waits 10 s at a time.
-    let report = tmp.path().join("work/runs/n1/work/chatrun-1.json");
+    let report = work_of(tmp.path(), "n1").join("chatrun-1.json");
     let start = std::time::Instant::now();
     while !report.exists() && start.elapsed() < Duration::from_secs(30) {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    let r = chat_run_report(&tmp.path().join("work/runs/n1/work"), 1).await;
+    let r = chat_run_report(&work_of(tmp.path(), "n1"), 1).await;
     assert_eq!(r["code"], 1, "{r}");
     let err: serde_json::Value = serde_json::from_str(r["out"].as_str().unwrap()).unwrap();
     assert_eq!(err["error"]["code"], "unavailable", "{err}");
@@ -1767,18 +1780,22 @@ async fn a_follow_up_run_resumes_the_session() {
     let mut a = assign("f2", "fake", "the answer", None);
     if let Down::RunAssign(r) = &mut a {
         r.resume_session_id = Some(s1.clone());
+        r.topic_id = "f1".into();
     }
     send(&mut ws, &a).await;
     let fr = collect(&mut ws, "f2", true, |f| matches!(f, Up::RunDone(_))).await;
     assert_eq!(done(&fr).status, "succeeded");
     assert_eq!(done(&fr).session_id.as_deref(), Some(s1.as_str()));
     let argv: Vec<String> = serde_json::from_str(
-        &std::fs::read_to_string(tmp.path().join("work/runs/f2/work/argv.json")).unwrap(),
+        &std::fs::read_to_string(work_of(tmp.path(), "f1").join("argv.json")).unwrap(),
     )
     .unwrap();
     let i = argv.iter().position(|a| a == "--resume").expect("--resume");
     assert_eq!(argv[i + 1], s1);
     assert!(!argv.iter().any(|a| a == "--session-id"));
+    // Run 2 worked in run 1's folder: no folder of its own, and no other line.
+    assert!(!tmp.path().join("work/runs/f2/work").exists());
+    assert!(!line_of(tmp.path(), "f2").exists());
 
     // A session the CLI no longer has starts a new one.
     let mut a = assign("f3", "fake", "again", None);
@@ -1790,7 +1807,7 @@ async fn a_follow_up_run_resumes_the_session() {
     assert_eq!(done(&fr).status, "succeeded");
     assert_ne!(done(&fr).session_id.as_deref(), Some("gone-session"));
     let argv: Vec<String> = serde_json::from_str(
-        &std::fs::read_to_string(tmp.path().join("work/runs/f3/work/argv.json")).unwrap(),
+        &std::fs::read_to_string(work_of(tmp.path(), "f3").join("argv.json")).unwrap(),
     )
     .unwrap();
     assert!(argv.iter().any(|a| a == "--session-id"));
@@ -1845,8 +1862,7 @@ async fn runs_get_an_effort_the_cli_reported() {
         let fr = collect(&mut ws, run, true, |f| matches!(f, Up::RunDone(_))).await;
         assert_eq!(done(&fr).status, "succeeded");
         let argv: Vec<String> = serde_json::from_str(
-            &std::fs::read_to_string(tmp.path().join(format!("work/runs/{run}/work/argv.json")))
-                .unwrap(),
+            &std::fs::read_to_string(work_of(tmp.path(), run).join("argv.json")).unwrap(),
         )
         .unwrap();
         let i = argv.iter().position(|a| a == "--effort");
@@ -1881,7 +1897,7 @@ async fn pause_and_cancel_cover_orphaned_tools() {
     send(&mut ws, &welcome(vec![])).await;
 
     send(&mut ws, &assign("o1", "fake", "orphan", None)).await;
-    let dir = tmp.path().join("work/runs/o1/work");
+    let dir = work_of(tmp.path(), "o1");
     wait_file(&dir.join("fake.pid")).await;
     let orphan: i32 = wait_file(&dir.join("orphan.txt"))
         .await
@@ -2016,7 +2032,7 @@ async fn gated_commands_wait_for_a_person() {
         f => panic!("{f:?}"),
     }
     send(&mut ws, &welcome(vec![])).await;
-    let work = |run: &str| tmp.path().join(format!("work/runs/{run}/work"));
+    let work = |run: &str| work_of(tmp.path(), run);
     let report = |run: &str| work(run).join("gate-1.json");
 
     // 1. Deny: the command does not run and the CLI reads why.
@@ -2484,7 +2500,7 @@ async fn a_cli_that_runs_no_hooks_gets_no_gated_prompt() {
     );
     assert!(!fr.iter().any(is_request));
     // The CLI started (it wrote its arguments) and never got the prompt (no command ran).
-    let work = tmp.path().join("work/runs/nh1/work");
+    let work = work_of(tmp.path(), "nh1");
     assert!(work.join("argv.json").is_file());
     assert!(!work.join("gate-1.json").exists());
 
@@ -2570,7 +2586,7 @@ async fn a_machine_that_slept_connects_again_at_once_and_its_run_is_not_stalled(
     })
     .await;
     let acked = before.iter().filter_map(Up::seq).max().unwrap_or(0);
-    let pid: i32 = wait_file(&tmp.path().join("work/runs/z1/work/fake.pid"))
+    let pid: i32 = wait_file(&work_of(tmp.path(), "z1").join("fake.pid"))
         .await
         .trim()
         .parse()

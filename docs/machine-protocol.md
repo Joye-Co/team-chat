@@ -785,22 +785,47 @@ later audits have the complete record:
 
 ## Run folders
 
-- `<work_root>/runs/<runId>/` with `work/` (the CLI's working directory), `run.json`,
-  `events.jsonl` (the sequenced frames), `stream.jsonl` (raw CLI stdout), `stderr.log`, and
-  `session.jsonl` (the copied raw session). `runId` must match `[A-Za-z0-9_-]{1,64}`.
+- `<work_root>/runs/<runId>/` with `run.json`, `events.jsonl` (the sequenced frames),
+  `stream.jsonl` (raw CLI stdout), `stderr.log`, and `session.jsonl` (the copied raw session).
+  `runId` must match `[A-Za-z0-9_-]{1,64}`.
+- Work lines: the runs of one member in one topic on one repository share a working folder
+  and a branch, so a follow-up run (an answer, "再改一下") finds the files, commits and
+  uncommitted changes of the run before it, and a resumed CLI session is in the folder it
+  knows. The line is `<work_root>/lines/<key>/` with `work/` (the CLI's working directory)
+  and `line.json`; `<key>` is the first 16 hex digits of SHA-256 of
+  `botMemberId \n topicId \n url:<repo.url> | path:<repo.path> | ""`, its branch is
+  `bot/<key>`. A line is used by one run at a time: a run of the same member in the topic that
+  starts while another holds the line gets its own folder `<run folder>/work` and branch
+  `bot/<runId>`, and its CLI is told so. A read-only side chat run (`kind: "aside"`) always
+  gets its own `<run folder>/work`. `run.json` names the line (`line`) when the run used one.
 - `repo.path`: a local repository (inside `repo_roots` when configured). `repo.url`: a bare
   mirror under `<work_root>/repos/` is cloned once and fetched before each run with
-  `+refs/heads/*:refs/remotes/origin/*`, so remote branches never touch the local
-  `bot/<runId>` branches of other runs. Either way the daemon runs
-  `git worktree add --no-track -b bot/<runId> work <start>`, where `<start>` is
-  `origin/<branch>` when it exists, else `<branch>`, else `HEAD`; `<branch>` is `baseBranch`,
-  or the branch HEAD names. Without `repo` the run gets an empty scratch folder.
-- Cleanup at start and every 30 minutes: finished runs older than `keep_runs_hours`
-  (default 72) are removed with `git worktree remove`; while free disk is below `min_free_gb`
-  (default 10) the oldest finished runs go first. `bot/<runId>` is deleted only when all its
-  commits are on a remote-tracking branch or another local branch; a branch with unpushed
-  commits is kept, and the daemon log names it. Below half of `min_free_gb` new runs are
-  rejected with `disk_low`.
+  `+refs/heads/*:refs/remotes/origin/*`, so remote branches never touch the local `bot/*`
+  branches of lines and runs. A line's `work/` that is there is used as it is (the base
+  branch is not merged in). Otherwise the daemon runs `git worktree add work bot/<key>` when
+  that branch is still there, else `git worktree add --no-track -b <branch> work <start>`,
+  where `<start>` is `origin/bot/<key>` for a line whose branch was pushed under its own name,
+  else `origin/<base>` when it exists, else `<base>`, else `HEAD`; `<base>` is `baseBranch`,
+  or the branch HEAD names. Without `repo` the line (or the run) gets a scratch folder, kept
+  like a worktree. When a resumed run (`resumeSessionId`) gets a line folder that was made
+  again, its CLI is told that its folder changed and what is in it.
+- Cleanup at start and every 30 minutes: finished run folders older than `keep_runs_hours`
+  (default 72) are removed, and while free disk is below `min_free_gb` (default 10) the
+  oldest finished ones go first; a run that used a line leaves the line alone. A line goes only
+  when no run has used it for `keep_runs_hours` (also when disk is low) and no run holds it.
+  Before a worktree (a line's or a run's own) is removed with `git worktree remove`, its
+  uncommitted changes are committed to the branch it has checked out (`wip: uncommitted
+  changes kept by cleanup`, hooks and signing off; a detached HEAD gets a branch
+  `<branch>-kept-<ms>`). When that commit fails, also after a stale `index.lock` of the
+  worktree is removed (a git killed with a cancelled run), the folder is moved with its files to
+  `<work_root>/kept/<run-<runId> | line-<key>>-<ms>` instead, so it never blocks the cleanup;
+  a line `work/` that git cannot use when a run starts is moved there too
+  (`line-<key>-lost-<ms>`). Folders in `kept/` stay until free disk is below `min_free_gb`,
+  then the oldest go first. A run that starts while the cleanup holds its line waits for it.
+  The branch is then deleted
+  only when all its commits are on a remote-tracking branch or another local branch; a branch
+  with unpushed commits is kept, and the daemon log names it, so the line's next run checks it
+  out again. Below half of `min_free_gb` new runs are rejected with `disk_low`.
 
 ## MicroVM runs (`[vm]`, Linux)
 
@@ -809,15 +834,18 @@ process of the daemon's machine. Nothing in this protocol changes. The VM boots 
 base image (`scripts/runner/build-base-image.sh`: Ubuntu with git, Node, Claude Code, Codex,
 Pi, bun, uv, gh) with a per-run sparse scratch disk as its writable overlay, and a tools disk
 that holds the daemon binary as `vm-agent` (PID 1 after `vm-init`) and `chat-run`. The run
-folder, the run's git dir and `[vm].shares` (default `~/.claude`, `~/.codex`, `~/.pi`) are NFS
-shares of the host, mounted at their host paths, so the worktree, session files, `stderr.log`
-and 产出 stay where the daemon reads them. Stdin and stdout go over vsock (port 1024) as
+folder, the working folder (the line's `work/`, see Run folders), the run's git dir and
+`[vm].shares` (default `~/.claude`, `~/.codex`, `~/.pi`) are NFS shares of the host, mounted at
+their host paths, so the worktree, session files, `stderr.log` and 产出 stay where the daemon
+reads them, and the member's next run in the topic, in a new VM, finds its working folder as
+it was left. Stdin and stdout go over vsock (port 1024) as
 frames; `chat-run` in the VM uses the socket `/run/chat-run.sock`, which the agent relays to
 the run's socket over vsock (port 1025), so Codex runs use the socket instead of the request
 folder. With `[vm].homes` (default `/srv/runner/homes`) the folder `<homes>/<bot member id>` is
 one more share, mounted as the VM's `$HOME`: what a bot clones, installs and signs in to
 (`gh auth login`) is there again in its next run, in every VM of that bot; the rest of the
-disk still goes with the VM. The CLI's system note says so, and that processes left running
+disk still goes with the VM. The CLI's system note says what is kept (the working folder for
+the next run in the topic, the home folder for all runs), and that processes left running
 when the turn ends are killed. 接管 pauses and resumes the whole VM. When the CLI exits the agent syncs the shares
 before the daemon reads them; then the VM, its tap, its exports and its scratch disk go.
 
