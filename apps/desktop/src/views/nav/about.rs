@@ -34,7 +34,10 @@ pub fn title() -> String {
 
 /// The version line, as the about panel words it.
 pub fn version_line() -> String {
-    fill(nav::ABOUT_VERSION, &[("version", env!("CARGO_PKG_VERSION"))])
+    fill(
+        nav::ABOUT_VERSION,
+        &[("version", env!("CARGO_PKG_VERSION"))],
+    )
 }
 
 pub struct AboutView {

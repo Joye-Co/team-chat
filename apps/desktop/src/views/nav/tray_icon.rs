@@ -141,13 +141,24 @@ mod tests {
             assert_eq!(px.len(), side * side * 4);
             assert_eq!(px[3], 0, "the corner is clear");
             let center = (side / 2 * side + 2) * 4;
-            assert_eq!(px[center..center + 4], [0x30, 0x3b, 0xff, 255], "the disc is solid");
+            assert_eq!(
+                px[center..center + 4],
+                [0x30, 0x3b, 0xff, 255],
+                "the disc is solid"
+            );
             let ink = white(&px);
             assert!(!ink.is_empty(), "{unread} draws digits");
             for i in &ink {
-                assert_eq!(px[i * 4 + 3], 255, "digits sit on the solid part of the disc");
+                assert_eq!(
+                    px[i * 4 + 3],
+                    255,
+                    "digits sit on the solid part of the disc"
+                );
                 let (x, y) = ((i % side) as i32, (i / side) as i32);
-                assert!((2..30).contains(&x) && (6..26).contains(&y), "{unread}: {x},{y}");
+                assert!(
+                    (2..30).contains(&x) && (6..26).contains(&y),
+                    "{unread}: {x},{y}"
+                );
             }
             assert!(!seen.contains(&ink), "{unread} looks like another count");
             seen.push(ink);

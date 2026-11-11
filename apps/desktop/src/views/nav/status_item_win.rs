@@ -202,8 +202,8 @@ fn set_overlay(hwnd: HWND, unread: u32, fill: [u8; 3]) -> bool {
     let Some(taskbar) = taskbar() else {
         return false;
     };
-    let icon = badge_bgra(unread, fill)
-        .and_then(|bgra| icon_from_bgra(BADGE_SIDE, BADGE_SIDE, &bgra));
+    let icon =
+        badge_bgra(unread, fill).and_then(|bgra| icon_from_bgra(BADGE_SIDE, BADGE_SIDE, &bgra));
     // What a screen reader says for the badge.
     let label = wide(&badge_text(unread).unwrap_or_default());
     // SAFETY: `hwnd` is a window of this thread; the taskbar copies the icon, which is
