@@ -101,8 +101,30 @@ pub fn validate_repo(cfg: &Config, repo: &RepoSpec) -> Result<(), String> {
     }
 }
 
+tokio::task_local! {
+    /// Environment for the daemon's own git commands of one run (feature "github": the
+    /// person's GitHub for the mirror's clone and fetch). `None` removes the variable.
+    static GIT_ENV: Vec<(String, Option<String>)>;
+}
+
+/// Runs `f` (a run's [`prepare`] or [`prepare_line`]) with `env` on every git it starts.
+pub async fn with_git_env<F: std::future::Future>(
+    env: Vec<(String, Option<String>)>,
+    f: F,
+) -> F::Output {
+    GIT_ENV.scope(env, f).await
+}
+
 async fn git(dir: Option<&Path>, args: &[&str]) -> Result<String, String> {
     let mut c = tokio::process::Command::new("git");
+    let _ = GIT_ENV.try_with(|env| {
+        for (k, v) in env {
+            match v {
+                Some(v) => c.env(k, v),
+                None => c.env_remove(k),
+            };
+        }
+    });
     // Windows: paths over 260 characters (deep trees under the run folder).
     if cfg!(windows) {
         c.args(["-c", "core.longpaths=true"]);

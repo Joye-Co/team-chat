@@ -36,6 +36,7 @@ pub const FEATURES: &[&str] = &[
     feature::CONTEXT,
     feature::EFFORT,
     feature::GATES,
+    feature::GITHUB,
 ];
 
 /// `run.resume.note` limit (docs/machine-protocol.md).
@@ -59,6 +60,9 @@ struct RunEntry {
     log: Option<std::fs::File>,
     /// `chat-run` outputs waiting for `run.output.result`.
     outputs: Arc<crate::chat_run::Outputs>,
+    /// The run's own redactor: the daemon's rules and the values the run learns (its GitHub
+    /// tokens).
+    redactor: Arc<crate::redact::Redactor>,
 }
 
 pub struct Daemon {
@@ -353,6 +357,7 @@ impl Daemon {
                     orphan: false,
                     log: None,
                     outputs: Arc::default(),
+                    redactor: Arc::new(self.redactor.for_run()),
                 },
             );
         }
@@ -504,8 +509,8 @@ impl Daemon {
                         ),
                         takeover_url: self.takeover_url(),
                         public_key: self.machine_key.as_ref().map(|k| k.public_b64()),
-                        // usable: reported with feature "github" (not yet).
-                        runs_in: None,
+                        // Feature "github": a run in a VM never has the machine's own sign-ins.
+                        runs_in: Some(if self.cfg.vm.is_some() { "vm" } else { "host" }.into()),
                     },
                     clis: self.clis.clone(),
                     health: health::health(&self.cfg, self.active_count()),
@@ -779,6 +784,7 @@ impl Daemon {
         }
         let (ctl_tx, ctl_rx) = mpsc::unbounded_channel();
         let outputs = Arc::new(crate::chat_run::Outputs::new(&id));
+        let redactor = Arc::new(self.redactor.for_run());
         self.runs.insert(
             id.clone(),
             RunEntry {
@@ -790,6 +796,7 @@ impl Daemon {
                 orphan: false,
                 log: None,
                 outputs: outputs.clone(),
+                redactor: redactor.clone(),
             },
         );
         log!("run {id} accepted ({})", a.runtime);
@@ -811,7 +818,7 @@ impl Daemon {
             rt,
             control_rx: ctl_rx,
             out: self.run_tx.clone(),
-            redactor: self.redactor.clone(),
+            redactor,
             outputs,
             exec: self.exec.clone(),
             keys,
@@ -856,7 +863,7 @@ impl Daemon {
                     Up::RunSession(s) => s.seq = seq,
                     _ => {}
                 }
-                let Some(text) = self.redactor.frame(&up) else {
+                let Some(text) = r.redactor.frame(&up) else {
                     return;
                 };
                 if r.log.is_none() {

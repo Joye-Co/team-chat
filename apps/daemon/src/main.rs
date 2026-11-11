@@ -9,6 +9,10 @@ fn main() {
     if daemon::chat_run::started_as(&argv0, daemon::chat_run::NAME) {
         std::process::exit(daemon::chat_run::main(std::env::args().skip(1).collect()));
     }
+    // `gh` in a run that uses the app's GitHub: the real gh with the person's token.
+    if daemon::chat_run::started_as(&argv0, daemon::github::GH) {
+        std::process::exit(daemon::github::gh_main(std::env::args().skip(1).collect()));
+    }
     // PID 1 of a run's microVM (the tools disk names it vm-agent).
     if daemon::chat_run::started_as(&argv0, daemon::vm_agent::NAME) {
         std::process::exit(daemon::vm_agent::main());
