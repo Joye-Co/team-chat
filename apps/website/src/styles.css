@@ -328,7 +328,7 @@ footer a:hover{color:var(--ink)}
 .player.auto .ps.on .bar::after{animation:fill var(--ms,3s) linear forwards}
 .player.held .ps.on .bar::after,.player.away .ps.on .bar::after{animation-play-state:paused}
 @keyframes fill{to{transform:none}}
-.pf{position:relative;aspect-ratio:16/10;border-radius:12px;overflow:hidden;background:var(--bg);box-shadow:0 0 0 1px var(--shot-edge),var(--shot-shadow)}
+.pf{position:relative;width:100%;justify-self:center;aspect-ratio:16/10;border-radius:12px;overflow:hidden;background:var(--bg);box-shadow:0 0 0 1px var(--shot-edge),var(--shot-shadow)}
 .pf>img{width:100%;height:100%}
 .pl-layer{position:absolute;inset:0;opacity:0;transform-origin:0 0;transition:opacity .55s ease,transform 1.05s cubic-bezier(.65,0,.35,1)}
 .pl-layer.on{opacity:1}

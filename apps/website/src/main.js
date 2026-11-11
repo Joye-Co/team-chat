@@ -42,7 +42,10 @@
      A tour section sticks whole, below the nav; the hero's tour sticks alone, centered in the window. */
   var NAV=60,tours=[].slice.call(document.querySelectorAll("section.chap,.hero-tour")).filter(function(c){return c.querySelector(".stick>.player");});
   function stickTop(c){var st=c.querySelector(".stick");return c.classList.contains("hero-tour")?Math.max(NAV+8,(innerHeight+NAV-st.offsetHeight)/2):NAV;}
-  function fits(){tours.forEach(function(c){var st=c.querySelector(".stick"),pl=st.querySelector(".player"),was=c.classList.contains("scrolly");c.classList.remove("scrolly");
+  function fits(){tours.forEach(function(c){var st=c.querySelector(".stick"),pl=st.querySelector(".player"),pf=pl.querySelector(".pf"),was=c.classList.contains("scrolly");c.classList.remove("scrolly");
+    /* a section taller than the window shrinks its screenshot (16:10) until it fits, rather than losing the scroll steps */
+    pf.style.maxWidth="";var over=st.offsetHeight-(innerHeight-NAV);
+    if(!reduce&&innerWidth>760&&over>0){var w=pf.offsetWidth-Math.ceil(over*1.6)-2;if(w>=pf.offsetWidth*.55)pf.style.maxWidth=w+"px";}
     var ok=!reduce&&innerWidth>760&&st.offsetHeight<=innerHeight-NAV;
     if(ok){c.style.setProperty("--n",pl._n);c.style.setProperty("--ph",st.offsetHeight+"px");c.style.setProperty("--st",stickTop(c)+"px");}
     c.classList.toggle("scrolly",ok);if(ok!==was)c._last=-1;});scrolled();}
