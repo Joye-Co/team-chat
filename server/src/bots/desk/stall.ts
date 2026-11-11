@@ -3,6 +3,7 @@
 import { RUN_KIND_ASIDE } from "@chat/protocol";
 import { HEARTBEAT_STALE_MS, type MachineView, STALL_MS, TEXT, isOnline } from "../dispatch";
 import { CONTINUE_TEXT, LOOP_LIMIT, LOOP_TEXT, MACHINE_GONE_MS, MACHINE_MOVE_MS, MAX_AUTO_CONTINUE, MAX_INTERVENTIONS, NUDGE_MS, NUDGE_TEXT, TOOL_STALL_MS, isPromiseOnly, loopKey } from "../../agent/supervise";
+import { actedOutward } from "../../agent/recovery";
 import { ulid } from "../../core/ids";
 import { linkStub } from "../env";
 import { loadMachines, loadRunner } from "../store";
@@ -264,9 +265,12 @@ export abstract class DeskStall extends DeskEvents {
   }
 
   /**
-   * Ends the run without a message and starts its request again: in the same CLI session
-   * (`sameSession`), or fresh, leaving out the machines in `exclude`. The new run carries the
-   * count and the stall step; out of tries (when it counts) it returns false.
+   * Ends the run without a message and continues its work in a new run (盯 1.2): on the same
+   * machine (`sameSession`), or leaving out the machines in `exclude`. The new run keeps the work
+   * line, resumes the CLI session when it lands on the machine that has it, and starts with the
+   * recovery note (agent/recovery.ts). It carries the count and the stall step; out of tries
+   * (when it counts) it returns false. A run that leaves its machine is closed there: the old
+   * copy is stopped as soon as that daemon is back, before anything else (盯 1.14).
    */
   protected async restartElsewhere(r: RunRow, why: string, how: Restart = {}, opts: { count?: boolean; step?: number } = {}): Promise<boolean> {
     const count = opts.count ?? true;
@@ -274,10 +278,14 @@ export abstract class DeskStall extends DeskEvents {
     const request = this.requestOf(r);
     if (!request) return false;
     if (r.machine_id) {
+      const leaves = (how.exclude ?? []).includes(r.machine_id);
       try {
-        await linkStub(this.env, r.machine_id).toRun({ t: "run.cancel", runId: r.id } as never);
-      } catch {
-        // The machine is gone; the cancel waits in its queue or is lost.
+        // Leaving the machine: the run is closed there, so the next welcome leaves it out and
+        // the daemon stops it first thing. Staying: a cancel, and the late frames still count.
+        if (leaves) await linkStub(this.env, r.machine_id).closeRun(r.id);
+        else await linkStub(this.env, r.machine_id).toRun({ t: "run.cancel", runId: r.id } as never);
+      } catch (err) {
+        this.log.warn("restart cancel failed", { runId: r.id, err });
       }
     }
     await this.closeProgress(r);
@@ -286,10 +294,10 @@ export abstract class DeskStall extends DeskEvents {
     await this.setStatus(r, "cancelled", { ended_at: Date.now(), summary: `restarted: ${why}` });
     const key = `restart:${ulid()}`;
     const ack = request.m.ackMessageId ?? (r.trigger_message_id.includes(":") ? undefined : r.trigger_message_id);
-    // A new session starts fresh with the full topic; the same session gets what is new.
-    if (!how.sameSession) this.sql.exec("UPDATE runs SET session_id = NULL WHERE id = ?", r.id);
+    // The run keeps its CLI session: a retry that lands on the machine that has it resumes it,
+    // anywhere else it starts a new one with the full topic. Both get the recovery note.
     // The same session lives on its machine: the retry stays there (it waits when that is full).
-    const keep: Restart = how.sameSession && r.machine_id ? { ...how, machine: r.machine_id } : how;
+    const keep: Restart = { ...how, why, ...(how.sameSession && r.machine_id ? { machine: r.machine_id } : {}) };
     this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `restart:${r.id}`, JSON.stringify(keep));
     await this.start({ ...request.m, messageId: key, ackMessageId: ack, mentioned: true }, undefined, request.followUps, r.id, request.brief);
     const next = this.sql.exec<{ id: string }>("SELECT id FROM runs WHERE trigger_message_id = ?", key).toArray()[0];
@@ -307,7 +315,9 @@ export abstract class DeskStall extends DeskEvents {
     // A paused run (接管) is quiet on purpose; a run waiting for its machine is not silent.
     if (r.stalled || r.ended_at !== null || r.approval_id || r.paused_by || r.away_since !== null) return;
     if (r.stall_step < 1 && (await this.restartElsewhere(r, "stalled", { sameSession: true }, { step: 1 }))) return;
-    if (r.stall_step < 2 && r.machine_id && r.interventions < MAX_INTERVENTIONS && (await this.canMove(r))) {
+    // 机 2.6: work that already reached outside (a push, a pull request, a card, 产出) is not
+    // started over on another machine: the retry above resumed and verified it; now people decide.
+    if (r.stall_step < 2 && r.machine_id && r.interventions < MAX_INTERVENTIONS && (await this.canMove(r)) && !actedOutward(await this.recoveryFacts(r.id, "stalled"))) {
       if (await this.restartElsewhere(r, "stalled", { exclude: [r.machine_id] }, { step: 2 })) return;
     }
     this.sql.exec("UPDATE runs SET stalled = 1 WHERE id = ?", r.id);

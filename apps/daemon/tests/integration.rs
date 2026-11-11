@@ -748,7 +748,7 @@ async fn unknown_run_after_reconnect_is_cancelled() {
 
 /// A daemon that starts after a crash finds an unfinished run folder: it stops the CLI that was
 /// left running, replays the frames the server has not acked, and ends the run with run.done
-/// (failed: daemon restarted) and a failed run.session. On a graceful stop it waits for the
+/// (failed: daemon restarted, with the run's CLI session) and a failed run.session. On a graceful stop it waits for the
 /// ack of run.done before it exits.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn restart_recovers_unfinished_runs() {
@@ -787,9 +787,10 @@ async fn restart_recovers_unfinished_runs() {
     let lines = [
         frame(
             1,
-            RunEvent::Status {
-                state: "running".into(),
-                message: None,
+            RunEvent::Session {
+                session_id: "sess-rc1".into(),
+                runtime: "claude".into(),
+                model: None,
             },
         ),
         frame(
@@ -849,6 +850,8 @@ async fn restart_recovers_unfinished_runs() {
     let d = done(&frames);
     assert_eq!(d.status, "failed");
     assert_eq!(d.error.as_deref(), Some("daemon restarted"));
+    // The session the run reported: the server continues the run in it (盯 1.7).
+    assert_eq!(d.session_id.as_deref(), Some("sess-rc1"));
     assert!(matches!(frames.last(), Some(Up::RunSession(s)) if !s.ok));
     let meta: serde_json::Value =
         serde_json::from_slice(&std::fs::read(dir.join("run.json")).unwrap()).unwrap();

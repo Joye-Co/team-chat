@@ -39,6 +39,9 @@ pub const FEATURES: &[&str] = &[
     feature::GITHUB,
 ];
 
+/// `run.done.error` of a run found unfinished at start: the server continues it in its session.
+pub const DAEMON_RESTARTED: &str = "daemon restarted";
+
 /// `run.resume.note` limit (docs/machine-protocol.md).
 const MAX_RESUME_NOTE: usize = 2000;
 
@@ -273,7 +276,8 @@ const RECOVER_FINISHED_MS: u64 = 3_600_000;
 
 impl Daemon {
     /// Rebuilds run state after a restart from `run.json` and `events.jsonl`: stops CLIs left
-    /// running, ends unfinished runs with `run.done` (failed: daemon restarted) and a failed
+    /// running, ends unfinished runs with `run.done` (failed: daemon restarted, with the CLI
+    /// session the run reported, so the server continues it in that session) and a failed
     /// `run.session`, and keeps the frames the server may not have, for replay after welcome.
     fn recover(&mut self) {
         let Ok(rd) = std::fs::read_dir(crate::workspace::runs_dir(&self.cfg)) else {
@@ -303,6 +307,8 @@ impl Daemon {
             let log_path = dir.join("events.jsonl");
             let mut buffer: VecDeque<(u64, bool, String)> = VecDeque::new();
             let (mut has_done, mut has_session, mut last) = (false, false, 0u64);
+            // The CLI session the run reported last: the server resumes it (盯 1.7).
+            let mut session_id: Option<String> = None;
             for line in std::fs::read_to_string(&log_path)
                 .unwrap_or_default()
                 .lines()
@@ -314,6 +320,13 @@ impl Daemon {
                 let Some(seq) = up.seq() else { continue };
                 has_done |= matches!(up, Up::RunDone(_));
                 has_session |= matches!(up, Up::RunSession(_));
+                if let Up::RunEvent {
+                    event: RunEvent::Session { session_id: s, .. },
+                    ..
+                } = &up
+                {
+                    session_id = Some(s.clone());
+                }
                 let delta = matches!(
                     up,
                     Up::RunEvent {
@@ -354,8 +367,8 @@ impl Daemon {
                         exit_code: None,
                         result_text: None,
                         summary: None,
-                        error: Some("daemon restarted".into()),
-                        session_id: None,
+                        error: Some(DAEMON_RESTARTED.into()),
+                        session_id,
                         usage: None,
                         duration_ms: now.saturating_sub(meta.started_at),
                         code: None,
@@ -376,7 +389,7 @@ impl Daemon {
                         bytes: None,
                         gzip_bytes: None,
                         sha256: None,
-                        error: Some("daemon restarted".into()),
+                        error: Some(DAEMON_RESTARTED.into()),
                     }),
                     &mut buffer,
                     last,

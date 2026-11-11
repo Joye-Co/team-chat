@@ -178,10 +178,14 @@ RunEvent =
 - **Daemon restart.** `run.json` records the CLI's process group. A daemon that starts after
   a crash stops the process groups of unfinished runs (when the group leader still runs the
   recorded CLI), then rebuilds those runs from `events.jsonl` and appends `run.done`
-  (`failed`, error `daemon restarted`) and a failed `run.session`. Their frames, and those of
-  runs that finished in the last hour, are offered in `hello` and replayed after `welcome` as
-  above. On a graceful stop the daemon cancels its runs and waits up to 10 s for the server to
-  ack their last frames.
+  (`failed`, error `daemon restarted`, `sessionId` the last `session` event of the run) and a
+  failed `run.session`. Their frames, and those of runs that finished in the last hour, are
+  offered in `hello` and replayed after `welcome` as above. BotDesk does not record such a run
+  as failed: it continues the work in a new run on the same machine that resumes that CLI
+  session, with the recovery note (see "Leases"); only after 3 such resumes in a row, or for a
+  run it cannot start again (a side chat run), does the run fail, with a note that says the
+  computer's program restarted. On a graceful stop the daemon cancels its runs and waits up to
+  10 s for the server to ack their last frames.
 - `run.assign` is idempotent: when the daemon already holds the run it answers `run.accept`
   again. When the server gets neither `run.accept` nor `run.reject` within 30 s, or the link
   drops first, it sends the same `run.assign` again on the next link.
@@ -300,8 +304,23 @@ CliUsage   = { runtime, at, windows: { kind, label?, usedPct, resetsAt? }[] }
   session); with no such machine it waits on. A removed machine is not waited for.
 - When a lease expires while the machine is connected (the daemon no longer reports the run),
   the server marks the run lost and leaves it out of later `welcome.runs`, so the daemon stops
-  it. BotDesk starts it again or sets the run and the topic to `blocked` with one short note.
+  it. BotDesk continues the work in a new run (preferring that machine, where the session
+  resumes) or sets the run and the topic to `blocked` with one short note.
   Late frames of a lost or closed run are acked and dropped.
+- **A run that starts again continues** (盯 1.2): every restart (a stall, a daemon restart, a
+  lost or moved run) is a new run that keeps the work line, resumes the old run's CLI session
+  when it lands on the machine that has it (`resumeSessionId`; elsewhere a new session with the
+  full topic), and whose prompt ends with a recovery note written by the server: why it starts
+  again, the try number, the last plan, the last 20 steps (`tool.call` titles) and every outward
+  action of the earlier tries (pushes, pull request and release commands, publishes and deploys
+  from `tool.call`; cards, 产出 data, hand-offs and the desk note from `output` events; 产出
+  versions and the topic's pull requests from the room), with the instruction to check each one
+  before repeating anything. Work that already acted outward is never moved to another machine
+  by a stall: after the same-session retry the run turns `blocked` instead.
+- **A run that moves to another machine** (after the 30 minute wait, or a stall) is closed on
+  the old machine's link: a connected daemon gets `run.cancel` now, and a daemon that is away
+  finds the run missing from its next `welcome.runs`, so it stops the old copy first thing and
+  discards its frames. Two machines never keep working on the same run.
 - The daemon's own `stalled` status is a signal only: the server does not restart a run for
   it. A silent run gets one nudge, then is restarted in the same session on the same machine,
   then on another machine when one can take it, and only then is it marked `blocked`.
@@ -922,7 +941,8 @@ later audits have the complete record:
   `botMemberId \n topicId \n url:<repo.url> | path:<repo.path> | ""`, its branch is
   `bot/<key>`. A line is used by one run at a time: a run of the same member in the topic that
   starts while another holds the line gets its own folder `<run folder>/work` and branch
-  `bot/<runId>`, and its CLI is told so. A read-only side chat run (`kind: "aside"`) always
+  `bot/<runId>`, and its CLI is told so; a run waits up to 30 s for another run's hold first,
+  since a restart comes right after the cancel of the run it continues. A read-only side chat run (`kind: "aside"`) always
   gets its own `<run folder>/work`. `run.json` names the line (`line`) when the run used one.
 - `repo.path`: a local repository (inside `repo_roots` when configured). `repo.url`: a bare
   mirror under `<work_root>/repos/` is cloned once and fetched before each run with

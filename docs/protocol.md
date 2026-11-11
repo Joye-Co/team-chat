@@ -936,9 +936,10 @@ stops trying, and the topic gets one note.
   gets no nudge either.
 - **Silent 10 minutes (30 with a step open)**, in a fixed order, one step each time the run is
   silent that long again: first the run is cancelled without a message (`cancelled`, summary
-  `restarted: …`) and its request starts again in the same CLI session on the same machine
+  `restarted: …`) and its work continues in the same CLI session on the same machine
   (`resumeSessionId`; when that machine is full the retry waits for it, it never goes elsewhere);
-  then, when another healthy machine can take it, it starts there in a fresh session; only then
+  then, when another healthy machine can take it and the work has not acted outward (pushes,
+  pull requests, cards, 产出), it continues there in a fresh session; only then
   the run turns `blocked` with one note that names the minutes of silence and only the tries that
   really happened (提醒, 打断后重来, 换电脑重来). The nudge comes once per piece of work. The
   daemon's `stalled` report is a signal only and never restarts a run.
@@ -950,6 +951,13 @@ stops trying, and the topic gets one note.
   fresh session when one can take it; with no other machine it waits without limit. A machine
   that is removed, or that is connected again without the run, ends the wait: the run restarts
   elsewhere when it can, else it turns `blocked` with one note.
+- **Every restart continues the work** (盯 1.2): the new run keeps the run's CLI session (it
+  resumes on the machine that has it) and its prompt ends with a recovery note written by code:
+  the plan, the last steps and every outward action the earlier tries made, with the instruction
+  to check them before repeating anything (machine-protocol.md, "Leases"). A run the daemon
+  found unfinished after a restart (`run.done.error` `daemon restarted`) continues the same way
+  instead of failing, at most 3 times in a row. A run that moves is closed on its old machine,
+  so the old copy stops as soon as that machine is back.
 - **The same step 4 times in a row** (equal `tool.call` titles): one reminder (`desk-loop-…`).
 - **A promise without work**: a run that succeeds with a short result such as "我来看看" and called
   no tool gets a follow-up run that continues its session ("do the work now"). At most 3 in a row.

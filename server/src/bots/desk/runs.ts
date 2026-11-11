@@ -18,6 +18,8 @@ import { refsText } from "../refs";
 import { EXECUTOR_MEMORY_BYTES, memoryIndex } from "../../memory/inject";
 import { loadMachines, loadRunner } from "../store";
 import { DeskCore, QUEUED, type RunRow } from "./core";
+import { type LoggedFrame, type RecoveryFacts, outwardAction, recoveryNote, stepOf } from "../../agent/recovery";
+import type { RunProof } from "../proof";
 
 /** The prompts of a run (Run context): the full one, and the one for a resumed session. */
 interface Prompts {
@@ -51,6 +53,8 @@ export interface Restart {
   exclude?: string[];
   /** The only machine the new run may go to (a same-session restart stays on its machine). */
   machine?: string;
+  /** Why the work starts again (developer words): the recovery note names it. */
+  why?: string;
 }
 
 /** What started a run (meta `request:{runId}`): the message and the follow-ups it carried. */
@@ -65,7 +69,7 @@ export interface RunRequest {
 
 export abstract class DeskRuns extends DeskCore {
   /** 盯活 (stall.ts): ends the run quietly and starts the same request again; false when out of tries. */
-  protected abstract restartElsewhere(r: RunRow, why: string, how?: Restart): Promise<boolean>;
+  protected abstract restartElsewhere(r: RunRow, why: string, how?: Restart, opts?: { count?: boolean; step?: number }): Promise<boolean>;
   /** 盯 1.1 (stall.ts): the lease of a run ran out; true when the run keeps waiting for its machine. */
   protected abstract machineLost(r: RunRow): Promise<boolean>;
 
@@ -112,7 +116,8 @@ export abstract class DeskRuns extends DeskCore {
     const quotesBot = m.replyToAuthorId === botId || (m.refs ?? []).some((x) => x.fromId === botId);
     // 盯活: a restart says whether it continues the session and which machines it leaves out.
     const how = retryOf ? this.restartOf(retryOf) : null;
-    if (isMainTopicId(m.topicId) && !followUpOf && !quotesBot && !how?.sameSession) this.sql.exec("UPDATE runs SET fresh = 1 WHERE id = ?", runId);
+    // A restart continues the work it replaces (盯 1.2): never a fresh start in the 群聊 either.
+    if (isMainTopicId(m.topicId) && !followUpOf && !quotesBot && !how) this.sql.exec("UPDATE runs SET fresh = 1 WHERE id = ?", runId);
     if (how?.exclude && how.exclude.length > 0) this.sql.exec("UPDATE runs SET excluded = ? WHERE id = ?", JSON.stringify(how.exclude), runId);
     if (claim.newest?.[0]) this.sql.exec("UPDATE runs SET context_seq = ? WHERE id = ?", claim.newest[0].seq, runId);
     // The request as it came, so the run can be retried with the same one. A follow-up or a
@@ -160,6 +165,12 @@ export abstract class DeskRuns extends DeskCore {
           prompt = await this.asidePrompt(m, claim, claim.contextOf, followUps);
         } else {
           const p = await this.topicPrompts(r, runner, m, claim, followUps, feature("acceptance"), feature("context"), brief, gated);
+          // 盯 1.2: a restart starts with the recovery note, in a resumed session and in a new one.
+          const note = retryOf ? await this.recoveryNoteOf(retryOf, how?.why ?? "restarted") : null;
+          if (note) {
+            p.prompt = `${p.prompt}\n\n${note}`;
+            if (p.resume) p.resume.prompt = `${p.resume.prompt}\n\n${note}`;
+          }
           prompt = p.prompt;
           this.storeContext(r.id, p);
         }
@@ -208,6 +219,69 @@ export abstract class DeskRuns extends DeskCore {
     } catch {
       return null;
     }
+  }
+
+  /** The run and the runs it restarted (`retry_of`), newest first: one piece of work. */
+  protected retryChain(runId: string): RunRow[] {
+    const out: RunRow[] = [];
+    let id: string | null = runId;
+    while (id && out.length < 20) {
+      const r = this.run(id);
+      if (!r) break;
+      out.push(r);
+      id = r.retry_of;
+    }
+    return out;
+  }
+
+  /** What the earlier tries of a piece of work did (the run `runId` and the runs it restarted). */
+  protected async recoveryFacts(runId: string, why: string): Promise<RecoveryFacts> {
+    const chain = this.retryChain(runId);
+    const steps: string[] = [];
+    const actions: string[] = [];
+    for (const run of [...chain].reverse()) {
+      const rows = this.sql
+        .exec<{ frame: string }>(
+          `SELECT frame FROM run_log WHERE run_id = ? AND (frame LIKE '%"tool.call"%' OR frame LIKE '%"output"%') ORDER BY seq`,
+          run.id,
+        )
+        .toArray();
+      for (const row of rows) {
+        let f: LoggedFrame;
+        try {
+          f = JSON.parse(row.frame) as LoggedFrame;
+        } catch {
+          continue;
+        }
+        const step = stepOf(f);
+        if (step) steps.push(step);
+        const action = outwardAction(f);
+        if (action) actions.push(action);
+      }
+    }
+    const last = chain[0];
+    const first = chain[chain.length - 1];
+    let prs: string[] = [];
+    let artifacts: string[] = [];
+    if (last) {
+      try {
+        const proof = unwrap(
+          await roomStub(this.env, last.group_id).rpc(last.group_id, "bots.runProof", this.actor(), { topicId: last.topic_id, runId: last.id, since: first.created_at }),
+        ) as RunProof;
+        prs = proof.prs.map((p) => `${p.url}${p.state ? ` (${p.state})` : ""}`);
+        artifacts = proof.artifacts.map((a) => `"${a.title}" version ${a.version}`);
+      } catch (err) {
+        this.log.warn("recovery proof failed", { runId, err });
+      }
+    }
+    // The newest plan any try reported.
+    const plan = chain.map((x) => this.planOf(x)).find((x) => x !== null && x.length > 0) ?? null;
+    return { why, tries: chain.length, plan, steps, actions, prs, artifacts };
+  }
+
+  /** The recovery note a restart of `runId` starts with (盯 1.2). */
+  protected async recoveryNoteOf(runId: string, why: string): Promise<string> {
+    return recoveryNote(await this.recoveryFacts(runId, why));
   }
 
   /** How a restart of `runId` goes on (meta `restart:{runId}`), or null when it was no restart. */

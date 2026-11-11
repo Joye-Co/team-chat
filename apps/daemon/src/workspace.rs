@@ -349,6 +349,17 @@ pub fn line_key(bot_member_id: &str, topic_id: &str, repo: Option<&RepoSpec>) ->
         .to_string()
 }
 
+/// How long a run waits for the cleanup's hold on its line.
+const CLEANUP_WAIT: Duration = Duration::from_secs(600);
+
+/// How long a run waits for another run's hold on its line (a cancelled run stops within
+/// seconds: SIGTERM, then SIGKILL after 3 s) before it gets a folder of its own.
+const LINE_RUN_WAIT: Duration = if cfg!(test) {
+    Duration::from_millis(600)
+} else {
+    Duration::from_secs(30)
+};
+
 /// The line folders a run or the cleanup is using in this daemon, and whether the holder is the
 /// cleanup. A line is used by one at a time.
 static BUSY_LINES: std::sync::Mutex<std::collections::BTreeMap<PathBuf, bool>> =
@@ -441,12 +452,14 @@ pub async fn prepare_line(
     let key = line_key(bot_member_id, topic_id, repo);
     let line = lines_dir(cfg).join(&key);
     // The cleanup's hold is short (a commit and a removal): wait for it instead of giving the
-    // run a folder of its own. Another run's hold lasts the whole run.
+    // run a folder of its own. Another run's hold usually lasts the whole run, but a restart
+    // (盯 1.2) comes right after the cancel of the run it continues: wait a little for that one
+    // to stop so the work goes on in its line.
     let mut waited = Duration::ZERO;
     loop {
         match claim_line(&line, false) {
             Ok(()) => break,
-            Err(true) if waited < Duration::from_secs(600) => {
+            Err(cleanup) if waited < if cleanup { CLEANUP_WAIT } else { LINE_RUN_WAIT } => {
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 waited += Duration::from_millis(200);
             }
@@ -1301,6 +1314,28 @@ keep_runs_hours = {keep_hours}\nmin_free_gb = 0\n",
         assert!(w.starts_with(&line));
         release.await.unwrap();
         drop(g);
+    }
+
+    /// A restart (盯 1.2) comes right after the cancel of the run it continues: it waits for
+    /// that run to let the line go, and works in the same folder.
+    #[tokio::test]
+    async fn a_restart_waits_for_the_stopping_runs_hold() {
+        let (_d, cfg, repo) = setup(72);
+        let (w1, _, g1) = prepare_line(&cfg, "r1", "BOT1", "T1", Some(&repo))
+            .await
+            .unwrap()
+            .unwrap();
+        let release = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            drop(g1);
+        });
+        let (w2, _, g2) = prepare_line(&cfg, "r2", "BOT1", "T1", Some(&repo))
+            .await
+            .unwrap()
+            .expect("the line, after the cancelled run let go");
+        assert_eq!(w2, w1);
+        release.await.unwrap();
+        drop(g2);
     }
 
     /// A line folder git cannot use is moved aside with its files when a run starts, not
