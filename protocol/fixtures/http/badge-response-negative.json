@@ -1,0 +1,8 @@
+{
+  "kind": "BadgeResponse",
+  "valid": false,
+  "description": "count is not negative",
+  "value": {
+    "waiting": -1
+  }
+}

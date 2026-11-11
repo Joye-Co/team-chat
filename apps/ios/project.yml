@@ -20,6 +20,13 @@ settings:
     # The app and its extensions share the Keychain item, the defaults and the cache through
     # this group.
     APP_GROUP: group.$(APP_BUNDLE_ID)
+  configs:
+    # APNs gateway of the push entitlement. Simulator builds are signed to run locally and do
+    # not check it; a device build needs a profile with Push Notifications (docs: PR of M3).
+    Debug:
+      APS_ENVIRONMENT: development
+    Release:
+      APS_ENVIRONMENT: production
 
 targets:
   Mobile:
@@ -29,6 +36,7 @@ targets:
     sources:
       - Sources
       - Shared
+      - Extensions/Notify/AskCategory.swift
       - path: ../../.tmp/ios/gen/chat_ffi.swift
         group: Generated
     settings:
@@ -59,22 +67,33 @@ targets:
         DefaultServer: $(DEFAULT_SERVER)
         # 扫电脑上的码 (sign-in by QR code) and 打开时用面容解锁.
         NSCameraUsageDescription: 用来扫电脑上的二维码登录。
-        NSFaceIDUsageDescription: 用面容确认是你本人。
+        NSFaceIDUsageDescription: 解锁应用和批准不能撤回的事情时，用面容确认是你本人。
     entitlements:
       path: Generated/Mobile.entitlements
       properties:
         com.apple.security.application-groups: [$(APP_GROUP)]
+        aps-environment: $(APS_ENVIRONMENT)
 
-  # Notification service extension: a shell for now. Later it fills a push with the message it
-  # announces before the system shows it.
+  # Notification service extension: reads the sign-in from the shared Keychain and app group,
+  # hides pushes after sign-out and gives answerable questions their answer buttons.
   Notify:
     type: app-extension
     platform: iOS
     sources:
       - Extensions/Notify
+      - Sources/Session.swift
+      - path: ../../.tmp/ios/gen/chat_ffi.swift
+        group: Generated
+    dependencies:
+      - sdk: SystemConfiguration.framework
+      - sdk: Security.framework
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID).notify
+        OTHER_SWIFT_FLAGS: $(inherited) -Xcc -fmodule-map-file=$(CORE_GEN_DIR)/chat_ffiFFI.modulemap
+        SWIFT_INCLUDE_PATHS: $(CORE_GEN_DIR)
+        LIBRARY_SEARCH_PATHS: $(CORE_LIB_DIR)
+        OTHER_LDFLAGS: $(inherited) -lchat_ffi
     info:
       path: Generated/Notify-Info.plist
       properties:
