@@ -125,6 +125,11 @@ TOAST_CLSID="$(toast_activator_clsid)"
 if [ -n "$TOAST_CLSID" ]; then
   defines+=("-DTOAST_CLSID=$TOAST_CLSID")
 else
+  # The constant is found by its spelling. An app that already takes the activator's argument
+  # but whose constant was not found would ship with nothing registered: stop instead.
+  if grep -rqF -- '-ToastActivated' "$ROOT/apps/desktop/src"; then
+    die "the app handles -ToastActivated but no 'TOAST_ACTIVATOR_CLSID: &str = \"<guid>\"' was found under apps/desktop/src (scripts/lib.sh, toast_activator_clsid)"
+  fi
   log "the app defines no notification activator: a notification clicked after the app exited does nothing"
 fi
 

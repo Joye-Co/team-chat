@@ -86,6 +86,12 @@ MACHINE_CONFIG="$(cygpath -u "$USERPROFILE")/.config/$SLUG"
 MACHINE_STATE="$(cygpath -u "$LOCALAPPDATA")/$SLUG-daemon"
 TASK="$BUNDLE_ID.daemon"
 task_exists() { run_native "$(cygpath -u "$SYSTEMROOT")/System32/schtasks.exe" /Query /TN "$TASK" >/dev/null 2>&1; }
+# daemon_id: "<pid> <start time>" of the task's daemon, as it writes them next to its log.
+daemon_id() { tr -d '\r\n' <"$MACHINE_STATE/daemon.pid" 2>/dev/null || true; }
+# pid_alive <pid>
+pid_alive() { run_native "$(cygpath -u "$SYSTEMROOT")/System32/tasklist.exe" /FI "PID eq $1" /FO CSV /NH 2>/dev/null | grep -q "\"$1\""; }
+# self_restarts: how often the daemon left by itself for a new program (its own log line).
+self_restarts() { grep -c "a new version of the daemon is installed; restarting" "$MACHINE_STATE/daemon.log" 2>/dev/null || true; }
 daemon_runs() { run_native "$(cygpath -u "$SYSTEMROOT")/System32/tasklist.exe" /FI "IMAGENAME eq $SLUG-daemon.exe" /FO CSV /NH 2>/dev/null | grep -qi "$SLUG-daemon.exe"; }
 if [ "$CHAIN" = 1 ]; then
   if [ -e "$MACHINE_CONFIG" ] || [ -e "$MACHINE_STATE" ] || task_exists; then
@@ -115,8 +121,10 @@ cleanup() {
       run_native "$(cygpath -u "$SYSTEMROOT")/System32/schtasks.exe" /End /TN "$TASK" >/dev/null 2>&1 || true
       run_native "$(cygpath -u "$SYSTEMROOT")/System32/schtasks.exe" /Delete /TN "$TASK" /F >/dev/null 2>&1 || true
     fi
-    run_native "$(cygpath -u "$SYSTEMROOT")/System32/taskkill.exe" /F /IM "$SLUG-daemon.exe" >/dev/null 2>&1 || true
-    run_native "$(cygpath -u "$SYSTEMROOT")/System32/taskkill.exe" /F /IM repair.exe >/dev/null 2>&1 || true
+    # Only this test's programs, by their path: the daemon of the install folder (also under
+    # the name it was renamed to) and the task's repair copy. Never by image name alone.
+    ARG1="$(cygpath -w "$DIR")\\$SLUG-daemon.exe" ARG2="$(cygpath -w "$MACHINE_STATE")\\repair.exe" ps_out \
+      'Get-Process | Where-Object { $_.Path -and ($_.Path.StartsWith($env:ARG1, "OrdinalIgnoreCase") -or $_.Path -ieq $env:ARG2) } | Stop-Process -Force' >/dev/null 2>&1 || true
     mkdir -p "$WORK/daemon" && cp "$MACHINE_STATE"/daemon.log* "$WORK/daemon/" 2>/dev/null || true
     rm -rf "$MACHINE_CONFIG" "$MACHINE_STATE"
   fi
@@ -223,6 +231,10 @@ if [ "$CHAIN" = 1 ]; then
   iconv -f UTF-16 -t UTF-8 "$MACHINE_STATE/task.xml" | grep -qF "$(cygpath -w "$DIR/$SLUG-daemon.exe")" ||
     fail "the task does not run the daemon of the install folder"
   wait_daemon "$A" 120 || fail "the daemon of $A did not connect to the server"
+  DAEMON_BEFORE="$(daemon_id)"
+  RESTARTS_BEFORE="$(self_restarts)"
+  case "$DAEMON_BEFORE" in [0-9]*" "[0-9]*) ;; *) fail "the daemon wrote no pid and start time ('$DAEMON_BEFORE')" ;; esac
+  pid_alive "${DAEMON_BEFORE%% *}" || fail "the daemon's pid file names no running process"
   log "ok: the machine is connected, daemon $A, started by the task"
 fi
 
@@ -270,10 +282,23 @@ if [ "${DAEMON:-1}" = 1 ]; then
     # c. The daemon was running a machine through the update: it was not stopped (the old
     #    process lives on from its renamed file), finds the new program within a minute,
     #    leaves when idle, and the task starts version B, which removes the renamed file.
-    daemon_runs || fail "the daemon was stopped by the update"
+    # Not stopped means the very process from before the update (same pid, same start time)
+    # is alive, or it has left by itself for the new program and says so in its log. A
+    # daemon that was killed and started again by its task has a new pid and no such line.
+    if [ "$(daemon_id)" = "$DAEMON_BEFORE" ]; then
+      pid_alive "${DAEMON_BEFORE%% *}" || fail "the daemon was stopped by the update (its process is gone)"
+      log "the daemon of before the update is still the same process (${DAEMON_BEFORE%% *})"
+    elif [ "$(self_restarts)" -gt "$RESTARTS_BEFORE" ]; then
+      log "the daemon has already left by itself for the new program"
+    else
+      tail -n 20 "$MACHINE_STATE/daemon.log" | sed 's/^/      /' >&2 || true
+      fail "the daemon was stopped by the update: another process ($(daemon_id), before $DAEMON_BEFORE) and it did not leave by itself"
+    fi
     task_exists || fail "the daemon's task is gone after the update"
     log "waiting for the running daemon to move to $B"
     wait_daemon "$B" 420 || fail "the daemon did not restart on $B after the app's update"
+    [ "$(self_restarts)" -gt "$RESTARTS_BEFORE" ] || fail "the daemon is on $B but its log does not say it left by itself"
+    [ "$(daemon_id)" != "$DAEMON_BEFORE" ] || fail "the daemon reports $B from the process of before the update"
     for _ in $(seq 1 60); do
       compgen -G "$DIR/$SLUG-daemon.exe.*" >/dev/null || break
       sleep 1
