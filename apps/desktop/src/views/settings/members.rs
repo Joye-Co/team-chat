@@ -1441,6 +1441,64 @@ fn clean_runner(r: &RunnerSetup) -> RunnerSetup {
     }
 }
 
+/// One 运行方式 a computer reports, as the add-member sheet lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeOption {
+    pub runtime: String,
+    /// "Claude Code", "Codex", else the configured name.
+    pub name: String,
+    /// Not signed in on any computer that has it, as far as they say.
+    pub signed_out: bool,
+}
+
+impl RuntimeOption {
+    pub fn text(&self) -> String {
+        if self.signed_out {
+            fill(s::RUNNER_RUNTIME_SIGNED_OUT, &[("name", &self.name)])
+        } else {
+            self.name.clone()
+        }
+    }
+}
+
+/// The 运行方式 of the picked computer, else of every computer, in the order they report
+/// them. Two that people know by the same name keep their configured names after it.
+pub fn runtime_options(
+    machines: &[MachineInfo],
+    machine: Option<&str>,
+    logins: &std::collections::HashMap<String, Vec<chat_core::proto::monitor::MonitorCli>>,
+) -> Vec<RuntimeOption> {
+    let mut out: Vec<RuntimeOption> = Vec::new();
+    for m in machines
+        .iter()
+        .filter(|m| machine.is_none_or(|id| m.id == id))
+    {
+        for c in &m.clis {
+            let login = logins
+                .get(&m.id)
+                .and_then(|l| l.iter().find(|x| x.runtime == c.runtime))
+                .map(|x| x.login.as_str());
+            // Signed out here; signed in (or not known to be out) anywhere clears the mark.
+            let out_here = login == Some("logged_out");
+            match out.iter_mut().find(|o| o.runtime == c.runtime) {
+                Some(o) => o.signed_out &= out_here,
+                None => out.push(RuntimeOption {
+                    runtime: c.runtime.clone(),
+                    name: crate::views::admin::cli_name(&c.kind, &c.runtime),
+                    signed_out: out_here,
+                }),
+            }
+        }
+    }
+    let names: Vec<String> = out.iter().map(|o| o.name.clone()).collect();
+    for o in &mut out {
+        if names.iter().filter(|n| **n == o.name).count() > 1 && o.name != o.runtime {
+            o.name = format!("{} · {}", o.name, o.runtime);
+        }
+    }
+    out
+}
+
 /// The models and 思考强度 a runtime offers on the computers that can run the member: the
 /// picked computer only, else every computer that has the runtime. Models keep their first
 /// report; efforts are the union in order.
@@ -1582,10 +1640,11 @@ pub struct BotForm {
     runtime: Entity<InputState>,
     repo: Entity<InputState>,
     branch: Entity<InputState>,
-    /// Runtime names that machines report.
-    known_runtimes: Vec<String>,
-    /// The team's computers, for 在哪台电脑干活.
+    /// The team's computers, for 在哪台电脑干活 and 运行方式.
     machines: Vec<MachineInfo>,
+    /// The sign-ins of each online computer's CLIs (its monitor), by computer id: 运行方式
+    /// marks the ones that are not signed in.
+    logins: std::collections::HashMap<String, Vec<chat_core::proto::monitor::MonitorCli>>,
     /// This Mac's machine id, marked 这台电脑 in the list.
     this_machine: Option<String>,
     /// The one computer picked to run this member; `None` = any free computer.
@@ -1613,12 +1672,9 @@ impl BotForm {
         let this_machine = services.provider.this_machine_id();
         cx.spawn(async move |this, cx| {
             if let Ok(list) = answer(machines).await {
-                let mut known: Vec<String> = list.iter().flat_map(|m| m.runtimes.clone()).collect();
-                known.sort();
-                known.dedup();
                 let _ = this.update(cx, |this, cx| {
-                    this.known_runtimes = known;
                     this.machines = list;
+                    this.load_logins(cx);
                     cx.notify();
                 });
             }
@@ -1653,8 +1709,8 @@ impl BotForm {
             branch: input(s::RUNNER_BRANCH_PLACEHOLDER, window, cx),
             services,
             runner: false,
-            known_runtimes: Vec::new(),
             machines: Vec::new(),
+            logins: Default::default(),
             this_machine,
             machine: None,
             model: None,
@@ -1758,6 +1814,46 @@ impl BotForm {
     }
 
     /// 在哪台电脑干活 picked: the hand-typed labels no longer count.
+    /// Reads which CLIs of each online computer are signed in (owners only: a failed read
+    /// leaves the list unmarked).
+    fn load_logins(&mut self, cx: &mut Context<Self>) {
+        let day = crate::views::admin::day_start();
+        for m in self
+            .machines
+            .iter()
+            .filter(|m| m.connected && !m.clis.is_empty())
+        {
+            let reply = self.services.provider.machine_monitor(&m.id, "15m", day);
+            let id = m.id.clone();
+            cx.spawn(async move |this, cx| {
+                if let Ok(d) = answer(reply).await {
+                    let _ = this.update(cx, |this, cx| {
+                        this.logins.insert(id, d.clis);
+                        cx.notify();
+                    });
+                }
+            })
+            .detach();
+        }
+    }
+
+    /// The 运行方式 the picked computer (or any computer) offers.
+    fn runtime_options(&self) -> Vec<RuntimeOption> {
+        runtime_options(&self.machines, self.machine.as_deref(), &self.logins)
+    }
+
+    /// The 运行方式 the member gets: the one picked, else the only one there is.
+    fn runtime_value(&self, cx: &App) -> String {
+        let typed = self.value(&self.runtime, cx);
+        if !typed.is_empty() {
+            return typed;
+        }
+        match self.runtime_options().as_slice() {
+            [only] => only.runtime.clone(),
+            _ => String::new(),
+        }
+    }
+
     fn pick_machine(&mut self, id: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
         self.machine = id;
         self.labels
@@ -1774,7 +1870,7 @@ impl BotForm {
         let repo = self.value(&self.repo, cx);
         let branch = self.value(&self.branch, cx);
         Some(RunnerSetup {
-            runtime: self.value(&self.runtime, cx),
+            runtime: self.runtime_value(cx),
             labels: widgets::split_labels(&self.value(&self.labels, cx)),
             repo: (!repo.is_empty()).then_some(repo),
             base_branch: (!branch.is_empty()).then_some(branch),
@@ -1788,7 +1884,7 @@ impl BotForm {
     fn model_value(&self, cx: &App) -> Option<String> {
         let (models, _) = cli_choices(
             &self.machines,
-            &self.value(&self.runtime, cx),
+            &self.runtime_value(cx),
             self.machine.as_deref(),
         );
         if models.is_empty() {
@@ -1833,7 +1929,7 @@ impl BotForm {
             cx.notify();
             return;
         }
-        if self.runner && self.value(&self.runtime, cx).is_empty() {
+        if self.runner && self.runtime_value(cx).is_empty() {
             self.status = Status::Failed(s::RUNNER_RUNTIME_REQUIRED.into());
             cx.notify();
             return;
@@ -1988,7 +2084,7 @@ impl Render for BotForm {
         let (off, name_err, role_err) =
             name_role_problem(&self.value(&self.name, cx), &self.value(&self.role, cx));
         // Work on the team's computers needs a runtime.
-        let off = off || (self.runner && self.value(&self.runtime, cx).is_empty());
+        let off = off || (self.runner && self.runtime_value(cx).is_empty());
         // Editing: the runner loads first; saving needs it in and a change.
         let load = self.editing.as_ref().map(|e| e.runner.clone());
         let runner_ready = !matches!(load, Some(RunnerLoad::Loading | RunnerLoad::Failed(_)));
@@ -2104,41 +2200,57 @@ impl Render for BotForm {
             );
         }
         if runner_ready && self.runner {
-            // 运行方式: picked from what the team's computers have; typed only
-            // when no computer has reported yet.
-            let current = self.value(&self.runtime, cx);
+            // 运行方式: what the picked computer (or any computer) reports, by the names
+            // people know, marked when not signed in. The only one there is is chosen and
+            // not asked; typed only when no computer has reported yet.
+            let typed = self.value(&self.runtime, cx);
+            let current = self.runtime_value(cx);
             let (models, efforts) = cli_choices(&self.machines, &current, self.machine.as_deref());
-            let mut known = self.known_runtimes.clone();
-            if !current.is_empty() && !known.contains(&current) {
-                known.insert(0, current.clone());
+            let mut known = self.runtime_options();
+            let only = matches!(known.as_slice(), [o] if typed.is_empty() || typed == o.runtime);
+            if !current.is_empty() && !known.iter().any(|o| o.runtime == current) {
+                known.insert(
+                    0,
+                    RuntimeOption {
+                        runtime: current.clone(),
+                        name: current.clone(),
+                        signed_out: false,
+                    },
+                );
             }
-            let runtime: gpui::AnyElement = if known.is_empty() {
-                NativeTextField::new("member-runtime", &self.runtime)
-                    .full_width()
-                    .into_any_element()
+            let runtime: Option<gpui::AnyElement> = if only {
+                None
+            } else if known.is_empty() {
+                Some(
+                    NativeTextField::new("member-runtime", &self.runtime)
+                        .full_width()
+                        .into_any_element(),
+                )
             } else {
                 let input = self.runtime.clone();
-                let shown = if current.is_empty() {
-                    s::RUNNER_RUNTIME_PICK.to_string()
-                } else {
-                    current.clone()
-                };
-                widgets::popup_fixed("member-runtime", shown, SELECT_WIDTH, window, cx)
-                    .dropdown_menu(move |menu, _, _| {
-                        known.iter().fold(menu, |menu, rt| {
-                            let (rt, input) = (rt.clone(), input.clone());
-                            menu.item(
-                                PopupMenuItem::new(rt.clone())
-                                    .checked(rt == current)
-                                    .on_click(move |_, window, cx| {
-                                        input.update(cx, |st, cx| {
-                                            st.set_value(rt.clone(), window, cx)
-                                        })
-                                    }),
-                            )
+                let shown = known
+                    .iter()
+                    .find(|o| o.runtime == current)
+                    .map(RuntimeOption::text)
+                    .unwrap_or_else(|| s::RUNNER_RUNTIME_PICK.to_string());
+                Some(
+                    widgets::popup_fixed("member-runtime", shown, SELECT_WIDTH, window, cx)
+                        .dropdown_menu(move |menu, _, _| {
+                            known.iter().fold(menu, |menu, o| {
+                                let (rt, input) = (o.runtime.clone(), input.clone());
+                                menu.item(
+                                    PopupMenuItem::new(o.text())
+                                        .checked(rt == current)
+                                        .on_click(move |_, window, cx| {
+                                            input.update(cx, |st, cx| {
+                                                st.set_value(rt.clone(), window, cx)
+                                            })
+                                        }),
+                                )
+                            })
                         })
-                    })
-                    .into_any_element()
+                        .into_any_element(),
+                )
             };
             // 在哪台电脑干活: one of the team's computers, or any free one. Picking a
             // computer (or 任意) replaces the old hand-typed labels.
@@ -2261,8 +2373,8 @@ impl Render for BotForm {
                     .child(section(s::RUNNER_SECTION))
                     .child(
                         sheet_form()
-                            .child(sheet_form_row(s::RUNNER_RUNTIME, runtime, cx))
                             .child(sheet_form_row(s::RUNNER_MACHINE, machine, cx))
+                            .children(runtime.map(|r| sheet_form_row(s::RUNNER_RUNTIME, r, cx)))
                             .child(sheet_form_row(s::RUNNER_MODEL, model, cx))
                             .children(effort.map(|e| sheet_form_row(s::RUNNER_EFFORT, e, cx)))
                             .child(field_row(
@@ -2488,6 +2600,7 @@ mod tests {
     ) -> crate::data::CliChoice {
         crate::data::CliChoice {
             runtime: runtime.into(),
+            kind: runtime.into(),
             models: models
                 .iter()
                 .map(|(id, e, d)| ModelChoice {
@@ -2499,6 +2612,79 @@ mod tests {
                 .collect(),
             efforts: efforts.iter().map(|x| x.to_string()).collect(),
         }
+    }
+
+    fn signed(runtime: &str, login: &str) -> chat_core::proto::monitor::MonitorCli {
+        chat_core::proto::monitor::MonitorCli {
+            runtime: runtime.into(),
+            kind: runtime.into(),
+            available: true,
+            version: None,
+            login: login.into(),
+            failed_today: 0,
+            method: None,
+            email: None,
+            plan: None,
+            usage: None,
+            usage_at: None,
+        }
+    }
+
+    #[test]
+    fn runtimes_are_listed_by_name_with_the_ones_not_signed_in_marked() {
+        let a = MachineInfo {
+            id: "a".into(),
+            clis: vec![cli("claude", &[], &[]), cli("codex", &[], &[])],
+            ..Default::default()
+        };
+        let b = MachineInfo {
+            id: "b".into(),
+            clis: vec![cli("codex", &[], &[])],
+            ..Default::default()
+        };
+        let all = [a, b];
+        let mut logins = std::collections::HashMap::new();
+        logins.insert(
+            "a".to_string(),
+            vec![signed("claude", "logged_in"), signed("codex", "logged_out")],
+        );
+        let any = runtime_options(&all, None, &logins);
+        assert_eq!(
+            any.iter().map(RuntimeOption::text).collect::<Vec<_>>(),
+            ["Claude Code", "Codex"],
+            "codex is not known to be signed out on b"
+        );
+        let on_a = runtime_options(&all, Some("a"), &logins);
+        assert_eq!(
+            on_a.iter().map(RuntimeOption::text).collect::<Vec<_>>(),
+            [
+                "Claude Code",
+                fill(s::RUNNER_RUNTIME_SIGNED_OUT, &[("name", "Codex")]).as_str()
+            ]
+        );
+        assert_eq!(on_a[1].runtime, "codex");
+        // The picked computer's own list: one only.
+        let on_b = runtime_options(&all, Some("b"), &logins);
+        assert_eq!(on_b.len(), 1);
+        assert_eq!(on_b[0].runtime, "codex");
+        // Nothing reported: nothing to pick from.
+        assert!(runtime_options(&[], None, &logins).is_empty());
+    }
+
+    #[test]
+    fn two_runtimes_of_one_kind_keep_their_names() {
+        let mut fast = cli("claude-fast", &[], &[]);
+        fast.kind = "claude".into();
+        let m = MachineInfo {
+            id: "a".into(),
+            clis: vec![cli("claude", &[], &[]), fast],
+            ..Default::default()
+        };
+        let list = runtime_options(&[m], None, &Default::default());
+        assert_eq!(
+            list.iter().map(|o| o.name.as_str()).collect::<Vec<_>>(),
+            ["Claude Code · claude", "Claude Code · claude-fast"]
+        );
     }
 
     #[test]

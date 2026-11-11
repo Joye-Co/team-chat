@@ -213,7 +213,7 @@ impl AdminView {
         .detach();
     }
 
-    fn start_login(&mut self, runtime: String, cx: &mut Context<Self>) {
+    pub(super) fn start_login(&mut self, runtime: String, cx: &mut Context<Self>) {
         let Some(machine_id) = self.selected.clone() else {
             return;
         };
