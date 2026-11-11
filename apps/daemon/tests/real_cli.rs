@@ -471,12 +471,14 @@ async fn the_real_clis_are_found_by_name_and_say_their_version() {
         "{real:?}"
     );
     // The daemon answers Codex's own approval requests: gated on every system.
-    assert_eq!(
-        clis.iter()
-            .find(|c| c.kind == "codex")
-            .and_then(|c| c.gates),
-        Some(true)
-    );
+    if codex.is_some() {
+        assert_eq!(
+            clis.iter()
+                .find(|c| c.kind == "codex")
+                .and_then(|c| c.gates),
+            Some(true)
+        );
+    }
     let (report, _) = daemon::doctor::report(&cfg).await;
     assert!(!report.contains("NOT FOUND"), "{report}");
     assert!(report.contains("Claude Code"), "{report}");
