@@ -342,11 +342,48 @@ return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2});})()",
             .ok_or("no menu covered the inline page")?;
         }
     }
+    // A page that loaded but drew nothing must not pass: both pages have painted (a
+    // page hidden under the menu of the covered scene draws no frames, its snapshot
+    // shows instead).
+    if mode != Mode::Covered {
+        // Looked up again: scrolling can give the page a new view.
+        let inline = cx.update(|cx| embed(INLINE_ID, cx)).unwrap_or(inline);
+        let pane = cx.update(|cx| embed(PANE_ID, cx)).unwrap_or(pane);
+        painted(cx, &inline, "the inline page").await?;
+        painted(cx, &pane, "the 产出 pane page").await?;
+    }
     // Let the last frame draw.
     cx.background_executor()
         .timer(Duration::from_millis(250))
         .await;
     Ok(())
+}
+
+/// Waits until `page` has drawn: the browser runs animation-frame callbacks only when it
+/// draws the page, so two of them in a row mean a picture of the page exists.
+async fn painted(
+    cx: &mut AsyncApp,
+    page: &Entity<WebEmbedState>,
+    what: &str,
+) -> Result<(), String> {
+    const MARK: &str = "window.__tcDrew || (window.__tcDrew = 0, \
+        requestAnimationFrame(function () { requestAnimationFrame(function () { \
+        window.__tcDrew = 1; }); })); String(window.__tcDrew)";
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut last = String::new();
+    while Instant::now() < deadline {
+        let drew = eval(cx, page, MARK).await;
+        if drew == "1" {
+            return Ok(());
+        }
+        last = drew;
+        cx.background_executor()
+            .timer(Duration::from_millis(100))
+            .await;
+    }
+    Err(format!(
+        "{what} did not paint (its script answered {last:?})"
+    ))
 }
 
 /// True once the scene reached its end state.

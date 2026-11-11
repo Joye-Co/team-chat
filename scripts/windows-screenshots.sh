@@ -37,7 +37,7 @@ echo "artifact window exit code: $window_code"
 # its picture, and a WebView2 child window does not always answer): <dir>/screen/. With
 # a long settle: without a graphics card a page's first paint lags its load by seconds.
 set +e
-TC_CAPTURE_SCREEN=1 "$exe" --screenshot "$dir/screen" --scenes web-embed,artifact-pane-v2,compose-extend \
+TC_CAPTURE_SCREEN=1 "$exe" --screenshot "$dir/screen" --scenes web-embed,web-embed-scrolled,artifact-pane-v2,compose-extend,artifacts-grid \
   --settle-ms 4000 2>&1 \
   | tee -a "$dir/selftest.log"
 set -e
