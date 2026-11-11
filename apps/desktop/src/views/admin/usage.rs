@@ -663,14 +663,29 @@ impl AdminView {
         let line = budget_cents.filter(|b| *b > 0).map(|b| {
             let per_day = b as f64 / 100. / 7.;
             let frac = (1. - per_day / max).clamp(0., 1.) as f32;
-            div()
+            let line = div()
                 .absolute()
                 .left_0()
                 .right_0()
-                .top(relative(frac * 0.86))
-                .border_t_1()
-                .border_dashed()
-                .border_color(k.amber)
+                .top(relative(frac * 0.86));
+            // GPUI's Direct3D renderer draws nothing for a dashed border on a box
+            // without a height (seen in the Windows screenshots): the same 2 on,
+            // 1 off dashes as boxes there.
+            if cfg!(target_os = "windows") {
+                line.h(gpui::px(1.))
+                    .flex()
+                    .gap(gpui::px(1.))
+                    .overflow_hidden()
+                    .children((0..400).map(|_| {
+                        div()
+                            .flex_none()
+                            .w(gpui::px(2.))
+                            .h(gpui::px(1.))
+                            .bg(k.amber)
+                    }))
+            } else {
+                line.border_t_1().border_dashed().border_color(k.amber)
+            }
         });
         let legend = top
             .iter()

@@ -14,7 +14,10 @@
 //! The same totals put the unread count on the app's taskbar buttons
 //! (`ITaskbarList3::SetOverlayIcon`), as the Dock icon's badge on macOS: a red disc with the
 //! count, drawn here ([`super::tray_icon::badge_bgra`]) because Windows takes an icon, not
-//! a number. It is set again when a window opens ([`window_attached`]).
+//! a number. A window has no taskbar button until the shell says so (`TaskbarButtonCreated`,
+//! sent to that window): every top-level window of the app is watched for it
+//! ([`watch_window_buttons`]), and gets the badge when its button exists, also after
+//! Explorer starts again.
 //!
 //! The icon belongs to the hidden events window ([`crate::win32`]). Its procedure only
 //! sends on a channel that a GPUI task drains. The menu is the system's own popup menu; its
@@ -28,20 +31,21 @@ use futures::{
 use gpui::{Action, App, Global};
 use windows::{
     Win32::{
-        Foundation::{HWND, POINT},
+        Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM},
         Graphics::Gdi::{CreateBitmap, DeleteObject},
         System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance},
         UI::{
             Shell::{
-                ITaskbarList3, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
-                NOTIFYICONDATAW, Shell_NotifyIconW, TaskbarList,
+                DefSubclassProc, ITaskbarList3, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD,
+                NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW, RemoveWindowSubclass, SetWindowSubclass,
+                Shell_NotifyIconW, TaskbarList,
             },
             WindowsAndMessaging::{
                 AppendMenuW, CreateIconIndirect, CreatePopupMenu, DestroyIcon, DestroyMenu,
                 GetCursorPos, HICON, ICONINFO, MF_SEPARATOR, MF_STRING, PostMessageW,
                 RegisterWindowMessageW, SetForegroundWindow, TPM_BOTTOMALIGN, TPM_NONOTIFY,
                 TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_APP, WM_CONTEXTMENU,
-                WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WM_SETTINGCHANGE,
+                WM_LBUTTONUP, WM_NCDESTROY, WM_NULL, WM_RBUTTONUP, WM_SETTINGCHANGE,
             },
         },
     },
@@ -174,26 +178,85 @@ fn badge_fill(cx: &App) -> [u8; 3] {
     [byte(red.b), byte(red.g), byte(red.r)]
 }
 
-/// The shell's taskbar object, made on first use. `None` when the shell has no taskbar
-/// (no Explorer in this session).
+thread_local! {
+    /// The shell's taskbar object. Dropped when Explorer starts again (the old one talks
+    /// to a taskbar that is gone).
+    static TASKBAR: std::cell::RefCell<Option<ITaskbarList3>> =
+        const { std::cell::RefCell::new(None) };
+    /// Where a window's subclass says that its taskbar button exists.
+    static BUTTONS: std::cell::RefCell<Option<UnboundedSender<isize>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The shell's taskbar object, made on first use and again after [`forget_taskbar`].
+/// `None` when the shell has no taskbar now (no Explorer in this session); asked again
+/// next time.
 fn taskbar() -> Option<ITaskbarList3> {
-    thread_local! {
-        static TASKBAR: std::cell::OnceCell<Option<ITaskbarList3>> =
-            const { std::cell::OnceCell::new() };
-    }
-    TASKBAR.with(|t| {
-        t.get_or_init(|| {
-            // SAFETY: GPUI initialized COM on this (the main) thread; the object is used
-            // on this thread only.
-            unsafe {
-                let list: ITaskbarList3 =
-                    CoCreateInstance(&TaskbarList, None, CLSCTX_INPROC_SERVER).ok()?;
-                list.HrInit().ok()?;
-                Some(list)
-            }
-        })
-        .clone()
+    TASKBAR.with_borrow_mut(|taskbar| {
+        if taskbar.is_none() {
+            // SAFETY: COM is initialized on this thread (GPUI does it on the main
+            // thread); the object is used on this thread only.
+            *taskbar = unsafe {
+                CoCreateInstance::<_, ITaskbarList3>(&TaskbarList, None, CLSCTX_INPROC_SERVER)
+                    .ok()
+                    .filter(|list| list.HrInit().is_ok())
+            };
+        }
+        taskbar.clone()
     })
+}
+
+/// Explorer started again: its taskbar is a new one.
+fn forget_taskbar() {
+    TASKBAR.with_borrow_mut(|taskbar| *taskbar = None);
+}
+
+/// The message the shell sends to a window when its taskbar button exists; only from
+/// then on does the button take an overlay.
+fn taskbar_button_created() -> u32 {
+    // SAFETY: a static string; the id is the same for the whole session.
+    unsafe { RegisterWindowMessageW(w!("TaskbarButtonCreated")) }
+}
+
+const BUTTON_SUBCLASS: usize = 0x5443_4254;
+
+unsafe extern "system" fn button_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _id: usize,
+    created: usize,
+) -> LRESULT {
+    if created != 0 && msg == created as u32 {
+        BUTTONS.with_borrow(|tx| {
+            if let Some(tx) = tx {
+                let _ = tx.unbounded_send(hwnd.0 as isize);
+            }
+        });
+    }
+    // SAFETY: the arguments are the ones this procedure was called with; the subclass
+    // is removed with the window.
+    unsafe {
+        if msg == WM_NCDESTROY {
+            let _ = RemoveWindowSubclass(hwnd, Some(button_proc), BUTTON_SUBCLASS);
+        }
+        DefSubclassProc(hwnd, msg, wparam, lparam)
+    }
+}
+
+/// Listens on `hwnd` (a window of this thread) for its taskbar button being created.
+fn watch_button(hwnd: HWND) -> bool {
+    // SAFETY: a window of this thread; the procedure lives for the whole process.
+    unsafe {
+        SetWindowSubclass(
+            hwnd,
+            Some(button_proc),
+            BUTTON_SUBCLASS,
+            taskbar_button_created() as usize,
+        )
+        .as_bool()
+    }
 }
 
 /// Puts the unread badge on `hwnd`'s taskbar button, or takes it off when nothing is
@@ -229,18 +292,58 @@ fn sync_overlays(unread: u32, cx: &mut App) {
     }
 }
 
-/// A window opened: its taskbar button gets the badge too. The button exists only after
-/// the window is shown, so this runs on a later turn.
-pub fn window_attached(cx: &mut App) {
-    cx.defer(|cx| {
-        if let Some(unread) = cx
-            .try_global::<StatusItem>()
-            .and_then(|s| s.shown)
-            .map(|(unread, _)| unread)
-        {
-            sync_overlays(unread, cx);
+/// The unread count the badge shows now.
+fn badge_count(cx: &App) -> u32 {
+    cx.try_global::<StatusItem>()
+        .and_then(|s| s.shown)
+        .map_or(0, |(unread, _)| unread)
+}
+
+/// How long after a window opens the badge is set again, in case the button's message
+/// came before the window was watched.
+const RETRIES: [std::time::Duration; 2] = [
+    std::time::Duration::from_millis(400),
+    std::time::Duration::from_millis(2000),
+];
+
+/// Gives every top-level window of the app the badge as soon as its taskbar button
+/// exists: now for the windows that are open, when it opens for a later one (every window
+/// has gpui-component's root view), and again when Explorer makes new buttons.
+fn watch_window_buttons(cx: &mut App) {
+    let (tx, mut rx) = unbounded::<isize>();
+    BUTTONS.with_borrow_mut(|slot| *slot = Some(tx));
+    cx.spawn(async move |cx| {
+        while let Some(hwnd) = rx.next().await {
+            cx.update(|cx| {
+                let (unread, fill) = (badge_count(cx), badge_fill(cx));
+                set_overlay(HWND(hwnd as *mut _), unread, fill);
+            });
         }
-    });
+    })
+    .detach();
+    cx.observe_new::<gpui_base::Root>(|_, window, cx| {
+        let Some(hwnd) = window.and_then(|window| crate::win32::hwnd(window)) else {
+            return;
+        };
+        watch_button(hwnd);
+        let hwnd = hwnd.0 as isize;
+        cx.spawn(async move |_, cx| {
+            for wait in RETRIES {
+                cx.background_executor().timer(wait).await;
+                cx.update(|cx| {
+                    let (unread, fill) = (badge_count(cx), badge_fill(cx));
+                    set_overlay(HWND(hwnd as *mut _), unread, fill);
+                });
+            }
+        })
+        .detach();
+    })
+    .detach();
+    for handle in cx.windows() {
+        if let Ok(Some(hwnd)) = handle.update(cx, |_, window, _| crate::win32::hwnd(window)) {
+            watch_button(hwnd);
+        }
+    }
 }
 
 fn icon_data(hwnd: HWND) -> NOTIFYICONDATAW {
@@ -383,6 +486,7 @@ pub fn install(services: Services, cx: &mut App) {
         tooltip: String::new(),
         icon: None,
     });
+    watch_window_buttons(cx);
     update(&services, cx);
 
     let on_event = services.clone();
@@ -409,6 +513,9 @@ pub fn install(services: Services, cx: &mut App) {
                     });
                 }
                 Event::Refresh => cx.update(|cx| {
+                    // After an Explorer restart the taskbar is a new one; its buttons
+                    // announce themselves to their windows, which then get the badge.
+                    forget_taskbar();
                     cx.global_mut::<StatusItem>().shown = None;
                     update(&on_event, cx);
                 }),
@@ -540,7 +647,7 @@ mod tests {
             System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx},
             UI::WindowsAndMessaging::{
                 CreateWindowExW, DestroyWindow, DispatchMessageW, MSG, PM_REMOVE, PeekMessageW,
-                WINDOW_EX_STYLE, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+                SW_HIDE, SW_SHOW, ShowWindow, WINDOW_EX_STYLE, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
             },
         };
         let fill = [0x30, 0x3b, 0xff];
@@ -579,9 +686,23 @@ mod tests {
                     std::thread::sleep(std::time::Duration::from_millis(10));
                 }
             };
+            let (tx, mut rx) = unbounded::<isize>();
+            BUTTONS.with_borrow_mut(|slot| *slot = Some(tx));
+            assert!(watch_button(hwnd), "the window is watched");
+            // Hiding and showing makes the shell create the button again, now watched.
+            let _ = ShowWindow(hwnd, SW_HIDE);
             pump();
+            let _ = ShowWindow(hwnd, SW_SHOW);
+            pump();
+            pump();
+            let announced = rx.try_recv().ok() == Some(hwnd.0 as isize);
+            println!("taskbar button announced to its window: {announced}");
             // A session without Explorer has no taskbar: nothing to check there.
             if taskbar().is_some() {
+                assert!(announced, "the shell told the window its button exists");
+                // A new taskbar (Explorer started again) gets a new object.
+                forget_taskbar();
+                assert!(taskbar().is_some());
                 let set = set_overlay(hwnd, 7, fill);
                 pump();
                 let cleared = set_overlay(hwnd, 0, fill);

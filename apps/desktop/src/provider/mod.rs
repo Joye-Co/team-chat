@@ -32,6 +32,7 @@ pub mod instance;
 pub mod macos;
 mod panes;
 pub mod persist;
+mod phone_sign_in;
 #[cfg(target_os = "windows")]
 pub mod windows;
 // Proof chips from done cards (1.1.0).
@@ -1251,6 +1252,22 @@ impl ChatProvider for CoreProvider {
 
     fn my_email(&self) -> crate::data::EmailReply<Option<String>> {
         self.my_email_inner()
+    }
+
+    fn offer_phone_sign_in(&self) -> crate::data::EmailReply<crate::data::PhoneOffer> {
+        self.offer_phone_sign_in_inner()
+    }
+
+    fn phone_offer_state(&self, id: &str) -> crate::data::EmailReply<crate::data::PhoneOfferState> {
+        self.phone_offer_state_inner(id)
+    }
+
+    fn peek_phone_code(&self, code: &str) -> crate::data::EmailReply<String> {
+        self.peek_phone_code_inner(code)
+    }
+
+    fn approve_phone_code(&self, code: &str) -> crate::data::EmailReply<()> {
+        self.approve_phone_code_inner(code)
     }
 
     fn add_email_code(&self, email: &str) -> crate::data::EmailReply<()> {

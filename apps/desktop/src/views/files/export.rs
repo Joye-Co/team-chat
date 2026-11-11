@@ -416,9 +416,22 @@ fn copy_to(local: &Local, dest: &Path) -> std::io::Result<()> {
 pub fn share(target: &FileRef, at: Point<Pixels>, window: &mut Window, cx: &mut App) {
     let handle = window.window_handle();
     target.with_local(cx, move |local, cx| {
+        #[cfg(not(target_os = "windows"))]
         let _ = handle.update(cx, |_, window, _| {
             super::native::share(vec![local.item], at, window)
         });
+        // Windows centers its share UI on the window; `at` has no use there.
+        #[cfg(target_os = "windows")]
+        {
+            let _ = at;
+            let hwnd = handle
+                .update(cx, |_, window, _| crate::win32::hwnd(window))
+                .ok()
+                .flatten();
+            if let Some(hwnd) = hwnd {
+                super::native::win_share::share(vec![local.item], hwnd.0 as isize, cx);
+            }
+        }
     });
 }
 

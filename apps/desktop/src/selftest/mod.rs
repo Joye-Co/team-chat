@@ -318,6 +318,10 @@ fn exit_now(code: i32) -> ! {
 
 async fn run_all(options: &Options, cx: &mut AsyncApp) -> bool {
     let mut all_ok = true;
+    if !capture::dpi_aware() {
+        eprintln!("the process is not per-monitor DPI aware: the exe has no manifest");
+        all_ok = false;
+    }
     let mut shots = Vec::new();
     for &mode in &options.modes {
         cx.update(|cx| {
@@ -584,6 +588,12 @@ async fn shoot(
 fn park_pointer(handle: AnyWindowHandle, at: gpui::Point<Pixels>, cx: &mut AsyncApp) {
     let _ = cx.update(|cx| {
         handle.update(cx, |_, window, cx| {
+            // Hover points are measured on the Mac's layout; off the Mac the
+            // caption strip pushes the content down.
+            let mut at = at;
+            if at.y >= gpui::px(0.) {
+                at.y += crate::ui::native::window_chrome::height(window);
+            }
             window.dispatch_event(
                 gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
                     position: at,

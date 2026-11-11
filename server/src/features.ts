@@ -14,6 +14,8 @@ import "./sidechat";
 import "./settings";
 import "./desknote";
 import "./email";
+import "./password";
+import "./qr";
 import "./aiservice";
 import "./autotitle";
 import "./summary";

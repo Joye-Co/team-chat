@@ -1110,6 +1110,25 @@ pub enum EmailError {
     Other,
 }
 
+/// A code this Mac shows so a phone signs in to my account.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PhoneOffer {
+    pub id: String,
+    /// `XXXX-XXXX`, shown under the QR image.
+    pub code: String,
+    /// What the QR image holds.
+    pub qr_text: String,
+    pub expires_at: u64,
+}
+
+/// Where a [`PhoneOffer`] stands.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PhoneOfferState {
+    Waiting,
+    Used { device_name: String },
+    Expired,
+}
+
 /// The answer to an email sign-in request (see [`AdminReply`]).
 pub type EmailReply<T> = futures::channel::oneshot::Receiver<Result<T, EmailError>>;
 
@@ -1407,6 +1426,22 @@ pub trait ChatProvider: Send + Sync + 'static {
     }
     /// 账号 › 登录邮箱: removes my sign-in email.
     fn remove_email(&self) -> EmailReply<()> {
+        email_reply_now(Err(EmailError::NotSetUp))
+    }
+    /// 账号 › 在手机上登录: a one-time code a phone scans to sign in to my account.
+    fn offer_phone_sign_in(&self) -> EmailReply<PhoneOffer> {
+        email_reply_now(Err(EmailError::NotSetUp))
+    }
+    /// Whether a phone used the code of [`Provider::offer_phone_sign_in`].
+    fn phone_offer_state(&self, _id: &str) -> EmailReply<PhoneOfferState> {
+        email_reply_now(Err(EmailError::NotSetUp))
+    }
+    /// 账号 › 输入手机上的码: the name of the device that shows `code`.
+    fn peek_phone_code(&self, _code: &str) -> EmailReply<String> {
+        email_reply_now(Err(EmailError::NotSetUp))
+    }
+    /// Lets the device that shows `code` in to my account.
+    fn approve_phone_code(&self, _code: &str) -> EmailReply<()> {
         email_reply_now(Err(EmailError::NotSetUp))
     }
     /// Uses another server. The session of the server in use stays saved
@@ -3116,7 +3151,7 @@ impl DeviceKind {
     /// The kind a device name suggests.
     pub fn from_name(name: &str) -> Self {
         let n = name.to_lowercase();
-        if n.contains("iphone") || n.contains("ipad") {
+        if n.contains("iphone") || n.contains("ipad") || n.contains("android") {
             DeviceKind::Phone
         } else if [
             "imac",
@@ -3129,6 +3164,8 @@ impl DeviceKind {
         .iter()
         .any(|k| n.contains(k))
             && !n.contains("macbook")
+            // Windows names a new PC `DESKTOP-…` or `LAPTOP-…`.
+            || n.starts_with("desktop-")
         {
             DeviceKind::Desktop
         } else {

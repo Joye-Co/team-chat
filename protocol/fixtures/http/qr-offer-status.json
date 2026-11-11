@@ -1,0 +1,8 @@
+{
+  "kind": "QrOfferStatus",
+  "valid": true,
+  "value": {
+    "state": "used",
+    "deviceName": "Joye 的 iPhone"
+  }
+}

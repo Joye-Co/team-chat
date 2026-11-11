@@ -2,8 +2,8 @@ name: Release
 
 # Makes a desktop release on a macOS runner by running scripts/release.sh, the same script a
 # maintainer runs on a Mac: release-check, version and CHANGELOG date, build-dmg + test-dmg,
-# build-daemon, the chore(release) commit on main, the tag, the GitHub Release with the DMG, the
-# daemon and their .sha256 files, and PUT /v1/admin/releases/<version> on production.
+# build-daemon, the chore(release) commit on main, the tag, the GitHub Release with the DMG and the
+# daemon (GitHub keeps each asset's SHA-256 digest), and PUT /v1/admin/releases/<version> on production.
 #
 # Manual only (Actions tab, or `gh workflow run release.yml -f version=1.2.6 -f mode=release`).
 # Not on a tag push: the release commit (version and CHANGELOG date) must come before the tag,
@@ -211,8 +211,8 @@ jobs:
             release) scripts/release.sh "${args[@]}" ;;
             upload-only)
               mkdir -p dist
-              gh release download "v$VERSION" --pattern '*.dmg' --pattern '*.dmg.sha256' --dir dist
-              (cd dist && shasum -a 256 -c ./*.dmg.sha256)
+              gh release download "v$VERSION" --pattern '*.dmg' --dir dist
+              scripts/check-release-digest.sh "v$VERSION" dist/*.dmg
               scripts/release.sh "$VERSION" --env production --upload-only ;;
           esac
 
@@ -406,7 +406,7 @@ jobs:
         if: inputs.mode == 'upload-only'
         run: |
           mkdir -p dist
-          if ! gh release download "v$VERSION" --pattern '*-setup.exe' --pattern '*-setup.exe.sha256' --dir dist; then
+          if ! gh release download "v$VERSION" --pattern '*-setup.exe' --dir dist; then
             echo "::notice::release v$VERSION has no Windows installer; nothing to upload"
             echo "NO_INSTALLER=1" >>"$GITHUB_ENV"
           fi
@@ -414,10 +414,13 @@ jobs:
       - name: Publish
         if: env.NO_INSTALLER != '1'
         run: |
-          (cd dist && for sum in ./*.sha256; do sha256sum -c "$sum"; done)
           if [ "$MODE" = release ]; then
-            # The installer, the Windows daemon alone, and their .sha256 files.
-            gh release upload "v$VERSION" dist/*.exe dist/*.exe.sha256 --clobber
+            # The artifact carries the build's .sha256 files: check the transfer, then add the
+            # installer and the Windows daemon alone (GitHub keeps their digests).
+            (cd dist && for sum in ./*.sha256; do sha256sum -c "$sum"; done)
+            gh release upload "v$VERSION" dist/*.exe --clobber
+          else
+            scripts/check-release-digest.sh "v$VERSION" dist/*-setup.exe
           fi
           args=("$VERSION" --env production --upload-only --platform windows)
           notes="docs/releases/$VERSION.md"

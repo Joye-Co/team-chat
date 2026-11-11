@@ -46,6 +46,7 @@ pub fn preview_opens(path: &std::path::Path, windows: bool) -> bool {
 
 /// Opens the share picker for `paths` at `at` (window points from the top left of the
 /// content) in `window`'s content view.
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 pub fn share(paths: Vec<PathBuf>, at: Point<Pixels>, window: &Window) {
     #[cfg(target_os = "macos")]
     {
@@ -59,15 +60,8 @@ pub fn share(paths: Vec<PathBuf>, at: Point<Pixels>, window: &Window) {
             mac::share(&view, &paths, x, y);
         });
     }
-    // Windows centers its share UI on the window; `at` has no use there.
-    #[cfg(target_os = "windows")]
-    {
-        let _ = at;
-        if let Some(hwnd) = crate::win32::hwnd(window) {
-            win_share::share(paths, hwnd.0 as isize);
-        }
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    // Windows shows its share UI through [`win_share::share`], which needs the app.
+    #[cfg(not(target_os = "macos"))]
     let _ = (paths, at, window);
 }
 
@@ -76,8 +70,8 @@ pub fn share(paths: Vec<PathBuf>, at: Point<Pixels>, window: &Window) {
 ///
 /// A Win32 window has no share contract of its own: `IDataTransferManagerInterop` gives the
 /// manager for an HWND and shows the UI for it. The files are opened as storage items on
-/// a background thread first (an asynchronous WinRT call that must not block the UI
-/// thread); the UI then asks for the data once, on the UI thread, and gets them.
+/// a background thread (an asynchronous WinRT call that must not block the UI thread);
+/// then the picker opens, asks for the data once on the UI thread, and gets them.
 #[cfg(target_os = "windows")]
 pub mod win_share {
     use std::{cell::RefCell, path::PathBuf};
@@ -159,8 +153,9 @@ pub mod win_share {
         Ok(interop)
     }
 
-    /// Shows the share UI of the window `hwnd` for `paths`. Call on the UI thread.
-    pub fn share(paths: Vec<PathBuf>, hwnd: isize) {
+    /// Shows the share UI of the window `hwnd` for `paths`. The files are opened on a
+    /// background thread; the UI thread only shows the picker once they are.
+    pub fn share(paths: Vec<PathBuf>, hwnd: isize, cx: &mut gpui::App) {
         let Some(title) = paths
             .first()
             .and_then(|p| p.file_name())
@@ -168,35 +163,26 @@ pub mod win_share {
         else {
             return;
         };
-        let (tx, rx) = std::sync::mpsc::channel();
-        let opened = std::thread::Builder::new()
-            .name("share-items".into())
-            .spawn(move || {
-                let _ = tx.send(storage_items(&paths));
-            });
-        if opened.is_err() {
-            return;
-        }
-        // Opening a local file takes milliseconds; the picker must open from this turn of
-        // the UI thread (it belongs to the click).
-        let items = match rx.recv_timeout(std::time::Duration::from_secs(5)) {
-            Ok(Ok(items)) => items,
-            Ok(Err(error)) => {
-                tracing::warn!(%error, "cannot open the files to share");
-                return;
+        let opening = cx
+            .background_executor()
+            .spawn(async move { storage_items(&paths) });
+        cx.spawn(async move |_| {
+            let items = match opening.await {
+                Ok(items) => items,
+                Err(error) => {
+                    tracing::warn!(%error, "cannot open the files to share");
+                    return;
+                }
+            };
+            let hwnd = HWND(hwnd as *mut _);
+            let shown = prepare(hwnd, &title, items)
+                // SAFETY: as in `prepare`; a window that closed meanwhile is an error.
+                .and_then(|interop| unsafe { interop.ShowShareUIForWindow(hwnd) });
+            if let Err(error) = shown {
+                tracing::warn!(%error, "cannot show the share UI");
             }
-            Err(_) => {
-                tracing::warn!("opening the files to share took too long");
-                return;
-            }
-        };
-        let hwnd = HWND(hwnd as *mut _);
-        let shown = prepare(hwnd, &title, items)
-            // SAFETY: as in `prepare`.
-            .and_then(|interop| unsafe { interop.ShowShareUIForWindow(hwnd) });
-        if let Err(error) = shown {
-            tracing::warn!(%error, "cannot show the share UI");
-        }
+        })
+        .detach();
     }
 }
 

@@ -1,0 +1,8 @@
+{
+  "kind": "QrPollRequest",
+  "valid": true,
+  "value": {
+    "id": "01JQRREQ00000000000000000",
+    "secret": "Zm9vYmFyYmF6cXV4cXV1eHF1dXhxdXV4cXV1eHF1dXg"
+  }
+}

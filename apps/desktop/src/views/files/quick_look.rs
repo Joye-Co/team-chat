@@ -112,20 +112,36 @@ pub fn show(target: &FileRef, local: Local, cx: &mut App) {
 
 /// Starts reading the attachment at `path` for the viewer. `None` when no viewer shows it.
 pub fn request_attachment(name: &str, sha256: &str, path: &Path, cx: &mut App) -> Option<MediaKey> {
-    let (Preview::Viewer(_), Some(dir), Some(entry)) =
-        (preview_of(path), path.parent(), path.file_name())
-    else {
+    let Preview::Viewer(_) = preview_of(path) else {
         return None;
     };
     let key = attachment_key(sha256, path);
-    store::request_folder(
-        &key,
-        name,
-        dir.to_path_buf(),
-        entry.to_string_lossy().into_owned(),
-        cx,
-    );
+    let (dir, entry) = stage(&key.artifact_id, path)?;
+    store::request_folder(&key, name, dir, entry, cx);
     Some(key)
+}
+
+/// A folder that holds only this file, for the viewer to read: the viewer takes a folder
+/// as one 产出 version and shows every picture in it as a set, and the cache keeps the
+/// same content under every name it was sent with in one folder. A hard link (a copy
+/// when the temp folder is on another volume), made once per content.
+fn stage(key: &str, path: &Path) -> Option<(std::path::PathBuf, String)> {
+    stage_in(&std::env::temp_dir().join("tc-quick-look"), key, path)
+}
+
+fn stage_in(root: &Path, key: &str, path: &Path) -> Option<(std::path::PathBuf, String)> {
+    let name = path.file_name()?;
+    let dir = root.join(key);
+    let staged = dir.join(name);
+    if !staged.is_file() {
+        // Only this file: an older name of the same content goes.
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).ok()?;
+        if std::fs::hard_link(path, &staged).is_err() {
+            std::fs::copy(path, &staged).ok()?;
+        }
+    }
+    Some((dir, name.to_string_lossy().into_owned()))
 }
 
 /// Opens the viewer sheet on the active window, after the current update.
@@ -212,6 +228,37 @@ mod tests {
             attachment_key("", Path::new("/a.png")),
             attachment_key("", Path::new("/b.png"))
         );
+    }
+
+    /// The cache keeps one content under every name it was sent with in one folder; the
+    /// viewer gets a folder with the one file, so one picture never shows as a set of two.
+    #[test]
+    fn the_viewer_reads_a_folder_with_only_the_file() {
+        let root = tempfile::tempdir().unwrap();
+        let cache = root.path().join("cache");
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(cache.join("a.png"), b"png").unwrap();
+        std::fs::write(cache.join("b.png"), b"png").unwrap();
+        let stage_root = root.path().join("stage");
+        let (dir, entry) = stage_in(&stage_root, "file-abc", &cache.join("a.png")).unwrap();
+        assert_eq!(entry, "a.png");
+        let names = |dir: &Path| {
+            let mut names: Vec<String> = std::fs::read_dir(dir)
+                .unwrap()
+                .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            names.sort();
+            names
+        };
+        assert_eq!(names(&dir), ["a.png"]);
+        assert_eq!(std::fs::read(dir.join("a.png")).unwrap(), b"png");
+        // The same content under its other name replaces it.
+        let (dir, entry) = stage_in(&stage_root, "file-abc", &cache.join("b.png")).unwrap();
+        assert_eq!(
+            (names(&dir), entry.as_str()),
+            (vec!["b.png".to_string()], "b.png")
+        );
+        assert!(stage_in(&stage_root, "file-x", &cache.join("gone.png")).is_none());
     }
 
     #[test]
