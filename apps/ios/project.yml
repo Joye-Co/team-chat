@@ -55,6 +55,8 @@ targets:
         NSSupportsLiveActivities: true
         AppGroup: $(APP_GROUP)
         AppBundleId: $(APP_BUNDLE_ID)
+        # The operator's server (from the ops checkout at build time); empty asks at sign-in.
+        DefaultServer: $(DEFAULT_SERVER)
     entitlements:
       path: Generated/Mobile.entitlements
       properties:

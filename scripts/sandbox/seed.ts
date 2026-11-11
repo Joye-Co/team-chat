@@ -37,6 +37,9 @@ export interface SeedOptions {
   startMachine?: () => Promise<void>;
 }
 
+/** The sample owner's sign-in email. */
+export const OWNER_EMAIL = "owner@example.com";
+
 /** AI members that run on the sample machine, and their runtime. */
 const RUNNERS = [
   ["forge", "claude"],
@@ -153,6 +156,14 @@ export async function seed(o: SeedOptions): Promise<Json> {
   });
   const owner = boot.token;
   writeSecret(join(o.out, "owner-token"), owner);
+
+  // The owner's sign-in email, so a client's sign-in screens can be tried: ask for a code at
+  // owner@example.com, then read it with `bun scripts/sandbox/email-code.ts`.
+  await call(url, "POST", "/v1/me/email/code", { token: owner, body: { email: OWNER_EMAIL } });
+  const sent = await call<{ codes: { code: string }[] }>(url, "GET", `/v1/admin/email-outbox?email=${encodeURIComponent(OWNER_EMAIL)}`, {
+    admin: o.adminSecret,
+  });
+  await call(url, "POST", "/v1/me/email", { token: owner, body: { email: OWNER_EMAIL, code: sent.codes[0].code } });
   await call(url, "PATCH", `/v1/members/${boot.member.id}`, { token: owner, body: { role: "负责人" } });
   const ids = { joye: boot.member.id } as Record<Key, string>;
   const tokens = { joye: owner } as Record<Key, string>;
