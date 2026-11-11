@@ -493,7 +493,10 @@ jobs:
       # What Codex's own Windows sandbox did to chat-run (tests/runtimes.rs writes it down).
       - name: Codex Windows sandbox and chat-run (what happened)
         if: always()
-        run: cat target/tmp/codex-windows-sandbox.json || true
+        shell: bash
+        run: |
+          cat target/tmp/codex-windows-sandbox.json || true
+          cat target/tmp/codex-windows-read-only.json || true
       # The same as on Linux: with managed settings that allow only managed hooks, the real CLI
       # never gets the prompt of a gated run.
       - name: A gated run does not start when only managed hooks are allowed

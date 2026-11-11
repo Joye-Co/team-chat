@@ -958,6 +958,80 @@ async fn codex_sandbox_lets_chat_run_answer_without_network() {
     assert!(out.starts_with("closed"), "{net}");
 }
 
+/// A folder that is not under the temp folder (Codex's sandboxes count the temp folder as
+/// writable): under the user's local application data on Windows.
+fn outside_temp() -> tempfile::TempDir {
+    match std::env::var_os("LOCALAPPDATA").filter(|_| cfg!(windows)) {
+        Some(local) => tempfile::tempdir_in(local).unwrap(),
+        None => tempfile::tempdir().unwrap(),
+    }
+}
+
+/// Windows: what Codex's `read-only` does to a command with each setting of Codex's own
+/// Windows sandbox (none, `unelevated`, `elevated`): a write in the working folder, a write
+/// outside it and outside the temp folder, and reading a file. Written to
+/// `codex-windows-read-only.json` in the test folder (CI prints it). Asserts nothing but that
+/// no call hangs; [`codex_read_only_sandbox_writes_nothing`] asserts for what the daemon sends.
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread")]
+async fn codex_read_only_on_windows_report() {
+    let Some(codex) = real_codex() else { return };
+    let mut report = serde_json::Map::new();
+    for mode in ["none", "unelevated", "elevated"] {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("codex-home");
+        std::fs::create_dir_all(&home).unwrap();
+        let s = spec(tmp.path(), "codex", "codex", &[], "hi");
+        std::fs::write(s.cwd.join("seed.txt"), "seed-text").unwrap();
+        let mut args: Vec<String> = ["app-server", "-c", "sandbox_mode=\"read-only\""]
+            .map(String::from)
+            .into();
+        args.extend(["-c".into(), "approval_policy=\"never\"".into()]);
+        if mode != "none" {
+            args.extend(["-c".into(), format!("windows.sandbox=\"{mode}\"")]);
+        }
+        let outside = outside_temp();
+        let inside_file = s.cwd.join("written.txt");
+        let outside_file = outside.path().join("written.txt");
+        let mut calls = serde_json::Map::new();
+        for (what, line) in [
+            (
+                "a write in the working folder",
+                format!("echo x> {}", inside_file.display()),
+            ),
+            (
+                "a write outside it",
+                format!("echo x> {}", outside_file.display()),
+            ),
+            ("reading a file", "type seed.txt".to_string()),
+        ] {
+            let command: Vec<String> = vec!["cmd.exe".into(), "/c".into(), line];
+            let (codex, args, home, cwd) =
+                (codex.clone(), args.clone(), home.clone(), s.cwd.clone());
+            let answer = tokio::task::spawn_blocking(move || {
+                codex_exec(&codex, &args, &home, &cwd, &command, serde_json::json!({}))
+            })
+            .await
+            .unwrap();
+            calls.insert(what.into(), answer);
+        }
+        calls.insert(
+            "the file in the working folder exists".into(),
+            inside_file.exists().into(),
+        );
+        calls.insert(
+            "the file outside exists".into(),
+            outside_file.exists().into(),
+        );
+        report.insert(mode.into(), calls.into());
+    }
+    std::fs::write(
+        std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("codex-windows-read-only.json"),
+        serde_json::to_string_pretty(&report).unwrap(),
+    )
+    .unwrap();
+}
+
 /// A side chat run of Codex is read-only on every system: with the sandbox the daemon sends
 /// for it (`read-only`, approval `never`) the real CLI does not let a command write a file,
 /// in the working folder or outside it. Through `command/exec` (the server's sandbox, no
@@ -978,7 +1052,7 @@ async fn codex_read_only_sandbox_writes_nothing() {
     let mut args = runtime::codex::app_server_args(&s).unwrap();
     args.extend(["-c".to_string(), format!("sandbox_mode=\"{sandbox}\"")]);
     args.extend(["-c".to_string(), format!("approval_policy=\"{approval}\"")]);
-    let outside = tempfile::tempdir().unwrap();
+    let outside = outside_temp();
     for target in [
         s.cwd.join("written.txt"),
         outside.path().join("written.txt"),
@@ -1291,7 +1365,7 @@ async fn codex_windows_sandbox_mode(
         let (codex, args, home, cwd) = (codex.clone(), args.clone(), home.clone(), s.cwd.clone());
         tokio::task::spawn_blocking(move || codex_exec(&codex, &args, &home, &cwd, &command, env))
     };
-    let outside = tempfile::tempdir().unwrap();
+    let outside = outside_temp();
     let target = outside.path().join("written.txt");
     let write = exec(
         vec![
