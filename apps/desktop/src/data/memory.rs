@@ -1,7 +1,7 @@
 //! 沉淀 (memory) as the app sees it (docs/protocol.md, "Memory"): what the team and an AI
 //! member keep, and the daily 记忆更新. The views read these; the provider maps the wire.
 
-use super::{MemberId, Millis};
+use super::{GroupId, MemberId, Millis};
 
 /// Where a memory lives.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -10,14 +10,38 @@ pub enum MemoryScope {
     Team,
     /// An AI member's own lessons and playbooks: owners and that member write them.
     Member(MemberId),
+    /// 群里的约定: the group's members read and write it.
+    Group(GroupId),
+    /// 我的偏好: only that person reads and writes it.
+    Person(MemberId),
 }
 
 impl MemoryScope {
-    /// The wire form: `team` or `member:<id>`.
+    /// The wire form: `team`, `member:<id>`, `group:<id>` or `person:<id>`.
     pub fn wire(&self) -> String {
         match self {
             MemoryScope::Team => "team".into(),
             MemoryScope::Member(id) => format!("member:{id}"),
+            MemoryScope::Group(id) => format!("group:{id}"),
+            MemoryScope::Person(id) => format!("person:{id}"),
+        }
+    }
+
+    /// The scope of a wire form; `None` for one this version does not know.
+    pub fn parse(wire: &str) -> Option<MemoryScope> {
+        if wire == "team" {
+            return Some(MemoryScope::Team);
+        }
+        let (layer, id) = wire.split_once(':')?;
+        if id.is_empty() {
+            return None;
+        }
+        let id = id.to_string();
+        match layer {
+            "member" => Some(MemoryScope::Member(id)),
+            "group" => Some(MemoryScope::Group(id)),
+            "person" => Some(MemoryScope::Person(id)),
+            _ => None,
         }
     }
 }
@@ -149,3 +173,25 @@ impl MemoryEdit {
 /// The longest text and `when` the server takes.
 pub const MAX_TEXT_CHARS: usize = 500;
 pub const MAX_WHEN_CHARS: usize = 300;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scopes_round_trip_their_wire_form() {
+        for scope in [
+            MemoryScope::Team,
+            MemoryScope::Member("b1".into()),
+            MemoryScope::Group("g1".into()),
+            MemoryScope::Person("m1".into()),
+        ] {
+            assert_eq!(MemoryScope::parse(&scope.wire()), Some(scope));
+        }
+        assert_eq!(MemoryScope::Group("g1".into()).wire(), "group:g1");
+        assert_eq!(MemoryScope::Person("m1".into()).wire(), "person:m1");
+        assert_eq!(MemoryScope::parse("topic:t1"), None);
+        assert_eq!(MemoryScope::parse("group:"), None);
+        assert_eq!(MemoryScope::parse("teams"), None);
+    }
+}

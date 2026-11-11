@@ -1,0 +1,36 @@
+{
+  "kind": "RunArtifactResponse",
+  "valid": true,
+  "description": "the entry is not text: no text, read the files by id",
+  "value": {
+    "artifact": {
+      "id": "01JBX0ART000000000000000AH",
+      "groupId": "01JBX0GENERAL000000000000A",
+      "topicId": "01JBX0TOPIC0000000000000AD",
+      "title": "上线方案",
+      "kind": "html",
+      "currentVersion": 2,
+      "createdBy": "01JBX0BOT000000000000000AC",
+      "createdAt": 1762128000000,
+      "updatedAt": 1762128060000
+    },
+    "versions": [
+      {
+        "artifactId": "01JBX0ART000000000000000AH",
+        "version": 1,
+        "entry": "plan.md",
+        "files": [
+          {
+            "path": "plan.md",
+            "fileId": "01JBX0FILE00000000000000AA",
+            "size": 1200,
+            "mime": "text/markdown"
+          }
+        ],
+        "createdBy": "01JBX0BOT000000000000000AC",
+        "createdAt": 1762128000000
+      }
+    ],
+    "version": 1
+  }
+}

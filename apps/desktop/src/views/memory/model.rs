@@ -15,7 +15,9 @@ use crate::{
 };
 
 /// True when `me` may write `scope` (docs/protocol.md "Memory": the team is written by
-/// owners; an AI member's memories by owners and that member).
+/// owners; an AI member's memories by owners and that member; a group's by its members, and
+/// a group board only shows in a group I am in, the server checks the rest; a person's
+/// only by that person).
 pub fn can_write(scope: &MemoryScope, me: Option<&Member>) -> bool {
     let Some(me) = me.filter(|m| !m.deactivated) else {
         return false;
@@ -23,6 +25,57 @@ pub fn can_write(scope: &MemoryScope, me: Option<&Member>) -> bool {
     match scope {
         MemoryScope::Team => me.level == MemberLevel::Owner,
         MemoryScope::Member(id) => me.level == MemberLevel::Owner || me.id == *id,
+        MemoryScope::Group(_) => true,
+        MemoryScope::Person(id) => me.id == *id,
+    }
+}
+
+/// True when exactly one person uses the server (盯 4.12): the memory screens fold into
+/// 我的约定 (the team's and mine together) and each AI member's 记得的事. AI members and
+/// deactivated people do not count.
+pub fn single_user(members: &[Member]) -> bool {
+    members
+        .iter()
+        .filter(|m| !m.is_bot() && !m.deactivated)
+        .count()
+        == 1
+}
+
+/// The scope a board reads once the signed-in person is `me`: a person's board (我的偏好,
+/// 我的约定) is always the signed-in person's, so it follows a change of account; every
+/// other scope stays. `None` while nobody is signed in: the board reads nothing.
+pub fn scope_for(scope: &MemoryScope, me: Option<&str>) -> Option<MemoryScope> {
+    match scope {
+        MemoryScope::Person(_) => me
+            .filter(|id| !id.is_empty())
+            .map(|id| MemoryScope::Person(id.to_string())),
+        other => Some(other.clone()),
+    }
+}
+
+/// Where 记一条 in 我的约定 keeps a memory: 偏好 is mine; 约定 and 事实 are the team's while
+/// I may write the team, else mine as well.
+pub fn folded_scope(kind: MemoryKind, me: &str, team_writer: bool) -> MemoryScope {
+    if kind == MemoryKind::Preference || !team_writer {
+        MemoryScope::Person(me.to_string())
+    } else {
+        MemoryScope::Team
+    }
+}
+
+/// The 记忆更新 of several scopes as one: the newest day any of them has, with that day's
+/// lines of each, oldest first.
+pub fn merge_days(days: Vec<MemoryDay>) -> MemoryDay {
+    let newest = days.iter().filter_map(|d| d.day.clone()).max();
+    let mut updates: Vec<MemoryUpdate> = days
+        .into_iter()
+        .filter(|d| d.day.is_some() && d.day == newest)
+        .flat_map(|d| d.updates)
+        .collect();
+    updates.sort_by_key(|u| u.at);
+    MemoryDay {
+        day: newest,
+        updates,
     }
 }
 
@@ -39,25 +92,30 @@ pub fn kind_word(kind: MemoryKind) -> &'static str {
     }
 }
 
-/// The kind groups of a scope, in the order they show. An AI member: 经验, 做法, then 其他
-/// (偏好, 事实, 约定 …). The team: 约定, 事实, then 其他.
-fn group_of(scope: &MemoryScope, kind: MemoryKind) -> MemoryKind {
-    let own: &[MemoryKind] = match scope {
-        MemoryScope::Member(_) => &[MemoryKind::Lesson, MemoryKind::Playbook],
-        MemoryScope::Team => &[MemoryKind::Convention, MemoryKind::Fact],
-    };
-    if own.contains(&kind) {
+/// The kind groups of a board, in the order they show; every other kind is 其他. An AI
+/// member: 经验, 做法. The team and a group: 约定, 事实. A person: 偏好, 事实. 我的约定
+/// (`folded`, the team's and mine together): 约定, 偏好, 事实.
+pub fn kind_order(scope: &MemoryScope, folded: bool) -> &'static [MemoryKind] {
+    use MemoryKind::*;
+    if folded {
+        return &[Convention, Preference, Fact];
+    }
+    match scope {
+        MemoryScope::Member(_) => &[Lesson, Playbook],
+        MemoryScope::Team | MemoryScope::Group(_) => &[Convention, Fact],
+        MemoryScope::Person(_) => &[Preference, Fact],
+    }
+}
+
+fn group_of(order: &[MemoryKind], kind: MemoryKind) -> MemoryKind {
+    if order.contains(&kind) {
         kind
     } else {
         MemoryKind::Other
     }
 }
 
-fn group_rank(scope: &MemoryScope, group: MemoryKind) -> usize {
-    let order: &[MemoryKind] = match scope {
-        MemoryScope::Member(_) => &[MemoryKind::Lesson, MemoryKind::Playbook],
-        MemoryScope::Team => &[MemoryKind::Convention, MemoryKind::Fact],
-    };
+fn group_rank(order: &[MemoryKind], group: MemoryKind) -> usize {
     order
         .iter()
         .position(|k| *k == group)
@@ -87,6 +145,11 @@ impl Lists<'_> {
 }
 
 pub fn lists<'a>(scope: &MemoryScope, memories: &'a [Memory]) -> Lists<'a> {
+    lists_in(kind_order(scope, false), memories)
+}
+
+/// [`lists`] with the kind groups of `order`.
+pub fn lists_in<'a>(order: &[MemoryKind], memories: &'a [Memory]) -> Lists<'a> {
     let mut groups: Vec<KindGroup<'a>> = Vec::new();
     let mut retired = Vec::new();
     let mut sorted: Vec<&Memory> = memories.iter().collect();
@@ -95,7 +158,7 @@ pub fn lists<'a>(scope: &MemoryScope, memories: &'a [Memory]) -> Lists<'a> {
         match m.status {
             MemoryStatus::Retired => retired.push(m),
             MemoryStatus::Active | MemoryStatus::Pending => {
-                let g = group_of(scope, m.kind);
+                let g = group_of(order, m.kind);
                 match groups.iter_mut().find(|x| x.kind == g) {
                     Some(x) => x.items.push(m),
                     None => groups.push(KindGroup {
@@ -108,7 +171,7 @@ pub fn lists<'a>(scope: &MemoryScope, memories: &'a [Memory]) -> Lists<'a> {
             MemoryStatus::Other => {}
         }
     }
-    groups.sort_by_key(|g| group_rank(scope, g.kind));
+    groups.sort_by_key(|g| group_rank(order, g.kind));
     Lists { groups, retired }
 }
 
@@ -249,6 +312,31 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_person_board_follows_the_signed_in_person() {
+        let mine = MemoryScope::Person("old".into());
+        assert_eq!(
+            scope_for(&mine, Some("new")),
+            Some(MemoryScope::Person("new".into()))
+        );
+        assert_eq!(scope_for(&mine, Some("old")), Some(mine.clone()));
+        // Signed out, or opened before sign-in: nothing to read, never `person:`.
+        assert_eq!(scope_for(&mine, None), None);
+        assert_eq!(
+            scope_for(&MemoryScope::Person(String::new()), Some("")),
+            None
+        );
+        // Other boards keep their scope across an account change.
+        for s in [
+            MemoryScope::Team,
+            MemoryScope::Member("b1".into()),
+            MemoryScope::Group("g1".into()),
+        ] {
+            assert_eq!(scope_for(&s, Some("new")), Some(s.clone()));
+            assert_eq!(scope_for(&s, None), Some(s));
+        }
+    }
+
     fn mem(id: &str, kind: MemoryKind, status: MemoryStatus, at: i64) -> Memory {
         Memory {
             id: id.into(),
@@ -302,6 +390,139 @@ mod tests {
             ..owner
         };
         assert!(!can_write(&team, Some(&off)));
+    }
+
+    #[test]
+    fn group_members_write_the_group_and_only_i_write_mine() {
+        let person = member("p", MemberLevel::Member);
+        let owner = member("o", MemberLevel::Owner);
+        let group = MemoryScope::Group("g1".into());
+        assert!(can_write(&group, Some(&person)));
+        assert!(!can_write(&group, None));
+        let mine = MemoryScope::Person("p".into());
+        assert!(can_write(&mine, Some(&person)));
+        assert!(
+            !can_write(&mine, Some(&owner)),
+            "an owner does not write my preferences"
+        );
+        let off = Member {
+            deactivated: true,
+            ..person
+        };
+        assert!(!can_write(&group, Some(&off)));
+        assert!(!can_write(&mine, Some(&off)));
+    }
+
+    #[test]
+    fn one_person_with_ai_members_is_a_single_user() {
+        let mut bot = member("b1", MemberLevel::Member);
+        bot.kind = MemberKind::Bot;
+        let me = member("o", MemberLevel::Owner);
+        let mut gone = member("p", MemberLevel::Member);
+        gone.deactivated = true;
+        assert!(single_user(&[me.clone(), bot.clone(), gone.clone()]));
+        let other = member("q", MemberLevel::Member);
+        assert!(!single_user(&[me.clone(), bot.clone(), other]));
+        assert!(!single_user(&[bot]), "nobody is not one person");
+    }
+
+    #[test]
+    fn folded_preferences_are_mine_and_conventions_the_teams() {
+        assert_eq!(
+            folded_scope(MemoryKind::Preference, "o", true),
+            MemoryScope::Person("o".into())
+        );
+        assert_eq!(
+            folded_scope(MemoryKind::Convention, "o", true),
+            MemoryScope::Team
+        );
+        assert_eq!(folded_scope(MemoryKind::Fact, "o", true), MemoryScope::Team);
+        assert_eq!(
+            folded_scope(MemoryKind::Convention, "o", false),
+            MemoryScope::Person("o".into()),
+            "without team rights it stays mine"
+        );
+    }
+
+    #[test]
+    fn merged_days_keep_the_newest_day_of_any_scope() {
+        let a = mem("m1", MemoryKind::Lesson, MemoryStatus::Active, 1);
+        let at = |mut u: MemoryUpdate, day: &str, at: i64, id: &str| {
+            u.day = day.into();
+            u.at = at;
+            u.id = id.into();
+            u
+        };
+        let team = MemoryDay {
+            day: Some("2026-11-09".into()),
+            updates: vec![at(
+                upd(MemoryChange::Added, None, Some(a.clone())),
+                "2026-11-09",
+                5,
+                "t1",
+            )],
+        };
+        let mine = MemoryDay {
+            day: Some("2026-11-09".into()),
+            updates: vec![at(
+                upd(MemoryChange::Added, None, Some(a.clone())),
+                "2026-11-09",
+                2,
+                "p1",
+            )],
+        };
+        let old = MemoryDay {
+            day: Some("2026-11-01".into()),
+            updates: vec![at(
+                upd(MemoryChange::Added, None, Some(a.clone())),
+                "2026-11-01",
+                1,
+                "o1",
+            )],
+        };
+        let day = merge_days(vec![team, MemoryDay::default(), mine, old]);
+        assert_eq!(day.day.as_deref(), Some("2026-11-09"));
+        let ids: Vec<&str> = day.updates.iter().map(|u| u.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["p1", "t1"],
+            "oldest first, the older day left out"
+        );
+        assert_eq!(
+            merge_days(vec![MemoryDay::default(), MemoryDay::default()]),
+            MemoryDay::default()
+        );
+    }
+
+    #[test]
+    fn groups_people_and_my_conventions_group_their_own_kinds() {
+        let ms = vec![
+            mem("f", MemoryKind::Fact, MemoryStatus::Active, 5),
+            mem("p", MemoryKind::Preference, MemoryStatus::Active, 4),
+            mem("c", MemoryKind::Convention, MemoryStatus::Active, 3),
+            mem("l", MemoryKind::Lesson, MemoryStatus::Active, 2),
+        ];
+        let titles = |order: &[MemoryKind]| {
+            lists_in(order, &ms)
+                .groups
+                .iter()
+                .map(|g| g.title)
+                .collect::<Vec<_>>()
+        };
+        let group = MemoryScope::Group("g1".into());
+        let person = MemoryScope::Person("o".into());
+        assert_eq!(
+            titles(kind_order(&group, false)),
+            vec!["约定", "事实", "其他"]
+        );
+        assert_eq!(
+            titles(kind_order(&person, false)),
+            vec!["偏好", "事实", "其他"]
+        );
+        assert_eq!(
+            titles(kind_order(&person, true)),
+            vec!["约定", "偏好", "事实", "其他"]
+        );
     }
 
     #[test]

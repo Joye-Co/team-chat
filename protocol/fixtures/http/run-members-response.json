@@ -1,0 +1,19 @@
+{
+  "kind": "RunMembersResponse",
+  "valid": true,
+  "value": {
+    "members": [
+      {
+        "id": "01JBX0OWNER0000000000000AA",
+        "name": "张三",
+        "role": "产品负责人",
+        "ai": false
+      },
+      {
+        "id": "01JBX0BOT000000000000000AC",
+        "name": "小克",
+        "ai": true
+      }
+    ]
+  }
+}
