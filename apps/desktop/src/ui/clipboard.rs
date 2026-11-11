@@ -72,6 +72,75 @@ fn dib_of(bytes: &[u8], format: ImageFormat) -> Option<Vec<u8>> {
     Some(dib)
 }
 
+/// The wait for the picture of one snip (the composer's 截图 on Windows).
+///
+/// The system's snipping overlay has no result to hand back: it puts the picture on the
+/// clipboard. The composer must take that picture and no other, so the wait ends as soon
+/// as the snip is over: when a new picture is there (taken), or when the app is in front
+/// again without one (the snip was cancelled). A picture copied later, for another
+/// program, is never taken.
+#[cfg(any(target_os = "windows", test))]
+pub struct SnipWait {
+    started: std::time::Instant,
+    /// The overlay took the screen (this app was not in front at some point).
+    away: bool,
+    /// When this app came back in front after that.
+    back: Option<std::time::Instant>,
+}
+
+/// What to do after one look at the clipboard and the screen.
+#[cfg(any(target_os = "windows", test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Snip {
+    Wait,
+    /// The clipboard has this snip's picture.
+    Take,
+    /// The snip ended without a picture.
+    Stop,
+}
+
+#[cfg(any(target_os = "windows", test))]
+impl SnipWait {
+    /// The overlay copies the picture as it closes; the clipboard can lag a moment
+    /// behind the app coming back in front.
+    const AFTER_BACK: std::time::Duration = std::time::Duration::from_millis(1500);
+    /// How long the overlay may take to appear.
+    const TO_APPEAR: std::time::Duration = std::time::Duration::from_secs(20);
+    /// Nobody draws a snip for longer.
+    const GIVE_UP: std::time::Duration = std::time::Duration::from_secs(120);
+
+    pub fn new(now: std::time::Instant) -> Self {
+        Self {
+            started: now,
+            away: false,
+            back: None,
+        }
+    }
+
+    /// `in_front`: a window of this app is the foreground window. `new_picture`: the
+    /// clipboard changed since the click and now holds a picture.
+    pub fn step(&mut self, now: std::time::Instant, in_front: bool, new_picture: bool) -> Snip {
+        if new_picture {
+            return Snip::Take;
+        }
+        if !in_front {
+            self.away = true;
+            self.back = None;
+        } else if self.away && self.back.is_none() {
+            self.back = Some(now);
+        }
+        let over = match self.back {
+            Some(back) => now.duration_since(back) > Self::AFTER_BACK,
+            None => !self.away && now.duration_since(self.started) > Self::TO_APPEAR,
+        };
+        if over || now.duration_since(self.started) > Self::GIVE_UP {
+            Snip::Stop
+        } else {
+            Snip::Wait
+        }
+    }
+}
+
 #[cfg(target_os = "windows")]
 pub mod windows {
     use ::windows::Win32::{
@@ -86,6 +155,21 @@ pub mod windows {
 
     /// `CF_DIB`.
     const BITMAP: u32 = 8;
+
+    /// Whether the foreground window belongs to this app (false while the snipping
+    /// overlay, or any other program, is in front).
+    pub fn app_in_front() -> bool {
+        use ::windows::Win32::{
+            System::Threading::GetCurrentProcessId,
+            UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId},
+        };
+        let mut process = 0u32;
+        // SAFETY: asks which process owns the foreground window.
+        unsafe {
+            GetWindowThreadProcessId(GetForegroundWindow(), Some(&mut process));
+            process == GetCurrentProcessId()
+        }
+    }
 
     /// A number that changes whenever the clipboard's content does.
     pub fn sequence() -> u32 {
@@ -167,6 +251,39 @@ mod tests {
             )
             .unwrap();
         bytes
+    }
+
+    #[test]
+    fn a_snip_takes_its_own_picture_and_no_later_one() {
+        use std::time::{Duration, Instant};
+        let t0 = Instant::now();
+        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        // The overlay opens, the person draws, the picture arrives: taken.
+        let mut wait = SnipWait::new(t0);
+        assert_eq!(wait.step(at(250), true, false), Snip::Wait);
+        assert_eq!(wait.step(at(500), false, false), Snip::Wait);
+        assert_eq!(wait.step(at(9_000), false, false), Snip::Wait);
+        assert_eq!(wait.step(at(9_250), true, true), Snip::Take);
+        // Cancelled with Esc: the app is back without a picture, and the wait ends
+        // before a picture copied afterwards could be taken.
+        let mut wait = SnipWait::new(t0);
+        assert_eq!(wait.step(at(500), false, false), Snip::Wait);
+        assert_eq!(wait.step(at(3_000), true, false), Snip::Wait);
+        assert_eq!(wait.step(at(4_000), true, false), Snip::Wait);
+        assert_eq!(wait.step(at(4_600), true, false), Snip::Stop);
+        // The clipboard lags the overlay's closing by a moment: still this snip's.
+        let mut wait = SnipWait::new(t0);
+        assert_eq!(wait.step(at(500), false, false), Snip::Wait);
+        assert_eq!(wait.step(at(3_000), true, false), Snip::Wait);
+        assert_eq!(wait.step(at(3_500), true, true), Snip::Take);
+        // The overlay never appeared.
+        let mut wait = SnipWait::new(t0);
+        assert_eq!(wait.step(at(19_000), true, false), Snip::Wait);
+        assert_eq!(wait.step(at(20_500), true, false), Snip::Stop);
+        // Left open for ever.
+        let mut wait = SnipWait::new(t0);
+        assert_eq!(wait.step(at(1_000), false, false), Snip::Wait);
+        assert_eq!(wait.step(at(121_000), false, false), Snip::Stop);
     }
 
     #[test]

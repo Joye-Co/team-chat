@@ -125,6 +125,9 @@ pub struct ComposerView {
     key: Option<DraftKey>,
     /// The text the composer last saw or set, to tell user edits from ours.
     last_text: String,
+    /// Counts the 截图 clicks on Windows: only the latest one waits for its picture.
+    #[cfg(target_os = "windows")]
+    snip: u64,
     /// Members picked from the @ list for the current draft.
     picked: Vec<MemberId>,
     quote: Option<QuoteChip>,
@@ -207,6 +210,8 @@ impl ComposerView {
             input,
             key: None,
             last_text: String::new(),
+            #[cfg(target_os = "windows")]
+            snip: 0,
             picked: Vec::new(),
             quote: None,
             files: Vec::new(),
