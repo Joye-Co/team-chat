@@ -4,8 +4,10 @@
 // (the member that most recently started a run there), or the DM's other member. The hand-off is
 // written to an outbox in the same transaction as the event and delivered after commit; a failed
 // delivery is retried by the room alarm until every desk accepted it.
-import { type BlockRef, type BotRun, type CardV2, type Event, isMainTopicId, type Message, RUN_KIND_ASIDE, type TopicContext } from "@chat/protocol";
+import { ACK_EMOJI, type BlockRef, type BotRun, type CardV2, type Event, isMainTopicId, type Message, RUN_KIND_ASIDE, type TopicContext } from "@chat/protocol";
+import { roomStub } from "../core/env";
 import { ApiError } from "../core/errors";
+import { ROOM_REACT_RPC } from "../reactions";
 import {
   type ArchivedEvent,
   registerAfterCommit,
@@ -613,18 +615,81 @@ export async function handOffEach<T extends { id: string }>(
 ): Promise<void> {
   const done = new Set(alreadyDone);
   let failure: unknown = null;
+  const failed: string[] = [];
   for (const t of targets) {
     if (done.has(t.id)) continue;
     try {
       await send(t);
     } catch (err) {
       failure ??= err;
+      failed.push(t.id);
       continue;
     }
     done.add(t.id);
     record([...done]);
   }
-  if (failure !== null) throw failure;
+  if (failure !== null) throw new HandOffFailed(failure, failed);
+}
+
+/** The members a message could not be handed to (接 6.1: they say so when the room gives up). */
+export class HandOffFailed extends Error {
+  constructor(
+    readonly failure: unknown,
+    readonly botIds: string[],
+  ) {
+    super(failure instanceof Error ? failure.message : String(failure));
+    this.name = "HandOffFailed";
+  }
+}
+
+/** 接 6.1: what a member says in the topic when a message for it was dropped. */
+export const UNDELIVERED_TEXT = (excerpt: string) =>
+  excerpt ? `「${excerpt}」这条消息一个小时都没能交到我这里，我没有收到。需要的话请再发一次。` : "有一条消息一个小时都没能交到我这里，我没有收到。需要的话请再发一次。";
+
+/**
+ * The AI members a message was for when its hand-off failed before it reached any desk (the
+ * lookup itself failed): the DM peer, else the members it mentions, else the routing owner (as
+ * `messageTargets`), only active AI members.
+ */
+async function likelyBots(c: DeliverContext, m: OutboxMessage): Promise<string[]> {
+  const peer = dmPeer(c.sql, m.authorId);
+  const owner = routingOwner(c.sql, m.topicId);
+  const ids = [...new Set(peer ? [peer] : m.mentions.length > 0 ? m.mentions : owner ? [owner] : [])].filter((id) => id !== m.authorId);
+  if (ids.length === 0) return [];
+  const rows = await c.env.DB.prepare(`SELECT id FROM members WHERE kind = 'bot' AND deactivated = 0 AND id IN (${ids.map(() => "?").join(",")})`)
+    .bind(...ids)
+    .all<{ id: string }>();
+  return rows.results.map((r) => r.id);
+}
+
+/**
+ * 接 6.1: the room gave up handing a row to its members: each one says so in the topic and takes
+ * back its 👀 on the message. Bots only (a card press or answer names its bot; a message the
+ * members that failed). Never throws.
+ */
+async function undelivered(c: DeliverContext, row: OutboxRow, err: unknown): Promise<void> {
+  try {
+    const p = JSON.parse(row.payload) as Partial<OutboxMessage & OutboxCard & OutboxAnswer>;
+    const botIds = err instanceof HandOffFailed ? err.botIds : row.kind !== "message" ? (p.botId ? [p.botId] : []) : await likelyBots(c, p as OutboxMessage);
+    const messageId = row.kind === "answer" ? p.answer?.messageId : p.messageId;
+    const excerpt = row.kind === "message" && typeof p.body === "string" ? [...p.body.replace(/\s+/g, " ").trim()].slice(0, 30).join("") : "";
+    const room = roomStub(c.env, c.groupId);
+    for (const botId of botIds) {
+      const actor = { id: botId, level: "member" as const, kind: "bot" as const };
+      if (messageId) await room.rpc(c.groupId, ROOM_REACT_RPC, actor, { messageId, emoji: ACK_EMOJI, on: false }).catch(() => undefined);
+      const sent = await room.send(c.groupId, actor, {
+        t: "send",
+        rid: "bot",
+        groupId: c.groupId,
+        topicId: row.topic_id,
+        clientMsgId: `undelivered:${row.id}:${botId}`.slice(0, 64),
+        body: UNDELIVERED_TEXT(excerpt),
+      } as never);
+      if (!sent.ok) c.log.warn("undelivered note failed", { topicId: row.topic_id, err: sent.error });
+    }
+  } catch (e) {
+    c.log.warn("undelivered note failed", { topicId: row.topic_id, err: e });
+  }
 }
 
 /**
@@ -727,6 +792,7 @@ export async function drainOutbox(c: DeliverContext): Promise<void> {
           if (Date.now() - row.created_at > HANDOFF_GIVE_UP_MS) {
             c.sql.exec("DELETE FROM bot_outbox WHERE id = ?", row.id);
             c.log.error("bot hand-off dropped", { err, kind: row.kind, topicId: row.topic_id, attempts });
+            await undelivered(c, row, err);
             continue;
           }
           const wait = Math.min(1000 * 2 ** Math.min(attempts, 20), RETRY_MAX_MS);

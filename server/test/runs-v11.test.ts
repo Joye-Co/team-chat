@@ -7,7 +7,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { STALL_MS, TEXT } from "../src/bots/dispatch";
 import type { BotsEnv } from "../src/bots/env";
 import { ACK_EMOJI } from "@chat/protocol";
-import { doneCard, prRefs, testCounts } from "../src/bots/proof";
+import { PROOF_TEXT, doneCard, prRefs, testCounts } from "../src/bots/proof";
 import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
@@ -145,7 +145,7 @@ describe("done card rules", () => {
     expect(testCounts("Tests  33 passed (33)")).toEqual({ passed: 33, failed: 0 });
     expect(testCounts("all good")).toBeNull();
     expect(testCounts("Tests  12 passed | 1 failed | 2 skipped (15)")).toEqual({ passed: 12, failed: 1, skipped: 2 });
-    const card = doneCard({ runId: "r", result: "做完了\n12 passed, 1 failed", prs: [], artifacts: [], acceptance: [] });
+    const card = doneCard({ runId: "r", result: "做完了\n12 passed, 1 failed", prs: [], artifacts: [], acceptance: [], tests: { passed: 12, failed: 1 } });
     expect(card?.blocks).toContainEqual(expect.objectContaining({ type: "evidence", id: "tests", state: "fail", tests: { passed: 12, failed: 1 } }));
     expect(prRefs("see https://github.com/a/b/pull/7 and https://github.com/a/b/pull/7, https://github.com/c/d/pull/9")).toEqual([
       { url: "https://github.com/a/b/pull/7", repo: "a/b", number: 7 },
@@ -241,7 +241,8 @@ describe("1.1 runs", () => {
     // A one-line result is the title only: no text block repeats it.
     expect(card.cardV2.title).toBe("发好了。");
     expect(card.cardV2.blocks).toEqual([
-      { type: "evidence", id: "acceptance-1", label: "staging 上能登录", state: "pass" },
+      // 接 5.1: met without a file, link or 产出 is shown as a claim.
+      { type: "evidence", id: "acceptance-1", label: "staging 上能登录", state: "info", detail: PROOF_TEXT.claimed },
       { type: "evidence", id: "acceptance-2", label: "E2E 全过", state: "pass", detail: "48 个通过", url: "https://ci.example.com/1" },
       { type: "ref", id: "artifact-1", label: "发布说明（第 2 版）", target: { kind: "artifact", artifactId: "01JBX0ART000000000000000AM", version: 2 } },
     ]);

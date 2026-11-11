@@ -412,6 +412,8 @@ export abstract class DeskInteract extends DeskTakeover {
       if (r.kind === "aside") throw new ApiError("forbidden", "a side chat run is read only", "output.read_only");
       // 转交 / 分出去 (delegate.ts): desk to desk, not a client frame.
       if (op === "member.handoff" || op === "member.assign") return this.delegate(r, op, body);
+      // 接 4.2: how the run's work ended, in the CLI's words (events.ts).
+      if (op === "run.report") return this.storeReport(r, body);
       // 1.1: the desk note has no WebSocket frame; it is `PUT /v1/desk-note` in the run's group.
       if (op === "desk.note") {
         const text = (body as { text?: unknown } | null)?.text;
@@ -432,6 +434,11 @@ export abstract class DeskInteract extends DeskTakeover {
       if (frame.t === "send") {
         const sent = await this.room(r).send(r.group_id, this.actor(), frame as never);
         if (!sent.ok) throw new ApiError(sent.error.code, sent.error.message, sent.error.reason);
+        // Problem 5: a done card the CLI posted in the run's topic is the run's result (postResult).
+        const v2 = (frame as { cardV2?: { intent?: unknown } }).cardV2;
+        if (v2?.intent === "done" && sent.value.message.topicId === r.topic_id) {
+          this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `doneCard:${r.id}`, sent.value.message.id);
+        }
         return { messageId: sent.value.message.id, message: sent.value.message };
       }
       if (!handler) throw new ApiError("invalid", "the server does not take this output yet", "output.not_supported");

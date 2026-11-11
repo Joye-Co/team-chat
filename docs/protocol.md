@@ -1070,6 +1070,9 @@ contract, but its shape is fixed here so the developer view and the daemon notes
                          files: number, cards: number, refs: number }
   ```
 
+  `messages` and `chars` count the topic lines; `files` and `refs` also count what the request
+  itself carries (its files; its quote, 产出 and 引用), which the topic lines leave out.
+
 ### Run plans
 
 A run plan is the bot's ordered to-do list for one run, so members see what it does next:
