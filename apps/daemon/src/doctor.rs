@@ -76,6 +76,17 @@ pub async fn report(cfg: &Config) -> (String, bool) {
                 }
             );
         }
+        // A Claude Code whose runs this machine cannot stop at gated commands (on Windows one
+        // older than the tested version, or one that does not say its version): the owner
+        // should know, the team's rules reach the bot only as text then.
+        if c.kind == "claude" && c.available && c.gates != Some(true) {
+            let [a, b, patch] = crate::gates::WINDOWS_MIN_CLAUDE;
+            let _ = writeln!(
+                s,
+                "             gated actions: off. Commands that need a person's approval are not \
+stopped on this machine: update Claude Code to {a}.{b}.{patch} or later"
+            );
+        }
         ok &= c.available;
     }
     if h.disk_free_bytes < cfg.min_free_gb * (1 << 30) {

@@ -1,5 +1,5 @@
-//! The bundled character SVGs, embedded by `build.rs` from the optional
-//! character pack (from TC_OPS_DIR); empty in a build without it.
+//! The bundled character SVGs, embedded by `build.rs` from the vendored
+//! avatar pack (`apps/desktop/assets/characters/`).
 //! `ui::AppAssets` serves them; gpui's `img()` renders them in full color
 //! (resvg).
 
@@ -7,7 +7,7 @@ mod embedded {
     include!(concat!(env!("OUT_DIR"), "/character_assets.rs"));
 }
 
-/// The bytes of a bundled asset path such as `characters/jojo/idle-24.svg`.
+/// The bytes of a bundled asset path such as `characters/jojo/calm-24.svg`.
 pub fn load(path: &str) -> Option<&'static [u8]> {
     if !path.starts_with("characters/") {
         return None;

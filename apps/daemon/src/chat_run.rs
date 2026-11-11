@@ -2453,13 +2453,15 @@ mod tests {
         assert_eq!(v["error"]["reason"], "daemon.no_answer");
     }
 
-    #[cfg(unix)]
+    /// A request folder the client may not write into (what a CLI sandbox that makes the
+    /// working folder read-only looks like) is reported as the sandbox. Unix: the folder's
+    /// mode; Windows: an entry in its access list that denies this user the write.
     #[test]
     fn a_folder_the_sandbox_will_not_write_names_the_sandbox() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+        crate::workspace::set_read_only(dir.path(), true);
         let v = call_files(dir.path(), "card.patch", json!({}), TIMEOUT).unwrap();
-        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        crate::workspace::set_read_only(dir.path(), false);
         assert_eq!(v["error"]["code"], "unavailable");
         assert_eq!(v["error"]["reason"], "sandbox.blocked");
     }

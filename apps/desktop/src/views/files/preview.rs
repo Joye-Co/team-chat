@@ -335,25 +335,87 @@ pub fn open_quick_look(
     content: Size<Pixels>,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
+    let bytes = std::fs::read(std::env::temp_dir().join("team-chat-files-preview.png"));
+    open_quick_look_of(
+        services,
+        content,
+        &photo().name,
+        &bytes.unwrap_or_default(),
+        cx,
+    )
+}
+
+/// The `files-quick-look-no-preview` scene: Space on a type the app has no viewer for (a
+/// Word document). The sheet says that there is no preview and offers 用系统应用打开 (on
+/// the Mac, where Quick Look does this, the full view keeps its own words).
+pub fn open_quick_look_no_preview(
+    services: Services,
+    content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_quick_look_of(
+        services,
+        content,
+        "第三季度复盘.docx",
+        b"PK\x03\x04 not a real document",
+        cx,
+    )
+}
+
+/// The `files-quick-look-page` scene: Space on an attached HTML page: it runs in the
+/// isolated 产出 view (no network, no bridge), inside the sheet.
+pub fn open_quick_look_page(
+    services: Services,
+    content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    const PAGE: &str = r#"<!doctype html><html><head><meta charset="utf-8"><style>
+body { font: 16px system-ui, "Segoe UI", "Microsoft YaHei UI", sans-serif; margin: 32px; }
+h1 { font-size: 24px; } p { color: #555; }
+</style></head><body><h1>第三季度复盘</h1><p>这个网页附件在隔离的视图里显示：不能联网，也拿不到应用的任何能力。</p>
+<p id="net">…</p><script>
+fetch("https://example.com/").then(() => "联网成功", () => "联网被拦住").then(t => document.getElementById("net").textContent = t);
+</script></body></html>"#;
+    open_quick_look_of(services, content, "第三季度复盘.html", PAGE.as_bytes(), cx)
+}
+
+thread_local! {
+    /// When the last preview scene opened its sheet.
+    static OPENED: std::cell::Cell<Option<std::time::Instant>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// For the scene whose sheet shows content GPUI's frames do not cover (a page in the
+/// isolated view): true once that content had time to load.
+pub fn quick_look_settled(_: &App) -> bool {
+    OPENED
+        .get()
+        .is_some_and(|at| at.elapsed() >= std::time::Duration::from_secs(4))
+}
+
+/// The `files` scene with the preview sheet of a file named `name` holding `bytes`.
+fn open_quick_look_of(
+    services: Services,
+    content: Size<Pixels>,
+    name: &str,
+    bytes: &[u8],
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
     let handle = open(services, content, cx)?;
-    let file = photo();
     // Under the name it was sent with, as a downloaded attachment is in the cache.
     let dir = std::env::temp_dir().join("team-chat-quick-look-scene");
-    let path = dir.join(&file.name);
+    let path = dir.join(name);
     let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::copy(
-        std::env::temp_dir().join("team-chat-files-preview.png"),
-        &path,
-    );
+    let _ = std::fs::write(&path, bytes);
+    let name = name.to_string();
+    OPENED.set(Some(std::time::Instant::now()));
     handle
         .update(cx, |_, window, cx| {
-            if let Some(key) =
-                super::quick_look::request_attachment(&file.name, &file.sha256, &path, cx)
-            {
+            if let Some(key) = super::quick_look::request_attachment(&name, "", &path, cx) {
                 super::quick_look::open_sheet_in(
                     window,
                     key,
-                    file.name.clone(),
+                    name.clone(),
                     crate::views::media::state::Target::none(),
                     cx,
                 );

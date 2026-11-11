@@ -240,6 +240,63 @@ pub(super) fn install_command(server_url: &str, machine: &proto::Machine, token:
     )
 }
 
+/// Quotes a value as a PowerShell literal string.
+fn powershell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "''"))
+}
+
+/// PowerShell lines that do on a Windows computer what [`install_command`] does on a Mac
+/// or Linux one: write the daemon config and the token into a folder only that user,
+/// SYSTEM and Administrators can open (the daemon refuses anything wider), then run the
+/// daemon's `doctor` and `install-service` (a scheduled task of that user). The daemon is
+/// the one the installed app ships (`%LOCALAPPDATA%\Programs\<name>\<slug>-daemon.exe`);
+/// a `<slug>-daemon` on `PATH` is the fallback; with neither the command says so in a
+/// sentence and stops. Nothing is downloaded, so no hash is needed; a computer without the app uses `scripts/install-daemon.ps1` (docs/bots.md).
+///
+/// Works in Windows PowerShell 5.1. The config is a literal here-string: the values are
+/// TOML strings on one line each ([`toml_str`] escapes quotes, `$`, backticks and control
+/// characters), so none can end it.
+pub(super) fn install_command_windows(
+    server_url: &str,
+    machine: &proto::Machine,
+    token: &str,
+) -> String {
+    let slug = env!("PRODUCT_SLUG");
+    let app = env!("PRODUCT_NAME");
+    let labels = machine
+        .labels
+        .iter()
+        .map(|l| toml_str(l))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "$d = \"$env:USERPROFILE\\.config\\{slug}\"\n\
+         New-Item -ItemType Directory -Force $d | Out-Null\n\
+         $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value\n\
+         icacls $d /inheritance:r /grant:r \"*${{me}}:(OI)(CI)F\" \"*S-1-5-18:(OI)(CI)F\" \"*S-1-5-32-544:(OI)(CI)F\" | Out-Null\n\
+         [IO.File]::WriteAllText(\"$d\\machine-token\", {token})\n\
+         $toml = @'\n\
+         server_url = {server}\n\
+         machine_id = {id}\n\
+         name = {name}\n\
+         labels = [{labels}]\n\
+         '@\n\
+         $toml += \"`ntoken_file = `\"$($d.Replace('\\', '/'))/machine-token`\"`n\"\n\
+         [IO.File]::WriteAllText(\"$d\\daemon.toml\", $toml)\n\
+         $D = \"$env:LOCALAPPDATA\\Programs\\{app}\\{slug}-daemon.exe\"\n\
+         if (-not (Test-Path $D)) {{ $D = (Get-Command {slug}-daemon -ErrorAction SilentlyContinue).Source }}\n\
+         if ($D) {{ & $D doctor; if ($LASTEXITCODE -eq 0) {{ & $D install-service }} }} else {{ Write-Host {missing} }}",
+        token = powershell_quote(token),
+        missing = powershell_quote(&crate::copy::fill(
+            crate::copy::settings::MACHINE_INSTALL_NO_DAEMON,
+            &[("app", app)]
+        )),
+        server = toml_str(server_url),
+        id = toml_str(&machine.id),
+        name = toml_str(&machine.name),
+    )
+}
+
 impl CoreProvider {
     /// Runs `work` on the client's runtime and answers on the returned [`AdminReply`].
     pub(super) fn request<T, F>(&self, work: impl FnOnce(Arc<Client>, String) -> F) -> AdminReply<T>
@@ -298,6 +355,26 @@ impl CoreProvider {
         let Some(me) = self.my_id() else {
             return reply_now(Err(AdminError::Offline));
         };
+        self.upload_member_avatar_inner(me, path)
+    }
+
+    pub(super) fn remove_member_avatar_inner(&self, id: String) -> AdminReply<Member> {
+        self.request(move |client, _| async move {
+            let m = client
+                .remove_avatar(&id)
+                .await
+                .map_err(|_| AdminError::Other)?
+                .map_err(|e| admin_error(&e))?;
+            let online = client.is_online(&m.id);
+            Ok(convert::member(&m, online))
+        })
+    }
+
+    pub(super) fn upload_member_avatar_inner(
+        &self,
+        me: String,
+        path: PathBuf,
+    ) -> AdminReply<Member> {
         self.request(move |client, _| async move {
             let read = super::tokio_blocking(move || -> Result<Vec<u8>, AdminError> {
                 let len = std::fs::metadata(&path)
@@ -324,7 +401,8 @@ impl CoreProvider {
                 .await
                 .map_err(|_| AdminError::Other)?
                 .map_err(|e| admin_error(&e))?;
-            Ok(convert::member(&m, true))
+            let online = client.is_online(&m.id);
+            Ok(convert::member(&m, online))
         })
     }
 
@@ -570,10 +648,12 @@ impl CoreProvider {
                 .await
                 .map_err(|e| api_error(&e))?;
             let install = install_command(&server_url, &r.machine, &r.token);
+            let install_windows = install_command_windows(&server_url, &r.machine, &r.token);
             Ok(MachineCreated {
                 machine: machine(&r.machine),
                 credential: SecretText::new(r.token),
                 install_command: SecretText::new(install),
+                install_command_windows: SecretText::new(install_windows),
             })
         })
     }
@@ -741,6 +821,134 @@ mod tests {
         assert_eq!(m.active_runs, 1);
         assert_eq!(m.runtimes, vec!["rt-a".to_string()]);
         assert_eq!(m.labels, vec!["mac".to_string(), "gpu".to_string()]);
+    }
+
+    /// The Windows command writes the same config as the Mac one, quotes the token for
+    /// PowerShell, makes the folder private before the token is written, and runs the
+    /// installed app's daemon.
+    #[test]
+    fn the_windows_install_command_is_powershell() {
+        let cmd = install_command_windows("https://x.example", &sample_machine(), "tm_a'b");
+        let line = |start: &str| {
+            cmd.lines()
+                .position(|l| l.starts_with(start))
+                .unwrap_or_else(|| panic!("no line starting with {start:?} in:\n{cmd}"))
+        };
+        assert!(cmd.contains("\\machine-token\", 'tm_a''b')"), "{cmd}");
+        assert!(cmd.contains("name = \"mini \\\"x\\\"\""), "{cmd}");
+        assert!(cmd.contains("labels = [\"mac\", \"gpu\"]"));
+        assert!(cmd.contains("server_url = \"https://x.example\""));
+        assert!(line("icacls") < line("[IO.File]::WriteAllText(\"$d\\machine-token"));
+        assert!(cmd.contains("/inheritance:r") && cmd.contains("*S-1-5-18:(OI)(CI)F"));
+        // The here-string is literal and closes on its own line.
+        assert!(line("$toml = @'") < line("'@"));
+        assert!(cmd.contains("token_file = `\"$($d.Replace('\\', '/'))/machine-token`\""));
+        let (slug, app) = (env!("PRODUCT_SLUG"), env!("PRODUCT_NAME"));
+        assert!(cmd.contains(&format!(
+            "$env:LOCALAPPDATA\\Programs\\{app}\\{slug}-daemon.exe"
+        )));
+        assert!(cmd.contains(
+            "if ($D) { & $D doctor; if ($LASTEXITCODE -eq 0) { & $D install-service } }"
+        ));
+        // Without a daemon the last line says what to do (one statement, so it also
+        // works pasted line by line).
+        assert!(cmd.ends_with("。' }"), "{cmd}");
+        assert!(cmd.lines().last().unwrap().contains("else { Write-Host '"));
+        // No POSIX shell in it.
+        for posix in ["chmod", "umask", "<<EOF", "$HOME", "/Applications"] {
+            assert!(!cmd.contains(posix), "{posix}");
+        }
+        // A value cannot close the here-string or run as PowerShell.
+        let mut machine = sample_machine();
+        machine.name = "a\n'@\n$(calc) `x`".into();
+        let cmd = install_command_windows("https://x.example", &machine, "t");
+        assert_eq!(
+            cmd.lines().filter(|l| l.starts_with("'@")).count(),
+            1,
+            "{cmd}"
+        );
+        assert!(!cmd.contains("$(calc)"), "{cmd}");
+    }
+
+    /// The command really runs in Windows PowerShell 5.1: it leaves a config the daemon
+    /// reads and the token, in a folder with exactly the three entries the daemon accepts.
+    /// (No daemon is installed in the test's profile, so the last line finds none.)
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn the_windows_install_command_runs_in_powershell() {
+        let mut machine = sample_machine();
+        machine.name = "会议室 \"mini\" $x `y`".into();
+        let cmd = install_command_windows("https://x.example", &machine, "tm_a'b$c");
+        let home = tempfile::tempdir().unwrap();
+        let script = home.path().join("install.ps1");
+        // With a BOM, as Windows PowerShell needs to read a UTF-8 script file.
+        std::fs::write(&script, format!("\u{feff}{cmd}\n")).unwrap();
+        let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        let run = |program: &str, args: &[&std::ffi::OsStr]| {
+            std::process::Command::new(std::path::Path::new(&root).join(program))
+                .args(args)
+                .env("USERPROFILE", home.path())
+                .env("LOCALAPPDATA", home.path().join("local"))
+                .output()
+                .unwrap()
+        };
+        let out = run(
+            r"System32\WindowsPowerShell\v1.0\powershell.exe",
+            &[
+                "-NoProfile".as_ref(),
+                "-NonInteractive".as_ref(),
+                "-ExecutionPolicy".as_ref(),
+                "Bypass".as_ref(),
+                "-File".as_ref(),
+                script.as_os_str(),
+            ],
+        );
+        // No daemon in this profile: the command says what to do, not a PowerShell error.
+        let said = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success(), "the script ends cleanly");
+        assert!(
+            out.stderr.is_empty(),
+            "no PowerShell error: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(said.contains(env!("PRODUCT_NAME")), "{said}");
+        println!(
+            "powershell: {}\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let dir = home.path().join(".config").join(env!("PRODUCT_SLUG"));
+        assert_eq!(
+            std::fs::read_to_string(dir.join("machine-token")).unwrap(),
+            "tm_a'b$c"
+        );
+        let toml = std::fs::read_to_string(dir.join("daemon.toml")).unwrap();
+        println!("daemon.toml:\n{toml}");
+        assert!(!toml.starts_with('\u{feff}'), "no BOM");
+        assert!(toml.contains("server_url = \"https://x.example\""));
+        assert!(toml.contains("machine_id = "));
+        assert!(toml.contains("labels = [\"mac\", \"gpu\"]"));
+        // The name comes back as it was, through TOML's own escapes.
+        assert!(
+            toml.contains(r#"name = "会议室 \"mini\" \u0024x \u0060y\u0060""#),
+            "{toml}"
+        );
+        let token_file = toml
+            .lines()
+            .find_map(|l| l.strip_prefix("token_file = \""))
+            .and_then(|l| l.strip_suffix('"'))
+            .expect("a token_file line");
+        assert!(!token_file.contains('\\'), "forward slashes: {token_file}");
+        assert_eq!(
+            std::fs::read_to_string(token_file).unwrap(),
+            "tm_a'b$c",
+            "the config points at the token"
+        );
+        // The folder is private: nothing inherited, three full-control entries.
+        let acl = run(r"System32\icacls.exe", &[dir.as_os_str()]);
+        let acl = String::from_utf8_lossy(&acl.stdout).into_owned();
+        assert!(!acl.contains("(I)"), "inherited entries: {acl}");
+        assert_eq!(acl.matches("(OI)(CI)(F)").count(), 3, "{acl}");
     }
 
     #[test]

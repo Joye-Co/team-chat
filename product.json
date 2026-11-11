@@ -1,5 +1,8 @@
 {
-  "name": "TeamChat",
+  "name": "Cahoots",
+  "formerNames": [
+    "TeamChat"
+  ],
   "slug": "team-chat",
   "bundleId": "co.joye.teamchat",
   "urlScheme": "teamchat",

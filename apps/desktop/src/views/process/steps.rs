@@ -19,8 +19,10 @@ use super::status_text;
 const MAX_STEPS: usize = 300;
 /// Characters of one text shown at most.
 const MAX_TEXT: usize = 4000;
-/// Lines of a command's output shown.
+/// Lines of a command's output shown: a step that went well needs a glance, a failed or
+/// running one needs reading.
 const OUTPUT_LINES: usize = 12;
+const OUTPUT_LINES_OK: usize = 3;
 
 /// Cuts `text` to `max` characters.
 pub fn clip(text: &str, max: usize) -> String {
@@ -370,14 +372,22 @@ fn render_step(
             } else {
                 p::STEP_INPUT.to_string()
             };
+            // What the bot wrote is Markdown, as in the topic; its acceptance block is for
+            // the app, not for readers (normalize_fences drops it).
+            let shown = crate::markdown::normalize_fences(&clip(text, MAX_TEXT));
+            let body = if *from_bot {
+                crate::markdown::message_body(
+                    ElementId::NamedInteger("process-said".into(), ix as u64),
+                    shown,
+                    &[],
+                )
+                .into_any_element()
+            } else {
+                shown.into_any_element()
+            };
             block(cx)
                 .child(label(who, cx))
-                .child(
-                    div()
-                        .t_body()
-                        .text_color(colors.text_1)
-                        .child(clip(text, MAX_TEXT)),
-                )
+                .child(div().t_body().text_color(colors.text_1).child(body))
                 .when(*streaming, |el| {
                     el.child(label(p::STEP_WRITING.to_string(), cx))
                 })
@@ -431,7 +441,12 @@ fn render_step(
                 );
             }
             let out = output.as_deref().filter(|o| !o.trim().is_empty()).map(|o| {
-                let (head, more) = head_lines(o, OUTPUT_LINES);
+                let lines = if *ok == Some(true) && !developer {
+                    OUTPUT_LINES_OK
+                } else {
+                    OUTPUT_LINES
+                };
+                let (head, more) = head_lines(o, lines);
                 (clip(&head, MAX_TEXT), more)
             });
             block(cx)

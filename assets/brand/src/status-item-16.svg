@@ -1,6 +1,8 @@
-<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-<!-- Menu bar template at 1x: 1 px brackets and 4 px shapes on the pixel grid. -->
-<path d="M1 3h4v1H2v6H1z M14 13h-4v-1h3V6h1z" fill="#000"/>
-<circle cx="5" cy="7" r="2" fill="#000"/>
-<rect x="8" y="7" width="4" height="4" rx="1" fill="#000"/>
+<svg width="16" height="16" viewBox="240 213 775 775" xmlns="http://www.w3.org/2000/svg">
+<!-- Menu bar template at 1x: Jojo's shell, black on transparent (macOS tints it); the eyes and the mouth are holes. The notch is empty: nothing waits on you. -->
+<defs><mask id="m" maskUnits="userSpaceOnUse" x="240" y="213" width="775" height="775"><rect x="240" y="213" width="775" height="775" fill="#fff"/>
+  <rect x="555" y="592" width="68" height="196" rx="34" fill="#000"/>
+  <rect x="747" y="572.5" width="110" height="215" rx="55" fill="#000"/>
+  <rect x="723" y="823" width="162" height="47" rx="23.5" fill="#000"/></mask></defs>
+<path d="M260,380 C260,312 310,262 365,262 C396,262 418,288 422,318 A80,80 0 0 0 582,318 C590,284 622,258 670,258 L875,258 A120,120 0 0 1 995,378 L995,838 A120,120 0 0 1 875,958 L380,958 A120,120 0 0 1 260,838 Z" fill="#000" mask="url(#m)"/>
 </svg>

@@ -216,6 +216,31 @@ jobs:
           trap 'sudo rm -f /etc/claude-code/managed-settings.json' EXIT
           TC_MANAGED_HOOKS_ONLY=1 cargo test --locked -p daemon --test integration a_cli_whose_hooks_are_managed_only -- --nocapture
 
+  # The daemon's tests on the Mac, where most production daemons run: the same suites as on
+  # Linux (process groups, the Unix socket, launchd's plist, the pty) on the system's own
+  # process and file rules, with the real Claude Code and Codex CLIs (no login) against the
+  # fake model, Codex's Seatbelt sandbox among them.
+  daemon-macos:
+    name: Daemon tests (macOS)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: macos-daemon
+      - name: Install the real Claude Code and Codex CLIs
+        run: npm install -g @anthropic-ai/claude-code@2.1.322 @openai/codex@0.167.1
+      - name: cargo test (daemon)
+        env:
+          TC_REQUIRE_REAL_CLI: "1"
+          TC_REQUIRE_REAL_CODEX: "1"
+        run: cargo test --locked -p daemon --no-fail-fast
+
   daemon-e2e:
     name: Daemon local e2e (Linux, fake Claude and Codex)
     needs: changes
@@ -341,7 +366,7 @@ jobs:
       # The system-integration tests that talk to the shell (taskbar, share, toasts, time zone) say
       # in the log what this runner's session gave them.
       - name: cargo test (system integration, with output)
-        run: cargo test --locked -p desktop -- --nocapture the_taskbar_takes the_share_ui windows_names a_toast_reaches the_toast_xml a_second_launch windows_reports_its_accent
+        run: cargo test --locked -p desktop -- --nocapture the_taskbar_takes the_share_ui windows_names a_toast_reaches the_toast_xml a_second_launch windows_reports_its_accent a_window_gpui_does_not_know the_icon_is_added the_windows_install_command_runs the_settings_window_fits
       # 「用这台电脑」 (src/provider/this_mac.rs) runs for real in the desktop tests, against a
       # local server (`wrangler dev`): the app's code registers this computer as an owner and
       # writes the config and token, the daemon just built registers the scheduled task of the
@@ -378,6 +403,10 @@ jobs:
           GPUI_DISABLE_DIRECT_COMPOSITION=1 cargo run --locked -p desktop --example win_embed_gpui -- "$RUNNER_TEMP/embed-gpui/hwnd-swap-chain"
           cargo run --locked -p desktop --example win_embed_gpui -- "$RUNNER_TEMP/embed-gpui/direct-composition" \
             || echo "::notice::with DirectComposition the child window is covered, as expected"
+      # The 窗口 menu's commands and the jump list in a real GPUI app (the unit tests run on
+      # GPUI's test platform, which has no windows): docs/plans/windows-parity/system.zh.md.
+      - name: Window commands and the jump list in a real GPUI window
+        run: cargo run --locked -p desktop --example win_window_probe -- "$RUNNER_TEMP/embed-gpui/window-probe"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -475,34 +504,13 @@ jobs:
       - name: PowerShell install command (real daemon as a scheduled task)
         shell: powershell
         run: ./scripts/test-install-daemon.ps1
-      # Report only: whether a user without administrator rights may register the task (the
-      # runner's own user is an administrator). The answer is in this step's output: that user is
-      # not logged on, so starting the task (schtasks /Run) may fail; /Create is what is asked.
-      - name: Register the task as a standard user (report only)
-        continue-on-error: true
+      # As a person's computer is: a user without administrator rights (the runner's own user
+      # is an elevated administrator). The same test programs, started as a standard user
+      # made for it: runs, cancel and pause, the whole daemon against the mock server, and the
+      # scheduled task of that user (install, restart, one daemon only, update, uninstall).
+      - name: The daemon as a standard user (runs, the scheduled task)
         shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $user = 'tcstandard'
-          $secret = 'Tc!' + [guid]::NewGuid().ToString('N') + 'aA1'
-          $secure = ConvertTo-SecureString $secret -AsPlainText -Force
-          New-LocalUser -Name $user -Password $secure -AccountNeverExpires | Out-Null
-          Add-LocalGroupMember -Group 'Users' -Member $user
-          $cred = New-Object Management.Automation.PSCredential("$env:COMPUTERNAME\$user", $secure)
-          # A folder that user may read but not change (install-service refuses a daemon that
-          # others can replace, such as one under C:\Users\Public).
-          $dir = 'C:\tc-standard'
-          New-Item -ItemType Directory -Force -Path $dir | Out-Null
-          & icacls.exe $dir /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' "${user}:(OI)(CI)RX" | Out-Null
-          Copy-Item target\debug\daemon.exe "$dir\daemon.exe"
-          [IO.File]::WriteAllText("$dir\daemon.toml", "server_url = `"http://127.0.0.1:9`"`ntoken_file = `"C:\\tc-standard\\token`"`n[runtimes.ci]`nkind = `"claude`"`ncommand = 'C:\Windows\System32\whoami.exe'`n")
-          [IO.File]::WriteAllText("$dir\token", 'tm_test_not_a_real_token')
-          foreach ($verb in 'install-service', 'uninstall-service') {
-            $p = Start-Process -FilePath "$dir\daemon.exe" -ArgumentList $verb, '--config', "$dir\daemon.toml" -Credential $cred -WorkingDirectory $dir -Wait -PassThru -RedirectStandardOutput "$dir\out.txt" -RedirectStandardError "$dir\err.txt"
-            Write-Host "$verb as a standard user: exit code $($p.ExitCode)"
-            Get-Content "$dir\out.txt", "$dir\err.txt"
-          }
-          Remove-LocalUser -Name $user
+        run: ./scripts/test-daemon-standard-user.ps1
       # A side chat's checkout is read-only to its CLI. The runner's own user is an elevated
       # administrator, whom a restore privilege lets remove files and make folders past an
       # access list (as root is past file modes), so the tests above cannot show the whole of
@@ -527,6 +535,19 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "a standard user's CLI could change a read-only checkout (exit code $($p.ExitCode))" }
       - name: cargo check (e2e tool)
         run: cargo check --locked -p e2e --all-targets
+      # What Codex's own Windows sandbox does to a command and to chat-run, with each of its
+      # settings (tests/runtimes.rs writes it down). Last, and a report only: setting up the
+      # elevated one changes this computer (sandbox accounts that may write the temp folder).
+      - name: Codex's Windows sandbox, every setting (what happened)
+        if: always()
+        shell: bash
+        env:
+          TC_REQUIRE_REAL_CODEX: "1"
+          TC_CODEX_ELEVATED_SANDBOX: "1"
+        run: |
+          cargo test --locked -p daemon --features test-fakes --test runtimes -- codex_windows_sandbox_modes codex_read_only_on_windows_report || true
+          cat target/tmp/codex-windows-sandbox.json || true
+          cat target/tmp/codex-windows-read-only.json || true
 
   # The Windows release from end to end (docs/plans/windows.zh.md, R1): a release build of the
   # app, the update helper and the daemon, the NSIS installer, a silent install with its files,

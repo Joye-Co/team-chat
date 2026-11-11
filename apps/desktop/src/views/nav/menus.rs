@@ -8,7 +8,8 @@ use gpui::{App, KeyBinding, Menu, MenuItem, OsAction, SystemMenuType};
 use gpui_component::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 
 use super::{
-    About, NewGroup, NextUnreadTopic, PreviousUnreadTopic, QuickSwitch, ShowMainWindow, StartDm,
+    About, GoBack, GoForward, NewGroup, NextUnreadTopic, PreviousUnreadTopic, QuickSwitch,
+    ShowMainWindow, StartDm,
 };
 use crate::{
     app::{
@@ -104,6 +105,9 @@ fn mac_menus(state: MenuState) -> Vec<Menu> {
         ]),
         Menu::new(nav::MENU_GO).items([
             MenuItem::action(nav::MENU_QUICK_SWITCH, QuickSwitch),
+            MenuItem::separator(),
+            MenuItem::action(nav::MENU_BACK, GoBack),
+            MenuItem::action(nav::MENU_FORWARD, GoForward),
             MenuItem::separator(),
             MenuItem::action(rail::RAIL_DESK, OpenDesk),
             MenuItem::action(rail::RAIL_ARTIFACTS, OpenArtifacts),
@@ -384,9 +388,53 @@ mod win {
     /// Restores a maximized window to its size before.
     pub fn restore(window: &gpui::Window) {
         if let Some(hwnd) = crate::win32::hwnd(window) {
-            // SAFETY: a live window of this thread.
+            restore_hwnd(hwnd);
+        }
+    }
+
+    pub fn restore_hwnd(hwnd: windows::Win32::Foundation::HWND) {
+        // SAFETY: a live window of this thread.
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use windows::{
+            Win32::UI::WindowsAndMessaging::{
+                CreateWindowExW, DestroyWindow, IsZoomed, SW_MAXIMIZE, SW_SHOW, ShowWindow,
+                WINDOW_EX_STYLE, WS_OVERLAPPEDWINDOW,
+            },
+            core::w,
+        };
+
+        /// 窗口 › 最大化或还原: a maximized window goes back to its size.
+        #[test]
+        fn a_maximized_window_is_restored() {
+            // SAFETY: a plain window of this thread, destroyed below.
             unsafe {
-                let _ = ShowWindow(hwnd, SW_RESTORE);
+                let hwnd = CreateWindowExW(
+                    WINDOW_EX_STYLE(0),
+                    w!("STATIC"),
+                    w!("zoom test"),
+                    WS_OVERLAPPEDWINDOW,
+                    80,
+                    80,
+                    400,
+                    300,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .expect("a window");
+                let _ = ShowWindow(hwnd, SW_SHOW);
+                let _ = ShowWindow(hwnd, SW_MAXIMIZE);
+                assert!(IsZoomed(hwnd).as_bool(), "maximized");
+                super::restore_hwnd(hwnd);
+                assert!(!IsZoomed(hwnd).as_bool(), "restored");
+                let _ = DestroyWindow(hwnd);
             }
         }
     }
@@ -421,11 +469,12 @@ pub fn install(cx: &mut App) {
     }
     cx.on_action(|_: &Minimize, cx| with_key_window(cx, |window| window.minimize_window()));
     // Like the red traffic light: the app keeps running, and a click on the
-    // Dock icon opens the main window again.
+    // Dock icon (the notification-area icon on Windows) opens the main window again.
     cx.on_action(|_: &CloseWindow, cx| {
-        // Off the Mac the app ends with its last window: Ctrl+W never closes
-        // that one (the close button and Alt+F4 do).
-        if cfg!(not(target_os = "macos")) && cx.windows().len() <= 1 {
+        // Never the window whose closing would end the app (Windows without the
+        // notification-area icon). The main window answers the command itself.
+        if !super::close_command_closes(super::app_outlives_windows(cx), cx.windows().len(), false)
+        {
             return;
         }
         with_key_window(cx, |window| window.remove_window())
@@ -437,6 +486,22 @@ pub fn install(cx: &mut App) {
     cx.on_action(|_: &BringAllToFront, cx| bring_all_to_front(cx));
     cx.on_action(|_: &ShowCharacterPalette, cx| show_character_palette(cx));
     set_menus(app_menus(), cx);
+    // On Windows the Dock menu is the taskbar's jump list, which the shell files under
+    // the process's AppUserModelID at the moment it is committed: the id must be set
+    // first, or the list lands under the default identity and the app's taskbar button
+    // never shows it.
+    //
+    // GPUI commits the list on a background thread, which has COM only while the process
+    // has a multithreaded apartment: join it first (for good), or the commit fails and
+    // the taskbar button has no tasks.
+    #[cfg(target_os = "windows")]
+    {
+        cx.set_app_identity(crate::provider::session::app_id(), env!("PRODUCT_NAME"));
+        // SAFETY: only raises the process's apartment count; never released.
+        if let Err(error) = unsafe { windows::Win32::System::Com::CoIncrementMTAUsage() } {
+            tracing::warn!(%error, "no multithreaded apartment for the jump list");
+        }
+    }
     cx.set_dock_menu(dock_menu());
 }
 
@@ -451,15 +516,26 @@ fn with_key_window(cx: &mut App, f: impl FnOnce(&mut gpui::Window) + 'static) {
     }
 }
 
-/// The standard macOS about panel (name, version and icon from the bundle). Other systems
-/// have no such panel: the app's own 关于 window shows the same three things
-/// ([`super::about`]).
+/// The standard macOS about panel (name, version and icon from the bundle), with the credit
+/// of the member art. Other systems have no such panel: the app's own 关于 window shows the
+/// same things ([`super::about`]).
 pub fn show_about(cx: &mut App) {
     cx.activate(true);
     #[cfg(target_os = "macos")]
     if let Some(mtm) = objc2::MainThreadMarker::new() {
+        use objc2::{AnyThread as _, rc::Retained, runtime::AnyObject};
+        use objc2_foundation::{NSAttributedString, NSDictionary, NSString};
         let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
-        app.orderFrontStandardAboutPanel(None);
+        let credits = NSAttributedString::initWithString(
+            NSAttributedString::alloc(),
+            &NSString::from_str(&super::about::credits_line()),
+        );
+        let credits: Retained<AnyObject> = credits.into();
+        // SAFETY: an AppKit constant, valid for the life of the process.
+        let key = unsafe { objc2_app_kit::NSAboutPanelOptionCredits };
+        let options = NSDictionary::from_slices(&[key], &[&*credits]);
+        // SAFETY: the options are the documented credits key with an attributed string.
+        unsafe { app.orderFrontStandardAboutPanelWithOptions(&options) };
     }
     #[cfg(not(target_os = "macos"))]
     cx.defer(super::about::open);
@@ -756,6 +832,99 @@ mod tests {
         vcx.simulate_keystrokes("cmd-w");
         cx.run_until_parked();
         assert!(cx.update(|cx| cx.windows().is_empty()), "cmd-w closed it");
+    }
+
+    /// The keys of the menu commands off the Mac, as `install` binds them: Ctrl+W closes a
+    /// window, F11 is full screen, and the commands Windows has its own keys for (最小化,
+    /// 表情与符号) or no counterpart of (隐藏) have none. Every command of the Windows menus
+    /// that is this module's has its handler.
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn the_window_menu_commands_have_their_windows_keys(cx: &mut gpui::TestAppContext) {
+        use gpui::Action as _;
+        cx.update(|cx| {
+            install(cx);
+            let keymap = cx.key_bindings();
+            let keys = |action: &dyn gpui::Action| -> Vec<String> {
+                keymap
+                    .borrow()
+                    .bindings()
+                    .filter(|b| b.action().partial_eq(action))
+                    .map(|b| {
+                        b.keystrokes()
+                            .iter()
+                            .map(|k| {
+                                let k = k.inner();
+                                let ctrl = if k.modifiers.control { "ctrl-" } else { "" };
+                                format!("{ctrl}{}", k.key)
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                    .collect()
+            };
+            assert_eq!(keys(&CloseWindow), ["ctrl-w"]);
+            assert_eq!(keys(&ToggleFullScreen), ["f11"]);
+            for none in [
+                Minimize.boxed_clone(),
+                Hide.boxed_clone(),
+                HideOthers.boxed_clone(),
+                ShowCharacterPalette.boxed_clone(),
+                Zoom.boxed_clone(),
+            ] {
+                assert!(keys(none.as_ref()).is_empty(), "{}", none.name());
+            }
+            for handled in [
+                CloseWindow.boxed_clone(),
+                Minimize.boxed_clone(),
+                Zoom.boxed_clone(),
+                ToggleFullScreen.boxed_clone(),
+                BringAllToFront.boxed_clone(),
+                ShowCharacterPalette.boxed_clone(),
+                UseProductionServer.boxed_clone(),
+                UseStagingServer.boxed_clone(),
+            ] {
+                assert!(
+                    cx.is_action_available(handled.as_ref()),
+                    "{} has a handler",
+                    handled.name()
+                );
+            }
+        });
+    }
+
+    /// 窗口 › 前置全部窗口 through the app's handler: every window is raised and the one
+    /// that was active is the active one again at the end (it is raised last).
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn bring_all_to_front_ends_on_the_window_that_was_active(cx: &mut gpui::TestAppContext) {
+        cx.update(install);
+        let first = cx.add_window(|_, _| Empty);
+        let second = cx.add_window(|_, _| Empty);
+        let third = cx.add_window(|_, _| Empty);
+        cx.run_until_parked();
+        first
+            .update(cx, |_, window, _| window.activate_window())
+            .unwrap();
+        cx.run_until_parked();
+        let active = |cx: &mut gpui::TestAppContext| cx.update(|cx| cx.active_window());
+        assert_eq!(active(cx), Some(first.into()));
+        cx.update(|cx| cx.dispatch_action(&BringAllToFront));
+        cx.run_until_parked();
+        assert_eq!(
+            active(cx),
+            Some(first.into()),
+            "the active window ends on top"
+        );
+        // From another active window the order follows it.
+        third
+            .update(cx, |_, window, _| window.activate_window())
+            .unwrap();
+        cx.run_until_parked();
+        cx.update(|cx| cx.dispatch_action(&BringAllToFront));
+        cx.run_until_parked();
+        assert_eq!(active(cx), Some(third.into()));
+        let _ = second;
     }
 
     /// The menus a window shows on Windows: every command of the Mac menus except the

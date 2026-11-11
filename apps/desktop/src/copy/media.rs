@@ -89,6 +89,7 @@ crate::copy! {
     STATE_TOO_LARGE_HINT = "可以先压缩，或放到共享盘再贴链接",
     STATE_TOO_LARGE_DETAIL = "{size}，超过 {limit}",
     STATE_FAILED_HINT = "这种格式没法在应用里打开",
+    STATE_NO_PREVIEW = "这种文件在应用里没有预览，可以用系统应用打开",
     // Windows only: a video whose decoder is not installed (HEVC without the
     // system's extension, most MOV files).
     STATE_FAILED_CODEC = "这台电脑没有这种视频的解码器，没法在应用里播放",

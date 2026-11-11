@@ -11,7 +11,9 @@ Read [docs/PRODUCT.md](docs/PRODUCT.md) (what we build, interface words, V1 bar)
 - **Product name**: only in `product.json`. The server imports it, `apps/desktop/build.rs`
   exports it as compile-time constants, scripts read it with bun or jq. Never type the product
   name in code or UI strings. Infra ids (Worker, D1, crate and package names) use neutral names
-  and do not change when the product is renamed. Server URLs are not in `product.json`: the app and the
+  and do not change when the product is renamed. After a rename, add the old name to
+  `formerNames` in `product.json`: the Windows installer keeps it as a second name of the app's
+  program, because an installed app starts `<old name>.exe` after it updates itself. Server URLs are not in `product.json`: the app and the
   scripts read them from `deploy/servers.json` in the ops checkout.
 - **Interface text**: Simplified Chinese, only from the desktop copy catalog, only the four
   product nouns 成员, 群, 话题, 产出 (see PRODUCT.md). Developer words stay in the developer view

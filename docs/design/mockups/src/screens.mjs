@@ -128,38 +128,37 @@ export const LOGIN_CSS = `
 
 /**
  * App icon. macOS grid: an 824 px rounded-square body inside the 1024 canvas (radius 186).
- * 「 」 corner brackets (Chinese quotation: a conversation) hold a circle (a person, in the
- * accent: "color means you") and a rounded square (a bot): equal members in one exchange.
- * Below 64 px the strokes and shapes thicken (optical sizing for 16/32 px).
+ * Jojo, the lead character of the default bot family, calm, on the family's cream. The drawing is
+ * jojo-friends' own (renderSvg, character jojo, emotion calm: src/library/geometry.ts); never
+ * redraw it by hand. The icon is the same on light and dark surfaces (`variant` only picks the edge).
+ * Below 64 px Jojo is larger and the fills are flat (optical sizing for 16/32 px).
  */
+const JOJO_SHELL = "M260,380 C260,312 310,262 365,262 C396,262 418,288 422,318 A80,80 0 0 0 582,318 C590,284 622,258 670,258 L875,258 A120,120 0 0 1 995,378 L995,838 A120,120 0 0 1 875,958 L380,958 A120,120 0 0 1 260,838 Z";
+const JOJO_FACE = "M418,582 A130,130 0 0 1 548,452 L925,452 A70,70 0 0 1 995,522 L995,838 A120,120 0 0 1 875,958 L498,958 A80,80 0 0 1 418,878 Z";
 export function appIconSvg(size, { variant = "light", id = "a" } = {}) {
   const dark = variant === "dark";
   const small = size < 64;
-  const bodyTop = dark ? "#3a3a3e" : "#ffffff";
-  const bodyBot = dark ? "#1f1f22" : "#e9e9ee";
-  const ink = dark ? "#f2f2f5" : "#2c2c30";
-  const bot = dark ? "#9a9aa1" : "#56565c";
-  const sw = small ? 84 : 60;
   const shadow = size >= 64;
-  // Horizontal composition, like quoted text: 「 ● ■ 」. Tall brackets with short arms, so they
-  // read as quotation marks and not as crop marks.
-  const g = small
-    ? { l: 194, r: 830, top: 300, bot: 724, arm: 104, cx: 398, cy: 512, cr: 106, sx: 530, sw: 204, srx: 58, dy: 30 }
-    : { l: 214, r: 810, top: 318, bot: 706, arm: 92, cx: 402, cy: 512, cr: 92, sx: 532, sw: 180, srx: 50, dy: 36 };
+  const s = small ? 0.92 : 0.86;
+  const at = `translate(${+(512 - 627.5 * s).toFixed(2)} ${+(522 - 608 * s).toFixed(2)}) scale(${s})`;
   return `<svg width="${size}" height="${size}" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
 <defs>
-  <linearGradient id="bg${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${bodyTop}"/><stop offset="1" stop-color="${bodyBot}"/></linearGradient>
-  <linearGradient id="ac${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3b9bff"/><stop offset="1" stop-color="#0a74f0"/></linearGradient>
-  <filter id="ws${id}" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="${shadow ? (dark ? 0.45 : 0.20) : 0}"/></filter>
+  <linearGradient id="bg${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fbf6ec"/><stop offset="1" stop-color="#f1e7d4"/></linearGradient>
+  <linearGradient id="js${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#32377b"/><stop offset="1" stop-color="#292d6b"/></linearGradient>
+  <linearGradient id="jf${id}" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#d6f3ea"/><stop offset="1" stop-color="#c9ede1"/></linearGradient>
+  <radialGradient id="jd${id}" cx="0.36" cy="0.32" r="0.75"><stop offset="0" stop-color="#ff8a6c"/><stop offset="0.55" stop-color="#fe6a4a"/></radialGradient>
+  <filter id="ws${id}" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="${shadow ? (dark ? 0.45 : 0.22) : 0}"/></filter>
 </defs>
 <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#bg${id})" filter="url(#ws${id})"/>
-<rect x="100.75" y="100.75" width="822.5" height="822.5" rx="185.25" fill="none" stroke="${dark ? "#ffffff" : "#000000"}" stroke-opacity="${dark ? 0.16 : 0.10}" stroke-width="${small ? 10 : 1.5}"/>
-<g fill="none" stroke="${ink}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">
-  <path d="M ${g.l + g.arm} ${g.top} H ${g.l} V ${g.top + (g.bot - g.top) * 0.68}"/>
-  <path d="M ${g.r - g.arm} ${g.bot} H ${g.r} V ${g.bot - (g.bot - g.top) * 0.68}"/>
+<rect x="100.75" y="100.75" width="822.5" height="822.5" rx="185.25" fill="none" stroke="#5e4828" stroke-opacity="${small ? 0.16 : 0.12}" stroke-width="${small ? 10 : 1.5}"/>
+<g transform="${at}">
+  <path d="${JOJO_SHELL}" fill="${small ? "#2d3272" : `url(#js${id})`}"/>
+  <path d="${JOJO_FACE}" fill="${small ? "#cff0e6" : `url(#jf${id})`}"/>
+  <rect x="555" y="592" width="68" height="196" rx="34" fill="#2d3272"/>
+  <rect x="747" y="572.5" width="110" height="215" rx="55" fill="#2d3272"/>
+  <rect x="723" y="823" width="162" height="47" rx="23.5" fill="#2d3272"/>
+  <circle cx="501" cy="297" r="53" fill="${small ? "#fe6a4a" : `url(#jd${id})`}"/>
 </g>
-<circle cx="${g.cx}" cy="${g.cy - g.dy}" r="${g.cr}" fill="url(#ac${id})"/>
-<rect x="${g.sx}" y="${g.cy + g.dy - g.sw / 2}" width="${g.sw}" height="${g.sw}" rx="${g.srx}" fill="${bot}"/>
 </svg>`;
 }
 

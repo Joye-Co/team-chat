@@ -67,6 +67,18 @@ check "silent install" silent_install "$SETUP"
 check "app installed" test -f "$EXE"
 check "update helper installed" test -f "$DIR/$SLUG-update.exe"
 check "uninstaller installed" test -f "$DIR/uninstall.exe"
+# The names the product had before (product.json formerNames) stay as second names of the
+# app's program: the update helper of an app installed under such a name starts
+# <former name>.exe after the installer, and rolls the update back when it is missing.
+FORMER=()
+while IFS= read -r former; do [ -z "$former" ] || FORMER+=("$former"); done < <(jq -r '.formerNames // [] | .[]' "$ROOT/product.json" | tr -d '\r')
+former_names_hold() {
+  for former in ${FORMER[@]+"${FORMER[@]}"}; do
+    check "former name $former.exe is the app's program" cmp -s "$EXE" "$DIR/$former.exe"
+    check "no Start menu shortcut of $former" test ! -e "$(dirname "$(start_menu_shortcut)")/$former.lnk"
+  done
+}
+former_names_hold
 if [ "${DAEMON:-1}" = 1 ]; then check "machine daemon installed" test -f "$DIR/$SLUG-daemon.exe"; fi
 printf 'install log:\n'; sed 's/^/      /' "$DIR/install.log" 2>/dev/null || true
 # The installer refuses a Windows older than the one the docs promise (10 version 22H2).
@@ -159,9 +171,22 @@ if [ "${SKIP_WINDOW:-0}" != 1 ]; then
   [ "$RC" = 0 ] || tail -n 20 "$WORK/screenshot.log"
 fi
 
+# An install made under a former name: its program and its shortcut are there, the app's own
+# program is not. The installer over it leaves the new program under both names.
+for former in ${FORMER[@]+"${FORMER[@]}"}; do
+  rm -f "$DIR/$former.exe"
+  echo "the program of an earlier version" >"$DIR/$former.exe"
+  echo "an earlier shortcut" >"$(dirname "$(start_menu_shortcut)")/$former.lnk"
+done
 # A second install over the first works and keeps the folder.
 check "reinstall over itself" silent_install "$SETUP"
 check "still installed" test -f "$EXE"
+former_names_hold
+for former in ${FORMER[@]+"${FORMER[@]}"}; do
+  "$DIR/$former.exe" --selftest-installed --report "$(cygpath -m "$WORK/installed-$former.json")" && RC=0 || RC=$?
+  check "the app starts as $former.exe" is "$RC" 0
+  check "$former.exe reports this version" is "$(jq -r .version "$WORK/installed-$former.json" 2>/dev/null)" "$VERSION"
+done
 
 # What a person who used the app has besides the install: 登录时打开 turned on (the Run value
 # and Task Manager's record of it), the caches, and their data. The uninstall removes the

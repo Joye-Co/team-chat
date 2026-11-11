@@ -1,17 +1,19 @@
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
 <!-- The iPhone app icon: the master (docs/design/brand/icon.svg) full bleed, without the macOS
-     body, margin and shadow; iOS draws the rounded corners. -->
+     body, margin and shadow; iOS draws the rounded corners. Jojo is drawn by jojo-friends (renderSvg, character jojo, emotion calm); do not redraw it by hand. -->
 <defs>
-  <linearGradient id="bgm" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#e9e9ee"/></linearGradient>
-  <linearGradient id="acm" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3b9bff"/><stop offset="1" stop-color="#0a74f0"/></linearGradient>
+  <linearGradient id="bgm" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fbf6ec"/><stop offset="1" stop-color="#f1e7d4"/></linearGradient>
+  <linearGradient id="js" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#32377b"/><stop offset="1" stop-color="#292d6b"/></linearGradient>
+  <linearGradient id="jf" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#d6f3ea"/><stop offset="1" stop-color="#c9ede1"/></linearGradient>
+  <radialGradient id="jd" cx="0.36" cy="0.32" r="0.75"><stop offset="0" stop-color="#ff8a6c"/><stop offset="0.55" stop-color="#fe6a4a"/></radialGradient>
 </defs>
 <rect width="1024" height="1024" fill="url(#bgm)"/>
-<g transform="translate(512 512) scale(1.12) translate(-512 -512)">
-  <g fill="none" stroke="#2c2c30" stroke-width="60" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M 306 318 H 214 V 581.84"/>
-    <path d="M 718 706 H 810 V 442.16"/>
-  </g>
-  <circle cx="402" cy="476" r="92" fill="url(#acm)"/>
-  <rect x="532" y="458" width="180" height="180" rx="50" fill="#56565c"/>
+<g transform="translate(-90.4 -59.68) scale(0.96)">
+  <path d="M260,380 C260,312 310,262 365,262 C396,262 418,288 422,318 A80,80 0 0 0 582,318 C590,284 622,258 670,258 L875,258 A120,120 0 0 1 995,378 L995,838 A120,120 0 0 1 875,958 L380,958 A120,120 0 0 1 260,838 Z" fill="url(#js)"/>
+  <path d="M418,582 A130,130 0 0 1 548,452 L925,452 A70,70 0 0 1 995,522 L995,838 A120,120 0 0 1 875,958 L498,958 A80,80 0 0 1 418,878 Z" fill="url(#jf)"/>
+  <rect x="555" y="592" width="68" height="196" rx="34" fill="#2d3272"/>
+  <rect x="747" y="572.5" width="110" height="215" rx="55" fill="#2d3272"/>
+  <rect x="723" y="823" width="162" height="47" rx="23.5" fill="#2d3272"/>
+  <circle cx="501" cy="297" r="53" fill="url(#jd)"/>
 </g>
 </svg>

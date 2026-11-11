@@ -45,6 +45,9 @@ gpui::actions!(
         StartDm,
         NextUnreadTopic,
         PreviousUnreadTopic,
+        // ⌘[ / ⌘]: back and forward through the places of the window.
+        GoBack,
+        GoForward,
         OpenGroup1,
         OpenGroup2,
         OpenGroup3,
@@ -78,6 +81,42 @@ enum Pending {
 
 impl Global for NavGlobal {}
 
+/// The key of 返回: ⌘[ on the Mac, Alt+← elsewhere.
+pub fn go_back_key() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "cmd-["
+    } else {
+        "alt-left"
+    }
+}
+
+/// The key of 前进: ⌘] on the Mac, Alt+→ elsewhere.
+pub fn go_forward_key() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "cmd-]"
+    } else {
+        "alt-right"
+    }
+}
+
+/// ⌘[ never leads to a 群 the person left. (An empty list is a snapshot
+/// still loading, not every 群 gone.)
+fn forget_gone_places(cx: &mut App) {
+    let services = services_of(cx);
+    let groups: HashSet<GroupId> = services
+        .provider
+        .groups()
+        .into_iter()
+        .map(|g| g.id)
+        .collect();
+    if groups.is_empty() {
+        return;
+    }
+    services
+        .nav
+        .update(cx, |nav, _| nav.forget_gone(|g, _| groups.contains(g)));
+}
+
 /// The keys inside the switcher, the sheets and 问: ↑↓ and Return in their
 /// lists (the screenshot self-test binds them too).
 pub fn bind_sheet_keys(cx: &mut App) {
@@ -96,6 +135,10 @@ pub fn install(services: Services, status_item: bool, cx: &mut App) {
         KeyBinding::new(crate::secondary!("shift-n"), NewGroup, None),
         KeyBinding::new("alt-down", NextUnreadTopic, None),
         KeyBinding::new("alt-up", PreviousUnreadTopic, None),
+        // Back and forward: ⌘[ ⌘] like Safari and Finder on the Mac, Alt+←
+        // Alt+→ like the browsers and Explorer on Windows (WINDOWS.md).
+        KeyBinding::new(go_back_key(), GoBack, None),
+        KeyBinding::new(go_forward_key(), GoForward, None),
         KeyBinding::new(crate::secondary!("1"), OpenGroup1, None),
         KeyBinding::new(crate::secondary!("2"), OpenGroup2, None),
         KeyBinding::new(crate::secondary!("3"), OpenGroup3, None),
@@ -116,7 +159,9 @@ pub fn install(services: Services, status_item: bool, cx: &mut App) {
     cx.subscribe(&services.hub, |_, changes: &Changes, cx| {
         if changes.any(|c| matches!(c, Change::Groups)) {
             open_pending(cx);
+            forget_gone_places(cx);
         }
+
         if changes.any(|c| matches!(c, Change::Session)) {
             menus::refresh_server_menu(cx);
         }
@@ -145,6 +190,12 @@ pub fn install(services: Services, status_item: bool, cx: &mut App) {
                 dialogs::open_start_dm(services_of(cx), window, cx);
             }
         });
+    });
+    cx.on_action(|_: &GoBack, cx| {
+        services_of(cx).nav.update(cx, |nav, cx| nav.go_back(cx));
+    });
+    cx.on_action(|_: &GoForward, cx| {
+        services_of(cx).nav.update(cx, |nav, cx| nav.go_forward(cx));
     });
     cx.on_action(|_: &NextUnreadTopic, cx| go_to_unread(true, cx));
     cx.on_action(|_: &PreviousUnreadTopic, cx| go_to_unread(false, cx));
@@ -196,6 +247,37 @@ pub fn status_item_ok(services: &Services, cx: &App) -> bool {
     {
         let _ = (services, cx);
         true
+    }
+}
+
+/// Whether the app keeps running when its last window closes, with a way back to it: on
+/// macOS always (the Dock icon), on Windows while the notification-area icon is shown.
+/// Closing the last window from the keyboard is only offered then.
+pub fn app_outlives_windows(cx: &App) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = cx;
+        true
+    }
+    #[cfg(target_os = "windows")]
+    {
+        status_item::outlives_windows(cx)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = cx;
+        false
+    }
+}
+
+/// What 关闭窗口 (⌘W, Ctrl+W) does to a window: it closes unless that would end the app
+/// (the last window of an app that does not outlive its windows), and the main window
+/// only closes when the app stays reachable without it.
+pub fn close_command_closes(outlives: bool, windows: usize, main_window: bool) -> bool {
+    if main_window {
+        outlives
+    } else {
+        outlives || windows > 1
     }
 }
 
@@ -554,6 +636,31 @@ fn go_to_unread(forward: bool, cx: &mut App) {
             nav.open_group(g.clone(), cx);
             nav.open_topic(g, t, cx);
         });
+    }
+}
+
+#[cfg(test)]
+mod close_tests {
+    use super::close_command_closes;
+
+    /// ⌘W on the Mac and Ctrl+W on Windows with the notification-area icon close any
+    /// window, the main one too (the app stays in the Dock or the tray). Without the icon
+    /// Ctrl+W never closes the main window or the last window: that would quit.
+    #[test]
+    fn the_close_command_never_ends_the_app() {
+        for windows in [1, 2, 3] {
+            assert!(close_command_closes(true, windows, true), "main, app stays");
+            assert!(close_command_closes(true, windows, false));
+            assert!(
+                !close_command_closes(false, windows, true),
+                "main, no way back"
+            );
+        }
+        assert!(!close_command_closes(false, 1, false), "the last window");
+        assert!(
+            close_command_closes(false, 2, false),
+            "设置 next to the main window"
+        );
     }
 }
 

@@ -144,7 +144,8 @@ RunEvent =
 ```
 
 - `status: "preparing"` comes first (worktree setup), then `running`.
-- `status: "stalled"` is sent once after `stall_minutes` (default 5) without any event; the
+- `status: "stalled"` is sent once after `stall_minutes` (default 5) without any event, or
+  after 30 minutes while a `tool.call` has no `tool.result` yet (the CLI waits for a step); the
   next event clears it. BotDesk uses it for the topic's stuck state.
 - `tool.result.itemId` equals the `tool.call.itemId` it answers.
 - `plan` carries the CLI's own to-do list, mapped by the daemon: Claude Code's `TodoWrite` tool
@@ -405,7 +406,9 @@ How the 1.1 daemon does each one:
   `~/.claude`), so the run keeps its auth and model; it is mode 0600, never on the command line,
   left out when there is nothing to keep, and removed when the run ends. The tool set keeps a
   user allow rule for a command or edit tool from widening the run. Codex gets
-  `approvalPolicy: "never"` and `sandbox: "read-only"` (no writes, no network for commands),
+  `approvalPolicy: "never"` and `sandbox: "read-only"` (no writes, no network for commands; on Windows Codex enforces
+  it only through its own Windows sandbox, so the daemon adds `-c windows.sandbox="unelevated"`:
+  no writes, but commands still reach the network),
   and `-c` overrides that turn off web search, apps, plugins, browser and computer use, and
   each MCP server in `$CODEX_HOME/config.toml` and the `.codex/config.toml` files of the
   working directory and the folders above it (MCP tools run outside the sandbox): each one is
@@ -808,7 +811,11 @@ shares of the host, mounted at their host paths, so the worktree, session files,
 and 产出 stay where the daemon reads them. Stdin and stdout go over vsock (port 1024) as
 frames; `chat-run` in the VM uses the socket `/run/chat-run.sock`, which the agent relays to
 the run's socket over vsock (port 1025), so Codex runs use the socket instead of the request
-folder. 接管 pauses and resumes the whole VM. When the CLI exits the agent syncs the shares
+folder. With `[vm].homes` (default `/srv/runner/homes`) the folder `<homes>/<bot member id>` is
+one more share, mounted as the VM's `$HOME`: what a bot clones, installs and signs in to
+(`gh auth login`) is there again in its next run, in every VM of that bot; the rest of the
+disk still goes with the VM. The CLI's system note says so, and that processes left running
+when the turn ends are killed. 接管 pauses and resumes the whole VM. When the CLI exits the agent syncs the shares
 before the daemon reads them; then the VM, its tap, its exports and its scratch disk go.
 
 The VMs reach the internet. A static nftables table (`scripts/runner/runner-vm.nft`) drops
@@ -840,7 +847,8 @@ Group members read run events, so the daemon redacts every frame before it sends
 it, and the session file before upload: the exact values of the `env_passthrough` and
 `gated_env` variables and the machine token, known token formats (`tc_`, `whk_`, `tm_`, GitHub, OpenAI, Anthropic,
 AWS, Slack, Google keys, bearer values, private key blocks, URL passwords, secret query
-parameters, invite codes) and secret-named `key=value` pairs become `<redacted>`.
+parameters, invite codes; not the one-time code of a device sign-in such as `gh auth login`,
+which a person has to read) and secret-named `key=value` pairs become `<redacted>`.
 `message.delta` text is released per line (or after 1 s, all but its last two words), so a
 secret split over two deltas is redacted whole.
 
@@ -849,7 +857,7 @@ secret split over two deltas is redacted whole.
 | kind | Command | Protocol |
 | --- | --- | --- |
 | `codex` | `codex app-server` | JSON-RPC lines on stdio (v2): `initialize`, `initialized`, `thread/start {cwd, approvalPolicy, sandbox, model?}`, `turn/start`, `turn/steer`, `turn/interrupt`; notifications `turn/*`, `item/*`, `item/agentMessage/delta`, `thread/tokenUsage/updated`, `error`; server requests `item/commandExecution/requestApproval`, `item/fileChange/requestApproval` |
-| `claude` | `claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --session-id <uuid> --permission-mode <mode>` | one JSON line per user message in; `system/init`, `stream_event` (text deltas), `assistant`, `user` (tool results), `result` out |
+| `claude` | `claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --replay-user-messages --session-id <uuid> --permission-mode <mode>` | one JSON line per user message in (a line the CLI reads while a turn runs joins that turn; the CLI echoes each line it takes up, and the run ends when a `result` arrives with no line unread); `system/init`, `stream_event` (text deltas), `assistant`, `user` (tool results), `result` out |
 | `acp` | configured, e.g. `gemini --acp`, `opencode acp` | Agent Client Protocol v1 (JSON-RPC 2.0): `initialize`, `session/new`, `session/prompt`, `session/update`, `session/request_permission`, `session/cancel` |
 | `pty` | configured; `{prompt}` in args is replaced | a pseudo terminal; output without ANSI codes streams as message item `out` |
 
@@ -861,7 +869,7 @@ example-config` prints a commented example. Keys: `server_url`, `token_file`, `m
 `stall_minutes`, `repo_roots`, `env_passthrough`, `gated_env`, `takeover_url` (1.1), `[runtimes.<name>]` with `kind`,
 `command`, `args`, `env`, `model`, and `[vm]` with `kernel`, `rootfs`, `dir`, `vcpus`, `mem_mib`
 (a cap: the host gives only the pages the VM touches), `scratch_gb`, `firecracker`, `helper`,
-`shares`. `approval_policy`, `sandbox`, `permission_mode` and
+`shares`, `homes`. `approval_policy`, `sandbox`, `permission_mode` and
 `allowed_tools` still parse (1.1 configs) but are ignored since 1.2.1. Without `[runtimes.*]`, `codex` and `claude` are added when
 found on PATH.
 
