@@ -54,7 +54,7 @@ impl SheetExt for Dialog {
         // wide, radius 22; the window behind dims (theme `overlay`).
         overlay_fill(self, cx)
             .entrance(entrance(false))
-            .margin_top(crate::ui::native::metrics::TOOLBAR_ROW)
+            .margin_top(crate::ui::native::window_chrome::sheet_top())
             .width(crate::ui::native::metrics::SHEET_WIDTH)
             .rounded(crate::ui::native::metrics::SHEET_RADIUS)
     }

@@ -230,7 +230,7 @@ return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2});})()",
             .timer(Duration::from_millis(100))
             .await;
     }
-    let clip_top = crate::ui::native::metrics::TOOLBAR_ROW;
+    let clip_top = crate::ui::native::window_chrome::sheet_top();
     match mode {
         Mode::Topic => {}
         Mode::Scrolled => {
@@ -430,7 +430,7 @@ video{display:block;width:100%;border-radius:8px;background:#000;aspect-ratio:16
 audio{display:block;width:100%;margin-top:12px}
 h2{font-size:13px;margin:16px 0 4px;font-weight:600}
 ul{margin:0;padding-left:18px;color:var(--t1)}
-code{font:12px ui-monospace,Menlo,monospace;background:var(--line);padding:1px 4px;border-radius:4px}
+code{font:12px ui-monospace,Menlo,"Cascadia Mono",Consolas,monospace;background:var(--line);padding:1px 4px;border-radius:4px}
 "#,
     r#"</style></head><body><div class="wrap">
 <div class="sub">视频和提示音都在这个产出里</div>

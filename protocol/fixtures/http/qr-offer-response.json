@@ -1,0 +1,9 @@
+{
+  "kind": "QrOfferResponse",
+  "valid": true,
+  "value": {
+    "id": "01JQROFFER000000000000000",
+    "code": "7K2M-9QPX",
+    "expiresAt": 1762800300000
+  }
+}
