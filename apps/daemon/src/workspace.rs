@@ -107,8 +107,12 @@ async fn git(dir: Option<&Path>, args: &[&str]) -> Result<String, String> {
     c.args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
-    let out = tokio::time::timeout(Duration::from_secs(600), c.output())
+    // Windows: in a job, so a git that is given up after the time limit takes the helpers it
+    // started (`git-remote-https`) with it.
+    let out = tokio::time::timeout(Duration::from_secs(600), crate::health::output(&mut c))
         .await
         .map_err(|_| format!("git {} timed out", args.first().unwrap_or(&"")))?
         .map_err(|e| format!("git: {e}"))?;

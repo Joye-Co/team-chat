@@ -56,6 +56,10 @@ GPUI、gpui-component 和 `chat-core` 不用改就能为 Windows 编译；W0 修
 
 ### 机器（`apps/daemon`，约 1.15 万行）
 
+和 Mac 机器逐项对齐的清单在 [`windows-parity/machine.zh.md`](windows-parity/machine.zh.md)：下面 M1 到 M3
+里「还没做的」「要在真机上核实的」大多已经在 Windows CI 上补完（审批、真 CLI、整条链、「用这台电脑」），
+以那份清单为准；这里保留当时的记录。
+
 M1 之前为 Windows 编译有 68 处错误（加上测试 115 处），M1 之后是 0。协议、运行时对各 CLI 的解析、
 脱敏、模型列表、配置这些大头和平台无关。下表是每一块的 Windows 方案；M1 做了哪些见「阶段」里的 M1。
 
@@ -439,7 +443,8 @@ M1 里发现、留给后面的：
   起不来，而不是被冒充）。请求和回答的格式跟 Unix socket 完全一样，变量还是 `CHAT_RUN_SOCKET`。客户端
   以「只许识别身份」的方式连接，daemon 不能冒用它的身份。run 结束管道就没了。Windows 上现在和 Unix 一致：
   Codex 走文件，其他运行时走管道。
-- **审批（gates）**：Windows 机器**仍然不上报** `gates` 能力。通道已经有了（管道），钩子在 Windows 上
+- **审批（gates）**：（已打开，见 `windows-parity/machine.zh.md` 第 6 节：钩子改成不经过 shell 的写法加
+  `onFailure: "block"`，在 CI 上对着真的 Claude Code 证明过。下面是当时的记录。）Windows 机器**仍然不上报** `gates` 能力。通道已经有了（管道），钩子在 Windows 上
   也改成了问不到 daemon 就拒绝（Unix 保持原样：问不到就放行）；带审批的 run 如果传输起不来，run 直接失败
   （两个平台一直如此）。但还有一种情况代码里堵不住：Claude Code 在 Windows 上如果根本没把钩子命令
   `"C:/.../chat-run.exe" gate` 启动起来（用哪个 shell、怎么处理引号，没在真机上见过），所有命令都会放行，

@@ -17,6 +17,19 @@ pub async fn report(cfg: &Config) -> (String, bool) {
         "git:          {}",
         if git.is_some() { "found" } else { "MISSING" }
     );
+    // Windows: which shell Claude Code's command tool and hooks use. Not a problem either way;
+    // it tells the owner what a run's commands are written in.
+    #[cfg(windows)]
+    if cfg.runtimes.values().any(|rt| rt.kind == "claude") {
+        let _ = writeln!(
+            s,
+            "claude shell: {}",
+            match crate::sys::git_bash() {
+                Some(bash) => format!("Git Bash ({})", bash.display()),
+                None => "PowerShell (Git for Windows was not found)".into(),
+            }
+        );
+    }
     let h = crate::health::health(cfg, 0);
     let _ = writeln!(
         s,

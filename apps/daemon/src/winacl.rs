@@ -16,7 +16,8 @@ use std::sync::OnceLock;
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, LocalFree};
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
-    GetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT, SetNamedSecurityInfoW,
+    GetNamedSecurityInfoW, GetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT, SE_KERNEL_OBJECT,
+    SetNamedSecurityInfoW,
 };
 use windows_sys::Win32::Security::{
     ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, CreateWellKnownSid, DACL_SECURITY_INFORMATION, EqualSid,
@@ -406,7 +407,53 @@ pub fn check(path: &Path) -> Result<(), String> {
             std::io::Error::from_raw_os_error(err as i32)
         ));
     }
-    let verdict = (|| {
+    let verdict = private_verdict(t, owner, dacl);
+    // SAFETY: allocated by GetNamedSecurityInfoW.
+    unsafe {
+        LocalFree(sd);
+    }
+    verdict
+}
+
+/// [`check`] for an open kernel object (a connection to a named pipe): `Ok` when its owner is the
+/// daemon's user (or SYSTEM or Administrators) and nobody else is allowed any access.
+pub fn check_handle(object: &std::fs::File) -> Result<(), String> {
+    use std::os::windows::io::AsRawHandle as _;
+    let handle = object.as_raw_handle() as HANDLE;
+    let t = trusted().map_err(|e| format!("cannot read this user's identity: {e}"))?;
+    let mut owner: PSID = std::ptr::null_mut();
+    let mut dacl: *mut ACL = std::ptr::null_mut();
+    let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+    // SAFETY: the handle is open; the out pointers are valid; `sd` is freed below.
+    let err = unsafe {
+        GetSecurityInfo(
+            handle,
+            SE_KERNEL_OBJECT,
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+            &mut owner,
+            std::ptr::null_mut(),
+            &mut dacl,
+            std::ptr::null_mut(),
+            &mut sd,
+        )
+    };
+    if err != 0 {
+        return Err(format!(
+            "cannot read its access list: {}",
+            std::io::Error::from_raw_os_error(err as i32)
+        ));
+    }
+    let verdict = private_verdict(t, owner, dacl);
+    // SAFETY: allocated by GetSecurityInfo.
+    unsafe {
+        LocalFree(sd);
+    }
+    verdict
+}
+
+/// The rule of [`check`] over an owner and an access list.
+fn private_verdict(t: &Trusted, owner: PSID, dacl: *mut ACL) -> Result<(), String> {
+    {
         if owner.is_null() || !t.may_own(owner) {
             return Err(format!(
                 "it belongs to {}, not to this user",
@@ -450,12 +497,7 @@ pub fn check(path: &Path) -> Result<(), String> {
             }
         }
         Ok(())
-    })();
-    // SAFETY: allocated by GetNamedSecurityInfoW.
-    unsafe {
-        LocalFree(sd);
     }
-    verdict
 }
 
 /// Security attributes for a kernel object (a named pipe) that only the daemon's user may
@@ -479,6 +521,18 @@ impl OnlyMe {
 
     pub fn as_ptr(&mut self) -> *mut c_void {
         (&raw mut self.attrs).cast()
+    }
+
+    /// Attributes with the access list of `sddl`, for tests (a pipe this user may not open).
+    #[cfg(test)]
+    pub(crate) fn for_sddl(sddl: &str) -> std::io::Result<OnlyMe> {
+        let sd = Descriptor::parse(sddl)?;
+        let attrs = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: sd.0,
+            bInheritHandle: 0,
+        };
+        Ok(OnlyMe { _sd: sd, attrs })
     }
 }
 

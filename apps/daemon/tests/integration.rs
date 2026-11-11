@@ -24,6 +24,9 @@ use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 
+#[path = "fake/model.rs"]
+mod model;
+
 const TOKEN: &str = "tm_test_token_value";
 
 /// The `[runtimes.<name>]` section of a fake CLI script (`fake_claude.py`, `fake_codex.py`):
@@ -594,17 +597,8 @@ async fn daemon_end_to_end() {
     })
     .await;
     assert!(matches!(start[0], Up::RunAccept { .. }));
-    for _ in 0..200 {
-        if pidfile.exists() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    let pid: i32 = std::fs::read_to_string(&pidfile)
-        .unwrap()
-        .trim()
-        .parse()
-        .unwrap();
+    // The file can be there before its content.
+    let pid: i32 = wait_file(&pidfile).await.trim().parse().unwrap();
     send(
         &mut ws,
         &Down::RunCancel {
@@ -705,17 +699,8 @@ async fn unknown_run_after_reconnect_is_cancelled() {
     })
     .await;
     let pidfile = tmp.path().join("work/runs/r9/work/fake.pid");
-    for _ in 0..200 {
-        if pidfile.exists() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    let pid: i32 = std::fs::read_to_string(&pidfile)
-        .unwrap()
-        .trim()
-        .parse()
-        .unwrap();
+    // The file can be there before its content.
+    let pid: i32 = wait_file(&pidfile).await.trim().parse().unwrap();
     drop(ws);
     let (mut ws, _) = tokio::time::timeout(Duration::from_secs(40), m.conns.recv())
         .await
@@ -1549,6 +1534,27 @@ async fn interaction_envelope_and_chat_run() {
     assert_eq!(done(&frames).status, "succeeded");
     #[cfg(unix)]
     assert!(!socket.exists(), "socket left after the run");
+    // Windows: the pipe went with the run (its access list is checked in the daemon's unit
+    // tests, from a connection to a live pipe).
+    #[cfg(windows)]
+    {
+        let pipe = r["socket"].as_str().unwrap().to_string();
+        let mut gone = false;
+        for _ in 0..100 {
+            match std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&pipe)
+            {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    gone = true;
+                    break;
+                }
+                _ => tokio::time::sleep(Duration::from_millis(50)).await,
+            }
+        }
+        assert!(gone, "pipe left after the run: {pipe}");
+    }
 
     // 2. No run.output.result: chat-run gives up after 15 s with "unconfirmed" (retry is safe).
     send(&mut ws, &assign("c2", "fake", "chatrun", None)).await;
@@ -2001,13 +2007,6 @@ async fn gated_commands_wait_for_a_person() {
     match next(&mut ws).await {
         Up::Hello { machine, clis, .. } => {
             assert!(machine.features.unwrap().iter().any(|f| f == "gates"));
-            // A system whose Claude Code runs are not gated yet says so (no `gates`), and
-            // the server then sends such a machine no gates: nothing more to check there.
-            if !daemon::gates::enforced_by("claude") {
-                assert_eq!(clis[0].gates, None);
-                stop_tx.send(()).unwrap();
-                return;
-            }
             assert_eq!(clis[0].gates, Some(true), "a claude runtime is gated");
         }
         f => panic!("{f:?}"),
@@ -2066,6 +2065,428 @@ async fn gated_commands_wait_for_a_person() {
     assert!(!fr.iter().any(is_request));
     let r: serde_json::Value = serde_json::from_str(&wait_file(&report("g3")).await).unwrap();
     assert_eq!(r["hooks"], 0);
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+/// The real `claude` of this machine, or None (skip) when it has none; a failure instead when
+/// `TC_REQUIRE_REAL_CLI` is set (CI installs the CLI and sets it).
+fn real_claude() -> Option<PathBuf> {
+    let found = daemon::health::which("claude");
+    if found.is_none() {
+        assert!(
+            std::env::var_os("TC_REQUIRE_REAL_CLI").is_none(),
+            "TC_REQUIRE_REAL_CLI is set and claude is not on PATH"
+        );
+        eprintln!("skipped: claude is not on PATH");
+    }
+    found
+}
+
+/// The `[runtimes.real]` section: the real CLI with the fake model, its config in
+/// `<dir>/real-claude`. Windows: with the PowerShell tool, the shell tool of a machine
+/// without Git Bash.
+fn real_runtime(dir: &Path, claude: &Path, model: &model::Model) -> String {
+    let mut env: Vec<String> = model
+        .env()
+        .into_iter()
+        .map(|(k, v)| format!("{k} = '{v}'"))
+        .collect();
+    env.push(format!(
+        "CLAUDE_CONFIG_DIR = '{}'",
+        dir.join("real-claude").display()
+    ));
+    if cfg!(windows) {
+        env.push("CLAUDE_CODE_USE_POWERSHELL_TOOL = '1'".into());
+    }
+    format!(
+        "[runtimes.real]\nkind = \"claude\"\ncommand = '{}'\nenv = {{ {} }}\n",
+        claude.display(),
+        env.join(", ")
+    )
+}
+
+/// A folder by its path (what `tempfile::TempDir::path` gives).
+struct Dir(PathBuf);
+
+impl Dir {
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+/// The server's default patterns (`DEFAULT_GATE_PATTERNS` of packages/protocol), as the
+/// server sends them in `run.assign.gates`.
+fn default_gates() -> Vec<RunGate> {
+    let src = include_str!("../../../packages/protocol/src/settings.ts");
+    let body = &src[src.find("export const DEFAULT_GATE_PATTERNS").unwrap()..];
+    let body = &body[..body.find("\n};").unwrap()];
+    let mut out: Vec<RunGate> = vec![];
+    for line in body.lines().skip(1) {
+        let t = line.trim();
+        if let Some(kind) = t.strip_suffix(": [") {
+            out.push(RunGate {
+                kind: kind.into(),
+                patterns: vec![],
+            });
+        } else if t.starts_with('"') {
+            let p: String = serde_json::from_str(t.trim_end_matches(',')).unwrap();
+            out.last_mut().unwrap().patterns.push(p);
+        }
+    }
+    assert_eq!(out.len(), 5);
+    out
+}
+
+/// The same with the real Claude Code CLI of this machine and a fake model
+/// (`tests/fake/model.rs`): the daemon reports the CLI as gated, the model calls the Bash tool,
+/// the CLI starts the hook, the hook asks the daemon, the daemon asks a person. Declined: the
+/// command does not run and the model reads why. Approved: it runs. Skipped when `claude` is
+/// not on PATH, unless `TC_REQUIRE_REAL_CLI` is set (CI).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_real_cli_waits_for_a_person_at_a_gated_command() {
+    let Some(claude) = real_claude() else { return };
+    daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
+    let tmp = tempfile::tempdir().unwrap();
+    // Every path of the run (its folder, the hook in it, the CLI's config) has spaces, text
+    // outside ASCII and the characters shells give a meaning.
+    let base = tmp.path().join("运行 dir &()^%!");
+    std::fs::create_dir_all(base.join("real-claude")).unwrap();
+    // The user turned hooks off in their own settings: the run's settings turn them on again.
+    std::fs::write(
+        base.join("real-claude").join("settings.json"),
+        r#"{"disableAllHooks": true}"#,
+    )
+    .unwrap();
+    let mut m = mock().await;
+    let model = model::Model::start().await;
+    let cfg = write_config_with(&base, &m.url, &real_runtime(&base, &claude, &model));
+    let tmp = Dir(base);
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    match next(&mut ws).await {
+        Up::Hello { clis, .. } => {
+            let real = clis.iter().find(|c| c.runtime == "real").expect("real");
+            assert!(real.available);
+            let version = real.version.clone().expect("the CLI says its version");
+            assert!(version.contains("Claude Code"), "{version}");
+            assert_eq!(real.gates, Some(true), "{version} is gated");
+        }
+        f => panic!("{f:?}"),
+    }
+    send(&mut ws, &welcome(vec![])).await;
+    let gated = |run: &str, marker: &str| {
+        let mut a = assign(
+            run,
+            "real",
+            &format!("Run the tool.\nTOOL Bash echo {marker}"),
+            None,
+        );
+        if let Down::RunAssign(r) = &mut a {
+            r.gates = Some(vec![RunGate {
+                kind: "mergeMain".into(),
+                patterns: vec!["gated-marker".into()],
+            }]);
+        }
+        a
+    };
+    let stderr = |run: &str| {
+        std::fs::read_to_string(tmp.path().join(format!("work/runs/{run}/stderr.log")))
+            .unwrap_or_default()
+    };
+
+    // 1. Declined: the command does not run and the model reads why.
+    send(&mut ws, &gated("rg1", "gated-marker-declined")).await;
+    let fr = collect(&mut ws, "rg1", true, is_request).await;
+    let (id, kind, command) = gate_request(&fr);
+    assert_eq!(kind.as_deref(), Some("mergeMain"));
+    assert_eq!(command.as_deref(), Some("echo gated-marker-declined"));
+    send(&mut ws, &approval("rg1", &id, "deny", None)).await;
+    let fr = collect(&mut ws, "rg1", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "succeeded", "{}", stderr("rg1"));
+    let results = model.tool_results();
+    assert_eq!(results.len(), 1, "{results:?}");
+    assert!(results[0].0, "an error result: {results:?}");
+    assert!(
+        results[0].1.contains("a person declined it"),
+        "the model reads why: {results:?}"
+    );
+    // The model's words after the result carry it, not the command's output.
+    assert!(
+        !done(&fr)
+            .result_text
+            .unwrap_or_default()
+            .contains("\ngated-marker-declined"),
+        "the command ran"
+    );
+
+    // 2. Approved: the command runs.
+    send(&mut ws, &gated("rg2", "gated-marker-approved")).await;
+    let fr = collect(&mut ws, "rg2", true, is_request).await;
+    let (id, _, _) = gate_request(&fr);
+    send(&mut ws, &approval("rg2", &id, "approve", None)).await;
+    let fr = collect(&mut ws, "rg2", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "succeeded", "{}", stderr("rg2"));
+    let results = model.tool_results();
+    assert!(
+        results
+            .iter()
+            .any(|(is_error, text)| !is_error && text.contains("gated-marker-approved")),
+        "{results:?}"
+    );
+
+    // 3. A command no gate names never asks.
+    send(&mut ws, &gated("rg3", "plain-marker")).await;
+    let fr = collect(&mut ws, "rg3", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert!(!fr.iter().any(is_request));
+    assert!(
+        model
+            .tool_results()
+            .iter()
+            .any(|(is_error, text)| !is_error && text.contains("plain-marker"))
+    );
+
+    // 4. The server's default patterns and the way commands are spelled on Windows: with an
+    // extension, a folder, quotes; PowerShell's and cmd's own words for deleting. Each is
+    // stopped as its kind (and declined: none of them runs). On Windows the model calls the
+    // PowerShell tool, elsewhere Bash: the hook sees the same line.
+    let tool = if cfg!(windows) { "PowerShell" } else { "Bash" };
+    let spellings = [
+        ("mergeMain", "gh.exe pr merge 5"),
+        (
+            "mergeMain",
+            r#"& "C:\Program Files\GitHub CLI\gh.exe" pr merge 5"#,
+        ),
+        ("mergeMain", "git.exe push origin main"),
+        ("deployProd", "wrangler.cmd deploy --env production"),
+        ("prodConfig", "fly.exe secrets set A=1"),
+        ("deleteData", r"Remove-Item -Recurse -Force C:\"),
+        ("deleteData", r"cmd /c rd /s /q C:\"),
+        ("externalPublish", "npm.cmd publish"),
+    ];
+    for (i, (want, command)) in spellings.iter().enumerate() {
+        let run = format!("rw{i}");
+        let mut a = assign(
+            &run,
+            "real",
+            &format!("Run the tool.\nTOOL {tool} {command}"),
+            None,
+        );
+        if let Down::RunAssign(r) = &mut a {
+            r.gates = Some(default_gates());
+        }
+        send(&mut ws, &a).await;
+        let fr = collect(&mut ws, &run, true, |f| {
+            is_request(f) || matches!(f, Up::RunDone(_))
+        })
+        .await;
+        assert!(
+            fr.last().is_some_and(is_request),
+            "{command} was not stopped: {}",
+            stderr(&run)
+        );
+        let (id, kind, asked) = gate_request(&fr);
+        assert_eq!(kind.as_deref(), Some(*want), "{command}");
+        assert_eq!(asked.as_deref(), Some(*command));
+        send(&mut ws, &approval(&run, &id, "deny", None)).await;
+        let fr = collect(&mut ws, &run, true, |f| matches!(f, Up::RunDone(_))).await;
+        assert_eq!(done(&fr).status, "succeeded", "{}", stderr(&run));
+    }
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+/// Managed settings that allow only managed hooks drop the run's hook, and nothing in the
+/// run's own settings can bring it back. A gated run then never starts: the CLI does not run
+/// the start-up hook, so the daemon gives it no prompt and the run fails with the reason.
+///
+/// Needs such managed settings on this machine, so it runs only where `TC_MANAGED_HOOKS_ONLY`
+/// is set: CI writes the file (`/etc/claude-code/managed-settings.json`, on Windows
+/// `C:\Program Files\ClaudeCode\managed-settings.json`) around this one test.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cli_whose_hooks_are_managed_only_never_starts_a_gated_run() {
+    if std::env::var_os("TC_MANAGED_HOOKS_ONLY").is_none() {
+        eprintln!("skipped: TC_MANAGED_HOOKS_ONLY is not set");
+        return;
+    }
+    let claude = daemon::health::which("claude").expect("claude on PATH");
+    daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let model = model::Model::start().await;
+    let cfg = write_config_with(
+        tmp.path(),
+        &m.url,
+        &real_runtime(tmp.path(), &claude, &model),
+    );
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
+    send(&mut ws, &welcome(vec![])).await;
+
+    let tool = if cfg!(windows) { "PowerShell" } else { "Bash" };
+    let mut a = assign(
+        "mh1",
+        "real",
+        &format!("Run the tool.\nTOOL {tool} echo gated-marker-managed"),
+        None,
+    );
+    if let Down::RunAssign(r) = &mut a {
+        r.gates = Some(vec![RunGate {
+            kind: "mergeMain".into(),
+            patterns: vec!["gated-marker".into()],
+        }]);
+    }
+    send(&mut ws, &a).await;
+    let mut frames = vec![];
+    let fr = tokio::time::timeout(Duration::from_secs(120), async {
+        loop {
+            let f = next(&mut ws).await;
+            let end = matches!(&f, Up::RunDone(d) if d.run_id == "mh1");
+            if let Some(seq) = f.seq() {
+                send(
+                    &mut ws,
+                    &Down::Ack {
+                        run_id: "mh1".into(),
+                        seq,
+                    },
+                )
+                .await;
+            }
+            frames.push(f);
+            if end {
+                break;
+            }
+        }
+        frames
+    })
+    .await
+    .expect("the run ended");
+    let d = done(&fr);
+    assert_eq!(d.status, "failed", "{d:?}");
+    assert!(
+        d.error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("the approval hook did not start"),
+        "{d:?}"
+    );
+    assert!(!fr.iter().any(is_request), "nobody was asked");
+    // The model was never given the prompt, so no command ran.
+    assert!(
+        model.tool_results().is_empty(),
+        "{:?}",
+        model.tool_results()
+    );
+    assert!(
+        !model
+            .requests()
+            .iter()
+            .any(|r| r["messages"].to_string().contains("gated-marker-managed")),
+        "the prompt reached the model"
+    );
+
+    // A run without gates still works on this machine.
+    send(&mut ws, &assign("mh2", "real", "say ok", None)).await;
+    let fr = collect(&mut ws, "mh2", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "succeeded");
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+/// The same rule with the fake CLI, on every system and without managed settings: a CLI that
+/// runs none of the run's hooks (`FAKE_HOOKS_OFF`) is given no prompt of a gated run. The run
+/// fails with the reason; the same CLI runs a run without gates.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cli_that_runs_no_hooks_gets_no_gated_prompt() {
+    daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let cfg = write_config_with(
+        tmp.path(),
+        &m.url,
+        &fake_runtime(
+            "nohooks",
+            "claude",
+            "fake_claude.py",
+            &format!(
+                "CLAUDE_CONFIG_DIR = '{}', FAKE_HOOKS_OFF = '1'",
+                tmp.path().join("claude").display()
+            ),
+        ),
+    );
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
+    send(&mut ws, &welcome(vec![])).await;
+
+    let mut a = assign("nh1", "nohooks", "gated", None);
+    if let Down::RunAssign(r) = &mut a {
+        r.gates = Some(vec![RunGate {
+            kind: "mergeMain".into(),
+            patterns: vec![r"\bgh pr merge\b".into()],
+        }]);
+    }
+    send(&mut ws, &a).await;
+    let mut fr = vec![];
+    tokio::time::timeout(Duration::from_secs(120), async {
+        loop {
+            let f = next(&mut ws).await;
+            let end = matches!(&f, Up::RunDone(d) if d.run_id == "nh1");
+            if let Some(seq) = f.seq() {
+                let run_id = "nh1".to_string();
+                send(&mut ws, &Down::Ack { run_id, seq }).await;
+            }
+            fr.push(f);
+            if end {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("the run ended");
+    let d = done(&fr);
+    assert_eq!(d.status, "failed", "{d:?}");
+    assert!(
+        d.error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("the approval hook did not start"),
+        "{d:?}"
+    );
+    assert!(!fr.iter().any(is_request));
+    // The CLI started (it wrote its arguments) and never got the prompt (no command ran).
+    let work = tmp.path().join("work/runs/nh1/work");
+    assert!(work.join("argv.json").is_file());
+    assert!(!work.join("gate-1.json").exists());
+
+    send(&mut ws, &assign("nh2", "nohooks", "hello", None)).await;
+    let fr = collect(&mut ws, "nh2", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "succeeded");
 
     stop_tx.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(20), daemon)

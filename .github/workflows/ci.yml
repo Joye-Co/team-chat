@@ -188,8 +188,22 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: linux-test
+      # The real Claude Code CLI, without a login: the daemon's tests drive it against a fake
+      # model (the approval hook of a gated run; see the Windows job, which pins the same version).
+      - name: Install the real Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code@2.1.322
       - name: cargo test
+        env:
+          TC_REQUIRE_REAL_CLI: "1"
         run: cargo test --locked -p chat-protocol -p chat-core -p daemon -p update-helper
+      # Managed settings that allow only managed hooks drop the approval hook of a gated run:
+      # the real CLI then never gets the run's prompt (apps/daemon/src/gates.rs).
+      - name: A gated run does not start when only managed hooks are allowed
+        run: |
+          sudo mkdir -p /etc/claude-code
+          echo '{"allowManagedHooksOnly": true}' | sudo tee /etc/claude-code/managed-settings.json >/dev/null
+          trap 'sudo rm -f /etc/claude-code/managed-settings.json' EXIT
+          TC_MANAGED_HOOKS_ONLY=1 cargo test --locked -p daemon --test integration a_cli_whose_hooks_are_managed_only -- --nocapture
 
   daemon-e2e:
     name: Daemon local e2e (Linux, fake Claude and Codex)
@@ -313,14 +327,37 @@ jobs:
         run: cargo test --locked -p desktop views::media::native -- --nocapture
       - name: cargo test (protocol and core)
         run: cargo test --locked -p chat-protocol -p chat-core
-      # Required, every desktop test (this replaces the Windows system integration subset and
-      # the report-only full run).
       # The system-integration tests that talk to the shell (taskbar, share, toasts, time zone) say
       # in the log what this runner's session gave them.
       - name: cargo test (system integration, with output)
         run: cargo test --locked -p desktop -- --nocapture the_taskbar_takes the_share_ui windows_names a_toast_reaches the_toast_xml a_second_launch windows_reports_its_accent
+      # 「用这台电脑」 (src/provider/this_mac.rs) runs for real in the desktop tests, against a
+      # local server (`wrangler dev`): the app's code registers this computer as an owner and
+      # writes the config and token, the daemon just built registers the scheduled task of the
+      # runner's user and comes online at the server, and the real Claude Code CLI (no login)
+      # is the runtime it finds.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.10
+      - name: Build the daemon and install a coding CLI for 「用这台电脑」
+        run: cargo build --locked -p daemon && npm install -g @anthropic-ai/claude-code@2.1.322 && bun install --frozen-lockfile
+      # Required, every desktop test (this replaces the Windows system integration subset and
+      # the report-only full run).
       - name: cargo test (desktop)
-        run: cargo test --locked -p desktop
+        run: |
+          server="$RUNNER_TEMP/this-computer"
+          mkdir -p "$server"
+          bun apps/daemon/e2e/local-e2e.ts --port 8795 --server-only "$(cygpath -w "$server")" > "$server/server.log" 2>&1 &
+          for _ in $(seq 180); do [ -f "$server/owner-token" ] && break; sleep 1; done
+          [ -f "$server/owner-token" ] || { cat "$server/server.log"; exit 1; }
+          export TC_THIS_COMPUTER_DAEMON="$(cygpath -w "$GITHUB_WORKSPACE/target/debug/daemon.exe")"
+          export TC_THIS_COMPUTER_SERVER="$(cat "$server/url")"
+          export TC_THIS_COMPUTER_OWNER_TOKEN="$(cygpath -w "$server/owner-token")"
+          code=0
+          cargo test --locked -p desktop || code=$?
+          touch "$server/stop"
+          [ "$code" -eq 0 ] || tail -n 60 "$server/server.log" "$LOCALAPPDATA/$(jq -r .slug product.json)-daemon/daemon.log" || true
+          exit "$code"
       # An embedded 产出 page (WebView2 child window) in a real GPUI window: with GPUI presenting
       # to the HWND, as the app runs, the page must show. The DirectComposition run is the
       # record of why the app turns it off (the page stays under GPUI's content).
@@ -401,8 +438,26 @@ jobs:
       # is listed in docs/plans/windows-parity/machine.zh.md.
       # Also tests/service_task.rs: the scheduled task of the runner's own user with a stand-in
       # daemon, against the real Task Scheduler (docs/plans/windows.zh.md, M3).
+      # The real Claude Code and Codex CLIs, without a login: tests/real_cli.rs and the real
+      # cases of tests/integration.rs and tests/runtimes.rs drive them against a fake model
+      # (how the CLI starts the approval hook, what a failed hook does, its shell tools, its
+      # session files, Codex's sandbox). Pinned, so a new CLI release cannot break an unrelated
+      # change: raise the versions on purpose.
+      - name: Install the real Claude Code and Codex CLIs
+        run: npm install -g @anthropic-ai/claude-code@2.1.322 @openai/codex@0.167.1
       - name: cargo test (daemon)
+        env:
+          TC_REQUIRE_REAL_CLI: "1"
+          TC_REQUIRE_REAL_CODEX: "1"
         run: cargo test --locked -p daemon --features test-fakes --no-fail-fast
+      # The same as on Linux: with managed settings that allow only managed hooks, the real CLI
+      # never gets the prompt of a gated run.
+      - name: A gated run does not start when only managed hooks are allowed
+        run: |
+          mkdir -p "/c/Program Files/ClaudeCode"
+          echo '{"allowManagedHooksOnly": true}' > "/c/Program Files/ClaudeCode/managed-settings.json"
+          trap 'rm -f "/c/Program Files/ClaudeCode/managed-settings.json"' EXIT
+          TC_MANAGED_HOOKS_ONLY=1 cargo test --locked -p daemon --features test-fakes --test integration a_cli_whose_hooks_are_managed_only -- --nocapture
       # The install command for machines without the app, in Windows PowerShell 5.1, with the
       # daemon just built: SHA-256 check, config and token for this user only, the real daemon
       # as a scheduled task, an update by the replace protocol, uninstall.
@@ -437,6 +492,28 @@ jobs:
             Get-Content "$dir\out.txt", "$dir\err.txt"
           }
           Remove-LocalUser -Name $user
+      # A side chat's checkout is read-only to its CLI. The runner's own user is an elevated
+      # administrator, whom a restore privilege lets remove files and make folders past an
+      # access list (as root is past file modes), so the tests above cannot show the whole of
+      # it: here the same check runs as a user without administrator rights.
+      - name: Read-only checkout of a side chat, as a standard user
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $user = 'tcaside'
+          $secret = 'Tc!' + [guid]::NewGuid().ToString('N') + 'aA1'
+          $secure = ConvertTo-SecureString $secret -AsPlainText -Force
+          New-LocalUser -Name $user -Password $secure -AccountNeverExpires | Out-Null
+          Add-LocalGroupMember -Group 'Users' -Member $user
+          $cred = New-Object Management.Automation.PSCredential("$env:COMPUTERNAME\$user", $secure)
+          $dir = 'C:\tc-aside'
+          New-Item -ItemType Directory -Force -Path "$dir\work" | Out-Null
+          & icacls.exe $dir /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' "${user}:(OI)(CI)M" | Out-Null
+          Copy-Item target\debug\fake-cli.exe "$dir\fake-cli.exe"
+          $p = Start-Process -FilePath "$dir\fake-cli.exe" -ArgumentList '--read-only-check', "$dir\work" -Credential $cred -WorkingDirectory $dir -Wait -PassThru -RedirectStandardOutput "$dir\out.txt" -RedirectStandardError "$dir\err.txt"
+          Get-Content "$dir\out.txt", "$dir\err.txt"
+          Remove-LocalUser -Name $user
+          if ($p.ExitCode -ne 0) { throw "a standard user's CLI could change a read-only checkout (exit code $($p.ExitCode))" }
       - name: cargo check (e2e tool)
         run: cargo check --locked -p e2e --all-targets
 
@@ -582,6 +659,44 @@ jobs:
         run: apps/ios/build-sim.sh
       - name: chat-core tests in the simulator
         run: apps/ios/test-core-sim.sh
+
+  # The whole chain a Windows machine goes through, on a real Windows: the PowerShell install
+  # command, the daemon as the scheduled task of the runner's user, a local server
+  # (`wrangler dev`), runs with the fake CLIs started and stopped through the server, an update
+  # by the replace protocol while idle and during a run, a logoff and logon of the task, the
+  # uninstall. See docs/plans/windows-parity/machine.zh.md.
+  daemon-windows-chain:
+    name: Daemon chain (Windows, scheduled task and local server)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.server == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.10
+      - run: bun install --frozen-lockfile
+      - name: Install the toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: windows-daemon-chain
+      - name: Build the daemon, the fake CLI launcher and the cancel_run client example
+        run: cargo build --locked -p daemon --features test-fakes && cargo build --locked -p chat-core --example cancel_run
+      - name: Install, run, update, log off and on, uninstall
+        run: bun apps/daemon/e2e/local-e2e.ts --port 8793 --service
+      - name: Logs
+        if: failure()
+        run: |
+          slug=$(jq -r .slug product.json)
+          for f in "$TEMP"/bots-e2e-*/*.log "$TEMP"/bots-e2e-*/report.json "$LOCALAPPDATA/$slug-daemon/daemon.log"; do
+            [ -f "$f" ] && { echo "--- $f"; tail -n 150 "$f"; }
+          done
+          true
 
   rust-lint:
     name: Rust fmt and clippy

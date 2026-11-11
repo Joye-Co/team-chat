@@ -636,15 +636,32 @@ An AI member runs with every permission; only the few kinds the team checked nee
 
 - **Matching**: each pattern is a regular expression, matched case-insensitively against each
   simple command of the tool's shell line (split at newlines, `;`, `&`, `|`; whitespace runs as
-  one space), so a pattern cannot span two commands. An MCP tool call is matched as
+  one space), so a pattern cannot span two commands. Each command is matched as written and as
+  its plain words: the program without its folder, quotes and `.exe` / `.cmd` / `.bat` /
+  `.com` / `.ps1`, the arguments without quotes (`"C:\Program Files\GitHub CLI\gh.exe" pr merge 5`,
+  `gh.exe pr merge 5` and `'gh' pr merge 5` are all `gh pr merge 5`), so a pattern holds for
+  every spelling a shell accepts. An MCP tool call is matched as
   `<tool name> <input JSON>`. The first kind (assignment order) with a matching pattern wins. A
   pattern the daemon cannot compile is left out and logged; a kind left with none is dropped.
 - **Claude Code** (`CliInfo.gates = true`): the run gets `--settings <run folder>/.gate-settings.json`
-  with a PreToolUse hook (matcher `^(Bash|mcp__.*)$`, anchored: Claude Code reads a matcher with
-  other characters than letters, digits and `|` as an unanchored regex) that runs
+  with a PreToolUse hook (matcher `^(Bash|PowerShell|Monitor|mcp__.*)$`: the tools that run a
+  shell line, and every MCP tool; anchored: Claude Code reads a matcher with other characters
+  than letters, digits and `|` as an unanchored regex) that runs
   `<run folder>/bin/chat-run gate` (timeout 24 h instead of the 600 s default; the run's own
-  deadline ends it sooner). Claude Code merges hooks of all settings files, so the user's own
-  stay; a `disableAllHooks` in the user's settings would turn the hook off. The hook reads the hook input on standard input and sends `gate.check
+  deadline ends it sooner). On Windows the hook is in the exec form
+  (`command: <run folder>/bin/chat-run.exe`, `args: ["gate"]`: started without a shell, because
+  Claude Code runs a shell line in Git Bash or, without it, in PowerShell, and no quoted path
+  with an argument is a command in both) with `onFailure: "block"`; a Windows daemon reports
+  `gates` only for a Claude Code of 2.1.322 or later, the version its tests run against
+  (`onFailure` for command hooks came with 2.1.295), and a run whose gates reach a CLI that was
+  not reported as gated fails before the CLI starts. Claude Code merges hooks of all settings files, so the user's own
+  stay. Hooks can be turned off outside the run. The run's settings say `disableAllHooks: false`,
+  which wins over the user's and the project's settings. Managed settings rank above the run's
+  (`allowManagedHooksOnly`, or `disableAllHooks` there), so the settings also install a
+  SessionStart hook, `chat-run gate-alive` (op `gate.alive`): the CLI runs it when it starts,
+  before it takes input, and the daemon writes a gated run's prompt only after it ran. When it
+  has not run within 45 s the run fails ("the approval hook did not start") and no command of it
+  ever runs. The hook reads the hook input on standard input and sends `gate.check
   { tool, command }` over the run's `chat-run` socket. No match: it exits 0 at once with no
   output. A match: the daemon emits `approval.request { approvalId: "daemon-gate-<n>", title: <the
   kind's 设置 name>, detail: command, kind, command }` and the hook waits. `run.approval approve`
@@ -652,7 +669,8 @@ An AI member runs with every permission; only the few kinds the team checked nee
   reason the CLI reads ("a person declined it … do the rest another way"). The daemon emits
   `approval.resolved`. Hooks run before the permission flow, so the deny holds although the run
   uses `bypassPermissions` (Claude Code hooks reference, "PreToolUse decision control"; checked
-  with the fake CLI in `tests/integration.rs`, not yet with the real one).
+  with the fake CLI and with the real CLI against a fake model in `tests/integration.rs` and
+  `tests/real_cli.rs`, on Linux and Windows CI).
 - **One question at a time**: the server keeps one open approval per run, so a second gated
   command waits until the first is answered, then asks (or passes, see scope).
 - **scope "run"** (这件事里都同意): with `approve`, later matches of the same kind in this run pass
@@ -662,7 +680,9 @@ An AI member runs with every permission; only the few kinds the team checked nee
 - **When it cannot ask**: a gated run whose `chat-run` socket or hook settings cannot be set up
   fails before the CLI starts. If the hook cannot reach the daemon during the run (not inside a
   run, socket gone), the command runs and the reason goes to the hook's standard error: the
-  daemon is the run's parent, so this happens only when the run is ending anyway.
+  daemon is the run's parent, so this happens only when the run is ending anyway. On Windows
+  the command is refused instead (the hook prints the deny decision), and a hook that cannot
+  start, times out or ends with an unexpected code blocks the command (`onFailure`).
 - **Codex** (`gates` absent): not gated yet. Its app-server asks
   (`item/commandExecution/requestApproval`) only under an approval policy (`untrusted`,
   `on-request`, `granular`) that asks for nearly every command and changes how the model works

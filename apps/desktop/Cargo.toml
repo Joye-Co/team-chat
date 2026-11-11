@@ -41,6 +41,8 @@ markdown = "=1.0.0"
 
 [dev-dependencies]
 tempfile = "3"
+# 「用这台电脑」 against a local server (provider/this_mac.rs, Windows CI).
+tokio = { version = "1", features = ["rt"] }
 gpui = { package = "gpui-pre", version = "=0.3.10", features = ["test-support"] }
 
 [build-dependencies]

@@ -505,32 +505,50 @@ pub fn install_task(
         log: &log,
         at_logon: true,
     };
-    let write = |task: &Task| -> Result<(), String> {
-        std::fs::write(&file, utf16_file(&task_xml(task)))
-            .map_err(|e| format!("cannot write {}: {e}", file.display()))
+    let write = |to: &Path, task: &Task| -> Result<(), String> {
+        std::fs::write(to, utf16_file(&task_xml(task)))
+            .map_err(|e| format!("cannot write {}: {e}", to.display()))
     };
     if !load {
-        write(&task)?;
+        write(&file, &task)?;
         return Ok(file);
     }
+    // Nothing of this install was here before: a failed one leaves nothing behind.
+    let fresh = !file.exists() && !repair.exists();
     // The copy that repairs an interrupted update. One that is in use right now stays.
     if let Err(e) = std::fs::copy(&exe, &repair)
         && !repair.is_file()
     {
         return Err(format!("cannot write {}: {e}", repair.display()));
     }
+    // The definition is registered from a file of another name: `task.xml` says "this task
+    // is registered" to whoever reads it (the app), so it appears only once that is true.
+    let draft = file.with_extension("xml.new");
     let register = |task: &Task| -> Result<(), String> {
-        write(task)?;
-        let xml = file.to_string_lossy();
+        write(&draft, task)?;
+        let xml = draft.to_string_lossy();
         schtasks(&["/Create", "/TN", name, "/XML", &xml, "/F"])
     };
-    if let Err(first) = register(&task) {
+    let mut registered = register(&task);
+    if let Err(first) = &registered {
         task.at_logon = false;
-        register(&task).map_err(|_| first)?;
-        eprintln!(
-            "the task could not be registered with a logon trigger; it starts within a minute of your logon instead"
-        );
+        registered = register(&task).map_err(|_| first.clone());
+        if registered.is_ok() {
+            eprintln!(
+                "the task could not be registered with a logon trigger; it starts within a minute of your logon instead"
+            );
+        }
     }
+    if let Err(e) = registered {
+        let _ = std::fs::remove_file(&draft);
+        if fresh {
+            let _ = std::fs::remove_file(&repair);
+            // Only when it is empty.
+            let _ = std::fs::remove_dir(dir);
+        }
+        return Err(e);
+    }
+    std::fs::rename(&draft, &file).map_err(|e| format!("cannot write {}: {e}", file.display()))?;
     restart_task(name, dir)?;
     Ok(file)
 }
@@ -565,6 +583,72 @@ pub fn uninstall_task(name: &str, dir: &Path, unload: bool) -> Result<PathBuf, S
 /// Logs larger than this are moved to `daemon.log.1` when the daemon starts.
 const LOG_KEEP_BYTES: u64 = 10 * 1024 * 1024;
 
+/// The name of the lock that makes a daemon the only one of its user and config
+/// ([`single_instance`]): the same for every way of writing the same config path.
+#[cfg(any(windows, test))]
+fn instance_name(user: &str, config: &Path) -> String {
+    use sha2::Digest;
+    let config = std::path::absolute(config).unwrap_or_else(|_| config.to_path_buf());
+    let key = format!(
+        "{user}\n{}",
+        config.to_string_lossy().replace('/', "\\").to_lowercase()
+    );
+    let hash: String = sha2::Sha256::digest(key.as_bytes())
+        .iter()
+        .take(16)
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    format!("Global\\{}-daemon-{hash}", crate::product::slug())
+}
+
+/// Held by a running daemon for its whole life ([`single_instance`]).
+pub struct Instance(#[allow(dead_code)] isize);
+
+/// Windows: makes this process the one daemon of this user and config, or says that another
+/// one is running. launchd and systemd never start a second daemon of a service; the Task
+/// Scheduler can: ending a task ends only its console host, so the every-minute trigger may
+/// start a new daemon while the old one is still shutting down (a restart, an uninstall). The
+/// second one must not run: two daemons would take runs with one machine token, and each
+/// would overwrite the other's pid file. The lock is a named mutex of the whole computer
+/// (also seen from another logon session of the user), named after the user and the config
+/// file; it goes when the process ends, however it ends. Unix: nothing to hold.
+pub fn single_instance(config: &Path) -> Result<Instance, String> {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError};
+        use windows_sys::Win32::System::Threading::CreateMutexW;
+        let name: Vec<u16> = instance_name(&current_user()?, config)
+            .encode_utf16()
+            .chain([0])
+            .collect();
+        // SAFETY: the name is a NUL-terminated UTF-16 string; the error is read right after.
+        let (mutex, code) = unsafe {
+            let m = CreateMutexW(std::ptr::null(), 0, name.as_ptr());
+            (m, GetLastError())
+        };
+        let running = "another daemon with this config is already running";
+        if mutex.is_null() {
+            // It is there and this process may not open it: the other daemon runs with
+            // more rights (elevated).
+            return Err(format!(
+                "{running} ({})",
+                std::io::Error::from_raw_os_error(code as i32)
+            ));
+        }
+        if code == ERROR_ALREADY_EXISTS {
+            // SAFETY: the handle is ours.
+            unsafe { CloseHandle(mutex) };
+            return Err(running.into());
+        }
+        Ok(Instance(mutex as isize))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = config;
+        Ok(Instance(0))
+    }
+}
+
 /// Where the task's daemon says which process it is (see [`stop_daemon`]).
 pub fn task_pid_file(dir: &Path) -> PathBuf {
     dir.join("daemon.pid")
@@ -589,13 +673,12 @@ fn stop_event_name(pid: u32) -> Vec<u16> {
 }
 
 /// `run --log-file`, what the scheduled task starts: sends everything the daemon prints to
-/// `path` (appending; the task's headless console shows nothing) and makes this daemon one
-/// that [`stop_daemon`] can stop.
+/// `path` (appending; the task's headless console shows nothing). [`stoppable`] is the other
+/// half.
 #[cfg(windows)]
 pub fn log_to(path: &Path) -> Result<(), String> {
     use std::os::windows::io::IntoRawHandle as _;
     use windows_sys::Win32::System::Console::{STD_ERROR_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle};
-    use windows_sys::Win32::System::Threading::CreateEventW;
     let dir = path.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir).map_err(|e| format!("cannot make {}: {e}", dir.display()))?;
     if std::fs::metadata(path).is_ok_and(|m| m.len() > LOG_KEEP_BYTES) {
@@ -615,6 +698,16 @@ pub fn log_to(path: &Path) -> Result<(), String> {
         SetStdHandle(STD_OUTPUT_HANDLE, handle as _);
         SetStdHandle(STD_ERROR_HANDLE, handle as _);
     }
+    Ok(())
+}
+
+/// Makes this daemon one that [`stop_daemon`] can stop: the stop event and the pid file next
+/// to the log `path`. Call it once this process is the only daemon ([`single_instance`]): the
+/// pid file is the running daemon's.
+#[cfg(windows)]
+pub fn stoppable(path: &Path) -> Result<(), String> {
+    use windows_sys::Win32::System::Threading::CreateEventW;
+    let dir = path.parent().unwrap_or(Path::new("."));
     let name = stop_event_name(std::process::id());
     // SAFETY: the name is a NUL-terminated UTF-16 string; a manual-reset event, not set.
     let event = unsafe { CreateEventW(std::ptr::null(), 1, 0, name.as_ptr()) };
@@ -639,6 +732,11 @@ pub fn log_to(path: &Path) -> Result<(), String> {
 pub fn log_to(_path: &Path) -> Result<(), String> {
     let _ = LOG_KEEP_BYTES;
     Err("--log-file is for the Windows scheduled task: redirect the output yourself".into())
+}
+
+#[cfg(not(windows))]
+pub fn stoppable(_path: &Path) -> Result<(), String> {
+    Ok(())
 }
 
 /// Blocks until someone asks this daemon to stop ([`stop_daemon`]). Never returns for a
@@ -706,8 +804,18 @@ pub fn stop_daemon(dir: &Path) -> Result<bool, String> {
         .ok()
         .and_then(|t| pid_and_made(&t))
     else {
-        let _ = std::fs::remove_file(&pid_file);
         return Ok(false);
+    };
+    // The pid file goes only while it still names the process this call dealt with: another
+    // daemon that started meanwhile has written its own, and must stay findable.
+    let forget = || {
+        if std::fs::read_to_string(&pid_file)
+            .ok()
+            .and_then(|t| pid_and_made(&t))
+            == Some((pid, made))
+        {
+            let _ = std::fs::remove_file(&pid_file);
+        }
     };
     let access = PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | PROCESS_SYNCHRONIZE;
     // SAFETY: plain call; a null handle is an error.
@@ -717,7 +825,7 @@ pub fn stop_daemon(dir: &Path) -> Result<bool, String> {
         let code = unsafe { GetLastError() };
         if code == ERROR_INVALID_PARAMETER {
             // No process has this pid: the daemon ended by itself.
-            let _ = std::fs::remove_file(&pid_file);
+            forget();
             return Ok(false);
         }
         return Err(format!(
@@ -761,7 +869,7 @@ pub fn stop_daemon(dir: &Path) -> Result<bool, String> {
     // SAFETY: the handle is ours.
     unsafe { CloseHandle(process) };
     if res.is_ok() {
-        let _ = std::fs::remove_file(&pid_file);
+        forget();
     }
     res
 }
@@ -788,6 +896,33 @@ mod tests {
             log: Path::new(r"C:\Users\li & co\AppData\Local\x-daemon\daemon.log"),
             at_logon,
         })
+    }
+
+    /// One lock per user and config, however the config path is written; another user or
+    /// another config has another.
+    #[test]
+    fn the_instance_lock_is_named_after_the_user_and_the_config() {
+        let a = instance_name(ME, Path::new(r"C:\Users\li\.config\x\daemon.toml"));
+        assert!(a.starts_with("Global\\") && a.contains("-daemon-"), "{a}");
+        assert!(
+            a.len() < 100 && !a["Global\\".len()..].contains('\\'),
+            "{a}"
+        );
+        assert_eq!(
+            a,
+            instance_name(ME, Path::new(r"c:/users/LI/.config/x/DAEMON.toml"))
+        );
+        assert_ne!(
+            a,
+            instance_name(ME, Path::new(r"C:\Users\li\.config\x\other.toml"))
+        );
+        assert_ne!(
+            a,
+            instance_name(
+                "S-1-5-21-1-2-3-1002",
+                Path::new(r"C:\Users\li\.config\x\daemon.toml")
+            )
+        );
     }
 
     #[test]

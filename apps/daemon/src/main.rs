@@ -1,7 +1,7 @@
 use daemon::config::{self, Config};
 use std::path::PathBuf;
 
-const USAGE: &str = "usage: daemon <run|doctor|install-service|uninstall-service|restart-service|example-config> [--config <file>] [--no-load] [--log-file <file>]";
+const USAGE: &str = "usage: daemon <run|doctor|install-service|uninstall-service|restart-service|example-config> [--config <file>] [--no-load] [--log-file <file>]\n       daemon private-dir <folder>";
 
 fn main() {
     // The same binary is `chat-run` inside a run (a link named chat-run on the run's PATH).
@@ -13,6 +13,8 @@ fn main() {
     if daemon::chat_run::started_as(&argv0, daemon::vm_agent::NAME) {
         std::process::exit(daemon::vm_agent::main());
     }
+    // Windows: CLIs installed where the user's PATH does not reach (see the function).
+    daemon::sys::add_usual_program_folders();
     let mut args = std::env::args().skip(1);
     let cmd = args.next().unwrap_or_default();
     // The scheduled task's first action on Windows: put the program file back after an update
@@ -20,6 +22,28 @@ fn main() {
     if cmd == "repair-program" {
         if let Some(exe) = args.next() {
             daemon::selfupdate::repair(std::path::Path::new(&exe));
+        }
+        return;
+    }
+    // Makes a folder that only this user can open, private from the moment it exists (the app
+    // runs this for the daemon's config folder before it writes the token there). A folder
+    // that is already there is taken when it is private, or made private while it is still
+    // empty; anything else is refused.
+    if cmd == "private-dir" {
+        let dir = PathBuf::from(args.next().unwrap_or_else(|| exit_with(USAGE)));
+        let made = daemon::sys::create_private_dir(&dir).or_else(|e| {
+            let empty = std::fs::read_dir(&dir).is_ok_and(|mut d| d.next().is_none());
+            if empty {
+                daemon::sys::set_mode(&dir, 0o700)
+            } else {
+                Err(e)
+            }
+        });
+        if let Err(e) = made.and_then(|()| daemon::sys::set_mode(&dir, 0o700)) {
+            exit_with(&format!("cannot make {} private: {e}", dir.display()));
+        }
+        if let Some(why) = daemon::sys::acl_problem(&dir) {
+            exit_with(&format!("{} is not private: {why}", dir.display()));
         }
         return;
     }
@@ -49,6 +73,15 @@ fn main() {
             {
                 exit_with(&e);
             }
+            // Windows: the only daemon of this user and config, or none (the Task Scheduler
+            // can start a second one while the first shuts down). Held until the process ends.
+            let _instance =
+                daemon::service::single_instance(&config_path).unwrap_or_else(|e| exit_with(&e));
+            if let Some(file) = &log_file
+                && let Err(e) = daemon::service::stoppable(file)
+            {
+                exit_with(&e);
+            }
             let cfg = load_cfg();
             let mut problems = cfg.problems();
             // Windows: the config can hold a runtime's keys (`env`); like the token file it
@@ -62,6 +95,9 @@ fn main() {
             if !problems.is_empty() {
                 exit_with(&problems.join("\n"));
             }
+            // Windows: the first reading of the machine's load takes half a second; take it
+            // here, not on a thread of the runtime.
+            let _ = daemon::sys::load_avg();
             let rt = tokio::runtime::Runtime::new().unwrap_or_else(|e| exit_with(&e.to_string()));
             let res = rt.block_on(daemon::daemon::run(cfg, async {
                 #[cfg(unix)]
