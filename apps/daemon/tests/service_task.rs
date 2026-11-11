@@ -245,12 +245,28 @@ mod windows {
                 }
                 let actions = actions(&file);
                 for (i, (program, arguments)) in actions.iter().enumerate() {
+                    // The scheduler starts an action without standard streams. A console host
+                    // that is given some takes them for a terminal to talk to, and ends when
+                    // its input ends: so it gets an input that stays open (the pipe lives as
+                    // long as the child value) and nowhere to write.
                     let mut cmd = Command::new(program);
-                    cmd.raw_arg(arguments);
+                    cmd.raw_arg(arguments)
+                        .stdin(std::process::Stdio::piped())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null());
+                    let Ok(mut child) = cmd.spawn() else {
+                        continue;
+                    };
                     if i + 1 < actions.len() {
-                        let _ = cmd.status();
+                        // To its end (`wait` would close the input first).
+                        let end = Instant::now() + Duration::from_secs(30);
+                        while matches!(child.try_wait(), Ok(None)) && Instant::now() < end {
+                            std::thread::sleep(Duration::from_millis(50));
+                        }
+                        let _ = child.kill();
+                        let _ = child.wait();
                     } else {
-                        running = cmd.spawn().ok();
+                        running = Some(child);
                     }
                 }
             }
