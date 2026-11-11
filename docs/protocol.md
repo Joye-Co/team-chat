@@ -1140,7 +1140,7 @@ Rules:
   a team `convention` (its `note` names the sources). A memory with `fromGroup` never widens its
   audience by itself: it merges only into a memory of the same group, the other members' lessons
   the model sees are only those without `fromGroup`, and a promotion with such a source writes no
-  team memory but a `flagged` line on that source for a person to decide. A pending memory no operation names becomes
+  team memory but a `flagged` line on that source for a person to decide. That line is read like its source, so only members of the source group (the owners among them) decide; when the sources come from more than one group the line names only the source ids, not the proposed text. A pending memory no operation names becomes
   active as it is. Memories with `human: true` are never changed: an operation on one becomes a
   `flagged` line. Without an AI service the pending memories become active as they are. AI-written
   active memories unused for 60 days are retired. Every change is a `MemoryUpdate` line of that

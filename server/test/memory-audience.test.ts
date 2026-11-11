@@ -253,6 +253,30 @@ describe("daily consolidation and a memory's group", () => {
     }
   });
 
+  it("names only the sources when a held promotion mixes groups", async () => {
+    const w = await world();
+    const bot2 = await createMember({ kind: "bot", name: "ops2" });
+    const a = `member:${w.bot.id}`;
+    const base = { kind: "lesson" as const, source: { kind: "run" as const, ids: [] }, human: false, confidence: 0.5 };
+    const here = await createMemory(env.DB, { ...base, scope: a, text: "本群的经验", authorId: w.bot.id, status: "pending", fromGroup: w.gid }, w.bot.id);
+    const there = await createMemory(env.DB, { ...base, scope: a, text: "别的群的经验", authorId: w.bot.id, status: "pending", fromGroup: "01OTHERGROUP00000000000001" }, w.bot.id);
+    const shared = await createMemory(env.DB, { ...base, scope: `member:${bot2.id}`, text: "公开的经验", authorId: bot2.id, status: "pending" }, bot2.id);
+    await aiOn(w.owner.token);
+    try {
+      fakeModel((c) => (c.system.includes(`Scope: ${a}`) ? { ops: [{ op: "promote", sources: [here.id, there.id, shared.id], text: "合并后的别的群的经验" }] } : { ops: [] }));
+      const now = after3(6);
+      const { day } = localClock(now, teamZone(env));
+      await consolidateAll(env, { now });
+      const lines = (await api(`/v1/memories/updates?scope=${encodeURIComponent(a)}&day=${day}`, { token: w.owner.token })).body.updates;
+      const held = lines.find((u: any) => u.change === "flagged");
+      expect(held.note).not.toContain("合并后的别的群的经验");
+      expect(held.note).toContain(there.id);
+      expect(texts(await api("/v1/memories?scope=team", { token: w.owner.token }))).not.toContain("合并后的别的群的经验");
+    } finally {
+      await aiOff(w.owner.token);
+    }
+  });
+
   it("tries a scope again the next hour after the model failed", async () => {
     const w = await world();
     const scope = `member:${w.bot.id}`;

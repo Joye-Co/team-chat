@@ -30,6 +30,7 @@ export const NOTE = {
   mergedInto: (id: string) => `并入了 ${id}`,
   promotedFrom: (ids: string[]) => `从这几条升为团队约定：${ids.join("、")}`,
   promoteHeld: (text: string) => `来自群里或私聊的经验，没有自动升为团队约定，请决定要不要写进团队约定：${text}`,
+  promoteHeldIds: (ids: string[]) => `来自几个群或私聊的经验，没有自动升为团队约定，请决定要不要写进团队约定：${ids.join("、")}`,
   undo: "撤回了",
 } as const;
 
@@ -250,7 +251,9 @@ async function runOp(
       // Learned in a group: the whole team would read it. A person decides.
       const limited = sources.find((r) => r.from_group);
       if (limited) {
-        await flag(c, limited, NOTE.promoteHeld(text));
+        // Merged from several groups: the model's text may quote another group, so name only the sources.
+        const groups = new Set(sources.map((r) => r.from_group).filter(Boolean));
+        await flag(c, limited, groups.size > 1 ? NOTE.promoteHeldIds(sources.map((r) => r.id)) : NOTE.promoteHeld(text));
         return;
       }
       const srcIds = [...new Set(sources.flatMap((r) => (JSON.parse(r.source) as { ids: string[] }).ids))].slice(0, 20);
