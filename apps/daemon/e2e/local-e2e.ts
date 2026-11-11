@@ -927,9 +927,9 @@ async function routingCheck({ owner, groupId, bot, events, ws }: Landed) {
 
 /**
  * Gates by code for Codex and ACP (PR #202, 盯 2.1, 盯 2.10): a gated Codex run starts with
- * approval policy `untrusted`; the daemon answers `ls`, a file change and a GitHub MCP merge (no
- * built-in pattern) itself, and `git push origin main` waits for a person's card (拒绝 in words).
- * An ACP agent that asks before its tools gets a card for `gh pr merge` and none for a
+ * approval policy `untrusted`; the daemon answers `ls` and a file change itself, and `git push
+ * origin main` and a GitHub MCP merge each wait for a person's card (拒绝 in words, 同意 with the
+ * button). An ACP agent that asks before its tools gets a card for `gh pr merge` and none for a
  * file write.
  */
 async function gatesByCodeCheck({ owner, groupId, work, events, ws }: Landed) {
@@ -954,6 +954,9 @@ async function gatesByCodeCheck({ owner, groupId, work, events, ws }: Landed) {
   const push = await until("codex: the push asks a person", () => cardsIn(t.topicId, gx)[0], 60_000);
   await say(events, ws, groupId, "拒绝", { topicId: t.topicId });
   await closedAs(push.id, "已拒绝：合并到 main");
+  const merge = await until("codex: the MCP merge asks a person", () => cardsIn(t.topicId, gx)[1], 60_000);
+  await press(merge);
+  await closedAs(merge.id, "已同意：合并到 main");
   const run = await ranDone(events, t.topicId, "codex gates");
   const dir = workOf(work, run.id);
   const answers = JSON.parse(readFileSync(join(dir, "gated.json"), "utf8")) as any[];
@@ -961,7 +964,7 @@ async function gatesByCodeCheck({ owner, groupId, work, events, ws }: Landed) {
   if (JSON.stringify(decided) !== JSON.stringify(["accept", "accept", "decline", "accept"])) throw new Error(`codex: the requests were answered ${JSON.stringify(answers)}`);
   const policies = JSON.parse(readFileSync(join(dir, "policies.json"), "utf8")) as string[];
   if (policies.at(-1) !== "untrusted") throw new Error(`codex: a gated run started with approval policy ${JSON.stringify(policies)}`);
-  if (cardsIn(t.topicId, gx).length !== 1) throw new Error(`codex: ${cardsIn(t.topicId, gx).length} cards for one gated request`);
+  if (cardsIn(t.topicId, gx).length !== 2) throw new Error(`codex: ${cardsIn(t.topicId, gx).length} cards for two gated requests`);
 
   const ac = await aiMember(owner, "ac", "acp");
   const a = await say(events, ws, groupId, "@ac approve merge", { mentions: [ac] });
@@ -976,7 +979,7 @@ async function gatesByCodeCheck({ owner, groupId, work, events, ws }: Landed) {
   if (cardsIn(w.topicId, ac).length !== 0) throw new Error("acp: a file write nobody gates asked a person");
   const written = messageOf(events, wr.resultMessageId);
   if (!written?.body.includes("permission yes")) throw new Error(`acp: the file write answered ${JSON.stringify(written?.body)}`);
-  step("gates by code: Codex (untrusted) asked a person only for the push (拒绝); ACP asked for gh pr merge and not for a file write");
+  step("gates by code: Codex (untrusted) asked a person only for the push (拒绝) and the MCP merge (同意); ACP asked for gh pr merge and not for a file write");
   return { codexRun: run.id, acpRuns: [ar.id, wr.id] };
 }
 
