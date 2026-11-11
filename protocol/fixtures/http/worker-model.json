@@ -1,0 +1,10 @@
+{
+  "kind": "WorkerModel",
+  "valid": true,
+  "value": {
+    "runtime": "claude",
+    "model": "opus",
+    "effort": "high",
+    "updatedAt": 1762128000000
+  }
+}

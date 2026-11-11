@@ -643,6 +643,44 @@ impl TextSystem {
     }
 }
 
+/// Replaces shown text, one run at a time: an app that renders its screens in another
+/// language (a screenshot self-test) sets it once. `None` from the function keeps the run.
+static TEXT_TRANSLATOR: std::sync::OnceLock<fn(&str) -> Option<String>> = std::sync::OnceLock::new();
+
+/// Sets the [`TEXT_TRANSLATOR`] for the life of the process. Only the first call counts.
+pub fn set_text_translator(translate: fn(&str) -> Option<String>) {
+    let _ = TEXT_TRANSLATOR.set(translate);
+}
+
+/// The text and runs to draw after the translator: each run's text is replaced on its own and
+/// the run takes the new length. `None` when no translator is set or nothing changed.
+pub(crate) fn translate_runs(text: &str, runs: &[TextRun]) -> Option<(SharedString, Vec<TextRun>)> {
+    let translate = TEXT_TRANSLATOR.get()?;
+    let mut out = String::with_capacity(text.len());
+    let mut new_runs = Vec::with_capacity(runs.len());
+    let mut changed = false;
+    let mut ix = 0;
+    for run in runs {
+        let end = (ix + run.len).min(text.len());
+        let part = text.get(ix..end)?;
+        let mut run = run.clone();
+        match translate(part) {
+            Some(t) => {
+                changed = true;
+                run.len = t.len();
+                out.push_str(&t);
+            }
+            None => out.push_str(part),
+        }
+        new_runs.push(run);
+        ix = end;
+    }
+    if ix < text.len() {
+        out.push_str(&text[ix..]);
+    }
+    changed.then(|| (SharedString::from(out), new_runs))
+}
+
 /// The GPUI text layout subsystem.
 #[derive(Deref)]
 pub struct WindowTextSystem {
@@ -688,6 +726,11 @@ impl WindowTextSystem {
         runs: &[TextRun],
         force_width: Option<Pixels>,
     ) -> ShapedLine {
+        let translated = translate_runs(&text, runs);
+        let (text, runs) = match &translated {
+            Some((t, r)) => (t.clone(), r.as_slice()),
+            None => (text, runs),
+        };
         debug_assert!(
             text.find('\n').is_none(),
             "text argument should not contain newlines"
@@ -801,6 +844,11 @@ impl WindowTextSystem {
         wrap_width: Option<Pixels>,
         line_clamp: Option<usize>,
     ) -> Result<SmallVec<[WrappedLine; 1]>> {
+        let translated = translate_runs(&text, runs);
+        let (text, runs) = match &translated {
+            Some((t, r)) => (t.clone(), r.as_slice()),
+            None => (text, runs),
+        };
         let mut runs = runs.iter().filter(|run| run.len > 0).cloned().peekable();
         let mut font_runs = self.font_runs_pool.lock().pop().unwrap_or_default();
 
@@ -936,6 +984,11 @@ impl WindowTextSystem {
         runs: &[TextRun],
         force_width: Option<Pixels>,
     ) -> Arc<LineLayout> {
+        let translated = translate_runs(text, runs);
+        let (text, runs): (&str, &[TextRun]) = match &translated {
+            Some((t, r)) => (t, r.as_slice()),
+            None => (text, runs),
+        };
         let mut last_run = None::<&TextRun>;
         let mut font_runs = self.font_runs_pool.lock().pop().unwrap_or_default();
         font_runs.clear();

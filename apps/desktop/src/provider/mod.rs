@@ -2330,6 +2330,15 @@ impl ChatProvider for CoreProvider {
     fn ai_service(&self) -> AdminReply<crate::data::AiServiceSettings> {
         self.ai_service_inner()
     }
+    fn worker_models(&self) -> AdminReply<Vec<crate::data::WorkerModelSetting>> {
+        self.worker_models_inner()
+    }
+    fn set_worker_model(
+        &self,
+        setting: crate::data::WorkerModelSetting,
+    ) -> AdminReply<crate::data::WorkerModelSetting> {
+        self.set_worker_model_inner(setting)
+    }
     fn set_ai_service(
         &self,
         draft: crate::data::AiServiceDraft,

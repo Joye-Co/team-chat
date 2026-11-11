@@ -1,0 +1,108 @@
+/* The product's own interface, rebuilt in HTML so it can act on screen.
+   Every size, colour and label is taken from the shipped light theme
+   (apps/desktop/src/ui/native/tokens.rs) and measured on the real topic screen, in window points:
+   the window is 1440 x 900, the sidebar 264, the topic rail 319. Nothing here is invented layout. */
+.app{--bg:#fff;--fg:#0a0a0a;--side:#fafafa;--muted:#f5f5f5;--mfg:#737373;--line:#e5e5e5;--pri:#171717;--prifg:#fafafa;--warn:#d97706;--ok:#16a34a;--info:#2563eb;
+  position:absolute;left:0;top:0;width:1440px;height:900px;color:var(--fg);font:400 14px/20px -apple-system,"SF Pro Text","PingFang SC",system-ui,sans-serif;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+.app *{box-sizing:border-box}
+.app .win{position:absolute;inset:0;background:var(--bg);border-radius:14px}
+.app i.ic{display:inline-flex;width:16px;height:16px;flex:none}
+.app i.ic svg{width:16px;height:16px;display:block;fill:none;stroke:currentColor;stroke-width:1.35;stroke-linecap:round;stroke-linejoin:round}
+.app .m{color:var(--mfg)}
+.app .sm{font-size:12px;line-height:16px}
+.app .b6{font-weight:600}.app .b5{font-weight:500}
+
+/* avatars: a person is a circle, an AI member a rounded tile (its character when the pack is there) */
+.app .av{flex:none;width:32px;height:32px;border-radius:50%;background:var(--muted);box-shadow:inset 0 0 0 1px var(--line);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500;position:relative}
+.app .av.bot{border-radius:8px}
+.app .av.s16{width:16px;height:16px;font-size:10px}.app .av.s16.bot{border-radius:4px}
+.app .av.s20{width:20px;height:20px;font-size:11px}.app .av.s20.bot{border-radius:5px}
+.app .av.chr{background:none;box-shadow:none}
+.app .av .face{position:absolute;left:-12%;top:-12%;width:124%;height:124%}
+.app .av .face svg,.app .av .face img{width:100%;height:100%;display:block;overflow:visible}
+
+/* status marks */
+.app .dotw{width:10px;height:10px;border-radius:50%;background:var(--warn);display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:8px;font-weight:800;flex:none}
+.app .dotw::after{content:"!"}
+.app .okc{width:12px;height:12px;border-radius:50%;background:var(--ok);display:inline-flex;align-items:center;justify-content:center;flex:none}
+.app .okc::after{content:"";width:5px;height:3px;border-left:1.4px solid #fff;border-bottom:1.4px solid #fff;transform:translateY(-.5px) rotate(-45deg)}
+.app .spin{width:14px;height:14px;flex:none;color:var(--info)}
+.app .spin svg{width:14px;height:14px;display:block;transform:rotate(calc(var(--t,0) * 200deg))}
+.app .chip{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 9px;border-radius:11px;background:var(--muted);font-size:12px;font-weight:500;white-space:nowrap}
+
+/* ---------- sidebar ---------- */
+.app .sb{position:absolute;left:0;top:0;width:264px;height:900px;background:var(--side);border-right:1px solid var(--line);border-radius:14px 0 0 14px}
+.app .tl3{position:absolute;left:19px;top:26.5px;display:flex;gap:8px}.app .tl3 i{width:12px;height:12px;border-radius:50%;background:#d6d6d6}
+.app .sb .t1{position:absolute;left:87.5px;top:24.5px}.app .sb .t2{position:absolute;left:187px;top:24.5px}.app .sb .t3{position:absolute;left:222.5px;top:24.5px}
+.app .search{position:absolute;left:17px;top:57px;width:221px;height:30px;border-radius:15px;background:#fff;box-shadow:inset 0 0 0 1px var(--line);display:flex;align-items:center;gap:7px;padding:0 12px;color:#8e8e8e}
+.app .nav{position:absolute;left:16px;width:231px;height:32px;border-radius:8px;display:flex;align-items:center;gap:8px;padding:0 8px;white-space:nowrap}
+.app .nav.sel{background:#f0f0f0}
+.app .nav .bd{margin-left:auto;min-width:20px;height:20px;border-radius:10px;background:#efefef;font-size:12px;font-weight:500;display:flex;align-items:center;justify-content:center}
+.app .sec{position:absolute;left:24.5px;font-size:12px;line-height:16px;color:var(--mfg)}
+.app .me{position:absolute;left:8px;top:835px;width:247px;height:58px;border-top:1px solid var(--line);display:flex;align-items:center;gap:9px;padding:0 15.5px}
+.app .me .up{margin-left:auto;color:var(--mfg)}
+
+/* ---------- topic page ---------- */
+.app .tb{position:absolute;left:264px;top:0;width:857px;height:64px;border-bottom:1px solid var(--line);display:flex;align-items:center;padding-left:24.5px;gap:5px;white-space:nowrap}
+.app .tb .ttl{font-size:16px;font-weight:600;line-height:24px;margin:0 7px 0 0}
+.app .tb .acts{position:absolute;right:26px;top:15.5px;display:flex;gap:6px}
+.app .tbb{height:32px;padding:0 11px;border-radius:8px;display:flex;align-items:center;gap:7px;color:var(--mfg)}
+.app .tbb.on{background:var(--muted);color:var(--fg);font-weight:500}
+.app .thread{position:absolute;left:264px;top:65px;width:857px;height:835px;overflow:hidden}
+.app .tflow{position:absolute;left:24.5px;right:0;bottom:203.5px;display:flex;flex-direction:column}
+.app .datep{position:absolute;left:50%;top:1.5px;transform:translateX(-50%);height:24px;padding:0 13px;border-radius:12px;background:#fff;box-shadow:0 0 0 1px var(--line),0 2px 6px rgba(0,0,0,.08);font-size:12px;line-height:24px;color:var(--mfg);white-space:nowrap;z-index:3}
+.app .row{flex:none;overflow:hidden}
+.app .msg{display:flex;gap:12px;padding-top:7px;padding-bottom:7px}
+.app .msg .hd{display:flex;align-items:baseline;gap:7px;height:20px;white-space:nowrap}
+.app .msg .tx{font-size:14px;line-height:22px}
+.app .sysl{padding:6px 0 5px 44px;font-size:12px;line-height:16px;color:var(--mfg);white-space:nowrap}
+.app .recl{padding:4.5px 0 6px 44px;font-size:12px;line-height:16px;color:var(--mfg);display:flex;align-items:center;gap:6px;white-space:nowrap}
+.app .file{margin-top:6.5px;width:639px;height:58.5px;border-radius:10px;box-shadow:inset 0 0 0 1px var(--line);display:flex;align-items:center;gap:12.5px;padding:0 12.5px}
+.app .file .pl{width:31px;height:31px;border-radius:7px;background:var(--muted);box-shadow:inset 0 0 0 1px var(--line);display:flex;align-items:center;justify-content:center;color:var(--mfg);overflow:hidden;position:relative}
+.app .card{margin-top:3px;width:639px;border-radius:14px;box-shadow:inset 0 0 0 1px var(--line),0 1px 3px rgba(0,0,0,.05);padding:17.5px 16.5px 0}
+.app .card h4{font-size:16px;line-height:24px;font-weight:600;margin:5.5px 0 6px}
+.app .card .pf{display:flex;gap:14px;margin-top:11px;height:16px;font-size:12px;line-height:16px;color:var(--mfg);white-space:nowrap}
+.app .card .pf span{display:inline-flex;align-items:center;gap:5px}
+.app .card .ln{height:33px;border-top:1px solid var(--line);display:flex;align-items:center;gap:9px;white-space:nowrap}
+.app .card .ln.first{margin-top:11px}
+.app .card .ln .r{margin-left:auto;display:flex;align-items:center;gap:14px;font-size:12px;color:var(--mfg)}
+.app .card .foot{height:15.5px}
+.app .pin{position:absolute;left:24.5px;top:651.5px;width:808px;height:67px;border-radius:14px;box-shadow:inset 0 0 0 1px var(--line);background:#fff;display:flex;align-items:center;padding:0 16.5px 0 18px;gap:14px;white-space:nowrap}
+.app .pin .dotw{width:13px;height:13px;font-size:10px;align-self:flex-start;margin-top:16.5px}
+.app .pin .acts{margin-left:auto;display:flex;gap:8px}
+.app .btn{height:28px;padding:0 12px;border-radius:8px;background:var(--muted);font-weight:500;display:inline-flex;align-items:center;white-space:nowrap}
+.app .btn.pri{background:var(--pri);color:var(--prifg)}
+.app .comp{position:absolute;left:24.5px;top:743.5px;width:808px;height:75px;border-radius:14px;box-shadow:inset 0 0 0 1px var(--line);background:#fff}
+.app .comp .ph{position:absolute;left:17px;top:10px;color:#a3a3a3}
+.app .comp .tools{position:absolute;left:15px;bottom:14px;display:flex;gap:15px;color:var(--mfg)}
+.app .comp .send{position:absolute;right:8.5px;bottom:8.5px;width:28px;height:28px;border-radius:8px;background:#8e8e8e;color:#fff;display:flex;align-items:center;justify-content:center}
+
+/* ---------- topic rail ---------- */
+.app .rail{position:absolute;left:1121px;top:0;width:319px;height:900px;border-left:1px solid var(--line);overflow:hidden;border-radius:0 14px 14px 0}
+.app .rail .rh{height:64px;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 24px 0 16px;font-size:16px;font-weight:600}
+.app .rail .rh .x{margin-left:auto;color:var(--mfg)}
+.app .rail .give{position:absolute;left:28px;top:84.5px;font-weight:500}
+.app .rail .box{position:absolute;left:16px;width:287px;border-radius:10px;background:var(--muted)}
+.app .rail .st{top:132px;height:46px;display:flex;align-items:center;gap:7px;padding-left:24px;font-size:12px;font-weight:500}
+.app .rail .rm{top:202px;height:48px;display:flex;align-items:center;padding:0 8px 0 14px;font-weight:500}
+.app .rail .selb{margin-left:auto;width:120px;height:31px;border-radius:8px;background:#fff;box-shadow:inset 0 0 0 1px var(--line);display:flex;align-items:center;padding:0 10px 0 12px;font-weight:400}
+.app .rail .selb .ic{margin-left:auto;color:var(--mfg)}
+.app .rail .hint{position:absolute;left:18px;top:258.5px;font-size:12px;line-height:16px;color:var(--mfg);white-space:nowrap}
+.app .rail .h{position:absolute;left:18px;right:16px;font-weight:600;display:flex;align-items:center}
+.app .rail .h .ic{margin-left:auto;color:var(--mfg)}
+.app .rail .mem{top:334px;height:320px;padding:7.5px 14px 0}
+.app .rail .mr{height:34px;display:flex;align-items:center;gap:8px;white-space:nowrap}
+.app .rail .mr .r{margin-left:auto;font-size:12px;color:var(--mfg)}
+.app .rail .plan{top:714px;height:200px;padding:12.5px 14px 0}
+.app .rail .plan .p0{display:flex;align-items:center;font-weight:500;height:20px}
+.app .rail .plan .p0 span{margin-left:auto;font-weight:400;font-size:12px;color:var(--mfg)}
+.app .rail .bar{height:3px;border-radius:2px;background:#e2e2e2;margin:14px 0 12.5px;position:relative;overflow:hidden}
+.app .rail .bar i{position:absolute;inset:0;background:var(--fg);transform-origin:left}
+.app .rail .ps{height:30px;display:flex;align-items:center;gap:6px;color:var(--mfg);white-space:nowrap}
+.app .rail .ps .r{margin-left:auto;font-size:12px}
+
+/* the live row under a member's reply while it works */
+.app .work{margin:6px 0 8px 44px;width:640px;height:57px;border-radius:14px;box-shadow:inset 0 0 0 1px var(--line),0 1px 3px rgba(0,0,0,.05);background:#fff;display:flex;align-items:center;gap:9px;padding:0 17px;white-space:nowrap}
+.app .work .r{margin-left:auto;display:flex;align-items:center;gap:9px}
+.app .av.s24{width:24px;height:24px;font-size:12px}.app .av.s24.bot{border-radius:6px}
+.app .nav .bd{position:relative}

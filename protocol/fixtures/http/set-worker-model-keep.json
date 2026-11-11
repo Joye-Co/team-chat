@@ -1,0 +1,8 @@
+{
+  "kind": "SetWorkerModelRequest",
+  "valid": true,
+  "description": "absent keeps the model",
+  "value": {
+    "effort": "low"
+  }
+}

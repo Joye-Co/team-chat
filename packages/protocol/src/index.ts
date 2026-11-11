@@ -124,6 +124,9 @@ import { TeamRoster } from "./roster.ts";
 import { LoginCodeRequest, MachineLogin, MachineMonitor, MachineSecretsResponse, SetSecretRequest, StartLoginRequest } from "./monitor.ts";
 import {
   AiServiceConfig,
+  WorkerModel,
+  WorkerModelsResponse,
+  SetWorkerModelRequest,
   AiServiceTestResult,
   ApprovalPolicy,
   Device,
@@ -893,6 +896,9 @@ export const schemas = {
   ApprovalPolicy,
   UpdateApprovalPolicyRequest,
   AiServiceConfig,
+  WorkerModel,
+  WorkerModelsResponse,
+  SetWorkerModelRequest,
   UpdateAiServiceRequest,
   TestAiServiceRequest,
   AiServiceTestResult,

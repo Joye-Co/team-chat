@@ -383,6 +383,13 @@ pub const SCENES: &[Scene] = &[
         open: settings_scenes::open_ai_service,
     },
     Scene {
+        name: "settings-models",
+        about: "Settings: 通用 › 模型 (owner): 前台 from AI 服务, and a model and 思考强度 per runtime",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_models,
+    },
+    Scene {
         name: "settings-ai-service-failed",
         about: "Settings: 通用 › AI 服务 with OpenAI 兼容 and a refused key: 连接失败",
         start: Start::SignedIn,

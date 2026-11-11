@@ -61,6 +61,8 @@ pub struct GeneralPage {
     versions: usize,
     /// AI 服务, shown to owners only.
     ai: Entity<super::ai_service::AiServicePanel>,
+    /// 模型, under AI 服务: it lives in 团队管理 too, the self-tests show it here.
+    models: Entity<super::worker_models::WorkerModelsPanel>,
     /// Self-tests only: AI 服务 under 通用 (it lives in 团队管理).
     ai_here: bool,
     updater: Option<Entity<updater::Updater>>,
@@ -98,11 +100,14 @@ impl GeneralPage {
             subscriptions.push(cx.observe(u, |_, _, cx| cx.notify()));
         }
         let ai = cx.new(|cx| super::ai_service::AiServicePanel::new(services.clone(), window, cx));
+        let models =
+            cx.new(|cx| super::worker_models::WorkerModelsPanel::new(services.clone(), window, cx));
         Self {
             me: Me::read(&services),
             versions: updater::notes::history_len(),
             services,
             ai,
+            models,
             ai_here: false,
             updater,
             description,
@@ -117,6 +122,10 @@ impl GeneralPage {
 
     pub fn ai_service(&self) -> &Entity<super::ai_service::AiServicePanel> {
         &self.ai
+    }
+
+    pub fn worker_models(&self) -> &Entity<super::worker_models::WorkerModelsPanel> {
+        &self.models
     }
 
     /// Self-tests: draw 通用 › AI 服务 as before it moved to 团队管理.
@@ -708,8 +717,10 @@ impl Render for GeneralPage {
             .when(owner, |p| p.child(admin_card(cx)))
             .child(startup)
             .child(alerts)
-            // AI 服务 lives in 团队管理; the self-tests still show it here.
-            .when(owner && self.ai_here, |p| p.child(self.ai.clone()))
+            // AI 服务 and 模型 live in 团队管理; the self-tests still show them here.
+            .when(owner && self.ai_here, |p| {
+                p.child(self.ai.clone()).child(self.models.clone())
+            })
             .child(version)
             .child(developer_section)
     }

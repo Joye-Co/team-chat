@@ -1,0 +1,28 @@
+{
+  "kind": "MemoryItem",
+  "valid": true,
+  "description": "an AI member's lesson learned in one group: only that group's people read it",
+  "value": {
+    "id": "01JBX0MEM000000000000000AK",
+    "scope": "member:01JBX0BOT000000000000000AC",
+    "kind": "lesson",
+    "text": "跑 cargo test 之前先设 CARGO_TARGET_DIR",
+    "source": {
+      "kind": "run",
+      "ids": [
+        "01JBX0RUN000000000000000AJ"
+      ]
+    },
+    "authorId": "01JBX0BOT000000000000000AC",
+    "human": false,
+    "status": "pending",
+    "confidence": 0.5,
+    "uses": 0,
+    "lastUsedAt": null,
+    "version": 1,
+    "createdAt": 1762128000000,
+    "updatedAt": 1762128001000,
+    "note": "上次没设，编译占满了磁盘",
+    "fromGroup": "01JBX0GENERAL000000000000A"
+  }
+}

@@ -386,7 +386,12 @@ pub fn write_page(
 /// 10 月数据月报: v3 as the artboard; v2 has no 渠道拆分 table and its
 /// question takes no answers (it was answered in v3).
 fn report_html(version: u32) -> String {
-    let page = include_str!("v2_report.html");
+    // The English homepage's screenshots (`--lang en`) show the English copy of the page.
+    let page = if crate::selftest::english::on() {
+        include_str!("v2_report.en.html")
+    } else {
+        include_str!("v2_report.html")
+    };
     if version >= 3 {
         return page.to_string();
     }

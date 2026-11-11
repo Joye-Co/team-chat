@@ -755,6 +755,20 @@ impl Daemon {
                 );
             }
         }
+        // Codex with no model set: its configured default may be one this account cannot use.
+        if a.model.is_none() && rt.kind == "codex" && rt.model.is_none() {
+            let cli = self.clis.iter().find(|c| c.runtime == a.runtime);
+            if let Some(m) = crate::models::codex_fallback_model(
+                cli,
+                crate::models::codex_config_model(&rt).as_deref(),
+            ) {
+                log!(
+                    "run {id}: Codex's default model is not in this account's list; it runs with {}",
+                    crate::chat_run::safe_word(&m)
+                );
+                a.model = Some(m);
+            }
+        }
         let (ctl_tx, ctl_rx) = mpsc::unbounded_channel();
         let outputs = Arc::new(crate::chat_run::Outputs::new(&id));
         self.runs.insert(

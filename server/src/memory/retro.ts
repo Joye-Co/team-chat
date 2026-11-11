@@ -1,12 +1,14 @@
 // 复盘 (agent-harness.zh.md 7.3): when a run of a person's request ends, one forced tool call
 // writes at most 3 lessons with evidence and when-to-apply, pending in the member's scope until
-// the daily consolidation. Best effort: it never fails or delays the run.
+// the daily consolidation, readable only in the group (or direct conversation) of the run.
+// Best effort: it never fails or delays the run.
 import type { RunStatus } from "@chat/protocol";
 import { z } from "zod";
 import { loadModelConfig } from "../aiservice";
 import type { CallOptions } from "../aiservice/providers";
 import { type ToolSpec, callTool } from "../aiservice/tools";
 import type { Env } from "../core/env";
+import { fitsGroupSql } from "./access";
 import { insertStatements, type MemoryRow } from "./store";
 
 export const MAX_LESSONS = 3;
@@ -47,6 +49,8 @@ export interface RetroInput {
   botId: string;
   botName?: string;
   runId: string;
+  /** The run's group: the lessons are read only there. */
+  groupId: string;
   status: RunStatus;
   requesterId: string;
   request: string;
@@ -73,8 +77,8 @@ export async function retroAfterRun(env: Env, i: RetroInput, opts: CallOptions =
   const cfg = await loadModelConfig(env).catch(() => null);
   if (!cfg) return 0;
   const known = (
-    await env.DB.prepare("SELECT text FROM memories WHERE scope = ? AND status IN ('active', 'pending') ORDER BY updated_at DESC LIMIT 30")
-      .bind(`member:${i.botId}`)
+    await env.DB.prepare(`SELECT text FROM memories m WHERE scope = ?1 AND status IN ('active', 'pending') AND ${fitsGroupSql("m", 2)} ORDER BY updated_at DESC LIMIT 30`)
+      .bind(`member:${i.botId}`, i.groupId)
       .all<Pick<MemoryRow, "text">>()
   ).results;
   const system = [
@@ -117,6 +121,7 @@ export async function retroAfterRun(env: Env, i: RetroInput, opts: CallOptions =
         human: false,
         status: "pending",
         confidence: 0.5,
+        fromGroup: i.groupId,
       },
       i.botId,
       now + n,
