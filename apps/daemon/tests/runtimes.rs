@@ -75,6 +75,7 @@ fn spec(dir: &std::path::Path, kind: &str, command: &str, args: &[&str], prompt:
         gate_alive: None,
         gates: None,
         exec: daemon::executor::local(),
+        vm_shares: vec![],
     }
 }
 

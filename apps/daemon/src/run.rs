@@ -73,28 +73,14 @@ pub fn aside_capable(kind: &str) -> bool {
 }
 
 /// What a CLI must know about a run in a microVM: what is kept and what goes with the VM.
-pub fn vm_note(vm: &crate::config::VmConfig) -> String {
-    let kept = if vm.homes.as_os_str().is_empty() {
-        "Your working folder is kept for your next run in this topic; nothing outside it is kept."
-            .to_string()
-    } else {
-        let size = if crate::vm_home::limited(vm) {
-            format!(" Your home folder holds {} GB in all.", vm.home_gb)
-        } else {
-            String::new()
-        };
-        format!(
-            "Your working folder is kept for your next run in this topic, and your home folder \
-($HOME) for all your runs: install tools and sign in there, and look there for what a run in \
-another topic left. /tmp and everything else outside these two are gone after this run.{size}"
-        )
-    };
-    format!(
-        "You run in a virtual machine that was started for this run and is deleted when you end \
-your turn. {kept} Every process still running when your turn ends is killed: when you start \
-something you need the result of (a sign-in that waits for a person, a build, a test run), wait \
-for it in the foreground before you finish, never in the background."
-    )
+pub fn vm_note(_vm: &crate::config::VmConfig) -> String {
+    "You run in a virtual machine that was started for this run and is deleted when you end \
+your turn. Your working folder is kept for your next run in this topic; $HOME, /tmp and \
+everything else outside it are gone after this run. Every process still running when your turn \
+ends is killed: when you start something you need the result of (a sign-in that waits for a \
+person, a build, a test run), wait for it in the foreground before you finish, never in the \
+background."
+        .to_string()
 }
 
 /// How long a VM run's sign-in must last: the run's limit (2 hours when the server sets none)
@@ -536,27 +522,24 @@ pub async fn supervise(ctx: RunCtx) {
             redactor.clone(),
         ))
     });
-    // A VM member's own folder (its home: a fixed-size disk image), ready before anything uses it.
-    let vm_member = match cfg.vm.as_ref().filter(|_| exec.isolated()) {
-        Some(vm) => Some(crate::vm_home::ensure(vm, &assign.bot_member_id).await),
-        None => None,
-    };
-    // A VM member's kept home: no GitHub sign-in of an earlier run is used again.
-    if let (Some(vm), Some(_)) = (&cfg.vm, &github)
-        && crate::github::clear_home(&vm.homes, &assign.bot_member_id)
-    {
-        eprintln!("{} run {run_id}: removed an old GitHub sign-in", now_ms());
-    }
+    let in_vm = cfg.vm.is_some() && exec.isolated();
     let prepared = prepare_with_github(&cfg, &assign, github.as_deref(), &event).await;
     let (outcome, timed_out, code) = match prepared {
         Err(e) => (Outcome::failed(e), false, None),
         Ok((cwd, line, line_note)) => {
-            if let Some(sid) = &assign.resume_session_id
-                && let Some(mut meta) = workspace::read_meta(&dir)
-            {
-                meta.resume_session_id = Some(sid.clone());
+            if let Some(mut meta) = workspace::read_meta(&dir) {
+                meta.bot_member_id = Some(assign.bot_member_id.clone());
+                if let Some(sid) = &assign.resume_session_id {
+                    meta.resume_session_id = Some(sid.clone());
+                }
                 workspace::write_meta(&dir, &meta);
             }
+            // In a VM the CLI's own folders (its sessions) go with the topic's work line, or
+            // with the run when it has no line.
+            let cli_root = in_vm.then(|| match &line {
+                Some(l) => l.dir().join("cli"),
+                None => dir.join("cli"),
+            });
             event(RunEvent::Status {
                 state: "running".into(),
                 message: None,
@@ -576,16 +559,18 @@ pub async fn supervise(ctx: RunCtx) {
                     }
                 }
             }
-            // In a VM the CLI uses its member's own folders and a copy of the sign-in that cannot
+            // In a VM the CLI uses the topic's own folders and a copy of the sign-in that cannot
             // change this host's (机 3.2).
-            let vm_ready = match &vm_member {
-                Some(Ok(member)) => crate::vm_login::prepare(
+            let vm_ready = match &cli_root {
+                Some(root) => crate::vm_login::prepare(
                     &rt,
-                    member,
+                    root,
                     &cwd,
                     assign.resume_session_id.as_deref(),
                     vm_run_need(&assign),
                     &mut env,
+                    &assign.bot_member_id,
+                    &cfg,
                 )
                 .await
                 .map(|token| {
@@ -593,7 +578,6 @@ pub async fn supervise(ctx: RunCtx) {
                         redactor.add(&t);
                     }
                 }),
-                Some(Err(e)) => Err(format!("the AI member's home folder is not ready: {e}")),
                 None => Ok(()),
             };
             // Marks the run's processes, also tools that leave the CLI's tree (proctree).
@@ -755,6 +739,7 @@ pub async fn supervise(ctx: RunCtx) {
                 gate_alive,
                 gates: Some(gates.clone()),
                 exec: exec.clone(),
+                vm_shares: cli_root.iter().cloned().collect(),
             };
             let work = spec.cwd.clone();
             // The hook asks through chat-run: a gated run never goes on without it.
@@ -790,6 +775,10 @@ this machine cannot be made to stop at them (update it)",
                 .await
             };
             drop(chat_run);
+            // The sign-in copies live only while the CLI runs.
+            if let Some(root) = &cli_root {
+                crate::vm_login::remove_auth(root);
+            }
             if aside {
                 workspace::set_read_only(&work, false);
             }
@@ -1283,7 +1272,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_vm_run_is_told_its_home_size_and_its_sign_in_outlasts_its_limit() {
+    fn a_vm_run_is_told_what_is_kept_and_its_sign_in_outlasts_its_limit() {
         let vm = |extra: &str| {
             Config::parse(&format!(
                 "server_url = \"http://127.0.0.1:1\"\ntoken_file = \"/nonexistent\"\n[runtimes.claude]\nkind = \"claude\"\n[vm]\nkernel = \"/k\"\nrootfs = \"/r\"\n{extra}"
@@ -1292,9 +1281,10 @@ mod tests {
             .vm
             .unwrap()
         };
-        assert!(vm_note(&vm("")).contains("Your home folder holds 20 GB in all."));
-        assert!(!vm_note(&vm("home_gb = 0\n")).contains("GB in all"));
-        assert!(vm_note(&vm("homes = ''\n")).contains("nothing outside it is kept"));
+        // An old config with home_gb: homes are no longer kept or sized.
+        let note = vm_note(&vm("home_gb = 20\n"));
+        assert!(note.contains("$HOME, /tmp and everything else outside it are gone"));
+        assert!(!note.contains("GB"));
         let mut a: RunAssign = serde_json::from_value(serde_json::json!({
             "runId": "r1", "botMemberId": "B1", "groupId": "g", "topicId": "t",
             "runtime": "claude", "prompt": "p", "leaseMs": 600000
