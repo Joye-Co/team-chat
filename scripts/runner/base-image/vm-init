@@ -53,5 +53,7 @@ fi
 for c in git node claude codex pi bun uv gh python3; do
   printf '%s: %s\n' "$c" "$(command -v $c >/dev/null && $c --version 2>&1 | head -1 || echo missing)"
 done
+printf 'rustup: %s\n' "$([ -x /opt/rust/cargo/bin/rustup ] && RUSTUP_HOME=/opt/rust/rustup /opt/rust/cargo/bin/rustup --version 2>/dev/null | head -1 || echo missing)"
+printf 'sccache: %s\n' "$(command -v sccache >/dev/null && sccache --version 2>&1 | head -1 || echo missing)"
 echo "vm-init: tools listed after $(cut -d' ' -f1 /proc/uptime)s"
 poweroff_now
