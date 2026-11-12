@@ -336,6 +336,28 @@ impl ChatProvider for WorstCase {
     }
     // --- settings-backend track: break-ui data for 设置 › 账号, 通知 and 成员 ---
     /// Twelve devices: names at the 128-character limit, an empty name, never used, mixed kinds.
+    // Usable: GitHub with the longest login GitHub allows (39) and a long profile name.
+    fn github(&self) -> Option<crate::data::GithubState> {
+        self.inner.github().map(|mut s| {
+            if let Some(a) = s.account.as_mut() {
+                a.login = "a-very-long-github-login-for-the-limits".into();
+                a.name = Some("很长的 GitHub 资料名".repeat(6));
+            }
+            s
+        })
+    }
+    fn refresh_github(&self) {
+        self.inner.refresh_github()
+    }
+    fn start_github(&self) -> AdminReply<crate::data::GithubDevice> {
+        self.inner.start_github()
+    }
+    fn poll_github(&self, device_id: &str) -> AdminReply<crate::data::GithubPoll> {
+        self.inner.poll_github(device_id)
+    }
+    fn disconnect_github(&self) -> AdminReply<()> {
+        self.inner.disconnect_github()
+    }
     fn devices(&self) -> AdminReply<Vec<DeviceInfo>> {
         let now = self.now.max(0) as u64;
         let long = "很长的设备名称".repeat(19);
