@@ -51,6 +51,7 @@ import {
   messageWriteHooks,
   roomAlarmHandlers,
   roomMigrations,
+  READ_AS_RPCS,
   roomRpcHandlers,
 } from "./registry";
 import {
@@ -531,8 +532,9 @@ export class GroupRoom extends DurableObject<Env> {
     }
   }
 
-  private roomContext(): RoomContext {
+  private roomContext(readingAs = false): RoomContext {
     return {
+      readingAs,
       groupId: this.groupId as string,
       env: this.env,
       sql: this.sql,
@@ -1535,6 +1537,19 @@ export class GroupRoom extends DurableObject<Env> {
       await this.ready(groupId);
       if (actor) this.requireMember(actor.id);
       return h(this.roomContext(), actor, args);
+    });
+  }
+
+  /**
+   * Server-only read on behalf of a run that may read this group (context/routes.ts checked
+   * `requireReadable`). No member check; only the RPCs in `READ_AS_RPCS`.
+   */
+  async readAs(groupId: string, name: string, viewer: Actor, args: unknown): Promise<Result<unknown>> {
+    return run(async () => {
+      const h = READ_AS_RPCS.has(name) ? roomRpcHandlers.get(name) : undefined;
+      if (!h) throw new ApiError("forbidden", `room rpc ${name} is not a read`);
+      await this.ready(groupId);
+      return h(this.roomContext(true), viewer, args);
     });
   }
 }

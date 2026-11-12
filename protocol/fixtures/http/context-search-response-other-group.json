@@ -1,0 +1,19 @@
+{
+  "kind": "ContextSearchResponse",
+  "valid": true,
+  "description": "search --all: a hit of another group",
+  "value": {
+    "hits": [
+      {
+        "messageId": "01JBX0MSG000000000000000AE",
+        "topicId": "01JBX0TOPIC0000000000000AD",
+        "seq": 3,
+        "authorName": "张三",
+        "at": 1762128000000,
+        "snippet": "导出格式",
+        "groupId": "01JBX0GENERAL000000000000A",
+        "groupName": "产品"
+      }
+    ]
+  }
+}

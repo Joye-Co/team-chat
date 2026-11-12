@@ -131,6 +131,11 @@ export interface RoomContext {
   isMember(memberId: string): boolean;
   /** "group" or "dm"; null only before the room has loaded its group from D1. */
   groupKind: "group" | "dm" | null;
+  /**
+   * True inside `RoomDO.readAs` (design-visibility 3.2): a server read for a run that may read
+   * this group, whose AI member need not be in it. Handlers that check membership accept it.
+   */
+  readingAs: boolean;
   /** Runs `fn` in one SQLite transaction; events it appends are fanned out and hooked after commit. */
   commit<T>(fn: (tx: RoomTx) => T): T;
   /** Sends a frame (e.g. a transient event) to the gateways of all members, or the given ones. */
@@ -157,6 +162,22 @@ export interface TopicChange {
   ownerId?: string | null;
   extra?: Record<string, unknown>;
 }
+
+/**
+ * The room RPCs `RoomDO.readAs` may call (design-visibility 3.2): the reads of chat-run for a run
+ * that may read another group. Any other name is `forbidden` there.
+ */
+export const READ_AS_RPCS: ReadonlySet<string> = new Set([
+  "bots.history",
+  "bots.message",
+  "bots.topicExists",
+  "context.card",
+  "context.topicState",
+  "artifacts.list",
+  "artifacts.get",
+  "search.query",
+  "cards.decisions",
+]);
 
 export type RoomRpcHandler = (room: RoomContext, actor: Actor | null, args: unknown) => Promise<unknown> | unknown;
 export const roomRpcHandlers = new Map<string, RoomRpcHandler>();

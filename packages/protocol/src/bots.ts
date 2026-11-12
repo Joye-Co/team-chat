@@ -150,6 +150,9 @@ export const ContextHit = z.object({
   authorName: z.string(),
   at: Millis,
   snippet: z.string(),
+  /** A hit of another group the run may read (design-visibility): that group; absent for the run's own. */
+  groupId: Id.optional(),
+  groupName: z.string().optional(),
 });
 export type ContextHit = z.infer<typeof ContextHit>;
 
@@ -256,6 +259,9 @@ export type RunCardAnswer = z.infer<typeof RunCardAnswer>;
  */
 export const RunCardResponse = z.object({
   topicId: Id,
+  /** A card of another group the run may read: that group; absent for the run's own. */
+  groupId: Id.optional(),
+  groupName: z.string().optional(),
   message: ContextMessage,
   card: z.json(),
   /** The open ask: who is waited on. */
@@ -283,8 +289,29 @@ export const RunMembersResponse = z.object({ members: z.array(RunMember) });
 export type RunMembersResponse = z.infer<typeof RunMembersResponse>;
 
 /** `GET /v1/machine/runs/:id/topic/state?topic=`: one compact state card of a topic (at most 2,000 characters). */
-export const TopicStateResponse = z.object({ topicId: Id, title: z.string(), text: z.string().max(2000) });
+export const TopicStateResponse = z.object({
+  topicId: Id,
+  /** A topic of another group the run may read: that group; absent for the run's own. */
+  groupId: Id.optional(),
+  groupName: z.string().optional(),
+  title: z.string(),
+  text: z.string().max(2000),
+});
 export type TopicStateResponse = z.infer<typeof TopicStateResponse>;
+
+/** One group a run may read: its own (`current`) and the groups of kind "group" of the person it works for. */
+export const RunGroup = z.object({
+  id: Id,
+  name: z.string(),
+  kind: z.enum(["group", "dm"]),
+  purpose: z.string().optional(),
+  current: z.boolean(),
+});
+export type RunGroup = z.infer<typeof RunGroup>;
+
+/** `GET /v1/machine/runs/:id/groups` (feature `groups`): the groups the run may read, its own first. */
+export const RunGroupsResponse = z.object({ groups: z.array(RunGroup) });
+export type RunGroupsResponse = z.infer<typeof RunGroupsResponse>;
 
 /**
  * `POST /v1/runs` (a bot that is not runner-backed, member of the group): starts a run of the

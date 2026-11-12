@@ -856,7 +856,8 @@ CreateMachineRequest = { name, labels? }      CreateMachineResponse = { machine,
 | `GET /v1/machine/ws` | machine token | | WebSocket upgrade (machine-protocol.md) |
 | `PUT /v1/machine/runs/:id/session` | machine token | gzip body | `{ ok: true }` |
 | `GET /v1/machine/runs/:id/topic/messages`, `…/topic/messages/:messageId`, `…/search`, `…/files/:fileId` | machine token | | the run's topic context (machine-protocol.md, "Topic context") |
-| `GET /v1/machine/runs/:id/topic/state`, `…/artifacts`, `…/artifacts/:artifactId`, `…/cards/:messageId`, `…/decisions`, `…/members` | machine token | | what the run's group produced: `TopicStateResponse`, `RunArtifactsResponse`, `RunArtifactResponse`, `RunCardResponse`, `RunDecisionsResponse`, `RunMembersResponse` (machine-protocol.md, "Topic context") |
+| `GET /v1/machine/runs/:id/topic/state`, `…/artifacts`, `…/artifacts/:artifactId`, `…/cards/:messageId`, `…/decisions`, `…/members` | machine token | | what the run's group, or another group its person is in (`group=`), produced: `TopicStateResponse`, `RunArtifactsResponse`, `RunArtifactResponse`, `RunCardResponse`, `RunDecisionsResponse`, `RunMembersResponse` (machine-protocol.md, "Topic context") |
+| `GET /v1/machine/runs/:id/groups` | machine token | | `RunGroupsResponse`: the groups the run may read (usable, machine-protocol.md, "Topic context") |
 
 Rules:
 
@@ -2545,6 +2546,9 @@ BotRun += { requestedFor?: string }   // absent = no person (a hook), a private 
 
 Messages of AI members never start runs (unchanged), so no run works for an AI member. Readers
 of runs from before the field use `requestedBy` as before.
+
+A run reads its own group and the groups of kind `group` of the person it works for; a hook's
+run and a private card's answer read only their own group (machine-protocol.md, "Topic context").
 
 ## Roles: 所有者 and personal machines
 
