@@ -147,6 +147,7 @@ fn spec(rewrite: bool) -> RunGithub {
             email: "ai-B1@users.noreply.invalid".into(),
         },
         rewrite_ssh: rewrite.then_some(true),
+        asked_by: None,
     }
 }
 
@@ -352,7 +353,8 @@ async fn git_gets_the_persons_token_through_the_daemon() {
         events,
         vec![RunEvent::Github {
             state: "used".into(),
-            login: Some("octo".into())
+            login: Some("octo".into()),
+            reason: None
         }]
     );
     assert_eq!(side.redactor.text(&format!("x {TOKEN}")), "x <redacted>");
@@ -417,7 +419,8 @@ async fn without_a_connection_git_fails_now_and_the_server_is_told_once() {
         side.events.lock().unwrap().clone(),
         vec![RunEvent::Github {
             state: "missing".into(),
-            login: Some("octo".into())
+            login: Some("octo".into()),
+            reason: None
         }]
     );
 }

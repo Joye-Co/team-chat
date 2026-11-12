@@ -2,7 +2,7 @@
 // `GET /v1/machines/:id/monitor` answers one MachineMonitor.
 import { z } from "zod";
 import { Id, Millis } from "./common.ts";
-import { BootStats, DaemonProblem, HomeUse, MAX_DAEMON_PROBLEMS, MAX_HOMES, RunId, SecretInfo, SecretName, UsageWindow } from "./machine.ts";
+import { BootStats, DaemonProblem, HomeUse, MachineGithub, MAX_DAEMON_PROBLEMS, MAX_HOMES, RunId, SecretInfo, SecretName, UsageWindow } from "./machine.ts";
 
 export const MonitorRange = z.enum(["15m", "1h", "24h"]);
 export type MonitorRange = z.infer<typeof MonitorRange>;
@@ -151,6 +151,10 @@ export const MachineMonitor = z.object({
   homes: z.array(HomeUse).max(MAX_HOMES).optional(),
   /** Usable (机 5.4): the last warning and error lines of the daemon's log (server clock), oldest first. */
   problems: z.array(DaemonProblem).max(MAX_DAEMON_PROBLEMS).optional(),
+  /** Usable: the computer's own GitHub sign-in from the latest heartbeat (`metrics.github`). */
+  github: MachineGithub.optional(),
+  /** Usable: where runs execute, "host" | "vm" (`hello.machine.runsIn`). */
+  runsIn: z.string().min(1).max(16).optional(),
 });
 export type MachineMonitor = z.infer<typeof MachineMonitor>;
 

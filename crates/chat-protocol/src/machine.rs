@@ -41,6 +41,9 @@ pub mod feature {
     /// Usable: `hello.machine.runsIn`, `run.assign.github`, the `github` run event and the
     /// GitHub ops of `chat-run`.
     pub const GITHUB: &str = "github";
+    /// Usable: VM runs use the host's own GitHub sign-in per use, and heartbeats carry
+    /// `metrics.github`.
+    pub const GITHUB_HOST: &str = "github-host";
     /// Usable: `run.pause.hold`, `run.command`, `run.command.cancel` and the `hand.*` run events.
     pub const TAKEOVER: &str = "takeover";
     /// Usable: with `takeover`, a person's commands run as another user than the run (VM runs).
@@ -330,6 +333,21 @@ pub struct BootStats {
     pub samples: u32,
 }
 
+/// Known `MachineGithub.state` values; readers take an unknown one as "unknown".
+pub const MACHINE_GITHUB_STATES: [&str; 4] = ["signed_in", "signed_out", "no_gh", "unknown"];
+
+/// Usable (feature "github-host"): the computer's own GitHub sign-in, as `gh` on the host
+/// reports it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineGithub {
+    /// One of [`MACHINE_GITHUB_STATES`], or a newer value (1..32 chars).
+    pub state: String,
+    /// The signed-in account (1..100 chars), when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub login: Option<String>,
+}
+
 /// Host and VM numbers sent with each heartbeat (docs/machine-protocol.md, "Metrics"). Every
 /// number is optional: a platform may not have it.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -375,6 +393,10 @@ pub struct MachineMetrics {
     /// (at most [`MAX_DAEMON_PROBLEMS`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub problems: Option<Vec<DaemonProblem>>,
+    /// Usable, feature "github-host": the host's GitHub sign-in (read at start, every 10
+    /// minutes, after a refused push).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub github: Option<MachineGithub>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -805,13 +827,16 @@ pub enum RunEvent {
         op: String,
         body: Value,
     },
-    /// Usable (feature "github"): git or gh used the person's GitHub ("used"), or could not
-    /// ("missing", "invalid"; [`crate::github::RUN_GITHUB_STATES`]).
+    /// Usable (feature "github"): git or gh used GitHub ("used"), or could not ("missing",
+    /// "invalid"; [`crate::github::RUN_GITHUB_STATES`]). `reason` with "missing": one of
+    /// [`crate::github::RUN_GITHUB_REASONS`], or a newer value.
     #[serde(rename = "github", rename_all = "camelCase")]
     Github {
         state: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         login: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
     },
     /// Usable (feature "takeover"): a command of the person holding the run started.
     #[serde(rename = "hand.command", rename_all = "camelCase")]

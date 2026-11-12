@@ -315,6 +315,47 @@ export function addUsableFixtures({ ok, bad, T0, ID, base, topic }: UsableCtx) {
     leaseMs: 600000,
     github: { source: "app", memberId: ID.owner },
   }, "github.committer is required");
+
+  // GitHub by computer (design-github-identity 3.2, 3.3, 3.6)
+  const aiCommitter = { name: "dev", email: `ai-${ID.bot}@users.noreply.invalid` };
+  ok("machine/down-run.assign-github-asked-by.json", "MachineDownFrame", {
+    t: "run.assign",
+    runId,
+    botMemberId: ID.bot,
+    groupId: ID.general,
+    topicId: ID.topic,
+    runtime: "claude",
+    prompt: "Topic: 修好登录\n\n实习生: @dev 改一下 README",
+    envAllowlist: [],
+    leaseMs: 600000,
+    github: { source: "machine", memberId: ID.alice, author: aiCommitter, committer: aiCommitter, askedBy: "实习生" },
+  }, "the computer's own sign-in; author and committer are the AI member; askedBy goes into the PR body");
+  ok("machine/run-event-github-missing-reason.json", "RunEvent", { type: "github", state: "missing", reason: "signed_out" }, "the host's gh is not signed in");
+  ok("machine/up-heartbeat-github.json", "MachineUpFrame", {
+    t: "heartbeat",
+    at: T0,
+    health: { diskFreeBytes: 1, diskTotalBytes: 2, load1: 0.5, load5: 0.25, load15: 0.125, cpuCount: 8, activeRuns: 0 },
+    runs: [],
+    metrics: { at: T0 - 100, runs: [], github: { state: "signed_in", login: "example-bot" } },
+  }, "feature github-host: the host's own GitHub sign-in");
+  ok("entities/machine-github.json", "Machine", {
+    ...machineBase,
+    github: { state: "signed_out" },
+  }, "the computer's GitHub sign-in, to admins and the computer's owner");
+  bad("entities/machine-github-no-state.json", "Machine", { ...machineBase, github: { login: "example-bot" } }, "github.state is required");
+  ok("http/machine-monitor-github.json", "MachineMonitor", {
+    machine: { id: machineId, name: "linux-host", connected: true, lastHeartbeatAt: T0 },
+    series: { range: "15m", from: T0 - 900_000, stepMs: 30_000, cpuPct: [], memPct: [], diskPct: [], netRxBps: [], netTxBps: [] },
+    capacity: { slots: 4, running: 0, canTake: 4 },
+    queue: { count: 0 },
+    today: { finished: 0, succeeded: 0, failed: 0, finishedYesterday: 0, tokens: 0 },
+    clis: [],
+    runs: [],
+    members: [],
+    github: { state: "no_gh" },
+    runsIn: "vm",
+  }, "usable: the computer's GitHub sign-in and where its runs execute");
+  ok("http/github-status-response-off.json", "GithubStatusResponse", { available: false, unavailableReason: "off", waits: [] }, "switched off: GitHub is the computer's own sign-in");
   ok("machine/down-run.pause-takeover.json", "MachineDownFrame", { t: "run.pause", runId, by: ID.owner, hold: "takeover" });
   ok("machine/down-run.command.json", "MachineDownFrame", { t: "run.command", runId, commandId: "c1", command: "git status", by: ID.owner });
   ok("machine/down-run.command.cancel.json", "MachineDownFrame", { t: "run.command.cancel", runId, commandId: "c1" });

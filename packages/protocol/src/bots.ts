@@ -2,7 +2,7 @@
 // status events in the group log and the run log. See docs/protocol.md, "Bot runs".
 import { z } from "zod";
 import { eventBase, Id, Millis, Name, Seq } from "./common.ts";
-import { AcceptanceItem, CliInfo, Effort, Health, Labels, MAX_ACCEPTANCE_ITEMS, MachineFeature, RunFailure, RunLogEntry, Usage } from "./machine.ts";
+import { AcceptanceItem, CliInfo, Effort, Health, Labels, MAX_ACCEPTANCE_ITEMS, MachineFeature, MachineGithub, RunFailure, RunLogEntry, Usage } from "./machine.ts";
 import { RunPlan } from "./plan.ts";
 import { Artifact, ArtifactVersion } from "./files.ts";
 import { GroupDecision, RecordedDecision } from "./card2.ts";
@@ -414,6 +414,8 @@ export const Machine = z.object({
   ownerId: Id.optional(),
   /** Usable: the AI members whose work for the owner runs here. Sent to the owner only. */
   personalBots: z.array(PersonalBot).max(MAX_PERSONAL_BOTS).optional(),
+  /** Usable: the computer's own GitHub sign-in (`metrics.github`). Admins and the computer's owner only. */
+  github: MachineGithub.optional(),
 });
 export type Machine = z.infer<typeof Machine>;
 

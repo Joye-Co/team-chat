@@ -2673,40 +2673,47 @@ Rules:
 
 ## GitHub sign-in
 
-Module: `github.ts` / `github.rs`. Each person connects their own GitHub once; runs done for them
-push as them (machine side: machine-protocol.md, "GitHub (feature `github`)").
+Module: `github.ts` / `github.rs`. **Switched off** (usable, design-github-identity): the product
+no longer stores anyone's GitHub sign-in. Git and `gh` in a run use the GitHub sign-in of the
+computer the run is on: on a personal computer its owner's, on a team computer a machine account an
+administrator signed in to once on the host. Commits name the AI member; the pull request body
+names who asked (`RunGithub.askedBy`, machine-protocol.md, "GitHub (feature `github`)").
 
-```ts
-GithubAccount = { login, name?, status: "ok" | "invalid", connectedAt }   // open status: unknown reads as invalid
-GithubWait = { runId, groupId, topicId, botId, reason: "not_connected" | "invalid" }
-GithubStatusResponse = { available: boolean, unavailableReason?: "no_client_id" | "no_secret_key",
-                         account?: GithubAccount, waits: GithubWait[] /* <= 100 */ }
-GithubDeviceResponse = { deviceId, userCode, verificationUri, interval /* s */, expiresAt }
-GithubPollResponse = { state: "pending" | "slow_down" | "done" | "expired" | "denied" | "taken", account? }
-TransientEvent += { type: "github.status", account?: GithubAccount }      // no account = disconnected
-```
+The routes stay, so older clients keep working, and answer:
 
 | Method and path | Who | Response |
 | --- | --- | --- |
-| `GET /v1/me/github` | person | `GithubStatusResponse`: my connection and the runs that wait for it |
-| `POST /v1/me/github/device` | person | `GithubDeviceResponse`: a GitHub device code sign-in (15 minutes) |
-| `POST /v1/me/github/device/:id/poll` | the person who started it | `GithubPollResponse`; `taken` = that GitHub account is connected to another member |
+| `GET /v1/me/github` | person | `{ available: false, unavailableReason: "off", waits: [] }` |
+| `POST /v1/me/github/device` | person | `conflict` with reason `github.off` |
+| `POST /v1/me/github/device/:id/poll` | person | `conflict` with reason `github.off` |
 | `DELETE /v1/me/github` | person | `{ ok: true }` |
 
-Rules:
+```ts
+GithubStatusResponse = { available: boolean, unavailableReason?: "no_client_id" | "no_secret_key" | "off",  // open
+                         account?: GithubAccount, waits: GithubWait[] /* <= 100 */ }
+// No longer sent, kept with their meaning for older readers:
+GithubAccount = { login, name?, status: "ok" | "invalid", connectedAt }   // open status: unknown reads as invalid
+GithubWait = { runId, groupId, topicId, botId, reason: "not_connected" | "invalid" }
+GithubDeviceResponse = { deviceId, userCode, verificationUri, interval /* s */, expiresAt }
+GithubPollResponse = { state: "pending" | "slow_down" | "done" | "expired" | "denied" | "taken", account? }
+TransientEvent += { type: "github.status", account?: GithubAccount }      // no account = disconnected; never pushed now
 
-- The server keeps the token, encrypted; clients never get it. `done` resumes every run that
-  waited for this person (one follow-up run each). Connecting and disconnecting push
-  `github.status` to the person's own connections whose `hello.features` has `github/1`; other
-  connections read `GET /v1/me/github` (on open, on focus, in settings). An older client never
-  gets the transient: a Rust reader fails on an unknown transient type.
-- `available` is false when the server lacks the OAuth client id (`no_client_id`) or the key it
-  encrypts tokens with (`no_secret_key`); then nobody can connect and machines run as before.
-- A run that needs the GitHub of a person who has not connected, or whose token GitHub refused,
-  ends waiting for them: the AI member @-mentions them once in the topic, and `waits` lists it.
-- Whose GitHub a run uses: its `requestedFor`; for a hook's run, the person who made the hook;
-  with neither, the person who added the AI member. A person who left the team is replaced by the
-  earliest active human admin.
+MachineGithub = { state: "signed_in" | "signed_out" | "no_gh" | "unknown" /* open, 1..32 */, login?: string /* 1..100 */ }
+Machine += { github?: MachineGithub }            // the computer's own GitHub sign-in; to admins and the computer's owner only
+MachineMonitor += { github?: MachineGithub,      // from the latest heartbeat
+                    runsIn?: "host" | "vm" }     // hello.machine.runsIn; open, 1..16
+```
+
+- `MachineGithub` comes from the daemon's `metrics.github` (feature `github-host`): what `gh` on
+  the host says about the account the daemon runs as. Readers show an unknown `state` as
+  `unknown`. Absent = the daemon does not report it.
+- `Machine.github` goes to administrators and the computer's owner only. A computer whose runs
+  execute in VMs (`runsIn: "vm"`) sends it in every state; one that runs on the host sends it only
+  when `signed_in` (on the host git may push with an SSH key or a keychain, so a signed-out `gh`
+  does not mean it cannot push).
+- `MachineMonitor.github` and `runsIn` are forwarded as the daemon reported them.
+- An older client shows a person-level GitHub row as unavailable and nothing else; `available`
+  false never blocks a run.
 
 ## Run phase and take-over
 
