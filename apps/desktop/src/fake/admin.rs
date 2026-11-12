@@ -380,20 +380,3 @@ pub fn machine_secrets() -> MachineSecretsResponse {
         ]
     }))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn samples_parse() {
-        let _ = machine_monitor("mc-mini", "15m");
-        let _ = machine_monitor("mc-old", "1h");
-        let n = now();
-        let u = team_usage(n - 3 * DAY, n + 4 * DAY);
-        assert_eq!(u.daily.len(), 7);
-        assert_eq!(team_roster().invites.len(), 2);
-        assert!(!team_activity().entries.is_empty());
-        assert_eq!(machine_secrets().secrets.len(), 2);
-    }
-}

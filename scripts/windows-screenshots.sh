@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Runs the screenshot self-test of the built Windows client and writes the PNGs
-# and screenshots.json to <dir>. CI's desktop-windows job calls it after
-# `cargo build -p desktop` (docs/plans/windows.zh.md, 「怎么看 Windows 界面」).
+# and screenshots.json to <dir>. A local tool for a Windows machine (Git Bash), run
+# after `cargo build -p desktop`; CI no longer runs it (docs/plans/windows.zh.md,
+# 「怎么看 Windows 界面」).
 #
 #   scripts/windows-screenshots.sh <dir>
 #

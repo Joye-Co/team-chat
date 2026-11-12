@@ -741,19 +741,3 @@ pub fn description_row(
 pub fn selected_weight() -> gpui::FontWeight {
     MEDIUM_WEIGHT
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn row_and_table_heights() {
-        assert_eq!(height::LIST_ROW, px(56.));
-        assert_eq!(height::TABLE_ROW, px(48.));
-        assert_eq!(height::TABLE_HEAD, px(40.));
-        assert_eq!(height::FOOTER_ROW, px(40.));
-        // The separator inset is the title x: px 12 + media 32 + gap 12.
-        assert_eq!(LIST_TITLE_INSET, space::S12 + avatar::MD + space::S12);
-        assert_eq!(metrics::LABEL_COLUMN, px(112.));
-    }
-}

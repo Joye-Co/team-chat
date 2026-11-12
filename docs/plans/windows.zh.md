@@ -83,35 +83,14 @@ Git for Windows），订阅登录在 Windows 上放在哪，Codex 在 Windows �
 
 ## 怎么看 Windows 界面
 
-没人有 Windows 电脑，界面靠 CI 截图看。`desktop-windows` 任务（`windows-2025`）编译完客户端后跑截图自测
-（`desktop.exe --screenshot`，数据来自进程内的 fake，不连服务器），浅色深色各截一遍，把 PNG、
-`screenshots.json` 和 `selftest.log` 传成名为 `windows-screenshots` 的产物，保留 14 天。
-
-1. 推分支并开 PR（改到 `apps/desktop/**` 就会跑），或者手动跑并指定场景：
-
-   ```bash
-   gh workflow run ci.yml --ref <分支> -f desktop=false -f windows_scenes=main,settings-about
-   ```
-
-   `windows_scenes` 留空是默认的主要页面（列表在 `scripts/windows-screenshots.sh`），`all` 是全部场景；
-   场景名用 `desktop --list-scenes` 看，新场景加在 `apps/desktop/src/selftest/scenes.rs`。
-2. 等 `Upload the screenshots` 这一步跑完（不用等整个任务），下载：
-
-   ```bash
-   gh run download <run id> -n windows-screenshots -D .tmp/win-shots
-   ```
-
-3. 读 PNG（`<场景>-<light|dark>.png`）。一张都没有时看 `selftest.log`：应用没启动起来或某个场景失败，
-   原因在里面。
-
-要知道的几点：
+Windows 移植期间界面靠 CI 截图看；移植做完后，CI 不再截图（只编译和跑单测）。要看 Windows 界面，在一台
+Windows 电脑上编译客户端后跑 `scripts/windows-screenshots.sh <输出目录>`：它跑截图自测
+（`desktop.exe --screenshot`，数据来自进程内的 fake，不连服务器），浅色深色各截一遍，写出 PNG、
+`screenshots.json` 和 `selftest.log`。场景名用 `desktop --list-scenes` 看，新场景加在
+`apps/desktop/src/selftest/scenes.rs`。
 
 - 截图用 `PrintWindow` 加 `PW_RENDERFULLCONTENT`（`apps/desktop/src/selftest/capture.rs`），只截应用自己
   窗口的客户区，被别的窗口挡住或者比屏幕大也能截。
-- runner 没有显卡，GPUI 走 WARP（软件 Direct3D），缩放是 100%，所以 1440×900 的窗口截出来就是
-  1440×900 像素（Mac 上是 2 倍）。别的缩放比例 CI 上测不了。
-- runner 的屏幕默认 1024×768，任务先改成 1920×1080，否则窗口会被系统限制在屏幕以内。
-- 截图步骤失败会让任务变红，产物照样上传。
 - 颜色没有经过显示器色彩配置转换，PNG 里的像素值就是主题 token 的值。
 
 ## 阶段

@@ -1,7 +1,8 @@
 //! Protocol fixtures, config, launchd and systemd services, run folders and cleanup.
 //!
-//! The launchd and systemd cases are Unix only (Windows has `tests/service_task.rs` for its
-//! scheduled task); the rest runs on every system.
+//! The launchd and systemd cases are Unix only (the Windows scheduled task is tested for real
+//! by the release workflow's install and update test, `scripts/test-windows-update.sh`); the
+//! rest runs on every system.
 
 use daemon::config::Config;
 use daemon::proto::{Down, RepoSpec, Up};
@@ -158,19 +159,6 @@ fn launchd_plist_install_and_uninstall() {
     assert!(text.contains("<key>KeepAlive</key>"));
     assert!(text.contains("<key>PATH</key>"));
     check_plist(&text, &std::fs::canonicalize(&cfg).unwrap());
-    // macOS also checks it with its own plist parser.
-    if cfg!(target_os = "macos") {
-        let lint = Command::new("plutil")
-            .arg("-lint")
-            .arg(&file)
-            .output()
-            .unwrap();
-        assert!(
-            lint.status.success(),
-            "{}",
-            String::from_utf8_lossy(&lint.stdout)
-        );
-    }
     daemon::service::uninstall(&agents, false).unwrap();
     assert!(!file.exists());
 }

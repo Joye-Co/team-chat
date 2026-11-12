@@ -635,13 +635,17 @@ pub async fn supervise(ctx: RunCtx) {
             };
             // Gated actions: only runtimes that can stop a command get them (the server sends
             // them only for CLIs that report `gates`), never a side chat.
-            let gates = Arc::new(crate::gates::Gates::new(
+            let mut gates = crate::gates::Gates::new(
                 assign
                     .gates
                     .as_deref()
                     .filter(|_| !aside && crate::gates::enforced_by(&rt.kind))
                     .unwrap_or_default(),
-            ));
+            );
+            if let Some(ms) = cfg.test_clocks.and_then(|c| c.hooks_start_ms) {
+                gates = gates.with_hooks_start(Duration::from_millis(ms));
+            }
+            let gates = Arc::new(gates);
             outputs.set_gates(gates.clone());
             // Shims first on PATH for the programs the kinds are about: commands inside scripts
             // and spellings the patterns miss stop too (crate::shim). In a VM they are on the
@@ -973,7 +977,10 @@ async fn run_runtime(
     let (rt_tx, rt_rx) = mpsc::unbounded_channel::<Control>();
     let fut = rt.start(spec, emit_tx, rt_rx);
     tokio::pin!(fut);
-    let stall = Duration::from_secs(cfg.stall_minutes.max(1) * 60);
+    let stall = match cfg.test_clocks.and_then(|c| c.stall_ms) {
+        Some(ms) => Duration::from_millis(ms),
+        None => Duration::from_secs(cfg.stall_minutes.max(1) * 60),
+    };
     // Tool calls without a result: the CLI waits for a step it started (a build, a test run),
     // so its silence is not a stall until much later.
     let mut open_tools: std::collections::HashSet<String> = Default::default();
@@ -983,8 +990,11 @@ async fn run_runtime(
     let mut deadline = assign
         .max_duration_ms
         .map(|ms| tokio::time::Instant::now() + Duration::from_millis(ms));
-    const TICK: Duration = Duration::from_secs(15);
-    let mut tick = tokio::time::interval(TICK);
+    let tick_every = cfg
+        .test_clocks
+        .and_then(|c| c.tick_ms)
+        .map_or(Duration::from_secs(15), Duration::from_millis);
+    let mut tick = tokio::time::interval(tick_every);
     let mut ticked = Instant::now();
     let mut tools_before: Option<std::collections::HashMap<i32, u64>> = None;
     let mut paused: Option<Paused> = None;
@@ -1205,7 +1215,7 @@ async fn run_runtime(
                 // of the run's time limit.
                 let now = Instant::now();
                 let step = now.duration_since(ticked);
-                let asleep = crate::sys::slept(step, TICK);
+                let asleep = crate::sys::slept(step, tick_every, cfg.sleep_late());
                 if let Some(asleep) = asleep {
                     (last, deadline) = after_sleep(last, deadline, asleep, now, paused.is_some());
                 }

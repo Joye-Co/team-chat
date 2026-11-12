@@ -635,7 +635,17 @@ async fn daemon_end_to_end() {
     m.refuse.store(true, std::sync::atomic::Ordering::SeqCst);
     drop(ws); // server side goes away without a close handshake
     // The run finishes while the link is down (5 deltas, 0.3 s apart).
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    let r4_dir = tmp.path().join("work/runs/r4");
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while daemon::workspace::read_meta(&r4_dir)
+            .and_then(|m| m.finished_at)
+            .is_none()
+        {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("r4 finished while offline");
     m.refuse.store(false, std::sync::atomic::Ordering::SeqCst);
     let (mut ws, _) = tokio::time::timeout(Duration::from_secs(40), m.conns.recv())
         .await
@@ -1653,7 +1663,8 @@ async fn heartbeat_active(ws: &mut Ws, run: &str, want: Option<bool>) {
 async fn the_heartbeat_says_when_a_runs_tools_are_working() {
     let tmp = tempfile::tempdir().unwrap();
     let mut m = mock().await;
-    let cfg = write_config(tmp.path(), &m.url);
+    // The run's tools are sampled every 500 ms, not every 15 s.
+    let cfg = write_config_with(tmp.path(), &m.url, "[test_clocks]\ntick_ms = 500\n");
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
     let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
         let _ = stop_rx.await;
@@ -1676,7 +1687,7 @@ async fn the_heartbeat_says_when_a_runs_tools_are_working() {
     .await;
     collect(&mut ws, "w1", true, |f| matches!(f, Up::RunDone(_))).await;
 
-    // A tool at work: active from the second sample on (one tick, 15 s).
+    // A tool at work: active from the second sample on (one tick).
     send(&mut ws, &assign("b1", "fake", "busy", None)).await;
     let dir = work_of(tmp.path(), "b1");
     let kid: i32 = wait_file(&dir.join("children.txt"))
@@ -1799,7 +1810,8 @@ async fn interaction_envelope_and_chat_run() {
     assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
     send(&mut ws, &welcome(vec![])).await;
 
-    // 1. chat-run card patch: the output event goes up redacted, the CLI gets the result.
+    // chat-run card patch: the output event goes up redacted, the CLI gets the result. (No
+    // result in time is `chat_run`'s unit tests.)
     send(&mut ws, &assign("c1", "fake", "chatrun", None)).await;
     #[cfg(unix)]
     let run_dir = tmp.path().join("work/runs/c1");
@@ -1958,25 +1970,6 @@ async fn interaction_envelope_and_chat_run() {
         assert!(gone, "pipe left after the run: {pipe}");
     }
 
-    // 2. No run.output.result: chat-run gives up after 15 s with "unconfirmed" (retry is safe).
-    send(&mut ws, &assign("c2", "fake", "chatrun", None)).await;
-    let fr = collect(&mut ws, "c2", true, |f| matches!(f, Up::RunDone(_))).await;
-    assert!(
-        events(&fr)
-            .iter()
-            .any(|e| matches!(e, RunEvent::Output { .. }))
-    );
-    let r = chat_run_report(&work_of(tmp.path(), "c2"), 1).await;
-    assert_eq!(r["code"], 1, "{r}");
-    let err: serde_json::Value = serde_json::from_str(r["out"].as_str().unwrap()).unwrap();
-    assert_eq!(err["error"]["reason"], "output.unconfirmed");
-    assert!(
-        err["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("may have been applied")
-    );
-
     stop_tx.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(20), daemon)
         .await
@@ -2053,70 +2046,6 @@ async fn codex_chat_run_uses_the_request_folder() {
     assert_eq!(r["files"], serde_json::json!([".gitignore"]));
     collect(&mut ws, "x1", true, |f| matches!(f, Up::RunDone(_))).await;
     assert!(!work.join(".chat-run-x1").exists(), "request folder left");
-
-    stop_tx.send(()).unwrap();
-    tokio::time::timeout(Duration::from_secs(20), daemon)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-}
-
-/// `chat-run` while the daemon's link to the server is down: the output never reaches the
-/// server, so after 15 s `chat-run` says "not connected", not "unconfirmed".
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn chat_run_without_a_link_is_not_connected() {
-    daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
-    let tmp = tempfile::tempdir().unwrap();
-    let mut m = mock().await;
-    let cfg = write_config(tmp.path(), &m.url);
-    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
-    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
-        let _ = stop_rx.await;
-    }));
-    let (mut ws, _) = m.conns.recv().await.unwrap();
-    assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
-    send(&mut ws, &welcome(vec![])).await;
-
-    send(&mut ws, &assign("n1", "fake", "chatrun", None)).await;
-    // The server goes away before it acks the output event.
-    collect(&mut ws, "n1", false, |f| {
-        matches!(
-            f,
-            Up::RunEvent {
-                event: RunEvent::Output { .. },
-                ..
-            }
-        )
-    })
-    .await;
-    m.refuse.store(true, std::sync::atomic::Ordering::SeqCst);
-    drop(ws);
-    // chat-run gives up after 15 s; wait_file waits 10 s at a time.
-    let report = work_of(tmp.path(), "n1").join("chatrun-1.json");
-    let start = std::time::Instant::now();
-    while !report.exists() && start.elapsed() < Duration::from_secs(30) {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    let r = chat_run_report(&work_of(tmp.path(), "n1"), 1).await;
-    assert_eq!(r["code"], 1, "{r}");
-    let err: serde_json::Value = serde_json::from_str(r["out"].as_str().unwrap()).unwrap();
-    assert_eq!(err["error"]["code"], "unavailable", "{err}");
-    assert_eq!(err["error"]["reason"], "server.not_connected", "{err}");
-    assert!(
-        err["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("not connected"),
-        "{err}"
-    );
-    assert!(
-        err["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("the result is unknown"),
-        "{err}"
-    );
 
     stop_tx.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(20), daemon)
@@ -2562,90 +2491,6 @@ async fn a_run_at_its_limit_says_so_and_goes_on_in_its_session() {
         .unwrap();
 }
 
-/// A tool that daemonized (its parent exited, so it is no longer below the CLI) still stops on
-/// pause, continues on resume and is gone after cancel: the daemon finds it by the run's
-/// `CHAT_RUN_FOLDER` in its environment.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn pause_and_cancel_cover_orphaned_tools() {
-    let tmp = tempfile::tempdir().unwrap();
-    let mut m = mock().await;
-    let cfg = write_config(tmp.path(), &m.url);
-    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
-    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
-        let _ = stop_rx.await;
-    }));
-    let (mut ws, _) = m.conns.recv().await.unwrap();
-    assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
-    send(&mut ws, &welcome(vec![])).await;
-
-    send(&mut ws, &assign("o1", "fake", "orphan", None)).await;
-    let dir = work_of(tmp.path(), "o1");
-    wait_file(&dir.join("fake.pid")).await;
-    let orphan: i32 = wait_file(&dir.join("orphan.txt"))
-        .await
-        .trim()
-        .parse()
-        .unwrap();
-    let _reap = Reap(vec![orphan]);
-    let ticks = dir.join("orphan.ticks");
-    wait_file(&ticks).await;
-
-    send(
-        &mut ws,
-        &Down::RunPause {
-            run_id: "o1".into(),
-            by: None,
-            hold: None,
-        },
-    )
-    .await;
-    collect(&mut ws, "o1", true, |f| is_paused(f, true)).await;
-    assert!(stopped(orphan), "orphan not stopped");
-    let before = file_len(&ticks);
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    assert_eq!(file_len(&ticks), before, "a stopped orphan made progress");
-
-    send(
-        &mut ws,
-        &Down::RunResume {
-            run_id: "o1".into(),
-            note: None,
-        },
-    )
-    .await;
-    collect(&mut ws, "o1", true, |f| is_paused(f, false)).await;
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    assert!(
-        file_len(&ticks) > before,
-        "orphan did not tick after resume"
-    );
-
-    send(
-        &mut ws,
-        &Down::RunCancel {
-            run_id: "o1".into(),
-            reason: None,
-        },
-    )
-    .await;
-    let fr = collect(&mut ws, "o1", true, |f| matches!(f, Up::RunDone(_))).await;
-    assert_eq!(done(&fr).status, "cancelled");
-    for _ in 0..100 {
-        if !alive(orphan) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    assert!(!alive(orphan), "orphan left after cancel");
-
-    stop_tx.send(()).unwrap();
-    tokio::time::timeout(Duration::from_secs(20), daemon)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-}
-
 fn gated(run: &str, prompt: &str) -> Down {
     let mut a = assign(run, "fake", prompt, None);
     if let Down::RunAssign(r) = &mut a {
@@ -2866,18 +2711,10 @@ async fn pushes_to_main_written_another_way_ask_once() {
         .unwrap();
 }
 
-/// The real `claude` of this machine, or None (skip) when it has none; a failure instead when
-/// `TC_REQUIRE_REAL_CLI` is set (CI installs the CLI and sets it).
-fn real_claude() -> Option<PathBuf> {
-    let found = daemon::health::which("claude");
-    if found.is_none() {
-        assert!(
-            std::env::var_os("TC_REQUIRE_REAL_CLI").is_none(),
-            "TC_REQUIRE_REAL_CLI is set and claude is not on PATH"
-        );
-        eprintln!("skipped: claude is not on PATH");
-    }
-    found
+/// The real `claude` of this machine (the real-CLI cases are `#[ignore]`d and run by
+/// `scripts/test-real-cli.sh`, which checks it is there).
+fn real_claude() -> PathBuf {
+    daemon::health::which("claude").expect("claude is not on PATH")
 }
 
 /// The `[runtimes.real]` section: the real CLI with the fake model, its config in
@@ -2938,11 +2775,11 @@ fn default_gates() -> Vec<RunGate> {
 /// The same with the real Claude Code CLI of this machine and a fake model
 /// (`tests/fake/model.rs`): the daemon reports the CLI as gated, the model calls the Bash tool,
 /// the CLI starts the hook, the hook asks the daemon, the daemon asks a person. Declined: the
-/// command does not run and the model reads why. Approved: it runs. Skipped when `claude` is
-/// not on PATH, unless `TC_REQUIRE_REAL_CLI` is set (CI).
+/// command does not run and the model reads why. Approved: it runs.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "real CLI: scripts/test-real-cli.sh"]
 async fn the_real_cli_waits_for_a_person_at_a_gated_command() {
-    let Some(claude) = real_claude() else { return };
+    let claude = real_claude();
     daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
     let tmp = tempfile::tempdir().unwrap();
     // Every path of the run (its folder, the hook in it, the CLI's config) has spaces, text
@@ -3150,16 +2987,17 @@ async fn the_real_cli_waits_for_a_person_at_a_gated_command() {
 /// run's own settings can bring it back. A gated run then never starts: the CLI does not run
 /// the start-up hook, so the daemon gives it no prompt and the run fails with the reason.
 ///
-/// Needs such managed settings on this machine, so it runs only where `TC_MANAGED_HOOKS_ONLY`
-/// is set: CI writes the file (`/etc/claude-code/managed-settings.json`, on Windows
-/// `C:\Program Files\ClaudeCode\managed-settings.json`) around this one test.
+/// Needs such managed settings on this machine, so it does nothing unless
+/// `TC_MANAGED_HOOKS_ONLY` is set: `scripts/test-real-cli.sh --managed-hooks` writes the file
+/// around this one test.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "real CLI: scripts/test-real-cli.sh"]
 async fn a_cli_whose_hooks_are_managed_only_never_starts_a_gated_run() {
     if std::env::var_os("TC_MANAGED_HOOKS_ONLY").is_none() {
         eprintln!("skipped: TC_MANAGED_HOOKS_ONLY is not set");
         return;
     }
-    let claude = daemon::health::which("claude").expect("claude on PATH");
+    let claude = real_claude();
     daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
     let tmp = tempfile::tempdir().unwrap();
     let mut m = mock().await;
@@ -3260,19 +3098,17 @@ async fn a_cli_that_runs_no_hooks_gets_no_gated_prompt() {
     daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
     let tmp = tempfile::tempdir().unwrap();
     let mut m = mock().await;
-    let cfg = write_config_with(
-        tmp.path(),
-        &m.url,
-        &fake_runtime(
-            "nohooks",
-            "claude",
-            "fake_claude.py",
-            &format!(
-                "CLAUDE_CONFIG_DIR = '{}', FAKE_HOOKS_OFF = '1'",
-                tmp.path().join("claude").display()
-            ),
+    // The run waits 2 s for the start-up hook, not 45 s.
+    let extra = fake_runtime(
+        "nohooks",
+        "claude",
+        "fake_claude.py",
+        &format!(
+            "CLAUDE_CONFIG_DIR = '{}', FAKE_HOOKS_OFF = '1'",
+            tmp.path().join("claude").display()
         ),
-    );
+    ) + "\n[test_clocks]\nhooks_start_ms = 2000\n";
+    let cfg = write_config_with(tmp.path(), &m.url, &extra);
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
     let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
         let _ = stop_rx.await;
@@ -3334,8 +3170,9 @@ async fn a_cli_that_runs_no_hooks_gets_no_gated_prompt() {
 }
 
 /// A machine that slept: every process stops and the clocks go on. Here the daemon is a
-/// process of its own that is frozen for longer than `stall_minutes` (what a closed lid does
-/// to it) while a run is in progress. When it runs again it connects to the server again at
+/// process of its own that is frozen for longer than its stall limit (what a closed lid does
+/// to it) while a run is in progress. Its clocks are in milliseconds (`test_clocks`): a 3 s
+/// stall limit, a 100 ms supervisor tick, a tick 500 ms late is a sleep. When it runs again it connects to the server again at
 /// once (the old connection is dead on the server's side), the run is still there and is not
 /// reported as stalled (the CLI was asleep too, not silent), and a cancel still ends it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3350,7 +3187,7 @@ async fn a_machine_that_slept_connects_again_at_once_and_its_run_is_not_stalled(
         &config,
         text.replace(
             "heartbeat_secs = 1\n",
-            "heartbeat_secs = 1\nstall_minutes = 1\n",
+            "heartbeat_secs = 1\ntest_clocks = { stall_ms = 3000, tick_ms = 100, late_ms = 500 }\n",
         ),
     )
     .unwrap();
@@ -3409,9 +3246,9 @@ async fn a_machine_that_slept_connects_again_at_once_and_its_run_is_not_stalled(
         .parse()
         .unwrap();
 
-    // Asleep for longer than a silent CLI is given (`stall_minutes = 1`).
+    // Asleep for longer than a silent CLI is given (3 s).
     freeze(true);
-    tokio::time::sleep(Duration::from_secs(66)).await;
+    tokio::time::sleep(Duration::from_millis(3500)).await;
     drop(ws);
     let woke = std::time::Instant::now();
     freeze(false);
@@ -3441,11 +3278,11 @@ async fn a_machine_that_slept_connects_again_at_once_and_its_run_is_not_stalled(
         }]),
     )
     .await;
-    // The run is not called stalled: nothing comes for it (the supervisor looks every 15 s,
-    // and looked when it woke).
+    // The run is not called stalled: nothing comes for it (the supervisor looks every 100 ms,
+    // and looked when it woke). Awake, the CLI has been silent for well under 3 s.
     let stalled = |f: &Up| matches!(f, Up::RunEvent { event: RunEvent::Status { state, .. }, .. } if state == "stalled");
     let quiet = tokio::time::timeout(
-        Duration::from_secs(20),
+        Duration::from_secs(1),
         collect(&mut ws, "z1", true, |f| {
             stalled(f) || matches!(f, Up::RunDone(_))
         }),

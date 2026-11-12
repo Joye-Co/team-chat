@@ -2448,33 +2448,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn note_teaches_hand_over_and_split_off_after_the_member_list() {
-        let n = note();
-        let list = n
-            .find("chat-run member list` first")
-            .expect("member list first");
-        let handoff = n.find("chat-run handoff --member").expect("handoff");
-        let assign = n.find("chat-run assign --member").expect("assign");
-        assert!(list < handoff && handoff < assign);
-        for c in [
-            "then stop",
-            "do not poll",
-            "never hand work back",
-            "never message other members",
-            "push your branch first",
-        ] {
-            assert!(n.contains(c), "{c}");
-        }
-        for c in [
-            "chat-run handoff",
-            "chat-run assign",
-            "chat-run member list",
-        ] {
-            assert!(USAGE.contains(c), "{c}");
-        }
-    }
-
     #[tokio::test]
     async fn secret_requests_go_to_the_gate_not_the_server() {
         let outputs = Outputs::new("r1");

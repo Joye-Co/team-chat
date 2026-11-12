@@ -1,23 +1,32 @@
 name: CI
 
+# What a pull request must pass, and nothing more. A check belongs here only when it tests our
+# own code (not a third-party CLI, the operating system or the environment), cannot be covered by
+# running the tests on a Mac, and fails with a clear verdict. The Windows installer and update
+# are tested by the Release workflow, on the real build it ships. Real coding CLIs are tested
+# locally with scripts/test-real-cli.sh.
+#
+# Each job runs only for the code it tests:
+#   server/**                      -> Server
+#   packages/**, protocol/**       -> Packages (protocol also every Rust job)
+#   apps/daemon/**, update-helper  -> Rust tests (Linux), daemon on Windows, lint
+#   apps/desktop/**, artifact-view -> Desktop on macOS, desktop on Windows, lint
+#   crates/chat-protocol|core      -> all of the Rust jobs (everything builds on them)
+#   ops/**, release scripts        -> Ops
+#   .github/workflows/**           -> actionlint only
+#   docs/**                        -> nothing
+
 on:
   pull_request:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      desktop:
-        description: Also build the macOS desktop DMG (macOS minutes cost 10x)
-        type: boolean
-        default: true
-      windows_scenes:
-        description: Scenes of the Windows screenshot self-test, comma separated (empty = the main screens, all = every scene)
-        type: string
-        default: ""
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer push replaces an older run of the same pull request; every run on main finishes,
+  # so main's caches stay fresh.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
@@ -25,6 +34,9 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
+  # No debug info: smaller objects, faster links, smaller caches.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
 
 jobs:
   changes:
@@ -34,13 +46,17 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      packages: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.packages == 'true' }}
-      server: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.server == 'true' }}
-      rust: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.rust == 'true' }}
-      ops: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.ops == 'true' }}
-      desktop: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.desktop == 'true' }}
-      ios: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.ios == 'true' }}
-      installer: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.installer == 'true' }}
+      # A manual run runs everything.
+      all: ${{ github.event_name == 'workflow_dispatch' }}
+      packages: ${{ steps.filter.outputs.packages == 'true' }}
+      server: ${{ steps.filter.outputs.server == 'true' }}
+      ops: ${{ steps.filter.outputs.ops == 'true' }}
+      workflows: ${{ steps.filter.outputs.workflows == 'true' }}
+      # Everything Rust builds on these.
+      core: ${{ steps.filter.outputs.core == 'true' }}
+      daemon: ${{ steps.filter.outputs.daemon == 'true' }}
+      desktop: ${{ steps.filter.outputs.desktop == 'true' }}
+      artifact_view: ${{ steps.filter.outputs.artifact_view == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
@@ -48,123 +64,80 @@ jobs:
         if: github.event_name != 'workflow_dispatch'
         with:
           filters: |
-            common: &common
-              - .github/workflows/ci.yml
-              - scripts/ci-run.sh
-              - scripts/lib.sh
-              - scripts/servers.ts
             js: &js
-              - *common
               - package.json
               - bun.lock
               - product.json
+              - scripts/ci-run.sh
+              - scripts/lib.sh
             packages:
               - *js
               - packages/**
               - protocol/**
               # gen-fixtures.ts copies the daemon's golden machine frames into protocol/fixtures.
               - apps/daemon/tests/fixtures/machine/**
-              - scripts/sandbox/**
             server:
               - *js
               - server/**
               - packages/**
               - scripts/sandbox/**
-            rust: &rust
-              - *common
-              - Cargo.toml
-              - Cargo.lock
-              - rust-toolchain.toml
-              - product.json
-              - crates/**
-              - apps/daemon/**
-              - scripts/install-daemon.ps1
-              - scripts/test-install-daemon.ps1
-              - apps/update-helper/**
-              - protocol/**
-            # ops/restore's config test reads server/wrangler.jsonc and ops/monitor/wrangler.jsonc.
             ops:
               - *js
               - ops/**
               - server/wrangler.jsonc
               - server/src/ops/index.ts
+              - server/scripts/admin.ts
               - scripts/deploy-server.sh
               - scripts/release-check.sh
               - scripts/release.sh
               - scripts/build-daemon.sh
               - scripts/runner/install-daemon.sh
-              - scripts/lib.sh
               - scripts/previous-windows-installer.sh
               - scripts/check-logs-for-servers.sh
               - scripts/test-release-scripts.sh
               - scripts/setup-server.sh
               - scripts/test-setup-server.sh
-              - server/scripts/admin.ts
-              - Cargo.toml
               - CHANGELOG.md
               - docs/releases/**
-            desktop:
-              - *rust
-              - apps/desktop/**
-              - scripts/windows-screenshots.sh
-              - assets/**
-              - third_party/**
-            ios:
-              - *common
+            workflows:
+              - .github/workflows/**
+            core:
               - Cargo.toml
               - Cargo.lock
               - rust-toolchain.toml
-              - product.json
               - crates/chat-protocol/**
               - crates/chat-core/**
-              - crates/chat-ffi/**
               - protocol/**
-              - apps/ios/**
-              - docs/PRODUCT.md
-            # The Windows installer and everything that ends up in it: the app, the update
-            # helper and the machine daemon with the crates they are built from, and the
-            # server's release routes the update test talks to. The job installs the build,
-            # signs in, makes this runner a machine and updates the app with the daemon
-            # running, so a change to the client or the daemon is tried in that chain too.
-            installer:
-              - *common
-              - .github/workflows/release.yml
-              - .github/workflows/release-jobs.yml
-              - .github/workflows/windows-installer.yml
-              - scripts/check-logs-for-servers.sh
-              - Cargo.toml
-              - Cargo.lock
-              - rust-toolchain.toml
-              - product.json
-              - scripts/build-windows-installer.sh
-              - scripts/test-windows-installer.sh
-              - scripts/test-windows-update.sh
-              - scripts/windows/**
-              - apps/update-helper/**
-              - apps/desktop/**
+            daemon:
               - apps/daemon/**
-              - crates/**
+              - apps/update-helper/**
+              - tools/e2e/**
+            desktop:
+              - product.json
+              - apps/desktop/**
+              - crates/artifact-view/**
               - assets/**
               - third_party/**
-              - docs/releases/**
-              - server/src/files/**
-              - server/src/bots/**
-              - server/src/core/**
-              - server/migrations/**
-      # The per-scene table of the Windows parity list is generated from two runs of the
-      # screenshot self-test; it must be what the script writes from them.
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.3.10
-      - name: Windows parity scene table matches its runs
-        run: scripts/check-scene-table.sh
+            artifact_view:
+              - crates/artifact-view/**
+
+  workflows:
+    name: Workflow lint
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true' || needs.changes.outputs.all == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: actionlint
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color -shellcheck= -pyflakes=
 
   packages:
     name: Packages (bun)
     needs: changes
-    if: needs.changes.outputs.packages == 'true'
+    if: needs.changes.outputs.packages == 'true' || needs.changes.outputs.all == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -176,12 +149,18 @@ jobs:
       - name: Test
         run: scripts/ci-run.sh test packages/*
 
+  # The server's vitest files in three shards, side by side; the typecheck and the sandbox seed
+  # (wrangler dev, every migration and the sample team of bun run dev:desktop) in the first.
   server:
-    name: Server (Workers)
+    name: Server (Workers) ${{ matrix.shard }}/3
     needs: changes
-    if: needs.changes.outputs.server == 'true'
+    if: needs.changes.outputs.server == 'true' || needs.changes.outputs.all == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -189,102 +168,139 @@ jobs:
           bun-version: 1.3.10
       - run: bun install --frozen-lockfile
       - name: Typecheck
+        if: matrix.shard == 1
         run: scripts/ci-run.sh typecheck server
       - name: Test
-        run: scripts/ci-run.sh test server
-      # The local sandbox (bun run dev:desktop): wrangler dev, every migration and the sample team
-      # through the public API. A wire change that breaks the samples fails here.
+        working-directory: server
+        run: bun run test --shard=${{ matrix.shard }}/3
       - name: Sandbox seed
+        if: matrix.shard == 1
         run: bun scripts/sandbox/up.ts --reset && bun scripts/sandbox/up.ts --stop
       - name: Sandbox server log
-        if: failure()
+        if: failure() && matrix.shard == 1
         run: tail -n 200 .tmp/sandbox/server.log || true
 
+  rust-lint:
+    name: Rust fmt and clippy
+    needs: changes
+    if: >-
+      needs.changes.outputs.core == 'true' || needs.changes.outputs.daemon == 'true' ||
+      needs.changes.outputs.desktop == 'true' || needs.changes.outputs.all == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: linux
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: cargo fmt
+        run: cargo fmt --all --check
+      - name: cargo clippy
+        if: always()
+        run: cargo clippy --locked -p chat-protocol -p chat-core -p daemon -p update-helper -p e2e --all-targets -- -D warnings
+
   rust:
-    name: Rust (protocol, core, daemon)
+    name: Rust tests (protocol, core, daemon)
     needs: changes
-    if: needs.changes.outputs.rust == 'true'
+    if: >-
+      needs.changes.outputs.core == 'true' || needs.changes.outputs.daemon == 'true' ||
+      needs.changes.outputs.all == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install the toolchain from rust-toolchain.toml
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          shared-key: linux-test
-      # The real Claude Code CLI, without a login: the daemon's tests drive it against a fake
-      # model (the approval hook of a gated run; see the Windows job, which pins the same version).
-      - name: Install the real Claude Code CLI
-        run: npm install -g @anthropic-ai/claude-code@2.1.322
+          shared-key: linux
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: cargo test
-        env:
-          TC_REQUIRE_REAL_CLI: "1"
         run: cargo test --locked -p chat-protocol -p chat-core -p daemon -p update-helper
-      # Managed settings that allow only managed hooks drop the approval hook of a gated run:
-      # the real CLI then never gets the run's prompt (apps/daemon/src/gates.rs).
-      - name: A gated run does not start when only managed hooks are allowed
-        run: |
-          sudo mkdir -p /etc/claude-code
-          echo '{"allowManagedHooksOnly": true}' | sudo tee /etc/claude-code/managed-settings.json >/dev/null
-          trap 'sudo rm -f /etc/claude-code/managed-settings.json' EXIT
-          TC_MANAGED_HOOKS_ONLY=1 cargo test --locked -p daemon --test integration a_cli_whose_hooks_are_managed_only -- --nocapture
 
-  # The daemon's tests on the Mac, where most production daemons run: the same suites as on
-  # Linux (process groups, the Unix socket, launchd's plist, the pty) on the system's own
-  # process and file rules, with the real Claude Code and Codex CLIs (no login) against the
-  # fake model, Codex's Seatbelt sandbox among them.
-  daemon-macos:
-    name: Daemon tests (macOS)
+  desktop-macos:
+    name: Desktop tests (macOS)
     needs: changes
-    if: needs.changes.outputs.rust == 'true'
+    if: >-
+      needs.changes.outputs.core == 'true' || needs.changes.outputs.desktop == 'true' ||
+      needs.changes.outputs.all == 'true'
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install the toolchain from rust-toolchain.toml
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          shared-key: macos-daemon
-      - name: Install the real Claude Code and Codex CLIs
-        run: npm install -g @anthropic-ai/claude-code@2.1.322 @openai/codex@0.167.1
-      - name: cargo test (daemon)
-        env:
-          TC_REQUIRE_REAL_CLI: "1"
-          TC_REQUIRE_REAL_CODEX: "1"
-        run: cargo test --locked -p daemon --no-fail-fast
+          shared-key: macos
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: cargo test
+        run: cargo test --locked -p desktop
+      # The isolation of an 产出 page in a real WKWebView (tests/isolation.rs): a security
+      # property, run when its crate changes.
+      - name: cargo test (artifact view)
+        if: needs.changes.outputs.artifact_view == 'true' || needs.changes.outputs.all == 'true'
+        run: cargo test --locked -p artifact-view --no-fail-fast
 
-  daemon-e2e:
-    name: Daemon local e2e (Linux, fake Claude and Codex)
+  # Code under cfg(windows) cannot be built or tested on a Mac. The desktop app and the daemon
+  # are separate jobs, so a daemon change does not build the app.
+  windows-desktop:
+    name: Desktop tests (Windows)
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.server == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    if: >-
+      needs.changes.outputs.core == 'true' || needs.changes.outputs.desktop == 'true' ||
+      needs.changes.outputs.all == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.3.10
-      - run: bun install --frozen-lockfile
       - name: Install the toolchain from rust-toolchain.toml
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          shared-key: linux-test
-      - name: Build the daemon and the cancel_run client example
-        run: cargo build --locked -p daemon && cargo build --locked -p chat-core --example cancel_run
-      # wrangler dev with fresh local state, the real daemon on Linux with the fake Claude Code
-      # CLI (socket transport) and the fake Codex app-server (file transport).
-      - name: Local e2e
-        run: bun apps/daemon/e2e/local-e2e.ts --port 8793
+          shared-key: windows-desktop
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: cargo test
+        run: cargo test --locked -p desktop
+
+  # The daemon's Windows code (Job Objects, ConPTY, access lists, the named pipe) and the update
+  # helper's file replacement; the rest of the daemon runs on Linux.
+  windows-daemon:
+    name: Daemon tests (Windows)
+    needs: changes
+    if: >-
+      needs.changes.outputs.core == 'true' || needs.changes.outputs.daemon == 'true' ||
+      needs.changes.outputs.all == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: windows-daemon
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: cargo test
+        run: |
+          cargo test --locked -p daemon --features test-fakes --lib --bins --test process_tree
+          cargo test --locked -p update-helper
 
   ops:
     name: Ops (monitor, restore)
     needs: changes
-    if: needs.changes.outputs.ops == 'true'
+    if: needs.changes.outputs.ops == 'true' || needs.changes.outputs.all == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -299,418 +315,3 @@ jobs:
         run: scripts/test-release-scripts.sh
       - name: Self-hosting setup (fake wrangler)
         run: scripts/test-setup-server.sh
-
-  desktop-test:
-    name: Desktop tests (macOS)
-    needs: changes
-    if: needs.changes.outputs.desktop == 'true'
-    runs-on: macos-15
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install the toolchain from rust-toolchain.toml
-        run: rustup show active-toolchain || rustup toolchain install
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: macos-test
-      # Unit tests, then tests/isolation.rs in a real WKWebView (hidden window, the same
-      # assertions the Windows job runs in WebView2).
-      - name: cargo test (artifact view, isolation in WKWebView)
-        env:
-          ARTIFACT_VIEW_ISOLATION_REPORT: ${{ runner.temp }}/artifact-view/isolation.json
-        run: cargo test --locked -p artifact-view --no-fail-fast
-      - name: cargo test
-        if: always()
-        run: cargo test --locked -p desktop
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: artifact-view-macos
-          path: ${{ runner.temp }}/artifact-view
-          if-no-files-found: warn
-          retention-days: 14
-
-  desktop-windows:
-    name: Desktop build and tests (Windows)
-    needs: changes
-    if: needs.changes.outputs.desktop == 'true'
-    runs-on: windows-2025
-    timeout-minutes: 90
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install the toolchain from rust-toolchain.toml
-        run: rustup show active-toolchain || rustup toolchain install
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: windows-test
-          # The screenshot step can fail while the port is young; keep the build for the next run.
-          cache-on-failure: true
-      - name: cargo build
-        run: cargo build --locked -p desktop
-      # Windows Server comes without Media Foundation (video and audio decoders, the media
-      # player); Windows 10 and 11 have it. The media previews and their tests need it.
-      - name: Install Media Foundation
-        shell: pwsh
-        run: Install-WindowsFeature Server-Media-Foundation
-      # How to use the screenshots: docs/plans/windows.zh.md, 「怎么看 Windows 界面」.
-      # The runner's screen is 1024x768 and Windows keeps a window inside the screen.
-      - name: Set the screen to 1920x1080
-        shell: pwsh
-        run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
-      - name: Screenshot self-test (light and dark)
-        env:
-          SCENES: ${{ inputs.windows_scenes }}
-          RUST_BACKTRACE: "1"
-        run: scripts/windows-screenshots.sh "$RUNNER_TEMP/windows-screenshots"
-      - name: Upload the screenshots
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: windows-screenshots
-          path: ${{ runner.temp }}/windows-screenshots
-          if-no-files-found: warn
-          retention-days: 14
-      # Video frames, audio peaks and playback, PDF pages on the system's own decoders
-      # (src/views/media/native_windows.rs).
-      - name: cargo test (media previews)
-        run: cargo test --locked -p desktop views::media::native -- --nocapture
-      - name: cargo test (protocol and core)
-        run: cargo test --locked -p chat-protocol -p chat-core
-      # The system-integration tests that talk to the shell (taskbar, share, toasts, time zone) say
-      # in the log what this runner's session gave them.
-      - name: cargo test (system integration, with output)
-        run: cargo test --locked -p desktop -- --nocapture the_taskbar_takes the_share_ui windows_names a_toast_reaches the_toast_xml a_second_launch windows_reports_its_accent a_window_gpui_does_not_know the_icon_is_added the_windows_install_command_runs the_windows_install_command_finds the_settings_window_fits a_login_item_under
-      # 「用这台电脑」 (src/provider/this_mac.rs) runs for real in the desktop tests, against a
-      # local server (`wrangler dev`): the app's code registers this computer as an owner and
-      # writes the config and token, the daemon just built registers the scheduled task of the
-      # runner's user and comes online at the server, and the real Claude Code CLI (no login)
-      # is the runtime it finds.
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.3.10
-      - name: Build the daemon and install a coding CLI for 「用这台电脑」
-        run: cargo build --locked -p daemon && npm install -g @anthropic-ai/claude-code@2.1.322 && bun install --frozen-lockfile
-      # Required, every desktop test (this replaces the Windows system integration subset and
-      # the report-only full run).
-      - name: cargo test (desktop)
-        run: |
-          server="$RUNNER_TEMP/this-computer"
-          mkdir -p "$server"
-          bun apps/daemon/e2e/local-e2e.ts --port 8795 --server-only "$(cygpath -w "$server")" > "$server/server.log" 2>&1 &
-          for _ in $(seq 180); do [ -f "$server/owner-token" ] && break; sleep 1; done
-          [ -f "$server/owner-token" ] || { cat "$server/server.log"; exit 1; }
-          export TC_THIS_COMPUTER_DAEMON="$(cygpath -w "$GITHUB_WORKSPACE/target/debug/daemon.exe")"
-          export TC_THIS_COMPUTER_SERVER="$(cat "$server/url")"
-          export TC_THIS_COMPUTER_OWNER_TOKEN="$(cygpath -w "$server/owner-token")"
-          code=0
-          cargo test --locked -p desktop || code=$?
-          touch "$server/stop"
-          [ "$code" -eq 0 ] || tail -n 60 "$server/server.log" "$LOCALAPPDATA/$(jq -r .slug product.json)-daemon/daemon.log" || true
-          exit "$code"
-      # An embedded 产出 page (WebView2 child window) in a real GPUI window: with GPUI presenting
-      # to the HWND, as the app runs, the page must show. The DirectComposition run is the
-      # record of why the app turns it off (the page stays under GPUI's content).
-      - name: Embedded page in a GPUI window (screenshots)
-        run: |
-          cargo build --locked -p desktop --example win_embed_gpui
-          GPUI_DISABLE_DIRECT_COMPOSITION=1 cargo run --locked -p desktop --example win_embed_gpui -- "$RUNNER_TEMP/embed-gpui/hwnd-swap-chain"
-          cargo run --locked -p desktop --example win_embed_gpui -- "$RUNNER_TEMP/embed-gpui/direct-composition" \
-            || echo "::notice::with DirectComposition the child window is covered, as expected"
-      # The 窗口 menu's commands and the jump list in a real GPUI app (the unit tests run on
-      # GPUI's test platform, which has no windows): docs/plans/windows-parity/system.zh.md.
-      # The 通知区域里显示 switch and Ctrl+W on the main window, through the handlers of the
-      # running app (its navigation self-test, on the fake sample team). Only the Windows
-      # checks decide the step: the rest of that self-test has never been a gate here.
-      - name: Tray switch and Ctrl+W in the running app
-        run: |
-          report="$RUNNER_TEMP/embed-gpui/nav-selftest.json"
-          "${CARGO_TARGET_DIR:-target}/debug/desktop.exe" --selftest-nav --report "$report" \
-            || echo "::notice::the navigation self-test has a failed check; the report follows"
-          cat "$report"
-          jq -e '[.checks | to_entries[] | select(.key | startswith("windows_")) | .value] | length == 5 and all' "$report"
-      - name: Window commands and the jump list in a real GPUI window
-        run: cargo run --locked -p desktop --example win_window_probe -- "$RUNNER_TEMP/embed-gpui/window-probe"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: windows-embed-gpui
-          path: ${{ runner.temp }}/embed-gpui
-          if-no-files-found: warn
-          retention-days: 14
-
-  # The WebView2 backend of crates/artifact-view runs only here: nobody develops on Windows.
-  artifact-view-windows:
-    name: Artifact view (Windows, WebView2)
-    needs: changes
-    if: needs.changes.outputs.desktop == 'true'
-    runs-on: windows-2025
-    timeout-minutes: 45
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install the toolchain from rust-toolchain.toml
-        run: rustup show active-toolchain || rustup toolchain install
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: windows-artifact-view
-      - name: cargo build (tests and examples)
-        run: cargo build --locked -p artifact-view --tests --examples
-      # Unit tests, then tests/isolation.rs in a real WebView2 (the same assertions as WKWebView).
-      - name: cargo test (isolation in WebView2)
-        env:
-          ARTIFACT_VIEW_ISOLATION_REPORT: ${{ runner.temp }}/artifact-view/isolation.json
-        run: cargo test --locked -p artifact-view --no-fail-fast
-      - name: Embedded view in a host window (screenshots)
-        if: always()
-        run: cargo run --locked -p artifact-view --example win_embed_proto -- "$RUNNER_TEMP/artifact-view/embed"
-      - name: Diagram renderer (PNG per sample)
-        if: always()
-        run: cargo run --locked -p artifact-view --example diagram_selftest -- "$RUNNER_TEMP/artifact-view/diagrams"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: artifact-view-windows
-          path: ${{ runner.temp }}/artifact-view
-          if-no-files-found: warn
-          retention-days: 14
-
-  daemon-windows:
-    name: Daemon tests (Windows)
-    needs: changes
-    if: needs.changes.outputs.rust == 'true'
-    runs-on: windows-2025
-    timeout-minutes: 45
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install the toolchain from rust-toolchain.toml
-        run: rustup show active-toolchain || rustup toolchain install
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: windows-daemon
-      # The unit tests (access lists, the named pipe), the chat-run client and doctor,
-      # tests/process_tree.rs (a fake CLI in a Job Object: run, cancel, pause, wrappers, ConPTY)
-      # and tests/runtimes.rs (the Codex, ACP and Claude runtimes against the Python fake CLIs,
-      # started through the fake-cli launcher of the test-fakes feature). See
-      # docs/plans/windows.zh.md, M1 and M2. tests/integration.rs (the whole daemon against a
-      # mock server and the fake CLIs) and tests/setup.rs run here too; what is left Unix only
-      # is listed in docs/plans/windows-parity/machine.zh.md.
-      # Also tests/service_task.rs: the scheduled task of the runner's own user with a stand-in
-      # daemon, against the real Task Scheduler (docs/plans/windows.zh.md, M3).
-      # The real Claude Code and Codex CLIs, without a login: tests/real_cli.rs and the real
-      # cases of tests/integration.rs and tests/runtimes.rs drive them against a fake model
-      # (how the CLI starts the approval hook, what a failed hook does, its shell tools, its
-      # session files, Codex's sandbox). Pinned, so a new CLI release cannot break an unrelated
-      # change: raise the versions on purpose.
-      - name: Install the real Claude Code and Codex CLIs
-        run: npm install -g @anthropic-ai/claude-code@2.1.322 @openai/codex@0.167.1
-      - name: cargo test (daemon)
-        env:
-          TC_REQUIRE_REAL_CLI: "1"
-          TC_REQUIRE_REAL_CODEX: "1"
-        run: cargo test --locked -p daemon --features test-fakes --no-fail-fast
-      # The same as on Linux: with managed settings that allow only managed hooks, the real CLI
-      # never gets the prompt of a gated run.
-      - name: A gated run does not start when only managed hooks are allowed
-        run: |
-          mkdir -p "/c/Program Files/ClaudeCode"
-          echo '{"allowManagedHooksOnly": true}' > "/c/Program Files/ClaudeCode/managed-settings.json"
-          trap 'rm -f "/c/Program Files/ClaudeCode/managed-settings.json"' EXIT
-          TC_MANAGED_HOOKS_ONLY=1 cargo test --locked -p daemon --features test-fakes --test integration a_cli_whose_hooks_are_managed_only -- --nocapture
-      # The install command for machines without the app, in Windows PowerShell 5.1, with the
-      # daemon just built: SHA-256 check, config and token for this user only, the real daemon
-      # as a scheduled task, an update by the replace protocol, uninstall.
-      - name: PowerShell install command (real daemon as a scheduled task)
-        shell: powershell
-        run: ./scripts/test-install-daemon.ps1
-      # As a person's computer is: a user without administrator rights (the runner's own user
-      # is an elevated administrator). The same test programs, started as a standard user
-      # made for it: runs, cancel and pause, the whole daemon against the mock server, and the
-      # scheduled task of that user (install, restart, one daemon only, update, uninstall).
-      # The user gets a real logon session (Remote Desktop to this computer), in which the Task
-      # Scheduler starts the task; the step fails when it gets none.
-      - name: The daemon as a standard user in its own logon session (runs, the scheduled task, the install command)
-        shell: powershell
-        run: ./scripts/test-daemon-standard-user.ps1
-      # A side chat's checkout is read-only to its CLI. The runner's own user is an elevated
-      # administrator, whom a restore privilege lets remove files and make folders past an
-      # access list (as root is past file modes), so the tests above cannot show the whole of
-      # it: here the same check runs as a user without administrator rights.
-      - name: Read-only checkout of a side chat, as a standard user
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $user = 'tcaside'
-          $secret = 'Tc!' + [guid]::NewGuid().ToString('N') + 'aA1'
-          $secure = ConvertTo-SecureString $secret -AsPlainText -Force
-          New-LocalUser -Name $user -Password $secure -AccountNeverExpires | Out-Null
-          Add-LocalGroupMember -Group 'Users' -Member $user
-          $cred = New-Object Management.Automation.PSCredential("$env:COMPUTERNAME\$user", $secure)
-          $dir = 'C:\tc-aside'
-          New-Item -ItemType Directory -Force -Path "$dir\work" | Out-Null
-          & icacls.exe $dir /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' "${user}:(OI)(CI)M" | Out-Null
-          Copy-Item target\debug\fake-cli.exe "$dir\fake-cli.exe"
-          $p = Start-Process -FilePath "$dir\fake-cli.exe" -ArgumentList '--read-only-check', "$dir\work" -Credential $cred -WorkingDirectory $dir -Wait -PassThru -RedirectStandardOutput "$dir\out.txt" -RedirectStandardError "$dir\err.txt"
-          Get-Content "$dir\out.txt", "$dir\err.txt"
-          Remove-LocalUser -Name $user
-          if ($p.ExitCode -ne 0) { throw "a standard user's CLI could change a read-only checkout (exit code $($p.ExitCode))" }
-      - name: cargo check (e2e tool)
-        run: cargo check --locked -p e2e --all-targets
-      # What Codex's own Windows sandbox does to a command and to chat-run, with each of its
-      # settings (tests/runtimes.rs writes it down). Last, and a report only: setting up the
-      # elevated one changes this computer (sandbox accounts that may write the temp folder).
-      - name: Codex's Windows sandbox, every setting (what happened)
-        if: always()
-        shell: bash
-        env:
-          TC_REQUIRE_REAL_CODEX: "1"
-          TC_CODEX_ELEVATED_SANDBOX: "1"
-        run: |
-          cargo test --locked -p daemon --features test-fakes --test runtimes -- codex_windows_sandbox_modes codex_read_only_on_windows_report codex_side_chat_network_on_windows || true
-          cat target/tmp/codex-windows-sandbox.json || true
-          cat target/tmp/codex-windows-read-only.json || true
-          cat target/tmp/codex-windows-network.json || true
-
-  # The Windows release from end to end (docs/plans/windows.zh.md, R1): a release build of the
-  # app, the update helper and the daemon, the NSIS installer, a silent install with its files,
-  # registry entries and shortcut, the installed app's start, the uninstall; then the app's own
-  # update from this version to the next one against a local server, a rollback, and the same
-  # with installers signed by a certificate made for this run.
-  windows-installer:
-    name: Windows installer and update
-    needs: changes
-    if: needs.changes.outputs.installer == 'true'
-    # A called workflow, because of the server URLs of the sign-in screen: the build gets them
-    # as the Release workflow gives them (the repository variable, never a file of the
-    # repository), and a value handed to a called workflow as a secret is masked in every log
-    # line. A plain `env:` would print it in the header of every step. A fork has no such
-    # variable: its build carries no URLs and the test checks exactly that.
-    # Its last job reads the logs of the run to prove that no server address is in them.
-    permissions:
-      contents: read
-      actions: read
-    uses: ./.github/workflows/windows-installer.yml
-    secrets:
-      SERVERS_JSON: ${{ vars.SERVERS_JSON }}
-
-  ios:
-    name: iPhone client (simulator)
-    needs: changes
-    if: needs.changes.outputs.ios == 'true'
-    runs-on: macos-15
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.3.10
-      - name: Interface text
-        run: bun apps/ios/check-copy.ts
-      - name: Install the toolchain from rust-toolchain.toml and the simulator target
-        run: (rustup show active-toolchain || rustup toolchain install) && rustup target add aarch64-apple-ios-sim
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: ios-sim
-          workspaces: ". -> .tmp/target-ios"
-      - name: Install XcodeGen
-        run: command -v xcodegen || HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
-      - name: Bridge lint
-        run: cargo clippy --locked -p chat-ffi --all-targets -- -D warnings
-        env:
-          CARGO_TARGET_DIR: .tmp/target-ios
-      - name: Bridge tests
-        run: cargo test --locked -p chat-ffi
-        env:
-          CARGO_TARGET_DIR: .tmp/target-ios
-      - name: Build the bridge, the app and its extensions
-        run: apps/ios/build-sim.sh
-      - name: chat-core tests in the simulator
-        run: apps/ios/test-core-sim.sh
-
-  # The whole chain a Windows machine goes through, on a real Windows: the PowerShell install
-  # command, the daemon as the scheduled task of the runner's user, a local server
-  # (`wrangler dev`), runs with the fake CLIs started and stopped through the server, an update
-  # by the replace protocol while idle and during a run, a logoff and logon of the task, the
-  # uninstall. See docs/plans/windows-parity/machine.zh.md.
-  daemon-windows-chain:
-    name: Daemon chain (Windows, scheduled task and local server)
-    needs: changes
-    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.server == 'true'
-    runs-on: windows-2025
-    timeout-minutes: 60
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.3.10
-      - run: bun install --frozen-lockfile
-      - name: Install the toolchain from rust-toolchain.toml
-        run: rustup show active-toolchain || rustup toolchain install
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: windows-daemon-chain
-      - name: Build the daemon, the fake CLI launcher and the cancel_run client example
-        run: cargo build --locked -p daemon --features test-fakes && cargo build --locked -p chat-core --example cancel_run
-      - name: Install, run, update, log off and on, uninstall
-        run: bun apps/daemon/e2e/local-e2e.ts --port 8793 --service
-      - name: Logs
-        if: failure()
-        run: |
-          slug=$(jq -r .slug product.json)
-          for f in "$TEMP"/bots-e2e-*/*.log "$TEMP"/bots-e2e-*/report.json "$LOCALAPPDATA/$slug-daemon/daemon.log"; do
-            [ -f "$f" ] && { echo "--- $f"; tail -n 150 "$f"; }
-          done
-          true
-
-  rust-lint:
-    name: Rust fmt and clippy
-    needs: changes
-    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.desktop == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install the toolchain from rust-toolchain.toml
-        run: rustup show active-toolchain || rustup toolchain install
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: linux-test
-      - name: cargo fmt
-        run: cargo fmt --all --check
-      - name: cargo clippy
-        if: always()
-        run: cargo clippy --locked -p chat-protocol -p chat-core -p daemon -p update-helper --all-targets -- -D warnings
-
-  desktop-macos:
-    name: Desktop DMG (macOS)
-    # Only on manual runs: a release build of the DMG is slow and costly.
-    if: github.event_name == 'workflow_dispatch' && inputs.desktop
-    runs-on: macos-15
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install the toolchain from rust-toolchain.toml
-        run: rustup show active-toolchain || rustup toolchain install
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: macos-release
-      - name: Build the DMG
-        run: scripts/build-dmg.sh
-      - name: Check the DMG
-        run: scripts/test-dmg.sh
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: dmg
-          path: dist/*.dmg*
-          if-no-files-found: error
-          retention-days: 14

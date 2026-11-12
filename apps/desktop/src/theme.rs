@@ -1794,23 +1794,6 @@ mod tests {
         assert!((red.r - 232. / 255.).abs() < 0.01 && red.g < 0.1 && red.a == 1.);
     }
 
-    /// Windows answers with a color (the runner's is the stock one or a chosen one).
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn windows_reports_its_accent() {
-        use windows::UI::ViewManagement::{UIColorType, UISettings};
-        let color = UISettings::new()
-            .and_then(|settings| settings.GetColorValue(UIColorType::Accent))
-            .expect("an accent color");
-        println!(
-            "system accent: #{:02X}{:02X}{:02X}, used: {}",
-            color.R,
-            color.G,
-            color.B,
-            read_system_accent().is_some()
-        );
-    }
-
     /// The best installed family of a stack wins; a machine with none of the
     /// better ones (Windows 10: no Segoe UI Variable, no Cascadia Mono) gets
     /// the last one, which every version has.

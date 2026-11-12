@@ -70,10 +70,11 @@ export async function createGroup(owner: TestMember, memberIds: string[], name =
   return r.body.group.id as string;
 }
 
-export async function waitUntil<T>(fn: () => T | undefined | false, ms = 5000, what = "condition"): Promise<T> {
+/** Polls `fn` (sync or async) every 10 ms until it returns a truthy value. */
+export async function waitUntil<T>(fn: () => T | undefined | false | PromiseLike<T | undefined | false>, ms = 5000, what = "condition"): Promise<T> {
   const start = Date.now();
   for (;;) {
-    const v = fn();
+    const v = await fn();
     if (v) return v;
     if (Date.now() - start > ms) throw new Error(`timed out waiting for ${what}`);
     await new Promise((r) => setTimeout(r, 10));

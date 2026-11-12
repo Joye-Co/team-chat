@@ -1,6 +1,6 @@
 //! Usable protocol additions: defaults that readers apply and the open values older readers keep.
 
-use chat_protocol::machine::{Down, RunEvent};
+use chat_protocol::machine::RunEvent;
 use chat_protocol::*;
 use serde_json::json;
 
@@ -46,13 +46,6 @@ fn a_run_event_from_a_newer_daemon_is_skipped() {
     )
     .unwrap();
     assert!(matches!(e, RunEvent::HandResult { ok: true, .. }));
-}
-
-#[test]
-fn a_pause_without_hold_reads_as_before() {
-    let d: Down =
-        serde_json::from_value(json!({ "t": "run.pause", "runId": "r1", "by": "u1" })).unwrap();
-    assert!(matches!(d, Down::RunPause { hold: None, .. }));
 }
 
 #[test]

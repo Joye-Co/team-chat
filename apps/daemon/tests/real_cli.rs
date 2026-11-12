@@ -1,12 +1,11 @@
 //! The real Claude Code CLI, as installed on this machine, driven by the daemon's own runtime
 //! against a fake model (`tests/fake/model.rs`): no login, no model call, and everything
 //! between the daemon and the CLI is the real thing. This is how what depends on the CLI's
-//! own behavior is seen on a system nobody can sit at (Windows CI): how it starts the approval
-//! hook, what a hook that cannot answer does, which shell tools it has, where it keeps the
-//! session file.
+//! own behavior is seen: how it starts the approval hook, what a hook that cannot answer
+//! does, which shell tools it has, where it keeps the session file.
 //!
-//! Each case is skipped (with a line on standard error) when `claude` is not on PATH, and
-//! fails instead when `TC_REQUIRE_REAL_CLI` is set (CI installs the CLI and sets it).
+//! Every case is `#[ignore]`d: it tests a program we do not make, so CI does not run it.
+//! `scripts/test-real-cli.sh` runs them on a machine with the CLIs installed.
 
 #[path = "fake/model.rs"]
 mod model;
@@ -19,17 +18,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-/// The real `claude`, or None (skip) when this machine has none.
-fn claude() -> Option<PathBuf> {
-    let found = daemon::health::which("claude");
-    if found.is_none() {
-        assert!(
-            std::env::var_os("TC_REQUIRE_REAL_CLI").is_none(),
-            "TC_REQUIRE_REAL_CLI is set and claude is not on PATH"
-        );
-        eprintln!("skipped: claude is not on PATH");
-    }
-    found
+/// The real `claude` of this machine.
+fn claude() -> PathBuf {
+    daemon::health::which("claude").expect("claude is not on PATH")
 }
 
 fn spec(dir: &Path, claude: &Path, model: &model::Model, prompt: &str) -> RunSpec {
@@ -119,8 +110,9 @@ fn stderr_of(dir: &Path) -> String {
 /// (`projects/<the working folder's name>/<session id>.jsonl`), not merely somewhere under
 /// the config folder: a follow-up run resumes from that place.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "real CLI: scripts/test-real-cli.sh"]
 async fn the_real_cli_runs_a_turn_and_keeps_its_session_where_the_daemon_looks() {
-    let Some(claude) = claude() else { return };
+    let claude = claude();
     let dir = tempfile::tempdir().unwrap();
     let model = model::Model::start().await;
     let s = spec(dir.path(), &claude, &model, "say ok");
@@ -223,8 +215,9 @@ async fn tool_result_with_hook(
 /// a reason that tells the CLI to try again shortly. The hook here is the real `chat-run` with
 /// no daemon behind it (no `CHAT_RUN_SOCKET`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "real CLI: scripts/test-real-cli.sh"]
 async fn the_real_cli_starts_the_hook_and_a_hook_without_a_daemon_refuses() {
-    let Some(claude) = claude() else { return };
+    let claude = claude();
     daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
     let links = tempfile::tempdir().unwrap();
     let hook = daemon::chat_run::install_link(links.path())
@@ -252,8 +245,9 @@ async fn the_real_cli_starts_the_hook_and_a_hook_without_a_daemon_refuses() {
 /// (`onFailure: "block"`), so no failure of the hook lets a gated command through there. Unix
 /// keeps what it has always done: the command runs.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "real CLI: scripts/test-real-cli.sh"]
 async fn a_hook_that_cannot_start_blocks_the_command_on_windows() {
-    let Some(claude) = claude() else { return };
+    let claude = claude();
     let nowhere = tempfile::tempdir().unwrap();
     let hook = nowhere
         .path()
@@ -278,8 +272,9 @@ async fn a_hook_that_cannot_start_blocks_the_command_on_windows() {
 /// with the CLI's own switch) goes through the same hook. Skipped where the CLI does not
 /// offer the tool (no `pwsh` on a Unix machine).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "real CLI: scripts/test-real-cli.sh"]
 async fn the_powershell_tool_goes_through_the_hook_too() {
-    let Some(claude) = claude() else { return };
+    let claude = claude();
     if !cfg!(windows) && daemon::health::which("pwsh").is_none() {
         eprintln!("skipped: no pwsh on this machine");
         return;
@@ -319,8 +314,9 @@ async fn the_powershell_tool_goes_through_the_hook_too() {
 /// command, and the real one with no daemon behind it refuses it. The CLI's hook runner is the
 /// same code on every system, so this is seen on the Mac and Linux too, not only on Windows.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "real CLI: scripts/test-real-cli.sh"]
 async fn the_windows_form_of_the_hook_blocks_when_it_cannot_start() {
-    let Some(claude) = claude() else { return };
+    let claude = claude();
     daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
     let links = tempfile::tempdir().unwrap();
     let real = daemon::chat_run::install_link(links.path())
@@ -367,10 +363,11 @@ async fn the_windows_form_of_the_hook_blocks_when_it_cannot_start() {
 /// that does nothing, or on Windows does not exist, and the CLI has no other way), and a
 /// cancel ends it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "real CLI: scripts/test-real-cli.sh"]
 async fn a_sign_in_with_the_real_cli_reports_the_link_and_can_be_cancelled() {
     use daemon::accounts::{LoginCtl, run_login};
     use daemon::proto::login_phase;
-    let Some(claude) = claude() else { return };
+    let claude = claude();
     let dir = tempfile::tempdir().unwrap();
     let mut env = BTreeMap::new();
     env.insert(
@@ -427,8 +424,9 @@ async fn a_sign_in_with_the_real_cli_reports_the_link_and_can_be_cancelled() {
 /// (the package's `.exe`, or `node` with the package's script), so no prompt goes through
 /// `cmd.exe`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "real CLI: scripts/test-real-cli.sh"]
 async fn the_real_clis_are_found_by_name_and_say_their_version() {
-    let Some(claude) = claude() else { return };
+    let claude = claude();
     let dir = tempfile::tempdir().unwrap();
     let token = dir.path().join("token");
     std::fs::write(&token, "tm_x").unwrap();
@@ -442,11 +440,6 @@ async fn the_real_clis_are_found_by_name_and_say_their_version() {
     let codex = daemon::health::which("codex");
     if codex.is_some() {
         text.push_str("[runtimes.codex]\nkind = \"codex\"\n");
-    } else {
-        assert!(
-            std::env::var_os("TC_REQUIRE_REAL_CODEX").is_none(),
-            "TC_REQUIRE_REAL_CODEX is set and codex is not on PATH"
-        );
     }
     let cfg = daemon::config::Config::parse(&text).unwrap();
     assert!(cfg.problems().is_empty(), "{:?}", cfg.problems());

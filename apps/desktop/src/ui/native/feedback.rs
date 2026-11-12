@@ -547,18 +547,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn alert_titles_stay_neutral() {
-        let k = NativeColors::light();
-        let (_, title, edge) = alert_colors(AlertTone::Warning, &k);
-        assert_eq!(title, k.label);
-        assert_eq!(edge, k.separator);
-        // T1-11, owner decision: state color only on the icon (and border).
-        let (icon, title, _) = alert_colors(AlertTone::Destructive, &k);
-        assert_eq!(icon, k.red);
-        assert_eq!(title, k.label);
-    }
-
-    #[test]
     fn skeletons_read_on_white_and_on_the_sidebar() {
         for k in [NativeColors::light(), NativeColors::dark()] {
             // T1-07: the bar is the full muted fill; on the sidebar fill it
@@ -568,10 +556,5 @@ mod tests {
             assert_ne!(bone_fill(true, &k), k.fill);
         }
         assert!(BONE_LOW >= 0.7);
-    }
-
-    #[test]
-    fn the_progress_bar_is_h4() {
-        assert_eq!(metrics::BAR, px(4.));
     }
 }

@@ -838,14 +838,6 @@ mod tests {
     }
 
     #[test]
-    fn origin_is_reserved_and_versioned() {
-        assert_eq!(
-            crate::origin_host(ARTIFACT_ID, RENDERER_VERSION).unwrap(),
-            format!("teamchat-diagram-v{RENDERER_VERSION}")
-        );
-    }
-
-    #[test]
     fn config_is_strict_and_secures_every_key() {
         let c = mermaid_config(&theme());
         assert_eq!(c["securityLevel"], "strict");

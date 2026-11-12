@@ -10,7 +10,7 @@ afterAllCheck(() => {
 
 describe("bootstrap", () => {
   beforeAll(async () => {
-    // Files run one at a time; start this one from an empty directory.
+    // Each file has its own D1; start this one from an empty directory all the same.
     for (const t of ["audit", "group_members", "groups", "invites", "tokens", "members"]) {
       await env.DB.prepare(`DELETE FROM ${t}`).run();
     }

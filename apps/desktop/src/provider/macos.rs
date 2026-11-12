@@ -354,10 +354,4 @@ mod tests {
         assert_eq!(rx.try_recv().ok(), Some(("g1".into(), "t1".into())));
         assert!(rx.try_recv().is_err());
     }
-
-    #[test]
-    fn interfaces_can_be_listed() {
-        // Not empty on a Mac with a network, but never panics.
-        let _ = interfaces();
-    }
 }

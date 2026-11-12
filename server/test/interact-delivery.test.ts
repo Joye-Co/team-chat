@@ -379,8 +379,11 @@ describe("BotDesk delivery", () => {
     await desk.interaction(w.bot.id, interaction(w, topicId, messageId, "channels", { values: ["weibo"] }));
     await sleep(200);
     expect(d.frames.filter((f) => f.t === "run.interaction")).toHaveLength(1);
-    await sleep(3000);
-    await runInDurableObject(desk, (o) => (o as unknown as { alarm(): Promise<void> }).alarm());
+    // The 3 s window ends (moved back in storage instead of waited out), and the alarm flushes it.
+    await runInDurableObject(desk, async (o, state: DurableObjectState) => {
+      state.storage.sql.exec("UPDATE interact_windows SET until = 0");
+      await (o as unknown as { alarm(): Promise<void> }).alarm();
+    });
     const live = await waitUntil(() => {
       const xs = d.frames.filter((f) => f.t === "run.interaction");
       return xs.length >= 3 ? xs : undefined;

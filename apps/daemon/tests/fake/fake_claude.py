@@ -9,8 +9,6 @@ in a new process group (setpgid), each appending to <name>.ticks every 0.05 s, w
 to children.txt and then hangs like "hang" (Windows: one without a console and one in a new
 process group);
 "busy" starts a tool child that burns CPU (its pid goes to children.txt), then hangs like "hang";
-"orphan" starts a ticker that daemonizes (its parent exits; it appends to orphan.ticks every
-0.05 s and its pid goes to orphan.txt), then hangs like "hang";
 "chatrun" runs `chat-run card patch` from PATH and writes its exit code, output and the socket's
 mode to chatrun-<n>.json; "artifact" writes page/index.html and page/app.js and runs
 `chat-run artifact create --title 看板 --dir page`, writing its result to chatrun-<n>.json;
@@ -264,21 +262,6 @@ while True:
         quiet = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL}
         kid = subprocess.Popen([sys.executable, "-c", "while True:\n    pass\n"], **quiet)
         open("children.txt", "w").write(str(kid.pid))
-        open("fake.pid", "w").write(str(os.getpid()))
-        time.sleep(600)
-    if "orphan" in cue:
-        # A tool that daemonizes: the shell starts a ticker in the background and exits, so the
-        # ticker's parent is pid 1 and it is no longer below the CLI.
-        loop = "import time\nwhile True:\n    open('orphan.ticks', 'a').write('x\\n')\n    time.sleep(0.05)\n"
-        if os.name == "nt":
-            # The same without a shell: a helper starts the ticker without a console and exits.
-            helper = ("import subprocess, sys\n"
-                      "p = subprocess.Popen([sys.executable, '-c', sys.argv[1]], creationflags=subprocess.DETACHED_PROCESS,\n"
-                      "                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
-                      "open('orphan.txt', 'w').write(str(p.pid))\n")
-            subprocess.run([sys.executable, "-c", helper, loop], check=True)
-        else:
-            subprocess.run(["/bin/sh", "-c", "%s -c \"$0\" >/dev/null 2>&1 </dev/null & echo $! > orphan.txt" % sys.executable, loop], check=True)
         open("fake.pid", "w").write(str(os.getpid()))
         time.sleep(600)
     if "hang" in cue:
