@@ -76,7 +76,7 @@
    3. `done` → `done`；其余（`failed`、`blocked`）→ `failed`。被跟进任务盖过的「在等人」也落到这两条。
 2. 还没结束：
    1. `paused_by` 不为空：`hold_kind = 'takeover'` → `taken_over`，否则 `paused`（旧数据 `hold_kind` 为空，算 `paused`）。电脑失联时 phase 不变，另给 `waitingFor: "offline"`。
-   2. 线 3 的「在等电脑」标记（排队、指定电脑离线、失联、虚拟机启动中）→ `waiting_computer`，`waitingFor`: `queue` / `offline` / `booting`。
+   2. 线 3 的「在等电脑」标记（排队、指定电脑离线、失联、虚拟机启动中）→ `waiting_computer`，`waitingFor`: `queue` / `offline` / `booting`；等这台电脑的订阅额度重置（线 4，模 3.4）也是 `waiting_computer`，`waitingFor: "limit"`。
    3. `approval_id` 不为空 → `waiting_approval`。
    4. `status = waiting` → `waiting_person`（`question`）；`status = blocked` → `waiting_person`（`stuck`）。
    5. 其余 → `working`。
@@ -162,7 +162,7 @@ Check these changes before you continue; do not redo what the person did.
 ```ts
 BotRun += {
   phase?: string        // z.string().max(32)；已知值导出为 RUN_PHASES；不认识的值客户端按 status + pausedBy 自己算
-  waitingFor?: string   // z.string().max(32)；已知值 RUN_WAITING_FOR = question|stuck|report|queue|offline|booting
+  waitingFor?: string   // z.string().max(32)；已知值 RUN_WAITING_FOR = question|stuck|report|queue|offline|booting|limit
   holdKind?: string     // "pause" | "takeover"，只在 pausedBy 存在时有；pausedBy 含义不变，接管时也有值
   heldAt?: Millis
   takeover?: string     // 这台电脑能怎么接管："commands" | "isolated" | "none"

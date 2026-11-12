@@ -177,7 +177,8 @@ pub struct Topic {
     pub status: TopicStatus,
     /// Who the topic waits on (drives the status chip and 待办).
     pub waiting_on: Vec<MemberId>,
-    /// The one responsible member, when set.
+    /// Who a follow-up without an @ goes to (the AI member that last started a run here).
+    /// Routing only: the interface shows [`Topic::participants`], never a responsible member.
     pub owner_id: Option<MemberId>,
     pub created_by: MemberId,
     pub created_at: Millis,
@@ -188,6 +189,31 @@ pub struct Topic {
     /// Unread messages in this topic for me (read positions are per topic).
     pub unread: u32,
     pub mentions: u32,
+    /// Usable: the AI members that ran here, each at work or not (`Topic.participants`).
+    pub participants: Vec<TopicParticipant>,
+    /// Usable: the topic's latest 按顺序做 (`Topic.relay`).
+    pub relay: Option<TopicRelay>,
+}
+
+pub use chat_core::proto::{TopicParticipant, TopicRelay, TopicRelayStep};
+
+/// Usable: the server refused a message as 按顺序做 (`relay.*` reasons of `send`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RelayRefusal {
+    /// `relay.member_unavailable`, `relay.running`, `relay.bad_steps` or a newer one.
+    pub reason: String,
+    /// The members who cannot take it (`ErrorBody.memberIds`).
+    pub member_ids: Vec<MemberId>,
+}
+
+impl Topic {
+    /// The AI members at work here now, in the order they last started.
+    pub fn working_members(&self) -> Vec<&str> {
+        let mut at: Vec<&TopicParticipant> =
+            self.participants.iter().filter(|p| p.working).collect();
+        at.sort_by_key(|p| p.last_run_at);
+        at.into_iter().map(|p| p.member_id.as_str()).collect()
+    }
 }
 
 /// Delivery state of a message I wrote.
@@ -668,6 +694,8 @@ pub fn topic_or_chat(p: &dyn ChatProvider, group_id: &str, topic_id: &str) -> Op
         message_count: 0,
         unread: 0,
         mentions: 0,
+        participants: Vec::new(),
+        relay: None,
     })
 }
 
@@ -1865,6 +1893,26 @@ pub trait ChatProvider: Send + Sync + 'static {
     /// A stop of this run was asked and its answer is not in yet. Cheap.
     fn run_stopping(&self, _run_id: &str) -> bool {
         false
+    }
+    /// Usable: stops 按顺序做 `relay_id` of a 话题 and the run of its current step
+    /// (`POST /v1/groups/:id/relays/:relayId/stop`; any person in the 群).
+    fn stop_relay(&self, _group_id: &str, _topic_id: &str, _relay_id: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Usable: starts a paused 按顺序做 again from the step it stopped at
+    /// (`POST /v1/groups/:id/relays/:relayId/retry`).
+    fn retry_relay(&self, _group_id: &str, _topic_id: &str, _relay_id: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Usable: stops a chain of hand-overs and every run in it (全部停止,
+    /// `POST /v1/groups/:id/chains/:chainId/stop`).
+    fn stop_chain(&self, _group_id: &str, _chain_id: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Usable: why the server refused my newest message in this 话题 as 按顺序做, until I
+    /// send, retry or discard there again. Cheap.
+    fn relay_refusal(&self, _group_id: &str, _topic_id: &str) -> Option<RelayRefusal> {
+        None
     }
     /// Saves the raw session of a run (owners only) into `dir`.
     fn download_run_session(&self, _run_id: &str, _dir: PathBuf) -> SessionDownload {

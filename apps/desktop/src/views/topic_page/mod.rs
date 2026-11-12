@@ -8,10 +8,12 @@
 
 pub mod output_pane;
 mod pinned;
+pub mod relay_strip;
 pub mod scenes;
 
 use gpui::{
-    App, Context, Entity, IntoElement, ParentElement, Render, Styled, Subscription, Window, div, px,
+    App, AppContext as _, Context, Entity, IntoElement, ParentElement, Render, Styled,
+    Subscription, Window, div, px,
 };
 
 use crate::{
@@ -30,6 +32,8 @@ pub struct TopicPage {
     services: Services,
     timeline: Entity<TimelineView>,
     composer: Entity<ComposerView>,
+    /// Usable: the 按顺序做 bar at the top of the column.
+    relay_strip: Entity<relay_strip::RelayStrip>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -49,11 +53,13 @@ impl TopicPage {
         let mut subscriptions = watch(&services, cx);
         // R2-09: the pinned banner gives way while its card is on screen.
         subscriptions.push(cx.observe(&timeline, |_, _, cx| cx.notify()));
+        let relay_strip = cx.new(|cx| relay_strip::RelayStrip::new(services.clone(), cx));
         Self {
             _subscriptions: subscriptions,
             services,
             timeline,
             composer,
+            relay_strip,
         }
     }
 }
@@ -382,8 +388,9 @@ pub fn topic_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> Sta
         }
         let paused_by = p.machine_screen(&run.id).and_then(|s| s.paused_by);
         let mut line = run_state(run, &who, paused_by.as_deref(), me, name);
-        // A2-11: two members at work are one state, `2 个成员在做`.
-        let at_work = working_runs(&runs).len();
+        // A2-11: two members at work are one state, `2 个成员在做`. Usable: the
+        // server's `participants` count members whose runs this window has not read.
+        let at_work = working_runs(&runs).len().max(topic.working_members().len());
         if at_work > 1 && !line.paused {
             line.text = fill(c::STATE_MANY_WORKING, &[("n", &at_work.to_string())]);
             // A2-05: the sidebar says the same words, not the lead's `2/5`.
@@ -418,6 +425,11 @@ pub fn topic_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> Sta
         )
         .short(crate::copy::process::STATUS_FAILED);
     }
+    // Usable: the server says members work here (`participants`) though this
+    // window has not read their runs (the sidebar): the same words as above.
+    if let Some(line) = participants_state(topic, name) {
+        return line;
+    }
     // §2.12: 在做 and its spinner only while a member works on a run (above).
     // A 话题 marked in progress with no run is queued: 排队, the clock, muted.
     if topic.status == TopicStatus::InProgress {
@@ -441,6 +453,24 @@ pub fn topic_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> Sta
         _ => String::new(),
     };
     StateLine::plain(text, badge).short(short)
+}
+
+/// `{name} 在做` or `{n} 个成员在做` from `Topic.participants` alone, when a member
+/// works there; `None` otherwise.
+pub fn participants_state(topic: &Topic, name: impl Fn(&str) -> String) -> Option<StateLine> {
+    use crate::copy::{fill, topic_rail as c};
+    let at_work = topic.working_members();
+    let text = match at_work.as_slice() {
+        [] => return None,
+        [one] => fill(c::STATE_WORKING_NO_PLAN, &[("name", &name(one))]),
+        many => fill(c::STATE_MANY_WORKING, &[("n", &many.len().to_string())]),
+    };
+    let short = if at_work.len() > 1 {
+        text.clone()
+    } else {
+        c::STATE_WORKING_SHORT.to_string()
+    };
+    Some(StateLine::plain(text, BadgeState::Working).short(short))
 }
 
 /// The pane buttons of a 话题 page: 单独问, 产出 (when it has one), 电脑
@@ -578,6 +608,8 @@ impl Render for TopicPage {
             .bg(k.bg)
             // Usable: an AI member waits for me to connect GitHub (§2.16, top of the column).
             .children(crate::views::github_banner::slot(cx))
+            // Usable: the 按顺序做 bar, under the title, above the plan cards.
+            .child(self.relay_strip.clone())
             .child(div().flex_1().min_h(px(0.)).child(self.timeline.clone()))
             .child(
                 div()
@@ -696,5 +728,60 @@ mod tests {
         assert_ne!(mine.tone, StateTone::Live);
         let other = run_state(&r, "Forge", Some("w"), Some("me"), |_| "小王".into());
         assert_eq!(other.detail.as_deref(), Some("小王 在操作它的电脑"));
+    }
+}
+
+#[cfg(test)]
+mod participants_tests {
+    use super::participants_state;
+    use crate::{
+        data::{Topic, TopicParticipant, TopicStatus},
+        ui::native::BadgeState,
+    };
+
+    fn topic(working: &[(&str, bool)]) -> Topic {
+        Topic {
+            id: "t".into(),
+            group_id: "g".into(),
+            title: "t".into(),
+            status: TopicStatus::InProgress,
+            waiting_on: vec![],
+            owner_id: None,
+            created_by: "me".into(),
+            created_at: 0,
+            root_message_id: String::new(),
+            last_seq: 0,
+            last_activity_at: 0,
+            message_count: 0,
+            unread: 0,
+            mentions: 0,
+            participants: working
+                .iter()
+                .enumerate()
+                .map(|(i, (id, w))| TopicParticipant {
+                    member_id: id.to_string(),
+                    working: *w,
+                    last_run_at: i as u64,
+                })
+                .collect(),
+            relay: None,
+        }
+    }
+
+    fn name(id: &str) -> String {
+        id.to_uppercase()
+    }
+
+    #[test]
+    fn the_sidebar_says_who_works_from_participants() {
+        assert!(participants_state(&topic(&[]), name).is_none());
+        assert!(participants_state(&topic(&[("a", false)]), name).is_none());
+        let one = participants_state(&topic(&[("a", false), ("b", true)]), name).unwrap();
+        assert_eq!(one.text, "B 在做");
+        assert_eq!(one.short, "在做");
+        assert_eq!(one.badge, BadgeState::Working);
+        let two = participants_state(&topic(&[("a", true), ("b", true)]), name).unwrap();
+        assert_eq!(two.text, "2 个成员在做");
+        assert_eq!(two.short, "2 个成员在做");
     }
 }

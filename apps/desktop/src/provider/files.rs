@@ -1577,6 +1577,8 @@ fn job_topic(j: &UploadJob, me: &str) -> Topic {
         message_count: 1,
         unread: 0,
         mentions: 0,
+        participants: Vec::new(),
+        relay: None,
     }
 }
 

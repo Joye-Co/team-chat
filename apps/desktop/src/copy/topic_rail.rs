@@ -16,7 +16,7 @@ crate::copy! {
     TOPIC_RAIL_COST = "用时和成本",
     TOPIC_RAIL_EMPTY = "这个话题还没有人在做",
     // A section with no data keeps its place with one quiet line.
-    RAIL_EMPTY_OWNER = "还没有人负责",
+    RAIL_EMPTY_OWNER = "还没有成员在做",
     RAIL_EMPTY_PLAN = "还没有计划",
     RAIL_EMPTY_CHANGES = "还没有改动",
     RAIL_EMPTY_OUTPUTS = "还没有产出",

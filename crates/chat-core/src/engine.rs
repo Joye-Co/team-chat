@@ -864,7 +864,7 @@ impl Session {
                     }
                     _ => {
                         warn!(id = %item.id, "follow-up of a topic that was not started");
-                        self.fail_row(&item, ErrorCode::NotFound, String::new());
+                        self.fail_row(&item, ErrorCode::NotFound, String::new(), None, Vec::new());
                         continue;
                     }
                 }
@@ -1586,14 +1586,27 @@ impl Session {
             }
             code => {
                 warn!(id = %id, kind = item.op.kind(), ?code, "write refused");
-                self.fail_row(&item, code, err.message);
+                self.fail_row(
+                    &item,
+                    code,
+                    err.message,
+                    err.reason,
+                    err.member_ids.unwrap_or_default(),
+                );
                 None
             }
         }
     }
 
     /// Marks an outbox row failed (retry and discard become available) and tells the UI.
-    fn fail_row(&mut self, item: &crate::store::OutboxItem, code: ErrorCode, message: String) {
+    fn fail_row(
+        &mut self,
+        item: &crate::store::OutboxItem,
+        code: ErrorCode,
+        message: String,
+        reason: Option<String>,
+        member_ids: Vec<String>,
+    ) {
         let id = item.id.clone();
         let group_id = item.op.group_id().to_string();
         self.internal_failures.remove(&id);
@@ -1619,6 +1632,8 @@ impl Session {
             topic_id,
             code,
             message,
+            reason,
+            member_ids,
         }));
     }
 

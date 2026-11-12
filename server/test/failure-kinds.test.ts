@@ -168,22 +168,12 @@ describe("failure kinds in the topic", () => {
     d.close();
   });
 
-  it("say when a limit resets, and to change the model", async () => {
+  it("say to change the model (a limit waits for its reset: limit-wait.test.ts)", async () => {
     const w = await world();
     const { d } = await Daemon.connect(w.machineToken);
     const { c } = await Client.connect(w.human.token);
-    const resetsAt = Date.now() + 2 * 3600_000;
-    const topicId = await mention(c, w);
-    const { runId } = await d.next((f) => f.t === "run.assign");
-    d.send({ t: "run.accept", runId });
-    await d.acked(runId, d.done(runId, { status: "failed", error: "You've hit your usage limit.", failure: { kind: "limit", resetsAt } }));
-    const ended = await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === runId && e.data.run.status === "failed");
-    expect(ended.data.run.failure).toEqual({ kind: "limit", resetsAt });
-    const [msg] = botMessages(c, topicId, w.bot.id);
-    expect(msg.body).toBe(TEXT.failedWith(TEXT.failure.limit("Codex"), TEXT.next.limitAt(clockText(resetsAt, Date.now(), "Asia/Shanghai"))));
-
     const topic2 = await mention(c, w, "@dev other");
-    const r2 = await d.next((f) => f.t === "run.assign" && f.runId !== runId);
+    const r2 = await d.next((f) => f.t === "run.assign");
     d.send({ t: "run.accept", runId: r2.runId });
     // An older daemon: no kind, the #103 JSON body still reads as the model.
     await d.acked(
