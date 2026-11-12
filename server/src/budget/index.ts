@@ -9,6 +9,7 @@ import type { Env } from "../core/env";
 import { registerMembersChanged } from "../core/registry";
 import { teamZone } from "../memory/consolidate";
 import { loadPrices, priceRun } from "../usage/prices";
+import { type LoginMethodsOf, machineLoginMethods, paidRuns } from "./paid";
 
 export interface BudgetState {
   weekStart: number;
@@ -27,8 +28,16 @@ export function overBudget(s: BudgetState): boolean {
   return s.spentCents >= s.budgetCents + s.extraCents;
 }
 
+export { type LoginMethodsOf, paidRuns } from "./paid";
+
 /** The AI member's budget and spend this week, or null when it has no budget (no limit). */
-export async function budgetState(env: Env, botId: string, runsSince: (from: number) => Promise<UsageRun[]>, now = Date.now()): Promise<BudgetState | null> {
+export async function budgetState(
+  env: Env,
+  botId: string,
+  runsSince: (from: number) => Promise<UsageRun[]>,
+  now = Date.now(),
+  methodsOf: LoginMethodsOf = machineLoginMethods(env),
+): Promise<BudgetState | null> {
   const row = await env.DB.prepare(
     "SELECT m.weekly_budget_cents AS budget, r.runtime AS runtime, r.model AS model FROM members m LEFT JOIN bot_runners r ON r.member_id = m.id WHERE m.id = ?",
   )
@@ -41,7 +50,7 @@ export async function budgetState(env: Env, botId: string, runsSince: (from: num
     .first<{ cents: number }>();
   const prices = await loadPrices(env);
   const runner = { runtime: row.runtime ?? null, model: row.model ?? null };
-  const spent = (await runsSince(from)).map((r) => priceRun(r, prices, runner)).reduce((s, r) => s + r.costUsd, 0);
+  const spent = (await paidRuns(await runsSince(from), methodsOf)).map((r) => priceRun(r, prices, runner)).reduce((s, r) => s + r.costUsd, 0);
   return { weekStart: from, budgetCents: row.budget, extraCents: extra?.cents ?? 0, spentCents: Math.round(spent * 100) };
 }
 
