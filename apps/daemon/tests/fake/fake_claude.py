@@ -28,6 +28,8 @@ answers, writes its text to held.json and takes it as the next turn;
 and `git status --porcelain`; "keepfile" then writes kept.txt and leaves it uncommitted;
 "memo:<text>" runs `chat-run memory note --scope member --kind lesson --text <text>` and
 writes its exit code and output to remember.json;
+"relayfail:<k>" fails the turn of relay step k (its order says "You do step k of") once per
+working folder (relayfail-<k>.done marks it); "relaystall:<k>" sleeps like "hang" in relay step k;
 "readback" runs the read commands `chat-run member list`, `topic state` and `artifact list`
 (with "topic:<id>", of that topic), `artifact get --id <first listed>`, `decisions list` and, with "card:<message id>", `card get`,
 and writes each answer to readback.json.
@@ -163,6 +165,9 @@ while True:
     # Modes come from the request and what follows it, not from the rules the server puts in
     # front of it (the acceptance rule says "changes" and "artifact").
     cue = text.rsplit("\nRequest from ", 1)[-1]
+    # A relay step's order carries the step before's result (another member's words, here the
+    # fake's echo of its prompt): no mode comes from it.
+    cue = cue.split("\nResult of step ", 1)[0]
     session.write(json.dumps({"type": "user", "text": text}) + "\n"); session.flush()
     with open(os.path.join(rec, "prompts.jsonl"), "a") as pf:
         pf.write(json.dumps({"pid": os.getpid(), "sid": sid, "n": n + 1, "text": text}) + "\n")
@@ -208,6 +213,17 @@ while True:
              "error": "authentication_failed", "is_api_error_message": True})
         out({"type": "result", "subtype": "success", "is_error": True, "result": words, "session_id": sid})
         continue
+    m = re.search(r"relayfail:(\d+)", cue)
+    if m and ("You do step %s of" % m.group(1)) in cue and not os.path.exists("relayfail-%s.done" % m.group(1)):
+        open("relayfail-%s.done" % m.group(1), "w").write("1")
+        words = "fake failure of relay step %s" % m.group(1)
+        out({"type": "assistant", "message": {"id": mid, "role": "assistant", "content": [{"type": "text", "text": words}]}, "session_id": sid})
+        out({"type": "result", "subtype": "error_during_execution", "is_error": True, "result": words, "session_id": sid})
+        continue
+    m = re.search(r"relaystall:(\d+)", cue)
+    if m and ("You do step %s of" % m.group(1)) in cue:
+        open("fake.pid", "w").write(str(os.getpid()))
+        time.sleep(600)
     if "spawn" in cue:
         loop = "import time\nwhile True:\n    open(%r, 'a').write('x\\n')\n    time.sleep(0.05)\n"
         quiet = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL}
