@@ -883,7 +883,7 @@ GET  /v1/machine/runs/:id/memories?q=<text>&limit=<1-50, default 10>   -> Memori
 - A run that names a memory's id (as `[id]`) in its result or progress counts one use of it, when
   it may read it.
 
-- The run must be on the calling machine, active and not a side chat, as for files.
+- A note (`memory.note`): the run must be on the calling machine, active and not a side chat, as for files.
 - `member` is the run's AI member (its lessons and playbooks), read only in the run's group
   (`fromGroup`), `person` the person who asked for the run (their preferences), `group` the run's
   group (conventions people said in the group; a direct conversation has none: `forbidden`). A
