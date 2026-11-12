@@ -23,7 +23,16 @@ import { logger as baseLogger, type Logger } from "../core/logger";
 import { runMigrations } from "../core/migrations";
 import { LOGINS_MIGRATION, METRICS_MIGRATION, latestMetrics, readSeries, recordMetrics } from "../monitor/store";
 import { type MachineLogin, LoginStatusFrame } from "@chat/protocol";
-import { ALERT_OFFLINE_MS, type AlertNote, type MachineAlert, heartbeatAlerts, notifyAlert, withdrawAlert } from "../monitor/alerts";
+import {
+  ALERT_OFFLINE_MS,
+  type AlertNote,
+  type GithubState,
+  type MachineAlert,
+  githubAlerts,
+  heartbeatAlerts,
+  notifyAlert,
+  withdrawAlert,
+} from "../monitor/alerts";
 import { ASSIGN_RETRY_MS, LIMIT_SLACK_MS, LINK_IDLE_MS, cliName } from "./dispatch";
 import { type BotsEnv, deskStub } from "./env";
 
@@ -51,6 +60,27 @@ const MAX_FRAME_BYTES = 1_048_576;
 // so a newer daemon's event types are stored, not rejected (machine-protocol.md: unknown
 // fields and types are ignored on read, and a rejected frame would be resent forever).
 const LooseEvent = z.looseObject({ type: z.string().min(1).max(64) });
+/**
+ * design-github-identity 3.6: the heartbeat's `metrics.github`, read apart from the other metrics.
+ * A state this server does not know reads as "unknown".
+ */
+const GITHUB_STATES = ["signed_in", "signed_out", "no_gh", "unknown"] as const;
+const HeartbeatGithub = z.object({
+  state: z
+    .string()
+    .min(1)
+    .max(32)
+    .transform((s): (typeof GITHUB_STATES)[number] => ((GITHUB_STATES as readonly string[]).includes(s) ? (s as (typeof GITHUB_STATES)[number]) : "unknown")),
+  login: z.string().min(1).max(100).optional(),
+});
+
+/** The heartbeat's GitHub sign-in, or undefined when it has none the server can read. */
+export function heartbeatGithub(metrics: unknown): GithubState | undefined {
+  if (typeof metrics !== "object" || metrics === null) return undefined;
+  const r = HeartbeatGithub.safeParse((metrics as { github?: unknown }).github);
+  if (!r.success) return undefined;
+  return r.data.login !== undefined ? { state: r.data.state, login: r.data.login } : { state: r.data.state };
+}
 const UpFrame = z.discriminatedUnion("t", [
   z.object({
     t: z.literal("hello"),
@@ -112,6 +142,8 @@ export interface LinkStatus {
   signedOut?: string[];
   /** 模 3.4: runtimes at their subscription limit until `until` (`limitedRuntimes`). */
   limited?: LimitedRuntime[];
+  /** design-github-identity 3.6: the GitHub sign-in of the latest heartbeat. */
+  github?: GithubState;
 }
 
 /** How long a run that failed to sign in keeps its runtime signed out without a heartbeat saying so. */
@@ -533,6 +565,41 @@ export class MachineLink extends DurableObject<BotsEnv> {
     for (const a of r.raise) this.raiseAlert(a, now);
   }
 
+  /** design-github-identity 3.6: the heartbeat's GitHub sign-in is kept, and starts or ends its alert. */
+  private heartbeatGithub(raw: unknown, now: number): void {
+    const github = heartbeatGithub(raw);
+    if (github) this.setMeta("github", JSON.stringify(github));
+    else this.sql.exec("DELETE FROM meta WHERE key = 'github'");
+    const r = githubAlerts({ up: this.upAlerts(), runsIn: this.runsIn(), github, seen: this.meta("github_seen") ?? undefined, now });
+    if (r.seen !== undefined) this.setMeta("github_seen", r.seen);
+    for (const key of r.clear) this.clearAlert(key);
+    for (const a of r.raise) this.raiseAlert(a, now);
+  }
+
+  private runsIn(): string | undefined {
+    try {
+      return (JSON.parse(this.meta("info") ?? "{}") as { runsIn?: string }).runsIn;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * design-github-identity 3.6: an AI member's run on this computer found no GitHub sign-in. A
+   * team computer that runs tasks in VMs tells its admins once (also when no heartbeat ever showed
+   * a sign-in); the alert ends with a heartbeat that shows one. True when the alert started.
+   */
+  async githubMissing(reason: string): Promise<boolean> {
+    if (!this.machineId || this.runsIn() !== "vm" || this.upAlerts().github) return false;
+    const row = await this.env.DB.prepare("SELECT owner_id FROM machines WHERE id = ? AND revoked_at IS NULL")
+      .bind(this.machineId)
+      .first<{ owner_id: string | null }>();
+    if (!row || row.owner_id !== null || this.upAlerts().github) return false;
+    const now = Date.now();
+    this.raiseAlert({ key: "github", kind: "github", since: now, reason: reason.slice(0, 64) }, now);
+    return this.upAlerts().github !== undefined;
+  }
+
   async webSocketError(): Promise<void> {}
 
   private async handle(ws: WebSocket, f: UpFrame): Promise<void> {
@@ -559,6 +626,7 @@ export class MachineLink extends DurableObject<BotsEnv> {
         {
           const m = recordMetrics(this.sql, (k, v) => this.setMeta(k, v), f.metrics, f.health, now);
           this.heartbeatAlerts(f.health, m, now);
+          this.heartbeatGithub(f.metrics, now);
         }
         this.renew(
           f.runs.map((r) => r.runId),
@@ -980,9 +1048,11 @@ export class MachineLink extends DurableObject<BotsEnv> {
     const { metrics, at } = latestMetrics((k) => this.meta(k));
     const signedOut = signedOutRuntimes(metrics?.logins, at, this.signedOutMarks(), Date.now());
     const limited = limitedRuntimes(this.limitMarks(), Date.now());
+    const github = parse<GithubState>("github");
     return {
       ...(signedOut.length > 0 ? { signedOut } : {}),
       ...(limited.length > 0 ? { limited } : {}),
+      ...(github ? { github } : {}),
       machineId: this.machineId,
       connected: this.socket() !== null,
       revoked: this.meta("revoked") !== null,
