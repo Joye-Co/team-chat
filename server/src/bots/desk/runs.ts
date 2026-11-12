@@ -505,7 +505,16 @@ export abstract class DeskRuns extends DeskCore {
       acceptance,
       ...(brief ? { brief: briefText(brief) } : {}),
       // 沉淀: what the team, the group, this member and the requester keep (reference material).
-      memory: await memoryIndex(this.env, { botId, groupId: m.groupId, requesterId: m.authorId, requesterName: name(m.authorId), maxBytes: EXECUTOR_MEMORY_BYTES }),
+      // Chosen by relevance to the request; the rest is found with chat-run memory search.
+      memory: await memoryIndex(this.env, {
+        botId,
+        groupId: m.groupId,
+        requesterId: m.authorId,
+        requesterName: name(m.authorId),
+        maxBytes: EXECUTOR_MEMORY_BYTES,
+        query: [request.body, ...followUps.map((f) => f.body), ...(brief ? [briefText(brief)] : [])].join("\n"),
+        runNote: contextTools,
+      }),
       // Who is in the group and their 岗位: hand-offs and parts go to members by name.
       members: membersText(await groupMembers(this.env.DB, m.groupId), botId),
     });

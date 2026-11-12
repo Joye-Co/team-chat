@@ -507,8 +507,9 @@ MemoryItem = { id, scope: "team" | `group:${id}` | `member:${id}` | `person:${id
   - 请求人的偏好；
   - 成员的相关经验和做法：用本批事件的全文检索，取前 5 条；
   - 群里相关的决定：取前 5 条。
-- **执行者**：交代单里带上选中的条目和它们的 ID，不够再用 `memory_search` 查。
-- **反馈**：每用到一次记一次。用到某条经验的工单被人纠正，就调低这条的可信度，低到阈值以下自动停用。
+- **执行者**：交代单里带上选中的条目和它们的 ID（人写的约定必带，其余按和请求的相关度，再按新旧，到 8 KB 为止），不够再用
+  `chat-run memory search --query` 查。
+- **反馈**：每用到一次记一次。「用到」指执行者搜到了它，或在结果里引用了它的 ID；只是进了提示词不算。用到某条经验的工单被人纠正，就调低这条的可信度，低到阈值以下自动停用。
 
 ### 7.5 安全
 
@@ -521,8 +522,9 @@ MemoryItem = { id, scope: "team" | `group:${id}` | `member:${id}` | `person:${id
 
 ### 7.6 存储
 
-D1 里三张表：`memories`、`memory_versions`，加上中文二字全文索引（`packages/search` 已有）。10 人规模用全文检索就够，以后
-需要再加向量检索。整套记忆可以导出成一个 Markdown 文件夹。
+D1 里三张表：`memories`、`memory_versions`，加上中文二字全文检索（`packages/search` 已有）。实际做法：不建 FTS 表，先按
+「谁能读」筛出允许的条目（最多 2000 条，每条不超过 500 字），再在 Worker 里用 `packages/search` 的同一套分词（词、
+中文二字词）按命中词的稀有程度打分（`server/src/memory/relevance.ts`）。10 人规模这样就够，以后需要再加 FTS 表或向量检索。整套记忆可以导出成一个 Markdown 文件夹。
 
 ### 7.7 界面
 

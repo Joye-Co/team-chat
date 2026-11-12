@@ -99,7 +99,8 @@ lesson|playbook|preference|convention|fact|decision --text <text> [--when <text>
 <messageId>]`: member for your own lessons and how-tos (only this group reads them), person for the \
 requester's preferences, group for conventions people said here, with `--source` the id of the \
 person's message that says it (without one it stays your own). Notes are reviewed once a day; the \
-team's memory is never written by a run. \
+team's memory is never written by a run. The prompt carries only part of what is remembered: \
+`chat-run memory search --query <words> [--limit <n>]` finds the rest you may read, with ids to cite. \
 Read who is in the group with `chat-run member list` first. Hand the whole piece of work over \
 only when another AI member really should do it: `chat-run handoff --member <name> --goal <text> \
 [--done-when \"check; check\"] [--notes <text>]`, push your branch first, then stop. Give a part \
@@ -942,6 +943,7 @@ pub const USAGE: &str = "usage:
   chat-run decisions list [--limit <1-100>]
   chat-run member list
   chat-run memory note --scope member|person|group --kind lesson|playbook|preference|convention|fact|decision --text <text> [--when <text>] [--source <messageId>]
+  chat-run memory search --query <text> [--limit <1-50>]
   chat-run report --state done|blocked|waiting --text <text>
 
 card.json is a Card v2 document (or {\"cardV2\": ..., \"body\": ...}); `chat-run card schema`
@@ -1135,6 +1137,11 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
             &args[2..],
             &["scope", "kind", "when", "text", "source"],
         ),
+        ["memory", "search"] => (
+            crate::chat_run_context::MEMORY_SEARCH,
+            &args[2..],
+            &["query", "limit"],
+        ),
         ["file", "get"] => (
             crate::chat_run_context::FILE_GET,
             &args[2..],
@@ -1263,6 +1270,16 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
                 put("scope", json!("group"));
             }
             if let Some(n) = limit(&f, crate::chat_run_context::MAX_SEARCH_LIMIT)? {
+                put("limit", json!(n));
+            }
+        }
+        crate::chat_run_context::MEMORY_SEARCH => {
+            let q = f.req("query")?;
+            if q.trim().is_empty() {
+                return Err("--query is required".into());
+            }
+            put("query", json!(q));
+            if let Some(n) = limit(&f, crate::chat_run_context::MAX_MEMORY_SEARCH_LIMIT)? {
                 put("limit", json!(n));
             }
         }
@@ -1837,6 +1854,30 @@ mod tests {
             ]))
             .is_err()
         );
+        assert_eq!(
+            request(&args(&[
+                "memory",
+                "search",
+                "--query",
+                "部署 悉尼",
+                "--limit",
+                "5"
+            ]))
+            .unwrap(),
+            (
+                crate::chat_run_context::MEMORY_SEARCH,
+                json!({ "query": "部署 悉尼", "limit": 5 })
+            )
+        );
+        assert!(crate::chat_run_context::OPS.contains(&crate::chat_run_context::MEMORY_SEARCH));
+        for bad in [
+            &["memory", "search"][..],
+            &["memory", "search", "--query", " "],
+            &["memory", "search", "--query", "x", "--limit", "51"],
+            &["memory", "search", "--query", "x", "--scope", "team"],
+        ] {
+            assert!(request(&args(bad)).is_err(), "{bad:?}");
+        }
         let (_, body) = request(&args(&[
             "memory",
             "note",
