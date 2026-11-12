@@ -22,9 +22,11 @@ pub const RUN_PHASES: [&str; 10] = [
     "failed",
     "stopped",
 ];
-/// Known `BotRun.waiting_for` values.
-pub const RUN_WAITING_FOR: [&str; 6] =
-    ["question", "stuck", "report", "queue", "offline", "booting"];
+/// Known `BotRun.waiting_for` values; "limit": the computer's subscription limit, until it
+/// resets (usable 模 3.4).
+pub const RUN_WAITING_FOR: [&str; 7] = [
+    "question", "stuck", "report", "queue", "offline", "booting", "limit",
+];
 /// Known `BotRun.hold_kind` and `run.pause.hold` values.
 pub const RUN_HOLD_KINDS: [&str; 2] = ["pause", "takeover"];
 /// `run.pause.hold` and `BotRun.hold_kind` of a take-over.
