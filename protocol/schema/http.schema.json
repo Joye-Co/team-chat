@@ -42454,6 +42454,88 @@
               "bots"
             ]
           }
+        },
+        "service": {
+          "type": "object",
+          "properties": {
+            "calls": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "failures": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "costUsd": {
+              "type": "number",
+              "minimum": 0
+            },
+            "inputTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "outputTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "cacheReadTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "unpricedTokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "uses": {
+              "maxItems": 16,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "use": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 32
+                  },
+                  "calls": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "inputTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "outputTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "use",
+                  "calls",
+                  "inputTokens",
+                  "outputTokens"
+                ]
+              }
+            }
+          },
+          "required": [
+            "calls",
+            "failures",
+            "costUsd",
+            "inputTokens",
+            "outputTokens",
+            "uses"
+          ]
         }
       },
       "required": [
@@ -65327,6 +65409,91 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
+        },
+        "switches": {
+          "type": "object",
+          "properties": {
+            "frontDesk": {
+              "type": "boolean"
+            },
+            "titles": {
+              "type": "boolean"
+            },
+            "memory": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "frontDesk",
+            "titles",
+            "memory"
+          ]
+        },
+        "uses": {
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "use": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32
+              },
+              "at": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "ok": {
+                "type": "boolean"
+              },
+              "error": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "failures": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "okAt": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "use",
+              "at",
+              "ok",
+              "failures"
+            ]
+          }
+        },
+        "failing": {
+          "type": "object",
+          "properties": {
+            "since": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "use": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            },
+            "error": {
+              "type": "string",
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "since",
+            "use",
+            "error"
+          ]
         }
       },
       "required": [
@@ -65563,12 +65730,79 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
+        },
+        "text": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "error": {
+              "type": "string",
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "ok"
+          ]
+        },
+        "tool": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "error": {
+              "type": "string",
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "ok"
+          ]
         }
       },
       "required": [
         "ok",
         "latencyMs"
       ]
+    },
+    "AiServiceStatus": {
+      "type": "object",
+      "properties": {
+        "configured": {
+          "type": "boolean"
+        },
+        "frontDesk": {
+          "type": "boolean"
+        },
+        "titles": {
+          "type": "boolean"
+        },
+        "memory": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "configured",
+        "frontDesk",
+        "titles",
+        "memory"
+      ]
+    },
+    "UpdateAiServiceSwitchesRequest": {
+      "type": "object",
+      "properties": {
+        "frontDesk": {
+          "type": "boolean"
+        },
+        "titles": {
+          "type": "boolean"
+        },
+        "memory": {
+          "type": "boolean"
+        }
+      }
     },
     "Device": {
       "type": "object",
