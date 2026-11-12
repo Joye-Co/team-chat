@@ -9,9 +9,9 @@ import type { AcceptanceItem, BotRun } from "@chat/protocol";
 import { ApiError, type Result, unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
 import { TokenBucket } from "../../core/ratelimit";
-import { type MachineView, hasFeature } from "../dispatch";
+import { type MachineView, hasFeature, personalBlock } from "../dispatch";
 import { linkStub } from "../env";
-import { loadMachines } from "../store";
+import { loadMachines, loadRunner } from "../store";
 import { ACTIVE, PLAN_RATE, type RunRow, result } from "./core";
 import type { RunRequest } from "./runs";
 import { DeskInput } from "./input";
@@ -24,9 +24,14 @@ export type TakeoverActor = HoldActor;
 export abstract class DeskTakeover extends DeskInput {
   protected readonly acceptanceBuckets = new Map<string, TokenBucket>();
 
-  /** Retry (重试): the requester or an admin, a person. */
-  protected mayRetry(r: RunRow, a: TakeoverActor): boolean {
-    return a.kind === "human" && (a.id === r.requested_by || a.level === "owner");
+  /**
+   * Retry (重试): the requester or an admin, a person. design-roles 3.6: on a personal machine
+   * (`machineOwner`) the person the run works for and the machine's owner, no admin.
+   */
+  protected mayRetry(r: RunRow, a: TakeoverActor, machineOwner: string | null = null): boolean {
+    if (a.kind !== "human") return false;
+    if (machineOwner) return a.id === machineOwner || a.id === (r.requested_for ?? r.requested_by);
+    return a.id === r.requested_by || a.level === "owner";
   }
 
   /** The run's machine (undefined when it is gone), with the run's `takeover` kept current. */
@@ -321,13 +326,18 @@ export abstract class DeskTakeover extends DeskInput {
       this.bind(botId);
       const r = this.run(runId);
       if (!r) throw new ApiError("not_found", "run not found");
-      if (!this.mayRetry(r, actor)) throw new ApiError("forbidden", "only the requester or an owner retries a run");
+      if (!this.mayRetry(r, actor, await this.machineOwnerOf(r))) throw new ApiError("forbidden", "only the requester or an owner retries a run");
       if (r.ended_at === null) throw new ApiError("conflict", "the run is still active");
       if (r.external) throw new ApiError("conflict", "a run started over HTTP cannot be retried");
       if (!(await this.botActive())) throw new ApiError("conflict", "the member takes no runs");
       if (this.startBlocked(r.topic_id)) throw new ApiError("conflict", "the topic has an active run");
       const request = this.requestOf(r) ?? (await this.requestFromRoom(r));
       if (!request) throw new ApiError("conflict", "the request of this run is gone");
+      // design-roles 3.3: a retry works for the same person; refused when no machine may take it.
+      const runner = await loadRunner(this.env.DB, botId);
+      if (runner && personalBlock(await loadMachines(this.env), runner, await this.placeCtx(r))) {
+        throw new ApiError("conflict", "no computer may take this work for the person it is for", "machine.personal_requester");
+      }
       // A key of its own: the original message already started a run.
       const key = `retry:${ulid()}`;
       const ack = request.m.ackMessageId ?? (r.trigger_message_id.includes(":") ? undefined : r.trigger_message_id);

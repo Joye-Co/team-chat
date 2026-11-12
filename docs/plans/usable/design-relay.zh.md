@@ -319,7 +319,7 @@ AddArtifactVersionRequest += { parentVersion?: number }
 - 「全部停止」是 Card v2 的页脚按钮，没有 `ask`，按下是实时事件（`action.press`），走 desk 的 `interaction` 而不是 `cardAnswer`；两处都拦 `chain.stop:`，不当成 run 的输入。
 - `part` 放弃时要写话题，只有房间的 alarm 能写（提交后钩子不能）：提交后钩子遇到过期的 `part` / `cancel` 行就留给 alarm 处理。
 - 请求人离开：停链、停 run 已做；「话题 blocked、等管理员」没做（run 被停时各自报 `open`，会盖掉它），留给线 13 / R3 和接力一起定。
-- `delegation.not_for_requester` 没做：个人电脑只接主人的活（design-roles R4）还没合并，那时在 `takeDelegation` 里加。
+- `delegation.not_for_requester`：design-roles R4 在 `takeDelegation` 里加了（先算 `personalBlock`）。
 - 旧的 `delegation:` meta、旧的 `reportPart`：部署那一刻还没交回的分出去的结果不再交回（旧链没有步）。
 
 **R3 实现时更正和留给后面的**（2026-11-12）：

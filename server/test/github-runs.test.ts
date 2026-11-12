@@ -188,19 +188,18 @@ describe("run.assign.github", () => {
     c.close();
   });
 
-  it("another person's machine on its host: its own sign-in, and no token for it", async () => {
+  it("another person's machine on its host: never takes the person's run", async () => {
+    // design-roles R4: a personal machine takes only its owner's work, so the person's run is left
+    // to the team machine (never set up here: no run starts) and the owner's machine gets nothing.
+    // "other" on a host stays in the table above, for a hook's run.
     const w = await world();
     const bobs = await personalMachine(w, w.owner);
     await connect(w.human.id);
     const { d } = await githubDaemon(w, "host", bobs.token);
     const { c } = await Client.connect(w.human.token);
-    await mention(c, w);
-    const a = await d.next((f) => f.t === "run.assign");
-    expect(a.github).toMatchObject({ source: "machine", memberId: w.human.id });
-    expect(a.github.author).toBeUndefined();
-    const t = await tokenOf(a.runId, bobs.token);
-    expect(t.status).toBe(403);
-    expect(t.body.error.reason).toBe("github.not_allowed");
+    const topicId = await mention(c, w);
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.topicId === topicId && e.data.run.endedAt !== undefined);
+    expect(d.frames.filter((f) => f.t === "run.assign")).toEqual([]);
     d.close();
     c.close();
   });

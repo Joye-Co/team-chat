@@ -8,7 +8,7 @@ import { unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
 import { effectivePolicy } from "../../settings/approvals";
 import { policyPrompt, runGates } from "../../settings/rules";
-import { CONTEXT_CHARS, LEASE_MS, LIMIT_SLACK_MS, MAX_RUN_MS, type MachineView, type NoMachine, TEXT, asideRuntime, cliName, clockText, buildAsidePrompt, buildPrompt, buildResumePrompt, cut, gatesRuntime, hasFeature, hasRuntime, pickMachine, resumesRuntime, whyNoMachine } from "../dispatch";
+import { CONTEXT_CHARS, type DispatchCtx, LEASE_MS, LIMIT_SLACK_MS, MAX_RUN_MS, type MachineView, type NoMachine, TEXT, asideRuntime, cliName, clockText, buildAsidePrompt, buildPrompt, buildResumePrompt, cut, gatesRuntime, hasFeature, hasRuntime, personalBlock, pickMachine, placesFor, resumesRuntime, whyNoMachine } from "../dispatch";
 import { type ContextRow, type Selection, requestAuthors, requestText, selectLines, withSummary } from "../../context/render";
 import { teamZone } from "../../memory/consolidate";
 import { type Brief, briefText, isNewTask } from "../../agent/frontdesk";
@@ -56,6 +56,19 @@ function manifestOf(sel: Selection, resumed: boolean, m: Pick<TopicMessage, "ext
     out.lastSeq = sel.rows[sel.rows.length - 1].seq;
   }
   return out;
+}
+
+/**
+ * The code folder a run gets on its machine (machine-protocol.md `run.assign.repo`). On a
+ * personal machine (design-roles 3.3, 机 3.8) only the owner's folder for this member counts
+ * (`machine_bots.repo_path`); a folder an admin set on the member is a path on other machines,
+ * so there it clones the member's repo URL, or works in a scratch folder.
+ */
+export function repoOn(runner: Pick<BotRunner, "repo">, machine: Pick<MachineView, "ownerId" | "personalBots"> | undefined, botId: string): { url?: string; path?: string } | undefined {
+  if (!machine?.ownerId) return runner.repo;
+  const own = machine.personalBots?.get(botId);
+  if (own) return { path: own };
+  return runner.repo?.url ? { url: runner.repo.url } : undefined;
 }
 
 /** How a restarted run goes on (meta `restart:{runId}` of the run it restarts). */
@@ -143,6 +156,10 @@ export abstract class DeskRuns extends DeskCore {
     // A restart continues the work it replaces (盯 1.2): never a fresh start in the 群聊 either.
     if (isMainTopicId(m.topicId) && !followUpOf && !how && (alongside || newWork)) this.sql.exec("UPDATE runs SET fresh = 1 WHERE id = ?", runId);
     if (how?.exclude && how.exclude.length > 0) this.sql.exec("UPDATE runs SET excluded = ? WHERE id = ?", JSON.stringify(how.exclude), runId);
+    // design-roles 3.3 rule 2: handed over from a run on the person's own machine. A restart
+    // keeps the machine its work came from.
+    const fromMachine = m.fromMachine ?? (retryOf ? this.meta(`fromMachine:${retryOf}`) : null);
+    if (fromMachine) this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `fromMachine:${runId}`, fromMachine);
     if (claim.newest?.[0]) this.sql.exec("UPDATE runs SET context_seq = ? WHERE id = ?", claim.newest[0].seq, runId);
     // The request as it came, so the run can be retried with the same one. A follow-up or a
     // retry is the same piece of work: it keeps the kinds a person approved for all of it.
@@ -162,6 +179,12 @@ export abstract class DeskRuns extends DeskCore {
           .run();
         // A new run of this member in a topic answers the GitHub waits of its earlier ones there.
         if (!isMainTopicId(m.topicId)) await supersedeWaits(this.env, botId, m.topicId).catch((err) => this.log.warn("github waits cleanup failed", { runId, err }));
+        const all = await loadMachines(this.env);
+        const ctx = await this.placeCtx(r);
+        // design-roles 3.3: no machine may ever take it for its person (the member works only on
+        // someone else's own machine): said at once, without 👀, and the run does not wait.
+        const blocked = personalBlock(all, runner, ctx);
+        if (blocked) return await this.endPersonal(r, blocked);
         // Answers and live events start runs too: a card answer acknowledges on the answered card,
         // other synthetic keys get no reaction.
         if (m.ackMessageId) await this.ack(r, m.ackMessageId);
@@ -170,11 +193,11 @@ export abstract class DeskRuns extends DeskCore {
         await this.topic(r, "in_progress");
         await this.answeredReports(r);
 
-        const machines = this.machinesFor(r, await loadMachines(this.env));
-        const machine = this.pick(r, runner, machines, how?.exclude ?? []);
+        const machines = this.machinesFor(r, all);
+        const machine = this.pick(r, runner, machines, how?.exclude ?? [], ctx);
         // Every machine that could take it is busy, or (机 2.2) offline: the run waits (排队)
         // instead of failing, and starts by itself when one is free or online again.
-        const none = machine ? null : this.whyNone(r, runner, machines);
+        const none = machine ? null : this.whyNone(r, runner, machines, ctx);
         // 模 3.4: so does a run whose computers are at their subscription limit, until the reset.
         const waits = none !== null && (none.why === "busy" || ((none.why === "offline" || none.why === "limit") && !kind));
         if (!machine && !waits) {
@@ -219,9 +242,15 @@ export abstract class DeskRuns extends DeskCore {
           r.queued_at = Date.now();
           this.sql.exec("UPDATE runs SET queued_at = ? WHERE id = ?", r.queued_at, r.id);
           if (none?.why === "limit") this.keepLimit(r, none.until);
+          const places = placesFor(machines, runner, ctx);
+          this.keepPlaces(r, places.machines, places.checked && none?.why === "offline");
           await this.setStatus(r, "created");
-          // Waiting for a machine to come online: the topic says which one.
-          if (none?.why === "offline") await this.note(r, TEXT.waitOffline(none.names)).catch((err) => this.log.warn("wait note failed", { runId, err }));
+          // Waiting for a machine to come online: the topic says which one (design-roles 3.3:
+          // the person's checked machines, and how not to wait).
+          if (none?.why === "offline") {
+            const text = places.checked ? TEXT.waitPersonal(none.names) : TEXT.waitOffline(none.names);
+            await this.note(r, text).catch((err) => this.log.warn("wait note failed", { runId, err }));
+          }
           // Waiting for the limit to reset: the topic says until when.
           if (none?.why === "limit") await this.limitNote(r, runner.runtime, none);
           await this.scheduleStall();
@@ -252,6 +281,45 @@ export abstract class DeskRuns extends DeskCore {
       m.authorId === ANONYMOUS_ID ? null : await this.env.DB.prepare("SELECT kind FROM members WHERE id = ?").bind(m.authorId).first<{ kind: string }>();
     if (author?.kind === "human") return m.authorId;
     return followUpOf?.requested_for ?? null;
+  }
+
+  /**
+   * design-roles 3.3: what the ownership rules of personal machines read for a run: its person,
+   * the machine its work was handed over from, and (a hook's run) who last placed the member.
+   */
+  protected async placeCtx(r: Pick<RunRow, "id" | "requested_for">): Promise<DispatchCtx> {
+    const ctx: DispatchCtx = { botId: this.botId as string, requestedFor: r.requested_for ?? null };
+    const from = this.meta(`fromMachine:${r.id}`);
+    if (from) ctx.fromMachine = from;
+    if (ctx.requestedFor === null) {
+      const row = await this.env.DB.prepare("SELECT updated_by FROM bot_runners WHERE member_id = ?").bind(ctx.botId).first<{ updated_by: string | null }>();
+      ctx.updatedBy = row?.updated_by ?? null;
+    }
+    return ctx;
+  }
+
+  /**
+   * design-roles 3.3 `personalOnly`: no machine may ever take the run for its person; the topic
+   * says whose machine the member works on, and the run ends (reason `machine.personal_requester`).
+   */
+  protected async endPersonal(r: RunRow, ownerId: string): Promise<void> {
+    const botId = this.botId as string;
+    const names = await this.names([botId, ownerId]);
+    const text = TEXT.personalOnly(names.get(botId) ?? botId, names.get(ownerId) ?? ownerId);
+    this.log.info("run not for this machine owner", { runId: r.id, reason: "machine.personal_requester" });
+    // The front desk may have put 👀 on the request while it read it: nothing works on it now.
+    if (!r.trigger_message_id.includes(":")) await this.unack(r.group_id, r.trigger_message_id).catch(() => undefined);
+    await this.end(r, "failed", text, "blocked", text);
+  }
+
+  /**
+   * Keeps the machines a queued run may go to (its place in the queue counts only runs that
+   * wait for the same machines) and whether it waits for its person's own machines.
+   */
+  protected keepPlaces(r: Pick<RunRow, "id">, machines: MachineView[], waitsPersonal: boolean): void {
+    this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `places:${r.id}`, JSON.stringify(machines.map((m) => m.id)));
+    if (waitsPersonal) this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `waitPersonal:${r.id}`, "1");
+    else this.sql.exec("DELETE FROM meta WHERE key = ?", `waitPersonal:${r.id}`);
   }
 
   /**
@@ -370,9 +438,10 @@ export abstract class DeskRuns extends DeskCore {
   }
 
   /** Why no machine takes the run now (机 2.10); an aside run needs a daemon that runs it read-only. */
-  protected whyNone(r: RunRow, runner: BotRunner, machines: MachineView[]): NoMachine {
-    const usable = r.kind === RUN_KIND_ASIDE ? machines.filter((x) => asideRuntime(x, runner.runtime)) : machines;
-    return whyNoMachine(usable, runner, Date.now());
+  protected whyNone(r: RunRow, runner: BotRunner, machines: MachineView[], ctx?: DispatchCtx): NoMachine {
+    const placed = placesFor(machines, runner, ctx).machines;
+    const usable = r.kind === RUN_KIND_ASIDE ? placed.filter((x) => asideRuntime(x, runner.runtime)) : placed;
+    return whyNoMachine(usable, runner, Date.now(), ctx);
   }
 
   /** Why a rejected run did not start: the machines left decide, else the daemon's reason. */
@@ -422,6 +491,15 @@ export abstract class DeskRuns extends DeskCore {
   }
 
   /**
+   * design-roles 3.3: a person checked or unchecked this member on a machine, or a machine's owner
+   * changed: the queued runs are placed again now (not at the next alarm).
+   */
+  async redispatch(botId: string): Promise<void> {
+    this.bind(botId);
+    await this.dispatchQueued();
+  }
+
+  /**
    * Gives queued runs (排队) a machine, oldest first, while machines have free slots. Called
    * when a run of this bot ends and by the alarm (slots also free up in other bots' desks).
    */
@@ -436,16 +514,38 @@ export abstract class DeskRuns extends DeskCore {
         const r = this.run(id);
         if (!r || r.ended_at !== null || r.machine_id || r.status !== "created" || !r.queued_at) return false;
         const prompt = this.meta(`prompt:${id}`);
-        const machines = this.machinesFor(r, await loadMachines(this.env));
-        const machine = prompt === null ? null : this.pick(r, runner, machines, JSON.parse(r.excluded) as string[]);
-        if (!machine && prompt !== null && r.kind !== RUN_KIND_ASIDE) {
+        const all = await loadMachines(this.env);
+        const ctx = await this.placeCtx(r);
+        // design-roles 3.3: a check, a placement or an owner changed while it waited, and no
+        // machine may take it for its person any more: it stops waiting and the topic says why.
+        const blocked = personalBlock(all, runner, ctx);
+        // An ended run leaves the queue: the runs behind it move up (returns true).
+        if (blocked) {
+          await this.endPersonal(r, blocked);
+          return true;
+        }
+        const machines = this.machinesFor(r, all);
+        const machine = prompt === null ? null : this.pick(r, runner, machines, JSON.parse(r.excluded) as string[], ctx);
+        const none = machine ? null : this.whyNone(r, runner, machines, ctx);
+        if (!machine) {
+          // It waits for the person's own machines while those are offline (not only when it
+          // first queued for that: a checked laptop that was busy may go offline meanwhile).
+          const places = placesFor(machines, runner, ctx);
+          const waitsPersonal = places.checked && none?.why === "offline";
+          const before = this.meta(`waitPersonal:${id}`) !== null;
+          this.keepPlaces(r, places.machines, waitsPersonal);
+          if (waitsPersonal && !before && none?.why === "offline") {
+            await this.note(r, TEXT.waitPersonal(none.names)).catch((err) => this.log.warn("wait note failed", { runId: id, err }));
+            await this.setStatus(r, "created");
+          }
+        }
+        if (none && prompt !== null && r.kind !== RUN_KIND_ASIDE) {
           // 模 3.1: the computers' CLI was signed out while the run waited: it does not wait
           // for a sign-in nobody knows is needed; the topic says which computer needs it.
-          const none = this.whyNone(r, runner, machines);
           if (none.why === "signed_out") {
             const note = await this.signedOutNote(r, runner.runtime, none.machines);
             await this.end(r, "failed", note.text, "blocked", cut(note.text, 280), false, note.mentions);
-            return false;
+            return true;
           }
           // 模 3.4: its computers are at their limit: it waits for the reset (the topic hears
           // once, when the wait starts), and later runs that can go elsewhere still do.
@@ -459,10 +559,11 @@ export abstract class DeskRuns extends DeskCore {
             return false;
           }
         }
-        if (!machine || prompt === null) return null;
+        if (!machine || prompt === null) return false;
         if (await this.budgetGate(r, prompt)) return false;
         await this.assign(r, runner, machine, prompt);
         this.sql.exec("UPDATE runs SET queued_at = NULL WHERE id = ?", id);
+        this.sql.exec("DELETE FROM meta WHERE key IN (?, ?)", `places:${id}`, `waitPersonal:${id}`);
         r.queued_at = null;
         // 模 3.4: the limit reset: the run goes on, and the topic says so.
         const afterLimit = r.limit_until !== null;
@@ -471,7 +572,8 @@ export abstract class DeskRuns extends DeskCore {
         if (afterLimit) await this.note(r, TEXT.limitBack(r.retry_of !== null)).catch((err) => this.log.warn("limit back note failed", { runId: id, err }));
         return true;
       });
-      if (placed === null) break; // No free machine: the rest keep waiting in order.
+      // design-roles 3.3: a run with no free machine does not hold up the later ones, which may
+      // wait for other machines (A's closed laptop does not stop B's work on the team machine).
       changed ||= placed;
     }
     // The runs still waiting moved up: tell clients their new place.
@@ -505,14 +607,22 @@ export abstract class DeskRuns extends DeskCore {
 
   /** The best machine for the run; an aside run needs a daemon that runs it read-only. The
    * machine of the topic's last session comes first, so the run can continue that session. */
-  protected pick(r: RunRow, runner: BotRunner, machines: MachineView[], excluded: string[] = []): MachineView | null {
-    const usable = r.kind === RUN_KIND_ASIDE ? machines.filter((x) => asideRuntime(x, runner.runtime)) : machines;
+  protected pick(r: RunRow, runner: BotRunner, machines: MachineView[], excluded: string[] = [], ctx?: DispatchCtx): MachineView | null {
+    // design-roles 3.3: only machines that may take it for its person; the person's checked ones
+    // first and alone, and the machine the work was handed over from before the rest.
+    const placed = placesFor(machines, runner, ctx).machines;
+    const usable = r.kind === RUN_KIND_ASIDE ? placed.filter((x) => asideRuntime(x, runner.runtime)) : placed;
+    const now = Date.now();
+    if (ctx?.fromMachine) {
+      const from = pickMachine(usable.filter((x) => x.id === ctx.fromMachine), runner, now, excluded, ctx);
+      if (from) return from;
+    }
     const prev = this.lastSession(r, runner);
     if (prev) {
-      const same = pickMachine(usable.filter((x) => x.id === prev.machine_id), runner, Date.now(), excluded);
+      const same = pickMachine(usable.filter((x) => x.id === prev.machine_id), runner, now, excluded, ctx);
       if (same) return same;
     }
-    return pickMachine(usable, runner, Date.now(), excluded);
+    return pickMachine(usable, runner, now, excluded, ctx);
   }
 
   /**
@@ -710,7 +820,8 @@ export abstract class DeskRuns extends DeskCore {
     // 思考强度 only to a daemon that knows the field (an old one would ignore it silently).
     if (effort && machine && hasFeature(machine, "effort")) frame.effort = effort;
     if (r.kind === RUN_KIND_ASIDE) frame.kind = RUN_KIND_ASIDE;
-    if (runner.repo) frame.repo = { ...runner.repo, ...(runner.baseBranch ? { baseBranch: runner.baseBranch } : {}) };
+    const repo = repoOn(runner, machine, this.botId as string);
+    if (repo) frame.repo = { ...repo, ...(runner.baseBranch ? { baseBranch: runner.baseBranch } : {}) };
     // Continue the topic's last session when this run goes to the machine that has it.
     // Only a CLI that can continue it (ACP: an agent with session/load); else the full prompt.
     const prev = machine && resumesRuntime(machine, runner.runtime) ? this.lastSession(r, runner) : undefined;
@@ -795,11 +906,12 @@ export abstract class DeskRuns extends DeskCore {
       this.sql.exec("UPDATE runs SET excluded = ? WHERE id = ?", JSON.stringify(excluded), runId);
       const runner = await loadRunner(this.env.DB, this.botId as string);
       const machines = await loadMachines(this.env);
-      const machine = runner?.enabled ? this.pick(r, runner, machines, excluded) : null;
+      const ctx = await this.placeCtx(r);
+      const machine = runner?.enabled ? this.pick(r, runner, machines, excluded, ctx) : null;
       const prompt = this.meta(`prompt:${runId}`);
       if (!runner || !machine || prompt === null) {
         // 机 2.10: the true reason, from the machines left or else from the daemon's answer.
-        const none = runner ? this.whyNone(r, runner, machines.filter((x) => !excluded.includes(x.id))) : null;
+        const none = runner ? this.whyNone(r, runner, machines.filter((x) => !excluded.includes(x.id)), ctx) : null;
         if (runner && r.kind !== RUN_KIND_ASIDE && none?.why === "signed_out") {
           const note = await this.signedOutNote(r, runner.runtime, none.machines);
           return this.end(r, "failed", note.text, "blocked", cut(note.text, 280), false, note.mentions);
