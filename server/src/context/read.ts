@@ -7,6 +7,8 @@ import { ApiError } from "../core/errors";
 import { registerRoomRpc } from "../core/registry";
 import { contextRows } from "../bots/room";
 import { cut } from "../bots/dispatch";
+import { type HandoverLine, topicHandovers } from "../bots/chains";
+import { topicBots } from "../bots/participants";
 import { type ContextRow, type Names, stamp } from "./render";
 
 /** The longest state card (`topic state`). */
@@ -44,6 +46,10 @@ export interface TopicStateData {
   artifacts: { id: string; title: string; kind: string; version: number; updatedAt: number; createdBy: string; note: string | null }[];
   openCards: { messageId: string; title: string; from: string[] }[];
   decisions: { title: string; label: string; choices: string[]; by: string; at: number }[];
+  /** design-relay: the AI members that ran here, and how their latest run stands. */
+  participants?: { memberId: string; working: boolean; report: string | null; at: number }[];
+  /** design-relay R2: hand-overs and split-offs of the pieces of work that touch this topic. */
+  handovers?: HandoverLine[];
 }
 
 registerRoomRpc("context.topicState", (room, actor, args): TopicStateData => {
@@ -112,12 +118,21 @@ registerRoomRpc("context.topicState", (room, actor, args): TopicStateData => {
     .sort((a, b) => b.seq - a.seq)
     .slice(0, 5)
     .map(({ seq: _seq, ...d }) => d);
-  return { title: topic.title, messages, authors, artifacts, openCards, decisions };
+  const participants = topicBots(room.sql, topicId).map((r) => ({ memberId: r.bot_id, working: r.working === 1, report: r.report, at: r.ended_at ?? r.started_at }));
+  const handovers = topicHandovers(room.sql, topicId);
+  return { title: topic.title, messages, authors, artifacts, openCards, decisions, participants, handovers };
 });
 
 /** The member ids a state card names. */
 export function stateIds(d: TopicStateData): string[] {
-  return [...d.authors.map((a) => a.authorId), ...d.artifacts.map((a) => a.createdBy), ...d.openCards.flatMap((c) => c.from), ...d.decisions.map((x) => x.by)];
+  return [
+    ...d.authors.map((a) => a.authorId),
+    ...d.artifacts.map((a) => a.createdBy),
+    ...d.openCards.flatMap((c) => c.from),
+    ...d.decisions.map((x) => x.by),
+    ...(d.participants ?? []).map((p) => p.memberId),
+    ...(d.handovers ?? []).flatMap((h) => [...(h.from ? [h.from] : []), h.to]),
+  ];
 }
 
 /**
@@ -135,6 +150,17 @@ export function topicStateText(d: TopicStateData, name: Names): string {
   parts.push(d.artifacts.length > 0 ? "产出 (newest first; read with chat-run artifact get --id <id>):" : "产出: none yet");
   for (const a of d.artifacts) {
     parts.push(`- ${cut(oneLine(a.title), 60)} · a ${a.id} v${a.version} · ${a.kind} · ${name(a.createdBy)} ${stamp(a.updatedAt)}${a.note ? ` · ${cut(oneLine(a.note), 60)}` : ""}`);
+  }
+  if (d.participants && d.participants.length > 0) {
+    parts.push("AI members in this topic:");
+    for (const p of d.participants) parts.push(`- ${name(p.memberId)} · ${p.working ? "working" : (p.report ?? "ran here")} · ${stamp(p.at)}`);
+  }
+  if (d.handovers && d.handovers.length > 0) {
+    parts.push("Hand-overs of this work (交接; a split-off works in its own topic):");
+    d.handovers.forEach((h, i) => {
+      const how = h.kind === "handoff" ? "转交" : "分出去";
+      parts.push(`${i + 1}. ${h.from ? name(h.from) : "?"} →(${how}) ${name(h.to)} · ${h.state} · topic ${h.topicId}`);
+    });
   }
   if (d.openCards.length > 0) {
     parts.push("Open cards (waiting for an answer):");

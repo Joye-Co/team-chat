@@ -985,8 +985,9 @@ Bots' own messages never start runs, so the hand-over goes desk to desk, and a v
 who took what.
 
 - **转交** (`member.handoff`): the other member becomes the topic's `ownerId`, and the
-  calling bot posts "@B 转交给你：goal". B starts a run in the same topic, whose prompt carries the
-  work order (`goal`, `doneWhen`, `notes`). The calling run should stop.
+  calling bot posts a Card v2 "A 把这件事转交给 B" (since usable; before, the line "@B 转交给你：goal").
+  B starts a run in the same topic, whose prompt carries the work order (`goal`, `doneWhen`,
+  `notes`). The calling run should stop; the server stops it after 2 minutes, as `done`.
 - **分出去** (`member.assign`): the calling bot opens a new topic with "@B goal". B works there.
   When B's run ends (done, failed or blocked), its result goes back to the giver's topic: as
   `run.input` to the giver's active run (`inputId` `desk-part-…`), or else as a follow-up run.
