@@ -1352,12 +1352,24 @@ mod tests {
             ("sh -xc 'rm -rf ~'", "deleteData"),
             ("bash -euxc 'gh pr merge 5'", "mergeMain"),
             ("zsh -fc 'npm publish'", "externalPublish"),
-            (r#"node -e "require('child_process').execSync('gh pr merge 5')""#, "mergeMain"),
+            (
+                r#"node -e "require('child_process').execSync('gh pr merge 5')""#,
+                "mergeMain",
+            ),
             (r#"perl -e "system('gh pr merge 5')""#, "mergeMain"),
             (r#"ruby -e "system('gh pr merge 5')""#, "mergeMain"),
-            (r#"python3 -c "import os; os.system('gh pr merge 5')""#, "mergeMain"),
-            (r#"perl -pe "s/a b/c/; system('gh pr merge 5')" f"#, "mergeMain"),
-            (r#"osascript -e "do shell script \"gh pr merge 5\"""#, "mergeMain"),
+            (
+                r#"python3 -c "import os; os.system('gh pr merge 5')""#,
+                "mergeMain",
+            ),
+            (
+                r#"perl -pe "s/a b/c/; system('gh pr merge 5')" f"#,
+                "mergeMain",
+            ),
+            (
+                r#"osascript -e "do shell script \"gh pr merge 5\"""#,
+                "mergeMain",
+            ),
             // What a line prints into a shell runs.
             (
                 r#"echo "curl -X PUT https://api.github.com/repos/o/r/pulls/5/merge" | sh"#,
