@@ -33,6 +33,28 @@ impl RelayCache {
         );
     }
 
+    /// Keeps why the server refused a send as 按顺序做. A refused first message of a new 话题
+    /// has no topic id: its refusal goes under the pending 话题 the composer stays on.
+    pub(super) fn refused_send(&self, f: &chat_core::SendFailure) -> bool {
+        if !is_relay_refusal(f.kind, f.reason.as_deref()) {
+            return false;
+        }
+        let topic_id = f
+            .topic_id
+            .clone()
+            .unwrap_or_else(|| super::convert::pending_topic_id(&f.id));
+        self.refused(
+            &f.group_id,
+            &topic_id,
+            &f.id,
+            RelayRefusal {
+                reason: f.reason.clone().unwrap_or_default(),
+                member_ids: f.member_ids.clone(),
+            },
+        );
+        true
+    }
+
     /// I wrote in the 话题 again: the old refusal no longer applies.
     pub(super) fn clear_topic(&self, group_id: &str, topic_id: &str) -> bool {
         lock(&self.refusals)
@@ -158,5 +180,45 @@ mod tests {
         assert!(c.clear_topic("g", "t2"));
         assert!(!c.clear_topic("g", "t2"));
         assert_eq!(c.get("g", "t2"), None);
+    }
+
+    fn failure(topic_id: Option<&str>, reason: Option<&str>) -> chat_core::SendFailure {
+        chat_core::SendFailure {
+            id: "c9".into(),
+            kind: "send",
+            group_id: "g".into(),
+            topic_id: topic_id.map(str::to_string),
+            code: chat_core::proto::ErrorCode::Conflict,
+            message: String::new(),
+            reason: reason.map(str::to_string),
+            member_ids: vec!["b1".into()],
+        }
+    }
+
+    #[test]
+    fn a_refused_order_in_a_topic_is_kept_under_it() {
+        let c = RelayCache::default();
+        assert!(c.refused_send(&failure(Some("t"), Some("relay.member_unavailable"))));
+        assert_eq!(c.get("g", "t"), Some(refusal("b1")));
+    }
+
+    #[test]
+    fn a_refused_order_starting_a_topic_is_kept_under_the_pending_topic() {
+        let c = RelayCache::default();
+        assert!(c.refused_send(&failure(None, Some("relay.member_unavailable"))));
+        let pending = super::super::convert::pending_topic_id("c9");
+        assert_eq!(c.get("g", &pending), Some(refusal("b1")));
+        assert_eq!(c.clear_message("c9"), vec![("g".into(), pending)]);
+    }
+
+    #[test]
+    fn other_refusals_are_not_kept() {
+        let c = RelayCache::default();
+        assert!(!c.refused_send(&failure(None, Some("card.already_answered"))));
+        assert!(!c.refused_send(&failure(None, None)));
+        assert_eq!(
+            c.get("g", &super::super::convert::pending_topic_id("c9")),
+            None
+        );
     }
 }

@@ -982,27 +982,23 @@ impl CoreProvider {
                     self.shared.cards_v2.on_refused(&a.client, &f.id, f.code);
                 }
                 // --- end cards v2 track ---
-                if relay::is_relay_refusal(f.kind, f.reason.as_deref())
-                    && let Some(t) = &f.topic_id
-                {
-                    self.shared.relay.refused(
-                        &f.group_id,
-                        t,
-                        &f.id,
-                        crate::data::RelayRefusal {
-                            reason: f.reason.clone().unwrap_or_default(),
-                            member_ids: f.member_ids.clone(),
-                        },
-                    );
-                }
+                let relay_refused = self.shared.relay.refused_send(&f);
                 match f.topic_id {
                     Some(topic_id) => out.push(Change::Messages {
                         group_id: f.group_id,
                         topic_id,
                     }),
-                    None => out.push(Change::Topics {
-                        group_id: f.group_id,
-                    }),
+                    None => {
+                        if relay_refused {
+                            out.push(Change::Messages {
+                                group_id: f.group_id.clone(),
+                                topic_id: pending_topic_id(&f.id),
+                            });
+                        }
+                        out.push(Change::Topics {
+                            group_id: f.group_id,
+                        })
+                    }
                 }
             }
             ClientUpdate::CaughtUp => out.extend([Change::Groups, Change::Todo]),
