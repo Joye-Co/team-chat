@@ -12,6 +12,7 @@ import { stamp } from "../../context/render";
 import { MAX_FOLLOW_UPS, type RunRow, codeOf, isStallStatus, sanitizeAcceptance, sanitizePlan, sanitizeUsage, sessionIdOf } from "./core";
 import { DeskRuns, type RunRequest } from "./runs";
 import { briefText } from "../../agent/frontdesk";
+import { countCited } from "../../memory/inject";
 import { retroAfterRun } from "../../memory/retro";
 import { DAEMON_RESTARTED, MAX_DAEMON_RESUMES } from "../../agent/recovery";
 
@@ -575,6 +576,9 @@ export abstract class DeskEvents extends DeskRuns {
       const raw = this.meta(`request:${r.id}`);
       if (raw === null) return;
       const req = JSON.parse(raw) as RunRequest;
+      // A memory counts as used when the run cites its id (盯 4.9), not because its prompt carried it.
+      const cited = `${result}\n${r.progress_text ?? ""}`;
+      this.ctx.waitUntil(countCited(this.env, { botId: this.botId as string, groupId: r.group_id, requesterId: req.m.authorId }, cited));
       const input = {
         botId: this.botId as string,
         runId: r.id,

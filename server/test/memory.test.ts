@@ -165,10 +165,10 @@ describe("memory from runs", () => {
     expect(b.prompt).toContain("登录测试要先起 mock 服务");
     expect(b.prompt).not.toContain("Alice 要中文回复");
 
-    // Each prompt counted a use.
+    // Being in a prompt is not a use (盯 4.9); memory-search.test.ts covers searches and citations.
     const team = (await list(w.human.token, "team")).body.memories.find((m: any) => m.text === "提交信息只写一行");
-    expect(team.uses).toBeGreaterThanOrEqual(2);
-    expect(team.lastUsedAt).toBeGreaterThan(0);
+    expect(team.uses).toBe(0);
+    expect(team.lastUsedAt).toBeNull();
     d.close();
     c.close();
   });

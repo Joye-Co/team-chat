@@ -172,7 +172,14 @@ export abstract class DeskFront extends DeskStall {
       request: requestText(m.body, m.ext, name),
       dm: m.dm === true,
       ...(followUp ? { followUp: true } : {}),
-      memory: await memoryIndex(this.env, { botId, groupId: m.groupId, requesterId: m.authorId, requesterName: name(m.authorId), maxBytes: FRONT_DESK_MEMORY_BYTES }),
+      memory: await memoryIndex(this.env, {
+        botId,
+        groupId: m.groupId,
+        requesterId: m.authorId,
+        requesterName: name(m.authorId),
+        maxBytes: FRONT_DESK_MEMORY_BYTES,
+        query: requestText(m.body, m.ext, name),
+      }),
     }, { track: tracker(this.env, "front_desk", cfg, this.log) });
     return { res, seen: peek.newest?.[0]?.seq };
   }
