@@ -4,8 +4,10 @@
 //! them itself over HTTP with the machine token, as the run's member (results can be larger
 //! than a machine frame). They only read.
 //!
-//! `file.get` writes the file inside the run's working folder only: `--out` must resolve there
-//! (symbolic links included), and the default is `<working folder>/.chat-files/<fileId>/<name>`.
+//! `file.get` writes `--out` inside the run's working folder only (symbolic links included).
+//! Without `--out` it writes `<run folder>/downloads/<fileId>/<name>`, outside the working
+//! folder, so a download is never committed to the member's branch (verify-log problem 7); the
+//! result says where (`path`, `inWorkFolder`).
 
 use crate::chat_run_files::{Local, answer, client, encode, err, mime_of, url};
 use serde_json::{Value, json};
@@ -62,8 +64,11 @@ pub const MAX_SEARCH_LIMIT: u64 = 50;
 pub const MAX_MEMORY_SEARCH_LIMIT: u64 = 50;
 /// `file.get` refuses files over 100 MiB.
 pub const MAX_GET_BYTES: u64 = 100 * 1024 * 1024;
-/// The folder of downloaded files in the working folder (git ignores it).
+/// The folder of downloaded files in the working folder (git ignores it); only for a run
+/// without a downloads folder.
 pub const FILES_DIR: &str = ".chat-files";
+/// The folder of downloaded files in the run folder (outside the working folder).
+pub const DOWNLOADS_DIR: &str = "downloads";
 /// `file.get` waits like the other file ops.
 pub const FILE_TIMEOUT: Duration = crate::chat_run_files::TIMEOUT;
 /// The reads answer with one JSON document.
@@ -360,15 +365,37 @@ fn default_dir(root: &Path, file_id: &str) -> Result<PathBuf, Value> {
     }
 }
 
-/// Downloads one file of the run's group into the working folder.
+/// `<run folder>/downloads/<fileId>/`, made (the daemon's own folder: no link rules apply).
+fn download_dir(downloads: &Path, file_id: &str) -> Result<PathBuf, Value> {
+    let dir = downloads.join(file_id);
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        err(
+            "failed",
+            None,
+            format!("cannot make {}: {e}", dir.display()),
+        )
+    })?;
+    std::fs::canonicalize(&dir).map_err(|e| {
+        err(
+            "failed",
+            None,
+            format!("cannot read {}: {e}", dir.display()),
+        )
+    })
+}
+
+/// Downloads one file of the run's group: into the run folder, or to `out` in the working folder.
 async fn get(local: &Local, body: &Value) -> Value {
     let Some(file_id) = body["fileId"].as_str().filter(|s| valid_id(s)) else {
         return err("invalid", None, "fileId is required");
     };
-    let target = match body["out"].as_str().filter(|s| !s.is_empty()) {
-        Some(out) => resolve_out(&local.root, out),
-        None => default_dir(&local.root, file_id).map(Target::Dir),
+    let out = body["out"].as_str().filter(|s| !s.is_empty());
+    let target = match (out, &local.downloads) {
+        (Some(out), _) => resolve_out(&local.root, out),
+        (None, Some(downloads)) => download_dir(downloads, file_id).map(Target::Dir),
+        (None, None) => default_dir(&local.root, file_id).map(Target::Dir),
     };
+    let in_work = out.is_some() || local.downloads.is_none();
     let target = match target {
         Ok(t) => t,
         Err(e) => return e,
@@ -462,6 +489,7 @@ async fn get(local: &Local, body: &Value) -> Value {
         "name": name,
         "mime": mime,
         "size": size,
+        "inWorkFolder": in_work,
     } })
 }
 
@@ -897,6 +925,7 @@ mod tests {
             run_id: "R1".into(),
             root: root.to_path_buf(),
             redactor: Arc::new(Redactor::new(vec![])),
+            downloads: None,
         }
     }
 
@@ -988,7 +1017,7 @@ mod tests {
             a,
             json!({ "ok": true, "result": {
                 "path": path.display().to_string(), "name": "报告/1.pdf",
-                "mime": "application/pdf", "size": 6,
+                "mime": "application/pdf", "size": 6, "inWorkFolder": true,
             } })
         );
         assert_eq!(std::fs::read(&path).unwrap(), b"%PDF-1");
@@ -1067,6 +1096,34 @@ mod tests {
         )
         .await;
         assert_eq!(a["error"]["reason"], "file.outside_workspace");
+    }
+
+    #[tokio::test]
+    async fn file_get_without_out_writes_into_the_run_folder_not_the_working_folder() {
+        // Problem 7: a download in the working folder would be committed to the member's branch.
+        let run = tempfile::tempdir().unwrap();
+        let work = run.path().join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        let (url, _) = server(
+            "200 OK",
+            vec![("X-File-Name", "shapes.png".into())],
+            b"png".to_vec(),
+        )
+        .await;
+        let mut l = local(&url, &work);
+        l.downloads = Some(run.path().join(DOWNLOADS_DIR));
+        let a = handle(FILE_GET, &json!({ "fileId": "F1" }), &l).await;
+        let path = std::fs::canonicalize(run.path())
+            .unwrap()
+            .join("downloads/F1/shapes.png");
+        assert_eq!(a["result"]["path"], path.display().to_string());
+        assert_eq!(a["result"]["inWorkFolder"], false);
+        assert_eq!(std::fs::read(&path).unwrap(), b"png");
+        assert_eq!(std::fs::read_dir(&work).unwrap().count(), 0);
+        // `--out` still goes into the working folder, and says so.
+        let a = handle(FILE_GET, &json!({ "fileId": "F1", "out": "in/a.png" }), &l).await;
+        assert_eq!(a["result"]["inWorkFolder"], true);
+        assert!(work.join("in/a.png").exists());
     }
 
     #[tokio::test]
