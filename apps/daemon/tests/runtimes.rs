@@ -753,7 +753,12 @@ fn aside_runs_ignore_widening_config() {
     );
     assert_eq!(
         runtime::codex::app_server_args(&s).unwrap(),
-        vec!["app-server", "--dangerously-bypass-approvals-and-sandbox"]
+        vec![
+            "app-server",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "-c",
+            "features.memories=false"
+        ]
     );
     s.aside = true;
     assert_eq!(
@@ -788,6 +793,7 @@ fn aside_runs_ignore_widening_config() {
         "features.browser_use=false",
         "features.browser_use_external=false",
         "features.computer_use=false",
+        "features.memories=false",
         "mcp_servers.github={command=\"true\",enabled=false}",
         "mcp_servers.writer-2={url=\"http://127.0.0.1/\",enabled=false}",
         "mcp_servers.repo_tool={command=\"true\",enabled=false}",
@@ -1024,7 +1030,13 @@ async fn codex_sandbox_lets_chat_run_answer_without_network() {
     let args = runtime::codex::app_server_args(&s).unwrap();
     assert_eq!(
         args,
-        ["app-server", closed[0], closed[1]],
+        [
+            "app-server",
+            closed[0],
+            closed[1],
+            "-c",
+            "features.memories=false"
+        ],
         "the user's network setting stays"
     );
 
@@ -1406,7 +1418,10 @@ fn codex_runs_always_have_full_access() {
             "{configured:?}"
         );
         assert!(runtime::codex::chat_run_works(&s));
-        assert_eq!(runtime::codex::app_server_args(&s).unwrap(), ["app-server"]);
+        assert_eq!(
+            runtime::codex::app_server_args(&s).unwrap(),
+            ["app-server", "-c", "features.memories=false"]
+        );
     }
     // Gated actions: still full access, approval `untrusted` so commands come to the daemon;
     // a side chat stays read-only with `never`.
@@ -1426,7 +1441,13 @@ fn codex_runs_always_have_full_access() {
     s.cfg.args = vec!["-c".into(), "model_reasoning_effort=\"high\"".into()];
     assert_eq!(
         runtime::codex::app_server_args(&s).unwrap(),
-        ["app-server", "-c", "model_reasoning_effort=\"high\""]
+        [
+            "app-server",
+            "-c",
+            "model_reasoning_effort=\"high\"",
+            "-c",
+            "features.memories=false"
+        ]
     );
 }
 
@@ -1482,6 +1503,12 @@ async fn codex_resumes_the_thread_or_starts_a_new_one() {
         )
         .unwrap();
         assert_eq!(seen, calls);
+        // Codex's own memory is off (存 3.6).
+        let argv: Vec<String> = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join("work/argv.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(argv, ["app-server", "-c", "features.memories=false"]);
     }
 }
 
