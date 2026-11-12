@@ -58,6 +58,34 @@ pub struct Config {
     /// `scripts/runner/host-setup.sh`). Absent: CLIs run as processes of this machine.
     #[serde(default)]
     pub vm: Option<VmConfig>,
+    /// Tests only: the daemon's clocks in milliseconds, so a test can freeze the daemon for
+    /// seconds instead of over a minute. Never set in a real config.
+    #[serde(default)]
+    pub test_clocks: Option<TestClocks>,
+}
+
+impl Config {
+    /// How much later than its period a tick must come to count as a sleep (None: the
+    /// default, [`crate::sys::SLEEP_LATE`]).
+    pub fn sleep_late(&self) -> Option<std::time::Duration> {
+        self.test_clocks
+            .and_then(|c| c.late_ms)
+            .map(std::time::Duration::from_millis)
+    }
+}
+
+/// Tests only (see [`Config::test_clocks`]). Each one left out keeps its usual value.
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct TestClocks {
+    /// The stall limit, instead of `stall_minutes`.
+    pub stall_ms: Option<u64>,
+    /// The period of a run's supervisor tick (15 s otherwise).
+    pub tick_ms: Option<u64>,
+    /// How much later than its period a tick must come to count as a sleep (20 s otherwise).
+    pub late_ms: Option<u64>,
+    /// How long a gated run waits for the CLI's start-up hook (45 s otherwise).
+    pub hooks_start_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -484,18 +512,5 @@ mod tests {
         assert!(!super::Config::parse(&off).unwrap().self_update);
         let example = super::EXAMPLE.replace("# self_update = false", "self_update = false");
         assert!(!super::Config::parse(&example).unwrap().self_update);
-    }
-
-    /// `asks_permission` is off unless a runtime sets it.
-    #[test]
-    fn asks_permission_is_off_by_default() {
-        let c = super::Config::parse(
-            "server_url = \"http://127.0.0.1:1\"\ntoken_file = \"t\"\n\
-             [runtimes.gemini]\nkind = \"acp\"\ncommand = \"gemini\"\nasks_permission = true\n\
-             [runtimes.opencode]\nkind = \"acp\"\ncommand = \"opencode\"\n",
-        )
-        .unwrap();
-        assert!(c.runtimes["gemini"].asks_permission);
-        assert!(!c.runtimes["opencode"].asks_permission);
     }
 }

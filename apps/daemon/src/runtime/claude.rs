@@ -728,7 +728,13 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
     // settings. A CLI that does not run it has its hooks turned off (managed settings that
     // allow only managed hooks), and would run every gated command unasked.
     if let Some(mut alive) = spec.gate_alive.clone().filter(|_| gate_settings_installed) {
-        let started = tokio::time::timeout(crate::gates::HOOKS_START, alive.wait_for(|a| *a)).await;
+        let started = tokio::time::timeout(
+            spec.gates
+                .as_ref()
+                .map_or(crate::gates::HOOKS_START, |g| g.hooks_start()),
+            alive.wait_for(|a| *a),
+        )
+        .await;
         if !matches!(started, Ok(Ok(_))) {
             return Outcome::failed(
                 "the approval hook did not start: hooks are turned off for this CLI (its \
