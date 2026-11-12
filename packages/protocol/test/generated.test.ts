@@ -30,6 +30,7 @@ test("diffTree names missing, changed and hand-written files; writeTree fixes al
     expect(diffTree(dir, tree)).toEqual([]);
     writeFileSync(join(dir, "two.json"), "x\n");
     writeFileSync(join(dir, "a/by-hand.json"), "{}\n");
+    writeFileSync(join(dir, "a/.DS_Store"), "litter");
     rmSync(join(dir, "a/one.json"));
     expect(diffTree(dir, tree)).toEqual([
       "changed two.json",
@@ -39,6 +40,7 @@ test("diffTree names missing, changed and hand-written files; writeTree fixes al
     writeTree(dir, tree);
     expect(diffTree(dir, tree)).toEqual([]);
     expect(readFileSync(join(dir, "two.json"), "utf8")).toBe("2\n");
+    expect(readFileSync(join(dir, "a/.DS_Store"), "utf8")).toBe("litter");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

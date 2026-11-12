@@ -7,6 +7,7 @@ import { dirname, join, relative, sep } from "node:path";
 /** Relative path (with `/`) to file text. */
 export type Tree = Map<string, string>;
 
+// Dotfiles (.DS_Store and other OS litter, which git ignores) are never generated and never checked.
 function walk(dir: string): string[] {
   let entries;
   try {
@@ -14,7 +15,9 @@ function walk(dir: string): string[] {
   } catch {
     return [];
   }
-  return entries.flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]));
+  return entries
+    .filter((e) => !e.name.startsWith("."))
+    .flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]));
 }
 
 function onDisk(root: string): string[] {
