@@ -147,7 +147,8 @@ describe("limit wait in the topic", () => {
     await waitUntil(() => botMessages(c, topicId, w.bot.id).find((m) => m.body === TEXT.limitBack(true)), 5000, "back note");
     await waitUntil(() => botMessages(c, t2, w.bot.id).find((m) => m.body === TEXT.limitBack(false)), 5000, "back note 2");
     const placed = (await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === waiting.id && e.data.run.machineId !== undefined)).data.run;
-    expect(placed.waitingFor).toBeUndefined();
+    // Placed on its computer, not yet accepted: it waits for the computer to start it (design-takeover 3.1), not the limit.
+    expect(placed).toMatchObject({ phase: "waiting_computer", waitingFor: "booting" });
 
     // It goes on and ends well; a success clears the computer's limit.
     d.send({ t: "run.accept", runId: cont.runId });

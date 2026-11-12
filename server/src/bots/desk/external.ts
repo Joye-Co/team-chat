@@ -28,6 +28,7 @@ export interface UsageRun {
   models?: ModelUsage[];
 }
 import { DeskGithub } from "./github";
+import type { RunViewer } from "./hand";
 import { type DeskRollup, deskRollup } from "../../monitor/rollup";
 
 /** A run held at the budget (meta `budget_hold:{runId}`): the state when it was held. */
@@ -385,18 +386,32 @@ export class BotDesk extends DeskGithub {
     runId: string,
     afterSeq = 0,
     limit = DEFAULT_PAGE,
+    viewer?: RunViewer,
   ): Promise<{ run: BotRun; entries: unknown[]; hasMore: boolean; lastSeq: number } | null> {
     this.bind(botId);
     const r = this.run(runId);
     if (!r) return null;
     const n = Math.max(1, Math.min(limit, MAX_PAGE));
-    const rows = this.sql
-      .exec<{ frame: string }>("SELECT frame FROM run_log WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?", runId, afterSeq, n + 1)
-      .toArray();
+    // design-takeover 3.6: entries the viewer may not see are left out; a page is never empty
+    // while more follow (a client pages from the seq of the last entry it got).
+    const entries: unknown[] = [];
+    let cursor = afterSeq;
+    let hasMore = false;
+    // Scans on until an entry is found or the log ends; after the first page in larger steps.
+    for (let size = n; ; size = MAX_PAGE) {
+      const rows = this.sql
+        .exec<{ seq: number; frame: string }>("SELECT seq, frame FROM run_log WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?", runId, cursor, size + 1)
+        .toArray();
+      const page = rows.slice(0, size);
+      entries.push(...this.visibleEntries(runId, page.map((x) => JSON.parse(x.frame)), viewer));
+      hasMore = rows.length > size;
+      if (page.length > 0) cursor = page[page.length - 1].seq;
+      if (!hasMore || entries.length > 0) break;
+    }
     return {
       run: this.toRun(r),
-      entries: rows.slice(0, n).map((x) => JSON.parse(x.frame)),
-      hasMore: rows.length > n,
+      entries: entries.slice(0, n),
+      hasMore: hasMore || entries.length > n,
       lastSeq: r.last_seq,
     };
   }
