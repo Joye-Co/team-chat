@@ -92,7 +92,7 @@ pub fn model_line(run: &BotRunSummary) -> Option<String> {
             Some(e) => fill(
                 p::FACT_MODEL_EFFORT,
                 &[
-                    ("model", model),
+                    ("name", model),
                     ("effort", &crate::views::settings::members::effort_text(e)),
                 ],
             ),

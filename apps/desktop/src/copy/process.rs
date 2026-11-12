@@ -79,7 +79,7 @@ crate::copy! {
     // The facts of a run (a DescriptionList, COMPLETENESS §2.5).
     FACT_MACHINE = "电脑",
     FACT_MODEL = "模型",
-    FACT_MODEL_EFFORT = "{model} · 思考强度{effort}",
+    FACT_MODEL_EFFORT = "{name} · 思考强度{effort}",
     FACT_REQUESTED_BY = "发起",
     FACT_TIME = "时间",
     FACT_STARTED = "开始",
