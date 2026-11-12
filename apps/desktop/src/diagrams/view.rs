@@ -591,7 +591,10 @@ fn image_with_hits(
                         .when(!scrolls, |d| d.justify_center())
                         // Room under the drawing for the scrollbar, so it never covers it.
                         .when(scrolls, |d| {
-                            d.overflow_x_scroll().track_scroll(&scroll).pb(space::S16)
+                            d.overflow_x_scroll()
+                                .restrict_scroll_to_axis()
+                                .track_scroll(&scroll)
+                                .pb(space::S16)
                         })
                         .child(
                             div()

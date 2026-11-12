@@ -408,6 +408,7 @@ fn render_table(
                 .id(ElementId::Name(format!("{key}-scroll").into()))
                 .w_full()
                 .overflow_x_scroll()
+                .restrict_scroll_to_axis()
                 .child(div().flex().flex_col().child(header).children(body)),
         )
         .when(hidden > 0, |el| {
