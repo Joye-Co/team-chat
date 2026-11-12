@@ -429,6 +429,7 @@ impl Daemon {
                         failure: Some(crate::proto::RunFailure::new(
                             crate::proto::failure_kind::OTHER,
                         )),
+                        resume_missed: None,
                     }),
                     &mut buffer,
                     last,
@@ -1430,6 +1431,7 @@ mod tests {
             duration_ms: 0,
             code: None,
             failure: None,
+            resume_missed: None,
         };
         let mut d = done("cancelled", None);
         interrupted_by_stop(&mut d, Some("sess-old"));
@@ -1462,6 +1464,7 @@ mod tests {
             duration_ms: 0,
             code: None,
             failure: kind.map(crate::proto::RunFailure::new),
+            resume_missed: None,
         };
         note_sign_in(&marks, &worked, "claude", &done("failed", Some("network")));
         assert!(marks.lock().unwrap().is_empty());

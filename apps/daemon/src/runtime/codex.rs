@@ -372,6 +372,8 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
     let mut norm = CodexNormalizer::default();
     let mut thread_id: Option<String> = None;
     let mut session_file: Option<PathBuf> = None;
+    // `thread/resume` failed and the first turn got `spec.full_prompt`.
+    let mut resume_missed = false;
     let mut turn_running = false;
     let mut active_turn: Option<String> = None;
     let mut queued: VecDeque<String> = VecDeque::new();
@@ -435,6 +437,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                     o.session_file = session_file;
                     o.result_text = norm.last_message;
                     o.usage = norm.usage;
+                    o.resume_missed = resume_missed;
                     return o;
                 };
                 let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
@@ -447,6 +450,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                                 Pending::Steer { text } => queued.push_back(text),
                                 // The thread is gone (another CODEX_HOME, removed): a new one.
                                 Pending::ThreadResume { params } => {
+                                    resume_missed = spec.full_prompt.is_some();
                                     let id = ids.next_id();
                                     pending.insert(id, Pending::ThreadStart);
                                     let _ = p.write_json(&json!({ "id": id, "method": "thread/start", "params": params })).await;
@@ -508,7 +512,11 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                                 let id = ids.next_id();
                                 pending.insert(id, Pending::TurnStart);
                                 turn_running = true;
-                                let params = turn_start_params(&tid, &spec.prompt, spec.effort.as_deref());
+                                let text = match &spec.full_prompt {
+                                    Some(full) if resume_missed => full,
+                                    _ => &spec.prompt,
+                                };
+                                let params = turn_start_params(&tid, text, spec.effort.as_deref());
                                 let _ = p.write_json(&json!({ "id": id, "method": "turn/start", "params": params })).await;
                             }
                             Pending::TurnStart => {
@@ -609,6 +617,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                         return Outcome {
                             status: Status::Cancelled, exit_code: code, result_text: norm.last_message,
                             error: None, session_id: thread_id, session_file, usage: norm.usage, failure: None,
+                            resume_missed,
                         };
                     }
                 }
@@ -653,6 +662,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
         session_id: thread_id,
         session_file,
         usage: norm.usage,
+        resume_missed,
     }
 }
 

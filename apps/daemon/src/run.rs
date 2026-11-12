@@ -751,6 +751,7 @@ pub async fn supervise(ctx: RunCtx) {
                     .resume_session_id
                     .clone()
                     .filter(|s| runtime::valid_session_id(s)),
+                full_prompt: assign.full_prompt.clone(),
                 gate_hook,
                 gate_alive,
                 gates: Some(gates.clone()),
@@ -850,6 +851,7 @@ this machine cannot be made to stop at them (update it)",
         code,
         failure: (status == "failed")
             .then(|| crate::failure::of_run(outcome.failure.as_ref(), outcome.error.as_deref())),
+        resume_missed: outcome.resume_missed.then_some(true),
     }));
     if let Some(mut meta) = workspace::read_meta(&dir) {
         meta.finished_at = Some(now_ms());
@@ -1461,6 +1463,7 @@ mod tests {
             session_upload: None,
             kind: None,
             resume_session_id: None,
+            full_prompt: None,
             gates: None,
             github: Some(spec.clone()),
         };
@@ -1520,6 +1523,7 @@ mod tests {
             session_upload: None,
             kind: kind.map(str::to_string),
             resume_session_id: None,
+            full_prompt: None,
             gates: None,
             github: None,
         };
