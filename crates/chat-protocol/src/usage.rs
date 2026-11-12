@@ -126,4 +126,38 @@ pub struct TeamUsage {
     pub pairs: Vec<PairSpend>,
     pub runtimes: Vec<RuntimeSpend>,
     pub daily: Vec<UsageDay>,
+    /// Usable: the AI 服务's own calls in the span (absent from older servers). Not in `total`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service: Option<ServiceUsage>,
+}
+
+/// Usable (模 1.9): the server's own model calls (front desk, titles, summaries, review, tidy).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceUsage {
+    pub calls: u32,
+    /// Calls that failed (they used no tokens).
+    pub failures: u32,
+    pub cost_usd: f64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read_tokens: Option<u64>,
+    /// Tokens of a model with no known price: not in `cost_usd`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unpriced_tokens: Option<u64>,
+    /// By use, most tokens first.
+    #[serde(default)]
+    pub uses: Vec<ServiceUseSpend>,
+}
+
+/// One use's share of [`ServiceUsage`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceUseSpend {
+    #[serde(rename = "use")]
+    pub use_: String,
+    pub calls: u32,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
 }

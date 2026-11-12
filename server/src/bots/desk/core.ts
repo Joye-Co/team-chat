@@ -593,6 +593,12 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
           `,
         },
         {
+          // Usable 模 4.1: how the run's CLI was signed in when the run was sent ("subscription" |
+          // "api_key"); the weekly budget counts by it. Old rows: NULL (the machine's sign-in now).
+          name: "desk-login-method",
+          up: `ALTER TABLE runs ADD COLUMN login_method TEXT;`,
+        },
+        {
           // Verify 2, problem 9: a queued run says whether it waits for a computer to come
           // online (`offline`) or for a free one. Old rows: NULL (waiting for a free one).
           name: "desk-wait-for",

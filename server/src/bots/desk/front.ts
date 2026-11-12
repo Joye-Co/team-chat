@@ -3,8 +3,8 @@
 // delivery acts on the same decision. Without an AI service, or for anything that is not a plain
 // human request, the request becomes a run as before.
 import { CARD_V2_VERSION, type CardV2, isMainTopicId } from "@chat/protocol";
-import { loadModelConfig } from "../../aiservice";
 import type { ModelConfig } from "../../aiservice/providers";
+import { tracker, useConfig } from "../../aiservice/uses";
 import { type Decision, type DecideResult, FRONT_DESK_CHARS, decide } from "../../agent/frontdesk";
 import { CARD_PATCH_RPC } from "../../cards2";
 import { firstLine } from "../dispatch";
@@ -80,7 +80,9 @@ export abstract class DeskFront extends DeskStall {
     const botId = this.botId as string;
     let row = this.decisionRow(m.messageId);
     if (!row) {
-      const cfg = await loadModelConfig(this.env);
+      // 模 1.5: no config, the front desk switched off, or a key that cannot be read (the Worker
+      // secret missing or changed): the request becomes a run as without a front desk.
+      const cfg = await useConfig(this.env, "front_desk", this.log);
       if (!cfg) return this.start(m);
       let res: DecideResult | undefined;
       for (let round = 0; !res; round++) {
@@ -178,7 +180,7 @@ export abstract class DeskFront extends DeskStall {
         maxBytes: FRONT_DESK_MEMORY_BYTES,
         query: requestText(m.body, m.ext, name),
       }),
-    });
+    }, { track: tracker(this.env, "front_desk", cfg, this.log) });
     return { res, seen: peek.newest?.[0]?.seq };
   }
 

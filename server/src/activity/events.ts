@@ -2,6 +2,7 @@
 // finish, a machine that went offline and came back, and an AI member reaching its weekly budget.
 // Unlike the admin events, which the audit trigger copies, these are written here; `audit_id` is 0.
 import type { UsageRun } from "../bots/desk/external";
+import { type LoginMethodsOf, machineLoginMethods, paidRuns } from "../budget/paid";
 import type { Env } from "../core/env";
 import { teamZone } from "../memory/consolidate";
 import { loadPrices, priceRun } from "../usage/prices";
@@ -11,8 +12,18 @@ export const OFFLINE_GRACE_MS = 5 * 60_000;
 
 export interface ActivityEvent {
   at: number;
-  kind: "run" | "machine" | "budget";
-  action: "run.failed" | "machine.offline" | "machine.online" | "budget.reached" | "budget.paused" | "budget.raised" | "budget.stopped";
+  /** "key": the team's AI 服务 key keeps failing, or works again (aiservice/uses.ts). */
+  kind: "run" | "machine" | "budget" | "key";
+  action:
+    | "run.failed"
+    | "machine.offline"
+    | "machine.online"
+    | "budget.reached"
+    | "budget.paused"
+    | "budget.raised"
+    | "budget.stopped"
+    | "ai.failing"
+    | "ai.recovered";
   actorId?: string | null;
   target?: string | null;
   machineId?: string | null;
@@ -57,6 +68,8 @@ export async function activityAfterRun(
     title: () => Promise<string>;
     /** This bot's ended runs since a time, for this week's spend. */
     runsSince: (from: number) => Promise<UsageRun[]>;
+    /** Tests: how machines are signed in; the machines' heartbeats otherwise. */
+    loginMethodsOf?: LoginMethodsOf;
     now?: number;
   },
 ): Promise<void> {
@@ -81,7 +94,8 @@ export async function activityAfterRun(
   const budget = row?.budget;
   if (typeof budget !== "number" || budget <= 0) return;
   const from = weekStart(now, teamZone(env));
-  const runs = await input.runsSince(from);
+  // 模 4.1: runs on a subscription sign-in do not count toward the budget.
+  const runs = await paidRuns(await input.runsSince(from), input.loginMethodsOf ?? machineLoginMethods(env));
   const runner = { runtime: row?.runtime ?? null, model: row?.model ?? null };
   const prices = await loadPrices(env);
   const priced = runs.map((r) => priceRun(r, prices, runner));

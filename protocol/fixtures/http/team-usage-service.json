@@ -1,0 +1,47 @@
+{
+  "kind": "TeamUsage",
+  "valid": true,
+  "description": "usable: the AI 服务's own calls as one line",
+  "value": {
+    "from": 1761523200000,
+    "to": 1762128000000,
+    "total": {
+      "costUsd": 1.5,
+      "inputTokens": 10000,
+      "outputTokens": 1000,
+      "runs": 1,
+      "topics": 1
+    },
+    "previous": {
+      "costUsd": 2.5,
+      "topics": 1
+    },
+    "bots": [],
+    "initiators": [],
+    "machines": [],
+    "runtimes": [],
+    "daily": [],
+    "service": {
+      "calls": 42,
+      "failures": 2,
+      "costUsd": 0.12,
+      "inputTokens": 120000,
+      "outputTokens": 9000,
+      "cacheReadTokens": 40000,
+      "uses": [
+        {
+          "use": "front_desk",
+          "calls": 30,
+          "inputTokens": 100000,
+          "outputTokens": 6000
+        },
+        {
+          "use": "title",
+          "calls": 12,
+          "inputTokens": 20000,
+          "outputTokens": 3000
+        }
+      ]
+    }
+  }
+}

@@ -759,9 +759,21 @@ export abstract class DeskRuns extends DeskCore {
     // Whose GitHub the run uses on this machine (design-github-identity 3.2); never the token.
     const github = r.kind === RUN_KIND_ASIDE ? null : await githubFor(this.env, { requestedFor: r.requested_for, requestedBy: r.requested_by, botId: this.botId as string }, machine);
     if (github) frame.github = github.github;
+    // 模 4.1: the sign-in the run starts on, from the machine's latest heartbeat; the budget counts by it.
+    const methods = await linkStub(this.env, machine.id)
+      .loginMethods()
+      .catch((): Record<string, string> => ({}));
+    const loginMethod = methods[runner.runtime] ?? null;
     // design-takeover 3.6: how a person can take over the run on this machine.
     r.takeover = takeoverOf(machine);
-    this.sql.exec("UPDATE runs SET machine_id = ?, runtime = ?, takeover = ? WHERE id = ?", machine.id, runner.runtime, r.takeover, r.id);
+    this.sql.exec(
+      "UPDATE runs SET machine_id = ?, runtime = ?, login_method = ?, takeover = ? WHERE id = ?",
+      machine.id,
+      runner.runtime,
+      loginMethod,
+      r.takeover,
+      r.id,
+    );
     r.machine_id = machine.id;
     r.runtime = runner.runtime;
     await this.env.DB.prepare("UPDATE bot_runs SET machine_id = ?, github_member_id = ? WHERE id = ?").bind(machine.id, github?.memberId ?? null, r.id).run();
