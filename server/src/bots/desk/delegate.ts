@@ -5,6 +5,7 @@
 //   responsible, and the result comes back to its topic (as input to its run, or a follow-up run).
 // Bots' own messages never start runs, so the hand-over goes desk to desk, and a visible message
 // says who took what. Depth and count limits stop delegation loops.
+import { isMainTopicId } from "@chat/protocol";
 import { ulid } from "../../core/ids";
 import { ApiError } from "../../core/errors";
 import { isGroupMember } from "../../core/db";
@@ -146,8 +147,7 @@ export abstract class DeskDelegate extends DeskFront {
     }
     const key = `delegated:${ulid()}`;
     const m: TopicMessage = { groupId: d.groupId, topicId: d.topicId, messageId: key, authorId: d.requesterId, body: d.brief.goal, mentioned: true };
-    const active = this.activeRun(d.topicId);
-    if (active) throw new ApiError("conflict", "that member is already working in this topic", "delegation.busy");
+    if (this.startBlocked(d.topicId)) throw new ApiError("conflict", "that member is already working in this topic", "delegation.busy");
     await this.start(m, undefined, [], undefined, d.brief);
     const run = this.sql.exec<{ id: string }>("SELECT id FROM runs WHERE trigger_message_id = ?", key).toArray()[0];
     if (!run) return null;
@@ -157,15 +157,20 @@ export abstract class DeskDelegate extends DeskFront {
   }
 
   /** A part this member gave out came back: to its run as input, or as a follow-up run. */
-  async partDone(botId: string, p: { groupId: string; topicId: string; requesterId: string; fromName: string; topicTitle: string; ok: boolean; result: string }): Promise<void> {
+  async partDone(
+    botId: string,
+    p: { groupId: string; topicId: string; requesterId: string; fromName: string; topicTitle: string; ok: boolean; result: string; runId?: string },
+  ): Promise<void> {
     this.bind(botId);
     const text = `[team-chat] The part you gave to ${p.fromName} ${p.ok ? "is done" : "did not finish"} (topic "${p.topicTitle}"):\n${p.result}`;
-    const active = this.activeRun(p.topicId);
+    // 接 1.5: in a chat area the part goes back to the run that gave it out, not the newest run.
+    const own = p.runId ? this.run(p.runId) : undefined;
+    const active = own && own.ended_at === null ? own : isMainTopicId(p.topicId) ? undefined : this.activeRun(p.topicId);
     if (active?.machine_id) {
       await linkStub(this.env, active.machine_id).toRun({ t: "run.input", runId: active.id, inputId: `desk-part-${ulid()}`, text, authorId: botId } as never);
       return;
     }
-    if (active) return;
+    if (active || this.startBlocked(p.topicId)) return;
     await this.start({ groupId: p.groupId, topicId: p.topicId, messageId: `part:${ulid()}`, authorId: p.requesterId, body: text, mentioned: true });
   }
 
@@ -178,6 +183,7 @@ export abstract class DeskDelegate extends DeskFront {
       await deskStub(this.env, d.parent.botId).partDone(d.parent.botId, {
         groupId: d.parent.groupId,
         topicId: d.parent.topicId,
+        runId: d.parent.runId,
         requesterId: r.requested_by,
         fromName: names.get(this.botId as string) ?? "",
         topicTitle: await this.topicTitle(r),

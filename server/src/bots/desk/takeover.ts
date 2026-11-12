@@ -96,7 +96,7 @@ export abstract class DeskTakeover extends DeskInput {
       if (r.ended_at === null) throw new ApiError("conflict", "the run is still active");
       if (r.external) throw new ApiError("conflict", "a run started over HTTP cannot be retried");
       if (!(await this.botActive())) throw new ApiError("conflict", "the member takes no runs");
-      if (this.activeRun(r.topic_id)) throw new ApiError("conflict", "the topic has an active run");
+      if (this.startBlocked(r.topic_id)) throw new ApiError("conflict", "the topic has an active run");
       const request = this.requestOf(r) ?? (await this.requestFromRoom(r));
       if (!request) throw new ApiError("conflict", "the request of this run is gone");
       // A key of its own: the original message already started a run.

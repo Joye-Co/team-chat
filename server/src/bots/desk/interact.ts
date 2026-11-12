@@ -11,6 +11,7 @@ import { ApiError, type Result, schemaReason, toErrorBody, unwrap } from "../../
 import { ulid } from "../../core/ids";
 import { type FrameContext, frameHandlers, frameValidators } from "../../core/registry";
 import { setDeskNote } from "../../desknote";
+import { FRONT_DESK_ASK_PREFIX } from "../../agent/frontdesk";
 import { answerBlocks, cardEventText, pageEventText } from "../answers";
 import { linkStub } from "../env";
 import { ETA_MS, type InteractionIn } from "../interact";
@@ -94,7 +95,12 @@ export abstract class DeskInteract extends DeskTakeover {
       const runner = await loadRunner(this.env.DB, botId);
       if (!runner?.enabled) return { mode: "none" };
       const byRun = x.runId ? this.run(x.runId) : undefined;
-      const target = byRun && byRun.ended_at === null && !byRun.external ? byRun : this.activeRun(x.topicId);
+      const target =
+        byRun && byRun.ended_at === null && !byRun.external
+          ? byRun
+          : x.source.kind === "card"
+            ? this.runOfCard(x.topicId, x.source.messageId)
+            : this.activeRun(x.topicId);
       const names = await this.names([x.actorId]);
       const actor = { id: x.actorId, name: names.get(x.actorId) ?? x.actorId };
       if (target && !target.external) {
@@ -387,7 +393,11 @@ export abstract class DeskInteract extends DeskTakeover {
         topicId: r.topic_id,
         // The daemon's idempotency key (one per command in the run), so a retry after a lost
         // result posts once; without it the output id, which is new on each retry.
-        clientMsgId: typeof b.clientMsgId === "string" && b.clientMsgId ? b.clientMsgId.slice(0, 64) : `run:${r.id}:out:${outputId}`.slice(0, 64),
+        // A run's key never takes the front desk's prefix (its question cards route talk, 接 1.8).
+        clientMsgId:
+          typeof b.clientMsgId === "string" && b.clientMsgId && !b.clientMsgId.startsWith(FRONT_DESK_ASK_PREFIX)
+            ? b.clientMsgId.slice(0, 64)
+            : `run:${r.id}:out:${outputId}`.slice(0, 64),
         body: typeof b.body === "string" ? b.body : "",
         cardV2: card,
       };
@@ -443,6 +453,8 @@ export abstract class DeskInteract extends DeskTakeover {
         if (v2?.intent === "done" && sent.value.message.topicId === r.topic_id) {
           this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `doneCard:${r.id}`, sent.value.message.id);
         }
+        // 接 1.5: the card's answers and events go to the run that posted it, not to the newest run.
+        if (frame.cardV2 || frame.card) this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `runCard:${sent.value.message.id}`, r.id);
         return { messageId: sent.value.message.id, message: sent.value.message };
       }
       if (!handler) throw new ApiError("invalid", "the server does not take this output yet", "output.not_supported");
