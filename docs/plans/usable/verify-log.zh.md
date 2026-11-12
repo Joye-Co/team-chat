@@ -224,7 +224,7 @@
 - 日期：2026-11-12
 - 测的 main：`228318a3`（#281 之后，含虚拟机状态重做 #268、#270、#271、#280 和 GitHub 按电脑 #273–#278）
 - 在哪跑：团队的 Linux 主机（Ubuntu 24.04，KVM，Firecracker 1.17）。主机上的正式 daemon（连正式服务器）和它的 `/srv/runner` **没有碰**：开始和结束时正式 daemon 是同一个进程，配置、目录、虚拟机、防火墙表都没动。测试全部在一个单独的系统用户和单独目录里：origin/main 的检出、自己的沙盒服务器（`wrangler dev`，只听本机，端口在 9620–9639）和 `scripts/sandbox/seed.ts` 的样例团队、从这份检出编的 daemon（release）、自己的 `work_root` 和 `[vm].dir`、用 `build-base-image.sh` 新编的基础镜像（内核拷了主机那份）、一份改了用户和数据目录的 `runner-vm` 和它自己的 sudoers 一行。为了不和正式 daemon 抢槽位（tap 名和地址按槽位算，两个 daemon 都从 0 开始会撞），测试检出里改了一行让槽位从 64 开始（没进仓库）。结束后全部停掉删掉（用户、目录、sudoers、tap、NFS 导出、镜像、主机 rustup），端口和导出查过是空的。
-- 模型：主机上已有的订阅登录属于正式 daemon 的用户，没有拿来用（不拷、不改）。Claude Code 和 Codex 都走 DeepSeek（Claude Code 用它的 Anthropic 兼容接口，Codex 用 Responses 接口，模型 `deepseek-v4-pro`），key 只在测试用户 600 的文件和测试配置里。订阅登录进虚拟机的部分只能用一个假的 Codex 登录文件（金丝雀）测。
+- 模型：正式 daemon 的用户下其实没有能用的订阅登录（只读看过：Claude Code 的 `.credentials.json` 是空的 `{}`，Codex 没有 `auth.json`），所以没有可借的登录，也没去碰那些文件；正式这台现在派过去的 Claude Code、Codex 任务都会因为没登录而失败。Claude Code 和 Codex 都走 DeepSeek（Claude Code 用它的 Anthropic 兼容接口，Codex 用 Responses 接口，模型 `deepseek-v4-pro`），key 只在测试用户 600 的文件和测试配置里。订阅登录进虚拟机的部分只能用一个假的 Codex 登录文件（金丝雀）测。
 - AI 成员：Forge、Scout（Claude Code）、Taro（Codex），各指向一个没有远端的一次性仓库；Scout 的是一个很小的 Rust 仓库（`rust-toolchain.toml` 写 `stable`，一个依赖）。最多 4 个任务同时跑。
 
 ## 结果
@@ -269,6 +269,8 @@
 2. **几个 Codex 任务同时在虚拟机里跑时起不来：`failed to initialize sqlite state runtime under <line>/cli/.codex`。** 4 个同时 3 个失败，单独都好。主机 `/proc/fs/nfsd/clients/*/info` 里每台虚拟机的 NFS 客户端名都是 `Linux NFSv4.2 vm`（主机名都是 `vm`），同一时刻好几条 `unconfirmed`：服务端把不同虚拟机当成同一个客户端，互相顶掉租约和锁，Codex 的 SQLite 加锁失败；Claude Code 不用 SQLite。这是推断，没改代码验证。修法方向：每台虚拟机唯一的 NFSv4 客户端标识（`firecracker.rs` 启动参数加 `nfs.nfs4_unique_id=<run id>`），或每台不同的主机名（`scripts/runner/base-image/vm-init`）。复现：同时在 3–4 个新话题 @ 同一个 Codex 成员。正式配置 `max_parallel_runs = 12`，升级后会常见。
 3. **接管时人在虚拟机里跑 git 报 `detected dubious ownership`。** 人的命令是另一个 uid，共享上的文件属于任务 uid。文件能建（交还后 CLI 读得到），但 git 命令都不能用，而 design-takeover 写了人能 `git status / diff / commit`。修法：`apps/daemon/src/vm_agent.rs` 给人的命令加 `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=*`。
 4. **审批被拒后话题里多一句「这台电脑还没有登录 GitHub，推不了代码。已通知管理员」。** 命令没执行、仓库也没远端；daemon 日志 `chat-run github.token: not_found`（垫片执行前就问了 token）。没登录 GitHub 的电脑上每个被拦的推送都会多这句和一条管理员提醒。应只在 git 真要凭证时提示。
+5. **（补充）问题 1 时接管也会出错。** 钩子没起来时接管，钩子的启动计时（约 2 分钟）不因接管停下：人还在跑命令，任务就以「approval hook did not start」结束，交还后话题里是「交还后出错，已从上次的进度重新开始」并开了重试。问题 1 修好后不再出现，但计时应在持有期间暂停。
+6. **（补充）基础镜像缺 bubblewrap。** 每个 Codex 任务的 `stderr.log` 都有「Codex could not find bubblewrap on PATH … will use the bundled bubblewrap」。`scripts/runner/base-image/Dockerfile` 的 apt 列表加 `bubblewrap`。
 
 ## SELF-HOSTING 第 2 部分哪里不对或缺了
 
@@ -278,23 +280,26 @@
 4. 第 8 步示例没有 `self_update`；手编 daemon 时它会去找发布物，应写 `self_update = false` 或说明。
 5. 没写一台主机只能跑一个 `[vm]` daemon：两个 daemon 都从槽位 0 开始，tap 名、地址、`runner-vm` 状态文件会撞。写明，或加槽位起点的配置（`VmConfig` 是 `deny_unknown_fields`，注意回滚）。
 6. 第 2 步内核仍没有脚本；主机现有 6.1 内核能启动新镜像。
+7. （补充）`[vm].dir` 和 `[vm].homes` 的默认值是 `/srv/runner/vms`、`/srv/runner/homes`，第 8 步的示例不写它们。一台主机上第二个 daemon（测试用的也算）不写这两项，就会在正式的目录里放虚拟机，并按 14 天规则清理正式的 `homes`。和第 5 条一起写明。
+8. （补充）`team-chat-daemon example-config` 里还写着「AI members always run with every permission (no approvals); there is nothing to set」，和审批规则对不上。
 
 ## 怎么安全地升级正式 daemon
 
-前提：问题 1 修好并合进 main（否则升级后所有带审批规则的 Claude Code 任务起不来）；问题 2 最好也修好，否则先把 `max_parallel_runs` 调到 1–2。然后按顺序，每步都能回退：
+前提：问题 1 修好并合进 main（否则升级后所有带审批规则的 Claude Code 任务起不来）；问题 2 最好也修好，否则先把 `max_parallel_runs` 调到 1–2。
+
+（补充，只读核对过）正式这台现在的 daemon 是 11-09 编的：程序里没有自更新、没有「看到程序文件换了就在空闲时退出」的逻辑，也没有审批钩子和垫片；配置里 `[vm]` 还有 `shares = ["~/.claude", "~/.codex", "~/.pi"]`；主机上的 `runner-vm` 和防火墙表也是 11-09 的旧版。所以顺序要先换 daemon 再重跑主机脚本：新 `runner-vm` 拒绝导出 `~/.claude` 这类私有目录，旧 daemon 还按 `shares` 导出，先重跑主机脚本的话，到换 daemon 之前派来的任务都会在开虚拟机时失败。按顺序，每步都能回退：
 
 1. **备份**（root）：`daemon.toml`、`~/.local/bin/daemon`、`/usr/local/sbin/runner-vm`、`/etc/runner-vm.nft` 各拷一份 `.bak`。
-2. **等空闲**：应用电脑页上这台没有在做的任务。
-3. **主机脚本**（root）：主机检出 `git checkout <修好的版本>`，`bash scripts/runner/host-setup.sh`。装新 `runner-vm`、新防火墙表、主机 rustup，把旧家目录收成只剩会话。注意它会 `apt-get upgrade`，并跑 `install-daemon.sh`（只打印怎么把服务切到它装的文件，不会自动切）。
-4. **基础镜像**（root）：`bash scripts/runner/build-base-image.sh`；以 runner 跑 `boot-test.sh`，要看到 `rustup`、`sccache`。
-5. **daemon**（runner）：编新程序，写成同目录 `daemon.new` 再 `mv -f` 盖到 `~/.local/bin/daemon`。**不要 stop 服务**：daemon 看到文件变了，空闲时自己退出，systemd 拉起新版本。
-6. **配置**（runner）：从 `[vm]` 删掉 `shares = ["~/.claude", "~/.codex", "~/.pi"]`（新版本会跳过，留着容易误会）。空闲时 `systemctl --user restart team-chat-daemon` 让配置生效。
-7. **检查**：`daemon doctor` 没有警告；`nft list chain inet runner_vm input` 有 `fib` 一行；在测试群各 @ 一次 Claude Code 和 Codex 成员跑 `hostname`（答 `vm`），再试一次被拦的 `git push`（出卡片）；同时开 3 个 Codex 任务确认问题 2。
-8. **回退**：拷回 `.bak`，`systemctl --user restart team-chat-daemon`、`systemctl restart runner-vm-net.service`。旧 daemon 碰到收过的家目录会当普通目录用，能跑。
+2. **基础镜像**（root，可先做，不影响正在跑的）：主机检出 `git checkout <修好的版本>`，`bash scripts/runner/build-base-image.sh`（写新文件、改 `base.ext4` 链接，已开的虚拟机用旧的）；以 runner 跑 `boot-test.sh`，要看到 `rustup`、`sccache`。
+3. **daemon 和配置**（runner）：编新程序，写成同目录 `daemon.new` 再 `mv -f` 盖到 `~/.local/bin/daemon`（服务启动的就是这个文件）；从 `[vm]` 删掉 `shares`。旧程序不会自己换，要在应用电脑页上这台没有在做的任务时 `systemctl --user restart team-chat-daemon`（这一步会断开正式 daemon，由负责人决定时间）。新程序启动后有自更新，以后不用手动重启。
+4. **主机脚本**（root）：`bash scripts/runner/host-setup.sh`。装新 `runner-vm`、新防火墙表、主机 rustup，删空的 `/srv/runner/cache`。注意它会 `apt-get upgrade`，并跑 `install-daemon.sh`（只打印怎么把服务切到它装的文件，不会自动切）。
+5. **登录**（runner）：`claude setup-token`，把 token 在应用里存成 `CLAUDE_CODE_OAUTH_TOKEN`；`codex login --device-auth`；要推代码再按「Give AI members a GitHub account」登 `gh`。现在这台都没登录。
+6. **检查**：`daemon doctor` 没有警告；`nft list chain inet runner_vm input` 有 `fib` 一行；在测试群各 @ 一次 Claude Code 和 Codex 成员跑 `hostname`（答 `vm`），再试一次被拦的 `git push`（出卡片）；同时开 3 个 Codex 任务确认问题 2。
+7. **回退**：拷回 `.bak`，`systemctl --user restart team-chat-daemon`、`systemctl restart runner-vm-net.service`。只回退 daemon、不回退 `runner-vm` 时，旧 daemon 的 `shares` 会被新 `runner-vm` 拒绝，所以两样一起拷回。
 
 ## 这一轮没有覆盖的
 
-- 主机现有的订阅登录：没用，订阅副本、主机统一刷新、长期 token 都没在虚拟机里真跑。
+- 订阅登录：主机上没有，订阅副本、主机统一刷新、长期 token 都没在虚拟机里真跑。
 - 72 小时清理、缓存 LRU、内存检查、同话题两人并发、虚拟机连别的槽位、升级前话题续接、Pi、ACP、桌面应用。
 - GitHub：测试用户没登录 `gh`，推送只到「没有远端」为止。
 - 前台、夜间整理：DeepSeek key 只当执行者模型用，没配 AI 服务。
