@@ -227,7 +227,7 @@ RunGithub = {
 ### 3.7 桌面端（Mac、Windows 同一套代码）
 
 - **连接 sheet**（新文件 `apps/desktop/src/views/settings/github.rs`，gpui-component 的 sheet、button、spinner）：大字等宽显示 8 位验证码，带「复制验证码」；「打开 GitHub」复制验证码并用浏览器打开 `verificationUri`。按 `interval` 轮询，成功显示「已连接为 @login」，1 秒后关。过期、取消、账号已被占用各一句，都带「再试一次」。底部一行小字提醒组织授权。
-- **设置 › 账号**（`views/settings/account.rs`）新增「GitHub」一组：未连接显示「连接…」；已连接显示 `@login` 和「断开…」（确认对话框，带去 GitHub 撤销的链接）；失效显示「需要重新连接」和「重新连接…」。`available` 为 false 时：owner/管理员看到「服务器还没配好，暂时不能连接 GitHub」，其他人不显示这一组。
+- **设置 › 账号**（`views/settings/account.rs`）新增「GitHub」一组：未连接显示「连接…」；已连接显示 `@login` 和「断开…」（确认对话框，带去 GitHub 撤销的链接；断开失败时组里显示「没能断开 GitHub」和原因，带「重试」）；失效显示「需要重新连接」和「重新连接…」。`available` 为 false 时：owner/管理员看到「服务器还没配好，暂时不能连接 GitHub」，其他人不显示这一组。
 - **上手**：第一次登录成功后，`available` 为 true 且没连接，弹一次连接 sheet，带「以后再说」。每个账号每台设备只弹一次，记在本地偏好。
 - **话题横幅**：打开话题、收到 `github.status`、应用回到前台时取 `GET /v1/me/github`；`waits` 里有这个话题，就在话题顶部显示「{成员}在等你连接 GitHub」或「{成员}在等你重新连接 GitHub」，带「连接 GitHub」按钮，点了直接弹连接 sheet。连上后横幅消失，任务自己继续。
 - **电脑页**：daemon 没有 `github` 功能的电脑显示「这台电脑更新后，AI 成员才能用你连接的 GitHub」。只在本人已连接时显示（没连的人看不到任何 GitHub 字样）；服务器只给 owner 返回电脑的 `features`，所以普通成员看不到这句。
@@ -247,7 +247,9 @@ GitHub
 AI 成员替你拉代码、推代码、开 PR 时用这个账号
 在 GitHub 页面输入这串验证码
 复制验证码
+已复制
 打开 GitHub
+正在准备验证码…
 正在等你在 GitHub 上确认…
 验证码过期了
 你在 GitHub 上取消了授权
@@ -257,7 +259,9 @@ AI 成员替你拉代码、推代码、开 PR 时用这个账号
 要用组织里的仓库，在 GitHub 授权页上给那个组织点「Grant」或「Request」
 断开 GitHub？
 断开后，AI 成员不能再用你的 GitHub。要彻底收回，到 GitHub 的设置里撤销授权。
+断开
 去 GitHub 撤销
+没能断开 GitHub
 服务器还没配好，暂时不能连接 GitHub
 {成员} 在等你连接 GitHub
 {成员} 在等你重新连接 GitHub

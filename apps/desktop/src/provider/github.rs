@@ -20,6 +20,40 @@ use crate::data::{
 #[derive(Default)]
 pub(super) struct GithubCache {
     state: Mutex<Option<(String, GithubState)>>,
+    stamps: Mutex<Stamps>,
+}
+
+/// Orders the writes to the cache. Several `GET /v1/me/github` can be in flight (the app comes
+/// to the front, a 话题 opens, a sign-in ends); an answer older than what is already kept is
+/// dropped, so a late answer from before a connect cannot bring the banner back.
+#[derive(Default)]
+struct Stamps {
+    issued: u64,
+    applied: u64,
+}
+
+impl Stamps {
+    /// A stamp for a request about to be sent.
+    fn issue(&mut self) -> u64 {
+        self.issued += 1;
+        self.issued
+    }
+
+    /// Whether the answer to request `stamp` may replace what is kept.
+    fn accept(&mut self, stamp: u64) -> bool {
+        if stamp < self.applied {
+            return false;
+        }
+        self.applied = stamp;
+        true
+    }
+
+    /// A change known here (a sign-in ended, `github.status`, 断开): it outranks every
+    /// request already sent.
+    fn local_write(&mut self) {
+        let stamp = self.issue();
+        self.applied = stamp;
+    }
 }
 
 pub(super) fn account(a: &proto::GithubAccount) -> GithubAccount {
@@ -91,11 +125,13 @@ impl CoreProvider {
     /// Changes the kept state of the account `key` (if it is still the one shown) and emits.
     fn github_update(&self, key: &str, f: impl FnOnce(&mut GithubState)) {
         {
+            let mut stamps = lock(&self.shared.github.stamps);
             let mut kept = lock(&self.shared.github.state);
             match kept.as_mut() {
                 Some((k, s)) if k == key => f(s),
                 _ => return,
             }
+            stamps.local_write();
         }
         self.emit(vec![Change::Github]);
     }
@@ -107,11 +143,16 @@ impl CoreProvider {
         let key = a.key.clone();
         let client = a.client.clone();
         let this = self.clone();
+        let stamp = lock(&self.shared.github.stamps).issue();
         a.client.spawn(async move {
             match client.http().github_status().await {
                 Ok(r) => {
                     let next = state(&r);
                     let changed = {
+                        let mut stamps = lock(&this.shared.github.stamps);
+                        if !stamps.accept(stamp) {
+                            return;
+                        }
                         let mut kept = lock(&this.shared.github.state);
                         let same = kept.as_ref().is_some_and(|(k, s)| *k == key && *s == next);
                         *kept = Some((key, next));
@@ -199,6 +240,24 @@ mod tests {
             status: status.into(),
             connected_at: 5,
         }
+    }
+
+    #[test]
+    fn an_older_answer_never_replaces_a_newer_one() {
+        let mut s = Stamps::default();
+        let before_connect = s.issue();
+        // The sign-in ends: the account is written here, then read again.
+        s.local_write();
+        let after_connect = s.issue();
+        assert!(s.accept(after_connect));
+        // The answer sent before the connect arrives last: dropped.
+        assert!(!s.accept(before_connect));
+        // Answers in order are all kept; one arriving late after a local write is dropped.
+        let (a, b) = (s.issue(), s.issue());
+        assert!(s.accept(a) && s.accept(b));
+        let c = s.issue();
+        s.local_write();
+        assert!(!s.accept(c));
     }
 
     #[test]

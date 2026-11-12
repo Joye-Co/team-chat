@@ -494,6 +494,7 @@ crate::copy! {
     GITHUB_DISCONNECT_TITLE = "断开 GitHub？",
     GITHUB_DISCONNECT_BODY = "断开后，AI 成员不能再用你的 GitHub。要彻底收回，到 GitHub 的设置里撤销授权。",
     GITHUB_DISCONNECT_OK = "断开",
+    GITHUB_DISCONNECT_FAILED = "没能断开 GitHub",
     GITHUB_REVOKE = "去 GitHub 撤销",
     GITHUB_UNAVAILABLE = "服务器还没配好，暂时不能连接 GitHub",
     GITHUB_WAIT = "{name} 在等你连接 GitHub",

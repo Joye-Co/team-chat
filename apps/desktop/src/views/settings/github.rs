@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use gpui::{
     AnyWindowHandle, App, AppContext as _, ClipboardItem, Context, Entity, IntoElement,
-    ParentElement, Render, Styled, Subscription, Window, div,
+    ParentElement, Render, Styled, Subscription, WeakEntity, Window, div,
 };
 use gpui_component::WindowExt as _;
 
@@ -476,6 +476,8 @@ fn machine_needs_update(github: Option<bool>, state: Option<&GithubState>) -> bo
 /// 设置 › 账号 › GitHub: who I am connected as, 连接…, 重新连接… or 断开….
 pub struct GithubSection {
     services: Services,
+    /// 断开 failed: why, shown under the row until the account changes or I try again.
+    disconnect_failed: Option<AdminError>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -519,21 +521,51 @@ impl GithubSection {
     pub fn new(services: Services, cx: &mut Context<Self>) -> Self {
         // 打开设置时取 (§3.7): the group is current when the page opens.
         services.provider.refresh_github();
-        let subscriptions = vec![cx.subscribe(&services.hub, |_, _, changes: &Changes, cx| {
-            if changes.any(|c| matches!(c, Change::Github | Change::Session)) {
-                cx.notify();
-            }
-        })];
+        let subscriptions = vec![cx.subscribe(
+            &services.hub,
+            |this: &mut Self, _, changes: &Changes, cx| {
+                if changes.any(|c| matches!(c, Change::Github)) {
+                    this.disconnect_failed = None;
+                }
+                if changes.any(|c| matches!(c, Change::Github | Change::Session)) {
+                    cx.notify();
+                }
+            },
+        )];
         Self {
             services,
+            disconnect_failed: None,
             _subscriptions: subscriptions,
         }
     }
 
+    /// Asks the server to forget my GitHub; a refusal stays on the group with 重试.
+    pub fn disconnect(&mut self, cx: &mut Context<Self>) {
+        self.disconnect_failed = None;
+        cx.notify();
+        let reply = self.services.provider.disconnect_github();
+        cx.spawn(async move |this, cx| {
+            if let Err(e) = widgets::answer(reply).await {
+                tracing::warn!(?e, "github disconnect");
+                let _ = this.update(cx, |this, cx| {
+                    this.disconnect_failed = Some(e);
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Screenshot scenes: 断开 was refused with `e`.
+    pub fn preview_disconnect_failed(&mut self, e: AdminError, cx: &mut Context<Self>) {
+        self.disconnect_failed = Some(e);
+        cx.notify();
+    }
+
     /// 断开…: asks first, with the link to withdraw the app on GitHub.
-    pub fn confirm_disconnect(services: Services, window: &mut Window, cx: &mut App) {
+    pub fn confirm_disconnect(section: WeakEntity<Self>, window: &mut Window, cx: &mut App) {
         widgets::open_alert(window, cx, move |_, cx| {
-            let services = services.clone();
+            let section = section.clone();
             AlertLayout::new(s::GITHUB_DISCONNECT_TITLE)
                 .icon(widgets::app_icon(cx))
                 .message(s::GITHUB_DISCONNECT_BODY)
@@ -546,14 +578,8 @@ impl GithubSection {
                         cx,
                     )
                     .on_click(move |_, window, cx| {
-                        let reply = services.provider.disconnect_github();
                         window.close_dialog(cx);
-                        cx.spawn(async move |_| {
-                            if let Ok(Err(e)) = reply.await {
-                                tracing::warn!(?e, "github disconnect");
-                            }
-                        })
-                        .detach();
+                        let _ = section.update(cx, |s, cx| s.disconnect(cx));
                     }),
                     alert_button(
                         "github-revoke",
@@ -604,7 +630,7 @@ impl Render for GithubSection {
                     .value(connect("github-connect", s::GITHUB_CONNECT, cx))
             }
             SectionState::Connected { login, name } => {
-                let services = self.services.clone();
+                let section = cx.entity().downgrade();
                 widgets::ItemRow::new(
                     "github-row",
                     fill(s::GITHUB_CONNECTED_AS, &[("login", login)]),
@@ -620,7 +646,7 @@ impl Render for GithubSection {
                         cx,
                     )
                     .on_click(move |_, window, cx| {
-                        Self::confirm_disconnect(services.clone(), window, cx)
+                        Self::confirm_disconnect(section.clone(), window, cx)
                     }),
                 )
             }
@@ -631,11 +657,39 @@ impl Render for GithubSection {
                     .value(connect("github-reconnect", s::GITHUB_RECONNECT, cx))
             }
         };
+        let failed = disconnect_error(&state, self.disconnect_failed).map(|text| {
+            widgets::failed_alert(
+                "github-disconnect-failed",
+                s::GITHUB_DISCONNECT_FAILED,
+                Some(text.into()),
+                Some(
+                    widgets::retry_button("github-disconnect-retry", cx)
+                        .on_click(cx.listener(|this, _, _, cx| this.disconnect(cx))),
+                ),
+                cx,
+            )
+        });
         widgets::section(
             SectionTitle::new(s::GITHUB).description(s::GITHUB_HINT),
-            GroupedForm::new().row(row),
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(tokens::space::S12)
+                .child(GroupedForm::new().row(row))
+                .children(failed),
         )
         .into_any_element()
+    }
+}
+
+/// Why 断开 failed, while I am still connected (once the account is gone it no longer matters).
+fn disconnect_error(state: &SectionState, failed: Option<AdminError>) -> Option<&'static str> {
+    match state {
+        SectionState::Connected { .. } | SectionState::NeedsReconnect { .. } => {
+            failed.map(widgets::error_text)
+        }
+        _ => None,
     }
 }
 
@@ -702,6 +756,24 @@ mod tests {
         assert!(!machine_needs_update(None, Some(&connected)));
         assert!(!machine_needs_update(Some(false), Some(&not)));
         assert!(!machine_needs_update(Some(false), None));
+    }
+
+    #[test]
+    fn a_failed_disconnect_says_why_while_still_connected() {
+        let connected = SectionState::Connected {
+            login: "octo".into(),
+            name: None,
+        };
+        assert_eq!(
+            disconnect_error(&connected, Some(AdminError::Offline)),
+            Some(s::ERROR_OFFLINE)
+        );
+        assert_eq!(disconnect_error(&connected, None), None);
+        // Gone after all (another device, or the answer was lost): nothing to report.
+        assert_eq!(
+            disconnect_error(&SectionState::NotConnected, Some(AdminError::Other)),
+            None
+        );
     }
 
     #[test]

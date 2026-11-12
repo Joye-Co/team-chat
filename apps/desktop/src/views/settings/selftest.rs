@@ -996,9 +996,26 @@ pub fn open_github_disconnect(
     _content: gpui::Size<gpui::Pixels>,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
-    let (handle, _) = open_page(services.clone(), Page::Account, cx)?;
+    let (handle, view) = open_page(services, Page::Account, cx)?;
     after_fit(handle, cx, move |window, cx| {
-        super::github::GithubSection::confirm_disconnect(services, window, cx);
+        let section = view.read(cx).account().read(cx).github().downgrade();
+        super::github::GithubSection::confirm_disconnect(section, window, cx);
+    });
+    Ok(handle)
+}
+
+/// 账号 › GitHub after 断开 was refused: the reason and 重试 under the row.
+pub fn open_github_disconnect_failed(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::Account, cx)?;
+    after_fit(handle, cx, move |_, cx| {
+        let section = view.read(cx).account().read(cx).github().clone();
+        section.update(cx, |s, cx| {
+            s.preview_disconnect_failed(crate::data::AdminError::Offline, cx)
+        });
     });
     Ok(handle)
 }
@@ -1580,6 +1597,13 @@ pub const SCENES: &[Scene] = &[
         start: Start::Github(crate::fake::github::GithubShape::Connected),
         setup: |_, _| {},
         open: open_github_disconnect,
+    },
+    Scene {
+        name: "settings-github-disconnect-failed",
+        about: "Settings: 账号 › GitHub after 断开 was refused: 没能断开 GitHub, the reason and 重试",
+        start: Start::Github(crate::fake::github::GithubShape::Connected),
+        setup: |_, _| {},
+        open: open_github_disconnect_failed,
     },
     Scene {
         name: "settings-github-invalid",
