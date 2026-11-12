@@ -128,12 +128,198 @@ fn action(kind: &str) -> String {
 }
 
 /// The simple commands of a shell line: split at newlines, `;`, `&&`, `||` and `|`, with
-/// runs of whitespace made one space. A pattern then cannot span two commands.
+/// runs of whitespace made one space. A pattern then cannot span two commands. A separator
+/// inside a quoted argument that is data ([`Part`]) does not split.
 pub fn commands(line: &str) -> Vec<String> {
-    line.split(['\n', ';', '|', '&'])
-        .map(|c| c.split_whitespace().collect::<Vec<_>>().join(" "))
-        .filter(|c| !c.is_empty())
-        .collect()
+    parts(line).into_iter().map(|p| p.text).collect()
+}
+
+/// A simple command with the bytes that are data, not code: the inside of a quoted argument
+/// that holds whitespace (`chat-run report --text "git push origin main 被拒绝了"`, a commit
+/// message), which the shell passes to the program as one argument and never runs. A pattern
+/// match that starts there is no match: the gates decide on the program run and its arguments,
+/// not on text an argument mentions. A quoted argument stays code when it is in the program
+/// word, the script after a `-c` / `-lc` / `-Command` / `/c` flag, an argument of `eval`, or a
+/// double-quoted one with a command substitution (`$(…)`, `` `…` ``) in it.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct Part {
+    text: String,
+    /// One flag for each byte of `text`.
+    data: Vec<bool>,
+}
+
+impl Part {
+    fn push(&mut self, c: char, data: bool) {
+        self.text.push(c);
+        self.data.extend(std::iter::repeat_n(data, c.len_utf8()));
+    }
+
+    /// The pattern matches somewhere that starts outside data.
+    fn hit(&self, p: &Regex) -> bool {
+        let mut pos = 0;
+        while pos <= self.text.len() {
+            let Some(m) = p.find_at(&self.text, pos) else {
+                return false;
+            };
+            if !self.data.get(m.start()).copied().unwrap_or(false) {
+                return true;
+            }
+            // The next match that could count starts after this run of data.
+            pos = (m.start()..self.text.len())
+                .find(|&i| !self.data[i])
+                .unwrap_or(self.text.len() + 1);
+        }
+        false
+    }
+
+    /// The command as its plain words ([`plain_command`]), its data kept.
+    fn plain(&self) -> Part {
+        let c = self.text.trim_start();
+        let off = self.text.len() - c.len();
+        let quoted = c.chars().next().filter(|q| matches!(q, '"' | '\''));
+        let (program, rest) = match quoted {
+            Some(q) => match c[1..].find(q) {
+                Some(i) => (&c[1..1 + i], 2 + i),
+                None => (&c[1..], c.len()),
+            },
+            None => match c.find(' ') {
+                Some(i) => (&c[..i], i),
+                None => (c, c.len()),
+            },
+        };
+        let base = program.rsplit(['/', '\\']).next().unwrap_or(program);
+        let lower = base.to_ascii_lowercase();
+        let stem = [".exe", ".cmd", ".bat", ".com", ".ps1"]
+            .iter()
+            .find(|e| lower.len() > e.len() && lower.ends_with(**e))
+            .map_or(base, |e| &base[..base.len() - e.len()]);
+        let mut chars: Vec<(char, bool)> = stem.chars().map(|ch| (ch, false)).collect();
+        for (i, ch) in c[rest..].char_indices() {
+            if !matches!(ch, '"' | '\'') {
+                chars.push((ch, self.data[off + rest + i]));
+            }
+        }
+        // Runs of whitespace as one space, none at the ends.
+        let mut out = Part::default();
+        let mut space: Option<bool> = None;
+        for (ch, data) in chars {
+            if ch.is_whitespace() {
+                space = Some(space.unwrap_or(true) && data);
+            } else {
+                if let Some(d) = space.take().filter(|_| !out.text.is_empty()) {
+                    out.push(' ', d && data);
+                }
+                out.push(ch, data);
+            }
+        }
+        out
+    }
+}
+
+/// The simple commands of a shell line ([`commands`]) with their data ([`Part`]).
+fn parts(line: &str) -> Vec<Part> {
+    let chars: Vec<char> = line.chars().collect();
+    let mut out = vec![];
+    let mut cur = Part::default();
+    // The words of the current command so far, quotes left out.
+    let mut words: Vec<String> = vec![];
+    let mut word = String::new();
+    let mut space = false;
+    // Where the quoted code arguments we are inside end.
+    let mut code_ends: Vec<usize> = vec![];
+    // Inside a `#` comment: its quotes (`# it's done`) open nothing.
+    let mut comment = false;
+    // The line feeds what it prints to a shell (`echo "…" | sh`): every argument may be code.
+    let piped = PIPED_TO_SHELL.is_match(line);
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        // A quote opens an argument only where a word starts: `it's` is a letter, not a quote.
+        let word_start = i == 0
+            || chars[i - 1].is_whitespace()
+            || matches!(chars[i - 1], '=' | ';' | '|' | '&' | '(' | '<' | '>' | '$');
+        if code_ends.last() == Some(&i) {
+            code_ends.pop();
+            comment = false;
+        } else if comment {
+            comment = c != '\n';
+        } else if c == '#' && word.is_empty() && word_start {
+            comment = true;
+        } else if matches!(c, '"' | '\'') && word_start {
+            let limit = code_ends.last().copied().unwrap_or(chars.len());
+            if let Some(close) = closing(&chars, i, limit) {
+                let inner: String = chars[i + 1..close].iter().collect();
+                // A span over several lines is data only as the value of a flag (`-m`, `--body`,
+                // `--text=`): elsewhere it may be a stray quote that runs over real commands.
+                let lines_of_data = !inner.contains('\n')
+                    || !word.is_empty()
+                    || words.last().is_some_and(|w| w.starts_with('-'));
+                let code = piped
+                    || !lines_of_data
+                    || words.is_empty()
+                    || words.last().is_some_and(|w| opens_script(&words, w))
+                    || plain_command(&words[0]).eq_ignore_ascii_case("eval")
+                    || (c == '"' && (inner.contains("$(") || inner.contains('`')));
+                if !code && inner.chars().any(char::is_whitespace) {
+                    if space {
+                        cur.push(' ', false);
+                        space = false;
+                    }
+                    for &ch in &chars[i..=close] {
+                        cur.push(ch, true);
+                    }
+                    word.push_str(&inner);
+                    i = close + 1;
+                    continue;
+                }
+                code_ends.push(close);
+            }
+        }
+        if matches!(c, '\n' | ';' | '|' | '&') {
+            if !word.is_empty() {
+                words.push(std::mem::take(&mut word));
+            }
+            if !cur.text.is_empty() {
+                out.push(std::mem::take(&mut cur));
+            }
+            words.clear();
+            space = false;
+        } else if c.is_whitespace() {
+            if !word.is_empty() {
+                words.push(std::mem::take(&mut word));
+            }
+            space = !cur.text.is_empty();
+        } else {
+            if space {
+                cur.push(' ', false);
+                space = false;
+            }
+            cur.push(c, false);
+            if !matches!(c, '"' | '\'') {
+                word.push(c);
+            }
+        }
+        i += 1;
+    }
+    if !cur.text.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+/// The index of the quote that closes the one at `open`, before `limit`. Inside `"…"` a `\`
+/// escapes the next character.
+fn closing(chars: &[char], open: usize, limit: usize) -> Option<usize> {
+    let q = chars[open];
+    let mut j = open + 1;
+    while j < limit {
+        match chars[j] {
+            '\\' if q == '"' => j += 2,
+            ch if ch == q => return Some(j),
+            _ => j += 1,
+        }
+    }
+    None
 }
 
 /// A simple command as its plain words, for the patterns to match besides the command as
@@ -143,32 +329,11 @@ pub fn commands(line: &str) -> Vec<String> {
 /// `git push origin main`. A pattern written for the plain command (the server's defaults, a
 /// team's own) then holds for every spelling a shell accepts, on Windows and on Unix.
 pub fn plain_command(command: &str) -> String {
-    let c = command.trim_start();
-    let quoted = c.chars().next().filter(|q| matches!(q, '"' | '\''));
-    let (program, rest) = match quoted {
-        Some(q) => match c[1..].find(q) {
-            Some(i) => (&c[1..1 + i], &c[i + 2..]),
-            None => (&c[1..], ""),
-        },
-        None => match c.find(' ') {
-            Some(i) => (&c[..i], &c[i..]),
-            None => (c, ""),
-        },
-    };
-    let base = program.rsplit(['/', '\\']).next().unwrap_or(program);
-    let lower = base.to_ascii_lowercase();
-    let stem = [".exe", ".cmd", ".bat", ".com", ".ps1"]
-        .iter()
-        .find(|e| lower.len() > e.len() && lower.ends_with(**e))
-        .map_or(base, |e| &base[..base.len() - e.len()]);
-    let rest: String = rest
-        .chars()
-        .filter(|ch| !matches!(ch, '"' | '\''))
-        .collect();
-    format!("{stem}{rest}")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+    let mut p = Part::default();
+    for ch in command.chars() {
+        p.push(ch, false);
+    }
+    p.plain().text
 }
 
 /// The script of a shell wrapper the way Codex reports a command (`/bin/zsh -lc 'git push
@@ -200,12 +365,51 @@ fn is_shell(program: &str) -> bool {
     )
 }
 
+/// The flag before a shell's script: `-c`, `/c`, `-Command`, or a cluster of short flags that
+/// ends in `c` (`-lc`, `-ec`, `-euxc`).
 fn is_script_flag(flag: &str) -> bool {
+    let f = flag.to_ascii_lowercase();
+    matches!(f.as_str(), "-command" | "/c")
+        || f.strip_prefix('-').is_some_and(|rest| {
+            rest.ends_with('c') && rest.chars().all(|ch| ch.is_ascii_alphabetic())
+        })
+}
+
+/// Programs that run code given as an argument (`node -e '…'`, `python -c '…'`).
+fn is_interpreter(program: &str) -> bool {
+    let base = program.rsplit(['/', '\\']).next().unwrap_or(program);
+    let base = base.to_ascii_lowercase();
+    let base = base.strip_suffix(".exe").unwrap_or(&base);
+    let base = base.trim_end_matches(|ch: char| ch.is_ascii_digit() || ch == '.');
     matches!(
-        flag.to_ascii_lowercase().as_str(),
-        "-c" | "-lc" | "-ic" | "-command" | "/c"
+        base,
+        "node" | "nodejs" | "perl" | "ruby" | "python" | "osascript" | "deno" | "bun" | "php"
     )
 }
+
+/// The argument after `flag` is code: a script flag of a shell, or the code flag of an
+/// interpreter, in the command whose words so far are `words`. The flags `-c`, `-lc`, `-ic`,
+/// `-Command` and `/c` count after any program (a wrapper such as `sudo` or `env` may come
+/// first); clusters (`-ec`) after a shell; `-e`, `-pe`, `-E`, `--eval`, `-p`, `-r` and
+/// `eval` after an interpreter.
+fn opens_script(words: &[String], flag: &str) -> bool {
+    let f = flag.to_ascii_lowercase();
+    matches!(f.as_str(), "-c" | "-lc" | "-ic" | "-command" | "/c")
+        || (is_script_flag(flag) && words.iter().any(|w| is_shell(w)))
+        || ((matches!(flag, "--eval" | "--print" | "-p" | "-r" | "eval")
+            || flag.strip_prefix('-').is_some_and(|rest| {
+                rest.ends_with(['e', 'E', 'c']) && rest.chars().all(|ch| ch.is_ascii_alphabetic())
+            }))
+            && words.iter().any(|w| is_interpreter(w)))
+}
+
+/// A pipe into a shell or an interpreter: what the line prints there runs.
+static PIPED_TO_SHELL: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+    Regex::new(
+        r"(?i)\|\s*(?:sudo\s+|env\s+)?(?:\S*[/\\])?(?:(?:ba|z|da|k|fi)?sh|pwsh|powershell|cmd|python[0-9.]*|node|perl|ruby|osascript)(?:\.exe)?(?:\s|$)",
+    )
+    .expect("pipe pattern")
+});
 
 /// POSIX shell words: `'…'` literal, `"…"` with `\` before `"`, `\`, `$` and `` ` ``, and a
 /// bare `\` that escapes the next character. None when a quote is not closed.
@@ -413,20 +617,23 @@ impl Gates {
 
     /// The first kind whose pattern matches one of the line's commands, as written or as its
     /// plain words ([`plain_command`]).
+    /// A match that starts inside a quoted argument that is data ([`Part`]) does not count. An
+    /// MCP tool call's input is JSON, not shell words: all of it counts.
     pub fn matches(&self, line: &str) -> Option<&str> {
-        let cmds: Vec<String> = commands(line)
+        let mcp = line.trim_start().starts_with("mcp__");
+        let cmds: Vec<Part> = parts(line)
             .into_iter()
-            .flat_map(|c| {
-                let plain = plain_command(&c);
+            .flat_map(|mut c| {
+                if mcp {
+                    c.data.iter_mut().for_each(|d| *d = false);
+                }
+                let plain = c.plain();
                 if plain == c { vec![c] } else { vec![c, plain] }
             })
             .collect();
         self.kinds
             .iter()
-            .find(|k| {
-                cmds.iter()
-                    .any(|c| k.patterns.iter().any(|p| p.is_match(c)))
-            })
+            .find(|k| cmds.iter().any(|c| k.patterns.iter().any(|p| c.hit(p))))
             .map(|k| k.name.as_str())
     }
 
@@ -1088,6 +1295,95 @@ mod tests {
         for cmd in misses {
             assert_eq!(gates.matches(cmd), None, "{cmd}");
         }
+    }
+
+    /// Verification pass 2, problem 1: a quoted argument with whitespace is data. The program
+    /// run and its arguments decide, not text an argument mentions; a shell's script, `eval`
+    /// and a command substitution are still code.
+    #[test]
+    fn text_an_argument_mentions_is_not_the_command() {
+        let gates = Gates::new(&defaults());
+        let misses = [
+            r#"chat-run report --state blocked --text "git -C . push origin main 需要审批，被审批人拒绝，未执行""#,
+            "chat-run report --text 'git push origin main was denied'",
+            r#"git commit -m "docs: never run git push origin main""#,
+            r#"echo "rm -rf /" > note.txt"#,
+            r#"chat-run report --text "next: gh pr merge 5; then npm publish""#,
+            r#"/path/to/chat-run report --text "a" --text "wrangler deploy --env prod""#,
+            "git commit -m \"docs: say why\n\nnever git push origin main by hand\"",
+            r#"grep -rn "git push origin main" docs"#,
+        ];
+        for cmd in misses {
+            assert_eq!(gates.matches(cmd), None, "{cmd}");
+        }
+        let hits = [
+            (
+                r#"chat-run report --text "x y" && git push origin main"#,
+                "mergeMain",
+            ),
+            ("bash -c 'git push origin main'", "mergeMain"),
+            ("/bin/zsh -lc 'cd repo && gh pr merge 5'", "mergeMain"),
+            (r#"sh -c "echo 'a b' && npm publish""#, "externalPublish"),
+            ("eval 'git push origin main'", "mergeMain"),
+            (r#"echo "$(git push origin main )""#, "mergeMain"),
+            (
+                "wrangler d1 execute db --remote --command 'DROP TABLE users'",
+                "deleteData",
+            ),
+            (r#"git push origin main && echo "pushed a b""#, "mergeMain"),
+            (
+                r#""C:\Program Files\GitHub CLI\gh.exe" pr merge 5"#,
+                "mergeMain",
+            ),
+            (
+                r#"mcp__srv__push_files {"branch":"main","message":"a b"}"#,
+                "mergeMain",
+            ),
+            // An apostrophe in a comment opens no quoted argument over the lines after it.
+            (
+                "# it's approved, merge via API\ncurl -X PUT https://api.github.com/repos/o/r/pulls/5/merge -d '{\"merge_method\":\"squash\"}'",
+                "mergeMain",
+            ),
+            ("# don't keep the cache\nrm -rf ~", "deleteData"),
+            ("echo it's done\nrm -rf ~ # it's fine", "deleteData"),
+            ("# 'old note\nrm -rf ~", "deleteData"),
+            // Script flags in every spelling a shell or an interpreter takes.
+            ("bash -ec 'git push origin main'", "mergeMain"),
+            ("sh -xc 'rm -rf ~'", "deleteData"),
+            ("bash -euxc 'gh pr merge 5'", "mergeMain"),
+            ("zsh -fc 'npm publish'", "externalPublish"),
+            (
+                r#"node -e "require('child_process').execSync('gh pr merge 5')""#,
+                "mergeMain",
+            ),
+            (r#"perl -e "system('gh pr merge 5')""#, "mergeMain"),
+            (r#"ruby -e "system('gh pr merge 5')""#, "mergeMain"),
+            (
+                r#"python3 -c "import os; os.system('gh pr merge 5')""#,
+                "mergeMain",
+            ),
+            (
+                r#"perl -pe "s/a b/c/; system('gh pr merge 5')" f"#,
+                "mergeMain",
+            ),
+            (
+                r#"osascript -e "do shell script \"gh pr merge 5\"""#,
+                "mergeMain",
+            ),
+            // What a line prints into a shell runs.
+            (
+                r#"echo "curl -X PUT https://api.github.com/repos/o/r/pulls/5/merge" | sh"#,
+                "mergeMain",
+            ),
+            (r#"printf '%s\n' "rm -rf ~" | bash -s"#, "deleteData"),
+        ];
+        for (cmd, want) in hits {
+            assert_eq!(gates.matches(cmd), Some(want), "{cmd}");
+        }
+        assert_eq!(
+            commands(r#"chat-run report --text "a; b | c" && ls"#),
+            [r#"chat-run report --text "a; b | c""#, "ls"]
+        );
     }
 
     #[test]

@@ -24,7 +24,7 @@ import { supersedeWaits } from "../../github/machine";
 import { DeskCore, QUEUED, type RunRow } from "./core";
 import { takeoverOf } from "./hold";
 import { type FailureNote, failureNote } from "./failure";
-import { LIMIT_NOTE, LIMIT_REACHED, type LoggedFrame, type RecoveryFacts, outwardAction, recoveryNote, stepOf } from "../../agent/recovery";
+import { LIMIT_NOTE, LIMIT_REACHED, type LoggedFrame, type RecoveryFacts, backgroundStep, outwardAction, recoveryNote, stepOf } from "../../agent/recovery";
 import type { RunProof } from "../proof";
 import { needsReply, reportOf } from "./report";
 import { runLimitMs } from "../../settings/runs";
@@ -291,6 +291,7 @@ export abstract class DeskRuns extends DeskCore {
     const chain = this.retryChain(runId);
     const steps: string[] = [];
     const actions: string[] = [];
+    const background: string[] = [];
     for (const run of [...chain].reverse()) {
       const rows = this.sql
         .exec<{ frame: string }>(
@@ -309,6 +310,8 @@ export abstract class DeskRuns extends DeskCore {
         if (step) steps.push(step);
         const action = outwardAction(f);
         if (action) actions.push(action);
+        const bg = backgroundStep(f);
+        if (bg) background.push(bg);
       }
     }
     const last = chain[0];
@@ -329,7 +332,7 @@ export abstract class DeskRuns extends DeskCore {
     }
     // The newest plan any try reported.
     const plan = chain.map((x) => this.planOf(x)).find((x) => x !== null && x.length > 0) ?? null;
-    return { why, tries: chain.length, plan, steps, actions, prs, artifacts };
+    return { why, tries: chain.length, plan, steps, actions, prs, artifacts, background };
   }
 
   /** The recovery note a restart of `runId` starts with (盯 1.2). */

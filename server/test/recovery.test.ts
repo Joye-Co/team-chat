@@ -4,7 +4,7 @@
 // run that moved is stopped on its old computer first thing when that one is back.
 import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { afterAll, describe, expect, it } from "vitest";
-import { DAEMON_RESTARTED, MAX_DAEMON_RESUMES, actedOutward, outwardAction, recoveryNote, stepOf } from "../src/agent/recovery";
+import { DAEMON_RESTARTED, MAX_DAEMON_RESUMES, actedOutward, backgroundStep, outwardAction, recoveryNote, stepOf } from "../src/agent/recovery";
 import { STALL_MS, TEXT } from "../src/bots/dispatch";
 import { Daemon, type World, downViolations, mention, world } from "./daemon";
 import { Client, api, protocolViolations, waitUntil } from "./helpers";
@@ -86,6 +86,23 @@ describe("recovery rules", () => {
     expect(note).toContain('- made 产出 "方案" version 2');
     expect(note).toContain("https://github.com/o/r/pull/1 (open)");
     expect(note).toContain("Do not push, open or change a pull request");
+    expect(note).not.toContain("in the background");
+  });
+
+  // Verification pass 2, problem 4: a command the earlier try put in the background was stopped
+  // with it; the note says so, and that the work is done only when nothing runs on.
+  it("names the commands an earlier try left running in the background", () => {
+    const ev = (event: Record<string, unknown>) => ({ t: "run.event", event });
+    const bg = ev({ type: "tool.call", tool: "Bash", title: "sleep 90", input: { command: "sleep   90", run_in_background: true } });
+    expect(backgroundStep(bg)).toBe("sleep 90");
+    expect(backgroundStep(ev({ type: "tool.call", tool: "Bash", title: "ls", input: { command: "ls" } }))).toBeNull();
+    expect(backgroundStep(ev({ type: "tool.call", tool: "Bash", title: "ls", input: { command: "ls", run_in_background: false } }))).toBeNull();
+    expect(backgroundStep({ t: "run.done" })).toBeNull();
+    const note = recoveryNote({ why: DAEMON_RESTARTED, tries: 1, plan: null, steps: ["sleep 90"], actions: [], prs: [], artifacts: [], background: ["sleep 90", "sleep 90"] });
+    expect(note).toContain("ran in the background; any still running when that work stopped was stopped with it and may not have finished");
+    expect(note).not.toContain("did not finish");
+    expect(note.match(/- sleep 90/g)).toHaveLength(2);
+    expect(note).toContain("wait for each in the foreground before you end your turn");
   });
 });
 
