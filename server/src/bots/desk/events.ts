@@ -17,8 +17,6 @@ import { retroAfterRun } from "../../memory/retro";
 export const CARD_ANSWER_TAKEN_RPC = "cards.answerTaken";
 
 export abstract class DeskEvents extends DeskRuns {
-  /** 分出去 (delegate.ts): the result of a part goes back to the member that gave it out. */
-  protected abstract reportPart(r: RunRow, ok: boolean, result: string): Promise<void>;
   /** 盯活 (stall.ts): a tool call of the run (loops). */
   protected abstract watchTool(r: RunRow, title: string): Promise<void>;
   /** 盯活 (stall.ts): continues a run that only promised work; true when it did. */
@@ -429,6 +427,8 @@ export abstract class DeskEvents extends DeskRuns {
       // The acceptance block is shown by the done card: the posted text leaves it out.
       const result = stripAcceptance(raw) || stripAcceptance((f.summary ?? "").trim()) || TEXT.done;
       await this.end(r, "done", cut(result, MAX_RESULT_CHARS), "done", firstLine(result), true);
+      // 转交 (design-relay R2): the work goes on with the other member; nothing follows here.
+      if (this.handedOverOf(r.id)) return;
       // 盯活: the CLI only promised the work and stopped. The desk continues it (at most 3 times).
       if (await this.continuePromise(r, raw)) return;
     } else if (f.status === "cancelled") {
@@ -437,6 +437,7 @@ export abstract class DeskEvents extends DeskRuns {
       const why = firstLine(readableError(f.error ?? f.summary ?? ""), 300);
       await this.end(r, "failed", TEXT.failed(why), "blocked", cut(TEXT.failed(why), 280));
     }
+    if (this.handedOverOf(r.id)) return;
     // Follow-ups the CLI never took start a new run with the topic context.
     const unread = this.sql
       .exec<{ message_id: string; author_id: string; body: string; ack_message_id: string | null }>(
@@ -510,14 +511,23 @@ export abstract class DeskEvents extends DeskRuns {
     r.approval_id = null;
     r.paused_by = null;
     r.paused_at = null;
-    const id = await this.postResult(r, body, success);
+    // 转交 (design-relay R2): a run that handed its work over posts no result card; the card in
+    // the topic says who took it, and its run ends as done.
+    const handed = this.handedOverOf(r.id);
+    if (handed) {
+      status = "done";
+      topicStatus = "done";
+      summary = TEXT.handedOver(handed.name);
+    }
+    const id = handed ? null : await this.postResult(r, body, success);
     if (id) {
       this.sql.exec("UPDATE runs SET result_message_id = ? WHERE id = ?", id, r.id);
       r.result_message_id = id;
     }
     await this.setStatus(r, status, { ended_at: now, summary: cut(summary, 280) || null });
-    await this.topic(r, topicStatus);
-    if (status !== "cancelled") await this.reportPart(r, success, body);
+    // The room ends the run's step of its chain: a split-off's result (stopped ones too) goes
+    // back to its giver from there.
+    await this.topic(r, topicStatus, [], { outcome: status, result: handed ? summary : body });
     this.retro(r, status, body);
     // A slot may be free now: the next queued run (排队) gets it. Not awaited: it takes other
     // runs' turns and must not wait inside this run's turn.

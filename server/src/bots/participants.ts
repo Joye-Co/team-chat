@@ -6,7 +6,7 @@
 // gets a follow-up without an @.
 import { type ArchivedEvent, type RoomContext, type RoomTx, registerTopicFields } from "../core/registry";
 import { approvalDecision, approvesWholeWork } from "./dispatch";
-import { type BotRun, isMainTopicId, MAX_TOPIC_PARTICIPANTS, RUN_KIND_ASIDE, type TopicParticipant, type TopicStatus } from "@chat/protocol";
+import { type BotRun, isMainTopicId, MAX_TOPIC_PARTICIPANTS, RUN_KIND_ASIDE, type RunStatus, type TopicParticipant, type TopicStatus } from "@chat/protocol";
 
 /** Room migration `participants-1` (registered after `bots-1` in room.ts, which it reads). */
 export const PARTICIPANTS_MIGRATION = `
@@ -141,6 +141,16 @@ export interface WorkState {
   waitingOn: string[];
   /** The run has ended (its last report). */
   ended: boolean;
+  /** design-relay R2: the run's step of its chain (chains.ts `StepReport`). */
+  chain?: { chainId: string; seq: number };
+  /** How the run ended: done | failed | cancelled. */
+  outcome?: RunStatus;
+  /** The person who stopped the run. */
+  stoppedBy?: string;
+  /** The member the run handed the work over to. */
+  handedOver?: string;
+  /** The run's result (<= 4000). */
+  result?: string;
 }
 
 /** Stores one run's report on its row and publishes the topic's state. */

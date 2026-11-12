@@ -26,6 +26,8 @@ import { FRONT_DESK_ASK_PREFIX } from "../agent/frontdesk";
 import { type RefSource, resolveRefs, stripRefPrefix } from "./refs";
 import { type ContextRow, type RequestExt, parseExt, requestExt } from "../context/render";
 import { PARTICIPANTS_MIGRATION, type WorkState, addressedParticipants, claimTopic, isParticipant, onRunUpdated, publishWorkState, routingOwner, topicBots, workState } from "./participants";
+import { giveUpChainRow, sendChainRow, stepReport } from "./chains";
+import type { RoomContext } from "../core/registry";
 
 registerRoomMigration({
   name: "bots-1",
@@ -296,7 +298,11 @@ registerRoomRpc("bots.workState", (room, actor, args) => {
   if (!room.isMember(actor.id)) throw new ApiError("forbidden", "not a member of this group");
   const topic = room.sql.exec("SELECT 1 FROM topics WHERE id = ?", s.topicId).toArray()[0];
   if (!topic) throw new ApiError("not_found", "topic not found");
-  room.commit((tx) => workState(room, tx, actor.id, s));
+  room.commit((tx) => {
+    workState(room, tx, actor.id, s);
+    // design-relay R2: the run's step of its chain (result back to the giver, stops).
+    stepReport(room, actor.id, s);
+  });
   return { ok: true };
 });
 
@@ -314,23 +320,6 @@ registerEventImporter((event, sql) => {
     run.botId,
     run.createdAt,
   );
-});
-
-/** 转交: the calling bot gives its topic to another bot (delegate.ts). The 群聊 has no claim. */
-registerRoomRpc("bots.transfer", (room, actor, args) => {
-  const { topicId, to } = args as { topicId: string; to: string };
-  if (!actor || actor.kind !== "bot") throw new ApiError("forbidden", "bots only");
-  if (!room.isMember(to)) throw new ApiError("forbidden", "not a member of this group");
-  if (isMainTopicId(topicId)) return { transferred: false };
-  const owner = routingOwner(room.sql, topicId);
-  if (owner && owner !== actor.id && !isParticipant(room.sql, topicId, actor.id)) throw new ApiError("forbidden", "only a member working in the topic hands it over");
-  room.sql.exec(
-    "INSERT INTO bot_topics (topic_id, bot_id, claimed_at) VALUES (?, ?, ?) ON CONFLICT (topic_id) DO UPDATE SET bot_id = excluded.bot_id, claimed_at = excluded.claimed_at",
-    topicId,
-    to,
-    Date.now(),
-  );
-  return { transferred: true };
 });
 
 /** Removes a bot's topic claims and participant rows in this group (the bot was deactivated). Internal. */
@@ -488,8 +477,11 @@ function withoutValues(a: AnswerData): AnswerData {
 
 type OutboxRow = {
   id: number;
-  /** "artifact" rows (page events before 1.1 made them transient) are dropped. */
-  kind: "message" | "card" | "answer" | "artifact";
+  /**
+   * "artifact" rows (page events before 1.1 made them transient) are dropped. "part" and
+   * "cancel" (design-relay R2, chains.ts): a split-off's result for its giver, a stop for a person.
+   */
+  kind: "message" | "card" | "answer" | "artifact" | "part" | "cancel";
   topic_id: string;
   payload: string;
   attempts: number;
@@ -602,6 +594,10 @@ async function plan(c: DeliverContext, row: OutboxRow): Promise<Plan | null> {
     return single(p.botId, () => deskStub(c.env, p.botId).cardAction(p.botId, press));
   }
   if (row.kind === "artifact") return null;
+  if (row.kind === "part" || row.kind === "cancel") {
+    const p = JSON.parse(row.payload) as { botId: string };
+    return single(p.botId, () => sendChainRow(c.env, c.groupId, row.kind, row.payload));
+  }
   if (row.kind === "answer") {
     const a = JSON.parse(row.payload) as OutboxAnswer;
     const args = await answerArgs(c, row, a);
@@ -920,6 +916,15 @@ async function deliverRow(c: DeliverContext, st: DrainState, row: OutboxRow, hel
     if (err instanceof LaneWaits) return;
     const attempts = row.attempts + 1;
     if (Date.now() - row.created_at > HANDOFF_GIVE_UP_MS) {
+      if (row.kind === "part" || row.kind === "cancel") {
+        // Giving up writes the topic: only the room's alarm can (an after-commit hook cannot).
+        if (!(c as Partial<RoomContext>).commit) {
+          c.sql.exec("UPDATE bot_outbox SET attempts = ?, next_at = ? WHERE id = ?", attempts, Date.now() + 1000, row.id);
+          c.wakeAt(Date.now() + 1000);
+          return;
+        }
+        giveUpChainRow(c as RoomContext, c.log, row.kind, row.payload);
+      }
       c.sql.exec("DELETE FROM bot_outbox WHERE id = ?", row.id);
       c.log.error("bot hand-off dropped", { err, kind: row.kind, topicId: row.topic_id, attempts });
       return;
@@ -959,7 +964,8 @@ export async function drainOutbox(c: DeliverContext): Promise<void> {
   if (next !== null) c.wakeAt(Math.max(next, Date.now() + 1000));
 }
 
-const HANDED_OFF = new Set(["message.created", "card.actioned", "card.answered"]);
+// run.updated, topic.updated and group.memberRemoved: chain rows (part, cancel) go out at once.
+const HANDED_OFF = new Set(["message.created", "card.actioned", "card.answered", "run.updated", "topic.updated", "group.memberRemoved"]);
 
 registerAfterCommit(async (event: Event, h) => {
   if (!HANDED_OFF.has(event.type)) return;
