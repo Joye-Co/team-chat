@@ -146,7 +146,9 @@ export abstract class DeskInput extends DeskRelay {
 
   /**
    * Only a human who is the run's requester, or an owner, may answer its approval. settings:
-   * with approver "owners" (谁可以批准 = 管理员) only owners may.
+   * with approver "owners" (谁可以批准 = 管理员) only owners may. design-roles 3.6: on a personal
+   * machine (`machineOwner`) only the person the run works for and the machine's owner, never an
+   * admin for them.
    */
   protected mayApprove(
     r: RunRow,
@@ -154,10 +156,19 @@ export abstract class DeskInput extends DeskRelay {
     kind: string | null | undefined,
     level: string | null | undefined,
     approver: Approver = "requester",
+    machineOwner: string | null = null,
   ): boolean {
     if (kind !== "human") return false;
+    if (machineOwner) return actorId === machineOwner || actorId === (r.requested_for ?? r.requested_by);
     if (level === "owner") return true;
     return approver !== "owners" && actorId === r.requested_by;
+  }
+
+  /** The owner of the run's machine when it is a personal machine (design-roles 3.6), else null. */
+  protected async machineOwnerOf(r: Pick<RunRow, "machine_id">): Promise<string | null> {
+    if (!r.machine_id) return null;
+    const row = await this.env.DB.prepare("SELECT owner_id FROM machines WHERE id = ?").bind(r.machine_id).first<{ owner_id: string | null }>();
+    return row?.owner_id ?? null;
   }
 
   protected async auditApproval(r: RunRow, actorId: string, decision: string, via: "card" | "text"): Promise<void> {
@@ -188,8 +199,9 @@ export abstract class DeskInput extends DeskRelay {
     // A short "好" / "ok" answers only in a reply that quotes the approval card.
     const toCard = m.replyToMessageId !== undefined && m.replyToMessageId === this.approvalCard(r)?.messageId;
     const decision = r.approval_id ? (whole ? "approve" : approvalDecision(m.body, toCard)) : null;
+    const machineOwner = await this.machineOwnerOf(r);
     // The room hook sends only human messages; other members' 同意 stays plain input.
-    if (r.approval_id && decision && link && this.mayApprove(r, m.authorId, "human", m.authorLevel, await this.approverOfOpen(r, kind))) {
+    if (r.approval_id && decision && link && this.mayApprove(r, m.authorId, "human", m.authorLevel, await this.approverOfOpen(r, kind), machineOwner)) {
       await this.auditApproval(r, m.authorId, whole ? "approve_run" : decision, "text");
       // Recorded as an input so a retried call does not answer twice.
       this.sql.exec(
@@ -225,6 +237,12 @@ export abstract class DeskInput extends DeskRelay {
     }
     // 盯活: "进展怎么样了" is answered from the run's own state; the CLI is not interrupted.
     if (!r.approval_id && isProgressQuestion(m.body)) return this.answerProgress(r, m);
+    // design-roles 3.6: on a personal machine only the person the run works for and the owner
+    // talk to the run; anyone else's message stays in the topic for the next run to read.
+    if (machineOwner && m.authorId !== machineOwner && m.authorId !== (r.requested_for ?? r.requested_by)) {
+      this.log.info("input not for a personal machine's run", { runId: r.id });
+      return;
+    }
     const inputId = ulid();
     const text = await this.inputText(r, m);
     this.sql.exec(
@@ -289,7 +307,7 @@ export abstract class DeskInput extends DeskRelay {
     const whole = kind !== null && a.actionId.startsWith("approveall:");
     const decision = a.actionId.startsWith("approve:") || whole ? "approve" : a.actionId.startsWith("deny:") ? "deny" : null;
     if (!decision) return;
-    if (!this.mayApprove(r, a.actorId, a.actorKind, a.actorLevel, await this.approverOfOpen(r, kind))) {
+    if (!this.mayApprove(r, a.actorId, a.actorKind, a.actorLevel, await this.approverOfOpen(r, kind), await this.machineOwnerOf(r))) {
       this.log.info("approval press ignored", { runId: r.id, actorId: a.actorId, kind: a.actorKind });
       return;
     }

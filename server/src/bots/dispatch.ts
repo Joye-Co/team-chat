@@ -49,6 +49,14 @@ export const TEXT = {
   noDisk: "电脑的磁盘空间不够，这次没有开始。清出空间后再 @我。",
   /** The computers that could take it are busy (a computer turned the run down). */
   allBusy: "能接手的电脑都在忙，这次没有开始。请稍后再 @我。",
+  /**
+   * design-roles 3.3: the AI member works only on other people's own computers, so no computer
+   * may ever take this request (the run ends at once).
+   */
+  personalOnly: (bot: string, person: string) =>
+    `${bot}在${person}的电脑上干活，只做${person}交代的事。可以请管理员把它放到团队的电脑上，或者在你自己的电脑上用它。`,
+  /** design-roles 3.3: the requester checked this member on own computers, and they are offline. */
+  waitPersonal: (names: string[]) => `在等${names.join("、")}上线。不想等的话，在设置 › 电脑里取消勾选。`,
   /** The member's computers are offline: the run waits (排队) and starts when one comes online. */
   waitOffline: (names: string[]) => `${names.join("、")} 不在线，等它上线后自动开始；不需要了可以停止。`,
   /**
@@ -347,6 +355,75 @@ export function limitOf(m: Pick<MachineView, "limited">, runtime: string, now: n
   return l ? { until: l.until, known: l.known } : null;
 }
 
+/** What the runner says about where it runs. */
+export type RunnerPlace = Pick<BotRunner, "labels" | "runtime" | "machineId">;
+
+/**
+ * design-roles 3.3: who a run works for and where it came from, for the ownership rules of
+ * personal machines. Absent: every machine counts as a team machine (the rules before).
+ */
+export interface DispatchCtx {
+  botId: string;
+  /** The person the run works for (`requested_for`); null: nobody (a hook's run). */
+  requestedFor: string | null;
+  /** The machine of the run this one was handed over (转交, 分出去) from. */
+  fromMachine?: string | null;
+  /** Who last changed the AI member's runner (`bot_runners.updated_by`). */
+  updatedBy?: string | null;
+}
+
+/**
+ * Whether a machine may take this AI member's run by placement and ownership (health aside).
+ * A team machine: the one the runner is pinned to, else one with its labels. A personal machine
+ * of A only when (1) the run works for A and the member is pinned there, checked there by A, or
+ * pinned nowhere with matching labels; (2) the run works for A and was handed over from a run on
+ * it; (3) a hook's run (nobody) of a member pinned there by A himself (`updated_by`).
+ */
+export function mayTake(m: Pick<MachineView, "id" | "labels" | "ownerId" | "personalBots">, runner: RunnerPlace, ctx?: DispatchCtx): boolean {
+  const placed = runner.machineId ? m.id === runner.machineId : labelsMatch(runner.labels, m.labels);
+  if (!m.ownerId || !ctx) return placed;
+  if (ctx.requestedFor === m.ownerId) return placed || m.personalBots?.has(ctx.botId) === true || ctx.fromMachine === m.id;
+  return ctx.requestedFor === null && runner.machineId === m.id && ctx.updatedBy === m.ownerId;
+}
+
+/**
+ * The machines a run may go to (design-roles 3.3, 优先顺序): the ones it may take by ownership;
+ * when its person checked the member on own machines, only those (and the machine the work was
+ * handed over from), counting only checked machines that have its runtime or have not said yet.
+ * `checked`: the run waits for the person's checked machines.
+ */
+export function placesFor(machines: MachineView[], runner: RunnerPlace, ctx?: DispatchCtx): { machines: MachineView[]; checked: boolean } {
+  const ok = machines.filter((m) => !m.revoked && mayTake(m, runner, ctx));
+  const person = ctx?.requestedFor;
+  if (!ctx || !person) return { machines: ok, checked: false };
+  // design-roles 3.4: a check does not look at the runtime; a checked machine without it does not count.
+  const checked = ok.filter((m) => m.ownerId === person && m.personalBots?.has(ctx.botId) && (m.clis === undefined || hasRuntime(m, runner.runtime)));
+  if (checked.length === 0) return { machines: ok, checked: false };
+  const from = ok.find((m) => m.id === ctx.fromMachine && m.ownerId === person && !checked.includes(m));
+  return { machines: from ? [from, ...checked] : checked, checked: true };
+}
+
+/**
+ * Whether any machine could ever take the run (design-roles 3.3 `reachable`): ownership,
+ * placement, checks and the runtime count; online and busy do not. A machine that never said
+ * hello counts (its runtime is not known yet).
+ */
+export function reachable(machines: MachineView[], runner: RunnerPlace, ctx?: DispatchCtx): boolean {
+  return placesFor(machines, runner, ctx).machines.some((m) => m.clis === undefined || hasRuntime(m, runner.runtime));
+}
+
+/**
+ * The owner of the personal machine that keeps the run from every machine: no machine may take
+ * it for its person, but someone's own machine would by placement alone. Null when the run is
+ * reachable, or when no machine at all would take it (the usual no-machine texts say so).
+ */
+export function personalBlock(machines: MachineView[], runner: RunnerPlace, ctx: DispatchCtx): string | null {
+  if (reachable(machines, runner, ctx)) return null;
+  const would = machines.filter((m) => !m.revoked && m.ownerId && mayTake(m, runner) && (m.clis === undefined || hasRuntime(m, runner.runtime)));
+  const pinned = would.find((m) => m.id === runner.machineId);
+  return (pinned ?? would[0])?.ownerId ?? null;
+}
+
 function activeRuns(m: MachineView): number {
   return Math.max(m.health?.activeRuns ?? 0, m.runningRuns.length);
 }
@@ -354,9 +431,10 @@ function activeRuns(m: MachineView): number {
 /** Machines that can take a new run of this bot, best first. */
 export function candidates(
   machines: MachineView[],
-  runner: Pick<BotRunner, "labels" | "runtime" | "machineId">,
+  runner: RunnerPlace,
   now: number,
   exclude: string[] = [],
+  ctx?: DispatchCtx,
 ): MachineView[] {
   return machines
     .filter(
@@ -364,7 +442,8 @@ export function candidates(
         !exclude.includes(m.id) &&
         isHealthy(m, now) &&
         // A runner pinned to one machine (1.2.2) runs only there; its labels do not count.
-        (runner.machineId ? m.id === runner.machineId : labelsMatch(runner.labels, m.labels)) &&
+        // A personal machine takes only its owner's work (design-roles 3.3).
+        mayTake(m, runner, ctx) &&
         hasRuntime(m, runner.runtime) &&
         signedIn(m, runner.runtime) &&
         limitOf(m, runner.runtime, now) === null &&
@@ -375,11 +454,12 @@ export function candidates(
 
 export function pickMachine(
   machines: MachineView[],
-  runner: Pick<BotRunner, "labels" | "runtime" | "machineId">,
+  runner: RunnerPlace,
   now: number,
   exclude: string[] = [],
+  ctx?: DispatchCtx,
 ): MachineView | null {
-  return candidates(machines, runner, now, exclude)[0] ?? null;
+  return candidates(machines, runner, now, exclude, ctx)[0] ?? null;
 }
 
 /** Connected with a recent heartbeat (free disk aside). */
@@ -402,8 +482,8 @@ export type NoMachine =
    */
   | { why: "limit"; machines: MachineView[]; until: number; known: boolean };
 
-export function whyNoMachine(machines: MachineView[], runner: Pick<BotRunner, "labels" | "runtime" | "machineId">, now: number): NoMachine {
-  const mine = machines.filter((m) => !m.revoked && (runner.machineId ? m.id === runner.machineId : labelsMatch(runner.labels, m.labels)));
+export function whyNoMachine(machines: MachineView[], runner: RunnerPlace, now: number, ctx?: DispatchCtx): NoMachine {
+  const mine = machines.filter((m) => !m.revoked && mayTake(m, runner, ctx));
   // A machine that never said hello is not set up yet.
   const known = mine.filter((m) => m.clis !== undefined);
   if (known.length === 0) return { why: "none" };

@@ -722,6 +722,8 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
       const { phase, waitingFor } = phaseOf(r, { report, superseded: needsReply(report) && this.superseded(r) });
       run.phase = phase;
       if (waitingFor) run.waitingFor = waitingFor;
+      // design-roles 3.3: a queued run that waits for its person's own computers to come online.
+      if (waitingFor === "queue" && this.meta(`waitPersonal:${r.id}`) !== null) run.waitingFor = "offline";
     }
     if (isHeld(r)) {
       run.holdKind = holdKindOf(r);
@@ -759,13 +761,31 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
     return later.toArray().length > 0;
   }
 
-  /** 1-based place of a queued run among this bot's queued runs, oldest first. */
+  /**
+   * 1-based place of a queued run among this bot's queued runs, oldest first. design-roles 3.3:
+   * only earlier runs that wait for one of the same machines count (meta `places:{runId}`); a
+   * run without that record counts as waiting for every machine.
+   */
   protected queuePosition(r: Pick<RunRow, "id" | "queued_at">): number {
-    return (
-      this.sql
-        .exec<{ n: number }>(`SELECT count(*) AS n FROM runs WHERE ${QUEUED} AND (queued_at < ? OR (queued_at = ? AND id < ?))`, r.queued_at, r.queued_at, r.id)
-        .one().n + 1
-    );
+    const earlier = this.sql
+      .exec<{ id: string }>(`SELECT id FROM runs WHERE ${QUEUED} AND (queued_at < ? OR (queued_at = ? AND id < ?))`, r.queued_at, r.queued_at, r.id)
+      .toArray();
+    const placesOf = (id: string): Set<string> | null => {
+      const raw = this.meta(`places:${id}`);
+      if (raw === null) return null;
+      try {
+        return new Set(JSON.parse(raw) as string[]);
+      } catch {
+        return null;
+      }
+    };
+    const mine = placesOf(r.id);
+    let n = 0;
+    for (const { id } of earlier) {
+      const theirs = mine ? placesOf(id) : null;
+      if (!mine || !theirs || [...theirs].some((m) => mine.has(m))) n += 1;
+    }
+    return n + 1;
   }
 
   protected acceptanceOf(r: Pick<RunRow, "acceptance">): AcceptanceItem[] | null {
