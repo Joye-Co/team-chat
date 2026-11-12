@@ -56,6 +56,24 @@ pub(super) fn api_error(e: &ApiError) -> AdminError {
     }
 }
 
+/// What the server said to forgetting a computer: one that is gone already is forgotten.
+fn forget_machine(r: Result<(), ApiError>) -> Result<(), AdminError> {
+    match r {
+        Ok(()) => Ok(()),
+        Err(e) if machine_error(&e) == AdminError::NotFound => Ok(()),
+        Err(e) => Err(machine_error(&e)),
+    }
+}
+
+/// [`api_error`] for the computer routes: a conflict there is a change made meanwhile (the
+/// computer's owner changed), not the last 所有者.
+pub(super) fn machine_error(e: &ApiError) -> AdminError {
+    match api_error(e) {
+        AdminError::LastOwner => AdminError::Conflict,
+        other => other,
+    }
+}
+
 fn level_to_wire(level: MemberLevel) -> proto::MemberLevel {
     match level {
         MemberLevel::Owner => proto::MemberLevel::Owner,
@@ -178,6 +196,16 @@ pub(super) fn machine(m: &proto::Machine) -> MachineInfo {
             .max(m.running_runs.len() as u32),
         max_parallel_runs: m.max_parallel_runs,
         runtimes,
+        owner_id: m.owner_id.clone(),
+        personal_bots: m
+            .personal_bots
+            .iter()
+            .flatten()
+            .map(|b| crate::data::PersonalBot {
+                bot_id: b.bot_id.clone(),
+                repo_path: b.repo_path.clone(),
+            })
+            .collect(),
         clis: m
             .clis
             .iter()
@@ -228,10 +256,10 @@ fn toml_str(s: &str) -> String {
     out
 }
 
-/// Shell lines that write the daemon config and token (mode 600) and install
+/// Shell lines for a Mac that write the daemon config and token (mode 600) and install
 /// the launchd service. The daemon ships inside the app (`Contents/MacOS/<slug>-daemon`,
-/// see scripts/build-dmg.sh), so the machine needs the app installed; a `<slug>-daemon` on
-/// `PATH` (a release asset) is the fallback.
+/// see scripts/build-dmg.sh), so the Mac needs the app installed; a `<slug>-daemon` on
+/// `PATH` is the fallback. A Linux computer has [`install_command_linux`].
 pub(super) fn install_command(server_url: &str, machine: &proto::Machine, token: &str) -> String {
     let slug = env!("PRODUCT_SLUG");
     let app = env!("PRODUCT_NAME");
@@ -259,6 +287,62 @@ pub(super) fn install_command(server_url: &str, machine: &proto::Machine, token:
         server = toml_str(server_url),
         id = toml_str(&machine.id),
         name = toml_str(&machine.name),
+    )
+}
+
+/// The release platform of the Linux daemon (server `ReleasePlatform`).
+const LINUX_PLATFORM: &str = "linux-x86_64";
+
+/// Shell lines for a Linux computer (机 1.8): the same config and token as [`install_command`],
+/// then the released Linux daemon, downloaded from this server with the machine token (sent in
+/// a curl config on standard input, never on a command line) and checked against the SHA-256
+/// the server gives, into `~/.local/bin`, where it later updates itself
+/// (docs/machine-protocol.md, "Updating itself"); then `doctor` and `install-service` (a
+/// systemd user unit). Any step that fails stops the rest and the last line says so.
+pub(super) fn install_command_linux(
+    server_url: &str,
+    machine: &proto::Machine,
+    token: &str,
+) -> String {
+    let slug = env!("PRODUCT_SLUG");
+    let dir = format!("$HOME/.config/{slug}");
+    let labels = machine
+        .labels
+        .iter()
+        .map(|l| toml_str(l))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let latest = format!(
+        "{}/v1/machine/updates/latest?platform={LINUX_PLATFORM}",
+        server_url.trim_end_matches('/')
+    );
+    format!(
+        "mkdir -p \"{dir}\" && chmod 700 \"{dir}\"\n\
+         (umask 077; printf '%s' {token} > \"{dir}/machine-token\")\n\
+         cat > \"{dir}/daemon.toml\" <<EOF\n\
+         server_url = {server}\n\
+         token_file = \"{dir}/machine-token\"\n\
+         machine_id = {id}\n\
+         name = {name}\n\
+         labels = [{labels}]\n\
+         EOF\n\
+         B=\"$HOME/.local/bin\"; D=\"$B/{slug}-daemon\"\n\
+         A=\"header = \\\"Authorization: Bearer $(cat \"{dir}/machine-token\")\\\"\"\n\
+         I=\"$(printf '%s\\n' \"$A\" | curl -fsSL -K - {latest})\"\n\
+         U=\"$(printf '%s' \"$I\" | sed -n 's/.*\"downloadUrl\":\"\\([^\"]*\\)\".*/\\1/p')\"\n\
+         H=\"$(printf '%s' \"$I\" | sed -n 's/.*\"sha256\":\"\\([0-9a-f]\\{{64\\}}\\)\".*/\\1/p')\"\n\
+         [ \"$(uname -m)\" = x86_64 ] && [ -n \"$U\" ] && [ -n \"$H\" ] && mkdir -p \"$B\" \\\n\
+         && printf '%s\\n' \"$A\" | curl -fsSL -K - -o \"$D.install\" \"$U\" \\\n\
+         && printf '%s  %s\\n' \"$H\" \"$D.install\" | sha256sum -c - \\\n\
+         && chmod 755 \"$D.install\" && mv -f \"$D.install\" \"$D\" \\\n\
+         && \"$D\" doctor && \"$D\" install-service \\\n\
+         || printf '%s\\n' {failed}",
+        token = shell_quote(token),
+        server = toml_str(server_url),
+        id = toml_str(&machine.id),
+        name = toml_str(&machine.name),
+        latest = shell_quote(&latest),
+        failed = shell_quote(crate::copy::settings::MACHINE_INSTALL_LINUX_FAILED),
     )
 }
 
@@ -668,6 +752,7 @@ impl CoreProvider {
         &self,
         name: String,
         labels: Vec<String>,
+        personal: Option<bool>,
     ) -> AdminReply<MachineCreated> {
         let name = name.trim().to_string();
         if name.is_empty() {
@@ -682,7 +767,7 @@ impl CoreProvider {
             let req = CreateMachineRequest {
                 name,
                 labels: (!labels.is_empty()).then_some(labels),
-                personal: None,
+                personal,
             };
             let r = client
                 .http()
@@ -691,12 +776,98 @@ impl CoreProvider {
                 .map_err(|e| api_error(&e))?;
             let install = install_command(&server_url, &r.machine, &r.token);
             let install_windows = install_command_windows(&server_url, &r.machine, &r.token);
+            let install_linux = install_command_linux(&server_url, &r.machine, &r.token);
             Ok(MachineCreated {
                 machine: machine(&r.machine),
                 credential: SecretText::new(r.token),
                 install_command: SecretText::new(install),
                 install_command_windows: SecretText::new(install_windows),
+                install_command_linux: SecretText::new(install_linux),
             })
+        })
+    }
+
+    /// `PATCH /v1/machines/:id`: a new name, or `owner` (`Some(Some("me"))` 改成我的电脑,
+    /// `Some(None)` 交给团队).
+    pub(super) fn update_machine_inner(
+        &self,
+        machine_id: &str,
+        name: Option<String>,
+        owner: Option<Option<String>>,
+    ) -> AdminReply<MachineInfo> {
+        let name = name.map(|n| n.trim().to_string());
+        if name.as_deref() == Some("") {
+            return reply_now(Err(AdminError::Invalid));
+        }
+        let id = machine_id.to_string();
+        self.request(move |client, _| async move {
+            let req = proto::UpdateMachineRequest { name, owner };
+            let m = client
+                .http()
+                .update_machine(&id, &req)
+                .await
+                .map_err(|e| machine_error(&e))?;
+            Ok(machine(&m))
+        })
+    }
+
+    /// `DELETE /v1/machines/:id`; one that is already gone counts as removed.
+    pub(super) fn remove_machine_inner(&self, machine_id: &str) -> AdminReply<()> {
+        let id = machine_id.to_string();
+        self.request(move |client, _| async move {
+            match client.http().delete_machine(&id).await {
+                Ok(()) => Ok(()),
+                Err(e) if machine_error(&e) == AdminError::NotFound => Ok(()),
+                Err(e) => Err(machine_error(&e)),
+            }
+        })
+    }
+
+    /// My work for `bot_id` on my computer: `Some(repo)` sets it (with my code folder, or
+    /// none), `None` takes it away.
+    pub(super) fn machine_bot_inner(
+        &self,
+        machine_id: &str,
+        bot_id: &str,
+        set: Option<Option<String>>,
+    ) -> AdminReply<MachineInfo> {
+        let (id, bot) = (machine_id.to_string(), bot_id.to_string());
+        let set = set.map(|repo| repo.map(|r| r.trim().to_string()).filter(|r| !r.is_empty()));
+        self.request(move |client, _| async move {
+            let http = client.http();
+            let m = match set {
+                Some(repo_path) => {
+                    let req = proto::SetMachineBotRequest {
+                        repo_path: Some(repo_path),
+                    };
+                    http.set_machine_bot(&id, &bot, &req).await
+                }
+                None => http.delete_machine_bot(&id, &bot).await,
+            }
+            .map_err(|e| machine_error(&e))?;
+            Ok(machine(&m))
+        })
+    }
+
+    /// 不再用这台电脑 (机 1.6): the service and the files that registered this computer are
+    /// removed here first, then the server forgets it (its token stops working; one that is
+    /// gone already, removed from another device, is fine). A failure on this computer leaves
+    /// the registration, so the row and its "⋯" stay to try again; once the files are gone the
+    /// row is no longer this computer and 移除… on it finishes the rest.
+    pub(super) fn stop_using_this_computer_inner(&self) -> AdminReply<()> {
+        let Some(daemon) = super::this_mac::bundled_daemon() else {
+            return reply_now(Err(AdminError::Unsupported));
+        };
+        let id = super::this_mac::machine_id();
+        self.request(move |client, _| async move {
+            super::this_mac::stop_using(&daemon).map_err(|e| {
+                tracing::warn!(error = %e, "不再用这台电脑: uninstall failed");
+                AdminError::Other
+            })?;
+            match id {
+                Some(id) => forget_machine(client.http().delete_machine(&id).await),
+                None => Ok(()),
+            }
         })
     }
 
@@ -854,6 +1025,25 @@ mod tests {
                      { "runtime": "rt-b", "kind": "pty", "command": "y", "available": false }]
         }))
         .expect("machine json")
+    }
+
+    /// 不再用这台电脑 after this computer was removed elsewhere (another device, an admin):
+    /// the server no longer knows it, and that is the end of it, not a failure.
+    #[test]
+    fn forgetting_a_computer_that_is_gone_is_done() {
+        assert_eq!(forget_machine(Ok(())), Ok(()));
+        assert_eq!(
+            forget_machine(Err(ApiError::Unexpected { status: 404 })),
+            Ok(())
+        );
+        assert_eq!(
+            forget_machine(Err(ApiError::Unexpected { status: 403 })),
+            Err(AdminError::Forbidden)
+        );
+        assert_eq!(
+            forget_machine(Err(ApiError::NoToken)),
+            Err(AdminError::Offline)
+        );
     }
 
     #[test]
@@ -1104,6 +1294,101 @@ mod tests {
         let acl = String::from_utf8_lossy(&acl.stdout).into_owned();
         assert!(!acl.contains("(I)"), "inherited entries: {acl}");
         assert_eq!(acl.matches("(OI)(CI)(F)").count(), 3, "{acl}");
+    }
+
+    /// The Linux command (机 1.8) writes the config, downloads the daemon this server releases
+    /// with the machine token kept off every command line, checks its SHA-256, installs it in
+    /// `~/.local/bin` and runs `doctor` and `install-service`; a wrong hash or another
+    /// processor stops it before anything is installed, with one line that says so. `curl`
+    /// and `uname` are stand-ins; the hash check is the real one.
+    #[cfg(unix)]
+    #[test]
+    fn the_linux_install_command_downloads_and_checks_the_daemon() {
+        use sha2::Digest as _;
+        use std::os::unix::fs::PermissionsExt as _;
+        let tmp = tempfile::tempdir().unwrap();
+        let fake = tmp.path().join("bin");
+        let home = tmp.path().join("home");
+        std::fs::create_dir_all(&fake).unwrap();
+        std::fs::create_dir_all(&home).unwrap();
+        let script = |name: &str, body: String| {
+            let p = fake.join(name);
+            std::fs::write(&p, format!("#!/bin/sh\n{body}")).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        let f = fake.display().to_string();
+        let daemon = format!("#!/bin/sh\necho \"$1\" >> '{f}/daemon-log'\n");
+        std::fs::write(fake.join("daemon-bin"), &daemon).unwrap();
+        let good = format!("{:x}", sha2::Sha256::digest(daemon.as_bytes()));
+        script(
+            "curl",
+            format!(
+                "cat >> '{f}/curl-config'\nout=''; url=''\n\
+                 while [ $# -gt 0 ]; do case \"$1\" in -o) out=\"$2\"; shift 2;; -*) shift;; *) url=\"$1\"; shift;; esac; done\n\
+                 echo \"$url\" >> '{f}/urls'\n\
+                 if [ -n \"$out\" ]; then cp '{f}/daemon-bin' \"$out\"; else printf '{{\"version\":\"9.9.9\",\"sha256\":\"%s\",\"downloadUrl\":\"https://x.example/v1/machine/updates/9.9.9/download?platform=linux-x86_64\"}}' \"$(cat '{f}/hash')\"; fi\n"
+            ),
+        );
+        script("uname", format!("cat '{f}/arch'\n"));
+        script(
+            "sha256sum",
+            "if [ -x /usr/bin/sha256sum ]; then exec /usr/bin/sha256sum \"$@\"; else exec shasum -a 256 \"$@\"; fi\n"
+                .into(),
+        );
+        let cmd = install_command_linux("https://x.example/", &sample_machine(), "tm_a'b");
+        let run = |hash: &str, arch: &str| {
+            std::fs::write(fake.join("hash"), hash).unwrap();
+            std::fs::write(fake.join("arch"), arch).unwrap();
+            let out = std::process::Command::new("/bin/sh")
+                .arg("-c")
+                .arg(&cmd)
+                .env("HOME", &home)
+                .env("PATH", format!("{f}:/usr/bin:/bin"))
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).into_owned()
+        };
+        let slug = env!("PRODUCT_SLUG");
+        let installed = home.join(".local/bin").join(format!("{slug}-daemon"));
+        let failed = crate::copy::settings::MACHINE_INSTALL_LINUX_FAILED;
+
+        // Another processor: nothing is downloaded or installed.
+        assert!(run(&good, "aarch64").contains(failed));
+        assert!(!installed.exists());
+        // A hash that does not match: the download is not put in place.
+        assert!(run(&"0".repeat(64), "x86_64").contains(failed));
+        assert!(!installed.exists());
+
+        let said = run(&good, "x86_64");
+        assert!(!said.contains(failed), "{said}");
+        assert_eq!(std::fs::read_to_string(&installed).unwrap(), daemon);
+        let mode = std::fs::metadata(&installed).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o755);
+        let log = std::fs::read_to_string(fake.join("daemon-log")).unwrap();
+        assert_eq!(log, "doctor\ninstall-service\n");
+        let cfg = home.join(".config").join(slug);
+        assert_eq!(
+            std::fs::read_to_string(cfg.join("machine-token")).unwrap(),
+            "tm_a'b"
+        );
+        let toml = std::fs::read_to_string(cfg.join("daemon.toml")).unwrap();
+        assert!(
+            toml.contains("server_url = \"https://x.example/\""),
+            "{toml}"
+        );
+        assert!(toml.contains(&format!("token_file = \"{}/machine-token\"", cfg.display())));
+        // The token goes in curl's config on standard input, never in a URL or an argument.
+        let config = std::fs::read_to_string(fake.join("curl-config")).unwrap();
+        assert!(
+            config.contains("header = \"Authorization: Bearer tm_a'b\""),
+            "{config}"
+        );
+        let urls = std::fs::read_to_string(fake.join("urls")).unwrap();
+        assert!(!urls.contains("tm_"));
+        assert!(
+            urls.starts_with("https://x.example/v1/machine/updates/latest?platform=linux-x86_64\n")
+        );
+        assert!(urls.contains("/v1/machine/updates/9.9.9/download?platform=linux-x86_64"));
     }
 
     #[test]

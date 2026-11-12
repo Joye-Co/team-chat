@@ -133,6 +133,9 @@ export type RunRow = {
   // desk-run-code (design-relay R5)
   /** JSON of `RunCode` from run.done (branch, head, pushed), or null when not known. */
   code: string | null;
+  // desk-requested-for (usable, protocol "Who a run works for")
+  /** The person the run works for (`BotRun.requestedFor`); null for a hook's run and runs from before. */
+  requested_for: string | null;
   // desk-failure-model (模 2.2, 2.3, 2.10)
   /** JSON of `RunFailure` of a failed run, or null. */
   failure: string | null;
@@ -507,6 +510,12 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
           up: `ALTER TABLE runs ADD COLUMN code TEXT;`,
         },
         {
+          // Usable (protocol "Who a run works for"): the person a run works for. Old rows: NULL,
+          // read as their requester where a person is needed.
+          name: "desk-requested-for",
+          up: `ALTER TABLE runs ADD COLUMN requested_for TEXT;`,
+        },
+        {
           // 模 2.2, 2.3, 2.10: why a run failed (run.done.failure, JSON) and the model and
           // 思考强度 it really ran with (the session event). Old rows: NULL.
           name: "desk-failure-model",
@@ -615,6 +624,8 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
       updatedAt: r.updated_at,
     };
     if (r.requested_by) run.requestedBy = r.requested_by;
+    // A private card's answerer stays on the server: the wire field is absent then.
+    if (r.requested_for && r.requested_by !== ANONYMOUS_ID) run.requestedFor = r.requested_for;
     if (r.machine_id) run.machineId = r.machine_id;
     if (r.started_at !== null) run.startedAt = r.started_at;
     if (r.ended_at !== null) run.endedAt = r.ended_at;
@@ -741,6 +752,11 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
    * The person to mention and wait on for the run's approvals: its requester, or nobody when
    * an answer to a private card started the run (cards2/privacy; then owners approve).
    */
+  /** A private card's answer started this run: who it works for stays on the server. */
+  protected anonymous(r: Pick<RunRow, "requested_by">): boolean {
+    return r.requested_by === ANONYMOUS_ID;
+  }
+
   protected requester(r: Pick<RunRow, "requested_by">): string[] {
     return r.requested_by === ANONYMOUS_ID ? [] : [r.requested_by];
   }
@@ -1007,7 +1023,14 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
     return this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = ?", key).toArray()[0]?.value ?? null;
   }
 
+  /** The person this run stopped to wait for to connect GitHub (meta `github_wait:{runId}`), or null. */
+  protected githubWaitingOn(runId: string): string | null {
+    return this.meta(`github_wait:${runId}`);
+  }
+
   // Implemented by the feature modules that extend this class.
+  /** A connection arrived while the run was still going (meta `github_resume:{runId}`): go on after it ended (desk/github.ts). */
+  protected abstract resumeAfterGithub(r: RunRow, deferUnread?: boolean): Promise<void>;
   protected abstract end(r: RunRow, status: RunStatus, body: string, topicStatus: TopicStatus, summary: string, success?: boolean, waitingOn?: string[]): Promise<void>;
   protected abstract scheduleStall(): Promise<void>;
   protected abstract markStalled(r: RunRow): Promise<void>;

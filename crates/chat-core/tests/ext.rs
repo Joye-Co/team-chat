@@ -1543,3 +1543,84 @@ async fn upload_over_100_mb_goes_in_parts_with_progress_and_retries() {
         .collect();
     assert_eq!(ups, vec![60_000_000, 120_000_000, size as u64]);
 }
+
+/// Usable (design-roles 3.5): rename, 交给团队 / 改成我的电脑, and the AI members whose work for
+/// me runs on my machine go out as the server reads them; a bad request never leaves.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn machine_ownership_requests_reach_the_server_as_written() {
+    let dir = tempfile::tempdir().unwrap();
+    let http = MockHttp::start().await;
+    let client = http_client(&http, dir.path(), |_| {});
+    let h = client.http();
+    let renamed = h
+        .update_machine(
+            "M1",
+            &UpdateMachineRequest {
+                name: Some("书房的 Mac".into()),
+                owner: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(renamed.name, "书房的 Mac");
+    assert_eq!(renamed.owner_id.as_deref(), Some("me"));
+    h.update_machine(
+        "M1",
+        &UpdateMachineRequest {
+            name: None,
+            owner: Some(None),
+        },
+    )
+    .await
+    .unwrap();
+    h.update_machine(
+        "M1",
+        &UpdateMachineRequest {
+            name: None,
+            owner: Some(Some(MACHINE_OWNER_ME.into())),
+        },
+    )
+    .await
+    .unwrap();
+    let m = h
+        .set_machine_bot(
+            "M1",
+            "B1",
+            &SetMachineBotRequest {
+                repo_path: Some(Some("/code/app".into())),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        m.personal_bots.unwrap()[0].repo_path.as_deref(),
+        Some("/code/app")
+    );
+    h.set_machine_bot(
+        "M1",
+        "B1",
+        &SetMachineBotRequest {
+            repo_path: Some(None),
+        },
+    )
+    .await
+    .unwrap();
+    h.delete_machine_bot("M1", "B1").await.unwrap();
+    // Nothing to change: refused before it is sent.
+    assert!(
+        h.update_machine("M1", &UpdateMachineRequest::default())
+            .await
+            .is_err()
+    );
+    let sent = http.with(|s| s.machine_requests.clone());
+    assert_eq!(sent.len(), 6);
+    assert_eq!(sent[0].0, "PATCH");
+    assert_eq!(sent[0].2, json!({"name": "书房的 Mac"}));
+    assert_eq!(sent[1].2, json!({"owner": null}));
+    assert_eq!(sent[2].2, json!({"owner": "me"}));
+    assert_eq!(sent[3].0, "PUT");
+    assert_eq!(sent[3].1, "/v1/machines/M1/bots/B1");
+    assert_eq!(sent[3].2, json!({"repoPath": "/code/app"}));
+    assert_eq!(sent[4].2, json!({"repoPath": null}));
+    assert_eq!(sent[5].0, "DELETE");
+}

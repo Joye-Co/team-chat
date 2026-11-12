@@ -2145,7 +2145,51 @@ impl ChatProvider for FakeProvider {
     }
 
     fn create_machine(&self, name: String, labels: Vec<String>) -> AdminReply<MachineCreated> {
-        self.create_machine_fake(name, labels)
+        self.create_machine_fake(name, labels, None)
+    }
+
+    fn create_machine_as(
+        &self,
+        name: String,
+        labels: Vec<String>,
+        personal: Option<bool>,
+    ) -> AdminReply<MachineCreated> {
+        self.create_machine_fake(name, labels, personal)
+    }
+
+    fn rename_machine(&self, machine_id: &str, name: String) -> AdminReply<MachineInfo> {
+        self.rename_machine_fake(machine_id, name)
+    }
+
+    fn set_machine_owner(&self, machine_id: &str, mine: bool) -> AdminReply<MachineInfo> {
+        self.set_machine_owner_fake(machine_id, mine)
+    }
+
+    fn remove_machine(&self, machine_id: &str) -> AdminReply<()> {
+        self.remove_machine_fake(machine_id)
+    }
+
+    fn set_machine_bot(
+        &self,
+        machine_id: &str,
+        bot_id: &str,
+        repo_path: Option<String>,
+    ) -> AdminReply<MachineInfo> {
+        self.machine_bot_fake(machine_id, bot_id, Some(repo_path))
+    }
+
+    fn unset_machine_bot(&self, machine_id: &str, bot_id: &str) -> AdminReply<MachineInfo> {
+        self.machine_bot_fake(machine_id, bot_id, None)
+    }
+
+    /// The demo computer stops being used: it is gone from the list.
+    fn stop_using_this_computer(&self) -> AdminReply<()> {
+        if let Some(id) = self.this_machine_id() {
+            let _ = self.remove_machine_fake(&id);
+        }
+        self.this_mac_used
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        reply_now(Ok(()))
     }
 
     /// The demo Mac has no daemon yet, so 用这台电脑 shows; using it only pretends.
@@ -2160,11 +2204,24 @@ impl ChatProvider for FakeProvider {
         }
     }
 
-    /// After 用这台电脑 the demo Mac is the office Mac mini.
+    /// After 用这台电脑 the demo Mac is the office Mac mini; in the role views it is my own
+    /// MacBook Air.
     fn this_machine_id(&self) -> Option<String> {
-        self.this_mac_used
+        if !self
+            .this_mac_used
             .load(std::sync::atomic::Ordering::Relaxed)
-            .then(|| "mc-mini".into())
+        {
+            return None;
+        }
+        let mine = self.has_machine(settings::MY_COMPUTER);
+        Some(
+            if mine {
+                settings::MY_COMPUTER
+            } else {
+                "mc-mini"
+            }
+            .into(),
+        )
     }
 
     fn restart_this_mac(&self) -> AdminReply<()> {

@@ -542,7 +542,8 @@ export abstract class DeskEvents extends DeskRuns {
     // close now; an answer taken back in the meantime is left out.
     const left: typeof unread = [];
     for (const x of unread) if (await this.answerStartsRun(r, x.message_id)) left.push(x);
-    if (left.length === 0) return;
+    // None of them starts a run: a GitHub connection that waited for them goes on now.
+    if (left.length === 0) return this.resumeAfterGithub(r, false);
     if (this.followUpDepth(r) >= MAX_FOLLOW_UPS) {
       try {
         await this.note(r, TEXT.followUpLimit);
@@ -629,13 +630,20 @@ export abstract class DeskEvents extends DeskRuns {
       r.result_message_id = id;
     }
     await this.setStatus(r, status, { ended_at: now, summary: cut(summary, 280) || null });
+    // A run that stopped for someone's GitHub is not done: the topic waits on that person.
+    const githubFor = status !== "cancelled" ? this.githubWaitingOn(r.id) : null;
     // The room ends the run's step of its chain: a split-off's result (stopped ones too) goes
-    // back to its giver from there.
-    await this.topic(r, topicStatus, waitingOn, { outcome: status, result: handed ? summary : body });
+    // back to its giver from there. A private card's answerer is never named on the wire: the
+    // topic waits on nobody then.
+    await this.topic(r, githubFor ? "blocked" : topicStatus, githubFor ? (this.anonymous(r) ? [] : [githubFor]) : waitingOn, {
+      outcome: status,
+      result: handed ? summary : body,
+    });
     this.retro(r, status, body);
     // A slot may be free now: the next queued run (排队) gets it. Not awaited: it takes other
     // runs' turns and must not wait inside this run's turn.
     void this.dispatchQueued().catch((err) => this.log.warn("queue dispatch failed", { err }));
+    if (status !== "cancelled" && this.meta(`github_resume:${r.id}`) !== null) await this.resumeAfterGithub(r);
   }
 
   /** 复盘 (memory/retro.ts): lessons from a run that ran on a machine, after it ended. Never fails the run. */

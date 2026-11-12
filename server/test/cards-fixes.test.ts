@@ -503,6 +503,13 @@ describe("private answers reach the card's author without the voter", () => {
     const next = await d.next((f) => f.t === "run.assign" && f.runId !== runId && f.runId !== follow.runId);
     const started = await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === next.runId);
     expect(started.data.run.requestedBy).toBe("anonymous");
+    // The run works for the answerer, which only the server knows (protocol "Who a run works for").
+    expect(started.data.run.requestedFor).toBeUndefined();
+    expect(followed.data.run.requestedFor).toBeUndefined();
+    const kept = (id: string) =>
+      runInDurableObject(desk, async (_o, state) => state.storage.sql.exec("SELECT requested_for FROM runs WHERE id = ?", id).toArray()[0]);
+    expect(await kept(next.runId)).toEqual({ requested_for: w.human.id });
+    expect(await kept(follow.runId)).toEqual({ requested_for: w.human.id });
     const prompt = JSON.stringify(next);
     expect(prompt).toContain("不错");
     expect(prompt).not.toContain(`"requestedBy":"${w.human.id}"`);

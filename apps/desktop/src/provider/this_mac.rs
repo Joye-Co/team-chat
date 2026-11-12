@@ -235,7 +235,8 @@ pub(super) async fn set_up(
         let req = chat_core::proto::CreateMachineRequest {
             name: computer_name(),
             labels: Some(labels.clone()),
-            personal: None,
+            // 用这台电脑 makes it my own computer (design-roles 3.3): only what I ask is done here.
+            personal: Some(true),
         };
         let r = http.create_machine(&req).await.map_err(SetUpError::Api)?;
         Some(NewMachine {
@@ -666,9 +667,119 @@ pub(super) fn install(daemon: &Path, new: Option<&NewMachine>) -> Result<(), Str
     }
 }
 
+/// The files in the config folder that make this computer one of the team's: its config, its
+/// token, its machine key and the API keys it was given (`daemon::accounts`). Other files there
+/// (a developer's own token copies, say) stay.
+const REGISTRATION_FILES: [&str; 4] = [
+    "daemon.toml",
+    "machine-token",
+    "machine.key",
+    "secrets.json",
+];
+
+/// Removes this computer's registration files from `dir`; one that is not there is fine.
+fn remove_registration(dir: &Path) -> Result<(), String> {
+    for name in REGISTRATION_FILES {
+        for path in [dir.join(name), dir.join(name).with_extension("new")] {
+            match std::fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(format!("cannot remove {}: {e}", path.display())),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 不再用这台电脑 (机 1.6), the part on this computer: `<daemon> uninstall-service` stops the
+/// daemon and removes the launchd agent (on Windows the scheduled task), then the files that
+/// registered this computer go. Errors are for the log.
+pub(super) fn stop_using(daemon: &Path) -> Result<(), String> {
+    stop_using_in(daemon, &config_dir())
+}
+
+fn stop_using_in(daemon: &Path, dir: &Path) -> Result<(), String> {
+    forget_task_state();
+    let mut cmd = Command::new(daemon);
+    cmd.arg("uninstall-service").stdin(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let out = cmd
+        .output()
+        .map_err(|e| format!("cannot start the daemon: {e}"))?;
+    forget_task_state();
+    if !out.status.success() {
+        return Err(format!(
+            "uninstall-service failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    remove_registration(dir)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stopping_removes_only_the_registration_files() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in [
+            "daemon.toml",
+            "machine-token",
+            "machine.key",
+            "secrets.json",
+            "machine-token.new",
+        ] {
+            std::fs::write(dir.path().join(name), "x").unwrap();
+        }
+        // A developer's own files in the same folder stay.
+        std::fs::create_dir(dir.path().join("local")).unwrap();
+        std::fs::write(dir.path().join("local").join("owner-token"), "x").unwrap();
+        std::fs::write(dir.path().join("notes.txt"), "x").unwrap();
+        remove_registration(dir.path()).unwrap();
+        let mut left: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["local", "notes.txt"]);
+        // Nothing left to remove: still fine (a second try after a failure).
+        remove_registration(dir.path()).unwrap();
+    }
+
+    /// The daemon that set this computer up removes its own service first; when it cannot,
+    /// the registration stays, so a second try still has the machine to forget.
+    #[cfg(unix)]
+    #[test]
+    fn stopping_asks_the_daemon_to_remove_its_service() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("args");
+        let fake = |name: &str, exit: u8| {
+            let daemon = dir.path().join(name);
+            std::fs::write(
+                &daemon,
+                format!(
+                    "#!/bin/sh\nprintf '%s' \"$*\" > '{}'\nexit {exit}\n",
+                    log.display()
+                ),
+            )
+            .unwrap();
+            std::fs::set_permissions(&daemon, std::fs::Permissions::from_mode(0o755)).unwrap();
+            daemon
+        };
+        let cfg = dir.path().join("cfg");
+        std::fs::create_dir(&cfg).unwrap();
+        std::fs::write(cfg.join("daemon.toml"), "machine_id = \"m\"\n").unwrap();
+        assert!(stop_using_in(&fake("broken", 1), &cfg).is_err());
+        assert!(cfg.join("daemon.toml").exists());
+        stop_using_in(&fake("daemon", 0), &cfg).unwrap();
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "uninstall-service");
+        assert!(!cfg.join("daemon.toml").exists());
+    }
 
     #[test]
     fn the_state_says_where_launchd_runs_the_daemon() {
