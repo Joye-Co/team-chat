@@ -15,7 +15,6 @@ import { requireMachineManager } from "../bots/store";
 import type { AuthContext } from "../core/auth";
 import { ApiError } from "../core/errors";
 import { registerRoute } from "../core/registry";
-import type { GithubState } from "./alerts";
 import type { DeskRollup } from "./rollup";
 import "./accounts";
 import "./homes";
@@ -39,15 +38,12 @@ export function canTake(slots: number, running: number, availableBytes?: number,
 
 type Rollup = DeskRollup & { lastFailureTitle?: string };
 
-/** design-github-identity 3.6: the monitor with the computer's GitHub sign-in and where its runs go. */
-type MonitorView = MachineMonitor & { github?: GithubState; runsIn?: string };
-
 export function buildMonitor(input: {
   machine: { id: string; name: string; revoked: boolean };
   link: Awaited<ReturnType<ReturnType<typeof linkStub>["monitor"]>> | null;
   desks: { botId: string; rollup: Rollup }[];
   now: number;
-}): MonitorView {
+}): MachineMonitor {
   const { link, desks, now } = input;
   const status = link?.status;
   const metrics: MachineMetrics | null = link?.metrics ?? null;
@@ -159,7 +155,7 @@ export function buildMonitor(input: {
     .filter((m) => m.running + m.waiting + m.queued + m.finishedToday > 0 || m.tokensToday > 0);
 
   const sampledAt = link?.metricsAt ?? undefined;
-  const out: MonitorView = {
+  const out: MachineMonitor = {
     machine: {
       id: input.machine.id,
       name: input.machine.name,

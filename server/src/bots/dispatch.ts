@@ -528,8 +528,8 @@ export function whyNoMachine(machines: MachineView[], runner: RunnerPlace, now: 
   return { why: "disk" };
 }
 
-export function toMachine(m: MachineView, createdBy: string, createdAt: number, now: number): Machine & { github?: GithubState } {
-  const out: Machine & { github?: GithubState } = {
+export function toMachine(m: MachineView, createdBy: string, createdAt: number, now: number): Machine {
+  const out: Machine = {
     id: m.id,
     name: m.name,
     labels: m.labels,
