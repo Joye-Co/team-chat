@@ -330,6 +330,7 @@ fn spec(dir: &Path, command: &str, prompt: &str) -> RunSpec {
         aside: false,
         note: None,
         resume_session_id: None,
+        full_prompt: None,
         gate_hook: None,
         gate_alive: None,
         gates: None,

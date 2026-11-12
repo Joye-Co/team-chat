@@ -66,6 +66,7 @@ fn spec(dir: &Path, claude: &Path, model: &model::Model, prompt: &str) -> RunSpe
         aside: false,
         note: None,
         resume_session_id: None,
+        full_prompt: None,
         gate_hook: None,
         gate_alive: None,
         gates: None,

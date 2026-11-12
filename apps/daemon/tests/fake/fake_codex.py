@@ -20,6 +20,7 @@ gated.json."""
 import json, os, subprocess, sys, threading, time
 
 assert sys.argv[1:2] == ["app-server"]
+open("argv.json", "w").write(json.dumps(sys.argv[1:]))
 lock = threading.Lock()
 def out(o):
     with lock:

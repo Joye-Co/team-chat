@@ -372,6 +372,8 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
     let mut norm = CodexNormalizer::default();
     let mut thread_id: Option<String> = None;
     let mut session_file: Option<PathBuf> = None;
+    // `thread/resume` failed and the first turn got `spec.full_prompt`.
+    let mut resume_missed = false;
     let mut turn_running = false;
     let mut active_turn: Option<String> = None;
     let mut queued: VecDeque<String> = VecDeque::new();
@@ -435,6 +437,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                     o.session_file = session_file;
                     o.result_text = norm.last_message;
                     o.usage = norm.usage;
+                    o.resume_missed = resume_missed;
                     return o;
                 };
                 let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
@@ -447,6 +450,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                                 Pending::Steer { text } => queued.push_back(text),
                                 // The thread is gone (another CODEX_HOME, removed): a new one.
                                 Pending::ThreadResume { params } => {
+                                    resume_missed = spec.full_prompt.is_some();
                                     let id = ids.next_id();
                                     pending.insert(id, Pending::ThreadStart);
                                     let _ = p.write_json(&json!({ "id": id, "method": "thread/start", "params": params })).await;
@@ -508,7 +512,11 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                                 let id = ids.next_id();
                                 pending.insert(id, Pending::TurnStart);
                                 turn_running = true;
-                                let params = turn_start_params(&tid, &spec.prompt, spec.effort.as_deref());
+                                let text = match &spec.full_prompt {
+                                    Some(full) if resume_missed => full,
+                                    _ => &spec.prompt,
+                                };
+                                let params = turn_start_params(&tid, text, spec.effort.as_deref());
                                 let _ = p.write_json(&json!({ "id": id, "method": "turn/start", "params": params })).await;
                             }
                             Pending::TurnStart => {
@@ -609,6 +617,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                         return Outcome {
                             status: Status::Cancelled, exit_code: code, result_text: norm.last_message,
                             error: None, session_id: thread_id, session_file, usage: norm.usage, failure: None,
+                            resume_missed,
                         };
                     }
                 }
@@ -653,6 +662,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
         session_id: thread_id,
         session_file,
         usage: norm.usage,
+        resume_missed,
     }
 }
 
@@ -780,6 +790,10 @@ pub const ASIDE_CONFIG: &[&str] = &[
 /// `tests/runtimes.rs::codex_side_chat_network_on_windows` pins what happens.
 pub const ASIDE_WINDOWS_SANDBOX: &str = "windows.sandbox=\"unelevated\"";
 
+/// Codex's own memory is off in every run, after the configured args: memory lives only in
+/// the product.
+pub const NO_MEMORIES: &str = "features.memories=false";
+
 /// Names of the MCP servers in the Codex config files a run can load, each with whether its
 /// transport is a URL: `$CODEX_HOME/config.toml` and `.codex/config.toml` in the working
 /// directory and each folder above it (Codex loads these only for a trusted project). The first
@@ -809,7 +823,7 @@ fn configured_mcp_servers(spec: &RunSpec) -> Result<Vec<(String, bool)>, String>
     Ok(names)
 }
 
-/// `codex app-server` arguments: the configured args. A side chat run ignores them (they could widen
+/// `codex app-server` arguments: the configured args, then [`NO_MEMORIES`]. A side chat run ignores them (they could widen
 /// the sandbox) and turns off [`ASIDE_CONFIG`] and every configured MCP server: MCP tools run
 /// outside the sandbox. The sandbox (`thread_policy`) blocks writes and network for commands.
 ///
@@ -821,6 +835,7 @@ pub fn app_server_args(spec: &RunSpec) -> Result<Vec<String>, String> {
     let mut args = vec!["app-server".to_string()];
     if !spec.aside {
         args.extend(spec.cfg.args.iter().cloned());
+        args.extend(["-c".to_string(), NO_MEMORIES.to_string()]);
         return Ok(args);
     }
     let plain = |n: &str| {
@@ -829,6 +844,7 @@ pub fn app_server_args(spec: &RunSpec) -> Result<Vec<String>, String> {
                 .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
     };
     let mut overrides: Vec<String> = ASIDE_CONFIG.iter().map(|c| c.to_string()).collect();
+    overrides.push(NO_MEMORIES.to_string());
     if cfg!(windows) {
         overrides.push(ASIDE_WINDOWS_SANDBOX.to_string());
     }

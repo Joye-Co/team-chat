@@ -341,9 +341,12 @@ const AUTH_COPIES: [&str; 2] = [".codex/auth.json", ".pi/agent/auth.json"];
 /// Removes the sign-in copies under a run's cli root once its CLI is done. True when one was
 /// there.
 pub fn remove_auth(cli_root: &Path) -> bool {
-    AUTH_COPIES.iter().fold(false, |gone, f| {
-        std::fs::remove_file(cli_root.join(f)).is_ok() || gone
-    })
+    // Every copy goes: no short cut after the first.
+    AUTH_COPIES
+        .iter()
+        .filter(|f| std::fs::remove_file(cli_root.join(f)).is_ok())
+        .count()
+        > 0
 }
 
 /// At daemon start: removes the sign-in copies a crash left in the cli roots of the work lines

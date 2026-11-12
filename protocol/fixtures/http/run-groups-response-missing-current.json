@@ -1,0 +1,14 @@
+{
+  "kind": "RunGroupsResponse",
+  "valid": false,
+  "description": "current is required",
+  "value": {
+    "groups": [
+      {
+        "id": "01JBX0GENERAL000000000000A",
+        "name": "产品",
+        "kind": "group"
+      }
+    ]
+  }
+}

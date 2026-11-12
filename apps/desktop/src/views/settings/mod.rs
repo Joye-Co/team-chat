@@ -668,9 +668,19 @@ pub fn open(services: Services, cx: &mut App) {
 }
 
 /// The sidebar's settings entry: opens the settings window, or closes it
-/// when it is open (a second click on the same button closes it).
+/// when it is open and in plain sight (a second click on the same button
+/// closes it). One that another window covers comes to the front instead:
+/// the click that reaches the entry raises the main window over it, and
+/// closing a window nobody can see read as the entry doing nothing.
 pub fn toggle(services: Services, cx: &mut App) {
+    // After the action: it runs inside the main window's update, whose
+    // bounds `covered` cannot read until then.
+    cx.defer(move |cx| toggle_now(services, cx));
+}
+
+fn toggle_now(services: Services, cx: &mut App) {
     if let Some(handle) = cx.try_global::<SettingsWindow>().and_then(|w| w.0)
+        && !covered(handle, cx)
         && handle
             .update(cx, |_, window, _| window.remove_window())
             .is_ok()
@@ -679,6 +689,22 @@ pub fn toggle(services: Services, cx: &mut App) {
         return;
     }
     open(services, cx);
+}
+
+/// Whether a window above `handle` overlaps it (front to back order from the
+/// platform; `false` where the platform cannot tell).
+fn covered(handle: AnyWindowHandle, cx: &mut App) -> bool {
+    let Some(stack) = cx.window_stack() else {
+        return false;
+    };
+    let Ok(mine) = handle.update(cx, |_, window, _| window.bounds()) else {
+        return false;
+    };
+    stack
+        .into_iter()
+        .take_while(|w| *w != handle)
+        .filter_map(|w| w.update(cx, |_, window, _| window.bounds()).ok())
+        .any(|b| b.intersects(&mine))
 }
 
 /// v12/fx-overlays: opens the settings window at `page` (the app menu's

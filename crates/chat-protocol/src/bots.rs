@@ -642,6 +642,19 @@ pub struct ContextHit {
     pub author_name: String,
     pub at: Millis,
     pub snippet: String,
+    /// Another group the run may read (design-visibility): that group; absent for the run's own.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub group_id: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub group_name: Option<String>,
 }
 
 /// The front desk's work order (交代单) for the executor.
@@ -812,6 +825,19 @@ pub struct RunCardAsk {
 #[serde(rename_all = "camelCase")]
 pub struct RunCardResponse {
     pub topic_id: String,
+    /// Another group the run may read (design-visibility): that group; absent for the run's own.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub group_id: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub group_name: Option<String>,
     pub message: ContextMessage,
     pub card: serde_json::Value,
     #[serde(
@@ -889,8 +915,52 @@ pub struct RunMembersResponse {
 #[serde(rename_all = "camelCase")]
 pub struct TopicStateResponse {
     pub topic_id: String,
+    /// Another group the run may read (design-visibility): that group; absent for the run's own.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub group_id: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub group_name: Option<String>,
     pub title: String,
     pub text: String,
+}
+
+/// "group" | "dm"
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RunGroupKind {
+    Group,
+    Dm,
+}
+
+/// One group a run may read: its own (`current`) and the groups of the person it works for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunGroup {
+    pub id: String,
+    pub name: String,
+    pub kind: RunGroupKind,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub purpose: Option<String>,
+    pub current: bool,
+}
+
+/// `GET /v1/machine/runs/:id/groups` (feature `groups`): the groups the run may read, its own first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunGroupsResponse {
+    pub groups: Vec<RunGroup>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
