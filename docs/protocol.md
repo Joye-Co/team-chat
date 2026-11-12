@@ -2724,6 +2724,10 @@ RunCommandRequest = { command: string /* 1..4000 */ }
 RunCommandResponse = { commandId /* [A-Za-z0-9_-]{1,64} */ }
 ```
 
+A run that waits for a machine (`status: "created"`, `queuedAt`) is `phase: "waiting_computer"`:
+`waitingFor: "offline"` when the machines that could take it are offline, `"queue"` when they
+are busy, `"limit"` as below.
+
 Subscription limit (usable 模 3.4): a run whose CLI stops at its subscription limit
 (`failure.kind: "limit"`) does not fail. It ends as `cancelled` (summary `restarted: subscription
 limit`, `failure` kept) and its work goes on in a new run (`retryOf` the old one) that waits on

@@ -218,6 +218,7 @@ export abstract class DeskRuns extends DeskCore {
           r.queued_at = Date.now();
           this.sql.exec("UPDATE runs SET queued_at = ? WHERE id = ?", r.queued_at, r.id);
           if (none?.why === "limit") this.keepLimit(r, none.until);
+          this.keepWaitFor(r, none?.why === "offline" ? "offline" : null);
           await this.setStatus(r, "created");
           // Waiting for a machine to come online: the topic says which one.
           if (none?.why === "offline") await this.note(r, TEXT.waitOffline(none.names)).catch((err) => this.log.warn("wait note failed", { runId, err }));
@@ -394,6 +395,14 @@ export abstract class DeskRuns extends DeskCore {
     return failureNote(this.env, { kind: "signed_out", machines: on, runtime, requesterId: r.requested_by, groupId: r.group_id, started: false });
   }
 
+  /** Verify 2, problem 9: keeps why a queued run waits (`offline`, or NULL for a free computer). */
+  protected keepWaitFor(r: RunRow, why: "offline" | null): boolean {
+    if ((r.wait_for ?? null) === why) return false;
+    r.wait_for = why;
+    this.sql.exec("UPDATE runs SET wait_for = ? WHERE id = ?", why, r.id);
+    return true;
+  }
+
   /** 模 3.4: keeps when the run's subscription limit resets (the run waits for it). */
   protected keepLimit(r: RunRow, until: number | null): void {
     if (r.limit_until === until) return;
@@ -454,12 +463,15 @@ export abstract class DeskRuns extends DeskCore {
             }
             return false;
           }
+          // Its computers came online but are busy, or went offline: the run says which.
+          if ((none.why === "offline" || none.why === "busy") && this.keepWaitFor(r, none.why === "offline" ? "offline" : null)) await this.setStatus(r, "created");
         }
         if (!machine || prompt === null) return null;
         if (await this.budgetGate(r, prompt)) return false;
         await this.assign(r, runner, machine, prompt);
         this.sql.exec("UPDATE runs SET queued_at = NULL WHERE id = ?", id);
         r.queued_at = null;
+        this.keepWaitFor(r, null);
         // 模 3.4: the limit reset: the run goes on, and the topic says so.
         const afterLimit = r.limit_until !== null;
         this.keepLimit(r, null);

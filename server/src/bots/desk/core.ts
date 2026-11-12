@@ -145,6 +145,8 @@ export type RunRow = {
   // desk-limit-wait (模 3.4, 盯 1.5)
   /** While a queued run waits for its computer's subscription limit: when it resets (server clock); else null. */
   limit_until: number | null;
+  /** Verify 2, problem 9: why a queued run waits (`offline`); NULL: every machine is busy. */
+  wait_for?: string | null;
   // desk-time-limit (盯 1.4, 1.6, 1.8, 1.11, 5.5)
   /** The team's time limit (ms of counted work) when the run was assigned, or null (the default). */
   limit_ms: number | null;
@@ -550,6 +552,12 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
             ALTER TABLE runs ADD COLUMN acts TEXT;
           `,
         },
+        {
+          // Verify 2, problem 9: a queued run says whether it waits for a computer to come
+          // online (`offline`) or for a free one. Old rows: NULL (waiting for a free one).
+          name: "desk-wait-for",
+          up: `ALTER TABLE runs ADD COLUMN wait_for TEXT;`,
+        },
       ]);
       const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'bot_id'").toArray()[0];
       this.botId = row?.value ?? null;
@@ -661,10 +669,11 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
       run.queuedAt = r.queued_at;
       run.queuePosition = this.queuePosition(r);
       // 模 3.4: waiting for the subscription limit is waiting for its computer (design-takeover 3.1).
-      if (r.limit_until !== null && r.limit_until !== undefined) {
-        run.phase = "waiting_computer";
-        run.waitingFor = "limit";
-      }
+      // A queued run waits for its computer (protocol "Run phase and take-over"): one that is
+      // offline, or a free one.
+      run.phase = "waiting_computer";
+      if (r.limit_until !== null && r.limit_until !== undefined) run.waitingFor = "limit";
+      else run.waitingFor = r.wait_for === "offline" ? "offline" : "queue";
     }
     // 接 4.2: an ended run's phase follows its report (design-takeover 3.1, rule 1).
     if (r.ended_at !== null && !r.external) {

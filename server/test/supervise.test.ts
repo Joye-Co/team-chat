@@ -446,6 +446,10 @@ describe("a member pinned to a computer that is offline (机 2.2)", () => {
       const run = (await c.waitEvent((e) => e.type === "run.updated" && e.data.run.topicId === topicId && e.data.run.queuedAt !== undefined)).data.run;
       await waitUntil(() => botNotes(c, topicId, w.bot.id).includes(TEXT.waitOffline(["mac-mini"])), 5000, "wait note");
       expect(run.status).toBe("created");
+      // Verify 2, problem 9: the run says it waits for its computer, which is offline.
+      expect(run).toMatchObject({ phase: "waiting_computer", waitingFor: "offline" });
+      const read = await api(`/v1/runs/${run.id}`, { token: w.human.token });
+      expect(read.body).toMatchObject({ phase: "waiting_computer", waitingFor: "offline", requestedBy: w.human.id, requestedFor: w.human.id });
       return { topicId, runId: run.id as string };
     };
     const first = await queued("@dev 第一件事");
