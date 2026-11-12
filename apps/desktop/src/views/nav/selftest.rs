@@ -630,6 +630,44 @@ pub mod scenes {
         })
     }
 
+    /// The alert before deleting the first 群 for everyone (hide-delete/1).
+    pub fn delete_group(
+        services: Services,
+        content: Size<Pixels>,
+        cx: &mut App,
+    ) -> Result<AnyWindowHandle, String> {
+        over_main(services, content, cx, |services, window, cx| {
+            let group = services
+                .provider
+                .groups()
+                .into_iter()
+                .find(|g| g.kind == crate::data::GroupKind::Group);
+            if let Some(g) = group {
+                super::super::hide_delete::confirm_delete_group(services, g.id, g.name, window, cx);
+            }
+        })
+    }
+
+    /// The alert before deleting the first 群's newest 话题 for everyone (hide-delete/1).
+    pub fn delete_topic(
+        services: Services,
+        content: Size<Pixels>,
+        cx: &mut App,
+    ) -> Result<AnyWindowHandle, String> {
+        over_main(services, content, cx, |services, window, cx| {
+            let group = services
+                .provider
+                .groups()
+                .into_iter()
+                .find(|g| g.kind == crate::data::GroupKind::Group);
+            if let Some(g) = group
+                && let Some(t) = services.provider.topics(&g.id).into_iter().next()
+            {
+                super::super::hide_delete::confirm_delete_topic(services, &g.id, &t, window, cx);
+            }
+        })
+    }
+
     /// The 群 open in the sidebar, or the first 群.
     fn open_group(services: &Services, cx: &App) -> Option<crate::data::GroupSummary> {
         let open = match services.nav.read(cx).place.clone() {

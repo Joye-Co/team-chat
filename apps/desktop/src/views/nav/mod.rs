@@ -9,6 +9,7 @@
 pub mod about;
 pub mod ask_scenes;
 pub mod dialogs;
+pub mod hide_delete;
 pub mod menus;
 pub mod notify;
 pub mod rename;
@@ -117,6 +118,23 @@ fn forget_gone_places(cx: &mut App) {
         .update(cx, |nav, _| nav.forget_gone(|g, _| groups.contains(g)));
 }
 
+/// A 话题 deleted for everyone (hide-delete/1): the main window that shows it goes back to its
+/// 群聊, and ⌘[ never leads to it again.
+fn leave_deleted_topics(deleted: &[(GroupId, String)], cx: &mut App) {
+    let services = services_of(cx);
+    let gone = |g: &GroupId, t: Option<&String>| {
+        t.is_some_and(|t| deleted.iter().any(|(dg, dt)| dg == g && dt == t))
+    };
+    services.nav.update(cx, |nav, cx| {
+        nav.forget_gone(|g, t| !gone(g, t));
+        if let Some((g, t)) = nav.topic.clone()
+            && gone(&g, Some(&t))
+        {
+            nav.open_group_chat(g, cx);
+        }
+    });
+}
+
 /// The keys inside the switcher, the sheets and 问: ↑↓ and Return in their
 /// lists (the screenshot self-test binds them too).
 pub fn bind_sheet_keys(cx: &mut App) {
@@ -160,6 +178,19 @@ pub fn install(services: Services, status_item: bool, cx: &mut App) {
         if changes.any(|c| matches!(c, Change::Groups)) {
             open_pending(cx);
             forget_gone_places(cx);
+        }
+        let deleted: Vec<(GroupId, String)> = changes
+            .0
+            .iter()
+            .filter_map(|c| match c {
+                Change::TopicDeleted { group_id, topic_id } => {
+                    Some((group_id.clone(), topic_id.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        if !deleted.is_empty() {
+            leave_deleted_topics(&deleted, cx);
         }
 
         if changes.any(|c| matches!(c, Change::Session)) {

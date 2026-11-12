@@ -48,6 +48,7 @@ pub fn member(m: &proto::Member, online: bool) -> Member {
         online,
         character: m.character(),
         team_owner: m.is_team_owner(),
+        deleted: m.is_deleted(),
     }
 }
 

@@ -493,6 +493,7 @@ impl FakeProvider {
             online: false,
             character,
             team_owner: false,
+            deleted: false,
         };
         self.with(|s| s.members.push(member.clone()));
         if let Some(r) = &runner {

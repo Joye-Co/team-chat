@@ -189,6 +189,8 @@ impl AdminView {
         let all = self.services.provider.members();
         all.clone()
             .into_iter()
+            // A deleted AI member is gone from the team, also from 已停用.
+            .filter(|x| x.is_listed())
             .filter(|x| match self.team.tab {
                 TeamTab::All => !x.deactivated,
                 TeamTab::People => !x.deactivated && x.kind == MemberKind::Human,
@@ -291,7 +293,9 @@ impl AdminView {
 
     pub(super) fn team_page(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let members = self.services.provider.members();
-        let count = |f: &dyn Fn(&Member) -> bool| members.iter().filter(|x| f(x)).count() as u32;
+        let count = |f: &dyn Fn(&Member) -> bool| {
+            members.iter().filter(|x| x.is_listed() && f(x)).count() as u32
+        };
         let invited = self
             .team
             .roster
@@ -629,6 +633,9 @@ impl AdminView {
         let services = self.services.clone();
         let id = x.id.to_string();
         let off = x.deactivated;
+        // Only a deactivated AI member can be deleted (the server asks the same).
+        let deletable = off && x.is_bot();
+        let name = x.name.clone();
         let view = cx.entity();
         // 「设为…」 (the 所有者 only) and 停用 (a 管理员 or 所有者 target needs the 所有者).
         let team_owner = crate::views::settings::i_am_team_owner(&self.services);
@@ -701,7 +708,8 @@ impl AdminView {
             } else {
                 menu.separator()
             };
-            menu.item(
+            let (s2, id2, view2) = (services.clone(), id.clone(), view.clone());
+            let menu = menu.item(
                 PopupMenuItem::new(if off {
                     m::TEAM_REACTIVATE
                 } else {
@@ -715,6 +723,21 @@ impl AdminView {
                         let _ = view.update(cx, |v, cx| v.fetch_team(cx));
                     })
                     .detach();
+                }),
+            );
+            // hide-delete/1: a deactivated AI member can leave the team for good.
+            if !(deletable && s2.provider.can_hide_delete()) {
+                return menu;
+            }
+            let name = name.clone();
+            menu.item(
+                PopupMenuItem::element(|_: &mut Window, cx: &mut gpui::App| {
+                    div()
+                        .text_color(native_colors(cx).red)
+                        .child(m::TEAM_DELETE)
+                })
+                .on_click(move |_, window, cx| {
+                    confirm_delete_member(s2.clone(), id2.clone(), &name, view2.clone(), window, cx)
                 }),
             )
         })
@@ -1189,6 +1212,51 @@ fn set_role(
     .detach();
 }
 
+/// Asks before deleting a deactivated AI member for good (the 离开群 alert); on 删除 deletes
+/// it and reads the team again. A refusal shows an alert with the reason.
+fn confirm_delete_member(
+    services: crate::app::Services,
+    id: String,
+    name: &str,
+    view: Entity<AdminView>,
+    window: &mut Window,
+    cx: &mut gpui::App,
+) {
+    use crate::views::nav::dialogs;
+    dialogs::destructive_alert(
+        "delete-member",
+        fill(
+            m::TEAM_DELETE_CONFIRM_TITLE,
+            &[("name", &dialogs::short_name(name))],
+        ),
+        m::TEAM_DELETE_CONFIRM_BODY.to_string(),
+        m::TEAM_DELETE_OK,
+        move |window, cx| {
+            let reply = services.provider.delete_member(&id);
+            let view = view.clone();
+            let handle = window.window_handle();
+            cx.spawn(async move |cx| {
+                let result = answer(reply).await;
+                if let Err(e) = result {
+                    let _ = handle.update(cx, |_, window, cx| {
+                        dialogs::error_alert(
+                            m::TEAM_DELETE_FAILED,
+                            crate::views::settings::widgets::error_text(e),
+                            |_, _| {},
+                            window,
+                            cx,
+                        )
+                    });
+                }
+                view.update(cx, |v, cx| v.fetch_team(cx));
+            })
+            .detach();
+        },
+        window,
+        cx,
+    );
+}
+
 fn usd(x: f64) -> String {
     format!("${x:.2}")
 }
@@ -1221,6 +1289,7 @@ mod tests {
                 online: false,
                 character: None,
                 team_owner: false,
+                deleted: false,
             },
             role: if owner {
                 TeamRole::Admin

@@ -840,6 +840,7 @@ mod tests {
             online: true,
             character: None,
             team_owner: false,
+            deleted: false,
         }
     }
 

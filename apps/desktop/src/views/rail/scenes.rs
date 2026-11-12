@@ -75,7 +75,7 @@ pub const BEHAVIOR_SCENES: &[Scene] = &[
     },
     Scene {
         name: "rail-group-menu",
-        about: "Right click on a 群 header in the rail: 静音, 提醒 ▸, 重命名群…, 添加成员, 离开群",
+        about: "Right click on a 群 header in the rail: 静音, 提醒 ▸, 重命名群…, 添加成员, 隐藏, 离开群, 删除群",
         start: Start::V2,
         setup: |s, cx| rail(s, RailMode::Work, cx),
         open: |s, c, cx| open_with_menu(s, c, true, cx),

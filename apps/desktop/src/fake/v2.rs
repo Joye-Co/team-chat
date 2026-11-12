@@ -130,6 +130,7 @@ fn person(id: &str, name: &str, role: &str, online: bool, owner: bool) -> Member
         online,
         character: None,
         team_owner: owner,
+        deleted: false,
     }
 }
 
@@ -145,6 +146,7 @@ fn bot(id: &str, name: &str, role: &str, character: &str) -> Member {
         online: true,
         character: CharacterId::parse(character),
         team_owner: false,
+        deleted: false,
     }
 }
 
@@ -1410,6 +1412,11 @@ impl V2Samples {
 }
 
 impl ChatProvider for V2Samples {
+    /// The menus of the screenshot scenes show 隐藏 and 删除 (nothing behind them here).
+    fn can_hide_delete(&self) -> bool {
+        true
+    }
+
     // v11/pb2-cards: the preview images of the sample compare card.
     fn card_image(
         &self,
