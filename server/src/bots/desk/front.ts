@@ -11,6 +11,7 @@ import { firstLine } from "../dispatch";
 import { requestAuthors, requestText, selectLines, withSummary } from "../../context/render";
 import { teamZone } from "../../memory/consolidate";
 import { FRONT_DESK_MEMORY_BYTES, memoryIndex } from "../../memory/inject";
+import { readableGroups, readerOf } from "../../context/reach";
 import { roomStub } from "../../core/env";
 import { unwrap } from "../../core/errors";
 import type { ClaimResult, TopicMessage } from "../room";
@@ -163,6 +164,9 @@ export abstract class DeskFront extends DeskStall {
     const total = Math.max(0, (peek.total ?? 0) - (peek.newest ?? []).length + newest.length);
     const sel = selectLines(first, newest, total, name, FRONT_DESK_CHARS, { zone: teamZone(this.env) });
     const member = await this.env.DB.prepare("SELECT role FROM members WHERE id = ?").bind(botId).first<{ role: string | null }>();
+    // design-visibility 3.5: no run yet; the person is the author when the author is a person.
+    const forId = await readerOf(this.env.DB, { requested_by: m.authorId, requested_for: m.authorId });
+    const groups = [...(await readableGroups(this.env.DB, { group_id: m.groupId }, forId))];
     const res = await decide(cfg, {
       botName: name(botId),
       role: member?.role ?? null,
@@ -175,8 +179,9 @@ export abstract class DeskFront extends DeskStall {
       memory: await memoryIndex(this.env, {
         botId,
         groupId: m.groupId,
-        requesterId: m.authorId,
+        requesterId: forId,
         requesterName: name(m.authorId),
+        groups,
         maxBytes: FRONT_DESK_MEMORY_BYTES,
         query: requestText(m.body, m.ext, name),
       }),

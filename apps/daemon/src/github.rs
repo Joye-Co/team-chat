@@ -578,74 +578,6 @@ pub fn install_gh(bin: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-// --- A VM member's kept home folder. ---------------------------------------------------------
-
-/// Removes a GitHub sign-in an earlier run left in the AI member's kept home folder
-/// (`<homes>/<botId>`): gh's `hosts.yml`, `.git-credentials`, and in `.gitconfig` the
-/// github.com credential helpers and `url.*` sections that carry a token. True when something
-/// was removed. Before every VM run with `run.assign.github`: all of them use the app's GitHub.
-pub fn clear_home(homes: &Path, bot: &str) -> bool {
-    let plain =
-        !bot.is_empty() && bot.len() <= 64 && bot.bytes().all(|b| b.is_ascii_alphanumeric());
-    if homes.as_os_str().is_empty() || !plain {
-        return false;
-    }
-    let home = homes.join(bot);
-    if !home.is_dir() {
-        return false;
-    }
-    let mut removed = false;
-    for f in [
-        home.join(".config").join("gh").join("hosts.yml"),
-        home.join(".git-credentials"),
-    ] {
-        removed |= std::fs::remove_file(&f).is_ok();
-    }
-    let gitconfig = home.join(".gitconfig");
-    if let Ok(text) = std::fs::read_to_string(&gitconfig)
-        && let Some(kept) = strip_gitconfig(&text)
-    {
-        removed |= std::fs::write(&gitconfig, kept).is_ok();
-    }
-    removed
-}
-
-/// A section header `[name "sub"]` as (name, sub).
-fn section(line: &str) -> Option<(String, String)> {
-    let inner = line.trim().strip_prefix('[')?.split(']').next()?.trim();
-    match inner.split_once(char::is_whitespace) {
-        Some((name, sub)) => Some((
-            name.to_ascii_lowercase(),
-            sub.trim().trim_matches('"').to_string(),
-        )),
-        None => Some((inner.to_ascii_lowercase(), String::new())),
-    }
-}
-
-/// `.gitconfig` without github.com's credential sections and the `url.*` sections whose
-/// address carries a sign-in. None when nothing is removed.
-pub fn strip_gitconfig(text: &str) -> Option<String> {
-    let mut out = String::new();
-    let mut skip = false;
-    let mut changed = false;
-    for line in text.split_inclusive('\n') {
-        if line.trim_start().starts_with('[') {
-            skip = section(line).is_some_and(|(name, sub)| {
-                let github = sub.to_ascii_lowercase().contains(HOST);
-                let signed_in = sub
-                    .split_once("://")
-                    .is_some_and(|(_, rest)| rest.split('/').next().unwrap_or("").contains('@'));
-                (name == "credential" && github) || (name == "url" && github && signed_in)
-            });
-            changed |= skip;
-        }
-        if !skip {
-            out.push_str(line);
-        }
-    }
-    changed.then_some(out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -837,40 +769,6 @@ mod tests {
             n.contains("the GitHub account of the person who asked"),
             "{n}"
         );
-    }
-
-    /// A VM member's home loses what an earlier `gh auth login` or a token URL left; other
-    /// settings stay.
-    #[test]
-    fn an_old_sign_in_is_cleared_from_the_members_home() {
-        let homes = tempfile::tempdir().unwrap();
-        let home = homes.path().join("B1");
-        std::fs::create_dir_all(home.join(".config/gh")).unwrap();
-        std::fs::write(
-            home.join(".config/gh/hosts.yml"),
-            "github.com:\n  oauth_token: x\n",
-        )
-        .unwrap();
-        std::fs::write(home.join(".config/gh/config.yml"), "editor: vim\n").unwrap();
-        std::fs::write(home.join(".git-credentials"), "https://a:b@github.com\n").unwrap();
-        std::fs::write(
-            home.join(".gitconfig"),
-            "[user]\n\tname = Bot\n[credential \"https://github.com\"]\n\thelper =\n\thelper = !/usr/bin/gh auth git-credential\n[url \"https://x-access-token:gho_1@github.com/\"]\n\tinsteadOf = https://github.com/\n[url \"https://github.com/\"]\n\tinsteadOf = git@github.com:\n[credential]\n\thelper = cache\n",
-        )
-        .unwrap();
-        assert!(clear_home(homes.path(), "B1"));
-        assert!(!home.join(".config/gh/hosts.yml").exists());
-        assert!(home.join(".config/gh/config.yml").exists());
-        assert!(!home.join(".git-credentials").exists());
-        assert_eq!(
-            std::fs::read_to_string(home.join(".gitconfig")).unwrap(),
-            "[user]\n\tname = Bot\n[url \"https://github.com/\"]\n\tinsteadOf = git@github.com:\n[credential]\n\thelper = cache\n"
-        );
-        // Nothing left: nothing to say.
-        assert!(!clear_home(homes.path(), "B1"));
-        // Never outside the homes folder.
-        assert!(!clear_home(homes.path(), "../B1"));
-        assert!(!clear_home(Path::new(""), "B1"));
     }
 
     #[test]

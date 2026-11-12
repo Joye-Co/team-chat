@@ -263,7 +263,8 @@ design it came from.
   coding CLI (Claude Code, Codex, or an agent over ACP) that the daemon starts on a computer. It reads the
   topic, 产出, cards, decisions, members and memory, and posts cards, 产出 and reports, with the
   `chat-run` command the daemon puts on its PATH (not an MCP server). The CLI runs with full
-  permissions; only the gated actions below stop it.
+  permissions; only the gated actions below stop it. AI 成员替谁干活，就能读谁所在的群；私聊和单独问只属于里面的人
+  ([plans/usable/design-visibility.zh.md](plans/usable/design-visibility.zh.md)).
 - **Continuing**: a member's runs in one topic share one CLI session, one working folder and one
   branch, so a follow-up continues where the last run stopped; a DM continues its last session
   until the person says 新任务 (or the front desk finds the request is new work). A run that

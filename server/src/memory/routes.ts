@@ -16,10 +16,12 @@ import { getGroup } from "../core/db";
 import { roomStub } from "../core/env";
 import { ApiError, unwrap } from "../core/errors";
 import { type Actor, registerRoute } from "../core/registry";
+import { deskStub } from "../bots/env";
 import { machineRun } from "../bots/routes";
+import { readableGroups } from "../context/reach";
 import { type Who, canReadSource, readableSql, requireAccess } from "./access";
 import { countUses, readableMemories, search } from "./inject";
-import { type MemoryChange, type MemoryRow, createMemory, getRow, getUpdate, saveChange, toItem, toUpdate } from "./store";
+import { type MemoryChange, type MemoryRow, UNKNOWN_GROUP, createMemory, getRow, getUpdate, saveChange, toItem, toUpdate } from "./store";
 
 /** Notes one run may write. */
 export const MAX_NOTES_PER_RUN = 10;
@@ -236,17 +238,19 @@ export function registerMemoryRoutes(): void {
   });
 
   // A run searches what its prompt could carry (chat-run memory search): the same audience, every
-  // item that matches, best first. What it gets back counts as used.
+  // item that matches, best first, and the group layer of every group the run may read
+  // (design-visibility 3.5). What it gets back counts as used.
   registerRoute({
     method: "GET",
     path: "/v1/machine/runs/:id/memories",
     auth: "none",
     async handler({ request, env, params, url }): Promise<MemoriesResponse> {
-      const { run, info } = await machineRun(request, env, params.id, { read: true });
+      const { run, forId } = await machineRun(request, env, params.id, { read: true });
       const q = (url.searchParams.get("q") ?? "").trim().slice(0, 500);
       if (q === "") throw new ApiError("invalid", "q is required");
       const limit = intParam(url, "limit", 1, MAX_MEMORY_SEARCH_LIMIT, 10);
-      const rows = await readableMemories(env.DB, { botId: run.bot_id, groupId: run.group_id, requesterId: info?.requestedBy ?? null });
+      const groups = [...(await readableGroups(env.DB, run, forId))];
+      const rows = await readableMemories(env.DB, { botId: run.bot_id, groupId: run.group_id, requesterId: forId, groups, searchGroups: true });
       const hits = search(rows, q).slice(0, limit);
       const now = Date.now();
       await countUses(env.DB, hits.map((r) => r.id), now);
@@ -260,21 +264,26 @@ export function registerMemoryRoutes(): void {
     path: "/v1/machine/runs/:id/memories",
     auth: "none",
     async handler({ request, env, params, body }): Promise<MemoryItem> {
-      const { run, info } = await machineRun(request, env, params.id);
+      const { run, forId } = await machineRun(request, env, params.id);
       const req = await body(MachineMemoryNoteRequest);
+      // design-visibility 3.5: a run that read other groups may have learned it there. One such
+      // group becomes the source; two or more are `unknown` (owners only, no run).
+      const read = await deskStub(env, run.bot_id).readGroups(run.bot_id, run.id);
+      const readFrom = read.length === 0 ? null : read.length === 1 ? read[0] : UNKNOWN_GROUP;
       // What a run learns about itself stays with the group (or direct conversation) it learned it in.
       let scope = `member:${run.bot_id}`;
-      let fromGroup: string | null = run.group_id;
+      let fromGroup: string | null = readFrom ?? run.group_id;
       const ids = [run.id];
       if (req.scope === "member") {
         // the default above
       } else if (req.scope === "person") {
-        if (!info?.requestedBy) throw new ApiError("invalid", "the run has no requester");
-        const person = await env.DB.prepare("SELECT kind FROM members WHERE id = ?").bind(info.requestedBy).first<{ kind: string }>();
-        if (person?.kind !== "human") throw new ApiError("invalid", "the run was not asked for by a person");
-        scope = `person:${info.requestedBy}`;
-        fromGroup = null;
+        // The person the run works for (`readerOf`: an active person, not a private card's answer).
+        if (!forId) throw new ApiError("invalid", "the run was not asked for by a person");
+        scope = `person:${forId}`;
+        fromGroup = readFrom;
       } else {
+        // Another group's content does not become this group's memory.
+        if (readFrom) throw new ApiError("forbidden", "a run that read another group has no group memory", "memory.read_other_group");
         // A direct conversation is private: what it says goes to the member or the person only.
         const group = await getGroup(env.DB, run.group_id);
         if (!group || group.kind !== "group") throw new ApiError("forbidden", "a direct conversation has no group memory");

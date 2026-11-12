@@ -4,9 +4,11 @@
 // releases it; a direct conversation's lessons stay between the person and the member; a group
 // convention needs a person's message; the daily consolidation never widens the audience by itself
 // and retries a failed scope the next hour.
-import { SELF, env } from "cloudflare:test";
+import { SELF, env, runInDurableObject } from "cloudflare:test";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import type { BotsEnv } from "../src/bots/env";
 import { consolidateAll, localClock, teamZone } from "../src/memory/consolidate";
+import { readableMemories } from "../src/memory/inject";
 import { createMemory } from "../src/memory/store";
 import { Daemon, downViolations, mention, world, type World } from "./daemon";
 import { BASE, Client, api, clientMsgId, createGroup, createMember, protocolViolations, type TestMember } from "./helpers";
@@ -78,14 +80,14 @@ describe("memory across groups", () => {
     }
   });
 
-  it("does not put it into a run asked by a person of that group in a group with others", async () => {
+  it("puts it into a run asked by a person of that group, also in another group (design-visibility 3.5)", async () => {
     const s = await noted();
     const { c: joye } = await Client.connect(s.w.owner.token);
     try {
-      // Joye is in group 1, but Carol in group 2 would read the run.
+      // Joye is in group 1: a run working for Joye may read it, wherever it runs.
       await joye.ok({ t: "send", groupId: s.gid2, clientMsgId: clientMsgId(), body: "@dev 总结一下", mentions: [s.w.bot.id] });
       const b = await s.d.next((f) => f.t === "run.assign" && f.runId !== s.firstRun);
-      expect(b.prompt).not.toContain(SECRET);
+      expect(b.prompt).toContain(SECRET);
     } finally {
       s.close();
       joye.close();
@@ -295,6 +297,184 @@ describe("daily consolidation and a memory's group", () => {
       expect((await consolidateAll(env, { now: now + 2 * HOUR })).scopes).not.toContain(scope);
     } finally {
       await aiOff(w.owner.token);
+    }
+  });
+});
+
+// design-visibility 3.5: a run reads the memory of the groups the person it works for may read.
+// P (Joye) is in G1 and G2, Q (Alice) only in G1; the AI member is in G1, not in G2; P and the
+// member also have a direct conversation.
+describe("memory a run reads for its person", () => {
+  const MEM_G2 = "在产品群学到：导出按 CSV 做";
+  const MEM_DM = "私聊里学到：Joye 的口令是 tiger";
+  const CONV_G2 = "产品群约定：导出格式先做 xlsx";
+  const PREF = "Joye 喜欢简短的导出说明";
+
+  async function reach() {
+    const w = await world();
+    const carol = await createMember({ name: "Carol" });
+    const g2 = await createGroup(w.owner, [carol.id], "product");
+    const dm = await api("/v1/dms", { token: w.owner.token, body: { memberId: w.bot.id } });
+    expect(dm.status).toBe(200);
+    const dmId = dm.body.group.id as string;
+    const base = { source: { kind: "run" as const, ids: [] }, confidence: 0.6, status: "active" as const };
+    const memG2 = await createMemory(env.DB, { ...base, scope: `member:${w.bot.id}`, kind: "lesson", text: MEM_G2, authorId: w.bot.id, human: false, fromGroup: g2 }, w.bot.id);
+    const memDm = await createMemory(env.DB, { ...base, scope: `member:${w.bot.id}`, kind: "lesson", text: MEM_DM, authorId: w.bot.id, human: false, fromGroup: dmId }, w.bot.id);
+    const conv = await createMemory(env.DB, { ...base, scope: `group:${g2}`, kind: "convention", text: CONV_G2, authorId: w.owner.id, human: true }, w.owner.id);
+    const pref = await createMemory(env.DB, { ...base, scope: `person:${w.owner.id}`, kind: "preference", text: PREF, authorId: w.owner.id, human: true }, w.owner.id);
+    const { d } = await Daemon.connect(w.machineToken, {});
+    const { c: joye } = await Client.connect(w.owner.token);
+    const { c: alice } = await Client.connect(w.human.token);
+    return { w, g2, dmId, carol, memG2, memDm, conv, pref, d, joye, alice, close: () => (d.close(), joye.close(), alice.close()) };
+  }
+  type Reach = Awaited<ReturnType<typeof reach>>;
+
+  const machine = (s: Reach, path: string, init: { method?: string; body?: unknown } = {}) =>
+    SELF.fetch(`${BASE}/v1/machine/runs/${path}`, {
+      method: init.method ?? "GET",
+      headers: { authorization: `Bearer ${s.w.machineToken}`, "content-type": "application/json" },
+      ...(init.body ? { body: JSON.stringify(init.body) } : {}),
+    });
+  /** A run asked by `c` in G1, accepted; its id and prompt. */
+  async function runOf(s: Reach, c: Client, body: string, prev: string[] = []): Promise<{ runId: string; prompt: string }> {
+    await c.ok({ t: "send", groupId: s.w.gid, clientMsgId: clientMsgId(), body: `@dev ${body}`, mentions: [s.w.bot.id] });
+    const a = await s.d.next((f) => f.t === "run.assign" && !prev.includes(f.runId));
+    s.d.send({ t: "run.accept", runId: a.runId });
+    return { runId: a.runId, prompt: a.prompt as string };
+  }
+  async function finish(s: Reach, runId: string): Promise<void> {
+    await s.d.acked(runId, s.d.done(runId, { status: "succeeded", resultText: "好了" }));
+  }
+  const searchTexts = async (s: Reach, runId: string, q: string): Promise<string[]> => {
+    const r = await machine(s, `${runId}/memories?q=${encodeURIComponent(q)}&limit=50`);
+    expect(r.status).toBe(200);
+    return ((await r.json()) as any).memories.map((m: any) => m.text);
+  };
+  const desk = (s: Reach) => (env as unknown as BotsEnv).BOT_DESK.get((env as unknown as BotsEnv).BOT_DESK.idFromName(s.w.bot.id));
+  const setRun = (s: Reach, runId: string, by: string, forId: string | null) =>
+    runInDurableObject(desk(s), async (_o, state) => {
+      state.storage.sql.exec("UPDATE runs SET requested_by = ?, requested_for = ? WHERE id = ?", by, forId, runId);
+    });
+
+  it("puts another group's lesson into a run for a person of that group, never a direct conversation's", async () => {
+    const s = await reach();
+    try {
+      const p = await runOf(s, s.joye, "导出怎么做");
+      expect(p.prompt).toContain(MEM_G2);
+      expect(p.prompt).toContain(PREF);
+      expect(p.prompt).not.toContain(MEM_DM);
+      // The prompt carries only this group's group layer; the search finds the others.
+      expect(p.prompt).not.toContain(CONV_G2);
+      await finish(s, p.runId);
+      const q = await runOf(s, s.alice, "导出怎么做", [p.runId]);
+      expect(q.prompt).not.toContain(MEM_G2);
+      expect(q.prompt).not.toContain(MEM_DM);
+      expect(q.prompt).not.toContain(PREF);
+      await finish(s, q.runId);
+    } finally {
+      s.close();
+    }
+  });
+
+  it("finds another readable group's convention with memory search", async () => {
+    const s = await reach();
+    try {
+      const p = await runOf(s, s.joye, "导出");
+      const found = await searchTexts(s, p.runId, "导出");
+      expect(found).toEqual(expect.arrayContaining([CONV_G2, MEM_G2, PREF]));
+      expect(found).not.toContain(MEM_DM);
+      await finish(s, p.runId);
+      const q = await runOf(s, s.alice, "导出", [p.runId]);
+      const notFound = await searchTexts(s, q.runId, "导出");
+      expect(notFound).not.toContain(CONV_G2);
+      expect(notFound).not.toContain(MEM_G2);
+      expect(notFound).not.toContain(PREF);
+      await finish(s, q.runId);
+    } finally {
+      s.close();
+    }
+  });
+
+  it("reads cited ids under the same rule", async () => {
+    const s = await reach();
+    try {
+      const ids = [s.memG2.id, s.memDm.id, s.conv.id, s.pref.id];
+      const forP = await readableMemories(env.DB, { botId: s.w.bot.id, groupId: s.w.gid, requesterId: s.w.owner.id, groups: [s.w.gid, s.g2] }, ids);
+      expect(forP.map((r) => r.id).sort()).toEqual([s.memG2.id, s.pref.id].sort());
+      const search = await readableMemories(env.DB, { botId: s.w.bot.id, groupId: s.w.gid, requesterId: s.w.owner.id, groups: [s.w.gid, s.g2], searchGroups: true }, ids);
+      expect(search.map((r) => r.id).sort()).toEqual([s.memG2.id, s.conv.id, s.pref.id].sort());
+      const forQ = await readableMemories(env.DB, { botId: s.w.bot.id, groupId: s.w.gid, requesterId: s.w.human.id, groups: [s.w.gid] }, ids);
+      expect(forQ).toEqual([]);
+    } finally {
+      s.close();
+    }
+  });
+
+  it("reads and writes the person layer of whom a handed-over run works for", async () => {
+    const s = await reach();
+    const other = await createMember({ kind: "bot", name: "ops" });
+    try {
+      const r = await runOf(s, s.alice, "导出");
+      // As after a hand-over: another AI member asked, for Joye.
+      await setRun(s, r.runId, other.id, s.w.owner.id);
+      expect(await searchTexts(s, r.runId, "导出")).toEqual(expect.arrayContaining([PREF, MEM_G2]));
+      const note = await machine(s, `${r.runId}/memories`, { method: "POST", body: { scope: "person", kind: "preference", text: "Joye 要 CSV" } });
+      expect(note.status).toBe(200);
+      const item = (await note.json()) as any;
+      expect(item.scope).toBe(`person:${s.w.owner.id}`);
+      expect(item.fromGroup).toBeUndefined();
+      await finish(s, r.runId);
+    } finally {
+      s.close();
+    }
+  });
+
+  it("keeps what a run learned after reading another group with that group", async () => {
+    const s = await reach();
+    try {
+      const p = await runOf(s, s.joye, "按产品群的需求做导出");
+      expect((await machine(s, `${p.runId}/members?group=${s.g2}`)).status).toBe(200);
+      const note = await machine(s, `${p.runId}/memories`, { method: "POST", body: { scope: "member", kind: "lesson", text: "产品群要求导出带表头" } });
+      expect(note.status).toBe(200);
+      expect(((await note.json()) as any).fromGroup).toBe(s.g2);
+      const person = await machine(s, `${p.runId}/memories`, { method: "POST", body: { scope: "person", kind: "preference", text: "Joye 要表头" } });
+      expect(((await person.json()) as any).fromGroup).toBe(s.g2);
+      const group = await machine(s, `${p.runId}/memories`, { method: "POST", body: { scope: "group", kind: "convention", text: "导出带表头" } });
+      expect(group.status).toBe(403);
+      expect(((await group.json()) as any).error).toMatchObject({ code: "forbidden", reason: "memory.read_other_group" });
+      // A second other group: the source is unknown.
+      const g3 = await createGroup(s.w.owner, [], "ops");
+      expect((await machine(s, `${p.runId}/members?group=${g3}`)).status).toBe(200);
+      const two = await machine(s, `${p.runId}/memories`, { method: "POST", body: { scope: "member", kind: "lesson", text: "两个群都看过" } });
+      expect(((await two.json()) as any).fromGroup).toBe("unknown");
+      await finish(s, p.runId);
+      const q = await runOf(s, s.alice, "导出", [p.runId]);
+      expect(q.prompt).not.toContain("产品群要求导出带表头");
+      expect(q.prompt).not.toContain("两个群都看过");
+      await finish(s, q.runId);
+    } finally {
+      s.close();
+    }
+  });
+
+  it("gives a private card's answer run and a hook's run only their own group's memory", async () => {
+    const s = await reach();
+    try {
+      const p = await runOf(s, s.joye, "导出");
+      await setRun(s, p.runId, "anonymous", s.w.owner.id);
+      const anon = await searchTexts(s, p.runId, "导出");
+      expect(anon).not.toContain(MEM_G2);
+      expect(anon).not.toContain(CONV_G2);
+      expect(anon).not.toContain(PREF);
+      expect((await machine(s, `${p.runId}/memories`, { method: "POST", body: { scope: "person", kind: "preference", text: "x" } })).status).toBe(400);
+      // A hook's run works for nobody.
+      await setRun(s, p.runId, "integration:hook", null);
+      const hook = await searchTexts(s, p.runId, "导出");
+      expect(hook).not.toContain(MEM_G2);
+      expect(hook).not.toContain(CONV_G2);
+      await finish(s, p.runId);
+    } finally {
+      s.close();
     }
   });
 });
