@@ -1,6 +1,6 @@
 # 接管的状态机
 
-状态：设计，待实现。属于线 8（第 2 波，排在线 1→2→3 之后）。范围：人看到的一次任务处在哪种状态；暂停、接管、交还怎么切换；接管时人在应用里能做什么；交还后 AI 成员知道什么。
+状态：设计；服务端 T2、T3 已实现（`server/src/bots/desk/{phase,hold,takeover,hand}.ts`），其余待实现。属于线 8（第 2 波，排在线 1→2→3 之后）。范围：人看到的一次任务处在哪种状态；暂停、接管、交还怎么切换；接管时人在应用里能做什么；交还后 AI 成员知道什么。
 
 ## 1. 目标
 
@@ -76,7 +76,7 @@
    3. `done` → `done`；其余（`failed`、`blocked`）→ `failed`。被跟进任务盖过的「在等人」也落到这两条。
 2. 还没结束：
    1. `paused_by` 不为空：`hold_kind = 'takeover'` → `taken_over`，否则 `paused`（旧数据 `hold_kind` 为空，算 `paused`）。电脑失联时 phase 不变，另给 `waitingFor: "offline"`。
-   2. 线 3 的「在等电脑」标记（排队、指定电脑离线、失联、虚拟机启动中）→ `waiting_computer`，`waitingFor`: `queue` / `offline` / `booting`。
+   2. 线 3 的「在等电脑」标记（排队、指定电脑离线、失联、虚拟机启动中）→ `waiting_computer`，`waitingFor`: `queue` / `offline` / `booting`。实现：`queued_at`（排队）→ `queue`；`away_since`（电脑失联）→ `offline`；已派给电脑、电脑还没接（`status = created` 且有 `machine_id`）→ `booting`。
    3. `approval_id` 不为空 → `waiting_approval`。
    4. `status = waiting` → `waiting_person`（`question`）；`status = blocked` → `waiting_person`（`stuck`）。
    5. 其余 → `working`。
@@ -180,7 +180,7 @@ Rust 端（`crates/chat-protocol`）这几个字段用 `String`；fixture 里放
 | `POST /v1/runs/:id/resume` | 3.2；另外管理员可替人交还 | 不变 |
 | `POST /v1/runs/:id/commands` | 只有持有人 | `{ commandId }`；不在接管、已有命令在跑、电脑不在线时 `conflict`；审计 `run.command`（命令文本先脱敏） |
 | `POST /v1/runs/:id/commands/:commandId/cancel` | 只有持有人 | `{ ok: true }` |
-| `GET /v1/runs/:id/events` | 不变 | `hand.command`、`hand.result` 群成员都看得到；`hand.output` 只给持有人和管理员，别人那里过滤掉 |
+| `GET /v1/runs/:id/events` | 不变 | `hand.command`、`hand.result` 群成员都看得到；`hand.output` 只给跑这条命令的人（`hand.command.by`，交还后也看得到自己的输出）和管理员，别人那里过滤掉；过滤后一页不会在还有下一页时是空的 |
 
 **服务端 ↔ daemon**（`docs/machine-protocol.md`；新特性 `takeover`，虚拟机执行器另报 `takeover-isolated`）
 
@@ -210,6 +210,8 @@ ALTER TABLE runs ADD COLUMN hold_reminded INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN hand_command TEXT;           -- 正在跑的 commandId
 ALTER TABLE runs ADD COLUMN handed_back_at INTEGER;      -- 3.3 的 2 分钟规则
 ALTER TABLE runs ADD COLUMN last_handback TEXT;          -- hand.summary 的 JSON
+ALTER TABLE runs ADD COLUMN hand_command_at INTEGER;     -- 命令发出的时间：超过 11 分钟没有 hand.result 就不再算「在跑」，免得 daemon 丢了结果后永远 busy
+ALTER TABLE runs ADD COLUMN takeover TEXT;               -- BotRun.takeover：派活时按电脑特性记，暂停 / 接管时刷新（toRun 是同步的，读不到电脑）
 ```
 
 - **link 数据**：命名迁移 `link-hold-1`：`runs` 加 `held INTEGER NOT NULL DEFAULT 0`。新 RPC `setHeld(runId, held)`：desk 在暂停 / 接管时设 1，交还 / 停止时设 0。`expireLeases()` 跳过 `held = 1` 的任务（`AND held = 0`），所以持有中的任务不会被 `runLost` 换电脑或结束；outbox 也不被清。`runLost` 再加一道：`paused_by` 不为空时只记日志，不动。
@@ -218,8 +220,10 @@ ALTER TABLE runs ADD COLUMN last_handback TEXT;          -- hand.summary 的 JSO
   - `takeover()`：检查 3.2，发 `run.pause {hold: "takeover"}`，`pause_gen + 1`，写 `hold_kind`。从 paused 来时同样发一次（daemon 升级，见 3.8），计数照旧成立。
   - `resume()`：保持今天的写法，立刻清 `paused_by`、`hold_kind`，写 `handed_back_at`；先结束正在跑的人的命令；`setHeld(false)`。所以交还后 `scheduleStall` 和 `onMachines`（`stall.ts:20-37`、`116`）照常计时，没有中间状态。
   - `runCommand()`、`cancelCommand()`：只有持有人；`hand_command` 保证一次一条。
-  - `releaseHolds(memberId)`：成员被移出群（`server/src/core/routes.ts:112` 的 `removeMemberFromGroup`）或线 13 的移出团队时调用，按 3.2 自动交还。
-  - `holdDueAt()`：给 `stall.ts` 的 `scheduleStall()` 多一个最小值，到点发提醒（复用盯活的通知路径），写 `hold_reminded`。
+  - `releaseHolds(memberId)`：成员被移出群（`server/src/core/routes.ts:112` 的 `removeMemberFromGroup`）或线 13 的移出团队时调用，按 3.2 自动交还。实现：core 新增钩子 `registerGroupMemberRemoved`（`removeMemberFromGroup` 调它），停用成员走已有的 `registerMemberDeactivated`；`server/src/bots/index.ts` 找出在这个群跑过任务的 AI 成员，逐个调 desk。
+  - `holdDueAt()`：给 `stall.ts` 的 `scheduleStall()` 多一个最小值，到点发提醒（复用盯活的通知路径），写 `hold_reminded`。实现：提醒是 AI 成员在话题里的一句话，@ 要提醒的人（2 小时：持有人；24 小时：持有人、请求人、群里的管理员）。
+  - 请求人：服务端还没有存 `requestedFor`，权限判断先用 `requested_by`（私密卡片的回答算没有请求人）。
+  - 持有中电脑失联：link 在离线满宽限（`OFFLINE_GRACE_MS`）时、以及 hello 时调 desk 的 `heldMachine(runId, machineId, online)`，desk 只改 `away_since`（给 `waitingFor: "offline"`），不发「不在线了 / 回来了」。交还时电脑还不在，`away_since` 从交还时刻重新算，之后按盯 1.1 等电脑。
 - **`events.ts`**：`hand.result` 清 `hand_command`；`hand.summary` 写 `last_handback` 并广播 `run.updated`；`hand.*` 不碰 `last_event_at`。任务在 `handed_back_at` 后 2 分钟内以失败结束时，走线 3 的同会话重开一次（3.3）。
 - **daemon 重启**：持有期间 daemon 崩溃或重启，CLI 没了。按线 3 对丢失任务的规则处理（同会话重开），desk 先清掉持有，交还说明里写「the computer restarted while a person held it」，话题里一行「{computer} 重启过，接管已结束」。线 8 的自更新在这台电脑有持有中的任务时推迟。
 - **`core.ts` 的 `toRun()`**：用 `phaseOf()` 填 `phase`、`waitingFor`、`holdKind`、`heldAt`、`takeover`、`lastHandback`。

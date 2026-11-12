@@ -19,6 +19,7 @@ import { EXECUTOR_MEMORY_BYTES, memoryIndex } from "../../memory/inject";
 import { groupMembers, membersText } from "../../context/read";
 import { loadMachines, loadRunner } from "../store";
 import { DeskCore, QUEUED, type RunRow } from "./core";
+import { takeoverOf } from "./hold";
 import { type FailureNote, failureNote } from "./failure";
 import { type LoggedFrame, type RecoveryFacts, outwardAction, recoveryNote, stepOf } from "../../agent/recovery";
 import type { RunProof } from "../proof";
@@ -672,7 +673,9 @@ export abstract class DeskRuns extends DeskCore {
     const resumePrompt = frame.resumeSessionId ? this.meta(`prompt_resume:${r.id}`) : null;
     if (resumePrompt !== null) frame.prompt = resumePrompt;
     this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `sent:${r.id}`, resumePrompt !== null ? "resume" : "full");
-    this.sql.exec("UPDATE runs SET machine_id = ?, runtime = ? WHERE id = ?", machine.id, runner.runtime, r.id);
+    // design-takeover 3.6: how a person can take over the run on this machine.
+    r.takeover = takeoverOf(machine);
+    this.sql.exec("UPDATE runs SET machine_id = ?, runtime = ?, takeover = ? WHERE id = ?", machine.id, runner.runtime, r.takeover, r.id);
     r.machine_id = machine.id;
     r.runtime = runner.runtime;
     await this.env.DB.prepare("UPDATE bot_runs SET machine_id = ? WHERE id = ?").bind(machine.id, r.id).run();
@@ -727,6 +730,11 @@ export abstract class DeskRuns extends DeskCore {
     return this.serial(runId, async () => {
       const r = this.run(runId);
       if (!r || r.ended_at !== null || r.machine_id !== machineId) return false;
+      // design-takeover 3.7: a run a person holds is not moved or ended; it waits for its machine.
+      if (r.paused_by) {
+        this.log.info("lease ran out while held", { runId, machineId });
+        return true;
+      }
       return this.machineLost(r);
     });
   }
