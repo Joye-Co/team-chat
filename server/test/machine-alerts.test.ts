@@ -61,6 +61,24 @@ describe("alerts to a computer's managers (机 5.1)", () => {
     expect(heartbeatAlerts({ ...base, up: { "signed_out:claude": went.raise[0] }, health: ok, seen: went.seen })).toMatchObject({ raise: [], clear: [] });
   });
 
+  it("ends a sign-in alert only on a certain sign-in when the daemon confirms them, or when the CLI is gone", () => {
+    const ok = { diskFreeBytes: 100e9, diskTotalBytes: 500e9 };
+    const alert = { key: "signed_out:claude", kind: "signed_out" as const, since: 1, runtime: "claude", cli: "Claude Code" };
+    const base = { seen: { claude: "logged_out" }, cliName: (rt: string) => rt, now: 1000, health: ok, up: { "signed_out:claude": alert } };
+    // The run's mark expired and the credential files say signed in again: not a recovery.
+    expect(heartbeatAlerts({ ...base, confirmsSignIn: true, logins: [{ runtime: "claude", state: "logged_in" }] }).clear).toEqual([]);
+    // The CLI's check, an app key or a run that worked vouches for it.
+    expect(heartbeatAlerts({ ...base, confirmsSignIn: true, logins: [{ runtime: "claude", state: "logged_in", confirmed: true }] }).clear).toEqual([
+      "signed_out:claude",
+    ]);
+    // A daemon from before sign-in-confirmed: a logged_in is all there is.
+    expect(heartbeatAlerts({ ...base, logins: [{ runtime: "claude", state: "logged_in" }] }).clear).toEqual(["signed_out:claude"]);
+    // The CLI left the heartbeat (removed from the config, uninstalled): nothing left to recover.
+    expect(heartbeatAlerts({ ...base, confirmsSignIn: true, logins: [{ runtime: "codex", state: "logged_in" }] }).clear).toEqual(["signed_out:claude"]);
+    // A heartbeat without logins says nothing about it.
+    expect(heartbeatAlerts({ ...base, confirmsSignIn: true }).clear).toEqual([]);
+  });
+
   it("tells the admins about a full disk in a DM from the AI member, and withdraws it when there is room again", async () => {
     const { w, c, d } = await placed();
     const alice = await createMember({ name: "Alice2" });
@@ -182,7 +200,6 @@ describe("a key from the app that asks before each use (机 4.3)", () => {
     expect(await d2.next((x) => x.t === "secret.set")).toEqual({ t: "secret.set", name: "CF_TOKEN", sealed: "c2VhbGVk", members: [w.bot.id], ask: true });
     d2.close();
   });
-});
 
   it("keeps a key's ask when a new value comes without it (an older client), and turns it off only on ask: false", async () => {
     const w = await world();
@@ -202,3 +219,4 @@ describe("a key from the app that asks before each use (机 4.3)", () => {
     expect(await put({})).toEqual({ t: "secret.set", name: "CF_TOKEN", sealed: "c2VhbGVk", members: [] });
     d.close();
   });
+});

@@ -991,6 +991,7 @@ async fn pause_resume_answer_acceptance_and_aside() {
                         "gates",
                         "github",
                         "takeover",
+                        "sign-in-confirmed",
                         "accounts",
                         "ask-keys"
                     ]

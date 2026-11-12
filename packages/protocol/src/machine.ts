@@ -33,6 +33,8 @@ export const MACHINE_FEATURE_TAKEOVER_ISOLATED = "takeover-isolated";
 export const MACHINE_FEATURE_HOMES = "homes";
 /** Usable (机 4.3): `secret.set.ask`: an app key runs get only after a person approves. */
 export const MACHINE_FEATURE_ASK_KEYS = "ask-keys";
+/** Usable (机 5.1): `CliLogin.confirmed` is also `true` on a certain `logged_in`. */
+export const MACHINE_FEATURE_SIGN_IN_CONFIRMED = "sign-in-confirmed";
 
 export const MachineInfo = z.object({
   /** The id configured on the machine (optional); the token is authoritative. */
@@ -144,6 +146,8 @@ export const CliLogin = z.object({
    * Usable: `true` when a `logged_out` state is certain (the CLI's own status check, run with the
    * env its runs get, said so, or a run just failed because it is not signed in). Absent = from
    * the credential files only, or an older daemon. Only a confirmed `logged_out` keeps runs away.
+   * Feature "sign-in-confirmed": also `true` on a certain `logged_in` (the status check said so, a
+   * key saved from the app, or the runtime's last run succeeded).
    */
   confirmed: z.boolean().optional(),
 });

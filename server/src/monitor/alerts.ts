@@ -70,6 +70,11 @@ export function heartbeatAlerts(input: {
   logins?: { runtime: string; state: string; confirmed?: boolean }[];
   /** The last state each runtime was seen in ("logged_in" | "logged_out"). */
   seen: Record<string, string>;
+  /**
+   * The daemon has feature "sign-in-confirmed": only a `logged_in` with `confirmed` is certain; one
+   * without may come from the credential files while the CLI is still signed out.
+   */
+  confirmsSignIn?: boolean;
   cliName: (runtime: string) => string;
   now: number;
 }): { raise: MachineAlert[]; clear: string[]; seen: Record<string, string> } {
@@ -86,13 +91,22 @@ export function heartbeatAlerts(input: {
     const key = `signed_out:${l.runtime}`;
     if (l.state === "logged_in") {
       seen[l.runtime] = "logged_in";
-      if (input.up[key]) clear.push(key);
+      if (input.up[key] && (!input.confirmsSignIn || l.confirmed === true)) clear.push(key);
     } else if (l.state === "logged_out" && l.confirmed === true) {
       // Only a sign-in that was there and went: a CLI nobody ever signed in is not news.
       if (input.seen[l.runtime] === "logged_in" && !input.up[key]) {
         raise.push({ key, kind: "signed_out", since: input.now, runtime: l.runtime, cli: input.cliName(l.runtime) });
       }
       seen[l.runtime] = "logged_out";
+    }
+  }
+  // A CLI the heartbeat no longer reports (removed from the config, uninstalled) has nothing left
+  // to recover: its alert ends.
+  if (input.logins) {
+    const reported = new Set(input.logins.map((l) => l.runtime));
+    for (const key of Object.keys(input.up)) {
+      const a = input.up[key];
+      if (a?.kind === "signed_out" && a.runtime !== undefined && !reported.has(a.runtime)) clear.push(key);
     }
   }
   return { raise, clear, seen };

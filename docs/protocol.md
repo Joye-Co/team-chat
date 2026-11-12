@@ -2940,7 +2940,10 @@ SetSecretRequest += { ask?: boolean }  // 每次用之前要批准; absent keeps
   - `offline`: no link for 10 minutes while an AI member is placed on the computer
     (`BotRunner.machineId`) or checked on it by its owner;
   - `signed_out:<runtime>`: a CLI the heartbeat last saw `logged_in` is now a confirmed
-    `logged_out`;
+    `logged_out`. It ends on a `logged_in` that is certain (`confirmed: true`, from a daemon with
+    feature `sign-in-confirmed`; from an older daemon any `logged_in`), not on one from the
+    credential files after a failed run's mark ran out, and when a heartbeat with logins no longer
+    reports the runtime;
   - `disk`: free disk below 5 GiB; it ends at 6 GiB or more, so a disk at the line does not flap.
 
   The notice is a message of an AI member that depends on the computer (for a sign-in or the

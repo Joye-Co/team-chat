@@ -995,6 +995,7 @@ safe default named below). Protocol side: protocol.md, "Usable extensions".
 | `takeover-isolated` | With `takeover` (VM runs, `runsIn: "vm"`): a person's commands run as another user than the run, so they cannot read the run's own credentials. |
 | `homes` | VM hosts (`[vm]`): reports `metrics.homes` (each AI member's home folder) and takes `home.clear`. |
 | `ask-keys` | With `accounts`: takes `secret.set.ask` and keeps such a key out of runs' environments until a person approves (see "Accounts and keys"). |
+| `sign-in-confirmed` | Sends `CliLogin.confirmed: true` on a certain `logged_in` too (see "Accounts and keys"), so the server ends a signed-out alert only on a sign-in that is known to work. |
 
 ```ts
 // daemon -> server
@@ -1123,7 +1124,11 @@ the app, or the check every 10 minutes) or a later run of it succeeds.
 own status check said so, or a run just failed with `signed_out`. A `logged_out` from the
 credential files alone (they do not know every way a CLI signs in, such as Claude Code's
 `apiKeyHelper` or a token in its env) or from an older daemon has no `confirmed`; it is shown to
-people but keeps no runs away.
+people but keeps no runs away. A daemon with feature `sign-in-confirmed` also sends
+`confirmed: true` on a `logged_in` that is certain: the CLI's own status check said signed in, a
+key saved from the app serves it, or the runtime's last run succeeded (and no run failed to sign
+in since). A `logged_in` from the credential files alone has no `confirmed`; the server does not
+end a signed-out alert on it (protocol.md, "Computers that need their managers").
 
 The sign-in state in `metrics.logins` is the CLI's own status check when the daemon has one
 (feature `accounts`, every 10 minutes and after each sign-in): `claude auth status --json`

@@ -50,6 +50,7 @@ pub const FEATURES: &[&str] = &[
     // Every executor runs a person's commands (local: as the daemon's user; a VM: as another
     // user, and `takeover-isolated` says so).
     feature::TAKEOVER,
+    feature::SIGN_IN_CONFIRMED,
 ];
 
 /// `run.done.error` of a run found unfinished at start: the server continues it in its session.
@@ -147,6 +148,9 @@ pub struct Daemon {
     /// Runtimes whose last run failed because the CLI is not signed in, and since when: they
     /// report `logged_out` until the CLI's status check says signed in again (模 3.2).
     signed_out: Arc<std::sync::Mutex<HashMap<String, Instant>>>,
+    /// Runtimes whose last run succeeded: their `logged_in` is certain (feature
+    /// "sign-in-confirmed").
+    worked: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     /// Values masked besides the config's: every key this process has held.
     key_values: Vec<String>,
     /// The daemon is shutting down: the runs it stops itself end as `daemon restarted`.
@@ -197,6 +201,7 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
         usage: Arc::new(std::sync::Mutex::new(vec![])),
         accounts: Arc::new(std::sync::Mutex::new(HashMap::new())),
         signed_out: Arc::new(std::sync::Mutex::new(HashMap::new())),
+        worked: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         key_values,
         stopping: false,
         clearing: Arc::default(),
@@ -1048,7 +1053,7 @@ impl Daemon {
                             log!("run {id} done: {}", d.status);
                         }
                         if let Some(rt) = &r.runtime {
-                            note_sign_in(&self.signed_out, rt, d);
+                            note_sign_in(&self.signed_out, &self.worked, rt, d);
                         }
                     }
                     Up::RunSession(s) => s.seq = seq,
@@ -1366,6 +1371,11 @@ impl Daemon {
             }
         }
         drop(marks);
+        let worked = self.worked.lock().unwrap_or_else(|e| e.into_inner());
+        for l in m.logins.iter_mut().flatten() {
+            crate::metrics::confirm_worked(l, worked.contains(&l.runtime));
+        }
+        drop(worked);
         // 机 5.4: 最近的问题, redacted with every key this daemon knows now.
         let problems = crate::problems::recent(&self.redactor);
         m.problems = (!problems.is_empty()).then_some(problems);
@@ -1377,16 +1387,24 @@ impl Daemon {
 const SIGNED_OUT_MARK: Duration = Duration::from_secs(15 * 60);
 
 /// A run of `runtime` ended: one that failed because the CLI is not signed in marks it signed
-/// out; one that succeeded shows the CLI works, so the mark goes.
-fn note_sign_in(marks: &std::sync::Mutex<HashMap<String, Instant>>, runtime: &str, d: &RunDone) {
+/// out; one that succeeded shows the CLI works, so the mark goes and its sign-in is certain.
+fn note_sign_in(
+    marks: &std::sync::Mutex<HashMap<String, Instant>>,
+    worked: &std::sync::Mutex<std::collections::HashSet<String>>,
+    runtime: &str,
+    d: &RunDone,
+) {
     let mut m = marks.lock().unwrap_or_else(|e| e.into_inner());
+    let mut w = worked.lock().unwrap_or_else(|e| e.into_inner());
     if d.failure
         .as_ref()
         .is_some_and(|f| f.kind == crate::proto::failure_kind::SIGNED_OUT)
     {
         m.insert(runtime.to_string(), Instant::now());
+        w.remove(runtime);
     } else if d.status == "succeeded" {
         m.remove(runtime);
+        w.insert(runtime.to_string());
     }
 }
 
@@ -1429,6 +1447,7 @@ mod tests {
     #[test]
     fn a_run_that_failed_to_sign_in_marks_its_cli_until_one_succeeds() {
         let marks = std::sync::Mutex::new(HashMap::new());
+        let worked = std::sync::Mutex::new(std::collections::HashSet::new());
         let done = |status: &str, kind: Option<&str>| RunDone {
             run_id: "r1".into(),
             seq: 1,
@@ -1444,15 +1463,30 @@ mod tests {
             code: None,
             failure: kind.map(crate::proto::RunFailure::new),
         };
-        note_sign_in(&marks, "claude", &done("failed", Some("network")));
+        note_sign_in(&marks, &worked, "claude", &done("failed", Some("network")));
         assert!(marks.lock().unwrap().is_empty());
-        note_sign_in(&marks, "claude", &done("failed", Some("signed_out")));
+        note_sign_in(
+            &marks,
+            &worked,
+            "claude",
+            &done("failed", Some("signed_out")),
+        );
         assert!(marks.lock().unwrap().contains_key("claude"));
         // Another runtime's success leaves it.
-        note_sign_in(&marks, "codex", &done("succeeded", None));
+        note_sign_in(&marks, &worked, "codex", &done("succeeded", None));
         assert!(marks.lock().unwrap().contains_key("claude"));
-        note_sign_in(&marks, "claude", &done("succeeded", None));
+        assert!(!worked.lock().unwrap().contains("claude"));
+        note_sign_in(&marks, &worked, "claude", &done("succeeded", None));
         assert!(marks.lock().unwrap().is_empty());
+        // Its sign-in is certain now, until a run fails to sign in again.
+        assert!(worked.lock().unwrap().contains("claude"));
+        note_sign_in(
+            &marks,
+            &worked,
+            "claude",
+            &done("failed", Some("signed_out")),
+        );
+        assert!(!worked.lock().unwrap().contains("claude"));
     }
 
     #[test]

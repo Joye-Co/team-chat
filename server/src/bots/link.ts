@@ -524,6 +524,7 @@ export class MachineLink extends DurableObject<BotsEnv> {
       health,
       ...(metrics?.logins ? { logins: metrics.logins } : {}),
       seen,
+      confirmsSignIn: this.hasFeature("sign-in-confirmed"),
       cliName: (runtime) => cliName(clis.find((c) => c.runtime === runtime)?.kind, runtime),
       now,
     });

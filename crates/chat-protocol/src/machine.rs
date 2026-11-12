@@ -49,6 +49,9 @@ pub mod feature {
     pub const HOMES: &str = "homes";
     /// Usable (机 4.3): `secret.set.ask`: an app key runs get only after a person approves.
     pub const ASK_KEYS: &str = "ask-keys";
+    /// Usable (机 5.1): `CliLogin.confirmed` is also `true` on a certain `logged_in`, so a
+    /// `logged_in` without it may come from the credential files alone.
+    pub const SIGN_IN_CONFIRMED: &str = "sign-in-confirmed";
 }
 
 /// Most entries of `MachineMetrics.homes`.
@@ -234,7 +237,9 @@ pub struct CliLogin {
     /// Usable: `true` when a `logged_out` state is certain: the CLI's own status check, run with
     /// the env its runs get, said so, or a run just failed because it is not signed in. `None` =
     /// from the credential files only (or an older daemon). Only a confirmed `logged_out` keeps
-    /// runs away from the runtime.
+    /// runs away from the runtime. Feature "sign-in-confirmed": also `true` on a certain
+    /// `logged_in` (the status check said so, a key saved from the app, or the runtime's last run
+    /// succeeded).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confirmed: Option<bool>,
 }
