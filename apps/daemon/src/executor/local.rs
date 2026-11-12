@@ -1,12 +1,15 @@
 //! `local`: the CLI runs as a child process of the daemon, in its own process group, as the
 //! daemon's user. Tools that leave the CLI's tree are found by [`crate::proctree`].
 
-use super::{BoxFuture, Executor, Process, Spawned, Stopped};
+use super::{BoxFuture, Executor, HandChild, HandEnd, HandReq, Process, Spawned, Stopped};
 use crate::proctree;
 use crate::runtime::RunSpec;
 use crate::workspace::{self, RunMeta};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::process::Child;
 
@@ -91,6 +94,103 @@ impl Executor for Local {
             libc::kill(-pgid, libc::SIGKILL);
         }
     }
+
+    fn takeover(&self) -> Option<&'static str> {
+        Some(super::TAKEOVER_COMMANDS)
+    }
+
+    /// `$SHELL -c '<command>'` (no `-l`: a profile could bring tokens back) in a session of
+    /// its own, so it is not in the CLI's stopped group and ends with its own group.
+    fn hand(&self, req: &HandReq) -> std::io::Result<HandChild> {
+        let (r, w) = std::io::pipe()?;
+        let w2 = w.try_clone()?;
+        let mut cmd = tokio::process::Command::new(shell(&req.env));
+        cmd.arg("-c")
+            .arg(&req.command)
+            .current_dir(&req.cwd)
+            .env_clear()
+            .envs(req.env.iter().map(|(k, v)| (k, v)))
+            .stdin(Stdio::null())
+            .stdout(w)
+            .stderr(w2);
+        // SAFETY: setsid is async-signal-safe and touches no memory of the parent.
+        unsafe {
+            cmd.pre_exec(|| {
+                if libc::setsid() < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let spawned = cmd.spawn();
+        // The pipe's write ends live in `cmd` until it is dropped: the output ends only then.
+        drop(cmd);
+        let mut child = spawned?;
+        let pgid = child.id().map(|p| p as i32).unwrap_or(0);
+        hands(|m| {
+            m.entry(req.run_dir.clone())
+                .or_default()
+                .push(proctree::Target::Group(pgid, proctree::start_time(pgid)))
+        });
+        let (tx, output) = tokio::sync::mpsc::unbounded_channel();
+        super::pipe_reader(r, tx);
+        let exited = Arc::new(AtomicBool::new(false));
+        let (done_tx, done) = tokio::sync::oneshot::channel();
+        let e2 = exited.clone();
+        tokio::spawn(async move {
+            let status = child.wait().await;
+            e2.store(true, Ordering::SeqCst);
+            let _ = done_tx.send(HandEnd {
+                code: status.ok().and_then(|s| s.code().map(i64::from)),
+                ..HandEnd::default()
+            });
+        });
+        Ok(HandChild {
+            output,
+            done,
+            cancel: Box::new(move || {
+                if pgid > 1 && !exited.load(Ordering::SeqCst) {
+                    // SAFETY: plain syscall; a negative pid addresses the command's group.
+                    unsafe {
+                        libc::kill(-pgid, libc::SIGKILL);
+                    }
+                }
+            }),
+        })
+    }
+
+    /// What a person's commands left in the background ends with the run (each command led
+    /// its own session and group).
+    fn hand_end(&self, run_dir: &Path) {
+        if let Some(groups) = hands(|m| m.remove(run_dir)) {
+            proctree::signal(&groups, libc::SIGKILL);
+        }
+    }
+}
+
+/// The groups of the person's commands, by run folder, for [`Executor::hand_end`].
+static HANDS: Mutex<Option<HashMap<PathBuf, Vec<proctree::Target>>>> = Mutex::new(None);
+
+fn hands<T>(f: impl FnOnce(&mut HashMap<PathBuf, Vec<proctree::Target>>) -> T) -> T {
+    let mut g = HANDS.lock().unwrap_or_else(|e| e.into_inner());
+    f(g.get_or_insert_with(HashMap::new))
+}
+
+/// The person's shell: `$SHELL` of the daemon, else zsh on macOS and bash elsewhere.
+fn shell(env: &[(String, String)]) -> PathBuf {
+    let own = env
+        .iter()
+        .find(|(k, _)| k == "SHELL")
+        .map(|(_, v)| PathBuf::from(v))
+        .filter(|p| p.is_absolute() && p.is_file());
+    own.unwrap_or_else(|| {
+        let p = PathBuf::from(if cfg!(target_os = "macos") {
+            "/bin/zsh"
+        } else {
+            "/bin/bash"
+        });
+        if p.is_file() { p } else { "/bin/sh".into() }
+    })
 }
 
 struct LocalStopped {
