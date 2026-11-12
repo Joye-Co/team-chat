@@ -191,6 +191,7 @@ impl Sampler {
             usage: None,
             homes: None,
             problems: None,
+            github: None,
         }
     }
 

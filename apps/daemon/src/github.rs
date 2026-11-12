@@ -285,6 +285,7 @@ impl Run {
                         emit(RunEvent::Github {
                             state: "used".into(),
                             login: Some(t.login.clone()),
+                            reason: None,
                         });
                     }
                     Got::Token(t)
@@ -307,6 +308,7 @@ impl Run {
         emit(RunEvent::Github {
             state: if invalid { "invalid" } else { "missing" }.into(),
             login: self.spec.login.clone(),
+            reason: None,
         });
         let body = MachineGithubWaitRequest {
             reason: if invalid { "invalid" } else { "not_connected" }.into(),
@@ -595,6 +597,7 @@ mod tests {
                 email: "ai-B1@users.noreply.invalid".into(),
             },
             rewrite_ssh: rewrite.then_some(true),
+            asked_by: None,
         }
     }
 

@@ -1,0 +1,27 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "feature github-host: the host's own GitHub sign-in",
+  "value": {
+    "t": "heartbeat",
+    "at": 1762128000000,
+    "health": {
+      "diskFreeBytes": 1,
+      "diskTotalBytes": 2,
+      "load1": 0.5,
+      "load5": 0.25,
+      "load15": 0.125,
+      "cpuCount": 8,
+      "activeRuns": 0
+    },
+    "runs": [],
+    "metrics": {
+      "at": 1762127999900,
+      "runs": [],
+      "github": {
+        "state": "signed_in",
+        "login": "example-bot"
+      }
+    }
+  }
+}

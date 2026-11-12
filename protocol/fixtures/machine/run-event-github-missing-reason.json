@@ -1,0 +1,10 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "description": "the host's gh is not signed in",
+  "value": {
+    "type": "github",
+    "state": "missing",
+    "reason": "signed_out"
+  }
+}

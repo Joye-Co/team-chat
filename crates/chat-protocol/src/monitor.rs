@@ -5,7 +5,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::machine::{BootStats, DaemonProblem, HomeUse, LoginAccount, SecretInfo, UsageWindow};
+use crate::machine::{
+    BootStats, DaemonProblem, HomeUse, LoginAccount, MachineGithub, SecretInfo, UsageWindow,
+};
 
 /// `MonitorRange` values.
 pub mod range {
@@ -203,6 +205,12 @@ pub struct MachineMonitor {
     /// oldest first; absent before a daemon that reports them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub problems: Option<Vec<DaemonProblem>>,
+    /// Usable: the computer's own GitHub sign-in from the latest heartbeat (`metrics.github`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub github: Option<MachineGithub>,
+    /// Usable: where runs execute, "host" | "vm" (`hello.machine.runsIn`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runs_in: Option<String>,
 }
 
 /// `POST /v1/machines/:id/logins`

@@ -1510,6 +1510,7 @@ mod tests {
                 email: "ai-B1@users.noreply.invalid".into(),
             },
             rewrite_ssh: Some(true),
+            asked_by: None,
         };
         let a = RunAssign {
             run_id: "rg".into(),
@@ -1553,7 +1554,8 @@ mod tests {
             events.into_inner().unwrap(),
             vec![RunEvent::Github {
                 state: "missing".into(),
-                login: None
+                login: None,
+                reason: None
             }]
         );
         assert_eq!(

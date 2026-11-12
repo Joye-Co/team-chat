@@ -36104,6 +36104,11 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 100
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
             }
           },
           "required": [
@@ -36873,6 +36878,11 @@
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 100
+                    },
+                    "reason": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 32
                     }
                   },
                   "required": [
@@ -38325,6 +38335,11 @@
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 100
+                          },
+                          "reason": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 32
                           }
                         },
                         "required": [
@@ -40993,6 +41008,24 @@
               "botId"
             ]
           }
+        },
+        "github": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            },
+            "login": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          "required": [
+            "state"
+          ]
         }
       },
       "required": [
@@ -41275,6 +41308,24 @@
                   "botId"
                 ]
               }
+            },
+            "github": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 32
+                },
+                "login": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                }
+              },
+              "required": [
+                "state"
+              ]
             }
           },
           "required": [
@@ -41542,6 +41593,24 @@
                 "botId"
               ]
             }
+          },
+          "github": {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32
+              },
+              "login": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              }
+            },
+            "required": [
+              "state"
+            ]
           }
         },
         "required": [
@@ -42175,6 +42244,29 @@
               "text"
             ]
           }
+        },
+        "github": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            },
+            "login": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          "required": [
+            "state"
+          ]
+        },
+        "runsIn": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16
         }
       },
       "required": [
@@ -43775,6 +43867,24 @@
                       "text"
                     ]
                   }
+                },
+                "github": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 32
+                    },
+                    "login": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ]
                 }
               },
               "required": [
@@ -44427,6 +44537,11 @@
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 100
+                    },
+                    "reason": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 32
                     }
                   },
                   "required": [
@@ -45164,6 +45279,11 @@
                 },
                 "rewriteSsh": {
                   "type": "boolean"
+                },
+                "askedBy": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
                 }
               },
               "required": [
