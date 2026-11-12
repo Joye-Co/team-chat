@@ -31,7 +31,7 @@ import { type Env, gatewayStub, roomStub } from "./env";
 import { ApiError, unwrap } from "./errors";
 import { ulid } from "./ids";
 import { logger } from "./logger";
-import { memberDeactivatedHooks, membersChangedHooks, registerRoute } from "./registry";
+import { groupMemberRemovedHooks, memberDeactivatedHooks, membersChangedHooks, registerRoute } from "./registry";
 
 export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const DEFAULT_GROUP_NAME = "全员";
@@ -124,6 +124,13 @@ export async function removeMemberFromGroup(
   ]);
   // Idempotent: a retry after a failed room call (D1 already changed) still updates the room.
   unwrap(await roomStub(env, groupId).memberRemoved(groupId, actor.memberId, memberId));
+  for (const hook of groupMemberRemovedHooks) {
+    try {
+      await hook(env, groupId, memberId);
+    } catch (err) {
+      logger.error("group member removed hook failed", { groupId, memberId, err });
+    }
+  }
   notifyGroupChanged(env, waitUntil, groupId, [...before]);
 }
 

@@ -19,7 +19,7 @@ import type { CardAnswerIn } from "../room";
 import { truthfulDoneCard } from "../proof";
 import { loadRunner } from "../store";
 import { type RunRow, result } from "./core";
-import { DeskTakeover } from "./takeover";
+import { DeskHand } from "./hand";
 import { isChainStop } from "./delegate_card";
 
 /** One coalescing window per card (or page version): the newest event per block in 3 s. */
@@ -53,7 +53,7 @@ const OUTPUT_FRAME: Record<string, string> = {
   "artifact.reply": "artifact.reply",
 };
 
-export abstract class DeskInteract extends DeskTakeover {
+export abstract class DeskInteract extends DeskHand {
   // -------------------------------------------------------------------------
   // Expect (§6.4)
   // -------------------------------------------------------------------------
