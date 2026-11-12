@@ -68,6 +68,8 @@ pub struct MachinesPage {
     solo: bool,
     /// The last change from a row's "⋯" that failed.
     action: Status,
+    /// 不再用这台电脑 in progress or failed (its failure offers 重试).
+    stopping: Status,
     /// The periodic reload; dropped with the pane.
     _poll: Task<()>,
     _owner: gpui::Subscription,
@@ -115,6 +117,7 @@ impl MachinesPage {
             me: my_id(&services),
             solo: solo(&services),
             action: Status::Idle,
+            stopping: Status::Idle,
             _owner: owner_sub,
             services,
             machines: None,
@@ -163,6 +166,44 @@ impl MachinesPage {
                 cx.notify();
             });
         })
+    }
+
+    /// What 不再用这台电脑 does next: reload, or say it did not work and offer 重试.
+    pub fn stop_after(&self, cx: &mut Context<Self>) -> After {
+        let page = cx.entity().downgrade();
+        std::rc::Rc::new(move |result, cx| {
+            let _ = page.update(cx, |p, cx| {
+                p.this_mac = p.services.provider.this_mac();
+                p.this_machine = p.services.provider.this_machine_id();
+                match result {
+                    Ok(()) => {
+                        p.stopping = Status::Idle;
+                        p.using = Status::Idle;
+                        p.refresh(cx);
+                    }
+                    Err(e) => p.stopping = Status::from_error(e),
+                }
+                cx.notify();
+            });
+        })
+    }
+
+    /// 不再用这台电脑 again after it failed (the confirmation was given already).
+    pub fn stop_this(&mut self, cx: &mut Context<Self>) {
+        if self.stopping.busy() {
+            return;
+        }
+        self.stopping = Status::Busy(s::LOADING.into());
+        let (reply, after) = (
+            self.services.provider.stop_using_this_computer(),
+            self.stop_after(cx),
+        );
+        cx.spawn(async move |_, cx| {
+            let result = answer(reply).await.map(|_| ());
+            cx.update(|cx| after(result, cx));
+        })
+        .detach();
+        cx.notify();
     }
 
     /// 用这台电脑: first the screen that says what it means (机 3.1), then the set-up.
@@ -285,7 +326,7 @@ impl MachinesPage {
         // itself after an app update, or one that is stuck).
         let restart =
             (this && may.rename && self.this_mac == ThisMac::Working).then(|| cx.entity());
-        let (services, after) = (self.services.clone(), self.after(cx));
+        let (services, after, stop) = (self.services.clone(), self.after(cx), self.stop_after(cx));
         let machine = m.clone();
         let more = crate::views::settings::widgets::more_button(
             ElementId::Name(format!("machine-more-{}", m.id).into()),
@@ -303,7 +344,7 @@ impl MachinesPage {
                         .on_click(move |_, _, cx| page.update(cx, |p, cx| p.restart_this_mac(cx))),
                 );
             }
-            actions::menu_items(menu, &services, &machine, may, &after)
+            actions::menu_items(menu, &services, &machine, may, &after, &stop)
         });
         let facts = match m.ownership(me) {
             // Somebody else's computer: whose it is first (a member sees nothing more).
@@ -361,22 +402,53 @@ impl Render for MachinesPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let owner = self.owner;
         let page = cx.entity();
-        // Every member adds their own computers (design-roles 3.3).
-        let add = push_button(
-            "machine-add",
-            s::COMPUTER_ADD_OPEN,
-            PushStyle::Outline,
-            PushSize::Small,
-            cx,
-        )
-        .on_click(move |_, window, cx| Self::open_add(page.clone(), window, cx));
+        // Every member adds their own computers (design-roles 3.3), once a personal computer
+        // takes only its owner's work; until then only admins add computers.
+        let may_add = crate::data::may_add_computers(owner);
+        let add = may_add.then(|| {
+            push_button(
+                "machine-add",
+                s::COMPUTER_ADD_OPEN,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            )
+            .on_click(move |_, window, cx| Self::open_add(page.clone(), window, cx))
+        });
         // 用这台电脑: this Mac has no daemon yet, or runs one copied by hand that does not
         // update with the app.
         let use_label = match self.this_mac {
-            ThisMac::NotSetUp => Some(s::THIS_MAC_USE),
+            ThisMac::NotSetUp if may_add => Some(s::THIS_MAC_USE),
+            ThisMac::NotSetUp => None,
             ThisMac::Elsewhere => Some(s::THIS_MAC_SWITCH),
             ThisMac::Unavailable | ThisMac::Working => None,
         };
+        // This computer runs its service but the server no longer lists it (removed from
+        // another device, or a 不再用这台电脑 that stopped halfway): its row and "⋯" are gone,
+        // so 不再用这台电脑 is offered here.
+        let stop_here = this_computer_unlisted(
+            self.this_mac,
+            self.this_machine.as_deref(),
+            self.machines.as_deref(),
+        )
+        .then(|| {
+            let (services, after) = (self.services.clone(), self.stop_after(cx));
+            disabled_push(
+                push_button(
+                    "machine-stop-this",
+                    s::THIS_STOP,
+                    PushStyle::Outline,
+                    PushSize::Small,
+                    cx,
+                ),
+                self.stopping.busy(),
+                cx,
+            )
+            .loading(self.stopping.busy())
+            .on_click(move |_, window, cx| {
+                actions::confirm_stop_this(services.clone(), after.clone(), window, cx)
+            })
+        });
         let use_here = use_label.map(|label| {
             let page = cx.entity();
             let first = self.this_mac == ThisMac::NotSetUp;
@@ -405,8 +477,9 @@ impl Render for MachinesPage {
             .flex()
             .items_center()
             .gap(tokens::space::S8)
+            .children(stop_here)
             .children(use_here)
-            .child(add);
+            .children(add);
         // Why this Mac is offered: a daemon copied by hand does not update with the app.
         let this_mac_note = (self.this_mac == ThisMac::Elsewhere && !self.using.busy())
             .then(|| widgets::quiet(s::THIS_MAC_ELSEWHERE_HINT, cx));
@@ -422,6 +495,19 @@ impl Render for MachinesPage {
                 cx,
             )),
             Status::Done(t) => Some(widgets::quiet(t.clone(), cx).into_any_element()),
+            _ => None,
+        };
+        let stop_failed = match &self.stopping {
+            Status::Failed(t) => Some(widgets::failed_alert(
+                "machine-stop-failed",
+                s::THIS_STOP_FAILED,
+                Some(t.clone()),
+                Some(
+                    widgets::retry_button("machine-stop-retry", cx)
+                        .on_click(cx.listener(|this, _, _, cx| this.stop_this(cx))),
+                ),
+                cx,
+            )),
             _ => None,
         };
         let action_failed = match &self.action {
@@ -484,7 +570,11 @@ impl Render for MachinesPage {
                             None,
                             cx,
                         ))
-                        .footer(s::MY_COMPUTERS_EMPTY_HINT)
+                        .footer(if may_add {
+                            s::MY_COMPUTERS_EMPTY_HINT
+                        } else {
+                            s::MY_COMPUTERS_EMPTY_MEMBER_HINT
+                        })
                         .into_any_element(),
                 };
                 if !self.solo {
@@ -544,6 +634,7 @@ impl Render for MachinesPage {
                     .gap(tokens::space::S12)
                     .children(this_mac_note)
                     .children(using)
+                    .children(stop_failed)
                     .children(action_failed)
                     .child(first_body)
                     .children(reload_failed),
@@ -553,6 +644,19 @@ impl Render for MachinesPage {
                 SectionTitle::new(s::CLOUD).description(s::CLOUD_FOOTER),
                 cloud,
             ))
+    }
+}
+
+/// This computer runs its service (`this_mac`) but the loaded list has no row for it.
+pub fn this_computer_unlisted(
+    this_mac: ThisMac,
+    this_machine: Option<&str>,
+    list: Option<&[MachineInfo]>,
+) -> bool {
+    let running = matches!(this_mac, ThisMac::Working | ThisMac::Elsewhere);
+    match (running, list) {
+        (true, Some(list)) => !this_machine.is_some_and(|id| list.iter().any(|m| m.id == id)),
+        _ => false,
     }
 }
 
@@ -778,8 +882,12 @@ impl MachineForm {
         &self.status
     }
 
-    /// Shows the install command for a computer of this system.
+    /// Picks the system of the computer to add. It gives the computer its tag when it is
+    /// created, so once it exists the system (and its install command) stays.
     pub fn set_target(&mut self, target: InstallTarget, cx: &mut Context<Self>) {
+        if self.created.is_some() {
+            return;
+        }
         self.target = target;
         cx.notify();
     }
@@ -907,7 +1015,8 @@ impl Render for MachineForm {
                             .iter()
                             .position(|t| *t == self.target)
                             .unwrap_or(0),
-                        false,
+                        // The computer has its system's tag now: shown, not changed.
+                        true,
                         {
                             let form = cx.entity().downgrade();
                             move |ix: usize, _: &mut Window, cx: &mut gpui::App| {
@@ -1102,6 +1211,44 @@ mod tests {
         let tags: Vec<&str> = InstallTarget::ALL.iter().map(|t| t.tag()).collect();
         assert_eq!(tags, ["mac", "windows", "linux"]);
         assert!(tags.iter().all(|t| os_tag(t)));
+    }
+
+    /// Until R4 sends a personal computer only its owner's work, only admins add computers.
+    #[test]
+    fn who_may_add_computers() {
+        assert!(crate::data::may_add_computers(true));
+        assert_eq!(
+            crate::data::may_add_computers(false),
+            crate::data::OWNERSHIP_DISPATCH
+        );
+    }
+
+    /// 机 1.6: this computer's service runs but its row is gone (removed elsewhere, or a stop
+    /// that ended halfway): the page offers 不再用这台电脑 itself.
+    #[test]
+    fn a_running_computer_the_server_forgot_can_still_be_stopped() {
+        let listed = MachineInfo {
+            id: "mc_here".into(),
+            ..Default::default()
+        };
+        let list = [listed];
+        let unlisted = |mac, id, list| this_computer_unlisted(mac, id, list);
+        assert!(!unlisted(
+            ThisMac::Working,
+            Some("mc_here"),
+            Some(&list[..])
+        ));
+        assert!(unlisted(ThisMac::Working, Some("mc_gone"), Some(&list[..])));
+        assert!(unlisted(ThisMac::Elsewhere, Some("mc_gone"), Some(&[][..])));
+        assert!(unlisted(ThisMac::Working, None, Some(&list[..])));
+        // Not loaded yet, or nothing running here: nothing to offer.
+        assert!(!unlisted(ThisMac::Working, Some("mc_gone"), None));
+        assert!(!unlisted(
+            ThisMac::NotSetUp,
+            Some("mc_gone"),
+            Some(&list[..])
+        ));
+        assert!(!unlisted(ThisMac::Unavailable, None, Some(&list[..])));
     }
 
     /// design-roles 3.3: a member's new computer is always his own; an admin's is the team's

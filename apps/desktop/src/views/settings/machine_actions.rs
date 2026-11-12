@@ -55,7 +55,8 @@ pub fn allowed(m: &MachineInfo, me: Option<&str>, admin: bool, this: bool) -> Al
     let manage = m.manageable(me, admin);
     let ownership = m.ownership(me);
     Allowed {
-        my_bots: ownership == Ownership::Mine,
+        // Checked AI members change where work runs only once R4 dispatch is on main.
+        my_bots: ownership == Ownership::Mine && crate::data::OWNERSHIP_DISPATCH,
         rename: manage,
         to_team: ownership == Ownership::Mine && admin,
         to_mine: ownership == Ownership::Team && admin,
@@ -72,6 +73,7 @@ pub fn menu_items(
     m: &MachineInfo,
     may: Allowed,
     after: &After,
+    stop: &After,
 ) -> PopupMenu {
     let mut menu = menu;
     let item = |label: &'static str,
@@ -107,9 +109,12 @@ pub fn menu_items(
         menu = menu.separator();
     }
     if may.stop_this {
-        menu = menu.item(item(s::THIS_STOP, |sv, _, a, w, cx| {
-            confirm_stop_this(sv, a, w, cx)
-        }));
+        let (services, stop) = (services.clone(), stop.clone());
+        menu = menu.item(
+            PopupMenuItem::new(s::THIS_STOP).on_click(move |_, window, cx| {
+                confirm_stop_this(services.clone(), stop.clone(), window, cx)
+            }),
+        );
     }
     if may.remove {
         menu = menu.item(item(s::MACHINE_REMOVE, confirm_remove));
@@ -807,12 +812,14 @@ mod tests {
         let a = allowed(&team, me, true, false);
         assert!(a.rename && a.remove && a.to_mine && !a.to_team && !a.my_bots && !a.stop_this);
         let a = allowed(&mine, me, true, false);
-        assert!(a.rename && a.remove && a.to_team && a.my_bots && !a.to_mine);
+        assert!(a.rename && a.remove && a.to_team && !a.to_mine);
+        assert_eq!(a.my_bots, crate::data::OWNERSHIP_DISPATCH);
         assert_eq!(allowed(&theirs, me, true, false), Allowed::default());
         // A member.
         assert_eq!(allowed(&team, me, false, false), Allowed::default());
         let a = allowed(&mine, me, false, false);
-        assert!(a.rename && a.remove && a.my_bots && !a.to_team && !a.to_mine);
+        assert!(a.rename && a.remove && !a.to_team && !a.to_mine);
+        assert_eq!(a.my_bots, crate::data::OWNERSHIP_DISPATCH);
         assert_eq!(allowed(&theirs, me, false, true), Allowed::default());
         // This computer: 不再用这台电脑 in place of 移除.
         let a = allowed(&mine, me, false, true);

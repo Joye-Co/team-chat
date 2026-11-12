@@ -56,6 +56,15 @@ pub(super) fn api_error(e: &ApiError) -> AdminError {
     }
 }
 
+/// What the server said to forgetting a computer: one that is gone already is forgotten.
+fn forget_machine(r: Result<(), ApiError>) -> Result<(), AdminError> {
+    match r {
+        Ok(()) => Ok(()),
+        Err(e) if machine_error(&e) == AdminError::NotFound => Ok(()),
+        Err(e) => Err(machine_error(&e)),
+    }
+}
+
 /// [`api_error`] for the computer routes: a conflict there is a change made meanwhile (the
 /// computer's owner changed), not the last 所有者.
 pub(super) fn machine_error(e: &ApiError) -> AdminError {
@@ -835,26 +844,25 @@ impl CoreProvider {
         })
     }
 
-    /// 不再用这台电脑 (机 1.6): the server forgets this computer first (its token stops
-    /// working; one that is gone already is fine), then the service and the files that
-    /// registered it are removed here. Run again after a failure, it finishes the rest.
+    /// 不再用这台电脑 (机 1.6): the service and the files that registered this computer are
+    /// removed here first, then the server forgets it (its token stops working; one that is
+    /// gone already, removed from another device, is fine). A failure on this computer leaves
+    /// the registration, so the row and its "⋯" stay to try again; once the files are gone the
+    /// row is no longer this computer and 移除… on it finishes the rest.
     pub(super) fn stop_using_this_computer_inner(&self) -> AdminReply<()> {
         let Some(daemon) = super::this_mac::bundled_daemon() else {
             return reply_now(Err(AdminError::Unsupported));
         };
         let id = super::this_mac::machine_id();
         self.request(move |client, _| async move {
-            if let Some(id) = id {
-                match client.http().delete_machine(&id).await {
-                    Ok(()) => {}
-                    Err(e) if machine_error(&e) == AdminError::NotFound => {}
-                    Err(e) => return Err(machine_error(&e)),
-                }
-            }
             super::this_mac::stop_using(&daemon).map_err(|e| {
                 tracing::warn!(error = %e, "不再用这台电脑: uninstall failed");
                 AdminError::Other
-            })
+            })?;
+            match id {
+                Some(id) => forget_machine(client.http().delete_machine(&id).await),
+                None => Ok(()),
+            }
         })
     }
 
@@ -1012,6 +1020,25 @@ mod tests {
                      { "runtime": "rt-b", "kind": "pty", "command": "y", "available": false }]
         }))
         .expect("machine json")
+    }
+
+    /// 不再用这台电脑 after this computer was removed elsewhere (another device, an admin):
+    /// the server no longer knows it, and that is the end of it, not a failure.
+    #[test]
+    fn forgetting_a_computer_that_is_gone_is_done() {
+        assert_eq!(forget_machine(Ok(())), Ok(()));
+        assert_eq!(
+            forget_machine(Err(ApiError::Unexpected { status: 404 })),
+            Ok(())
+        );
+        assert_eq!(
+            forget_machine(Err(ApiError::Unexpected { status: 403 })),
+            Err(AdminError::Forbidden)
+        );
+        assert_eq!(
+            forget_machine(Err(ApiError::NoToken)),
+            Err(AdminError::Offline)
+        );
     }
 
     #[test]

@@ -1308,6 +1308,20 @@ pub enum Ownership {
     Theirs,
 }
 
+/// Whether the server sends a personal computer only its owner's work (design-roles R4:
+/// `personalOnly` and `reachable` in `server/src/bots/dispatch.ts`). Until it does, every
+/// computer takes any AI member's work it matches, whoever it belongs to, and runs it with the
+/// owner's permissions and CLI settings. So members do not register their own computers, the
+/// owner's checked AI members are not offered, and no text promises "only what you ask". The
+/// PR that lands R4 turns this on (design-roles §6).
+pub const OWNERSHIP_DISPATCH: bool = false;
+
+/// Whether I may add computers (添加电脑, 用这台电脑): an admin always; every member once a
+/// personal computer takes only its owner's work ([`OWNERSHIP_DISPATCH`]).
+pub fn may_add_computers(admin: bool) -> bool {
+    admin || OWNERSHIP_DISPATCH
+}
+
 impl MachineInfo {
     /// Whose this computer is for `me`.
     pub fn ownership(&self, me: Option<&str>) -> Ownership {

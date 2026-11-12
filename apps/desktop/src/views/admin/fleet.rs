@@ -429,7 +429,7 @@ impl AdminView {
                 move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(name.clone())),
             ));
             crate::views::settings::machine_actions::menu_items(
-                menu, &services, &machine, may, &after,
+                menu, &services, &machine, may, &after, &after,
             )
         });
         let open = push_button(
