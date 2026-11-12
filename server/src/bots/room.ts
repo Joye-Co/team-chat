@@ -29,6 +29,7 @@ import { type RefSource, resolveRefs, stripRefPrefix } from "./refs";
 import { type ContextRow, type RequestExt, parseExt, requestExt } from "../context/render";
 import { PARTICIPANTS_MIGRATION, type WorkState, addressedParticipants, claimTopic, isParticipant, onRunUpdated, publishWorkState, routingOwner, topicBots, workState } from "./participants";
 import { giveUpChainRow, sendChainRow, stepReport } from "./chains";
+import { giveUpRelayRow, isRelayMessage, relayReport, sendRelayRow } from "./relay/engine";
 import type { RoomContext } from "../core/registry";
 
 registerRoomMigration({
@@ -301,6 +302,8 @@ registerRoomRpc("bots.workState", (room, actor, args) => {
   const topic = room.sql.exec("SELECT 1 FROM topics WHERE id = ?", s.topicId).toArray()[0];
   if (!topic) throw new ApiError("not_found", "topic not found");
   room.commit((tx) => {
+    // design-relay R3: a relay moves on first, so the topic's state written next shows where it is.
+    relayReport(room, actor.id, s);
     workState(room, tx, actor.id, s);
     // design-relay R2: the run's step of its chain (result back to the giver, stops).
     stepReport(room, actor.id, s);
@@ -482,8 +485,9 @@ type OutboxRow = {
   /**
    * "artifact" rows (page events before 1.1 made them transient) are dropped. "part" and
    * "cancel" (design-relay R2, chains.ts): a split-off's result for its giver, a stop for a person.
+   * "relay" (design-relay R3, relay/engine.ts): a step of a relay for its member.
    */
-  kind: "message" | "card" | "answer" | "artifact" | "part" | "cancel";
+  kind: "message" | "card" | "answer" | "artifact" | "part" | "cancel" | "relay";
   topic_id: string;
   payload: string;
   attempts: number;
@@ -600,12 +604,19 @@ async function plan(c: DeliverContext, row: OutboxRow): Promise<Plan | null> {
     const p = JSON.parse(row.payload) as { botId: string };
     return single(p.botId, () => sendChainRow(c.env, c.groupId, row.kind, row.payload));
   }
+  if (row.kind === "relay") {
+    const p = JSON.parse(row.payload) as { botId: string };
+    return single(p.botId, () => sendRelayRow(c.env, c.groupId, c.sql, row.payload));
+  }
   if (row.kind === "answer") {
     const a = JSON.parse(row.payload) as OutboxAnswer;
     const args = await answerArgs(c, row, a);
     return args ? single(a.botId, () => deskStub(c.env, a.botId).cardAnswer(a.botId, args)) : null;
   }
   const m = JSON.parse(row.payload) as OutboxMessage;
+  // design-relay R3: an arrow message started a relay: the room wakes its steps one after the
+  // other, so the message goes to none of the members it mentions.
+  if (!m.targets && isRelayMessage(c.sql, m.messageId)) return null;
   const peer = dmPeer(c.sql, m.authorId);
   // The routing owner now (a run may have started in the topic since the message was written).
   const owner = m.targets ? null : routingOwner(c.sql, m.topicId);
@@ -984,14 +995,15 @@ async function deliverRow(c: DeliverContext, st: DrainState, row: OutboxRow, hel
     if (err instanceof LaneWaits) return;
     const attempts = row.attempts + 1;
     if (Date.now() - row.created_at > HANDOFF_GIVE_UP_MS) {
-      if (row.kind === "part" || row.kind === "cancel") {
+      if (row.kind === "part" || row.kind === "cancel" || row.kind === "relay") {
         // Giving up writes the topic: only the room's alarm can (an after-commit hook cannot).
         if (!(c as Partial<RoomContext>).commit) {
           c.sql.exec("UPDATE bot_outbox SET attempts = ?, next_at = ? WHERE id = ?", attempts, Date.now() + 1000, row.id);
           c.wakeAt(Date.now() + 1000);
           return;
         }
-        giveUpChainRow(c as RoomContext, c.log, row.kind, row.payload);
+        if (row.kind === "relay") giveUpRelayRow(c as RoomContext, c.log, row.payload);
+        else giveUpChainRow(c as RoomContext, c.log, row.kind, row.payload);
       }
       c.sql.exec("DELETE FROM bot_outbox WHERE id = ?", row.id);
       c.log.error("bot hand-off dropped", { err, kind: row.kind, topicId: row.topic_id, attempts });

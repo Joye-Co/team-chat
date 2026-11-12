@@ -322,6 +322,19 @@ AddArtifactVersionRequest += { parentVersion?: number }
 - `delegation.not_for_requester` 没做：个人电脑只接主人的活（design-roles R4）还没合并，那时在 `takeDelegation` 里加。
 - 旧的 `delegation:` meta、旧的 `reportPart`：部署那一刻还没交回的分出去的结果不再交回（旧链没有步）。
 
+**R3 实现时更正和留给后面的**（2026-11-12）：
+
+- 接力的每一步（含每次重试）是链上一个 `kind=relay` 的步：深度 0、`path=[这一步的成员]`、不加 `handoffs`，所以 A→B→A 不算回环，步里的转交、分出去照链的规则数。desk 不写 `relayStep:` meta：房间按 `topic_relays.chain_id` 和报告里的链步找到这一步；转交出去的 run 沿转交步往回找到接力步。`topic_relays.steps` 里另存每步的链步号、这一步跑过的 run、结果（≤1500）和代码位置（只给房间用，不上线）；加索引 `topic_relays_chain`。
+- `bots.workState` 的 RPC 先推进接力，再写参与成员的行、再处理链：同一个 `topic.updated` 里话题状态就是接力推进后的状态（第 1 步「等审」不会先发出去）。接力对汇总的影响不写进 `participants.ts`，而是 `registerWorkStateOverlay`（接力在跑且没人在做 → 进行中；有人在做时保留他的等待/卡住；停住 → 卡住、等发起人），每次汇总都带上 `relay`。`publishWorkState` 在话题还没有参与成员时也会发（接力刚开始、还没轮到谁）。
+- 代码位置随 `bots.workState` 的结束报告带上（`WorkState.code`），不另查 run 记录。
+- 汇报 `waiting_answer` 结束（run 问了人就结束了）按 `step_blocked` 停住：之后人的回答是一条新消息，不再是这一步的 run；人回答后点重试。中途等人回答（run 没结束）照原设计一直等。
+- 第 4 次重试被拒：`conflict`，reason `relay.retry_limit`（protocol.md 的路由表补了一句）。
+- 投不出去的 `relay` 行（交到对方 desk 失败到放弃时间）让接力停住（`paused`，`undelivered`），话题卡住、等发起人，可以重试；desk 明确说接不了（停用、不在群、没有运行方式、起不了 run）时不等放弃时间，立即停住 `member_unavailable`。忙（在这个话题有 run）→ `queued`，由 `run.updated` 写入器在那个 run 结束时重投。
+- 发消息时只有第一行像箭头写法（以 @ 开头、有分隔符、最后一段以 @ 开头）才查成员，别的消息不碰 D1。一行里不是每段都以 @ 开头（如 `@A 比较 x -> y`）不算接力。
+- 请求人离开时接力 `stopped`、reason `requester_left`；「话题卡住、等管理员」仍没做（同 R2 那条，等线 13）。`relay.member_unavailable` 不查「肯不肯接这个请求人的活」：个人电脑只接主人的活（design-roles R4）还没合并。
+- 状态卡多一行接力（每步成员、说明、状态，当前步加括号），「交接」段里接力步写成「接力」。
+- tools/e2e 加 `relay` 场景（假机器 socket）；daemon 的 local-e2e 加 `relayCheck`（真 daemon + 假 Claude：假 CLI 新认 `relayfail:<k>`、`relaystall:<k>`，并且不从「上一步结果」里读模式词）。
+
 和别的线的关系：线 1（路由、读取命令、请求渲染）是 R1 的前提；线 2（会话续接、分支）、线 3（结构化汇报、离线排队、交接失败的那一句话）、线 13（管理员、个人电脑只接主人的活）、GitHub 身份没合并前：续接用新会话；结束状态按现在的 run 状态算（成功 → done，失败 → failed）；离线按现在的排队；那一句话先不发；`not_for_requester` 跳过；管理员用 owner。
 
 ## 7. 真电脑上的验收步骤
