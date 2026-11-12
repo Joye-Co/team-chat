@@ -144,7 +144,7 @@
 - 真 CLI：Claude Code 2.1.319、Codex CLI 0.159.0，用这台电脑上已经登录的订阅。Forge、Scout（Claude Code）指向一个没有远端的一次性仓库，Taro（Codex）指向另一个，Ledger 用 Codex、不带仓库。
 - **这一轮配了 AI 服务**：provider `deepseek`，model `deepseek-chat`，key 从本机 mode 600 的文件读进请求，不打印、不进日志。
 - 证据：脚本和输出在 worktree 的 `.tmp/verify/`（不进仓库）。运行 id 是这次本地沙盒里的，不是任何部署环境的。
-- 这一轮按协调要求提前收尾，没来得及做的在表里标「没法跑」并写明原因。
+- 这一轮按协调要求提前收尾，没来得及做的在表里标「没法跑」并写明原因。收尾以后在同一个沙盒里补跑了其中三项（两个 Codex 条目的登录提示、电脑离线时排队的 `phase`、额度撞线的假 CLI 测试），表里已改成补跑的结果。
 
 ## 结果
 
@@ -182,9 +182,9 @@
 | 时限：单步几分钟不被杀 | Forge 前台跑 `python3 … sleep(420)` | 通过 | run 7.3 分钟 `done`，输出 `long-ok`；没有催促、重来或续跑的运行事件 | 30 分钟以上的单步没测 |
 | GitHub 按电脑 | `GET /v1/me/github`、`POST …/device`；看电脑；@Forge 跑 `gh auth status` | 通过 | `available: false, unavailableReason: off`；device `conflict github.off`；runner-1 和 Joye 的 Mac 都是 `github.state: signed_in`；run 里的 `gh` 是运行目录里的包装，用这台电脑钥匙串里的登录，`GH_TOKEN`、`GITHUB_TOKEN` 都没设；D1 的 `github_accounts`、`github_device`、`github_logins`、`github_waits` 都是 0 行 | |
 | 第二轮问题 7：Codex 第一条命令起不来 | 这一轮 Codex 跑了 4 次 | 没再出现 | | 只见过一次，仍不确定 |
-| 第二轮问题 8：两个 Codex 条目的登录提示 | 配了 `codexout` 条目、写好脚本 | 没法跑 | | 协调要求提前收尾，没跑 |
-| 电脑离线时交代、排队的 `phase`（第二轮问题 9） | 脚本写好 | 没法跑 | | 提前收尾；`requestedFor` 这一半看到了：这一轮人交代的 run 都有 |
-| 额度撞线等重置 | | 没法跑 | | 真账号上没法安全地撞线，只能用假 CLI 的测试 |
+| 第二轮问题 8：两个 Codex 条目的登录提示（补跑） | daemon 配置里加第二个 Codex 条目 `codexout`（`CODEX_HOME` 指向空目录），Ledger 改用它，@Ledger 跑 `echo` | 通过 | 电脑上报 `codex: logged_in`、`codexout: logged_out`；run 立刻 `failed`、`failure.kind: signed_out`；Ledger 说「这次没有开始：runner-1 上的 Codex（codexout） 没有登录，或者登录已经过期。请到 团队管理 › 账号与密钥 › 订阅账号，选 runner-1，点「重新登录」，然后再 @我。」 | 句子里带上了条目名。括号后面多了一个空格（「（codexout） 没有」） |
+| 电脑离线时交代、排队的 `phase`（第二轮问题 9，补跑） | 停 daemon，@Forge 跑 `echo offline-ok`，20 秒后读 run，再开 daemon | 通过 | run `01M77MDJDXCR7XHHFH3NC6AEWR` 离线时 `status: created, phase: waiting_computer, waitingFor: offline`，`requestedFor` 是 Joye；话题里「runner-1 不在线，等它上线后自动开始；不需要了可以停止。」；上线后自动做完，答「offline-ok」 | 第一次用「只回答 9+9」，前台直接答了、没有 run，换成要动电脑的活才排队 |
+| 额度撞线等重置 | 真账号：没跑。假 CLI：跑了现有测试 | 没法跑（真账号） | `server/` 里 `bunx vitest run test/limit-wait.test.ts`：8 个全过；`cargo test -p daemon limit`：`a_run_at_its_limit_says_so_and_goes_on_in_its_session`、`codex_failure_kinds_and_the_limit_reset`、`claude_not_logged_in_and_the_limit_reset` 等全过 | 真账号上没法安全地撞线；等重置这条只有假 CLI 的证据 |
 | 转交的上限（3 层、8 次、回环） | | 没法跑 | | 真模型不会主动触发，只有单元测试 |
 
 ## 第二轮问题现在的状态
@@ -198,10 +198,10 @@
 | 5 全部停止之后主话题看不到 | 部分解决：按钮去掉了，子话题说了谁停的；卡片文字和主话题状态仍看不出已停止 |
 | 6 样例预算拦订阅任务 | 已解决（「加 $1」那句出现两遍没复查） |
 | 7 Codex 第一条命令起不来 | 这一轮没出现 |
-| 8 两个 Codex 条目的登录提示 | 没测 |
-| 9 排队时没有 `phase`；没有 `requestedFor` | `requestedFor` 已解决；排队的 `phase` 没测 |
+| 8 两个 Codex 条目的登录提示 | 已解决（补跑：提示里带条目名 `codexout`） |
+| 9 排队时没有 `phase`；没有 `requestedFor` | 已解决（补跑：离线排队是 `waiting_computer` + `offline`，`requestedFor` 都有） |
 | 10 群聊里同一成员的第二件事被并掉 | 已解决 |
-| 第一轮备注 9 个人的 Claude Code 设置带进 AI 成员 | 没复查 |
+| 第一轮备注 9 个人的 Claude Code 设置带进 AI 成员 | 文案已加（`apps/desktop/src/copy/settings.rs` 的 `THIS_INTRO_SETTINGS`：「…也会带进它做的每一件事，包括钩子、插件和全局指令…」）；没开桌面应用，界面上没看 |
 
 ## 新发现的问题
 
@@ -211,12 +211,14 @@
 4. **审批卡上的时间不按团队时区。** 沙盒设了 `TEAM_TIME_ZONE`（不是上海），卡片「Joye 拒绝了 · 17:31」仍是上海时间（当时团队时区是 02:31）。`server/src/bots/desk/events.ts` 第 353 行的 `stamp(Date.now())` 用了默认时区，应传 `teamZone(this.env)`。和接 2.9（时间用团队时区）是同一类。
 5. **daemon 正在停的时候还接了新的重来，白跑一次。** SIGTERM 后 daemon 打出 `daemon stopping`，原 run 结束成 `restarted: daemon restarted`，服务端立刻把重来的 run `01M77KX7D515N6YDMWFM3QYXAD` 派给同一个正在退出的 daemon，它 `accepted` 后又被当成 `daemon restarted` 取消，第三个 run 才真正接着做。结果是对的，只是多一次重来、多一次 CLI 启动。daemon 处于 `stopping` 时应拒绝新的 `run.assign`（例如回 `draining`），服务端等它重连再派。
 6. **（小）转交或分出去的事做完以后，卡片上的「全部停止」还在。** 转交给 Scout、Scout 答完以后，「Forge 把这件事转交给 Scout」卡仍挂着「全部停止」；被停止时按钮会去掉，做完时不会。按 design-relay「话题里看得见」，做完也应原地改成「{B} 做完了」并去掉按钮。
+7. **（小）工作记录的 `summary` 取结果的第一行，第一行是「输出是：」时什么也没说。** 7 分钟那个 run 的 `summary` 是「命令在前台一次跑完，输出是：」，真正的输出 `long-ok` 在下面的代码块里；第一轮的「我在终端运行了 `echo hi`，输出是：」也是这样。`server/src/bots/desk/events.ts` 第 563 行用 `firstLine(result)`。第一行以冒号结尾、后面是代码块时，应把代码块的第一行带上，或者取到第一句完整的话。
+8. **（备注）`BotRun.chainId` 没有填。** protocol.md「Participants, chains and relays」说一件事的每个 run（包括最开始那个）都带 `chainId`，但转交和分出去的 run 在 `GET /v1/runs/:id` 和 `run.updated` 里都没有这个字段，只能从卡片按钮的 `chain.stop:<id>` 里取。这一轮的脚本第一次就是因此拿不到 chain id，停止返回 `not_found`。客户端要按 run 停整件事时会碰到同样的问题。
 
 ## 这一轮没有覆盖的
 
 - 桌面应用、Windows、Linux 主机（虚拟机、团队电脑上的接管 `takeover-isolated`）、自己部署服务器、ACP。
 - 额度撞线等重置：只能用假 CLI 的测试。
-- 电脑离线时交代和排队的 `phase`、两个 Codex 条目的登录提示、接力重来的次数上限、转交的上限、30 分钟以上的单步：协调要求提前收尾，没跑。
+- 接力重来的次数上限、转交的上限、30 分钟以上的单步：协调要求提前收尾，没跑（离线排队和两个 Codex 条目后来补跑了，见表）。
 - 摘要在运行提示词里顶替被挤掉的消息：这次的话题放得下，没有触发。
 
 # 第四轮：团队 Linux 主机上的虚拟机
