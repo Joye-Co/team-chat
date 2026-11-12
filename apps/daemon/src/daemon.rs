@@ -53,6 +53,19 @@ pub const FEATURES: &[&str] = &[
     feature::SIGN_IN_CONFIRMED,
 ];
 
+/// `hello.machine.features`: [`FEATURES`], and those of a machine key (`keyed`) and of a VM
+/// host (`vm`). No "homes": this daemon keeps no member homes.
+fn hello_features(keyed: bool, vm: bool) -> Vec<String> {
+    FEATURES
+        .iter()
+        .copied()
+        .chain(keyed.then_some(feature::ACCOUNTS))
+        .chain(keyed.then_some(feature::ASK_KEYS))
+        .chain(vm.then_some(feature::TAKEOVER_ISOLATED))
+        .map(str::to_string)
+        .collect()
+}
+
 /// `run.done.error` of a run found unfinished at start: the server continues it in its session.
 pub const DAEMON_RESTARTED: &str = "daemon restarted";
 
@@ -107,8 +120,6 @@ struct RunEntry {
     cancel_asked: bool,
     /// The CLI session the run was assigned to resume, for a `run.done` without a session.
     resume_session: Option<String>,
-    /// The AI member the run belongs to (empty for a run recovered after a restart).
-    bot: String,
 }
 
 pub struct Daemon {
@@ -155,8 +166,6 @@ pub struct Daemon {
     key_values: Vec<String>,
     /// The daemon is shutting down: the runs it stops itself end as `daemon restarted`.
     stopping: bool,
-    /// Feature "homes": AI members whose home is being emptied; their runs wait.
-    clearing: Arc<std::sync::Mutex<HashSet<String>>>,
 }
 
 pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), String> {
@@ -204,7 +213,6 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
         worked: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         key_values,
         stopping: false,
-        clearing: Arc::default(),
     };
     d.read_accounts();
     d.recover();
@@ -215,6 +223,11 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
         let swept = crate::workspace::sweep_spools(&cfg, &[]);
         if swept > 0 {
             log!("removed {swept} chat-run request folders left from a crash");
+        }
+        // No CLI runs yet: every sign-in copy is left from a crash.
+        let swept = crate::vm_login::sweep_auth(&cfg, &[]);
+        if swept > 0 {
+            log!("removed the sign-in copies {swept} runs left");
         }
         tokio::spawn(async move {
             crate::workspace::cleanup(&cfg, &active).await;
@@ -474,7 +487,6 @@ impl Daemon {
                     runtime: None,
                     cancel_asked: false,
                     resume_session: None,
-                    bot: String::new(),
                 },
             );
         }
@@ -617,17 +629,10 @@ impl Daemon {
                         os: std::env::consts::OS.into(),
                         arch: std::env::consts::ARCH.into(),
                         max_parallel_runs: self.cfg.max_parallel_runs,
-                        features: Some(
-                            FEATURES
-                                .iter()
-                                .copied()
-                                .chain(self.machine_key.as_ref().map(|_| feature::ACCOUNTS))
-                                .chain(self.machine_key.as_ref().map(|_| feature::ASK_KEYS))
-                                .chain(self.cfg.vm.as_ref().map(|_| feature::HOMES))
-                                .chain(self.cfg.vm.as_ref().map(|_| feature::TAKEOVER_ISOLATED))
-                                .map(str::to_string)
-                                .collect(),
-                        ),
+                        features: Some(hello_features(
+                            self.machine_key.is_some(),
+                            self.cfg.vm.is_some(),
+                        )),
                         takeover_url: self.takeover_url(),
                         public_key: self.machine_key.as_ref().map(|k| k.public_b64()),
                         // Feature "github": a run in a VM never has the machine's own sign-ins.
@@ -802,7 +807,8 @@ impl Daemon {
                     log!("key {} removed", crate::chat_run::safe_word(&name));
                 }
             }
-            Down::HomeClear { member_id } => self.on_home_clear(member_id),
+            // Feature "homes" (#227): this daemon keeps no member homes.
+            Down::HomeClear { .. } => log!("home.clear: homes are gone in this version"),
             // Feature "takeover": the run checks that the sender holds it.
             Down::RunCommand {
                 run_id,
@@ -902,14 +908,6 @@ impl Daemon {
             if !health::vm_memory_ok(mem.map(|m| m.1), mem.map(|m| m.0), vm.mem_mib, starting) {
                 return self.reject(&id, "busy", "not enough free memory for another VM");
             }
-            if self
-                .clearing
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .contains(&a.bot_member_id)
-            {
-                return self.reject(&id, "busy", "the AI member's home folder is being emptied");
-            }
         }
         if let Some(repo) = &a.repo
             && let Err(e) = crate::workspace::validate_repo(&self.cfg, repo)
@@ -977,7 +975,6 @@ impl Daemon {
                 runtime: Some(a.runtime.clone()),
                 cancel_asked: false,
                 resume_session: a.resume_session_id.clone(),
-                bot: a.bot_member_id.clone(),
             },
         );
         log!("run {id} accepted ({})", a.runtime);
@@ -1223,40 +1220,6 @@ impl Daemon {
     }
 
     /// Feature "accounts": open and keep an API key, then mask its value from now on.
-    /// Feature "homes": empties an AI member's home folder, unless one of its runs is on this
-    /// machine. Its runs wait meanwhile; the next heartbeat shows the result.
-    fn on_home_clear(&mut self, member_id: String) {
-        let safe = crate::chat_run::safe_word(&member_id);
-        let Some(vm) = self.cfg.vm.clone() else {
-            return log!("home of {safe}: this machine keeps no home folders");
-        };
-        if !crate::vm_home::plain_id(&member_id) {
-            return log!("home of {safe}: not a member id");
-        }
-        if self.runs.values().any(|r| !r.done && r.bot == member_id) {
-            return log!("home of {safe}: not emptied, a run of it is on this machine");
-        }
-        if !self
-            .clearing
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(member_id.clone())
-        {
-            return;
-        }
-        let clearing = self.clearing.clone();
-        tokio::spawn(async move {
-            match crate::vm_home::clear(&vm, &member_id).await {
-                Ok(()) => log!("home of {safe} emptied"),
-                Err(e) => warn!("home of {safe}: {e}"),
-            }
-            clearing
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .remove(&member_id);
-        });
-    }
-
     fn on_secret_set(&mut self, name: &str, sealed: &str, members: Vec<String>, ask: bool) {
         let Some(key) = self.machine_key.clone() else {
             return;
@@ -1339,13 +1302,6 @@ impl Daemon {
                 .collect()
         };
         let mut m = self.sampler.sample(&self.cfg, vm_slots, &local);
-        // Feature "homes": each member's home image on a VM host.
-        m.homes = self
-            .cfg
-            .vm
-            .as_ref()
-            .filter(|vm| crate::vm_home::images_on(vm))
-            .map(crate::vm_home::usage);
         if self.machine_key.is_some() {
             m.secrets = Some(self.keys.infos());
             m.usage = Some(self.usage.lock().unwrap_or_else(|e| e.into_inner()).clone());
@@ -1412,6 +1368,16 @@ fn note_sign_in(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_machine_reports_member_homes() {
+        for (keyed, vm) in [(false, false), (true, true), (false, true)] {
+            let f = hello_features(keyed, vm);
+            assert!(!f.iter().any(|x| x == feature::HOMES), "{f:?}");
+            assert_eq!(f.iter().any(|x| x == feature::TAKEOVER_ISOLATED), vm);
+            assert_eq!(f.iter().any(|x| x == feature::ACCOUNTS), keyed);
+        }
+    }
 
     /// A run the daemon's own stop interrupted ends as `daemon restarted`, with the session it
     /// resumed when the CLI reported none; other endings stay as they are.
@@ -1513,7 +1479,6 @@ mod tests {
                 runtime: None,
                 cancel_asked: false,
                 resume_session: None,
-                bot: String::new(),
             },
         );
         // The clone the run's task holds shares the list with the entry's.

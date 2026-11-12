@@ -339,14 +339,10 @@ pub fn disk(path: &Path) -> (u64, u64) {
     crate::sys::disk(&p)
 }
 
-/// The disk runs need: of the work root and, on a VM host, of the members' homes (their images
-/// grow on it), the one with less free space. `(free, total)`.
+/// The disk runs need: the work root's (their work lines and CLI folders are on it).
+/// `(free, total)`.
 pub fn run_disk(cfg: &Config) -> (u64, u64) {
-    let work = disk(&cfg.work_root);
-    match cfg.vm.as_ref().and_then(crate::vm_home::disk) {
-        Some(homes) if homes.0 < work.0 => homes,
-        _ => work,
-    }
+    disk(&cfg.work_root)
 }
 
 /// Whether the host has the memory for one more VM: what is available must cover the VM's
@@ -407,7 +403,7 @@ mod tests {
     }
 
     #[test]
-    fn the_run_disk_is_the_fuller_of_work_root_and_homes() {
+    fn the_run_disk_is_the_work_roots_also_with_old_homes_set() {
         let tmp = tempfile::tempdir().unwrap();
         let cfg = Config::parse(&format!(
             "server_url = \"http://127.0.0.1:1\"\ntoken_file = \"/nonexistent\"\nwork_root = '{}'\n[runtimes.claude]\nkind = \"claude\"\n[vm]\nkernel = \"/k\"\nrootfs = \"/r\"\nhomes = '{}'\n",
@@ -415,9 +411,7 @@ mod tests {
             tmp.path().join("homes").display()
         ))
         .unwrap();
-        // Same disk here: the figures are that disk's.
         assert_eq!(run_disk(&cfg).1, disk(&cfg.work_root).1);
-        assert!(crate::vm_home::disk(cfg.vm.as_ref().unwrap()).is_some());
     }
 
     #[test]
