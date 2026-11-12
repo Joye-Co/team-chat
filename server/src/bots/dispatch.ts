@@ -39,7 +39,7 @@ export const LIMIT_SLACK_MS = 60_000;
 
 /** How a run with the `context` feature reads what the prompt left out. */
 export const CONTEXT_TOOLS_RULE =
-  "The topic lines above are only part of the topic. Read older messages with `chat-run topic history --before <seq>`, a whole message with `chat-run topic message --id <m id>`, search with `chat-run search --query <text>` (add `--group` for every topic of the group) and get a file with `chat-run file get --id <f id>`. Look things up instead of guessing.";
+  "The topic lines above are only part of the topic. Read older messages with `chat-run topic history --before <seq>`, a whole message with `chat-run topic message --id <m id>` (a quote `in t <t id>` is in another topic: add `--topic <t id>`), search with `chat-run search --query <text>` (add `--group` for every topic of the group) and get a file with `chat-run file get --id <f id>`. Look things up instead of guessing.";
 
 /** Topic texts the bot posts. Product words only (PRODUCT.md): no developer words. */
 export const TEXT = {

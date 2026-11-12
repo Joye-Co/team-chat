@@ -1095,7 +1095,9 @@ contract, but its shape is fixed here so the developer view and the daemon notes
     [card · 选部署时间 · 2 answers: 李四 选了「周五晚上」]
   ```
 
-  `#42` is the message's seq. The time is on the team's clock (`TEAM_TIME_ZONE`, default
+  `#42` is the message's seq. A quote of a message in another topic of the group names that
+  topic (`↪ quotes m 01J… in t 01J… (王五: …)`), so the run reads it with
+  `chat-run topic message --id <m> --topic <t>`. The time is on the team's clock (`TEAM_TIME_ZONE`, default
   Asia/Shanghai). A system message (`kind: "system"`) is one line in brackets. A 产出 line
   carries the 产出's current title.
 - **The request whole.** The request and every follow-up carry the same indented lines for the
