@@ -4,7 +4,7 @@
 // messages, approvals, stop), takeover (pause, resume, acceptance) and the BotDesk class itself
 // (external runs and reads).
 import { DurableObject } from "cloudflare:workers";
-import type { Approver } from "@chat/protocol";
+import { type Approver, GATE_KINDS } from "@chat/protocol";
 import { effectivePolicy } from "../../settings/approvals";
 import { approverOf } from "../../settings/rules";
 import {
@@ -988,13 +988,51 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
     }
   }
 
+  /** settings: the people to mention and wait on for an approval ({@link approversFor}). */
+  protected async approvers(r: Pick<RunRow, "requested_by" | "group_id" | "machine_id">, kind?: string | null): Promise<string[]> {
+    return (await this.approversFor(r, kind)).ids;
+  }
+
+  /** Whether `kind` is a gated action (合并到 main, 部署, …) that the computer's approvers answer. */
+  protected isGated(kind: string | null | undefined): boolean {
+    return typeof kind === "string" && (GATE_KINDS as readonly string[]).includes(kind);
+  }
+
+  /** The owner of the run's machine when it is a personal machine (design-roles 3.6), else null. */
+  protected async machineOwnerOf(r: Pick<RunRow, "machine_id">): Promise<string | null> {
+    if (!r.machine_id) return null;
+    const row = await this.env.DB.prepare("SELECT owner_id FROM machines WHERE id = ?").bind(r.machine_id).first<{ owner_id: string | null }>();
+    return row?.owner_id ?? null;
+  }
+
   /**
-   * settings: the people to mention and wait on for an approval: the requester, or the active
-   * human owners in the run's group when the policy (or the kind's approver) says owners approve
-   * (mentions must be group members; owners outside the group can still answer).
+   * design-github-identity 3.5: who is asked for an approval. A plain one (no gated kind):
+   * {@link approversOrRequester}. A gated one goes by the run's computer: on a team computer
+   * (no owner, or deleted) the active human admins in the group; on a personal computer its
+   * owner when in the group. With nobody to ask, the requester is mentioned (`noApprover`) but
+   * cannot answer.
    */
-  protected async approvers(r: Pick<RunRow, "requested_by" | "group_id">, kind?: string | null): Promise<string[]> {
-    return (await this.approversOrRequester(r, kind)).ids;
+  protected async approversFor(
+    r: Pick<RunRow, "requested_by" | "group_id" | "machine_id">,
+    kind?: string | null,
+  ): Promise<{ ids: string[]; noOwner: boolean; noApprover: boolean; machineOwner: string | null }> {
+    if (!this.isGated(kind)) return { ...(await this.approversOrRequester(r, kind)), noApprover: false, machineOwner: null };
+    const machineOwner = await this.machineOwnerOf(r);
+    const found = await (machineOwner
+      ? this.env.DB.prepare(
+          `SELECT m.id FROM members m JOIN group_members g ON g.member_id = m.id AND g.group_id = ?
+           WHERE m.id = ? AND m.kind = 'human' AND m.deactivated = 0`,
+        ).bind(r.group_id, machineOwner)
+      : this.env.DB.prepare(
+          `SELECT m.id FROM members m JOIN group_members g ON g.member_id = m.id AND g.group_id = ?
+           WHERE m.level = 'owner' AND m.kind = 'human' AND m.deactivated = 0 ORDER BY m.id LIMIT 20`,
+        ).bind(r.group_id)
+    )
+      .all<{ id: string }>()
+      .catch(() => ({ results: [] as { id: string }[] }));
+    const ids = found.results.map((x) => x.id);
+    if (ids.length > 0) return { ids, noOwner: false, noApprover: false, machineOwner };
+    return { ids: this.requester(r), noOwner: false, noApprover: true, machineOwner };
   }
 
   /**
