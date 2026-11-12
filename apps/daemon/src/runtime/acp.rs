@@ -307,7 +307,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                             // gates asks a person; any other is allowed at once.
                             let options = params["options"].as_array().cloned().unwrap_or_default();
                             let line = permission_line(&params["toolCall"]);
-                            match spec.gates.clone().filter(|g| g.matches(&line).is_some()) {
+                            match spec.gates.clone().filter(|g| g.next_command(&line).is_some()) {
                                 None => {
                                     let _ = p.write_json(&json!({ "jsonrpc": "2.0", "id": id, "result": { "outcome": permission_outcome(&options, true) } })).await;
                                 }

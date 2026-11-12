@@ -421,6 +421,62 @@ describe("产出", () => {
     expect(late.body.artifact).toMatchObject({ currentVersion: 3, title: "成员版" });
     const got = ArtifactResponse.parse((await api(`/v1/artifacts/${id}`, { token: owner.token })).body);
     expect(got.versions.map((v) => v.version)).toEqual([3, 2, 1]);
+    // The bot's version had no parent: it stores the current version when it committed.
+    expect(late.body.version.parentVersion).toBe(2);
+    c.close();
+  });
+
+  it("stores the parent version of each version (design-relay R4)", async () => {
+    const owner = await createMember({ level: "owner" });
+    const groupId = await createGroup(owner, []);
+    const { c } = await Client.connect(owner.token);
+    const topicId = await newTopic(c, groupId);
+    const page = await upload(owner, groupId, enc.encode("<h1>v</h1>"), { name: "index.html", mime: "text/html" });
+    const files = [{ path: "index.html", fileId: page.id }];
+    const created = await api("/v1/artifacts", {
+      token: owner.token,
+      body: { groupId, topicId, title: "页面", kind: "html", entry: "index.html", files, parentVersion: 3 },
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(200);
+    expect(created.body.version.parentVersion).toBeUndefined();
+    const id = created.body.artifact.id as string;
+    const add = (body: Record<string, unknown>) => api(`/v1/artifacts/${id}/versions`, { token: owner.token, body: { entry: "index.html", files, ...body } });
+
+    // Absent: the current version.
+    const v2 = await add({});
+    expect(v2.status, JSON.stringify(v2.body)).toBe(200);
+    expect(v2.body.version).toMatchObject({ version: 2, parentVersion: 1 });
+    const v3 = await add({});
+    expect(v3.body.version).toMatchObject({ version: 3, parentVersion: 2 });
+    // Given: any existing version below the new one.
+    const v4 = await add({ parentVersion: 1 });
+    expect(v4.status, JSON.stringify(v4.body)).toBe(200);
+    expect(v4.body.version).toMatchObject({ version: 4, parentVersion: 1 });
+
+    // Not an existing version below the new one: refused, nothing stored.
+    for (const parentVersion of [5, 9]) {
+      const bad = await add({ parentVersion });
+      expect(bad.status).toBe(400);
+      expect(bad.body).toMatchObject({ error: { code: "invalid", reason: "artifact.bad_parent" } });
+    }
+    expect((await add({ parentVersion: 0 })).status).toBe(400);
+    expect((await add({ parentVersion: 1.5 })).status).toBe(400);
+
+    // Rows from before the column read as made from the version before them.
+    const genv = env as unknown as { GROUP_ROOM: DurableObjectNamespace };
+    const room = genv.GROUP_ROOM.get(genv.GROUP_ROOM.idFromName(groupId));
+    const inDo = runInDurableObject as unknown as (stub: unknown, fn: (inst: unknown, state: DurableObjectState) => void) => Promise<void>;
+    await inDo(room, (_inst, state) => {
+      state.storage.sql.exec("UPDATE artifact_versions SET parent_version = NULL WHERE artifact_id = ?", id);
+    });
+    const got = ArtifactResponse.parse((await api(`/v1/artifacts/${id}`, { token: owner.token })).body);
+    expect(got.artifact.currentVersion).toBe(4);
+    expect(got.versions.map((v) => [v.version, v.parentVersion])).toEqual([
+      [4, 3],
+      [3, 2],
+      [2, 1],
+      [1, undefined],
+    ]);
     c.close();
   });
 });

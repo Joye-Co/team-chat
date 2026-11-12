@@ -31,7 +31,8 @@ pending = {}
 def ask(rid, method, params):
     ev = threading.Event(); pending[rid] = ev
     out({"id": rid, "method": method, "params": params})
-    ev.wait(10)
+    # A person answers a gated one through a card: give them time.
+    ev.wait(60)
     return state["answers"].get(rid)
 
 def run_turn(tid, text):

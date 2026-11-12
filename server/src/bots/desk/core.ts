@@ -12,12 +12,14 @@ import {
   type BotRun,
   type Card,
   type CardV2,
+  isMainTopicId,
   MAX_ACCEPTANCE_ITEMS,
   MAX_PLAN_ITEMS,
   MAX_PLAN_TEXT_CHARS,
   type RunPlan,
   RunPlanItem,
   RUN_KIND_ASIDE,
+  RunCode,
   type RunStatus,
   type TopicStatus,
   Usage,
@@ -122,7 +124,25 @@ export type RunRow = {
   stall_step: number;
   /** A nudge was really sent for this piece of work (盯 1.12: the note names only real tries). Carried over. */
   nudge_sent: number;
+  // desk-run-code (design-relay R5)
+  /** JSON of `RunCode` from run.done (branch, head, pushed), or null when not known. */
+  code: string | null;
 };
+
+/** A stored or reported code location (`run.done.code`), or null when it is not a valid one. */
+export function codeOf(v: unknown): RunCode | null {
+  if (v === null || v === undefined) return null;
+  let raw = v;
+  if (typeof v === "string") {
+    try {
+      raw = JSON.parse(v);
+    } catch {
+      return null;
+    }
+  }
+  const parsed = RunCode.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
 
 /** A CLI session id BotDesk keeps and sends back (`run.assign.resumeSessionId`). */
 export function sessionIdOf(v: unknown): string | null {
@@ -419,6 +439,11 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
           name: "desk-nudge-sent",
           up: `ALTER TABLE runs ADD COLUMN nudge_sent INTEGER NOT NULL DEFAULT 0;`,
         },
+        {
+          // Usable (design-relay R5): where the run left its code (`run.done.code`, JSON).
+          name: "desk-run-code",
+          up: `ALTER TABLE runs ADD COLUMN code TEXT;`,
+        },
       ]);
       const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'bot_id'").toArray()[0];
       this.botId = row?.value ?? null;
@@ -460,6 +485,36 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
       .toArray()[0] as RunRow | undefined;
   }
 
+  /** The topic's active runs, newest first (接 1.5: a 群聊 or DM chat area can have several). */
+  protected activeRuns(topicId: string): RunRow[] {
+    return this.sql.exec<RunRow>(`SELECT * FROM runs WHERE topic_id = ? AND ${ACTIVE} ORDER BY created_at DESC`, topicId).toArray() as RunRow[];
+  }
+
+  /**
+   * True when a new run may not start in the topic now: a topic (话题) is one piece of work with
+   * one run at a time; in a chat area (main topic) each request gets its own run (接 1.5).
+   */
+  protected startBlocked(topicId: string): boolean {
+    return !isMainTopicId(topicId) && this.activeRun(topicId) !== undefined;
+  }
+
+  /**
+   * The active run a card of this bot belongs to (its answers and live events go there). A topic
+   * (话题) has one run at a time. In a chat area (接 1.5) it is the run that posted the card, while
+   * it is active; a card no run is known to have posted goes to the only active run, if there is
+   * just one. Undefined: no run takes it (an answer may start one).
+   */
+  protected runOfCard(topicId: string, messageId: string): RunRow | undefined {
+    if (!isMainTopicId(topicId)) return this.activeRun(topicId);
+    const owner = this.meta(`runCard:${messageId}`);
+    if (owner !== null) {
+      const r = this.run(owner);
+      return r && r.ended_at === null ? r : undefined;
+    }
+    const runs = this.activeRuns(topicId);
+    return runs.length === 1 ? runs[0] : undefined;
+  }
+
   protected toRun(r: RunRow): BotRun {
     const run: BotRun = {
       id: r.id,
@@ -486,6 +541,8 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
     if (r.paused_by) run.pausedBy = r.paused_by;
     if (r.kind) run.kind = r.kind;
     if (r.retry_of) run.retryOf = r.retry_of;
+    const code = codeOf(r.code);
+    if (code) run.code = code;
     if (r.queued_at && r.ended_at === null && r.status === "created" && !r.machine_id) {
       run.queuedAt = r.queued_at;
       run.queuePosition = this.queuePosition(r);
@@ -766,7 +823,14 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
   protected abstract end(r: RunRow, status: RunStatus, body: string, topicStatus: TopicStatus, summary: string, success?: boolean): Promise<void>;
   protected abstract scheduleStall(): Promise<void>;
   protected abstract markStalled(r: RunRow): Promise<void>;
-  protected abstract start(m: TopicMessage, followUpOf?: RunRow, followUps?: { authorId: string; body: string }[], retryOf?: string, brief?: Brief): Promise<void>;
+  protected abstract start(
+    m: TopicMessage,
+    followUpOf?: RunRow,
+    followUps?: { authorId: string; body: string }[],
+    retryOf?: string,
+    brief?: Brief,
+    opts?: { newTask?: boolean },
+  ): Promise<void>;
   /** A RunEvent `output` (`chat-run`, 1.1): performed and answered by the interaction module. */
   protected abstract output(r: RunRow, ev: { outputId?: unknown; op?: unknown; body?: unknown }, f: { at: number; serverAt?: number }): Promise<void>;
 }

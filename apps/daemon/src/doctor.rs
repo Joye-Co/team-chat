@@ -30,6 +30,12 @@ pub async fn report(cfg: &Config) -> (String, bool) {
             }
         );
     }
+    // Windows: a Codex side chat cannot write, but its commands are not cut off from the
+    // network as they are on macOS and Linux (see ASIDE_WINDOWS_SANDBOX).
+    #[cfg(windows)]
+    if cfg.runtimes.values().any(|rt| rt.kind == "codex") {
+        let _ = writeln!(s, "codex side chat: {}", CODEX_SIDE_CHAT_ON_WINDOWS);
+    }
     let h = crate::health::health(cfg, 0);
     let _ = writeln!(
         s,
@@ -103,9 +109,19 @@ stopped on this machine: update Claude Code to {a}.{b}.{patch} or later"
             cfg.min_free_gb
         );
     }
+    if let Some(vm) = cfg.vm.as_ref().filter(|vm| crate::vm_home::images_on(vm))
+        && crate::vm_home::helper_has_homes(vm) == Some(false)
+    {
+        let _ = writeln!(s, "warning: {}", crate::vm_home::OLD_HELPER);
+    }
     for p in &problems {
         let _ = writeln!(s, "problem: {p}");
     }
     let _ = writeln!(s, "{}", if ok { "OK" } else { "NOT OK" });
     (s, ok)
 }
+
+/// What `doctor` says about a side chat of Codex on Windows.
+#[cfg(windows)]
+pub const CODEX_SIDE_CHAT_ON_WINDOWS: &str =
+    "read-only (no writes); its commands can still reach the network on Windows";

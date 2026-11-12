@@ -1372,6 +1372,133 @@ async fn codex_read_only_on_windows_report() {
     .unwrap();
 }
 
+/// Windows: what a command of a Codex side chat can reach on the network. Codex's `read-only`
+/// blocks the network on macOS and Linux; on Windows, in the sandbox the daemon turns on for a
+/// side chat (`unelevated`, the one that needs no administrator), Codex only points the proxy
+/// settings of the command's environment at a dead port.
+///
+/// Asserted, with the arguments the daemon sends: a program that honors the proxy settings
+/// (curl) does not reach a listener on this computer's own address. Not asserted, written to
+/// `codex-windows-network.json` in the test folder (CI prints it): the same program told to
+/// ignore the proxy settings, which is the declared difference from the Mac
+/// (docs/plans/windows-parity/machine.zh.md). With `TC_CODEX_ELEVATED_SANDBOX` the report
+/// also tries Codex's elevated sandbox, in a folder private to the user (as run folders are)
+/// and in one where its sandbox accounts were given read access.
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread")]
+async fn codex_side_chat_network_on_windows() {
+    let Some(codex) = real_codex() else { return };
+    let base = outside_temp();
+    let home = base.path().join("codex-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let own_ip = std::net::UdpSocket::bind("0.0.0.0:0")
+        .and_then(|u| u.connect("8.8.8.8:53").and_then(|_| u.local_addr()))
+        .map(|a| a.ip().to_string())
+        .unwrap_or_else(|_| "127.0.0.1".into());
+    let mut variants = vec![("the daemon's side chat", "private")];
+    if std::env::var_os("TC_CODEX_ELEVATED_SANDBOX").is_some() {
+        variants.extend([
+            ("elevated", "private"),
+            ("elevated", "private, read access granted"),
+            ("elevated", "private, read access granted"),
+        ]);
+    }
+    let mut report = Vec::new();
+    for (i, (mode, kind)) in variants.into_iter().enumerate() {
+        let root = base.path().join(format!("root-{i}"));
+        daemon::winacl::create_dir(&root).unwrap();
+        let mut s = spec(&root, "codex", "codex", &[], "hi");
+        s.aside = true;
+        std::fs::write(s.cwd.join("seed.txt"), "seed-text").unwrap();
+        if kind.ends_with("granted") {
+            for user in ["CodexSandboxOffline", "CodexSandboxOnline"] {
+                let _ = std::process::Command::new("icacls.exe")
+                    .arg(&s.cwd)
+                    .args(["/grant", &format!("{user}:(OI)(CI)RX")])
+                    .output();
+            }
+        }
+        let (approval, sandbox) = runtime::codex::thread_policy(&s);
+        let mut args = if mode == "elevated" {
+            vec![
+                "app-server".to_string(),
+                "-c".into(),
+                "windows.sandbox=\"elevated\"".into(),
+            ]
+        } else {
+            runtime::codex::app_server_args(&s).unwrap()
+        };
+        args.extend(["-c".to_string(), format!("sandbox_mode=\"{sandbox}\"")]);
+        args.extend(["-c".to_string(), format!("approval_policy=\"{approval}\"")]);
+        let listener = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mut calls = serde_json::Map::new();
+        calls.insert("mode".into(), format!("{mode}, {kind} folder").into());
+        for (what, line) in [
+            ("reading a file", "type seed.txt".to_string()),
+            (
+                "curl to this computer's own address",
+                format!("curl.exe -s -m 5 http://{own_ip}:{port}/"),
+            ),
+            (
+                "curl to this computer's own address, ignoring proxy settings",
+                format!("curl.exe --noproxy * -s -m 5 http://{own_ip}:{port}/"),
+            ),
+            (
+                "curl to the internet, ignoring proxy settings",
+                "curl.exe --noproxy * -s -m 10 -o NUL https://github.com/".to_string(),
+            ),
+            ("proxy settings", "set | findstr /i proxy".to_string()),
+        ] {
+            let command: Vec<String> = vec!["cmd.exe".into(), "/c".into(), line];
+            let (codex, args, home, dir) =
+                (codex.clone(), args.clone(), home.clone(), s.cwd.clone());
+            let answer = tokio::task::spawn_blocking(move || {
+                codex_exec(&codex, &args, &home, &dir, &command, serde_json::json!({}))
+            })
+            .await
+            .unwrap();
+            let mut arrived = 0;
+            while listener.accept().is_ok() {
+                arrived += 1;
+            }
+            if mode != "elevated" && what == "reading a file" {
+                assert!(
+                    answer["result"]["stdout"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .contains("seed-text"),
+                    "{answer}"
+                );
+            }
+            if mode != "elevated" && what == "curl to this computer's own address" {
+                assert_eq!(
+                    arrived, 0,
+                    "a program that honors proxy settings reached the network: {answer}"
+                );
+            }
+            calls.insert(
+                what.into(),
+                serde_json::json!({
+                    "answer": answer.get("result").or(answer.get("error")),
+                    "connections that arrived": arrived,
+                }),
+            );
+        }
+        calls.insert(
+            "the daemon's privacy check of the run folder".into(),
+            format!("{:?}", daemon::winacl::check(&root)).into(),
+        );
+        report.push(serde_json::Value::Object(calls));
+    }
+    std::fs::write(
+        std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("codex-windows-network.json"),
+        serde_json::to_string_pretty(&report).unwrap(),
+    )
+    .unwrap();
+}
+
 /// A side chat run of Codex is read-only on every system: with the sandbox the daemon sends
 /// for it (`read-only`, approval `never`) the real CLI does not let a command write a file,
 /// in the working folder or outside it. Through `command/exec` (the server's sandbox, no

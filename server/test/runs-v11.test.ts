@@ -586,6 +586,39 @@ describe("1.1 runs", () => {
   });
 });
 
+describe("code location of a run (design-relay R5)", () => {
+  it("keeps run.done.code on the run, also from a late run.done, and nothing without one", async () => {
+    const w = await world();
+    const d = await Daemon.connect(w.machineToken, []);
+    const { c } = await Client.connect(w.human.token);
+    const code = { branch: "bot/0123456789abcdef", head: "a".repeat(40), pushed: true };
+    const first = await startRun(w, c, d);
+    const seq = d.done(first.runId, { status: "succeeded", resultText: "改好了。", code });
+    await d.acked(first.runId, seq);
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === first.runId && e.data.run.status === "done");
+    expect(lastRun(c, first.runId).code).toEqual(code);
+    expect((await api(`/v1/runs/${first.runId}`, { token: w.human.token })).body.code).toEqual(code);
+
+    // A run whose daemon does not know: no code.
+    const second = await startRun(w, c, d);
+    const seq2 = d.done(second.runId, { status: "failed", error: "x" });
+    await d.acked(second.runId, seq2);
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === second.runId && e.data.run.status === "failed");
+    expect((await api(`/v1/runs/${second.runId}`, { token: w.human.token })).body.code).toBeUndefined();
+
+    // Stopped here first: the machine's late run.done still says where the code is.
+    const third = await startRun(w, c, d);
+    expect((await api(`/v1/runs/${third.runId}/cancel`, { method: "POST", token: w.human.token })).status).toBe(200);
+    const late = { ...code, pushed: false };
+    const seq3 = d.done(third.runId, { status: "cancelled", code: late });
+    await d.acked(third.runId, seq3);
+    const got = await api(`/v1/runs/${third.runId}`, { token: w.human.token });
+    expect(got.body).toMatchObject({ status: "cancelled", code: late });
+    c.close();
+    d.close();
+  });
+});
+
 describe("desk note from a run (chat-run desk note)", () => {
   it("sets, keeps and clears the bot's desk note in the run's group; a bad body is refused", async () => {
     const w = await world();

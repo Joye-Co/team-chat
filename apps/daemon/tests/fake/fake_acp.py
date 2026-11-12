@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Fake ACP agent (JSON-RPC 2.0 on stdio, Agent Client Protocol v1): streams message chunks,
 one tool call, and asks permission when the prompt says "approve": for a file write, or with
-"merge" in the prompt for the shell command `gh pr merge 5`.
+"merge" in the prompt for the shell command `gh pr merge 5`. The words count in the request, not
+in the rules the server puts in front of it.
 
 Sessions are kept in $HOME/acp-sessions/<id>.json (the prompts and the cwd), so a later
 process can `session/load` one: the agent then replays the history as `session/update`s, as
@@ -59,11 +60,12 @@ for line in sys.stdin:
         earlier = list(sess["prompts"])
         sess["prompts"].append(text)
         save()
+        cue = text.rsplit("\nRequest from ", 1)[-1]
         upd({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "acp: "}})
-        if "approve" in text:
+        if "approve" in cue:
             out({"id": 500, "method": "session/request_permission", "params": {"sessionId": sid,
                 "toolCall": {"toolCallId": "call_1", "title": "Run shell", "kind": "execute", "rawInput": {"command": "gh pr merge 5"}}
-                    if "merge" in text else {"toolCallId": "call_1", "title": "Write file"},
+                    if "merge" in cue else {"toolCallId": "call_1", "title": "Write file"},
                 "options": [{"optionId": "yes", "name": "Allow", "kind": "allow_once"}, {"optionId": "no", "name": "Reject", "kind": "reject_once"}]}})
             continue
         if "slow" in text:

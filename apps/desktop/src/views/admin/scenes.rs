@@ -245,6 +245,47 @@ opener!(open_overview, AdminPage::Overview);
 opener!(open_accounts, AdminPage::Accounts);
 opener!(open_keys, AdminPage::Keys);
 
+/// The 身份 scenes (design-roles 3.9): 成员 as each viewer, with 陈晨 (or me, alone) selected so
+/// the inspector shows the 身份 line.
+fn open_roles(
+    services: Services,
+    _content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let alone = crate::views::settings::solo(&services);
+    open_with(
+        services,
+        AdminPage::Members,
+        |v| {
+            v.team.selected = Some(if alone { "m-joye" } else { "m-chenchen" }.into());
+            v.team.sort = (super::team::TeamSortKey::Level, true);
+        },
+        cx,
+    )
+}
+
+/// 成员 as the 所有者 with 陈晨's ⋯ menu open: 设为所有者, 设为普通成员, 停用. `TC_CLICK=x,y` moves
+/// the click while you look for the spot.
+fn open_roles_menu(
+    services: Services,
+    _content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let handle = open_with(
+        services,
+        AdminPage::Members,
+        |v| v.team.sort = (super::team::TeamSortKey::Level, true),
+        cx,
+    )?;
+    crate::views::settings::selftest::click_when_drawn(
+        handle,
+        (818., 317.),
+        gpui::MouseButton::Left,
+        cx,
+    )?;
+    Ok(handle)
+}
+
 macro_rules! scene {
     ($name:literal, $about:literal, $open:ident) => {
         Scene {
@@ -257,7 +298,49 @@ macro_rules! scene {
     };
 }
 
+macro_rules! roles_scene {
+    ($name:literal, $about:literal, $view:ident, $open:ident) => {
+        Scene {
+            name: $name,
+            about: $about,
+            start: Start::Roles(crate::fake::RoleView::$view),
+            setup: |_, _| {},
+            open: $open,
+        }
+    };
+}
+
 pub const SCENES: &[Scene] = &[
+    roles_scene!(
+        "roles-owner",
+        "团队管理 › 成员 as the 所有者: the 身份 column and 陈晨 (管理员) selected with the 身份 pull-down",
+        Owner,
+        open_roles
+    ),
+    roles_scene!(
+        "roles-owner-menu",
+        "团队管理 › 成员 as the 所有者 with 陈晨's ⋯ menu open: 设为所有者, 设为普通成员, 停用",
+        Owner,
+        open_roles_menu
+    ),
+    roles_scene!(
+        "roles-admin",
+        "团队管理 › 成员 as a 管理员: 陈晨 is the 所有者, read-only, and has no ⋯ menu",
+        Admin,
+        open_roles
+    ),
+    roles_scene!(
+        "roles-member",
+        "团队管理 as a 普通成员: only 所有者 and 管理员 open it",
+        Member,
+        open_roles
+    ),
+    roles_scene!(
+        "roles-alone",
+        "团队管理 › 成员 for one person alone: no 身份 column or line",
+        Alone,
+        open_roles
+    ),
     scene!(
         "admin-home",
         "团队管理 › 总览: KPIs, 谁在用, 要注意 and the machine cards",

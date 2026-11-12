@@ -17,7 +17,8 @@ use super::{CoreProvider, convert};
 use crate::data::{
     AdminError, AdminReply, BotCreated, BotMemberEdit, Change, CharacterId, CliChoice, GroupKind,
     GroupPrefs, InviteCreated, InviteRequest, MachineCreated, MachineInfo, Member, MemberKind,
-    MemberLevel, ModelChoice, NotifyLevel, RunnerChange, RunnerSetup, SecretText, reply_now,
+    MemberLevel, ModelChoice, NotifyLevel, RunnerChange, RunnerSetup, SecretText, TeamRole,
+    reply_now,
 };
 
 /// Largest avatar the server takes.
@@ -59,6 +60,21 @@ fn level_to_wire(level: MemberLevel) -> proto::MemberLevel {
     match level {
         MemberLevel::Owner => proto::MemberLevel::Owner,
         MemberLevel::Member => proto::MemberLevel::Member,
+    }
+}
+
+/// The member update that gives a 身份: 所有者 and 管理员 are both `level: owner`, told apart by
+/// `teamOwner`; `level: member` clears `teamOwner` on the server.
+fn role_request(role: TeamRole) -> UpdateMemberRequest {
+    let (level, team_owner) = match role {
+        TeamRole::Owner => (MemberLevel::Owner, Some(true)),
+        TeamRole::Admin => (MemberLevel::Owner, Some(false)),
+        TeamRole::Member => (MemberLevel::Member, None),
+    };
+    UpdateMemberRequest {
+        level: Some(level_to_wire(level)),
+        team_owner,
+        ..Default::default()
     }
 }
 
@@ -463,16 +479,8 @@ impl CoreProvider {
         })
     }
 
-    pub(super) fn set_member_level_inner(
-        &self,
-        id: &str,
-        level: MemberLevel,
-    ) -> AdminReply<Member> {
-        let req = UpdateMemberRequest {
-            level: Some(level_to_wire(level)),
-            ..Default::default()
-        };
-        self.patch_member(id.to_string(), req)
+    pub(super) fn set_member_role_inner(&self, id: &str, role: TeamRole) -> AdminReply<Member> {
+        self.patch_member(id.to_string(), role_request(role))
     }
 
     pub(super) fn set_member_deactivated_inner(&self, id: &str, off: bool) -> AdminReply<Member> {
@@ -1120,6 +1128,23 @@ mod tests {
         assert_eq!(
             api_error(&ApiError::Network("x".into())),
             AdminError::Offline
+        );
+    }
+
+    #[test]
+    fn roles_go_on_the_wire_as_level_and_team_owner() {
+        let json = |r| serde_json::to_value(role_request(r)).unwrap();
+        assert_eq!(
+            json(TeamRole::Owner),
+            serde_json::json!({ "level": "owner", "teamOwner": true })
+        );
+        assert_eq!(
+            json(TeamRole::Admin),
+            serde_json::json!({ "level": "owner", "teamOwner": false })
+        );
+        assert_eq!(
+            json(TeamRole::Member),
+            serde_json::json!({ "level": "member" })
         );
     }
 

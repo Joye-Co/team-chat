@@ -339,8 +339,37 @@ pub fn disk(path: &Path) -> (u64, u64) {
     crate::sys::disk(&p)
 }
 
+/// The disk runs need: of the work root and, on a VM host, of the members' homes (their images
+/// grow on it), the one with less free space. `(free, total)`.
+pub fn run_disk(cfg: &Config) -> (u64, u64) {
+    let work = disk(&cfg.work_root);
+    match cfg.vm.as_ref().and_then(crate::vm_home::disk) {
+        Some(homes) if homes.0 < work.0 => homes,
+        _ => work,
+    }
+}
+
+/// Whether the host has the memory for one more VM: what is available must cover the VM's
+/// cap for it and for each VM still booting (they have not taken their memory yet), above a
+/// reserve for the running VMs to grow into (a fifth of the memory, at least 2 GiB; the
+/// monitor's estimate uses the same). True when the memory cannot be read.
+pub fn vm_memory_ok(
+    available: Option<u64>,
+    total: Option<u64>,
+    cap_mib: u32,
+    booting: u64,
+) -> bool {
+    let (Some(available), Some(total)) = (available, total) else {
+        return true;
+    };
+    const GIB: u64 = 1 << 30;
+    let reserve = (((total as f64 * 0.2) / GIB as f64).round() as u64).max(2) * GIB;
+    let need = (u64::from(cap_mib) << 20) * (1 + booting);
+    available >= reserve + need
+}
+
 pub fn health(cfg: &Config, active_runs: u32) -> Health {
-    let (free, total) = disk(&cfg.work_root);
+    let (free, total) = run_disk(cfg);
     let l = crate::sys::load_avg();
     let round = |x: f64| (x * 100.0).round() / 100.0;
     Health {
@@ -359,6 +388,37 @@ pub fn health(cfg: &Config, active_runs: u32) -> Health {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_vm_needs_its_cap_above_the_reserve() {
+        const GIB: u64 = 1 << 30;
+        // 64 GiB host: the reserve is 13 GiB; a 4 GiB VM needs 17 GiB available.
+        let total = Some(64 * GIB);
+        assert!(vm_memory_ok(Some(17 * GIB), total, 4096, 0));
+        assert!(!vm_memory_ok(Some(17 * GIB - 1), total, 4096, 0));
+        // Each VM still booting counts with its whole cap.
+        assert!(!vm_memory_ok(Some(20 * GIB), total, 4096, 1));
+        assert!(vm_memory_ok(Some(21 * GIB), total, 4096, 1));
+        // A small host keeps at least 2 GiB.
+        assert!(!vm_memory_ok(Some(5 * GIB), Some(8 * GIB), 4096, 0));
+        assert!(vm_memory_ok(Some(6 * GIB), Some(8 * GIB), 4096, 0));
+        // Unknown memory never refuses a run.
+        assert!(vm_memory_ok(None, None, 4096, 3));
+    }
+
+    #[test]
+    fn the_run_disk_is_the_fuller_of_work_root_and_homes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = Config::parse(&format!(
+            "server_url = \"http://127.0.0.1:1\"\ntoken_file = \"/nonexistent\"\nwork_root = '{}'\n[runtimes.claude]\nkind = \"claude\"\n[vm]\nkernel = \"/k\"\nrootfs = \"/r\"\nhomes = '{}'\n",
+            tmp.path().join("work").display(),
+            tmp.path().join("homes").display()
+        ))
+        .unwrap();
+        // Same disk here: the figures are that disk's.
+        assert_eq!(run_disk(&cfg).1, disk(&cfg.work_root).1);
+        assert!(crate::vm_home::disk(cfg.vm.as_ref().unwrap()).is_some());
+    }
 
     #[test]
     fn windows_names_follow_pathext_and_never_try_the_bare_name() {
