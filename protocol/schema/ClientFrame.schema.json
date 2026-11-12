@@ -34228,6 +34228,64 @@
         "topicId",
         "muted"
       ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "t": {
+          "type": "string",
+          "const": "topic.hide"
+        },
+        "rid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "groupId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "topicId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hidden": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "t",
+        "rid",
+        "groupId",
+        "topicId",
+        "hidden"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "t": {
+          "type": "string",
+          "const": "topic.delete"
+        },
+        "rid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "groupId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "topicId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "t",
+        "rid",
+        "groupId",
+        "topicId"
+      ]
     }
   ],
   "$defs": {

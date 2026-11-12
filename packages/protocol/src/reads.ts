@@ -16,6 +16,8 @@ export const TopicState = z.object({
   following: z.boolean().optional(),
   /** I muted this topic: only mentions notify. Absent means false. */
   muted: z.boolean().optional(),
+  /** I hid this topic until a message mentions me. Absent means false. */
+  hidden: z.boolean().optional(),
 });
 export type TopicState = z.infer<typeof TopicState>;
 

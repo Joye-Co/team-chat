@@ -103,6 +103,9 @@
             },
             "teamOwner": {
               "type": "boolean"
+            },
+            "deleted": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -203,6 +206,9 @@
                 "maximum": 100000000
               },
               "teamOwner": {
+                "type": "boolean"
+              },
+              "deleted": {
                 "type": "boolean"
               }
             },
@@ -316,6 +322,9 @@
                     },
                     "muted": {
                       "type": "boolean"
+                    },
+                    "hidden": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -336,6 +345,9 @@
                   "mentions",
                   "none"
                 ]
+              },
+              "hidden": {
+                "type": "boolean"
               }
             },
             "required": [
@@ -21615,6 +21627,59 @@
                   },
                   "required": [
                     "text"
+                  ]
+                }
+              },
+              "required": [
+                "seq",
+                "groupId",
+                "at",
+                "actorId",
+                "type",
+                "data"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "seq": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "groupId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "at": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "actorId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "type": {
+                  "type": "string",
+                  "const": "topic.deleted"
+                },
+                "data": {
+                  "type": "object",
+                  "properties": {
+                    "topicId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "deletedAt": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "topicId",
+                    "deletedAt"
                   ]
                 }
               },
@@ -43603,6 +43668,59 @@
                   "type",
                   "data"
                 ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "seq": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "groupId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "at": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "actorId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "topic.deleted"
+                  },
+                  "data": {
+                    "type": "object",
+                    "properties": {
+                      "topicId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "deletedAt": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "topicId",
+                      "deletedAt"
+                    ]
+                  }
+                },
+                "required": [
+                  "seq",
+                  "groupId",
+                  "at",
+                  "actorId",
+                  "type",
+                  "data"
+                ]
               }
             ]
           }
@@ -52951,6 +53069,9 @@
               },
               "teamOwner": {
                 "type": "boolean"
+              },
+              "deleted": {
+                "type": "boolean"
               }
             },
             "required": [
@@ -53063,6 +53184,9 @@
                     },
                     "muted": {
                       "type": "boolean"
+                    },
+                    "hidden": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -53083,6 +53207,9 @@
                   "mentions",
                   "none"
                 ]
+              },
+              "hidden": {
+                "type": "boolean"
               }
             },
             "required": [
@@ -53229,6 +53356,9 @@
                 "type": "boolean"
               },
               "muted": {
+                "type": "boolean"
+              },
+              "hidden": {
                 "type": "boolean"
               }
             },

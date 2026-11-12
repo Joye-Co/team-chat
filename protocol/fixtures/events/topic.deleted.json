@@ -1,0 +1,15 @@
+{
+  "kind": "Event",
+  "valid": true,
+  "value": {
+    "seq": 42,
+    "groupId": "01JBX0GENERAL000000000000A",
+    "at": 1762128005000,
+    "actorId": "01JBX0OWNER0000000000000AA",
+    "type": "topic.deleted",
+    "data": {
+      "topicId": "01JBX0TOPIC0000000000000AD",
+      "deletedAt": 1762128009000
+    }
+  }
+}

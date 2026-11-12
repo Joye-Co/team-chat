@@ -92,6 +92,9 @@
         },
         "teamOwner": {
           "type": "boolean"
+        },
+        "deleted": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -249,6 +252,9 @@
               },
               "muted": {
                 "type": "boolean"
+              },
+              "hidden": {
+                "type": "boolean"
               }
             },
             "required": [
@@ -269,6 +275,9 @@
             "mentions",
             "none"
           ]
+        },
+        "hidden": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -19697,6 +19706,9 @@
             },
             "teamOwner": {
               "type": "boolean"
+            },
+            "deleted": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -19874,6 +19886,9 @@
               "maximum": 100000000
             },
             "teamOwner": {
+              "type": "boolean"
+            },
+            "deleted": {
               "type": "boolean"
             }
           },
@@ -20181,6 +20196,9 @@
             },
             "teamOwner": {
               "type": "boolean"
+            },
+            "deleted": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -20316,6 +20334,9 @@
         },
         "teamOwner": {
           "type": "boolean"
+        },
+        "deleted": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -20416,6 +20437,9 @@
             "maximum": 100000000
           },
           "teamOwner": {
+            "type": "boolean"
+          },
+          "deleted": {
             "type": "boolean"
           }
         },
@@ -20625,6 +20649,9 @@
             },
             "teamOwner": {
               "type": "boolean"
+            },
+            "deleted": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -20770,6 +20797,9 @@
                 },
                 "muted": {
                   "type": "boolean"
+                },
+                "hidden": {
+                  "type": "boolean"
                 }
               },
               "required": [
@@ -20790,6 +20820,9 @@
               "mentions",
               "none"
             ]
+          },
+          "hidden": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -20946,6 +20979,9 @@
               },
               "muted": {
                 "type": "boolean"
+              },
+              "hidden": {
+                "type": "boolean"
               }
             },
             "required": [
@@ -20966,6 +21002,9 @@
             "mentions",
             "none"
           ]
+        },
+        "hidden": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -21031,6 +21070,9 @@
         },
         "muted": {
           "type": "boolean"
+        },
+        "hidden": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -21038,6 +21080,24 @@
         "readSeq",
         "unread",
         "mentions"
+      ]
+    },
+    "TopicDeleteResult": {
+      "type": "object",
+      "properties": {
+        "topicId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deletedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "topicId",
+        "deletedAt"
       ]
     },
     "Card": {
@@ -25065,6 +25125,9 @@
         },
         "teamOwner": {
           "type": "boolean"
+        },
+        "deleted": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -25087,6 +25150,9 @@
             "mentions",
             "none"
           ]
+        },
+        "hidden": {
+          "type": "boolean"
         }
       }
     },

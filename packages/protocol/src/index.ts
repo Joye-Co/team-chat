@@ -85,7 +85,7 @@ import { eventFrameFields, groupSummaryPrefFields, MAX_WEEKLY_BUDGET_CENTS, Upda
 import { groupSummaryReadFields, readFields, ReadsFrame, TopicState } from "./reads.ts";
 import { messageReactionFields, ReactFrame, ReactionChangedEvent } from "./reactions.ts";
 import { SearchFrame, SearchResultsFrame } from "./search.ts";
-import { messageAsideFields, sendContextFields, TopicContext, TopicFollowFrame, TopicMuteFrame, topicFields, topicUpdatedFields, topicUpdateFields } from "./topic.ts";
+import { messageAsideFields, sendContextFields, TopicContext, TopicDeleteFrame, TopicDeleteResult, TopicFollowFrame, TopicHideFrame, TopicMuteFrame, topicFields, topicUpdatedFields, topicUpdateFields } from "./topic.ts";
 import { UpdateInfo } from "./updates.ts";
 import { DiagnosticsResponse } from "./diagnostics.ts";
 import { AuditResponse, AuditEntry } from "./audit.ts";
@@ -262,6 +262,8 @@ export const Member = z.object({
   weeklyBudgetCents: z.int().nonnegative().max(MAX_WEEKLY_BUDGET_CENTS).optional(),
   /** Usable: true for a 所有者 (always `level: "owner"`); sent only when true. */
   teamOwner: z.boolean().optional(),
+  /** The AI member was deleted (also deactivated); sent only when true. Clients leave it out of lists. */
+  deleted: z.boolean().optional(),
 });
 export type Member = z.infer<typeof Member>;
 
@@ -413,6 +415,11 @@ export const GroupMemberAddedEvent = z.object({
   type: z.literal("group.memberAdded"),
   data: z.object({ memberId: Id }),
 });
+export const TopicDeletedEvent = z.object({
+  ...eventBase,
+  type: z.literal("topic.deleted"),
+  data: TopicDeleteResult,
+});
 export const GroupMemberRemovedEvent = z.object({
   ...eventBase,
   type: z.literal("group.memberRemoved"),
@@ -440,6 +447,7 @@ export const Event = z.discriminatedUnion("type", [
   ArtifactPreviewReadyEvent,
   DecisionRecordedEvent,
   DeskNotedEvent,
+  TopicDeletedEvent,
 ]);
 export type Event = z.infer<typeof Event>;
 export type EventType = Event["type"];
@@ -504,7 +512,7 @@ export const HelloFrame = z.object({
 /** `hello.features` of a 1.1 client: the interaction loop and refs to parts. */
 export const CLIENT_FEATURES = ["interact/1", "refs/1"] as const;
 /** `welcome.features` of a 1.1 server; clients hide affordances the server does not list. */
-export const SERVER_FEATURES = ["interact/1", "refs/1", "diagram/1"] as const;
+export const SERVER_FEATURES = ["interact/1", "refs/1", "diagram/1", "hide-delete/1"] as const;
 export const SendFrame = z.object({
   t: z.literal("send"),
   rid: Rid,
@@ -602,6 +610,8 @@ export const ClientFrame = z.discriminatedUnion("t", [
   ArtifactDataFrame,
   ArtifactReplyFrame,
   TopicMuteFrame,
+  TopicHideFrame,
+  TopicDeleteFrame,
 ]);
 export type ClientFrame = z.infer<typeof ClientFrame>;
 export type ClientFrameType = ClientFrame["t"];
@@ -839,6 +849,7 @@ export const schemas = {
   HealthResponse,
   // V1 extensions
   TopicState,
+  TopicDeleteResult,
   Card,
   FileRef,
   FileMeta,

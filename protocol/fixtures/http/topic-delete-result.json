@@ -1,0 +1,8 @@
+{
+  "kind": "TopicDeleteResult",
+  "valid": true,
+  "value": {
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "deletedAt": 1762128009000
+  }
+}

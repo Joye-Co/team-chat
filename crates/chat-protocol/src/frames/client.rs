@@ -20,7 +20,9 @@ use crate::reactions::ReactFrame;
 use crate::search::SearchFrame;
 use crate::serde_util::{any_value, non_null, nullable};
 use crate::topic::TopicContext;
-use crate::topic::{TopicFollowFrame, TopicMuteFrame, check_waiting_on};
+use crate::topic::{
+    TopicDeleteFrame, TopicFollowFrame, TopicHideFrame, TopicMuteFrame, check_waiting_on,
+};
 
 #[allow(clippy::large_enum_variant)] // frames are short-lived; boxing would change the public API
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -76,6 +78,11 @@ pub enum ClientFrame {
     ArtifactData(ArtifactDataFrame),
     #[serde(rename = "artifact.reply")]
     ArtifactReply(ArtifactReplyFrame),
+    // hide and delete
+    #[serde(rename = "topic.hide")]
+    TopicHide(TopicHideFrame),
+    #[serde(rename = "topic.delete")]
+    TopicDelete(TopicDeleteFrame),
 }
 
 impl ClientFrame {
@@ -106,6 +113,8 @@ impl ClientFrame {
             Self::InteractionResolve(_) => "interaction.resolve",
             Self::ArtifactData(_) => "artifact.data",
             Self::ArtifactReply(_) => "artifact.reply",
+            Self::TopicHide(_) => "topic.hide",
+            Self::TopicDelete(_) => "topic.delete",
         }
     }
 
@@ -120,6 +129,8 @@ impl ClientFrame {
             Self::History(f) => Some(&f.rid),
             Self::TopicFollow(f) => Some(&f.rid),
             Self::TopicMute(f) => Some(&f.rid),
+            Self::TopicHide(f) => Some(&f.rid),
+            Self::TopicDelete(f) => Some(&f.rid),
             Self::CardAction(f) => Some(&f.rid),
             Self::Search(f) => Some(&f.rid),
             Self::React(f) => Some(&f.rid),
@@ -258,6 +269,8 @@ impl ClientFrame {
             Self::Ping => Ok(()),
             Self::TopicFollow(f) => f.validate(),
             Self::TopicMute(f) => f.validate(),
+            Self::TopicHide(f) => f.validate(),
+            Self::TopicDelete(f) => f.validate(),
             Self::CardAction(f) => {
                 check_id("rid", &f.rid)?;
                 check_id("groupId", &f.group_id)?;

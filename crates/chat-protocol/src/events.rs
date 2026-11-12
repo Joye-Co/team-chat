@@ -89,6 +89,9 @@ pub enum EventData {
     /// 1.1: a bot member set its desk note (首页).
     #[serde(rename = "desk.noted")]
     DeskNoted(crate::desk::DeskNotedData),
+    /// A topic was deleted for everyone; clients drop it and its messages.
+    #[serde(rename = "topic.deleted")]
+    TopicDeleted(crate::topic::TopicDeleteResult),
 }
 
 impl EventData {
@@ -113,6 +116,7 @@ impl EventData {
             Self::ArtifactPreviewReady(_) => "artifact.previewReady",
             Self::DecisionRecorded(_) => "decision.recorded",
             Self::DeskNoted(_) => "desk.noted",
+            Self::TopicDeleted(_) => "topic.deleted",
         }
     }
 }

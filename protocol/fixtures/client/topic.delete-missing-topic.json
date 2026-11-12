@@ -1,0 +1,10 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "missing topicId",
+  "value": {
+    "t": "topic.delete",
+    "rid": "r94",
+    "groupId": "01JBX0GENERAL000000000000A"
+  }
+}

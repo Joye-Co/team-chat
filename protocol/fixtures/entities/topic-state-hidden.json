@@ -1,0 +1,12 @@
+{
+  "kind": "TopicState",
+  "valid": true,
+  "description": "I hid this topic",
+  "value": {
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "readSeq": 40,
+    "unread": 0,
+    "mentions": 0,
+    "hidden": true
+  }
+}
