@@ -237,6 +237,8 @@ pub enum AttentionKind {
     Invite,
     /// 模 3.3: a CLI's subscription near or at its limit (the machine's sign-in, shared).
     Limit,
+    /// 模 1.3: the team's AI 服务 is not set up.
+    AiService,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -245,6 +247,17 @@ pub struct Attention {
     pub title: String,
     pub meta: String,
     pub tone: Tone,
+}
+
+/// 模 1.3: one 要注意 row while the team's AI 服务 is not set up (`Some(false)`); nothing
+/// before it was read.
+pub fn ai_service_attention(configured: Option<bool>) -> Option<Attention> {
+    (configured == Some(false)).then(|| Attention {
+        kind: AttentionKind::AiService,
+        title: m::ATT_AI_UNSET.into(),
+        meta: m::ATT_AI_UNSET_META.into(),
+        tone: Tone::Warn,
+    })
 }
 
 /// A subscription window this full is near its limit (模 3.3).
@@ -550,6 +563,16 @@ mod tests {
     use chat_core::proto::monitor::{
         MonitorCli, MonitorFailure, MonitorHost, MonitorMachine, MonitorQueue,
     };
+
+    /// 模 1.3: 要注意 says so while the AI 服务 is not set up, and only once it was read.
+    #[test]
+    fn an_unset_ai_service_needs_attention() {
+        let a = ai_service_attention(Some(false)).expect("a row");
+        assert_eq!(a.kind, AttentionKind::AiService);
+        assert_eq!(a.title, m::ATT_AI_UNSET);
+        assert_eq!(ai_service_attention(Some(true)), None);
+        assert_eq!(ai_service_attention(None), None);
+    }
 
     fn sample() -> MachineMonitor {
         MachineMonitor {

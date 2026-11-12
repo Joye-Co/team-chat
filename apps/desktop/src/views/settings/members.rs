@@ -1531,6 +1531,16 @@ pub(super) fn cli_choices(
     (models, efforts)
 }
 
+/// The model and 思考强度 a member saves: its own only while 单独设置模型 is on; off, none,
+/// so the team's setting is the one that runs.
+pub(super) fn own_model_choice(
+    own: bool,
+    model: Option<String>,
+    effort: Option<String>,
+) -> (Option<String>, Option<String>) {
+    if own { (model, effort) } else { (None, None) }
+}
+
 /// The 思考强度 levels for a model: its own list, else the runtime's. With no model picked,
 /// the default model's.
 pub(super) fn effort_options(
@@ -1561,7 +1571,7 @@ pub(super) fn default_model_text(models: &[ModelChoice]) -> String {
 }
 
 /// A 思考强度 level in words; one this build does not know shows as the CLI spells it.
-pub(super) fn effort_text(e: &str) -> String {
+pub(crate) fn effort_text(e: &str) -> String {
     match e {
         "minimal" => s::EFFORT_MINIMAL,
         "low" => s::EFFORT_LOW,
@@ -1754,6 +1764,9 @@ pub struct BotForm {
     model_input: Entity<InputState>,
     /// 思考强度 picked; `None` = the CLI's default.
     effort: Option<String>,
+    /// 高级 › 单独设置模型 is on: the member's own model and 思考强度 win over the team's.
+    /// Off, the member saves none and follows the team's setting.
+    own_model: bool,
     /// The character picked by hand; until then [`default_character`] for the typed name.
     character: Option<CharacterId>,
     status: Status,
@@ -1817,6 +1830,7 @@ impl BotForm {
             model: None,
             model_input,
             effort: None,
+            own_model: false,
             character: None,
             status: Status::Idle,
             created: None,
@@ -1900,6 +1914,7 @@ impl BotForm {
         self.machine_chosen = true;
         self.model = r.model.clone();
         self.effort = r.effort.clone();
+        self.own_model = r.model.is_some() || r.effort.is_some();
         set(
             &self.model_input,
             r.model.clone().unwrap_or_default(),
@@ -1986,14 +2001,16 @@ impl BotForm {
         }
         let repo = self.value(&self.repo, cx);
         let branch = self.value(&self.branch, cx);
+        let (model, effort) =
+            own_model_choice(self.own_model, self.model_value(cx), self.effort.clone());
         Some(RunnerSetup {
             runtime: self.runtime_value(cx),
             labels: widgets::split_labels(&self.value(&self.labels, cx)),
             repo: (!repo.is_empty()).then_some(repo),
             base_branch: (!branch.is_empty()).then_some(branch),
             machine_id: self.machine.clone(),
-            model: self.model_value(cx),
-            effort: self.effort.clone(),
+            model,
+            effort,
         })
     }
 
@@ -2507,8 +2524,6 @@ impl Render for BotForm {
                         sheet_form()
                             .child(sheet_form_row(s::RUNNER_MACHINE, machine, cx))
                             .children(runtime.map(|r| sheet_form_row(s::RUNNER_RUNTIME, r, cx)))
-                            .child(sheet_form_row(s::RUNNER_MODEL, model, cx))
-                            .children(effort.map(|e| sheet_form_row(s::RUNNER_EFFORT, e, cx)))
                             .child(field_row(
                                 s::RUNNER_REPO,
                                 "member-repo",
@@ -2523,6 +2538,41 @@ impl Render for BotForm {
                                 false,
                                 cx,
                             )),
+                    ),
+            );
+            // 高级: the member's own model. Off (the everyday case), the team's setting runs.
+            let own = self.own_model;
+            let own_form = cx.entity();
+            let own_switch = NativeSwitch::new("member-own-model", own)
+                .name(s::RUNNER_OWN_MODEL)
+                .disabled(busy)
+                .on_change(move |v, _, cx| {
+                    own_form.update(cx, |f, cx| {
+                        f.own_model = v;
+                        cx.notify();
+                    })
+                });
+            body = body.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(section(s::RUNNER_OWN_SECTION))
+                    .child(
+                        sheet_form()
+                            .child(sheet_form_row(s::RUNNER_OWN_MODEL, own_switch, cx))
+                            .when(own, |f| {
+                                f.child(sheet_form_row(s::RUNNER_MODEL, model, cx))
+                                    .children(
+                                        effort.map(|e| sheet_form_row(s::RUNNER_EFFORT, e, cx)),
+                                    )
+                            }),
+                    )
+                    .child(
+                        div()
+                            .pt(tokens::space::S8)
+                            .n_subheadline()
+                            .text_color(k.secondary)
+                            .child(s::RUNNER_OWN_MODEL_HINT),
                     ),
             );
         }
@@ -2904,6 +2954,21 @@ mod tests {
 
     /// The grid is one Tab stop on the chosen look; the arrow keys walk the
     /// tiles, and Tab stays on the tile the arrows reached (E3, §2.9).
+    /// 单独设置模型 off saves no model of the member's own, so the team's setting runs; on,
+    /// the sheet's picks are saved.
+    #[test]
+    fn the_members_own_model_counts_only_when_it_is_on() {
+        let picked = (Some("m-1".to_string()), Some("high".to_string()));
+        assert_eq!(
+            own_model_choice(false, picked.0.clone(), picked.1.clone()),
+            (None, None)
+        );
+        assert_eq!(
+            own_model_choice(true, picked.0.clone(), picked.1.clone()),
+            picked
+        );
+    }
+
     #[gpui::test]
     fn the_look_grid_is_one_tab_stop(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
