@@ -261,16 +261,25 @@ export abstract class DeskDelegate extends DeskFront {
    */
   async partDone(botId: string, p: PartRow & { groupId: string }): Promise<void> {
     this.bind(botId);
-    const seen = `partSeen:${p.chainId}:${p.seq}`;
+    // A retried part comes back again with its new run.
+    const seen = `partSeen:${p.chainId}:${p.seq}${p.runId ? `:${p.runId}` : ""}${p.cardOnly ? ":card" : ""}`;
     if (this.meta(seen) !== null) return;
-    const names = await this.names([botId, p.fromBot, ...(p.stoppedBy ? [p.stoppedBy] : [])]);
+    const names = await this.names([botId, p.fromBot, ...(p.stoppedBy ? [p.stoppedBy] : []), ...(p.givenBy ? [p.givenBy] : [])]);
     const fromName = names.get(p.fromBot) ?? p.fromBot;
+    // The giver handed its work over since: only its split-off card says how the part ended.
+    if (p.cardOnly) {
+      await this.patchPartCard(p, fromName, names.get(botId) ?? botId);
+      this.putMeta(seen, "1");
+      return;
+    }
     const how = p.state === "done" ? "is done" : p.state === "cancelled" ? `was stopped by ${p.stoppedBy ? (names.get(p.stoppedBy) ?? p.stoppedBy) : "a person"}` : "did not finish";
-    const text = `[team-chat] The part you gave to ${fromName} ${how} (its topic ${p.partTopicId}; read it with chat-run topic state --topic ${p.partTopicId}):\n${p.result}`;
-    await this.patchPartCard(p, fromName, names.get(botId) ?? botId);
+    const whose = p.givenBy ? `${names.get(p.givenBy) ?? p.givenBy} gave to ${fromName} before handing the work over to you` : `you gave to ${fromName}`;
+    const text = `[team-chat] The part ${whose} ${how} (its topic ${p.partTopicId}; read it with chat-run topic state --topic ${p.partTopicId}):\n${p.result}`;
+    if (!p.givenBy) await this.patchPartCard(p, fromName, names.get(botId) ?? botId);
     const live = this.liveRunOf(p.parentRun, p.topicId);
     if (live?.machine_id) {
-      await linkStub(this.env, live.machine_id).toRun({ t: "run.input", runId: live.id, inputId: `desk-part-${p.chainId}-${p.seq}`.slice(0, 64), text, authorId: botId } as never);
+      const inputId = `desk-part-${p.chainId}-${p.seq}${p.runId ? `-${p.runId.slice(-8)}` : ""}`.slice(0, 64);
+      await linkStub(this.env, live.machine_id).toRun({ t: "run.input", runId: live.id, inputId, text, authorId: botId } as never);
     } else if (live) {
       this.addPart(live.id, text);
     } else {
@@ -279,10 +288,10 @@ export abstract class DeskDelegate extends DeskFront {
         this.addPart(anchor.id, text);
         if (p.last) {
           const all = this.takeParts(anchor.id) ?? text;
-          await this.start({ groupId: p.groupId, topicId: p.topicId, messageId: `part:${p.chainId}:${p.seq}`, authorId: p.requesterId, body: all, mentioned: true }, anchor);
+          await this.start({ groupId: p.groupId, topicId: p.topicId, messageId: `part:${p.chainId}:${p.seq}${p.runId ? `:${p.runId.slice(-8)}` : ""}`, authorId: p.requesterId, body: all, mentioned: true }, anchor);
         }
       } else if (p.last) {
-        await this.start({ groupId: p.groupId, topicId: p.topicId, messageId: `part:${p.chainId}:${p.seq}`, authorId: p.requesterId, body: text, mentioned: true });
+        await this.start({ groupId: p.groupId, topicId: p.topicId, messageId: `part:${p.chainId}:${p.seq}${p.runId ? `:${p.runId.slice(-8)}` : ""}`, authorId: p.requesterId, body: text, mentioned: true });
       }
     }
     this.putMeta(seen, "1");

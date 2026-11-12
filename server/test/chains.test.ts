@@ -5,7 +5,8 @@ import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test"
 import { afterAll, describe, expect, it } from "vitest";
 import { CardV2 } from "@chat/protocol";
 import type { BotsEnv } from "../src/bots/env";
-import { MAX_DEPTH, MAX_HANDOFFS, reserveStep, stopChain } from "../src/bots/chains";
+import { MAX_DEPTH, MAX_HANDOFFS, confirmStep, reserveStep, stepReport, stopChain } from "../src/bots/chains";
+import type { RoomContext, RoomTx } from "../src/core/registry";
 import { closedCard, handoverCard, lastWords, workOrderText } from "../src/bots/desk/delegate_card";
 import { topicStateText } from "../src/context/read";
 import { Daemon, type World, downViolations, mention, world } from "./daemon";
@@ -34,6 +35,19 @@ function room(gid: string) {
 
 async function inRoom<T>(gid: string, fn: (sql: SqlStorage) => T): Promise<T> {
   return runInDurableObject(room(gid), (_o, state: DurableObjectState) => fn(state.storage.sql)) as Promise<T>;
+}
+
+/** Just enough of the room for split-off steps (no routing owner moves, no alarm). */
+function fakeRoom(sql: SqlStorage): RoomContext {
+  return { sql, wakeAt: () => {} } as unknown as RoomContext;
+}
+const noTx = {} as RoomTx;
+
+function outbox(sql: SqlStorage, kind: string): any[] {
+  return sql
+    .exec<{ payload: string }>("SELECT payload FROM bot_outbox WHERE kind = ? ORDER BY id", kind)
+    .toArray()
+    .map((r) => JSON.parse(r.payload));
 }
 
 /** Sends a chat-run output from a run and waits for its answer. */
@@ -89,6 +103,72 @@ describe("the chain rules (room)", () => {
       expect(() => reserveStep(sql, "A", { fromRun: "rZ", chain: { chainId: other.chainId, seq: 0 }, requesterId: "h", kind: "assign", to: "C", topicId: "t9" })).toThrow(
         expect.objectContaining({ reason: "delegation.stopped" }),
       );
+    });
+  });
+
+  it("confirms a step whose run reported first: the part's own topic, and a stop in between stops it", async () => {
+    const w = await world();
+    await inRoom(w.gid, (sql) => {
+      const room = fakeRoom(sql);
+      sql.exec("DELETE FROM bot_outbox");
+      const s = reserveStep(sql, "A", { fromRun: "rA", requesterId: "h", kind: "assign", to: "B", topicId: "t1" });
+      // B's run starts and reports before A confirms: the step stays reserved, its run is named.
+      stepReport(room, "B", { runId: "rB", ended: false, chain: { chainId: s.chainId, seq: s.seq } });
+      expect(sql.exec("SELECT state, run_id, topic_id FROM chain_steps WHERE chain_id = ? AND seq = 1", s.chainId).one()).toEqual({ state: "reserved", run_id: "rB", topic_id: "t1" });
+      // A person stops the whole piece of work now: only A's run is working yet.
+      expect(stopChain(sql, s.chainId, "h")).toBe(1);
+      confirmStep(room, noTx, "A", { chainId: s.chainId, seq: s.seq, runId: "rB", topicId: "t2" });
+      expect(sql.exec("SELECT state, run_id, topic_id FROM chain_steps WHERE chain_id = ? AND seq = 1", s.chainId).one()).toEqual({ state: "working", run_id: "rB", topic_id: "t2" });
+      expect(outbox(sql, "cancel").map((c) => c.runId)).toEqual(["rA", "rB"]);
+      sql.exec("DELETE FROM bot_outbox");
+    });
+  });
+
+  it("a retried part works again: its new result goes back, and a stop stops the retry", async () => {
+    const w = await world();
+    await inRoom(w.gid, (sql) => {
+      const room = fakeRoom(sql);
+      sql.exec("DELETE FROM bot_outbox");
+      const s = reserveStep(sql, "A", { fromRun: "rA", requesterId: "h", kind: "assign", to: "B", topicId: "t1" });
+      const chain = { chainId: s.chainId, seq: s.seq };
+      confirmStep(room, noTx, "A", { ...chain, runId: "rB", topicId: "t2" });
+      stepReport(room, "B", { runId: "rB", ended: true, chain, outcome: "failed", result: "没过" });
+      // A person presses 重试 on B's run: the same step works again with the new run.
+      stepReport(room, "B", { runId: "rB2", ended: false, chain });
+      expect(sql.exec("SELECT state, run_id FROM chain_steps WHERE chain_id = ? AND seq = 1", s.chainId).one()).toEqual({ state: "working", run_id: "rB2" });
+      stepReport(room, "B", { runId: "rB2", ended: true, chain, outcome: "done", result: "过了" });
+      expect(outbox(sql, "part").map((p) => [p.runId, p.state, p.result, p.partTopicId])).toEqual([
+        ["rB", "failed", "没过", "t2"],
+        ["rB2", "done", "过了", "t2"],
+      ]);
+      // Retried again and stopped: the retry is stopped too.
+      stepReport(room, "B", { runId: "rB3", ended: false, chain });
+      stopChain(sql, s.chainId, "h");
+      expect(outbox(sql, "cancel").map((c) => c.runId)).toContain("rB3");
+      sql.exec("DELETE FROM bot_outbox");
+    });
+  });
+
+  it("a part of a giver that handed its work over goes to the member that continued it", async () => {
+    const w = await world();
+    await inRoom(w.gid, (sql) => {
+      const room = fakeRoom(sql);
+      sql.exec("DELETE FROM bot_outbox");
+      // A gives a part to C, then hands the work over to B.
+      const c = reserveStep(sql, "A", { fromRun: "rA", requesterId: "h", kind: "assign", to: "C", topicId: "t1" });
+      confirmStep(room, noTx, "A", { chainId: c.chainId, seq: c.seq, runId: "rC", topicId: "t2" });
+      const root = { chainId: c.chainId, seq: 0 };
+      const b = reserveStep(sql, "A", { fromRun: "rA", chain: root, requesterId: "h", kind: "handoff", to: "B", topicId: "t1" });
+      sql.exec("UPDATE chain_steps SET state = 'working', run_id = 'rB' WHERE chain_id = ? AND seq = ?", b.chainId, b.seq);
+      stepReport(room, "A", { runId: "rA", ended: true, chain: root, outcome: "done", handedOver: "B" });
+      stepReport(room, "C", { runId: "rC", ended: true, chain: { chainId: c.chainId, seq: c.seq }, outcome: "done", result: "好了" });
+      const parts = outbox(sql, "part");
+      expect(parts).toHaveLength(2);
+      expect(parts[0]).toMatchObject({ botId: "B", parentRun: "rB", topicId: "t1", givenBy: "A", result: "好了" });
+      expect(parts[0].cardOnly).toBeUndefined();
+      // A only gets its split-off card updated.
+      expect(parts[1]).toMatchObject({ botId: "A", cardOnly: true });
+      sql.exec("DELETE FROM bot_outbox");
     });
   });
 
@@ -244,6 +324,61 @@ describe("hand-overs between desks", () => {
     expect(next.prompt).toContain("界面没问题");
     await new Promise((r) => setTimeout(r, 300));
     expect(d.frames.filter((f) => f.t === "run.assign" && f.botMemberId === w.bot.id)).toHaveLength(2);
+    d.close();
+    c.close();
+  });
+});
+
+describe("split-offs after a retry and a hand-over", () => {
+  it("a part does its work in its own topic, and a retried part's new result reaches the giver", async () => {
+    const w = await world();
+    const qa = await addBot(w, "qa");
+    const { d } = await Daemon.connect(w.machineToken, { maxParallelRuns: 4 });
+    const { c } = await Client.connect(w.human.token);
+    const topicId = await mention(c, w);
+    const a = await started(d, w.bot.id);
+    expect((await output(d, a.runId, "o1", "member.assign", { member: "qa", goal: "测 Windows" })).ok).toBe(true);
+    const b = await started(d, qa.id);
+    const step = await inRoom(w.gid, (sql) => sql.exec<{ topic_id: string; state: string }>("SELECT topic_id, state FROM chain_steps WHERE kind = 'assign'").one());
+    expect(step.state).toBe("working");
+    expect(step.topic_id).not.toBe(topicId);
+    await d.acked(b.runId, d.done(b.runId, { status: "failed", error: "tests failed" }));
+    const first = await d.next((f) => f.t === "run.input" && f.runId === a.runId && String(f.inputId).startsWith("desk-part-"));
+    expect(first.text).toContain("did not finish");
+    expect(first.text).toContain(`topic ${step.topic_id}`);
+    expect((await api(`/v1/runs/${b.runId}/retry`, { token: w.human.token, body: {} })).status).toBe(200);
+    const b2 = await started(d, qa.id, [b.runId]);
+    await d.acked(b2.runId, d.done(b2.runId, { status: "succeeded", resultText: "Windows 上通过" }));
+    const second = await d.next((f) => f.t === "run.input" && f.runId === a.runId && f.inputId !== first.inputId && String(f.inputId).startsWith("desk-part-"));
+    expect(second.text).toContain("is done");
+    expect(second.text).toContain("Windows 上通过");
+    d.close();
+    c.close();
+  });
+
+  it("a giver that handed its work over is not woken by its part: the member that took it gets it", async () => {
+    const w = await world();
+    const qa = await addBot(w, "qa");
+    const ux = await addBot(w, "ux");
+    const { d } = await Daemon.connect(w.machineToken, { maxParallelRuns: 4 });
+    const { c } = await Client.connect(w.human.token);
+    const topicId = await mention(c, w);
+    const a = await started(d, w.bot.id);
+    expect((await output(d, a.runId, "o1", "member.assign", { member: "qa", goal: "写文档" })).ok).toBe(true);
+    const q = await started(d, qa.id);
+    expect((await output(d, a.runId, "o2", "member.handoff", { member: "ux", goal: "你接着做" })).ok).toBe(true);
+    const u = await started(d, ux.id, [q.runId]);
+    await d.acked(a.runId, d.done(a.runId, { status: "succeeded", resultText: "交给 ux 了" }));
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === a.runId && e.data.run.endedAt !== undefined);
+    await d.acked(q.runId, d.done(q.runId, { status: "succeeded", resultText: "文档写好了" }));
+    const back = await d.next((f) => f.t === "run.input" && f.runId === u.runId && String(f.inputId).startsWith("desk-part-"));
+    expect(back.text).toContain("dev gave to qa before handing the work over to you");
+    expect(back.text).toContain("文档写好了");
+    // dev's split-off card still says how the part ended.
+    await c.waitEvent((e) => e.type === "message.updated" && e.data.cardV2?.blocks?.some((x: any) => x.id === "closed" && x.text === "qa 做完了，结果已交回 dev"));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(d.frames.filter((f) => f.t === "run.assign" && f.botMemberId === w.bot.id)).toHaveLength(1);
+    expect(await inRoom(w.gid, (sql) => sql.exec<{ owner_id: string }>("SELECT owner_id FROM topics WHERE id = ?", topicId).one().owner_id)).toBe(ux.id);
     d.close();
     c.close();
   });

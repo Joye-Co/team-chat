@@ -311,6 +311,9 @@ AddArtifactVersionRequest += { parentVersion?: number }
 - 对方拒绝时只在「跟进对象被这次转交改成了对方」时改回 `owner_before`，不一律改回交出方（两个成员都在话题里时，跟进对象本来就可能是对方）。
 - 步的结束不在 `participants.ts` 里处理，而是 `bots.workState` 的 RPC 在同一个 commit 里先调 `workState`、再调 `chains.ts` 的 `stepReport`（两个文件不互相引用）。desk 的 `chain:` meta 不复制给重试、续跑：`chainOf` 沿 `retry_of` / `follow_up_of` 往回找；转交来的 run 在开始前先写 `chainFor:<触发键>`，第一份报告就带步。
 - 交出方被人停下（步 `cancelled`）时，分出去的结果不再交回，免得把它叫起来；链停后也不交回。
+- 两步确认的顺序：接手的 run 的第一份报告常常比 `bots.chainStepResult` 先到，这时只记下 run，步留在 `reserved`，由确认把步改成 `working`、写上分出去的新话题、转交时改跟进对象、链已停时停掉它。
+- 重试、重开、续跑一个已结束的步，是同一步重新 `working`（全部停止能停到它）；交回给交出方的 `part` 带上那次 run，新结果会再交回一次，卡片也再改一次。人在链停之后自己再叫起来的 run 不拦。
+- 交出方分出去之后又转交了：分出去的结果交给接手的成员（沿转交步往下找），不叫醒交出方，也不让它把话题拿回去；交出方那张分出去的卡片照样改。
 - 交代单不放进 `brief`（`briefText` 写的是「前台的交代单」），而是作为 run 的请求正文：标明是哪个 AI 成员替谁写的、当作资料；含根请求（附件、引用、产出按线 1 渲染）、交出方的计划、产出、最后一段话（≤1500）、代码位置。
 - 「代码没推不交出」这一条在转交、分出去里不拦：run 还在跑，`code` 只在 run 结束时才有，拦就只能按上一次 run 的旧位置拦，会误拦刚推上去的分支。交代单写明位置和「没推」，提示词要求转交前先推。真正按 `pushed` 停住的是接力（R3，`not_pushed`）。
 - 「全部停止」是 Card v2 的页脚按钮，没有 `ask`，按下是实时事件（`action.press`），走 desk 的 `interaction` 而不是 `cardAnswer`；两处都拦 `chain.stop:`，不当成 run 的输入。

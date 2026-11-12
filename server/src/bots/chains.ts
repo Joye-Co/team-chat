@@ -137,6 +137,12 @@ export interface PartRow {
   stoppedBy?: string;
   /** Every part that step gave out has ended. */
   last: boolean;
+  /** The run of the part's step that ended: a retried part comes back again with its new run. */
+  runId?: string;
+  /** The member that gave the part out, when it handed its work over since: `botId` continues the work. */
+  givenBy?: string;
+  /** Only the giver's split-off card is updated: the work went on with another member. */
+  cardOnly?: boolean;
 }
 
 /** A `cancel` outbox row: stops a run for a person. */
@@ -258,8 +264,8 @@ export function confirmStep(room: RoomContext, tx: RoomTx, botId: string, a: { c
   const sql = room.sql;
   const step = stepRow(sql, a.chainId, a.seq);
   if (!step || step.from_bot !== botId) throw new ApiError("not_found", "step not found");
-  if (step.state !== "reserved") return;
   if (a.runId === null) {
+    if (step.state !== "reserved") return;
     sql.exec("DELETE FROM chain_steps WHERE chain_id = ? AND seq = ?", a.chainId, a.seq);
     sql.exec("UPDATE work_chains SET handoffs = max(0, handoffs - 1) WHERE id = ?", a.chainId);
     // The other member's start may have claimed the topic before it refused (a race): the
@@ -269,8 +275,19 @@ export function confirmStep(room: RoomContext, tx: RoomTx, botId: string, a: { c
     }
     return;
   }
+  // The receiving run's first report may come first: it only names the run, the step stays
+  // reserved until here (and a run that already ended keeps how it ended).
+  if (step.state !== "reserved" && step.run_id !== a.runId) return;
+  const open = step.state === "reserved" || step.state === "working";
   const topicId = a.topicId ?? step.topic_id;
-  sql.exec("UPDATE chain_steps SET state = 'working', run_id = ?, topic_id = ? WHERE chain_id = ? AND seq = ?", a.runId, topicId, a.chainId, a.seq);
+  sql.exec(
+    "UPDATE chain_steps SET state = CASE WHEN state = 'reserved' THEN 'working' ELSE state END, run_id = ?, topic_id = ? WHERE chain_id = ? AND seq = ?",
+    a.runId,
+    topicId,
+    a.chainId,
+    a.seq,
+  );
+  if (!open) return;
   if (step.kind === "handoff") claimTopic(room, tx, step.to_bot, topicId);
   const chain = chainRow(sql, a.chainId);
   if (chain?.stopped_at) {
@@ -309,7 +326,16 @@ export function stepReport(room: RoomContext, botId: string, s: StepReport): voi
   const step = stepRow(sql, s.chain.chainId, s.chain.seq);
   if (!step || step.to_bot !== botId) return;
   if (!s.ended) {
-    if (step.state === "reserved" || step.state === "working" || step.kind === "root") {
+    // Not taken yet: `confirmStep` moves the step on (its topic, the routing owner, a stop
+    // that came in between); the run is only named here.
+    if (step.state === "reserved") {
+      sql.exec("UPDATE chain_steps SET run_id = ? WHERE chain_id = ? AND seq = ?", s.runId, step.chain_id, step.seq);
+      return;
+    }
+    // A retry, restart or follow-up of an ended step is the same step working again.
+    const again = (step.state === "done" || step.state === "failed" || step.state === "cancelled") && step.run_id !== s.runId;
+    // (A run a person starts again after a stop is that person's choice: it is not stopped here.)
+    if (step.state === "working" || step.kind === "root" || again) {
       sql.exec("UPDATE chain_steps SET run_id = ?, state = 'working' WHERE chain_id = ? AND seq = ?", s.runId, step.chain_id, step.seq);
     }
     return;
@@ -337,9 +363,12 @@ export function stepReport(room: RoomContext, botId: string, s: StepReport): voi
     }
   }
   if (step.parent_seq !== null) {
-    const parent = stepRow(sql, step.chain_id, step.parent_seq);
+    const giver = stepRow(sql, step.chain_id, step.parent_seq);
+    // A giver that handed its work over since is not woken: the part goes to the member that
+    // continued the work (its card in the giver's topic is still updated).
+    const parent = giver ? continuer(sql, giver) : undefined;
     // A giver a person stopped is not woken by what comes back.
-    if (parent && parent.state !== "cancelled") {
+    if (giver && parent && parent.state !== "cancelled" && parent.state !== "handed_over") {
       const open = sql
         .exec<{ n: number }>(`SELECT count(*) AS n FROM chain_steps WHERE chain_id = ? AND parent_seq = ? AND state IN ${OPEN_STATES}`, step.chain_id, step.parent_seq)
         .one().n;
@@ -357,12 +386,29 @@ export function stepReport(room: RoomContext, botId: string, s: StepReport): voi
         result,
         ...(s.stoppedBy ? { stoppedBy: s.stoppedBy } : {}),
         last: open === 0,
+        runId: s.runId,
+        ...(parent.seq !== giver.seq ? { givenBy: giver.to_bot } : {}),
       };
       enqueue(sql, "part", parent.topic_id, part);
+      if (parent.seq !== giver.seq) enqueue(sql, "part", giver.topic_id, { ...part, botId: giver.to_bot, parentSeq: giver.seq, parentRun: giver.run_id, topicId: giver.topic_id, cardOnly: true });
       queued = true;
     }
   }
   if (queued) room.wakeAt(Date.now());
+}
+
+/**
+ * The step that carries on a giver's work: the giver itself, or (it handed the work over) the
+ * hand-over step its run started, followed along later hand-overs.
+ */
+function continuer(sql: SqlStorage, giver: StepRow): StepRow | undefined {
+  let cur: StepRow | undefined = giver;
+  for (let i = 0; cur && cur.state === "handed_over" && i <= MAX_DEPTH + 1; i++) {
+    cur = sql
+      .exec<StepRow>("SELECT * FROM chain_steps WHERE chain_id = ? AND kind = 'handoff' AND from_bot = ? AND from_run = ? ORDER BY seq DESC LIMIT 1", cur.chain_id, cur.to_bot, cur.run_id)
+      .toArray()[0] as StepRow | undefined;
+  }
+  return cur;
 }
 
 // ---------------------------------------------------------------------------
