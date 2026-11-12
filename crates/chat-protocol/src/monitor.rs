@@ -255,7 +255,8 @@ pub struct SetSecretRequest {
     pub sealed: String,
     #[serde(default)]
     pub members: Vec<String>,
-    /// Usable (机 4.3): runs get it only after a person approves (每次用之前要批准).
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub ask: bool,
+    /// Usable (机 4.3): runs get it only after a person approves (每次用之前要批准). `None` keeps
+    /// what the key has now (an older client), so this client always sends `Some`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ask: Option<bool>,
 }

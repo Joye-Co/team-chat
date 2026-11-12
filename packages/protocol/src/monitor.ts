@@ -189,7 +189,10 @@ export const SetSecretRequest = z.object({
   sealed: z.string().min(1).max(16384),
   /** AI members whose runs get it; empty = every run. */
   members: z.array(Id).max(100).default([]),
-  /** Usable (机 4.3): runs get it only after a person approves (每次用之前要批准); absent = false. */
+  /**
+   * Usable (机 4.3): runs get it only after a person approves (每次用之前要批准). Absent keeps what
+   * the key has now (false for a new key), so an older client's new value does not turn it off.
+   */
   ask: z.boolean().optional(),
 });
 export type SetSecretRequest = z.infer<typeof SetSecretRequest>;

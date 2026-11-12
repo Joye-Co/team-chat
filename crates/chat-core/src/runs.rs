@@ -492,7 +492,7 @@ impl HttpClient {
                 Some(&crate::proto::monitor::SetSecretRequest {
                     sealed,
                     members,
-                    ask,
+                    ask: Some(ask),
                 }),
                 true,
             )

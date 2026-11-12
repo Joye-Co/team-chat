@@ -183,3 +183,22 @@ describe("a key from the app that asks before each use (机 4.3)", () => {
     d2.close();
   });
 });
+
+  it("keeps a key's ask when a new value comes without it (an older client), and turns it off only on ask: false", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["accounts", "ask-keys"], publicKey: KEY });
+    const secrets = [{ name: "CF_TOKEN", last4: "abcd", members: [], updatedAt: Date.now(), ask: true }];
+    await beat(d, {}, { secrets });
+    const put = async (body: Record<string, unknown>) => {
+      d.frames.length = 0;
+      const r = await api(`/v1/machines/${w.machineId}/secrets/CF_TOKEN`, { method: "PUT", token: w.owner.token, body: { sealed: "c2VhbGVk", members: [], ...body } });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      return d.next((x) => x.t === "secret.set");
+    };
+    expect(await put({})).toEqual({ t: "secret.set", name: "CF_TOKEN", sealed: "c2VhbGVk", members: [], ask: true });
+    expect(await put({ ask: false })).toEqual({ t: "secret.set", name: "CF_TOKEN", sealed: "c2VhbGVk", members: [] });
+    // A key that does not ask stays that way.
+    await beat(d, {}, { secrets: [{ ...secrets[0], ask: undefined }] });
+    expect(await put({})).toEqual({ t: "secret.set", name: "CF_TOKEN", sealed: "c2VhbGVk", members: [] });
+    d.close();
+  });

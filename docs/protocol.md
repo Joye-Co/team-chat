@@ -2920,7 +2920,7 @@ Machine += { unhealthy?: string }      // connected and not healthy: "heartbeat"
 DaemonProblem = { at, text /* 1..500, redacted on the machine */ }
 MachineMonitor += { problems?: DaemonProblem[] /* <= 20, oldest first; at on the server clock */ }
 SecretInfo += { ask?: true }           // runs get the key only after a person approves; sent only when true
-SetSecretRequest += { ask?: boolean }  // 每次用之前要批准; absent = false
+SetSecretRequest += { ask?: boolean }  // 每次用之前要批准; absent keeps the key's (false when new)
 ```
 
 - **Which check failed** (机 5.6): `unhealthy` is `heartbeat` when no heartbeat came for 90 s
@@ -2930,7 +2930,10 @@ SetSecretRequest += { ask?: boolean }  // 每次用之前要批准; absent = fal
   (machine-protocol.md, "Metrics"), moved onto the server clock.
 - **Keys that ask first** (机 4.3): `PUT …/secrets/:name` with `ask: true` needs a daemon with
   feature `ask-keys`: otherwise `conflict` with `machine.too_old` (an older daemon would give the
-  key to every run), or `machine.offline`. The audit details carry `ask: true`.
+  key to every run), or `machine.offline`. The audit details carry `ask: true`. A request without
+  `ask` keeps what the key has now (the latest heartbeat's `SecretInfo.ask`; a new key does not
+  ask), so a new value from an older client never turns approval off; turning it off takes an
+  explicit `ask: false`, which clients send every time.
 - **Alerts** (机 5.1): MachineLink keeps which of these are up and tells the computer's
   managers (a team computer: the active admins, at most 20; a personal one: its owner) once per
   alert:
