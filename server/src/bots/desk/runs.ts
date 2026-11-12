@@ -19,6 +19,7 @@ import { EXECUTOR_MEMORY_BYTES, memoryIndex } from "../../memory/inject";
 import { groupMembers, membersText } from "../../context/read";
 import { loadMachines, loadRunner } from "../store";
 import { DeskCore, QUEUED, type RunRow } from "./core";
+import { needsReply, reportOf } from "./report";
 
 /** The prompts of a run (Run context): the full one, and the one for a resumed session. */
 interface Prompts {
@@ -27,15 +28,19 @@ interface Prompts {
   resume?: { prompt: string; manifest: RunContextManifest };
 }
 
-function manifestOf(sel: Selection, resumed: boolean): RunContextManifest {
+/**
+ * What a run's prompt carried. Problem 6: the request's own files count with the files, and its
+ * quote, 产出 and 引用 with the refs (the topic lines leave the request out).
+ */
+function manifestOf(sel: Selection, resumed: boolean, m: Pick<TopicMessage, "ext" | "refs">): RunContextManifest {
   const out: RunContextManifest = {
     resumed,
     chars: sel.chars,
     messages: sel.rows.length,
     omitted: sel.omitted,
-    files: sel.stats.files,
+    files: sel.stats.files + (m.ext?.attachments?.length ?? 0),
     cards: sel.stats.cards,
-    refs: sel.stats.refs,
+    refs: sel.stats.refs + (m.ext?.replyTo ? 1 : 0) + (m.ext?.artifactRefs?.length ?? 0) + (m.refs?.length ?? 0),
   };
   if (sel.rows.length > 0) {
     out.firstSeq = sel.rows[0].seq;
@@ -146,6 +151,7 @@ export abstract class DeskRuns extends DeskCore {
         else if (!m.messageId.includes(":")) await this.ack(r);
         await this.setStatus(r, "created");
         await this.topic(r, "in_progress");
+        await this.answeredReports(r);
 
         const machines = this.machinesFor(r, await loadMachines(this.env));
         const machine = this.pick(r, runner, machines, how?.exclude ?? []);
@@ -307,6 +313,24 @@ export abstract class DeskRuns extends DeskCore {
     }
   }
 
+  /**
+   * 接 4.2: the topic's earlier runs that ended waiting for a reply (`needs_reply`) are answered
+   * by the run `r` that starts now: their `run.updated` says so (phase `done`). Never throws.
+   */
+  protected async answeredReports(r: RunRow): Promise<void> {
+    const waiting = this.sql
+      .exec<RunRow>("SELECT * FROM runs WHERE topic_id = ? AND id != ? AND ended_at IS NOT NULL AND report IS NOT NULL AND status = 'done' ORDER BY created_at DESC LIMIT 5", r.topic_id, r.id)
+      .toArray() as RunRow[];
+    for (const prev of waiting) {
+      if (!needsReply(reportOf(prev))) continue;
+      try {
+        await this.setStatus(prev, prev.status);
+      } catch (err) {
+        this.log.warn("answered report update failed", { runId: prev.id, err });
+      }
+    }
+  }
+
   /** The best machine for the run; an aside run needs a daemon that runs it read-only. The
    * machine of the topic's last session comes first, so the run can continue that session. */
   protected pick(r: RunRow, runner: BotRunner, machines: MachineView[], excluded: string[] = []): MachineView | null {
@@ -410,12 +434,12 @@ export abstract class DeskRuns extends DeskCore {
       // Who is in the group and their 岗位: hand-offs and parts go to members by name.
       members: membersText(await groupMembers(this.env.DB, m.groupId), botId),
     });
-    const out: Prompts = { prompt, manifest: manifestOf(sel, false) };
+    const out: Prompts = { prompt, manifest: manifestOf(sel, false, m) };
     if (since) {
       const delta = selectLines(undefined, since.newest, since.total, name, CONTEXT_CHARS, lines);
       out.resume = {
         prompt: buildResumePrompt({ names, context: delta.text, request, followUps, refs, contextTools, ...(brief ? { brief: briefText(brief) } : {}) }),
-        manifest: manifestOf(delta, true),
+        manifest: manifestOf(delta, true, m),
       };
     }
     return out;
