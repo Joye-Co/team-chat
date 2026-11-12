@@ -92,7 +92,8 @@ async function visibleMachines(env: Env, a: AuthContext, only?: string): Promise
       continue;
     }
     let mine = false;
-    if (m.takeoverUrl) {
+    // design-roles 3.6: someone else's personal machine is taken over only by its owner.
+    if (m.takeoverUrl && view.ownerId === undefined) {
       for (const runId of m.runningRuns) {
         const ix = await runIndex(env.DB, runId);
         const run = ix ? await deskStub(env, ix.bot_id).getRun(ix.bot_id, ix.id) : null;
@@ -121,6 +122,25 @@ async function oneMachine(env: Env, a: AuthContext, id: string): Promise<Machine
   const [m] = await visibleMachines(env, a, id);
   if (!m) throw new ApiError("not_found", "machine not found");
   return m;
+}
+
+/**
+ * design-roles 3.3: a check or a machine's owner changed, so the queued runs of these AI members
+ * are placed again at once (the desks' alarms would only try again later). Never fails the request.
+ */
+function redispatch(env: Env, ctx: ExecutionContext, botIds: string[]): void {
+  for (const botId of new Set(botIds)) {
+    ctx.waitUntil(
+      deskStub(env, botId)
+        .redispatch(botId)
+        .catch(() => undefined),
+    );
+  }
+}
+
+/** The AI members whose queued runs a machine's owner change may move: every enabled runner. */
+async function runnerBots(db: D1Database): Promise<string[]> {
+  return (await db.prepare("SELECT member_id FROM bot_runners WHERE enabled = 1").all<{ member_id: string }>()).results.map((x) => x.member_id);
 }
 
 /** A personal machine of the caller (checked AI members live only there). */
@@ -310,7 +330,7 @@ export function registerBotRoutes(): void {
     method: "PATCH",
     path: "/v1/machines/:id",
     auth: "member",
-    async handler({ env, params, auth, body }) {
+    async handler({ env, ctx, params, auth, body }) {
       const req = await body(UpdateMachineRequest);
       const a = auth as AuthContext;
       const m = await requireMachineManager(env.DB, a, params.id);
@@ -366,6 +386,7 @@ export function registerBotRoutes(): void {
           throw new ApiError("conflict", "the machine's owner changed meanwhile");
         }
         await auditStatement(env.DB, a, { action: "machine.update", target: m.id, details }, now).run();
+        if (details.owner !== undefined) redispatch(env, ctx, await runnerBots(env.DB));
       }
       return oneMachine(env, a, m.id);
     },
@@ -389,7 +410,7 @@ export function registerBotRoutes(): void {
     method: "PUT",
     path: "/v1/machines/:id/bots/:botId",
     auth: "member",
-    async handler({ env, params, auth, body }) {
+    async handler({ env, ctx, params, auth, body }) {
       const req = await body(SetMachineBotRequest);
       const a = auth as AuthContext;
       await requirePersonalOwner(env.DB, a, params.id);
@@ -419,6 +440,7 @@ export function registerBotRoutes(): void {
           now,
         ),
       ]);
+      redispatch(env, ctx, [bot.id]);
       return oneMachine(env, a, params.id);
     },
   });
@@ -427,12 +449,13 @@ export function registerBotRoutes(): void {
     method: "DELETE",
     path: "/v1/machines/:id/bots/:botId",
     auth: "member",
-    async handler({ env, params, auth }) {
+    async handler({ env, ctx, params, auth }) {
       const a = auth as AuthContext;
       await requirePersonalOwner(env.DB, a, params.id);
       const res = await env.DB.prepare("DELETE FROM machine_bots WHERE machine_id = ? AND bot_id = ?").bind(params.id, params.botId).run();
       if (res.meta.changes) {
         await auditStatement(env.DB, a, { action: "machine.bots.delete", target: params.id, details: { botId: params.botId } }).run();
+        redispatch(env, ctx, [params.botId]);
       }
       return oneMachine(env, a, params.id);
     },

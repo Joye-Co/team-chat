@@ -375,6 +375,11 @@ export interface TopicMessage {
    * null = nobody. Absent = the author when the author is a person. Server only.
    */
   requestedFor?: string | null;
+  /**
+   * design-roles 3.3 rule 2: the machine of the run this work was handed over (转交, 分出去) from;
+   * the person's own machine may take it there. Server only.
+   */
+  fromMachine?: string;
 }
 
 /** Who pressed a card button, as BotDesk.cardAction gets it. */

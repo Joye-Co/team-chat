@@ -17,8 +17,9 @@ import { unwrap } from "../../core/errors";
 import type { Brief } from "../../agent/frontdesk";
 import { requestAuthors, requestText } from "../../context/render";
 import type { ChainStepOut, PartRow } from "../chains";
-import { cut } from "../dispatch";
+import { cut, personalBlock } from "../dispatch";
 import { deskStub, linkStub } from "../env";
+import { loadMachines, loadRunner } from "../store";
 import type { RunProof } from "../proof";
 import { memberInfo, type TopicMessage } from "../room";
 import { ACTIVE, type ChainMeta, type RunRow, codeOf } from "./core";
@@ -27,6 +28,8 @@ import { DeskFront } from "./front";
 
 /** A run that handed its work over and has not stopped by itself is stopped after this long. */
 export const HANDED_OVER_STOP_MS = 2 * 60_000;
+/** design-roles 3.3: the other member may not work for the chain's person (docs/protocol.md). */
+export const NOT_FOR_REQUESTER = "delegation.not_for_requester";
 /** A run report the room did not take is sent again after this long. */
 const PENDING_STATE_RETRY_MS = 30_000;
 
@@ -36,6 +39,8 @@ export interface DelegateIn {
   requesterId: string;
   /** The person the work is for (the giving run's `requested_for`); absent from an older desk. */
   requestedFor?: string | null;
+  /** The giving run's machine (design-roles 3.3 rule 2); absent from an older desk. */
+  fromMachine?: string;
   brief: Brief;
   fromBotId: string;
   kind: "handoff" | "assign";
@@ -113,7 +118,7 @@ export abstract class DeskDelegate extends DeskFront {
         lastWords: lastWords(r.progress_text),
         code: this.codeOfWork(r),
       });
-      runId = await this.handOver(target, { groupId: r.group_id, topicId, requesterId: r.requested_by, requestedFor: r.requested_for ?? undefined, brief, fromBotId: botId, kind, chain: step, workOrder });
+      runId = await this.handOver(target, { groupId: r.group_id, topicId, requesterId: r.requested_by, requestedFor: r.requested_for ?? undefined, ...(r.machine_id ? { fromMachine: r.machine_id } : {}), brief, fromBotId: botId, kind, chain: step, workOrder });
       if (!runId) throw new ApiError("conflict", "that member did not start the work", "delegation.refused");
     } catch (err) {
       // Refused: the room drops the step, the count and the routing owner stay as they were.
@@ -198,7 +203,10 @@ export abstract class DeskDelegate extends DeskFront {
     try {
       return await deskStub(this.env, target).takeDelegation(target, d);
     } catch (err) {
-      throw new ApiError("conflict", String((err as Error)?.message ?? err).slice(0, 300), "delegation.refused");
+      const message = String((err as Error)?.message ?? err);
+      // design-roles 3.3: the other member may not work for this person (a reason of its own).
+      const reason = message.includes(NOT_FOR_REQUESTER) ? NOT_FOR_REQUESTER : "delegation.refused";
+      throw new ApiError("conflict", message.slice(0, 300), reason);
     }
   }
 
@@ -241,11 +249,28 @@ export abstract class DeskDelegate extends DeskFront {
       throw new ApiError("conflict", "that member takes no work now", "delegation.unavailable");
     }
     if (this.startBlocked(d.topicId)) throw new ApiError("conflict", "that member is already working in this topic; wait until it is done or do it yourself", "delegation.busy");
+    // design-roles 3.3: refused at once when no machine may ever take it for the person (the
+    // member works only on someone else's own machine); the giver may choose another member.
+    const runner = await loadRunner(this.env.DB, botId);
+    if (runner) {
+      const ctx = await this.placeCtx({ id: "", requested_for: d.requestedFor ?? null });
+      if (d.fromMachine) ctx.fromMachine = d.fromMachine;
+      const owner = personalBlock(await loadMachines(this.env), runner, ctx);
+      if (owner) {
+        const names = await this.names([botId, owner]);
+        throw new ApiError(
+          "conflict",
+          `${names.get(botId) ?? botId} works only for ${names.get(owner) ?? owner} on their own computer (${NOT_FOR_REQUESTER}); choose another member`,
+          NOT_FOR_REQUESTER,
+        );
+      }
+    }
     const key = `delegated:${ulid()}`;
     // The run's step is known before it starts, so its first report already names it.
     this.putMeta(`chainFor:${key}`, JSON.stringify(d.chain));
     const m: TopicMessage = { groupId: d.groupId, topicId: d.topicId, messageId: key, authorId: d.requesterId, body: d.workOrder, mentioned: true };
     if (d.requestedFor !== undefined) m.requestedFor = d.requestedFor;
+    if (d.fromMachine) m.fromMachine = d.fromMachine;
     await this.start(m);
     const run = this.sql.exec<{ id: string }>("SELECT id FROM runs WHERE trigger_message_id = ?", key).toArray()[0];
     if (!run) {
