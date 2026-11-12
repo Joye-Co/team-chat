@@ -47,6 +47,11 @@ const quietSince = (r: RunRow): number => Math.max(r.last_event_at, r.open_tools
 const MAX_LOOP_CALLS = 32;
 
 export abstract class DeskStall extends DeskEvents {
+  /** design-takeover 3.3 (takeover.ts): when the next hold reminder is due, or null. */
+  protected abstract holdDueAt(): number | null;
+  /** design-takeover 3.3 (takeover.ts): sends the hold reminders that are due. */
+  protected abstract remindHolds(now: number): Promise<void>;
+
   // -------------------------------------------------------------------------
   // Stall detection
   // -------------------------------------------------------------------------
@@ -78,7 +83,7 @@ export abstract class DeskStall extends DeskEvents {
         `SELECT min(last_event_at) AS at FROM runs WHERE ${ACTIVE} AND external = 0 AND status = 'running' AND stalled = 0 AND nudged = 0 AND open_tools = 0 AND interventions < ${MAX_INTERVENTIONS} AND approval_id IS NULL AND paused_by IS NULL AND ${PRESENT} AND stall_step = 0`,
       )
       .one().at;
-    const times = [stall === null ? null : stall + STALL_MS, stuck === null ? null : stuck + START_STUCK_MS, retry, nudge === null ? null : nudge + NUDGE_MS, watch].filter(
+    const times = [stall === null ? null : stall + STALL_MS, stuck === null ? null : stuck + START_STUCK_MS, retry, nudge === null ? null : nudge + NUDGE_MS, watch, this.holdDueAt()].filter(
       (x): x is number => x !== null,
     );
     if (times.length === 0) return;
@@ -105,6 +110,7 @@ export abstract class DeskStall extends DeskEvents {
     }
     await this.superviseRunning(now);
     await this.superviseLimits(now);
+    await this.remindHolds(now);
     // Runs whose start broke before they reached a machine (for example a reset mid-start).
     const stuck = this.sql
       .exec<{ id: string }>(
@@ -420,7 +426,9 @@ export abstract class DeskStall extends DeskEvents {
     }
     await this.closeProgress(r);
     await this.closeApprovalCard(r, "expired");
-    this.sql.exec("UPDATE runs SET approval_id = NULL, paused_by = NULL, paused_at = NULL WHERE id = ?", r.id);
+    this.sql.exec("UPDATE runs SET approval_id = NULL WHERE id = ?", r.id);
+    r.approval_id = null;
+    await this.clearHold(r);
     await this.setStatus(r, "cancelled", { ended_at: Date.now(), summary: `restarted: ${why}` });
     const key = `restart:${ulid()}`;
     const ack = request.m.ackMessageId ?? (r.trigger_message_id.includes(":") ? undefined : r.trigger_message_id);

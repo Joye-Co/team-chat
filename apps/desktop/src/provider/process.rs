@@ -362,6 +362,8 @@ impl CoreProvider {
                 started_at: r.started_at.map(|t| t as i64),
                 ended_at: r.ended_at.map(|t| t as i64),
                 updated_at: r.updated_at as i64,
+                model: r.model,
+                effort: r.effort,
                 summary: r.summary,
                 plan: r
                     .plan

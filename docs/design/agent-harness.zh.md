@@ -1,6 +1,54 @@
 # AI 成员的 harness：前台 + 执行者、盯活、工作线、上下文、批准、沉淀
 
-状态：总体方案，待拍板（第 13 节）。日期 2026-11-08。取代只讲选模型的草案。
+状态：已拍板并实现（M1–M6 在 2026-11-08 合并），之后按「可用版」修和补；下面的正文是当时的方案，和实现不一样的地方以
+「实现状态」一节为准。日期 2026-11-08，实现状态更新于 2026-11-12。取代只讲选模型的草案。
+
+## 实现状态
+
+还没做完、还没在真电脑上验过的，逐条在 [docs/plans/usable.zh.md](../plans/usable.zh.md) 和
+[docs/plans/usable/](../plans/usable/) 下（接、盯、机、模四份审计，真机验证记录 verify-log.zh.md）。这一节只说主线上已经
+有什么、和下面的方案哪里不同。
+
+**做了的**
+
+- 前台（3.2）：服务端 `server/src/agent/frontdesk.ts`、`server/src/bots/desk/front.ts`。先存后做，判断记录在开发者视图。
+  没配 AI 服务时走规则路径（每个请求都派给执行者）。
+- 上下文（第 5 节）：`server/src/context/`，按 ID 取、分页、搜索；请求自带的附件、引用、产出进提示词。
+- 工作线（第 4 节）：同一成员、同一话题、同一仓库共用一个工作目录、一个分支和一个 CLI 会话；私聊默认续上一个会话。
+- 盯活（3.4）：`server/src/agent/supervise.ts`、`server/src/bots/desk/stall.ts`。催一次、提醒打转、同会话重来、最后换电脑；
+  电脑失联先等；到时限先存档再续一轮；重来带恢复说明，对外动过的不自动重跑；盯活做的每一步记在运行上。
+- 结构化汇报：`chat-run report --state done|blocked|waiting`，话题状态按汇报算；结果卡的数字从运行记录取；失败按类别说一句中文。
+- 要批准的动作（第 6 节）：守护进程在执行那一步拦（Claude Code 的 hook、Codex 和 ACP 的权限请求、任务 PATH 最前面的垫片），
+  卡片直接发给批准人，「这件事里都同意」；问不到守护进程时一律拒绝。
+- 转交和分出去（3.5）：`chat-run handoff`、`chat-run assign`，有层数、次数和回环上限，「全部停止」。另加了人写的顺序
+  `@A → @B → @C`（界面叫「按顺序做」），设计见 [design-relay.zh.md](../plans/usable/design-relay.zh.md)。
+- 沉淀（第 7 节）：`server/src/memory/`，四层、版本、全文检索（`chat-run memory search`）、运行后复盘、按团队时区每天整理、
+  记忆更新和撤回；按群过滤，私聊来的只对当事人可见。
+- 评估（第 9 节）：前台判断的回放集（`server/scripts/replay-frontdesk.ts`）和提示词补丁登记（`server/src/agent/patches.ts`）。
+- 模型（第 8 节）：电脑上报模型和思考强度；团队按运行方式设一次，运行记录写实际用的模型和思考强度。
+
+**和方案不同的**
+
+- **团队工具走命令行，不走 MCP**（3.3、第 10 节、第 11 节）：守护进程把 `chat-run` 放在任务的 PATH 上，读话题、产出、
+  卡片、决定、成员名单、记忆，发卡片、产出、汇报，转交和分出去都是它的子命令，经守护进程（本地 socket，Codex 用请求目录）
+  到服务端，见 [machine-protocol.md](../machine-protocol.md) 的 `output` 和 `context` 特性。usable.zh.md 第 4 节定了保留
+  命令行、不做 MCP。
+- **前台只有四种决定**（3.2）：回复（`reply`）、派工（`dispatch`，带交代单）、追问一句（`ask`，发成卡片）、不理
+  （`skip`）。表里的 `attach`、`steer`、`handoff`、`note`、`stop` 不由前台做：跟进由代码直通在做的运行；转交由执行者自己做；
+  「停」在没配 AI 服务时由代码认出来，停下请求人自己的运行；配了时前台不处理，「停」作为补充交给在做的运行（要停就点 **停止**）。前台没有读工具，读的是代码先备好的话题。
+- **盯活不调模型**（3.4）：「出了事才叫醒模型」那一层没有做，九种处理里只做了代码能做的（提醒、打断重来、换电脑、告诉人、
+  停止）。没有备用模型、换档、拆小。
+- **没有工单对象**（第 4 节）：`WorkOrder`、`work.updated` 没有加；一件事由运行、话题的参与成员和 `chainId` 串起来。
+  一个话题可以有几个 AI 成员一起或先后在做，`ownerId` 只决定不带 @ 的跟进给谁。
+- **没有档位**（第 8 节）：「更快」「更强」、@ 胶囊上选档、成员档位（先问、只在工作目录）都不做。
+- **等批准时整件事停住**（第 6 节）：hook 同步等待，「不卡住整件事」这一条不做。没有代审。
+- **接管**做成状态机：每个运行一个人看得见的状态（`BotRun.phase`），暂停、继续、接管、交还，接管时在应用里对工作目录跑命令
+  （已合并：服务端为每个运行算出 `phase`，有 `holdKind`、交还小结 `lastHandback`，路由 `/v1/runs/:id/pause`、`/resume`、
+  `/takeover`、`/commands`；应用的状态和界面；守护进程的 `takeover` 特性，虚拟机里只停 CLI 不再整台暂停）。设计见
+  [design-takeover.zh.md](../plans/usable/design-takeover.zh.md)。
+- **单独问**还是只读的单独运行，不是从执行者的会话分叉；跨电脑还原会话没有做，换电脑时开新会话并带恢复说明。
+
+第 13 节已定，见那一节开头。
 
 ## 0. 结论
 
@@ -189,6 +237,8 @@ sequenceDiagram
 
 ### 3.2 前台
 
+> 实现：前台只有 `reply`、`dispatch`、`ask`、`skip` 四种决定，没有读工具，见文首「实现状态」。
+
 每一轮先读第 5.2 节列的上下文，再从下面这组固定的决定里选，可以一次选几个：
 
 | 决定 | 用在 | 结果 |
@@ -232,8 +282,8 @@ sequenceDiagram
 
   这些之外，还有一段稳定的"在这里怎么工作"说明，走 Claude Code `--append-system-prompt` 或 Codex developerInstructions，
   这个通道现在已经有了。
-- 团队工具由守护进程给每次运行起一个 MCP 服务（Claude Code `--mcp-config`；Codex `mcp_servers` 或 app-server 的动态工具
-  `item/tool/call`；ACP `session/new.mcpServers`）。工具调用通过现有的 `output` 通道直接到服务端取数据，不经过前台模型：
+- （实现：团队工具是 `chat-run` 命令，不是 MCP，见文首「实现状态」。）团队工具由守护进程给每次运行起一个 MCP 服务
+  （Claude Code `--mcp-config`；Codex `mcp_servers` 或 app-server 的动态工具 `item/tool/call`；ACP `session/new.mcpServers`）。工具调用通过现有的 `output` 通道直接到服务端取数据，不经过前台模型：
   - `context_get(id)`、`topic_history(topic, before, limit)`、`search(q)`；
   - `file_get(id)`：把原图或原文件取到工作目录，Claude Code 能直接看图；
   - `memory_search(q)`、`memory_note(text)`；
@@ -248,6 +298,8 @@ sequenceDiagram
   PR、CI 和验收证据从集成和运行记录里读，不信模型自己报。执行者自己做的交互卡片和产出照旧由它直接发。
 
 ### 3.4 盯活
+
+> 实现：盯活只用代码规则，不叫醒模型；没有备用模型、换档和拆小，见文首「实现状态」。
 
 前台是经理：不替执行者干活，也不在它每一步的路上，但要对手下每个在做的工单负责到底。分两层：代码一直看，出了事才叫醒
 模型。
@@ -641,6 +693,9 @@ D1 里三张表：`memories`、`memory_versions`，加上中文二字全文检�
 | M6 评估 | 回放集、补丁登记、指标、按模型代际对比 | M2 开始就收集数据 | 至少 50 条真实用例的离线回放在 CI 里跑；每段提示词补丁都有编号和失败用例 |
 
 ## 13. 要拍板的
+
+> 已定：第 1、3、4 条按推荐；第 2 条改成团队另配一把 key（计划用 DeepSeek，usable.zh.md 第 5 节）；第 5 条的词只用了
+> 做了的那些，档位的词（更快、更强、全开、先问、只在工作目录）没有用。
 
 1. **前台放服务端**（推荐），不像 DeepSeek 原型那样放在机器上的一个长会话里。代价：服务端开始自己调模型，必须先配好 AI 服务。
 2. **前台模型选哪个**：推荐先用 Haiku 5.5（工具调用稳），之后用回放集和 DeepSeek 比一比成本和准确率。

@@ -707,6 +707,8 @@ mod tests {
             started_at: Some(started),
             ended_at: None,
             updated_at: started,
+            model: None,
+            effort: None,
             summary: None,
             plan,
         }

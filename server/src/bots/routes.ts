@@ -11,6 +11,7 @@ import {
   MachineCreateArtifactRequest,
   RUN_KIND_ASIDE,
   ResumeRunRequest,
+  RunCommandRequest,
   SetBotRunnerRequest,
   SetMachineBotRequest,
   SetRunAcceptanceRequest,
@@ -20,6 +21,7 @@ import {
   UpdateMachineRequest,
 } from "@chat/protocol";
 import { auditStatement } from "../core/audit";
+import { auditValue } from "../core/auditvalue";
 import { roomStub } from "../core/env";
 import type { AuthContext } from "../core/auth";
 import { sha256Hex } from "../core/crypto";
@@ -610,7 +612,9 @@ export function registerBotRoutes(): void {
       const n = limit === null ? 200 : Number(limit);
       if (!Number.isInteger(afterSeq) || afterSeq < 0) throw new ApiError("invalid", "afterSeq must be a non-negative integer");
       if (!Number.isInteger(n) || n < 1 || n > 500) throw new ApiError("invalid", "limit must be 1..500");
-      const page = await deskStub(env, row.bot_id).events(row.bot_id, row.id, afterSeq, n);
+      // design-takeover 3.6: a person's command output only for that person and admins.
+      const a = auth as AuthContext;
+      const page = await deskStub(env, row.bot_id).events(row.bot_id, row.id, afterSeq, n, { id: a.memberId, admin: a.member.level === "owner" });
       if (!page) throw new ApiError("not_found", "run not found");
       return page;
     },
@@ -746,10 +750,62 @@ export function registerBotRoutes(): void {
       const req = await body(ResumeRunRequest);
       const row = await visibleRun(env.DB, a, params.id);
       const who = { id: a.memberId, kind: a.member.kind, level: a.member.level } as TakeoverActor;
+      // An admin may hand back for the person holding it (design-takeover 3.2): the audit says for whom.
+      const before = await deskStub(env, row.bot_id).getRun(row.bot_id, row.id);
       const run = unwrap(await deskStub(env, row.bot_id).resume(row.bot_id, row.id, who, req.note));
+      const holder = before?.pausedBy && before.pausedBy !== a.memberId ? { for: before.pausedBy } : {};
       // The note itself goes to the CLI, not into the audit log.
-      await auditStatement(env.DB, a, { action: "run.resume", target: row.id, details: { botId: row.bot_id, note: Boolean(req.note) } }).run();
+      await auditStatement(env.DB, a, { action: "run.resume", target: row.id, details: { botId: row.bot_id, note: Boolean(req.note), ...(before?.holdKind ? { holdKind: before.holdKind } : {}), ...holder } }).run();
       return run;
+    },
+  });
+
+  // design-takeover 3.2, 3.6: take over a run (the CLI stops; the person runs commands in its work folder).
+  registerRoute({
+    method: "POST",
+    path: "/v1/runs/:id/takeover",
+    auth: "member",
+    async handler({ env, params, auth }) {
+      const a = auth as AuthContext;
+      const row = await visibleRun(env.DB, a, params.id);
+      const who = { id: a.memberId, kind: a.member.kind, level: a.member.level } as TakeoverActor;
+      const run = unwrap(await deskStub(env, row.bot_id).takeover(row.bot_id, row.id, who));
+      await auditStatement(env.DB, a, { action: "run.takeover", target: row.id, details: { botId: row.bot_id } }).run();
+      return run;
+    },
+  });
+
+  // design-takeover 3.6 (T3): the person holding a take-over runs one command at a time.
+  registerRoute({
+    method: "POST",
+    path: "/v1/runs/:id/commands",
+    auth: "member",
+    async handler({ env, params, auth, body }) {
+      const a = auth as AuthContext;
+      const req = await body(RunCommandRequest);
+      const row = await visibleRun(env.DB, a, params.id);
+      const who = { id: a.memberId, kind: a.member.kind, level: a.member.level } as TakeoverActor;
+      const res = unwrap(await deskStub(env, row.bot_id).runCommand(row.bot_id, row.id, who, req.command));
+      await auditStatement(env.DB, a, {
+        action: "run.command",
+        target: row.id,
+        details: { botId: row.bot_id, commandId: res.commandId, command: auditValue(req.command) },
+      }).run();
+      return res;
+    },
+  });
+
+  registerRoute({
+    method: "POST",
+    path: "/v1/runs/:id/commands/:commandId/cancel",
+    auth: "member",
+    async handler({ env, params, auth }) {
+      const a = auth as AuthContext;
+      const row = await visibleRun(env.DB, a, params.id);
+      const who = { id: a.memberId, kind: a.member.kind, level: a.member.level } as TakeoverActor;
+      const res = unwrap(await deskStub(env, row.bot_id).cancelCommand(row.bot_id, row.id, who, params.commandId));
+      await auditStatement(env.DB, a, { action: "run.command.cancel", target: row.id, details: { botId: row.bot_id, commandId: params.commandId } }).run();
+      return res;
     },
   });
 

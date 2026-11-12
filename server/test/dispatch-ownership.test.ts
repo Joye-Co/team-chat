@@ -70,6 +70,16 @@ describe("ownership rules", () => {
     expect(mayTake(other, runner, ctx("b", { fromMachine: "a-linux" }))).toBe(false);
   });
 
+  it("skips a checked computer that lacks the member's runtime", () => {
+    const laptop = m("a-mac", { ownerId: "a", personalBots: new Map([["bot", null]]), clis: [{ runtime: "claude", kind: "claude", command: "claude", available: true }] });
+    const team = m("team");
+    // Not only the laptop: the team computer too (the laptop stays, it cannot take the run anyway).
+    expect(placesFor([team, laptop], runner, ctx("a"))).toEqual({ machines: [team, laptop], checked: false });
+    expect(reachable([team, laptop], runner, ctx("a"))).toBe(true);
+    expect(personalBlock([team, laptop], runner, ctx("a"))).toBeNull();
+    expect(ids(candidates([team, laptop], runner, now, [], ctx("a")))).toEqual(["team"]);
+  });
+
   it("knows when no computer may ever take the run, whoever is online", () => {
     const own = m("a-mac", { ownerId: "a", personalBots: new Map(), connected: false });
     const pinned = { ...runner, machineId: "a-mac" };
@@ -163,6 +173,33 @@ describe("dispatch by ownership", () => {
     co.close();
   });
 
+  it("says it waits for the checked computer once that computer goes offline while the run waits for it", async () => {
+    const w = await world();
+    const mac = await personalMachine(w, w.human, "alice-mac");
+    await check(w.human, mac.id, w.bot.id);
+    await inGroup(w, w.owner.id);
+    const { d: laptop } = await Daemon.connect(mac.token, { maxParallelRuns: 1 });
+    const { c } = await Client.connect(w.human.token);
+    await mention(c, w);
+    const a = await laptop.next((f) => f.t === "run.assign");
+    laptop.send({ t: "run.accept", runId: a.runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === a.runId && e.data.run.status === "running");
+    // The laptop is busy: the second request waits in the queue, not for the laptop to come online.
+    const topicId = await mention(c, w, "@dev and the docs");
+    const queued = (await c.waitEvent((e) => e.type === "run.updated" && e.data.run.topicId === topicId && e.data.run.queuedAt !== undefined)).data.run;
+    expect(queued.waitingFor).toBe("queue");
+    expect(botSaid(c, w, TEXT.waitPersonal(["alice-mac"]))).toBeUndefined();
+
+    // The laptop closes; the queue is placed again: it now waits for the laptop to come online.
+    laptop.close();
+    await waitUntilOffline(w.human, mac.id);
+    await check(w.human, mac.id, w.bot.id);
+    await waitUntil(() => botSaid(c, w, TEXT.waitPersonal(["alice-mac"])), 5000, "wait note");
+    const waiting = (await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === queued.id && e.data.run.waitingFor === "offline")).data.run;
+    expect(waiting.phase).toBe("waiting_computer");
+    c.close();
+  });
+
   it("says at once when the member works only on someone else's computer, and refuses its retry", async () => {
     const w = await world();
     const own = await personalMachine(w, w.owner, "joye-mac");
@@ -242,6 +279,9 @@ describe("dispatch by ownership", () => {
     md.event(a.runId, { type: "session", sessionId: "s-1", runtime: "codex" });
     await md.acked(a.runId, md.done(a.runId, { status: "succeeded", resultText: "done", sessionId: "s-1" }));
     await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === a.runId && e.data.run.endedAt !== undefined);
+
+    // An admin does not retry work on Alice's computer for her (design-roles 3.6).
+    expect((await api(`/v1/runs/${a.runId}/retry`, { token: w.owner.token, body: {} })).status).toBe(403);
 
     await co.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "@dev one more thing", mentions: [w.bot.id] });
     const b = await td.next((f) => f.t === "run.assign");

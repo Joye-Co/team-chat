@@ -22,6 +22,7 @@ import { ANONYMOUS_ID } from "../../cards2/privacy";
 import { githubFor } from "../../github/assign";
 import { supersedeWaits } from "../../github/machine";
 import { DeskCore, QUEUED, type RunRow } from "./core";
+import { takeoverOf } from "./hold";
 import { type FailureNote, failureNote } from "./failure";
 import { LIMIT_NOTE, LIMIT_REACHED, type LoggedFrame, type RecoveryFacts, outwardAction, recoveryNote, stepOf } from "../../agent/recovery";
 import type { RunProof } from "../proof";
@@ -305,7 +306,6 @@ export abstract class DeskRuns extends DeskCore {
     const botId = this.botId as string;
     const names = await this.names([botId, ownerId]);
     const text = TEXT.personalOnly(names.get(botId) ?? botId, names.get(ownerId) ?? ownerId);
-    this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `personalOnly:${r.id}`, ownerId);
     this.log.info("run not for this machine owner", { runId: r.id, reason: "machine.personal_requester" });
     // The front desk may have put 👀 on the request while it read it: nothing works on it now.
     if (!r.trigger_message_id.includes(":")) await this.unack(r.group_id, r.trigger_message_id).catch(() => undefined);
@@ -516,24 +516,33 @@ export abstract class DeskRuns extends DeskCore {
         // design-roles 3.3: a check, a placement or an owner changed while it waited, and no
         // machine may take it for its person any more: it stops waiting and the topic says why.
         const blocked = personalBlock(all, runner, ctx);
+        // An ended run leaves the queue: the runs behind it move up (returns true).
         if (blocked) {
           await this.endPersonal(r, blocked);
-          return false;
+          return true;
         }
         const machines = this.machinesFor(r, all);
         const machine = prompt === null ? null : this.pick(r, runner, machines, JSON.parse(r.excluded) as string[], ctx);
+        const none = machine ? null : this.whyNone(r, runner, machines, ctx);
         if (!machine) {
+          // It waits for the person's own machines while those are offline (not only when it
+          // first queued for that: a checked laptop that was busy may go offline meanwhile).
           const places = placesFor(machines, runner, ctx);
-          this.keepPlaces(r, places.machines, places.checked && this.meta(`waitPersonal:${id}`) !== null);
+          const waitsPersonal = places.checked && none?.why === "offline";
+          const before = this.meta(`waitPersonal:${id}`) !== null;
+          this.keepPlaces(r, places.machines, waitsPersonal);
+          if (waitsPersonal && !before && none?.why === "offline") {
+            await this.note(r, TEXT.waitPersonal(none.names)).catch((err) => this.log.warn("wait note failed", { runId: id, err }));
+            await this.setStatus(r, "created");
+          }
         }
-        if (!machine && prompt !== null && r.kind !== RUN_KIND_ASIDE) {
+        if (none && prompt !== null && r.kind !== RUN_KIND_ASIDE) {
           // 模 3.1: the computers' CLI was signed out while the run waited: it does not wait
           // for a sign-in nobody knows is needed; the topic says which computer needs it.
-          const none = this.whyNone(r, runner, machines, ctx);
           if (none.why === "signed_out") {
             const note = await this.signedOutNote(r, runner.runtime, none.machines);
             await this.end(r, "failed", note.text, "blocked", cut(note.text, 280), false, note.mentions);
-            return false;
+            return true;
           }
           // 模 3.4: its computers are at their limit: it waits for the reset (the topic hears
           // once, when the wait starts), and later runs that can go elsewhere still do.
@@ -849,7 +858,9 @@ export abstract class DeskRuns extends DeskCore {
     // Whose GitHub the run uses on this machine (design-github-identity 3.2); never the token.
     const github = r.kind === RUN_KIND_ASIDE ? null : await githubFor(this.env, { requestedFor: r.requested_for, requestedBy: r.requested_by, botId: this.botId as string }, machine);
     if (github) frame.github = github.github;
-    this.sql.exec("UPDATE runs SET machine_id = ?, runtime = ? WHERE id = ?", machine.id, runner.runtime, r.id);
+    // design-takeover 3.6: how a person can take over the run on this machine.
+    r.takeover = takeoverOf(machine);
+    this.sql.exec("UPDATE runs SET machine_id = ?, runtime = ?, takeover = ? WHERE id = ?", machine.id, runner.runtime, r.takeover, r.id);
     r.machine_id = machine.id;
     r.runtime = runner.runtime;
     await this.env.DB.prepare("UPDATE bot_runs SET machine_id = ?, github_member_id = ? WHERE id = ?").bind(machine.id, github?.memberId ?? null, r.id).run();
@@ -905,6 +916,11 @@ export abstract class DeskRuns extends DeskCore {
     return this.serial(runId, async () => {
       const r = this.run(runId);
       if (!r || r.ended_at !== null || r.machine_id !== machineId) return false;
+      // design-takeover 3.7: a run a person holds is not moved or ended; it waits for its machine.
+      if (r.paused_by) {
+        this.log.info("lease ran out while held", { runId, machineId });
+        return true;
+      }
       return this.machineLost(r);
     });
   }

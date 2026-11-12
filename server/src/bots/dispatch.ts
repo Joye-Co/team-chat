@@ -377,13 +377,15 @@ export function mayTake(m: Pick<MachineView, "id" | "labels" | "ownerId" | "pers
 /**
  * The machines a run may go to (design-roles 3.3, 优先顺序): the ones it may take by ownership;
  * when its person checked the member on own machines, only those (and the machine the work was
- * handed over from). `checked`: the run waits for the person's checked machines.
+ * handed over from), counting only checked machines that have its runtime or have not said yet.
+ * `checked`: the run waits for the person's checked machines.
  */
 export function placesFor(machines: MachineView[], runner: RunnerPlace, ctx?: DispatchCtx): { machines: MachineView[]; checked: boolean } {
   const ok = machines.filter((m) => !m.revoked && mayTake(m, runner, ctx));
   const person = ctx?.requestedFor;
   if (!ctx || !person) return { machines: ok, checked: false };
-  const checked = ok.filter((m) => m.ownerId === person && m.personalBots?.has(ctx.botId));
+  // design-roles 3.4: a check does not look at the runtime; a checked machine without it does not count.
+  const checked = ok.filter((m) => m.ownerId === person && m.personalBots?.has(ctx.botId) && (m.clis === undefined || hasRuntime(m, runner.runtime)));
   if (checked.length === 0) return { machines: ok, checked: false };
   const from = ok.find((m) => m.id === ctx.fromMachine && m.ownerId === person && !checked.includes(m));
   return { machines: from ? [from, ...checked] : checked, checked: true };

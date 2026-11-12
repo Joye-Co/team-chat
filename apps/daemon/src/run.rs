@@ -660,22 +660,28 @@ pub async fn supervise(ctx: RunCtx) {
                 env.retain(|(k, _)| k != crate::shim::ENV_GATES);
                 env.push((crate::shim::ENV_GATES.into(), "1".into()));
                 // Claude Code runs Bash with the PATH of the user's shell profile: put the shims
-                // first again before each command. (Windows: Git Bash, not done there.)
+                // first again before each command (on Windows Git Bash, whose /etc/profile puts
+                // /mingw64/bin first).
                 if rt.kind == "claude"
-                    && cfg!(unix)
                     && !env.iter().any(|(k, _)| k == crate::shim::CLAUDE_ENV_FILE)
                 {
                     match crate::shim::claude_env_file(&dir, &bin) {
-                        Ok(f) => {
-                            env.push((crate::shim::CLAUDE_ENV_FILE.into(), f.display().to_string()))
-                        }
+                        Ok(f) => env.push((crate::shim::CLAUDE_ENV_FILE.into(), f)),
                         Err(e) => eprintln!("{} run {run_id}: no Claude env file: {e}", now_ms()),
                     }
+                }
+                // Every bash of the run (Codex's `bash -lc` when the user's shell is bash, Git
+                // Bash, a `bash -l script`) reads BASH_ENV after the profiles that reset PATH.
+                // Codex then skips ~/.bashrc when it captures the shell: the file reads it.
+                if !exec.isolated()
+                    && let Err(e) =
+                        crate::shim::set_bash_env(&mut env, &dir, &bin, rt.kind != "claude")
+                {
+                    eprintln!("{} run {run_id}: no bash env file: {e}", now_ms());
                 }
                 // Codex (and an ACP agent) runs each command in the user's login shell
                 // (`zsh -lc`): on macOS path_helper, or a profile, would put the shims last.
                 // A zsh of the run reads the user's own files, then puts them first again.
-                // (A login bash re-reads the system profile with no such hook: not covered.)
                 if rt.kind != "claude" && cfg!(unix) && !exec.isolated() {
                     match crate::shim::zsh_dotdir(&dir, &bin) {
                         Ok(zdot) => {
