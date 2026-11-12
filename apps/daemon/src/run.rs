@@ -841,6 +841,7 @@ pub async fn supervise(ctx: RunCtx) {
                     .cloned()
                     .chain(cache.iter().map(|c| c.dir.clone()))
                     .collect(),
+                vm: assign.vm,
             };
             let work = spec.cwd.clone();
             // The hook asks through chat-run: a gated run never goes on without it.
@@ -1604,6 +1605,7 @@ mod tests {
             full_prompt: None,
             gates: None,
             github: Some(spec.clone()),
+            vm: None,
         };
         let g = crate::github::Run::new(spec, Arc::new(crate::redact::Redactor::default()), true)
             .with_path(bin.as_os_str());
@@ -1658,6 +1660,7 @@ mod tests {
             full_prompt: None,
             gates: None,
             github: None,
+            vm: None,
         };
         let (w1, g1, n1) = prepare_work(&cfg, &a("r1", None)).await.unwrap();
         assert!(g1.is_some() && n1.is_none());

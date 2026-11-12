@@ -33,6 +33,14 @@ table inet runner_vm {
 		oifname "rvm*" drop
 	}
 
+	# Nothing on the host opens a connection into a VM (the daemon talks to it over vsock), so
+	# one user's processes cannot reach another user's VMs; replies (NFS) still go out.
+	chain output {
+		type filter hook output priority -10; policy accept;
+		oifname "rvm*" ct state established,related accept
+		oifname "rvm*" ip daddr 10.200.0.0/16 drop
+	}
+
 	chain postrouting {
 		type nat hook postrouting priority 100;
 		ip saddr 10.200.0.0/16 oifname != "rvm*" masquerade

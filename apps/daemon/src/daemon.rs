@@ -915,7 +915,8 @@ impl Daemon {
             let mem = crate::metrics::host_memory();
             let starting =
                 u64::from(self.active_count()).saturating_sub(crate::metrics::vms_booted());
-            if !health::vm_memory_ok(mem.map(|m| m.1), mem.map(|m| m.0), vm.mem_mib, starting) {
+            let (_, mem_mib) = vm.size(a.vm);
+            if !health::vm_memory_ok(mem.map(|m| m.1), mem.map(|m| m.0), mem_mib, starting) {
                 return self.reject(&id, "busy", "not enough free memory for another VM");
             }
         }

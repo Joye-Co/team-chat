@@ -317,6 +317,7 @@ fn assign(run: &str, runtime: &str, prompt: &str, upload: Option<String>) -> Dow
         full_prompt: None,
         gates: None,
         github: None,
+        vm: None,
         run_id: run.into(),
         bot_member_id: "bot1".into(),
         group_id: "g1".into(),

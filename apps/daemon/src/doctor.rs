@@ -118,6 +118,21 @@ stopped on this machine: update Claude Code to {a}.{b}.{patch} or later"
             caches.iter().map(|c| c.bytes).sum::<u64>() as f64 / (1u64 << 30) as f64
         );
     }
+    if let Some(vm) = &cfg.vm {
+        let slots = vm.slots(cfg.max_parallel_runs);
+        let _ = writeln!(
+            s,
+            "vm:           slots {}..{} (taps rvm{}..rvm{}); {} vCPU, {} MiB unless the server sends a size, at most {} vCPU, {} MiB",
+            slots.start,
+            slots.end - 1,
+            slots.start,
+            slots.end - 1,
+            vm.vcpus,
+            vm.mem_mib,
+            vm.max_vcpus(),
+            vm.max_mem_mib()
+        );
+    }
     for line in cfg.vm.as_ref().map(old_homes).unwrap_or_default() {
         let _ = writeln!(s, "{line}");
     }

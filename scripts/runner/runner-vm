@@ -1,42 +1,75 @@
 #!/usr/bin/env bash
-# Root helper of the daemon's Firecracker executor, run by the runner user with `sudo -n`
-# (installed to /usr/local/sbin/runner-vm by host-setup.sh, allowed in /etc/sudoers.d/runner-vm).
+# Root helper of the daemon's Firecracker executor, run by a daemon user with `sudo -n`
+# (installed to /usr/local/sbin/runner-vm by host-setup.sh, allowed per user in
+# /etc/sudoers.d/runner-vm and /etc/sudoers.d/runner-vm-<user>).
 #
-#   runner-vm up <slot>                     tap rvm<slot> for the runner user, host side of the slot's /30
+#   runner-vm up <slot>                     tap rvm<slot> for the caller, host side of the slot's /30
 #   runner-vm export <slot> <path> rw|ro    NFS export of <path> to the slot's guest address only
 #   runner-vm down <slot>                   removes the slot's exports and its tap
+#   runner-vm --as <user> <command> ...     root only, without sudo: act for <user>
 #
-# Slot n uses 10.200.0.0/16 at offset 4n: host .1, guest .2. Exported paths must be under
-# /srv/runner or the runner user's home, and never the runner's home itself, one of its dot
-# folders (the CLIs' sign-ins, the daemon's config and token, SSH keys) or the host's images.
-# A folder named `caches` (the repositories' caches) is never exported itself, only one
-# repository's folder inside it.
+# The caller is the user sudo names (SUDO_USER), never an environment variable it could set.
+# Each daemon user has its own slots in /etc/runner-vm.users (root's, lines
+# `<user> <first slot> <count>`); a user not listed there, or a slot outside its range, is
+# refused. Slot n uses 10.200.0.0/16 at offset 4n: host .1, guest .2.
+# Exported paths must be under the caller's home or /srv/runner/u/<caller> (the team user
+# `runner`: also /srv/runner, except the other users' trees under /srv/runner/u), and never
+# the home itself, one of its dot folders (the CLIs' sign-ins, the daemon's config and token,
+# SSH keys) or the host's images. A folder named `caches` (the repositories' caches) is never
+# exported itself, only one repository's folder inside it.
 # The static firewall (/etc/runner-vm.nft) does the rest.
 set -euo pipefail
 
-RUNNER_USER="${RUNNER_USER:-runner}"
+TEAM_USER=runner
 DATA=/srv/runner
+USERS_FILE=/etc/runner-vm.users
 STATE=/run/runner-vm
-runner_home="$(getent passwd "$RUNNER_USER" | cut -d: -f6)"
-ROOTS=("$DATA" "$runner_home")
 
 die() { echo "runner-vm: $*" >&2; exit 2; }
 
-uid="$(id -u "$RUNNER_USER")"
-gid="$(id -g "$RUNNER_USER")"
+[[ $EUID -eq 0 ]] || die "run it with sudo"
+caller="${SUDO_USER:-}"
+if [[ "${1:-}" == --as ]]; then
+  # Root itself (an operator cleaning up), never a user that sudo let in.
+  [[ -z "$caller" || "$caller" == root ]] || die "--as is for root only"
+  caller="${2:-}"
+  shift 2 || die "usage: runner-vm --as <user> up|export|down <slot> ..."
+fi
+[[ -n "$caller" && "$caller" != root ]] || die "cannot tell which user this is for: run it with sudo as that user"
+[[ "$caller" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "bad user name"
+
+# The users file must be root's alone: anyone who can write it can take any slot.
+[[ -f "$USERS_FILE" && ! -L "$USERS_FILE" ]] || die "$USERS_FILE is missing"
+[[ "$(stat -c '%u %a' "$USERS_FILE")" =~ ^0\ [0-7][0145][0145]$ ]] || die "$USERS_FILE must be root's and not writable by others"
+first="" count=""
+while read -r u f n _; do
+  [[ "$u" == "$caller" ]] || continue
+  first="$f" count="$n"
+done < <(grep -v '^[[:space:]]*\(#\|$\)' "$USERS_FILE")
+[[ "$first" =~ ^[0-9]{1,5}$ && "$count" =~ ^[0-9]{1,5}$ ]] || die "$caller is not in $USERS_FILE"
+first=$(( 10#$first )) count=$(( 10#$count ))
+
+home="$(getent passwd "$caller" | cut -d: -f6)"
+uid="$(id -u "$caller")" || die "no user $caller"
+gid="$(id -g "$caller")"
+own="$DATA/u/$caller"
+ROOTS=("$home" "$own")
+[[ "$caller" == "$TEAM_USER" ]] && ROOTS+=("$DATA")
 
 slot="${2:-}"
-[[ "$slot" =~ ^[0-9]{1,5}$ ]] && (( slot < 16384 )) || die "bad slot"
+[[ "$slot" =~ ^[0-9]{1,5}$ ]] && (( 10#$slot < 16384 )) || die "bad slot"
+slot=$(( 10#$slot ))
+(( slot >= first && slot < first + count )) || die "slot $slot is not one of $caller's ($first..$(( first + count - 1 )))"
 base=$(( slot * 4 ))
-host="10.200.$(( base >> 8 )).$(( (base & 255) + 1 ))"
 guest="10.200.$(( base >> 8 )).$(( (base & 255) + 2 ))"
+host="10.200.$(( base >> 8 )).$(( (base & 255) + 1 ))"
 tap="rvm$slot"
 mkdir -p "$STATE"
 
 case "${1:-}" in
   up)
     ip link del "$tap" 2>/dev/null || true
-    ip tuntap add dev "$tap" mode tap user "$RUNNER_USER" group "$RUNNER_USER"
+    ip tuntap add dev "$tap" mode tap user "$caller" group "$gid"
     ip addr add "$host/30" dev "$tap"
     ip link set "$tap" up
     # Strict reverse path: a VM cannot send with another slot's address.
@@ -51,14 +84,18 @@ case "${1:-}" in
       [[ -n "$r" && "$path" == "$r"/* ]] && ok=1
     done
     (( ok )) || die "$path is not inside ${ROOTS[*]}"
-    if [[ -n "$runner_home" && "$path" == "$runner_home"/* ]]; then
-      rel="${path#"$runner_home"/}"
-      [[ "$rel" == .* ]] && die "$path is a private folder of $RUNNER_USER"
+    if [[ -n "$home" && "$path" == "$home"/* ]]; then
+      rel="${path#"$home"/}"
+      [[ "$rel" == .* ]] && die "$path is a private folder of $caller"
     fi
     case "$path" in
-      "$DATA"/images|"$DATA"/images/*|"$DATA"/kernels|"$DATA"/kernels/*|"$DATA"/home-images|"$DATA"/home-images/*|"$DATA"/homes)
+      "$DATA"/images|"$DATA"/images/*|"$DATA"/kernels|"$DATA"/kernels/*|"$DATA"/home-images|"$DATA"/home-images/*|"$DATA"/homes|"$DATA"/u-images|"$DATA"/u-images/*|"$DATA"/u)
         die "$path is not shared" ;;
     esac
+    # Another user's tree: the team user's /srv/runner holds every user's under u/.
+    if [[ "$path" == "$DATA"/u/* && "$path" != "$own"/* ]]; then
+      die "$path belongs to another user"
+    fi
     # Every repository's cache at once: a VM gets only its own repository's folder.
     [[ "$(basename "$path")" == caches ]] && die "$path holds every repository's cache"
     exportfs -o "$mode,sync,no_subtree_check,all_squash,anonuid=$uid,anongid=$gid" "$guest:$path"
