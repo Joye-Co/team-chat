@@ -145,6 +145,9 @@ bun server/scripts/admin.ts members --env production
    卡片检查三项：后台服务在运行、找到 CLI、已登录，缺哪项就说怎么补。详细见
    [INSTALL.zh.md 的「让 AI 成员在你的电脑上干活」](INSTALL.zh.md#让-ai-成员在你的电脑上干活)。
 
+AI 成员在你自己的电脑上推代码、开 PR，用的是你在这台电脑上的 git 和 GitHub 登录（`gh auth login`、SSH key
+或钥匙串），和你自己用时一样；应用里不用设置什么。
+
 检查：设置 › 电脑 的列表里有这台电脑，显示在线，三项都好了。在 Ubuntu 上运行
 `bun server/scripts/admin.ts machines --env production`，它显示为 `healthy`。
 
@@ -317,6 +320,45 @@ AI 成员。
    ~/.local/bin/team-chat-daemon doctor            # 退出码 0：没有问题
    ~/.local/bin/team-chat-daemon install-service   # systemd 用户服务 team-chat-daemon.service
    ```
+
+### 给 AI 成员一个 GitHub 账号
+
+这台主机上的 AI 成员替所有人推代码、开 PR，用的是同一个 GitHub 账号：一个机器账号，由管理员在主机上登录一次。
+产品不保存任何 GitHub 凭证。虚拟机里也不放这个登录：任务里的 git 或 `gh` 每次要用时去问 daemon，daemon 以
+runner 身份从主机的 `gh` 读出来。提交记在 AI 成员名下；PR 正文的最后一行写明是谁交代的。
+
+1. **建机器账号**：在 GitHub 上新建一个账号，比如 `<org>-bot`，用单独的邮箱，开两步验证。
+2. **只给需要的权限**：把它邀请进你的组织，基础权限设为无，只在 AI 成员要改的仓库上给 **Write**，别的都不给
+   （不是管理员，也不是 owner）。
+3. **保护 `main`**：在这些仓库上（Settings › Branches，或者用 ruleset）要求合并前必须走 PR。产品自己也会把
+   合并到 main、发布到生产等受控操作停下，等团队的管理员批准；分支保护是在这一关被绕过时仍然守得住的底线。
+4. **在主机上登录**，用 root：`sudo -iu runner gh auth login`，选 GitHub.com 和 HTTPS，用浏览器登录：`gh`
+   会打印一个一次性的码，在你自己的电脑上以机器账号登录 GitHub，打开它给的地址，输入这个码。`gh auth login`
+   问要不要给 git 设置认证时选否。
+   也可以用细粒度令牌：以机器账号创建（Settings › Developer settings › Fine-grained tokens），资源所有者选你的
+   组织，只选这几个仓库，权限只开 **Contents** 和 **Pull requests** 的读写（Metadata 只读会自动带上），并设
+   过期时间。然后不显示、不写文件地交给 `gh`：
+
+   ```sh
+   read -rs t && printf '%s' "$t" | sudo -iu runner gh auth login --with-token; unset t
+   ```
+
+   不要运行 `gh auth setup-git`：daemon 给每台虚拟机单独设好凭证助手。登录保存在
+   `~runner/.config/gh/hosts.yml`（权限 600），虚拟机看不到。
+5. **检查**：`sudo -iu runner gh auth status` 显示机器账号。10 分钟内，应用的 设置 › 电脑 里这台主机显示
+   `GitHub @<login>`，团队管理 › 电脑 里显示 `已登录 @<login>`。
+
+主机没有登录时，需要 GitHub 的任务会在它的话题里说一次，管理员会收到提醒。登录失效（令牌过期或被撤销，或者
+有人运行了 `gh auth logout`）时提醒会再来；照上面的办法重新登录。
+
+**不用虚拟机的团队电脑**（daemon 直接在电脑上运行 CLI）：用运行 daemon 的那个系统用户登录，不要用你自己的账户。
+这种电脑上 CLI 直接用这个用户自己的 git 和 `gh`，所以 `gh auth login` 问要不要给 git 设置认证时选是，或者给
+这个用户配上机器账号的 SSH key。
+
+**已知限制**：git 推送必须拿到令牌，所以任务里的进程可以自己调用凭证助手（`git credential fill`），在任务运行
+期间读到令牌。虚拟机里的 `gh` 拒绝 `gh auth token` 和 `--show-token`，只挡住了最直接的用法。把可能的损失压小：
+机器账号只给需要的仓库和权限，用带过期时间的细粒度令牌，保护 `main`。每台虚拟机连同任务留在里面的东西，在任务
+结束后整个丢掉。
 
 ### 检查
 
