@@ -1313,7 +1313,7 @@ folder. What a run keeps:
   overlay), `/tmp` and the rest of the disk go with the VM. System packages and Docker belong
   in the base image.
 
-Daemons from 1.2.8 keep no member home folders: `[vm].homes` and `[vm].home_gb` still parse but
+Daemons from 1.3.0 keep no member home folders: `[vm].homes` and `[vm].home_gb` still parse but
 do nothing (`homes` is only searched for old sessions), the daemon reports no feature `homes`
 and no `metrics.homes`, and `home.clear` is only logged. Old folders in `<homes>` and
 `<[vm].dir>/cli` that are not mount points are removed after 14 days unused. The CLI's system note says what is kept (the working
@@ -1426,7 +1426,7 @@ example-config` prints a commented example. Keys: `server_url`, `token_file`, `m
 calls, see "Gated actions"), and `[vm]` with `kernel`, `rootfs`, `dir`, `vcpus`, `mem_mib`
 (a cap: the host gives only the pages the VM touches), `scratch_gb`, `firecracker`, `helper`,
 `shares` (default none; never the daemon user's home or its dot folders). `homes` and
-`home_gb` still parse but are ignored since 1.2.8 (`daemon doctor` notes a set `home_gb`).
+`home_gb` still parse but are ignored since 1.3.0 (`daemon doctor` notes a set `home_gb`).
 `approval_policy`, `sandbox`, `permission_mode` and
 `allowed_tools` still parse (1.1 configs) but are ignored since 1.2.1. Without `[runtimes.*]`, `codex` and `claude` are added when
 found on PATH.

@@ -3,12 +3,53 @@
 Each release is tagged `v<version>` and has a GitHub Release with the DMG, the machine daemon
 and the Windows installer; GitHub shows each file's SHA-256. Release notes for the team are in Chinese in `docs/releases/`.
 
-## Unreleased
+## 1.3.0 (unreleased)
 
+Notes: [docs/releases/1.3.0.md](docs/releases/1.3.0.md). The "usable" milestone
+([docs/plans/usable.zh.md](docs/plans/usable.zh.md)), Windows parity and the rename. D1
+migrations `0013_worker_models`, `0016_account_sign_in`, `0016_push`, `0017_github_accounts`,
+`0017_github_runs`, `0017_machine_owner`, `0017_memory_audience`, `0017_roles`,
+`0018_ai_service_health`, `0018_run_limits` and `0019_github_off` (deletes stored GitHub
+connections; a later release drops the tables). Deployed wrangler configs need a second cron,
+`0 * * * *`, next to `0 3 * * *` for the nightly memory tidy. Protocol: additive (roles and
+personal machines, relays, take-over, failure kinds, `resumeMissed`, GitHub identity by
+computer, AI service health, push and code sign-in). The server is redeployed before the
+release. 1.2.7 clients and daemons keep working.
+
+- Front desk and routing: each @ reaches its member, several @ start several members, follow-ups
+  without @ continue; requests carry their attachments and quotes; runs read 产出, cards,
+  decisions, members and topic state, across every group of the person they work for.
+- Continuity: one work folder and branch per member and topic, committed before cleanup; DM and
+  ACP (`session/load`) sessions continue; a missing session falls back to the full prompt;
+  restarted work continues with a recovery note.
+- Supervision: a computer that goes away is waited for, an offline target queues; long steps are
+  not killed; the time limit continues the run another round; supervision steps are run events.
+- Results and failures: a topic records how a task really ended; failures are classified (sign-in,
+  limit, model, network, missing CLI) with one Chinese sentence; no work goes to a signed-out
+  CLI; a subscription limit waits for the reset and continues in the same session.
+- Several AI members: participants instead of one owner member, hand-over and split-off chains
+  with one stop, 按顺序做 relays with a bar to stop and retry.
+- Take-over: pause and take over a run, run the person's commands (also in the VM), hand back.
+- Gates: Codex and ACP gated by code, PATH shims decide on parsed arguments, fail closed, strict
+  text approvals; gated actions are approved by the computer's admins or its owner; app keys can
+  ask first.
+- Memory: scoped to the group it was learned in and to the groups of the person a run works for;
+  群里的约定 and 我的偏好 screens; relevance-picked prompt memory and `chat-run memory search`;
+  the tidy runs hourly after 03:00 in the team's time zone and retries.
+- AI service: per-use switches, health and a failing alert to admins; one place for models, the
+  run's real model in the work record; subscription runs outside the budget.
+- Computers: three roles (所有者, 管理员, 成员); personal and team computers, personal ones take work
+  only from their owner; computers page with per-system install commands and 不再用这台电脑;
+  「用这台电脑」 checks the CLIs and sign-ins; admins are told about computers that need them.
+- GitHub identity by computer: a personal computer uses its owner's `gh` sign-in; a team computer
+  uses a machine account an administrator signs in once on the host, lent to VMs by the daemon.
+  The product stores no person's GitHub any more.
+- Linux host: the Release workflow publishes `<slug>-daemon-<v>-x86_64-unknown-linux-gnu`; a
+  daemon run by systemd updates itself from it (`GET /v1/machine/updates/latest?platform=linux-x86_64`).
 - The CLIs' own memory is off in every AI member run on every machine
   (`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, Codex `-c features.memories=false`); memory lives only in
   the product. Repository AGENTS.md / CLAUDE.md are still read.
-- VM hosts (`[vm]`): from 1.2.8 the daemon keeps no AI member home folders (the 20 GB home images,
+- VM hosts (`[vm]`): from 1.3.0 the daemon keeps no AI member home folders (the 20 GB home images,
   `[vm].homes` / `home_gb`, `runner-vm home-up` / `home-clear` and the heartbeat's `homes` are
   gone; the protocol fields stay for older daemons). A topic keeps its code, build outputs and
   CLI sessions in `<work_root>/lines/<line>/cli/` and is cleaned with its line; a repository
@@ -19,6 +60,12 @@ and the Windows installer; GitHub shows each file's SHA-256. Release notes for t
   once host-setup has run. Tools installed in old home folders are not migrated: the daemon
   installs a repository's Rust toolchain into its cache, and AI members install other tools
   again. Computers without VMs keep the real home folder.
+- Windows: interface, system, machine and release parity with macOS; apps installed under the
+  former name update in place; one release publishes both systems atomically.
+- Self-hosting: `scripts/setup-server.sh` and docs/SELF-HOSTING.md.
+- New name and Jojo app icon; Jojo & Friends avatars with live emotions, uploadable AI member
+  avatars; image mosaic and viewer; back and forward history; less redrawing.
+- The iPhone client (M2–M5) is in the repo; it is not part of this release.
 
 ## 1.2.7 (2026-11-11)
 

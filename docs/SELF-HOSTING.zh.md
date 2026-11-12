@@ -384,7 +384,7 @@ runner 身份从主机的 `gh` 读出来。提交记在 AI 成员名下；PR 正
 - **缓存**：用 runner，`~/.local/bin/team-chat-daemon caches` 列出每个仓库的缓存（key、仓库、大小、最近使用）；
   `team-chat-daemon caches clear <key>`（或 `all`）删掉一个，比如工具链或工具坏了的时候；正在被任务用的缓存
   会拒绝。`work_root` 剩余空间低于 `min_free_gb` 时，daemon 自己先删最久没用的缓存。
-- **从有 AI 成员家目录的版本升级**（`/srv/runner/homes`，1.2.7 及以前）：daemon 从 1.2.8 起不再保留家目录。
+- **从有 AI 成员家目录的版本升级**（`/srv/runner/homes`，1.2.7 及以前）：daemon 从 1.3.0 起不再保留家目录。
   用 root 在 `/root/team-chat` 里 `git checkout` 新版本，再跑一遍 `bash scripts/runner/host-setup.sh`，然后重建
   基础镜像（加了 rustup 和 sccache）。host-setup 在 `/srv/runner/homes/<id>` 里只留每个成员的会话记录
   （`.claude/projects`、`.codex/sessions`、`.pi/agent/sessions`），删掉家目录镜像和 `/srv/runner/home-images`，
