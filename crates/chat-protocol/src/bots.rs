@@ -314,6 +314,13 @@ pub struct BotRun {
         skip_serializing_if = "Option::is_none"
     )]
     pub last_handback: Option<crate::takeover::RunHandback>,
+    /// Usable: what the desk did to this run by itself, oldest first (盯 5.5).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub supervision: Option<Vec<crate::supervise::SuperviseAct>>,
 }
 
 impl BotRun {

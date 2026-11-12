@@ -8,6 +8,7 @@ writes fake.pid and appends to ticks.txt 30 times, 0.1 s apart (a stopped proces
 in a new process group (setpgid), each appending to <name>.ticks every 0.05 s, writes their pids
 to children.txt and then hangs like "hang" (Windows: one without a console and one in a new
 process group);
+"busy" starts a tool child that burns CPU (its pid goes to children.txt), then hangs like "hang";
 "orphan" starts a ticker that daemonizes (its parent exits; it appends to orphan.ticks every
 0.05 s and its pid goes to orphan.txt), then hangs like "hang";
 "chatrun" runs `chat-run card patch` from PATH and writes its exit code, output and the socket's
@@ -230,6 +231,13 @@ while True:
         kids = [subprocess.Popen([sys.executable, "-c", loop % "session.ticks"], **apart[0], **quiet),
                 subprocess.Popen([sys.executable, "-c", loop % "group.ticks"], **apart[1], **quiet)]
         open("children.txt", "w").write(" ".join(str(k.pid) for k in kids))
+        open("fake.pid", "w").write(str(os.getpid()))
+        time.sleep(600)
+    if "busy" in cue:
+        # A tool at work (a build): a child that burns CPU, then the CLI waits like "hang".
+        quiet = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL}
+        kid = subprocess.Popen([sys.executable, "-c", "while True:\n    pass\n"], **quiet)
+        open("children.txt", "w").write(str(kid.pid))
         open("fake.pid", "w").write(str(os.getpid()))
         time.sleep(600)
     if "orphan" in cue:

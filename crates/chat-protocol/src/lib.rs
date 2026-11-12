@@ -85,9 +85,11 @@ pub use usage::TeamUsage;
 // Usable: GitHub sign-in, relays and chains, run phase and take-over.
 pub mod github;
 pub mod relay;
+pub mod supervise;
 pub mod takeover;
 pub use github::*;
 pub use relay::*;
+pub use supervise::*;
 pub use takeover::*;
 
 pub const PROTOCOL_VERSION: u32 = 1;

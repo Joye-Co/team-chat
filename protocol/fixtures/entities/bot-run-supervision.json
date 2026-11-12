@@ -1,0 +1,36 @@
+{
+  "kind": "BotRun",
+  "valid": true,
+  "description": "usable: what the desk did by itself; unknown actions and reasons are open strings",
+  "value": {
+    "id": "01JBX0RUN000000000000000AU",
+    "botId": "01JBX0BOT000000000000000AC",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "machineId": "01JBX0MACHINE00000000000AV",
+    "status": "running",
+    "requestedBy": "01JBX0OWNER0000000000000AA",
+    "createdAt": 1762128000000,
+    "startedAt": 1762128001000,
+    "updatedAt": 1762128009000,
+    "supervision": [
+      {
+        "at": 1762128300000,
+        "action": "nudge",
+        "reason": "silent",
+        "minutes": 5
+      },
+      {
+        "at": 1762135200000,
+        "action": "limit",
+        "reason": "time_limit",
+        "minutes": 120
+      },
+      {
+        "at": 1762135300000,
+        "action": "lucky_guess",
+        "reason": "the_moon"
+      }
+    ]
+  }
+}

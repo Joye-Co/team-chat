@@ -8,6 +8,7 @@ import { Artifact, ArtifactVersion } from "./files.ts";
 import { GroupDecision, RecordedDecision } from "./card2.ts";
 import { RunCode } from "./relay.ts";
 import { runPhaseFields } from "./takeover.ts";
+import { runSuperviseFields } from "./supervise.ts";
 
 /** `BotRun.kind` of a side chat run. */
 export const RUN_KIND_ASIDE = "aside";
@@ -70,6 +71,7 @@ export const BotRun = z.object({
   /** Why a failed run failed (`run.done.failure`); absent = not known. */
   failure: RunFailure.optional(),
   ...runPhaseFields,
+  ...runSuperviseFields,
 });
 export type BotRun = z.infer<typeof BotRun>;
 

@@ -23,7 +23,13 @@ export const CARD_ANSWER_TAKEN_RPC = "cards.answerTaken";
 
 export abstract class DeskEvents extends DeskRuns {
   /** 盯活 (stall.ts): a tool call of the run (loops). */
-  protected abstract watchTool(r: RunRow, title: string): Promise<void>;
+  protected abstract watchTool(r: RunRow, itemId: string, title: string): Promise<void>;
+  /** 盯 1.11 (stall.ts): the result of a tool call (loops look at the output; progress). */
+  protected abstract watchResult(r: RunRow, itemId: string, ok: boolean, output: string): Promise<void>;
+  /** 盯 5.5 (stall.ts): keeps one act of the desk with the run. */
+  protected abstract act(r: RunRow, action: string, reason: string, minutes?: number): Promise<void>;
+  /** 盯 1.6 (stall.ts): a run that ended after it reached its time limit goes on; true when it did (or stopped). */
+  protected abstract limitEnded(r: RunRow, f: Extract<SeqFrame, { t: "run.done" }>): Promise<boolean>;
   /** 盯活 (stall.ts): continues a run that only promised work; true when it did. */
   protected abstract continuePromise(r: RunRow, result: string): Promise<boolean>;
   /** 盯 1.1 (stall.ts): the machine of a run that waited for it is back. */
@@ -80,6 +86,7 @@ export abstract class DeskEvents extends DeskRuns {
     const now = Date.now();
     let done: Extract<SeqFrame, { t: "run.done" }> | null = null;
     let planChanged = false;
+    let moved = 0;
     // The daemon's own stall reports are not progress: they must not restart the stall clock.
     const progressed = frames.some((f) => f.t !== "run.event" || !isStallStatus(f.event));
     const stallReported = frames.some((f) => f.t === "run.event" && isStallStatus(f.event) && (f.event as { state?: unknown }).state === "stalled");
@@ -118,11 +125,15 @@ export abstract class DeskEvents extends DeskRuns {
           break;
         case "tool.call":
           progress.tool(String(ev.title || ev.tool || ""));
-          await this.watchTool(r, String(ev.title || ev.tool || ""));
+          await this.watchTool(r, String(ev.itemId ?? ""), String(ev.title || ev.tool || ""));
           this.openTools(r, r.open_tools + 1);
           break;
         case "tool.result":
           this.openTools(r, r.open_tools - 1);
+          await this.watchResult(r, String(ev.itemId ?? ""), ev.ok === true, typeof ev.output === "string" ? ev.output : "");
+          break;
+        case "file.change":
+          moved++;
           break;
         case "approval.request": {
           await this.flush(r, progress);
@@ -160,6 +171,7 @@ export abstract class DeskEvents extends DeskRuns {
         case "output":
           // chat-run (1.1): post or patch a card, resolve an event, push or answer a 产出.
           await this.output(r, ev as { outputId?: unknown; op?: unknown; body?: unknown }, f);
+          moved++;
           break;
         case "input.accepted": {
           const taken = this.sql.exec("UPDATE inputs SET accepted = 1 WHERE id = ? AND run_id = ?", String(ev.inputId), r.id).rowsWritten;
@@ -175,12 +187,18 @@ export abstract class DeskEvents extends DeskRuns {
         case "plan": {
           // The link reads events loosely (newer daemons): keep what fits the plan rules.
           const plan = sanitizePlan(ev.items);
-          if (plan && this.storePlan(r, plan)) planChanged = true;
+          if (plan && this.storePlan(r, plan)) {
+            planChanged = true;
+            moved++;
+          }
           break;
         }
         case "acceptance": {
           const items = sanitizeAcceptance(ev.items);
-          if (items && this.storeAcceptance(r, items)) planChanged = true;
+          if (items && this.storeAcceptance(r, items)) {
+            planChanged = true;
+            moved++;
+          }
           break;
         }
         case "paused":
@@ -204,6 +222,11 @@ export abstract class DeskEvents extends DeskRuns {
       }
     }
     await this.flush(r, progress);
+    // 盯 1.6: signs of progress up to the time limit (after it the run saves its state; tool results count in watchResult).
+    if (moved > 0 && r.limit_at === null) {
+      this.sql.exec("UPDATE runs SET progress = progress + ? WHERE id = ?", moved, r.id);
+      r.progress += moved;
+    }
     // The final run.updated of `finish` carries the plan too.
     if (planChanged && !done) await this.setStatus(r, r.status);
     if (done) await this.finish(r, done);
@@ -468,6 +491,9 @@ export abstract class DeskEvents extends DeskRuns {
     this.storeUsage(r, f);
     this.storeSession(r, f.sessionId);
     this.storeCode(r, f.code);
+    // 盯 1.6: a run at its time limit saved its state (or ran past the daemon's backstop): the work
+    // goes on in a new turn of the same session, without a result in the topic.
+    if (await this.limitEnded(r, f)) return;
     if (f.status === "succeeded") {
       const raw = (f.resultText ?? "").trim();
       this.dropResultFromProgress(r, raw);
@@ -554,7 +580,9 @@ export abstract class DeskEvents extends DeskRuns {
     // A daemon that keeps restarting under the same work does not get it again and again.
     const resumes = this.retryChain(r.id).filter((x) => x.summary === `restarted: ${DAEMON_RESTARTED}`).length;
     if (resumes >= MAX_DAEMON_RESUMES) return false;
-    return this.restartElsewhere(r, DAEMON_RESTARTED, { sameSession: true }, { count: false });
+    if (!(await this.restartElsewhere(r, DAEMON_RESTARTED, { sameSession: true }, { count: false }))) return false;
+    await this.act(r, "retry", "daemon_restarted");
+    return true;
   }
 
   /**

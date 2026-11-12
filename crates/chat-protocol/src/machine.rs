@@ -358,6 +358,10 @@ pub struct RunCursor {
     /// True when the run has finished on the machine (run.done was produced).
     #[serde(default)]
     pub done: bool,
+    /// Usable (盯 1.4): the processes the run's CLI started used CPU since the last heartbeat,
+    /// so a long step is working, not stuck. `None` = not known (older daemons).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

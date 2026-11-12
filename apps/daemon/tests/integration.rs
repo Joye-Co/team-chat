@@ -1386,6 +1386,90 @@ async fn pause_and_cancel_cover_tool_children() {
         .unwrap();
 }
 
+/// The run's `active` in the heartbeats until `want` (acks them; other frames are dropped).
+#[cfg(unix)]
+async fn heartbeat_active(ws: &mut Ws, run: &str, want: Option<bool>) {
+    let mut seen = vec![];
+    for _ in 0..60 {
+        loop {
+            let m = tokio::time::timeout(Duration::from_secs(20), ws.next())
+                .await
+                .expect("frame in time")
+                .expect("open")
+                .expect("ok");
+            let Message::Text(t) = m else { continue };
+            if let Ok(Up::Heartbeat { at, runs, .. }) = serde_json::from_str::<Up>(&t) {
+                send(ws, &Down::HeartbeatAck { at }).await;
+                let got = runs.iter().find(|r| r.run_id == run).and_then(|r| r.active);
+                if got == want {
+                    return;
+                }
+                seen.push(got);
+                break;
+            }
+        }
+    }
+    panic!("no heartbeat with active {want:?} for {run}: {seen:?}");
+}
+
+/// 盯 1.4: while a tool the CLI started burns CPU (a build), the heartbeat says the run is
+/// active; a CLI that only waits is not.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_heartbeat_says_when_a_runs_tools_are_working() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let cfg = write_config(tmp.path(), &m.url);
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
+    send(&mut ws, &welcome(vec![])).await;
+
+    // A CLI that only waits: known, and not active.
+    send(&mut ws, &assign("w1", "fake", "hang", None)).await;
+    wait_file(&work_of(tmp.path(), "w1").join("fake.pid")).await;
+    heartbeat_active(&mut ws, "w1", Some(false)).await;
+    send(
+        &mut ws,
+        &Down::RunCancel {
+            run_id: "w1".into(),
+            reason: None,
+        },
+    )
+    .await;
+    collect(&mut ws, "w1", true, |f| matches!(f, Up::RunDone(_))).await;
+
+    // A tool at work: active from the second sample on (one tick, 15 s).
+    send(&mut ws, &assign("b1", "fake", "busy", None)).await;
+    let dir = work_of(tmp.path(), "b1");
+    let kid: i32 = wait_file(&dir.join("children.txt"))
+        .await
+        .trim()
+        .parse()
+        .unwrap();
+    let _reap = Reap(vec![kid]);
+    heartbeat_active(&mut ws, "b1", Some(true)).await;
+    send(
+        &mut ws,
+        &Down::RunCancel {
+            run_id: "b1".into(),
+            reason: None,
+        },
+    )
+    .await;
+    collect(&mut ws, "b1", true, |f| matches!(f, Up::RunDone(_))).await;
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
 /// 1.1 `chat-run artifact create`: the daemon uploads each file of the folder from the run's
 /// working folder (text redacted) and makes the 产出 with the machine token; the CLI gets its id.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

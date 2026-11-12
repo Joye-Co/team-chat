@@ -488,6 +488,7 @@ impl Daemon {
                 run_id: id.clone(),
                 last_seq: r.next_seq.saturating_sub(1),
                 done: r.done,
+                active: if r.done { None } else { crate::run::active(id) },
             })
             .collect();
         v.sort_by(|a, b| a.run_id.cmp(&b.run_id));

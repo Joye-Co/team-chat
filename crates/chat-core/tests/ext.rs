@@ -1187,6 +1187,7 @@ fn bot_run(id: &str, topic: &str, status: RunStatus, updated: u64) -> BotRun {
         held_at: None,
         takeover: None,
         last_handback: None,
+        supervision: None,
     }
 }
 

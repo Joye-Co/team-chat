@@ -3,8 +3,8 @@
 // progress questions itself, all before it tells people.
 import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { afterAll, describe, expect, it } from "vitest";
-import { CONTINUE_TEXT, LOOP_LIMIT, NUDGE_MS, isProgressQuestion, isPromiseOnly, progressAnswer } from "../src/agent/supervise";
-import { STALL_MS, TEXT } from "../src/bots/dispatch";
+import { CONTINUE_TEXT, LOOP_LIMIT, NUDGE_MS, isProgressQuestion, isPromiseOnly, progressAnswer, stepKey } from "../src/agent/supervise";
+import { STALL_MS, TEXT, workTime } from "../src/bots/dispatch";
 import { Daemon, type World, downViolations, mention, world } from "./daemon";
 import { Client, api, clientMsgId, protocolViolations, waitUntil } from "./helpers";
 
@@ -23,10 +23,18 @@ const silence = (botId: string, runId: string, ms: number) =>
 
 describe("supervise rules", () => {
   it("knows promises, progress questions and how to answer them", () => {
-    expect(isPromiseOnly("好的，我来看看。", 0)).toBe(true);
-    expect(isPromiseOnly("Let me look into it.", 0)).toBe(true);
-    expect(isPromiseOnly("我来看看", 2)).toBe(false);
-    expect(isPromiseOnly("修好了：测试都通过了。", 0)).toBe(false);
+    expect(isPromiseOnly("好的，我来看看。", 0, true)).toBe(true);
+    expect(isPromiseOnly("Let me look into it.", 0, true)).toBe(true);
+    expect(isPromiseOnly("我来看看", 2, true)).toBe(false);
+    expect(isPromiseOnly("修好了：测试都通过了。", 0, true)).toBe(false);
+    // 盯 1.10: a short answer to a request without a work order is an answer, not a promise.
+    expect(isPromiseOnly("我会在周会上提", 0, false)).toBe(false);
+    expect(isPromiseOnly("我会在周会上提", 0, true)).toBe(true);
+    // 盯 1.11: the same step is the same title and the same output.
+    expect(stepKey("gh pr checks 12", "pending")).toBe(stepKey("gh  pr checks 12", " pending\n"));
+    expect(stepKey("gh pr checks 12", "pending")).not.toBe(stepKey("gh pr checks 12", "pass"));
+    expect(stepKey("", "x")).toBe("");
+    expect([workTime(45), workTime(120), workTime(150), workTime(0.2)]).toEqual(["45 分钟", "2 小时", "2.5 小时", "1 分钟"]);
     expect(isProgressQuestion("@dev 进展怎么样了？")).toBe(true);
     expect(isProgressQuestion("好了吗")).toBe(true);
     expect(isProgressQuestion("把进度条的颜色改成蓝色，然后把按钮放大一点再提交")).toBe(false);
@@ -107,9 +115,25 @@ describe("supervise", () => {
     const topicId = await mention(c, w);
     const a = await d.next((f) => f.t === "run.assign");
     d.send({ t: "run.accept", runId: a.runId });
-    for (let i = 0; i < LOOP_LIMIT; i++) d.event(a.runId, { type: "tool.call", itemId: `t${i}`, tool: "bash", title: "cargo test -p app" });
+    // 盯 1.11: polling with an output that changes is not a loop.
+    for (let i = 0; i < LOOP_LIMIT + 1; i++) {
+      d.event(a.runId, { type: "tool.call", itemId: `p${i}`, tool: "bash", title: "gh pr checks 12" });
+      d.event(a.runId, { type: "tool.result", itemId: `p${i}`, ok: true, output: `build pending (${i * 30}s)` });
+    }
+    // The same step with the same output is.
+    let last = 0;
+    for (let i = 0; i < LOOP_LIMIT; i++) {
+      d.event(a.runId, { type: "tool.call", itemId: `t${i}`, tool: "bash", title: "cargo test -p app" });
+      last = d.event(a.runId, { type: "tool.result", itemId: `t${i}`, ok: false, output: "error[E0425]: cannot find value `x`", exitCode: 101 });
+    }
+    await d.acked(a.runId, last);
     const loop = await d.next((f) => f.t === "run.input" && String(f.inputId).startsWith("desk-loop-"));
     expect(loop.text).toContain("same step 4 times");
+    expect(loop.text).toContain("cargo test -p app");
+    expect(d.frames.filter((f) => f.t === "run.input" && String(f.inputId).startsWith("desk-loop-"))).toHaveLength(1);
+    // 盯 5.5: the reminder is kept with the run, with its reason.
+    const looped = await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === a.runId && (e.data.run.supervision ?? []).length > 0);
+    expect(looped.data.run.supervision).toEqual([expect.objectContaining({ action: "loop", reason: "same_step" })]);
 
     // A progress question: the desk answers, the CLI gets nothing.
     await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "进展怎么样了" });
@@ -120,15 +144,40 @@ describe("supervise", () => {
     await d.acked(a.runId, d.done(a.runId, { status: "succeeded", resultText: "测试修好了" }));
     await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === a.runId && e.data.run.status === "done");
 
-    // Only a promise, no tool call: the desk continues the session.
+    // 盯 1.10: a short answer without a work order is an answer: no push.
+    await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "@dev 这个要在周会上说吗", mentions: [w.bot.id] });
+    const q = await d.next((f) => f.t === "run.assign" && f.runId !== a.runId);
+    // Even as a follow-up of work that had a 交代单: this turn has none of its own.
+    await runInDurableObject(deskOf(w.bot.id), (_o, state: DurableObjectState) => {
+      const key = `request:${a.runId}`;
+      const req = JSON.parse(state.storage.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = ?", key).one().value);
+      state.storage.sql.exec("UPDATE meta SET value = ? WHERE key = ?", JSON.stringify({ ...req, brief: { goal: "修测试", doneWhen: [] } }), key);
+      state.storage.sql.exec("UPDATE runs SET follow_up_of = ? WHERE id = ?", a.runId, q.runId);
+    });
+    d.send({ t: "run.accept", runId: q.runId });
+    await d.acked(q.runId, d.done(q.runId, { status: "succeeded", resultText: "我会在周会上提" }));
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === q.runId && e.data.run.status === "done");
+    await new Promise((r) => setTimeout(r, 200));
+    expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(2);
+    expect(await runInDurableObject(deskOf(w.bot.id), (_o, state: DurableObjectState) => state.storage.sql.exec<{ acts: string | null }>("SELECT acts FROM runs WHERE id = ?", q.runId).one().acts)).toBeNull();
+
+    // Only a promise, no tool call, and a work order (交代单): the desk continues the session.
     await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "@dev 再看下文档", mentions: [w.bot.id] });
-    const b = await d.next((f) => f.t === "run.assign" && f.runId !== a.runId);
+    const b = await d.next((f) => f.t === "run.assign" && f.runId !== a.runId && f.runId !== q.runId);
+    await runInDurableObject(deskOf(w.bot.id), (_o, state: DurableObjectState) => {
+      const key = `request:${b.runId}`;
+      const req = JSON.parse(state.storage.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = ?", key).one().value);
+      state.storage.sql.exec("UPDATE meta SET value = ? WHERE key = ?", JSON.stringify({ ...req, brief: { goal: "检查文档", doneWhen: [] } }), key);
+    });
     d.send({ t: "run.accept", runId: b.runId });
     await d.acked(b.runId, d.done(b.runId, { status: "succeeded", resultText: "好的，我来看看。" }));
-    const cont = await d.next((f) => f.t === "run.assign" && f.runId !== a.runId && f.runId !== b.runId);
+    const cont = await d.next((f) => f.t === "run.assign" && f.runId !== a.runId && f.runId !== b.runId && f.runId !== q.runId);
     expect(cont.prompt).toContain(CONTINUE_TEXT);
+    const continued = await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === b.runId && (e.data.run.supervision ?? []).some((x: { action: string }) => x.action === "continue"));
+    expect(continued.data.run.supervision).toEqual([expect.objectContaining({ action: "continue", reason: "promise" })]);
     d.send({ t: "run.accept", runId: cont.runId });
     await d.acked(cont.runId, d.done(cont.runId, { status: "succeeded", resultText: "文档也改好了" }));
+    expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(4);
     d.close();
     c.close();
   });

@@ -42,6 +42,8 @@ const TICK_MS = 30_000;
 /** A finished run waits this long for its run.session before it is closed. */
 const SESSION_WAIT_MS = 60 * 60_000;
 const ACK_EVERY = 100;
+/** 盯 1.4: a working step is passed on to its desk at most this often per run. */
+const ALIVE_EVERY_MS = 60_000;
 const MAX_FRAME_BYTES = 1_048_576;
 
 // Daemon frames as the server reads them. Run events are kept as objects with a string `type`
@@ -194,6 +196,8 @@ const OPEN_STATES = "('assigned','accepted','done')";
 export class MachineLink extends DurableObject<BotsEnv> {
   private readonly sql: SqlStorage;
   private machineId: string | null = null;
+  /** 盯 1.4: when each run's desk last heard that its step is working (in memory only). */
+  private readonly aliveSent = new Map<string, number>();
   private log: Logger = baseLogger.child({ obj: "MachineLink" });
   private chain: Promise<void> = Promise.resolve();
   private readonly queues = new Map<string, { frames: SeqFrame[]; busy: boolean; sinceAck: number }>();
@@ -267,6 +271,25 @@ export class MachineLink extends DurableObject<BotsEnv> {
 
   private run(runId: string): RunRow | undefined {
     return this.sql.exec<RunRow>("SELECT * FROM runs WHERE run_id = ?", runId).toArray()[0] as RunRow | undefined;
+  }
+
+  /**
+   * 盯 1.4: runs whose step the daemon reports working (`RunCursor.active`); their desks hear it
+   * at most once a minute per run. Never holds up the heartbeat.
+   */
+  private alive(runIds: string[], now: number): void {
+    for (const id of runIds) {
+      if (now - (this.aliveSent.get(id) ?? 0) < ALIVE_EVERY_MS) continue;
+      const r = this.run(id);
+      if (!r || !this.machineId || (r.state !== "assigned" && r.state !== "accepted")) continue;
+      this.aliveSent.set(id, now);
+      this.ctx.waitUntil(
+        deskStub(this.env, r.bot_id)
+          .runAlive(id, this.machineId)
+          .catch((err: unknown) => this.log.warn("run alive failed", { runId: id, err })),
+      );
+    }
+    for (const [id, at] of this.aliveSent) if (now - at > 10 * ALIVE_EVERY_MS) this.aliveSent.delete(id);
   }
 
   private openRuns(): RunRow[] {
@@ -436,6 +459,10 @@ export class MachineLink extends DurableObject<BotsEnv> {
         recordMetrics(this.sql, (k, v) => this.setMeta(k, v), f.metrics, f.health, now);
         this.renew(
           f.runs.map((r) => r.runId),
+          now,
+        );
+        this.alive(
+          f.runs.filter((r) => r.active === true && !r.done).map((r) => r.runId),
           now,
         );
         this.send(ws, { t: "heartbeat.ack", at: now });
