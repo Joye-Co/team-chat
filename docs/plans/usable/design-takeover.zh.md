@@ -131,7 +131,7 @@
 | Windows | 和今天一样挂起线程 | `powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand <cmd>`（实现时改用 `-EncodedCommand`：命令按 UTF-16LE 的 base64 传，免去引号转义；输出设成 UTF-8），单独的 job |
 | Linux 主机的虚拟机 | **改成**：虚拟机继续运行，vm-agent 只对它起的 CLI 进程组 SIGSTOP（和本机同一条规则）。不再整台暂停 | vm-agent 以另一个 uid（任务 uid + 1，组是任务的组）执行 `/bin/bash -c <cmd>`，`HOME` 是每次接管新建的临时目录；命令在自己的 mount namespace 里跑，只留工作目录和任务的 git 目录两个共享，成员家目录和运行目录卸掉（见下面「实现时更正」） |
 
-**实现时更正（T5）**：主机给虚拟机的 NFS 共享是 `all_squash,anonuid=<daemon uid>`（`scripts/runner/runner-vm`），虚拟机里任何 uid 访问共享，在主机上都按 daemon 的 uid 判权限。所以只换 uid 挡不住人的命令读成员家目录（CLI 的订阅登录）。vm-agent 在 fork 之后、exec 之前：`setsid`，`unshare(CLONE_NEWNS)`，先把工作目录和 git 目录 bind 到 `/run/tc-hand/<i>`，再卸掉 `Start.mounts` 里的每个共享（由内到外，`MNT_DETACH`），然后把两个目录 bind 回原路径，最后 `setgroups(0)`、`setgid(任务 gid)`、`setuid(任务 uid + 1)`、`chdir`。`/proc/<CLI pid>/environ` 仍靠 uid 不同读不到；`/run/chat-run.sock` 是 600、属于任务 uid，人的命令连不上。`chmod -R g+rwX` 只对工作目录做（以任务 uid 去改，root 在 NFS 上被 squash），git 目录是同一仓库共用的镜像，不改它的权限。`Restore` 的 chown 在 `all_squash` 下通常没有可改的文件，保留它是为了不走 NFS 的共享。
+**实现时更正（T5）**：主机给虚拟机的 NFS 共享是 `all_squash,anonuid=<daemon uid>`（`scripts/runner/runner-vm`），虚拟机里任何 uid 访问共享，在主机上都按 daemon 的 uid 判权限。所以只换 uid 挡不住人的命令读成员家目录（CLI 的订阅登录）。vm-agent 在 fork 之后、exec 之前：`setsid`，`unshare(CLONE_NEWNS)`，先把工作目录和 git 目录 bind 到 `/run/tc-hand/<i>`，再卸掉 `Start.mounts` 里的每个共享（由内到外，`MNT_DETACH`），然后把两个目录 bind 回原路径，最后 `setgroups(0)`、`setgid(任务 gid)`、`setuid(任务 uid + 1)`、`chdir`。`/proc/<CLI pid>/environ` 仍靠 uid 不同读不到；`/run/chat-run.sock` 是 600、属于任务 uid，人的命令连不上。但这个套接字只是 vm-agent 的转发，真正的通路是 vsock（CID 2、端口 1025，Firecracker 转到主机的 chat-run，主机按 daemon 的 uid 认人，会用任务的 GitHub 登录回答 `git-credential`、发放审批过的 secret），虚拟机里任何进程都能开 vsock。所以 vm-agent 在 `setuid` 之后再装一个 seccomp 过滤（先 `PR_SET_NO_NEW_PRIVS`）：`socket(AF_VSOCK, …)` 和 `io_uring_setup` 返回 EPERM，x32 调用返回 EPERM，别的架构的调用直接杀掉（`vm_agent::hand_filter`）。装不上就不启动命令。`chmod -R g+rwX` 只对工作目录做（以任务 uid 去改，root 在 NFS 上被 squash），git 目录是同一仓库共用的镜像，不改它的权限。`Restore` 的 chown 在 `all_squash` 下通常没有可改的文件，保留它是为了不走 NFS 的共享。
 
 - 每条命令都从工作目录开始，不保留上一条的 `cd`（一行里写 `cd x && …` 可以）。最简单，不会错。
 - 人的命令可以在后台留下进程（`nohup`）；中止和超时只结束它的进程组，留下的进程算人自己的选择，停止任务时一起结束（本机按会话，虚拟机按 uid）。
@@ -339,7 +339,7 @@ ALTER TABLE runs ADD COLUMN last_handback TEXT;          -- hand.summary 的 JSO
 3. **Linux 主机上的虚拟机**（团队电脑，请求人接管）
    1. 接管后虚拟机没有整台暂停：daemon metrics 里这次任务的 `vm_paused` 是 false（firecracker API 状态 Running）。
    2. `hostname` 是虚拟机的名字；`id -u` 不是任务的 uid。
-   3. `env` 里没有注入的密钥和 GitHub token；`cat /proc/*/environ` 读不到 CLI 的环境；`cat ~<任务用户>/.claude/.credentials.json`（或 Codex 的对应文件）被拒绝。
+   3. `env` 里没有注入的密钥和 GitHub token；`cat /proc/*/environ` 读不到 CLI 的环境；`cat ~<任务用户>/.claude/.credentials.json`（或 Codex 的对应文件）被拒绝。命令里连 vsock CID 2 端口 1025（比如 `python3 -c 'import socket; socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM).connect((2, 1025))'`）失败（EPERM），`git credential fill` 拿不到任务的 token。
    4. 在工作目录里改一个文件；交还后 `ls -l` 显示它属于任务 uid，CLI 接着做。
 4. **团队**
    1. A 的个人电脑跑 B 的任务：B 只看到「暂停」；A 能接管。

@@ -101,6 +101,9 @@ pub struct HandEnd {
     pub unsupported: bool,
     /// Why it did not start.
     pub error: Option<String>,
+    /// Output bytes the executor counted but never put on `output` (in a VM: what the agent
+    /// dropped past its cap, less the last bytes it sent at the end).
+    pub skipped: u64,
 }
 
 /// Reads `r` on a thread of its own and sends what it reads to `tx`, until the pipe ends or

@@ -247,6 +247,26 @@ pub fn hand_exec(id: &str, req: &HandReq, git_dir: Option<&Path>) -> vmwire::Exe
     }
 }
 
+/// The end of a person's command in the VM: the last bytes the agent kept past its cap go on
+/// `out` as plain output, and the bytes it dropped before them are counted once, in
+/// [`HandEnd::skipped`], so [`crate::hand::OutCap`] writes the one "not shown" line.
+pub fn exec_end(e: vmwire::ExecExit, out: &tokio::sync::mpsc::UnboundedSender<Vec<u8>>) -> HandEnd {
+    let mut skipped = 0;
+    if e.dropped > 0 {
+        skipped = e.dropped.saturating_sub(e.tail.len() as u64);
+        if !e.tail.is_empty() {
+            let _ = out.send(e.tail.into_bytes());
+        }
+    }
+    let unsupported = e.error.as_deref() == Some("unsupported");
+    HandEnd {
+        code: e.code,
+        unsupported,
+        error: e.error.filter(|_| !unsupported),
+        skipped,
+    }
+}
+
 impl Firecracker {
     fn ctl(&self, run_dir: &Path) -> Option<mpsc::WeakUnboundedSender<Ctl>> {
         let procs = self.procs.lock().unwrap_or_else(|e| e.into_inner());
@@ -806,19 +826,7 @@ impl Job {
                         if let Ok(e) = serde_json::from_slice::<vmwire::ExecExit>(&p)
                             && let Some((out, done)) = execs.remove(&e.id)
                         {
-                            if e.dropped > 0 {
-                                let skipped = e.dropped.saturating_sub(e.tail.len() as u64);
-                                let _ = out.send(
-                                    format!("\n[... {skipped} bytes not shown ...]\n{}", e.tail)
-                                        .into_bytes(),
-                                );
-                            }
-                            let unsupported = e.error.as_deref() == Some("unsupported");
-                            let _ = done.send(HandEnd {
-                                code: e.code,
-                                unsupported,
-                                error: e.error.filter(|_| !unsupported),
-                            });
+                            let _ = done.send(exec_end(e, &out));
                         }
                     }
                     Some(_) => {}

@@ -867,6 +867,14 @@ struct Paused {
 }
 
 impl Paused {
+    /// The id of the person's command that runs now.
+    fn running_command(&self) -> Option<String> {
+        self.takeover
+            .as_ref()
+            .and_then(|t| t.running.as_ref())
+            .map(|r| r.id.clone())
+    }
+
     /// Lets the CLI and its tools continue.
     fn resume(&self) {
         if let Some(s) = &self.stopped {
@@ -919,6 +927,9 @@ async fn run_runtime(
     let mut tick = tokio::time::interval(TICK);
     let mut ticked = Instant::now();
     let mut paused: Option<Paused> = None;
+    // The person's command that ended with the take-over when the run was cancelled: it still
+    // gets its `hand.result`.
+    let mut ending: Option<String> = None;
     let mut resumes = 0u32;
     let mut control_open = true;
     let mut acceptance = crate::acceptance::AcceptanceTracker::default();
@@ -1097,6 +1108,7 @@ async fn run_runtime(
                         // A stopped CLI cannot handle SIGTERM: a cancel resumes it first (and
                         // ends the person's command with the take-over).
                         if c == Control::Cancel && let Some(p) = paused.take() {
+                            ending = p.running_command();
                             p.resume();
                             for ev in gate.push(RunEvent::Paused { paused: false, by: None }) {
                                 event(ev);
@@ -1111,7 +1123,14 @@ async fn run_runtime(
                     Some(t) => t.on_msg(m, &event),
                     // The take-over is over (the run was cancelled): the command's last events
                     // still go up.
-                    None => if let crate::hand::HandMsg::Event(ev) = m { event(ev) },
+                    None => if let crate::hand::HandMsg::Event(ev) = m {
+                        if matches!(&ev, RunEvent::HandResult { command_id, .. }
+                            if ending.as_deref() == Some(command_id.as_str()))
+                        {
+                            ending = None;
+                        }
+                        event(ev)
+                    },
                 }
             }
             _ = tokio::time::sleep_until(hold_until), if gate.holding() => {
@@ -1152,12 +1171,11 @@ async fn run_runtime(
     // Never leave a stopped group behind (the runtime already reaped the CLI). A person's
     // command ends with the take-over, and what their commands left with the run.
     if let Some(p) = paused.take() {
+        ending = p.running_command().or(ending);
         p.resume();
     }
     exec.hand_end(&run_dir);
-    while let Ok(crate::hand::HandMsg::Event(ev)) = hand_rx.try_recv() {
-        event(ev);
-    }
+    crate::hand::finish_with_run(ending, &mut hand_rx, Duration::from_secs(1), &event).await;
     while let Ok(ev) = emit_rx.try_recv() {
         let extra = acceptance.on_event(&ev);
         for ev in gate.push(ev).into_iter().chain(extra) {

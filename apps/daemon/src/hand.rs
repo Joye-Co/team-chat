@@ -102,8 +102,11 @@ impl OutCap {
         let mut out = vec![];
         while self.pending.len() >= MAX_HAND_OUTPUT_BYTES {
             let mut cut = MAX_HAND_OUTPUT_BYTES;
-            // Back off from a cut inside a character.
-            while cut > MAX_HAND_OUTPUT_BYTES - 4 && (self.pending[cut] & 0xC0) == 0x80 {
+            // Back off from a cut inside a character (a cut at the end is never inside one).
+            while cut < self.pending.len()
+                && cut > MAX_HAND_OUTPUT_BYTES - 4
+                && (self.pending[cut] & 0xC0) == 0x80
+            {
                 cut -= 1;
             }
             out.push(self.take(cut));
@@ -115,6 +118,14 @@ impl OutCap {
         let bytes: Vec<u8> = self.pending.drain(..n).collect();
         self.sent += bytes.len();
         bounded(String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    /// `n` more bytes past the cap that never came to [`OutCap::push`] (an executor that caps
+    /// on its own): counted in the "not shown" line, not kept.
+    pub fn skip(&mut self, n: u64) {
+        if n > 0 {
+            self.dropped += n;
+        }
     }
 
     /// What is pending, except a character still incomplete at its end.
@@ -135,8 +146,20 @@ impl OutCap {
             out.push(self.take(n));
         }
         if self.dropped > 0 {
-            let skipped = self.dropped - self.tail.len() as u64;
-            let tail = std::mem::take(&mut self.tail);
+            let mut tail = std::mem::take(&mut self.tail);
+            // The count line and the last bytes fit one text, so its end is never cut off;
+            // the tail starts on a character.
+            let room = MAX_HAND_OUTPUT_BYTES - 64;
+            if tail.len() > room {
+                tail.drain(..tail.len() - room);
+            }
+            let lead = tail
+                .iter()
+                .take(3)
+                .take_while(|b| (*b & 0xC0) == 0x80)
+                .count();
+            tail.drain(..lead);
+            let skipped = self.dropped - tail.len() as u64;
             out.push(bounded(format!(
                 "\n[... {skipped} bytes not shown ...]\n{}",
                 String::from_utf8_lossy(&tail)
@@ -251,6 +274,7 @@ pub fn watch(
                 }
             }
         }
+        cap.skip(end.skipped);
         if let Some(e) = &end.error {
             cap.push(format!("{e}\n").as_bytes());
         }
@@ -445,6 +469,54 @@ impl Takeover {
     }
 }
 
+/// The run ended while the person's command `id` ran (it was cancelled with the take-over):
+/// its last events still go up, waiting up to `wait` for them, and a `hand.result` with
+/// `ok: false` goes up when its own does not come in time. Without `id`, only what is already
+/// there goes up.
+pub async fn finish_with_run(
+    id: Option<String>,
+    rx: &mut mpsc::UnboundedReceiver<HandMsg>,
+    wait: Duration,
+    event: &impl Fn(RunEvent),
+) {
+    if let Some(id) = id {
+        let mut result = false;
+        let until = tokio::time::sleep(wait);
+        tokio::pin!(until);
+        loop {
+            tokio::select! {
+                m = rx.recv() => match m {
+                    Some(HandMsg::Event(ev)) => {
+                        if matches!(&ev, RunEvent::HandResult { command_id, .. } if *command_id == id) {
+                            result = true;
+                        }
+                        event(ev);
+                    }
+                    Some(HandMsg::Ended { id: ended, .. }) if ended == id => break,
+                    Some(HandMsg::Ended { .. }) => {}
+                    None => break,
+                },
+                _ = &mut until => break,
+            }
+        }
+        if !result {
+            event(RunEvent::HandResult {
+                command_id: id,
+                ok: false,
+                exit_code: None,
+                ms: 0,
+                timed_out: None,
+                error: None,
+            });
+        }
+    }
+    while let Ok(m) = rx.try_recv() {
+        if let HandMsg::Event(ev) = m {
+            event(ev);
+        }
+    }
+}
+
 impl Drop for Takeover {
     /// A run that ends while held: the person's command ends with it.
     fn drop(&mut self) {
@@ -469,6 +541,11 @@ mod tests {
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].len(), MAX_HAND_OUTPUT_BYTES - 1);
         assert_eq!(c.flush().as_deref(), Some("€tail\n"));
+        // Exactly one text's worth goes at once.
+        let mut whole = OutCap::new(40_000);
+        let out = whole.push(&vec![b'a'; MAX_HAND_OUTPUT_BYTES]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].len(), MAX_HAND_OUTPUT_BYTES);
         // An incomplete character waits for its last byte.
         c.push(&"é".as_bytes()[..1]);
         assert_eq!(c.flush(), None);
@@ -625,6 +702,122 @@ mod tests {
             run_one("Start-Sleep 600", LIMIT, Some(Duration::from_millis(500))).await;
         assert!(!result(&evs).0);
         assert_eq!(ran.end, End::Cancelled);
+    }
+
+    /// A VM's command past the agent's cap: its 1 MiB, then the agent's last bytes at the
+    /// end; the "not shown" line counts what the agent dropped, once.
+    #[tokio::test]
+    async fn output_capped_in_the_vm_is_counted_once() {
+        use crate::executor::vmwire::{EXEC_OUT_CAP, EXEC_OUT_CHUNK, ExecExit};
+        let (out_tx, out_rx) = mpsc::unbounded_channel();
+        let (done_tx, done) = tokio::sync::oneshot::channel();
+        let child = HandChild {
+            output: out_rx,
+            done,
+            cancel: Box::new(|| {}),
+        };
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let _running = watch(child, "c1".into(), "yes".into(), LIMIT, tx);
+        for _ in 0..EXEC_OUT_CAP / EXEC_OUT_CHUNK {
+            out_tx.send(vec![b'y'; EXEC_OUT_CHUNK]).unwrap();
+        }
+        let dropped = 5_000_000u64;
+        let tail = "z".repeat(EXEC_OUT_CHUNK);
+        let end = crate::executor::firecracker::exec_end(
+            ExecExit {
+                id: "c1".into(),
+                code: Some(0),
+                ms: 1,
+                dropped,
+                tail,
+                error: None,
+            },
+            &out_tx,
+        );
+        assert_eq!(end.skipped, dropped - EXEC_OUT_CHUNK as u64);
+        drop(out_tx);
+        done_tx.send(end).unwrap();
+        let mut evs = vec![];
+        while let HandMsg::Event(e) = tokio::time::timeout(Duration::from_secs(20), rx.recv())
+            .await
+            .unwrap()
+            .unwrap()
+        {
+            evs.push(e);
+        }
+        let out = output(&evs);
+        assert_eq!(out.matches("bytes not shown").count(), 1);
+        // The agent's 1 MiB, then one count line, then the last bytes up to the end.
+        assert_eq!(
+            out[..EXEC_OUT_CAP].bytes().filter(|b| *b == b'y').count(),
+            EXEC_OUT_CAP
+        );
+        let rest = &out[EXEC_OUT_CAP..];
+        let (head, shown) = rest
+            .strip_prefix("\n[... ")
+            .and_then(|r| r.split_once(" bytes not shown ...]\n"))
+            .unwrap_or_else(|| panic!("{}", rest.get(..80).unwrap_or(rest)));
+        assert!(!shown.is_empty() && shown.bytes().all(|b| b == b'z'));
+        // What was shown and what was not add up to what the agent dropped.
+        assert_eq!(head.parse::<u64>().unwrap() + shown.len() as u64, dropped);
+        assert!(evs.iter().all(|e| match e {
+            RunEvent::HandOutput { text, .. } => text.len() <= MAX_HAND_OUTPUT_BYTES,
+            _ => true,
+        }));
+        assert_eq!(result(&evs), (true, Some(0), None));
+    }
+
+    /// The run ends while a person's command runs: the command still gets its `hand.result`.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_command_running_when_the_run_ends_gets_its_result() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exec = crate::executor::local();
+        let req = HandReq {
+            run_dir: tmp.path().join("run"),
+            cwd: tmp.path().to_path_buf(),
+            command: "echo started; sleep 600".into(),
+            env: std::env::vars().collect(),
+        };
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let running = watch(
+            exec.hand(&req).unwrap(),
+            "c1".into(),
+            req.command.clone(),
+            LIMIT,
+            tx,
+        );
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        running.cancel();
+        let evs = std::sync::Mutex::new(vec![]);
+        finish_with_run(Some("c1".into()), &mut rx, Duration::from_secs(5), &|e| {
+            evs.lock().unwrap().push(e)
+        })
+        .await;
+        exec.hand_end(&req.run_dir);
+        let evs = evs.into_inner().unwrap();
+        assert_eq!(result(&evs), (false, None, None));
+        assert_eq!(
+            evs.iter()
+                .filter(|e| matches!(e, RunEvent::HandResult { .. }))
+                .count(),
+            1
+        );
+        // A command whose end does not come in time gets one with `ok: false`.
+        let (_tx, mut rx) = mpsc::unbounded_channel();
+        let evs = std::sync::Mutex::new(vec![]);
+        finish_with_run(
+            Some("c2".into()),
+            &mut rx,
+            Duration::from_millis(50),
+            &|e| evs.lock().unwrap().push(e),
+        )
+        .await;
+        let evs = evs.into_inner().unwrap();
+        assert!(matches!(
+            &evs[..],
+            [RunEvent::HandResult { command_id, ok: false, .. }] if command_id == "c2"
+        ));
     }
 
     #[test]

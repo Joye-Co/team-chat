@@ -42,6 +42,44 @@ pub fn hand_mounts(shares: &[String], open: &[String]) -> (Vec<String>, Vec<Vec<
     (hide, dirs)
 }
 
+/// One classic BPF instruction: code, jump if true, jump if false, k.
+pub type Bpf = (u16, u8, u8, u32);
+
+/// The seccomp filter of a person's command in the VM (design-takeover 3.4).
+///
+/// Any process in the VM can open vsock to the host, and the host's `chat-run` port answers
+/// for the run (its GitHub sign-in, gated secrets, posting as the member); the agent relays
+/// the CLI to it. So the person's command may not make a vsock socket: `socket(AF_VSOCK, ..)`
+/// fails with EPERM, and so does `io_uring_setup` (an io_uring can make sockets too). A call of
+/// another architecture kills the command; on x86_64 the x32 calls fail.
+pub fn hand_filter(arch: u32, sys_socket: u32, sys_io_uring_setup: u32) -> Vec<Bpf> {
+    const LD_W_ABS: u16 = 0x20;
+    const JEQ_K: u16 = 0x15;
+    const JGE_K: u16 = 0x35;
+    const RET_K: u16 = 0x06;
+    const KILL_PROCESS: u32 = 0x8000_0000;
+    const ERRNO_EPERM: u32 = 0x0005_0000 | 1;
+    const ALLOW: u32 = 0x7fff_0000;
+    const X32_BIT: u32 = 0x4000_0000;
+    const AF_VSOCK: u32 = 40;
+    // struct seccomp_data: nr at 0, arch at 4, args[0] at 16 (its low half: little endian).
+    vec![
+        (LD_W_ABS, 0, 0, 4),
+        (JEQ_K, 1, 0, arch),
+        (RET_K, 0, 0, KILL_PROCESS),
+        (LD_W_ABS, 0, 0, 0),
+        (JGE_K, 0, 1, X32_BIT),
+        (RET_K, 0, 0, ERRNO_EPERM),
+        (JEQ_K, 0, 1, sys_io_uring_setup),
+        (RET_K, 0, 0, ERRNO_EPERM),
+        (JEQ_K, 0, 3, sys_socket),
+        (LD_W_ABS, 0, 0, 16),
+        (JEQ_K, 0, 1, AF_VSOCK),
+        (RET_K, 0, 0, ERRNO_EPERM),
+        (RET_K, 0, 0, ALLOW),
+    ]
+}
+
 /// The person's temporary home in the VM: made at the first command of a take-over, removed
 /// at hand-back, so a sign-in there does not outlive it.
 pub const HAND_HOME: &str = "/tmp/tc-hand-home";
@@ -85,6 +123,82 @@ mod tests {
         );
         assert_eq!(dirs[1].last().unwrap(), "/srv/mirrors/m.git");
         assert_eq!(hand_uid(1000), 1001);
+    }
+
+    /// Runs a classic BPF program the way the kernel runs a seccomp filter.
+    fn bpf(prog: &[Bpf], nr: u32, arch: u32, arg0: u32) -> u32 {
+        let mut a = 0u32;
+        let mut pc = 0usize;
+        loop {
+            let (code, jt, jf, k) = prog[pc];
+            pc += 1;
+            match code {
+                0x20 => {
+                    a = match k {
+                        0 => nr,
+                        4 => arch,
+                        16 => arg0,
+                        _ => panic!("load at {k}"),
+                    }
+                }
+                0x15 | 0x35 => {
+                    let hit = if code == 0x15 { a == k } else { a >= k };
+                    pc += usize::from(if hit { jt } else { jf });
+                }
+                0x06 => return k,
+                _ => panic!("code {code:#x}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_persons_command_cannot_open_vsock() {
+        const X86_64: u32 = 0xC000_003E;
+        let f = hand_filter(X86_64, 41, 425);
+        let eperm = 0x0005_0001;
+        // socket(AF_VSOCK) fails; other sockets and calls run.
+        assert_eq!(bpf(&f, 41, X86_64, 40), eperm);
+        assert_eq!(bpf(&f, 41, X86_64, 1), 0x7fff_0000);
+        assert_eq!(bpf(&f, 41, X86_64, 2), 0x7fff_0000);
+        assert_eq!(bpf(&f, 0, X86_64, 40), 0x7fff_0000);
+        // No io_uring, no x32 calls, no other architecture.
+        assert_eq!(bpf(&f, 425, X86_64, 0), eperm);
+        assert_eq!(bpf(&f, 0x4000_0000 | 41, X86_64, 40), eperm);
+        assert_eq!(bpf(&f, 41, 0x4000_0003, 40), 0x8000_0000);
+    }
+
+    /// The filter as the kernel takes it: a vsock socket fails with EPERM, a Unix one works.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_kernel_refuses_a_vsock_socket_to_a_persons_command() {
+        let mut f = linux::hand_filter_here();
+        // SAFETY: the child only makes syscalls, then exits.
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0);
+        if pid == 0 {
+            let code = unsafe {
+                if linux::deny_vsock(&mut f).is_err() {
+                    3
+                } else {
+                    let v = libc::socket(libc::AF_VSOCK, libc::SOCK_STREAM, 0);
+                    let errno = *libc::__errno_location();
+                    let u = libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0);
+                    if v >= 0 || errno != libc::EPERM {
+                        1
+                    } else if u < 0 {
+                        2
+                    } else {
+                        0
+                    }
+                }
+            };
+            unsafe { libc::_exit(code) };
+        }
+        let mut status = 0;
+        // SAFETY: waits for the child made above.
+        unsafe { libc::waitpid(pid, &mut status, 0) };
+        assert!(libc::WIFEXITED(status), "{status}");
+        assert_eq!(libc::WEXITSTATUS(status), 0);
     }
 }
 
@@ -549,8 +663,57 @@ mod linux {
         }
     }
 
+    /// [`super::hand_filter`] for this machine's architecture (any other kills every call).
+    pub(crate) fn hand_filter_here() -> Vec<libc::sock_filter> {
+        #[cfg(target_arch = "x86_64")]
+        const ARCH: u32 = 0xC000_003E;
+        #[cfg(target_arch = "aarch64")]
+        const ARCH: u32 = 0xC000_00B7;
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        const ARCH: u32 = 0;
+        super::hand_filter(
+            ARCH,
+            libc::SYS_socket as u32,
+            libc::SYS_io_uring_setup as u32,
+        )
+        .into_iter()
+        .map(|(code, jt, jf, k)| libc::sock_filter { code, jt, jf, k })
+        .collect()
+    }
+
+    /// Installs `filter` on this process and what it execs (no new privileges either, so no
+    /// setuid program gets the run's user back).
+    ///
+    /// # Safety
+    /// Only syscalls: callable between fork and exec.
+    pub(crate) unsafe fn deny_vsock(filter: &mut [libc::sock_filter]) -> std::io::Result<()> {
+        let prog = libc::sock_fprog {
+            len: filter.len() as libc::c_ushort,
+            filter: filter.as_mut_ptr(),
+        };
+        let one: libc::c_ulong = 1;
+        let zero: libc::c_ulong = 0;
+        // SAFETY: `prog` points at `filter`, alive for the call.
+        let r = unsafe {
+            if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, one, zero, zero, zero) != 0 {
+                -1
+            } else {
+                libc::prctl(
+                    libc::PR_SET_SECCOMP,
+                    libc::SECCOMP_MODE_FILTER as libc::c_ulong,
+                    &prog as *const libc::sock_fprog,
+                )
+            }
+        };
+        if r != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
     /// Starts the person's command: a session of its own, a mount namespace in which only the
-    /// open shares are left, then the person's user. Returns the child and its output pipe.
+    /// open shares are left, then the person's user, and no vsock ([`deny_vsock`]). Returns
+    /// the child and its output pipe.
     fn spawn_hand(
         e: &Exec,
         home: &Path,
@@ -575,6 +738,7 @@ mod linux {
             .collect::<Result<_, _>>()?;
         let cwd = cstr(&e.cwd)?;
         let root = cstr("/")?;
+        let mut filter = hand_filter_here();
         let (r, w) = std::io::pipe()?;
         let w2 = w.try_clone()?;
         let mut cmd = Command::new(&e.argv[0]);
@@ -641,7 +805,7 @@ mod linux {
                 {
                     return err();
                 }
-                Ok(())
+                deny_vsock(&mut filter)
             });
         }
         let child = cmd.spawn();
