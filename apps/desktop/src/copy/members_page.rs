@@ -61,7 +61,7 @@ crate::copy! {
     MEMBERS_MACHINE_IDLE = "空闲",
     MEMBERS_MACHINE_OFFLINE = "离线",
     MEMBERS_EDIT = "修改",
-    MEMBERS_APPROVAL_NOTE = "做这些事之前会先发卡片，等交代的人或管理员批准。",
+    MEMBERS_APPROVAL_NOTE = "做这些事之前会先发卡片：团队的电脑上由管理员批准，个人的电脑上由电脑主人批准。其他要确认的事由交代的人或管理员批准。",
     MEMBERS_DECISIONS = "用到的决定",
     MEMBERS_GROUP_NAME = "{name}群",
     MEMBERS_SIDE_CHAT = "单独问",
@@ -111,7 +111,7 @@ crate::copy! {
     MEMBERS_FILTER_EMPTY_BODY = "换一个筛选，或者看全部成员。",
     // --- end v13/ux-pages ---
     // --- v13/wire: backend data on the member detail ---
-    MEMBERS_APPROVAL_NOTE_OWNERS = "做这些事之前会先发卡片，等管理员批准。",
+    MEMBERS_APPROVAL_NOTE_OWNERS = "做这些事之前会先发卡片：团队的电脑上由管理员批准，个人的电脑上由电脑主人批准。其他要确认的事由管理员批准。",
     MEMBERS_APPROVE_MERGE = "合并到 main",
     MEMBERS_APPROVE_DEPLOY = "发布到生产",
     MEMBERS_APPROVE_CONFIG = "改生产环境配置",

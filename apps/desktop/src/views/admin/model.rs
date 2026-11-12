@@ -181,9 +181,12 @@ pub struct StripCell {
     pub value: String,
     pub tone: Tone,
     pub cli: bool,
+    /// A second line under the value: what to run (the GitHub cell when not signed in).
+    pub hint: Option<String>,
 }
 
-/// The status strip: the host, then each CLI with its login.
+/// The status strip: the host, then each CLI with its login, then the computer's GitHub
+/// sign-in when it reports one.
 pub fn strip(d: &MachineMonitor, now: u64) -> Vec<StripCell> {
     let mut out = Vec::new();
     let host = if d.machine.connected {
@@ -196,6 +199,7 @@ pub fn strip(d: &MachineMonitor, now: u64) -> Vec<StripCell> {
             ),
             tone: Tone::Ok,
             cli: false,
+            hint: None,
         }
     } else {
         StripCell {
@@ -210,6 +214,7 @@ pub fn strip(d: &MachineMonitor, now: u64) -> Vec<StripCell> {
                 Tone::Quiet
             },
             cli: false,
+            hint: None,
         }
     };
     out.push(host);
@@ -228,9 +233,48 @@ pub fn strip(d: &MachineMonitor, now: u64) -> Vec<StripCell> {
             value: value.into(),
             tone,
             cli: true,
+            hint: None,
         });
     }
+    out.extend(github_cell(d));
     out
+}
+
+/// Usable (design-github-identity.zh.md §3.7): `已登录 @{login}` / `未登录` / `没装 gh`, with
+/// what to run on the computer when it is not signed in; nothing when the computer does not
+/// report it.
+fn github_cell(d: &MachineMonitor) -> Option<StripCell> {
+    let g = d.github.as_ref()?;
+    let hint = || {
+        Some(
+            if d.runs_in.as_deref() == Some("vm") {
+                m::GITHUB_HINT_VM
+            } else {
+                m::GITHUB_HINT_HOST
+            }
+            .to_string(),
+        )
+    };
+    let (value, tone, hint) = match g.state.as_str() {
+        "signed_in" => (
+            match g.login.as_deref() {
+                Some(login) => fill(m::GITHUB_IN, &[("login", login)]),
+                None => m::LOGIN_IN.to_string(),
+            },
+            Tone::Ok,
+            None,
+        ),
+        "signed_out" => (m::LOGIN_OUT.to_string(), Tone::Warn, hint()),
+        "no_gh" => (m::GITHUB_NO_GH.to_string(), Tone::Warn, hint()),
+        _ => (m::LOGIN_UNKNOWN.to_string(), Tone::Quiet, None),
+    };
+    Some(StripCell {
+        label: m::STRIP_GITHUB.into(),
+        value,
+        tone,
+        cli: true,
+        hint,
+    })
 }
 
 /// What a 要注意 row is about (it picks the icon).
@@ -709,6 +753,48 @@ mod tests {
         assert_eq!(ago(4_000), "刚刚");
         assert_eq!(seconds(1300), "1.3 秒");
         assert_eq!(cores(2.64), "2.6 核");
+    }
+
+    /// §3.7: the GitHub cell in its three states, with what to run where the runs execute;
+    /// none when the computer does not report it.
+    #[test]
+    fn strip_shows_the_computer_github_sign_in() {
+        use chat_core::proto::machine::MachineGithub;
+        let cell = |state: &str, login: Option<&str>, runs_in: Option<&str>| {
+            let mut d = sample();
+            d.github = Some(MachineGithub {
+                state: state.into(),
+                login: login.map(Into::into),
+            });
+            d.runs_in = runs_in.map(Into::into);
+            let c = strip(&d, 1_000).pop().expect("a cell");
+            assert_eq!(c.label, "GitHub");
+            (c.value, c.tone, c.hint)
+        };
+        assert_eq!(
+            cell("signed_in", Some("acme-bot"), Some("vm")),
+            ("已登录 @acme-bot".into(), Tone::Ok, None)
+        );
+        assert_eq!(
+            cell("signed_out", None, Some("vm")),
+            (
+                "未登录".into(),
+                Tone::Warn,
+                Some("在主机上运行 sudo -iu runner gh auth login".into())
+            )
+        );
+        assert_eq!(
+            cell("no_gh", None, Some("host")),
+            (
+                "没装 gh".into(),
+                Tone::Warn,
+                Some("用运行 AI 成员的系统用户运行 gh auth login".into())
+            )
+        );
+        assert_eq!(cell("unknown", None, Some("vm")).2, None);
+        let mut d = sample();
+        d.github = None;
+        assert!(strip(&d, 1_000).iter().all(|c| c.label != "GitHub"));
     }
 
     #[test]

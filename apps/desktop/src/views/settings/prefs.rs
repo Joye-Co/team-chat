@@ -39,9 +39,8 @@ pub struct LocalPrefs {
     pub show_whats_new: bool,
     /// The version this Mac last opened, so the 已更新到 sheet shows once.
     pub last_seen_version: Option<String>,
-    /// Accounts (`<server>#<member id>`) that saw the one-time 连接 GitHub prompt on this
-    /// computer.
-    pub github_prompted: Vec<String>,
+    // Usable: `github_prompted` (the one-time 连接 GitHub prompt) is gone; an older file's
+    // key is ignored on read and dropped on the next write.
 }
 
 impl Default for LocalPrefs {
@@ -57,7 +56,6 @@ impl Default for LocalPrefs {
             auto_download: true,
             show_whats_new: true,
             last_seen_version: None,
-            github_prompted: Vec::new(),
         }
     }
 }
@@ -123,5 +121,15 @@ mod tests {
         assert_eq!(p.last_pane, None);
         assert!(p.auto_download && p.show_whats_new);
         assert_eq!(p.last_seen_version, None);
+    }
+
+    /// An older file's `github_prompted` reads fine and is never written back.
+    #[test]
+    fn the_old_github_prompt_key_is_ignored() {
+        let p: LocalPrefs =
+            serde_json::from_str(r#"{"sound":false,"github_prompted":["s#m"]}"#).unwrap();
+        assert!(!p.sound);
+        let out = serde_json::to_string(&p).unwrap();
+        assert!(!out.contains("github"), "{out}");
     }
 }

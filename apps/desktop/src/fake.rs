@@ -15,8 +15,6 @@ use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use crate::{data::*, drafts::DraftStore};
 
 pub mod admin;
-/// Usable: GitHub sign-in for the screenshot scenes.
-pub mod github;
 pub mod memory;
 mod settings;
 /// The v2 sample team of the 1.1.0 artboards.
@@ -63,8 +61,6 @@ pub struct FakeProvider {
     this_mac_used: std::sync::atomic::AtomicBool,
     /// 记得的事 and 团队约定.
     memory: memory::FakeMemory,
-    /// Usable: my GitHub sign-in.
-    github: github::FakeGithub,
 }
 
 struct State {
@@ -149,29 +145,6 @@ impl FakeProvider {
         )
     }
 
-    /// The wait of the `Waiting` GitHub shape: the first AI member of the first 群, in
-    /// the 话题 the scenes open first (`selftest::scenes::open_first_topic`).
-    fn sample_github_wait(&self) -> Option<GithubWait> {
-        let group = self.groups().into_iter().next()?;
-        let topics = self.topics(&group.id);
-        let topic = topics
-            .iter()
-            .find(|t| t.id != LONG_TOPIC)
-            .or(topics.first())?;
-        let members = self.members();
-        let bot = members
-            .iter()
-            .find(|m| m.kind == MemberKind::Bot && group.member_ids.contains(&m.id))
-            .or_else(|| members.iter().find(|m| m.kind == MemberKind::Bot))?;
-        Some(GithubWait {
-            run_id: "run-github-wait".into(),
-            group_id: group.id.clone(),
-            topic_id: topic.id.clone(),
-            bot_id: bot.id.clone(),
-            reconnect: false,
-        })
-    }
-
     /// Signed in as Joye with the sample data.
     pub fn new() -> Arc<Self> {
         let provider = Arc::new(Self {
@@ -184,7 +157,6 @@ impl FakeProvider {
             settings_backend: Mutex::new(settings_backend::FakeSettingsBackend::new(now_ms())),
             this_mac_used: std::sync::atomic::AtomicBool::new(false),
             memory: memory::FakeMemory::default(),
-            github: github::FakeGithub::default(),
         });
         provider.seed_followed();
         provider
@@ -193,12 +165,6 @@ impl FakeProvider {
     /// Starts at the login view; any server URL and non-empty code signs in,
     /// except the codes `0000-0000` and `WRONG-CODE-0000`.
     /// Sets the connection state, for self-test scenes of the offline states.
-    /// Sets what the server says about my GitHub (GitHub scenes).
-    pub fn set_github(&self, shape: github::GithubShape) {
-        self.github.set(shape);
-        self.emit(vec![Change::Github]);
-    }
-
     pub fn set_connection(&self, state: ConnectionState) {
         self.with(|s| s.connection = state);
         self.emit(vec![Change::Connection]);
@@ -215,7 +181,6 @@ impl FakeProvider {
             settings_backend: Mutex::new(settings_backend::FakeSettingsBackend::new(now_ms())),
             this_mac_used: std::sync::atomic::AtomicBool::new(false),
             memory: memory::FakeMemory::default(),
-            github: github::FakeGithub::default(),
         });
         provider.seed_followed();
         provider
@@ -2166,28 +2131,6 @@ impl ChatProvider for FakeProvider {
         _id: &str,
     ) -> crate::data::EmailReply<crate::data::PhoneOfferState> {
         crate::data::email_reply_now(Ok(crate::data::PhoneOfferState::Waiting))
-    }
-    // Usable: GitHub sign-in (screenshots only): a fixed code that stays waiting.
-    fn github(&self) -> Option<GithubState> {
-        let mut state = self.github.state();
-        if self.github.shape() == github::GithubShape::Waiting {
-            state.waits.extend(self.sample_github_wait());
-        }
-        Some(state)
-    }
-    fn start_github(&self) -> AdminReply<GithubDevice> {
-        reply_now(match self.github.shape() {
-            github::GithubShape::Unavailable => Err(AdminError::Unsupported),
-            _ => Ok(github::device()),
-        })
-    }
-    fn poll_github(&self, _device_id: &str) -> AdminReply<GithubPoll> {
-        reply_now(Ok(GithubPoll::Pending))
-    }
-    fn disconnect_github(&self) -> AdminReply<()> {
-        self.github.set(github::GithubShape::NotConnected);
-        self.emit(vec![Change::Github]);
-        reply_now(Ok(()))
     }
     fn add_email_code(&self, _email: &str) -> crate::data::EmailReply<()> {
         crate::data::email_reply_now(Ok(()))

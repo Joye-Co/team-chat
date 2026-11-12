@@ -244,6 +244,7 @@ opener!(open_machines, AdminPage::Machines);
 opener!(open_overview, AdminPage::Overview);
 opener!(open_accounts, AdminPage::Accounts);
 opener!(open_keys, AdminPage::Keys);
+opener!(open_rules, AdminPage::Rules);
 
 /// The 身份 scenes (design-roles 3.9): 成员 as each viewer, with 陈晨 (or me, alone) selected so
 /// the inspector shows the 身份 line.
@@ -294,6 +295,22 @@ macro_rules! scene {
             start: Start::SignedIn,
             setup: |_, _| {},
             open: $open,
+        }
+    };
+}
+
+/// The monitor scenes of the computer's GitHub sign-in (design-github-identity.zh.md §3.7).
+macro_rules! github_scene {
+    ($name:literal, $about:literal, $shape:literal) => {
+        Scene {
+            name: $name,
+            about: $about,
+            start: Start::SignedIn,
+            setup: |_, _| {
+                crate::fake::admin::MONITOR_GITHUB
+                    .store($shape, std::sync::atomic::Ordering::Relaxed)
+            },
+            open: open_overview,
         }
     };
 }
@@ -421,10 +438,25 @@ pub const SCENES: &[Scene] = &[
         "团队管理 › 机器 › 办公室 Mac mini › 概览: the monitor",
         open_overview
     ),
+    github_scene!(
+        "admin-overview-github-out",
+        "团队管理 › 概览 of a VM computer not signed in to GitHub: 未登录 and the sudo command",
+        1
+    ),
+    github_scene!(
+        "admin-overview-github-no-gh",
+        "团队管理 › 概览 of a computer without gh: 没装 gh and what to run",
+        2
+    ),
     scene!(
         "admin-accounts",
         "团队管理 › 订阅账号 of the Mac mini",
         open_accounts
+    ),
+    scene!(
+        "admin-rules",
+        "团队管理 › 默认规则: the note on who approves the gated actions above 其他要确认的事谁来批准",
+        open_rules
     ),
     scene!(
         "admin-keys",

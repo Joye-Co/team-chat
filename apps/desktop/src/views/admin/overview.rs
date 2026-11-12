@@ -16,6 +16,7 @@ use super::{
 };
 use crate::{
     copy::{admin as m, fill},
+    theme::Type as _,
     ui::{
         MemberAvatar, Sym,
         icons::sym as sym_icon,
@@ -188,6 +189,16 @@ fn strip(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
                         .child(dot(tone_color(c.tone, &k)))
                         .child(TruncText::new(c.value)),
                 )
+                // Usable: what to run on the computer, wrapped, in the code font.
+                .when_some(c.hint, |d, h| {
+                    d.child(
+                        div()
+                            .n_footnote()
+                            .code_font()
+                            .text_color(k.secondary)
+                            .child(h),
+                    )
+                })
         }))
 }
 

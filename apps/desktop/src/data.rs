@@ -22,13 +22,10 @@ pub mod cards_v2;
 // --- inc-host track: 产出 page host types ---
 pub mod page_host;
 // --- end inc-host track ---
-/// Usable: each person's GitHub sign-in.
-pub mod github;
 /// 沉淀: 记得的事, 团队约定 and the daily 记忆更新.
 pub mod memory;
 // Usable (design-takeover T6): a run's one state and who may hold it.
 pub mod run_phase;
-pub use github::{GithubAccount, GithubDevice, GithubPoll, GithubState, GithubWait};
 use std::{fmt, path::PathBuf, sync::Arc};
 
 use futures::channel::mpsc::UnboundedReceiver;
@@ -997,8 +994,6 @@ pub enum Change {
     Draft {
         key: DraftKey,
     },
-    /// My GitHub sign-in or the runs that wait for it ([`ChatProvider::github`]).
-    Github,
 }
 
 /// Which composer a draft belongs to: one per topic, and one per 群 for a new
@@ -1332,9 +1327,27 @@ pub struct MachineInfo {
     /// Usable, on my own computer only: the AI members whose work for me runs here, each with
     /// my code folder there.
     pub personal_bots: Vec<PersonalBot>,
-    /// Usable: its daemon has feature `github` (runs can use a connected GitHub); `None` =
-    /// not told (the server tells owners only).
-    pub github: Option<bool>,
+    /// Usable: the computer's own GitHub sign-in (`Machine.github`); `None` = not told (the
+    /// server tells admins and the computer's owner only, and a host-mode computer only when
+    /// signed in).
+    pub github: Option<MachineGithub>,
+}
+
+/// Usable (design-github-identity.zh.md §3.6): the GitHub sign-in a computer reports.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MachineGithub {
+    /// "signed_in" | "signed_out" | "no_gh" | "unknown", or a newer value.
+    pub state: String,
+    pub login: Option<String>,
+}
+
+impl MachineGithub {
+    /// The signed-in account, when the computer is signed in.
+    pub fn signed_in_login(&self) -> Option<&str> {
+        (self.state == "signed_in")
+            .then_some(self.login.as_deref())
+            .flatten()
+    }
 }
 
 /// An AI member whose work for the computer's owner runs on that computer.
@@ -3090,32 +3103,6 @@ pub trait ChatProvider: Send + Sync + 'static {
     }
 
     // --- end settings-backend track ---
-
-    // --- usable: GitHub sign-in (design-github-identity.zh.md §3.7) ---
-
-    /// My GitHub sign-in as last read; `None` before the first read, signed out, or on a
-    /// provider (or server) without it. Cheap.
-    fn github(&self) -> Option<GithubState> {
-        None
-    }
-    /// Reads `GET /v1/me/github` in the background; emits `Change::Github` when it is in.
-    fn refresh_github(&self) {}
-    /// Starts a device code sign-in (`POST /v1/me/github/device`).
-    fn start_github(&self) -> AdminReply<GithubDevice> {
-        reply_now(Err(AdminError::Unsupported))
-    }
-    /// Whether I confirmed the code (`POST /v1/me/github/device/:id/poll`). `Done` updates
-    /// [`ChatProvider::github`] and emits `Change::Github`.
-    fn poll_github(&self, _device_id: &str) -> AdminReply<GithubPoll> {
-        reply_now(Err(AdminError::Unsupported))
-    }
-    /// Forgets my GitHub account on the server (`DELETE /v1/me/github`); emits
-    /// `Change::Github`.
-    fn disconnect_github(&self) -> AdminReply<()> {
-        reply_now(Err(AdminError::Unsupported))
-    }
-
-    // --- end usable: GitHub sign-in ---
 
     // --- changes ---
 
