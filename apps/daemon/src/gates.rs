@@ -227,17 +227,37 @@ fn parts(line: &str) -> Vec<Part> {
     let mut space = false;
     // Where the quoted code arguments we are inside end.
     let mut code_ends: Vec<usize> = vec![];
+    // Inside a `#` comment: its quotes (`# it's done`) open nothing.
+    let mut comment = false;
+    // The line feeds what it prints to a shell (`echo "…" | sh`): every argument may be code.
+    let piped = PIPED_TO_SHELL.is_match(line);
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
+        // A quote opens an argument only where a word starts: `it's` is a letter, not a quote.
+        let word_start = i == 0
+            || chars[i - 1].is_whitespace()
+            || matches!(chars[i - 1], '=' | ';' | '|' | '&' | '(' | '<' | '>' | '$');
         if code_ends.last() == Some(&i) {
             code_ends.pop();
-        } else if matches!(c, '"' | '\'') {
+            comment = false;
+        } else if comment {
+            comment = c != '\n';
+        } else if c == '#' && word.is_empty() && word_start {
+            comment = true;
+        } else if matches!(c, '"' | '\'') && word_start {
             let limit = code_ends.last().copied().unwrap_or(chars.len());
             if let Some(close) = closing(&chars, i, limit) {
                 let inner: String = chars[i + 1..close].iter().collect();
-                let code = words.is_empty()
-                    || words.last().is_some_and(|w| is_script_flag(w))
+                // A span over several lines is data only as the value of a flag (`-m`, `--body`,
+                // `--text=`): elsewhere it may be a stray quote that runs over real commands.
+                let lines_of_data = !inner.contains('\n')
+                    || !word.is_empty()
+                    || words.last().is_some_and(|w| w.starts_with('-'));
+                let code = piped
+                    || !lines_of_data
+                    || words.is_empty()
+                    || words.last().is_some_and(|w| opens_script(&words, w))
                     || plain_command(&words[0]).eq_ignore_ascii_case("eval")
                     || (c == '"' && (inner.contains("$(") || inner.contains('`')));
                 if !code && inner.chars().any(char::is_whitespace) {
@@ -345,12 +365,51 @@ fn is_shell(program: &str) -> bool {
     )
 }
 
+/// The flag before a shell's script: `-c`, `/c`, `-Command`, or a cluster of short flags that
+/// ends in `c` (`-lc`, `-ec`, `-euxc`).
 fn is_script_flag(flag: &str) -> bool {
+    let f = flag.to_ascii_lowercase();
+    matches!(f.as_str(), "-command" | "/c")
+        || f.strip_prefix('-').is_some_and(|rest| {
+            rest.ends_with('c') && rest.chars().all(|ch| ch.is_ascii_alphabetic())
+        })
+}
+
+/// Programs that run code given as an argument (`node -e '…'`, `python -c '…'`).
+fn is_interpreter(program: &str) -> bool {
+    let base = program.rsplit(['/', '\\']).next().unwrap_or(program);
+    let base = base.to_ascii_lowercase();
+    let base = base.strip_suffix(".exe").unwrap_or(&base);
+    let base = base.trim_end_matches(|ch: char| ch.is_ascii_digit() || ch == '.');
     matches!(
-        flag.to_ascii_lowercase().as_str(),
-        "-c" | "-lc" | "-ic" | "-command" | "/c"
+        base,
+        "node" | "nodejs" | "perl" | "ruby" | "python" | "osascript" | "deno" | "bun" | "php"
     )
 }
+
+/// The argument after `flag` is code: a script flag of a shell, or the code flag of an
+/// interpreter, in the command whose words so far are `words`. The flags `-c`, `-lc`, `-ic`,
+/// `-Command` and `/c` count after any program (a wrapper such as `sudo` or `env` may come
+/// first); clusters (`-ec`) after a shell; `-e`, `-pe`, `-E`, `--eval`, `-p`, `-r` and
+/// `eval` after an interpreter.
+fn opens_script(words: &[String], flag: &str) -> bool {
+    let f = flag.to_ascii_lowercase();
+    matches!(f.as_str(), "-c" | "-lc" | "-ic" | "-command" | "/c")
+        || (is_script_flag(flag) && words.iter().any(|w| is_shell(w)))
+        || ((matches!(flag, "--eval" | "--print" | "-p" | "-r" | "eval")
+            || flag.strip_prefix('-').is_some_and(|rest| {
+                rest.ends_with(['e', 'E', 'c']) && rest.chars().all(|ch| ch.is_ascii_alphabetic())
+            }))
+            && words.iter().any(|w| is_interpreter(w)))
+}
+
+/// A pipe into a shell or an interpreter: what the line prints there runs.
+static PIPED_TO_SHELL: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+    Regex::new(
+        r"(?i)\|\s*(?:sudo\s+|env\s+)?(?:\S*[/\\])?(?:(?:ba|z|da|k|fi)?sh|pwsh|powershell|cmd|python[0-9.]*|node|perl|ruby|osascript)(?:\.exe)?(?:\s|$)",
+    )
+    .expect("pipe pattern")
+});
 
 /// POSIX shell words: `'…'` literal, `"…"` with `\` before `"`, `\`, `$` and `` ` ``, and a
 /// bare `\` that escapes the next character. None when a quote is not closed.
@@ -1251,6 +1310,8 @@ mod tests {
             r#"echo "rm -rf /" > note.txt"#,
             r#"chat-run report --text "next: gh pr merge 5; then npm publish""#,
             r#"/path/to/chat-run report --text "a" --text "wrangler deploy --env prod""#,
+            "git commit -m \"docs: say why\n\nnever git push origin main by hand\"",
+            r#"grep -rn "git push origin main" docs"#,
         ];
         for cmd in misses {
             assert_eq!(gates.matches(cmd), None, "{cmd}");
@@ -1278,6 +1339,31 @@ mod tests {
                 r#"mcp__srv__push_files {"branch":"main","message":"a b"}"#,
                 "mergeMain",
             ),
+            // An apostrophe in a comment opens no quoted argument over the lines after it.
+            (
+                "# it's approved, merge via API\ncurl -X PUT https://api.github.com/repos/o/r/pulls/5/merge -d '{\"merge_method\":\"squash\"}'",
+                "mergeMain",
+            ),
+            ("# don't keep the cache\nrm -rf ~", "deleteData"),
+            ("echo it's done\nrm -rf ~ # it's fine", "deleteData"),
+            ("# 'old note\nrm -rf ~", "deleteData"),
+            // Script flags in every spelling a shell or an interpreter takes.
+            ("bash -ec 'git push origin main'", "mergeMain"),
+            ("sh -xc 'rm -rf ~'", "deleteData"),
+            ("bash -euxc 'gh pr merge 5'", "mergeMain"),
+            ("zsh -fc 'npm publish'", "externalPublish"),
+            (r#"node -e "require('child_process').execSync('gh pr merge 5')""#, "mergeMain"),
+            (r#"perl -e "system('gh pr merge 5')""#, "mergeMain"),
+            (r#"ruby -e "system('gh pr merge 5')""#, "mergeMain"),
+            (r#"python3 -c "import os; os.system('gh pr merge 5')""#, "mergeMain"),
+            (r#"perl -pe "s/a b/c/; system('gh pr merge 5')" f"#, "mergeMain"),
+            (r#"osascript -e "do shell script \"gh pr merge 5\"""#, "mergeMain"),
+            // What a line prints into a shell runs.
+            (
+                r#"echo "curl -X PUT https://api.github.com/repos/o/r/pulls/5/merge" | sh"#,
+                "mergeMain",
+            ),
+            (r#"printf '%s\n' "rm -rf ~" | bash -s"#, "deleteData"),
         ];
         for (cmd, want) in hits {
             assert_eq!(gates.matches(cmd), Some(want), "{cmd}");

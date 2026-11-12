@@ -162,10 +162,10 @@ export function recoveryNote(f: RecoveryFacts): string {
   }
   const background = dedupe(f.background ?? []).slice(-NOTE_ACTIONS);
   if (background.length > 0) {
-    lines.push("", "Commands the earlier tries ran in the background; they were stopped with that work and did not finish:");
+    lines.push("", "Commands the earlier tries ran in the background; any still running when that work stopped was stopped with it and may not have finished:");
     for (const b of background) lines.push(`- ${b}`);
     lines.push(
-      "Run again what you still need of them and wait for each in the foreground before you end your turn: a turn that ends while a command still runs in the background has not finished the work.",
+      "Check whether each finished (its output, the files it makes); run again only what you still need and did not get, and wait for each in the foreground before you end your turn: a turn that ends while a command still runs in the background has not finished the work.",
     );
   }
   lines.push(

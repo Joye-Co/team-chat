@@ -94,8 +94,28 @@ pub fn idle_result(v: &Value) -> bool {
 
 /// How long the daemon waits for the CLI's own turn after its last background command finished.
 pub const BACKGROUND_NUDGE: Duration = Duration::from_secs(15);
-/// How long a run whose turn ended waits for the commands the CLI left in the background.
-pub const BACKGROUND_WAIT: Duration = Duration::from_secs(600);
+/// How long a run whose turn ended waits for the commands the CLI left in the background. The
+/// run sends nothing while it waits, so this stays well below the server's nudge (5 minutes of
+/// quiet, `NUDGE_MS`) and stall restart (10 minutes): the daemon's [`BACKGROUND_STILL`] comes
+/// first, and a command that needs longer is then waited for in the foreground, as an open tool
+/// call the server gives its longer tool limit.
+pub const BACKGROUND_WAIT: Duration = Duration::from_secs(4 * 60);
+
+/// [`BACKGROUND_WAIT`] unless a test shortened it ([`set_background_wait`]), in milliseconds.
+static BACKGROUND_WAIT_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Tests only: how long a run waits for its background commands instead of [`BACKGROUND_WAIT`].
+#[doc(hidden)]
+pub fn set_background_wait(d: Duration) {
+    BACKGROUND_WAIT_MS.store(d.as_millis() as u64, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn background_wait_for() -> Duration {
+    match BACKGROUND_WAIT_MS.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => BACKGROUND_WAIT,
+        ms => Duration::from_millis(ms),
+    }
+}
 /// The line the daemon writes when a background command still runs after [`BACKGROUND_WAIT`].
 pub const BACKGROUND_STILL: &str = "[team-chat] Written automatically (not a message from a person): \
 your turn ended while a command you ran in the background still runs. If the work needs its \
@@ -867,7 +887,7 @@ run unasked. The run was not started.",
                     super::codex::take_late_input(&mut control, &mut late, &emit);
                     if late.is_empty() && norm.background_running() && !norm.last_is_error && !still_asked {
                         background_wait = true;
-                        wake = Some((tokio::time::Instant::now() + BACKGROUND_WAIT, Wake::Still));
+                        wake = Some((tokio::time::Instant::now() + background_wait_for(), Wake::Still));
                         continue;
                     }
                     if late.is_empty() { break; }

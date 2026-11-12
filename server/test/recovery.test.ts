@@ -99,7 +99,8 @@ describe("recovery rules", () => {
     expect(backgroundStep(ev({ type: "tool.call", tool: "Bash", title: "ls", input: { command: "ls", run_in_background: false } }))).toBeNull();
     expect(backgroundStep({ t: "run.done" })).toBeNull();
     const note = recoveryNote({ why: DAEMON_RESTARTED, tries: 1, plan: null, steps: ["sleep 90"], actions: [], prs: [], artifacts: [], background: ["sleep 90", "sleep 90"] });
-    expect(note).toContain("ran in the background; they were stopped");
+    expect(note).toContain("ran in the background; any still running when that work stopped was stopped with it and may not have finished");
+    expect(note).not.toContain("did not finish");
     expect(note.match(/- sleep 90/g)).toHaveLength(2);
     expect(note).toContain("wait for each in the foreground before you end your turn");
   });

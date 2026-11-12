@@ -2234,3 +2234,28 @@ async fn claude_does_not_take_a_cleared_notification_for_the_answer() {
         .count();
     assert_eq!(ended, 1);
 }
+
+/// A background command that never finishes (a server) gets one line after the wait, and the
+/// turn after it ends the run: the run does not sit quiet until the server nudges or restarts it.
+#[tokio::test]
+async fn claude_is_asked_once_about_a_background_command_that_still_runs() {
+    runtime::claude::set_background_wait(std::time::Duration::from_millis(1500));
+    let dir = tempfile::tempdir().unwrap();
+    let s = spec(
+        dir.path(),
+        "claude",
+        &fake("fake_claude.py"),
+        &[],
+        "background bgnever",
+    );
+    let (o, evs) = drive(s, |_| None).await;
+    assert_eq!(o.status, Status::Succeeded, "{o:?}");
+    let text = o.result_text.unwrap_or_default();
+    assert!(text.starts_with("reply 2: "), "{text}");
+    assert!(text.contains(runtime::claude::BACKGROUND_STILL), "{text}");
+    let ended = evs
+        .iter()
+        .filter(|e| matches!(e, RunEvent::TurnCompleted { .. }))
+        .count();
+    assert_eq!(ended, 2);
+}

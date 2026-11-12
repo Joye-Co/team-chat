@@ -39,7 +39,8 @@ restart (`task_notification` stopped, then a `result` of no turns and no text), 
 "background" puts a command in the background (`task_started` with `is_backgrounded`) and ends
 its turn while it runs; 0.3 s later its `task_notification` comes. With "bgself" the CLI then
 takes a turn of its own ("continued after the background command"); with "bgidle" it clears the
-notification with a `result` of no turns and waits for the next stdin line.
+notification with a `result` of no turns and waits for the next stdin line; with "bgnever" the
+command never finishes (a server).
 `--version` prints the version of the Claude Code the Windows tests gate (2.1.322).
 Every turn's text goes to prompts.jsonl ({"pid", "sid", "n", "text"}, one line each, appended).
 The arguments are written to argv.json in the working directory (in the run folder above it, with
@@ -379,7 +380,7 @@ while True:
     session.write(json.dumps({"type": "assistant", "text": reply}) + "\n"); session.flush()
     out({"type": "result", "subtype": "success", "is_error": False, "result": reply, "session_id": sid,
          "usage": {"input_tokens": 3, "output_tokens": 4}, "total_cost_usd": 0.001})
-    if "background" in cue and n == 1:
+    if "background" in cue and n == 1 and "bgnever" not in cue:
         time.sleep(0.3)
         out({"type": "system", "subtype": "task_notification", "task_id": "bbg1", "status": "completed", "session_id": sid})
         out({"type": "system", "subtype": "background_tasks_changed", "tasks": [], "session_id": sid})
