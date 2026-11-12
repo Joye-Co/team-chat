@@ -75,11 +75,7 @@ impl RailView {
             )
             .selected(*selected)
             .unread(unread)
-            .muted(
-                self.services
-                    .provider
-                    .topic_muted(&topic.group_id, &topic.id),
-            );
+            .muted(item.muted);
         // Owner decision (2026-11-08): one signal per row. The state is
         // the 12 mark in the leading slot (等你, 在做, 失败, 等别人), its
         // words in the tooltip; unread is the Semibold title alone.

@@ -39,7 +39,6 @@ pub mod upload;
 pub mod usage;
 pub mod vm_agent;
 pub mod vm_cache;
-pub mod vm_home;
 pub mod vm_login;
 #[cfg(windows)]
 pub mod winacl;

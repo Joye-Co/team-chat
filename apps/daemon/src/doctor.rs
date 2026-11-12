@@ -118,10 +118,8 @@ stopped on this machine: update Claude Code to {a}.{b}.{patch} or later"
             caches.iter().map(|c| c.bytes).sum::<u64>() as f64 / (1u64 << 30) as f64
         );
     }
-    if let Some(vm) = cfg.vm.as_ref().filter(|vm| crate::vm_home::images_on(vm))
-        && crate::vm_home::helper_has_homes(vm) == Some(false)
-    {
-        let _ = writeln!(s, "warning: {}", crate::vm_home::OLD_HELPER);
+    for line in cfg.vm.as_ref().map(old_homes).unwrap_or_default() {
+        let _ = writeln!(s, "{line}");
     }
     for p in &problems {
         let _ = writeln!(s, "problem: {p}");
@@ -130,7 +128,60 @@ stopped on this machine: update Claude Code to {a}.{b}.{patch} or later"
     (s, ok)
 }
 
+/// What `doctor` says about what is left of the per-member homes of earlier versions (#227).
+fn old_homes(vm: &crate::config::VmConfig) -> Vec<String> {
+    let mut out = vec![];
+    if vm.home_gb.is_some() {
+        out.push("note: [vm].home_gb is ignored".to_string());
+    }
+    let images = (!vm.homes.as_os_str().is_empty())
+        .then(|| vm.homes.parent().map(|p| p.join("home-images")))
+        .flatten();
+    if images.is_some_and(|d| std::fs::read_dir(d).is_ok_and(|mut e| e.next().is_some())) {
+        out.push(
+            "warning: old home images are still on disk: run scripts/runner/host-setup.sh \
+again as root"
+                .to_string(),
+        );
+    }
+    out
+}
+
 /// What `doctor` says about a side chat of Codex on Windows.
 #[cfg(windows)]
 pub const CODEX_SIDE_CHAT_ON_WINDOWS: &str =
     "read-only (no writes); its commands can still reach the network on Windows";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vm(extra: &str) -> crate::config::VmConfig {
+        Config::parse(&format!(
+            "server_url = \"http://127.0.0.1:1\"\ntoken_file = \"/nonexistent\"\n[runtimes.claude]\nkind = \"claude\"\n[vm]\nkernel = \"/k\"\nrootfs = \"/r\"\n{extra}"
+        ))
+        .unwrap()
+        .vm
+        .unwrap()
+    }
+
+    #[test]
+    fn doctor_notes_the_old_home_settings_and_images() {
+        let tmp = tempfile::tempdir().unwrap();
+        let homes = tmp.path().join("homes");
+        let at = format!("homes = '{}'\n", homes.display());
+        assert!(old_homes(&vm(&at)).is_empty());
+        assert_eq!(
+            old_homes(&vm(&format!("{at}home_gb = 20\n"))),
+            ["note: [vm].home_gb is ignored"]
+        );
+        let images = tmp.path().join("home-images");
+        std::fs::create_dir_all(&images).unwrap();
+        // An empty folder is fine.
+        assert!(old_homes(&vm(&at)).is_empty());
+        std::fs::write(images.join("01BOT.ext4"), b"x").unwrap();
+        let said = old_homes(&vm(&at));
+        assert_eq!(said.len(), 1);
+        assert!(said[0].starts_with("warning: old home images are still on disk"));
+    }
+}

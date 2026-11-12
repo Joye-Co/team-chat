@@ -802,6 +802,10 @@ pub mod motion {
     pub const DECORATIVE_FPS: f32 = 24.0;
     pub const SHIMMER: Duration = Duration::from_millis(1600);
     pub const SPINNER_TURN: Duration = Duration::from_millis(800);
+    /// Frame cap of the busy spinner: every frame of its loop re-renders the
+    /// whole window that shows it, so an uncapped one kept the main thread
+    /// busy at the display's full rate while anything was 在做.
+    pub const SPINNER_FPS: f32 = 30.0;
     /// Travel of menus and popovers from their trigger.
     pub const TRAVEL: gpui::Pixels = gpui::px(4.);
     /// Rise of new messages and the pending row.

@@ -7,12 +7,16 @@
 //!
 //! A run holds a shared flock on `<C>/.lock` from start to end; cleanup and `daemon caches
 //! clear` take it exclusively without waiting and leave a cache that is in use alone.
+//!
+//! Also the small helpers the VM runs share ([`lock`], [`plain_id`]).
 
 use crate::proto::{RepoSpec, now_ms};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::fs::{File, TryLockError};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// The cache of runs without a repository.
@@ -66,6 +70,25 @@ pub struct Meta {
     pub repo: String,
     pub created_at: u64,
     pub last_used_at: u64,
+}
+
+/// One lock per key in this process: runs that start together take turns (writing one
+/// folder's sign-in copy).
+pub async fn lock(key: &str) -> tokio::sync::OwnedMutexGuard<()> {
+    static LOCKS: Mutex<Option<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = Mutex::new(None);
+    let m = {
+        let mut g = LOCKS.lock().unwrap_or_else(|e| e.into_inner());
+        g.get_or_insert_with(HashMap::new)
+            .entry(key.to_string())
+            .or_default()
+            .clone()
+    };
+    m.lock_owned().await
+}
+
+/// A member id the daemon uses as a folder name: 1-64 ASCII letters and digits.
+pub fn plain_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric())
 }
 
 /// The folder that holds every cache.
@@ -220,7 +243,11 @@ pub async fn hold(work_root: &Path, repo: Option<&RepoSpec>) -> Result<Held, Str
     hold_for(work_root, repo, WAIT).await
 }
 
-async fn hold_for(work_root: &Path, repo: Option<&RepoSpec>, wait: Duration) -> Result<Held, String> {
+async fn hold_for(
+    work_root: &Path,
+    repo: Option<&RepoSpec>,
+    wait: Duration,
+) -> Result<Held, String> {
     let key = key(repo);
     let dir = root(work_root).join(&key);
     let until = tokio::time::Instant::now() + wait;
@@ -520,11 +547,29 @@ fn tail(b: &[u8]) -> String {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn runs_of_one_key_take_turns() {
+        let a = lock("login:01BOT").await;
+        // Another key is not held up.
+        drop(lock("login:01OTHER").await);
+        let waiting = tokio::spawn(async { drop(lock("login:01BOT").await) });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(!waiting.is_finished());
+        drop(a);
+        waiting.await.unwrap();
+    }
+
+    #[test]
+    fn a_plain_id_is_a_folder_name() {
+        assert!(plain_id("01BOT"));
+        assert!(!plain_id("") && !plain_id("../x") && !plain_id(&"a".repeat(65)));
+    }
+
     fn repo_url(u: &str) -> RepoSpec {
         RepoSpec {
             url: Some(u.into()),
             path: None,
-            base_branch: None
+            base_branch: None,
         }
     }
 
@@ -538,7 +583,7 @@ mod tests {
         let path = RepoSpec {
             url: None,
             path: Some(tmp.path().display().to_string()),
-            base_branch: None
+            base_branch: None,
         };
         let canon = std::fs::canonicalize(tmp.path()).unwrap();
         let want = crate::workspace::hex(&Sha256::digest(
@@ -610,7 +655,14 @@ mod tests {
         std::thread::sleep(Duration::from_millis(5));
         drop(held);
         assert!(read_meta(&c).unwrap().last_used_at > started);
-        remove(tmp.path(), &m.key).unwrap();
+        // A process another test starts at this moment holds a copy of the lock until it
+        // execs: try again briefly.
+        let mut tries = 0;
+        while let Err(e) = remove(tmp.path(), &m.key) {
+            tries += 1;
+            assert!(tries < 100, "{e}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
         assert!(!c.exists());
         assert!(list(tmp.path()).is_empty());
     }
@@ -665,7 +717,7 @@ mod tests {
         loop {
             line.clear();
             use std::io::BufRead;
-            if out.read_line(&mut line).unwrap() == 0 || line.trim() == "held" {
+            if out.read_line(&mut line).unwrap() == 0 || line.trim_end().ends_with("held") {
                 break;
             }
         }
@@ -695,11 +747,7 @@ mod tests {
             std::fs::write(c.join(META), serde_json::to_vec(&m).unwrap()).unwrap();
             c
         };
-        let (a, b, c) = (
-            "aaaaaaaaaaaaaaaa",
-            "bbbbbbbbbbbbbbbb",
-            "cccccccccccccccc",
-        );
+        let (a, b, c) = ("aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "cccccccccccccccc");
         make(b, 200);
         let busy = make(a, 100);
         make(c, 300);
@@ -734,7 +782,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(toolchain_channel(d).as_deref(), Some("1.99.1"));
-        std::fs::write(d.join("rust-toolchain.toml"), "[toolchain]\nchannel = \"--x\"\n").unwrap();
+        std::fs::write(
+            d.join("rust-toolchain.toml"),
+            "[toolchain]\nchannel = \"--x\"\n",
+        )
+        .unwrap();
         assert_eq!(toolchain_channel(d), None);
         std::fs::remove_file(d.join("rust-toolchain.toml")).unwrap();
         std::fs::write(d.join("rust-toolchain"), "nightly-2026-01-01\n").unwrap();

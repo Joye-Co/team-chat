@@ -127,11 +127,17 @@ mod tests {
             ]
         };
         let has = |p: &std::path::Path| p == std::path::Path::new("/usr/bin/sccache");
-        assert_eq!(without_missing_sccache(&env("sccache"), has), env("sccache"));
+        assert_eq!(
+            without_missing_sccache(&env("sccache"), has),
+            env("sccache")
+        );
         let none = without_missing_sccache(&env("sccache"), |_| false);
         assert!(!none.iter().any(|(k, _)| k == "RUSTC_WRAPPER"));
         // The user's own wrapper stays.
-        assert_eq!(without_missing_sccache(&env("/x/w"), |_| false), env("/x/w"));
+        assert_eq!(
+            without_missing_sccache(&env("/x/w"), |_| false),
+            env("/x/w")
+        );
     }
 
     #[test]

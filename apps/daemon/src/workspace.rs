@@ -37,6 +37,10 @@ pub struct RunMeta {
     /// not report one before the daemon stopped.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_session_id: Option<String>,
+    /// The AI member the run is for, written when it starts: a later run of that member finds
+    /// the CLI sessions in this run's `cli/` (VM hosts, [`crate::vm_login::session_roots`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bot_member_id: Option<String>,
 }
 
 pub fn runs_dir(cfg: &Config) -> PathBuf {
@@ -329,7 +333,7 @@ pub fn lines_dir(cfg: &Config) -> PathBuf {
     cfg.work_root.join("lines")
 }
 
-fn read_line(dir: &Path) -> Option<LineMeta> {
+pub fn read_line(dir: &Path) -> Option<LineMeta> {
     serde_json::from_slice(&std::fs::read(dir.join("line.json")).ok()?).ok()
 }
 
@@ -428,6 +432,13 @@ pub struct LineGuard {
     /// A fresh folder that checked out the line's existing branch (what earlier runs committed,
     /// and what cleanup committed for them).
     pub restored: bool,
+}
+
+impl LineGuard {
+    /// The line's folder (`<work_root>/lines/<key>`).
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
 }
 
 impl Drop for LineGuard {
@@ -1046,9 +1057,83 @@ pub async fn cleanup(cfg: &Config, active: &[String]) -> usize {
     removed
         + cleanup_lines(cfg, active).await
         + cleanup_kept(cfg).await
+        + cleanup_legacy(cfg).await
         + crate::vm_cache::remove_lru(&cfg.work_root, min_free, || {
             crate::health::disk(&cfg.work_root).0
         })
+}
+
+/// How long the CLI folders of the daemon versions that kept per-member homes stay unused
+/// before they go.
+const LEGACY_KEEP_MS: u64 = 14 * 24 * 3_600_000;
+
+/// On a VM host: removes the members' folders that daemon versions with per-member homes left
+/// (`<[vm].homes>/<member>`, `<[vm].dir>/cli/<member>`, read only to find old sessions) when
+/// unchanged for 14 days, then `<[vm].homes>` once it is empty. Mount points (a home image
+/// still mounted) are skipped, and so is all of `<[vm].homes>` while `home-images` is next to
+/// it: `host-setup.sh` has not retired the images yet.
+pub async fn cleanup_legacy(cfg: &Config) -> usize {
+    cleanup_legacy_at(cfg, now_ms().saturating_sub(LEGACY_KEEP_MS), device).await
+}
+
+async fn cleanup_legacy_at(cfg: &Config, cutoff: u64, dev: fn(&Path) -> Option<u64>) -> usize {
+    let Some(vm) = &cfg.vm else {
+        return 0;
+    };
+    let homes = Some(vm.homes.clone())
+        .filter(|h| !h.as_os_str().is_empty())
+        .filter(|h| !h.parent().is_some_and(|p| p.join("home-images").exists()));
+    let mut removed = 0;
+    for parent in homes.iter().cloned().chain([vm.dir.join("cli")]) {
+        for e in std::fs::read_dir(&parent).into_iter().flatten().flatten() {
+            let p = e.path();
+            if !std::fs::symlink_metadata(&p).is_ok_and(|m| m.is_dir())
+                || mount_point(&p, dev)
+                || modified_ms(&p).is_none_or(|at| at > cutoff)
+            {
+                continue;
+            }
+            remove_dir(&p).await;
+            if !p.exists() {
+                eprintln!(
+                    "{} cleanup: removed the old folder {}",
+                    now_ms(),
+                    p.display()
+                );
+                removed += 1;
+            }
+        }
+    }
+    if let Some(h) = homes
+        && std::fs::read_dir(&h).is_ok_and(|mut d| d.next().is_none())
+        && !mount_point(&h, dev)
+    {
+        let _ = std::fs::remove_dir(&h);
+    }
+    removed
+}
+
+/// The device a path is on (`st_dev`); None when it cannot be read or off Unix.
+fn device(p: &Path) -> Option<u64> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::symlink_metadata(p).ok().map(|m| m.dev())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = p;
+        None
+    }
+}
+
+/// Whether `p` is a mount point: on another device than its parent folder. Unknown counts as
+/// one, so it is left alone.
+fn mount_point(p: &Path, dev: fn(&Path) -> Option<u64>) -> bool {
+    match (dev(p), p.parent().and_then(dev)) {
+        (Some(a), Some(b)) => a != b,
+        _ => true,
+    }
 }
 
 /// Removes the oldest folders that were moved to `kept` while free disk is below `min_free_gb`.
@@ -1582,5 +1667,57 @@ keep_runs_hours = {keep_hours}\nmin_free_gb = 0\n",
         assert!(remove_run(&cfg, &run_dir(&cfg, "r2")).await);
         let b = meta.branch.unwrap();
         assert_eq!(sh_git(&repo_dir, &["branch", "--list", &b]), "");
+    }
+
+    /// The folders of the per-member homes go after 14 days unused, except mount points and
+    /// everything under `homes` while the home images are still there.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn old_member_folders_go_after_14_days_but_not_mount_points() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = Config::parse(&format!(
+            "server_url = \"http://127.0.0.1:1\"\ntoken_file = \"/nonexistent\"\nwork_root = '{}'\n[runtimes.claude]\nkind = \"claude\"\n[vm]\nkernel = \"/k\"\nrootfs = \"/r\"\nhomes = '{}'\ndir = '{}'\nhome_gb = 20\n",
+            tmp.path().join("w").display(),
+            tmp.path().join("homes").display(),
+            tmp.path().join("vms").display()
+        ))
+        .unwrap();
+        let homes = tmp.path().join("homes");
+        let ago = std::time::SystemTime::now() - Duration::from_secs(20 * 86_400);
+        let dir = |rel: &str, old: bool| {
+            let d = tmp.path().join(rel);
+            std::fs::create_dir_all(d.join(".claude")).unwrap();
+            if old {
+                std::fs::File::open(&d).unwrap().set_modified(ago).unwrap();
+            }
+            d
+        };
+        // A mounted home image is on another device than `homes`.
+        fn dev(p: &Path) -> Option<u64> {
+            Some(if p.ends_with("MOUNTED") { 2 } else { 1 })
+        }
+        let cutoff = now_ms() - LEGACY_KEEP_MS;
+        let old = dir("homes/OLD", true);
+        let new = dir("homes/NEW", false);
+        let mounted = dir("homes/MOUNTED", true);
+        let old_cli = dir("vms/cli/OLDCLI", true);
+        // While home-images is there, nothing under homes goes; `<dir>/cli` does.
+        std::fs::create_dir_all(tmp.path().join("home-images")).unwrap();
+        assert_eq!(cleanup_legacy_at(&cfg, cutoff, dev).await, 1);
+        assert!(!old_cli.exists() && old.exists());
+        std::fs::remove_dir(tmp.path().join("home-images")).unwrap();
+        assert_eq!(cleanup_legacy_at(&cfg, cutoff, dev).await, 1);
+        assert!(!old.exists() && new.exists() && mounted.exists());
+        // Once it is empty, `homes` goes too.
+        std::fs::remove_dir_all(&new).unwrap();
+        std::fs::remove_dir_all(&mounted).unwrap();
+        assert_eq!(cleanup_legacy_at(&cfg, cutoff, dev).await, 0);
+        assert!(!homes.exists());
+        // The real check: a folder on the same disk as its parent is no mount point.
+        assert!(!mount_point(tmp.path(), device));
+        assert!(mount_point(&tmp.path().join("missing"), device));
+        // Not a VM host: nothing to do.
+        let (_d, plain, _) = setup(72);
+        assert_eq!(cleanup_legacy(&plain).await, 0);
     }
 }

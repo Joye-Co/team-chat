@@ -11,7 +11,8 @@ import { ApiError, type Result, unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
 import { TokenBucket } from "../../core/ratelimit";
 import { cut } from "../dispatch";
-import { DEFAULT_PAGE, MAX_PAGE, PLAN_RATE, type RunRow, result, sanitizeUsage } from "./core";
+import { readerOf } from "../../context/reach";
+import { DEFAULT_PAGE, MAX_PAGE, PLAN_RATE, readGroupsOf, type RunRow, result, sanitizeUsage } from "./core";
 import type { CardPress } from "../room";
 
 /** One ended run for 用量. */
@@ -382,6 +383,30 @@ export class BotDesk extends DeskGithub {
     this.bind(botId);
     const r = this.run(runId);
     return r ? this.toRun(r) : null;
+  }
+
+  /** The person a run reads for (context/reach.ts `readerOf`), or null. Server only: never sent. */
+  async readerOf(botId: string, runId: string): Promise<string | null> {
+    this.bind(botId);
+    const r = this.run(runId);
+    return r ? readerOf(this.env.DB, r) : null;
+  }
+
+  /** The other groups a run read (`runs.read_groups`); [] when none. Server only: never sent. */
+  async readGroups(botId: string, runId: string): Promise<string[]> {
+    this.bind(botId);
+    const r = this.run(runId);
+    return r ? readGroupsOf(r) : [];
+  }
+
+  /** Remembers that a run read another group (design-visibility 3.3), once per group. */
+  async noteRead(botId: string, runId: string, groupId: string): Promise<void> {
+    this.bind(botId);
+    const r = this.run(runId);
+    if (!r || groupId === r.group_id) return;
+    const read = readGroupsOf(r);
+    if (read.includes(groupId)) return;
+    this.sql.exec("UPDATE runs SET read_groups = ? WHERE id = ?", JSON.stringify([...read, groupId]), runId);
   }
 
   async events(

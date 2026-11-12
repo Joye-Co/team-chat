@@ -48,6 +48,9 @@ pub struct RunSpec {
     /// `run.assign.resumeSessionId`: the CLI session to continue (Claude Code `--resume`, Codex
     /// `thread/resume`). A session the CLI no longer has starts a new one.
     pub resume_session_id: Option<String>,
+    /// `run.assign.fullPrompt`: the whole prompt, which the CLI gets instead of `prompt` when
+    /// the session to resume is not found (then `Outcome.resume_missed`). Never logged.
+    pub full_prompt: Option<String>,
     /// The run's `chat-run` link when the run has gated actions (`run.assign.gates`): Claude
     /// Code gets a PreToolUse hook that runs `<link> gate` (see [`crate::gates`]).
     pub gate_hook: Option<PathBuf>,
@@ -58,11 +61,11 @@ pub struct RunSpec {
     /// The run's gated actions. Codex and ACP agents answer their CLI's own approval requests
     /// with them ([`crate::gates::Gates::allows`]); None or empty: everything is allowed.
     pub gates: Option<Arc<crate::gates::Gates>>,
-    /// More host folders a VM run needs at their host paths (the repository's cache). Only
-    /// the microVM executor reads it.
-    pub vm_shares: Vec<PathBuf>,
     /// Where the CLI runs.
     pub exec: Arc<dyn Executor>,
+    /// Host folders a VM run shares with its VM besides the run folder, working folder and git
+    /// dir (the run's cli root, the repository's cache). Only the firecracker executor reads it.
+    pub vm_shares: Vec<PathBuf>,
 }
 
 /// A session id the daemon passes on: 1-128 of `[A-Za-z0-9_-]` (it becomes a file name).
@@ -127,6 +130,9 @@ pub struct Outcome {
     /// Why a failed run failed, from what the CLI reported (its typed errors); None leaves it to
     /// the error text ([`crate::failure::of_run`]).
     pub failure: Option<crate::proto::RunFailure>,
+    /// The session to resume was not found and the CLI got `RunSpec.full_prompt` instead
+    /// (`run.done.resumeMissed`).
+    pub resume_missed: bool,
 }
 
 impl Outcome {
@@ -140,6 +146,7 @@ impl Outcome {
             session_file: None,
             usage: None,
             failure: None,
+            resume_missed: false,
         }
     }
 }

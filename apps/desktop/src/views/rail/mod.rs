@@ -104,6 +104,9 @@ pub struct RailView {
     /// C: the order of members.
     member_sort: MemberSort,
     cache: Option<Cache>,
+    /// The session as of the last provider change: `session()` reads my
+    /// member row from the store, which a frame must not do.
+    session: Option<crate::data::SessionState>,
     /// The open 话题 and selected 群 the list last scrolled into view: a
     /// move from anywhere (search, a card, ⌘[) shows its row here too.
     revealed: Option<Selection>,
@@ -158,6 +161,7 @@ impl RailView {
         let subscriptions = vec![
             cx.subscribe(&services.hub, |this, _, _: &Changes, cx| {
                 this.cache = None;
+                this.session = None;
                 cx.notify();
             }),
             cx.observe(&services.nav, |_, _, cx| cx.notify()),
@@ -171,6 +175,7 @@ impl RailView {
             _subscriptions: subscriptions,
             services,
             cache: None,
+            session: None,
             revealed: None,
             list: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
             // Tab reaches the rows themselves (FocusRow); the list keeps a
@@ -189,7 +194,18 @@ impl RailView {
     }
 
     fn me(&self) -> Option<String> {
-        self.services.me()
+        match self.session.as_ref() {
+            Some(crate::data::SessionState::SignedIn { me, .. }) => Some(me.id.clone()),
+            Some(_) => None,
+            None => self.services.me(),
+        }
+    }
+
+    /// The session, read from the provider once per change.
+    fn session(&mut self) -> crate::data::SessionState {
+        self.session
+            .get_or_insert_with(|| self.services.provider.session())
+            .clone()
     }
 
     /// What the lists depend on now, besides the provider.
@@ -217,6 +233,7 @@ impl RailView {
     /// Reads the rail from the provider when a change came in or the inputs
     /// changed; otherwise keeps what it has.
     fn refresh(&mut self, cx: &App) {
+        self.session();
         let mut inputs = self.inputs(cx);
         let selection = (inputs.open.clone(), inputs.group_page.clone());
         let reveal = self.revealed.as_ref() != Some(&selection);
@@ -466,7 +483,7 @@ impl RailView {
             data::{ConnectionState, SessionState},
             ui::native::{BadgeState, SidebarFooter, StatusBadge},
         };
-        let SessionState::SignedIn { me, .. } = self.services.provider.session() else {
+        let SessionState::SignedIn { me, .. } = self.session.clone()? else {
             return None;
         };
         let avatar = crate::ui::MemberAvatar::new(Some(&me), crate::ui::native::tokens::avatar::MD);
@@ -499,7 +516,7 @@ impl RailView {
         let state = p.connection();
         if page == Page::Topic
             || matches!(state, ConnectionState::Connecting)
-            || !matches!(p.session(), SessionState::SignedIn { .. })
+            || !matches!(self.session, Some(SessionState::SignedIn { .. }))
         {
             return None;
         }
