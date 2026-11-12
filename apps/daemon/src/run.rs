@@ -872,7 +872,6 @@ this machine cannot be made to stop at them (update it)",
         usage: outcome.usage.clone(),
         duration_ms: started.elapsed().as_millis() as u64,
         code,
-        resume_missed: None,
         failure: (status == "failed")
             .then(|| crate::failure::of_run(outcome.failure.as_ref(), outcome.error.as_deref())),
         resume_missed: outcome.resume_missed.then_some(true),
