@@ -1,6 +1,6 @@
-//! Feature "github" end to end on this machine: git's credential helper and the `gh` proxy
-//! (the daemon binary started as `chat-run git-credential` and as `gh`) ask the daemon, the
-//! daemon asks a fake server (`GET /v1/machine/runs/:id/github`) on every use.
+//! Feature "github-host" end to end on this machine: in a VM run git's credential helper and
+//! the `gh` proxy (the daemon binary started as `chat-run git-credential` and as `gh`) ask the
+//! daemon, and the daemon runs the host's `gh auth token` (a fake `gh` here) on every use.
 
 use chat_protocol::github::{GitIdentity, RunGithub};
 use daemon::chat_run::{Outputs, Server, Spool, TIMEOUT, socket_path, spool_dir};
@@ -11,76 +11,56 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
-const TOKEN: &str = "fake-person-token-0123456789abcdef";
+/// The fake host gh's token: shaped like a real one.
+const TOKEN: &str = "ghp_FakeHostToken0123456789abcdefABCDEF";
 
-/// What the fake server answers for the token and what it was asked.
-#[derive(Default)]
-struct Fake {
-    status: Mutex<u16>,
-    seen: Mutex<Vec<String>>,
+/// What the host's fake `gh` does.
+#[derive(Clone, Copy)]
+enum FakeGh {
+    /// Signed in: `gh auth token` prints [`TOKEN`].
+    Token,
+    /// Not signed in: every command exits 1.
+    SignedOut,
+    /// No gh at all.
+    None,
 }
 
-impl Fake {
-    fn seen(&self) -> Vec<String> {
-        self.seen.lock().unwrap().clone()
+/// A folder with the host's fake `gh` (the daemon's `PATH` in these tests). Each call adds a
+/// line to `<dir>/asked`.
+fn fake_gh(dir: &Path, kind: FakeGh) -> PathBuf {
+    let bin = dir.join("hostbin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let body = match kind {
+        FakeGh::Token => format!(
+            "case \"$1 $2\" in\n  \"auth token\") echo {TOKEN} ;;\n  \"api user\") echo org-bot ;;\n  *) exit 0 ;;\nesac\n"
+        ),
+        FakeGh::SignedOut => "echo 'not logged in' >&2\nexit 1\n".into(),
+        FakeGh::None => return bin,
+    };
+    let gh = bin.join("gh");
+    std::fs::write(
+        &gh,
+        format!(
+            "#!/bin/sh\necho \"$*\" >> '{}'\n{body}",
+            dir.join("asked").display()
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
+    bin
 }
 
-/// A server with the three machine routes of feature "github".
-async fn fake_server(status: u16) -> (String, Arc<Fake>) {
-    let fake = Arc::new(Fake {
-        status: Mutex::new(status),
-        seen: Mutex::default(),
-    });
-    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}", l.local_addr().unwrap());
-    let f = fake.clone();
-    tokio::spawn(async move {
-        loop {
-            let Ok((s, _)) = l.accept().await else { return };
-            let f = f.clone();
-            tokio::spawn(async move {
-                let (head, body, _) = read_request(s).await;
-                let (mut s, line, headers) = head;
-                let auth = headers
-                    .iter()
-                    .find(|(k, _)| k == "authorization")
-                    .map(|(_, v)| v.clone())
-                    .unwrap_or_default();
-                f.seen
-                    .lock()
-                    .unwrap()
-                    .push(format!("{line} {auth} {}", String::from_utf8_lossy(&body)));
-                let status = *f.status.lock().unwrap();
-                let (code, json) = if line.starts_with("GET ") {
-                    match status {
-                        200 => ("200 OK", format!(r#"{{"token":"{TOKEN}","login":"octo"}}"#)),
-                        404 => (
-                            "404 Not Found",
-                            r#"{"error":{"code":"not_found","reason":"github.not_connected"}}"#
-                                .into(),
-                        ),
-                        _ => (
-                            "409 Conflict",
-                            r#"{"error":{"code":"conflict","reason":"github.invalid"}}"#.into(),
-                        ),
-                    }
-                } else {
-                    ("200 OK", r#"{"ok":true}"#.into())
-                };
-                let _ = s
-                    .write_all(
-                        format!(
-                            "HTTP/1.1 {code}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{json}",
-                            json.len()
-                        )
-                        .as_bytes(),
-                    )
-                    .await;
-            });
-        }
-    });
-    (url, fake)
+/// How often the host's fake gh was asked for the token.
+fn asked(dir: &Path) -> usize {
+    std::fs::read_to_string(dir.join("asked"))
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| l.starts_with("auth token"))
+        .count()
 }
 
 type Head = (tokio::net::TcpStream, String, Vec<(String, String)>);
@@ -135,9 +115,9 @@ async fn read_request(s: tokio::net::TcpStream) -> (Head, Vec<u8>, ()) {
 
 fn spec(rewrite: bool) -> RunGithub {
     RunGithub {
-        source: "app".into(),
+        source: "machine".into(),
         member_id: "U1".into(),
-        login: Some("octo".into()),
+        login: None,
         author: Some(GitIdentity {
             name: "Ann Person".into(),
             email: "1+octo@users.noreply.github.com".into(),
@@ -147,6 +127,7 @@ fn spec(rewrite: bool) -> RunGithub {
             email: "ai-B1@users.noreply.invalid".into(),
         },
         rewrite_ssh: rewrite.then_some(true),
+        asked_by: Some("Ann Person".into()),
     }
 }
 
@@ -161,26 +142,21 @@ fn linked(dir: &Path, name: &str) -> PathBuf {
     p
 }
 
-/// A run's daemon side: its outputs with the GitHub of `spec`, its socket, its events and
-/// redactor.
+/// A VM run's daemon side: its outputs with the GitHub of `spec` (the host's `gh` found on
+/// `host_bin`), its events and redactor.
 struct RunSide {
     outputs: Arc<Outputs>,
     events: Arc<Mutex<Vec<RunEvent>>>,
     redactor: Arc<Redactor>,
 }
 
-fn run_side(url: &str, host: &str, spec: RunGithub) -> RunSide {
+fn run_side(host_bin: &Path, host: &str, spec: RunGithub) -> RunSide {
     let redactor = Arc::new(Redactor::new(vec![]).for_run());
     let outputs = Arc::new(Outputs::new("r1"));
     outputs.set_github(Arc::new(
-        daemon::github::Run::new(
-            url,
-            Arc::new("tm_machine_token_for_tests_only".into()),
-            "r1",
-            spec,
-            redactor.clone(),
-        )
-        .with_host(host),
+        daemon::github::Run::new(spec, redactor.clone(), true)
+            .with_path(host_bin.as_os_str())
+            .with_host(host),
     ));
     RunSide {
         outputs,
@@ -206,7 +182,7 @@ fn git_env(
     transport: (&str, PathBuf),
 ) -> Vec<(String, String)> {
     let mut env = vec![];
-    daemon::github::put_env_at(spec, &mut env, base);
+    daemon::github::put_env_at(spec, &mut env, base, Some("org-bot"));
     let path = std::env::join_paths(std::iter::once(bin.to_path_buf()).chain(
         std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
     ))
@@ -264,18 +240,19 @@ fn system_config(dir: &Path) -> PathBuf {
     p
 }
 
-/// `git credential fill` gets the person's token from the daemon, which asked the server with
-/// the machine token, over the socket and over the request folder (Codex); the machine's own
-/// helper is not used, no `.res` file stays and the run's redactor has the token.
+/// `git credential fill` gets the host's token from the daemon, which ran the host's `gh auth
+/// token` for each use, over the socket and over the request folder (Codex); the machine's
+/// own helper is not used, no `.res` file stays and the run's redactor has the token.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
-async fn git_gets_the_persons_token_through_the_daemon() {
-    let (url, fake) = fake_server(200).await;
+async fn git_gets_the_hosts_token_through_the_daemon() {
     let tmp = tempfile::tempdir().unwrap();
+    let host_bin = fake_gh(tmp.path(), FakeGh::Token);
     let bin = tmp.path().join("bin");
     std::fs::create_dir(&bin).unwrap();
     linked(&bin, "chat-run");
     let system = system_config(tmp.path());
-    let side = run_side(&url, "github.com", spec(false));
+    let side = run_side(&host_bin, "github.com", spec(false));
     let fill = "protocol=https\nhost=github.com\n\n";
 
     let server = Server::start(
@@ -292,6 +269,8 @@ async fn git_gets_the_persons_token_through_the_daemon() {
         daemon::github::BASE,
         ("CHAT_RUN_SOCKET", server.path().to_path_buf()),
     );
+    // The token is in no variable of the run.
+    assert!(!env.iter().any(|(_, v)| v.contains(TOKEN)), "{env:?}");
     let out = tokio::task::spawn_blocking(move || git(&env, None, &["credential", "fill"], fill))
         .await
         .unwrap();
@@ -337,38 +316,127 @@ async fn git_gets_the_persons_token_through_the_daemon() {
     assert!(left.is_empty(), "{left:?}");
     drop(spool);
 
-    // Asked each time, never cached, with the machine token, for this run.
-    let seen = fake.seen();
-    assert_eq!(seen.len(), 2, "{seen:?}");
-    for s in &seen {
-        assert!(
-            s.starts_with("GET /v1/machine/runs/r1/github HTTP/1.1 Bearer tm_machine_token"),
-            "{s}"
-        );
-    }
-    // One `used` event, never the token; the run masks the token from now on.
+    // Asked each time, never cached.
+    assert_eq!(asked(tmp.path()), 2);
+    // No event carries the token; the run masks it from now on.
     let events = side.events.lock().unwrap().clone();
-    assert_eq!(
-        events,
-        vec![RunEvent::Github {
-            state: "used".into(),
-            login: Some("octo".into())
-        }]
-    );
+    assert!(!format!("{events:?}").contains(TOKEN), "{events:?}");
+    assert!(side.redactor.has_added());
     assert_eq!(side.redactor.text(&format!("x {TOKEN}")), "x <redacted>");
 }
 
-/// Not connected: the helper fails at once with the line the CLI must act on, the server is
-/// told once (`/wait`), and the run reports `missing`.
+/// The host is not signed in (gh exits 1) or has no gh: the helper fails at once with
+/// `quit=1` and the line the CLI must act on, and the run reports `missing` with the reason
+/// once.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
-async fn without_a_connection_git_fails_now_and_the_server_is_told_once() {
-    let (url, fake) = fake_server(404).await;
+async fn without_a_host_sign_in_git_fails_now_and_says_so_once() {
+    for (kind, reason) in [(FakeGh::SignedOut, "signed_out"), (FakeGh::None, "no_gh")] {
+        let tmp = tempfile::tempdir().unwrap();
+        let host_bin = fake_gh(tmp.path(), kind);
+        let bin = tmp.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        linked(&bin, "chat-run");
+        let system = system_config(tmp.path());
+        let side = run_side(&host_bin, "github.com", spec(false));
+        let server = Server::start(
+            socket_path(tmp.path()),
+            side.outputs.clone(),
+            side.emit(),
+            TIMEOUT,
+        )
+        .unwrap();
+        let env = git_env(
+            &bin,
+            &system,
+            &spec(false),
+            daemon::github::BASE,
+            ("CHAT_RUN_SOCKET", server.path().to_path_buf()),
+        );
+        for _ in 0..2 {
+            let env = env.clone();
+            let started = std::time::Instant::now();
+            let out = tokio::task::spawn_blocking(move || {
+                git(
+                    &env,
+                    None,
+                    &["credential", "fill"],
+                    "protocol=https\nhost=github.com\n\n",
+                )
+            })
+            .await
+            .unwrap();
+            assert!(!out.status.success());
+            assert!(started.elapsed() < std::time::Duration::from_secs(10));
+            let err = String::from_utf8_lossy(&out.stderr);
+            assert!(err.contains(daemon::github::NOT_SIGNED_IN), "{err}");
+            assert!(!String::from_utf8_lossy(&out.stdout).contains("machine-owner"));
+        }
+        assert_eq!(
+            side.events.lock().unwrap().clone(),
+            vec![RunEvent::Github {
+                state: "missing".into(),
+                login: None,
+                reason: Some(reason.into()),
+            }]
+        );
+    }
+}
+
+/// The helper itself answers git's `get` with `quit=1` when the daemon has no token.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn the_helper_says_quit_without_a_sign_in() {
     let tmp = tempfile::tempdir().unwrap();
+    let host_bin = fake_gh(tmp.path(), FakeGh::SignedOut);
+    let bin = tmp.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let chat_run = linked(&bin, "chat-run");
+    let side = run_side(&host_bin, "github.com", spec(false));
+    let server = Server::start(
+        socket_path(tmp.path()),
+        side.outputs.clone(),
+        side.emit(),
+        TIMEOUT,
+    )
+    .unwrap();
+    let socket = server.path().to_path_buf();
+    let out = tokio::task::spawn_blocking(move || {
+        use std::io::Write;
+        let mut c = Command::new(&chat_run)
+            .args(["git-credential", "get"])
+            .env("CHAT_RUN_SOCKET", &socket)
+            .env_remove("CHAT_RUN_DIR")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        c.stdin
+            .take()
+            .unwrap()
+            .write_all(b"protocol=https\nhost=github.com\n\n")
+            .unwrap();
+        c.wait_with_output().unwrap()
+    })
+    .await
+    .unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "quit=1\n");
+    assert!(String::from_utf8_lossy(&out.stderr).contains(daemon::github::NOT_SIGNED_IN));
+}
+
+/// git erases a refused token: the run reports `invalid` once and the daemon is asked to look
+/// at the host's sign-in again.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_token_is_reported_once_and_rechecked() {
+    let tmp = tempfile::tempdir().unwrap();
+    let host_bin = fake_gh(tmp.path(), FakeGh::Token);
     let bin = tmp.path().join("bin");
     std::fs::create_dir(&bin).unwrap();
     linked(&bin, "chat-run");
     let system = system_config(tmp.path());
-    let side = run_side(&url, "github.com", spec(false));
+    let side = run_side(&host_bin, "github.com", spec(false));
     let server = Server::start(
         socket_path(tmp.path()),
         side.outputs.clone(),
@@ -383,72 +451,89 @@ async fn without_a_connection_git_fails_now_and_the_server_is_told_once() {
         daemon::github::BASE,
         ("CHAT_RUN_SOCKET", server.path().to_path_buf()),
     );
+    let recheck = daemon::github::recheck().notified();
     for _ in 0..2 {
         let env = env.clone();
-        let started = std::time::Instant::now();
         let out = tokio::task::spawn_blocking(move || {
             git(
                 &env,
                 None,
-                &["credential", "fill"],
-                "protocol=https\nhost=github.com\n\n",
+                &["credential", "reject"],
+                &format!(
+                    "protocol=https\nhost=github.com\nusername=x-access-token\npassword={TOKEN}\n\n"
+                ),
             )
         })
         .await
         .unwrap();
-        assert!(!out.status.success());
-        assert!(started.elapsed() < std::time::Duration::from_secs(10));
-        let err = String::from_utf8_lossy(&out.stderr);
         assert!(
-            err.contains("GitHub is not connected for Ann Person (they have been asked)"),
-            "{err}"
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
         );
-        assert!(!String::from_utf8_lossy(&out.stdout).contains("machine-owner"));
     }
-    let seen = fake.seen();
-    let waits: Vec<_> = seen.iter().filter(|s| s.contains("/github/wait")).collect();
-    assert_eq!(waits.len(), 1, "{seen:?}");
-    assert!(
-        waits[0].ends_with(r#"{"reason":"not_connected"}"#),
-        "{}",
-        waits[0]
-    );
+    tokio::time::timeout(std::time::Duration::from_secs(5), recheck)
+        .await
+        .expect("asked to look at the sign-in again");
     assert_eq!(
         side.events.lock().unwrap().clone(),
         vec![RunEvent::Github {
-            state: "missing".into(),
-            login: Some("octo".into())
+            state: "invalid".into(),
+            login: None,
+            reason: None,
         }]
     );
 }
 
-/// `gh auth login` is stopped; `gh` (`gh.exe` on Windows) is the proxy by its name.
+/// In a VM run `gh` may not sign in or out or print the token; `gh` (`gh.exe` on Windows) is
+/// the proxy by its name.
 #[test]
-fn gh_sign_in_is_stopped() {
+fn gh_sign_in_and_token_are_stopped() {
     let tmp = tempfile::tempdir().unwrap();
     let gh = linked(tmp.path(), "gh");
-    for sub in ["login", "logout", "refresh", "setup-git"] {
+    let refused: [&[&str]; 8] = [
+        &["auth", "login"],
+        &["auth", "logout"],
+        &["auth", "refresh"],
+        &["auth", "setup-git"],
+        &["auth", "token"],
+        &["auth", "status", "--show-token"],
+        &["auth", "status", "-t"],
+        &[
+            "auth",
+            "status",
+            "--hostname",
+            "github.com",
+            "--show-token=true",
+        ],
+    ];
+    for args in refused {
         let out = Command::new(&gh)
-            .args(["auth", sub])
-            .env("CHAT_GITHUB_AS", "Ann Person")
+            .args(args)
+            .env("CHAT_GITHUB_AS", "org-bot")
+            .env_remove("CHAT_RUN_SOCKET")
+            .env_remove("CHAT_RUN_DIR")
             .output()
             .unwrap();
-        assert_eq!(out.status.code(), Some(1));
+        assert_eq!(out.status.code(), Some(1), "{args:?}");
         assert_eq!(
             String::from_utf8_lossy(&out.stderr).trim(),
-            "GitHub sign-in is handled by the app for Ann Person; do not sign in here."
+            "gh already works as this computer's GitHub account (org-bot); do not sign in or \
+read its token here.",
+            "{args:?}"
         );
     }
 }
 
-/// The proxy finds the real gh after the run's tools and runs it with the person's token;
-/// without a connection it fails and the server is told.
+/// The proxy finds the real gh after the run's tools and runs it with the host's token; on a
+/// computer without a VM (no `CHAT_GITHUB_AS`) it is the real gh untouched; without a host
+/// sign-in it fails before the real gh runs.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
-async fn gh_runs_the_real_gh_with_the_token() {
+async fn gh_runs_the_real_gh_with_the_hosts_token() {
     use std::os::unix::fs::PermissionsExt;
-    let (url, fake) = fake_server(200).await;
     let tmp = tempfile::tempdir().unwrap();
+    let host_bin = fake_gh(tmp.path(), FakeGh::Token);
     let bin = tmp.path().join("bin");
     let sys = tmp.path().join("sys");
     std::fs::create_dir(&bin).unwrap();
@@ -462,7 +547,7 @@ async fn gh_runs_the_real_gh_with_the_token() {
     )
     .unwrap();
     std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let side = run_side(&url, "github.com", spec(false));
+    let side = run_side(&host_bin, "github.com", spec(false));
     let server = Server::start(
         socket_path(tmp.path()),
         side.outputs.clone(),
@@ -472,15 +557,15 @@ async fn gh_runs_the_real_gh_with_the_token() {
     .unwrap();
     let path = std::env::join_paths([bin.clone(), sys.clone()]).unwrap();
     let socket = server.path().to_path_buf();
-    let run = move |with_person: bool| {
+    let run = move |in_vm: bool| {
         let mut c = Command::new(&proxy);
         c.args(["pr", "create"])
             .env("PATH", &path)
             .env("CHAT_RUN_SOCKET", &socket)
             .env_remove("CHAT_RUN_DIR")
             .env_remove("GH_TOKEN");
-        if with_person {
-            c.env("CHAT_GITHUB_AS", "Ann Person");
+        if in_vm {
+            c.env("CHAT_GITHUB_AS", "org-bot");
         } else {
             c.env_remove("CHAT_GITHUB_AS");
         }
@@ -493,28 +578,23 @@ async fn gh_runs_the_real_gh_with_the_token() {
         String::from_utf8_lossy(&out.stdout).trim(),
         format!("args=pr create token={TOKEN}")
     );
-    // Machine mode (no person named): the real gh as it is, nothing asked.
+    // On the computer itself: the real gh as it is, nothing asked.
     let r = run.clone();
     let out = tokio::task::spawn_blocking(move || r(false)).await.unwrap();
     assert_eq!(
         String::from_utf8_lossy(&out.stdout).trim(),
         "args=pr create token="
     );
-    assert_eq!(fake.seen().len(), 1);
+    assert_eq!(asked(tmp.path()), 1);
 
-    *fake.status.lock().unwrap() = 409;
+    // The host signs out.
+    fake_gh(tmp.path(), FakeGh::SignedOut);
     let out = tokio::task::spawn_blocking(move || run(true))
         .await
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
     assert!(out.stdout.is_empty(), "the real gh did not run");
-    assert!(String::from_utf8_lossy(&out.stderr).contains("no longer works"));
-    let seen = fake.seen();
-    assert!(
-        seen.iter()
-            .any(|s| s.contains("/github/wait") && s.ends_with(r#"{"reason":"invalid"}"#)),
-        "{seen:?}"
-    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains(daemon::github::NOT_SIGNED_IN));
 }
 
 /// A local GitHub stand-in: git's smart HTTP (`git http-backend`) behind Basic auth that takes
@@ -607,13 +687,13 @@ async fn git_host(root: PathBuf) -> String {
     base
 }
 
-/// A push over HTTPS-style auth to a local smart-HTTP remote: git takes the token from the
-/// helper, the commit says the person authored it and the AI member committed it.
+/// A push over HTTPS-style auth to a local smart-HTTP remote: git takes the host's token from
+/// the helper, the commit names the author the server sent and the AI member as committer.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
-async fn git_pushes_as_the_person_with_the_ai_member_as_committer() {
-    let (url, fake) = fake_server(200).await;
+async fn git_pushes_with_the_hosts_token_and_the_ai_member_as_committer() {
     let tmp = tempfile::tempdir().unwrap();
+    let host_bin = fake_gh(tmp.path(), FakeGh::Token);
     let repos = tmp.path().join("repos");
     std::fs::create_dir(&repos).unwrap();
     let bare = repos.join("repo.git");
@@ -631,7 +711,7 @@ async fn git_pushes_as_the_person_with_the_ai_member_as_committer() {
     std::fs::create_dir(&bin).unwrap();
     linked(&bin, "chat-run");
     let system = system_config(tmp.path());
-    let side = run_side(&url, &host, spec(false));
+    let side = run_side(&host_bin, &host, spec(false));
     let server = Server::start(
         socket_path(tmp.path()),
         side.outputs.clone(),
@@ -686,14 +766,14 @@ async fn git_pushes_as_the_person_with_the_ai_member_as_committer() {
         String::from_utf8_lossy(&out.stdout).trim(),
         "Ann Person <1+octo@users.noreply.github.com>|Robo <ai-B1@users.noreply.invalid>"
     );
-    assert!(!fake.seen().is_empty());
+    assert!(asked(tmp.path()) >= 1);
 }
 
-/// The daemon's own clone of a private repository (before the CLI starts) goes with the
-/// person's token as a header; without one it goes without any credentials and fails.
+/// The daemon's own clone of a private repository for a VM run (before the CLI starts) goes
+/// with the host's token as a header; without one it goes without any credentials and fails.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
-async fn the_daemons_own_clone_uses_the_persons_token() {
+async fn the_daemons_own_clone_uses_the_hosts_token() {
     let tmp = tempfile::tempdir().unwrap();
     let repos = tmp.path().join("repos");
     std::fs::create_dir(&repos).unwrap();
@@ -735,13 +815,13 @@ async fn the_daemons_own_clone_uses_the_persons_token() {
         base_branch: None,
     };
     let without = daemon::workspace::with_git_env(
-        daemon::github::fetch_env_at(&spec(false), None, &base),
+        daemon::github::fetch_env_at(None, &base),
         daemon::workspace::prepare(&cfg, "r1", Some(&repo)),
     )
     .await;
     assert!(without.is_err());
     let (work, _) = daemon::workspace::with_git_env(
-        daemon::github::fetch_env_at(&spec(false), Some(TOKEN), &base),
+        daemon::github::fetch_env_at(Some(TOKEN), &base),
         daemon::workspace::prepare(&cfg, "r2", Some(&repo)),
     )
     .await

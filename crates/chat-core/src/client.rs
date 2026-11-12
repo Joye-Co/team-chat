@@ -198,9 +198,6 @@ pub enum ClientUpdate {
     Notify(Box<Notification>),
     /// Settings transient: the daily digest (每日摘要), counted by event since the last one.
     Digest(Box<crate::proto::DigestTransient>),
-    /// My GitHub sign-in changed (`github.status`, feature `github/1`); no account =
-    /// disconnected. `GET /v1/me/github` has the runs that wait for it.
-    GithubStatus(Box<crate::proto::GithubStatusTransient>),
     /// The 产出 of a topic changed (event or HTTP answer). Re-read `artifacts(topic)`.
     ArtifactsChanged {
         group_id: String,

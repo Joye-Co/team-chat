@@ -67,3 +67,39 @@ fn the_token_response_does_not_print_the_token() {
     assert!(!shown.contains("placeholder"));
     assert!(shown.contains("alice-dev"));
 }
+
+#[test]
+fn github_by_computer_fields_are_optional_and_open() {
+    use chat_protocol::github::RunGithub;
+    use chat_protocol::machine::{MachineMetrics, feature};
+    // An old daemon's github event has no reason; a newer reason is kept as a string.
+    let e: RunEvent =
+        serde_json::from_value(json!({ "type": "github", "state": "missing" })).unwrap();
+    assert!(matches!(e, RunEvent::Github { reason: None, .. }));
+    let e: RunEvent = serde_json::from_value(
+        json!({ "type": "github", "state": "missing", "reason": "a_future_reason" }),
+    )
+    .unwrap();
+    assert!(matches!(e, RunEvent::Github { reason: Some(ref r), .. } if r == "a_future_reason"));
+    // An assign from a server before askedBy, and one with it.
+    let committer = json!({ "name": "dev", "email": "ai-B1@users.noreply.invalid" });
+    let g: RunGithub = serde_json::from_value(
+        json!({ "source": "machine", "memberId": "U1", "committer": committer }),
+    )
+    .unwrap();
+    assert_eq!(g.asked_by, None);
+    let g: RunGithub = serde_json::from_value(
+        json!({ "source": "machine", "memberId": "U1", "committer": committer, "askedBy": "实习生" }),
+    )
+    .unwrap();
+    assert_eq!(g.asked_by.as_deref(), Some("实习生"));
+    // Metrics without github (older daemons), and an unknown state kept as is.
+    let m: MachineMetrics = serde_json::from_value(json!({ "at": 1, "runs": [] })).unwrap();
+    assert_eq!(m.github, None);
+    let m: MachineMetrics =
+        serde_json::from_value(json!({ "at": 1, "runs": [], "github": { "state": "later" } }))
+            .unwrap();
+    assert_eq!(m.github.map(|g| g.state).as_deref(), Some("later"));
+    assert_eq!(feature::GITHUB_HOST, "github-host");
+    assert!(GITHUB_UNAVAILABLE_REASONS.contains(&"off"));
+}

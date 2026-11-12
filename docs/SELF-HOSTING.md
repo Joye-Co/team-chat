@@ -165,6 +165,10 @@ Check: the app opens as you, with your team's default group. 设置 › 电脑 i
    found, and it is signed in; a missing line says what to do. Details:
    [INSTALL.md, Let AI members work on your computer](INSTALL.md#let-ai-members-work-on-your-computer).
 
+AI members on your own computer push code and open pull requests with your own git and GitHub
+sign-in on it (`gh auth login`, an SSH key or the keychain), as you do; there is nothing to set
+up in the app.
+
 Check: the computer is in the list in 设置 › 电脑 and online, with all three lines fine. On Ubuntu,
 `bun server/scripts/admin.ts machines --env production` shows it as `healthy`.
 
@@ -355,6 +359,59 @@ and people who sign in with an invite code use these AI members without setting 
    ~/.local/bin/team-chat-daemon doctor            # exit code 0: nothing wrong
    ~/.local/bin/team-chat-daemon install-service   # systemd user service team-chat-daemon.service
    ```
+
+### Give AI members a GitHub account
+
+The AI members on this host push code and open pull requests for everyone with one GitHub
+account: a machine account that an administrator signs in to once, on the host. The product
+stores no GitHub credentials. The VMs never hold the sign-in: each time a run's git or `gh`
+needs it, they ask the daemon, which reads it from the host's `gh` as runner. Commits name the
+AI member; a pull request's body ends with the person who asked for the work.
+
+1. **Create the machine account** on GitHub, for example `<org>-bot`, with its own email
+   address and two-factor authentication.
+2. **Give it only what it needs.** Invite it to your organization with no base permission and
+   give it **Write** on the repositories the AI members work on, and nothing more (no admin, no
+   owner).
+3. **Protect `main`** on each of these repositories (Settings › Branches, or a ruleset): require
+   a pull request before merging. The product also stops a merge to main, a deploy and the other
+   gated actions until an administrator of your team approves them; branch protection is the
+   floor that holds even when that check is passed by.
+4. **Sign it in on the host**, as root: `sudo -iu runner gh auth login`, choose GitHub.com and
+   HTTPS, and log in with a web browser: `gh` prints a one-time code; open the address it shows
+   on your own computer, signed in to GitHub as the machine account, and enter the code.
+   Or use a fine-grained token: create one as the machine account (Settings › Developer settings
+   › Fine-grained tokens) with your organization as resource owner, only the selected
+   repositories, the permissions **Contents** and **Pull requests** set to read and write and
+   nothing else (Metadata read-only comes with them), and an expiry date. Then give it to `gh`
+   without showing it or writing it to a file:
+
+   ```sh
+   read -rs t && printf '%s' "$t" | sudo -iu runner gh auth login --with-token; unset t
+   ```
+
+   Do not run `gh auth setup-git`, and answer no when `gh auth login` offers to authenticate git:
+   the daemon gives each VM its own credential helper. The
+   sign-in stays in `~runner/.config/gh/hosts.yml` (mode 600), which no VM can see.
+5. **Check**: `sudo -iu runner gh auth status` names the machine account. Within 10 minutes the
+   app shows `GitHub @<login>` for this host in 设置 › 电脑, and `已登录 @<login>` in
+   团队管理 › 电脑.
+
+While the host is not signed in, a run that needs GitHub says so once in its 话题 and
+administrators get an alert. When the sign-in ends (the token expired or was revoked, or
+someone ran `gh auth logout`), the alert comes back; sign in again the same way.
+
+**A team computer without VMs** (the daemon runs the CLIs straight on the computer): sign in
+the system user that runs the daemon, not your own account. There the CLIs use that user's git
+and `gh` as they are, so let `gh auth login` set up git as well when it asks, or give that user
+an SSH key of the machine account.
+
+**Known limit.** git needs the token to push, so a process in a run can call the credential
+helper itself (`git credential fill`) and read the token while the run lasts. The `gh` in the
+VM refuses `gh auth token` and `--show-token`, which blocks only the most direct way. Keep the
+damage small: give the machine account as few repositories and permissions as it needs, use a
+fine-grained token with an expiry date and protect `main`. Each VM, with whatever a run left in
+it, is thrown away after its run.
 
 ### Check
 

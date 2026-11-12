@@ -749,6 +749,21 @@ impl MembersPage {
             ))
             // At rest the amount is right-aligned (2.8 number field).
             .row(FormRow::new(s::RULES_SPEND).control(spend))
+            // Usable (design-github-identity.zh.md §3.5): the gated actions follow the
+            // computer, not the dropdown below; read-only, it wraps.
+            .row(
+                div()
+                    .id("rules-gated-note")
+                    .w_full()
+                    .min_h(metrics::FORM_ROW)
+                    .px(metrics::FORM_ROW_INSET)
+                    .py(tokens::space::S6)
+                    .flex()
+                    .items_center()
+                    .n_subheadline()
+                    .text_color(native_colors(cx).secondary)
+                    .child(s::RULES_GATED_NOTE),
+            )
             .row(FormRow::new(s::RULES_APPROVER).control(approver));
         // A value the server refused or a spend that is not a number: the
         // Alert under the group.

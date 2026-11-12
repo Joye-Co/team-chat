@@ -229,26 +229,30 @@ const ACTION_TEXT: Record<keyof ApprovalPolicy["askBefore"], string> = {
  * The policy lines for a run prompt, or undefined when nothing needs approval. With `gated` the
  * machine stops the matching commands itself and asks the approver (feature "gates"): the CLI
  * then asks in the topic only when it does such an action another way (an API call, a web
- * page) or spends money.
+ * page) or spends money. design-github-identity 3.5: the gated actions are approved by the
+ * computer's approvers (`gateWho`: an admin on a team computer, the owner on a personal one);
+ * spending keeps the team's approver.
  */
-export function policyPrompt(p: ApprovalPolicy, gated = false): string | undefined {
+export function policyPrompt(p: ApprovalPolicy, gated = false, gateWho: "admin" | "owner" = "admin"): string | undefined {
   const kinds = GATE_KINDS.filter((k) => p.askBefore[k]);
   const items = kinds.map((k) => ACTION_TEXT[k]);
   const spend = p.maxSpendCny !== null ? `spend more than ¥${p.maxSpendCny} at once (paid APIs, cloud resources, purchases)` : null;
   if (items.length === 0 && !spend) return undefined;
-  const who = (k?: GateKind) => (approverOf(p, k) === "owners" ? "a team owner" : "the person who asked you");
-  if (!gated) {
-    return [
-      `Team rule: before you do any of these, stop, ask ${who()} for approval in the topic and wait for the answer:`,
-      ...[...kinds.map((k) => `${ACTION_TEXT[k]}${approverOf(p, k) !== p.approver ? ` (ask ${who(k)})` : ""}`), ...(spend ? [spend] : [])].map((x) => `- ${x}`),
-    ].join("\n");
-  }
+  const who = () => (p.approver === "owners" ? "a team owner" : "the person who asked you");
+  const gateAsk = gateWho === "owner" ? "the owner of this computer" : "a team admin";
   const lines: string[] = [];
+  if (!gated) {
+    if (items.length > 0) {
+      lines.push(`Team rule: before you do any of these, stop, ask ${gateAsk} for approval in the topic and wait for the answer:`, ...items.map((x) => `- ${x}`));
+    }
+    if (spend) lines.push(`${lines.length > 0 ? "Also" : "Team rule"}: before you ${spend}, stop, ask ${who()} for approval in the topic and wait for the answer.`);
+    return lines.join("\n");
+  }
   if (items.length > 0) {
     lines.push(
-      "Team rule: these need a person's approval. When you run a command for one of them (for example `gh pr merge`, a production deploy), the machine asks the approver and the command waits for the answer; do not ask for it in the topic yourself. If a person declines, do not try again, do the rest another way:",
+      `Team rule: these need the approval of ${gateAsk}. When you run a command for one of them (for example \`gh pr merge\`, a production deploy), the machine asks the approver and the command waits for the answer; do not ask for it in the topic yourself. If a person declines, do not try again, do the rest another way:`,
       ...items.map((x) => `- ${x}`),
-      `When you do one of these another way (an API call, a web page), first ask ${who()} in the topic and wait for the answer.`,
+      `When you do one of these another way (an API call, a web page), first ask ${gateAsk} in the topic and wait for the answer.`,
     );
   }
   if (spend) lines.push(`${lines.length > 0 ? "Also" : "Team rule"}: before you ${spend}, ask ${who()} in the topic and wait for the answer.`);

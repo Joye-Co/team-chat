@@ -1,6 +1,7 @@
 // Pure rules of the bots feature: machine choice, health gating, approval answers, prompt and
 // progress text. No I/O here, so the rules are easy to test.
 import type { BotRunner, CliInfo, Health, Machine, MachineInfo } from "@chat/protocol";
+import type { GithubState } from "../monitor/alerts";
 import { REFS_RULE } from "./refs";
 
 /** Lease the server gives each run; heartbeats and run frames renew it. */
@@ -115,6 +116,10 @@ export const TEXT = {
   approveRun: "这件事里都同意",
   /** The kind's approver is the owners, and the group has none to ask: the requester is asked. */
   approvalNoOwner: "这个群里没有管理员，先请你确认。",
+  /** A gated action on a team computer, and the group has no admin: nobody can approve yet. */
+  approvalNoAdmin: "这类操作要管理员批准，可这个群里没有管理员。请把一位管理员拉进群来批准。",
+  /** A gated action on a personal computer whose owner is not in the group. */
+  approvalNoMachineOwner: "这类操作要这台电脑的主人批准，可他不在这个群里。请把他拉进群来批准。",
   approveRunConfirm: "这件事里之后同类的操作都不再问你。",
   /** The approval card after the answer (DESIGN.md §7.10 answered): title and one record line. */
   approvalClosed: {
@@ -328,6 +333,11 @@ export interface MachineView {
   signedOut?: string[];
   /** 模 3.4: runtimes at their subscription limit (`MachineLink.status`); they take no runs until then. */
   limited?: { runtime: string; until: number; known: boolean }[];
+  /**
+   * design-github-identity 3.6: the computer's GitHub sign-in as people may see it
+   * (`loadMachineViews`): any state when it runs tasks in VMs, else only `signed_in`.
+   */
+  github?: GithubState;
 }
 
 export function mergeLabels(owner: string[], daemon: string[] | undefined): string[] {
@@ -548,6 +558,7 @@ export function toMachine(m: MachineView, createdBy: string, createdAt: number, 
   }
   if (m.health) out.health = m.health;
   if (m.clis) out.clis = m.clis;
+  if (m.github) out.github = m.github;
   return out;
 }
 

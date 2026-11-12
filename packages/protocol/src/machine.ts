@@ -25,6 +25,8 @@ export const MAX_MACHINE_FEATURES = 32;
 export const MACHINE_FEATURES = ["pause", "answer", "aside", "acceptance", "interact", "output", "resume", "context", "effort", "gates", "accounts"] as const;
 /** Usable features (docs/machine-protocol.md): `run.assign.github` and the GitHub ops. */
 export const MACHINE_FEATURE_GITHUB = "github";
+/** Usable: VM runs use the host's own GitHub sign-in per use, and heartbeats carry `metrics.github`. */
+export const MACHINE_FEATURE_GITHUB_HOST = "github-host";
 /** Usable: `run.pause.hold`, `run.command`, `run.command.cancel` and the `hand.*` run events. */
 export const MACHINE_FEATURE_TAKEOVER = "takeover";
 /** Usable: with `takeover`, a person's commands run as another user than the run (VM runs). */
@@ -229,6 +231,17 @@ export const DaemonProblem = z.object({
 });
 export type DaemonProblem = z.infer<typeof DaemonProblem>;
 
+/** Known `MachineGithub.state` values; readers take an unknown one as "unknown". */
+export const MACHINE_GITHUB_STATES = ["signed_in", "signed_out", "no_gh", "unknown"] as const;
+/** Usable (feature "github-host"): the computer's own GitHub sign-in, as `gh` on the host reports it. */
+export const MachineGithub = z.object({
+  /** "signed_in" | "signed_out" | "no_gh" | "unknown" (`MACHINE_GITHUB_STATES`); open string. */
+  state: z.string().min(1).max(32),
+  /** The signed-in account, when known. */
+  login: z.string().min(1).max(100).optional(),
+});
+export type MachineGithub = z.infer<typeof MachineGithub>;
+
 export const MachineMetrics = z.object({
   /** When the daemon took the sample (machine clock). */
   at: Millis,
@@ -254,6 +267,8 @@ export const MachineMetrics = z.object({
   homes: z.array(HomeUse).max(MAX_HOMES).optional(),
   /** Usable (机 5.4): the last warning and error lines of the daemon's log, oldest first. */
   problems: z.array(DaemonProblem).max(MAX_DAEMON_PROBLEMS).optional(),
+  /** Usable, feature "github-host": the host's GitHub sign-in (read at start, every 10 minutes, after a refused push). */
+  github: MachineGithub.optional(),
 });
 export type MachineMetrics = z.infer<typeof MachineMetrics>;
 
@@ -413,8 +428,9 @@ export const RunEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("paused"), paused: z.boolean(), by: Id.optional() }),
   /** 1.1 (feature "output", `chat-run`): the CLI asks the server to post or patch a card, resolve an event or answer a 产出. */
   z.object({ type: z.literal("output"), outputId: z.string().min(1).max(64), op: RunOutputOp, body: z.json() }),
-  // Usable (feature "github"): git or gh used the person's GitHub, or could not.
-  z.object({ type: z.literal("github"), state: z.string().min(1).max(32), login: z.string().min(1).max(100).optional() }),
+  // Usable (feature "github"): git or gh used GitHub, or could not. `reason` with "missing":
+  // "no_gh" | "signed_out" (`RUN_GITHUB_REASONS`), open string.
+  z.object({ type: z.literal("github"), state: z.string().min(1).max(32), login: z.string().min(1).max(100).optional(), reason: z.string().min(1).max(32).optional() }),
   // Usable (feature "takeover"): a person's command while holding the run. Not the AI member's progress.
   z.object({ type: z.literal("hand.command"), commandId: HandCommandId, command: z.string().min(1).max(MAX_HAND_COMMAND_CHARS), by: Id }),
   z.object({ type: z.literal("hand.output"), commandId: HandCommandId, text: z.string().refine((t) => utf8Bytes(t) <= MAX_HAND_OUTPUT_BYTES, { message: "hand.output text is at most 16 KiB" }) }),

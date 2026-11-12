@@ -64,7 +64,7 @@ pub struct RunSpec {
     /// Where the CLI runs.
     pub exec: Arc<dyn Executor>,
     /// Host folders a VM run shares with its VM besides the run folder, working folder and git
-    /// dir (the run's cli root). Only the firecracker executor reads it.
+    /// dir (the run's cli root, the repository's cache). Only the firecracker executor reads it.
     pub vm_shares: Vec<PathBuf>,
 }
 

@@ -30,6 +30,21 @@ fn wave(n: usize, base: f64, swing: f64) -> Vec<f64> {
         .collect()
 }
 
+/// Usable (GitHub, §3.7): the Mac mini's GitHub sign-in in the monitor scenes: 0 signed in
+/// (host), 1 signed out (VM), 2 no gh (host).
+pub static MONITOR_GITHUB: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+fn monitor_github() -> (Value, &'static str) {
+    match MONITOR_GITHUB.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => (json!({ "state": "signed_out" }), "vm"),
+        2 => (json!({ "state": "no_gh" }), "host"),
+        _ => (
+            json!({ "state": "signed_in", "login": "example-bot" }),
+            "host",
+        ),
+    }
+}
+
 pub fn machine_monitor(machine_id: &str, range: &str) -> MachineMonitor {
     let now = now();
     let (n, step) = match range {
@@ -53,6 +68,7 @@ pub fn machine_monitor(machine_id: &str, range: &str) -> MachineMonitor {
         }));
     }
     let gib = 1024_u64 * 1024 * 1024;
+    let (github, runs_in) = monitor_github();
     parse(json!({
         "machine": {
             "id": machine_id, "name": "办公室 Mac mini", "connected": true,
@@ -97,7 +113,8 @@ pub fn machine_monitor(machine_id: &str, range: &str) -> MachineMonitor {
               "memBytes": 0, "tokensToday": 800_000, "finishedToday": 9 }
         ],
         "lastFailure": { "runId": "r-9", "memberId": "m-taro", "at": now - 2 * HOUR,
-                         "title": "把这周的微博排期发出来" }
+                         "title": "把这周的微博排期发出来" },
+        "github": github, "runsIn": runs_in
     }))
 }
 

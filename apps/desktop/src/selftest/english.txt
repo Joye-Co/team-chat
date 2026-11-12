@@ -367,7 +367,7 @@ CI 超时，PR #59 的检查没跑完	CI timed out before PR #59's checks finish
 orderbot、拾光、TeamChat 三个仓库	The orderbot, Keepsake and TeamChat repos
 单次花费超过 ¥50	Any single run over $50
 改生产环境配置	Change production config
-做这些事之前会先发卡片，等交代的人或管理员批准。	Before doing any of these, it sends a card and waits for the requester or an admin to approve.
+做这些事之前会先发卡片：团队的电脑上由管理员批准，个人的电脑上由电脑主人批准。其他要确认的事由交代的人或管理员批准。	Before doing any of these, it sends a card: an admin approves on a team computer, the owner on a personal one. Anything else that needs a yes is approved by the requester or an admin.
 压测用 1000 条消息就够了。	1,000 messages is enough for a load test.
 被「{}」取代	Replaced by “{}”
 依据：11 月 1 日和 2 日两次回滚，都是没跑压测就合并了	Why: both rollbacks on Nov 1 and 2 were merged without a load test

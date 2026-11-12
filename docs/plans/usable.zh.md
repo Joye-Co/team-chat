@@ -231,7 +231,7 @@
 | 电脑离线、登录失效、磁盘不足时通知 owner | 机 5.1 |
 | 电脑可以改名、移除；Mac 上有「不再用这台电脑」 | 机 1.5、1.6 |
 | Windows：合并 #178、#175、#187；做完真机清单 | 机 1.11 |
-| GitHub 身份：每个人上手时登录一次自己的 GitHub，凭证保存下来，之后他交代的任务都用它。设计见 [usable/design-github-identity.zh.md](usable/design-github-identity.zh.md) | 已定 3；机 4.1 |
+| GitHub 身份按电脑：个人电脑用主人自己的登录，团队电脑用管理员在主机上登录的机器账号；产品不保存任何人的 GitHub 凭证；团队电脑上的受控操作由管理员批准，个人电脑上由电脑主人批准。设计见 [usable/design-github-identity.zh.md](usable/design-github-identity.zh.md) | 已定 3；机 4.1 |
 | 接管：参考 Buzz 的做法做成状态机。设计见 [usable/design-takeover.zh.md](usable/design-takeover.zh.md) | 已定 5；盯 6.1；机 3.4 |
 | 电脑分个人的和团队的：每个人都能加自己的电脑；团队的电脑只有管理员能管（线 13） | 已定 6；机 1.12 |
 
@@ -314,7 +314,7 @@ PTY 这种接法保持现状，标为实验，不在验收里。
 
 1. **服务器**：都自己部署，个人也是。部署只保证 Linux（Ubuntu）这一套。托管不做。
 2. **前台和夜间整理的模型**：另配一把 key（计划用 DeepSeek）。key 归团队管；团队有 owner 和管理员，只有管理员能改这些模型。
-3. **GitHub 身份**：每个人上手时先登录自己的 GitHub，之后一直用它。所有人的 GitHub 凭证由产品保存。
+3. **GitHub 身份**（2026-11-12 改定，见 [usable/design-github-identity.zh.md](usable/design-github-identity.zh.md)）：按电脑，用电脑自己的登录。个人电脑用主人自己的 gh / git 登录；团队电脑用管理员在主机上登录一次的机器账号，所有 AI 成员替所有人做事都用它，虚拟机里不存。提交记在 AI 成员名下，PR 正文写明谁交代的。产品不保存任何人的 GitHub 凭证。合并到 main、发布到生产等受控操作：团队电脑上由管理员批准，个人电脑上由电脑主人批准。
 4. **多个 AI 成员**：这一版做完整。转交、分出去、接力都要做。
 5. **接管**：参考 Buzz，做成状态机。
 6. **电脑**：所有人都能加自己的电脑。电脑分个人的和团队的，团队的只有管理员能管。团队使用要有一套最基础的管理员和成员权限。
@@ -326,7 +326,7 @@ PTY 这种接法保持现状，标为实验，不在验收里。
 | 设计 | 文件 |
 | --- | --- |
 | 团队权限和电脑归属 | [usable/design-roles.zh.md](usable/design-roles.zh.md) |
-| 每个人的 GitHub 身份 | [usable/design-github-identity.zh.md](usable/design-github-identity.zh.md) |
+| GitHub 身份按电脑 | [usable/design-github-identity.zh.md](usable/design-github-identity.zh.md) |
 | 转交、分出去和接力 | [usable/design-relay.zh.md](usable/design-relay.zh.md) |
 | 接管的状态机 | [usable/design-takeover.zh.md](usable/design-takeover.zh.md) |
 

@@ -1,0 +1,10 @@
+{
+  "kind": "GithubStatusResponse",
+  "valid": true,
+  "description": "switched off: GitHub is the computer's own sign-in",
+  "value": {
+    "available": false,
+    "unavailableReason": "off",
+    "waits": []
+  }
+}

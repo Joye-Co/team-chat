@@ -232,7 +232,9 @@ MachineMetrics = { at /* sample time, machine clock */, uptimeSecs?, cpuPct? /* 
                    memTotalBytes?, memAvailableBytes?, netRxBps?, netTxBps?, vmSlots?,
                    boot?: { avgMs, maxMs, samples }, runs: VmRunMetrics[] /* <= 64 */, logins?: CliLogin[],
                    homes?: HomeUse[] /* <= 500, feature "homes" */,
-                   problems?: DaemonProblem[] /* <= 20, oldest first; usable, any daemon */ }
+                   problems?: DaemonProblem[] /* <= 20, oldest first; usable, any daemon */,
+                   github?: MachineGithub /* usable, feature "github-host" */ }
+MachineGithub  = { state: "signed_in" | "signed_out" | "no_gh" | "unknown" /* open, 1..32 */, login? /* 1..100 */ }
 DaemonProblem  = { at /* when logged, machine clock */, text /* 1..500 characters, redacted */ }
 VmRunMetrics   = { runId, phase: "booting" | "running" | "paused", startedAt, bootMs?, cpuCores?, memBytes?, scratchBytes? }
 CliLogin       = { runtime, state: "logged_in" | "logged_out" | "unknown", method?: "subscription" | "api_key" }
@@ -263,6 +265,10 @@ HomeUse        = { memberId, usedBytes /* on the host disk */, sizeBytes? /* abs
   started (the link going down, a server error, a key or home it could not save, a failed self
   update, a run that failed, by status only), kept in memory and redacted with every value the
   daemon knows when the heartbeat is made. Absent while there are none.
+- **GitHub** (usable, feature `github-host`): the exit code of `gh auth status --hostname
+  github.com` as the daemon's own user (`signed_in` / `signed_out`; `no_gh` when there is no `gh`;
+  `unknown` when it could not tell), and `login` from `gh api user --jq .login`. Read at start,
+  every 10 minutes and after a refused push; never the token.
 
 ## Accounts and keys (feature `accounts`)
 
@@ -1034,7 +1040,8 @@ safe default named below). Protocol side: protocol.md, "Usable extensions".
 
 | Feature | What the daemon does |
 | --- | --- |
-| `github` | Reports `hello.machine.runsIn`. Takes `run.assign.github`: sets the commit identity and, with `source: "app"`, lets git and `gh` ask it for the person's token for each use; emits the `github` run event. |
+| `github` | Reports `hello.machine.runsIn`. Takes `run.assign.github`: sets the commit identity; emits the `github` run event. (`source: "app"`, the person's token from the server, is no longer sent.) |
+| `github-host` | With `github`: VM runs use the GitHub sign-in of the host's own `gh` (the daemon's user) for each use; heartbeats carry `metrics.github`. See "GitHub (feature `github`)". |
 | `takeover` | Takes `run.pause.hold = "takeover"`, `run.command` and `run.command.cancel`; emits the `hand.*` run events. |
 | `takeover-isolated` | With `takeover` (VM runs, `runsIn: "vm"`): a person's commands run as another user than the run, so they cannot read the run's own credentials. |
 | `homes` | VM hosts (`[vm]`): reports `metrics.homes` (each AI member's home folder) and takes `home.clear`. |
@@ -1053,7 +1060,8 @@ RunFailure = { kind: "signed_out" | "limit" | "model" | "network" | "not_install
                resetsAt?: number /* limit: ms since the epoch, when the CLI said */ }
 RunEvent.session += { effort?: string }            // the 思考强度 the CLI runs with; absent = its default or not known
 RunEvent +=
-  | { type: "github", state: "used" | "missing" | "invalid", login? }        // feature "github"
+  | { type: "github", state: "used" | "missing" | "invalid", login?,        // feature "github"
+      reason?: "no_gh" | "signed_out" }                                      // with "missing"; open, 1..32
   | { type: "hand.command", commandId, command /* 1..4000 */, by }           // feature "takeover"
   | { type: "hand.output",  commandId, text /* <= 16 KiB per event */ }
   | { type: "hand.result",  commandId, ok, exitCode?, ms, timedOut?,
@@ -1063,12 +1071,13 @@ RunEvent +=
 // server -> daemon
 run.assign += { github?: RunGithub }              // feature "github"
 RunGithub = {
-  source: "app" | "machine",     // "app": git and gh get the person's token from the daemon; "machine": the machine's own sign-in; unknown = "machine"
-  memberId,                      // the person whose GitHub the run uses
-  login?,                        // with "app" when connected
-  author?: { name, email },      // absent = the machine's own git config
+  source: "machine" | "app",     // the server sends only "machine" (the computer's own sign-in); "app" is no longer sent; unknown = "machine"
+  memberId,                      // the person the run works for
+  login?,                        // no longer sent
+  author?: { name, email },      // absent = the machine's own git config; sent equal to committer
   committer: { name, email },    // the AI member
-  rewriteSsh?: boolean           // rewrite git@github.com: and ssh://git@github.com/ to HTTPS, drop SSH_AUTH_SOCK
+  rewriteSsh?: boolean,          // no longer sent (with github-host a VM run rewrites SSH to HTTPS on its own)
+  askedBy?: string               // 1..100: display name of the person who asked; absent for anonymous runs
 }
 { t: "run.pause", runId, by?, hold?: "takeover" }                  // feature "takeover"; absent hold = a pause
 { t: "run.command", runId, commandId, command /* 1..4000 */, by }  // feature "takeover"; only while connected
@@ -1077,35 +1086,39 @@ RunGithub = {
                                  // folder (refused, and logged, while a run of it is on the machine)
 ```
 
-GitHub (feature `github`), over HTTP with the machine token:
+GitHub (feature `github`):
 
-```ts
-GET  /v1/machine/runs/:id/github        -> MachineGithubTokenResponse { token, login }
-POST /v1/machine/runs/:id/github/wait   MachineGithubWaitRequest { reason: "not_connected" | "invalid" } -> { ok: true }
-POST /v1/machine/runs/:id/github/rejected                                                               -> { ok: true }
-```
-
-- The token is given only for a run on the calling machine that has not ended, and only when the
-  machine may use that person's GitHub; it is fetched for each git or `gh` use and never cached,
-  written to a file, logged or put in the CLI's environment. Errors: `not_found` with reason
-  `github.not_connected`, `conflict` with `github.invalid` (GitHub refused the token), `forbidden`
-  with `github.not_allowed` (another machine, an ended run, or no right to it).
-- `/wait` reports that the run needs a GitHub the person has not connected; the server asks the
-  person once, and the run then ends waiting (its CLI stops and reports it). `/rejected` reports
-  that git got an authentication failure, so the server checks the token once.
+- The server never holds a GitHub credential. It sends `run.assign.github` with `source:
+  "machine"`, `author` and `committer` both the AI member (`ai-<botId>@users.noreply.invalid`),
+  `memberId` the person the run works for and `askedBy` their display name (absent for an
+  anonymous run). There are no GitHub HTTP routes for machines any more:
+  `/v1/machine/runs/:id/github`, `…/github/wait` and `…/github/rejected` answer `not_found`, and
+  `MachineGithubTokenResponse` and `MachineGithubWaitRequest` are no longer used.
+- Any daemon: `GIT_COMMITTER_*` and `GIT_AUTHOR_*` are the AI member. A run on the host
+  (`runsIn: "host"`) uses the git credentials, SSH keys and `gh` sign-in of the system user the
+  daemon runs as, untouched. The CLI's note says who commits and, with `askedBy`, asks it to end
+  a pull request body with the line `交代人：<askedBy>`.
+- With feature `github-host`, a VM run (`runsIn: "vm"`) uses the host's sign-in: for each git or
+  `gh` use the daemon runs `gh auth token --hostname github.com` on the host as its own user (10 s
+  timeout). The token is never cached, written to the VM's disk, logged, put in the CLI's
+  environment or sent in an event; it is masked in that run's frames, files, session upload and
+  `stderr.log`. In the VM the daemon sets `!chat-run git-credential` as github.com's only
+  credential helper (`GIT_CONFIG_COUNT/KEY/VALUE`), rewrites `git@github.com:` and
+  `ssh://git@github.com/` to HTTPS, puts a `gh` proxy first on `PATH` (`/opt/runner/bin/gh` on the
+  tools disk) that runs the real `gh` with `GH_TOKEN` for that one command, and sets
+  `CHAT_GITHUB_AS` to the account's login (`this computer` when unknown). The proxy refuses `gh
+  auth login|logout|refresh|setup-git|token` and `auth status --show-token` / `-t`. Its own
+  clone and fetch of the mirror use the token as an HTTP header of those git processes only. A
+  daemon without `github-host` sets only the commit identity in a VM.
+- No token: when the host's `gh` is missing (`reason: "no_gh"`) or not signed in (`"signed_out"`),
+  the daemon sends one `{ type: "github", state: "missing", reason }` per run, the credential
+  helper answers git with `quit=1` and the CLI is told to stop and report it, not to sign in. A
+  push that GitHub refuses (`erase`) sends one `state: "invalid"` and makes the daemon read the
+  sign-in again. The server says it once in the topic and tells whoever manages the computer.
+- `metrics.github` (feature `github-host`; see "Metrics"): the host's sign-in, read at start,
+  every 10 minutes and after an `invalid`, on the host and VM computers alike.
 - The `chat-run` ops `git-credential` and `github.token` are answered by the daemon itself, like
   `secret`; they are never `output` run events.
-- What the daemon does with `run.assign.github`: `GIT_COMMITTER_*` is the AI member and
-  `GIT_AUTHOR_*` the person when `author` is given. With `source: "app"` it clears github.com's
-  credential helpers and sets `!chat-run git-credential` instead (`GIT_CONFIG_COUNT/KEY/VALUE`),
-  puts a `gh` proxy first on `PATH` (`<run folder>/bin/gh`; in a VM `/opt/runner/bin/gh` on the
-  tools disk) that runs the real `gh` with `GH_TOKEN` for that one command, and sets
-  `CHAT_GITHUB_AS` to the person's name (`gh auth login|logout|refresh|setup-git` are refused).
-  Its own clone and fetch of the mirror use the token as an HTTP header of those git processes
-  only. Every token it gets is masked in that run's frames, files, session upload and
-  `stderr.log`. Before a VM run it removes an earlier GitHub sign-in from the member's kept home
-  (`.config/gh/hosts.yml`, `.git-credentials`, github.com credential and token `url.*` sections
-  of `.gitconfig`). Any other `source` gets only the committer.
 
 Take-over (feature `takeover`):
 

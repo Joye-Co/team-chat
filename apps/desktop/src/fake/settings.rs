@@ -108,7 +108,6 @@ fn sample_machines() -> Vec<MachineInfo> {
             max_parallel_runs: Some(2),
             runtimes: vec!["claude".into(), "codex".into()],
             clis: sample_clis(),
-            github: Some(true),
             ..Default::default()
         },
         MachineInfo {
@@ -125,7 +124,10 @@ fn sample_machines() -> Vec<MachineInfo> {
             max_parallel_runs: Some(4),
             runtimes: vec!["claude".into(), "codex".into()],
             clis: sample_clis(),
-            github: Some(true),
+            github: Some(MachineGithub {
+                state: "signed_in".into(),
+                login: Some("example-bot".into()),
+            }),
             ..Default::default()
         },
         MachineInfo {
@@ -141,7 +143,10 @@ fn sample_machines() -> Vec<MachineInfo> {
             active_runs: 0,
             max_parallel_runs: Some(1),
             runtimes: Vec::new(),
-            github: Some(false),
+            github: Some(MachineGithub {
+                state: "signed_out".into(),
+                login: None,
+            }),
             ..Default::default()
         },
     ]

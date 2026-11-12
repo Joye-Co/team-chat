@@ -23,7 +23,6 @@ mod client_v11;
 pub mod diagnostics;
 mod engine;
 pub mod files;
-pub mod github;
 pub mod http;
 mod http_ext;
 mod http_push;

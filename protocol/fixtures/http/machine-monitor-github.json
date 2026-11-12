@@ -1,0 +1,45 @@
+{
+  "kind": "MachineMonitor",
+  "valid": true,
+  "description": "usable: the computer's GitHub sign-in and where its runs execute",
+  "value": {
+    "machine": {
+      "id": "01JBX0MACHINE00000000000AV",
+      "name": "linux-host",
+      "connected": true,
+      "lastHeartbeatAt": 1762128000000
+    },
+    "series": {
+      "range": "15m",
+      "from": 1762127100000,
+      "stepMs": 30000,
+      "cpuPct": [],
+      "memPct": [],
+      "diskPct": [],
+      "netRxBps": [],
+      "netTxBps": []
+    },
+    "capacity": {
+      "slots": 4,
+      "running": 0,
+      "canTake": 4
+    },
+    "queue": {
+      "count": 0
+    },
+    "today": {
+      "finished": 0,
+      "succeeded": 0,
+      "failed": 0,
+      "finishedYesterday": 0,
+      "tokens": 0
+    },
+    "clis": [],
+    "runs": [],
+    "members": [],
+    "github": {
+      "state": "no_gh"
+    },
+    "runsIn": "vm"
+  }
+}

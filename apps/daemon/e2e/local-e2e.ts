@@ -20,7 +20,8 @@
 // cards close in place (同意, 拒绝, 没用上); the team's model is used by a member without one;
 // each mention reaches its own member and a follow-up without one goes to the topic's latest;
 // a request for an offline computer waits for it; Codex and ACP runs stop gated actions by code;
-// a run reads the group's members, 产出, cards, decisions and topic state with `chat-run`.
+// a run reads the group's members, 产出, cards, decisions and topic state with `chat-run`, and
+// lists the other groups of the person it works for and searches them (`group list`, `search --all`).
 //
 // Usage (from the repo root): bun apps/daemon/e2e/local-e2e.ts [--port 8793] [--keep]
 // With --vm on a Linux runner host (scripts/runner/host-setup.sh), every run's CLI runs in a
@@ -393,6 +394,7 @@ async function runDaemonCheck(
   report.resume = await resumeCheck(groupId, topicId, runId, bot, work, events, ws);
   if (!REMOTE) report.codex = await codexCheck(owner, groupId, work, events, ws);
   const stop = await cancelCheck(groupId, alice, bot, work, events, ws);
+  if (VM) report.caches = cachesCheck(work);
   // The usable milestone's fixes (local runs only: they change team settings and need the
   // fake CLI's files on this computer).
   if (!REMOTE && !VM) report.landed = await landedChecks({ owner, groupId, alice: alice as Person, bot, work, events, ws, machineId: machine.machine.id, daemon });
@@ -516,6 +518,35 @@ async function codexResultCheck(cxId: string, groupId: string, work: string, eve
   if (blocked.said().some((m: any) => m.cardV2)) throw new Error("a blocked run posted a done card");
   step("codex: a run that exits normally but reports blocked leaves the topic blocked, the run waiting for a reply");
   return { doneCardRun: done.run.id, blockedRun: blocked.run.id };
+}
+
+/**
+ * VM runs (design-vm-state 3.3): the runs of different topics without a repository used one
+ * cache, `<work>/caches/scratch`, with its record; each CLI had it on PATH right after the
+ * VM's shims, and the daemon's own variable did not reach the CLI.
+ */
+function cachesCheck(work: string) {
+  const c = join(work, "caches", "scratch");
+  const meta = JSON.parse(readFileSync(join(c, "cache.json"), "utf8"));
+  if (meta.key !== "scratch" || !(meta.lastUsedAt >= meta.createdAt)) throw new Error(`cache.json: ${JSON.stringify(meta)}`);
+  const seen: { dir: string; env: Record<string, string | null> }[] = [];
+  const walk = (d: string) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (e.isFile() && e.name === "cache-env.json") seen.push({ dir: d, env: JSON.parse(readFileSync(p, "utf8")) });
+      else if (e.isDirectory() && e.name !== "caches" && e.name !== ".git") walk(p);
+    }
+  };
+  walk(work);
+  const folders = new Set(seen.map((s) => s.dir));
+  if (folders.size < 2) throw new Error(`cache-env.json in ${folders.size} work folders`);
+  for (const { dir, env } of seen) {
+    const path = (env.PATH ?? "").split(":");
+    if (env.CARGO_HOME !== join(c, "cargo") || path[0] !== "/opt/runner/bin" || path[1] !== join(c, "bin") || env.CHAT_VM_PATH_EXTRA)
+      throw new Error(`the CLI in ${dir} did not get the cache: ${JSON.stringify(env)}`);
+  }
+  step(`VM runs in ${folders.size} work folders shared the repository cache ${c}`);
+  return { folders: folders.size, rustcWrapper: seen.map((s) => s.env.RUSTC_WRAPPER ?? null) };
 }
 
 /** The first file named `name` under `dir`, at any depth. */
@@ -723,6 +754,7 @@ async function landedChecks(x: Landed) {
   out.relay = await relayCheck(x);
   out.gatesByCode = await gatesByCodeCheck(x);
   out.readCommands = await readCommandsCheck(x);
+  out.readGroups = await readGroupsCheck(x);
   if (x.daemon) out.offlineComputer = await offlineComputerCheck(x);
   return out;
 }
@@ -1097,6 +1129,29 @@ async function readCommandsCheck({ alice, bot, groupId, work, events, ws }: Land
   if (!Array.isArray(ok("decisions").decisions)) throw new Error(`decisions list: ${JSON.stringify(got.decisions)}`);
   step("chat-run read commands: a run in another topic read the members, that topic's state and 产出, the 产出's text, the card and the decisions");
   return { artifactId: listed.id, cardId };
+}
+
+/**
+ * Reads across groups (design-visibility 3.7): Alice is in a second group the AI member is not
+ * in; a run she asks for lists that group with `chat-run group list` and finds her message there
+ * with `chat-run search --all`.
+ */
+async function readGroupsCheck({ owner, alice, bot, groupId, work, events, ws }: Landed) {
+  const g2 = (await call("POST", "/v1/groups", { token: owner, body: { name: "产品群", memberIds: [alice.member.id] } })).group.id as string;
+  const word = `xgroup${crypto.randomUUID().replaceAll("-", "").slice(0, 10)}`;
+  const said = await say(events, ws, g2, `导出格式 ${word}`);
+  const ask = await say(events, ws, groupId, `@dev groupsread find:${word}`, { mentions: [bot.member.id] });
+  const run = await ranDone(events, ask.topicId, "groups: read another group");
+  const got = JSON.parse(readFileSync(join(workOf(work, run.id), "groupsread.json"), "utf8"));
+  if (got.groups?.code !== 0 || got.search?.code !== 0) throw new Error(`chat-run group list / search --all failed: ${JSON.stringify(got).slice(0, 600)}`);
+  const groups = got.groups.out.groups as any[];
+  if (!groups.some((g) => g.id === groupId && g.current === true) || !groups.some((g) => g.id === g2 && g.current === false)) {
+    throw new Error(`group list: ${JSON.stringify(groups)}`);
+  }
+  const hit = (got.search.out.hits as any[]).find((h) => h.messageId === said.id);
+  if (!hit || hit.groupId !== g2 || hit.groupName !== "产品群") throw new Error(`search --all: ${JSON.stringify(got.search.out).slice(0, 600)}`);
+  step("chat-run reads across groups: a run for Alice listed her other group and found her message there with search --all");
+  return { groupId: g2, hit: hit.messageId };
 }
 
 /**

@@ -998,9 +998,11 @@ async fn pause_resume_answer_acceptance_and_aside() {
                         "output",
                         "resume",
                         "context",
+                        "groups",
                         "effort",
                         "gates",
                         "github",
+                        "github-host",
                         "takeover",
                         "sign-in-confirmed",
                         "accounts",
@@ -3312,6 +3314,73 @@ async fn a_machine_that_slept_connects_again_at_once_and_its_run_is_not_stalled(
     let fr = collect(&mut ws, "z1", true, |f| matches!(f, Up::RunDone(_))).await;
     assert_eq!(done(&fr).status, "cancelled");
     assert!(!fr.iter().any(stalled));
+    let _ = child.start_kill();
+    let _ = child.wait().await;
+}
+
+/// Feature "github-host": hello says so, and the heartbeat carries the computer's GitHub
+/// sign-in as `gh` on the daemon's own PATH reports it (a computer without `[vm]` too).
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_heartbeat_carries_the_computers_github() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    write_config(tmp.path(), &m.url);
+    let bin = tmp.path().join("hostbin");
+    std::fs::create_dir(&bin).unwrap();
+    let gh = bin.join("gh");
+    std::fs::write(
+        &gh,
+        "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") exit 0 ;;\n  \"api user\") echo org-bot ;;\n  *) exit 1 ;;\nesac\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = std::env::join_paths(std::iter::once(bin.clone()).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
+    .unwrap();
+    let log = tmp.path().join("daemon.err");
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_daemon"))
+        .arg("run")
+        .arg("--config")
+        .arg(tmp.path().join("daemon.toml"))
+        .env("PATH", &path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::fs::File::create(&log).unwrap())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let (mut ws, _) = tokio::time::timeout(Duration::from_secs(30), m.conns.recv())
+        .await
+        .unwrap_or_else(|_| panic!("no connection: {}", std::fs::read_to_string(&log).unwrap()))
+        .unwrap();
+    match next(&mut ws).await {
+        Up::Hello { machine, .. } => {
+            let f = machine.features.unwrap_or_default();
+            assert!(f.iter().any(|f| f == "github-host"), "{f:?}");
+            assert_eq!(machine.runs_in.as_deref(), Some("host"));
+        }
+        f => panic!("{f:?}"),
+    }
+    send(&mut ws, &welcome(vec![])).await;
+    let github = tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let Some(Ok(Message::Text(t))) = ws.next().await else {
+                panic!("closed")
+            };
+            if let Up::Heartbeat { at, metrics, .. } = serde_json::from_str::<Up>(&t).unwrap() {
+                send(&mut ws, &Down::HeartbeatAck { at }).await;
+                if let Some(g) = metrics.and_then(|m| m.github) {
+                    return g;
+                }
+            }
+        }
+    })
+    .await
+    .expect("a heartbeat with github");
+    assert_eq!(github.state, "signed_in");
+    assert_eq!(github.login.as_deref(), Some("org-bot"));
     let _ = child.start_kill();
     let _ = child.wait().await;
 }
