@@ -725,7 +725,7 @@ An AI member runs with every permission; only the few kinds the team checked nee
   `approval.resolved`. Hooks run before the permission flow, so the deny holds although the run
   uses `bypassPermissions` (Claude Code hooks reference, "PreToolUse decision control"; checked
   with the fake CLI and with the real CLI against a fake model in `tests/integration.rs` and
-  `tests/real_cli.rs`, on Linux and Windows CI).
+  `tests/real_cli.rs`, which `scripts/test-real-cli.sh` runs locally).
 - **One question at a time**: the server keeps one open approval per run, so a second gated
   command waits until the first is answered, then asks (or passes, see scope).
 - **scope "run"** (这件事里都同意): with `approve`, later matches of the same kind in this run pass
