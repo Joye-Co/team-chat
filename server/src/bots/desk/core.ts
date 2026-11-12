@@ -17,6 +17,7 @@ import {
   MAX_PLAN_ITEMS,
   MAX_PLAN_TEXT_CHARS,
   type RunPlan,
+  RunFailure,
   RunPlanItem,
   RUN_KIND_ASIDE,
   RunCode,
@@ -134,6 +135,12 @@ export type RunRow = {
   // desk-requested-for (usable, protocol "Who a run works for")
   /** The person the run works for (`BotRun.requestedFor`); null for a hook's run and runs from before. */
   requested_for: string | null;
+  // desk-failure-model (模 2.2, 2.3, 2.10)
+  /** JSON of `RunFailure` of a failed run, or null. */
+  failure: string | null;
+  /** The model and 思考强度 the CLI really ran with (the session event), or null. */
+  model: string | null;
+  effort: string | null;
 };
 
 /**
@@ -477,6 +484,16 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
           name: "desk-requested-for",
           up: `ALTER TABLE runs ADD COLUMN requested_for TEXT;`,
         },
+        {
+          // 模 2.2, 2.3, 2.10: why a run failed (run.done.failure, JSON) and the model and
+          // 思考强度 it really ran with (the session event). Old rows: NULL.
+          name: "desk-failure-model",
+          up: `
+            ALTER TABLE runs ADD COLUMN failure TEXT;
+            ALTER TABLE runs ADD COLUMN model TEXT;
+            ALTER TABLE runs ADD COLUMN effort TEXT;
+          `,
+        },
       ]);
       const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'bot_id'").toArray()[0];
       this.botId = row?.value ?? null;
@@ -578,6 +595,10 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
     if (r.retry_of) run.retryOf = r.retry_of;
     const code = codeOf(r.code);
     if (code) run.code = code;
+    if (r.model) run.model = r.model;
+    if (r.effort) run.effort = r.effort;
+    const failure = r.failure ? RunFailure.safeParse(JSON.parse(r.failure)) : null;
+    if (failure?.success) run.failure = failure.data;
     if (r.queued_at && r.ended_at === null && r.status === "created" && !r.machine_id) {
       run.queuedAt = r.queued_at;
       run.queuePosition = this.queuePosition(r);

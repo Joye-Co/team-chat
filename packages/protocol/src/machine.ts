@@ -138,6 +138,12 @@ export const CliLogin = z.object({
   /** Feature "accounts": the signed-in account and plan, when the CLI says. */
   email: z.string().max(320).optional(),
   plan: z.string().max(64).optional(),
+  /**
+   * Usable: `true` when a `logged_out` state is certain (the CLI's own status check, run with the
+   * env its runs get, said so, or a run just failed because it is not signed in). Absent = from
+   * the credential files only, or an older daemon. Only a confirmed `logged_out` keeps runs away.
+   */
+  confirmed: z.boolean().optional(),
 });
 export type CliLogin = z.infer<typeof CliLogin>;
 /** VM boot times of the last (at most 50) runs. */
@@ -319,7 +325,14 @@ export const RunReport = z.object({
 export type RunReport = z.infer<typeof RunReport>;
 
 export const RunEvent = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("session"), sessionId: z.string(), runtime: z.string(), model: z.string().optional() }),
+  z.object({
+    type: z.literal("session"),
+    sessionId: z.string(),
+    runtime: z.string(),
+    model: z.string().optional(),
+    /** Usable: the 思考强度 the CLI runs with; absent = its default or not known. */
+    effort: z.string().optional(),
+  }),
   z.object({ type: z.literal("turn.started"), turnId: z.string() }),
   z.object({
     type: z.literal("turn.completed"),
@@ -394,6 +407,19 @@ export type RunEventType = RunEvent["type"];
 export const RunDoneStatus = z.enum(["succeeded", "failed", "cancelled", "timeout"]);
 export type RunDoneStatus = z.infer<typeof RunDoneStatus>;
 
+/**
+ * Usable: why a run failed, as the daemon sorted it (machine-protocol.md, "Failure kinds"). The
+ * kind is an open string: an unknown one reads as `other`.
+ */
+export const RUN_FAILURE_KINDS = ["signed_out", "limit", "model", "network", "not_installed", "other"] as const;
+export type RunFailureKind = (typeof RUN_FAILURE_KINDS)[number];
+export const RunFailure = z.object({
+  kind: z.string().min(1).max(32),
+  /** `limit`: when the limit resets (ms since the epoch), when the CLI said. */
+  resetsAt: Millis.optional(),
+});
+export type RunFailure = z.infer<typeof RunFailure>;
+
 // ---------------------------------------------------------------------------
 // Daemon to server
 // ---------------------------------------------------------------------------
@@ -420,6 +446,8 @@ export const RunDoneFrame = z.object({
   durationMs: z.int().nonnegative(),
   /** Usable: the run's branch, its head and whether it is pushed; absent = not known. */
   code: RunCode.optional(),
+  /** Usable: with `status: "failed"`, why it failed; absent = not sorted (older daemons). */
+  failure: RunFailure.optional(),
 });
 export const RunSessionFrame = z.object({
   t: z.literal("run.session"),

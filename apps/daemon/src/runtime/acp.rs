@@ -281,7 +281,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                                     Pending::LoadSession(sid) => sid,
                                     _ => r["sessionId"].as_str().unwrap_or_default().to_string(),
                                 };
-                                let _ = emit.send(RunEvent::Session { session_id: sid.clone(), runtime: spec.runtime_name.clone(), model: None });
+                                let _ = emit.send(RunEvent::Session { session_id: sid.clone(), runtime: spec.runtime_name.clone(), model: None, effort: None });
                                 session = Some(sid);
                                 // ACP has no system prompt: the run note goes before the first prompt.
                                 let first = first_prompt(&spec, lost);
@@ -376,7 +376,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                         }
                         let code = p.kill_group(Duration::from_secs(3)).await;
                         return Outcome { status: Status::Cancelled, exit_code: code, result_text: norm.last_message,
-                            error: None, session_id: session, session_file: None, usage: None };
+                            error: None, session_id: session, session_file: None, usage: None, failure: None };
                     }
                 }
             }
@@ -399,6 +399,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
         session_id: session,
         session_file: None,
         usage: None,
+        failure: None,
     }
 }
 

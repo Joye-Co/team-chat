@@ -923,13 +923,24 @@ and lengths before it calls the server.
 | `op` | `body` | `chat-run` command |
 | --- | --- | --- |
 | `memory.note` | `MachineMemoryNoteRequest` | `chat-run memory note --scope member\|person\|group --kind K --text T [--when W] [--source <messageId>]` → `MemoryItem` |
+| `memory.search` | `{ query, limit? }` | `chat-run memory search --query <text> [--limit <1-50>]` → `MemoriesResponse` |
 
 ```ts
 POST /v1/machine/runs/:id/memories   body MachineMemoryNoteRequest -> MemoryItem (status "pending")
 MachineMemoryNoteRequest = { scope: "member" | "person" | "group", kind: MemoryKind, text /* 1..500 */, when? /* <= 300 */, sourceMessageId? }
+GET  /v1/machine/runs/:id/memories?q=<text>&limit=<1-50, default 10>   -> MemoriesResponse
 ```
 
-- The run must be on the calling machine, active and not a side chat, as for files.
+- **Search** (`memory.search`): the prompt carries only part of what is remembered (8 KB, chosen
+  for the request). The search reads exactly what the run's prompt could carry: the team's, the
+  run's group's, the member's (its own pending notes too) and the requester's active memories,
+  each memory learned in a group only when everyone in the run's group is in that group. Hits
+  match the query's words or Chinese two-character words, best first; each hit counts one use
+  (protocol.md, "Memory"). A side chat run may search. An empty `q` is `invalid`.
+- A run that names a memory's id (as `[id]`) in its result or progress counts one use of it, when
+  it may read it.
+
+- A note (`memory.note`): the run must be on the calling machine, active and not a side chat, as for files.
 - `member` is the run's AI member (its lessons and playbooks), read only in the run's group
   (`fromGroup`), `person` the person who asked for the run (their preferences), `group` the run's
   group (conventions people said in the group; a direct conversation has none: `forbidden`). A
@@ -960,6 +971,10 @@ CliInfo += { resume?: boolean,                    // with feature "resume": runs
              aside?: boolean }                    // with feature "aside": the CLI has a read-only mode for side chats
                                                   // absent (an older daemon): true for kinds "claude" and "codex" only
 run.done += { code?: { branch, head /* hex */, pushed: boolean } }  // any daemon; absent = not known
+run.done += { failure?: RunFailure }              // any daemon; with status "failed"; absent = not sorted
+RunFailure = { kind: "signed_out" | "limit" | "model" | "network" | "not_installed" | "other",  // open: unknown = "other"
+               resetsAt?: number /* limit: ms since the epoch, when the CLI said */ }
+RunEvent.session += { effort?: string }            // the 思考强度 the CLI runs with; absent = its default or not known
 RunEvent +=
   | { type: "github", state: "used" | "missing" | "invalid", login? }        // feature "github"
   | { type: "hand.command", commandId, command /* 1..4000 */, by }           // feature "takeover"
@@ -1040,6 +1055,47 @@ Other usable changes:
 - Machine ownership: a machine is the team's or one person's (protocol.md, "Roles: 所有者 and
   personal machines"). The daemon does not know which; the server only assigns a run to a
   personal machine when the run works for its owner.
+
+### Failure kinds and the sign-in state
+
+A failed run says why in `run.done.failure`, so the topic gets one plain sentence and a next
+step while the CLI's own words stay in `run.done.error` for the process view. The daemon sorts
+by what the CLI reports, its typed fields first and its words only when it has none:
+
+| Kind | Claude Code (`stream-json`) | Codex (`app-server`) |
+| --- | --- | --- |
+| `signed_out` | assistant `error: "authentication_failed"` (or `oauth_org_not_allowed`), `api_error` `stored_login_refused` / `gateway_signin_required` / `gateway_session_expired`; words: "Not logged in", "Please run /login", "Invalid API key", "token has expired" | `codexErrorInfo: "unauthorized"`; words: "401 Unauthorized", "not logged in" |
+| `limit` | assistant `error: "billing_error"`, or `error: "rate_limit"` with `api_error: "usage_limit_reached"` or a `rate_limit_event` with `status: "rejected"`; `resetsAt` from that event's `rate_limit_info.resetsAt` (seconds) or the old `…limit reached\|<epoch>` text; words: "You've hit your … limit", "usage limit reached", "Credit balance is too low" | `codexErrorInfo: "usageLimitExceeded"`; `resetsAt` from the latest `account/rateLimits/updated` window at 100 % |
+| `model` | assistant `error: "model_not_found"`, `api_error` `model_requires_usage_credits` / `no_allowed_fallback`; words: "issue with the selected model", `not_found_error` with "model" | `badRequest` or words with `model_not_found`, "model … does not exist", "model is not supported" |
+| `network` | `api_error` `connection_failed` / `stream_idle_timeout` / `no_response` / `network_edge_blocked` / `tls_untrusted_ca`, assistant `error` `overloaded` / `server_error`; words: "Connection error", "ECONNREFUSED", "ENOTFOUND", "fetch failed", "timed out" | `httpConnectionFailed`, `responseStreamConnectionFailed`, `responseStreamDisconnected`, `responseTooManyFailedAttempts`, `serverOverloaded`, `internalServerError` |
+| `not_installed` | the program was not found when the daemon started it | same |
+| `other` | anything else | same |
+
+Claude Code's words in the stderr of a run that exited early say `signed_out` only when they are
+the CLI's own ("Not logged in", "Please run /login", "Invalid API key"): that tail can hold an MCP
+server's or a hook's "401 Unauthorized", which reads as `other`.
+
+A run that failed with `signed_out` marks its runtime signed out at once: `metrics.logins` says
+`logged_out` for it until the CLI's own status check says it is signed in again (a sign-in from
+the app, or the check every 10 minutes) or a later run of it succeeds.
+
+`CliLogin += { confirmed?: boolean }` (usable): `true` when a `logged_out` is certain: the CLI's
+own status check said so, or a run just failed with `signed_out`. A `logged_out` from the
+credential files alone (they do not know every way a CLI signs in, such as Claude Code's
+`apiKeyHelper` or a token in its env) or from an older daemon has no `confirmed`; it is shown to
+people but keeps no runs away.
+
+The sign-in state in `metrics.logins` is the CLI's own status check when the daemon has one
+(feature `accounts`, every 10 minutes and after each sign-in): `claude auth status --json`
+(`loggedIn`) and `codex login status` ("Logged in" / "Not logged in"), run with the env a run
+gets (the runtime's env and the daemon's `env_passthrough` variables), so it sees an
+`apiKeyHelper` or a token passed that way. A check that cannot run or says nothing clear falls
+back to the credential files. An API key the CLI gets (its runtime's env, the daemon's env or a
+key saved from the app) counts as signed in. The server gives no run to a runtime whose login is
+a confirmed `logged_out` (protocol.md, "Failure kinds and the model a run used").
+
+The `session` event's `effort` is the 思考强度 the daemon passed to the CLI (`run.assign.effort`
+after the check in "Models and effort"), or the one Codex's `thread/start` answered with.
 
 ## Raw session upload
 

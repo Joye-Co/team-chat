@@ -171,7 +171,7 @@ END;
 - 指定（`PUT /v1/bots/:id/runner` 的 `machineId`）仍只有管理员能做。新规则：只有当 `machineId` **变成**一台个人电脑（和存着的不同）时，调用的人必须是它的主人，否则 403 `machine.not_yours`。原样带回存着的 `machineId` 的编辑照常通过，所以管理员仍能改指定在别人电脑上的 AI 成员的模型、运行方式、标签。
 - 管理员改了这样的 AI 成员后 `updated_by` 变成管理员，按规则 3 钩子就不再用那台个人电脑；主人自己交代的事照常在那里做。环境变量名单改了也拿不到主人的密钥：密钥给谁由主人在自己电脑上定（`secret.members`）。表单在这种 AI 成员上显示一行 `BOT_PINNED_OTHER_HINT`。
 - 勾选（`machine_bots`）：主人可以勾任何没停用、他电脑上有运行方式的 AI 成员，只影响他自己交代的事，不改 AI 成员设置，所以普通成员也能做。
-  服务端只查 AI 成员没停用、有运行配置；「电脑上有这种运行方式」由客户端在勾选时按电脑报上来的 CLI 过滤，派活时由 R4 的 `reachable()` 判断（运行方式之后还能被管理员改，勾选时查一次也不够）。
+  服务端只查 AI 成员没停用、有运行配置；「电脑上有这种运行方式」派活时由 R4 的 `reachable()` 判断（运行方式之后还能被管理员改，勾选时查一次也不够）。R5 实现时改：客户端不按运行方式过滤勾选列表，因为普通成员读不到 AI 成员的运行配置（`GET /v1/bots/:id/runner` 只给管理员）；列表是所有在用的 AI 成员，没有运行配置的由服务端拒绝。
 
 ### 3.5 归属怎么改、移除和停用
 
@@ -274,7 +274,7 @@ END;
 **界面改动**
 - 判断函数保留 `i_am_owner` 的名字（加注释：表示管理员或所有者），新增 `i_am_team_owner`。服务端还没发 `teamOwner` 时（R1 之前），客户端把人类管理员都当所有者，和 0017_roles 的迁移结果一致（`TeamRole::of`）。原因：23 处改名会和线 8、10 的桌面 PR 互相 rebase，条件又没变。`data::Member` 加 `team_owner`，`provider/convert.rs` 读 `teamOwner`。
 - 成员列表（设置和团队管理两处）：身份一列显示所有者 / 管理员 / 普通成员；⋯ 菜单的「设为…」只在我是所有者、对象不是我时出现（对象是 AI 成员时只有设为管理员 / 普通成员）。邀请表单不加身份选项，原有的「级别」选项也去掉：邀请来的都是普通成员，之后再「设为…」。
-- 电脑页（设置 › 电脑；团队管理 › 电脑）：普通成员也能打开设置 › 电脑，分「我的电脑」「团队的电脑」两组，团队那组只有名字和在不在线；每台的副标题写团队的电脑或 {name}的电脑；有「添加电脑」。个人电脑详情里有 `MACHINE_MY_BOTS`：gpui-component 的 list 加 switch，只列这台电脑有运行方式的 AI 成员，每行可展开填代码仓库。⋯ 菜单按 3.5 显示「交给团队」或「改成我的电脑」（后者用 dialog 确认）。
+- 电脑页（设置 › 电脑；团队管理 › 电脑）：普通成员也能打开设置 › 电脑，分「我的电脑」「团队的电脑」两组，团队那组只有名字和在不在线；每台的副标题写团队的电脑或 {name}的电脑；有「添加电脑」。（R5 实现时定：别人的个人电脑单独成第三组「同事的电脑」，副标题写 {name}的电脑；团队管理 › 电脑只放团队的和我的，别人的个人电脑没有监控可看。「交给团队」「改成我的电脑」在一个人用时也在 ⋯ 菜单里，它们不是分组，是 3.10 旧数据和 3.11 邀请时要用的入口。）个人电脑详情里有 `MACHINE_MY_BOTS`：gpui-component 的 list 加 switch，只列这台电脑有运行方式的 AI 成员，每行可展开填代码仓库。⋯ 菜单按 3.5 显示「交给团队」或「改成我的电脑」（后者用 dialog 确认）。
 - 「用这台电脑」：请求带 `personal:true`，完成那一屏多一行 `MACHINE_PERSONAL_NOTE`（团队时才显示；那一屏的其余说明是线 8 机 3.1 a）。
 - AI 成员的电脑选择（成员页表单，以及线 10 日常界面里改电脑的弹窗）：管理员看到任意一台（团队的）电脑 / 各台团队电脑 / 自己的个人电脑；指定在别人个人电脑上的 AI 成员，这一项只读并显示 `BOT_PINNED_OTHER_HINT`。普通成员只看到「我交代的事：用团队安排的电脑 / 用我的电脑 {name}」，写的是 `machine_bots`。添加 AI 成员时，如果「用这台电脑」已做过，默认选这台电脑。
 - 邀请表单：我在 `solo()` 状态、而且有指定在我个人电脑上的 AI 成员时，显示 `INVITE_SOLO_NOTE` 和「交给团队」按钮（我不是管理员时不会走到这里，邀请本来就要管理员）。
@@ -313,7 +313,7 @@ END;
 
 ## 6. 拆成哪些 PR
 
-R1、R3 可并行（R1 只碰成员，R3 只碰电脑，都不改对方文件，触发器各自独立）。R4 改 desk，要等线 1–3 和接力（线 6）里改同一批 desk 文件的 PR 先合。R2 在 R1 后；R5 在 R2、R3 后（共用 `views/settings/members.rs`）。
+R1、R3 可并行（R1 只碰成员，R3 只碰电脑，都不改对方文件，触发器各自独立）。R4 改 desk，要等线 1–3 和接力（线 6）里改同一批 desk 文件的 PR 先合。R2 在 R1 后；R5 在 R2、R3 后（共用 `views/settings/members.rs`）。R5 先于 R4 合入时（实际如此），桌面端用 `apps/desktop/src/data.rs` 的 `OWNERSHIP_DISPATCH = false` 关住要靠 R4 才成立的部分：普通成员不能「添加电脑」「用这台电脑」，不显示「在这里做的事…」，界面文字不说「只做你交代的事」（R4 之前个人电脑照样接所有匹配的派活，用主人的权限和编程工具设置）。R4 的 PR 把它改成 `true`，并恢复 `MY_COMPUTERS_FOOTER`、`OTHERS_COMPUTERS_FOOTER`、`MACHINE_TO_MINE_CONFIRM`、`THIS_INTRO_PERSONAL`、`BOT_PLACE_MINE_HINT`、`BOT_PINNED_OTHER_HINT` 里「只做你交代的事」的说法。
 
 | PR | 做什么 | 主要文件 | 依赖 | 怎么测 |
 | --- | --- | --- | --- | --- |
@@ -321,7 +321,7 @@ R1、R3 可并行（R1 只碰成员，R3 只碰电脑，都不改对方文件，
 | R2 身份：桌面端 | `team_owner` 进数据层；`i_am_team_owner`；身份列和「设为…」；文案统一 | `apps/desktop/src/{data.rs,provider/convert.rs,provider/settings.rs}`、`views/settings/{mod,members}.rs`（成员列表部分）、`views/admin/{team,mod}.rs`、`views/members_page/mod.rs`、`copy/{settings,admin}.rs`（身份段）、`fake/settings*.rs`（只给截图自测补字段） | R1 | `cargo test`（含文案目录测试）；截图自测：所有者、管理员、普通成员三视角，浅色和深色；沙盒两个账号实测 |
 | R3 电脑归属：服务端 | 0017_machine_owner（含新触发器）；`POST /v1/machines` 带 `personal`；`PATCH`；`machine_bots` 路由；`requireMachineManager`；`GET` 按身份返回；`PUT runner` 的归属检查；停用钩子（协议字段、protocol.md「Machines」和 machine-protocol.md「电脑归属」已在协议 PR 里） | `server/migrations/0017_machine_owner.sql`、`server/src/bots/{routes,store}.ts`、`server/src/bots/deactivate.ts`（新，注册钩子）、`server/src/monitor/{accounts,index}.ts` | 无 | vitest：普通成员加团队电脑 403、加个人电脑成功；管理员动不了别人个人电脑的密钥和监控；改名、交给团队、改成我的电脑；管理员带原 `machineId` 改别人个人电脑上的 AI 成员成功、改成别人的个人电脑 403；停用后电脑 `revoked_at` 有值、`machine_bots` 清空、审计有 `machine.revoke`；钩子写库独立成批、吊销连接失败时写库仍在 |
 | R4 派工按归属 | `requesterKind`、`requesterOf`、`requested_for`（DO 迁移 `roles-1`）；`candidates` 三条规则和优先顺序；`reachable` 和 `personalOnly`、`waitPersonal`；`dispatchQueued` 不互相挡、`queuePosition`；转交带 `requested_for` 和 `fromMachine`、`takeDelegation` 先查；勾选变化重新派；个人电脑上的插话、批准、接管；代码仓库路径 | `server/src/bots/dispatch.ts`、`server/src/bots/desk/{core,runs,delegate,input,takeover}.ts`、`server/src/bots/routes.ts`（只在 `machine_bots` 路由里加一行重新派工）、`server/src/bots/store.ts`（只加 `requesterKind`） | R3；线 1–3、线 6 改 desk 的 PR | `dispatch.ts` 单元测试：一个人、一台个人电脑、没指定电脑的 AI 成员，他的请求落到这台电脑；别人请求不落；钩子只在 `updated_by` 是主人时落；勾选优先；desk 测试：A 的运行等 A 离线的电脑，B 后来的运行拿到团队主机；X 在 A 电脑上转交给 Y，Y 也在 A 电脑上；分出去给只在别人电脑上的成员得到 `delegation.not_for_requester`；B 追问 A 电脑上的话题落到团队电脑；B 的插话不进 A 电脑上的运行；管理员批不了 A 电脑上的审批、不能接管；tools/e2e 加两人两电脑场景 |
-| R5 电脑归属：桌面端 | `personal:true`；`solo()`；电脑页分组和副标题、普通成员「添加电脑」；「谁用这台电脑」；交给团队、改成我的电脑；勾选和代码仓库；AI 成员表单的放置和「我交代的事」；默认选这台电脑；邀请表单提示；`seed.ts` 加一位普通成员和他的个人电脑 | `apps/desktop/src/provider/{settings,mod}.rs`、`crates/chat-core/src/runs.rs`（新路由的客户端）、`views/settings/machines.rs`、`views/settings/members.rs`（BotForm 和邀请表单部分）、`views/admin/fleet.rs`、`copy/settings.rs`（电脑段）、`scripts/sandbox/seed.ts` | R2、R3；线 10 改电脑的弹窗 | `cargo test`；截图自测（一个人、普通成员、管理员看电脑页，个人电脑详情），浅色和深色；`bun run dev:desktop` 实测；用 `docs/design/skills/emilkowalski/` 四个技能过一遍 |
+| R5 电脑归属：桌面端 | `personal:true`；`solo()`；电脑页分组和副标题、普通成员「添加电脑」；「谁用这台电脑」；交给团队、改成我的电脑；勾选和代码仓库；AI 成员表单的放置和「我交代的事」；默认选这台电脑；邀请表单提示；`seed.ts` 加一位普通成员和他的个人电脑 | `apps/desktop/src/provider/{settings,mod}.rs`、`crates/chat-core/src/runs.rs`（新路由的客户端）、`views/settings/machines.rs`、`views/settings/members.rs`（BotForm 和邀请表单部分）、`views/admin/fleet.rs`、`copy/settings.rs`（电脑段）、`scripts/sandbox/seed.ts` | R2、R3；线 10 改电脑的弹窗；普通成员自己加电脑和「只做你交代的事」要等 R4（见上） | `cargo test`；截图自测（一个人、普通成员、管理员看电脑页，个人电脑详情），浅色和深色；`bun run dev:desktop` 实测；用 `docs/design/skills/emilkowalski/` 四个技能过一遍 |
 
 ## 7. 真电脑上的验收步骤
 

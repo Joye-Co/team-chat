@@ -64,6 +64,8 @@ pub struct HttpState {
     pub parts: BTreeMap<(String, u32), Vec<u8>>,
     /// Fail this many part PUTs with 503 before taking them.
     pub fail_parts: u32,
+    /// (method, path, body) of every request under `/v1/machines/:id` (usable: ownership).
+    pub machine_requests: Vec<(String, String, Value)>,
 }
 
 /// Part size of the mock's multipart uploads.
@@ -205,6 +207,25 @@ async fn handle(st: Arc<Mutex<HttpState>>, req: Request<Incoming>) -> Response<F
     let seg: Vec<&str> = path.trim_start_matches('/').split('/').collect();
     let json_body = || serde_json::from_slice::<Value>(&body).unwrap_or(Value::Null);
     match (&method, seg.as_slice()) {
+        // Usable: rename, ownership and the AI members of my machine. Answers the machine.
+        (&Method::PATCH, ["v1", "machines", id])
+        | (&Method::PUT, ["v1", "machines", id, "bots", _])
+        | (&Method::DELETE, ["v1", "machines", id, "bots", _]) => {
+            let id = id.to_string();
+            let req = json_body();
+            s.machine_requests
+                .push((method.to_string(), path.clone(), req.clone()));
+            let name = req
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("电脑")
+                .to_string();
+            ok(json!({
+                "id": id, "name": name, "labels": [], "createdBy": "me", "createdAt": 1,
+                "connected": false, "healthy": false, "runningRuns": [], "ownerId": "me",
+                "personalBots": [{"botId": "B1", "repoPath": "/code/app"}],
+            }))
+        }
         (&Method::POST, ["v1", "files"]) => {
             let r: CreateFileRequest = serde_json::from_value(json_body()).unwrap();
             let id = s.id("F");

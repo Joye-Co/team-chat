@@ -200,6 +200,14 @@ while True:
         out({"type": "system", "subtype": "init", "cwd": os.getcwd(), "session_id": sid, "model": "fake-model"})
     n += 1
     mid = "msg_%d" % n
+    if "signedout" in cue:
+        # As Claude Code 2.1 ends a turn with no sign-in.
+        words = "Not logged in · Please run /login"
+        out({"type": "assistant", "message": {"id": mid, "model": "<synthetic>", "role": "assistant",
+             "content": [{"type": "text", "text": words}]}, "session_id": sid,
+             "error": "authentication_failed", "is_api_error_message": True})
+        out({"type": "result", "subtype": "success", "is_error": True, "result": words, "session_id": sid})
+        continue
     if "spawn" in cue:
         loop = "import time\nwhile True:\n    open(%r, 'a').write('x\\n')\n    time.sleep(0.05)\n"
         quiet = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL}
