@@ -260,22 +260,21 @@ impl TopicRail {
             .into_any_element()
     }
 
-    /// 成员 (§2.5): everyone in the 话题's 群 (they all see it), the one who
-    /// is 负责 first and the one who 提出 it next, each marked so; then the
-    /// rest, people before bots. A click opens the member. The state is in
-    /// 状态 only; this section never repeats it.
+    /// 成员 (§2.5): everyone in the 话题's 群 (they all see it): the AI members
+    /// at work here (在做) and those that took part (参与过) first, then the one
+    /// who 提出 it, each marked so ([`super::people_marks`]); then the rest,
+    /// people before bots. A click opens the member.
     pub(super) fn native_owner(
         &self,
         d: &Data,
-        owner: Option<&str>,
-        by: Option<&str>,
+        marks: &[(crate::data::MemberId, &'static str)],
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let k = native_colors(cx);
         let mut section = self.section(OWNER, c::TOPIC_RAIL_PEOPLE, cx);
-        // R2-17, §2.13: no owner is a compact empty (icon and muted line),
-        // and the section header offers the ghost 指派 (§2.5).
-        if owner.is_none() {
+        // R2-17, §2.13: no AI member took part yet: a compact empty (icon and
+        // muted line), and the section header offers the ghost 指派 (§2.5).
+        if !marks.iter().any(|(_, tag)| *tag != c::INSPECTOR_ASKED) {
             if let Some(t) = d.topic.as_ref() {
                 section = section.action(self.assign_button(t, cx));
             }
@@ -300,8 +299,9 @@ impl TopicRail {
                 people.push((m, Some(tag)));
             }
         };
-        lead(owner, c::INSPECTOR_OWNER, &mut people);
-        lead(by, c::INSPECTOR_ASKED, &mut people);
+        for (id, tag) in marks {
+            lead(Some(id.as_str()), tag, &mut people);
+        }
         for m in &d.group_members {
             if !people.iter().any(|(x, _)| x.id == m.id) {
                 people.push((m.clone(), None));

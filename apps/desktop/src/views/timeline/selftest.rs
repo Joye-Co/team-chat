@@ -135,6 +135,8 @@ pub fn provider(count: usize) -> Arc<dyn ChatProvider> {
         message_count: count as u32,
         unread: 0,
         mentions: 0,
+        participants: Vec::new(),
+        relay: None,
     };
     Arc::new(SelftestProvider {
         inner,

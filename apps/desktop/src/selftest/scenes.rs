@@ -83,6 +83,9 @@ pub enum Start {
     ),
     /// The sample data with my GitHub sign-in in one shape (GitHub scenes).
     Github(crate::fake::github::GithubShape),
+    /// The v2 sample team with 开发 / 虚拟列表 as an order (按顺序做) in one state, or two
+    /// members at work there (`fake::v2::V2Samples::with_relay`).
+    V2Relay(crate::fake::v2::RelayShape),
 }
 
 pub struct Scene {

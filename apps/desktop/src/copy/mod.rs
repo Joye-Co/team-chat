@@ -54,6 +54,8 @@ pub mod live;
 pub mod members_page;
 pub mod memory;
 pub mod rail;
+// Usable: 按顺序做 and who is at work in a 话题.
+pub mod relay;
 pub mod side_chat;
 pub mod topic_rail;
 // --- v12/kit ---
@@ -217,6 +219,11 @@ pub const SECTIONS: &[Section] = &[
     Section {
         name: "topic_rail",
         entries: topic_rail::ENTRIES,
+        developer: false,
+    },
+    Section {
+        name: "relay",
+        entries: relay::ENTRIES,
         developer: false,
     },
     Section {

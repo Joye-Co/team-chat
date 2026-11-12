@@ -99,6 +99,17 @@ const HOUR: i64 = 60 * MIN;
 const DAY: i64 = 24 * HOUR;
 
 impl FakeProvider {
+    /// Usable: `Topic.participants` from the sample runs, unless a sample set them.
+    fn fill_participants(&self, t: &mut Topic) {
+        if !t.participants.is_empty() {
+            return;
+        }
+        let runs = self.runs(&t.group_id, &t.id);
+        let members = self.with(|s| s.members.clone());
+        let is_bot = |id: &str| members.iter().any(|m| m.id == id && m.is_bot());
+        t.participants = sample_participants(t, &runs, &is_bot);
+    }
+
     /// The asks of the cards in one 话题, oldest first: a card whose state word is 等你审 or
     /// 等你回答, from its author. `None` when the 话题 has no cards: the 话题 itself then
     /// waits on me. Whether my answer reached the card is the reader's call
@@ -322,6 +333,8 @@ impl State {
             message_count: 0,
             unread: 0,
             mentions: 0,
+            participants: Vec::new(),
+            relay: None,
         });
         for (author, body, ago) in messages {
             self.push_message(group_id, id, author, body, self.now - ago, SendState::Sent);
@@ -1051,6 +1064,42 @@ fn members() -> Vec<Member> {
     list
 }
 
+/// Usable: the AI members that ran in a sample 话题, as the server's `Topic.participants`
+/// says: one per member with a run (at work while one is active), and the follow-up owner
+/// when it is an AI member without a run here (the server's first migration does the same).
+pub fn sample_participants(
+    topic: &Topic,
+    runs: &[BotRunSummary],
+    is_bot: &dyn Fn(&str) -> bool,
+) -> Vec<TopicParticipant> {
+    let mut out: Vec<TopicParticipant> = Vec::new();
+    for r in runs.iter().filter(|r| r.topic_id == topic.id) {
+        let at = r.started_at.unwrap_or(r.created_at).max(0) as u64;
+        match out.iter_mut().find(|p| p.member_id == r.bot_id) {
+            Some(p) => {
+                p.working |= r.status.is_active();
+                p.last_run_at = p.last_run_at.max(at);
+            }
+            None => out.push(TopicParticipant {
+                member_id: r.bot_id.clone(),
+                working: r.status.is_active(),
+                last_run_at: at,
+            }),
+        }
+    }
+    if let Some(owner) = topic.owner_id.as_deref()
+        && is_bot(owner)
+        && !out.iter().any(|p| p.member_id == owner)
+    {
+        out.push(TopicParticipant {
+            member_id: owner.to_string(),
+            working: false,
+            last_run_at: topic.created_at.max(0) as u64,
+        });
+    }
+    out
+}
+
 fn sorted_topics(state: &State, group_id: &str) -> Vec<Topic> {
     let mut topics: Vec<Topic> = state
         .topics
@@ -1150,16 +1199,22 @@ impl ChatProvider for FakeProvider {
     }
 
     fn topics(&self, group_id: &str) -> Vec<Topic> {
-        self.with(|s| sorted_topics(s, group_id))
+        let mut out = self.with(|s| sorted_topics(s, group_id));
+        for t in &mut out {
+            self.fill_participants(t);
+        }
+        out
     }
 
     fn topic(&self, group_id: &str, topic_id: &str) -> Option<Topic> {
-        self.with(|s| {
+        let mut t = self.with(|s| {
             s.topics
                 .iter()
                 .find(|t| t.id == topic_id && t.group_id == group_id)
                 .cloned()
-        })
+        })?;
+        self.fill_participants(&mut t);
+        Some(t)
     }
 
     fn todo(&self) -> Vec<TodoItem> {
@@ -1269,6 +1324,8 @@ impl ChatProvider for FakeProvider {
                     last_seq: 0,
                     last_activity_at: at,
                     message_count: 0,
+                    participants: Vec::new(),
+                    relay: None,
                     unread: 0,
                     mentions: 0,
                 });
@@ -1337,6 +1394,8 @@ impl ChatProvider for FakeProvider {
                 created_at: at,
                 root_message_id: String::new(),
                 last_seq: 0,
+                participants: Vec::new(),
+                relay: None,
                 last_activity_at: at,
                 message_count: 0,
                 unread: 0,
