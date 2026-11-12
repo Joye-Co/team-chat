@@ -223,7 +223,7 @@ describe("health and the failing alert", () => {
     expect(cfg.failing).toBeUndefined();
     expect(cfg.uses?.map((u) => u.use)).toEqual(["title"]);
     const activity = ActivityResponse.parse((await api("/v1/activity?kind=key", { token: owner.token })).body);
-    const recovered = activity.entries.filter((x) => x.action === "ai.recovered" && x.at >= t0 && x.details.switchedOff);
+    const recovered = activity.entries.filter((x) => x.action === "ai.recovered" && x.at >= t0 && x.details?.switchedOff);
     expect(recovered).toHaveLength(1);
     expect(recovered[0]).toMatchObject({ actorId: owner.id, details: { switchedOff: ["memory"] } });
   });
