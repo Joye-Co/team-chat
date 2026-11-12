@@ -604,6 +604,8 @@ mod tests {
         assert_eq!(strip_userinfo("https://h/a@b"), "https://h/a@b");
     }
 
+    // Caches are for hosts that run tasks in a microVM: Linux paths and flock.
+    #[cfg(unix)]
     #[test]
     fn the_variables_point_into_the_cache_and_the_users_env_wins() {
         let c = Path::new("/w/caches/k");
@@ -629,6 +631,8 @@ mod tests {
         assert_eq!(get("GOPATH"), Some("/w/caches/k/go"));
     }
 
+    // Caches are for hosts that run tasks in a microVM: Linux paths and flock.
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_run_gets_its_cache_without_old_credentials() {
         let tmp = tempfile::tempdir().unwrap();
@@ -731,6 +735,8 @@ mod tests {
         assert_eq!(done, vec![SCRATCH.to_string()]);
     }
 
+    // Caches are for hosts that run tasks in a microVM: Linux paths and flock.
+    #[cfg(unix)]
     #[test]
     fn low_disk_removes_the_oldest_cache_first_and_skips_ones_in_use() {
         let tmp = tempfile::tempdir().unwrap();
