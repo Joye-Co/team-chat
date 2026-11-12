@@ -92,6 +92,18 @@ export function stepOf(f: LoggedFrame): string | null {
   return t ? cut(t, 160) : null;
 }
 
+/**
+ * The command a tool call put in the background (Claude Code's `run_in_background`), or null.
+ * A restart stops it, and a turn that ended while it ran had not finished the work.
+ */
+export function backgroundStep(f: LoggedFrame): string | null {
+  if (f.t !== "run.event" || f.event?.type !== "tool.call") return null;
+  const input = f.event.input as { run_in_background?: unknown } | undefined;
+  if (!input || typeof input !== "object" || input.run_in_background !== true) return null;
+  const cmd = commandOf(f.event).replace(/\s+/g, " ").trim();
+  return cmd ? cut(cmd, 160) : null;
+}
+
 /** What the earlier tries of a piece of work did, oldest first. */
 export interface RecoveryFacts {
   /** Why the work starts again (developer words: the CLI reads them). */
@@ -107,6 +119,8 @@ export interface RecoveryFacts {
   prs: string[];
   /** 产出 versions the bot made in the topic since the work began. */
   artifacts: string[];
+  /** Commands the earlier tries put in the background, oldest first. */
+  background?: string[];
 }
 
 /** True when the earlier tries reached outside: pushes, pull requests, cards, 产出 (机 2.6). */
@@ -145,6 +159,14 @@ export function recoveryNote(f: RecoveryFacts): string {
   if (f.prs.length > 0) {
     lines.push("", "Pull requests linked to this topic:");
     for (const p of dedupe(f.prs)) lines.push(`- ${p}`);
+  }
+  const background = dedupe(f.background ?? []).slice(-NOTE_ACTIONS);
+  if (background.length > 0) {
+    lines.push("", "Commands the earlier tries ran in the background; any still running when that work stopped was stopped with it and may not have finished:");
+    for (const b of background) lines.push(`- ${b}`);
+    lines.push(
+      "Check whether each finished (its output, the files it makes); run again only what you still need and did not get, and wait for each in the foreground before you end your turn: a turn that ends while a command still runs in the background has not finished the work.",
+    );
   }
   lines.push(
     "",

@@ -323,6 +323,16 @@ R1、R3 可并行（R1 只碰成员，R3 只碰电脑，都不改对方文件，
 | R4 派工按归属 | `requesterKind`、`requesterOf`、`requested_for`（DO 迁移 `roles-1`）；`candidates` 三条规则和优先顺序；`reachable` 和 `personalOnly`、`waitPersonal`；`dispatchQueued` 不互相挡、`queuePosition`；转交带 `requested_for` 和 `fromMachine`、`takeDelegation` 先查；勾选变化重新派；个人电脑上的插话、批准、接管；代码仓库路径 | `server/src/bots/dispatch.ts`、`server/src/bots/desk/{core,runs,delegate,input,takeover}.ts`、`server/src/bots/routes.ts`（只在 `machine_bots` 路由里加一行重新派工）、`server/src/bots/store.ts`（只加 `requesterKind`） | R3；线 1–3、线 6 改 desk 的 PR | `dispatch.ts` 单元测试：一个人、一台个人电脑、没指定电脑的 AI 成员，他的请求落到这台电脑；别人请求不落；钩子只在 `updated_by` 是主人时落；勾选优先；desk 测试：A 的运行等 A 离线的电脑，B 后来的运行拿到团队主机；X 在 A 电脑上转交给 Y，Y 也在 A 电脑上；分出去给只在别人电脑上的成员得到 `delegation.not_for_requester`；B 追问 A 电脑上的话题落到团队电脑；B 的插话不进 A 电脑上的运行；管理员批不了 A 电脑上的审批、不能接管；tools/e2e 加两人两电脑场景 |
 | R5 电脑归属：桌面端 | `personal:true`；`solo()`；电脑页分组和副标题、普通成员「添加电脑」；「谁用这台电脑」；交给团队、改成我的电脑；勾选和代码仓库；AI 成员表单的放置和「我交代的事」；默认选这台电脑；邀请表单提示；`seed.ts` 加一位普通成员和他的个人电脑 | `apps/desktop/src/provider/{settings,mod}.rs`、`crates/chat-core/src/runs.rs`（新路由的客户端）、`views/settings/machines.rs`、`views/settings/members.rs`（BotForm 和邀请表单部分）、`views/admin/fleet.rs`、`copy/settings.rs`（电脑段）、`scripts/sandbox/seed.ts` | R2、R3；线 10 改电脑的弹窗；普通成员自己加电脑和「只做你交代的事」要等 R4（见上） | `cargo test`；截图自测（一个人、普通成员、管理员看电脑页，个人电脑详情），浅色和深色；`bun run dev:desktop` 实测；用 `docs/design/skills/emilkowalski/` 四个技能过一遍 |
 
+**R4 实现时定和留给后面的**（2026-11-13）：
+
+- 没加 `requesterKind` 和 `requesterOf`：`requested_for` 已经由 desk 的 `requestedFor()` 按作者是不是人算好（钩子的 AI 成员不是人 → NULL），DO 迁移是已有的 `desk-requested-for`。规则都在 `dispatch.ts` 的 `mayTake`、`placesFor`、`reachable`、`personalBlock`；desk 的 `pick`、`whyNone` 多带一个 `ctx`。
+- `fromMachine` 存在 desk 的 meta `fromMachine:{runId}`，重来时带过去。接力的一步还不带 `fromMachine`（`RelayOrder.prev` 没有上一步的电脑），所以规则 2 只对转交和分出去成立；`relay.member_unavailable` 仍不查个人电脑。
+- 排队位置只数「更早排队、可去的电脑有交集」的运行（meta `places:{runId}`）；等自己勾过的电脑时 `phase: waiting_computer`、`waitingFor: offline`（meta `waitPersonal:{runId}`）。
+- 「改成我的电脑 / 交给团队」后，所有有运行配置的 AI 成员的 desk 都立刻重新派一次；勾选、取消勾选只重新派那一位。
+- 接管：服务端还没有 `POST /v1/runs/:id/takeover`，这里只做到「别人的个人电脑不给接管地址」；暂停、交还、重试按 3.6。
+- 团队电脑上「受控操作只由管理员批准、不由交代人」（另一个会话的新决定）：批准人取自审批规则（`settings/rules.ts`），R4 没改团队电脑上的规则：要改的话，`desk/input.ts` 的 `mayApprove`、`desk/core.ts` 的 `approversOrRequester`（通知谁）和「谁可以批准」设置要一起改，留给做这个决定的单元。
+- tools/e2e 的两人两电脑场景没加；vitest 覆盖 `server/test/dispatch-ownership.test.ts`。
+
 ## 7. 真电脑上的验收步骤
 
 在 Ubuntu 上自己部署服务器，按线 10 的部署文档：部署脚本跑 bootstrap，用 bootstrap 得到的令牌登录第一位成员。

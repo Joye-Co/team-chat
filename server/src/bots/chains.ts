@@ -144,6 +144,8 @@ export interface PartRow {
   givenBy?: string;
   /** Only the giver's split-off card is updated: the work went on with another member. */
   cardOnly?: boolean;
+  /** A person stopped the whole piece of work (`stoppedBy`): the card says only who. */
+  chainStopped?: boolean;
 }
 
 /** A `cancel` outbox row: stops a run for a person. */
@@ -432,9 +434,40 @@ export function onChainStop(h: ChainStopHook): void {
  * collects the topics whose relay stopped with it; `reason` is why (a relay's `requester_left`).
  */
 export function stopChain(sql: SqlStorage, chainId: string, by: string, now = Date.now(), touched?: Set<string>, reason?: string): number {
+  const before = chainRow(sql, chainId);
   sql.exec("UPDATE work_chains SET stopped_at = coalesce(stopped_at, ?), stopped_by = coalesce(stopped_by, ?) WHERE id = ?", now, by, chainId);
   const open = sql.exec<StepRow>("SELECT * FROM chain_steps WHERE chain_id = ? AND state = 'working' AND run_id IS NOT NULL", chainId).toArray() as StepRow[];
   for (const s of open) enqueue(sql, "cancel", s.topic_id, { botId: s.to_bot, runId: s.run_id as string, actorId: by, chainId });
+  // design-relay「结束」「话题里看得见」: the hand-over and split-off cards of the parts still
+  // going say in place who stopped them and lose their button (nothing goes back on a stopped
+  // chain, so no part row would change them later). Only on the first stop.
+  if (before && before.stopped_at === null) {
+    const cards = sql
+      .exec<StepRow>(`SELECT * FROM chain_steps WHERE chain_id = ? AND kind IN ('handoff', 'assign') AND state IN ${OPEN_STATES} AND from_bot IS NOT NULL`, chainId)
+      .toArray() as StepRow[];
+    for (const s of cards) {
+      const giver = s.parent_seq !== null ? stepRow(sql, chainId, s.parent_seq) : undefined;
+      const topicId = giver?.topic_id ?? s.topic_id;
+      enqueue(sql, "part", topicId, {
+        botId: s.from_bot as string,
+        chainId,
+        seq: s.seq,
+        parentSeq: s.parent_seq ?? 0,
+        parentRun: s.parent_run ?? s.from_run,
+        topicId,
+        partTopicId: s.topic_id,
+        fromBot: s.to_bot,
+        requesterId: before.requester_id,
+        state: "cancelled",
+        result: "",
+        stoppedBy: by,
+        last: false,
+        ...(s.run_id ? { runId: s.run_id } : {}),
+        cardOnly: true,
+        chainStopped: true,
+      });
+    }
+  }
   for (const h of chainStopHooks) for (const t of h(sql, chainId, by, reason)) touched?.add(t);
   return open.length;
 }
@@ -526,7 +559,7 @@ export async function sendChainRow(env: Env, groupId: string, kind: string, payl
   if (kind === "cancel") {
     const c = JSON.parse(payload) as CancelRow;
     // An ended or unknown run is stopped already: nothing to retry.
-    await deskStub(env, c.botId).cancel(c.botId, c.runId, c.actorId);
+    await deskStub(env, c.botId).cancel(c.botId, c.runId, c.actorId, c.chainId);
     return;
   }
   const p = JSON.parse(payload) as PartRow;

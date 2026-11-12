@@ -685,6 +685,8 @@ export abstract class DeskEvents extends DeskRuns {
     this.sql.exec("UPDATE runs SET approval_id = NULL WHERE id = ?", r.id);
     r.approval_id = null;
     await this.clearHold(r);
+    // design-roles 3.3: an ended run waits for no machine (`fromMachine:` stays for a retry).
+    this.sql.exec("DELETE FROM meta WHERE key IN (?, ?)", `places:${r.id}`, `waitPersonal:${r.id}`);
     // 转交 (design-relay R2): a run that handed its work over posts no result card; the card in
     // the topic says who took it, and its run ends as done.
     const handed = this.handedOverOf(r.id);
