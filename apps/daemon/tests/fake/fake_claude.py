@@ -175,6 +175,9 @@ while True:
     # A relay step's order carries the step before's result (another member's words, here the
     # fake's echo of its prompt): no mode comes from it.
     cue = cue.split("\nResult of step ", 1)[0]
+    # The daemon's hand-back note after a take-over is no request ("changes" has "hang").
+    if text.startswith("[team-chat] A person held"):
+        cue = ""
     session.write(json.dumps({"type": "user", "text": text}) + "\n"); session.flush()
     with open(os.path.join(rec, "prompts.jsonl"), "a") as pf:
         pf.write(json.dumps({"pid": os.getpid(), "sid": sid, "n": n + 1, "text": text}) + "\n")
