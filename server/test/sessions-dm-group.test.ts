@@ -89,6 +89,9 @@ describe("rules", () => {
     expect(isAddOn("补充：还要支持邮箱")).toBe(true);
     expect(isAddOn("@Forge 另一件事：只回答 7+8 等于几")).toBe(false);
     expect(isAddOn("@dev 写一下周报")).toBe(false);
+    expect(isAddOn("@dev 还有 lint")).toBe(true);
+    expect(isAddOn("@dev 还有一件事：写周报")).toBe(false);
+    expect(isAddOn("另外一件事：写周报")).toBe(false);
   });
 
   it("write the front desk's question as a valid card ask", () => {

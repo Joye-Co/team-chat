@@ -893,7 +893,7 @@ Rules:
   running ones, with its own result and its own session. A message that quotes a run's request,
   progress or approval card, or an input it took, goes to that run; an approval answer to the run
   that waits for it; the requester's own words to their newest run when they have no @, come in
-  a DM, or start with words that add to it (顺便, 补充, 加上, 还要, 改成, also, …); any other mention
+  a DM, or start with words that add to it (顺便, 补充, 加上, 还有, 还要, 改成, also, …); any other mention
   of theirs in the 群聊, and a message that starts with 新任务 or 另一件事 (or answers the front
   desk's question), starts a new run. An answer or a live event on a
   card goes to the run that posted the card, and a part handed back to the run that gave it out.

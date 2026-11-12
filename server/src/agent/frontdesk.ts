@@ -163,7 +163,7 @@ export function isNewTask(body: string): boolean {
  * already asked for ("顺便看下 lint", "补充：…", "加上数据"). In the 群聊 only such a message with
  * an @ goes to that person's running run; any other @ request is a new piece of work next to it.
  */
-const ADD_ON = /^(?:顺便|顺带|补充|加上|再加|还要|还得|也要|也把|改成|改为|换成|对了|另外再|然后再|刚才那|上面那|also\b|btw\b|and also\b|plus\b)/iu;
+const ADD_ON = /^(?:顺便|顺带|补充|加上|再加|还要|还得|还有(?!一件事|件事|个事|一个事)|也要|也把|改成|改为|换成|对了|另外|然后再|刚才那|上面那|also\b|btw\b|and also\b|plus\b)/iu;
 
 export function isAddOn(body: string): boolean {
   return !isNewTask(body) && ADD_ON.test(body.replace(/@\S+/g, "").trim());
