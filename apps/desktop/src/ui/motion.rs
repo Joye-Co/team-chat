@@ -735,13 +735,27 @@ impl gpui_component::Sizable for BusySpinner {
 
 impl gpui::RenderOnce for BusySpinner {
     fn render(self, window: &mut gpui::Window, cx: &mut App) -> impl IntoElement {
-        use gpui::{ParentElement as _, prelude::FluentBuilder as _};
+        use gpui::{AnimationExt as _, ParentElement as _, prelude::FluentBuilder as _};
         use gpui_component::Sizable as _;
         if !cx.reduce_motion() {
-            return gpui_component::spinner::Spinner::new()
-                .ease(gpui::linear)
-                .with_size(self.size)
-                .when_some(self.color, |s, c| s.color(c))
+            // gpui-component's `Spinner` turns its icon at the display's full
+            // rate and has no frame cap; the same icon turns here at
+            // `SPINNER_FPS`, linear, one turn per `SPINNER_TURN`.
+            return gpui::div()
+                .child(
+                    gpui_component::Icon::from(crate::ui::Sym::Spinner)
+                        .with_size(self.size)
+                        .when_some(self.color, |i, c| i.text_color(c))
+                        .with_animation(
+                            "busy-spinner",
+                            gpui::Animation::new(motion::SPINNER_TURN)
+                                .repeat()
+                                .with_max_fps(motion::SPINNER_FPS),
+                            |icon, t| {
+                                icon.transform(gpui::Transformation::rotate(gpui::percentage(t)))
+                            },
+                        ),
+                )
                 .into_any_element();
         }
         window.request_animation_frame();

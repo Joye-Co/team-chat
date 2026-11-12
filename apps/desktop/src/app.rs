@@ -862,6 +862,9 @@ pub struct RootView {
         Entity<crate::views::files::lightbox::Lightbox>,
         Subscription,
     )>,
+    /// Signed in, and has a 群: read from the provider once per change, so
+    /// a frame (an animation redraws the whole window) reads no store.
+    shell_facts: Option<(bool, bool)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -891,6 +894,7 @@ impl RootView {
                 &services.hub,
                 window,
                 |this, _, changes: &Changes, window, cx| {
+                    this.shell_facts = None;
                     if changes.any(|c| matches!(c, Change::Session))
                         && this.account_changed(window, cx)
                     {
@@ -977,6 +981,7 @@ impl RootView {
             focus,
             account: shown_account(&services_for_account),
             lightbox: None,
+            shell_facts: None,
             _subscriptions: subscriptions,
         }
     }
@@ -1301,10 +1306,14 @@ impl RootView {
                     this.composer
                         .update(cx, |composer, cx| composer.focus_end(window, cx));
                 }));
-        if !matches!(
-            self.services.provider.session(),
-            SessionState::SignedIn { .. }
-        ) {
+        let (signed_in, has_groups) = *self.shell_facts.get_or_insert_with(|| {
+            let p = &self.services.provider;
+            (
+                matches!(p.session(), SessionState::SignedIn { .. }),
+                !p.groups().is_empty(),
+            )
+        });
+        if !signed_in {
             return root.child(self.login.clone());
         }
         // Signed in, nothing drawn has the focus: none at all, or the login
@@ -1367,7 +1376,7 @@ impl RootView {
         // No 群 yet: the sidebar and the 首页 empty state (v12/fx-shell:
         // centered text and two push buttons, no illustration).
         let toggle = self.sidebar_toggle(active, cx);
-        if self.services.provider.groups().is_empty() {
+        if !has_groups {
             let leading = if rail_shown {
                 crate::ui::native::metrics::CONTENT_LEADING
             } else {

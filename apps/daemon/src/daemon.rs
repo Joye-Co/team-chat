@@ -426,6 +426,7 @@ impl Daemon {
                         usage: None,
                         duration_ms: now.saturating_sub(meta.started_at),
                         code: None,
+                        resume_missed: None,
                         failure: Some(crate::proto::RunFailure::new(
                             crate::proto::failure_kind::OTHER,
                         )),
@@ -1430,6 +1431,7 @@ mod tests {
             usage: None,
             duration_ms: 0,
             code: None,
+            resume_missed: None,
             failure: None,
             resume_missed: None,
         };
@@ -1463,6 +1465,7 @@ mod tests {
             usage: None,
             duration_ms: 0,
             code: None,
+            resume_missed: None,
             failure: kind.map(crate::proto::RunFailure::new),
             resume_missed: None,
         };

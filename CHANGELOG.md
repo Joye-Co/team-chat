@@ -3,6 +3,12 @@
 Each release is tagged `v<version>` and has a GitHub Release with the DMG, the machine daemon
 and the Windows installer; GitHub shows each file's SHA-256. Release notes for the team are in Chinese in `docs/releases/`.
 
+## Unreleased
+
+- The CLIs' own memory is off in every AI member run on every machine
+  (`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, Codex `-c features.memories=false`); memory lives only in
+  the product. Repository AGENTS.md / CLAUDE.md are still read.
+
 ## 1.2.7 (2026-11-11)
 
 Notes: [docs/releases/1.2.7.md](docs/releases/1.2.7.md). D1 migrations `0013_activity`,

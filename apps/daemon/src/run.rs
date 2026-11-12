@@ -374,6 +374,38 @@ pub fn build_env(cfg: &Config, rt: &RuntimeConfig, a: &RunAssign) -> Vec<(String
     env
 }
 
+/// The CLI's own memory stays off in every run: memory lives only in the product.
+pub const NO_CLI_MEMORY: (&str, &str) = ("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1");
+
+/// The last env step of a run, so neither the runtime's `env` nor an app key turns the CLI's
+/// own memory back on.
+pub fn seal_env(env: &mut Vec<(String, String)>) {
+    let (k, v) = NO_CLI_MEMORY;
+    env.retain(|(n, _)| n != k);
+    env.push((k.into(), v.into()));
+}
+
+/// [`build_env`], then the app's API keys (under the runtime's fixed env, never in a side
+/// chat), then [`seal_env`].
+fn run_env(
+    cfg: &Config,
+    rt: &RuntimeConfig,
+    a: &RunAssign,
+    keys: &[(String, String)],
+) -> Vec<(String, String)> {
+    let mut env = build_env(cfg, rt, a);
+    if a.kind.as_deref() != Some(KIND_ASIDE) {
+        for (k, v) in keys {
+            if !rt.env.contains_key(k) {
+                env.retain(|(n, _)| n != k);
+                env.push((k.clone(), v.clone()));
+            }
+        }
+    }
+    seal_env(&mut env);
+    env
+}
+
 fn summary(text: &str) -> String {
     let first = text
         .lines()
@@ -566,16 +598,7 @@ pub async fn supervise(ctx: RunCtx) {
             if aside {
                 workspace::set_read_only(&cwd, true);
             }
-            let mut env = build_env(&cfg, &rt, &assign);
-            // API keys from the app: under the runtime's fixed env, and never in a side chat.
-            if !aside {
-                for (k, v) in &keys {
-                    if !rt.env.contains_key(k) {
-                        env.retain(|(n, _)| n != k);
-                        env.push((k.clone(), v.clone()));
-                    }
-                }
-            }
+            let mut env = run_env(&cfg, &rt, &assign, &keys);
             // In a VM the CLI uses its member's own folders and a copy of the sign-in that cannot
             // change this host's (机 3.2).
             let vm_ready = match &vm_member {
@@ -849,6 +872,7 @@ this machine cannot be made to stop at them (update it)",
         usage: outcome.usage.clone(),
         duration_ms: started.elapsed().as_millis() as u64,
         code,
+        resume_missed: None,
         failure: (status == "failed")
             .then(|| crate::failure::of_run(outcome.failure.as_ref(), outcome.error.as_deref())),
         resume_missed: outcome.resume_missed.then_some(true),
@@ -1305,6 +1329,62 @@ mod tests {
         assert_eq!(vm_run_need(&a), Duration::from_secs(9000));
         a.max_duration_ms = Some(600_000);
         assert_eq!(vm_run_need(&a), Duration::from_secs(2400));
+    }
+
+    /// 存 3.6: the CLI's own memory is off in every run of every kind, side chats too; neither
+    /// the runtime's `env` nor an app key turns it back on.
+    #[test]
+    fn every_run_has_the_cli_memory_off() {
+        let mut env = vec![
+            ("A".to_string(), "1".to_string()),
+            (
+                "CLAUDE_CODE_DISABLE_AUTO_MEMORY".to_string(),
+                "0".to_string(),
+            ),
+        ];
+        seal_env(&mut env);
+        assert_eq!(
+            env,
+            [("A", "1"), ("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1")]
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+        );
+        let mut text =
+            "server_url = \"http://127.0.0.1:1\"\ntoken_file = \"/nonexistent\"\n".to_string();
+        for kind in ["claude", "codex", "acp", "pty"] {
+            text.push_str(&format!(
+                "[runtimes.{kind}]\nkind = \"{kind}\"\ncommand = \"x\"\nenv = {{ CLAUDE_CODE_DISABLE_AUTO_MEMORY = '0' }}\n"
+            ));
+        }
+        let cfg = Config::parse(&text).unwrap();
+        let memory = |env: &[(String, String)]| -> Vec<String> {
+            env.iter()
+                .filter(|(k, _)| k == NO_CLI_MEMORY.0)
+                .map(|(_, v)| v.clone())
+                .collect()
+        };
+        for kind in ["claude", "codex", "acp", "pty"] {
+            for aside in [false, true] {
+                let mut rt = cfg.runtimes[kind].clone();
+                let mut a: RunAssign = serde_json::from_value(serde_json::json!({
+                    "runId": "r1", "botMemberId": "B1", "groupId": "g", "topicId": "t",
+                    "runtime": kind, "prompt": "p", "leaseMs": 600000
+                }))
+                .unwrap();
+                a.kind = aside.then(|| KIND_ASIDE.to_string());
+                let key = [(NO_CLI_MEMORY.0.to_string(), "0".to_string())];
+                assert_eq!(
+                    memory(&run_env(&cfg, &rt, &a, &key)),
+                    ["1"],
+                    "{kind} {aside}"
+                );
+                rt.env.clear();
+                assert_eq!(
+                    memory(&run_env(&cfg, &rt, &a, &key)),
+                    ["1"],
+                    "{kind} {aside}"
+                );
+            }
+        }
     }
 
     /// 盯 1.4: tools are busy when they used 100 ms of CPU since the last sample: what a known
