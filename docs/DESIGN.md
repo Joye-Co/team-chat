@@ -456,13 +456,24 @@ Topic rail cards, in this order:
 
 | Card | Content |
 | --- | --- |
-| 负责 | 24 tile + name `ui` 500 + 岗位 tag + right state (`✓ 做完了 · 09:55` or `在做 · 3/5`); line 2 the asker `小王 提出 · 09:12` (16 avatar, `meta`) |
+| 成员 | Everyone in the 群: the AI members at work here first, marked `在做` at the right, then those that took part (`参与过`), then the asker (`提出`), then the rest; 16 avatar + name + 岗位. No member is marked 负责: several can work in one 话题 (design-relay §3.6, `Topic.participants`) |
 | 计划 | The plan: ✓ done (`ink-3`, mono duration), ● current (`live`, breathing), ○ todo; segments bar (4 pt, radius 2, gap 4: done `ink-3`, current `live`, todo `line-2`). When done it collapses to `✓ 5 步都做完了 · 41 分钟` with `展开` |
 | 改动 | Title `ui` 500; `#61 +214 −63` mono (`ok-ink` / `bad-ink`) with a 5-cell diffstat; `12 个文件`; checks `✓ 3/3 项检查通过`; status tag (`未合并`, `合并中`, `已合并`). No merge button here: the decision is the pinned card |
 | 产出 | A real-content thumbnail (title + tiny table) 96 tall, radius 8, `line`; name `ui` 500 + `v2 · 09:55` mono; extra rows for recordings (`▶` tile 32 × 22 + name + `0:42`) |
 | 用到的决定 | `check` + decision text `ui` + `Joye 09:31` (16 avatar, mono) |
 | 电脑 | `monitor` 28 tile + `Mac mini` + `Forge 用完了 · 09:52`; right `○ 空闲` or `● 在用` (`live`) + text action `看 Forge 的电脑` |
 | 用时和成本 | `用时 41 分钟 · ¥6.20` mono + right `今天 09:14–09:55` |
+
+The 按顺序做 bar (design-relay §3.6) sits at the top of a 话题 whose work goes in an order a person
+wrote (`@A → @B → @C`), above the plan cards, on the composer insets: radius 10, a 1 pt `line`
+border, `content` fill, px 16 py 12. One row: 按顺序做 (`headline`), then each step as its member
+name and a dense StatusBadge (在做, 排队, 做完了, 卡住了, 停止了; a step not reached yet is the name
+alone in `ink-3`) joined by `→`; at the right `第 2/3 步` or `都做完了` (`footnote`, `ink-2`) and
+outline sm 重试 (only while stopped at a step) and 停止 (while it runs or is stopped at a step). A
+second line in `ink-2` says why it stopped (`停在 Scout：卡住了`, `Joye 停止了`) or what the step
+waits for (`等 Scout 手上的做完`). It stays a day after it ended. The composer shows, above the text,
+`按顺序做：Forge → Scout → Forge` for an order on the first line, `想让他们按顺序做？用 → 连起来` when a
+message names two or more AI members, and, in red, why the server refused an order.
 
 ### 7.9 Member identity: avatars, status dots and tags
 

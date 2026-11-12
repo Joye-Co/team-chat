@@ -56,6 +56,8 @@ pub struct State {
     pub search_error: Option<ErrorCode>,
     /// Ack every `send` with this body with this error, without storing it.
     pub fail_send_body: Option<(String, ErrorCode)>,
+    /// Ack every `send` with this body with this error body (reason, member ids), unstored.
+    pub refuse_send_body: Option<(String, Value)>,
     /// Answer every `typing` with a connection-level error frame (a frame without rid).
     pub typing_error: Option<ErrorCode>,
     /// Broadcast the `card.answered` of a stored card event before its ack (the room fans the
@@ -367,6 +369,17 @@ fn handle(s: &mut State, conn: usize, tx: &UnboundedSender<Ctrl>, v: Value) -> b
             send(
                 tx,
                 json!({"t": "ack", "rid": rid, "ok": false, "error": {"code": code, "message": "boom"}}),
+            );
+        }
+        "send"
+            if s.refuse_send_body
+                .as_ref()
+                .is_some_and(|(b, _)| v["body"].as_str() == Some(b.as_str())) =>
+        {
+            let error = s.refuse_send_body.as_ref().unwrap().1.clone();
+            send(
+                tx,
+                json!({"t": "ack", "rid": rid, "ok": false, "error": error}),
             );
         }
         "send" => {

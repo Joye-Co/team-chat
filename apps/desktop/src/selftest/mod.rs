@@ -251,6 +251,7 @@ fn provider(start: Start, worst_case: bool) -> Arc<dyn ChatProvider> {
         Start::V2Quiet => fake::v2::V2Samples::quiet(),
         Start::V2Newcomer => fake::v2::V2Samples::newcomer(),
         Start::V2TwoRuns => fake::v2::V2Samples::with_second_run(),
+        Start::V2Relay(shape) => fake::v2::V2Samples::with_relay(shape),
         Start::V2Gallery => fake::v2::V2Samples::with_release_run(),
         // --- v13/ux-pages ---
         Start::V2Unsynced => page_states::Unsynced::new(

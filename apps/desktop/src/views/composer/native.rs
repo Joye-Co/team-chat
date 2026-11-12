@@ -341,6 +341,17 @@ impl ComposerView {
                     .into_any_element(),
             );
         }
+        // Usable: 按顺序做 (design-relay §3.6), a hint muted, a refusal in red.
+        if let Some(line) = self.relay_line_now() {
+            above.push(
+                div()
+                    .id("composer-relay-line")
+                    .n_callout()
+                    .text_color(if line.error { k.red } else { k.secondary })
+                    .child(line.text)
+                    .into_any_element(),
+            );
+        }
 
         let has_text = !self.last_text.trim().is_empty() || has_chips;
         let send = self.native_send(editing, has_text && enabled, window, cx);

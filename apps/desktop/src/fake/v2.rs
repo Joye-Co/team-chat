@@ -185,6 +185,27 @@ struct Data {
     levels: HashMap<GroupId, NotifyLevel>,
     unfollowed: std::collections::HashSet<TopicId>,
     muted_topics: std::collections::HashSet<TopicId>,
+    /// Usable: why the server refused my last order in a 话题 (`relay_refusal`).
+    relay_refusal: Option<(TopicId, RelayRefusal)>,
+}
+
+/// Usable: the state a sample 按顺序做 is in (`V2Samples::with_relay`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RelayShape {
+    /// Two members at work in one 话题, no order (Forge and Scout).
+    TwoWorking,
+    /// Step 2 of 3 at work.
+    Working,
+    /// Step 2 waits for its member's other work here.
+    Queued,
+    /// Stopped at step 2: Scout got stuck; 重试 and 停止.
+    Paused,
+    /// I stopped it at step 2.
+    Stopped,
+    /// Every step done.
+    Done,
+    /// The server refused my order: Scout cannot take it.
+    Refused,
 }
 
 /// The v2 sample provider.
@@ -248,6 +269,8 @@ fn topic(s: TopicSpec) -> Topic {
         message_count: 0,
         unread: 0,
         mentions: 0,
+        participants: Vec::new(),
+        relay: None,
     }
 }
 
@@ -1083,6 +1106,7 @@ impl V2Samples {
             levels: HashMap::new(),
             unfollowed: Default::default(),
             muted_topics: Default::default(),
+            relay_refusal: None,
         }
     }
 
@@ -1137,6 +1161,139 @@ impl V2Samples {
         s
     }
 
+    /// Usable: 开发 / 话题列表虚拟滚动 as an order I wrote (`@Forge 写 → @Scout 审 → @Forge
+    /// 按意见改`), at one state of [`RelayShape`]; or, for [`RelayShape::Refused`], no relay
+    /// and the server's refusal of my order (Scout cannot take it).
+    pub fn with_relay(shape: RelayShape) -> Arc<Self> {
+        let s = Self::new();
+        s.with(|d| {
+            let step = |member: &str, note: &str, state: &str, run: Option<&str>| TopicRelayStep {
+                member_id: member.into(),
+                note: Some(note.into()),
+                state: state.into(),
+                run_id: run.map(Into::into),
+            };
+            // Forge wrote it; Scout's check is the second step.
+            let forge_done = matches!(
+                shape,
+                RelayShape::Working
+                    | RelayShape::Queued
+                    | RelayShape::Paused
+                    | RelayShape::Stopped
+                    | RelayShape::Done
+            );
+            if forge_done && let Some(r) = d.runs.iter_mut().find(|r| r.id == RUN_VIRTUAL) {
+                r.status = RunStatus::Done;
+                r.ended_at = Some(at(9, 38));
+                for p in &mut r.plan {
+                    p.state = PlanState::Done;
+                }
+            }
+            let scout = |status: RunStatus, ended: Option<Millis>| {
+                run(RunSpec {
+                    id: RUN_VIRTUAL_CHECK,
+                    bot: SCOUT,
+                    group: DEV,
+                    topic: T_VIRTUAL,
+                    status,
+                    by: ME,
+                    started: at(9, 40),
+                    ended,
+                    machine: "云端",
+                    plan: plan(&[
+                        ("读 Forge 的改动", PlanState::Done),
+                        ("在三台电脑上跑一遍", PlanState::Current),
+                        ("写审查意见", PlanState::Pending),
+                    ]),
+                })
+            };
+            let (state, current, steps, reason, stopped_by) = match shape {
+                RelayShape::Working | RelayShape::TwoWorking => {
+                    d.runs.push(scout(RunStatus::Running, None));
+                    let first = if shape == RelayShape::TwoWorking {
+                        "working"
+                    } else {
+                        "done"
+                    };
+                    ("running", 1, [first, "working", "pending"], None, None)
+                }
+                RelayShape::Queued => ("running", 1, ["done", "queued", "pending"], None, None),
+                RelayShape::Paused => {
+                    d.runs.push(scout(RunStatus::Failed, Some(at(9, 52))));
+                    (
+                        "paused",
+                        1,
+                        ["done", "failed", "pending"],
+                        Some("step_blocked"),
+                        None,
+                    )
+                }
+                RelayShape::Stopped => {
+                    d.runs.push(scout(RunStatus::Cancelled, Some(at(9, 47))));
+                    (
+                        "stopped",
+                        1,
+                        ["done", "stopped", "pending"],
+                        Some("step_cancelled"),
+                        Some(ME),
+                    )
+                }
+                RelayShape::Done => {
+                    d.runs.push(scout(RunStatus::Done, Some(at(9, 50))));
+                    ("done", 2, ["done", "done", "done"], None, None)
+                }
+                RelayShape::Refused => {
+                    d.relay_refusal = Some((
+                        T_VIRTUAL.into(),
+                        RelayRefusal {
+                            reason: "relay.member_unavailable".into(),
+                            member_ids: vec![SCOUT.into()],
+                        },
+                    ));
+                    return;
+                }
+            };
+            if shape == RelayShape::TwoWorking {
+                // Two members at work, no order: the second run beside Forge's.
+                return;
+            }
+            let runs = [Some(RUN_VIRTUAL), Some(RUN_VIRTUAL_CHECK), None];
+            let notes = ["写", "审", "按意见改"];
+            let members = [FORGE, SCOUT, FORGE];
+            let relay = TopicRelay {
+                id: "relay-v2-virtual".into(),
+                started_by: ME.into(),
+                goal: "话题列表改成虚拟滚动，一千条也不卡".into(),
+                current,
+                state: state.into(),
+                reason: reason.map(Into::into),
+                stopped_by: stopped_by.map(Into::into),
+                updated_at: at(9, 52) as u64,
+                steps: (0..3)
+                    .map(|i| {
+                        let run = (steps[i] != "pending" && steps[i] != "queued")
+                            .then_some(runs[i])
+                            .flatten();
+                        step(members[i], notes[i], steps[i], run)
+                    })
+                    .collect(),
+            };
+            if let Some(t) = d.topics.iter_mut().find(|t| t.id == T_VIRTUAL) {
+                t.relay = Some(relay);
+                t.status = match state {
+                    "paused" => TopicStatus::Blocked,
+                    "done" => TopicStatus::Done,
+                    "stopped" => TopicStatus::Open,
+                    _ => TopicStatus::InProgress,
+                };
+                if state == "paused" {
+                    t.waiting_on = vec![ME.into()];
+                }
+            }
+        });
+        s
+    }
+
     fn with<R>(&self, f: impl FnOnce(&mut Data) -> R) -> R {
         f(&mut self.data.lock().unwrap_or_else(|e| e.into_inner()))
     }
@@ -1144,6 +1301,42 @@ impl V2Samples {
     fn emit(&self, changes: Vec<Change>) {
         let mut subs = self.subscribers.lock().unwrap_or_else(|e| e.into_inner());
         subs.retain(|tx| tx.unbounded_send(changes.clone()).is_ok());
+    }
+
+    /// `--fake`: 停止 and 重试 of a sample 按顺序做 move it as the server would.
+    fn relay_to(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        relay_id: &str,
+        state: &str,
+    ) -> AdminReply<()> {
+        let done = self.with(|d| {
+            let r = d
+                .topics
+                .iter_mut()
+                .find(|t| t.id == topic_id)
+                .and_then(|t| t.relay.as_mut())
+                .filter(|r| r.id == relay_id)?;
+            let cur = r.current as usize;
+            if state == "stopped" {
+                r.stopped_by = Some(ME.into());
+                if let Some(s) = r.steps.get_mut(cur) {
+                    s.state = "stopped".into();
+                }
+            } else {
+                r.reason = None;
+                if let Some(s) = r.steps.get_mut(cur) {
+                    s.state = "working".into();
+                }
+            }
+            r.state = state.into();
+            Some(())
+        });
+        self.emit(vec![Change::Topics {
+            group_id: group_id.into(),
+        }]);
+        reply_now(done.ok_or(AdminError::Conflict))
     }
 
     /// Takes over the live run in a scene (`live-takeover`).
@@ -1203,6 +1396,17 @@ impl ChatProvider for V2Samples {
                     t.last_seq = msgs as u64;
                     if self.quiet {
                         t.waiting_on.retain(|m| m != ME);
+                    }
+                    if t.participants.is_empty() {
+                        let is_bot =
+                            |id: &str| self.members.iter().any(|m| m.id == id && m.is_bot());
+                        let runs: Vec<BotRunSummary> = d
+                            .runs
+                            .iter()
+                            .filter(|r| !(self.quiet && r.status.is_active()))
+                            .cloned()
+                            .collect();
+                        t.participants = crate::fake::sample_participants(&t, &runs, &is_bot);
                     }
                     t
                 })
@@ -1383,6 +1587,8 @@ impl ChatProvider for V2Samples {
                 last_seq: 1,
                 last_activity_at: now,
                 message_count: 1,
+                participants: Vec::new(),
+                relay: None,
                 unread: 0,
                 mentions: 0,
             });
@@ -1528,6 +1734,20 @@ impl ChatProvider for V2Samples {
         }]);
     }
     // --- end rail track
+    fn relay_refusal(&self, _group_id: &str, topic_id: &str) -> Option<RelayRefusal> {
+        self.with(|d| {
+            d.relay_refusal
+                .as_ref()
+                .filter(|(t, _)| t == topic_id)
+                .map(|(_, r)| r.clone())
+        })
+    }
+    fn stop_relay(&self, group_id: &str, topic_id: &str, relay_id: &str) -> AdminReply<()> {
+        self.relay_to(group_id, topic_id, relay_id, "stopped")
+    }
+    fn retry_relay(&self, group_id: &str, topic_id: &str, relay_id: &str) -> AdminReply<()> {
+        self.relay_to(group_id, topic_id, relay_id, "running")
+    }
     fn runs(&self, _group_id: &str, topic_id: &str) -> Vec<BotRunSummary> {
         let mut runs: Vec<BotRunSummary> = self.with(|d| {
             d.runs

@@ -14,6 +14,7 @@
 
 mod model;
 mod native;
+mod relay;
 #[cfg(test)]
 mod tests;
 
