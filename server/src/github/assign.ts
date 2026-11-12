@@ -1,11 +1,11 @@
-// Whose GitHub a run uses and how (design-github-identity 3.2, unit G3): the identity person, the
-// machine's mode ("app": git and gh ask for the person's token; "machine": the machine's own
-// sign-in) and the `run.assign.github` field. Only for a daemon with feature `github` that reports
-// `runsIn`; any other daemon gets no field and works as before.
+// The `run.assign.github` field (design-github-identity 3.2): who a run works for (the identity
+// person), who commits (the AI member) and who asked. Git and gh use the computer's own GitHub
+// sign-in. Only for a daemon with feature `github` that reports `runsIn`; any other daemon gets no
+// field and works as before.
 import { MACHINE_FEATURE_GITHUB, type RunGithub } from "@chat/protocol";
 import { type MachineView, hasFeature } from "../bots/dispatch";
 import type { Env } from "../core/env";
-import { type AccountRow, loadAccount, unavailableReason } from "./store";
+import { ANONYMOUS_ID } from "../cards2/privacy";
 
 /** Who a run works for, as the desk knows it. */
 export interface RunPerson {
@@ -56,75 +56,32 @@ export async function identityPerson(db: D1Database, x: RunPerson): Promise<stri
   return earliestAdmin(db);
 }
 
-/** A machine for one person: their own personal machine, another person's, or a team machine. */
-export type MachineKind = "own" | "other" | "team";
-
-export function machineKind(ownerId: string | null | undefined, memberId: string): MachineKind {
-  if (!ownerId) return "team";
-  return ownerId === memberId ? "own" : "other";
-}
-
-/**
- * The 3.2 table. Runs on the host of the person's own personal machine use that machine's sign-in
- * until they connect; another person's personal machine always uses its own sign-in; a team
- * machine and any VM use the person's connected GitHub. An unknown `runsIn` counts as a VM.
- */
-export function sourceFor(kind: MachineKind, runsIn: string, connected: boolean): "app" | "machine" {
-  if (runsIn !== "host") return "app";
-  if (kind === "team") return "app";
-  if (kind === "other") return "machine";
-  return connected ? "app" : "machine";
-}
-
-/** May this machine get the person's token at all (the cells of the table that are not "machine" when connected)? */
-export function mayUseToken(kind: MachineKind, runsIn: string | undefined): boolean {
-  return !(kind === "other" && runsIn === "host");
-}
-
 const cut = (s: string, n: number) => [...s].slice(0, n).join("");
 
-/** The git committer: the AI member, with an address that is never a real mailbox. */
+/** The git committer and author: the AI member, with an address that is never a real mailbox. */
 export function committerOf(botId: string, botName: string) {
   return { name: cut(botName.trim() || "AI", 200), email: `ai-${botId}@users.noreply.invalid` };
 }
 
-/** The git author: the person's GitHub identity when connected, else their name in the team. */
-export function authorOf(memberId: string, memberName: string, account: AccountRow | null) {
-  if (account && account.status === "ok") {
-    return { name: cut(account.name?.trim() || account.login, 200), email: `${account.github_user_id}+${account.login}@users.noreply.github.com` };
-  }
-  return { name: cut(memberName.trim() || memberId, 200), email: `${memberId}@users.noreply.invalid` };
-}
-
 /**
- * `run.assign.github` for a run going to `machine`, with the identity person; null when the
- * machine does not take the field (no feature `github`, no `runsIn`), nobody can answer for the
- * run, or the field would ask for a token the server cannot keep (GitHub sign-in not set up: team
- * machines and VMs then run as before).
+ * `run.assign.github` for a run going to `machine` (3.2): always the computer's own sign-in; the
+ * commits name the AI member; `askedBy` names who asked, for the pull request body (not for a
+ * private card's anonymous answer). Null when the machine does not take the field (no feature
+ * `github`, no `runsIn`) or nobody can answer for the run. No GitHub account is looked up.
  */
-export async function githubFor(env: Env, x: RunPerson, machine: MachineView): Promise<{ github: RunGithub; memberId: string } | null> {
+export async function githubFor(env: Env, x: RunPerson, machine: MachineView): Promise<RunGithub | null> {
   if (!hasFeature(machine, MACHINE_FEATURE_GITHUB)) return null;
-  const runsIn = machine.info?.runsIn;
-  if (!runsIn) return null;
+  if (!machine.info?.runsIn) return null;
   const memberId = await identityPerson(env.DB, x);
   if (!memberId) return null;
-  const available = unavailableReason(env) === null;
-  const account = available ? await loadAccount(env.DB, memberId) : null;
-  const connected = account?.status === "ok";
-  const kind = machineKind(machine.ownerId, memberId);
-  const source = sourceFor(kind, runsIn, connected);
-  if (source === "app" && !available) return null;
-  const names = await env.DB.prepare("SELECT id, name FROM members WHERE id IN (?, ?)").bind(memberId, x.botId).all<{ id: string; name: string }>();
+  const asker = x.requestedBy === ANONYMOUS_ID ? null : x.requestedBy;
+  const names = await env.DB.prepare("SELECT id, name FROM members WHERE id IN (?, ?)")
+    .bind(x.botId, asker ?? x.botId)
+    .all<{ id: string; name: string }>();
   const name = (id: string) => names.results.find((r) => r.id === id)?.name ?? "";
-  const github: RunGithub = { source, memberId, committer: committerOf(x.botId, name(x.botId)) };
-  if (source === "app") {
-    if (connected && account) github.login = account.login;
-    // On the person's own machine (host) git keeps that machine's config; elsewhere the author
-    // is given and SSH is rewritten to HTTPS, so the host's own key is never used.
-    if (!(kind === "own" && runsIn === "host")) {
-      github.author = authorOf(memberId, name(memberId), account);
-      github.rewriteSsh = true;
-    }
-  }
-  return { github, memberId };
+  const ai = committerOf(x.botId, name(x.botId));
+  const github: RunGithub = { source: "machine", memberId, committer: ai, author: ai };
+  const askedBy = asker ? cut(name(asker).trim(), 100) : "";
+  if (askedBy) github.askedBy = askedBy;
+  return github;
 }
