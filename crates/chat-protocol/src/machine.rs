@@ -451,6 +451,9 @@ pub struct RunAssign {
     /// 1.1 (feature "resume"): the CLI session of the topic's last run on this machine.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_session_id: Option<String>,
+    /// With `resume_session_id`: the full prompt, for when that session is not found.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub full_prompt: Option<String>,
     /// Feature "gates": the action kinds the run stops at for a person's approval.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gates: Option<Vec<RunGate>>,
@@ -875,6 +878,9 @@ pub struct RunDone {
     /// Usable: with status "failed", why it failed; `None` = not sorted (older daemons).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure: Option<RunFailure>,
+    /// `Some(true)`: `resume_session_id` was not found and the run used `full_prompt`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_missed: Option<bool>,
 }
 
 /// `RunFailure.kind` values (machine-protocol.md, "Failure kinds"). Open: an unknown kind reads

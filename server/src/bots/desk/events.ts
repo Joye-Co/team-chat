@@ -57,6 +57,10 @@ export abstract class DeskEvents extends DeskRuns {
           JSON.stringify(f),
         );
       }
+      // design-vm-state 3.2: the machine could not continue the session and sent the full prompt.
+      if (frames.some((f) => f.t === "run.done" && f.resumeMissed === true)) {
+        this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `sent:${runId}`, "full");
+      }
       const top = Math.max(r.last_seq, ...frames.map((f) => f.seq));
       this.sql.exec("UPDATE runs SET last_seq = ? WHERE id = ?", top, runId);
       // A late run.session still records its upload; a late run.done (the run was stopped

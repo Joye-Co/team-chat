@@ -37189,6 +37189,9 @@
               "required": [
                 "kind"
               ]
+            },
+            "resumeMissed": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -38638,6 +38641,9 @@
                     "required": [
                       "kind"
                     ]
+                  },
+                  "resumeMissed": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -44737,6 +44743,9 @@
               "required": [
                 "kind"
               ]
+            },
+            "resumeMissed": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -45067,6 +45076,9 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 128
+            },
+            "fullPrompt": {
+              "type": "string"
             },
             "gates": {
               "maxItems": 16,

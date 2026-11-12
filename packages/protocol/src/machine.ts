@@ -477,6 +477,8 @@ export const RunDoneFrame = z.object({
   code: RunCode.optional(),
   /** Usable: with `status: "failed"`, why it failed; absent = not sorted (older daemons). */
   failure: RunFailure.optional(),
+  /** true: `resumeSessionId` was not found and the run used `run.assign.fullPrompt`. */
+  resumeMissed: z.boolean().optional(),
 });
 export const RunSessionFrame = z.object({
   t: z.literal("run.session"),
@@ -558,6 +560,8 @@ export const RunAssignFrame = z.object({
   kind: z.string().min(1).max(32).optional(),
   /** 1.1 (feature "resume"): the CLI session of the topic's last run on this machine, to continue. */
   resumeSessionId: z.string().min(1).max(128).optional(),
+  /** With `resumeSessionId`: the full prompt, for when that session is not found. */
+  fullPrompt: z.string().optional(),
   /** Feature "gates": the action kinds the run stops at for a person's approval. */
   gates: z.array(RunGate).max(MAX_RUN_GATES).optional(),
   /** Usable, feature "github": whose GitHub the run uses and how. */

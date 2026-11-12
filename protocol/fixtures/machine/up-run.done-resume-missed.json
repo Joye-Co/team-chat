@@ -1,0 +1,15 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "the session was not found, so the run used the full prompt",
+  "value": {
+    "t": "run.done",
+    "runId": "01JBX0RUN000000000000000AU",
+    "seq": 20,
+    "at": 1762128000020,
+    "status": "succeeded",
+    "sessionId": "5c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+    "durationMs": 12000,
+    "resumeMissed": true
+  }
+}

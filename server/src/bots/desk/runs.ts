@@ -2,7 +2,7 @@
 // MachineLink answers to an assignment (accepted, rejected, lost).
 import { workerModel } from "../../settings/models";
 import type { WorkerModel } from "@chat/protocol";
-import { type BotRunner, isMainTopicId, RUN_KIND_ASIDE, type RunAssignFrame, type RunContextManifest, type TopicContext } from "@chat/protocol";
+import { type BotRunner, isMainTopicId, MAX_FRAME_BYTES, RUN_KIND_ASIDE, type RunAssignFrame, type RunContextManifest, type TopicContext } from "@chat/protocol";
 import { roomStub } from "../../core/env";
 import { unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
@@ -92,6 +92,19 @@ export interface RunRequest {
   brief?: Brief;
   /** Gated kinds a person approved for the whole piece of work (这件事里都同意). */
   approvedGates?: string[];
+}
+
+/** Room kept below the frame limit when the full prompt rides along (the link adds `sessionUpload`). */
+const FULL_PROMPT_SLACK = 4096;
+
+/**
+ * design-vm-state 3.2: puts the full prompt on a resumed run's frame, for when the machine cannot
+ * find the session; left out when the frame would then pass the link's 1 MiB limit.
+ */
+export function withFullPrompt(frame: RunAssignFrame, prompt: string): RunAssignFrame {
+  frame.fullPrompt = prompt;
+  if (new TextEncoder().encode(JSON.stringify(frame)).byteLength > MAX_FRAME_BYTES - FULL_PROMPT_SLACK) delete frame.fullPrompt;
+  return frame;
 }
 
 export abstract class DeskRuns extends DeskCore {
@@ -904,6 +917,8 @@ export abstract class DeskRuns extends DeskCore {
     // Whose GitHub the run uses on this machine (design-github-identity 3.2); never the token.
     const github = r.kind === RUN_KIND_ASIDE ? null : await githubFor(this.env, { requestedFor: r.requested_for, requestedBy: r.requested_by, botId: this.botId as string }, machine);
     if (github) frame.github = github.github;
+    // design-vm-state 3.2: the full prompt too, for when the machine cannot find the session.
+    if (resumePrompt !== null) withFullPrompt(frame, prompt);
     // 模 4.1: the sign-in the run starts on, from the machine's latest heartbeat; the budget counts by it.
     const methods = await linkStub(this.env, machine.id)
       .loginMethods()
