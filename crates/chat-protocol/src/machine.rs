@@ -30,6 +30,9 @@ pub mod feature {
     /// chat-run topic context ops: `topic.history`, `topic.message`, `context.search`, `file.get`,
     /// `topic.state`, `artifact.list`, `artifact.get`, `card.get`, `decisions.list`, `member.list`.
     pub const CONTEXT: &str = "context";
+    /// Usable (design-visibility): `group.list` and `groupId` on the context ops: a run reads the
+    /// other groups of the person it works for.
+    pub const GROUPS: &str = "groups";
     /// `CliInfo.models` / `efforts` and `run.assign.effort`.
     pub const EFFORT: &str = "effort";
     /// `run.assign.gates`, `CliInfo.gates`, `approval.request.kind`/`command` and

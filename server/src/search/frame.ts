@@ -10,7 +10,7 @@ export const ROOM_SEARCH_RPC = "search.query";
 
 type SearchFrame = ClientFrameOf<"search">;
 
-function newestFirst(a: SearchHit, b: SearchHit): number {
+export function newestFirst(a: SearchHit, b: SearchHit): number {
   return b.createdAt - a.createdAt || b.seq - a.seq || (a.messageId < b.messageId ? 1 : -1);
 }
 

@@ -21,7 +21,8 @@ import { loadMachines, loadRunner } from "../store";
 import { ANONYMOUS_ID } from "../../cards2/privacy";
 import { githubFor } from "../../github/assign";
 import { supersedeWaits } from "../../github/machine";
-import { DeskCore, QUEUED, type RunRow } from "./core";
+import { DeskCore, QUEUED, readGroupsOf, type RunRow } from "./core";
+import { readableGroups, readerOf } from "../../context/reach";
 import { takeoverOf } from "./hold";
 import { type FailureNote, failureNote } from "./failure";
 import { LIMIT_NOTE, LIMIT_REACHED, type LoggedFrame, type RecoveryFacts, backgroundStep, outwardAction, recoveryNote, stepOf } from "../../agent/recovery";
@@ -220,7 +221,11 @@ export abstract class DeskRuns extends DeskCore {
         if (claim.contextOf) {
           prompt = await this.asidePrompt(m, claim, claim.contextOf, followUps);
         } else {
-          const p = await this.topicPrompts(r, runner, m, claim, followUps, feature("acceptance"), feature("context"), brief, gated);
+          // design-visibility 3.6: a session that read groups this run's person may not read is not
+          // continued (before topicPrompts, so the prompt and the assign frame agree).
+          const forId = await readerOf(this.env.DB, r);
+          await this.freshIfUnreadable(r, runner, forId);
+          const p = await this.topicPrompts(r, runner, m, claim, followUps, feature("acceptance"), feature("context"), brief, gated, feature("groups") && forId !== null);
           // 盯 1.2: a restart starts with the recovery note, in a resumed session and in a new one.
           const note = retryOf ? await this.recoveryNoteOf(retryOf, how?.why ?? "restarted") : null;
           if (note) {
@@ -660,6 +665,20 @@ export abstract class DeskRuns extends DeskCore {
     return prev?.session_id && prev.machine_id && prev.runtime === runner.runtime && !prev.external ? prev : undefined;
   }
 
+  /**
+   * design-visibility 3.6: when the session the run would continue read a group the run's person
+   * (`forId`) may not read, the run starts a new session (`fresh = 1`, which `lastSession` reads).
+   */
+  protected async freshIfUnreadable(r: RunRow, runner: BotRunner, forId: string | null): Promise<void> {
+    const prev = this.lastSession(r, runner);
+    const read = prev ? readGroupsOf(prev) : [];
+    if (read.length === 0) return;
+    const may = await readableGroups(this.env.DB, r, forId);
+    if (read.every((g) => may.has(g))) return;
+    r.fresh = 1;
+    this.sql.exec("UPDATE runs SET fresh = 1 WHERE id = ?", r.id);
+  }
+
   /** Whether the group is a DM (接 3.2). */
   protected async isDm(groupId: string): Promise<boolean> {
     const row = await this.env.DB.prepare("SELECT kind FROM groups WHERE id = ?").bind(groupId).first<{ kind: string }>();
@@ -677,6 +696,7 @@ export abstract class DeskRuns extends DeskCore {
     contextTools = false,
     brief?: Brief,
     gated = false,
+    readGroups = false,
   ): Promise<Prompts> {
     const botId = this.botId as string;
     const notRequest = (x: ContextRow) => x.id !== m.messageId;
@@ -715,6 +735,7 @@ export abstract class DeskRuns extends DeskCore {
       messages: [],
       context: withSummary(sel, claim.summary),
       contextTools,
+      readGroups,
       names,
       request,
       followUps,
@@ -741,7 +762,7 @@ export abstract class DeskRuns extends DeskCore {
     if (since) {
       const delta = selectLines(undefined, since.newest, since.total, name, CONTEXT_CHARS, lines);
       out.resume = {
-        prompt: buildResumePrompt({ names, context: delta.text, request, followUps, refs, contextTools, ...(brief ? { brief: briefText(brief) } : {}) }),
+        prompt: buildResumePrompt({ names, context: delta.text, request, followUps, refs, contextTools, readGroups, ...(brief ? { brief: briefText(brief) } : {}) }),
         manifest: manifestOf(delta, true, m),
       };
     }
@@ -812,6 +833,14 @@ export abstract class DeskRuns extends DeskCore {
     });
   }
 
+  /** Adds the groups `prev`'s session read to `r` (it continues that session). */
+  protected inheritReads(r: RunRow, prev: RunRow | undefined): void {
+    const read = prev ? readGroupsOf(prev) : [];
+    if (read.length === 0) return;
+    r.read_groups = JSON.stringify([...new Set([...readGroupsOf(r), ...read])]);
+    this.sql.exec("UPDATE runs SET read_groups = ? WHERE id = ?", r.read_groups, r.id);
+  }
+
   protected assignFrame(r: RunRow, runner: BotRunner, prompt: string, machine?: MachineView, team?: WorkerModel | null): RunAssignFrame {
     const frame: RunAssignFrame = {
       t: "run.assign",
@@ -851,6 +880,8 @@ export abstract class DeskRuns extends DeskCore {
       if (resume !== null) this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `prompt_resume:${r.id}`, `${resume}\n\n${parts}`);
     }
     const frame = this.assignFrame(r, runner, prompt, machine, await workerModel(this.env.DB, runner.runtime));
+    // design-visibility 3.6: a continued session keeps what it read of other groups.
+    if (frame.resumeSessionId) this.inheritReads(r, this.lastSession(r, runner));
     // 盯 1.6: the desk keeps the team's limit (work time, without waits) and saves and continues
     // the run there; the daemon's own deadline lies past it and is only a backstop.
     if (r.kind !== RUN_KIND_ASIDE) {

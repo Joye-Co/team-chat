@@ -38959,6 +38959,13 @@
               },
               "snippet": {
                 "type": "string"
+              },
+              "groupId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "groupName": {
+                "type": "string"
               }
             },
             "required": [
@@ -39529,6 +39536,13 @@
           "type": "string",
           "minLength": 1
         },
+        "groupId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "groupName": {
+          "type": "string"
+        },
         "message": {
           "type": "object",
           "properties": {
@@ -39965,6 +39979,13 @@
           "type": "string",
           "minLength": 1
         },
+        "groupId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "groupName": {
+          "type": "string"
+        },
         "title": {
           "type": "string"
         },
@@ -39977,6 +39998,48 @@
         "topicId",
         "title",
         "text"
+      ]
+    },
+    "RunGroupsResponse": {
+      "type": "object",
+      "properties": {
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "group",
+                  "dm"
+                ]
+              },
+              "purpose": {
+                "type": "string"
+              },
+              "current": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "kind",
+              "current"
+            ]
+          }
+        }
+      },
+      "required": [
+        "groups"
       ]
     },
     "FrontDeskDecision": {

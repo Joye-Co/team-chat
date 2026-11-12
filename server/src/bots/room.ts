@@ -264,11 +264,13 @@ registerRoomRpc("bots.history", (room, actor, args) => {
   return { rows: forward ? page : page.reverse(), hasMore };
 });
 
-/** One message of a topic, whole (chat-run `topic.message`). */
+/** One message of a topic, whole (chat-run `topic.message`); without `topicId`, of its own topic. */
 registerRoomRpc("bots.message", (room, actor, args) => {
-  const { topicId, messageId } = args as { topicId: string; messageId: string };
+  const { topicId, messageId } = args as { topicId?: string; messageId: string };
   if (!actor || actor.kind !== "bot") throw new ApiError("forbidden", "bots only");
-  const row = contextRows(room.sql, actor.id, topicId, "AND id = ?", [messageId], "ASC", 1)[0];
+  const topic =
+    topicId ?? room.sql.exec<{ topic_id: string }>("SELECT topic_id FROM messages WHERE id = ?", messageId).toArray()[0]?.topic_id;
+  const row = topic === undefined ? undefined : contextRows(room.sql, actor.id, topic, "AND id = ?", [messageId], "ASC", 1)[0];
   if (!row) throw new ApiError("not_found", "message not found");
   return { row };
 });
