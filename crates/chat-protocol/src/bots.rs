@@ -1210,6 +1210,14 @@ pub struct Machine {
         skip_serializing_if = "Option::is_none"
     )]
     pub personal_bots: Option<Vec<PersonalBot>>,
+    /// Usable: the computer's own GitHub sign-in (`metrics.github`). Admins and the computer's
+    /// owner only.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub github: Option<crate::machine::MachineGithub>,
 }
 
 /// Usable: at most this many AI members on one personal machine.
