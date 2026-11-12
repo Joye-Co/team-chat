@@ -784,8 +784,14 @@ An AI member runs with every permission; only the few kinds the team checked nee
   same patterns decide. So a command inside a script, `git -C . push origin main`, a plain
   `git push` while `main` is checked out and `B=main; git push origin HEAD:$B` all stop.
   Claude Code runs Bash with the `PATH` of the user's shell profile, so a gated Claude Code run
-  on Unix also gets `CLAUDE_ENV_FILE=<run folder>/.claude-env.sh`, which puts the shims first
-  again before each command. Codex (and an ACP agent) runs each command in the user's login
+  also gets `CLAUDE_ENV_FILE=<run folder>/.claude-env.sh`, which puts the shims first again
+  before each command (on Windows Git Bash, whose `/etc/profile` puts `/mingw64/bin` and
+  `/usr/bin` first: the file names the shims in MSYS form, `/c/…/bin`, and its own path is
+  written with `/`). Every gated run on the host also gets `BASH_ENV=<run folder>/.bash-env.sh`:
+  bash reads it in every non-interactive shell, and a login bash (`bash -lc`, as Codex runs
+  commands when the user's shell is bash; `bash -l script`) reads it after `/etc/profile` and
+  the user's profile. It reads the user's own `BASH_ENV` first (`CHAT_RUN_USER_BASH_ENV`), then
+  puts the shims first on `PATH`, once. Codex (and an ACP agent) runs each command in the user's login
   shell (`zsh -lc`); on macOS `/etc/zprofile` runs `path_helper`, which puts the system folders
   before the inherited `PATH`. So a gated Codex or ACP run on the host (Unix) gets
   `ZDOTDIR=<run folder>/zsh`, whose `.zshenv`, `.zprofile`, `.zshrc` and `.zlogin` each read the
@@ -806,9 +812,10 @@ An AI member runs with every permission; only the few kinds the team checked nee
   (a script that pushes twice). The runtime's next command ends that. Another kind in the same
   command asks at its shim; what a shim asks and a person approves holds the same way.
 - **Not a security boundary**: this guards against mistakes. A program started by its full
-  path, a login shell other than zsh whose system profile resets `PATH` (Codex with `bash` as
-  the user's shell, a login shell inside the VM image, Git Bash on Windows with `/mingw64/bin`
-  ahead of the shims), or a merge through a web page is not seen. The floor is the repository's
+  path, a login shell whose start-up files the run cannot reach (`sh -l`, which reads only
+  `/etc/profile` and `~/.profile`; a login shell inside the VM image, whose `/etc/profile`
+  resets `PATH`; a user profile that sets its own `BASH_ENV`), or a merge through a web page is
+  not seen. The floor is the repository's
   branch protection and the production environment's own required approval.
 - Side chat runs and the PTY runtime are never gated (the server sends no gates to a CLI that
   does not report `gates`).
