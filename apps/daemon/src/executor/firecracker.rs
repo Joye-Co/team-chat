@@ -31,9 +31,10 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, watch};
 
-/// `PATH` of the CLI in the VM: the tools disk first (`chat-run`), then the base image.
-pub const GUEST_PATH: &str =
-    "/opt/runner/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+/// `PATH` of the CLI in the VM: the tools disk first (`chat-run`), then the base image, its
+/// rustup proxies last. The repository's cache folders go right after the tools disk
+/// ([`crate::vm_cache::ENV_PATH_EXTRA`]).
+pub const GUEST_PATH: &str = "/opt/runner/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/rust/cargo/bin";
 /// The `chat-run` socket in the VM (relayed to the run's socket on the host).
 pub const GUEST_CHAT_RUN_SOCKET: &str = "/run/chat-run.sock";
 /// How long a VM may take from start to a connected agent.
@@ -165,15 +166,24 @@ pub fn tap_name(slot: u32) -> String {
 /// host-only sockets or temp folder. Returns the host's `chat-run` socket when the run has one.
 pub fn guest_env(env: &[(String, String)]) -> (Vec<(String, String)>, Option<String>) {
     let mut host_socket = None;
+    let mut path_extra = None;
     let mut out = vec![];
     for (k, v) in env {
         match k.as_str() {
             "PATH" | "TMPDIR" | "SSH_AUTH_SOCK" => {}
             k if k == crate::chat_run::ENV_SOCKET => host_socket = Some(v.clone()),
+            k if k == crate::vm_cache::ENV_PATH_EXTRA => path_extra = Some(v.clone()),
             _ => out.push((k.clone(), v.clone())),
         }
     }
-    out.push(("PATH".into(), GUEST_PATH.into()));
+    let path = match path_extra.filter(|x| !x.is_empty()) {
+        Some(x) => match GUEST_PATH.split_once(':') {
+            Some((tools, rest)) => format!("{tools}:{x}:{rest}"),
+            None => format!("{GUEST_PATH}:{x}"),
+        },
+        None => GUEST_PATH.to_string(),
+    };
+    out.push(("PATH".into(), path));
     if host_socket.is_some() {
         out.push((
             crate::chat_run::ENV_SOCKET.into(),
@@ -303,6 +313,7 @@ impl Executor for Firecracker {
             cwd: spec.cwd.clone(),
             env: spec.env.clone(),
             home: bot_home(&self.cfg.homes, &spec.env),
+            vm_shares: spec.vm_shares.clone(),
             program: program.to_string(),
             args: args.to_vec(),
             procs: self.procs.clone(),
@@ -477,6 +488,8 @@ struct Job {
     env: Vec<(String, String)>,
     /// The bot's kept home folder on the host and where it goes in the VM (`$HOME`).
     home: Option<(PathBuf, String)>,
+    /// More host folders the run needs in the VM ([`RunSpec::vm_shares`]).
+    vm_shares: Vec<PathBuf>,
     program: String,
     args: Vec<String>,
     /// The executor's control channels: this run's goes at teardown.
@@ -557,6 +570,7 @@ impl Job {
         {
             out.push(d);
         }
+        out.extend(self.vm_shares.iter().cloned());
         let home = crate::config::home();
         for s in &self.cfg.shares {
             if s.is_dir() && !private_share(&home, s) {
@@ -1018,6 +1032,7 @@ mod tests {
             cwd: cwd.clone(),
             env,
             home: home.clone(),
+            vm_shares: vec![p("caches/0123456789abcdef")],
             program: "claude".into(),
             args: vec![],
             procs: Arc::default(),
@@ -1026,7 +1041,8 @@ mod tests {
         let canon = |d: &Path| std::fs::canonicalize(d).unwrap();
         assert!(shares.contains(&canon(&homes.join("01BOT"))));
         assert!(shares.contains(&canon(&run_dir)) && shares.contains(&canon(&cwd)));
-        assert_eq!(shares.len(), 3, "{shares:?}");
+        assert!(shares.contains(&canon(&tmp.path().join("caches/0123456789abcdef"))));
+        assert_eq!(shares.len(), 4, "{shares:?}");
         let (host, guest) = home.unwrap();
         assert_eq!(host, canon(&homes.join("01BOT")));
         assert_eq!(guest, "/home/runner");
@@ -1061,5 +1077,24 @@ mod tests {
             get(crate::chat_run::ENV_SOCKET),
             Some(GUEST_CHAT_RUN_SOCKET)
         );
+    }
+
+    /// The repository's cache folders come right after the tools disk (its shims stay first)
+    /// and before the image's own; the variable itself does not reach the CLI.
+    #[test]
+    fn guest_env_puts_the_cache_on_path_after_the_shims() {
+        let c = Path::new("/w/caches/k");
+        let mut env = vec![("PATH".to_string(), "/host/bin".to_string())];
+        env.extend(crate::vm_cache::guest_vars(c));
+        let (g, _) = guest_env(&env);
+        let get = |k: &str| g.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+        assert_eq!(get(crate::vm_cache::ENV_PATH_EXTRA), None);
+        assert_eq!(get("CARGO_HOME"), Some("/w/caches/k/cargo"));
+        let path: Vec<&str> = get("PATH").unwrap().split(':').collect();
+        assert_eq!(path[0], crate::github::GUEST_BIN);
+        assert_eq!(&path[1..3], &["/w/caches/k/bin", "/w/caches/k/cargo/bin"]);
+        assert_eq!(path[7], "/usr/local/sbin");
+        assert_eq!(path.last(), Some(&"/opt/rust/cargo/bin"));
+        assert!(!path.contains(&"/host/bin"));
     }
 }

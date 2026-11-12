@@ -58,6 +58,9 @@ pub struct RunSpec {
     /// The run's gated actions. Codex and ACP agents answer their CLI's own approval requests
     /// with them ([`crate::gates::Gates::allows`]); None or empty: everything is allowed.
     pub gates: Option<Arc<crate::gates::Gates>>,
+    /// More host folders a VM run needs at their host paths (the repository's cache). Only
+    /// the microVM executor reads it.
+    pub vm_shares: Vec<PathBuf>,
     /// Where the CLI runs.
     pub exec: Arc<dyn Executor>,
 }

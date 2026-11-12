@@ -73,27 +73,34 @@ pub fn aside_capable(kind: &str) -> bool {
 }
 
 /// What a CLI must know about a run in a microVM: what is kept and what goes with the VM.
-pub fn vm_note(vm: &crate::config::VmConfig) -> String {
-    let kept = if vm.homes.as_os_str().is_empty() {
-        "Your working folder is kept for your next run in this topic; nothing outside it is kept."
-            .to_string()
-    } else {
-        let size = if crate::vm_home::limited(vm) {
-            format!(" Your home folder holds {} GB in all.", vm.home_gb)
-        } else {
-            String::new()
-        };
-        format!(
-            "Your working folder is kept for your next run in this topic, and your home folder \
-($HOME) for all your runs: install tools and sign in there, and look there for what a run in \
-another topic left. /tmp and everything else outside these two are gone after this run.{size}"
-        )
+/// `cache` is the repository's cache folder; `toolchain` the Rust toolchain the daemon could
+/// not install for it.
+pub fn vm_note(cache: Option<&std::path::Path>, toolchain: Option<&str>) -> String {
+    let cache = match cache {
+        Some(c) => format!(
+            " This repository's dependency caches and user-level tools (cargo, rustup \
+toolchains, `cargo install`, npm and `npm -g`, pnpm, bun, pip, pipx and uv tools, go) are in {} \
+and already on PATH; they are kept and shared with the other runs on this repository.",
+            c.display()
+        ),
+        None => String::new(),
+    };
+    let toolchain = match toolchain {
+        Some(t) => format!(
+            " The Rust toolchain {t} could not be installed before this run: install it with \
+`rustup toolchain install {t}` before you build."
+        ),
+        None => String::new(),
     };
     format!(
         "You run in a virtual machine that was started for this run and is deleted when you end \
-your turn. {kept} Every process still running when your turn ends is killed: when you start \
-something you need the result of (a sign-in that waits for a person, a build, a test run), wait \
-for it in the foreground before you finish, never in the background."
+your turn. Your working folder and its build outputs are kept for your next run in this \
+topic.{cache} Everything else in $HOME, /tmp and the system folders is gone after this run.\
+{toolchain} When a system package (apt) or docker is missing, do not work around it: say in \
+your answer which one is missing and that an administrator must add it to the base image. \
+Never sign in to anything in this machine. Every process still running when your turn ends \
+is killed: when you start something you need the result of (a build, a test run), wait for it \
+in the foreground before you finish, never in the background."
     )
 }
 
@@ -576,6 +583,36 @@ pub async fn supervise(ctx: RunCtx) {
                     }
                 }
             }
+            // A VM run uses its repository's caches (design-vm-state 3.3): held until the CLI is
+            // done, so cleanup leaves them alone; the Rust toolchain is installed first.
+            let mut toolchain_missing = None;
+            let cache = if exec.isolated() && cfg.vm.is_some() && !aside {
+                match crate::vm_cache::hold(&cfg.work_root, assign.repo.as_ref()).await {
+                    Ok(held) => {
+                        if let Some(ch) = crate::vm_cache::toolchain_channel(&cwd) {
+                            let rustup = std::path::Path::new(crate::vm_cache::HOST_RUSTUP);
+                            match crate::vm_cache::install_toolchain(&held.dir, &ch, rustup).await
+                            {
+                                Ok(ms) => {
+                                    eprintln!("{} run {run_id}: toolchain {ch} ready ({ms})", now_ms())
+                                }
+                                Err(e) => {
+                                    eprintln!("{} run {run_id}: toolchain {ch}: {e}", now_ms());
+                                    toolchain_missing = Some(ch);
+                                }
+                            }
+                        }
+                        crate::vm_cache::merge_vars(&mut env, &held.dir, &rt.env);
+                        Some(held)
+                    }
+                    Err(e) => {
+                        eprintln!("{} run {run_id}: no repository cache: {e}", now_ms());
+                        None
+                    }
+                }
+            } else {
+                None
+            };
             // In a VM the CLI uses its member's own folders and a copy of the sign-in that cannot
             // change this host's (机 3.2).
             let vm_ready = match &vm_member {
@@ -721,7 +758,12 @@ pub async fn supervise(ctx: RunCtx) {
                 line_note,
                 gate.note(),
                 gates.note(),
-                cfg.vm.as_ref().map(vm_note),
+                cfg.vm.as_ref().map(|_| {
+                    vm_note(
+                        cache.as_ref().map(|c| c.dir.as_path()),
+                        toolchain_missing.as_deref(),
+                    )
+                }),
                 github
                     .as_ref()
                     .filter(|_| !aside)
@@ -754,6 +796,7 @@ pub async fn supervise(ctx: RunCtx) {
                 gate_hook,
                 gate_alive,
                 gates: Some(gates.clone()),
+                vm_shares: cache.iter().map(|c| c.dir.clone()).collect(),
                 exec: exec.clone(),
             };
             let work = spec.cwd.clone();
@@ -804,6 +847,7 @@ this machine cannot be made to stop at them (update it)",
             };
             // The CLI is done: the next run of this member in this topic may use the line.
             drop(line);
+            drop(cache);
             (res.0, res.1, code)
         }
     };
@@ -1283,18 +1327,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_vm_run_is_told_its_home_size_and_its_sign_in_outlasts_its_limit() {
-        let vm = |extra: &str| {
-            Config::parse(&format!(
-                "server_url = \"http://127.0.0.1:1\"\ntoken_file = \"/nonexistent\"\n[runtimes.claude]\nkind = \"claude\"\n[vm]\nkernel = \"/k\"\nrootfs = \"/r\"\n{extra}"
-            ))
-            .unwrap()
-            .vm
-            .unwrap()
-        };
-        assert!(vm_note(&vm("")).contains("Your home folder holds 20 GB in all."));
-        assert!(!vm_note(&vm("home_gb = 0\n")).contains("GB in all"));
-        assert!(vm_note(&vm("homes = ''\n")).contains("nothing outside it is kept"));
+    fn a_vm_run_is_told_what_is_kept_and_its_sign_in_outlasts_its_limit() {
+        let c = std::path::Path::new("/w/caches/0123456789abcdef");
+        let note = vm_note(Some(c), None);
+        assert!(note.contains("build outputs are kept for your next run in this topic"));
+        assert!(note.contains("are in /w/caches/0123456789abcdef and already on PATH"));
+        assert!(note.contains("$HOME, /tmp and the system folders is gone"));
+        assert!(note.contains("an administrator must add it to the base image"));
+        assert!(note.contains("Never sign in"));
+        assert!(!note.contains("GB") && !note.contains("rustup toolchain install"));
+        let note = vm_note(None, Some("1.99.1"));
+        assert!(!note.contains("already on PATH"));
+        assert!(note.contains("`rustup toolchain install 1.99.1`"));
         let mut a: RunAssign = serde_json::from_value(serde_json::json!({
             "runId": "r1", "botMemberId": "B1", "groupId": "g", "topicId": "t",
             "runtime": "claude", "prompt": "p", "leaseMs": 600000

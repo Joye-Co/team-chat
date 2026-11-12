@@ -1007,7 +1007,8 @@ pub fn sweep_spools(cfg: &Config, active: &[String]) -> usize {
 /// Removes finished runs older than `keep_runs_hours`, then the oldest finished runs while
 /// free disk is below `min_free_gb`, then the lines idle for `keep_runs_hours` (a line goes
 /// only when idle, also when disk is low: its folder holds work in progress). Active runs and
-/// the lines they use are never touched.
+/// the lines they use are never touched. Last, while free disk is still low, the least
+/// recently used repository caches that no run holds (design-vm-state 3.3).
 pub async fn cleanup(cfg: &Config, active: &[String]) -> usize {
     let Ok(rd) = std::fs::read_dir(runs_dir(cfg)) else {
         return 0;
@@ -1042,7 +1043,12 @@ pub async fn cleanup(cfg: &Config, active: &[String]) -> usize {
             removed += 1;
         }
     }
-    removed + cleanup_lines(cfg, active).await + cleanup_kept(cfg).await
+    removed
+        + cleanup_lines(cfg, active).await
+        + cleanup_kept(cfg).await
+        + crate::vm_cache::remove_lru(&cfg.work_root, min_free, || {
+            crate::health::disk(&cfg.work_root).0
+        })
 }
 
 /// Removes the oldest folders that were moved to `kept` while free disk is below `min_free_gb`.

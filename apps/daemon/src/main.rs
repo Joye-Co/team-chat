@@ -1,7 +1,7 @@
 use daemon::config::{self, Config};
 use std::path::PathBuf;
 
-const USAGE: &str = "usage: daemon <run|doctor|install-service|uninstall-service|restart-service|example-config> [--config <file>] [--no-load] [--log-file <file>]\n       daemon private-dir <folder>";
+const USAGE: &str = "usage: daemon <run|doctor|install-service|uninstall-service|restart-service|example-config> [--config <file>] [--no-load] [--log-file <file>]\n       daemon caches [clear <key|all>] [--config <file>]\n       daemon private-dir <folder>";
 
 fn main() {
     // The same binary is `chat-run` inside a run (a link named chat-run on the run's PATH).
@@ -58,6 +58,7 @@ fn main() {
     let mut config_path = config::default_config_path();
     let mut load = true;
     let mut log_file: Option<PathBuf> = None;
+    let mut words: Vec<String> = vec![];
     while let Some(a) = args.next() {
         match a.as_str() {
             "--config" => match args.next() {
@@ -69,6 +70,7 @@ fn main() {
                 Some(p) => log_file = Some(PathBuf::from(p)),
                 None => exit_with(USAGE),
             },
+            w if cmd == "caches" && !w.starts_with('-') => words.push(w.to_string()),
             _ => exit_with(USAGE),
         }
     }
@@ -224,6 +226,36 @@ fn main() {
                 &daemon::service::task_dir(),
             ) {
                 exit_with(&e);
+            }
+        }
+        // A VM computer's repository caches, for an administrator on the host.
+        "caches" => {
+            let cfg = load_cfg();
+            match words.iter().map(String::as_str).collect::<Vec<_>>()[..] {
+                [] => {
+                    for c in daemon::vm_cache::list(&cfg.work_root) {
+                        println!(
+                            "{}  {:>10}  {:>13}  {}",
+                            c.key,
+                            c.bytes,
+                            c.last_used_at,
+                            if c.repo.is_empty() { "-" } else { &c.repo }
+                        );
+                    }
+                }
+                ["clear", which] => {
+                    let (done, refused) = daemon::vm_cache::clear(&cfg.work_root, which);
+                    for k in &done {
+                        println!("removed {k}");
+                    }
+                    for r in &refused {
+                        eprintln!("not removed: {r}");
+                    }
+                    if !refused.is_empty() {
+                        std::process::exit(1);
+                    }
+                }
+                _ => exit_with(USAGE),
             }
         }
         "example-config" => print!("{}", config::EXAMPLE),

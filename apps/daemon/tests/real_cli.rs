@@ -69,6 +69,7 @@ fn spec(dir: &Path, claude: &Path, model: &model::Model, prompt: &str) -> RunSpe
         gate_hook: None,
         gate_alive: None,
         gates: None,
+        vm_shares: vec![],
         exec: daemon::executor::local(),
     }
 }

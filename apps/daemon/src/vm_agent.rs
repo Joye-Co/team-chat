@@ -9,6 +9,24 @@
 /// The name the agent is started by.
 pub const NAME: &str = "vm-agent";
 
+/// The CLI's environment without `RUSTC_WRAPPER=sccache` when no `sccache` is on its `PATH`
+/// (a base image built before sccache was in it): cargo would fail on every build.
+pub fn without_missing_sccache(
+    env: &[(String, String)],
+    is_file: impl Fn(&std::path::Path) -> bool,
+) -> Vec<(String, String)> {
+    let get = |k: &str| env.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+    let found = get("PATH")
+        .unwrap_or_default()
+        .split(':')
+        .filter(|d| !d.is_empty())
+        .any(|d| is_file(&std::path::Path::new(d).join("sccache")));
+    env.iter()
+        .filter(|(k, v)| found || !(k == "RUSTC_WRAPPER" && v == "sccache"))
+        .cloned()
+        .collect()
+}
+
 /// 接管 (design-takeover 3.4): the person's command runs as the run's uid + 1, in the run's
 /// group, so it cannot read the CLI's environment (`/proc/<pid>/environ`) or its files that
 /// are not open to the group.
@@ -99,6 +117,22 @@ pub fn main() -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sccache_is_left_out_when_the_image_has_none() {
+        let env = |w: &str| {
+            vec![
+                ("PATH".to_string(), "/opt/runner/bin:/usr/bin".to_string()),
+                ("RUSTC_WRAPPER".to_string(), w.to_string()),
+            ]
+        };
+        let has = |p: &std::path::Path| p == std::path::Path::new("/usr/bin/sccache");
+        assert_eq!(without_missing_sccache(&env("sccache"), has), env("sccache"));
+        let none = without_missing_sccache(&env("sccache"), |_| false);
+        assert!(!none.iter().any(|(k, _)| k == "RUSTC_WRAPPER"));
+        // The user's own wrapper stays.
+        assert_eq!(without_missing_sccache(&env("/x/w"), |_| false), env("/x/w"));
+    }
 
     #[test]
     fn a_persons_command_sees_only_the_open_shares() {
@@ -918,11 +952,12 @@ mod linux {
             .create(true)
             .append(true)
             .open(&start.stderr)?;
+        let env = super::without_missing_sccache(&start.env, |p| p.is_file());
         let mut child = Command::new(&program)
             .args(&start.args)
             .current_dir(&start.cwd)
             .env_clear()
-            .envs(start.env.iter().map(|(k, v)| (k, v)))
+            .envs(env.iter().map(|(k, v)| (k, v)))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::from(stderr))

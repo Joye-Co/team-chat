@@ -109,6 +109,15 @@ stopped on this machine: update Claude Code to {a}.{b}.{patch} or later"
             cfg.min_free_gb
         );
     }
+    let caches = crate::vm_cache::list(&cfg.work_root);
+    if !caches.is_empty() {
+        let _ = writeln!(
+            s,
+            "caches:       {} ({:.1} GiB)",
+            caches.len(),
+            caches.iter().map(|c| c.bytes).sum::<u64>() as f64 / (1u64 << 30) as f64
+        );
+    }
     if let Some(vm) = cfg.vm.as_ref().filter(|vm| crate::vm_home::images_on(vm))
         && crate::vm_home::helper_has_homes(vm) == Some(false)
     {
