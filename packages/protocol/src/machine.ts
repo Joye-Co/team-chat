@@ -237,7 +237,16 @@ export const MachineMetrics = z.object({
 });
 export type MachineMetrics = z.infer<typeof MachineMetrics>;
 
-export const RunCursor = z.object({ runId: RunId, lastSeq: Seq, done: z.boolean() });
+export const RunCursor = z.object({
+  runId: RunId,
+  lastSeq: Seq,
+  done: z.boolean(),
+  /**
+   * Usable (盯 1.4): the processes the CLI started (a build, a test run) used CPU since the last
+   * heartbeat, so a long step is working, not stuck. Absent = not known (older daemons).
+   */
+  active: z.boolean().optional(),
+});
 export type RunCursor = z.infer<typeof RunCursor>;
 export const KnownRun = z.object({ runId: RunId, ackedSeq: Seq });
 export type KnownRun = z.infer<typeof KnownRun>;

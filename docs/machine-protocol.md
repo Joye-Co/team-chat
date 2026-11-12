@@ -69,7 +69,9 @@ CliInfo   = { runtime: string, kind: "codex" | "claude" | "acp" | "pty", command
               version?: string, available: boolean }
               // runtime = the name configured on the machine; run.assign.runtime names one
 Health    = { diskFreeBytes, diskTotalBytes, load1, load5, load15, cpuCount, activeRuns }
-RunCursor = { runId, lastSeq: number /* highest seq produced */, done: boolean }
+RunCursor = { runId, lastSeq: number /* highest seq produced */, done: boolean,
+              active?: boolean /* usable 盯 1.4: the processes the CLI started used CPU since the
+                                  last sample (100 ms in 15 s); absent = not known */ }
 Usage     = { inputTokens: number, outputTokens: number, costUsd?: number,
               models?: ModelUsage[] /* per model the run used; older daemons omit it */ }
 ModelUsage = { model: string /* the id the CLI reported */, inputTokens /* not cached */,
@@ -95,6 +97,8 @@ KnownRun = { runId, ackedSeq: number }
   envAllowlist: string[],          // names of daemon env vars the CLI may see (see Environment)
   leaseMs: number,                 // e.g. 600000
   maxDurationMs?: number,          // the daemon cancels the run after this; status "timeout"
+                                   // (usable: the team limit + 30 min, a backstop; BotDesk saves
+                                   // and continues the run at the limit itself)
   sessionUpload?: { url: string, headers?: Record<string, string> },
   kind?: "aside",                  // 1.1, feature "aside": a read-only side chat run
   resumeSessionId?: string,        // 1.1, feature "resume": continue this CLI session (<= 128)
@@ -146,7 +150,8 @@ RunEvent =
 - `status: "preparing"` comes first (worktree setup), then `running`.
 - `status: "stalled"` is sent once after `stall_minutes` (default 5) without any event, or
   after 30 minutes while a `tool.call` has no `tool.result` yet (the CLI waits for a step); the
-  next event clears it. BotDesk uses it for the topic's stuck state.
+  next event clears it, and so do the CLI's tools while they use CPU (usable 盯 1.4). BotDesk
+  takes it as a signal only.
 - `tool.result.itemId` equals the `tool.call.itemId` it answers.
 - `plan` carries the CLI's own to-do list, mapped by the daemon: Claude Code's `TodoWrite` tool
   input (`todos[].content`, `status` `completed` -> `done`, `in_progress` -> `current`,
@@ -330,7 +335,8 @@ CliUsage   = { runtime, at, windows: { kind, label?, usedPct, resetsAt? }[] }
 - The daemon's own `stalled` status is a signal only: the server does not restart a run for
   it. A silent run gets one nudge, then is restarted in the same session on the same machine,
   then on another machine when one can take it, and only then is it marked `blocked`.
-- The server's lease is 10 minutes (`leaseMs = 600000`) and `maxDurationMs` is 2 hours.
+- The server's lease is 10 minutes (`leaseMs = 600000`) and `maxDurationMs` is the team's run
+  time limit (default 2 hours) plus 30 minutes (docs/protocol.md, "Run time limit").
 - The server closes the link when it hears nothing for 90 s. The daemon drops the link when
   it receives nothing for 3 heartbeat intervals and reconnects with exponential backoff
   (0.5 s to 30 s, with jitter).
@@ -724,7 +730,8 @@ An AI member runs with every permission; only the few kinds the team checked nee
   command waits until the first is answered, then asks (or passes, see scope).
 - **scope "run"** (这件事里都同意): with `approve`, later matches of the same kind in this run pass
   without asking. The server leaves the kind out of `gates` of the run's follow-ups and retries.
-- **While a command waits** the daemon sends no `stalled` status and the run keeps its deadline;
+- **While a command waits** the daemon sends no `stalled` status and the deadline moves by the
+  time waited (usable 盯 1.8; also while a `chat-run secret` approval waits);
   `run.cancel` stops the CLI as usual (the hook ends with it).
 - **When it cannot ask**: a gated run whose `chat-run` socket or hook settings cannot be set up
   fails before the CLI starts. If the hook cannot reach the daemon during the run (not inside a

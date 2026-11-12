@@ -1,0 +1,9 @@
+{
+  "kind": "RunSettings",
+  "valid": true,
+  "description": "the default: two hours",
+  "value": {
+    "limitMinutes": 120,
+    "updatedAt": 0
+  }
+}

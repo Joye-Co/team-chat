@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateRunSettingsRequest",
+  "valid": false,
+  "description": "whole minutes",
+  "value": {
+    "limitMinutes": 90.5
+  }
+}
