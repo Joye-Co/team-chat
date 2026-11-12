@@ -433,7 +433,7 @@ impl FakeProvider {
     }
 
     pub(super) fn set_member_deactivated_fake(&self, id: &str, off: bool) -> AdminReply<Member> {
-        if !self.is_owner() {
+        if !self.may_edit_bot(id) {
             return reply_now(Err(AdminError::Forbidden));
         }
         let team_owner = self.is_team_owner();
@@ -458,7 +458,7 @@ impl FakeProvider {
         id: &str,
         character: Option<CharacterId>,
     ) -> AdminReply<Member> {
-        if !self.is_owner() {
+        if !self.may_edit_bot(id) {
             return reply_now(Err(AdminError::Forbidden));
         }
         reply_now(self.change_member(id, |m, _, _| {
@@ -473,9 +473,24 @@ impl FakeProvider {
         role: Option<String>,
         character: Option<CharacterId>,
         runner: Option<RunnerSetup>,
+        owner_id: Option<String>,
     ) -> AdminReply<BotCreated> {
-        if !self.is_owner() {
-            return reply_now(Err(AdminError::Forbidden));
+        // design-personal-ai 3.1: a member who is not an admin makes his own, at most
+        // MAX_OWN_BOTS, on a computer of his own.
+        let admin = self.is_owner();
+        let owner_id = if admin {
+            owner_id
+        } else {
+            if owner_id.is_some() {
+                return reply_now(Err(AdminError::Forbidden));
+            }
+            if !crate::data::may_add_own_bot(&self.members(), ME) {
+                return reply_now(Err(AdminError::Forbidden));
+            }
+            Some(ME.to_string())
+        };
+        if owner_id.is_some() && runner.as_ref().is_some_and(|r| r.machine_id.is_none()) {
+            return reply_now(Err(AdminError::Invalid));
         }
         let name = name.trim().to_string();
         if name.is_empty() || runner.as_ref().is_some_and(|r| r.runtime.trim().is_empty()) {
@@ -493,6 +508,7 @@ impl FakeProvider {
             online: false,
             character,
             team_owner: false,
+            owner_id,
         };
         self.with(|s| s.members.push(member.clone()));
         if let Some(r) = &runner {
@@ -506,15 +522,24 @@ impl FakeProvider {
         reply_now(Ok(BotCreated { member, credential }))
     }
 
+    /// An admin, or the AI member's own person (design-personal-ai 3.1).
+    fn may_edit_bot(&self, id: &str) -> bool {
+        self.is_owner()
+            || self
+                .members()
+                .iter()
+                .any(|m| m.id == id && m.owner_id.as_deref() == Some(ME))
+    }
+
     pub(super) fn bot_runner_fake(&self, id: &str) -> AdminReply<Option<RunnerSetup>> {
-        if !self.is_owner() {
+        if !self.may_edit_bot(id) {
             return reply_now(Err(AdminError::Forbidden));
         }
         reply_now(Ok(self.settings.lock().unwrap().runners.get(id).cloned()))
     }
 
     pub(super) fn update_bot_member_fake(&self, id: &str, edit: BotMemberEdit) -> AdminReply<()> {
-        if !self.is_owner() {
+        if !self.may_edit_bot(id) {
             return reply_now(Err(AdminError::Forbidden));
         }
         let name = edit.name.map(|n| n.trim().to_string());
@@ -577,6 +602,11 @@ impl FakeProvider {
                     personal_bots: Vec::new(),
                     ..m
                 },
+                // design-personal-ai 3.2: one an admin set up for somebody, in full to admins.
+                Ownership::Theirs if admin && m.set_up_for_owner() => MachineInfo {
+                    personal_bots: Vec::new(),
+                    ..m
+                },
                 _ => cut_down(m),
             })
             .collect()))
@@ -606,6 +636,28 @@ impl FakeProvider {
             .machines
             .iter()
             .any(|m| m.id == id)
+    }
+
+    /// Admins: the VM size of a computer (design-personal-ai 3.3).
+    pub(super) fn set_machine_vm_fake(
+        &self,
+        id: &str,
+        vm: Option<crate::data::VmSize>,
+    ) -> AdminReply<MachineInfo> {
+        if !self.is_owner() {
+            return reply_now(Err(AdminError::Forbidden));
+        }
+        if vm.is_some_and(|v| {
+            !crate::data::VmSize::VCPUS.contains(&v.vcpus) || !(1024..=65536).contains(&v.mem_mib)
+        }) {
+            return reply_now(Err(AdminError::Invalid));
+        }
+        let mut st = self.settings.lock().unwrap();
+        let Some(m) = st.machines.iter_mut().find(|m| m.id == id) else {
+            return reply_now(Err(AdminError::NotFound));
+        };
+        m.vm = vm;
+        reply_now(Ok(m.clone()))
     }
 
     pub(super) fn rename_machine_fake(&self, id: &str, name: String) -> AdminReply<MachineInfo> {
@@ -674,10 +726,11 @@ impl FakeProvider {
         name: String,
         labels: Vec<String>,
         personal: Option<bool>,
+        owner_id: Option<String>,
     ) -> AdminReply<MachineCreated> {
         let admin = self.is_owner();
-        let personal = personal.unwrap_or(!admin);
-        if !personal && !admin {
+        let personal = personal.unwrap_or(!admin) || owner_id.is_some();
+        if (!personal || owner_id.is_some()) && !admin {
             return reply_now(Err(AdminError::Forbidden));
         }
         let name = name.trim().to_string();
@@ -693,7 +746,8 @@ impl FakeProvider {
                 .map(|l| l.trim().to_string())
                 .filter(|l| !l.is_empty())
                 .collect(),
-            owner_id: personal.then(|| ME.to_string()),
+            owner_id: owner_id.or_else(|| personal.then(|| ME.to_string())),
+            created_by: ME.to_string(),
             ..Default::default()
         };
         self.settings.lock().unwrap().machines.push(machine.clone());

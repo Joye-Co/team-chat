@@ -13,7 +13,7 @@ use gpui::{
 use gpui_component::{
     WindowExt as _,
     input::{InputEvent, InputState},
-    menu::{PopupMenu, PopupMenuItem},
+    menu::{DropdownMenu as _, PopupMenu, PopupMenuItem},
 };
 
 use super::widgets::{self, Status, answer};
@@ -21,7 +21,7 @@ use crate::views::nav::dialogs::{sheet_form, sheet_form_row};
 use crate::{
     app::Services,
     copy::{common, fill, settings as s},
-    data::{AdminError, MachineInfo, Member, Ownership, PersonalBot},
+    data::{AdminError, MachineInfo, Member, Ownership, PersonalBot, VmSize},
     ui::native::{
         AlertLayout, NativeSwitch, NativeTextField, NativeType as _, PushSize, PushStyle,
         SheetLayout, SheetWidth, alert_button, disabled_push, native_colors, push_button,
@@ -48,6 +48,9 @@ pub struct Allowed {
     pub stop_this: bool,
     /// 移除…: another computer I manage.
     pub remove: bool,
+    /// 改规格…: a computer whose AI members work in VMs, and I am an admin (design-personal-ai
+    /// 3.3). The page that knows it is a VM computer sets it.
+    pub vm: bool,
 }
 
 /// What `me` (an admin when `admin`) may do to `m`; `this` is this computer.
@@ -62,6 +65,7 @@ pub fn allowed(m: &MachineInfo, me: Option<&str>, admin: bool, this: bool) -> Al
         to_mine: ownership == Ownership::Team && admin,
         stop_this: this && manage,
         remove: !this && manage,
+        vm: false,
     }
 }
 
@@ -90,6 +94,11 @@ pub fn menu_items(
     if may.rename {
         menu = menu.item(item(s::MACHINE_RENAME, |sv, m, a, w, cx| {
             open_rename(sv, m, a, w, cx);
+        }));
+    }
+    if may.vm {
+        menu = menu.item(item(s::MACHINE_VM_MENU, |sv, m, a, w, cx| {
+            open_vm_size(sv, m, a, w, cx);
         }));
     }
     if may.to_team || may.to_mine {
@@ -475,6 +484,238 @@ pub fn open_rename(
     form
 }
 
+// --- 改规格… ---
+
+/// How a VM size reads: "2 核 · 4 GB", or 用电脑自己的设置 when none is set.
+pub fn vm_size_text(vm: Option<VmSize>) -> String {
+    match vm {
+        Some(v) => fill(
+            s::MACHINE_VM_SIZE,
+            &[
+                ("cpus", &v.vcpus.to_string()),
+                ("mem", &v.mem_gb().to_string()),
+            ],
+        ),
+        None => s::MACHINE_VM_DEFAULT.to_string(),
+    }
+}
+
+/// The memory sizes offered, in GB: the usual steps from 1 to 64, and the current one.
+pub fn vm_mem_choices(current: u32) -> Vec<u32> {
+    let mut list = vec![1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64];
+    if VmSize::MEM_GB.contains(&current) && !list.contains(&current) {
+        list.push(current);
+        list.sort_unstable();
+    }
+    list
+}
+
+/// What a VM sheet starts at with no size set: 2 核 · 4 GB, the size of a computer split off
+/// a host.
+pub const VM_START: VmSize = VmSize {
+    vcpus: 2,
+    mem_mib: 4096,
+};
+
+pub struct VmForm {
+    services: Services,
+    id: String,
+    name: String,
+    before: Option<VmSize>,
+    vcpus: u32,
+    mem_gb: u32,
+    status: Status,
+    after: After,
+}
+
+impl VmForm {
+    pub fn pick_vcpus(&mut self, n: u32, cx: &mut Context<Self>) {
+        self.vcpus = n.clamp(*VmSize::VCPUS.start(), *VmSize::VCPUS.end());
+        cx.notify();
+    }
+
+    pub fn pick_mem_gb(&mut self, n: u32, cx: &mut Context<Self>) {
+        self.mem_gb = n.clamp(*VmSize::MEM_GB.start(), *VmSize::MEM_GB.end());
+        cx.notify();
+    }
+
+    fn picked(&self) -> VmSize {
+        VmSize {
+            vcpus: self.vcpus,
+            mem_mib: self.mem_gb * 1024,
+        }
+    }
+
+    /// Saves `vm` (`None`: the computer's own setting again); a saved size closes the sheet.
+    fn save(&mut self, vm: Option<VmSize>, window: &mut Window, cx: &mut Context<Self>) {
+        if self.status.busy() {
+            return;
+        }
+        if vm == self.before {
+            window.close_dialog(cx);
+            return;
+        }
+        let reply = self.services.provider.set_machine_vm(&self.id, vm);
+        self.status = Status::Busy(s::SAVING.into());
+        cx.notify();
+        let handle = window.window_handle();
+        cx.spawn(async move |this, cx| {
+            let result = answer(reply).await;
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(_) => {
+                    this.status = Status::Idle;
+                    let after = this.after.clone();
+                    let _ = handle.update(cx, |_, window, cx| window.close_dialog(cx));
+                    after(Ok(()), cx);
+                }
+                Err(e) => {
+                    this.status = Status::from_error(e);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+}
+
+impl Render for VmForm {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let busy = self.status.busy();
+        let form = cx.entity();
+        let select = |id: &'static str,
+                      shown: String,
+                      options: Vec<(u32, String)>,
+                      picked: u32,
+                      set: fn(&mut VmForm, u32, &mut Context<VmForm>),
+                      window: &mut Window,
+                      cx: &mut Context<Self>| {
+            let form = form.clone();
+            disabled_push(
+                widgets::popup_fixed(id, shown, tokens::size::SELECT_WIDTH, window, cx),
+                busy,
+                cx,
+            )
+            .dropdown_menu(move |menu, _, _| {
+                options.iter().fold(menu, |menu, (n, text)| {
+                    let (n, form) = (*n, form.clone());
+                    menu.item(
+                        PopupMenuItem::new(text.clone())
+                            .checked(n == picked)
+                            .on_click(move |_, _, cx| form.update(cx, |f, cx| set(f, n, cx))),
+                    )
+                })
+            })
+        };
+        let cpu_text = |n: u32| fill(s::MACHINE_VM_CPUS_N, &[("n", &n.to_string())]);
+        let mem_text = |n: u32| fill(s::MACHINE_VM_MEM_N, &[("n", &n.to_string())]);
+        let cpus = select(
+            "machine-vm-cpus",
+            cpu_text(self.vcpus),
+            VmSize::VCPUS.map(|n| (n, cpu_text(n))).collect(),
+            self.vcpus,
+            VmForm::pick_vcpus,
+            window,
+            cx,
+        );
+        let mem = select(
+            "machine-vm-mem",
+            mem_text(self.mem_gb),
+            vm_mem_choices(self.mem_gb)
+                .into_iter()
+                .map(|n| (n, mem_text(n)))
+                .collect(),
+            self.mem_gb,
+            VmForm::pick_mem_gb,
+            window,
+            cx,
+        );
+        let status = match &self.status {
+            Status::Failed(t) => Some(sheet_status_error(
+                format!("{}：{t}", s::MACHINE_ACTION_FAILED),
+                cx,
+            )),
+            _ => None,
+        };
+        let picked = self.picked();
+        let (save, clear) = (cx.entity(), cx.entity());
+        SheetLayout::new(fill(s::MACHINE_VM_TITLE, &[("name", &self.name)]))
+            .explanation(s::MACHINE_VM_HINT)
+            .body(
+                sheet_form()
+                    .child(sheet_form_row(s::MACHINE_VM_CPUS, cpus, cx))
+                    .child(sheet_form_row(s::MACHINE_VM_MEM, mem, cx)),
+            )
+            .when_some(status, |l, st| l.status(st))
+            .buttons([
+                disabled_push(
+                    push_button(
+                        "machine-vm-default",
+                        s::MACHINE_VM_DEFAULT,
+                        PushStyle::Outline,
+                        PushSize::Regular,
+                        cx,
+                    ),
+                    busy || self.before.is_none(),
+                    cx,
+                )
+                .on_click(move |_, window, cx| clear.update(cx, |f, cx| f.save(None, window, cx))),
+                push_button(
+                    "machine-vm-cancel",
+                    common::CANCEL,
+                    PushStyle::Outline,
+                    PushSize::Regular,
+                    cx,
+                )
+                .on_click(|_, window, cx| window.close_dialog(cx)),
+                disabled_push(
+                    push_button(
+                        "machine-vm-save",
+                        common::SAVE,
+                        PushStyle::Default,
+                        PushSize::Regular,
+                        cx,
+                    ),
+                    busy,
+                    cx,
+                )
+                .loading(busy)
+                .on_click(move |_, window, cx| {
+                    save.update(cx, |f, cx| f.save(Some(picked), window, cx))
+                }),
+            ])
+    }
+}
+
+/// 改规格…: a sheet with CPU 核数 and 内存, saved on 保存; 用电脑自己的设置 clears the size.
+pub fn open_vm_size(
+    services: Services,
+    m: &MachineInfo,
+    after: After,
+    window: &mut Window,
+    cx: &mut App,
+) -> Entity<VmForm> {
+    let start = m.vm.unwrap_or(VM_START);
+    let form = cx.new(|_| VmForm {
+        services,
+        id: m.id.clone(),
+        name: m.name.clone(),
+        before: m.vm,
+        vcpus: start.vcpus,
+        mem_gb: start.mem_gb(),
+        status: Status::Idle,
+        after,
+    });
+    let shown = form.clone();
+    widgets::open_sheet(
+        window,
+        cx,
+        SheetWidth::Form,
+        px(300.),
+        move |dialog, _, _| dialog.child(shown.clone()),
+    );
+    form
+}
+
 // --- 在这里做的事… ---
 
 /// One AI member of the sheet: checked or not, and my code folder for it.
@@ -840,6 +1081,7 @@ mod tests {
             online: true,
             character: None,
             team_owner: false,
+            owner_id: None,
         }
     }
 

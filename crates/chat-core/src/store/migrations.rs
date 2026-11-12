@@ -202,6 +202,11 @@ ALTER TABLE members ADD COLUMN weekly_budget_cents INTEGER;
         name: "roles-1",
         sql: "ALTER TABLE members ADD COLUMN team_owner INTEGER NOT NULL DEFAULT 0;",
     },
+    // usable: an AI member's own person (`ownerId`). Old rows read as NULL: the team's.
+    Migration {
+        name: "members-owner-1",
+        sql: "ALTER TABLE members ADD COLUMN owner_id TEXT;",
+    },
 ];
 
 pub fn run(conn: &mut Connection, list: &[Migration]) -> rusqlite::Result<Vec<&'static str>> {

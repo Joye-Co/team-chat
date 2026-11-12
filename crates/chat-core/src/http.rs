@@ -294,17 +294,20 @@ impl HttpClient {
             .await
     }
 
-    /// Owner only. The returned token is a secret: never log it.
+    /// An admin, or (usable) any person for himself. `owner_id`: admins only, the person the
+    /// new AI member belongs to. The returned token is a secret: never log it.
     pub async fn create_bot(
         &self,
         name: &str,
         role: Option<&str>,
         character: Option<crate::proto::CharacterId>,
+        owner_id: Option<&str>,
     ) -> ApiResult<CreateBotResponse> {
         let body = CreateBotRequest {
             name: name.to_string(),
             role: role.map(str::to_string),
             character,
+            owner_id: owner_id.map(str::to_string),
         };
         self.call(Method::POST, "/v1/bots", Some(&body), true).await
     }

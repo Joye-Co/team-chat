@@ -48,14 +48,19 @@ pub struct BotQuick {
     status: Status,
 }
 
-/// Whether the 常用设置 entry shows for `member`: an active AI member, and I am an owner
-/// (the server lets only owners change a runner).
+/// Whether the 常用设置 entry shows for `member`: an active AI member, and I am an admin or
+/// it is my own (design-personal-ai 3.1; the server lets only them change a runner).
 pub fn can_open(services: &Services, member: &Member) -> bool {
-    shows_for(member, i_am_owner(services))
+    shows_for(
+        member,
+        i_am_owner(services),
+        super::my_id(services).as_deref(),
+    )
 }
 
-fn shows_for(member: &Member, owner: bool) -> bool {
-    owner && member.is_bot() && !member.deactivated
+fn shows_for(member: &Member, owner: bool, me: Option<&str>) -> bool {
+    let mine = me.is_some() && member.owner_id.as_deref() == me;
+    (owner || mine) && member.is_bot() && !member.deactivated
 }
 
 /// The choices of 在哪台电脑干活 (as in the edit sheet: [`placement_options`]).
@@ -158,11 +163,14 @@ impl BotQuick {
 
     fn fields(&self, r: &RunnerSetup, window: &Window, cx: &mut Context<Self>) -> gpui::Div {
         let me = super::my_id(&self.services);
-        let view = PlaceView::of(&self.services, self.this_machine.as_deref(), me.as_deref());
+        let view = PlaceView::of(&self.services, self.this_machine.as_deref(), me.as_deref())
+            .only(self.member.owner_id.as_deref());
         let picked = r.machine_id.clone();
-        // On somebody else's own computer the choice is theirs: shown, not offered.
-        if super::members::pinned_elsewhere(picked.as_deref(), &self.machines, me.as_deref())
-            .is_some()
+        // On somebody else's own computer the choice is theirs: shown, not offered. An AI
+        // member of somebody's own moves among his computers.
+        if view.only.is_none()
+            && super::members::pinned_elsewhere(picked.as_deref(), &self.machines, me.as_deref())
+                .is_some()
         {
             let hint =
                 super::members::placement_hint(picked.as_deref(), &self.machines, view, |id| {
@@ -338,6 +346,7 @@ mod tests {
             online: false,
             character: None,
             team_owner: false,
+            owner_id: None,
         }
     }
 
@@ -346,6 +355,7 @@ mod tests {
             this,
             me: None,
             solo: true,
+            only: None,
         }
     }
 
@@ -398,9 +408,16 @@ mod tests {
 
     #[test]
     fn shows_only_for_active_ai_members_to_owners() {
-        assert!(shows_for(&member(MemberKind::Bot, false), true));
-        assert!(!shows_for(&member(MemberKind::Bot, false), false));
-        assert!(!shows_for(&member(MemberKind::Bot, true), true));
-        assert!(!shows_for(&member(MemberKind::Human, false), true));
+        assert!(shows_for(&member(MemberKind::Bot, false), true, None));
+        assert!(!shows_for(&member(MemberKind::Bot, false), false, None));
+        assert!(!shows_for(&member(MemberKind::Bot, true), true, None));
+        assert!(!shows_for(&member(MemberKind::Human, false), true, None));
+        // design-personal-ai 3.1: my own AI member, not somebody else's.
+        let own = Member {
+            owner_id: Some("me".into()),
+            ..member(MemberKind::Bot, false)
+        };
+        assert!(shows_for(&own, false, Some("me")));
+        assert!(!shows_for(&own, false, Some("chen")));
     }
 }

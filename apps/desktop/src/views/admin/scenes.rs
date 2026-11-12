@@ -1,6 +1,7 @@
 //! Screenshot scenes of 团队管理 (`desktop --screenshot <dir> --scenes admin-…`), on the v1
 //! sample team with the 团队管理 samples of `fake/admin.rs`. The window opens without focus.
 
+use futures::FutureExt as _;
 use gpui::{AnyWindowHandle, App, Pixels, Size};
 
 use super::{AdminPage, AdminView, usage::UsageRange};
@@ -286,6 +287,67 @@ fn open_roles_menu(
     )?;
     Ok(handle)
 }
+
+/// usable (design-personal-ai 3.2, 3.3): a VM computer the admin set up for 小王, sized, and
+/// one of the team's on its own setting.
+fn add_vm_computers(services: &Services, _: &mut App) {
+    let p = &services.provider;
+    let labels = || vec!["linux".to_string(), "vm".to_string()];
+    drop(p.create_machine_for("runner-xw".into(), labels(), "m-xiaowang".into()));
+    drop(p.create_machine_as("runner-team".into(), labels(), Some(false)));
+    if let Some(m) = vm_computer(services) {
+        drop(p.set_machine_vm(
+            &m.id,
+            Some(crate::data::VmSize {
+                vcpus: 2,
+                mem_mib: 4096,
+            }),
+        ));
+    }
+}
+
+/// 小王's VM computer as the fake answers it.
+fn vm_computer(services: &Services) -> Option<crate::data::MachineInfo> {
+    let list = services.provider.machines().now_or_never()?.ok()?.ok()?;
+    list.into_iter().find(|m| m.name == "runner-xw")
+}
+
+/// 电脑 with the 改规格… sheet of 小王's VM computer open.
+fn open_vm_size(
+    services: Services,
+    _content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let machine = vm_computer(&services).ok_or("no VM computer")?;
+    let handle = open(services.clone(), AdminPage::Machines, cx)?;
+    crate::views::settings::selftest::after_fit(handle, cx, move |window, cx| {
+        crate::views::settings::machine_actions::open_vm_size(
+            services,
+            &machine,
+            std::rc::Rc::new(|_, _| {}),
+            window,
+            cx,
+        );
+    });
+    Ok(handle)
+}
+
+pub const VM_SCENES: &[Scene] = &[
+    Scene {
+        name: "admin-machines-vm",
+        about: "团队管理 › 电脑 with VM computers: 小王's (2 核 · 4 GB) and the team's on its own setting",
+        start: Start::Roles(crate::fake::RoleView::Owner),
+        setup: add_vm_computers,
+        open: open_machines,
+    },
+    Scene {
+        name: "admin-machine-vm-size",
+        about: "团队管理 › 电脑 › 改规格…: CPU 核数, 内存 and 用电脑自己的设置",
+        start: Start::Roles(crate::fake::RoleView::Owner),
+        setup: add_vm_computers,
+        open: open_vm_size,
+    },
+];
 
 macro_rules! scene {
     ($name:literal, $about:literal, $open:ident) => {

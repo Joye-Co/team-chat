@@ -502,8 +502,17 @@ impl MembersPage {
         } else {
             s::KIND_HUMAN
         });
-        let detail = kind
+        // Usable: whose AI member it is (design-personal-ai 3.5), first, quietly.
+        let whose = whose_bot(m, me, self.roster.solo, |id| {
+            self.services
+                .provider
+                .member(id)
+                .map(|p| crate::ui::avatar::name_beside_avatar(&p.name).to_string())
+        });
+        let detail = whose
+            .as_deref()
             .into_iter()
+            .chain(kind)
             .chain(state.as_deref())
             .chain(std::iter::once(role.as_str()))
             .collect::<Vec<_>>()
@@ -541,6 +550,22 @@ impl MembersPage {
         .when_some(value, |r, v| r.value(v))
         .muted(m.deactivated);
         if !owner {
+            // My own AI member is mine to edit (design-personal-ai 3.1).
+            if me.is_some_and(|me| m.is_bot() && m.owner_id.as_deref() == Some(me)) {
+                return row
+                    .menu(self.own_bot_menu(m, window, cx))
+                    .into_any_element();
+            }
+            // Keep the "⋯" column when my own AI member's row has one, so the badges line up.
+            let any_own = me.is_some_and(|me| {
+                self.roster
+                    .members
+                    .iter()
+                    .any(|x| x.is_bot() && x.owner_id.as_deref() == Some(me))
+            });
+            if any_own {
+                return row.menu(div().size(tokens::height::SM)).into_any_element();
+            }
             return row.into_any_element();
         }
         let team_owner = self.roster.team_owner;
@@ -641,6 +666,65 @@ impl MembersPage {
             )
         });
         row.menu(more).into_any_element()
+    }
+
+    /// "⋯" of my own AI member when I am not an admin: 编辑…, 更换形象, 停用… (or 恢复 while I
+    /// have no other one).
+    fn own_bot_menu(
+        &self,
+        m: &Member,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        let page = cx.entity();
+        let member = m.clone();
+        let may_restore = self
+            .roster
+            .me
+            .as_deref()
+            .is_some_and(|me| crate::data::may_add_own_bot(&self.roster.members, me));
+        widgets::more_button(
+            ElementId::Name(format!("member-more-{}", m.id).into()),
+            window,
+            cx,
+        )
+        .dropdown_menu(move |menu, _, _| {
+            let page = page.clone();
+            if member.deactivated {
+                if !may_restore {
+                    return menu;
+                }
+                let target = member.id.clone();
+                return menu.item(PopupMenuItem::new(s::REACTIVATE).on_click(move |_, _, cx| {
+                    let target = target.clone();
+                    page.update(cx, |p, cx| p.set_deactivated(target, false, cx));
+                }));
+            }
+            let (edit_page, edit_member) = (page.clone(), member.clone());
+            let menu = menu.item(PopupMenuItem::new(s::EDIT).on_click(move |_, window, cx| {
+                let services = edit_page.read(cx).services.clone();
+                open_edit_bot(services, &edit_member, window, cx);
+            }));
+            let menu = if characters::available() {
+                let (look_page, look_member) = (page.clone(), member.clone());
+                menu.item(
+                    PopupMenuItem::new(s::CHANGE_CHARACTER).on_click(move |_, window, cx| {
+                        let services = look_page.read(cx).services.clone();
+                        open_character(services, &look_member, window, cx);
+                    }),
+                )
+            } else {
+                menu
+            };
+            let member = member.clone();
+            menu.separator()
+                .item(
+                    PopupMenuItem::new(s::DEACTIVATE_MENU).on_click(move |_, window, cx| {
+                        Self::confirm_deactivate(page.clone(), &member, window, cx)
+                    }),
+                )
+        })
+        .into_any_element()
     }
 
     /// 默认规则 (2.19): switches, the spend limit as a number field with
@@ -850,6 +934,28 @@ impl Render for MembersPage {
                         }),
                     ),
             );
+        } else if let Some(me) = me.as_deref() {
+            // A member adds one AI member of his own (design-personal-ai 3.5).
+            let may = crate::data::may_add_own_bot(members, me);
+            let add = disabled_push(
+                push_button(
+                    "member-add-ai",
+                    s::ADD_AI_OPEN,
+                    PushStyle::Outline,
+                    PushSize::Small,
+                    cx,
+                ),
+                !may,
+                cx,
+            )
+            .when(!may, |b| b.tooltip(s::ADD_AI_OWN_LIMIT))
+            .on_click(move |_, window, cx| {
+                open_add_bot(bot_services.clone(), window, cx);
+            });
+            header = header.action(add);
+            if !may {
+                header = header.description(s::ADD_AI_OWN_LIMIT);
+            }
         }
         let list = if active_rows.is_empty() {
             widgets::list_empty(ui::Sym::Search, s::MEMBERS_NO_MATCH, None, cx).into_any_element()
@@ -1600,6 +1706,21 @@ pub(crate) fn effort_text(e: &str) -> String {
     .to_string()
 }
 
+/// Whose AI member `m` is, as its row says it under the name: 你的, or "{name}的". Nothing for
+/// a person, the team's AI member, or one person alone.
+pub fn whose_bot(
+    m: &Member,
+    me: Option<&str>,
+    solo: bool,
+    name: impl Fn(&str) -> Option<String>,
+) -> Option<String> {
+    let owner = m.owner_id.as_deref().filter(|_| m.is_bot() && !solo)?;
+    if Some(owner) == me {
+        return Some(s::MEMBER_OWNED_BY_ME.to_string());
+    }
+    Some(fill(s::MEMBER_OWNED_BY, &[("name", &name(owner)?)]))
+}
+
 /// Who looks at 在哪台电脑干活 (design-roles 3.9): this computer's id, my id, and whether one
 /// person uses the server (then nothing says 团队 or 我的).
 #[derive(Clone, Copy, Debug, Default)]
@@ -1607,6 +1728,9 @@ pub struct PlaceView<'a> {
     pub this: Option<&'a str>,
     pub me: Option<&'a str>,
     pub solo: bool,
+    /// Usable (design-personal-ai 3.1): the AI member belongs to this person, so it works only
+    /// on his own computers: no 任意 choice and no team computer.
+    pub only: Option<&'a str>,
 }
 
 impl<'a> PlaceView<'a> {
@@ -1615,8 +1739,25 @@ impl<'a> PlaceView<'a> {
             this,
             me,
             solo: super::solo(services),
+            only: None,
         }
     }
+
+    /// The same view for an AI member of `owner`'s own.
+    pub fn only(self, owner: Option<&'a str>) -> Self {
+        Self {
+            only: owner,
+            ..self
+        }
+    }
+}
+
+/// The computers an AI member of `owner`'s own may work on: his own.
+pub fn own_computers<'a>(machines: &'a [MachineInfo], owner: &str) -> Vec<&'a MachineInfo> {
+    machines
+        .iter()
+        .filter(|m| m.owner_id.as_deref() == Some(owner))
+        .collect()
 }
 
 /// How 在哪台电脑干活 names a choice: any computer (any team computer when more than one person
@@ -1624,6 +1765,9 @@ impl<'a> PlaceView<'a> {
 /// other people use the server), or a computer that is no longer in the list.
 pub fn machine_choice_text(id: Option<&str>, machines: &[MachineInfo], v: PlaceView) -> String {
     let Some(id) = id else {
+        if v.only.is_some() {
+            return s::BOT_PLACE_PICK.to_string();
+        }
         return if v.solo {
             s::RUNNER_MACHINE_ANY
         } else {
@@ -1651,7 +1795,12 @@ pub fn placement_options(
     machines: &[MachineInfo],
     v: PlaceView,
 ) -> Vec<(Option<String>, String)> {
-    let mut options = vec![(None, machine_choice_text(None, machines, v))];
+    // An AI member of somebody's own has no 任意: it must be on one of his computers.
+    let mut options = if v.only.is_some() {
+        vec![]
+    } else {
+        vec![(None, machine_choice_text(None, machines, v))]
+    };
     if let Some(id) = picked.filter(|id| !machines.iter().any(|m| m.id == *id)) {
         options.push((
             Some(id.to_string()),
@@ -1661,7 +1810,10 @@ pub fn placement_options(
     options.extend(
         machines
             .iter()
-            .filter(|m| m.ownership(v.me) != Ownership::Theirs)
+            .filter(|m| match v.only {
+                Some(owner) => m.owner_id.as_deref() == Some(owner),
+                None => m.ownership(v.me) != Ownership::Theirs,
+            })
             .map(|m| {
                 (
                     Some(m.id.clone()),
@@ -1697,6 +1849,14 @@ pub fn placement_hint(
         return None;
     }
     let m = machines.iter().find(|m| Some(m.id.as_str()) == picked)?;
+    // design-personal-ai: someone's own AI member takes work from anyone on his computers.
+    if let Some(owner) = v.only {
+        if Some(owner) == v.me {
+            return Some(s::BOT_PLACE_OWN_HINT.to_string());
+        }
+        let who = person(owner).unwrap_or_default();
+        return Some(fill(s::BOT_PLACE_OWN_OTHER_HINT, &[("person", &who)]));
+    }
     match m.ownership(v.me) {
         Ownership::Mine => Some(s::BOT_PLACE_MINE_HINT.to_string()),
         Ownership::Theirs => {
@@ -1788,6 +1948,14 @@ pub struct BotForm {
     created: Option<BotCreated>,
     /// Set when the sheet edits an existing AI member.
     editing: Option<BotEditing>,
+    /// I am an admin: any AI member, on any computer. Otherwise the sheet adds or edits an AI
+    /// member of my own (design-personal-ai 3.1).
+    admin: bool,
+    /// Usable: the person the AI member belongs to (归谁); `None` = the team's. A member who is
+    /// not an admin adds his own, so it is always him then.
+    owner: Option<String>,
+    /// The computers are in.
+    machines_loaded: bool,
     /// The window the sheet is in: a saved edit closes it.
     window: gpui::AnyWindowHandle,
     _subscriptions: Vec<Subscription>,
@@ -1795,19 +1963,9 @@ pub struct BotForm {
 
 impl BotForm {
     pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let machines = services.provider.machines();
         let this_machine = services.provider.this_machine_id();
-        cx.spawn(async move |this, cx| {
-            if let Ok(list) = answer(machines).await {
-                let _ = this.update(cx, |this, cx| {
-                    this.machines = list;
-                    this.default_to_this_computer();
-                    this.load_logins(cx);
-                    cx.notify();
-                });
-            }
-        })
-        .detach();
+        let admin = i_am_owner(&services);
+        let me = super::my_id(&services);
         let input = |placeholder: &'static str, window: &mut Window, cx: &mut Context<Self>| {
             cx.new(|cx| InputState::new(window, cx).placeholder(placeholder))
         };
@@ -1836,7 +1994,8 @@ impl BotForm {
             repo: input(s::RUNNER_REPO_PLACEHOLDER, window, cx),
             branch: input(s::RUNNER_BRANCH_PLACEHOLDER, window, cx),
             services,
-            runner: false,
+            // My own AI member always works on my computer.
+            runner: !admin,
             machines: Vec::new(),
             logins: Default::default(),
             this_machine,
@@ -1850,9 +2009,98 @@ impl BotForm {
             status: Status::Idle,
             created: None,
             editing: None,
+            admin,
+            owner: if admin { None } else { me },
+            machines_loaded: false,
             window: window.window_handle(),
             _subscriptions: subscriptions,
         }
+        .loading_machines(cx)
+    }
+
+    fn loading_machines(mut self, cx: &mut Context<Self>) -> Self {
+        self.load_machines(cx);
+        self
+    }
+
+    /// Loads the computers (again, after one was added from the sheet).
+    fn load_machines(&mut self, cx: &mut Context<Self>) {
+        let machines = self.services.provider.machines();
+        cx.spawn(async move |this, cx| {
+            if let Ok(list) = answer(machines).await {
+                let _ = this.update(cx, |this, cx| {
+                    this.machines = list;
+                    this.machines_loaded = true;
+                    this.this_machine = this.services.provider.this_machine_id();
+                    this.default_to_this_computer();
+                    this.load_logins(cx);
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// The person whose own computers are the only choices: the AI member's owner.
+    fn only(&self) -> Option<&str> {
+        self.owner.as_deref()
+    }
+
+    /// 归谁 picked (admins adding an AI member): the computer choice starts again.
+    pub fn set_owner(&mut self, owner: Option<String>, cx: &mut Context<Self>) {
+        if !self.admin || self.editing.is_some() || self.owner == owner {
+            return;
+        }
+        self.owner = owner;
+        self.machine = None;
+        self.machine_chosen = false;
+        self.default_to_this_computer();
+        cx.notify();
+    }
+
+    /// An AI member of somebody's own needs one of his computers picked.
+    fn needs_machine(&self) -> bool {
+        self.runner && self.only().is_some() && self.machine.is_none()
+    }
+
+    /// 添加电脑 from the sheet: the list loads again once the computer is added.
+    fn add_computer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let form = super::machines::open_add_machine(self.services.clone(), window, cx);
+        cx.observe(&form, |this, form, cx| {
+            if form.read(cx).created().is_some() {
+                this.load_machines(cx);
+            }
+        })
+        .detach();
+    }
+
+    /// 用这台电脑 from the sheet (after the screen that says what it means).
+    fn use_this_computer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let me = cx.entity().downgrade();
+        let alone = super::solo(&self.services);
+        super::machine_actions::open_use_this(
+            alone,
+            move |cx| {
+                let _ = me.update(cx, |f, cx| {
+                    let reply = f.services.provider.use_this_mac();
+                    f.status = Status::Busy(s::THIS_MAC_SETTING_UP.into());
+                    cx.notify();
+                    cx.spawn(async move |this, cx| {
+                        let result = answer(reply).await;
+                        let _ = this.update(cx, |f, cx| {
+                            f.status = match result {
+                                Ok(()) => Status::Idle,
+                                Err(e) => Status::from_error(e),
+                            };
+                            f.load_machines(cx);
+                        });
+                    })
+                    .detach();
+                });
+            },
+            window,
+            cx,
+        );
     }
 
     /// Turns the sheet into the edit sheet of `member` and loads its runner.
@@ -1862,6 +2110,7 @@ impl BotForm {
             .update(cx, |st, cx| st.set_value(member.name.clone(), window, cx));
         self.role
             .update(cx, |st, cx| st.set_value(role, window, cx));
+        self.owner = member.owner_id.clone();
         self.editing = Some(BotEditing {
             member_id: member.id.clone(),
             name: member.name.clone(),
@@ -1992,10 +2241,15 @@ impl BotForm {
             return;
         }
         let me = super::my_id(&self.services);
+        let only = self.only();
         self.machine = self.this_machine.clone().filter(|id| {
-            self.machines
-                .iter()
-                .any(|m| &m.id == id && m.ownership(me.as_deref()) != Ownership::Theirs)
+            self.machines.iter().any(|m| {
+                &m.id == id
+                    && match only {
+                        Some(owner) => m.owner_id.as_deref() == Some(owner),
+                        None => m.ownership(me.as_deref()) != Ownership::Theirs,
+                    }
+            })
         });
     }
 
@@ -2081,6 +2335,9 @@ impl BotForm {
         if self.runner && self.runtime_value(cx).is_empty() {
             self.status = Status::Failed(s::RUNNER_RUNTIME_REQUIRED.into());
             cx.notify();
+            return;
+        }
+        if self.needs_machine() {
             return;
         }
         let Some(edit) = self.pending_edit(cx) else {
@@ -2182,12 +2439,18 @@ impl BotForm {
             cx.notify();
             return;
         }
+        if self.needs_machine() {
+            return;
+        }
         let character = Some(self.chosen_character(cx));
-        let reply = self.services.provider.create_bot_member(
+        // A member who is not an admin always makes his own: the server knows it is him.
+        let owner = self.owner.clone().filter(|_| self.admin);
+        let reply = self.services.provider.create_bot_member_for(
             name,
             (!role.is_empty()).then_some(role),
             character,
             runner,
+            owner,
         );
         self.status = Status::Busy(s::SAVING.into());
         cx.notify();
@@ -2205,6 +2468,111 @@ impl BotForm {
             });
         })
         .detach();
+    }
+}
+
+impl BotForm {
+    /// 归谁 (admins adding an AI member, once other people use the server): the team, or a
+    /// person.
+    fn owner_row(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<gpui::Div> {
+        if !self.admin || self.editing.is_some() || super::solo(&self.services) {
+            return None;
+        }
+        let people: Vec<(Option<String>, String)> =
+            std::iter::once((None, s::BOT_OWNER_TEAM.to_string()))
+                .chain(
+                    sorted(self.services.provider.members(), None)
+                        .into_iter()
+                        .filter(|m| !m.is_bot() && !m.deactivated)
+                        .map(|m| {
+                            let name = crate::ui::avatar::name_beside_avatar(&m.name).to_string();
+                            (Some(m.id), name)
+                        }),
+                )
+                .collect();
+        let picked = self.owner.clone();
+        let shown = people
+            .iter()
+            .find(|(id, _)| *id == picked)
+            .map(|(_, t)| t.clone())
+            .unwrap_or_else(|| s::BOT_OWNER_TEAM.to_string());
+        let form = cx.entity();
+        let select = widgets::popup_fixed("member-owner", shown, SELECT_WIDTH, window, cx)
+            .dropdown_menu(move |menu, _, _| {
+                people.iter().fold(menu, |menu, (id, text)| {
+                    let (id, form) = (id.clone(), form.clone());
+                    menu.item(
+                        PopupMenuItem::new(text.clone())
+                            .checked(id == picked)
+                            .on_click(move |_, _, cx| {
+                                form.update(cx, |f, cx| f.set_owner(id.clone(), cx))
+                            }),
+                    )
+                })
+            });
+        Some(sheet_form_row(s::BOT_OWNER, select, cx))
+    }
+
+    /// 在哪台电脑干活 when the owner has no computer of his own: why, and the way to one.
+    fn no_computer(&self, cx: &mut Context<Self>) -> gpui::Div {
+        let me = super::my_id(&self.services);
+        let mine = self.only().is_some() && self.only() == me.as_deref();
+        let text = if mine {
+            s::BOT_OWN_NO_COMPUTER.to_string()
+        } else {
+            let who = self
+                .only()
+                .and_then(|id| self.services.provider.member(id))
+                .map(|m| crate::ui::avatar::name_beside_avatar(&m.name).to_string())
+                .unwrap_or_default();
+            fill(s::BOT_OWNER_NO_COMPUTER, &[("person", &who)])
+        };
+        let this_mac = mine && self.services.provider.this_mac() == crate::data::ThisMac::NotSetUp;
+        let busy = self.status.busy();
+        let use_this = this_mac.then(|| {
+            let form = cx.entity();
+            disabled_push(
+                push_button(
+                    "member-use-this",
+                    s::THIS_INTRO_CONFIRM,
+                    PushStyle::Outline,
+                    PushSize::Small,
+                    cx,
+                ),
+                busy,
+                cx,
+            )
+            .on_click(move |_, window, cx| form.update(cx, |f, cx| f.use_this_computer(window, cx)))
+        });
+        let form = cx.entity();
+        let add = disabled_push(
+            push_button(
+                "member-add-computer",
+                s::COMPUTER_ADD,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            ),
+            busy,
+            cx,
+        )
+        .on_click(move |_, window, cx| form.update(cx, |f, cx| f.add_computer(window, cx)));
+        div()
+            .flex_1()
+            .min_w(px(0.))
+            .py(tokens::space::S6)
+            .flex()
+            .flex_col()
+            .items_start()
+            .gap(tokens::space::S8)
+            .child(widgets::quiet(text, cx).w_full())
+            .child(
+                div()
+                    .flex()
+                    .gap(tokens::space::S8)
+                    .children(use_this)
+                    .child(add),
+            )
     }
 }
 
@@ -2232,8 +2600,9 @@ impl Render for BotForm {
         let busy = self.status.busy();
         let (off, name_err, role_err) =
             name_role_problem(&self.value(&self.name, cx), &self.value(&self.role, cx));
-        // Work on the team's computers needs a runtime.
-        let off = off || (self.runner && self.runtime_value(cx).is_empty());
+        // Work on the team's computers needs a runtime; an AI member of somebody's own needs
+        // one of his computers.
+        let off = off || (self.runner && self.runtime_value(cx).is_empty()) || self.needs_machine();
         // Editing: the runner loads first; saving needs it in and a change.
         let load = self.editing.as_ref().map(|e| e.runner.clone());
         let runner_ready = !matches!(load, Some(RunnerLoad::Loading | RunnerLoad::Failed(_)));
@@ -2284,8 +2653,17 @@ impl Render for BotForm {
                         &self.role,
                         role_err.is_some(),
                         cx,
-                    )),
+                    ))
+                    .children(self.owner_row(window, cx)),
             );
+        if self.admin && self.editing.is_none() && self.owner.is_some() {
+            body = body.child(
+                div()
+                    .n_subheadline()
+                    .text_color(k.secondary)
+                    .child(s::BOT_OWNER_HINT),
+            );
+        }
         match &load {
             Some(RunnerLoad::Loading) => {
                 body = body.child(widgets::list_loading("bot-runner-loading", 2, false, cx));
@@ -2304,7 +2682,8 @@ impl Render for BotForm {
             }
             _ => {}
         }
-        if runner_ready {
+        // My own AI member always works on my computer: no 工作方式 to choose.
+        if runner_ready && self.admin {
             // 工作方式: two choices side by side, the one in effect raised,
             // and one line on what it means under them.
             let hint = if self.runner {
@@ -2407,11 +2786,19 @@ impl Render for BotForm {
             // somebody else's own computer stays there: that is theirs to change.
             let picked = self.machine.clone();
             let me = super::my_id(&self.services);
-            let view = PlaceView::of(&self.services, self.this_machine.as_deref(), me.as_deref());
+            let view = PlaceView::of(&self.services, self.this_machine.as_deref(), me.as_deref())
+                .only(self.only());
             let shown = machine_choice_text(picked.as_deref(), &self.machines, view);
             let options = placement_options(picked.as_deref(), &self.machines, view);
-            let elsewhere =
-                pinned_elsewhere(picked.as_deref(), &self.machines, me.as_deref()).is_some();
+            // An AI member of somebody's own is placed among his computers by whoever edits it.
+            let elsewhere = self.only().is_none()
+                && pinned_elsewhere(picked.as_deref(), &self.machines, me.as_deref()).is_some();
+            // Nobody's computer to pick: the sheet says so and offers to add one.
+            let no_computer = self.machines_loaded
+                && picked.is_none()
+                && self
+                    .only()
+                    .is_some_and(|o| own_computers(&self.machines, o).is_empty());
             let services = self.services.clone();
             let place_hint = placement_hint(picked.as_deref(), &self.machines, view, |id| {
                 services
@@ -2500,7 +2887,9 @@ impl Render for BotForm {
                         })
                         .into_any_element()
                 });
-            let machine: gpui::AnyElement = if elsewhere {
+            let machine: gpui::AnyElement = if no_computer {
+                self.no_computer(cx).into_any_element()
+            } else if elsewhere {
                 widgets::row_value(shown, cx).into_any_element()
             } else {
                 widgets::popup_fixed("member-machine", shown, MACHINE_SELECT_WIDTH, window, cx)
@@ -2538,21 +2927,26 @@ impl Render for BotForm {
                     .child(
                         sheet_form()
                             .child(sheet_form_row(s::RUNNER_MACHINE, machine, cx))
-                            .children(runtime.map(|r| sheet_form_row(s::RUNNER_RUNTIME, r, cx)))
-                            .child(field_row(
-                                s::RUNNER_REPO,
-                                "member-repo",
-                                &self.repo,
-                                false,
-                                cx,
-                            ))
-                            .child(field_row(
-                                s::RUNNER_BRANCH,
-                                "member-branch",
-                                &self.branch,
-                                false,
-                                cx,
-                            )),
+                            // Without a computer the rest waits until there is one.
+                            .when(!no_computer, |f| {
+                                f.children(
+                                    runtime.map(|r| sheet_form_row(s::RUNNER_RUNTIME, r, cx)),
+                                )
+                                .child(field_row(
+                                    s::RUNNER_REPO,
+                                    "member-repo",
+                                    &self.repo,
+                                    false,
+                                    cx,
+                                ))
+                                .child(field_row(
+                                    s::RUNNER_BRANCH,
+                                    "member-branch",
+                                    &self.branch,
+                                    false,
+                                    cx,
+                                ))
+                            }),
                     ),
             );
             // 高级: the member's own model. Off (the everyday case), the team's setting runs.
@@ -2567,29 +2961,31 @@ impl Render for BotForm {
                         cx.notify();
                     })
                 });
-            body = body.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .child(section(s::RUNNER_OWN_SECTION))
-                    .child(
-                        sheet_form()
-                            .child(sheet_form_row(s::RUNNER_OWN_MODEL, own_switch, cx))
-                            .when(own, |f| {
-                                f.child(sheet_form_row(s::RUNNER_MODEL, model, cx))
-                                    .children(
-                                        effort.map(|e| sheet_form_row(s::RUNNER_EFFORT, e, cx)),
-                                    )
-                            }),
-                    )
-                    .child(
-                        div()
-                            .pt(tokens::space::S8)
-                            .n_subheadline()
-                            .text_color(k.secondary)
-                            .child(s::RUNNER_OWN_MODEL_HINT),
-                    ),
-            );
+            body = body.when(!no_computer, |body| {
+                body.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .child(section(s::RUNNER_OWN_SECTION))
+                        .child(
+                            sheet_form()
+                                .child(sheet_form_row(s::RUNNER_OWN_MODEL, own_switch, cx))
+                                .when(own, |f| {
+                                    f.child(sheet_form_row(s::RUNNER_MODEL, model, cx))
+                                        .children(
+                                            effort.map(|e| sheet_form_row(s::RUNNER_EFFORT, e, cx)),
+                                        )
+                                }),
+                        )
+                        .child(
+                            div()
+                                .pt(tokens::space::S8)
+                                .n_subheadline()
+                                .text_color(k.secondary)
+                                .child(s::RUNNER_OWN_MODEL_HINT),
+                        ),
+                )
+            });
         }
         // The look of an existing member changes in its own sheet (更换形象…).
         // A build without the character pack has no looks to pick from.
@@ -2621,6 +3017,11 @@ impl Render for BotForm {
                 fill(s::EDIT_AI_TITLE, &[("name", &one_line(&e.name))]),
                 s::EDIT_AI_HINT,
                 common::SAVE,
+            ),
+            None if !self.admin => (
+                s::ADD_AI_TITLE.to_string(),
+                s::ADD_AI_OWN_HINT,
+                s::BOT_CREATE,
             ),
             None => (s::ADD_AI_TITLE.to_string(), s::ADD_AI_HINT, s::BOT_CREATE),
         };
@@ -3051,6 +3452,7 @@ mod tests {
             online: false,
             character: None,
             team_owner: false,
+            owner_id: None,
         }
     }
 
@@ -3131,6 +3533,7 @@ mod tests {
             this,
             me: Some("me"),
             solo: true,
+            only: None,
         };
         assert_eq!(
             machine_choice_text(None, &list, alone(Some("a"))),
@@ -3169,6 +3572,7 @@ mod tests {
             this: None,
             me: Some("me"),
             solo: false,
+            only: None,
         };
         let options = placement_options(None, &list, team);
         let texts: Vec<&str> = options.iter().map(|(_, t)| t.as_str()).collect();
@@ -3194,6 +3598,20 @@ mod tests {
         assert_eq!(options[0].1, s::RUNNER_MACHINE_ANY);
         assert_eq!(options[2].1, "MacBook");
         assert_eq!(placement_hint(Some("mine"), &list, alone, person), None);
+        // design-personal-ai 3.1: an AI member of my own lists only my computers, no 任意.
+        let own = team.only(Some("me"));
+        let options = placement_options(None, &list, own);
+        let texts: Vec<&str> = options.iter().map(|(_, t)| t.as_str()).collect();
+        assert_eq!(texts, ["MacBook（我的）"]);
+        assert_eq!(machine_choice_text(None, &list, own), s::BOT_PLACE_PICK);
+        // An admin choosing for 陈晨 sees 陈晨's computers only.
+        let theirs = team.only(Some("chen"));
+        let options = placement_options(None, &list, theirs);
+        assert_eq!(
+            options,
+            vec![(Some("chen".to_string()), "iMac".to_string())]
+        );
+        assert_eq!(own_computers(&list, "chen").len(), 1);
     }
 
     #[test]

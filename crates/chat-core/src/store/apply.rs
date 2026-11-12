@@ -215,12 +215,13 @@ pub(super) fn resolve_followups(
 
 fn upsert_member(tx: &Transaction<'_>, m: &Member) -> StoreResult<()> {
     tx.execute(
-        "INSERT INTO members (id, kind, name, role, level, avatar_url, deactivated, character, reports_to, weekly_budget_cents, team_owner)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        "INSERT INTO members (id, kind, name, role, level, avatar_url, deactivated, character, reports_to, weekly_budget_cents, team_owner, owner_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
          ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, name = excluded.name, role = excluded.role,
            level = excluded.level, avatar_url = excluded.avatar_url, deactivated = excluded.deactivated,
            character = excluded.character, reports_to = excluded.reports_to,
-           weekly_budget_cents = excluded.weekly_budget_cents, team_owner = excluded.team_owner",
+           weekly_budget_cents = excluded.weekly_budget_cents, team_owner = excluded.team_owner,
+           owner_id = excluded.owner_id",
         params![
             m.id,
             enum_str(&m.kind)?,
@@ -232,7 +233,8 @@ fn upsert_member(tx: &Transaction<'_>, m: &Member) -> StoreResult<()> {
             m.character().map(|c| c.as_str()),
             m.reports_to,
             m.weekly_budget_cents.and_then(|c| i64::try_from(c).ok()),
-            m.is_team_owner()
+            m.is_team_owner(),
+            m.owner_id
         ],
     )?;
     Ok(())

@@ -805,6 +805,8 @@ pub struct MachineForm {
     /// 谁用这台电脑 (admins, when more than one person uses the server): only me. Members
     /// always add their own computer.
     only_me: bool,
+    /// Usable (design-personal-ai 3.2): an admin adds the computer as this person's own.
+    for_person: Option<String>,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -901,6 +903,7 @@ impl MachineForm {
             created: None,
             target: InstallTarget::of_this_computer(),
             only_me: false,
+            for_person: None,
             _subscriptions: subscriptions,
         }
     }
@@ -943,6 +946,14 @@ impl MachineForm {
     /// 谁用这台电脑 picked (admins): only me, or the team.
     pub fn set_only_me(&mut self, only_me: bool, cx: &mut Context<Self>) {
         self.only_me = only_me;
+        self.for_person = None;
+        cx.notify();
+    }
+
+    /// 谁用这台电脑 picked as another person (admins): the computer is added as his own.
+    pub fn set_for_person(&mut self, person: String, cx: &mut Context<Self>) {
+        self.only_me = false;
+        self.for_person = Some(person);
         cx.notify();
     }
 
@@ -968,10 +979,16 @@ impl MachineForm {
         }
         let labels = vec![self.target.tag().to_string()];
         let personal = personal_of(i_am_owner(&self.services), self.asks_who() && self.only_me);
-        let reply = self
-            .services
-            .provider
-            .create_machine_as(name, labels, personal);
+        let reply = match self.for_person.clone().filter(|_| self.asks_who()) {
+            Some(person) => self
+                .services
+                .provider
+                .create_machine_for(name, labels, person),
+            None => self
+                .services
+                .provider
+                .create_machine_as(name, labels, personal),
+        };
         self.status = Status::Busy(s::SAVING.into());
         cx.notify();
         cx.spawn(async move |this, cx| {
@@ -991,8 +1008,76 @@ impl MachineForm {
     }
 }
 
+/// One choice of 谁用这台电脑.
+#[derive(Clone, Debug, PartialEq)]
+enum Who {
+    Team,
+    Me,
+    Person(String),
+}
+
+impl MachineForm {
+    /// 谁用这台电脑 (admins): the team, only me, or another person (his own computer, design-
+    /// personal-ai 3.2).
+    fn who_select(
+        &self,
+        busy: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        let me = my_id(&self.services);
+        let mut people = self.services.provider.members();
+        people.retain(|m| !m.is_bot() && !m.deactivated && Some(&m.id) != me.as_ref());
+        people.sort_by_cached_key(|m| m.name.trim().to_lowercase());
+        let options: Vec<(Who, String)> = [
+            (Who::Team, s::MACHINE_WHO_USES_TEAM.to_string()),
+            (Who::Me, s::MACHINE_WHO_USES_ONLY_ME.to_string()),
+        ]
+        .into_iter()
+        .chain(people.into_iter().map(|m| {
+            let name = crate::ui::avatar::name_beside_avatar(&m.name).to_string();
+            (Who::Person(m.id), name)
+        }))
+        .collect();
+        let picked = match (&self.for_person, self.only_me) {
+            (Some(p), _) => Who::Person(p.clone()),
+            (None, true) => Who::Me,
+            (None, false) => Who::Team,
+        };
+        let shown = options
+            .iter()
+            .find(|(w, _)| *w == picked)
+            .map(|(_, t)| t.clone())
+            .unwrap_or_default();
+        let form = cx.entity().downgrade();
+        disabled_push(
+            widgets::popup_fixed("machine-who", shown, tokens::size::SELECT_WIDTH, window, cx),
+            busy,
+            cx,
+        )
+        .dropdown_menu(move |menu, _, _| {
+            options.iter().fold(menu, |menu, (who, text)| {
+                let (who, form) = (who.clone(), form.clone());
+                menu.item(
+                    PopupMenuItem::new(text.clone())
+                        .checked(who == picked)
+                        .on_click(move |_, _, cx| {
+                            let who = who.clone();
+                            let _ = form.update(cx, |f, cx| match who {
+                                Who::Team => f.set_only_me(false, cx),
+                                Who::Me => f.set_only_me(true, cx),
+                                Who::Person(p) => f.set_for_person(p, cx),
+                            });
+                        }),
+                )
+            })
+        })
+        .into_any_element()
+    }
+}
+
 impl Render for MachineForm {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = native_colors(cx);
         if let Some(created) = &self.created {
             let (command, hint) = self.target.command(created);
@@ -1115,19 +1200,7 @@ impl Render for MachineForm {
             },
             cx,
         );
-        let who = self.asks_who().then(|| {
-            let form = cx.entity().downgrade();
-            widgets::choice(
-                "machine-who",
-                &[s::MACHINE_WHO_USES_TEAM, s::MACHINE_WHO_USES_ONLY_ME],
-                usize::from(self.only_me),
-                busy,
-                move |ix: usize, _: &mut Window, cx: &mut gpui::App| {
-                    let _ = form.update(cx, |this, cx| this.set_only_me(ix == 1, cx));
-                },
-                cx,
-            )
-        });
+        let who = self.asks_who().then(|| self.who_select(busy, window, cx));
         SheetLayout::new(s::COMPUTER_ADD)
             .explanation(s::COMPUTER_ADD_HINT)
             .body(

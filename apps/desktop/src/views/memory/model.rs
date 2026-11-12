@@ -310,6 +310,7 @@ mod tests {
             online: true,
             character: None,
             team_owner: false,
+            owner_id: None,
         }
     }
 

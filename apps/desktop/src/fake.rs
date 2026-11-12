@@ -993,6 +993,7 @@ fn members() -> Vec<Member> {
         online,
         character: None,
         team_owner: false,
+        owner_id: None,
     };
     // Sample bots with sample names, characters and 岗位. The ids stay the
     // sample ids the other samples use.
@@ -1992,7 +1993,18 @@ impl ChatProvider for FakeProvider {
         character: Option<CharacterId>,
         runner: Option<RunnerSetup>,
     ) -> AdminReply<BotCreated> {
-        self.create_bot_member_fake(name, role, character, runner)
+        self.create_bot_member_fake(name, role, character, runner, None)
+    }
+
+    fn create_bot_member_for(
+        &self,
+        name: String,
+        role: Option<String>,
+        character: Option<CharacterId>,
+        runner: Option<RunnerSetup>,
+        owner_id: Option<String>,
+    ) -> AdminReply<BotCreated> {
+        self.create_bot_member_fake(name, role, character, runner, owner_id)
     }
 
     fn set_member_character(
@@ -2147,7 +2159,24 @@ impl ChatProvider for FakeProvider {
     }
 
     fn create_machine(&self, name: String, labels: Vec<String>) -> AdminReply<MachineCreated> {
-        self.create_machine_fake(name, labels, None)
+        self.create_machine_fake(name, labels, None, None)
+    }
+
+    fn create_machine_for(
+        &self,
+        name: String,
+        labels: Vec<String>,
+        owner_id: String,
+    ) -> AdminReply<MachineCreated> {
+        self.create_machine_fake(name, labels, Some(true), Some(owner_id))
+    }
+
+    fn set_machine_vm(
+        &self,
+        machine_id: &str,
+        vm: Option<crate::data::VmSize>,
+    ) -> AdminReply<MachineInfo> {
+        self.set_machine_vm_fake(machine_id, vm)
     }
 
     fn create_machine_as(
@@ -2156,7 +2185,7 @@ impl ChatProvider for FakeProvider {
         labels: Vec<String>,
         personal: Option<bool>,
     ) -> AdminReply<MachineCreated> {
-        self.create_machine_fake(name, labels, personal)
+        self.create_machine_fake(name, labels, personal, None)
     }
 
     fn rename_machine(&self, machine_id: &str, name: String) -> AdminReply<MachineInfo> {

@@ -2070,7 +2070,18 @@ impl ChatProvider for CoreProvider {
         character: Option<crate::data::CharacterId>,
         runner: Option<RunnerSetup>,
     ) -> AdminReply<BotCreated> {
-        self.create_bot_member_inner(name, role, character, runner)
+        self.create_bot_member_inner(name, role, character, runner, None)
+    }
+
+    fn create_bot_member_for(
+        &self,
+        name: String,
+        role: Option<String>,
+        character: Option<crate::data::CharacterId>,
+        runner: Option<RunnerSetup>,
+        owner_id: Option<String>,
+    ) -> AdminReply<BotCreated> {
+        self.create_bot_member_inner(name, role, character, runner, owner_id)
     }
 
     fn bot_runner(&self, member_id: &str) -> AdminReply<Option<RunnerSetup>> {
@@ -2262,7 +2273,24 @@ impl ChatProvider for CoreProvider {
     }
 
     fn create_machine(&self, name: String, labels: Vec<String>) -> AdminReply<MachineCreated> {
-        self.create_machine_inner(name, labels, None)
+        self.create_machine_inner(name, labels, None, None)
+    }
+
+    fn create_machine_for(
+        &self,
+        name: String,
+        labels: Vec<String>,
+        owner_id: String,
+    ) -> AdminReply<MachineCreated> {
+        self.create_machine_inner(name, labels, Some(true), Some(owner_id))
+    }
+
+    fn set_machine_vm(
+        &self,
+        machine_id: &str,
+        vm: Option<crate::data::VmSize>,
+    ) -> AdminReply<MachineInfo> {
+        self.update_machine_inner(machine_id, None, None, Some(vm))
     }
 
     fn create_machine_as(
@@ -2271,16 +2299,16 @@ impl ChatProvider for CoreProvider {
         labels: Vec<String>,
         personal: Option<bool>,
     ) -> AdminReply<MachineCreated> {
-        self.create_machine_inner(name, labels, personal)
+        self.create_machine_inner(name, labels, personal, None)
     }
 
     fn rename_machine(&self, machine_id: &str, name: String) -> AdminReply<MachineInfo> {
-        self.update_machine_inner(machine_id, Some(name), None)
+        self.update_machine_inner(machine_id, Some(name), None, None)
     }
 
     fn set_machine_owner(&self, machine_id: &str, mine: bool) -> AdminReply<MachineInfo> {
         let owner = mine.then(|| chat_core::proto::MACHINE_OWNER_ME.to_string());
-        self.update_machine_inner(machine_id, None, Some(owner))
+        self.update_machine_inner(machine_id, None, Some(owner), None)
     }
 
     fn remove_machine(&self, machine_id: &str) -> AdminReply<()> {

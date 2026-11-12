@@ -330,6 +330,12 @@ impl MembersPage {
             .as_deref()
             .and_then(|m| self.services.provider.member(m))
             .is_some_and(|m| m.level == crate::data::MemberLevel::Owner);
+        // A member who is not an admin adds one AI member of his own (design-personal-ai 3.5).
+        let own_bot = !owner
+            && me.as_deref().is_some_and(|me| {
+                crate::data::may_add_own_bot(&self.services.provider.members(), me)
+            });
+        let member = !owner && me.is_some();
         let services = self.services.clone();
         let add = toolbar_item(
             "members-add",
@@ -342,11 +348,26 @@ impl MembersPage {
         )
         // Nothing to add to while the team has not loaded (§2.15: the
         // toolbar stays in place, its controls disabled).
-        .disabled(!owner || load != PageLoad::Ready)
+        .disabled(!(owner || member) || load != PageLoad::Ready)
         .when(load != PageLoad::Ready, |b| b.opacity(0.5))
         .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
             let invite = services.clone();
             let bot = services.clone();
+            if member {
+                let menu = menu.item(
+                    PopupMenuItem::new(c::MEMBERS_ADD_BOT_MORE)
+                        .icon(gpui_component::Icon::new(Sym::AiMember))
+                        .disabled(!own_bot)
+                        .on_click(move |_, window, cx| {
+                            crate::views::settings::open_add_bot(bot.clone(), window, cx);
+                        }),
+                );
+                return if own_bot {
+                    menu
+                } else {
+                    menu.label(crate::copy::settings::ADD_AI_OWN_LIMIT)
+                };
+            }
             menu.item(
                 PopupMenuItem::new(c::MEMBERS_INVITE_MORE)
                     .icon(gpui_component::Icon::new(Sym::Invite))
@@ -713,7 +734,16 @@ impl MembersPage {
             .filter(|g| g.member_ids.len() < team)
             .map(|g| g.name)
             .collect();
-        let mut parts: Vec<String> = m.role.clone().into_iter().collect();
+        let me = self.services.me();
+        let solo = crate::views::settings::solo(&self.services);
+        let mut parts: Vec<String> =
+            crate::views::settings::members::whose_bot(m, me.as_deref(), solo, |id| {
+                p.member(id)
+                    .map(|x| crate::ui::avatar::name_beside_avatar(&x.name).to_string())
+            })
+            .into_iter()
+            .chain(m.role.clone())
+            .collect();
         if let Some(r) = &e.stats.reports_to {
             parts.push(fill(
                 c::MEMBERS_REPORTS_TO,
@@ -730,6 +760,33 @@ impl MembersPage {
             ));
         }
         let mut actions: Vec<AnyElement> = Vec::new();
+        // My own AI member (design-personal-ai 3.5): I edit it here; admins have 团队管理.
+        if m.is_bot()
+            && !m.deactivated
+            && !self.i_am_owner()
+            && me.is_some()
+            && m.owner_id.as_deref() == me.as_deref()
+        {
+            let (services, member) = (self.services.clone(), m.clone());
+            actions.push(
+                push_button(
+                    "member-edit-own",
+                    crate::copy::settings::EDIT,
+                    PushStyle::Outline,
+                    PushSize::Small,
+                    cx,
+                )
+                .on_click(move |_, window, cx| {
+                    crate::views::settings::members::open_edit_bot(
+                        services.clone(),
+                        &member,
+                        window,
+                        cx,
+                    );
+                })
+                .into_any_element(),
+            );
+        }
         if m.is_bot() {
             // 单独问 needs a running 话题: without one it is left out, not
             // drawn as a faded button beside 交代.

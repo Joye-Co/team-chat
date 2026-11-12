@@ -237,6 +237,7 @@ pub(super) async fn set_up(
             labels: Some(labels.clone()),
             // 用这台电脑 makes it my own computer (design-roles 3.3): only what I ask is done here.
             personal: Some(true),
+            owner_id: None,
         };
         let r = http.create_machine(&req).await.map_err(SetUpError::Api)?;
         Some(NewMachine {

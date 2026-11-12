@@ -159,6 +159,28 @@ fn member_team_owner_is_stored_and_cleared() {
 }
 
 #[test]
+fn member_owner_id_is_stored_and_cleared() {
+    let (_d, s) = open();
+    let bot = Member {
+        kind: MemberKind::Bot,
+        owner_id: Some(ALICE.into()),
+        ..member("B3", "Mira")
+    };
+    s.apply_directory(Some(std::slice::from_ref(&bot)), None, None)
+        .unwrap();
+    assert_eq!(
+        s.member("B3").unwrap().unwrap().owner_id.as_deref(),
+        Some(ALICE)
+    );
+    let team = Member {
+        owner_id: None,
+        ..bot
+    };
+    s.apply_directory(Some(&[team]), None, None).unwrap();
+    assert_eq!(s.member("B3").unwrap().unwrap().owner_id, None);
+}
+
+#[test]
 fn a_cache_from_before_roles_1_reads_owners_as_admins() {
     use chat_core::store::migrations::{MIGRATIONS, run};
     let dir = tempfile::tempdir().unwrap();

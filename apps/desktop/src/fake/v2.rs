@@ -130,6 +130,7 @@ fn person(id: &str, name: &str, role: &str, online: bool, owner: bool) -> Member
         online,
         character: None,
         team_owner: owner,
+        owner_id: None,
     }
 }
 
@@ -145,6 +146,7 @@ fn bot(id: &str, name: &str, role: &str, character: &str) -> Member {
         online: true,
         character: CharacterId::parse(character),
         team_owner: false,
+        owner_id: None,
     }
 }
 
