@@ -150,28 +150,36 @@ gh workflow run release.yml --ref main -f version=<v> -f mode=windows-only # add
 Add `-f windows_unsigned=true` to `release` and `windows-only` while no Windows code signing is
 set up (below): without it they refuse to run.
 
-A release is one thing for both systems. The Windows job runs first (build, sign, install,
-uninstall, and the update from the previous release with the daemon running); the macOS job
-publishes only when it is green, and it creates the GitHub Release with the DMG and the
-installer together, then uploads the DMG and the installer to production. A Windows build that
-fails stops the release before anything is public: fix it on `main` and start the release again.
+A release is one thing for every system. Three jobs build at the same time: "Mac app" (build,
+sign, check the DMG against the previous release's), "Windows installer" (build, sign, install,
+uninstall, and the update from the previous release with the daemon running) and "Linux
+daemon". The job "Publish" runs only when all three are green: it makes the release commit and
+the tag, creates the GitHub Release with the DMG, the installer and the daemons together, then
+uploads the DMG, the installer and the Linux daemon to production. A build that fails stops the
+release before anything is public: fix it on `main` and start the release again. A run takes as
+long as its slowest build (the Windows job) plus a minute to publish.
 
-- `dry-run` (default): preflight and plan, then builds, signs and checks the DMG, the daemon
-  (against the previous release's DMG too) and the Windows installer, and keeps them as workflow
-  artifacts for 7 days. Nothing is committed, tagged or uploaded. "would stop" lines name what a
-  release would refuse.
+Between releases the workflow "Release rehearsal" runs the same builds as a dry run of the
+current version twice a week: a release that would fail shows there first, and the build
+caches of the release jobs stay warm.
+
+- `dry-run` (default): preflight and plan, then builds, signs and checks the DMG, the daemons
+  (against the previous release's DMG too) and the Windows installer, keeps them as workflow
+  artifacts for 7 days, and "Publish" checks that they are the files a release would publish.
+  Nothing is committed, tagged or uploaded. "would stop" lines name what a release would refuse.
 - `release` (main only): `chore(release): v<v>` on `main`, tag `v<v>`, GitHub Release with the
   DMG, the installer and the daemons, then `PUT /v1/admin/releases/<v>` and
   `PUT /v1/admin/releases/<v>/assets/windows` on production.
   The release commit is pushed with the workflow token, which starts no CI run on `main`.
-  Both jobs build the commit the run was started on, and the release commit goes on top of it:
-  a commit that reaches `main` while the Windows job runs (about half an hour) stops the release
-  at the macOS job's preflight ("HEAD is not origin/main"), before anything is public. Start it
+  Every job builds the commit the run was started on, and the release commit goes on top of
+  it: a commit that reaches `main` while the builds run (about twenty minutes) stops the release
+  at the preflight of "Publish" ("HEAD is not origin/main"), before anything is public. Start it
   again.
 - `upload-only` (main only): `scripts/release.sh <v> --reupload`. Downloads the DMG and the
   installer of release `v<v>`, checks them against the release's SHA-256 digests and uploads
   each to production. A file production already has with the same content counts as done; both
-  are tried; one that is missing on GitHub or refused fails the run.
+  are tried; one that is missing on GitHub or refused fails the run. Then the Linux daemon of
+  the release, when it has one.
 - `windows-only` (main only): for a release that exists without a Windows installer. Builds and
   tests the installer from the release's tag (never from what reached `main` since), then
   gives it to production and to the GitHub Release (`scripts/release.sh <v> --add-windows`).
@@ -180,10 +188,10 @@ When a release stops half way:
 
 | What happened | What is public | Repair |
 | --- | --- | --- |
-| The Windows job failed | nothing | fix on `main`, `mode=release` again |
-| The macOS job failed before the tag (build, signing, "HEAD is not origin/main") | nothing | fix or just start `mode=release` again |
-| It failed between the tag and the GitHub Release (the tag `v<v>` is on `main`, the release does not exist) | the tag | `mode=release` again: the run sees the tag without a release and resumes from it (`release.sh --resume`: both jobs build the tag, no new commit) |
-| The GitHub Release exists, an upload to production failed (the DMG arrived, the installer did not, or neither) | the GitHub Release; Mac apps may update already | `mode=upload-only`; it sends what is missing and passes over what is there |
+| A build job failed (Mac, Windows or Linux: build, signing, a test) | nothing | fix on `main`, `mode=release` again |
+| "Publish" failed before the tag ("HEAD is not origin/main", a missing secret) | nothing | fix or just start `mode=release` again |
+| It failed between the tag and the GitHub Release (the tag `v<v>` is on `main`, the release does not exist) | the tag | `mode=release` again: the run sees the tag without a release and resumes from it (`release.sh --resume`: every job builds the tag, no new commit) |
+| The GitHub Release exists, an upload to production failed (the DMG arrived, the installer or the Linux daemon did not, or none) | the GitHub Release; Mac apps may update already | `mode=upload-only`; it sends what is missing and passes over what is there |
 | Production answered 404 to an upload | the GitHub Release | the server has no release routes yet: deploy it, then `mode=upload-only` |
 | Production answers 409 in `upload-only` | | production has *another* file for that version (or is a server from before it accepted the same file twice: deploy it). A published file is never replaced: withdraw the version and release a higher one |
 | The release was made for the Mac alone | DMG only | `mode=windows-only` |
