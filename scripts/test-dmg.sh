@@ -86,7 +86,14 @@ if [ -n "$OTHER" ]; then
   MNT2="$(mktemp -d "${TMPDIR:-/tmp}/test-dmg.XXXXXX")"
   hdiutil attach -quiet -nobrowse -noautoopen -readonly -mountpoint "$MNT2" "$OTHER"
   dr1="$(designated_requirement "$APP")"
-  dr2="$(designated_requirement "$MNT2/$NAME.app")"
+  # The previous release may carry the app under a former name (product.json formerNames).
+  other_app="$MNT2/$NAME.app"
+  if [ ! -d "$other_app" ]; then
+    while IFS= read -r former; do
+      [ -n "$former" ] && [ -d "$MNT2/$former.app" ] && other_app="$MNT2/$former.app" && break
+    done < <(jq -r '.formerNames[]? // empty' "$ROOT/product.json")
+  fi
+  dr2="$(designated_requirement "$other_app" || true)"
   hdiutil detach -quiet "$MNT2" 2>/dev/null || hdiutil detach -quiet -force "$MNT2" 2>/dev/null || true
   rmdir "$MNT2" 2>/dev/null || true
   check "same designated requirement as $(basename "$OTHER")" bash -c "[ -n \"\$1\" ] && [ \"\$1\" = \"\$2\" ] && [[ \"\$1\" != cdhash* ]]" _ "$dr1" "$dr2"
