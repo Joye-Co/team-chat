@@ -32,6 +32,8 @@ working folder (relayfail-<k>.done marks it); "relaystall:<k>" sleeps like "hang
 "readback" runs the read commands `chat-run member list`, `topic state` and `artifact list`
 (with "topic:<id>", of that topic), `artifact get --id <first listed>`, `decisions list` and, with "card:<message id>", `card get`,
 and writes each answer to readback.json.
+"groupsread find:<word>" runs `chat-run group list` and `chat-run search --query <word> --all`
+(every group the run may read) and writes both answers to groupsread.json.
 "stalenote" first clears a notification left from the session before like Claude Code after a
 restart (`task_notification` stopped, then a `result` of no turns and no text), then answers.
 "background" puts a command in the background (`task_started` with `is_backgrounded`) and ends
@@ -210,6 +212,11 @@ while True:
         if card:
             got["card"] = chat_run("card", "get", "--message", card.group(1))
         open("readback.json", "w").write(json.dumps(got))
+    if "groupsread" in cue:
+        word = re.search(r"find:(\S+)", cue)
+        got = {"groups": chat_run("group", "list"),
+               "search": chat_run("search", "--query", word.group(1) if word else "x", "--all")}
+        open("groupsread.json", "w").write(json.dumps(got))
     if n == 0:
         out({"type": "system", "subtype": "init", "cwd": os.getcwd(), "session_id": sid, "model": "fake-model"})
     n += 1

@@ -933,16 +933,17 @@ pub const USAGE: &str = "usage:
   chat-run file upload --file <path> [--name <name>] [--mime <type>]
   chat-run artifact create --title <title> (--dir <folder> | --file <path>) [--entry <path>] [--kind html|file] [--note <text>] [--events events.json] [--media media.json] [--data data.json]
   chat-run artifact version --artifact <artifactId> (--dir <folder> | --file <path>) [--entry <path>] [--title <title>] [--note <text>] [--parent <version>] [--events events.json] [--media media.json] [--data data.json]
-  chat-run topic history [--before <seq>] [--after <seq>] [--limit <1-100>] [--topic <topicId>]
-  chat-run topic message --id <messageId> [--topic <topicId>]
-  chat-run topic state [--topic <topicId>]
-  chat-run search --query <text> [--group] [--limit <1-50>]
+  chat-run topic history [--before <seq>] [--after <seq>] [--limit <1-100>] [--topic <topicId>] [--in <groupId>]
+  chat-run topic message --id <messageId> [--topic <topicId>] [--in <groupId>]
+  chat-run topic state [--topic <topicId>] [--in <groupId>]
+  chat-run search --query <text> [--group | --all] [--in <groupId>] [--limit <1-50>]
   chat-run file get --id <fileId> [--out <path>]
-  chat-run artifact list [--group | --topic <topicId>]
+  chat-run artifact list [--group | --topic <topicId>] [--in <groupId>]
   chat-run artifact get --id <artifactId> [--version <n>] [--out <path>]
   chat-run card get --message <messageId>
-  chat-run decisions list [--limit <1-100>]
-  chat-run member list
+  chat-run decisions list [--limit <1-100>] [--in <groupId>]
+  chat-run member list [--in <groupId>]
+  chat-run group list
   chat-run memory note --scope member|person|group --kind lesson|playbook|preference|convention|fact|decision --text <text> [--when <text>] [--source <messageId>]
   chat-run memory search --query <text> [--limit <1-50>]
   chat-run report --state done|blocked|waiting --text <text>
@@ -957,7 +958,10 @@ group with --group) and file get read the rest. file get without --out (best: le
 writes downloads/<fileId>/<name> in the run's folder, outside the working folder, and prints
 that path; --out may name a path in the working folder (it is then committed with your work),
 in that downloads folder or in the system temp folder (e.g. \"$(mktemp -d)/x.png\").
---topic reads another topic of the run's group, never another group.
+--topic reads another topic; --in <groupId> reads another group the run may read (`chat-run
+group list` lists them: this group and the other groups of the person the run works for;
+search and artifact list then cover that whole group); search --all searches every group the
+run may read. Ids of topics, cards, 产出 and files of those groups work as they are.
 artifact get prints the 产出's versions and the entry file's text when it is text; --out also
 writes the entry file there (inside the working folder). report says how the work ended (done,
 blocked: cannot go on without something, waiting: for a person's answer); the latest report
@@ -1034,16 +1038,22 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
             _ => Err("usage: chat-run secret <NAME>".into()),
         };
     }
-    // `search --group` and `artifact list --group` are the flags without a value.
+    // `search --group`, `search --all` and `artifact list --group` are the flags without a value.
+    let is_search = args.first().map(String::as_str) == Some("search");
     let takes_group = match args.first().map(String::as_str) {
         Some("search") => true,
         Some("artifact") => args.get(1).map(String::as_str) == Some("list"),
         _ => false,
     };
     let group = takes_group && args.iter().skip(1).any(|a| a == "--group");
+    let all = is_search && args.iter().skip(1).any(|a| a == "--all");
     let without_group: Vec<String>;
-    let args = if group {
-        without_group = args.iter().filter(|a| *a != "--group").cloned().collect();
+    let args = if group || all {
+        without_group = args
+            .iter()
+            .filter(|a| !((group && *a == "--group") || (all && *a == "--all")))
+            .cloned()
+            .collect();
         &without_group[..]
     } else {
         args
@@ -1105,18 +1115,22 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
         ["topic", "history"] => (
             crate::chat_run_context::TOPIC_HISTORY,
             &args[2..],
-            &["before", "after", "limit", "topic"],
+            &["before", "after", "limit", "topic", "in"],
         ),
         ["topic", "message"] => (
             crate::chat_run_context::TOPIC_MESSAGE,
             &args[2..],
-            &["id", "topic"],
+            &["id", "topic", "in"],
         ),
-        ["topic", "state"] => (crate::chat_run_context::TOPIC_STATE, &args[2..], &["topic"]),
+        ["topic", "state"] => (
+            crate::chat_run_context::TOPIC_STATE,
+            &args[2..],
+            &["topic", "in"],
+        ),
         ["artifact", "list"] => (
             crate::chat_run_context::ARTIFACT_LIST,
             &args[2..],
-            &["topic"],
+            &["topic", "in"],
         ),
         ["artifact", "get"] => (
             crate::chat_run_context::ARTIFACT_GET,
@@ -1127,13 +1141,14 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
         ["decisions", "list"] => (
             crate::chat_run_context::DECISIONS_LIST,
             &args[2..],
-            &["limit"],
+            &["limit", "in"],
         ),
-        ["member", "list"] => (crate::chat_run_context::MEMBER_LIST, &args[2..], &[]),
+        ["member", "list"] => (crate::chat_run_context::MEMBER_LIST, &args[2..], &["in"]),
+        ["group", "list"] => (crate::chat_run_context::GROUP_LIST, &args[2..], &[]),
         ["search", ..] => (
             crate::chat_run_context::CONTEXT_SEARCH,
             &args[1..],
-            &["query", "limit"],
+            &["query", "limit", "in"],
         ),
         ["memory", "note"] => (
             crate::chat_run_context::MEMORY_NOTE,
@@ -1180,6 +1195,20 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
             Some(_) => Err("--topic must be a topic id (letters, digits, - and _)".into()),
         }
     };
+    // `--in`: another group the run may read.
+    let in_group = |f: &Flags| -> Result<Option<String>, String> {
+        match f.opt("in") {
+            None => Ok(None),
+            Some(g) if crate::chat_run_context::valid_id(g) => Ok(Some(g.to_string())),
+            Some(_) => Err("--in must be a group id (letters, digits, - and _)".into()),
+        }
+    };
+    if let Some(g) = in_group(&f)? {
+        if all {
+            return Err("--all and --in do not go together".into());
+        }
+        put("groupId", json!(g));
+    }
     match op {
         crate::chat_run_context::TOPIC_HISTORY => {
             for k in ["before", "after"] {
@@ -1210,7 +1239,8 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
             if group && t.is_some() {
                 return Err("--group and --topic do not go together".into());
             }
-            if group {
+            // `--in` without a topic: the 产出 of that whole group.
+            if group || (t.is_none() && f.opt("in").is_some()) {
                 put("scope", json!("group"));
             }
             if let Some(t) = t {
@@ -1269,8 +1299,15 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
                 return Err("--query is required".into());
             }
             put("query", json!(q));
-            if group {
+            if group && all {
+                return Err("--group and --all do not go together".into());
+            }
+            // `--in`: every topic of that group.
+            if group || f.opt("in").is_some() {
                 put("scope", json!("group"));
+            }
+            if all {
+                put("scope", json!("all"));
             }
             if let Some(n) = limit(&f, crate::chat_run_context::MAX_SEARCH_LIMIT)? {
                 put("limit", json!(n));
@@ -1450,7 +1487,7 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
             }
             put("text", json!(text));
         }
-        crate::chat_run_context::MEMBER_LIST => {}
+        crate::chat_run_context::MEMBER_LIST | crate::chat_run_context::GROUP_LIST => {}
         _ => {
             put("eventId", json!(f.req("event")?));
             match (f.opt("file"), f.opt("decline")) {
@@ -2393,6 +2430,56 @@ mod tests {
             ("decisions.list", json!({ "limit": 100 }))
         );
         assert_eq!(r(&["member", "list"]).unwrap(), ("member.list", json!({})));
+        // Another group the run may read.
+        assert_eq!(r(&["group", "list"]).unwrap(), ("group.list", json!({})));
+        assert_eq!(
+            r(&["topic", "history", "--in", "G2", "--topic", "T2"]).unwrap(),
+            ("topic.history", json!({ "groupId": "G2", "topicId": "T2" }))
+        );
+        assert_eq!(
+            r(&["topic", "message", "--id", "M1", "--in", "G2"]).unwrap(),
+            (
+                "topic.message",
+                json!({ "messageId": "M1", "groupId": "G2" })
+            )
+        );
+        assert_eq!(
+            r(&["topic", "state", "--topic", "T2", "--in", "G2"]).unwrap(),
+            ("topic.state", json!({ "topicId": "T2", "groupId": "G2" }))
+        );
+        assert_eq!(
+            r(&["artifact", "list", "--in", "G2"]).unwrap(),
+            (
+                "artifact.list",
+                json!({ "scope": "group", "groupId": "G2" })
+            )
+        );
+        assert_eq!(
+            r(&["artifact", "list", "--in", "G2", "--topic", "T2"]).unwrap(),
+            ("artifact.list", json!({ "topicId": "T2", "groupId": "G2" }))
+        );
+        assert_eq!(
+            r(&["decisions", "list", "--in", "G2"]).unwrap(),
+            ("decisions.list", json!({ "groupId": "G2" }))
+        );
+        assert_eq!(
+            r(&["member", "list", "--in", "G2"]).unwrap(),
+            ("member.list", json!({ "groupId": "G2" }))
+        );
+        assert_eq!(
+            r(&["search", "--query", "x", "--in", "G2"]).unwrap(),
+            (
+                "context.search",
+                json!({ "query": "x", "scope": "group", "groupId": "G2" })
+            )
+        );
+        assert_eq!(
+            r(&["search", "--all", "--query", "x", "--limit", "5"]).unwrap(),
+            (
+                "context.search",
+                json!({ "query": "x", "scope": "all", "limit": 5 })
+            )
+        );
         for op in [
             "artifact.list",
             "artifact.get",
@@ -2400,6 +2487,7 @@ mod tests {
             "decisions.list",
             "member.list",
             "topic.state",
+            "group.list",
         ] {
             assert!(crate::chat_run_context::OPS.contains(&op), "{op}");
         }
@@ -2416,6 +2504,14 @@ mod tests {
             &["card", "get", "--message", "M 1"],
             &["decisions", "list", "--limit", "101"],
             &["member", "list", "--group"],
+            &["group", "list", "--in", "G2"],
+            &["topic", "state", "--in", "../G"],
+            &["member", "list", "--in", ""],
+            &["search", "--query", "x", "--all", "--in", "G2"],
+            &["search", "--query", "x", "--all", "--group"],
+            &["artifact", "list", "--all"],
+            &["card", "get", "--message", "M1", "--in", "G2"],
+            &["artifact", "get", "--id", "A1", "--in", "G2"],
         ] {
             assert!(r(bad).is_err(), "{bad:?}");
         }

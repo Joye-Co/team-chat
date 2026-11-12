@@ -44,6 +44,7 @@ pub const FEATURES: &[&str] = &[
     feature::OUTPUT,
     feature::RESUME,
     feature::CONTEXT,
+    feature::GROUPS,
     feature::EFFORT,
     feature::GATES,
     feature::GITHUB,
@@ -1368,6 +1369,13 @@ fn note_sign_in(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The daemon answers `group.list` and `groupId` itself, so it says it reads other groups.
+    #[test]
+    fn hello_reports_the_groups_feature() {
+        assert!(FEATURES.contains(&feature::GROUPS));
+        assert!(crate::chat_run_context::OPS.contains(&crate::chat_run_context::GROUP_LIST));
+    }
 
     #[test]
     fn no_machine_reports_member_homes() {
