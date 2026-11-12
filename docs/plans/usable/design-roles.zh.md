@@ -329,8 +329,8 @@ R1、R3 可并行（R1 只碰成员，R3 只碰电脑，都不改对方文件，
 - `fromMachine` 存在 desk 的 meta `fromMachine:{runId}`，重来时带过去。接力的一步还不带 `fromMachine`（`RelayOrder.prev` 没有上一步的电脑），所以规则 2 只对转交和分出去成立；`relay.member_unavailable` 仍不查个人电脑。
 - 排队位置只数「更早排队、可去的电脑有交集」的运行（meta `places:{runId}`）；等自己勾过的电脑时 `phase: waiting_computer`、`waitingFor: offline`（meta `waitPersonal:{runId}`）。
 - 「改成我的电脑 / 交给团队」后，所有有运行配置的 AI 成员的 desk 都立刻重新派一次；勾选、取消勾选只重新派那一位。
-- 接管：服务端还没有 `POST /v1/runs/:id/takeover`，这里只做到「别人的个人电脑不给接管地址」；暂停、交还按 3.6。
-- 团队电脑上「受控操作只由管理员批准、不由交代人」（另一个会话的新决定）：批准人取自审批规则（`settings/rules.ts`），R4 没改团队电脑上的规则。
+- 接管：服务端还没有 `POST /v1/runs/:id/takeover`，这里只做到「别人的个人电脑不给接管地址」；暂停、交还、重试按 3.6。
+- 团队电脑上「受控操作只由管理员批准、不由交代人」（另一个会话的新决定）：批准人取自审批规则（`settings/rules.ts`），R4 没改团队电脑上的规则：要改的话，`desk/input.ts` 的 `mayApprove`、`desk/core.ts` 的 `approversOrRequester`（通知谁）和「谁可以批准」设置要一起改，留给做这个决定的单元。
 - tools/e2e 的两人两电脑场景没加；vitest 覆盖 `server/test/dispatch-ownership.test.ts`。
 
 ## 7. 真电脑上的验收步骤
