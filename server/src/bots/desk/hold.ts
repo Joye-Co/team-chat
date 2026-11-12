@@ -49,14 +49,16 @@ export function mayPause(a: HoldActor, requester: string | null, m: HoldMachine)
 /**
  * Take over (3.2, "谁能接管"): never without feature `takeover`; on a personal machine only its
  * owner; on a team machine only the requester, and only where the machine reports
- * `takeover-isolated`. Admins do not take over the runs of others.
+ * `takeover-isolated`. Admins do not take over the runs of others. `solo`: the person is the
+ * team's only active human, so no one else's credentials are on a team machine; machines made
+ * before computer ownership (line 13) are team machines, and a person alone keeps take-over there.
  */
-export function mayTakeOver(a: HoldActor, requester: string | null, m: HoldMachine): boolean {
+export function mayTakeOver(a: HoldActor, requester: string | null, m: HoldMachine, solo = false): boolean {
   if (a.kind !== "human" || m === undefined) return false;
   const how = takeoverOf(m);
   if (how === "none") return false;
   if (m.ownerId) return a.id === m.ownerId;
-  return how === "isolated" && a.id === requester;
+  return (how === "isolated" && a.id === requester) || solo;
 }
 
 /**

@@ -395,13 +395,14 @@ export class BotDesk extends DeskInteract {
     const entries: unknown[] = [];
     let cursor = afterSeq;
     let hasMore = false;
-    for (let i = 0; i < 50; i++) {
+    // Scans on until an entry is found or the log ends; after the first page in larger steps.
+    for (let size = n; ; size = MAX_PAGE) {
       const rows = this.sql
-        .exec<{ seq: number; frame: string }>("SELECT seq, frame FROM run_log WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?", runId, cursor, n + 1)
+        .exec<{ seq: number; frame: string }>("SELECT seq, frame FROM run_log WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?", runId, cursor, size + 1)
         .toArray();
-      const page = rows.slice(0, n);
+      const page = rows.slice(0, size);
       entries.push(...this.visibleEntries(runId, page.map((x) => JSON.parse(x.frame)), viewer));
-      hasMore = rows.length > n;
+      hasMore = rows.length > size;
       if (page.length > 0) cursor = page[page.length - 1].seq;
       if (!hasMore || entries.length > 0) break;
     }

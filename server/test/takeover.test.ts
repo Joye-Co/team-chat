@@ -165,6 +165,10 @@ describe("hold rights (design-takeover 3.2)", () => {
     expect(mayTakeOver(req, "req", team(ISOLATED))).toBe(true);
     expect(mayTakeOver(admin, "req", team(ISOLATED))).toBe(false);
     expect(mayTakeOver(admin, "adm", team(ISOLATED))).toBe(true);
+    // A person alone in the team: also on a team machine that is not isolated, never without the feature.
+    expect(mayTakeOver(req, "req", team(TAKEOVER), true)).toBe(true);
+    expect(mayTakeOver(req, "req", team(["pause"]), true)).toBe(false);
+    expect(mayTakeOver(bot, "bot", team(TAKEOVER), true)).toBe(false);
   });
 
   it("let the holder hand back, and an admin for him on a team machine only", () => {
@@ -256,6 +260,29 @@ describe("take-over (design-takeover T2)", () => {
     expect((await deskRow(w.bot.id, runId)).pause_gen).toBe(2);
     c.close();
     d3.close();
+  });
+
+  it("let a person alone in the team take over on a team machine that is not isolated", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: TAKEOVER, version: "1.2.0" });
+    const { c } = await Client.connect(w.human.token);
+    const { runId } = await startRun(w, c, d);
+    expect((await hold(w.human, runId, "takeover")).status).toBe(403);
+    // Everyone else leaves: no one else's credentials are on the machine any more.
+    const others = await env.DB.prepare("SELECT id FROM members WHERE kind = 'human' AND deactivated = 0 AND id != ?").bind(w.human.id).all<{ id: string }>();
+    const ids = others.results.map((x) => x.id);
+    const set = (v: number) => Promise.all(ids.map((id) => env.DB.prepare("UPDATE members SET deactivated = ? WHERE id = ?").bind(v, id).run()));
+    await set(1);
+    try {
+      const took = await hold(w.human, runId, "takeover");
+      expect(took.status, JSON.stringify(took.body)).toBe(200);
+      expect(took.body).toMatchObject({ phase: "taken_over", holdKind: "takeover", takeover: "commands", pausedBy: w.human.id });
+      await d.next((f) => f.t === "run.pause" && f.hold === "takeover");
+    } finally {
+      await set(0);
+    }
+    c.close();
+    d.close();
   });
 
   it("follow the machine owner on a personal machine running someone else's run", async () => {
@@ -512,11 +539,12 @@ describe("a person's commands (design-takeover T3)", () => {
     expect((await hold(w.human, runId, "takeover")).status).toBe(200);
     const { commandId } = (await command(w.human, runId, "yes | head")).body;
     d.event(runId, { type: "hand.command", commandId, command: "yes | head", by: w.human.id });
-    for (let i = 0; i < 5; i++) d.event(runId, { type: "hand.output", commandId, text: `y${i}\n` });
+    // More hidden frames than a page-by-page scan of 50 pages would cover at limit 1.
+    for (let i = 0; i < 60; i++) d.event(runId, { type: "hand.output", commandId, text: `y${i}\n` });
     const last = d.event(runId, { type: "hand.result", commandId, ok: true, exitCode: 0, ms: 5 });
     await d.acked(runId, last);
-    // Bob pages two at a time from after the command: the outputs are skipped, the result comes.
-    const page = await api(`/v1/runs/${runId}/events?afterSeq=1&limit=2`, { token: w.other.token });
+    // Bob pages one at a time from after the command: the outputs are skipped, the result comes.
+    const page = await api(`/v1/runs/${runId}/events?afterSeq=1&limit=1`, { token: w.other.token });
     expect(page.status).toBe(200);
     expect(page.body.entries.map((e: any) => e.event.type)).toEqual(["hand.result"]);
     expect(page.body.hasMore).toBe(false);

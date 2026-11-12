@@ -111,7 +111,11 @@ export abstract class DeskTakeover extends DeskInput {
           throw new ApiError("conflict", "someone else took the run over", "run.held");
         }
         if (takeoverOf(m) === "none") throw new ApiError("conflict", "the run's machine cannot be taken over", "run.no_takeover");
-        if (!mayTakeOver(actor, requesterOf(r), m)) throw new ApiError("forbidden", "only the owner of a personal machine, or the requester on an isolated team machine, takes over a run");
+        // A person alone in the team takes over on a team machine too (3.2, 一个人用).
+        const solo = m !== undefined && !m.ownerId && (await this.onlyHuman(actor.id));
+        if (!mayTakeOver(actor, requesterOf(r), m, solo)) {
+          throw new ApiError("forbidden", "only the owner of a personal machine, the requester on an isolated team machine, or a person alone in the team takes over a run");
+        }
         const sent = await linkStub(this.env, r.machine_id as string).toRun({ t: "run.pause", runId, by: actor.id, hold: "takeover" } as never);
         if (!sent.ok) throw new ApiError("conflict", "the run is not open on its machine");
         const now = Date.now();
@@ -285,6 +289,15 @@ export abstract class DeskTakeover extends DeskInput {
         }
       });
     }
+  }
+
+  /** True when this person is the team's only active human (design-takeover 3.2, one person). */
+  protected async onlyHuman(memberId: string): Promise<boolean> {
+    const row = await this.env.DB.prepare("SELECT 1 AS x FROM members WHERE kind = 'human' AND deactivated = 0 AND id != ? LIMIT 1")
+      .bind(memberId)
+      .first<{ x: number }>()
+      .catch(() => ({ x: 1 }));
+    return row === null;
   }
 
   /** The active human admins in the group (mentions must be group members). */
