@@ -23,9 +23,10 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
-  # A newer push replaces an older run of the same pull request; every run on main finishes,
-  # so main's caches stay fresh.
+  # A newer push replaces an older run of the same pull request. Every run on main has a group
+  # of its own: it starts at once and finishes (one group for main made each run wait for the
+  # one before it, and a third push cancelled the one that waited), so main's caches stay fresh.
+  group: ci-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
