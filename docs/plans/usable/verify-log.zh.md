@@ -135,3 +135,83 @@
 - 改了什么：`scripts/runner/host-setup.sh` 的 apt 列表加 `gh`；SELF-HOSTING（中英）加「给 AI 成员一个 GitHub 账号」。
 - 查过的：`shellcheck scripts/runner/host-setup.sh` 无输出。在团队的一台 Ubuntu 24.04.5 主机上只读查看：`apt-cache policy gh` 的候选版本是 Ubuntu 自己的 `2.45.0`（universe），所以不用另加 GitHub 的软件源；这个版本有文档里用到的 `gh auth login`（浏览器码和 `--with-token`）、`gh auth status`、`gh auth token --hostname`。主机上没有改任何东西。
 - 没走的：没有全新的 Ubuntu 主机，没有重跑 `host-setup.sh`；没有机器账号，所以「在主机上登录」「电脑页显示 `GitHub @<login>`」「提醒来和走」这几步没有真做。这些归 design-github-identity.zh.md 第 7 节的验收。
+
+# 第四轮：团队 Linux 主机上的虚拟机
+
+- 日期：2026-11-12
+- 测的 main：`228318a3`（#281 之后，含虚拟机状态重做 #268、#270、#271、#280 和 GitHub 按电脑 #273–#278）
+- 在哪跑：团队的 Linux 主机（Ubuntu 24.04，KVM，Firecracker 1.17）。主机上的正式 daemon（连正式服务器）和它的 `/srv/runner` **没有碰**：开始和结束时正式 daemon 是同一个进程，配置、目录、虚拟机、防火墙表都没动。测试全部在一个单独的系统用户和单独目录里：origin/main 的检出、自己的沙盒服务器（`wrangler dev`，只听本机，端口在 9620–9639）和 `scripts/sandbox/seed.ts` 的样例团队、从这份检出编的 daemon（release）、自己的 `work_root` 和 `[vm].dir`、用 `build-base-image.sh` 新编的基础镜像（内核拷了主机那份）、一份改了用户和数据目录的 `runner-vm` 和它自己的 sudoers 一行。为了不和正式 daemon 抢槽位（tap 名和地址按槽位算，两个 daemon 都从 0 开始会撞），测试检出里改了一行让槽位从 64 开始（没进仓库）。结束后全部停掉删掉（用户、目录、sudoers、tap、NFS 导出、镜像、主机 rustup），端口和导出查过是空的。
+- 模型：主机上已有的订阅登录属于正式 daemon 的用户，没有拿来用（不拷、不改）。Claude Code 和 Codex 都走 DeepSeek（Claude Code 用它的 Anthropic 兼容接口，Codex 用 Responses 接口，模型 `deepseek-v4-pro`），key 只在测试用户 600 的文件和测试配置里。订阅登录进虚拟机的部分只能用一个假的 Codex 登录文件（金丝雀）测。
+- AI 成员：Forge、Scout（Claude Code）、Taro（Codex），各指向一个没有远端的一次性仓库；Scout 的是一个很小的 Rust 仓库（`rust-toolchain.toml` 写 `stable`，一个依赖）。最多 4 个任务同时跑。
+
+## 结果
+
+| 条目 | 做了什么 | 结果 | 证据和备注 |
+| --- | --- | --- | --- |
+| Claude Code 在虚拟机里跑任务 | @Forge 跑 `hostname` | **不通过**（新问题 1） | 每次约 137 秒后失败：「the approval hook did not start」。审批钩子命令是 `<run folder>/bin/chat-run gate-alive`，而 `bin/chat-run` 是指向主机 daemon 程序的软链接，虚拟机里没挂那个目录，钩子起不来，Claude Code 一直等它。同样的设置在主机上（不进虚拟机）0.4 秒就跑了钩子 |
+| 同上，绕过之后 | 测试配置加 `[vm].shares = ["<daemon 程序目录>"]`（**只为测试**，正式环境不要这样做） | 通过 | 之后 Claude Code 任务都在虚拟机里做完（`hostname` 是 `vm`）。下面所有 Claude Code 的结果都在这个绕过下 |
+| Codex 在虚拟机里跑任务 | @Taro 跑 `hostname`、`git status`、`which git` | 通过 | `model: deepseek-v4-pro`；`git` 是 `/opt/runner/bin/git`（垫片在最前） |
+| 几个 Codex 任务同时跑 | 同时开 4 个 @Taro 新话题 | **不通过**（新问题 2） | 3 个失败：`failed to initialize sqlite state runtime under <line>/cli/.codex`；单独跑都成功 |
+| 接着说：工作线和会话 | Forge 新话题建 `notes.txt` 写「第一行」不提交、跑 `hostname`；同一话题再说「追加第二行，并凭记忆说上一轮 hostname 的输出」 | 通过 | 两次同一个 sessionId，第 2 次 `resumed: true`；文件两行；答「vm」没有再跑。会话在 `lines/<key>/cli/.claude/` |
+| 同一成员两个话题同时跑（vm-state §7 第 4 条） | Forge 两个新话题同时各建一个文件；再同时追问「不用工具，凭记忆说文件和内容」 | 通过 | 两个 `lines/<k>/cli` 分开；各自 `resumed: true`，分别答出 `p1.txt alpha-甲`、`p2.txt beta-乙` |
+| 工具链只装一次（§7 第 3 条） | Rust 仓库同时开 3 个话题让 Scout `cargo build` | 通过 | 三个 run 都 `toolchain stable ready`（7–8 秒），缓存里只有一份 `stable` 工具链（617 MB），三个都编译成功 |
+| 下一次不再下载、sccache 命中 | 话题 2 里 `cargo clean` 后 `cargo build -v`、`sccache -s` | 通过 | `Downloading` 0 次；sccache 命中 1、未命中 0，位置 `caches/<key>/sccache` |
+| 用户级工具跟着仓库，其余随虚拟机清掉（§7 第 6 条） | 同话题 `echo x > $HOME/foo`、`pip install --user httpie`、`npm i -g cowsay`；下一次再看 | 通过 | 下一次 `$HOME/foo`、`http` 没了，`cowsay` 还在（`caches/<key>/npm-global/bin`），`target/debug/rdemo` 还在能跑。`daemon caches` 列出三个缓存 |
+| 登录不进虚拟机、不可写 | 测试用户主机上放假的 Codex `auth.json`；@Taro 在虚拟机里看 `$CODEX_HOME`、家目录、挂载 | 部分通过 | 虚拟机里 `~/.codex`、`~/.claude` 都不存在，`/proc/mounts` 没有 CLI 目录或家目录；主机 `auth.json` 前后哈希一样；运行后 `work_root` 下 `auth.json` 0 个。daemon 把假登录判为没登录（第一次 `signed_out` 不派），所以「副本里 refresh token 为空」没看到，要真订阅 |
+| CLI 自带记忆关掉 | 同上 | 通过 | 虚拟机里 `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`，codex 参数有 `features.memories=false` |
+| 审批：Claude Code | Forge `git push origin main`（拒绝）；`git -C . push origin main`（同意） | 通过 | 都先 `approval.request`、`waiting_approval`；拒绝后没执行、话题 `needs_reply`；同意后才执行（没有远端所以失败）。拒绝那次多了一句 GitHub 没登录（新问题 4） |
+| 审批：Codex | Taro `git push origin main`（拒绝） | 通过（单独跑时） | 卡片、`waiting_approval`、拒绝后没执行。和别的任务同时跑时两次被新问题 2 打断 |
+| 接管（design-takeover §7 第 3 组） | Forge 跑 150 秒前台等待；25 秒时 Joye 接管，跑一组命令、建 `handnote.txt`，留言后交还 | 通过（一处例外） | `taken_over`、`takeover: isolated`；CLI 进程 `Tl`，虚拟机没停；人的命令 uid 不是任务 uid，`env` 只有 `HOME LANG PATH PWD SHLVL TERM`；读别的进程环境 0 条；连 vsock 2:1025 `Operation not permitted`；`git credential fill` 拿不到；看不到 `cli/` 和缓存；sudo 被拒。交还后 CLI 做完并答出 `handnote.txt` 的内容。例外：人的 `git status` 报 `detected dubious ownership`（新问题 3） |
+| `boot-test.sh` | 新基础镜像 | 通过 | `vm-init: ready after 0.72s`，列出 claude、codex、pi、bun、uv、gh 2.45、python 3.12、`rustup 1.29.3`、`sccache 0.19.0` |
+
+## #227 的 17 条和 vm-state §7
+
+#227 的家目录镜像在 1.2.8 被 vm-state 拿掉，第 2、3、10–14、17 条不再适用。
+
+| # | 条目 | 结果 |
+| --- | --- | --- |
+| 1 | `runner-vm.nft` 的 `fib daddr . iif type != local drop` | 在临时网络命名空间里加载仓库的新表：语法对、规则在。**主机现在装的是旧表**（没有这条），因为正式环境还没重跑 `host-setup.sh` |
+| 4、5 | Claude Code 不带 key / 带长期 token | 没测（没用主机订阅） |
+| 6 | Codex 副本 refresh 为空、主机文件不变 | 部分（见上） |
+| 7 | 虚拟机里看不到登录目录 | 通过 |
+| 8 | NFS 收窄 | 新 `runner-vm` 拒绝导出私有目录、整个 `caches`、`images`、根以外的路径，只许一个仓库的缓存；导出只给本虚拟机地址、`all_squash`。从虚拟机连别的槽位地址没测完 |
+| 9、15、16 | 升级前话题续接、Pi、内存检查 | 没测 |
+| vm-state 1、2 | 升级、升级前话题 | 没做（不碰正式环境），见「怎么安全地升级正式 daemon」 |
+| vm-state 3、4、6、9 | 缓存、两个话题、工具保留、记忆 | 通过 |
+| vm-state 5、7、8 | 同话题两人并发、72 小时清理、磁盘 LRU | 没测（时间） |
+
+## 新发现的问题
+
+1. **虚拟机里 Claude Code 的审批钩子找不到 `chat-run`，带审批规则的 Claude Code 任务全部起不来（阻塞，正式升级前必须修）。** `apps/daemon/src/run.rs` 的 `gate_hook = dir.join("bin").join(chat_run::link_name())` 在虚拟机里也用这个主机路径；它是指向主机 daemon 程序的软链接，虚拟机不挂那个目录。PATH 垫片那条已经区分了虚拟机（`github::GUEST_BIN`，工具盘上的 `/opt/runner/bin`），钩子没有。修法：`exec.isolated()` 时用 `/opt/runner/bin/chat-run`（`firecracker.rs` 的 `stage_tools` 已放好）。报错说「managed settings allow only managed hooks」，会误导人去查托管设置。`local-e2e.ts --vm` 要加一个带默认审批规则的场景。
+2. **几个 Codex 任务同时在虚拟机里跑时起不来：`failed to initialize sqlite state runtime under <line>/cli/.codex`。** 4 个同时 3 个失败，单独都好。主机 `/proc/fs/nfsd/clients/*/info` 里每台虚拟机的 NFS 客户端名都是 `Linux NFSv4.2 vm`（主机名都是 `vm`），同一时刻好几条 `unconfirmed`：服务端把不同虚拟机当成同一个客户端，互相顶掉租约和锁，Codex 的 SQLite 加锁失败；Claude Code 不用 SQLite。这是推断，没改代码验证。修法方向：每台虚拟机唯一的 NFSv4 客户端标识（`firecracker.rs` 启动参数加 `nfs.nfs4_unique_id=<run id>`），或每台不同的主机名（`scripts/runner/base-image/vm-init`）。复现：同时在 3–4 个新话题 @ 同一个 Codex 成员。正式配置 `max_parallel_runs = 12`，升级后会常见。
+3. **接管时人在虚拟机里跑 git 报 `detected dubious ownership`。** 人的命令是另一个 uid，共享上的文件属于任务 uid。文件能建（交还后 CLI 读得到），但 git 命令都不能用，而 design-takeover 写了人能 `git status / diff / commit`。修法：`apps/daemon/src/vm_agent.rs` 给人的命令加 `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=*`。
+4. **审批被拒后话题里多一句「这台电脑还没有登录 GitHub，推不了代码。已通知管理员」。** 命令没执行、仓库也没远端；daemon 日志 `chat-run github.token: not_found`（垫片执行前就问了 token）。没登录 GitHub 的电脑上每个被拦的推送都会多这句和一条管理员提醒。应只在 git 真要凭证时提示。
+
+## SELF-HOSTING 第 2 部分哪里不对或缺了
+
+1. 第 4 步没说 `scripts/build-daemon.sh` 要 `jq` 和 `shasum`（`shasum` 在 perl 里，这台碰巧有）。
+2. daemon 的文件名三处不一致：第 4 步装 `~/.local/bin/team-chat-daemon`，`install-daemon.sh` 装 `~/.local/bin/<slug>-daemon`，现有主机的服务启动 `~/.local/bin/daemon`。「Update」照第 4 步写。要统一。
+3. `daemon run --log-file` 只给 Windows 用（Linux 上报错「redirect the output yourself」），没写。
+4. 第 8 步示例没有 `self_update`；手编 daemon 时它会去找发布物，应写 `self_update = false` 或说明。
+5. 没写一台主机只能跑一个 `[vm]` daemon：两个 daemon 都从槽位 0 开始，tap 名、地址、`runner-vm` 状态文件会撞。写明，或加槽位起点的配置（`VmConfig` 是 `deny_unknown_fields`，注意回滚）。
+6. 第 2 步内核仍没有脚本；主机现有 6.1 内核能启动新镜像。
+
+## 怎么安全地升级正式 daemon
+
+前提：问题 1 修好并合进 main（否则升级后所有带审批规则的 Claude Code 任务起不来）；问题 2 最好也修好，否则先把 `max_parallel_runs` 调到 1–2。然后按顺序，每步都能回退：
+
+1. **备份**（root）：`daemon.toml`、`~/.local/bin/daemon`、`/usr/local/sbin/runner-vm`、`/etc/runner-vm.nft` 各拷一份 `.bak`。
+2. **等空闲**：应用电脑页上这台没有在做的任务。
+3. **主机脚本**（root）：主机检出 `git checkout <修好的版本>`，`bash scripts/runner/host-setup.sh`。装新 `runner-vm`、新防火墙表、主机 rustup，把旧家目录收成只剩会话。注意它会 `apt-get upgrade`，并跑 `install-daemon.sh`（只打印怎么把服务切到它装的文件，不会自动切）。
+4. **基础镜像**（root）：`bash scripts/runner/build-base-image.sh`；以 runner 跑 `boot-test.sh`，要看到 `rustup`、`sccache`。
+5. **daemon**（runner）：编新程序，写成同目录 `daemon.new` 再 `mv -f` 盖到 `~/.local/bin/daemon`。**不要 stop 服务**：daemon 看到文件变了，空闲时自己退出，systemd 拉起新版本。
+6. **配置**（runner）：从 `[vm]` 删掉 `shares = ["~/.claude", "~/.codex", "~/.pi"]`（新版本会跳过，留着容易误会）。空闲时 `systemctl --user restart team-chat-daemon` 让配置生效。
+7. **检查**：`daemon doctor` 没有警告；`nft list chain inet runner_vm input` 有 `fib` 一行；在测试群各 @ 一次 Claude Code 和 Codex 成员跑 `hostname`（答 `vm`），再试一次被拦的 `git push`（出卡片）；同时开 3 个 Codex 任务确认问题 2。
+8. **回退**：拷回 `.bak`，`systemctl --user restart team-chat-daemon`、`systemctl restart runner-vm-net.service`。旧 daemon 碰到收过的家目录会当普通目录用，能跑。
+
+## 这一轮没有覆盖的
+
+- 主机现有的订阅登录：没用，订阅副本、主机统一刷新、长期 token 都没在虚拟机里真跑。
+- 72 小时清理、缓存 LRU、内存检查、同话题两人并发、虚拟机连别的槽位、升级前话题续接、Pi、ACP、桌面应用。
+- GitHub：测试用户没登录 `gh`，推送只到「没有远端」为止。
+- 前台、夜间整理：DeepSeek key 只当执行者模型用，没配 AI 服务。
