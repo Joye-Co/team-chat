@@ -100,12 +100,15 @@ registerRoute({
     if (!SecretName.safeParse(params.name).success) throw new ApiError("invalid", "a key's name is an environment variable name (A-Z, 0-9, _)");
     const req = await body(SetSecretRequest);
     const link = await machine(env, auth as AuthContext, params.id);
-    sent(await link.accountsFrame({ t: "secret.set", name: params.name, sealed: req.sealed, members: req.members }));
+    // 机 4.3: `ask` only when set, and only to a daemon that keeps it (an older one would give the
+    // key to every run without asking).
+    if (req.ask && !(await link.hasAskKeys())) sent((await link.status()).connected ? "unsupported" : "offline");
+    sent(await link.accountsFrame({ t: "secret.set", name: params.name, sealed: req.sealed, members: req.members, ...(req.ask ? { ask: true } : {}) }));
     await env.DB.batch([
       auditStatement(env.DB, auth as AuthContext, {
         action: "machine.secret.set",
         target: params.id,
-        details: { name: params.name, members: req.members },
+        details: { name: params.name, members: req.members, ...(req.ask ? { ask: true } : {}) },
       }),
     ]);
     return { ok: true };

@@ -23,7 +23,8 @@ import { logger as baseLogger, type Logger } from "../core/logger";
 import { runMigrations } from "../core/migrations";
 import { LOGINS_MIGRATION, METRICS_MIGRATION, latestMetrics, readSeries, recordMetrics } from "../monitor/store";
 import { type MachineLogin, LoginStatusFrame } from "@chat/protocol";
-import { ASSIGN_RETRY_MS, LIMIT_SLACK_MS, LINK_IDLE_MS } from "./dispatch";
+import { ALERT_OFFLINE_MS, type AlertNote, type MachineAlert, heartbeatAlerts, notifyAlert, withdrawAlert } from "../monitor/alerts";
+import { ASSIGN_RETRY_MS, LIMIT_SLACK_MS, LINK_IDLE_MS, cliName } from "./dispatch";
 import { type BotsEnv, deskStub } from "./env";
 
 export const MACHINE_HEADER = "x-chat-machine-id";
@@ -402,6 +403,7 @@ export class MachineLink extends DurableObject<BotsEnv> {
     const since = Number(this.meta("offline_since") ?? 0);
     const logged = this.meta("offline_logged") !== null;
     this.sql.exec("DELETE FROM meta WHERE key IN ('offline_since', 'offline_logged')");
+    this.clearAlert("offline");
     if (!since || !logged || !this.machineId) return;
     this.ctx.waitUntil(
       recordActivity(this.env.DB, {
@@ -418,19 +420,108 @@ export class MachineLink extends DurableObject<BotsEnv> {
   /** From the alarm: 离线 once the machine stayed away for the grace. */
   private async offlineCheck(now: number): Promise<void> {
     const since = Number(this.meta("offline_since") ?? 0);
-    if (!since || this.meta("offline_logged") !== null || this.socket() !== null || !this.machineId) return;
-    if (now - since < OFFLINE_GRACE_MS) {
-      await this.ensureAlarm(since + OFFLINE_GRACE_MS);
+    if (!since || this.socket() !== null || !this.machineId) return;
+    if (this.meta("offline_logged") === null) {
+      if (now - since < OFFLINE_GRACE_MS) {
+        await this.ensureAlarm(since + OFFLINE_GRACE_MS);
+        return;
+      }
+      this.setMeta("offline_logged", String(now));
+      await recordActivity(this.env.DB, {
+        at: since,
+        kind: "machine",
+        action: "machine.offline",
+        target: this.machineId,
+        machineId: this.machineId,
+      }).catch((err) => this.log.warn("activity offline failed", { err }));
+    }
+    // 机 5.1: still away after 10 minutes, the managers hear of it (when an AI member depends on it).
+    if (now - since < ALERT_OFFLINE_MS) {
+      await this.ensureAlarm(since + ALERT_OFFLINE_MS);
       return;
     }
-    this.setMeta("offline_logged", String(now));
-    await recordActivity(this.env.DB, {
-      at: since,
-      kind: "machine",
-      action: "machine.offline",
-      target: this.machineId,
-      machineId: this.machineId,
-    }).catch((err) => this.log.warn("activity offline failed", { err }));
+    this.raiseAlert({ key: "offline", kind: "offline", since }, now);
+  }
+
+  // -------------------------------------------------------------------------
+  // 机 5.1: alerts to the computer's managers (monitor/alerts.ts)
+  // -------------------------------------------------------------------------
+
+  private upAlerts(): Record<string, MachineAlert & { notes?: AlertNote[] }> {
+    try {
+      return JSON.parse(this.meta("alerts") ?? "{}") as Record<string, MachineAlert & { notes?: AlertNote[] }>;
+    } catch {
+      return {};
+    }
+  }
+
+  private saveAlerts(all: Record<string, MachineAlert & { notes?: AlertNote[] }>): void {
+    if (Object.keys(all).length === 0) this.sql.exec("DELETE FROM meta WHERE key = 'alerts'");
+    else this.setMeta("alerts", JSON.stringify(all));
+  }
+
+  /** Starts an alert once: the notices go out in the background and are kept to withdraw later. */
+  private raiseAlert(alert: MachineAlert, now: number): void {
+    const all = this.upAlerts();
+    if (all[alert.key] || !this.machineId || this.meta("revoked")) return;
+    all[alert.key] = alert;
+    this.saveAlerts(all);
+    const machineId = this.machineId;
+    this.ctx.waitUntil(
+      notifyAlert(this.env, machineId, alert, now, (p) => this.ctx.waitUntil(p))
+        .then(async (notes) => {
+          const cur = this.upAlerts();
+          const still = cur[alert.key];
+          if (still && still.since === alert.since) {
+            cur[alert.key] = { ...still, notes };
+            this.saveAlerts(cur);
+          } else if (notes.length > 0) {
+            // It ended while the notices went out.
+            await withdrawAlert(this.env, notes);
+          }
+        })
+        .catch((err: unknown) => this.log.warn("machine alert failed", { kind: alert.kind, err })),
+    );
+  }
+
+  /** Ends an alert: its notices say it recovered. */
+  private clearAlert(key: string): void {
+    const all = this.upAlerts();
+    const a = all[key];
+    if (!a) return;
+    delete all[key];
+    this.saveAlerts(all);
+    if (a.notes && a.notes.length > 0) {
+      this.ctx.waitUntil(withdrawAlert(this.env, a.notes).catch((err: unknown) => this.log.warn("machine alert withdraw failed", { err })));
+    }
+  }
+
+  /** A heartbeat: free disk and the CLIs' sign-ins start or end alerts. */
+  private heartbeatAlerts(health: z.infer<typeof Health>, metrics: MachineMetrics | null, now: number): void {
+    let seen: Record<string, string> = {};
+    try {
+      seen = JSON.parse(this.meta("login_seen") ?? "{}") as Record<string, string>;
+    } catch {
+      // Starts over.
+    }
+    const clis = (() => {
+      try {
+        return JSON.parse(this.meta("clis") ?? "[]") as { runtime: string; kind?: string }[];
+      } catch {
+        return [];
+      }
+    })();
+    const r = heartbeatAlerts({
+      up: this.upAlerts(),
+      health,
+      ...(metrics?.logins ? { logins: metrics.logins } : {}),
+      seen,
+      cliName: (runtime) => cliName(clis.find((c) => c.runtime === runtime)?.kind, runtime),
+      now,
+    });
+    this.setMeta("login_seen", JSON.stringify(r.seen));
+    for (const key of r.clear) this.clearAlert(key);
+    for (const a of r.raise) this.raiseAlert(a, now);
   }
 
   async webSocketError(): Promise<void> {}
@@ -456,7 +547,10 @@ export class MachineLink extends DurableObject<BotsEnv> {
         this.setMeta("clock_offset", String(now - f.at));
         this.setMeta("health", JSON.stringify(f.health));
         this.setMeta("last_heartbeat_at", String(now));
-        recordMetrics(this.sql, (k, v) => this.setMeta(k, v), f.metrics, f.health, now);
+        {
+          const m = recordMetrics(this.sql, (k, v) => this.setMeta(k, v), f.metrics, f.health, now);
+          this.heartbeatAlerts(f.health, m, now);
+        }
         this.renew(
           f.runs.map((r) => r.runId),
           now,
@@ -900,6 +994,11 @@ export class MachineLink extends DurableObject<BotsEnv> {
     return "sent";
   }
 
+  /** 机 4.3: the connected daemon keeps `secret.set.ask` (feature "ask-keys"). */
+  async hasAskKeys(): Promise<boolean> {
+    return this.socket() !== null && this.hasFeature("ask-keys");
+  }
+
   /** Usable, feature "homes": sends `home.clear` now (never queued), or why it cannot. */
   async clearHome(memberId: string): Promise<"sent" | "offline" | "unsupported"> {
     const ws = this.socket();
@@ -932,6 +1031,8 @@ export class MachineLink extends DurableObject<BotsEnv> {
   async revoke(machineId: string): Promise<void> {
     this.bind(machineId);
     this.setMeta("revoked", String(Date.now()));
+    // 机 5.1: a removed computer needs nobody any more.
+    for (const key of Object.keys(this.upAlerts())) this.clearAlert(key);
     for (const ws of this.ctx.getWebSockets()) {
       this.send(ws, { t: "error", error: { code: "unauthorized", message: "machine token revoked" } });
       try {

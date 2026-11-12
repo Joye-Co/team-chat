@@ -40718,6 +40718,11 @@
         "healthy": {
           "type": "boolean"
         },
+        "unhealthy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
         "lastHeartbeatAt": {
           "type": "integer",
           "minimum": 0,
@@ -40995,6 +41000,11 @@
             "healthy": {
               "type": "boolean"
             },
+            "unhealthy": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            },
             "lastHeartbeatAt": {
               "type": "integer",
               "minimum": 0,
@@ -41256,6 +41266,11 @@
           },
           "healthy": {
             "type": "boolean"
+          },
+          "unhealthy": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
           },
           "lastHeartbeatAt": {
             "type": "integer",
@@ -42066,6 +42081,29 @@
             "required": [
               "memberId",
               "usedBytes"
+            ]
+          }
+        },
+        "problems": {
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "at": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "at",
+              "text"
             ]
           }
         }
@@ -42898,6 +42936,9 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              },
+              "ask": {
+                "type": "boolean"
               }
             },
             "required": [
@@ -42929,6 +42970,9 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        "ask": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -43462,6 +43506,9 @@
                         "type": "integer",
                         "minimum": 0,
                         "maximum": 9007199254740991
+                      },
+                      "ask": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -43552,6 +43599,29 @@
                     "required": [
                       "memberId",
                       "usedBytes"
+                    ]
+                  }
+                },
+                "problems": {
+                  "maxItems": 20,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "at": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      }
+                    },
+                    "required": [
+                      "at",
+                      "text"
                     ]
                   }
                 }
@@ -45616,6 +45686,9 @@
                 "type": "string",
                 "minLength": 1
               }
+            },
+            "ask": {
+              "type": "boolean"
             }
           },
           "required": [

@@ -388,6 +388,9 @@ pub struct RunCtx {
     pub exec: Arc<dyn Executor>,
     /// Feature "accounts": the API keys this run's member gets (none for side chats).
     pub keys: Vec<(String, String)>,
+    /// 机 4.3: the app's keys this run's member may ask for after a person approves (none for
+    /// side chats); never in its environment.
+    pub ask_keys: Vec<(String, String)>,
     /// The daemon reported this run's CLI as one whose runs stop at gated commands
     /// (`CliInfo.gates`, [`crate::gates::reported_for`]).
     pub gated: bool,
@@ -486,6 +489,7 @@ pub async fn supervise(ctx: RunCtx) {
         outputs,
         exec,
         keys,
+        ask_keys,
         gated,
     } = ctx;
     let run_id = assign.run_id.clone();
@@ -581,11 +585,10 @@ pub async fn supervise(ctx: RunCtx) {
             };
             // Marks the run's processes, also tools that leave the CLI's tree (proctree).
             env.push((proctree::ENV_FOLDER.into(), dir.display().to_string()));
-            let gate = Arc::new(crate::secrets::Gate::for_run(
-                &cfg.gated_env,
-                &assign.env_allowlist,
-                aside,
-            ));
+            let gate = Arc::new(
+                crate::secrets::Gate::for_run(&cfg.gated_env, &assign.env_allowlist, aside)
+                    .with_values(if aside { vec![] } else { ask_keys }),
+            );
             outputs.set_gate(gate.clone());
             if let Some(g) = github.as_ref().filter(|g| g.app() && !aside) {
                 outputs.set_github(g.clone());

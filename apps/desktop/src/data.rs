@@ -1310,6 +1310,8 @@ pub struct MachineInfo {
     pub labels: Vec<String>,
     pub connected: bool,
     pub healthy: bool,
+    /// 机 5.6: the check that failed when connected and not healthy ("heartbeat", "disk").
+    pub unhealthy: Option<String>,
     pub last_heartbeat_at: Option<Millis>,
     pub version: Option<String>,
     pub disk_free_bytes: Option<u64>,
@@ -2075,7 +2077,8 @@ pub trait ChatProvider: Send + Sync + 'static {
     ) -> AdminReply<chat_core::proto::monitor::MachineSecretsResponse> {
         reply_now(Err(AdminError::Unsupported))
     }
-    /// Owner: gives a machine an API key, sealed to its public key on this Mac.
+    /// Owner: gives a machine an API key, sealed to its public key on this Mac; `ask`: runs get
+    /// it only after a person approves.
     fn set_machine_secret(
         &self,
         _machine_id: &str,
@@ -2083,6 +2086,7 @@ pub trait ChatProvider: Send + Sync + 'static {
         _name: &str,
         _value: SecretText,
         _members: Vec<String>,
+        _ask: bool,
     ) -> AdminReply<()> {
         reply_now(Err(AdminError::Unsupported))
     }

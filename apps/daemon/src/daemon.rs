@@ -21,6 +21,16 @@ macro_rules! log {
     }};
 }
 
+/// A log line that is a warning or an error: also kept for 最近的问题 (机 5.4, `problems`).
+macro_rules! warn {
+    ($($a:tt)*) => {{
+        let at = crate::proto::now_ms();
+        let line = format!($($a)*);
+        eprintln!("{at} {line}");
+        crate::problems::record(at, &line);
+    }};
+}
+
 /// Frames buffered per run before message deltas are dropped (finals are always kept).
 const BUFFER_SOFT_CAP: usize = 20_000;
 
@@ -216,7 +226,7 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
     let mut updater = match crate::selfupdate::Updater::new(d.cfg.self_update) {
         Ok(u) => Some(u),
         Err(why) => {
-            log!("self-update off: {why}");
+            warn!("self-update off: {why}");
             None
         }
     };
@@ -264,7 +274,7 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
                             log!("installed a new version of the daemon; restarting");
                             break;
                         }
-                        Some(Err(e)) => log!("self-update: {e}"),
+                        Some(Err(e)) => warn!("self-update: {e}"),
                         _ => {}
                     }
                 }
@@ -469,7 +479,7 @@ impl Daemon {
             return None;
         }
         if self.redactor.text(url) != url {
-            log!("takeover_url not reported: it looks like it holds a secret");
+            warn!("takeover_url not reported: it looks like it holds a secret");
             return None;
         }
         Some(url.to_string())
@@ -563,7 +573,7 @@ impl Daemon {
 
     fn drop_link(&mut self, why: &str) {
         if self.link.is_some() || self.connecting {
-            log!("link down: {why}");
+            warn!("link down: {why}");
         }
         self.link = None;
         self.welcomed = false;
@@ -603,6 +613,7 @@ impl Daemon {
                                 .iter()
                                 .copied()
                                 .chain(self.machine_key.as_ref().map(|_| feature::ACCOUNTS))
+                                .chain(self.machine_key.as_ref().map(|_| feature::ASK_KEYS))
                                 .chain(self.cfg.vm.as_ref().map(|_| feature::HOMES))
                                 .map(str::to_string)
                                 .collect(),
@@ -622,7 +633,7 @@ impl Daemon {
                 self.last_rx = Instant::now();
                 match serde_json::from_str::<Down>(&text) {
                     Ok(f) => self.on_frame(f),
-                    Err(e) => log!("ignored server frame: {e}"),
+                    Err(e) => warn!("ignored server frame: {e}"),
                 }
             }
             LinkEvent::Closed(epoch, why) if epoch == self.epoch => self.drop_link(&why),
@@ -641,7 +652,7 @@ impl Daemon {
                 if let Some(id) = &self.cfg.machine_id
                     && id != &machine_id
                 {
-                    log!("server machine id differs from config machine_id");
+                    warn!("server machine id differs from config machine_id");
                 }
                 self.welcomed = true;
                 self.backoff_ms = 500;
@@ -738,7 +749,7 @@ impl Daemon {
                     self.gc(&run_id);
                 }
             }
-            Down::Error { error } => log!("server error {}: {}", error.code, error.message),
+            Down::Error { error } => warn!("server error {}: {}", error.code, error.message),
             // 1.1 interaction loop: one `<teamchat-event>` user turn; the runtime answers
             // `input.accepted` as for `run.input`. A run that has ended takes nothing (BotDesk
             // starts a follow-up run).
@@ -766,10 +777,11 @@ impl Daemon {
                 name,
                 sealed,
                 members,
-            } => self.on_secret_set(&name, &sealed, members),
+                ask,
+            } => self.on_secret_set(&name, &sealed, members, ask),
             Down::SecretDelete { name } => {
                 if let Err(e) = self.keys.delete(&name) {
-                    log!("key {}: {e}", crate::chat_run::safe_word(&name));
+                    warn!("key {}: {e}", crate::chat_run::safe_word(&name));
                 } else {
                     log!("key {} removed", crate::chat_run::safe_word(&name));
                 }
@@ -777,7 +789,7 @@ impl Daemon {
             Down::HomeClear { member_id } => self.on_home_clear(member_id),
             // usable: feature "takeover" is not reported yet, so the server sends neither.
             Down::RunCommand { run_id, .. } | Down::RunCommandCancel { run_id, .. } => {
-                log!("run {run_id}: take-over commands are not supported");
+                warn!("run {run_id}: take-over commands are not supported");
             }
             Down::RunOutputResult(res) => {
                 let run_id = res.run_id.clone();
@@ -925,10 +937,13 @@ impl Daemon {
         );
         log!("run {id} accepted ({})", a.runtime);
         self.send_now(&Up::RunAccept { run_id: id });
-        let keys = if a.kind.is_some() {
-            vec![]
+        let (keys, ask_keys) = if a.kind.is_some() {
+            (vec![], vec![])
         } else {
-            self.keys.env_for(&a.bot_member_id)
+            (
+                self.keys.env_for(&a.bot_member_id),
+                self.keys.ask_for(&a.bot_member_id),
+            )
         };
         let gated = self
             .clis
@@ -946,6 +961,7 @@ impl Daemon {
             outputs,
             exec: self.exec.clone(),
             keys,
+            ask_keys,
         }));
     }
 
@@ -985,7 +1001,13 @@ impl Daemon {
                         if self.stopping && !r.cancel_asked {
                             interrupted_by_stop(d, r.resume_session.as_deref());
                         }
-                        log!("run {id} done: {}", d.status);
+                        // The status only: the run's error is the CLI's text, and only the
+                        // run's own redactor knows every value the run learned.
+                        if d.status == "failed" {
+                            warn!("run {id} done: failed");
+                        } else {
+                            log!("run {id} done: {}", d.status);
+                        }
                         if let Some(rt) = &r.runtime {
                             note_sign_in(&self.signed_out, rt, d);
                         }
@@ -1181,7 +1203,7 @@ impl Daemon {
         tokio::spawn(async move {
             match crate::vm_home::clear(&vm, &member_id).await {
                 Ok(()) => log!("home of {safe} emptied"),
-                Err(e) => log!("home of {safe}: {e}"),
+                Err(e) => warn!("home of {safe}: {e}"),
             }
             clearing
                 .lock()
@@ -1190,16 +1212,16 @@ impl Daemon {
         });
     }
 
-    fn on_secret_set(&mut self, name: &str, sealed: &str, members: Vec<String>) {
+    fn on_secret_set(&mut self, name: &str, sealed: &str, members: Vec<String>, ask: bool) {
         let Some(key) = self.machine_key.clone() else {
             return;
         };
         let safe = crate::chat_run::safe_word(name);
         let value = match key.unseal(sealed) {
             Ok(v) => v,
-            Err(e) => return log!("key {safe}: {e}"),
+            Err(e) => return warn!("key {safe}: {e}"),
         };
-        match self.keys.set(name, value.clone(), members) {
+        match self.keys.set(name, value.clone(), members, ask) {
             Ok(()) => {
                 log!("key {safe} saved");
                 mask_in_runs(&self.runs, &value);
@@ -1210,7 +1232,7 @@ impl Daemon {
                     &self.key_values,
                 ));
             }
-            Err(e) => log!("key {safe}: {e}"),
+            Err(e) => warn!("key {safe}: {e}"),
         }
     }
 
@@ -1305,6 +1327,9 @@ impl Daemon {
             }
         }
         drop(marks);
+        // 机 5.4: 最近的问题, redacted with every key this daemon knows now.
+        let problems = crate::problems::recent(&self.redactor);
+        m.problems = (!problems.is_empty()).then_some(problems);
         m
     }
 }

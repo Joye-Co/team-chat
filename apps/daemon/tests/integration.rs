@@ -990,7 +990,8 @@ async fn pause_resume_answer_acceptance_and_aside() {
                         "effort",
                         "gates",
                         "github",
-                        "accounts"
+                        "accounts",
+                        "ask-keys"
                     ]
                     .map(String::from)[..]
                 )

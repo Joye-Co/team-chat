@@ -317,7 +317,8 @@ impl MachinesPage {
             .id(ElementId::Name(format!("machine-state-{}", m.id).into()))
             .child(badge)
             .when(m.connected && !m.healthy, |d| {
-                d.tooltip(|window, cx| Tooltip::new(s::MACHINE_UNHEALTHY_TIP).build(window, cx))
+                let tip = unhealthy_tip(m.unhealthy.as_deref());
+                d.tooltip(move |window, cx| Tooltip::new(tip).build(window, cx))
             });
         let this = self.this_machine.as_deref() == Some(m.id.as_str());
         let me = self.me.as_deref();
@@ -687,6 +688,17 @@ pub fn group_machines<'a>(
         of(Ownership::Team),
         of(Ownership::Theirs),
     )
+}
+
+/// 机 5.6: the 异常 tooltip names the check that failed (`Machine.unhealthy`); an older server or
+/// an unknown check keeps the general words.
+pub fn unhealthy_tip(why: Option<&str>) -> &'static str {
+    use chat_core::proto::bots::unhealthy;
+    match why {
+        Some(unhealthy::HEARTBEAT) => s::MACHINE_UNHEALTHY_TIP_HEARTBEAT,
+        Some(unhealthy::DISK) => s::MACHINE_UNHEALTHY_TIP_DISK,
+        _ => s::MACHINE_UNHEALTHY_TIP,
+    }
 }
 
 /// The second line of a computer row, most important first: what it does
@@ -1182,6 +1194,19 @@ pub fn open_add_machine(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 机 5.6: 异常 says which check failed; an unknown one or an older server keeps the
+    /// general words.
+    #[test]
+    fn the_unhealthy_tooltip_names_the_failed_check() {
+        assert_eq!(unhealthy_tip(Some("disk")), s::MACHINE_UNHEALTHY_TIP_DISK);
+        assert_eq!(
+            unhealthy_tip(Some("heartbeat")),
+            s::MACHINE_UNHEALTHY_TIP_HEARTBEAT
+        );
+        assert_eq!(unhealthy_tip(Some("gpu")), s::MACHINE_UNHEALTHY_TIP);
+        assert_eq!(unhealthy_tip(None), s::MACHINE_UNHEALTHY_TIP);
+    }
 
     /// The computer being added may run another system than this one: each choice shows
     /// its own command and its own line about where to run it.

@@ -1,0 +1,51 @@
+{
+  "kind": "MachineMonitor",
+  "valid": true,
+  "description": "usable: 最近的问题 from the latest heartbeat",
+  "value": {
+    "machine": {
+      "id": "01JBX0MACHINE00000000000AV",
+      "name": "laptop",
+      "connected": true,
+      "lastHeartbeatAt": 1762128000000
+    },
+    "series": {
+      "range": "15m",
+      "from": 1762127100000,
+      "stepMs": 30000,
+      "cpuPct": [],
+      "memPct": [],
+      "diskPct": [],
+      "netRxBps": [],
+      "netTxBps": []
+    },
+    "capacity": {
+      "slots": 1,
+      "running": 0,
+      "canTake": 1
+    },
+    "queue": {
+      "count": 0
+    },
+    "today": {
+      "finished": 0,
+      "succeeded": 0,
+      "failed": 0,
+      "finishedYesterday": 0,
+      "tokens": 0
+    },
+    "clis": [],
+    "runs": [],
+    "members": [],
+    "problems": [
+      {
+        "at": 1762127880000,
+        "text": "link down: read: connection reset"
+      },
+      {
+        "at": 1762127940000,
+        "text": "self-update: cannot reach the release server"
+      }
+    ]
+  }
+}

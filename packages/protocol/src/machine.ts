@@ -31,6 +31,8 @@ export const MACHINE_FEATURE_TAKEOVER = "takeover";
 export const MACHINE_FEATURE_TAKEOVER_ISOLATED = "takeover-isolated";
 /** Usable: the `homes` metrics and `home.clear` (VM hosts: each AI member's home folder). */
 export const MACHINE_FEATURE_HOMES = "homes";
+/** Usable (机 4.3): `secret.set.ask`: an app key runs get only after a person approves. */
+export const MACHINE_FEATURE_ASK_KEYS = "ask-keys";
 
 export const MachineInfo = z.object({
   /** The id configured on the machine (optional); the token is authoritative. */
@@ -177,6 +179,8 @@ export const SecretInfo = z.object({
   /** AI members whose runs get it; empty = every run. */
   members: z.array(Id).max(100),
   updatedAt: Millis,
+  /** Usable (机 4.3): a run gets it only after a person approves (每次用之前要批准); sent only when true. */
+  ask: z.boolean().optional(),
 });
 export type SecretInfo = z.infer<typeof SecretInfo>;
 /** One usage window of a subscription (Claude 5 h / week, Codex primary / secondary). */
@@ -211,6 +215,16 @@ export const LoginStatusFrame = z.object({
 });
 export type LoginStatusFrame = z.infer<typeof LoginStatusFrame>;
 
+export const MAX_DAEMON_PROBLEMS = 20;
+export const MAX_PROBLEM_CHARS = 500;
+/** Usable (机 5.4): one warning or error line of the daemon's log, redacted on the machine. */
+export const DaemonProblem = z.object({
+  /** When the daemon logged it (machine clock in a heartbeat; server clock in the monitor). */
+  at: Millis,
+  text: z.string().min(1).max(MAX_PROBLEM_CHARS),
+});
+export type DaemonProblem = z.infer<typeof DaemonProblem>;
+
 export const MachineMetrics = z.object({
   /** When the daemon took the sample (machine clock). */
   at: Millis,
@@ -234,6 +248,8 @@ export const MachineMetrics = z.object({
   usage: z.array(CliUsage).max(16).optional(),
   /** Usable, feature "homes": each AI member's home folder on a VM host. */
   homes: z.array(HomeUse).max(MAX_HOMES).optional(),
+  /** Usable (机 5.4): the last warning and error lines of the daemon's log, oldest first. */
+  problems: z.array(DaemonProblem).max(MAX_DAEMON_PROBLEMS).optional(),
 });
 export type MachineMetrics = z.infer<typeof MachineMetrics>;
 
@@ -688,6 +704,8 @@ export const MachineDownFrame = z.discriminatedUnion("t", [
     /** base64 of a libsodium sealed box (X25519 + XSalsa20-Poly1305) to `machine.publicKey`. */
     sealed: z.string().min(1).max(16384),
     members: z.array(Id).max(100),
+    /** Usable (机 4.3): runs get it only after a person approves; absent = false. */
+    ask: z.boolean().optional(),
   }),
   z.object({ t: z.literal("secret.delete"), name: SecretName }),
   // Usable, feature "homes": empty one AI member's home folder; sent only while connected.

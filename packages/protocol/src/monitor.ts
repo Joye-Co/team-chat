@@ -2,7 +2,7 @@
 // `GET /v1/machines/:id/monitor` answers one MachineMonitor.
 import { z } from "zod";
 import { Id, Millis } from "./common.ts";
-import { BootStats, HomeUse, MAX_HOMES, RunId, SecretInfo, SecretName, UsageWindow } from "./machine.ts";
+import { BootStats, DaemonProblem, HomeUse, MAX_DAEMON_PROBLEMS, MAX_HOMES, RunId, SecretInfo, SecretName, UsageWindow } from "./machine.ts";
 
 export const MonitorRange = z.enum(["15m", "1h", "24h"]);
 export type MonitorRange = z.infer<typeof MonitorRange>;
@@ -149,6 +149,8 @@ export const MachineMonitor = z.object({
   lastFailure: MonitorFailure.optional(),
   /** Usable, feature "homes": each AI member's home folder on a VM host, from the latest heartbeat. */
   homes: z.array(HomeUse).max(MAX_HOMES).optional(),
+  /** Usable (机 5.4): the last warning and error lines of the daemon's log (server clock), oldest first. */
+  problems: z.array(DaemonProblem).max(MAX_DAEMON_PROBLEMS).optional(),
 });
 export type MachineMonitor = z.infer<typeof MachineMonitor>;
 
@@ -187,6 +189,8 @@ export const SetSecretRequest = z.object({
   sealed: z.string().min(1).max(16384),
   /** AI members whose runs get it; empty = every run. */
   members: z.array(Id).max(100).default([]),
+  /** Usable (机 4.3): runs get it only after a person approves (每次用之前要批准); absent = false. */
+  ask: z.boolean().optional(),
 });
 export type SetSecretRequest = z.infer<typeof SetSecretRequest>;
 export { SecretName };

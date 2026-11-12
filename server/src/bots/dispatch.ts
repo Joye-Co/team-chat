@@ -314,6 +314,17 @@ export function isHealthy(m: MachineView, now: number): boolean {
   return m.health.diskFreeBytes >= MIN_FREE_DISK_BYTES;
 }
 
+/**
+ * 机 5.6: which check a connected machine fails (`Machine.unhealthy`): "heartbeat" (none for
+ * `HEARTBEAT_STALE_MS`) or "disk" (free disk below `MIN_FREE_DISK_BYTES`). Undefined when it is
+ * healthy, offline or removed.
+ */
+export function unhealthyReason(m: MachineView, now: number): "heartbeat" | "disk" | undefined {
+  if (m.revoked || !m.connected || isHealthy(m, now)) return undefined;
+  if (!m.health || m.lastHeartbeatAt === undefined || now - m.lastHeartbeatAt > HEARTBEAT_STALE_MS) return "heartbeat";
+  return "disk";
+}
+
 /** The machine has every label the bot asks for. */
 export function labelsMatch(required: string[], have: string[]): boolean {
   const set = new Set(have);
@@ -424,6 +435,8 @@ export function toMachine(m: MachineView, createdBy: string, createdAt: number, 
     runningRuns: m.runningRuns,
   };
   if (m.revoked) out.revoked = true;
+  const why = unhealthyReason(m, now);
+  if (why) out.unhealthy = why;
   if (m.ownerId) out.ownerId = m.ownerId;
   if (m.lastHeartbeatAt !== undefined) out.lastHeartbeatAt = m.lastHeartbeatAt;
   if (m.info) {

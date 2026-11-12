@@ -24,9 +24,9 @@ use crate::{
         MemberAvatar, Sym,
         icons::sym as sym_icon,
         native::{
-            Alert, AlertTone, Badge, BadgeState, Column, Empty, NativeCheckbox, NativeTextField,
-            NativeType as _, PushSize, PushStyle, StatusBadge, TruncText, card_surface,
-            native_colors, progress, push_button, skeleton, table,
+            Alert, AlertTone, Badge, BadgeState, Column, Empty, NativeCheckbox, NativeSwitch,
+            NativeTextField, NativeType as _, PushSize, PushStyle, StatusBadge, TruncText,
+            card_surface, native_colors, progress, push_button, skeleton, table,
             tokens::{avatar, height, monitor as t, radius, space, text},
         },
         sf_symbols::SymSize,
@@ -98,6 +98,8 @@ pub struct State {
     form_open: bool,
     /// AI members the new key is for; empty = every run.
     form_members: Vec<String>,
+    /// 机 4.3: runs get the new key only after a person approves.
+    form_ask: bool,
     form_error: Option<String>,
     saving: bool,
     notice: Option<String>,
@@ -120,6 +122,7 @@ impl State {
             secrets_error: None,
             form_open: false,
             form_members: vec![],
+            form_ask: false,
             form_error: None,
             saving: false,
             notice: None,
@@ -352,6 +355,13 @@ impl AdminView {
         self.acct.form_open = true;
         self.acct.form_error = None;
         self.acct.form_members.clear();
+        // A new value for a key keeps whether it asks first.
+        self.acct.form_ask = name.is_some_and(|n| {
+            self.acct
+                .secrets
+                .as_ref()
+                .is_some_and(|s| s.secrets.iter().any(|x| x.name == n && x.ask))
+        });
         let name = name.unwrap_or("").to_string();
         self.acct
             .key_name
@@ -391,6 +401,7 @@ impl AdminView {
             &name,
             SecretText::new(value),
             self.acct.form_members.clone(),
+            self.acct.form_ask,
         );
         self.acct
             .key_value
@@ -992,8 +1003,11 @@ impl AdminView {
                 });
                 vec![
                     div()
-                        .n_style(text::MONO)
-                        .child(x.name.clone())
+                        .flex()
+                        .items_center()
+                        .gap(space::S8)
+                        .child(div().n_style(text::MONO).child(x.name.clone()))
+                        .when(x.ask, |d| d.child(Badge::new(m::KEYS_ASK_BADGE)))
                         .into_any_element(),
                     div()
                         .flex()
@@ -1183,6 +1197,45 @@ impl AdminView {
                             .children(boxes),
                     ),
             )
+            .child({
+                // 机 4.3: 每次用之前要批准.
+                let ask_view = cx.entity();
+                div()
+                    .flex()
+                    .items_start()
+                    .gap(space::S12)
+                    .child(label(m::KEYS_FIELD_ASK))
+                    .child(
+                        div()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap(space::S4)
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(space::S8)
+                                    .child(
+                                        NativeSwitch::new("key-ask", self.acct.form_ask)
+                                            .name(m::KEYS_ASK_LABEL)
+                                            .on_change(move |on, _, cx| {
+                                                ask_view.update(cx, |v, cx| {
+                                                    v.acct.form_ask = on;
+                                                    cx.notify();
+                                                })
+                                            }),
+                                    )
+                                    .child(div().n_body().child(m::KEYS_ASK_LABEL)),
+                            )
+                            .child(
+                                div()
+                                    .n_footnote()
+                                    .text_color(k.secondary)
+                                    .child(m::KEYS_ASK_DESC),
+                            ),
+                    )
+            })
             .children(
                 self.acct
                     .form_error

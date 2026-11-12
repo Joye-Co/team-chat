@@ -1036,6 +1036,14 @@ pub struct BotRunner {
     pub machine_id: Option<String>,
 }
 
+/// `Machine.unhealthy` values (机 5.6).
+pub mod unhealthy {
+    /// No heartbeat for 90 s.
+    pub const HEARTBEAT: &str = "heartbeat";
+    /// Free disk below the limit.
+    pub const DISK: &str = "disk";
+}
+
 /// A machine that runs coding CLIs for bots (settings: 机器).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1053,6 +1061,14 @@ pub struct Machine {
     pub revoked: Option<bool>,
     pub connected: bool,
     pub healthy: bool,
+    /// Usable (机 5.6): the check that failed when connected and not healthy ([`unhealthy`]
+    /// values; an unknown one is a failed check without a name). None otherwise.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unhealthy: Option<String>,
     #[serde(
         default,
         deserialize_with = "non_null",

@@ -190,6 +190,7 @@ impl Sampler {
             secrets: None,
             usage: None,
             homes: None,
+            problems: None,
         }
     }
 
