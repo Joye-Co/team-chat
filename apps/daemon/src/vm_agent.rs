@@ -34,6 +34,27 @@ pub fn hand_uid(run_uid: u32) -> u32 {
     run_uid.saturating_add(1)
 }
 
+/// The environment of a person's command in the VM: `env` plus `safe.directory` for the work
+/// folder `cwd`. The command runs as another uid than the files on the share ([`hand_uid`]),
+/// so git would refuse the repository ("dubious ownership"). The entry goes after any
+/// `GIT_CONFIG_COUNT` the environment already has.
+pub fn hand_env(env: &[(String, String)], cwd: &str) -> Vec<(String, String)> {
+    let n = env
+        .iter()
+        .find(|(k, _)| k == "GIT_CONFIG_COUNT")
+        .and_then(|(_, v)| v.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    let mut out: Vec<(String, String)> = env
+        .iter()
+        .filter(|(k, _)| k != "GIT_CONFIG_COUNT")
+        .cloned()
+        .collect();
+    out.push((format!("GIT_CONFIG_KEY_{n}"), "safe.directory".into()));
+    out.push((format!("GIT_CONFIG_VALUE_{n}"), cwd.into()));
+    out.push(("GIT_CONFIG_COUNT".into(), (n + 1).to_string()));
+    out
+}
+
 /// Where a person's command sees the shares: each `open` path (the work folder, the run's git
 /// dir) is kept, every other share (the member's home, the run folder) is unmounted in the
 /// command's own mount namespace. Returns the shares to unmount, innermost first, and for
@@ -138,6 +159,38 @@ mod tests {
             without_missing_sccache(&env("/x/w"), |_| false),
             env("/x/w")
         );
+    }
+
+    #[test]
+    fn a_persons_git_trusts_the_work_folder() {
+        let kv = |k: &str, v: &str| (k.to_string(), v.to_string());
+        let env = hand_env(&[kv("PATH", "/bin")], "/w/lines/k/work");
+        assert_eq!(
+            env,
+            vec![
+                kv("PATH", "/bin"),
+                kv("GIT_CONFIG_KEY_0", "safe.directory"),
+                kv("GIT_CONFIG_VALUE_0", "/w/lines/k/work"),
+                kv("GIT_CONFIG_COUNT", "1"),
+            ]
+        );
+        // Config the environment already carries is kept; ours goes after it.
+        let env = hand_env(
+            &[
+                kv("GIT_CONFIG_COUNT", "1"),
+                kv("GIT_CONFIG_KEY_0", "a.b"),
+                kv("GIT_CONFIG_VALUE_0", "c"),
+            ],
+            "/w",
+        );
+        assert!(env.contains(&kv("GIT_CONFIG_KEY_0", "a.b")));
+        assert!(env.contains(&kv("GIT_CONFIG_KEY_1", "safe.directory")));
+        assert!(env.contains(&kv("GIT_CONFIG_VALUE_1", "/w")));
+        let counts: Vec<_> = env
+            .iter()
+            .filter(|(k, _)| k == "GIT_CONFIG_COUNT")
+            .collect();
+        assert_eq!(counts, vec![&kv("GIT_CONFIG_COUNT", "2")]);
     }
 
     #[test]
@@ -784,7 +837,7 @@ mod linux {
         let mut cmd = Command::new(&e.argv[0]);
         cmd.args(&e.argv[1..])
             .env_clear()
-            .envs(e.env.iter().map(|(k, v)| (k, v)))
+            .envs(super::hand_env(&e.env, &e.cwd))
             .env("HOME", home)
             .stdin(Stdio::null())
             .stdout(w)

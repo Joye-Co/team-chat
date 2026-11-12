@@ -335,12 +335,20 @@ impl Run {
     }
 
     /// The token as a `chat-run` answer, or the error the CLI sees.
-    async fn token(&self, emit: &(dyn Fn(RunEvent) + Send + Sync)) -> Result<String, Value> {
+    /// `report`: a missing sign-in is told to the topic and the administrators
+    /// ([`Run::missing`]); false when the command only looks at the sign-in.
+    async fn token(
+        &self,
+        report: bool,
+        emit: &(dyn Fn(RunEvent) + Send + Sync),
+    ) -> Result<String, Value> {
         let e = crate::chat_run_files::err;
         match self.fetch().await {
             Got::Token(t) => Ok(t),
             Got::Missing(reason) => {
-                self.missing(reason, emit);
+                if report {
+                    self.missing(reason, emit);
+                }
                 Err(e(
                     "not_found",
                     Some(&format!("github.{reason}")),
@@ -363,7 +371,7 @@ impl Run {
         emit: &(dyn Fn(RunEvent) + Send + Sync),
     ) -> Value {
         match op {
-            OP_TOKEN => match self.token(emit).await {
+            OP_TOKEN => match self.token(body["quiet"] != json!(true), emit).await {
                 Ok(t) => json!({ "ok": true, "result": { "token": t } }),
                 Err(e) => e,
             },
@@ -371,7 +379,7 @@ impl Run {
                 let host = body["host"].as_str().unwrap_or_default();
                 match body["action"].as_str().unwrap_or_default() {
                     "get" if host.eq_ignore_ascii_case(&self.host) => {
-                        match self.token(emit).await {
+                        match self.token(true, emit).await {
                             Ok(t) => json!({ "ok": true, "result": {
                                 "username": "x-access-token", "password": t } }),
                             Err(e) => e,
@@ -469,6 +477,16 @@ pub fn real_gh(path: &std::ffi::OsStr) -> Option<PathBuf> {
     crate::shim::real_program(GH, path)
 }
 
+/// True for the `gh` commands that do not use the sign-in: `gh auth status`, help and the
+/// version. A CLI often runs them after a person refused its push; a missing sign-in then is
+/// no failure to tell the topic and the administrators about (verify-log 4, problem 4).
+fn only_looks(args: &[String]) -> bool {
+    let first = args.first().map(String::as_str);
+    matches!(first, None | Some("help" | "version" | "--version"))
+        || args.iter().any(|a| a == "--help" || a == "-h")
+        || (first == Some("auth") && args.get(1).map(String::as_str) == Some("status"))
+}
+
 /// True for the `gh` commands a run may not use: signing in or out, and printing the token.
 fn refused(args: &[String]) -> bool {
     if args.first().map(String::as_str) != Some("auth") {
@@ -506,14 +524,17 @@ read its token here."
     };
     let mut cmd = std::process::Command::new(&real);
     cmd.args(&args);
+    let looks = only_looks(&args);
     if as_person.is_some() {
-        match ask(OP_TOKEN, json!({})) {
+        match ask(OP_TOKEN, json!({ "quiet": looks })) {
             Ok(v) if v["ok"] == json!(true) => {
                 cmd.env(
                     "GH_TOKEN",
                     v["result"]["token"].as_str().unwrap_or_default(),
                 );
             }
+            // gh itself says it is not signed in; nobody is told.
+            Ok(_) if looks => {}
             Ok(v) => {
                 eprintln!("{}", error_text(&v));
                 return 1;
@@ -759,6 +780,43 @@ mod tests {
         for c in ["auth status", "pr create", "api user", "repo view -t x"] {
             assert!(!refused(&a(c)), "{c}");
         }
+    }
+
+    #[test]
+    fn looking_at_the_sign_in_is_no_use_of_it() {
+        let a = |s: &str| s.split_whitespace().map(str::to_string).collect::<Vec<_>>();
+        for c in [
+            "",
+            "--version",
+            "version",
+            "help",
+            "auth status",
+            "pr create --help",
+        ] {
+            assert!(only_looks(&a(c)), "{c}");
+        }
+        for c in ["pr create", "api user", "repo view", "auth token"] {
+            assert!(!only_looks(&a(c)), "{c}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_quiet_token_ask_tells_nobody_of_a_missing_sign_in() {
+        let empty = tempfile::tempdir().unwrap();
+        let g = Run::new(
+            spec("machine", false, None),
+            Arc::new(crate::redact::Redactor::default()),
+            true,
+        )
+        .with_path(empty.path().as_os_str());
+        let events = std::sync::Mutex::new(vec![]);
+        let emit = |e: RunEvent| events.lock().unwrap().push(e);
+        let quiet = g.handle(OP_TOKEN, &json!({ "quiet": true }), &emit).await;
+        assert_eq!(quiet["ok"], json!(false));
+        assert!(events.lock().unwrap().is_empty());
+        let loud = g.handle(OP_TOKEN, &json!({}), &emit).await;
+        assert_eq!(loud["ok"], json!(false));
+        assert_eq!(events.lock().unwrap().len(), 1);
     }
 
     #[test]
