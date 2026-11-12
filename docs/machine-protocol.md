@@ -1274,28 +1274,53 @@ process of the daemon's machine. Nothing in this protocol changes. The VM boots 
 base image (`scripts/runner/build-base-image.sh`: Ubuntu with git, Node, Claude Code, Codex,
 Pi, bun, uv, gh) with a per-run sparse scratch disk as its writable overlay, and a tools disk
 that holds the daemon binary as `vm-agent` (PID 1 after `vm-init`) and `chat-run`. The run
-folder, the working folder (the line's `work/`, see Run folders), the run's git dir, the AI
-member's own folder (below) and any `[vm].shares` (default none) are NFS shares of the host,
-mounted at their host paths, so the worktree, session files, `stderr.log` and 产出 stay where
-the daemon reads them, and the member's next run in the topic, in a new VM, finds its working
-folder as it was left. Stdin and stdout go over vsock (port 1024) as
+folder, the working folder (the line's `work/`, see Run folders), the run's git dir, the run's
+CLI folder and its repository's cache (both below) and any `[vm].shares` (default none) are NFS
+shares of the host, mounted at their host paths, so the worktree, session files, `stderr.log`
+and 产出 stay where the daemon reads them, and the member's next run in the topic, in a new VM,
+finds its working folder as it was left. Stdin and stdout go over vsock (port 1024) as
 frames; `chat-run` in the VM uses the socket `/run/chat-run.sock`, which the agent relays to
 the run's socket over vsock (port 1025), so Codex runs use the socket instead of the request
-folder. With `[vm].homes` (default `/srv/runner/homes`) the folder `<homes>/<bot member id>` is
-the member's own folder, mounted at its host path and as the VM's `$HOME`: what a bot clones,
-installs and signs in to is there again in its next run, in every VM of that bot; the rest of
-the disk still goes with the VM. With `[vm].home_gb` (default 20) that folder is a disk image
-of that size (`<homes>/../home-images/<id>.ext4`, sparse, mounted with `discard`) that the root
-helper makes on first use and mounts (`runner-vm home-up`), so one member cannot fill the host;
-a larger `home_gb` grows existing images, a smaller one leaves them. A home folder from before
-the images moves into its image the first time it is used (when it does not fit it stays a
-plain folder without a limit until it is emptied). `home_gb = 0` keeps plain folders. Without
-`homes` the member's own folder is `<[vm].dir>/cli/<id>` and only holds its CLIs' folders.
-`home.clear` (feature `homes`) empties a member's home: the image goes, its next run starts with
-a new one; the daemon refuses while a run of that member is on the machine and holds that
-member's new runs (`busy`) while it empties. The CLI's system note says what is kept (the working
-folder for the next run in the topic, the home folder for all runs), and that processes left
-running when the turn ends are killed. 暂停 and 接管 stop only the CLI's process group (the
+folder. What a run keeps:
+
+- **The topic**: the line's working folder with its build outputs, and the CLIs' session
+  folders in `<work_root>/lines/<line key>/cli/` (`.claude/`, `.codex/`, `.pi/agent/`); a run
+  without a line (a side chat, or a run that found its topic's line taken) uses
+  `<run folder>/cli/`. One line has one run at a time, so topics that run at once never share a
+  session folder. They go with the line when it is cleaned (72 hours idle, uncommitted changes
+  committed to the branch first).
+- **The repository**: `<work_root>/caches/<repo key>/` (key: `sha256(url)[..16]` like the
+  mirror key, `sha256("path:"+path)[..16]` for a local repo, `scratch` without one), shared by
+  all members and topics of that repository on the host: the cargo registry and `sccache`,
+  npm, pnpm and bun stores, `XDG_CACHE_HOME` (pip, uv), Go, and user-level tools (rustup
+  toolchains, `cargo install`, `npm -g`, pipx and uv tools). The daemon points the matching
+  variables (`CARGO_HOME`, `RUSTUP_HOME`, `SCCACHE_DIR`, `RUSTC_WRAPPER=sccache`, `npm_config_*`,
+  `PNPM_HOME`, `BUN_INSTALL`, `XDG_CACHE_HOME`, `PIPX_*`, `UV_*`, `GOPATH`, `GOCACHE`) there
+  unless the runtime's `env` sets them, and puts the cache's bin folders on the guest `PATH`
+  after the gate shims. A run holds a shared `flock` on `<cache>/.lock` from start to end.
+  Before a run in a repository with `rust-toolchain.toml` / `rust-toolchain` (its `channel`)
+  or a `Cargo.toml` (`stable`), the daemon installs that toolchain into the cache on the host
+  (`rustup toolchain install <channel> --profile minimal -c clippy,rustfmt`, one install per
+  cache at a time, at most 15 minutes; without rustup on the host the CLI is told to install
+  it). Known credential files in a cache (`cargo/credentials*`, `npm-global/etc/npmrc`,
+  `bun/bunfig.toml`) are removed before each run. When `work_root` stays below `min_free_gb`
+  after old run folders are gone, caches go least recently used first, skipping those in use;
+  there is no size limit and no expiry. `daemon caches` lists them (key, repository, size, last
+  used), `daemon caches clear <key|all>` removes them and refuses one in use.
+- **The computer**: sign-ins (below) and GitHub never go into a VM; each run gets them as it
+  runs.
+- **Nothing else**: `$HOME` (the host's path, e.g. `/home/runner`, made on the VM's scratch
+  overlay), `/tmp` and the rest of the disk go with the VM. System packages and Docker belong
+  in the base image.
+
+Daemons from 1.2.8 keep no member home folders: `[vm].homes` and `[vm].home_gb` still parse but
+do nothing (`homes` is only searched for old sessions), the daemon reports no feature `homes`
+and no `metrics.homes`, and `home.clear` is only logged. Old folders in `<homes>` and
+`<[vm].dir>/cli` that are not mount points are removed after 14 days unused. The CLI's system note says what is kept (the working
+folder for the next run in the topic, the repository's cache for all its runs), that `$HOME`,
+`/tmp` and system folders go when the run ends, that missing system packages or Docker are for
+an administrator to add to the base image, and that processes left running when the turn ends
+are killed. 暂停 and 接管 stop only the CLI's process group (the
 agent's `Hold`); the VM keeps running, and a person's commands run in it as another user (feature
 `takeover-isolated`, see "Usable features"). When the CLI exits
 the agent syncs the shares before the daemon reads them; then the VM, its tap, its exports and
@@ -1303,10 +1328,9 @@ its scratch disk go.
 
 **Sign-ins and session records.** The host's own CLI folders (`~/.claude`, `~/.codex`, `~/.pi`)
 are never shared with a VM: the daemon skips any share that is the daemon user's home or in one
-of its dot folders, and the root helper refuses to export them. A run's CLI uses its member's
-own folders, so session records stay per member: `CLAUDE_CONFIG_DIR=<member>/.claude`,
-`CODEX_HOME=<member>/.codex`, `PI_CODING_AGENT_DIR=<member>/.pi/agent` (host paths, mounted at
-the same paths in the VM). The host's `settings.json` / `config.toml` are copied in for each
+of its dot folders, and the root helper refuses to export them. A run's CLI uses its topic's
+CLI folder (above): `CLAUDE_CONFIG_DIR=<cli>/.claude`, `CODEX_HOME=<cli>/.codex`,
+`PI_CODING_AGENT_DIR=<cli>/.pi/agent` (host paths, mounted at the same paths in the VM). The host's `settings.json` / `config.toml` are copied in for each
 run. The sign-in reaches the run in a form it cannot use to change the host's:
 
 - Claude Code: `CLAUDE_CODE_OAUTH_TOKEN`. A long-lived token (`claude setup-token` as the
@@ -1314,7 +1338,7 @@ run. The sign-in reaches the run in a form it cannot use to change the host's:
   it is, and so is `ANTHROPIC_API_KEY` from the runtime's env; otherwise the host's current
   access token from `.credentials.json` (never its refresh token). When that token would run out
   before the run's limit plus 30 minutes, the host's CLI refreshes it first.
-- Codex: `<member>/.codex/auth.json`, a copy of the host's with `refresh_token` set to `""`
+- Codex: `<cli>/.codex/auth.json`, a copy of the host's with `refresh_token` set to `""`
   (Codex reads a file without the field as no sign-in). The access token lasts 10 days; when it
   would run out before the run's limit plus 30 minutes, the host's Codex refreshes it first
   (`codex app-server`, `account/read` with `refreshToken: true`), so a refresh never happens in
@@ -1325,15 +1349,20 @@ run. The sign-in reaches the run in a form it cannot use to change the host's:
   sign-in in it has run out and cannot be renewed, the run fails before it starts.
 
 Refreshes on the host take turns (one at a time per daemon; each first rereads the host's file
-and skips when another run just renewed it), so a refresh token is never used twice. Runs of one
-member that start together take turns preparing its home (the daemon, and `flock` in the root
-helper) and writing its sign-in copy.
+and skips when another run just renewed it), so a refresh token is never used twice. The Codex and Pi copies
+(mode 600) exist only while the run does: they are deleted when the CLI exits, and a starting
+daemon deletes any left in a `cli/` folder without an active run. They never go into a cache.
 
-A run that resumes a session from before per-member folders gets that one session file copied
-from the host's folder into its member's.
+A run that resumes a session not in its `cli/` folder gets that session copied in from the first
+place that has it: the member's other lines (`lines/*/cli`), its finished run folders
+(`runs/*/cli`), the old `<[vm].homes>/<member>` and `<[vm].dir>/cli/<member>`, then the host's own
+CLI folders. When none has it, the run sends `run.assign.fullPrompt` instead of the short resume
+prompt and reports `run.done.resumeMissed` (see run.assign). The CLIs' own memory is off in every run, in a VM
+or not (`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, Codex `-c features.memories=false`; see
+Environment): what a member remembers lives in the product, not in a `cli/` folder.
 
-**Capacity.** Besides `max_parallel_runs` and the free disk (of `work_root` and of the disk the
-homes are on, whichever has less free; `health.diskFreeBytes` reports that one), a VM host
+**Capacity.** Besides `max_parallel_runs` and the free disk of `work_root`
+(`health.diskFreeBytes`), a VM host
 refuses a run (`run.reject`, `busy`) when `MemAvailable` does not cover `[vm].mem_mib` for the
 new VM and for each accepted VM that has not booted yet, above a reserve of a fifth of the
 memory (at least 2 GiB) for the running VMs to grow into.
@@ -1342,8 +1371,8 @@ The VMs reach the internet. A static nftables table (`scripts/runner/runner-vm.n
 their traffic to the host (except NFS on the host address of their own tap), to private,
 link-local and metadata ranges and to each other; strict reverse-path filtering stops address
 spoofing. Each VM's exports name only its own guest address. The daemon runs as an unprivileged
-user; the tap device, the NFS exports and the home images go through the root helper
-`runner-vm` with `sudo -n`.
+user; the tap device and the NFS exports go through the root helper `runner-vm` with
+`sudo -n`; it refuses to export `<work_root>/caches` itself (only one cache below it).
 `scripts/runner/host-setup.sh` installs all of it; `scripts/runner/net-check.py` boots a VM and
 checks its network.
 
@@ -1396,7 +1425,9 @@ example-config` prints a commented example. Keys: `server_url`, `token_file`, `m
 `command`, `args`, `env`, `model`, `asks_permission` (ACP: the agent asks before its tool
 calls, see "Gated actions"), and `[vm]` with `kernel`, `rootfs`, `dir`, `vcpus`, `mem_mib`
 (a cap: the host gives only the pages the VM touches), `scratch_gb`, `firecracker`, `helper`,
-`shares` (default none; never the daemon user's home or its dot folders), `homes`, `home_gb`. `approval_policy`, `sandbox`, `permission_mode` and
+`shares` (default none; never the daemon user's home or its dot folders). `homes` and
+`home_gb` still parse but are ignored since 1.2.8 (`daemon doctor` notes a set `home_gb`).
+`approval_policy`, `sandbox`, `permission_mode` and
 `allowed_tools` still parse (1.1 configs) but are ignored since 1.2.1. Without `[runtimes.*]`, `codex` and `claude` are added when
 found on PATH.
 
