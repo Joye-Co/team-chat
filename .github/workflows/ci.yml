@@ -5,6 +5,16 @@ name: CI
 # running the tests on a Mac, and fails with a clear verdict. The Windows installer and update
 # are tested by the Release workflow, on the real build it ships. Real coding CLIs are tested
 # locally with scripts/test-real-cli.sh.
+#
+# Each job runs only for the code it tests:
+#   server/**                      -> Server
+#   packages/**, protocol/**       -> Packages (protocol also every Rust job)
+#   apps/daemon/**, update-helper  -> Rust tests (Linux), daemon on Windows, lint
+#   apps/desktop/**, artifact-view -> Desktop on macOS, desktop on Windows, lint
+#   crates/chat-protocol|core      -> all of the Rust jobs (everything builds on them)
+#   ops/**, release scripts        -> Ops
+#   .github/workflows/**           -> actionlint only
+#   docs/**                        -> nothing
 
 on:
   pull_request:
@@ -36,13 +46,17 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      packages: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.packages == 'true' }}
-      server: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.server == 'true' }}
-      rust: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.rust == 'true' }}
-      desktop: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.desktop == 'true' }}
-      windows: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.windows == 'true' }}
-      artifact_view: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.artifact_view == 'true' }}
-      ops: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.ops == 'true' }}
+      # A manual run runs everything.
+      all: ${{ github.event_name == 'workflow_dispatch' }}
+      packages: ${{ steps.filter.outputs.packages == 'true' }}
+      server: ${{ steps.filter.outputs.server == 'true' }}
+      ops: ${{ steps.filter.outputs.ops == 'true' }}
+      workflows: ${{ steps.filter.outputs.workflows == 'true' }}
+      # Everything Rust builds on these.
+      core: ${{ steps.filter.outputs.core == 'true' }}
+      daemon: ${{ steps.filter.outputs.daemon == 'true' }}
+      desktop: ${{ steps.filter.outputs.desktop == 'true' }}
+      artifact_view: ${{ steps.filter.outputs.artifact_view == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
@@ -50,21 +64,12 @@ jobs:
         if: github.event_name != 'workflow_dispatch'
         with:
           filters: |
-            common: &common
-              - .github/workflows/ci.yml
-              - scripts/ci-run.sh
-              - scripts/lib.sh
             js: &js
-              - *common
               - package.json
               - bun.lock
               - product.json
-            cargo: &cargo
-              - *common
-              - Cargo.toml
-              - Cargo.lock
-              - rust-toolchain.toml
-              - product.json
+              - scripts/ci-run.sh
+              - scripts/lib.sh
             packages:
               - *js
               - packages/**
@@ -76,46 +81,12 @@ jobs:
               - server/**
               - packages/**
               - scripts/sandbox/**
-            rust:
-              - *cargo
-              - crates/chat-protocol/**
-              - crates/chat-core/**
-              - apps/daemon/**
-              - apps/update-helper/**
-              - tools/e2e/**
-              - protocol/**
-            desktop:
-              - *cargo
-              - crates/chat-protocol/**
-              - crates/chat-core/**
-              - crates/artifact-view/**
-              - apps/desktop/**
-              - assets/**
-              - third_party/**
-              - protocol/**
-              - docs/PRODUCT.md
-            # Everything Rust that the Windows build compiles: code under cfg(windows) cannot be
-            # built or tested on a Mac.
-            windows:
-              - *cargo
-              - crates/chat-protocol/**
-              - crates/chat-core/**
-              - crates/artifact-view/**
-              - apps/desktop/**
-              - apps/daemon/**
-              - apps/update-helper/**
-              - assets/**
-              - third_party/**
-              - protocol/**
-            artifact_view:
-              - *cargo
-              - crates/artifact-view/**
-            # ops/restore's config test reads server/wrangler.jsonc and ops/monitor/wrangler.jsonc.
             ops:
               - *js
               - ops/**
               - server/wrangler.jsonc
               - server/src/ops/index.ts
+              - server/scripts/admin.ts
               - scripts/deploy-server.sh
               - scripts/release-check.sh
               - scripts/release.sh
@@ -126,14 +97,45 @@ jobs:
               - scripts/test-release-scripts.sh
               - scripts/setup-server.sh
               - scripts/test-setup-server.sh
-              - server/scripts/admin.ts
               - CHANGELOG.md
               - docs/releases/**
+            workflows:
+              - .github/workflows/**
+            core:
+              - Cargo.toml
+              - Cargo.lock
+              - rust-toolchain.toml
+              - crates/chat-protocol/**
+              - crates/chat-core/**
+              - protocol/**
+            daemon:
+              - apps/daemon/**
+              - apps/update-helper/**
+              - tools/e2e/**
+            desktop:
+              - product.json
+              - apps/desktop/**
+              - crates/artifact-view/**
+              - assets/**
+              - third_party/**
+            artifact_view:
+              - crates/artifact-view/**
+
+  workflows:
+    name: Workflow lint
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true' || needs.changes.outputs.all == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: actionlint
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color
 
   packages:
     name: Packages (bun)
     needs: changes
-    if: needs.changes.outputs.packages == 'true'
+    if: needs.changes.outputs.packages == 'true' || needs.changes.outputs.all == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -147,12 +149,18 @@ jobs:
       - name: Test
         run: scripts/ci-run.sh test packages/*
 
+  # The server's vitest files in three shards, side by side; the typecheck and the sandbox seed
+  # (wrangler dev, every migration and the sample team of bun run dev:desktop) in the first.
   server:
-    name: Server (Workers)
+    name: Server (Workers) ${{ matrix.shard }}/3
     needs: changes
-    if: needs.changes.outputs.server == 'true'
+    if: needs.changes.outputs.server == 'true' || needs.changes.outputs.all == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -160,21 +168,24 @@ jobs:
           bun-version: 1.3.10
       - run: bun install --frozen-lockfile
       - name: Typecheck
+        if: matrix.shard == 1
         run: scripts/ci-run.sh typecheck server
       - name: Test
-        run: scripts/ci-run.sh test server
-      # The local sandbox (bun run dev:desktop): wrangler dev, every migration and the sample team
-      # through the public API. A wire change that breaks the samples fails here.
+        working-directory: server
+        run: bun run test --shard=${{ matrix.shard }}/3
       - name: Sandbox seed
+        if: matrix.shard == 1
         run: bun scripts/sandbox/up.ts --reset && bun scripts/sandbox/up.ts --stop
       - name: Sandbox server log
-        if: failure()
+        if: failure() && matrix.shard == 1
         run: tail -n 200 .tmp/sandbox/server.log || true
 
   rust-lint:
     name: Rust fmt and clippy
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.desktop == 'true'
+    if: >-
+      needs.changes.outputs.core == 'true' || needs.changes.outputs.daemon == 'true' ||
+      needs.changes.outputs.desktop == 'true' || needs.changes.outputs.all == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -194,7 +205,9 @@ jobs:
   rust:
     name: Rust tests (protocol, core, daemon)
     needs: changes
-    if: needs.changes.outputs.rust == 'true'
+    if: >-
+      needs.changes.outputs.core == 'true' || needs.changes.outputs.daemon == 'true' ||
+      needs.changes.outputs.all == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -211,7 +224,9 @@ jobs:
   desktop-macos:
     name: Desktop tests (macOS)
     needs: changes
-    if: needs.changes.outputs.desktop == 'true'
+    if: >-
+      needs.changes.outputs.core == 'true' || needs.changes.outputs.desktop == 'true' ||
+      needs.changes.outputs.all == 'true'
     runs-on: macos-15
     timeout-minutes: 20
     steps:
@@ -227,13 +242,17 @@ jobs:
       # The isolation of an 产出 page in a real WKWebView (tests/isolation.rs): a security
       # property, run when its crate changes.
       - name: cargo test (artifact view)
-        if: needs.changes.outputs.artifact_view == 'true'
+        if: needs.changes.outputs.artifact_view == 'true' || needs.changes.outputs.all == 'true'
         run: cargo test --locked -p artifact-view --no-fail-fast
 
-  windows:
-    name: Windows build and tests
+  # Code under cfg(windows) cannot be built or tested on a Mac. The desktop app and the daemon
+  # are separate jobs, so a daemon change does not build the app.
+  windows-desktop:
+    name: Desktop tests (Windows)
     needs: changes
-    if: needs.changes.outputs.windows == 'true'
+    if: >-
+      needs.changes.outputs.core == 'true' || needs.changes.outputs.desktop == 'true' ||
+      needs.changes.outputs.all == 'true'
     runs-on: windows-2025
     timeout-minutes: 25
     defaults:
@@ -245,13 +264,33 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          shared-key: windows
+          shared-key: windows-desktop
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: cargo test (desktop)
+      - name: cargo test
         run: cargo test --locked -p desktop
-      # The daemon's Windows code (Job Objects, ConPTY, access lists, the named pipe) and the
-      # update helper's file replacement; the rest of the daemon runs on Linux.
-      - name: cargo test (daemon and update helper)
+
+  # The daemon's Windows code (Job Objects, ConPTY, access lists, the named pipe) and the update
+  # helper's file replacement; the rest of the daemon runs on Linux.
+  windows-daemon:
+    name: Daemon tests (Windows)
+    needs: changes
+    if: >-
+      needs.changes.outputs.core == 'true' || needs.changes.outputs.daemon == 'true' ||
+      needs.changes.outputs.all == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: windows-daemon
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: cargo test
         run: |
           cargo test --locked -p daemon --features test-fakes --lib --bins --test process_tree
           cargo test --locked -p update-helper
@@ -259,7 +298,7 @@ jobs:
   ops:
     name: Ops (monitor, restore)
     needs: changes
-    if: needs.changes.outputs.ops == 'true'
+    if: needs.changes.outputs.ops == 'true' || needs.changes.outputs.all == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
