@@ -818,6 +818,10 @@ pub struct BotRunSummary {
     pub ended_at: Option<Millis>,
     pub updated_at: Millis,
     pub summary: Option<String>,
+    /// The model the CLI really ran with; `None` until the run started (or an old server).
+    pub model: Option<String>,
+    /// The 思考强度 the CLI really ran with; `None` = its default (or not known yet).
+    pub effort: Option<String>,
     /// The bot's plan for this run, in order: what it did, does now, waits
     /// for and does later. Empty when the run has none.
     pub plan: Vec<PlanItem>,
