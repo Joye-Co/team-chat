@@ -972,6 +972,23 @@ impl Session {
                     topic_id,
                     muted,
                 }),
+                OutboxOp::TopicHide {
+                    group_id,
+                    topic_id,
+                    hidden,
+                } => ClientFrame::TopicHide(crate::proto::TopicHideFrame {
+                    rid: rid.clone(),
+                    group_id,
+                    topic_id,
+                    hidden,
+                }),
+                OutboxOp::TopicDelete { group_id, topic_id } => {
+                    ClientFrame::TopicDelete(crate::proto::TopicDeleteFrame {
+                        rid: rid.clone(),
+                        group_id,
+                        topic_id,
+                    })
+                }
                 OutboxOp::CardAction {
                     group_id,
                     message_id,
@@ -1478,7 +1495,14 @@ impl Session {
                         }
                     }
                 }
-                OutboxOp::TopicFollow { group_id, .. } | OutboxOp::TopicMute { group_id, .. } => {
+                OutboxOp::TopicDelete { group_id, topic_id } => {
+                    // The `topic.deleted` event says the same; drop the topic now.
+                    self.drop_topic(group_id, topic_id);
+                    let _ = self.shared.store.outbox_remove(&id);
+                }
+                OutboxOp::TopicFollow { group_id, .. }
+                | OutboxOp::TopicMute { group_id, .. }
+                | OutboxOp::TopicHide { group_id, .. } => {
                     if let Some(state) =
                         result.and_then(|v| serde_json::from_value::<TopicState>(v).ok())
                         && let Err(e) = self.shared.store.apply_topic_state(group_id, &state)
@@ -1566,6 +1590,38 @@ impl Session {
                 // A refused page event (undeclared name, rate limit after retries) is dropped.
                 warn!(id = %id, ?code, "artifact event refused");
                 let _ = self.shared.store.outbox_remove(&id);
+                None
+            }
+            ErrorCode::NotFound if matches!(item.op, OutboxOp::TopicDelete { .. }) => {
+                // Already deleted.
+                if let OutboxOp::TopicDelete { group_id, topic_id } = &item.op {
+                    self.drop_topic(group_id, topic_id);
+                }
+                let _ = self.shared.store.outbox_remove(&id);
+                None
+            }
+            code if matches!(
+                item.op,
+                OutboxOp::TopicHide { .. } | OutboxOp::TopicDelete { .. }
+            ) =>
+            {
+                // A refused hide or delete (no right, the 群聊, a deleted topic) is dropped:
+                // nothing changed locally. The UI hears of it as a failed write.
+                warn!(id = %id, kind = item.op.kind(), ?code, "topic write refused");
+                let _ = self.shared.store.outbox_remove(&id);
+                self.shared.emit(ClientUpdate::TopicsChanged {
+                    group_id: group_id.clone(),
+                });
+                self.shared.emit(ClientUpdate::SendFailed(SendFailure {
+                    id,
+                    kind: item.op.kind(),
+                    group_id,
+                    topic_id: item.op.topic_id().map(str::to_string),
+                    code,
+                    message: err.message,
+                    reason: err.reason,
+                    member_ids: Vec::new(),
+                }));
                 None
             }
             code if matches!(item.op, OutboxOp::React { .. }) => {
@@ -1808,6 +1864,26 @@ impl Session {
         last
     }
 
+    /// Drops a deleted topic from the cache (my `topic.delete` was acked) and tells the UI.
+    fn drop_topic(&mut self, group_id: &str, topic_id: &str) {
+        match self.shared.store.remove_topic(group_id, topic_id) {
+            Ok(true) => {
+                self.shared.emit(ClientUpdate::TopicDeleted {
+                    group_id: group_id.into(),
+                    topic_id: topic_id.into(),
+                });
+                self.shared.emit(ClientUpdate::GroupChanged {
+                    group_id: group_id.into(),
+                });
+                self.shared.emit(ClientUpdate::TopicsChanged {
+                    group_id: group_id.into(),
+                });
+            }
+            Ok(false) => {}
+            Err(e) => warn!(error = %e, "drop deleted topic"),
+        }
+    }
+
     fn emit_outcome(&mut self, group_id: &str, out: &ApplyOutcome) {
         if out.applied == 0 {
             return;
@@ -1854,6 +1930,12 @@ impl Session {
         }
         for t in &out.artifact_topics {
             self.shared.emit(ClientUpdate::ArtifactsChanged {
+                group_id: group_id.into(),
+                topic_id: t.clone(),
+            });
+        }
+        for t in &out.deleted_topics {
+            self.shared.emit(ClientUpdate::TopicDeleted {
                 group_id: group_id.into(),
                 topic_id: t.clone(),
             });

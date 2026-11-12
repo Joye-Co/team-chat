@@ -539,6 +539,47 @@ async fn mute_and_unmute_a_topic() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn hide_and_delete_a_topic() {
+    let server = server_with_group().await;
+    let mut h = harness_with(server, |_| {});
+    next_update(&mut h.updates, "caught up", |u| {
+        matches!(u, ClientUpdate::CaughtUp)
+    })
+    .await;
+    h.client.start_topic(G1, None, "Gone", vec![]).unwrap();
+    next_update(&mut h.updates, "sent", |u| {
+        matches!(u, ClientUpdate::Sent { .. })
+    })
+    .await;
+    let tid = topic_of(&h);
+    h.client.hide_topic(&tid, true).unwrap();
+    until("hidden", || h.client.topics(G1, 10).unwrap()[0].hidden).await;
+    let sent = h.server.with(|s| s.frames_of("topic.hide"));
+    assert_eq!(sent[0]["hidden"], true);
+    h.client.delete_topic(&tid).unwrap();
+    next_update(
+        &mut h.updates,
+        "topic deleted",
+        |u| matches!(u, ClientUpdate::TopicDeleted { topic_id, .. } if *topic_id == tid),
+    )
+    .await;
+    assert!(h.client.store().topic(&tid).unwrap().is_none());
+    assert!(
+        h.client
+            .store()
+            .messages_before(&tid, None, 10)
+            .unwrap()
+            .is_empty()
+    );
+    let sent = h.server.with(|s| s.frames_of("topic.delete"));
+    assert_eq!(sent[0]["topicId"], tid.as_str());
+    until("outbox empty", || {
+        h.client.store().outbox_all().unwrap().is_empty()
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn typing_presence_and_streaming_text() {
     let server = server_with_group().await;
     let tid = server.with(|s| {

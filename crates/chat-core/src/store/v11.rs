@@ -328,7 +328,12 @@ pub(super) fn set_message_card_v2(
 }
 
 /// Applies one event of the 1.1 recovery pass: only what is idempotent and what 1.0.x lost.
-fn recover_one(tx: &Transaction<'_>, ev: &Event, out: &mut ApplyOutcome) -> StoreResult<()> {
+fn recover_one(
+    tx: &Transaction<'_>,
+    me: &str,
+    ev: &Event,
+    out: &mut ApplyOutcome,
+) -> StoreResult<()> {
     match &ev.data {
         EventData::MessageCreated(d) => {
             if let Some(c) = &d.message.card_v2
@@ -388,6 +393,13 @@ fn recover_one(tx: &Transaction<'_>, ev: &Event, out: &mut ApplyOutcome) -> Stor
         EventData::TopicLinked(d) => {
             upsert_topic_link(tx, ev, d)?;
             out.topic_list_changed = true;
+        }
+        // 1.0.x skipped it as unknown: the topic may still be cached.
+        EventData::TopicDeleted(d) => {
+            super::apply::remove_topic(tx, me, &ev.group_id, &d.topic_id)?;
+            out.deleted_topics.push(d.topic_id.clone());
+            out.topic_list_changed = true;
+            out.group_changed = true;
         }
         _ => {}
     }
@@ -647,6 +659,7 @@ impl Store {
         after: u64,
         done: bool,
     ) -> StoreResult<ApplyOutcome> {
+        let me = self.me_id()?.unwrap_or_default();
         self.with_writer(|tx| {
             let upto: Option<u64> = tx
                 .query_row(
@@ -664,7 +677,7 @@ impl Store {
                     && ev.group_id == group_id
                     && ev.seq <= upto
                 {
-                    recover_one(tx, ev, &mut out)?;
+                    recover_one(tx, &me, ev, &mut out)?;
                     out.applied += 1;
                 }
             }

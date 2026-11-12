@@ -418,6 +418,11 @@ impl Client {
         self.server_features().iter().any(|f| f == feature)
     }
 
+    /// True when the server lists `hide-delete/1`: 隐藏 and 删除 of 群, 私聊, 话题 and AI members.
+    pub fn can_hide_delete(&self) -> bool {
+        self.server_has(crate::proto::FEATURE_HIDE_DELETE)
+    }
+
     /// Topics that point at a 产出 (Card v2 `ref` blocks), newest first, from the cache.
     pub fn artifact_citations(
         &self,

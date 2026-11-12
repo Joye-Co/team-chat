@@ -101,6 +101,8 @@ pub struct ApplyOutcome {
     pub artifact_topics: BTreeSet<String>,
     /// Topics whose bot runs changed (`run.updated`).
     pub run_topics: BTreeSet<String>,
+    /// Topics this call removed (`topic.deleted`).
+    pub deleted_topics: Vec<String>,
 }
 
 /// What a welcome, directory or reads frame changed.
