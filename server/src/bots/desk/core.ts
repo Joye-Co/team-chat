@@ -138,6 +138,9 @@ export type RunRow = {
   /** The model and 思考强度 the CLI really ran with (the session event), or null. */
   model: string | null;
   effort: string | null;
+  // desk-limit-wait (模 3.4, 盯 1.5)
+  /** While a queued run waits for its computer's subscription limit: when it resets (server clock); else null. */
+  limit_until: number | null;
 };
 
 /**
@@ -485,6 +488,11 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
             ALTER TABLE runs ADD COLUMN effort TEXT;
           `,
         },
+        {
+          // 模 3.4, 盯 1.5: a queued run that waits for a subscription limit to reset. Old rows: NULL.
+          name: "desk-limit-wait",
+          up: `ALTER TABLE runs ADD COLUMN limit_until INTEGER;`,
+        },
       ]);
       const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'bot_id'").toArray()[0];
       this.botId = row?.value ?? null;
@@ -591,6 +599,11 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
     if (r.queued_at && r.ended_at === null && r.status === "created" && !r.machine_id) {
       run.queuedAt = r.queued_at;
       run.queuePosition = this.queuePosition(r);
+      // 模 3.4: waiting for the subscription limit is waiting for its computer (design-takeover 3.1).
+      if (r.limit_until !== null && r.limit_until !== undefined) {
+        run.phase = "waiting_computer";
+        run.waitingFor = "limit";
+      }
     }
     // 接 4.2: an ended run's phase follows its report (design-takeover 3.1, rule 1).
     if (r.ended_at !== null && !r.external) {

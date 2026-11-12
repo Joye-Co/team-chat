@@ -2182,6 +2182,68 @@ async fn a_signed_out_cli_fails_with_its_kind_and_reports_signed_out() {
         .unwrap();
 }
 
+/// 模 3.4, 盯 1.5: a run that stops at the subscription limit fails with kind `limit`, with the
+/// reset the CLI named or without one, and keeps its session; the server's continuation after
+/// the reset (`resumeSessionId`, same topic) resumes that session in the same work folder.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_run_at_its_limit_says_so_and_goes_on_in_its_session() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let cfg = write_config(tmp.path(), &m.url);
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = tokio::time::timeout(Duration::from_secs(20), m.conns.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
+    send(&mut ws, &welcome(vec![])).await;
+
+    send(&mut ws, &assign("lim1", "fake", "limitedreset", None)).await;
+    let fr = collect(&mut ws, "lim1", true, |f| matches!(f, Up::RunDone(_))).await;
+    let d = done(&fr);
+    assert_eq!(d.status, "failed");
+    let f = d.failure.expect("failure");
+    assert_eq!(f.kind, "limit");
+    assert_eq!(f.resets_at, Some(4_102_444_000_000));
+    let s1 = d.session_id.expect("session");
+
+    // No reset named: still the limit, without a time.
+    send(&mut ws, &assign("lim2", "fake", "limited", None)).await;
+    let fr = collect(&mut ws, "lim2", true, |f| matches!(f, Up::RunDone(_))).await;
+    let f = done(&fr).failure.expect("failure");
+    assert_eq!((f.kind.as_str(), f.resets_at), ("limit", None));
+
+    // After the reset the server continues the work: same topic, the session of lim1.
+    let mut a = assign("lim3", "fake", "go on", None);
+    if let Down::RunAssign(r) = &mut a {
+        r.resume_session_id = Some(s1.clone());
+        r.topic_id = "lim1".into();
+    }
+    send(&mut ws, &a).await;
+    let fr = collect(&mut ws, "lim3", true, |f| matches!(f, Up::RunDone(_))).await;
+    let d = done(&fr);
+    assert_eq!(d.status, "succeeded");
+    assert_eq!(d.failure, None);
+    assert_eq!(d.session_id.as_deref(), Some(s1.as_str()));
+    let argv: Vec<String> = serde_json::from_str(
+        &std::fs::read_to_string(work_of(tmp.path(), "lim1").join("argv.json")).unwrap(),
+    )
+    .unwrap();
+    let i = argv.iter().position(|a| a == "--resume").expect("--resume");
+    assert_eq!(argv[i + 1], s1);
+    assert!(!line_of(tmp.path(), "lim3").exists());
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
 /// A tool that daemonized (its parent exited, so it is no longer below the CLI) still stops on
 /// pause, continues on resume and is gone after cancel: the daemon finds it by the run's
 /// `CHAT_RUN_FOLDER` in its environment.

@@ -179,6 +179,12 @@ export function addUsableFixtures({ ok, bad, T0, ID, base, topic }: UsableCtx) {
     lastHandback: handback,
   }, "requestedFor, chainId, code, phase and a take-over");
   ok("entities/bot-run-waiting-computer.json", "BotRun", { ...run, status: "created", machineId: undefined, phase: "waiting_computer", waitingFor: "offline", takeover: "none" }, "waits for the requester's own machine");
+  ok(
+    "entities/bot-run-waiting-limit.json",
+    "BotRun",
+    { ...run, status: "created", machineId: undefined, phase: "waiting_computer", waitingFor: "limit", queuedAt: run.updatedAt, queuePosition: 1 },
+    "waits for its machine's subscription limit to reset (模 3.4)",
+  );
   ok("entities/bot-run-unknown-phase.json", "BotRun", { ...run, phase: "dreaming", waitingFor: "the_moon", takeover: "screen" }, "unknown phase values are read as open strings");
   bad("entities/bot-run-bad-code.json", "BotRun", { ...run, code: { branch: "x", head: "abc", pushed: "yes" } }, "code.pushed is a boolean");
   bad("entities/bot-run-handback-no-files.json", "BotRun", { ...run, lastHandback: { by: ID.owner, heldMs: 1, commands: 0 } }, "a hand-back lists files");
