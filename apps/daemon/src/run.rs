@@ -527,6 +527,16 @@ fn start_chat_run(
     Some(host)
 }
 
+/// The `chat-run` the approval hook starts. On the host the run's link; in a VM the tools
+/// disk's (the run folder's link points at the host's daemon, which the VM does not mount).
+fn gate_hook_path(run_dir: &std::path::Path, isolated: bool) -> std::path::PathBuf {
+    if isolated {
+        std::path::Path::new(crate::github::GUEST_BIN).join(crate::chat_run::NAME)
+    } else {
+        run_dir.join("bin").join(crate::chat_run::link_name())
+    }
+}
+
 pub async fn supervise(ctx: RunCtx) {
     let RunCtx {
         cfg,
@@ -776,8 +786,7 @@ pub async fn supervise(ctx: RunCtx) {
                     }
                 }
             }
-            let gate_hook =
-                (!gates.is_empty()).then(|| dir.join("bin").join(crate::chat_run::link_name()));
+            let gate_hook = (!gates.is_empty()).then(|| gate_hook_path(&dir, exec.isolated()));
             let gate_alive = (!gates.is_empty()).then(|| gates.alive());
             // Gates for a CLI the daemon did not report as gated (on Windows one older than
             // the tested version, or one whose version changed since `hello`): its hook could
@@ -1364,6 +1373,19 @@ async fn run_runtime(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_vm_run_hooks_the_tools_disk_chat_run() {
+        let dir = std::path::Path::new("/runs/r1");
+        assert_eq!(
+            gate_hook_path(dir, true),
+            std::path::Path::new("/opt/runner/bin/chat-run")
+        );
+        assert_eq!(
+            gate_hook_path(dir, false),
+            dir.join("bin").join(crate::chat_run::link_name())
+        );
+    }
 
     #[test]
     fn a_vm_run_is_told_what_is_kept_and_its_sign_in_outlasts_its_limit() {

@@ -850,11 +850,15 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
         )
         .await;
         if !matches!(started, Ok(Ok(_))) {
-            return Outcome::failed(
-                "the approval hook did not start: hooks are turned off for this CLI (its \
-managed settings allow only managed hooks), so commands that need a person's approval would \
-run unasked. The run was not started.",
-            );
+            return Outcome::failed(format!(
+                "the approval hook did not start: either {program} could not run it ({}) or its \
+hooks are turned off (managed settings that allow only managed hooks). Commands that need \
+a person's approval would run unasked, so the run was not started.",
+                spec.gate_hook
+                    .as_deref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default()
+            ));
         }
     }
     let mut norm = ClaudeNormalizer {
