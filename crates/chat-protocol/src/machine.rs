@@ -139,6 +139,14 @@ pub struct CliInfo {
     /// Feature "gates": runs of this CLI stop at `run.assign.gates` matches.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gates: Option<bool>,
+    /// Usable (feature "resume"): runs of this CLI continue `run.assign.resumeSessionId`;
+    /// `None` = only kinds "claude" and "codex" do.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume: Option<bool>,
+    /// Usable (feature "aside"): this CLI has a read-only mode for side chats; `None` = only
+    /// kinds "claude" and "codex" do.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aside: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

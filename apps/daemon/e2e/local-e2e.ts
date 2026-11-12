@@ -281,7 +281,8 @@ async function runDaemonCheck(
     // An ACP agent that asks before its tools (its runs are gated by code).
     "[runtimes.acp]",
     'kind = "acp"',
-    ...fakeRuntime(fakeAcp, []),
+    // Its sessions stay in this run's folder, not under HOME.
+    ...fakeRuntime(fakeAcp, [`FAKE_ACP_STORE = ${q(join(TMP, "acp-sessions"))}`]),
     "asks_permission = true",
     "",
     ...(VM

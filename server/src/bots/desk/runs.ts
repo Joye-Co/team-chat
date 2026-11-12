@@ -8,7 +8,7 @@ import { unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
 import { effectivePolicy } from "../../settings/approvals";
 import { policyPrompt, runGates } from "../../settings/rules";
-import { CONTEXT_CHARS, LEASE_MS, MAX_RUN_MS, type MachineView, type NoMachine, TEXT, buildAsidePrompt, buildPrompt, buildResumePrompt, cut, gatesRuntime, hasFeature, hasRuntime, pickMachine, whyNoMachine } from "../dispatch";
+import { CONTEXT_CHARS, LEASE_MS, MAX_RUN_MS, type MachineView, type NoMachine, TEXT, asideRuntime, buildAsidePrompt, buildPrompt, buildResumePrompt, cut, gatesRuntime, hasFeature, hasRuntime, pickMachine, resumesRuntime, whyNoMachine } from "../dispatch";
 import { type ContextRow, type Selection, requestAuthors, requestText, selectLines, withSummary } from "../../context/render";
 import { teamZone } from "../../memory/consolidate";
 import { type Brief, briefText, isNewTask } from "../../agent/frontdesk";
@@ -331,7 +331,7 @@ export abstract class DeskRuns extends DeskCore {
 
   /** Why no machine takes the run now (机 2.10); an aside run needs a daemon that runs it read-only. */
   protected whyNone(r: RunRow, runner: BotRunner, machines: MachineView[]): NoMachine {
-    const usable = r.kind === RUN_KIND_ASIDE ? machines.filter((x) => hasFeature(x, "aside")) : machines;
+    const usable = r.kind === RUN_KIND_ASIDE ? machines.filter((x) => asideRuntime(x, runner.runtime)) : machines;
     return whyNoMachine(usable, runner, Date.now());
   }
 
@@ -409,7 +409,7 @@ export abstract class DeskRuns extends DeskCore {
   /** The best machine for the run; an aside run needs a daemon that runs it read-only. The
    * machine of the topic's last session comes first, so the run can continue that session. */
   protected pick(r: RunRow, runner: BotRunner, machines: MachineView[], excluded: string[] = []): MachineView | null {
-    const usable = r.kind === RUN_KIND_ASIDE ? machines.filter((x) => hasFeature(x, "aside")) : machines;
+    const usable = r.kind === RUN_KIND_ASIDE ? machines.filter((x) => asideRuntime(x, runner.runtime)) : machines;
     const prev = this.lastSession(r, runner);
     if (prev) {
       const same = pickMachine(usable.filter((x) => x.id === prev.machine_id), runner, Date.now(), excluded);
@@ -606,7 +606,8 @@ export abstract class DeskRuns extends DeskCore {
     if (r.kind === RUN_KIND_ASIDE) frame.kind = RUN_KIND_ASIDE;
     if (runner.repo) frame.repo = { ...runner.repo, ...(runner.baseBranch ? { baseBranch: runner.baseBranch } : {}) };
     // Continue the topic's last session when this run goes to the machine that has it.
-    const prev = machine && hasFeature(machine, "resume") ? this.lastSession(r, runner) : undefined;
+    // Only a CLI that can continue it (ACP: an agent with session/load); else the full prompt.
+    const prev = machine && resumesRuntime(machine, runner.runtime) ? this.lastSession(r, runner) : undefined;
     if (prev?.session_id && prev.machine_id === machine?.id) frame.resumeSessionId = prev.session_id;
     return frame;
   }

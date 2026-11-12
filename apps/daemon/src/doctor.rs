@@ -82,6 +82,13 @@ pub async fn report(cfg: &Config) -> (String, bool) {
                 }
             );
         }
+        if c.kind == "acp" && c.available {
+            let _ = writeln!(
+                s,
+                "             continues sessions (session/load): {}",
+                if c.resume == Some(true) { "yes" } else { "no" }
+            );
+        }
         // A Claude Code whose runs this machine cannot stop at gated commands (on Windows one
         // older than the tested version, or one that does not say its version): the owner
         // should know, the team's rules reach the bot only as text then.

@@ -371,9 +371,9 @@ server frames and ignores unknown fields, so it must never get work it cannot do
 | --- | --- |
 | `pause` | `run.pause`: interrupts the CLI turn where the CLI supports it, else sends SIGSTOP to the run's process group, stops the stall timer and the `maxDurationMs` clock, and emits `paused { paused: true, by }`. `run.resume`: SIGCONT, restarts both clocks (the deadline moves by the paused time), emits `paused { paused: false }` and gives `note` to the CLI as its next input when set. A cancel while paused resumes first. |
 | `answer` | `run.input.answer` and `run.input.artifactEvent` reach the CLI as typed, untrusted data (a tool result of the CLI's own ask, or a user line with a fenced JSON block). `text` holds the same content as text for daemons without the feature. |
-| `aside` | `run.assign.kind = "aside"`: the run is read-only (Codex sandbox `read-only` with no MCP servers or web tools, Claude Code permission mode `plan` with only the read tools, no repo write) whatever `daemon.toml` or the CLI's own settings say. |
+| `aside` | `run.assign.kind = "aside"`: the run is read-only (Codex sandbox `read-only` with no MCP servers or web tools, Claude Code permission mode `plan` with only the read tools, no repo write) whatever `daemon.toml` or the CLI's own settings say. ACP agents and the PTY have no read-only mode: their `CliInfo.aside` is false and the daemon rejects such a run. |
 | `acceptance` | The daemon forwards the CLI's acceptance criteria as the `acceptance` run event. |
-| `resume` | `run.assign.resumeSessionId`: the run continues that CLI session (Claude Code `--resume`, Codex `thread/resume`) instead of starting a new one. |
+| `resume` | `run.assign.resumeSessionId`: the run continues that CLI session (Claude Code `--resume`, Codex `thread/resume`, ACP `session/load`) instead of starting a new one; `CliInfo.resume` says which CLIs can. |
 | `effort` | Reports `CliInfo.models` and `efforts` and runs with `run.assign.effort`, see "Models and effort". |
 | `context` | Answers the read-only topic context ops of `chat-run` (`topic.history`, `topic.message`, `context.search`, `file.get`, and from this version `topic.state`, `artifact.list`, `artifact.get`, `card.get`, `decisions.list`, `member.list`), see "Topic context". |
 | `gates` | Reports `CliInfo.gates`, stops the commands of `run.assign.gates` for a person's approval and honors `run.approval.scope`, see "Gated actions". |
@@ -389,7 +389,14 @@ How the 1.1 daemon does each one:
   `$CLAUDE_CONFIG_DIR/projects/*/<id>.jsonl` is copied into the project folder of the new
   working directory and the CLI starts with `--resume <id>` instead of `--session-id`; with no
   such file the run starts a new session. Codex: `thread/resume { threadId, ...the thread/start
-  params }`; an error answer falls back to `thread/start`. With `resumeSessionId` the prompt
+  params }`; an error answer falls back to `thread/start`. ACP: when the agent's `initialize`
+  answer has `agentCapabilities.loadSession`, `session/load { sessionId, cwd, mcpServers: [] }`
+  with the new run's folder as `cwd`; the history the agent replays while it loads is not
+  reported again, and an error answer falls back to `session/new` with a line telling the agent
+  that its earlier conversation is gone. The daemon asks each ACP agent (`initialize` only, at
+  most 15 s) when it reports its CLIs and sets `CliInfo.resume` from the answer; the server sends
+  `resumeSessionId` only for a CLI with `resume: true` (absent: kinds `claude` and `codex`), so a
+  CLI that cannot continue gets the full prompt, as a first run does. With `resumeSessionId` the prompt
   carries only what the session has not seen (protocol.md, "Run context"), and `run.done.sessionId`
   names the session the run used. In the 群聊 a run continues the last session only when its request
   quotes a message of that bot or follows up its run; other requests start a new session.
@@ -949,6 +956,9 @@ safe default named below). Protocol side: protocol.md, "Usable extensions".
 ```ts
 // daemon -> server
 hello.machine += { runsIn?: "host" | "vm" }       // where runs execute; required with feature "github"
+CliInfo += { resume?: boolean,                    // with feature "resume": runs of this CLI continue resumeSessionId
+             aside?: boolean }                    // with feature "aside": the CLI has a read-only mode for side chats
+                                                  // absent (an older daemon): true for kinds "claude" and "codex" only
 run.done += { code?: { branch, head /* hex */, pushed: boolean } }  // any daemon; absent = not known
 RunEvent +=
   | { type: "github", state: "used" | "missing" | "invalid", login? }        // feature "github"
@@ -1210,7 +1220,7 @@ secret split over two deltas is redacted whole.
 | --- | --- | --- |
 | `codex` | `codex app-server` | JSON-RPC lines on stdio (v2): `initialize`, `initialized`, `thread/start {cwd, approvalPolicy, sandbox, model?}`, `turn/start`, `turn/steer`, `turn/interrupt`; notifications `turn/*`, `item/*`, `item/agentMessage/delta`, `thread/tokenUsage/updated`, `error`; server requests `item/commandExecution/requestApproval`, `item/fileChange/requestApproval` |
 | `claude` | `claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --replay-user-messages --session-id <uuid> --permission-mode <mode>` | one JSON line per user message in (a line the CLI reads while a turn runs joins that turn; the CLI echoes each line it takes up, and the run ends when a `result` arrives with no line unread); `system/init`, `stream_event` (text deltas), `assistant`, `user` (tool results), `result` out |
-| `acp` | configured, e.g. `gemini --acp`, `opencode acp` | Agent Client Protocol v1 (JSON-RPC 2.0): `initialize`, `session/new`, `session/prompt`, `session/update`, `session/request_permission`, `session/cancel` |
+| `acp` | configured, e.g. `gemini --acp`, `opencode acp` | Agent Client Protocol v1 (JSON-RPC 2.0): `initialize`, `session/new` or `session/load` (resume, when the agent has `loadSession`), `session/prompt`, `session/update`, `session/request_permission`, `session/cancel`. No effort setting and no read-only mode: the daemon reports no `efforts` and `aside: false` |
 | `pty` | configured; `{prompt}` in args is replaced | a pseudo terminal; output without ANSI codes streams as message item `out` |
 
 ## Daemon config and commands
