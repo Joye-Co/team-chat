@@ -158,6 +158,22 @@ pub fn addrs(slot: u32) -> (String, String) {
     )
 }
 
+/// The guest kernel's command line. Every VM's hostname is `vm`, and the NFS client builds its
+/// NFSv4 client identity from the hostname, so concurrent VMs looked like one client to the
+/// host's server and took each other's leases and locks (Codex's SQLite failed to open). The
+/// `nfs.nfs4_unique_id` parameter makes each VM's identity unique: slot plus run id.
+pub fn boot_args(guest_ip: &str, host_ip: &str, slot: u32, run_id: &str) -> String {
+    let run: String = run_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .take(64)
+        .collect();
+    format!(
+        "console=ttyS0 reboot=k panic=1 pci=off ro init=/sbin/vm-init \
+         ip={guest_ip}::{host_ip}:255.255.255.252::eth0:off nfs.nfs4_unique_id=runner-{slot}-{run}"
+    )
+}
+
 pub fn tap_name(slot: u32) -> String {
     format!("rvm{slot}")
 }
@@ -614,9 +630,7 @@ impl Job {
         let config = serde_json::json!({
             "boot-source": {
                 "kernel_image_path": self.cfg.kernel,
-                "boot_args": format!(
-                    "console=ttyS0 reboot=k panic=1 pci=off ro init=/sbin/vm-init ip={guest_ip}::{host_ip}:255.255.255.252::eth0:off"
-                ),
+                "boot_args": boot_args(&guest_ip, &host_ip, self.slot, &self.run_id()),
             },
             "drives": [
                 { "drive_id": "root", "path_on_host": rootfs, "is_root_device": true, "is_read_only": true },
@@ -909,6 +923,31 @@ async fn connect_agent(vsock: &Path) -> std::io::Result<tokio::net::UnixStream> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Concurrent VMs need distinct NFSv4 client identities (their hostnames are all `vm`).
+    #[test]
+    fn each_vm_boots_with_its_own_nfs_client_identity() {
+        let (host, guest) = addrs(3);
+        let a = boot_args(&guest, &host, 3, "r-1 a/b");
+        assert!(a.contains("init=/sbin/vm-init "), "{a}");
+        assert!(
+            a.contains(&format!(" ip={guest}::{host}:255.255.255.252::eth0:off ")),
+            "{a}"
+        );
+        let id = |args: &str| {
+            let ids: Vec<String> = args
+                .split(' ')
+                .filter_map(|p| p.strip_prefix("nfs.nfs4_unique_id="))
+                .map(str::to_string)
+                .collect();
+            assert_eq!(ids.len(), 1, "{args}");
+            ids[0].clone()
+        };
+        assert_eq!(id(&a), "runner-3-r-1ab");
+        assert_ne!(id(&a), id(&boot_args(&guest, &host, 4, "r-1 a/b")));
+        assert_ne!(id(&a), id(&boot_args(&guest, &host, 3, "r-2")));
+        assert!(!a.contains("  "), "{a}");
+    }
 
     /// Feature "github": in the VM, `gh` on `GUEST_PATH` is the tools disk's proxy, and the
     /// proxy skips the tools folder when it looks for the real one.
