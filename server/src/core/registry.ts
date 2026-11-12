@@ -394,6 +394,16 @@ export function registerMemberDeactivated(hook: MemberDeactivatedHook): void {
 }
 
 /**
+ * Runs after a member left a group (removed from it), e.g. to hand back the runs he held there.
+ * Errors are logged by the caller; the removal stands.
+ */
+export type GroupMemberRemovedHook = (env: Env, groupId: string, memberId: string) => Promise<void> | void;
+export const groupMemberRemovedHooks: GroupMemberRemovedHook[] = [];
+export function registerGroupMemberRemoved(hook: GroupMemberRemovedHook): void {
+  groupMemberRemovedHooks.push(hook);
+}
+
+/**
  * Runs after members changed (name, level, deactivation, a new member, a bot's runner), so a
  * feature can drop what it cached about them. Awaited by the route; errors are logged.
  */

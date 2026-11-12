@@ -17,6 +17,12 @@ import { briefText } from "../../agent/frontdesk";
 import { countCited } from "../../memory/inject";
 import { retroAfterRun } from "../../memory/retro";
 import { DAEMON_RESTARTED, LIMIT_REACHED, MAX_DAEMON_RESUMES, MAX_LIMIT_WAITS } from "../../agent/recovery";
+import { HANDBACK_RETRY_MS, HOLD_CLI_TEXT, HOLD_TEXT } from "./hold";
+
+/** A run event of a person's command or hand-back (`hand.*`, design-takeover 3.6). */
+function isHandFrame(f: SeqFrame): boolean {
+  return f.t === "run.event" && typeof (f.event as { type?: unknown }).type === "string" && (f.event as { type: string }).type.startsWith("hand.");
+}
 
 /** Room RPC of the cards feature: a run's CLI took the answer with this seq (`{ seq, runId, inputId }`). */
 export const CARD_ANSWER_TAKEN_RPC = "cards.answerTaken";
@@ -34,6 +40,8 @@ export abstract class DeskEvents extends DeskRuns {
   protected abstract continuePromise(r: RunRow, result: string): Promise<boolean>;
   /** 盯 1.1 (stall.ts): the machine of a run that waited for it is back. */
   protected abstract machineBack(r: RunRow, say?: boolean): Promise<void>;
+  /** design-takeover 3.7 (hand.ts): a person's commands and the hand-back summary. */
+  protected abstract handEvents(r: RunRow, events: (Record<string, unknown> & { type: string })[]): Promise<void>;
 
   /** Stores run frames idempotently by (runId, seq) and applies their effects. */
   async ingest(runId: string, frames: SeqFrame[]): Promise<{ lastSeq: number }> {
@@ -81,7 +89,13 @@ export abstract class DeskEvents extends DeskRuns {
     r.open_tools = next;
   }
 
-  protected async apply(r: RunRow, frames: SeqFrame[]): Promise<void> {
+  protected async apply(r: RunRow, all: SeqFrame[]): Promise<void> {
+    // design-takeover 3.6: a person's commands (hand.*) are not the AI member's progress: they
+    // reset no stall timer, count as no tool call and never start the run.
+    const hand = all.filter((f): f is Extract<SeqFrame, { t: "run.event" }> => isHandFrame(f));
+    if (hand.length > 0) await this.handEvents(r, hand.map((f) => f.event as Record<string, unknown> & { type: string }));
+    const frames = hand.length > 0 ? all.filter((f) => !isHandFrame(f)) : all;
+    if (frames.length === 0) return;
     const progress = new Progress(r.progress_text, JSON.parse(r.items) as Record<string, string>, r.progress_full === 1);
     const now = Date.now();
     let done: Extract<SeqFrame, { t: "run.done" }> | null = null;
@@ -97,7 +111,8 @@ export abstract class DeskEvents extends DeskRuns {
       return;
     }
     // Frames from a machine the run waited for: it is back (盯 1.1).
-    if (r.away_since !== null) await this.machineBack(r);
+    // A held run (design-takeover 3.7) gets no note: the hello of its machine clears its offline mark.
+    if (r.away_since !== null && !r.paused_by) await this.machineBack(r);
     this.sql.exec("UPDATE runs SET last_event_at = ?, nudged = 0 WHERE id = ?", now, r.id);
     r.last_event_at = now;
     r.nudged = 0;
@@ -211,9 +226,7 @@ export abstract class DeskEvents extends DeskRuns {
           // the run is no longer taken over. A `paused: false` from before the daemon took the
           // latest pause (the answer to an earlier resume) is stale and keeps pausedBy.
           if (ev.paused === false && r.paused_by && r.pause_seen >= r.pause_gen) {
-            this.sql.exec("UPDATE runs SET paused_by = NULL, paused_at = NULL WHERE id = ?", r.id);
-            r.paused_by = null;
-            r.paused_at = null;
+            await this.clearHold(r);
             planChanged = true;
           }
           break;
@@ -519,10 +532,24 @@ export abstract class DeskEvents extends DeskRuns {
       const aborted = typeof f.error === "string" && f.error.trim() !== "";
       await this.end(r, "cancelled", TEXT.cancelled, aborted ? "blocked" : "open", TEXT.cancelled);
     } else if (f.status === "failed" && f.error === DAEMON_RESTARTED) {
+      // design-takeover 3.7: the daemon restarted while a person held the run. The hold ends
+      // (the CLI and the person's shell are gone), the topic says so, and the run goes on.
+      if (r.paused_by && (await this.restartHeld(r))) return;
       // 盯 1.7, 机 5.3: the daemon restarted under the run. It goes on in its session on the
       // same machine with the recovery note; only when it cannot does it fail, saying why.
       if (await this.resumeAfterRestart(r)) return;
       await this.end(r, "failed", TEXT.interrupted, "blocked", TEXT.interrupted);
+    } else if (
+      f.status === "failed" &&
+      r.handed_back_at !== null &&
+      Date.now() - r.handed_back_at <= HANDBACK_RETRY_MS &&
+      // The subscription limit waits for its reset instead (waitForLimit).
+      failureKind(f.failure, f.error ?? f.summary ?? "") !== "limit" &&
+      (await this.retryAfterHandback(r))
+    ) {
+      // design-takeover 3.3: the CLI failed right after a hand-back (its model connection often
+      // drops after a long stop): not "没做完"; it went on in its session once.
+      return;
     } else if (f.status === "failed") {
       // 模 3.4, 盯 1.5: the subscription limit is not a failure: the work waits for the reset
       // and goes on in its session on the same computer.
@@ -585,6 +612,28 @@ export abstract class DeskEvents extends DeskRuns {
     return true;
   }
 
+  /** design-takeover 3.7: the daemon restarted under a held run: the hold ends, the run goes on. */
+  protected async restartHeld(r: RunRow): Promise<boolean> {
+    const computer = r.machine_id
+      ? await this.env.DB.prepare("SELECT name FROM machines WHERE id = ?")
+          .bind(r.machine_id)
+          .first<{ name: string }>()
+          .catch(() => null)
+      : null;
+    await this.clearHold(r);
+    if (computer) await this.note(r, HOLD_TEXT.restarted(computer.name)).catch((err) => this.log.warn("restart note failed", { runId: r.id, err }));
+    return this.restartElsewhere(r, HOLD_CLI_TEXT.restarted, { sameSession: true }, { count: false });
+  }
+
+  /** design-takeover 3.3: the run failed right after a hand-back: once more in its session. */
+  protected async retryAfterHandback(r: RunRow): Promise<boolean> {
+    // Once: the run that goes on was not handed back.
+    if (!(await this.restartElsewhere(r, HOLD_CLI_TEXT.handback, { sameSession: true }, { count: false }))) return false;
+    const name = (await this.names([this.botId as string]).catch(() => new Map<string, string>())).get(this.botId as string) ?? "";
+    await this.note(r, HOLD_TEXT.retried(name)).catch((err) => this.log.warn("hand-back retry note failed", { runId: r.id, err }));
+    return true;
+  }
+
   /**
    * 模 3.4, 盯 1.5 (decided: wait for the reset): a run that stopped at the subscription limit
    * ends quietly and its work goes on in a new run that waits on the same computer (排队) until
@@ -633,10 +682,9 @@ export abstract class DeskEvents extends DeskRuns {
     const now = Date.now();
     await this.closeProgress(r);
     await this.closeApprovalCard(r, "expired");
-    this.sql.exec("UPDATE runs SET approval_id = NULL, paused_by = NULL, paused_at = NULL WHERE id = ?", r.id);
+    this.sql.exec("UPDATE runs SET approval_id = NULL WHERE id = ?", r.id);
     r.approval_id = null;
-    r.paused_by = null;
-    r.paused_at = null;
+    await this.clearHold(r);
     // 转交 (design-relay R2): a run that handed its work over posts no result card; the card in
     // the topic says who took it, and its run ends as done.
     const handed = this.handedOverOf(r.id);

@@ -89,6 +89,8 @@ type RunRow = {
   lease_until: number;
   sent_at: number | null;
   updated_at: number;
+  /** 1 while a person holds the run (paused or taken over): its lease does not run out. */
+  held: number;
 };
 
 interface Attachment {
@@ -228,6 +230,11 @@ export class MachineLink extends DurableObject<BotsEnv> {
         },
         METRICS_MIGRATION,
         LOGINS_MIGRATION,
+        {
+          // Usable (design-takeover 3.7): a run a person holds keeps its lease while its machine is away.
+          name: "link-hold-1",
+          up: `ALTER TABLE runs ADD COLUMN held INTEGER NOT NULL DEFAULT 0;`,
+        },
       ]);
       this.machineId = this.meta("machine_id");
       if (this.machineId) this.log = baseLogger.child({ obj: "MachineLink", machineId: this.machineId });
@@ -424,6 +431,7 @@ export class MachineLink extends DurableObject<BotsEnv> {
       return;
     }
     this.setMeta("offline_logged", String(now));
+    this.heldMachine(false);
     await recordActivity(this.env.DB, {
       at: since,
       kind: "machine",
@@ -546,6 +554,7 @@ export class MachineLink extends DurableObject<BotsEnv> {
     att.ready = true;
     ws.serializeAttachment(att);
     this.backOnline(now);
+    this.heldMachine(true);
     // Assigns that got no answer yet, then queued inputs, approvals and cancels.
     for (const r of open) {
       if (r.state === "assigned") {
@@ -704,7 +713,7 @@ export class MachineLink extends DurableObject<BotsEnv> {
 
   private async expireLeases(now: number): Promise<void> {
     const expired = this.sql
-      .exec<RunRow>("SELECT * FROM runs WHERE state IN ('assigned','accepted') AND lease_until < ?", now)
+      .exec<RunRow>("SELECT * FROM runs WHERE state IN ('assigned','accepted') AND held = 0 AND lease_until < ?", now)
       .toArray() as RunRow[];
     for (const r of expired) {
       // BotDesk decides: a run that waits for this machine (盯 1.1) stays open with a new lease,
@@ -753,17 +762,61 @@ export class MachineLink extends DurableObject<BotsEnv> {
     return { sent: ws !== null };
   }
 
-  /** run.input, run.approval, run.cancel, run.pause or run.resume for an open run; queued while the link is down. */
-  async toRun(frame: {
-    t: "run.input" | "run.approval" | "run.cancel" | "run.pause" | "run.resume" | "run.answer" | "run.interaction" | "run.output.result";
-    runId: string;
-  }): Promise<{ ok: boolean; sent: boolean }> {
+  /**
+   * run.input, run.approval, run.cancel, run.pause or run.resume for an open run; queued while the
+   * link is down. With `noQueue` (a person's command, design-takeover 3.7) a frame is sent now or
+   * not at all: `{ ok: true, sent: false }` while the link is down.
+   */
+  async toRun(
+    frame: {
+      t:
+        | "run.input"
+        | "run.approval"
+        | "run.cancel"
+        | "run.pause"
+        | "run.resume"
+        | "run.answer"
+        | "run.interaction"
+        | "run.output.result"
+        | "run.command"
+        | "run.command.cancel";
+      runId: string;
+    },
+    opts: { noQueue?: boolean } = {},
+  ): Promise<{ ok: boolean; sent: boolean }> {
     const r = this.run(frame.runId);
     if (!r || (r.state !== "assigned" && r.state !== "accepted")) return { ok: false, sent: false };
     const ws = this.socket();
     if (ws) this.send(ws, this.forDaemon(frame));
-    else this.sql.exec("INSERT INTO outbox (run_id, frame) VALUES (?, ?)", frame.runId, JSON.stringify(frame));
+    else if (!opts.noQueue) this.sql.exec("INSERT INTO outbox (run_id, frame) VALUES (?, ?)", frame.runId, JSON.stringify(frame));
     return { ok: true, sent: ws !== null };
+  }
+
+  /**
+   * design-takeover 3.7: BotDesk marks a run a person holds (paused or taken over). A held run's
+   * lease does not run out, so it is never moved or ended because its machine is away, and its
+   * queued frames stay. Released, it gets a fresh lease.
+   */
+  async setHeld(runId: string, held: boolean): Promise<void> {
+    const now = Date.now();
+    if (held) this.sql.exec("UPDATE runs SET held = 1 WHERE run_id = ?", runId);
+    else this.sql.exec("UPDATE runs SET held = 0, lease_until = max(lease_until, ? + lease_ms) WHERE run_id = ? AND held = 1", now, runId);
+  }
+
+  /** Tells the desks of the runs people hold that this machine went away or is back. */
+  private heldMachine(online: boolean): void {
+    if (!this.machineId) return;
+    const machineId = this.machineId;
+    const held = this.sql
+      .exec<{ run_id: string; bot_id: string }>(`SELECT run_id, bot_id FROM runs WHERE held = 1 AND state IN ('assigned','accepted')`)
+      .toArray();
+    for (const r of held) {
+      this.ctx.waitUntil(
+        deskStub(this.env, r.bot_id)
+          .heldMachine(r.run_id, machineId, online)
+          .catch((err) => this.log.warn("held machine update failed", { runId: r.run_id, err })),
+      );
+    }
   }
 
   private signedOutMarks(): Record<string, number> {

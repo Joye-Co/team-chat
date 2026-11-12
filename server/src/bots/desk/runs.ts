@@ -22,6 +22,7 @@ import { ANONYMOUS_ID } from "../../cards2/privacy";
 import { githubFor } from "../../github/assign";
 import { supersedeWaits } from "../../github/machine";
 import { DeskCore, QUEUED, type RunRow } from "./core";
+import { takeoverOf } from "./hold";
 import { type FailureNote, failureNote } from "./failure";
 import { LIMIT_NOTE, LIMIT_REACHED, type LoggedFrame, type RecoveryFacts, outwardAction, recoveryNote, stepOf } from "../../agent/recovery";
 import type { RunProof } from "../proof";
@@ -746,7 +747,9 @@ export abstract class DeskRuns extends DeskCore {
     // Whose GitHub the run uses on this machine (design-github-identity 3.2); never the token.
     const github = r.kind === RUN_KIND_ASIDE ? null : await githubFor(this.env, { requestedFor: r.requested_for, requestedBy: r.requested_by, botId: this.botId as string }, machine);
     if (github) frame.github = github.github;
-    this.sql.exec("UPDATE runs SET machine_id = ?, runtime = ? WHERE id = ?", machine.id, runner.runtime, r.id);
+    // design-takeover 3.6: how a person can take over the run on this machine.
+    r.takeover = takeoverOf(machine);
+    this.sql.exec("UPDATE runs SET machine_id = ?, runtime = ?, takeover = ? WHERE id = ?", machine.id, runner.runtime, r.takeover, r.id);
     r.machine_id = machine.id;
     r.runtime = runner.runtime;
     await this.env.DB.prepare("UPDATE bot_runs SET machine_id = ?, github_member_id = ? WHERE id = ?").bind(machine.id, github?.memberId ?? null, r.id).run();
@@ -801,6 +804,11 @@ export abstract class DeskRuns extends DeskCore {
     return this.serial(runId, async () => {
       const r = this.run(runId);
       if (!r || r.ended_at !== null || r.machine_id !== machineId) return false;
+      // design-takeover 3.7: a run a person holds is not moved or ended; it waits for its machine.
+      if (r.paused_by) {
+        this.log.info("lease ran out while held", { runId, machineId });
+        return true;
+      }
       return this.machineLost(r);
     });
   }
