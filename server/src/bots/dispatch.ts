@@ -34,6 +34,8 @@ export const MAX_RESULT_CHARS = 30_000;
 export const CONTEXT_MESSAGES = 30;
 /** Characters of topic lines in a run's prompt (docs/protocol.md, "Run context"). */
 export const CONTEXT_CHARS = 24_000;
+/** 模 3.4: a run that waits for a subscription limit tries a little past the reset, so it does not race the provider's clock. */
+export const LIMIT_SLACK_MS = 60_000;
 
 /** How a run with the `context` feature reads what the prompt left out. */
 export const CONTEXT_TOOLS_RULE =
@@ -49,6 +51,15 @@ export const TEXT = {
   allBusy: "能接手的电脑都在忙，这次没有开始。请稍后再 @我。",
   /** The member's computers are offline: the run waits (排队) and starts when one comes online. */
   waitOffline: (names: string[]) => `${names.join("、")} 不在线，等它上线后自动开始；不需要了可以停止。`,
+  /**
+   * 模 3.4, 盯 1.5: the computer's subscription is at its limit: the run waits for the reset (the
+   * team's clock) and starts, or goes on (`goesOn`), by itself. Without a reset time it tries
+   * again after `minutes`.
+   */
+  waitLimit: (cli: string, when: string, goesOn: boolean) => `${cli} 的订阅额度用完了，${when} 恢复后${goesOn ? "接着做" : "开始"}；不需要了可以停止。`,
+  waitLimitRetry: (cli: string, minutes: number) => `${cli} 的订阅额度用完了，不知道几点恢复，${minutes} 分钟后再试；不需要了可以停止。`,
+  /** The wait for the limit is over: the run starts on the computer again. */
+  limitBack: (goesOn: boolean) => `额度恢复了，${goesOn ? "接着做" : "开始做"}。`,
   /** A queued run that waited too long, by the reason it waited. */
   queueExpired: (hours: number, offline?: string[]) =>
     offline && offline.length > 0
@@ -288,6 +299,8 @@ export interface MachineView {
   personalBots?: Map<string, string | null>;
   /** 模 3.1: runtimes whose CLI is not signed in (`MachineLink.status`); they take no runs. */
   signedOut?: string[];
+  /** 模 3.4: runtimes at their subscription limit (`MachineLink.status`); they take no runs until then. */
+  limited?: { runtime: string; until: number; known: boolean }[];
 }
 
 export function mergeLabels(owner: string[], daemon: string[] | undefined): string[] {
@@ -316,6 +329,12 @@ export function signedIn(m: Pick<MachineView, "signedOut">, runtime: string): bo
   return !(m.signedOut ?? []).includes(runtime);
 }
 
+/** 模 3.4: the machine's sign-in for this runtime is at its limit now: when it resets, else null. */
+export function limitOf(m: Pick<MachineView, "limited">, runtime: string, now: number): { until: number; known: boolean } | null {
+  const l = (m.limited ?? []).find((x) => x.runtime === runtime && x.until > now);
+  return l ? { until: l.until, known: l.known } : null;
+}
+
 function activeRuns(m: MachineView): number {
   return Math.max(m.health?.activeRuns ?? 0, m.runningRuns.length);
 }
@@ -336,6 +355,7 @@ export function candidates(
         (runner.machineId ? m.id === runner.machineId : labelsMatch(runner.labels, m.labels)) &&
         hasRuntime(m, runner.runtime) &&
         signedIn(m, runner.runtime) &&
+        limitOf(m, runner.runtime, now) === null &&
         activeRuns(m) < Math.max(1, m.info?.maxParallelRuns ?? 1),
     )
     .sort((a, b) => activeRuns(a) - activeRuns(b) || (a.health?.load1 ?? 0) - (b.health?.load1 ?? 0) || a.id.localeCompare(b.id));
@@ -363,7 +383,12 @@ export type NoMachine =
   | { why: "busy" }
   | { why: "offline"; names: string[] }
   /** 模 3.1: every computer with the runtime has its CLI signed out (fails, the topic says which). */
-  | { why: "signed_out"; machines: MachineView[] };
+  | { why: "signed_out"; machines: MachineView[] }
+  /**
+   * 模 3.4: every signed-in computer with the runtime is at its subscription limit: the run
+   * waits (排队) until the first one resets (`until`; `known`: a real reset time, else a retry).
+   */
+  | { why: "limit"; machines: MachineView[]; until: number; known: boolean };
 
 export function whyNoMachine(machines: MachineView[], runner: Pick<BotRunner, "labels" | "runtime" | "machineId">, now: number): NoMachine {
   const mine = machines.filter((m) => !m.revoked && (runner.machineId ? m.id === runner.machineId : labelsMatch(runner.labels, m.labels)));
@@ -374,8 +399,15 @@ export function whyNoMachine(machines: MachineView[], runner: Pick<BotRunner, "l
   if (installed.length === 0) return { why: "runtime" };
   const able = installed.filter((m) => signedIn(m, runner.runtime));
   if (able.length === 0) return { why: "signed_out", machines: installed };
-  if (able.some((m) => isHealthy(m, now))) return { why: "busy" };
-  const away = able.filter((m) => !isOnline(m, now));
+  // A computer at its limit waits for the reset; one free of it that is only busy comes first.
+  const free = able.filter((m) => limitOf(m, runner.runtime, now) === null);
+  if (free.some((m) => isHealthy(m, now))) return { why: "busy" };
+  const limited = able.filter((m) => limitOf(m, runner.runtime, now) !== null);
+  if (limited.length > 0) {
+    const first = limited.map((m) => limitOf(m, runner.runtime, now) as { until: number; known: boolean }).sort((a, b) => a.until - b.until)[0];
+    return { why: "limit", machines: limited, until: first.until, known: first.known };
+  }
+  const away = free.filter((m) => !isOnline(m, now));
   if (away.length > 0) return { why: "offline", names: away.map((m) => m.name) };
   return { why: "disk" };
 }

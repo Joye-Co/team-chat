@@ -1082,6 +1082,14 @@ Claude Code's words in the stderr of a run that exited early say `signed_out` on
 the CLI's own ("Not logged in", "Please run /login", "Invalid API key"): that tail can hold an MCP
 server's or a hook's "401 Unauthorized", which reads as `other`.
 
+A run that failed with `limit` holds its runtime back on that machine (the sign-in, and so the
+limit, is the machine's, shared by every AI member there): the server gives it no runs until
+`resetsAt` (plus a minute); without one, until the end of the `metrics.usage` windows of that
+runtime at 95 % or more; without those, for 15 minutes, doubling each time in a row up to 2
+hours. A run of it that succeeds clears the hold. Nothing changes on the daemon: the work that
+hit the limit comes back as a new `run.assign` with `resumeSessionId` once the hold is over
+(protocol.md, "Run phase and take-over").
+
 A run that failed with `signed_out` marks its runtime signed out at once: `metrics.logins` says
 `logged_out` for it until the CLI's own status check says it is signed in again (a sign-in from
 the app, or the check every 10 minutes) or a later run of it succeeds.

@@ -29,6 +29,9 @@ import { DeskEvents } from "./events";
 import { reportOf } from "./report";
 import type { Restart } from "./runs";
 
+/** When a queued run's wait counts from: when it was queued, or the reset of the limit it waits for (模 3.4). */
+const QUEUE_FROM = "max(queued_at, coalesce(limit_until, 0))";
+
 /** The step of a `stepKey` without its output. */
 const stepPart = (key: string): string => key.split("\n")[0] ?? "";
 
@@ -59,8 +62,9 @@ export abstract class DeskStall extends DeskEvents {
         `SELECT min(created_at) AS at FROM runs WHERE ${ACTIVE} AND external = 0 AND status = 'created' AND machine_id IS NULL AND queued_at IS NULL`,
       )
       .one().at;
-    // Queued runs (排队): try again soon, and fail the ones that waited too long.
-    const queued = this.sql.exec<{ at: number | null }>(`SELECT min(queued_at) AS at FROM runs WHERE ${QUEUED}`).one().at;
+    // Queued runs (排队): try again soon, and fail the ones that waited too long (模 3.4: a run
+    // waiting for a subscription limit counts from the reset).
+    const queued = this.sql.exec<{ at: number | null }>(`SELECT min(${QUEUE_FROM}) AS at FROM runs WHERE ${QUEUED}`).one().at;
     const retry = queued === null ? null : Math.min(Date.now() + QUEUE_RETRY_MS, queued + QUEUE_MAX_MS);
     // 盯活: the nudge comes before the stall, and running runs (and runs waiting for their
     // machine) are checked every minute for a machine that went away or came back.
@@ -115,7 +119,7 @@ export abstract class DeskStall extends DeskEvents {
         await this.end(r, "failed", TEXT.failed(""), "blocked", TEXT.failed(""));
       });
     }
-    const expired = this.sql.exec<{ id: string }>(`SELECT id FROM runs WHERE ${QUEUED} AND queued_at <= ?`, now - QUEUE_MAX_MS).toArray();
+    const expired = this.sql.exec<{ id: string }>(`SELECT id FROM runs WHERE ${QUEUED} AND ${QUEUE_FROM} <= ?`, now - QUEUE_MAX_MS).toArray();
     if (expired.length > 0) {
       // 机 2.10: say what it waited for (a computer that stayed offline, or a free one).
       const runner = await loadRunner(this.env.DB, this.botId as string);
