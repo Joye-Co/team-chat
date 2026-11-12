@@ -202,6 +202,9 @@ describe("run context", () => {
     expect(req).toContain("修一下这个");
     expect(req).toContain(`[file f ${file} · 截图.png · image/png`);
     expect(req).toContain(`↪ quotes m ${quoted.message.id} (Alice: 登录按钮点了没反应)`);
+    // Problem 6: the manifest counts the request's own file and quote too.
+    const ctx = await api(`/v1/runs/${a.runId}/context`, { token: w.owner.token });
+    expect(ctx.body.manifest).toMatchObject({ files: 1, refs: 1 });
     d.send({ t: "run.accept", runId: a.runId });
     await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === a.runId && e.data.run.status === "running");
 
