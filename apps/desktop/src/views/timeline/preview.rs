@@ -129,6 +129,8 @@ fn topic(id: &str, title: &str, status: TopicStatus, owner: &str, msgs: &[Messag
         message_count: msgs.len() as u32,
         unread: 0,
         mentions: 0,
+        participants: Vec::new(),
+        relay: None,
     }
 }
 
@@ -354,6 +356,7 @@ impl TopicSamples {
 
         let runs = vec![
             BotRunSummary {
+                hold: Default::default(),
                 id: RUN_DONE.into(),
                 bot_id: "m-coder".into(),
                 group_id: GROUP.into(),
@@ -370,6 +373,7 @@ impl TopicSamples {
                 plan: Vec::new(),
             },
             BotRunSummary {
+                hold: Default::default(),
                 id: RUN_LIVE.into(),
                 bot_id: "m-reviewer".into(),
                 group_id: GROUP.into(),
@@ -389,6 +393,7 @@ impl TopicSamples {
             // `Taro 的进度` (the mockup's four steps). It waits for Joye's
             // review, so the timeline shows no bot-at-work row.
             BotRunSummary {
+                hold: Default::default(),
                 id: RUN_SHORT.into(),
                 bot_id: "m-taro".into(),
                 group_id: GROUP.into(),

@@ -63,8 +63,8 @@
 
 服务器派活时按顺序算，第一条命中就用：
 
-1. 有真人交代（运行的 `requested_for`，即协议的 `BotRun.requestedFor`，规则见 design-roles 3.3）：用他。私密卡片作答等 `requested_by` 为 `anonymous` 的，`requested_for` 就是 desk 拿到的真作答人 `claim.askerId`（`runs.ts:381`），不落到第 3 条。转交、分出去、接力沿用最初交代人，重试复用原请求，都由 `requested_for` 带过去，走这条。
-2. 集成事件（交代人是 hook 对应的成员）：用 `hooks.created_by`。
+1. 有真人交代（运行的 `requested_for`，即协议的 `BotRun.requestedFor`，规则见 design-roles 3.3）：用他。私密卡片作答等 `requested_by` 为 `anonymous` 的，`requested_for` 是真作答人，不落到第 3 条。（G3 实现时更正：`claim.askerId` 只是单独问私聊里的提问人；私密卡片的真作答人只在房间里，房间把它作为 `CardAnswerIn.voterId` 交给 desk，只用于 `requested_for`，不进运行、提示和线上字段。）转交、分出去、接力沿用最初交代人，重试复用原请求，都由 `requested_for` 带过去，走这条。
+2. 集成事件（交代人是 hook 对应的成员）：用 `hooks.created_by`。（G3 实现时注：今天 hook 的消息不会让 AI 成员开工——AI 成员和 hook 的消息都不进 desk——所以这条按「`requested_by` 是某个 hook 的成员」来认，等以后有这条路时自然生效。）
 3. 没有人交代（定时、AI 成员自己起的）：用这个 AI 成员的 `members.created_by`。
 
 算出的人已被移出团队（`members.deactivated = 1`）时，改用团队里最早的在用的人类管理员（`level = 'owner'` 且 `kind = 'human'`；design-roles 里 `level='owner'` 就是管理员，含所有者，所以合并前后是同一条查询）。理由：没人负责的事落给还在的负责人，不 @ 已经走了的人。
@@ -79,7 +79,7 @@
 | 别人的个人电脑（只会因规则 2、3 发生），本机执行 | `machine` | `machine` |
 | 团队电脑，或任何虚拟机执行 | `app` | `app`：没连，用到时请他连 |
 
-「个人电脑」「团队电脑」按 [design-roles.zh.md](design-roles.zh.md) 的电脑归属字段。它合并前：本机执行且 `machines.created_by` 等于身份人才算个人电脑，其余一律按团队电脑。虚拟机执行永远走 `app`：虚拟机里没有主人的 SSH，家目录里只有以前借来的登录，正是机 4.1。电脑是否虚拟机执行由 daemon 在 `hello.machine.runsIn` 里报（见 3.5）；旧 daemon 没报的不发 `github`，行为不变。
+「个人电脑」「团队电脑」按 [design-roles.zh.md](design-roles.zh.md) 的电脑归属字段。G3 实现时归属字段已在 main 上：`machines.owner_id`（`MachineView.ownerId`）等于身份人是他自己的个人电脑，是别人就是别人的个人电脑，为空是团队电脑。虚拟机执行永远走 `app`：虚拟机里没有主人的 SSH，家目录里只有以前借来的登录，正是机 4.1。电脑是否虚拟机执行由 daemon 在 `hello.machine.runsIn` 里报（见 3.5）；旧 daemon 没报的不发 `github`，行为不变。
 
 ### 3.3 数据和存储（D1）
 
@@ -136,15 +136,15 @@ CREATE INDEX github_waits_member ON github_waits(member_id);
 | `POST /v1/machine/runs/:id/github/rejected` | 机器令牌 | git 报认证失败后重新验一次令牌。 |
 
 - `available`：`client id` 和 `HOOK_SECRET_KEY` 都有才为 true。缺哪个，`unavailableReason` 给 `no_client_id` 或 `no_secret_key`（github 模块自己检查，不把 `hooks are not configured` 透出去）。
-- `GET .../github` 依次检查：`bot_runs.machine_id` 是这台电脑；`github_member_id` 非空；向 desk DO 发新 RPC `run.live(runId)`，确认 `ended_at IS NULL` 且 DO 里的 `machine_id` 也是这台电脑（任何结束路径——完成、取消、超时、租约丢失、转到别的电脑、`external.ts:277`——都落到 DO 的 `ended_at` 或换 `machine_id`，所以只查这一处）；电脑对此人有资格（3.2 表格不是 `machine` 的那几格）；此人已连且 `status = 'ok'`。
+- `GET .../github` 依次检查：`bot_runs.machine_id` 是这台电脑；`github_member_id` 非空；向 desk DO 取这次运行（现成的 `getRun`，不另加 `run.live`），确认 `ended_at IS NULL` 且 DO 里的 `machine_id` 也是这台电脑（任何结束路径——完成、取消、超时、租约丢失、转到别的电脑、`external.ts:277`——都落到 DO 的 `ended_at` 或换 `machine_id`，所以只查这一处）；电脑对此人有资格（3.2 表格不是 `machine` 的那几格）；此人已连且 `status = 'ok'`。
   - 通过：`{ token, login }`。没连：404（`not_found`）`github.not_connected`。失效：409（`conflict`）`github.invalid`（`ErrorCode` 是封闭的，没有对应 410 的值，所以用 `conflict`）。没资格或运行已结束：403（`forbidden`）`github.not_allowed`。
   - 每次发放写审计 `github.token.issue`（runId、machineId、memberId，不记值）。
 - `/wait`：`INSERT INTO github_waits ... ON CONFLICT(run_id) DO NOTHING`，只有真插入了一行才动作，所以每次运行只处理一次且不怕并发：
   - 由这个 AI 成员在话题里发一条普通消息 @ 身份人：没连时「@{名字} 这一步要用你的 GitHub。连接 GitHub 后我会自己接着做。」；失效时「@{名字} 你的 GitHub 连接失效了，重新连接后我会自己接着做。」
   - 不另发事件；@ 本身带系统通知。
-- **恢复**：此人连接成功时，对他每条 `github_waits` 调 desk DO 新 RPC `github.resume(runId)`，删行。desk 以那次运行为 `follow_up_of` 起一条跟进，交代人沿用原运行，提示里写「{名字} 已连接 GitHub，从停下的地方接着做」。原运行还没结束（AI 成员还在汇报）就等它结束再起，和现有「运行结束后有剩余输入」同一条路（`events.ts:386` 的深度上限照样生效）。等待的运行若已被别人跟进过，不重复起。
+- **恢复**：此人连接成功时，对他每条 `github_waits` 先删行（删到才动作，并发只恢复一次），再调 desk DO 新 RPC `githubResume(runId, memberId)`。desk 以那次运行为 `follow_up_of` 起一条跟进，交代人沿用原运行，提示里写「{名字} 已连接 GitHub，从停下的地方接着做」。原运行还没结束（AI 成员还在汇报）就等它结束再起，和现有「运行结束后有剩余输入」同一条路（`events.ts:386` 的深度上限照样生效）。等待的运行若已被别人跟进过（话题里之后有了这个成员的新运行；群聊区里有它的跟进或重试），不重复起；这个成员在话题里起新运行时，同一话题里它之前的等待行一并删掉，横幅随之消失。等待中的运行结束时话题标「blocked」、`waitingOn` 是身份人，不标完成；「只承诺没做」的自动继续在等待时不起。`/wait` 时此人其实已连上，就不 @，直接记下运行结束后恢复。
 - `/rejected`：用 `GET /user` 验一次；401 就标 `invalid` 并推 `github.status`。只在这里验，不做定时检查（OAuth App 令牌不过期）。
-- 派活：`server/src/bots/desk/runs.ts:397` `assignFrame` 里加一行调用 `githubFor(r, claim, machine)`（新文件 `server/src/github/assign.ts`）。只在电脑报了 `github` 功能时填 `frame.github`，并写 `bot_runs.github_member_id`。
+- 派活：`server/src/bots/desk/runs.ts` 的 `assign()` 里调用 `githubFor(env, { requestedFor, requestedBy, botId }, machine)`（新文件 `server/src/github/assign.ts`；它要查 D1，是异步的，所以不放在同步的 `assignFrame` 里）。单独问的只读运行不带。只在电脑报了 `github` 功能时填 `frame.github`，并写 `bot_runs.github_member_id`。
 - 令牌不进 `run.assign`、DO 存储、运行事件、日志、审计详情。
 
 ### 3.5 协议（只加不改）
@@ -317,7 +317,7 @@ AI 成员替你拉代码、推代码、开 PR 时用这个账号
 | --- | --- | --- | --- | --- |
 | G1 协议（并进四份设计共用的协议 PR，新模块 `github.ts` / `github.rs`） | 3.5 的字段、事件、`runsIn`、`github` RunEvent、fixtures；确认未知事件被忽略 | `docs/protocol.md`、`docs/machine-protocol.md`、`packages/protocol/src/`、`crates/chat-protocol/src/`、`protocol/fixtures/` | — | 两边 fixture 测试；未知事件解码测试 |
 | G2 服务端连接 | `0017_github_accounts.sql`、加密存储、设备码路由、`/v1/me/github`（`waits` 先返回空数组）、断开、`available` 和原因、对照表、停用钩子（用现成的 `registerMemberDeactivated`）、`github/index.ts` 注册点 | `server/src/github/{index,routes,store,api,hooks}.ts`、`server/src/features.ts` | G1 | vitest：mock GitHub fetch，覆盖 pending、slow_down、done、expired、denied、taken；库里和日志没有明文；对照表不覆盖手工行；停用后行被删 |
-| G3 服务端派活 | 身份人规则（含 anonymous、离开团队）、`frame.github`、`0017_github_runs.sql`、机器取令牌、`/wait`、`/rejected`、恢复跟进、desk RPC `run.live` 和 `github.resume`、`waits` 查询、话题 @ 文案 | `server/src/github/{assign,machine,resume,text}.ts`；`server/src/bots/desk/runs.ts:397` 一行；`server/src/bots/desk/github.ts`（新，两个 RPC）；往 `github/index.ts` 追加 | G1、G2。design-roles 没合并就按 3.2 的临时规则 | vitest：3.2 表格每一格；规则 1–3 和回落；别的电脑取令牌被拒；完成、取消、超时、租约丢失、转电脑后取令牌都被拒；`/wait` 并发只发一次 @；连上后起跟进且只起一次 |
+| G3 服务端派活 | 身份人规则（含 anonymous、离开团队）、`frame.github`、`0017_github_runs.sql`、机器取令牌、`/wait`、`/rejected`、恢复跟进、desk RPC `githubWait` 和 `githubResume`（取运行用现成的 `getRun`）、`waits` 查询、话题 @ 文案 | `server/src/github/{assign,machine,text}.ts`（恢复在 `machine.ts` 里）；`server/src/bots/desk/runs.ts:397` 一行；`server/src/bots/desk/github.ts`（新，两个 RPC）；往 `github/index.ts` 追加 | G1、G2。design-roles 没合并就按 3.2 的临时规则 | vitest：3.2 表格每一格；规则 1–3 和回落；别的电脑取令牌被拒；完成、取消、超时、租约丢失、转电脑后取令牌都被拒；`/wait` 并发只发一次 @；连上后起跟进且只起一次 |
 | G4 daemon | `github` 功能和 `runsIn`、署名环境、助手、`gh` 代理（本机和工具盘）、daemon 自己 fetch 的凭证、可追加脱敏、家目录清理、系统说明 | `apps/daemon/src/github.rs`（新）、`run.rs`、`chat_run.rs`（本地分支）、`daemon.rs`（FEATURES、hello、每次运行的 redactor）、`workspace.rs`（daemon 自己 git 的环境）、`redact.rs`、`executor/firecracker.rs`（工具盘由 daemon 做） | G1 | cargo test：mock 服务器，本地 http 远端上跑 `git credential fill`、`git push`；`gh auth login` 被拦；404 立刻失败并报 `/wait`；`stderr.log` 和会话上传里令牌被遮；文件通道调用后无 `.res`；guest PATH 解析 `gh` 到代理；Windows CI 上 `gh.exe` 分流，并验证空助手清掉系统级 `credential.helper=manager` |
 | G5 桌面端 | 连接 sheet、账号页一组、上手弹一次、话题横幅、电脑页提示、文案、截图自测数据 | `apps/desktop/src/views/settings/{github,account}.rs`、`copy/settings.rs`、`data.rs`、`provider/` 的 HTTP 调用、`fake/`（只为截图自测） | G1；横幅的数据要 G3，之前按 G2 的空 `waits` 做 | 文案目录测试；截图自测（浅色、深色、Mac、Windows）：未连接、等确认、已连接、失效、不可用、横幅 |
 | G6 文档、部署和端到端 | 自部署脚本生成 `HOOK_SECRET_KEY`；INSTALL 写 client id 覆盖和自建 OAuth App；上手指南加连接 GitHub；改 `machine-protocol.md:816` 那段；`tools/e2e` 场景 | `scripts/deploy-server.sh`、`docs/INSTALL*.md`、`docs/ONBOARDING.zh.md`、`docs/machine-protocol.md`、`tools/e2e/` | G3、G4 | 照文档在新 Ubuntu 上部署一遍；e2e：假 GitHub（`GITHUB_API_BASE`）下，没连 → @ → 连接 → 自动跟进推送成功；集成事件用 hook 建立人；重试仍用原交代人 |

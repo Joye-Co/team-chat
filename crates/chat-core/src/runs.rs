@@ -4,9 +4,10 @@
 use crate::http::{ApiError, ApiResult, HttpClient, enc};
 use crate::proto::machine::{FileChange, RunEvent, RunLogEntry};
 use crate::proto::{
-    BotRun, BotRunner, CreateMachineRequest, CreateMachineResponse, DecisionsResponse,
-    EndRunRequest, MAX_DECISIONS_PAGE, Machine, RunEventsResponse, SetBotRunnerRequest,
-    SetRunPlanRequest, StartRunRequest,
+    BotRun, BotRunner, ChainStopResponse, CreateMachineRequest, CreateMachineResponse,
+    DecisionsResponse, EndRunRequest, MAX_DECISIONS_PAGE, Machine, RunEventsResponse,
+    SetBotRunnerRequest, SetMachineBotRequest, SetRunPlanRequest, StartRunRequest, TopicRelay,
+    UpdateMachineRequest,
 };
 use reqwest::Method;
 use std::collections::HashMap;
@@ -76,6 +77,47 @@ impl HttpClient {
         .await
     }
 
+    /// Usable, a person in the group: stops a relay (按顺序做) and the run of its current step
+    /// (docs/protocol.md, "Participants, chains and relays"). Answers with the relay;
+    /// `conflict` when it had already ended.
+    pub async fn stop_relay(&self, group_id: &str, relay_id: &str) -> ApiResult<TopicRelay> {
+        self.call::<(), _>(
+            Method::POST,
+            &format!("/v1/groups/{}/relays/{}/stop", enc(group_id), enc(relay_id)),
+            None,
+            true,
+        )
+        .await
+    }
+
+    /// Usable, a person in the group: starts a paused relay again from the step it stopped at.
+    /// Answers with the relay; `conflict` when it is not paused.
+    pub async fn retry_relay(&self, group_id: &str, relay_id: &str) -> ApiResult<TopicRelay> {
+        self.call::<(), _>(
+            Method::POST,
+            &format!(
+                "/v1/groups/{}/relays/{}/retry",
+                enc(group_id),
+                enc(relay_id)
+            ),
+            None,
+            true,
+        )
+        .await
+    }
+
+    /// Usable, a person in the group: stops a chain of hand-overs and every run in it that has
+    /// not ended (全部停止).
+    pub async fn stop_chain(&self, group_id: &str, chain_id: &str) -> ApiResult<ChainStopResponse> {
+        self.call::<(), _>(
+            Method::POST,
+            &format!("/v1/groups/{}/chains/{}/stop", enc(group_id), enc(chain_id)),
+            None,
+            true,
+        )
+        .await
+    }
+
     /// A person in the run's group: stops an active run (docs/protocol.md, "Bot runs"). The
     /// machine gets `run.cancel` and the run ends as `cancelled` at once. Answers with the
     /// ended run; `conflict` (409) when the run had already ended.
@@ -112,6 +154,55 @@ impl HttpClient {
             true,
         )
         .await
+    }
+
+    /// Usable 接管: takes over a run (`POST /v1/runs/:id/takeover`, docs/protocol.md, "Run phase
+    /// and take-over"). Answers with the run (`holdKind: "takeover"`); `conflict` when it ended,
+    /// waits for a machine or its machine cannot be taken over; 404 on an older server.
+    pub async fn take_over_run(&self, run_id: &str) -> ApiResult<BotRun> {
+        self.call::<(), _>(
+            Method::POST,
+            &format!("/v1/runs/{}/takeover", enc(run_id)),
+            None,
+            true,
+        )
+        .await
+    }
+
+    /// Usable: runs one command of the person holding the run in its work folder. Never
+    /// queued: `conflict` when the run is not taken over by me, a command runs, or the machine
+    /// is offline.
+    pub async fn run_command(
+        &self,
+        run_id: &str,
+        req: &crate::proto::RunCommandRequest,
+    ) -> ApiResult<crate::proto::RunCommandResponse> {
+        req.validate()
+            .map_err(|e| ApiError::Invalid(e.to_string()))?;
+        self.call(
+            Method::POST,
+            &format!("/v1/runs/{}/commands", enc(run_id)),
+            Some(req),
+            true,
+        )
+        .await
+    }
+
+    /// Usable: stops my running command in a run I hold.
+    pub async fn cancel_run_command(&self, run_id: &str, command_id: &str) -> ApiResult<()> {
+        let _: serde_json::Value = self
+            .call::<(), _>(
+                Method::POST,
+                &format!(
+                    "/v1/runs/{}/commands/{}/cancel",
+                    enc(run_id),
+                    enc(command_id)
+                ),
+                None,
+                true,
+            )
+            .await?;
+        Ok(())
     }
 
     /// 1.1: one page of a group's decisions (群里的决定, `GET /v1/groups/:id/decisions`),
@@ -464,7 +555,56 @@ impl HttpClient {
         .await
     }
 
-    /// Owner. Revokes the machine token and closes its link.
+    /// Usable: renames a machine, or moves it between the team and me (`PATCH /v1/machines/:id`;
+    /// a team machine needs an admin, a personal one its owner). Answers the machine as I see it.
+    pub async fn update_machine(
+        &self,
+        machine_id: &str,
+        req: &UpdateMachineRequest,
+    ) -> ApiResult<Machine> {
+        req.validate()
+            .map_err(|e| ApiError::Invalid(e.to_string()))?;
+        self.call(
+            Method::PATCH,
+            &format!("/v1/machines/{}", enc(machine_id)),
+            Some(req),
+            true,
+        )
+        .await
+    }
+
+    /// Usable, the owner of a personal machine: my work for AI member `bot_id` runs on it
+    /// (`PUT /v1/machines/:id/bots/:botId`), with my code folder there.
+    pub async fn set_machine_bot(
+        &self,
+        machine_id: &str,
+        bot_id: &str,
+        req: &SetMachineBotRequest,
+    ) -> ApiResult<Machine> {
+        req.validate()
+            .map_err(|e| ApiError::Invalid(e.to_string()))?;
+        self.call(
+            Method::PUT,
+            &format!("/v1/machines/{}/bots/{}", enc(machine_id), enc(bot_id)),
+            Some(req),
+            true,
+        )
+        .await
+    }
+
+    /// Usable, the owner of a personal machine: my work for `bot_id` no longer runs on it.
+    pub async fn delete_machine_bot(&self, machine_id: &str, bot_id: &str) -> ApiResult<Machine> {
+        self.call::<(), _>(
+            Method::DELETE,
+            &format!("/v1/machines/{}/bots/{}", enc(machine_id), enc(bot_id)),
+            None,
+            true,
+        )
+        .await
+    }
+
+    /// Revokes the machine token and closes its link (a team machine: an admin; a personal one:
+    /// its owner).
     pub async fn delete_machine(&self, machine_id: &str) -> ApiResult<()> {
         let _: serde_json::Value = self
             .call::<(), _>(

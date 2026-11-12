@@ -175,7 +175,9 @@ struct Data {
     cards: HashMap<String, Arc<card::Card>>,
     artifacts: Vec<(GroupId, ArtifactSummary)>,
     side_chat: Vec<SideChatMessage>,
-    paused_by: Option<MemberId>,
+    /// Usable (T6, T7): the sample live run's phase fields and its held commands.
+    hold: run_phase::RunHold,
+    hand: Vec<run_phase::HandCommand>,
     // topic track (v11/topic): who approved PR #61 and when.
     approval: Option<(MemberId, Millis)>,
     /// My own notify settings, so the 通知 sections and menus can be tried
@@ -185,6 +187,27 @@ struct Data {
     levels: HashMap<GroupId, NotifyLevel>,
     unfollowed: std::collections::HashSet<TopicId>,
     muted_topics: std::collections::HashSet<TopicId>,
+    /// Usable: why the server refused my last order in a 话题 (`relay_refusal`).
+    relay_refusal: Option<(TopicId, RelayRefusal)>,
+}
+
+/// Usable: the state a sample 按顺序做 is in (`V2Samples::with_relay`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RelayShape {
+    /// Two members at work in one 话题, no order (Forge and Scout).
+    TwoWorking,
+    /// Step 2 of 3 at work.
+    Working,
+    /// Step 2 waits for its member's other work here.
+    Queued,
+    /// Stopped at step 2: Scout got stuck; 重试 and 停止.
+    Paused,
+    /// I stopped it at step 2.
+    Stopped,
+    /// Every step done.
+    Done,
+    /// The server refused my order: Scout cannot take it.
+    Refused,
 }
 
 /// The v2 sample provider.
@@ -248,6 +271,8 @@ fn topic(s: TopicSpec) -> Topic {
         message_count: 0,
         unread: 0,
         mentions: 0,
+        participants: Vec::new(),
+        relay: None,
     }
 }
 
@@ -292,6 +317,7 @@ struct RunSpec<'a> {
 
 fn run(s: RunSpec) -> BotRunSummary {
     BotRunSummary {
+        hold: Default::default(),
         id: s.id.into(),
         bot_id: s.bot.into(),
         group_id: s.group.into(),
@@ -1077,12 +1103,19 @@ impl V2Samples {
             cards,
             artifacts,
             side_chat,
-            paused_by: None,
+            hold: run_phase::RunHold {
+                // A personal Mac of mine, which takes commands.
+                takeover: Some("commands".into()),
+                machine_owner: Some(ME.into()),
+                ..Default::default()
+            },
+            hand: Vec::new(),
             approval: None,
             muted_groups: Default::default(),
             levels: HashMap::new(),
             unfollowed: Default::default(),
             muted_topics: Default::default(),
+            relay_refusal: None,
         }
     }
 
@@ -1137,6 +1170,139 @@ impl V2Samples {
         s
     }
 
+    /// Usable: 开发 / 话题列表虚拟滚动 as an order I wrote (`@Forge 写 → @Scout 审 → @Forge
+    /// 按意见改`), at one state of [`RelayShape`]; or, for [`RelayShape::Refused`], no relay
+    /// and the server's refusal of my order (Scout cannot take it).
+    pub fn with_relay(shape: RelayShape) -> Arc<Self> {
+        let s = Self::new();
+        s.with(|d| {
+            let step = |member: &str, note: &str, state: &str, run: Option<&str>| TopicRelayStep {
+                member_id: member.into(),
+                note: Some(note.into()),
+                state: state.into(),
+                run_id: run.map(Into::into),
+            };
+            // Forge wrote it; Scout's check is the second step.
+            let forge_done = matches!(
+                shape,
+                RelayShape::Working
+                    | RelayShape::Queued
+                    | RelayShape::Paused
+                    | RelayShape::Stopped
+                    | RelayShape::Done
+            );
+            if forge_done && let Some(r) = d.runs.iter_mut().find(|r| r.id == RUN_VIRTUAL) {
+                r.status = RunStatus::Done;
+                r.ended_at = Some(at(9, 38));
+                for p in &mut r.plan {
+                    p.state = PlanState::Done;
+                }
+            }
+            let scout = |status: RunStatus, ended: Option<Millis>| {
+                run(RunSpec {
+                    id: RUN_VIRTUAL_CHECK,
+                    bot: SCOUT,
+                    group: DEV,
+                    topic: T_VIRTUAL,
+                    status,
+                    by: ME,
+                    started: at(9, 40),
+                    ended,
+                    machine: "云端",
+                    plan: plan(&[
+                        ("读 Forge 的改动", PlanState::Done),
+                        ("在三台电脑上跑一遍", PlanState::Current),
+                        ("写审查意见", PlanState::Pending),
+                    ]),
+                })
+            };
+            let (state, current, steps, reason, stopped_by) = match shape {
+                RelayShape::Working | RelayShape::TwoWorking => {
+                    d.runs.push(scout(RunStatus::Running, None));
+                    let first = if shape == RelayShape::TwoWorking {
+                        "working"
+                    } else {
+                        "done"
+                    };
+                    ("running", 1, [first, "working", "pending"], None, None)
+                }
+                RelayShape::Queued => ("running", 1, ["done", "queued", "pending"], None, None),
+                RelayShape::Paused => {
+                    d.runs.push(scout(RunStatus::Failed, Some(at(9, 52))));
+                    (
+                        "paused",
+                        1,
+                        ["done", "failed", "pending"],
+                        Some("step_blocked"),
+                        None,
+                    )
+                }
+                RelayShape::Stopped => {
+                    d.runs.push(scout(RunStatus::Cancelled, Some(at(9, 47))));
+                    (
+                        "stopped",
+                        1,
+                        ["done", "stopped", "pending"],
+                        Some("step_cancelled"),
+                        Some(ME),
+                    )
+                }
+                RelayShape::Done => {
+                    d.runs.push(scout(RunStatus::Done, Some(at(9, 50))));
+                    ("done", 2, ["done", "done", "done"], None, None)
+                }
+                RelayShape::Refused => {
+                    d.relay_refusal = Some((
+                        T_VIRTUAL.into(),
+                        RelayRefusal {
+                            reason: "relay.member_unavailable".into(),
+                            member_ids: vec![SCOUT.into()],
+                        },
+                    ));
+                    return;
+                }
+            };
+            if shape == RelayShape::TwoWorking {
+                // Two members at work, no order: the second run beside Forge's.
+                return;
+            }
+            let runs = [Some(RUN_VIRTUAL), Some(RUN_VIRTUAL_CHECK), None];
+            let notes = ["写", "审", "按意见改"];
+            let members = [FORGE, SCOUT, FORGE];
+            let relay = TopicRelay {
+                id: "relay-v2-virtual".into(),
+                started_by: ME.into(),
+                goal: "话题列表改成虚拟滚动，一千条也不卡".into(),
+                current,
+                state: state.into(),
+                reason: reason.map(Into::into),
+                stopped_by: stopped_by.map(Into::into),
+                updated_at: at(9, 52) as u64,
+                steps: (0..3)
+                    .map(|i| {
+                        let run = (steps[i] != "pending" && steps[i] != "queued")
+                            .then_some(runs[i])
+                            .flatten();
+                        step(members[i], notes[i], steps[i], run)
+                    })
+                    .collect(),
+            };
+            if let Some(t) = d.topics.iter_mut().find(|t| t.id == T_VIRTUAL) {
+                t.relay = Some(relay);
+                t.status = match state {
+                    "paused" => TopicStatus::Blocked,
+                    "done" => TopicStatus::Done,
+                    "stopped" => TopicStatus::Open,
+                    _ => TopicStatus::InProgress,
+                };
+                if state == "paused" {
+                    t.waiting_on = vec![ME.into()];
+                }
+            }
+        });
+        s
+    }
+
     fn with<R>(&self, f: impl FnOnce(&mut Data) -> R) -> R {
         f(&mut self.data.lock().unwrap_or_else(|e| e.into_inner()))
     }
@@ -1146,9 +1312,94 @@ impl V2Samples {
         subs.retain(|tx| tx.unbounded_send(changes.clone()).is_ok());
     }
 
+    /// `--fake`: 停止 and 重试 of a sample 按顺序做 move it as the server would.
+    fn relay_to(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        relay_id: &str,
+        state: &str,
+    ) -> AdminReply<()> {
+        let done = self.with(|d| {
+            let r = d
+                .topics
+                .iter_mut()
+                .find(|t| t.id == topic_id)
+                .and_then(|t| t.relay.as_mut())
+                .filter(|r| r.id == relay_id)?;
+            let cur = r.current as usize;
+            if state == "stopped" {
+                r.stopped_by = Some(ME.into());
+                if let Some(s) = r.steps.get_mut(cur) {
+                    s.state = "stopped".into();
+                }
+            } else {
+                r.reason = None;
+                if let Some(s) = r.steps.get_mut(cur) {
+                    s.state = "working".into();
+                }
+            }
+            r.state = state.into();
+            Some(())
+        });
+        self.emit(vec![Change::Topics {
+            group_id: group_id.into(),
+        }]);
+        reply_now(done.ok_or(AdminError::Conflict))
+    }
+
     /// Takes over the live run in a scene (`live-takeover`).
     pub fn set_paused_by(&self, member: Option<MemberId>) {
-        self.with(|d| d.paused_by = member);
+        self.update_hold(|h| {
+            h.paused_by = member.clone();
+            h.hold_kind = member.as_ref().map(|_| "takeover".into());
+            h.held_at = member.as_ref().map(|_| at(9, 50));
+            h.phase = member.as_ref().map(|_| "taken_over".into());
+        });
+    }
+
+    /// Usable (T6, T7 scenes): changes the live run's phase fields.
+    pub fn update_hold(&self, f: impl FnOnce(&mut run_phase::RunHold)) {
+        self.with(|d| f(&mut d.hold));
+        self.emit(vec![Change::Runs {
+            group_id: DEV.into(),
+            topic_id: T_VIRTUAL.into(),
+        }]);
+    }
+
+    /// Usable (T7 scenes): the commands of the person holding the live run.
+    pub fn set_hand(&self, hand: Vec<run_phase::HandCommand>) {
+        self.with(|d| d.hand = hand);
+        self.emit(vec![Change::RunLog {
+            run_id: RUN_VIRTUAL.into(),
+        }]);
+    }
+
+    /// 继续 / 交还: the hold ends; a hand-back with commands leaves its summary.
+    fn release_hold(&self) {
+        self.with(|d| {
+            let h = &mut d.hold;
+            if let Some(by) = h.paused_by.take() {
+                let took_over = h.hold_kind.as_deref() == Some("takeover");
+                let commands = d.hand.iter().filter(|c| c.by == by).count() as u64;
+                if took_over {
+                    h.last_handback = Some(run_phase::Handback {
+                        by,
+                        held_ms: h
+                            .held_at
+                            .map_or(0, |t| (crate::selftest::clock::now_ms() - t).max(0) as u64),
+                        commands,
+                        files: Vec::new(),
+                        head_from: None,
+                        head_to: None,
+                    });
+                }
+            }
+            h.hold_kind = None;
+            h.held_at = None;
+            h.phase = None;
+            d.hand.clear();
+        });
         self.emit(vec![Change::Runs {
             group_id: DEV.into(),
             topic_id: T_VIRTUAL.into(),
@@ -1203,6 +1454,17 @@ impl ChatProvider for V2Samples {
                     t.last_seq = msgs as u64;
                     if self.quiet {
                         t.waiting_on.retain(|m| m != ME);
+                    }
+                    if t.participants.is_empty() {
+                        let is_bot =
+                            |id: &str| self.members.iter().any(|m| m.id == id && m.is_bot());
+                        let runs: Vec<BotRunSummary> = d
+                            .runs
+                            .iter()
+                            .filter(|r| !(self.quiet && r.status.is_active()))
+                            .cloned()
+                            .collect();
+                        t.participants = crate::fake::sample_participants(&t, &runs, &is_bot);
                     }
                     t
                 })
@@ -1383,6 +1645,8 @@ impl ChatProvider for V2Samples {
                 last_seq: 1,
                 last_activity_at: now,
                 message_count: 1,
+                participants: Vec::new(),
+                relay: None,
                 unread: 0,
                 mentions: 0,
             });
@@ -1528,6 +1792,20 @@ impl ChatProvider for V2Samples {
         }]);
     }
     // --- end rail track
+    fn relay_refusal(&self, _group_id: &str, topic_id: &str) -> Option<RelayRefusal> {
+        self.with(|d| {
+            d.relay_refusal
+                .as_ref()
+                .filter(|(t, _)| t == topic_id)
+                .map(|(_, r)| r.clone())
+        })
+    }
+    fn stop_relay(&self, group_id: &str, topic_id: &str, relay_id: &str) -> AdminReply<()> {
+        self.relay_to(group_id, topic_id, relay_id, "stopped")
+    }
+    fn retry_relay(&self, group_id: &str, topic_id: &str, relay_id: &str) -> AdminReply<()> {
+        self.relay_to(group_id, topic_id, relay_id, "running")
+    }
     fn runs(&self, _group_id: &str, topic_id: &str) -> Vec<BotRunSummary> {
         let mut runs: Vec<BotRunSummary> = self.with(|d| {
             d.runs
@@ -1535,6 +1813,12 @@ impl ChatProvider for V2Samples {
                 .filter(|r| r.topic_id == topic_id)
                 .filter(|r| !(self.quiet && r.status.is_active()))
                 .cloned()
+                .map(|mut r| {
+                    if r.id == RUN_VIRTUAL {
+                        r.hold = d.hold.clone();
+                    }
+                    r
+                })
                 .collect()
         });
         runs.sort_by_key(|r| std::cmp::Reverse(r.created_at));
@@ -1909,7 +2193,7 @@ impl ChatProvider for V2Samples {
             ],
             started_at: Some(at(9, 31)),
             takeover_url: None,
-            paused_by: self.with(|d| d.paused_by.clone()),
+            paused_by: self.with(|d| d.hold.paused_by.clone()),
         })
     }
     fn acceptance_criteria(&self, run_id: &str) -> Vec<AcceptanceItem> {
@@ -1944,12 +2228,104 @@ impl ChatProvider for V2Samples {
         }
     }
     fn take_over_run(&self, _group_id: &str, _topic_id: &str, _run_id: &str) -> AdminReply<()> {
-        self.set_paused_by(Some(ME.into()));
+        self.update_hold(|h| {
+            h.paused_by = Some(ME.into());
+            h.hold_kind = Some("takeover".into());
+            h.held_at = Some(crate::selftest::clock::now_ms());
+            h.phase = Some("taken_over".into());
+        });
         reply_now(Ok(()))
     }
     fn hand_back_run(&self, _group_id: &str, _topic_id: &str, _run_id: &str) -> AdminReply<()> {
-        self.set_paused_by(None);
+        self.release_hold();
         reply_now(Ok(()))
+    }
+    fn pause_run(&self, _group_id: &str, _topic_id: &str, _run_id: &str) -> AdminReply<()> {
+        self.update_hold(|h| {
+            h.paused_by = Some(ME.into());
+            h.hold_kind = Some("pause".into());
+            h.held_at = Some(crate::selftest::clock::now_ms());
+            h.phase = Some("paused".into());
+        });
+        reply_now(Ok(()))
+    }
+    fn resume_run(
+        &self,
+        _g: &str,
+        _t: &str,
+        _run_id: &str,
+        _note: Option<String>,
+    ) -> AdminReply<()> {
+        self.release_hold();
+        reply_now(Ok(()))
+    }
+    /// A sample command ends at once: its first word picks the output.
+    fn run_command(&self, run_id: &str, command: String) -> AdminReply<String> {
+        if run_id != RUN_VIRTUAL {
+            return reply_now(Err(AdminError::Unsupported));
+        }
+        let held = self.with(|d| d.hold.paused_by.as_deref() == Some(ME));
+        if !held {
+            return reply_now(Err(AdminError::Conflict));
+        }
+        let id = self.with(|d| format!("hc-{}", d.hand.len() + 1));
+        let (ok, output) = match command.split_whitespace().next() {
+            Some("git") => (
+                true,
+                "On branch bot/forge-virtual\nnothing to commit, working tree clean\n",
+            ),
+            Some("ls") => (true, "Cargo.toml\napps\ncrates\ndocs\n"),
+            _ => (false, "command not found\n"),
+        };
+        self.with(|d| {
+            d.hand.push(run_phase::HandCommand {
+                id: id.clone(),
+                command,
+                by: ME.into(),
+                output: output.into(),
+                result: Some(run_phase::HandResult {
+                    ok,
+                    exit_code: Some(if ok { 0 } else { 127 }),
+                    ms: 40,
+                    ..Default::default()
+                }),
+                at: crate::selftest::clock::now_ms(),
+            })
+        });
+        self.emit(vec![Change::RunLog {
+            run_id: RUN_VIRTUAL.into(),
+        }]);
+        reply_now(Ok(id))
+    }
+    fn cancel_run_command(&self, _run_id: &str, command_id: &str) -> AdminReply<()> {
+        self.with(|d| {
+            if let Some(c) = d
+                .hand
+                .iter_mut()
+                .find(|c| c.id == command_id && c.result.is_none())
+            {
+                c.result = Some(run_phase::HandResult::default());
+            }
+        });
+        self.emit(vec![Change::RunLog {
+            run_id: RUN_VIRTUAL.into(),
+        }]);
+        reply_now(Ok(()))
+    }
+    fn hand_commands(&self, run_id: &str) -> Vec<run_phase::HandCommand> {
+        if run_id != RUN_VIRTUAL {
+            return Vec::new();
+        }
+        self.with(|d| d.hand.clone())
+    }
+    /// The sample run is on this computer (a made-up folder; 在访达中打开 shows it).
+    fn run_work_folder(&self, run_id: &str) -> Option<std::path::PathBuf> {
+        (run_id == RUN_VIRTUAL).then(|| {
+            std::path::PathBuf::from(format!(
+                "~/{}-runs/lines/forge-virtual/work",
+                env!("PRODUCT_SLUG")
+            ))
+        })
     }
     fn member_stats(&self, member_id: &str) -> Option<MemberStats> {
         let mut stats = MemberStats::default();

@@ -19,6 +19,7 @@ import { addPushFixtures } from "./fixtures-push.ts";
 import { addUsableFixtures } from "./fixtures-usable.ts";
 import { addSignInFixtures } from "./fixtures-sign-in.ts";
 import { addHomesFixtures } from "./fixtures-homes.ts";
+import { addSuperviseFixtures } from "./fixtures-supervise.ts";
 import { run, type Tree } from "./generated.ts";
 
 type Fixture = {
@@ -370,6 +371,7 @@ addPushFixtures({ ok, bad, T0, ID });
 addUsableFixtures({ ok, bad, T0, ID, base, topic });
 addSignInFixtures({ ok, bad, ID });
 addHomesFixtures({ ok, ID });
+addSuperviseFixtures({ ok, bad, T0, ID });
 
 // ---------------------------------------------------------------------------
 

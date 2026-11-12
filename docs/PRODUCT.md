@@ -23,7 +23,7 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
 
 - Topic status, `waitingOn` and the members working on it follow the work (runs, cards, results);
   nobody sets them by hand. The topic menu only has 重命名 and 关注. Bots are
-  members: there is no 暂停 for a member; you tell it in the topic, and 停止 ends one run.
+  members: there is no 暂停 for a member; you tell it in the topic, 暂停 holds one run, and 停止 ends one run.
 - Topic status chips say who is waited on and for what:
 
   | `TopicStatus` | Chip when the viewer is in `waitingOn` | Chip otherwise |
@@ -61,12 +61,30 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
   图没有画出来, 这种图还画不了, 图太大了，只显示原文, 图里有不支持的写法, 第 {n} 行看不懂, {n} 个节点, 流程图, 时序图, 状态图, 类图,
   关系图, 甘特图, 时间线, and the 产出 footer chip 图 n. Never `Mermaid`, `block`, `render` or `event`
   in UI text.
+- Words for several AI members in one 话题 and for work that goes from member to member
+  (docs/plans/usable/design-relay.zh.md §3.6). Never 接力 as a noun: an order a person writes
+  (`@A → @B → @C`) is 按顺序做, and its steps use the closed set of status words above plus 停止:
+  按顺序做：{names}, 第 {k}/{n} 步, 停在 {name}：{reason}, 都做完了, {name} 停止了, 停止了, 重试, 停止,
+  没能停止, 没能重试; {a} 把这件事转交给 {b}, {a} 把一部分分给 {b}, 全部停止, 停止这件事里所有在做的？,
+  做完的标准, {b} 做完了，结果已交回 {a}, {b} 没做完：{reason}, 被 {name} 停止; the reasons
+  {name} 现在接不了这件事, 等 {name} 手上的做完, 交出次数到上限了, {name} 的代码还没推上去,
+  发起的人已经不在这个群, 没有交到 {name} 手上, 停住了; the composer's 想让他们按顺序做？用 → 连起来,
+  按顺序做要在话题里用, 这个话题已经在按顺序做，先停止它, 按顺序做要写 2 到 6 步，同一个成员不能挨着;
+  and in 详情 → 成员 在做 and 参与过. Several members can work in a 话题 at once or one after
+  another; no member is the one responsible for a 话题.
 - The settings window may also use 岗位 (role and how the member works), 权限 (permissions),
   机器 (machines) and 成本 (cost).
 - Words for each person's GitHub (docs/plans/usable/design-github-identity.zh.md §3.7): GitHub is
   a proper name, not a product noun; 连接 GitHub, 连接…, 重新连接…, 断开…, 已连接为 @{login}, 还没连接,
   需要重新连接, 验证码 (GitHub's own word), 复制验证码, 打开 GitHub, 授权, 组织, 仓库, PR, 以后再说,
   去 GitHub 撤销, and {name} 在等你连接 GitHub.
+- Words for a run's state and 接管 (docs/plans/usable/design-takeover.zh.md §3.9): 暂停, 继续, 已暂停,
+  已停止, 没做完, 在等电脑, 排队第 {n} 个, 电脑不在线, 正在准备, 等 {who} 回复, 等 {who} 批准,
+  卡住了，需要你看一下, {who} 暂停了 {member}, 你在操作 {computer}, {who} 在操作 {computer}, 已停下,
+  替 {who} 交还, 去回复, 运行, 中止, 运行中, 成功, 失败, 已中止, 工作目录, 在访达中打开 / 在资源管理器中打开,
+  留句话给 {member}, {who} 接管了 {member}, {who} 交还了 {member}, 跑了 {k} 条命令, 改了 {files}, and the
+  reminders {member} 还停着，等你交还 and {who} 接管 {member} 已经 {h} 小时. 暂停 stops one run for a
+  while (继续 lets it go on); it is not a setting of the member. 暂停, 等你 and 完成 never share words.
 - The three 身份 of a team (design-roles): 所有者, 管理员 and 普通成员, with 身份 itself and the menu
   items 设为所有者, 设为管理员, 设为普通成员. 负责人 stays the member a 话题 is assigned to and is
   never a 身份.
@@ -99,8 +117,8 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
 - **话题**: the timeline (virtualized, anchored at the bottom, Markdown, images inline, cards
   rendered natively), the newest decision that waits on me pinned above the composer, and the
   composer (multi-line, Chinese IME, @mentions, quote a message, paste or drop images and files).
-  On the right, the topic rail (详情): 成员 (everyone in the 群, who all see the 话题, with the one
-  who is 负责 and the one who 提出 it marked), 计划, 改动, 产出, 用到的决定, 电脑, 用时和成本; a card
+  On the right, the topic rail (详情): 成员 (everyone in the 群, who all see the 话题, with the AI
+  members at work marked 在做, those that took part 参与过, and the one who 提出 it), 计划, 改动, 产出, 用到的决定, 电脑, 用时和成本; a card
   with no data is hidden.
 - **单独问** (⌘;): a side chat with a member (the main bot by default) beside a topic. The member has read
   the topic up to now. Only I see the questions and answers. A suggested step goes into the topic

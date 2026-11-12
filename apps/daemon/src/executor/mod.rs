@@ -40,6 +40,13 @@ pub trait Executor: Send + Sync + std::fmt::Debug {
     /// Ends what a daemon that crashed left running for an unfinished run.
     fn kill_leftover(&self, meta: &RunMeta);
 
+    /// 盯 1.4: the CPU time each process the run's CLI started has used, by pid (see
+    /// [`crate::proctree::tools_cpu`]). None when it is not known (the CLI is not running, or
+    /// it runs where the daemon cannot see its processes).
+    fn tools_cpu(&self, _run_dir: &Path) -> Option<std::collections::HashMap<i32, u64>> {
+        None
+    }
+
     /// The CLI runs apart from this machine's processes (in a VM): it reaches `chat-run`
     /// only through the relayed socket, never through files the daemon watches.
     fn isolated(&self) -> bool {

@@ -1093,3 +1093,38 @@ async fn discarding_a_new_topic_discards_its_follow_ups() {
     h.client.discard(&root).unwrap();
     assert!(h.client.store().outbox_all().unwrap().is_empty());
 }
+
+/// Usable: a refused 按顺序做 message keeps the server's reason and the members it names.
+#[tokio::test]
+async fn a_refused_send_carries_the_reason_and_the_members() {
+    let server = server_with_group().await;
+    let t1 = server.with(|s| {
+        s.refuse_send_body = Some((
+            "@a -> @b go".into(),
+            serde_json::json!({"code": "invalid", "message": "no", "reason": "relay.member_unavailable", "memberIds": ["B2"]}),
+        ));
+        s.post(G1, ALICE, None, None, "a0", "r1", false)
+            .1
+            .unwrap()
+            .id
+    });
+    let mut h = harness_with(server, |_| {});
+    next_update(&mut h.updates, "caught up", |u| {
+        matches!(u, ClientUpdate::CaughtUp)
+    })
+    .await;
+    let id = h
+        .client
+        .send_message(G1, &t1, "@a -> @b go", vec![])
+        .unwrap();
+    let u = next_update(&mut h.updates, "send failed", |u| {
+        matches!(u, ClientUpdate::SendFailed(_))
+    })
+    .await;
+    let ClientUpdate::SendFailed(f) = u else {
+        unreachable!()
+    };
+    assert_eq!((f.id.as_str(), f.code), (id.as_str(), ErrorCode::Invalid));
+    assert_eq!(f.reason.as_deref(), Some("relay.member_unavailable"));
+    assert_eq!(f.member_ids, vec!["B2".to_string()]);
+}

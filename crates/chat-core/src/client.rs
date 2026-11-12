@@ -142,6 +142,10 @@ pub struct SendFailure {
     pub topic_id: Option<String>,
     pub code: ErrorCode,
     pub message: String,
+    /// The server's specific reason, e.g. `relay.member_unavailable`.
+    pub reason: Option<String>,
+    /// The members the reason is about (`ErrorBody.memberIds`).
+    pub member_ids: Vec<String>,
 }
 
 /// Change notices. The UI re-reads the cache for the named scope.

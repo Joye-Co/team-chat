@@ -52,6 +52,11 @@ impl Executor for Local {
         Some(Box::new(LocalStopped { pgid, tools }))
     }
 
+    fn tools_cpu(&self, run_dir: &Path) -> Option<std::collections::HashMap<i32, u64>> {
+        let pgid = workspace::read_meta(run_dir)?.pgid.filter(|p| *p > 1)?;
+        proctree::tools_cpu(pgid)
+    }
+
     /// A pid can be reused, so a live group leader must still name the CLI program; while any
     /// member of the group lives, its id is not reused.
     fn kill_leftover(&self, meta: &RunMeta) {

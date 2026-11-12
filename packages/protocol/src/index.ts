@@ -195,6 +195,7 @@ import {
 } from "./github.ts";
 import { ChainStopResponse, topicRelayFields, topicUpdatedRelayFields, TopicRelay } from "./relay.ts";
 import { RunCommandRequest, RunCommandResponse } from "./takeover.ts";
+import { RunSettings, UpdateRunSettingsRequest } from "./supervise.ts";
 
 export * from "./common.ts";
 export * from "./account.ts";
@@ -230,6 +231,7 @@ export * from "./push.ts";
 export * from "./github.ts";
 export * from "./relay.ts";
 export * from "./takeover.ts";
+export * from "./supervise.ts";
 
 // ---------------------------------------------------------------------------
 // Entities
@@ -974,6 +976,8 @@ export const schemas = {
   MachineGithubWaitRequest,
   RunCommandRequest,
   RunCommandResponse,
+  RunSettings,
+  UpdateRunSettingsRequest,
 } as const;
 export type SchemaName = keyof typeof schemas;
 

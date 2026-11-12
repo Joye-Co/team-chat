@@ -54,6 +54,8 @@ pub mod live;
 pub mod members_page;
 pub mod memory;
 pub mod rail;
+// Usable: 按顺序做 and who is at work in a 话题.
+pub mod relay;
 pub mod side_chat;
 pub mod topic_rail;
 // --- v12/kit ---
@@ -217,6 +219,11 @@ pub const SECTIONS: &[Section] = &[
     Section {
         name: "topic_rail",
         entries: topic_rail::ENTRIES,
+        developer: false,
+    },
+    Section {
+        name: "relay",
+        entries: relay::ENTRIES,
         developer: false,
     },
     Section {
@@ -600,6 +607,27 @@ mod tests {
             for (key, text) in section.entries {
                 assert!(!text.trim().is_empty(), "{}::{key} is empty", section.name);
                 assert!(keys.insert(*key), "{}::{key} twice", section.name);
+            }
+        }
+    }
+
+    /// 机 1.9 / 2.11: where AI members work is one word, 电脑, in 设置 and 团队管理 alike, and
+    /// neither says daemon, runtime or 标签 (团队管理 may still name VM).
+    #[test]
+    fn a_computer_is_called_one_thing() {
+        for section in SECTIONS
+            .iter()
+            .filter(|s| s.name == "settings" || s.name == "admin")
+        {
+            for (key, text) in section.entries {
+                let lower = text.to_lowercase();
+                for word in ["机器", "daemon", "runtime", "标签"] {
+                    assert!(
+                        !lower.contains(word),
+                        "{}::{key} = {text:?} says {word}",
+                        section.name
+                    );
+                }
             }
         }
     }

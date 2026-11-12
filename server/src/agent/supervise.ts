@@ -26,17 +26,52 @@ export const LOOP_TEXT = (title: string) =>
 export const CONTINUE_TEXT =
   "[team-chat] You said you would do it but ended without doing it. Do the work now with your tools, then report the result.";
 
+/**
+ * 盯 1.6: after this long told to save its state at the time limit, a run that has not ended is
+ * interrupted and goes on in a new turn of the same session.
+ */
+export const LIMIT_GRACE_MS = 15 * 60_000;
+/** Turns in a row that reach the time limit without progress before the desk stops and tells people. */
+export const LIMIT_STOP_ROUNDS = 2;
+/** The daemon's own deadline (`maxDurationMs`) lies this far past the limit: only a backstop. */
+export const LIMIT_BACKSTOP_MS = 2 * LIMIT_GRACE_MS;
+
+/** What the CLI reads at the time limit (developer words are fine: the CLI reads them). */
+export const LIMIT_TEXT = (minutes: number) =>
+  `[team-chat] This run has worked for ${minutes} minutes, the team's time limit for one turn. This is an automatic message, not from a person: do not answer it in your reply to people. Do not start anything new now. Save your state: commit work in progress to your own branch (never to main), update your plan, and end this turn with a short note of what is done and what is left. The work then goes on by itself in a new turn of this same session. If the whole request is already done, finish as usual and run \`chat-run report --state done --text <one line>\`.`;
+
 /** A tool call's identity for loop detection: its title without volatile numbers and spacing. */
 export function loopKey(title: string): string {
   return title.replace(/\s+/g, " ").trim().slice(0, 300);
 }
 
+/**
+ * 盯 1.11: a step's identity for loop detection is its title and its output. The same step with
+ * the same output is a loop; the same step with changing output (polling CI) is not.
+ */
+export function stepKey(title: string, output: string): string {
+  const key = loopKey(title);
+  if (key === "") return "";
+  const out = output.trim();
+  // FNV-1a: only equality matters.
+  let h = 0x811c9dc5;
+  for (let i = 0; i < out.length; i++) {
+    h ^= out.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return `${key}\n${out.length}:${h.toString(16)}`;
+}
+
 const PROMISE = /^(好的?|收到|没问题|ok(ay)?)?[，,。.!！\s]*(我(来|去|先|会|马上|这就)|让我|稍等|马上|这就|i'?ll|i will|let me|on it|working on it|looking into)/i;
 
-/** A result that only promises work (and the run called no tool): the desk continues it. */
-export function isPromiseOnly(result: string, toolCalls: number): boolean {
+/**
+ * A result that only promises work: the desk continues it. 盯 1.10: only when the piece of work
+ * has a work order (交代单, the front desk dispatched it) and the run called no tool, so a plain
+ * short answer ("我会在周会上提") to a question is left alone.
+ */
+export function isPromiseOnly(result: string, toolCalls: number, workOrder: boolean): boolean {
   const t = result.trim();
-  return toolCalls === 0 && t.length > 0 && [...t].length <= 200 && PROMISE.test(t);
+  return workOrder && toolCalls === 0 && t.length > 0 && [...t].length <= 200 && PROMISE.test(t);
 }
 
 const PROGRESS = /(进展|进度(如何|怎样|怎么样|呢|[?？]|$)|怎么样了|到哪(一步|了)|好了(没|吗)|完成了(吗|没)|做完了(吗|没)|还要多久|status\b|progress|eta\b|how('s| is) it going)/i;

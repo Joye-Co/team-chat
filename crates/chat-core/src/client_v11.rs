@@ -607,6 +607,43 @@ impl Client {
         })
     }
 
+    /// Takes over a run (接管, `POST /v1/runs/:id/takeover`) and stores the answer.
+    pub fn take_over_run(&self, run_id: &str) -> JoinHandle<Result<BotRun, ClientError>> {
+        let http = self.http();
+        let shared = self.shared().clone();
+        let id = run_id.to_string();
+        self.spawn(async move {
+            let run = http.take_over_run(&id).await?;
+            store_run_and_emit(&shared, &run)?;
+            Ok(run)
+        })
+    }
+
+    /// Runs one command of mine in a run I hold (`POST /v1/runs/:id/commands`): its id.
+    pub fn run_command(
+        &self,
+        run_id: &str,
+        command: String,
+    ) -> JoinHandle<Result<String, ClientError>> {
+        let http = self.http();
+        let id = run_id.to_string();
+        self.spawn(async move {
+            let req = crate::proto::RunCommandRequest { command };
+            Ok(http.run_command(&id, &req).await?.command_id)
+        })
+    }
+
+    /// Stops my running command (`POST /v1/runs/:id/commands/:commandId/cancel`).
+    pub fn cancel_run_command(
+        &self,
+        run_id: &str,
+        command_id: &str,
+    ) -> JoinHandle<Result<(), ClientError>> {
+        let http = self.http();
+        let (id, cmd) = (run_id.to_string(), command_id.to_string());
+        self.spawn(async move { Ok(http.cancel_run_command(&id, &cmd).await?) })
+    }
+
     /// Resumes a paused run (交还, `POST /v1/runs/:id/resume`) and stores the answer.
     pub fn resume_run(
         &self,

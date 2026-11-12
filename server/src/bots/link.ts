@@ -23,7 +23,7 @@ import { logger as baseLogger, type Logger } from "../core/logger";
 import { runMigrations } from "../core/migrations";
 import { LOGINS_MIGRATION, METRICS_MIGRATION, latestMetrics, readSeries, recordMetrics } from "../monitor/store";
 import { type MachineLogin, LoginStatusFrame } from "@chat/protocol";
-import { ASSIGN_RETRY_MS, LINK_IDLE_MS } from "./dispatch";
+import { ASSIGN_RETRY_MS, LIMIT_SLACK_MS, LINK_IDLE_MS } from "./dispatch";
 import { type BotsEnv, deskStub } from "./env";
 
 export const MACHINE_HEADER = "x-chat-machine-id";
@@ -42,6 +42,8 @@ const TICK_MS = 30_000;
 /** A finished run waits this long for its run.session before it is closed. */
 const SESSION_WAIT_MS = 60 * 60_000;
 const ACK_EVERY = 100;
+/** 盯 1.4: a working step is passed on to its desk at most this often per run. */
+const ALIVE_EVERY_MS = 60_000;
 const MAX_FRAME_BYTES = 1_048_576;
 
 // Daemon frames as the server reads them. Run events are kept as objects with a string `type`
@@ -105,6 +107,8 @@ export interface LinkStatus {
   runningRuns: string[];
   /** 模 3.1: runtimes whose CLI is not signed in (`signedOutRuntimes`). */
   signedOut?: string[];
+  /** 模 3.4: runtimes at their subscription limit until `until` (`limitedRuntimes`). */
+  limited?: LimitedRuntime[];
 }
 
 /** How long a run that failed to sign in keeps its runtime signed out without a heartbeat saying so. */
@@ -134,11 +138,66 @@ export function signedOutRuntimes(
   return [...out].sort();
 }
 
+/**
+ * 模 3.4, 盯 1.5 (decided: wait for the reset): a runtime whose run ended at its subscription
+ * limit takes no runs on this machine until `until` (server clock). The sign-in is the
+ * machine's, shared by every AI member there. `known`: the CLI or the daemon's usage windows
+ * said when it resets; else the desk tries again after a backoff (`tries` in a row).
+ */
+export interface LimitMark {
+  until: number;
+  known: boolean;
+  tries: number;
+}
+export interface LimitedRuntime {
+  runtime: string;
+  until: number;
+  known: boolean;
+}
+/** Without a reset time: 15 min, then twice as long each time in a row, at most 2 h. */
+export const LIMIT_BACKOFF_MS = 15 * 60_000;
+export const LIMIT_BACKOFF_MAX_MS = 2 * 60 * 60_000;
+/** A usage window this full is the one that stopped the run. */
+export const LIMIT_FULL_PCT = 95;
+/** A reset further away than this is not believed (a week's window and a day of slack). */
+const LIMIT_MAX_MS = 8 * 24 * 60 * 60_000;
+
+/**
+ * When a runtime that just hit its limit takes runs again: the CLI's reset time, else the end of
+ * the fullest usage windows the daemon read (`windows` on the machine clock, `offset` puts them
+ * on the server's), else a backoff that doubles while the earlier mark was a guess too.
+ */
+export function limitMark(
+  resetsAt: number | undefined,
+  windows: { usedPct: number; resetsAt?: number }[] | undefined,
+  offset: number,
+  prev: LimitMark | undefined,
+  now: number,
+): LimitMark {
+  const ok = (t: number | undefined): t is number => t !== undefined && Number.isFinite(t) && t > now && t - now <= LIMIT_MAX_MS;
+  if (ok(resetsAt)) return { until: resetsAt + LIMIT_SLACK_MS, known: true, tries: 0 };
+  const full = (windows ?? []).filter((w) => w.usedPct >= LIMIT_FULL_PCT).map((w) => (w.resetsAt === undefined ? undefined : w.resetsAt + offset)).filter(ok);
+  if (full.length > 0) return { until: Math.max(...full) + LIMIT_SLACK_MS, known: true, tries: 0 };
+  // A guess in a row (the earlier one ended within a backoff of now): twice as long.
+  const tries = prev && !prev.known && now - prev.until < LIMIT_BACKOFF_MAX_MS ? prev.tries + 1 : 1;
+  return { until: now + Math.min(LIMIT_BACKOFF_MAX_MS, LIMIT_BACKOFF_MS * 2 ** (tries - 1)), known: false, tries };
+}
+
+/** The runtimes still at their limit (marks whose time has not come), by runtime. */
+export function limitedRuntimes(marks: Record<string, LimitMark>, now: number): LimitedRuntime[] {
+  return Object.entries(marks)
+    .filter(([, m]) => m.until > now)
+    .map(([runtime, m]) => ({ runtime, until: m.until, known: m.known }))
+    .sort((a, b) => a.runtime.localeCompare(b.runtime));
+}
+
 const OPEN_STATES = "('assigned','accepted','done')";
 
 export class MachineLink extends DurableObject<BotsEnv> {
   private readonly sql: SqlStorage;
   private machineId: string | null = null;
+  /** 盯 1.4: when each run's desk last heard that its step is working (in memory only). */
+  private readonly aliveSent = new Map<string, number>();
   private log: Logger = baseLogger.child({ obj: "MachineLink" });
   private chain: Promise<void> = Promise.resolve();
   private readonly queues = new Map<string, { frames: SeqFrame[]; busy: boolean; sinceAck: number }>();
@@ -212,6 +271,25 @@ export class MachineLink extends DurableObject<BotsEnv> {
 
   private run(runId: string): RunRow | undefined {
     return this.sql.exec<RunRow>("SELECT * FROM runs WHERE run_id = ?", runId).toArray()[0] as RunRow | undefined;
+  }
+
+  /**
+   * 盯 1.4: runs whose step the daemon reports working (`RunCursor.active`); their desks hear it
+   * at most once a minute per run. Never holds up the heartbeat.
+   */
+  private alive(runIds: string[], now: number): void {
+    for (const id of runIds) {
+      if (now - (this.aliveSent.get(id) ?? 0) < ALIVE_EVERY_MS) continue;
+      const r = this.run(id);
+      if (!r || !this.machineId || (r.state !== "assigned" && r.state !== "accepted")) continue;
+      this.aliveSent.set(id, now);
+      this.ctx.waitUntil(
+        deskStub(this.env, r.bot_id)
+          .runAlive(id, this.machineId)
+          .catch((err: unknown) => this.log.warn("run alive failed", { runId: id, err })),
+      );
+    }
+    for (const [id, at] of this.aliveSent) if (now - at > 10 * ALIVE_EVERY_MS) this.aliveSent.delete(id);
   }
 
   private openRuns(): RunRow[] {
@@ -383,6 +461,10 @@ export class MachineLink extends DurableObject<BotsEnv> {
           f.runs.map((r) => r.runId),
           now,
         );
+        this.alive(
+          f.runs.filter((r) => r.active === true && !r.done).map((r) => r.runId),
+          now,
+        );
         this.send(ws, { t: "heartbeat.ack", at: now });
         this.touchD1(now);
         return;
@@ -427,6 +509,12 @@ export class MachineLink extends DurableObject<BotsEnv> {
         // 模 3.2: a run that failed because its CLI is not signed in takes the runtime out of
         // the routing at once, before the next heartbeat says so.
         if (f.t === "run.done" && f.failure?.kind === "signed_out") this.markSignedOut(this.assignOut(r).runtime, now);
+        // 模 3.4: a run at the subscription limit holds the runtime back here until the reset,
+        // before the desk hears of it (it reads the mark to say when); a run that went well
+        // after the mark's time clears it (one that went well before then may have started
+        // before the limit was hit, and proves nothing).
+        if (f.t === "run.done" && f.failure?.kind === "limit") this.markLimited(this.assignOut(r).runtime, f.failure.resetsAt, now);
+        else if (f.t === "run.done" && f.status === "succeeded") this.clearLimited(this.assignOut(r).runtime, now);
         this.enqueue(r, f.t === "run.event" && f.event.type === "output" ? { ...f, serverAt: this.serverTime(f.at, now) } : f);
       }
     }
@@ -690,6 +778,36 @@ export class MachineLink extends DurableObject<BotsEnv> {
     this.setMeta("signed_out", JSON.stringify({ ...this.signedOutMarks(), [runtime]: now }));
   }
 
+  private limitMarks(): Record<string, LimitMark> {
+    try {
+      return JSON.parse(this.meta("limited") ?? "{}") as Record<string, LimitMark>;
+    } catch {
+      return {};
+    }
+  }
+
+  private markLimited(runtime: string, resetsAt: number | undefined, now: number): void {
+    const { metrics, at } = latestMetrics((k) => this.meta(k));
+    const windows = metrics?.usage?.find((u) => u.runtime === runtime)?.windows;
+    // Usage is read on the machine clock; the latest sample's offset puts it on the server's.
+    const offset = metrics && at !== null ? at - metrics.at : 0;
+    const marks = this.limitMarks();
+    const mark = limitMark(resetsAt, windows, offset, marks[runtime], now);
+    // Runs that hit the limit together keep the latest reset they know of.
+    const prev = marks[runtime];
+    const keep = prev && prev.until > mark.until && (prev.known || !mark.known) ? prev : mark;
+    this.setMeta("limited", JSON.stringify({ ...marks, [runtime]: keep }));
+    this.log.info("runtime at its limit", { runtime, until: keep.until, known: keep.known });
+  }
+
+  private clearLimited(runtime: string, now: number): void {
+    const marks = this.limitMarks();
+    const mark = marks[runtime];
+    if (!mark || mark.until > now) return;
+    delete marks[runtime];
+    this.setMeta("limited", JSON.stringify(marks));
+  }
+
   /**
    * 盯 1.14: the run moved to another machine. It is closed here: a connected daemon gets
    * `run.cancel` now; a daemon that is away finds it missing from its next `welcome.runs` and
@@ -713,8 +831,10 @@ export class MachineLink extends DurableObject<BotsEnv> {
     const hb = this.meta("last_heartbeat_at");
     const { metrics, at } = latestMetrics((k) => this.meta(k));
     const signedOut = signedOutRuntimes(metrics?.logins, at, this.signedOutMarks(), Date.now());
+    const limited = limitedRuntimes(this.limitMarks(), Date.now());
     return {
       ...(signedOut.length > 0 ? { signedOut } : {}),
+      ...(limited.length > 0 ? { limited } : {}),
       machineId: this.machineId,
       connected: this.socket() !== null,
       revoked: this.meta("revoked") !== null,

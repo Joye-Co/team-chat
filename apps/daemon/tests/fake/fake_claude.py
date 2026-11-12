@@ -8,6 +8,7 @@ writes fake.pid and appends to ticks.txt 30 times, 0.1 s apart (a stopped proces
 in a new process group (setpgid), each appending to <name>.ticks every 0.05 s, writes their pids
 to children.txt and then hangs like "hang" (Windows: one without a console and one in a new
 process group);
+"busy" starts a tool child that burns CPU (its pid goes to children.txt), then hangs like "hang";
 "orphan" starts a ticker that daemonizes (its parent exits; it appends to orphan.ticks every
 0.05 s and its pid goes to orphan.txt), then hangs like "hang";
 "chatrun" runs `chat-run card patch` from PATH and writes its exit code, output and the socket's
@@ -28,6 +29,8 @@ answers, writes its text to held.json and takes it as the next turn;
 and `git status --porcelain`; "keepfile" then writes kept.txt and leaves it uncommitted;
 "memo:<text>" runs `chat-run memory note --scope member --kind lesson --text <text>` and
 writes its exit code and output to remember.json;
+"relayfail:<k>" fails the turn of relay step k (its order says "You do step k of") once per
+working folder (relayfail-<k>.done marks it); "relaystall:<k>" sleeps like "hang" in relay step k;
 "readback" runs the read commands `chat-run member list`, `topic state` and `artifact list`
 (with "topic:<id>", of that topic), `artifact get --id <first listed>`, `decisions list` and, with "card:<message id>", `card get`,
 and writes each answer to readback.json.
@@ -163,6 +166,9 @@ while True:
     # Modes come from the request and what follows it, not from the rules the server puts in
     # front of it (the acceptance rule says "changes" and "artifact").
     cue = text.rsplit("\nRequest from ", 1)[-1]
+    # A relay step's order carries the step before's result (another member's words, here the
+    # fake's echo of its prompt): no mode comes from it.
+    cue = cue.split("\nResult of step ", 1)[0]
     # The daemon's hand-back note after a take-over is no request ("changes" has "hang").
     if text.startswith("[team-chat] A person held"):
         cue = ""
@@ -211,6 +217,28 @@ while True:
              "error": "authentication_failed", "is_api_error_message": True})
         out({"type": "result", "subtype": "success", "is_error": True, "result": words, "session_id": sid})
         continue
+    m = re.search(r"relayfail:(\d+)", cue)
+    if m and ("You do step %s of" % m.group(1)) in cue and not os.path.exists("relayfail-%s.done" % m.group(1)):
+        open("relayfail-%s.done" % m.group(1), "w").write("1")
+        words = "fake failure of relay step %s" % m.group(1)
+        out({"type": "assistant", "message": {"id": mid, "role": "assistant", "content": [{"type": "text", "text": words}]}, "session_id": sid})
+        out({"type": "result", "subtype": "error_during_execution", "is_error": True, "result": words, "session_id": sid})
+        continue
+    m = re.search(r"relaystall:(\d+)", cue)
+    if m and ("You do step %s of" % m.group(1)) in cue:
+        open("fake.pid", "w").write(str(os.getpid()))
+        time.sleep(600)
+    if "limited" in cue:
+        # As Claude Code 2.1 ends a turn at the subscription limit; "limitedreset" also gets the
+        # rate_limit_event that names the reset (epoch seconds).
+        words = "You've hit your session limit · resets 3pm"
+        if "limitedreset" in cue:
+            out({"type": "rate_limit_event", "rate_limit_info": {"status": "rejected", "resetsAt": 4102444000,
+                 "rateLimitType": "five_hour"}, "uuid": "u-%d" % n, "session_id": sid})
+        out({"type": "assistant", "message": {"id": mid, "model": "<synthetic>", "role": "assistant",
+             "content": [{"type": "text", "text": words}]}, "session_id": sid, "error": "rate_limit"})
+        out({"type": "result", "subtype": "success", "is_error": True, "result": words, "session_id": sid})
+        continue
     if "spawn" in cue:
         loop = "import time\nwhile True:\n    open(%r, 'a').write('x\\n')\n    time.sleep(0.05)\n"
         quiet = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL}
@@ -222,6 +250,13 @@ while True:
         kids = [subprocess.Popen([sys.executable, "-c", loop % "session.ticks"], **apart[0], **quiet),
                 subprocess.Popen([sys.executable, "-c", loop % "group.ticks"], **apart[1], **quiet)]
         open("children.txt", "w").write(" ".join(str(k.pid) for k in kids))
+        open("fake.pid", "w").write(str(os.getpid()))
+        time.sleep(600)
+    if "busy" in cue:
+        # A tool at work (a build): a child that burns CPU, then the CLI waits like "hang".
+        quiet = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL}
+        kid = subprocess.Popen([sys.executable, "-c", "while True:\n    pass\n"], **quiet)
+        open("children.txt", "w").write(str(kid.pid))
         open("fake.pid", "w").write(str(os.getpid()))
         time.sleep(600)
     if "orphan" in cue:

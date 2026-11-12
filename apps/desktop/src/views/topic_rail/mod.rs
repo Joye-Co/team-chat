@@ -126,6 +126,31 @@ impl Data {
 mod native;
 pub use native::run_since;
 
+/// The members 成员 marks, in order (design-relay §3.6): the AI members at work here (在做,
+/// the newest start first), then those that took part (参与过), then the one who 提出 the
+/// 话题 (提出) unless already marked.
+pub fn people_marks(topic: &Topic) -> Vec<(MemberId, &'static str)> {
+    use crate::copy::relay as r;
+    let mut ps: Vec<&crate::data::TopicParticipant> = topic.participants.iter().collect();
+    ps.sort_by_key(|p| (!p.working, std::cmp::Reverse(p.last_run_at)));
+    let mut out: Vec<(MemberId, &'static str)> = ps
+        .into_iter()
+        .map(|p| {
+            let tag = if p.working {
+                r::PEOPLE_WORKING
+            } else {
+                r::PEOPLE_TOOK_PART
+            };
+            (p.member_id.clone(), tag)
+        })
+        .collect();
+    let by = &topic.created_by;
+    if !by.is_empty() && !out.iter().any(|(id, _)| id == by) {
+        out.push((by.clone(), c::INSPECTOR_ASKED));
+    }
+    out
+}
+
 // --- v12/fx-topic: one trailing pane width (coordinator decision): the
 // inspector is 280 pt, the wider panes (单独问, 产出, 改动) are 400 pt. Use the
 // shell's token for the wide pane once it lands.
@@ -549,11 +574,10 @@ impl Render for TopicRail {
         sections.push(
             crate::views::nav::notify::topic_select(&self.services, &g, &t, cx).into_any_element(),
         );
-        let owner = topic.and_then(|t| t.owner_id.clone());
-        let by = topic
-            .map(|x| x.created_by.clone())
-            .filter(|by| !by.is_empty() && owner.as_deref() != Some(by.as_str()));
-        sections.push(self.native_owner(&d, owner.as_deref(), by.as_deref(), cx));
+        // Usable (design-relay §3.6): who works here now and who took part, never one
+        // responsible member.
+        let marks = topic.map(people_marks).unwrap_or_default();
+        sections.push(self.native_owner(&d, &marks, cx));
         let mut empty: Vec<&'static str> = Vec::new();
         let mut add =
             |el: Option<AnyElement>, name: &'static str, sections: &mut Vec<AnyElement>| match el {
@@ -674,6 +698,7 @@ mod run_tests {
 
     fn run(id: &str, bot: &str) -> BotRunSummary {
         BotRunSummary {
+            hold: Default::default(),
             id: id.into(),
             bot_id: bot.into(),
             group_id: "g".into(),
@@ -705,5 +730,74 @@ mod run_tests {
         assert_eq!(rail_run(runs(), Some("Taro")).unwrap().id, "scout");
         assert_eq!(rail_run(runs(), None).unwrap().id, "scout");
         assert!(rail_run(vec![], Some("Forge")).is_none());
+    }
+}
+
+#[cfg(test)]
+mod people_tests {
+    use super::people_marks;
+    use crate::data::{Topic, TopicParticipant, TopicStatus};
+
+    fn who(id: &str, working: bool, at: u64) -> TopicParticipant {
+        TopicParticipant {
+            member_id: id.into(),
+            working,
+            last_run_at: at,
+        }
+    }
+
+    fn topic(participants: Vec<TopicParticipant>, by: &str, owner: Option<&str>) -> Topic {
+        Topic {
+            id: "t".into(),
+            group_id: "g".into(),
+            title: "t".into(),
+            status: TopicStatus::InProgress,
+            waiting_on: vec![],
+            owner_id: owner.map(Into::into),
+            created_by: by.into(),
+            created_at: 0,
+            root_message_id: String::new(),
+            last_seq: 0,
+            last_activity_at: 0,
+            message_count: 0,
+            unread: 0,
+            mentions: 0,
+            participants,
+            relay: None,
+        }
+    }
+
+    #[test]
+    fn who_works_comes_first_then_who_took_part_then_the_asker() {
+        let t = topic(
+            vec![
+                who("a", false, 5),
+                who("b", true, 3),
+                who("c", true, 9),
+                who("d", false, 7),
+            ],
+            "me",
+            Some("a"),
+        );
+        let marks = people_marks(&t);
+        assert_eq!(
+            marks,
+            vec![
+                ("c".to_string(), "在做"),
+                ("b".to_string(), "在做"),
+                ("d".to_string(), "参与过"),
+                ("a".to_string(), "参与过"),
+                ("me".to_string(), "提出"),
+            ]
+        );
+        // The routing owner is never marked 负责.
+        assert!(marks.iter().all(|(_, tag)| *tag != "负责"));
+    }
+
+    #[test]
+    fn a_topic_nobody_worked_on_marks_only_the_asker() {
+        let t = topic(vec![], "me", Some("a"));
+        assert_eq!(people_marks(&t), vec![("me".to_string(), "提出")]);
+        assert!(people_marks(&topic(vec![], "", None)).is_empty());
     }
 }

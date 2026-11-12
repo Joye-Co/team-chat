@@ -60,6 +60,7 @@ mod system_events;
 mod this_mac;
 #[cfg(test)]
 mod wire_live;
+mod work_folder;
 // --- settings-backend track ---
 mod settings_backend;
 // --- end settings-backend track ---
@@ -70,6 +71,7 @@ pub mod seeded;
 mod topic_v2;
 // --- inc-refs: 引用提问 (references, chips, sends with blockRefs).
 mod refs;
+mod relay;
 // --- end inc-refs
 
 use std::{
@@ -213,6 +215,8 @@ struct Shared {
     snapshots: snapshot::SnapshotCache,
     /// Usable: my GitHub sign-in as last read (`provider/github.rs`).
     github: github::GithubCache,
+    /// Usable: why the server refused a message as 按顺序做 (`provider/relay.rs`).
+    relay: relay::RelayCache,
 }
 
 /// [`ChatProvider`] on chat-core. Cheap to clone.
@@ -255,6 +259,7 @@ impl CoreProvider {
                 refs: refs::RefsCache::default(),
                 snapshots: snapshot::SnapshotCache::default(),
                 github: github::GithubCache::default(),
+                relay: relay::RelayCache::default(),
             }),
         });
         provider.state().saved = session::load_accounts(&provider.shared.config.data_root);
@@ -945,6 +950,8 @@ impl CoreProvider {
                     ready
                 };
                 if let Some(group_id) = self.group_of_topic(&topic_id) {
+                    // Usable: a message got through, so an older 按顺序做 refusal is over.
+                    self.shared.relay.clear_topic(&group_id, &topic_id);
                     out.extend([
                         Change::Messages {
                             group_id: group_id.clone(),
@@ -976,14 +983,23 @@ impl CoreProvider {
                     self.shared.cards_v2.on_refused(&a.client, &f.id, f.code);
                 }
                 // --- end cards v2 track ---
+                let relay_refused = self.shared.relay.refused_send(&f);
                 match f.topic_id {
                     Some(topic_id) => out.push(Change::Messages {
                         group_id: f.group_id,
                         topic_id,
                     }),
-                    None => out.push(Change::Topics {
-                        group_id: f.group_id,
-                    }),
+                    None => {
+                        if relay_refused {
+                            out.push(Change::Messages {
+                                group_id: f.group_id.clone(),
+                                topic_id: pending_topic_id(&f.id),
+                            });
+                        }
+                        out.push(Change::Topics {
+                            group_id: f.group_id,
+                        })
+                    }
                 }
             }
             ClientUpdate::CaughtUp => out.extend([Change::Groups, Change::Todo]),
@@ -1792,6 +1808,7 @@ impl ChatProvider for CoreProvider {
     }
 
     fn retry_send(&self, _group_id: &str, client_msg_id: &str) {
+        self.shared.relay.clear_message(client_msg_id);
         if self.retry_job(client_msg_id) {
             return;
         }
@@ -1803,6 +1820,7 @@ impl ChatProvider for CoreProvider {
     }
 
     fn discard_send(&self, _group_id: &str, client_msg_id: &str) {
+        self.shared.relay.clear_message(client_msg_id);
         if self.discard_job(client_msg_id) {
             return;
         }
@@ -2030,6 +2048,23 @@ impl ChatProvider for CoreProvider {
 
     fn run_stopping(&self, run_id: &str) -> bool {
         self.run_stopping_inner(run_id)
+    }
+
+    fn stop_relay(&self, group_id: &str, topic_id: &str, relay_id: &str) -> AdminReply<()> {
+        self.relay_action_inner(group_id, topic_id, relay_id, false)
+    }
+
+    fn retry_relay(&self, group_id: &str, topic_id: &str, relay_id: &str) -> AdminReply<()> {
+        self.relay_action_inner(group_id, topic_id, relay_id, true)
+    }
+
+    fn stop_chain(&self, group_id: &str, chain_id: &str) -> AdminReply<()> {
+        self.stop_chain_inner(group_id, chain_id)
+    }
+
+    fn relay_refusal(&self, group_id: &str, topic_id: &str) -> Option<crate::data::RelayRefusal> {
+        let topic_id = self.resolve_topic(topic_id);
+        self.shared.relay.get(group_id, &topic_id)
     }
 
     // --- settings window (provider/settings.rs) ---
@@ -2260,7 +2295,46 @@ impl ChatProvider for CoreProvider {
     }
 
     fn create_machine(&self, name: String, labels: Vec<String>) -> AdminReply<MachineCreated> {
-        self.create_machine_inner(name, labels)
+        self.create_machine_inner(name, labels, None)
+    }
+
+    fn create_machine_as(
+        &self,
+        name: String,
+        labels: Vec<String>,
+        personal: Option<bool>,
+    ) -> AdminReply<MachineCreated> {
+        self.create_machine_inner(name, labels, personal)
+    }
+
+    fn rename_machine(&self, machine_id: &str, name: String) -> AdminReply<MachineInfo> {
+        self.update_machine_inner(machine_id, Some(name), None)
+    }
+
+    fn set_machine_owner(&self, machine_id: &str, mine: bool) -> AdminReply<MachineInfo> {
+        let owner = mine.then(|| chat_core::proto::MACHINE_OWNER_ME.to_string());
+        self.update_machine_inner(machine_id, None, Some(owner))
+    }
+
+    fn remove_machine(&self, machine_id: &str) -> AdminReply<()> {
+        self.remove_machine_inner(machine_id)
+    }
+
+    fn set_machine_bot(
+        &self,
+        machine_id: &str,
+        bot_id: &str,
+        repo_path: Option<String>,
+    ) -> AdminReply<MachineInfo> {
+        self.machine_bot_inner(machine_id, bot_id, Some(repo_path))
+    }
+
+    fn unset_machine_bot(&self, machine_id: &str, bot_id: &str) -> AdminReply<MachineInfo> {
+        self.machine_bot_inner(machine_id, bot_id, None)
+    }
+
+    fn stop_using_this_computer(&self) -> AdminReply<()> {
+        self.stop_using_this_computer_inner()
     }
 
     fn this_mac(&self) -> crate::data::ThisMac {
@@ -2676,11 +2750,41 @@ impl ChatProvider for CoreProvider {
     }
 
     fn take_over_run(&self, group_id: &str, topic_id: &str, run_id: &str) -> AdminReply<()> {
-        self.pause_inner(group_id, topic_id, run_id, true)
+        self.hold_inner(group_id, topic_id, run_id, panes::Hold::TakeOver)
     }
 
     fn hand_back_run(&self, group_id: &str, topic_id: &str, run_id: &str) -> AdminReply<()> {
-        self.pause_inner(group_id, topic_id, run_id, false)
+        self.hold_inner(group_id, topic_id, run_id, panes::Hold::Resume(None))
+    }
+
+    fn pause_run(&self, group_id: &str, topic_id: &str, run_id: &str) -> AdminReply<()> {
+        self.hold_inner(group_id, topic_id, run_id, panes::Hold::Pause)
+    }
+
+    fn resume_run(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        run_id: &str,
+        note: Option<String>,
+    ) -> AdminReply<()> {
+        self.hold_inner(group_id, topic_id, run_id, panes::Hold::Resume(note))
+    }
+
+    fn run_command(&self, run_id: &str, command: String) -> AdminReply<String> {
+        self.run_command_inner(run_id, command)
+    }
+
+    fn cancel_run_command(&self, run_id: &str, command_id: &str) -> AdminReply<()> {
+        self.cancel_run_command_inner(run_id, command_id)
+    }
+
+    fn hand_commands(&self, run_id: &str) -> Vec<crate::data::run_phase::HandCommand> {
+        self.hand_commands_inner(run_id)
+    }
+
+    fn run_work_folder(&self, run_id: &str) -> Option<std::path::PathBuf> {
+        self.run_work_folder_inner(run_id)
     }
 
     // --- end of the panes track ---

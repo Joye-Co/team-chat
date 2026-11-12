@@ -16,14 +16,20 @@ import { DeskRuns, type RunRequest } from "./runs";
 import { briefText } from "../../agent/frontdesk";
 import { countCited } from "../../memory/inject";
 import { retroAfterRun } from "../../memory/retro";
-import { DAEMON_RESTARTED, MAX_DAEMON_RESUMES } from "../../agent/recovery";
+import { DAEMON_RESTARTED, LIMIT_REACHED, MAX_DAEMON_RESUMES, MAX_LIMIT_WAITS } from "../../agent/recovery";
 
 /** Room RPC of the cards feature: a run's CLI took the answer with this seq (`{ seq, runId, inputId }`). */
 export const CARD_ANSWER_TAKEN_RPC = "cards.answerTaken";
 
 export abstract class DeskEvents extends DeskRuns {
   /** 盯活 (stall.ts): a tool call of the run (loops). */
-  protected abstract watchTool(r: RunRow, title: string): Promise<void>;
+  protected abstract watchTool(r: RunRow, itemId: string, title: string): Promise<void>;
+  /** 盯 1.11 (stall.ts): the result of a tool call (loops look at the output; progress). */
+  protected abstract watchResult(r: RunRow, itemId: string, ok: boolean, output: string): Promise<void>;
+  /** 盯 5.5 (stall.ts): keeps one act of the desk with the run. */
+  protected abstract act(r: RunRow, action: string, reason: string, minutes?: number): Promise<void>;
+  /** 盯 1.6 (stall.ts): a run that ended after it reached its time limit goes on; true when it did (or stopped). */
+  protected abstract limitEnded(r: RunRow, f: Extract<SeqFrame, { t: "run.done" }>): Promise<boolean>;
   /** 盯活 (stall.ts): continues a run that only promised work; true when it did. */
   protected abstract continuePromise(r: RunRow, result: string): Promise<boolean>;
   /** 盯 1.1 (stall.ts): the machine of a run that waited for it is back. */
@@ -80,6 +86,7 @@ export abstract class DeskEvents extends DeskRuns {
     const now = Date.now();
     let done: Extract<SeqFrame, { t: "run.done" }> | null = null;
     let planChanged = false;
+    let moved = 0;
     // The daemon's own stall reports are not progress: they must not restart the stall clock.
     const progressed = frames.some((f) => f.t !== "run.event" || !isStallStatus(f.event));
     const stallReported = frames.some((f) => f.t === "run.event" && isStallStatus(f.event) && (f.event as { state?: unknown }).state === "stalled");
@@ -118,11 +125,15 @@ export abstract class DeskEvents extends DeskRuns {
           break;
         case "tool.call":
           progress.tool(String(ev.title || ev.tool || ""));
-          await this.watchTool(r, String(ev.title || ev.tool || ""));
+          await this.watchTool(r, String(ev.itemId ?? ""), String(ev.title || ev.tool || ""));
           this.openTools(r, r.open_tools + 1);
           break;
         case "tool.result":
           this.openTools(r, r.open_tools - 1);
+          await this.watchResult(r, String(ev.itemId ?? ""), ev.ok === true, typeof ev.output === "string" ? ev.output : "");
+          break;
+        case "file.change":
+          moved++;
           break;
         case "approval.request": {
           await this.flush(r, progress);
@@ -160,6 +171,7 @@ export abstract class DeskEvents extends DeskRuns {
         case "output":
           // chat-run (1.1): post or patch a card, resolve an event, push or answer a 产出.
           await this.output(r, ev as { outputId?: unknown; op?: unknown; body?: unknown }, f);
+          moved++;
           break;
         case "input.accepted": {
           const taken = this.sql.exec("UPDATE inputs SET accepted = 1 WHERE id = ? AND run_id = ?", String(ev.inputId), r.id).rowsWritten;
@@ -175,12 +187,18 @@ export abstract class DeskEvents extends DeskRuns {
         case "plan": {
           // The link reads events loosely (newer daemons): keep what fits the plan rules.
           const plan = sanitizePlan(ev.items);
-          if (plan && this.storePlan(r, plan)) planChanged = true;
+          if (plan && this.storePlan(r, plan)) {
+            planChanged = true;
+            moved++;
+          }
           break;
         }
         case "acceptance": {
           const items = sanitizeAcceptance(ev.items);
-          if (items && this.storeAcceptance(r, items)) planChanged = true;
+          if (items && this.storeAcceptance(r, items)) {
+            planChanged = true;
+            moved++;
+          }
           break;
         }
         case "paused":
@@ -204,6 +222,11 @@ export abstract class DeskEvents extends DeskRuns {
       }
     }
     await this.flush(r, progress);
+    // 盯 1.6: signs of progress up to the time limit (after it the run saves its state; tool results count in watchResult).
+    if (moved > 0 && r.limit_at === null) {
+      this.sql.exec("UPDATE runs SET progress = progress + ? WHERE id = ?", moved, r.id);
+      r.progress += moved;
+    }
     // The final run.updated of `finish` carries the plan too.
     if (planChanged && !done) await this.setStatus(r, r.status);
     if (done) await this.finish(r, done);
@@ -468,6 +491,9 @@ export abstract class DeskEvents extends DeskRuns {
     this.storeUsage(r, f);
     this.storeSession(r, f.sessionId);
     this.storeCode(r, f.code);
+    // 盯 1.6: a run at its time limit saved its state (or ran past the daemon's backstop): the work
+    // goes on in a new turn of the same session, without a result in the topic.
+    if (await this.limitEnded(r, f)) return;
     if (f.status === "succeeded") {
       const raw = (f.resultText ?? "").trim();
       this.dropResultFromProgress(r, raw);
@@ -498,6 +524,9 @@ export abstract class DeskEvents extends DeskRuns {
       if (await this.resumeAfterRestart(r)) return;
       await this.end(r, "failed", TEXT.interrupted, "blocked", TEXT.interrupted);
     } else if (f.status === "failed") {
+      // 模 3.4, 盯 1.5: the subscription limit is not a failure: the work waits for the reset
+      // and goes on in its session on the same computer.
+      if (await this.waitForLimit(r, f)) return;
       const note = await this.failedNote(r, f);
       await this.end(r, "failed", note.text, "blocked", cut(note.text, 280), false, note.mentions);
     } else {
@@ -516,7 +545,8 @@ export abstract class DeskEvents extends DeskRuns {
     // close now; an answer taken back in the meantime is left out.
     const left: typeof unread = [];
     for (const x of unread) if (await this.answerStartsRun(r, x.message_id)) left.push(x);
-    if (left.length === 0) return;
+    // None of them starts a run: a GitHub connection that waited for them goes on now.
+    if (left.length === 0) return this.resumeAfterGithub(r, false);
     if (this.followUpDepth(r) >= MAX_FOLLOW_UPS) {
       try {
         await this.note(r, TEXT.followUpLimit);
@@ -550,7 +580,28 @@ export abstract class DeskEvents extends DeskRuns {
     // A daemon that keeps restarting under the same work does not get it again and again.
     const resumes = this.retryChain(r.id).filter((x) => x.summary === `restarted: ${DAEMON_RESTARTED}`).length;
     if (resumes >= MAX_DAEMON_RESUMES) return false;
-    return this.restartElsewhere(r, DAEMON_RESTARTED, { sameSession: true }, { count: false });
+    if (!(await this.restartElsewhere(r, DAEMON_RESTARTED, { sameSession: true }, { count: false }))) return false;
+    await this.act(r, "retry", "daemon_restarted");
+    return true;
+  }
+
+  /**
+   * 模 3.4, 盯 1.5 (decided: wait for the reset): a run that stopped at the subscription limit
+   * ends quietly and its work goes on in a new run that waits on the same computer (排队) until
+   * the limit resets (MachineLink holds the runtime back until then), then continues the CLI
+   * session in the same work folder with a short note. A person can stop it while it waits.
+   * False when it cannot (an aside, a run over HTTP, too many waits in a row): it fails.
+   */
+  protected async waitForLimit(r: RunRow, f: Extract<SeqFrame, { t: "run.done" }>): Promise<boolean> {
+    if (failureKind(f.failure, f.error ?? f.summary ?? "") !== "limit") return false;
+    if (r.external || r.kind === RUN_KIND_ASIDE || !r.machine_id) return false;
+    const waits = this.retryChain(r.id).filter((x) => x.summary === `restarted: ${LIMIT_REACHED}`).length;
+    if (waits >= MAX_LIMIT_WAITS) return false;
+    // The run that hit the limit keeps why it stopped, for the work record.
+    const resetsAt = Number.isInteger(f.failure?.resetsAt) ? f.failure?.resetsAt : undefined;
+    r.failure = JSON.stringify({ kind: "limit", ...(resetsAt ? { resetsAt } : {}) });
+    this.sql.exec("UPDATE runs SET failure = ? WHERE id = ?", r.failure, r.id);
+    return this.restartElsewhere(r, LIMIT_REACHED, { sameSession: true }, { count: false });
   }
 
   /** How many runs in a row before `r` were follow-ups. */
@@ -601,13 +652,20 @@ export abstract class DeskEvents extends DeskRuns {
       r.result_message_id = id;
     }
     await this.setStatus(r, status, { ended_at: now, summary: cut(summary, 280) || null });
+    // A run that stopped for someone's GitHub is not done: the topic waits on that person.
+    const githubFor = status !== "cancelled" ? this.githubWaitingOn(r.id) : null;
     // The room ends the run's step of its chain: a split-off's result (stopped ones too) goes
-    // back to its giver from there.
-    await this.topic(r, topicStatus, waitingOn, { outcome: status, result: handed ? summary : body });
+    // back to its giver from there. A private card's answerer is never named on the wire: the
+    // topic waits on nobody then.
+    await this.topic(r, githubFor ? "blocked" : topicStatus, githubFor ? (this.anonymous(r) ? [] : [githubFor]) : waitingOn, {
+      outcome: status,
+      result: handed ? summary : body,
+    });
     this.retro(r, status, body);
     // A slot may be free now: the next queued run (排队) gets it. Not awaited: it takes other
     // runs' turns and must not wait inside this run's turn.
     void this.dispatchQueued().catch((err) => this.log.warn("queue dispatch failed", { err }));
+    if (status !== "cancelled" && this.meta(`github_resume:${r.id}`) !== null) await this.resumeAfterGithub(r);
   }
 
   /** 复盘 (memory/retro.ts): lessons from a run that ran on a machine, after it ended. Never fails the run. */

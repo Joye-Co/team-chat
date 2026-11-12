@@ -443,6 +443,67 @@ impl Client {
         })
     }
 
+    /// Usable: stops relay `relay_id` of topic `topic_id` (按顺序做 → 停止). Stores the
+    /// answered relay in the topic and emits [`ClientUpdate::TopicsChanged`], so the strip
+    /// shows the stop before the `topic.updated` event arrives.
+    pub fn stop_relay(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        relay_id: &str,
+    ) -> JoinHandle<Result<crate::proto::TopicRelay, ClientError>> {
+        self.relay_action(group_id, topic_id, relay_id, false)
+    }
+
+    /// Usable: starts paused relay `relay_id` again (按顺序做 → 重试); stored as
+    /// [`Client::stop_relay`] does.
+    pub fn retry_relay(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        relay_id: &str,
+    ) -> JoinHandle<Result<crate::proto::TopicRelay, ClientError>> {
+        self.relay_action(group_id, topic_id, relay_id, true)
+    }
+
+    fn relay_action(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        relay_id: &str,
+        retry: bool,
+    ) -> JoinHandle<Result<crate::proto::TopicRelay, ClientError>> {
+        let http = self.http();
+        let shared = self.shared().clone();
+        let (g, t, id) = (
+            group_id.to_string(),
+            topic_id.to_string(),
+            relay_id.to_string(),
+        );
+        self.spawn(async move {
+            let relay = if retry {
+                http.retry_relay(&g, &id).await?
+            } else {
+                http.stop_relay(&g, &id).await?
+            };
+            if shared.store.store_topic_relay(&t, &relay)? {
+                shared.emit(ClientUpdate::TopicsChanged { group_id: g });
+            }
+            Ok(relay)
+        })
+    }
+
+    /// Usable: stops chain `chain_id` of group `group_id` and every run in it (全部停止).
+    pub fn stop_chain(
+        &self,
+        group_id: &str,
+        chain_id: &str,
+    ) -> JoinHandle<Result<crate::proto::ChainStopResponse, ClientError>> {
+        let http = self.http();
+        let (g, id) = (group_id.to_string(), chain_id.to_string());
+        self.spawn(async move { Ok(http.stop_chain(&g, &id).await?) })
+    }
+
     // ------------------------------------------------------------------
     // Updates and diagnostics
     // ------------------------------------------------------------------

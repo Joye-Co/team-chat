@@ -8,10 +8,12 @@
 
 pub mod output_pane;
 mod pinned;
+pub mod relay_strip;
 pub mod scenes;
 
 use gpui::{
-    App, Context, Entity, IntoElement, ParentElement, Render, Styled, Subscription, Window, div, px,
+    App, AppContext as _, Context, Entity, IntoElement, ParentElement, Render, Styled,
+    Subscription, Window, div, px,
 };
 
 use crate::{
@@ -30,6 +32,8 @@ pub struct TopicPage {
     services: Services,
     timeline: Entity<TimelineView>,
     composer: Entity<ComposerView>,
+    /// Usable: the 按顺序做 bar at the top of the column.
+    relay_strip: Entity<relay_strip::RelayStrip>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -49,11 +53,13 @@ impl TopicPage {
         let mut subscriptions = watch(&services, cx);
         // R2-09: the pinned banner gives way while its card is on screen.
         subscriptions.push(cx.observe(&timeline, |_, _, cx| cx.notify()));
+        let relay_strip = cx.new(|cx| relay_strip::RelayStrip::new(services.clone(), cx));
         Self {
             _subscriptions: subscriptions,
             services,
             timeline,
             composer,
+            relay_strip,
         }
     }
 }
@@ -201,11 +207,44 @@ pub fn run_state(
     name: &str,
     paused_by: Option<&str>,
     me: Option<&str>,
-    who: impl FnOnce(&str) -> String,
+    who: impl Fn(&str) -> String,
 ) -> StateLine {
     use crate::copy::{fill, topic_rail as c};
-    if let Some(by) = paused_by {
-        let detail = if Some(by) == me {
+    use crate::data::run_phase::{RunPhase, phase_of};
+    // Usable (design-takeover 3.9): the run's phase. A pause and a take-over both stop the
+    // member; a server phase other than 在做 has its own words.
+    let paused_by = paused_by.or(run.hold.paused_by.as_deref());
+    let mut held_run;
+    let run = if paused_by.is_some() && run.hold.paused_by.is_none() {
+        held_run = run.clone();
+        held_run.hold.paused_by = paused_by.map(Into::into);
+        &held_run
+    } else {
+        run
+    };
+    let (phase, _) = phase_of(run);
+    let server_phase = run
+        .hold
+        .phase
+        .as_deref()
+        .and_then(RunPhase::parse)
+        .is_some();
+    if let Some(by) = paused_by.filter(|_| phase.held()) {
+        // An older server's hold (no kind) keeps the words of before.
+        let detail = if phase == RunPhase::Paused && run.hold.hold_kind.as_deref() == Some("pause")
+        {
+            if Some(by) == me {
+                fill(
+                    crate::copy::live::LIVE_PHASE_PAUSED_YOU,
+                    &[("member", name)],
+                )
+            } else {
+                fill(
+                    crate::copy::live::LIVE_PHASE_PAUSED,
+                    &[("who", &who(by)), ("member", name)],
+                )
+            }
+        } else if Some(by) == me {
             c::STATE_PAUSED_YOU.to_string()
         } else {
             fill(c::STATE_PAUSED_OTHER, &[("who", &who(by))])
@@ -217,6 +256,28 @@ pub fn run_state(
             short: c::STATE_PAUSED_SHORT.to_string(),
             detail: Some(detail),
             paused: true,
+            name: Some(name.to_string()),
+        };
+    }
+    // A server that says the run waits (for a person, an approval, a computer) or ended is
+    // believed; an older one keeps the words of before.
+    if server_phase && phase != RunPhase::Working {
+        let words = crate::views::live::phase::phase_words(
+            run,
+            &crate::views::live::phase::Names {
+                member: name,
+                computer: run.machine_name.as_deref().unwrap_or(name),
+                me,
+            },
+            &who,
+        );
+        return StateLine {
+            text: format!("{name} {}", words.text),
+            tone: tone_of(words.badge),
+            badge: words.badge,
+            short: words.short,
+            detail: None,
+            paused: false,
             name: Some(name.to_string()),
         };
     }
@@ -382,8 +443,9 @@ pub fn topic_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> Sta
         }
         let paused_by = p.machine_screen(&run.id).and_then(|s| s.paused_by);
         let mut line = run_state(run, &who, paused_by.as_deref(), me, name);
-        // A2-11: two members at work are one state, `2 个成员在做`.
-        let at_work = working_runs(&runs).len();
+        // A2-11: two members at work are one state, `2 个成员在做`. Usable: the
+        // server's `participants` count members whose runs this window has not read.
+        let at_work = working_runs(&runs).len().max(topic.working_members().len());
         if at_work > 1 && !line.paused {
             line.text = fill(c::STATE_MANY_WORKING, &[("n", &at_work.to_string())]);
             // A2-05: the sidebar says the same words, not the lead's `2/5`.
@@ -418,6 +480,11 @@ pub fn topic_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> Sta
         )
         .short(crate::copy::process::STATUS_FAILED);
     }
+    // Usable: the server says members work here (`participants`) though this
+    // window has not read their runs (the sidebar): the same words as above.
+    if let Some(line) = participants_state(topic, name) {
+        return line;
+    }
     // §2.12: 在做 and its spinner only while a member works on a run (above).
     // A 话题 marked in progress with no run is queued: 排队, the clock, muted.
     if topic.status == TopicStatus::InProgress {
@@ -441,6 +508,24 @@ pub fn topic_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> Sta
         _ => String::new(),
     };
     StateLine::plain(text, badge).short(short)
+}
+
+/// `{name} 在做` or `{n} 个成员在做` from `Topic.participants` alone, when a member
+/// works there; `None` otherwise.
+pub fn participants_state(topic: &Topic, name: impl Fn(&str) -> String) -> Option<StateLine> {
+    use crate::copy::{fill, topic_rail as c};
+    let at_work = topic.working_members();
+    let text = match at_work.as_slice() {
+        [] => return None,
+        [one] => fill(c::STATE_WORKING_NO_PLAN, &[("name", &name(one))]),
+        many => fill(c::STATE_MANY_WORKING, &[("n", &many.len().to_string())]),
+    };
+    let short = if at_work.len() > 1 {
+        text.clone()
+    } else {
+        c::STATE_WORKING_SHORT.to_string()
+    };
+    Some(StateLine::plain(text, BadgeState::Working).short(short))
 }
 
 /// The pane buttons of a 话题 page: 单独问, 产出 (when it has one), 电脑
@@ -578,6 +663,8 @@ impl Render for TopicPage {
             .bg(k.bg)
             // Usable: an AI member waits for me to connect GitHub (§2.16, top of the column).
             .children(crate::views::github_banner::slot(cx))
+            // Usable: the 按顺序做 bar, under the title, above the plan cards.
+            .child(self.relay_strip.clone())
             .child(div().flex_1().min_h(px(0.)).child(self.timeline.clone()))
             .child(
                 div()
@@ -607,6 +694,7 @@ mod tests {
 
     fn run(id: &str, status: RunStatus, started: i64, plan: Vec<PlanItem>) -> BotRunSummary {
         BotRunSummary {
+            hold: Default::default(),
             id: id.into(),
             bot_id: "forge".into(),
             group_id: "g".into(),
@@ -696,5 +784,83 @@ mod tests {
         assert_ne!(mine.tone, StateTone::Live);
         let other = run_state(&r, "Forge", Some("w"), Some("me"), |_| "小王".into());
         assert_eq!(other.detail.as_deref(), Some("小王 在操作它的电脑"));
+    }
+
+    #[test]
+    fn a_pause_a_wait_and_a_take_over_read_apart() {
+        let mut r = run("now", RunStatus::Running, 3, plan());
+        r.hold.paused_by = Some("w".into());
+        r.hold.hold_kind = Some("pause".into());
+        r.hold.phase = Some("paused".into());
+        let paused = run_state(&r, "Forge", None, Some("me"), |_| "小王".into());
+        assert!(paused.paused);
+        assert_eq!(paused.detail.as_deref(), Some("小王 暂停了 Forge"));
+        r.hold = Default::default();
+        r.hold.phase = Some("waiting_person".into());
+        r.hold.waiting_for = Some("question".into());
+        r.requested_by = Some("me".into());
+        let waiting = run_state(&r, "Forge", None, Some("me"), |_| String::new());
+        assert_eq!(waiting.text, "Forge 等你回复");
+        assert!(!waiting.paused);
+        assert_ne!(waiting.badge, paused.badge);
+        // An older server: a waiting run keeps the words of before.
+        r.hold.phase = None;
+        let old = run_state(&r, "Forge", None, Some("me"), |_| String::new());
+        assert_eq!(old.text, "Forge 在做 2/5");
+    }
+}
+
+#[cfg(test)]
+mod participants_tests {
+    use super::participants_state;
+    use crate::{
+        data::{Topic, TopicParticipant, TopicStatus},
+        ui::native::BadgeState,
+    };
+
+    fn topic(working: &[(&str, bool)]) -> Topic {
+        Topic {
+            id: "t".into(),
+            group_id: "g".into(),
+            title: "t".into(),
+            status: TopicStatus::InProgress,
+            waiting_on: vec![],
+            owner_id: None,
+            created_by: "me".into(),
+            created_at: 0,
+            root_message_id: String::new(),
+            last_seq: 0,
+            last_activity_at: 0,
+            message_count: 0,
+            unread: 0,
+            mentions: 0,
+            participants: working
+                .iter()
+                .enumerate()
+                .map(|(i, (id, w))| TopicParticipant {
+                    member_id: id.to_string(),
+                    working: *w,
+                    last_run_at: i as u64,
+                })
+                .collect(),
+            relay: None,
+        }
+    }
+
+    fn name(id: &str) -> String {
+        id.to_uppercase()
+    }
+
+    #[test]
+    fn the_sidebar_says_who_works_from_participants() {
+        assert!(participants_state(&topic(&[]), name).is_none());
+        assert!(participants_state(&topic(&[("a", false)]), name).is_none());
+        let one = participants_state(&topic(&[("a", false), ("b", true)]), name).unwrap();
+        assert_eq!(one.text, "B 在做");
+        assert_eq!(one.short, "在做");
+        assert_eq!(one.badge, BadgeState::Working);
+        let two = participants_state(&topic(&[("a", true), ("b", true)]), name).unwrap();
+        assert_eq!(two.text, "2 个成员在做");
+        assert_eq!(two.short, "2 个成员在做");
     }
 }

@@ -9,6 +9,7 @@ import { contextRows } from "../bots/room";
 import { cut } from "../bots/dispatch";
 import { type HandoverLine, topicHandovers } from "../bots/chains";
 import { topicBots } from "../bots/participants";
+import { relayLine } from "../bots/relay/engine";
 import { type ContextRow, type Names, stamp } from "./render";
 
 /** The longest state card (`topic state`). */
@@ -50,6 +51,8 @@ export interface TopicStateData {
   participants?: { memberId: string; working: boolean; report: string | null; at: number }[];
   /** design-relay R2: hand-overs and split-offs of the pieces of work that touch this topic. */
   handovers?: HandoverLine[];
+  /** design-relay R3: the topic's latest relay (按顺序做). */
+  relay?: ReturnType<typeof relayLine>;
 }
 
 registerRoomRpc("context.topicState", (room, actor, args): TopicStateData => {
@@ -120,7 +123,8 @@ registerRoomRpc("context.topicState", (room, actor, args): TopicStateData => {
     .map(({ seq: _seq, ...d }) => d);
   const participants = topicBots(room.sql, topicId).map((r) => ({ memberId: r.bot_id, working: r.working === 1, report: r.report, at: r.ended_at ?? r.started_at }));
   const handovers = topicHandovers(room.sql, topicId);
-  return { title: topic.title, messages, authors, artifacts, openCards, decisions, participants, handovers };
+  const relay = relayLine(room.sql, topicId);
+  return { title: topic.title, messages, authors, artifacts, openCards, decisions, participants, handovers, ...(relay ? { relay } : {}) };
 });
 
 /** The member ids a state card names. */
@@ -132,6 +136,7 @@ export function stateIds(d: TopicStateData): string[] {
     ...d.decisions.map((x) => x.by),
     ...(d.participants ?? []).map((p) => p.memberId),
     ...(d.handovers ?? []).flatMap((h) => [...(h.from ? [h.from] : []), h.to]),
+    ...(d.relay?.steps ?? []).map((s) => s.memberId),
   ];
 }
 
@@ -158,9 +163,14 @@ export function topicStateText(d: TopicStateData, name: Names): string {
   if (d.handovers && d.handovers.length > 0) {
     parts.push("Hand-overs of this work (交接; a split-off works in its own topic):");
     d.handovers.forEach((h, i) => {
-      const how = h.kind === "handoff" ? "转交" : "分出去";
+      const how = h.kind === "handoff" ? "转交" : h.kind === "relay" ? "接力" : "分出去";
       parts.push(`${i + 1}. ${h.from ? name(h.from) : "?"} →(${how}) ${name(h.to)} · ${h.state} · topic ${h.topicId}`);
     });
+  }
+  if (d.relay) {
+    const r = d.relay;
+    const steps = r.steps.map((s, i) => `${i === r.current ? "[" : ""}${name(s.memberId)}${s.note ? ` ${cut(oneLine(s.note), 30)}` : ""} · ${s.state}${i === r.current ? "]" : ""}`);
+    parts.push(`Relay (按顺序做; the room wakes each step): ${steps.join(" → ")} · step ${r.current + 1}/${r.steps.length} · ${r.state}${r.reason ? ` (${r.reason})` : ""}`);
   }
   if (d.openCards.length > 0) {
     parts.push("Open cards (waiting for an answer):");

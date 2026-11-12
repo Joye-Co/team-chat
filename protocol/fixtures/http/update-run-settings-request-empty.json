@@ -1,0 +1,6 @@
+{
+  "kind": "UpdateRunSettingsRequest",
+  "valid": true,
+  "description": "nothing changes",
+  "value": {}
+}

@@ -21,8 +21,8 @@ export const RUN_PHASES = [
   "failed",
   "stopped",
 ] as const;
-/** Known `BotRun.waitingFor` values. */
-export const RUN_WAITING_FOR = ["question", "stuck", "report", "queue", "offline", "booting"] as const;
+/** Known `BotRun.waitingFor` values; "limit": the computer's subscription limit, until it resets (usable 模 3.4). */
+export const RUN_WAITING_FOR = ["question", "stuck", "report", "queue", "offline", "booting", "limit"] as const;
 /** Known `BotRun.holdKind` values and `run.pause.hold` values. */
 export const RUN_HOLD_KINDS = ["pause", "takeover"] as const;
 /** Known `BotRun.takeover` values: how a person can take over the run's machine. */
