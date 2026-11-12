@@ -71,10 +71,12 @@ fn spec(dir: &std::path::Path, kind: &str, command: &str, args: &[&str], prompt:
         aside: false,
         note: None,
         resume_session_id: None,
+        full_prompt: None,
         gate_hook: None,
         gate_alive: None,
         gates: None,
         exec: daemon::executor::local(),
+        vm_shares: vec![],
     }
 }
 
@@ -753,7 +755,12 @@ fn aside_runs_ignore_widening_config() {
     );
     assert_eq!(
         runtime::codex::app_server_args(&s).unwrap(),
-        vec!["app-server", "--dangerously-bypass-approvals-and-sandbox"]
+        vec![
+            "app-server",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "-c",
+            "features.memories=false"
+        ]
     );
     s.aside = true;
     assert_eq!(
@@ -788,6 +795,7 @@ fn aside_runs_ignore_widening_config() {
         "features.browser_use=false",
         "features.browser_use_external=false",
         "features.computer_use=false",
+        "features.memories=false",
         "mcp_servers.github={command=\"true\",enabled=false}",
         "mcp_servers.writer-2={url=\"http://127.0.0.1/\",enabled=false}",
         "mcp_servers.repo_tool={command=\"true\",enabled=false}",
@@ -1024,7 +1032,13 @@ async fn codex_sandbox_lets_chat_run_answer_without_network() {
     let args = runtime::codex::app_server_args(&s).unwrap();
     assert_eq!(
         args,
-        ["app-server", closed[0], closed[1]],
+        [
+            "app-server",
+            closed[0],
+            closed[1],
+            "-c",
+            "features.memories=false"
+        ],
         "the user's network setting stays"
     );
 
@@ -1406,7 +1420,10 @@ fn codex_runs_always_have_full_access() {
             "{configured:?}"
         );
         assert!(runtime::codex::chat_run_works(&s));
-        assert_eq!(runtime::codex::app_server_args(&s).unwrap(), ["app-server"]);
+        assert_eq!(
+            runtime::codex::app_server_args(&s).unwrap(),
+            ["app-server", "-c", "features.memories=false"]
+        );
     }
     // Gated actions: still full access, approval `untrusted` so commands come to the daemon;
     // a side chat stays read-only with `never`.
@@ -1426,7 +1443,13 @@ fn codex_runs_always_have_full_access() {
     s.cfg.args = vec!["-c".into(), "model_reasoning_effort=\"high\"".into()];
     assert_eq!(
         runtime::codex::app_server_args(&s).unwrap(),
-        ["app-server", "-c", "model_reasoning_effort=\"high\""]
+        [
+            "app-server",
+            "-c",
+            "model_reasoning_effort=\"high\"",
+            "-c",
+            "features.memories=false"
+        ]
     );
 }
 
@@ -1482,6 +1505,12 @@ async fn codex_resumes_the_thread_or_starts_a_new_one() {
         )
         .unwrap();
         assert_eq!(seen, calls);
+        // Codex's own memory is off (存 3.6).
+        let argv: Vec<String> = serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join("work/argv.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(argv, ["app-server", "-c", "features.memories=false"]);
     }
 }
 
@@ -1735,4 +1764,126 @@ async fn claude_is_asked_once_about_a_background_command_that_still_runs() {
         .filter(|e| matches!(e, RunEvent::TurnCompleted { .. }))
         .count();
     assert_eq!(ended, 2);
+}
+
+/// `run.assign.fullPrompt` (design-vm-state §3.2): a session Claude Code no longer has starts a
+/// new one with `--session-id`, and the CLI gets the whole prompt instead of only what is new;
+/// without `fullPrompt`, or when the session is found, the short prompt as before.
+#[tokio::test]
+async fn claude_gets_the_full_prompt_when_the_session_is_gone() {
+    let argv = |dir: &std::path::Path| -> Vec<String> {
+        serde_json::from_str(&std::fs::read_to_string(dir.join("work/argv.json")).unwrap()).unwrap()
+    };
+    // Gone, with the whole prompt.
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = spec(
+        dir.path(),
+        "claude",
+        &fake("fake_claude.py"),
+        &[],
+        "only new",
+    );
+    s.resume_session_id = Some("gone".into());
+    s.full_prompt = Some("whole topic then only new".into());
+    let (o, _) = drive(s, |_| None).await;
+    assert_eq!(o.status, Status::Succeeded, "{o:?}");
+    assert_eq!(
+        o.result_text.as_deref(),
+        Some("reply 1: whole topic then only new")
+    );
+    assert!(o.resume_missed);
+    let args = argv(dir.path());
+    assert!(args.contains(&"--session-id".to_string()), "{args:?}");
+    assert!(!args.contains(&"--resume".to_string()), "{args:?}");
+
+    // Gone, from an older server: the short prompt, nothing reported.
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = spec(
+        dir.path(),
+        "claude",
+        &fake("fake_claude.py"),
+        &[],
+        "only new",
+    );
+    s.resume_session_id = Some("gone".into());
+    let (o, _) = drive(s, |_| None).await;
+    assert_eq!(o.result_text.as_deref(), Some("reply 1: only new"));
+    assert!(!o.resume_missed);
+    assert!(argv(dir.path()).contains(&"--session-id".to_string()));
+
+    // Found: `--resume` and the short prompt, whatever `fullPrompt` holds.
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = spec(
+        dir.path(),
+        "claude",
+        &fake("fake_claude.py"),
+        &[],
+        "only new",
+    );
+    let old = dir.path().join(".claude/projects/-old-run-work");
+    std::fs::create_dir_all(&old).unwrap();
+    std::fs::write(old.join("s1.jsonl"), "{}\n").unwrap();
+    s.resume_session_id = Some("s1".into());
+    s.full_prompt = Some("whole topic then only new".into());
+    let (o, _) = drive(s, |_| None).await;
+    assert_eq!(o.status, Status::Succeeded, "{o:?}");
+    assert_eq!(o.result_text.as_deref(), Some("reply 1: only new"));
+    assert!(!o.resume_missed);
+    assert!(argv(dir.path()).contains(&"--resume".to_string()));
+}
+
+/// A thread Codex no longer has: `thread/start`, and the first `turn/start` carries the whole
+/// prompt; a thread it has, or no `fullPrompt`, keeps the short prompt.
+#[tokio::test]
+async fn codex_gets_the_full_prompt_when_the_thread_is_gone() {
+    for (tid, full, reply, missed) in [
+        ("th-gone", Some("whole"), "codex: whole", true),
+        ("th-gone", None, "codex: only new", false),
+        ("th-old", Some("whole"), "codex: only new", false),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = spec(dir.path(), "codex", &fake("fake_codex.py"), &[], "only new");
+        s.resume_session_id = Some(tid.into());
+        s.full_prompt = full.map(str::to_string);
+        let (o, _) = drive(s, |_| None).await;
+        assert_eq!(o.status, Status::Succeeded, "{:?}", o.error);
+        assert_eq!(o.result_text.as_deref(), Some(reply), "{tid} {full:?}");
+        assert_eq!(o.resume_missed, missed, "{tid} {full:?}");
+    }
+}
+
+/// An ACP session the agent no longer has: the first prompt is the whole prompt (after the run
+/// note), not the lost-session note and the short prompt.
+#[tokio::test]
+async fn acp_gets_the_full_prompt_when_the_session_is_lost() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = spec(dir.path(), "acp", &fake("fake_acp.py"), &[], "go on");
+    s.resume_session_id = Some("gone".into());
+    s.full_prompt = Some("whole topic, go on".into());
+    s.note = Some("NOTE".into());
+    let (o, _) = drive(s.clone(), |_| None).await;
+    assert_eq!(o.status, Status::Succeeded, "{o:?}");
+    let text = o.result_text.unwrap();
+    assert!(
+        text.ends_with("NOTE\n\nwhole topic, go on")
+            && !text.contains(runtime::acp::LOST_SESSION_NOTE),
+        "{text}"
+    );
+    assert!(o.resume_missed);
+    assert_eq!(
+        runtime::acp::first_prompt(&s, false),
+        "NOTE\n\ngo on",
+        "a session that loads keeps the short prompt"
+    );
+    // No `fullPrompt`: told the session is new, as before; nothing reported.
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = spec(dir.path(), "acp", &fake("fake_acp.py"), &[], "go on");
+    s.resume_session_id = Some("gone".into());
+    let (o, _) = drive(s, |_| None).await;
+    assert!(
+        o.result_text
+            .unwrap()
+            .contains(runtime::acp::LOST_SESSION_NOTE)
+    );
+    assert!(!o.resume_missed);
 }

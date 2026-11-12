@@ -11,11 +11,13 @@ import { type RunProof, type TestCounts, doneCard, doneCardV1, hasProof, mergePr
 import { needsReply, parseReport, reportOf } from "./report";
 import { TOPIC_LINK_RPC } from "../../integrations/links";
 import { stamp } from "../../context/render";
-import { MAX_FOLLOW_UPS, type RunRow, codeOf, isStallStatus, sanitizeAcceptance, sanitizePlan, sanitizeUsage, sessionIdOf } from "./core";
+import { MAX_FOLLOW_UPS, type RunRow, codeOf, isStallStatus, readGroupsOf, sanitizeAcceptance, sanitizePlan, sanitizeUsage, sessionIdOf } from "./core";
 import { DeskRuns, type RunRequest } from "./runs";
 import { briefText } from "../../agent/frontdesk";
 import { countCited } from "../../memory/inject";
 import { retroAfterRun } from "../../memory/retro";
+import { UNKNOWN_GROUP } from "../../memory/store";
+import { readableGroups, readerOf } from "../../context/reach";
 import { DAEMON_RESTARTED, LIMIT_REACHED, MAX_DAEMON_RESUMES, MAX_LIMIT_WAITS } from "../../agent/recovery";
 import { HANDBACK_RETRY_MS, HOLD_CLI_TEXT, HOLD_TEXT } from "./hold";
 
@@ -56,6 +58,10 @@ export abstract class DeskEvents extends DeskRuns {
           f.at,
           JSON.stringify(f),
         );
+      }
+      // design-vm-state 3.2: the machine could not continue the session and sent the full prompt.
+      if (frames.some((f) => f.t === "run.done" && f.resumeMissed === true)) {
+        this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `sent:${runId}`, "full");
       }
       const top = Math.max(r.last_seq, ...frames.map((f) => f.seq));
       this.sql.exec("UPDATE runs SET last_seq = ? WHERE id = ?", top, runId);
@@ -727,19 +733,28 @@ export abstract class DeskEvents extends DeskRuns {
       const req = JSON.parse(raw) as RunRequest;
       // A memory counts as used when the run cites its id (盯 4.9), not because its prompt carried it.
       const cited = `${result}\n${r.progress_text ?? ""}`;
-      this.ctx.waitUntil(countCited(this.env, { botId: this.botId as string, groupId: r.group_id, requesterId: req.m.authorId }, cited));
-      const input = {
-        botId: this.botId as string,
-        runId: r.id,
-        groupId: r.group_id,
-        status,
-        requesterId: req.m.authorId,
-        request: [req.m.body, ...req.followUps.map((f) => f.body)].join("\n\n"),
-        ...(req.brief ? { brief: briefText(req.brief) } : {}),
-        progress: r.progress_text,
-        result,
+      // design-visibility 3.5: memory for the person the run works for; lessons of a run that read
+      // another group come from that group (`unknown` for two or more).
+      const read = readGroupsOf(r);
+      const work = async () => {
+        const forId = await readerOf(this.env.DB, r);
+        const groups = [...(await readableGroups(this.env.DB, r, forId))];
+        await countCited(this.env, { botId: this.botId as string, groupId: r.group_id, requesterId: forId, groups }, cited);
+        const input = {
+          botId: this.botId as string,
+          runId: r.id,
+          groupId: read.length === 0 ? r.group_id : read.length === 1 ? read[0] : UNKNOWN_GROUP,
+          groups,
+          status,
+          requesterId: req.m.authorId,
+          request: [req.m.body, ...req.followUps.map((f) => f.body)].join("\n\n"),
+          ...(req.brief ? { brief: briefText(req.brief) } : {}),
+          progress: r.progress_text,
+          result,
+        };
+        await retroAfterRun(this.env, input);
       };
-      this.ctx.waitUntil(retroAfterRun(this.env, input).catch((err) => this.log.warn("run review failed", { runId: r.id, err })));
+      this.ctx.waitUntil(work().catch((err) => this.log.warn("run review failed", { runId: r.id, err })));
     } catch (err) {
       this.log.warn("run review failed", { runId: r.id, err });
     }

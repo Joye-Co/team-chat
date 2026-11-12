@@ -771,6 +771,12 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
         .resume_session_id
         .clone()
         .filter(|s| prepare_resume(&config_dir, &spec.cwd, s));
+    // The session to resume is gone: the CLI gets the whole prompt, when the server sent it.
+    let full = spec
+        .full_prompt
+        .as_deref()
+        .filter(|_| spec.resume_session_id.is_some() && resume.is_none());
+    let resume_missed = full.is_some();
     let mut args: Vec<String> = [
         "-p",
         "--input-format",
@@ -858,7 +864,7 @@ run unasked. The run was not started.",
     for ev in norm.queue_turn() {
         let _ = emit.send(ev);
     }
-    if let Err(e) = p.write_json(&user_line(&spec.prompt)).await {
+    if let Err(e) = p.write_json(&user_line(full.unwrap_or(&spec.prompt))).await {
         return Outcome::failed(format!("claude: {e}"));
     }
     let mut control_open = true;
@@ -944,7 +950,7 @@ run unasked. The run was not started.",
                         return Outcome {
                             status: Status::Cancelled, exit_code: code, result_text: norm.last_result,
                             error: None, session_file: find_session_file(&config_dir, &spec.cwd, &sid),
-                            session_id: Some(sid), usage: norm.usage, failure: None,
+                            session_id: Some(sid), usage: norm.usage, failure: None, resume_missed,
                         };
                     }
                 }
@@ -978,5 +984,6 @@ run unasked. The run was not started.",
         session_file: find_session_file(&config_dir, &spec.cwd, &sid),
         session_id: Some(sid),
         usage: norm.usage,
+        resume_missed,
     }
 }

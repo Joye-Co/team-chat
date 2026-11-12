@@ -56,6 +56,10 @@ pub struct GroupPage {
     /// starts in it (a scene scrolls to it).
     scrolls: std::cell::RefCell<std::collections::HashMap<String, gpui::ScrollHandle>>,
     memory_top: std::rc::Rc<std::cell::Cell<gpui::Pixels>>,
+    /// What the page shows, read from the provider once per change: a
+    /// frame (a spinner elsewhere in the window redraws this page too) reads
+    /// no store.
+    snap: Option<Snapshot>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -76,13 +80,28 @@ impl GroupPage {
         _composer: Entity<ComposerView>,
         cx: &mut Context<Self>,
     ) -> Self {
+        let mut subscriptions = watch(&services, cx);
+        subscriptions.push(cx.subscribe(
+            &services.hub,
+            |this: &mut Self, _, _: &crate::app::Changes, _| this.snap = None,
+        ));
         Self {
-            _subscriptions: watch(&services, cx),
+            _subscriptions: subscriptions,
             services,
             show_all: false,
             memory: None,
             scrolls: Default::default(),
             memory_top: std::rc::Rc::new(std::cell::Cell::new(gpui::Pixels::ZERO)),
+            snap: None,
+        }
+    }
+
+    /// The snapshot of `g`, read again after a provider change or when
+    /// another 群 opens. Render puts it back when it is done.
+    fn take_snapshot(&mut self, g: &str) -> Snapshot {
+        match self.snap.take() {
+            Some(snap) if snap.group == g => snap,
+            _ => Snapshot::read(&self.services, g),
         }
     }
 
@@ -134,6 +153,12 @@ impl PageView for GroupPage {
         let Some(g) = self.group_id(cx) else {
             return TitleBarSpec::default();
         };
+        if let Some(snap) = self.snap.as_ref().filter(|x| x.group == g) {
+            return TitleBarSpec {
+                subtitle: snap.purpose.clone(),
+                ..TitleBarSpec::page(snap.name.clone())
+            };
+        }
         let p = &self.services.provider;
         let group = p.groups().into_iter().find(|x| x.id == g);
         TitleBarSpec {
@@ -248,24 +273,23 @@ impl GroupPage {
     /// `新话题`.
     fn toolbar(
         &self,
-        g: &str,
+        snap: &Snapshot,
         load: PageLoad,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let p = &self.services.provider;
-        let group = p.groups().into_iter().find(|x| x.id == g);
+        let g = snap.group.as_str();
         // The same members 群资料 lists, so the count matches it.
         // §2.14, A5: the count shows once the 群 is synced (the cache has
         // only me before that); offline the subtitle says 离线.
-        let n = self.listed_members(g).len();
+        let n = snap.members;
         let ready = load == PageLoad::Ready;
         let count = match load {
             PageLoad::Ready => Some(fill(c::GROUP_PAGE_MEMBERS, &[("n", &n.to_string())])),
             PageLoad::Failed => Some(crate::copy::desk::DESK_SUBTITLE_OFFLINE.to_string()),
             PageLoad::Loading => Some(crate::copy::desk::DESK_SUBTITLE_SYNCING.to_string()),
         };
-        let subtitle = [count, p.group_purpose(g)]
+        let subtitle = [count, snap.purpose.clone()]
             .into_iter()
             .flatten()
             .collect::<Vec<_>>()
@@ -315,7 +339,7 @@ impl GroupPage {
         div()
             .flex_none()
             .child(
-                ToolbarRow::new(group.map(|x| x.name).unwrap_or_default())
+                ToolbarRow::new(snap.name.clone())
                     .subtitle(subtitle)
                     .leading_inset(rows::toolbar_leading(&self.services, cx))
                     .group(ToolbarGroup::new([toolbar_item(
@@ -352,31 +376,15 @@ impl GroupPage {
     /// One open 话题 row (§2.6): the member's avatar (owner decision v16),
     /// the title over the owner and the step or note, then the StatusBadge
     /// and the time at fixed columns.
-    fn topic_row(
-        &self,
-        t: &Topic,
-        st: Standing,
-        run: Option<&BotRunSummary>,
-        cx: &App,
-    ) -> AnyElement {
+    fn topic_row(&self, row: &ActiveRow, cx: &App) -> AnyElement {
         let p = &self.services.provider;
-        let owner_id = run
-            .map(|r| r.bot_id.clone())
-            .or_else(|| t.owner_id.clone())
-            .unwrap_or_else(|| t.created_by.clone());
-        let glance = p.topic_glance(&t.group_id, &t.id);
+        let (t, st, run, state) = (&row.topic, row.standing, row.run.as_ref(), &row.state);
         // X-01: the name beside the member's avatar drops a leading emoji.
-        let owner_name =
-            crate::ui::avatar::name_beside_avatar(&member_name(&self.services, &owner_id))
-                .to_string();
-        let with_note = |first: String| match &glance.state_note {
+        let owner_name = crate::ui::avatar::name_beside_avatar(&row.owner_name).to_string();
+        let with_note = |first: String| match &row.note {
             Some(n) => format!("{first} · {n}"),
             None => first,
         };
-        // The one state mapping of a 话题 (§2.12, `topic_state`): asks to
-        // me first, 在做 n/m only with a run, 排队 without one.
-        let state =
-            crate::views::topic_page::topic_state(p.as_ref(), self.services.me().as_deref(), t);
         let label = if state.short.is_empty() {
             state.text.clone()
         } else {
@@ -388,10 +396,7 @@ impl GroupPage {
                 c::GROUP_PAGE_ASKED_BY,
                 &[(
                     "name",
-                    crate::ui::avatar::name_beside_avatar(&member_name(
-                        &self.services,
-                        &t.created_by,
-                    )),
+                    crate::ui::avatar::name_beside_avatar(&row.asker_name),
                 )],
             ))
         };
@@ -431,8 +436,8 @@ impl GroupPage {
         };
         // Owner decision v16: the leading media is the member (the status
         // shows only in the StatusBadge); the kind icon when no member.
-        let media = match p.member(&owner_id) {
-            Some(m) => rows::avatar(Some(&m), rows::AVATAR, cx),
+        let media = match &row.owner {
+            Some(m) => rows::avatar(Some(m), rows::AVATAR, cx),
             None => page::icon_box(Sym::Topic, None, cx),
         };
         // The time column: a run's start while it works, else the last
@@ -443,9 +448,10 @@ impl GroupPage {
         };
         let nav = self.services.nav.clone();
         let (gid, tid) = (t.group_id.clone(), t.id.clone());
-        let live = run
-            .filter(|r| p.machine_screen(&r.id).is_some())
-            .map(|r| r.id.clone());
+        // Whether its machine screen shows is asked on the click, not in a
+        // frame.
+        let run_id = run.map(|r| r.id.clone());
+        let screens = self.services.provider.clone();
         let menu_nav = self.services.nav.clone();
         let (mg, mt) = (gid.clone(), tid.clone());
         page::PageRow {
@@ -462,7 +468,10 @@ impl GroupPage {
         )
         // The title (TruncText) shows the whole title only when it is cut.
         .on_click(move |_, _, cx| {
-            let (gid, tid, live) = (gid.clone(), tid.clone(), live.clone());
+            let (gid, tid) = (gid.clone(), tid.clone());
+            let live = run_id
+                .clone()
+                .filter(|r| screens.machine_screen(r).is_some());
             nav.update(cx, |nav, cx| {
                 nav.open_topic(gid, tid, cx);
                 if let Some(run) = live {
@@ -486,50 +495,21 @@ impl GroupPage {
     /// 话题 (O-2), as in the sidebar: a 话题 that is open again (in
     /// `active`) is not listed (§2.21: no duplicates), and a 话题 marked
     /// done this week with no run result is listed too.
-    fn done_rows(&self, g: &str, active: &[String], cx: &App) -> (Vec<AnyElement>, usize) {
-        let p = &self.services.provider;
-        let mut all: Vec<_> = p
-            .group_recent_done(g)
-            .into_iter()
-            .filter(|d| !active.contains(&d.topic_id))
-            .collect();
-        let week_ago = p.clock_now() - 7 * 24 * 3_600_000;
-        for t in p.topics(g) {
-            if t.status == TopicStatus::Done
-                && t.last_activity_at >= week_ago
-                && !all.iter().any(|d| d.topic_id == t.id)
-            {
-                all.push(crate::data::pages::RecentDone {
-                    group_id: t.group_id.clone(),
-                    member_id: t.owner_id.clone().unwrap_or_else(|| t.created_by.clone()),
-                    title: t.title.clone(),
-                    note: None,
-                    at: t.last_activity_at,
-                    topic_id: t.id,
-                });
-            }
-        }
-        all.sort_by_key(|d| std::cmp::Reverse(d.at));
-        let total = all.len();
-        let done: Vec<_> = all.into_iter().take(5).collect();
-        let rows = done
-            .into_iter()
+    fn done_rows(&self, snap: &Snapshot, cx: &App) -> (Vec<AnyElement>, usize) {
+        let rows = snap
+            .done
+            .iter()
             .enumerate()
-            .map(|(i, d)| {
+            .map(|(i, row)| {
+                let d = &row.done;
                 let nav = self.services.nav.clone();
                 let (gid, tid) = (d.group_id.clone(), d.topic_id.clone());
-                let mut rest = vec![
-                    crate::ui::avatar::name_beside_avatar(&member_name(
-                        &self.services,
-                        &d.member_id,
-                    ))
-                    .to_string(),
-                ];
+                let mut rest = vec![crate::ui::avatar::name_beside_avatar(&row.name).to_string()];
                 rest.extend(d.note.clone());
                 page::PageRow {
                     // Owner decision v16: the member, not a second status.
-                    media: Some(match p.member(&d.member_id) {
-                        Some(m) => rows::avatar(Some(&m), rows::AVATAR, cx),
+                    media: Some(match &row.member {
+                        Some(m) => rows::avatar(Some(m), rows::AVATAR, cx),
                         None => page::icon_box(Sym::Topic, None, cx),
                     }),
                     second: Some(line(rest.join(" · ")).into_any_element()),
@@ -549,12 +529,134 @@ impl GroupPage {
                 .into_any_element()
             })
             .collect();
-        (rows, total)
+        (rows, snap.done_total)
     }
+}
 
+/// One open 话题 row of the page, with what its row shows.
+struct ActiveRow {
+    standing: Standing,
+    topic: Topic,
+    run: Option<BotRunSummary>,
+    /// The one state mapping of a 话题 (§2.12, `topic_state`): asks to me
+    /// first, 在做 n/m only with a run, 排队 without one.
+    state: crate::views::topic_page::StateLine,
+    /// The glance's state note.
+    note: Option<String>,
+    owner: Option<crate::data::Member>,
+    owner_name: String,
+    asker_name: String,
+}
+
+/// One 最近完成 row.
+struct DoneRow {
+    done: crate::data::pages::RecentDone,
+    member: Option<crate::data::Member>,
+    name: String,
+}
+
+/// What the 群 page shows of one 群, read from the provider once per change.
+struct Snapshot {
+    group: String,
+    name: String,
+    purpose: Option<String>,
     /// The members 群资料 lists (and the subtitle counts).
-    fn listed_members(&self, g: &str) -> Vec<crate::data::Member> {
-        info::listed_members(&self.services, g)
+    members: usize,
+    /// The open 话题 by standing, then newest first.
+    active: Vec<ActiveRow>,
+    /// The first 5 of 最近完成.
+    done: Vec<DoneRow>,
+    done_total: usize,
+    /// The cache has 话题 of this 群.
+    has_topics: bool,
+    /// A 群, not a 私聊.
+    is_group: bool,
+}
+
+impl Snapshot {
+    fn read(services: &Services, g: &str) -> Self {
+        let p = &services.provider;
+        let me = services.me();
+        let topics = p.topics(g);
+        let group = p.groups().into_iter().find(|x| x.id == g);
+        let mut active: Vec<ActiveRow> = topics
+            .iter()
+            .filter(|t| t.status != TopicStatus::Done)
+            .map(|t| {
+                let run = p.runs(g, &t.id).into_iter().find(|r| r.status.is_active());
+                let state = crate::views::topic_page::topic_state(p.as_ref(), me.as_deref(), t);
+                let owner_id = run
+                    .as_ref()
+                    .map(|r| r.bot_id.clone())
+                    .or_else(|| t.owner_id.clone())
+                    .unwrap_or_else(|| t.created_by.clone());
+                let owner = p.member(&owner_id);
+                ActiveRow {
+                    standing: standing(t, &state),
+                    note: p.topic_glance(&t.group_id, &t.id).state_note,
+                    owner_name: owner.as_ref().map(|m| m.name.clone()).unwrap_or_default(),
+                    asker_name: member_name(services, &t.created_by),
+                    owner,
+                    state,
+                    run,
+                    topic: t.clone(),
+                }
+            })
+            .collect();
+        active.sort_by(|a, b| {
+            a.standing
+                .cmp(&b.standing)
+                .then(b.topic.last_activity_at.cmp(&a.topic.last_activity_at))
+        });
+        // 完成 is a done 话题 (O-2), as in the sidebar: a 话题 that is open
+        // again is not listed (§2.21: no duplicates), and a 话题 marked done
+        // this week with no run result is listed too.
+        let mut all: Vec<_> = p
+            .group_recent_done(g)
+            .into_iter()
+            .filter(|d| !active.iter().any(|a| a.topic.id == d.topic_id))
+            .collect();
+        let week_ago = p.clock_now() - 7 * 24 * 3_600_000;
+        for t in &topics {
+            if t.status == TopicStatus::Done
+                && t.last_activity_at >= week_ago
+                && !all.iter().any(|d| d.topic_id == t.id)
+            {
+                all.push(crate::data::pages::RecentDone {
+                    group_id: t.group_id.clone(),
+                    member_id: t.owner_id.clone().unwrap_or_else(|| t.created_by.clone()),
+                    title: t.title.clone(),
+                    note: None,
+                    at: t.last_activity_at,
+                    topic_id: t.id.clone(),
+                });
+            }
+        }
+        all.sort_by_key(|d| std::cmp::Reverse(d.at));
+        let done_total = all.len();
+        let done = all
+            .into_iter()
+            .take(5)
+            .map(|d| {
+                let member = p.member(&d.member_id);
+                DoneRow {
+                    name: member.as_ref().map(|m| m.name.clone()).unwrap_or_default(),
+                    member,
+                    done: d,
+                }
+            })
+            .collect();
+        Self {
+            group: g.to_string(),
+            name: group.as_ref().map(|x| x.name.clone()).unwrap_or_default(),
+            purpose: p.group_purpose(g),
+            members: info::listed_members(services, g).len(),
+            active,
+            done,
+            done_total,
+            has_topics: !topics.is_empty(),
+            is_group: group.is_some_and(|x| x.kind == crate::data::GroupKind::Group),
+        }
     }
 }
 
@@ -564,32 +666,17 @@ impl Render for GroupPage {
         let Some(g) = self.group_id(cx) else {
             return div().into_any_element();
         };
-        let p = self.services.provider.clone();
-        let me = self.services.me();
-        let mut active: Vec<(Standing, Topic, Option<BotRunSummary>)> = p
-            .topics(&g)
-            .into_iter()
-            .filter(|t| t.status != TopicStatus::Done)
-            .map(|t| {
-                let run = p.runs(&g, &t.id).into_iter().find(|r| r.status.is_active());
-                let state = crate::views::topic_page::topic_state(p.as_ref(), me.as_deref(), &t);
-                (standing(&t, &state), t, run)
-            })
-            .collect();
-        active.sort_by(|a, b| {
-            a.0.cmp(&b.0)
-                .then(b.1.last_activity_at.cmp(&a.1.last_activity_at))
-        });
-        let n = active.len();
-        let on_me = active.iter().filter(|(s, ..)| *s == Standing::OnMe).count();
+        let snap = self.take_snapshot(&g);
+        let n = snap.active.len();
+        let on_me = snap
+            .active
+            .iter()
+            .filter(|a| a.standing == Standing::OnMe)
+            .count();
         crate::selftest::drawn::mark("group-page", format!("{g} active={n} on_me={on_me}"));
-        let active_ids: Vec<String> = active.iter().map(|(_, t, _)| t.id.clone()).collect();
-        let (done, done_total) = self.done_rows(&g, &active_ids, cx);
-        let load = PageLoad::of(
-            &self.services,
-            n > 0 || !done.is_empty() || !p.topics(&g).is_empty(),
-        );
-        let toolbar = self.toolbar(&g, load, window, cx);
+        let (done, done_total) = self.done_rows(&snap, cx);
+        let load = PageLoad::of(&self.services, n > 0 || !done.is_empty() || snap.has_topics);
+        let toolbar = self.toolbar(&snap, load, window, cx);
         // Frames hug their rows and footer row; space below the last frame
         // is allowed (A1).
         let mut content = div()
@@ -659,7 +746,7 @@ impl Render for GroupPage {
                 // frame ends with a footer row (§2.6): `看全部 N 个话题`
                 // when the list is cut, else the count.
                 for st in Standing::ALL {
-                    let rows: Vec<_> = active.iter().filter(|(s, ..)| *s == st).collect();
+                    let rows: Vec<_> = snap.active.iter().filter(|a| a.standing == st).collect();
                     let total = rows.len();
                     if total == 0 && st != Standing::Running {
                         continue;
@@ -672,7 +759,7 @@ impl Render for GroupPage {
                     let topic_rows: Vec<AnyElement> = rows
                         .iter()
                         .take(shown)
-                        .map(|(st, t, run)| self.topic_row(t, *st, run.as_ref(), cx))
+                        .map(|row| self.topic_row(row, cx))
                         .collect();
                     let slug = st.slug();
                     let footer = if total > ACTIVE_ROWS {
@@ -747,10 +834,9 @@ impl Render for GroupPage {
             }
         }
         // 群里的约定 under the 话题 of a 群 (not a 私聊: nothing is kept for one there).
-        let is_group = p
-            .groups()
-            .into_iter()
-            .any(|x| x.id == g && x.kind == crate::data::GroupKind::Group);
+        let is_group = snap.is_group;
+        // Kept for the next frame.
+        self.snap = Some(snap);
         if load == PageLoad::Ready && is_group {
             let board = self.memory_board(&g, cx);
             if !board.read(cx).hidden() {

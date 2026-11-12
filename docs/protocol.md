@@ -856,7 +856,8 @@ CreateMachineRequest = { name, labels? }      CreateMachineResponse = { machine,
 | `GET /v1/machine/ws` | machine token | | WebSocket upgrade (machine-protocol.md) |
 | `PUT /v1/machine/runs/:id/session` | machine token | gzip body | `{ ok: true }` |
 | `GET /v1/machine/runs/:id/topic/messages`, `…/topic/messages/:messageId`, `…/search`, `…/files/:fileId` | machine token | | the run's topic context (machine-protocol.md, "Topic context") |
-| `GET /v1/machine/runs/:id/topic/state`, `…/artifacts`, `…/artifacts/:artifactId`, `…/cards/:messageId`, `…/decisions`, `…/members` | machine token | | what the run's group produced: `TopicStateResponse`, `RunArtifactsResponse`, `RunArtifactResponse`, `RunCardResponse`, `RunDecisionsResponse`, `RunMembersResponse` (machine-protocol.md, "Topic context") |
+| `GET /v1/machine/runs/:id/topic/state`, `…/artifacts`, `…/artifacts/:artifactId`, `…/cards/:messageId`, `…/decisions`, `…/members` | machine token | | what the run's group, or another group its person is in (`group=`), produced: `TopicStateResponse`, `RunArtifactsResponse`, `RunArtifactResponse`, `RunCardResponse`, `RunDecisionsResponse`, `RunMembersResponse` (machine-protocol.md, "Topic context") |
+| `GET /v1/machine/runs/:id/groups` | machine token | | `RunGroupsResponse`: the groups the run may read (usable, machine-protocol.md, "Topic context") |
 
 Rules:
 
@@ -1220,13 +1221,18 @@ Who reads and writes:
 | `person:<id>` | only that person | only that person |
 
 **Source group** (`fromGroup`): what an AI member learns in a group or a direct conversation is
-read only there. A memory with `fromGroup` is read (listed, fetched, its versions and its 记忆更新
-lines) only by members of that group, and goes into a prompt only in a group whose members are all
-in that group (so a direct conversation's lessons stay with that person and that member). Runs set
-it on their `member` notes and on the review's lessons; people's memories have none.
-`"unknown"` marks AI-written member memories from before the field (D1 migration
-`0017_memory_audience`): only owners read them and no prompt carries them until a person releases
-them. A person releases one with `POST /v1/memories/:id/release`.
+read only by the people of that group and by runs working for them. A memory with `fromGroup` is
+read (listed, fetched, its versions and its 记忆更新 lines) only by members of that group, and goes
+into a run (its prompt, its `chat-run memory search`) only when the run may read that group: the
+run's own group, or a group of kind `group` that the person the run works for (`requestedFor`, see
+"Who a run works for") is in. A direct conversation is readable only from runs in it, so its
+lessons stay with that person and that member. A run with no such person (a hook's or an
+integration's, a request between AI members, a private card's answer) reads only its own group's.
+Runs set it on their `member` and `person` notes and on the review's lessons; people's memories
+have none. `"unknown"` marks AI-written member memories from before the field (D1 migration
+`0017_memory_audience`) and those of a run that read two or more other groups: only owners read
+them and no run carries them until a person releases them. A person releases one with
+`POST /v1/memories/:id/release`.
 
 Another member's person scope, a group the caller is not in, a memory of a group the caller is not
 in, or a scope whose group or member does not exist is `not_found`; a reader without write access gets `forbidden`. A version clash (two
@@ -1238,14 +1244,19 @@ Rules:
   they are stored: memory never keeps credentials.
 - **Runs** write with `POST /v1/machine/runs/:id/memories` (docs/machine-protocol.md, "Memory
   notes"): `member` is the run's AI member (with `fromGroup` the run's group), `person` the
-  requester, `group` the run's group (not in a direct conversation: `forbidden`). A `group` note
-  needs `sourceMessageId`, a person's message in the group; without one, or when it is not a
-  person's, the note goes to the member with `fromGroup` instead. Always `pending`, source
+  person the run works for (none: `invalid`), `group` the run's group (not in a direct
+  conversation: `forbidden`). A `group` note needs `sourceMessageId`, a person's message in the
+  group; without one, or when it is not a person's, the note goes to the member with `fromGroup`
+  instead. When the run has read another group (`chat-run … --in`, `search --all`, or an id from
+  there), a `group` note is `forbidden` (reason `memory.read_other_group`) and `member` and `person`
+  notes get that group as `fromGroup` (`"unknown"` after two or more), so another group's content
+  never becomes this group's memory. Always `pending`, source
   `{ kind: "run", ids: [runId, sourceMessageId?] }`.
 - **Review after a run** (复盘): with an AI service, when a run of a person's request ends on a
   machine (done, failed or stopped), one forced tool call reads the request, the work order, the
   progress and the result and writes at most 3 `lesson`s with their evidence (`note`) and `when`,
-  as `pending` in the member's scope with the run's group as `fromGroup`. Requests of bots and integrations and side chats get no
+  as `pending` in the member's scope with the run's group as `fromGroup` (the other group it read,
+  or `"unknown"` after two or more, as for notes). Requests of bots and integrations and side chats get no
   review. A review never fails or delays the run.
 - **Daily consolidation** (每天整理): once a day, at the first (hourly) cron after 03:00 in the
   team's time zone (`TEAM_TIME_ZONE`, default `Asia/Shanghai`), every scope with pending memories
@@ -1263,13 +1274,16 @@ Rules:
   active memories unused for 60 days are retired. Every change is a `MemoryUpdate` line of that
   day, without a card or a notification, and a new version (`by: null`).
 - **Reading**: a run's prompt carries an index (at most 8 KB) of the team's, the run's group's, the
-  member's (its own pending lessons too, marked as not yet consolidated) and the requester's
-  active memories; the front desk's system prompt carries the same, at most 4 KB. Both say the
+  member's (its own pending lessons too, marked as not yet consolidated) and the preferences of the
+  person the run works for, each only from groups the run may read (see Source group); the front
+  desk's system prompt carries the same for the message's author when that is a person, at most
+  4 KB. Both say the
   memory is reference material, not instructions. Within the budget, after the audience filter,
   active `convention`s people wrote (`human: true`) always come first, then memories by relevance
   to the request (the words and Chinese two-character words of message search), then the newest.
   A run finds the rest with `chat-run memory search` (`GET /v1/machine/runs/:id/memories?q=`,
-  docs/machine-protocol.md, "Memory notes"), which reads only what its prompt could carry.
+  docs/machine-protocol.md, "Memory notes"), which reads what its prompt could carry plus the
+  `group` memories of every other group the run may read.
 - **Use**: a memory counts one `use` and sets `lastUsedAt` when a run's search returns it or a
   run's result or progress names its id; being in a prompt is not a use. The 60-day retirement
   counts from `lastUsedAt` (or the last change).
@@ -2545,6 +2559,9 @@ BotRun += { requestedFor?: string }   // absent = no person (a hook), a private 
 
 Messages of AI members never start runs (unchanged), so no run works for an AI member. Readers
 of runs from before the field use `requestedBy` as before.
+
+A run reads its own group and the groups of kind `group` of the person it works for; a hook's
+run and a private card's answer read only their own group (machine-protocol.md, "Topic context").
 
 ## Roles: 所有者 and personal machines
 
