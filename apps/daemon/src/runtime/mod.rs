@@ -63,6 +63,9 @@ pub struct RunSpec {
     pub gates: Option<Arc<crate::gates::Gates>>,
     /// Where the CLI runs.
     pub exec: Arc<dyn Executor>,
+    /// Host folders a VM run shares with its VM besides the run folder, working folder and git
+    /// dir (the run's cli root). Only the firecracker executor reads it.
+    pub vm_shares: Vec<PathBuf>,
 }
 
 /// A session id the daemon passes on: 1-128 of `[A-Za-z0-9_-]` (it becomes a file name).

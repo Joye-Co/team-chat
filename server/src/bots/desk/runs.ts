@@ -730,7 +730,10 @@ export abstract class DeskRuns extends DeskCore {
     }
     const refIds = (m.refs ?? []).map((x) => x.fromId).filter((x): x is string => Boolean(x));
     const authors = [first, ...newest, ...(since?.newest ?? [])].flatMap((x) => (x ? [x.authorId, x.ext.replyTo?.authorId ?? x.authorId, ...(x.ext.cardState?.answers ?? []).map((a) => a.actorId)] : []));
-    const names = await this.names([...new Set([...authors, m.authorId, botId, ...refIds, ...requestAuthors(m.ext)])]);
+    // design-visibility 3.5: memory is read for the person the run works for, in the groups they may read.
+    const forId = await readerOf(this.env.DB, r);
+    const groups = [...(await readableGroups(this.env.DB, r, forId))];
+    const names = await this.names([...new Set([...authors, m.authorId, botId, ...refIds, ...requestAuthors(m.ext), ...(forId ? [forId] : [])])]);
     const name = (id: string) => names.get(id) ?? id;
     const lines = {
       more: (x: ContextRow) => (contextTools ? `rest: chat-run topic message --id ${x.id}` : ""),
@@ -762,8 +765,9 @@ export abstract class DeskRuns extends DeskCore {
       memory: await memoryIndex(this.env, {
         botId,
         groupId: m.groupId,
-        requesterId: m.authorId,
-        requesterName: name(m.authorId),
+        requesterId: forId,
+        requesterName: forId ? name(forId) : "",
+        groups,
         maxBytes: EXECUTOR_MEMORY_BYTES,
         query: [request.body, ...followUps.map((f) => f.body), ...(brief ? [briefText(brief)] : [])].join("\n"),
         runNote: contextTools,

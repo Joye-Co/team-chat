@@ -335,6 +335,7 @@ fn spec(dir: &Path, command: &str, prompt: &str) -> RunSpec {
         gate_alive: None,
         gates: None,
         exec: daemon::executor::local(),
+        vm_shares: vec![],
     }
 }
 

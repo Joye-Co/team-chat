@@ -1,8 +1,9 @@
 //! What a run in a microVM gets of this host's CLI sign-ins (机 3.2).
 //!
 //! The host's sign-in folders (`~/.claude`, `~/.codex`, `~/.pi`) are never shared with a VM.
-//! Each run's CLI uses its member's own folders instead (`<member>/.claude`, `.codex`,
-//! `.pi/agent`, see [`crate::vm_home::member_dir`]), so session records stay per member, and
+//! Each run's CLI uses the folders of its topic instead (`<cli root>/.claude`, `.codex`,
+//! `.pi/agent`; the cli root is `<line>/cli` for a run in a work line, else `<run>/cli`), so
+//! session records go with the topic's work and topics that run at once never share them, and
 //! gets the sign-in in a form it cannot use to change this host's:
 //!
 //! - **Claude Code**: a token in `CLAUDE_CODE_OAUTH_TOKEN`. A long-lived token
@@ -10,7 +11,8 @@
 //!   own `ANTHROPIC_API_KEY`) is used as it is; otherwise the host's current access token, never
 //!   its refresh token. When that runs out before the run could end, the host CLI refreshes it
 //!   first.
-//! - **Codex**: a copy of `auth.json` without the refresh token, written for the run (tested
+//! - **Codex**: a copy of `auth.json` without the refresh token, written for the run and removed
+//!   when its CLI is done ([`remove_auth`], and [`sweep_auth`] at daemon start) (tested
 //!   with Codex 0.159: a copy whose `refresh_token` is empty completes a task with the access
 //!   token; a copy without the field is not signed in). Access tokens last 10 days; when the
 //!   host's runs out before the run could end, the host's Codex refreshes it first
@@ -24,10 +26,10 @@
 //! whether another has just renewed the sign-in), so a refresh token is never used twice.
 //!
 //! The host's settings (`settings.json`, `config.toml`) are copied for each run. A run that
-//! resumes a session from before this (kept in the host's folders) gets that one session file
-//! copied into its member's folder.
+//! resumes a session its cli root does not have gets that one session file copied in from the
+//! first place that has it ([`session_roots`], then the host's own folders).
 
-use crate::config::RuntimeConfig;
+use crate::config::{Config, RuntimeConfig};
 use base64::Engine as _;
 use serde_json::{Value, json};
 use std::future::Future;
@@ -42,9 +44,9 @@ pub const CLAUDE_TOKEN: &str = "CLAUDE_CODE_OAUTH_TOKEN";
 /// A run that has one of these already brings its own Claude credential.
 const CLAUDE_OWN: [&str; 3] = [CLAUDE_TOKEN, "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"];
 
-/// The CLIs' folders of a member, as the run's environment names them.
-pub fn cli_env(member: &Path) -> Vec<(String, String)> {
-    let p = |rel: &str| member.join(rel).to_string_lossy().to_string();
+/// The CLIs' folders under a run's cli root, as the run's environment names them.
+pub fn cli_env(cli_root: &Path) -> Vec<(String, String)> {
+    let p = |rel: &str| cli_root.join(rel).to_string_lossy().to_string();
     vec![
         ("CLAUDE_CONFIG_DIR".into(), p(".claude")),
         ("CODEX_HOME".into(), p(".codex")),
@@ -202,99 +204,215 @@ fn copy_setting(from: &Path, to: &Path, name: &str) {
     }
 }
 
-/// A session of the member from before per-member folders: copies `<sid>.jsonl` of the host's
-/// Claude folder into the member's, under the same project folder. True when it is there now.
-pub fn carry_claude_session(host: &Path, member: &Path, cwd: &Path, sid: &str) -> bool {
+/// The cli roots that may hold a member's earlier sessions, in the order they are searched
+/// after the run's own `cli_root`: the member's other work lines (`lines/*/cli`, by
+/// `line.json`), its runs without a line (`runs/*/cli`, by `run.json`: side chats and runs
+/// whose line was held), then the folders of the daemon versions that kept per-member homes
+/// (`<[vm].homes>/<member>`, `<[vm].dir>/cli/<member>`).
+pub fn session_roots(cfg: &Config, cli_root: &Path, member: &str) -> Vec<PathBuf> {
+    let mut out = vec![];
+    if member.is_empty() {
+        return out;
+    }
+    let mut push = |p: PathBuf| {
+        if p != cli_root && p.is_dir() && !out.contains(&p) {
+            out.push(p);
+        }
+    };
+    let lines = std::fs::read_dir(crate::workspace::lines_dir(cfg));
+    for e in lines.into_iter().flatten().flatten() {
+        if crate::workspace::read_line(&e.path()).is_some_and(|l| l.bot_member_id == member) {
+            push(e.path().join("cli"));
+        }
+    }
+    let runs = std::fs::read_dir(crate::workspace::runs_dir(cfg));
+    for e in runs.into_iter().flatten().flatten() {
+        if crate::workspace::read_meta(&e.path())
+            .is_some_and(|m| m.bot_member_id.as_deref() == Some(member))
+        {
+            push(e.path().join("cli"));
+        }
+    }
+    if let Some(vm) = &cfg.vm
+        && crate::vm_cache::plain_id(member)
+    {
+        if !vm.homes.as_os_str().is_empty() {
+            push(vm.homes.join(member));
+        }
+        push(vm.dir.join("cli").join(member));
+    }
+    out
+}
+
+/// Copies Claude Code session `<sid>.jsonl` into `own` (a run's Claude folder) from the first
+/// folder of `from` that has it, under the same project folder. True when it is in `own` now.
+pub fn carry_claude_session(from: &[PathBuf], own: &Path, cwd: &Path, sid: &str) -> bool {
     use crate::runtime::claude::find_session_file;
     if !crate::runtime::valid_session_id(sid) {
         return false;
     }
-    if find_session_file(member, cwd, sid).is_some() {
+    if find_session_file(own, cwd, sid).is_some() {
         return true;
     }
-    let Some(found) = find_session_file(host, cwd, sid) else {
+    let Some(found) = from.iter().find_map(|d| find_session_file(d, cwd, sid)) else {
         return false;
     };
     let Some(project) = found.parent().and_then(|p| p.file_name()) else {
         return false;
     };
-    let dir = member.join("projects").join(project);
+    let dir = own.join("projects").join(project);
     std::fs::create_dir_all(&dir).is_ok()
         && std::fs::copy(&found, dir.join(format!("{sid}.jsonl"))).is_ok()
 }
 
-/// A Codex thread's rollout file under `sessions/` (`YYYY/MM/DD/rollout-<time>-<id>.jsonl`).
-fn find_rollout(home: &Path, sid: &str) -> Option<PathBuf> {
-    fn walk(dir: &Path, suffix: &str, depth: u32) -> Option<PathBuf> {
+/// A session file under `sessions/` (a few folders deep) whose name `matches`.
+fn find_in_sessions(home: &Path, matches: &dyn Fn(&str) -> bool) -> Option<PathBuf> {
+    fn walk(dir: &Path, matches: &dyn Fn(&str) -> bool, depth: u32) -> Option<PathBuf> {
         for e in std::fs::read_dir(dir).ok()?.flatten() {
             let p = e.path();
             if p.is_dir() {
                 if depth < 4
-                    && let Some(f) = walk(&p, suffix, depth + 1)
+                    && let Some(f) = walk(&p, matches, depth + 1)
                 {
                     return Some(f);
                 }
-            } else if e
-                .file_name()
-                .to_str()
-                .is_some_and(|n| n.starts_with("rollout-") && n.ends_with(suffix))
-            {
+            } else if e.file_name().to_str().is_some_and(matches) {
                 return Some(p);
             }
         }
         None
     }
-    walk(&home.join("sessions"), &format!("-{sid}.jsonl"), 0)
+    walk(&home.join("sessions"), matches, 0)
 }
 
-/// [`carry_claude_session`] for a Codex thread: the rollout file keeps its place under
-/// `sessions/`.
-pub fn carry_codex_session(host: &Path, member: &Path, sid: &str) -> bool {
+/// A Codex thread's rollout file under `sessions/` (`YYYY/MM/DD/rollout-<time>-<id>.jsonl`).
+fn find_rollout(home: &Path, sid: &str) -> Option<PathBuf> {
+    let suffix = format!("-{sid}.jsonl");
+    find_in_sessions(home, &|n| n.starts_with("rollout-") && n.ends_with(&suffix))
+}
+
+/// A Pi session file under `sessions/` (`<cwd folder>/<time>_<id>.jsonl`).
+fn find_pi_session(home: &Path, sid: &str) -> Option<PathBuf> {
+    let (under, plain) = (format!("_{sid}.jsonl"), format!("{sid}.jsonl"));
+    find_in_sessions(home, &|n| n.ends_with(&under) || n == plain)
+}
+
+/// Copies the session file `find` finds in the first folder of `from` into `own`, at the same
+/// place under it. True when `own` has it now.
+fn carry_session(
+    from: &[PathBuf],
+    own: &Path,
+    sid: &str,
+    find: fn(&Path, &str) -> Option<PathBuf>,
+) -> bool {
     if !crate::runtime::valid_session_id(sid) {
         return false;
     }
-    if find_rollout(member, sid).is_some() {
+    if find(own, sid).is_some() {
         return true;
     }
-    let Some(found) = find_rollout(host, sid) else {
+    let Some((root, found)) = from.iter().find_map(|d| Some((d, find(d, sid)?))) else {
         return false;
     };
-    let Ok(rel) = found.strip_prefix(host) else {
+    let Ok(rel) = found.strip_prefix(root) else {
         return false;
     };
-    let target = member.join(rel);
+    let target = own.join(rel);
     target
         .parent()
         .is_some_and(|d| std::fs::create_dir_all(d).is_ok())
         && std::fs::copy(&found, &target).is_ok()
 }
 
-/// Readies the CLI's folders and sign-in of a VM run of the member whose folder is `member`:
-/// sets the CLIs' folders in `env` and, for Claude Code, the token. Returns the token the run
-/// got in its environment (to be masked), if any. `need`: how long the run may take.
+/// [`carry_claude_session`] for a Codex thread: the rollout file keeps its place under
+/// `sessions/`.
+pub fn carry_codex_session(from: &[PathBuf], own: &Path, sid: &str) -> bool {
+    carry_session(from, own, sid, find_rollout)
+}
+
+/// [`carry_claude_session`] for a Pi session: the file keeps its place under `sessions/`.
+pub fn carry_pi_session(from: &[PathBuf], own: &Path, sid: &str) -> bool {
+    carry_session(from, own, sid, find_pi_session)
+}
+
+/// The sign-in copies a run's CLI reads under its cli root.
+const AUTH_COPIES: [&str; 2] = [".codex/auth.json", ".pi/agent/auth.json"];
+
+/// Removes the sign-in copies under a run's cli root once its CLI is done. True when one was
+/// there.
+pub fn remove_auth(cli_root: &Path) -> bool {
+    // Every copy goes: no short cut after the first.
+    AUTH_COPIES
+        .iter()
+        .filter(|f| std::fs::remove_file(cli_root.join(f)).is_ok())
+        .count()
+        > 0
+}
+
+/// At daemon start: removes the sign-in copies a crash left in the cli roots of the work lines
+/// and runs that no `active` run uses. Returns the cli roots that had one.
+pub fn sweep_auth(cfg: &Config, active: &[String]) -> usize {
+    use crate::workspace::{lines_dir, read_meta, run_dir, runs_dir};
+    let in_use: Vec<PathBuf> = active
+        .iter()
+        .flat_map(|id| {
+            let dir = run_dir(cfg, id);
+            let line = read_meta(&dir).and_then(|m| m.line);
+            [Some(dir), line].into_iter().flatten()
+        })
+        .collect();
+    let mut removed = 0;
+    for parent in [lines_dir(cfg), runs_dir(cfg)] {
+        for e in std::fs::read_dir(parent).into_iter().flatten().flatten() {
+            if !in_use.contains(&e.path()) && remove_auth(&e.path().join("cli")) {
+                removed += 1;
+            }
+        }
+    }
+    removed
+}
+
+/// Readies the CLI's folders and sign-in of a VM run whose CLI folders are under `cli_root`:
+/// sets the CLIs' folders in `env` and, for Claude Code, the token. A resumed session the cli
+/// root lacks is copied in from the member's (`member_id`) other folders ([`session_roots`]) or
+/// the host's. Returns the token the run got in its environment (to be masked), if any.
+/// `need`: how long the run may take. The caller removes the sign-in copies with
+/// [`remove_auth`] when the CLI is done.
+#[allow(clippy::too_many_arguments)]
 pub async fn prepare(
     rt: &RuntimeConfig,
-    member: &Path,
+    cli_root: &Path,
     cwd: &Path,
     resume: Option<&str>,
     need: Duration,
     env: &mut Vec<(String, String)>,
+    member_id: &str,
+    cfg: &Config,
 ) -> Result<Option<String>, String> {
-    for (k, v) in cli_env(member) {
+    for (k, v) in cli_env(cli_root) {
         env.retain(|(n, _)| *n != k);
         env.push((k, v));
     }
-    // Runs of one member that start together take turns writing its folders.
-    let _turn = crate::vm_home::lock(&format!("login:{}", member.display())).await;
+    std::fs::create_dir_all(cli_root).map_err(|e| format!("{}: {e}", cli_root.display()))?;
+    // Runs that start together never write one folder at once.
+    let _turn = crate::vm_cache::lock(&format!("login:{}", cli_root.display())).await;
+    // Where a resumed session may be: the member's other folders, then the host's.
+    let from = |rel: &str, host: &Path| {
+        session_roots(cfg, cli_root, member_id)
+            .into_iter()
+            .map(|r| r.join(rel))
+            .chain([host.to_path_buf()])
+            .collect::<Vec<_>>()
+    };
     let until = now_ms() + need.as_millis() as u64;
     match rt.kind.as_str() {
         "claude" => {
             let host = host_dir(rt, "CLAUDE_CONFIG_DIR", ".claude");
-            let own = member.join(".claude");
+            let own = cli_root.join(".claude");
             std::fs::create_dir_all(&own).map_err(|e| format!("{}: {e}", own.display()))?;
             copy_setting(&host, &own, "settings.json");
             if let Some(sid) = resume {
-                carry_claude_session(&host, &own, cwd, sid);
+                carry_claude_session(&from(".claude", &host), &own, cwd, sid);
             }
             if env
                 .iter()
@@ -323,11 +441,11 @@ pub async fn prepare(
         }
         "codex" => {
             let host = host_dir(rt, "CODEX_HOME", ".codex");
-            let own = member.join(".codex");
+            let own = cli_root.join(".codex");
             std::fs::create_dir_all(&own).map_err(|e| format!("{}: {e}", own.display()))?;
             copy_setting(&host, &own, "config.toml");
             if let Some(sid) = resume {
-                carry_codex_session(&host, &own, sid);
+                carry_codex_session(&from(".codex", &host), &own, sid);
             }
             let read = || std::fs::read_to_string(host.join("auth.json")).ok();
             renew(
@@ -353,9 +471,12 @@ pub async fn prepare(
             // Pi (an ACP or terminal runtime): its sign-in and settings, when the host has it.
             let host = host_dir(rt, "PI_CODING_AGENT_DIR", ".pi/agent");
             if host.is_dir() {
-                let own = member.join(".pi/agent");
+                let own = cli_root.join(".pi/agent");
                 copy_setting(&host, &own, "settings.json");
                 copy_setting(&host, &own, "models.json");
+                if let Some(sid) = resume {
+                    carry_pi_session(&from(".pi/agent", &host), &own, sid);
+                }
                 let read = || std::fs::read_to_string(host.join("auth.json")).ok();
                 renew(
                     || {
@@ -550,6 +671,17 @@ mod tests {
         )
     }
 
+    /// A VM host's config with its work root, old homes and VM folder under `root`.
+    fn vm_host(root: &Path) -> Config {
+        Config::parse(&format!(
+            "server_url = \"http://127.0.0.1:1\"\ntoken_file = \"/nonexistent\"\nwork_root = '{}'\n[runtimes.claude]\nkind = \"claude\"\n[vm]\nkernel = \"/k\"\nrootfs = \"/r\"\nhomes = '{}'\ndir = '{}'\n",
+            root.join("w").display(),
+            root.join("homes").display(),
+            root.join("vms").display()
+        ))
+        .unwrap()
+    }
+
     fn rt(kind: &str, env: &[(&str, &Path)]) -> RuntimeConfig {
         let mut c = crate::config::Config::parse(&format!(
             "server_url = \"http://127.0.0.1:1\"\ntoken_file = \"/nonexistent\"\n[runtimes.x]\nkind = \"{kind}\"\ncommand = \"/nonexistent/cli\"\n"
@@ -691,12 +823,17 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let host = tmp.path().join("host-pi");
         std::fs::create_dir_all(&host).unwrap();
-        let member = tmp.path().join("homes/01BOT");
+        let member = tmp.path().join("w/lines/l1/cli");
         let r = rt("acp", &[("PI_CODING_AGENT_DIR", &host)]);
+        let cfg = vm_host(tmp.path());
         let run = |env: &mut Vec<(String, String)>| {
             let (r, member, cwd) = (r.clone(), member.clone(), tmp.path().to_path_buf());
+            let cfg = cfg.clone();
             let mut e = std::mem::take(env);
-            async move { prepare(&r, &member, &cwd, None, Duration::from_secs(9000), &mut e).await }
+            async move {
+                let need = Duration::from_secs(9000);
+                prepare(&r, &member, &cwd, None, need, &mut e, "01BOT", &cfg).await
+            }
         };
         // A sign-in that lasts: copied without its refresh token, nothing refreshed.
         let fresh = json!({ "none-such": { "type": "oauth", "refresh": "SECRET-R", "access": "A", "expires": now_ms() + 86_400_000 } });
@@ -721,23 +858,35 @@ mod tests {
         std::fs::create_dir_all(&old).unwrap();
         std::fs::write(old.join("s1.jsonl"), "{}\n").unwrap();
         std::fs::write(old.join("other.jsonl"), "{}\n").unwrap();
-        assert!(carry_claude_session(&host, &member, &cwd, "s1"));
+        let from = [tmp.path().join("empty"), host.clone()];
+        assert!(carry_claude_session(&from, &member, &cwd, "s1"));
         assert!(member.join("projects/-old-work/s1.jsonl").is_file());
         // Only the session the run resumes: no other member's records.
         assert!(!member.join("projects/-old-work/other.jsonl").exists());
-        assert!(!carry_claude_session(&host, &member, &cwd, "missing"));
-        assert!(!carry_claude_session(&host, &member, &cwd, "../x"));
+        assert!(!carry_claude_session(&from, &member, &cwd, "missing"));
+        assert!(!carry_claude_session(&from, &member, &cwd, "../x"));
 
         let rollout = host.join("sessions/2026/11/09");
         std::fs::create_dir_all(&rollout).unwrap();
         std::fs::write(rollout.join("rollout-2026-11-09T10-00-00-t1.jsonl"), "{}\n").unwrap();
-        assert!(carry_codex_session(&host, &member, "t1"));
+        assert!(carry_codex_session(&from, &member, "t1"));
         assert!(
             member
                 .join("sessions/2026/11/09/rollout-2026-11-09T10-00-00-t1.jsonl")
                 .is_file()
         );
-        assert!(!carry_codex_session(&host, &member, "t2"));
+        assert!(!carry_codex_session(&from, &member, "t2"));
+
+        let pi = host.join("sessions/--work--");
+        std::fs::create_dir_all(&pi).unwrap();
+        std::fs::write(pi.join("2026-11-09T10-00-00-000Z_p1.jsonl"), "{}\n").unwrap();
+        assert!(carry_pi_session(&from, &member, "p1"));
+        assert!(
+            member
+                .join("sessions/--work--/2026-11-09T10-00-00-000Z_p1.jsonl")
+                .is_file()
+        );
+        assert!(!carry_pi_session(&from, &member, "p2"));
     }
 
     #[tokio::test]
@@ -749,9 +898,10 @@ mod tests {
         let auth = json!({ "auth_mode": "chatgpt", "tokens": { "access_token": jwt(far), "refresh_token": "SECRET-REFRESH" } });
         std::fs::write(host.join("auth.json"), auth.to_string()).unwrap();
         std::fs::write(host.join("config.toml"), "model = \"m\"\n").unwrap();
-        let member = tmp.path().join("homes/01BOT");
+        let member = tmp.path().join("w/lines/l1/cli");
         let mut env = vec![("CODEX_HOME".to_string(), host.display().to_string())];
         let r = rt("codex", &[("CODEX_HOME", &host)]);
+        let cfg = vm_host(tmp.path());
         let got = prepare(
             &r,
             &member,
@@ -759,6 +909,8 @@ mod tests {
             None,
             Duration::from_secs(9000),
             &mut env,
+            "01BOT",
+            &cfg,
         )
         .await
         .unwrap();
@@ -791,6 +943,11 @@ mod tests {
                 .unwrap()
                 .contains("SECRET-REFRESH")
         );
+        // When the CLI is done the copy goes; the settings stay.
+        assert!(remove_auth(&member));
+        assert!(!member.join(".codex/auth.json").exists());
+        assert!(member.join(".codex/config.toml").is_file());
+        assert!(!remove_auth(&member));
     }
 
     #[tokio::test]
@@ -800,8 +957,9 @@ mod tests {
         std::fs::create_dir_all(&host).unwrap();
         let creds = json!({ "claudeAiOauth": { "accessToken": "sk-ant-oat01-host", "refreshToken": "sk-ant-ort01-r", "expiresAt": now_ms() + 86_400_000 } });
         std::fs::write(host.join(".credentials.json"), creds.to_string()).unwrap();
-        let member = tmp.path().join("homes/01BOT");
+        let member = tmp.path().join("w/lines/l1/cli");
         let r = rt("claude", &[("CLAUDE_CONFIG_DIR", &host)]);
+        let cfg = vm_host(tmp.path());
         let mut env = vec![];
         let got = prepare(
             &r,
@@ -810,6 +968,8 @@ mod tests {
             None,
             Duration::from_secs(9000),
             &mut env,
+            "01BOT",
+            &cfg,
         )
         .await
         .unwrap();
@@ -826,6 +986,8 @@ mod tests {
             None,
             Duration::from_secs(9000),
             &mut env,
+            "01BOT",
+            &cfg,
         )
         .await
         .unwrap();
@@ -857,5 +1019,203 @@ mod tests {
             s.on_line(r#"{"id":2,"error":{"code":-1}}"#),
             RefreshStep::Done(false)
         );
+    }
+
+    /// Two topics of one member that run at once each get their own CLI folders and sign-in
+    /// copy: the folders of their work lines.
+    #[tokio::test]
+    async fn two_topics_of_one_member_at_once_get_their_own_cli_folders() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = vm_host(tmp.path());
+        let host = tmp.path().join("host-codex");
+        std::fs::create_dir_all(&host).unwrap();
+        let far = (now_ms() / 1000) + 10 * 86_400;
+        let auth = json!({ "auth_mode": "chatgpt", "tokens": { "access_token": jwt(far), "refresh_token": "R" } });
+        std::fs::write(host.join("auth.json"), auth.to_string()).unwrap();
+        let r = rt("codex", &[("CODEX_HOME", &host)]);
+        let (cwd1, _, l1) = crate::workspace::prepare_line(&cfg, "r1", "01BOT", "t1", None)
+            .await
+            .unwrap()
+            .unwrap();
+        let (cwd2, _, l2) = crate::workspace::prepare_line(&cfg, "r2", "01BOT", "t2", None)
+            .await
+            .unwrap()
+            .unwrap();
+        let (root1, root2) = (l1.dir().join("cli"), l2.dir().join("cli"));
+        assert_ne!(root1, root2);
+        let need = Duration::from_secs(9000);
+        let (mut e1, mut e2) = (vec![], vec![]);
+        let (a, b) = tokio::join!(
+            prepare(&r, &root1, &cwd1, None, need, &mut e1, "01BOT", &cfg),
+            prepare(&r, &root2, &cwd2, None, need, &mut e2, "01BOT", &cfg),
+        );
+        a.unwrap();
+        b.unwrap();
+        let home =
+            |e: &[(String, String)]| e.iter().find(|(k, _)| k == "CODEX_HOME").unwrap().1.clone();
+        assert_eq!(home(&e1), root1.join(".codex").display().to_string());
+        assert_eq!(home(&e2), root2.join(".codex").display().to_string());
+        assert!(
+            root1.join(".codex/auth.json").is_file() && root2.join(".codex/auth.json").is_file()
+        );
+        // The first run ends: only its copy goes.
+        remove_auth(&root1);
+        assert!(!root1.join(".codex/auth.json").exists());
+        assert!(root2.join(".codex/auth.json").is_file());
+    }
+
+    /// A resumed session is found in the run's own folder, the member's other work lines, its
+    /// runs without a line, the folders of the per-member homes, then the host's folder; never
+    /// in another member's.
+    #[tokio::test]
+    async fn a_resumed_session_is_found_in_each_place_it_may_be() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = vm_host(tmp.path());
+        let w = tmp.path().join("w");
+        let cwd = tmp.path().join("work");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let host = tmp.path().join("host-claude");
+        std::fs::create_dir_all(&host).unwrap();
+        let mine = w.join("lines/mine/cli");
+        let line = |key: &str, member: &str| {
+            let d = w.join("lines").join(key);
+            std::fs::create_dir_all(d.join("cli")).unwrap();
+            let meta = json!({ "key": key, "botMemberId": member, "topicId": "t", "createdAt": 0, "lastUsedAt": 0 });
+            std::fs::write(d.join("line.json"), meta.to_string()).unwrap();
+            d.join("cli")
+        };
+        let run = |id: &str, member: &str| {
+            let d = w.join("runs").join(id);
+            std::fs::create_dir_all(d.join("cli")).unwrap();
+            let meta = json!({ "runId": id, "startedAt": 0, "botMemberId": member });
+            std::fs::write(d.join("run.json"), meta.to_string()).unwrap();
+            d.join("cli")
+        };
+        line("mine", "01BOT");
+        let places = [
+            ("own", mine.clone()),
+            ("line", line("other", "01BOT")),
+            ("run", run("r9", "01BOT")),
+            ("home", tmp.path().join("homes/01BOT")),
+            ("vmcli", tmp.path().join("vms/cli/01BOT")),
+        ];
+        let put_claude = |root: &Path, sid: &str| {
+            let d = root.join("projects/-somewhere");
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join(format!("{sid}.jsonl")), "{}\n").unwrap();
+        };
+        for (sid, root) in &places {
+            put_claude(&root.join(".claude"), &format!("c-{sid}"));
+        }
+        // The host's own folder is the last place; another member's line is never searched.
+        put_claude(&host, "c-host");
+        put_claude(&line("theirs", "01OTHER").join(".claude"), "c-theirs");
+        put_claude(&run("r8", "01OTHER").join(".claude"), "c-theirs-run");
+        let r = rt("claude", &[("CLAUDE_CONFIG_DIR", &host)]);
+        let need = Duration::from_secs(9000);
+        for sid in ["own", "line", "run", "home", "vmcli", "host"] {
+            let sid = format!("c-{sid}");
+            let mut env = vec![(CLAUDE_TOKEN.to_string(), "t".to_string())];
+            prepare(&r, &mine, &cwd, Some(&sid), need, &mut env, "01BOT", &cfg)
+                .await
+                .unwrap();
+            assert!(
+                crate::runtime::claude::find_session_file(&mine.join(".claude"), &cwd, &sid)
+                    .is_some(),
+                "{sid}"
+            );
+        }
+        for sid in ["c-theirs", "c-theirs-run"] {
+            let mut env = vec![(CLAUDE_TOKEN.to_string(), "t".to_string())];
+            prepare(&r, &mine, &cwd, Some(sid), need, &mut env, "01BOT", &cfg)
+                .await
+                .unwrap();
+            let own = mine.join(".claude");
+            assert!(crate::runtime::claude::find_session_file(&own, &cwd, sid).is_none());
+        }
+        // The order: the member's lines, its runs, then the old homes.
+        assert_eq!(
+            session_roots(&cfg, &mine, "01BOT"),
+            places[1..]
+                .iter()
+                .map(|(_, p)| p.clone())
+                .collect::<Vec<_>>()
+        );
+
+        // Codex: a thread kept in a run folder of the member.
+        let codex_host = tmp.path().join("host-codex");
+        std::fs::create_dir_all(&codex_host).unwrap();
+        let day = places[2].1.join(".codex/sessions/2026/11/09");
+        std::fs::create_dir_all(&day).unwrap();
+        std::fs::write(day.join("rollout-2026-11-09T10-00-00-x1.jsonl"), "{}\n").unwrap();
+        let r = rt("codex", &[("CODEX_HOME", &codex_host)]);
+        prepare(
+            &r,
+            &mine,
+            &cwd,
+            Some("x1"),
+            need,
+            &mut vec![],
+            "01BOT",
+            &cfg,
+        )
+        .await
+        .unwrap();
+        assert!(
+            mine.join(".codex/sessions/2026/11/09/rollout-2026-11-09T10-00-00-x1.jsonl")
+                .is_file()
+        );
+
+        // Pi: a session kept in an old home.
+        let pi_host = tmp.path().join("host-pi");
+        std::fs::create_dir_all(&pi_host).unwrap();
+        let s = places[3].1.join(".pi/agent/sessions/--work--");
+        std::fs::create_dir_all(&s).unwrap();
+        std::fs::write(s.join("2026-11-09T10-00-00-000Z_p1.jsonl"), "{}\n").unwrap();
+        let r = rt("acp", &[("PI_CODING_AGENT_DIR", &pi_host)]);
+        prepare(
+            &r,
+            &mine,
+            &cwd,
+            Some("p1"),
+            need,
+            &mut vec![],
+            "01BOT",
+            &cfg,
+        )
+        .await
+        .unwrap();
+        assert!(
+            mine.join(".pi/agent/sessions/--work--/2026-11-09T10-00-00-000Z_p1.jsonl")
+                .is_file()
+        );
+    }
+
+    /// At daemon start the sign-in copies a crash left go, except those of runs still active.
+    #[test]
+    fn the_sign_in_copies_a_crash_left_are_swept() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = vm_host(tmp.path());
+        let w = tmp.path().join("w");
+        let put = |f: &str| {
+            let p = w.join(f);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, "{}").unwrap();
+            p
+        };
+        let line = put("lines/l1/cli/.codex/auth.json");
+        let run = put("runs/r1/cli/.pi/agent/auth.json");
+        let kept = put("runs/r1/cli/.codex/config.toml");
+        let active = put("runs/r2/cli/.codex/auth.json");
+        let active_line = put("lines/l2/cli/.codex/auth.json");
+        let meta = json!({ "runId": "r3", "startedAt": 0, "line": w.join("lines/l2") });
+        std::fs::create_dir_all(w.join("runs/r3")).unwrap();
+        std::fs::write(w.join("runs/r3/run.json"), meta.to_string()).unwrap();
+        let active_ids = ["r2".to_string(), "r3".to_string()];
+        assert_eq!(sweep_auth(&cfg, &active_ids), 2);
+        assert!(!line.exists() && !run.exists());
+        assert!(kept.exists() && active.exists() && active_line.exists());
+        assert_eq!(sweep_auth(&cfg, &active_ids), 0);
+        assert_eq!(sweep_auth(&cfg, &[]), 2);
     }
 }
