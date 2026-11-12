@@ -2,8 +2,10 @@
 // cards), and the end of a run (result, status, follow-up runs).
 import { type Card, RUN_KIND_ASIDE, type RunStatus, type TopicStatus } from "@chat/protocol";
 import { ApiError, unwrap } from "../../core/errors";
-import { MAX_RESULT_CHARS, Progress, TEXT, cut, firstLine, readableError, stripAcceptance } from "../dispatch";
+import { MAX_RESULT_CHARS, Progress, TEXT, cut, failureKind, firstLine, readableError, stripAcceptance } from "../dispatch";
+import { type FailureNote, failedOn, failureNote } from "./failure";
 import { linkStub } from "../env";
+import { loadRunner } from "../store";
 import type { SeqFrame } from "../link";
 import { type RunProof, type TestCounts, doneCard, doneCardV1, hasProof, mergePrs, prRefs, testsFromLog } from "../proof";
 import { needsReply, parseReport, reportOf } from "./report";
@@ -134,6 +136,7 @@ export abstract class DeskEvents extends DeskRuns {
           break;
         case "session":
           this.storeSession(r, ev.sessionId);
+          this.storeModel(r, ev.model, ev.effort);
           break;
         case "approval.resolved":
           if (r.approval_id === ev.approvalId) {
@@ -426,6 +429,41 @@ export abstract class DeskEvents extends DeskRuns {
     this.sql.exec("UPDATE runs SET session_id = ? WHERE id = ?", sid, r.id);
   }
 
+  /** 模 2.3, 2.10: the model and 思考强度 the CLI really ran with (the session event). */
+  protected storeModel(r: RunRow, model: unknown, effort: unknown): void {
+    const m = typeof model === "string" && model.trim() !== "" ? cut(model.trim(), 200) : null;
+    const e = typeof effort === "string" && effort.trim() !== "" ? cut(effort.trim(), 32) : null;
+    if (m === null && e === null) return;
+    r.model = m ?? r.model;
+    r.effort = e ?? r.effort;
+    this.sql.exec("UPDATE runs SET model = ?, effort = ? WHERE id = ?", r.model, r.effort, r.id);
+  }
+
+  /**
+   * 模 2.2: a failed run says why in one sentence and one next step; the CLI's own words stay in
+   * the run log. Keeps the failure with the run.
+   */
+  protected async failedNote(r: RunRow, f: Extract<SeqFrame, { t: "run.done" }>): Promise<FailureNote> {
+    const raw = f.error ?? f.summary ?? "";
+    const kind = failureKind(f.failure, raw);
+    const resetsAt = kind === "limit" && Number.isInteger(f.failure?.resetsAt) ? f.failure?.resetsAt : undefined;
+    const stored = { kind: f.failure ? cut(f.failure.kind, 32) : kind, ...(resetsAt ? { resetsAt } : {}) };
+    r.failure = JSON.stringify(stored);
+    this.sql.exec("UPDATE runs SET failure = ? WHERE id = ?", r.failure, r.id);
+    const on = r.machine_id ? await failedOn(this.env, r.machine_id, r.runtime) : null;
+    const ownModel = kind === "model" && !!(await loadRunner(this.env.DB, this.botId as string).catch(() => null))?.model;
+    return failureNote(this.env, {
+      ownModel,
+      kind,
+      machines: on ? [on] : [],
+      runtime: r.runtime ?? "",
+      requesterId: r.requested_by,
+      groupId: r.group_id,
+      ...(resetsAt ? { resetsAt } : {}),
+      started: true,
+    });
+  }
+
   protected async finish(r: RunRow, f: Extract<SeqFrame, { t: "run.done" }>): Promise<void> {
     this.storeUsage(r, f);
     this.storeSession(r, f.sessionId);
@@ -459,6 +497,9 @@ export abstract class DeskEvents extends DeskRuns {
       // same machine with the recovery note; only when it cannot does it fail, saying why.
       if (await this.resumeAfterRestart(r)) return;
       await this.end(r, "failed", TEXT.interrupted, "blocked", TEXT.interrupted);
+    } else if (f.status === "failed") {
+      const note = await this.failedNote(r, f);
+      await this.end(r, "failed", note.text, "blocked", cut(note.text, 280), false, note.mentions);
     } else {
       const why = firstLine(readableError(f.error ?? f.summary ?? ""), 300);
       await this.end(r, "failed", TEXT.failed(why), "blocked", cut(TEXT.failed(why), 280));

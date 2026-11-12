@@ -14,6 +14,7 @@ import {
   type RunAssignFrame,
   RunCursor,
   RunDoneFrame,
+  RunFailure,
   RunId,
   RunSessionFrame,
 } from "@chat/protocol";
@@ -61,7 +62,8 @@ const UpFrame = z.discriminatedUnion("t", [
   z.object({ t: z.literal("run.accept"), runId: RunId }),
   z.object({ t: z.literal("run.reject"), runId: RunId, reason: z.string().max(64), message: z.string().max(4096) }),
   z.object({ t: z.literal("run.event"), runId: RunId, seq: z.int().positive(), at: z.number(), event: LooseEvent }),
-  RunDoneFrame.extend({ status: z.string().max(32) }),
+  // A failure this server cannot read is left out, never a reason to refuse the frame.
+  RunDoneFrame.extend({ status: z.string().max(32), failure: RunFailure.optional().catch(undefined) }),
   RunSessionFrame.extend({ source: z.string().max(32).optional() }),
   // Feature "accounts": where a sign-in the owner started stands.
   LoginStatusFrame,
@@ -101,6 +103,35 @@ export interface LinkStatus {
   health?: z.infer<typeof Health>;
   clis?: z.infer<typeof CliInfo>[];
   runningRuns: string[];
+  /** 模 3.1: runtimes whose CLI is not signed in (`signedOutRuntimes`). */
+  signedOut?: string[];
+}
+
+/** How long a run that failed to sign in keeps its runtime signed out without a heartbeat saying so. */
+export const SIGNED_OUT_MARK_MS = 15 * 60_000;
+
+/**
+ * 模 3.1, 机 2.5: the runtimes that take no runs: the latest heartbeat says a confirmed
+ * `logged_out` (the CLI's own check, or a run that just failed to sign in; the credential files
+ * alone do not know every way a CLI signs in), or a run failed with `signed_out` (`marks`:
+ * runtime -> when) and no later heartbeat says `logged_in`. A mark older than
+ * `SIGNED_OUT_MARK_MS` leaves it to the heartbeat.
+ */
+export function signedOutRuntimes(
+  logins: { runtime: string; state: string; confirmed?: boolean }[] | undefined,
+  metricsAt: number | null,
+  marks: Record<string, number>,
+  now: number,
+): string[] {
+  const state = new Map((logins ?? []).map((l) => [l.runtime, l.state]));
+  const out = new Set<string>();
+  for (const l of logins ?? []) if (l.state === "logged_out" && l.confirmed === true) out.add(l.runtime);
+  for (const [rt, at] of Object.entries(marks)) {
+    if (now - at > SIGNED_OUT_MARK_MS) continue;
+    if (metricsAt !== null && metricsAt > at && state.get(rt) === "logged_in") continue;
+    out.add(rt);
+  }
+  return [...out].sort();
 }
 
 const OPEN_STATES = "('assigned','accepted','done')";
@@ -393,6 +424,9 @@ export class MachineLink extends DurableObject<BotsEnv> {
           this.send(ws, { t: "ack", runId: f.runId, seq: r.acked_seq });
           return;
         }
+        // 模 3.2: a run that failed because its CLI is not signed in takes the runtime out of
+        // the routing at once, before the next heartbeat says so.
+        if (f.t === "run.done" && f.failure?.kind === "signed_out") this.markSignedOut(this.assignOut(r).runtime, now);
         this.enqueue(r, f.t === "run.event" && f.event.type === "output" ? { ...f, serverAt: this.serverTime(f.at, now) } : f);
       }
     }
@@ -644,6 +678,18 @@ export class MachineLink extends DurableObject<BotsEnv> {
     return { ok: true, sent: ws !== null };
   }
 
+  private signedOutMarks(): Record<string, number> {
+    try {
+      return JSON.parse(this.meta("signed_out") ?? "{}") as Record<string, number>;
+    } catch {
+      return {};
+    }
+  }
+
+  private markSignedOut(runtime: string, now: number): void {
+    this.setMeta("signed_out", JSON.stringify({ ...this.signedOutMarks(), [runtime]: now }));
+  }
+
   /**
    * 盯 1.14: the run moved to another machine. It is closed here: a connected daemon gets
    * `run.cancel` now; a daemon that is away finds it missing from its next `welcome.runs` and
@@ -665,7 +711,10 @@ export class MachineLink extends DurableObject<BotsEnv> {
       return v ? (JSON.parse(v) as T) : undefined;
     };
     const hb = this.meta("last_heartbeat_at");
+    const { metrics, at } = latestMetrics((k) => this.meta(k));
+    const signedOut = signedOutRuntimes(metrics?.logins, at, this.signedOutMarks(), Date.now());
     return {
+      ...(signedOut.length > 0 ? { signedOut } : {}),
       machineId: this.machineId,
       connected: this.socket() !== null,
       revoked: this.meta("revoked") !== null,

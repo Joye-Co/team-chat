@@ -792,6 +792,7 @@ async fn restart_recovers_unfinished_runs() {
                 session_id: "sess-rc1".into(),
                 runtime: "claude".into(),
                 model: None,
+                effort: None,
             },
         ),
         frame(
@@ -851,6 +852,7 @@ async fn restart_recovers_unfinished_runs() {
     let d = done(&frames);
     assert_eq!(d.status, "failed");
     assert_eq!(d.error.as_deref(), Some("daemon restarted"));
+    assert_eq!(d.failure.map(|f| f.kind).as_deref(), Some("other"));
     // The session the run reported: the server continues the run in it (盯 1.7).
     assert_eq!(d.session_id.as_deref(), Some("sess-rc1"));
     assert!(matches!(frames.last(), Some(Up::RunSession(s)) if !s.ok));
@@ -2088,6 +2090,89 @@ async fn runs_get_an_effort_the_cli_reported() {
             assert_eq!(argv[i + 1], effort);
         }
     }
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+/// The login state of `runtime` in the next heartbeat that has metrics (other frames are
+/// skipped).
+async fn next_login(ws: &mut Ws, runtime: &str) -> String {
+    loop {
+        let m = tokio::time::timeout(Duration::from_secs(20), ws.next())
+            .await
+            .expect("frame in time")
+            .expect("open")
+            .expect("ok");
+        let Message::Text(t) = m else { continue };
+        if let Up::Heartbeat { at, metrics, .. } = serde_json::from_str::<Up>(&t).unwrap() {
+            send(ws, &Down::HeartbeatAck { at }).await;
+            if let Some(l) = metrics
+                .and_then(|m| m.logins)
+                .and_then(|l| l.into_iter().find(|l| l.runtime == runtime))
+            {
+                return l.state;
+            }
+        }
+    }
+}
+
+/// 模 2.2, 3.2: a run that failed because the CLI is not signed in says so in `run.done`, and
+/// the heartbeat reports the CLI signed out at once, whatever its credential files say, until
+/// a run of it succeeds.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_signed_out_cli_fails_with_its_kind_and_reports_signed_out() {
+    let tmp = tempfile::tempdir().unwrap();
+    // A credential file: the files say signed in.
+    let claude = tmp.path().join("claude");
+    std::fs::create_dir_all(&claude).unwrap();
+    std::fs::write(
+        claude.join(".credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"x"}}"#,
+    )
+    .unwrap();
+    let mut m = mock().await;
+    let cfg = write_config(tmp.path(), &m.url);
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = tokio::time::timeout(Duration::from_secs(20), m.conns.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
+    send(&mut ws, &welcome(vec![])).await;
+    assert_eq!(next_login(&mut ws, "fake").await, "logged_in");
+
+    let mut a = assign("so1", "fake", "signedout", None);
+    if let Down::RunAssign(r) = &mut a {
+        r.effort = Some("high".into());
+    }
+    send(&mut ws, &a).await;
+    let fr = collect(&mut ws, "so1", true, |f| matches!(f, Up::RunDone(_))).await;
+    let d = done(&fr);
+    assert_eq!(d.status, "failed");
+    assert_eq!(
+        d.error.as_deref(),
+        Some("Not logged in · Please run /login")
+    );
+    assert_eq!(d.failure.map(|f| f.kind).as_deref(), Some("signed_out"));
+    // The session event names the model and the effort the CLI ran with.
+    assert!(events(&fr).iter().any(|e| matches!(e,
+        RunEvent::Session { model: Some(m), effort: Some(e), .. } if m == "fake-model" && e == "high")));
+    assert_eq!(next_login(&mut ws, "fake").await, "logged_out");
+
+    send(&mut ws, &assign("ok1", "fake", "hello", None)).await;
+    let fr = collect(&mut ws, "ok1", true, |f| matches!(f, Up::RunDone(_))).await;
+    let d = done(&fr);
+    assert_eq!(d.status, "succeeded");
+    assert_eq!(d.failure, None);
+    assert_eq!(next_login(&mut ws, "fake").await, "logged_in");
 
     stop_tx.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(20), daemon)

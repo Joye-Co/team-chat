@@ -19,6 +19,7 @@ import { EXECUTOR_MEMORY_BYTES, memoryIndex } from "../../memory/inject";
 import { groupMembers, membersText } from "../../context/read";
 import { loadMachines, loadRunner } from "../store";
 import { DeskCore, QUEUED, type RunRow } from "./core";
+import { type FailureNote, failureNote } from "./failure";
 import { type LoggedFrame, type RecoveryFacts, outwardAction, recoveryNote, stepOf } from "../../agent/recovery";
 import type { RunProof } from "../proof";
 import { needsReply, reportOf } from "./report";
@@ -165,6 +166,11 @@ export abstract class DeskRuns extends DeskCore {
         const none = machine ? null : this.whyNone(r, runner, machines);
         const waits = none !== null && (none.why === "busy" || (none.why === "offline" && !kind));
         if (!machine && !waits) {
+          // 模 3.1: the computers' CLI is not signed in: the topic says which, and who signs in.
+          if (!kind && none?.why === "signed_out") {
+            const note = await this.signedOutNote(r, runner.runtime, none.machines);
+            return this.end(r, "failed", note.text, "blocked", cut(note.text, 280), false, note.mentions);
+          }
           const why = kind ? TEXT.noAsideMachine : this.noMachineText(none);
           return this.end(r, "failed", why, "blocked", why);
         }
@@ -344,6 +350,20 @@ export abstract class DeskRuns extends DeskCore {
     return TEXT.failed("");
   }
 
+  /**
+   * 模 3.1, 3.5: no run starts because every computer with the runtime has its CLI signed out.
+   * The run keeps the failure; the note names the computers and who signs them in.
+   */
+  protected async signedOutNote(r: RunRow, runtime: string, machines: MachineView[]): Promise<FailureNote> {
+    r.failure = JSON.stringify({ kind: "signed_out" });
+    this.sql.exec("UPDATE runs SET failure = ? WHERE id = ?", r.failure, r.id);
+    const on = machines.map((m) => {
+      const kind = m.clis?.find((c) => c.runtime === runtime)?.kind;
+      return { id: m.id, name: m.name, ...(m.ownerId ? { ownerId: m.ownerId } : {}), ...(kind ? { kind } : {}) };
+    });
+    return failureNote(this.env, { kind: "signed_out", machines: on, runtime, requesterId: r.requested_by, groupId: r.group_id, started: false });
+  }
+
   protected noMachineText(none: NoMachine | null): string {
     if (none?.why === "runtime") return TEXT.noRuntime;
     if (none?.why === "disk") return TEXT.noDisk;
@@ -365,7 +385,18 @@ export abstract class DeskRuns extends DeskCore {
         const r = this.run(id);
         if (!r || r.ended_at !== null || r.machine_id || r.status !== "created" || !r.queued_at) return false;
         const prompt = this.meta(`prompt:${id}`);
-        const machine = prompt === null ? null : this.pick(r, runner, this.machinesFor(r, await loadMachines(this.env)), JSON.parse(r.excluded) as string[]);
+        const machines = this.machinesFor(r, await loadMachines(this.env));
+        const machine = prompt === null ? null : this.pick(r, runner, machines, JSON.parse(r.excluded) as string[]);
+        if (!machine && prompt !== null && r.kind !== RUN_KIND_ASIDE) {
+          // 模 3.1: the computers' CLI was signed out while the run waited: it does not wait
+          // for a sign-in nobody knows is needed; the topic says which computer needs it.
+          const none = this.whyNone(r, runner, machines);
+          if (none.why === "signed_out") {
+            const note = await this.signedOutNote(r, runner.runtime, none.machines);
+            await this.end(r, "failed", note.text, "blocked", cut(note.text, 280), false, note.mentions);
+            return false;
+          }
+        }
         if (!machine || prompt === null) return null;
         if (await this.budgetGate(r, prompt)) return false;
         await this.assign(r, runner, machine, prompt);
@@ -677,6 +708,10 @@ export abstract class DeskRuns extends DeskCore {
       if (!runner || !machine || prompt === null) {
         // 机 2.10: the true reason, from the machines left or else from the daemon's answer.
         const none = runner ? this.whyNone(r, runner, machines.filter((x) => !excluded.includes(x.id))) : null;
+        if (runner && r.kind !== RUN_KIND_ASIDE && none?.why === "signed_out") {
+          const note = await this.signedOutNote(r, runner.runtime, none.machines);
+          return this.end(r, "failed", note.text, "blocked", cut(note.text, 280), false, note.mentions);
+        }
         const why = r.kind === RUN_KIND_ASIDE ? TEXT.noAsideMachine : this.rejectText(none, reason);
         return this.end(r, "failed", why, "blocked", why);
       }

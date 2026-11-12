@@ -91,7 +91,136 @@ export const TEXT = {
     externalPublish: "对外发布",
   } as Record<string, string>,
   noAsideMachine: "现在没有能单独回答的电脑，请稍后再问。",
+  /**
+   * Why a run failed (模 2.2, 接 5.3, 盯 1.13): one sentence per kind (`run.done.failure`) and one
+   * next step. The CLI's own words stay in the run log for the work record.
+   */
+  failure: {
+    signedOut: (machine: string, cli: string) => `${machine} 上的 ${cli} 没有登录，或者登录已经过期`,
+    limit: (cli: string) => `${cli} 的订阅额度用完了`,
+    model: (cli: string) => `${cli} 用不了现在选的模型`,
+    network: (machine: string) => `${machine} 连不上模型服务（网络不通，或者服务暂时不可用）`,
+    notInstalled: (machine: string, cli: string) => `${machine} 上没有装 ${cli}`,
+    other: "运行时出错了，原因记在工作记录里",
+  },
+  /** The next step after the sentence. */
+  next: {
+    /**
+     * The requester manages the computers and may open 团队管理 (a 负责人, 模 3.5): its sign-in
+     * is in 账号与密钥 › 订阅账号, with the computer chosen there.
+     */
+    signInSelf: (machines: string[]) =>
+      machines.length === 1
+        ? `请到 团队管理 › 账号与密钥 › 订阅账号，选 ${machines[0]}，点「重新登录」，然后再 @我。`
+        : `请到 团队管理 › 账号与密钥 › 订阅账号，给 ${machines.join("、")} 重新登录，然后再 @我。`,
+    /** The requester owns the personal computers but cannot open 团队管理: sign in there. */
+    signInOnMachine: (machines: string[], cli: string) =>
+      `请在 ${machines.join("、")} 上重新登录 ${cli}，或者请负责人在 团队管理 › 账号与密钥 › 订阅账号 里帮忙，然后再 @我。`,
+    /** Someone else does: they are mentioned. */
+    signInAsk: (names: string[]) =>
+      `请 ${names.join("、")} 重新登录（团队管理 › 账号与密钥 › 订阅账号，或者在那台电脑上），然后再 @我。`,
+    signInAdmin: "请负责人到 团队管理 › 账号与密钥 › 订阅账号 重新登录，然后再 @我。",
+    limitAt: (when: string) => `额度在 ${when} 恢复，到时再 @我。`,
+    limitLater: "额度恢复后再 @我。",
+    /** The AI member's own model (运行设置) is the one that failed. */
+    modelOwn: "请到 设置 › 成员 里我的 运行设置 › 模型 换一个模型，然后再 @我。",
+    /** The shared model (设置 › 通用 › 模型, only 负责人 change it). */
+    model: "请负责人到 设置 › 通用 › 模型 换一个模型，然后再 @我。",
+    network: "请稍后再 @我；一直这样的话，看看那台电脑的网络。",
+    notInstalled: "装好后再 @我。",
+    other: "需要的话再 @我 试一次。",
+  },
+  /** A run that failed: the sentence and the next step. */
+  failedWith: (sentence: string, next: string) => `没有完成：${sentence}。${next}`,
+  /** No run started because the computers are not signed in. */
+  notStartedWith: (sentence: string, next: string) => `这次没有开始：${sentence}。${next}`,
 } as const;
+
+/** `RunFailure.kind` values the server words (machine-protocol.md, "Failure kinds"). */
+export type FailureKind = "signed_out" | "limit" | "model" | "network" | "not_installed" | "other";
+
+/**
+ * The kind of a failed run: the daemon's (`run.done.failure.kind`; an unknown one is `other`),
+ * else, for a daemon before failure kinds, `model` for a JSON `model_not_found` body (#103).
+ */
+export function failureKind(failure: { kind?: unknown } | undefined, raw: string): FailureKind {
+  const k = failure?.kind;
+  if (typeof k === "string") {
+    return (["signed_out", "limit", "model", "network", "not_installed"] as const).find((x) => x === k) ?? "other";
+  }
+  return /"code"\s*:\s*"model_not_found"/.test(raw) ? "model" : "other";
+}
+
+/** How people know a runtime: its CLI's name for the kinds the product knows, else the runtime. */
+export function cliName(kind: string | undefined, runtime: string): string {
+  if (kind === "claude") return "Claude Code";
+  if (kind === "codex") return "Codex";
+  return runtime;
+}
+
+/** `11 月 13 日 15:00` (`今天 15:00` on the same day) on the team's clock `zone`. */
+export function clockText(at: number, now: number, zone: string): string {
+  const parts = (t: number) => {
+    try {
+      return Object.fromEntries(
+        new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+          .formatToParts(new Date(t))
+          .map((x) => [x.type, x.value]),
+      ) as Record<string, string>;
+    } catch {
+      return null;
+    }
+  };
+  const p = parts(at);
+  const n = parts(now);
+  if (!p) return new Date(at).toISOString();
+  const time = `${p.hour}:${p.minute}`;
+  if (n && n.year === p.year && n.month === p.month && n.day === p.day) return `今天 ${time}`;
+  return `${p.month} 月 ${p.day} 日 ${time}`;
+}
+
+/**
+ * Who may sign a computer's CLI in again (模 3.5): the requester from 团队管理 (`admin`), the
+ * requester on their own personal computers (`machine`: they cannot open 团队管理), or others.
+ */
+export type SignInBy = { self: "admin" | "machine" } | { names: string[] };
+
+/** The sentence and next step of a failure kind. */
+export function failureWords(
+  kind: FailureKind,
+  ctx: { machines: string[]; cli: string; resetsAt?: number; now: number; zone: string; signIn: SignInBy; ownModel?: boolean },
+): { sentence: string; next: string } {
+  const f = TEXT.failure;
+  const n = TEXT.next;
+  const machine = ctx.machines.length > 0 ? ctx.machines.join("、") : "电脑";
+  switch (kind) {
+    case "signed_out":
+      return {
+        sentence: f.signedOut(machine, ctx.cli),
+        next:
+          "self" in ctx.signIn
+            ? ctx.signIn.self === "admin"
+              ? n.signInSelf(ctx.machines)
+              : n.signInOnMachine(ctx.machines, ctx.cli)
+            : ctx.signIn.names.length > 0
+              ? n.signInAsk(ctx.signIn.names)
+              : n.signInAdmin,
+      };
+    case "limit":
+      return {
+        sentence: f.limit(ctx.cli),
+        next: ctx.resetsAt && ctx.resetsAt > ctx.now ? n.limitAt(clockText(ctx.resetsAt, ctx.now, ctx.zone)) : n.limitLater,
+      };
+    case "model":
+      return { sentence: f.model(ctx.cli), next: ctx.ownModel ? n.modelOwn : n.model };
+    case "network":
+      return { sentence: f.network(machine), next: n.network };
+    case "not_installed":
+      return { sentence: f.notInstalled(machine, ctx.cli), next: n.notInstalled };
+    default:
+      return { sentence: f.other, next: n.other };
+  }
+}
 
 /** The machine's daemon reports this 1.1 feature (docs/machine-protocol.md, "1.1 features"). */
 export function hasFeature(m: Pick<MachineView, "info">, feature: string): boolean {
@@ -144,6 +273,8 @@ export interface MachineView {
   ownerId?: string;
   /** Usable: the owner's checked AI members on a personal machine (bot id -> repo path). */
   personalBots?: Map<string, string | null>;
+  /** 模 3.1: runtimes whose CLI is not signed in (`MachineLink.status`); they take no runs. */
+  signedOut?: string[];
 }
 
 export function mergeLabels(owner: string[], daemon: string[] | undefined): string[] {
@@ -167,6 +298,11 @@ export function hasRuntime(m: MachineView, runtime: string): boolean {
   return (m.clis ?? []).some((c) => c.runtime === runtime && c.available);
 }
 
+/** 模 3.1, 机 2.5: the machine's CLI for this runtime is signed in, or nothing says it is not. */
+export function signedIn(m: Pick<MachineView, "signedOut">, runtime: string): boolean {
+  return !(m.signedOut ?? []).includes(runtime);
+}
+
 function activeRuns(m: MachineView): number {
   return Math.max(m.health?.activeRuns ?? 0, m.runningRuns.length);
 }
@@ -186,6 +322,7 @@ export function candidates(
         // A runner pinned to one machine (1.2.2) runs only there; its labels do not count.
         (runner.machineId ? m.id === runner.machineId : labelsMatch(runner.labels, m.labels)) &&
         hasRuntime(m, runner.runtime) &&
+        signedIn(m, runner.runtime) &&
         activeRuns(m) < Math.max(1, m.info?.maxParallelRuns ?? 1),
     )
     .sort((a, b) => activeRuns(a) - activeRuns(b) || (a.health?.load1 ?? 0) - (b.health?.load1 ?? 0) || a.id.localeCompare(b.id));
@@ -206,15 +343,24 @@ export function isOnline(m: MachineView, now: number): boolean {
 }
 
 /** Why no machine takes a run right now (机 2.10). `busy` and `offline` wait; the rest fail. */
-export type NoMachine = { why: "none" } | { why: "runtime" } | { why: "disk" } | { why: "busy" } | { why: "offline"; names: string[] };
+export type NoMachine =
+  | { why: "none" }
+  | { why: "runtime" }
+  | { why: "disk" }
+  | { why: "busy" }
+  | { why: "offline"; names: string[] }
+  /** 模 3.1: every computer with the runtime has its CLI signed out (fails, the topic says which). */
+  | { why: "signed_out"; machines: MachineView[] };
 
 export function whyNoMachine(machines: MachineView[], runner: Pick<BotRunner, "labels" | "runtime" | "machineId">, now: number): NoMachine {
   const mine = machines.filter((m) => !m.revoked && (runner.machineId ? m.id === runner.machineId : labelsMatch(runner.labels, m.labels)));
   // A machine that never said hello is not set up yet.
   const known = mine.filter((m) => m.clis !== undefined);
   if (known.length === 0) return { why: "none" };
-  const able = known.filter((m) => hasRuntime(m, runner.runtime));
-  if (able.length === 0) return { why: "runtime" };
+  const installed = known.filter((m) => hasRuntime(m, runner.runtime));
+  if (installed.length === 0) return { why: "runtime" };
+  const able = installed.filter((m) => signedIn(m, runner.runtime));
+  if (able.length === 0) return { why: "signed_out", machines: installed };
   if (able.some((m) => isHealthy(m, now))) return { why: "busy" };
   const away = able.filter((m) => !isOnline(m, now));
   if (away.length > 0) return { why: "offline", names: away.map((m) => m.name) };

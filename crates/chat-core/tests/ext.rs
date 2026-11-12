@@ -1178,6 +1178,9 @@ fn bot_run(id: &str, topic: &str, status: RunStatus, updated: u64) -> BotRun {
         requested_for: None,
         chain_id: None,
         code: None,
+        model: None,
+        effort: None,
+        failure: None,
         phase: None,
         waiting_for: None,
         hold_kind: None,
@@ -1233,6 +1236,7 @@ async fn bot_runs_from_events_and_the_process_view_from_the_run_log() {
                 session_id: "S1".into(),
                 runtime: "codex".into(),
                 model: None,
+                effort: None,
             },
         ),
         run_ev(

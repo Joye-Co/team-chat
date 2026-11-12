@@ -2718,6 +2718,40 @@ Rules:
   `hand.summary` to everyone who may read the run, and `hand.output` only to the person holding
   it and admins. They are not the AI member's progress.
 
+## Failure kinds and the model a run used
+
+Module: `machine.ts` / `machine.rs` (`RunFailure`, `RUN_FAILURE_KINDS` / `failure_kind`), fields
+in `bots`. The daemon sorts a failed run (machine-protocol.md, "Failure kinds and the sign-in
+state"); the server keeps it with the run and says it in the topic.
+
+```ts
+BotRun += {
+  model?: string        // the model the CLI really ran with (the run's `session` event); absent = not known
+  effort?: string       // the 思考强度 it really ran with; absent = the CLI's default or not known
+  failure?: RunFailure  // why a failed run failed (run.done.failure); absent = not known
+}
+RunFailure = { kind: "signed_out" | "limit" | "model" | "network" | "not_installed" | "other",  // open: unknown = "other"
+               resetsAt?: number }   // limit: when it resets (ms)
+RunLogEntry: run.done += { failure?: RunFailure }; session event += { effort?: string }
+```
+
+- The topic gets one sentence and one next step per kind, in product words; the CLI's own text
+  stays in the run log (`run.done.error`) for the process view. `signed_out` names the computer
+  and the CLI: when the requester may manage that computer (a 负责人 for a team computer, the
+  owner for a personal one) and is a 负责人, it points to 团队管理 › 账号与密钥 › 订阅账号 (where
+  the sign-in is; 团队管理 opens only for 负责人); the owner of a personal computer who is not a
+  负责人 is asked to sign in on that computer. Otherwise it mentions the people who may (the
+  personal owner and the 负责人) and asks them to sign in again. `limit` says when it resets when
+  the time is known; `model` asks to change the model: the AI member's own 运行设置 › 模型 when it
+  has one, else 设置 › 通用 › 模型 (负责人). A run without `failure` (an older daemon) reads as
+  `other`, except that a JSON body with `model_not_found` reads as `model`.
+- A runtime whose latest `metrics.logins` state is a confirmed `logged_out` (`CliLogin.confirmed`:
+  the CLI's own status check, or a run that just failed to sign in; the credential files alone
+  do not count), or whose last run failed with `signed_out` and no later heartbeat says
+  `logged_in`, takes no runs. When every computer that has the runtime is signed out, the run does
+  not start, or a queued run (排队) stops waiting, and the topic says which computer needs
+  signing in (the same sentence and next step).
+
 ## Machine homes (VM hosts)
 
 On a Linux host that runs each run in a VM, every AI member has a home folder of fixed size
