@@ -19,6 +19,7 @@ import { addPushFixtures } from "./fixtures-push.ts";
 import { addUsableFixtures } from "./fixtures-usable.ts";
 import { addSignInFixtures } from "./fixtures-sign-in.ts";
 import { addHomesFixtures } from "./fixtures-homes.ts";
+import { addAiServiceFixtures } from "./fixtures-ai-service.ts";
 import { addSuperviseFixtures } from "./fixtures-supervise.ts";
 import { addAlertsFixtures } from "./fixtures-alerts.ts";
 import { run, type Tree } from "./generated.ts";
@@ -372,6 +373,7 @@ addPushFixtures({ ok, bad, T0, ID });
 addUsableFixtures({ ok, bad, T0, ID, base, topic });
 addSignInFixtures({ ok, bad, ID });
 addHomesFixtures({ ok, ID });
+addAiServiceFixtures({ ok, bad });
 addSuperviseFixtures({ ok, bad, T0, ID });
 addAlertsFixtures({ ok, T0, ID });
 

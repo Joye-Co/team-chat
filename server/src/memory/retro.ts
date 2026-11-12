@@ -4,7 +4,7 @@
 // Best effort: it never fails or delays the run.
 import type { RunStatus } from "@chat/protocol";
 import { z } from "zod";
-import { loadModelConfig } from "../aiservice";
+import { tracker, useConfig } from "../aiservice/uses";
 import type { CallOptions } from "../aiservice/providers";
 import { type ToolSpec, callTool } from "../aiservice/tools";
 import type { Env } from "../core/env";
@@ -74,7 +74,7 @@ export async function retroAfterRun(env: Env, i: RetroInput, opts: CallOptions =
   // Sources are people's messages and run results: a bot's or an integration's request gets no review.
   const requester = await env.DB.prepare("SELECT kind FROM members WHERE id = ?").bind(i.requesterId).first<{ kind: string }>();
   if (requester?.kind !== "human") return 0;
-  const cfg = await loadModelConfig(env).catch(() => null);
+  const cfg = await useConfig(env, "retro");
   if (!cfg) return 0;
   const known = (
     await env.DB.prepare(`SELECT text FROM memories m WHERE scope = ?1 AND status IN ('active', 'pending') AND ${fitsGroupSql("m", 2)} ORDER BY updated_at DESC LIMIT 30`)
@@ -98,7 +98,7 @@ export async function retroAfterRun(env: Env, i: RetroInput, opts: CallOptions =
     cut(i.result, PART_CHARS),
     ...(known.length > 0 ? ["", "Lessons already known (do not repeat them):", ...known.map((k) => `- ${k.text}`)] : []),
   ].join("\n");
-  const res = await callTool(cfg, { system, prompt, tool: RETRO_TOOL, maxTokens: 1200 }, opts);
+  const res = await callTool(cfg, { system, prompt, tool: RETRO_TOOL, maxTokens: 1200 }, { track: tracker(env, "retro", cfg), ...opts });
   if (!res.ok) return 0;
   const parsed = Lessons.safeParse(res.input);
   if (!parsed.success) return 0;

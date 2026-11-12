@@ -230,7 +230,8 @@ and a staging server next to production (`scripts/setup-server.sh staging`).
 | `deployed, but wrangler printed no workers.dev address` | Your account has no `workers.dev` subdomain yet (step 3.2), or you use your own domain: run again with `--url <base>`. |
 | `could not make the first owner` right after the first deploy | A new secret can take a moment to arrive: run the script again in a minute. |
 | `this server has an owner already` | The owner was made from another machine: copy its `~/.config/team-chat/production/` folder here. |
-| Saving the AI 服务 in the app fails with `hooks are not configured on this server` | The Worker has no `HOOK_SECRET_KEY`: run `scripts/setup-server.sh production`. |
+| Saving the AI 服务 in the app fails with `the Worker secret HOOK_SECRET_KEY is not set on this server` (older servers: `hooks are not configured on this server`) | The Worker has no `HOOK_SECRET_KEY`: run `scripts/setup-server.sh production`. |
+| Saving or testing the AI 服务 fails with `the saved API key cannot be read` | `HOOK_SECRET_KEY` changed and the stored key no longer opens: enter the key again in AI 服务. |
 | The app says 连不上服务器 | Check the address (with `https://`) and `curl <address>/v1/health`. |
 | `/v1/health reports <x>, expected <y>` | The deploy did not take effect yet, or failed: run `scripts/deploy-server.sh production` again and read its output. |
 

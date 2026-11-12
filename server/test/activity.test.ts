@@ -93,7 +93,7 @@ describe("activity the server notices", () => {
       error: "boom",
     });
     await d.acked(assign.runId, done);
-    const got = await entriesWhen(w.owner.token, "kind=run,budget", (e) => e.length >= 2, "run and budget activity");
+    const got = await entriesWhen(w.owner.token, "kind=run,budget", (e) => e.some((x) => x.action === "budget.reached" && x.target === w.bot.id), "run and budget activity");
     const failed = got.find((e) => e.action === "run.failed");
     expect(failed).toMatchObject({ kind: "run", actorId: w.bot.id, machineId: w.machineId, details: { runId: assign.runId, requestedBy: w.human.id } });
     const reached = got.find((e) => e.action === "budget.reached");

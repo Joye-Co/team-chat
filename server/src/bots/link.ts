@@ -1080,6 +1080,12 @@ export class MachineLink extends DurableObject<BotsEnv> {
     return { ...(publicKey && this.hasFeature("accounts") ? { publicKey } : {}), secrets: metrics?.secrets ?? [] };
   }
 
+  /** How each runtime's CLI is signed in ("subscription" | "api_key"), from the latest heartbeat (budget/index.ts). */
+  async loginMethods(): Promise<Record<string, string>> {
+    const { metrics } = latestMetrics((k) => this.meta(k));
+    return Object.fromEntries((metrics?.logins ?? []).flatMap((l) => (l.method ? [[l.runtime, l.method]] : [])));
+  }
+
   /** The token was revoked: close the link and refuse frames from now on. */
   async revoke(machineId: string): Promise<void> {
     this.bind(machineId);

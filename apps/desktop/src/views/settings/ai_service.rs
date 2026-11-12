@@ -355,6 +355,34 @@ impl AiServicePanel {
         }
     }
 
+    /// What the team's model does (模 1.2): each use with what it does, and how it reads now —
+    /// 开启 when the AI 服务 is set up, else what happens without it.
+    pub fn uses(configured: bool) -> [(&'static str, &'static str, &'static str); 4] {
+        let state = |off: &'static str| if configured { s::AI_USE_ON } else { off };
+        [
+            (
+                s::AI_USE_FRONT,
+                s::AI_USE_FRONT_DETAIL,
+                state(s::AI_USE_FRONT_OFF),
+            ),
+            (
+                s::AI_USE_TITLES,
+                s::AI_USE_TITLES_DETAIL,
+                state(s::AI_USE_TITLES_OFF),
+            ),
+            (
+                s::AI_USE_SUMMARY,
+                s::AI_USE_SUMMARY_DETAIL,
+                state(s::AI_USE_SUMMARY_OFF),
+            ),
+            (
+                s::AI_USE_MEMORY,
+                s::AI_USE_MEMORY_DETAIL,
+                state(s::AI_USE_MEMORY_OFF),
+            ),
+        ]
+    }
+
     /// The section; `None` for a member who is not an owner.
     pub fn section(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<gpui::Div> {
         if !self.owner {
@@ -483,8 +511,20 @@ impl AiServicePanel {
                 .loading(saving)
                 .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
             );
-        let empty = (saved.provider.is_none() && self.action == AiAction::Idle)
-            .then(|| widgets::quiet(s::AI_EMPTY, cx));
+        let configured = saved.provider.is_some();
+        let empty =
+            (!configured && self.action == AiAction::Idle).then(|| widgets::quiet(s::AI_EMPTY, cx));
+        let uses_form = Self::uses(configured).into_iter().fold(
+            GroupedForm::new(),
+            |form, (label, detail, state)| {
+                form.row(
+                    FormRow::new(label)
+                        .detail(detail)
+                        .min_height(crate::ui::native::tokens::height::FORM_ROW_TWO)
+                        .control(widgets::row_value(state, cx)),
+                )
+            },
+        );
         Some(widgets::section(
             header,
             div()
@@ -495,7 +535,15 @@ impl AiServicePanel {
                 .child(group)
                 .children(empty)
                 .children(self.answer_row(cx))
-                .child(buttons),
+                .child(buttons)
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(space::S8)
+                        .child(widgets::quiet(s::AI_USES, cx))
+                        .child(uses_form),
+                ),
         ))
     }
 }
@@ -509,6 +557,20 @@ impl gpui::Render for AiServicePanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Set up, every use says 开启; not set up, each says what happens without it.
+    #[test]
+    fn the_uses_say_what_is_on_and_what_is_missing() {
+        assert!(
+            AiServicePanel::uses(true)
+                .iter()
+                .all(|(_, _, state)| *state == s::AI_USE_ON)
+        );
+        let off = AiServicePanel::uses(false);
+        assert!(off.iter().all(|(_, _, state)| *state != s::AI_USE_ON));
+        assert_eq!(off[0].2, s::AI_USE_FRONT_OFF);
+        assert_eq!(off[3].2, s::AI_USE_MEMORY_OFF);
+    }
 
     #[test]
     fn every_problem_has_words() {

@@ -154,6 +154,17 @@ fn runner_request(runner: RunnerSetup) -> SetBotRunnerRequest {
     }
 }
 
+/// The PUT for a runner edit. PUT replaces the whole runner, so what the sheets do not show
+/// (allowed env, on/off) is kept from the stored one; the model and 思考强度 are the sheet's.
+fn runner_update(setup: RunnerSetup, old: Option<&proto::BotRunner>) -> SetBotRunnerRequest {
+    let mut req = runner_request(setup);
+    if let Some(old) = old {
+        req.env_allowlist = Some(old.env_allowlist.clone());
+        req.enabled = Some(old.enabled);
+    }
+    req
+}
+
 /// What the edit sheet shows of a stored runner.
 pub(super) fn runner_setup(r: &proto::BotRunner) -> RunnerSetup {
     RunnerSetup {
@@ -709,13 +720,8 @@ impl CoreProvider {
             let http = client.http();
             match edit.runner {
                 Some(RunnerChange::Set(setup)) => {
-                    // PUT replaces the whole runner: keep what the sheet does not show.
-                    let mut req = runner_request(setup);
-                    if let Some(old) = http.bot_runner(&id).await.map_err(|e| api_error(&e))? {
-                        req.model = old.model;
-                        req.env_allowlist = Some(old.env_allowlist);
-                        req.enabled = Some(old.enabled);
-                    }
+                    let old = http.bot_runner(&id).await.map_err(|e| api_error(&e))?;
+                    let req = runner_update(setup, old.as_ref());
                     let saved = http
                         .set_bot_runner(&id, &req)
                         .await
@@ -1045,6 +1051,39 @@ mod tests {
             forget_machine(Err(ApiError::NoToken)),
             Err(AdminError::Offline)
         );
+    }
+
+    /// A model changed in the full edit sheet is saved; allowed env and on/off stay as stored.
+    #[test]
+    fn a_runner_edit_saves_the_sheets_model_and_keeps_the_rest() {
+        let old: proto::BotRunner = serde_json::from_value(serde_json::json!({
+            "botId": "b1", "runtime": "claude", "labels": [], "model": "old-model",
+            "effort": "low", "envAllowlist": ["FOO"], "enabled": false, "updatedAt": 1
+        }))
+        .expect("runner json");
+        let setup = RunnerSetup {
+            runtime: "claude".into(),
+            labels: vec![],
+            repo: None,
+            base_branch: None,
+            machine_id: None,
+            model: Some("new-model".into()),
+            effort: Some("high".into()),
+        };
+        let req = runner_update(setup.clone(), Some(&old));
+        assert_eq!(req.model.as_deref(), Some("new-model"));
+        assert_eq!(req.effort, Some(Some("high".into())));
+        assert_eq!(req.env_allowlist, Some(vec!["FOO".to_string()]));
+        assert_eq!(req.enabled, Some(false));
+        // Back to the default: the stored model is not put back.
+        let cleared = runner_update(
+            RunnerSetup {
+                model: None,
+                ..setup
+            },
+            Some(&old),
+        );
+        assert_eq!(cleared.model, None);
     }
 
     #[test]
