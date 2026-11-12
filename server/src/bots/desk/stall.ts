@@ -251,7 +251,7 @@ export abstract class DeskStall extends DeskEvents {
   /** The CLI ended with a promise and no tool call: a follow-up run continues the session. */
   protected async continuePromise(r: RunRow, result: string): Promise<boolean> {
     if (r.kind === RUN_KIND_ASIDE || !isPromiseOnly(result, r.tool_calls) || r.auto_continues >= MAX_AUTO_CONTINUE) return false;
-    if (this.activeRun(r.topic_id)) return false;
+    if (this.startBlocked(r.topic_id)) return false;
     const key = `continue:${ulid()}`;
     try {
       await this.start(

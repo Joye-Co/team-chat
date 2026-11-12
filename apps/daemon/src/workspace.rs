@@ -5,6 +5,7 @@
 
 use crate::config::Config;
 use crate::proto::{RepoSpec, now_ms};
+use chat_protocol::relay::RunCode;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -689,6 +690,80 @@ async fn unpushed_commits(git_dir: &Path, branch: &str) -> Result<u64, String> {
     n.parse().map_err(|_| format!("rev-list gave {n}"))
 }
 
+/// Where a run left its code (`run.done.code`, design-relay R5): the branch the worktree `work`
+/// has checked out (`fallback` for a detached HEAD), its head commit, and whether every commit of
+/// it is on the remote. "Pushed" is checked, not taken from the CLI: the branch is fetched from
+/// `origin` into its remote-tracking ref and the head must be in it; uncommitted changes to
+/// tracked files, a failed fetch or a branch the remote lacks all read as not pushed. `None`
+/// when `work` is not a git worktree with a commit. Run it with the run's [`with_git_env`].
+/// The URL of `work`'s `origin` remote, None when it has none.
+pub async fn origin_url(work: &Path) -> Option<String> {
+    git(Some(work), &["remote", "get-url", "origin"])
+        .await
+        .ok()
+        .filter(|u| !u.is_empty())
+}
+
+pub async fn code_location(work: &Path, fallback: Option<&str>) -> Option<RunCode> {
+    git(Some(work), &["rev-parse", "--is-inside-work-tree"])
+        .await
+        .ok()
+        .filter(|s| s == "true")?;
+    let head = git(Some(work), &["rev-parse", "--verify", "--quiet", "HEAD"])
+        .await
+        .ok()
+        .filter(|h| (4..=64).contains(&h.len()) && h.bytes().all(|b| b.is_ascii_hexdigit()))?
+        .to_ascii_lowercase();
+    let branch = match git(Some(work), &["symbolic-ref", "--quiet", "--short", "HEAD"]).await {
+        Ok(b) => b,
+        Err(_) => fallback?.to_string(),
+    };
+    if !safe_ref(&branch) || branch.len() > 256 {
+        return None;
+    }
+    let pushed = branch_pushed(work, &branch, &head).await;
+    Some(RunCode {
+        branch,
+        head,
+        pushed,
+    })
+}
+
+/// True when `head` is on `origin`'s `branch` as fetched now, and `work` has no uncommitted
+/// changes to tracked files.
+async fn branch_pushed(work: &Path, branch: &str, head: &str) -> bool {
+    match git(
+        Some(work),
+        &["status", "--porcelain", "--untracked-files=no"],
+    )
+    .await
+    {
+        Ok(st) if st.is_empty() => {}
+        _ => return false,
+    }
+    let tracking = format!("refs/remotes/origin/{branch}");
+    let refspec = format!("+refs/heads/{branch}:{tracking}");
+    // Other runs fetch into the same git dir; the run is over, so a short wait is fine.
+    let fetched = tokio::time::timeout(Duration::from_secs(90), async {
+        let _lock = GIT_LOCK.lock().await;
+        git(
+            Some(work),
+            &["fetch", "--quiet", "--no-tags", "origin", &refspec],
+        )
+        .await
+    })
+    .await;
+    if !matches!(fetched, Ok(Ok(_))) {
+        return false;
+    }
+    git(
+        Some(work),
+        &["merge-base", "--is-ancestor", head, &tracking],
+    )
+    .await
+    .is_ok()
+}
+
 /// Makes `dir` and everything below it read-only (`a-w`; a side chat run's checkout, so its CLI
 /// cannot write there whatever its own modes say), or gives the owner write access back
 /// (`u+w`). Symlinks are not followed. Errors are skipped: the walk does what it can.
@@ -1099,6 +1174,80 @@ keep_runs_hours = {keep_hours}\nmin_free_gb = 0\n",
             base_branch: Some("main".into()),
         };
         (dir, cfg, spec)
+    }
+
+    /// The code location of a line (design-relay R5): "pushed" is what the remote has after a
+    /// fetch, not what the CLI did or what a stale remote-tracking ref says.
+    #[tokio::test]
+    async fn the_code_location_is_pushed_only_when_the_remote_has_it() {
+        let (d, cfg, repo) = setup(72);
+        let remote = d.path().join("remote.git");
+        let r = remote.to_string_lossy().to_string();
+        sh_git(d.path(), &["init", "--quiet", "--bare", &r]);
+        let local = PathBuf::from(repo.path.clone().unwrap());
+        sh_git(&local, &["remote", "add", "origin", &r]);
+        sh_git(&local, &["push", "--quiet", "origin", "main"]);
+
+        let (w, m, g) = prepare_line(&cfg, "r1", "BOT1", "T1", Some(&repo))
+            .await
+            .unwrap()
+            .unwrap();
+        let branch = m.branch.clone().unwrap();
+        assert_eq!(origin_url(&w).await.as_deref(), Some(r.as_str()));
+        // A new branch the remote does not have: not pushed.
+        let c = code_location(&w, None).await.unwrap();
+        assert_eq!(c.branch, branch);
+        assert_eq!(c.head, sh_git(&w, &["rev-parse", "HEAD"]));
+        assert!(!c.pushed);
+
+        std::fs::write(w.join("done.txt"), "x").unwrap();
+        sh_git(&w, &["add", "done.txt"]);
+        sh_git(&w, &["commit", "--quiet", "-m", "work"]);
+        // A remote-tracking ref that says so is not enough: the fetch finds no such branch.
+        sh_git(
+            &w,
+            &[
+                "update-ref",
+                &format!("refs/remotes/origin/{branch}"),
+                "HEAD",
+            ],
+        );
+        assert!(!code_location(&w, None).await.unwrap().pushed);
+
+        sh_git(&w, &["push", "--quiet", "origin", &branch]);
+        let c = code_location(&w, None).await.unwrap();
+        assert!(c.pushed);
+        assert_eq!(c.head, sh_git(&w, &["rev-parse", "HEAD"]));
+
+        // Changed tracked files are not on the remote.
+        std::fs::write(w.join("done.txt"), "y").unwrap();
+        assert!(!code_location(&w, None).await.unwrap().pushed);
+        sh_git(&w, &["checkout", "--quiet", "--", "done.txt"]);
+        // An untracked file does not count.
+        std::fs::write(w.join("scratch.log"), "x").unwrap();
+        assert!(code_location(&w, None).await.unwrap().pushed);
+
+        // A commit after the push: not pushed.
+        sh_git(&w, &["commit", "--quiet", "--allow-empty", "-m", "more"]);
+        assert!(!code_location(&w, None).await.unwrap().pushed);
+        // A remote that cannot be reached: not pushed either.
+        sh_git(&w, &["push", "--quiet", "origin", &branch]);
+        std::fs::rename(&remote, d.path().join("gone.git")).unwrap();
+        let c = code_location(&w, None).await.unwrap();
+        assert!(!c.pushed);
+        std::fs::rename(d.path().join("gone.git"), &remote).unwrap();
+
+        // A detached HEAD reports the branch it is given.
+        sh_git(&w, &["checkout", "--quiet", "--detach"]);
+        let c = code_location(&w, Some(&branch)).await.unwrap();
+        assert_eq!(c.branch, branch);
+        assert!(c.pushed);
+        assert!(code_location(&w, None).await.is_none());
+        drop(g);
+
+        // Not a git repository: no code location.
+        let plain = tempfile::tempdir().unwrap();
+        assert!(code_location(plain.path(), Some("main")).await.is_none());
     }
 
     /// The next run of a member in a topic works in the folder and on the branch of the last

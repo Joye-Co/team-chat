@@ -129,6 +129,7 @@ fn person(id: &str, name: &str, role: &str, online: bool, owner: bool) -> Member
         deactivated: false,
         online,
         character: None,
+        team_owner: owner,
     }
 }
 
@@ -143,6 +144,7 @@ fn bot(id: &str, name: &str, role: &str, character: &str) -> Member {
         deactivated: false,
         online: true,
         character: CharacterId::parse(character),
+        team_owner: false,
     }
 }
 

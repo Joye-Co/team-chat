@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::machine::{BootStats, LoginAccount, SecretInfo, UsageWindow};
+use crate::machine::{BootStats, HomeUse, LoginAccount, SecretInfo, UsageWindow};
 
 /// `MonitorRange` values.
 pub mod range {
@@ -195,6 +195,10 @@ pub struct MachineMonitor {
     pub members: Vec<MonitorMember>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_failure: Option<MonitorFailure>,
+    /// Usable, feature "homes": each AI member's home folder on a VM host, from the latest
+    /// heartbeat; absent on other machines.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub homes: Option<Vec<HomeUse>>,
 }
 
 /// `POST /v1/machines/:id/logins`

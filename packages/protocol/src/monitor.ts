@@ -2,7 +2,7 @@
 // `GET /v1/machines/:id/monitor` answers one MachineMonitor.
 import { z } from "zod";
 import { Id, Millis } from "./common.ts";
-import { BootStats, RunId, SecretInfo, SecretName, UsageWindow } from "./machine.ts";
+import { BootStats, HomeUse, MAX_HOMES, RunId, SecretInfo, SecretName, UsageWindow } from "./machine.ts";
 
 export const MonitorRange = z.enum(["15m", "1h", "24h"]);
 export type MonitorRange = z.infer<typeof MonitorRange>;
@@ -147,6 +147,8 @@ export const MachineMonitor = z.object({
   runs: z.array(MonitorRun).max(500),
   members: z.array(MonitorMember).max(500),
   lastFailure: MonitorFailure.optional(),
+  /** Usable, feature "homes": each AI member's home folder on a VM host, from the latest heartbeat. */
+  homes: z.array(HomeUse).max(MAX_HOMES).optional(),
 });
 export type MachineMonitor = z.infer<typeof MachineMonitor>;
 

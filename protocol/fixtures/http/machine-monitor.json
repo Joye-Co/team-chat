@@ -135,6 +135,17 @@
       "memberId": "01JBX0BOT000000000000000AC",
       "at": 1762127100000,
       "title": "对一下十月的账单"
-    }
+    },
+    "homes": [
+      {
+        "memberId": "01JBX0BOT000000000000000AC",
+        "usedBytes": 3221225472,
+        "sizeBytes": 21474836480
+      },
+      {
+        "memberId": "01JBX0BOT000000000000000AD",
+        "usedBytes": 1048576
+      }
+    ]
   }
 }

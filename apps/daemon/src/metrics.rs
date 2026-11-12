@@ -83,6 +83,19 @@ pub fn vm_gone(run_id: &str) {
     vms().remove(run_id);
 }
 
+/// VMs that booted (running or paused): they hold the memory they use already.
+pub fn vms_booted() -> u64 {
+    vms()
+        .values()
+        .filter(|e| e.phase != vm_phase::BOOTING)
+        .count() as u64
+}
+
+/// `(total, available)` memory of this host, when the platform says.
+pub fn host_memory() -> Option<(u64, u64)> {
+    host::memory()
+}
+
 fn boot_stats() -> Option<BootStats> {
     let b = BOOTS.lock().unwrap_or_else(|e| e.into_inner());
     if b.is_empty() {
@@ -176,6 +189,7 @@ impl Sampler {
             logins: Some(logins(cfg)),
             secrets: None,
             usage: None,
+            homes: None,
         }
     }
 

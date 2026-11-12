@@ -264,3 +264,39 @@ describe("sign in and API keys from the app (feature accounts)", () => {
     d.close();
   });
 });
+
+describe("AI members' home folders on a VM host (feature homes)", () => {
+  it("shows each home's use in the monitor and relays emptying one to its managers", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["homes"] });
+    const homes = [
+      { memberId: w.bot.id, usedBytes: 3 * GIB, sizeBytes: 20 * GIB },
+      { memberId: "01JBX0BOT000000000000000ZZ", usedBytes: 0, sizeBytes: 20 * GIB },
+    ];
+    d.send({ t: "heartbeat", at: Date.now(), health: HEALTH, runs: [], metrics: metrics([], { homes }) });
+    await d.next((x) => x.t === "heartbeat.ack");
+    const m = MachineMonitor.parse((await monitor(w.owner.token, w.machineId)).body);
+    expect(m.homes).toEqual(homes);
+
+    const path = `/v1/machines/${w.machineId}/homes/${w.bot.id}/clear`;
+    expect((await api(path, { method: "POST", token: w.human.token })).status).toBe(403);
+    expect((await api(`/v1/machines/${w.machineId}/homes/not%20an%20id/clear`, { method: "POST", token: w.owner.token })).status).toBe(404);
+    const r = await api(path, { method: "POST", token: w.owner.token });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(await d.next((x) => x.t === "home.clear")).toEqual({ t: "home.clear", memberId: w.bot.id });
+    d.close();
+  });
+
+  it("says when the machine is offline or keeps no homes, and sends nothing then", async () => {
+    const w = await world();
+    const path = `/v1/machines/${w.machineId}/homes/${w.bot.id}/clear`;
+    expect((await api(path, { method: "POST", token: w.owner.token })).status).toBe(409);
+    const { d } = await Daemon.connect(w.machineToken);
+    const old = await api(path, { method: "POST", token: w.owner.token });
+    expect(old.status).toBe(409);
+    expect(JSON.stringify(old.body)).toContain("no home folders");
+    expect(MachineMonitor.parse((await monitor(w.owner.token, w.machineId)).body).homes).toBeUndefined();
+    expect(d.frames.some((x) => x.t === "home.clear")).toBe(false);
+    d.close();
+  });
+});

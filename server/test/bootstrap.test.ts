@@ -30,7 +30,7 @@ describe("bootstrap", () => {
       headers: { "x-admin-secret": "test-admin-secret" },
     });
     expect(ok.status).toBe(200);
-    expect(ok.body.member).toMatchObject({ name: "Joye", level: "owner", kind: "human" });
+    expect(ok.body.member).toMatchObject({ name: "Joye", level: "owner", kind: "human", teamOwner: true });
     expect(ok.body.group).toMatchObject({ name: "全员", kind: "group", memberIds: [ok.body.member.id] });
 
     const again = await api("/v1/admin/bootstrap", {

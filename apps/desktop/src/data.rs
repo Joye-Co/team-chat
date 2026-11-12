@@ -43,10 +43,34 @@ pub enum MemberKind {
     Bot,
 }
 
+/// The wire level: `Owner` is 管理员 or 所有者 (it can manage the team), `Member` is 普通成员.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MemberLevel {
     Owner,
     Member,
+}
+
+/// 身份 (design-roles 3.1): 所有者 is a 管理员 who also changes 身份 and stops other 管理员.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TeamRole {
+    Owner,
+    Admin,
+    Member,
+}
+
+impl TeamRole {
+    /// The 身份 of `m` in the team `all` (the directory, with or without `m`). A server from
+    /// before roles sends no `teamOwner` at all: every human 管理员 then reads as 所有者, as the
+    /// roles migration makes them.
+    pub fn of(m: &Member, all: &[Member]) -> TeamRole {
+        if m.level == MemberLevel::Member {
+            TeamRole::Member
+        } else if m.team_owner || (!m.is_bot() && !all.iter().any(|x| x.team_owner)) {
+            TeamRole::Owner
+        } else {
+            TeamRole::Admin
+        }
+    }
 }
 
 /// A person or a bot. Both are equal members.
@@ -66,6 +90,8 @@ pub struct Member {
     pub online: bool,
     /// The character the avatar draws, when set and its art is in this build (`characters`).
     pub character: Option<crate::characters::CharacterId>,
+    /// 所有者 (`teamOwner`); always with `level` `Owner`. Read it through [`TeamRole::of`].
+    pub team_owner: bool,
 }
 
 impl Member {
@@ -1807,8 +1833,8 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn create_invite(&self, _request: InviteRequest) -> AdminReply<InviteCreated> {
         reply_now(Err(AdminError::Unsupported))
     }
-    /// Owner: changes a member's level. Emits `Change::Members`.
-    fn set_member_level(&self, _member_id: &str, _level: MemberLevel) -> AdminReply<Member> {
+    /// 所有者: changes a member's 身份 (`level` and `teamOwner`). Emits `Change::Members`.
+    fn set_member_role(&self, _member_id: &str, _role: TeamRole) -> AdminReply<Member> {
         reply_now(Err(AdminError::Unsupported))
     }
     /// Owner: deactivates (or reactivates) a member. Emits `Change::Members`.

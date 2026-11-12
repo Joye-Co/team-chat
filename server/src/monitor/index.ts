@@ -17,6 +17,7 @@ import { ApiError } from "../core/errors";
 import { registerRoute } from "../core/registry";
 import type { DeskRollup } from "./rollup";
 import "./accounts";
+import "./homes";
 
 const GIB = 1024 ** 3;
 const DAY_MS = 86_400_000;
@@ -181,6 +182,7 @@ export function buildMonitor(input: {
   if (sampledAt) out.sampledAt = sampledAt;
   if (metrics?.boot) out.boot = metrics.boot;
   if (lastFailure) out.lastFailure = lastFailure;
+  if (metrics?.homes) out.homes = metrics.homes;
   if (health) {
     out.host = {
       load1: health.load1,

@@ -14,7 +14,7 @@ import {
   normalizeGroupText,
 } from "@chat/protocol";
 import { auditStatement } from "./audit";
-import type { AuthContext } from "./auth";
+import { type AuthContext, requireTeamOwner } from "./auth";
 import { newInviteCode, newToken, normalizeInviteCode, sha256Hex, timingSafeEqualString } from "./crypto";
 import { REDEEM_RATE, refundAttempt, takeAttempt } from "./ratelimit";
 import {
@@ -190,6 +190,8 @@ export async function membersChanged(env: Env, memberIds: string[]): Promise<voi
 /** Deactivates a member: rejects its tokens from now on and closes its sockets. */
 export async function deactivateMember(env: Env, actor: AuthContext, memberId: string): Promise<void> {
   if (actor.member.level !== "owner") throw new ApiError("forbidden", "owner only");
+  const target = await getMember(env.DB, memberId);
+  if (target?.level === "owner" && memberId !== actor.memberId) requireTeamOwner(actor, "only a team owner can deactivate an admin");
   const r = await env.DB.batch([
     env.DB.prepare("UPDATE members SET deactivated = 1 WHERE id = ?").bind(memberId),
     auditStatement(env.DB, actor, { action: "member.deactivate", target: memberId }),
@@ -231,8 +233,8 @@ export function registerCoreRoutes(): void {
       // One batch = one transaction; every insert depends on the first one winning.
       const results = await env.DB.batch([
         env.DB.prepare(
-          `INSERT INTO members (id, kind, name, role, level, created_at)
-           SELECT ?, 'human', ?, NULL, 'owner', ? WHERE NOT EXISTS (SELECT 1 FROM members)`,
+          `INSERT INTO members (id, kind, name, role, level, team_owner, created_at)
+           SELECT ?, 'human', ?, NULL, 'owner', 1, ? WHERE NOT EXISTS (SELECT 1 FROM members)`,
         ).bind(memberId, ownerName, now),
         env.DB.prepare(
           `INSERT INTO tokens (id, token_hash, member_id, label, created_at) SELECT ?, ?, ?, 'bootstrap', ? WHERE ${exists}`,
@@ -356,7 +358,13 @@ export function registerCoreRoutes(): void {
         const m = await getMember(env.DB, req.memberId);
         if (!m) throw new ApiError("not_found", "member not found");
         if (m.deactivated) throw new ApiError("invalid", "reactivate the member first");
+        // Redeeming the code signs in as the target, so a code for another admin is 所有者 only.
+        if (m.level === "owner" && m.id !== a.memberId) requireTeamOwner(a, "only a team owner can sign in as an admin");
         Object.assign(req, { name: m.name, kind: m.kind, level: m.level, role: m.role ?? undefined });
+      } else if (req.level === "owner") {
+        // A new admin (person or AI member) is a role change: 所有者 only. Invited people arrive
+        // as members and get a role afterwards (design-roles 3.2).
+        requireTeamOwner(a, "only a team owner can invite an admin");
       }
       const code = newInviteCode();
       const now = Date.now();
@@ -429,7 +437,12 @@ export function registerCoreRoutes(): void {
       const a = auth as AuthContext;
       const target = req.memberId ?? a.memberId;
       if (target !== a.memberId && a.member.level !== "owner") throw new ApiError("forbidden", "owner only");
-      if (target !== a.memberId && !(await getMember(env.DB, target))) throw new ApiError("not_found", "member not found");
+      if (target !== a.memberId) {
+        const t = await getMember(env.DB, target);
+        if (!t) throw new ApiError("not_found", "member not found");
+        // An admin's or a 所有者's tokens: 所有者 only (design-roles 3.2).
+        if (t.level === "owner") requireTeamOwner(a, "only a team owner can revoke an admin's tokens");
+      }
       // No memberId and no all: revoke the calling token. Otherwise every token of the target.
       const which = req.memberId === undefined && !req.all ? [a.tokenId] : "all";
       return { revoked: await revokeTokens(env, a, target, which) };
