@@ -11,7 +11,7 @@ The shared types are `packages/protocol/src/machine.ts` (Zod, used by the server
 `crates/chat-protocol/src/machine.rs` (serde, used by the daemon through
 `apps/daemon/src/proto.rs`). `apps/daemon/tests/fixtures/machine/{up,down}.jsonl` hold one
 golden frame per line; the daemon test parses each one and serializes it back to an equal
-value, and `bun run gen:fixtures` copies them into `protocol/fixtures/machine/`, which both
+value, and `bun run gen:protocol` copies them into `protocol/fixtures/machine/`, which both
 the Zod and the Rust fixture tests check. Change the doc, both type modules and the golden
 files together. Conventions are those of [protocol.md](protocol.md):
 JSON, UTF-8, camelCase, unknown fields ignored, times in ms since the epoch, IDs are ULIDs
@@ -470,7 +470,7 @@ no credentials pass through chat. The server shows the address to owners and run
   source: { kind: "card", messageId, blockId?, actionId?, rev } | { kind: "artifact", artifactId, version, eventId, ask },
   event, value?, actor: { id, name }, eventId?, block? /* card events: the block or action at rev */ }
 // daemon -> server (feature "output", `chat-run`): a normal run.event with seq and ack
-RunEvent += { type: "output", outputId, op: "card.post" | "card.patch" | "interaction.resolve" | "artifact.data" | "artifact.reply" | "desk.note", body: JSON }
+RunEvent += { type: "output", outputId, op: "card.post" | "card.patch" | "interaction.resolve" | "artifact.data" | "artifact.reply" | "desk.note" | "run.report", body: JSON }
 // server -> daemon
 { t: "run.output.result", runId, outputId, ok, result?, error? { code, reason?, message } }
 run.input.answer += { answerId?, askId?, eventId?, event?, blockId?, value? }
@@ -499,6 +499,7 @@ with the rules of the matching WebSocket frame. The `output` body is that frame 
 | `desk.note` (1.1) | `{ text }`: the bot's desk note in the run's group, with the rules of `PUT /v1/desk-note` (protocol.md "Desk notes"); result `{ seq }` | `chat-run desk note --text "…"` (`""` clears) |
 | `member.handoff` | `{ member, goal, doneWhen?, notes? }`: 转交 to another AI member (protocol.md "Delegation"); result `{ member, topicId, runId }` | `chat-run handoff --member <name> --goal "…" [--done-when "a; b"] [--notes "…"]` |
 | `member.assign` | the same body: 分出去 into a new topic; result `{ member, topicId, runId }` | `chat-run assign --member <name> --goal "…" [--done-when "a; b"] [--notes "…"]` |
+| `run.report` (usable) | `{ state: "done" \| "blocked" \| "waiting", text }` (`RunReport`, text 1-2000 characters): how the work ended, in the CLI's own words; result `{ state }`. See "Run report" below | `chat-run report --state done\|blocked\|waiting --text "…"` |
 
 `chat-run` is the daemon binary started by the name `chat-run` (argv0). The daemon links it as
 `<run folder>/bin/chat-run` and puts that folder first on the CLI's `PATH`. Side chat runs
@@ -543,7 +544,7 @@ A connect or write that the CLI's sandbox refuses gives `{ code: "unavailable", 
 "sandbox.blocked" }`. `chat-run` prints the result JSON (exit 0) or the error JSON with its
 `reason` (exit 1). `chat-run card schema` prints the JSON Schema of a Card v2 document
 (`protocol/schema/CardV2.schema.json`, made from the protocol package's Zod with
-`bun run gen:schema` and built into the daemon) without asking the daemon; it holds the shape,
+`bun run gen:protocol` and built into the daemon) without asking the daemon; it holds the shape,
 and the server checks the write rules too. The CLI learns about `chat-run` from a short note
 that names the commands, the card fields, every block type of that schema and
 `chat-run card schema`: Claude Code
@@ -843,9 +844,12 @@ ContextHit = { messageId, topicId, topicTitle?, seq, authorName, at, snippet }
   run's group the bot member can read. `limit` 1-50, default 20, newest first.
 - `file.get` gives a file of the run's group (ready, not deleted). The daemon writes it to `out`,
   which must be inside the run's working folder after symbolic links are resolved (`forbidden`,
-  `file.outside_workspace` otherwise); without `out`, to `<working folder>/.chat-files/<fileId>/<name>`
-  (the folder gets a `.gitignore` of `*`). It refuses files over 100 MiB with `too_large`.
-  `chat-run` waits up to 5 minutes for it.
+  `file.outside_workspace` otherwise); without `out`, to `<run folder>/downloads/<fileId>/<name>`,
+  outside the working folder, so a download never ends up in the member's branch when the
+  daemon commits what a run left uncommitted. The result says where: `{ path, name, mime, size,
+  inWorkFolder }` (`inWorkFolder: false` for the default). Daemons before this wrote the default
+  to `<working folder>/.chat-files/<fileId>/<name>` (with a `.gitignore` of `*`). It refuses files
+  over 100 MiB with `too_large`. `chat-run` waits up to 5 minutes for it.
 - `topic.state` is one compact state card of a topic, at most 2000 characters: who did what (the
   newest authors with their last message), the 产出 with their latest versions, open cards and who
   they wait on, the latest decisions. Members work together through 产出 and state; this is how
@@ -863,6 +867,31 @@ ContextHit = { messageId, topicId, topicTitle?, seq, authorName, at, snippet }
   first: name, 岗位 (`role`) and `ai` for AI members.
 - A daemon with this feature reports `context`; the server's prompt then names these commands for
   messages it left out. The `chat-run` note lists them.
+
+### Run report (`chat-run report`, usable)
+
+Before it ends, the CLI says how its work ended with `chat-run report --state <state> --text
+<text>` (output op `run.report`): `done` (the request is done), `blocked` (it cannot go on without
+something: a key, an access, a decision) or `waiting` (it asked a person and waits for the
+answer). A run may report more than once; the latest report counts when the run ends. The server
+answers `{ state }`; a body that is not a `RunReport` is `invalid`.
+
+When the run ends with `run.done` `succeeded`:
+
+| Latest report | Topic | The result in the topic | `BotRun` |
+| --- | --- | --- | --- |
+| none, or `done` | `done` | the done card (or a text answer), as before | `status: "done"`, `phase: "done"` |
+| `blocked` | `blocked`, `waitingOn` the requester | the CLI's last message (else the report text) as a text message that mentions the requester; no done card | `status: "done"`, `phase: "needs_reply"`, `waitingFor: "stuck"` |
+| `waiting` | `waiting_answer`, `waitingOn` the requester | the same | `status: "done"`, `phase: "needs_reply"`, `waitingFor: "report"` |
+
+A `needs_reply` run reads `phase: "done"` again once a later run of the AI member starts in the
+topic (the server sends `run.updated` for it then). A run that fails or is stopped ignores its
+report. Without a report a run that ended normally is done, as before. The 盯活 continuation of a
+run that only promised work is skipped when the run reported `blocked` or `waiting`.
+
+When the CLI posted its own Card v2 with intent `done` (`card.post`) in the run, that card is the
+run's result: the server does not post the CLI's last message again, and `resultMessageId` names
+the card.
 
 ### Memory notes (`chat-run`, daemon over HTTP; feature `context`)
 

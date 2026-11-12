@@ -100,6 +100,9 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 100000000
+            },
+            "teamOwner": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -198,6 +201,9 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 100000000
+              },
+              "teamOwner": {
+                "type": "boolean"
               }
             },
             "required": [
@@ -500,6 +506,115 @@
                         },
                         "main": {
                           "type": "boolean"
+                        },
+                        "participants": {
+                          "maxItems": 50,
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "memberId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "working": {
+                                "type": "boolean"
+                              },
+                              "lastRunAt": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              }
+                            },
+                            "required": [
+                              "memberId",
+                              "working",
+                              "lastRunAt"
+                            ]
+                          }
+                        },
+                        "relay": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "startedBy": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "goal": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 1000
+                            },
+                            "current": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "state": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 32
+                            },
+                            "reason": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            },
+                            "stoppedBy": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "updatedAt": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "steps": {
+                              "minItems": 2,
+                              "maxItems": 6,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "memberId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "note": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 100
+                                  },
+                                  "state": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 32
+                                  },
+                                  "runId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": [
+                                  "memberId",
+                                  "state"
+                                ]
+                              }
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "startedBy",
+                            "goal",
+                            "current",
+                            "state",
+                            "updatedAt",
+                            "steps"
+                          ]
                         }
                       },
                       "required": [
@@ -622,6 +737,122 @@
                         "groupId",
                         "topicId",
                         "uptoSeq"
+                      ]
+                    },
+                    "participants": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "memberId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "working": {
+                            "type": "boolean"
+                          },
+                          "lastRunAt": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "memberId",
+                          "working",
+                          "lastRunAt"
+                        ]
+                      }
+                    },
+                    "relay": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "startedBy": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "goal": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 1000
+                            },
+                            "current": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "state": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 32
+                            },
+                            "reason": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            },
+                            "stoppedBy": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "updatedAt": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "steps": {
+                              "minItems": 2,
+                              "maxItems": 6,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "memberId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "note": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 100
+                                  },
+                                  "state": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 32
+                                  },
+                                  "runId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": [
+                                  "memberId",
+                                  "state"
+                                ]
+                              }
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "startedBy",
+                            "goal",
+                            "current",
+                            "state",
+                            "updatedAt",
+                            "steps"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
                       ]
                     }
                   },
@@ -19651,6 +19882,11 @@
                               }
                             }
                           }
+                        },
+                        "parentVersion": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
                         }
                       },
                       "required": [
@@ -20109,6 +20345,11 @@
                               }
                             }
                           }
+                        },
+                        "parentVersion": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
                         }
                       },
                       "required": [
@@ -20285,6 +20526,49 @@
                             "costUsd": {
                               "type": "number",
                               "minimum": 0
+                            },
+                            "models": {
+                              "maxItems": 32,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "model": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200
+                                  },
+                                  "inputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "outputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "cacheReadTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "cacheWriteTokens": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "costUsd": {
+                                    "type": "number",
+                                    "minimum": 0
+                                  }
+                                },
+                                "required": [
+                                  "model",
+                                  "inputTokens",
+                                  "outputTokens"
+                                ]
+                              }
                             }
                           },
                           "required": [
@@ -20385,6 +20669,105 @@
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 9007199254740991
+                        },
+                        "requestedFor": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "chainId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "code": {
+                          "type": "object",
+                          "properties": {
+                            "branch": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256
+                            },
+                            "head": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{4,64}$"
+                            },
+                            "pushed": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "branch",
+                            "head",
+                            "pushed"
+                          ]
+                        },
+                        "phase": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 32
+                        },
+                        "waitingFor": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 32
+                        },
+                        "holdKind": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 32
+                        },
+                        "heldAt": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "takeover": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 32
+                        },
+                        "lastHandback": {
+                          "type": "object",
+                          "properties": {
+                            "by": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "heldMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "commands": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "files": {
+                              "maxItems": 20,
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 1024
+                              }
+                            },
+                            "headFrom": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            },
+                            "headTo": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            }
+                          },
+                          "required": [
+                            "by",
+                            "heldMs",
+                            "commands",
+                            "files"
+                          ]
                         }
                       },
                       "required": [
@@ -21711,6 +22094,48 @@
                 "counts",
                 "items"
               ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "github.status"
+                },
+                "account": {
+                  "type": "object",
+                  "properties": {
+                    "login": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 255
+                    },
+                    "status": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 32
+                    },
+                    "connectedAt": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "login",
+                    "status",
+                    "connectedAt"
+                  ]
+                }
+              },
+              "required": [
+                "type"
+              ]
             }
           ]
         }
@@ -21789,6 +22214,14 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 9007199254740991
+                },
+                "memberIds": {
+                  "maxItems": 20,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
                 }
               },
               "required": [
@@ -21951,6 +22384,115 @@
                           },
                           "main": {
                             "type": "boolean"
+                          },
+                          "participants": {
+                            "maxItems": 50,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "memberId": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "working": {
+                                  "type": "boolean"
+                                },
+                                "lastRunAt": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                }
+                              },
+                              "required": [
+                                "memberId",
+                                "working",
+                                "lastRunAt"
+                              ]
+                            }
+                          },
+                          "relay": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "startedBy": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "goal": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 1000
+                              },
+                              "current": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "state": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 32
+                              },
+                              "reason": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64
+                              },
+                              "stoppedBy": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "updatedAt": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "steps": {
+                                "minItems": 2,
+                                "maxItems": 6,
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "memberId": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "note": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 100
+                                    },
+                                    "state": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 32
+                                    },
+                                    "runId": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": [
+                                    "memberId",
+                                    "state"
+                                  ]
+                                }
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "startedBy",
+                              "goal",
+                              "current",
+                              "state",
+                              "updatedAt",
+                              "steps"
+                            ]
                           }
                         },
                         "required": [
@@ -22073,6 +22615,122 @@
                           "groupId",
                           "topicId",
                           "uptoSeq"
+                        ]
+                      },
+                      "participants": {
+                        "maxItems": 50,
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "memberId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "working": {
+                              "type": "boolean"
+                            },
+                            "lastRunAt": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "memberId",
+                            "working",
+                            "lastRunAt"
+                          ]
+                        }
+                      },
+                      "relay": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "startedBy": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "goal": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 1000
+                              },
+                              "current": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "state": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 32
+                              },
+                              "reason": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64
+                              },
+                              "stoppedBy": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "updatedAt": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "steps": {
+                                "minItems": 2,
+                                "maxItems": 6,
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "memberId": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "note": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 100
+                                    },
+                                    "state": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 32
+                                    },
+                                    "runId": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": [
+                                    "memberId",
+                                    "state"
+                                  ]
+                                }
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "startedBy",
+                              "goal",
+                              "current",
+                              "state",
+                              "updatedAt",
+                              "steps"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
                         ]
                       }
                     },
@@ -41102,6 +41760,11 @@
                                 }
                               }
                             }
+                          },
+                          "parentVersion": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
                           }
                         },
                         "required": [
@@ -41560,6 +42223,11 @@
                                 }
                               }
                             }
+                          },
+                          "parentVersion": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
                           }
                         },
                         "required": [
@@ -41736,6 +42404,49 @@
                               "costUsd": {
                                 "type": "number",
                                 "minimum": 0
+                              },
+                              "models": {
+                                "maxItems": 32,
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "model": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 200
+                                    },
+                                    "inputTokens": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "outputTokens": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "cacheReadTokens": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "cacheWriteTokens": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "costUsd": {
+                                      "type": "number",
+                                      "minimum": 0
+                                    }
+                                  },
+                                  "required": [
+                                    "model",
+                                    "inputTokens",
+                                    "outputTokens"
+                                  ]
+                                }
                               }
                             },
                             "required": [
@@ -41836,6 +42547,105 @@
                             "type": "integer",
                             "exclusiveMinimum": 0,
                             "maximum": 9007199254740991
+                          },
+                          "requestedFor": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "chainId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "code": {
+                            "type": "object",
+                            "properties": {
+                              "branch": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256
+                              },
+                              "head": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{4,64}$"
+                              },
+                              "pushed": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "branch",
+                              "head",
+                              "pushed"
+                            ]
+                          },
+                          "phase": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 32
+                          },
+                          "waitingFor": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 32
+                          },
+                          "holdKind": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 32
+                          },
+                          "heldAt": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "takeover": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 32
+                          },
+                          "lastHandback": {
+                            "type": "object",
+                            "properties": {
+                              "by": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "heldMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "commands": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "files": {
+                                "maxItems": 20,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 1024
+                                }
+                              },
+                              "headFrom": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64
+                              },
+                              "headTo": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64
+                              }
+                            },
+                            "required": [
+                              "by",
+                              "heldMs",
+                              "commands",
+                              "files"
+                            ]
                           }
                         },
                         "required": [
@@ -51977,6 +52787,9 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 100000000
+              },
+              "teamOwner": {
+                "type": "boolean"
               }
             },
             "required": [
@@ -52168,6 +52981,14 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "memberIds": {
+              "maxItems": 20,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           },
           "required": [

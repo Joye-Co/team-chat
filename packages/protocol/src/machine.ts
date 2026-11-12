@@ -301,8 +301,22 @@ export type AcceptanceItem = z.infer<typeof AcceptanceItem>;
 const item = { itemId: z.string().min(1), turnId: z.string().optional() };
 /** What a `chat-run` output asks for; each one has the rules of the matching WebSocket frame. */
 /** `desk.note` (1.1): the bot's desk note in the run's group, body `{ text }` (as `PUT /v1/desk-note`). */
-export const RunOutputOp = z.enum(["card.post", "card.patch", "interaction.resolve", "artifact.data", "artifact.reply", "desk.note"]);
+/** `run.report` (usable): how the run ended in the CLI's own words, body `RunReport`. */
+export const RunOutputOp = z.enum(["card.post", "card.patch", "interaction.resolve", "artifact.data", "artifact.reply", "desk.note", "run.report"]);
 export type RunOutputOp = z.infer<typeof RunOutputOp>;
+
+/** Known `RunReport.state` values: done, blocked (needs something to go on), waiting (for a person's answer). */
+export const RUN_REPORT_STATES = ["done", "blocked", "waiting"] as const;
+export const MAX_RUN_REPORT_CHARS = 2000;
+/**
+ * The body of the `run.report` output (`chat-run report`, usable): the CLI says how its work
+ * ended. The latest report counts when the run ends (docs/machine-protocol.md, "Run report").
+ */
+export const RunReport = z.object({
+  state: z.enum(RUN_REPORT_STATES),
+  text: z.string().trim().min(1).max(MAX_RUN_REPORT_CHARS),
+});
+export type RunReport = z.infer<typeof RunReport>;
 
 export const RunEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("session"), sessionId: z.string(), runtime: z.string(), model: z.string().optional() }),

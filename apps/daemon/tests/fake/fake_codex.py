@@ -6,7 +6,9 @@ prompt says "late", the turn waits for a steer and then completes before it answ
 with an error (a steer that arrives as the turn ends). When the prompt says "chatrun", the turn
 runs `chat-run resolve` from PATH and writes its exit code, output, `CHAT_RUN_DIR`,
 `CHAT_RUN_SOCKET` and the folder's mode and files to chatrun.json; "chatcard" posts a card from
-`chat-run card schema` twice and patches it, with the answers in chatcard.json. `thread/resume` knows only
+`chat-run card schema` twice and patches it, with the answers in chatcard.json; "chatdone" posts
+its own done card and reports done (chatdone.json), "chatblocked" reports blocked
+(chatblocked.json), each before its final answer. `thread/resume` knows only
 the thread "th-old" (any other id is an error, like a thread Codex no longer has); each thread
 call goes to threads.json; each turn/start's `effort` (null when absent) goes to efforts.json.
 `model/list` answers two pages (cursor "p2"), with a hidden model and a configWarning
@@ -34,6 +36,14 @@ def ask(rid, method, params):
     # A person answers a gated one through a card: give them time.
     ev.wait(60)
     return state["answers"].get(rid)
+
+def chat_run(*a):
+    r = subprocess.run(["chat-run", *a], capture_output=True, text=True)
+    try:
+        v = json.loads(r.stdout)
+    except ValueError:
+        v = None
+    return {"code": r.returncode, "out": v, "err": r.stderr[-400:]}
 
 def run_turn(tid, text):
     out({"method": "turn/started", "params": {"threadId": thread, "turn": {"id": tid, "items": [], "status": "inProgress"}}})
@@ -83,6 +93,17 @@ def run_turn(tid, text):
         d = os.environ.get("CHAT_RUN_DIR", "")
         open("chatcard.json", "w").write(json.dumps({"kinds": kinds, "post": post, "again": again, "patch": patch, "dir": d,
             "socket": os.environ.get("CHAT_RUN_SOCKET")}))
+    if "chatdone" in text:
+        # Problem 5: the CLI posts its own done card; its final answer must not be posted again.
+        card = {"v": 2, "rev": 1, "title": "codex done card", "fallback": "codex done card", "intent": "done", "blocks": [{"type": "text", "id": "r", "text": "done"}]}
+        open("done-card.json", "w").write(json.dumps(card))
+        post = chat_run("card", "post", "--file", "done-card.json")
+        rep = chat_run("report", "--state", "done", "--text", "做完了")
+        open("chatdone.json", "w").write(json.dumps({"post": post, "report": rep}))
+    if "chatblocked" in text:
+        # 接 4.2: the run ends normally but cannot go on.
+        rep = chat_run("report", "--state", "blocked", "--text", "需要 staging 的数据库密码")
+        open("chatblocked.json", "w").write(json.dumps({"report": rep}))
     mid = "m-" + tid
     reply = "codex: " + text
     late = "late" in text

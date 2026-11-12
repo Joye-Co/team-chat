@@ -309,7 +309,9 @@ describe("runner-backed bots", () => {
     d.event(runId, { type: "status", state: "running" });
     d.event(runId, { type: "message.delta", itemId: "m1", text: "正在看" });
     d.event(runId, { type: "tool.call", itemId: "c1", tool: "bash", title: "cargo test" });
-    const s = d.event(runId, { type: "message", itemId: "m1", role: "assistant", text: "正在看测试" });
+    // 接 5.1: the card's test counts come from the recorded test run, not from the last words.
+    d.event(runId, { type: "tool.result", itemId: "c1", ok: true, output: "test result: ok. 12 passed; 0 failed" });
+    const s =d.event(runId, { type: "message", itemId: "m1", role: "assistant", text: "正在看测试" });
     await d.acked(runId, s);
     const result = "修好了：sync 测试不再随机失败。\nhttps://github.com/acme/app/pull/42\ntest result: ok. 12 passed; 0 failed";
     const seqDone = d.done(runId, {

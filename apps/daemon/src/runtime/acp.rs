@@ -167,7 +167,7 @@ impl AcpNormalizer {
             item_id: id.to_string(),
             turn_id: self.turn.clone(),
             ok: status == Some("completed"),
-            output: Some(truncate(&text.join("\n"), OUTPUT_LIMIT)),
+            output: Some(super::truncate_output(&text.join("\n"))),
             exit_code: None,
         });
         if !changes.is_empty() {

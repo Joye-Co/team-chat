@@ -72,7 +72,7 @@
 
 1. 已结束（`ended_at` 不为空）：
    1. `cancelled` → `stopped`。
-   2. 汇报是「在等人」或「卡住」，并且这是该成员在这个话题里最新的任务、后面没有跟进任务 → `needs_reply`（`waitingFor`: `report` 或 `stuck`）。
+   2. 正常结束（`done`），汇报是「在等人」或「卡住」（`chat-run report --state waiting|blocked`），并且这是该成员在这个话题里最新的任务、后面没有跟进任务 → `needs_reply`（`waitingFor`: `report` 或 `stuck`）。失败的任务不看汇报。线 3 已实现：`server/src/bots/desk/report.ts` 的 `endedPhase`，结束的任务由服务端填 `phase`。
    3. `done` → `done`；其余（`failed`、`blocked`）→ `failed`。被跟进任务盖过的「在等人」也落到这两条。
 2. 还没结束：
    1. `paused_by` 不为空：`hold_kind = 'takeover'` → `taken_over`，否则 `paused`（旧数据 `hold_kind` 为空，算 `paused`）。电脑失联时 phase 不变，另给 `waitingFor: "offline"`。

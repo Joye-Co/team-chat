@@ -474,7 +474,48 @@ async function codexCheck(owner: string, groupId: string, work: string, events: 
   const cards = events.filter((e) => e.type === "message.created" && e.data.message.topicId === topicId && e.data.message.cardV2?.title === "chat-run codex card");
   if (cards.length !== 1) throw new Error(`the topic holds the codex card ${cards.length} times`);
   step(`codex: chat-run through ${VM ? "the VM's relayed socket" : "the request folder"} posted once (retry deduped) and patched to rev ${r.patch.out.rev}${VM ? "" : "; folder removed"}`);
-  return { runId: run.id, topicId, patchedRev: r.patch.out.rev };
+  const results = await codexResultCheck(cx.member.id, groupId, work, events, ws);
+  return { runId: run.id, topicId, patchedRev: r.patch.out.rev, ...results };
+}
+
+/**
+ * The topic tells how a task ended (usable work line 3). Problem 5: the fake Codex posts its own
+ * done card with `chat-run` and reports done; the topic then holds that card alone (the final
+ * answer is not posted again). 接 4.2: a run that reports blocked and exits normally leaves the
+ * topic blocked, not done, with the run waiting for a reply.
+ */
+async function codexResultCheck(cxId: string, groupId: string, work: string, events: any[], ws: WebSocket) {
+  const ask = async (rid: string, body: string) => {
+    ws.send(JSON.stringify({ t: "send", rid, groupId, clientMsgId: crypto.randomUUID(), body: `@cx ${body}`, mentions: [cxId] }));
+    const ack = await until(`send ack (${body})`, () => events.find((e) => e.frame?.rid === rid));
+    if (!ack.frame.ok) throw new Error(`send failed: ${JSON.stringify(ack.frame.error)}`);
+    const topicId = ack.frame.result.message.topicId as string;
+    const run = await until(`${body} run ended`, () => events.find((e) => e.type === "run.updated" && e.data.run.topicId === topicId && e.data.run.endedAt)?.data.run, 60_000);
+    if (run.status !== "done") throw new Error(`${body} run ${run.status}`);
+    const topicStatus = () => events.filter((e) => e.type === "topic.updated" && e.data.topicId === topicId && e.data.status).at(-1)?.data.status;
+    const said = () => events.filter((e) => e.type === "message.created" && e.data.message.topicId === topicId && e.data.message.authorId === cxId).map((e) => e.data.message);
+    return { topicId, run, topicStatus, said };
+  };
+
+  const done = await ask("r-codex-done", "chatdone");
+  const d = JSON.parse(readFileSync(join(workOf(work, done.run.id), "chatdone.json"), "utf8"));
+  if (d.post.code !== 0 || !d.post.out?.messageId) throw new Error(`codex done card post failed: ${JSON.stringify(d.post)}`);
+  if (d.report.code !== 0 || d.report.out?.state !== "done") throw new Error(`codex report failed: ${JSON.stringify(d.report)}`);
+  await until("done topic", () => done.topicStatus() === "done" || undefined);
+  await new Promise((r) => setTimeout(r, 500));
+  const doneMsgs = done.said();
+  if (doneMsgs.length !== 1 || doneMsgs[0].id !== d.post.out.messageId) throw new Error(`the result appeared ${doneMsgs.length} times: ${JSON.stringify(doneMsgs.map((m: any) => m.body))}`);
+  if (done.run.resultMessageId !== d.post.out.messageId) throw new Error("the run's result is not its own done card");
+  step("codex: its own done card is the one result (the final answer was not posted again)");
+
+  const blocked = await ask("r-codex-blocked", "chatblocked");
+  const b = JSON.parse(readFileSync(join(workOf(work, blocked.run.id), "chatblocked.json"), "utf8"));
+  if (b.report.code !== 0 || b.report.out?.state !== "blocked") throw new Error(`codex blocked report failed: ${JSON.stringify(b.report)}`);
+  await until("blocked topic", () => blocked.topicStatus() === "blocked" || undefined);
+  if (blocked.run.phase !== "needs_reply" || blocked.run.waitingFor !== "stuck") throw new Error(`blocked run phase ${blocked.run.phase}/${blocked.run.waitingFor}`);
+  if (blocked.said().some((m: any) => m.cardV2)) throw new Error("a blocked run posted a done card");
+  step("codex: a run that exits normally but reports blocked leaves the topic blocked, the run waiting for a reply");
+  return { doneCardRun: done.run.id, blockedRun: blocked.run.id };
 }
 
 /** The first file named `name` under `dir`, at any depth. */

@@ -1,7 +1,9 @@
-// Writes protocol/fixtures/**. Run with `bun run gen:fixtures` from packages/protocol.
-// The fixture files are the contract; this script only makes them easier to extend.
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+// Writes protocol/fixtures/**. Run with `bun run gen:protocol` at the repo root (or
+// `bun run gen:fixtures`); `--check` only compares. The fixture files are the contract; this
+// script only makes them easier to extend. It owns the whole folder: every fixture is written
+// here (or in a fixtures-*.ts it calls), and a file it does not produce is removed, so never add
+// one by hand. test/generated.test.ts fails when the folder and this script differ.
+import { join } from "node:path";
 import { MAX_BODY_CHARS, MAX_NAME_CHARS, MAX_PAGE_LIMIT, MAX_TITLE_CHARS } from "../src/index.ts";
 import { addV1Fixtures } from "./fixtures-v1.ts";
 import { addBotsFixtures } from "./fixtures-bots.ts";
@@ -15,6 +17,9 @@ import { addMemberFixtures } from "./fixtures-members.ts";
 import { addMemoryFixtures } from "./fixtures-memory.ts";
 import { addPushFixtures } from "./fixtures-push.ts";
 import { addUsableFixtures } from "./fixtures-usable.ts";
+import { addSignInFixtures } from "./fixtures-sign-in.ts";
+import { addHomesFixtures } from "./fixtures-homes.ts";
+import { run, type Tree } from "./generated.ts";
 
 type Fixture = {
   kind: string;
@@ -27,7 +32,7 @@ type Fixture = {
   normalized?: unknown;
 };
 
-const root = join(import.meta.dir, "../../../protocol/fixtures");
+export const fixturesRoot = join(import.meta.dir, "../../../protocol/fixtures");
 const out = new Map<string, Fixture>();
 const add = (path: string, f: Fixture) => {
   if (out.has(path)) throw new Error(`duplicate fixture ${path}`);
@@ -363,13 +368,11 @@ addMemberFixtures({ ok, bad, T0, ID, base, message });
 addMemoryFixtures({ ok, bad, T0, ID });
 addPushFixtures({ ok, bad, T0, ID });
 addUsableFixtures({ ok, bad, T0, ID, base, topic });
+addSignInFixtures({ ok, bad, ID });
+addHomesFixtures({ ok, ID });
 
 // ---------------------------------------------------------------------------
 
-rmSync(root, { recursive: true, force: true });
-for (const [path, fixture] of out) {
-  const file = join(root, path);
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, `${JSON.stringify(fixture, null, 2)}\n`);
-}
-console.log(`wrote ${out.size} fixtures to ${root}`);
+export const fixtures: Tree = new Map([...out].map(([path, f]) => [path, `${JSON.stringify(f, null, 2)}\n`]));
+
+if (import.meta.main) run("fixtures", fixturesRoot, fixtures);
