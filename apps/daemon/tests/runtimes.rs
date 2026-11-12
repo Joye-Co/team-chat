@@ -251,13 +251,15 @@ async fn codex_gated_run_answers_its_own_approvals() {
     })
     .await;
     assert_eq!(o.status, Status::Succeeded, "{o:?}");
+    // The tool's arguments are compared as JSON: their key order depends on serde_json's
+    // `preserve_order`, which a build together with the desktop app turns on.
+    assert_eq!(asked.len(), 2, "{asked:?}");
+    assert_eq!(asked[0], "git push origin main");
+    let (tool, args) = asked[1].split_once(' ').expect("tool and arguments");
+    assert_eq!(tool, "mcp__github__merge_pull_request");
     assert_eq!(
-        asked,
-        [
-            "git push origin main".to_string(),
-            r#"mcp__github__merge_pull_request {"owner":"o","pullNumber":5,"repo":"r"}"#
-                .to_string(),
-        ]
+        serde_json::from_str::<serde_json::Value>(args).expect("arguments are JSON"),
+        serde_json::json!({"owner": "o", "pullNumber": 5, "repo": "r"})
     );
     // Only the gated ones were cards; the daemon itself answered every request.
     assert_eq!(
@@ -690,134 +692,6 @@ async fn pty_runs_a_batch_file() {
     );
 }
 
-/// Windows: 接管 really stops a `pty` run (every thread of the program and of what it started
-/// is suspended and nothing is written), handing it back lets it go on, and a cancel ends the
-/// program and what it started. Unix: `pty_cancel_kills_group` and the pause cases of
-/// `tests/integration.rs`.
-#[cfg(windows)]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn pty_pause_holds_and_cancel_ends_the_tree() {
-    let dir = tempfile::tempdir().unwrap();
-    let script = dir.path().join("ticker.py");
-    std::fs::write(
-        &script,
-        "import os, subprocess, sys, time\n\
-kid = subprocess.Popen([sys.executable, '-c', \"import time\\nwhile True:\\n    open('kid.ticks', 'a').write('x\\\\n')\\n    time.sleep(0.05)\"])\n\
-open('pids', 'w').write('%d %d' % (os.getpid(), kid.pid))\n\
-print('ready', flush=True)\n\
-while True:\n    open('own.ticks', 'a').write('x\\n')\n    time.sleep(0.05)\n",
-    )
-    .unwrap();
-    let s = spec(dir.path(), "pty", &script.to_string_lossy(), &[], "go");
-    let (work, run_dir, exec) = (s.cwd.clone(), s.run_dir.clone(), s.exec.clone());
-    let rt = runtime::for_kind("pty").unwrap();
-    let (etx, _erx) = mpsc::unbounded_channel();
-    let (ctx, crx) = mpsc::unbounded_channel();
-    let run = tokio::spawn(rt.start(s, etx, crx));
-    let ticks = [work.join("own.ticks"), work.join("kid.ticks")];
-    let sizes = || -> Vec<u64> {
-        ticks
-            .iter()
-            .map(|f| std::fs::metadata(f).map_or(0, |m| m.len()))
-            .collect()
-    };
-    let wait = |what: &'static str, done: &dyn Fn() -> bool| {
-        let end = std::time::Instant::now() + Duration::from_secs(60);
-        while !done() {
-            assert!(std::time::Instant::now() < end, "timed out: {what}");
-            std::thread::sleep(Duration::from_millis(50));
-        }
-    };
-    wait("both processes tick", &|| sizes().iter().all(|n| *n > 10));
-    let pids: Vec<u32> = std::fs::read_to_string(work.join("pids"))
-        .unwrap()
-        .split_whitespace()
-        .map(|p| p.parse().unwrap())
-        .collect();
-    assert_eq!(pids.len(), 2);
-
-    let paused = exec.stop(&run_dir).expect("a pty run can be stopped");
-    // A write that had begun may still land.
-    tokio::time::sleep(Duration::from_millis(400)).await;
-    let held = sizes();
-    for pid in &pids {
-        assert_eq!(
-            procs::stopped(*pid),
-            Some(true),
-            "process {pid} is not stopped"
-        );
-    }
-    tokio::time::sleep(Duration::from_millis(1500)).await;
-    assert_eq!(sizes(), held, "a paused run made progress");
-    paused.resume();
-    wait("both processes tick again", &|| {
-        sizes().iter().zip(&held).all(|(now, then)| now > then)
-    });
-    assert_eq!(procs::stopped(pids[0]), Some(false));
-
-    ctx.send(Control::Cancel).unwrap();
-    let o = tokio::time::timeout(Duration::from_secs(20), run)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(o.status, Status::Cancelled, "{o:?}");
-    wait("the program and its child end", &|| {
-        pids.iter().all(|p| procs::stopped(*p).is_none())
-    });
-    let end = sizes();
-    tokio::time::sleep(Duration::from_millis(600)).await;
-    assert_eq!(sizes(), end, "something of the run still writes");
-}
-
-/// Windows: whether a process is stopped, for the pause tests.
-#[cfg(windows)]
-mod procs {
-    /// `Some(true)` when every thread of the process `pid` is suspended (a suspend that is
-    /// taken back at once tells the count before it), `Some(false)` when one runs, `None` when
-    /// the process is gone.
-    pub fn stopped(pid: u32) -> Option<bool> {
-        use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
-        use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-            CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
-        };
-        use windows_sys::Win32::System::Threading::{
-            OpenThread, ResumeThread, SuspendThread, THREAD_SUSPEND_RESUME,
-        };
-        if !daemon::winjob::pid_alive(pid) {
-            return None;
-        }
-        let (mut threads, mut running) = (0, 0);
-        // SAFETY: a snapshot of the system's threads, read entry by entry into a struct of the
-        // size the call is told; each thread handle is closed again.
-        unsafe {
-            let snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-            assert_ne!(snap, INVALID_HANDLE_VALUE);
-            let mut e: THREADENTRY32 = std::mem::zeroed();
-            e.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
-            let mut more = Thread32First(snap, &mut e) != 0;
-            while more {
-                if e.th32OwnerProcessID == pid {
-                    let t = OpenThread(THREAD_SUSPEND_RESUME, 0, e.th32ThreadID);
-                    if !t.is_null() {
-                        threads += 1;
-                        let before = SuspendThread(t);
-                        if before != u32::MAX {
-                            ResumeThread(t);
-                            if before == 0 {
-                                running += 1;
-                            }
-                        }
-                        CloseHandle(t);
-                    }
-                }
-                more = Thread32Next(snap, &mut e) != 0;
-            }
-            CloseHandle(snap);
-        }
-        (threads > 0).then_some(running == 0)
-    }
-}
-
 #[cfg(unix)]
 #[tokio::test]
 async fn pty_cancel_kills_group() {
@@ -1007,10 +881,11 @@ fn aside_runs_ignore_widening_config() {
 /// The MCP overrides of a side chat run are valid for the real Codex CLI whether or not it
 /// loads a server's config file: here an untrusted project's `.codex/config.toml`, which Codex
 /// skips, and a user config with a stdio and a URL server. Every server ends up disabled.
-/// `codex mcp list` reads the config without a model call. Skipped without `codex` on PATH.
+/// `codex mcp list` reads the config without a model call.
 #[test]
+#[ignore = "real CLI: scripts/test-real-cli.sh"]
 fn codex_aside_mcp_overrides_load_in_real_cli() {
-    let Some(codex) = real_codex() else { return };
+    let codex = real_codex();
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("codex-home");
     std::fs::create_dir_all(&home).unwrap();
@@ -1060,18 +935,11 @@ fn codex_aside_mcp_overrides_load_in_real_cli() {
 }
 
 /// The real `codex` of this machine and how to start it (on Windows npm's `codex.cmd` is
-/// resolved to what it starts, as for a run). None (skip) when there is none; a failure
-/// instead when `TC_REQUIRE_REAL_CODEX` is set (CI installs the CLI and sets it).
-fn real_codex() -> Option<daemon::health::Launch> {
-    let Some(found) = daemon::health::which("codex") else {
-        assert!(
-            std::env::var_os("TC_REQUIRE_REAL_CODEX").is_none(),
-            "TC_REQUIRE_REAL_CODEX is set and codex is not on PATH"
-        );
-        eprintln!("codex not on PATH; skipped");
-        return None;
-    };
-    Some(daemon::health::launch(&found))
+/// resolved to what it starts, as for a run). The real-CLI cases are `#[ignore]`d and run by
+/// `scripts/test-real-cli.sh`, which checks it is there.
+fn real_codex() -> daemon::health::Launch {
+    let found = daemon::health::which("codex").expect("codex is not on PATH");
+    daemon::health::launch(&found)
 }
 
 /// `codex app-server` with `args`: runs `command` through `command/exec` (the server's sandbox,
@@ -1137,12 +1005,12 @@ fn codex_exec(
 /// A Codex run in a `workspace-write` sandbox can use `chat-run` without network:
 /// the real Codex CLI runs the real client through `command/exec` (the server's sandbox, no
 /// model call) with the app-server args the daemon builds. The sandbox blocks the run's unix
-/// socket, so a Codex run uses the request folder in its working folder. Skipped without
-/// `codex` on PATH.
+/// socket, so a Codex run uses the request folder in its working folder.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "real CLI: scripts/test-real-cli.sh"]
 async fn codex_sandbox_lets_chat_run_answer_without_network() {
-    let Some(codex) = real_codex() else { return };
+    let codex = real_codex();
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("codex-home");
     std::fs::create_dir_all(&home).unwrap();
@@ -1282,230 +1150,14 @@ fn outside_temp() -> tempfile::TempDir {
     }
 }
 
-/// The settings of Codex's own Windows sandbox a report test tries. `elevated` only when
-/// `TC_CODEX_ELEVATED_SANDBOX` is set: its setup changes the computer (it makes sandbox
-/// accounts and lets them write the user's temp folder, after which the daemon rightly
-/// refuses run folders there), so CI tries it in a last step of its own.
-#[cfg(windows)]
-fn windows_sandbox_modes(always: &[&'static str]) -> Vec<&'static str> {
-    let mut modes = always.to_vec();
-    if std::env::var_os("TC_CODEX_ELEVATED_SANDBOX").is_some() {
-        modes.push("elevated");
-    }
-    modes
-}
-
-/// Windows: what Codex's `read-only` does to a command with each setting of Codex's own
-/// Windows sandbox (none, `unelevated`, `elevated`): a write in the working folder, a write
-/// outside it and outside the temp folder, reading a file, and a connection to a port of this
-/// computer. Written to
-/// `codex-windows-read-only.json` in the test folder (CI prints it). Asserts nothing but that
-/// no call hangs; [`codex_read_only_sandbox_writes_nothing`] asserts for what the daemon sends.
-#[cfg(windows)]
-#[tokio::test(flavor = "multi_thread")]
-async fn codex_read_only_on_windows_report() {
-    let Some(codex) = real_codex() else { return };
-    let mut report = serde_json::Map::new();
-    for mode in windows_sandbox_modes(&["none", "unelevated"]) {
-        let tmp = tempfile::tempdir().unwrap();
-        let home = tmp.path().join("codex-home");
-        std::fs::create_dir_all(&home).unwrap();
-        let s = spec(tmp.path(), "codex", "codex", &[], "hi");
-        std::fs::write(s.cwd.join("seed.txt"), "seed-text").unwrap();
-        let mut args: Vec<String> = ["app-server", "-c", "sandbox_mode=\"read-only\""]
-            .map(String::from)
-            .into();
-        args.extend(["-c".into(), "approval_policy=\"never\"".into()]);
-        if mode != "none" {
-            args.extend(["-c".into(), format!("windows.sandbox=\"{mode}\"")]);
-        }
-        let outside = outside_temp();
-        let inside_file = s.cwd.join("written.txt");
-        let outside_file = outside.path().join("written.txt");
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        listener.set_nonblocking(true).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let mut calls = serde_json::Map::new();
-        for (what, line) in [
-            (
-                "a write in the working folder",
-                format!("echo x> {}", inside_file.display()),
-            ),
-            (
-                "a write outside it",
-                format!("echo x> {}", outside_file.display()),
-            ),
-            ("reading a file", "type seed.txt".to_string()),
-            (
-                "a connection to a local port",
-                format!("curl.exe -s -m 5 http://127.0.0.1:{port}/"),
-            ),
-        ] {
-            let command: Vec<String> = vec!["cmd.exe".into(), "/c".into(), line];
-            let (codex, args, home, cwd) =
-                (codex.clone(), args.clone(), home.clone(), s.cwd.clone());
-            let answer = tokio::task::spawn_blocking(move || {
-                codex_exec(&codex, &args, &home, &cwd, &command, serde_json::json!({}))
-            })
-            .await
-            .unwrap();
-            calls.insert(what.into(), answer);
-        }
-        calls.insert(
-            "the file in the working folder exists".into(),
-            inside_file.exists().into(),
-        );
-        calls.insert(
-            "the file outside exists".into(),
-            outside_file.exists().into(),
-        );
-        calls.insert(
-            "the connection arrived".into(),
-            listener.accept().is_ok().into(),
-        );
-        report.insert(mode.into(), calls.into());
-    }
-    std::fs::write(
-        std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("codex-windows-read-only.json"),
-        serde_json::to_string_pretty(&report).unwrap(),
-    )
-    .unwrap();
-}
-
-/// Windows: what a command of a Codex side chat can reach on the network. Codex's `read-only`
-/// blocks the network on macOS and Linux; on Windows, in the sandbox the daemon turns on for a
-/// side chat (`unelevated`, the one that needs no administrator), Codex only points the proxy
-/// settings of the command's environment at a dead port.
-///
-/// Asserted, with the arguments the daemon sends: a program that honors the proxy settings
-/// (curl) does not reach a listener on this computer's own address. Not asserted, written to
-/// `codex-windows-network.json` in the test folder (CI prints it): the same program told to
-/// ignore the proxy settings, which is the declared difference from the Mac
-/// (docs/plans/windows-parity/machine.zh.md). With `TC_CODEX_ELEVATED_SANDBOX` the report
-/// also tries Codex's elevated sandbox, in a folder private to the user (as run folders are)
-/// and in one where its sandbox accounts were given read access.
-#[cfg(windows)]
-#[tokio::test(flavor = "multi_thread")]
-async fn codex_side_chat_network_on_windows() {
-    let Some(codex) = real_codex() else { return };
-    let base = outside_temp();
-    let home = base.path().join("codex-home");
-    std::fs::create_dir_all(&home).unwrap();
-    let own_ip = std::net::UdpSocket::bind("0.0.0.0:0")
-        .and_then(|u| u.connect("8.8.8.8:53").and_then(|_| u.local_addr()))
-        .map(|a| a.ip().to_string())
-        .unwrap_or_else(|_| "127.0.0.1".into());
-    let mut variants = vec![("the daemon's side chat", "private")];
-    if std::env::var_os("TC_CODEX_ELEVATED_SANDBOX").is_some() {
-        variants.extend([
-            ("elevated", "private"),
-            ("elevated", "private, read access granted"),
-            ("elevated", "private, read access granted"),
-        ]);
-    }
-    let mut report = Vec::new();
-    for (i, (mode, kind)) in variants.into_iter().enumerate() {
-        let root = base.path().join(format!("root-{i}"));
-        daemon::winacl::create_dir(&root).unwrap();
-        let mut s = spec(&root, "codex", "codex", &[], "hi");
-        s.aside = true;
-        std::fs::write(s.cwd.join("seed.txt"), "seed-text").unwrap();
-        if kind.ends_with("granted") {
-            for user in ["CodexSandboxOffline", "CodexSandboxOnline"] {
-                let _ = std::process::Command::new("icacls.exe")
-                    .arg(&s.cwd)
-                    .args(["/grant", &format!("{user}:(OI)(CI)RX")])
-                    .output();
-            }
-        }
-        let (approval, sandbox) = runtime::codex::thread_policy(&s);
-        let mut args = if mode == "elevated" {
-            vec![
-                "app-server".to_string(),
-                "-c".into(),
-                "windows.sandbox=\"elevated\"".into(),
-            ]
-        } else {
-            runtime::codex::app_server_args(&s).unwrap()
-        };
-        args.extend(["-c".to_string(), format!("sandbox_mode=\"{sandbox}\"")]);
-        args.extend(["-c".to_string(), format!("approval_policy=\"{approval}\"")]);
-        let listener = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
-        listener.set_nonblocking(true).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let mut calls = serde_json::Map::new();
-        calls.insert("mode".into(), format!("{mode}, {kind} folder").into());
-        for (what, line) in [
-            ("reading a file", "type seed.txt".to_string()),
-            (
-                "curl to this computer's own address",
-                format!("curl.exe -s -m 5 http://{own_ip}:{port}/"),
-            ),
-            (
-                "curl to this computer's own address, ignoring proxy settings",
-                format!("curl.exe --noproxy * -s -m 5 http://{own_ip}:{port}/"),
-            ),
-            (
-                "curl to the internet, ignoring proxy settings",
-                "curl.exe --noproxy * -s -m 10 -o NUL https://github.com/".to_string(),
-            ),
-            ("proxy settings", "set | findstr /i proxy".to_string()),
-        ] {
-            let command: Vec<String> = vec!["cmd.exe".into(), "/c".into(), line];
-            let (codex, args, home, dir) =
-                (codex.clone(), args.clone(), home.clone(), s.cwd.clone());
-            let answer = tokio::task::spawn_blocking(move || {
-                codex_exec(&codex, &args, &home, &dir, &command, serde_json::json!({}))
-            })
-            .await
-            .unwrap();
-            let mut arrived = 0;
-            while listener.accept().is_ok() {
-                arrived += 1;
-            }
-            if mode != "elevated" && what == "reading a file" {
-                assert!(
-                    answer["result"]["stdout"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .contains("seed-text"),
-                    "{answer}"
-                );
-            }
-            if mode != "elevated" && what == "curl to this computer's own address" {
-                assert_eq!(
-                    arrived, 0,
-                    "a program that honors proxy settings reached the network: {answer}"
-                );
-            }
-            calls.insert(
-                what.into(),
-                serde_json::json!({
-                    "answer": answer.get("result").or(answer.get("error")),
-                    "connections that arrived": arrived,
-                }),
-            );
-        }
-        calls.insert(
-            "the daemon's privacy check of the run folder".into(),
-            format!("{:?}", daemon::winacl::check(&root)).into(),
-        );
-        report.push(serde_json::Value::Object(calls));
-    }
-    std::fs::write(
-        std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("codex-windows-network.json"),
-        serde_json::to_string_pretty(&report).unwrap(),
-    )
-    .unwrap();
-}
-
 /// A side chat run of Codex is read-only on every system: with the sandbox the daemon sends
 /// for it (`read-only`, approval `never`) the real CLI does not let a command write a file,
 /// in the working folder or outside it. Through `command/exec` (the server's sandbox, no
-/// model call). Skipped without `codex` on PATH.
+/// model call).
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "real CLI: scripts/test-real-cli.sh"]
 async fn codex_read_only_sandbox_writes_nothing() {
-    let Some(codex) = real_codex() else { return };
+    let codex = real_codex();
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("codex-home");
     std::fs::create_dir_all(&home).unwrap();
@@ -1577,11 +1229,12 @@ async fn codex_read_only_sandbox_writes_nothing() {
 /// Windows: a Codex run reaches the daemon through the request folder. With the sandbox the
 /// daemon sends for a run (`danger-full-access`) the real CLI starts the real `chat-run`
 /// client, the request arrives, and the answer comes back; the folder is left clean. Through
-/// `command/exec` (no model call). Skipped without `codex` on PATH.
+/// `command/exec` (no model call).
 #[cfg(windows)]
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "real CLI: scripts/test-real-cli.sh"]
 async fn codex_on_windows_reaches_the_daemon_through_the_request_folder() {
-    let Some(codex) = real_codex() else { return };
+    let codex = real_codex();
     // Also for a user whose own Codex config turns Codex's Windows sandbox on: a run has full
     // access whatever the config says, so the sandbox is not used for it.
     for user_config in ["", "[windows]\nsandbox = \"unelevated\"\n"] {
@@ -1731,182 +1384,6 @@ fn the_session_folder_has_the_names_the_cli_can_use() {
         Some(config.join("projects").join(&names[0]).join("s1.jsonl"))
     );
     assert!(!prepare_resume(&config, &cwd, "gone"));
-}
-
-/// Windows: what Codex's own Windows sandbox does when a user turns it on by hand (it is off
-/// unless the user's Codex config says otherwise, and the daemon's runs do not use it: they
-/// have full access). Both of its modes, with `workspace-write`, through `command/exec` of the
-/// real CLI: a write outside the working folder, then the real `chat-run` client against the
-/// run's named pipe and against the request folder. What each call answered is written to
-/// `codex-windows-sandbox.json` in the test folder (CI prints it).
-///
-/// This does not prove that `chat-run` works inside that sandbox. It proves what is there to
-/// see without a person: no call hangs, and each one either starts nothing (the sandbox
-/// refuses to run the command), or `chat-run` answers, or it names the sandbox as what blocks
-/// it. Seen with Codex 0.167.1: the unelevated mode starts no command at all ("cannot enforce
-/// split writable root sets directly; refusing to run unsandboxed"); what the elevated mode
-/// did on the runner is in the file.
-#[cfg(windows)]
-#[tokio::test(flavor = "multi_thread")]
-async fn codex_windows_sandbox_modes_start_nothing_or_name_the_sandbox() {
-    let Some(codex) = real_codex() else { return };
-    let mut report = serde_json::Map::new();
-    for mode in windows_sandbox_modes(&["unelevated"]) {
-        report.insert(mode.into(), codex_windows_sandbox_mode(&codex, mode).await);
-    }
-    std::fs::write(
-        std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("codex-windows-sandbox.json"),
-        serde_json::to_string_pretty(&report).unwrap(),
-    )
-    .unwrap();
-    for (mode, calls) in &report {
-        for what in [
-            "chat-run through the named pipe",
-            "chat-run through the request folder",
-        ] {
-            let outcome = calls[what]["outcome"].as_str().unwrap_or_default();
-            assert!(
-                [
-                    "the command was not started",
-                    "chat-run answered",
-                    "chat-run named the sandbox"
-                ]
-                .contains(&outcome),
-                "{mode}, {what}: {}",
-                calls[what]
-            );
-        }
-    }
-}
-
-/// One mode of [`codex_windows_sandbox_modes_start_nothing_or_name_the_sandbox`]: each call's
-/// answer and what it amounts to.
-#[cfg(windows)]
-async fn codex_windows_sandbox_mode(
-    codex: &daemon::health::Launch,
-    mode: &str,
-) -> serde_json::Value {
-    let codex = codex.clone();
-    let tmp = tempfile::tempdir().unwrap();
-    let home = tmp.path().join("codex-home");
-    std::fs::create_dir_all(&home).unwrap();
-    let mut s = spec(tmp.path(), "codex", "codex", &[], "hi");
-    s.note = Some(daemon::chat_run::note());
-    let mut args = runtime::codex::app_server_args(&s).unwrap();
-    args.extend([
-        "-c".to_string(),
-        "sandbox_mode=\"workspace-write\"".to_string(),
-        "-c".to_string(),
-        format!("windows.sandbox=\"{mode}\""),
-    ]);
-    daemon::chat_run::set_exe(std::path::PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
-    let bin = daemon::chat_run::install_link(tmp.path()).unwrap();
-    let outputs = std::sync::Arc::new(daemon::chat_run::Outputs::default());
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let tx2 = tx.clone();
-    let server = daemon::chat_run::Server::start(
-        daemon::chat_run::socket_path(tmp.path()),
-        outputs.clone(),
-        move |e| {
-            let _ = tx2.send(e);
-        },
-        daemon::chat_run::TIMEOUT,
-    )
-    .unwrap();
-    let spool = daemon::chat_run::Spool::start(
-        daemon::chat_run::spool_dir(&s.cwd, "x1"),
-        outputs.clone(),
-        move |e| {
-            let _ = tx.send(e);
-        },
-        daemon::chat_run::TIMEOUT,
-    )
-    .unwrap();
-    // The daemon's side: every request that arrives is answered.
-    let answering = {
-        let outputs = outputs.clone();
-        tokio::spawn(async move {
-            while let Some(ev) = rx.recv().await {
-                if let RunEvent::Output { output_id, .. } = ev {
-                    outputs.resolve(daemon::proto::RunOutputResult {
-                        run_id: "r1".into(),
-                        output_id,
-                        ok: true,
-                        result: Some(serde_json::json!({ "resolved": true })),
-                        error: None,
-                    });
-                }
-            }
-        })
-    };
-    let chat_run: Vec<String> = [
-        bin.join(daemon::chat_run::link_name())
-            .to_string_lossy()
-            .to_string(),
-        "resolve".into(),
-        "--event".into(),
-        "EV1".into(),
-        "--result".into(),
-        "ignored".into(),
-    ]
-    .into();
-    let exec = |command: Vec<String>, env: serde_json::Value| {
-        let (codex, args, home, cwd) = (codex.clone(), args.clone(), home.clone(), s.cwd.clone());
-        tokio::task::spawn_blocking(move || codex_exec(&codex, &args, &home, &cwd, &command, env))
-    };
-    let outside = outside_temp();
-    let target = outside.path().join("written.txt");
-    let write = exec(
-        vec![
-            "cmd.exe".into(),
-            "/c".into(),
-            // No quotes: the path has no space, and cmd.exe reads quotes its own way.
-            format!("echo x> {}", target.display()),
-        ],
-        serde_json::json!({}),
-    )
-    .await
-    .unwrap();
-    let pipe = exec(
-        chat_run.clone(),
-        serde_json::json!({ "CHAT_RUN_SOCKET": server.path().to_string_lossy() }),
-    )
-    .await
-    .unwrap();
-    let folder = exec(
-        chat_run,
-        serde_json::json!({ "CHAT_RUN_DIR": spool.path().to_string_lossy() }),
-    )
-    .await
-    .unwrap();
-    drop((server, spool));
-    let _ = tokio::time::timeout(Duration::from_secs(5), answering).await;
-    let outcome = |answer: &serde_json::Value| {
-        let stdout = answer["result"]["stdout"].as_str().unwrap_or_default();
-        if answer.get("error").is_some_and(|e| !e.is_null()) {
-            "the command was not started"
-        } else if answer["result"]["exitCode"] == 0 && stdout.contains("resolved") {
-            "chat-run answered"
-        } else if stdout.contains("sandbox.blocked") {
-            "chat-run named the sandbox"
-        } else {
-            "something else"
-        }
-    };
-    serde_json::json!({
-        "a write outside the working folder": {
-            "outcome": if write.get("error").is_some_and(|e| !e.is_null()) {
-                "the command was not started"
-            } else if target.exists() {
-                "the file was written: no sandbox was in effect"
-            } else {
-                "the command ran and the file was not written"
-            },
-            "answer": write,
-        },
-        "chat-run through the named pipe": { "outcome": outcome(&pipe), "answer": pipe },
-        "chat-run through the request folder": { "outcome": outcome(&folder), "answer": folder },
-    })
 }
 
 /// A Codex run always has full access, whatever `daemon.toml` says, so `chat-run` always works

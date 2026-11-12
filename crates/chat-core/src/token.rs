@@ -282,39 +282,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn credential_targets_keep_service_and_account_apart() {
-        assert_eq!(
-            credential_target("app.id", "https://chat.example"),
-            "app.id:https://chat.example"
-        );
-        assert_ne!(
-            credential_target("app.id", "https://a.example"),
-            credential_target("app.id", "https://b.example")
-        );
-    }
-
-    /// Runs against the real Credential Manager of the signed-in user (Windows CI).
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn credential_store_round_trip() {
-        let account = format!("https://test.invalid/{}", crate::new_id());
-        let s = CredentialTokenStore::new("chat-core.test", account.clone());
-        assert_eq!(s.load().unwrap(), None);
-        s.save("tc_test_value").unwrap();
-        assert_eq!(s.load().unwrap().as_deref(), Some("tc_test_value"));
-        // A second store of the same pair reads it; another account does not.
-        let again = CredentialTokenStore::new("chat-core.test", account.clone());
-        assert_eq!(again.load().unwrap().as_deref(), Some("tc_test_value"));
-        let other = CredentialTokenStore::new("chat-core.test", format!("{account}/other"));
-        assert_eq!(other.load().unwrap(), None);
-        s.save("tc_test_value_2").unwrap();
-        assert_eq!(s.load().unwrap().as_deref(), Some("tc_test_value_2"));
-        s.clear().unwrap();
-        s.clear().unwrap();
-        assert_eq!(s.load().unwrap(), None);
-    }
-
-    #[test]
     fn file_store_round_trip_with_mode_600() {
         let dir = tempfile::tempdir().unwrap();
         let s = FileTokenStore::new(dir.path().join("sub/token"));

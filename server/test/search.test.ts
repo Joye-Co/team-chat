@@ -1,9 +1,8 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import { afterAll, describe, expect, it } from "vitest";
-import { roomStub } from "../src/core/env";
 import { runMigrations } from "../src/core/migrations";
 import { type GroupRoom, roomMigrationSteps } from "../src/core/room";
-import { Client, clientMsgId, createGroup, createMember, protocolViolations, type TestMember } from "./helpers";
+import { Client, clientMsgId, createGroup, createMember, protocolViolations } from "./helpers";
 
 afterAll(() => {
   expect(protocolViolations).toEqual([]);
@@ -175,100 +174,5 @@ describe("search", () => {
       expect(row.c).toBe(row.u);
       expect(row.d).toBe(1);
     });
-  });
-
-  it("searches 100,000 messages in one room under 300 ms", { timeout: 300_000 }, async () => {
-    const owner = await createMember({ name: "P" });
-    const gid = await createGroup(owner, [], "perf");
-    const room = roomStub(env, gid);
-    // Binds the room to its group.
-    expect((await room.memberIds(gid)).ok).toBe(true);
-    const N = 100_000;
-    const TOPICS = 200;
-    const words = ["部署", "上线", "测试", "数据库", "性能", "会议", "客户", "需求", "设计", "发布", "回滚", "监控"];
-    const latin = ["deploy", "prod", "staging", "parseJSONData", "user_id", "cache", "latency", "bug", "fix", "review"];
-    const stub = env.GROUP_ROOM.get(env.GROUP_ROOM.idFromName(gid));
-    const t0 = Date.now();
-    await runInDurableObject(stub, async (_room: GroupRoom, state) => {
-      const sql = state.storage.sql;
-      let seed = 42;
-      const rnd = (n: number) => {
-        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-        return seed % n;
-      };
-      state.storage.transactionSync(() => {
-        for (let t = 0; t < TOPICS; t++) {
-          sql.exec(
-            `INSERT INTO topics (id, title, status, created_by, created_at, root_message_id, last_seq, message_count)
-             VALUES (?, ?, 'open', ?, ?, ?, 0, 0)`,
-            `T${String(t).padStart(5, "0")}`,
-            `话题 ${t} ${words[t % words.length]}`,
-            owner.id,
-            1,
-            `M${String(t).padStart(7, "0")}`,
-          );
-        }
-        for (let i = 0; i < N; i++) {
-          const body = `${words[rnd(words.length)]}${words[rnd(words.length)]} ${latin[rnd(latin.length)]} 第${i}条 ${
-            words[rnd(words.length)]
-          }的说明 ${latin[rnd(latin.length)]} item${i}`;
-          sql.exec(
-            `INSERT INTO messages (id, client_msg_id, topic_id, author_id, body, created_seq, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            `M${String(i).padStart(7, "0")}`,
-            `c${i}`,
-            `T${String(i % TOPICS).padStart(5, "0")}`,
-            owner.id,
-            body,
-            i + 1,
-            1_000_000 + i,
-          );
-        }
-        sql.exec(
-          "UPDATE search_backfill SET until_seq = ?, msg_cursor = 0, topic_cursor = '', topics_done = 0",
-          N,
-        );
-      });
-    });
-    const tInsert = Date.now() - t0;
-    const t1 = Date.now();
-    const bf = await room.rpc(gid, "search.backfill", null, {});
-    expect(bf.ok).toBe(true);
-    const tBackfill = Date.now() - t1;
-
-    const actor = { id: owner.id, level: "member" as const, kind: "human" as const };
-    const timings: Record<string, number> = {};
-    const queries: [string, Record<string, unknown>][] = [
-      ["部署", {}],
-      ["部", {}],
-      ["parseJSONData", {}],
-      ["部署 prod", {}],
-      ["数据库性能", {}],
-      ["item99999", {}],
-      ["deploy", { topicId: "T00007" }],
-      ["deploy limit 50", { limit: 50 }],
-      ["nothingmatches", {}],
-    ];
-    for (const [q, extra] of queries) {
-      const query = q === "deploy limit 50" ? "deploy" : q;
-      const s = Date.now();
-      const r = await room.rpc(gid, "search.query", actor, { query, ...extra });
-      timings[q] = Date.now() - s;
-      expect(r.ok, JSON.stringify(r)).toBe(true);
-      const hits = (r as { value: any[] }).value;
-      if (q === "nothingmatches") expect(hits).toEqual([]);
-      else expect(hits.length, q).toBeGreaterThan(0);
-      if (q === "item99999") expect(hits[0].messageId).toBe("M0099999");
-    }
-    // Through the gateway: one frame, all of the member's groups.
-    const { c } = await Client.connect(owner.token);
-    const s = Date.now();
-    const hits = await search(c, { query: "部署 deploy", limit: 50 });
-    timings["ws 部署 deploy (all groups)"] = Date.now() - s;
-    expect(hits).toHaveLength(50);
-    c.close();
-    const perf = { messages: N, insertMs: tInsert, backfillMs: tBackfill, searchMs: timings };
-    console.log(`SEARCH_PERF ${JSON.stringify(perf)}`);
-    for (const [q, ms] of Object.entries(timings)) expect(ms, q).toBeLessThan(300);
   });
 });

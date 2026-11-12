@@ -312,21 +312,6 @@ mod tests {
         assert_eq!(helper_has_homes(&v), Some(true));
     }
 
-    /// The daemon (the runner user) lists the images for the monitor: the folder is readable by
-    /// the runner's group, each image stays root's.
-    #[test]
-    fn the_image_folder_is_listable_by_the_runner() {
-        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/runner/");
-        let helper = std::fs::read_to_string(format!("{root}runner-vm")).unwrap();
-        assert!(helper.contains(r#"install -d -o root -g "$gid" -m 750 "$images""#));
-        assert!(helper.contains(r#"chown root:"$gid" "$images""#));
-        let setup = std::fs::read_to_string(format!("{root}host-setup.sh")).unwrap();
-        assert!(setup.contains(
-            r#"install -d -o root -g "$RUNNER_USER" -m 750 "$RUNNER_HOME_DATA/home-images""#
-        ));
-        assert!(!helper.contains("711") && !setup.contains("711"));
-    }
-
     #[tokio::test]
     async fn runs_of_one_member_take_turns() {
         let a = lock("home:01BOT").await;

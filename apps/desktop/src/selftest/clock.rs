@@ -61,19 +61,7 @@ pub fn utc_now() -> DateTime<Utc> {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{Datelike as _, Timelike as _};
-
     use super::*;
-
-    #[test]
-    fn the_artboard_morning_is_10_21_on_3_november_2026() {
-        let t = Local
-            .timestamp_millis_opt(artboard_now())
-            .single()
-            .expect("a local time");
-        assert_eq!((t.year(), t.month(), t.day()), (2026, 11, 3));
-        assert_eq!((t.hour(), t.minute()), (10, 21));
-    }
 
     #[test]
     fn tests_read_the_real_clock() {

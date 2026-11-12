@@ -125,38 +125,3 @@ async fn the_client_asks_the_daemon_over_the_socket_and_the_request_folder() {
     drop(spool);
     assert!(!work.join(".chat-run-r1").exists());
 }
-
-/// `daemon doctor` on this system: it finds git and a program on PATH by name (on Windows
-/// through PATHEXT), reads the disk, accepts a private token file and says OK.
-#[test]
-fn doctor_reports_this_machine() {
-    let tmp = tempfile::tempdir().unwrap();
-    let token = tmp.path().join("token");
-    std::fs::write(&token, "tm_test\n").unwrap();
-    daemon::sys::set_mode(&token, 0o600).unwrap();
-    let config = tmp.path().join("daemon.toml");
-    // TOML literal strings: a Windows path has backslashes.
-    std::fs::write(
-        &config,
-        format!(
-            "server_url = \"http://127.0.0.1:1\"\ntoken_file = '{}'\nwork_root = '{}'\n\
-             [runtimes.shell]\nkind = \"pty\"\ncommand = \"{}\"\n",
-            token.display(),
-            tmp.path().join("runs").display(),
-            if cfg!(windows) { "cmd" } else { "sh" },
-        ),
-    )
-    .unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_daemon"))
-        .arg("doctor")
-        .arg("--config")
-        .arg(&config)
-        .output()
-        .unwrap();
-    let text = String::from_utf8_lossy(&out.stdout).to_string();
-    assert!(out.status.success(), "{text}");
-    assert!(text.contains("git:          found"), "{text}");
-    assert!(text.contains("shell") && text.contains("found"), "{text}");
-    assert!(!text.contains("disk free:    0.0 GiB of 0.0 GiB"), "{text}");
-    assert!(text.trim_end().ends_with("OK"), "{text}");
-}

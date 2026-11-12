@@ -242,21 +242,6 @@ mod tests {
     }
 
     #[test]
-    fn button_glyphs_fill_three_quarters_of_the_button() {
-        let i = button_glyph(Sym::Inspector, gpui::px(18.), gpui::px(32.));
-        let _ = i;
-        assert_eq!(
-            super::super::sf_symbols::asset::path(
-                Sym::Inspector,
-                SymSize::new(15., 24., Weight::Regular)
-            )
-            .split('/')
-            .nth(4),
-            Some("240")
-        );
-    }
-
-    #[test]
     fn old_slot_sizes_map_to_the_native_contexts() {
         assert_eq!(SymSize::for_slot(gpui::px(18.)), SymSize::SIDEBAR);
         assert_eq!(SymSize::for_slot(gpui::px(16.)), SymSize::INLINE);

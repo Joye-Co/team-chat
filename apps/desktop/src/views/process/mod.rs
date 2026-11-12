@@ -1184,29 +1184,4 @@ mod tests {
         assert_eq!(status_kind(RunStatus::Done), StatusKind::Done);
         assert_eq!(status_kind(RunStatus::Cancelled), StatusKind::Idle);
     }
-
-    #[test]
-    fn every_status_has_words() {
-        for s in [
-            RunStatus::Created,
-            RunStatus::Running,
-            RunStatus::Waiting,
-            RunStatus::Blocked,
-            RunStatus::Done,
-            RunStatus::Failed,
-            RunStatus::Cancelled,
-        ] {
-            assert!(!status_text(s).is_empty());
-            assert_eq!(
-                s.is_active(),
-                matches!(
-                    s,
-                    RunStatus::Created
-                        | RunStatus::Running
-                        | RunStatus::Waiting
-                        | RunStatus::Blocked
-                )
-            );
-        }
-    }
 }

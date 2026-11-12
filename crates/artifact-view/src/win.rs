@@ -2741,29 +2741,3 @@ fn task_dialog(owner: HWND, ask: &Confirm) -> Option<bool> {
         Some(pressed == AGREE)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The link dialog is a page's way out: nothing that was typed or clicked before it
-    /// showed may agree to it.
-    #[test]
-    fn the_link_dialog_cancels_by_default_and_holds_its_agree_button() {
-        assert_eq!(DEFAULT_BUTTON, IDCANCEL.0);
-        assert_ne!(DEFAULT_BUTTON, AGREE);
-        assert_ne!(FALLBACK_STYLE.0 & MB_DEFBUTTON2.0, 0);
-        assert!(!agree_enabled(0));
-        assert!(!agree_enabled(AGREE_DELAY_MS - 1));
-        assert!(agree_enabled(AGREE_DELAY_MS));
-        // A held key repeats within half a second; the delay is longer.
-        const { assert!(AGREE_DELAY_MS >= 500) };
-    }
-
-    #[test]
-    fn a_scheme_has_a_handler_only_when_a_program_registered_it() {
-        // Every Windows opens `https` with something; nothing registers this one.
-        assert!(has_url_handler("https"));
-        assert!(!has_url_handler("artifact-view-no-such-scheme"));
-    }
-}

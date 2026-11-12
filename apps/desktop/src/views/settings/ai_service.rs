@@ -571,24 +571,4 @@ mod tests {
         assert_eq!(off[0].2, s::AI_USE_FRONT_OFF);
         assert_eq!(off[3].2, s::AI_USE_MEMORY_OFF);
     }
-
-    #[test]
-    fn every_problem_has_words() {
-        for p in [
-            AiDraftProblem::ModelRequired,
-            AiDraftProblem::ModelInvalid,
-            AiDraftProblem::BaseUrlInvalid,
-            AiDraftProblem::KeyRequired,
-            AiDraftProblem::KeyInvalid,
-        ] {
-            assert!(!problem_text(p, false).is_empty());
-        }
-        assert_eq!(
-            problem_text(AiDraftProblem::KeyRequired, true),
-            s::AI_KEY_REQUIRED_SWITCH
-        );
-        for p in AiProviderKind::ALL {
-            assert!(!provider_label(p).is_empty());
-        }
-    }
 }

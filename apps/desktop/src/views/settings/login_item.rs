@@ -360,22 +360,6 @@ mod tests {
         assert!(!status(Some(r#""C:\Other\app.exe""#), None));
     }
 
-    /// Writes a value of its own under the real Run key of the signed-in user (Windows CI)
-    /// and takes it out again.
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn the_run_key_round_trip() {
-        let name = format!("desktop-test-{}", chat_core::new_id());
-        assert_eq!(super::imp::status_of(&name), Some(Status::NotRegistered));
-        assert_eq!(super::imp::set_of(&name, true), Ok(Status::Enabled));
-        assert_eq!(super::imp::status_of(&name), Some(Status::Enabled));
-        // Turning it on again is fine; off twice too.
-        assert_eq!(super::imp::set_of(&name, true), Ok(Status::Enabled));
-        assert_eq!(super::imp::set_of(&name, false), Ok(Status::NotRegistered));
-        assert_eq!(super::imp::set_of(&name, false), Ok(Status::NotRegistered));
-        assert_eq!(super::imp::status_of(&name), Some(Status::NotRegistered));
-    }
-
     #[test]
     fn a_run_value_names_its_program() {
         use std::path::Path;

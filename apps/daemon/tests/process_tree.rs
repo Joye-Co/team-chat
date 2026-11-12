@@ -37,7 +37,8 @@ fn main() {
         fake_cli(&args[1..]);
     }
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let cases: Vec<(&str, runtime::BoxFuture<()>)> = vec![
+    #[allow(unused_mut)]
+    let mut cases: Vec<(&str, runtime::BoxFuture<()>)> = vec![
         (
             "a_run_starts_streams_and_ends",
             Box::pin(a_run_starts_streams_and_ends()),
@@ -54,6 +55,10 @@ fn main() {
             "pause_holds_a_tree_that_keeps_starting_processes",
             Box::pin(pause_holds_a_tree_that_keeps_starting_processes()),
         ),
+    ];
+    // Windows only: npm shims, batch wrappers, helper jobs and ConPTY have no Unix form.
+    #[cfg(windows)]
+    let windows: [(&str, runtime::BoxFuture<()>); 4] = [
         (
             "an_npm_shim_starts_the_cli_without_cmd_exe",
             Box::pin(an_npm_shim_starts_the_cli_without_cmd_exe()),
@@ -71,6 +76,8 @@ fn main() {
             Box::pin(the_pty_runtime_runs_a_program_in_a_pseudoconsole()),
         ),
     ];
+    #[cfg(windows)]
+    cases.extend(windows);
     println!("\nrunning {} tests", cases.len());
     for (name, case) in cases {
         rt.block_on(async {
@@ -613,10 +620,6 @@ async fn an_npm_shim_starts_the_cli_without_cmd_exe() {
     assert!(argv.iter().any(|a| a == note), "{argv:?}");
 }
 
-/// Unix starts the program file the kernel is given: there is no shim to resolve.
-#[cfg(not(windows))]
-async fn an_npm_shim_starts_the_cli_without_cmd_exe() {}
-
 /// Windows: a `.cmd` that is not an npm shim runs in `cmd.exe`. An argument with a line break
 /// cannot get through it: the run fails and says why, before anything starts. Arguments
 /// without one arrive unchanged, whatever `cmd.exe` syntax is in them.
@@ -659,9 +662,6 @@ async fn a_batch_wrapper_gets_no_argument_with_a_line_break() {
     assert!(argv.iter().any(|a| a == note), "{argv:?}");
 }
 
-#[cfg(not(windows))]
-async fn a_batch_wrapper_gets_no_argument_with_a_line_break() {}
-
 /// Windows: a probe or a sign-in the daemon starts is in a job of its own, so giving it up
 /// (a timeout, a cancel) also ends what it started; killing a `.cmd` wrapper alone would
 /// leave the real program running.
@@ -693,10 +693,6 @@ async fn a_helper_process_ends_with_everything_it_started() {
     })
     .await;
 }
-
-/// Unix: a helper is a plain child; the CLIs there are not started through wrappers.
-#[cfg(not(windows))]
-async fn a_helper_process_ends_with_everything_it_started() {}
 
 /// A run of the `pty` runtime with `cmd.exe` and `args`.
 #[cfg(windows)]
@@ -766,7 +762,3 @@ async fn the_pty_runtime_runs_a_program_in_a_pseudoconsole() {
     assert_eq!(o.status, Status::Cancelled, "{o:?}");
     wait_for("the shell to end", || !alive(pid)).await;
 }
-
-/// Unix: `tests/runtimes.rs` covers the pty runtime there.
-#[cfg(not(windows))]
-async fn the_pty_runtime_runs_a_program_in_a_pseudoconsole() {}

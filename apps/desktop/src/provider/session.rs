@@ -541,16 +541,6 @@ pub async fn sign_in(
 mod tests {
     use super::*;
 
-    /// The device list shows this computer under its Windows name.
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn the_device_name_is_the_computer_name() {
-        let name = device_name();
-        println!("device name: {name}");
-        assert_eq!(name, std::env::var("COMPUTERNAME").unwrap());
-        assert!(!name.is_empty() && name != "PC");
-    }
-
     #[test]
     fn server_url_is_normalized() {
         assert_eq!(

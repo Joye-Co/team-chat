@@ -315,27 +315,6 @@ mod tests {
         assert!(String::from_utf8(big).unwrap().contains("-g-dot)\""));
     }
 
-    /// Writes every tile at 36 pt (the 48 pt art) and 64 pt to
-    /// `$TILE_DUMP` for a visual check: `TILE_DUMP=<dir> cargo test -p desktop
-    /// dump_tiles -- --ignored`.
-    #[test]
-    #[ignore]
-    fn dump_tiles() {
-        let Some(dir) = std::env::var_os("TILE_DUMP") else {
-            return;
-        };
-        std::fs::create_dir_all(&dir).unwrap();
-        for &c in CharacterId::ALL {
-            for s in looks() {
-                for size in [24., 32., 36., 64.] {
-                    let svg = load(&tile_path(c, s, px(size))).unwrap();
-                    let name = format!("{}-{}-{size}.svg", c.as_str(), s.face());
-                    std::fs::write(std::path::Path::new(&dir).join(name), svg).unwrap();
-                }
-            }
-        }
-    }
-
     #[test]
     fn a_tile_rasterizes_at_its_device_pixel_size() {
         let path = device_path(

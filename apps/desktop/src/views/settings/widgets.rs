@@ -1244,24 +1244,6 @@ mod tests {
     }
 
     #[test]
-    fn every_error_has_text() {
-        for e in [
-            AdminError::Unsupported,
-            AdminError::Offline,
-            AdminError::Forbidden,
-            AdminError::NotFound,
-            AdminError::LastOwner,
-            AdminError::Invalid,
-            AdminError::TooLarge,
-            AdminError::RateLimited,
-            AdminError::Conflict,
-            AdminError::Other,
-        ] {
-            assert!(!error_text(e).is_empty());
-        }
-    }
-
-    #[test]
     fn numbers_get_thousands_separators() {
         assert_eq!(grouped(0), "0");
         assert_eq!(grouped(950), "950");

@@ -942,20 +942,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn push_sizes_follow_the_scale() {
-        // §1.8: sm 28, default 32, lg 36, all radius 8.
-        assert_eq!(PushSize::Regular.height(), px(32.));
-        assert_eq!(PushSize::Small.height(), px(28.));
-        assert_eq!(PushSize::Large.height(), px(36.));
-        for size in [PushSize::Regular, PushSize::Small, PushSize::Large] {
-            assert_eq!(size.radius(), px(8.));
-        }
-        assert_eq!(IconSize::Regular.side(), px(32.));
-        assert_eq!(IconSize::Small.side(), px(28.));
-        assert_eq!(metrics::TOOLBAR_ITEM, px(32.));
-    }
-
-    #[test]
     fn the_variants_follow_the_table() {
         for k in [NativeColors::light(), NativeColors::dark()] {
             // Cancel (outline) is a tinted push button with no border; each

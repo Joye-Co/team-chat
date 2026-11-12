@@ -2,7 +2,7 @@
 // counted in one place in the room, with one way to stop a run, a whole piece of work and what a
 // run gave out.
 import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { CardV2 } from "@chat/protocol";
 import type { BotsEnv } from "../src/bots/env";
 import { MAX_DEPTH, MAX_HANDOFFS, confirmStep, reserveStep, stepReport, stopChain } from "../src/bots/chains";
@@ -404,11 +404,18 @@ describe("a giver that waits for a machine", () => {
     await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "@dev 再补一个说明", mentions: [w.bot.id] });
     const queued = await c.waitEvent((e) => e.type === "run.updated" && e.data.run.botId === w.bot.id && e.data.run.id !== a.runId && e.data.run.queuedAt !== undefined);
     await d.acked(b.runId, d.done(b.runId, { status: "succeeded", resultText: "Windows 上通过" }));
-    const next = await d.next((f) => f.t === "run.assign" && f.runId === queued.data.run.id, 25_000);
+    // qa's slot freed up in qa's desk; dev's desk gives its queued run a machine on its alarm.
+    const desk = benv.BOT_DESK.get(benv.BOT_DESK.idFromName(w.bot.id));
+    const isNext = (f: any) => f.t === "run.assign" && f.runId === queued.data.run.id;
+    await vi.waitFor(async () => {
+      await runDurableObjectAlarm(desk);
+      expect(d.frames.some(isNext)).toBe(true);
+    }, { timeout: 10_000, interval: 50 });
+    const next = await d.next(isNext);
     expect(next.prompt).toContain("Windows 上通过");
     d.close();
     c.close();
-  }, 40_000);
+  });
 });
 
 describe("a part that cannot be handed back", () => {

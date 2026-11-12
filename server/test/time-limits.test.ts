@@ -48,10 +48,11 @@ describe("a long step whose processes work (盯 1.4)", () => {
     d.send({ t: "run.accept", runId: a.runId });
     await d.acked(a.runId, d.event(a.runId, { type: "tool.call", itemId: "t1", tool: "bash", title: "cargo build --release" }));
 
-    // 40 minutes into the build its processes still use CPU, and the heartbeat says so.
-    await sql(w.bot.id, (s) => s.exec("UPDATE runs SET last_event_at = ? WHERE id = ?", Date.now() - 40 * 60_000, a.runId));
+    // 40 minutes into the build its processes still use CPU, and the heartbeat says so. (The
+    // heartbeat lands before the step is made old, so no alarm of the desk sees it old and silent.)
     d.send({ t: "heartbeat", at: Date.now(), health: HEALTH, runs: [{ runId: a.runId, lastSeq: 1, done: false, active: true }] });
     await waitUntil(async () => (await sql(w.bot.id, (s) => s.exec<{ alive_at: number | null }>("SELECT alive_at FROM runs WHERE id = ?", a.runId).one().alive_at)) !== null, 5000, "alive");
+    await sql(w.bot.id, (s) => s.exec("UPDATE runs SET last_event_at = ? WHERE id = ?", Date.now() - 40 * 60_000, a.runId));
     await runDurableObjectAlarm(deskOf(w.bot.id));
     await new Promise((r) => setTimeout(r, 200));
     expect(d.frames.filter((f) => (f.t === "run.cancel" || f.t === "run.input") && f.runId === a.runId)).toHaveLength(0);

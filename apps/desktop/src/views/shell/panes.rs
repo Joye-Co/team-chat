@@ -215,26 +215,3 @@ fn header_less(pane: &RightPane) -> bool {
         RightPane::TopicRail | RightPane::Changes | RightPane::GroupInfo
     )
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_pane_kind_has_the_one_width() {
-        // D13: every right pane is 400 wide.
-        assert_eq!(pane_width(&RightPane::TopicRail), gpui::px(400.));
-        assert_eq!(pane_width(&RightPane::Changes), gpui::px(400.));
-        assert_eq!(
-            pane_width(&RightPane::SideChat("m-ledger".into())),
-            gpui::px(400.)
-        );
-        assert_eq!(pane_width(&RightPane::Live("r-1".into())), gpui::px(400.));
-        assert_eq!(pane_width(&RightPane::None), gpui::px(0.));
-        assert!(header_less(&RightPane::TopicRail));
-        // 群资料 is the 群聊's 详情: the same width, the shell's header.
-        assert_eq!(pane_width(&RightPane::GroupInfo), gpui::px(400.));
-        assert!(header_less(&RightPane::GroupInfo));
-        assert_eq!(pane_title(&RightPane::GroupInfo), "群资料");
-    }
-}

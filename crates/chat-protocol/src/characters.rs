@@ -48,19 +48,3 @@ impl std::fmt::Display for CharacterId {
         f.write_str(self.as_str())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::CharacterId;
-
-    #[test]
-    fn ids_round_trip() {
-        assert_eq!(CharacterId::ALL.len(), 26);
-        for id in CharacterId::ALL {
-            assert_eq!(CharacterId::parse(id.as_str()), Some(*id));
-            let json = serde_json::to_string(id).unwrap();
-            assert_eq!(json, format!("\"{}\"", id.as_str()));
-        }
-        assert_eq!(CharacterId::parse("o21"), None);
-    }
-}

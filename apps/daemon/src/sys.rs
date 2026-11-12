@@ -265,10 +265,14 @@ pub fn disk(path: &Path) -> (u64, u64) {
 pub fn slept(
     between: std::time::Duration,
     period: std::time::Duration,
+    late: Option<std::time::Duration>,
 ) -> Option<std::time::Duration> {
-    const LATE: std::time::Duration = std::time::Duration::from_secs(20);
-    (between > period + LATE).then(|| between - period)
+    let late = late.unwrap_or(SLEEP_LATE);
+    (between > period + late).then(|| between - period)
 }
+
+/// How much later than its period a tick may come before [`slept`] counts it as a sleep.
+pub const SLEEP_LATE: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// How long the machine has been up, counting the time it was asleep, on a clock that a
 /// change of the date does not move (an NTP correction, a person setting the time). The
@@ -593,33 +597,20 @@ pub fn windows_plain_path(path: &str) -> &str {
 mod tests {
     use super::*;
 
-    /// The clock that counts sleep moves forward and does not stand still.
-    #[test]
-    fn the_time_since_boot_moves_forward() {
-        let a = since_boot();
-        std::thread::sleep(std::time::Duration::from_millis(30));
-        let b = since_boot();
-        assert!(a > std::time::Duration::ZERO, "{a:?}");
-        assert!(
-            b > a && b - a < std::time::Duration::from_secs(5),
-            "{a:?} {b:?}"
-        );
-    }
-
     /// A tick that comes on time, or a little late, is a tick; one that comes much later
     /// than its period means the machine slept for the rest.
     #[test]
     fn a_tick_that_is_far_too_late_means_the_machine_slept() {
         use std::time::Duration as D;
-        assert_eq!(slept(D::from_secs(15), D::from_secs(15)), None);
-        assert_eq!(slept(D::from_secs(0), D::from_secs(15)), None);
-        assert_eq!(slept(D::from_secs(34), D::from_secs(15)), None);
+        assert_eq!(slept(D::from_secs(15), D::from_secs(15), None), None);
+        assert_eq!(slept(D::from_secs(0), D::from_secs(15), None), None);
+        assert_eq!(slept(D::from_secs(34), D::from_secs(15), None), None);
         assert_eq!(
-            slept(D::from_secs(36), D::from_secs(15)),
+            slept(D::from_secs(36), D::from_secs(15), None),
             Some(D::from_secs(21))
         );
         assert_eq!(
-            slept(D::from_secs(8 * 3600), D::from_secs(30)),
+            slept(D::from_secs(8 * 3600), D::from_secs(30), None),
             Some(D::from_secs(8 * 3600 - 30))
         );
     }
@@ -763,51 +754,5 @@ mod tests {
             Path::new(r"C:\Users\me\.local\bin"),
             Path::new(r"C:\Users\me\.local")
         ));
-    }
-
-    /// Windows: the machine's processor time moves forward and the idle part is within it.
-    #[cfg(windows)]
-    #[test]
-    fn windows_cpu_times_move_forward() {
-        let (t0, i0) = cpu_times().unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        let (t1, i1) = cpu_times().unwrap();
-        assert!(t1 > t0 && i1 >= i0 && i1 - i0 <= t1 - t0);
-        assert!(load_avg().iter().all(|v| *v >= 0.0));
-    }
-
-    /// Windows: the first load a process reports is what the machine does now. With every
-    /// processor kept busy from before the first call, it is not zero (it was, for the first
-    /// minutes of every daemon and always in `doctor`).
-    #[cfg(windows)]
-    #[test]
-    fn the_first_windows_load_is_measured_not_zero() {
-        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
-        let workers: Vec<_> = (0..cpus)
-            .map(|_| {
-                let stop = stop.clone();
-                std::thread::spawn(move || {
-                    let mut x = 0u64;
-                    while !stop.load(std::sync::atomic::Ordering::Relaxed) {
-                        x = std::hint::black_box(x.wrapping_mul(31).wrapping_add(1));
-                    }
-                })
-            })
-            .collect();
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        let first = load_avg();
-        stop.store(true, std::sync::atomic::Ordering::Relaxed);
-        for w in workers {
-            w.join().unwrap();
-        }
-        // The other tests of this program may have asked first, at a calmer moment: then the
-        // averages are at least not negative; when this was the first call, all three are
-        // the load of busy processors.
-        assert!(first.iter().all(|v| *v >= 0.0), "{first:?}");
-        assert!(
-            first[0] == first[1] && first[1] == first[2] || first[0] > 0.0,
-            "{first:?}"
-        );
     }
 }

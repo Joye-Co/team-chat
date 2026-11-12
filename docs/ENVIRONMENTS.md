@@ -67,8 +67,8 @@ checkout. The Release workflow sets `TC_SERVERS_JSON` from the repository variab
 gh variable set SERVERS_JSON --body '{"staging":"<url>","production":"<url>"}'
 ```
 
-The workflows never print it: the jobs that use it are called workflows (`release-jobs.yml`,
-`windows-installer.yml`) that get it as a secret, each job masks every URL and host first, and
+The workflows never print it: the jobs that use it are in a called workflow
+(`release-jobs.yml`) that gets it as a secret, each job masks every URL and host first, and
 a last job (`scripts/check-logs-for-servers.sh`) fails the run when a job log shows a host. Do
 not read `vars.SERVERS_JSON` through `env:` in a workflow: Actions prints the environment of
 every step, and the logs of this repository are public.

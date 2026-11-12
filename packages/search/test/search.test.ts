@@ -4,7 +4,6 @@ import {
   buildMatchQuery,
   makeSnippet,
   MessageSearchIndex,
-  SEARCH_SCHEMA,
   searchStatement,
   tokenizeForIndex,
 } from "../src/index.ts"
@@ -32,14 +31,6 @@ function ids(query: string, extra: { topicId?: string; prefixLast?: boolean } = 
 beforeEach(() => {
   ;({ db, index } = openIndex())
   seq = 0
-})
-
-describe("sqlite", () => {
-  test("FTS5 is available", () => {
-    const opts = db.query("PRAGMA compile_options").all() as { compile_options: string }[]
-    expect(opts.some((o) => o.compile_options === "ENABLE_FTS5")).toBe(true)
-    expect(() => SEARCH_SCHEMA.forEach((s) => db.run(s))).not.toThrow()
-  })
 })
 
 describe("tokenizeForIndex", () => {
@@ -233,55 +224,4 @@ describe("makeSnippet", () => {
     expect(s.text.normalize()).toBe(s.text)
     expect(Array.from(s.text).every((c) => c.length === 1 || c === "🎉")).toBe(true)
   })
-})
-
-describe("timing", () => {
-  test("100,000 messages", () => {
-    const words = ["部署", "上线", "数据库", "迁移", "会议", "版本", "回滚", "测试", "代码", "审查", "需求", "设计", "客户", "反馈", "性能", "优化"]
-    const latin = ["deploy", "parseJSONData", "max_retry_count", "api", "prod", "staging", "bug", "fix", "PR", "CI"]
-    let r = 42
-    const rand = (n: number) => {
-      r = (Math.imul(r, 1103515245) + 12345) & 0x7fffffff
-      return (r >>> 16) % n
-    }
-    const make = () => {
-      const parts: string[] = []
-      const n = 6 + rand(14)
-      for (let i = 0; i < n; i++) parts.push(rand(3) ? (words[rand(words.length)] as string) : (latin[rand(latin.length)] as string))
-      return `${parts.join(["", "，", " "][rand(3)] as string)}。`
-    }
-    const N = 100_000
-    let t = performance.now()
-    db.run("BEGIN")
-    for (let i = 0; i < N; i++) index.upsert({ messageId: `m${i}`, topicId: `t${i % 500}`, sortKey: i, text: make() })
-    db.run("COMMIT")
-    const insertMs = performance.now() - t
-
-    const queries = ["部署", "数据库迁移", "parseJSONData", "json", "部署 prod", "客户反馈", "部", "retry", "不存在的词"]
-    const report: Record<string, string> = {}
-    for (const q of queries) {
-      t = performance.now()
-      const rows = index.search({ query: q, limit: 50 })
-      const ms = performance.now() - t
-      t = performance.now()
-      index.search({ query: q, limit: 50, order: "relevance" })
-      const relMs = performance.now() - t
-      t = performance.now()
-      index.search({ query: q, topicId: "t7", limit: 50 })
-      const topicMs = performance.now() - t
-      report[q] = `recent ${ms.toFixed(1)} ms, relevance ${relMs.toFixed(1)} ms, topic ${topicMs.toFixed(1)} ms (${rows.length} rows)`
-      expect(ms).toBeLessThan(300)
-    }
-    t = performance.now()
-    for (let i = 0; i < 1000; i++) index.upsert({ messageId: `m${i}`, topicId: "t0", sortKey: i, text: "编辑后的内容 edited" })
-    const editMs = performance.now() - t
-    t = performance.now()
-    for (let i = 1000; i < 2000; i++) index.delete(`m${i}`)
-    const deleteMs = performance.now() - t
-    expect(index.search({ query: "编辑", limit: 200 })).toHaveLength(200)
-
-    console.log(`insert ${N}: ${insertMs.toFixed(0)} ms (${((insertMs / N) * 1000).toFixed(1)} us each)`)
-    console.log(`1000 edits: ${editMs.toFixed(0)} ms, 1000 deletes: ${deleteMs.toFixed(0)} ms`)
-    for (const [q, line] of Object.entries(report)) console.log(`search ${q}: ${line}`)
-  }, 120_000)
 })

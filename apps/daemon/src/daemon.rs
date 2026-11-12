@@ -1111,7 +1111,7 @@ impl Daemon {
         let now = crate::sys::since_boot();
         let between = now.saturating_sub(self.last_beat);
         self.last_beat = now;
-        if let Some(asleep) = crate::sys::slept(between, hb) {
+        if let Some(asleep) = crate::sys::slept(between, hb, self.cfg.sleep_late()) {
             log!(
                 "the machine was asleep for {} s: connecting again",
                 asleep.as_secs()

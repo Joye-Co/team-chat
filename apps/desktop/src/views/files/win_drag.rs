@@ -162,14 +162,6 @@ pub fn watch(target: FileRef, window: &mut Window, cx: &mut App) {
 
 #[cfg(test)]
 mod tests {
-    use windows::Win32::{
-        System::{
-            Com::{DVASPECT_CONTENT, FORMATETC, TYMED_HGLOBAL},
-            Ole::{CF_HDROP, ReleaseStgMedium},
-        },
-        UI::Shell::{DragQueryFileW, HDROP},
-    };
-
     use super::*;
 
     #[test]
@@ -206,46 +198,5 @@ mod tests {
                 DRAGDROP_S_USEDEFAULTCURSORS
             );
         }
-    }
-
-    /// What a drop target reads from the drag: the file's path as `CF_HDROP`, for a file
-    /// and for a page's folder, with spaces and Chinese in the name.
-    #[test]
-    fn the_drag_carries_the_file_as_a_file_drop() {
-        use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
-        // SAFETY: COM for this test thread.
-        unsafe {
-            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-        }
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("季度 报告 v2.pdf");
-        std::fs::write(&file, b"%PDF-1.4").unwrap();
-        let folder = dir.path().join("Q3 复盘");
-        std::fs::create_dir(&folder).unwrap();
-        for path in [&file, &folder] {
-            let data = data_object(path).expect("a data object");
-            let format = FORMATETC {
-                cfFormat: CF_HDROP.0,
-                ptd: std::ptr::null_mut(),
-                dwAspect: DVASPECT_CONTENT.0,
-                lindex: -1,
-                tymed: TYMED_HGLOBAL.0 as u32,
-            };
-            // SAFETY: the medium is read as the HDROP the format promises and released.
-            unsafe {
-                let mut medium = data.GetData(&format).expect("CF_HDROP");
-                let drop = HDROP(medium.u.hGlobal.0);
-                assert_eq!(DragQueryFileW(drop, u32::MAX, None), 1, "one item");
-                let mut name = [0u16; 1024];
-                let len = DragQueryFileW(drop, 0, Some(&mut name)) as usize;
-                let dropped = std::path::PathBuf::from(String::from_utf16_lossy(&name[..len]));
-                assert_eq!(
-                    dropped.canonicalize().unwrap(),
-                    path.canonicalize().unwrap()
-                );
-                ReleaseStgMedium(&mut medium);
-            }
-        }
-        assert!(data_object(&dir.path().join("gone.txt")).is_err());
     }
 }

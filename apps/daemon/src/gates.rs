@@ -514,6 +514,8 @@ pub struct Gates {
     asking: tokio::sync::Mutex<()>,
     /// True once the CLI ran the run's start-up hook: its hooks are on.
     alive: tokio::sync::watch::Sender<bool>,
+    /// How long a gated run waits for that hook ([`HOOKS_START`]).
+    hooks_start: Duration,
 }
 
 impl std::fmt::Debug for Gates {
@@ -571,7 +573,19 @@ impl Gates {
             shim_wait: SHIM_WAIT,
             asking: tokio::sync::Mutex::new(()),
             alive: tokio::sync::watch::channel(false).0,
+            hooks_start: HOOKS_START,
         }
+    }
+
+    /// With the wait for the start-up hook `wait` instead of [`HOOKS_START`] (tests).
+    pub fn with_hooks_start(mut self, wait: Duration) -> Gates {
+        self.hooks_start = wait;
+        self
+    }
+
+    /// How long a gated run waits for the CLI's start-up hook.
+    pub fn hooks_start(&self) -> Duration {
+        self.hooks_start
     }
 
     /// With shim checks waiting `wait` instead of [`SHIM_WAIT`].

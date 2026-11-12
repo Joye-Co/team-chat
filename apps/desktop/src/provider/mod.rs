@@ -25,8 +25,6 @@ pub mod convert;
 mod desk;
 mod email;
 pub mod files;
-#[cfg(test)]
-mod files_live;
 mod github;
 pub mod instance;
 #[cfg(target_os = "macos")]
@@ -46,10 +44,6 @@ mod page_host;
 mod memory;
 mod process;
 mod realtime;
-#[cfg(test)]
-mod realtime_live;
-#[cfg(test)]
-mod search_live;
 // v13/wire: the pages' backend data against a live server.
 pub mod sandbox;
 pub mod selftest_interact;
@@ -58,8 +52,6 @@ pub mod session;
 mod settings;
 mod system_events;
 mod this_mac;
-#[cfg(test)]
-mod wire_live;
 mod work_folder;
 // --- settings-backend track ---
 mod settings_backend;

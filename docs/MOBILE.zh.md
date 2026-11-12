@@ -46,7 +46,6 @@ chat-protocol（协议类型）
 | `apps/ios/project.yml` | 工程定义，用 XcodeGen 生成 Xcode 工程（工程文件不进仓库） |
 | `apps/ios/Shared` | 应用和扩展共用的类型 |
 | `apps/ios/build-sim.sh` | 模拟器构建：编核心、生成接口、生成工程、编应用和扩展；`--run` 装到模拟器并登录本地沙盒 |
-| `apps/ios/test-core-sim.sh` | 在模拟器里跑 `chat-core` 的测试 |
 | `apps/ios/check-copy.ts` | 界面文字检查 |
 | `server/src/push` | 推送模块 |
 

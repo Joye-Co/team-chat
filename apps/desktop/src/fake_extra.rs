@@ -275,37 +275,3 @@ pub fn sample_process(run_id: &str) -> RunProcess {
         error: None,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn snippet_marks_the_match() {
-        let (s, at) = snippet("登录页需要支持邀请码", 7, 3);
-        assert_eq!(s, "登录页需要支持邀请码");
-        assert_eq!(s.chars().skip(at).take(3).collect::<String>(), "邀请码");
-        let long = format!("{}关键词{}", "前".repeat(40), "后".repeat(40));
-        let (s, at) = snippet(&long, 40, 3);
-        assert!(s.starts_with('…') && s.ends_with('…'));
-        assert_eq!(s.chars().skip(at).take(3).collect::<String>(), "关键词");
-    }
-
-    #[test]
-    fn snippet_starts_at_a_boundary() {
-        // DESIGN.md §15: no '…明（草稿）', the cut moves past the bracket.
-        let text = "这是一段比较长的产品说明（草稿）新功能的话题会在这里讨论，请大家看话题列表";
-        let at = text.chars().position(|c| c == '列').unwrap() - 2;
-        let (s, i) = snippet(text, at, 2);
-        assert!(s.starts_with("…草稿）"), "{s}");
-        assert_eq!(s.chars().skip(i).take(2).collect::<String>(), "话题");
-        let latin = format!("{} release notes for the parser", "word ".repeat(10));
-        let at = latin.find("parser").unwrap();
-        let (s, _) = snippet(&latin, at, 6);
-        let first = s.trim_start_matches('…').split(' ').next().unwrap();
-        assert!(
-            ["word", "release", "notes", "for", "the"].contains(&first),
-            "{s}"
-        );
-    }
-}

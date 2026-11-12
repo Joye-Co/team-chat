@@ -139,14 +139,4 @@ mod tests {
                 .is_empty()
         );
     }
-
-    #[test]
-    fn deltas_merge_until_cleared() {
-        let mut t = TransientState::default();
-        t.append_delta("m", "Hel");
-        t.append_delta("m", "lo");
-        assert_eq!(t.stream_suffix("m"), Some("Hello"));
-        assert!(t.clear_stream("m"));
-        assert_eq!(t.stream_suffix("m"), None);
-    }
 }

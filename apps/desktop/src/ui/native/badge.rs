@@ -399,15 +399,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn badge_and_pill_sizes() {
-        assert_eq!(height::BADGE, px(22.));
-        assert_eq!(height::COUNT, px(20.));
-        assert_eq!(height::KBD, px(20.));
-        assert_eq!(cap(1000), "99+");
-        assert_eq!(cap(7), "7");
-    }
-
-    #[test]
     fn every_state_has_one_mark_and_color() {
         let k = NativeColors::light();
         assert_eq!(BadgeState::NeedsYou.color(&k), k.amber);

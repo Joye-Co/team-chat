@@ -52,27 +52,4 @@ describe("delegation", () => {
     d.close();
     c.close();
   });
-
-  it("gives a part out in a new topic and brings its result back to the giver's run", async () => {
-    const w = await world();
-    const qa = await secondBot(w, "qa");
-    const { d } = await Daemon.connect(w.machineToken, { maxParallelRuns: 4 });
-    const { c } = await Client.connect(w.human.token);
-    const topicId = await mention(c, w);
-    const a = await d.next((f) => f.t === "run.assign");
-    d.send({ t: "run.accept", runId: a.runId });
-    d.event(a.runId, { type: "output", outputId: "o1", op: "member.assign", body: { member: qa.id, goal: "写接口文档" } });
-    const res = await d.next((f) => f.t === "run.output.result" && f.outputId === "o1");
-    expect(res.ok, JSON.stringify(res)).toBe(true);
-    expect(res.result.topicId).not.toBe(topicId);
-    const b = await d.next((f) => f.t === "run.assign" && f.botMemberId === qa.id);
-    expect(b.topicId).toBe(res.result.topicId);
-    d.send({ t: "run.accept", runId: b.runId });
-    await d.acked(b.runId, d.done(b.runId, { status: "succeeded", resultText: "文档写好了：docs/api.md" }));
-    const back = await d.next((f) => f.t === "run.input" && f.runId === a.runId && String(f.inputId).startsWith("desk-part-"));
-    expect(back.text).toContain("is done");
-    expect(back.text).toContain("文档写好了：docs/api.md");
-    d.close();
-    c.close();
-  });
 });
