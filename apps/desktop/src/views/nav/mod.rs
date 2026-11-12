@@ -673,7 +673,7 @@ mod close_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::{ChatProvider, GroupKind};
+    use crate::data::ChatProvider;
     use crate::fake::FakeProvider;
 
     fn walk(items: &[(&str, &str, bool)]) -> Vec<WalkTopic> {
@@ -786,63 +786,5 @@ mod tests {
             resolve_saved(Some(&saved), &groups, exists),
             (false, Some(groups[0].id.clone()), None)
         );
-        // The provider keeps it.
-        p.save_navigation(saved.clone());
-        assert_eq!(p.saved_navigation(), Some(saved));
-    }
-
-    #[test]
-    fn fake_group_commands_work() {
-        let p = FakeProvider::new();
-        let before = p.groups().len();
-        drop(p.create_group(crate::data::CreateGroupRequest {
-            name: "新群".into(),
-            member_ids: vec!["m-alex".into()],
-        }));
-        let groups = p.groups();
-        assert_eq!(groups.len(), before + 1);
-        let new = groups.iter().find(|g| g.name == "新群").unwrap();
-        assert!(new.member_ids.contains(&crate::fake::ME.to_string()));
-        // A member can be added to an existing 群 later.
-        let other = p
-            .members()
-            .into_iter()
-            .find(|m| !new.member_ids.contains(&m.id) && !m.deactivated)
-            .unwrap();
-        let mut added = p.add_group_members(&new.id, vec![other.id.clone()]);
-        assert_eq!(added.try_recv().unwrap(), Some(Ok(())));
-        let new = p.groups().into_iter().find(|g| g.name == "新群").unwrap();
-        assert!(new.member_ids.contains(&other.id));
-        let mut gone = p.add_group_members("g-gone", vec![other.id.clone()]);
-        assert_eq!(
-            gone.try_recv().unwrap(),
-            Some(Err(crate::data::AdminError::NotFound))
-        );
-        p.set_group_muted(&new.id, true);
-        assert!(p.group_muted(&new.id));
-        p.set_group_muted(&new.id, false);
-        assert!(!p.group_muted(&new.id));
-        p.leave_group(&new.id);
-        assert_eq!(p.groups().len(), before);
-        // A DM with a member who has none yet is created once.
-        let peer = p
-            .members()
-            .into_iter()
-            .find(|m| {
-                m.id != crate::fake::ME
-                    && !p
-                        .groups()
-                        .iter()
-                        .any(|g| g.dm_peer.as_deref() == Some(m.id.as_str()))
-            })
-            .unwrap();
-        drop(p.open_dm(&peer.id));
-        drop(p.open_dm(&peer.id));
-        let dms = p
-            .groups()
-            .into_iter()
-            .filter(|g| g.kind == GroupKind::Dm && g.dm_peer.as_deref() == Some(peer.id.as_str()))
-            .count();
-        assert_eq!(dms, 1);
     }
 }

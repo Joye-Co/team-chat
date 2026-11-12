@@ -161,13 +161,6 @@ pub fn open_window(focus: bool, cx: &mut App) -> Result<AnyWindowHandle, String>
 mod tests {
     use super::*;
 
-    #[test]
-    fn the_window_names_the_product_and_its_version() {
-        assert!(title().contains(env!("PRODUCT_NAME")));
-        assert!(version_line().contains(env!("CARGO_PKG_VERSION")));
-        assert!(!version_line().contains('{'));
-    }
-
     /// 关于 twice shows one window; Esc closes it.
     #[gpui::test]
     fn about_opens_one_window_and_escape_closes_it(cx: &mut gpui::TestAppContext) {

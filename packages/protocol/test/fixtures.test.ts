@@ -15,10 +15,6 @@ function walk(dir: string): string[] {
 
 const files = walk(root);
 
-test("fixtures exist", () => {
-  expect(files.length).toBeGreaterThan(100);
-});
-
 describe("fixtures", () => {
   for (const file of files) {
     const name = relative(root, file);

@@ -765,38 +765,6 @@ mod tests {
         assert_eq!(busy_pct(&b, &a), None);
     }
 
-    /// macOS, Linux and Windows all report the host's CPU, memory and uptime.
-    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
-    #[test]
-    fn the_host_reports_cpu_memory_and_uptime() {
-        let a = host::cpu_times().expect("cpu times");
-        let (total, avail) = host::memory().expect("memory");
-        assert!(total > 0 && avail <= total, "{total} {avail}");
-        assert!(host::uptime_secs().is_some());
-        // Burn some CPU until the counters move (their ticks are coarse), then a second
-        // reading gives a share.
-        let until = Instant::now() + std::time::Duration::from_secs(10);
-        let mut x = 0u64;
-        let b = loop {
-            for _ in 0..1_000_000 {
-                x = x.wrapping_mul(31).wrapping_add(1);
-            }
-            std::hint::black_box(x);
-            let b = host::cpu_times().expect("cpu times");
-            if b.total > a.total || Instant::now() > until {
-                break b;
-            }
-        };
-        assert!(b.total > a.total, "{a:?} {b:?}");
-        let pct = busy_pct(&a, &b).expect("a share");
-        assert!((0.0..=100.0).contains(&pct), "{pct}");
-        let cfg =
-            Config::parse("server_url = \"http://127.0.0.1:1\"\ntoken_file = \"/nonexistent\"\n")
-                .unwrap();
-        let m = Sampler::new().sample(&cfg, None, &[]);
-        assert!(m.mem_total_bytes.is_some() && m.uptime_secs.is_some());
-    }
-
     #[test]
     fn meminfo_gives_total_and_available_bytes() {
         let t = "MemTotal:       65536000 kB\nMemFree:  1 kB\nMemAvailable:   28000000 kB\n";

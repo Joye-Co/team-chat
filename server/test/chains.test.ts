@@ -406,6 +406,14 @@ describe("a giver that waits for a machine", () => {
     await d.acked(b.runId, d.done(b.runId, { status: "succeeded", resultText: "Windows 上通过" }));
     // qa's slot freed up in qa's desk; dev's desk gives its queued run a machine on its alarm.
     const desk = benv.BOT_DESK.get(benv.BOT_DESK.idFromName(w.bot.id));
+    // The machine ack precedes delivery through the room's outbox. Wait for the part to
+    // reach the queued run before forcing its alarm, or we test the running-input path.
+    await vi.waitFor(async () => {
+      const parts = await runInDurableObject(desk, (_o, state: DurableObjectState) =>
+        state.storage.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = ?", `partsIn:${queued.data.run.id}`).toArray()[0]?.value,
+      );
+      expect(parts).toContain("Windows 上通过");
+    }, { timeout: 10_000, interval: 50 });
     const isNext = (f: any) => f.t === "run.assign" && f.runId === queued.data.run.id;
     await vi.waitFor(async () => {
       await runDurableObjectAlarm(desk);

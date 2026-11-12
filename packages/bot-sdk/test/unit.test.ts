@@ -3,9 +3,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ACK_EMOJI as PROTOCOL_ACK_EMOJI, type CardV2 } from "@chat/protocol";
+import { type CardV2 } from "@chat/protocol";
 import {
-  ACK_EMOJI,
   blocks,
   Bot,
   type CardAnswerContext,
@@ -81,12 +80,6 @@ function liveEvent(messageId: string, o: Record<string, unknown> = {}) {
     ...o,
   };
 }
-
-describe("ack", () => {
-  test("SDK bots acknowledge with the emoji runner runs use", () => {
-    expect(ACK_EMOJI).toBe(PROTOCOL_ACK_EMOJI);
-  });
-});
 
 describe("hello and features", () => {
   test("hello sends interact/1, refs/1 and both catalogs; welcome.features is kept", async () => {

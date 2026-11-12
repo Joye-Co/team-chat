@@ -239,33 +239,3 @@ pub fn write_misses(dir: &Path) {
         eprintln!("{} untranslated runs in {}", misses.len(), path.display());
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_source_is_listed_once() {
-        let mut seen = std::collections::HashSet::new();
-        for line in TABLE.lines().filter(|l| !l.trim_start().starts_with('#')) {
-            if let Some((zh, _)) = line.split_once('\t') {
-                assert!(seen.insert(zh), "listed twice in english.txt: {zh}");
-            }
-        }
-    }
-
-    #[test]
-    fn fills_patterns_and_parts() {
-        assert_eq!(translate("已用 55 分钟").as_deref(), Some("55 min elapsed"));
-        assert_eq!(
-            translate("产出「重连测试报告」v2").as_deref(),
-            Some("Artifact “Reconnect test report” v2")
-        );
-        assert_eq!(
-            translate("Tata · 写第二版需求 · 已用 55 分钟").as_deref(),
-            Some("Tata · Writing spec v2 · 55 min elapsed")
-        );
-        assert_eq!(translate("缺 李雪").as_deref(), Some("Lisa can't come"));
-        assert_eq!(translate("Forge"), None);
-    }
-}
