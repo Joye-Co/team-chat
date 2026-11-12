@@ -31,6 +31,33 @@ RUN npm install -g --no-fund --no-audit \
     && curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash \
     && PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install uv
 
+# The rustup proxies (rustup, cargo, rustc...) without a toolchain: a run's CARGO_HOME and
+# RUSTUP_HOME point at its repository's cache, where the daemon installs the toolchain the
+# repository asks for. Pinned rustup-init, checked against the SHA-256 written here.
+ARG RUSTUP_VERSION=1.29.3
+ARG RUSTUP_SHA256_AMD64=b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55
+ARG RUSTUP_SHA256_ARM64=9f608c142e0e38a78957d0661ba1dfaf0b6fb37184cfaa4b9a0aa57af6184282
+RUN set -eux; arch="$(dpkg --print-architecture)"; case "$arch" in \
+      amd64) t=x86_64-unknown-linux-gnu; sum="$RUSTUP_SHA256_AMD64";; \
+      arm64) t=aarch64-unknown-linux-gnu; sum="$RUSTUP_SHA256_ARM64";; esac; \
+    curl -fsSL -o /tmp/rustup-init "https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/${t}/rustup-init"; \
+    echo "${sum}  /tmp/rustup-init" | sha256sum -c -; chmod 755 /tmp/rustup-init; \
+    CARGO_HOME=/opt/rust/cargo RUSTUP_HOME=/opt/rust/rustup /tmp/rustup-init -y --no-modify-path \
+      --default-toolchain none --profile minimal; \
+    rm /tmp/rustup-init; /opt/rust/cargo/bin/rustup --version
+
+# sccache from its official static release, checked against the SHA-256 written here.
+ARG SCCACHE_VERSION=0.19.0
+ARG SCCACHE_SHA256_AMD64=aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd
+ARG SCCACHE_SHA256_ARM64=3e47fc4a71b1ddd1b4294a0de9d34498922fdf41e3cd0bda5df3954e3d6deb9d
+RUN set -eux; arch="$(dpkg --print-architecture)"; case "$arch" in \
+      amd64) a=x86_64; sum="$SCCACHE_SHA256_AMD64";; arm64) a=aarch64; sum="$SCCACHE_SHA256_ARM64";; esac; \
+    d="sccache-v${SCCACHE_VERSION}-${a}-unknown-linux-musl"; cd /tmp; \
+    curl -fsSLO "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/${d}.tar.gz"; \
+    echo "${sum}  ${d}.tar.gz" | sha256sum -c -; \
+    tar -xzf "${d}.tar.gz" --no-same-owner; install -m 755 "${d}/sccache" /usr/local/bin/sccache; \
+    rm -rf "${d}" "${d}.tar.gz"; sccache --version
+
 # The user every CLI runs as. sudo without a password: the VM is the boundary, not this user.
 RUN userdel -r ubuntu 2>/dev/null || true; \
     useradd --create-home --uid 1000 --shell /bin/bash agent \

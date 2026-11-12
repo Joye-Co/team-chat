@@ -303,13 +303,13 @@ mod tests {
             "/usr/local/sbin/runner-vm home-up: runner-vm: bad slot"
         ));
         assert!(!old_helper_error("runner-vm: bad member id"));
-        // The helper in this checkout makes images.
+        // The helper in this checkout no longer makes images.
         v.helper = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../scripts/runner/runner-vm"
         )
         .into();
-        assert_eq!(helper_has_homes(&v), Some(true));
+        assert_eq!(helper_has_homes(&v), Some(false));
     }
 
     #[tokio::test]
