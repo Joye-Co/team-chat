@@ -157,6 +157,38 @@ describe("limit wait in the topic", () => {
     d.close();
   }, 40_000);
 
+  it("keep the limit when a run that started before it ends well", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["resume"] });
+    const { c } = await Client.connect(w.human.token);
+    // Two runs share the computer's sign-in; one hits the limit while the other is still working.
+    const t1 = await mention(c, w);
+    const a = await d.next((f) => f.t === "run.assign");
+    const t2 = await mention(c, w, "@dev 另一件事");
+    const b = await d.next((f) => f.t === "run.assign" && f.runId !== a.runId);
+    d.send({ t: "run.accept", runId: a.runId });
+    d.send({ t: "run.accept", runId: b.runId });
+    const resetsAt = Date.now() + 3 * 3_600_000;
+    await d.acked(a.runId, d.done(a.runId, { status: "failed", error: "limit", sessionId: "s-a", failure: { kind: "limit", resetsAt } }));
+    const waiting = (await c.waitEvent((e) => e.type === "run.updated" && e.data.run.retryOf === a.runId && e.data.run.waitingFor === "limit")).data.run;
+    await d.acked(b.runId, d.done(b.runId, { status: "succeeded", resultText: "做完了" }));
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === b.runId && e.data.run.status === "done");
+
+    // The limit still holds: the waiting work stays queued and no back note is posted.
+    const marks = await runInDurableObject(linkOf(w.machineId), (_o, state: DurableObjectState) => {
+      const row = state.storage.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'limited'").toArray()[0];
+      return JSON.parse(row?.value ?? "{}") as Record<string, { until: number }>;
+    });
+    expect(marks.codex?.until).toBeGreaterThan(Date.now());
+    await runDurableObjectAlarm(deskOf(w.bot.id));
+    await new Promise((r) => setTimeout(r, 200));
+    expect(d.frames.some((f) => f.t === "run.assign" && f.runId === waiting.id)).toBe(false);
+    expect(botMessages(c, t1, w.bot.id).some((m) => m.body === TEXT.limitBack(true))).toBe(false);
+    expect(t2).not.toBe(t1);
+    c.close();
+    d.close();
+  }, 40_000);
+
   it("without a reset time use the usage windows, else try again later and say so", async () => {
     const w = await world();
     const { d } = await Daemon.connect(w.machineToken, { features: ["resume"] });

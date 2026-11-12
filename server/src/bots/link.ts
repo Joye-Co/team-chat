@@ -484,9 +484,10 @@ export class MachineLink extends DurableObject<BotsEnv> {
         if (f.t === "run.done" && f.failure?.kind === "signed_out") this.markSignedOut(this.assignOut(r).runtime, now);
         // 模 3.4: a run at the subscription limit holds the runtime back here until the reset,
         // before the desk hears of it (it reads the mark to say when); a run that went well
-        // clears it.
+        // after the mark's time clears it (one that went well before then may have started
+        // before the limit was hit, and proves nothing).
         if (f.t === "run.done" && f.failure?.kind === "limit") this.markLimited(this.assignOut(r).runtime, f.failure.resetsAt, now);
-        else if (f.t === "run.done" && f.status === "succeeded") this.clearLimited(this.assignOut(r).runtime);
+        else if (f.t === "run.done" && f.status === "succeeded") this.clearLimited(this.assignOut(r).runtime, now);
         this.enqueue(r, f.t === "run.event" && f.event.type === "output" ? { ...f, serverAt: this.serverTime(f.at, now) } : f);
       }
     }
@@ -772,9 +773,10 @@ export class MachineLink extends DurableObject<BotsEnv> {
     this.log.info("runtime at its limit", { runtime, until: keep.until, known: keep.known });
   }
 
-  private clearLimited(runtime: string): void {
+  private clearLimited(runtime: string, now: number): void {
     const marks = this.limitMarks();
-    if (!(runtime in marks)) return;
+    const mark = marks[runtime];
+    if (!mark || mark.until > now) return;
     delete marks[runtime];
     this.setMeta("limited", JSON.stringify(marks));
   }
