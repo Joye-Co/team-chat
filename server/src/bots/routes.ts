@@ -1,6 +1,7 @@
 // HTTP routes of the bots feature (docs/protocol.md, "Bot runs").
 import {
   AddArtifactVersionRequest,
+  ChainStopResponse,
   CreateFileRequest,
   CreateMachineRequest,
   EndRunRequest,
@@ -18,6 +19,7 @@ import {
   UpdateMachineRequest,
 } from "@chat/protocol";
 import { auditStatement } from "../core/audit";
+import { roomStub } from "../core/env";
 import type { AuthContext } from "../core/auth";
 import { sha256Hex } from "../core/crypto";
 import { getMember, isGroupMember } from "../core/db";
@@ -652,6 +654,23 @@ export function registerBotRoutes(): void {
       const run = unwrap(await deskStub(env, row.bot_id).cancel(row.bot_id, row.id, a.memberId));
       await auditStatement(env.DB, a, { action: "run.cancel", target: row.id, details: { botId: row.bot_id } }).run();
       return run;
+    },
+  });
+
+  // design-relay R2: any person in the group stops a whole piece of work (every run of its chain).
+  registerRoute({
+    method: "POST",
+    path: "/v1/groups/:id/chains/:chainId/stop",
+    auth: "member",
+    async handler({ env, params, auth }) {
+      const a = auth as AuthContext;
+      if (a.member.kind !== "human") throw new ApiError("forbidden", "only people stop a piece of work");
+      if (!(await isGroupMember(env.DB, params.id, a.memberId))) throw new ApiError("not_found", "group not found");
+      if (!/^[0-9A-Za-z]{1,64}$/.test(params.chainId)) throw new ApiError("not_found", "piece of work not found");
+      const actor = { id: a.memberId, kind: a.member.kind, level: a.member.level, tokenId: a.tokenId };
+      const res = ChainStopResponse.parse(unwrap(await roomStub(env, params.id).rpc(params.id, "bots.chainStop", actor, { chainId: params.chainId })));
+      await auditStatement(env.DB, a, { action: "chain.stop", target: params.chainId, details: { groupId: params.id, stoppedRuns: res.stoppedRuns } }).run();
+      return res;
     },
   });
 

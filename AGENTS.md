@@ -40,7 +40,9 @@ Read [docs/PRODUCT.md](docs/PRODUCT.md) (what we build, interface words, V1 bar)
   `break-ui` (worst-case data) and `apple-design` (macOS feel). Web pages, if any, use the
   libraries in `pick-ui-library`.
 - **Protocol changes**: update `docs/protocol.md`, `packages/protocol`, `crates/chat-protocol`
-  and `protocol/fixtures` in one commit. Both fixture tests must pass. Additive changes only:
+  and `protocol/fixtures` in one commit; write fixtures in `packages/protocol/scripts` and run
+  `bun run gen:protocol`, never edit `protocol/fixtures` or `protocol/schema` by hand. Both
+  fixture tests must pass. Additive changes only:
   new optional fields, new frame and event types. Never change the meaning of a released field.
 - **Server**: TypeScript on Cloudflare Workers. Validate every client frame and HTTP body with
   the Zod schemas at the boundary. Durable Objects use location hint `oc`. Each Durable Object
