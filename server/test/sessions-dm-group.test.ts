@@ -231,6 +231,26 @@ describe("the same person's second request in the 群聊 (verify 2, problem 10)"
     d.close();
     joye.close();
   });
+
+  it("an @ stop word from the requester stops their run instead of starting one (接 1.12)", async () => {
+    const w = await world();
+    const forge = await addBot(w, "Forge");
+    const { d } = await Daemon.connect(w.machineToken, { features: ["resume"], maxParallelRuns: 4 });
+    const { c: joye } = await Client.connect(w.owner.token);
+    const main = mainTopicId(w.gid);
+
+    await send(joye, w.gid, main, "@Forge 运行 sleep 40，然后只回答：甲", { mentions: [forge.id] });
+    const a = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId: a.runId });
+    await joye.waitEvent((e) => e.type === "run.updated" && e.data.run.id === a.runId && e.data.run.status === "running");
+    await send(joye, w.gid, main, "@Forge 停", { mentions: [forge.id] });
+    expect(await d.next((f) => f.t === "run.cancel")).toMatchObject({ runId: a.runId });
+    await joye.waitEvent((e) => e.type === "run.updated" && e.data.run.id === a.runId && e.data.run.status === "cancelled");
+    await new Promise((r) => setTimeout(r, 200));
+    expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(1);
+    d.close();
+    joye.close();
+  });
 });
 
 describe("the front desk's question (接 1.8)", () => {

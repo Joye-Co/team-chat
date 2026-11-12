@@ -69,7 +69,8 @@ export abstract class DeskInput extends DeskRelay {
    * chat area) a member may work on several requests at once: a reply to a run's message goes to
    * that run, an answer to the front desk's question and 新任务 start a new one, an approval
    * answer goes to the run that waits for it, and the person's own request gets what they say
-   * without an @, in a DM, or what adds to it (`isAddOn`); any other @ request, theirs too, starts
+   * without an @, in a DM, what adds to it (`isAddOn`) and a stop word (`isStopRequest`: in the 群聊
+   * the @ is the only way to reach the member); any other @ request, theirs too, starts
    * a new run (verify 2, problem 10: "@Forge 另一件事：…" was taken into the first run).
    */
   protected runFor(m: TopicMessage): RunRow | null | undefined {
@@ -85,7 +86,7 @@ export abstract class DeskInput extends DeskRelay {
     const waits = runs.find((x) => x.approval_id && (approvalDecision(m.body) !== null || approvesWholeWork(m.body)));
     if (waits) return waits;
     const own = runs.find((x) => x.requested_by === m.authorId);
-    if (own && (m.dm || !m.mentioned || isAddOn(m.body))) return own;
+    if (own && (m.dm || !m.mentioned || isAddOn(m.body) || isStopRequest(m.body))) return own;
     if (m.replyToAuthorId === this.botId || isProgressQuestion(m.body)) return own ?? runs[0];
     return m.mentioned ? null : runs[0];
   }
