@@ -19,6 +19,7 @@ import {
   type ArchivedEvent,
   type RoomContext,
   type RoomTx,
+  registerAfterCommit,
   registerEventWriter,
   registerMessageWriteHook,
   registerRoomMigration,
@@ -426,8 +427,8 @@ function enqueueStep(sql: SqlStorage, r: Relay, index: number, now = Date.now())
   queueRow(sql, r, index, now);
 }
 
-function queueRow(sql: SqlStorage, r: Relay, index: number, now = Date.now()): void {
-  sql.exec("INSERT INTO bot_outbox (kind, topic_id, payload, created_at) VALUES ('relay', ?, ?, ?)", r.topicId, JSON.stringify(orderOf(sql, r, index)), now);
+function queueRow(sql: SqlStorage, r: Relay, index: number, now = Date.now(), nextAt = 0): void {
+  sql.exec("INSERT INTO bot_outbox (kind, topic_id, payload, next_at, created_at) VALUES ('relay', ?, ?, ?, ?)", r.topicId, JSON.stringify(orderOf(sql, r, index)), nextAt, now);
 }
 
 /** True while a `relay` row is still the relay's current try (a stop or a retry makes it stale). */
@@ -474,22 +475,41 @@ function pause(sql: SqlStorage, r: Relay, reason: string, stepState: string, sto
   save(sql, r);
 }
 
-/** Internal: the member of a step was busy in the topic (`queued`) or takes no work (`unavailable`). */
-registerRoomRpc("bots.relayStepState", (room, actor, args) => {
-  const a = args as { relayId: string; index: number; seq: number; state: "queued" | "unavailable" };
-  if (actor) throw new ApiError("forbidden", "internal only");
+/** How long a step waits before it is handed over again when its member's busy run already ended. */
+export const RELAY_RECHECK_MS = 2000;
+
+/**
+ * The member of a step was busy in the topic (`queued`) or takes no work (`unavailable`). The busy
+ * run may have ended (its run.updated handled) while the room waited for the desk's answer: then
+ * nothing would wake a `queued` step, so it is handed over again shortly instead.
+ */
+export function relayStepState(room: RoomContext, a: { relayId: string; index: number; seq: number; state: "queued" | "unavailable" }): void {
   room.commit((tx) => {
     const r = current(room.sql, a);
     if (!r) return;
     if (a.state === "queued") {
-      r.steps[r.current].state = "queued";
-      save(room.sql, r);
+      const st = r.steps[r.current];
+      const stillBusy = topicBots(room.sql, r.topicId).some((x) => x.bot_id === st.memberId && x.working === 1);
+      if (stillBusy) {
+        st.state = "queued";
+        save(room.sql, r);
+      } else {
+        const at = Date.now() + RELAY_RECHECK_MS;
+        queueRow(room.sql, r, r.current, Date.now(), at);
+        room.wakeAt(at);
+      }
     } else {
       room.sql.exec("UPDATE chain_steps SET state = 'failed' WHERE chain_id = ? AND seq = ? AND state = 'reserved'", r.chainId, a.seq);
       pause(room.sql, r, "member_unavailable", "failed");
     }
     publishWorkState(room, tx, r.startedBy, r.topicId);
   });
+}
+
+/** Internal: see `relayStepState`. */
+registerRoomRpc("bots.relayStepState", (room, actor, args) => {
+  if (actor) throw new ApiError("forbidden", "internal only");
+  relayStepState(room, args as Parameters<typeof relayStepState>[1]);
   return { ok: true };
 });
 
@@ -639,6 +659,42 @@ registerRoomRpc("bots.relayStop", (room, actor, args): TopicRelay => {
   });
   room.wakeAt(Date.now());
   return toTopicRelay(relayById(room.sql, relayId) as Relay);
+});
+
+/** Relays a member's leaving stopped just now (`requester_left`): their topics are published again. */
+function leftRelayTopics(sql: SqlStorage, memberId: string, now = Date.now()): string[] {
+  return sql
+    .exec<{ topic_id: string }>(
+      "SELECT DISTINCT topic_id FROM topic_relays WHERE started_by = ? AND state = 'stopped' AND reason = 'requester_left' AND updated_at >= ?",
+      memberId,
+      now - 60_000,
+    )
+    .toArray()
+    .map((x) => x.topic_id);
+}
+
+/** Internal: publishes the topics whose relay stopped when its requester left the group. */
+export function publishLeftRelays(room: RoomContext, memberId: string): number {
+  const topics = leftRelayTopics(room.sql, memberId);
+  if (topics.length === 0) return 0;
+  room.commit((tx) => {
+    for (const t of topics) publishWorkState(room, tx, memberId, t);
+  });
+  return topics.length;
+}
+
+registerRoomRpc("bots.relayRequesterLeft", (room, actor, args) => {
+  if (actor) throw new ApiError("forbidden", "internal only");
+  return { topics: publishLeftRelays(room, (args as { memberId: string }).memberId) };
+});
+
+// The requester left the group: the `group.memberRemoved` writer (chains.ts) stopped his relays in
+// the same transaction, where nothing can be published; the changed topics go out here.
+registerAfterCommit(async (event, h) => {
+  if (event.type !== "group.memberRemoved") return;
+  const { memberId } = event.data as { memberId?: string };
+  if (!memberId || leftRelayTopics(h.sql, memberId).length === 0) return;
+  unwrap(await roomStub(h.env, h.groupId).rpc(h.groupId, "bots.relayRequesterLeft", null, { memberId }));
 });
 
 /** `POST /v1/groups/:id/relays/:relayId/retry`: any person in the group; the paused step again. */

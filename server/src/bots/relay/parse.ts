@@ -22,9 +22,14 @@ export class RelayParseError extends Error {
   readonly reason = "relay.bad_steps";
 }
 
-function cut(s: string, n: number): string {
+/** At most `n` UTF-16 units (as `TopicRelay` counts them), never splitting a surrogate pair. */
+export function cut(s: string, n: number): string {
+  if (s.length <= n) return s;
   const cs = [...s];
-  return cs.length <= n ? s : cs.slice(0, n).join("");
+  let len = 0;
+  let i = 0;
+  while (i < cs.length && len + cs[i]!.length <= n) len += cs[i++]!.length;
+  return cs.slice(0, i).join("");
 }
 
 /** True when the first line is an arrow line (checked before any member is looked up). */

@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { TopicRelay, mainTopicId } from "@chat/protocol";
 import type { BotsEnv } from "../src/bots/env";
 import { RelayParseError, parseRelay } from "../src/bots/relay/parse";
-import { giveUpRelayRow, startRelay } from "../src/bots/relay/engine";
+import { RELAY_RECHECK_MS, giveUpRelayRow, publishLeftRelays, relayStepState, startRelay } from "../src/bots/relay/engine";
 import { requesterLeft } from "../src/bots/chains";
 import type { RoomContext, RoomTx } from "../src/core/registry";
 import { relayOrderText } from "../src/bots/desk/relay";
@@ -89,6 +89,18 @@ describe("parsing an arrow line", () => {
     bad("@小码 → @小审"); // no goal
     bad("@小码 → @小审 → @小码 → @小审 → @小码 → @小审 → @小码 x"); // 7 steps
     expect(parseRelay("@小码 → @小审 → @小码 → @小审 → @小码 → @小审 x", members)?.steps).toHaveLength(6);
+  });
+
+  it("cuts a long goal and notes the way TopicRelay counts them (UTF-16), never splitting an emoji", () => {
+    const goal = "a" + "😀".repeat(700);
+    const note = "b" + "😀".repeat(80);
+    const d = parseRelay(`@小码 ${note} → @小审 x\n${goal}`, members)!;
+    expect(d.goal.length).toBeLessThanOrEqual(1000);
+    expect(d.goal).toBe("a" + "😀".repeat(499));
+    expect(d.steps[0]!.note!.length).toBeLessThanOrEqual(100);
+    expect(d.steps[0]!.note).toBe("b" + "😀".repeat(49));
+    const relay = { id: "R", state: "running", current: 0, goal: d.goal, startedBy: "H", updatedAt: 1, steps: d.steps.map((s) => ({ memberId: s.memberId, ...(s.note ? { note: s.note } : {}), state: "pending" })) };
+    expect(TopicRelay.safeParse(relay).success).toBe(true);
   });
 
   it("writes the step's order with its place, the step before and where its code is", () => {
@@ -352,7 +364,60 @@ describe("the relay rows of the outbox", () => {
       requesterLeft(sql, "H1");
       const stored = sql.exec<{ state: string; reason: string; stopped_by: string | null }>("SELECT state, reason, stopped_by FROM topic_relays WHERE id = ?", r.id).one();
       expect(stored).toEqual({ state: "stopped", reason: "requester_left", stopped_by: null });
+      // Leaving the group stops it in the event writer, where nothing is published: the hook
+      // after the commit publishes the topic with the stopped relay.
+      const calls: { topicId: string; change: any }[] = [];
+      const pub = { ...fake, updateTopic: (_tx: RoomTx, _a: string, topicId: string, change: unknown) => calls.push({ topicId, change }) } as unknown as RoomContext;
+      expect(publishLeftRelays(pub, "H1")).toBe(1);
+      expect(calls[calls.length - 1]).toMatchObject({ topicId: "T8", change: { extra: { relay: { state: "stopped", reason: "requester_left" } } } });
+      expect(publishLeftRelays(pub, "someone-else")).toBe(0);
       sql.exec("DELETE FROM bot_outbox");
+    });
+  });
+
+  it("leaving the group stops the relay its requester started, and the topic shows it", async () => {
+    const w = await world();
+    const qa = await addBot(w, "qa");
+    const { d } = await Daemon.connect(w.machineToken, { maxParallelRuns: 4 });
+    const { c } = await Client.connect(w.owner.token);
+    const sent = await c.ok({ t: "send", groupId: w.gid, clientMsgId: clientMsgId(), body: "@qa → @dev 加深色模式", mentions: [w.bot.id, qa.id] });
+    const topicId = sent.message.topicId;
+    const s1 = await started(d, qa.id);
+    // The step ended, the next one has not started: no run's end would publish the stop.
+    await d.acked(s1.runId, d.done(s1.runId, { status: "failed", error: "boom" }));
+    await relayIs(c, topicId, (r) => r.state === "paused");
+    c.close();
+    const { c: o } = await Client.connect(w.human.token);
+    expect((await api(`/v1/groups/${w.gid}/members/${w.owner.id}`, { method: "DELETE", token: w.owner.token })).status).toBe(200);
+    const stopped = await relayIs(o, topicId, (r) => r.state === "stopped");
+    expect(stopped.relay.reason).toBe("requester_left");
+    d.close();
+    o.close();
+  });
+
+  it("a busy step whose member's run ended before the room heard it is handed over again, not left queued", async () => {
+    const w = await world();
+    await inRoom(w.gid, (sql) => {
+      const fake = { sql, groupId: w.gid, commit: <T>(fn: (tx: RoomTx) => T) => fn({} as RoomTx), updateTopic: () => {}, wakeAt: () => {} } as unknown as RoomContext;
+      sql.exec("INSERT INTO topics (id, title, status, created_by, created_at, root_message_id, last_seq, message_count, owner_id, last_message_at) VALUES ('T7', 't', 'open', 'h', 1, 'M7', 0, 0, NULL, 1)");
+      const r = startRelay(fake, {} as RoomTx, "H1", "T7", "M7", { goal: "x", steps: [{ memberId: "A" }, { memberId: "B" }] });
+      const seq = r.steps[0].seq;
+      sql.exec("DELETE FROM bot_outbox");
+      const step = () => (JSON.parse(sql.exec<{ steps: string }>("SELECT steps FROM topic_relays WHERE id = ?", r.id).one().steps) as { state: string }[])[0].state;
+      // A's busy run ended (its run.updated was handled) while the room waited for the desk.
+      const before = Date.now();
+      relayStepState(fake, { relayId: r.id, index: 0, seq, state: "queued" });
+      expect(step()).toBe("pending");
+      const rows = sql.exec<{ next_at: number }>("SELECT next_at FROM bot_outbox WHERE kind = 'relay'").toArray();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].next_at).toBeGreaterThanOrEqual(before + RELAY_RECHECK_MS);
+      // A still works in the topic: the step waits for that run's end.
+      sql.exec("DELETE FROM bot_outbox");
+      sql.exec("INSERT INTO topic_bots (topic_id, bot_id, run_id, working, started_at) VALUES ('T7', 'A', 'RUN1', 1, 1)");
+      relayStepState(fake, { relayId: r.id, index: 0, seq, state: "queued" });
+      expect(step()).toBe("queued");
+      expect(sql.exec("SELECT 1 FROM bot_outbox WHERE kind = 'relay'").toArray()).toHaveLength(0);
+      sql.exec("DELETE FROM topic_bots WHERE topic_id = 'T7'");
     });
   });
 });
