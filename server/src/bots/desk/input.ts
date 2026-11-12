@@ -12,7 +12,7 @@ import { refsText } from "../refs";
 import { requestAuthors, requestText } from "../../context/render";
 import type { CardAnswerIn, CardPress, TopicMessage } from "../room";
 import { ACTIVE, type RunRow, result } from "./core";
-import { DeskDelegate } from "./delegate";
+import { DeskRelay } from "./relay";
 import { isChainStop } from "./delegate_card";
 import { isProgressQuestion, isStopRequest, progressAnswer } from "../../agent/supervise";
 import { isNewTask } from "../../agent/frontdesk";
@@ -23,7 +23,7 @@ import { isNewTask } from "../../agent/frontdesk";
  */
 export const FOLLOW_UP_WINDOW_MS = 30 * 60_000;
 
-export abstract class DeskInput extends DeskDelegate {
+export abstract class DeskInput extends DeskRelay {
   // -------------------------------------------------------------------------
   // Messages from the topic
   // -------------------------------------------------------------------------

@@ -720,6 +720,7 @@ async function landedChecks(x: Landed) {
   out.approvalCards = await approvalCardCheck(x);
   out.teamModel = await teamModelCheck(x);
   out.routing = await routingCheck(x);
+  out.relay = await relayCheck(x);
   out.gatesByCode = await gatesByCodeCheck(x);
   out.readCommands = await readCommandsCheck(x);
   if (x.daemon) out.offlineComputer = await offlineComputerCheck(x);
@@ -965,6 +966,42 @@ async function routingCheck({ owner, groupId, bot, events, ws }: Landed) {
   if (follow.botId !== two) throw new Error(`routing: a follow-up without @ went to ${follow.botId}, not the member that ran last`);
   step("routing: two mentions started a run for each member with its own done card, both listed in the topic; a follow-up without @ went to the member that ran last");
   return { topicId: t, runs: [...first, again.id, follow.id] };
+}
+
+/**
+ * 按顺序做 (design-relay R3) with the fake CLIs: `@dev 写 → @rv 审 → @dev 改` starts only dev;
+ * its end wakes rv with dev's result; rv's step fails (the fake's "relayfail:2"), the relay pauses
+ * there and the topic is blocked; a retry runs rv's step again, which finishes; dev's last step
+ * hangs ("relaystall:3") and a person stops the relay, which stops that run.
+ */
+async function relayCheck({ owner, groupId, alice, bot, work, events, ws }: Landed) {
+  const rv = await aiMember(owner, "rv", "claude");
+  const m = await say(events, ws, groupId, "@dev 写 → @rv 审 → @dev 改\n给 README 加一节安装说明 relayfail:2 relaystall:3", { mentions: [rv, bot.member.id] });
+  const t = m.topicId;
+  const relayOf = (pred: (r: any) => boolean) => () =>
+    events
+      .filter((e) => e.type === "topic.updated" && e.data.topicId === t && e.data.relay)
+      .map((e) => ({ relay: e.data.relay, status: e.data.status }))
+      .find((x) => pred(x.relay));
+  const paused = await until("relay: rv's step fails and the relay pauses", relayOf((r) => r.state === "paused"), 90_000);
+  if (paused.relay.reason !== "step_failed" || paused.relay.current !== 1 || paused.status !== "blocked") {
+    throw new Error(`relay: after the failed step ${JSON.stringify(paused)}`);
+  }
+  const first = paused.relay.steps[0];
+  if (first.memberId !== bot.member.id || first.state !== "done") throw new Error(`relay: step 1 ${JSON.stringify(first)}`);
+  const second = promptsOf(work, paused.relay.steps[1].runId).map((p) => p.text).join("\n");
+  if (!second.includes("You do step 2 of 3") || !second.includes("Result of step 1 (dev)")) throw new Error("relay: rv's step did not get dev's result");
+  const retried = await call("POST", `/v1/groups/${groupId}/relays/${paused.relay.id}/retry`, { token: alice.token });
+  if (retried.state !== "running") throw new Error(`relay: retry answered ${JSON.stringify(retried)}`);
+  const last = await until("relay: dev's last step works", relayOf((r) => r.current === 2 && r.steps[2].state === "working" && r.steps[2].runId), 90_000);
+  const runId = last.relay.steps[2].runId as string;
+  await until("relay: the last step's fake CLI hangs", () => existsSync(join(workOf(work, runId), "fake.pid")), 30_000);
+  const stopped = await call("POST", `/v1/groups/${groupId}/relays/${paused.relay.id}/stop`, { token: alice.token });
+  if (stopped.state !== "stopped") throw new Error(`relay: stop answered ${JSON.stringify(stopped)}`);
+  await until("relay: the last step's run is stopped", () => runsIn(events, t).find((r: any) => r.id === runId && r.status === "cancelled"), 30_000);
+  await until("relay: the strip shows it stopped", relayOf((r) => r.state === "stopped" && r.steps[2].state === "stopped"));
+  step("relay: three steps in order with the fake CLIs; a failed step paused it, a retry went on, a person's stop ended it and its run");
+  return { topicId: t, relayId: paused.relay.id };
 }
 
 /**

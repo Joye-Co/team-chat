@@ -15,6 +15,7 @@ import {
   SetMachineBotRequest,
   SetRunAcceptanceRequest,
   SetRunPlanRequest,
+  TopicRelay,
   StartRunRequest,
   UpdateMachineRequest,
 } from "@chat/protocol";
@@ -673,6 +674,27 @@ export function registerBotRoutes(): void {
       return res;
     },
   });
+
+  // design-relay R3: any person in the group stops a relay (the current step's run) or retries the
+  // step it stopped at.
+  for (const op of ["stop", "retry"] as const) {
+    registerRoute({
+      method: "POST",
+      path: `/v1/groups/:id/relays/:relayId/${op}`,
+      auth: "member",
+      async handler({ env, params, auth }) {
+        const a = auth as AuthContext;
+        if (a.member.kind !== "human") throw new ApiError("forbidden", "only people stop or retry a relay");
+        if (!(await isGroupMember(env.DB, params.id, a.memberId))) throw new ApiError("not_found", "group not found");
+        if (!/^[0-9A-Za-z]{1,64}$/.test(params.relayId)) throw new ApiError("not_found", "relay not found");
+        const actor = { id: a.memberId, kind: a.member.kind, level: a.member.level, tokenId: a.tokenId };
+        const rpc = op === "stop" ? "bots.relayStop" : "bots.relayRetry";
+        const res = TopicRelay.parse(unwrap(await roomStub(env, params.id).rpc(params.id, rpc, actor, { relayId: params.relayId })));
+        await auditStatement(env.DB, a, { action: `relay.${op}`, target: params.relayId, details: { groupId: params.id } }).run();
+        return res;
+      },
+    });
+  }
 
   // -------------------------------------------------------------------------
   // 1.1: take-over (pause / resume) and acceptance criteria

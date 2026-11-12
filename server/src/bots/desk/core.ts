@@ -897,6 +897,9 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
       if (stoppedBy) s.stoppedBy = stoppedBy;
       const handed = this.handedOverOf(r.id);
       if (handed) s.handedOver = handed.to;
+      // design-relay R3: a relay does not go on to another member past code that is not pushed.
+      const code = codeOf(r.code);
+      if (code) s.code = code;
     }
     await this.sendWorkState(r.group_id, s);
   }

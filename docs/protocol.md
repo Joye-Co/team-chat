@@ -2638,7 +2638,7 @@ ErrorBody += { memberIds?: string[] }                // at most 20: the members 
 | Method and path | Who | Response |
 | --- | --- | --- |
 | `POST /v1/groups/:id/relays/:relayId/stop` | a person in the group | `TopicRelay`; `conflict` when it has ended |
-| `POST /v1/groups/:id/relays/:relayId/retry` | a person in the group | `TopicRelay`; `conflict` unless it is `paused` |
+| `POST /v1/groups/:id/relays/:relayId/retry` | a person in the group | `TopicRelay`; `conflict` unless it is `paused`; `conflict` with reason `relay.retry_limit` after 3 retries |
 | `POST /v1/groups/:id/chains/:chainId/stop` | a person in the group | `ChainStopResponse { stoppedRuns }` |
 
 Rules:

@@ -11,7 +11,7 @@ import { ApiError } from "../core/errors";
 import { ulid } from "../core/ids";
 import { type Actor, type RoomContext, type RoomTx, registerEventWriter, registerRoomMigration, registerRoomRpc } from "../core/registry";
 import { deskStub } from "./env";
-import { claimTopic, routingOwner } from "./participants";
+import { claimTopic, publishWorkState, routingOwner } from "./participants";
 import type { Env } from "../core/env";
 import type { Logger } from "../core/logger";
 
@@ -70,7 +70,8 @@ export const CHAINS_MIGRATION = `
 
 registerRoomMigration({ name: "chains-1", up: CHAINS_MIGRATION });
 
-export type StepKind = "root" | "handoff" | "assign";
+/** `relay`: a step of a relay (按顺序做, relay/engine.ts): depth 0, its path is its member. */
+export type StepKind = "root" | "handoff" | "assign" | "relay";
 /** Step states: reserved (not taken yet), working, then done | failed | cancelled | handed_over. */
 const OPEN_STATES = "('reserved', 'working')";
 
@@ -327,15 +328,16 @@ export function stepReport(room: RoomContext, botId: string, s: StepReport): voi
   if (!step || step.to_bot !== botId) return;
   if (!s.ended) {
     // Not taken yet: `confirmStep` moves the step on (its topic, the routing owner, a stop
-    // that came in between); the run is only named here.
-    if (step.state === "reserved") {
+    // that came in between); the run is only named here. A relay step has no confirmation: its
+    // run's first report starts it.
+    if (step.state === "reserved" && step.kind !== "relay") {
       sql.exec("UPDATE chain_steps SET run_id = ? WHERE chain_id = ? AND seq = ?", s.runId, step.chain_id, step.seq);
       return;
     }
     // A retry, restart or follow-up of an ended step is the same step working again.
     const again = (step.state === "done" || step.state === "failed" || step.state === "cancelled") && step.run_id !== s.runId;
     // (A run a person starts again after a stop is that person's choice: it is not stopped here.)
-    if (step.state === "working" || step.kind === "root" || again) {
+    if (step.state === "working" || step.state === "reserved" || step.kind === "root" || again) {
       sql.exec("UPDATE chain_steps SET run_id = ?, state = 'working' WHERE chain_id = ? AND seq = ?", s.runId, step.chain_id, step.seq);
     }
     return;
@@ -415,12 +417,34 @@ function continuer(sql: SqlStorage, giver: StepRow): StepRow | undefined {
 // Stopping
 // ---------------------------------------------------------------------------
 
-/** Marks the chain stopped and queues a cancel for each of its runs that has not ended. */
-export function stopChain(sql: SqlStorage, chainId: string, by: string, now = Date.now()): number {
+/**
+ * design-relay R3: what else stops with a chain (a relay, relay/engine.ts), in the same
+ * transaction. Returns the topics whose state it changed (published by the caller when it can).
+ */
+export type ChainStopHook = (sql: SqlStorage, chainId: string, by: string, reason?: string) => string[];
+const chainStopHooks: ChainStopHook[] = [];
+export function onChainStop(h: ChainStopHook): void {
+  chainStopHooks.push(h);
+}
+
+/**
+ * Marks the chain stopped and queues a cancel for each of its runs that has not ended. `touched`
+ * collects the topics whose relay stopped with it; `reason` is why (a relay's `requester_left`).
+ */
+export function stopChain(sql: SqlStorage, chainId: string, by: string, now = Date.now(), touched?: Set<string>, reason?: string): number {
   sql.exec("UPDATE work_chains SET stopped_at = coalesce(stopped_at, ?), stopped_by = coalesce(stopped_by, ?) WHERE id = ?", now, by, chainId);
   const open = sql.exec<StepRow>("SELECT * FROM chain_steps WHERE chain_id = ? AND state = 'working' AND run_id IS NOT NULL", chainId).toArray() as StepRow[];
   for (const s of open) enqueue(sql, "cancel", s.topic_id, { botId: s.to_bot, runId: s.run_id as string, actorId: by, chainId });
+  for (const h of chainStopHooks) for (const t of h(sql, chainId, by, reason)) touched?.add(t);
   return open.length;
+}
+
+/** Publishes the topics a stop changed (their relay). */
+function publishStopped(room: RoomContext, actorId: string, touched: Set<string>): void {
+  if (touched.size === 0) return;
+  room.commit((tx) => {
+    for (const t of touched) publishWorkState(room, tx, actorId, t);
+  });
 }
 
 /** The person a stop is for: a person in the group, or (a card press through a desk) the one who pressed. */
@@ -460,16 +484,18 @@ registerRoomRpc("bots.chainStop", async (room, actor, args) => {
   const by = actor ? await stopper(room, actor, byActorId) : String(byActorId ?? "");
   if (!by) throw new ApiError("forbidden", "people only");
   if (!chainRow(room.sql, chainId)) throw new ApiError("not_found", "piece of work not found");
-  const stoppedRuns = stopChain(room.sql, chainId, by);
+  const touched = new Set<string>();
+  const stoppedRuns = stopChain(room.sql, chainId, by, Date.now(), touched);
+  publishStopped(room, by, touched);
   room.wakeAt(Date.now());
   return { stoppedRuns };
 });
 
 /** Stops every chain a person asked for (he was deactivated or left the group). */
-export function requesterLeft(sql: SqlStorage, memberId: string): number {
+export function requesterLeft(sql: SqlStorage, memberId: string, touched?: Set<string>): number {
   const chains = sql.exec<{ id: string }>("SELECT id FROM work_chains WHERE requester_id = ? AND stopped_at IS NULL", memberId).toArray();
   let n = 0;
-  for (const c of chains) n += stopChain(sql, c.id, memberId);
+  for (const c of chains) n += stopChain(sql, c.id, memberId, Date.now(), touched, "requester_left");
   return n;
 }
 
@@ -477,7 +503,9 @@ export function requesterLeft(sql: SqlStorage, memberId: string): number {
 registerRoomRpc("bots.requesterLeft", (room, actor, args) => {
   const { memberId } = args as { memberId: string };
   if (actor) throw new ApiError("forbidden", "internal only");
-  const n = requesterLeft(room.sql, memberId);
+  const touched = new Set<string>();
+  const n = requesterLeft(room.sql, memberId, touched);
+  publishStopped(room, memberId, touched);
   if (n > 0) room.wakeAt(Date.now());
   return { stoppedRuns: n };
 });
