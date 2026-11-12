@@ -18,9 +18,7 @@ import { Client, protocolViolations, waitUntil } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
 
-afterAll(async () => {
-  // Let the last test's run and its note settle before the file's workers close.
-  await new Promise((r) => setTimeout(r, 300));
+afterAll(() => {
   expect(protocolViolations).toEqual([]);
   expect(downViolations).toEqual([]);
 });
@@ -30,6 +28,26 @@ function botMessages(c: Client, topicId: string, botId: string): any[] {
     .events()
     .filter((e) => e.type === "message.created" && e.data.message.topicId === topicId && e.data.message.authorId === botId)
     .map((e) => e.data.message);
+}
+
+/**
+ * A failed run posts its note before it ends: the topic's status and 活动记录's 没跑成 (with the
+ * topic's title from the room) follow. Waits for that last write, so no request of the run is
+ * still on its way when the file's workers close.
+ */
+async function runEnded(topicId: string): Promise<void> {
+  for (const start = Date.now(); ; ) {
+    const row = await benv.DB.prepare("SELECT 1 AS x FROM activity WHERE action = 'run.failed' AND target = ?").bind(topicId).first();
+    if (row) return;
+    if (Date.now() - start > 5000) throw new Error(`timed out waiting for the end of the run in ${topicId}`);
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
+/** Closes the links and waits until the server has closed them too (its close handlers ran). */
+async function closeAll(...links: (Client | Daemon)[]): Promise<void> {
+  for (const l of links) l.close();
+  await waitUntil(() => links.every((l) => l.closed !== null), 5000, "closed links");
 }
 
 const login = (runtime: string, state: string, confirmed?: boolean) => ({ runtime, state, ...(confirmed ? { confirmed } : {}) });
@@ -165,9 +183,8 @@ describe("failure kinds in the topic", () => {
     await new Promise((r) => setTimeout(r, 100));
     await oc.ok({ t: "send", groupId: w.gid, clientMsgId: crypto.randomUUID(), body: "@dev third", mentions: [w.bot.id] });
     await d.next((f) => f.t === "run.assign" && d.frames.filter((x) => x.t === "run.assign").length > assigns);
-    c.close();
-    oc.close();
-    d.close();
+    await runEnded(topic2);
+    await closeAll(c, oc, d);
   });
 
   it("say to change the model (a limit waits for its reset: limit-wait.test.ts)", async () => {
@@ -184,8 +201,8 @@ describe("failure kinds in the topic", () => {
     );
     await waitUntil(() => botMessages(c, topic2, w.bot.id)[0], 5000, "model note");
     expect(botMessages(c, topic2, w.bot.id)[0].body).toBe(TEXT.failedWith(TEXT.failure.model("Codex"), TEXT.next.model));
-    c.close();
-    d.close();
+    await runEnded(topic2);
+    await closeAll(c, d);
   });
   it("end a queued run with the sign-in note when its computer's CLI is signed out while it waits", async () => {
     const w = await world();
@@ -205,8 +222,8 @@ describe("failure kinds in the topic", () => {
     expect(note.mentions).toEqual([w.owner.id]);
     // It never went to the signed-out computer.
     expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(1);
-    c.close();
-    d.close();
+    await runEnded(t2);
+    await closeAll(c, d);
   }, 40_000);
 
   it("still send work when only the credential files say signed out", async () => {
@@ -238,7 +255,7 @@ describe("failure kinds in the topic", () => {
     const note = await waitUntil(() => botMessages(c, t2, w.bot.id)[0], 5000, "signed-out note");
     expect(note.body).toBe(TEXT.notStartedWith(TEXT.failure.signedOut("mac-mini", "Codex"), TEXT.next.signInAsk(["Joye"])));
     expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(1);
-    c.close();
-    d.close();
+    await runEnded(t2);
+    await closeAll(c, d);
   });
 });
