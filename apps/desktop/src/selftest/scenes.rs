@@ -672,6 +672,20 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::nav::selftest::scenes::leave_group,
     },
     Scene {
+        name: "delete-group",
+        about: "The alert before deleting a 群 for everyone (hide-delete/1)",
+        start: Start::SignedIn,
+        setup: open_first_topic,
+        open: crate::views::nav::selftest::scenes::delete_group,
+    },
+    Scene {
+        name: "delete-topic",
+        about: "The alert before deleting a 话题 for everyone (hide-delete/1)",
+        start: Start::SignedIn,
+        setup: open_first_topic,
+        open: crate::views::nav::selftest::scenes::delete_topic,
+    },
+    Scene {
         name: "search",
         about: "Cmd+F: the switcher scoped to the current 群 with a Chinese query",
         start: Start::SignedIn,

@@ -147,7 +147,8 @@ pub fn group_members(services: &Services, group_id: &str) -> Vec<Member> {
     members
 }
 
-/// Adds the topic items to `menu`: 重命名 and 关注. Status, who the topic
+/// Adds the topic items to `menu`: 重命名, 关注, 静音 and (hide-delete/1) 隐藏话题 and
+/// 删除话题…. Status, who the topic
 /// waits on and its owner follow the work itself, so nobody sets them by hand.
 /// Every action goes to the provider; the new state arrives as `Change::Topics`.
 pub fn build(
@@ -175,14 +176,15 @@ pub fn build(
             .on_click(move |_, _, _| s.provider.set_topic_following(&g, &t, !following)),
     );
     let (s, g, t) = (services.clone(), group_id.to_string(), topic.id.clone());
-    menu.item(
+    let menu = menu.item(
         PopupMenuItem::new(if muted {
             r::TOPIC_UNMUTE
         } else {
             r::TOPIC_MUTE
         })
         .on_click(move |_, _, _| s.provider.set_topic_muted(&g, &t, !muted)),
-    )
+    );
+    crate::views::nav::hide_delete::topic_items(menu, services, group_id, topic)
 }
 
 /// "负责人：name" for the topic header, when an owner is set.

@@ -101,3 +101,26 @@ export const TopicMuteFrame = z.object({
   muted: z.boolean(),
 });
 export type TopicMuteFrame = z.infer<typeof TopicMuteFrame>;
+
+/** `{ t: "topic.hide" }`: hide or show a topic for me (until a message mentions me). ack.result = `TopicState`. */
+export const TopicHideFrame = z.object({
+  t: z.literal("topic.hide"),
+  rid: Rid,
+  groupId: Id,
+  topicId: Id,
+  hidden: z.boolean(),
+});
+export type TopicHideFrame = z.infer<typeof TopicHideFrame>;
+
+/** `{ t: "topic.delete" }`: delete a topic for everyone (its creator or an owner). ack.result = `TopicDeleteResult`. */
+export const TopicDeleteFrame = z.object({
+  t: z.literal("topic.delete"),
+  rid: Rid,
+  groupId: Id,
+  topicId: Id,
+});
+export type TopicDeleteFrame = z.infer<typeof TopicDeleteFrame>;
+
+/** ack.result of `topic.delete`, and the data of the `topic.deleted` event. */
+export const TopicDeleteResult = z.object({ topicId: Id, deletedAt: Millis });
+export type TopicDeleteResult = z.infer<typeof TopicDeleteResult>;

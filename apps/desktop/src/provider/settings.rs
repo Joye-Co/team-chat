@@ -592,6 +592,20 @@ impl CoreProvider {
         self.patch_member(id.to_string(), req)
     }
 
+    /// hide-delete/1: deletes a deactivated AI member for good; the cache keeps it as
+    /// `deleted` for its old messages.
+    pub(super) fn delete_member_inner(&self, id: &str) -> AdminReply<Member> {
+        let id = id.to_string();
+        self.request(move |client, _| async move {
+            let m = client
+                .delete_member(&id)
+                .await
+                .map_err(|_| AdminError::Other)?
+                .map_err(|e| admin_error(&e))?;
+            Ok(convert::member(&m, false))
+        })
+    }
+
     /// 限额 alone (owners, 用量 › 改预算): `None` clears; 汇报给 stays.
     pub(super) fn set_member_budget_inner(
         &self,
@@ -924,6 +938,7 @@ impl CoreProvider {
             let req = UpdateGroupPrefsRequest {
                 muted,
                 notify: notify.map(notify_to_wire),
+                hidden: None,
             };
             client
                 .set_group_prefs(&gid, req)

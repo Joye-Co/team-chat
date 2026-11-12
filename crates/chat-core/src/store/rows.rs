@@ -28,6 +28,8 @@ pub struct GroupRow {
     pub muted: bool,
     /// `None` = the default: all for a DM, mentions for a group.
     pub notify: Option<NotifyLevel>,
+    /// I hid this 群 or 私聊 until a new message from someone else arrives.
+    pub hidden: bool,
 }
 
 impl GroupRow {
@@ -54,6 +56,8 @@ pub struct TopicRow {
     pub following: bool,
     /// I muted this topic: only mentions notify.
     pub muted: bool,
+    /// I hid this topic from my lists until a message mentions me.
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,6 +163,14 @@ pub enum OutboxOp {
         topic_id: String,
         muted: bool,
     },
+    /// hide-delete/1: hides or shows a topic for me (`topic.hide`).
+    TopicHide {
+        group_id: String,
+        topic_id: String,
+        hidden: bool,
+    },
+    /// hide-delete/1: deletes a topic for everyone (`topic.delete`).
+    TopicDelete { group_id: String, topic_id: String },
     CardAction {
         group_id: String,
         topic_id: Option<String>,
@@ -229,6 +241,8 @@ impl OutboxOp {
             OutboxOp::TopicUpdate { .. } => "topic_update",
             OutboxOp::TopicFollow { .. } => "topic_follow",
             OutboxOp::TopicMute { .. } => "topic_mute",
+            OutboxOp::TopicHide { .. } => "topic_hide",
+            OutboxOp::TopicDelete { .. } => "topic_delete",
             OutboxOp::CardAction { .. } => "card_action",
             OutboxOp::React { .. } => "react",
             OutboxOp::CardAnswer { .. } => "card_answer",
@@ -244,6 +258,8 @@ impl OutboxOp {
             | OutboxOp::TopicUpdate { group_id, .. }
             | OutboxOp::TopicFollow { group_id, .. }
             | OutboxOp::TopicMute { group_id, .. }
+            | OutboxOp::TopicHide { group_id, .. }
+            | OutboxOp::TopicDelete { group_id, .. }
             | OutboxOp::CardAction { group_id, .. }
             | OutboxOp::React { group_id, .. }
             | OutboxOp::CardAnswer { group_id, .. }
@@ -263,7 +279,9 @@ impl OutboxOp {
             | OutboxOp::CardEvent { topic_id, .. } => topic_id.as_deref(),
             OutboxOp::TopicUpdate { topic_id, .. }
             | OutboxOp::TopicFollow { topic_id, .. }
-            | OutboxOp::TopicMute { topic_id, .. } => Some(topic_id),
+            | OutboxOp::TopicMute { topic_id, .. }
+            | OutboxOp::TopicHide { topic_id, .. }
+            | OutboxOp::TopicDelete { topic_id, .. } => Some(topic_id),
         }
     }
     pub(crate) fn reply_to_ref(id: &Option<String>) -> Option<ReplyToRef> {
@@ -320,7 +338,7 @@ pub(crate) fn enum_from<T: DeserializeOwned>(s: String) -> rusqlite::Result<T> {
     serde_json::from_value(serde_json::Value::String(s)).map_err(json_err)
 }
 
-pub(crate) const MEMBER_COLS: &str = "id, kind, name, role, level, avatar_url, deactivated, character, reports_to, weekly_budget_cents, team_owner";
+pub(crate) const MEMBER_COLS: &str = "id, kind, name, role, level, avatar_url, deactivated, character, reports_to, weekly_budget_cents, team_owner, deleted";
 
 pub(crate) fn member_from_row(r: &Row<'_>) -> rusqlite::Result<Member> {
     let deactivated: bool = r.get(6)?;
@@ -343,11 +361,13 @@ pub(crate) fn member_from_row(r: &Row<'_>) -> rusqlite::Result<Member> {
             .and_then(|c| u64::try_from(c).ok()),
         // Sent only when true, so a cleared mark reads back as absent.
         team_owner: r.get::<_, bool>(10)?.then_some(true),
+        // Sent only when true.
+        deleted: r.get::<_, bool>(11)?.then_some(true),
     })
 }
 
 pub(crate) const GROUP_COLS: &str = "id, kind, name, member_ids, created_by, created_at, last_seq, read_seq, \
-     unread, mentions, last_activity_at, muted, notify, purpose";
+     unread, mentions, last_activity_at, muted, notify, purpose, hidden";
 
 pub(crate) fn group_from_row(r: &Row<'_>) -> rusqlite::Result<GroupRow> {
     let ids: String = r.get(3)?;
@@ -372,6 +392,7 @@ pub(crate) fn group_from_row(r: &Row<'_>) -> rusqlite::Result<GroupRow> {
             Some(s) => Some(enum_from(s)?),
             None => None,
         },
+        hidden: r.get(14)?,
     })
 }
 
@@ -388,11 +409,12 @@ pub(crate) fn topic_select(inner: &str) -> String {
            (SELECT COUNT(*) FROM messages m WHERE m.topic_id = t.id AND m.created_seq > t.pos AND {cond}),
            (SELECT COUNT(*) FROM messages m WHERE m.topic_id = t.id AND m.created_seq > t.pos AND {cond}
               AND m.mentions LIKE '%\"' || ?2 || '\"%'),
-           t.following, t.muted
+           t.following, t.muted, t.hidden
          FROM (SELECT t.*,
                  MAX(COALESCE((SELECT g.read_seq FROM groups g WHERE g.id = t.group_id), 0),
                      COALESCE(rc.seq, 0)) AS pos,
-                 COALESCE(rc.following, 0) AS following, COALESCE(rc.muted, 0) AS muted
+                 COALESCE(rc.following, 0) AS following, COALESCE(rc.muted, 0) AS muted,
+                 COALESCE(rc.hidden, 0) AS hidden
                FROM topics t
                LEFT JOIN read_cursors rc ON rc.group_id = t.group_id AND rc.topic_id = t.id
                {inner}) t
@@ -422,6 +444,7 @@ pub(crate) fn topic_from_row(r: &Row<'_>) -> rusqlite::Result<TopicRow> {
         mentions: r.get(12)?,
         following: r.get(13)?,
         muted: r.get(14)?,
+        hidden: r.get(15)?,
     })
 }
 

@@ -117,6 +117,13 @@ pub struct UpdateGroupPrefsRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub notify: Option<NotifyLevel>,
+    /// Hide or show this 群 or 私聊 for me.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub hidden: Option<bool>,
 }
 
 impl UpdateGroupPrefsRequest {

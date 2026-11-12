@@ -127,7 +127,11 @@ impl Roster {
             .iter()
             .map(|m| (m.id.clone(), TeamRole::of(m, &all)))
             .collect();
-        let members = sorted(all, me.as_deref());
+        // A deleted AI member is gone from the team, also from 已停用.
+        let members = sorted(
+            all.into_iter().filter(Member::is_listed).collect(),
+            me.as_deref(),
+        );
         let mut seen = std::collections::HashMap::<String, usize>::new();
         for m in &members {
             *seen.entry(one_line(&m.name).to_lowercase()).or_default() += 1;
@@ -3051,6 +3055,7 @@ mod tests {
             online: false,
             character: None,
             team_owner: false,
+            deleted: false,
         }
     }
 

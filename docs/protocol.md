@@ -2987,3 +2987,63 @@ SetSecretRequest += { ask?: boolean }  // 每次用之前要批准; absent keeps
   still shows it). When the alert ends (the link is back, the CLI is signed in, there is room),
   the AI member edits the message to say it recovered and sets the 话题 `done`. A removed
   computer ends its alerts the same way.
+
+## Hide and delete (群, 私聊, 话题, AI 成员)
+
+Module: `members.ts`, `topic.ts`, `reads.ts` / `members.rs`, `topic.rs`, `reads.rs`. Server
+feature `hide-delete/1` in `welcome.features`: clients show 隐藏 and 删除 only when the server
+lists it.
+
+```ts
+GroupSummary += { hidden?: boolean }            // I hid this 群 or 私聊; absent = false
+UpdateGroupPrefsRequest += { hidden?: boolean }
+TopicState += { hidden?: boolean }              // I hid this 话题; absent = false
+Member += { deleted?: boolean }                 // the AI member was deleted; sent only when true
+{ t: "topic.hide", rid, groupId, topicId, hidden: boolean }   // ack.result = TopicState
+{ t: "topic.delete", rid, groupId, topicId }                  // ack.result = TopicDeleteResult
+TopicDeleteResult = { topicId, deletedAt }
+{ type: "topic.deleted", data: { topicId, deletedAt } }   // group log event
+```
+
+| Method and path | Who | Body | Response |
+| --- | --- | --- | --- |
+| `DELETE /v1/groups/:id` | owner (`level: "owner"`) | | `{ ok: true }` |
+| `DELETE /v1/members/:id` | owner (`level: "owner"`) | | `Member` (`deleted: true`) |
+
+Rules:
+
+- **Hide a 群 or 私聊** (`PATCH /v1/groups/:id/prefs` with `hidden`): per member, like `muted`.
+  It changes nothing for others and keeps my membership, history and notification settings.
+  The server clears my `hidden` when a `message.created` that is not mine and not `kind:
+  "system"` is appended to the group, and when I call `POST /v1/dms` for that DM; clients clear
+  it the same way when such an event arrives, so the conversation comes back with the new
+  message. Audited with `prefs.update` (`hidden: [before, after]`).
+- **Hide a 话题** (`topic.hide`): per member, stored in the room next to `following` and `muted`;
+  the server answers my `TopicState` and sends `reads` to my other connections, as for
+  `topic.mute`. A hidden topic is listed in `GroupSummary.topics`. The server clears my
+  `hidden` (and sends `reads`) when a message that mentions me is appended to it; clients clear
+  it the same way. The 群聊 cannot be hidden (`invalid`).
+- **Delete a 话题** (`topic.delete`): the topic's creator (`createdBy`) or an owner. The 群聊
+  cannot be deleted (`invalid`). In one commit the server scrubs every message of the topic
+  exactly as `delete` does (content, files no one else uses, quotes, search), cancels the
+  topic's active runs, marks the topic deleted and appends `topic.deleted`. No `message.deleted`
+  events are appended for its messages. Deleting a deleted topic answers the first result.
+  A deleted topic is left out of `GroupSummary.topics`, `history` answers it with `not_found`,
+  and `send`, `topic.update`, `topic.follow`, `topic.mute` and `topic.hide` on it answer
+  `not_found`. Its 产出 are left out of `GET /v1/artifacts`. Clients drop the topic, its
+  messages and its drafts from their cache when the event arrives (also in a `page` replay).
+  Audited as `topic.delete` (`{ groupId, topicId, messages }`).
+- **Delete a 群** (`DELETE /v1/groups/:id`): an owner; a DM (`forbidden`, "a DM cannot be
+  deleted") and a default group (`forbidden`, "the default group cannot be deleted") cannot be
+  deleted. The server removes the group and its memberships from D1, wipes the group's room
+  (log, messages, read state) and pushes `directory { removedGroupIds: [id] }` to every member.
+  Afterwards the group answers `not_found` everywhere. Audited as `group.delete`
+  (`{ name, members }`).
+- **Delete an AI member** (`DELETE /v1/members/:id`): an owner; only a bot (`forbidden` for a
+  person) that is already deactivated (`conflict`, "deactivate the member first"). The member
+  stays in `members` with `deleted: true` and `deactivated: true` so old messages keep their
+  author; it is removed from every group that is not a DM (`group.memberRemoved`), its runner
+  and machine placements are removed, and `PATCH /v1/members/:id` on it answers `not_found`.
+  Clients leave deleted members out of every list and picker (团队管理, @ mentions, add to
+  群, new 私聊) and show their old messages as before. Pushed as `directory` with the member;
+  audited as `member.delete`.

@@ -432,6 +432,33 @@ export abstract class DeskInput extends DeskRelay {
     await this.end(r, "cancelled", text, "open", text);
   }
 
+  /**
+   * A 话题 (with `topicId`) or a whole 群 is being deleted (docs/protocol.md, "Hide and delete"):
+   * stop this bot's active runs there. Best effort per run. Returns how many were stopped.
+   */
+  async stopRunsIn(botId: string, groupId: string, topicId?: string): Promise<number> {
+    this.bind(botId);
+    const active = (
+      topicId
+        ? this.sql.exec<{ id: string }>(`SELECT id FROM runs WHERE ${ACTIVE} AND group_id = ? AND topic_id = ?`, groupId, topicId)
+        : this.sql.exec<{ id: string }>(`SELECT id FROM runs WHERE ${ACTIVE} AND group_id = ?`, groupId)
+    ).toArray();
+    let stopped = 0;
+    for (const { id } of active) {
+      try {
+        await this.serial(id, async () => {
+          const r = this.run(id);
+          if (!r || r.ended_at !== null) return;
+          await this.stop(r);
+          stopped++;
+        });
+      } catch (err) {
+        this.log.warn("stop run of a deleted topic failed", { runId: id, err });
+      }
+    }
+    return stopped;
+  }
+
   /** The bot was deactivated: stop its active runs and give up its topics. */
   async deactivated(botId: string): Promise<void> {
     this.bind(botId);

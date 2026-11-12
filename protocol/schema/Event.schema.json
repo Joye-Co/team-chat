@@ -21248,6 +21248,59 @@
         "type",
         "data"
       ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "groupId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "actorId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "topic.deleted"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "topicId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "deletedAt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "topicId",
+            "deletedAt"
+          ]
+        }
+      },
+      "required": [
+        "seq",
+        "groupId",
+        "at",
+        "actorId",
+        "type",
+        "data"
+      ]
     }
   ],
   "$defs": {

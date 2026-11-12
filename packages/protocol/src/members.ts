@@ -32,12 +32,16 @@ export type NotifyLevel = z.infer<typeof NotifyLevel>;
 export const groupSummaryPrefFields = {
   muted: z.boolean().optional(),
   notify: NotifyLevel.optional(),
+  /** I hid this 群 or 私聊 until a new message arrives. Absent means false. */
+  hidden: z.boolean().optional(),
 };
 
 /** `PATCH /v1/groups/:id/prefs`. Response: `GroupSummary`. */
 export const UpdateGroupPrefsRequest = z.object({
   muted: z.boolean().optional(),
   notify: NotifyLevel.optional(),
+  /** Hide or show this 群 or 私聊 for me (until a new message arrives). */
+  hidden: z.boolean().optional(),
 });
 export type UpdateGroupPrefsRequest = z.infer<typeof UpdateGroupPrefsRequest>;
 

@@ -3,8 +3,8 @@
 // Membership is not replayed: on restore the room takes its members from D1, which is restored
 // first. Feature modules register their own importers for their tables and event types.
 import { isMainTopicId } from "@chat/protocol";
-import { type ArchivedEvent, registerEventImporter } from "../core/registry";
-import { scrubDeletedMessage } from "../core/scrub";
+import { type ArchivedEvent, eventImporters, eventWriters, registerEventImporter } from "../core/registry";
+import { forgetDeletedTopic, scrubDeletedMessage } from "../core/scrub";
 import { setFollowing } from "../core/topicstate";
 
 const CORE_MESSAGE_KEYS = new Set([
@@ -167,6 +167,24 @@ export function replayCoreEvent(e: ArchivedEvent, sql: SqlStorage): void {
       // Same scrub as a live delete: the archive may hold the content from before the delete.
       scrubDeletedMessage(sql, id, (data.deletedAt as number) ?? e.at);
       touch(sql, e.topicId ?? messageTopic(sql, id), e.seq);
+      return;
+    }
+    case "topic.deleted": {
+      // As the live delete (GroupRoom.topicDelete): each message of the topic is deleted for
+      // every importer and writer (no message.deleted rows are stored), then the topic goes.
+      const topicId = (data.topicId as string | undefined) ?? e.topicId ?? undefined;
+      if (!topicId) return;
+      const at = (data.deletedAt as number | undefined) ?? e.at;
+      const ids = sql
+        .exec<{ id: string }>("SELECT id FROM messages WHERE topic_id = ? AND deleted_at IS NULL ORDER BY created_seq", topicId)
+        .toArray()
+        .map((r) => r.id);
+      for (const id of ids) {
+        const gone: ArchivedEvent = { seq: e.seq, type: "message.deleted", at, actorId: e.actorId, topicId, messageId: id, data: { messageId: id, deletedAt: at } };
+        for (const importer of eventImporters) importer(gone, sql);
+        for (const w of eventWriters) w(gone, sql);
+      }
+      forgetDeletedTopic(sql, topicId, at, e.actorId, ids.length);
       return;
     }
     default:

@@ -45,6 +45,15 @@ crate::copy! {
     LEAVE_CONFIRM_TITLE = "离开「{name}」？",
     LEAVE_CONFIRM_BODY = "离开后不再收到这个群的消息。\n要回来，需要成员重新邀请你。",
     LEAVE_OK = "离开",
+    // hide and delete of a 群 or 私聊 (hide-delete/1)
+    HIDE = "隐藏",
+    DELETE_GROUP = "删除群…",
+    DELETE_GROUP_CONFIRM_TITLE = "删除「{name}」？",
+    DELETE_GROUP_CONFIRM_BODY = "所有成员都会失去这个群和全部消息。\n删除后不能恢复。",
+    DELETE_OK = "删除",
+    HIDE_GROUP_REFUSED = "没能隐藏",
+    DELETE_GROUP_REFUSED = "没能删除群",
+    DELETE_GROUP_FORBIDDEN = "所有人默认加入的群不能删除。",
     // new group dialog
     GROUP_NAME_LABEL = "群名称",
     GROUP_NAME_PLACEHOLDER = "例如：产品讨论",

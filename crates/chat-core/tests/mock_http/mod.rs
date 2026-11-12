@@ -433,7 +433,30 @@ async fn handle(st: Arc<Mutex<HttpState>>, req: Request<Incoming>) -> Response<F
             if let Some(n) = r.notify {
                 g.notify = Some(n);
             }
+            if let Some(h) = r.hidden {
+                g.hidden = Some(h);
+            }
             ok(g.clone())
+        }
+        (&Method::DELETE, ["v1", "groups", id]) => {
+            let Some(g) = s.groups.get(*id) else {
+                return err(StatusCode::NOT_FOUND, "not_found");
+            };
+            if g.group.kind == GroupKind::Dm {
+                return err(StatusCode::FORBIDDEN, "forbidden");
+            }
+            s.groups.remove(*id);
+            ok(serde_json::json!({ "ok": true }))
+        }
+        (&Method::DELETE, ["v1", "members", id]) => {
+            let Some(m) = s.members.get_mut(*id) else {
+                return err(StatusCode::NOT_FOUND, "not_found");
+            };
+            if !m.is_deactivated() {
+                return err(StatusCode::CONFLICT, "conflict");
+            }
+            m.deleted = Some(true);
+            ok(m.clone())
         }
         (&Method::PATCH, ["v1", "groups", id]) => {
             let r: UpdateGroupRequest = serde_json::from_value(json_body()).unwrap();

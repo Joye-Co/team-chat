@@ -94,11 +94,19 @@ pub struct Member {
     pub character: Option<crate::characters::CharacterId>,
     /// 所有者 (`teamOwner`); always with `level` `Owner`. Read it through [`TeamRole::of`].
     pub team_owner: bool,
+    /// hide-delete/1: an AI member deleted for good (also `deactivated`). Its old messages
+    /// keep its name and avatar; every list and picker leaves it out ([`Member::is_listed`]).
+    pub deleted: bool,
 }
 
 impl Member {
     pub fn is_bot(&self) -> bool {
         self.kind == MemberKind::Bot
+    }
+
+    /// Shown in lists and pickers: every member but a deleted AI member.
+    pub fn is_listed(&self) -> bool {
+        !self.deleted
     }
 }
 
@@ -962,6 +970,12 @@ pub enum Change {
     /// The topics of one group (new topic, title, status, unread).
     Topics {
         group_id: GroupId,
+    },
+    /// hide-delete/1: a 话题 was deleted for everyone (by me or anyone); a view that shows it
+    /// goes back to the 群聊.
+    TopicDeleted {
+        group_id: GroupId,
+        topic_id: TopicId,
     },
     /// Messages of one topic (new, edited, deleted, streamed, ack, older page loaded).
     Messages {
@@ -1854,6 +1868,29 @@ pub trait ChatProvider: Send + Sync + 'static {
     }
     /// Sets my mute preference (`PATCH /v1/groups/:id/prefs`). Emits `Change::Groups`.
     fn set_group_muted(&self, _group_id: &str, _muted: bool) {}
+
+    // --- hide and delete (hide-delete/1; all have defaults) ---
+
+    /// The server lists `hide-delete/1`: the 隐藏 and 删除 items show only then.
+    fn can_hide_delete(&self) -> bool {
+        false
+    }
+    /// Hides a 群 or 私聊 for me (`PATCH /v1/groups/:id/prefs` with `hidden`). A hidden one
+    /// leaves [`ChatProvider::groups`] until someone else writes there or I open the 私聊
+    /// again. Emits `Change::Groups`.
+    fn set_group_hidden(&self, _group_id: &str, _hidden: bool) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: deletes a 群 for everyone (`DELETE /v1/groups/:id`). Emits `Change::Groups`.
+    fn delete_group(&self, _group_id: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Hides a 话题 for me (`topic.hide`): it leaves [`ChatProvider::topics`] until a message
+    /// mentions me. Emits `Change::Topics`.
+    fn hide_topic(&self, _group_id: &str, _topic_id: &str) {}
+    /// Its creator or an owner: deletes a 话题 for everyone (`topic.delete`). Emits
+    /// `Change::TopicDeleted` when it is gone.
+    fn delete_topic(&self, _group_id: &str, _topic_id: &str) {}
     /// The place the main window showed last time, from local storage.
     fn saved_navigation(&self) -> Option<SavedNavigation> {
         None
@@ -1979,6 +2016,12 @@ pub trait ChatProvider: Send + Sync + 'static {
     }
     /// Owner: deactivates (or reactivates) a member. Emits `Change::Members`.
     fn set_member_deactivated(&self, _member_id: &str, _deactivated: bool) -> AdminReply<Member> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner, hide-delete/1: deletes a deactivated AI member for good (`DELETE
+    /// /v1/members/:id`). It stays in [`ChatProvider::members`] with `deleted` so old messages
+    /// keep their author. Emits `Change::Members`.
+    fn delete_member(&self, _member_id: &str) -> AdminReply<Member> {
         reply_now(Err(AdminError::Unsupported))
     }
     /// Owner: adds a bot member. With `runner`, it is runner-backed (the server

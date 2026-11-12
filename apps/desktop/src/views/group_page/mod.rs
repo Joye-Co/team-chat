@@ -913,43 +913,51 @@ fn group_menu(
     };
     let menu = nav_views::notify::items(menu, services, &g.id, window, cx);
     if g.kind != crate::data::GroupKind::Group {
-        return menu;
+        let menu = if services.provider.can_hide_delete() {
+            menu.separator()
+        } else {
+            menu
+        };
+        return nav_views::hide_delete::hide_group_item(menu, services, &g);
     }
     let menu = menu.separator();
+    let hide = g.clone();
     let (rename, add, leave) = (services.clone(), services.clone(), services.clone());
     let purpose = services.clone();
     let (g1, g2, g3) = (g.clone(), g.clone(), g);
     let purpose_group = g1.id.clone();
-    menu.item(
-        PopupMenuItem::new(nav_copy::RENAME_GROUP).on_click(move |_, window, cx| {
-            nav_views::rename::open_rename_group(
-                rename.clone(),
-                g1.id.clone(),
-                g1.name.clone(),
-                window,
-                cx,
-            )
-        }),
-    )
-    .item(
-        PopupMenuItem::new(c::GROUP_PAGE_PURPOSE_MORE).on_click(move |_, window, cx| {
-            open_purpose_sheet(purpose.clone(), purpose_group.clone(), window, cx)
-        }),
-    )
-    .item(
-        PopupMenuItem::new(nav_copy::ADD_MEMBERS).on_click(move |_, window, cx| {
-            nav_views::dialogs::open_add_members(
-                add.clone(),
-                g2.id.clone(),
-                g2.name.clone(),
-                window,
-                cx,
-            )
-        }),
-    )
-    .separator()
+    let menu = menu
+        .item(
+            PopupMenuItem::new(nav_copy::RENAME_GROUP).on_click(move |_, window, cx| {
+                nav_views::rename::open_rename_group(
+                    rename.clone(),
+                    g1.id.clone(),
+                    g1.name.clone(),
+                    window,
+                    cx,
+                )
+            }),
+        )
+        .item(
+            PopupMenuItem::new(c::GROUP_PAGE_PURPOSE_MORE).on_click(move |_, window, cx| {
+                open_purpose_sheet(purpose.clone(), purpose_group.clone(), window, cx)
+            }),
+        )
+        .item(
+            PopupMenuItem::new(nav_copy::ADD_MEMBERS).on_click(move |_, window, cx| {
+                nav_views::dialogs::open_add_members(
+                    add.clone(),
+                    g2.id.clone(),
+                    g2.name.clone(),
+                    window,
+                    cx,
+                )
+            }),
+        )
+        .separator();
+    let menu = nav_views::hide_delete::hide_group_item(menu, services, &hide);
     // A destructive item reads in the destructive color (§2.11, T4-14).
-    .item(
+    let menu = menu.item(
         PopupMenuItem::element(|_, cx: &mut App| {
             div()
                 .text_color(crate::ui::native::native_colors(cx).red)
@@ -964,5 +972,6 @@ fn group_menu(
                 cx,
             )
         }),
-    )
+    );
+    nav_views::hide_delete::delete_group_item(menu, services, &hide)
 }

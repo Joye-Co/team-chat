@@ -993,6 +993,7 @@ fn members() -> Vec<Member> {
         online,
         character: None,
         team_owner: false,
+        deleted: false,
     };
     // Sample bots with sample names, characters and 岗位. The ids stay the
     // sample ids the other samples use.
@@ -1080,6 +1081,11 @@ fn sorted_topics(state: &State, group_id: &str) -> Vec<Topic> {
 impl ChatProvider for FakeProvider {
     fn session(&self) -> SessionState {
         self.with(|s| s.session.clone())
+    }
+
+    /// The menus of the screenshot scenes show 隐藏 and 删除 (nothing behind them here).
+    fn can_hide_delete(&self) -> bool {
+        true
     }
 
     /// The signed-in account and a second one on a local server (the

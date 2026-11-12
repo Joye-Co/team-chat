@@ -541,6 +541,26 @@ fn handle(s: &mut State, conn: usize, tx: &UnboundedSender<Ctrl>, v: Value) -> b
                 json!({"t": "ack", "rid": rid, "ok": true, "result": state}),
             );
         }
+        "topic.hide" => {
+            let tid = v["topicId"].as_str().unwrap();
+            let state = json!({"topicId": tid, "readSeq": 0, "unread": 0, "mentions": 0, "hidden": v["hidden"]});
+            send(
+                tx,
+                json!({"t": "ack", "rid": rid, "ok": true, "result": state}),
+            );
+        }
+        "topic.delete" => {
+            let tid = v["topicId"].as_str().unwrap().to_string();
+            let data = chat_core::proto::TopicDeleteResult {
+                topic_id: tid.clone(),
+                deleted_at: 9_000,
+            };
+            s.append(&gid, &me, EventData::TopicDeleted(data.clone()));
+            send(
+                tx,
+                json!({"t": "ack", "rid": rid, "ok": true, "result": data}),
+            );
+        }
         "card.action" => {
             let data: CardActionedData = serde_json::from_value(json!({
                 "messageId": v["messageId"], "actionId": v["actionId"]

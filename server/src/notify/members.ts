@@ -25,7 +25,8 @@ registerRoute({
       throw new ApiError("forbidden", "only an owner can change level, character, reportsTo, the budget or deactivate");
     }
     const target = await getMember(env.DB, params.id);
-    if (!target) throw new ApiError("not_found", "member not found");
+    // A deleted AI member is gone for changes (docs/protocol.md, "Hide and delete").
+    if (!target || target.deleted_at) throw new ApiError("not_found", "member not found");
     // design-roles 3.2: an admin's or a 所有者's record is the 所有者's to change.
     if (!self && target.level === "owner") requireTeamOwner(a, "only a team owner can change an admin");
     if (req.teamOwner === true && target.kind !== "human") throw new ApiError("invalid", "an AI member cannot be the team owner");

@@ -62,6 +62,51 @@ impl TopicMuteFrame {
     }
 }
 
+/// `{ t: "topic.hide" }`: hide or show a topic for me (until a message mentions me).
+/// `ack.result` is a [`crate::TopicState`].
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopicHideFrame {
+    pub rid: String,
+    pub group_id: String,
+    pub topic_id: String,
+    pub hidden: bool,
+}
+
+impl TopicHideFrame {
+    pub fn validate(&self) -> Validation {
+        check_id("rid", &self.rid)?;
+        check_id("groupId", &self.group_id)?;
+        check_id("topicId", &self.topic_id)
+    }
+}
+
+/// `{ t: "topic.delete" }`: delete a topic for everyone (its creator or an owner).
+/// `ack.result` is a [`TopicDeleteResult`].
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopicDeleteFrame {
+    pub rid: String,
+    pub group_id: String,
+    pub topic_id: String,
+}
+
+impl TopicDeleteFrame {
+    pub fn validate(&self) -> Validation {
+        check_id("rid", &self.rid)?;
+        check_id("groupId", &self.group_id)?;
+        check_id("topicId", &self.topic_id)
+    }
+}
+
+/// `ack.result` of `topic.delete`, and the data of the `topic.deleted` event.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopicDeleteResult {
+    pub topic_id: String,
+    pub deleted_at: crate::entities::Millis,
+}
+
 /// Checks a `waitingOn` list: at most [`MAX_WAITING_ON`] non-empty ids.
 pub fn check_waiting_on(ids: &[String]) -> Validation {
     if ids.len() > MAX_WAITING_ON {

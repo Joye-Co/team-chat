@@ -1,0 +1,11 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "missing hidden",
+  "value": {
+    "t": "topic.hide",
+    "rid": "r92",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD"
+  }
+}
