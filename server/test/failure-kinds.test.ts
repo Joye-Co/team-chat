@@ -18,7 +18,9 @@ import { Client, protocolViolations, waitUntil } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
 
-afterAll(() => {
+afterAll(async () => {
+  // Let the last test's run and its note settle before the file's workers close.
+  await new Promise((r) => setTimeout(r, 300));
   expect(protocolViolations).toEqual([]);
   expect(downViolations).toEqual([]);
 });
