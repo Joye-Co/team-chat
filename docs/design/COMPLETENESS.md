@@ -145,7 +145,7 @@ No 3, 5, 7, 9, 10, 14, 18 or 20 for layout gaps (today `gap 3` x9, `5` x3, `10` 
 | full | badge, count pill, avatar (human), switch, presence dot, search field |
 | 22 | window chrome only: Mac sheet window 22 |
 
-Agent avatars use a squircle at radius = size x 0.25 (8 at 32). Human avatars are circles.
+Agent avatars use a squircle at radius = size x 0.25 (8 at 32). Human avatars are circles. An agent tile with character art sits on its member's pastel tint (`tokens::member_tint`, owner decision 2026-11-12): the one colored surface outside the state colors, because the dark character art disappears on a muted fill in dark mode.
 
 ### 1.7 Borders and shadows
 
