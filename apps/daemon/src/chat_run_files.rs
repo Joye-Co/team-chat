@@ -313,7 +313,15 @@ async fn artifact_body(local: &Local, body: &Value, create: bool) -> Result<Valu
     let (files, entry) = version_files(local, body).await?;
     let mut out = serde_json::Map::new();
     for k in [
-        "title", "kind", "entry", "files", "note", "events", "media", "data",
+        "title",
+        "kind",
+        "entry",
+        "files",
+        "note",
+        "events",
+        "media",
+        "data",
+        "parentVersion",
     ] {
         if !body[k].is_null() {
             out.insert(k.to_string(), body[k].clone());
@@ -521,5 +529,26 @@ mod tests {
         assert_eq!(paths, ["assets/app.js", "index.html"]);
         assert_eq!(mime_of("index.HTML"), "text/html");
         assert_eq!(encode("报告 1.html"), "%E6%8A%A5%E5%91%8A%201.html");
+    }
+
+    #[tokio::test]
+    async fn a_version_body_carries_its_parent_version() {
+        let root = tempfile::tempdir().unwrap();
+        let local = Local {
+            server_url: "http://127.0.0.1:9".into(),
+            token: Arc::new("tm_test".into()),
+            run_id: "R1".into(),
+            root: root.path().to_path_buf(),
+            redactor: Arc::new(Redactor::new(vec![])),
+        };
+        let files = json!([{ "path": "index.html", "fileId": "F1" }]);
+        let body =
+            json!({ "artifactId": "A", "entry": "index.html", "files": files, "parentVersion": 2 });
+        let out = artifact_body(&local, &body, false).await.unwrap();
+        assert_eq!(out["parentVersion"], 2);
+        assert!(out.get("artifactId").is_none());
+        let body = json!({ "artifactId": "A", "entry": "index.html", "files": files });
+        let out = artifact_body(&local, &body, false).await.unwrap();
+        assert!(out.get("parentVersion").is_none());
     }
 }

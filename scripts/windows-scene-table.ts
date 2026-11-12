@@ -39,6 +39,10 @@ const win = results(read(winPath));
 const scenes = [...new Set([...mac.keys(), ...win.keys()])].sort();
 const unique = (items: string[]) => [...new Set(items)].join("；");
 const failing = scenes.filter((s) => win.get(s)?.startsWith("失败"));
+// A scene one run has and the other lacks (the runs were at different commits) is neither
+// a pass nor a failure: it is counted and named, so the summary cannot say more than the runs.
+const passing = scenes.filter((s) => win.get(s) === "通过");
+const missing = scenes.filter((s) => !win.has(s) || !mac.has(s));
 
 const lines = [
   "# Windows 对齐清单：界面，逐场景对比",
@@ -48,7 +52,7 @@ const lines = [
   "",
   `- Windows：CI 的 \`desktop-windows\` 任务，\`windows_scenes=all\`，**run ${runId}**，产物 \`windows-screenshots\`（\`<场景>-<light|dark>.png\`，内嵌页面另见 \`screen/\`）。`,
   "- Mac：一台 Mac 上 `desktop --screenshot` 的结果（2 倍，缩到 1 倍再比）。",
-  `- 场景 ${scenes.length} 个；Windows 上通过 ${scenes.length - failing.length} 个${failing.length ? `，失败 ${failing.length} 个（${failing.map((s) => `\`${s}\``).join("、")}）` : "，没有失败的"}。`,
+  `- 场景 ${scenes.length} 个；Windows 上通过 ${passing.length} 个${failing.length ? `，失败 ${failing.length} 个（${failing.map((s) => `\`${s}\``).join("、")}）` : "，没有失败的"}${missing.length ? `；只有一边跑了的 ${missing.length} 个（${missing.map((s) => `\`${s}\``).join("、")}）` : ""}。`,
   "- 不算差别、所以不在表里的：标题条和窗口按钮、内容整体下移 32、字体和图标集本身、表情的画法、AI 成员头像（开源构建没有图包）。",
   "",
   "所有主窗口场景共有的差别（表里不逐行重复）：",
@@ -66,4 +70,4 @@ const lines = [
   "",
 ];
 writeFileSync(`${dir}/interface-scenes.zh.md`, lines.join("\n"));
-console.log(`${scenes.length} scenes, ${failing.length} failing on Windows`);
+console.log(`${scenes.length} scenes, ${passing.length} passing and ${failing.length} failing on Windows, ${missing.length} in one run only`);

@@ -35,10 +35,23 @@ use crate::{
     },
 };
 
-/// The kinds a person picks from in a scope (and the edited memory's own kind).
-pub fn kinds_for(scope: &MemoryScope, current: Option<MemoryKind>) -> Vec<MemoryKind> {
+/// The kinds a person picks from in a scope, or in 我的约定 (`folded`), and the edited
+/// memory's own kind.
+pub fn kinds_for(
+    scope: &MemoryScope,
+    folded: bool,
+    current: Option<MemoryKind>,
+) -> Vec<MemoryKind> {
     let mut kinds = match scope {
-        MemoryScope::Team => vec![MemoryKind::Convention, MemoryKind::Fact],
+        _ if folded => vec![
+            MemoryKind::Convention,
+            MemoryKind::Preference,
+            MemoryKind::Fact,
+        ],
+        MemoryScope::Team | MemoryScope::Group(_) => {
+            vec![MemoryKind::Convention, MemoryKind::Fact]
+        }
+        MemoryScope::Person(_) => vec![MemoryKind::Preference, MemoryKind::Fact],
         MemoryScope::Member(_) => vec![
             MemoryKind::Lesson,
             MemoryKind::Playbook,
@@ -85,6 +98,9 @@ struct MemorySheet {
     services: Services,
     board: WeakEntity<MemoryBoard>,
     scope: MemoryScope,
+    /// 我的约定: `Some(true)` when I may write the team, so a new 约定 or 事实 is the
+    /// team's ([`model::folded_scope`]).
+    folded: Option<bool>,
     /// `None`: 记一条.
     original: Option<Memory>,
     member_name: String,
@@ -118,8 +134,14 @@ impl MemorySheet {
                         &[("n", &MAX_WHEN_CHARS.to_string())],
                     )));
                 }
+                let scope = match (&self.scope, self.folded) {
+                    (MemoryScope::Person(me), Some(team_writer)) => {
+                        model::folded_scope(self.kind, me, team_writer)
+                    }
+                    (scope, _) => scope.clone(),
+                };
                 Ok(Ready::New(NewMemory {
-                    scope: self.scope.clone(),
+                    scope,
                     kind: self.kind,
                     text,
                     when: (!when.is_empty()).then(|| when.to_string()),
@@ -175,7 +197,11 @@ impl Render for MemorySheet {
         let ready = !self.busy && check.is_ok();
         let note = check.err().flatten();
         let field_w = form_field_width(SheetWidth::Form);
-        let kinds = kinds_for(&self.scope, self.original.as_ref().map(|m| m.kind));
+        let kinds = kinds_for(
+            &self.scope,
+            self.folded.is_some(),
+            self.original.as_ref().map(|m| m.kind),
+        );
         let current = self.kind;
         let this = cx.entity().downgrade();
         let kind = popup_button(
@@ -226,7 +252,10 @@ impl Render for MemorySheet {
             (
                 c::SHEET_NEW,
                 match &self.scope {
+                    _ if self.folded.is_some() => c::SHEET_NEW_MINE.to_string(),
                     MemoryScope::Team => c::SHEET_NEW_TEAM.to_string(),
+                    MemoryScope::Group(_) => c::SHEET_NEW_GROUP.to_string(),
+                    MemoryScope::Person(_) => c::SHEET_NEW_PERSON.to_string(),
                     MemoryScope::Member(_) => {
                         fill(c::SHEET_NEW_MEMBER, &[("name", &self.member_name)])
                     }
@@ -252,6 +281,8 @@ pub struct Target {
     pub services: Services,
     pub board: WeakEntity<MemoryBoard>,
     pub scope: MemoryScope,
+    /// 我的约定: whether I may write the team (see [`MemorySheet`]).
+    pub folded: Option<bool>,
     pub host: Host,
     pub member_name: String,
 }
@@ -265,6 +296,7 @@ pub fn open(target: Target, original: Option<Memory>, window: &mut Window, cx: &
         services,
         board,
         scope,
+        folded,
         host,
         member_name,
     } = target;
@@ -272,12 +304,15 @@ pub fn open(target: Target, original: Option<Memory>, window: &mut Window, cx: &
         .as_ref()
         .map(|m| m.kind)
         .filter(|k| *k != MemoryKind::Other)
-        .unwrap_or(kinds_for(&scope, None)[0]);
+        .unwrap_or(kinds_for(&scope, folded.is_some(), None)[0]);
     let sheet = cx.new(|cx| {
         let text = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .placeholder(match scope {
+                    _ if folded.is_some() => c::SHEET_TEXT_PLACEHOLDER_TEAM,
                     MemoryScope::Team => c::SHEET_TEXT_PLACEHOLDER_TEAM,
+                    MemoryScope::Group(_) => c::SHEET_TEXT_PLACEHOLDER_GROUP,
+                    MemoryScope::Person(_) => c::SHEET_TEXT_PLACEHOLDER_PERSON,
                     MemoryScope::Member(_) => c::SHEET_TEXT_PLACEHOLDER_MEMBER,
                 })
                 .default_value(
@@ -321,6 +356,7 @@ pub fn open(target: Target, original: Option<Memory>, window: &mut Window, cx: &
             services,
             board,
             scope,
+            folded,
             original,
             member_name,
             kind,
@@ -408,11 +444,27 @@ mod tests {
     #[test]
     fn each_scope_offers_its_own_kinds() {
         assert_eq!(
-            kinds_for(&MemoryScope::Team, None),
+            kinds_for(&MemoryScope::Team, false, None),
             vec![MemoryKind::Convention, MemoryKind::Fact]
+        );
+        assert_eq!(
+            kinds_for(&MemoryScope::Group("g1".into()), false, None),
+            vec![MemoryKind::Convention, MemoryKind::Fact]
+        );
+        let me = MemoryScope::Person("m1".into());
+        assert_eq!(kinds_for(&me, false, None)[0], MemoryKind::Preference);
+        assert_eq!(
+            kinds_for(&me, true, None),
+            vec![
+                MemoryKind::Convention,
+                MemoryKind::Preference,
+                MemoryKind::Fact
+            ],
+            "我的约定 offers the team's kinds and mine"
         );
         let member = kinds_for(
             &MemoryScope::Member("b1".into()),
+            false,
             Some(MemoryKind::Decision),
         );
         assert_eq!(member[0], MemoryKind::Lesson);

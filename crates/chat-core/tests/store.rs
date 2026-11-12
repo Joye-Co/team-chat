@@ -51,6 +51,7 @@ fn migrations_are_named_and_run_once() {
             "core-1",
             "ext-1",
             "members-2",
+            "roles-1",
             "topic-mute-1",
             "v11-1",
             "v11-2",
@@ -169,6 +170,47 @@ fn member_reports_to_and_weekly_budget_are_stored_and_cleared() {
     s.apply_directory(Some(&[cleared]), None, None).unwrap();
     let got = s.member("B2").unwrap().unwrap();
     assert_eq!((got.reports_to, got.weekly_budget_cents), (None, None));
+}
+
+#[test]
+fn member_team_owner_is_stored_and_cleared() {
+    let (_d, s) = open();
+    let owner = Member {
+        level: MemberLevel::Owner,
+        team_owner: Some(true),
+        ..member("O1", "Ana")
+    };
+    s.apply_directory(Some(std::slice::from_ref(&owner)), None, None)
+        .unwrap();
+    assert!(s.member("O1").unwrap().unwrap().is_team_owner());
+    // Made an admin: the server stops sending the mark.
+    let admin = Member {
+        team_owner: None,
+        ..owner
+    };
+    s.apply_directory(Some(&[admin]), None, None).unwrap();
+    let got = s.member("O1").unwrap().unwrap();
+    assert_eq!((got.level, got.team_owner), (MemberLevel::Owner, None));
+}
+
+#[test]
+fn a_cache_from_before_roles_1_reads_owners_as_admins() {
+    use chat_core::store::migrations::{MIGRATIONS, run};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("c.sqlite3");
+    {
+        let mut conn = rusqlite::Connection::open(&path).unwrap();
+        let n = MIGRATIONS.iter().position(|m| m.name == "roles-1").unwrap();
+        run(&mut conn, &MIGRATIONS[..n]).unwrap();
+        conn.execute(
+            "INSERT INTO members (id, kind, name, level) VALUES ('O1', 'human', 'old', 'owner')",
+            [],
+        )
+        .unwrap();
+    }
+    let s = Store::open(&path).unwrap();
+    let m = s.member("O1").unwrap().unwrap();
+    assert_eq!((m.level, m.is_team_owner()), (MemberLevel::Owner, false));
 }
 
 #[test]

@@ -1204,10 +1204,10 @@ impl AccountPage {
             .map(|r| r.split_whitespace().collect::<Vec<_>>().join(" "))
             .filter(|r| !r.is_empty())
             .unwrap_or_else(|| s::NO_ROLE.to_string());
-        let level = me
-            .as_ref()
-            .map(|m| widgets::level_text(m.level))
-            .unwrap_or_default();
+        // My 身份 after the 岗位; one person alone has none to show (design-roles 3.10).
+        let level = super::my_role(&self.services)
+            .filter(|_| !super::solo(&self.services))
+            .map(super::role_text);
         let page = cx.entity();
         div()
             .w_full()
@@ -1240,7 +1240,10 @@ impl AccountPage {
                             .overflow_hidden()
                             .whitespace_nowrap()
                             .text_ellipsis()
-                            .child(format!("{role} · {level}")),
+                            .child(match level {
+                                Some(level) => format!("{role} · {level}"),
+                                None => role,
+                            }),
                     ),
             )
             .child(

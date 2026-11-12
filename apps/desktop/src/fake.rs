@@ -29,6 +29,19 @@ mod settings_backend;
 // --- end settings-backend track
 
 pub const ME: &str = "m-joye";
+
+/// Who I am in the sample team, for the 身份 scenes ([`FakeProvider::set_role_view`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RoleView {
+    /// 所有者, with 陈晨 as a 管理员.
+    Owner,
+    /// 管理员; 陈晨 is the 所有者.
+    Admin,
+    /// 普通成员; 陈晨 is the 所有者.
+    Member,
+    /// The only person on the server (the AI members stay).
+    Alone,
+}
 /// The topic with 10,000 messages.
 pub const LONG_TOPIC: &str = "t-perf";
 pub const LONG_TOPIC_GROUP: &str = "g-dev";
@@ -966,6 +979,7 @@ fn members() -> Vec<Member> {
         deactivated: false,
         online,
         character: None,
+        team_owner: false,
     };
     // Sample bots with sample names, characters and 岗位. The ids stay the
     // sample ids the other samples use.
@@ -977,7 +991,10 @@ fn members() -> Vec<Member> {
     use MemberKind::*;
     use MemberLevel::{Member as Regular, Owner};
     let mut list = vec![
-        m(ME, Human, "Joye", "负责人", Owner, true),
+        Member {
+            team_owner: true,
+            ..m(ME, Human, "Joye", "负责人", Owner, true)
+        },
         m("m-xiaowang", Human, "小王", "前端实习生", Regular, true),
         m("m-lixue", Human, "李雪", "产品实习生", Regular, false),
         m("m-chenchen", Human, "陈晨", "设计实习生", Regular, true),
@@ -1901,8 +1918,8 @@ impl ChatProvider for FakeProvider {
         self.create_invite_fake(request)
     }
 
-    fn set_member_level(&self, member_id: &str, level: MemberLevel) -> AdminReply<Member> {
-        self.set_member_level_fake(member_id, level)
+    fn set_member_role(&self, member_id: &str, role: crate::data::TeamRole) -> AdminReply<Member> {
+        self.set_member_role_fake(member_id, role)
     }
 
     fn set_member_deactivated(&self, member_id: &str, deactivated: bool) -> AdminReply<Member> {

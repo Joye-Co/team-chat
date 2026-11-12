@@ -43,6 +43,10 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
   实时查看 (watch a member's computer while it works), 接管 and 交还 (pause the member and take over,
   then hand back), 交代 (hand work to a member), 来龙去脉 (where a 产出 came from), 群里的决定 (the
   decisions recorded in a 群), 验收标准 (the checks a result must pass), 回放 (replay a run by step).
+- Words for memory (沉淀, docs/design/agent-harness.zh.md §7.7 and §13.5): 记得的事 (an AI member's),
+  团队约定, 群里的约定, 我的偏好, and 我的约定 (团队约定 and 我的偏好 on one board when one person uses
+  the server); the kinds 约定, 事实, 决定, 偏好, 经验, 做法; 记忆更新, 记一条, 明天生效, 停用, 恢复, 撤回,
+  可能过时; and AI 服务 (the server's own model, set in 团队管理).
 - Words for cards, the interaction loop and 产出 pages (1.1.0 part 2; DESIGN.md §7.13, §7.14): the
   card band words 等你, 等{name}, 处理中, 完成, 失败, 已作废, 已过期; the choice forms 单选, 多选, 排序,
   评分 (打分), 量表, 是或否, 图片选择, 矩阵, 时间段, 投票, 问卷, 对比; and 等 {name} 回应, {name} 还在处理,
@@ -59,6 +63,9 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
   in UI text.
 - The settings window may also use 岗位 (role and how the member works), 权限 (permissions),
   机器 (machines) and 成本 (cost).
+- The three 身份 of a team (design-roles): 所有者, 管理员 and 普通成员, with 身份 itself and the menu
+  items 设为所有者, 设为管理员, 设为普通成员. 负责人 stays the member a 话题 is assigned to and is
+  never a 身份.
 - Developer words appear only in the developer view (开发者视图) and in logs: session, CLI,
   model names, router, worker, runner, trigger, token, agent, bot, chat, thread, channel, DM,
   task, ticket, artifact, attachment, and their Chinese forms 会话, 机器人, 智能体, 频道, 线程,
@@ -183,9 +190,17 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
   post them; every interaction (not only answers) goes back to the card's author, which may change
   the card in place. Only people send interactions; a bot's message never starts a run. Clients
   before 1.1.0 see a v1 card that the server derives and refreshes on every change.
-- Permissions: levels `owner` (the team lead and the bots at that level) and `member` (everyone
-  else and their bots). Clients and bots use the same API. Every write is audited with who asked, who
-  did it, which credential, and what changed.
+- Permissions: three roles. 所有者 (team owner: `level` `owner` with `teamOwner`, people only),
+  管理员 (admin: `level` `owner`, people and the AI members at that level) and 普通成员 (member:
+  `level` `member`, everyone else and their AI members). A 所有者 is also an admin. Admins manage
+  the team: the AI service key and model, the team's models, approval rules, invites, AI members,
+  team machines, usage and activity; members read the team settings. Only a 所有者 changes
+  anyone's role and deactivates, revokes or edits an admin or a 所有者. Invited people arrive as
+  members and get a role afterwards. The team keeps at least one active 所有者; the person who
+  sets up a server is its first 所有者, so someone using it alone notices no roles at all
+  (see [plans/usable/design-roles.zh.md](plans/usable/design-roles.zh.md)). Clients and bots use
+  the same API. Every write is audited with who asked, who did it, which credential, and what
+  changed.
 - Sign-in for V1 is an invite code that becomes a token in the macOS Keychain. After that a
   member can add a sign-in email in 账号 and sign in on any Mac with a 6-digit code sent there.
   The app keeps one session per server (正式服务器, 测试服务器 or another), so switching servers

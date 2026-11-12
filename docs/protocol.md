@@ -853,6 +853,7 @@ CreateMachineRequest = { name, labels? }      CreateMachineResponse = { machine,
 | `GET /v1/machine/ws` | machine token | | WebSocket upgrade (machine-protocol.md) |
 | `PUT /v1/machine/runs/:id/session` | machine token | gzip body | `{ ok: true }` |
 | `GET /v1/machine/runs/:id/topic/messages`, `…/topic/messages/:messageId`, `…/search`, `…/files/:fileId` | machine token | | the run's topic context (machine-protocol.md, "Topic context") |
+| `GET /v1/machine/runs/:id/topic/state`, `…/artifacts`, `…/artifacts/:artifactId`, `…/cards/:messageId`, `…/decisions`, `…/members` | machine token | | what the run's group produced: `TopicStateResponse`, `RunArtifactsResponse`, `RunArtifactResponse`, `RunCardResponse`, `RunDecisionsResponse`, `RunMembersResponse` (machine-protocol.md, "Topic context") |
 
 Rules:
 
@@ -884,6 +885,20 @@ Rules:
   run after its last turn ended starts a new run. When no run is active, a mention starts a run,
   and so does a message without an @ from the last run's requester within 30 minutes after it
   ended (with a front desk, the front desk decides; small talk gets no answer).
+- In a chat area (the 群聊, a DM's 群聊) a bot works on several requests at once (usable 接 1.5):
+  a mention from someone who has no active run of the bot there starts its own run next to the
+  running ones, with its own result and its own session. A message that quotes a run's request,
+  progress or approval card, or an input it took, goes to that run; an approval answer to the run
+  that waits for it; the requester's own words to their newest run; a message that starts with
+  新任务 (or answers the front desk's question) starts a new run. An answer or a live event on a
+  card goes to the run that posted the card, and a part handed back to the run that gave it out.
+  A retry or a hand-over may start next to the running ones. In a topic the bot has one run
+  at a time, as above.
+- The room hands messages to bots in lanes, one per (topic, bot) (usable 接 1.9): in order within
+  a lane, lanes at the same time, so one bot's front desk call does not delay another bot's 👀. A
+  failed hand-off holds only the later messages of its lane until it is retried; in a topic a
+  message without an @ is routed after the topic's earlier hand-offs are done, without holding
+  back later messages that name their bots.
 - The bot acknowledges the message that started the run with one reaction (👀; before 1.1, a
   short text line). It posts nothing while it works: progress lives in the run (`plan`, the run
   log; before 1.1, one streaming message). When the run ends it posts one result message and
@@ -996,10 +1011,19 @@ and makes one forced tool call `decide`, which answers with one of four actions:
   No run, no machine.
 - `dispatch`: a run as before. Its prompt carries the work order (`WorkBrief`: goal, done-when
   checks, notes) after the request.
-- `ask`: the bot posts one question and becomes the topic's `ownerId`. For an hour the
-  requester's next message in the topic counts as addressed to the bot without an @; the front
-  desk then decides again with the answer in the topic.
+- `ask`: the bot posts one question as a Card v2 ask (`intent: "ask"`, `ask.from` = the
+  requester, blocking, `expiresAt` in an hour, one `textarea` input `answer` with the submit
+  action `send`) and, in a topic, becomes its `ownerId`; the topic shows `waiting_answer`. For an
+  hour the requester's next message in the topic (in the 群聊 too, where the front desk's open,
+  unexpired question routes that person's messages to the bot; other card asks do not) counts as addressed to the
+  bot without an @; the front desk then decides again with the answer in the topic, and the card
+  stops waiting (its ask, action and input are removed). An answer in the card starts a run with
+  that answer (in the 群聊 next to any running one).
 - `skip`: nothing is posted, and the 👀 it put on the request is taken back.
+
+When a person says something in the topic while the front desk thinks, the decision read an
+old topic: it is dropped and made again on the new one (at most twice; usable 接 1.13). In a DM
+a `dispatch` may say `newTask: true`: the request is new work and starts a fresh session.
 
 The 👀 reaction goes on the request while the front desk reads it. A decision is stored before
 it is acted on, so a retried delivery never posts twice. Any doubt becomes a `dispatch`: an
@@ -1038,16 +1062,20 @@ contract, but its shape is fixed here so the developer view and the daemon notes
   [#42 m 01J… · 张三 · 11-08 14:02] the body (cut at 600 characters; the rest by id)
     ↪ quotes m 01J… (王五: the excerpt)
     [file f 01J… · 设计稿.png · image/png · 1280×720]
-    [产出 a 01J… v3]
+    [产出 a 01J… v3 · 上线方案]
     [card · 选部署时间 · 2 answers: 李四 选了「周五晚上」]
   ```
 
   `#42` is the message's seq. The time is on the team's clock (`TEAM_TIME_ZONE`, default
-  Asia/Shanghai). A system message (`kind: "system"`) is one line in brackets.
+  Asia/Shanghai). A system message (`kind: "system"`) is one line in brackets. A 产出 line
+  carries the 产出's current title.
 - **The request whole.** The request and every follow-up carry the same indented lines for the
   message they quote, their files and their 产出, so a file is an id the run fetches with
   `chat-run file get`; a message with only an image is its file line. The front desk reads the
   request the same way.
+- **Members.** The executor's prompt lists the group's active members, people first, one line
+  each: name, 岗位, `AI member` for bots and `you` for the run's own member (at most 40; the rest
+  with `chat-run member list`).
 - **Budget, not a count.** The topic's first message is always there, cut at 4,000 characters. Then the newest messages,
   newest first, until 24,000 characters; the lines go in oldest first. When messages are left out
   between them, one line says how many and, for a machine with feature `context`, how to read them
@@ -1062,7 +1090,11 @@ contract, but its shape is fixed here so the developer view and the daemon notes
   seq that are not the bot's own, then the request; at most the same budget.
 - **群聊.** A run continues the bot's last session in the 群聊 only when its request quotes a
   message of that bot or is a follow-up of its run (input left over). A new request starts a new
-  session with the 群聊's lines as above.
+  session with the 群聊's lines as above. In a DM's 群聊 (usable 接 3.2) the next request
+  continues the bot's last session there, unless it starts with 新任务 (or similar words: 新的任务,
+  另一个任务, 换个任务, 重新开始, new task) or the front desk dispatches it with `newTask: true`. A
+  request next to a running one in a chat area always starts a new session; a follow-up or a
+  retry continues its own run's session.
 - **What it carried.** Every run keeps its prompt and a manifest; owners read them with
   `GET /v1/runs/:id/context`:
 
@@ -1607,9 +1639,11 @@ Rules:
 - The 群聊 is a chat, not a piece of work: `topic.update` on it changes nothing and answers the
   topic as it is (bots that report a run's status keep working); a card ask in it does not set
   its status or `waitingOn`; posting or being mentioned in it does not auto-follow it.
-- Bots: a message in the 群聊 goes only to the bot it mentions (in a DM with a bot, to that bot).
-  No bot becomes the 群聊's responsible member, so each @mention can go to a different bot; a
-  bot with an active run there takes a later mention as a follow-up of that run. A card press in
+- Bots: a message in the 群聊 goes only to the bot it mentions (in a DM with a bot, to that bot),
+  or to a bot whose front desk question (an open, unexpired card ask) waits on its author. No bot becomes the 群聊's responsible
+  member, so each @mention can go to a different bot; a bot with an active run there takes a
+  later mention from that run's requester as a follow-up of that run, and a mention from someone
+  else as a new request next to it. A card press in
   the 群聊 goes to the card's author when that bot has run there.
 
 ## Desk notes
@@ -2136,14 +2170,22 @@ only at the moment a command would run: the machine stops the command and asks
 
   | Kind | Matches |
   | --- | --- |
-  | `mergeMain` | `gh pr merge`; `git push` naming `main`/`master` as a branch or refspec target (`origin main`, `HEAD:main`, `x:refs/heads/master`) |
+  | `mergeMain` | `gh pr merge`; `git push` naming `main`/`master` as a branch or refspec target (`origin main`, `HEAD:main`, `x:refs/heads/master`), also with git's options first (`git -C repo push origin main`); a merge through the GitHub API (`gh api`/`curl` with `PUT` to `…/pulls/<n>/merge`, GraphQL `mergePullRequest` or `enablePullRequestAutoMerge`); an MCP tool `mcp__<server>__merge_pull_request`, and `…__push_files`/`…__create_or_update_file` with `"branch":"main"` |
   | `deployProd` | `wrangler deploy`/`publish` with `--env`/`-e` `prod`/`production`; `vercel … --prod`; `netlify deploy … --prod`; `fly deploy`/`flyctl deploy`; `npm`/`bun`/`pnpm`/`yarn run deploy:prod` (also `deploy-prod`, `deploy_prod`, `production`) |
   | `prodConfig` | `wrangler secret put`/`delete`/`bulk` with `--env prod`; `vercel env add`/`rm` … `production`; `fly secrets set`/`unset`/`import` |
   | `deleteData` | `rm` with flags of `/`, `/*`, `~`, `~/`, `~/*`, `$HOME`; on Windows `Remove-Item`/`ri`/`rm`/`rmdir`/`rd`/`del`/`erase` of a drive's root (`C:\`, `C:\*`, `\`), of `~`, `$HOME`, `$env:USERPROFILE` or `%USERPROFILE%` itself, and `rm` with flags of a Git Bash drive (`/c/`); `DROP TABLE`/`DATABASE`/`SCHEMA` or `TRUNCATE TABLE` through `wrangler d1 execute`, `psql`, `mysql`, `sqlite3`; `DELETE FROM` through `wrangler d1 execute --remote`; `wrangler d1 delete`, `wrangler kv namespace`/`key`/`bulk delete`, `wrangler r2 bucket`/`object delete`; `gh repo delete` |
   | `externalPublish` | `npm`/`bun`/`pnpm`/`yarn publish`; `cargo publish`; `gh release create`; `twine upload` |
 
   A force push to a work branch is not gated (the agent rebases its own PR branch); a force push
-  to `main` is `mergeMain`. A plain `git push` while `main` is checked out is not seen.
+  to `main` is `mergeMain`. The run's shims (machine-protocol.md, "Gated actions") match the same
+  patterns against the facts of each invocation, so a plain `git push` while `main` is checked
+  out, `git -C`, a variable in the refspec and a deploy inside a script or package script stop
+  too.
+- **What this is**: a guard against mistakes, not a security boundary. A member that starts a
+  program by its full path or acts through a web page is not stopped. The real floor is GitHub
+  branch protection on `main` and a production environment that requires its own approval; the
+  settings page says so. `maxSpendCny` is never enforced: it is only a line in the run's prompt
+  that reminds the member to ask.
 - The daemon's `approval.request` carries `kind` and `command` (redacted). BotDesk posts the
   approval card titled `需要你确认：<kind's 设置 name>` with the command, mentions the kind's
   approver (`approvers[kind]`, else `approver`) and has three actions: 同意 (`approve:<id>`),
@@ -2487,7 +2529,8 @@ Rules:
 
 - Every route that was `owner` is now "an admin (管理员, `level: "owner"`)". Only a 所有者 changes
   a member's `level` or `teamOwner` (`forbidden`, reason `role.owner_only`), makes an invite with
-  `level: "owner"` (not a sign-in code), and deactivates, revokes or edits an admin or a 所有者.
+  `level: "owner"`, makes a sign-in code (`memberId`) for another admin or 所有者, and deactivates,
+  revokes or edits (including the avatar) an admin or a 所有者.
   The team keeps at least one active human 所有者 (`conflict`, `role.last_owner`). `teamOwner:
   true` for an AI member is `invalid`.
 - `DELETE /v1/machines/:id`, `…/logins*`, `…/secrets*` and `…/monitor` need an admin on a team
@@ -2647,3 +2690,19 @@ Rules:
 - `GET /v1/runs/:id/events` carries the run events `hand.command`, `hand.result` and
   `hand.summary` to everyone who may read the run, and `hand.output` only to the person holding
   it and admins. They are not the AI member's progress.
+
+## Machine homes (VM hosts)
+
+On a Linux host that runs each run in a VM, every AI member has a home folder of fixed size
+(machine-protocol.md, "MicroVM runs"). A daemon with feature `homes` reports them with its
+heartbeat, and the monitor passes the latest report on:
+
+```ts
+HomeUse = { memberId, usedBytes /* on the host disk */, sizeBytes? /* absent = no limit */ }
+MachineMetrics += { homes?: HomeUse[] /* <= 500 */ }
+MachineMonitor += { homes?: HomeUse[] /* <= 500; absent on other machines */ }
+```
+
+| Method and path | Who | Body | Response |
+| --- | --- | --- | --- |
+| `POST /v1/machines/:id/homes/:memberId/clear` | whoever manages the machine (team machine: an admin; personal machine: its owner) | | `{ ok: true }` once `home.clear` is sent to the daemon; `conflict` when the machine is offline (`machine.offline`, never queued) or keeps no homes (`machine.too_old`); `not_found` for an id that is not `[A-Za-z0-9]{1,64}`; audited as `machine.home.clear`. The daemon refuses while a run of that member is on the machine; the next heartbeat shows the result |

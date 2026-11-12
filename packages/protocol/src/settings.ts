@@ -157,6 +157,17 @@ export const DEFAULT_GATE_PATTERNS: Record<GateKind, readonly string[]> = {
     "\\bgh pr merge\\b",
     // `git push origin main`, `git push origin HEAD:main`, `git push origin x:refs/heads/master`
     "\\bgit push\\b.*[\\s:](refs/heads/)?(main|master)(\\s|$)",
+    // The same with git's own options first: `git -C repo push origin main`, `git -c k=v push …`
+    "\\bgit(\\s+(-[cC]\\s+\\S+|--\\S+))+\\s+push\\b.*[\\s:](refs/heads/)?(main|master)(\\s|$)",
+    // Merging through the GitHub API, where no shim sees it: `gh api -X PUT …/pulls/5/merge`,
+    // `curl -X PUT https://api.github.com/…/pulls/5/merge`, GraphQL `mergePullRequest`
+    "\\b(gh api|curl)\\b.*(-X\\s*|--method[ =]|--request[ =])put\\b.*/pulls/\\d+/merge\\b",
+    "\\b(gh api|curl)\\b.*/pulls/\\d+/merge\\b.*(-X\\s*|--method[ =]|--request[ =])put\\b",
+    "\\b(gh api|curl)\\b.*\\b(mergePullRequest|enablePullRequestAutoMerge)\\b",
+    // A merge tool of an MCP server (the GitHub MCP server's `merge_pull_request`), or one that
+    // writes to main (`push_files`, `create_or_update_file` with `"branch":"main"`)
+    "^mcp__\\S+__merge_pull_request\\b",
+    "^mcp__\\S+__(push_files|create_or_update_file)\\b.*\"branch\":\"(main|master)\"",
   ],
   deployProd: [
     "\\bwrangler (deploy|publish)\\b.*(--env|-e)[ =](prod|production)\\b",

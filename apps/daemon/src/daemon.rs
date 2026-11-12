@@ -91,6 +91,8 @@ struct RunEntry {
     cancel_asked: bool,
     /// The CLI session the run was assigned to resume, for a `run.done` without a session.
     resume_session: Option<String>,
+    /// The AI member the run belongs to (empty for a run recovered after a restart).
+    bot: String,
 }
 
 pub struct Daemon {
@@ -131,6 +133,8 @@ pub struct Daemon {
     key_values: Vec<String>,
     /// The daemon is shutting down: the runs it stops itself end as `daemon restarted`.
     stopping: bool,
+    /// Feature "homes": AI members whose home is being emptied; their runs wait.
+    clearing: Arc<std::sync::Mutex<HashSet<String>>>,
 }
 
 pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), String> {
@@ -176,6 +180,7 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
         accounts: Arc::new(std::sync::Mutex::new(HashMap::new())),
         key_values,
         stopping: false,
+        clearing: Arc::default(),
     };
     d.read_accounts();
     d.recover();
@@ -440,6 +445,7 @@ impl Daemon {
                     redactor: Arc::new(self.redactor.for_run()),
                     cancel_asked: false,
                     resume_session: None,
+                    bot: String::new(),
                 },
             );
         }
@@ -586,6 +592,7 @@ impl Daemon {
                                 .iter()
                                 .copied()
                                 .chain(self.machine_key.as_ref().map(|_| feature::ACCOUNTS))
+                                .chain(self.cfg.vm.as_ref().map(|_| feature::HOMES))
                                 .map(str::to_string)
                                 .collect(),
                         ),
@@ -756,6 +763,7 @@ impl Daemon {
                     log!("key {} removed", crate::chat_run::safe_word(&name));
                 }
             }
+            Down::HomeClear { member_id } => self.on_home_clear(member_id),
             // usable: feature "takeover" is not reported yet, so the server sends neither.
             Down::RunCommand { run_id, .. } | Down::RunCommandCancel { run_id, .. } => {
                 log!("run {run_id}: take-over commands are not supported");
@@ -814,9 +822,26 @@ impl Daemon {
         if self.active_count() >= self.cfg.max_parallel_runs {
             return self.reject(&id, "busy", "max_parallel_runs reached");
         }
-        let (free, _) = health::disk(&self.cfg.work_root);
+        let (free, _) = health::run_disk(&self.cfg);
         if free < self.cfg.min_free_gb * (1 << 30) / 2 {
             return self.reject(&id, "disk_low", "free disk below half of min_free_gb");
+        }
+        if let Some(vm) = &self.cfg.vm {
+            // 机 3.7: a VM that could not get its memory would fail after it started.
+            let mem = crate::metrics::host_memory();
+            let starting =
+                u64::from(self.active_count()).saturating_sub(crate::metrics::vms_booted());
+            if !health::vm_memory_ok(mem.map(|m| m.1), mem.map(|m| m.0), vm.mem_mib, starting) {
+                return self.reject(&id, "busy", "not enough free memory for another VM");
+            }
+            if self
+                .clearing
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains(&a.bot_member_id)
+            {
+                return self.reject(&id, "busy", "the AI member's home folder is being emptied");
+            }
         }
         if let Some(repo) = &a.repo
             && let Err(e) = crate::workspace::validate_repo(&self.cfg, repo)
@@ -883,6 +908,7 @@ impl Daemon {
                 redactor: redactor.clone(),
                 cancel_asked: false,
                 resume_session: a.resume_session_id.clone(),
+                bot: a.bot_member_id.clone(),
             },
         );
         log!("run {id} accepted ({})", a.runtime);
@@ -1115,6 +1141,40 @@ impl Daemon {
     }
 
     /// Feature "accounts": open and keep an API key, then mask its value from now on.
+    /// Feature "homes": empties an AI member's home folder, unless one of its runs is on this
+    /// machine. Its runs wait meanwhile; the next heartbeat shows the result.
+    fn on_home_clear(&mut self, member_id: String) {
+        let safe = crate::chat_run::safe_word(&member_id);
+        let Some(vm) = self.cfg.vm.clone() else {
+            return log!("home of {safe}: this machine keeps no home folders");
+        };
+        if !crate::vm_home::plain_id(&member_id) {
+            return log!("home of {safe}: not a member id");
+        }
+        if self.runs.values().any(|r| !r.done && r.bot == member_id) {
+            return log!("home of {safe}: not emptied, a run of it is on this machine");
+        }
+        if !self
+            .clearing
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(member_id.clone())
+        {
+            return;
+        }
+        let clearing = self.clearing.clone();
+        tokio::spawn(async move {
+            match crate::vm_home::clear(&vm, &member_id).await {
+                Ok(()) => log!("home of {safe} emptied"),
+                Err(e) => log!("home of {safe}: {e}"),
+            }
+            clearing
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&member_id);
+        });
+    }
+
     fn on_secret_set(&mut self, name: &str, sealed: &str, members: Vec<String>) {
         let Some(key) = self.machine_key.clone() else {
             return;
@@ -1185,6 +1245,13 @@ impl Daemon {
                 .collect()
         };
         let mut m = self.sampler.sample(&self.cfg, vm_slots, &local);
+        // Feature "homes": each member's home image on a VM host.
+        m.homes = self
+            .cfg
+            .vm
+            .as_ref()
+            .filter(|vm| crate::vm_home::images_on(vm))
+            .map(crate::vm_home::usage);
         if self.machine_key.is_some() {
             m.secrets = Some(self.keys.infos());
             m.usage = Some(self.usage.lock().unwrap_or_else(|e| e.into_inner()).clone());
@@ -1263,6 +1330,7 @@ mod tests {
                 redactor: run_redactor.clone(),
                 cancel_asked: false,
                 resume_session: None,
+                bot: String::new(),
             },
         );
         // The clone the run's task holds shares the list with the entry's.

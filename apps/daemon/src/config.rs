@@ -83,14 +83,22 @@ pub struct VmConfig {
     /// Root helper for the tap device and NFS exports, run with `sudo -n`.
     #[serde(default = "default_vm_helper")]
     pub helper: String,
-    /// Folders shared with every VM at their host paths (the CLIs' sessions and logins).
-    #[serde(default = "default_vm_shares")]
+    /// More folders shared with every VM at their host paths. Empty by default: the CLIs'
+    /// sign-in folders are never shared (a run gets its member's own CLI folders and a copy of
+    /// the sign-in it cannot use to change this host's, see `vm_login`). Folders of the daemon
+    /// user's home that start with a dot are skipped.
+    #[serde(default)]
     pub shares: Vec<PathBuf>,
     /// One folder per bot here is that bot's home folder in every VM it runs in, so what it
-    /// installs, clones and signs in to is still there in its next run. Empty: the home folder
-    /// is part of the run's scratch disk and goes with the VM.
+    /// installs, clones and signs in to is still there in its next run, with its CLIs' folders
+    /// (session records). Empty: the home folder is part of the run's scratch disk and goes
+    /// with the VM; the CLIs' folders are then kept in `<dir>/cli/<bot>`.
     #[serde(default = "default_vm_homes")]
     pub homes: PathBuf,
+    /// Size of each bot's home folder: a disk image of this size that the root helper mounts at
+    /// `<homes>/<bot>`. 0: a plain folder without a limit.
+    #[serde(default = "default_vm_home_gb")]
+    pub home_gb: u32,
 }
 
 fn default_vm_dir() -> PathBuf {
@@ -114,11 +122,8 @@ fn default_vm_helper() -> String {
 fn default_vm_homes() -> PathBuf {
     PathBuf::from("/srv/runner/homes")
 }
-fn default_vm_shares() -> Vec<PathBuf> {
-    ["~/.claude", "~/.codex", "~/.pi"]
-        .iter()
-        .map(PathBuf::from)
-        .collect()
+fn default_vm_home_gb() -> u32 {
+    20
 }
 
 /// Why a `takeover_url` cannot be reported, or None when it is fine: it must be a
@@ -452,8 +457,8 @@ kind = "claude"
 # rootfs = "/srv/runner/images/base.ext4"
 # vcpus = 2
 # mem_mib = 4096                     # a cap; the host gives only what the VM touches
-# shares = ["~/.claude", "~/.codex", "~/.pi"]
 # homes = "/srv/runner/homes"         # one home folder per bot, kept between runs ("" = not kept)
+# home_gb = 20                        # each home is a disk image of this size (0 = no limit)
 "#;
 
 #[cfg(test)]

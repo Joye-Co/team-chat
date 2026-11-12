@@ -1,8 +1,8 @@
 // Members admin (PATCH /v1/members/:id) and the audit log reader (GET /v1/audit).
 // See docs/protocol.md, "Members and preferences" and "Audit".
 import { type AuditEntry, MAX_AUDIT_LIMIT, UpdateMemberRequest } from "@chat/protocol";
-import type { AuthContext } from "../core/auth";
-import { type MemberRow, getMember, toMember } from "../core/db";
+import { type AuthContext, requireTeamOwner } from "../core/auth";
+import { type MemberRow, getMember, isTeamOwner, toMember } from "../core/db";
 import { gatewayStub } from "../core/env";
 import { ApiError } from "../core/errors";
 import { registerRoute } from "../core/registry";
@@ -20,12 +20,16 @@ registerRoute({
     if (!isOwner && !self) throw new ApiError("forbidden", "only an owner can change other members");
     if (
       !isOwner &&
-      (req.level !== undefined || req.deactivated !== undefined || req.character !== undefined || req.reportsTo !== undefined || req.weeklyBudgetCents !== undefined)
+      (req.level !== undefined || req.teamOwner !== undefined || req.deactivated !== undefined || req.character !== undefined || req.reportsTo !== undefined || req.weeklyBudgetCents !== undefined)
     ) {
       throw new ApiError("forbidden", "only an owner can change level, character, reportsTo, the budget or deactivate");
     }
     const target = await getMember(env.DB, params.id);
     if (!target) throw new ApiError("not_found", "member not found");
+    // design-roles 3.2: an admin's or a 所有者's record is the 所有者's to change.
+    if (!self && target.level === "owner") requireTeamOwner(a, "only a team owner can change an admin");
+    if (req.teamOwner === true && target.kind !== "human") throw new ApiError("invalid", "an AI member cannot be the team owner");
+    if (req.teamOwner === true && req.level === "member") throw new ApiError("invalid", "a team owner is an admin");
     if (req.reportsTo) {
       if (req.reportsTo === target.id) throw new ApiError("invalid", "a member cannot report to itself");
       const boss = await getMember(env.DB, req.reportsTo);
@@ -35,35 +39,45 @@ registerRoute({
     const next = {
       name: req.name ?? target.name,
       role: req.role === undefined ? target.role : req.role,
-      level: req.level ?? target.level,
+      level: req.teamOwner ? "owner" : (req.level ?? target.level),
       deactivated: req.deactivated === undefined ? target.deactivated === 1 : req.deactivated,
       character: req.character === undefined ? (target.character ?? null) : req.character,
       reportsTo: req.reportsTo === undefined ? (target.reports_to ?? null) : req.reportsTo,
       weeklyBudgetCents: req.weeklyBudgetCents === undefined ? (target.weekly_budget_cents ?? null) : req.weeklyBudgetCents,
     };
+    const wasTeamOwner = isTeamOwner(target);
+    const nextTeamOwner = next.level === "owner" && target.kind === "human" && (req.teamOwner ?? wasTeamOwner);
+    // Changing anyone's role, own included, is the 所有者's (design-roles 3.2).
+    if (next.level !== target.level || nextTeamOwner !== wasTeamOwner) requireTeamOwner(a, "only a team owner can change roles");
     const details: Record<string, unknown> = {};
     if (next.name !== target.name) details.name = [target.name, next.name];
     if (next.role !== target.role) details.role = [target.role, next.role];
     if (next.level !== target.level) details.level = [target.level, next.level];
+    if (nextTeamOwner !== wasTeamOwner) {
+      // `level` too, so the activity trigger (0013) files it as a level change.
+      details.level = [target.level, next.level];
+      details.teamOwner = [wasTeamOwner, nextTeamOwner];
+    }
     if (next.deactivated !== (target.deactivated === 1)) details.deactivated = [target.deactivated === 1, next.deactivated];
     if (next.character !== (target.character ?? null)) details.character = [target.character ?? null, next.character];
     if (next.reportsTo !== (target.reports_to ?? null)) details.reportsTo = [target.reports_to ?? null, next.reportsTo];
     if (next.weeklyBudgetCents !== (target.weekly_budget_cents ?? null)) details.weeklyBudgetCents = [target.weekly_budget_cents ?? null, next.weeklyBudgetCents];
     if (Object.keys(details).length === 0) return toMember(target);
 
-    // A change that takes away an active owner needs another active owner. The check is part of
-    // the UPDATE so two owners demoting each other at once cannot both win.
-    const losesOwner = target.level === "owner" && target.deactivated === 0 && (next.level !== "owner" || next.deactivated);
+    // A change that takes away an active 所有者 needs another active human 所有者. The check is part
+    // of the UPDATE so two 所有者 demoting each other at once cannot both win.
+    const losesOwner = wasTeamOwner && target.deactivated === 0 && (!nextTeamOwner || next.deactivated);
     const now = Date.now();
     const results = await env.DB.batch([
       env.DB.prepare(
-        `UPDATE members SET name = ?, role = ?, level = ?, deactivated = ?, character = ?, reports_to = ?, weekly_budget_cents = ?
+        `UPDATE members SET name = ?, role = ?, level = ?, team_owner = ?, deactivated = ?, character = ?, reports_to = ?, weekly_budget_cents = ?
          WHERE id = ? AND (? = 0 OR EXISTS
-           (SELECT 1 FROM members o WHERE o.level = 'owner' AND o.deactivated = 0 AND o.id != ?))`,
+           (SELECT 1 FROM members o WHERE o.team_owner = 1 AND o.level = 'owner' AND o.kind = 'human' AND o.deactivated = 0 AND o.id != ?))`,
       ).bind(
         next.name,
         next.role,
         next.level,
+        nextTeamOwner ? 1 : 0,
         next.deactivated ? 1 : 0,
         next.character,
         next.reportsTo,
@@ -77,7 +91,7 @@ registerRoute({
          SELECT ?, ?, 'member.update', ?, ?, ? WHERE changes() = 1`,
       ).bind(a.memberId, a.tokenId, target.id, JSON.stringify(details), now),
     ]);
-    if (!results[0].meta.changes) throw new ApiError("conflict", "the team needs at least one active owner");
+    if (!results[0].meta.changes) throw new ApiError("conflict", "the team needs at least one active team owner", "role.last_owner");
 
     if (details.deactivated && next.deactivated) {
       await revokeTokens(env, a, target.id, "all");

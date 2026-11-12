@@ -14,6 +14,7 @@ import type { CardAnswerIn, CardPress, TopicMessage } from "../room";
 import { ACTIVE, type RunRow, result } from "./core";
 import { DeskDelegate } from "./delegate";
 import { isProgressQuestion, isStopRequest, progressAnswer } from "../../agent/supervise";
+import { isNewTask } from "../../agent/frontdesk";
 
 /**
  * 接 1.4 (usable section 4): a message without an @ from the person who asked for the last run in
@@ -39,7 +40,9 @@ export abstract class DeskInput extends DeskDelegate {
     this.messagesInFlight.add(m.messageId);
     try {
       if (!(await this.botActive())) return;
-      const active = this.activeRun(m.topicId);
+      const active = this.runFor(m);
+      // 接 1.5: a new request next to a running one in a chat area gets its own run.
+      if (active === null) return await this.admit({ ...m, mentioned: true });
       if (active) {
         // 接 1.6: while it works, only what is meant for it reaches the CLI; the rest of the talk
         // stays in the topic and reaches the next turn as context.
@@ -58,6 +61,39 @@ export abstract class DeskInput extends DeskDelegate {
   }
 
   protected readonly messagesInFlight = new Set<string>();
+
+  /**
+   * The active run a message is for; null: a new request that gets its own run next to the
+   * running ones (接 1.5). In a topic (话题) that is the topic's run. In a chat area (群聊, a DM's
+   * chat area) a member may work on several requests at once: a reply to a run's message goes to
+   * that run, an answer to the front desk's question and 新任务 start a new one, an approval
+   * answer goes to the run that waits for it, and the person's own request gets what they say;
+   * anyone else who @s the member starts a new run.
+   */
+  protected runFor(m: TopicMessage): RunRow | null | undefined {
+    const runs = this.activeRuns(m.topicId);
+    if (runs.length === 0) return undefined;
+    if (!isMainTopicId(m.topicId)) return runs[0];
+    const quoted = m.replyToMessageId;
+    if (quoted) {
+      const r = runs.find((x) => this.runMessage(x, quoted));
+      if (r) return r;
+    }
+    if (this.openAsk(m) || (m.mentioned && isNewTask(m.body))) return null;
+    const waits = runs.find((x) => x.approval_id && (approvalDecision(m.body) !== null || approvesWholeWork(m.body)));
+    if (waits) return waits;
+    const own = runs.find((x) => x.requested_by === m.authorId);
+    if (own) return own;
+    if (m.replyToAuthorId === this.botId || isProgressQuestion(m.body)) return runs[0];
+    return m.mentioned ? null : runs[0];
+  }
+
+  /** Whether a message is the run's own: its request, its progress or approval card, or an input it took. */
+  protected runMessage(r: RunRow, messageId: string): boolean {
+    if (messageId === r.trigger_message_id || messageId === r.progress_message_id || messageId === r.result_message_id) return true;
+    if (messageId === this.approvalCard(r)?.messageId || this.meta(`runCard:${messageId}`) === r.id) return true;
+    return this.sql.exec("SELECT 1 FROM inputs WHERE run_id = ? AND message_id = ? LIMIT 1", r.id, messageId).toArray().length > 0;
+  }
 
   /**
    * 接 1.6: a message is input for the running run when it mentions the bot (or is in its DM),
@@ -292,7 +328,11 @@ export abstract class DeskInput extends DeskDelegate {
         body: text,
         mentioned: true,
       };
-      const active = this.activeRun(a.topicId);
+      // 接 1.8: an answer in the front desk's question card answers that question; in a chat area
+      // it starts its own run next to any running one.
+      const asked = this.askOfCard(a.answer.messageId);
+      if (asked) this.sql.exec("UPDATE decisions SET answered = 1 WHERE message_id = ?", asked.message_id);
+      const active = asked && isMainTopicId(a.topicId) ? undefined : this.runOfCard(a.topicId, a.answer.messageId);
       // cards2 (F5): an answer that starts a run closes its retract window first. It starts a
       // run only while its ask still stands: an answer to a closed ask of an ended run does not.
       if (!active) {

@@ -141,6 +141,11 @@ impl FakeProvider {
         reply_now(Ok(self.sb(|s| s.ai.clone())))
     }
 
+    /// A server without an AI 服务 (memory scenes, 盯 4.6).
+    pub fn clear_ai_service(&self) {
+        self.sb(|s| s.ai = AiServiceSettings::default());
+    }
+
     pub(super) fn set_ai_service_fake(
         &self,
         draft: AiServiceDraft,

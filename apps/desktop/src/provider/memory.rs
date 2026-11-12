@@ -304,6 +304,20 @@ mod tests {
         assert_eq!(req.text, "先跑压测");
         assert_eq!(req.when, None);
         assert!(req.validate().is_ok());
+        // 群里的约定 and 我的偏好 go to their own scopes, as the server takes them.
+        for (scope, wire) in [
+            (MemoryScope::Group("g1".into()), "group:g1"),
+            (MemoryScope::Person("m1".into()), "person:m1"),
+        ] {
+            let req = create_request(&NewMemory {
+                scope,
+                kind: MemoryKind::Preference,
+                ..new.clone()
+            })
+            .unwrap();
+            assert_eq!(req.scope, wire);
+            assert!(req.validate().is_ok());
+        }
         assert!(
             create_request(&NewMemory {
                 kind: MemoryKind::Other,

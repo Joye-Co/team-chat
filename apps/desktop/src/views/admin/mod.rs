@@ -575,6 +575,8 @@ impl AdminView {
             })
             .unwrap_or(0);
         let vm_count = data.map(model::running_now);
+        // One person uses the server: 团队约定 is in 设置 › 我的约定 (盯 4.12).
+        let team_memory = !self.memory.read(cx).folded();
         let members = self
             .services
             .provider
@@ -830,21 +832,29 @@ impl AdminView {
                         accounts::Page::Rules,
                         None,
                     ))
-                    .child(live_page(
-                        "nav-memory",
-                        m::NAV_MEMORY,
-                        Sym::Book,
-                        accounts::Page::Memory,
-                        None,
-                    )),
+                    .when(team_memory, |d| {
+                        d.child(live_page(
+                            "nav-memory",
+                            m::NAV_MEMORY,
+                            Sym::Book,
+                            accounts::Page::Memory,
+                            None,
+                        ))
+                    }),
             )
             .children(me.map(|me| {
-                SidebarFooter::new(
+                let footer = SidebarFooter::new(
                     "admin-me",
                     MemberAvatar::new(Some(&me), crate::ui::native::tokens::avatar::SM),
                     me.name.clone(),
-                )
-                .detail(m::ROLE_OWNER, cx)
+                );
+                // My 身份; one person alone has none to show (design-roles 3.10).
+                match crate::views::settings::my_role(&self.services)
+                    .filter(|_| !crate::views::settings::solo(&self.services))
+                {
+                    Some(role) => footer.detail(team::role_word(role), cx),
+                    None => footer,
+                }
             }))
     }
 

@@ -67,7 +67,7 @@
 2. 集成事件（交代人是 hook 对应的成员）：用 `hooks.created_by`。
 3. 没有人交代（定时、AI 成员自己起的）：用这个 AI 成员的 `members.created_by`。
 
-算出的人已被移出团队（`members.deactivated_at` 非空）时，改用团队里最早的在用的人类管理员（`level = 'owner'` 且 `kind = 'human'`；design-roles 里 `level='owner'` 就是管理员，含所有者，所以合并前后是同一条查询）。理由：没人负责的事落给还在的负责人，不 @ 已经走了的人。
+算出的人已被移出团队（`members.deactivated = 1`）时，改用团队里最早的在用的人类管理员（`level = 'owner'` 且 `kind = 'human'`；design-roles 里 `level='owner'` 就是管理员，含所有者，所以合并前后是同一条查询）。理由：没人负责的事落给还在的负责人，不 @ 已经走了的人。
 
 跟进是新运行，按新消息的作者重新算：A 等着连 GitHub 时 B 说「继续」，这次就用 B。这是有意的：谁说话谁负责。
 
@@ -118,7 +118,7 @@ CREATE INDEX github_waits_member ON github_waits(member_id);
 ```
 
 - 连接成功时写对照表：`INSERT INTO github_logins (login, member_id, updated_at) VALUES (lower(?), ?, ?) ON CONFLICT(login) DO NOTHING`。理由：owner 手工设的不被覆盖。断开不删。
-- 成员被停用时：在 `deactivateMember`（`server/src/core/routes.ts:191`）加一个 feature 钩子 `onMemberDeactivated`，github 模块在里面删他的 `github_accounts`、`github_device`、`github_waits` 行。
+- 成员被停用时：core 已有 feature 钩子 `registerMemberDeactivated`（`server/src/core/registry.ts`，`deactivateMember` 之后由 `afterDeactivate` 调用），github 模块用它删他的 `github_accounts`、`github_device` 行；G3 用同一个钩子删自己的 `github_waits` 行。
 - 运行是否还活着不另加列，取令牌时问 desk DO（3.4）。
 
 ### 3.4 服务端
@@ -310,7 +310,7 @@ AI 成员替你拉代码、推代码、开 PR 时用这个账号
 | PR | 做什么 | 主要文件 | 依赖 | 怎么测 |
 | --- | --- | --- | --- | --- |
 | G1 协议（并进四份设计共用的协议 PR，新模块 `github.ts` / `github.rs`） | 3.5 的字段、事件、`runsIn`、`github` RunEvent、fixtures；确认未知事件被忽略 | `docs/protocol.md`、`docs/machine-protocol.md`、`packages/protocol/src/`、`crates/chat-protocol/src/`、`protocol/fixtures/` | — | 两边 fixture 测试；未知事件解码测试 |
-| G2 服务端连接 | `0017_github_accounts.sql`、加密存储、设备码路由、`/v1/me/github`（`waits` 先返回空数组）、断开、`available` 和原因、对照表、`onMemberDeactivated` 钩子、`github/index.ts` 注册点 | `server/src/github/{index,routes,store,device}.ts`、`server/src/core/routes.ts`（钩子一处）、`server/src/features.ts` | G1 | vitest：mock GitHub fetch，覆盖 pending、slow_down、done、expired、denied、taken；库里和日志没有明文；对照表不覆盖手工行；停用后行被删 |
+| G2 服务端连接 | `0017_github_accounts.sql`、加密存储、设备码路由、`/v1/me/github`（`waits` 先返回空数组）、断开、`available` 和原因、对照表、停用钩子（用现成的 `registerMemberDeactivated`）、`github/index.ts` 注册点 | `server/src/github/{index,routes,store,api,hooks}.ts`、`server/src/features.ts` | G1 | vitest：mock GitHub fetch，覆盖 pending、slow_down、done、expired、denied、taken；库里和日志没有明文；对照表不覆盖手工行；停用后行被删 |
 | G3 服务端派活 | 身份人规则（含 anonymous、离开团队）、`frame.github`、`0017_github_runs.sql`、机器取令牌、`/wait`、`/rejected`、恢复跟进、desk RPC `run.live` 和 `github.resume`、`waits` 查询、话题 @ 文案 | `server/src/github/{assign,machine,resume,text}.ts`；`server/src/bots/desk/runs.ts:397` 一行；`server/src/bots/desk/github.ts`（新，两个 RPC）；往 `github/index.ts` 追加 | G1、G2。design-roles 没合并就按 3.2 的临时规则 | vitest：3.2 表格每一格；规则 1–3 和回落；别的电脑取令牌被拒；完成、取消、超时、租约丢失、转电脑后取令牌都被拒；`/wait` 并发只发一次 @；连上后起跟进且只起一次 |
 | G4 daemon | `github` 功能和 `runsIn`、署名环境、助手、`gh` 代理（本机和工具盘）、daemon 自己 fetch 的凭证、可追加脱敏、家目录清理、系统说明 | `apps/daemon/src/github.rs`（新）、`run.rs`、`chat_run.rs`（本地分支）、`daemon.rs`（FEATURES、hello、每次运行的 redactor）、`workspace.rs`（daemon 自己 git 的环境）、`redact.rs`、`executor/firecracker.rs`（工具盘由 daemon 做） | G1 | cargo test：mock 服务器，本地 http 远端上跑 `git credential fill`、`git push`；`gh auth login` 被拦；404 立刻失败并报 `/wait`；`stderr.log` 和会话上传里令牌被遮；文件通道调用后无 `.res`；guest PATH 解析 `gh` 到代理；Windows CI 上 `gh.exe` 分流，并验证空助手清掉系统级 `credential.helper=manager` |
 | G5 桌面端 | 连接 sheet、账号页一组、上手弹一次、话题横幅、电脑页提示、文案、截图自测数据 | `apps/desktop/src/views/settings/{github,account}.rs`、`copy/settings.rs`、`data.rs`、`provider/` 的 HTTP 调用、`fake/`（只为截图自测） | G1；横幅的数据要 G3，之前按 G2 的空 `waits` 做 | 文案目录测试；截图自测（浅色、深色、Mac、Windows）：未连接、等确认、已连接、失效、不可用、横幅 |

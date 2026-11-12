@@ -33,7 +33,7 @@ use crate::{
     app::Services,
     data::{
         AdminError, ChatProvider, ConnectionState, Credential, LoginRequest, MemberLevel,
-        NotifyLevel, SessionState,
+        NotifyLevel, SessionState, TeamRole,
     },
     fake,
     provider::{CoreProvider, ProviderConfig, session::TokenStorage},
@@ -378,7 +378,7 @@ async fn drive(services: Services, live: bool, cx: &mut AsyncApp) -> (bool, Valu
     );
     let _ = handle.update(cx, |_, window, cx| window.close_all_dialogs(cx));
 
-    // 成员: change the level, deactivate and reactivate the outside bot member.
+    // 成员: change the 身份 (所有者 only), deactivate and reactivate the outside bot member.
     let members = cx.update(|cx| view.read(cx).members().clone());
     if let Some(b) = &bot_member {
         let id = b.member.id.clone();
@@ -386,13 +386,13 @@ async fn drive(services: Services, live: bool, cx: &mut AsyncApp) -> (bool, Valu
             provider.member(id).map(|m| (m.level, m.deactivated))
         };
         let i = id.clone();
-        cx.update(|cx| members.update(cx, |p, cx| p.set_level(i, MemberLevel::Owner, cx)));
+        cx.update(|cx| members.update(cx, |p, cx| p.set_role(i, TeamRole::Admin, cx)));
         let up = wait_for(cx, |_| {
             (level_of(&provider, &id) == Some((MemberLevel::Owner, false))).then_some(())
         })
         .await;
         let i = id.clone();
-        cx.update(|cx| members.update(cx, |p, cx| p.set_level(i, MemberLevel::Member, cx)));
+        cx.update(|cx| members.update(cx, |p, cx| p.set_role(i, TeamRole::Member, cx)));
         let down = wait_for(cx, |_| {
             (level_of(&provider, &id) == Some((MemberLevel::Member, false))).then_some(())
         })
@@ -429,14 +429,18 @@ async fn drive(services: Services, live: bool, cx: &mut AsyncApp) -> (bool, Valu
         check("deactivate_and_reactivate", Err("no bot member".into()));
     }
 
-    // The last active owner cannot step down.
-    let owners = provider
-        .members()
+    // The last active 所有者 cannot step down.
+    let all = provider.members();
+    let owners = all
         .iter()
-        .filter(|m| m.level == MemberLevel::Owner && !m.deactivated)
+        .filter(|m| !m.deactivated && TeamRole::of(m, &all) == TeamRole::Owner)
         .count();
-    if owners == 1 {
-        let reply = provider.set_member_level(&me.id, MemberLevel::Member);
+    if owners == 1
+        && all
+            .iter()
+            .any(|m| m.id == me.id && TeamRole::of(m, &all) == TeamRole::Owner)
+    {
+        let reply = provider.set_member_role(&me.id, TeamRole::Member);
         let r = super::widgets::answer(reply).await;
         check(
             "last_owner_kept",
@@ -665,6 +669,29 @@ pub fn open_memory_add(
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
     open_memory_sheet(false, services, cx)
+}
+
+/// 我的偏好 (我的约定 when one person uses the server).
+pub fn open_mine(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_page(services, Page::Mine, cx).map(|(h, _)| h)
+}
+
+/// 我的偏好 (or 我的约定) with the 记一条 sheet open.
+pub fn open_mine_add(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::Mine, cx)?;
+    after_fit(handle, cx, move |window, cx| {
+        let board = view.read(cx).mine().clone();
+        board.update(cx, |b, cx| b.open_for_scene(false, window, cx));
+    });
+    Ok(handle)
 }
 
 /// 团队约定 with the 编辑 sheet of the newest convention open.
@@ -1339,6 +1366,20 @@ pub fn open_machine_created(
 use crate::selftest::scenes::{Scene, Start};
 
 pub const SCENES: &[Scene] = &[
+    Scene {
+        name: "roles-account-member",
+        about: "Settings: 账号 as a 普通成员: the 身份 after the 岗位",
+        start: Start::Roles(crate::fake::RoleView::Member),
+        setup: |_, _| {},
+        open: open_profile,
+    },
+    Scene {
+        name: "roles-members-pane",
+        about: "Settings: the 成员 pane as the 所有者: 所有者, 管理员 and 普通成员 down the column",
+        start: Start::Roles(crate::fake::RoleView::Owner),
+        setup: |_, _| {},
+        open: open_members,
+    },
     Scene {
         name: "settings-general",
         about: "Settings: 通用 (启动时, 登录时启动, 菜单栏里显示, 声音, version, developer view)",

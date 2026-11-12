@@ -129,6 +129,7 @@ fn person(id: &str, name: &str, role: &str, online: bool, owner: bool) -> Member
         deactivated: false,
         online,
         character: None,
+        team_owner: owner,
     }
 }
 
@@ -143,6 +144,7 @@ fn bot(id: &str, name: &str, role: &str, character: &str) -> Member {
         deactivated: false,
         online: true,
         character: CharacterId::parse(character),
+        team_owner: false,
     }
 }
 
@@ -342,6 +344,30 @@ impl V2Samples {
         let inner = FakeProvider::new();
         inner.set_memory_shape(shape);
         Self::wrap(inner)
+    }
+
+    /// [`Self::with_memory`] on a server that `team` describes: one person with the AI
+    /// members (盯 4.12), or no AI 服务 (盯 4.6).
+    pub fn with_memory_team(
+        shape: super::memory::MemoryShape,
+        team: super::memory::MemoryTeam,
+    ) -> Arc<Self> {
+        let inner = FakeProvider::new();
+        inner.set_memory_shape(shape);
+        if !team.ai {
+            inner.clear_ai_service();
+        }
+        let mut this = Self::wrap(inner);
+        if team.solo {
+            let me_alone = members()
+                .into_iter()
+                .filter(|m| m.is_bot() || m.id == ME)
+                .collect();
+            if let Some(s) = Arc::get_mut(&mut this) {
+                s.members = me_alone;
+            }
+        }
+        this
     }
 
     /// The sample team over `inner` (for its session, drafts and settings).
@@ -1749,6 +1775,10 @@ impl ChatProvider for V2Samples {
     }
     fn side_chat_default_member(&self) -> Option<MemberId> {
         Some(JOJO.into())
+    }
+    /// The memory screens ask an owner whether the server has an AI 服务 (盯 4.6).
+    fn ai_service(&self) -> crate::data::AdminReply<crate::data::AiServiceSettings> {
+        self.inner.ai_service()
     }
     fn memories(
         &self,

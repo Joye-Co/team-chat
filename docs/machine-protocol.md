@@ -222,9 +222,11 @@ optional: a platform may not have it.
 ```ts
 MachineMetrics = { at /* sample time, machine clock */, uptimeSecs?, cpuPct? /* 0-100 */, cpuThreads?,
                    memTotalBytes?, memAvailableBytes?, netRxBps?, netTxBps?, vmSlots?,
-                   boot?: { avgMs, maxMs, samples }, runs: VmRunMetrics[] /* <= 64 */, logins?: CliLogin[] }
+                   boot?: { avgMs, maxMs, samples }, runs: VmRunMetrics[] /* <= 64 */, logins?: CliLogin[],
+                   homes?: HomeUse[] /* <= 500, feature "homes" */ }
 VmRunMetrics   = { runId, phase: "booting" | "running" | "paused", startedAt, bootMs?, cpuCores?, memBytes?, scratchBytes? }
 CliLogin       = { runtime, state: "logged_in" | "logged_out" | "unknown", method?: "subscription" | "api_key" }
+HomeUse        = { memberId, usedBytes /* on the host disk */, sizeBytes? /* absent = no limit */ }
 ```
 
 - **Host**: CPU busy since the previous sample over all threads (Linux `/proc/stat`, macOS
@@ -238,6 +240,8 @@ CliLogin       = { runtime, state: "logged_in" | "logged_out" | "unknown", metho
   touched); `scratchBytes` the blocks the sparse scratch disk uses. `vmSlots` is
   `max_parallel_runs`; `boot` covers the last 50 boots. Without `[vm]`, `runs` lists the daemon's
   unfinished runs with `phase: "running"` and their start, nothing else.
+- **Homes** (`[vm]` with home images): each AI member's home image (see "MicroVM runs"), its size
+  and the blocks it takes on the host disk.
 - **Logins**: for `claude` and `codex` runtimes only, checked for presence, never read out:
   Claude Code is `logged_in` (`subscription`) with `claudeAiOauth` tokens in
   `$CLAUDE_CONFIG_DIR/.credentials.json` (on macOS, where the credential is in the Keychain, an
@@ -371,7 +375,7 @@ server frames and ignores unknown fields, so it must never get work it cannot do
 | `acceptance` | The daemon forwards the CLI's acceptance criteria as the `acceptance` run event. |
 | `resume` | `run.assign.resumeSessionId`: the run continues that CLI session (Claude Code `--resume`, Codex `thread/resume`) instead of starting a new one. |
 | `effort` | Reports `CliInfo.models` and `efforts` and runs with `run.assign.effort`, see "Models and effort". |
-| `context` | Answers the read-only topic context ops of `chat-run` (`topic.history`, `topic.message`, `context.search`, `file.get`), see "Topic context". |
+| `context` | Answers the read-only topic context ops of `chat-run` (`topic.history`, `topic.message`, `context.search`, `file.get`, and from this version `topic.state`, `artifact.list`, `artifact.get`, `card.get`, `decisions.list`, `member.list`), see "Topic context". |
 | `gates` | Reports `CliInfo.gates`, stops the commands of `run.assign.gates` for a person's approval and honors `run.approval.scope`, see "Gated actions". |
 
 How the 1.1 daemon does each one:
@@ -743,7 +747,56 @@ An AI member runs with every permission; only the few kinds the team checked nee
   default, any agent whose own permissions allow everything) would not be stopped, so without
   `asks_permission` the daemon does not report `gates` for it and the server keeps the plain
   "Team rule" paragraph in its prompt.
-- Side chat runs and the PTY runtime are never gated.
+- **Shims** (every gated run; see below for the shells that are not covered): the runtime's own gate sees only the line as
+  the CLI wrote it, so the daemon also puts shims first on the run's `PATH`: links to its own
+  binary in `<run folder>/bin` (`.exe` on Windows; in a VM the tools disk's `/opt/runner/bin`)
+  named `git`, `gh`, `wrangler`, `npm`, `npx`, `pnpm`, `yarn`, `bun`, `bunx`, `cargo`,
+  `vercel`, `netlify`, `fly`, `flyctl`, `twine`, `psql`, `mysql`, `sqlite3` (on the host only
+  those the run's `PATH` has), and sets `CHAT_RUN_GATES=1`. Started by such a name, the binary
+  sends `gate.check { tool: "shim", via: "shim", command }` over the run's `chat-run` transport
+  (socket or request folder) and then runs the real program found after the tools folder on
+  `PATH` (on Unix in its place), or refuses: exit code 1, the reason on standard error. When
+  the daemon cannot be asked it refuses too, like the hook. `command` is decided on the parsed
+  program and arguments, not on a shell line: the invocation as plain words (each argument
+  with newlines, `;`, `&` and `|` made spaces, so one invocation is one command), then one line
+  per fact: for git the command with its options before the subcommand dropped and aliases put
+  in (`git push …`), and for a push one line `git push <remote> <source>:refs/heads/<branch>`
+  per remote branch it would update (a plain `git push` from the checked-out branch, the
+  remote, `remote.<name>.push` and `push.default`; `HEAD`, `@`, `--all`, `--mirror`,
+  `--delete`, `:branch`; the shell already put in variables), and for `npm`/`pnpm`/`yarn`/`bun`
+  running a package script the script's lines (`pre`, the script, `post`) from the
+  `package.json` it runs in (its programs come from `node_modules/.bin`, where no shim is). The
+  same patterns decide. So a command inside a script, `git -C . push origin main`, a plain
+  `git push` while `main` is checked out and `B=main; git push origin HEAD:$B` all stop.
+  Claude Code runs Bash with the `PATH` of the user's shell profile, so a gated Claude Code run
+  on Unix also gets `CLAUDE_ENV_FILE=<run folder>/.claude-env.sh`, which puts the shims first
+  again before each command. Codex (and an ACP agent) runs each command in the user's login
+  shell (`zsh -lc`); on macOS `/etc/zprofile` runs `path_helper`, which puts the system folders
+  before the inherited `PATH`. So a gated Codex or ACP run on the host (Unix) gets
+  `ZDOTDIR=<run folder>/zsh`, whose `.zshenv`, `.zprofile`, `.zshrc` and `.zlogin` each read the
+  user's own file of that name (from `CHAT_RUN_USER_ZDOTDIR`, the user's own `ZDOTDIR`, else
+  `$HOME`) and then put the shims first again.
+- **Waiting at a shim**: a shim waits inside the CLI's own command, which the CLI kills after
+  its command timeout (Claude Code's Bash tool: two minutes by default). So a shim's check waits
+  at most 90 seconds (the shim's call 100). With no answer by then the command does not run: the
+  answer is `deny` with `waiting: true` and a reason that tells the model to go on and run the
+  same command again later. The card stays open, and the one-question turn is free again. A
+  retry of the same command (same kind and `command`) before the answer waits for that card
+  again; an answer that comes when no shim waits is kept and taken by the next retry of that
+  command, once (approve: it runs, no second card; decline: it is refused). Another command's
+  card waits until the open one is answered (one open approval per run).
+- **One decision per action**: a check without `via` is the runtime's own (the hook, a Codex or
+  ACP request, matched or not) and starts the runtime's next command. A kind a person approves
+  there holds for the shims of that command: they pass it without a second card, however often
+  (a script that pushes twice). The runtime's next command ends that. Another kind in the same
+  command asks at its shim; what a shim asks and a person approves holds the same way.
+- **Not a security boundary**: this guards against mistakes. A program started by its full
+  path, a login shell other than zsh whose system profile resets `PATH` (Codex with `bash` as
+  the user's shell, a login shell inside the VM image, Git Bash on Windows with `/mingw64/bin`
+  ahead of the shims), or a merge through a web page is not seen. The floor is the repository's
+  branch protection and the production environment's own required approval.
+- Side chat runs and the PTY runtime are never gated (the server sends no gates to a CLI that
+  does not report `gates`).
 
 ### Topic context (`chat-run`, daemon over HTTP; feature `context`)
 
@@ -753,14 +806,35 @@ with the machine token (results can be larger than a frame); they only read.
 
 | `op` | `body` | `chat-run` command |
 | --- | --- | --- |
-| `topic.history` | `{ before?, after?, limit? }` | `chat-run topic history [--before SEQ] [--after SEQ] [--limit N]` → `{ messages: ContextMessage[], hasMore }` |
-| `topic.message` | `{ messageId }` | `chat-run topic message --id M` → `{ message: ContextMessage }` |
+| `topic.history` | `{ before?, after?, limit?, topicId? }` | `chat-run topic history [--before SEQ] [--after SEQ] [--limit N] [--topic T]` → `{ messages: ContextMessage[], hasMore }` |
+| `topic.message` | `{ messageId, topicId? }` | `chat-run topic message --id M [--topic T]` → `{ message: ContextMessage }` |
 | `context.search` | `{ query, scope?, limit? }` | `chat-run search --query Q [--group] [--limit N]` → `{ hits: ContextHit[] }` |
 | `file.get` | `{ fileId, out? }` | `chat-run file get --id F [--out PATH]` → `{ path, name, mime, size }` |
+| `topic.state` | `{ topicId? }` | `chat-run topic state [--topic T]` → `TopicStateResponse` |
+| `artifact.list` | `{ scope?, topicId? }` | `chat-run artifact list [--group \| --topic T]` → `RunArtifactsResponse` |
+| `artifact.get` | `{ artifactId, version?, out? }` | `chat-run artifact get --id A [--version N] [--out PATH]` → `RunArtifactResponse` (with `path` when `out` is set) |
+| `card.get` | `{ messageId }` | `chat-run card get --message M` → `RunCardResponse` |
+| `decisions.list` | `{ limit? }` | `chat-run decisions list [--limit N]` → `RunDecisionsResponse` |
+| `member.list` | `{}` | `chat-run member list` → `RunMembersResponse` |
 
 ```ts
-GET /v1/machine/runs/:id/topic/messages?before=&after=&limit=   -> { messages: ContextMessage[], hasMore: boolean }
-GET /v1/machine/runs/:id/topic/messages/:messageId              -> { message: ContextMessage }
+GET /v1/machine/runs/:id/topic/messages?before=&after=&limit=&topic=   -> { messages: ContextMessage[], hasMore: boolean }
+GET /v1/machine/runs/:id/topic/messages/:messageId?topic=               -> { message: ContextMessage }
+GET /v1/machine/runs/:id/topic/state?topic=                     -> TopicStateResponse
+GET /v1/machine/runs/:id/artifacts?scope=topic|group&topic=     -> RunArtifactsResponse
+GET /v1/machine/runs/:id/artifacts/:artifactId?version=         -> RunArtifactResponse
+GET /v1/machine/runs/:id/cards/:messageId                       -> RunCardResponse
+GET /v1/machine/runs/:id/decisions?limit=                       -> RunDecisionsResponse
+GET /v1/machine/runs/:id/members                                -> RunMembersResponse
+TopicStateResponse = { topicId, title, text /* <= 2000 characters */ }
+RunArtifactsResponse = { artifacts: Artifact[] }
+RunArtifactResponse = { artifact: Artifact, versions: ArtifactVersion[], version, text?, truncated? }
+RunCardResponse = { topicId, message: ContextMessage, card /* CardV2 or the 1.0 card */,
+                    ask?: { status, from: string[] /* names */ },
+                    answers: { actorId, actorName, at?, value?, inputs? }[], answerCount? }
+RunDecisionsResponse = { decisions: (GroupDecision & { answeredByName })[], hasMore,
+                         recorded?: (RecordedDecision & { recordedByName })[] }
+RunMembersResponse = { members: { id, name, role?, ai: boolean }[] }
 GET /v1/machine/runs/:id/search?q=&scope=topic|group&limit=     -> { hits: ContextHit[] }
 GET /v1/machine/runs/:id/files/:fileId                          -> the file's bytes
     headers: Content-Type, Content-Length, X-File-Name (URI-encoded UTF-8)
@@ -768,8 +842,11 @@ ContextMessage = { id, seq, authorId, authorName, at /* ms */, text }
 ContextHit = { messageId, topicId, topicTitle?, seq, authorName, at, snippet }
 ```
 
-- The run must be on the calling machine, active and not a side chat, as for files.
-- `topic.history` reads the run's topic, oldest first. `before` and `after` are message seqs
+- The run must be on the calling machine and active. These ops only read, so a side chat run
+  (单独问) may call them too (its group is the side chat's). Everything is of the run's own group:
+  `topicId` (`--topic`) names another topic of that group, and a topic, 产出, card or file of
+  another group is `not_found`, like an unknown one.
+- `topic.history` reads the run's topic (or `topicId`), oldest first. `before` and `after` are message seqs
   (`ContextMessage.seq`, also printed in the prompt) and exclusive. Without either it returns the
   newest messages. `limit` is 1-100, default 30. `hasMore` says that more messages lie past the page
   in the direction of the read (older without `after`, newer with it). Deleted messages are left out.
@@ -783,6 +860,21 @@ ContextHit = { messageId, topicId, topicTitle?, seq, authorName, at, snippet }
   `file.outside_workspace` otherwise); without `out`, to `<working folder>/.chat-files/<fileId>/<name>`
   (the folder gets a `.gitignore` of `*`). It refuses files over 100 MiB with `too_large`.
   `chat-run` waits up to 5 minutes for it.
+- `topic.state` is one compact state card of a topic, at most 2000 characters: who did what (the
+  newest authors with their last message), the 产出 with their latest versions, open cards and who
+  they wait on, the latest decisions. Members work together through 产出 and state; this is how
+  one reads where the others are.
+- `artifact.list` gives the 产出 of the run's topic (or `topicId`), or with `scope: "group"`
+  (`--group`) of the whole group, newest first (at most 100). `artifact.get` gives one 产出 with
+  all its versions; `version` (default the current one) is the one read, and `text` is its entry
+  file when that is text (`text/*`, JSON, XML, YAML, SVG; up to 200,000 characters, else
+  `truncated`). Other files are read by id with `file.get`. With `out` the daemon also writes the
+  entry file there, under the same rules as `file.get`.
+- `card.get` gives a card message of the group whole: the card document, the open ask with the
+  names it waits on, and the live answers (a private card shows only `answerCount`, as to members).
+- `decisions.list` gives the group's decisions (群里的决定), newest first, `limit` 1-100, default 20,
+  with the decisions recorded by hand. `member.list` gives the group's active members, people
+  first: name, 岗位 (`role`) and `ai` for AI members.
 - A daemon with this feature reports `context`; the server's prompt then names these commands for
   messages it left out. The `chat-run` note lists them.
 
@@ -823,6 +915,7 @@ safe default named below). Protocol side: protocol.md, "Usable extensions".
 | `github` | Reports `hello.machine.runsIn`. Takes `run.assign.github`: sets the commit identity and, with `source: "app"`, lets git and `gh` ask it for the person's token for each use; emits the `github` run event. |
 | `takeover` | Takes `run.pause.hold = "takeover"`, `run.command` and `run.command.cancel`; emits the `hand.*` run events. |
 | `takeover-isolated` | With `takeover` (VM runs, `runsIn: "vm"`): a person's commands run as another user than the run, so they cannot read the run's own credentials. |
+| `homes` | VM hosts (`[vm]`): reports `metrics.homes` (each AI member's home folder) and takes `home.clear`. |
 
 ```ts
 // daemon -> server
@@ -849,6 +942,8 @@ RunGithub = {
 { t: "run.pause", runId, by?, hold?: "takeover" }                  // feature "takeover"; absent hold = a pause
 { t: "run.command", runId, commandId, command /* 1..4000 */, by }  // feature "takeover"; only while connected
 { t: "run.command.cancel", runId, commandId }                      // feature "takeover"
+{ t: "home.clear", memberId }   // feature "homes"; only while connected: empty that AI member's home
+                                 // folder (refused, and logged, while a run of it is on the machine)
 ```
 
 GitHub (feature `github`), over HTTP with the machine token:
@@ -982,25 +1077,74 @@ process of the daemon's machine. Nothing in this protocol changes. The VM boots 
 base image (`scripts/runner/build-base-image.sh`: Ubuntu with git, Node, Claude Code, Codex,
 Pi, bun, uv, gh) with a per-run sparse scratch disk as its writable overlay, and a tools disk
 that holds the daemon binary as `vm-agent` (PID 1 after `vm-init`) and `chat-run`. The run
-folder, the working folder (the line's `work/`, see Run folders), the run's git dir and
-`[vm].shares` (default `~/.claude`, `~/.codex`, `~/.pi`) are NFS shares of the host, mounted at
-their host paths, so the worktree, session files, `stderr.log` and 产出 stay where the daemon
-reads them, and the member's next run in the topic, in a new VM, finds its working folder as
-it was left. Stdin and stdout go over vsock (port 1024) as
+folder, the working folder (the line's `work/`, see Run folders), the run's git dir, the AI
+member's own folder (below) and any `[vm].shares` (default none) are NFS shares of the host,
+mounted at their host paths, so the worktree, session files, `stderr.log` and 产出 stay where
+the daemon reads them, and the member's next run in the topic, in a new VM, finds its working
+folder as it was left. Stdin and stdout go over vsock (port 1024) as
 frames; `chat-run` in the VM uses the socket `/run/chat-run.sock`, which the agent relays to
 the run's socket over vsock (port 1025), so Codex runs use the socket instead of the request
 folder. With `[vm].homes` (default `/srv/runner/homes`) the folder `<homes>/<bot member id>` is
-one more share, mounted as the VM's `$HOME`: what a bot clones, installs and signs in to
-(`gh auth login`) is there again in its next run, in every VM of that bot; the rest of the
-disk still goes with the VM. The CLI's system note says what is kept (the working folder for
-the next run in the topic, the home folder for all runs), and that processes left running
-when the turn ends are killed. 接管 pauses and resumes the whole VM. When the CLI exits the agent syncs the shares
-before the daemon reads them; then the VM, its tap, its exports and its scratch disk go.
+the member's own folder, mounted at its host path and as the VM's `$HOME`: what a bot clones,
+installs and signs in to is there again in its next run, in every VM of that bot; the rest of
+the disk still goes with the VM. With `[vm].home_gb` (default 20) that folder is a disk image
+of that size (`<homes>/../home-images/<id>.ext4`, sparse, mounted with `discard`) that the root
+helper makes on first use and mounts (`runner-vm home-up`), so one member cannot fill the host;
+a larger `home_gb` grows existing images, a smaller one leaves them. A home folder from before
+the images moves into its image the first time it is used (when it does not fit it stays a
+plain folder without a limit until it is emptied). `home_gb = 0` keeps plain folders. Without
+`homes` the member's own folder is `<[vm].dir>/cli/<id>` and only holds its CLIs' folders.
+`home.clear` (feature `homes`) empties a member's home: the image goes, its next run starts with
+a new one; the daemon refuses while a run of that member is on the machine and holds that
+member's new runs (`busy`) while it empties. The CLI's system note says what is kept (the working
+folder for the next run in the topic, the home folder for all runs), and that processes left
+running when the turn ends are killed. 接管 pauses and resumes the whole VM. When the CLI exits
+the agent syncs the shares before the daemon reads them; then the VM, its tap, its exports and
+its scratch disk go.
+
+**Sign-ins and session records.** The host's own CLI folders (`~/.claude`, `~/.codex`, `~/.pi`)
+are never shared with a VM: the daemon skips any share that is the daemon user's home or in one
+of its dot folders, and the root helper refuses to export them. A run's CLI uses its member's
+own folders, so session records stay per member: `CLAUDE_CONFIG_DIR=<member>/.claude`,
+`CODEX_HOME=<member>/.codex`, `PI_CODING_AGENT_DIR=<member>/.pi/agent` (host paths, mounted at
+the same paths in the VM). The host's `settings.json` / `config.toml` are copied in for each
+run. The sign-in reaches the run in a form it cannot use to change the host's:
+
+- Claude Code: `CLAUDE_CODE_OAUTH_TOKEN`. A long-lived token (`claude setup-token` as the
+  daemon user) given to the machine as an API key with that name (团队管理 › 订阅账号) is used as
+  it is, and so is `ANTHROPIC_API_KEY` from the runtime's env; otherwise the host's current
+  access token from `.credentials.json` (never its refresh token). When that token would run out
+  before the run's limit plus 30 minutes, the host's CLI refreshes it first.
+- Codex: `<member>/.codex/auth.json`, a copy of the host's with `refresh_token` set to `""`
+  (Codex reads a file without the field as no sign-in). The access token lasts 10 days; when it
+  would run out before the run's limit plus 30 minutes, the host's Codex refreshes it first
+  (`codex app-server`, `account/read` with `refreshToken: true`), so a refresh never happens in
+  a VM and never rotates the host's refresh token away.
+- Pi: a copy of its `auth.json` with every `refresh` emptied. When an OAuth access token would
+  run out before the run's limit plus 30 minutes, the host's Pi refreshes it first
+  (`pi auth print-bearer-token --provider <p> --min-expiry <s>s`, output discarded); when every
+  sign-in in it has run out and cannot be renewed, the run fails before it starts.
+
+Refreshes on the host take turns (one at a time per daemon; each first rereads the host's file
+and skips when another run just renewed it), so a refresh token is never used twice. Runs of one
+member that start together take turns preparing its home (the daemon, and `flock` in the root
+helper) and writing its sign-in copy.
+
+A run that resumes a session from before per-member folders gets that one session file copied
+from the host's folder into its member's.
+
+**Capacity.** Besides `max_parallel_runs` and the free disk (of `work_root` and of the disk the
+homes are on, whichever has less free; `health.diskFreeBytes` reports that one), a VM host
+refuses a run (`run.reject`, `busy`) when `MemAvailable` does not cover `[vm].mem_mib` for the
+new VM and for each accepted VM that has not booted yet, above a reserve of a fifth of the
+memory (at least 2 GiB) for the running VMs to grow into.
 
 The VMs reach the internet. A static nftables table (`scripts/runner/runner-vm.nft`) drops
-their traffic to the host (except NFS), to private, link-local and metadata ranges and to each
-other; strict reverse-path filtering stops address spoofing. The daemon runs as an unprivileged
-user; the tap device and the NFS exports go through the root helper `runner-vm` with `sudo -n`.
+their traffic to the host (except NFS on the host address of their own tap), to private,
+link-local and metadata ranges and to each other; strict reverse-path filtering stops address
+spoofing. Each VM's exports name only its own guest address. The daemon runs as an unprivileged
+user; the tap device, the NFS exports and the home images go through the root helper
+`runner-vm` with `sudo -n`.
 `scripts/runner/host-setup.sh` installs all of it; `scripts/runner/net-check.py` boots a VM and
 checks its network.
 
@@ -1049,7 +1193,7 @@ example-config` prints a commented example. Keys: `server_url`, `token_file`, `m
 `command`, `args`, `env`, `model`, `asks_permission` (ACP: the agent asks before its tool
 calls, see "Gated actions"), and `[vm]` with `kernel`, `rootfs`, `dir`, `vcpus`, `mem_mib`
 (a cap: the host gives only the pages the VM touches), `scratch_gb`, `firecracker`, `helper`,
-`shares`, `homes`. `approval_policy`, `sandbox`, `permission_mode` and
+`shares` (default none; never the daemon user's home or its dot folders), `homes`, `home_gb`. `approval_policy`, `sandbox`, `permission_mode` and
 `allowed_tools` still parse (1.1 configs) but are ignored since 1.2.1. Without `[runtimes.*]`, `codex` and `claude` are added when
 found on PATH.
 

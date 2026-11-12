@@ -349,6 +349,8 @@ export function buildPrompt(opts: {
   brief?: string;
   /** 沉淀: the memory index (memory/inject.ts), reference material. */
   memory?: string;
+  /** The group's members with 岗位 (context/read.ts `membersText`). */
+  members?: string;
 }): string {
   const name = (id: string) => opts.names.get(id) ?? id;
   const lines = [
@@ -358,6 +360,7 @@ export function buildPrompt(opts: {
     ...(opts.acceptance ? [ACCEPTANCE_RULE] : []),
     ...(opts.refs ? [REFS_RULE] : []),
     ...(opts.rules ? [opts.rules] : []),
+    ...(opts.members ? ["", opts.members] : []),
     ...(opts.memory ? ["", opts.memory] : []),
     "",
     ...(opts.context !== undefined

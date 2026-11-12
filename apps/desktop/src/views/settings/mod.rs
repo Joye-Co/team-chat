@@ -39,7 +39,7 @@ use gpui_component::button::Button;
 use crate::{
     app::Services,
     copy::settings as s,
-    data::{MemberLevel, SessionState},
+    data::{MemberLevel, SessionState, TeamRole},
     theme,
     ui::{
         Sym,
@@ -64,24 +64,28 @@ pub enum Page {
     Members,
     /// 团队约定 (沉淀, team scope).
     Memory,
+    /// 我的偏好 (沉淀, my own scope); 我的约定 when one person uses the server.
+    Mine,
     Machines,
     Appearance,
     Shortcuts,
 }
 
 impl Page {
-    pub const ALL: [Page; 8] = [
+    pub const ALL: [Page; 9] = [
         Page::General,
         Page::Account,
         Page::Notifications,
         Page::Members,
         Page::Memory,
+        Page::Mine,
         Page::Machines,
         Page::Appearance,
         Page::Shortcuts,
     ];
 
-    /// The pane name: the tab label and the window title.
+    /// The pane name: the tab label and the window title. [`SettingsView::title_of`]
+    /// says 我的约定 for [`Page::Mine`] when one person uses the server.
     pub fn title(self) -> &'static str {
         match self {
             Page::General => s::PANE_GENERAL,
@@ -89,6 +93,7 @@ impl Page {
             Page::Notifications => s::PANE_NOTIFICATIONS,
             Page::Members => s::PANE_MEMBERS,
             Page::Memory => crate::copy::memory::TEAM_TITLE,
+            Page::Mine => crate::copy::memory::PERSON_TITLE,
             Page::Machines => s::PANE_MACHINES,
             Page::Appearance => s::PANE_APPEARANCE,
             Page::Shortcuts => s::PANE_SHORTCUTS,
@@ -102,7 +107,7 @@ impl Page {
             Page::Account => Sym::Account,
             Page::Notifications => Sym::Bell,
             Page::Members => Sym::Members,
-            Page::Memory => Sym::Book,
+            Page::Memory | Page::Mine => Sym::Book,
             // desktopcomputer: its ink fills the 18 box; macmini is 22 × 10
             // (2.19, C1-09).
             Page::Machines => Sym::Computer,
@@ -119,6 +124,7 @@ impl Page {
             Page::Notifications => "notifications",
             Page::Members => "members",
             Page::Memory => "memory",
+            Page::Mine => "mine",
             Page::Machines => "machines",
             Page::Appearance => "appearance",
             Page::Shortcuts => "shortcuts",
@@ -127,10 +133,11 @@ impl Page {
 
     /// The tabs of the settings window: my own preferences. 成员 (with 默认规则), 团队约定 and
     /// 机器 live in 团队管理 (`views::admin`); their panes stay here for the self-tests.
-    pub const TABS: [Page; 5] = [
+    pub const TABS: [Page; 6] = [
         Page::General,
         Page::Account,
         Page::Notifications,
+        Page::Mine,
         Page::Appearance,
         Page::Shortcuts,
     ];
@@ -145,12 +152,98 @@ impl Page {
     }
 }
 
-/// True when I am signed in as an owner (the admin actions show).
+/// True when I am signed in as a 管理员 or a 所有者 (the admin actions show). The name stays
+/// from before roles: the wire level `owner` is both (design-roles 3.9).
 pub fn i_am_owner(services: &Services) -> bool {
     matches!(
         services.provider.session(),
         SessionState::SignedIn { me, .. } if me.level == MemberLevel::Owner
     )
+}
+
+/// My 身份, `None` when signed out.
+pub fn my_role(services: &Services) -> Option<TeamRole> {
+    let SessionState::SignedIn { me, .. } = services.provider.session() else {
+        return None;
+    };
+    // The directory has the newest copy of me, mark included.
+    let all = services.provider.members();
+    let me = all.iter().find(|m| m.id == me.id).cloned().unwrap_or(me);
+    Some(TeamRole::of(&me, &all))
+}
+
+/// True when I am the team's 所有者: I change 身份 and stop 管理员 and 所有者.
+pub fn i_am_team_owner(services: &Services) -> bool {
+    my_role(services) == Some(TeamRole::Owner)
+}
+
+/// One person uses this team: exactly one active human member. Then nothing about 身份 (and,
+/// for the computers, nothing about 团队 or 我的) shows (design-roles 3.9, 3.10).
+pub fn solo(services: &Services) -> bool {
+    solo_in(&services.provider.members())
+}
+
+pub fn solo_in(members: &[crate::data::Member]) -> bool {
+    members
+        .iter()
+        .filter(|m| !m.deactivated && !m.is_bot())
+        .count()
+        == 1
+}
+
+/// The word of a 身份: 所有者, 管理员 or 普通成员.
+pub fn role_text(role: TeamRole) -> &'static str {
+    match role {
+        TeamRole::Owner => s::ROLE_TEAM_OWNER,
+        TeamRole::Admin => s::LEVEL_OWNER,
+        TeamRole::Member => s::LEVEL_MEMBER,
+    }
+}
+
+/// The 「设为…」 item of a 身份.
+pub fn set_role_text(role: TeamRole) -> &'static str {
+    match role {
+        TeamRole::Owner => s::SET_ROLE_OWNER,
+        TeamRole::Admin => s::SET_ROLE_ADMIN,
+        TeamRole::Member => s::SET_ROLE_MEMBER,
+    }
+}
+
+/// The 身份 a 所有者 can give `target` from its row (design-roles 3.9): the other two, and never
+/// 所有者 to an AI member. Empty for myself, a deactivated member, or when I am not the 所有者.
+pub fn roles_to_offer(
+    target: &crate::data::Member,
+    current: TeamRole,
+    me: Option<&str>,
+    i_am_team_owner: bool,
+) -> Vec<TeamRole> {
+    if !i_am_team_owner || target.deactivated || me == Some(target.id.as_str()) {
+        return Vec::new();
+    }
+    [TeamRole::Owner, TeamRole::Admin, TeamRole::Member]
+        .into_iter()
+        .filter(|r| *r != current && !(target.is_bot() && *r == TeamRole::Owner))
+        .collect()
+}
+
+/// True when I may stop (or bring back) `target`: a 管理员 handles 普通成员 and AI members at
+/// 普通成员; a 管理员 or 所有者 target needs the 所有者 (design-roles 3.2).
+pub fn may_deactivate(target_role: TeamRole, i_am_team_owner: bool) -> bool {
+    i_am_team_owner || target_role == TeamRole::Member
+}
+
+/// True when a member's "⋯" menu has an item: an active AI member's own items, a 「设为…」, or
+/// 停用 / 恢复. A deactivated AI member a 管理员 may not bring back has none, so no button.
+pub fn has_member_menu(target: &crate::data::Member, offer: &[TeamRole], may_stop: bool) -> bool {
+    may_stop || !offer.is_empty() || (target.is_bot() && !target.deactivated)
+}
+
+/// The text of a failed 身份 change: refused means only the 所有者 may do it.
+pub fn role_error_text(e: crate::data::AdminError) -> &'static str {
+    match e {
+        crate::data::AdminError::Forbidden => s::ERR_OWNER_ONLY,
+        e => widgets::error_text(e),
+    }
 }
 
 /// The title row that holds the traffic lights and the window title.
@@ -178,6 +271,8 @@ pub struct SettingsView {
     notifications: Entity<NotificationsPage>,
     members: Entity<MembersPage>,
     memory: Entity<crate::views::memory::MemoryBoard>,
+    /// 我的偏好, or 我的约定 when one person uses the server.
+    mine: Entity<crate::views::memory::MemoryBoard>,
     machines: Entity<MachinesPage>,
     appearance: Entity<AppearancePage>,
     shortcuts: Entity<ShortcutsPage>,
@@ -191,7 +286,7 @@ pub struct SettingsView {
     focus: gpui::FocusHandle,
     /// The pane whose name the window title shows, so the title is set when
     /// the pane changes, not on every frame.
-    titled: Option<Page>,
+    titled: Option<&'static str>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -219,6 +314,19 @@ impl SettingsView {
                 cx,
             )
         });
+        // The board follows the signed-in person itself: this window outlives an account
+        // change, and before sign-in it reads nothing.
+        let mine = cx.new(|cx| {
+            crate::views::memory::MemoryBoard::new(
+                services.clone(),
+                crate::data::memory::MemoryScope::Person(services.me().unwrap_or_default()),
+                crate::views::memory::Host::Settings,
+                String::new(),
+                cx,
+            )
+        });
+        // Its name (我的偏好 or 我的约定) is the tab's and the window's.
+        let mine_changed = cx.observe(&mine, |_, _, cx| cx.notify());
         let machines = cx.new(|cx| MachinesPage::new(services.clone(), window, cx));
         let appearance = cx.new(|cx| AppearancePage::new(services.clone(), window, cx));
         let shortcuts = cx.new(|cx| ShortcutsPage::new(window, cx));
@@ -231,6 +339,7 @@ impl SettingsView {
             notifications,
             members,
             memory,
+            mine,
             machines,
             appearance,
             shortcuts,
@@ -239,6 +348,7 @@ impl SettingsView {
             focus,
             titled: None,
             _subscriptions: vec![
+                mine_changed,
                 theme::follow_system(window, cx),
                 // Back in front: the login item may have changed in 系统设置.
                 cx.observe_window_activation(window, |this, window, cx| {
@@ -267,8 +377,9 @@ impl SettingsView {
             self.scroll.set_offset(gpui::point(px(0.), px(0.)));
         }
         self.page = page;
-        window.set_window_title(page.title());
-        self.titled = Some(page);
+        let title = self.title_of(page, cx);
+        window.set_window_title(title);
+        self.titled = Some(title);
         prefs::update(|p| p.last_pane = Some(page.slug().to_string()));
         match page {
             Page::General => {
@@ -282,6 +393,7 @@ impl SettingsView {
             Page::Notifications => self.notifications.update(cx, |n, cx| n.refresh(cx)),
             Page::Members => self.members.update(cx, |m, cx| m.refresh_rules(window, cx)),
             Page::Memory => self.memory.update(cx, |m, cx| m.load(cx)),
+            Page::Mine => self.mine.update(cx, |m, cx| m.load(cx)),
             _ => {}
         }
         cx.notify();
@@ -324,8 +436,21 @@ impl SettingsView {
         &self.memory
     }
 
+    /// 我的偏好 (我的约定 when one person uses the server).
+    pub fn mine(&self) -> &Entity<crate::views::memory::MemoryBoard> {
+        &self.mine
+    }
+
     pub fn machines(&self) -> &Entity<MachinesPage> {
         &self.machines
+    }
+
+    /// The name of `page` as the tab and the window title say it.
+    fn title_of(&self, page: Page, cx: &App) -> &'static str {
+        match page {
+            Page::Mine => self.mine.read(cx).title(),
+            _ => page.title(),
+        }
     }
 
     fn render_page(&self) -> gpui::AnyElement {
@@ -335,6 +460,7 @@ impl SettingsView {
             Page::Notifications => self.notifications.clone().into_any_element(),
             Page::Members => self.members.clone().into_any_element(),
             Page::Memory => self.memory.clone().into_any_element(),
+            Page::Mine => self.mine.clone().into_any_element(),
             Page::Machines => self.machines.clone().into_any_element(),
             Page::Appearance => self.appearance.clone().into_any_element(),
             Page::Shortcuts => self.shortcuts.clone().into_any_element(),
@@ -348,7 +474,7 @@ impl SettingsView {
         crate::ui::native::toolbar_tab(
             gpui::SharedString::from(format!("settings-page-{}", page.slug())),
             page.symbol(),
-            page.title(),
+            self.title_of(page, cx),
             page == self.page,
             emphasized(window),
             cx,
@@ -360,7 +486,12 @@ impl SettingsView {
 impl Render for SettingsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = self.window_body(window, cx).into_any_element();
-        crate::ui::native::window_chrome::framed_fixed(self.page.title(), body, window, cx)
+        crate::ui::native::window_chrome::framed_fixed(
+            self.title_of(self.page, cx),
+            body,
+            window,
+            cx,
+        )
     }
 }
 
@@ -370,9 +501,10 @@ impl SettingsView {
         let k = native_colors(cx);
         let active = emphasized(window);
         // The self-test walks the panes without the window: keep the title.
-        if self.titled != Some(self.page) {
-            window.set_window_title(self.page.title());
-            self.titled = Some(self.page);
+        let title = self.title_of(self.page, cx);
+        if self.titled != Some(title) {
+            window.set_window_title(title);
+            self.titled = Some(title);
         }
         let tabs: Vec<Button> = Page::TABS
             .into_iter()
@@ -425,7 +557,7 @@ impl SettingsView {
                                 div()
                                     .n_headline()
                                     .text_color(if active { k.label } else { k.secondary })
-                                    .child(self.page.title()),
+                                    .child(title),
                             ),
                     )
                     .child(
@@ -613,6 +745,45 @@ mod tests {
     use gpui::{TestAppContext, VisualTestContext};
 
     use super::*;
+
+    fn member(kind: crate::data::MemberKind, deactivated: bool) -> crate::data::Member {
+        crate::data::Member {
+            id: "m-1".into(),
+            name: "Scout".into(),
+            kind,
+            level: crate::data::MemberLevel::Owner,
+            role: None,
+            avatar_url: None,
+            deactivated,
+            online: false,
+            character: None,
+            team_owner: false,
+        }
+    }
+
+    /// No "⋯" for a deactivated AI 管理员 that a 管理员 (not the 所有者) sees: nothing to pick.
+    #[test]
+    fn member_menu_only_when_it_has_items() {
+        use crate::data::MemberKind::{Bot, Human};
+        let off_bot = member(Bot, true);
+        let may_stop = may_deactivate(TeamRole::Admin, false);
+        let offer = roles_to_offer(&off_bot, TeamRole::Admin, Some("me"), false);
+        assert!(!has_member_menu(&off_bot, &offer, may_stop));
+        assert!(
+            has_member_menu(&off_bot, &[], true),
+            "the 所有者 can bring it back"
+        );
+        assert!(
+            has_member_menu(&member(Bot, false), &[], false),
+            "an active AI member"
+        );
+        assert!(!has_member_menu(&member(Human, false), &[], false));
+        assert!(has_member_menu(
+            &member(Human, false),
+            &[TeamRole::Member],
+            false
+        ));
+    }
 
     /// Tab walks the Settings window (E3): the root holds the focus in a
     /// fresh window, Tab moves it to a control, and ⇧Tab moves it on.

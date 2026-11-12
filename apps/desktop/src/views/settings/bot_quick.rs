@@ -323,6 +323,7 @@ mod tests {
             deactivated,
             online: false,
             character: None,
+            team_owner: false,
         }
     }
 

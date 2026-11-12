@@ -1,0 +1,13 @@
+{
+  "kind": "RunMembersResponse",
+  "valid": false,
+  "description": "ai is required",
+  "value": {
+    "members": [
+      {
+        "id": "01JBX0OWNER0000000000000AA",
+        "name": "张三"
+      }
+    ]
+  }
+}
