@@ -885,6 +885,20 @@ Rules:
   run after its last turn ended starts a new run. When no run is active, a mention starts a run,
   and so does a message without an @ from the last run's requester within 30 minutes after it
   ended (with a front desk, the front desk decides; small talk gets no answer).
+- In a chat area (the 群聊, a DM's 群聊) a bot works on several requests at once (usable 接 1.5):
+  a mention from someone who has no active run of the bot there starts its own run next to the
+  running ones, with its own result and its own session. A message that quotes a run's request,
+  progress or approval card, or an input it took, goes to that run; an approval answer to the run
+  that waits for it; the requester's own words to their newest run; a message that starts with
+  新任务 (or answers the front desk's question) starts a new run. An answer or a live event on a
+  card goes to the run that posted the card, and a part handed back to the run that gave it out.
+  A retry or a hand-over may start next to the running ones. In a topic the bot has one run
+  at a time, as above.
+- The room hands messages to bots in lanes, one per (topic, bot) (usable 接 1.9): in order within
+  a lane, lanes at the same time, so one bot's front desk call does not delay another bot's 👀. A
+  failed hand-off holds only the later messages of its lane until it is retried; in a topic a
+  message without an @ is routed after the topic's earlier hand-offs are done, without holding
+  back later messages that name their bots.
 - The bot acknowledges the message that started the run with one reaction (👀; before 1.1, a
   short text line). It posts nothing while it works: progress lives in the run (`plan`, the run
   log; before 1.1, one streaming message). When the run ends it posts one result message and
@@ -989,10 +1003,19 @@ and makes one forced tool call `decide`, which answers with one of four actions:
   No run, no machine.
 - `dispatch`: a run as before. Its prompt carries the work order (`WorkBrief`: goal, done-when
   checks, notes) after the request.
-- `ask`: the bot posts one question and becomes the topic's `ownerId`. For an hour the
-  requester's next message in the topic counts as addressed to the bot without an @; the front
-  desk then decides again with the answer in the topic.
+- `ask`: the bot posts one question as a Card v2 ask (`intent: "ask"`, `ask.from` = the
+  requester, blocking, `expiresAt` in an hour, one `textarea` input `answer` with the submit
+  action `send`) and, in a topic, becomes its `ownerId`; the topic shows `waiting_answer`. For an
+  hour the requester's next message in the topic (in the 群聊 too, where the front desk's open,
+  unexpired question routes that person's messages to the bot; other card asks do not) counts as addressed to the
+  bot without an @; the front desk then decides again with the answer in the topic, and the card
+  stops waiting (its ask, action and input are removed). An answer in the card starts a run with
+  that answer (in the 群聊 next to any running one).
 - `skip`: nothing is posted, and the 👀 it put on the request is taken back.
+
+When a person says something in the topic while the front desk thinks, the decision read an
+old topic: it is dropped and made again on the new one (at most twice; usable 接 1.13). In a DM
+a `dispatch` may say `newTask: true`: the request is new work and starts a fresh session.
 
 The 👀 reaction goes on the request while the front desk reads it. A decision is stored before
 it is acted on, so a retried delivery never posts twice. Any doubt becomes a `dispatch`: an
@@ -1059,7 +1082,11 @@ contract, but its shape is fixed here so the developer view and the daemon notes
   seq that are not the bot's own, then the request; at most the same budget.
 - **群聊.** A run continues the bot's last session in the 群聊 only when its request quotes a
   message of that bot or is a follow-up of its run (input left over). A new request starts a new
-  session with the 群聊's lines as above.
+  session with the 群聊's lines as above. In a DM's 群聊 (usable 接 3.2) the next request
+  continues the bot's last session there, unless it starts with 新任务 (or similar words: 新的任务,
+  另一个任务, 换个任务, 重新开始, new task) or the front desk dispatches it with `newTask: true`. A
+  request next to a running one in a chat area always starts a new session; a follow-up or a
+  retry continues its own run's session.
 - **What it carried.** Every run keeps its prompt and a manifest; owners read them with
   `GET /v1/runs/:id/context`:
 
@@ -1604,9 +1631,11 @@ Rules:
 - The 群聊 is a chat, not a piece of work: `topic.update` on it changes nothing and answers the
   topic as it is (bots that report a run's status keep working); a card ask in it does not set
   its status or `waitingOn`; posting or being mentioned in it does not auto-follow it.
-- Bots: a message in the 群聊 goes only to the bot it mentions (in a DM with a bot, to that bot).
-  No bot becomes the 群聊's responsible member, so each @mention can go to a different bot; a
-  bot with an active run there takes a later mention as a follow-up of that run. A card press in
+- Bots: a message in the 群聊 goes only to the bot it mentions (in a DM with a bot, to that bot),
+  or to a bot whose front desk question (an open, unexpired card ask) waits on its author. No bot becomes the 群聊's responsible
+  member, so each @mention can go to a different bot; a bot with an active run there takes a
+  later mention from that run's requester as a follow-up of that run, and a mention from someone
+  else as a new request next to it. A card press in
   the 群聊 goes to the card's author when that bot has run there.
 
 ## Desk notes
