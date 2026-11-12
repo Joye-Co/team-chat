@@ -193,7 +193,7 @@ type DecisionRow = {
 };
 
 registerRoomRpc(DECISIONS_RPC, (room, actor, args): DecisionsResponse => {
-  if (!actor || !room.isMember(actor.id)) throw new ApiError("forbidden", "not a member of this group");
+  if (!actor || !(room.readingAs || room.isMember(actor.id))) throw new ApiError("forbidden", "not a member of this group");
   const { beforeSeq, limit } = args as { beforeSeq?: number; limit: number };
   const rows = room.sql
     .exec<DecisionRow>(

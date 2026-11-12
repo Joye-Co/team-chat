@@ -61,7 +61,8 @@ Before `welcome` the daemon sends nothing else, and the server sends nothing but
 { t: "run.event",   runId, seq, at, event: RunEvent }
 { t: "run.done",    runId, seq, at, status: "succeeded" | "failed" | "cancelled" | "timeout",
   exitCode?: number, resultText?: string /* <= 64 KiB */, summary?: string /* first line, <= 280 chars */,
-  error?: string /* <= 4 KiB */, sessionId?: string, usage?: Usage, durationMs: number }
+  error?: string /* <= 4 KiB */, sessionId?: string, usage?: Usage, durationMs: number,
+  resumeMissed?: boolean /* true: resumeSessionId was not found, the run used run.assign.fullPrompt */ }
 { t: "run.session", runId, seq, at, ok: boolean, source?: "cli" | "stream",
   bytes?: number, gzipBytes?: number, sha256?: string, error?: string }
 
@@ -102,6 +103,8 @@ KnownRun = { runId, ackedSeq: number }
   sessionUpload?: { url: string, headers?: Record<string, string> },
   kind?: "aside",                  // 1.1, feature "aside": a read-only side chat run
   resumeSessionId?: string,        // 1.1, feature "resume": continue this CLI session (<= 128)
+  fullPrompt?: string,             // with resumeSessionId: the full prompt, for when that session
+                                   // is not found; absent when the frame would pass 1 MiB
   gates?: RunGate[] }              // feature "gates": kinds the run stops at, see "Gated actions"
 { t: "run.input",    runId, inputId, text, authorId?,            // a follow-up from the topic
   answer?: RunAnswer, artifactEvent?: RunArtifactEvent }         // 1.1, feature "answer"
@@ -395,6 +398,7 @@ server frames and ignores unknown fields, so it must never get work it cannot do
 | `resume` | `run.assign.resumeSessionId`: the run continues that CLI session (Claude Code `--resume`, Codex `thread/resume`, ACP `session/load`) instead of starting a new one; `CliInfo.resume` says which CLIs can. |
 | `effort` | Reports `CliInfo.models` and `efforts` and runs with `run.assign.effort`, see "Models and effort". |
 | `context` | Answers the read-only topic context ops of `chat-run` (`topic.history`, `topic.message`, `context.search`, `file.get`, and from this version `topic.state`, `artifact.list`, `artifact.get`, `card.get`, `decisions.list`, `member.list`), see "Topic context". |
+| `groups` | Usable: `chat-run group list` and `--in <group id>` / `search --all` on the context ops: a run reads the other groups of the person it works for, see "Topic context". The server's prompt names them only to a daemon with this feature. |
 | `gates` | Reports `CliInfo.gates`, stops the commands of `run.assign.gates` for a person's approval and honors `run.approval.scope`, see "Gated actions". |
 
 How the 1.1 daemon does each one:
@@ -415,9 +419,16 @@ How the 1.1 daemon does each one:
   that its earlier conversation is gone. The daemon asks each ACP agent (`initialize` only, at
   most 15 s) when it reports its CLIs and sets `CliInfo.resume` from the answer; the server sends
   `resumeSessionId` only for a CLI with `resume: true` (absent: kinds `claude` and `codex`), so a
-  CLI that cannot continue gets the full prompt, as a first run does. With `resumeSessionId` the prompt
+  CLI that cannot continue gets the full prompt, as a first run does. A session that read other
+  groups (usable, "Topic context": the server keeps which, and a continuing run inherits them)
+  continues only when the new run's person may read every one of them; otherwise the new run
+  starts a new session with the full prompt. With `resumeSessionId` the prompt
   carries only what the session has not seen (protocol.md, "Run context"), and `run.done.sessionId`
-  names the session the run used. In the 群聊 a run continues the last session only when its request
+  names the session the run used. `fullPrompt` then carries the full prompt; when the daemon cannot
+  continue the session (no session file, `thread/resume` or `session/load` fails) it sends
+  `fullPrompt` to the new session instead and sets `run.done.resumeMissed: true`, and the server
+  records that the run got the full prompt (its run context shows the full prompt). Without
+  `fullPrompt` (an older server, or a frame that would pass 1 MiB) the daemon keeps the short prompt. In the 群聊 a run continues the last session only when its request
   quotes a message of that bot or follows up its run; other requests start a new session.
 
 - **pause**: the daemon stops the CLI's process group (`SIGSTOP`, the group from `run.json`) for
@@ -854,46 +865,62 @@ with the machine token (results can be larger than a frame); they only read.
 
 | `op` | `body` | `chat-run` command |
 | --- | --- | --- |
-| `topic.history` | `{ before?, after?, limit?, topicId? }` | `chat-run topic history [--before SEQ] [--after SEQ] [--limit N] [--topic T]` → `{ messages: ContextMessage[], hasMore }` |
-| `topic.message` | `{ messageId, topicId? }` | `chat-run topic message --id M [--topic T]` → `{ message: ContextMessage }` |
-| `context.search` | `{ query, scope?, limit? }` | `chat-run search --query Q [--group] [--limit N]` → `{ hits: ContextHit[] }` |
+| `topic.history` | `{ before?, after?, limit?, topicId?, groupId? }` | `chat-run topic history [--before SEQ] [--after SEQ] [--limit N] [--topic T] [--in G]` → `{ messages: ContextMessage[], hasMore }` |
+| `topic.message` | `{ messageId, topicId?, groupId? }` | `chat-run topic message --id M [--topic T] [--in G]` → `{ message: ContextMessage }` |
+| `context.search` | `{ query, scope?, limit?, groupId? }` | `chat-run search --query Q [--group \| --all] [--in G] [--limit N]` → `{ hits: ContextHit[] }` |
 | `file.get` | `{ fileId, out? }` | `chat-run file get --id F [--out PATH]` → `{ path, name, mime, size }` |
-| `topic.state` | `{ topicId? }` | `chat-run topic state [--topic T]` → `TopicStateResponse` |
-| `artifact.list` | `{ scope?, topicId? }` | `chat-run artifact list [--group \| --topic T]` → `RunArtifactsResponse` |
+| `topic.state` | `{ topicId?, groupId? }` | `chat-run topic state [--topic T] [--in G]` → `TopicStateResponse` |
+| `artifact.list` | `{ scope?, topicId?, groupId? }` | `chat-run artifact list [--group \| --topic T] [--in G]` → `RunArtifactsResponse` |
 | `artifact.get` | `{ artifactId, version?, out? }` | `chat-run artifact get --id A [--version N] [--out PATH]` → `RunArtifactResponse` (with `path` when `out` is set) |
 | `card.get` | `{ messageId }` | `chat-run card get --message M` → `RunCardResponse` |
-| `decisions.list` | `{ limit? }` | `chat-run decisions list [--limit N]` → `RunDecisionsResponse` |
-| `member.list` | `{}` | `chat-run member list` → `RunMembersResponse` |
+| `decisions.list` | `{ limit?, groupId? }` | `chat-run decisions list [--limit N] [--in G]` → `RunDecisionsResponse` |
+| `member.list` | `{ groupId? }` | `chat-run member list [--in G]` → `RunMembersResponse` |
+| `group.list` | `{}` | `chat-run group list` → `RunGroupsResponse` (feature `groups`) |
 
 ```ts
-GET /v1/machine/runs/:id/topic/messages?before=&after=&limit=&topic=   -> { messages: ContextMessage[], hasMore: boolean }
-GET /v1/machine/runs/:id/topic/messages/:messageId?topic=               -> { message: ContextMessage }
-GET /v1/machine/runs/:id/topic/state?topic=                     -> TopicStateResponse
-GET /v1/machine/runs/:id/artifacts?scope=topic|group&topic=     -> RunArtifactsResponse
+GET /v1/machine/runs/:id/topic/messages?before=&after=&limit=&topic=&group=   -> { messages: ContextMessage[], hasMore: boolean }
+GET /v1/machine/runs/:id/topic/messages/:messageId?topic=&group=               -> { message: ContextMessage }
+GET /v1/machine/runs/:id/topic/state?topic=&group=              -> TopicStateResponse
+GET /v1/machine/runs/:id/artifacts?scope=topic|group&topic=&group= -> RunArtifactsResponse
 GET /v1/machine/runs/:id/artifacts/:artifactId?version=         -> RunArtifactResponse
 GET /v1/machine/runs/:id/cards/:messageId                       -> RunCardResponse
-GET /v1/machine/runs/:id/decisions?limit=                       -> RunDecisionsResponse
-GET /v1/machine/runs/:id/members                                -> RunMembersResponse
-TopicStateResponse = { topicId, title, text /* <= 2000 characters */ }
+GET /v1/machine/runs/:id/decisions?limit=&group=                -> RunDecisionsResponse
+GET /v1/machine/runs/:id/members?group=                         -> RunMembersResponse
+GET /v1/machine/runs/:id/groups                                 -> RunGroupsResponse
+TopicStateResponse = { topicId, groupId?, groupName?, title, text /* <= 2000 characters */ }
+RunGroupsResponse = { groups: { id, name, kind: "group" | "dm", purpose?, current: boolean }[] }
 RunArtifactsResponse = { artifacts: Artifact[] }
 RunArtifactResponse = { artifact: Artifact, versions: ArtifactVersion[], version, text?, truncated? }
-RunCardResponse = { topicId, message: ContextMessage, card /* CardV2 or the 1.0 card */,
+RunCardResponse = { topicId, groupId?, groupName?, message: ContextMessage, card /* CardV2 or the 1.0 card */,
                     ask?: { status, from: string[] /* names */ },
                     answers: { actorId, actorName, at?, value?, inputs? }[], answerCount? }
 RunDecisionsResponse = { decisions: (GroupDecision & { answeredByName })[], hasMore,
                          recorded?: (RecordedDecision & { recordedByName })[] }
 RunMembersResponse = { members: { id, name, role?, ai: boolean }[] }
-GET /v1/machine/runs/:id/search?q=&scope=topic|group&limit=     -> { hits: ContextHit[] }
+GET /v1/machine/runs/:id/search?q=&scope=topic|group|all&group=&limit= -> { hits: ContextHit[] }
 GET /v1/machine/runs/:id/files/:fileId                          -> the file's bytes
     headers: Content-Type, Content-Length, X-File-Name (URI-encoded UTF-8)
 ContextMessage = { id, seq, authorId, authorName, at /* ms */, text }
-ContextHit = { messageId, topicId, topicTitle?, seq, authorName, at, snippet }
+ContextHit = { messageId, topicId, topicTitle?, seq, authorName, at, snippet, groupId?, groupName? }
 ```
 
 - The run must be on the calling machine and active. These ops only read, so a side chat run
-  (单独问) may call them too (its group is the side chat's). Everything is of the run's own group:
-  `topicId` (`--topic`) names another topic of that group, and a topic, 产出, card or file of
-  another group is `not_found`, like an unknown one.
+  (单独问) may call them too (its group is the side chat's).
+- **Which groups** (usable, [plans/usable/design-visibility.zh.md](plans/usable/design-visibility.zh.md)):
+  a run reads its own group, and when it works for a person (`requestedFor`, an active person; not
+  a hook's run nor a private card's answer) every group of kind `group` that person is in, read
+  from the server's membership on every request (at most the person's 200 newest). Whether the AI
+  member is in that group does not matter. DMs and side chats other than the run's own are never
+  readable. `groupId` (`group=`, `--in`) names the group of a read; without it, ids of topics and
+  cards are looked up in the run's own group and then in the other readable groups, and 产出 and
+  files by their own group. A group, topic, 产出, card or file the run may not read is `not_found`,
+  like an unknown one. `topicId` without `groupId` names another topic of the run's own group
+  first; with another `groupId`, `topic.history` and `topic.state` need `topicId`. Results from
+  another group carry `groupId` and `groupName` (`ContextHit`, `TopicStateResponse`,
+  `RunCardResponse`). `group.list` lists the readable groups, the run's own first (`current`),
+  with no person's name. Writes (cards, 产出, versions, files) stay in the run's own group: a 产出
+  of another group is `not_found` there. The server remembers which other groups a run read; see
+  **resume** for what that changes.
 - `topic.history` reads the run's topic (or `topicId`), oldest first. `before` and `after` are message seqs
   (`ContextMessage.seq`, also printed in the prompt) and exclusive. Without either it returns the
   newest messages. `limit` is 1-100, default 30. `hasMore` says that more messages lie past the page
@@ -902,7 +929,9 @@ ContextHit = { messageId, topicId, topicTitle?, seq, authorName, at, snippet }
   each attachment, 产出 reference, quote and card. In `topic.history` the body is cut to 4000
   characters; `topic.message` gives the whole body. A message of another topic is `not_found`.
 - `context.search` searches the run's topic, or with `scope: "group"` (`--group`) every topic of the
-  run's group the bot member can read. `limit` 1-50, default 20, newest first.
+  run's group (or of `groupId`) the bot member can read, or with `scope: "all"` (`--all`) every
+  readable group. `groupId` goes only with `scope: "group"` (`invalid` otherwise). `limit` 1-50,
+  default 20, newest first.
 - `file.get` gives a file of the run's group (ready, not deleted). The daemon writes it to `out`,
   which must be inside the run's working folder after symbolic links are resolved; an absolute
   `out` may also be inside the run's downloads folder (`<run folder>/downloads`) or the system's
@@ -1312,6 +1341,10 @@ the runtime's fixed `env` from the config; and `CHAT_RUN_ID`, `CHAT_GROUP_ID`,
 `CHAT_TOPIC_ID`, `CHAT_BOT_MEMBER_ID`, `CHAT_RUN_FOLDER` (the run folder: it marks the run's
 processes for pause and cancel); 1.1 runs that are not side chats also get `CHAT_RUN_SOCKET`
 (Codex runs: `CHAT_RUN_DIR`) and `<run folder>/bin` (with `chat-run`) first on `PATH`.
+Every run of every runtime kind, side chats too, ends with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`,
+set last so neither the runtime's `env` nor an app key overrides it, and `codex app-server`
+always gets `-c features.memories=false`: the CLIs' own memory is off, memory lives only in the
+product.
 
 Names in `envAllowlist` that the config lists in `gated_env` are never in the environment. The
 CLI asks for one with `chat-run secret <NAME>`: the first call sends `approval.request` (title

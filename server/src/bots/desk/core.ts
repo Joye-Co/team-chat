@@ -138,6 +138,9 @@ export type RunRow = {
   // desk-requested-for (usable, protocol "Who a run works for")
   /** The person the run works for (`BotRun.requestedFor`); null for a hook's run and runs from before. */
   requested_for: string | null;
+  // reach-1 (design-visibility 3.3)
+  /** JSON array of the other groups the run read (`noteRead`), or null when none. */
+  read_groups: string | null;
   // desk-failure-model (模 2.2, 2.3, 2.10)
   /** JSON of `RunFailure` of a failed run, or null. */
   failure: string | null;
@@ -228,6 +231,17 @@ export function actsOf(r: Pick<RunRow, "acts">): SuperviseAct[] {
   try {
     const v = JSON.parse(r.acts) as unknown;
     return Array.isArray(v) ? v.filter((x): x is SuperviseAct => SuperviseAct.safeParse(x).success) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** The other groups a run read (`runs.read_groups`, design-visibility 3.3); [] when none. */
+export function readGroupsOf(r: Pick<RunRow, "read_groups">): string[] {
+  if (!r.read_groups) return [];
+  try {
+    const v = JSON.parse(r.read_groups) as unknown;
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
   } catch {
     return [];
   }
@@ -603,6 +617,12 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
           // online (`offline`) or for a free one. Old rows: NULL (waiting for a free one).
           name: "desk-wait-for",
           up: `ALTER TABLE runs ADD COLUMN wait_for TEXT;`,
+        },
+        {
+          // Usable (design-visibility 3.3, 3.6): the other groups a run read; a session that read
+          // them resumes only for a person who may read them all. Old rows: NULL (none).
+          name: "reach-1",
+          up: `ALTER TABLE runs ADD COLUMN read_groups TEXT;`,
         },
       ]);
       const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'bot_id'").toArray()[0];

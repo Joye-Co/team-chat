@@ -208,6 +208,7 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ("RunDecisionsResponse", plain::<RunDecisionsResponse>),
     ("RunMembersResponse", plain::<RunMembersResponse>),
     ("TopicStateResponse", plain::<TopicStateResponse>),
+    ("RunGroupsResponse", plain::<RunGroupsResponse>),
     ("FrontDeskDecision", plain::<FrontDeskDecision>),
     ("BotMetrics", plain::<BotMetrics>),
     (
