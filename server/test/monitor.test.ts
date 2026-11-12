@@ -114,6 +114,21 @@ describe("machine monitor", () => {
     d2.close();
   });
 
+  it("passes the computer's GitHub sign-in through as the heartbeat said, with where runs go", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { labels: [], runsIn: "host" });
+    const read = async () => (await api(`/v1/machines/${w.machineId}/monitor?range=15m`, { token: w.owner.token })).body;
+    expect((await read()).github).toBeUndefined();
+    expect((await read()).runsIn).toBe("host");
+    // On the host a sign-out is shown here too: the monitor is for the people who fix it.
+    d.send({ t: "heartbeat", at: Date.now(), health: HEALTH, runs: [], metrics: { at: Date.now(), runs: [], github: { state: "signed_out" } } });
+    await d.next((f) => f.t === "heartbeat.ack");
+    const m = await read();
+    expect(m.github).toEqual({ state: "signed_out" });
+    expect(MachineMonitor.safeParse(m).success).toBe(true);
+    d.close();
+  });
+
   it("drops metrics it cannot read but still takes the heartbeat", async () => {
     const w = await world();
     const { d } = await Daemon.connect(w.machineToken);

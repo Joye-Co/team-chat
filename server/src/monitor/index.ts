@@ -15,6 +15,7 @@ import { requireMachineManager } from "../bots/store";
 import type { AuthContext } from "../core/auth";
 import { ApiError } from "../core/errors";
 import { registerRoute } from "../core/registry";
+import type { GithubState } from "./alerts";
 import type { DeskRollup } from "./rollup";
 import "./accounts";
 import "./homes";
@@ -38,12 +39,15 @@ export function canTake(slots: number, running: number, availableBytes?: number,
 
 type Rollup = DeskRollup & { lastFailureTitle?: string };
 
+/** design-github-identity 3.6: the monitor with the computer's GitHub sign-in and where its runs go. */
+type MonitorView = MachineMonitor & { github?: GithubState; runsIn?: string };
+
 export function buildMonitor(input: {
   machine: { id: string; name: string; revoked: boolean };
   link: Awaited<ReturnType<ReturnType<typeof linkStub>["monitor"]>> | null;
   desks: { botId: string; rollup: Rollup }[];
   now: number;
-}): MachineMonitor {
+}): MonitorView {
   const { link, desks, now } = input;
   const status = link?.status;
   const metrics: MachineMetrics | null = link?.metrics ?? null;
@@ -155,7 +159,7 @@ export function buildMonitor(input: {
     .filter((m) => m.running + m.waiting + m.queued + m.finishedToday > 0 || m.tokensToday > 0);
 
   const sampledAt = link?.metricsAt ?? undefined;
-  const out: MachineMonitor = {
+  const out: MonitorView = {
     machine: {
       id: input.machine.id,
       name: input.machine.name,
@@ -183,6 +187,9 @@ export function buildMonitor(input: {
   if (metrics?.boot) out.boot = metrics.boot;
   if (lastFailure) out.lastFailure = lastFailure;
   if (metrics?.homes) out.homes = metrics.homes;
+  // design-github-identity 3.6: the computer's GitHub sign-in as the heartbeat said, and where runs go.
+  if (status?.github) out.github = status.github;
+  if (info?.runsIn) out.runsIn = info.runsIn;
   // 机 5.4: 最近的问题, on the server clock like the usage windows.
   if (metrics?.problems) out.problems = metrics.problems.map((p) => ({ at: Math.max(0, p.at + offset), text: p.text }));
   if (health) {
