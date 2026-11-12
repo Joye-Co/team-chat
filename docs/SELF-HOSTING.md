@@ -444,7 +444,7 @@ it, is thrown away after its run.
   daemon also removes the least recently used caches by itself when `work_root` has less than
   `min_free_gb` free.
 - **From a version with AI member home folders** (`/srv/runner/homes`, 1.2.7 and before): the
-  daemon from 1.2.8 keeps no home folders. As root, `git checkout` the new version in
+  daemon from 1.3.0 keeps no home folders. As root, `git checkout` the new version in
   `/root/team-chat` and run `bash scripts/runner/host-setup.sh` again, then rebuild the base
   image (it adds rustup and sccache). host-setup keeps only each member's session records
   (`.claude/projects`, `.codex/sessions`, `.pi/agent/sessions`) in `/srv/runner/homes/<id>`,
