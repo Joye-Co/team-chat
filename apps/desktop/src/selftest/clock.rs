@@ -34,6 +34,12 @@ fn pinned() -> Option<Millis> {
     (ms != UNPINNED).then_some(ms)
 }
 
+/// True while the screenshot self-test runs (the clock is pinned): one-time prompts wait
+/// for a scene to open them.
+pub fn is_pinned() -> bool {
+    pinned().is_some()
+}
+
 /// Now, in milliseconds since the epoch.
 pub fn now_ms() -> Millis {
     pinned().unwrap_or_else(|| Utc::now().timestamp_millis())

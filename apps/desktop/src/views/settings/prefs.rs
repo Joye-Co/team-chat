@@ -39,6 +39,9 @@ pub struct LocalPrefs {
     pub show_whats_new: bool,
     /// The version this Mac last opened, so the 已更新到 sheet shows once.
     pub last_seen_version: Option<String>,
+    /// Accounts (`<server>#<member id>`) that saw the one-time 连接 GitHub prompt on this
+    /// computer.
+    pub github_prompted: Vec<String>,
 }
 
 impl Default for LocalPrefs {
@@ -54,6 +57,7 @@ impl Default for LocalPrefs {
             auto_download: true,
             show_whats_new: true,
             last_seen_version: None,
+            github_prompted: Vec::new(),
         }
     }
 }

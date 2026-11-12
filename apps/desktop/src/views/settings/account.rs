@@ -127,6 +127,8 @@ pub struct AccountPage {
     email_back: bool,
     /// 在手机上登录: show a QR code a phone scans, or approve a phone's code.
     phone: Entity<super::account_phone::PhoneSignIn>,
+    /// GitHub: who AI members act as when they push code for me.
+    github: Entity<super::github::GithubSection>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -203,6 +205,7 @@ impl AccountPage {
             cx.subscribe_in(&name, window, Self::on_input),
             cx.subscribe_in(&role, window, Self::on_input),
         ];
+        let services_for_github = services.clone();
         let mut this = Self {
             me: read_me(&services),
             services,
@@ -228,6 +231,7 @@ impl AccountPage {
             email_step: 0,
             email_back: false,
             phone,
+            github: cx.new(|cx| super::github::GithubSection::new(services_for_github, cx)),
             _subscriptions: subscriptions,
         };
         this.fill_from_me(window, cx);
@@ -760,6 +764,10 @@ impl AccountPage {
 
     pub fn phone(&self) -> &Entity<super::account_phone::PhoneSignIn> {
         &self.phone
+    }
+
+    pub fn github(&self) -> &Entity<super::github::GithubSection> {
+        &self.github
     }
 
     pub fn devices(&self) -> Option<&[DeviceInfo]> {
@@ -1383,6 +1391,7 @@ impl Render for AccountPage {
             .child(GroupedForm::new().row(self.header(cx)))
             .child(self.email_section(window, cx))
             .child(self.phone.clone())
+            .child(self.github.clone())
             .child(self.devices_section(window, cx))
             .child(
                 div().flex().child(

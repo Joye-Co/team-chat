@@ -1042,6 +1042,8 @@ pub mod metrics {
     pub const CODE_CARET: (Pixels, Pixels) = (px(2.), px(20.));
     /// The 3 px ring of the active slot: foreground at 15 %.
     pub const CODE_RING_OPACITY: f32 = 0.15;
+    /// The settings window grows to this while the 连接 GitHub sheet is up.
+    pub const GITHUB_SHEET_FLOOR: Pixels = px(520.);
     /// A disabled primary button before its form is complete: primary at
     /// 30 %, light, never a mid gray (§2.20).
     pub const PRIMARY_WAITING_OPACITY: f32 = 0.3;

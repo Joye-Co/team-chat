@@ -644,6 +644,21 @@ export class MachineLink extends DurableObject<BotsEnv> {
     return { ok: true, sent: ws !== null };
   }
 
+  /**
+   * 盯 1.14: the run moved to another machine. It is closed here: a connected daemon gets
+   * `run.cancel` now; a daemon that is away finds it missing from its next `welcome.runs` and
+   * stops it before anything else. Queued frames for it are dropped, and its late frames are
+   * acked and dropped.
+   */
+  async closeRun(runId: string): Promise<void> {
+    const r = this.run(runId);
+    if (!r || r.state === "closed" || r.state === "lost") return;
+    const ws = this.socket();
+    if (ws) this.send(ws, { t: "run.cancel", runId });
+    this.sql.exec("UPDATE runs SET state = 'closed', updated_at = ? WHERE run_id = ?", Date.now(), runId);
+    this.sql.exec("DELETE FROM outbox WHERE run_id = ?", runId);
+  }
+
   async status(): Promise<LinkStatus> {
     const parse = <T>(k: string): T | undefined => {
       const v = this.meta(k);
