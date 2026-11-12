@@ -706,6 +706,7 @@ mod tests {
 
     /// A VM's command past the agent's cap: its 1 MiB, then the agent's last bytes at the
     /// end; the "not shown" line counts what the agent dropped, once.
+    #[cfg(unix)]
     #[tokio::test]
     async fn output_capped_in_the_vm_is_counted_once() {
         use crate::executor::vmwire::{EXEC_OUT_CAP, EXEC_OUT_CHUNK, ExecExit};
