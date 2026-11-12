@@ -95,6 +95,9 @@ pub(super) enum Item {
     MemberHead {
         row: Box<MemberRow>,
         expanded: bool,
+        /// The state of its newest 话题, for the badge of a member with no
+        /// run.
+        first: Option<crate::views::topic_page::StateLine>,
     },
     /// C: a section header (`在做`, `空闲`, `不在`) that folds its rows.
     MemberSection {
@@ -139,6 +142,8 @@ pub(super) struct TopicItem {
     /// The one state of the 话题 (`topic_page::topic_state`): its short
     /// words go to the right column.
     pub line: crate::views::topic_page::StateLine,
+    /// The 话题 is muted, read with the rest so a frame reads no store.
+    pub muted: bool,
 }
 
 /// Where the first sync stands (T-13), from the connection state: the
@@ -245,6 +250,7 @@ pub(super) fn work(p: &dyn ChatProvider, i: &Inputs) -> Vec<Entry> {
                 let (state, meta) = model::row_state(p, me, &t);
                 section.push(Item::topic(TopicItem {
                     line: crate::views::topic_page::topic_state(p, me, &t),
+                    muted: p.topic_muted(&t.group_id, &t.id),
                     key: "topic".into(),
                     selected: is_open(open, &g.id, &t.id),
                     tile: tile(p, &state),
@@ -366,6 +372,7 @@ pub(super) fn attention(p: &dyn ChatProvider, i: &Inputs, side: &SideChats) -> V
                 }
                 section.push(Item::topic(TopicItem {
                     line: crate::views::topic_page::topic_state(p, me, &t),
+                    muted: p.topic_muted(&t.group_id, &t.id),
                     key: "bucket".into(),
                     selected: is_open(i.open.as_ref(), &t.group_id, &t.id),
                     tile: tile(p, &state),
@@ -420,6 +427,7 @@ pub(super) fn by_member(p: &dyn ChatProvider, i: &mut Inputs, side: &SideChats) 
                                 i.me.as_deref(),
                                 &mt.topic,
                             ),
+                            muted: p.topic_muted(&mt.topic.group_id, &mt.topic.id),
                             key: format!("member-{}", r.member.id),
                             topic: mt.topic.clone(),
                             state: mt.state.clone(),
@@ -437,9 +445,14 @@ pub(super) fn by_member(p: &dyn ChatProvider, i: &mut Inputs, side: &SideChats) 
                 Vec::new()
             };
             let list = if bot { &mut bots } else { &mut people };
+            let first = r
+                .topics
+                .first()
+                .map(|mt| crate::views::topic_page::topic_state(p, i.me.as_deref(), &mt.topic));
             list.push(Item::MemberHead {
                 row: Box::new(r),
                 expanded,
+                first,
             });
             list.extend(topics);
         } else if bot {
@@ -643,7 +656,11 @@ impl RailView {
                 .into_any_element()
             }
             Item::Topic(t) => self.topic_row(t, cx),
-            Item::MemberHead { row, expanded } => self.member_head(row, *expanded, cx),
+            Item::MemberHead {
+                row,
+                expanded,
+                first,
+            } => self.member_head(row, *expanded, first.clone(), cx),
             Item::MemberSection { id, word, folded } => {
                 let id = *id;
                 let this = cx.entity().downgrade();
@@ -723,7 +740,13 @@ impl RailView {
     /// column item: `等你 2` as a StatusBadge when 话题 wait on me, else the
     /// count of its 话题. The disclosure chevron shows when it is open, and
     /// on hover. A click opens or closes its 话题.
-    fn member_head(&self, r: &MemberRow, expanded: bool, cx: &mut Context<Self>) -> AnyElement {
+    fn member_head(
+        &self,
+        r: &MemberRow,
+        expanded: bool,
+        first: Option<crate::views::topic_page::StateLine>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let k = crate::views::shell::chrome::colors(cx);
         let id = r.member.id.clone();
         let this = cx.entity().downgrade();
@@ -757,14 +780,7 @@ impl RailView {
             );
             (crate::ui::native::BadgeState::Working, text)
         } else {
-            let line = r.topics.first().map(|mt| {
-                crate::views::topic_page::topic_state(
-                    self.services.provider.as_ref(),
-                    self.services.me().as_deref(),
-                    &mt.topic,
-                )
-            });
-            line.map_or(
+            first.map_or(
                 (
                     crate::ui::native::BadgeState::Queued,
                     crate::copy::common::STATUS_QUEUED.to_string(),

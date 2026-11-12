@@ -1319,6 +1319,10 @@ the runtime's fixed `env` from the config; and `CHAT_RUN_ID`, `CHAT_GROUP_ID`,
 `CHAT_TOPIC_ID`, `CHAT_BOT_MEMBER_ID`, `CHAT_RUN_FOLDER` (the run folder: it marks the run's
 processes for pause and cancel); 1.1 runs that are not side chats also get `CHAT_RUN_SOCKET`
 (Codex runs: `CHAT_RUN_DIR`) and `<run folder>/bin` (with `chat-run`) first on `PATH`.
+Every run of every runtime kind, side chats too, ends with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`,
+set last so neither the runtime's `env` nor an app key overrides it, and `codex app-server`
+always gets `-c features.memories=false`: the CLIs' own memory is off, memory lives only in the
+product.
 
 Names in `envAllowlist` that the config lists in `gated_env` are never in the environment. The
 CLI asks for one with `chat-run secret <NAME>`: the first call sends `approval.request` (title
