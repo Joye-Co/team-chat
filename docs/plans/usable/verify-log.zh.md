@@ -51,3 +51,79 @@
 - 路径 1、2、4、6、7、9、10 的大部分：没有开桌面应用，没有配 AI 服务（前台、经验总结、夜间整理都没跑），没有长任务、断网、额度用完、多个成员。
 - ACP：这台电脑没有配 ACP 的 CLI。
 - Windows、Linux 主机：没有。
+
+# 第二轮
+
+- 日期：2026-11-12
+- 测的 main：`230c592a`（#229 合并之后）
+- 在哪跑：同一台 Mac。做法和第一轮一样：本 worktree 自己的沙盒服务器（`wrangler dev`，端口在给这一轮的范围里，样例团队来自 `scripts/sandbox/seed.ts`）；种子里的样例电脑脚本开出的 6 个样例任务先取消、脚本停掉，换成从这份代码编出来的 daemon（1.2.7）用同一个电脑 token 以 runner-1 连上。没有开桌面应用，全部通过公开 API 和 WebSocket，以样例的人操作（Joye 是所有者，陈晨是管理员，小王、李雪是成员）。
+- 真 CLI：Claude Code 2.1.319、Codex CLI 0.159.0，用这台电脑上已经登录的订阅。Forge、Scout（Claude Code）指向一个没有远端的一次性仓库，Taro（Codex）指向另一个；Ledger 改用 daemon 配置里第二个 Codex 条目 `codexout`，它的 `CODEX_HOME` 指向一个空目录（等于没登录）。没有配 AI 服务。
+- 证据：脚本和输出在 worktree 的 `.tmp/verify/`（不进仓库），下面抄关键的一行。运行 id 是这次本地沙盒里的，不是任何部署环境的。
+
+## 结果
+
+| 路径或条目 | 做了什么 | 结果 | 证据 | 备注 |
+| --- | --- | --- | --- | --- |
+| 第一轮问题 1：话题里不带 @ 的跟进 | Joye 在 `开发` 新话题 @Forge 建 `notes.txt` 写一行；做完后同一话题不带 @ 说「追加一行：第二行」 | 通过 | run `01M76XP5TPX3EE3Y8FPAP9PGQJ` → `01M76XPJ230VT6TXHZFE5JAQ2H`：不带 @ 的那句马上开了 run；同一个工作线目录、同一个 sessionId，第 2 次 context `resumed: true`；文件两行 | |
+| 第一轮问题 2：私聊聊天区续会话 | Joye 在和 Forge 的私聊里直接发（`main-<私聊群>`），同样两步 | 通过 | run `01M76XP5XKCN4KQ4AZWXYDN1Y1` → `01M76XPJ51DS67ZMRVCHXM6T5Y`：sessionId 相同，第 2 次 `resumed: true` | |
+| 第一轮问题 3：`git -C . push origin main` | 默认审批规则；@Forge 在仓库里运行这一条，卡片上按「拒绝」 | 通过 | run `01M76XSJS97ZZZCSA4JG9RS2DK`：`approval.request {kind: mergeMain, command: "git -C . push origin main"}`，run `waiting`；拒绝后钩子回「a person declined it」，命令没执行；卡片原地变成「已拒绝：合并到 main」「Joye 拒绝了 · 11:46」，没有按钮 | 拒绝之后它用 `chat-run report` 汇报，又被拦了一次，见新问题 1 |
+| 第一轮问题 3：main 上不带参数的 `git push` | @Forge 在工作目录里 `git init -b main` 一个子仓库，空提交，再在里面直接 `git push` | 通过 | run `01M76XTXSYBARSRHNPMBPBNPND`：卡片内容是 `git push` 和垫片算出来的 `git push origin HEAD:refs/heads/main`；拒绝后没执行 | 话题标成在等回答（`needs_reply`），没有标完成 |
+| 第一轮问题 3：脚本里的推送 | @Scout 写 `push.sh`（一行 `git push origin main`），运行 `bash push.sh` | 通过 | run `01M76XSJXJPAWNN34E84DM5Y2G`：Bash 那一行是 `bash push.sh`，由 PATH 垫片拦下发卡（`git push origin main`、`git push origin main:refs/heads/main`）；拒绝后脚本输出 `git: This command needs a person's approval … a person declined it`，exit 1 | |
+| 第一轮问题 4：Codex 被拦并发卡 | Taro 运行 `git push origin main`，按「同意」 | 通过 | 电脑上报的 codex `gates: true`。run `01M76XSJS89SJE1P6ECEDY8Z4Z`：`approval.request` 在命令执行前，同意后才执行（没有远端所以失败）；卡片原地变「已同意」 | Codex 的第一条命令起不来，第二次才跑（新问题 7） |
+| 第一轮问题 5：Codex 的结果只出现一次 | 同上一行 | 通过 | 话题里 Taro 的文字结果只有一条，它没有自己发「做完」卡片 | |
+| 第一轮问题 6：manifest 算请求带的文件和引用 | 小王在 `开发` 群聊发暗号；Joye 新话题 @Forge，引用那条，附一张图，问图和暗号 | 通过 | run `01M76XP7JQEQKTEH37GG6GJHB9`：manifest `files: 1, refs: 1`（第一轮全是 0）；回答对 | 它想按 id 再读一遍被引用的消息，`chat-run topic message` 回 `not_found`（新问题 3） |
+| 第一轮问题 7：下载落在工作目录 | 同上一行 | 部分通过 | 它先 `--out` 到系统临时目录，被拒（`file.outside_workspace`）；又在工作目录里建 `./dl.xxxx/` 下到那里，看完自己删了 | 不带 `--out` 时默认已经在运行目录（不在 worktree）；但 `--out` 只许写在工作目录里（新问题 2） |
+| 第一轮问题 8：工作记录里的模型和思考强度 | 看 `GET /v1/runs/:id`；再把团队的 Claude Code 设成 `haiku` + `low`，@Scout 问一个算术题，之后清掉 | 通过 | 没设时 Claude Code 的 run `model: claude-opus-5-5`，Codex 的 run `model: gpt-6-luna, effort: high`；设了之后 run `model: claude-haiku-5-5, effort: low`，和 `session` 事件一致 | |
+| 第一轮问题 10：一条消息 @ 两个成员 | 新话题一条消息 @Forge @Scout，各答 3+3 | 通过 | 话题 `01M76XYP4YCQEZ2SS8XRHFEK47`：Forge、Scout 各一个 run，各答「6」 | |
+| 结束汇报：做不到的事不标完成 | @Forge 读一个不存在的文件，不许创建 | 通过 | run `01M76XYP9KMHM6WGT6ZQ3V8SBV`：它 `chat-run report --state blocked`；run `status: done`，`phase: needs_reply, waitingFor: stuck`；话题状态先 `in_progress` 再 `blocked`，`waitingOn` 是 Joye；回答说清读不到 | |
+| 失败归类：CLI 没登录 | Ledger 用 `codexout`（空的 `CODEX_HOME`），电脑上报它 `logged_out`。@Ledger 问一个算术题，45 秒后在另一个话题再 @ 一次 | 通过 | 两次 run 都立刻 `failed`，`failure.kind: signed_out`，没有分到电脑（`machineId` 空，电脑上没有这两个 run）；话题里 Ledger 说「这次没有开始：runner-1 上的 Codex 没有登录，或者登录已经过期。请到 团队管理 › 账号与密钥 › 订阅账号，选 runner-1，点「重新登录」，然后再 @我。」 | 同一台电脑上有两个 Codex 条目时，这句话分不出是哪一个（新问题 8） |
+| 恢复：daemon 正常停（SIGTERM） | @Forge 三步：`echo step1 >> rec-stop.txt`、`sleep 90`、`echo step2 >> rec-stop.txt`；sleep 时停 daemon，8 秒后再开 | 不通过 | 原 run `01M76YB5EGZT68X53TMYBFHCPF` 变 `cancelled`；新 run `01M76YC5J9Q2MTN40TWYQ2QJSR`（`retryOf` 原 run），同一个 sessionId，提示词里有恢复说明（「This is try 2 … The last 2 steps … Bash: sleep 90」），step1 没有重做。但新 run 的 CLI 结果是 `success, num_turns: 0`、空文字；话题里 Forge 说「完成了。」，run `done`，文件里只有 `step1` | 新问题 4：第 3 步没做，话题却标完成 |
+| 恢复：daemon 被杀（SIGKILL） | 同样三步，`sleep 60` 要求在前台；sleep 时 `kill -9` daemon，再开 | 通过 | 原 run `01M76YEGR2TMWZTSPMH1Z90CCF` → 新 run `01M76YF92CNSWMC4T0SK641KX9`（`retryOf`），同一个 sessionId，带恢复说明；它先看文件和 `git status`，没有重做 step1；之后以 `waiting` 汇报：前台的 `sleep 60` 被 Claude Code 自己拦了 | Claude Code 2.1.319 会拦单独的 `sleep N`（「Blocked: standalone sleep …」），AI 成员的等待只能放后台，这和新问题 4 有关 |
+| 转交 | Joye @Forge：用 `chat-run handoff` 转交给 Scout，目标里让 Scout 先试着转交回 Forge，再答 5+5 | 通过（回环上限没测到） | 话题里 Forge 发了卡片「Forge 把这件事转交给 Scout」，带「全部停止」；Forge 的 run 交出去就结束了；Scout 在同一话题开 run，答「5+5 等于 10」 | Scout 按提示词拒绝转交回去，没有真的调，所以 `delegation.cycle` 没被真模型触发；上限只有单元测试 |
+| 分出去 + 全部停止 | Joye @Forge：用 `chat-run assign` 把「sleep 150 后答 4+4」分给 Scout；Scout 开始约 25 秒后，小王（不是请求人）调 `POST /v1/groups/:id/chains/:chainId/stop` | 通过（话题里看不到停止） | Forge 发卡片「Forge 把一部分分给 Scout」；新话题里「@Scout 运行 sleep 150 …」；停止返回 `stoppedRuns: 1`，Scout 的 run `cancelled, phase: stopped`，之后 Forge 没有再被叫起来；再停一次返回 `stoppedRuns: 0` | 主话题的卡还挂着「全部停止」，没说被谁停了（新问题 5）。Scout 一开始被样例预算拦住（新问题 6） |
+| 读取命令：真模型用 | @Forge 依次 `chat-run member list`、`decisions list`、`topic state`；@Taro（Codex）`artifact list --group`、`artifact get`；@Forge `memory search --query 代码评审` | 通过 | Forge 列出 5 个 AI 成员、决定「登录只用邀请码，不做手机号」、状态卡第一行；Taro 答出「10 月数据月报」、1 个版本、正文第一句；memory search 找到下面那条群约定 | |
+| 群和个人记忆（API） | 小王写 `group:<开发>` 的约定；陈晨读、改；李雪（不在 `开发`）读、列、写；小王停用、看版本、恢复版本 1；小王写自己的 `person:` 偏好，所有者读、列，小王自己列、停用 | 通过 | 群成员读写都成；李雪读、列、写都是 `not_found`；改成版本 2 → 停用 → 恢复成版本 1 的文字；别人（包括所有者）读个人层是 `not_found`，本人能列能停用 | 每天的「记忆更新」和撤回要夜间整理，没配 AI 服务，没测 |
+| 身份：管理员不是所有者 | 陈晨（管理员）改小王的 `level`、`teamOwner`，降所有者、停用所有者，发管理员邀请码，改小王的职位文字；小王改团队模型设置 | 通过 | 前五个都是 `forbidden, reason: role.owner_only`；改职位文字成功；小王改模型设置 `forbidden`；`GET /v1/members` 里 Joye `teamOwner: true` | 没测「最后一个所有者不能降」：沙盒里只有 Joye 一个所有者，万一没拦住会把沙盒锁死 |
+| 个人电脑改名和移除 | 小王建团队电脑；建个人电脑，自己改名；陈晨改名、读监控、删除；李雪看列表；小王删除；小王改团队电脑名 | 通过 | 建团队电脑 `machine.team_admin_only`；个人电脑 `ownerId` 是小王，改名成功；陈晨改名、读监控、删除都是 `machine.not_yours`；李雪看到的只有 `id, name, createdBy, createdAt, ownerId, connected, healthy`（`labels`、`runningRuns` 空）；小王删除后 `revoked: true`；小王改团队电脑 `machine.not_yours` | |
+| 电脑离线时交代（#195，顺带） | 停 daemon，@Forge 一个算术题，20 秒后再开 daemon | 通过 | 离线时 run `created`，话题里「runner-1 不在线，等它上线后自动开始；不需要了可以停止。」；上线后自动做完，答「18」 | 等电脑时 run 上没有 `phase`、`waitingFor`（新问题 9） |
+| 群聊里同一个成员的第二件事（接 1.5，顺带） | Joye 在 `开发` 群聊连发两条：「@Forge 运行 sleep 40，然后只回答：甲」「@Forge 另一件事：只回答 7+8 等于几」 | 不通过 | 只有一个 run `01M76YHHBEFGZGMDCZAAHXAQ9M`，第二条以 `input.accepted` 插进了第一件；回答只有「7+8 等于 15」，「甲」那件没有答 | 新问题 10 |
+| 暂停和继续（顺带） | @Forge 跑一个 60 秒的 python 等待，20 秒时 `POST /v1/runs/:id/pause`，10 秒后 `resume` | 通过 | daemon 日志 `paused`、`resumed`，之后做完 | 接管（`POST /v1/runs/:id/takeover`）在 main 上还没有（404） |
+| GitHub 登录（顺带） | `GET /v1/me/github`、`POST /v1/me/github/device` | 没法跑 | `available: false, unavailableReason: no_client_id`；device 回 `conflict, github.no_client_id` | 沙盒没有 GitHub OAuth 应用；这一轮不碰真的 GitHub |
+
+## 第一轮问题现在的状态
+
+| 第一轮问题 | 现在 |
+| --- | --- |
+| 1 话题里不带 @ 的跟进没人理 | 已解决 |
+| 2 私聊聊天区每句话新会话 | 已解决 |
+| 3 `git -C` 等绕法 | 已解决：`git -C . push`、main 上不带参数的 `git push`、脚本里的推送都拦住了；带来一个误拦（新问题 1） |
+| 4 Codex 不会被拦 | 已解决 |
+| 5 Codex 的结果出现两遍 | 已解决 |
+| 6 manifest 不算请求本身 | 已解决 |
+| 7 下载落在工作目录 | 部分解决：默认位置对了，模型给 `--out` 时仍只能写进 worktree（新问题 2） |
+| 8 工作记录看不到模型 | 已解决（模型和思考强度都在 run 上） |
+| 9 个人的 Claude Code 设置带进 AI 成员 | 这一轮没复查，上手页的说明还没加 |
+| 10 一条消息 @ 两个成员 | 已解决 |
+
+## 新发现的问题
+
+1. **审批规则把命令参数里的文字也当成命令（误拦）。** 被拒绝或同意之后，AI 成员用 `chat-run report --state blocked --text "git -C . push origin main 需要审批，被审批人拒绝，未执行"` 汇报，这一行又被当成「合并到 main」拦下，话题里多出第二张「需要你确认：合并到 main」卡，内容是那条 `chat-run report …`，run 一直 `waiting` 到有人再按。Claude Code（run `01M76XSJS97ZZZCSA4JG9RS2DK`）和 Codex（run `01M76XSJS89SJE1P6ECEDY8Z4Z`）都出现了。原因：钩子和 Codex 的请求按整条 shell 行匹配，按「plain words」去掉引号以后，`--text` 里的字就和规则 `git … push` 对上了（`apps/daemon/src/gates.rs`；machine-protocol.md「Gated actions」的 Matching 一段写的就是这个行为）。垫片那条路径按解析过的参数判断，没有这个问题。建议：整行匹配时，引号里的参数不参与，或者至少 daemon 自己的 `chat-run` 命令整条跳过；改了要同步 machine-protocol.md。复现：让成员被拒后用 `chat-run report` 写一句带原命令的话。
+2. **`chat-run file get --out` 只许写在工作目录里，模型一给 `--out` 文件就进 worktree。** run `01M76XP7JQEQKTEH37GG6GJHB9`：模型先 `--out "$(mktemp -d)/shapes.png"`，被拒（`forbidden, file.outside_workspace`），于是在工作目录里 `mktemp -d ./dl.XXXXXX` 再下载，看完自己删掉。这次删了，不删的话清理时会被提交进 `bot/<key>`。`apps/daemon/src/chat_run_files.rs` 的 `inside()` 同时管上传和下载。建议：下载的 `--out` 也允许运行目录（`<run folder>/downloads`）和系统临时目录；或者提示词里 `file get` 那句（`server/src/bots/dispatch.ts` 第 31 行、`apps/daemon/src/chat_run.rs` 的说明）写明「不要给 --out，结果里的 path 就是文件位置」。
+3. **引用的消息在别的话题时，按 id 读不到。** 请求引用了群聊里的一条消息，提示词里是 `↪ quotes m <id> (…)`，没有话题 id。模型用 `chat-run topic message --id <id>` 去读，回 `not_found`：不带 `--topic` 时只查 run 自己的话题（`server/src/context/routes.ts` 的 `readTopic`）。建议：引用行带上话题（`server/src/context/render.ts` 第 125 行，例如 `↪ quotes m <id> in t <topicId>`），或者 `topic message` 在本话题找不到时在本群里按 id 找。
+4. **daemon 重启后续上的 run 一轮都没跑，就在话题里说「完成了。」。** 经过：Forge 要 `sleep 90`，Claude Code 不许前台单独 sleep，它就放到后台（`run_in_background`），这一轮以「第 1 步已做完，第 2 步 sleep 90 正在运行，结束后再执行第 3 步」结束，进程等后台通知。这时正常停 daemon 再开：新 run `01M76YC5J9Q2MTN40TWYQ2QJSR` 用原会话续上、带了恢复说明，但它的 `stream.jsonl` 只有钩子、一条 `task_notification`（`status: stopped`，后台命令在上一个会话结束前没跑完）、`init`，然后 `result: success, num_turns: 0`，结果文字是空的。daemon 报 `succeeded`，服务端用兜底文字（`server/src/bots/dispatch.ts` 第 61 行的 `done: "完成了。"`）发到话题，run `done`，第 3 步没做。（会话文件里能看到后面又有一轮检查文件、重新放后台 sleep 的记录，但那不在这个 run 的输出里，和这个 run 的结束对不上。）要修：(a) 结果为空、`num_turns: 0` 的 run 不能算完成，按「卡住」处理并说清；最后一句明说在等后台命令的，也不该算完成；(b) 续接时要确认恢复说明真的开了一轮（看起来被会话里排着的后台任务通知占掉了）。相关代码：`apps/daemon/src/runtime/` 里 Claude Code 结果的解析，服务端 run 结束时选兜底文字的地方。复现：`.tmp/verify/recovery.ts stop` 的做法（三步里有一个 90 秒的 sleep，停在 sleep 上）。
+5. **「全部停止」之后，主话题里看不到停了。** 分出去的那份被小王停掉以后：Scout 的子话题里有「已停止，没有完成。」（没说是谁停的）；Forge 的主话题里那张「Forge 把一部分分给 Scout」卡还挂着「全部停止」按钮，最后一句仍是「等它自己回来后告诉你答案」，请求人在主话题里看不出这件事已经停了。design-relay.zh.md 说链停后结果不交回，这一点对；但卡片应该原地改成已停止（谁停的、什么时候）并去掉按钮，主话题的状态也该跟着变。
+6. **样例预算会拦住走订阅的任务。** 沙盒种子给 Scout 每周 $0.40；跑了几次订阅的小任务以后，Scout 被分出去和被转交的两件事都停在「Scout 这周花了 $0.47，到了预算。继续吗？」。这是线 4 还没做的「走订阅的任务不计入每周预算」（模 4.1）。另外，两张预算卡各按一次「这周再加 $1」后，转交的那个话题里「Joye 这周给 Scout 加了 $1 预算，接着做。」出现了两遍。
+7. **Codex 的第一条命令有时起不来。** run `01M76XSJS89SJE1P6ECEDY8Z4Z`：第一条 `/bin/zsh -lc 'git push origin main'` 返回 `Failed to create unified exec process: No such file or directory (os error 2)`，Codex 换个说法再跑就好了。只见过一次，可能和带审批时的 `ZDOTDIR` 垫片目录或工作目录有关，要再看。
+8. **一台电脑上同一种 CLI 有两个运行方式时，登录提示分不出是哪一个。** Ledger 用的是 `codexout`，提示说「runner-1 上的 Codex 没有登录」，而同一台电脑上的 `codex` 是登录着的，照着去团队管理找会找错。建议条目名和种类不同时，句子里带上条目名。少见，不急。
+9. **排队等电脑时 run 上没有 `phase`。** 电脑离线时交代的 run 是 `status: created`，`phase`、`waitingFor` 都没有；protocol.md「Run phase and take-over」写的是 `waiting_computer` + `offline`。话题里那句话是对的，只是 run 对象没填。另外，所有 run 上都没有 `requestedFor`（protocol.md「Who a run works for」说人发起的 run 要填）。
+10. **群聊里同一个成员连着两件事会被并成一件（接 1.5 没做到）。** 在 `开发` 群聊连发「@Forge 运行 sleep 40，然后只回答：甲」和「@Forge 另一件事：只回答 7+8 等于几」：只开了一个 run，第二条以 `input.accepted` 插进了第一件，回答只有「7+8 等于 15」，「甲」那件丢了。第 4 节的默认是「并行，各出各的结果」。两条消息相隔不到 1 秒；间隔长一些时没有测。
+
+## 这一轮没有覆盖的
+
+- 桌面应用（所有界面、单独问、截图），Windows、Linux 主机（虚拟机、家目录上限），自己部署服务器。
+- 没有 AI 服务的 key：前台（追问卡、闲聊不出声、由前台判断的跟进）、运行后的经验总结、夜间整理、第二天的「记忆更新」和撤回，都没跑。
+- ACP：这台电脑没有配 ACP 的 CLI，ACP 的续接和审批没有真跑。
+- 接力（按顺序做）和接管：main 上还没有（接管的路由是 404）。转交的上限（3 层、8 次、回环）真模型没有触发，只有单元测试。
+- GitHub 登录：沙盒没有 OAuth 应用。
+- 额度用完、模型不可用这两类失败：没法在真账号上安全地造出来。
+- 「最后一个所有者不能降级」：万一没拦住会锁死沙盒，没测。
