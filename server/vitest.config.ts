@@ -20,7 +20,9 @@ export default defineConfig(async () => {
     test: {
       setupFiles: ["./test/setup.ts"],
       testTimeout: 20_000,
-      fileParallelism: false,
+      // Each test file gets its own runtime and its own storage (D1, Durable Objects), so files
+      // run side by side. Starting that runtime is most of a file's time; 4 matches the CI runner.
+      maxWorkers: 4,
     },
   };
 });

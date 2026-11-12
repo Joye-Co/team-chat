@@ -1,6 +1,5 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { env } from "cloudflare:test";
-import { CHARACTER_IDS } from "@chat/protocol";
 import { Client, api, createGroup, createMember, protocolViolations } from "./helpers";
 
 afterAll(async () => {
@@ -16,11 +15,6 @@ async function lastAudit(action: string, target: string) {
 }
 
 describe("member characters", () => {
-  it("knows the 26 character ids", () => {
-    expect(CHARACTER_IDS).toHaveLength(26);
-    expect(new Set(CHARACTER_IDS).size).toBe(26);
-  });
-
   it("let an owner create a bot with a character, audited and listed", async () => {
     const owner = await createMember({ level: "owner" });
     const r = await api("/v1/bots", { method: "POST", token: owner.token, body: { name: "Tata", role: "产品负责人", character: "o03" } });

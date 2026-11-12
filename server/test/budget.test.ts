@@ -101,8 +101,13 @@ describe("budget pause", () => {
     );
     expect(said.body).toBe("这周的预算用完了，Joye 让 dev 先停下，这件事没有做。要继续，在 团队管理 › 用量 里改预算后再 @dev。");
     expect(d.frames.some((f) => f.t === "run.assign" && f.runId === run.data.run.id)).toBe(false);
-    const a = ActivityResponse.parse((await api("/v1/activity?kind=budget", { token: w.owner.token })).body);
-    expect(a.entries.find((e) => e.action === "budget.stopped")).toMatchObject({ actorId: w.owner.id, target: w.bot.id });
+    // The activity row is written after the run ends.
+    const stopped = await waitUntil(
+      async () => ActivityResponse.parse((await api("/v1/activity?kind=budget", { token: w.owner.token })).body).entries.find((e) => e.action === "budget.stopped"),
+      5000,
+      "budget.stopped activity",
+    );
+    expect(stopped).toMatchObject({ actorId: w.owner.id, target: w.bot.id });
   });
 
   it("lets held runs go when the weekly budget is raised, and never holds without a budget", async () => {

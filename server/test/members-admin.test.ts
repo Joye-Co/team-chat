@@ -193,10 +193,10 @@ describe("POST /v1/groups/:id/messages", () => {
   it("rate limit posts per credential", async () => {
     const bot = await createMember({ kind: "bot" });
     const gid = await createGroup(bot, []);
-    const statuses: number[] = [];
-    for (let i = 0; i < 45; i++) {
-      statuses.push((await api(`/v1/groups/${gid}/messages`, { token: bot.token, body: { clientMsgId: clientMsgId(), body: `n${i}` } })).status);
-    }
+    // All at once, so a slow machine cannot refill the bucket between them.
+    const statuses = await Promise.all(
+      Array.from({ length: 45 }, async (_, i) => (await api(`/v1/groups/${gid}/messages`, { token: bot.token, body: { clientMsgId: clientMsgId(), body: `n${i}` } })).status),
+    );
     expect(statuses).toContain(429);
     expect(statuses.filter((s) => s === 200).length).toBeGreaterThanOrEqual(20);
   });
