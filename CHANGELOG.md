@@ -3,7 +3,7 @@
 Each release is tagged `v<version>` and has a GitHub Release with the DMG, the machine daemon
 and the Windows installer; GitHub shows each file's SHA-256. Release notes for the team are in Chinese in `docs/releases/`.
 
-## 1.3.0 (unreleased)
+## 1.3.0 (2026-11-12)
 
 Notes: [docs/releases/1.3.0.md](docs/releases/1.3.0.md). The "usable" milestone
 ([docs/plans/usable.zh.md](docs/plans/usable.zh.md)), Windows parity and the rename. D1
