@@ -234,3 +234,55 @@ fn a_runs_list_grows_and_stays_with_the_run() {
         "remote: token <redacted> rejected\n"
     );
 }
+
+/// Feature "github-host": the token a VM run got from the host's `gh auth token` (any shape,
+/// not only `ghp_…`) is masked in the run's frames and its `stderr.log` from then on.
+#[cfg(unix)]
+#[tokio::test]
+async fn the_hosts_github_token_is_masked_in_frames_and_stderr_log() {
+    use std::os::unix::fs::PermissionsExt;
+    let token = "host-github-token-without-a-known-shape-42";
+    let tmp = tempfile::tempdir().unwrap();
+    let gh = tmp.path().join("gh");
+    std::fs::write(&gh, format!("#!/bin/sh\necho {token}\n")).unwrap();
+    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let red = std::sync::Arc::new(r().for_run());
+    let spec = chat_protocol::github::RunGithub {
+        source: "machine".into(),
+        member_id: "U1".into(),
+        login: None,
+        author: None,
+        committer: chat_protocol::github::GitIdentity {
+            name: "Robo".into(),
+            email: "ai-B1@users.noreply.invalid".into(),
+        },
+        rewrite_ssh: None,
+        asked_by: None,
+    };
+    let g = daemon::github::Run::new(spec, red.clone(), true).with_path(tmp.path().as_os_str());
+    assert_eq!(red.text(token), token);
+    assert!(matches!(g.fetch().await, daemon::github::Got::Token(t) if t == token));
+    let up = Up::RunEvent {
+        run_id: "run-1".into(),
+        seq: 1,
+        at: 1,
+        event: RunEvent::ToolResult {
+            item_id: "i".into(),
+            turn_id: None,
+            ok: true,
+            output: Some(format!("remote: token {token}\n")),
+            exit_code: Some(0),
+        },
+    };
+    let text = red.frame(&up).unwrap();
+    assert!(!text.contains(token) && text.contains(MASK), "{text}");
+    let log = tmp.path().join("stderr.log");
+    std::fs::write(
+        &log,
+        format!("fatal: https://x-access-token:{token}@github.com\n"),
+    )
+    .unwrap();
+    red.file(&log);
+    let logged = std::fs::read_to_string(&log).unwrap();
+    assert!(!logged.contains(token) && logged.contains(MASK), "{logged}");
+}

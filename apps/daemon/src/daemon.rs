@@ -48,6 +48,8 @@ pub const FEATURES: &[&str] = &[
     feature::EFFORT,
     feature::GATES,
     feature::GITHUB,
+    // A VM run's git and gh use the host's GitHub sign-in; `metrics.github`.
+    feature::GITHUB_HOST,
     // Every executor runs a person's commands (local: as the daemon's user; a VM: as another
     // user, and `takeover-isolated` says so).
     feature::TAKEOVER,
@@ -167,6 +169,8 @@ pub struct Daemon {
     key_values: Vec<String>,
     /// The daemon is shutting down: the runs it stops itself end as `daemon restarted`.
     stopping: bool,
+    /// Feature "github-host": the computer's GitHub sign-in as last looked at.
+    github: Arc<std::sync::Mutex<Option<chat_protocol::machine::MachineGithub>>>,
 }
 
 pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), String> {
@@ -214,6 +218,7 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
         worked: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         key_values,
         stopping: false,
+        github: Arc::default(),
     };
     d.read_accounts();
     d.recover();
@@ -257,6 +262,8 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
         tokio::time::Instant::now() + crate::selfupdate::FIRST_CHECK,
         crate::selfupdate::CHECK_EVERY,
     );
+    // At start, every 10 minutes and when a push was refused.
+    let mut github_tick = tokio::time::interval(crate::metrics::GITHUB_EVERY);
     let mut usage_tick = tokio::time::interval_at(
         tokio::time::Instant::now() + Duration::from_secs(5),
         crate::usage::EVERY,
@@ -273,6 +280,8 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
             _ = heartbeat.tick() => d.heartbeat(hb),
             Some(st) = login_rx.recv() => d.on_login_status(st),
             _ = usage_tick.tick(), if d.machine_key.is_some() => d.read_accounts(),
+            _ = github_tick.tick() => d.check_github(),
+            _ = crate::github::recheck().notified() => d.check_github(),
             _ = release_check.tick(), if updater.as_ref().is_some_and(|u| u.wants_check()) => {
                 if let Some(u) = updater.as_mut() {
                     u.check(d.cfg.server_url.clone(), d.token.clone(), release_tx.clone());
@@ -1245,6 +1254,15 @@ impl Daemon {
         }
     }
 
+    /// Looks at the computer's GitHub sign-in in the background (`metrics.github`).
+    fn check_github(&self) {
+        let github = self.github.clone();
+        tokio::spawn(async move {
+            let g = crate::metrics::github(None).await;
+            *github.lock().unwrap_or_else(|e| e.into_inner()) = Some(g);
+        });
+    }
+
     /// Reads who each CLI is signed in as and the subscription usage, in the background.
     fn read_accounts(&self) {
         if self.machine_key.is_none() {
@@ -1303,6 +1321,13 @@ impl Daemon {
                 .collect()
         };
         let mut m = self.sampler.sample(&self.cfg, vm_slots, &local);
+        // Feature "github-host": both on the computer and on a VM host (the server decides
+        // whom to show it).
+        m.github = self
+            .github
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         if self.machine_key.is_some() {
             m.secrets = Some(self.keys.infos());
             m.usage = Some(self.usage.lock().unwrap_or_else(|e| e.into_inner()).clone());
