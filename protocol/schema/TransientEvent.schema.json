@@ -538,6 +538,43 @@
       "required": [
         "type"
       ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "ai.failing"
+        },
+        "failing": {
+          "type": "object",
+          "properties": {
+            "since": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "use": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            },
+            "error": {
+              "type": "string",
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "since",
+            "use",
+            "error"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "failing"
+      ]
     }
   ],
   "$defs": {

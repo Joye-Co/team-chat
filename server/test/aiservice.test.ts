@@ -39,7 +39,15 @@ describe("ai service", () => {
     const member = await createMember();
     expect((await api("/v1/settings/ai", { token: member.token })).status).toBe(403);
     const empty = await api("/v1/settings/ai", { token: owner.token });
-    expect(empty.body).toEqual({ provider: null, model: "", baseUrl: null, keySet: false, keyHint: null, updatedAt: 0 });
+    expect(empty.body).toEqual({
+      provider: null,
+      model: "",
+      baseUrl: null,
+      keySet: false,
+      keyHint: null,
+      updatedAt: 0,
+      switches: { frontDesk: true, titles: true, memory: true },
+    });
 
     const noKey = await api("/v1/settings/ai", { method: "PUT", token: owner.token, body: { provider: "deepseek", model: "deepseek-chat" } });
     expect(noKey.status).toBe(400);
@@ -75,16 +83,29 @@ describe("ai service", () => {
   it("tests the connection with the saved key or a new one", async () => {
     const owner = await createMember({ level: "owner" });
     await api("/v1/settings/ai", { method: "PUT", token: owner.token, body: { provider: "deepseek", model: "deepseek-chat", apiKey: KEY } });
-    const seen = fakeProviders((s) =>
-      s.auth === `Bearer ${KEY}` ? completion("OK") : Response.json({ error: { message: "Authentication Fails" } }, { status: 401 }),
-    );
+    let tools = true;
+    const seen = fakeProviders((s) => {
+      if (s.auth !== `Bearer ${KEY}`) return Response.json({ error: { message: "Authentication Fails" } }, { status: 401 });
+      if (!s.body.tools || !tools) return completion("OK");
+      return Response.json({ choices: [{ message: { role: "assistant", content: null, tool_calls: [{ type: "function", function: { name: "answer", arguments: '{"ok":true}' } }] } }] });
+    });
     const ok = await api("/v1/settings/ai/test", { token: owner.token, body: { provider: "deepseek", model: "deepseek-chat" } });
-    expect(ok.body).toMatchObject({ ok: true });
+    expect(ok.body).toMatchObject({ ok: true, text: { ok: true }, tool: { ok: true } });
+    expect(ok.body.error).toBeUndefined();
     expect(seen[0].url).toBe("https://api.deepseek.com/chat/completions");
     expect(seen[0].body.model).toBe("deepseek-chat");
+    // 模 1.7: the second check is a forced tool call, as the front desk makes.
+    expect(seen[1].body.tool_choice).toEqual({ type: "function", function: { name: "answer" } });
+
+    // A model that answers text but cannot be made to call a tool: the test says which check fails.
+    tools = false;
+    const noTools = await api("/v1/settings/ai/test", { token: owner.token, body: { provider: "deepseek", model: "deepseek-chat" } });
+    expect(noTools.body).toMatchObject({ ok: false, text: { ok: true }, tool: { ok: false } });
+    expect(noTools.body.error).toMatch(/^forced tool call: no tool call/);
 
     const bad = await api("/v1/settings/ai/test", { token: owner.token, body: { provider: "deepseek", model: "deepseek-chat", apiKey: "sk-wrong-key-0000" } });
-    expect(bad.body).toMatchObject({ ok: false, error: "401 Authentication Fails" });
+    expect(bad.body).toMatchObject({ ok: false, error: "401 Authentication Fails", text: { ok: false, error: "401 Authentication Fails" } });
+    expect(bad.body.tool).toBeUndefined();
     // Testing does not save.
     expect((await api("/v1/settings/ai", { token: owner.token })).body.keyHint).toBe("9f3k");
     await api("/v1/settings/ai", { method: "DELETE", token: owner.token });
@@ -107,6 +128,9 @@ describe("ai service", () => {
     expect(titled().data.title).toBe("登录页报错排查");
     expect(seen[0].url).toBe("https://llm.example.com/v1/chat/completions");
     expect(seen[0].body.messages[1].content).toContain("登录页一直报 500");
+    // 模 1.4: the call is recorded under its use.
+    const cfg = await api("/v1/settings/ai", { token: owner.token });
+    expect(cfg.body.uses).toEqual([expect.objectContaining({ use: "title", ok: true, failures: 0 })]);
     await api("/v1/settings/ai", { method: "DELETE", token: owner.token });
   });
 
@@ -120,13 +144,15 @@ describe("ai service", () => {
         content: [{ type: "text", text: "周五发版" }],
         stop_reason: "end_turn",
         stop_sequence: null,
-        usage: { input_tokens: 10, output_tokens: 3 },
+        usage: { input_tokens: 10, output_tokens: 3, cache_read_input_tokens: 2000 },
       }),
     );
     const r = await callModel({ provider: "anthropic", model: "claude-haiku-5-5", baseUrl: null, apiKey: "sk-ant-test-0000" }, { system: "s", prompt: "p", maxTokens: 64 });
-    expect(r).toEqual({ ok: true, text: "周五发版" });
+    expect(r).toEqual({ ok: true, text: "周五发版", usage: { inputTokens: 10, outputTokens: 3, cacheReadTokens: 2000 } });
     expect(seen[0].url).toBe("https://api.anthropic.com/v1/messages");
     expect(seen[0].body.output_config).toEqual({ effort: "low" });
+    // 模 1.11: the system prompt is the stable prefix, marked for the prompt cache.
+    expect(seen[0].body.system).toEqual([{ type: "text", text: "s", cache_control: { type: "ephemeral" } }]);
   });
 
   it("builds URLs and knows which Claude models take effort", () => {

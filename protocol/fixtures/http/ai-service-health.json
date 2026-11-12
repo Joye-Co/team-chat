@@ -1,0 +1,40 @@
+{
+  "kind": "AiServiceConfig",
+  "valid": true,
+  "description": "usable: switches, the last call of each use, and failing after several failures in a row",
+  "value": {
+    "provider": "deepseek",
+    "model": "deepseek-chat",
+    "baseUrl": null,
+    "keySet": true,
+    "keyHint": "a1b2",
+    "updatedAt": 1762128000000,
+    "switches": {
+      "frontDesk": false,
+      "titles": true,
+      "memory": true
+    },
+    "uses": [
+      {
+        "use": "front_desk",
+        "at": 1762128600000,
+        "ok": false,
+        "error": "401 Authentication Fails",
+        "failures": 3,
+        "okAt": 1762128000000
+      },
+      {
+        "use": "title",
+        "at": 1762128300000,
+        "ok": true,
+        "failures": 0,
+        "okAt": 1762128300000
+      }
+    ],
+    "failing": {
+      "since": 1762128600000,
+      "use": "front_desk",
+      "error": "401 Authentication Fails"
+    }
+  }
+}

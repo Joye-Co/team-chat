@@ -1,7 +1,7 @@
 // BotDesk input: topic messages for the bot (new runs, follow-up input, text approvals), card
 // presses on approval cards, and stopping runs (cancel by a member, a deactivated bot).
 import { type Approver, type BotRun, isMainTopicId, RUN_KIND_ASIDE } from "@chat/protocol";
-import { loadModelConfig } from "../../aiservice";
+import { useConfig } from "../../aiservice/uses";
 import { roomStub } from "../../core/env";
 import { ApiError, type Result, unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
@@ -217,7 +217,7 @@ export abstract class DeskInput extends DeskRelay {
       return;
     }
     // 接 1.12: a plain "停" from the requester stops the run (with a front desk, it decides).
-    if (m.authorId === r.requested_by && isStopRequest(m.body) && !(await loadModelConfig(this.env))) {
+    if (m.authorId === r.requested_by && isStopRequest(m.body) && !(await useConfig(this.env, "front_desk", this.log))) {
       // Recorded as a taken input, so a retried delivery does not stop or start anything again.
       this.sql.exec(
         "INSERT INTO inputs (id, run_id, message_id, author_id, body, at, accepted) VALUES (?, ?, ?, ?, ?, ?, 1)",

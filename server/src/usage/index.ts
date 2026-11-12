@@ -2,6 +2,7 @@
 // member, by the person who asked, by machine and by runtime, per day, against the members' weekly
 // budgets (`weeklyBudgetCents`). Read from every runner bot's BotDesk; nothing is stored.
 import { type TeamUsage, UsageQuery } from "@chat/protocol";
+import { serviceUsage } from "../aiservice/uses";
 import { deskStub } from "../bots/env";
 import type { UsageRun } from "../bots/desk/external";
 import { ApiError } from "../core/errors";
@@ -189,6 +190,9 @@ registerRoute({
     ).flat();
     const prices = await loadPrices(env, (p) => ctx.waitUntil(p));
     const out = buildUsage({ from, to, runs, budgets, runners, prices });
+    // 模 1.9: the AI 服务's own calls, one line apart from the runs.
+    const service = await serviceUsage(env.DB, from, to, prices).catch(() => undefined);
+    if (service) out.service = service;
     // 到了预算: how many runs of each AI member with a budget wait for an owner.
     await Promise.all(
       out.bots

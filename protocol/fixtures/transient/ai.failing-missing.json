@@ -1,0 +1,8 @@
+{
+  "kind": "TransientEvent",
+  "valid": false,
+  "description": "failing is required",
+  "value": {
+    "type": "ai.failing"
+  }
+}

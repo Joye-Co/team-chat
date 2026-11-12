@@ -33,6 +33,8 @@ export const FALLBACK: Record<string, ModelPrice> = {
   "gpt-5-codex": { name: "GPT-5-Codex", input: 1.25, output: 10, cacheRead: 0.125 },
   "gpt-5.1-codex": { name: "GPT-5.1-Codex", input: 1.25, output: 10, cacheRead: 0.125 },
   "gpt-5": { name: "GPT-5", input: 1.25, output: 10, cacheRead: 0.125 },
+  // The AI 服务's suggested DeepSeek model (用量's 前台和整理 line).
+  "deepseek-chat": { name: "DeepSeek Chat", input: 0.28, output: 0.42, cacheRead: 0.028 },
 };
 
 /** Providers whose own entries win when two list the same model id. */
