@@ -8,6 +8,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+mod acp_resume;
 mod catchup;
 mod chat;
 mod gap;
@@ -45,6 +46,7 @@ pub fn registry() -> Vec<Scenario> {
         pipeline::SCENARIO,
         plan::SCENARIO,
         runs_v11::SCENARIO,
+        acp_resume::SCENARIO,
         load::SCENARIO,
         soak::SCENARIO,
     ]

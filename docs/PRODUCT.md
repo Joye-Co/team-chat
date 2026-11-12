@@ -63,6 +63,10 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
   in UI text.
 - The settings window may also use 岗位 (role and how the member works), 权限 (permissions),
   机器 (machines) and 成本 (cost).
+- Words for each person's GitHub (docs/plans/usable/design-github-identity.zh.md §3.7): GitHub is
+  a proper name, not a product noun; 连接 GitHub, 连接…, 重新连接…, 断开…, 已连接为 @{login}, 还没连接,
+  需要重新连接, 验证码 (GitHub's own word), 复制验证码, 打开 GitHub, 授权, 组织, 仓库, PR, 以后再说,
+  去 GitHub 撤销, and {name} 在等你连接 GitHub.
 - The three 身份 of a team (design-roles): 所有者, 管理员 and 普通成员, with 身份 itself and the menu
   items 设为所有者, 设为管理员, 设为普通成员. 负责人 stays the member a 话题 is assigned to and is
   never a 身份.
