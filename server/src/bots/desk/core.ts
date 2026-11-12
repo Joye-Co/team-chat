@@ -322,6 +322,22 @@ export function samePlan(a: RunPlan | null, b: RunPlan): boolean {
 export const MAX_PAGE = 500;
 export const DEFAULT_PAGE = 200;
 
+/**
+ * Desk migration `github-off-1` (design-github-identity 3.4): no run waits for a person's GitHub
+ * any more. The runs that did (meta `github_wait:` and `github_resume:`) are kept in
+ * `github_off_pending`; their topics are set right after the next bind (`clearGithubWaits`).
+ */
+export function githubOff1(sql: SqlStorage): void {
+  const keys = "key GLOB 'github_wait:*' OR key GLOB 'github_resume:*'";
+  const ids = sql
+    .exec<{ key: string }>(`SELECT key FROM meta WHERE ${keys}`)
+    .toArray()
+    .map((x) => x.key.slice(x.key.indexOf(":") + 1));
+  const unique = [...new Set(ids)];
+  if (unique.length > 0) sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES ('github_off_pending', ?)", JSON.stringify(unique));
+  sql.exec(`DELETE FROM meta WHERE ${keys}`);
+}
+
 export abstract class DeskCore extends DurableObject<BotsEnv> {
   protected readonly sql: SqlStorage;
   protected botId: string | null = null;
@@ -624,6 +640,7 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
           name: "reach-1",
           up: `ALTER TABLE runs ADD COLUMN read_groups TEXT;`,
         },
+        { name: "github-off-1", up: githubOff1 },
       ]);
       const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'bot_id'").toArray()[0];
       this.botId = row?.value ?? null;
@@ -632,11 +649,41 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
   }
 
   protected bind(botId: string): void {
-    if (this.botId === botId) return;
-    if (this.botId !== null) throw new Error("desk bound to another bot");
-    this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES ('bot_id', ?)", botId);
-    this.botId = botId;
-    this.log = baseLogger.child({ obj: "BotDesk", botId });
+    if (this.botId !== botId) {
+      if (this.botId !== null) throw new Error("desk bound to another bot");
+      this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES ('bot_id', ?)", botId);
+      this.botId = botId;
+      this.log = baseLogger.child({ obj: "BotDesk", botId });
+    }
+    if (!this.githubOffStarted && this.meta("github_off_pending") !== null) {
+      this.githubOffStarted = true;
+      this.ctx.waitUntil(this.clearGithubWaits().catch((err) => this.log.warn("github waits cleanup failed", { err })));
+    }
+  }
+
+  private githubOffStarted = false;
+
+  /**
+   * design-github-identity 3.4 (migration `github-off-1`): the topics of runs that waited for a
+   * person to connect GitHub stop waiting on them; each gets the status its run ended with.
+   */
+  protected async clearGithubWaits(): Promise<void> {
+    let ids: string[] = [];
+    try {
+      ids = JSON.parse(this.meta("github_off_pending") ?? "[]") as string[];
+    } catch {
+      ids = [];
+    }
+    for (const id of ids) {
+      await this.serial(id, async () => {
+        const r = this.run(id);
+        // A run still going ends as usual, without a GitHub wait.
+        if (!r || r.ended_at === null) return;
+        // A topic has no failed status: an unsuccessful run leaves it blocked on nobody, as `end` does.
+        await this.topic(r, r.status === "done" ? "done" : "blocked", [], { outcome: r.status, result: r.summary ?? "" });
+      });
+    }
+    this.sql.exec("DELETE FROM meta WHERE key = 'github_off_pending'");
   }
 
   /** Runs `fn` after every earlier operation on the same run. */
@@ -1194,14 +1241,7 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
     return this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = ?", key).toArray()[0]?.value ?? null;
   }
 
-  /** The person this run stopped to wait for to connect GitHub (meta `github_wait:{runId}`), or null. */
-  protected githubWaitingOn(runId: string): string | null {
-    return this.meta(`github_wait:${runId}`);
-  }
-
   // Implemented by the feature modules that extend this class.
-  /** A connection arrived while the run was still going (meta `github_resume:{runId}`): go on after it ended (desk/github.ts). */
-  protected abstract resumeAfterGithub(r: RunRow, deferUnread?: boolean): Promise<void>;
   protected abstract end(r: RunRow, status: RunStatus, body: string, topicStatus: TopicStatus, summary: string, success?: boolean, waitingOn?: string[]): Promise<void>;
   protected abstract scheduleStall(): Promise<void>;
   protected abstract markStalled(r: RunRow): Promise<void>;
