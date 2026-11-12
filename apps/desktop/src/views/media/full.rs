@@ -609,6 +609,80 @@ fn sections(md: &str) -> (Option<String>, Vec<(Option<String>, String)>) {
     (title, out)
 }
 
+/// The blocks of a Markdown document, one child each so the table of contents can scroll
+/// to a part: the title (its first-level heading at the top, else the 产出's title) with
+/// the file name and length under it, then one part per heading. The viewer sheet and the
+/// 产出 pane and page ([`markdown_reader`]) draw the same blocks.
+fn markdown_blocks(
+    id: &SharedString,
+    title: Option<String>,
+    parts_: Vec<(Option<String>, String)>,
+    media: &Media,
+    md: &store::Markdown,
+    cx: &App,
+) -> Vec<AnyElement> {
+    let k = theme::colors(cx);
+    let head = div()
+        .pb(space::S12)
+        .flex()
+        .flex_col()
+        .gap(space::S4)
+        .child(
+            div()
+                .t_display()
+                .text_color(k.text_1)
+                .child(title.unwrap_or_else(|| media.title.clone())),
+        )
+        .child(div().t_meta().text_color(k.text_3).child(format!(
+            "{} · {}",
+            media.file_name(),
+            fill(cm::MD_WORDS, &[("n", &group_digits(md.stats.chars as u64))])
+        )))
+        .into_any_element();
+    std::iter::once(head)
+        .chain(parts_.into_iter().enumerate().map(|(i, (_, body))| {
+            div()
+                .pb(space::S8)
+                .child(markdown::message_body(
+                    ElementId::Name(format!("{id}-md-{i}").into()),
+                    body,
+                    &[],
+                ))
+                .into_any_element()
+        }))
+        .collect()
+}
+
+/// A Markdown version read in place, without the viewer's header and table of contents:
+/// the 产出 pane beside a 话题 and the 产出 page draw it in their own frame, so a document
+/// reads where it was opened (no sheet on top of it). The column scrolls; it is at most
+/// `measure` wide and centered, with `pad` around it.
+pub fn markdown_reader(
+    id: impl Into<SharedString>,
+    media: &Media,
+    md: &store::Markdown,
+    measure: gpui::Pixels,
+    pad: gpui::Pixels,
+    cx: &App,
+) -> gpui::Stateful<gpui::Div> {
+    let id: SharedString = id.into();
+    let (title, parts_) = sections(&md.text);
+    div()
+        .id(ElementId::Name(format!("{id}-reader").into()))
+        .flex_1()
+        .min_h(px(0.))
+        .w_full()
+        .overflow_y_scroll()
+        .child(
+            div()
+                .w_full()
+                .max_w(measure + pad * 2.)
+                .mx_auto()
+                .p(pad)
+                .children(markdown_blocks(&id, title, parts_, media, md, cx)),
+        )
+}
+
 fn markdown_view(
     spec: &FullSpec,
     md: &store::Markdown,
@@ -662,7 +736,7 @@ fn markdown_view(
                 }),
         );
     }
-    let mut doc = div()
+    let doc = div()
         .id(id(spec, "doc"))
         .flex_1()
         .min_w(px(0.))
@@ -671,31 +745,14 @@ fn markdown_view(
         .track_scroll(&scroll)
         .px(space::S24)
         .py(space::S20)
-        .child(
-            div()
-                .pb(space::S12)
-                .flex()
-                .flex_col()
-                .gap(space::S4)
-                .child(
-                    div()
-                        .t_display()
-                        .text_color(k.text_1)
-                        .child(title.unwrap_or_else(|| spec.media.title.clone())),
-                )
-                .child(div().t_meta().text_color(k.text_3).child(format!(
-                    "{} · {}",
-                    spec.media.file_name(),
-                    fill(cm::MD_WORDS, &[("n", &group_digits(md.stats.chars as u64))])
-                ))),
-        );
-    for (i, (_, body)) in parts_.iter().enumerate() {
-        doc = doc.child(div().pb(space::S8).child(markdown::message_body(
-            ElementId::Name(format!("{}-md-{i}", spec.id).into()),
-            body.clone(),
-            &[],
-        )));
-    }
+        .children(markdown_blocks(
+            &spec.id,
+            title,
+            parts_,
+            &spec.media,
+            md,
+            cx,
+        ));
     let toggle = state.clone();
     let md_text = md.text.clone();
     let header = head(

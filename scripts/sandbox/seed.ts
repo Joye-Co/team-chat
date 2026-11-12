@@ -150,6 +150,49 @@ const html = (title: string, body: string) =>
   `table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #ddd;padding:6px 8px;text-align:left}</style>` +
   `<h1>${title}</h1>${body}</html>`;
 
+/** Forge's Markdown 产出 in 断线重连后消息重复: every block a document uses, a long code line and a long link. */
+const RECONNECT_REVIEW_MD = `# 重连重复问题复盘
+
+日期 2026-11-03。**结论：**重连后补拉的事件没有按 \`seq\` 去重，同一条消息会画两次。*修复已在 PR #61。*
+
+## 1. 现象
+
+- 断线超过 30 秒再连上，最近一条消息出现两次
+- 只在**补拉**和**实时推送**同时到达时出现
+  - 桌面端：每 10 次断线约 3 次
+  - 手机端：没有复现
+
+> 用户原话：「刚才那条消息怎么发了两遍？」
+
+## 2. 原因
+
+补拉的结果和实时推送走两条路，合并时只按 \`clientMsgId\` 去重，而补拉回来的事件 \`clientMsgId\` 为空：
+
+\`\`\`rust
+fn merge(events: Vec<Event>, seen: &mut HashSet<String>) -> Vec<Event> {
+    events.into_iter().filter(|e| e.client_msg_id.as_ref().map_or(true, |id| seen.insert(id.clone()))).collect()
+}
+\`\`\`
+
+## 3. 修复
+
+| 改动 | 文件 | 说明 |
+| --- | --- | --- |
+| 按 seq 去重 | \`crates/chat-core/src/engine.rs\` | 补拉和推送合并前先比 seq |
+| 断线重放测试 | \`crates/chat-core/tests/replay.rs\` | 重放 50 次，0 次重复 |
+
+1. 合并前按 \`seq\` 排序
+2. 跳过已经画过的 \`seq\`
+3. 加断线重放的测试
+
+参考：[重连协议](https://example.com/docs/protocol#reconnect)，以及完整日志 https://example.com/logs/2026-11-03/reconnect-duplicate-messages-desktop-client-trace-0b7c9e2f4a1d8e6b3c5f7a9d1e2b4c6d8f0a.txt
+
+## 4. 后续
+
+- [x] 合并 PR #61
+- [ ] 下个版本发出后再观察一周
+`;
+
 export async function seed(o: SeedOptions): Promise<Json> {
   const log = o.log ?? ((l: string) => console.log(l));
   const url = o.url.replace(/\/+$/, "");
@@ -263,6 +306,16 @@ export async function seed(o: SeedOptions): Promise<Json> {
       await forge.ack(reconnect.groupId, (await forge.history(reconnect.groupId, reconnect.topicId)).messages[0]?.id ?? "");
       await forge.setPlan(reconnect, plan(["复现问题", "定位重复原因", "写修复和测试", "开 PR"], 4));
       await say("forge", reconnect, "原因是重连后补拉的事件没有按 seq 去重。修复在 PR #61，加了断线重放的测试。");
+      // A Markdown 产出 (a file, not a page): the 产出 pane and page read it in place.
+      const md = new TextEncoder().encode(RECONNECT_REVIEW_MD);
+      const review = await forge.http.uploadFile({ ...reconnect, name: "重连重复问题复盘.md", mime: "text/markdown", data: md });
+      const reviewDoc = await forge.http.createArtifact({
+        ...reconnect,
+        title: "重连重复问题复盘",
+        kind: "file",
+        entry: "重连重复问题复盘.md",
+        files: [{ path: "重连重复问题复盘.md", fileId: review.fileId }],
+      });
       await forge.done(reconnect, {
         title: "修好了：重连后不再重复",
         summary: "补拉事件时按 seq 去重；断线重放 50 次没有再出现重复。",
@@ -270,7 +323,10 @@ export async function seed(o: SeedOptions): Promise<Json> {
           { label: "单元测试 214 个", state: "pass" },
           { label: "断线重放 50 次", state: "pass", detail: "0 次重复" },
         ],
-        refs: [{ label: "PR #61", target: { kind: "pr", url: "https://example.com/qqbot/pull/61", number: 61, state: "open" } }],
+        refs: [
+          { label: "PR #61", target: { kind: "pr", url: "https://example.com/qqbot/pull/61", number: 61, state: "open" } },
+          { label: "重连重复问题复盘", target: { kind: "artifact", artifactId: reviewDoc.artifact.id, version: reviewDoc.version.version } },
+        ],
       });
       await forge.send(reconnect, {
         cardV2: approvalCard({ title: "合并 PR #61？", text: "改了 3 个文件，测试全过。", from: [ids.joye], approveLabel: "合并" }),
