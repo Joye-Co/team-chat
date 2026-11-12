@@ -11,7 +11,7 @@ The shared types are `packages/protocol/src/machine.ts` (Zod, used by the server
 `crates/chat-protocol/src/machine.rs` (serde, used by the daemon through
 `apps/daemon/src/proto.rs`). `apps/daemon/tests/fixtures/machine/{up,down}.jsonl` hold one
 golden frame per line; the daemon test parses each one and serializes it back to an equal
-value, and `bun run gen:fixtures` copies them into `protocol/fixtures/machine/`, which both
+value, and `bun run gen:protocol` copies them into `protocol/fixtures/machine/`, which both
 the Zod and the Rust fixture tests check. Change the doc, both type modules and the golden
 files together. Conventions are those of [protocol.md](protocol.md):
 JSON, UTF-8, camelCase, unknown fields ignored, times in ms since the epoch, IDs are ULIDs
@@ -178,10 +178,16 @@ RunEvent =
 - **Daemon restart.** `run.json` records the CLI's process group. A daemon that starts after
   a crash stops the process groups of unfinished runs (when the group leader still runs the
   recorded CLI), then rebuilds those runs from `events.jsonl` and appends `run.done`
-  (`failed`, error `daemon restarted`) and a failed `run.session`. Their frames, and those of
-  runs that finished in the last hour, are offered in `hello` and replayed after `welcome` as
-  above. On a graceful stop the daemon cancels its runs and waits up to 10 s for the server to
-  ack their last frames.
+  (`failed`, error `daemon restarted`, `sessionId` the last `session` event of the run, or the
+  session the run was assigned to resume when it logged none) and a failed `run.session`. Their frames, and those of runs that finished in the last hour, are
+  offered in `hello` and replayed after `welcome` as above. BotDesk does not record such a run
+  as failed: it continues the work in a new run on the same machine that resumes that CLI
+  session, with the recovery note (see "Leases"); only after 3 such resumes in a row, or for a
+  run it cannot start again (a side chat run), does the run fail, with a note that says the
+  computer's program restarted. On a graceful stop (a computer restart, a service restart,
+  Ctrl+C) the daemon stops its runs and ends each one the server did not cancel the same way
+  (`failed`, error `daemon restarted`, with its session), so BotDesk continues it when the
+  daemon is back; it waits up to 10 s for the server to ack their last frames.
 - `run.assign` is idempotent: when the daemon already holds the run it answers `run.accept`
   again. When the server gets neither `run.accept` nor `run.reject` within 30 s, or the link
   drops first, it sends the same `run.assign` again on the next link.
@@ -304,8 +310,23 @@ CliUsage   = { runtime, at, windows: { kind, label?, usedPct, resetsAt? }[] }
   session); with no such machine it waits on. A removed machine is not waited for.
 - When a lease expires while the machine is connected (the daemon no longer reports the run),
   the server marks the run lost and leaves it out of later `welcome.runs`, so the daemon stops
-  it. BotDesk starts it again or sets the run and the topic to `blocked` with one short note.
+  it. BotDesk continues the work in a new run (preferring that machine, where the session
+  resumes) or sets the run and the topic to `blocked` with one short note.
   Late frames of a lost or closed run are acked and dropped.
+- **A run that starts again continues** (盯 1.2): every restart (a stall, a daemon restart, a
+  lost or moved run) is a new run that keeps the work line, resumes the old run's CLI session
+  when it lands on the machine that has it (`resumeSessionId`; elsewhere a new session with the
+  full topic), and whose prompt ends with a recovery note written by the server: why it starts
+  again, the try number, the last plan, the last 20 steps (`tool.call` titles) and every outward
+  action of the earlier tries (pushes, pull request and release commands, publishes and deploys
+  from `tool.call`; cards, 产出 data, hand-offs and the desk note from `output` events; 产出
+  versions and the topic's pull requests from the room), with the instruction to check each one
+  before repeating anything. Work that already acted outward is never moved to another machine
+  by a stall: after the same-session retry the run turns `blocked` instead.
+- **A run that moves to another machine** (after the 30 minute wait, or a stall) is closed on
+  the old machine's link: a connected daemon gets `run.cancel` now, and a daemon that is away
+  finds the run missing from its next `welcome.runs`, so it stops the old copy first thing and
+  discards its frames. Two machines never keep working on the same run.
 - The daemon's own `stalled` status is a signal only: the server does not restart a run for
   it. A silent run gets one nudge, then is restarted in the same session on the same machine,
   then on another machine when one can take it, and only then is it marked `blocked`.
@@ -350,9 +371,9 @@ server frames and ignores unknown fields, so it must never get work it cannot do
 | --- | --- |
 | `pause` | `run.pause`: interrupts the CLI turn where the CLI supports it, else sends SIGSTOP to the run's process group, stops the stall timer and the `maxDurationMs` clock, and emits `paused { paused: true, by }`. `run.resume`: SIGCONT, restarts both clocks (the deadline moves by the paused time), emits `paused { paused: false }` and gives `note` to the CLI as its next input when set. A cancel while paused resumes first. |
 | `answer` | `run.input.answer` and `run.input.artifactEvent` reach the CLI as typed, untrusted data (a tool result of the CLI's own ask, or a user line with a fenced JSON block). `text` holds the same content as text for daemons without the feature. |
-| `aside` | `run.assign.kind = "aside"`: the run is read-only (Codex sandbox `read-only` with no MCP servers or web tools, Claude Code permission mode `plan` with only the read tools, no repo write) whatever `daemon.toml` or the CLI's own settings say. |
+| `aside` | `run.assign.kind = "aside"`: the run is read-only (Codex sandbox `read-only` with no MCP servers or web tools, Claude Code permission mode `plan` with only the read tools, no repo write) whatever `daemon.toml` or the CLI's own settings say. ACP agents and the PTY have no read-only mode: their `CliInfo.aside` is false and the daemon rejects such a run. |
 | `acceptance` | The daemon forwards the CLI's acceptance criteria as the `acceptance` run event. |
-| `resume` | `run.assign.resumeSessionId`: the run continues that CLI session (Claude Code `--resume`, Codex `thread/resume`) instead of starting a new one. |
+| `resume` | `run.assign.resumeSessionId`: the run continues that CLI session (Claude Code `--resume`, Codex `thread/resume`, ACP `session/load`) instead of starting a new one; `CliInfo.resume` says which CLIs can. |
 | `effort` | Reports `CliInfo.models` and `efforts` and runs with `run.assign.effort`, see "Models and effort". |
 | `context` | Answers the read-only topic context ops of `chat-run` (`topic.history`, `topic.message`, `context.search`, `file.get`, and from this version `topic.state`, `artifact.list`, `artifact.get`, `card.get`, `decisions.list`, `member.list`), see "Topic context". |
 | `gates` | Reports `CliInfo.gates`, stops the commands of `run.assign.gates` for a person's approval and honors `run.approval.scope`, see "Gated actions". |
@@ -368,7 +389,14 @@ How the 1.1 daemon does each one:
   `$CLAUDE_CONFIG_DIR/projects/*/<id>.jsonl` is copied into the project folder of the new
   working directory and the CLI starts with `--resume <id>` instead of `--session-id`; with no
   such file the run starts a new session. Codex: `thread/resume { threadId, ...the thread/start
-  params }`; an error answer falls back to `thread/start`. With `resumeSessionId` the prompt
+  params }`; an error answer falls back to `thread/start`. ACP: when the agent's `initialize`
+  answer has `agentCapabilities.loadSession`, `session/load { sessionId, cwd, mcpServers: [] }`
+  with the new run's folder as `cwd`; the history the agent replays while it loads is not
+  reported again, and an error answer falls back to `session/new` with a line telling the agent
+  that its earlier conversation is gone. The daemon asks each ACP agent (`initialize` only, at
+  most 15 s) when it reports its CLIs and sets `CliInfo.resume` from the answer; the server sends
+  `resumeSessionId` only for a CLI with `resume: true` (absent: kinds `claude` and `codex`), so a
+  CLI that cannot continue gets the full prompt, as a first run does. With `resumeSessionId` the prompt
   carries only what the session has not seen (protocol.md, "Run context"), and `run.done.sessionId`
   names the session the run used. In the 群聊 a run continues the last session only when its request
   quotes a message of that bot or follows up its run; other requests start a new session.
@@ -463,7 +491,7 @@ no credentials pass through chat. The server shows the address to owners and run
   source: { kind: "card", messageId, blockId?, actionId?, rev } | { kind: "artifact", artifactId, version, eventId, ask },
   event, value?, actor: { id, name }, eventId?, block? /* card events: the block or action at rev */ }
 // daemon -> server (feature "output", `chat-run`): a normal run.event with seq and ack
-RunEvent += { type: "output", outputId, op: "card.post" | "card.patch" | "interaction.resolve" | "artifact.data" | "artifact.reply" | "desk.note", body: JSON }
+RunEvent += { type: "output", outputId, op: "card.post" | "card.patch" | "interaction.resolve" | "artifact.data" | "artifact.reply" | "desk.note" | "run.report", body: JSON }
 // server -> daemon
 { t: "run.output.result", runId, outputId, ok, result?, error? { code, reason?, message } }
 run.input.answer += { answerId?, askId?, eventId?, event?, blockId?, value? }
@@ -492,6 +520,7 @@ with the rules of the matching WebSocket frame. The `output` body is that frame 
 | `desk.note` (1.1) | `{ text }`: the bot's desk note in the run's group, with the rules of `PUT /v1/desk-note` (protocol.md "Desk notes"); result `{ seq }` | `chat-run desk note --text "…"` (`""` clears) |
 | `member.handoff` | `{ member, goal, doneWhen?, notes? }`: 转交 to another AI member (protocol.md "Delegation"); result `{ member, topicId, runId }` | `chat-run handoff --member <name> --goal "…" [--done-when "a; b"] [--notes "…"]` |
 | `member.assign` | the same body: 分出去 into a new topic; result `{ member, topicId, runId }` | `chat-run assign --member <name> --goal "…" [--done-when "a; b"] [--notes "…"]` |
+| `run.report` (usable) | `{ state: "done" \| "blocked" \| "waiting", text }` (`RunReport`, text 1-2000 characters): how the work ended, in the CLI's own words; result `{ state }`. See "Run report" below | `chat-run report --state done\|blocked\|waiting --text "…"` |
 
 `chat-run` is the daemon binary started by the name `chat-run` (argv0). The daemon links it as
 `<run folder>/bin/chat-run` and puts that folder first on the CLI's `PATH`. Side chat runs
@@ -536,7 +565,7 @@ A connect or write that the CLI's sandbox refuses gives `{ code: "unavailable", 
 "sandbox.blocked" }`. `chat-run` prints the result JSON (exit 0) or the error JSON with its
 `reason` (exit 1). `chat-run card schema` prints the JSON Schema of a Card v2 document
 (`protocol/schema/CardV2.schema.json`, made from the protocol package's Zod with
-`bun run gen:schema` and built into the daemon) without asking the daemon; it holds the shape,
+`bun run gen:protocol` and built into the daemon) without asking the daemon; it holds the shape,
 and the server checks the write rules too. The CLI learns about `chat-run` from a short note
 that names the commands, the card fields, every block type of that schema and
 `chat-run card schema`: Claude Code
@@ -836,9 +865,12 @@ ContextHit = { messageId, topicId, topicTitle?, seq, authorName, at, snippet }
   run's group the bot member can read. `limit` 1-50, default 20, newest first.
 - `file.get` gives a file of the run's group (ready, not deleted). The daemon writes it to `out`,
   which must be inside the run's working folder after symbolic links are resolved (`forbidden`,
-  `file.outside_workspace` otherwise); without `out`, to `<working folder>/.chat-files/<fileId>/<name>`
-  (the folder gets a `.gitignore` of `*`). It refuses files over 100 MiB with `too_large`.
-  `chat-run` waits up to 5 minutes for it.
+  `file.outside_workspace` otherwise); without `out`, to `<run folder>/downloads/<fileId>/<name>`,
+  outside the working folder, so a download never ends up in the member's branch when the
+  daemon commits what a run left uncommitted. The result says where: `{ path, name, mime, size,
+  inWorkFolder }` (`inWorkFolder: false` for the default). Daemons before this wrote the default
+  to `<working folder>/.chat-files/<fileId>/<name>` (with a `.gitignore` of `*`). It refuses files
+  over 100 MiB with `too_large`. `chat-run` waits up to 5 minutes for it.
 - `topic.state` is one compact state card of a topic, at most 2000 characters: who did what (the
   newest authors with their last message), the 产出 with their latest versions, open cards and who
   they wait on, the latest decisions. Members work together through 产出 and state; this is how
@@ -856,6 +888,31 @@ ContextHit = { messageId, topicId, topicTitle?, seq, authorName, at, snippet }
   first: name, 岗位 (`role`) and `ai` for AI members.
 - A daemon with this feature reports `context`; the server's prompt then names these commands for
   messages it left out. The `chat-run` note lists them.
+
+### Run report (`chat-run report`, usable)
+
+Before it ends, the CLI says how its work ended with `chat-run report --state <state> --text
+<text>` (output op `run.report`): `done` (the request is done), `blocked` (it cannot go on without
+something: a key, an access, a decision) or `waiting` (it asked a person and waits for the
+answer). A run may report more than once; the latest report counts when the run ends. The server
+answers `{ state }`; a body that is not a `RunReport` is `invalid`.
+
+When the run ends with `run.done` `succeeded`:
+
+| Latest report | Topic | The result in the topic | `BotRun` |
+| --- | --- | --- | --- |
+| none, or `done` | `done` | the done card (or a text answer), as before | `status: "done"`, `phase: "done"` |
+| `blocked` | `blocked`, `waitingOn` the requester | the CLI's last message (else the report text) as a text message that mentions the requester; no done card | `status: "done"`, `phase: "needs_reply"`, `waitingFor: "stuck"` |
+| `waiting` | `waiting_answer`, `waitingOn` the requester | the same | `status: "done"`, `phase: "needs_reply"`, `waitingFor: "report"` |
+
+A `needs_reply` run reads `phase: "done"` again once a later run of the AI member starts in the
+topic (the server sends `run.updated` for it then). A run that fails or is stopped ignores its
+report. Without a report a run that ended normally is done, as before. The 盯活 continuation of a
+run that only promised work is skipped when the run reported `blocked` or `waiting`.
+
+When the CLI posted its own Card v2 with intent `done` (`card.post`) in the run, that card is the
+run's result: the server does not post the CLI's last message again, and `resultMessageId` names
+the card.
 
 ### Memory notes (`chat-run`, daemon over HTTP; feature `context`)
 
@@ -899,6 +956,9 @@ safe default named below). Protocol side: protocol.md, "Usable extensions".
 ```ts
 // daemon -> server
 hello.machine += { runsIn?: "host" | "vm" }       // where runs execute; required with feature "github"
+CliInfo += { resume?: boolean,                    // with feature "resume": runs of this CLI continue resumeSessionId
+             aside?: boolean }                    // with feature "aside": the CLI has a read-only mode for side chats
+                                                  // absent (an older daemon): true for kinds "claude" and "codex" only
 run.done += { code?: { branch, head /* hex */, pushed: boolean } }  // any daemon; absent = not known
 RunEvent +=
   | { type: "github", state: "used" | "missing" | "invalid", login? }        // feature "github"
@@ -1017,7 +1077,8 @@ later audits have the complete record:
   `botMemberId \n topicId \n url:<repo.url> | path:<repo.path> | ""`, its branch is
   `bot/<key>`. A line is used by one run at a time: a run of the same member in the topic that
   starts while another holds the line gets its own folder `<run folder>/work` and branch
-  `bot/<runId>`, and its CLI is told so. A read-only side chat run (`kind: "aside"`) always
+  `bot/<runId>`, and its CLI is told so; a run waits up to 30 s for another run's hold first,
+  since a restart comes right after the cancel of the run it continues. A read-only side chat run (`kind: "aside"`) always
   gets its own `<run folder>/work`. `run.json` names the line (`line`) when the run used one.
 - `repo.path`: a local repository (inside `repo_roots` when configured). `repo.url`: a bare
   mirror under `<work_root>/repos/` is cloned once and fetched before each run with
@@ -1159,7 +1220,7 @@ secret split over two deltas is redacted whole.
 | --- | --- | --- |
 | `codex` | `codex app-server` | JSON-RPC lines on stdio (v2): `initialize`, `initialized`, `thread/start {cwd, approvalPolicy, sandbox, model?}`, `turn/start`, `turn/steer`, `turn/interrupt`; notifications `turn/*`, `item/*`, `item/agentMessage/delta`, `thread/tokenUsage/updated`, `error`; server requests `item/commandExecution/requestApproval`, `item/fileChange/requestApproval` |
 | `claude` | `claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --replay-user-messages --session-id <uuid> --permission-mode <mode>` | one JSON line per user message in (a line the CLI reads while a turn runs joins that turn; the CLI echoes each line it takes up, and the run ends when a `result` arrives with no line unread); `system/init`, `stream_event` (text deltas), `assistant`, `user` (tool results), `result` out |
-| `acp` | configured, e.g. `gemini --acp`, `opencode acp` | Agent Client Protocol v1 (JSON-RPC 2.0): `initialize`, `session/new`, `session/prompt`, `session/update`, `session/request_permission`, `session/cancel` |
+| `acp` | configured, e.g. `gemini --acp`, `opencode acp` | Agent Client Protocol v1 (JSON-RPC 2.0): `initialize`, `session/new` or `session/load` (resume, when the agent has `loadSession`), `session/prompt`, `session/update`, `session/request_permission`, `session/cancel`. No effort setting and no read-only mode: the daemon reports no `efforts` and `aside: false` |
 | `pty` | configured; `{prompt}` in args is replaced | a pseudo terminal; output without ANSI codes streams as message item `out` |
 
 ## Daemon config and commands
@@ -1197,7 +1258,7 @@ found on PATH.
   task ends only the console host, so the task's daemon writes its pid and its process
   creation time to `%LOCALAPPDATA%\<slug>-daemon\daemon.pid` and waits on the event
   `Local\<slug>-daemon-stop-<pid>`: setting it shuts the daemon down as Ctrl+C does (runs are
-  cancelled and reported). From another logon session of the same user (SSH, WinRM), where the
+  stopped and reported as `daemon restarted`). From another logon session of the same user (SSH, WinRM), where the
   event is not visible, or after 20 s, the process (matched by pid and creation time) is
   terminated. Both commands fail when the daemon is still running afterwards.
 - Windows, replacing the program file (every updater follows this; the daemon is never stopped

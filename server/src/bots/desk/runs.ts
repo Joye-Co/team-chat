@@ -8,7 +8,7 @@ import { unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
 import { effectivePolicy } from "../../settings/approvals";
 import { policyPrompt, runGates } from "../../settings/rules";
-import { CONTEXT_CHARS, LEASE_MS, MAX_RUN_MS, type MachineView, type NoMachine, TEXT, buildAsidePrompt, buildPrompt, buildResumePrompt, cut, gatesRuntime, hasFeature, hasRuntime, pickMachine, whyNoMachine } from "../dispatch";
+import { CONTEXT_CHARS, LEASE_MS, MAX_RUN_MS, type MachineView, type NoMachine, TEXT, asideRuntime, buildAsidePrompt, buildPrompt, buildResumePrompt, cut, gatesRuntime, hasFeature, hasRuntime, pickMachine, resumesRuntime, whyNoMachine } from "../dispatch";
 import { type ContextRow, type Selection, requestAuthors, requestText, selectLines, withSummary } from "../../context/render";
 import { teamZone } from "../../memory/consolidate";
 import { type Brief, briefText, isNewTask } from "../../agent/frontdesk";
@@ -19,6 +19,9 @@ import { EXECUTOR_MEMORY_BYTES, memoryIndex } from "../../memory/inject";
 import { groupMembers, membersText } from "../../context/read";
 import { loadMachines, loadRunner } from "../store";
 import { DeskCore, QUEUED, type RunRow } from "./core";
+import { type LoggedFrame, type RecoveryFacts, outwardAction, recoveryNote, stepOf } from "../../agent/recovery";
+import type { RunProof } from "../proof";
+import { needsReply, reportOf } from "./report";
 
 /** The prompts of a run (Run context): the full one, and the one for a resumed session. */
 interface Prompts {
@@ -27,15 +30,19 @@ interface Prompts {
   resume?: { prompt: string; manifest: RunContextManifest };
 }
 
-function manifestOf(sel: Selection, resumed: boolean): RunContextManifest {
+/**
+ * What a run's prompt carried. Problem 6: the request's own files count with the files, and its
+ * quote, 产出 and 引用 with the refs (the topic lines leave the request out).
+ */
+function manifestOf(sel: Selection, resumed: boolean, m: Pick<TopicMessage, "ext" | "refs">): RunContextManifest {
   const out: RunContextManifest = {
     resumed,
     chars: sel.chars,
     messages: sel.rows.length,
     omitted: sel.omitted,
-    files: sel.stats.files,
+    files: sel.stats.files + (m.ext?.attachments?.length ?? 0),
     cards: sel.stats.cards,
-    refs: sel.stats.refs,
+    refs: sel.stats.refs + (m.ext?.replyTo ? 1 : 0) + (m.ext?.artifactRefs?.length ?? 0) + (m.refs?.length ?? 0),
   };
   if (sel.rows.length > 0) {
     out.firstSeq = sel.rows[0].seq;
@@ -52,6 +59,8 @@ export interface Restart {
   exclude?: string[];
   /** The only machine the new run may go to (a same-session restart stays on its machine). */
   machine?: string;
+  /** Why the work starts again (developer words): the recovery note names it. */
+  why?: string;
 }
 
 /** What started a run (meta `request:{runId}`): the message and the follow-ups it carried. */
@@ -66,7 +75,7 @@ export interface RunRequest {
 
 export abstract class DeskRuns extends DeskCore {
   /** 盯活 (stall.ts): ends the run quietly and starts the same request again; false when out of tries. */
-  protected abstract restartElsewhere(r: RunRow, why: string, how?: Restart): Promise<boolean>;
+  protected abstract restartElsewhere(r: RunRow, why: string, how?: Restart, opts?: { count?: boolean; step?: number }): Promise<boolean>;
   /** 盯 1.1 (stall.ts): the lease of a run ran out; true when the run keeps waiting for its machine. */
   protected abstract machineLost(r: RunRow): Promise<boolean>;
 
@@ -121,7 +130,8 @@ export abstract class DeskRuns extends DeskCore {
     // 盯活: a restart says whether it continues the session and which machines it leaves out.
     const how = retryOf ? this.restartOf(retryOf) : null;
     const newWork = dm ? opts.newTask === true || isNewTask(m.body) : !quotesBot;
-    if (isMainTopicId(m.topicId) && !followUpOf && !how?.sameSession && (alongside || newWork)) this.sql.exec("UPDATE runs SET fresh = 1 WHERE id = ?", runId);
+    // A restart continues the work it replaces (盯 1.2): never a fresh start in the 群聊 either.
+    if (isMainTopicId(m.topicId) && !followUpOf && !how && (alongside || newWork)) this.sql.exec("UPDATE runs SET fresh = 1 WHERE id = ?", runId);
     if (how?.exclude && how.exclude.length > 0) this.sql.exec("UPDATE runs SET excluded = ? WHERE id = ?", JSON.stringify(how.exclude), runId);
     if (claim.newest?.[0]) this.sql.exec("UPDATE runs SET context_seq = ? WHERE id = ?", claim.newest[0].seq, runId);
     // The request as it came, so the run can be retried with the same one. A follow-up or a
@@ -146,6 +156,7 @@ export abstract class DeskRuns extends DeskCore {
         else if (!m.messageId.includes(":")) await this.ack(r);
         await this.setStatus(r, "created");
         await this.topic(r, "in_progress");
+        await this.answeredReports(r);
 
         const machines = this.machinesFor(r, await loadMachines(this.env));
         const machine = this.pick(r, runner, machines, how?.exclude ?? []);
@@ -169,6 +180,12 @@ export abstract class DeskRuns extends DeskCore {
           prompt = await this.asidePrompt(m, claim, claim.contextOf, followUps);
         } else {
           const p = await this.topicPrompts(r, runner, m, claim, followUps, feature("acceptance"), feature("context"), brief, gated);
+          // 盯 1.2: a restart starts with the recovery note, in a resumed session and in a new one.
+          const note = retryOf ? await this.recoveryNoteOf(retryOf, how?.why ?? "restarted") : null;
+          if (note) {
+            p.prompt = `${p.prompt}\n\n${note}`;
+            if (p.resume) p.resume.prompt = `${p.resume.prompt}\n\n${note}`;
+          }
           prompt = p.prompt;
           this.storeContext(r.id, p);
         }
@@ -219,6 +236,70 @@ export abstract class DeskRuns extends DeskCore {
     }
   }
 
+  /** The run and the runs it restarted (`retry_of`), newest first: one piece of work. */
+  protected retryChain(runId: string): RunRow[] {
+    const out: RunRow[] = [];
+    let id: string | null = runId;
+    while (id && out.length < 20) {
+      const r = this.run(id);
+      if (!r) break;
+      out.push(r);
+      id = r.retry_of;
+    }
+    return out;
+  }
+
+  /** What the earlier tries of a piece of work did (the run `runId` and the runs it restarted). */
+  protected async recoveryFacts(runId: string, why: string): Promise<RecoveryFacts> {
+    const chain = this.retryChain(runId);
+    const steps: string[] = [];
+    const actions: string[] = [];
+    for (const run of [...chain].reverse()) {
+      const rows = this.sql
+        .exec<{ frame: string }>(
+          `SELECT frame FROM run_log WHERE run_id = ? AND (frame LIKE '%"tool.call"%' OR frame LIKE '%"output"%') ORDER BY seq`,
+          run.id,
+        )
+        .toArray();
+      for (const row of rows) {
+        let f: LoggedFrame;
+        try {
+          f = JSON.parse(row.frame) as LoggedFrame;
+        } catch {
+          continue;
+        }
+        const step = stepOf(f);
+        if (step) steps.push(step);
+        const action = outwardAction(f);
+        if (action) actions.push(action);
+      }
+    }
+    const last = chain[0];
+    const first = chain[chain.length - 1];
+    let prs: string[] = [];
+    let artifacts: string[] = [];
+    // 产出 of every try: a version keeps the run that made it, and an earlier try may have made it.
+    if (last) {
+      try {
+        const proof = unwrap(
+          await roomStub(this.env, last.group_id).rpc(last.group_id, "bots.runProof", this.actor(), { topicId: last.topic_id, runId: last.id, runIds: chain.map((x) => x.id), since: first.created_at }),
+        ) as RunProof;
+        prs = proof.prs.map((p) => `${p.url}${p.state ? ` (${p.state})` : ""}`);
+        artifacts = proof.artifacts.map((a) => `"${a.title}" version ${a.version}`);
+      } catch (err) {
+        this.log.warn("recovery proof failed", { runId, err });
+      }
+    }
+    // The newest plan any try reported.
+    const plan = chain.map((x) => this.planOf(x)).find((x) => x !== null && x.length > 0) ?? null;
+    return { why, tries: chain.length, plan, steps, actions, prs, artifacts };
+  }
+
+  /** The recovery note a restart of `runId` starts with (盯 1.2). */
+  protected async recoveryNoteOf(runId: string, why: string): Promise<string> {
+    return recoveryNote(await this.recoveryFacts(runId, why));
+  }
+
   /** How a restart of `runId` goes on (meta `restart:{runId}`), or null when it was no restart. */
   protected restartOf(runId: string): Restart | null {
     const raw = this.meta(`restart:${runId}`);
@@ -250,7 +331,7 @@ export abstract class DeskRuns extends DeskCore {
 
   /** Why no machine takes the run now (机 2.10); an aside run needs a daemon that runs it read-only. */
   protected whyNone(r: RunRow, runner: BotRunner, machines: MachineView[]): NoMachine {
-    const usable = r.kind === RUN_KIND_ASIDE ? machines.filter((x) => hasFeature(x, "aside")) : machines;
+    const usable = r.kind === RUN_KIND_ASIDE ? machines.filter((x) => asideRuntime(x, runner.runtime)) : machines;
     return whyNoMachine(usable, runner, Date.now());
   }
 
@@ -307,10 +388,28 @@ export abstract class DeskRuns extends DeskCore {
     }
   }
 
+  /**
+   * 接 4.2: the topic's earlier runs that ended waiting for a reply (`needs_reply`) are answered
+   * by the run `r` that starts now: their `run.updated` says so (phase `done`). Never throws.
+   */
+  protected async answeredReports(r: RunRow): Promise<void> {
+    const waiting = this.sql
+      .exec<RunRow>("SELECT * FROM runs WHERE topic_id = ? AND id != ? AND ended_at IS NOT NULL AND report IS NOT NULL AND status = 'done' ORDER BY created_at DESC LIMIT 5", r.topic_id, r.id)
+      .toArray() as RunRow[];
+    for (const prev of waiting) {
+      if (!needsReply(reportOf(prev))) continue;
+      try {
+        await this.setStatus(prev, prev.status);
+      } catch (err) {
+        this.log.warn("answered report update failed", { runId: prev.id, err });
+      }
+    }
+  }
+
   /** The best machine for the run; an aside run needs a daemon that runs it read-only. The
    * machine of the topic's last session comes first, so the run can continue that session. */
   protected pick(r: RunRow, runner: BotRunner, machines: MachineView[], excluded: string[] = []): MachineView | null {
-    const usable = r.kind === RUN_KIND_ASIDE ? machines.filter((x) => hasFeature(x, "aside")) : machines;
+    const usable = r.kind === RUN_KIND_ASIDE ? machines.filter((x) => asideRuntime(x, runner.runtime)) : machines;
     const prev = this.lastSession(r, runner);
     if (prev) {
       const same = pickMachine(usable.filter((x) => x.id === prev.machine_id), runner, Date.now(), excluded);
@@ -410,12 +509,12 @@ export abstract class DeskRuns extends DeskCore {
       // Who is in the group and their 岗位: hand-offs and parts go to members by name.
       members: membersText(await groupMembers(this.env.DB, m.groupId), botId),
     });
-    const out: Prompts = { prompt, manifest: manifestOf(sel, false) };
+    const out: Prompts = { prompt, manifest: manifestOf(sel, false, m) };
     if (since) {
       const delta = selectLines(undefined, since.newest, since.total, name, CONTEXT_CHARS, lines);
       out.resume = {
         prompt: buildResumePrompt({ names, context: delta.text, request, followUps, refs, contextTools, ...(brief ? { brief: briefText(brief) } : {}) }),
-        manifest: manifestOf(delta, true),
+        manifest: manifestOf(delta, true, m),
       };
     }
     return out;
@@ -507,12 +606,21 @@ export abstract class DeskRuns extends DeskCore {
     if (r.kind === RUN_KIND_ASIDE) frame.kind = RUN_KIND_ASIDE;
     if (runner.repo) frame.repo = { ...runner.repo, ...(runner.baseBranch ? { baseBranch: runner.baseBranch } : {}) };
     // Continue the topic's last session when this run goes to the machine that has it.
-    const prev = machine && hasFeature(machine, "resume") ? this.lastSession(r, runner) : undefined;
+    // Only a CLI that can continue it (ACP: an agent with session/load); else the full prompt.
+    const prev = machine && resumesRuntime(machine, runner.runtime) ? this.lastSession(r, runner) : undefined;
     if (prev?.session_id && prev.machine_id === machine?.id) frame.resumeSessionId = prev.session_id;
     return frame;
   }
 
   protected async assign(r: RunRow, runner: BotRunner, machine: MachineView, prompt: string): Promise<void> {
+    // 分出去 (design-relay R2): parts that came back while the run waited for a machine; kept in
+    // its prompts, so a later assignment of the run carries them too.
+    const parts = this.takeParts(r.id);
+    if (parts !== null) {
+      prompt = `${prompt}\n\n${parts}`;
+      const resume = this.meta(`prompt_resume:${r.id}`);
+      if (resume !== null) this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `prompt_resume:${r.id}`, `${resume}\n\n${parts}`);
+    }
     const frame = this.assignFrame(r, runner, prompt, machine, await workerModel(this.env.DB, runner.runtime));
     // Gated actions: the team's checked kinds, to a machine whose CLI stops them; kinds a person
     // approved for this piece of work are left out.

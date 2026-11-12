@@ -12,6 +12,7 @@ use std::ffi::c_void;
 use std::sync::Mutex;
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE, WAIT_TIMEOUT};
 use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, GenerateConsoleCtrlEvent};
+use windows_sys::Win32::System::Diagnostics::Debug::{CONTEXT, GetThreadContext};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
 };
@@ -23,7 +24,7 @@ use windows_sys::Win32::System::JobObjects::{
     SetInformationJobObject, TerminateJobObject,
 };
 use windows_sys::Win32::System::Threading::{
-    OpenProcess, OpenThread, PROCESS_SYNCHRONIZE, ResumeThread, SuspendThread,
+    OpenProcess, OpenThread, PROCESS_SYNCHRONIZE, ResumeThread, SuspendThread, THREAD_GET_CONTEXT,
     THREAD_SUSPEND_RESUME, WaitForSingleObject,
 };
 
@@ -166,6 +167,11 @@ impl Job {
 
     /// Suspends every thread of every process of the job (接管). Looks again until a look
     /// finds no thread it has not suspended, so a process started meanwhile stops too.
+    ///
+    /// `SuspendThread` only asks: a thread that is inside a system call, such as the one that
+    /// starts a process, goes on until the kernel lets it stop. So each thread is waited for
+    /// ([`settle`]) before the next look: when a look finds nothing new, every thread of the
+    /// job has really stopped, and nothing is left that could start another process.
     pub fn suspend(&self) {
         let mut suspended = self.suspended.lock().unwrap_or_else(|e| e.into_inner());
         for _ in 0..50 {
@@ -180,7 +186,11 @@ impl Job {
             for tid in new {
                 if with_thread(tid, |h| {
                     // SAFETY: the handle has THREAD_SUSPEND_RESUME access.
-                    unsafe { SuspendThread(h) != u32::MAX }
+                    let asked = unsafe { SuspendThread(h) != u32::MAX };
+                    if asked {
+                        settle(h);
+                    }
+                    asked
                 }) {
                     suspended.insert(tid);
                 }
@@ -208,9 +218,32 @@ impl Job {
     }
 }
 
+/// Waits until the thread behind `thread`, which was asked to suspend, has stopped: reading a
+/// thread's context returns only then. Without the access to read it (the handle then has
+/// only `THREAD_SUSPEND_RESUME`) the call fails at once and nothing is waited for.
+fn settle(thread: HANDLE) {
+    #[cfg(target_arch = "x86_64")]
+    const CONTROL: u32 = windows_sys::Win32::System::Diagnostics::Debug::CONTEXT_CONTROL_AMD64;
+    #[cfg(target_arch = "aarch64")]
+    const CONTROL: u32 = windows_sys::Win32::System::Diagnostics::Debug::CONTEXT_CONTROL_ARM64;
+    #[cfg(target_arch = "x86")]
+    const CONTROL: u32 = windows_sys::Win32::System::Diagnostics::Debug::CONTEXT_CONTROL_X86;
+    // SAFETY: a plain C struct (with the alignment the call needs); zeroes are a valid value.
+    let mut context: CONTEXT = unsafe { std::mem::zeroed() };
+    context.ContextFlags = CONTROL;
+    // SAFETY: the handle is open and `context` is a CONTEXT with its flags set.
+    unsafe {
+        GetThreadContext(thread, &mut context);
+    }
+}
+
 fn with_thread(tid: u32, f: impl FnOnce(HANDLE) -> bool) -> bool {
     // SAFETY: plain call; a null handle means the thread is gone or not ours.
-    let h = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, tid) };
+    let mut h = unsafe { OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, 0, tid) };
+    if h.is_null() {
+        // SAFETY: as above, with the one access suspending needs.
+        h = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, tid) };
+    }
     if h.is_null() {
         return false;
     }

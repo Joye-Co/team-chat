@@ -374,6 +374,11 @@ impl MachinesPage {
             (true, false) => format!("{} · {facts}", s::MACHINE_THIS),
             (false, _) => facts,
         };
+        // Usable (GitHub, §3.7): an older daemon cannot use the GitHub I connected.
+        let facts = match super::github::machine_hint(m, &self.services) {
+            Some(hint) => format!("{hint} · {facts}"),
+            None => facts,
+        };
         widgets::ItemRow::new(
             ElementId::Name(format!("machine-{}", m.id).into()),
             m.name.clone(),

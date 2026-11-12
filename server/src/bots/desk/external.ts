@@ -214,8 +214,8 @@ export class BotDesk extends DeskInteract {
   }
 
   /** After a run ended: 活动记录's 没跑成 and 到了预算 (activity/events.ts), off the run's turn. */
-  protected override async end(r: RunRow, status: RunStatus, body: string, topicStatus: TopicStatus, summary: string, success = false): Promise<void> {
-    await super.end(r, status, body, topicStatus, summary, success);
+  protected override async end(r: RunRow, status: RunStatus, body: string, topicStatus: TopicStatus, summary: string, success = false, waitingOn: string[] = []): Promise<void> {
+    await super.end(r, status, body, topicStatus, summary, success, waitingOn);
     const botId = this.botId;
     if (r.external || !botId) return;
     this.ctx.waitUntil(

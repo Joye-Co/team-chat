@@ -48,7 +48,9 @@ export const TEXT = {
   /** The run's computer went away: the run waits for it (盯 1.1). */
   machineAway: (name: string) => `${name} 不在线了，等它回来接着做；不需要了可以停止。`,
   machineBack: (name: string) => `${name} 回来了，接着做。`,
-  machineMoved: (name: string, minutes: number) => `${name} ${minutes} 分钟没回来，换一台电脑重新做。`,
+  machineMoved: (name: string, minutes: number) => `${name} ${minutes} 分钟没回来，换一台电脑接着做。`,
+  /** 盯 1.7: the computer's program restarted and the run could not be continued. */
+  interrupted: "电脑上的程序重启了，这次没能接着做。需要的话请再 @我。",
   /** The computer is back but no longer has the run, or it was removed. */
   lost: "卡住了：电脑上的这次处理中断了，没有完成。需要的话请再 @我。",
   stalled: (minutes: number) => `卡住了：${minutes} 分钟没有进展。`,
@@ -59,6 +61,8 @@ export const TEXT = {
   done: "完成了。",
   failed: (why: string) => (why ? `没有完成：${why}` : "没有完成。"),
   cancelled: "已停止，没有完成。",
+  /** design-relay R2: the summary of a run that handed its work over (转交). */
+  handedOver: (name: string) => `已转交给 ${name}`,
   followUpLimit: "后面的消息没有接着处理，需要的话请再 @我。",
   approval: (title: string, detail?: string) =>
     `需要你确认：${title}${detail ? `\n\n${detail}` : ""}\n\n回复「同意」或「拒绝」。`,
@@ -100,6 +104,28 @@ export function hasFeature(m: Pick<MachineView, "info">, feature: string): boole
  */
 export function gatesRuntime(m: Pick<MachineView, "info" | "clis">, runtime: string): boolean {
   return hasFeature(m, "gates") && (m.clis ?? []).some((c) => c.runtime === runtime && c.gates === true);
+}
+
+/** Kinds that continue a session and have a read-only mode when a daemon does not say (`CliInfo.resume` / `aside` absent). */
+const SESSION_KINDS: readonly string[] = ["claude", "codex"];
+
+function cliOf(m: Pick<MachineView, "clis">, runtime: string): CliInfo | undefined {
+  return (m.clis ?? []).find((c) => c.runtime === runtime);
+}
+
+/**
+ * Runs of this runtime on the machine continue `resumeSessionId` (接 3.6): feature "resume" and
+ * the CLI's `resume`; a daemon that does not report it continues only Claude Code and Codex.
+ */
+export function resumesRuntime(m: Pick<MachineView, "info" | "clis">, runtime: string): boolean {
+  const cli = cliOf(m, runtime);
+  return hasFeature(m, "resume") && cli !== undefined && (cli.resume ?? SESSION_KINDS.includes(cli.kind));
+}
+
+/** The machine runs a side chat (单独问) of this runtime read-only: feature "aside" and the CLI's `aside` (absent: Claude Code and Codex). */
+export function asideRuntime(m: Pick<MachineView, "info" | "clis">, runtime: string): boolean {
+  const cli = cliOf(m, runtime);
+  return hasFeature(m, "aside") && cli !== undefined && (cli.aside ?? SESSION_KINDS.includes(cli.kind));
 }
 
 export interface MachineView {

@@ -68,6 +68,28 @@ export function addUsableFixtures({ ok, bad, T0, ID, base, topic }: UsableCtx) {
   ok("http/update-machine-request-mine.json", "UpdateMachineRequest", { owner: "me" }, "team -> my own machine");
   ok("http/update-machine-request-team.json", "UpdateMachineRequest", { owner: null }, "my own machine -> the team");
   bad("http/update-machine-request-empty.json", "UpdateMachineRequest", {}, "name or owner is required");
+  ok("entities/machine-cli-resume.json", "Machine", {
+    id: "01JBX0MACHINE00000000000AW",
+    name: "mac-mini",
+    labels: ["mac"],
+    createdBy: ID.owner,
+    createdAt: T0,
+    connected: true,
+    healthy: true,
+    lastHeartbeatAt: T0 + 30_000,
+    daemonVersion: "0.1.0",
+    os: "macos",
+    arch: "aarch64",
+    maxParallelRuns: 2,
+    health: { diskFreeBytes: 120_000_000_000, diskTotalBytes: 494_000_000_000, load1: 1.5, load5: 1.2, load15: 0.9, cpuCount: 10, activeRuns: 0 },
+    clis: [
+      { runtime: "claude", kind: "claude", command: "claude", available: true, efforts: ["low", "high"], gates: true, resume: true, aside: true },
+      { runtime: "opencode", kind: "acp", command: "opencode", version: "1.17.11", available: true, gates: true, resume: true, aside: false },
+      { runtime: "gemini", kind: "acp", command: "gemini", available: true, resume: false, aside: false },
+    ],
+    runningRuns: [],
+    features: ["effort", "gates", "resume", "aside"],
+  }, "Usable: per-CLI resume and aside; an ACP agent that loads sessions but has no read-only mode");
   bad("http/update-machine-request-other-owner.json", "UpdateMachineRequest", { owner: ID.alice }, "a machine cannot be given to someone else");
   bad("http/update-machine-request-long-name.json", "UpdateMachineRequest", { name: "名".repeat(65) }, "name is 1..64");
   ok("http/set-machine-bot-request.json", "SetMachineBotRequest", { repoPath: "/Users/alice/code/app" });
@@ -229,6 +251,12 @@ export function addUsableFixtures({ ok, bad, T0, ID, base, topic }: UsableCtx) {
     durationMs: 64000,
     code: { branch: "main", pushed: true },
   }, "code.head is required");
+  ok("machine/up-run.event-output-run-report.json", "MachineUpFrame", runEventFrame(22, {
+    type: "output",
+    outputId: "o3",
+    op: "run.report",
+    body: { state: "blocked", text: "需要 staging 的数据库密码才能接着做" },
+  }), "chat-run report: the CLI says how its work ended (done, blocked, waiting)");
   ok("machine/run-event-github-used.json", "RunEvent", { type: "github", state: "used", login: "alice-dev" });
   ok("machine/run-event-github-missing.json", "RunEvent", { type: "github", state: "missing" });
   ok("machine/run-event-hand.command.json", "RunEvent", { type: "hand.command", commandId: "c1", command: "npm test", by: ID.owner });

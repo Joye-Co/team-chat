@@ -305,6 +305,23 @@ AddArtifactVersionRequest += { parentVersion?: number }
 
 并行：R0 先合。之后 R1、R4、R5、R6 可以同时开（文件不重叠）；R2 等 R1、R5；R3 等 R2。只有 R0 改 `docs/protocol.md` 和协议包，其余 PR 不再改它们。
 
+**R2 实现时更正和留给后面的**（2026-11-12）：
+
+- 表：`work_chains` 多 `root_bot`；根 run 也是一步（`seq=0`、`kind=root`、`path=[根成员]`），所以链上每个 run 都有步、深度和路径；`chain_steps` 多 `parent_seq`（结果交回哪一步，按步找，不按 run，重试换了 run 也找得到）和 `owner_before`（转交预留时的跟进对象）。步的终态多一个 `handed_over`。
+- 对方拒绝时只在「跟进对象被这次转交改成了对方」时改回 `owner_before`，不一律改回交出方（两个成员都在话题里时，跟进对象本来就可能是对方）。
+- 步的结束不在 `participants.ts` 里处理，而是 `bots.workState` 的 RPC 在同一个 commit 里先调 `workState`、再调 `chains.ts` 的 `stepReport`（两个文件不互相引用）。desk 的 `chain:` meta 不复制给重试、续跑：`chainOf` 沿 `retry_of` / `follow_up_of` 往回找；转交来的 run 在开始前先写 `chainFor:<触发键>`，第一份报告就带步。
+- 交出方被人停下（步 `cancelled`）时，分出去的结果不再交回，免得把它叫起来；链停后也不交回。
+- 两步确认的顺序：接手的 run 的第一份报告常常比 `bots.chainStepResult` 先到，这时只记下 run，步留在 `reserved`，由确认把步改成 `working`、写上分出去的新话题、转交时改跟进对象、链已停时停掉它。
+- 重试、重开、续跑一个已结束的步，是同一步重新 `working`（全部停止能停到它）；交回给交出方的 `part` 带上那次 run，新结果会再交回一次，卡片也再改一次。人在链停之后自己再叫起来的 run 不拦。
+- 交出方分出去之后又转交了：分出去的结果交给接手的成员（沿转交步往下找），不叫醒交出方，也不让它把话题拿回去；交出方那张分出去的卡片照样改。
+- 交代单不放进 `brief`（`briefText` 写的是「前台的交代单」），而是作为 run 的请求正文：标明是哪个 AI 成员替谁写的、当作资料；含根请求（附件、引用、产出按线 1 渲染）、交出方的计划、产出、最后一段话（≤1500）、代码位置。
+- 「代码没推不交出」这一条在转交、分出去里不拦：run 还在跑，`code` 只在 run 结束时才有，拦就只能按上一次 run 的旧位置拦，会误拦刚推上去的分支。交代单写明位置和「没推」，提示词要求转交前先推。真正按 `pushed` 停住的是接力（R3，`not_pushed`）。
+- 「全部停止」是 Card v2 的页脚按钮，没有 `ask`，按下是实时事件（`action.press`），走 desk 的 `interaction` 而不是 `cardAnswer`；两处都拦 `chain.stop:`，不当成 run 的输入。
+- `part` 放弃时要写话题，只有房间的 alarm 能写（提交后钩子不能）：提交后钩子遇到过期的 `part` / `cancel` 行就留给 alarm 处理。
+- 请求人离开：停链、停 run 已做；「话题 blocked、等管理员」没做（run 被停时各自报 `open`，会盖掉它），留给线 13 / R3 和接力一起定。
+- `delegation.not_for_requester` 没做：个人电脑只接主人的活（design-roles R4）还没合并，那时在 `takeDelegation` 里加。
+- 旧的 `delegation:` meta、旧的 `reportPart`：部署那一刻还没交回的分出去的结果不再交回（旧链没有步）。
+
 和别的线的关系：线 1（路由、读取命令、请求渲染）是 R1 的前提；线 2（会话续接、分支）、线 3（结构化汇报、离线排队、交接失败的那一句话）、线 13（管理员、个人电脑只接主人的活）、GitHub 身份没合并前：续接用新会话；结束状态按现在的 run 状态算（成功 → done，失败 → failed）；离线按现在的排队；那一句话先不发；`not_for_requester` 跳过；管理员用 owner。
 
 ## 7. 真电脑上的验收步骤

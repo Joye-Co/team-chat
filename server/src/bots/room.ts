@@ -4,8 +4,10 @@
 // (the member that most recently started a run there), or the DM's other member. The hand-off is
 // written to an outbox in the same transaction as the event and delivered after commit; a failed
 // delivery is retried by the room alarm until every desk accepted it.
-import { type BlockRef, type BotRun, type CardV2, type Event, isMainTopicId, type Message, RUN_KIND_ASIDE, type TopicContext } from "@chat/protocol";
+import { ACK_EMOJI, type BlockRef, type BotRun, type CardV2, type Event, isMainTopicId, type Message, RUN_KIND_ASIDE, type TopicContext } from "@chat/protocol";
+import { roomStub } from "../core/env";
 import { ApiError } from "../core/errors";
+import { ROOM_REACT_RPC } from "../reactions";
 import {
   type ArchivedEvent,
   registerAfterCommit,
@@ -26,6 +28,8 @@ import { FRONT_DESK_ASK_PREFIX } from "../agent/frontdesk";
 import { type RefSource, resolveRefs, stripRefPrefix } from "./refs";
 import { type ContextRow, type RequestExt, parseExt, requestExt } from "../context/render";
 import { PARTICIPANTS_MIGRATION, type WorkState, addressedParticipants, claimTopic, isParticipant, onRunUpdated, publishWorkState, routingOwner, topicBots, workState } from "./participants";
+import { giveUpChainRow, sendChainRow, stepReport } from "./chains";
+import type { RoomContext } from "../core/registry";
 
 registerRoomMigration({
   name: "bots-1",
@@ -296,7 +300,11 @@ registerRoomRpc("bots.workState", (room, actor, args) => {
   if (!room.isMember(actor.id)) throw new ApiError("forbidden", "not a member of this group");
   const topic = room.sql.exec("SELECT 1 FROM topics WHERE id = ?", s.topicId).toArray()[0];
   if (!topic) throw new ApiError("not_found", "topic not found");
-  room.commit((tx) => workState(room, tx, actor.id, s));
+  room.commit((tx) => {
+    workState(room, tx, actor.id, s);
+    // design-relay R2: the run's step of its chain (result back to the giver, stops).
+    stepReport(room, actor.id, s);
+  });
   return { ok: true };
 });
 
@@ -314,23 +322,6 @@ registerEventImporter((event, sql) => {
     run.botId,
     run.createdAt,
   );
-});
-
-/** 转交: the calling bot gives its topic to another bot (delegate.ts). The 群聊 has no claim. */
-registerRoomRpc("bots.transfer", (room, actor, args) => {
-  const { topicId, to } = args as { topicId: string; to: string };
-  if (!actor || actor.kind !== "bot") throw new ApiError("forbidden", "bots only");
-  if (!room.isMember(to)) throw new ApiError("forbidden", "not a member of this group");
-  if (isMainTopicId(topicId)) return { transferred: false };
-  const owner = routingOwner(room.sql, topicId);
-  if (owner && owner !== actor.id && !isParticipant(room.sql, topicId, actor.id)) throw new ApiError("forbidden", "only a member working in the topic hands it over");
-  room.sql.exec(
-    "INSERT INTO bot_topics (topic_id, bot_id, claimed_at) VALUES (?, ?, ?) ON CONFLICT (topic_id) DO UPDATE SET bot_id = excluded.bot_id, claimed_at = excluded.claimed_at",
-    topicId,
-    to,
-    Date.now(),
-  );
-  return { transferred: true };
 });
 
 /** Removes a bot's topic claims and participant rows in this group (the bot was deactivated). Internal. */
@@ -488,8 +479,11 @@ function withoutValues(a: AnswerData): AnswerData {
 
 type OutboxRow = {
   id: number;
-  /** "artifact" rows (page events before 1.1 made them transient) are dropped. */
-  kind: "message" | "card" | "answer" | "artifact";
+  /**
+   * "artifact" rows (page events before 1.1 made them transient) are dropped. "part" and
+   * "cancel" (design-relay R2, chains.ts): a split-off's result for its giver, a stop for a person.
+   */
+  kind: "message" | "card" | "answer" | "artifact" | "part" | "cancel";
   topic_id: string;
   payload: string;
   attempts: number;
@@ -602,6 +596,10 @@ async function plan(c: DeliverContext, row: OutboxRow): Promise<Plan | null> {
     return single(p.botId, () => deskStub(c.env, p.botId).cardAction(p.botId, press));
   }
   if (row.kind === "artifact") return null;
+  if (row.kind === "part" || row.kind === "cancel") {
+    const p = JSON.parse(row.payload) as { botId: string };
+    return single(p.botId, () => sendChainRow(c.env, c.groupId, row.kind, row.payload));
+  }
   if (row.kind === "answer") {
     const a = JSON.parse(row.payload) as OutboxAnswer;
     const args = await answerArgs(c, row, a);
@@ -686,17 +684,83 @@ export async function handOffEach<T extends { id: string }>(
   record: (done: string[]) => void,
 ): Promise<void> {
   const done = new Set(alreadyDone);
+  const left = targets.filter((t) => !done.has(t.id));
   const results = await Promise.allSettled(
-    targets
-      .filter((t) => !done.has(t.id))
-      .map(async (t) => {
-        await send(t);
-        done.add(t.id);
-        record([...done]);
-      }),
+    left.map(async (t) => {
+      await send(t);
+      done.add(t.id);
+      record([...done]);
+    }),
   );
   const failed = results.flatMap((r) => (r.status === "rejected" ? [r.reason as unknown] : []));
-  if (failed.length > 0) throw failed.find((e) => !(e instanceof LaneWaits)) ?? failed[0];
+  if (failed.length === 0) return;
+  const failure = failed.find((e) => !(e instanceof LaneWaits));
+  // Only lanes that wait behind an earlier row: the row waits too (deliverRow).
+  if (failure === undefined) throw failed[0];
+  // 接 6.1: the members whose hand-off failed say so when the room gives up.
+  const ids = left.filter((_, i) => results[i].status === "rejected" && !((results[i] as PromiseRejectedResult).reason instanceof LaneWaits)).map((t) => t.id);
+  throw new HandOffFailed(failure, ids);
+}
+
+/** The members a message could not be handed to (接 6.1: they say so when the room gives up). */
+export class HandOffFailed extends Error {
+  constructor(
+    readonly failure: unknown,
+    readonly botIds: string[],
+  ) {
+    super(failure instanceof Error ? failure.message : String(failure));
+    this.name = "HandOffFailed";
+  }
+}
+
+/** 接 6.1: what a member says in the topic when a message for it was dropped. */
+export const UNDELIVERED_TEXT = (excerpt: string) =>
+  excerpt ? `「${excerpt}」这条消息一个小时都没能交到我这里，我没有收到。需要的话请再发一次。` : "有一条消息一个小时都没能交到我这里，我没有收到。需要的话请再发一次。";
+
+/**
+ * The AI members a message was for when its hand-off failed before it reached any desk (the
+ * lookup itself failed): the DM peer, else the members it mentions, else the routing owner (as
+ * `messageTargets`), only active AI members.
+ */
+async function likelyBots(c: DeliverContext, m: OutboxMessage): Promise<string[]> {
+  const peer = dmPeer(c.sql, m.authorId);
+  const owner = routingOwner(c.sql, m.topicId);
+  const ids = [...new Set(peer ? [peer] : m.mentions.length > 0 ? m.mentions : owner ? [owner] : [])].filter((id) => id !== m.authorId);
+  if (ids.length === 0) return [];
+  const rows = await c.env.DB.prepare(`SELECT id FROM members WHERE kind = 'bot' AND deactivated = 0 AND id IN (${ids.map(() => "?").join(",")})`)
+    .bind(...ids)
+    .all<{ id: string }>();
+  return rows.results.map((r) => r.id);
+}
+
+/**
+ * 接 6.1: the room gave up handing a row to its members: each one says so in the topic and takes
+ * back its 👀 on the message. Bots only (a card press or answer names its bot; a message the
+ * members that failed). Never throws.
+ */
+async function undelivered(c: DeliverContext, row: OutboxRow, err: unknown): Promise<void> {
+  try {
+    const p = JSON.parse(row.payload) as Partial<OutboxMessage & OutboxCard & OutboxAnswer>;
+    const botIds = err instanceof HandOffFailed ? err.botIds : row.kind !== "message" ? (p.botId ? [p.botId] : []) : await likelyBots(c, p as OutboxMessage);
+    const messageId = row.kind === "answer" ? p.answer?.messageId : p.messageId;
+    const excerpt = row.kind === "message" && typeof p.body === "string" ? [...p.body.replace(/\s+/g, " ").trim()].slice(0, 30).join("") : "";
+    const room = roomStub(c.env, c.groupId);
+    for (const botId of botIds) {
+      const actor = { id: botId, level: "member" as const, kind: "bot" as const };
+      if (messageId) await room.rpc(c.groupId, ROOM_REACT_RPC, actor, { messageId, emoji: ACK_EMOJI, on: false }).catch(() => undefined);
+      const sent = await room.send(c.groupId, actor, {
+        t: "send",
+        rid: "bot",
+        groupId: c.groupId,
+        topicId: row.topic_id,
+        clientMsgId: `undelivered:${row.id}:${botId}`.slice(0, 64),
+        body: UNDELIVERED_TEXT(excerpt),
+      } as never);
+      if (!sent.ok) c.log.warn("undelivered note failed", { topicId: row.topic_id, err: sent.error });
+    }
+  } catch (e) {
+    c.log.warn("undelivered note failed", { topicId: row.topic_id, err: e });
+  }
 }
 
 /**
@@ -920,8 +984,18 @@ async function deliverRow(c: DeliverContext, st: DrainState, row: OutboxRow, hel
     if (err instanceof LaneWaits) return;
     const attempts = row.attempts + 1;
     if (Date.now() - row.created_at > HANDOFF_GIVE_UP_MS) {
+      if (row.kind === "part" || row.kind === "cancel") {
+        // Giving up writes the topic: only the room's alarm can (an after-commit hook cannot).
+        if (!(c as Partial<RoomContext>).commit) {
+          c.sql.exec("UPDATE bot_outbox SET attempts = ?, next_at = ? WHERE id = ?", attempts, Date.now() + 1000, row.id);
+          c.wakeAt(Date.now() + 1000);
+          return;
+        }
+        giveUpChainRow(c as RoomContext, c.log, row.kind, row.payload);
+      }
       c.sql.exec("DELETE FROM bot_outbox WHERE id = ?", row.id);
       c.log.error("bot hand-off dropped", { err, kind: row.kind, topicId: row.topic_id, attempts });
+      await undelivered(c, row, err);
       return;
     }
     const wait = Math.min(1000 * 2 ** Math.min(attempts, 20), RETRY_MAX_MS);
@@ -959,7 +1033,8 @@ export async function drainOutbox(c: DeliverContext): Promise<void> {
   if (next !== null) c.wakeAt(Math.max(next, Date.now() + 1000));
 }
 
-const HANDED_OFF = new Set(["message.created", "card.actioned", "card.answered"]);
+// run.updated, topic.updated and group.memberRemoved: chain rows (part, cancel) go out at once.
+const HANDED_OFF = new Set(["message.created", "card.actioned", "card.answered", "run.updated", "topic.updated", "group.memberRemoved"]);
 
 registerAfterCommit(async (event: Event, h) => {
   if (!HANDED_OFF.has(event.type)) return;

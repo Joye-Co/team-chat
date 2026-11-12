@@ -5,20 +5,20 @@ import { ApiError, unwrap } from "../../core/errors";
 import { MAX_RESULT_CHARS, Progress, TEXT, cut, firstLine, readableError, stripAcceptance } from "../dispatch";
 import { linkStub } from "../env";
 import type { SeqFrame } from "../link";
-import { type RunProof, doneCard, doneCardV1, hasProof, mergePrs, prRefs } from "../proof";
+import { type RunProof, type TestCounts, doneCard, doneCardV1, hasProof, mergePrs, prRefs, testsFromLog } from "../proof";
+import { needsReply, parseReport, reportOf } from "./report";
 import { TOPIC_LINK_RPC } from "../../integrations/links";
 import { stamp } from "../../context/render";
 import { MAX_FOLLOW_UPS, type RunRow, codeOf, isStallStatus, sanitizeAcceptance, sanitizePlan, sanitizeUsage, sessionIdOf } from "./core";
 import { DeskRuns, type RunRequest } from "./runs";
 import { briefText } from "../../agent/frontdesk";
 import { retroAfterRun } from "../../memory/retro";
+import { DAEMON_RESTARTED, MAX_DAEMON_RESUMES } from "../../agent/recovery";
 
 /** Room RPC of the cards feature: a run's CLI took the answer with this seq (`{ seq, runId, inputId }`). */
 export const CARD_ANSWER_TAKEN_RPC = "cards.answerTaken";
 
 export abstract class DeskEvents extends DeskRuns {
-  /** 分出去 (delegate.ts): the result of a part goes back to the member that gave it out. */
-  protected abstract reportPart(r: RunRow, ok: boolean, result: string): Promise<void>;
   /** 盯活 (stall.ts): a tool call of the run (loops). */
   protected abstract watchTool(r: RunRow, title: string): Promise<void>;
   /** 盯活 (stall.ts): continues a run that only promised work; true when it did. */
@@ -158,7 +158,13 @@ export abstract class DeskEvents extends DeskRuns {
           await this.output(r, ev as { outputId?: unknown; op?: unknown; body?: unknown }, f);
           break;
         case "input.accepted": {
-          this.sql.exec("UPDATE inputs SET accepted = 1 WHERE id = ? AND run_id = ?", String(ev.inputId), r.id);
+          const taken = this.sql.exec("UPDATE inputs SET accepted = 1 WHERE id = ? AND run_id = ?", String(ev.inputId), r.id).rowsWritten;
+          // 接 4.2: a person's message reached the run after its report: that report no longer
+          // says how the work ends (the run reports again, or ends normally as done).
+          if (taken > 0 && r.report) {
+            r.report = null;
+            this.sql.exec("UPDATE runs SET report = NULL WHERE id = ?", r.id);
+          }
           await this.answerTaken(r, String(ev.inputId));
           break;
         }
@@ -427,16 +433,36 @@ export abstract class DeskEvents extends DeskRuns {
       const raw = (f.resultText ?? "").trim();
       this.dropResultFromProgress(r, raw);
       // The acceptance block is shown by the done card: the posted text leaves it out.
-      const result = stripAcceptance(raw) || stripAcceptance((f.summary ?? "").trim()) || TEXT.done;
-      await this.end(r, "done", cut(result, MAX_RESULT_CHARS), "done", firstLine(result), true);
-      // 盯活: the CLI only promised the work and stopped. The desk continues it (at most 3 times).
-      if (await this.continuePromise(r, raw)) return;
+      // 接 4.2: the CLI's own report says whether the work is done or waits for a person.
+      const report = reportOf(r);
+      const result = stripAcceptance(raw) || stripAcceptance((f.summary ?? "").trim()) || report?.text || TEXT.done;
+      // 转交 (design-relay R2): a run that handed its work over waits for no one; it ends as done.
+      if (needsReply(report) && !this.handedOverOf(r.id)) {
+        const topicStatus = report.state === "waiting" ? "waiting_answer" : "blocked";
+        await this.end(r, "done", cut(result, MAX_RESULT_CHARS), topicStatus, report.text, false, this.requester(r));
+      } else {
+        await this.end(r, "done", cut(result, MAX_RESULT_CHARS), "done", firstLine(result), true);
+        // 转交 (design-relay R2): the work goes on with the other member; nothing follows here.
+        if (this.handedOverOf(r.id)) return;
+        // 盯活: the CLI only promised the work and stopped. The desk continues it (at most 3 times).
+        if (await this.continuePromise(r, raw)) return;
+      }
     } else if (f.status === "cancelled") {
-      await this.end(r, "cancelled", TEXT.cancelled, "blocked", TEXT.cancelled);
+      // 接 5.4: a plain stop on the machine reads like stopped by a person (input.ts `stop`). A
+      // cancel the daemon gives a reason for (it ran past maxDurationMs) is work that did not
+      // finish: the topic stays blocked, as before.
+      const aborted = typeof f.error === "string" && f.error.trim() !== "";
+      await this.end(r, "cancelled", TEXT.cancelled, aborted ? "blocked" : "open", TEXT.cancelled);
+    } else if (f.status === "failed" && f.error === DAEMON_RESTARTED) {
+      // 盯 1.7, 机 5.3: the daemon restarted under the run. It goes on in its session on the
+      // same machine with the recovery note; only when it cannot does it fail, saying why.
+      if (await this.resumeAfterRestart(r)) return;
+      await this.end(r, "failed", TEXT.interrupted, "blocked", TEXT.interrupted);
     } else {
       const why = firstLine(readableError(f.error ?? f.summary ?? ""), 300);
       await this.end(r, "failed", TEXT.failed(why), "blocked", cut(TEXT.failed(why), 280));
     }
+    if (this.handedOverOf(r.id)) return;
     // Follow-ups the CLI never took start a new run with the topic context.
     const unread = this.sql
       .exec<{ message_id: string; author_id: string; body: string; ack_message_id: string | null }>(
@@ -477,6 +503,14 @@ export abstract class DeskEvents extends DeskRuns {
     }
   }
 
+  /** Continues a run the daemon found unfinished when it restarted; false when it cannot. */
+  protected async resumeAfterRestart(r: RunRow): Promise<boolean> {
+    // A daemon that keeps restarting under the same work does not get it again and again.
+    const resumes = this.retryChain(r.id).filter((x) => x.summary === `restarted: ${DAEMON_RESTARTED}`).length;
+    if (resumes >= MAX_DAEMON_RESUMES) return false;
+    return this.restartElsewhere(r, DAEMON_RESTARTED, { sameSession: true }, { count: false });
+  }
+
   /** How many runs in a row before `r` were follow-ups. */
   protected followUpDepth(r: RunRow): number {
     let depth = 0;
@@ -502,7 +536,7 @@ export abstract class DeskEvents extends DeskRuns {
    * with intent "done" and its proof), keeps it as `resultMessageId`, sets the run and topic
    * status.
    */
-  protected async end(r: RunRow, status: RunStatus, body: string, topicStatus: TopicStatus, summary: string, success = false): Promise<void> {
+  protected async end(r: RunRow, status: RunStatus, body: string, topicStatus: TopicStatus, summary: string, success = false, waitingOn: string[] = []): Promise<void> {
     const now = Date.now();
     await this.closeProgress(r);
     await this.closeApprovalCard(r, "expired");
@@ -510,14 +544,24 @@ export abstract class DeskEvents extends DeskRuns {
     r.approval_id = null;
     r.paused_by = null;
     r.paused_at = null;
-    const id = await this.postResult(r, body, success);
+    // 转交 (design-relay R2): a run that handed its work over posts no result card; the card in
+    // the topic says who took it, and its run ends as done.
+    const handed = this.handedOverOf(r.id);
+    if (handed) {
+      status = "done";
+      topicStatus = "done";
+      waitingOn = [];
+      summary = TEXT.handedOver(handed.name);
+    }
+    const id = handed ? null : await this.postResult(r, body, success, waitingOn);
     if (id) {
       this.sql.exec("UPDATE runs SET result_message_id = ? WHERE id = ?", id, r.id);
       r.result_message_id = id;
     }
     await this.setStatus(r, status, { ended_at: now, summary: cut(summary, 280) || null });
-    await this.topic(r, topicStatus);
-    if (status !== "cancelled") await this.reportPart(r, success, body);
+    // The room ends the run's step of its chain: a split-off's result (stopped ones too) goes
+    // back to its giver from there.
+    await this.topic(r, topicStatus, waitingOn, { outcome: status, result: handed ? summary : body });
     this.retro(r, status, body);
     // A slot may be free now: the next queued run (排队) gets it. Not awaited: it takes other
     // runs' turns and must not wait inside this run's turn.
@@ -565,8 +609,12 @@ export abstract class DeskEvents extends DeskRuns {
   }
 
   /** Posts the result once (idempotent by client message id); returns its message id. */
-  protected async postResult(r: RunRow, body: string, success: boolean): Promise<string | null> {
+  protected async postResult(r: RunRow, body: string, success: boolean, mentions: string[] = []): Promise<string | null> {
     const cmid = `run:${r.id}:result`;
+    // Problem 5: the CLI posted its own done card (`chat-run card post`): that card is the
+    // result, and its last message is not posted a second time.
+    const ownCard = success ? this.meta(`doneCard:${r.id}`) : null;
+    if (ownCard) return ownCard;
     // A side chat answers as a plain message in the asker's DM.
     if (success && r.kind !== RUN_KIND_ASIDE) {
       try {
@@ -580,6 +628,7 @@ export abstract class DeskEvents extends DeskRuns {
           prs: mergePrs(proof.prs, prRefs(body)),
           artifacts: proof.artifacts,
           acceptance: this.acceptanceOf(r) ?? [],
+          tests: this.loggedTests(r),
         });
         // A plain answer (no tests, acceptance, pull requests or 产出) is a text message.
         if (card && hasProof(card)) return await this.post(r, cmid, body, { cardV2: card, card: doneCardV1(card) });
@@ -588,10 +637,41 @@ export abstract class DeskEvents extends DeskRuns {
       }
     }
     try {
-      return await this.post(r, cmid, body);
+      return await this.post(r, cmid, body, mentions.length > 0 ? { mentions } : {});
     } catch (err) {
       this.log.warn("result post failed", { runId: r.id, err });
       return null;
     }
+  }
+
+  /** 接 5.1: test counts from the run's recorded tool calls and results (its last test command). */
+  protected loggedTests(r: Pick<RunRow, "id">): TestCounts | null {
+    const rows = this.sql
+      .exec<{ frame: string }>(
+        `SELECT frame FROM run_log WHERE run_id = ? AND (frame LIKE '%"type":"tool.call"%' OR frame LIKE '%"type":"tool.result"%')
+         ORDER BY seq DESC LIMIT 400`,
+        r.id,
+      )
+      .toArray();
+    const events: unknown[] = [];
+    for (const x of rows.reverse()) {
+      try {
+        events.push((JSON.parse(x.frame) as { event?: unknown }).event);
+      } catch {
+        // A frame that does not parse shows nothing.
+      }
+    }
+    return testsFromLog(events);
+  }
+
+  /**
+   * 接 4.2: `chat-run report` (output op `run.report`): keeps the run's latest report; it counts
+   * when the run ends (finish). Result `{ state }`.
+   */
+  protected storeReport(r: RunRow, body: unknown): { state: string } {
+    const report = parseReport(body);
+    r.report = JSON.stringify({ ...report, at: Date.now() });
+    this.sql.exec("UPDATE runs SET report = ? WHERE id = ?", r.report, r.id);
+    return { state: report.state };
   }
 }

@@ -35,8 +35,14 @@ describe("delegation", () => {
     const b = await d.next((f) => f.t === "run.assign" && f.botMemberId === qa.id);
     expect(b.topicId).toBe(topicId);
     expect(b.prompt).toContain("Goal: 把登录页的测试补全");
-    const note = await c.waitEvent((e) => e.type === "message.created" && e.data.message.authorId === w.bot.id && e.data.message.body.startsWith("@qa 转交给你"));
-    expect(note.data.message.mentions).toEqual([qa.id]);
+    // The work order: written by code, marked as another AI member's, with the person's request.
+    expect(b.prompt).toContain("Work order from dev, an AI member, on behalf of Alice");
+    expect(b.prompt).toContain("please fix tests");
+    // The topic shows a card with 全部停止, not a plain line.
+    const card = await c.waitEvent((e) => e.type === "message.created" && e.data.message.authorId === w.bot.id && e.data.message.cardV2);
+    expect(card.data.message.cardV2.title).toBe("dev 把这件事转交给 qa");
+    expect(card.data.message.cardV2.actions[0]).toMatchObject({ label: "全部停止" });
+    expect(card.data.message.cardV2.actions[0].id).toMatch(/^chain\.stop:/);
 
     // An unknown member: the run hears which members it can name.
     d.event(a.runId, { type: "output", outputId: "o2", op: "member.handoff", body: { member: "nobody", goal: "x" } });

@@ -13,6 +13,7 @@ pub mod ai_service;
 pub mod appearance;
 pub(crate) mod bot_quick;
 pub(crate) mod general;
+pub mod github;
 pub mod login_item;
 pub(crate) mod machine_actions;
 pub(crate) mod machines;

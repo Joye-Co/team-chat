@@ -748,8 +748,9 @@ async fn unknown_run_after_reconnect_is_cancelled() {
 
 /// A daemon that starts after a crash finds an unfinished run folder: it stops the CLI that was
 /// left running, replays the frames the server has not acked, and ends the run with run.done
-/// (failed: daemon restarted) and a failed run.session. On a graceful stop it waits for the
-/// ack of run.done before it exits.
+/// (failed: daemon restarted, with the run's CLI session) and a failed run.session. On a
+/// graceful stop the runs it interrupts end the same way, and it waits for the ack of run.done
+/// before it exits.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn restart_recovers_unfinished_runs() {
     #[cfg(unix)]
@@ -787,9 +788,10 @@ async fn restart_recovers_unfinished_runs() {
     let lines = [
         frame(
             1,
-            RunEvent::Status {
-                state: "running".into(),
-                message: None,
+            RunEvent::Session {
+                session_id: "sess-rc1".into(),
+                runtime: "claude".into(),
+                model: None,
             },
         ),
         frame(
@@ -849,13 +851,16 @@ async fn restart_recovers_unfinished_runs() {
     let d = done(&frames);
     assert_eq!(d.status, "failed");
     assert_eq!(d.error.as_deref(), Some("daemon restarted"));
+    // The session the run reported: the server continues the run in it (盯 1.7).
+    assert_eq!(d.session_id.as_deref(), Some("sess-rc1"));
     assert!(matches!(frames.last(), Some(Up::RunSession(s)) if !s.ok));
     let meta: serde_json::Value =
         serde_json::from_slice(&std::fs::read(dir.join("run.json")).unwrap()).unwrap();
     assert!(meta["finishedAt"].is_u64());
 
-    // Graceful stop with a running run: run.done (cancelled) goes out, and the daemon exits
-    // soon after the server acks it.
+    // Graceful stop with a running run (a computer or service restart): run.done goes out as
+    // `daemon restarted`, so the server continues the run in its session (盯 1.7), and the
+    // daemon exits soon after the server acks it.
     send(&mut ws, &assign("r2", "fake", "hang", None)).await;
     collect(&mut ws, "r2", true, |f| {
         matches!(
@@ -869,10 +874,60 @@ async fn restart_recovers_unfinished_runs() {
     .await;
     stop_tx.send(()).unwrap();
     let frames = collect(&mut ws, "r2", true, |f| matches!(f, Up::RunDone(_))).await;
-    assert_eq!(done(&frames).status, "cancelled");
+    let d = done(&frames);
+    assert_eq!(d.status, "failed");
+    assert_eq!(d.error.as_deref(), Some("daemon restarted"));
     tokio::time::timeout(Duration::from_secs(8), daemon)
         .await
         .expect("daemon exits once run.done is acked")
+        .unwrap()
+        .unwrap();
+}
+
+/// A run that was itself a resume and stopped before its CLI reported a session: the restart
+/// reports the session it was resuming, so the conversation is not lost.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn restart_reports_the_resumed_session_when_none_was_logged() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let cfg = write_config(tmp.path(), &m.url);
+    let dir = tmp.path().join("work/runs/rc2");
+    std::fs::create_dir_all(dir.join("work")).unwrap();
+    let meta = serde_json::json!({ "runId": "rc2", "startedAt": now_ms() - 5000, "resumeSessionId": "sess-old" });
+    std::fs::write(dir.join("run.json"), meta.to_string()).unwrap();
+    let frame = serde_json::to_string(&Up::RunEvent {
+        run_id: "rc2".into(),
+        seq: 1,
+        at: now_ms(),
+        event: RunEvent::Status {
+            state: "running".into(),
+            message: None,
+        },
+    })
+    .unwrap();
+    std::fs::write(dir.join("events.jsonl"), format!("{frame}\n")).unwrap();
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
+    send(
+        &mut ws,
+        &welcome(vec![KnownRun {
+            run_id: "rc2".into(),
+            acked_seq: 1,
+        }]),
+    )
+    .await;
+    let frames = collect(&mut ws, "rc2", true, |f| matches!(f, Up::RunSession(_))).await;
+    let d = done(&frames);
+    assert_eq!(d.error.as_deref(), Some("daemon restarted"));
+    assert_eq!(d.session_id.as_deref(), Some("sess-old"));
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(8), daemon)
+        .await
+        .expect("daemon exits")
         .unwrap()
         .unwrap();
 }
@@ -1821,6 +1876,158 @@ async fn a_follow_up_run_resumes_the_session() {
     )
     .unwrap();
     assert!(argv.iter().any(|a| a == "--session-id"));
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+/// An AI member on an ACP agent through acceptance paths 3, 4 and 5 (usable, 接 3.6): hello says
+/// the agent continues sessions but has no effort and no read-only mode; the request and the
+/// run note reach the agent; a follow-up during a turn becomes the next prompt and a stop ends
+/// the run; the topic's next run loads the session in the same work folder and the agent
+/// remembers the first turn.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_acp_member_takes_a_task_follows_up_and_continues() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let store = tmp.path().join("acp-sessions");
+    let acp = fake_runtime(
+        "agent",
+        "acp",
+        "fake_acp.py",
+        &format!("FAKE_ACP_STORE = '{}'", store.display()),
+    );
+    // A configured effort list is not reported for an agent that takes none.
+    let cfg = write_config_with(tmp.path(), &m.url, &format!("{acp}efforts = [\"high\"]\n"));
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = tokio::time::timeout(Duration::from_secs(30), m.conns.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    match next(&mut ws).await {
+        Up::Hello { clis, .. } => {
+            let agent = clis.iter().find(|c| c.runtime == "agent").expect("agent");
+            assert_eq!(agent.resume, Some(true), "{agent:?}");
+            assert_eq!(agent.aside, Some(false));
+            assert_eq!(agent.efforts, None);
+            let claude = clis.iter().find(|c| c.runtime == "fake").expect("fake");
+            assert_eq!((claude.resume, claude.aside), (Some(true), Some(true)));
+        }
+        f => panic!("{f:?}"),
+    }
+    assert!(!store.exists(), "the probe started no session");
+    send(&mut ws, &welcome(vec![])).await;
+
+    // Path 3: the request (with its file line) and the run note reach the agent.
+    let request = "@dev fix the login page\n  [file f 01J · shot.png · image/png]";
+    send(&mut ws, &assign("a1", "agent", request, None)).await;
+    let fr = collect(&mut ws, "a1", true, |f| matches!(f, Up::RunDone(_))).await;
+    let d1 = done(&fr);
+    assert_eq!(d1.status, "succeeded", "{d1:?}");
+    let s1 = d1.session_id.clone().expect("session");
+    let first: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(store.join(format!("{s1}.json"))).unwrap())
+            .unwrap();
+    let got = first["prompts"][0].as_str().unwrap();
+    assert!(got.ends_with(request), "{got}");
+    assert!(got.contains("chat-run"), "the run note: {got}");
+    assert_eq!(
+        Path::new(first["cwd"].as_str().unwrap()),
+        work_of(tmp.path(), "a1")
+    );
+
+    // Path 4: the work is visible as it goes, a follow-up during the turn is the next prompt,
+    // and a stop ends the run.
+    send(&mut ws, &assign("a2", "agent", "slow job", None)).await;
+    let mut fr = collect(&mut ws, "a2", true, |f| {
+        matches!(
+            f,
+            Up::RunEvent {
+                event: RunEvent::MessageDelta { .. },
+                ..
+            }
+        )
+    })
+    .await;
+    send(
+        &mut ws,
+        &Down::RunInput {
+            answer: None,
+            artifact_event: None,
+            run_id: "a2".into(),
+            input_id: "in1".into(),
+            text: "also the docs".into(),
+            author_id: Some("u1".into()),
+        },
+    )
+    .await;
+    fr.extend(collect(&mut ws, "a2", true, |f| matches!(f, Up::RunDone(_))).await);
+    let evs = events(&fr);
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, RunEvent::InputAccepted { input_id } if input_id == "in1"))
+    );
+    assert_eq!(
+        evs.iter()
+            .filter(|e| matches!(e, RunEvent::TurnCompleted { .. }))
+            .count(),
+        2
+    );
+    assert_eq!(done(&fr).result_text.as_deref(), Some("acp: also the docs"));
+
+    send(&mut ws, &assign("a3", "agent", "slow again", None)).await;
+    collect(&mut ws, "a3", true, |f| {
+        matches!(
+            f,
+            Up::RunEvent {
+                event: RunEvent::TurnStarted { .. },
+                ..
+            }
+        )
+    })
+    .await;
+    send(
+        &mut ws,
+        &Down::RunCancel {
+            run_id: "a3".into(),
+            reason: None,
+        },
+    )
+    .await;
+    let fr = collect(&mut ws, "a3", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "cancelled");
+
+    // Path 5: the topic's next run continues the session, in the same work folder.
+    let mut a = assign("a4", "agent", "recall", None);
+    if let Down::RunAssign(r) = &mut a {
+        r.resume_session_id = Some(s1.clone());
+        r.topic_id = "a1".into();
+    }
+    send(&mut ws, &a).await;
+    let fr = collect(&mut ws, "a4", true, |f| matches!(f, Up::RunDone(_))).await;
+    let d4 = done(&fr);
+    assert_eq!(d4.status, "succeeded", "{d4:?}");
+    assert_eq!(d4.session_id.as_deref(), Some(s1.as_str()));
+    let text = d4.result_text.unwrap();
+    assert!(
+        text.starts_with("acp: remembered [") && text.contains(request),
+        "{text}"
+    );
+    let cwd = text.rsplit_once(" in ").map(|(_, c)| c).unwrap_or_default();
+    assert_eq!(Path::new(cwd), work_of(tmp.path(), "a1"), "{text}");
+    // The replayed history is not reported as this run's messages.
+    assert!(!events(&fr).iter().any(|e| matches!(
+        e,
+        RunEvent::Message { text, .. } | RunEvent::MessageDelta { text, .. } if text == "old answer"
+    )));
+    assert!(!tmp.path().join("work/runs/a4/work").exists());
 
     stop_tx.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(20), daemon)

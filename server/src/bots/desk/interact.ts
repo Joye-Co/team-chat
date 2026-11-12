@@ -16,9 +16,11 @@ import { answerBlocks, cardEventText, pageEventText } from "../answers";
 import { linkStub } from "../env";
 import { ETA_MS, type InteractionIn } from "../interact";
 import type { CardAnswerIn } from "../room";
+import { truthfulDoneCard } from "../proof";
 import { loadRunner } from "../store";
 import { type RunRow, result } from "./core";
 import { DeskTakeover } from "./takeover";
+import { isChainStop } from "./delegate_card";
 
 /** One coalescing window per card (or page version): the newest event per block in 3 s. */
 export const COALESCE_MS = 3000;
@@ -89,6 +91,11 @@ export abstract class DeskInteract extends DeskTakeover {
    */
   async interaction(botId: string, x: InteractionIn): Promise<DeskExpect> {
     this.bind(botId);
+    // design-relay R2: 全部停止 on a hand-over card stops the piece of work; it is no run input.
+    if (x.source.kind === "card" && isChainStop(x.source.actionId)) {
+      if (x.event === "action.press") await this.chainStopPressed(x.groupId, x.source.messageId, x.source.actionId, x.actorId);
+      return { mode: "none" };
+    }
     return this.serial("interact", async () => {
       if (!(await this.botActive())) return { mode: "none" };
       const runner = await loadRunner(this.env.DB, botId);
@@ -422,6 +429,8 @@ export abstract class DeskInteract extends DeskTakeover {
       if (r.kind === "aside") throw new ApiError("forbidden", "a side chat run is read only", "output.read_only");
       // 转交 / 分出去 (delegate.ts): desk to desk, not a client frame.
       if (op === "member.handoff" || op === "member.assign") return this.delegate(r, op, body);
+      // 接 4.2: how the run's work ended, in the CLI's words (events.ts).
+      if (op === "run.report") return this.storeReport(r, body);
       // 1.1: the desk note has no WebSocket frame; it is `PUT /v1/desk-note` in the run's group.
       if (op === "desk.note") {
         const text = (body as { text?: unknown } | null)?.text;
@@ -440,8 +449,16 @@ export abstract class DeskInteract extends DeskTakeover {
       const c = this.outputContext();
       for (const v of [...(frameValidators.get("*") ?? []), ...(frameValidators.get(frame.t) ?? [])]) await v(frame as never, c);
       if (frame.t === "send") {
+        // 接 5.1: a done card the CLI posts is the run's result (problem 5): it shows test counts
+        // from the run's log only, and passes without evidence as claims.
+        if (frame.cardV2 !== undefined) frame.cardV2 = truthfulDoneCard(frame.cardV2, this.loggedTests(r));
         const sent = await this.room(r).send(r.group_id, this.actor(), frame as never);
         if (!sent.ok) throw new ApiError(sent.error.code, sent.error.message, sent.error.reason);
+        // Problem 5: a done card the CLI posted in the run's topic is the run's result (postResult).
+        const v2 = (frame as { cardV2?: { intent?: unknown } }).cardV2;
+        if (v2?.intent === "done" && sent.value.message.topicId === r.topic_id) {
+          this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `doneCard:${r.id}`, sent.value.message.id);
+        }
         // 接 1.5: the card's answers and events go to the run that posted it, not to the newest run.
         if (frame.cardV2 || frame.card) this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `runCard:${sent.value.message.id}`, r.id);
         return { messageId: sent.value.message.id, message: sent.value.message };

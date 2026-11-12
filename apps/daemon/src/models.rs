@@ -404,6 +404,8 @@ mod codex_default_tests {
             ),
             efforts: None,
             gates: None,
+            resume: None,
+            aside: None,
         }
     }
 
@@ -851,6 +853,8 @@ mod tests {
             models: None,
             efforts: Some(vec!["low".into(), "max".into()]),
             gates: None,
+            resume: None,
+            aside: None,
         };
         assert!(accepts_effort(Some(&cli), "max"));
         assert!(!accepts_effort(Some(&cli), "medium"));
