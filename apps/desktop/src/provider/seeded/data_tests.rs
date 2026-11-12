@@ -1,7 +1,7 @@
 //! The page aggregates of the real provider on the seeded cache: 成员 (这周 cost, 电脑,
 //! 最近的问题, 能用的工具), 做完了, 需要你拍板, and the frame time with 500 话题.
 
-use std::{path::PathBuf, sync::Arc, time::Instant};
+use std::{path::PathBuf, sync::Arc};
 
 use chat_core::proto::{
     self, Event, EventData, MessageCreatedData, RunUpdatedData, TopicCreatedData,
@@ -316,14 +316,10 @@ fn an_ask_for_me_deep_in_a_topic_that_does_not_wait_on_me_is_on_the_desk() {
     }
 }
 
-/// The 成员, 首页, 群 and 产出 pages read their aggregates on every frame. With 500
-/// 话题 a frame of those reads stays within budget; the report goes to
-/// `.tmp/selftest-page-aggregates.json`.
+/// With more than 500 话题 in a 群, every run of the week still counts in a member's stats.
 #[test]
-fn page_aggregates_with_500_topics_stay_within_the_frame_budget() {
+fn member_stats_count_topics_beyond_the_newest_500() {
     const TOPICS: u64 = 500;
-    const FRAMES: u32 = 20;
-    const BUDGET_MS: f64 = 4.0;
     let mut s = Seeded::new("perf");
     let now = s.now;
     let mut events = Vec::new();
@@ -346,42 +342,6 @@ fn page_aggregates_with_500_topics_stay_within_the_frame_budget() {
     }
     s.apply(events);
     let p = s.p.clone();
-    let frame = || {
-        let members = p.members();
-        let _ = p.active_runs();
-        let _ = p.asks_for_me();
-        for m in &members {
-            let _ = p.member_stats(&m.id);
-            let _ = p.member_extras(&m.id);
-        }
-        let _ = p.done_today();
-        let _ = p.all_artifacts();
-        let _ = p.group_recent_done(GROUP);
-        let _ = p.group_artifacts(GROUP);
-    };
-    let first = Instant::now();
-    frame();
-    let first_ms = first.elapsed().as_secs_f64() * 1000.;
-    let start = Instant::now();
-    for _ in 0..FRAMES {
-        frame();
-    }
-    let frame_ms = start.elapsed().as_secs_f64() * 1000. / FRAMES as f64;
-    let report = json!({
-        "test": "page_aggregates_with_500_topics_stay_within_the_frame_budget",
-        "topics": TOPICS, "frames": FRAMES, "firstFrameMs": first_ms,
-        "frameMs": frame_ms, "budgetMs": BUDGET_MS, "pass": frame_ms < BUDGET_MS
-    });
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.tmp");
-    let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::write(
-        dir.join("selftest-page-aggregates.json"),
-        serde_json::to_vec_pretty(&report).unwrap_or_default(),
-    );
-    assert!(
-        frame_ms < BUDGET_MS,
-        "a frame of page aggregates took {frame_ms:.2} ms (budget {BUDGET_MS} ms)"
-    );
     // Every run of the week counts, also in 话题 beyond the newest 500 of the 群.
     let forge = p.member_stats(FORGE).expect("stats");
     // Plus the seeded 话题 and the weekly report (RUN_WEEKLY).

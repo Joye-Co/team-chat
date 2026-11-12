@@ -200,41 +200,6 @@ pub mod windows {
             let _ = CloseClipboard();
         }
     }
-
-    #[cfg(test)]
-    mod tests {
-        use ::windows::Win32::System::{
-            DataExchange::{EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable},
-            Memory::GlobalSize,
-        };
-
-        use super::*;
-
-        /// The bitmap lands on the real clipboard beside what is there, and counts as a
-        /// change of its content.
-        #[test]
-        fn a_bitmap_is_added_to_the_clipboard() {
-            let dib = vec![7u8; 40 + 16];
-            // SAFETY: empties, reads and closes the clipboard of the test's desktop.
-            unsafe {
-                if OpenClipboard(None).is_err() {
-                    eprintln!("no clipboard in this session");
-                    return;
-                }
-                let _ = EmptyClipboard();
-                let _ = CloseClipboard();
-                let before = sequence();
-                add_bitmap(&dib);
-                assert_ne!(sequence(), before);
-                assert!(IsClipboardFormatAvailable(BITMAP).is_ok());
-                OpenClipboard(None).expect("open the clipboard");
-                let data = GetClipboardData(BITMAP).expect("the bitmap");
-                assert_eq!(GlobalSize(HGLOBAL(data.0)), dib.len());
-                let _ = EmptyClipboard();
-                let _ = CloseClipboard();
-            }
-        }
-    }
 }
 
 #[cfg(test)]

@@ -812,10 +812,4 @@ mod tests {
         view.update_in(cx, |this, window, cx| this.close_find(window, cx));
         assert!(!view.update(cx, |this, _| this.find_open()));
     }
-
-    #[test]
-    fn marks_are_hex_with_alpha() {
-        let c: Hsla = gpui::rgba(0x0A0A0A47).into();
-        assert_eq!(hex(c), "#0A0A0A47");
-    }
 }

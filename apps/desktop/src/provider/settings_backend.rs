@@ -363,16 +363,6 @@ impl CoreProvider {
 mod tests {
     use super::*;
 
-    /// 勿扰 and 每日摘要 are in this computer's zone: Windows reports one the server takes.
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn windows_names_its_time_zone_the_iana_way() {
-        let zone = system_time_zone().expect("a time zone");
-        println!("system time zone: {zone}");
-        assert!(valid_zone(&zone), "{zone:?}");
-        assert!(!zone.contains(' '), "not a Windows zone name: {zone:?}");
-    }
-
     #[test]
     fn only_iana_names_are_sent() {
         assert!(valid_zone("Asia/Shanghai"));

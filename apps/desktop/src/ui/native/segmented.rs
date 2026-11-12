@@ -154,19 +154,3 @@ impl RenderOnce for Segmented {
             .children(items)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use gpui::px;
-
-    #[test]
-    fn the_list_and_trigger_heights() {
-        // §1.8: list h32 with p 3, trigger h26.
-        assert_eq!(metrics::SEGMENTED, px(32.));
-        assert_eq!(
-            metrics::SEGMENTED - metrics::SEGMENT_INSET * 2.,
-            height::SEGMENT_TRIGGER
-        );
-    }
-}

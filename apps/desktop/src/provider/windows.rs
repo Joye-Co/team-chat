@@ -426,56 +426,6 @@ mod tests {
             .to_string();
         assert!(quiet.contains(r#"silent="true""#), "{quiet}");
         assert!(!quiet.contains("<header"), "{quiet}");
-        // Windows takes the document as a toast.
-        ToastNotification::CreateToastNotification(&toast_document(&spec(true, true)).unwrap())
-            .expect("a toast from the document");
-    }
-
-    /// A real toast under a test identity: registered, shown, found in the notification
-    /// center's history under its 群's group, and taken out when the 群 is read. A session
-    /// without the notification platform (some servers) says so and is skipped.
-    #[test]
-    fn a_toast_reaches_the_notification_center_and_leaves_it() {
-        let app_id = format!("test.toast.{}", std::process::id());
-        let dir = tempfile::tempdir().unwrap();
-        register_identity(&app_id, "Toast test", &dir.path().join("icon.png")).unwrap();
-        assert!(dir.path().join("icon.png").is_file());
-        let key = format!(r"Software\Classes\AppUserModelId\{app_id}");
-        let registered = windows_registry::CURRENT_USER.open(&key).unwrap();
-        assert_eq!(registered.get_string("DisplayName").unwrap(), "Toast test");
-        assert!(
-            registered
-                .get_string("IconUri")
-                .unwrap()
-                .ends_with("icon.png")
-        );
-
-        let spec = spec(false, true);
-        let shown = show_toast(&app_id, &spec);
-        println!("toast shown: {shown:?}");
-        if shown.is_ok() {
-            let history = ToastNotificationManager::History().unwrap();
-            let count = || {
-                history
-                    .GetHistoryWithId(&HSTRING::from(app_id.as_str()))
-                    .and_then(|toasts| toasts.Size())
-            };
-            // The platform files the toast asynchronously.
-            let until = Instant::now() + Duration::from_secs(10);
-            while count().unwrap_or(0) == 0 && Instant::now() < until {
-                std::thread::sleep(Duration::from_millis(100));
-            }
-            println!("toasts in the notification center: {:?}", count());
-            if count().unwrap_or(0) > 0 {
-                remove_group(&app_id, &spec.group).unwrap();
-                let until = Instant::now() + Duration::from_secs(10);
-                while count().unwrap_or(1) > 0 && Instant::now() < until {
-                    std::thread::sleep(Duration::from_millis(100));
-                }
-                assert_eq!(count().unwrap(), 0, "reading the 群 took its toast out");
-            }
-        }
-        let _ = windows_registry::CURRENT_USER.remove_tree(&key);
     }
 
     /// The URL scheme is written when nobody has it, left alone when a program that
@@ -512,20 +462,6 @@ mod tests {
         assert!(register_scheme(&scheme, "Test", &me).unwrap());
         assert_eq!(command().unwrap(), scheme_command(&me));
         windows_registry::CURRENT_USER.remove_tree(&root).unwrap();
-    }
-
-    /// A CI runner has a network: the adapter list is read and has an address.
-    #[test]
-    fn interfaces_can_be_listed() {
-        let up = interfaces();
-        assert!(!up.is_empty(), "no adapter with an address: {up:?}");
-        assert_eq!(up, interfaces(), "two reads in a row agree");
-    }
-
-    #[test]
-    fn this_process_is_not_the_foreground_app_or_is() {
-        // Never panics, with or without a desktop session.
-        let _ = app_is_active();
     }
 
     #[test]

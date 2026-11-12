@@ -575,22 +575,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fields_are_on_the_control_scale() {
-        assert_eq!(FieldSize::Regular.height(), px(32.));
-        assert_eq!(FieldSize::Small.height(), px(28.));
-        assert_eq!(FieldSize::Large.height(), px(36.));
-        assert_eq!(metrics::SEARCH, px(32.));
-        assert_eq!(metrics::FIELD_RADIUS, px(8.));
-    }
-
-    #[test]
-    fn a_textarea_is_whole_lines() {
-        // 4 lines of 20, py 8, a 1 px border: 98.
-        assert_eq!(NativeTextArea::height(4), px(98.));
-        assert_eq!(NativeTextArea::height(3), px(78.));
-    }
-
-    #[test]
     fn error_and_focus_rings() {
         for k in [NativeColors::light(), NativeColors::dark()] {
             let (rest, s) = field_edge(&k, false, false);

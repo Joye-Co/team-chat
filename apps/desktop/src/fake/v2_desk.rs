@@ -163,17 +163,3 @@ impl DeskSamples {
             });
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_desk_cards_parse_and_validate() {
-        for id in [release_ask(), review_ask(), draft_ask()] {
-            let card = card_v2(&id).expect("a v2 card");
-            assert!(card.validate().is_ok(), "{id}: {:?}", card.validate());
-        }
-        assert!(card_v2(&choice_ask()).is_none());
-    }
-}

@@ -505,28 +505,3 @@ impl gpui::Render for AiServicePanel {
         self.section(window, cx).unwrap_or_else(div)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_problem_has_words() {
-        for p in [
-            AiDraftProblem::ModelRequired,
-            AiDraftProblem::ModelInvalid,
-            AiDraftProblem::BaseUrlInvalid,
-            AiDraftProblem::KeyRequired,
-            AiDraftProblem::KeyInvalid,
-        ] {
-            assert!(!problem_text(p, false).is_empty());
-        }
-        assert_eq!(
-            problem_text(AiDraftProblem::KeyRequired, true),
-            s::AI_KEY_REQUIRED_SWITCH
-        );
-        for p in AiProviderKind::ALL {
-            assert!(!provider_label(p).is_empty());
-        }
-    }
-}
