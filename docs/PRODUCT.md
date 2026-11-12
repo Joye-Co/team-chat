@@ -135,10 +135,9 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
   only when I press its button.
 - **实时查看 + 接管**: a member's computer beside the topic while it works: its terminal rebuilt from
   the run's steps, the plan, 验收标准, and 回放 by step. Each run shows one state (see "AI members at
-  work"). 暂停 holds the run and 继续 lets it go on; 停止 cancels the run. 接管 (hold it for me
-  and run commands in the run's 工作目录) and 交还 (let it continue with a summary of what I did)
-  are designed and the screens are built, but the server half is not on main yet, so 接管 fails
-  for now (see "Run states and 接管").
+  work"). 暂停 holds the run and 继续 lets it go on; 接管 holds it for me and opens a command box in
+  the run's 工作目录 (when its computer supports take-over); 交还 lets it continue from that step
+  with a summary of what I did; 停止 cancels the run.
 - **⌘K 交代或搜索**: one field to hand work to a member (交给 <member> starts a topic addressed to
   it in the chosen 群; ⌘↵ hands it to the main bot) or to find 话题, 产出 and 成员.
 - **群**: opening a 群 (or a 私聊) shows its 群聊: one chat timeline with the composer at the
@@ -292,14 +291,12 @@ design it came from.
   responsible for a 话题 alone.
 - **Run states and 接管**: every run shows one state: 正在做, waiting for a person (a question, an
   approval, a reply), 在等电脑 (queued, offline, starting, a limit), 已暂停, taken over, 做完了,
-  失败 or 已停止; the design, and who may do what, is in
-  [plans/usable/design-takeover.zh.md](plans/usable/design-takeover.zh.md). On main the server
-  sets `BotRun.phase` only for a run waiting for a subscription limit and for ended runs (做完了,
-  needs a reply, 失败, 已停止); the app works out the rest from `status` and `pausedBy`. The
-  server does 暂停 and 继续 (`POST /v1/runs/:id/pause` and `/resume`). The server half of 接管 is
-  not built yet: the `/takeover` route, `holdKind`, the live phases, the 交还 summary and the
-  command route. The app and the daemon (feature `takeover`) have their half, so until the server
-  half lands, 接管 answers with an error.
+  失败 or 已停止. The server works it out for every run (`BotRun.phase`, with `holdKind`,
+  `takeover` and `lastHandback`); the app works it out from `status` and `pausedBy` only for an
+  older server. 暂停, 继续, 接管 and 交还 move between them (`POST /v1/runs/:id/pause`, `/resume`,
+  `/takeover`; the commands of 接管 go through `/v1/runs/:id/commands`); who may do which is in
+  [plans/usable/design-takeover.zh.md](plans/usable/design-takeover.zh.md). The command box of 接管
+  needs the computer's daemon to support it (feature `takeover`).
 - **Memory** (沉淀): four layers, the team's, a 群's, an AI member's and a person's own. What was
   learned in a 群 is read only by people in that 群; a person's own only by that person. AI members
   note what they learn during the day; once a night in the team's time zone the AI 服务 sorts the
