@@ -1004,21 +1004,24 @@ GET  /v1/machine/runs/:id/memories?q=<text>&limit=<1-50, default 10>   -> Memori
 ```
 
 - **Search** (`memory.search`): the prompt carries only part of what is remembered (8 KB, chosen
-  for the request). The search reads exactly what the run's prompt could carry: the team's, the
-  run's group's, the member's (its own pending notes too) and the requester's active memories,
-  each memory learned in a group only when everyone in the run's group is in that group. Hits
+  for the request). The search reads what the run's prompt could carry: the team's, the run's
+  group's, the member's (its own pending notes too) and the active memories of the person the run
+  works for, plus the `group` memories of the other groups the run may read; a memory learned in a
+  group only when the run may read that group (protocol.md, "Memory", Source group). Hits
   match the query's words or Chinese two-character words, best first; each hit counts one use
   (protocol.md, "Memory"). A side chat run may search. An empty `q` is `invalid`.
 - A run that names a memory's id (as `[id]`) in its result or progress counts one use of it, when
   it may read it.
 
 - A note (`memory.note`): the run must be on the calling machine, active and not a side chat, as for files.
-- `member` is the run's AI member (its lessons and playbooks), read only in the run's group
-  (`fromGroup`), `person` the person who asked for the run (their preferences), `group` the run's
-  group (conventions people said in the group; a direct conversation has none: `forbidden`). A
-  `group` note cites the person's message it comes from (`--source`, `sourceMessageId`); without
-  one, or when that message is not a person's, it goes to the member's own memory of this group.
-  Teams' memory is never written by a run.
+- `member` is the run's AI member (its lessons and playbooks), read only by runs that may read the
+  run's group (`fromGroup`), `person` the person the run works for (their preferences; none:
+  `invalid`), `group` the run's group (conventions people said in the group; a direct conversation
+  has none: `forbidden`). A `group` note cites the person's message it comes from (`--source`,
+  `sourceMessageId`); without one, or when that message is not a person's, it goes to the member's
+  own memory of this group. After the run read another group, `group` is `forbidden` (reason
+  `memory.read_other_group`) and `member` and `person` notes get that group as `fromGroup`
+  (`"unknown"` after two or more). Teams' memory is never written by a run.
 - The memory is `pending` with source `{ kind: "run", ids: [runId] }` until the daily
   consolidation. The member's own pending lessons are already in its next runs' prompts.
 - Text is redacted before it is stored. At most 10 notes per run (`rate_limited` after that).
