@@ -1,9 +1,9 @@
 # Machine protocol (version 1)
 
 The contract between the machine daemon (`apps/daemon`) and the server's **MachineLink**
-Durable Object (one per machine). The daemon runs on a team machine (a shared Mac, a member's
-laptop, later a container), connects out to the server (no inbound ports), receives runs for
-bot members, runs a coding CLI for each run in its own folder, and streams normalized progress
+Durable Object (one per machine). The daemon runs on a computer, the team's (a shared Mac, a
+Linux host with VMs) or one person's (their own laptop), connects out to the server (no inbound
+ports), receives runs for bot members, runs a coding CLI for each run in its own folder, and streams normalized progress
 back. **BotDesk** (one per bot member) decides what to run and turns run events into topic
 messages; it talks to MachineLink, never to the daemon.
 
@@ -20,11 +20,11 @@ made by the server (except the ids below that the daemon or the CLI makes), one 
 
 ## Machine token
 
-- The owner adds a machine in settings (机器) or with `bun scripts/admin.ts machine --name
-  <n> [--labels a,b]` (the token goes to a mode-600 file, never to the terminal):
-  `POST /v1/machines`. The server makes a row in D1 (`machines`: id, name, labels, token hash,
-  created by and at, revoked at, last seen) and a token `tm_` + 43 characters of base64url
-  (32 random bytes), shown once. The server stores only the SHA-256 hex digest, like member
+- An admin adds a team machine, and anyone their own, in the app (设置 › 电脑: 用这台电脑 or
+  添加电脑) or with `bun server/scripts/admin.ts machine --name <n> [--labels a,b]` (the token goes to a
+  mode-600 file, never to the terminal): `POST /v1/machines`. The server makes a row in D1
+  (`machines`: id, name, labels, token hash, created by and at, revoked at, last seen) and a
+  token `tm_` + 43 characters of base64url (32 random bytes), shown once. The server stores only the SHA-256 hex digest, like member
   tokens. `DELETE /v1/machines/:id` revokes it: the link closes with
   `error.code = "unauthorized"` and new upgrades get 401.
 - The daemon reads the token from `token_file` (mode 600; the daemon refuses group- or
@@ -219,7 +219,7 @@ RunEvent =
 
 ## Metrics
 
-Since 1.2.7 every heartbeat carries `metrics`, the numbers of the owner's monitor (protocol.md,
+Since 1.2.7 every heartbeat carries `metrics`, the numbers of the machine monitor (protocol.md,
 "Machine monitor"). Old servers ignore the field; the server reads it apart from the heartbeat, so
 metrics it cannot parse are dropped and the heartbeat still renews the leases. Every number is
 optional: a platform may not have it.
@@ -257,8 +257,9 @@ HomeUse        = { memberId, usedBytes /* on the host disk */, sizeBytes? /* abs
 
 ## Accounts and keys (feature `accounts`)
 
-The owner signs the machine's CLIs in and gives it API keys from the app (团队管理 › 订阅账号 and
-API 密钥), never through a shell on the machine. A daemon that can do this reports feature
+Whoever manages the machine (an admin for a team machine, its owner for a personal one) signs
+its CLIs in and gives it API keys from the app (团队管理 › 账号与密钥: 订阅账号 and API 密钥),
+never through a shell on the machine. A daemon that can do this reports feature
 `accounts` and its public key; the server sends these frames only to such a daemon.
 
 ```ts
@@ -658,7 +659,7 @@ run.assign += { effort?: string }   // only to a daemon with feature "effort"
 
 The daemon reports what each CLI can run, so settings offer a list instead of a text field. It
 finds the list when it connects (each `hello`), with a 15 s limit per CLI; a CLI it cannot ask
-reports no `models`, and settings then let the owner type a model id.
+reports no `models`, and settings then let an admin type a model id.
 
 - **Codex**: a short `codex app-server` session: `initialize`, `initialized`, `model/list`. Each
   model that is not `hidden` becomes a `CliModel` (`id`, `displayName` as `name`,

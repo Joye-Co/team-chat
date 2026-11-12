@@ -69,6 +69,47 @@ The app checks the server for a new version and offers to install it; it restart
 To update by hand, download the new DMG (step 1) and drag the app onto Applications again,
 choosing **Replace**. A copy that you download by hand needs step 3 again.
 
+## Let AI members work on your computer
+
+When you @mention an AI member, it works on a computer with a coding tool (Claude Code or
+Codex). Used alone, the simplest computer is the one you are on (a Mac or a Windows PC). If your
+team has computers for this (a Linux host, for example), skip this part and @mention the team's
+AI members.
+
+1. **Install a coding tool and sign in.** Claude Code: on a Mac run
+   `curl -fsSL https://claude.ai/install.sh | bash` in Terminal, on Windows
+   `irm https://claude.ai/install.ps1 | iex` in PowerShell, then run `claude` and sign in with
+   your subscription. Codex: install it and run `codex login`.
+2. **用这台电脑**: open **Settings › 电脑** and click **用这台电脑**. It first says two things: AI
+   members on this computer can do what you can (your files, your commands, the accounts you are
+   signed in to), and the settings of your own coding tools (hooks, plugins, global instructions)
+   come along into everything they do. After you confirm, the app registers this computer as
+   **your own computer**, installs and starts the background service (launchd on a Mac, a
+   scheduled task on Windows), which then updates with the app.
+3. **Check the three lines** (the card of this computer in **团队管理 › 电脑**): the background
+   service runs, Claude Code or Codex was found, and it is signed in. A missing line gives the
+   command to run (with **重新检查**) or a **登录** button. AI members work on this computer only
+   once all three are fine.
+4. **Add an AI member** (an admin does this; used alone, you are the admin): **团队管理 › 成员 ›
+   添加 AI 成员**. Give it a name and a 岗位, choose **在电脑上工作**, pick its **运行方式** from the
+   list (only those the computers have), and under **在哪台电脑干活** this computer or **任意一台空闲电脑**.
+5. **Hand it the first piece of work**: @mention it in a 群 and say what to do. The Chinese
+   onboarding guide ([ONBOARDING.zh.md](ONBOARDING.zh.md), section 6) shows how.
+
+Good to know:
+
+- Your own computer only does work **you** ask for; work that someone else gives the same AI
+  member runs on the team's computers. In **Settings › 电脑**, **在这里做的事…** on your computer
+  picks which AI members do your work there, and their code folder on it.
+- Models are set once for the team: an admin picks one per 运行方式 in **团队管理 › AI 服务**
+  (without one, the coding tool's own default).
+- AI 服务: the same page takes an API key of a model provider (DeepSeek, for example). With it, AI
+  members get a front desk: a simple question gets an answer at once, a request that lacks
+  something gets one question first, small talk gets no reply; topic titles, summaries and the
+  nightly memory sorting use it too. Without one everything works, and every request goes
+  straight to a computer.
+- To stop using this computer, see step 0 of [Uninstall](#uninstall).
+
 ## Where your data is
 
 | What | Where |
