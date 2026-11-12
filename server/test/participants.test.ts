@@ -144,10 +144,13 @@ describe("several AI members in one topic", () => {
     await waitUntil(() => c.events().filter((e) => e.type === "reaction.changed" && e.data.messageId === sent.message.id && e.data.emoji === ACK_EMOJI).length === 2);
     // Both runs mark their member working on their own: wait for the second mark, not just the second row.
     await waitUntil(() => lastParticipants(c, topicId)?.filter((p) => p.working).length === 2, 5000, "two working participants");
-    expect(lastParticipants(c, topicId)?.map((p) => [p.memberId, p.working])).toEqual([
-      [w.bot.id, true],
-      [ops.id, true],
-    ]);
+    // Rows are oldest first; the two runs start in their own desks, so either may come first.
+    expect(lastParticipants(c, topicId)?.map((p) => [p.memberId, p.working])).toEqual(
+      expect.arrayContaining([
+        [w.bot.id, true],
+        [ops.id, true],
+      ]),
+    );
     d.send({ t: "run.accept", runId: a.runId });
     d.send({ t: "run.accept", runId: b.runId });
     // One done, one failed at the same time: the topic is stuck, not done.
