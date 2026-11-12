@@ -9,6 +9,8 @@
     "at": 1762128060000,
     "status": "failed",
     "durationMs": 10,
-    "failure": { "kind": "quota_paused" }
+    "failure": {
+      "kind": "quota_paused"
+    }
   }
 }

@@ -9,6 +9,8 @@
     "at": 1762128060000,
     "status": "failed",
     "durationMs": 10,
-    "failure": { "resetsAt": 1762142400000 }
+    "failure": {
+      "resetsAt": 1762142400000
+    }
   }
 }

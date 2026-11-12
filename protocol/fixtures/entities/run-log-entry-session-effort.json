@@ -7,6 +7,12 @@
     "runId": "01JBX0RUN000000000000000AU",
     "seq": 1,
     "at": 1762128001000,
-    "event": { "type": "session", "sessionId": "s-1", "runtime": "claude", "model": "claude-test-1", "effort": "high" }
+    "event": {
+      "type": "session",
+      "sessionId": "s-1",
+      "runtime": "claude",
+      "model": "claude-test-1",
+      "effort": "high"
+    }
   }
 }

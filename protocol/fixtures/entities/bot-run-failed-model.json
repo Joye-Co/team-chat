@@ -16,6 +16,8 @@
     "updatedAt": 1762128005000,
     "model": "claude-test-1",
     "effort": "high",
-    "failure": { "kind": "signed_out" }
+    "failure": {
+      "kind": "signed_out"
+    }
   }
 }

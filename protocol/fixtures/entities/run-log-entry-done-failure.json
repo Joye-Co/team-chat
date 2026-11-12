@@ -10,6 +10,9 @@
     "status": "failed",
     "error": "You've hit your session limit · resets 3pm",
     "durationMs": 4100,
-    "failure": { "kind": "limit", "resetsAt": 1762142400000 }
+    "failure": {
+      "kind": "limit",
+      "resetsAt": 1762142400000
+    }
   }
 }
