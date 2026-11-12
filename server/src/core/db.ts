@@ -15,6 +15,8 @@ export interface MemberRow {
   /** 1.1 (migration 0008): 汇报给 and the weekly spending limit; absent before it ran. */
   reports_to?: string | null;
   weekly_budget_cents?: number | null;
+  /** Usable (migration 0017_roles): 1 for a 所有者; absent before it ran. */
+  team_owner?: number;
 }
 
 export interface GroupRow {
@@ -40,12 +42,18 @@ export function toMember(row: MemberRow): Member {
     avatarUrl: row.avatar_url,
   };
   if (row.deactivated) m.deactivated = true;
+  if (isTeamOwner(row)) m.teamOwner = true;
   // Only known ids reach the wire: clients reject unknown ones.
   const character = CharacterId.safeParse(row.character);
   if (character.success) m.character = character.data;
   if (row.reports_to) m.reportsTo = row.reports_to;
   if (typeof row.weekly_budget_cents === "number" && row.weekly_budget_cents >= 0) m.weeklyBudgetCents = row.weekly_budget_cents;
   return m;
+}
+
+/** A 所有者: a human admin marked team_owner (design-roles 3.1). */
+export function isTeamOwner(row: Pick<MemberRow, "kind" | "level" | "team_owner">): boolean {
+  return row.team_owner === 1 && row.level === "owner" && row.kind === "human";
 }
 
 export async function getMember(db: D1Database, id: string): Promise<MemberRow | null> {

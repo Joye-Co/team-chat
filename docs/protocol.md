@@ -2136,14 +2136,22 @@ only at the moment a command would run: the machine stops the command and asks
 
   | Kind | Matches |
   | --- | --- |
-  | `mergeMain` | `gh pr merge`; `git push` naming `main`/`master` as a branch or refspec target (`origin main`, `HEAD:main`, `x:refs/heads/master`) |
+  | `mergeMain` | `gh pr merge`; `git push` naming `main`/`master` as a branch or refspec target (`origin main`, `HEAD:main`, `x:refs/heads/master`), also with git's options first (`git -C repo push origin main`); a merge through the GitHub API (`gh api`/`curl` with `PUT` to `…/pulls/<n>/merge`, GraphQL `mergePullRequest` or `enablePullRequestAutoMerge`); an MCP tool `mcp__<server>__merge_pull_request`, and `…__push_files`/`…__create_or_update_file` with `"branch":"main"` |
   | `deployProd` | `wrangler deploy`/`publish` with `--env`/`-e` `prod`/`production`; `vercel … --prod`; `netlify deploy … --prod`; `fly deploy`/`flyctl deploy`; `npm`/`bun`/`pnpm`/`yarn run deploy:prod` (also `deploy-prod`, `deploy_prod`, `production`) |
   | `prodConfig` | `wrangler secret put`/`delete`/`bulk` with `--env prod`; `vercel env add`/`rm` … `production`; `fly secrets set`/`unset`/`import` |
   | `deleteData` | `rm` with flags of `/`, `/*`, `~`, `~/`, `~/*`, `$HOME`; on Windows `Remove-Item`/`ri`/`rm`/`rmdir`/`rd`/`del`/`erase` of a drive's root (`C:\`, `C:\*`, `\`), of `~`, `$HOME`, `$env:USERPROFILE` or `%USERPROFILE%` itself, and `rm` with flags of a Git Bash drive (`/c/`); `DROP TABLE`/`DATABASE`/`SCHEMA` or `TRUNCATE TABLE` through `wrangler d1 execute`, `psql`, `mysql`, `sqlite3`; `DELETE FROM` through `wrangler d1 execute --remote`; `wrangler d1 delete`, `wrangler kv namespace`/`key`/`bulk delete`, `wrangler r2 bucket`/`object delete`; `gh repo delete` |
   | `externalPublish` | `npm`/`bun`/`pnpm`/`yarn publish`; `cargo publish`; `gh release create`; `twine upload` |
 
   A force push to a work branch is not gated (the agent rebases its own PR branch); a force push
-  to `main` is `mergeMain`. A plain `git push` while `main` is checked out is not seen.
+  to `main` is `mergeMain`. The run's shims (machine-protocol.md, "Gated actions") match the same
+  patterns against the facts of each invocation, so a plain `git push` while `main` is checked
+  out, `git -C`, a variable in the refspec and a deploy inside a script or package script stop
+  too.
+- **What this is**: a guard against mistakes, not a security boundary. A member that starts a
+  program by its full path or acts through a web page is not stopped. The real floor is GitHub
+  branch protection on `main` and a production environment that requires its own approval; the
+  settings page says so. `maxSpendCny` is never enforced: it is only a line in the run's prompt
+  that reminds the member to ask.
 - The daemon's `approval.request` carries `kind` and `command` (redacted). BotDesk posts the
   approval card titled `需要你确认：<kind's 设置 name>` with the command, mentions the kind's
   approver (`approvers[kind]`, else `approver`) and has three actions: 同意 (`approve:<id>`),
@@ -2487,7 +2495,8 @@ Rules:
 
 - Every route that was `owner` is now "an admin (管理员, `level: "owner"`)". Only a 所有者 changes
   a member's `level` or `teamOwner` (`forbidden`, reason `role.owner_only`), makes an invite with
-  `level: "owner"` (not a sign-in code), and deactivates, revokes or edits an admin or a 所有者.
+  `level: "owner"`, makes a sign-in code (`memberId`) for another admin or 所有者, and deactivates,
+  revokes or edits (including the avatar) an admin or a 所有者.
   The team keeps at least one active human 所有者 (`conflict`, `role.last_owner`). `teamOwner:
   true` for an AI member is `invalid`.
 - `DELETE /v1/machines/:id`, `…/logins*`, `…/secrets*` and `…/monitor` need an admin on a team
@@ -2647,3 +2656,19 @@ Rules:
 - `GET /v1/runs/:id/events` carries the run events `hand.command`, `hand.result` and
   `hand.summary` to everyone who may read the run, and `hand.output` only to the person holding
   it and admins. They are not the AI member's progress.
+
+## Machine homes (VM hosts)
+
+On a Linux host that runs each run in a VM, every AI member has a home folder of fixed size
+(machine-protocol.md, "MicroVM runs"). A daemon with feature `homes` reports them with its
+heartbeat, and the monitor passes the latest report on:
+
+```ts
+HomeUse = { memberId, usedBytes /* on the host disk */, sizeBytes? /* absent = no limit */ }
+MachineMetrics += { homes?: HomeUse[] /* <= 500 */ }
+MachineMonitor += { homes?: HomeUse[] /* <= 500; absent on other machines */ }
+```
+
+| Method and path | Who | Body | Response |
+| --- | --- | --- | --- |
+| `POST /v1/machines/:id/homes/:memberId/clear` | whoever manages the machine (team machine: an admin; personal machine: its owner) | | `{ ok: true }` once `home.clear` is sent to the daemon; `conflict` when the machine is offline (`machine.offline`, never queued) or keeps no homes (`machine.too_old`); `not_found` for an id that is not `[A-Za-z0-9]{1,64}`; audited as `machine.home.clear`. The daemon refuses while a run of that member is on the machine; the next heartbeat shows the result |

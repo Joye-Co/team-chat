@@ -18,7 +18,10 @@ posts it again (a retry: the idempotency key gives the same message), patches th
 with `chat-run card patch` at its rev and writes each answer to chatcard-<n>.json;
 "gated" calls the Bash tool with `gh pr merge 12 --squash` and `ls` ("gated twice": and
 `gh pr merge 13`), each after the PreToolUse hooks of --settings, and writes what the hooks
-decided to gate-<n>.json.
+decided to gate-<n>.json; "pushes" makes a git repository on main with no remote and calls
+the Bash tool with pushes to main written in ways the patterns miss, runs each command the hooks
+let through in a shell (where the run's shims are first on PATH) and writes the hooks' decision,
+the exit code and standard error of each to push-<n>.json.
 The arguments are written to argv.json in the working directory (in the run folder above it, with
 the failed write's errno in aside-write.json, when the working directory is read-only); with --settings, the settings
 and the ASIDE_PROBE variable they set go to settings-seen.json.
@@ -213,6 +216,23 @@ for line in sys.stdin:
                 result["is_error"] = True
             out({"type": "user", "message": {"content": [result]}, "session_id": sid})
         open("gate-%d.json" % n, "w").write(json.dumps({"hooks": len(hooks), "commands": seen_cmds}))
+    if "pushes" in cue:
+        cmds = ["git init -q -b main && git -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m x",
+                "git -C . push origin main", "git push"]
+        if os.name != "nt":
+            cmds.append("B=main; git push origin HEAD:$B")
+        seen_cmds = []
+        for i, cmd in enumerate(cmds):
+            tid = "toolu_p%d_%d" % (n, i)
+            out({"type": "assistant", "message": {"id": mid, "content": [{"type": "tool_use", "id": tid, "name": "Bash", "input": {"command": cmd}}]}, "session_id": sid})
+            denied = pre_tool_use("Bash", {"command": cmd})
+            ran = None
+            if not denied:
+                r = subprocess.run(cmd, shell=True, stdin=subprocess.DEVNULL, capture_output=True, text=True)
+                ran = {"code": r.returncode, "stderr": r.stderr}
+            seen_cmds.append({"command": cmd, "denied": denied, "ran": ran})
+            out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": tid, "content": denied or "ran: " + cmd}]}, "session_id": sid})
+        open("push-%d.json" % n, "w").write(json.dumps({"commands": seen_cmds}))
     out({"type": "stream_event", "event": {"type": "message_start", "message": {"id": mid}}, "session_id": sid})
     reply = "reply %d: %s" % (n, text)
     k = 5 if "slow" in cue else 2

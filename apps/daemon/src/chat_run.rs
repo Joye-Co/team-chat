@@ -927,7 +927,7 @@ pub const USAGE: &str = "usage:
   chat-run gate   (the CLI's PreToolUse hook; reads the hook input on standard input)
   chat-run file upload --file <path> [--name <name>] [--mime <type>]
   chat-run artifact create --title <title> (--dir <folder> | --file <path>) [--entry <path>] [--kind html|file] [--note <text>] [--events events.json] [--media media.json] [--data data.json]
-  chat-run artifact version --artifact <artifactId> (--dir <folder> | --file <path>) [--entry <path>] [--title <title>] [--note <text>] [--events events.json] [--media media.json] [--data data.json]
+  chat-run artifact version --artifact <artifactId> (--dir <folder> | --file <path>) [--entry <path>] [--title <title>] [--note <text>] [--parent <version>] [--events events.json] [--media media.json] [--data data.json]
   chat-run topic history [--before <seq>] [--after <seq>] [--limit <1-100>] [--topic <topicId>]
   chat-run topic message --id <messageId> [--topic <topicId>]
   chat-run topic state [--topic <topicId>]
@@ -1090,7 +1090,8 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
             crate::chat_run_files::ARTIFACT_VERSION,
             &args[2..],
             &[
-                "artifact", "dir", "file", "entry", "title", "note", "events", "media", "data",
+                "artifact", "dir", "file", "entry", "title", "note", "parent", "events", "media",
+                "data",
             ],
         ),
         ["topic", "history"] => (
@@ -1292,6 +1293,13 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
                 put("artifactId", json!(f.req("artifact")?));
                 if let Some(t) = f.opt("title") {
                     put("title", json!(t));
+                }
+                // The version this one was made from; the server uses the current one without it.
+                if let Some(n) = f.num("parent")? {
+                    if n == 0 {
+                        return Err("--parent must be a version number from 1".into());
+                    }
+                    put("parentVersion", json!(n));
                 }
             }
             match (f.opt("dir"), f.opt("file")) {
@@ -1883,6 +1891,58 @@ mod tests {
         let long = "长".repeat(141);
         assert!(request(&args(&["desk", "note", "--text", &long])).is_err());
         assert!(OPS.contains(&"desk.note"));
+    }
+
+    #[test]
+    fn artifact_version_takes_a_parent_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().to_str().unwrap();
+        let (op, body) = request(&args(&[
+            "artifact",
+            "version",
+            "--artifact",
+            "A",
+            "--dir",
+            d,
+            "--parent",
+            "2",
+        ]))
+        .unwrap();
+        assert_eq!(op, crate::chat_run_files::ARTIFACT_VERSION);
+        assert_eq!(body["parentVersion"], 2);
+        let (_, body) = request(&args(&[
+            "artifact",
+            "version",
+            "--artifact",
+            "A",
+            "--dir",
+            d,
+        ]))
+        .unwrap();
+        assert!(body.get("parentVersion").is_none());
+        for bad in ["0", "x", "-1"] {
+            assert!(
+                request(&args(&[
+                    "artifact",
+                    "version",
+                    "--artifact",
+                    "A",
+                    "--dir",
+                    d,
+                    "--parent",
+                    bad
+                ]))
+                .is_err(),
+                "{bad}"
+            );
+        }
+        // `artifact create` has no parent: version 1 is the first.
+        assert!(
+            request(&args(&[
+                "artifact", "create", "--title", "t", "--dir", d, "--parent", "1"
+            ]))
+            .is_err()
+        );
     }
 
     #[test]

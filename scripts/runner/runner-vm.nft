@@ -1,6 +1,7 @@
 # Network rules for the runner's microVMs (taps rvm*, addresses 10.200.0.0/16).
-# VMs reach the internet. They never reach this host (except NFS), private or link-local
-# ranges, or each other. NFS and rpcbind answer only the VMs.
+# VMs reach the internet. They never reach this host (except NFS on their own tap's address,
+# where only their own run's folders and their member's home are exported to them), private or
+# link-local ranges, or each other. NFS and rpcbind answer only the VMs.
 destroy table inet runner_vm
 
 table inet runner_vm {
@@ -14,7 +15,9 @@ table inet runner_vm {
 	chain input {
 		type filter hook input priority -10; policy accept;
 		iifname "rvm*" ct state established,related accept
-		iifname "rvm*" tcp dport 2049 accept
+		# Only the host address of the VM's own tap: never another slot's.
+		iifname "rvm*" fib daddr . iif type != local drop
+		iifname "rvm*" meta nfproto ipv4 tcp dport 2049 accept
 		iifname "rvm*" drop
 		iifname != { "rvm*", "lo" } tcp dport { 111, 2049, 20048 } drop
 		iifname != { "rvm*", "lo" } udp dport { 111, 2049, 20048 } drop

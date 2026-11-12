@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::{FakeProvider, ME};
+use super::{FakeProvider, ME, RoleView};
 use crate::data::*;
 
 /// Settings state that the main fake state does not hold.
@@ -180,24 +180,63 @@ impl FakeProvider {
         })
     }
 
-    /// Applies `f` to a member and keeps my session copy in step.
+    /// Screenshot scenes: who I am in the sample team (design-roles 3.9). 陈晨 is the other
+    /// 管理员 or the 所有者; alone, the other people are gone.
+    pub fn set_role_view(&self, view: RoleView) {
+        const OTHER: &str = "m-chenchen";
+        self.with(|s| {
+            if view == RoleView::Alone {
+                s.members.retain(|m| m.id == ME || m.is_bot());
+            }
+            for m in &mut s.members {
+                let (level, team_owner) = match (m.id.as_str(), view) {
+                    (ME, RoleView::Owner | RoleView::Alone) => (MemberLevel::Owner, true),
+                    (ME, RoleView::Admin) => (MemberLevel::Owner, false),
+                    (ME, RoleView::Member) => (MemberLevel::Member, false),
+                    (OTHER, RoleView::Owner) => (MemberLevel::Owner, false),
+                    (OTHER, _) => (MemberLevel::Owner, true),
+                    _ => continue,
+                };
+                m.level = level;
+                m.team_owner = team_owner;
+            }
+            let me = s.members.iter().find(|m| m.id == ME).cloned();
+            if let (SessionState::SignedIn { me: mine, .. }, Some(me)) = (&mut s.session, me) {
+                *mine = me;
+            }
+        });
+        self.emit(vec![Change::Members, Change::Session]);
+    }
+
+    /// True when I am the 所有者 (the 身份 changes and stopping 管理员 are mine).
+    fn is_team_owner(&self) -> bool {
+        self.with(|s| {
+            s.members
+                .iter()
+                .any(|m| m.id == ME && TeamRole::of(m, &s.members) == TeamRole::Owner)
+        })
+    }
+
+    /// Applies `f` to a member and keeps my session copy in step. `f` gets the member's 身份
+    /// and the number of active 所有者.
     fn change_member(
         &self,
         id: &str,
-        f: impl FnOnce(&mut Member, usize) -> Result<(), AdminError>,
+        f: impl FnOnce(&mut Member, TeamRole, usize) -> Result<(), AdminError>,
     ) -> Result<Member, AdminError> {
         let result = self.with(|s| {
-            let active_owners = s
-                .members
+            let all = s.members.clone();
+            let active_owners = all
                 .iter()
-                .filter(|m| m.level == MemberLevel::Owner && !m.deactivated)
+                .filter(|m| !m.deactivated && TeamRole::of(m, &all) == TeamRole::Owner)
                 .count();
             let m = s
                 .members
                 .iter_mut()
                 .find(|m| m.id == id)
                 .ok_or(AdminError::NotFound)?;
-            f(m, active_owners)?;
+            let role = TeamRole::of(m, &all);
+            f(m, role, active_owners)?;
             let m = m.clone();
             if let SessionState::SignedIn { me, .. } = &mut s.session
                 && me.id == m.id
@@ -225,7 +264,7 @@ impl FakeProvider {
         if role.as_ref().is_some_and(|r| r.chars().count() > 64) {
             return reply_now(Err(AdminError::Invalid));
         }
-        reply_now(self.change_member(ME, |m, _| {
+        reply_now(self.change_member(ME, |m, _, _| {
             m.name = name;
             m.role = role;
             Ok(())
@@ -240,7 +279,7 @@ impl FakeProvider {
         if id != ME && !self.is_owner() {
             return reply_now(Err(AdminError::Forbidden));
         }
-        reply_now(self.change_member(id, |m, _| {
+        reply_now(self.change_member(id, |m, _, _| {
             m.avatar_url = None;
             Ok(())
         }))
@@ -261,7 +300,7 @@ impl FakeProvider {
             return reply_now(Err(AdminError::TooLarge));
         }
         let url = format!("file://{}", path.display());
-        reply_now(self.change_member(id, |m, _| {
+        reply_now(self.change_member(id, |m, _, _| {
             m.avatar_url = Some(url);
             Ok(())
         }))
@@ -283,19 +322,25 @@ impl FakeProvider {
         }))
     }
 
-    pub(super) fn set_member_level_fake(&self, id: &str, level: MemberLevel) -> AdminReply<Member> {
-        if !self.is_owner() {
+    /// The server's rules (design-roles 3.2): only a 所有者 changes 身份, an AI member is never
+    /// a 所有者, and the team keeps one active 所有者.
+    pub(super) fn set_member_role_fake(&self, id: &str, role: TeamRole) -> AdminReply<Member> {
+        if !self.is_team_owner() {
             return reply_now(Err(AdminError::Forbidden));
         }
-        reply_now(self.change_member(id, |m, owners| {
-            if m.level == MemberLevel::Owner
-                && level != MemberLevel::Owner
-                && !m.deactivated
-                && owners <= 1
-            {
+        reply_now(self.change_member(id, |m, was, owners| {
+            if role == TeamRole::Owner && m.is_bot() {
+                return Err(AdminError::Invalid);
+            }
+            if was == TeamRole::Owner && role != TeamRole::Owner && !m.deactivated && owners <= 1 {
                 return Err(AdminError::LastOwner);
             }
-            m.level = level;
+            m.level = if role == TeamRole::Member {
+                MemberLevel::Member
+            } else {
+                MemberLevel::Owner
+            };
+            m.team_owner = role == TeamRole::Owner;
             Ok(())
         }))
     }
@@ -304,8 +349,13 @@ impl FakeProvider {
         if !self.is_owner() {
             return reply_now(Err(AdminError::Forbidden));
         }
-        reply_now(self.change_member(id, |m, owners| {
-            if off && m.level == MemberLevel::Owner && !m.deactivated && owners <= 1 {
+        let team_owner = self.is_team_owner();
+        reply_now(self.change_member(id, |m, role, owners| {
+            // Only a 所有者 stops a 管理员 or a 所有者.
+            if role != TeamRole::Member && !team_owner {
+                return Err(AdminError::Forbidden);
+            }
+            if off && role == TeamRole::Owner && !m.deactivated && owners <= 1 {
                 return Err(AdminError::LastOwner);
             }
             m.deactivated = off;
@@ -324,7 +374,7 @@ impl FakeProvider {
         if !self.is_owner() {
             return reply_now(Err(AdminError::Forbidden));
         }
-        reply_now(self.change_member(id, |m, _| {
+        reply_now(self.change_member(id, |m, _, _| {
             m.character = character;
             Ok(())
         }))
@@ -355,6 +405,7 @@ impl FakeProvider {
             deactivated: false,
             online: false,
             character,
+            team_owner: false,
         };
         self.with(|s| s.members.push(member.clone()));
         if let Some(r) = &runner {
@@ -398,7 +449,7 @@ impl FakeProvider {
             let role = edit
                 .role
                 .map(|r| r.map(|r| r.trim().to_string()).filter(|r| !r.is_empty()));
-            if let Err(e) = self.change_member(id, |m, _| {
+            if let Err(e) = self.change_member(id, |m, _, _| {
                 if let Some(name) = name {
                     m.name = name;
                 }
@@ -618,24 +669,76 @@ mod tests {
     #[test]
     fn last_owner_is_kept() {
         let p = FakeProvider::new();
-        let owners: Vec<String> = p
-            .members()
-            .into_iter()
-            .filter(|m| m.level == MemberLevel::Owner && !m.deactivated)
-            .map(|m| m.id)
-            .collect();
-        // Demote every owner but the last; the last one is refused.
-        let (last, rest) = owners.split_last().expect("an owner");
-        for id in rest.iter().filter(|id| id.as_str() != ME) {
-            assert!(answer(p.set_member_level(id, MemberLevel::Member)).is_ok());
-        }
-        if last != ME {
-            assert!(answer(p.set_member_level(last, MemberLevel::Member)).is_ok());
-        }
+        // I am the one 所有者: I cannot step down or stop myself.
+        assert_eq!(
+            answer(p.set_member_role(ME, TeamRole::Admin)),
+            Err(AdminError::LastOwner)
+        );
         assert_eq!(
             answer(p.set_member_deactivated(ME, true)),
             Err(AdminError::LastOwner)
         );
+    }
+
+    #[test]
+    fn role_views_put_me_in_each_role() {
+        for (view, want) in [
+            (RoleView::Owner, TeamRole::Owner),
+            (RoleView::Admin, TeamRole::Admin),
+            (RoleView::Member, TeamRole::Member),
+            (RoleView::Alone, TeamRole::Owner),
+        ] {
+            let p = FakeProvider::new();
+            p.set_role_view(view);
+            let all = p.members();
+            let me = all.iter().find(|m| m.id == ME).unwrap();
+            assert_eq!(TeamRole::of(me, &all), want, "{view:?}");
+            let SessionState::SignedIn { me: session, .. } = p.session() else {
+                panic!("signed in")
+            };
+            assert_eq!(session.level, me.level);
+            // Exactly one 所有者 in every view.
+            let owners = all
+                .iter()
+                .filter(|m| TeamRole::of(m, &all) == TeamRole::Owner)
+                .count();
+            assert_eq!(owners, 1, "{view:?}");
+            let people = all.iter().filter(|m| !m.is_bot() && !m.deactivated).count();
+            assert_eq!(people == 1, view == RoleView::Alone, "{view:?}");
+        }
+    }
+
+    #[test]
+    fn only_the_team_owner_changes_roles() {
+        let p = FakeProvider::new();
+        let role = |id: &str| {
+            let all = p.members();
+            TeamRole::of(all.iter().find(|m| m.id == id).unwrap(), &all)
+        };
+        // An AI member is never a 所有者.
+        assert_eq!(
+            answer(p.set_member_role("m-coder", TeamRole::Owner)),
+            Err(AdminError::Invalid)
+        );
+        assert!(answer(p.set_member_role("m-coder", TeamRole::Admin)).is_ok());
+        assert_eq!(role("m-coder"), TeamRole::Admin);
+        // Hand 所有者 on, then step down to 管理员.
+        assert!(answer(p.set_member_role("m-xiaowang", TeamRole::Owner)).is_ok());
+        assert!(answer(p.set_member_role(ME, TeamRole::Admin)).is_ok());
+        assert_eq!(
+            (role("m-xiaowang"), role(ME)),
+            (TeamRole::Owner, TeamRole::Admin)
+        );
+        // A 管理员 changes no 身份 and cannot stop another 管理员, but can stop a 普通成员.
+        assert_eq!(
+            answer(p.set_member_role("m-lixue", TeamRole::Admin)),
+            Err(AdminError::Forbidden)
+        );
+        assert_eq!(
+            answer(p.set_member_deactivated("m-coder", true)),
+            Err(AdminError::Forbidden)
+        );
+        assert!(answer(p.set_member_deactivated("m-lixue", true)).is_ok());
     }
 
     #[test]

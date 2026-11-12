@@ -198,20 +198,23 @@ async function start(): Promise<string> {
   throw new Error(`the server did not start; see ${LOG}`);
 }
 
+/** The app's data roots, one per 身份 (`provider/sandbox.rs`): each keeps a saved session and a cache. */
+const APP_ROOTS = ["app", "app-admin", "app-member"];
+
 async function main() {
   mkdirSync(DIR, { recursive: true });
   if (!existsSync(WRANGLER)) throw new Error("wrangler is missing: run `bun install --frozen-lockfile` first");
   if (args.includes("--stop")) return stop();
   if (args.includes("--reset")) {
     stop();
-    for (const f of ["state", "seed.json", "owner-token", "machine-token", "app"]) rmSync(join(DIR, f), { recursive: true, force: true });
+    for (const f of ["state", "seed.json", "owner-token", "admin-token", "member-token", "machine-token", ...APP_ROOTS]) rmSync(join(DIR, f), { recursive: true, force: true });
     log("reset");
   }
   // A seed that stopped halfway leaves data without seed.json: start over.
   if (existsSync(STATE) && !existsSync(join(DIR, "seed.json"))) {
     stop();
     rmSync(STATE, { recursive: true, force: true });
-    rmSync(join(DIR, "app"), { recursive: true, force: true });
+    for (const f of APP_ROOTS) rmSync(join(DIR, f), { recursive: true, force: true });
   }
   const url = await start();
   write(join(DIR, "server-url"), url);

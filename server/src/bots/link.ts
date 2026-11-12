@@ -716,6 +716,15 @@ export class MachineLink extends DurableObject<BotsEnv> {
     return "sent";
   }
 
+  /** Usable, feature "homes": sends `home.clear` now (never queued), or why it cannot. */
+  async clearHome(memberId: string): Promise<"sent" | "offline" | "unsupported"> {
+    const ws = this.socket();
+    if (!ws) return "offline";
+    if (!this.hasFeature("homes")) return "unsupported";
+    this.send(ws, { t: "home.clear", memberId });
+    return "sent";
+  }
+
   /** A sign-in as the daemon last reported it. */
   async login(loginId: string): Promise<MachineLogin | null> {
     const row = this.sql

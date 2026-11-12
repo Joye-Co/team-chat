@@ -9,7 +9,7 @@ import { type RunProof, type TestCounts, doneCard, doneCardV1, hasProof, mergePr
 import { needsReply, parseReport, reportOf } from "./report";
 import { TOPIC_LINK_RPC } from "../../integrations/links";
 import { stamp } from "../../context/render";
-import { MAX_FOLLOW_UPS, type RunRow, isStallStatus, sanitizeAcceptance, sanitizePlan, sanitizeUsage, sessionIdOf } from "./core";
+import { MAX_FOLLOW_UPS, type RunRow, codeOf, isStallStatus, sanitizeAcceptance, sanitizePlan, sanitizeUsage, sessionIdOf } from "./core";
 import { DeskRuns, type RunRequest } from "./runs";
 import { briefText } from "../../agent/frontdesk";
 import { retroAfterRun } from "../../memory/retro";
@@ -48,7 +48,10 @@ export abstract class DeskEvents extends DeskRuns {
       if (r.ended_at !== null) {
         const late = frames.find((f): f is Extract<SeqFrame, { t: "run.done" }> => f.t === "run.done");
         if (late) this.storeSession(r, late.sessionId);
-        if (late && r.usage === null && r.duration_ms === null && this.storeUsage(r, late)) await this.setStatus(r, r.status);
+        const usage = !!late && r.usage === null && r.duration_ms === null && this.storeUsage(r, late);
+        // design-relay R5: and where it left its code.
+        const code = !!late && r.code === null && this.storeCode(r, late.code);
+        if (usage || code) await this.setStatus(r, r.status);
         return { lastSeq: top };
       }
       // Stored frames whose effects did not apply yet (also after a failed or interrupted apply).
@@ -406,6 +409,15 @@ export abstract class DeskEvents extends DeskRuns {
     return true;
   }
 
+  /** Keeps where the run left its code (`run.done.code`, design-relay R5). False when not known. */
+  protected storeCode(r: RunRow, raw: unknown): boolean {
+    const code = codeOf(raw);
+    if (!code) return false;
+    r.code = JSON.stringify(code);
+    this.sql.exec("UPDATE runs SET code = ? WHERE id = ?", r.code, r.id);
+    return true;
+  }
+
   /** Keeps the CLI session of the run for the topic's next run (resume). */
   protected storeSession(r: RunRow, sessionId: unknown): void {
     const sid = sessionIdOf(sessionId);
@@ -417,6 +429,7 @@ export abstract class DeskEvents extends DeskRuns {
   protected async finish(r: RunRow, f: Extract<SeqFrame, { t: "run.done" }>): Promise<void> {
     this.storeUsage(r, f);
     this.storeSession(r, f.sessionId);
+    this.storeCode(r, f.code);
     if (f.status === "succeeded") {
       const raw = (f.resultText ?? "").trim();
       this.dropResultFromProgress(r, raw);

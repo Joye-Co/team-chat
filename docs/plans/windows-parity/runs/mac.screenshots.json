@@ -1,0 +1,5204 @@
+{
+  "ok": true,
+  "worst_case": false,
+  "size": {
+    "width": 1440.0,
+    "height": 900.0
+  },
+  "shots": [
+    {
+      "scene": "main",
+      "theme": "light",
+      "file": "main-light.png",
+      "ok": true,
+      "window_number": 35593,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "main-sidebar-hidden",
+      "theme": "light",
+      "file": "main-sidebar-hidden-light.png",
+      "ok": true,
+      "window_number": 35596,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "new-topic",
+      "theme": "light",
+      "file": "new-topic-light.png",
+      "ok": true,
+      "window_number": 35597,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "group-chat",
+      "theme": "light",
+      "file": "group-chat-light.png",
+      "ok": true,
+      "window_number": 35598,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "group-chat-info",
+      "theme": "light",
+      "file": "group-chat-info-light.png",
+      "ok": true,
+      "window_number": 35599,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "group-chat-empty",
+      "theme": "light",
+      "file": "group-chat-empty-light.png",
+      "ok": true,
+      "window_number": 35600,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "dm-chat",
+      "theme": "light",
+      "file": "dm-chat-light.png",
+      "ok": true,
+      "window_number": 35601,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "new-topic-from",
+      "theme": "light",
+      "file": "new-topic-from-light.png",
+      "ok": true,
+      "window_number": 35602,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "new-topic-from-long",
+      "theme": "light",
+      "file": "new-topic-from-long-light.png",
+      "ok": true,
+      "window_number": 35603,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "todo",
+      "theme": "light",
+      "file": "todo-light.png",
+      "ok": true,
+      "window_number": 35604,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "long",
+      "theme": "light",
+      "file": "long-light.png",
+      "ok": true,
+      "window_number": 35605,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "empty",
+      "theme": "light",
+      "file": "empty-light.png",
+      "ok": true,
+      "window_number": 35606,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "login",
+      "theme": "light",
+      "file": "login-light.png",
+      "ok": true,
+      "window_number": 35607,
+      "width_px": 960,
+      "height_px": 960
+    },
+    {
+      "scene": "login-code",
+      "theme": "light",
+      "file": "login-code-light.png",
+      "ok": true,
+      "window_number": 35608,
+      "width_px": 960,
+      "height_px": 960
+    },
+    {
+      "scene": "login-server",
+      "theme": "light",
+      "file": "login-server-light.png",
+      "ok": true,
+      "window_number": 35609,
+      "width_px": 960,
+      "height_px": 960
+    },
+    {
+      "scene": "login-custom-server",
+      "theme": "light",
+      "file": "login-custom-server-light.png",
+      "ok": true,
+      "window_number": 35610,
+      "width_px": 960,
+      "height_px": 960
+    },
+    {
+      "scene": "login-error",
+      "theme": "light",
+      "file": "login-error-light.png",
+      "ok": true,
+      "window_number": 35611,
+      "width_px": 960,
+      "height_px": 960
+    },
+    {
+      "scene": "login-signing-in",
+      "theme": "light",
+      "file": "login-signing-in-light.png",
+      "ok": true,
+      "window_number": 35612,
+      "width_px": 960,
+      "height_px": 960
+    },
+    {
+      "scene": "login-unreachable",
+      "theme": "light",
+      "file": "login-unreachable-light.png",
+      "ok": true,
+      "window_number": 35613,
+      "width_px": 960,
+      "height_px": 960
+    },
+    {
+      "scene": "login-email",
+      "theme": "light",
+      "file": "login-email-light.png",
+      "ok": true,
+      "window_number": 35614,
+      "width_px": 960,
+      "height_px": 960
+    },
+    {
+      "scene": "login-email-code",
+      "theme": "light",
+      "file": "login-email-code-light.png",
+      "ok": true,
+      "window_number": 35615,
+      "width_px": 960,
+      "height_px": 960
+    },
+    {
+      "scene": "login-email-error",
+      "theme": "light",
+      "file": "login-email-error-light.png",
+      "ok": true,
+      "window_number": 35616,
+      "width_px": 960,
+      "height_px": 960
+    },
+    {
+      "scene": "offline",
+      "theme": "light",
+      "file": "offline-light.png",
+      "ok": true,
+      "window_number": 35617,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "settings-profile",
+      "theme": "light",
+      "file": "settings-profile-light.png",
+      "ok": true,
+      "window_number": 35618,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-invite",
+      "theme": "light",
+      "file": "settings-invite-light.png",
+      "ok": true,
+      "window_number": 35619,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-add-bot",
+      "theme": "light",
+      "file": "settings-add-bot-light.png",
+      "ok": true,
+      "window_number": 35620,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-add-bot-runner",
+      "theme": "light",
+      "file": "settings-add-bot-runner-light.png",
+      "ok": true,
+      "window_number": 35621,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-add-bot-new",
+      "theme": "light",
+      "file": "settings-add-bot-new-light.png",
+      "ok": true,
+      "window_number": 35622,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-character",
+      "theme": "light",
+      "file": "settings-character-light.png",
+      "ok": true,
+      "window_number": 35623,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-edit-bot",
+      "theme": "light",
+      "file": "settings-edit-bot-light.png",
+      "ok": true,
+      "window_number": 35624,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-add-machine",
+      "theme": "light",
+      "file": "settings-add-machine-light.png",
+      "ok": true,
+      "window_number": 35625,
+      "width_px": 1280,
+      "height_px": 1090
+    },
+    {
+      "scene": "settings-members",
+      "theme": "light",
+      "file": "settings-members-light.png",
+      "ok": true,
+      "window_number": 35626,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-machines",
+      "theme": "light",
+      "file": "settings-machines-light.png",
+      "ok": true,
+      "window_number": 35627,
+      "width_px": 1280,
+      "height_px": 1090
+    },
+    {
+      "scene": "settings-notifications",
+      "theme": "light",
+      "file": "settings-notifications-light.png",
+      "ok": true,
+      "window_number": 35628,
+      "width_px": 1280,
+      "height_px": 1380
+    },
+    {
+      "scene": "settings-about",
+      "theme": "light",
+      "file": "settings-about-light.png",
+      "ok": true,
+      "window_number": 35629,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "about",
+      "theme": "light",
+      "file": "about-light.png",
+      "ok": true,
+      "window_number": 35630,
+      "width_px": 568,
+      "height_px": 456
+    },
+    {
+      "scene": "settings-ai-service",
+      "theme": "light",
+      "file": "settings-ai-service-light.png",
+      "ok": true,
+      "window_number": 35631,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-models",
+      "theme": "light",
+      "file": "settings-models-light.png",
+      "ok": true,
+      "window_number": 35632,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-ai-service-failed",
+      "theme": "light",
+      "file": "settings-ai-service-failed-light.png",
+      "ok": true,
+      "window_number": 35633,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-members-end",
+      "theme": "light",
+      "file": "settings-members-end-light.png",
+      "ok": true,
+      "window_number": 35634,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-notifications-end",
+      "theme": "light",
+      "file": "settings-notifications-end-light.png",
+      "ok": true,
+      "window_number": 35635,
+      "width_px": 1280,
+      "height_px": 1380
+    },
+    {
+      "scene": "settings-profile-error",
+      "theme": "light",
+      "file": "settings-profile-error-light.png",
+      "ok": true,
+      "window_number": 35636,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-about-dev",
+      "theme": "light",
+      "file": "settings-about-dev-light.png",
+      "ok": true,
+      "window_number": 35637,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "update",
+      "theme": "light",
+      "file": "update-light.png",
+      "ok": true,
+      "window_number": 35638,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "update-dl",
+      "theme": "light",
+      "file": "update-dl-light.png",
+      "ok": true,
+      "window_number": 35639,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "update-manual",
+      "theme": "light",
+      "file": "update-manual-light.png",
+      "ok": true,
+      "window_number": 35640,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "update-card",
+      "theme": "light",
+      "file": "update-card-light.png",
+      "ok": true,
+      "window_number": 35641,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "update-card-dl",
+      "theme": "light",
+      "file": "update-card-dl-light.png",
+      "ok": true,
+      "window_number": 35642,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "update-card-failed",
+      "theme": "light",
+      "file": "update-card-failed-light.png",
+      "ok": true,
+      "window_number": 35643,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "update-card-manual",
+      "theme": "light",
+      "file": "update-card-manual-light.png",
+      "ok": true,
+      "window_number": 35644,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "update-notes",
+      "theme": "light",
+      "file": "update-notes-light.png",
+      "ok": true,
+      "window_number": 35645,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "whats-new",
+      "theme": "light",
+      "file": "whats-new-light.png",
+      "ok": true,
+      "window_number": 35646,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "changelog",
+      "theme": "light",
+      "file": "changelog-light.png",
+      "ok": true,
+      "window_number": 35647,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "files",
+      "theme": "light",
+      "file": "files-light.png",
+      "ok": true,
+      "window_number": 35648,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "files-menu",
+      "theme": "light",
+      "file": "files-menu-light.png",
+      "ok": true,
+      "window_number": 35649,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "files-lightbox",
+      "theme": "light",
+      "file": "files-lightbox-light.png",
+      "ok": true,
+      "window_number": 35650,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "files-quick-look",
+      "theme": "light",
+      "file": "files-quick-look-light.png",
+      "ok": true,
+      "window_number": 35651,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "files-quick-look-no-preview",
+      "theme": "light",
+      "file": "files-quick-look-no-preview-light.png",
+      "ok": true,
+      "window_number": 35652,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "files-quick-look-page",
+      "theme": "light",
+      "file": "files-quick-look-page-light.png",
+      "ok": true,
+      "window_number": 35653,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards",
+      "theme": "light",
+      "file": "cards-light.png",
+      "ok": true,
+      "window_number": 35657,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "switcher",
+      "theme": "light",
+      "file": "switcher-light.png",
+      "ok": true,
+      "window_number": 35658,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "switcher-query",
+      "theme": "light",
+      "file": "switcher-query-light.png",
+      "ok": true,
+      "window_number": 35659,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "new-group",
+      "theme": "light",
+      "file": "new-group-light.png",
+      "ok": true,
+      "window_number": 35660,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "new-group-keyboard",
+      "theme": "light",
+      "file": "new-group-keyboard-light.png",
+      "ok": true,
+      "window_number": 35661,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "new-group-error",
+      "theme": "light",
+      "file": "new-group-error-light.png",
+      "ok": true,
+      "window_number": 35662,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "add-members",
+      "theme": "light",
+      "file": "add-members-light.png",
+      "ok": true,
+      "window_number": 35663,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "rename-topic",
+      "theme": "light",
+      "file": "rename-topic-light.png",
+      "ok": true,
+      "window_number": 35664,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "group-menu",
+      "theme": "light",
+      "file": "group-menu-light.png",
+      "ok": true,
+      "window_number": 35665,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "account-menu",
+      "theme": "light",
+      "file": "account-menu-light.png",
+      "ok": true,
+      "window_number": 35666,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "rename-group",
+      "theme": "light",
+      "file": "rename-group-light.png",
+      "ok": true,
+      "window_number": 35667,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "rename-group-error",
+      "theme": "light",
+      "file": "rename-group-error-light.png",
+      "ok": true,
+      "window_number": 35668,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-dm",
+      "theme": "light",
+      "file": "topic-dm-light.png",
+      "ok": true,
+      "window_number": 35669,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-dm-bot",
+      "theme": "light",
+      "file": "topic-dm-bot-light.png",
+      "ok": true,
+      "window_number": 35670,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "start-dm",
+      "theme": "light",
+      "file": "start-dm-light.png",
+      "ok": true,
+      "window_number": 35671,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "leave-group",
+      "theme": "light",
+      "file": "leave-group-light.png",
+      "ok": true,
+      "window_number": 35672,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "search",
+      "theme": "light",
+      "file": "search-light.png",
+      "ok": true,
+      "window_number": 35673,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "search-hit",
+      "theme": "light",
+      "file": "search-hit-light.png",
+      "ok": true,
+      "window_number": 35674,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-came-from",
+      "theme": "light",
+      "file": "topic-came-from-light.png",
+      "ok": true,
+      "window_number": 35675,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-find",
+      "theme": "light",
+      "file": "topic-find-light.png",
+      "ok": true,
+      "window_number": 35676,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "process",
+      "theme": "light",
+      "file": "process-light.png",
+      "ok": true,
+      "window_number": 35677,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "process-failed",
+      "theme": "light",
+      "file": "process-failed-light.png",
+      "ok": true,
+      "window_number": 35678,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "process-dev",
+      "theme": "light",
+      "file": "process-dev-light.png",
+      "ok": true,
+      "window_number": 35679,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "panel-run",
+      "theme": "light",
+      "file": "panel-run-light.png",
+      "ok": true,
+      "window_number": 35680,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "panel-failed",
+      "theme": "light",
+      "file": "panel-failed-light.png",
+      "ok": true,
+      "window_number": 35681,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "panel-plan",
+      "theme": "light",
+      "file": "panel-plan-light.png",
+      "ok": true,
+      "window_number": 35682,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic",
+      "theme": "light",
+      "file": "topic-light.png",
+      "ok": true,
+      "window_number": 35683,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "stop",
+      "theme": "light",
+      "file": "stop-light.png",
+      "ok": true,
+      "window_number": 35684,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "stop-stopping",
+      "theme": "light",
+      "file": "stop-stopping-light.png",
+      "ok": true,
+      "window_number": 35685,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-short",
+      "theme": "light",
+      "file": "topic-short-light.png",
+      "ok": true,
+      "window_number": 35686,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-worst",
+      "theme": "light",
+      "file": "topic-worst-light.png",
+      "ok": true,
+      "window_number": 35687,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-react",
+      "theme": "light",
+      "file": "topic-react-light.png",
+      "ok": true,
+      "window_number": 35688,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-compose",
+      "theme": "light",
+      "file": "topic-compose-light.png",
+      "ok": true,
+      "window_number": 35689,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "web-embed",
+      "theme": "light",
+      "file": "web-embed-light.png",
+      "ok": true,
+      "window_number": 35690,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "web-embed-scrolled",
+      "theme": "light",
+      "file": "web-embed-scrolled-light.png",
+      "ok": true,
+      "window_number": 35693,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "web-embed-covered",
+      "theme": "light",
+      "file": "web-embed-covered-light.png",
+      "ok": true,
+      "window_number": 35696,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-html",
+      "theme": "light",
+      "file": "media-html-light.png",
+      "ok": true,
+      "window_number": 35699,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-markdown",
+      "theme": "light",
+      "file": "media-markdown-light.png",
+      "ok": true,
+      "window_number": 35700,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-images",
+      "theme": "light",
+      "file": "media-images-light.png",
+      "ok": true,
+      "window_number": 35703,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-video",
+      "theme": "light",
+      "file": "media-video-light.png",
+      "ok": true,
+      "window_number": 35704,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-audio",
+      "theme": "light",
+      "file": "media-audio-light.png",
+      "ok": true,
+      "window_number": 35707,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-pdf",
+      "theme": "light",
+      "file": "media-pdf-light.png",
+      "ok": true,
+      "window_number": 35708,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-code",
+      "theme": "light",
+      "file": "media-code-light.png",
+      "ok": true,
+      "window_number": 35711,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-table",
+      "theme": "light",
+      "file": "media-table-light.png",
+      "ok": true,
+      "window_number": 35712,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-states",
+      "theme": "light",
+      "file": "media-states-light.png",
+      "ok": true,
+      "window_number": 35715,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "diagram-inline",
+      "theme": "light",
+      "file": "diagram-inline-light.png",
+      "ok": true,
+      "window_number": 35716,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "diagram-error",
+      "theme": "light",
+      "file": "diagram-error-light.png",
+      "ok": true,
+      "window_number": 35720,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "diagram-viewer",
+      "theme": "light",
+      "file": "diagram-viewer-light.png",
+      "ok": true,
+      "window_number": 35721,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "desk",
+      "theme": "light",
+      "file": "desk-light.png",
+      "ok": true,
+      "window_number": 35722,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "desk-answered",
+      "theme": "light",
+      "file": "desk-answered-light.png",
+      "ok": true,
+      "window_number": 35723,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "desk-loading",
+      "theme": "light",
+      "file": "desk-loading-light.png",
+      "ok": true,
+      "window_number": 35724,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "desk-failed",
+      "theme": "light",
+      "file": "desk-failed-light.png",
+      "ok": true,
+      "window_number": 35725,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "desk-empty",
+      "theme": "light",
+      "file": "desk-empty-light.png",
+      "ok": true,
+      "window_number": 35726,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "desk-first-run",
+      "theme": "light",
+      "file": "desk-first-run-light.png",
+      "ok": true,
+      "window_number": 35727,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "new-topic-hand-to",
+      "theme": "light",
+      "file": "new-topic-hand-to-light.png",
+      "ok": true,
+      "window_number": 35728,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "rail-work",
+      "theme": "light",
+      "file": "rail-work-light.png",
+      "ok": true,
+      "window_number": 35729,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "rail-muted",
+      "theme": "light",
+      "file": "rail-muted-light.png",
+      "ok": true,
+      "window_number": 35730,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "rail-attention",
+      "theme": "light",
+      "file": "rail-attention-light.png",
+      "ok": true,
+      "window_number": 35731,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "rail-member",
+      "theme": "light",
+      "file": "rail-member-light.png",
+      "ok": true,
+      "window_number": 35732,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-v2",
+      "theme": "light",
+      "file": "topic-v2-light.png",
+      "ok": true,
+      "window_number": 35733,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-merged",
+      "theme": "light",
+      "file": "topic-merged-light.png",
+      "ok": true,
+      "window_number": 35734,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-artifact-pane",
+      "theme": "light",
+      "file": "topic-artifact-pane-light.png",
+      "ok": true,
+      "window_number": 35735,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-done-output",
+      "theme": "light",
+      "file": "topic-done-output-light.png",
+      "ok": true,
+      "window_number": 35736,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-two-runs",
+      "theme": "light",
+      "file": "topic-two-runs-light.png",
+      "ok": true,
+      "window_number": 35737,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "Forge's plan card is drawn ({\"run-v2-virtual\", \"run-v2-virtual-check\"})",
+        "Scout's plan card is drawn ({\"run-v2-virtual\", \"run-v2-virtual-check\"})"
+      ]
+    },
+    {
+      "scene": "side-chat",
+      "theme": "light",
+      "file": "side-chat-light.png",
+      "ok": true,
+      "window_number": 35738,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "live",
+      "theme": "light",
+      "file": "live-light.png",
+      "ok": true,
+      "window_number": 35739,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "live-takeover",
+      "theme": "light",
+      "file": "live-takeover-light.png",
+      "ok": true,
+      "window_number": 35740,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "switcher-no-match",
+      "theme": "light",
+      "file": "switcher-no-match-light.png",
+      "ok": true,
+      "window_number": 35741,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "switcher-loading",
+      "theme": "light",
+      "file": "switcher-loading-light.png",
+      "ok": true,
+      "window_number": 35742,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "switcher-failed",
+      "theme": "light",
+      "file": "switcher-failed-light.png",
+      "ok": true,
+      "window_number": 35743,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "ask-nobody",
+      "theme": "light",
+      "file": "ask-nobody-light.png",
+      "ok": true,
+      "window_number": 35744,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "ask",
+      "theme": "light",
+      "file": "ask-light.png",
+      "ok": true,
+      "window_number": 35745,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "ask-empty",
+      "theme": "light",
+      "file": "ask-empty-light.png",
+      "ok": true,
+      "window_number": 35746,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "group-v2",
+      "theme": "light",
+      "file": "group-v2-light.png",
+      "ok": true,
+      "window_number": 35747,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "group-empty",
+      "theme": "light",
+      "file": "group-empty-light.png",
+      "ok": true,
+      "window_number": 35748,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "group-loading",
+      "theme": "light",
+      "file": "group-loading-light.png",
+      "ok": true,
+      "window_number": 35749,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "group-failed",
+      "theme": "light",
+      "file": "group-failed-light.png",
+      "ok": true,
+      "window_number": 35750,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "group-record",
+      "theme": "light",
+      "file": "group-record-light.png",
+      "ok": true,
+      "window_number": 35751,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "group-purpose",
+      "theme": "light",
+      "file": "group-purpose-light.png",
+      "ok": true,
+      "window_number": 35752,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-v2",
+      "theme": "light",
+      "file": "members-v2-light.png",
+      "ok": true,
+      "window_number": 35753,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-person",
+      "theme": "light",
+      "file": "members-person-light.png",
+      "ok": true,
+      "window_number": 35754,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-none",
+      "theme": "light",
+      "file": "members-none-light.png",
+      "ok": true,
+      "window_number": 35755,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-loading",
+      "theme": "light",
+      "file": "members-loading-light.png",
+      "ok": true,
+      "window_number": 35756,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-failed",
+      "theme": "light",
+      "file": "members-failed-light.png",
+      "ok": true,
+      "window_number": 35757,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-plan",
+      "theme": "light",
+      "file": "members-plan-light.png",
+      "ok": true,
+      "window_number": 35758,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-memory",
+      "theme": "light",
+      "file": "members-memory-light.png",
+      "ok": true,
+      "window_number": 35759,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-memory-end",
+      "theme": "light",
+      "file": "members-memory-end-light.png",
+      "ok": true,
+      "window_number": 35760,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-memory-empty",
+      "theme": "light",
+      "file": "members-memory-empty-light.png",
+      "ok": true,
+      "window_number": 35761,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-memory-loading",
+      "theme": "light",
+      "file": "members-memory-loading-light.png",
+      "ok": true,
+      "window_number": 35762,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-memory-failed",
+      "theme": "light",
+      "file": "members-memory-failed-light.png",
+      "ok": true,
+      "window_number": 35763,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-memory-long",
+      "theme": "light",
+      "file": "members-memory-long-light.png",
+      "ok": true,
+      "window_number": 35764,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "settings-memory",
+      "theme": "light",
+      "file": "settings-memory-light.png",
+      "ok": true,
+      "window_number": 35765,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-memory-end",
+      "theme": "light",
+      "file": "settings-memory-end-light.png",
+      "ok": true,
+      "window_number": 35766,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-memory-empty",
+      "theme": "light",
+      "file": "settings-memory-empty-light.png",
+      "ok": true,
+      "window_number": 35767,
+      "width_px": 1280,
+      "height_px": 494
+    },
+    {
+      "scene": "settings-memory-loading",
+      "theme": "light",
+      "file": "settings-memory-loading-light.png",
+      "ok": true,
+      "window_number": 35768,
+      "width_px": 1280,
+      "height_px": 794
+    },
+    {
+      "scene": "settings-memory-failed",
+      "theme": "light",
+      "file": "settings-memory-failed-light.png",
+      "ok": true,
+      "window_number": 35769,
+      "width_px": 1280,
+      "height_px": 542
+    },
+    {
+      "scene": "settings-memory-long",
+      "theme": "light",
+      "file": "settings-memory-long-light.png",
+      "ok": true,
+      "window_number": 35770,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-memory-add",
+      "theme": "light",
+      "file": "settings-memory-add-light.png",
+      "ok": true,
+      "window_number": 35771,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-memory-edit",
+      "theme": "light",
+      "file": "settings-memory-edit-light.png",
+      "ok": true,
+      "window_number": 35772,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "artifact-v2",
+      "theme": "light",
+      "file": "artifact-v2-light.png",
+      "ok": true,
+      "window_number": 35773,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifact-v2-old",
+      "theme": "light",
+      "file": "artifact-v2-old-light.png",
+      "ok": true,
+      "window_number": 35774,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifact-pane-v2",
+      "theme": "light",
+      "file": "artifact-pane-v2-light.png",
+      "ok": true,
+      "window_number": 35775,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifact-v2-leave",
+      "theme": "light",
+      "file": "artifact-v2-leave-light.png",
+      "ok": true,
+      "window_number": 35776,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "no page shows after leaving the 产出 page"
+      ]
+    },
+    {
+      "scene": "artifact-v2-choose",
+      "theme": "light",
+      "file": "artifact-v2-choose-light.png",
+      "ok": true,
+      "window_number": 35777,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifact-quiet-page",
+      "theme": "light",
+      "file": "artifact-quiet-page-light.png",
+      "ok": true,
+      "window_number": 35780,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifacts-v2",
+      "theme": "light",
+      "file": "artifacts-v2-light.png",
+      "ok": true,
+      "window_number": 35783,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifacts-grid",
+      "theme": "light",
+      "file": "artifacts-grid-light.png",
+      "ok": true,
+      "window_number": 35784,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifacts-no-match",
+      "theme": "light",
+      "file": "artifacts-no-match-light.png",
+      "ok": true,
+      "window_number": 35785,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifacts-empty",
+      "theme": "light",
+      "file": "artifacts-empty-light.png",
+      "ok": true,
+      "window_number": 35786,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifacts-loading",
+      "theme": "light",
+      "file": "artifacts-loading-light.png",
+      "ok": true,
+      "window_number": 35787,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifacts-failed",
+      "theme": "light",
+      "file": "artifacts-failed-light.png",
+      "ok": true,
+      "window_number": 35788,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "admin-home",
+      "theme": "light",
+      "file": "admin-home-light.png",
+      "ok": true,
+      "window_number": 35789,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-members",
+      "theme": "light",
+      "file": "admin-members-light.png",
+      "ok": true,
+      "window_number": 35790,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-member-person",
+      "theme": "light",
+      "file": "admin-member-person-light.png",
+      "ok": true,
+      "window_number": 35791,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-member-ai",
+      "theme": "light",
+      "file": "admin-member-ai-light.png",
+      "ok": true,
+      "window_number": 35792,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-nav-end",
+      "theme": "light",
+      "file": "admin-nav-end-light.png",
+      "ok": true,
+      "window_number": 35793,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-budget-edit",
+      "theme": "light",
+      "file": "admin-budget-edit-light.png",
+      "ok": true,
+      "window_number": 35794,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-home-month",
+      "theme": "light",
+      "file": "admin-home-month-light.png",
+      "ok": true,
+      "window_number": 35795,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-usage-last-month",
+      "theme": "light",
+      "file": "admin-usage-last-month-light.png",
+      "ok": true,
+      "window_number": 35796,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-usage",
+      "theme": "light",
+      "file": "admin-usage-light.png",
+      "ok": true,
+      "window_number": 35797,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-activity",
+      "theme": "light",
+      "file": "admin-activity-light.png",
+      "ok": true,
+      "window_number": 35798,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-machines",
+      "theme": "light",
+      "file": "admin-machines-light.png",
+      "ok": true,
+      "window_number": 35799,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-this-computer-no-cli",
+      "theme": "light",
+      "file": "admin-this-computer-no-cli-light.png",
+      "ok": true,
+      "window_number": 35800,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-this-computer-sign-in",
+      "theme": "light",
+      "file": "admin-this-computer-sign-in-light.png",
+      "ok": true,
+      "window_number": 35801,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-this-computer-ready",
+      "theme": "light",
+      "file": "admin-this-computer-ready-light.png",
+      "ok": true,
+      "window_number": 35802,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-overview",
+      "theme": "light",
+      "file": "admin-overview-light.png",
+      "ok": true,
+      "window_number": 35803,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-accounts",
+      "theme": "light",
+      "file": "admin-accounts-light.png",
+      "ok": true,
+      "window_number": 35804,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-keys",
+      "theme": "light",
+      "file": "admin-keys-light.png",
+      "ok": true,
+      "window_number": 35805,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "settings-appearance",
+      "theme": "light",
+      "file": "settings-appearance-light.png",
+      "ok": true,
+      "window_number": 35806,
+      "width_px": 1280,
+      "height_px": 994
+    },
+    {
+      "scene": "artifact-beside-topic",
+      "theme": "light",
+      "file": "artifact-beside-topic-light.png",
+      "ok": true,
+      "window_number": 35807,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifact-page-back",
+      "theme": "light",
+      "file": "artifact-page-back-light.png",
+      "ok": true,
+      "window_number": 35808,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-core",
+      "theme": "light",
+      "file": "topic-core-light.png",
+      "ok": true,
+      "window_number": 35809,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "core-desk",
+      "theme": "light",
+      "file": "core-desk-light.png",
+      "ok": true,
+      "window_number": 35810,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "desk drew \"asks=1\" ({\"asks=1 done=1 runs=1\"})",
+        "desk drew \"runs=1\" ({\"asks=1 done=1 runs=1\"})"
+      ]
+    },
+    {
+      "scene": "core-group",
+      "theme": "light",
+      "file": "core-group-light.png",
+      "ok": true,
+      "window_number": 35811,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "group-page drew \"01SEEDGROUP000000000000000\" ({\"01SEEDGROUP000000000000000 active=2 on_me=1\"})",
+        "group-page drew \"active=2\" ({\"01SEEDGROUP000000000000000 active=2 on_me=1\"})",
+        "group-page drew \"on_me=1\" ({\"01SEEDGROUP000000000000000 active=2 on_me=1\"})"
+      ]
+    },
+    {
+      "scene": "core-members",
+      "theme": "light",
+      "file": "core-members-light.png",
+      "ok": true,
+      "window_number": 35812,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "members-page drew \"entries=3\" ({\"entries=3 detail=Forge\"})",
+        "members-page drew \"detail=Forge\" ({\"entries=3 detail=Forge\"})"
+      ]
+    },
+    {
+      "scene": "core-live",
+      "theme": "light",
+      "file": "core-live-light.png",
+      "ok": true,
+      "window_number": 35813,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "live drew \"Forge\" ({\"Forge 01SEEDRUNWEEKLY00000000000\"})",
+        "live drew \"01SEEDRUNWEEKLY00000000000\" ({\"Forge 01SEEDRUNWEEKLY00000000000\"})"
+      ]
+    },
+    {
+      "scene": "core-side-chat",
+      "theme": "light",
+      "file": "core-side-chat-light.png",
+      "ok": true,
+      "window_number": 35814,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "side-chat drew \"Forge messages=0\" ({\"Forge messages=0\"})"
+      ]
+    },
+    {
+      "scene": "core-artifact",
+      "theme": "light",
+      "file": "core-artifact-light.png",
+      "ok": true,
+      "window_number": 35815,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "artifact-page drew \"重连测试报告 v2\" ({\"重连测试报告 v2\"})"
+      ]
+    },
+    {
+      "scene": "cards-v2",
+      "theme": "light",
+      "file": "cards-v2-light.png",
+      "ok": true,
+      "window_number": 35816,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-choice",
+      "theme": "light",
+      "file": "cards-v2-choice-light.png",
+      "ok": true,
+      "window_number": 35817,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-approve",
+      "theme": "light",
+      "file": "cards-v2-approve-light.png",
+      "ok": true,
+      "window_number": 35818,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-draft",
+      "theme": "light",
+      "file": "cards-v2-draft-light.png",
+      "ok": true,
+      "window_number": 35819,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "a textarea showed 2 lines, more than 1 ({\"area-body 2\"})"
+      ]
+    },
+    {
+      "scene": "cards-v2-form",
+      "theme": "light",
+      "file": "cards-v2-form-light.png",
+      "ok": true,
+      "window_number": 35820,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-plan",
+      "theme": "light",
+      "file": "cards-v2-plan-light.png",
+      "ok": true,
+      "window_number": 35821,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-data",
+      "theme": "light",
+      "file": "cards-v2-data-light.png",
+      "ok": true,
+      "window_number": 35822,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-diff",
+      "theme": "light",
+      "file": "cards-v2-diff-light.png",
+      "ok": true,
+      "window_number": 35823,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-evidence",
+      "theme": "light",
+      "file": "cards-v2-evidence-light.png",
+      "ok": true,
+      "window_number": 35824,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-refs",
+      "theme": "light",
+      "file": "cards-v2-refs-light.png",
+      "ok": true,
+      "window_number": 35825,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-ack",
+      "theme": "light",
+      "file": "cards-v2-ack-light.png",
+      "ok": true,
+      "window_number": 35826,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-notify",
+      "theme": "light",
+      "file": "cards-v2-notify-light.png",
+      "ok": true,
+      "window_number": 35828,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-states",
+      "theme": "light",
+      "file": "cards-v2-states-light.png",
+      "ok": true,
+      "window_number": 35829,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-topic",
+      "theme": "light",
+      "file": "cards-v2-topic-light.png",
+      "ok": true,
+      "window_number": 35831,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "compose",
+      "theme": "light",
+      "file": "compose-light.png",
+      "ok": true,
+      "window_number": 35833,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "compose-choice",
+      "theme": "light",
+      "file": "compose-choice-light.png",
+      "ok": true,
+      "window_number": 35835,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "compose-choice-2",
+      "theme": "light",
+      "file": "compose-choice-2-light.png",
+      "ok": true,
+      "window_number": 35837,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "an answer that did not get there has one 重试 ({\"c21-failed\"})"
+      ]
+    },
+    {
+      "scene": "compose-choice-3",
+      "theme": "light",
+      "file": "compose-choice-3-light.png",
+      "ok": true,
+      "window_number": 35839,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "compose-extend",
+      "theme": "light",
+      "file": "compose-extend-light.png",
+      "ok": true,
+      "window_number": 35840,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "interact_report_rev1",
+      "theme": "light",
+      "file": "interact_report_rev1-light.png",
+      "ok": true,
+      "window_number": 35843,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "interact_pending",
+      "theme": "light",
+      "file": "interact_pending-light.png",
+      "ok": true,
+      "window_number": 35844,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "没有回应 shows 重试 ({\"c21-pend-hard\"})"
+      ]
+    },
+    {
+      "scene": "interact_drilldown_rev2",
+      "theme": "light",
+      "file": "interact_drilldown_rev2-light.png",
+      "ok": true,
+      "window_number": 35846,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "interact_conflict_toast",
+      "theme": "light",
+      "file": "interact_conflict_toast-light.png",
+      "ok": true,
+      "window_number": 35848,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "the conflict toast is on screen (1 toasts)"
+      ]
+    },
+    {
+      "scene": "interact_readonly_other_viewer",
+      "theme": "light",
+      "file": "interact_readonly_other_viewer-light.png",
+      "ok": true,
+      "window_number": 35851,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "interact_notes",
+      "theme": "light",
+      "file": "interact_notes-light.png",
+      "ok": true,
+      "window_number": 35852,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "expect.mode none: the block is read-only ({\"c21-note-busy\"})",
+        "expect.mode none: no 重试 ({\"c21-note-offline\"})"
+      ]
+    },
+    {
+      "scene": "artifact_live_data",
+      "theme": "light",
+      "file": "artifact_live_data-light.png",
+      "ok": true,
+      "window_number": 35854,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifact_reloaded_v2",
+      "theme": "light",
+      "file": "artifact_reloaded_v2-light.png",
+      "ok": true,
+      "window_number": 35857,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifact_ask_pending",
+      "theme": "light",
+      "file": "artifact_ask_pending-light.png",
+      "ok": true,
+      "window_number": 35860,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifact-embed-states",
+      "theme": "light",
+      "file": "artifact-embed-states-light.png",
+      "ok": true,
+      "window_number": 35864,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "the PDF embed is framed as a PDF file ({\"page:PDF\", \"page:网页\"})",
+        "only the web page keeps the 网页 frame ({\"page:PDF\", \"page:网页\"})"
+      ]
+    },
+    {
+      "scene": "artifact-ref-chip",
+      "theme": "light",
+      "file": "artifact-ref-chip-light.png",
+      "ok": true,
+      "window_number": 35866,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "refs-hover",
+      "theme": "light",
+      "file": "refs-hover-light.png",
+      "ok": true,
+      "window_number": 35869,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "refs-markdown",
+      "theme": "light",
+      "file": "refs-markdown-light.png",
+      "ok": true,
+      "window_number": 35871,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "refs-composer",
+      "theme": "light",
+      "file": "refs-composer-light.png",
+      "ok": true,
+      "window_number": 35873,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "refs-sent",
+      "theme": "light",
+      "file": "refs-sent-light.png",
+      "ok": true,
+      "window_number": 35875,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "refs-side-chat",
+      "theme": "light",
+      "file": "refs-side-chat-light.png",
+      "ok": true,
+      "window_number": 35877,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "refs-card-chart",
+      "theme": "light",
+      "file": "refs-card-chart-light.png",
+      "ok": true,
+      "window_number": 35878,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "refs-card-step",
+      "theme": "light",
+      "file": "refs-card-step-light.png",
+      "ok": true,
+      "window_number": 35879,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "refs-card-keyboard",
+      "theme": "light",
+      "file": "refs-card-keyboard-light.png",
+      "ok": true,
+      "window_number": 35880,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "refs-card-metric",
+      "theme": "light",
+      "file": "refs-card-metric-light.png",
+      "ok": true,
+      "window_number": 35881,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "refs-diagram-viewer",
+      "theme": "light",
+      "file": "refs-diagram-viewer-light.png",
+      "ok": true,
+      "window_number": 35882,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "native-kit",
+      "theme": "light",
+      "file": "native-kit-light.png",
+      "ok": true,
+      "window_number": 35883,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "native-kit-2",
+      "theme": "light",
+      "file": "native-kit-2-light.png",
+      "ok": true,
+      "window_number": 35884,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "native-kit-3",
+      "theme": "light",
+      "file": "native-kit-3-light.png",
+      "ok": true,
+      "window_number": 35885,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "rail-topic-menu",
+      "theme": "light",
+      "file": "rail-topic-menu-light.png",
+      "ok": true,
+      "window_number": 35886,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "rail-group-menu",
+      "theme": "light",
+      "file": "rail-group-menu-light.png",
+      "ok": true,
+      "window_number": 35887,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "window-inactive",
+      "theme": "light",
+      "file": "window-inactive-light.png",
+      "ok": true,
+      "window_number": 35888,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "settings-general",
+      "theme": "light",
+      "file": "settings-general-light.png",
+      "ok": true,
+      "window_number": 35889,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-shortcuts",
+      "theme": "light",
+      "file": "settings-shortcuts-light.png",
+      "ok": true,
+      "window_number": 35890,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-edit-profile",
+      "theme": "light",
+      "file": "settings-edit-profile-light.png",
+      "ok": true,
+      "window_number": 35891,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-email",
+      "theme": "light",
+      "file": "settings-email-light.png",
+      "ok": true,
+      "window_number": 35892,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-email-sending",
+      "theme": "light",
+      "file": "settings-email-sending-light.png",
+      "ok": true,
+      "window_number": 35893,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-email-code",
+      "theme": "light",
+      "file": "settings-email-code-light.png",
+      "ok": true,
+      "window_number": 35894,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-phone-qr",
+      "theme": "light",
+      "file": "settings-phone-qr-light.png",
+      "ok": true,
+      "window_number": 35895,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-phone-code",
+      "theme": "light",
+      "file": "settings-phone-code-light.png",
+      "ok": true,
+      "window_number": 35896,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-sign-out",
+      "theme": "light",
+      "file": "settings-sign-out-light.png",
+      "ok": true,
+      "window_number": 35897,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-device-remove",
+      "theme": "light",
+      "file": "settings-device-remove-light.png",
+      "ok": true,
+      "window_number": 35898,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "update-ready",
+      "theme": "light",
+      "file": "update-ready-light.png",
+      "ok": true,
+      "window_number": 35899,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "settings-devices-failed",
+      "theme": "light",
+      "file": "settings-devices-failed-light.png",
+      "ok": true,
+      "window_number": 35900,
+      "width_px": 1280,
+      "height_px": 1480
+    },
+    {
+      "scene": "settings-machine-created",
+      "theme": "light",
+      "file": "settings-machine-created-light.png",
+      "ok": true,
+      "window_number": 35901,
+      "width_px": 1280,
+      "height_px": 1090
+    },
+    {
+      "scene": "settings-machines-loading",
+      "theme": "light",
+      "file": "settings-machines-loading-light.png",
+      "ok": true,
+      "window_number": 35902,
+      "width_px": 1280,
+      "height_px": 960
+    },
+    {
+      "scene": "state-hover-message",
+      "theme": "light",
+      "file": "state-hover-message-light.png",
+      "ok": true,
+      "window_number": 35903,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-hover-code",
+      "theme": "light",
+      "file": "state-hover-code-light.png",
+      "ok": true,
+      "window_number": 35904,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-no-messages",
+      "theme": "light",
+      "file": "topic-no-messages-light.png",
+      "ok": true,
+      "window_number": 35905,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-older-loading",
+      "theme": "light",
+      "file": "topic-older-loading-light.png",
+      "ok": true,
+      "window_number": 35906,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "sidebar-first-sync",
+      "theme": "light",
+      "file": "sidebar-first-sync-light.png",
+      "ok": true,
+      "window_number": 35907,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-embed-in-pane",
+      "theme": "light",
+      "file": "media-embed-in-pane-light.png",
+      "ok": true,
+      "window_number": 35908,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-inline-docs",
+      "theme": "light",
+      "file": "media-inline-docs-light.png",
+      "ok": true,
+      "window_number": 35909,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-inline-data",
+      "theme": "light",
+      "file": "media-inline-data-light.png",
+      "ok": true,
+      "window_number": 35910,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-inline-av",
+      "theme": "light",
+      "file": "media-inline-av-light.png",
+      "ok": true,
+      "window_number": 35911,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-viewer-loading",
+      "theme": "light",
+      "file": "media-viewer-loading-light.png",
+      "ok": true,
+      "window_number": 35912,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-viewer-failed",
+      "theme": "light",
+      "file": "media-viewer-failed-light.png",
+      "ok": true,
+      "window_number": 35913,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "diagram-loading",
+      "theme": "light",
+      "file": "diagram-loading-light.png",
+      "ok": true,
+      "window_number": 35914,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "refs-too-many",
+      "theme": "light",
+      "file": "refs-too-many-light.png",
+      "ok": true,
+      "window_number": 35915,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-card-option-hover",
+      "theme": "light",
+      "file": "state-card-option-hover-light.png",
+      "ok": true,
+      "window_number": 35916,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-card-button-hover",
+      "theme": "light",
+      "file": "state-card-button-hover-light.png",
+      "ok": true,
+      "window_number": 35917,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-card-tooltip",
+      "theme": "light",
+      "file": "state-card-tooltip-light.png",
+      "ok": true,
+      "window_number": 35918,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-hover-sidebar",
+      "theme": "light",
+      "file": "state-hover-sidebar-light.png",
+      "ok": true,
+      "window_number": 35919,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-key-sidebar",
+      "theme": "light",
+      "file": "state-key-sidebar-light.png",
+      "ok": true,
+      "window_number": 35920,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-focus-page-list",
+      "theme": "light",
+      "file": "state-focus-page-list-light.png",
+      "ok": true,
+      "window_number": 35921,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-focus-card-option",
+      "theme": "light",
+      "file": "state-focus-card-option-light.png",
+      "ok": true,
+      "window_number": 35922,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-focus-picker",
+      "theme": "light",
+      "file": "state-focus-picker-light.png",
+      "ok": true,
+      "window_number": 35924,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-hover-page-row",
+      "theme": "light",
+      "file": "state-hover-page-row-light.png",
+      "ok": true,
+      "window_number": 35925,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-hover-artifact-row",
+      "theme": "light",
+      "file": "state-hover-artifact-row-light.png",
+      "ok": true,
+      "window_number": 35928,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-focus-artifact-row",
+      "theme": "light",
+      "file": "state-focus-artifact-row-light.png",
+      "ok": true,
+      "window_number": 35930,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-focus-diagram-node",
+      "theme": "light",
+      "file": "state-focus-diagram-node-light.png",
+      "ok": true,
+      "window_number": 35931,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-focus-settings-row",
+      "theme": "light",
+      "file": "state-focus-settings-row-light.png",
+      "ok": true,
+      "window_number": 35934,
+      "width_px": 1280,
+      "height_px": 1380
+    },
+    {
+      "scene": "main",
+      "theme": "dark",
+      "file": "main-dark.png",
+      "ok": true,
+      "window_number": 35940,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "main-sidebar-hidden",
+      "theme": "dark",
+      "file": "main-sidebar-hidden-dark.png",
+      "ok": true,
+      "window_number": 35943,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "new-topic",
+      "theme": "dark",
+      "file": "new-topic-dark.png",
+      "ok": true,
+      "window_number": 35944,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "group-chat",
+      "theme": "dark",
+      "file": "group-chat-dark.png",
+      "ok": true,
+      "window_number": 35945,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "group-chat-info",
+      "theme": "dark",
+      "file": "group-chat-info-dark.png",
+      "ok": true,
+      "window_number": 35946,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "group-chat-empty",
+      "theme": "dark",
+      "file": "group-chat-empty-dark.png",
+      "ok": true,
+      "window_number": 35947,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "dm-chat",
+      "theme": "dark",
+      "file": "dm-chat-dark.png",
+      "ok": true,
+      "window_number": 35948,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "new-topic-from",
+      "theme": "dark",
+      "file": "new-topic-from-dark.png",
+      "ok": true,
+      "window_number": 35949,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "new-topic-from-long",
+      "theme": "dark",
+      "file": "new-topic-from-long-dark.png",
+      "ok": true,
+      "window_number": 35950,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "todo",
+      "theme": "dark",
+      "file": "todo-dark.png",
+      "ok": true,
+      "window_number": 35951,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "long",
+      "theme": "dark",
+      "file": "long-dark.png",
+      "ok": true,
+      "window_number": 35952,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "empty",
+      "theme": "dark",
+      "file": "empty-dark.png",
+      "ok": true,
+      "window_number": 35953,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "login",
+      "theme": "dark",
+      "file": "login-dark.png",
+      "ok": true,
+      "window_number": 35954,
+      "width_px": 960,
+      "height_px": 960
+    },
+    {
+      "scene": "login-code",
+      "theme": "dark",
+      "file": "login-code-dark.png",
+      "ok": true,
+      "window_number": 35955,
+      "width_px": 960,
+      "height_px": 960
+    },
+    {
+      "scene": "login-server",
+      "theme": "dark",
+      "file": "login-server-dark.png",
+      "ok": true,
+      "window_number": 35956,
+      "width_px": 960,
+      "height_px": 960
+    },
+    {
+      "scene": "login-custom-server",
+      "theme": "dark",
+      "file": "login-custom-server-dark.png",
+      "ok": true,
+      "window_number": 35957,
+      "width_px": 960,
+      "height_px": 960
+    },
+    {
+      "scene": "login-error",
+      "theme": "dark",
+      "file": "login-error-dark.png",
+      "ok": true,
+      "window_number": 35958,
+      "width_px": 960,
+      "height_px": 960
+    },
+    {
+      "scene": "login-signing-in",
+      "theme": "dark",
+      "file": "login-signing-in-dark.png",
+      "ok": true,
+      "window_number": 35959,
+      "width_px": 960,
+      "height_px": 960
+    },
+    {
+      "scene": "login-unreachable",
+      "theme": "dark",
+      "file": "login-unreachable-dark.png",
+      "ok": true,
+      "window_number": 35960,
+      "width_px": 960,
+      "height_px": 960
+    },
+    {
+      "scene": "login-email",
+      "theme": "dark",
+      "file": "login-email-dark.png",
+      "ok": true,
+      "window_number": 35961,
+      "width_px": 960,
+      "height_px": 960
+    },
+    {
+      "scene": "login-email-code",
+      "theme": "dark",
+      "file": "login-email-code-dark.png",
+      "ok": true,
+      "window_number": 35962,
+      "width_px": 960,
+      "height_px": 960
+    },
+    {
+      "scene": "login-email-error",
+      "theme": "dark",
+      "file": "login-email-error-dark.png",
+      "ok": true,
+      "window_number": 35963,
+      "width_px": 960,
+      "height_px": 960
+    },
+    {
+      "scene": "offline",
+      "theme": "dark",
+      "file": "offline-dark.png",
+      "ok": true,
+      "window_number": 35964,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "settings-profile",
+      "theme": "dark",
+      "file": "settings-profile-dark.png",
+      "ok": true,
+      "window_number": 35965,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-invite",
+      "theme": "dark",
+      "file": "settings-invite-dark.png",
+      "ok": true,
+      "window_number": 35966,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-add-bot",
+      "theme": "dark",
+      "file": "settings-add-bot-dark.png",
+      "ok": true,
+      "window_number": 35967,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-add-bot-runner",
+      "theme": "dark",
+      "file": "settings-add-bot-runner-dark.png",
+      "ok": true,
+      "window_number": 35968,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-add-bot-new",
+      "theme": "dark",
+      "file": "settings-add-bot-new-dark.png",
+      "ok": true,
+      "window_number": 35969,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-character",
+      "theme": "dark",
+      "file": "settings-character-dark.png",
+      "ok": true,
+      "window_number": 35970,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-edit-bot",
+      "theme": "dark",
+      "file": "settings-edit-bot-dark.png",
+      "ok": true,
+      "window_number": 35971,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-add-machine",
+      "theme": "dark",
+      "file": "settings-add-machine-dark.png",
+      "ok": true,
+      "window_number": 35972,
+      "width_px": 1280,
+      "height_px": 1090
+    },
+    {
+      "scene": "settings-members",
+      "theme": "dark",
+      "file": "settings-members-dark.png",
+      "ok": true,
+      "window_number": 35973,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-machines",
+      "theme": "dark",
+      "file": "settings-machines-dark.png",
+      "ok": true,
+      "window_number": 35974,
+      "width_px": 1280,
+      "height_px": 1090
+    },
+    {
+      "scene": "settings-notifications",
+      "theme": "dark",
+      "file": "settings-notifications-dark.png",
+      "ok": true,
+      "window_number": 35975,
+      "width_px": 1280,
+      "height_px": 1380
+    },
+    {
+      "scene": "settings-about",
+      "theme": "dark",
+      "file": "settings-about-dark.png",
+      "ok": true,
+      "window_number": 35976,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "about",
+      "theme": "dark",
+      "file": "about-dark.png",
+      "ok": true,
+      "window_number": 35977,
+      "width_px": 568,
+      "height_px": 456
+    },
+    {
+      "scene": "settings-ai-service",
+      "theme": "dark",
+      "file": "settings-ai-service-dark.png",
+      "ok": true,
+      "window_number": 35978,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-models",
+      "theme": "dark",
+      "file": "settings-models-dark.png",
+      "ok": true,
+      "window_number": 35979,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-ai-service-failed",
+      "theme": "dark",
+      "file": "settings-ai-service-failed-dark.png",
+      "ok": true,
+      "window_number": 35980,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-members-end",
+      "theme": "dark",
+      "file": "settings-members-end-dark.png",
+      "ok": true,
+      "window_number": 35981,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-notifications-end",
+      "theme": "dark",
+      "file": "settings-notifications-end-dark.png",
+      "ok": true,
+      "window_number": 35982,
+      "width_px": 1280,
+      "height_px": 1380
+    },
+    {
+      "scene": "settings-profile-error",
+      "theme": "dark",
+      "file": "settings-profile-error-dark.png",
+      "ok": true,
+      "window_number": 35983,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-about-dev",
+      "theme": "dark",
+      "file": "settings-about-dev-dark.png",
+      "ok": true,
+      "window_number": 35984,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "update",
+      "theme": "dark",
+      "file": "update-dark.png",
+      "ok": true,
+      "window_number": 35985,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "update-dl",
+      "theme": "dark",
+      "file": "update-dl-dark.png",
+      "ok": true,
+      "window_number": 35986,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "update-manual",
+      "theme": "dark",
+      "file": "update-manual-dark.png",
+      "ok": true,
+      "window_number": 35987,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "update-card",
+      "theme": "dark",
+      "file": "update-card-dark.png",
+      "ok": true,
+      "window_number": 35988,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "update-card-dl",
+      "theme": "dark",
+      "file": "update-card-dl-dark.png",
+      "ok": true,
+      "window_number": 35989,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "update-card-failed",
+      "theme": "dark",
+      "file": "update-card-failed-dark.png",
+      "ok": true,
+      "window_number": 35990,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "update-card-manual",
+      "theme": "dark",
+      "file": "update-card-manual-dark.png",
+      "ok": true,
+      "window_number": 35991,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "update-notes",
+      "theme": "dark",
+      "file": "update-notes-dark.png",
+      "ok": true,
+      "window_number": 35992,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "whats-new",
+      "theme": "dark",
+      "file": "whats-new-dark.png",
+      "ok": true,
+      "window_number": 35993,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "changelog",
+      "theme": "dark",
+      "file": "changelog-dark.png",
+      "ok": true,
+      "window_number": 35994,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "files",
+      "theme": "dark",
+      "file": "files-dark.png",
+      "ok": true,
+      "window_number": 35995,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "files-menu",
+      "theme": "dark",
+      "file": "files-menu-dark.png",
+      "ok": true,
+      "window_number": 35996,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "files-lightbox",
+      "theme": "dark",
+      "file": "files-lightbox-dark.png",
+      "ok": true,
+      "window_number": 35997,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "files-quick-look",
+      "theme": "dark",
+      "file": "files-quick-look-dark.png",
+      "ok": true,
+      "window_number": 35998,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "files-quick-look-no-preview",
+      "theme": "dark",
+      "file": "files-quick-look-no-preview-dark.png",
+      "ok": true,
+      "window_number": 35999,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "files-quick-look-page",
+      "theme": "dark",
+      "file": "files-quick-look-page-dark.png",
+      "ok": true,
+      "window_number": 36000,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards",
+      "theme": "dark",
+      "file": "cards-dark.png",
+      "ok": true,
+      "window_number": 36003,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "switcher",
+      "theme": "dark",
+      "file": "switcher-dark.png",
+      "ok": true,
+      "window_number": 36004,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "switcher-query",
+      "theme": "dark",
+      "file": "switcher-query-dark.png",
+      "ok": true,
+      "window_number": 36005,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "new-group",
+      "theme": "dark",
+      "file": "new-group-dark.png",
+      "ok": true,
+      "window_number": 36006,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "new-group-keyboard",
+      "theme": "dark",
+      "file": "new-group-keyboard-dark.png",
+      "ok": true,
+      "window_number": 36007,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "new-group-error",
+      "theme": "dark",
+      "file": "new-group-error-dark.png",
+      "ok": true,
+      "window_number": 36008,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "add-members",
+      "theme": "dark",
+      "file": "add-members-dark.png",
+      "ok": true,
+      "window_number": 36009,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "rename-topic",
+      "theme": "dark",
+      "file": "rename-topic-dark.png",
+      "ok": true,
+      "window_number": 36010,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "group-menu",
+      "theme": "dark",
+      "file": "group-menu-dark.png",
+      "ok": true,
+      "window_number": 36011,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "account-menu",
+      "theme": "dark",
+      "file": "account-menu-dark.png",
+      "ok": true,
+      "window_number": 36012,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "rename-group",
+      "theme": "dark",
+      "file": "rename-group-dark.png",
+      "ok": true,
+      "window_number": 36013,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "rename-group-error",
+      "theme": "dark",
+      "file": "rename-group-error-dark.png",
+      "ok": true,
+      "window_number": 36014,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-dm",
+      "theme": "dark",
+      "file": "topic-dm-dark.png",
+      "ok": true,
+      "window_number": 36015,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-dm-bot",
+      "theme": "dark",
+      "file": "topic-dm-bot-dark.png",
+      "ok": true,
+      "window_number": 36016,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "start-dm",
+      "theme": "dark",
+      "file": "start-dm-dark.png",
+      "ok": true,
+      "window_number": 36017,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "leave-group",
+      "theme": "dark",
+      "file": "leave-group-dark.png",
+      "ok": true,
+      "window_number": 36018,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "search",
+      "theme": "dark",
+      "file": "search-dark.png",
+      "ok": true,
+      "window_number": 36019,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "search-hit",
+      "theme": "dark",
+      "file": "search-hit-dark.png",
+      "ok": true,
+      "window_number": 36020,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-came-from",
+      "theme": "dark",
+      "file": "topic-came-from-dark.png",
+      "ok": true,
+      "window_number": 36021,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-find",
+      "theme": "dark",
+      "file": "topic-find-dark.png",
+      "ok": true,
+      "window_number": 36022,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "process",
+      "theme": "dark",
+      "file": "process-dark.png",
+      "ok": true,
+      "window_number": 36023,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "process-failed",
+      "theme": "dark",
+      "file": "process-failed-dark.png",
+      "ok": true,
+      "window_number": 36024,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "process-dev",
+      "theme": "dark",
+      "file": "process-dev-dark.png",
+      "ok": true,
+      "window_number": 36025,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "panel-run",
+      "theme": "dark",
+      "file": "panel-run-dark.png",
+      "ok": true,
+      "window_number": 36026,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "panel-failed",
+      "theme": "dark",
+      "file": "panel-failed-dark.png",
+      "ok": true,
+      "window_number": 36027,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "panel-plan",
+      "theme": "dark",
+      "file": "panel-plan-dark.png",
+      "ok": true,
+      "window_number": 36028,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic",
+      "theme": "dark",
+      "file": "topic-dark.png",
+      "ok": true,
+      "window_number": 36029,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "stop",
+      "theme": "dark",
+      "file": "stop-dark.png",
+      "ok": true,
+      "window_number": 36030,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "stop-stopping",
+      "theme": "dark",
+      "file": "stop-stopping-dark.png",
+      "ok": true,
+      "window_number": 36031,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-short",
+      "theme": "dark",
+      "file": "topic-short-dark.png",
+      "ok": true,
+      "window_number": 36032,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-worst",
+      "theme": "dark",
+      "file": "topic-worst-dark.png",
+      "ok": true,
+      "window_number": 36033,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-react",
+      "theme": "dark",
+      "file": "topic-react-dark.png",
+      "ok": true,
+      "window_number": 36034,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-compose",
+      "theme": "dark",
+      "file": "topic-compose-dark.png",
+      "ok": true,
+      "window_number": 36035,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "web-embed",
+      "theme": "dark",
+      "file": "web-embed-dark.png",
+      "ok": true,
+      "window_number": 36036,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "web-embed-scrolled",
+      "theme": "dark",
+      "file": "web-embed-scrolled-dark.png",
+      "ok": true,
+      "window_number": 36039,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "web-embed-covered",
+      "theme": "dark",
+      "file": "web-embed-covered-dark.png",
+      "ok": true,
+      "window_number": 36042,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-html",
+      "theme": "dark",
+      "file": "media-html-dark.png",
+      "ok": true,
+      "window_number": 36043,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-markdown",
+      "theme": "dark",
+      "file": "media-markdown-dark.png",
+      "ok": true,
+      "window_number": 36044,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-images",
+      "theme": "dark",
+      "file": "media-images-dark.png",
+      "ok": true,
+      "window_number": 36045,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-video",
+      "theme": "dark",
+      "file": "media-video-dark.png",
+      "ok": true,
+      "window_number": 36046,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-audio",
+      "theme": "dark",
+      "file": "media-audio-dark.png",
+      "ok": true,
+      "window_number": 36047,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-pdf",
+      "theme": "dark",
+      "file": "media-pdf-dark.png",
+      "ok": true,
+      "window_number": 36050,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-code",
+      "theme": "dark",
+      "file": "media-code-dark.png",
+      "ok": true,
+      "window_number": 36051,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-table",
+      "theme": "dark",
+      "file": "media-table-dark.png",
+      "ok": true,
+      "window_number": 36052,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-states",
+      "theme": "dark",
+      "file": "media-states-dark.png",
+      "ok": true,
+      "window_number": 36053,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "diagram-inline",
+      "theme": "dark",
+      "file": "diagram-inline-dark.png",
+      "ok": true,
+      "window_number": 36054,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "diagram-error",
+      "theme": "dark",
+      "file": "diagram-error-dark.png",
+      "ok": true,
+      "window_number": 36055,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "diagram-viewer",
+      "theme": "dark",
+      "file": "diagram-viewer-dark.png",
+      "ok": true,
+      "window_number": 36056,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "desk",
+      "theme": "dark",
+      "file": "desk-dark.png",
+      "ok": true,
+      "window_number": 36057,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "desk-answered",
+      "theme": "dark",
+      "file": "desk-answered-dark.png",
+      "ok": true,
+      "window_number": 36058,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "desk-loading",
+      "theme": "dark",
+      "file": "desk-loading-dark.png",
+      "ok": true,
+      "window_number": 36059,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "desk-failed",
+      "theme": "dark",
+      "file": "desk-failed-dark.png",
+      "ok": true,
+      "window_number": 36060,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "desk-empty",
+      "theme": "dark",
+      "file": "desk-empty-dark.png",
+      "ok": true,
+      "window_number": 36061,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "desk-first-run",
+      "theme": "dark",
+      "file": "desk-first-run-dark.png",
+      "ok": true,
+      "window_number": 36062,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "new-topic-hand-to",
+      "theme": "dark",
+      "file": "new-topic-hand-to-dark.png",
+      "ok": true,
+      "window_number": 36063,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "rail-work",
+      "theme": "dark",
+      "file": "rail-work-dark.png",
+      "ok": true,
+      "window_number": 36064,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "rail-muted",
+      "theme": "dark",
+      "file": "rail-muted-dark.png",
+      "ok": true,
+      "window_number": 36065,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "rail-attention",
+      "theme": "dark",
+      "file": "rail-attention-dark.png",
+      "ok": true,
+      "window_number": 36066,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "rail-member",
+      "theme": "dark",
+      "file": "rail-member-dark.png",
+      "ok": true,
+      "window_number": 36067,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-v2",
+      "theme": "dark",
+      "file": "topic-v2-dark.png",
+      "ok": true,
+      "window_number": 36068,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-merged",
+      "theme": "dark",
+      "file": "topic-merged-dark.png",
+      "ok": true,
+      "window_number": 36069,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-artifact-pane",
+      "theme": "dark",
+      "file": "topic-artifact-pane-dark.png",
+      "ok": true,
+      "window_number": 36070,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-done-output",
+      "theme": "dark",
+      "file": "topic-done-output-dark.png",
+      "ok": true,
+      "window_number": 36071,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-two-runs",
+      "theme": "dark",
+      "file": "topic-two-runs-dark.png",
+      "ok": true,
+      "window_number": 36072,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "Forge's plan card is drawn ({\"run-v2-virtual\", \"run-v2-virtual-check\"})",
+        "Scout's plan card is drawn ({\"run-v2-virtual\", \"run-v2-virtual-check\"})"
+      ]
+    },
+    {
+      "scene": "side-chat",
+      "theme": "dark",
+      "file": "side-chat-dark.png",
+      "ok": true,
+      "window_number": 36073,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "live",
+      "theme": "dark",
+      "file": "live-dark.png",
+      "ok": true,
+      "window_number": 36074,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "live-takeover",
+      "theme": "dark",
+      "file": "live-takeover-dark.png",
+      "ok": true,
+      "window_number": 36075,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "switcher-no-match",
+      "theme": "dark",
+      "file": "switcher-no-match-dark.png",
+      "ok": true,
+      "window_number": 36076,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "switcher-loading",
+      "theme": "dark",
+      "file": "switcher-loading-dark.png",
+      "ok": true,
+      "window_number": 36077,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "switcher-failed",
+      "theme": "dark",
+      "file": "switcher-failed-dark.png",
+      "ok": true,
+      "window_number": 36078,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "ask-nobody",
+      "theme": "dark",
+      "file": "ask-nobody-dark.png",
+      "ok": true,
+      "window_number": 36079,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "ask",
+      "theme": "dark",
+      "file": "ask-dark.png",
+      "ok": true,
+      "window_number": 36080,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "ask-empty",
+      "theme": "dark",
+      "file": "ask-empty-dark.png",
+      "ok": true,
+      "window_number": 36081,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "group-v2",
+      "theme": "dark",
+      "file": "group-v2-dark.png",
+      "ok": true,
+      "window_number": 36082,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "group-empty",
+      "theme": "dark",
+      "file": "group-empty-dark.png",
+      "ok": true,
+      "window_number": 36083,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "group-loading",
+      "theme": "dark",
+      "file": "group-loading-dark.png",
+      "ok": true,
+      "window_number": 36084,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "group-failed",
+      "theme": "dark",
+      "file": "group-failed-dark.png",
+      "ok": true,
+      "window_number": 36085,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "group-record",
+      "theme": "dark",
+      "file": "group-record-dark.png",
+      "ok": true,
+      "window_number": 36086,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "group-purpose",
+      "theme": "dark",
+      "file": "group-purpose-dark.png",
+      "ok": true,
+      "window_number": 36087,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-v2",
+      "theme": "dark",
+      "file": "members-v2-dark.png",
+      "ok": true,
+      "window_number": 36088,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-person",
+      "theme": "dark",
+      "file": "members-person-dark.png",
+      "ok": true,
+      "window_number": 36089,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-none",
+      "theme": "dark",
+      "file": "members-none-dark.png",
+      "ok": true,
+      "window_number": 36090,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-loading",
+      "theme": "dark",
+      "file": "members-loading-dark.png",
+      "ok": true,
+      "window_number": 36091,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-failed",
+      "theme": "dark",
+      "file": "members-failed-dark.png",
+      "ok": true,
+      "window_number": 36092,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-plan",
+      "theme": "dark",
+      "file": "members-plan-dark.png",
+      "ok": true,
+      "window_number": 36093,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-memory",
+      "theme": "dark",
+      "file": "members-memory-dark.png",
+      "ok": true,
+      "window_number": 36094,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-memory-end",
+      "theme": "dark",
+      "file": "members-memory-end-dark.png",
+      "ok": true,
+      "window_number": 36095,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-memory-empty",
+      "theme": "dark",
+      "file": "members-memory-empty-dark.png",
+      "ok": true,
+      "window_number": 36096,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-memory-loading",
+      "theme": "dark",
+      "file": "members-memory-loading-dark.png",
+      "ok": true,
+      "window_number": 36097,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-memory-failed",
+      "theme": "dark",
+      "file": "members-memory-failed-dark.png",
+      "ok": true,
+      "window_number": 36098,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "members-memory-long",
+      "theme": "dark",
+      "file": "members-memory-long-dark.png",
+      "ok": true,
+      "window_number": 36099,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "settings-memory",
+      "theme": "dark",
+      "file": "settings-memory-dark.png",
+      "ok": true,
+      "window_number": 36100,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-memory-end",
+      "theme": "dark",
+      "file": "settings-memory-end-dark.png",
+      "ok": true,
+      "window_number": 36101,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-memory-empty",
+      "theme": "dark",
+      "file": "settings-memory-empty-dark.png",
+      "ok": true,
+      "window_number": 36102,
+      "width_px": 1280,
+      "height_px": 494
+    },
+    {
+      "scene": "settings-memory-loading",
+      "theme": "dark",
+      "file": "settings-memory-loading-dark.png",
+      "ok": true,
+      "window_number": 36103,
+      "width_px": 1280,
+      "height_px": 794
+    },
+    {
+      "scene": "settings-memory-failed",
+      "theme": "dark",
+      "file": "settings-memory-failed-dark.png",
+      "ok": true,
+      "window_number": 36104,
+      "width_px": 1280,
+      "height_px": 542
+    },
+    {
+      "scene": "settings-memory-long",
+      "theme": "dark",
+      "file": "settings-memory-long-dark.png",
+      "ok": true,
+      "window_number": 36105,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-memory-add",
+      "theme": "dark",
+      "file": "settings-memory-add-dark.png",
+      "ok": true,
+      "window_number": 36106,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-memory-edit",
+      "theme": "dark",
+      "file": "settings-memory-edit-dark.png",
+      "ok": true,
+      "window_number": 36107,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "artifact-v2",
+      "theme": "dark",
+      "file": "artifact-v2-dark.png",
+      "ok": true,
+      "window_number": 36108,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifact-v2-old",
+      "theme": "dark",
+      "file": "artifact-v2-old-dark.png",
+      "ok": true,
+      "window_number": 36109,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifact-pane-v2",
+      "theme": "dark",
+      "file": "artifact-pane-v2-dark.png",
+      "ok": true,
+      "window_number": 36110,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifact-v2-leave",
+      "theme": "dark",
+      "file": "artifact-v2-leave-dark.png",
+      "ok": true,
+      "window_number": 36111,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "no page shows after leaving the 产出 page"
+      ]
+    },
+    {
+      "scene": "artifact-v2-choose",
+      "theme": "dark",
+      "file": "artifact-v2-choose-dark.png",
+      "ok": true,
+      "window_number": 36112,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifact-quiet-page",
+      "theme": "dark",
+      "file": "artifact-quiet-page-dark.png",
+      "ok": true,
+      "window_number": 36115,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifacts-v2",
+      "theme": "dark",
+      "file": "artifacts-v2-dark.png",
+      "ok": true,
+      "window_number": 36118,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifacts-grid",
+      "theme": "dark",
+      "file": "artifacts-grid-dark.png",
+      "ok": true,
+      "window_number": 36119,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifacts-no-match",
+      "theme": "dark",
+      "file": "artifacts-no-match-dark.png",
+      "ok": true,
+      "window_number": 36120,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifacts-empty",
+      "theme": "dark",
+      "file": "artifacts-empty-dark.png",
+      "ok": true,
+      "window_number": 36121,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifacts-loading",
+      "theme": "dark",
+      "file": "artifacts-loading-dark.png",
+      "ok": true,
+      "window_number": 36122,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifacts-failed",
+      "theme": "dark",
+      "file": "artifacts-failed-dark.png",
+      "ok": true,
+      "window_number": 36123,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "admin-home",
+      "theme": "dark",
+      "file": "admin-home-dark.png",
+      "ok": true,
+      "window_number": 36124,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-members",
+      "theme": "dark",
+      "file": "admin-members-dark.png",
+      "ok": true,
+      "window_number": 36125,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-member-person",
+      "theme": "dark",
+      "file": "admin-member-person-dark.png",
+      "ok": true,
+      "window_number": 36126,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-member-ai",
+      "theme": "dark",
+      "file": "admin-member-ai-dark.png",
+      "ok": true,
+      "window_number": 36127,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-nav-end",
+      "theme": "dark",
+      "file": "admin-nav-end-dark.png",
+      "ok": true,
+      "window_number": 36128,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-budget-edit",
+      "theme": "dark",
+      "file": "admin-budget-edit-dark.png",
+      "ok": true,
+      "window_number": 36129,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-home-month",
+      "theme": "dark",
+      "file": "admin-home-month-dark.png",
+      "ok": true,
+      "window_number": 36130,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-usage-last-month",
+      "theme": "dark",
+      "file": "admin-usage-last-month-dark.png",
+      "ok": true,
+      "window_number": 36131,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-usage",
+      "theme": "dark",
+      "file": "admin-usage-dark.png",
+      "ok": true,
+      "window_number": 36132,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-activity",
+      "theme": "dark",
+      "file": "admin-activity-dark.png",
+      "ok": true,
+      "window_number": 36133,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-machines",
+      "theme": "dark",
+      "file": "admin-machines-dark.png",
+      "ok": true,
+      "window_number": 36134,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-this-computer-no-cli",
+      "theme": "dark",
+      "file": "admin-this-computer-no-cli-dark.png",
+      "ok": true,
+      "window_number": 36135,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-this-computer-sign-in",
+      "theme": "dark",
+      "file": "admin-this-computer-sign-in-dark.png",
+      "ok": true,
+      "window_number": 36136,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-this-computer-ready",
+      "theme": "dark",
+      "file": "admin-this-computer-ready-dark.png",
+      "ok": true,
+      "window_number": 36137,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-overview",
+      "theme": "dark",
+      "file": "admin-overview-dark.png",
+      "ok": true,
+      "window_number": 36138,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-accounts",
+      "theme": "dark",
+      "file": "admin-accounts-dark.png",
+      "ok": true,
+      "window_number": 36139,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "admin-keys",
+      "theme": "dark",
+      "file": "admin-keys-dark.png",
+      "ok": true,
+      "window_number": 36140,
+      "width_px": 2432,
+      "height_px": 1780
+    },
+    {
+      "scene": "settings-appearance",
+      "theme": "dark",
+      "file": "settings-appearance-dark.png",
+      "ok": true,
+      "window_number": 36141,
+      "width_px": 1280,
+      "height_px": 994
+    },
+    {
+      "scene": "artifact-beside-topic",
+      "theme": "dark",
+      "file": "artifact-beside-topic-dark.png",
+      "ok": true,
+      "window_number": 36142,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifact-page-back",
+      "theme": "dark",
+      "file": "artifact-page-back-dark.png",
+      "ok": true,
+      "window_number": 36143,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-core",
+      "theme": "dark",
+      "file": "topic-core-dark.png",
+      "ok": true,
+      "window_number": 36144,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "core-desk",
+      "theme": "dark",
+      "file": "core-desk-dark.png",
+      "ok": true,
+      "window_number": 36145,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "desk drew \"asks=1\" ({\"asks=1 done=1 runs=1\"})",
+        "desk drew \"runs=1\" ({\"asks=1 done=1 runs=1\"})"
+      ]
+    },
+    {
+      "scene": "core-group",
+      "theme": "dark",
+      "file": "core-group-dark.png",
+      "ok": true,
+      "window_number": 36146,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "group-page drew \"01SEEDGROUP000000000000000\" ({\"01SEEDGROUP000000000000000 active=2 on_me=1\"})",
+        "group-page drew \"active=2\" ({\"01SEEDGROUP000000000000000 active=2 on_me=1\"})",
+        "group-page drew \"on_me=1\" ({\"01SEEDGROUP000000000000000 active=2 on_me=1\"})"
+      ]
+    },
+    {
+      "scene": "core-members",
+      "theme": "dark",
+      "file": "core-members-dark.png",
+      "ok": true,
+      "window_number": 36147,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "members-page drew \"entries=3\" ({\"entries=3 detail=Forge\"})",
+        "members-page drew \"detail=Forge\" ({\"entries=3 detail=Forge\"})"
+      ]
+    },
+    {
+      "scene": "core-live",
+      "theme": "dark",
+      "file": "core-live-dark.png",
+      "ok": true,
+      "window_number": 36148,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "live drew \"Forge\" ({\"Forge 01SEEDRUNWEEKLY00000000000\"})",
+        "live drew \"01SEEDRUNWEEKLY00000000000\" ({\"Forge 01SEEDRUNWEEKLY00000000000\"})"
+      ]
+    },
+    {
+      "scene": "core-side-chat",
+      "theme": "dark",
+      "file": "core-side-chat-dark.png",
+      "ok": true,
+      "window_number": 36149,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "side-chat drew \"Forge messages=0\" ({\"Forge messages=0\"})"
+      ]
+    },
+    {
+      "scene": "core-artifact",
+      "theme": "dark",
+      "file": "core-artifact-dark.png",
+      "ok": true,
+      "window_number": 36150,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "artifact-page drew \"重连测试报告 v2\" ({\"重连测试报告 v2\"})"
+      ]
+    },
+    {
+      "scene": "cards-v2",
+      "theme": "dark",
+      "file": "cards-v2-dark.png",
+      "ok": true,
+      "window_number": 36151,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-choice",
+      "theme": "dark",
+      "file": "cards-v2-choice-dark.png",
+      "ok": true,
+      "window_number": 36152,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-approve",
+      "theme": "dark",
+      "file": "cards-v2-approve-dark.png",
+      "ok": true,
+      "window_number": 36153,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-draft",
+      "theme": "dark",
+      "file": "cards-v2-draft-dark.png",
+      "ok": true,
+      "window_number": 36154,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "a textarea showed 2 lines, more than 1 ({\"area-body 2\"})"
+      ]
+    },
+    {
+      "scene": "cards-v2-form",
+      "theme": "dark",
+      "file": "cards-v2-form-dark.png",
+      "ok": true,
+      "window_number": 36155,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-plan",
+      "theme": "dark",
+      "file": "cards-v2-plan-dark.png",
+      "ok": true,
+      "window_number": 36156,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-data",
+      "theme": "dark",
+      "file": "cards-v2-data-dark.png",
+      "ok": true,
+      "window_number": 36157,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-diff",
+      "theme": "dark",
+      "file": "cards-v2-diff-dark.png",
+      "ok": true,
+      "window_number": 36158,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-evidence",
+      "theme": "dark",
+      "file": "cards-v2-evidence-dark.png",
+      "ok": true,
+      "window_number": 36159,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-refs",
+      "theme": "dark",
+      "file": "cards-v2-refs-dark.png",
+      "ok": true,
+      "window_number": 36160,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-ack",
+      "theme": "dark",
+      "file": "cards-v2-ack-dark.png",
+      "ok": true,
+      "window_number": 36161,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-notify",
+      "theme": "dark",
+      "file": "cards-v2-notify-dark.png",
+      "ok": true,
+      "window_number": 36162,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-states",
+      "theme": "dark",
+      "file": "cards-v2-states-dark.png",
+      "ok": true,
+      "window_number": 36163,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "cards-v2-topic",
+      "theme": "dark",
+      "file": "cards-v2-topic-dark.png",
+      "ok": true,
+      "window_number": 36164,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "compose",
+      "theme": "dark",
+      "file": "compose-dark.png",
+      "ok": true,
+      "window_number": 36165,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "compose-choice",
+      "theme": "dark",
+      "file": "compose-choice-dark.png",
+      "ok": true,
+      "window_number": 36166,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "compose-choice-2",
+      "theme": "dark",
+      "file": "compose-choice-2-dark.png",
+      "ok": true,
+      "window_number": 36167,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "an answer that did not get there has one 重试 ({\"c21-failed\"})"
+      ]
+    },
+    {
+      "scene": "compose-choice-3",
+      "theme": "dark",
+      "file": "compose-choice-3-dark.png",
+      "ok": true,
+      "window_number": 36168,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "compose-extend",
+      "theme": "dark",
+      "file": "compose-extend-dark.png",
+      "ok": true,
+      "window_number": 36169,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "interact_report_rev1",
+      "theme": "dark",
+      "file": "interact_report_rev1-dark.png",
+      "ok": true,
+      "window_number": 36170,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "interact_pending",
+      "theme": "dark",
+      "file": "interact_pending-dark.png",
+      "ok": true,
+      "window_number": 36171,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "没有回应 shows 重试 ({\"c21-pend-hard\"})"
+      ]
+    },
+    {
+      "scene": "interact_drilldown_rev2",
+      "theme": "dark",
+      "file": "interact_drilldown_rev2-dark.png",
+      "ok": true,
+      "window_number": 36172,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "interact_conflict_toast",
+      "theme": "dark",
+      "file": "interact_conflict_toast-dark.png",
+      "ok": true,
+      "window_number": 36173,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "the conflict toast is on screen (1 toasts)"
+      ]
+    },
+    {
+      "scene": "interact_readonly_other_viewer",
+      "theme": "dark",
+      "file": "interact_readonly_other_viewer-dark.png",
+      "ok": true,
+      "window_number": 36174,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "interact_notes",
+      "theme": "dark",
+      "file": "interact_notes-dark.png",
+      "ok": true,
+      "window_number": 36175,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "expect.mode none: the block is read-only ({\"c21-note-busy\"})",
+        "expect.mode none: no 重试 ({\"c21-note-offline\"})"
+      ]
+    },
+    {
+      "scene": "artifact_live_data",
+      "theme": "dark",
+      "file": "artifact_live_data-dark.png",
+      "ok": true,
+      "window_number": 36176,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifact_reloaded_v2",
+      "theme": "dark",
+      "file": "artifact_reloaded_v2-dark.png",
+      "ok": true,
+      "window_number": 36177,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifact_ask_pending",
+      "theme": "dark",
+      "file": "artifact_ask_pending-dark.png",
+      "ok": true,
+      "window_number": 36180,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "artifact-embed-states",
+      "theme": "dark",
+      "file": "artifact-embed-states-dark.png",
+      "ok": true,
+      "window_number": 36181,
+      "width_px": 2880,
+      "height_px": 1800,
+      "checks": [
+        "the PDF embed is framed as a PDF file ({\"page:PDF\", \"page:网页\"})",
+        "only the web page keeps the 网页 frame ({\"page:PDF\", \"page:网页\"})"
+      ]
+    },
+    {
+      "scene": "artifact-ref-chip",
+      "theme": "dark",
+      "file": "artifact-ref-chip-dark.png",
+      "ok": true,
+      "window_number": 36182,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "refs-hover",
+      "theme": "dark",
+      "file": "refs-hover-dark.png",
+      "ok": true,
+      "window_number": 36183,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "refs-markdown",
+      "theme": "dark",
+      "file": "refs-markdown-dark.png",
+      "ok": true,
+      "window_number": 36184,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "refs-composer",
+      "theme": "dark",
+      "file": "refs-composer-dark.png",
+      "ok": true,
+      "window_number": 36185,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "refs-sent",
+      "theme": "dark",
+      "file": "refs-sent-dark.png",
+      "ok": true,
+      "window_number": 36186,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "refs-side-chat",
+      "theme": "dark",
+      "file": "refs-side-chat-dark.png",
+      "ok": true,
+      "window_number": 36187,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "refs-card-chart",
+      "theme": "dark",
+      "file": "refs-card-chart-dark.png",
+      "ok": true,
+      "window_number": 36188,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "refs-card-step",
+      "theme": "dark",
+      "file": "refs-card-step-dark.png",
+      "ok": true,
+      "window_number": 36189,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "refs-card-keyboard",
+      "theme": "dark",
+      "file": "refs-card-keyboard-dark.png",
+      "ok": true,
+      "window_number": 36190,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "refs-card-metric",
+      "theme": "dark",
+      "file": "refs-card-metric-dark.png",
+      "ok": true,
+      "window_number": 36191,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "refs-diagram-viewer",
+      "theme": "dark",
+      "file": "refs-diagram-viewer-dark.png",
+      "ok": true,
+      "window_number": 36192,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "native-kit",
+      "theme": "dark",
+      "file": "native-kit-dark.png",
+      "ok": true,
+      "window_number": 36193,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "native-kit-2",
+      "theme": "dark",
+      "file": "native-kit-2-dark.png",
+      "ok": true,
+      "window_number": 36194,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "native-kit-3",
+      "theme": "dark",
+      "file": "native-kit-3-dark.png",
+      "ok": true,
+      "window_number": 36195,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "rail-topic-menu",
+      "theme": "dark",
+      "file": "rail-topic-menu-dark.png",
+      "ok": true,
+      "window_number": 36196,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "rail-group-menu",
+      "theme": "dark",
+      "file": "rail-group-menu-dark.png",
+      "ok": true,
+      "window_number": 36197,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "window-inactive",
+      "theme": "dark",
+      "file": "window-inactive-dark.png",
+      "ok": true,
+      "window_number": 36198,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "settings-general",
+      "theme": "dark",
+      "file": "settings-general-dark.png",
+      "ok": true,
+      "window_number": 36199,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-shortcuts",
+      "theme": "dark",
+      "file": "settings-shortcuts-dark.png",
+      "ok": true,
+      "window_number": 36200,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-edit-profile",
+      "theme": "dark",
+      "file": "settings-edit-profile-dark.png",
+      "ok": true,
+      "window_number": 36201,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-email",
+      "theme": "dark",
+      "file": "settings-email-dark.png",
+      "ok": true,
+      "window_number": 36202,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-email-sending",
+      "theme": "dark",
+      "file": "settings-email-sending-dark.png",
+      "ok": true,
+      "window_number": 36203,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-email-code",
+      "theme": "dark",
+      "file": "settings-email-code-dark.png",
+      "ok": true,
+      "window_number": 36204,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-phone-qr",
+      "theme": "dark",
+      "file": "settings-phone-qr-dark.png",
+      "ok": true,
+      "window_number": 36205,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-phone-code",
+      "theme": "dark",
+      "file": "settings-phone-code-dark.png",
+      "ok": true,
+      "window_number": 36206,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-sign-out",
+      "theme": "dark",
+      "file": "settings-sign-out-dark.png",
+      "ok": true,
+      "window_number": 36207,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "settings-device-remove",
+      "theme": "dark",
+      "file": "settings-device-remove-dark.png",
+      "ok": true,
+      "window_number": 36208,
+      "width_px": 1280,
+      "height_px": 1520
+    },
+    {
+      "scene": "update-ready",
+      "theme": "dark",
+      "file": "update-ready-dark.png",
+      "ok": true,
+      "window_number": 36209,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "settings-devices-failed",
+      "theme": "dark",
+      "file": "settings-devices-failed-dark.png",
+      "ok": true,
+      "window_number": 36210,
+      "width_px": 1280,
+      "height_px": 1480
+    },
+    {
+      "scene": "settings-machine-created",
+      "theme": "dark",
+      "file": "settings-machine-created-dark.png",
+      "ok": true,
+      "window_number": 36211,
+      "width_px": 1280,
+      "height_px": 1090
+    },
+    {
+      "scene": "settings-machines-loading",
+      "theme": "dark",
+      "file": "settings-machines-loading-dark.png",
+      "ok": true,
+      "window_number": 36212,
+      "width_px": 1280,
+      "height_px": 960
+    },
+    {
+      "scene": "state-hover-message",
+      "theme": "dark",
+      "file": "state-hover-message-dark.png",
+      "ok": true,
+      "window_number": 36213,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-hover-code",
+      "theme": "dark",
+      "file": "state-hover-code-dark.png",
+      "ok": true,
+      "window_number": 36214,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-no-messages",
+      "theme": "dark",
+      "file": "topic-no-messages-dark.png",
+      "ok": true,
+      "window_number": 36215,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "topic-older-loading",
+      "theme": "dark",
+      "file": "topic-older-loading-dark.png",
+      "ok": true,
+      "window_number": 36216,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "sidebar-first-sync",
+      "theme": "dark",
+      "file": "sidebar-first-sync-dark.png",
+      "ok": true,
+      "window_number": 36217,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-embed-in-pane",
+      "theme": "dark",
+      "file": "media-embed-in-pane-dark.png",
+      "ok": true,
+      "window_number": 36218,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-inline-docs",
+      "theme": "dark",
+      "file": "media-inline-docs-dark.png",
+      "ok": true,
+      "window_number": 36219,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-inline-data",
+      "theme": "dark",
+      "file": "media-inline-data-dark.png",
+      "ok": true,
+      "window_number": 36220,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-inline-av",
+      "theme": "dark",
+      "file": "media-inline-av-dark.png",
+      "ok": true,
+      "window_number": 36221,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-viewer-loading",
+      "theme": "dark",
+      "file": "media-viewer-loading-dark.png",
+      "ok": true,
+      "window_number": 36222,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "media-viewer-failed",
+      "theme": "dark",
+      "file": "media-viewer-failed-dark.png",
+      "ok": true,
+      "window_number": 36223,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "diagram-loading",
+      "theme": "dark",
+      "file": "diagram-loading-dark.png",
+      "ok": true,
+      "window_number": 36224,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "refs-too-many",
+      "theme": "dark",
+      "file": "refs-too-many-dark.png",
+      "ok": true,
+      "window_number": 36225,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-card-option-hover",
+      "theme": "dark",
+      "file": "state-card-option-hover-dark.png",
+      "ok": true,
+      "window_number": 36226,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-card-button-hover",
+      "theme": "dark",
+      "file": "state-card-button-hover-dark.png",
+      "ok": true,
+      "window_number": 36227,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-card-tooltip",
+      "theme": "dark",
+      "file": "state-card-tooltip-dark.png",
+      "ok": true,
+      "window_number": 36228,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-hover-sidebar",
+      "theme": "dark",
+      "file": "state-hover-sidebar-dark.png",
+      "ok": true,
+      "window_number": 36229,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-key-sidebar",
+      "theme": "dark",
+      "file": "state-key-sidebar-dark.png",
+      "ok": true,
+      "window_number": 36230,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-focus-page-list",
+      "theme": "dark",
+      "file": "state-focus-page-list-dark.png",
+      "ok": true,
+      "window_number": 36231,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-focus-card-option",
+      "theme": "dark",
+      "file": "state-focus-card-option-dark.png",
+      "ok": true,
+      "window_number": 36232,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-focus-picker",
+      "theme": "dark",
+      "file": "state-focus-picker-dark.png",
+      "ok": true,
+      "window_number": 36235,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-hover-page-row",
+      "theme": "dark",
+      "file": "state-hover-page-row-dark.png",
+      "ok": true,
+      "window_number": 36236,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-hover-artifact-row",
+      "theme": "dark",
+      "file": "state-hover-artifact-row-dark.png",
+      "ok": true,
+      "window_number": 36237,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-focus-artifact-row",
+      "theme": "dark",
+      "file": "state-focus-artifact-row-dark.png",
+      "ok": true,
+      "window_number": 36238,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-focus-diagram-node",
+      "theme": "dark",
+      "file": "state-focus-diagram-node-dark.png",
+      "ok": true,
+      "window_number": 36239,
+      "width_px": 2880,
+      "height_px": 1800
+    },
+    {
+      "scene": "state-focus-settings-row",
+      "theme": "dark",
+      "file": "state-focus-settings-row-dark.png",
+      "ok": true,
+      "window_number": 36240,
+      "width_px": 1280,
+      "height_px": 1380
+    }
+  ]
+}

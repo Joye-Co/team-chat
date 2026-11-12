@@ -29,10 +29,13 @@ pub mod runtime;
 pub mod secrets;
 pub mod selfupdate;
 pub mod service;
+pub mod shim;
 pub mod sys;
 pub mod upload;
 pub mod usage;
 pub mod vm_agent;
+pub mod vm_home;
+pub mod vm_login;
 #[cfg(windows)]
 pub mod winacl;
 #[cfg(windows)]

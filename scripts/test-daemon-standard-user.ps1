@@ -19,11 +19,19 @@ and runs, as that user, with that user's own profile and environment:
   scheduler does. What stays unseen is the scheduler itself starting the task for a standard
   user; it does for the runner's own user, by the same definition.
 
+The script first gives the user a real logon session (Remote Desktop to this computer, three
+attempts). With one, the scheduler starts the task and the install command is tested too.
+Without one the tests above still run, and the script fails unless -AllowNoSession is given.
+
 The user is removed at the end. A test that fails fails this script.
 #>
 [CmdletBinding()]
 param(
-    [string]$Target = (Join-Path (Split-Path -Parent $PSScriptRoot) 'target\debug')
+    [string]$Target = (Join-Path (Split-Path -Parent $PSScriptRoot) 'target\debug'),
+    # Without a logon session for the user the tests still run (the test starts the task's
+    # actions itself), and the script then fails: the Task Scheduler starting the task was
+    # not seen. With this switch that outcome passes; CI does not use it.
+    [switch]$AllowNoSession
 )
 
 Set-StrictMode -Version 2
@@ -67,12 +75,18 @@ try {
     New-Item -Path $client -Force | Out-Null
     Set-ItemProperty -Path $client -Name AuthenticationLevelOverride -Value 0
     & cmdkey.exe "/generic:TERMSRV/127.0.0.2" "/user:$env:COMPUTERNAME\$user" "/pass:$secret" | Out-Null
-    $rdp = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\mstsc.exe') -ArgumentList '/v:127.0.0.2', '/w:1024', '/h:768' -PassThru
-    foreach ($i in 1..90) {
-        $session = Get-UserSession
+    foreach ($attempt in 1..3) {
+        $rdp = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\mstsc.exe') -ArgumentList '/v:127.0.0.2', '/w:1024', '/h:768' -PassThru
+        foreach ($i in 1..45) {
+            $session = Get-UserSession
+            if ($session) { break }
+            if ($rdp.HasExited) { Write-Host "the Remote Desktop client ended (exit code $($rdp.ExitCode))"; break }
+            Start-Sleep -Seconds 2
+        }
         if ($session) { break }
-        if ($rdp.HasExited) { Write-Host "the Remote Desktop client ended (exit code $($rdp.ExitCode))"; break }
-        Start-Sleep -Seconds 2
+        Write-Host "attempt ${attempt}: no logon session yet"
+        if (-not $rdp.HasExited) { Stop-Process -Id $rdp.Id -Force -ErrorAction SilentlyContinue }
+        Start-Sleep -Seconds 5
     }
     if ($session) { Write-Host "the user is logged on: $($session.Trim())" }
     else {
@@ -182,4 +196,5 @@ finally {
 }
 if ($failed.Count -gt 0) { throw "as a standard user these failed: $($failed -join ', ')" }
 if ($session) { Write-Host 'the daemon tests pass as a standard user, with the Task Scheduler starting the task in the user''s logon session' }
-else { Write-Host 'the daemon tests pass as a standard user (no logon session: the task''s actions were started by the test)' }
+elseif ($AllowNoSession) { Write-Host 'the daemon tests pass as a standard user (no logon session: the task''s actions were started by the test)' }
+else { throw 'the daemon tests pass as a standard user, but the user got no logon session: the Task Scheduler starting the task and the install command were NOT tested. This step proves the real session or fails.' }

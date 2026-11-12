@@ -16,7 +16,7 @@
 
 证据来源：逐个读了范围内所有按平台分支的代码（`cfg(target_os)`、`cfg(windows)`、`cfg!(…)`、直接读
 `modifiers.platform` 的地方、每个 macOS 框架调用）；在这台 Mac 和 Windows CI（`windows-2025`，100% 缩放，软件渲染）
-上各跑了全部截图场景（第一轮 270 个，现在 273 个），浅色深色各一遍，逐对比较；按 `docs/PRODUCT.md` 的功能逐项读到 GPUI 的 Windows
+上各跑了全部截图场景（第一轮 270 个，现在 283 个），浅色深色各一遍，逐对比较；按 `docs/PRODUCT.md` 的功能逐项读到 GPUI 的 Windows
 平台实现（`gpui-pre-windows 0.3.10`）。
 
 ## 1. 进程和窗口
@@ -142,11 +142,11 @@
 
 每个场景一行的明细在 [interface-scenes.zh.md](interface-scenes.zh.md)（由 `scripts/windows-scene-table.ts` 从两边的 `screenshots.json` 生成，场景数和 run 号写在它的开头）。
 
-最后一轮是 run 43020519758（`windows_scenes=all`，产物 `windows-screenshots`，在 #176 的分支上）；下面那张「看哪张」的表里的图，在 run 43000800678 和这一轮里都有。失败的场景：
+最后一轮是 run 43089167768（`windows_scenes=all`，产物 `windows-screenshots`），和 Mac 那一遍在同一个提交上（`main` 的 `d588c022`）：两边都是 283 个场景、566 张图，全部通过。两次运行的 `screenshots.json` 存在 `runs/` 里，[逐场景的表](interface-scenes.zh.md)由脚本从它们生成，CI 检查表和它们一致（`scripts/check-scene-table.sh`）。下面那张「看哪张」的表里的图，在 run 43000800678、43020519758 和这一轮里都有。以前失败过的场景：
 
 | 场景 | Mac | Windows | 状态 |
 | --- | --- | --- | --- |
-| `artifact_ask_pending` | 原来失败 | 原来失败 | 已修（#178）：话题样例变长之后，页面一打开就滚到了视口上方，按钮点不到（两边都一样）。场景现在先把页面滚进来再点；Mac 上通过，Windows 看新一轮 |
+| `artifact_ask_pending` | 原来失败 | 原来失败 | 已修（#178）：话题样例变长之后，页面一打开就滚到了视口上方，按钮点不到（两边都一样）。场景现在先把页面滚进来再点；两边都通过（run 43089167768） |
 | `state-hover-settings-row` | 原来失败 | 原来失败 | 场景删掉了（#178）：它悬停的「按群设置」那一行在通知设置搬到群和话题页之后就不存在了，通知页现在只有开关和下拉框，没有行悬停 |
 | `web-embed-scrolled` | 通过 | 原来失败：「the inline page did not load」；最后一轮通过 | 已修（#171） | 场景打开时停在长话题的末尾，页面有没有一条边露在视口里取决于内容区高度；Windows 的内容区矮 32，页面一开始完全在视口外，不算「显示」。场景现在先把页面滚进来。和应用本身无关 |
 | `live-takeover`（浅色） | 那一次没等到帧（偶发） | 通过 | 一样 |

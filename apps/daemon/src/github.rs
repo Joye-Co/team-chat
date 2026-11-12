@@ -164,6 +164,12 @@ pub fn fetches_from_github(repo: Option<&crate::proto::RepoSpec>) -> bool {
         .is_some_and(|u| u.contains(HOST))
 }
 
+/// True when the end-of-run fetch of a work folder goes to GitHub: the run's `repo.url` does,
+/// or (a `repo.path` run) the folder's `origin` remote does.
+pub fn code_fetch_from_github(repo: Option<&crate::proto::RepoSpec>, origin: Option<&str>) -> bool {
+    fetches_from_github(repo) || origin.is_some_and(|u| u.to_ascii_lowercase().contains(HOST))
+}
+
 /// What the CLI is told about GitHub in `app` mode (its system note).
 pub fn note(g: &RunGithub) -> Option<String> {
     if !app(g) {
@@ -491,27 +497,15 @@ pub fn credential_main(args: &[String]) -> i32 {
 /// The real `gh` on `PATH`: not in a folder of the run's tools (where `chat-run` is, or the
 /// VM's tools folder) and not this program.
 pub fn real_gh(path: &std::ffi::OsStr) -> Option<PathBuf> {
-    let me = std::env::current_exe()
-        .ok()
-        .and_then(|p| std::fs::canonicalize(p).ok());
-    let name = format!("{GH}{}", std::env::consts::EXE_SUFFIX);
-    std::env::split_paths(path).find_map(|dir| {
-        if dir.as_os_str().is_empty()
-            || dir == Path::new(GUEST_BIN)
-            || dir.join(crate::chat_run::link_name()).exists()
-        {
-            return None;
-        }
-        let c = dir.join(&name);
-        if !c.is_file() || (me.is_some() && std::fs::canonicalize(&c).ok() == me) {
-            return None;
-        }
-        Some(c)
-    })
+    crate::shim::real_program(GH, path)
 }
 
 /// `gh <args>` in a run: the real `gh` with the person's token for this one command.
 pub fn gh_main(args: Vec<String>) -> i32 {
+    // A run with gated actions: `gh` is one of its shims too (crate::shim).
+    if let Err(code) = crate::shim::gate(GH, &args) {
+        return code;
+    }
     let as_person = std::env::var(ENV_AS).ok().filter(|s| !s.is_empty());
     if let Some(name) = &as_person
         && args.first().map(String::as_str) == Some("auth")
@@ -694,6 +688,37 @@ mod tests {
 
     /// 机 4.5: the AI member commits in both modes; the person is the author only when the
     /// server names one, else the machine's git config stays.
+    /// A `repo.path` run fetches its code location with the token when its `origin` is on
+    /// GitHub (the CLI pushed with it); other remotes stay without one.
+    #[test]
+    fn the_code_fetch_uses_github_for_a_path_run_whose_origin_is_github() {
+        let path = crate::proto::RepoSpec {
+            url: None,
+            path: Some("/work/repo".into()),
+            base_branch: None,
+        };
+        assert!(!code_fetch_from_github(Some(&path), None));
+        assert!(!code_fetch_from_github(
+            Some(&path),
+            Some("https://git.example.com/o/r.git")
+        ));
+        assert!(code_fetch_from_github(
+            Some(&path),
+            Some("https://GitHub.com/o/private.git")
+        ));
+        assert!(code_fetch_from_github(
+            Some(&path),
+            Some("git@github.com:o/r.git")
+        ));
+        let url = crate::proto::RepoSpec {
+            url: Some("https://github.com/o/r.git".into()),
+            path: None,
+            base_branch: None,
+        };
+        assert!(code_fetch_from_github(Some(&url), None));
+        assert!(!code_fetch_from_github(None, None));
+    }
+
     #[test]
     fn the_committer_is_the_ai_member_and_the_author_only_when_given() {
         let mut env = vec![("SSH_AUTH_SOCK".to_string(), "/s".to_string())];
@@ -855,6 +880,7 @@ mod tests {
         let exe = |d: &Path, n: &str| {
             let p = d.join(format!("{n}{}", std::env::consts::EXE_SUFFIX));
             std::fs::write(&p, b"x").unwrap();
+            crate::sys::set_mode(&p, 0o755).unwrap();
             p
         };
         exe(&tools, "chat-run");
