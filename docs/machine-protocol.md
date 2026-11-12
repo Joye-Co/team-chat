@@ -61,7 +61,8 @@ Before `welcome` the daemon sends nothing else, and the server sends nothing but
 { t: "run.event",   runId, seq, at, event: RunEvent }
 { t: "run.done",    runId, seq, at, status: "succeeded" | "failed" | "cancelled" | "timeout",
   exitCode?: number, resultText?: string /* <= 64 KiB */, summary?: string /* first line, <= 280 chars */,
-  error?: string /* <= 4 KiB */, sessionId?: string, usage?: Usage, durationMs: number }
+  error?: string /* <= 4 KiB */, sessionId?: string, usage?: Usage, durationMs: number,
+  resumeMissed?: boolean /* true: resumeSessionId was not found, the run used run.assign.fullPrompt */ }
 { t: "run.session", runId, seq, at, ok: boolean, source?: "cli" | "stream",
   bytes?: number, gzipBytes?: number, sha256?: string, error?: string }
 
@@ -102,6 +103,8 @@ KnownRun = { runId, ackedSeq: number }
   sessionUpload?: { url: string, headers?: Record<string, string> },
   kind?: "aside",                  // 1.1, feature "aside": a read-only side chat run
   resumeSessionId?: string,        // 1.1, feature "resume": continue this CLI session (<= 128)
+  fullPrompt?: string,             // with resumeSessionId: the full prompt, for when that session
+                                   // is not found; absent when the frame would pass 1 MiB
   gates?: RunGate[] }              // feature "gates": kinds the run stops at, see "Gated actions"
 { t: "run.input",    runId, inputId, text, authorId?,            // a follow-up from the topic
   answer?: RunAnswer, artifactEvent?: RunArtifactEvent }         // 1.1, feature "answer"
@@ -417,7 +420,11 @@ How the 1.1 daemon does each one:
   `resumeSessionId` only for a CLI with `resume: true` (absent: kinds `claude` and `codex`), so a
   CLI that cannot continue gets the full prompt, as a first run does. With `resumeSessionId` the prompt
   carries only what the session has not seen (protocol.md, "Run context"), and `run.done.sessionId`
-  names the session the run used. In the 群聊 a run continues the last session only when its request
+  names the session the run used. `fullPrompt` then carries the full prompt; when the daemon cannot
+  continue the session (no session file, `thread/resume` or `session/load` fails) it sends
+  `fullPrompt` to the new session instead and sets `run.done.resumeMissed: true`, and the server
+  records that the run got the full prompt (its run context shows the full prompt). Without
+  `fullPrompt` (an older server, or a frame that would pass 1 MiB) the daemon keeps the short prompt. In the 群聊 a run continues the last session only when its request
   quotes a message of that bot or follows up its run; other requests start a new session.
 
 - **pause**: the daemon stops the CLI's process group (`SIGSTOP`, the group from `run.json`) for

@@ -871,6 +871,7 @@ this machine cannot be made to stop at them (update it)",
         usage: outcome.usage.clone(),
         duration_ms: started.elapsed().as_millis() as u64,
         code,
+        resume_missed: None,
         failure: (status == "failed")
             .then(|| crate::failure::of_run(outcome.failure.as_ref(), outcome.error.as_deref())),
     }));
@@ -1540,6 +1541,7 @@ mod tests {
             session_upload: None,
             kind: None,
             resume_session_id: None,
+            full_prompt: None,
             gates: None,
             github: Some(spec.clone()),
         };
@@ -1599,6 +1601,7 @@ mod tests {
             session_upload: None,
             kind: kind.map(str::to_string),
             resume_session_id: None,
+            full_prompt: None,
             gates: None,
             github: None,
         };
