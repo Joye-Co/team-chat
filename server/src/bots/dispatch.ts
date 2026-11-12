@@ -48,7 +48,9 @@ export const TEXT = {
   /** The run's computer went away: the run waits for it (盯 1.1). */
   machineAway: (name: string) => `${name} 不在线了，等它回来接着做；不需要了可以停止。`,
   machineBack: (name: string) => `${name} 回来了，接着做。`,
-  machineMoved: (name: string, minutes: number) => `${name} ${minutes} 分钟没回来，换一台电脑重新做。`,
+  machineMoved: (name: string, minutes: number) => `${name} ${minutes} 分钟没回来，换一台电脑接着做。`,
+  /** 盯 1.7: the computer's program restarted and the run could not be continued. */
+  interrupted: "电脑上的程序重启了，这次没能接着做。需要的话请再 @我。",
   /** The computer is back but no longer has the run, or it was removed. */
   lost: "卡住了：电脑上的这次处理中断了，没有完成。需要的话请再 @我。",
   stalled: (minutes: number) => `卡住了：${minutes} 分钟没有进展。`,
