@@ -4,7 +4,8 @@
 #
 #   scp scripts/runner/host-setup.sh root@<host>:/root/ && ssh root@<host> bash /root/host-setup.sh
 #
-# What it does: system packages, Docker (builds the base image), Firecracker and jailer from the
+# What it does: system packages (with gh: the daemon hands the VMs this host's GitHub sign-in,
+# see docs/SELF-HOSTING.md), Docker (builds the base image), Firecracker and jailer from the
 # official release (checked against its SHA256SUMS), the `runner` user that runs the daemon (kvm
 # and docker groups, systemd linger), the machine daemon from the release for that user
 # (install-daemon.sh; DAEMON_VERSION picks one, default latest), /srv/runner for images, the
@@ -90,7 +91,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get upgrade -yq
 apt-get install -yq --no-install-recommends \
-  ca-certificates curl git jq unzip zstd xz-utils tar \
+  ca-certificates curl git gh jq unzip zstd xz-utils tar \
   nftables iproute2 iptables e2fsprogs acl \
   build-essential pkg-config \
   docker.io docker-buildx nfs-kernel-server \

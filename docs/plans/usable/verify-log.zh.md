@@ -128,3 +128,10 @@
 - GitHub 登录：沙盒没有 OAuth 应用。
 - 额度用完、模型不可用这两类失败：没法在真账号上安全地造出来。
 - 「最后一个所有者不能降级」：万一没拦住会锁死沙盒，没测。
+
+# GitHub 身份按电脑：主机脚本和自部署文档（G7）
+
+- 日期：2026-11-12
+- 改了什么：`scripts/runner/host-setup.sh` 的 apt 列表加 `gh`；SELF-HOSTING（中英）加「给 AI 成员一个 GitHub 账号」。
+- 查过的：`shellcheck scripts/runner/host-setup.sh` 无输出。在团队的一台 Ubuntu 24.04.5 主机上只读查看：`apt-cache policy gh` 的候选版本是 Ubuntu 自己的 `2.45.0`（universe），所以不用另加 GitHub 的软件源；这个版本有文档里用到的 `gh auth login`（浏览器码和 `--with-token`）、`gh auth status`、`gh auth token --hostname`。主机上没有改任何东西。
+- 没走的：没有全新的 Ubuntu 主机，没有重跑 `host-setup.sh`；没有机器账号，所以「在主机上登录」「电脑页显示 `GitHub @<login>`」「提醒来和走」这几步没有真做。这些归 design-github-identity.zh.md 第 7 节的验收。
