@@ -8,7 +8,9 @@
 //! model on a Mac or Linux machine (it reads the Unix process state `T`). Here "stopped" is
 //! state `T` on Unix and, on Windows, a process whose every thread is suspended.
 //!
-//! One test in a file of its own: it looks at every process below this test program.
+//! In a file of its own: it looks at every process below this test program. On Windows
+//! "below" is by parent id and start time: a parent id alone also matches processes whose
+//! parent ended long ago and whose id this test program happens to have got.
 //! Skipped when `claude` is not on PATH; a failure instead when `TC_REQUIRE_REAL_CLI` is set.
 
 #[path = "fake/model.rs"]
@@ -22,8 +24,23 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-/// (pid, parent pid) of every process.
-fn processes() -> Vec<(u32, u32)> {
+/// A process as the test sees it.
+#[derive(Clone, Debug)]
+struct Proc {
+    pid: u32,
+    parent: u32,
+    /// The program's name (Windows; empty on Unix).
+    name: String,
+    /// When it started, in the system's own unit. Windows only (0 on Unix): a parent id
+    /// there is just a number that stays in the child after the parent ended and that a new
+    /// process can get, so a child is one only when it started after its parent.
+    started: u64,
+    /// Windows: whether it is in a Job Object (a run's processes are). None: not asked.
+    in_job: Option<bool>,
+}
+
+/// Every process.
+fn processes() -> Vec<Proc> {
     #[cfg(unix)]
     {
         let out = std::process::Command::new("ps")
@@ -34,20 +51,31 @@ fn processes() -> Vec<(u32, u32)> {
             .lines()
             .filter_map(|l| {
                 let mut p = l.split_whitespace();
-                Some((p.next()?.parse().ok()?, p.next()?.parse().ok()?))
+                Some(Proc {
+                    pid: p.next()?.parse().ok()?,
+                    parent: p.next()?.parse().ok()?,
+                    name: String::new(),
+                    started: 0,
+                    in_job: None,
+                })
             })
             .collect()
     }
     #[cfg(windows)]
     {
-        use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+        use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, INVALID_HANDLE_VALUE};
         use windows_sys::Win32::System::Diagnostics::ToolHelp::{
             CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
             TH32CS_SNAPPROCESS,
         };
+        use windows_sys::Win32::System::JobObjects::IsProcessInJob;
+        use windows_sys::Win32::System::Threading::{
+            GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
         let mut out = vec![];
         // SAFETY: a snapshot of the system's processes, read entry by entry into a struct of
-        // the size the call is told; the snapshot is closed again.
+        // the size the call is told; the snapshot and each process handle are closed again;
+        // the out pointers are valid.
         unsafe {
             let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
             assert_ne!(snap, INVALID_HANDLE_VALUE);
@@ -57,11 +85,31 @@ fn processes() -> Vec<(u32, u32)> {
             while more {
                 let len = e.szExeFile.iter().position(|c| *c == 0).unwrap_or(0);
                 let name = String::from_utf16_lossy(&e.szExeFile[..len]);
-                // The console host Windows puts next to a console program is the system's,
-                // not a process of the run's work.
-                if !name.eq_ignore_ascii_case("conhost.exe") {
-                    out.push((e.th32ProcessID, e.th32ParentProcessID));
+                let (mut started, mut in_job) = (0, None);
+                let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, e.th32ProcessID);
+                if !h.is_null() {
+                    let zero = FILETIME {
+                        dwLowDateTime: 0,
+                        dwHighDateTime: 0,
+                    };
+                    let (mut created, mut b, mut c, mut d) = (zero, zero, zero, zero);
+                    if GetProcessTimes(h, &mut created, &mut b, &mut c, &mut d) != 0 {
+                        started = (u64::from(created.dwHighDateTime) << 32)
+                            | u64::from(created.dwLowDateTime);
+                    }
+                    let mut yes = 0;
+                    if IsProcessInJob(h, std::ptr::null_mut(), &mut yes) != 0 {
+                        in_job = Some(yes != 0);
+                    }
+                    CloseHandle(h);
                 }
+                out.push(Proc {
+                    pid: e.th32ProcessID,
+                    parent: e.th32ParentProcessID,
+                    name,
+                    started,
+                    in_job,
+                });
                 more = Process32NextW(snap, &mut e) != 0;
             }
             CloseHandle(snap);
@@ -70,22 +118,71 @@ fn processes() -> Vec<(u32, u32)> {
     }
 }
 
-/// Every process below this test program.
-fn below_me() -> Vec<u32> {
+/// Whether `child` is a process that `parent` started. Windows: also by the time each
+/// started, which a process whose parent id is merely a reused number does not pass (a
+/// process whose start time cannot be read is one of the system's own, not a run's).
+fn started_by(child: &Proc, parent: &Proc) -> bool {
+    child.parent == parent.pid
+        && child.pid != parent.pid
+        && (cfg!(unix) || (child.started != 0 && child.started >= parent.started))
+}
+
+/// Windows: a process whose parent id is the number of a process that started after it is
+/// not that process's child. This is what once made the test count the system's services as
+/// the run's: this test program had got the id of the ended process that started them.
+#[cfg(windows)]
+#[test]
+fn a_reused_parent_id_does_not_make_a_child() {
+    let proc = |pid, parent, started| Proc {
+        pid,
+        parent,
+        name: String::new(),
+        started,
+        in_job: None,
+    };
+    let me = proc(628, 4000, 500);
+    assert!(started_by(&proc(700, 628, 600), &me));
+    assert!(!started_by(&proc(844, 628, 100), &me), "started before me");
+    assert!(
+        !started_by(&proc(740, 628, 0), &me),
+        "its start time is not readable"
+    );
+    assert!(!started_by(&proc(628, 628, 500), &me));
+}
+
+/// Every process below this test program, without the console host Windows puts next to a
+/// console program (the system's, not a process of the run's work).
+fn below_me() -> Vec<Proc> {
     let all = processes();
-    let mut found = vec![std::process::id()];
+    let me = std::process::id();
+    let mut found: Vec<Proc> = all.iter().filter(|p| p.pid == me).cloned().collect();
+    assert_eq!(found.len(), 1, "this test program is not in the list");
     let mut at = 0;
     while at < found.len() {
-        let parent = found[at];
-        for (pid, ppid) in &all {
-            if *ppid == parent && *pid != parent && !found.contains(pid) {
-                found.push(*pid);
+        let parent = found[at].clone();
+        for p in &all {
+            if started_by(p, &parent) && !found.iter().any(|f| f.pid == p.pid) {
+                found.push(p.clone());
             }
         }
         at += 1;
     }
     found.remove(0);
+    found.retain(|p| !p.name.eq_ignore_ascii_case("conhost.exe"));
     found
+}
+
+/// What a failed look at the tree prints: each process with its program, parent, start time,
+/// job membership and whether it is stopped.
+fn describe(tree: &[(Proc, Option<bool>)]) -> String {
+    tree.iter()
+        .map(|(p, stopped)| {
+            format!(
+                "\n  pid {} {:?} parent {} started {} in a job {:?} stopped {:?}",
+                p.pid, p.name, p.parent, p.started, p.in_job, stopped
+            )
+        })
+        .collect()
 }
 
 /// True when the process `pid` is stopped: state `T` on Unix; on Windows every one of its
@@ -255,14 +352,26 @@ async fn pause_stops_the_real_cli_and_its_tool_and_resume_lets_them_go_on() {
         // A write that had begun may still land.
         tokio::time::sleep(Duration::from_millis(1500)).await;
         let held = lines(&ticks);
-        let tree: Vec<(u32, Option<bool>)> =
-            below_me().into_iter().map(|p| (p, stopped(p))).collect();
+        let tree: Vec<(Proc, Option<bool>)> = below_me()
+            .into_iter()
+            .map(|p| {
+                let s = stopped(p.pid);
+                (p, s)
+            })
+            .collect();
         let live: Vec<_> = tree.iter().filter(|(_, s)| s.is_some()).collect();
         // The CLI and the shell of its tool at the least.
-        assert!(live.len() >= 2, "round {round}: {tree:?}");
+        assert!(live.len() >= 2, "round {round}: {}", describe(&tree));
         assert!(
             live.iter().all(|(_, s)| *s == Some(true)),
-            "round {round}: a process of the paused run is not stopped: {tree:?}"
+            "round {round}: a process of the paused run is not stopped: {}",
+            describe(&tree)
+        );
+        // Windows: every process of the run is in a Job Object, and the pause is the job's.
+        assert!(
+            live.iter().all(|(p, _)| p.in_job != Some(false)),
+            "round {round}: a process below the test is not in a job: {}",
+            describe(&tree)
         );
         tokio::time::sleep(Duration::from_secs(5)).await;
         assert_eq!(
@@ -276,7 +385,9 @@ async fn pause_stops_the_real_cli_and_its_tool_and_resume_lets_them_go_on() {
         })
         .await;
         assert!(
-            below_me().into_iter().any(|p| stopped(p) == Some(false)),
+            below_me()
+                .into_iter()
+                .any(|p| stopped(p.pid) == Some(false)),
             "round {round}: nothing runs after the resume"
         );
     }
@@ -291,7 +402,7 @@ async fn pause_stops_the_real_cli_and_its_tool_and_resume_lets_them_go_on() {
     wait_for(
         "every process of the run to end",
         Duration::from_secs(30),
-        || below_me().into_iter().all(|p| stopped(p).is_none()),
+        || below_me().into_iter().all(|p| stopped(p.pid).is_none()),
     )
     .await;
     let end = lines(&ticks);
