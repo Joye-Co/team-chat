@@ -701,7 +701,8 @@ impl ChatProvider for WorstCase {
                 }
                 r
             })
-            .collect()
+            .collect::<Vec<_>>()
+            .pipe_many_runs()
     }
     fn cancel_run(&self, group_id: &str, topic_id: &str, run_id: &str) -> AdminReply<()> {
         self.inner.cancel_run(group_id, topic_id, run_id)
@@ -1564,4 +1565,37 @@ fn escape_html(text: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+/// Worst case: a 话题 that a member has worked on a dozen times (全部记录 folds).
+trait ManyRuns {
+    fn pipe_many_runs(self) -> Self;
+}
+
+impl ManyRuns for Vec<BotRunSummary> {
+    fn pipe_many_runs(mut self) -> Self {
+        let Some(newest) = self.first().cloned() else {
+            return self;
+        };
+        const HOUR: i64 = 3_600_000;
+        for i in 1..=11i64 {
+            let mut r = newest.clone();
+            r.id = format!("{}-earlier-{i}", newest.id);
+            r.status = if i % 4 == 0 {
+                RunStatus::Failed
+            } else {
+                RunStatus::Done
+            };
+            r.created_at = newest.created_at - i * 6 * HOUR;
+            r.started_at = Some(r.created_at);
+            r.ended_at = Some(r.created_at + (i % 5 + 1) * 600_000);
+            r.updated_at = r.ended_at.unwrap_or(r.created_at);
+            r.summary = Some(format!(
+                "第 {i} 次：把登录页的错误提示分成邀请码无效和连不上服务器两种，并补上 Keychain 读写的测试"
+            ));
+            r.plan = Vec::new();
+            self.push(r);
+        }
+        self
+    }
 }

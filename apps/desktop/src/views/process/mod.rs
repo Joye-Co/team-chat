@@ -216,8 +216,13 @@ pub struct ProcessView {
     raw_open: std::collections::HashSet<u64>,
     /// Shows its own 工作记录 header (off when a pane's toolbar row names it).
     titled: bool,
+    /// 全部记录 shows every run, not only the newest [`RUNS_FOLDED`].
+    runs_expanded: bool,
     _subscriptions: Vec<Subscription>,
 }
+
+/// Rows 全部记录 shows while folded; more runs fold behind 看全部 n 条记录.
+const RUNS_FOLDED: usize = 3;
 
 impl ProcessView {
     /// A pane's toolbar row names the view: no 工作记录 header inside.
@@ -251,6 +256,7 @@ impl ProcessView {
             download: Download::Idle,
             raw_open: Default::default(),
             titled: true,
+            runs_expanded: false,
             _subscriptions: subscriptions,
         };
         this.open_topic(open, cx);
@@ -281,6 +287,7 @@ impl ProcessView {
     fn open_topic(&mut self, open: Option<(GroupId, TopicId)>, cx: &mut Context<Self>) {
         self.open = open;
         self.selected = None;
+        self.runs_expanded = false;
         self.process = RunProcess::default();
         self.download = Download::Idle;
         self.refresh_runs(cx);
@@ -437,47 +444,30 @@ impl ProcessView {
         self.members.iter().find(|m| m.id == id)
     }
 
-    /// One run (§2.6, A2-16): a bordered row h48 (radius 10, px 12, gap
-    /// 12) that is a Tab stop with the focus ring: the 24 member, its name
-    /// 14, the StatusBadge and the start time 12 muted. Selected: the muted
-    /// fill and the name medium (D10).
-    fn render_run_row(&self, run: &BotRunSummary, cx: &mut Context<Self>) -> impl IntoElement {
+    /// One row of 全部记录 (§2.6): h40 inside the one framed list, a Tab stop with the focus
+    /// ring: the 20 member, its name 14 and what came of the run (12 muted, one line), the
+    /// StatusBadge and the start time 12 muted. Selected: the muted fill and the name medium
+    /// (D10). Rows part with a hairline, none after the last.
+    fn render_run_row(
+        &self,
+        run: &BotRunSummary,
+        last: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         use crate::ui::native::{FocusRow as _, NativeType as _, tokens};
         let n = native_colors(cx);
         let bot = self.member(&run.bot_id).cloned();
         let selected = self.selected.as_deref() == Some(run.id.as_str());
         let id = run.id.clone();
-        // The one date format of the pane (`10:21`, `11-01`), as the facts.
         let when = clock(run.started_at.unwrap_or(run.created_at));
-        // What tells this run from the others: how long it took and what came of it (the
-        // result's first line), or the step it is on while it works.
-        let took = crate::views::topic_page::run_elapsed(self.services.provider.as_ref(), run)
-            .map(|ms| duration_text(ms.max(0) as u64));
-        let about = run
-            .summary
-            .as_deref()
-            .and_then(|s| s.lines().map(str::trim).find(|l| !l.is_empty()))
-            .map(|l| crate::markdown::clip(l, 120))
-            .or_else(|| {
-                run.plan
-                    .iter()
-                    .find(|p| p.state == crate::data::PlanState::Current)
-                    .map(|p| crate::markdown::clip(&p.text, 120))
-            });
-        let second = [took, about]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join(" · ");
+        let about = run_about(run);
         div()
             .id(gpui::ElementId::Name(format!("run-{}", run.id).into()))
             .focus_row(selected, cx)
             .min_h(space::S48)
             .py(space::S8)
             .px(space::S12)
-            .rounded(tokens::radius::CONTAINER)
-            .border_1()
-            .border_color(n.separator)
+            .when(!last, |el| el.border_b_1().border_color(n.separator))
             .when(selected, |el| el.bg(n.fill))
             .flex()
             .items_center()
@@ -494,7 +484,6 @@ impl ProcessView {
                     .min_w(px(0.))
                     .flex()
                     .flex_col()
-                    .gap(space::S2)
                     .child(
                         div()
                             .n_body()
@@ -503,14 +492,13 @@ impl ProcessView {
                             .one_line()
                             .child(bot.map(|b| b.name).unwrap_or_default()),
                     )
-                    .when(!second.is_empty(), |el| {
+                    .when_some(about, |el, about| {
                         el.child(
                             div()
                                 .n_footnote()
-                                .n_figures()
                                 .text_color(n.secondary)
                                 .one_line()
-                                .child(second),
+                                .child(about),
                         )
                     }),
             )
@@ -529,21 +517,83 @@ impl ProcessView {
             )
     }
 
-    fn render_run_details(
+    /// The selected run as one card (§2.5): who did it and its StatusBadge, what it is on or
+    /// what came of it, the plan's Progress while it has one, then its facts in a two-column
+    /// grid (label 12 muted over value 14), so five facts take three short rows instead of
+    /// five long ones.
+    fn render_run_card(
         &self,
         run: &BotRunSummary,
         developer: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let colors = theme::colors(cx);
+        use crate::ui::native::{NativeType as _, tokens};
+        let n = native_colors(cx);
         let now = crate::selftest::clock::utc_now().timestamp_millis();
-        // The facts as DescriptionList rows (§2.5): one label column, one
-        // value per row, so a fact never wraps onto a `·` of its own.
-        // F3: a cut value shows the whole value in its tooltip.
-        let value = |text: String| {
-            let id = SharedString::from(format!("run-fact-{}-{}", run.id, text.len()));
+        let bot = self.member(&run.bot_id).cloned();
+        let value = |key: &str, text: String| {
+            let id = SharedString::from(format!("run-fact-{}-{key}", run.id));
             crate::ui::truncate::TruncText::new(text).id(id).tnum()
         };
+        let fact = |label: &'static str, v: AnyElement, cx: &App| {
+            let n = native_colors(cx);
+            div()
+                .min_w(px(0.))
+                .flex()
+                .flex_col()
+                .gap(space::S2)
+                .child(div().n_footnote().text_color(n.secondary).child(label))
+                .child(div().n_body().text_color(n.label).min_w(px(0.)).child(v))
+                .into_any_element()
+        };
+        let mut cells: Vec<AnyElement> = Vec::new();
+        if let Some(at) = run.started_at {
+            let (label, text) = match run.ended_at {
+                Some(end) => (p::FACT_TIME, clock_range(at, end)),
+                None => (p::FACT_STARTED, clock(at)),
+            };
+            cells.push(fact(label, value("time", text).into_any_element(), cx));
+        }
+        if let Some(ms) = run_duration(run, now) {
+            cells.push(fact(
+                p::FACT_DURATION,
+                value("took", duration_text(ms)).into_any_element(),
+                cx,
+            ));
+        }
+        if let Some(name) = run.machine_name.clone().or_else(|| run.machine_id.clone()) {
+            cells.push(fact(
+                p::FACT_MACHINE,
+                value("machine", name).into_any_element(),
+                cx,
+            ));
+        }
+        if let Some(by) = run.requested_by.as_deref().and_then(|id| self.member(id)) {
+            cells.push(fact(
+                p::FACT_REQUESTED_BY,
+                value("by", by.name.clone()).into_any_element(),
+                cx,
+            ));
+        }
+        // The model line is the longest fact: it takes the whole width.
+        let model = model_line(run)
+            .map(|line| fact(p::FACT_MODEL, value("model", line).into_any_element(), cx));
+        let grid = div()
+            .flex()
+            .flex_col()
+            .gap(space::S12)
+            .children(cells.chunks_mut(2).map(|pair| {
+                let mut row = div().flex().gap(space::S16);
+                for cell in pair.iter_mut() {
+                    let cell = std::mem::replace(cell, div().into_any_element());
+                    row = row.child(div().flex_1().min_w(px(0.)).child(cell));
+                }
+                if pair.len() == 1 {
+                    row = row.child(div().flex_1());
+                }
+                row
+            }))
+            .children(model);
         let ends_with_summary = self.process.steps.iter().any(|s| {
             matches!(
                 s,
@@ -553,73 +603,147 @@ impl ProcessView {
                 }
             )
         });
-        let mut facts: Vec<AnyElement> = Vec::new();
-        if let Some(name) = run.machine_name.clone().or_else(|| run.machine_id.clone()) {
-            facts.push(label_value(p::FACT_MACHINE, value(name), cx).into_any_element());
-        }
-        if let Some(line) = model_line(run) {
-            facts.push(label_value(p::FACT_MODEL, value(line), cx).into_any_element());
-        }
-        if let Some(by) = run.requested_by.as_deref().and_then(|id| self.member(id)) {
-            facts.push(
-                label_value(p::FACT_REQUESTED_BY, value(by.name.clone()), cx).into_any_element(),
-            );
-        }
-        if let Some(at) = run.started_at {
-            // One line for the span (`11-01 10:22–10:28`), the start alone
-            // while it runs.
-            let (label, text) = match run.ended_at {
-                Some(end) => (p::FACT_TIME, clock_range(at, end)),
-                None => (p::FACT_STARTED, clock(at)),
-            };
-            facts.push(label_value(label, value(text), cx).into_any_element());
-        }
-        if let Some(ms) = run_duration(run, now) {
-            facts.push(
-                label_value(p::FACT_DURATION, value(duration_text(ms)), cx).into_any_element(),
-            );
-        }
-        div()
-            .pt(space::S8)
+        let progress = run
+            .status
+            .is_active()
+            .then(|| crate::views::topic_page::plan_progress(&run.plan))
+            .flatten();
+        let about = if progress.is_some() {
+            None
+        } else if run.status.is_active() {
+            steps::live_action(&self.process.steps)
+                .map(|step| fill(crate::copy::timeline::PLAN_DOING, &[("step", &step)]))
+        } else {
+            run.summary
+                .as_deref()
+                .filter(|_| !ends_with_summary)
+                .and_then(|s| s.lines().map(str::trim).find(|l| !l.is_empty()))
+                .map(|l| crate::markdown::clip(l, 160))
+        };
+        let card = div()
+            .rounded(tokens::radius::CONTAINER)
+            .border_1()
+            .border_color(n.separator)
             .flex()
             .flex_col()
-            .gap(space::S6)
-            .child(div().flex().flex_col().children(facts))
-            // The end step below repeats the summary once the log has it.
-            .when_some(
-                run.summary.clone().filter(|_| !ends_with_summary),
-                |el, summary| el.child(div().t_body().text_color(colors.text_1).child(summary)),
+            .child(
+                div()
+                    .p(space::S16)
+                    .flex()
+                    .flex_col()
+                    .gap(space::S12)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(space::S12)
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .child(ui::MemberAvatar::new(bot.as_ref(), tokens::avatar::MD)),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(0.))
+                                    .n_headline()
+                                    .text_color(n.label)
+                                    .one_line()
+                                    .child(bot.map(|b| b.name).unwrap_or_default()),
+                            )
+                            .child(div().flex_none().child(run_badge(
+                                run,
+                                self.services.provider.run_stopping(&run.id),
+                                cx,
+                            ))),
+                    )
+                    .when_some(progress, |el, (done, total, current)| {
+                        el.child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(space::S6)
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap(space::S8)
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .min_w(px(0.))
+                                                .n_body()
+                                                .text_color(n.label)
+                                                .one_line()
+                                                .children(current),
+                                        )
+                                        .child(
+                                            div()
+                                                .flex_none()
+                                                .n_footnote()
+                                                .n_figures()
+                                                .text_color(n.secondary)
+                                                .child(format!("{done}/{total}")),
+                                        ),
+                                )
+                                .child(ui::native::steps_bar(done, total, None, cx)),
+                        )
+                    })
+                    .when_some(about, |el, about| {
+                        el.child(
+                            div()
+                                .n_body()
+                                .text_color(n.label)
+                                .line_clamp(3)
+                                .child(about),
+                        )
+                    }),
             )
-            .when(developer, |el| {
-                let time = |t: Option<Millis>| match t.and_then(crate::views::shell::known) {
-                    Some(t) => clock(t),
-                    None => p::DEV_NONE.to_string(),
-                };
-                let mut rows: Vec<(&'static str, String)> = vec![
-                    (p::DEV_RUN_ID, run.id.clone()),
-                    (p::DEV_MEMBER_ID, run.bot_id.clone()),
-                    (
-                        p::DEV_MACHINE_ID,
-                        run.machine_id.clone().unwrap_or_else(|| p::DEV_NONE.into()),
-                    ),
-                    // A2-19: the state and the start are the facts above;
-                    // the box adds only what they do not say.
-                    (p::DEV_CREATED, time(Some(run.created_at))),
-                    (
-                        p::DEV_ENDED,
-                        match run.ended_at {
-                            None if run.status.is_active() => p::DEV_NOT_ENDED.to_string(),
-                            t => time(t),
-                        },
-                    ),
-                    (p::DEV_UPDATED, time(Some(run.updated_at))),
-                    (p::DEV_LOG_SEQ, self.process.last_seq.to_string()),
-                ];
-                if let Some((id, runtime)) = self.process.session.clone() {
-                    rows.push((p::DEV_RECORD, format!("{id} ({runtime})")));
-                }
-                el.child(developer_panel(rows, cx))
-            })
+            .child(
+                div()
+                    .px(space::S16)
+                    .py(space::S12)
+                    .border_t_1()
+                    .border_color(n.separator)
+                    .child(grid),
+            );
+        div()
+            .flex()
+            .flex_col()
+            .gap(space::S12)
+            .child(card)
+            .when(developer, |el| el.child(self.developer_rows(run, cx)))
+    }
+
+    fn developer_rows(&self, run: &BotRunSummary, cx: &mut Context<Self>) -> AnyElement {
+        let time = |t: Option<Millis>| match t.and_then(crate::views::shell::known) {
+            Some(t) => clock(t),
+            None => p::DEV_NONE.to_string(),
+        };
+        let mut rows: Vec<(&'static str, String)> = vec![
+            (p::DEV_RUN_ID, run.id.clone()),
+            (p::DEV_MEMBER_ID, run.bot_id.clone()),
+            (
+                p::DEV_MACHINE_ID,
+                run.machine_id.clone().unwrap_or_else(|| p::DEV_NONE.into()),
+            ),
+            // A2-19: the state and the start are the facts above;
+            // the box adds only what they do not say.
+            (p::DEV_CREATED, time(Some(run.created_at))),
+            (
+                p::DEV_ENDED,
+                match run.ended_at {
+                    None if run.status.is_active() => p::DEV_NOT_ENDED.to_string(),
+                    t => time(t),
+                },
+            ),
+            (p::DEV_UPDATED, time(Some(run.updated_at))),
+            (p::DEV_LOG_SEQ, self.process.last_seq.to_string()),
+        ];
+        if let Some((id, runtime)) = self.process.session.clone() {
+            rows.push((p::DEV_RECORD, format!("{id} ({runtime})")));
+        }
+        developer_panel(rows, cx)
     }
 
     /// A run that ended failed (§2.15, R2-07): one Alert in the pane, in
@@ -852,6 +976,21 @@ impl ProcessView {
     }
 }
 
+/// What tells a run from the others in 全部记录: what came of it (the result's first line),
+/// or the step it is on while it works.
+fn run_about(run: &BotRunSummary) -> Option<String> {
+    run.summary
+        .as_deref()
+        .and_then(|s| s.lines().map(str::trim).find(|l| !l.is_empty()))
+        .map(|l| crate::markdown::clip(l, 120))
+        .or_else(|| {
+            run.plan
+                .iter()
+                .find(|p| p.state == crate::data::PlanState::Current)
+                .map(|p| crate::markdown::clip(&p.text, 120))
+        })
+}
+
 /// The developer panel of a run (§2.19): a framed DescriptionList with a
 /// 40 pt header (its title and a 28 copy button); localized labels, values
 /// in 13 pt monospace that truncate at the frame.
@@ -973,11 +1112,73 @@ impl Render for ProcessView {
                 )
                 .into_any_element();
         }
-        let rows: Vec<_> = self
-            .runs
-            .iter()
-            .map(|r| self.render_run_row(r, cx).into_any_element())
+        // 全部记录 only when the 话题 has more than one run: a lone run is the card alone.
+        let count = self.runs.len();
+        // A 话题 with many runs would push the card and its steps far down: the list folds
+        // to the newest rows, and the selected run always keeps its row.
+        let folds = count > RUNS_FOLDED + 1;
+        let shown: Vec<&BotRunSummary> = if count < 2 {
+            Vec::new()
+        } else if !folds || self.runs_expanded {
+            self.runs.iter().collect()
+        } else {
+            let selected_ix = self
+                .selected
+                .as_ref()
+                .and_then(|id| self.runs.iter().position(|r| &r.id == id))
+                .unwrap_or(0);
+            let mut ix: Vec<usize> = (0..RUNS_FOLDED).collect();
+            if selected_ix >= RUNS_FOLDED {
+                ix[RUNS_FOLDED - 1] = selected_ix;
+            }
+            ix.into_iter().map(|i| &self.runs[i]).collect()
+        };
+        let shown_len = shown.len();
+        let mut rows: Vec<_> = shown
+            .into_iter()
+            .enumerate()
+            .map(|(i, r)| {
+                self.render_run_row(r, i + 1 == shown_len && !folds, cx)
+                    .into_any_element()
+            })
             .collect();
+        if folds {
+            let text = if self.runs_expanded {
+                p::RUNS_COLLAPSE.to_string()
+            } else {
+                fill(p::RUNS_SHOW_ALL, &[("n", &count.to_string())])
+            };
+            let n = native_colors(cx);
+            rows.push(
+                div()
+                    .id("runs-fold")
+                    .h(space::S32)
+                    .px(space::S12)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .gap(space::S4)
+                    .cursor_pointer()
+                    .hover(|el| el.bg(n.row_hover))
+                    .n_footnote()
+                    .text_color(n.secondary)
+                    .child(text)
+                    .child(ui::sym(
+                        if self.runs_expanded {
+                            Sym::ChevronUp
+                        } else {
+                            Sym::ChevronDown
+                        },
+                        ui::SymSize::INLINE,
+                        n.secondary,
+                    ))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.runs_expanded = !this.runs_expanded;
+                        cx.notify();
+                    }))
+                    .into_any_element(),
+            );
+        }
         let run = self.selected_run().cloned();
         let bot_name = run
             .as_ref()
@@ -1001,15 +1202,36 @@ impl Render for ProcessView {
         let footer = run
             .as_ref()
             .and_then(|run| self.failure_footer(run, developer, cx));
+        let n = native_colors(cx);
+        let step_count = steps.len() as u32;
         let body = body
             .when(titled, |el| el.child(section(p::RUNS, cx)))
             .when(!titled, |el| el.pt(space::S16))
-            // R2-07: the run rows sit inside the pane padding (x 1056), so
-            // the selected band lines up with the facts below.
-            .child(div().flex().flex_col().gap(space::S8).children(rows))
+            .when(!rows.is_empty(), |el| {
+                el.child(div().pb(space::S8).child(ui::panel_label(
+                    p::RUNS_ALL,
+                    Some(count as u32),
+                    cx,
+                )))
+                .child(
+                    div()
+                        .mb(space::S16)
+                        .rounded(ui::native::tokens::radius::CONTAINER)
+                        .border_1()
+                        .border_color(n.separator)
+                        .overflow_hidden()
+                        .flex()
+                        .flex_col()
+                        .children(rows),
+                )
+            })
             .when_some(run, |el, run| {
-                el.child(self.render_run_details(&run, developer, cx))
-                    .child(section(p::STEPS, cx))
+                el.child(self.render_run_card(&run, developer, cx))
+                    .child(div().pt(space::S24).pb(space::S8).child(ui::panel_label(
+                        p::STEPS,
+                        (step_count > 0).then_some(step_count),
+                        cx,
+                    )))
                     .children(steps)
                     .children(self.failure_alert(&run, cx))
                     .when(loading, |el| {

@@ -967,6 +967,7 @@ fn code(spec: &InlineSpec, media: &Arc<Media>, c: &store::Code, cx: &App) -> Any
         .h(px(CODE_LINES as f32 * 20. + 16.))
         .py(space::S8)
         .overflow_x_scroll()
+        .restrict_scroll_to_axis()
         .t_code()
         .tnum();
     let mut block = false;

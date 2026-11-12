@@ -1298,7 +1298,12 @@ fn build(dark: bool) -> Colors {
         tile_ink: fg,
         ph: [p.muted, p.pressed, p.muted],
         // One avatar style for every member (§1.8): no tints.
-        tints: if dark { tk::member_tint::DARK } else { tk::member_tint::LIGHT }.map(c),
+        tints: if dark {
+            tk::member_tint::DARK
+        } else {
+            tk::member_tint::LIGHT
+        }
+        .map(c),
 
         sidebar: p.sidebar,
         content: p.background,
