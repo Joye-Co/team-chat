@@ -44,35 +44,45 @@ pub(super) fn group(
     };
     let menu = nav_views::notify::items(menu, services, &g.id, window, cx);
     if g.kind != GroupKind::Group {
-        return menu;
+        // A 私聊: 隐藏 only (it comes back with a new message).
+        let menu = if services.provider.can_hide_delete() {
+            menu.separator()
+        } else {
+            menu
+        };
+        return nav_views::hide_delete::hide_group_item(menu, services, &g);
     }
     let menu = menu.separator();
+    let hide = g.clone();
     let (rename, add, leave) = (services.clone(), services.clone(), services.clone());
     let (g1, g2, g3) = (g.clone(), g.clone(), g);
-    menu.item(
-        PopupMenuItem::new(nav::RENAME_GROUP).on_click(move |_, window, cx| {
-            nav_views::rename::open_rename_group(
-                rename.clone(),
-                g1.id.clone(),
-                g1.name.clone(),
-                window,
-                cx,
-            )
-        }),
-    )
-    .item(
-        PopupMenuItem::new(nav::ADD_MEMBERS).on_click(move |_, window, cx| {
-            nav_views::dialogs::open_add_members(
-                add.clone(),
-                g2.id.clone(),
-                g2.name.clone(),
-                window,
-                cx,
-            )
-        }),
-    )
-    .separator()
-    .item(
+    let menu = menu
+        .item(
+            PopupMenuItem::new(nav::RENAME_GROUP).on_click(move |_, window, cx| {
+                nav_views::rename::open_rename_group(
+                    rename.clone(),
+                    g1.id.clone(),
+                    g1.name.clone(),
+                    window,
+                    cx,
+                )
+            }),
+        )
+        .item(
+            PopupMenuItem::new(nav::ADD_MEMBERS).on_click(move |_, window, cx| {
+                nav_views::dialogs::open_add_members(
+                    add.clone(),
+                    g2.id.clone(),
+                    g2.name.clone(),
+                    window,
+                    cx,
+                )
+            }),
+        )
+        .separator();
+    let menu = nav_views::hide_delete::hide_group_item(menu, services, &hide);
+    let delete = hide.clone();
+    let menu = menu.item(
         // T4-14: a destructive item reads in the destructive color (the
         // Mac menu's red item), and it still asks first.
         PopupMenuItem::element(|_: &mut gpui::Window, cx: &mut gpui::App| {
@@ -90,5 +100,6 @@ pub(super) fn group(
                 cx,
             )
         }),
-    )
+    );
+    nav_views::hide_delete::delete_group_item(menu, services, &delete)
 }

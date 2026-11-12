@@ -23,6 +23,7 @@ import { addAiServiceFixtures } from "./fixtures-ai-service.ts";
 import { addSuperviseFixtures } from "./fixtures-supervise.ts";
 import { addAlertsFixtures } from "./fixtures-alerts.ts";
 import { addPersonalAiFixtures } from "./fixtures-personal-ai.ts";
+import { addHideDeleteFixtures } from "./fixtures-hide-delete.ts";
 import { run, type Tree } from "./generated.ts";
 
 type Fixture = {
@@ -378,6 +379,7 @@ addAiServiceFixtures({ ok, bad });
 addSuperviseFixtures({ ok, bad, T0, ID });
 addAlertsFixtures({ ok, T0, ID });
 addPersonalAiFixtures({ ok, bad, T0, ID });
+addHideDeleteFixtures({ ok, bad, T0, ID, base, generalSummary, botMember: botNulls });
 
 // ---------------------------------------------------------------------------
 

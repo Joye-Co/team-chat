@@ -59,7 +59,7 @@ pub fn render_steps(
                 }
         )
     });
-    process.steps[start..]
+    let rows: Vec<(usize, AnyElement)> = process.steps[start..]
         .iter()
         .enumerate()
         .filter(|(_, step)| {
@@ -68,7 +68,19 @@ pub fn render_steps(
         // R2-07, §2.15: a failed end is the pane's failure Alert (with 重试
         // and 查看日志), not a step row.
         .filter(|(_, step)| !failed_end(step))
-        .filter_map(|(i, step)| render_step(start + i, step, bot_name, developer, window, cx))
+        .filter_map(|(i, step)| {
+            render_step(start + i, step, bot_name, developer, window, cx).map(|el| (start + i, el))
+        })
+        .collect();
+    // The timeline: every step's glyph sits on one rail that runs down to the next step;
+    // the last step ends it.
+    let count = rows.len();
+    rows.into_iter()
+        .enumerate()
+        .map(|(n, (ix, el))| {
+            let step = &process.steps[ix];
+            timeline_row(step, el, n + 1 == count, cx)
+        })
         .collect()
 }
 
@@ -97,6 +109,38 @@ fn block(_cx: &App) -> gpui::Div {
 /// decision 2026-11-10), so the box never reads as clipped. Explicit line
 /// breaks stay. `id` is unique within the step list.
 fn mono_box(id: ElementId, text: String, window: &mut Window, cx: &mut App) -> impl IntoElement {
+    let k = theme::colors(cx);
+    mono_frame(None, cx).child(mono_scroll(id, text, k.text_1, window, cx))
+}
+
+/// The frame of a code box: 1 px border (tinted red for a failed command), radius 8, the
+/// code fill.
+fn mono_frame(edge: Option<Hsla>, cx: &App) -> gpui::Div {
+    let k = theme::colors(cx);
+    let n = crate::ui::native::native_colors(cx);
+    div()
+        .mt(space::S2)
+        .w_full()
+        .min_w(px(0.))
+        .rounded(theme::radius::MD)
+        .border_1()
+        .border_color(edge.unwrap_or(n.separator))
+        .bg(k.code_bg)
+        .overflow_hidden()
+        .flex()
+        .flex_col()
+}
+
+/// One scrolling part of a code box: `code` 13/20 lines that never wrap mid-token; a long
+/// line scrolls sideways, with a scrollbar along the part's bottom edge whenever a line is
+/// cut and a 16 fade at its right edge.
+fn mono_scroll(
+    id: ElementId,
+    text: String,
+    color: Hsla,
+    window: &mut Window,
+    cx: &mut App,
+) -> gpui::Div {
     let scroll = window
         .use_keyed_state(id.clone(), cx, |_, _| gpui::ScrollHandle::new())
         .read(cx)
@@ -104,10 +148,6 @@ fn mono_box(id: ElementId, text: String, window: &mut Window, cx: &mut App) -> i
     // Known from the frame before: a line is wider than the box.
     let scrolls = scroll.max_offset().x > px(0.);
     let k = theme::colors(cx);
-    let n = crate::ui::native::native_colors(cx);
-    // The thread's scroll cue (R1-04): a 16 fade into the box fill at the
-    // right edge, over the 16 right padding, so a line that fits ends
-    // before it and a longer one reads as cut by a scroll edge, not a clip.
     let fade = div()
         .absolute()
         .top_0()
@@ -120,25 +160,16 @@ fn mono_box(id: ElementId, text: String, window: &mut Window, cx: &mut App) -> i
             gpui::linear_color_stop(k.code_bg, 1.),
         ));
     div()
-        .mt(space::S2)
         .relative()
         .w_full()
         .min_w(px(0.))
-        .rounded(theme::radius::MD)
-        .border_1()
-        .border_color(n.separator)
-        .bg(k.code_bg)
-        .overflow_hidden()
         .child(
             div()
                 .id(id)
                 .w_full()
-                // A row whose one item keeps its content width: the lines
-                // are as wide as the longest one, so the box has something
-                // to scroll (a block child would take the box's width and
-                // only overflow its paint).
                 .flex()
                 .overflow_x_scroll()
+                .restrict_scroll_to_axis()
                 .track_scroll(&scroll)
                 .child(
                     div()
@@ -147,11 +178,10 @@ fn mono_box(id: ElementId, text: String, window: &mut Window, cx: &mut App) -> i
                         .pl(space::S12)
                         .pr(space::S16)
                         .pt(space::S8)
-                        // Room for the scrollbar under the last line.
                         .pb(if scrolls { space::S16 } else { space::S8 })
                         .t_code()
                         .whitespace_nowrap()
-                        .text_color(k.text_1)
+                        .text_color(color)
                         .children(
                             text.lines()
                                 .map(|l| div().child(l.to_string()))
@@ -160,13 +190,50 @@ fn mono_box(id: ElementId, text: String, window: &mut Window, cx: &mut App) -> i
                 ),
         )
         .child(fade)
-        // Draws nothing while every line fits.
         .child(
             div().absolute().inset_0().child(
                 gpui_component::scroll::Scrollbar::horizontal(&scroll)
                     .mode(gpui_component::scroll::ScrollbarMode::Always),
             ),
         )
+}
+
+/// A command and what it printed in one code box: the command on top, its output under a
+/// hairline in the secondary ink, and 还有 n 行 as the box's last line.
+#[allow(clippy::too_many_arguments)]
+fn command_box(
+    ix: usize,
+    command: String,
+    output: Option<(String, usize)>,
+    failed: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> impl IntoElement {
+    let k = theme::colors(cx);
+    let n = crate::ui::native::native_colors(cx);
+    let edge = failed.then(|| n.red.opacity(0.5));
+    mono_frame(edge, cx)
+        .child(mono_scroll(mono_id(ix, 0), command, k.text_1, window, cx))
+        .when_some(output, |el, (out, more)| {
+            el.child(
+                div()
+                    .border_t_1()
+                    .border_color(n.separator)
+                    .child(mono_scroll(mono_id(ix, 1), out, k.text_2, window, cx)),
+            )
+            .when(more > 0, |el| {
+                el.child(
+                    div()
+                        .px(space::S12)
+                        .py(space::S4)
+                        .border_t_1()
+                        .border_color(n.separator)
+                        .t_meta()
+                        .text_color(k.text_3)
+                        .child(fill(p::MORE_LINES, &[("n", &more.to_string())])),
+                )
+            })
+        })
 }
 
 /// Where a path is cut: the folders before the last two parts, and those
@@ -385,9 +452,23 @@ fn render_step(
             } else {
                 shown.into_any_element()
             };
+            let n = crate::ui::native::native_colors(cx);
             block(cx)
                 .child(label(who, cx))
-                .child(div().t_body().text_color(colors.text_1).child(body))
+                .child(
+                    div()
+                        .t_body()
+                        .text_color(colors.text_1)
+                        // What came in reads as a quote; what the member said is its own text.
+                        .when(!*from_bot, |el| {
+                            el.mt(space::S2)
+                                .px(space::S12)
+                                .py(space::S8)
+                                .rounded(theme::radius::MD)
+                                .bg(n.fill)
+                        })
+                        .child(body),
+                )
                 .when(*streaming, |el| {
                     el.child(label(p::STEP_WRITING.to_string(), cx))
                 })
@@ -424,22 +505,24 @@ fn render_step(
                 Some(true) => crate::ui::native::StatusKind::Done,
                 Some(false) => crate::ui::native::StatusKind::Failed,
             };
-            let mut header = div()
+            let header = div()
                 .flex()
                 .items_center()
                 .gap(space::S6)
                 .t_small()
                 .child(div().text_color(colors.text_2).child(p::STEP_TOOL))
-                .child(crate::ui::native::status_badge(kind, result, cx));
-            if let Some(code) = exit_code {
-                header = header.child(
-                    div()
-                        .t_meta()
-                        .tnum()
-                        .text_color(colors.text_3)
-                        .child(fill(p::STEP_EXIT_CODE, &[("n", &code.to_string())])),
-                );
-            }
+                .child(crate::ui::native::status_badge(kind, result, cx))
+                .child(div().flex_1())
+                .when_some(*exit_code, |el, code| {
+                    el.child(
+                        div()
+                            .flex_none()
+                            .t_meta()
+                            .tnum()
+                            .text_color(colors.text_3)
+                            .child(fill(p::STEP_EXIT_CODE, &[("n", &code.to_string())])),
+                    )
+                });
             let out = output.as_deref().filter(|o| !o.trim().is_empty()).map(|o| {
                 let lines = if *ok == Some(true) && !developer {
                     OUTPUT_LINES_OK
@@ -451,18 +534,19 @@ fn render_step(
             });
             block(cx)
                 .child(header)
-                .child(mono_box(mono_id(ix, 0), clip(title, 400), window, cx))
+                .child(command_box(
+                    ix,
+                    clip(title, 400),
+                    out,
+                    *ok == Some(false),
+                    window,
+                    cx,
+                ))
                 .when_some(input.clone().filter(|_| developer), |el, json| {
                     el.child(label(
                         fill(dev::RUN_TOOL_INPUT, &[("json", &clip(&json, 600))]),
                         cx,
                     ))
-                })
-                .when_some(out, |el, (head, more)| {
-                    el.child(mono_box(mono_id(ix, 1), head, window, cx))
-                        .when(more > 0, |el| {
-                            el.child(label(fill(p::MORE_LINES, &[("n", &more.to_string())]), cx))
-                        })
                 })
         }
         ProcessStep::Files { changes } => {
@@ -482,6 +566,7 @@ fn render_step(
                         .child(
                             div()
                                 .flex_none()
+                                .w(space::S32)
                                 .t_small()
                                 .text_color(colors.text_3)
                                 .child(kind),
@@ -603,24 +688,51 @@ fn render_step(
                 )
             }),
     };
+    Some(el.into_any_element())
+}
+
+/// The glyph column of the timeline: 20 wide, the step's glyph on the first line.
+const RAIL: gpui::Pixels = px(20.);
+
+/// One step on the timeline: its 16 glyph in the 20 rail, a 1 pt line from under the glyph
+/// to the next step, and the step's content with 16 below it.
+fn timeline_row(step: &ProcessStep, content: AnyElement, last: bool, cx: &App) -> AnyElement {
     let (g, color) = glyph(step, cx);
-    Some(
-        div()
-            .py(space::S6)
-            .flex()
-            .items_start()
-            .gap(space::S10)
-            .child(
+    let n = crate::ui::native::native_colors(cx);
+    div()
+        .relative()
+        .flex()
+        .items_start()
+        .gap(space::S12)
+        .when(!last, |el| {
+            el.child(
                 div()
-                    .flex_none()
-                    .h(px(20.))
-                    .flex()
-                    .items_center()
-                    .child(ui::icon(g, theme::icon::ROW, color)),
+                    .absolute()
+                    .left(RAIL / 2. - px(0.5))
+                    .top(px(24.))
+                    .bottom(px(2.))
+                    .w(px(1.))
+                    .bg(n.separator),
             )
-            .child(el)
-            .into_any_element(),
-    )
+        })
+        .child(
+            div()
+                .flex_none()
+                .w(RAIL)
+                .h(px(20.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(ui::icon(g, theme::icon::ROW, color)),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.))
+                .pb(if last { space::S4 } else { space::S16 })
+                .child(content),
+        )
+        .into_any_element()
 }
 
 #[cfg(test)]

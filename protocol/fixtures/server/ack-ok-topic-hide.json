@@ -1,0 +1,17 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "description": "ack of topic.hide: result is a TopicState",
+  "value": {
+    "t": "ack",
+    "rid": "r90",
+    "ok": true,
+    "result": {
+      "topicId": "01JBX0TOPIC0000000000000AD",
+      "readSeq": 40,
+      "unread": 0,
+      "mentions": 0,
+      "hidden": true
+    }
+  }
+}

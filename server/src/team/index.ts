@@ -11,7 +11,7 @@ registerRoute({
   async handler({ env }) {
     const now = Date.now();
     const [members, tokens, invites] = await env.DB.batch([
-      env.DB.prepare("SELECT id, kind, level, team_owner, created_at, created_by FROM members ORDER BY created_at, id"),
+      env.DB.prepare("SELECT id, kind, level, team_owner, created_at, created_by FROM members WHERE deleted_at IS NULL ORDER BY created_at, id"),
       env.DB.prepare(
         "SELECT member_id, label, created_at, last_used_at FROM tokens WHERE revoked_at IS NULL ORDER BY COALESCE(last_used_at, created_at) DESC",
       ),

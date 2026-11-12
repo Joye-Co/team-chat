@@ -461,6 +461,7 @@ fn welcome_topic_states_and_reads_frames_set_per_topic_positions() {
         mentions: 0,
         following: Some(true),
         muted: Some(true),
+        hidden: None,
     }]);
     s.apply_welcome(&member(ME, "me"), &[], &[sum]).unwrap();
     let rows = s.topics(G1, 10).unwrap();
@@ -487,6 +488,7 @@ fn welcome_topic_states_and_reads_frames_set_per_topic_positions() {
                 mentions: 0,
                 following: Some(true),
                 muted: None,
+                hidden: None,
             }],
         },
         4,
@@ -506,6 +508,7 @@ fn welcome_topic_states_and_reads_frames_set_per_topic_positions() {
             mentions: 0,
             following: None,
             muted: Some(true),
+            hidden: None,
         },
     )
     .unwrap();
@@ -823,4 +826,188 @@ fn group_purpose_and_desk_notes_sync_from_the_log() {
     )
     .unwrap();
     assert_eq!(s.group(G1).unwrap().unwrap().group.purpose, None);
+}
+
+// ----------------------------------------------------------------------
+// hide-delete/1
+// ----------------------------------------------------------------------
+
+fn hidden_summary(last_seq: u64, topics: Option<Vec<TopicState>>) -> GroupSummary {
+    let mut sum = summary(group(G1, &[ME, ALICE]), last_seq, last_seq, 0);
+    sum.hidden = Some(true);
+    sum.topics = topics;
+    sum
+}
+
+fn hidden_topic(id: &str, read_seq: u64) -> TopicState {
+    TopicState {
+        topic_id: id.into(),
+        read_seq,
+        unread: 0,
+        mentions: 0,
+        following: None,
+        muted: None,
+        hidden: Some(true),
+    }
+}
+
+#[test]
+fn a_hidden_group_comes_back_with_a_new_message_from_someone_else() {
+    let (_d, s) = open();
+    seed_topic(&s);
+    s.apply_directory(None, Some(&[hidden_summary(2, None)]), None)
+        .unwrap();
+    assert!(s.group(G1).unwrap().unwrap().hidden);
+    // My own message and a system line keep it hidden.
+    let mut sys = message("M4", G1, "T1", ALICE, 4, "joined");
+    sys.kind = Some(MessageKind::System);
+    s.apply_events(
+        G1,
+        &[
+            msg_created(3, message("M3", G1, "T1", ME, 3, "mine")),
+            msg_created(4, sys),
+        ],
+    )
+    .unwrap();
+    assert!(s.group(G1).unwrap().unwrap().hidden);
+    // Alice writes: it shows again.
+    s.apply_events(
+        G1,
+        &[msg_created(5, message("M5", G1, "T1", ALICE, 5, "hi"))],
+    )
+    .unwrap();
+    assert!(!s.group(G1).unwrap().unwrap().hidden);
+}
+
+#[test]
+fn events_the_hidden_summary_already_counts_keep_the_group_hidden() {
+    let (_d, s) = open();
+    seed_topic(&s);
+    // The summary (hidden) is newer than Alice's message at seq 3, which a catch-up replays.
+    s.apply_directory(None, Some(&[hidden_summary(3, None)]), None)
+        .unwrap();
+    s.apply_events(
+        G1,
+        &[msg_created(3, message("M3", G1, "T1", ALICE, 3, "old"))],
+    )
+    .unwrap();
+    assert!(s.group(G1).unwrap().unwrap().hidden);
+}
+
+#[test]
+fn a_hidden_topic_comes_back_only_when_a_message_mentions_me() {
+    let (_d, s) = open();
+    seed_topic(&s);
+    s.apply_directory(
+        None,
+        Some(&[hidden_summary(2, Some(vec![hidden_topic("T1", 2)]))]),
+        None,
+    )
+    .unwrap();
+    assert!(s.topic("T1").unwrap().unwrap().hidden);
+    s.apply_events(
+        G1,
+        &[msg_created(3, message("M3", G1, "T1", ALICE, 3, "hi"))],
+    )
+    .unwrap();
+    assert!(s.topic("T1").unwrap().unwrap().hidden);
+    let mut m = message("M4", G1, "T1", ALICE, 4, "@me look");
+    m.mentions = vec![ME.into()];
+    s.apply_events(G1, &[msg_created(4, m)]).unwrap();
+    assert!(!s.topic("T1").unwrap().unwrap().hidden);
+    // The ack of topic.hide hides it again.
+    s.apply_topic_state(G1, &hidden_topic("T1", 4)).unwrap();
+    assert!(s.topic("T1").unwrap().unwrap().hidden);
+}
+
+#[test]
+fn a_deleted_topic_leaves_the_cache_with_its_messages_and_writes() {
+    let (_d, s) = open();
+    seed_topic(&s);
+    s.apply_events(
+        G1,
+        &[
+            topic_created(3, G1, topic("T2", G1, "M3", 3)),
+            msg_created(3 + 1, message("M4", G1, "T1", ALICE, 4, "unread")),
+        ],
+    )
+    .unwrap();
+    s.outbox_push(&chat_core::store::OutboxItem {
+        id: "w1".into(),
+        op: chat_core::store::OutboxOp::TopicMute {
+            group_id: G1.into(),
+            topic_id: "T1".into(),
+            muted: true,
+        },
+        attempts: 0,
+        last_error: None,
+        state: chat_core::store::OutboxState::Pending,
+        created_at: 1,
+    })
+    .unwrap();
+    assert_eq!(s.group(G1).unwrap().unwrap().unread, 1);
+    let out = s
+        .apply_events(
+            G1,
+            &[ev(
+                5,
+                G1,
+                ALICE,
+                EventData::TopicDeleted(TopicDeleteResult {
+                    topic_id: "T1".into(),
+                    deleted_at: 2_000,
+                }),
+            )],
+        )
+        .unwrap();
+    assert_eq!(out.deleted_topics, vec!["T1".to_string()]);
+    assert!(out.topic_list_changed);
+    assert!(s.topic("T1").unwrap().is_none());
+    assert!(s.message("M1").unwrap().is_none());
+    assert!(s.messages_before("T1", None, 10).unwrap().is_empty());
+    assert!(s.outbox_all().unwrap().is_empty());
+    assert_eq!(s.group(G1).unwrap().unwrap().unread, 0);
+    // The other topic stays.
+    assert!(s.topic("T2").unwrap().is_some());
+    // My own delete's ack finds it gone.
+    assert!(!s.remove_topic(G1, "T1").unwrap());
+}
+
+#[test]
+fn a_deleted_ai_member_stays_as_an_author() {
+    let (_d, s) = open();
+    let mut bot = member("B1", "bot");
+    bot.kind = MemberKind::Bot;
+    bot.deactivated = Some(true);
+    bot.deleted = Some(true);
+    s.apply_directory(Some(&[bot]), None, None).unwrap();
+    let m = s.member("B1").unwrap().unwrap();
+    assert!(m.is_deleted() && m.is_deactivated());
+    assert_eq!(m.name, "bot");
+    assert!(!s.member(ALICE).unwrap().unwrap().is_deleted());
+}
+
+#[test]
+fn a_cache_from_before_hide_delete_upgrades_with_everything_shown() {
+    use chat_core::store::migrations::{MIGRATIONS, run};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("c.sqlite3");
+    {
+        let mut conn = rusqlite::Connection::open(&path).unwrap();
+        let upto = MIGRATIONS.iter().position(|m| m.name == "roles-1").unwrap();
+        run(&mut conn, &MIGRATIONS[..=upto]).unwrap();
+        conn.execute(
+            "INSERT INTO groups (id, kind, name, member_ids, created_by, created_at) VALUES ('G1', 'group', 'g', '[]', 'M1', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO members (id, kind, name, level) VALUES ('M1', 'bot', 'b', 'member')",
+            [],
+        )
+        .unwrap();
+    }
+    let s = Store::open(&path).unwrap();
+    assert!(!s.group("G1").unwrap().unwrap().hidden);
+    assert!(!s.member("M1").unwrap().unwrap().is_deleted());
 }

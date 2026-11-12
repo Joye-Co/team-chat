@@ -17,6 +17,7 @@ import { unwrap } from "../core/errors";
 import type { Logger } from "../core/logger";
 import type { ArchivedEvent } from "../core/registry";
 import { gunzip, gzip } from "./gzip";
+import { DELETED_TITLE } from "../core/scrub";
 
 export const GROUP_PREFIX = "archive/groups/";
 export const D1_PREFIX = "archive/d1/";
@@ -144,8 +145,22 @@ function dropFields(o: Obj): boolean {
  * Same change as the live delete makes to stored events (GroupRoom.removeNow): the deleted
  * message loses its content, and quotes of it lose their excerpt.
  */
-export function scrubArchivedEvent(e: ArchivedEvent, ids: Set<string>): boolean {
+export function scrubArchivedEvent(e: ArchivedEvent, ids: Set<string>, topicIds: Set<string> = new Set()): boolean {
   const d = (e.data ?? {}) as Obj;
+  // A deleted topic (topic.delete) also loses its title, as GroupRoom.topicDelete does.
+  if (e.topicId && topicIds.has(e.topicId)) {
+    if (e.type === "topic.created" && d.topic && typeof d.topic === "object") {
+      const t = d.topic as Obj;
+      if (t.title === DELETED_TITLE) return false;
+      t.title = DELETED_TITLE;
+      return true;
+    }
+    if (e.type === "topic.updated" && typeof d.title === "string") {
+      if (d.title === DELETED_TITLE) return false;
+      d.title = DELETED_TITLE;
+      return true;
+    }
+  }
   if (e.type === "message.created" && d.message && typeof d.message === "object") {
     const m = d.message as Obj;
     const reply = m.replyTo as Obj | undefined;
@@ -216,13 +231,20 @@ async function writeEventFile(env: Env, groupId: string, key: string, rows: Arch
  * Messages deleted after their events were archived: rewrite the archive files in
  * [fromSeq, upTo] that hold them, so R2 keeps no deleted body or card. Idempotent.
  */
-async function scrubArchive(env: Env, groupId: string, ids: Set<string>, fromSeq: number, upTo: number): Promise<string[]> {
+async function scrubArchive(
+  env: Env,
+  groupId: string,
+  ids: Set<string>,
+  fromSeq: number,
+  upTo: number,
+  topicIds: Set<string> = new Set(),
+): Promise<string[]> {
   const rewritten: string[] = [];
   for (const f of await listGroupFiles(env, groupId)) {
     if (f.to < fromSeq || f.from > upTo) continue;
     const rows = await readEventFile(env, f.key);
     let changed = false;
-    for (const e of rows) if (scrubArchivedEvent(e, ids)) changed = true;
+    for (const e of rows) if (scrubArchivedEvent(e, ids, topicIds)) changed = true;
     if (!changed) continue;
     await writeEventFile(env, groupId, f.key, rows);
     rewritten.push(f.key);
@@ -250,7 +272,7 @@ export async function runArchive(env: Env, opts: ArchiveOptions = {}): Promise<A
 
   const groups = await env.DB.prepare(
     `SELECT g.id AS id, COALESCE(a.last_seq, 0) AS last_seq, a.state_date AS state_date FROM groups g
-     LEFT JOIN ops_archive a ON a.group_id = g.id WHERE g.id > ? ORDER BY g.id`,
+     LEFT JOIN ops_archive a ON a.group_id = g.id WHERE g.id > ? AND g.deleted_at IS NULL ORDER BY g.id`,
   )
     .bind(pass.after)
     .all<{ id: string; last_seq: number; state_date: string | null }>();
@@ -358,17 +380,29 @@ async function archiveGroup(
     // Deletes of messages whose events are already in R2: scrub those files before this page
     // (and its delete event) counts as archived.
     const deleted = new Set<string>();
+    const deletedTopics: string[] = [];
     for (const r of page.rows) {
+      if (r.type === "topic.deleted") {
+        const t = r.topicId ?? ((r.data as Obj)?.topicId as string | undefined);
+        if (t) deletedTopics.push(t);
+        continue;
+      }
       if (r.type !== "message.deleted") continue;
       const id = r.messageId ?? ((r.data as Obj)?.messageId as string | undefined);
       if (id) deleted.add(id);
+    }
+    // A deleted topic stores no message.deleted events: its messages are scrubbed the same way.
+    if (deletedTopics.length > 0 && archivedTo > 0) {
+      const ids = unwrap(await room.rpc(g.id, "ops.topicMessageIds", null, { topicIds: deletedTopics })) as string[];
+      for (const id of ids) deleted.add(id);
     }
     if (deleted.size > 0 && archivedTo > 0) {
       const seqs = unwrap(await room.rpc(g.id, "ops.messageSeqs", null, { ids: [...deleted] })) as Record<string, number>;
       const old = new Set([...deleted].filter((id) => seqs[id] !== undefined && seqs[id] <= archivedTo));
       if (old.size > 0) {
-        const fromSeq = Math.min(...[...old].map((id) => seqs[id]));
-        report.scrubbed.push(...(await scrubArchive(env, g.id, old, fromSeq, archivedTo)));
+        // A deleted topic's own events (topic.created) come just before its first message.
+        const fromSeq = Math.min(...[...old].map((id) => seqs[id])) - (deletedTopics.length > 0 ? 1 : 0);
+        report.scrubbed.push(...(await scrubArchive(env, g.id, old, Math.max(1, fromSeq), archivedTo, new Set(deletedTopics))));
       }
     }
     buf.push(...page.rows);

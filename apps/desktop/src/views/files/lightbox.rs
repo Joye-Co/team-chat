@@ -909,6 +909,7 @@ impl Render for Lightbox {
                         .id("lightbox-strip")
                         .max_w(px((vw - f32::from(space::S32) * 2.).max(0.)))
                         .overflow_x_scroll()
+                        .restrict_scroll_to_axis()
                         .track_scroll(&self.strip)
                         .flex()
                         .gap(lb::THUMB_GAP)

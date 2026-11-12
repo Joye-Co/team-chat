@@ -129,6 +129,32 @@ impl CoreProvider {
         }
     }
 
+    pub(super) fn hide_topic_inner(&self, topic_id: &str) {
+        let Some(a) = self.account() else {
+            return;
+        };
+        let real = self.resolve_topic(topic_id);
+        if pending_cid(&real).is_some() || crate::data::is_main_topic(&real) {
+            return;
+        }
+        if let Err(e) = a.client.hide_topic(&real, true) {
+            tracing::warn!(error = %e, "hide topic refused");
+        }
+    }
+
+    pub(super) fn delete_topic_inner(&self, topic_id: &str) {
+        let Some(a) = self.account() else {
+            return;
+        };
+        let real = self.resolve_topic(topic_id);
+        if pending_cid(&real).is_some() || crate::data::is_main_topic(&real) {
+            return;
+        }
+        if let Err(e) = a.client.delete_topic(&real) {
+            tracing::warn!(error = %e, "delete topic refused");
+        }
+    }
+
     pub(super) fn set_topic_owner_inner(&self, topic_id: &str, owner: Option<String>) {
         let Some(a) = self.account() else {
             return;
@@ -181,6 +207,54 @@ impl CoreProvider {
         });
     }
 
+    /// Hides or shows a 群 or 私聊 for me; the answer updates the cache at once.
+    pub(super) fn set_group_hidden_inner(&self, group_id: &str, hidden: bool) -> AdminReply<()> {
+        let Some(a) = self.account() else {
+            return reply_now(Err(AdminError::Offline));
+        };
+        let handle = a.client.set_group_hidden(group_id, hidden);
+        let (tx, rx) = futures::channel::oneshot::channel();
+        chat_core::background().spawn(async move {
+            let r = match handle.await {
+                Ok(Ok(_)) => Ok(()),
+                Ok(Err(e)) => {
+                    tracing::warn!(error = %e, "hide group refused");
+                    Err(super::settings::admin_error(&e))
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "hide group task failed");
+                    Err(AdminError::Other)
+                }
+            };
+            let _ = tx.send(r);
+        });
+        rx
+    }
+
+    /// Deletes a 群 for everyone (an owner); the 群 leaves the cache when the server agrees.
+    pub(super) fn delete_group_inner(&self, group_id: &str) -> AdminReply<()> {
+        let Some(a) = self.account() else {
+            return reply_now(Err(AdminError::Offline));
+        };
+        let handle = a.client.delete_group(group_id);
+        let (tx, rx) = futures::channel::oneshot::channel();
+        chat_core::background().spawn(async move {
+            let r = match handle.await {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(e)) => {
+                    tracing::warn!(error = %e, "delete group refused");
+                    Err(super::settings::admin_error(&e))
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "delete group task failed");
+                    Err(AdminError::Other)
+                }
+            };
+            let _ = tx.send(r);
+        });
+        rx
+    }
+
     /// Group and DM commands go over HTTP; the server pushes the new group
     /// to every connection as a `directory` frame, which updates the cache.
     pub(super) fn create_group_inner(&self, request: CreateGroupRequest) -> AdminReply<GroupId> {
@@ -207,12 +281,23 @@ impl CoreProvider {
             return reply_now(Err(AdminError::Offline));
         };
         let http = a.client.http();
+        let store = a.client.store().clone();
+        let this = self.clone();
         let member_id = member_id.to_string();
         let (tx, rx) = futures::channel::oneshot::channel();
         chat_core::background().spawn(async move {
             let r = http.dm(&member_id).await;
-            if let Err(e) = &r {
-                tracing::warn!(error = %e, "open dm refused");
+            match &r {
+                // The answer shows a 私聊 I hid again (the server cleared `hidden`).
+                Ok(summary) => {
+                    if let Err(e) =
+                        store.apply_directory(None, Some(std::slice::from_ref(summary)), None)
+                    {
+                        tracing::warn!(error = %e, "store dm");
+                    }
+                    this.emit(vec![Change::Groups]);
+                }
+                Err(e) => tracing::warn!(error = %e, "open dm refused"),
             }
             let _ = tx.send(
                 r.map(|g| g.group.id)

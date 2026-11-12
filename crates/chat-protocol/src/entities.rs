@@ -96,9 +96,21 @@ pub struct Member {
         skip_serializing_if = "Option::is_none"
     )]
     pub owner_id: Option<String>,
+    /// The AI member was deleted (also deactivated); sent only when true. Kept so old messages
+    /// keep their author; clients leave it out of every list.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub deleted: Option<bool>,
 }
 
 impl Member {
+    pub fn is_deleted(&self) -> bool {
+        self.deleted == Some(true)
+    }
+
     /// Usable: a 所有者 (team owner). Every 所有者 is also an admin (`level` owner).
     pub fn is_team_owner(&self) -> bool {
         self.team_owner == Some(true)
@@ -176,11 +188,21 @@ pub struct GroupSummary {
         skip_serializing_if = "Option::is_none"
     )]
     pub notify: Option<NotifyLevel>,
+    /// I hid this 群 or 私聊 until a new message arrives. Absent means false.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub hidden: Option<bool>,
 }
 
 impl GroupSummary {
     pub fn is_muted(&self) -> bool {
         self.muted.unwrap_or(false)
+    }
+    pub fn is_hidden(&self) -> bool {
+        self.hidden.unwrap_or(false)
     }
     /// The effective notify level, with the default for the group kind.
     pub fn notify_level(&self) -> NotifyLevel {

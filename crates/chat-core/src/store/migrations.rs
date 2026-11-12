@@ -202,6 +202,16 @@ ALTER TABLE members ADD COLUMN weekly_budget_cents INTEGER;
         name: "roles-1",
         sql: "ALTER TABLE members ADD COLUMN team_owner INTEGER NOT NULL DEFAULT 0;",
     },
+    // hide-delete/1: my hidden mark of a group and of a topic, and the deleted mark of an AI
+    // member. Old rows read as 0: shown, not deleted, until the next welcome brings the marks.
+    Migration {
+        name: "hide-delete-1",
+        sql: r#"
+ALTER TABLE groups ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE read_cursors ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE members ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;
+"#,
+    },
     // usable: an AI member's own person (`ownerId`). Old rows read as NULL: the team's.
     Migration {
         name: "members-owner-1",

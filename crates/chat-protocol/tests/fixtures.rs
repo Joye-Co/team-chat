@@ -141,6 +141,7 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ("HealthResponse", plain::<HealthResponse>),
     // V1 extensions
     ("TopicState", plain::<TopicState>),
+    ("TopicDeleteResult", plain::<TopicDeleteResult>),
     ("Card", validated::<Card>),
     ("FileRef", validated::<FileRef>),
     ("FileMeta", plain::<FileMeta>),
@@ -503,7 +504,9 @@ fn every_frame_and_event_type_has_a_valid_fixture() {
             "read",
             "search",
             "send",
+            "topic.delete",
             "topic.follow",
+            "topic.hide",
             "topic.mute",
             "topic.update",
             "typing"
@@ -526,7 +529,7 @@ fn every_frame_and_event_type_has_a_valid_fixture() {
             "welcome"
         ]
     );
-    assert_eq!(valid("Event", "type").len(), 19);
+    assert_eq!(valid("Event", "type").len(), 20);
     // 9 + usable "github.status" and "ai.failing".
     assert_eq!(valid("TransientEvent", "type").len(), 11);
 }

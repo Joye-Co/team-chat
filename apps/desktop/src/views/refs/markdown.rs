@@ -603,6 +603,7 @@ pub fn table(
                 .id(ElementId::Name(format!("{key}-scroll").into()))
                 .w_full()
                 .overflow_x_scroll()
+                .restrict_scroll_to_axis()
                 .child(
                     div()
                         .min_w(gpui::relative(1.))

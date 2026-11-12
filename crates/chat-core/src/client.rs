@@ -162,6 +162,13 @@ pub enum ClientUpdate {
     TopicsChanged {
         group_id: String,
     },
+    /// hide-delete/1: a topic was deleted for everyone (by me or anyone). The cache no longer
+    /// has it, its messages or its queued writes; a UI that shows it goes back to the 群聊 and
+    /// drops its drafts.
+    TopicDeleted {
+        group_id: String,
+        topic_id: String,
+    },
     /// Messages of a topic changed (new, edited, deleted, streaming text, pending sends).
     MessagesChanged {
         group_id: String,
@@ -865,6 +872,43 @@ impl Client {
                 group_id,
                 topic_id: topic_id.into(),
                 muted,
+            },
+        )
+    }
+
+    /// hide-delete/1: hides or shows a topic for me (`topic.hide`). A hidden topic comes back
+    /// when a message mentions me. The 群聊 cannot be hidden.
+    pub fn hide_topic(&self, topic_id: &str, hidden: bool) -> Result<String, ClientError> {
+        let group_id = self
+            .shared
+            .store
+            .topic_group(topic_id)?
+            .ok_or(ClientError::NotFound)?;
+        self.enqueue(
+            crate::new_id(),
+            OutboxOp::TopicHide {
+                group_id,
+                topic_id: topic_id.into(),
+                hidden,
+            },
+        )
+    }
+
+    /// hide-delete/1: deletes a topic for everyone (`topic.delete`): its creator or an owner.
+    /// When the ack arrives the topic, its messages and its queued writes leave the cache and
+    /// [`ClientUpdate::TopicDeleted`] follows; a refusal comes as [`ClientUpdate::SendFailed`]
+    /// with kind `topic_delete`.
+    pub fn delete_topic(&self, topic_id: &str) -> Result<String, ClientError> {
+        let group_id = self
+            .shared
+            .store
+            .topic_group(topic_id)?
+            .ok_or(ClientError::NotFound)?;
+        self.enqueue(
+            crate::new_id(),
+            OutboxOp::TopicDelete {
+                group_id,
+                topic_id: topic_id.into(),
             },
         )
     }

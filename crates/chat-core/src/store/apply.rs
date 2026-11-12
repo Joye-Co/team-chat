@@ -215,13 +215,13 @@ pub(super) fn resolve_followups(
 
 fn upsert_member(tx: &Transaction<'_>, m: &Member) -> StoreResult<()> {
     tx.execute(
-        "INSERT INTO members (id, kind, name, role, level, avatar_url, deactivated, character, reports_to, weekly_budget_cents, team_owner, owner_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        "INSERT INTO members (id, kind, name, role, level, avatar_url, deactivated, character, reports_to, weekly_budget_cents, team_owner, deleted, owner_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
          ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, name = excluded.name, role = excluded.role,
            level = excluded.level, avatar_url = excluded.avatar_url, deactivated = excluded.deactivated,
            character = excluded.character, reports_to = excluded.reports_to,
            weekly_budget_cents = excluded.weekly_budget_cents, team_owner = excluded.team_owner,
-           owner_id = excluded.owner_id",
+           deleted = excluded.deleted, owner_id = excluded.owner_id",
         params![
             m.id,
             enum_str(&m.kind)?,
@@ -234,6 +234,7 @@ fn upsert_member(tx: &Transaction<'_>, m: &Member) -> StoreResult<()> {
             m.reports_to,
             m.weekly_budget_cents.and_then(|c| i64::try_from(c).ok()),
             m.is_team_owner(),
+            m.is_deleted(),
             m.owner_id
         ],
     )?;
@@ -242,11 +243,19 @@ fn upsert_member(tx: &Transaction<'_>, m: &Member) -> StoreResult<()> {
 
 fn upsert_topic_state(tx: &Transaction<'_>, group_id: &str, t: &TopicState) -> StoreResult<()> {
     tx.execute(
-        "INSERT INTO read_cursors (group_id, topic_id, seq, synced, following, muted) VALUES (?1, ?2, ?3, 1, ?4, ?5)
+        "INSERT INTO read_cursors (group_id, topic_id, seq, synced, following, muted, hidden) VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6)
          ON CONFLICT(group_id, topic_id) DO UPDATE SET following = excluded.following, muted = excluded.muted,
+           hidden = excluded.hidden,
            synced = CASE WHEN excluded.seq >= read_cursors.seq THEN 1 ELSE read_cursors.synced END,
            seq = MAX(read_cursors.seq, excluded.seq)",
-        params![group_id, t.topic_id, t.read_seq, t.is_following(), t.is_muted()],
+        params![
+            group_id,
+            t.topic_id,
+            t.read_seq,
+            t.is_following(),
+            t.is_muted(),
+            t.is_hidden()
+        ],
     )?;
     Ok(())
 }
@@ -264,14 +273,14 @@ fn upsert_group_summary(tx: &Transaction<'_>, me: &str, s: &GroupSummary) -> Sto
         .unwrap_or(0);
     tx.execute(
         "INSERT INTO groups (id, kind, name, member_ids, created_by, created_at, last_seq, read_seq, unread, mentions,
-                             summary_seq, muted, notify, purpose)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?7, ?11, ?12, ?13)
+                             summary_seq, muted, notify, purpose, hidden)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?7, ?11, ?12, ?13, ?14)
          ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, name = excluded.name, member_ids = excluded.member_ids,
            purpose = excluded.purpose,
            created_by = excluded.created_by, created_at = excluded.created_at,
            last_seq = MAX(groups.last_seq, excluded.last_seq), read_seq = excluded.read_seq,
            unread = excluded.unread, mentions = excluded.mentions, summary_seq = excluded.summary_seq,
-           muted = excluded.muted, notify = excluded.notify",
+           muted = excluded.muted, notify = excluded.notify, hidden = excluded.hidden",
         params![
             g.id,
             enum_str(&g.kind)?,
@@ -289,6 +298,7 @@ fn upsert_group_summary(tx: &Transaction<'_>, me: &str, s: &GroupSummary) -> Sto
                 None => None,
             },
             g.purpose,
+            s.is_hidden(),
         ],
     )?;
     if let Some(states) = &s.topics {
@@ -314,6 +324,7 @@ fn upsert_group_summary(tx: &Transaction<'_>, me: &str, s: &GroupSummary) -> Sto
                     mentions: 0,
                     following: None,
                     muted: None,
+                    hidden: None,
                 },
             )?;
         }
@@ -468,6 +479,21 @@ fn set_topic_raw(
 }
 
 impl Store {
+    /// hide-delete/1: drops a deleted topic and everything cached for it (my `topic.delete`
+    /// was acked; the `topic.deleted` event does the same). True when it was cached.
+    pub fn remove_topic(&self, group_id: &str, topic_id: &str) -> StoreResult<bool> {
+        let me = self.me_id()?.unwrap_or_default();
+        self.with_writer(|tx| {
+            let cached: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM topics WHERE id = ?1)",
+                [topic_id],
+                |r| r.get(0),
+            )?;
+            remove_topic(tx, &me, group_id, topic_id)?;
+            Ok(cached)
+        })
+    }
+
     /// Usable: stores the relay a stop or retry route answered with in its topic's raw JSON
     /// (the `topic.updated` that follows says the same). A newer state of the same relay that
     /// an event already stored stays. True when the cache changed.
@@ -646,6 +672,7 @@ fn apply_one(
                     });
                 }
             }
+            unhide_for(tx, me, gid, ev.seq, m)?;
             touch_group(tx, gid, m.created_at)?;
             out.created.push((m.topic_id.clone(), m.author_id.clone()));
             out.message_topics.insert(m.topic_id.clone());
@@ -878,11 +905,75 @@ fn apply_one(
             out.topic_list_changed = true;
             out.other_events.push(ev.clone());
         }
+        EventData::TopicDeleted(d) => {
+            remove_topic(tx, me, gid, &d.topic_id)?;
+            out.deleted_topics.push(d.topic_id.clone());
+            out.message_topics.remove(&d.topic_id);
+            out.artifact_topics.remove(&d.topic_id);
+            out.run_topics.remove(&d.topic_id);
+            out.topic_list_changed = true;
+            out.group_changed = true;
+        }
         // 记一条: the server lists these (`GET /v1/groups/:id/decisions`); nothing to cache.
         EventData::DecisionRecorded(_) => {
             out.other_events.push(ev.clone());
         }
     }
+    Ok(())
+}
+
+/// The client side of the unhide rules (docs/protocol.md, "Hide and delete"): a new message
+/// that is not mine and not `system` shows a hidden group again, and a message that mentions
+/// me shows a hidden topic again. Only events newer than the server's summary count: the
+/// summary's `hidden` already includes the older ones (a catch-up replays them after it).
+fn unhide_for(
+    tx: &Transaction<'_>,
+    me: &str,
+    gid: &str,
+    seq: u64,
+    m: &Message,
+) -> rusqlite::Result<()> {
+    if m.author_id == me || m.kind == Some(MessageKind::System) || m.is_deleted() {
+        return Ok(());
+    }
+    tx.execute(
+        "UPDATE groups SET hidden = 0 WHERE id = ?1 AND hidden = 1 AND ?2 > summary_seq",
+        params![gid, seq],
+    )?;
+    if m.mentions.iter().any(|x| x == me) {
+        tx.execute(
+            "UPDATE read_cursors SET hidden = 0
+             WHERE group_id = ?1 AND topic_id = ?2 AND hidden = 1
+               AND ?3 > COALESCE((SELECT summary_seq FROM groups WHERE id = ?1), 0)",
+            params![gid, m.topic_id, seq],
+        )?;
+    }
+    Ok(())
+}
+
+/// Drops a deleted topic with everything cached for it: messages, read state, queued writes,
+/// 产出, runs, links and answers; the group's totals are counted again without it.
+pub(super) fn remove_topic(
+    tx: &Transaction<'_>,
+    me: &str,
+    gid: &str,
+    topic_id: &str,
+) -> StoreResult<()> {
+    for sql in [
+        "DELETE FROM card_answers WHERE message_id IN (SELECT id FROM messages WHERE topic_id = ?1)",
+        "DELETE FROM card_actions WHERE message_id IN (SELECT id FROM messages WHERE topic_id = ?1)",
+        "DELETE FROM artifact_versions WHERE artifact_id IN (SELECT id FROM artifacts WHERE topic_id = ?1)",
+        "DELETE FROM artifacts WHERE topic_id = ?1",
+        "DELETE FROM runs WHERE topic_id = ?1",
+        "DELETE FROM topic_links WHERE topic_id = ?1",
+        "DELETE FROM messages WHERE topic_id = ?1",
+        "DELETE FROM read_cursors WHERE topic_id = ?1",
+        "DELETE FROM outbox WHERE topic_id = ?1",
+        "DELETE FROM topics WHERE id = ?1",
+    ] {
+        tx.execute(sql, [topic_id])?;
+    }
+    recount_unread(tx, me, gid)?;
     Ok(())
 }
 

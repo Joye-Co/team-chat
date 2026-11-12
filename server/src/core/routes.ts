@@ -364,7 +364,7 @@ export function registerCoreRoutes(): void {
       if (req.memberId) {
         // The code signs in as this member: its own name, kind and level, not the request's.
         const m = await getMember(env.DB, req.memberId);
-        if (!m) throw new ApiError("not_found", "member not found");
+        if (!m || m.deleted_at) throw new ApiError("not_found", "member not found");
         if (m.deactivated) throw new ApiError("invalid", "reactivate the member first");
         // Redeeming the code signs in as the target, so a code for another admin is 所有者 only.
         if (m.level === "owner" && m.id !== a.memberId) requireTeamOwner(a, "only a team owner can sign in as an admin");
@@ -630,6 +630,17 @@ export function registerCoreRoutes(): void {
       if (memberId === a.memberId) throw new ApiError("invalid", "cannot DM yourself");
       await requireActiveMembers(env, [memberId]);
       const groupId = await findOrCreateDm(env, (p) => ctx.waitUntil(p), a, memberId);
+      // Opening a DM I hid shows it again (docs/protocol.md, "Hide and delete").
+      const actor = { id: a.memberId, level: a.member.level, kind: a.member.kind, tokenId: a.tokenId };
+      const r = unwrap(await roomStub(env, groupId).rpc(groupId, "prefs.set", actor, { hidden: false })) as {
+        before: { hidden?: boolean };
+      };
+      if (r.before.hidden) {
+        await auditStatement(env.DB, a, { action: "prefs.update", target: groupId, details: { groupId, hidden: [true, false] } }).run();
+        const summary = await summaryFor(env, a.memberId, groupId);
+        await gatewayStub(env, a.memberId).deliver([{ t: "directory", groups: [summary] }]);
+        return summary;
+      }
       return summaryFor(env, a.memberId, groupId);
     },
   });

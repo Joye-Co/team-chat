@@ -383,15 +383,15 @@ impl LivePane {
         };
         let badge = Some(badge);
         // P-01: the run's time on the one clock of every page.
-        let elapsed = crate::views::topic_page::run_elapsed(self.services.provider.as_ref(), &run)
-            .map(|ms| elapsed_text(ms, cx));
         let close = self.services.clone();
         let dot = || div().flex_none().child("·");
         let mut subtitle = div()
             .flex()
             .items_center()
             .gap(px(4.))
+            .flex_1()
             .min_w(px(0.))
+            .overflow_hidden()
             .n_subheadline()
             .n_figures()
             .text_color(n.secondary);
@@ -411,8 +411,22 @@ impl LivePane {
                     .into_any_element(),
             );
         }
-        if let Some(e) = elapsed {
-            parts.push(div().flex_none().child(e).into_any_element());
+        // The time gives way to the toolbar buttons: it truncates with "…" (the whole time in
+        // its tooltip), never runs under them.
+        if let Some(ms) =
+            crate::views::topic_page::run_elapsed(self.services.provider.as_ref(), run)
+        {
+            let copy = plan::SpanCopy {
+                minutes: c::LIVE_ELAPSED,
+                hours: c::LIVE_ELAPSED_HOURS,
+            };
+            parts.push(
+                crate::ui::truncate::TruncText::new(plan::span_text(copy, ms))
+                    .id("live-elapsed")
+                    .tnum()
+                    .flex_shrink(1.)
+                    .into_any_element(),
+            );
         }
         for (i, part) in parts.into_iter().enumerate() {
             if i > 0 {
@@ -2002,20 +2016,6 @@ fn span_fill(copy: plan::SpanCopy, ms: i64) -> gpui::Div {
     let (template, values) = plan::Span::of(ms).parts(copy);
     let values: Vec<(&str, String, bool)> = values.into_iter().map(|(k, v)| (k, v, true)).collect();
     mono_fill(template, &values)
-}
-
-/// 已用 19 分钟, or 已用 2 小时 5 分钟.
-fn elapsed_text(ms: i64, cx: &App) -> impl IntoElement {
-    let k = theme::colors(cx);
-    let copy = plan::SpanCopy {
-        minutes: c::LIVE_ELAPSED,
-        hours: c::LIVE_ELAPSED_HOURS,
-    };
-    div()
-        .flex_none()
-        .t_meta()
-        .text_color(k.ink_3)
-        .child(span_fill(copy, ms))
 }
 
 /// The terminal cursor: a block that blinks while the run works (still with

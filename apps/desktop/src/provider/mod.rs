@@ -884,6 +884,24 @@ impl CoreProvider {
             ClientUpdate::TopicsChanged { group_id } => {
                 out.extend([Change::Topics { group_id }, Change::Todo]);
             }
+            ClientUpdate::TopicDeleted { group_id, topic_id } => {
+                // Its drafts go with it (docs/protocol.md, "Hide and delete").
+                let key = crate::data::DraftKey::topic(group_id.clone(), topic_id.clone());
+                if self.shared.drafts.clear(&key) {
+                    self.draft_changed(&key, false);
+                    out.push(Change::Draft { key });
+                }
+                self.shared.cards_v2.forget_topic(&topic_id);
+                out.extend([
+                    Change::TopicDeleted {
+                        group_id: group_id.clone(),
+                        topic_id,
+                    },
+                    Change::Topics { group_id },
+                    Change::Groups,
+                    Change::Todo,
+                ]);
+            }
             ClientUpdate::MessagesChanged { group_id, topic_id } => {
                 // --- cards v2 track: an edit replaces a card in place ---
                 self.shared.cards_v2.forget_topic(&topic_id);
@@ -1167,7 +1185,8 @@ impl CoreProvider {
             // The 群聊 is the 群's chat, not one of its 话题 (`ChatProvider::topic` finds it).
             Ok(rows) => out.extend(
                 rows.iter()
-                    .filter(|r| !crate::data::is_main_topic(&r.topic.id))
+                    // A 话题 I hid leaves the lists until a message mentions me.
+                    .filter(|r| !crate::data::is_main_topic(&r.topic.id) && !r.hidden)
                     .map(convert::topic),
             ),
             Err(e) => tracing::warn!(error = %e, "topics read failed"),
@@ -1368,6 +1387,8 @@ impl ChatProvider for CoreProvider {
             .groups()
             .unwrap_or_default()
             .iter()
+            // A 群 or 私聊 I hid leaves the sidebar until someone else writes there.
+            .filter(|row| !row.hidden)
             .map(|row| convert::group(row, &a.me.id, |id| names.get(id).cloned()))
             .collect();
         // A topic I just started counts as activity.
@@ -1944,6 +1965,26 @@ impl ChatProvider for CoreProvider {
         self.set_group_muted_inner(group_id, muted);
     }
 
+    fn can_hide_delete(&self) -> bool {
+        self.account().is_some_and(|a| a.client.can_hide_delete())
+    }
+
+    fn set_group_hidden(&self, group_id: &str, hidden: bool) -> AdminReply<()> {
+        self.set_group_hidden_inner(group_id, hidden)
+    }
+
+    fn delete_group(&self, group_id: &str) -> AdminReply<()> {
+        self.delete_group_inner(group_id)
+    }
+
+    fn hide_topic(&self, _group_id: &str, topic_id: &str) {
+        self.hide_topic_inner(topic_id);
+    }
+
+    fn delete_topic(&self, _group_id: &str, topic_id: &str) {
+        self.delete_topic_inner(topic_id);
+    }
+
     fn saved_navigation(&self) -> Option<SavedNavigation> {
         self.saved_navigation_inner()
     }
@@ -2061,6 +2102,10 @@ impl ChatProvider for CoreProvider {
 
     fn set_member_deactivated(&self, member_id: &str, deactivated: bool) -> AdminReply<Member> {
         self.set_member_deactivated_inner(member_id, deactivated)
+    }
+
+    fn delete_member(&self, member_id: &str) -> AdminReply<Member> {
+        self.delete_member_inner(member_id)
     }
 
     fn create_bot_member(

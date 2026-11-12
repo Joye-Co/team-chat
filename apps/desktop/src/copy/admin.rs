@@ -472,6 +472,12 @@ crate::copy! {
     TEAM_NO_DEVICES = "没有登录的设备",
     TEAM_DEACTIVATE = "停用…",
     TEAM_REACTIVATE = "重新启用",
+    // hide-delete/1: a deactivated AI 成员 leaves the team for good.
+    TEAM_DELETE = "删除…",
+    TEAM_DELETE_CONFIRM_TITLE = "删除「{name}」？",
+    TEAM_DELETE_CONFIRM_BODY = "它会从团队里永久消失，不能再启用。\n它发过的消息会保留。",
+    TEAM_DELETE_OK = "删除",
+    TEAM_DELETE_FAILED = "没能删除成员",
     TEAM_FAILED = "读不到成员的详情",
     TEAM_ROLE_FAILED = "身份没有改",
 }

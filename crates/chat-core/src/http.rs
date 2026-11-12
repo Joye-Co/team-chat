@@ -266,6 +266,32 @@ impl HttpClient {
         Ok(())
     }
 
+    /// hide-delete/1: deletes a 群 for everyone (an owner; not a DM, not the default group).
+    /// The server pushes `directory { removedGroupIds }` to every member.
+    pub async fn delete_group(&self, group_id: &str) -> ApiResult<()> {
+        let _: serde_json::Value = self
+            .call::<(), _>(
+                Method::DELETE,
+                &format!("/v1/groups/{}", enc(group_id)),
+                None,
+                true,
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// hide-delete/1: deletes a deactivated AI member for good (an owner). Answers the member
+    /// with `deleted: true`; old messages keep it as their author.
+    pub async fn delete_member(&self, member_id: &str) -> ApiResult<Member> {
+        self.call::<(), _>(
+            Method::DELETE,
+            &format!("/v1/members/{}", enc(member_id)),
+            None,
+            true,
+        )
+        .await
+    }
+
     /// Finds or creates the DM with a member.
     pub async fn dm(&self, member_id: &str) -> ApiResult<GroupSummary> {
         let body = CreateDmRequest {

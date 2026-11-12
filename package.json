@@ -17,6 +17,7 @@
     "build:website": "bun run --cwd apps/website build",
     "test:server": "bun run --cwd server test",
     "typecheck:server": "bun run --cwd server typecheck",
-    "admin": "bun server/scripts/admin.ts"
+    "admin": "bun server/scripts/admin.ts",
+    "prepare": "git config core.hooksPath .githooks || true"
   }
 }

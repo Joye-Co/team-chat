@@ -49,6 +49,7 @@ pub fn member(m: &proto::Member, online: bool) -> Member {
         character: m.character(),
         team_owner: m.is_team_owner(),
         owner_id: m.owner_id.clone(),
+        deleted: m.is_deleted(),
     }
 }
 

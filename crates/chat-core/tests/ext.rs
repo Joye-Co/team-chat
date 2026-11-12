@@ -758,6 +758,7 @@ async fn members_prefs_avatars_audit_and_hooks() {
             UpdateGroupPrefsRequest {
                 muted: Some(true),
                 notify: Some(NotifyLevel::None),
+                hidden: None,
             },
         )
         .await
@@ -1650,4 +1651,52 @@ async fn machine_ownership_requests_reach_the_server_as_written() {
     assert_eq!(sent[5].2, json!({"repoPath": "/code/app"}));
     assert_eq!(sent[6].2, json!({"repoPath": null}));
     assert_eq!(sent[7].0, "DELETE");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn hide_and_delete_groups_and_members() {
+    const BOT: &str = "01BOT0000000000000000000ZZ";
+    let http = MockHttp::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let client = http_client(&http, dir.path(), |_| {});
+    let mut bot = member(BOT, "bot");
+    bot.kind = MemberKind::Bot;
+    client
+        .store()
+        .apply_welcome(
+            &member(ME, "me"),
+            &[member(ME, "me"), member(ALICE, "alice"), bot.clone()],
+            &[summary(group(G1, &[ME, ALICE]), 0, 0, 0)],
+        )
+        .unwrap();
+    http.with(|s| {
+        s.members.insert(ME.into(), member(ME, "me"));
+        s.members.insert(BOT.into(), bot.clone());
+        s.groups
+            .insert(G1.into(), summary(group(G1, &[ME, ALICE]), 0, 0, 0));
+    });
+
+    let row = client.set_group_hidden(G1, true).await.unwrap().unwrap();
+    assert!(row.hidden);
+    assert!(client.store().group(G1).unwrap().unwrap().hidden);
+
+    // Only a deactivated member can be deleted.
+    let e = client.delete_member(BOT).await.unwrap().unwrap_err();
+    assert!(
+        matches!(
+            e,
+            ClientError::Api(ApiError::Server {
+                code: ErrorCode::Conflict,
+                ..
+            })
+        ),
+        "{e:?}"
+    );
+    http.with(|s| s.members.get_mut(BOT).unwrap().deactivated = Some(true));
+    let m = client.delete_member(BOT).await.unwrap().unwrap();
+    assert!(m.is_deleted());
+    assert!(client.member(BOT).unwrap().unwrap().is_deleted());
+
+    client.delete_group(G1).await.unwrap().unwrap();
+    assert!(client.store().group(G1).unwrap().is_none());
 }

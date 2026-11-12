@@ -104,6 +104,56 @@ impl Client {
         })
     }
 
+    /// hide-delete/1: hides or shows a 群 or 私聊 for me (`PATCH /v1/groups/:id/prefs` with
+    /// `hidden`). It comes back by itself with the next message from someone else.
+    pub fn set_group_hidden(
+        &self,
+        group_id: &str,
+        hidden: bool,
+    ) -> JoinHandle<Result<GroupRow, ClientError>> {
+        self.set_group_prefs(
+            group_id,
+            UpdateGroupPrefsRequest {
+                hidden: Some(hidden),
+                ..Default::default()
+            },
+        )
+    }
+
+    /// hide-delete/1: deletes a 群 for everyone (`DELETE /v1/groups/:id`; an owner, not a DM,
+    /// not the default group). The group leaves the cache at once; the server's `directory`
+    /// says the same to every member.
+    pub fn delete_group(&self, group_id: &str) -> JoinHandle<Result<(), ClientError>> {
+        let http = self.http();
+        let shared = self.shared().clone();
+        let gid = group_id.to_string();
+        self.spawn(async move {
+            http.delete_group(&gid).await?;
+            shared
+                .store
+                .apply_directory(None, None, Some(std::slice::from_ref(&gid)))?;
+            shared.emit(ClientUpdate::DirectoryChanged);
+            Ok(())
+        })
+    }
+
+    /// hide-delete/1: deletes a deactivated AI member for good (`DELETE /v1/members/:id`; an
+    /// owner). The member stays in the cache with `deleted` so old messages keep their author;
+    /// lists leave it out.
+    pub fn delete_member(&self, member_id: &str) -> JoinHandle<Result<Member, ClientError>> {
+        let http = self.http();
+        let shared = self.shared().clone();
+        let id = member_id.to_string();
+        self.spawn(async move {
+            let m = http.delete_member(&id).await?;
+            shared
+                .store
+                .apply_directory(Some(std::slice::from_ref(&m)), None, None)?;
+            shared.emit(ClientUpdate::DirectoryChanged);
+            Ok(m)
+        })
+    }
+
     /// Renames a group (`PATCH /v1/groups/:id`). The server appends `group.updated`, which
     /// updates every client; the answer is stored at once too when I am in the group, so the
     /// sidebar does not wait for the event. Answers with the stored name.

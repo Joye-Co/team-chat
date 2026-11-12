@@ -36,6 +36,24 @@ export const ROOM_TOPIC_MUTE_MIGRATION: MigrationStep = {
   up: `ALTER TABLE topic_states ADD COLUMN muted INTEGER NOT NULL DEFAULT 0;`,
 };
 
+/**
+ * Room migration for hide and delete (docs/protocol.md, "Hide and delete"): my hidden flag on a
+ * 群 or 私聊 and on a 话题, and the deleted 话题 (their rows leave `topics`). Old rows read as 0.
+ */
+export const ROOM_HIDE_DELETE_MIGRATION: MigrationStep = {
+  name: "messaging-3-hide-delete",
+  up: `
+    ALTER TABLE member_prefs ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE topic_states ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE deleted_topics (
+      topic_id TEXT PRIMARY KEY,
+      deleted_at INTEGER NOT NULL,
+      deleted_by TEXT NOT NULL,
+      messages INTEGER NOT NULL DEFAULT 0
+    );
+  `,
+};
+
 export interface ReadTotals {
   readSeq: number;
   unread: number;
@@ -49,6 +67,7 @@ type StateRow = {
   read_seq: number;
   following: number;
   muted: number;
+  hidden: number;
 };
 
 function toState(r: StateRow, groupRead: number): TopicState {
@@ -60,6 +79,7 @@ function toState(r: StateRow, groupRead: number): TopicState {
   };
   if (r.following) s.following = true;
   if (r.muted) s.muted = true;
+  if (r.hidden) s.hidden = true;
   return s;
 }
 
@@ -96,10 +116,10 @@ export function groupReadState(
       `${UNREAD_CTE}
        SELECT t.id AS topic_id, coalesce(u.unread, 0) AS unread, coalesce(u.mentions, 0) AS mentions,
               coalesce(ts.read_seq, 0) AS read_seq, coalesce(ts.following, 0) AS following,
-              coalesce(ts.muted, 0) AS muted
+              coalesce(ts.muted, 0) AS muted, coalesce(ts.hidden, 0) AS hidden
        FROM topics t LEFT JOIN u ON u.topic_id = t.id
        LEFT JOIN topic_states ts ON ts.member_id = ? AND ts.topic_id = t.id
-       WHERE u.topic_id IS NOT NULL OR ts.following = 1 OR ts.muted = 1
+       WHERE u.topic_id IS NOT NULL OR ts.following = 1 OR ts.muted = 1 OR ts.hidden = 1
        ORDER BY t.last_seq DESC`,
       memberId,
       memberId,
@@ -126,7 +146,7 @@ export function topicState(sql: SqlStorage, memberId: string, topicId: string, c
       `${UNREAD_CTE}
        SELECT t.id AS topic_id, coalesce(u.unread, 0) AS unread, coalesce(u.mentions, 0) AS mentions,
               coalesce(ts.read_seq, 0) AS read_seq, coalesce(ts.following, 0) AS following,
-              coalesce(ts.muted, 0) AS muted
+              coalesce(ts.muted, 0) AS muted, coalesce(ts.hidden, 0) AS hidden
        FROM topics t LEFT JOIN u ON u.topic_id = t.id
        LEFT JOIN topic_states ts ON ts.member_id = ? AND ts.topic_id = t.id
        WHERE t.id = ?`,
@@ -138,7 +158,7 @@ export function topicState(sql: SqlStorage, memberId: string, topicId: string, c
       topicId,
     )
     .toArray()[0] as StateRow | undefined;
-  return toState(r ?? { topic_id: topicId, unread: 0, mentions: 0, read_seq: 0, following: 0, muted: 0 }, groupRead);
+  return toState(r ?? { topic_id: topicId, unread: 0, mentions: 0, read_seq: 0, following: 0, muted: 0, hidden: 0 }, groupRead);
 }
 
 export function setFollowing(sql: SqlStorage, memberId: string, topicId: string, following: boolean): void {
@@ -177,6 +197,29 @@ export function isTopicMuted(sql: SqlStorage, memberId: string, topicId: string)
   );
 }
 
+export function setTopicHidden(sql: SqlStorage, memberId: string, topicId: string, hidden: boolean): void {
+  sql.exec(
+    `INSERT INTO topic_states (member_id, topic_id, hidden) VALUES (?, ?, ?)
+     ON CONFLICT (member_id, topic_id) DO UPDATE SET hidden = excluded.hidden`,
+    memberId,
+    topicId,
+    hidden ? 1 : 0,
+  );
+}
+
+/**
+ * A message mentioning these members was appended to the topic: they see it again. Returns the
+ * members whose `hidden` was cleared.
+ */
+export function unhideTopicFor(sql: SqlStorage, topicId: string, memberIds: string[]): string[] {
+  const cleared: string[] = [];
+  for (const id of new Set(memberIds)) {
+    const r = sql.exec("UPDATE topic_states SET hidden = 0 WHERE member_id = ? AND topic_id = ? AND hidden = 1", id, topicId);
+    if (r.rowsWritten > 0) cleared.push(id);
+  }
+  return cleared;
+}
+
 /** Moves one topic's read position forward. Returns true when it moved. */
 export function advanceTopicRead(sql: SqlStorage, memberId: string, topicId: string, seq: number): boolean {
   const prev =
@@ -201,6 +244,7 @@ export function advanceTopicRead(sql: SqlStorage, memberId: string, topicId: str
 export interface Prefs {
   muted: boolean;
   notify: NotifyLevel;
+  hidden: boolean;
 }
 
 export function defaultNotify(kind: "group" | "dm" | null): NotifyLevel {
@@ -209,13 +253,26 @@ export function defaultNotify(kind: "group" | "dm" | null): NotifyLevel {
 
 export function getPrefs(sql: SqlStorage, memberId: string, kind: "group" | "dm" | null): Prefs {
   const r = sql
-    .exec<{ muted: number; notify: string | null }>("SELECT muted, notify FROM member_prefs WHERE member_id = ?", memberId)
-    .toArray()[0] as { muted: number; notify: string | null } | undefined;
-  return { muted: r?.muted === 1, notify: (r?.notify as NotifyLevel | null) ?? defaultNotify(kind) };
+    .exec<{ muted: number; notify: string | null; hidden: number }>(
+      "SELECT muted, notify, hidden FROM member_prefs WHERE member_id = ?",
+      memberId,
+    )
+    .toArray()[0] as { muted: number; notify: string | null; hidden: number } | undefined;
+  return { muted: r?.muted === 1, notify: (r?.notify as NotifyLevel | null) ?? defaultNotify(kind), hidden: r?.hidden === 1 };
 }
 
-export function setPrefs(sql: SqlStorage, memberId: string, change: { muted?: boolean; notify?: NotifyLevel }): void {
+export function setPrefs(
+  sql: SqlStorage,
+  memberId: string,
+  change: { muted?: boolean; notify?: NotifyLevel; hidden?: boolean },
+): void {
   sql.exec("INSERT OR IGNORE INTO member_prefs (member_id) VALUES (?)", memberId);
   if (change.muted !== undefined) sql.exec("UPDATE member_prefs SET muted = ? WHERE member_id = ?", change.muted ? 1 : 0, memberId);
   if (change.notify !== undefined) sql.exec("UPDATE member_prefs SET notify = ? WHERE member_id = ?", change.notify, memberId);
+  if (change.hidden !== undefined) sql.exec("UPDATE member_prefs SET hidden = ? WHERE member_id = ?", change.hidden ? 1 : 0, memberId);
+}
+
+/** A new message from someone else: every member but its author sees the 群 or 私聊 again. */
+export function unhideGroupExcept(sql: SqlStorage, authorId: string): void {
+  sql.exec("UPDATE member_prefs SET hidden = 0 WHERE hidden = 1 AND member_id != ?", authorId);
 }

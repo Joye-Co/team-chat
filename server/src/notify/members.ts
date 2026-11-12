@@ -29,7 +29,8 @@ registerRoute({
     ) {
       throw new ApiError("forbidden", "only an owner can change level, character, reportsTo, the budget or deactivate");
     }
-    if (!target) throw new ApiError("not_found", "member not found");
+    // A deleted AI member is gone for changes (docs/protocol.md, "Hide and delete").
+    if (!target || target.deleted_at) throw new ApiError("not_found", "member not found");
     if (myBot && req.deactivated === false && target.deactivated) {
       const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM members WHERE kind = 'bot' AND owner_id = ? AND deactivated = 0")
         .bind(a.memberId)

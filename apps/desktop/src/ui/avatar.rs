@@ -623,6 +623,7 @@ mod tests {
             character: Some(characters::CharacterId::O08),
             team_owner: false,
             owner_id: None,
+            deleted: false,
         };
         let avatar = MemberAvatar::new(Some(&member), px(32.));
         assert!(avatar.bot);

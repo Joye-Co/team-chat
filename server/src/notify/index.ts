@@ -2,9 +2,11 @@
 // live in the sibling files. Registered at import time from src/features.ts.
 import {
   type CardActionFrame,
+  mainTopicId,
   type Event,
   type GroupSummary,
   type TopicFollowFrame,
+  type TopicHideFrame,
   type TopicMuteFrame,
   type TopicState,
   UpdateGroupPrefsRequest,
@@ -30,6 +32,7 @@ import {
   isTopicMuted,
   setFollowing,
   setPrefs,
+  setTopicHidden,
   setTopicMuted,
   topicState,
 } from "../core/topicstate";
@@ -57,7 +60,7 @@ registerEventDecorator((event, memberId, c) => {
 });
 
 // ---------------------------------------------------------------------------
-// topic.follow, topic.mute
+// topic.follow, topic.mute, topic.hide
 // ---------------------------------------------------------------------------
 
 function lastSeq(sql: SqlStorage): number {
@@ -92,6 +95,14 @@ registerRoomRpc("topic.mute", (room, actor, args) => {
   return setTopicFlag(room, actor, { topicId: a.topicId, on: a.muted, groupRead: a.groupRead }, setTopicMuted);
 });
 
+// topic.hide: per member, like mute. The 群聊 cannot be hidden. A message that mentions me
+// shows the topic again (hidedelete/index.ts).
+registerRoomRpc("topic.hide", (room, actor, args) => {
+  const a = args as { topicId: string; hidden: boolean; groupRead: number };
+  if (a.topicId === mainTopicId(room.groupId)) throw new ApiError("invalid", "the group chat cannot be hidden");
+  return setTopicFlag(room, actor, { topicId: a.topicId, on: a.hidden, groupRead: a.groupRead }, setTopicHidden);
+});
+
 /** The member's group read cursor, from the gateway's own SQLite (core table `cursors`). */
 function groupCursor(sql: SqlStorage, groupId: string): number {
   return sql.exec<{ seq: number }>("SELECT seq FROM cursors WHERE group_id = ?", groupId).toArray()[0]?.seq ?? 0;
@@ -100,7 +111,7 @@ function groupCursor(sql: SqlStorage, groupId: string): number {
 /** Runs a topic flag change in the room and sends the new state to every connection of mine. */
 async function changeTopicFlag(
   c: FrameContext,
-  rpc: "topic.follow" | "topic.mute",
+  rpc: "topic.follow" | "topic.mute" | "topic.hide",
   frame: { groupId: string; topicId: string },
   args: Record<string, boolean>,
 ): Promise<TopicState> {
@@ -133,6 +144,11 @@ registerFrameHandler<TopicMuteFrame>("topic.mute", {
   handle: (frame, c) => changeTopicFlag(c, "topic.mute", frame, { muted: frame.muted }),
 });
 
+registerFrameHandler<TopicHideFrame>("topic.hide", {
+  rate: "write",
+  handle: (frame, c) => changeTopicFlag(c, "topic.hide", frame, { hidden: frame.hidden }),
+});
+
 // ---------------------------------------------------------------------------
 // card.action
 // ---------------------------------------------------------------------------
@@ -152,7 +168,7 @@ registerFrameHandler<CardActionFrame>("card.action", {
 
 registerRoomRpc("prefs.set", (room, actor, args) => {
   if (!actor) throw new ApiError("internal", "actor required");
-  const change = args as { muted?: boolean; notify?: "all" | "mentions" | "none" };
+  const change = args as { muted?: boolean; notify?: "all" | "mentions" | "none"; hidden?: boolean };
   const before = getPrefs(room.sql, actor.id, room.groupKind);
   setPrefs(room.sql, actor.id, change);
   return { before, after: getPrefs(room.sql, actor.id, room.groupKind) };
@@ -170,12 +186,13 @@ registerRoute({
     if (!(await isGroupMember(env.DB, group.id, a.memberId))) throw new ApiError("forbidden", "not a member of this group");
     const actor = { id: a.memberId, level: a.member.level, kind: a.member.kind, tokenId: a.tokenId };
     const r = unwrap(await roomStub(env, group.id).rpc(group.id, "prefs.set", actor, req)) as {
-      before: { muted: boolean; notify: string };
-      after: { muted: boolean; notify: string };
+      before: { muted: boolean; notify: string; hidden: boolean };
+      after: { muted: boolean; notify: string; hidden: boolean };
     };
     const details: Record<string, unknown> = { groupId: group.id };
     if (r.before.muted !== r.after.muted) details.muted = [r.before.muted, r.after.muted];
     if (r.before.notify !== r.after.notify) details.notify = [r.before.notify, r.after.notify];
+    if (r.before.hidden !== r.after.hidden) details.hidden = [r.before.hidden, r.after.hidden];
     await auditStatement(env.DB, a, { action: "prefs.update", target: group.id, details }).run();
     const summary: GroupSummary = await summaryFor(env, a.memberId, group.id);
     // Every connection of mine gets the new summary (an HTTP caller has none of its own).

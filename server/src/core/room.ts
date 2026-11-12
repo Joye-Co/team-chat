@@ -25,7 +25,7 @@ import { groupMemberIds, getGroup } from "./db";
 import { type Env, gatewayStub } from "./env";
 import { ApiError, type Result, toErrorBody } from "./errors";
 import { ulid } from "./ids";
-import { scrubDeletedMessage } from "./scrub";
+import { forgetDeletedTopic, scrubDeletedMessage } from "./scrub";
 import { LIMITS } from "./ratelimit";
 import { logger as baseLogger, type Logger } from "./logger";
 import { type MigrationStep, runMigrations } from "./migrations";
@@ -55,6 +55,7 @@ import {
   roomRpcHandlers,
 } from "./registry";
 import {
+  ROOM_HIDE_DELETE_MIGRATION,
   ROOM_MESSAGING_MIGRATION,
   ROOM_TOPIC_MUTE_MIGRATION,
   type ReadTotals,
@@ -133,7 +134,7 @@ export const ROOM_CORE_MIGRATIONS: MigrationStep[] = [
 ];
 
 export function roomMigrationSteps(): MigrationStep[] {
-  return [...ROOM_CORE_MIGRATIONS, ROOM_MESSAGING_MIGRATION, ROOM_TOPIC_MUTE_MIGRATION, ...roomMigrations];
+  return [...ROOM_CORE_MIGRATIONS, ROOM_MESSAGING_MIGRATION, ROOM_TOPIC_MUTE_MIGRATION, ROOM_HIDE_DELETE_MIGRATION, ...roomMigrations];
 }
 
 type TopicRow = {
@@ -184,6 +185,18 @@ export interface RoomCounts {
   topics: TopicState[];
   muted: boolean;
   notify: NotifyLevel;
+  /** I hid this 群 or 私聊; sent only when true. */
+  hidden?: boolean;
+}
+
+/** Result of `topic.delete`: the protocol result plus what the audit needs. */
+export interface TopicDeleteOutcome {
+  topicId: string;
+  deletedAt: number;
+  /** Messages scrubbed by the delete. */
+  messages: number;
+  /** False when the topic was already deleted (the first result) or only checked. */
+  deletedNow: boolean;
 }
 
 /** Result of a per-topic read: the new group totals and the changed topic (none when nothing moved). */
@@ -776,7 +789,9 @@ export class GroupRoom extends DurableObject<Env> {
       const read = Math.min(readSeq, this.lastSeq);
       const state = groupReadState(this.sql, memberId, read);
       const prefs = getPrefs(this.sql, memberId, this.groupKind);
-      return { lastSeq: this.lastSeq, ...state, muted: prefs.muted, notify: prefs.notify };
+      const counts: RoomCounts = { lastSeq: this.lastSeq, ...state, muted: prefs.muted, notify: prefs.notify };
+      if (prefs.hidden) counts.hidden = true;
+      return counts;
     });
   }
 
@@ -918,6 +933,8 @@ export class GroupRoom extends DurableObject<Env> {
           const topic = this.toTopic(this.topicRow(topicId) as TopicRow);
           tx.append({ type: "topic.created", actorId: actor.id, topicId, data: { topic } });
         } else {
+          // The hooks awaited: the topic may have been deleted in between.
+          if (!this.knownTopic(topicId)) throw new ApiError("not_found", "topic not found");
           this.sql.exec("UPDATE topics SET last_message_at = ? WHERE id = ?", now, topicId);
           if (context) {
             // The side chat reads its topic further now.
@@ -1187,6 +1204,91 @@ export class GroupRoom extends DurableObject<Env> {
     if (waitingOn !== undefined) data.waitingOn = waitingOn;
     if (change.ownerId !== undefined) data.ownerId = change.ownerId;
     tx.append({ type: "topic.updated", actorId, topicId: row.id, data, hints: { waitingAdded } });
+  }
+
+  /**
+   * `topic.delete` (docs/protocol.md, "Hide and delete"): the topic's creator or an owner; never
+   * the 群聊. In one commit every message of the topic is scrubbed as `delete` does (feature
+   * writers and write hooks see each one as a `message.deleted` that is not stored), the topic
+   * leaves `topics` and `topic_states`, and `topic.deleted` is appended. A deleted topic answers
+   * its first result. With `check`, only the checks run (the caller stops the topic's runs
+   * before the delete).
+   */
+  async topicDelete(groupId: string, actor: Actor, topicId: string, check = false): Promise<Result<TopicDeleteOutcome>> {
+    return run(async () => {
+      await this.ready(groupId);
+      this.requireMember(actor.id);
+      if (this.isMain(topicId)) throw new ApiError("invalid", "the group chat cannot be deleted");
+      const done = this.deletedTopic(topicId);
+      if (done) return done;
+      const row = this.topicRow(topicId);
+      if (!row) throw new ApiError("not_found", "topic not found");
+      if (row.created_by !== actor.id && actor.level !== "owner") {
+        throw new ApiError("forbidden", "only the topic's creator or an owner can delete it");
+      }
+      if (check) return { topicId, deletedAt: 0, messages: 0, deletedNow: false };
+      const rows = this.sql
+        .exec<MessageRow>("SELECT * FROM messages WHERE topic_id = ? AND deleted_at IS NULL ORDER BY created_seq", topicId)
+        .toArray() as MessageRow[];
+      for (const r of rows) {
+        const d = this.deltas.get(r.id);
+        if (d?.timer) clearTimeout(d.timer);
+        this.deltas.delete(r.id);
+      }
+      const now = Date.now();
+      const room = this.roomContext();
+      return this.commit((tx) => {
+        for (const r of rows) {
+          const removed = this.toMessage(r);
+          scrubDeletedMessage(this.sql, r.id, now);
+          const gone: ArchivedEvent = {
+            seq: tx.nextSeq(),
+            type: "message.deleted",
+            at: now,
+            actorId: actor.id,
+            topicId,
+            messageId: r.id,
+            data: { messageId: r.id, deletedAt: now },
+          };
+          for (const w of eventWriters) w(gone, this.sql);
+          for (const h of messageWriteHooks) h.remove?.(room, tx, removed, actor.id);
+        }
+        forgetDeletedTopic(this.sql, topicId, now, actor.id, rows.length);
+        tx.append({ type: "topic.deleted", actorId: actor.id, topicId, data: { topicId, deletedAt: now } });
+        return { topicId, deletedAt: now, messages: rows.length, deletedNow: true };
+      });
+    });
+  }
+
+  private deletedTopic(topicId: string): TopicDeleteOutcome | undefined {
+    const r = this.sql
+      .exec<{ deleted_at: number; messages: number }>("SELECT deleted_at, messages FROM deleted_topics WHERE topic_id = ?", topicId)
+      .toArray()[0];
+    return r ? { topicId, deletedAt: r.deleted_at, messages: r.messages, deletedNow: false } : undefined;
+  }
+
+  /**
+   * `DELETE /v1/groups/:id`: the API Worker removed the group from D1; this wipes the room's
+   * storage (log, topics, messages, read state, feature tables). Afterwards every call answers
+   * `not_found` (the group is gone from D1). Internal.
+   */
+  async wipe(groupId: string): Promise<Result<{ wiped: true }>> {
+    return run(async () => {
+      if (this.groupId !== null && this.groupId !== groupId) throw new ApiError("internal", "room bound to another group");
+      for (const d of this.deltas.values()) if (d.timer) clearTimeout(d.timer);
+      this.deltas.clear();
+      this.typingAt.clear();
+      this.cardPressAt.clear();
+      await this.ctx.storage.deleteAlarm();
+      await this.ctx.storage.deleteAll();
+      this.groupId = null;
+      this.groupKind = null;
+      this.members = new Set();
+      this.lastSeq = 0;
+      this.log = baseLogger.child({ obj: "GroupRoom" });
+      runMigrations(this.ctx.storage, roomMigrationSteps());
+      return { wiped: true as const };
+    });
   }
 
   /** A card button press (`card.action`): stored as `card.actioned` with the action's own value. */

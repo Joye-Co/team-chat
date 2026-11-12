@@ -1,0 +1,7 @@
+{
+  "kind": "UpdateGroupPrefsRequest",
+  "valid": true,
+  "value": {
+    "hidden": true
+  }
+}

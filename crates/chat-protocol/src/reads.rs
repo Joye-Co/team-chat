@@ -29,9 +29,20 @@ pub struct TopicState {
         skip_serializing_if = "Option::is_none"
     )]
     pub muted: Option<bool>,
+    /// I hid this topic from my lists until a message mentions me. Absent means false.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub hidden: Option<bool>,
 }
 
 impl TopicState {
+    pub fn is_hidden(&self) -> bool {
+        self.hidden.unwrap_or(false)
+    }
+
     pub fn is_following(&self) -> bool {
         self.following.unwrap_or(false)
     }

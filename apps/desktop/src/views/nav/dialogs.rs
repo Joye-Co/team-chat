@@ -1236,6 +1236,14 @@ pub fn short_name(name: &str) -> String {
 }
 
 fn leave(services: &Services, group_id: &str, cx: &mut App) {
+    move_away_from(services, group_id, cx);
+    services.provider.leave_group(group_id);
+}
+
+/// When the main window shows `group_id` (its page, its 群聊 or one of its 话题), opens
+/// another 群 instead and forgets the 群 in the back history: before leaving, hiding or
+/// deleting it.
+pub fn move_away_from(services: &Services, group_id: &str, cx: &mut App) {
     let showing = {
         let nav = services.nav.read(cx);
         nav.place == Some(Place::Group(group_id.to_string()))
@@ -1260,7 +1268,6 @@ fn leave(services: &Services, group_id: &str, cx: &mut App) {
             }
         });
     }
-    services.provider.leave_group(group_id);
 }
 
 #[cfg(test)]

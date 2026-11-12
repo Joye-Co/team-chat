@@ -96,8 +96,10 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// `hello.features` of a 1.1 client: the interaction loop and refs to parts.
 pub const CLIENT_FEATURES: [&str; 2] = ["interact/1", "refs/1"];
 /// `welcome.features` of a 1.1 server; clients hide affordances the server does not list.
-pub const SERVER_FEATURES: [&str; 3] = ["interact/1", "refs/1", "diagram/1"];
+pub const SERVER_FEATURES: [&str; 4] = ["interact/1", "refs/1", "diagram/1", "hide-delete/1"];
 /// The feature that turns on the 1.1 transients for a connection.
 pub const FEATURE_INTERACT: &str = "interact/1";
 pub const FEATURE_REFS: &str = "refs/1";
 pub const FEATURE_DIAGRAM: &str = "diagram/1";
+/// Hide and delete of 群, 私聊, 话题 and AI members (docs/protocol.md, "Hide and delete").
+pub const FEATURE_HIDE_DELETE: &str = "hide-delete/1";
