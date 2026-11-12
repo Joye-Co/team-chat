@@ -27,8 +27,8 @@ use crate::{
     data::{
         AdminError, BotRunSummary, Millis, PlanState,
         run_phase::{
-            HandResult, RunAction, RunPhase, RunRights, Viewer, WaitingFor, actions, phase_of,
-            rights,
+            HandCommand, HandResult, RunAction, RunPhase, RunRefusal, RunRights, Viewer,
+            WaitingFor, actions, phase_of, rights,
         },
         v2::{AcceptanceItem, MachineScreen, ScreenLine, ScreenLineKind},
     },
@@ -225,20 +225,29 @@ impl LivePane {
                 return;
             }
         };
-        // The note goes with this one answer.
-        if matches!(
+        // The note goes with this one answer: it is cleared once the server took it, and kept
+        // when the answer is a refusal.
+        let note = matches!(
             action,
             RunAction::Continue | RunAction::HandBack | RunAction::HandBackFor
-        ) && let Some(note) = &self.note
-        {
-            note.update(cx, |s, cx| s.set_value("", window, cx));
-        }
+        )
+        .then(|| self.note.clone())
+        .flatten();
         self.command_error = None;
-        cx.spawn(async move |_, cx| {
+        cx.spawn_in(window, async move |_, cx| {
             let result = reply.await.unwrap_or(Err(AdminError::Other));
-            if let Err(e) = result {
+            match result {
+                Ok(()) => {
+                    if let Some(note) = note {
+                        let _ = cx.update(|window, cx| {
+                            note.update(cx, |s, cx| s.set_value("", window, cx))
+                        });
+                    }
+                }
                 // A refusal blocks: an alert, no toast (NATIVE.md §7.4).
-                cx.update(|cx| alert_in_active_window(title, e, cx));
+                Err(e) => {
+                    let _ = cx.update(|_, cx| alert_in_active_window(title, hold_refusal(e), cx));
+                }
             }
         })
         .detach();
@@ -298,23 +307,29 @@ impl LivePane {
         if text.is_empty() {
             return;
         }
-        let p = self.services.provider.clone();
-        if p.hand_commands(&run.id).iter().any(|h| h.result.is_none()) {
-            self.command_error = Some(c::LIVE_CMD_BUSY);
+        // Never queued (design-takeover 3.2): an away computer is said before sending; the
+        // server judges a running command.
+        if computer_away(&run) {
+            self.command_error = Some(c::LIVE_CMD_OFFLINE);
             cx.notify();
             return;
         }
-        let reply = p.run_command(&run.id, text);
-        input.update(cx, |s, cx| s.set_value("", window, cx));
+        let reply = self.services.provider.run_command(&run.id, text.clone());
         self.command_error = None;
-        cx.spawn(async move |this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             let result = reply.await.unwrap_or(Err(AdminError::Other));
-            if let Err(e) = result {
-                let _ = this.update(cx, |this, cx| {
-                    this.command_error = Some(command_refusal(e));
-                    cx.notify();
-                });
-            }
+            let _ = this.update_in(cx, |this, window, cx| {
+                match result {
+                    // The line goes once the server took it, unless it was edited meanwhile.
+                    Ok(_) => input.update(cx, |s, cx| {
+                        if s.value().trim() == text {
+                            s.set_value("", window, cx);
+                        }
+                    }),
+                    Err(e) => this.command_error = Some(command_refusal(e)),
+                }
+                cx.notify();
+            });
         })
         .detach();
         cx.notify();
@@ -521,7 +536,11 @@ impl LivePane {
         let reminder = phase::reminder(run, bot, me.as_deref(), now, |id| {
             crate::ui::avatar::name_beside_avatar(&member_name(&self.services, id)).to_string()
         });
-        let share = (words.phase == RunPhase::TakenOver)
+        // The screen sharing entry stays for any hold (design-takeover 3.9): a pause-only
+        // computer or an older server has no other way in.
+        let share = words
+            .phase
+            .held()
             .then(|| screen_share_url(screen))
             .flatten()
             .map(|url| {
@@ -547,6 +566,7 @@ impl LivePane {
                     .provider
                     .hand_commands(&run.id)
                     .iter()
+                    .filter(|h| this_hold(run, h))
                     .filter(|h| mine && Some(h.by.as_str()) == me.as_deref())
                     .count();
                 div()
@@ -635,7 +655,12 @@ impl LivePane {
         let k = theme::colors(cx);
         let me = self.services.me();
         let commands = self.services.provider.hand_commands(&run.id);
-        let running = commands.iter().find(|h| h.result.is_none()).cloned();
+        // A command of an earlier hold that never got its result is not running now.
+        let running = commands
+            .iter()
+            .find(|h| h.result.is_none() && this_hold(run, h))
+            .cloned();
+        let away = computer_away(run);
         crate::selftest::drawn::mark(
             "live-commands",
             format!("{} {}", commands.len(), running.is_some()),
@@ -728,8 +753,11 @@ impl LivePane {
                 .collect()
         };
         let field = (mine).then(|| self.command.clone()).flatten().map(|state| {
+            // A button that cannot be used is left out, never drawn disabled (3.9): while the
+            // computer is away there is no 运行.
             let action = match &running {
-                Some(h) => {
+                None if away => None,
+                Some(h) => Some({
                     let (id, cmd) = (run.id.clone(), h.id.clone());
                     push_button(
                         "live-command-abort",
@@ -739,15 +767,22 @@ impl LivePane {
                         cx,
                     )
                     .on_click(cx.listener(move |this, _, _, cx| this.abort_command(&id, &cmd, cx)))
-                }
-                None => push_button(
-                    "live-command-run",
-                    c::LIVE_CMD_RUN,
-                    PushStyle::Default,
-                    PushSize::Regular,
-                    cx,
-                )
-                .on_click(cx.listener(|this, _, window, cx| this.send_command(window, cx))),
+                }),
+                None => Some(
+                    push_button(
+                        "live-command-run",
+                        c::LIVE_CMD_RUN,
+                        PushStyle::Default,
+                        PushSize::Regular,
+                        cx,
+                    )
+                    .on_click(cx.listener(|this, _, window, cx| this.send_command(window, cx))),
+                ),
+            };
+            // While the computer is away the box cannot run anything: say so, not as an error.
+            let hint = match self.command_error {
+                Some(e) => Some((e, n.red)),
+                None => away.then_some((c::LIVE_CMD_OFFLINE, n.secondary)),
             };
             div()
                 .flex()
@@ -765,15 +800,13 @@ impl LivePane {
                                     &state,
                                 )
                                 .full_width()
+                                .disabled(away)
                                 .error(self.command_error.is_some()),
                             ),
                         )
-                        .child(div().flex_none().child(action)),
+                        .children(action.map(|a| div().flex_none().child(a))),
                 )
-                .children(
-                    self.command_error
-                        .map(|e| div().n_footnote().text_color(n.red).child(e)),
-                )
+                .children(hint.map(|(e, color)| div().n_footnote().text_color(color).child(e)))
         });
         div()
             .flex_none()
@@ -1828,16 +1861,10 @@ impl PaneView for LivePane {
 }
 
 /// Opens the error alert of a refused request in the active window.
-fn alert_in_active_window(title: &'static str, e: AdminError, cx: &mut App) {
+fn alert_in_active_window(title: &'static str, body: &'static str, cx: &mut App) {
     if let Some(window) = cx.active_window() {
         let _ = window.update(cx, |_, window, cx| {
-            crate::views::nav::dialogs::error_alert(
-                title,
-                crate::views::settings::widgets::error_text(e),
-                |_, _| {},
-                window,
-                cx,
-            )
+            crate::views::nav::dialogs::error_alert(title, body, |_, _| {}, window, cx)
         });
     }
 }
@@ -1868,13 +1895,46 @@ fn hand_state(result: Option<&HandResult>) -> (BadgeState, &'static str) {
     }
 }
 
-/// Why the server refused a command: never queued, so offline is a refusal.
+/// Why the server refused a command: never queued, so an away computer is a refusal.
+/// `Offline` is this app not reaching the server, said as such.
 fn command_refusal(e: AdminError) -> &'static str {
     match e {
-        AdminError::Conflict | AdminError::Offline => c::LIVE_CMD_OFFLINE,
+        AdminError::Refused(RunRefusal::Busy) => c::LIVE_CMD_BUSY,
+        AdminError::Refused(RunRefusal::ComputerOffline | RunRefusal::NotReady) => {
+            c::LIVE_CMD_OFFLINE
+        }
+        AdminError::Refused(_) | AdminError::Conflict => crate::copy::settings::ERROR_CONFLICT,
         AdminError::Unsupported => c::LIVE_CMD_UNSUPPORTED,
+        AdminError::Offline | AdminError::Forbidden => {
+            crate::views::settings::widgets::error_text(e)
+        }
         _ => crate::copy::overlays::COMMAND_REFUSED,
     }
+}
+
+/// The alert words of a refused 暂停, 接管, 继续 or 交还 (design-takeover 3.9 不可用).
+fn hold_refusal(e: AdminError) -> &'static str {
+    match e {
+        AdminError::Refused(RunRefusal::ComputerOffline | RunRefusal::NotReady) => {
+            c::LIVE_NOT_READY
+        }
+        AdminError::Refused(RunRefusal::CannotTakeOver) => c::LIVE_DAEMON_OLD,
+        AdminError::Refused(RunRefusal::CannotPause) => {
+            crate::views::settings::widgets::error_text(AdminError::Unsupported)
+        }
+        e => crate::views::settings::widgets::error_text(e),
+    }
+}
+
+/// The held run's computer is away: the command box cannot run anything (design-takeover 3.2).
+fn computer_away(run: &BotRunSummary) -> bool {
+    phase_of(run).1 == Some(WaitingFor::Offline)
+}
+
+/// A command of the current hold (at or after it began); one of an earlier hold of the same
+/// run neither blocks nor counts.
+fn this_hold(run: &BotRunSummary, h: &HandCommand) -> bool {
+    run.hold.held_at.is_none_or(|at| h.at >= at)
 }
 
 /// The screen sharing address to offer, when it is one the app may open
@@ -2033,6 +2093,7 @@ impl Render for LivePane {
                     id: &id,
                     role,
                     active_person,
+                    solo: crate::views::settings::solo(&self.services),
                 };
                 (actions(&run, v), rights(&run, v))
             }
@@ -2268,11 +2329,73 @@ mod tests {
             hand_state(Some(&r(false, None, false, Some("unsupported")))).1,
             "这台电脑不支持在接管时运行命令"
         );
-        // Never queued: an offline computer is a refusal that says so.
+        // Never queued: an away computer is a refusal that says so; a busy one too.
         assert_eq!(
-            command_refusal(AdminError::Conflict),
+            command_refusal(AdminError::Refused(RunRefusal::ComputerOffline)),
             "电脑不在线，回来后才能运行"
         );
+        assert_eq!(
+            command_refusal(AdminError::Refused(RunRefusal::Busy)),
+            "已有一条命令在运行"
+        );
+        // This app not reaching the server does not blame the run's computer.
+        assert_ne!(command_refusal(AdminError::Offline), c::LIVE_CMD_OFFLINE);
+        // A refused hold never says the team needs an owner.
+        for r in [
+            RunRefusal::Busy,
+            RunRefusal::ComputerOffline,
+            RunRefusal::NotReady,
+            RunRefusal::CannotTakeOver,
+            RunRefusal::CannotPause,
+            RunRefusal::Changed,
+        ] {
+            assert_ne!(
+                hold_refusal(AdminError::Refused(r)),
+                crate::copy::settings::ERROR_LAST_OWNER
+            );
+        }
+        assert_eq!(
+            hold_refusal(AdminError::Refused(RunRefusal::NotReady)),
+            "电脑还没准备好"
+        );
+        assert_eq!(
+            hold_refusal(AdminError::Refused(RunRefusal::CannotTakeOver)),
+            "这台电脑的后台服务太旧，更新后才能接管"
+        );
+    }
+
+    #[test]
+    fn only_the_current_hold_counts_and_an_away_computer_runs_nothing() {
+        let mut run = BotRunSummary {
+            id: "r1".into(),
+            bot_id: "b1".into(),
+            group_id: "g1".into(),
+            topic_id: "t1".into(),
+            machine_id: Some("m1".into()),
+            machine_name: None,
+            status: crate::data::RunStatus::Running,
+            requested_by: Some("me".into()),
+            created_at: 0,
+            started_at: Some(0),
+            ended_at: None,
+            updated_at: 0,
+            summary: None,
+            plan: Vec::new(),
+            hold: Default::default(),
+        };
+        run.hold.paused_by = Some("me".into());
+        run.hold.hold_kind = Some("takeover".into());
+        run.hold.held_at = Some(100);
+        let at = |at| HandCommand {
+            at,
+            ..HandCommand::default()
+        };
+        // A command lost in an earlier hold neither blocks 运行 nor counts.
+        assert!(!this_hold(&run, &at(50)));
+        assert!(this_hold(&run, &at(100)));
+        assert!(!computer_away(&run));
+        run.hold.waiting_for = Some("offline".into());
+        assert!(computer_away(&run));
     }
 
     #[test]

@@ -1120,6 +1120,8 @@ pub enum AdminError {
     RateLimited,
     /// Someone changed it first (a memory line undone twice, a version clash).
     Conflict,
+    /// The server refused a hold or a command for the run's state (design-takeover 3.2).
+    Refused(run_phase::RunRefusal),
     Other,
 }
 

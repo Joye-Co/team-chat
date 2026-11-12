@@ -54,6 +54,21 @@ const POSTED_SCAN: usize = 200;
 /// The machine list is read again at most this often (for `takeoverUrl`).
 const MACHINES_REFRESH: Duration = Duration::from_secs(60);
 
+/// A refused hold or command: a `conflict` says why from the run's state (design-takeover
+/// 3.2); `admin_error` would read it as the last owner.
+pub(super) fn run_error(e: &ClientError) -> AdminError {
+    if let ClientError::Api(api) = e
+        && api.is_conflict()
+    {
+        let message = match api {
+            chat_core::ApiError::Server { message, .. } => message.as_str(),
+            _ => "",
+        };
+        return AdminError::Refused(crate::data::run_phase::RunRefusal::from_message(message));
+    }
+    super::settings::admin_error(e)
+}
+
 /// What [`CoreProvider::hold_inner`] asks of the server.
 pub(super) enum Hold {
     Pause,
@@ -900,7 +915,7 @@ impl CoreProvider {
                 Ok(_) => Ok(()),
                 Err(e) => {
                     tracing::warn!(error = %e, "cannot pause, take over or resume a run");
-                    Err(super::settings::admin_error(&e))
+                    Err(run_error(&e))
                 }
             });
         });
@@ -926,7 +941,7 @@ impl CoreProvider {
             this.refresh_live(&id, true, true);
             let _ = tx.send(result.map_err(|e| {
                 tracing::info!(error = %e, "a command was refused");
-                super::settings::admin_error(&e)
+                run_error(&e)
             }));
         });
         rx
@@ -948,7 +963,7 @@ impl CoreProvider {
                 Ok(r) => r,
                 Err(e) => Err(ClientError::Runtime(e.to_string())),
             };
-            let _ = tx.send(result.map_err(|e| super::settings::admin_error(&e)));
+            let _ = tx.send(result.map_err(|e| run_error(&e)));
         });
         rx
     }
@@ -977,6 +992,37 @@ impl CoreProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_conflict_on_a_run_says_why_and_never_names_the_last_owner() {
+        use crate::data::run_phase::RunRefusal;
+        let conflict = |message: &str| {
+            ClientError::Api(chat_core::ApiError::Server {
+                status: 409,
+                code: chat_core::proto::ErrorCode::Conflict,
+                message: message.into(),
+            })
+        };
+        assert_eq!(
+            run_error(&conflict("the run's machine is offline")),
+            AdminError::Refused(RunRefusal::ComputerOffline)
+        );
+        assert_eq!(
+            run_error(&conflict("a command is running")),
+            AdminError::Refused(RunRefusal::Busy)
+        );
+        assert_eq!(
+            run_error(&ClientError::Api(chat_core::ApiError::Unexpected {
+                status: 409
+            })),
+            AdminError::Refused(RunRefusal::Changed)
+        );
+        // This app not reaching the server stays an app-connection error.
+        assert_eq!(
+            run_error(&ClientError::Api(chat_core::ApiError::Network("x".into()))),
+            AdminError::Offline
+        );
+    }
 
     #[test]
     fn a_suggestion_counts_as_posted_once_my_message_with_its_text_follows_the_answer() {

@@ -255,6 +255,29 @@ pub fn handed_back_line(h: &Handback, member: &str, me: Option<&str>, who: &str)
     parts.join(" · ")
 }
 
+/// The badge of a run's card in the 话题 (design-takeover 3.9, one word per run): the
+/// phase's own short words, and while it works the plan's count (`在做 2/5`), or 等你 when its
+/// plan waits on a step.
+pub fn card_badge(
+    words: &PhaseWords,
+    progress: Option<(usize, usize)>,
+    plan_waiting: bool,
+) -> (BadgeState, String) {
+    if words.phase != RunPhase::Working {
+        return (words.badge, words.short.clone());
+    }
+    if plan_waiting {
+        return (BadgeState::NeedsYou, c::LIVE_SHORT_WAITING_YOU.to_string());
+    }
+    match progress {
+        Some((step, total)) => (
+            BadgeState::Working,
+            format!("{} {step}/{total}", c::LIVE_PHASE_WORKING),
+        ),
+        None => (BadgeState::Working, c::LIVE_PHASE_WORKING.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,6 +316,35 @@ mod tests {
                 id.into()
             }
         })
+    }
+
+    #[test]
+    fn the_card_in_the_topic_reads_the_same_phase() {
+        let mut r = run();
+        assert_eq!(
+            card_badge(&words(&r), Some((2, 5)), false),
+            (BadgeState::Working, "在做 2/5".into())
+        );
+        // A run waiting in a question card says so without a waiting plan step.
+        r.status = RunStatus::Waiting;
+        assert_eq!(
+            card_badge(&words(&r), Some((2, 5)), false),
+            (BadgeState::NeedsYou, "等你".into())
+        );
+        r.status = RunStatus::Running;
+        r.hold.phase = Some("waiting_approval".into());
+        r.requested_by = Some("w".into());
+        assert_eq!(card_badge(&words(&r), None, false).1, "等小王");
+        // A pause and a take-over do not read alike.
+        r.hold.phase = None;
+        r.hold.paused_by = Some("me".into());
+        r.hold.hold_kind = Some("pause".into());
+        assert_eq!(
+            card_badge(&words(&r), Some((2, 5)), false),
+            (BadgeState::Paused, "已暂停".into())
+        );
+        r.hold.hold_kind = Some("takeover".into());
+        assert_eq!(card_badge(&words(&r), None, false).1, "你在操作");
     }
 
     #[test]

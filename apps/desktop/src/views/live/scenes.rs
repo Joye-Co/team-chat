@@ -294,6 +294,20 @@ pub const PHASE_SCENES: &[Scene] = &[
             ),
         ]
     ),
+    phase_scene!(
+        "live-command-offline",
+        "实时查看 after 接管: the computer went away while I hold it (the command box is off, 电脑不在线)",
+        |h| {
+            held(h, d::ME, "takeover");
+            h.waiting_for = Some("offline".into());
+        },
+        vec![hand(
+            "hc-1",
+            "git status --short",
+            " M .env.example\n",
+            ended(true, Some(0), false)
+        )]
+    ),
 ];
 // --- end usable/takeover ---
 

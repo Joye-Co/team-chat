@@ -179,6 +179,48 @@ pub fn phase_of(run: &BotRunSummary) -> (RunPhase, Option<WaitingFor>) {
     }
 }
 
+/// Why the server refused 暂停, 接管, 继续, 交还 or a command (`conflict`, design-takeover
+/// 3.2 and 3.4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RunRefusal {
+    /// A command of the holder is still running.
+    Busy,
+    /// The run's computer is away: a command is never queued.
+    ComputerOffline,
+    /// The run is not open on its computer yet (waiting for it, or starting).
+    NotReady,
+    /// The computer's daemon cannot take runs over.
+    CannotTakeOver,
+    /// The computer's daemon cannot pause runs.
+    CannotPause,
+    /// The run changed first: someone else holds it, it is no longer held, or it ended.
+    Changed,
+}
+
+impl RunRefusal {
+    /// The refusal in the server's `conflict` message. The client keeps only the code and the
+    /// message of an error, so the reason is read from the message the server writes.
+    pub fn from_message(message: &str) -> Self {
+        let m = message.to_ascii_lowercase();
+        if m.contains("command is running") || m.contains("hand.busy") {
+            Self::Busy
+        } else if m.contains("offline")
+            || m.contains("not open on its machine")
+            || m.contains("not online")
+        {
+            Self::ComputerOffline
+        } else if m.contains("not ready") || m.contains("no machine") {
+            Self::NotReady
+        } else if m.contains("cannot be taken over") {
+            Self::CannotTakeOver
+        } else if m.contains("cannot pause") {
+            Self::CannotPause
+        } else {
+            Self::Changed
+        }
+    }
+}
+
 /// The person looking at a run.
 #[derive(Clone, Copy, Debug)]
 pub struct Viewer<'a> {
@@ -186,6 +228,8 @@ pub struct Viewer<'a> {
     pub role: TeamRole,
     /// A person who is not deactivated (a bot never holds a run).
     pub active_person: bool,
+    /// The only active person in the team (一个人用, design-takeover 3.2 and 3.10).
+    pub solo: bool,
 }
 
 /// What the viewer may do with a run now (design-takeover 3.2). The server stays the judge.
@@ -215,8 +259,9 @@ fn may_hold(run: &BotRunSummary, v: Viewer) -> bool {
     }
 }
 
-/// Who may take it over: on a personal computer only its owner; on a team computer only the
-/// requester, and only when it runs commands as another user; never without the feature.
+/// Who may take it over: on a personal computer only its owner; on a team computer the
+/// requester when it runs commands as another user, or the only person in the team (no one
+/// else's sign-ins are there); never without the feature.
 pub fn may_take_over(run: &BotRunSummary, v: Viewer) -> bool {
     if !v.active_person {
         return false;
@@ -227,6 +272,7 @@ pub fn may_take_over(run: &BotRunSummary, v: Viewer) -> bool {
     ) {
         (TakeoverKind::None, _) => false,
         (_, Some(owner)) => owner == v.id,
+        (_, None) if v.solo => true,
         (TakeoverKind::Isolated, None) => run.requester() == Some(v.id),
         (TakeoverKind::Commands, None) => false,
     }
@@ -381,6 +427,7 @@ mod tests {
             id,
             role,
             active_person: true,
+            solo: false,
         }
     }
 
@@ -467,6 +514,33 @@ mod tests {
     }
 
     #[test]
+    fn the_only_person_takes_over_on_their_own_team_mac() {
+        // 一个人用: the Mac set up from the app is a team machine with no owner.
+        let mut r = run(RunStatus::Running);
+        r.hold.takeover = Some("commands".into());
+        let alone = Viewer {
+            solo: true,
+            ..viewer("alice", TeamRole::Owner)
+        };
+        assert!(may_take_over(&r, alone));
+        assert_eq!(
+            actions(&r, alone),
+            [RunAction::Pause, RunAction::TakeOver, RunAction::Stop]
+        );
+        r.hold.paused_by = Some("alice".into());
+        r.hold.hold_kind = Some("takeover".into());
+        assert!(rights(&r, alone).run_commands);
+        // Still nothing without the feature, and a second person brings the team rule back.
+        let mut old = run(RunStatus::Running);
+        assert!(!may_take_over(&old, alone));
+        old.hold.takeover = Some("commands".into());
+        assert!(!may_take_over(&old, viewer("alice", TeamRole::Owner)));
+        // Someone else's personal computer stays its owner's.
+        old.hold.machine_owner = Some("bob".into());
+        assert!(!may_take_over(&old, alone));
+    }
+
+    #[test]
     fn the_buttons_follow_the_phase() {
         let alice = viewer("alice", TeamRole::Member);
         let admin = viewer("ada", TeamRole::Owner);
@@ -505,6 +579,31 @@ mod tests {
             ..alice
         };
         assert_eq!(actions(&run(RunStatus::Running), gone), [RunAction::Stop]);
+    }
+
+    #[test]
+    fn a_refusal_is_read_from_the_servers_message() {
+        for (m, r) in [
+            ("a command is running", RunRefusal::Busy),
+            ("the run's machine is offline", RunRefusal::ComputerOffline),
+            (
+                "the run is not open on its machine",
+                RunRefusal::ComputerOffline,
+            ),
+            ("the run's computer is not ready", RunRefusal::NotReady),
+            (
+                "the run's machine cannot be taken over",
+                RunRefusal::CannotTakeOver,
+            ),
+            (
+                "the run's machine cannot pause runs",
+                RunRefusal::CannotPause,
+            ),
+            ("someone else took the run over", RunRefusal::Changed),
+            ("the run ended", RunRefusal::Changed),
+        ] {
+            assert_eq!(RunRefusal::from_message(m), r, "{m}");
+        }
     }
 
     #[test]

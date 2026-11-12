@@ -202,18 +202,38 @@ impl TimelineView {
             .is_some_and(|s| s.state == PlanState::Waiting);
         let badge = if stopping {
             (BadgeState::Stopping, pr::STATUS_STOPPING.to_string())
-        } else if held {
-            (BadgeState::Paused, c::STATE_PAUSED_SHORT.to_string())
-        } else if waiting {
-            (BadgeState::NeedsYou, c::STATE_YOU_SHORT.to_string())
         } else {
-            match &progress_of {
-                Some((step, total, _)) => (
-                    BadgeState::Working,
-                    format!("{} {step}/{total}", c::STATE_WORKING_SHORT),
-                ),
-                None => (BadgeState::Working, c::STATE_WORKING_SHORT.to_string()),
+            // Usable (design-takeover 3.9): the run's one phase, as 实时查看 reads it.
+            let mut run = run.clone();
+            if held && run.hold.paused_by.is_none() {
+                run.hold.paused_by = self
+                    .services
+                    .provider
+                    .machine_screen(&run.id)
+                    .and_then(|s| s.paused_by);
             }
+            let member_name = |id: &str| {
+                self.members
+                    .iter()
+                    .find(|m| m.id == id)
+                    .map(|m| crate::ui::avatar::name_beside_avatar(&m.name).to_string())
+                    .unwrap_or_default()
+            };
+            let me = self.services.me();
+            let words = crate::views::live::phase::phase_words(
+                &run,
+                &crate::views::live::phase::Names {
+                    member: &member_name(&run.bot_id),
+                    computer: "",
+                    me: me.as_deref(),
+                },
+                member_name,
+            );
+            crate::views::live::phase::card_badge(
+                &words,
+                progress_of.as_ref().map(|(step, total, _)| (*step, *total)),
+                waiting,
+            )
         };
         // R2-05, A2-10: the title names the member and the step it is on;
         // with no plan, `Forge 在做` (never a bare `计划`).
