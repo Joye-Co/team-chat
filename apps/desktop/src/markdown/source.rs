@@ -273,6 +273,119 @@ fn link_line(line: &str, targets: &[&MentionTarget], out: &mut String) {
     }
 }
 
+/// `**bold**` that CommonMark leaves as literal asterisks, written as `<b>…</b>` (which the
+/// renderer draws the same way). A `**` only closes when it is not between a punctuation
+/// mark and a letter, so the usual Chinese `**结论：**正文` and `正文**（注）**后` show their
+/// asterisks. Pairs are taken in order on one line, outside code; a line with an odd count,
+/// a run of three or more asterisks, or pairs that already work stays as written.
+pub fn fix_cjk_strong(text: &str) -> String {
+    if !text.contains("**") {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len() + 16);
+    let mut fenced = false;
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with(FENCE) || trimmed.starts_with("~~~") {
+            fenced = !fenced;
+            out.push_str(line);
+            continue;
+        }
+        if fenced || !line.contains("**") {
+            out.push_str(line);
+            continue;
+        }
+        strong_line(line, &mut out);
+    }
+    out
+}
+
+/// [`fix_cjk_strong`] on one line outside a fence.
+fn strong_line(line: &str, out: &mut String) {
+    // Byte offsets of the `**` runs outside inline code and escapes.
+    let mut marks = Vec::new();
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 2,
+            b'`' => {
+                let run = line[i..].len() - line[i..].trim_start_matches('`').len();
+                let ticks = &line[i..i + run];
+                i = line[i + run..]
+                    .find(ticks)
+                    .map_or(i + run, |at| i + run + at + run);
+            }
+            b'*' => {
+                let run = line[i..].len() - line[i..].trim_start_matches('*').len();
+                if run > 2 {
+                    out.push_str(line);
+                    return;
+                }
+                if run == 2 {
+                    marks.push(i);
+                }
+                i += run;
+            }
+            _ => i += 1,
+        }
+    }
+    if marks.is_empty() || marks.len() % 2 == 1 {
+        out.push_str(line);
+        return;
+    }
+    let mut at = 0;
+    for pair in marks.chunks(2) {
+        let (open, close) = (pair[0], pair[1]);
+        let inner = &line[open + 2..close];
+        let trimmed_ok = inner.chars().next().is_some_and(|c| !c.is_whitespace())
+            && inner
+                .chars()
+                .next_back()
+                .is_some_and(|c| !c.is_whitespace());
+        let before = |p: usize| line[..p].chars().next_back();
+        let after = |p: usize| line[p + 2..].chars().next();
+        let works =
+            left_flanking(before(open), after(open)) && right_flanking(before(close), after(close));
+        if trimmed_ok && !works {
+            out.push_str(&line[at..open]);
+            out.push_str("<b>");
+            out.push_str(inner);
+            out.push_str("</b>");
+            at = close + 2;
+        }
+    }
+    out.push_str(&line[at..]);
+}
+
+/// Whether a delimiter run between `prev` and `next` (`None` at the line's edge) can open
+/// emphasis (CommonMark "left-flanking").
+fn left_flanking(prev: Option<char>, next: Option<char>) -> bool {
+    let Some(next) = next.filter(|c| !c.is_whitespace()) else {
+        return false;
+    };
+    !is_punctuation(next) || prev.is_none_or(|p| p.is_whitespace() || is_punctuation(p))
+}
+
+/// Whether a delimiter run between `prev` and `next` can close emphasis ("right-flanking").
+fn right_flanking(prev: Option<char>, next: Option<char>) -> bool {
+    let Some(prev) = prev.filter(|c| !c.is_whitespace()) else {
+        return false;
+    };
+    !is_punctuation(prev) || next.is_none_or(|n| n.is_whitespace() || is_punctuation(n))
+}
+
+/// ASCII punctuation and the punctuation blocks Chinese text uses: general punctuation
+/// (—、“”…), Latin-1 marks, CJK symbols (、。「」《》【】), CJK compatibility and small
+/// forms, and the full-width forms except letters and digits (，：；！？（）).
+fn is_punctuation(c: char) -> bool {
+    c.is_ascii_punctuation()
+        || matches!(c as u32,
+            0x00A1..=0x00BF | 0x2010..=0x2027 | 0x2030..=0x205E | 0x3000..=0x303F
+            | 0xFE10..=0xFE19 | 0xFE30..=0xFE6F | 0xFF01..=0xFF0F | 0xFF1A..=0xFF20
+            | 0xFF3B..=0xFF40 | 0xFF5B..=0xFF65)
+}
+
 /// The end of a `[text](dest)` link that starts at the beginning of `s`.
 fn link_end(s: &str) -> Option<usize> {
     let open = s.find('[')?;
@@ -339,6 +452,70 @@ pub fn top_level_blocks(source: &str) -> Vec<(MdBlock, std::ops::Range<usize>)> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The text the `markdown` crate (gpui-component's parser, same options) leaves as
+    /// plain text in `source`, and whether it found bold (`**` or `<b>`).
+    fn parsed(source: &str) -> (String, bool) {
+        use markdown::mdast::Node;
+        fn walk(node: &Node, text: &mut String, bold: &mut bool) {
+            match node {
+                Node::Text(t) => text.push_str(&t.value),
+                Node::Strong(_) => *bold = true,
+                Node::Html(h) if h.value == "<b>" => *bold = true,
+                _ => {}
+            }
+            for child in node.children().into_iter().flatten() {
+                walk(child, text, bold);
+            }
+        }
+        let tree = markdown::to_mdast(source, &markdown::ParseOptions::gfm()).expect("parsed");
+        let (mut text, mut bold) = (String::new(), false);
+        walk(&tree, &mut text, &mut bold);
+        (text, bold)
+    }
+
+    #[test]
+    fn chinese_bold_next_to_punctuation_renders_bold() {
+        for (body, fixed) in [
+            ("**结论：**重连后去重", "<b>结论：</b>重连后去重"),
+            ("正文**（注）**后面", "正文<b>（注）</b>后面"),
+            (
+                "- **注意：**用 `seq` 去重\n- 其他",
+                "- <b>注意：</b>用 `seq` 去重\n- 其他",
+            ),
+        ] {
+            // The parser leaves the asterisks of the body as text …
+            assert!(parsed(body).0.contains("**"), "{body}");
+            let out = fix_cjk_strong(body);
+            assert_eq!(out, fixed);
+            // … and none of the fixed one, which is bold.
+            let (text, bold) = parsed(&out);
+            assert!(!text.contains('*') && bold, "{out}: {text}");
+        }
+        // Without the fix the second pair would close the first one (all of it bold).
+        assert_eq!(
+            fix_cjk_strong("**结论：**重连后**补拉**也去重"),
+            "<b>结论：</b>重连后**补拉**也去重"
+        );
+    }
+
+    #[test]
+    fn bold_that_already_works_and_code_stay_as_written() {
+        for body in [
+            "**服务端**（`server/`）",
+            "**对方是什么：** 一个开源的替代品",
+            "**建议先补这 3 条**（前提是先走通）",
+            "plain **bold** text",
+            "`**结论：**重连` 是代码",
+            "```\n**结论：**重连\n```",
+            "**结论：**重连**",
+            "***结论：***重连",
+            "\\*\\*结论：\\*\\*重连",
+            "没有粗体",
+        ] {
+            assert_eq!(fix_cjk_strong(body), body);
+        }
+    }
 
     #[test]
     fn acceptance_blocks_never_show() {

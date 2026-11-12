@@ -305,7 +305,7 @@ export async function seed(o: SeedOptions): Promise<Json> {
       const forge = await as("forge");
       await forge.ack(reconnect.groupId, (await forge.history(reconnect.groupId, reconnect.topicId)).messages[0]?.id ?? "");
       await forge.setPlan(reconnect, plan(["复现问题", "定位重复原因", "写修复和测试", "开 PR"], 4));
-      await say("forge", reconnect, "原因是重连后补拉的事件没有按 seq 去重。修复在 PR #61，加了断线重放的测试。");
+      await say("forge", reconnect, "**原因：**重连后补拉的事件没有按 `seq` 去重。修复在 PR #61，加了断线重放的测试。");
       // A Markdown 产出 (a file, not a page): the 产出 pane and page read it in place.
       const md = new TextEncoder().encode(RECONNECT_REVIEW_MD);
       const review = await forge.http.uploadFile({ ...reconnect, name: "重连重复问题复盘.md", mime: "text/markdown", data: md });
