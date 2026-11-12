@@ -20,7 +20,13 @@ export const DISK_CLEAR_BYTES = MIN_FREE_DISK_BYTES + 1024 ** 3;
 /** At most this many people hear of one alert. */
 const MAX_RECIPIENTS = 20;
 
-export type AlertKind = "offline" | "signed_out" | "disk";
+export type AlertKind = "offline" | "signed_out" | "disk" | "github";
+
+/** The GitHub sign-in a computer's heartbeat reports (`metrics.github`, the protocol's MachineGithub). */
+export interface GithubState {
+  state: "signed_in" | "signed_out" | "no_gh" | "unknown";
+  login?: string;
+}
 
 /** One alert that is up. `key` is the kind, with the runtime for a sign-in. */
 export interface MachineAlert {
@@ -32,6 +38,8 @@ export interface MachineAlert {
   cli?: string;
   /** disk: free bytes when it started. */
   freeBytes?: number;
+  /** github: why an AI member's run found no sign-in (`MachineLink.githubMissing`). */
+  reason?: string;
 }
 
 /** Where one person was told, so the notice can be withdrawn. */
@@ -59,6 +67,11 @@ export const ALERT_TEXT = {
   diskTitle: (machine: string) => `电脑「${machine}」的磁盘快满了`,
   disk: (machine: string, free: number) =>
     `电脑「${machine}」只剩 ${gb(free)} GB 可用，少于 ${gb(MIN_FREE_DISK_BYTES)} GB，新的活不会派到这台电脑。请清理一些空间。`,
+  githubTitle: (machine: string) => `${machine} 没有登录 GitHub`,
+  github: (machine: string, personal: boolean) =>
+    personal
+      ? "AI 成员在这台电脑上推代码、开 PR 要用它。请在这台电脑上为运行 AI 成员的系统账户登录 GitHub。"
+      : `AI 成员在这台电脑上推代码、开 PR 要用它。请到 团队管理 › 电脑，选 ${machine}，照说明在电脑上登录。`,
   recovered: "已经恢复，不用处理了。",
 };
 
@@ -110,6 +123,29 @@ export function heartbeatAlerts(input: {
     }
   }
   return { raise, clear, seen };
+}
+
+/**
+ * The GitHub alert a heartbeat starts or ends (design-github-identity 3.6), only on a computer
+ * that runs each task in a VM: there the host's sign-in is the only way to GitHub. It starts when
+ * a sign-in that was there went (`signed_in` to `signed_out` or `no_gh`) and ends on `signed_in`
+ * or when the heartbeat no longer reports it. `seen` is the last certain state.
+ */
+export function githubAlerts(input: {
+  up: Record<string, MachineAlert>;
+  runsIn: string | undefined;
+  github: GithubState | undefined;
+  seen: string | undefined;
+  now: number;
+}): { raise: MachineAlert[]; clear: string[]; seen: string | undefined } {
+  const up = input.up.github !== undefined;
+  const state = input.github?.state;
+  const seen = state === "signed_in" || state === "signed_out" || state === "no_gh" ? state : input.seen;
+  if (input.runsIn !== "vm" || state === undefined || state === "signed_in") return { raise: [], clear: up ? ["github"] : [], seen };
+  if (!up && input.seen === "signed_in" && (state === "signed_out" || state === "no_gh")) {
+    return { raise: [{ key: "github", kind: "github", since: input.now }], clear: [], seen };
+  }
+  return { raise: [], clear: [], seen };
 }
 
 interface Person {
@@ -171,7 +207,9 @@ export async function notifyAlert(
         ? [ALERT_TEXT.offlineTitle(machine.name), ALERT_TEXT.offline(machine.name, Math.max(1, Math.round((now - alert.since) / 60_000)), bots.map((b) => b.name))]
         : alert.kind === "signed_out"
           ? [ALERT_TEXT.signedOutTitle(machine.name, cli), ALERT_TEXT.signedOut(machine.name, cli, p.level === "owner")]
-          : [ALERT_TEXT.diskTitle(machine.name), ALERT_TEXT.disk(machine.name, alert.freeBytes ?? 0)];
+          : alert.kind === "github"
+            ? [ALERT_TEXT.githubTitle(machine.name), ALERT_TEXT.github(machine.name, machine.owner_id !== null)]
+            : [ALERT_TEXT.diskTitle(machine.name), ALERT_TEXT.disk(machine.name, alert.freeBytes ?? 0)];
     try {
       const groupId = await findOrCreateDm(env, (w) => waitUntil?.(w), { memberId: speaker.id }, p.id);
       const sent = unwrap(

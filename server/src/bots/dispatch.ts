@@ -1,6 +1,7 @@
 // Pure rules of the bots feature: machine choice, health gating, approval answers, prompt and
 // progress text. No I/O here, so the rules are easy to test.
 import type { BotRunner, CliInfo, Health, Machine, MachineInfo } from "@chat/protocol";
+import type { GithubState } from "../monitor/alerts";
 import { REFS_RULE } from "./refs";
 
 /** Lease the server gives each run; heartbeats and run frames renew it. */
@@ -328,6 +329,11 @@ export interface MachineView {
   signedOut?: string[];
   /** 模 3.4: runtimes at their subscription limit (`MachineLink.status`); they take no runs until then. */
   limited?: { runtime: string; until: number; known: boolean }[];
+  /**
+   * design-github-identity 3.6: the computer's GitHub sign-in as people may see it
+   * (`loadMachineViews`): any state when it runs tasks in VMs, else only `signed_in`.
+   */
+  github?: GithubState;
 }
 
 export function mergeLabels(owner: string[], daemon: string[] | undefined): string[] {
@@ -548,6 +554,7 @@ export function toMachine(m: MachineView, createdBy: string, createdAt: number, 
   }
   if (m.health) out.health = m.health;
   if (m.clis) out.clis = m.clis;
+  if (m.github) out.github = m.github;
   return out;
 }
 
