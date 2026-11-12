@@ -322,6 +322,14 @@ AddArtifactVersionRequest += { parentVersion?: number }
 - `delegation.not_for_requester` 没做：个人电脑只接主人的活（design-roles R4）还没合并，那时在 `takeDelegation` 里加。
 - 旧的 `delegation:` meta、旧的 `reportPart`：部署那一刻还没交回的分出去的结果不再交回（旧链没有步）。
 
+**R6 实现时更正**（2026-11-12）：
+
+- 交接卡、「全部停止」由服务端的 Card v2 画（`delegate_card.ts`，R2），桌面端不加代码；文案在服务端，只补进 PRODUCT.md 的允许词。桌面端仍接了 `chains/:id/stop`（`ChatProvider::stop_chain`），卡片按钮走 desk 不用它。
+- 条上「等 {name} 的电脑上线」没做：`TopicRelay` 里没有电脑状态，要读当前步 run 的排队原因，那是线 3 / 运行状态那边的事；条上这一步照样显示「排队」或「在做」。
+- 停住的一步在条上标「停止了」（封闭集之外加的一个词，和「{name} 停止了」同义），未知状态也按它显示。
+- 发送被拒：chat-core 的 `SendFailure` 多带 `reason`、`member_ids`，桌面端按话题记住最后一次 `relay.*` 被拒，直到这个话题里再发出去、重试或丢弃那条消息；未知的 `relay.*` 原因不另写字，只靠消息本身的「没发出去」。
+- 详情栏「成员」没有参与成员时空行改成「还没有成员在做」（不再说「负责」），「交给…」「指派」照旧改跟进对象。
+
 和别的线的关系：线 1（路由、读取命令、请求渲染）是 R1 的前提；线 2（会话续接、分支）、线 3（结构化汇报、离线排队、交接失败的那一句话）、线 13（管理员、个人电脑只接主人的活）、GitHub 身份没合并前：续接用新会话；结束状态按现在的 run 状态算（成功 → done，失败 → failed）；离线按现在的排队；那一句话先不发；`not_for_requester` 跳过；管理员用 owner。
 
 ## 7. 真电脑上的验收步骤

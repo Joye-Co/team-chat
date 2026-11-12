@@ -479,10 +479,31 @@ export async function seed(o: SeedOptions): Promise<Json> {
     await topic("jojo", jojoDm.id, "今天的待办", "早上好！今天有 3 件事等你：PR #61、v2.14 上线和一条微博文案。");
     const xwDm = (await (await as("xiaowang")).http.dm(ids.joye)).group;
     await topic("xiaowang", xwDm.id, "搜索高亮", "Joye，高亮那块我下午看。");
-    log("topics: 15");
+
+    // 开发 / 设置页深色模式: an order a person wrote (按顺序做, design-relay §3.6): Forge writes,
+    // Scout checks, Forge finishes. The server reads the arrows and moves the order on; a server
+    // that refuses the order (a member cannot take it there) gets the same work as one request.
+    try {
+      await topic("joye", dev, "设置页深色模式", "@Forge 写 → @Scout 审 → @Forge 按意见改\n给设置页加深色模式", ["forge", "scout"]);
+    } catch (e) {
+      log(`order refused (${e instanceof Error ? e.message.slice(0, 80) : "error"}), sent as one request`);
+      await topic("joye", dev, "设置页深色模式", "@Forge 给设置页加深色模式，做完请 @Scout 审一下", ["forge", "scout"]);
+    }
+    log("topics: 16");
 
     const machineId = await seedMachine(o, owner, ids, { dev, growth });
-    const out = { url, members: ids, groups: { all, dev, ops, growth }, machineId, seededAt: Date.now() };
+    // 电脑 with ownership (design-roles 3.3): 小王 (a 普通成员) adds his own computer, and his
+    // work for Forge runs there in his code folder. It never connects: it shows offline.
+    const own = await call<{ machine: { id: string } }>(url, "POST", "/v1/machines", {
+      token: tokens.xiaowang,
+      body: { name: "小王的 MacBook", labels: ["mac"], personal: true },
+    });
+    await call(url, "PUT", `/v1/machines/${own.machine.id}/bots/${ids.forge}`, {
+      token: tokens.xiaowang,
+      body: { repoPath: "~/code/qqbot" },
+    });
+    log("personal computer: 小王的 MacBook");
+    const out ={ url, members: ids, groups: { all, dev, ops, growth }, machineId, seededAt: Date.now() };
     writeFileSync(join(o.out, "seed.json"), `${JSON.stringify(out, null, 2)}\n`);
     return out;
   } finally {

@@ -8,7 +8,7 @@ import { unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
 import { effectivePolicy } from "../../settings/approvals";
 import { policyPrompt, runGates } from "../../settings/rules";
-import { CONTEXT_CHARS, LEASE_MS, MAX_RUN_MS, type MachineView, type NoMachine, TEXT, asideRuntime, buildAsidePrompt, buildPrompt, buildResumePrompt, cut, gatesRuntime, hasFeature, hasRuntime, pickMachine, resumesRuntime, whyNoMachine } from "../dispatch";
+import { CONTEXT_CHARS, LEASE_MS, LIMIT_SLACK_MS, MAX_RUN_MS, type MachineView, type NoMachine, TEXT, asideRuntime, cliName, clockText, buildAsidePrompt, buildPrompt, buildResumePrompt, cut, gatesRuntime, hasFeature, hasRuntime, pickMachine, resumesRuntime, whyNoMachine } from "../dispatch";
 import { type ContextRow, type Selection, requestAuthors, requestText, selectLines, withSummary } from "../../context/render";
 import { teamZone } from "../../memory/consolidate";
 import { type Brief, briefText, isNewTask } from "../../agent/frontdesk";
@@ -18,10 +18,13 @@ import { refsText } from "../refs";
 import { EXECUTOR_MEMORY_BYTES, memoryIndex } from "../../memory/inject";
 import { groupMembers, membersText } from "../../context/read";
 import { loadMachines, loadRunner } from "../store";
+import { ANONYMOUS_ID } from "../../cards2/privacy";
+import { githubFor } from "../../github/assign";
+import { supersedeWaits } from "../../github/machine";
 import { DeskCore, QUEUED, type RunRow } from "./core";
 import { takeoverOf } from "./hold";
 import { type FailureNote, failureNote } from "./failure";
-import { type LoggedFrame, type RecoveryFacts, outwardAction, recoveryNote, stepOf } from "../../agent/recovery";
+import { LIMIT_NOTE, LIMIT_REACHED, type LoggedFrame, type RecoveryFacts, outwardAction, recoveryNote, stepOf } from "../../agent/recovery";
 import type { RunProof } from "../proof";
 import { needsReply, reportOf } from "./report";
 
@@ -105,13 +108,15 @@ export abstract class DeskRuns extends DeskCore {
     // 接 1.5: a request next to a running one in a chat area is its own piece of work.
     const alongside = isMainTopicId(m.topicId) && this.activeRun(m.topicId) !== undefined;
 
+    const requestedFor = await this.requestedFor(m, followUpOf, retryOf);
+    if (this.startBlocked(m.topicId)) return; // Raced with another message.
     const now = Date.now();
     const runId = ulid(now);
     // A side chat topic (单独问) gets a read-only run that answers only the asker.
     const kind = claim.contextOf ? RUN_KIND_ASIDE : null;
     this.sql.exec(
-      `INSERT INTO runs (id, group_id, topic_id, status, requested_by, trigger_message_id, created_at, updated_at, last_event_at, follow_up_of, kind, retry_of)
-       VALUES (?, ?, ?, 'created', ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO runs (id, group_id, topic_id, status, requested_by, trigger_message_id, created_at, updated_at, last_event_at, follow_up_of, kind, retry_of, requested_for)
+       VALUES (?, ?, ?, 'created', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       runId,
       m.groupId,
       m.topicId,
@@ -123,6 +128,7 @@ export abstract class DeskRuns extends DeskCore {
       followUpOf?.id ?? null,
       kind,
       retryOf ?? null,
+      requestedFor,
     );
     // Run context: in the 群聊 only a follow-up, or a request that quotes this bot, continues
     // the bot's last session; any other request is a new piece of work. 接 3.2: in a DM's chat
@@ -152,6 +158,8 @@ export abstract class DeskRuns extends DeskCore {
         )
           .bind(runId, botId, m.groupId, m.topicId, now)
           .run();
+        // A new run of this member in a topic answers the GitHub waits of its earlier ones there.
+        if (!isMainTopicId(m.topicId)) await supersedeWaits(this.env, botId, m.topicId).catch((err) => this.log.warn("github waits cleanup failed", { runId, err }));
         // Answers and live events start runs too: a card answer acknowledges on the answered card,
         // other synthetic keys get no reaction.
         if (m.ackMessageId) await this.ack(r, m.ackMessageId);
@@ -165,7 +173,8 @@ export abstract class DeskRuns extends DeskCore {
         // Every machine that could take it is busy, or (机 2.2) offline: the run waits (排队)
         // instead of failing, and starts by itself when one is free or online again.
         const none = machine ? null : this.whyNone(r, runner, machines);
-        const waits = none !== null && (none.why === "busy" || (none.why === "offline" && !kind));
+        // 模 3.4: so does a run whose computers are at their subscription limit, until the reset.
+        const waits = none !== null && (none.why === "busy" || ((none.why === "offline" || none.why === "limit") && !kind));
         if (!machine && !waits) {
           // 模 3.1: the computers' CLI is not signed in: the topic says which, and who signs in.
           if (!kind && none?.why === "signed_out") {
@@ -191,7 +200,8 @@ export abstract class DeskRuns extends DeskCore {
           const note = retryOf ? await this.recoveryNoteOf(retryOf, how?.why ?? "restarted") : null;
           if (note) {
             p.prompt = `${p.prompt}\n\n${note}`;
-            if (p.resume) p.resume.prompt = `${p.resume.prompt}\n\n${note}`;
+            // 模 3.4: the session that stopped at the limit goes on with a short note.
+            if (p.resume) p.resume.prompt = `${p.resume.prompt}\n\n${how?.why === LIMIT_REACHED ? LIMIT_NOTE : note}`;
           }
           prompt = p.prompt;
           this.storeContext(r.id, p);
@@ -206,9 +216,12 @@ export abstract class DeskRuns extends DeskCore {
           this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `prompt:${r.id}`, prompt);
           r.queued_at = Date.now();
           this.sql.exec("UPDATE runs SET queued_at = ? WHERE id = ?", r.queued_at, r.id);
+          if (none?.why === "limit") this.keepLimit(r, none.until);
           await this.setStatus(r, "created");
           // Waiting for a machine to come online: the topic says which one.
           if (none?.why === "offline") await this.note(r, TEXT.waitOffline(none.names)).catch((err) => this.log.warn("wait note failed", { runId, err }));
+          // Waiting for the limit to reset: the topic says until when.
+          if (none?.why === "limit") await this.limitNote(r, runner.runtime, none);
           await this.scheduleStall();
           return;
         }
@@ -222,6 +235,21 @@ export abstract class DeskRuns extends DeskCore {
       }
       await this.scheduleStall();
     });
+  }
+
+  /**
+   * The person a new run works for (protocol "Who a run works for"): what the starter says
+   * (`m.requestedFor`), else a retry's original run's, else the author when a person; a follow-up
+   * whose author is nobody (a private answer as input) keeps its run's.
+   */
+  protected async requestedFor(m: TopicMessage, followUpOf?: RunRow, retryOf?: string): Promise<string | null> {
+    if (m.requestedFor !== undefined) return m.requestedFor;
+    const retried = retryOf ? this.run(retryOf) : undefined;
+    if (retried?.requested_for) return retried.requested_for;
+    const author =
+      m.authorId === ANONYMOUS_ID ? null : await this.env.DB.prepare("SELECT kind FROM members WHERE id = ?").bind(m.authorId).first<{ kind: string }>();
+    if (author?.kind === "human") return m.authorId;
+    return followUpOf?.requested_for ?? null;
   }
 
   /**
@@ -365,6 +393,23 @@ export abstract class DeskRuns extends DeskCore {
     return failureNote(this.env, { kind: "signed_out", machines: on, runtime, requesterId: r.requested_by, groupId: r.group_id, started: false });
   }
 
+  /** 模 3.4: keeps when the run's subscription limit resets (the run waits for it). */
+  protected keepLimit(r: RunRow, until: number | null): void {
+    if (r.limit_until === until) return;
+    r.limit_until = until;
+    this.sql.exec("UPDATE runs SET limit_until = ? WHERE id = ?", until, r.id);
+  }
+
+  /** 模 3.4: the topic says the run waits for the limit, until when (team clock), or when it tries again. Never throws. */
+  protected async limitNote(r: RunRow, runtime: string, none: Extract<NoMachine, { why: "limit" }>): Promise<void> {
+    const now = Date.now();
+    const cli = cliName(none.machines.map((m) => m.clis?.find((c) => c.runtime === runtime)?.kind).find((k) => k !== undefined), runtime);
+    const text = none.known
+      ? TEXT.waitLimit(cli, clockText(none.until - LIMIT_SLACK_MS, now, teamZone(this.env)), r.retry_of !== null)
+      : TEXT.waitLimitRetry(cli, Math.max(1, Math.round((none.until - now) / 60_000)));
+    await this.note(r, text).catch((err) => this.log.warn("limit note failed", { runId: r.id, err }));
+  }
+
   protected noMachineText(none: NoMachine | null): string {
     if (none?.why === "runtime") return TEXT.noRuntime;
     if (none?.why === "disk") return TEXT.noDisk;
@@ -397,13 +442,28 @@ export abstract class DeskRuns extends DeskCore {
             await this.end(r, "failed", note.text, "blocked", cut(note.text, 280), false, note.mentions);
             return false;
           }
+          // 模 3.4: its computers are at their limit: it waits for the reset (the topic hears
+          // once, when the wait starts), and later runs that can go elsewhere still do.
+          if (none.why === "limit") {
+            const first = r.limit_until === null;
+            this.keepLimit(r, none.until);
+            if (first) {
+              await this.setStatus(r, "created");
+              await this.limitNote(r, runner.runtime, none);
+            }
+            return false;
+          }
         }
         if (!machine || prompt === null) return null;
         if (await this.budgetGate(r, prompt)) return false;
         await this.assign(r, runner, machine, prompt);
         this.sql.exec("UPDATE runs SET queued_at = NULL WHERE id = ?", id);
         r.queued_at = null;
+        // 模 3.4: the limit reset: the run goes on, and the topic says so.
+        const afterLimit = r.limit_until !== null;
+        this.keepLimit(r, null);
         await this.setStatus(r, "created");
+        if (afterLimit) await this.note(r, TEXT.limitBack(r.retry_of !== null)).catch((err) => this.log.warn("limit back note failed", { runId: id, err }));
         return true;
       });
       if (placed === null) break; // No free machine: the rest keep waiting in order.
@@ -673,12 +733,15 @@ export abstract class DeskRuns extends DeskCore {
     const resumePrompt = frame.resumeSessionId ? this.meta(`prompt_resume:${r.id}`) : null;
     if (resumePrompt !== null) frame.prompt = resumePrompt;
     this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `sent:${r.id}`, resumePrompt !== null ? "resume" : "full");
+    // Whose GitHub the run uses on this machine (design-github-identity 3.2); never the token.
+    const github = r.kind === RUN_KIND_ASIDE ? null : await githubFor(this.env, { requestedFor: r.requested_for, requestedBy: r.requested_by, botId: this.botId as string }, machine);
+    if (github) frame.github = github.github;
     // design-takeover 3.6: how a person can take over the run on this machine.
     r.takeover = takeoverOf(machine);
     this.sql.exec("UPDATE runs SET machine_id = ?, runtime = ?, takeover = ? WHERE id = ?", machine.id, runner.runtime, r.takeover, r.id);
     r.machine_id = machine.id;
     r.runtime = runner.runtime;
-    await this.env.DB.prepare("UPDATE bot_runs SET machine_id = ? WHERE id = ?").bind(machine.id, r.id).run();
+    await this.env.DB.prepare("UPDATE bot_runs SET machine_id = ?, github_member_id = ? WHERE id = ?").bind(machine.id, github?.memberId ?? null, r.id).run();
     this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `prompt:${r.id}`, prompt);
     await linkStub(this.env, machine.id).assign(machine.id, this.botId as string, frame);
   }

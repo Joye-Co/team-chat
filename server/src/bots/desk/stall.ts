@@ -11,6 +11,9 @@ import { ACTIVE, QUEUE_MAX_MS, QUEUE_RETRY_MS, QUEUED, type RunRow, START_STUCK_
 import { DeskEvents } from "./events";
 import type { Restart } from "./runs";
 
+/** When a queued run's wait counts from: when it was queued, or the reset of the limit it waits for (模 3.4). */
+const QUEUE_FROM = "max(queued_at, coalesce(limit_until, 0))";
+
 /** A run that waits for its machine (盯 1.1) is not silent: no nudge, no stall. */
 const PRESENT = "away_since IS NULL";
 
@@ -35,8 +38,9 @@ export abstract class DeskStall extends DeskEvents {
         `SELECT min(created_at) AS at FROM runs WHERE ${ACTIVE} AND external = 0 AND status = 'created' AND machine_id IS NULL AND queued_at IS NULL`,
       )
       .one().at;
-    // Queued runs (排队): try again soon, and fail the ones that waited too long.
-    const queued = this.sql.exec<{ at: number | null }>(`SELECT min(queued_at) AS at FROM runs WHERE ${QUEUED}`).one().at;
+    // Queued runs (排队): try again soon, and fail the ones that waited too long (模 3.4: a run
+    // waiting for a subscription limit counts from the reset).
+    const queued = this.sql.exec<{ at: number | null }>(`SELECT min(${QUEUE_FROM}) AS at FROM runs WHERE ${QUEUED}`).one().at;
     const retry = queued === null ? null : Math.min(Date.now() + QUEUE_RETRY_MS, queued + QUEUE_MAX_MS);
     // 盯活: the nudge comes before the stall, and running runs (and runs waiting for their
     // machine) are checked every minute for a machine that went away or came back.
@@ -88,7 +92,7 @@ export abstract class DeskStall extends DeskEvents {
         await this.end(r, "failed", TEXT.failed(""), "blocked", TEXT.failed(""));
       });
     }
-    const expired = this.sql.exec<{ id: string }>(`SELECT id FROM runs WHERE ${QUEUED} AND queued_at <= ?`, now - QUEUE_MAX_MS).toArray();
+    const expired = this.sql.exec<{ id: string }>(`SELECT id FROM runs WHERE ${QUEUED} AND ${QUEUE_FROM} <= ?`, now - QUEUE_MAX_MS).toArray();
     if (expired.length > 0) {
       // 机 2.10: say what it waited for (a computer that stayed offline, or a free one).
       const runner = await loadRunner(this.env.DB, this.botId as string);
@@ -258,11 +262,15 @@ export abstract class DeskStall extends DeskEvents {
   /** The CLI ended with a promise and no tool call: a follow-up run continues the session. */
   protected async continuePromise(r: RunRow, result: string): Promise<boolean> {
     if (r.kind === RUN_KIND_ASIDE || !isPromiseOnly(result, r.tool_calls) || r.auto_continues >= MAX_AUTO_CONTINUE) return false;
+    // A run that stopped to wait for someone's GitHub goes on when they connect, not now.
+    if (this.githubWaitingOn(r.id) !== null) return false;
+    // Something already went on with it (a GitHub resume started when the run ended).
+    if (this.sql.exec("SELECT 1 FROM runs WHERE follow_up_of = ? LIMIT 1", r.id).toArray().length > 0) return false;
     if (this.startBlocked(r.topic_id)) return false;
     const key = `continue:${ulid()}`;
     try {
       await this.start(
-        { groupId: r.group_id, topicId: r.topic_id, messageId: key, authorId: r.requested_by, body: CONTINUE_TEXT, mentioned: true },
+        { groupId: r.group_id, topicId: r.topic_id, messageId: key, authorId: r.requested_by, body: CONTINUE_TEXT, mentioned: true, ...(r.requested_for ? { requestedFor: r.requested_for } : {}) },
         r,
       );
     } catch (err) {

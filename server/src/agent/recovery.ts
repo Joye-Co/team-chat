@@ -7,6 +7,13 @@ import { cut } from "../bots/dispatch";
 
 /** `run.done.error` of a run the daemon found unfinished when it started (machine-protocol.md, "Daemon restart"). */
 export const DAEMON_RESTARTED = "daemon restarted";
+/** 模 3.4: why a run that hit its subscription limit goes on after the reset (restart `why`). */
+export const LIMIT_REACHED = "subscription limit";
+/** Runs in a row a piece of work waits for the limit; then it fails, saying so. */
+export const MAX_LIMIT_WAITS = 10;
+/** The short note a resumed session gets when the limit has reset (not the recovery note). */
+export const LIMIT_NOTE =
+  "[team-chat] Written automatically (not a message from a person): the subscription's usage limit stopped your last turn, and it has reset now. Continue the work from where you stopped; do not start it over.";
 /** A run is resumed after a daemon restart at most this often in a row; then it fails with the reason. */
 export const MAX_DAEMON_RESUMES = 3;
 /** Steps (tool calls) the note lists, newest last. */

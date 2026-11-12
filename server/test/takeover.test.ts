@@ -118,6 +118,8 @@ describe("phaseOf (design-takeover 3.1)", () => {
 
   it("give waiting_computer for a queue, an away machine and a run being prepared", () => {
     expect(phaseOf({ ...ROW, status: "created", machine_id: null, queued_at: 1 })).toEqual({ phase: "waiting_computer", waitingFor: "queue" });
+    // 模 3.4: queued for its computer's subscription limit to reset.
+    expect(phaseOf({ ...ROW, status: "created", machine_id: null, queued_at: 1, limit_until: 2 })).toEqual({ phase: "waiting_computer", waitingFor: "limit" });
     expect(phaseOf({ ...ROW, away_since: 1 })).toEqual({ phase: "waiting_computer", waitingFor: "offline" });
     expect(phaseOf({ ...ROW, status: "created" })).toEqual({ phase: "waiting_computer", waitingFor: "booting" });
   });

@@ -14,6 +14,8 @@ export interface PhaseRow {
   hold_kind?: string | null;
   away_since: number | null;
   queued_at: number | null;
+  /** A queued run waiting for its computer's subscription limit to reset (模 3.4); absent on old rows. */
+  limit_until?: number | null;
   machine_id: string | null;
   approval_id: string | null;
 }
@@ -51,7 +53,9 @@ export function phaseOf(r: PhaseRow, ctx: PhaseContext = {}): RunPhase {
     return r.away_since !== null ? { phase, waitingFor: "offline" } : { phase };
   }
   // 2.2 Waits for a computer: in the queue, its computer went away, or it is being prepared.
-  if (r.status === "created" && r.machine_id === null && r.queued_at !== null) return { phase: "waiting_computer", waitingFor: "queue" };
+  if (r.status === "created" && r.machine_id === null && r.queued_at !== null) {
+    return { phase: "waiting_computer", waitingFor: r.limit_until !== null && r.limit_until !== undefined ? "limit" : "queue" };
+  }
   if (r.away_since !== null) return { phase: "waiting_computer", waitingFor: "offline" };
   if (r.status === "created" && r.machine_id !== null) return { phase: "waiting_computer", waitingFor: "booting" };
   // 2.3 A step waits for approval.

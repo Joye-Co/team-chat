@@ -177,7 +177,8 @@ pub struct Topic {
     pub status: TopicStatus,
     /// Who the topic waits on (drives the status chip and 待办).
     pub waiting_on: Vec<MemberId>,
-    /// The one responsible member, when set.
+    /// Who a follow-up without an @ goes to (the AI member that last started a run here).
+    /// Routing only: the interface shows [`Topic::participants`], never a responsible member.
     pub owner_id: Option<MemberId>,
     pub created_by: MemberId,
     pub created_at: Millis,
@@ -188,6 +189,31 @@ pub struct Topic {
     /// Unread messages in this topic for me (read positions are per topic).
     pub unread: u32,
     pub mentions: u32,
+    /// Usable: the AI members that ran here, each at work or not (`Topic.participants`).
+    pub participants: Vec<TopicParticipant>,
+    /// Usable: the topic's latest 按顺序做 (`Topic.relay`).
+    pub relay: Option<TopicRelay>,
+}
+
+pub use chat_core::proto::{TopicParticipant, TopicRelay, TopicRelayStep};
+
+/// Usable: the server refused a message as 按顺序做 (`relay.*` reasons of `send`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RelayRefusal {
+    /// `relay.member_unavailable`, `relay.running`, `relay.bad_steps` or a newer one.
+    pub reason: String,
+    /// The members who cannot take it (`ErrorBody.memberIds`).
+    pub member_ids: Vec<MemberId>,
+}
+
+impl Topic {
+    /// The AI members at work here now, in the order they last started.
+    pub fn working_members(&self) -> Vec<&str> {
+        let mut at: Vec<&TopicParticipant> =
+            self.participants.iter().filter(|p| p.working).collect();
+        at.sort_by_key(|p| p.last_run_at);
+        at.into_iter().map(|p| p.member_id.as_str()).collect()
+    }
 }
 
 /// Delivery state of a message I wrote.
@@ -668,6 +694,8 @@ pub fn topic_or_chat(p: &dyn ChatProvider, group_id: &str, topic_id: &str) -> Op
         message_count: 0,
         unread: 0,
         mentions: 0,
+        participants: Vec::new(),
+        relay: None,
     })
 }
 
@@ -1287,9 +1315,68 @@ pub struct MachineInfo {
     pub runtimes: Vec<String>,
     /// What each available runtime reports it can run (feature "effort").
     pub clis: Vec<CliChoice>,
+    /// Usable: the person whose own computer this is (个人的电脑); `None` = the team's.
+    pub owner_id: Option<String>,
+    /// Usable, on my own computer only: the AI members whose work for me runs here, each with
+    /// my code folder there.
+    pub personal_bots: Vec<PersonalBot>,
     /// Usable: its daemon has feature `github` (runs can use a connected GitHub); `None` =
     /// not told (the server tells owners only).
     pub github: Option<bool>,
+}
+
+/// An AI member whose work for the computer's owner runs on that computer.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PersonalBot {
+    pub bot_id: String,
+    /// The owner's code folder on that computer.
+    pub repo_path: Option<String>,
+}
+
+/// Whose a computer is, as the viewer sees it (design-roles 3.3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ownership {
+    /// One of the team's computers.
+    Team,
+    /// My own computer.
+    Mine,
+    /// Somebody else's own computer.
+    Theirs,
+}
+
+/// Whether the server sends a personal computer only its owner's work (design-roles R4:
+/// `personalOnly` and `reachable` in `server/src/bots/dispatch.ts`). Until it does, every
+/// computer takes any AI member's work it matches, whoever it belongs to, and runs it with the
+/// owner's permissions and CLI settings. So members do not register their own computers, the
+/// owner's checked AI members are not offered, and no text promises "only what you ask". The
+/// PR that lands R4 turns this on (design-roles §6).
+pub const OWNERSHIP_DISPATCH: bool = false;
+
+/// Whether I may add computers (添加电脑, 用这台电脑): an admin always; every member once a
+/// personal computer takes only its owner's work ([`OWNERSHIP_DISPATCH`]).
+pub fn may_add_computers(admin: bool) -> bool {
+    admin || OWNERSHIP_DISPATCH
+}
+
+impl MachineInfo {
+    /// Whose this computer is for `me`.
+    pub fn ownership(&self, me: Option<&str>) -> Ownership {
+        match self.owner_id.as_deref() {
+            None => Ownership::Team,
+            Some(o) if Some(o) == me => Ownership::Mine,
+            Some(_) => Ownership::Theirs,
+        }
+    }
+
+    /// True when `me` may rename, remove and set this computer up: a team computer needs an
+    /// admin (`admin`), my own computer only me (design-roles 3.5). The server checks again.
+    pub fn manageable(&self, me: Option<&str>, admin: bool) -> bool {
+        match self.ownership(me) {
+            Ownership::Team => admin,
+            Ownership::Mine => true,
+            Ownership::Theirs => false,
+        }
+    }
 }
 
 /// The models and 思考强度 one runtime of a computer offers.
@@ -1331,11 +1418,13 @@ pub enum ThisMac {
 pub struct MachineCreated {
     pub machine: MachineInfo,
     pub credential: SecretText,
-    /// Shell lines that install the machine service with this credential on a Mac or a
-    /// Linux computer.
+    /// Shell lines that install the machine service with this credential on a Mac (from the
+    /// installed app).
     pub install_command: SecretText,
     /// The same for a Windows computer: PowerShell lines.
     pub install_command_windows: SecretText,
+    /// The same for a Linux computer: it downloads the released daemon from the server.
+    pub install_command_linux: SecretText,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1805,6 +1894,26 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn run_stopping(&self, _run_id: &str) -> bool {
         false
     }
+    /// Usable: stops 按顺序做 `relay_id` of a 话题 and the run of its current step
+    /// (`POST /v1/groups/:id/relays/:relayId/stop`; any person in the 群).
+    fn stop_relay(&self, _group_id: &str, _topic_id: &str, _relay_id: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Usable: starts a paused 按顺序做 again from the step it stopped at
+    /// (`POST /v1/groups/:id/relays/:relayId/retry`).
+    fn retry_relay(&self, _group_id: &str, _topic_id: &str, _relay_id: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Usable: stops a chain of hand-overs and every run in it (全部停止,
+    /// `POST /v1/groups/:id/chains/:chainId/stop`).
+    fn stop_chain(&self, _group_id: &str, _chain_id: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Usable: why the server refused my newest message in this 话题 as 按顺序做, until I
+    /// send, retry or discard there again. Cheap.
+    fn relay_refusal(&self, _group_id: &str, _topic_id: &str) -> Option<RelayRefusal> {
+        None
+    }
     /// Saves the raw session of a run (owners only) into `dir`.
     fn download_run_session(&self, _run_id: &str, _dir: PathBuf) -> SessionDownload {
         let (tx, rx) = futures::channel::oneshot::channel();
@@ -1999,6 +2108,47 @@ pub trait ChatProvider: Send + Sync + 'static {
     }
     /// Owner: registers a machine.
     fn create_machine(&self, _name: String, _labels: Vec<String>) -> AdminReply<MachineCreated> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Usable: registers a computer as mine (`personal: Some(true)`), the team's
+    /// (`Some(false)`, admins), or as the server decides (`None`: the team's for an admin).
+    fn create_machine_as(
+        &self,
+        name: String,
+        labels: Vec<String>,
+        _personal: Option<bool>,
+    ) -> AdminReply<MachineCreated> {
+        self.create_machine(name, labels)
+    }
+    /// Usable: renames a computer (a team one: admins; my own: me).
+    fn rename_machine(&self, _machine_id: &str, _name: String) -> AdminReply<MachineInfo> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Usable: 改成我的电脑 (`mine`, an admin) or 交给团队 (an admin who owns it).
+    fn set_machine_owner(&self, _machine_id: &str, _mine: bool) -> AdminReply<MachineInfo> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Usable: removes a computer from the team (a team one: admins; my own: me).
+    fn remove_machine(&self, _machine_id: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Usable, my own computer: my work for AI member `bot_id` runs there, in `repo_path`
+    /// (`None`: no code folder of mine there).
+    fn set_machine_bot(
+        &self,
+        _machine_id: &str,
+        _bot_id: &str,
+        _repo_path: Option<String>,
+    ) -> AdminReply<MachineInfo> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Usable, my own computer: my work for `bot_id` no longer runs there.
+    fn unset_machine_bot(&self, _machine_id: &str, _bot_id: &str) -> AdminReply<MachineInfo> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// 不再用这台电脑 (机 1.6): removes this computer from the team, then its background
+    /// service and its registration files.
+    fn stop_using_this_computer(&self) -> AdminReply<()> {
         reply_now(Err(AdminError::Unsupported))
     }
     /// Whether this Mac runs the app's own daemon (read from disk, fast).

@@ -34,6 +34,8 @@ export interface DelegateIn {
   groupId: string;
   topicId: string;
   requesterId: string;
+  /** The person the work is for (the giving run's `requested_for`); absent from an older desk. */
+  requestedFor?: string | null;
   brief: Brief;
   fromBotId: string;
   kind: "handoff" | "assign";
@@ -111,7 +113,7 @@ export abstract class DeskDelegate extends DeskFront {
         lastWords: lastWords(r.progress_text),
         code: this.codeOfWork(r),
       });
-      runId = await this.handOver(target, { groupId: r.group_id, topicId, requesterId: r.requested_by, brief, fromBotId: botId, kind, chain: step, workOrder });
+      runId = await this.handOver(target, { groupId: r.group_id, topicId, requesterId: r.requested_by, requestedFor: r.requested_for ?? undefined, brief, fromBotId: botId, kind, chain: step, workOrder });
       if (!runId) throw new ApiError("conflict", "that member did not start the work", "delegation.refused");
     } catch (err) {
       // Refused: the room drops the step, the count and the routing owner stay as they were.
@@ -243,6 +245,7 @@ export abstract class DeskDelegate extends DeskFront {
     // The run's step is known before it starts, so its first report already names it.
     this.putMeta(`chainFor:${key}`, JSON.stringify(d.chain));
     const m: TopicMessage = { groupId: d.groupId, topicId: d.topicId, messageId: key, authorId: d.requesterId, body: d.workOrder, mentioned: true };
+    if (d.requestedFor !== undefined) m.requestedFor = d.requestedFor;
     await this.start(m);
     const run = this.sql.exec<{ id: string }>("SELECT id FROM runs WHERE trigger_message_id = ?", key).toArray()[0];
     if (!run) {

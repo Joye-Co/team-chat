@@ -235,6 +235,8 @@ pub enum AttentionKind {
     Budget,
     /// 总览: an invite about to end.
     Invite,
+    /// 模 3.3: a CLI's subscription near or at its limit (the machine's sign-in, shared).
+    Limit,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -243,6 +245,47 @@ pub struct Attention {
     pub title: String,
     pub meta: String,
     pub tone: Tone,
+}
+
+/// A subscription window this full is near its limit (模 3.3).
+pub const NEAR_LIMIT_PCT: f64 = 90.0;
+
+/// 模 3.3: one 要注意 row for a signed-in CLI whose fullest usage window is near or at its limit;
+/// nothing is held back by it (a run that hits the limit waits for the reset by itself).
+fn near_limit(
+    c: &chat_core::proto::monitor::MonitorCli,
+    time: &dyn Fn(u64) -> String,
+) -> Option<Attention> {
+    if !c.available || c.login == login_state::LOGGED_OUT {
+        return None;
+    }
+    let w = c
+        .usage
+        .as_deref()?
+        .iter()
+        .filter(|w| w.used_pct.is_finite())
+        .max_by(|a, b| a.used_pct.total_cmp(&b.used_pct))?;
+    if w.used_pct < NEAR_LIMIT_PCT {
+        return None;
+    }
+    let cli = cli_name(&c.kind, &c.runtime);
+    let full = w.used_pct >= 100.0;
+    let title = if full {
+        fill(m::ATT_LIMIT_FULL, &[("cli", &cli)])
+    } else {
+        let pct = (w.used_pct.floor() as u32).to_string();
+        fill(m::ATT_LIMIT_NEAR, &[("cli", &cli), ("pct", &pct)])
+    };
+    let meta = match w.resets_at {
+        Some(at) => fill(m::ATT_LIMIT_META, &[("time", &time(at))]),
+        None => m::ATT_LIMIT_META_NONE.into(),
+    };
+    Some(Attention {
+        kind: AttentionKind::Limit,
+        title,
+        meta,
+        tone: if full { Tone::Bad } else { Tone::Warn },
+    })
 }
 
 /// The 要注意 list, the most urgent first. `name` gives a member's name.
@@ -294,6 +337,11 @@ pub fn attention(
                 },
                 tone: Tone::Warn,
             });
+        }
+    }
+    for c in &d.clis {
+        if let Some(a) = near_limit(c, time) {
+            out.push(a);
         }
     }
     if d.queue.count > 0 {
@@ -641,6 +689,46 @@ mod tests {
         assert_eq!(list[0].meta, "Forge 2 个 · Ledger 1 个");
         assert_eq!(list[1].meta, "今天 2 个任务没跑成");
         assert_eq!(list[3].meta, "对一下十月的账单 · 10:31");
+    }
+
+    #[test]
+    fn attention_says_a_subscription_is_near_its_limit_once_per_cli() {
+        use chat_core::proto::machine::UsageWindow;
+        let win = |pct: f64, at: Option<u64>| UsageWindow {
+            kind: "session".into(),
+            label: None,
+            used_pct: pct,
+            resets_at: at,
+        };
+        let mut d = sample();
+        d.clis[0].usage = Some(vec![win(40.0, Some(1)), win(92.4, Some(7_000))]);
+        // Signed out: the sign-in row says enough.
+        d.clis[1].usage = Some(vec![win(100.0, None)]);
+        let list = attention(&d, 10_000, &names, &|t| format!("t{t}"));
+        let limits: Vec<&Attention> = list
+            .iter()
+            .filter(|a| a.kind == AttentionKind::Limit)
+            .collect();
+        assert_eq!(limits.len(), 1);
+        assert_eq!(limits[0].title, "Claude Code 的订阅额度用了 92%");
+        assert_eq!(limits[0].meta, "t7000 恢复；用完时新任务会等到恢复再做");
+        assert_eq!(limits[0].tone, Tone::Warn);
+        // Full, with no reset time; below 90 % says nothing.
+        d.clis[0].usage = Some(vec![win(100.0, None)]);
+        let list = attention(&d, 10_000, &names, &|_| String::new());
+        let full = list
+            .iter()
+            .find(|a| a.kind == AttentionKind::Limit)
+            .unwrap();
+        assert_eq!(full.title, "Claude Code 的订阅额度用完了");
+        assert_eq!(full.meta, "用完时新任务会等到恢复再做");
+        assert_eq!(full.tone, Tone::Bad);
+        d.clis[0].usage = Some(vec![win(89.9, Some(1))]);
+        assert!(
+            attention(&d, 10_000, &names, &|_| String::new())
+                .iter()
+                .all(|a| a.kind != AttentionKind::Limit)
+        );
     }
 
     #[test]

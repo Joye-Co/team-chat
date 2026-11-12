@@ -624,6 +624,108 @@ fn topic_updates_keep_v1_fields() {
     assert_eq!(t.waiting_on, Some(vec![ALICE.to_string()]));
 }
 
+fn relay(state: &str, updated_at: u64) -> TopicRelay {
+    TopicRelay {
+        id: "R1".into(),
+        started_by: ME.into(),
+        goal: "加深色模式".into(),
+        current: 1,
+        state: state.into(),
+        reason: None,
+        stopped_by: None,
+        updated_at,
+        steps: vec![
+            TopicRelayStep {
+                member_id: "B1".into(),
+                note: None,
+                state: "done".into(),
+                run_id: Some("RUN1".into()),
+            },
+            TopicRelayStep {
+                member_id: "B2".into(),
+                note: Some("审".into()),
+                state: "working".into(),
+                run_id: None,
+            },
+        ],
+    }
+}
+
+#[test]
+fn topic_updates_keep_participants_and_the_relay() {
+    let (_d, s) = open();
+    seed_topic(&s);
+    let who = vec![TopicParticipant {
+        member_id: "B1".into(),
+        working: true,
+        last_run_at: 5,
+    }];
+    let upd = |seq: u64, data: TopicUpdatedData| ev(seq, G1, ME, EventData::TopicUpdated(data));
+    s.apply_events(
+        G1,
+        &[upd(
+            3,
+            TopicUpdatedData {
+                topic_id: "T1".into(),
+                participants: Some(who.clone()),
+                relay: Some(Some(relay("running", 10))),
+                ..Default::default()
+            },
+        )],
+    )
+    .unwrap();
+    let t = s.topic("T1").unwrap().unwrap().topic;
+    assert_eq!(t.participants, Some(who.clone()));
+    assert_eq!(t.relay, Some(relay("running", 10)));
+    // An event without the fields keeps them; a null relay removes it.
+    s.apply_events(
+        G1,
+        &[upd(
+            4,
+            TopicUpdatedData {
+                topic_id: "T1".into(),
+                status: Some(TopicStatus::Done),
+                ..Default::default()
+            },
+        )],
+    )
+    .unwrap();
+    let t = s.topic("T1").unwrap().unwrap().topic;
+    assert_eq!(t.participants, Some(who.clone()));
+    assert!(t.relay.is_some());
+    s.apply_events(
+        G1,
+        &[upd(
+            5,
+            TopicUpdatedData {
+                topic_id: "T1".into(),
+                relay: Some(None),
+                ..Default::default()
+            },
+        )],
+    )
+    .unwrap();
+    let t = s.topic("T1").unwrap().unwrap().topic;
+    assert_eq!(t.relay, None);
+    assert_eq!(t.participants, Some(who));
+}
+
+#[test]
+fn a_route_answer_never_replaces_a_newer_relay() {
+    let (_d, s) = open();
+    seed_topic(&s);
+    assert!(s.store_topic_relay("T1", &relay("stopped", 20)).unwrap());
+    // An older answer of the same relay (the event came first) stays out.
+    assert!(!s.store_topic_relay("T1", &relay("running", 10)).unwrap());
+    let t = s.topic("T1").unwrap().unwrap().topic;
+    assert_eq!(t.relay.map(|r| r.state), Some("stopped".to_string()));
+    // Another relay replaces it.
+    let mut other = relay("running", 5);
+    other.id = "R2".into();
+    assert!(s.store_topic_relay("T1", &other).unwrap());
+    assert!(!s.store_topic_relay("T-missing", &other).unwrap());
+}
+
 #[test]
 fn per_topic_reads_do_not_clear_other_topics() {
     let (_d, s) = open();

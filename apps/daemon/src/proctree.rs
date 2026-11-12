@@ -427,36 +427,37 @@ mod tests {
         unsafe { libc::kill(pid, 0) == 0 }
     }
 
+    const STAND_IN: &str = "TC_PROCTREE_STAND_IN";
+
+    /// The tool of `orphans_are_found_by_the_run_marker`: with `TC_PROCTREE_STAND_IN` set it
+    /// runs for 30 s (the test kills it sooner); in a plain test run it returns at once.
+    #[test]
+    fn stand_in_tool() {
+        if std::env::var_os(STAND_IN).is_some() {
+            std::thread::sleep(std::time::Duration::from_secs(30));
+        }
+    }
+
     /// A tool that daemonized (its parent exited, so pid 1 is its parent) is found by the run's
     /// folder in its environment, and only for its own run.
     #[test]
     fn orphans_are_found_by_the_run_marker() {
         let dir = tempfile::tempdir().unwrap();
         let pidfile = dir.path().join("orphan.pid");
-        // macOS hides the environment of platform binaries (/bin/sleep): an ad-hoc signed copy
-        // stands for the tools a CLI starts (node, python, cargo).
-        let sleep = if cfg!(target_os = "macos") {
-            let copy = dir.path().join("sleep");
-            std::fs::copy("/bin/sleep", &copy).unwrap();
-            let signed = Command::new("codesign")
-                .args(["-s", "-", "-f"])
-                .arg(&copy)
-                .output()
-                .unwrap();
-            assert!(signed.status.success());
-            copy
-        } else {
-            std::path::PathBuf::from("sleep")
-        };
-        // sh starts sleep in the background and exits: sleep is re-parented to pid 1.
+        // The tool is this test program running `stand_in_tool`: a program built here, like the
+        // tools a CLI starts (node, python, cargo), so macOS shows its environment. (An ad-hoc
+        // re-signed copy of /bin/sleep was killed at launch on the macOS 15 runners.)
+        let exe = std::env::current_exe().unwrap();
+        // sh starts the tool in the background and exits: the tool is re-parented to pid 1.
         let status = Command::new("/bin/sh")
             .arg("-c")
             .arg(format!(
-                "{} 30 & echo $! > {}",
-                sleep.display(),
+                "'{}' --exact proctree::tests::stand_in_tool -q >/dev/null 2>&1 & echo $! > '{}'",
+                exe.display(),
                 pidfile.display()
             ))
             .env(ENV_FOLDER, dir.path().join("runs/r1"))
+            .env(STAND_IN, "1")
             .status()
             .unwrap();
         assert!(status.success());
@@ -467,8 +468,7 @@ mod tests {
             .unwrap();
         let _ = std::fs::remove_file(&pidfile);
         let hit = |t: &Target| matches!(*t, Target::Pid(p, _) | Target::Group(p, _) if p == pid);
-        // Up to 15 s: on a loaded CI runner the copy of sleep can take seconds to start and to be
-        // re-parented (2 s was not always enough on the macOS runners).
+        // Up to 15 s for the tool to start and to be re-parented on a loaded runner.
         let mut found = vec![];
         for _ in 0..750 {
             found = orphans(&dir.path().join("runs/r1"));
@@ -477,7 +477,7 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        assert!(found.iter().any(hit), "{found:?}");
+        assert!(found.iter().any(hit), "alive: {}, {found:?}", alive(pid));
         assert!(!orphans(&dir.path().join("runs/r2")).iter().any(hit));
         assert!(
             !orphans(&dir.path().join("runs/r")).iter().any(hit),

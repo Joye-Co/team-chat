@@ -16,7 +16,7 @@ use gpui_component::{
 
 use super::{
     i_am_owner,
-    members::{machine_choice_text, open_edit_bot},
+    members::{PlaceView, machine_choice_text, open_edit_bot, placement_options},
     widgets::{self, Status, answer},
 };
 use crate::{
@@ -58,27 +58,13 @@ fn shows_for(member: &Member, owner: bool) -> bool {
     owner && member.is_bot() && !member.deactivated
 }
 
-/// The choices of 在哪台电脑干活: any free computer, the picked one when it is no longer
-/// in the team's list, then every computer of the team.
+/// The choices of 在哪台电脑干活 (as in the edit sheet: [`placement_options`]).
 fn machine_options(
     picked: Option<&str>,
     machines: &[MachineInfo],
-    this: Option<&str>,
+    view: PlaceView,
 ) -> Vec<(Option<String>, String)> {
-    let mut options = vec![(None, s::RUNNER_MACHINE_ANY.to_string())];
-    if let Some(id) = picked.filter(|id| !machines.iter().any(|m| m.id == *id)) {
-        options.push((
-            Some(id.to_string()),
-            machine_choice_text(Some(id), machines, this),
-        ));
-    }
-    options.extend(machines.iter().map(|m| {
-        (
-            Some(m.id.clone()),
-            machine_choice_text(Some(&m.id), machines, this),
-        )
-    }));
-    options
+    placement_options(picked, machines, view)
 }
 
 /// The runner with computer `id` picked; `None` when nothing changes. A picked computer
@@ -171,10 +157,38 @@ impl BotQuick {
     }
 
     fn fields(&self, r: &RunnerSetup, window: &Window, cx: &mut Context<Self>) -> gpui::Div {
-        let this = self.this_machine.as_deref();
+        let me = super::my_id(&self.services);
+        let view = PlaceView::of(&self.services, self.this_machine.as_deref(), me.as_deref());
         let picked = r.machine_id.clone();
-        let options = machine_options(picked.as_deref(), &self.machines, this);
-        let shown = machine_choice_text(picked.as_deref(), &self.machines, this);
+        // On somebody else's own computer the choice is theirs: shown, not offered.
+        if super::members::pinned_elsewhere(picked.as_deref(), &self.machines, me.as_deref())
+            .is_some()
+        {
+            let hint =
+                super::members::placement_hint(picked.as_deref(), &self.machines, view, |id| {
+                    self.services
+                        .provider
+                        .member(id)
+                        .map(|m| name_beside_avatar(&m.name).to_string())
+                });
+            return div().w_full().child(
+                sheet_form().child(sheet_form_row(
+                    s::RUNNER_MACHINE,
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(tokens::space::S4)
+                        .child(widgets::row_value(
+                            machine_choice_text(picked.as_deref(), &self.machines, view),
+                            cx,
+                        ))
+                        .children(hint.map(|h| widgets::quiet(h, cx))),
+                    cx,
+                )),
+            );
+        }
+        let options = machine_options(picked.as_deref(), &self.machines, view);
+        let shown = machine_choice_text(picked.as_deref(), &self.machines, view);
         let view = cx.entity();
         let select = widgets::popup_fixed(
             "quick-machine",
@@ -327,10 +341,18 @@ mod tests {
         }
     }
 
+    fn alone(this: Option<&str>) -> PlaceView<'_> {
+        PlaceView {
+            this,
+            me: None,
+            solo: true,
+        }
+    }
+
     #[test]
     fn options_start_with_any_and_mark_this_computer() {
         let list = [machine("m-a", "甲"), machine("m-b", "乙")];
-        let options = machine_options(Some("m-b"), &list, Some("m-a"));
+        let options = machine_options(Some("m-b"), &list, alone(Some("m-a")));
         let ids: Vec<_> = options.iter().map(|(id, _)| id.as_deref()).collect();
         assert_eq!(ids, [None, Some("m-a"), Some("m-b")]);
         assert_eq!(options[0].1, s::RUNNER_MACHINE_ANY);
@@ -344,7 +366,7 @@ mod tests {
     #[test]
     fn a_removed_computer_stays_listed_while_picked() {
         let list = [machine("m-a", "甲")];
-        let options = machine_options(Some("m-gone"), &list, None);
+        let options = machine_options(Some("m-gone"), &list, alone(None));
         assert_eq!(options.len(), 3);
         assert_eq!(
             options[1],
