@@ -2260,7 +2260,46 @@ impl ChatProvider for CoreProvider {
     }
 
     fn create_machine(&self, name: String, labels: Vec<String>) -> AdminReply<MachineCreated> {
-        self.create_machine_inner(name, labels)
+        self.create_machine_inner(name, labels, None)
+    }
+
+    fn create_machine_as(
+        &self,
+        name: String,
+        labels: Vec<String>,
+        personal: Option<bool>,
+    ) -> AdminReply<MachineCreated> {
+        self.create_machine_inner(name, labels, personal)
+    }
+
+    fn rename_machine(&self, machine_id: &str, name: String) -> AdminReply<MachineInfo> {
+        self.update_machine_inner(machine_id, Some(name), None)
+    }
+
+    fn set_machine_owner(&self, machine_id: &str, mine: bool) -> AdminReply<MachineInfo> {
+        let owner = mine.then(|| chat_core::proto::MACHINE_OWNER_ME.to_string());
+        self.update_machine_inner(machine_id, None, Some(owner))
+    }
+
+    fn remove_machine(&self, machine_id: &str) -> AdminReply<()> {
+        self.remove_machine_inner(machine_id)
+    }
+
+    fn set_machine_bot(
+        &self,
+        machine_id: &str,
+        bot_id: &str,
+        repo_path: Option<String>,
+    ) -> AdminReply<MachineInfo> {
+        self.machine_bot_inner(machine_id, bot_id, Some(repo_path))
+    }
+
+    fn unset_machine_bot(&self, machine_id: &str, bot_id: &str) -> AdminReply<MachineInfo> {
+        self.machine_bot_inner(machine_id, bot_id, None)
+    }
+
+    fn stop_using_this_computer(&self) -> AdminReply<()> {
+        self.stop_using_this_computer_inner()
     }
 
     fn this_mac(&self) -> crate::data::ThisMac {
