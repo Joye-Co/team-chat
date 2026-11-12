@@ -392,6 +392,13 @@ export class BotDesk extends DeskGithub {
     return r ? readerOf(this.env.DB, r) : null;
   }
 
+  /** The other groups a run read (`runs.read_groups`); [] when none. Server only: never sent. */
+  async readGroups(botId: string, runId: string): Promise<string[]> {
+    this.bind(botId);
+    const r = this.run(runId);
+    return r ? readGroupsOf(r) : [];
+  }
+
   /** Remembers that a run read another group (design-visibility 3.3), once per group. */
   async noteRead(botId: string, runId: string, groupId: string): Promise<void> {
     this.bind(botId);

@@ -66,9 +66,10 @@ export function readableSql(alias: string, memberParam: number, ownerParam: numb
 }
 
 /**
- * SQL condition on a memories row (alias `alias`): it may go into a prompt in the group bound at
- * `?${groupParam}`: no source group, or everyone in that group is in the source group too.
+ * SQL condition on a memories row (alias `alias`): a run may read it (design-visibility 3.5): no
+ * source group, or the source group is one the run may read, bound as a JSON array of group ids at
+ * `?${groupsParam}`. `unknown` never matches.
  */
-export function fitsGroupSql(alias: string, groupParam: number): string {
-  return `(${alias}.from_group IS NULL OR (${alias}.from_group != '${UNKNOWN_GROUP}' AND NOT EXISTS (SELECT 1 FROM group_members gx WHERE gx.group_id = ?${groupParam} AND gx.member_id NOT IN (SELECT gy.member_id FROM group_members gy WHERE gy.group_id = ${alias}.from_group))))`;
+export function runReadableSql(alias: string, groupsParam: number): string {
+  return `(${alias}.from_group IS NULL OR ${alias}.from_group IN (SELECT value FROM json_each(?${groupsParam})))`;
 }
