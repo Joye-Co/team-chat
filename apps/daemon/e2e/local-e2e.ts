@@ -393,6 +393,7 @@ async function runDaemonCheck(
   report.resume = await resumeCheck(groupId, topicId, runId, bot, work, events, ws);
   if (!REMOTE) report.codex = await codexCheck(owner, groupId, work, events, ws);
   const stop = await cancelCheck(groupId, alice, bot, work, events, ws);
+  if (VM) report.caches = cachesCheck(work);
   // The usable milestone's fixes (local runs only: they change team settings and need the
   // fake CLI's files on this computer).
   if (!REMOTE && !VM) report.landed = await landedChecks({ owner, groupId, alice: alice as Person, bot, work, events, ws, machineId: machine.machine.id, daemon });
@@ -516,6 +517,35 @@ async function codexResultCheck(cxId: string, groupId: string, work: string, eve
   if (blocked.said().some((m: any) => m.cardV2)) throw new Error("a blocked run posted a done card");
   step("codex: a run that exits normally but reports blocked leaves the topic blocked, the run waiting for a reply");
   return { doneCardRun: done.run.id, blockedRun: blocked.run.id };
+}
+
+/**
+ * VM runs (design-vm-state 3.3): the runs of different topics without a repository used one
+ * cache, `<work>/caches/scratch`, with its record; each CLI had it on PATH right after the
+ * VM's shims, and the daemon's own variable did not reach the CLI.
+ */
+function cachesCheck(work: string) {
+  const c = join(work, "caches", "scratch");
+  const meta = JSON.parse(readFileSync(join(c, "cache.json"), "utf8"));
+  if (meta.key !== "scratch" || !(meta.lastUsedAt >= meta.createdAt)) throw new Error(`cache.json: ${JSON.stringify(meta)}`);
+  const seen: { dir: string; env: Record<string, string | null> }[] = [];
+  const walk = (d: string) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (e.isFile() && e.name === "cache-env.json") seen.push({ dir: d, env: JSON.parse(readFileSync(p, "utf8")) });
+      else if (e.isDirectory() && e.name !== "caches" && e.name !== ".git") walk(p);
+    }
+  };
+  walk(work);
+  const folders = new Set(seen.map((s) => s.dir));
+  if (folders.size < 2) throw new Error(`cache-env.json in ${folders.size} work folders`);
+  for (const { dir, env } of seen) {
+    const path = (env.PATH ?? "").split(":");
+    if (env.CARGO_HOME !== join(c, "cargo") || path[0] !== "/opt/runner/bin" || path[1] !== join(c, "bin") || env.CHAT_VM_PATH_EXTRA)
+      throw new Error(`the CLI in ${dir} did not get the cache: ${JSON.stringify(env)}`);
+  }
+  step(`VM runs in ${folders.size} work folders shared the repository cache ${c}`);
+  return { folders: folders.size, rustcWrapper: seen.map((s) => s.env.RUSTC_WRAPPER ?? null) };
 }
 
 /** The first file named `name` under `dir`, at any depth. */

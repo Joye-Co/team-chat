@@ -72,6 +72,8 @@ except OSError as e:
     rec = ".."
     open(os.path.join(rec, "aside-write.json"), "w").write(json.dumps({"errno": e.errno, "name": errno.errorcode.get(e.errno)}))
     open(os.path.join(rec, "argv.json"), "w").write(json.dumps(args))
+# What a VM run's repository cache gave the CLI (design-vm-state 3.3).
+open(os.path.join(rec, "cache-env.json"), "w").write(json.dumps({k: os.environ.get(k) for k in ("PATH", "CARGO_HOME", "RUSTUP_HOME", "RUSTC_WRAPPER", "npm_config_cache", "CHAT_VM_PATH_EXTRA")}))
 # Like Claude Code: the env of --settings applies to the session (a side chat run's auth), and
 # its PreToolUse hooks run before each tool whose name the matcher matches.
 hooks = []
