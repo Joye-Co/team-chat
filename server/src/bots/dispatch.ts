@@ -116,6 +116,10 @@ export const TEXT = {
   approveRun: "这件事里都同意",
   /** The kind's approver is the owners, and the group has none to ask: the requester is asked. */
   approvalNoOwner: "这个群里没有管理员，先请你确认。",
+  /** A gated action on a team computer, and the group has no admin: nobody can approve yet. */
+  approvalNoAdmin: "这类操作要管理员批准，可这个群里没有管理员。请把一位管理员拉进群来批准。",
+  /** A gated action on a personal computer whose owner is not in the group. */
+  approvalNoMachineOwner: "这类操作要这台电脑的主人批准，可他不在这个群里。请把他拉进群来批准。",
   approveRunConfirm: "这件事里之后同类的操作都不再问你。",
   /** The approval card after the answer (DESIGN.md §7.10 answered): title and one record line. */
   approvalClosed: {
