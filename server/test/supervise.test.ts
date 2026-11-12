@@ -147,9 +147,19 @@ describe("supervise", () => {
     // 盯 1.10: a short answer without a work order is an answer: no push.
     await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "@dev 这个要在周会上说吗", mentions: [w.bot.id] });
     const q = await d.next((f) => f.t === "run.assign" && f.runId !== a.runId);
+    // Even as a follow-up of work that had a 交代单: this turn has none of its own.
+    await runInDurableObject(deskOf(w.bot.id), (_o, state: DurableObjectState) => {
+      const key = `request:${a.runId}`;
+      const req = JSON.parse(state.storage.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = ?", key).one().value);
+      state.storage.sql.exec("UPDATE meta SET value = ? WHERE key = ?", JSON.stringify({ ...req, brief: { goal: "修测试", doneWhen: [] } }), key);
+      state.storage.sql.exec("UPDATE runs SET follow_up_of = ? WHERE id = ?", a.runId, q.runId);
+    });
     d.send({ t: "run.accept", runId: q.runId });
     await d.acked(q.runId, d.done(q.runId, { status: "succeeded", resultText: "我会在周会上提" }));
     await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === q.runId && e.data.run.status === "done");
+    await new Promise((r) => setTimeout(r, 200));
+    expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(2);
+    expect(await runInDurableObject(deskOf(w.bot.id), (_o, state: DurableObjectState) => state.storage.sql.exec<{ acts: string | null }>("SELECT acts FROM runs WHERE id = ?", q.runId).one().acts)).toBeNull();
 
     // Only a promise, no tool call, and a work order (交代单): the desk continues the session.
     await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "@dev 再看下文档", mentions: [w.bot.id] });

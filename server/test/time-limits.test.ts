@@ -182,6 +182,11 @@ describe("the time limit (盯 1.6, 1.8)", () => {
     await workedFor(w.bot.id, b.runId, 120 * 60_000);
     await runDurableObjectAlarm(deskOf(w.bot.id));
     await d.next((f) => limitInput(f, b.runId));
+    // It saves as told (a commit, a file, its plan): that is the save, not progress.
+    await d.acked(b.runId, d.event(b.runId, { type: "tool.call", itemId: "s1", tool: "bash", title: "git commit -am wip" }));
+    await d.acked(b.runId, d.event(b.runId, { type: "tool.result", itemId: "s1", ok: true, output: "[main 1a2b3c] wip" }));
+    await d.acked(b.runId, d.event(b.runId, { type: "file.change", itemId: "f1", changes: [{ path: "PLAN.md", kind: "modify" }] }));
+    expect((await limitRow(w.bot.id, b.runId)).progress).toBe(0);
     await sql(w.bot.id, (s) => s.exec("UPDATE runs SET limit_at = ? WHERE id = ?", Date.now() - 16 * 60_000, b.runId));
     await runDurableObjectAlarm(deskOf(w.bot.id));
     await d.next((f) => f.t === "run.cancel" && f.runId === b.runId);
@@ -211,6 +216,52 @@ describe("the time limit (盯 1.6, 1.8)", () => {
     await new Promise((r) => setTimeout(r, 200));
     expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(3);
     expect(botNotes(c, topicId, w.bot.id)).toEqual([stop]);
+    d.close();
+    c.close();
+  });
+
+  it("leaves a run the desk gave up on with people: no new turn after the grace time", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["resume"] });
+    const { c } = await Client.connect(w.human.token);
+    await mention(c, w);
+    const a = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId: a.runId });
+    await d.acked(a.runId, d.event(a.runId, { type: "tool.call", itemId: "t1", tool: "bash", title: "cargo test" }));
+    await d.acked(a.runId, d.event(a.runId, { type: "tool.result", itemId: "t1", ok: true, output: "ok" }));
+    await workedFor(w.bot.id, a.runId, 120 * 60_000);
+    await runDurableObjectAlarm(deskOf(w.bot.id));
+    await d.next((f) => limitInput(f, a.runId));
+    // It went silent after the message and the desk gave up on it (markStalled); then the grace time passes.
+    await sql(w.bot.id, (s) => s.exec("UPDATE runs SET stalled = 1, status = 'blocked', limit_at = ? WHERE id = ?", Date.now() - 60 * 60_000, a.runId));
+    await runDurableObjectAlarm(deskOf(w.bot.id));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(d.frames.filter((f) => f.t === "run.cancel" && f.runId === a.runId)).toHaveLength(0);
+    expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(1);
+    expect(await limitRow(w.bot.id, a.runId)).toMatchObject({ status: "blocked", ended_at: null, stalled: 1 });
+    expect((await actsOfRun(w.bot.id, a.runId)).map((x) => x.action)).toEqual(["limit"]);
+    d.close();
+    c.close();
+  });
+
+  it("does not count polling the same step as progress", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, {});
+    const { c } = await Client.connect(w.human.token);
+    await mention(c, w);
+    const a = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId: a.runId });
+    let last = 0;
+    for (let i = 0; i < 3; i++) {
+      d.event(a.runId, { type: "tool.call", itemId: `p${i}`, tool: "bash", title: "gh pr checks 12" });
+      last = d.event(a.runId, { type: "tool.result", itemId: `p${i}`, ok: true, output: `build pending (${i * 30}s)` });
+    }
+    await d.acked(a.runId, last);
+    expect((await limitRow(w.bot.id, a.runId)).progress).toBe(1);
+    await d.acked(a.runId, d.event(a.runId, { type: "tool.call", itemId: "t1", tool: "bash", title: "cargo test" }));
+    await d.acked(a.runId, d.event(a.runId, { type: "tool.result", itemId: "t1", ok: true, output: "ok" }));
+    expect((await limitRow(w.bot.id, a.runId)).progress).toBe(2);
+    await d.acked(a.runId, d.done(a.runId, { status: "succeeded", resultText: "ok" }));
     d.close();
     c.close();
   });

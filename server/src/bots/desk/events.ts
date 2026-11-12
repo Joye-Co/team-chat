@@ -222,8 +222,8 @@ export abstract class DeskEvents extends DeskRuns {
       }
     }
     await this.flush(r, progress);
-    // 盯 1.6: signs of progress, for the turns at the time limit (tool results count in watchResult).
-    if (moved > 0) {
+    // 盯 1.6: signs of progress up to the time limit (after it the run saves its state; tool results count in watchResult).
+    if (moved > 0 && r.limit_at === null) {
       this.sql.exec("UPDATE runs SET progress = progress + ? WHERE id = ?", moved, r.id);
       r.progress += moved;
     }

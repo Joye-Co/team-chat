@@ -29,6 +29,9 @@ import { DeskEvents } from "./events";
 import { reportOf } from "./report";
 import type { Restart } from "./runs";
 
+/** The step of a `stepKey` without its output. */
+const stepPart = (key: string): string => key.split("\n")[0] ?? "";
+
 /** A run that waits for its machine (盯 1.1) is not silent: no nudge, no stall. */
 const PRESENT = "away_since IS NULL";
 /**
@@ -290,7 +293,7 @@ export abstract class DeskStall extends DeskEvents {
   /**
    * The result of a tool call. The same step with the same output again and again is a loop:
    * one reminder per streak (盯 1.11: a step whose output changes, such as polling CI, is not).
-   * A new successful step is progress (盯 1.6).
+   * A new successful step is progress (盯 1.6); the same step again with a new output (polling) is not.
    */
   protected async watchResult(r: RunRow, itemId: string, ok: boolean, output: string): Promise<void> {
     const calls = this.loopCalls(r);
@@ -302,11 +305,12 @@ export abstract class DeskStall extends DeskEvents {
     delete calls[itemId];
     r.loop_calls = JSON.stringify(calls);
     const key = stepKey(title, output);
+    const sameStep = key !== "" && stepPart(key) === stepPart(r.loop_key ?? "");
     const count = key !== "" && key === r.loop_key ? r.loop_count + 1 : 1;
     this.sql.exec("UPDATE runs SET loop_calls = ?, loop_key = ?, loop_count = ? WHERE id = ?", r.loop_calls, key, count, r.id);
     r.loop_key = key;
     r.loop_count = count;
-    if (ok && count === 1) this.addProgress(r);
+    if (ok && count === 1 && !sameStep) this.addProgress(r);
     if (count === LOOP_LIMIT && r.interventions < MAX_INTERVENTIONS) {
       this.sql.exec("UPDATE runs SET interventions = interventions + 1 WHERE id = ?", r.id);
       r.interventions += 1;
@@ -324,17 +328,25 @@ export abstract class DeskStall extends DeskEvents {
     }
   }
 
+  /**
+   * 盯 1.6: progress is measured up to the time limit. What the run does after the limit message
+   * (it is told to commit and update its plan) is the save, not progress.
+   */
   private addProgress(r: RunRow): void {
+    if (r.limit_at !== null) return;
     this.sql.exec("UPDATE runs SET progress = progress + 1 WHERE id = ?", r.id);
     r.progress += 1;
   }
 
-  /** 盯 1.10: the piece of work has a work order (交代单): the run, or the run it follows or retries. */
+  /**
+   * 盯 1.10: the piece of work has a work order (交代单): the run, a run it retries, or the run the
+   * desk's own continue went on from. A person's follow-up is a new turn and needs its own.
+   */
   protected workOrdered(r: RunRow): boolean {
     let cur: RunRow | undefined = r;
     for (let i = 0; cur && i < 12; i++) {
       if (this.requestOf(cur)?.brief) return true;
-      const up: string | null = cur.follow_up_of ?? cur.retry_of;
+      const up: string | null = cur.retry_of ?? (cur.trigger_message_id.startsWith("continue:") ? cur.follow_up_of : null);
       cur = up ? this.run(up) : undefined;
     }
     return false;
@@ -511,7 +523,8 @@ export abstract class DeskStall extends DeskEvents {
         r.worked_at = now;
         if (r.limit_at === null) {
           if (counting && worked >= (r.limit_ms ?? MAX_RUN_MS)) await this.limitReached(r, now);
-        } else if (now - r.limit_at >= LIMIT_GRACE_MS && !r.approval_id && !r.paused_by && r.away_since === null) {
+        } else if (now - r.limit_at >= LIMIT_GRACE_MS && !r.approval_id && !r.paused_by && r.away_since === null && !r.stalled) {
+          // A run the desk gave up on (markStalled) stays with people: no silent new turn.
           // Told to save and end its turn, and still going: interrupt it; it goes on in its session.
           await this.limitGoOn(r, false);
         }
