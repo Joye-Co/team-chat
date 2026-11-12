@@ -998,6 +998,7 @@ async fn pause_resume_answer_acceptance_and_aside() {
                         "output",
                         "resume",
                         "context",
+                        "groups",
                         "effort",
                         "gates",
                         "github",
