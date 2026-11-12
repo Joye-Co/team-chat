@@ -3,8 +3,8 @@
 // set in the meantime is never replaced. Needs the team's AI 服务 (src/aiservice, set by an owner
 // in 设置); without it topics keep the first line.
 import { MAX_TITLE_CHARS, isMainTopicId } from "@chat/protocol";
-import { type ModelConfig, callModel } from "../aiservice/providers";
-import { loadModelConfig } from "../aiservice/store";
+import { type CallOptions, type ModelConfig, callModel } from "../aiservice/providers";
+import { tracker, useConfig } from "../aiservice/uses";
 import type { Env } from "../core/env";
 import { registerAfterCommit, registerRoomRpc } from "../core/registry";
 import { roomStub } from "../core/env";
@@ -51,11 +51,11 @@ export function cleanTitle(text: string): string | null {
 }
 
 /** Asks the team's model for a title; null when it is not set up or the call fails or refuses. */
-export async function generateTitle(env: Env, input: TitleInput, cfg: ModelConfig | null): Promise<string | null> {
+export async function generateTitle(env: Env, input: TitleInput, cfg: ModelConfig | null, opts: CallOptions = {}): Promise<string | null> {
   // Tests: a body with the AUTOTITLE_FAKE marker gets a made-up title, no network.
   if (env.AUTOTITLE_FAKE && `${input.body}${input.quote ?? ""}`.includes(env.AUTOTITLE_FAKE)) return cleanTitle(`AI ${defaultTitle(input.quote ?? input.body)}`);
   if (!cfg) return null;
-  const result = await callModel(cfg, { system: SYSTEM, prompt: titlePrompt(input), maxTokens: 1024 });
+  const result = await callModel(cfg, { system: SYSTEM, prompt: titlePrompt(input), maxTokens: 1024 }, opts);
   if (!result.ok) throw new Error(result.error);
   return cleanTitle(result.text);
 }
@@ -71,16 +71,11 @@ registerAfterCommit(async (event, h) => {
   const ext = root.ext ? (JSON.parse(root.ext) as { replyTo?: { excerpt?: string } }) : {};
   // A title given at creation stays: only the first-line default is replaced.
   if (topic.title !== startTitle(root.body, ext.replyTo?.excerpt)) return;
-  let cfg: ModelConfig | null = null;
-  try {
-    cfg = await loadModelConfig(h.env);
-  } catch (err) {
-    h.log.warn("ai service unreadable", { err });
-  }
+  const cfg: ModelConfig | null = await useConfig(h.env, "title", h.log);
   if (!cfg && !h.env.AUTOTITLE_FAKE) return;
   let title: string | null = null;
   try {
-    title = await generateTitle(h.env, { body: root.body, quote: ext.replyTo?.excerpt }, cfg);
+    title = await generateTitle(h.env, { body: root.body, quote: ext.replyTo?.excerpt }, cfg, cfg ? { track: tracker(h.env, "title", cfg, h.log) } : {});
   } catch (err) {
     h.log.warn("topic title failed", { topicId: topic.id, err });
     return;

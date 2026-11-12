@@ -95,7 +95,8 @@ check!(
     SetMachineBotRequest,
     MachineGithubWaitRequest,
     RunCommandRequest,
-    RunCommandResponse
+    RunCommandResponse,
+    UpdateAiServiceSwitchesRequest
 );
 
 fn validated<T: DeserializeOwned + Serialize + Check>(v: &Value) -> Result<Value, String> {
@@ -295,6 +296,11 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ),
     ("TestAiServiceRequest", validated::<TestAiServiceRequest>),
     ("AiServiceTestResult", plain::<AiServiceTestResult>),
+    ("AiServiceStatus", plain::<AiServiceStatus>),
+    (
+        "UpdateAiServiceSwitchesRequest",
+        validated::<UpdateAiServiceSwitchesRequest>,
+    ),
     ("Device", plain::<Device>),
     ("DevicesResponse", plain::<DevicesResponse>),
     ("EmailCodeRequest", validated::<EmailCodeRequest>),

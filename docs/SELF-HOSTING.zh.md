@@ -201,7 +201,8 @@ scripts/setup-server.sh production
 | `deployed, but wrangler printed no workers.dev address` | 账号还没有 `workers.dev` 子域名（第 3 步第 2 条），或者你用的是自己的域名：加 `--url <地址>` 再运行。 |
 | 第一次部署后马上出现 `could not make the first owner` | 新放上去的密钥要过一会儿才生效：等一分钟再运行。 |
 | `this server has an owner already` | owner 是在另一台机器上建的：把那台的 `~/.config/team-chat/production/` 复制过来。 |
-| 应用里保存 AI 服务时报 `hooks are not configured on this server` | Worker 上没有 `HOOK_SECRET_KEY`：运行 `scripts/setup-server.sh production`。 |
+| 应用里保存 AI 服务时报 `the Worker secret HOOK_SECRET_KEY is not set on this server`（旧版本报 `hooks are not configured on this server`） | Worker 上没有 `HOOK_SECRET_KEY`：运行 `scripts/setup-server.sh production`。 |
+| 保存或测试 AI 服务时报 `the saved API key cannot be read` | `HOOK_SECRET_KEY` 换过，存着的 key 解不开了：在 AI 服务里重新填一次 key。 |
 | 应用提示「连不上服务器」 | 检查地址（要带 `https://`），再 `curl <地址>/v1/health`。 |
 | `/v1/health reports <x>, expected <y>` | 部署还没生效，或者失败了：再运行 `scripts/deploy-server.sh production`，看它的输出。 |
 

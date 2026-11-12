@@ -2,8 +2,8 @@
 // summary that the team's model updates as messages come in. Runs and the front desk read it in
 // place of the messages their budget leaves out (docs/protocol.md, "Run context"). Needs the AI
 // 服务; without it there is no summary and prompts say how many messages were left out, as before.
-import { type ModelConfig, callModel } from "../aiservice/providers";
-import { loadModelConfig } from "../aiservice/store";
+import { type CallOptions, type ModelConfig, callModel } from "../aiservice/providers";
+import { tracker, useConfig } from "../aiservice/uses";
 import { type ContextRow, HISTORY_BODY_CHARS, renderMessage } from "../context/render";
 import { teamZone } from "../memory/consolidate";
 import type { Env } from "../core/env";
@@ -55,8 +55,8 @@ export function summaryPrompt(previous: string, lines: string): string {
 }
 
 /** Asks the model for the next summary; null when the call fails. */
-export async function nextSummary(cfg: ModelConfig, previous: string, lines: string): Promise<string | null> {
-  const res = await callModel(cfg, { system: SYSTEM, prompt: summaryPrompt(previous, lines), maxTokens: 1500 });
+export async function nextSummary(cfg: ModelConfig, previous: string, lines: string, opts: CallOptions = {}): Promise<string | null> {
+  const res = await callModel(cfg, { system: SYSTEM, prompt: summaryPrompt(previous, lines), maxTokens: 1500 }, opts);
   if (!res.ok) return null;
   const text = res.text.trim();
   return text === "" ? null : [...text].slice(0, MAX_SUMMARY_CHARS).join("");
@@ -89,12 +89,7 @@ registerAfterCommit(async (event, h) => {
   // The first summary covers the start of the topic; later ones every SUMMARY_EVERY messages.
   if (row && fresh < SUMMARY_EVERY) return;
   if (row?.running_since && now - row.running_since < IN_FLIGHT_MS) return;
-  let cfg: ModelConfig | null = null;
-  try {
-    cfg = await loadModelConfig(h.env);
-  } catch (err) {
-    h.log.warn("ai service unreadable", { err });
-  }
+  const cfg: ModelConfig | null = await useConfig(h.env, "summary", h.log);
   if (!cfg) return;
   h.sql.exec(
     "INSERT INTO topic_summaries (topic_id, running_since) VALUES (?, ?) ON CONFLICT (topic_id) DO UPDATE SET running_since = excluded.running_since",
@@ -115,7 +110,7 @@ registerAfterCommit(async (event, h) => {
       used += line.length + 1;
       last = r.seq;
     }
-    const text = await nextSummary(cfg, row?.text ?? "", parts.join("\n"));
+    const text = await nextSummary(cfg, row?.text ?? "", parts.join("\n"), { track: tracker(h.env, "summary", cfg, h.log) });
     if (text === null) {
       h.sql.exec("UPDATE topic_summaries SET running_since = NULL WHERE topic_id = ?", topicId);
       return;

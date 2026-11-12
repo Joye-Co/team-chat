@@ -627,6 +627,98 @@ pub struct AiServiceConfig {
     pub key_hint: Option<String>,
     /// 0 = never changed.
     pub updated_at: Millis,
+    /// Usable: the per-use switches; `None` (an older server) = all on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub switches: Option<AiServiceSwitches>,
+    /// Usable: the last call of each use that has made one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub uses: Vec<AiServiceUseHealth>,
+    /// Usable: present while the model keeps failing (团队管理 › 要注意).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failing: Option<AiServiceFailing>,
+}
+
+/// Usable (模 1.1): what the team's model is used for; each is on unless an admin turned it off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiServiceSwitches {
+    /// 前台.
+    pub front_desk: bool,
+    /// AI 话题标题 and topic summaries.
+    pub titles: bool,
+    /// The review after a run and the nightly tidy.
+    pub memory: bool,
+}
+
+impl Default for AiServiceSwitches {
+    fn default() -> Self {
+        Self {
+            front_desk: true,
+            titles: true,
+            memory: true,
+        }
+    }
+}
+
+/// `PUT /v1/settings/ai/switches` (admin): `None` keeps.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateAiServiceSwitchesRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub front_desk: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub titles: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<bool>,
+}
+
+impl UpdateAiServiceSwitchesRequest {
+    pub fn validate(&self) -> Validation {
+        if self.front_desk.is_none() && self.titles.is_none() && self.memory.is_none() {
+            return invalid("switches", "at least one switch");
+        }
+        Ok(())
+    }
+}
+
+/// `AiServiceUseHealth::use_` values. Open: a newer server may add one.
+pub const AI_SERVICE_USES: [&str; 5] = ["front_desk", "title", "summary", "retro", "tidy"];
+
+/// Usable (模 1.4): the last call of one use of the team's model.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiServiceUseHealth {
+    /// One of [`AI_SERVICE_USES`].
+    #[serde(rename = "use")]
+    pub use_: String,
+    pub at: Millis,
+    pub ok: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Failed calls in a row; 0 after a success.
+    pub failures: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ok_at: Option<Millis>,
+}
+
+/// Usable (模 1.4): raised after several failed calls in a row; cleared by the next good call.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiServiceFailing {
+    pub since: Millis,
+    #[serde(rename = "use")]
+    pub use_: String,
+    pub error: String,
+}
+
+/// Usable (模 1.3): `GET /v1/settings/ai/status` (any member). Each use is `configured` and its switch on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiServiceStatus {
+    pub configured: bool,
+    pub front_desk: bool,
+    pub titles: bool,
+    pub memory: bool,
 }
 
 impl AiServiceConfig {
@@ -694,6 +786,21 @@ pub struct AiServiceTestResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     pub latency_ms: u64,
+    /// Usable (模 1.7): the plain text call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<AiServiceCheck>,
+    /// Usable (模 1.7): the forced tool call; `None` when the text call failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<AiServiceCheck>,
+}
+
+/// One check of 测试连接.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiServiceCheck {
+    pub ok: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

@@ -20,6 +20,27 @@ const Spend = {
   unpricedTokens: z.int().nonnegative().optional(),
 };
 
+/**
+ * Usable (模 1.9): the server's own model calls (the AI 服务: front desk, titles, summaries, the
+ * review and the tidy) in the span, priced like runs. One line on 用量.
+ */
+export const ServiceUsage = z.object({
+  calls: z.int().nonnegative(),
+  /** Calls that failed (they used no tokens). */
+  failures: z.int().nonnegative(),
+  costUsd: z.number().nonnegative(),
+  inputTokens: z.int().nonnegative(),
+  outputTokens: z.int().nonnegative(),
+  cacheReadTokens: z.int().nonnegative().optional(),
+  /** Tokens of a model with no known price: not in `costUsd`. */
+  unpricedTokens: z.int().nonnegative().optional(),
+  /** By use (AI_SERVICE_USES), most tokens first. */
+  uses: z
+    .array(z.object({ use: z.string().min(1).max(32), calls: z.int().nonnegative(), inputTokens: z.int().nonnegative(), outputTokens: z.int().nonnegative() }))
+    .max(16),
+});
+export type ServiceUsage = z.infer<typeof ServiceUsage>;
+
 export const TeamUsage = z.object({
   from: Millis,
   to: Millis,
@@ -57,5 +78,7 @@ export const TeamUsage = z.object({
   daily: z
     .array(z.object({ start: Millis, costUsd: z.number().nonnegative(), bots: z.array(z.object({ memberId: Id, costUsd: z.number().nonnegative() })).max(500) }))
     .max(62),
+  /** Usable: the AI 服务's own calls in the span; absent from an older server. Not in `total`. */
+  service: ServiceUsage.optional(),
 });
 export type TeamUsage = z.infer<typeof TeamUsage>;
