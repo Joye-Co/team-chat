@@ -84,10 +84,15 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
   another; no member is the one responsible for a 话题.
 - The settings window may also use 岗位 (role and how the member works), 权限 (permissions),
   机器 (machines) and 成本 (cost).
-- Words for each person's GitHub (docs/plans/usable/design-github-identity.zh.md §3.7): GitHub is
-  a proper name, not a product noun; 连接 GitHub, 连接…, 重新连接…, 断开…, 已连接为 @{login}, 还没连接,
-  需要重新连接, 验证码 (GitHub's own word), 复制验证码, 打开 GitHub, 授权, 组织, 仓库, PR, 以后再说,
-  去 GitHub 撤销, and {name} 在等你连接 GitHub.
+- Words for a computer's GitHub (docs/plans/usable/design-github-identity.zh.md §3.5–3.7): GitHub is
+  a proper name, not a product noun, and the sign-in belongs to the 电脑, never to a person; 仓库 and
+  PR; GitHub @{login}, 未登录 GitHub, 这台电脑还没有登录 GitHub, 这台电脑的 GitHub 登录失效了; the
+  rules' 其他要确认的事谁来批准 with the note 上面这几件事：团队的电脑上由管理员批准，个人的电脑上由电脑主人批准。;
+  the card lines 这类操作要管理员批准，可这个群里没有管理员。请把一位管理员拉进群来批准。 and
+  这类操作要这台电脑的主人批准，可他不在这个群里。请把他拉进群来批准。; and the alert {machine} 没有登录 GitHub
+  with AI 成员在这台电脑上推代码、开 PR 要用它。 followed by 请到 团队管理 › 电脑，选 {machine}，照说明在电脑上登录。
+  (administrators) or 请在这台电脑上为运行 AI 成员的系统账户登录 GitHub。 (a personal computer's owner). The app
+  has no GitHub sign-in of its own: no 连接 GitHub, 验证码 or {name} 在等你连接 GitHub.
 - Words for a run's state and 接管 (docs/plans/usable/design-takeover.zh.md §3.9): 暂停, 继续, 已暂停,
   已停止, 没做完, 在等电脑, 排队第 {n} 个, 电脑不在线, 正在准备, 等 {who} 回复, 等 {who} 批准,
   卡住了，需要你看一下, {who} 暂停了 {member}, 你在操作 {computer}, {who} 在操作 {computer}, 已停下,
