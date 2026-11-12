@@ -611,6 +611,27 @@ mod tests {
         }
     }
 
+    /// 机 1.9 / 2.11: where AI members work is one word, 电脑, in 设置 and 团队管理 alike, and
+    /// neither says daemon, runtime or 标签 (团队管理 may still name VM).
+    #[test]
+    fn a_computer_is_called_one_thing() {
+        for section in SECTIONS
+            .iter()
+            .filter(|s| s.name == "settings" || s.name == "admin")
+        {
+            for (key, text) in section.entries {
+                let lower = text.to_lowercase();
+                for word in ["机器", "daemon", "runtime", "标签"] {
+                    assert!(
+                        !lower.contains(word),
+                        "{}::{key} = {text:?} says {word}",
+                        section.name
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn product_name_is_never_typed() {
         let name = env!("PRODUCT_NAME").to_lowercase();
