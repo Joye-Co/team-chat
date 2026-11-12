@@ -19,7 +19,7 @@ VERSION="${VERSION#v}"
 
 # The releases older than <version>, newest first: the update an installed app will make is
 # from a lower version, also when <version> is not the newest (an installer added to an older
-# release). The release of <version> itself may exist already: the macOS job creates it.
+# release). The release of <version> itself may exist already (mode windows-only).
 all="$(gh release list --exclude-drafts --exclude-pre-releases --limit 100 --json tagName -q '.[].tagName')" ||
   die "cannot list the releases"
 core="${VERSION%%-*}"

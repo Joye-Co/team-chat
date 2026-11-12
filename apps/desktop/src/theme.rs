@@ -1298,7 +1298,7 @@ fn build(dark: bool) -> Colors {
         tile_ink: fg,
         ph: [p.muted, p.pressed, p.muted],
         // One avatar style for every member (§1.8): no tints.
-        tints: [p.muted; 8],
+        tints: if dark { tk::member_tint::DARK } else { tk::member_tint::LIGHT }.map(c),
 
         sidebar: p.sidebar,
         content: p.background,
@@ -1979,6 +1979,12 @@ mod tests {
         assert_eq!(all, (0..8).collect::<Vec<_>>());
         assert_eq!(member_tint_index("jojo"), 0);
         assert!(member_tint_index("m-xiaowang") < 8);
+        // Agent tiles keep a colored ground in both modes (dark art on a
+        // near-black muted fill read as a black square).
+        for k in [build(false), build(true)] {
+            assert!(k.tints.iter().all(|t| *t != k.palette.muted && t.s > 0.1));
+            assert!(k.tints.iter().all(|t| contrast(*t, k.bg) > 1.2));
+        }
     }
 
     #[test]

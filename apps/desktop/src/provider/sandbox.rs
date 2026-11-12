@@ -29,11 +29,12 @@ impl Sandbox {
                     )
                 })
         };
-        // `TC_SANDBOX_AS=admin` or `member`: the seeded 管理员 or 普通成员, in a data root of its
-        // own, to try the 身份 (design-roles).
+        // `TC_SANDBOX_AS=admin`, `member` or `newcomer`: the seeded 管理员, 普通成员 or a member
+        // who just joined (首页 从这里开始), in a data root of its own, to try the 身份
+        // (design-roles).
         let who = std::env::var("TC_SANDBOX_AS")
             .ok()
-            .filter(|w| matches!(w.as_str(), "admin" | "member"));
+            .filter(|w| matches!(w.as_str(), "admin" | "member" | "newcomer"));
         let (token, app) = match &who {
             Some(w) => (format!("{w}-token"), format!("app-{w}")),
             None => ("owner-token".to_string(), "app".to_string()),

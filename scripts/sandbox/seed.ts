@@ -10,7 +10,8 @@
 // reactions and two 私聊. Add a sample here when you add a screen that needs one.
 //
 // Usage: bun scripts/sandbox/seed.ts --url http://127.0.0.1:8850 --admin-secret-file <file> --out <dir>
-// Writes <dir>/owner-token, admin-token (陈晨) and member-token (小王) (mode 600) and
+// Writes <dir>/owner-token, admin-token (陈晨), member-token (小王) and newcomer-token (小林,
+// new and on no 话题) (mode 600) and
 // <dir>/seed.json (ids, no secrets). Prints no secret.
 import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -198,6 +199,15 @@ export async function seed(o: SeedOptions): Promise<Json> {
   await call(url, "PATCH", `/v1/members/${ids.chenchen}`, { token: owner, body: { level: "owner" } });
   writeSecret(join(o.out, "admin-token"), tokens.chenchen);
   writeSecret(join(o.out, "member-token"), tokens.xiaowang);
+  // 从这里开始 (首页): 小林 joined just now with no 岗位 and no 话题, so the checklist shows.
+  const fresh = await call<{ code: string }>(url, "POST", "/v1/invites", {
+    token: owner,
+    body: { name: "小林", kind: "human", level: "member" },
+  });
+  const newcomer = await call<{ token: string }>(url, "POST", "/v1/auth/redeem", {
+    body: { inviteCode: fresh.code, deviceName: "sandbox" },
+  });
+  writeSecret(join(o.out, "newcomer-token"), newcomer.token);
 
   // 团队管理 samples: weekly budgets (Scout's is low, so its sample runs pass 80% and reach it:
   // 要注意 and 活动记录 show it), and an invite nobody accepted that ends in 36 hours.

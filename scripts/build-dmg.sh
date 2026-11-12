@@ -51,7 +51,7 @@ xml() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<<"$1"; }
 BIN="$(bin_name "$PACKAGE")"
 if [ "$skip_build" = 0 ]; then
   log "building $PACKAGE $VERSION (release)"
-  MACOSX_DEPLOYMENT_TARGET="$MACOS_MIN" cargo build --release --locked -p "$PACKAGE" --bin "$BIN" --manifest-path "$ROOT/Cargo.toml"
+  MACOSX_DEPLOYMENT_TARGET="$MACOS_MIN" cargo build --release --locked ${CI:+--timings} -p "$PACKAGE" --bin "$BIN" --manifest-path "$ROOT/Cargo.toml"
 fi
 BIN_PATH="$CARGO_TARGET_DIR/release/$BIN"
 [ -x "$BIN_PATH" ] || die "no binary at $BIN_PATH"

@@ -1,0 +1,56 @@
+name: Release rehearsal
+
+# A dry run of the Release workflow for the version main holds now, twice a week and on
+# demand: every system's build, signing and checks (the DMG against the previous release's,
+# the Windows installer's install, update, rollback and uninstall), with nothing committed,
+# tagged or uploaded. A release that would fail shows here first, not on the day of the
+# release, and the build caches of the release jobs stay warm (GitHub drops a cache that
+# nothing read for seven days), so a release does not start from an empty cache.
+
+on:
+  schedule:
+    - cron: "17 18 * * 1,4"
+  workflow_dispatch:
+
+concurrency:
+  group: release-rehearsal
+  cancel-in-progress: true
+
+permissions:
+  # What the called workflow declares; a dry run writes nothing.
+  contents: write
+  actions: read
+
+jobs:
+  version:
+    name: Read the version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: read
+        run: |
+          . scripts/lib.sh
+          echo "version=$(workspace_version)" >>"$GITHUB_OUTPUT"
+
+  rehearsal:
+    name: Rehearsal
+    needs: version
+    uses: ./.github/workflows/release-jobs.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+      mode: dry-run
+    secrets:
+      SERVERS_JSON: ${{ vars.SERVERS_JSON }}
+      # The real certificates, so that the signatures are the ones a release would have.
+      # Not the admin secret: a dry run uploads nothing.
+      SIGNING_KEY_PEM: ${{ secrets.SIGNING_KEY_PEM }}
+      SIGNING_CERT_PEM: ${{ secrets.SIGNING_CERT_PEM }}
+      WINDOWS_SIGN_PFX_BASE64: ${{ secrets.WINDOWS_SIGN_PFX_BASE64 }}
+      WINDOWS_SIGN_PASSWORD: ${{ secrets.WINDOWS_SIGN_PASSWORD }}
+      WINDOWS_SIGN_CMD: ${{ secrets.WINDOWS_SIGN_CMD }}
+      WINDOWS_SIGN_ENV: ${{ secrets.WINDOWS_SIGN_ENV }}

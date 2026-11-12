@@ -96,7 +96,7 @@ if [ "$skip_build" = 0 ]; then
   packages=(-p desktop -p update-helper)
   if [ "$WITH_DAEMON" = 1 ]; then packages+=(-p daemon); fi
   log "building ${packages[*]} $VERSION (release)"
-  cargo build --release --locked "${packages[@]}" --bins --manifest-path "$ROOT/Cargo.toml"
+  cargo build --release --locked ${CI:+--timings} "${packages[@]}" --bins --manifest-path "$ROOT/Cargo.toml"
 fi
 BIN_DIR="${WINDOWS_BIN_DIR:-$CARGO_TARGET_DIR/release}"
 APP_BIN="$BIN_DIR/$(bin_name desktop).exe"

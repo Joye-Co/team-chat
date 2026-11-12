@@ -7,6 +7,8 @@
 # Usage: scripts/release.sh <version> [--env staging|production] [--notes <file>]
 #                           (--windows-installer <setup.exe> [--asset <file>]... | --without-windows)
 #                           [--dry-run [--build]] [--same-as <dmg>]
+#                           [--prebuilt <dir>] [--linux-daemon <file>]
+#        scripts/release.sh <version> --build-only [--dry-run] [--same-as <dmg>] [--resume]
 #        scripts/release.sh <version> ... --resume
 #        scripts/release.sh <version> --reupload
 #        scripts/release.sh <version> --upload-only [--platform windows|linux-x86_64]
@@ -26,6 +28,19 @@
 #                  DMG and the daemon into dist/, then restore Cargo.toml, Cargo.lock, CHANGELOG.md
 #   --same-as      also check that the new DMG has the same designated requirement as <dmg>
 #                  (the previous release), as scripts/test-dmg.sh --same-as does
+#   --build-only   the first half of a release, for a run that builds every system at the same
+#                  time (the Release workflow): the checks, the version, the build and the
+#                  checks of the DMG and the daemon into dist/, and the version files of the
+#                  release commit into dist/release-files/. Commits, tags and uploads nothing,
+#                  and needs no Windows installer. With --dry-run a failed check is reported
+#                  and the build goes on
+#   --prebuilt     the second half: take the DMG, the Mac daemon and release-files/ from <dir>
+#                  (what --build-only wrote on a Mac, at this same commit) instead of
+#                  building; then the commit, the tag, the GitHub Release and the uploads as
+#                  ever. Runs on any system, without cargo
+#   --linux-daemon the Linux daemon of this version (scripts/build-daemon.sh on Linux): goes to
+#                  the GitHub Release with the other files and to the server as the
+#                  linux-x86_64 file of the release
 #   --resume       finish a release that stopped after its tag was pushed and before the GitHub
 #                  Release was made: the tag v<version> exists on main, the release does not.
 #                  Builds the tag's source again (check it out first), makes no commit and no
@@ -53,7 +68,8 @@
 # Env: CHAT_API_BASE overrides the server URL. The admin secret is read from
 #      ~/.config/team-chat/<env>/admin-secret (TEAM_CHAT_CONFIG_DIR overrides
 #      ~/.config/team-chat) and is never printed. The Release workflow
-#      (.github/workflows/release.yml) runs this script on a macOS runner.
+#      (.github/workflows/release.yml) runs --build-only on a macOS runner while the Windows
+#      and Linux jobs build, then --prebuilt in the job that publishes.
 set -euo pipefail
 # shellcheck source=scripts/lib.sh
 . "$(dirname "$0")/lib.sh"
@@ -72,6 +88,9 @@ ADD_WINDOWS=""
 ASSETS=()
 RESUME=0
 REUPLOAD=0
+BUILD_ONLY=0
+PREBUILT=""
+LINUX_DAEMON=""
 ALLOW_MISSING_ROUTE=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -88,6 +107,11 @@ while [ $# -gt 0 ]; do
     --windows-installer=*) WINDOWS_INSTALLER="${1#*=}"; shift ;;
     --without-windows) WITHOUT_WINDOWS=1; shift ;;
     --resume) RESUME=1; shift ;;
+    --build-only) BUILD_ONLY=1; shift ;;
+    --prebuilt) PREBUILT="${2:-}"; shift 2 ;;
+    --prebuilt=*) PREBUILT="${1#*=}"; shift ;;
+    --linux-daemon) LINUX_DAEMON="${2:-}"; shift 2 ;;
+    --linux-daemon=*) LINUX_DAEMON="${1#*=}"; shift ;;
     --reupload) REUPLOAD=1; shift ;;
     --allow-missing-route) ALLOW_MISSING_ROUTE=1; shift ;;
     --add-windows) ADD_WINDOWS="${2:-}"; shift 2 ;;
@@ -96,14 +120,13 @@ while [ $# -gt 0 ]; do
     --asset=*) ASSETS+=("${1#*=}"); shift ;;
     --same-as) SAME_AS="${2:-}"; shift 2 ;;
     --same-as=*) SAME_AS="${1#*=}"; shift ;;
-    -h | --help) sed -n '2,58p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,71p' "$0"; exit 0 ;;
     -*) die "unknown option: $1" ;;
     *) [ -z "$VERSION" ] || die "more than one version given"; VERSION="$1"; shift ;;
   esac
 done
 
 [ -n "$VERSION" ] || die "usage: scripts/release.sh <version> [--env staging|production] [--notes <file>] (--windows-installer <setup.exe> | --without-windows) [--dry-run [--build]] [--same-as <dmg>] | --upload-only [--platform windows|linux-x86_64] | --add-windows <setup.exe>"
-[ "$BUILD" = 0 ] || [ "$DRY_RUN" = 1 ] || die "--build goes with --dry-run (a real run always builds)"
 case "$PLATFORM" in macos | windows | linux-x86_64) ;; *) die "--platform must be macos, windows or linux-x86_64" ;; esac
 [ "$PLATFORM" = macos ] || [ "$UPLOAD_ONLY" = 1 ] || die "--platform $PLATFORM goes with --upload-only: that file is built on its own system (the Release workflow's Windows and Linux jobs)"
 [ -z "$WINDOWS_INSTALLER" ] || [ "$WITHOUT_WINDOWS" = 0 ] || die "--windows-installer and --without-windows contradict each other"
@@ -116,6 +139,15 @@ if [ "$REUPLOAD" = 1 ]; then
     die "--reupload stands alone (with --env, --notes, --dry-run)"
 fi
 [ "$RESUME" = 0 ] || [ "$UPLOAD_ONLY" = 0 ] || die "--resume is for a release, not for --upload-only"
+if [ "$BUILD_ONLY" = 1 ]; then
+  [ "$UPLOAD_ONLY" = 0 ] && [ "$REUPLOAD" = 0 ] && [ -z "$ADD_WINDOWS" ] && [ -z "$WINDOWS_INSTALLER" ] && [ "$WITHOUT_WINDOWS" = 0 ] && [ -z "$PREBUILT" ] && [ -z "$LINUX_DAEMON" ] ||
+    die "--build-only builds the Mac's files and publishes nothing (with --env, --notes, --same-as, --dry-run, --resume)"
+  BUILD=1
+fi
+[ "$BUILD" = 0 ] || [ "$DRY_RUN" = 1 ] || [ "$BUILD_ONLY" = 1 ] || die "--build goes with --dry-run (a real run always builds)"
+if [ -n "$PREBUILT" ] || [ -n "$LINUX_DAEMON" ]; then
+  [ "$UPLOAD_ONLY" = 0 ] && [ "$REUPLOAD" = 0 ] && [ -z "$ADD_WINDOWS" ] && [ "$BUILD" = 0 ] || die "--prebuilt and --linux-daemon go with a release"
+fi
 VERSION="${VERSION#v}"
 valid_semver "$VERSION" || die "version '$VERSION' is not semver (for example 0.2.0 or 0.2.0-rc.1)"
 # The server takes only MAJOR.MINOR.PATCH for app updates. A prerelease goes to GitHub only.
@@ -152,6 +184,16 @@ while [ "$i" -lt "${#ASSETS[@]}" ]; do
 done
 if [ -n "$WINDOWS_INSTALLER" ] && [ -e "$WINDOWS_INSTALLER" ]; then WINDOWS_INSTALLER="$(abs "$WINDOWS_INSTALLER")"; fi
 if [ -n "$ADD_WINDOWS" ] && [ -e "$ADD_WINDOWS" ]; then ADD_WINDOWS="$(abs "$ADD_WINDOWS")"; fi
+LINUX_NAME="$(product slug)-daemon-$VERSION-x86_64-unknown-linux-gnu"
+if [ -n "$LINUX_DAEMON" ]; then
+  [ -s "$LINUX_DAEMON" ] || die "no Linux daemon at $LINUX_DAEMON"
+  [ "$(basename "$LINUX_DAEMON")" = "$LINUX_NAME" ] || die "the Linux daemon must be $LINUX_NAME, not $(basename "$LINUX_DAEMON")"
+  LINUX_DAEMON="$(abs "$LINUX_DAEMON")"
+fi
+if [ -n "$PREBUILT" ]; then
+  [ -d "$PREBUILT" ] || die "no folder at $PREBUILT (--prebuilt)"
+  PREBUILT="$(cd "$PREBUILT" && pwd)"
+fi
 # use_platform <macos|windows> [<file>]: what upload_to_server sends next: the DMG to the release
 # route every server has, or the Windows installer to the route for the files of other
 # platforms (docs/protocol.md).
@@ -306,7 +348,9 @@ problem() {
 cd "$ROOT"
 need gh
 # A release is for both systems. This comes first: nothing below matters without it.
-if [ -n "$WINDOWS_INSTALLER" ]; then
+if [ "$BUILD_ONLY" = 1 ]; then
+  : # The half that builds the Mac's files: the installer is the publishing half's business.
+elif [ -n "$WINDOWS_INSTALLER" ]; then
   why="$(windows_installer_problem "$WINDOWS_INSTALLER")"
   [ -z "$why" ] || problem "$why"
 elif [ "$WITHOUT_WINDOWS" = 0 ]; then
@@ -351,7 +395,7 @@ CURRENT="$(workspace_version)"
 [ -s "$ROOT/docs/releases/$VERSION.md" ] || problem "no release notes at docs/releases/$VERSION.md"
 grep -qE "^## ${VERSION//./\\.} \((unreleased|[0-9]{4}-[0-9]{2}-[0-9]{2})\)$" CHANGELOG.md || problem "CHANGELOG.md has no $VERSION section"
 if grep -qE 'Draft:|草稿：' "$ROOT/docs/releases/$VERSION.md" 2>/dev/null; then problem "docs/releases/$VERSION.md still has a draft note"; fi
-[ -s "$SECRET_FILE" ] || log "note: no admin secret at $SECRET_FILE; the server upload will be skipped"
+[ -s "$SECRET_FILE" ] || [ "$BUILD_ONLY" = 1 ] || log "note: no admin secret at $SECRET_FILE; the server upload will be skipped"
 
 # release_ops: a release embeds only the server URLs (the 正式服务器 / 测试服务器 menu), never
 # the local roster (the character art is in the repository). Builds against an ops dir that holds servers.json alone,
@@ -366,9 +410,47 @@ release_ops() {
 
 restore() { git checkout --quiet -- Cargo.toml Cargo.lock CHANGELOG.md 2>/dev/null || true; }
 
+# The files of the release commit, as --build-only keeps them next to its build.
+RELEASE_FILES=(Cargo.toml Cargo.lock CHANGELOG.md)
+
+# take_prebuilt: what --build-only built at this commit instead of a build here: the version
+# files into the working tree (not for --resume: the tag holds them), the DMG and the daemon
+# into dist/. Every file is checked against the .sha256 written next to it. Sets DAEMON.
+take_prebuilt() {
+  local f found
+  found="$(find "$PREBUILT" -maxdepth 1 -type f -name "*-daemon-$VERSION-*-apple-darwin" | head -n 1)"
+  [ -s "$PREBUILT/$(basename "$DMG")" ] || die "--prebuilt: no $(basename "$DMG") in $PREBUILT"
+  [ -n "$found" ] || die "--prebuilt: no Mac daemon of $VERSION in $PREBUILT"
+  for f in "$PREBUILT"/*.sha256; do
+    [ -e "$f" ] || continue
+    (cd "$PREBUILT" && shasum -a 256 -c "$(basename "$f")" >/dev/null) || die "--prebuilt: $(basename "${f%.sha256}") does not match its .sha256"
+  done
+  if [ "$RESUME" = 0 ]; then
+    for f in "${RELEASE_FILES[@]}"; do
+      [ -e "$PREBUILT/release-files/$f" ] || die "--prebuilt: no release-files/$f in $PREBUILT"
+      cp "$PREBUILT/release-files/$f" "$ROOT/$f"
+    done
+  fi
+  [ "$(workspace_version)" = "$VERSION" ] || die "--prebuilt: the version files hold $(workspace_version), not $VERSION"
+  "$ROOT/scripts/release-check.sh" "$VERSION" || die "release metadata of $VERSION is not final"
+  mkdir -p "$DIST"
+  [ "$PREBUILT" = "$(cd "$DIST" && pwd)" ] || cp "$PREBUILT/$(basename "$DMG")" "$found" "$DIST/"
+  DAEMON="$DIST/$(basename "$found")"
+  log "using the build of $VERSION in $PREBUILT: $(basename "$DMG"), $(basename "$DAEMON")"
+}
+
+# keep_release_files: the version files of the release commit into dist/release-files/, for
+# the run that publishes this build (--prebuilt).
+keep_release_files() {
+  local f
+  rm -rf "$DIST/release-files" && mkdir -p "$DIST/release-files"
+  for f in "${RELEASE_FILES[@]}"; do cp "$ROOT/$f" "$DIST/release-files/$f"; done
+}
+
 # set_version_and_build: sets the version and the CHANGELOG date in the working tree, checks the
 # release metadata, builds and checks the DMG and the daemon. Sets DAEMON.
 set_version_and_build() {
+  if [ -n "$PREBUILT" ]; then take_prebuilt; return 0; fi
   need cargo
   release_ops
   log "setting version $VERSION"
@@ -401,7 +483,8 @@ Release plan (dry run, nothing changed):
   push           origin HEAD:main, then tag $TAG
   GitHub         ${REPO:-?}: release $TAG$([[ "$VERSION" == *-* ]] && printf ' (prerelease)')
                  assets: $NAME-$VERSION.dmg, daemon (GitHub shows their SHA-256); the
-                 Linux daemon comes from its own job
+                 Linux daemon: ${LINUX_DAEMON:-from its own job}
+  build          $(if [ -n "$PREBUILT" ]; then printf 'none: the files of %s' "$PREBUILT"; elif [ "$BUILD_ONLY" = 1 ]; then printf 'only (--build-only): nothing is published by this run'; else printf 'here'; fi)
   Windows        $(if [ -n "$WINDOWS_INSTALLER" ]; then printf '%s and %s more file(s), on the GitHub Release and the server with the DMG' "$(basename "$WINDOWS_INSTALLER")" "${#ASSETS[@]}"; elif [ "$WITHOUT_WINDOWS" = 1 ]; then printf 'none, on purpose (--without-windows)'; else printf 'missing: a real run would stop'; fi)
   notes          ${NOTES:-generated by GitHub}
   server         $([ "$SERVER_UPLOAD" = 1 ] && printf 'PUT %s/v1/admin/releases/%s (%s)' "$BASE" "$VERSION" "$ENV_NAME" || printf 'none: a prerelease is not offered as an app update')
@@ -411,8 +494,21 @@ PLAN
   if [ "$BUILD" = 1 ]; then
     trap 'restore' EXIT
     set_version_and_build
+    [ "$BUILD_ONLY" = 0 ] || keep_release_files
     log "dry run: built and checked $(basename "$DMG") and $(basename "$DAEMON") in $DIST; nothing committed, tagged or uploaded"
+  elif [ -n "$PREBUILT" ]; then
+    # The files a real run would publish must be there and whole.
+    trap 'restore' EXIT
+    if (take_prebuilt); then log "dry run: the build in $PREBUILT is complete"; else log "dry run: the build in $PREBUILT cannot be published"; exit 1; fi
   fi
+  exit 0
+fi
+
+if [ "$BUILD_ONLY" = 1 ]; then
+  trap 'restore' EXIT
+  set_version_and_build
+  keep_release_files
+  log "built and checked $(basename "$DMG") and $(basename "$DAEMON") in $DIST; nothing committed, tagged or uploaded (publish with --prebuilt $DIST)"
   exit 0
 fi
 
@@ -446,6 +542,7 @@ log "creating GitHub release $TAG"
 gh_args=(release create "$TAG" "$DMG" "$DAEMON" --verify-tag --title "$NAME $VERSION")
 # Both systems in one step: the release never exists with the DMG alone.
 if [ -n "$WINDOWS_INSTALLER" ]; then gh_args+=("$WINDOWS_INSTALLER" ${ASSETS[@]+"${ASSETS[@]}"}); fi
+if [ -n "$LINUX_DAEMON" ]; then gh_args+=("$LINUX_DAEMON"); fi
 if [ -n "$NOTES" ]; then gh_args+=(--notes-file "$NOTES"); else gh_args+=(--generate-notes); fi
 if [[ "$VERSION" == *-* ]]; then gh_args+=(--prerelease); fi
 gh "${gh_args[@]}"
@@ -453,6 +550,10 @@ gh "${gh_args[@]}"
 upload_to_server
 if [ -n "$WINDOWS_INSTALLER" ]; then
   use_platform windows "$WINDOWS_INSTALLER"
+  upload_to_server
+fi
+if [ -n "$LINUX_DAEMON" ]; then
+  use_platform linux-x86_64 "$LINUX_DAEMON"
   upload_to_server
 fi
 log "release $TAG done"
