@@ -117,16 +117,14 @@ pub struct VmConfig {
     /// user's home that start with a dot are skipped.
     #[serde(default)]
     pub shares: Vec<PathBuf>,
-    /// One folder per bot here is that bot's home folder in every VM it runs in, so what it
-    /// installs, clones and signs in to is still there in its next run, with its CLIs' folders
-    /// (session records). Empty: the home folder is part of the run's scratch disk and goes
-    /// with the VM; the CLIs' folders are then kept in `<dir>/cli/<bot>`.
+    /// Where earlier daemon versions kept each bot's home folder. Still read (an old config
+    /// parses): a resumed session is looked for in `<homes>/<bot>`, and the cleanup removes
+    /// what is left there.
     #[serde(default = "default_vm_homes")]
     pub homes: PathBuf,
-    /// Size of each bot's home folder: a disk image of this size that the root helper mounts at
-    /// `<homes>/<bot>`. 0: a plain folder without a limit.
-    #[serde(default = "default_vm_home_gb")]
-    pub home_gb: u32,
+    /// The size of those homes. Ignored; `daemon doctor` says so when it is set.
+    #[serde(default)]
+    pub home_gb: Option<u32>,
 }
 
 fn default_vm_dir() -> PathBuf {
@@ -149,9 +147,6 @@ fn default_vm_helper() -> String {
 }
 fn default_vm_homes() -> PathBuf {
     PathBuf::from("/srv/runner/homes")
-}
-fn default_vm_home_gb() -> u32 {
-    20
 }
 
 /// Why a `takeover_url` cannot be reported, or None when it is fine: it must be a
@@ -485,13 +480,24 @@ kind = "claude"
 # rootfs = "/srv/runner/images/base.ext4"
 # vcpus = 2
 # mem_mib = 4096                     # a cap; the host gives only what the VM touches
-# homes = "/srv/runner/homes"         # one home folder per bot, kept between runs ("" = not kept)
-# home_gb = 20                        # each home is a disk image of this size (0 = no limit)
 "#;
 
 #[cfg(test)]
 mod tests {
     use super::takeover_url_problem as p;
+
+    /// A config written for the per-member homes still parses; the settings do nothing.
+    #[test]
+    fn an_old_vm_config_with_homes_parses() {
+        let c = super::Config::parse(
+            "server_url = \"http://127.0.0.1:1\"\ntoken_file = \"/nonexistent\"\n[runtimes.claude]\nkind = \"claude\"\n[vm]\nkernel = \"/k\"\nrootfs = \"/r\"\nhomes = \"/srv/runner/homes\"\nhome_gb = 20\n",
+        )
+        .unwrap();
+        let vm = c.vm.unwrap();
+        assert_eq!(vm.home_gb, Some(20));
+        assert_eq!(vm.homes, std::path::PathBuf::from("/srv/runner/homes"));
+        assert!(!super::EXAMPLE.contains("home_gb"));
+    }
 
     #[test]
     fn takeover_url_rules() {

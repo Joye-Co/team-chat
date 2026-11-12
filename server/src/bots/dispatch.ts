@@ -42,6 +42,13 @@ export const LIMIT_SLACK_MS = 60_000;
 export const CONTEXT_TOOLS_RULE =
   "The topic lines above are only part of the topic. Read older messages with `chat-run topic history --before <seq>`, a whole message with `chat-run topic message --id <m id>` (a quote `in t <t id>` is in another topic: add `--topic <t id>`), search with `chat-run search --query <text>` (add `--group` for every topic of the group) and get a file with `chat-run file get --id <f id>` (leave out `--out`: the file goes to the run's downloads folder, outside your working folder, and the printed path says where). Look things up instead of guessing.";
 
+/**
+ * design-visibility 3.7: a run with a person may read that person's other groups (feature
+ * `groups`). Names no person.
+ */
+export const READ_GROUPS_NOTE =
+  "Besides this group you may read the other groups of the person you work for: `chat-run group list`, then `--in <group id>`, or `chat-run search --query … --all`. Ids of topics, cards, 产出 and files there work as they are. People here may not be in those groups: bring over only what the request needs and say which group it came from. Other people's direct conversations and side chats are never readable.";
+
 /** Topic texts the bot posts. Product words only (PRODUCT.md): no developer words. */
 export const TEXT = {
   /** No computer is set up for this member at all (机 2.10: each reason has its own text). */
@@ -672,6 +679,8 @@ export function buildPrompt(opts: {
   context?: string;
   /** The machine answers chat-run context ops (feature "context"). */
   contextTools?: boolean;
+  /** The run may read its person's other groups (feature "groups"): `READ_GROUPS_NOTE`. */
+  readGroups?: boolean;
   /** The front desk's work order (agent/frontdesk.ts `briefText`). */
   brief?: string;
   /** 沉淀: the memory index (memory/inject.ts), reference material. */
@@ -695,6 +704,7 @@ export function buildPrompt(opts: {
           "The topic, oldest first. Each message is `[#seq m id · author · time]`; files, 产出, quotes and cards follow it on indented lines:",
           opts.context,
           ...(opts.contextTools ? ["", CONTEXT_TOOLS_RULE] : []),
+          ...(opts.readGroups ? ["", READ_GROUPS_NOTE] : []),
         ]
       : ["Recent messages of the topic, oldest first:", ...opts.messages.map((m) => `${name(m.authorId)}: ${m.body}`)]),
     "",
@@ -719,6 +729,7 @@ export function buildResumePrompt(opts: {
   followUps?: ContextMessage[];
   refs?: string;
   contextTools?: boolean;
+  readGroups?: boolean;
   brief?: string;
 }): string {
   const name = (id: string) => opts.names.get(id) ?? id;
@@ -729,6 +740,7 @@ export function buildResumePrompt(opts: {
   if (opts.refs) lines.push("", REFS_RULE, "", opts.refs);
   for (const f of opts.followUps ?? []) lines.push("", `Follow-up from ${name(f.authorId)}:`, f.body);
   if (opts.contextTools) lines.push("", CONTEXT_TOOLS_RULE);
+  if (opts.readGroups) lines.push("", READ_GROUPS_NOTE);
   return lines.join("\n");
 }
 

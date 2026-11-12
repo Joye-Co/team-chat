@@ -1,0 +1,21 @@
+{
+  "kind": "RunGroupsResponse",
+  "valid": true,
+  "value": {
+    "groups": [
+      {
+        "id": "01JBX0DM00000000000000000B",
+        "name": "张三",
+        "kind": "dm",
+        "current": true
+      },
+      {
+        "id": "01JBX0GENERAL000000000000A",
+        "name": "产品",
+        "kind": "group",
+        "purpose": "需求和排期",
+        "current": false
+      }
+    ]
+  }
+}

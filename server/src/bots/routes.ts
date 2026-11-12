@@ -165,7 +165,8 @@ export async function machineRun(request: Request, env: Parameters<typeof deskSt
   const machine = await authenticateMachine(request, env.DB);
   const run = await runIndex(env.DB, runId);
   if (!run || run.machine_id !== machine.id) throw new ApiError("not_found", "run not found");
-  const info = await deskStub(env, run.bot_id).getRun(run.bot_id, run.id);
+  const desk = deskStub(env, run.bot_id);
+  const [info, forId] = await Promise.all([desk.getRun(run.bot_id, run.id), desk.readerOf(run.bot_id, run.id)]);
   if (!info || info.endedAt !== undefined) throw new ApiError("conflict", "the run ended", "run.ended");
   if (info.kind === RUN_KIND_ASIDE && !opts.read) throw new ApiError("forbidden", "a side chat run is read only", "output.read_only");
   const bot = await getMember(env.DB, run.bot_id);
@@ -173,7 +174,9 @@ export async function machineRun(request: Request, env: Parameters<typeof deskSt
     throw new ApiError("forbidden", "the run's member is not in the group");
   }
   const writer: WriterContext = { memberId: run.bot_id, tokenId: `machine:${machine.id}`, member: { level: bot.level, kind: bot.kind } };
-  return { run, writer, info };
+  // forId (design-visibility 3.1): the person the run reads for; server only, never in a response,
+  // prompt or log.
+  return { run, writer, info, forId };
 }
 
 export function registerBotRoutes(): void {

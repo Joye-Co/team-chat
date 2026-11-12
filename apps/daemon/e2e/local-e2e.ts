@@ -20,7 +20,8 @@
 // cards close in place (同意, 拒绝, 没用上); the team's model is used by a member without one;
 // each mention reaches its own member and a follow-up without one goes to the topic's latest;
 // a request for an offline computer waits for it; Codex and ACP runs stop gated actions by code;
-// a run reads the group's members, 产出, cards, decisions and topic state with `chat-run`.
+// a run reads the group's members, 产出, cards, decisions and topic state with `chat-run`, and
+// lists the other groups of the person it works for and searches them (`group list`, `search --all`).
 //
 // Usage (from the repo root): bun apps/daemon/e2e/local-e2e.ts [--port 8793] [--keep]
 // With --vm on a Linux runner host (scripts/runner/host-setup.sh), every run's CLI runs in a
@@ -723,6 +724,7 @@ async function landedChecks(x: Landed) {
   out.relay = await relayCheck(x);
   out.gatesByCode = await gatesByCodeCheck(x);
   out.readCommands = await readCommandsCheck(x);
+  out.readGroups = await readGroupsCheck(x);
   if (x.daemon) out.offlineComputer = await offlineComputerCheck(x);
   return out;
 }
@@ -1097,6 +1099,29 @@ async function readCommandsCheck({ alice, bot, groupId, work, events, ws }: Land
   if (!Array.isArray(ok("decisions").decisions)) throw new Error(`decisions list: ${JSON.stringify(got.decisions)}`);
   step("chat-run read commands: a run in another topic read the members, that topic's state and 产出, the 产出's text, the card and the decisions");
   return { artifactId: listed.id, cardId };
+}
+
+/**
+ * Reads across groups (design-visibility 3.7): Alice is in a second group the AI member is not
+ * in; a run she asks for lists that group with `chat-run group list` and finds her message there
+ * with `chat-run search --all`.
+ */
+async function readGroupsCheck({ owner, alice, bot, groupId, work, events, ws }: Landed) {
+  const g2 = (await call("POST", "/v1/groups", { token: owner, body: { name: "产品群", memberIds: [alice.member.id] } })).group.id as string;
+  const word = `xgroup${crypto.randomUUID().replaceAll("-", "").slice(0, 10)}`;
+  const said = await say(events, ws, g2, `导出格式 ${word}`);
+  const ask = await say(events, ws, groupId, `@dev groupsread find:${word}`, { mentions: [bot.member.id] });
+  const run = await ranDone(events, ask.topicId, "groups: read another group");
+  const got = JSON.parse(readFileSync(join(workOf(work, run.id), "groupsread.json"), "utf8"));
+  if (got.groups?.code !== 0 || got.search?.code !== 0) throw new Error(`chat-run group list / search --all failed: ${JSON.stringify(got).slice(0, 600)}`);
+  const groups = got.groups.out.groups as any[];
+  if (!groups.some((g) => g.id === groupId && g.current === true) || !groups.some((g) => g.id === g2 && g.current === false)) {
+    throw new Error(`group list: ${JSON.stringify(groups)}`);
+  }
+  const hit = (got.search.out.hits as any[]).find((h) => h.messageId === said.id);
+  if (!hit || hit.groupId !== g2 || hit.groupName !== "产品群") throw new Error(`search --all: ${JSON.stringify(got.search.out).slice(0, 600)}`);
+  step("chat-run reads across groups: a run for Alice listed her other group and found her message there with search --all");
+  return { groupId: g2, hit: hit.messageId };
 }
 
 /**

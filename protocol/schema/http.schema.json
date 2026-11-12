@@ -37189,6 +37189,9 @@
               "required": [
                 "kind"
               ]
+            },
+            "resumeMissed": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -38638,6 +38641,9 @@
                     "required": [
                       "kind"
                     ]
+                  },
+                  "resumeMissed": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -38958,6 +38964,13 @@
                 "maximum": 9007199254740991
               },
               "snippet": {
+                "type": "string"
+              },
+              "groupId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "groupName": {
                 "type": "string"
               }
             },
@@ -39529,6 +39542,13 @@
           "type": "string",
           "minLength": 1
         },
+        "groupId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "groupName": {
+          "type": "string"
+        },
         "message": {
           "type": "object",
           "properties": {
@@ -39965,6 +39985,13 @@
           "type": "string",
           "minLength": 1
         },
+        "groupId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "groupName": {
+          "type": "string"
+        },
         "title": {
           "type": "string"
         },
@@ -39977,6 +40004,48 @@
         "topicId",
         "title",
         "text"
+      ]
+    },
+    "RunGroupsResponse": {
+      "type": "object",
+      "properties": {
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "group",
+                  "dm"
+                ]
+              },
+              "purpose": {
+                "type": "string"
+              },
+              "current": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "kind",
+              "current"
+            ]
+          }
+        }
+      },
+      "required": [
+        "groups"
       ]
     },
     "FrontDeskDecision": {
@@ -44674,6 +44743,9 @@
               "required": [
                 "kind"
               ]
+            },
+            "resumeMissed": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -45004,6 +45076,9 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 128
+            },
+            "fullPrompt": {
+              "type": "string"
             },
             "gates": {
               "maxItems": 16,
