@@ -89,7 +89,10 @@ AI members.
 3. **Check the three lines** (the card of this computer in **团队管理 › 电脑**): the background
    service runs, Claude Code or Codex was found, and it is signed in. A missing line gives the
    command to run (with **重新检查**) or a **登录** button. AI members work on this computer only
-   once all three are fine.
+   once all three are fine. Only owners and admins can open 团队管理; a member who uses their own
+   computer checks in a terminal instead: `claude --version` (or `codex --version`) prints a
+   version, and `claude` (or `codex login`) signs the CLI in. The app has no member path to these
+   checks yet.
 4. **Add an AI member** (an admin does this; used alone, you are the admin): **团队管理 › 成员 ›
    添加 AI 成员**. Give it a name and a 岗位, choose **在电脑上工作**, pick its **运行方式** from the
    list (only those the computers have), and under **在哪台电脑干活** this computer or **任意一台空闲电脑**.

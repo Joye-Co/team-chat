@@ -257,9 +257,10 @@ HomeUse        = { memberId, usedBytes /* on the host disk */, sizeBytes? /* abs
 
 ## Accounts and keys (feature `accounts`)
 
-Whoever manages the machine (an admin for a team machine, its owner for a personal one) signs
-its CLIs in and gives it API keys from the app (团队管理 › 账号与密钥: 订阅账号 and API 密钥),
-never through a shell on the machine. A daemon that can do this reports feature
+An admin signs a machine's CLIs in and gives it API keys from the app (团队管理 › 账号与密钥:
+订阅账号 and API 密钥), never through a shell on the machine. 团队管理 opens only for owners and
+admins, so a member who registered a personal machine signs its CLI in in a terminal on that
+machine (`claude`, `codex login`); the app has no member path for it yet. A daemon that can do this reports feature
 `accounts` and its public key; the server sends these frames only to such a daemon.
 
 ```ts
