@@ -142,7 +142,8 @@ describe("several AI members in one topic", () => {
     expect(b.topicId).toBe(topicId);
     // Each acknowledges the request.
     await waitUntil(() => c.events().filter((e) => e.type === "reaction.changed" && e.data.messageId === sent.message.id && e.data.emoji === ACK_EMOJI).length === 2);
-    await waitUntil(() => lastParticipants(c, topicId)?.length === 2, 5000, "two participants");
+    // Both runs mark their member working on their own: wait for the second mark, not just the second row.
+    await waitUntil(() => lastParticipants(c, topicId)?.filter((p) => p.working).length === 2, 5000, "two working participants");
     expect(lastParticipants(c, topicId)?.map((p) => [p.memberId, p.working])).toEqual([
       [w.bot.id, true],
       [ops.id, true],
