@@ -7,6 +7,7 @@
   },
   "scripts": {
     "test": "bun test",
+    "gen:protocol": "bun scripts/gen.ts",
     "gen:fixtures": "bun scripts/gen-fixtures.ts",
     "gen:schema": "bun scripts/gen-schema.ts",
     "typecheck": "tsc --noEmit"

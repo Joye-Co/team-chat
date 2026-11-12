@@ -2,6 +2,7 @@
 // daemon's golden files (apps/daemon/tests/fixtures/machine/*.jsonl), so both sides share them.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { monitorHomes } from "./fixtures-homes.ts";
 
 type Obj = Record<string, unknown>;
 export type BotsCtx = {
@@ -182,7 +183,7 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
     members: [{ memberId: ID.bot, running: 6, waiting: 2, queued: 1, cpuCores: 2.65, memBytes: 10307921510, tokensToday: 6800000, finishedToday: 48 }],
     lastFailure: { runId: "01JA0000000000000000000R09", memberId: ID.bot, at: T0 - 900_000, title: "对一下十月的账单" },
   };
-  ok("http/machine-monitor.json", "MachineMonitor", monitor);
+  ok("http/machine-monitor.json", "MachineMonitor", { ...monitor, homes: monitorHomes(ID) });
   ok("http/machine-monitor-offline.json", "MachineMonitor", {
     machine: { id: R.machine, name: "laptop", connected: false },
     series: { range: "15m", from: T0 - 900_000, stepMs: 30_000, cpuPct: [], memPct: [], diskPct: [], netRxBps: [], netTxBps: [] },

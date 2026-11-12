@@ -20,6 +20,7 @@ import { truthfulDoneCard } from "../proof";
 import { loadRunner } from "../store";
 import { type RunRow, result } from "./core";
 import { DeskTakeover } from "./takeover";
+import { isChainStop } from "./delegate_card";
 
 /** One coalescing window per card (or page version): the newest event per block in 3 s. */
 export const COALESCE_MS = 3000;
@@ -90,6 +91,11 @@ export abstract class DeskInteract extends DeskTakeover {
    */
   async interaction(botId: string, x: InteractionIn): Promise<DeskExpect> {
     this.bind(botId);
+    // design-relay R2: 全部停止 on a hand-over card stops the piece of work; it is no run input.
+    if (x.source.kind === "card" && isChainStop(x.source.actionId)) {
+      if (x.event === "action.press") await this.chainStopPressed(x.groupId, x.source.messageId, x.source.actionId, x.actorId);
+      return { mode: "none" };
+    }
     return this.serial("interact", async () => {
       if (!(await this.botActive())) return { mode: "none" };
       const runner = await loadRunner(this.env.DB, botId);

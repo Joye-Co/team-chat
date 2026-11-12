@@ -568,6 +568,14 @@ export abstract class DeskRuns extends DeskCore {
   }
 
   protected async assign(r: RunRow, runner: BotRunner, machine: MachineView, prompt: string): Promise<void> {
+    // 分出去 (design-relay R2): parts that came back while the run waited for a machine; kept in
+    // its prompts, so a later assignment of the run carries them too.
+    const parts = this.takeParts(r.id);
+    if (parts !== null) {
+      prompt = `${prompt}\n\n${parts}`;
+      const resume = this.meta(`prompt_resume:${r.id}`);
+      if (resume !== null) this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `prompt_resume:${r.id}`, `${resume}\n\n${parts}`);
+    }
     const frame = this.assignFrame(r, runner, prompt, machine, await workerModel(this.env.DB, runner.runtime));
     // Gated actions: the team's checked kinds, to a machine whose CLI stops them; kinds a person
     // approved for this piece of work are left out.
