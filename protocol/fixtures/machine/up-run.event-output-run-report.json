@@ -1,0 +1,20 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "chat-run report: the CLI says how its work ended (done, blocked, waiting)",
+  "value": {
+    "t": "run.event",
+    "runId": "01JBX0RUN000000000000000AU",
+    "seq": 22,
+    "at": 1762128000022,
+    "event": {
+      "type": "output",
+      "outputId": "o3",
+      "op": "run.report",
+      "body": {
+        "state": "blocked",
+        "text": "需要 staging 的数据库密码才能接着做"
+      }
+    }
+  }
+}

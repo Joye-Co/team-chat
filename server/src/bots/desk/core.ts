@@ -37,6 +37,7 @@ import { ACK_EMOJI } from "../proof";
 import type { TopicMessage } from "../room";
 import type { WorkState } from "../participants";
 import type { Brief } from "../../agent/frontdesk";
+import { endedPhase, needsReply, reportOf } from "./report";
 
 export type RunRow = {
   id: string;
@@ -124,6 +125,9 @@ export type RunRow = {
   stall_step: number;
   /** A nudge was really sent for this piece of work (盯 1.12: the note names only real tries). Carried over. */
   nudge_sent: number;
+  // desk-report (接 4.2)
+  /** JSON of the run's latest `chat-run report` (report.ts), or null. */
+  report: string | null;
   // desk-run-code (design-relay R5)
   /** JSON of `RunCode` from run.done (branch, head, pushed), or null when not known. */
   code: string | null;
@@ -455,6 +459,11 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
           up: `ALTER TABLE runs ADD COLUMN nudge_sent INTEGER NOT NULL DEFAULT 0;`,
         },
         {
+          // 接 4.2: the run's latest `chat-run report`. Old rows: NULL (no report: done as before).
+          name: "desk-report",
+          up: `ALTER TABLE runs ADD COLUMN report TEXT;`,
+        },
+        {
           // Usable (design-relay R5): where the run left its code (`run.done.code`, JSON).
           name: "desk-run-code",
           up: `ALTER TABLE runs ADD COLUMN code TEXT;`,
@@ -562,7 +571,20 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
       run.queuedAt = r.queued_at;
       run.queuePosition = this.queuePosition(r);
     }
+    // 接 4.2: an ended run's phase follows its report (design-takeover 3.1, rule 1).
+    if (r.ended_at !== null && !r.external) {
+      const report = reportOf(r);
+      const { phase, waitingFor } = endedPhase(r.status, report, needsReply(report) && this.superseded(r));
+      run.phase = phase;
+      if (waitingFor) run.waitingFor = waitingFor;
+    }
     return run;
+  }
+
+  /** A later run of this AI member started in the run's topic. */
+  protected superseded(r: Pick<RunRow, "id" | "topic_id" | "created_at">): boolean {
+    const later = this.sql.exec("SELECT 1 FROM runs WHERE topic_id = ? AND id != ? AND created_at >= ? LIMIT 1", r.topic_id, r.id, r.created_at);
+    return later.toArray().length > 0;
   }
 
   /** 1-based place of a queued run among this bot's queued runs, oldest first. */
@@ -915,7 +937,7 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
   }
 
   // Implemented by the feature modules that extend this class.
-  protected abstract end(r: RunRow, status: RunStatus, body: string, topicStatus: TopicStatus, summary: string, success?: boolean): Promise<void>;
+  protected abstract end(r: RunRow, status: RunStatus, body: string, topicStatus: TopicStatus, summary: string, success?: boolean, waitingOn?: string[]): Promise<void>;
   protected abstract scheduleStall(): Promise<void>;
   protected abstract markStalled(r: RunRow): Promise<void>;
   protected abstract start(
