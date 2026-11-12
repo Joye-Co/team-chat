@@ -1022,6 +1022,9 @@ pub fn all() -> Vec<&'static Scene> {
         // --- v12/settings track ---
         crate::views::settings::selftest::SCENES,
         // --- end v12/settings track ---
+        // --- usable R5: 电脑 with ownership ---
+        crate::views::settings::selftest::COMPUTER_SCENES,
+        // --- end usable R5 ---
         // --- v14 state scenes: one line per track, in track order ---
         super::states::SCENES,
         // --- end v14 state scenes ---

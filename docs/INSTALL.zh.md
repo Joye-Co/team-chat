@@ -90,6 +90,10 @@ cd ~/Library/Application\ Support/co.joye.teamchat && zip -r ~/Desktop/teamchat-
 
 ## 卸载
 
+0. 这台 Mac 用过「用这台电脑」（AI 成员在这里干活）的话，先在 **设置 › 电脑** 里这台电脑的 ⋯ 菜单选
+   **不再用这台电脑…**：它从团队里移除，后台服务（launchd）停掉并删掉，
+   `~/.config/team-chat/` 里登记这台电脑的文件（`daemon.toml`、`machine-token`、`machine.key`、
+   `secrets.json`）一起删掉。不做这一步就把 App 拖进废纸篓，后台服务还会指向已经不在的程序。
 1. 退出 Cahoots(菜单栏图标里也要退出),把 `/Applications/Cahoots.app` 移到废纸篓。
 2. 可选:删除 `~/Library/Application Support/co.joye.teamchat/`(日志也在里面)。
 3. 可选:删除登录凭证:在"钥匙串访问"里删除 `co.joye.teamchat` 项目,或在终端运行
@@ -162,6 +166,8 @@ Compress-Archive -Path "$env:APPDATA\co.joye.teamchat\logs" -DestinationPath "$e
 
 ### 卸载
 
+0. 这台电脑用过「用这台电脑」的话，先在 **设置 › 电脑** 里这台电脑的 ⋯ 菜单选 **不再用这台电脑…**：
+   它从团队里移除，后台任务删掉，`%USERPROFILE%\.config\team-chat\` 里登记这台电脑的文件一起删掉。
 1. 退出 Cahoots(通知区域的图标里也要退出)。
 2. 打开 **设置 → 应用 → 安装的应用**,找到 Cahoots,选 **卸载**。或者运行
    `"%LOCALAPPDATA%\Programs\Cahoots\uninstall.exe"`(加 `/S` 不显示窗口)。

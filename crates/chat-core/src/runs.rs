@@ -6,7 +6,7 @@ use crate::proto::machine::{FileChange, RunEvent, RunLogEntry};
 use crate::proto::{
     BotRun, BotRunner, CreateMachineRequest, CreateMachineResponse, DecisionsResponse,
     EndRunRequest, MAX_DECISIONS_PAGE, Machine, RunEventsResponse, SetBotRunnerRequest,
-    SetRunPlanRequest, StartRunRequest,
+    SetMachineBotRequest, SetRunPlanRequest, StartRunRequest, UpdateMachineRequest,
 };
 use reqwest::Method;
 use std::collections::HashMap;
@@ -464,7 +464,56 @@ impl HttpClient {
         .await
     }
 
-    /// Owner. Revokes the machine token and closes its link.
+    /// Usable: renames a machine, or moves it between the team and me (`PATCH /v1/machines/:id`;
+    /// a team machine needs an admin, a personal one its owner). Answers the machine as I see it.
+    pub async fn update_machine(
+        &self,
+        machine_id: &str,
+        req: &UpdateMachineRequest,
+    ) -> ApiResult<Machine> {
+        req.validate()
+            .map_err(|e| ApiError::Invalid(e.to_string()))?;
+        self.call(
+            Method::PATCH,
+            &format!("/v1/machines/{}", enc(machine_id)),
+            Some(req),
+            true,
+        )
+        .await
+    }
+
+    /// Usable, the owner of a personal machine: my work for AI member `bot_id` runs on it
+    /// (`PUT /v1/machines/:id/bots/:botId`), with my code folder there.
+    pub async fn set_machine_bot(
+        &self,
+        machine_id: &str,
+        bot_id: &str,
+        req: &SetMachineBotRequest,
+    ) -> ApiResult<Machine> {
+        req.validate()
+            .map_err(|e| ApiError::Invalid(e.to_string()))?;
+        self.call(
+            Method::PUT,
+            &format!("/v1/machines/{}/bots/{}", enc(machine_id), enc(bot_id)),
+            Some(req),
+            true,
+        )
+        .await
+    }
+
+    /// Usable, the owner of a personal machine: my work for `bot_id` no longer runs on it.
+    pub async fn delete_machine_bot(&self, machine_id: &str, bot_id: &str) -> ApiResult<Machine> {
+        self.call::<(), _>(
+            Method::DELETE,
+            &format!("/v1/machines/{}/bots/{}", enc(machine_id), enc(bot_id)),
+            None,
+            true,
+        )
+        .await
+    }
+
+    /// Revokes the machine token and closes its link (a team machine: an admin; a personal one:
+    /// its owner).
     pub async fn delete_machine(&self, machine_id: &str) -> ApiResult<()> {
         let _: serde_json::Value = self
             .call::<(), _>(

@@ -14,6 +14,7 @@ pub mod appearance;
 pub(crate) mod bot_quick;
 pub(crate) mod general;
 pub mod login_item;
+pub(crate) mod machine_actions;
 pub(crate) mod machines;
 pub(crate) mod members;
 pub mod worker_models;
@@ -131,13 +132,15 @@ impl Page {
         }
     }
 
-    /// The tabs of the settings window: my own preferences. 成员 (with 默认规则), 团队约定 and
-    /// 机器 live in 团队管理 (`views::admin`); their panes stay here for the self-tests.
-    pub const TABS: [Page; 6] = [
+    /// The tabs of the settings window: my own preferences, and 电脑, where every member adds
+    /// their own computers (design-roles 3.9). 成员 (with 默认规则) and 团队约定 live in 团队管理
+    /// (`views::admin`); their panes stay here for the self-tests.
+    pub const TABS: [Page; 7] = [
         Page::General,
         Page::Account,
         Page::Notifications,
         Page::Mine,
+        Page::Machines,
         Page::Appearance,
         Page::Shortcuts,
     ];
@@ -159,6 +162,14 @@ pub fn i_am_owner(services: &Services) -> bool {
         services.provider.session(),
         SessionState::SignedIn { me, .. } if me.level == MemberLevel::Owner
     )
+}
+
+/// My member id, `None` when signed out.
+pub fn my_id(services: &Services) -> Option<String> {
+    match services.provider.session() {
+        SessionState::SignedIn { me, .. } => Some(me.id),
+        _ => None,
+    }
 }
 
 /// My 身份, `None` when signed out.

@@ -482,7 +482,18 @@ export async function seed(o: SeedOptions): Promise<Json> {
     log("topics: 15");
 
     const machineId = await seedMachine(o, owner, ids, { dev, growth });
-    const out = { url, members: ids, groups: { all, dev, ops, growth }, machineId, seededAt: Date.now() };
+    // 电脑 with ownership (design-roles 3.3): 小王 (a 普通成员) adds his own computer, and his
+    // work for Forge runs there in his code folder. It never connects: it shows offline.
+    const own = await call<{ machine: { id: string } }>(url, "POST", "/v1/machines", {
+      token: tokens.xiaowang,
+      body: { name: "小王的 MacBook", labels: ["mac"], personal: true },
+    });
+    await call(url, "PUT", `/v1/machines/${own.machine.id}/bots/${ids.forge}`, {
+      token: tokens.xiaowang,
+      body: { repoPath: "~/code/qqbot" },
+    });
+    log("personal computer: 小王的 MacBook");
+    const out ={ url, members: ids, groups: { all, dev, ops, growth }, machineId, seededAt: Date.now() };
     writeFileSync(join(o.out, "seed.json"), `${JSON.stringify(out, null, 2)}\n`);
     return out;
   } finally {

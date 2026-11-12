@@ -40,15 +40,20 @@ pub struct Fleet {
     pub using_note: Option<String>,
     /// What this computer still lacks (用这台电脑).
     pub this: super::this_computer::ThisComputer,
+    /// Why the last change from a card's "⋯" failed.
+    pub action_failed: Option<String>,
 }
 
 impl AdminView {
     /// Reads every machine's monitor (on 打开 机器 and with every refresh while it shows).
     pub(super) fn fetch_fleet(&mut self, cx: &mut Context<Self>) {
+        // Other people's own computers have no monitor for me (design-roles 3.5).
+        let me = crate::views::settings::my_id(&self.services);
         let ids: Vec<String> = self
             .machines
             .iter()
             .flatten()
+            .filter(|x| x.ownership(me.as_deref()) != crate::data::Ownership::Theirs)
             .map(|x| x.id.clone())
             .collect();
         for id in ids {
@@ -98,6 +103,23 @@ impl AdminView {
         cx.notify();
     }
 
+    /// What a change from a card's "⋯" does next: reload, or say why it failed.
+    fn fleet_after(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> crate::views::settings::machine_actions::After {
+        let view = cx.entity().downgrade();
+        std::rc::Rc::new(move |result, cx| {
+            let _ = view.update(cx, |v, cx| {
+                v.fleet.action_failed = result
+                    .err()
+                    .map(|e| crate::views::settings::widgets::error_text(e).to_string());
+                v.retry(cx);
+                cx.notify();
+            });
+        })
+    }
+
     fn open_machine(&mut self, id: String, cx: &mut Context<Self>) {
         self.select_machine(id, cx);
         self.show_page(AdminPage::Overview, cx);
@@ -110,10 +132,14 @@ impl AdminView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let k = native_colors(cx);
+        // The team's computers and mine; other people's own computers are theirs to manage
+        // (they show in 设置 › 电脑).
+        let me = crate::views::settings::my_id(&self.services);
         let cards: Vec<AnyElement> = self
             .machines
             .iter()
             .flatten()
+            .filter(|x| x.ownership(me.as_deref()) != crate::data::Ownership::Theirs)
             .map(|x| self.machine_card(x, now, window, cx))
             .collect();
         let services = self.services.clone();
@@ -210,8 +236,28 @@ impl AdminView {
                         self.fleet.using,
                         PushSize::Small,
                     )
-                    .on_click(move |_, _, cx| view.update(cx, |v, cx| v.use_this_mac(cx)))
+                    .on_click(move |_, window, cx| {
+                        // 用这台电脑 says what it means first (机 3.1); moving an existing
+                        // set-up onto the app's daemon changes nothing it does.
+                        let view = view.clone();
+                        if label == crate::copy::settings::THIS_MAC_USE {
+                            let alone = crate::views::settings::solo(&view.read(cx).services);
+                            crate::views::settings::machine_actions::open_use_this(
+                                alone,
+                                move |cx| view.update(cx, |v, cx| v.use_this_mac(cx)),
+                                window,
+                                cx,
+                            );
+                        } else {
+                            view.update(cx, |v, cx| v.use_this_mac(cx))
+                        }
+                    })
                 }))
+        });
+        let action_failed = self.fleet.action_failed.clone().map(|why| {
+            Alert::new(Sym::Warning, crate::copy::settings::MACHINE_ACTION_FAILED)
+                .tone(AlertTone::Warning)
+                .description(why)
         });
         div()
             .w_full()
@@ -219,6 +265,7 @@ impl AdminView {
             .flex_col()
             .gap(space::S16)
             .children(use_row)
+            .children(action_failed)
             .children(self.this_computer_card(cx))
             .children(rows)
             .child(
@@ -252,6 +299,17 @@ impl AdminView {
             Some("macos") => format!("macOS · {kind}"),
             Some(o) => format!("{o} · {kind}"),
             None => kind.to_string(),
+        };
+        // Whose it is, once more than one person uses the server (design-roles 3.9).
+        let me = crate::views::settings::my_id(&self.services);
+        let meta = if crate::views::settings::solo(&self.services) {
+            meta
+        } else {
+            let whose = match x.ownership(me.as_deref()) {
+                crate::data::Ownership::Mine => crate::copy::settings::MACHINE_MINE,
+                _ => crate::copy::settings::MACHINE_TEAM,
+            };
+            format!("{whose} · {meta}")
         };
         let (badge, word) = if x.connected {
             (BadgeState::Online, m::MACHINE_ONLINE.to_string())
@@ -356,6 +414,10 @@ impl AdminView {
         let id = x.id.clone();
         let view = cx.entity();
         let name = x.name.clone();
+        let this = self.services.provider.this_machine_id().as_deref() == Some(x.id.as_str());
+        let may =
+            crate::views::settings::machine_actions::allowed(x, me.as_deref(), self.owner, this);
+        let (services, machine, after) = (self.services.clone(), x.clone(), self.fleet_after(cx));
         let more = crate::views::settings::widgets::more_button(
             SharedString::from(format!("fleet-more-{}", x.id)),
             window,
@@ -363,10 +425,11 @@ impl AdminView {
         )
         .dropdown_menu(move |menu, _, _| {
             let name = name.clone();
-            menu.item(
-                PopupMenuItem::new(m::FLEET_COPY_NAME).on_click(move |_, _, cx| {
-                    cx.write_to_clipboard(ClipboardItem::new_string(name.clone()))
-                }),
+            let menu = menu.item(PopupMenuItem::new(m::FLEET_COPY_NAME).on_click(
+                move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(name.clone())),
+            ));
+            crate::views::settings::machine_actions::menu_items(
+                menu, &services, &machine, may, &after,
             )
         });
         let open = push_button(

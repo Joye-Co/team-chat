@@ -455,7 +455,12 @@ async fn drive(services: Services, live: bool, cx: &mut AsyncApp) -> (bool, Valu
         .update(cx, |_, window, cx| {
             let form = open_add_machine(services.clone(), window, cx);
             form.update(cx, |f, cx| {
-                f.fill(&format!("自测机器 {stamp}"), "selftest, mac", window, cx);
+                f.fill(
+                    &format!("自测电脑 {stamp}"),
+                    super::machines::InstallTarget::Mac,
+                    window,
+                    cx,
+                );
                 f.submit(cx);
             });
             form
@@ -473,9 +478,10 @@ async fn drive(services: Services, live: bool, cx: &mut AsyncApp) -> (bool, Valu
         machine_result.and_then(|_| match &created {
             Some(c)
                 if c.install_command.expose().contains(c.credential.expose()) && {
-                    let mut l = c.machine.labels.clone();
-                    l.sort();
-                    l == ["mac", "selftest"]
+                    c.install_command_linux
+                        .expose()
+                        .contains(c.credential.expose())
+                        && c.machine.labels == ["mac"]
                 } =>
             {
                 Ok(())
@@ -1352,7 +1358,12 @@ pub fn open_machine_created(
         |s, w, cx| {
             let form = super::machines::open_add_machine(s, w, cx);
             form.update(cx, |form, cx| {
-                form.fill("会议室的电脑", "windows", w, cx);
+                form.fill(
+                    "会议室的电脑",
+                    super::machines::InstallTarget::Windows,
+                    w,
+                    cx,
+                );
                 form.submit(cx);
                 form.set_target(super::machines::InstallTarget::Windows, cx);
             });
@@ -1360,6 +1371,282 @@ pub fn open_machine_created(
         cx,
     )
 }
+
+// --- usable R5: 电脑 with ownership (design-roles 3.9) ---
+
+/// The computer of the role views that is mine (this one).
+fn my_computer(services: &Services) -> Option<crate::data::MachineInfo> {
+    let me = super::my_id(services);
+    let list = futures::executor::block_on(services.provider.machines())
+        .ok()?
+        .ok()?;
+    list.into_iter()
+        .find(|m| m.ownership(me.as_deref()) == crate::data::Ownership::Mine)
+}
+
+/// The first team computer of the role views.
+fn team_computer(services: &Services) -> Option<crate::data::MachineInfo> {
+    let list = futures::executor::block_on(services.provider.machines())
+        .ok()?
+        .ok()?;
+    list.into_iter().find(|m| m.owner_id.is_none())
+}
+
+fn noop_after() -> super::machine_actions::After {
+    std::rc::Rc::new(|_, _| {})
+}
+
+/// 电脑 with the 用这台电脑 screen (机 3.1): the AI members act here with my permissions and
+/// my own Claude Code and Codex settings come along.
+pub fn open_computers_use_this(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Machines,
+        |s, w, cx| {
+            let alone = super::solo(&s);
+            super::machine_actions::open_use_this(alone, |_| {}, w, cx)
+        },
+        cx,
+    )
+}
+
+/// 电脑 › my computer › 在这里做的事…: Jojo checked with my code folder.
+pub fn open_computers_my_bots(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Machines,
+        |s, w, cx| {
+            if let Some(m) = my_computer(&s) {
+                super::machine_actions::open_my_bots(s, &m, noop_after(), w, cx);
+            }
+        },
+        cx,
+    )
+}
+
+/// 电脑 › this computer › 不再用这台电脑… (机 1.6).
+pub fn open_computers_stop_this(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Machines,
+        |s, w, cx| super::machine_actions::confirm_stop_this(s, noop_after(), w, cx),
+        cx,
+    )
+}
+
+/// 电脑 › a team computer › 改成我的电脑 (an admin).
+pub fn open_computers_to_mine(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Machines,
+        |s, w, cx| {
+            if let Some(m) = team_computer(&s) {
+                super::machine_actions::confirm_owner(s, &m, true, noop_after(), w, cx);
+            }
+        },
+        cx,
+    )
+}
+
+/// 电脑 › my computer › 改名….
+pub fn open_computers_rename(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Machines,
+        |s, w, cx| {
+            if let Some(m) = my_computer(&s) {
+                super::machine_actions::open_rename(s, &m, noop_after(), w, cx);
+            }
+        },
+        cx,
+    )
+}
+
+/// 电脑 › 添加电脑 as an admin in a team: the system and 谁用这台电脑.
+pub fn open_computers_add_admin(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Machines,
+        |s, w, cx| {
+            let form = super::machines::open_add_machine(s, w, cx);
+            form.update(cx, |form, cx| {
+                form.fill("构建服务器", super::machines::InstallTarget::Linux, w, cx);
+                form.set_only_me(false, cx);
+            });
+        },
+        cx,
+    )
+}
+
+/// 电脑 › 添加电脑 done for a Linux computer (机 1.8): its own command.
+pub fn open_computers_added_linux(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Machines,
+        |s, w, cx| {
+            let form = super::machines::open_add_machine(s, w, cx);
+            form.update(cx, |form, cx| {
+                form.fill("家里的服务器", super::machines::InstallTarget::Linux, w, cx);
+                form.submit(cx);
+            });
+        },
+        cx,
+    )
+}
+
+/// 添加 AI 成员 after 用这台电脑: this computer (mine) is picked, with the line that says only
+/// my work is done there.
+pub fn open_add_ai_on_my_computer(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Members,
+        |s, w, cx| {
+            let form = super::members::open_add_bot(s, w, cx);
+            form.update(cx, |f, cx| f.fill("小测", Some("claude"), w, cx));
+        },
+        cx,
+    )
+}
+
+/// 编辑 Forge, who is on 陈晨's own computer: the computer shown, not offered, and why.
+pub fn open_edit_ai_pinned_elsewhere(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Members,
+        |s, w, cx| {
+            if let Some(bot) = s.provider.member("m-coder") {
+                super::members::open_edit_bot(s, &bot, w, cx);
+            }
+        },
+        cx,
+    )
+}
+
+/// The R5 scenes: a role view each (`fake::RoleView`).
+macro_rules! computers_scene {
+    ($name:literal, $about:literal, $view:ident, $open:expr) => {
+        Scene {
+            name: $name,
+            about: $about,
+            start: Start::Roles(crate::fake::RoleView::$view),
+            setup: |_, _| {},
+            open: $open,
+        }
+    };
+}
+
+pub const COMPUTER_SCENES: &[Scene] = &[
+    computers_scene!(
+        "computers-alone",
+        "Settings: 电脑 for one person alone: one list, no 团队 or 我的",
+        Alone,
+        open_machines
+    ),
+    computers_scene!(
+        "computers-member",
+        "Settings: 电脑 as a 普通成员: 我的电脑 (this one, an offline one), 团队的电脑 cut down, 同事的电脑",
+        Member,
+        open_machines
+    ),
+    computers_scene!(
+        "computers-admin",
+        "Settings: 电脑 as a 管理员: 我的电脑, 团队的电脑 in full, 同事的电脑",
+        Admin,
+        open_machines
+    ),
+    computers_scene!(
+        "computers-use-this",
+        "Settings: 电脑 › 用这台电脑: what it means first (permissions, own Claude Code and Codex settings)",
+        Member,
+        open_computers_use_this
+    ),
+    computers_scene!(
+        "computers-my-bots",
+        "Settings: 电脑 › my computer › 在这里做的事…: Jojo checked with its code folder",
+        Member,
+        open_computers_my_bots
+    ),
+    computers_scene!(
+        "computers-rename",
+        "Settings: 电脑 › my computer › 改名…",
+        Member,
+        open_computers_rename
+    ),
+    computers_scene!(
+        "computers-stop-this",
+        "Settings: 电脑 › this computer › 不再用这台电脑…",
+        Member,
+        open_computers_stop_this
+    ),
+    computers_scene!(
+        "computers-to-mine",
+        "Settings: 电脑 › a team computer › 改成我的电脑 as a 管理员",
+        Admin,
+        open_computers_to_mine
+    ),
+    computers_scene!(
+        "computers-add-admin",
+        "Settings: 电脑 › 添加电脑 as a 管理员: the system and 谁用这台电脑",
+        Admin,
+        open_computers_add_admin
+    ),
+    computers_scene!(
+        "computers-added-linux",
+        "Settings: 电脑 › 添加电脑 done for a Linux computer: its own install command",
+        Member,
+        open_computers_added_linux
+    ),
+    computers_scene!(
+        "computers-add-ai-mine",
+        "Settings: 添加 AI 成员 as a 管理员 after 用这台电脑: this computer picked, only my work there",
+        Admin,
+        open_add_ai_on_my_computer
+    ),
+    computers_scene!(
+        "computers-ai-pinned-elsewhere",
+        "Settings: 编辑 Forge, placed on 陈晨's own computer: shown, not offered, and why",
+        Admin,
+        open_edit_ai_pinned_elsewhere
+    ),
+];
+
+// --- end usable R5 ---
 
 // --- v12/settings track: the scenes of the new panes and their sheets ---
 

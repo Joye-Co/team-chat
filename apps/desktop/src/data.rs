@@ -1282,6 +1282,51 @@ pub struct MachineInfo {
     pub runtimes: Vec<String>,
     /// What each available runtime reports it can run (feature "effort").
     pub clis: Vec<CliChoice>,
+    /// Usable: the person whose own computer this is (个人的电脑); `None` = the team's.
+    pub owner_id: Option<String>,
+    /// Usable, on my own computer only: the AI members whose work for me runs here, each with
+    /// my code folder there.
+    pub personal_bots: Vec<PersonalBot>,
+}
+
+/// An AI member whose work for the computer's owner runs on that computer.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PersonalBot {
+    pub bot_id: String,
+    /// The owner's code folder on that computer.
+    pub repo_path: Option<String>,
+}
+
+/// Whose a computer is, as the viewer sees it (design-roles 3.3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ownership {
+    /// One of the team's computers.
+    Team,
+    /// My own computer.
+    Mine,
+    /// Somebody else's own computer.
+    Theirs,
+}
+
+impl MachineInfo {
+    /// Whose this computer is for `me`.
+    pub fn ownership(&self, me: Option<&str>) -> Ownership {
+        match self.owner_id.as_deref() {
+            None => Ownership::Team,
+            Some(o) if Some(o) == me => Ownership::Mine,
+            Some(_) => Ownership::Theirs,
+        }
+    }
+
+    /// True when `me` may rename, remove and set this computer up: a team computer needs an
+    /// admin (`admin`), my own computer only me (design-roles 3.5). The server checks again.
+    pub fn manageable(&self, me: Option<&str>, admin: bool) -> bool {
+        match self.ownership(me) {
+            Ownership::Team => admin,
+            Ownership::Mine => true,
+            Ownership::Theirs => false,
+        }
+    }
 }
 
 /// The models and 思考强度 one runtime of a computer offers.
@@ -1323,11 +1368,13 @@ pub enum ThisMac {
 pub struct MachineCreated {
     pub machine: MachineInfo,
     pub credential: SecretText,
-    /// Shell lines that install the machine service with this credential on a Mac or a
-    /// Linux computer.
+    /// Shell lines that install the machine service with this credential on a Mac (from the
+    /// installed app).
     pub install_command: SecretText,
     /// The same for a Windows computer: PowerShell lines.
     pub install_command_windows: SecretText,
+    /// The same for a Linux computer: it downloads the released daemon from the server.
+    pub install_command_linux: SecretText,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1991,6 +2038,47 @@ pub trait ChatProvider: Send + Sync + 'static {
     }
     /// Owner: registers a machine.
     fn create_machine(&self, _name: String, _labels: Vec<String>) -> AdminReply<MachineCreated> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Usable: registers a computer as mine (`personal: Some(true)`), the team's
+    /// (`Some(false)`, admins), or as the server decides (`None`: the team's for an admin).
+    fn create_machine_as(
+        &self,
+        name: String,
+        labels: Vec<String>,
+        _personal: Option<bool>,
+    ) -> AdminReply<MachineCreated> {
+        self.create_machine(name, labels)
+    }
+    /// Usable: renames a computer (a team one: admins; my own: me).
+    fn rename_machine(&self, _machine_id: &str, _name: String) -> AdminReply<MachineInfo> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Usable: 改成我的电脑 (`mine`, an admin) or 交给团队 (an admin who owns it).
+    fn set_machine_owner(&self, _machine_id: &str, _mine: bool) -> AdminReply<MachineInfo> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Usable: removes a computer from the team (a team one: admins; my own: me).
+    fn remove_machine(&self, _machine_id: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Usable, my own computer: my work for AI member `bot_id` runs there, in `repo_path`
+    /// (`None`: no code folder of mine there).
+    fn set_machine_bot(
+        &self,
+        _machine_id: &str,
+        _bot_id: &str,
+        _repo_path: Option<String>,
+    ) -> AdminReply<MachineInfo> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Usable, my own computer: my work for `bot_id` no longer runs there.
+    fn unset_machine_bot(&self, _machine_id: &str, _bot_id: &str) -> AdminReply<MachineInfo> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// 不再用这台电脑 (机 1.6): removes this computer from the team, then its background
+    /// service and its registration files.
+    fn stop_using_this_computer(&self) -> AdminReply<()> {
         reply_now(Err(AdminError::Unsupported))
     }
     /// Whether this Mac runs the app's own daemon (read from disk, fast).

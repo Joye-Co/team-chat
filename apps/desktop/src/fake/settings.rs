@@ -108,6 +108,7 @@ fn sample_machines() -> Vec<MachineInfo> {
             max_parallel_runs: Some(2),
             runtimes: vec!["claude".into(), "codex".into()],
             clis: sample_clis(),
+            ..Default::default()
         },
         MachineInfo {
             id: "mc-vps".into(),
@@ -123,6 +124,7 @@ fn sample_machines() -> Vec<MachineInfo> {
             max_parallel_runs: Some(4),
             runtimes: vec!["claude".into(), "codex".into()],
             clis: sample_clis(),
+            ..Default::default()
         },
         MachineInfo {
             id: "mc-old".into(),
@@ -140,6 +142,44 @@ fn sample_machines() -> Vec<MachineInfo> {
             ..Default::default()
         },
     ]
+}
+
+/// My own computer in the role views: this one, with Jojo's work for me here in my folder.
+fn my_computer() -> MachineInfo {
+    MachineInfo {
+        id: MY_COMPUTER.into(),
+        name: "MacBook Air".into(),
+        labels: vec!["mac".into()],
+        connected: true,
+        healthy: true,
+        last_heartbeat_at: Some(super::now_ms() - 3_000),
+        version: Some("0.4.0".into()),
+        active_runs: 0,
+        max_parallel_runs: Some(2),
+        runtimes: vec!["claude".into()],
+        clis: sample_clis().into_iter().take(1).collect(),
+        owner_id: Some(ME.into()),
+        personal_bots: vec![PersonalBot {
+            bot_id: "m-deploy".into(),
+            repo_path: Some("~/code/app".into()),
+        }],
+        ..Default::default()
+    }
+}
+
+/// The id of [`my_computer`]: this computer in the role views.
+pub const MY_COMPUTER: &str = "mc-air";
+
+/// A computer as a member sees it: the name, the owner and whether it is online.
+fn cut_down(m: MachineInfo) -> MachineInfo {
+    MachineInfo {
+        id: m.id,
+        name: m.name,
+        connected: m.connected,
+        healthy: m.healthy,
+        owner_id: m.owner_id,
+        ..Default::default()
+    }
 }
 
 /// A made-up `XXXX-XXXX` code (never a real one).
@@ -205,6 +245,45 @@ impl FakeProvider {
                 *mine = me;
             }
         });
+        let mut st = self.settings.lock().unwrap();
+        st.machines.insert(0, my_computer());
+        if view != RoleView::Alone {
+            st.machines.insert(
+                1,
+                MachineInfo {
+                    id: "mc-home".into(),
+                    name: "家里的 Mac mini".into(),
+                    labels: vec!["mac".into()],
+                    connected: false,
+                    last_heartbeat_at: Some(super::now_ms() - 2 * 86_400_000),
+                    version: Some("0.4.0".into()),
+                    owner_id: Some(ME.into()),
+                    ..Default::default()
+                },
+            );
+            // Forge works on 陈晨's own computer: only 陈晨 places it there.
+            st.runners.insert(
+                "m-coder".into(),
+                RunnerSetup {
+                    runtime: "claude".into(),
+                    machine_id: Some("mc-chen".into()),
+                    ..Default::default()
+                },
+            );
+            st.machines.push(MachineInfo {
+                id: "mc-chen".into(),
+                name: "陈晨的 iMac".into(),
+                labels: vec!["mac".into()],
+                connected: true,
+                healthy: true,
+                last_heartbeat_at: Some(super::now_ms() - 6_000),
+                owner_id: Some(OTHER.into()),
+                ..Default::default()
+            });
+        }
+        drop(st);
+        self.this_mac_used
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         self.emit(vec![Change::Members, Change::Session]);
     }
 
@@ -476,16 +555,121 @@ impl FakeProvider {
         reply_now(Ok(()))
     }
 
+    /// The computers as the server shows them to me (design-roles 3.5): team computers in full
+    /// for an admin and cut down for a member, mine in full with my AI members, other people's
+    /// cut down.
     pub(super) fn machines_fake(&self) -> AdminReply<Vec<MachineInfo>> {
-        reply_now(Ok(self.settings.lock().unwrap().machines.clone()))
+        let admin = self.is_owner();
+        let list = self.settings.lock().unwrap().machines.clone();
+        reply_now(Ok(list
+            .into_iter()
+            .map(|m| match m.ownership(Some(ME)) {
+                Ownership::Mine => m,
+                Ownership::Team if admin => MachineInfo {
+                    personal_bots: Vec::new(),
+                    ..m
+                },
+                _ => cut_down(m),
+            })
+            .collect()))
+    }
+
+    /// Changes computer `id` when I may (`manage`), and answers it as I see it.
+    fn change_machine(
+        &self,
+        id: &str,
+        f: impl FnOnce(&mut MachineInfo, bool) -> Result<(), AdminError>,
+    ) -> AdminReply<MachineInfo> {
+        let admin = self.is_owner();
+        let mut st = self.settings.lock().unwrap();
+        let Some(m) = st.machines.iter_mut().find(|m| m.id == id) else {
+            return reply_now(Err(AdminError::NotFound));
+        };
+        if !m.manageable(Some(ME), admin) {
+            return reply_now(Err(AdminError::Forbidden));
+        }
+        reply_now(f(m, admin).map(|()| m.clone()))
+    }
+
+    pub(super) fn has_machine(&self, id: &str) -> bool {
+        self.settings
+            .lock()
+            .unwrap()
+            .machines
+            .iter()
+            .any(|m| m.id == id)
+    }
+
+    pub(super) fn rename_machine_fake(&self, id: &str, name: String) -> AdminReply<MachineInfo> {
+        let name = name.trim().to_string();
+        self.change_machine(id, |m, _| {
+            if name.is_empty() {
+                return Err(AdminError::Invalid);
+            }
+            m.name = name;
+            Ok(())
+        })
+    }
+
+    pub(super) fn set_machine_owner_fake(&self, id: &str, mine: bool) -> AdminReply<MachineInfo> {
+        self.change_machine(id, |m, admin| {
+            if !admin {
+                return Err(AdminError::Forbidden);
+            }
+            if mine {
+                m.owner_id = Some(ME.into());
+            } else {
+                m.owner_id = None;
+                m.personal_bots.clear();
+            }
+            Ok(())
+        })
+    }
+
+    pub(super) fn remove_machine_fake(&self, id: &str) -> AdminReply<()> {
+        let admin = self.is_owner();
+        let mut st = self.settings.lock().unwrap();
+        match st.machines.iter().position(|m| m.id == id) {
+            Some(i) if st.machines[i].manageable(Some(ME), admin) => {
+                st.machines.remove(i);
+                reply_now(Ok(()))
+            }
+            Some(_) => reply_now(Err(AdminError::Forbidden)),
+            None => reply_now(Ok(())),
+        }
+    }
+
+    pub(super) fn machine_bot_fake(
+        &self,
+        id: &str,
+        bot: &str,
+        set: Option<Option<String>>,
+    ) -> AdminReply<MachineInfo> {
+        let bot = bot.to_string();
+        self.change_machine(id, |m, _| {
+            if m.owner_id.as_deref() != Some(ME) {
+                return Err(AdminError::Forbidden);
+            }
+            m.personal_bots.retain(|b| b.bot_id != bot);
+            if let Some(repo_path) = set {
+                m.personal_bots.push(PersonalBot {
+                    bot_id: bot,
+                    repo_path: repo_path.filter(|r| !r.trim().is_empty()),
+                });
+            }
+            Ok(())
+        })
     }
 
     pub(super) fn create_machine_fake(
         &self,
         name: String,
         labels: Vec<String>,
+        personal: Option<bool>,
     ) -> AdminReply<MachineCreated> {
-        if !self.is_owner() {
+        let admin = self.is_owner();
+        let personal = personal.unwrap_or(!admin);
+        if !personal && !admin {
             return reply_now(Err(AdminError::Forbidden));
         }
         let name = name.trim().to_string();
@@ -501,6 +685,7 @@ impl FakeProvider {
                 .map(|l| l.trim().to_string())
                 .filter(|l| !l.is_empty())
                 .collect(),
+            owner_id: personal.then(|| ME.to_string()),
             ..Default::default()
         };
         self.settings.lock().unwrap().machines.push(machine.clone());
@@ -508,11 +693,13 @@ impl FakeProvider {
         let install = format!("# fake\nprintf '%s' '{token}' > machine-token");
         let install_windows =
             format!("# fake\n[IO.File]::WriteAllText(\"machine-token\", '{token}')");
+        let install_linux = format!("# fake\nprintf '%s' '{token}' > ~/.config/machine-token");
         reply_now(Ok(MachineCreated {
             machine,
             credential: SecretText::new(token),
             install_command: SecretText::new(install),
             install_command_windows: SecretText::new(install_windows),
+            install_command_linux: SecretText::new(install_linux),
         }))
     }
 

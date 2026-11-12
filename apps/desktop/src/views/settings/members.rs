@@ -29,8 +29,8 @@ use crate::{
     copy::{common, fill, settings as s},
     data::{
         ApprovalDefaults, ApproverRole, BotCreated, BotMemberEdit, Change, InviteCreated,
-        InviteRequest, MachineInfo, Member, MemberKind, MemberLevel, ModelChoice, RunnerChange,
-        RunnerSetup, TeamRole,
+        InviteRequest, MachineInfo, Member, MemberKind, MemberLevel, ModelChoice, Ownership,
+        RunnerChange, RunnerSetup, TeamRole,
     },
     theme,
     ui::{
@@ -1575,20 +1575,110 @@ pub(super) fn effort_text(e: &str) -> String {
     .to_string()
 }
 
-/// How 在哪台电脑干活 names a choice: 任意一台空闲的电脑, a computer by name (this Mac
-/// marked 这台电脑), or a computer that is no longer in the list.
-pub fn machine_choice_text(
-    id: Option<&str>,
-    machines: &[MachineInfo],
-    this: Option<&str>,
-) -> String {
+/// Who looks at 在哪台电脑干活 (design-roles 3.9): this computer's id, my id, and whether one
+/// person uses the server (then nothing says 团队 or 我的).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PlaceView<'a> {
+    pub this: Option<&'a str>,
+    pub me: Option<&'a str>,
+    pub solo: bool,
+}
+
+impl<'a> PlaceView<'a> {
+    pub fn of(services: &Services, this: Option<&'a str>, me: Option<&'a str>) -> Self {
+        Self {
+            this,
+            me,
+            solo: super::solo(services),
+        }
+    }
+}
+
+/// How 在哪台电脑干活 names a choice: any computer (any team computer when more than one person
+/// uses the server), a computer by name (this one marked 这台电脑; otherwise 团队 or 我的 once
+/// other people use the server), or a computer that is no longer in the list.
+pub fn machine_choice_text(id: Option<&str>, machines: &[MachineInfo], v: PlaceView) -> String {
     let Some(id) = id else {
-        return s::RUNNER_MACHINE_ANY.to_string();
+        return if v.solo {
+            s::RUNNER_MACHINE_ANY
+        } else {
+            s::BOT_PLACE_ANY_TEAM
+        }
+        .to_string();
     };
     match machines.iter().find(|m| m.id == id) {
-        Some(m) if this == Some(id) => fill(s::RUNNER_MACHINE_THIS, &[("name", &m.name)]),
-        Some(m) => m.name.clone(),
+        Some(m) if v.this == Some(id) => fill(s::RUNNER_MACHINE_THIS, &[("name", &m.name)]),
+        Some(m) if v.solo => m.name.clone(),
+        Some(m) => match m.ownership(v.me) {
+            Ownership::Team => fill(s::BOT_PLACE_TEAM_SUFFIX, &[("name", &m.name)]),
+            Ownership::Mine => fill(s::BOT_PLACE_MINE_SUFFIX, &[("name", &m.name)]),
+            Ownership::Theirs => m.name.clone(),
+        },
         None => s::RUNNER_MACHINE_GONE.to_string(),
+    }
+}
+
+/// The choices of 在哪台电脑干活 (design-roles 3.9): any computer, the picked one when it is no
+/// longer in the list, then the team's computers and my own. Other people's own computers are
+/// theirs to place AI members on (the server refuses it, `machine.not_yours`).
+pub fn placement_options(
+    picked: Option<&str>,
+    machines: &[MachineInfo],
+    v: PlaceView,
+) -> Vec<(Option<String>, String)> {
+    let mut options = vec![(None, machine_choice_text(None, machines, v))];
+    if let Some(id) = picked.filter(|id| !machines.iter().any(|m| m.id == *id)) {
+        options.push((
+            Some(id.to_string()),
+            machine_choice_text(Some(id), machines, v),
+        ));
+    }
+    options.extend(
+        machines
+            .iter()
+            .filter(|m| m.ownership(v.me) != Ownership::Theirs)
+            .map(|m| {
+                (
+                    Some(m.id.clone()),
+                    machine_choice_text(Some(&m.id), machines, v),
+                )
+            }),
+    );
+    options
+}
+
+/// The picked computer when it is somebody else's own computer: the choice is theirs, so the
+/// sheet shows it read-only with [`s::BOT_PINNED_OTHER_HINT`].
+pub fn pinned_elsewhere<'a>(
+    picked: Option<&str>,
+    machines: &'a [MachineInfo],
+    me: Option<&str>,
+) -> Option<&'a MachineInfo> {
+    let id = picked?;
+    machines
+        .iter()
+        .find(|m| m.id == id && m.ownership(me) == Ownership::Theirs)
+}
+
+/// The line under 在哪台电脑干活: on my own computer only my work is done there; on someone
+/// else's, only theirs. Nothing when one person uses the server.
+pub fn placement_hint(
+    picked: Option<&str>,
+    machines: &[MachineInfo],
+    v: PlaceView,
+    person: impl Fn(&str) -> Option<String>,
+) -> Option<String> {
+    if v.solo {
+        return None;
+    }
+    let m = machines.iter().find(|m| Some(m.id.as_str()) == picked)?;
+    match m.ownership(v.me) {
+        Ownership::Mine => Some(s::BOT_PLACE_MINE_HINT.to_string()),
+        Ownership::Theirs => {
+            let who = person(m.owner_id.as_deref()?).unwrap_or_default();
+            Some(fill(s::BOT_PINNED_OTHER_HINT, &[("person", &who)]))
+        }
+        Ownership::Team => None,
     }
 }
 
@@ -1655,6 +1745,9 @@ pub struct BotForm {
     this_machine: Option<String>,
     /// The one computer picked to run this member; `None` = any free computer.
     machine: Option<String>,
+    /// The computer was picked by hand (or loaded from the member): this computer is no
+    /// longer the default.
+    machine_chosen: bool,
     /// The model picked from the computers' list; `None` = the CLI's default.
     model: Option<String>,
     /// The model typed when no computer reported a list.
@@ -1680,6 +1773,7 @@ impl BotForm {
             if let Ok(list) = answer(machines).await {
                 let _ = this.update(cx, |this, cx| {
                     this.machines = list;
+                    this.default_to_this_computer();
                     this.load_logins(cx);
                     cx.notify();
                 });
@@ -1719,6 +1813,7 @@ impl BotForm {
             logins: Default::default(),
             this_machine,
             machine: None,
+            machine_chosen: false,
             model: None,
             model_input,
             effort: None,
@@ -1802,6 +1897,7 @@ impl BotForm {
         set(&self.runtime, r.runtime.clone(), window, cx);
         set(&self.labels, r.labels.join(", "), window, cx);
         self.machine = r.machine_id.clone();
+        self.machine_chosen = true;
         self.model = r.model.clone();
         self.effort = r.effort.clone();
         set(
@@ -1859,9 +1955,24 @@ impl BotForm {
         }
     }
 
+    /// A new AI member works on this computer when 用这台电脑 was done here and I may place it
+    /// there (design-roles 3.9), until another computer is picked.
+    fn default_to_this_computer(&mut self) {
+        if self.editing.is_some() || self.machine_chosen {
+            return;
+        }
+        let me = super::my_id(&self.services);
+        self.machine = self.this_machine.clone().filter(|id| {
+            self.machines
+                .iter()
+                .any(|m| &m.id == id && m.ownership(me.as_deref()) != Ownership::Theirs)
+        });
+    }
+
     /// 在哪台电脑干活 picked: the hand-typed labels no longer count.
     fn pick_machine(&mut self, id: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
         self.machine = id;
+        self.machine_chosen = true;
         self.labels
             .update(cx, |st, cx| st.set_value(String::new(), window, cx));
         cx.notify();
@@ -2259,22 +2370,23 @@ impl Render for BotForm {
                         .into_any_element(),
                 )
             };
-            // 在哪台电脑干活: one of the team's computers, or any free one. Picking a
-            // computer (or 任意) replaces the old hand-typed labels.
+            // 在哪台电脑干活: any free computer, one of the team's, or my own. Picking a
+            // computer (or 任意) replaces the old hand-typed labels. An AI member placed on
+            // somebody else's own computer stays there: that is theirs to change.
             let picked = self.machine.clone();
-            let shown = machine_choice_text(
-                picked.as_deref(),
-                &self.machines,
-                self.this_machine.as_deref(),
-            );
-            let mut options: Vec<(Option<String>, String)> =
-                vec![(None, s::RUNNER_MACHINE_ANY.to_string())];
-            options.extend(self.machines.iter().map(|m| {
-                (
-                    Some(m.id.clone()),
-                    machine_choice_text(Some(&m.id), &self.machines, self.this_machine.as_deref()),
-                )
-            }));
+            let me = super::my_id(&self.services);
+            let view = PlaceView::of(&self.services, self.this_machine.as_deref(), me.as_deref());
+            let shown = machine_choice_text(picked.as_deref(), &self.machines, view);
+            let options = placement_options(picked.as_deref(), &self.machines, view);
+            let elsewhere =
+                pinned_elsewhere(picked.as_deref(), &self.machines, me.as_deref()).is_some();
+            let services = self.services.clone();
+            let place_hint = placement_hint(picked.as_deref(), &self.machines, view, |id| {
+                services
+                    .provider
+                    .member(id)
+                    .map(|m| crate::ui::avatar::name_beside_avatar(&m.name).to_string())
+            });
             let form = cx.entity();
             // 模型 and 思考强度: what the computers that can run it report.
             let model: gpui::AnyElement = if models.is_empty() {
@@ -2356,7 +2468,9 @@ impl Render for BotForm {
                         })
                         .into_any_element()
                 });
-            let machine =
+            let machine: gpui::AnyElement = if elsewhere {
+                widgets::row_value(shown, cx).into_any_element()
+            } else {
                 widgets::popup_fixed("member-machine", shown, MACHINE_SELECT_WIDTH, window, cx)
                     .dropdown_menu(move |menu, _, _| {
                         options.iter().fold(menu, |menu, (id, text)| {
@@ -2372,7 +2486,18 @@ impl Render for BotForm {
                             )
                         })
                     })
-                    .into_any_element();
+                    .into_any_element()
+            };
+            let machine: gpui::AnyElement = match place_hint {
+                Some(hint) => div()
+                    .flex()
+                    .flex_col()
+                    .gap(tokens::space::S4)
+                    .child(machine)
+                    .child(widgets::quiet(hint, cx))
+                    .into_any_element(),
+                None => machine,
+            };
             body = body.child(
                 div()
                     .flex()
@@ -2922,19 +3047,73 @@ mod tests {
             ..Default::default()
         };
         let list = [m("a", "macbook-pro"), m("b", "mac-mini")];
+        let alone = |this| PlaceView {
+            this,
+            me: Some("me"),
+            solo: true,
+        };
         assert_eq!(
-            machine_choice_text(None, &list, Some("a")),
+            machine_choice_text(None, &list, alone(Some("a"))),
             "任意一台空闲电脑"
         );
         assert_eq!(
-            machine_choice_text(Some("a"), &list, Some("a")),
+            machine_choice_text(Some("a"), &list, alone(Some("a"))),
             "macbook-pro（这台电脑）"
         );
-        assert_eq!(machine_choice_text(Some("b"), &list, Some("a")), "mac-mini");
         assert_eq!(
-            machine_choice_text(Some("gone"), &list, None),
+            machine_choice_text(Some("b"), &list, alone(Some("a"))),
+            "mac-mini"
+        );
+        assert_eq!(
+            machine_choice_text(Some("gone"), &list, alone(None)),
             "已移除的电脑"
         );
+    }
+
+    /// design-roles 3.9: in a team the choice says 团队 or 我的, never lists somebody else's
+    /// own computer, and says why an AI member on one stays there.
+    #[test]
+    fn the_computer_choice_knows_whose_computer_it_is() {
+        let m = |id: &str, name: &str, owner: Option<&str>| MachineInfo {
+            id: id.into(),
+            name: name.into(),
+            owner_id: owner.map(str::to_string),
+            ..Default::default()
+        };
+        let list = [
+            m("t", "主机", None),
+            m("mine", "MacBook", Some("me")),
+            m("chen", "iMac", Some("chen")),
+        ];
+        let team = PlaceView {
+            this: None,
+            me: Some("me"),
+            solo: false,
+        };
+        let options = placement_options(None, &list, team);
+        let texts: Vec<&str> = options.iter().map(|(_, t)| t.as_str()).collect();
+        assert_eq!(
+            texts,
+            ["任意一台团队的电脑", "主机（团队）", "MacBook（我的）"]
+        );
+        assert!(pinned_elsewhere(Some("chen"), &list, Some("me")).is_some());
+        assert!(pinned_elsewhere(Some("mine"), &list, Some("me")).is_none());
+        let person = |id: &str| (id == "chen").then(|| "陈晨".to_string());
+        assert_eq!(
+            placement_hint(Some("mine"), &list, team, person).as_deref(),
+            Some(s::BOT_PLACE_MINE_HINT)
+        );
+        assert_eq!(
+            placement_hint(Some("chen"), &list, team, person).as_deref(),
+            Some("这位成员在陈晨的电脑上，只做陈晨交代的事。")
+        );
+        assert_eq!(placement_hint(Some("t"), &list, team, person), None);
+        // One person alone: nothing about whose.
+        let alone = PlaceView { solo: true, ..team };
+        let options = placement_options(None, &list, alone);
+        assert_eq!(options[0].1, s::RUNNER_MACHINE_ANY);
+        assert_eq!(options[2].1, "MacBook");
+        assert_eq!(placement_hint(Some("mine"), &list, alone, person), None);
     }
 
     #[test]
