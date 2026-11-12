@@ -18,10 +18,13 @@ import { ApiError, unwrap } from "../core/errors";
 import { type Actor, registerRoute } from "../core/registry";
 import { machineRun } from "../bots/routes";
 import { type Who, canReadSource, readableSql, requireAccess } from "./access";
+import { countUses, readableMemories, search } from "./inject";
 import { type MemoryChange, type MemoryRow, createMemory, getRow, getUpdate, saveChange, toItem, toUpdate } from "./store";
 
 /** Notes one run may write. */
 export const MAX_NOTES_PER_RUN = 10;
+/** Memories one `chat-run memory search` returns at most. */
+export const MAX_MEMORY_SEARCH_LIMIT = 50;
 
 function who(auth: AuthContext | null): Who {
   const a = auth as AuthContext;
@@ -229,6 +232,25 @@ export function registerMemoryRoutes(): void {
       if (old.status !== "pending") change.status = old.status;
       if (w.kind === "human") change.human = true;
       return toItem(await saveChange(env.DB, row, change, w.memberId));
+    },
+  });
+
+  // A run searches what its prompt could carry (chat-run memory search): the same audience, every
+  // item that matches, best first. What it gets back counts as used.
+  registerRoute({
+    method: "GET",
+    path: "/v1/machine/runs/:id/memories",
+    auth: "none",
+    async handler({ request, env, params, url }): Promise<MemoriesResponse> {
+      const { run, info } = await machineRun(request, env, params.id, { read: true });
+      const q = (url.searchParams.get("q") ?? "").trim().slice(0, 500);
+      if (q === "") throw new ApiError("invalid", "q is required");
+      const limit = intParam(url, "limit", 1, MAX_MEMORY_SEARCH_LIMIT, 10);
+      const rows = await readableMemories(env.DB, { botId: run.bot_id, groupId: run.group_id, requesterId: info?.requestedBy ?? null });
+      const hits = search(rows, q).slice(0, limit);
+      const now = Date.now();
+      await countUses(env.DB, hits.map((r) => r.id), now);
+      return { memories: hits.map((r) => toItem({ ...r, uses: r.uses + 1, last_used_at: now })) };
     },
   });
 

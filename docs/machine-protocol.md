@@ -866,11 +866,22 @@ and lengths before it calls the server.
 | `op` | `body` | `chat-run` command |
 | --- | --- | --- |
 | `memory.note` | `MachineMemoryNoteRequest` | `chat-run memory note --scope member\|person\|group --kind K --text T [--when W] [--source <messageId>]` → `MemoryItem` |
+| `memory.search` | `{ query, limit? }` | `chat-run memory search --query <text> [--limit <1-50>]` → `MemoriesResponse` |
 
 ```ts
 POST /v1/machine/runs/:id/memories   body MachineMemoryNoteRequest -> MemoryItem (status "pending")
 MachineMemoryNoteRequest = { scope: "member" | "person" | "group", kind: MemoryKind, text /* 1..500 */, when? /* <= 300 */, sourceMessageId? }
+GET  /v1/machine/runs/:id/memories?q=<text>&limit=<1-50, default 10>   -> MemoriesResponse
 ```
+
+- **Search** (`memory.search`): the prompt carries only part of what is remembered (8 KB, chosen
+  for the request). The search reads exactly what the run's prompt could carry: the team's, the
+  run's group's, the member's (its own pending notes too) and the requester's active memories,
+  each memory learned in a group only when everyone in the run's group is in that group. Hits
+  match the query's words or Chinese two-character words, best first; each hit counts one use
+  (protocol.md, "Memory"). A side chat run may search. An empty `q` is `invalid`.
+- A run that names a memory's id (as `[id]`) in its result or progress counts one use of it, when
+  it may read it.
 
 - The run must be on the calling machine, active and not a side chat, as for files.
 - `member` is the run's AI member (its lessons and playbooks), read only in the run's group

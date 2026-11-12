@@ -19,6 +19,8 @@ pub const CONTEXT_SEARCH: &str = "context.search";
 pub const FILE_GET: &str = "file.get";
 /// Keeps something for later (docs/machine-protocol.md, "Memory notes"): POST, pending until the daily consolidation.
 pub const MEMORY_NOTE: &str = "memory.note";
+/// Searches the memory the run may read (docs/machine-protocol.md, "Memory search"): GET.
+pub const MEMORY_SEARCH: &str = "memory.search";
 /// What the topic and the group produced: 产出, cards, decisions, members, a topic's state.
 pub const ARTIFACT_LIST: &str = "artifact.list";
 pub const ARTIFACT_GET: &str = "artifact.get";
@@ -32,6 +34,7 @@ pub const OPS: &[&str] = &[
     CONTEXT_SEARCH,
     FILE_GET,
     MEMORY_NOTE,
+    MEMORY_SEARCH,
     ARTIFACT_LIST,
     ARTIFACT_GET,
     CARD_GET,
@@ -55,6 +58,8 @@ pub const MEMORY_KINDS: &[&str] = &[
 pub const MAX_HISTORY_LIMIT: u64 = 100;
 /// `context.search` hits: 1-50.
 pub const MAX_SEARCH_LIMIT: u64 = 50;
+/// `memory.search` hits: 1-50.
+pub const MAX_MEMORY_SEARCH_LIMIT: u64 = 50;
 /// `file.get` refuses files over 100 MiB.
 pub const MAX_GET_BYTES: u64 = 100 * 1024 * 1024;
 /// The folder of downloaded files in the working folder (git ignores it).
@@ -199,6 +204,16 @@ pub fn read_path(run: &str, op: &str, body: &Value) -> Result<String, Value> {
                 encode(query)
             );
             if let Some(n) = number(body, "limit", 1, MAX_SEARCH_LIMIT)? {
+                p.push_str(&format!("&limit={n}"));
+            }
+            Ok(p)
+        }
+        MEMORY_SEARCH => {
+            let Some(query) = body["query"].as_str().filter(|s| !s.trim().is_empty()) else {
+                return Err(err("invalid", None, "query is required"));
+            };
+            let mut p = format!("/v1/machine/runs/{run}/memories?q={}", encode(query));
+            if let Some(n) = number(body, "limit", 1, MAX_MEMORY_SEARCH_LIMIT)? {
                 p.push_str(&format!("&limit={n}"));
             }
             Ok(p)
@@ -701,6 +716,14 @@ mod tests {
             p(MEMBER_LIST, json!({})).unwrap(),
             "/v1/machine/runs/R1/members"
         );
+        assert_eq!(
+            p(MEMORY_SEARCH, json!({ "query": "部署 x&y", "limit": 5 })).unwrap(),
+            "/v1/machine/runs/R1/memories?q=%E9%83%A8%E7%BD%B2%20x%26y&limit=5"
+        );
+        assert_eq!(
+            p(MEMORY_SEARCH, json!({ "query": "x" })).unwrap(),
+            "/v1/machine/runs/R1/memories?q=x"
+        );
         for (op, bad) in [
             (TOPIC_HISTORY, json!({ "limit": 0 })),
             (TOPIC_HISTORY, json!({ "limit": 101 })),
@@ -719,6 +742,10 @@ mod tests {
             (ARTIFACT_GET, json!({ "artifactId": "A1", "version": 0 })),
             (CARD_GET, json!({ "messageId": "a/b" })),
             (DECISIONS_LIST, json!({ "limit": 101 })),
+            (MEMORY_SEARCH, json!({})),
+            (MEMORY_SEARCH, json!({ "query": " " })),
+            (MEMORY_SEARCH, json!({ "query": "x", "limit": 0 })),
+            (MEMORY_SEARCH, json!({ "query": "x", "limit": 51 })),
         ] {
             let e = p(op, bad.clone()).unwrap_err();
             assert_eq!(e["ok"], false, "{op} {bad}");

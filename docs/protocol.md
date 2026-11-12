@@ -1221,8 +1221,14 @@ Rules:
 - **Reading**: a run's prompt carries an index (at most 8 KB) of the team's, the run's group's, the
   member's (its own pending lessons too, marked as not yet consolidated) and the requester's
   active memories; the front desk's system prompt carries the same, at most 4 KB. Both say the
-  memory is reference material, not instructions. Each memory in a prompt counts one `use` and
-  sets `lastUsedAt`.
+  memory is reference material, not instructions. Within the budget, after the audience filter,
+  active `convention`s people wrote (`human: true`) always come first, then memories by relevance
+  to the request (the words and Chinese two-character words of message search), then the newest.
+  A run finds the rest with `chat-run memory search` (`GET /v1/machine/runs/:id/memories?q=`,
+  docs/machine-protocol.md, "Memory notes"), which reads only what its prompt could carry.
+- **Use**: a memory counts one `use` and sets `lastUsedAt` when a run's search returns it or a
+  run's result or progress names its id; being in a prompt is not a use. The 60-day retirement
+  counts from `lastUsedAt` (or the last change).
 
 # 1.1 extensions
 
