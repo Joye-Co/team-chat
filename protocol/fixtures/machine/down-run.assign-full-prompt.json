@@ -1,0 +1,18 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "a resumed run with the full prompt for when its session is not found",
+  "value": {
+    "t": "run.assign",
+    "runId": "01JBX0RUN000000000000000AU",
+    "botMemberId": "01JBX0BOT000000000000000AC",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "runtime": "claude",
+    "prompt": "Joye: 另一个测试也修一下",
+    "envAllowlist": [],
+    "leaseMs": 600000,
+    "resumeSessionId": "0b6a3c1e-2f4d-4e5a-9b7c-1d2e3f4a5b6c",
+    "fullPrompt": "Topic: 修好登录\n\nJoye: @dev 修一下\n\nJoye: 另一个测试也修一下"
+  }
+}

@@ -314,6 +314,7 @@ fn assign(run: &str, runtime: &str, prompt: &str, upload: Option<String>) -> Dow
     Down::RunAssign(RunAssign {
         kind: None,
         resume_session_id: None,
+        full_prompt: None,
         gates: None,
         github: None,
         run_id: run.into(),

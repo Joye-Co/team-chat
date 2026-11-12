@@ -330,4 +330,32 @@ export function addUsableFixtures({ ok, bad, T0, ID, base, topic }: UsableCtx) {
   bad("entities/run-log-entry-done-failure-no-kind.json", "RunLogEntry", {"t": "run.done", "runId": "01JBX0RUN000000000000000AU", "seq": 9, "at": 1762128060000, "status": "failed", "durationMs": 10, "failure": {"resetsAt": 1762142400000}}, "Usable: a failure without a kind");
   ok("entities/run-log-entry-session-effort.json", "RunLogEntry", {"t": "run.event", "runId": "01JBX0RUN000000000000000AU", "seq": 1, "at": 1762128001000, "event": {"type": "session", "sessionId": "s-1", "runtime": "claude", "model": "claude-test-1", "effort": "high"}}, "Usable: the session event names the model and the 思考强度 the CLI runs with");
   ok("machine/up-heartbeat-signed-out.json", "MachineUpFrame", {"t": "heartbeat", "at": 1793627520000, "health": {"diskFreeBytes": 120000000000, "diskTotalBytes": 494000000000, "load1": 0.5, "load5": 0.4, "load15": 0.3, "cpuCount": 10, "activeRuns": 0}, "runs": [], "metrics": {"at": 1793627519900, "runs": [], "logins": [{"runtime": "claude", "state": "logged_out", "confirmed": true}, {"runtime": "codex", "state": "logged_out"}]}}, "usable: a confirmed logged_out (the CLI's own check said so) and one from the credential files only");
+
+  // -------------------------------------------------------------------------
+  // Resume fallback (design-vm-state 3.2)
+  // -------------------------------------------------------------------------
+
+  ok("machine/down-run.assign-full-prompt.json", "MachineDownFrame", {
+    t: "run.assign",
+    runId,
+    botMemberId: ID.bot,
+    groupId: ID.general,
+    topicId: ID.topic,
+    runtime: "claude",
+    prompt: "Joye: 另一个测试也修一下",
+    envAllowlist: [],
+    leaseMs: 600000,
+    resumeSessionId: "0b6a3c1e-2f4d-4e5a-9b7c-1d2e3f4a5b6c",
+    fullPrompt: "Topic: 修好登录\n\nJoye: @dev 修一下\n\nJoye: 另一个测试也修一下",
+  }, "a resumed run with the full prompt for when its session is not found");
+  ok("machine/up-run.done-resume-missed.json", "MachineUpFrame", {
+    t: "run.done",
+    runId,
+    seq: 20,
+    at: T0 + 20,
+    status: "succeeded",
+    sessionId: "5c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+    durationMs: 12000,
+    resumeMissed: true,
+  }, "the session was not found, so the run used the full prompt");
 }
