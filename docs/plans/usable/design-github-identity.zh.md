@@ -230,7 +230,8 @@ RunGithub = {
 - **设置 › 账号**（`views/settings/account.rs`）新增「GitHub」一组：未连接显示「连接…」；已连接显示 `@login` 和「断开…」（确认对话框，带去 GitHub 撤销的链接）；失效显示「需要重新连接」和「重新连接…」。`available` 为 false 时：owner/管理员看到「服务器还没配好，暂时不能连接 GitHub」，其他人不显示这一组。
 - **上手**：第一次登录成功后，`available` 为 true 且没连接，弹一次连接 sheet，带「以后再说」。每个账号每台设备只弹一次，记在本地偏好。
 - **话题横幅**：打开话题、收到 `github.status`、应用回到前台时取 `GET /v1/me/github`；`waits` 里有这个话题，就在话题顶部显示「{成员}在等你连接 GitHub」或「{成员}在等你重新连接 GitHub」，带「连接 GitHub」按钮，点了直接弹连接 sheet。连上后横幅消失，任务自己继续。
-- **电脑页**：daemon 没有 `github` 功能的电脑显示「这台电脑更新后，任务才能用你连接的 GitHub」。
+- **电脑页**：daemon 没有 `github` 功能的电脑显示「这台电脑更新后，AI 成员才能用你连接的 GitHub」。只在本人已连接时显示（没连的人看不到任何 GitHub 字样）；服务器只给 owner 返回电脑的 `features`，所以普通成员看不到这句。
+- G5 实现时的更正：界面文案不能有「任务」（PRODUCT.md 的开发者用词），电脑页那句改成「AI 成员」；「未连接」是 COMPLETENESS §2.15 留给断网的词，账号页改成「还没连接」；轮询结果 `taken` 不带对方名字，所以那句改成「这个 GitHub 账号已经连在另一位成员上」。
 
 **新增界面文案**（`apps/desktop/src/copy/settings.rs` 新一段 `github`）：
 
@@ -241,7 +242,7 @@ GitHub
 重新连接…
 断开…
 已连接为 @{login}
-未连接
+还没连接
 需要重新连接
 AI 成员替你拉代码、推代码、开 PR 时用这个账号
 在 GitHub 页面输入这串验证码
@@ -250,7 +251,7 @@ AI 成员替你拉代码、推代码、开 PR 时用这个账号
 正在等你在 GitHub 上确认…
 验证码过期了
 你在 GitHub 上取消了授权
-这个 GitHub 账号已经连在{name}上
+这个 GitHub 账号已经连在另一位成员上
 再试一次
 以后再说
 要用组织里的仓库，在 GitHub 授权页上给那个组织点「Grant」或「Request」
@@ -258,9 +259,10 @@ AI 成员替你拉代码、推代码、开 PR 时用这个账号
 断开后，AI 成员不能再用你的 GitHub。要彻底收回，到 GitHub 的设置里撤销授权。
 去 GitHub 撤销
 服务器还没配好，暂时不能连接 GitHub
-{成员}在等你连接 GitHub
-{成员}在等你重新连接 GitHub
-这台电脑更新后，任务才能用你连接的 GitHub
+{成员} 在等你连接 GitHub
+{成员} 在等你重新连接 GitHub
+连上后 {成员} 会自己接着做，不用再说一遍
+这台电脑更新后，AI 成员才能用你连接的 GitHub
 ```
 
 没有新产品名词：GitHub 是专名，验证码是 GitHub 自己的说法，成员、电脑沿用现有用词。AI 成员在话题里发的两句 @ 消息放在服务端文案（`server/src/github/text.ts`），同样受用词约束。

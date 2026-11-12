@@ -955,6 +955,69 @@ pub fn open_phone_code(
     Ok(handle)
 }
 
+// --- usable: GitHub (design-github-identity.zh.md §3.7) ---
+
+/// 账号 with the 连接 GitHub sheet: the code shown, waiting for GitHub.
+pub fn open_github_code(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, _) = open_page(services.clone(), Page::Account, cx)?;
+    after_fit(handle, cx, move |window, cx| {
+        super::github::open_connect(services, super::github::Place::Settings, false, window, cx);
+    });
+    Ok(handle)
+}
+
+/// The 连接 GitHub sheet when the GitHub account is connected to another member.
+pub fn open_github_taken(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, _) = open_page(services.clone(), Page::Account, cx)?;
+    after_fit(handle, cx, move |window, cx| {
+        let sheet = super::github::open_connect(
+            services,
+            super::github::Place::Settings,
+            false,
+            window,
+            cx,
+        );
+        sheet.update(cx, |s, cx| s.preview(super::github::Step::Taken, cx));
+    });
+    Ok(handle)
+}
+
+/// 账号 › GitHub › 断开…: the alert with 去 GitHub 撤销.
+pub fn open_github_disconnect(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, _) = open_page(services.clone(), Page::Account, cx)?;
+    after_fit(handle, cx, move |window, cx| {
+        super::github::GithubSection::confirm_disconnect(services, window, cx);
+    });
+    Ok(handle)
+}
+
+/// The main window right after sign-in: the one-time 连接 GitHub sheet with 以后再说.
+pub fn open_github_onboarding(
+    services: Services,
+    content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let handle = crate::selftest::scenes::open_main(services.clone(), content, cx)?;
+    after_fit(handle, cx, move |window, cx| {
+        super::github::open_connect(services, super::github::Place::Main, true, window, cx);
+    });
+    Ok(handle)
+}
+
+// --- end usable: GitHub ---
+
 /// The 编辑资料 sheet after 完成 with an empty name: the field error.
 pub fn open_profile_error(
     services: Services,
@@ -1482,6 +1545,78 @@ pub const SCENES: &[Scene] = &[
         open: open_machines_loading,
     },
     // --- end v14/t4 lists ---
+    // --- usable: GitHub (design-github-identity.zh.md §3.7) ---
+    Scene {
+        name: "settings-github-not-connected",
+        about: "Settings: 账号 › GitHub before I connect: 还没连接 and 连接…",
+        start: Start::Github(crate::fake::github::GithubShape::NotConnected),
+        setup: |_, _| {},
+        open: open_profile,
+    },
+    Scene {
+        name: "settings-github-code",
+        about: "Settings: the 连接 GitHub sheet with the code, 复制验证码 and 打开 GitHub, waiting",
+        start: Start::Github(crate::fake::github::GithubShape::NotConnected),
+        setup: |_, _| {},
+        open: open_github_code,
+    },
+    Scene {
+        name: "settings-github-taken",
+        about: "Settings: the 连接 GitHub sheet when that GitHub account is on another member, 再试一次",
+        start: Start::Github(crate::fake::github::GithubShape::NotConnected),
+        setup: |_, _| {},
+        open: open_github_taken,
+    },
+    Scene {
+        name: "settings-github-connected",
+        about: "Settings: 账号 › GitHub connected: 已连接为 @login and 断开…",
+        start: Start::Github(crate::fake::github::GithubShape::Connected),
+        setup: |_, _| {},
+        open: open_profile,
+    },
+    Scene {
+        name: "settings-github-disconnect",
+        about: "Settings: the 断开 GitHub？ alert with 去 GitHub 撤销",
+        start: Start::Github(crate::fake::github::GithubShape::Connected),
+        setup: |_, _| {},
+        open: open_github_disconnect,
+    },
+    Scene {
+        name: "settings-github-invalid",
+        about: "Settings: 账号 › GitHub after GitHub refused the connection: 需要重新连接",
+        start: Start::Github(crate::fake::github::GithubShape::Invalid),
+        setup: |_, _| {},
+        open: open_profile,
+    },
+    Scene {
+        name: "settings-github-unavailable",
+        about: "Settings: 账号 › GitHub as an owner on a server without a GitHub client id",
+        start: Start::Github(crate::fake::github::GithubShape::Unavailable),
+        setup: |_, _| {},
+        open: open_profile,
+    },
+    Scene {
+        name: "settings-github-machines",
+        about: "Settings: 机器 once I connected GitHub: the older computer says it needs an update",
+        start: Start::Github(crate::fake::github::GithubShape::Connected),
+        setup: |_, _| {},
+        open: open_machines,
+    },
+    Scene {
+        name: "github-wait-banner",
+        about: "A 话题 whose AI member waits for me to connect GitHub: the banner with 连接 GitHub",
+        start: Start::Github(crate::fake::github::GithubShape::Waiting),
+        setup: crate::selftest::scenes::open_first_topic,
+        open: crate::selftest::scenes::open_main,
+    },
+    Scene {
+        name: "github-onboarding",
+        about: "The main window after the first sign-in: the one-time 连接 GitHub sheet with 以后再说",
+        start: Start::Github(crate::fake::github::GithubShape::NotConnected),
+        setup: crate::selftest::scenes::open_first_topic,
+        open: open_github_onboarding,
+    },
+    // --- end usable: GitHub ---
 ];
 
 // --- end v12/settings track ---
