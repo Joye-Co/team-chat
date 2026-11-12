@@ -239,8 +239,8 @@ HomeUse        = { memberId, usedBytes /* on the host disk */, sizeBytes? /* abs
   speculative pages), uptime, and bytes per second received and sent on the host's own interfaces
   (`/proc/net/dev` without `lo`, `tap*`, `fc*`, `veth*`, `docker*`, `virbr*`, `br-*`; Linux only).
 - **VMs** (`[vm]`): the executor records each run's VM as it boots (`booting`), answers
-  (`running`, with `bootMs`: Firecracker start to a connected guest agent), is paused by 接管
-  (`paused`) and goes. `cpuCores` is the Firecracker process's CPU time since the previous sample
+  (`running`, with `bootMs`: Firecracker start to a connected guest agent) and goes. `paused`
+  stays a valid value, but no VM reports it now: 暂停 and 接管 stop only the CLI in the VM. `cpuCores` is the Firecracker process's CPU time since the previous sample
   divided by the wall time (1.0 = one thread); `memBytes` its `VmRSS` (the guest pages it
   touched); `scratchBytes` the blocks the sparse scratch disk uses. `vmSlots` is
   `max_parallel_runs`; `boot` covers the last 50 boots. Without `[vm]`, `runs` lists the daemon's
@@ -1209,7 +1209,9 @@ plain folder without a limit until it is emptied). `home_gb = 0` keeps plain fol
 a new one; the daemon refuses while a run of that member is on the machine and holds that
 member's new runs (`busy`) while it empties. The CLI's system note says what is kept (the working
 folder for the next run in the topic, the home folder for all runs), and that processes left
-running when the turn ends are killed. 接管 pauses and resumes the whole VM. When the CLI exits
+running when the turn ends are killed. 暂停 and 接管 stop only the CLI's process group (the
+agent's `Hold`); the VM keeps running, and a person's commands run in it as another user (feature
+`takeover-isolated`, see "Usable features"). When the CLI exits
 the agent syncs the shares before the daemon reads them; then the VM, its tap, its exports and
 its scratch disk go.
 

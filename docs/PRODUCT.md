@@ -293,7 +293,8 @@ design it came from.
   a person (a question, an approval, a reply), 在等电脑 (queued, offline, starting, a limit),
   已暂停, taken over, 做完了, 失败 or 已停止. 暂停, 继续, 接管 and 交还 move between them; who may do
   which is in [plans/usable/design-takeover.zh.md](plans/usable/design-takeover.zh.md). The
-  command box of 接管 needs the computer's daemon to support it (feature `takeover`).
+  command box of 接管 needs the computer's daemon to support it (feature `takeover`; the
+  daemon and the screens are on main, the server's command route is not yet).
 - **Memory** (沉淀): four layers, the team's, a 群's, an AI member's and a person's own. What was
   learned in a 群 is read only by people in that 群; a person's own only by that person. AI members
   note what they learn during the day; once a night in the team's time zone the AI 服务 sorts the
