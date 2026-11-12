@@ -186,7 +186,8 @@ describe("a cancel the daemon gives a reason for (接 5.4)", () => {
     const { d } = await Daemon.connect(w.machineToken, { features: ["output"] });
     const { c } = await Client.connect(w.human.token);
     const { topicId, runId } = await started(w, c, d);
-    await d.acked(runId, d.done(runId, { status: "cancelled", error: "run took longer than maxDurationMs" }));
+    // (The time limit is not such a cancel any more: the work goes on, supervise.test.ts 盯 1.6.)
+    await d.acked(runId, d.done(runId, { status: "cancelled", error: "the CLI was killed by the system" }));
     expect(await ended(c, runId)).toMatchObject({ status: "cancelled", phase: "stopped" });
     await waitUntil(() => lastTopic(c, topicId)?.status === "blocked", 5000, "timed out: blocked");
     c.close();

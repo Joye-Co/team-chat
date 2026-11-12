@@ -698,6 +698,7 @@ mod run_tests {
 
     fn run(id: &str, bot: &str) -> BotRunSummary {
         BotRunSummary {
+            hold: Default::default(),
             id: id.into(),
             bot_id: bot.into(),
             group_id: "g".into(),

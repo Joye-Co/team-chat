@@ -950,8 +950,10 @@ stops trying, and the topic gets one note.
 - **Silent 5 minutes**: one `run.input` to the CLI (`inputId` `desk-nudge-…`) asking where it
   stands. It is not a member's message, so it never starts a follow-up run. Any event clears it.
   A run with a `tool.call` that has no `tool.result` yet waits for a step it started (a build, a
-  test run): it gets no nudge, and it counts as silent only after 30 minutes. A run out of tries
-  gets no nudge either.
+  test run): it gets no nudge, and it counts as silent only after 30 minutes. While the daemon's
+  heartbeat says that step's processes work (`RunCursor.active`, usable 盯 1.4) the run is not
+  silent at all, however long the step takes; it counts as silent from the last heartbeat that
+  said so. A run out of tries gets no nudge either.
 - **Silent 10 minutes (30 with a step open)**, in a fixed order, one step each time the run is
   silent that long again: first the run is cancelled without a message (`cancelled`, summary
   `restarted: …`) and its work continues in the same CLI session on the same machine
@@ -976,9 +978,32 @@ stops trying, and the topic gets one note.
   found unfinished after a restart (`run.done.error` `daemon restarted`) continues the same way
   instead of failing, at most 3 times in a row. A run that moves is closed on its old machine,
   so the old copy stops as soon as that machine is back.
-- **The same step 4 times in a row** (equal `tool.call` titles): one reminder (`desk-loop-…`).
-- **A promise without work**: a run that succeeds with a short result such as "我来看看" and called
+- **The same step 4 times in a row** (equal `tool.call` titles and equal `tool.result` output;
+  usable 盯 1.11: the same step whose output changes, such as polling CI, is not a loop): one
+  reminder (`desk-loop-…`).
+- **A promise without work**: a run whose request has a work order (交代单: the front desk
+  dispatched it; usable 盯 1.10) and that succeeds with a short result such as "我来看看" and called
   no tool gets a follow-up run that continues its session ("do the work now"). At most 3 in a row.
+  A short answer to a request without a work order ("我会在周会上提") is an answer.
+- **The time limit** (usable 盯 1.6, 1.8; see "Run time limit"): at the team's limit of work time
+  the run gets one `run.input` (`desk-limit-…`) telling it to save its state (commit to its own
+  branch, update the plan) and end its turn with what is done and what is left. When it ends that
+  turn without a final report, or is still going 15 minutes later (it is then interrupted), the
+  work goes on in a new turn of the same session: the run ends as `cancelled` without a message
+  (summary `restarted: time limit`) and a new run resumes its session with the recovery note. A run
+  that took the message and reported `chat-run report --state …` after it, or that ended before
+  taking it, ends as usual. After 2 turns in a row at the limit without progress (no new
+  successful step, file change, plan or acceptance update, or output) the work stops: the run turns
+  `blocked` with one note (已经做了 …，最近 2 轮都没有新进展…). A daemon that stops a run at its own
+  deadline (`run.done.status` `timeout`, or `cancelled` with the error `run took longer than
+  maxDurationMs`) is treated the same way: its English error never reaches the topic.
+- **What the desk did** (usable 盯 5.5): every act above (a nudge, a loop reminder, a continue, a
+  retry in the same session, a move to another computer, a wait for a computer and its return,
+  the time limit and what followed, giving up) is kept with the run as a `SuperviseAct` in
+  `BotRun.supervision` (the latest 20, oldest first) with its reason and, where it has one, the
+  minutes it lasted, and goes out with `run.updated`. The process view reads it as "10:32 没有动静
+  5 分钟，提醒了一次". The run log (`GET /v1/runs/:id/events`) holds only the daemon's frames: its
+  `seq` is the daemon's, so the desk's acts are not written there.
 - **Progress questions**: a short "进展怎么样了" / "好了吗" while a run works is answered by the
   bot from the run's state (minutes, plan, last step). The CLI is not interrupted, and the message
   counts as a taken input.
@@ -2140,6 +2165,8 @@ UpdateApprovalPolicyRequest = { askBefore?: Partial<ApprovalActions>, maxSpendCn
 | --- | --- | --- | --- |
 | `GET /v1/settings/approvals` | member | | `ApprovalPolicy` (the team's rules, 默认规则) |
 | `PATCH /v1/settings/approvals` | owner | `UpdateApprovalPolicyRequest` | `ApprovalPolicy`; audited as `settings.approvals` |
+| `GET /v1/settings/runs` | member | | `RunSettings` (usable: the run time limit, see "Run time limit") |
+| `PATCH /v1/settings/runs` | owner | `UpdateRunSettingsRequest` | `RunSettings`; audited as `settings.runs` |
 
 Rules:
 
@@ -2482,7 +2509,8 @@ Additive, as in 1.1: the protocol stays version 1, every new field is optional, 
 closed enum gains a value and no released field changes meaning. Every new state, kind and
 reason below is an open string (Zod `z.string()`, Rust `String`) with its known values exported
 (`RUN_PHASES`, `RELAY_STATES`, ...), so a newer server never fails an older reader. Modules:
-`relay.ts`, `github.ts`, `takeover.ts` / `relay.rs`, `github.rs`, `takeover.rs`, plus fields in
+`relay.ts`, `github.ts`, `takeover.ts`, `supervise.ts` / `relay.rs`, `github.rs`, `takeover.rs`,
+`supervise.rs`, plus fields in
 `bots`, `members`, `roster`, `files` and `machine`. Designs: `docs/plans/usable/design-*.zh.md`.
 
 The routes and fields here arrive with the usable milestone, one feature at a time. A server
@@ -2610,7 +2638,7 @@ ErrorBody += { memberIds?: string[] }                // at most 20: the members 
 | Method and path | Who | Response |
 | --- | --- | --- |
 | `POST /v1/groups/:id/relays/:relayId/stop` | a person in the group | `TopicRelay`; `conflict` when it has ended |
-| `POST /v1/groups/:id/relays/:relayId/retry` | a person in the group | `TopicRelay`; `conflict` unless it is `paused` |
+| `POST /v1/groups/:id/relays/:relayId/retry` | a person in the group | `TopicRelay`; `conflict` unless it is `paused`; `conflict` with reason `relay.retry_limit` after 3 retries |
 | `POST /v1/groups/:id/chains/:chainId/stop` | a person in the group | `ChainStopResponse { stoppedRuns }` |
 
 Rules:
@@ -2760,6 +2788,32 @@ RunLogEntry: run.done += { failure?: RunFailure }; session event += { effort?: s
   `logged_in`, takes no runs. When every computer that has the runtime is signed out, the run does
   not start, or a queued run (排队) stops waiting, and the topic says which computer needs
   signing in (the same sentence and next step).
+
+## Run time limit and what the desk did
+
+Module `supervise.ts` / `supervise.rs` (audit rows 盯 1.4, 1.6, 1.8, 5.5; 机 2.9; 接 6.2).
+
+```ts
+RunSettings   = { limitMinutes: number /* 30..1440, default 120 */, updatedAt /* 0 = never changed */ }
+UpdateRunSettingsRequest = { limitMinutes?: number }
+SuperviseAct  = { at, action: string /* SUPERVISE_ACTIONS */, reason: string /* SUPERVISE_REASONS */,
+                  minutes?: number /* whole minutes the reason lasted */ }
+BotRun       += { supervision?: SuperviseAct[] /* <= 20, oldest first */ }
+RunCursor    += { active?: boolean }   // machine-protocol.md, heartbeat
+```
+
+- The limit is work time of one run: BotDesk counts it about once a minute and leaves out the
+  time the run waits for an approval (`status: waiting`), is paused or taken over, waits for its
+  computer, or is marked stalled. D1 `run_settings` (migration 0018) holds one row, scope `*`;
+  no row = 120 minutes. A run keeps the limit it was assigned with; a new turn reads it again.
+  Administrators (`owner`) change it; a member gets `forbidden`, a value outside 30..1440 `invalid`.
+- What happens at the limit: "Supervision (盯活)", **The time limit**. `run.assign.maxDurationMs`
+  is the limit plus 30 minutes: only a backstop for a run the desk could not reach.
+- `SUPERVISE_ACTIONS`: `nudge`, `loop`, `continue`, `retry`, `move`, `wait_machine`,
+  `machine_back`, `limit`, `limit_continue`, `limit_stop`, `gave_up`. `SUPERVISE_REASONS`:
+  `silent`, `same_step`, `promise`, `machine_away`, `machine_removed`, `machine_lost`,
+  `daemon_restarted`, `time_limit`, `no_progress`. Both are open: a reader shows an unknown one
+  plainly. An act sits on the run it happened to; the run that continues the work starts without.
 
 ## Machine homes (VM hosts)
 

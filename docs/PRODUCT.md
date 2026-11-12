@@ -23,7 +23,7 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
 
 - Topic status, `waitingOn` and the members working on it follow the work (runs, cards, results);
   nobody sets them by hand. The topic menu only has 重命名 and 关注. Bots are
-  members: there is no 暂停 for a member; you tell it in the topic, and 停止 ends one run.
+  members: there is no 暂停 for a member; you tell it in the topic, 暂停 holds one run, and 停止 ends one run.
 - Topic status chips say who is waited on and for what:
 
   | `TopicStatus` | Chip when the viewer is in `waitingOn` | Chip otherwise |
@@ -78,6 +78,13 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
   a proper name, not a product noun; 连接 GitHub, 连接…, 重新连接…, 断开…, 已连接为 @{login}, 还没连接,
   需要重新连接, 验证码 (GitHub's own word), 复制验证码, 打开 GitHub, 授权, 组织, 仓库, PR, 以后再说,
   去 GitHub 撤销, and {name} 在等你连接 GitHub.
+- Words for a run's state and 接管 (docs/plans/usable/design-takeover.zh.md §3.9): 暂停, 继续, 已暂停,
+  已停止, 没做完, 在等电脑, 排队第 {n} 个, 电脑不在线, 正在准备, 等 {who} 回复, 等 {who} 批准,
+  卡住了，需要你看一下, {who} 暂停了 {member}, 你在操作 {computer}, {who} 在操作 {computer}, 已停下,
+  替 {who} 交还, 去回复, 运行, 中止, 运行中, 成功, 失败, 已中止, 工作目录, 在访达中打开 / 在资源管理器中打开,
+  留句话给 {member}, {who} 接管了 {member}, {who} 交还了 {member}, 跑了 {k} 条命令, 改了 {files}, and the
+  reminders {member} 还停着，等你交还 and {who} 接管 {member} 已经 {h} 小时. 暂停 stops one run for a
+  while (继续 lets it go on); it is not a setting of the member. 暂停, 等你 and 完成 never share words.
 - The three 身份 of a team (design-roles): 所有者, 管理员 and 普通成员, with 身份 itself and the menu
   items 设为所有者, 设为管理员, 设为普通成员. 负责人 stays the member a 话题 is assigned to and is
   never a 身份.

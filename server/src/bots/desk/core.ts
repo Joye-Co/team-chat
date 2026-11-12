@@ -23,6 +23,7 @@ import {
   RunCode,
   RunHandback,
   type RunStatus,
+  SuperviseAct,
   type TopicStatus,
   Usage,
 } from "@chat/protocol";
@@ -161,6 +162,25 @@ export type RunRow = {
   // desk-limit-wait (模 3.4, 盯 1.5)
   /** While a queued run waits for its computer's subscription limit: when it resets (server clock); else null. */
   limit_until: number | null;
+  // desk-time-limit (盯 1.4, 1.6, 1.8, 1.11, 5.5)
+  /** The team's time limit (ms of counted work) when the run was assigned, or null (the default). */
+  limit_ms: number | null;
+  /** Work time that counts toward the limit: not waiting for an approval, a pause or the machine. */
+  worked_ms: number;
+  /** When `worked_ms` was last brought up to date, or null before the first check. */
+  worked_at: number | null;
+  /** When the run was told to save its state at the time limit; null before. */
+  limit_at: number | null;
+  /** Turns in a row that reached the time limit without progress. Carried over. */
+  limit_rounds: number;
+  /** Signs of progress in this run: new successful steps, file changes, plan and acceptance updates, outputs. */
+  progress: number;
+  /** The daemon's latest heartbeat that said a step of the run is working (盯 1.4), or null. */
+  alive_at: number | null;
+  /** JSON of the open tool calls (item id -> title) for loops that look at the output (盯 1.11). */
+  loop_calls: string | null;
+  /** JSON of the desk's acts on this run (`SuperviseAct[]`, 盯 5.5), or null. */
+  acts: string | null;
 };
 
 /**
@@ -197,6 +217,17 @@ export function safeJson(text: string): unknown {
     return JSON.parse(text);
   } catch {
     return undefined;
+  }
+}
+
+/** The desk's acts on a run (盯 5.5), oldest first; [] when none or the row does not parse. */
+export function actsOf(r: Pick<RunRow, "acts">): SuperviseAct[] {
+  if (!r.acts) return [];
+  try {
+    const v = JSON.parse(r.acts) as unknown;
+    return Array.isArray(v) ? v.filter((x): x is SuperviseAct => SuperviseAct.safeParse(x).success) : [];
+  } catch {
+    return [];
   }
 }
 
@@ -529,6 +560,23 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
           up: `ALTER TABLE runs ADD COLUMN limit_until INTEGER;`,
         },
         {
+          // 盯 1.4, 1.6, 1.8, 1.11, 5.5: the time limit counts only work (not waits), a long step
+          // whose processes work is not silent, loops look at the output, and what the desk did is
+          // kept with the run. Old rows: NULL / 0 (the default limit, nothing recorded).
+          name: "desk-time-limit",
+          up: `
+            ALTER TABLE runs ADD COLUMN limit_ms INTEGER;
+            ALTER TABLE runs ADD COLUMN worked_ms INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE runs ADD COLUMN worked_at INTEGER;
+            ALTER TABLE runs ADD COLUMN limit_at INTEGER;
+            ALTER TABLE runs ADD COLUMN limit_rounds INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE runs ADD COLUMN progress INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE runs ADD COLUMN alive_at INTEGER;
+            ALTER TABLE runs ADD COLUMN loop_calls TEXT;
+            ALTER TABLE runs ADD COLUMN acts TEXT;
+          `,
+        },
+        {
           // Usable (design-takeover 3.7): pause versus take-over, the person's command, the
           // hand-back. Old rows: not held, or a pause (hold_kind NULL).
           name: "desk-hold-1",
@@ -647,6 +695,8 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
     if (r.effort) run.effort = r.effort;
     const failure = r.failure ? RunFailure.safeParse(JSON.parse(r.failure)) : null;
     if (failure?.success) run.failure = failure.data;
+    const acts = actsOf(r);
+    if (acts.length > 0) run.supervision = acts;
     if (r.queued_at && r.ended_at === null && r.status === "created" && !r.machine_id) {
       run.queuedAt = r.queued_at;
       run.queuePosition = this.queuePosition(r);
@@ -910,6 +960,9 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
       if (stoppedBy) s.stoppedBy = stoppedBy;
       const handed = this.handedOverOf(r.id);
       if (handed) s.handedOver = handed.to;
+      // design-relay R3: a relay does not go on to another member past code that is not pushed.
+      const code = codeOf(r.code);
+      if (code) s.code = code;
     }
     await this.sendWorkState(r.group_id, s);
   }

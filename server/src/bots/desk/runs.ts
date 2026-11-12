@@ -27,6 +27,8 @@ import { type FailureNote, failureNote } from "./failure";
 import { LIMIT_NOTE, LIMIT_REACHED, type LoggedFrame, type RecoveryFacts, outwardAction, recoveryNote, stepOf } from "../../agent/recovery";
 import type { RunProof } from "../proof";
 import { needsReply, reportOf } from "./report";
+import { runLimitMs } from "../../settings/runs";
+import { LIMIT_BACKSTOP_MS } from "../../agent/supervise";
 
 /** The prompts of a run (Run context): the full one, and the one for a resumed session. */
 interface Prompts {
@@ -80,7 +82,7 @@ export interface RunRequest {
 
 export abstract class DeskRuns extends DeskCore {
   /** 盯活 (stall.ts): ends the run quietly and starts the same request again; false when out of tries. */
-  protected abstract restartElsewhere(r: RunRow, why: string, how?: Restart, opts?: { count?: boolean; step?: number }): Promise<boolean>;
+  protected abstract restartElsewhere(r: RunRow, why: string, how?: Restart, opts?: { count?: boolean; step?: number; limitRounds?: number }): Promise<boolean>;
   /** 盯 1.1 (stall.ts): the lease of a run ran out; true when the run keeps waiting for its machine. */
   protected abstract machineLost(r: RunRow): Promise<boolean>;
 
@@ -723,6 +725,15 @@ export abstract class DeskRuns extends DeskCore {
       if (resume !== null) this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `prompt_resume:${r.id}`, `${resume}\n\n${parts}`);
     }
     const frame = this.assignFrame(r, runner, prompt, machine, await workerModel(this.env.DB, runner.runtime));
+    // 盯 1.6: the desk keeps the team's limit (work time, without waits) and saves and continues
+    // the run there; the daemon's own deadline lies past it and is only a backstop.
+    if (r.kind !== RUN_KIND_ASIDE) {
+      if (r.limit_ms === null || r.limit_ms === undefined) {
+        r.limit_ms = await runLimitMs(this.env.DB);
+        this.sql.exec("UPDATE runs SET limit_ms = ? WHERE id = ?", r.limit_ms, r.id);
+      }
+      frame.maxDurationMs = r.limit_ms + LIMIT_BACKSTOP_MS;
+    }
     // Gated actions: the team's checked kinds, to a machine whose CLI stops them; kinds a person
     // approved for this piece of work are left out.
     if (r.kind !== RUN_KIND_ASIDE && gatesRuntime(machine, runner.runtime)) {

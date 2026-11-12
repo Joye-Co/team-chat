@@ -138,6 +138,83 @@ pub fn descendants(root: i32) -> Vec<i32> {
     out
 }
 
+/// CPU time (user and system, nanoseconds) process `pid` has used; None when it is gone.
+// libc marks the Mach timebase as deprecated in favour of the `mach2` crate; one plain call does
+// not need another dependency.
+#[cfg(target_os = "macos")]
+#[allow(deprecated)]
+pub fn cpu_ns(pid: i32) -> Option<u64> {
+    if pid <= 0 {
+        return None;
+    }
+    // SAFETY: a plain C struct; zeroes are a valid value.
+    let mut info: libc::proc_taskinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_taskinfo>() as libc::c_int;
+    // SAFETY: the buffer holds `size` bytes; libproc writes at most that many.
+    let n = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTASKINFO,
+            0,
+            (&mut info as *mut libc::proc_taskinfo).cast(),
+            size,
+        )
+    };
+    if n != size {
+        return None;
+    }
+    // The totals are in Mach time units (nanoseconds on Intel, ticks on Apple silicon).
+    let mut tb = libc::mach_timebase_info { numer: 0, denom: 0 };
+    // SAFETY: writes the two fields of `tb`.
+    unsafe {
+        libc::mach_timebase_info(&mut tb);
+    }
+    let ticks = info.pti_total_user.saturating_add(info.pti_total_system) as u128;
+    let (numer, denom) = if tb.denom == 0 {
+        (1, 1)
+    } else {
+        (tb.numer as u128, tb.denom as u128)
+    };
+    Some((ticks * numer / denom) as u64)
+}
+
+/// CPU time (user and system, nanoseconds) process `pid` has used, from `/proc/<pid>/stat`
+/// (`utime` and `stime`, the 12th and 13th fields after the state); None when it is gone.
+#[cfg(target_os = "linux")]
+pub fn cpu_ns(pid: i32) -> Option<u64> {
+    if pid <= 0 {
+        return None;
+    }
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let rest = &stat[stat.rfind(')')? + 1..];
+    let mut f = rest.split_whitespace().skip(11);
+    let utime: u64 = f.next()?.parse().ok()?;
+    let stime: u64 = f.next()?.parse().ok()?;
+    // SAFETY: plain syscall without pointers.
+    let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    let hz = if hz > 0 { hz as u64 } else { 100 };
+    Some((utime + stime).saturating_mul(1_000_000_000 / hz))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn cpu_ns(_pid: i32) -> Option<u64> {
+    None
+}
+
+/// 盯 1.4: the CPU time each process below the CLI `root` (its tools: a build, a test run) has
+/// used, by pid. None when `root` is gone.
+pub fn tools_cpu(root: i32) -> Option<std::collections::HashMap<i32, u64>> {
+    if root <= 1 || start_time(root).is_none() {
+        return None;
+    }
+    Some(
+        descendants(root)
+            .into_iter()
+            .filter_map(|p| cpu_ns(p).map(|ns| (p, ns)))
+            .collect(),
+    )
+}
+
 /// The groups and processes below the CLI `root`, which leads its own group. `root`'s group
 /// itself is not in the list. Empty when `root` does not lead a group (it is gone, or the pid
 /// now belongs to another process).
@@ -425,6 +502,42 @@ mod tests {
     fn alive(pid: i32) -> bool {
         // SAFETY: signal 0 only checks that the process exists.
         unsafe { libc::kill(pid, 0) == 0 }
+    }
+
+    /// 盯 1.4: the CPU the tools below a CLI use is seen, and a gone CLI has no tools.
+    #[test]
+    fn tools_cpu_sees_a_busy_tool_and_not_a_sleeping_one() {
+        // The "CLI" waits for a busy tool and a sleeping one.
+        let mut cli = Command::new("/bin/sh")
+            .arg("-c")
+            .arg("(while :; do :; done) & sleep 30 & wait")
+            .spawn()
+            .unwrap();
+        let root = cli.id() as i32;
+        let total = |m: &std::collections::HashMap<i32, u64>| m.values().sum::<u64>();
+        // Up to 10 s for both tools to start and the busy one to burn some CPU.
+        let mut first = std::collections::HashMap::new();
+        for _ in 0..500 {
+            first = tools_cpu(root).unwrap();
+            if first.len() >= 2 && total(&first) > 0 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(first.len() >= 2, "{first:?}");
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let second = tools_cpu(root).unwrap();
+        assert!(total(&second) > total(&first), "{first:?} {second:?}");
+        for p in second.keys() {
+            // SAFETY: plain syscall; the pids are this test's own tools.
+            unsafe {
+                libc::kill(*p, libc::SIGKILL);
+            }
+        }
+        let _ = cli.kill();
+        let _ = cli.wait();
+        assert!(tools_cpu(root).is_none());
+        assert!(cpu_ns(std::process::id() as i32).is_some());
     }
 
     const STAND_IN: &str = "TC_PROCTREE_STAND_IN";

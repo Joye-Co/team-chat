@@ -9,7 +9,7 @@
 //!   the only one, so no CLI outlives it and there is nothing left to clean up at the next
 //!   start.
 
-use super::{BoxFuture, Executor, Process, Spawned, Stopped};
+use super::{BoxFuture, Executor, HandChild, HandEnd, HandReq, Process, Spawned, Stopped};
 use crate::runtime::RunSpec;
 use crate::winjob::{self, Job};
 use crate::workspace::{self, RunMeta};
@@ -101,6 +101,79 @@ impl Executor for Local {
 
     /// Nothing to do: the job of a daemon that is gone was killed when its handle closed.
     fn kill_leftover(&self, _meta: &RunMeta) {}
+
+    fn takeover(&self) -> Option<&'static str> {
+        Some(super::TAKEOVER_COMMANDS)
+    }
+
+    /// `powershell.exe -NoLogo -NoProfile -NonInteractive` with the command encoded (no quoting
+    /// rules to get wrong), in a job of its own: not in the CLI's suspended job, and ending the
+    /// job ends what the command started.
+    fn hand(&self, req: &HandReq) -> std::io::Result<HandChild> {
+        let (r, w) = std::io::pipe()?;
+        let w2 = w.try_clone()?;
+        let mut cmd = tokio::process::Command::new("powershell.exe");
+        cmd.args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-EncodedCommand",
+            &encoded_command(&req.command),
+        ])
+        .current_dir(&req.cwd)
+        .env_clear()
+        .envs(req.env.iter().map(|(k, v)| (k, v)))
+        .stdin(Stdio::null())
+        .stdout(w)
+        .stderr(w2);
+        let spawned = winjob::spawn(&mut cmd, true);
+        // The pipe's write ends live in `cmd` until it is dropped: the output ends only then.
+        drop(cmd);
+        let (mut child, job) = spawned?;
+        let job = Arc::new(job);
+        hands(|m| m.entry(req.run_dir.clone()).or_default().push(job.clone()));
+        let (tx, output) = tokio::sync::mpsc::unbounded_channel();
+        super::pipe_reader(r, tx);
+        let (done_tx, done) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let status = child.wait().await;
+            let _ = done_tx.send(HandEnd {
+                code: status.ok().and_then(|s| s.code().map(i64::from)),
+                ..HandEnd::default()
+            });
+        });
+        Ok(HandChild {
+            output,
+            done,
+            cancel: Box::new(move || job.terminate()),
+        })
+    }
+
+    /// Ending each command's job ends what it left running.
+    fn hand_end(&self, run_dir: &Path) {
+        for job in hands(|m| m.remove(run_dir)).unwrap_or_default() {
+            job.terminate();
+        }
+    }
+}
+
+/// The jobs of the person's commands, by run folder, for [`Executor::hand_end`].
+static HANDS: Mutex<Option<HashMap<PathBuf, Vec<Arc<Job>>>>> = Mutex::new(None);
+
+fn hands<T>(f: impl FnOnce(&mut HashMap<PathBuf, Vec<Arc<Job>>>) -> T) -> T {
+    let mut g = HANDS.lock().unwrap_or_else(|e| e.into_inner());
+    f(g.get_or_insert_with(HashMap::new))
+}
+
+/// `-EncodedCommand`: the script as base64 of UTF-16LE. Output in UTF-8, and no progress
+/// records (they would come as CLIXML on a redirected stream).
+pub fn encoded_command(command: &str) -> String {
+    use base64::Engine;
+    let script = format!(
+        "$ProgressPreference = 'SilentlyContinue'; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; {command}"
+    );
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
 struct LocalStopped {

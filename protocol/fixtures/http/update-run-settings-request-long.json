@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateRunSettingsRequest",
+  "valid": false,
+  "description": "the limit is 30..1440 minutes",
+  "value": {
+    "limitMinutes": 1441
+  }
+}

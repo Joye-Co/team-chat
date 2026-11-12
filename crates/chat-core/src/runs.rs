@@ -156,6 +156,55 @@ impl HttpClient {
         .await
     }
 
+    /// Usable 接管: takes over a run (`POST /v1/runs/:id/takeover`, docs/protocol.md, "Run phase
+    /// and take-over"). Answers with the run (`holdKind: "takeover"`); `conflict` when it ended,
+    /// waits for a machine or its machine cannot be taken over; 404 on an older server.
+    pub async fn take_over_run(&self, run_id: &str) -> ApiResult<BotRun> {
+        self.call::<(), _>(
+            Method::POST,
+            &format!("/v1/runs/{}/takeover", enc(run_id)),
+            None,
+            true,
+        )
+        .await
+    }
+
+    /// Usable: runs one command of the person holding the run in its work folder. Never
+    /// queued: `conflict` when the run is not taken over by me, a command runs, or the machine
+    /// is offline.
+    pub async fn run_command(
+        &self,
+        run_id: &str,
+        req: &crate::proto::RunCommandRequest,
+    ) -> ApiResult<crate::proto::RunCommandResponse> {
+        req.validate()
+            .map_err(|e| ApiError::Invalid(e.to_string()))?;
+        self.call(
+            Method::POST,
+            &format!("/v1/runs/{}/commands", enc(run_id)),
+            Some(req),
+            true,
+        )
+        .await
+    }
+
+    /// Usable: stops my running command in a run I hold.
+    pub async fn cancel_run_command(&self, run_id: &str, command_id: &str) -> ApiResult<()> {
+        let _: serde_json::Value = self
+            .call::<(), _>(
+                Method::POST,
+                &format!(
+                    "/v1/runs/{}/commands/{}/cancel",
+                    enc(run_id),
+                    enc(command_id)
+                ),
+                None,
+                true,
+            )
+            .await?;
+        Ok(())
+    }
+
     /// 1.1: one page of a group's decisions (群里的决定, `GET /v1/groups/:id/decisions`),
     /// newest first: answers to v2 asks with `record`, as the card was when it was answered.
     /// `before_seq` pages back; `limit` is 1..=200.
