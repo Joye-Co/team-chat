@@ -15,7 +15,7 @@ import { ACTIVE, type RunRow, result } from "./core";
 import { DeskRelay } from "./relay";
 import { isChainStop } from "./delegate_card";
 import { isProgressQuestion, isStopRequest, progressAnswer } from "../../agent/supervise";
-import { isNewTask } from "../../agent/frontdesk";
+import { isAddOn, isNewTask } from "../../agent/frontdesk";
 
 /**
  * 接 1.4 (usable section 4): a message without an @ from the person who asked for the last run in
@@ -68,8 +68,9 @@ export abstract class DeskInput extends DeskRelay {
    * running ones (接 1.5). In a topic (话题) that is the topic's run. In a chat area (群聊, a DM's
    * chat area) a member may work on several requests at once: a reply to a run's message goes to
    * that run, an answer to the front desk's question and 新任务 start a new one, an approval
-   * answer goes to the run that waits for it, and the person's own request gets what they say;
-   * anyone else who @s the member starts a new run.
+   * answer goes to the run that waits for it, and the person's own request gets what they say
+   * without an @, in a DM, or what adds to it (`isAddOn`); any other @ request, theirs too, starts
+   * a new run (verify 2, problem 10: "@Forge 另一件事：…" was taken into the first run).
    */
   protected runFor(m: TopicMessage): RunRow | null | undefined {
     const runs = this.activeRuns(m.topicId);
@@ -84,8 +85,8 @@ export abstract class DeskInput extends DeskRelay {
     const waits = runs.find((x) => x.approval_id && (approvalDecision(m.body) !== null || approvesWholeWork(m.body)));
     if (waits) return waits;
     const own = runs.find((x) => x.requested_by === m.authorId);
-    if (own) return own;
-    if (m.replyToAuthorId === this.botId || isProgressQuestion(m.body)) return runs[0];
+    if (own && (m.dm || !m.mentioned || isAddOn(m.body))) return own;
+    if (m.replyToAuthorId === this.botId || isProgressQuestion(m.body)) return own ?? runs[0];
     return m.mentioned ? null : runs[0];
   }
 

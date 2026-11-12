@@ -892,8 +892,10 @@ Rules:
   a mention from someone who has no active run of the bot there starts its own run next to the
   running ones, with its own result and its own session. A message that quotes a run's request,
   progress or approval card, or an input it took, goes to that run; an approval answer to the run
-  that waits for it; the requester's own words to their newest run; a message that starts with
-  新任务 (or answers the front desk's question) starts a new run. An answer or a live event on a
+  that waits for it; the requester's own words to their newest run when they have no @, come in
+  a DM, or start with words that add to it (顺便, 补充, 加上, 还要, 改成, also, …); any other mention
+  of theirs in the 群聊, and a message that starts with 新任务 or 另一件事 (or answers the front
+  desk's question), starts a new run. An answer or a live event on a
   card goes to the run that posted the card, and a part handed back to the run that gave it out.
   A retry or a hand-over may start next to the running ones. In a topic the bot has one run
   at a time, as above.
@@ -1123,7 +1125,7 @@ contract, but its shape is fixed here so the developer view and the daemon notes
   message of that bot or is a follow-up of its run (input left over). A new request starts a new
   session with the 群聊's lines as above. In a DM's 群聊 (usable 接 3.2) the next request
   continues the bot's last session there, unless it starts with 新任务 (or similar words: 新的任务,
-  另一个任务, 换个任务, 重新开始, new task) or the front desk dispatches it with `newTask: true`. A
+  另一个任务, 另一件事, 换个任务, 重新开始, new task) or the front desk dispatches it with `newTask: true`. A
   request next to a running one in a chat area always starts a new session; a follow-up or a
   retry continues its own run's session.
 - **What it carried.** Every run keeps its prompt and a manifest; owners read them with
