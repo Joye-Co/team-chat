@@ -34,6 +34,8 @@ export interface DelegateIn {
   groupId: string;
   topicId: string;
   requesterId: string;
+  /** The person the work is for (the giving run's `requested_for`); absent from an older desk. */
+  requestedFor?: string | null;
   brief: Brief;
   fromBotId: string;
   delegation: Delegation;
@@ -69,6 +71,7 @@ export abstract class DeskDelegate extends DeskFront {
         groupId: r.group_id,
         topicId: r.topic_id,
         requesterId: r.requested_by,
+        requestedFor: r.requested_for ?? undefined,
         brief,
         fromBotId: botId,
         delegation,
@@ -96,6 +99,7 @@ export abstract class DeskDelegate extends DeskFront {
       groupId: r.group_id,
       topicId,
       requesterId: r.requested_by,
+      requestedFor: r.requested_for ?? undefined,
       brief,
       fromBotId: botId,
       delegation,
@@ -147,6 +151,7 @@ export abstract class DeskDelegate extends DeskFront {
     }
     const key = `delegated:${ulid()}`;
     const m: TopicMessage = { groupId: d.groupId, topicId: d.topicId, messageId: key, authorId: d.requesterId, body: d.brief.goal, mentioned: true };
+    if (d.requestedFor !== undefined) m.requestedFor = d.requestedFor;
     if (this.startBlocked(d.topicId)) throw new ApiError("conflict", "that member is already working in this topic", "delegation.busy");
     await this.start(m, undefined, [], undefined, d.brief);
     const run = this.sql.exec<{ id: string }>("SELECT id FROM runs WHERE trigger_message_id = ?", key).toArray()[0];
@@ -159,7 +164,7 @@ export abstract class DeskDelegate extends DeskFront {
   /** A part this member gave out came back: to its run as input, or as a follow-up run. */
   async partDone(
     botId: string,
-    p: { groupId: string; topicId: string; requesterId: string; fromName: string; topicTitle: string; ok: boolean; result: string; runId?: string },
+    p: { groupId: string; topicId: string; requesterId: string; requestedFor?: string | null; fromName: string; topicTitle: string; ok: boolean; result: string; runId?: string },
   ): Promise<void> {
     this.bind(botId);
     const text = `[team-chat] The part you gave to ${p.fromName} ${p.ok ? "is done" : "did not finish"} (topic "${p.topicTitle}"):\n${p.result}`;
@@ -171,7 +176,7 @@ export abstract class DeskDelegate extends DeskFront {
       return;
     }
     if (active || this.startBlocked(p.topicId)) return;
-    await this.start({ groupId: p.groupId, topicId: p.topicId, messageId: `part:${ulid()}`, authorId: p.requesterId, body: text, mentioned: true });
+    await this.start({ groupId: p.groupId, topicId: p.topicId, messageId: `part:${ulid()}`, authorId: p.requesterId, body: text, mentioned: true, ...(p.requestedFor !== undefined ? { requestedFor: p.requestedFor } : {}) });
   }
 
   /** When a run that took a part ends, its result goes back to the member that gave it out. */
@@ -185,6 +190,7 @@ export abstract class DeskDelegate extends DeskFront {
         topicId: d.parent.topicId,
         runId: d.parent.runId,
         requesterId: r.requested_by,
+        requestedFor: r.requested_for ?? undefined,
         fromName: names.get(this.botId as string) ?? "",
         topicTitle: await this.topicTitle(r),
         ok,

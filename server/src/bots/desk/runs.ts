@@ -18,6 +18,9 @@ import { refsText } from "../refs";
 import { EXECUTOR_MEMORY_BYTES, memoryIndex } from "../../memory/inject";
 import { groupMembers, membersText } from "../../context/read";
 import { loadMachines, loadRunner } from "../store";
+import { ANONYMOUS_ID } from "../../cards2/privacy";
+import { githubFor } from "../../github/assign";
+import { supersedeWaits } from "../../github/machine";
 import { DeskCore, QUEUED, type RunRow } from "./core";
 import { needsReply, reportOf } from "./report";
 
@@ -99,13 +102,15 @@ export abstract class DeskRuns extends DeskCore {
     // 接 1.5: a request next to a running one in a chat area is its own piece of work.
     const alongside = isMainTopicId(m.topicId) && this.activeRun(m.topicId) !== undefined;
 
+    const requestedFor = await this.requestedFor(m, followUpOf, retryOf);
+    if (this.startBlocked(m.topicId)) return; // Raced with another message.
     const now = Date.now();
     const runId = ulid(now);
     // A side chat topic (单独问) gets a read-only run that answers only the asker.
     const kind = claim.contextOf ? RUN_KIND_ASIDE : null;
     this.sql.exec(
-      `INSERT INTO runs (id, group_id, topic_id, status, requested_by, trigger_message_id, created_at, updated_at, last_event_at, follow_up_of, kind, retry_of)
-       VALUES (?, ?, ?, 'created', ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO runs (id, group_id, topic_id, status, requested_by, trigger_message_id, created_at, updated_at, last_event_at, follow_up_of, kind, retry_of, requested_for)
+       VALUES (?, ?, ?, 'created', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       runId,
       m.groupId,
       m.topicId,
@@ -117,6 +122,7 @@ export abstract class DeskRuns extends DeskCore {
       followUpOf?.id ?? null,
       kind,
       retryOf ?? null,
+      requestedFor,
     );
     // Run context: in the 群聊 only a follow-up, or a request that quotes this bot, continues
     // the bot's last session; any other request is a new piece of work. 接 3.2: in a DM's chat
@@ -145,6 +151,8 @@ export abstract class DeskRuns extends DeskCore {
         )
           .bind(runId, botId, m.groupId, m.topicId, now)
           .run();
+        // A new run of this member in a topic answers the GitHub waits of its earlier ones there.
+        if (!isMainTopicId(m.topicId)) await supersedeWaits(this.env, botId, m.topicId).catch((err) => this.log.warn("github waits cleanup failed", { runId, err }));
         // Answers and live events start runs too: a card answer acknowledges on the answered card,
         // other synthetic keys get no reaction.
         if (m.ackMessageId) await this.ack(r, m.ackMessageId);
@@ -204,6 +212,21 @@ export abstract class DeskRuns extends DeskCore {
       }
       await this.scheduleStall();
     });
+  }
+
+  /**
+   * The person a new run works for (protocol "Who a run works for"): what the starter says
+   * (`m.requestedFor`), else a retry's original run's, else the author when a person; a follow-up
+   * whose author is nobody (a private answer as input) keeps its run's.
+   */
+  protected async requestedFor(m: TopicMessage, followUpOf?: RunRow, retryOf?: string): Promise<string | null> {
+    if (m.requestedFor !== undefined) return m.requestedFor;
+    const retried = retryOf ? this.run(retryOf) : undefined;
+    if (retried?.requested_for) return retried.requested_for;
+    const author =
+      m.authorId === ANONYMOUS_ID ? null : await this.env.DB.prepare("SELECT kind FROM members WHERE id = ?").bind(m.authorId).first<{ kind: string }>();
+    if (author?.kind === "human") return m.authorId;
+    return followUpOf?.requested_for ?? null;
   }
 
   /**
@@ -548,10 +571,13 @@ export abstract class DeskRuns extends DeskCore {
     const resumePrompt = frame.resumeSessionId ? this.meta(`prompt_resume:${r.id}`) : null;
     if (resumePrompt !== null) frame.prompt = resumePrompt;
     this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `sent:${r.id}`, resumePrompt !== null ? "resume" : "full");
+    // Whose GitHub the run uses on this machine (design-github-identity 3.2); never the token.
+    const github = r.kind === RUN_KIND_ASIDE ? null : await githubFor(this.env, { requestedFor: r.requested_for, requestedBy: r.requested_by, botId: this.botId as string }, machine);
+    if (github) frame.github = github.github;
     this.sql.exec("UPDATE runs SET machine_id = ?, runtime = ? WHERE id = ?", machine.id, runner.runtime, r.id);
     r.machine_id = machine.id;
     r.runtime = runner.runtime;
-    await this.env.DB.prepare("UPDATE bot_runs SET machine_id = ? WHERE id = ?").bind(machine.id, r.id).run();
+    await this.env.DB.prepare("UPDATE bot_runs SET machine_id = ?, github_member_id = ? WHERE id = ?").bind(machine.id, github?.memberId ?? null, r.id).run();
     this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `prompt:${r.id}`, prompt);
     await linkStub(this.env, machine.id).assign(machine.id, this.botId as string, frame);
   }

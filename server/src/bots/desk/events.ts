@@ -534,12 +534,15 @@ export abstract class DeskEvents extends DeskRuns {
       r.result_message_id = id;
     }
     await this.setStatus(r, status, { ended_at: now, summary: cut(summary, 280) || null });
-    await this.topic(r, topicStatus, waitingOn);
+    // A run that stopped for someone's GitHub is not done: the topic waits on that person.
+    const githubFor = status !== "cancelled" ? this.githubWaitingOn(r.id) : null;
+    await this.topic(r, githubFor ? "blocked" : topicStatus, githubFor ? [githubFor] : waitingOn);
     if (status !== "cancelled") await this.reportPart(r, success, body);
     this.retro(r, status, body);
     // A slot may be free now: the next queued run (排队) gets it. Not awaited: it takes other
     // runs' turns and must not wait inside this run's turn.
     void this.dispatchQueued().catch((err) => this.log.warn("queue dispatch failed", { err }));
+    if (status !== "cancelled" && this.meta(`github_resume:${r.id}`) !== null) await this.resumeAfterGithub(r);
   }
 
   /** 复盘 (memory/retro.ts): lessons from a run that ran on a machine, after it ended. Never fails the run. */

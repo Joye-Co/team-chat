@@ -2,7 +2,7 @@
 // has no model: fixed rules turn a mention into a run on a machine, run events into topic
 // messages and topic status, and later topic messages into run input. The normalized run log
 // lives in its SQLite. This class adds runs of external bots, plans over HTTP and reads to the
-// feature modules it extends (core, runs, events, stall, input, takeover, interact).
+// feature modules it extends (core, runs, events, stall, input, takeover, interact, github).
 import { type BotRun, type Card, type ModelUsage, RUN_KIND_ASIDE, type RunPlan, type RunStatus, type TopicStatus } from "@chat/protocol";
 import { activityAfterRun, recordActivity } from "../../activity/events";
 import { type BudgetState, budgetState, grantExtra, overBudget, raiseCents } from "../../budget";
@@ -27,7 +27,7 @@ export interface UsageRun {
   /** Per model the run used (daemons from 1.3). */
   models?: ModelUsage[];
 }
-import { DeskInteract } from "./interact";
+import { DeskGithub } from "./github";
 import { type DeskRollup, deskRollup } from "../../monitor/rollup";
 
 /** A run held at the budget (meta `budget_hold:{runId}`): the state when it was held. */
@@ -50,7 +50,7 @@ export const BUDGET_TEXT = {
   stopped: (owner: string, bot: string) => `这周的预算用完了，${owner} 让 ${bot} 先停下，这件事没有做。要继续，在 团队管理 › 用量 里改预算后再 @${bot}。`,
 };
 
-export class BotDesk extends DeskInteract {
+export class BotDesk extends DeskGithub {
   // -------------------------------------------------------------------------
   // 到了预算先停下来问 (budget/index.ts)
   // -------------------------------------------------------------------------

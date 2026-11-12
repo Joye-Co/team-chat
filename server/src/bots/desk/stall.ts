@@ -245,11 +245,13 @@ export abstract class DeskStall extends DeskEvents {
   /** The CLI ended with a promise and no tool call: a follow-up run continues the session. */
   protected async continuePromise(r: RunRow, result: string): Promise<boolean> {
     if (r.kind === RUN_KIND_ASIDE || !isPromiseOnly(result, r.tool_calls) || r.auto_continues >= MAX_AUTO_CONTINUE) return false;
+    // A run that stopped to wait for someone's GitHub goes on when they connect, not now.
+    if (this.githubWaitingOn(r.id) !== null) return false;
     if (this.startBlocked(r.topic_id)) return false;
     const key = `continue:${ulid()}`;
     try {
       await this.start(
-        { groupId: r.group_id, topicId: r.topic_id, messageId: key, authorId: r.requested_by, body: CONTINUE_TEXT, mentioned: true },
+        { groupId: r.group_id, topicId: r.topic_id, messageId: key, authorId: r.requested_by, body: CONTINUE_TEXT, mentioned: true, ...(r.requested_for ? { requestedFor: r.requested_for } : {}) },
         r,
       );
     } catch (err) {
