@@ -658,7 +658,7 @@ pub fn task_pid_file(dir: &Path) -> PathBuf {
 // daemon of a task writes its pid and the time its process was made next to its log, and
 // makes a named event (`Local\<slug>-daemon-stop-<pid>`). Whoever stops it finds the process
 // by pid and checks the time (a pid alone can be another program's by now), sets the event,
-// and the daemon shuts down the way it does on Ctrl+C (its runs are cancelled and reported).
+// and the daemon shuts down the way it does on Ctrl+C (its runs are stopped and reported as `daemon restarted`).
 // The event exists only in the daemon's own logon session: from another session of the same
 // user (SSH, WinRM), or when the daemon does not end in time, the process is terminated.
 

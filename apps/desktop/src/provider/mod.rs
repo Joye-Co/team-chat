@@ -27,6 +27,7 @@ mod email;
 pub mod files;
 #[cfg(test)]
 mod files_live;
+mod github;
 pub mod instance;
 #[cfg(target_os = "macos")]
 pub mod macos;
@@ -210,6 +211,8 @@ struct Shared {
     // --- end inc-refs ---
     /// Aggregates of the pages, rebuilt on a change (`provider/snapshot.rs`).
     snapshots: snapshot::SnapshotCache,
+    /// Usable: my GitHub sign-in as last read (`provider/github.rs`).
+    github: github::GithubCache,
 }
 
 /// [`ChatProvider`] on chat-core. Cheap to clone.
@@ -251,6 +254,7 @@ impl CoreProvider {
                 page_signals: page_host::PageSignals::default(),
                 refs: refs::RefsCache::default(),
                 snapshots: snapshot::SnapshotCache::default(),
+                github: github::GithubCache::default(),
             }),
         });
         provider.state().saved = session::load_accounts(&provider.shared.config.data_root);
@@ -1093,6 +1097,8 @@ impl CoreProvider {
                     let _ = tx.unbounded_send(notice);
                 }
             } // --- end settings-backend track ---
+            // usable: my GitHub sign-in changed.
+            ClientUpdate::GithubStatus(t) => self.on_github_status(&t),
         }
     }
 
@@ -1264,6 +1270,26 @@ impl ChatProvider for CoreProvider {
 
     fn peek_phone_code(&self, code: &str) -> crate::data::EmailReply<String> {
         self.peek_phone_code_inner(code)
+    }
+
+    fn github(&self) -> Option<crate::data::GithubState> {
+        self.github_inner()
+    }
+
+    fn refresh_github(&self) {
+        self.refresh_github_inner()
+    }
+
+    fn start_github(&self) -> AdminReply<crate::data::GithubDevice> {
+        self.start_github_inner()
+    }
+
+    fn poll_github(&self, device_id: &str) -> AdminReply<crate::data::GithubPoll> {
+        self.poll_github_inner(device_id)
+    }
+
+    fn disconnect_github(&self) -> AdminReply<()> {
+        self.disconnect_github_inner()
     }
 
     fn approve_phone_code(&self, code: &str) -> crate::data::EmailReply<()> {

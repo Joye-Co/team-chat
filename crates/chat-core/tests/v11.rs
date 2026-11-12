@@ -898,7 +898,7 @@ async fn card_events_page_events_and_interact_transients() {
     let hello = server.with(|s| s.hellos[0].clone());
     assert_eq!(
         hello["features"],
-        json!(["interact/1", "refs/1", "settings/1"])
+        json!(["interact/1", "refs/1", "settings/1", "github/1"])
     );
     assert_eq!(
         hello["supportedCatalogs"],

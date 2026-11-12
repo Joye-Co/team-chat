@@ -40791,6 +40791,12 @@
               },
               "gates": {
                 "type": "boolean"
+              },
+              "resume": {
+                "type": "boolean"
+              },
+              "aside": {
+                "type": "boolean"
               }
             },
             "required": [
@@ -41062,6 +41068,12 @@
                   },
                   "gates": {
                     "type": "boolean"
+                  },
+                  "resume": {
+                    "type": "boolean"
+                  },
+                  "aside": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -41317,6 +41329,12 @@
                   }
                 },
                 "gates": {
+                  "type": "boolean"
+                },
+                "resume": {
+                  "type": "boolean"
+                },
+                "aside": {
                   "type": "boolean"
                 }
               },
@@ -43006,6 +43024,12 @@
                     }
                   },
                   "gates": {
+                    "type": "boolean"
+                  },
+                  "resume": {
+                    "type": "boolean"
+                  },
+                  "aside": {
                     "type": "boolean"
                   }
                 },

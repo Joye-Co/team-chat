@@ -106,6 +106,7 @@ impl SnapshotCache {
                     | Change::RunLog { .. }
                     | Change::Draft { .. }
                     | Change::Connection
+                    | Change::Github
             )
         });
         if moves {

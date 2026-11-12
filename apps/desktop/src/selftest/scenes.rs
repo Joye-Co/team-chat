@@ -81,6 +81,8 @@ pub enum Start {
         crate::fake::memory::MemoryShape,
         crate::fake::memory::MemoryTeam,
     ),
+    /// The sample data with my GitHub sign-in in one shape (GitHub scenes).
+    Github(crate::fake::github::GithubShape),
 }
 
 pub struct Scene {

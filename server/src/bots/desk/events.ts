@@ -15,6 +15,7 @@ import { MAX_FOLLOW_UPS, type RunRow, codeOf, isStallStatus, sanitizeAcceptance,
 import { DeskRuns, type RunRequest } from "./runs";
 import { briefText } from "../../agent/frontdesk";
 import { retroAfterRun } from "../../memory/retro";
+import { DAEMON_RESTARTED, MAX_DAEMON_RESUMES } from "../../agent/recovery";
 
 /** Room RPC of the cards feature: a run's CLI took the answer with this seq (`{ seq, runId, inputId }`). */
 export const CARD_ANSWER_TAKEN_RPC = "cards.answerTaken";
@@ -490,6 +491,11 @@ export abstract class DeskEvents extends DeskRuns {
       // finish: the topic stays blocked, as before.
       const aborted = typeof f.error === "string" && f.error.trim() !== "";
       await this.end(r, "cancelled", TEXT.cancelled, aborted ? "blocked" : "open", TEXT.cancelled);
+    } else if (f.status === "failed" && f.error === DAEMON_RESTARTED) {
+      // 盯 1.7, 机 5.3: the daemon restarted under the run. It goes on in its session on the
+      // same machine with the recovery note; only when it cannot does it fail, saying why.
+      if (await this.resumeAfterRestart(r)) return;
+      await this.end(r, "failed", TEXT.interrupted, "blocked", TEXT.interrupted);
     } else if (f.status === "failed") {
       const note = await this.failedNote(r, f);
       await this.end(r, "failed", note.text, "blocked", cut(note.text, 280), false, note.mentions);
@@ -536,6 +542,14 @@ export abstract class DeskEvents extends DeskRuns {
     } catch (err) {
       this.log.error("follow-up start failed", { runId: r.id, err });
     }
+  }
+
+  /** Continues a run the daemon found unfinished when it restarted; false when it cannot. */
+  protected async resumeAfterRestart(r: RunRow): Promise<boolean> {
+    // A daemon that keeps restarting under the same work does not get it again and again.
+    const resumes = this.retryChain(r.id).filter((x) => x.summary === `restarted: ${DAEMON_RESTARTED}`).length;
+    if (resumes >= MAX_DAEMON_RESUMES) return false;
+    return this.restartElsewhere(r, DAEMON_RESTARTED, { sameSession: true }, { count: false });
   }
 
   /** How many runs in a row before `r` were follow-ups. */
