@@ -83,20 +83,24 @@ export const githubMachineRoutes: RouteDef[] = [
       const { run } = await liveRun(request, env, params.id);
       const reason = waitReason((await body(MachineGithubWaitRequest)).reason);
       const memberId = run.github_member_id;
-      // Connected in the meantime: nothing to ask; the run goes on by itself once it stops.
-      const account = await loadAccount(env.DB, memberId);
-      if (reason === "not_connected" && account?.status === "ok") {
-        await deskStub(env, run.bot_id).githubResume(run.bot_id, run.id, memberId);
-        return { ok: true };
-      }
-      // One wait per run: only the call that stored the row asks the person.
+      // One wait per run: only the call that stored the row goes on. The row is stored before the
+      // account is read, so a connection that lands in between finds it (resumeWaits).
       const stored = await env.DB.prepare(
         `INSERT INTO github_waits (run_id, member_id, group_id, topic_id, bot_id, reason, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (run_id) DO NOTHING`,
       )
         .bind(run.id, memberId, run.group_id, run.topic_id, run.bot_id, reason, Date.now())
         .run();
-      if (stored.meta.changes) await deskStub(env, run.bot_id).githubWait(run.bot_id, run.id, memberId, reason);
+      if (!stored.meta.changes) return { ok: true };
+      // Connected in the meantime: nothing to ask; the run goes on by itself once it stops. Who
+      // takes the row back (this call or a connection's resumeWaits) resumes it, once.
+      const account = await loadAccount(env.DB, memberId);
+      if (reason === "not_connected" && account?.status === "ok") {
+        const taken = await env.DB.prepare("DELETE FROM github_waits WHERE run_id = ? AND member_id = ?").bind(run.id, memberId).run();
+        if (taken.meta.changes) await deskStub(env, run.bot_id).githubResume(run.bot_id, run.id, memberId);
+        return { ok: true };
+      }
+      await deskStub(env, run.bot_id).githubWait(run.bot_id, run.id, memberId, reason);
       return { ok: true };
     },
   },

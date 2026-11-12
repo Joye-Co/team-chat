@@ -247,6 +247,8 @@ export abstract class DeskStall extends DeskEvents {
     if (r.kind === RUN_KIND_ASIDE || !isPromiseOnly(result, r.tool_calls) || r.auto_continues >= MAX_AUTO_CONTINUE) return false;
     // A run that stopped to wait for someone's GitHub goes on when they connect, not now.
     if (this.githubWaitingOn(r.id) !== null) return false;
+    // Something already went on with it (a GitHub resume started when the run ended).
+    if (this.sql.exec("SELECT 1 FROM runs WHERE follow_up_of = ? LIMIT 1", r.id).toArray().length > 0) return false;
     if (this.startBlocked(r.topic_id)) return false;
     const key = `continue:${ulid()}`;
     try {

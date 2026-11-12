@@ -19,11 +19,14 @@ export abstract class DeskGithub extends DeskInteract {
     this.bind(botId);
     await this.serial(runId, async () => {
       const r = this.run(runId);
-      if (!r || this.githubWaitingOn(runId) !== null) return;
+      // Connected while this report was on its way: the resume is already set, nothing to ask.
+      if (!r || this.githubWaitingOn(runId) !== null || this.meta(`github_resume:${runId}`) !== null) return;
       this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `github_wait:${runId}`, memberId);
-      const name = (await this.names([memberId])).get(memberId) ?? memberId;
+      // A private card's answerer stays anonymous: the note names and mentions nobody.
+      const named = !this.anonymous(r);
+      const name = named ? ((await this.names([memberId])).get(memberId) ?? memberId) : null;
       // Mentions must be group members; a fallback admin outside the group still reads the name.
-      const mentions = (await isGroupMember(this.env.DB, r.group_id, memberId)) ? [memberId] : [];
+      const mentions = named && (await isGroupMember(this.env.DB, r.group_id, memberId)) ? [memberId] : [];
       try {
         await this.post(r, `run:${r.id}:github`, waitText(name, reason), { mentions });
       } catch (err) {
@@ -45,10 +48,15 @@ export abstract class DeskGithub extends DeskInteract {
     });
   }
 
-  protected override async resumeAfterGithub(r: RunRow): Promise<void> {
-    // Follow-ups the run never took start their own run, which carries on the same work.
-    const unread = this.sql.exec<{ n: number }>("SELECT count(*) AS n FROM inputs WHERE run_id = ? AND accepted = 0", r.id).one().n;
-    if (unread > 0 || this.superseded(r)) return;
+  protected override async resumeAfterGithub(r: RunRow, deferUnread = true): Promise<void> {
+    // Follow-ups the run never took start their own run, which carries on the same work; `finish`
+    // calls again with `deferUnread` false when none of them started one.
+    if (this.meta(`github_resume:${r.id}`) === null) return;
+    if (deferUnread) {
+      const unread = this.sql.exec<{ n: number }>("SELECT count(*) AS n FROM inputs WHERE run_id = ? AND accepted = 0", r.id).one().n;
+      if (unread > 0) return;
+    }
+    if (this.superseded(r)) return;
     try {
       await this.startResume(r);
     } catch (err) {
@@ -73,7 +81,7 @@ export abstract class DeskGithub extends DeskInteract {
     this.sql.exec("DELETE FROM meta WHERE key = ?", `github_resume:${r.id}`);
     if (this.startBlocked(r.topic_id) || this.followUpDepth(r) >= MAX_FOLLOW_UPS) return false;
     const key = `github:${ulid()}`;
-    const name = who ? ((await this.names([who])).get(who) ?? "") : "";
+    const name = who && !this.anonymous(r) ? ((await this.names([who])).get(who) ?? "") : "";
     await this.start(
       {
         groupId: r.group_id,

@@ -2,8 +2,9 @@
 // is (requested_for and the fallbacks), `run.assign.github` per machine kind, the machine token
 // routes (token, wait, rejected), and the follow-up that goes on once the person connects.
 // GitHub is a fake fetch; tokens and ids are made up.
-import { env } from "cloudflare:test";
+import { env, runInDurableObject } from "cloudflare:test";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import type { BotsEnv } from "../src/bots/env";
 import { authorOf, identityPerson, machineKind, mayUseToken, sourceFor } from "../src/github/assign";
 import { encryptToken } from "../src/github/store";
 import { Daemon, type World, downViolations, mention, world } from "./daemon";
@@ -402,6 +403,61 @@ describe("waiting for a person to connect GitHub", () => {
     await new Promise((r) => setTimeout(r, 300));
     expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(2);
     oc.close();
+    d.close();
+    c.close();
+  });
+
+  it("connected before the report arrives: no ask, no row, one resume and no 继续 besides", async () => {
+    const w = await world();
+    const { d } = await githubDaemon(w);
+    const { c } = await Client.connect(w.human.token);
+    await mention(c, w);
+    const a = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId: a.runId });
+    await connect(w.human.id, { login: "alice-gh" });
+    expect((await waitFor(a.runId, w.machineToken)).body).toEqual({ ok: true });
+    expect(await env.DB.prepare("SELECT 1 FROM github_waits WHERE run_id = ?").bind(a.runId).first()).toBeNull();
+    // A promise-only result: the GitHub resume goes on, the desk does not also say 继续.
+    await d.acked(a.runId, d.done(a.runId, { status: "succeeded", resultText: "好的，我来看看。" }));
+    const b = await d.next((f) => f.t === "run.assign" && f.runId !== a.runId);
+    expect(b.prompt).toContain("Alice has connected GitHub");
+    await new Promise((r) => setTimeout(r, 400));
+    expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(2);
+    expect(c.events().some((e) => e.type === "message.created" && e.data.message.authorId === w.bot.id && e.data.message.body.includes("连接 GitHub"))).toBe(false);
+    d.close();
+    c.close();
+  });
+
+  it("a private card's answerer is never named: no name, no mention, no waitingOn, no name in the resume", async () => {
+    const w = await world();
+    const { d } = await githubDaemon(w);
+    const { c } = await Client.connect(w.human.token);
+    const topicId = await mention(c, w);
+    const a = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId: a.runId });
+    // As a private card answer starts it: requested_by anonymous, requested_for the answerer.
+    const desk = (env as unknown as BotsEnv).BOT_DESK.get((env as unknown as BotsEnv).BOT_DESK.idFromName(w.bot.id));
+    await runInDurableObject(desk, async (_o, state) => {
+      state.storage.sql.exec("UPDATE runs SET requested_by = 'anonymous', requested_for = ? WHERE id = ?", w.human.id, a.runId);
+    });
+    await waitFor(a.runId, w.machineToken);
+    const ask = await c.waitEvent((e) => e.type === "message.created" && e.data.message.authorId === w.bot.id && e.data.message.body.includes("GitHub"));
+    expect(ask.data.message.body).toBe("这一步要用 GitHub。连接 GitHub 后我会自己接着做。");
+    expect(ask.data.message.mentions ?? []).toEqual([]);
+    // The person still sees it among their own waits.
+    expect((await api("/v1/me/github", { token: w.human.token })).body.waits).toHaveLength(1);
+
+    await d.acked(a.runId, d.done(a.runId, { status: "succeeded", resultText: "Waiting for GitHub." }));
+    const blocked = await c.waitEvent((e) => e.type === "topic.updated" && e.data.topicId === topicId && e.data.status === "blocked");
+    expect(blocked.data.waitingOn ?? []).toEqual([]);
+    expect(JSON.stringify(blocked)).not.toContain(w.human.id);
+
+    fakeGithub({ id: githubUserId(), login: "alice-gh" });
+    const dev = await api("/v1/me/github/device", { method: "POST", token: w.human.token });
+    expect((await api(`/v1/me/github/device/${dev.body.deviceId}/poll`, { method: "POST", token: w.human.token })).body.state).toBe("done");
+    const b = await d.next((f) => f.t === "run.assign" && f.runId !== a.runId);
+    expect(b.prompt).toContain("has connected GitHub");
+    expect(b.prompt).not.toContain("Alice has connected");
     d.close();
     c.close();
   });

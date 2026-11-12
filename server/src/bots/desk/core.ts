@@ -666,6 +666,11 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
    * The person to mention and wait on for the run's approvals: its requester, or nobody when
    * an answer to a private card started the run (cards2/privacy; then owners approve).
    */
+  /** A private card's answer started this run: who it works for stays on the server. */
+  protected anonymous(r: Pick<RunRow, "requested_by">): boolean {
+    return r.requested_by === ANONYMOUS_ID;
+  }
+
   protected requester(r: Pick<RunRow, "requested_by">): string[] {
     return r.requested_by === ANONYMOUS_ID ? [] : [r.requested_by];
   }
@@ -859,7 +864,7 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
 
   // Implemented by the feature modules that extend this class.
   /** A connection arrived while the run was still going (meta `github_resume:{runId}`): go on after it ended (desk/github.ts). */
-  protected abstract resumeAfterGithub(r: RunRow): Promise<void>;
+  protected abstract resumeAfterGithub(r: RunRow, deferUnread?: boolean): Promise<void>;
   protected abstract end(r: RunRow, status: RunStatus, body: string, topicStatus: TopicStatus, summary: string, success?: boolean, waitingOn?: string[]): Promise<void>;
   protected abstract scheduleStall(): Promise<void>;
   protected abstract markStalled(r: RunRow): Promise<void>;
