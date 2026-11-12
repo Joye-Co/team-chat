@@ -111,7 +111,7 @@ describe("chat-run reads", () => {
     expect((await api(`/v1/groups/${w.gid}/decisions`, { token: w.human.token, body: { text: "周五不发版", topicId } })).status).toBe(200);
 
     // A group the bot is not in, with its own 产出 and topic.
-    const elsewhere = await createGroup(w.owner, [w.human.id], "other");
+    const elsewhere = await createGroup(w.owner, [], "other"); // Alice (the run is hers) is not in it either
     const co = (await Client.connect(w.owner.token)).c;
     const far = await co.ok({ t: "send", groupId: elsewhere, clientMsgId: clientMsgId(), body: "别的群" });
     const farArt = await artifact(w.owner, elsewhere, far.message.topicId, "别的群的产出", "secret");

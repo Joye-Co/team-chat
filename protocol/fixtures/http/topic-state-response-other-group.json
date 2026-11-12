@@ -1,0 +1,12 @@
+{
+  "kind": "TopicStateResponse",
+  "valid": true,
+  "description": "a topic of another group the run may read",
+  "value": {
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "groupName": "产品",
+    "title": "发布",
+    "text": "话题「发布」"
+  }
+}

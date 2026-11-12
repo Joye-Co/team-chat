@@ -131,6 +131,12 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
   ok("http/run-members-response.json", "RunMembersResponse", { members: [{ id: ID.owner, name: "张三", role: "产品负责人", ai: false }, { id: ID.bot, name: "小克", ai: true }] });
   bad("http/run-members-response-missing-ai.json", "RunMembersResponse", { members: [{ id: ID.owner, name: "张三" }] }, "ai is required");
   ok("http/topic-state-response.json", "TopicStateResponse", { topicId: ID.topic, title: "发布", text: "话题「发布」\n产出：上线方案 v2" });
+  ok("http/topic-state-response-other-group.json", "TopicStateResponse", { topicId: ID.topic, groupId: ID.general, groupName: "产品", title: "发布", text: "话题「发布」" }, "a topic of another group the run may read");
+  ok("http/context-search-response-other-group.json", "ContextSearchResponse", { hits: [{ messageId: ID.msg, topicId: ID.topic, seq: 3, authorName: "张三", at: T0, snippet: "导出格式", groupId: ID.general, groupName: "产品" }] }, "search --all: a hit of another group");
+  ok("http/run-card-response-other-group.json", "RunCardResponse", { topicId: ID.topic, groupId: ID.general, groupName: "产品", message: cm, card: cardDoc, answers: [] }, "a card of another group the run may read");
+  ok("http/run-groups-response.json", "RunGroupsResponse", { groups: [{ id: ID.dm, name: "张三", kind: "dm", current: true }, { id: ID.general, name: "产品", kind: "group", purpose: "需求和排期", current: false }] });
+  bad("http/run-groups-response-missing-current.json", "RunGroupsResponse", { groups: [{ id: ID.general, name: "产品", kind: "group" }] }, "current is required");
+  bad("http/run-groups-response-bad-kind.json", "RunGroupsResponse", { groups: [{ id: ID.general, name: "产品", kind: "team", current: false }] }, "kind is group or dm");
 
   // Runner-backed bots
   ok("http/set-bot-runner-request.json", "SetBotRunnerRequest", { runtime: "codex", labels: ["mac", "main"], repo: { url: "https://github.com/Joye-Co/team-chat" }, baseBranch: "main", model: "gpt-5.5", envAllowlist: ["GITHUB_TOKEN"] });

@@ -314,6 +314,7 @@ fn assign(run: &str, runtime: &str, prompt: &str, upload: Option<String>) -> Dow
     Down::RunAssign(RunAssign {
         kind: None,
         resume_session_id: None,
+        full_prompt: None,
         gates: None,
         github: None,
         run_id: run.into(),
@@ -2100,6 +2101,7 @@ async fn a_follow_up_run_resumes_the_session() {
     let fr = collect(&mut ws, "f2", true, |f| matches!(f, Up::RunDone(_))).await;
     assert_eq!(done(&fr).status, "succeeded");
     assert_eq!(done(&fr).session_id.as_deref(), Some(s1.as_str()));
+    assert_eq!(done(&fr).resume_missed, None);
     let argv: Vec<String> = serde_json::from_str(
         &std::fs::read_to_string(work_of(tmp.path(), "f1").join("argv.json")).unwrap(),
     )
@@ -2111,15 +2113,22 @@ async fn a_follow_up_run_resumes_the_session() {
     assert!(!tmp.path().join("work/runs/f2/work").exists());
     assert!(!line_of(tmp.path(), "f2").exists());
 
-    // A session the CLI no longer has starts a new one.
+    // A session the CLI no longer has starts a new one, with the whole prompt
+    // (`run.assign.fullPrompt`), and `run.done` says so.
     let mut a = assign("f3", "fake", "again", None);
     if let Down::RunAssign(r) = &mut a {
         r.resume_session_id = Some("gone-session".into());
+        r.full_prompt = Some("first question, the answer, again".into());
     }
     send(&mut ws, &a).await;
     let fr = collect(&mut ws, "f3", true, |f| matches!(f, Up::RunDone(_))).await;
     assert_eq!(done(&fr).status, "succeeded");
     assert_ne!(done(&fr).session_id.as_deref(), Some("gone-session"));
+    assert_eq!(done(&fr).resume_missed, Some(true));
+    assert_eq!(
+        done(&fr).result_text.as_deref(),
+        Some("reply 1: first question, the answer, again")
+    );
     let argv: Vec<String> = serde_json::from_str(
         &std::fs::read_to_string(work_of(tmp.path(), "f3").join("argv.json")).unwrap(),
     )

@@ -236,6 +236,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                     o.exit_code = code;
                     o.session_id = session;
                     o.result_text = norm.last_message;
+                    o.resume_missed = lost && spec.full_prompt.is_some();
                     return o;
                 };
                 let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
@@ -376,7 +377,8 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                         }
                         let code = p.kill_group(Duration::from_secs(3)).await;
                         return Outcome { status: Status::Cancelled, exit_code: code, result_text: norm.last_message,
-                            error: None, session_id: session, session_file: None, usage: None, failure: None };
+                            error: None, session_id: session, session_file: None, usage: None, failure: None,
+                            resume_missed: lost && spec.full_prompt.is_some() };
                     }
                 }
             }
@@ -400,6 +402,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
         session_file: None,
         usage: None,
         failure: None,
+        resume_missed: lost && spec.full_prompt.is_some(),
     }
 }
 
@@ -446,17 +449,22 @@ continued: this is a new session and you do not remember it. The messages below 
 is new since then. Before you act, read the topic and what was decided with `chat-run topic \
 history`.";
 
-/// The first prompt: the run note (how to use `chat-run`), when set, the lost-session note when
-/// `lost`, then the prompt.
+/// The first prompt: the run note (how to use `chat-run`), when set, then the prompt. When
+/// `lost`: the whole prompt (`spec.full_prompt`) when the server sent it, or else the
+/// lost-session note and the prompt.
 pub fn first_prompt(spec: &RunSpec, lost: bool) -> String {
     let mut parts: Vec<&str> = vec![];
     if let Some(n) = &spec.note {
         parts.push(n);
     }
-    if lost {
-        parts.push(LOST_SESSION_NOTE);
+    match (&spec.full_prompt, lost) {
+        (Some(full), true) => parts.push(full),
+        (None, true) => {
+            parts.push(LOST_SESSION_NOTE);
+            parts.push(&spec.prompt);
+        }
+        _ => parts.push(&spec.prompt),
     }
-    parts.push(&spec.prompt);
     parts.join("\n\n")
 }
 

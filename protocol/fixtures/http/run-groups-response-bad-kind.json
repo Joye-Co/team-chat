@@ -1,0 +1,15 @@
+{
+  "kind": "RunGroupsResponse",
+  "valid": false,
+  "description": "kind is group or dm",
+  "value": {
+    "groups": [
+      {
+        "id": "01JBX0GENERAL000000000000A",
+        "name": "产品",
+        "kind": "team",
+        "current": false
+      }
+    ]
+  }
+}
