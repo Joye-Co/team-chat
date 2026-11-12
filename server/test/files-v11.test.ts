@@ -361,7 +361,9 @@ describe("SF-10 rate limit answers", () => {
     const gid = await createGroup(owner, []);
     const { c } = await Client.connect(owner.token);
     const topicId = (await c.ok({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "burst" })).topic.id;
-    const rids = Array.from({ length: 30 }, () => c.rid());
+    // Far more frames than the bucket holds (20, refilled at 20 a second): on a loaded machine the
+    // frames arrive spread out, and 30 of them could all fit, so nothing was refused.
+    const rids = Array.from({ length: 200 }, () => c.rid());
     for (const [i, rid] of rids.entries()) c.send({ t: "send", rid, groupId: gid, topicId, clientMsgId: clientMsgId(), body: `m${i}` });
     const acks = await Promise.all(rids.map((rid) => c.next((f) => f.rid === rid)));
     const limited = acks.filter((a) => !a.ok);
