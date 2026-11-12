@@ -6,6 +6,8 @@
 // to `machineRoutes` below, fills `waits` with `registerGithubWaits` and resumes waiting runs
 // with `registerGithubConnected` (both in ./hooks).
 import { type RouteDef, registerMemberDeactivated, registerRoute } from "../core/registry";
+import { registerGithubConnected, registerGithubWaits } from "./hooks";
+import { forgetWaits, githubMachineRoutes, resumeWaits, waitsOf } from "./machine";
 import { registerGithubRoutes } from "./routes";
 import { forgetMember } from "./store";
 
@@ -17,7 +19,7 @@ export { loadToken, markInvalid, unavailableReason } from "./store";
  * route definitions in this array (imported from its own file into this one), so they are
  * registered with the rest below.
  */
-export const machineRoutes: RouteDef[] = [];
+export const machineRoutes: RouteDef[] = [...githubMachineRoutes];
 
 let registered = false;
 
@@ -27,6 +29,10 @@ export function registerGithub(): void {
   registerGithubRoutes();
   for (const r of machineRoutes) registerRoute(r);
   registerMemberDeactivated(forgetMember);
+  // G3: the runs that wait for a person, and their resumption once the person connects.
+  registerGithubWaits(waitsOf);
+  registerGithubConnected(resumeWaits);
+  registerMemberDeactivated(forgetWaits);
 }
 
 registerGithub();
