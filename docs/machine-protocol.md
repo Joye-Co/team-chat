@@ -62,7 +62,9 @@ Before `welcome` the daemon sends nothing else, and the server sends nothing but
 { t: "run.done",    runId, seq, at, status: "succeeded" | "failed" | "cancelled" | "timeout",
   exitCode?: number, resultText?: string /* <= 64 KiB */, summary?: string /* first line, <= 280 chars */,
   error?: string /* <= 4 KiB */, sessionId?: string, usage?: Usage, durationMs: number,
-  resumeMissed?: boolean /* true: resumeSessionId was not found, the run used run.assign.fullPrompt */ }
+  resumeMissed?: boolean /* true: resumeSessionId was not found, the run used run.assign.fullPrompt */,
+  prs?: { url: string, state: "open" | "draft" | "merged" | "closed" }[] /* <= 5: the pull requests resultText
+  names, as the computer's own gh read them when the run ended; one gh could not read is left out */ }
 { t: "run.session", runId, seq, at, ok: boolean, source?: "cli" | "stream",
   bytes?: number, gzipBytes?: number, sha256?: string, error?: string }
 

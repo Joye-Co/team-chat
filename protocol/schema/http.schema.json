@@ -37268,6 +37268,29 @@
             },
             "resumeMissed": {
               "type": "boolean"
+            },
+            "prs": {
+              "maxItems": 5,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 300
+                  },
+                  "state": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 32
+                  }
+                },
+                "required": [
+                  "url",
+                  "state"
+                ]
+              }
             }
           },
           "required": [
@@ -38725,6 +38748,29 @@
                   },
                   "resumeMissed": {
                     "type": "boolean"
+                  },
+                  "prs": {
+                    "maxItems": 5,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 300
+                        },
+                        "state": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 32
+                        }
+                      },
+                      "required": [
+                        "url",
+                        "state"
+                      ]
+                    }
                   }
                 },
                 "required": [
@@ -44927,6 +44973,29 @@
             },
             "resumeMissed": {
               "type": "boolean"
+            },
+            "prs": {
+              "maxItems": 5,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 300
+                  },
+                  "state": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 32
+                  }
+                },
+                "required": [
+                  "url",
+                  "state"
+                ]
+              }
             }
           },
           "required": [

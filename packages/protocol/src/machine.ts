@@ -476,6 +476,18 @@ export const RunEventFrame = z.object({
   at: Millis,
   event: RunEvent,
 });
+/**
+ * The state of a pull request a run's result names, as the run's computer read it with its own
+ * `gh` when the run ended: "open", "draft", "merged" or "closed" (the words of `topic.linked`).
+ */
+export const RunPrState = z.object({
+  url: z.string().min(1).max(300),
+  state: z.string().min(1).max(32),
+});
+export type RunPrState = z.infer<typeof RunPrState>;
+/** At most this many pull requests in `run.done.prs`. */
+export const MAX_RUN_PRS = 5;
+
 export const RunDoneFrame = z.object({
   t: z.literal("run.done"),
   runId: RunId,
@@ -495,6 +507,8 @@ export const RunDoneFrame = z.object({
   failure: RunFailure.optional(),
   /** true: `resumeSessionId` was not found and the run used `run.assign.fullPrompt`. */
   resumeMissed: z.boolean().optional(),
+  /** The pull requests the result names that the computer's `gh` could read; absent = not known. */
+  prs: z.array(RunPrState).max(MAX_RUN_PRS).optional(),
 });
 export const RunSessionFrame = z.object({
   t: z.literal("run.session"),

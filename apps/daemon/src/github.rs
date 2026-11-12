@@ -16,6 +16,7 @@
 use crate::proto::RunEvent;
 use crate::redact::Redactor;
 use chat_protocol::github::RunGithub;
+use chat_protocol::machine::{MAX_RUN_PRS, RunPrState};
 use serde_json::{Value, json};
 use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, Write};
@@ -244,6 +245,73 @@ pub async fn host_login(path: Option<&OsStr>) -> Option<String> {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'[' || b == b']');
     (o.status.success() && plain).then_some(login)
+}
+
+/// The GitHub pull request links in a run's result, first seen first, at most
+/// [`MAX_RUN_PRS`], written as the server writes them (`https://github.com/<owner>/<repo>/pull/<n>`,
+/// `prRefs` in server/src/bots/proof.ts).
+pub fn result_prs(text: &str) -> Vec<String> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(
+            r"https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/([0-9]{1,9})\b",
+        )
+        .expect("valid pattern")
+    });
+    let mut out: Vec<String> = Vec::new();
+    for c in re.captures_iter(text) {
+        let url = format!("https://github.com/{}/pull/{}", &c[1], &c[2]);
+        if !out.contains(&url) {
+            out.push(url);
+        }
+        if out.len() == MAX_RUN_PRS {
+            break;
+        }
+    }
+    out
+}
+
+/// The state in what `gh pr view --json state,isDraft` prints, in the words of `topic.linked`:
+/// "open", "draft", "merged" or "closed". `None` for anything else.
+pub fn pr_state_of(json: &[u8]) -> Option<&'static str> {
+    let v: serde_json::Value = serde_json::from_slice(json).ok()?;
+    let draft = v.get("isDraft").and_then(serde_json::Value::as_bool) == Some(true);
+    match v.get("state")?.as_str()? {
+        "MERGED" => Some("merged"),
+        "CLOSED" => Some("closed"),
+        "OPEN" if draft => Some("draft"),
+        "OPEN" => Some("open"),
+        _ => None,
+    }
+}
+
+/// The states of the pull requests `text` names, as this computer's `gh` reads them now, all at
+/// once and each within [`GH_TIMEOUT`]. A pull request gh cannot read (no gh, signed out, no
+/// access, too slow) is left out: its state is not known, and nothing is guessed for it.
+pub async fn result_pr_states(text: &str) -> Vec<RunPrState> {
+    let mut tasks = tokio::task::JoinSet::new();
+    for (i, url) in result_prs(text).into_iter().enumerate() {
+        tasks.spawn(async move {
+            let o = host_gh_output(None, &["pr", "view", &url, "--json", "state,isDraft"])
+                .await
+                .ok()??;
+            let state = o
+                .status
+                .success()
+                .then(|| pr_state_of(&o.stdout))
+                .flatten()?;
+            Some((
+                i,
+                RunPrState {
+                    url,
+                    state: state.into(),
+                },
+            ))
+        });
+    }
+    let mut got: Vec<(usize, RunPrState)> = tasks.join_all().await.into_iter().flatten().collect();
+    got.sort_by_key(|(i, _)| *i);
+    got.into_iter().map(|(_, p)| p).collect()
 }
 
 /// Asks the daemon to look at the computer's GitHub sign-in again now (a push was refused).
@@ -839,5 +907,45 @@ mod tests {
         assert_eq!(real_gh(&path), Some(real));
         let path = std::env::join_paths([tools]).unwrap();
         assert_eq!(real_gh(&path), None);
+    }
+
+    #[test]
+    fn a_result_names_its_pull_requests_once_in_the_servers_form() {
+        let text = "PR: https://github.com/Joye-Co/team-chat/pull/297.\n\
+                    again https://github.com/Joye-Co/team-chat/pull/297 and \
+                    https://github.com/o/r/pull/5/files, not https://github.com/o/r/issues/6";
+        assert_eq!(
+            result_prs(text),
+            [
+                "https://github.com/Joye-Co/team-chat/pull/297",
+                "https://github.com/o/r/pull/5"
+            ]
+        );
+        let many: String = (1..=9)
+            .map(|n| format!("https://github.com/o/r/pull/{n} "))
+            .collect();
+        assert_eq!(result_prs(&many).len(), MAX_RUN_PRS);
+    }
+
+    #[test]
+    fn gh_states_read_in_the_words_of_a_topic_link() {
+        assert_eq!(
+            pr_state_of(br#"{"state":"MERGED","isDraft":false}"#),
+            Some("merged")
+        );
+        assert_eq!(
+            pr_state_of(br#"{"state":"CLOSED","isDraft":false}"#),
+            Some("closed")
+        );
+        assert_eq!(
+            pr_state_of(br#"{"state":"OPEN","isDraft":true}"#),
+            Some("draft")
+        );
+        assert_eq!(
+            pr_state_of(br#"{"state":"OPEN","isDraft":false}"#),
+            Some("open")
+        );
+        assert_eq!(pr_state_of(br#"{"state":"WHAT"}"#), None);
+        assert_eq!(pr_state_of(b"not json"), None);
     }
 }
