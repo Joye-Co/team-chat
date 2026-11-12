@@ -235,7 +235,10 @@ export abstract class DeskRuns extends DeskCore {
           // continued (before topicPrompts, so the prompt and the assign frame agree).
           const forId = await readerOf(this.env.DB, r);
           await this.freshIfUnreadable(r, runner, forId);
-          const p = await this.topicPrompts(r, runner, m, claim, followUps, feature("acceptance"), feature("context"), brief, gated, feature("groups") && forId !== null);
+          // design-github-identity 3.5: gated actions go to the computer's approvers (a queued run:
+          // the owner only when every computer that could take it is someone's own).
+          const gateWho = (machine ? Boolean(machine.ownerId) : able.length > 0 && able.every((x) => x.ownerId)) ? "owner" : "admin";
+          const p = await this.topicPrompts(r, runner, m, claim, followUps, feature("acceptance"), feature("context"), brief, gated, feature("groups") && forId !== null, gateWho);
           // 盯 1.2: a restart starts with the recovery note, in a resumed session and in a new one.
           const note = retryOf ? await this.recoveryNoteOf(retryOf, how?.why ?? "restarted") : null;
           if (note) {
@@ -707,6 +710,7 @@ export abstract class DeskRuns extends DeskCore {
     brief?: Brief,
     gated = false,
     readGroups = false,
+    gateWho: "admin" | "owner" = "admin",
   ): Promise<Prompts> {
     const botId = this.botId as string;
     const notRequest = (x: ContextRow) => x.id !== m.messageId;
@@ -754,7 +758,7 @@ export abstract class DeskRuns extends DeskCore {
       followUps,
       refs,
       // settings: who must approve what (merge to main, publish, spend over the limit).
-      rules: policyPrompt(await effectivePolicy(this.env.DB), gated),
+      rules: policyPrompt(await effectivePolicy(this.env.DB), gated, gateWho),
       acceptance,
       ...(brief ? { brief: briefText(brief) } : {}),
       // 沉淀: what the team, the group, this member and the requester keep (reference material).

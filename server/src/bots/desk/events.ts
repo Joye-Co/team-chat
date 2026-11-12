@@ -385,22 +385,24 @@ export abstract class DeskEvents extends DeskRuns {
     else this.sql.exec("DELETE FROM meta WHERE key = ?", `approval:${r.id}`);
     const shown = gate ? (TEXT.gateKinds[gate.kind] ?? title) : title;
     const what = gate ? (gate.command ?? detail) : detail;
-    // The approvers; with none among the owners, the requester (and the card says why).
-    const { ids: askWho, noOwner } = await this.approversOrRequester(r, gate?.kind);
+    // The approvers; with none among the owners, the requester (and the card says why). A gated
+    // action with nobody to approve it in the group mentions the requester, who cannot answer.
+    const { ids: askWho, noOwner, noApprover, machineOwner } = await this.approversFor(r, gate?.kind);
     const cardMeta = (messageId?: string, posted?: { shown: string; card: Card }) =>
       this.sql.exec(
         "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
         `approvalCard:${r.id}`,
-        JSON.stringify({ approvalId, noOwner, ...(messageId ? { messageId } : {}), ...(posted ?? {}) }),
+        JSON.stringify({ approvalId, ...(noApprover ? { noApprover } : { noOwner }), ...(messageId ? { messageId } : {}), ...(posted ?? {}) }),
       );
     cardMeta();
     const asked = gate ? TEXT.approvalGate(cut(shown, 500), what ? cut(what, 4000) : undefined) : TEXT.approval(cut(title, 500), detail ? cut(detail, 4000) : undefined);
-    const body = noOwner ? `${TEXT.approvalNoOwner}\n\n${asked}` : asked;
+    const why = noApprover ? (machineOwner ? TEXT.approvalNoMachineOwner : TEXT.approvalNoAdmin) : noOwner ? TEXT.approvalNoOwner : null;
+    const body = why ? `${why}\n\n${asked}` : asked;
     const card: Card = {
       v: 1,
       title: cut(`需要你确认：${shown}`, 200),
       tone: "warning",
-      blocks: [...(noOwner ? [{ type: "text" as const, text: TEXT.approvalNoOwner }] : []), ...(what ? [{ type: "code" as const, text: cut(what, 8000) }] : [])],
+      blocks: [...(why ? [{ type: "text" as const, text: why }] : []), ...(what ? [{ type: "code" as const, text: cut(what, 8000) }] : [])],
       actions: [
         { id: cut(`approve:${approvalId}`, 64), label: TEXT.approve, style: "primary" },
         ...(gate ? [{ id: cut(`approveall:${approvalId}`, 64), label: TEXT.approveRun, confirm: TEXT.approveRunConfirm }] : []),

@@ -148,7 +148,8 @@ export abstract class DeskInput extends DeskRelay {
    * Only a human who is the run's requester, or an owner, may answer its approval. settings:
    * with approver "owners" (谁可以批准 = 管理员) only owners may. design-roles 3.6: on a personal
    * machine (`machineOwner`) only the person the run works for and the machine's owner, never an
-   * admin for them.
+   * admin for them. design-github-identity 3.5: a `gated` action (合并到 main, 部署, …) is
+   * answered by an admin on a team computer and only by the owner on a personal one.
    */
   protected mayApprove(
     r: RunRow,
@@ -157,18 +158,13 @@ export abstract class DeskInput extends DeskRelay {
     level: string | null | undefined,
     approver: Approver = "requester",
     machineOwner: string | null = null,
+    gated = false,
   ): boolean {
     if (kind !== "human") return false;
+    if (gated) return machineOwner ? actorId === machineOwner : level === "owner";
     if (machineOwner) return actorId === machineOwner || actorId === (r.requested_for ?? r.requested_by);
     if (level === "owner") return true;
     return approver !== "owners" && actorId === r.requested_by;
-  }
-
-  /** The owner of the run's machine when it is a personal machine (design-roles 3.6), else null. */
-  protected async machineOwnerOf(r: Pick<RunRow, "machine_id">): Promise<string | null> {
-    if (!r.machine_id) return null;
-    const row = await this.env.DB.prepare("SELECT owner_id FROM machines WHERE id = ?").bind(r.machine_id).first<{ owner_id: string | null }>();
-    return row?.owner_id ?? null;
   }
 
   protected async auditApproval(r: RunRow, actorId: string, decision: string, via: "card" | "text"): Promise<void> {
@@ -201,7 +197,7 @@ export abstract class DeskInput extends DeskRelay {
     const decision = r.approval_id ? (whole ? "approve" : approvalDecision(m.body, toCard)) : null;
     const machineOwner = await this.machineOwnerOf(r);
     // The room hook sends only human messages; other members' 同意 stays plain input.
-    if (r.approval_id && decision && link && this.mayApprove(r, m.authorId, "human", m.authorLevel, await this.approverOfOpen(r, kind), machineOwner)) {
+    if (r.approval_id && decision && link && this.mayApprove(r, m.authorId, "human", m.authorLevel, await this.approverOfOpen(r, kind), machineOwner, this.isGated(kind))) {
       await this.auditApproval(r, m.authorId, whole ? "approve_run" : decision, "text");
       // Recorded as an input so a retried call does not answer twice.
       this.sql.exec(
@@ -307,7 +303,7 @@ export abstract class DeskInput extends DeskRelay {
     const whole = kind !== null && a.actionId.startsWith("approveall:");
     const decision = a.actionId.startsWith("approve:") || whole ? "approve" : a.actionId.startsWith("deny:") ? "deny" : null;
     if (!decision) return;
-    if (!this.mayApprove(r, a.actorId, a.actorKind, a.actorLevel, await this.approverOfOpen(r, kind), await this.machineOwnerOf(r))) {
+    if (!this.mayApprove(r, a.actorId, a.actorKind, a.actorLevel, await this.approverOfOpen(r, kind), await this.machineOwnerOf(r), this.isGated(kind))) {
       this.log.info("approval press ignored", { runId: r.id, actorId: a.actorId, kind: a.actorKind });
       return;
     }
