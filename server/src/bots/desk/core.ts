@@ -132,12 +132,18 @@ export type RunRow = {
   // desk-run-code (design-relay R5)
   /** JSON of `RunCode` from run.done (branch, head, pushed), or null when not known. */
   code: string | null;
+  // desk-requested-for (usable, protocol "Who a run works for")
+  /** The person the run works for (`BotRun.requestedFor`); null for a hook's run and runs from before. */
+  requested_for: string | null;
   // desk-failure-model (模 2.2, 2.3, 2.10)
   /** JSON of `RunFailure` of a failed run, or null. */
   failure: string | null;
   /** The model and 思考强度 the CLI really ran with (the session event), or null. */
   model: string | null;
   effort: string | null;
+  // desk-limit-wait (模 3.4, 盯 1.5)
+  /** While a queued run waits for its computer's subscription limit: when it resets (server clock); else null. */
+  limit_until: number | null;
 };
 
 /**
@@ -476,6 +482,12 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
           up: `ALTER TABLE runs ADD COLUMN code TEXT;`,
         },
         {
+          // Usable (protocol "Who a run works for"): the person a run works for. Old rows: NULL,
+          // read as their requester where a person is needed.
+          name: "desk-requested-for",
+          up: `ALTER TABLE runs ADD COLUMN requested_for TEXT;`,
+        },
+        {
           // 模 2.2, 2.3, 2.10: why a run failed (run.done.failure, JSON) and the model and
           // 思考强度 it really ran with (the session event). Old rows: NULL.
           name: "desk-failure-model",
@@ -484,6 +496,11 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
             ALTER TABLE runs ADD COLUMN model TEXT;
             ALTER TABLE runs ADD COLUMN effort TEXT;
           `,
+        },
+        {
+          // 模 3.4, 盯 1.5: a queued run that waits for a subscription limit to reset. Old rows: NULL.
+          name: "desk-limit-wait",
+          up: `ALTER TABLE runs ADD COLUMN limit_until INTEGER;`,
         },
       ]);
       const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'bot_id'").toArray()[0];
@@ -567,6 +584,8 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
       updatedAt: r.updated_at,
     };
     if (r.requested_by) run.requestedBy = r.requested_by;
+    // A private card's answerer stays on the server: the wire field is absent then.
+    if (r.requested_for && r.requested_by !== ANONYMOUS_ID) run.requestedFor = r.requested_for;
     if (r.machine_id) run.machineId = r.machine_id;
     if (r.started_at !== null) run.startedAt = r.started_at;
     if (r.ended_at !== null) run.endedAt = r.ended_at;
@@ -591,6 +610,11 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
     if (r.queued_at && r.ended_at === null && r.status === "created" && !r.machine_id) {
       run.queuedAt = r.queued_at;
       run.queuePosition = this.queuePosition(r);
+      // 模 3.4: waiting for the subscription limit is waiting for its computer (design-takeover 3.1).
+      if (r.limit_until !== null && r.limit_until !== undefined) {
+        run.phase = "waiting_computer";
+        run.waitingFor = "limit";
+      }
     }
     // 接 4.2: an ended run's phase follows its report (design-takeover 3.1, rule 1).
     if (r.ended_at !== null && !r.external) {
@@ -691,6 +715,11 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
    * The person to mention and wait on for the run's approvals: its requester, or nobody when
    * an answer to a private card started the run (cards2/privacy; then owners approve).
    */
+  /** A private card's answer started this run: who it works for stays on the server. */
+  protected anonymous(r: Pick<RunRow, "requested_by">): boolean {
+    return r.requested_by === ANONYMOUS_ID;
+  }
+
   protected requester(r: Pick<RunRow, "requested_by">): string[] {
     return r.requested_by === ANONYMOUS_ID ? [] : [r.requested_by];
   }
@@ -960,7 +989,14 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
     return this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = ?", key).toArray()[0]?.value ?? null;
   }
 
+  /** The person this run stopped to wait for to connect GitHub (meta `github_wait:{runId}`), or null. */
+  protected githubWaitingOn(runId: string): string | null {
+    return this.meta(`github_wait:${runId}`);
+  }
+
   // Implemented by the feature modules that extend this class.
+  /** A connection arrived while the run was still going (meta `github_resume:{runId}`): go on after it ended (desk/github.ts). */
+  protected abstract resumeAfterGithub(r: RunRow, deferUnread?: boolean): Promise<void>;
   protected abstract end(r: RunRow, status: RunStatus, body: string, topicStatus: TopicStatus, summary: string, success?: boolean, waitingOn?: string[]): Promise<void>;
   protected abstract scheduleStall(): Promise<void>;
   protected abstract markStalled(r: RunRow): Promise<void>;

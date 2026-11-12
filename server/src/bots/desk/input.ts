@@ -332,6 +332,8 @@ export abstract class DeskInput extends DeskRelay {
         body: text,
         mentioned: true,
       };
+      // A private card's answerer is known here only: the run works for them (protocol "Who a run works for").
+      if (a.voterId) m.requestedFor = a.voterId;
       // 接 1.8: an answer in the front desk's question card answers that question; in a chat area
       // it starts its own run next to any running one.
       const asked = this.askOfCard(a.answer.messageId);

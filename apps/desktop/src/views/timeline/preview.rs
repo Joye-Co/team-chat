@@ -129,6 +129,8 @@ fn topic(id: &str, title: &str, status: TopicStatus, owner: &str, msgs: &[Messag
         message_count: msgs.len() as u32,
         unread: 0,
         mentions: 0,
+        participants: Vec::new(),
+        relay: None,
     }
 }
 

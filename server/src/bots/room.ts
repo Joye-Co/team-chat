@@ -369,6 +369,12 @@ export interface TopicMessage {
   ext?: RequestExt;
   /** The group is a direct chat (私聊) with the bot. */
   dm?: boolean;
+  /**
+   * The person the run works for (`runs.requested_for`) when it is not simply the author: a
+   * private card's answerer, or the person of a run that handed work over, continued or resumed;
+   * null = nobody. Absent = the author when the author is a person. Server only.
+   */
+  requestedFor?: string | null;
 }
 
 /** Who pressed a card button, as BotDesk.cardAction gets it. */
@@ -396,6 +402,11 @@ export interface CardAnswerIn {
   card: CardV2;
   /** A counts-only poll: the votes per option now, in place of the voter's choice. */
   tally?: Record<string, number>;
+  /**
+   * A private card's real answerer, for the run's `requested_for` (whose GitHub it uses). It never
+   * reaches the run, its prompt or the wire; `actorId` stays "anonymous".
+   */
+  voterId?: string;
 }
 
 export type MemberInfo = { id: string; name: string; kind: string; level: string; deactivated: number; runner: number };
@@ -833,6 +844,7 @@ async function answerArgs(c: DeliverContext, row: OutboxRow, a: OutboxAnswer): P
     const tally = currentTally(c.sql, a.answer.messageId);
     if (tally) args.tally = tally;
   }
+  if (a.anonymous && who?.kind === "human" && !who.deactivated) args.voterId = voter;
   return args;
 }
 

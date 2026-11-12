@@ -4,9 +4,10 @@
 use crate::http::{ApiError, ApiResult, HttpClient, enc};
 use crate::proto::machine::{FileChange, RunEvent, RunLogEntry};
 use crate::proto::{
-    BotRun, BotRunner, CreateMachineRequest, CreateMachineResponse, DecisionsResponse,
-    EndRunRequest, MAX_DECISIONS_PAGE, Machine, RunEventsResponse, SetBotRunnerRequest,
-    SetMachineBotRequest, SetRunPlanRequest, StartRunRequest, UpdateMachineRequest,
+    BotRun, BotRunner, ChainStopResponse, CreateMachineRequest, CreateMachineResponse,
+    DecisionsResponse, EndRunRequest, MAX_DECISIONS_PAGE, Machine, RunEventsResponse,
+    SetBotRunnerRequest, SetMachineBotRequest, SetRunPlanRequest, StartRunRequest, TopicRelay,
+    UpdateMachineRequest,
 };
 use reqwest::Method;
 use std::collections::HashMap;
@@ -71,6 +72,47 @@ impl HttpClient {
             Method::POST,
             &format!("/v1/runs/{}/end", enc(run_id)),
             Some(req),
+            true,
+        )
+        .await
+    }
+
+    /// Usable, a person in the group: stops a relay (按顺序做) and the run of its current step
+    /// (docs/protocol.md, "Participants, chains and relays"). Answers with the relay;
+    /// `conflict` when it had already ended.
+    pub async fn stop_relay(&self, group_id: &str, relay_id: &str) -> ApiResult<TopicRelay> {
+        self.call::<(), _>(
+            Method::POST,
+            &format!("/v1/groups/{}/relays/{}/stop", enc(group_id), enc(relay_id)),
+            None,
+            true,
+        )
+        .await
+    }
+
+    /// Usable, a person in the group: starts a paused relay again from the step it stopped at.
+    /// Answers with the relay; `conflict` when it is not paused.
+    pub async fn retry_relay(&self, group_id: &str, relay_id: &str) -> ApiResult<TopicRelay> {
+        self.call::<(), _>(
+            Method::POST,
+            &format!(
+                "/v1/groups/{}/relays/{}/retry",
+                enc(group_id),
+                enc(relay_id)
+            ),
+            None,
+            true,
+        )
+        .await
+    }
+
+    /// Usable, a person in the group: stops a chain of hand-overs and every run in it that has
+    /// not ended (全部停止).
+    pub async fn stop_chain(&self, group_id: &str, chain_id: &str) -> ApiResult<ChainStopResponse> {
+        self.call::<(), _>(
+            Method::POST,
+            &format!("/v1/groups/{}/chains/{}/stop", enc(group_id), enc(chain_id)),
+            None,
             true,
         )
         .await

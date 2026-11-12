@@ -445,6 +445,48 @@ fn insert_topic(tx: &Transaction<'_>, t: &Topic, activity: u64, replace: bool) -
     Ok(())
 }
 
+/// Sets (or, with `None`, removes) one field of a cached topic's raw JSON.
+fn set_topic_raw(
+    tx: &Transaction<'_>,
+    topic_id: &str,
+    path: &str,
+    json: Option<String>,
+) -> StoreResult<()> {
+    match json {
+        Some(v) => tx.execute(
+            "UPDATE topics SET raw = json_set(raw, ?2, json(?3)) WHERE id = ?1",
+            params![topic_id, path, v],
+        )?,
+        None => tx.execute(
+            "UPDATE topics SET raw = json_remove(raw, ?2) WHERE id = ?1",
+            params![topic_id, path],
+        )?,
+    };
+    Ok(())
+}
+
+impl Store {
+    /// Usable: stores the relay a stop or retry route answered with in its topic's raw JSON
+    /// (the `topic.updated` that follows says the same). A newer state of the same relay that
+    /// an event already stored stays. True when the cache changed.
+    pub fn store_topic_relay(
+        &self,
+        topic_id: &str,
+        relay: &crate::proto::TopicRelay,
+    ) -> StoreResult<bool> {
+        let json = serde_json::to_string(relay)?;
+        self.with_writer(|tx| {
+            let n = tx.execute(
+                "UPDATE topics SET raw = json_set(raw, '$.relay', json(?2)) WHERE id = ?1
+                   AND (json_extract(raw, '$.relay.id') IS NOT ?3
+                        OR COALESCE(json_extract(raw, '$.relay.updatedAt'), 0) <= ?4)",
+                params![topic_id, json, relay.id, relay.updated_at],
+            )?;
+            Ok(n > 0)
+        })
+    }
+}
+
 fn update_message_raw(
     tx: &Transaction<'_>,
     id: &str,
@@ -487,11 +529,28 @@ fn apply_one(
             owner_id,
             last_message_at,
             context_of,
-            // usable: participants and relay are not cached yet (the relay desktop work adds them).
+            participants,
+            relay,
             ..
         }) => {
             if let Some(c) = context_of {
                 super::v11::set_topic_context(tx, topic_id, c)?;
+            }
+            // Usable: who works in the topic and its relay (按顺序做) live in the raw topic.
+            if let Some(p) = participants {
+                set_topic_raw(
+                    tx,
+                    topic_id,
+                    "$.participants",
+                    Some(serde_json::to_string(p)?),
+                )?;
+            }
+            if let Some(r) = relay {
+                let json = match r {
+                    Some(r) => Some(serde_json::to_string(r)?),
+                    None => None,
+                };
+                set_topic_raw(tx, topic_id, "$.relay", json)?;
             }
             let status = match status {
                 Some(s) => Some(enum_str(s)?),

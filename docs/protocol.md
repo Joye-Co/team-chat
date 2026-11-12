@@ -2683,7 +2683,7 @@ Module: `takeover.ts` / `takeover.rs`. One state per run that people see, comput
 BotRun += {
   phase?: "working" | "waiting_person" | "needs_reply" | "waiting_approval" | "waiting_computer"
         | "paused" | "taken_over" | "done" | "failed" | "stopped"   // open; unknown or absent: work it out from status and pausedBy
-  waitingFor?: "question" | "stuck" | "report" | "queue" | "offline" | "booting"   // open
+  waitingFor?: "question" | "stuck" | "report" | "queue" | "offline" | "booting" | "limit"   // open
   holdKind?: "pause" | "takeover"     // only with pausedBy (pausedBy is also set while taken over)
   heldAt?: number                     // only with pausedBy
   takeover?: "commands" | "isolated" | "none"   // how the run's machine can be taken over
@@ -2693,6 +2693,15 @@ RunHandback = { by, heldMs, commands, files: string[] /* <= 20 */, headFrom?, he
 RunCommandRequest = { command: string /* 1..4000 */ }
 RunCommandResponse = { commandId /* [A-Za-z0-9_-]{1,64} */ }
 ```
+
+Subscription limit (usable 模 3.4): a run whose CLI stops at its subscription limit
+(`failure.kind: "limit"`) does not fail. It ends as `cancelled` (summary `restarted: subscription
+limit`, `failure` kept) and its work goes on in a new run (`retryOf` the old one) that waits on
+the same machine: `status: "created"`, `queuedAt`, `phase: "waiting_computer"`, `waitingFor:
+"limit"`. The topic says until when (the team's clock), or when it tries again if no reset time
+is known. At the reset the run is assigned with the old CLI session; `POST /v1/runs/:id/cancel`
+stops it while it waits. While a machine's runtime is at its limit, new runs of it go to other
+machines, or wait the same way when there are none.
 
 | Method and path | Who | Body | Response |
 | --- | --- | --- | --- |

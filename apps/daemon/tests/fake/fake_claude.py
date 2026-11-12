@@ -224,6 +224,17 @@ while True:
     if m and ("You do step %s of" % m.group(1)) in cue:
         open("fake.pid", "w").write(str(os.getpid()))
         time.sleep(600)
+    if "limited" in cue:
+        # As Claude Code 2.1 ends a turn at the subscription limit; "limitedreset" also gets the
+        # rate_limit_event that names the reset (epoch seconds).
+        words = "You've hit your session limit · resets 3pm"
+        if "limitedreset" in cue:
+            out({"type": "rate_limit_event", "rate_limit_info": {"status": "rejected", "resetsAt": 4102444000,
+                 "rateLimitType": "five_hour"}, "uuid": "u-%d" % n, "session_id": sid})
+        out({"type": "assistant", "message": {"id": mid, "model": "<synthetic>", "role": "assistant",
+             "content": [{"type": "text", "text": words}]}, "session_id": sid, "error": "rate_limit"})
+        out({"type": "result", "subtype": "success", "is_error": True, "result": words, "session_id": sid})
+        continue
     if "spawn" in cue:
         loop = "import time\nwhile True:\n    open(%r, 'a').write('x\\n')\n    time.sleep(0.05)\n"
         quiet = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL}

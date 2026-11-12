@@ -108,6 +108,7 @@ export async function loadMachineViews(env: Env, opts: { includeRevoked?: boolea
           clis: s.clis,
           runningRuns: s.runningRuns,
           ...(s.signedOut ? { signedOut: s.signedOut } : {}),
+          ...(s.limited ? { limited: s.limited } : {}),
         };
         return { row, view };
       } catch {

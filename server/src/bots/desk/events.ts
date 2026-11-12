@@ -16,7 +16,7 @@ import { DeskRuns, type RunRequest } from "./runs";
 import { briefText } from "../../agent/frontdesk";
 import { countCited } from "../../memory/inject";
 import { retroAfterRun } from "../../memory/retro";
-import { DAEMON_RESTARTED, MAX_DAEMON_RESUMES } from "../../agent/recovery";
+import { DAEMON_RESTARTED, LIMIT_REACHED, MAX_DAEMON_RESUMES, MAX_LIMIT_WAITS } from "../../agent/recovery";
 
 /** Room RPC of the cards feature: a run's CLI took the answer with this seq (`{ seq, runId, inputId }`). */
 export const CARD_ANSWER_TAKEN_RPC = "cards.answerTaken";
@@ -498,6 +498,9 @@ export abstract class DeskEvents extends DeskRuns {
       if (await this.resumeAfterRestart(r)) return;
       await this.end(r, "failed", TEXT.interrupted, "blocked", TEXT.interrupted);
     } else if (f.status === "failed") {
+      // 模 3.4, 盯 1.5: the subscription limit is not a failure: the work waits for the reset
+      // and goes on in its session on the same computer.
+      if (await this.waitForLimit(r, f)) return;
       const note = await this.failedNote(r, f);
       await this.end(r, "failed", note.text, "blocked", cut(note.text, 280), false, note.mentions);
     } else {
@@ -516,7 +519,8 @@ export abstract class DeskEvents extends DeskRuns {
     // close now; an answer taken back in the meantime is left out.
     const left: typeof unread = [];
     for (const x of unread) if (await this.answerStartsRun(r, x.message_id)) left.push(x);
-    if (left.length === 0) return;
+    // None of them starts a run: a GitHub connection that waited for them goes on now.
+    if (left.length === 0) return this.resumeAfterGithub(r, false);
     if (this.followUpDepth(r) >= MAX_FOLLOW_UPS) {
       try {
         await this.note(r, TEXT.followUpLimit);
@@ -551,6 +555,25 @@ export abstract class DeskEvents extends DeskRuns {
     const resumes = this.retryChain(r.id).filter((x) => x.summary === `restarted: ${DAEMON_RESTARTED}`).length;
     if (resumes >= MAX_DAEMON_RESUMES) return false;
     return this.restartElsewhere(r, DAEMON_RESTARTED, { sameSession: true }, { count: false });
+  }
+
+  /**
+   * 模 3.4, 盯 1.5 (decided: wait for the reset): a run that stopped at the subscription limit
+   * ends quietly and its work goes on in a new run that waits on the same computer (排队) until
+   * the limit resets (MachineLink holds the runtime back until then), then continues the CLI
+   * session in the same work folder with a short note. A person can stop it while it waits.
+   * False when it cannot (an aside, a run over HTTP, too many waits in a row): it fails.
+   */
+  protected async waitForLimit(r: RunRow, f: Extract<SeqFrame, { t: "run.done" }>): Promise<boolean> {
+    if (failureKind(f.failure, f.error ?? f.summary ?? "") !== "limit") return false;
+    if (r.external || r.kind === RUN_KIND_ASIDE || !r.machine_id) return false;
+    const waits = this.retryChain(r.id).filter((x) => x.summary === `restarted: ${LIMIT_REACHED}`).length;
+    if (waits >= MAX_LIMIT_WAITS) return false;
+    // The run that hit the limit keeps why it stopped, for the work record.
+    const resetsAt = Number.isInteger(f.failure?.resetsAt) ? f.failure?.resetsAt : undefined;
+    r.failure = JSON.stringify({ kind: "limit", ...(resetsAt ? { resetsAt } : {}) });
+    this.sql.exec("UPDATE runs SET failure = ? WHERE id = ?", r.failure, r.id);
+    return this.restartElsewhere(r, LIMIT_REACHED, { sameSession: true }, { count: false });
   }
 
   /** How many runs in a row before `r` were follow-ups. */
@@ -601,13 +624,20 @@ export abstract class DeskEvents extends DeskRuns {
       r.result_message_id = id;
     }
     await this.setStatus(r, status, { ended_at: now, summary: cut(summary, 280) || null });
+    // A run that stopped for someone's GitHub is not done: the topic waits on that person.
+    const githubFor = status !== "cancelled" ? this.githubWaitingOn(r.id) : null;
     // The room ends the run's step of its chain: a split-off's result (stopped ones too) goes
-    // back to its giver from there.
-    await this.topic(r, topicStatus, waitingOn, { outcome: status, result: handed ? summary : body });
+    // back to its giver from there. A private card's answerer is never named on the wire: the
+    // topic waits on nobody then.
+    await this.topic(r, githubFor ? "blocked" : topicStatus, githubFor ? (this.anonymous(r) ? [] : [githubFor]) : waitingOn, {
+      outcome: status,
+      result: handed ? summary : body,
+    });
     this.retro(r, status, body);
     // A slot may be free now: the next queued run (排队) gets it. Not awaited: it takes other
     // runs' turns and must not wait inside this run's turn.
     void this.dispatchQueued().catch((err) => this.log.warn("queue dispatch failed", { err }));
+    if (status !== "cancelled" && this.meta(`github_resume:${r.id}`) !== null) await this.resumeAfterGithub(r);
   }
 
   /** 复盘 (memory/retro.ts): lessons from a run that ran on a machine, after it ended. Never fails the run. */

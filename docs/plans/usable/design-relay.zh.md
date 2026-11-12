@@ -329,11 +329,18 @@ AddArtifactVersionRequest += { parentVersion?: number }
 - 代码位置随 `bots.workState` 的结束报告带上（`WorkState.code`），不另查 run 记录。
 - 汇报 `waiting_answer` 结束（run 问了人就结束了）按 `step_blocked` 停住：之后人的回答是一条新消息，不再是这一步的 run；人回答后点重试。中途等人回答（run 没结束）照原设计一直等。
 - 第 4 次重试被拒：`conflict`，reason `relay.retry_limit`（protocol.md 的路由表补了一句）。
-- 投不出去的 `relay` 行（交到对方 desk 失败到放弃时间）让接力停住（`paused`，`undelivered`），话题卡住、等发起人，可以重试；desk 明确说接不了（停用、不在群、没有运行方式、起不了 run）时不等放弃时间，立即停住 `member_unavailable`。忙（在这个话题有 run）→ `queued`，由 `run.updated` 写入器在那个 run 结束时重投。
+- 投不出去的 `relay` 行（交到对方 desk 失败到放弃时间）让接力停住（`paused`，`undelivered`），话题卡住、等发起人，可以重试；desk 明确说接不了（停用、不在群、没有运行方式、起不了 run）时不等放弃时间，立即停住 `member_unavailable`。忙（在这个话题有 run）→ `queued`，由 `run.updated` 写入器在那个 run 结束时重投；房间记 `queued` 时那个 run 若已结束（它的 `run.updated` 先到了），这一步不记 `queued`，而是 2 秒后重投（`RELAY_RECHECK_MS`）。目标和说明按 UTF-16 长度截断（和 `TopicRelay` 一致）；请求人被移出群停住的接力在提交后补发 `topic.updated`。
 - 发消息时只有第一行像箭头写法（以 @ 开头、有分隔符、最后一段以 @ 开头）才查成员，别的消息不碰 D1。一行里不是每段都以 @ 开头（如 `@A 比较 x -> y`）不算接力。
 - 请求人离开时接力 `stopped`、reason `requester_left`；「话题卡住、等管理员」仍没做（同 R2 那条，等线 13）。`relay.member_unavailable` 不查「肯不肯接这个请求人的活」：个人电脑只接主人的活（design-roles R4）还没合并。
 - 状态卡多一行接力（每步成员、说明、状态，当前步加括号），「交接」段里接力步写成「接力」。
 - tools/e2e 加 `relay` 场景（假机器 socket）；daemon 的 local-e2e 加 `relayCheck`（真 daemon + 假 Claude：假 CLI 新认 `relayfail:<k>`、`relaystall:<k>`，并且不从「上一步结果」里读模式词）。
+**R6 实现时更正**（2026-11-12）：
+
+- 交接卡、「全部停止」由服务端的 Card v2 画（`delegate_card.ts`，R2），桌面端不加代码；文案在服务端，只补进 PRODUCT.md 的允许词。桌面端仍接了 `chains/:id/stop`（`ChatProvider::stop_chain`），卡片按钮走 desk 不用它。
+- 条上「等 {name} 的电脑上线」没做：`TopicRelay` 里没有电脑状态，要读当前步 run 的排队原因，那是线 3 / 运行状态那边的事；条上这一步照样显示「排队」或「在做」。
+- 停住的一步在条上标「停止了」（封闭集之外加的一个词，和「{name} 停止了」同义），未知状态也按它显示。
+- 发送被拒：chat-core 的 `SendFailure` 多带 `reason`、`member_ids`，桌面端按话题记住最后一次 `relay.*` 被拒，直到这个话题里再发出去、重试或丢弃那条消息；未知的 `relay.*` 原因不另写字，只靠消息本身的「没发出去」。
+- 详情栏「成员」没有参与成员时空行改成「还没有成员在做」（不再说「负责」），「交给…」「指派」照旧改跟进对象。
 
 和别的线的关系：线 1（路由、读取命令、请求渲染）是 R1 的前提；线 2（会话续接、分支）、线 3（结构化汇报、离线排队、交接失败的那一句话）、线 13（管理员、个人电脑只接主人的活）、GitHub 身份没合并前：续接用新会话；结束状态按现在的 run 状态算（成功 → done，失败 → failed）；离线按现在的排队；那一句话先不发；`not_for_requester` 跳过；管理员用 owner。
 

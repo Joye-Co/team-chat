@@ -70,6 +70,7 @@ pub mod seeded;
 mod topic_v2;
 // --- inc-refs: 引用提问 (references, chips, sends with blockRefs).
 mod refs;
+mod relay;
 // --- end inc-refs
 
 use std::{
@@ -213,6 +214,8 @@ struct Shared {
     snapshots: snapshot::SnapshotCache,
     /// Usable: my GitHub sign-in as last read (`provider/github.rs`).
     github: github::GithubCache,
+    /// Usable: why the server refused a message as 按顺序做 (`provider/relay.rs`).
+    relay: relay::RelayCache,
 }
 
 /// [`ChatProvider`] on chat-core. Cheap to clone.
@@ -255,6 +258,7 @@ impl CoreProvider {
                 refs: refs::RefsCache::default(),
                 snapshots: snapshot::SnapshotCache::default(),
                 github: github::GithubCache::default(),
+                relay: relay::RelayCache::default(),
             }),
         });
         provider.state().saved = session::load_accounts(&provider.shared.config.data_root);
@@ -945,6 +949,8 @@ impl CoreProvider {
                     ready
                 };
                 if let Some(group_id) = self.group_of_topic(&topic_id) {
+                    // Usable: a message got through, so an older 按顺序做 refusal is over.
+                    self.shared.relay.clear_topic(&group_id, &topic_id);
                     out.extend([
                         Change::Messages {
                             group_id: group_id.clone(),
@@ -976,14 +982,23 @@ impl CoreProvider {
                     self.shared.cards_v2.on_refused(&a.client, &f.id, f.code);
                 }
                 // --- end cards v2 track ---
+                let relay_refused = self.shared.relay.refused_send(&f);
                 match f.topic_id {
                     Some(topic_id) => out.push(Change::Messages {
                         group_id: f.group_id,
                         topic_id,
                     }),
-                    None => out.push(Change::Topics {
-                        group_id: f.group_id,
-                    }),
+                    None => {
+                        if relay_refused {
+                            out.push(Change::Messages {
+                                group_id: f.group_id.clone(),
+                                topic_id: pending_topic_id(&f.id),
+                            });
+                        }
+                        out.push(Change::Topics {
+                            group_id: f.group_id,
+                        })
+                    }
                 }
             }
             ClientUpdate::CaughtUp => out.extend([Change::Groups, Change::Todo]),
@@ -1792,6 +1807,7 @@ impl ChatProvider for CoreProvider {
     }
 
     fn retry_send(&self, _group_id: &str, client_msg_id: &str) {
+        self.shared.relay.clear_message(client_msg_id);
         if self.retry_job(client_msg_id) {
             return;
         }
@@ -1803,6 +1819,7 @@ impl ChatProvider for CoreProvider {
     }
 
     fn discard_send(&self, _group_id: &str, client_msg_id: &str) {
+        self.shared.relay.clear_message(client_msg_id);
         if self.discard_job(client_msg_id) {
             return;
         }
@@ -2030,6 +2047,23 @@ impl ChatProvider for CoreProvider {
 
     fn run_stopping(&self, run_id: &str) -> bool {
         self.run_stopping_inner(run_id)
+    }
+
+    fn stop_relay(&self, group_id: &str, topic_id: &str, relay_id: &str) -> AdminReply<()> {
+        self.relay_action_inner(group_id, topic_id, relay_id, false)
+    }
+
+    fn retry_relay(&self, group_id: &str, topic_id: &str, relay_id: &str) -> AdminReply<()> {
+        self.relay_action_inner(group_id, topic_id, relay_id, true)
+    }
+
+    fn stop_chain(&self, group_id: &str, chain_id: &str) -> AdminReply<()> {
+        self.stop_chain_inner(group_id, chain_id)
+    }
+
+    fn relay_refusal(&self, group_id: &str, topic_id: &str) -> Option<crate::data::RelayRefusal> {
+        let topic_id = self.resolve_topic(topic_id);
+        self.shared.relay.get(group_id, &topic_id)
     }
 
     // --- settings window (provider/settings.rs) ---

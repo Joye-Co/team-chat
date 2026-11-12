@@ -118,6 +118,8 @@ pub fn topic(row: &TopicRow) -> Topic {
         message_count: count(t.message_count),
         unread: count(row.unread),
         mentions: count(row.mentions),
+        participants: t.participants.clone().unwrap_or_default(),
+        relay: t.relay.clone(),
     }
 }
 
@@ -289,6 +291,8 @@ pub fn pending_topic(item: &OutboxItem, me: &str) -> Option<Topic> {
         message_count: 1,
         unread: 0,
         mentions: 0,
+        participants: Vec::new(),
+        relay: None,
     })
 }
 
