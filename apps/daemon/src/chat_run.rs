@@ -122,7 +122,7 @@ types: {blocks}. `chat-run card schema` prints its JSON Schema; `chat-run --help
 }
 
 /// The JSON Schema of a Card v2 document (`protocol/schema/CardV2.schema.json`, made from the
-/// protocol package's Zod with `bun run gen:schema`): the shape; the server checks the write
+/// protocol package's Zod with `bun run gen:protocol`): the shape; the server checks the write
 /// rules too.
 pub const CARD_SCHEMA: &str = include_str!("../../../protocol/schema/CardV2.schema.json");
 

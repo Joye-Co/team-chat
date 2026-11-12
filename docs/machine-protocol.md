@@ -11,7 +11,7 @@ The shared types are `packages/protocol/src/machine.ts` (Zod, used by the server
 `crates/chat-protocol/src/machine.rs` (serde, used by the daemon through
 `apps/daemon/src/proto.rs`). `apps/daemon/tests/fixtures/machine/{up,down}.jsonl` hold one
 golden frame per line; the daemon test parses each one and serializes it back to an equal
-value, and `bun run gen:fixtures` copies them into `protocol/fixtures/machine/`, which both
+value, and `bun run gen:protocol` copies them into `protocol/fixtures/machine/`, which both
 the Zod and the Rust fixture tests check. Change the doc, both type modules and the golden
 files together. Conventions are those of [protocol.md](protocol.md):
 JSON, UTF-8, camelCase, unknown fields ignored, times in ms since the epoch, IDs are ULIDs
@@ -536,7 +536,7 @@ A connect or write that the CLI's sandbox refuses gives `{ code: "unavailable", 
 "sandbox.blocked" }`. `chat-run` prints the result JSON (exit 0) or the error JSON with its
 `reason` (exit 1). `chat-run card schema` prints the JSON Schema of a Card v2 document
 (`protocol/schema/CardV2.schema.json`, made from the protocol package's Zod with
-`bun run gen:schema` and built into the daemon) without asking the daemon; it holds the shape,
+`bun run gen:protocol` and built into the daemon) without asking the daemon; it holds the shape,
 and the server checks the write rules too. The CLI learns about `chat-run` from a short note
 that names the commands, the card fields, every block type of that schema and
 `chat-run card schema`: Claude Code
