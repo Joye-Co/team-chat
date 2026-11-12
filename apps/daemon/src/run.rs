@@ -29,10 +29,23 @@ pub enum RunCtl {
     /// stall and deadline clocks.
     Pause {
         by: Option<String>,
+        /// "takeover": a person takes over (or upgrades a pause): their commands may run.
+        hold: Option<String>,
     },
-    /// `run.resume`: SIGCONT, move the deadline by the paused time, give `note` to the CLI.
+    /// `run.resume`: SIGCONT, move the deadline by the paused time, give `note` to the CLI
+    /// (after a take-over: the hand-back note first).
     Resume {
         note: Option<String>,
+    },
+    /// `run.command`: a command of the person holding the run.
+    Command {
+        id: String,
+        command: String,
+        by: String,
+    },
+    /// `run.command.cancel`.
+    CommandCancel {
+        id: String,
     },
     /// `run.approval`: the daemon's own approvals (gated secrets and actions) are answered
     /// here, the CLI's go to the runtime. `all` = scope "run" (这件事里都同意).
@@ -260,7 +273,7 @@ turns are not in it. Check before you build on them."
 /// A run that waits for a tool call it started counts as stalled only after this long.
 const TOOL_STALL: Duration = Duration::from_secs(30 * 60);
 
-const BASE_ENV: &[&str] = &[
+pub(crate) const BASE_ENV: &[&str] = &[
     "PATH",
     "HOME",
     "USER",
@@ -847,6 +860,10 @@ struct Paused {
     since: Instant,
     /// The stopped CLI and its tools (None while the CLI has not started yet).
     stopped: Option<Box<dyn Stopped>>,
+    /// A person took over: their commands may run (design-takeover 3.4).
+    takeover: Option<crate::hand::Takeover>,
+    /// Inputs for the CLI that came while it was held: given after the hand-back note.
+    queued: Vec<Control>,
 }
 
 impl Paused {
@@ -880,6 +897,10 @@ async fn run_runtime(
         );
     };
     let run_dir = spec.run_dir.clone();
+    // 接管: a person's commands run in the work folder with the daemon's own env.
+    let work = spec.cwd.clone();
+    let hand_env = crate::hand::host_env(cfg, &spec.env);
+    let (hand_tx, mut hand_rx) = mpsc::unbounded_channel::<crate::hand::HandMsg>();
     let (emit_tx, mut emit_rx) = mpsc::unbounded_channel();
     let (rt_tx, rt_rx) = mpsc::unbounded_channel::<Control>();
     let fut = rt.start(spec, emit_tx, rt_rx);
@@ -931,23 +952,73 @@ async fn run_runtime(
             c = control_rx.recv(), if control_open => {
                 let Some(c) = c else { control_open = false; continue };
                 match c {
-                    RunCtl::Pause { by } => {
-                        // Already stopped (the resume before this pause never came): report the
-                        // pause again, so the server counts every pause it sent and a later
-                        // `paused: false` clears pausedBy (GAPS SB-16).
-                        if paused.is_some() {
-                            for ev in gate.push(RunEvent::Paused { paused: true, by }) {
-                                event(ev);
+                    RunCtl::Pause { by, hold } => {
+                        let take = hold.as_deref() == Some(chat_protocol::takeover::HOLD_TAKEOVER)
+                            && exec.takeover().is_some();
+                        // Already stopped (the resume before this pause never came, or a pause
+                        // becomes a take-over): report the pause again, so the server counts
+                        // every pause it sent and a later `paused: false` clears pausedBy
+                        // (GAPS SB-16).
+                        if let Some(p) = paused.as_mut() {
+                            match p.takeover.as_mut() {
+                                Some(t) if take => {
+                                    if let Some(b) = by.clone() {
+                                        t.by = b;
+                                    }
+                                }
+                                None if take => {
+                                    p.takeover =
+                                        Some(crate::hand::Takeover::start(by.clone(), &work).await);
+                                }
+                                _ => {}
                             }
-                            continue;
+                        } else {
+                            let stopped = exec.stop(&run_dir);
+                            let takeover = if take {
+                                Some(crate::hand::Takeover::start(by.clone(), &work).await)
+                            } else {
+                                None
+                            };
+                            paused = Some(Paused {
+                                since: Instant::now(),
+                                stopped,
+                                takeover,
+                                queued: vec![],
+                            });
                         }
-                        paused = Some(Paused { since: Instant::now(), stopped: exec.stop(&run_dir) });
                         for ev in gate.push(RunEvent::Paused { paused: true, by }) {
                             event(ev);
                         }
                     }
                     RunCtl::Resume { note } => {
-                        let Some(p) = paused.take() else { continue };
+                        let words = note.filter(|n| !n.trim().is_empty());
+                        let Some(mut p) = paused.take() else {
+                            // Not held (the pause never came, or this daemon restarted): say so,
+                            // so the server's state is right, and pass the words on.
+                            for ev in gate.push(RunEvent::Paused { paused: false, by: None }) {
+                                event(ev);
+                            }
+                            if let Some(text) = words {
+                                resumes += 1;
+                                let _ = rt_tx.send(Control::Input {
+                                    input_id: format!("resume-{resumes}"),
+                                    text,
+                                });
+                            }
+                            continue;
+                        };
+                        // After a take-over the CLI hears what the person did, before their
+                        // words and before what came for it meanwhile.
+                        let text = match p.takeover.take() {
+                            Some(t) => {
+                                let (text, summary) =
+                                    t.hand_back(&work, words.as_deref(), &mut hand_rx, &event).await;
+                                exec.hand_back(&run_dir);
+                                event(RunEvent::HandSummary(summary));
+                                Some(text)
+                            }
+                            None => words,
+                        };
                         p.resume();
                         // The paused time does not count toward maxDurationMs or the stall.
                         if let Some(d) = deadline.as_mut() {
@@ -958,12 +1029,39 @@ async fn run_runtime(
                         for ev in gate.push(RunEvent::Paused { paused: false, by: None }) {
                             event(ev);
                         }
-                        if let Some(text) = note.filter(|n| !n.trim().is_empty()) {
+                        if let Some(text) = text {
                             resumes += 1;
                             let _ = rt_tx.send(Control::Input {
                                 input_id: format!("resume-{resumes}"),
                                 text,
                             });
+                        }
+                        for c in std::mem::take(&mut p.queued) {
+                            let _ = rt_tx.send(c);
+                        }
+                    }
+                    RunCtl::Command { id, command, by } => {
+                        match paused.as_mut().and_then(|p| p.takeover.as_mut()) {
+                            Some(t) => t.command(
+                                exec,
+                                crate::executor::HandReq {
+                                    run_dir: run_dir.clone(),
+                                    cwd: work.clone(),
+                                    command,
+                                    env: hand_env.clone(),
+                                },
+                                id,
+                                &by,
+                                crate::hand::LIMIT,
+                                &hand_tx,
+                                &event,
+                            ),
+                            None => event(crate::hand::refused(&id, "not_held")),
+                        }
+                    }
+                    RunCtl::CommandCancel { id } => {
+                        if let Some(t) = paused.as_ref().and_then(|p| p.takeover.as_ref()) {
+                            t.cancel(&id);
                         }
                     }
                     // An answer to `chat-run secret` or to a gated command: the daemon's own
@@ -989,8 +1087,15 @@ async fn run_runtime(
                             }
                         }
                     }
+                    // Input for a held CLI waits for the hand-back (design-takeover 3.5).
+                    RunCtl::Runtime(c @ Control::Input { .. }) if paused.is_some() => {
+                        if let Some(p) = paused.as_mut() {
+                            p.queued.push(c);
+                        }
+                    }
                     RunCtl::Runtime(c) => {
-                        // A stopped CLI cannot handle SIGTERM: a cancel resumes it first.
+                        // A stopped CLI cannot handle SIGTERM: a cancel resumes it first (and
+                        // ends the person's command with the take-over).
                         if c == Control::Cancel && let Some(p) = paused.take() {
                             p.resume();
                             for ev in gate.push(RunEvent::Paused { paused: false, by: None }) {
@@ -999,6 +1104,14 @@ async fn run_runtime(
                         }
                         let _ = rt_tx.send(c);
                     }
+                }
+            }
+            Some(m) = hand_rx.recv() => {
+                match paused.as_mut().and_then(|p| p.takeover.as_mut()) {
+                    Some(t) => t.on_msg(m, &event),
+                    // The take-over is over (the run was cancelled): the command's last events
+                    // still go up.
+                    None => if let crate::hand::HandMsg::Event(ev) = m { event(ev) },
                 }
             }
             _ = tokio::time::sleep_until(hold_until), if gate.holding() => {
@@ -1036,9 +1149,14 @@ async fn run_runtime(
             }
         }
     };
-    // Never leave a stopped group behind (the runtime already reaped the CLI).
+    // Never leave a stopped group behind (the runtime already reaped the CLI). A person's
+    // command ends with the take-over, and what their commands left with the run.
     if let Some(p) = paused.take() {
         p.resume();
+    }
+    exec.hand_end(&run_dir);
+    while let Ok(crate::hand::HandMsg::Event(ev)) = hand_rx.try_recv() {
+        event(ev);
     }
     while let Ok(ev) = emit_rx.try_recv() {
         let extra = acceptance.on_event(&ev);

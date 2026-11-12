@@ -163,6 +163,9 @@ while True:
     # Modes come from the request and what follows it, not from the rules the server puts in
     # front of it (the acceptance rule says "changes" and "artifact").
     cue = text.rsplit("\nRequest from ", 1)[-1]
+    # The daemon's hand-back note after a take-over is no request ("changes" has "hang").
+    if text.startswith("[team-chat] A person held"):
+        cue = ""
     session.write(json.dumps({"type": "user", "text": text}) + "\n"); session.flush()
     with open(os.path.join(rec, "prompts.jsonl"), "a") as pf:
         pf.write(json.dumps({"pid": os.getpid(), "sid": sid, "n": n + 1, "text": text}) + "\n")

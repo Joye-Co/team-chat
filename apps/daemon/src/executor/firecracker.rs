@@ -17,12 +17,13 @@
 //! private ranges or each other.
 
 use super::vmwire::{self, AGENT_PORT, CHAT_RUN_PORT, Tag};
-use super::{BoxFuture, Executor, Process, Spawned, Stopped};
+use super::{BoxFuture, Executor, HandChild, HandEnd, HandReq, Process, Spawned, Stopped};
 use crate::config::VmConfig;
 use crate::runtime::RunSpec;
 use crate::workspace::{self, RunMeta};
 use sha2::{Digest, Sha256};
-use std::io::{Read, Write};
+use std::collections::HashMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
@@ -43,7 +44,15 @@ pub struct Firecracker {
     cfg: VmConfig,
     slots: Arc<Mutex<Vec<bool>>>,
     tools: Mutex<Option<PathBuf>>,
+    /// Each running VM's control channel by run folder (接管 reaches the VM by it).
+    procs: Procs,
+    /// Ids of the person's commands on the wire.
+    execs: std::sync::atomic::AtomicU64,
 }
+
+/// Weak: the run's [`VmProcess`] alone keeps a VM's control channel open, and when it is
+/// dropped the VM goes.
+type Procs = Arc<Mutex<HashMap<PathBuf, mpsc::WeakUnboundedSender<Ctl>>>>;
 
 impl Firecracker {
     pub fn new(cfg: VmConfig, slots: u32) -> Firecracker {
@@ -51,6 +60,8 @@ impl Firecracker {
             cfg,
             slots: Arc::new(Mutex::new(vec![false; slots.max(1) as usize])),
             tools: Mutex::new(None),
+            procs: Arc::default(),
+            execs: std::sync::atomic::AtomicU64::new(1),
         }
     }
 
@@ -205,30 +216,48 @@ fn helper_blocking(cfg: &VmConfig, args: &[&str]) {
         .status();
 }
 
-/// One request to the Firecracker API socket.
-fn api(sock: &Path, method: &str, path: &str, body: &str) -> Result<(), String> {
-    let mut s = std::os::unix::net::UnixStream::connect(sock).map_err(|e| e.to_string())?;
-    let t = Some(Duration::from_secs(3));
-    let _ = s.set_read_timeout(t);
-    let _ = s.set_write_timeout(t);
-    write!(
-        s,
-        "{method} {path} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    )
-    .map_err(|e| e.to_string())?;
-    let mut head = [0u8; 12];
-    s.read_exact(&mut head).map_err(|e| e.to_string())?;
-    let status = String::from_utf8_lossy(&head[9..12]).to_string();
-    if status.starts_with('2') {
-        Ok(())
-    } else {
-        Err(format!("firecracker api {method} {path}: {status}"))
+/// `PATH` of a person's command in the VM: the base image only, without the tools disk
+/// (`chat-run`, the `gh` proxy and the gate shims are the AI member's).
+pub const HAND_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
+/// The [`Tag::Exec`] of a person's command: `bash -c` in the work folder with only `PATH`,
+/// `LANG` and `TERM=dumb` (the agent adds `HOME`); the work folder and the run's git dir are
+/// the only shares it sees.
+pub fn hand_exec(id: &str, req: &HandReq, git_dir: Option<&Path>) -> vmwire::Exec {
+    let lang = req
+        .env
+        .iter()
+        .find(|(k, _)| k == "LANG")
+        .map(|(_, v)| v.clone())
+        .filter(|v| !v.is_empty() && v.len() < 64)
+        .unwrap_or_else(|| "C.UTF-8".into());
+    let cwd = req.cwd.to_string_lossy().to_string();
+    vmwire::Exec {
+        id: id.to_string(),
+        argv: vec!["/bin/bash".into(), "-c".into(), req.command.clone()],
+        cwd: cwd.clone(),
+        env: vec![
+            ("PATH".into(), HAND_PATH.into()),
+            ("LANG".into(), lang),
+            ("TERM".into(), "dumb".into()),
+        ],
+        open: std::iter::once(cwd)
+            .chain(git_dir.map(|g| g.to_string_lossy().to_string()))
+            .collect(),
     }
 }
 
-fn vm_state(sock: &Path, state: &str) -> Result<(), String> {
-    api(sock, "PATCH", "/vm", &format!(r#"{{"state":"{state}"}}"#))
+impl Firecracker {
+    fn ctl(&self, run_dir: &Path) -> Option<mpsc::WeakUnboundedSender<Ctl>> {
+        let procs = self.procs.lock().unwrap_or_else(|e| e.into_inner());
+        procs.get(run_dir).cloned()
+    }
+
+    fn send(&self, run_dir: &Path, c: Ctl) -> bool {
+        self.ctl(run_dir)
+            .and_then(|w| w.upgrade())
+            .is_some_and(|s| s.send(c).is_ok())
+    }
 }
 
 impl Executor for Firecracker {
@@ -256,7 +285,12 @@ impl Executor for Firecracker {
             home: bot_home(&self.cfg.homes, &spec.env),
             program: program.to_string(),
             args: args.to_vec(),
+            procs: self.procs.clone(),
         };
+        self.procs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(spec.run_dir.clone(), ctl_tx.downgrade());
         tokio::spawn(job.run(stdin_vm, stdout_vm, ctl_rx, exit_tx));
         Ok(Spawned {
             stdin: Some(Box::new(stdin_host)),
@@ -268,22 +302,13 @@ impl Executor for Firecracker {
         })
     }
 
+    /// 接管: the VM keeps running and vm-agent stops only the CLI's process group and its
+    /// tools, so a person's commands can run beside it (design-takeover 3.4). Asked before
+    /// the VM is up, the agent stops the CLI as soon as it has started it.
     fn stop(&self, run_dir: &Path) -> Option<Box<dyn Stopped>> {
-        let sock = self.cfg.dir.join(run_dir.file_name()?).join("api.sock");
-        if !sock.exists() {
-            return None;
-        }
-        let run_id = run_dir.file_name()?.to_string_lossy().to_string();
-        match vm_state(&sock, "Paused") {
-            Ok(()) => {
-                crate::metrics::vm_paused(&run_id, true);
-                Some(Box::new(VmStopped { sock, run_id }))
-            }
-            Err(e) => {
-                eprintln!("{} pause: {e}", crate::proto::now_ms());
-                None
-            }
-        }
+        let ctl = self.ctl(run_dir)?;
+        ctl.upgrade()?.send(Ctl::Hold(true)).ok()?;
+        Some(Box::new(VmStopped { ctl }))
     }
 
     fn kill_leftover(&self, meta: &RunMeta) {
@@ -301,18 +326,56 @@ impl Executor for Firecracker {
     fn isolated(&self) -> bool {
         true
     }
+
+    fn takeover(&self) -> Option<&'static str> {
+        Some(super::TAKEOVER_ISOLATED)
+    }
+
+    /// vm-agent runs the command as another user than the run's, in a mount namespace that
+    /// sees only the work folder and the git dir of the run's shares.
+    fn hand(&self, req: &HandReq) -> std::io::Result<HandChild> {
+        let ctl = self
+            .ctl(&req.run_dir)
+            .ok_or_else(|| std::io::Error::other("the run's VM is not running"))?;
+        let id = self
+            .execs
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            .to_string();
+        let git_dir = workspace::read_meta(&req.run_dir).and_then(|m| m.git_dir);
+        let (out, output) = mpsc::unbounded_channel();
+        let (done_tx, done) = tokio::sync::oneshot::channel();
+        ctl.upgrade()
+            .ok_or_else(|| std::io::Error::other("the run's VM is not running"))?
+            .send(Ctl::Exec(
+                hand_exec(&id, req, git_dir.as_deref()),
+                out,
+                done_tx,
+            ))
+            .map_err(|_| std::io::Error::other("the run's VM is not running"))?;
+        Ok(HandChild {
+            output,
+            done,
+            cancel: Box::new(move || {
+                if let Some(s) = ctl.upgrade() {
+                    let _ = s.send(Ctl::ExecCancel(id.clone()));
+                }
+            }),
+        })
+    }
+
+    fn hand_back(&self, run_dir: &Path) {
+        self.send(run_dir, Ctl::Restore);
+    }
 }
 
 struct VmStopped {
-    sock: PathBuf,
-    run_id: String,
+    ctl: mpsc::WeakUnboundedSender<Ctl>,
 }
 
 impl Stopped for VmStopped {
     fn resume(&self) {
-        match vm_state(&self.sock, "Resumed") {
-            Ok(()) => crate::metrics::vm_paused(&self.run_id, false),
-            Err(e) => eprintln!("{} resume: {e}", crate::proto::now_ms()),
+        if let Some(s) = self.ctl.upgrade() {
+            let _ = s.send(Ctl::Hold(false));
         }
     }
 }
@@ -320,6 +383,16 @@ impl Stopped for VmStopped {
 enum Ctl {
     Signal(i32),
     Destroy,
+    /// 接管: stop (true) or continue the CLI.
+    Hold(bool),
+    /// 接管: a person's command, where its output and its end go.
+    Exec(
+        vmwire::Exec,
+        mpsc::UnboundedSender<Vec<u8>>,
+        tokio::sync::oneshot::Sender<HandEnd>,
+    ),
+    ExecCancel(String),
+    Restore,
 }
 
 /// The handle the runtime holds. `exit` is None while the CLI runs, then its exit code.
@@ -386,6 +459,8 @@ struct Job {
     home: Option<(PathBuf, String)>,
     program: String,
     args: Vec<String>,
+    /// The executor's control channels: this run's goes at teardown.
+    procs: Procs,
 }
 
 /// A folder never shared with a VM: the daemon user's home itself, or anything in one of its
@@ -679,6 +754,12 @@ impl Job {
 
         let mut stdout_open = true;
         let mut stdin_open = true;
+        // The person's commands that run: where their output and their end go.
+        type Exec = (
+            mpsc::UnboundedSender<Vec<u8>>,
+            tokio::sync::oneshot::Sender<HandEnd>,
+        );
+        let mut execs: HashMap<String, Exec> = HashMap::new();
         let mut pending_exit: Option<Option<i64>> = None;
         let mut sync_deadline: Option<tokio::time::Instant> = None;
         let mut buf = vec![0u8; 1 << 16];
@@ -714,6 +795,32 @@ impl Job {
                         }
                     }
                     Some((Tag::Error, p)) => self.note(&String::from_utf8_lossy(&p)),
+                    Some((Tag::ExecOut, p)) => {
+                        if let Some((id, bytes)) = vmwire::parse_exec_out(&p)
+                            && let Some((out, _)) = execs.get(&id)
+                        {
+                            let _ = out.send(bytes.to_vec());
+                        }
+                    }
+                    Some((Tag::ExecExit, p)) => {
+                        if let Ok(e) = serde_json::from_slice::<vmwire::ExecExit>(&p)
+                            && let Some((out, done)) = execs.remove(&e.id)
+                        {
+                            if e.dropped > 0 {
+                                let skipped = e.dropped.saturating_sub(e.tail.len() as u64);
+                                let _ = out.send(
+                                    format!("\n[... {skipped} bytes not shown ...]\n{}", e.tail)
+                                        .into_bytes(),
+                                );
+                            }
+                            let unsupported = e.error.as_deref() == Some("unsupported");
+                            let _ = done.send(HandEnd {
+                                code: e.code,
+                                unsupported,
+                                error: e.error.filter(|_| !unsupported),
+                            });
+                        }
+                    }
                     Some(_) => {}
                     None => break,
                 },
@@ -736,6 +843,23 @@ impl Job {
                     Some(Ctl::Signal(sig)) => {
                         let _ = vmwire::write_frame_async(&mut wr, Tag::Signal, sig.to_string().as_bytes()).await;
                     }
+                    Some(Ctl::Hold(stop)) => {
+                        let p = serde_json::to_vec(&vmwire::Hold { stop }).unwrap_or_default();
+                        let _ = vmwire::write_frame_async(&mut wr, Tag::Hold, &p).await;
+                    }
+                    Some(Ctl::Exec(e, out, done)) => {
+                        let p = serde_json::to_vec(&e).unwrap_or_default();
+                        if vmwire::write_frame_async(&mut wr, Tag::Exec, &p).await.is_ok() {
+                            execs.insert(e.id, (out, done));
+                        }
+                    }
+                    Some(Ctl::ExecCancel(id)) => {
+                        let p = serde_json::to_vec(&vmwire::ExecCancel { id }).unwrap_or_default();
+                        let _ = vmwire::write_frame_async(&mut wr, Tag::ExecCancel, &p).await;
+                    }
+                    Some(Ctl::Restore) => {
+                        let _ = vmwire::write_frame_async(&mut wr, Tag::Restore, b"").await;
+                    }
                     Some(Ctl::Destroy) | None => break,
                 },
                 _ = child.wait() => {
@@ -752,6 +876,10 @@ impl Job {
     }
 
     async fn teardown(&self, child: Option<tokio::process::Child>) {
+        self.procs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.run_dir);
         if let Some(mut c) = child {
             let _ = c.start_kill();
             let _ = c.wait().await;
@@ -884,6 +1012,7 @@ mod tests {
             home: home.clone(),
             program: "claude".into(),
             args: vec![],
+            procs: Arc::default(),
         };
         let shares = job.shares();
         let canon = |d: &Path| std::fs::canonicalize(d).unwrap();

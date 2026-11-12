@@ -128,8 +128,10 @@
 | 电脑 | 接管时停什么 | 人的命令怎么跑 |
 | --- | --- | --- |
 | 本机 macOS / Linux | 和今天一样，对 CLI 进程组 SIGSTOP | `$SHELL -c '<cmd>'`，没有 SHELL 时 macOS 用 `/bin/zsh`、Linux 用 `/bin/bash`；不加 `-l`（免得 profile 把 token 带回来）；新会话（setsid），不在被停住的组里 |
-| Windows | 和今天一样挂起线程 | `powershell.exe -NoLogo -NoProfile -NonInteractive -Command <cmd>`，单独的 job |
-| Linux 主机的虚拟机 | **改成**：虚拟机继续运行，vm-agent 只对它起的 CLI 进程组 SIGSTOP（和本机同一条规则）。不再整台暂停 | vm-agent 以另一个 uid（任务 uid + 1，组是任务的组）执行 `/bin/bash -c <cmd>`，`HOME` 是每次接管新建的临时目录 |
+| Windows | 和今天一样挂起线程 | `powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand <cmd>`（实现时改用 `-EncodedCommand`：命令按 UTF-16LE 的 base64 传，免去引号转义；输出设成 UTF-8），单独的 job |
+| Linux 主机的虚拟机 | **改成**：虚拟机继续运行，vm-agent 只对它起的 CLI 进程组 SIGSTOP（和本机同一条规则）。不再整台暂停 | vm-agent 以另一个 uid（任务 uid + 1，组是任务的组）执行 `/bin/bash -c <cmd>`，`HOME` 是每次接管新建的临时目录；命令在自己的 mount namespace 里跑，只留工作目录和任务的 git 目录两个共享，成员家目录和运行目录卸掉（见下面「实现时更正」） |
+
+**实现时更正（T5）**：主机给虚拟机的 NFS 共享是 `all_squash,anonuid=<daemon uid>`（`scripts/runner/runner-vm`），虚拟机里任何 uid 访问共享，在主机上都按 daemon 的 uid 判权限。所以只换 uid 挡不住人的命令读成员家目录（CLI 的订阅登录）。vm-agent 在 fork 之后、exec 之前：`setsid`，`unshare(CLONE_NEWNS)`，先把工作目录和 git 目录 bind 到 `/run/tc-hand/<i>`，再卸掉 `Start.mounts` 里的每个共享（由内到外，`MNT_DETACH`），然后把两个目录 bind 回原路径，最后 `setgroups(0)`、`setgid(任务 gid)`、`setuid(任务 uid + 1)`、`chdir`。`/proc/<CLI pid>/environ` 仍靠 uid 不同读不到；`/run/chat-run.sock` 是 600、属于任务 uid，人的命令连不上。`chmod -R g+rwX` 只对工作目录做（以任务 uid 去改，root 在 NFS 上被 squash），git 目录是同一仓库共用的镜像，不改它的权限。`Restore` 的 chown 在 `all_squash` 下通常没有可改的文件，保留它是为了不走 NFS 的共享。
 
 - 每条命令都从工作目录开始，不保留上一条的 `cd`（一行里写 `cd x && …` 可以）。最简单，不会错。
 - 人的命令可以在后台留下进程（`nohup`）；中止和超时只结束它的进程组，留下的进程算人自己的选择，停止任务时一起结束（本机按会话，虚拟机按 uid）。
@@ -152,6 +154,8 @@ Check these changes before you continue; do not redo what the person did.
 ```
 
   总长不超过 6000 字，超出时先截命令输出。快照在接管开始时记（HEAD 和 `git status --short`；没有 git 时记文件的修改时间）。只是暂停、没跑命令时，只交留言（和今天一样）。
+
+  实现时更正（T4）：daemon 只知道 `run.pause.by` 的成员 id，不知道名字，所以 `<name>` 写成 `Member <id>`（CLI 用 `chat-run member list` 能对上名字）。说明只在接管（`hold: "takeover"`）后交还时写，哪怕一条命令都没跑（人可能在访达里改过文件）；普通暂停只交留言。`git status` 里接管前就有的改动，按文件的大小和修改时间再比一次，人又改过的也算进「changed」。成功的命令不附输出，失败、超时、被中止的附最后 5 行。
 - **插话，不打断**：说明在 CLI 当前这一步结束、轮次切换时被读到。三种运行方式的打断接口各不同，做全了超出这一版。
 - **话题里**：接管时一行「{who} 接管了 {member}」；交还时一行「{who} 交还了 {member} · {n} 分钟 · 跑了 {k} 条命令 · 改了 {files}」。由桌面端从 `run.updated` 的 `holdKind` 变化和 `lastHandback` 画出来，文字来自文案目录。
 
@@ -234,12 +238,13 @@ ALTER TABLE runs ADD COLUMN last_handback TEXT;          -- hand.summary 的 JSO
   - 新增 `RunCtl::Command { id, command, by }`、`RunCtl::CommandCancel { id }`：只在 takeover 持有、且 `by` 等于这次 takeover 的 `by` 时接受，否则回 `hand.result { ok: false, error: "not_held" }`；已有命令在跑回 `busy`。
   - 持有期间收到的 `Control::Input` 先存进 `Paused`，交还时放出。
   - 持有期间这个任务不会被 `daemon.rs:559` 当成服务端不认识的任务取消，因为 link 一直保留它（3.7）；链路断开时 daemon 继续保留持有中的任务，不设超时。
-- **执行器**：在 `Process` trait（`executor/mod.rs:58`）加两个方法，默认「不支持」：
-  - `fn hold(&self) -> Option<Box<dyn Stopped>>`：虚拟机用 `ctl` 发 `Hold`；本机和 Windows 返回 None，`run.rs` 回退到今天的 `exec.stop(run_dir)`。
-  - `fn hand(&self, req: HandReq) -> io::Result<HandChild>`：本机、Windows 起 3.4 里的命令；虚拟机发 `Exec`，输出从 `Job` 分来。
-  - `HandChild` 带输出流、`cancel()` 和退出结果。`firecracker.rs` 的整台暂停只留给旧路径不再使用。
+- **执行器**（实现时更正：放在 `Executor` 上，不放 `Process`。`Process` 归 runtime 持有，`run.rs` 的监督循环只拿得到 `Executor` 和运行目录）：
+  - `Executor::stop(run_dir)` 不变；虚拟机执行器改成按运行目录找到这台虚拟机的 `ctl`（弱引用登记，`VmProcess` 释放后虚拟机照常结束），发 `Hold {stop: true}`，恢复时发 `Hold {stop: false}`。整台暂停的代码删掉。
+  - `fn takeover(&self) -> Option<&str>`（`"commands"` / `"isolated"`）、`fn hand(&self, &HandReq) -> io::Result<HandChild>`、`fn hand_back(&self, run_dir)`（虚拟机发 `Restore`）、`fn hand_end(&self, run_dir)`（任务结束时结束人的命令留下的进程：本机按每条命令的进程组，Windows 按每条命令的 job）。默认「不支持」。
+  - `HandChild` 带输出流（stdout 和 stderr 合进一根管道）、结束结果和 `cancel`。10 分钟上限、每段 16 KiB、每条 1 MiB 上限和末尾 16 KiB 在 `apps/daemon/src/hand.rs` 里统一做。
 - **`vm_agent.rs`**：`Hold` 对 CLI 的进程组 SIGSTOP / SIGCONT；第一次 `Exec` 时把工作目录改成组可读写（`chmod -R g+rwX`，目录加 setgid），家目录不放开；人的命令以任务 uid + 1 起；`Restore` 把人建的文件 chown 回任务 uid。共享目录不允许改权限时，`Exec` 回 `unsupported`，界面显示「这台电脑不支持在接管时运行命令」。
-- **`daemon.rs`**：`FEATURES` 加 `takeover`；`exec.isolated()` 为真时再加 `takeover-isolated`；处理 `Down::RunCommand`、`Down::RunCommandCancel`。
+- **`daemon.rs`**：`FEATURES` 加 `takeover`（本机 macOS、Linux、Windows 和虚拟机都能跑命令）；配了 `[vm]` 时再加 `takeover-isolated`；处理 `Down::RunCommand`、`Down::RunCommandCancel`。
+- `vmwire::Exec` 另带 `open: [工作目录, git 目录]`（人的命令能看见的共享），`ExecExit` 另带 `dropped`、`tail` 和 `error: "unsupported"`。
 
 ### 3.9 桌面端
 
