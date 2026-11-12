@@ -916,8 +916,6 @@ impl RootView {
         let banner = cx.new(|cx| ConnectionBanner::new(services.clone(), cx));
         let update_banner = cx.new(crate::updater::banner::UpdateBanner::new);
         crate::views::banners::register(update_banner.clone(), banner.clone(), cx);
-        // Usable: the GitHub banner of a 话题 and the one-time 连接 GitHub prompt.
-        crate::views::github_banner::install(&services, window, cx);
         let timeline = cx.new(|cx| TimelineView::new(services.clone(), cx));
         let composer = cx.new(|cx| ComposerView::new(services.clone(), window, cx));
         // 回复, a click on an avatar and 重新编辑 land in the composer.
