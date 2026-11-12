@@ -22,10 +22,13 @@ import { ANONYMOUS_ID } from "../../cards2/privacy";
 import { githubFor } from "../../github/assign";
 import { supersedeWaits } from "../../github/machine";
 import { DeskCore, QUEUED, type RunRow } from "./core";
+import { takeoverOf } from "./hold";
 import { type FailureNote, failureNote } from "./failure";
 import { LIMIT_NOTE, LIMIT_REACHED, type LoggedFrame, type RecoveryFacts, outwardAction, recoveryNote, stepOf } from "../../agent/recovery";
 import type { RunProof } from "../proof";
 import { needsReply, reportOf } from "./report";
+import { runLimitMs } from "../../settings/runs";
+import { LIMIT_BACKSTOP_MS } from "../../agent/supervise";
 
 /** The prompts of a run (Run context): the full one, and the one for a resumed session. */
 interface Prompts {
@@ -79,7 +82,7 @@ export interface RunRequest {
 
 export abstract class DeskRuns extends DeskCore {
   /** 盯活 (stall.ts): ends the run quietly and starts the same request again; false when out of tries. */
-  protected abstract restartElsewhere(r: RunRow, why: string, how?: Restart, opts?: { count?: boolean; step?: number }): Promise<boolean>;
+  protected abstract restartElsewhere(r: RunRow, why: string, how?: Restart, opts?: { count?: boolean; step?: number; limitRounds?: number }): Promise<boolean>;
   /** 盯 1.1 (stall.ts): the lease of a run ran out; true when the run keeps waiting for its machine. */
   protected abstract machineLost(r: RunRow): Promise<boolean>;
 
@@ -722,6 +725,15 @@ export abstract class DeskRuns extends DeskCore {
       if (resume !== null) this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `prompt_resume:${r.id}`, `${resume}\n\n${parts}`);
     }
     const frame = this.assignFrame(r, runner, prompt, machine, await workerModel(this.env.DB, runner.runtime));
+    // 盯 1.6: the desk keeps the team's limit (work time, without waits) and saves and continues
+    // the run there; the daemon's own deadline lies past it and is only a backstop.
+    if (r.kind !== RUN_KIND_ASIDE) {
+      if (r.limit_ms === null || r.limit_ms === undefined) {
+        r.limit_ms = await runLimitMs(this.env.DB);
+        this.sql.exec("UPDATE runs SET limit_ms = ? WHERE id = ?", r.limit_ms, r.id);
+      }
+      frame.maxDurationMs = r.limit_ms + LIMIT_BACKSTOP_MS;
+    }
     // Gated actions: the team's checked kinds, to a machine whose CLI stops them; kinds a person
     // approved for this piece of work are left out.
     if (r.kind !== RUN_KIND_ASIDE && gatesRuntime(machine, runner.runtime)) {
@@ -740,7 +752,16 @@ export abstract class DeskRuns extends DeskCore {
       .loginMethods()
       .catch((): Record<string, string> => ({}));
     const loginMethod = methods[runner.runtime] ?? null;
-    this.sql.exec("UPDATE runs SET machine_id = ?, runtime = ?, login_method = ? WHERE id = ?", machine.id, runner.runtime, loginMethod, r.id);
+    // design-takeover 3.6: how a person can take over the run on this machine.
+    r.takeover = takeoverOf(machine);
+    this.sql.exec(
+      "UPDATE runs SET machine_id = ?, runtime = ?, login_method = ?, takeover = ? WHERE id = ?",
+      machine.id,
+      runner.runtime,
+      loginMethod,
+      r.takeover,
+      r.id,
+    );
     r.machine_id = machine.id;
     r.runtime = runner.runtime;
     await this.env.DB.prepare("UPDATE bot_runs SET machine_id = ?, github_member_id = ? WHERE id = ?").bind(machine.id, github?.memberId ?? null, r.id).run();
@@ -795,6 +816,11 @@ export abstract class DeskRuns extends DeskCore {
     return this.serial(runId, async () => {
       const r = this.run(runId);
       if (!r || r.ended_at !== null || r.machine_id !== machineId) return false;
+      // design-takeover 3.7: a run a person holds is not moved or ended; it waits for its machine.
+      if (r.paused_by) {
+        this.log.info("lease ran out while held", { runId, machineId });
+        return true;
+      }
       return this.machineLost(r);
     });
   }

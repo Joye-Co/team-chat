@@ -21,7 +21,9 @@ import {
   RunPlanItem,
   RUN_KIND_ASIDE,
   RunCode,
+  RunHandback,
   type RunStatus,
+  SuperviseAct,
   type TopicStatus,
   Usage,
 } from "@chat/protocol";
@@ -33,12 +35,13 @@ import type { TokenBucket } from "../../core/ratelimit";
 import type { Actor } from "../../core/registry";
 import { ANONYMOUS_ID } from "../../cards2/privacy";
 import { ROOM_REACT_RPC } from "../../reactions";
-import type { BotsEnv } from "../env";
+import { type BotsEnv, linkStub } from "../env";
 import { ACK_EMOJI } from "../proof";
 import type { TopicMessage } from "../room";
 import type { WorkState } from "../participants";
 import type { Brief } from "../../agent/frontdesk";
-import { endedPhase, needsReply, reportOf } from "./report";
+import { needsReply, reportOf } from "./report";
+import { holdKindOf, isHeld, phaseOf } from "./phase";
 
 export type RunRow = {
   id: string;
@@ -141,9 +144,43 @@ export type RunRow = {
   /** The model and 思考强度 the CLI really ran with (the session event), or null. */
   model: string | null;
   effort: string | null;
+  // desk-hold-1 (design-takeover 3.7)
+  /** NULL (a pause, or not held) | "pause" | "takeover"; set with `paused_by`. */
+  hold_kind: string | null;
+  /** Hold reminders sent: 1 after 2 hours, 2 after 24 hours. */
+  hold_reminded: number;
+  /** The person's command running now (its commandId), or null. */
+  hand_command: string | null;
+  /** When that command was sent: a command with no result after HAND_COMMAND_MAX_MS no longer blocks. */
+  hand_command_at: number | null;
+  /** When a person last handed the run back (the two-minute rule). */
+  handed_back_at: number | null;
+  /** JSON of the latest `hand.summary` (`RunHandback`), or null. */
+  last_handback: string | null;
+  /** How the run's machine can be taken over (`RUN_TAKEOVER`), from its features at assignment. */
+  takeover: string | null;
   // desk-limit-wait (模 3.4, 盯 1.5)
   /** While a queued run waits for its computer's subscription limit: when it resets (server clock); else null. */
   limit_until: number | null;
+  // desk-time-limit (盯 1.4, 1.6, 1.8, 1.11, 5.5)
+  /** The team's time limit (ms of counted work) when the run was assigned, or null (the default). */
+  limit_ms: number | null;
+  /** Work time that counts toward the limit: not waiting for an approval, a pause or the machine. */
+  worked_ms: number;
+  /** When `worked_ms` was last brought up to date, or null before the first check. */
+  worked_at: number | null;
+  /** When the run was told to save its state at the time limit; null before. */
+  limit_at: number | null;
+  /** Turns in a row that reached the time limit without progress. Carried over. */
+  limit_rounds: number;
+  /** Signs of progress in this run: new successful steps, file changes, plan and acceptance updates, outputs. */
+  progress: number;
+  /** The daemon's latest heartbeat that said a step of the run is working (盯 1.4), or null. */
+  alive_at: number | null;
+  /** JSON of the open tool calls (item id -> title) for loops that look at the output (盯 1.11). */
+  loop_calls: string | null;
+  /** JSON of the desk's acts on this run (`SuperviseAct[]`, 盯 5.5), or null. */
+  acts: string | null;
 };
 
 /**
@@ -172,6 +209,26 @@ export function codeOf(v: unknown): RunCode | null {
   }
   const parsed = RunCode.safeParse(raw);
   return parsed.success ? parsed.data : null;
+}
+
+/** JSON text parsed, or undefined when it does not parse. */
+export function safeJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+/** The desk's acts on a run (盯 5.5), oldest first; [] when none or the row does not parse. */
+export function actsOf(r: Pick<RunRow, "acts">): SuperviseAct[] {
+  if (!r.acts) return [];
+  try {
+    const v = JSON.parse(r.acts) as unknown;
+    return Array.isArray(v) ? v.filter((x): x is SuperviseAct => SuperviseAct.safeParse(x).success) : [];
+  } catch {
+    return [];
+  }
 }
 
 /** A CLI session id BotDesk keeps and sends back (`run.assign.resumeSessionId`). */
@@ -503,6 +560,37 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
           up: `ALTER TABLE runs ADD COLUMN limit_until INTEGER;`,
         },
         {
+          // 盯 1.4, 1.6, 1.8, 1.11, 5.5: the time limit counts only work (not waits), a long step
+          // whose processes work is not silent, loops look at the output, and what the desk did is
+          // kept with the run. Old rows: NULL / 0 (the default limit, nothing recorded).
+          name: "desk-time-limit",
+          up: `
+            ALTER TABLE runs ADD COLUMN limit_ms INTEGER;
+            ALTER TABLE runs ADD COLUMN worked_ms INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE runs ADD COLUMN worked_at INTEGER;
+            ALTER TABLE runs ADD COLUMN limit_at INTEGER;
+            ALTER TABLE runs ADD COLUMN limit_rounds INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE runs ADD COLUMN progress INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE runs ADD COLUMN alive_at INTEGER;
+            ALTER TABLE runs ADD COLUMN loop_calls TEXT;
+            ALTER TABLE runs ADD COLUMN acts TEXT;
+          `,
+        },
+        {
+          // Usable (design-takeover 3.7): pause versus take-over, the person's command, the
+          // hand-back. Old rows: not held, or a pause (hold_kind NULL).
+          name: "desk-hold-1",
+          up: `
+            ALTER TABLE runs ADD COLUMN hold_kind TEXT;
+            ALTER TABLE runs ADD COLUMN hold_reminded INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE runs ADD COLUMN hand_command TEXT;
+            ALTER TABLE runs ADD COLUMN hand_command_at INTEGER;
+            ALTER TABLE runs ADD COLUMN handed_back_at INTEGER;
+            ALTER TABLE runs ADD COLUMN last_handback TEXT;
+            ALTER TABLE runs ADD COLUMN takeover TEXT;
+          `,
+        },
+        {
           // Usable 模 4.1: how the run's CLI was signed in when the run was sent ("subscription" |
           // "api_key"); the weekly budget counts by it. Old rows: NULL (the machine's sign-in now).
           name: "desk-login-method",
@@ -613,23 +701,48 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
     if (r.effort) run.effort = r.effort;
     const failure = r.failure ? RunFailure.safeParse(JSON.parse(r.failure)) : null;
     if (failure?.success) run.failure = failure.data;
+    const acts = actsOf(r);
+    if (acts.length > 0) run.supervision = acts;
     if (r.queued_at && r.ended_at === null && r.status === "created" && !r.machine_id) {
       run.queuedAt = r.queued_at;
       run.queuePosition = this.queuePosition(r);
-      // 模 3.4: waiting for the subscription limit is waiting for its computer (design-takeover 3.1).
-      if (r.limit_until !== null && r.limit_until !== undefined) {
-        run.phase = "waiting_computer";
-        run.waitingFor = "limit";
-      }
     }
-    // 接 4.2: an ended run's phase follows its report (design-takeover 3.1, rule 1).
-    if (r.ended_at !== null && !r.external) {
-      const report = reportOf(r);
-      const { phase, waitingFor } = endedPhase(r.status, report, needsReply(report) && this.superseded(r));
+    // 模 3.4: waiting for the subscription limit is waiting for its computer (phaseOf, rule 2.2).
+    // design-takeover 3.1: one phase per run (an ended one follows its report, 接 4.2).
+    if (r.ended_at === null || !r.external) {
+      const report = r.ended_at !== null ? reportOf(r) : null;
+      const { phase, waitingFor } = phaseOf(r, { report, superseded: needsReply(report) && this.superseded(r) });
       run.phase = phase;
       if (waitingFor) run.waitingFor = waitingFor;
     }
+    if (isHeld(r)) {
+      run.holdKind = holdKindOf(r);
+      if (r.paused_at !== null) run.heldAt = r.paused_at;
+    }
+    if (r.takeover) run.takeover = r.takeover;
+    const handback = r.last_handback ? RunHandback.safeParse(safeJson(r.last_handback)) : null;
+    if (handback?.success) run.lastHandback = handback.data;
     return run;
+  }
+
+  /**
+   * design-takeover 3.7: the run is no longer held (handed back, ended, restarted). Clears the
+   * hold and the person's running command, and gives MachineLink the run's lease back. Never throws.
+   */
+  protected async clearHold(r: RunRow): Promise<void> {
+    const held = r.paused_by !== null || r.hold_kind !== null;
+    this.sql.exec("UPDATE runs SET paused_by = NULL, paused_at = NULL, hold_kind = NULL, hand_command = NULL, hand_command_at = NULL WHERE id = ?", r.id);
+    r.paused_by = null;
+    r.paused_at = null;
+    r.hold_kind = null;
+    r.hand_command = null;
+    r.hand_command_at = null;
+    if (!held || !r.machine_id) return;
+    try {
+      await linkStub(this.env, r.machine_id).setHeld(r.id, false);
+    } catch (err) {
+      this.log.warn("hold release on the machine failed", { runId: r.id, err });
+    }
   }
 
   /** A later run of this AI member started in the run's topic. */
@@ -853,6 +966,9 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
       if (stoppedBy) s.stoppedBy = stoppedBy;
       const handed = this.handedOverOf(r.id);
       if (handed) s.handedOver = handed.to;
+      // design-relay R3: a relay does not go on to another member past code that is not pushed.
+      const code = codeOf(r.code);
+      if (code) s.code = code;
     }
     await this.sendWorkState(r.group_id, s);
   }

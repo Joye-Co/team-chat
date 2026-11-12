@@ -6,7 +6,7 @@
 // gets a follow-up without an @.
 import { type ArchivedEvent, type RoomContext, type RoomTx, registerTopicFields } from "../core/registry";
 import { approvalDecision, approvesWholeWork } from "./dispatch";
-import { type BotRun, isMainTopicId, MAX_TOPIC_PARTICIPANTS, RUN_KIND_ASIDE, type RunStatus, type TopicParticipant, type TopicStatus } from "@chat/protocol";
+import { type BotRun, isMainTopicId, MAX_TOPIC_PARTICIPANTS, RUN_KIND_ASIDE, type RunCode, type RunStatus, type TopicParticipant, type TopicStatus } from "@chat/protocol";
 
 /** Room migration `participants-1` (registered after `bots-1` in room.ts, which it reads). */
 export const PARTICIPANTS_MIGRATION = `
@@ -125,12 +125,31 @@ export function rollUp(rows: TopicBotRow[]): { status: TopicStatus; waitingOn: s
   return null;
 }
 
-/** Writes the rolled-up status and the participants as one `topic.updated`. */
+/** A topic's rolled-up status, or null when nothing reports one. */
+export type RolledUp = { status: TopicStatus; waitingOn: string[] } | null;
+
+/**
+ * design-relay R3: a feature that changes the rolled-up status and adds fields to the same
+ * `topic.updated` (the relay, relay/engine.ts). `extra` absent: the feature has nothing here.
+ */
+export type WorkStateOverlay = (sql: SqlStorage, topicId: string, next: RolledUp) => { next: RolledUp; extra?: Record<string, unknown> };
+const overlays: WorkStateOverlay[] = [];
+export function registerWorkStateOverlay(o: WorkStateOverlay): void {
+  overlays.push(o);
+}
+
+/** Writes the rolled-up status and the participants (and what overlays add) as one `topic.updated`. */
 export function publishWorkState(room: RoomContext, tx: RoomTx, actorId: string, topicId: string): void {
   const rows = topicBots(room.sql, topicId);
-  if (rows.length === 0) return;
-  const next = rollUp(rows);
-  room.updateTopic(tx, actorId, topicId, { ...(next ?? {}), extra: { participants: participants(room.sql, topicId) } });
+  let next = rows.length > 0 ? rollUp(rows) : null;
+  let extra: Record<string, unknown> = rows.length > 0 ? { participants: participants(room.sql, topicId) } : {};
+  for (const o of overlays) {
+    const r = o(room.sql, topicId, next);
+    next = r.next;
+    if (r.extra) extra = { ...extra, ...r.extra };
+  }
+  if (Object.keys(extra).length === 0) return;
+  room.updateTopic(tx, actorId, topicId, { ...(next ?? {}), extra });
 }
 
 /** What `bots.workState` gets from a desk: the run's latest report. */
@@ -151,6 +170,8 @@ export interface WorkState {
   handedOver?: string;
   /** The run's result (<= 4000). */
   result?: string;
+  /** design-relay R3: where the run left its code (`run.done.code`), when it ended and it is known. */
+  code?: RunCode;
 }
 
 /** Stores one run's report on its row and publishes the topic's state. */

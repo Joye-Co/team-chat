@@ -1,6 +1,6 @@
 # 接管的状态机
 
-状态：设计，待实现。属于线 8（第 2 波，排在线 1→2→3 之后）。范围：人看到的一次任务处在哪种状态；暂停、接管、交还怎么切换；接管时人在应用里能做什么；交还后 AI 成员知道什么。
+状态：设计；服务端 T2、T3 已实现（`server/src/bots/desk/{phase,hold,takeover,hand}.ts`），其余待实现。属于线 8（第 2 波，排在线 1→2→3 之后）。范围：人看到的一次任务处在哪种状态；暂停、接管、交还怎么切换；接管时人在应用里能做什么；交还后 AI 成员知道什么。
 
 ## 1. 目标
 
@@ -76,7 +76,7 @@
    3. `done` → `done`；其余（`failed`、`blocked`）→ `failed`。被跟进任务盖过的「在等人」也落到这两条。
 2. 还没结束：
    1. `paused_by` 不为空：`hold_kind = 'takeover'` → `taken_over`，否则 `paused`（旧数据 `hold_kind` 为空，算 `paused`）。电脑失联时 phase 不变，另给 `waitingFor: "offline"`。
-   2. 线 3 的「在等电脑」标记（排队、指定电脑离线、失联、虚拟机启动中）→ `waiting_computer`，`waitingFor`: `queue` / `offline` / `booting`；等这台电脑的订阅额度重置（线 4，模 3.4）也是 `waiting_computer`，`waitingFor: "limit"`。
+   2. 线 3 的「在等电脑」标记（排队、指定电脑离线、失联、虚拟机启动中）→ `waiting_computer`，`waitingFor`: `queue` / `offline` / `booting`；等这台电脑的订阅额度重置（线 4，模 3.4）也是 `waiting_computer`，`waitingFor: "limit"`。实现：`queued_at`（排队）→ `queue`，排队且 `limit_until` 不为空 → `limit`；`away_since`（电脑失联）→ `offline`；已派给电脑、电脑还没接（`status = created` 且有 `machine_id`）→ `booting`。
    3. `approval_id` 不为空 → `waiting_approval`。
    4. `status = waiting` → `waiting_person`（`question`）；`status = blocked` → `waiting_person`（`stuck`）。
    5. 其余 → `working`。
@@ -106,7 +106,7 @@
 - 电脑没有 `takeover` 特性（旧 daemon）：谁都不能接管，只能暂停。
 - 个人的电脑：只有它的主人，不管任务是谁交代的。A 把电脑开放给 B 用，B 的任务在 A 的电脑上跑：A 能接管，B 只能暂停。
 - 团队的电脑：只有请求人，且只在报了 `takeover-isolated` 的电脑上（Linux 主机的虚拟机，人的命令换一个 uid 跑，见 3.4）。团队的 Mac / Windows 上，人的命令只能以 daemon 的用户身份跑，等于拿到这台电脑的 shell，能读别人的凭证，所以不给。管理员在团队电脑上能暂停、能替人交还，不能接管别人的任务（接管就能读到请求人自己的 GitHub 凭证）。
-- 线 13 合并之前（还没有电脑主人和个人 / 团队之分）：只有 owner 能接管，所有电脑按 owner 的个人电脑算。一个人用时他就是 owner，不受影响。
+- 团队里只有一个人（唯一一个没被停用的人类成员）：团队的电脑上他也能接管，不要求 `takeover-isolated`，因为电脑上没有别人的凭证。线 13 之前建的电脑、管理员不勾「个人」加的电脑都是团队的电脑（没有主人），一个人用的服务器靠这条照常接管，不用先把电脑改成自己的。团队里来了第二个人，就回到上面的规则。
 
 ### 3.3 计时
 
@@ -128,8 +128,10 @@
 | 电脑 | 接管时停什么 | 人的命令怎么跑 |
 | --- | --- | --- |
 | 本机 macOS / Linux | 和今天一样，对 CLI 进程组 SIGSTOP | `$SHELL -c '<cmd>'`，没有 SHELL 时 macOS 用 `/bin/zsh`、Linux 用 `/bin/bash`；不加 `-l`（免得 profile 把 token 带回来）；新会话（setsid），不在被停住的组里 |
-| Windows | 和今天一样挂起线程 | `powershell.exe -NoLogo -NoProfile -NonInteractive -Command <cmd>`，单独的 job |
-| Linux 主机的虚拟机 | **改成**：虚拟机继续运行，vm-agent 只对它起的 CLI 进程组 SIGSTOP（和本机同一条规则）。不再整台暂停 | vm-agent 以另一个 uid（任务 uid + 1，组是任务的组）执行 `/bin/bash -c <cmd>`，`HOME` 是每次接管新建的临时目录 |
+| Windows | 和今天一样挂起线程 | `powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand <cmd>`（实现时改用 `-EncodedCommand`：命令按 UTF-16LE 的 base64 传，免去引号转义；输出设成 UTF-8），单独的 job |
+| Linux 主机的虚拟机 | **改成**：虚拟机继续运行，vm-agent 只对它起的 CLI 进程组 SIGSTOP（和本机同一条规则）。不再整台暂停 | vm-agent 以另一个 uid（任务 uid + 1，组是任务的组）执行 `/bin/bash -c <cmd>`，`HOME` 是每次接管新建的临时目录；命令在自己的 mount namespace 里跑，只留工作目录和任务的 git 目录两个共享，成员家目录和运行目录卸掉（见下面「实现时更正」） |
+
+**实现时更正（T5）**：主机给虚拟机的 NFS 共享是 `all_squash,anonuid=<daemon uid>`（`scripts/runner/runner-vm`），虚拟机里任何 uid 访问共享，在主机上都按 daemon 的 uid 判权限。所以只换 uid 挡不住人的命令读成员家目录（CLI 的订阅登录）。vm-agent 在 fork 之后、exec 之前：`setsid`，`unshare(CLONE_NEWNS)`，先把工作目录和 git 目录 bind 到 `/run/tc-hand/<i>`，再卸掉 `Start.mounts` 里的每个共享（由内到外，`MNT_DETACH`），然后把两个目录 bind 回原路径，最后 `setgroups(0)`、`setgid(任务 gid)`、`setuid(任务 uid + 1)`、`chdir`。`/proc/<CLI pid>/environ` 仍靠 uid 不同读不到；`/run/chat-run.sock` 是 600、属于任务 uid，人的命令连不上。但这个套接字只是 vm-agent 的转发，真正的通路是 vsock（CID 2、端口 1025，Firecracker 转到主机的 chat-run，主机按 daemon 的 uid 认人，会用任务的 GitHub 登录回答 `git-credential`、发放审批过的 secret），虚拟机里任何进程都能开 vsock。所以 vm-agent 在 `setuid` 之后再装一个 seccomp 过滤（先 `PR_SET_NO_NEW_PRIVS`）：`socket(AF_VSOCK, …)` 和 `io_uring_setup` 返回 EPERM，x32 调用返回 EPERM，别的架构的调用直接杀掉（`vm_agent::hand_filter`）。装不上就不启动命令。`chmod -R g+rwX` 只对工作目录做（以任务 uid 去改，root 在 NFS 上被 squash），git 目录是同一仓库共用的镜像，不改它的权限。`Restore` 的 chown 在 `all_squash` 下通常没有可改的文件，保留它是为了不走 NFS 的共享。
 
 - 每条命令都从工作目录开始，不保留上一条的 `cd`（一行里写 `cd x && …` 可以）。最简单，不会错。
 - 人的命令可以在后台留下进程（`nohup`）；中止和超时只结束它的进程组，留下的进程算人自己的选择，停止任务时一起结束（本机按会话，虚拟机按 uid）。
@@ -152,6 +154,8 @@ Check these changes before you continue; do not redo what the person did.
 ```
 
   总长不超过 6000 字，超出时先截命令输出。快照在接管开始时记（HEAD 和 `git status --short`；没有 git 时记文件的修改时间）。只是暂停、没跑命令时，只交留言（和今天一样）。
+
+  实现时更正（T4）：daemon 只知道 `run.pause.by` 的成员 id，不知道名字，所以 `<name>` 写成 `Member <id>`（CLI 用 `chat-run member list` 能对上名字）。说明只在接管（`hold: "takeover"`）后交还时写，哪怕一条命令都没跑（人可能在访达里改过文件）；普通暂停只交留言。`git status` 里接管前就有的改动，按文件的大小和修改时间再比一次，人又改过的也算进「changed」。成功的命令不附输出，失败、超时、被中止的附最后 5 行。
 - **插话，不打断**：说明在 CLI 当前这一步结束、轮次切换时被读到。三种运行方式的打断接口各不同，做全了超出这一版。
 - **话题里**：接管时一行「{who} 接管了 {member}」；交还时一行「{who} 交还了 {member} · {n} 分钟 · 跑了 {k} 条命令 · 改了 {files}」。由桌面端从 `run.updated` 的 `holdKind` 变化和 `lastHandback` 画出来，文字来自文案目录。
 
@@ -180,7 +184,7 @@ Rust 端（`crates/chat-protocol`）这几个字段用 `String`；fixture 里放
 | `POST /v1/runs/:id/resume` | 3.2；另外管理员可替人交还 | 不变 |
 | `POST /v1/runs/:id/commands` | 只有持有人 | `{ commandId }`；不在接管、已有命令在跑、电脑不在线时 `conflict`；审计 `run.command`（命令文本先脱敏） |
 | `POST /v1/runs/:id/commands/:commandId/cancel` | 只有持有人 | `{ ok: true }` |
-| `GET /v1/runs/:id/events` | 不变 | `hand.command`、`hand.result` 群成员都看得到；`hand.output` 只给持有人和管理员，别人那里过滤掉 |
+| `GET /v1/runs/:id/events` | 不变 | `hand.command`、`hand.result` 群成员都看得到；`hand.output` 只给跑这条命令的人（`hand.command.by`，交还后也看得到自己的输出）和管理员，别人那里过滤掉；过滤后一页不会在还有下一页时是空的 |
 
 **服务端 ↔ daemon**（`docs/machine-protocol.md`；新特性 `takeover`，虚拟机执行器另报 `takeover-isolated`）
 
@@ -210,6 +214,8 @@ ALTER TABLE runs ADD COLUMN hold_reminded INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN hand_command TEXT;           -- 正在跑的 commandId
 ALTER TABLE runs ADD COLUMN handed_back_at INTEGER;      -- 3.3 的 2 分钟规则
 ALTER TABLE runs ADD COLUMN last_handback TEXT;          -- hand.summary 的 JSON
+ALTER TABLE runs ADD COLUMN hand_command_at INTEGER;     -- 命令发出的时间：超过 11 分钟没有 hand.result 就不再算「在跑」，免得 daemon 丢了结果后永远 busy
+ALTER TABLE runs ADD COLUMN takeover TEXT;               -- BotRun.takeover：派活时按电脑特性记，暂停 / 接管时刷新（toRun 是同步的，读不到电脑）
 ```
 
 - **link 数据**：命名迁移 `link-hold-1`：`runs` 加 `held INTEGER NOT NULL DEFAULT 0`。新 RPC `setHeld(runId, held)`：desk 在暂停 / 接管时设 1，交还 / 停止时设 0。`expireLeases()` 跳过 `held = 1` 的任务（`AND held = 0`），所以持有中的任务不会被 `runLost` 换电脑或结束；outbox 也不被清。`runLost` 再加一道：`paused_by` 不为空时只记日志，不动。
@@ -218,8 +224,10 @@ ALTER TABLE runs ADD COLUMN last_handback TEXT;          -- hand.summary 的 JSO
   - `takeover()`：检查 3.2，发 `run.pause {hold: "takeover"}`，`pause_gen + 1`，写 `hold_kind`。从 paused 来时同样发一次（daemon 升级，见 3.8），计数照旧成立。
   - `resume()`：保持今天的写法，立刻清 `paused_by`、`hold_kind`，写 `handed_back_at`；先结束正在跑的人的命令；`setHeld(false)`。所以交还后 `scheduleStall` 和 `onMachines`（`stall.ts:20-37`、`116`）照常计时，没有中间状态。
   - `runCommand()`、`cancelCommand()`：只有持有人；`hand_command` 保证一次一条。
-  - `releaseHolds(memberId)`：成员被移出群（`server/src/core/routes.ts:112` 的 `removeMemberFromGroup`）或线 13 的移出团队时调用，按 3.2 自动交还。
-  - `holdDueAt()`：给 `stall.ts` 的 `scheduleStall()` 多一个最小值，到点发提醒（复用盯活的通知路径），写 `hold_reminded`。
+  - `releaseHolds(memberId)`：成员被移出群（`server/src/core/routes.ts:112` 的 `removeMemberFromGroup`）或线 13 的移出团队时调用，按 3.2 自动交还。实现：core 新增钩子 `registerGroupMemberRemoved`（`removeMemberFromGroup` 调它），停用成员走已有的 `registerMemberDeactivated`；`server/src/bots/index.ts` 找出在这个群跑过任务的 AI 成员，逐个调 desk。
+  - `holdDueAt()`：给 `stall.ts` 的 `scheduleStall()` 多一个最小值，到点发提醒（复用盯活的通知路径），写 `hold_reminded`。实现：提醒是 AI 成员在话题里的一句话，@ 要提醒的人（2 小时：持有人；24 小时：持有人、请求人、群里的管理员）。
+  - 请求人：服务端还没有存 `requestedFor`，权限判断先用 `requested_by`（私密卡片的回答算没有请求人）。
+  - 持有中电脑失联：link 在离线满宽限（`OFFLINE_GRACE_MS`）时、以及 hello 时调 desk 的 `heldMachine(runId, machineId, online)`，desk 只改 `away_since`（给 `waitingFor: "offline"`），不发「不在线了 / 回来了」。交还时电脑还不在，`away_since` 从交还时刻重新算，之后按盯 1.1 等电脑。
 - **`events.ts`**：`hand.result` 清 `hand_command`；`hand.summary` 写 `last_handback` 并广播 `run.updated`；`hand.*` 不碰 `last_event_at`。任务在 `handed_back_at` 后 2 分钟内以失败结束时，走线 3 的同会话重开一次（3.3）。
 - **daemon 重启**：持有期间 daemon 崩溃或重启，CLI 没了。按线 3 对丢失任务的规则处理（同会话重开），desk 先清掉持有，交还说明里写「the computer restarted while a person held it」，话题里一行「{computer} 重启过，接管已结束」。线 8 的自更新在这台电脑有持有中的任务时推迟。
 - **`core.ts` 的 `toRun()`**：用 `phaseOf()` 填 `phase`、`waitingFor`、`holdKind`、`heldAt`、`takeover`、`lastHandback`。
@@ -234,12 +242,13 @@ ALTER TABLE runs ADD COLUMN last_handback TEXT;          -- hand.summary 的 JSO
   - 新增 `RunCtl::Command { id, command, by }`、`RunCtl::CommandCancel { id }`：只在 takeover 持有、且 `by` 等于这次 takeover 的 `by` 时接受，否则回 `hand.result { ok: false, error: "not_held" }`；已有命令在跑回 `busy`。
   - 持有期间收到的 `Control::Input` 先存进 `Paused`，交还时放出。
   - 持有期间这个任务不会被 `daemon.rs:559` 当成服务端不认识的任务取消，因为 link 一直保留它（3.7）；链路断开时 daemon 继续保留持有中的任务，不设超时。
-- **执行器**：在 `Process` trait（`executor/mod.rs:58`）加两个方法，默认「不支持」：
-  - `fn hold(&self) -> Option<Box<dyn Stopped>>`：虚拟机用 `ctl` 发 `Hold`；本机和 Windows 返回 None，`run.rs` 回退到今天的 `exec.stop(run_dir)`。
-  - `fn hand(&self, req: HandReq) -> io::Result<HandChild>`：本机、Windows 起 3.4 里的命令；虚拟机发 `Exec`，输出从 `Job` 分来。
-  - `HandChild` 带输出流、`cancel()` 和退出结果。`firecracker.rs` 的整台暂停只留给旧路径不再使用。
+- **执行器**（实现时更正：放在 `Executor` 上，不放 `Process`。`Process` 归 runtime 持有，`run.rs` 的监督循环只拿得到 `Executor` 和运行目录）：
+  - `Executor::stop(run_dir)` 不变；虚拟机执行器改成按运行目录找到这台虚拟机的 `ctl`（弱引用登记，`VmProcess` 释放后虚拟机照常结束），发 `Hold {stop: true}`，恢复时发 `Hold {stop: false}`。整台暂停的代码删掉。
+  - `fn takeover(&self) -> Option<&str>`（`"commands"` / `"isolated"`）、`fn hand(&self, &HandReq) -> io::Result<HandChild>`、`fn hand_back(&self, run_dir)`（虚拟机发 `Restore`）、`fn hand_end(&self, run_dir)`（任务结束时结束人的命令留下的进程：本机按每条命令的进程组，Windows 按每条命令的 job）。默认「不支持」。
+  - `HandChild` 带输出流（stdout 和 stderr 合进一根管道）、结束结果和 `cancel`。10 分钟上限、每段 16 KiB、每条 1 MiB 上限和末尾 16 KiB 在 `apps/daemon/src/hand.rs` 里统一做。
 - **`vm_agent.rs`**：`Hold` 对 CLI 的进程组 SIGSTOP / SIGCONT；第一次 `Exec` 时把工作目录改成组可读写（`chmod -R g+rwX`，目录加 setgid），家目录不放开；人的命令以任务 uid + 1 起；`Restore` 把人建的文件 chown 回任务 uid。共享目录不允许改权限时，`Exec` 回 `unsupported`，界面显示「这台电脑不支持在接管时运行命令」。
-- **`daemon.rs`**：`FEATURES` 加 `takeover`；`exec.isolated()` 为真时再加 `takeover-isolated`；处理 `Down::RunCommand`、`Down::RunCommandCancel`。
+- **`daemon.rs`**：`FEATURES` 加 `takeover`（本机 macOS、Linux、Windows 和虚拟机都能跑命令）；配了 `[vm]` 时再加 `takeover-isolated`；处理 `Down::RunCommand`、`Down::RunCommandCancel`。
+- `vmwire::Exec` 另带 `open: [工作目录, git 目录]`（人的命令能看见的共享），`ExecExit` 另带 `dropped`、`tail` 和 `error: "unsupported"`。
 
 ### 3.9 桌面端
 
@@ -334,7 +343,7 @@ ALTER TABLE runs ADD COLUMN last_handback TEXT;          -- hand.summary 的 JSO
 3. **Linux 主机上的虚拟机**（团队电脑，请求人接管）
    1. 接管后虚拟机没有整台暂停：daemon metrics 里这次任务的 `vm_paused` 是 false（firecracker API 状态 Running）。
    2. `hostname` 是虚拟机的名字；`id -u` 不是任务的 uid。
-   3. `env` 里没有注入的密钥和 GitHub token；`cat /proc/*/environ` 读不到 CLI 的环境；`cat ~<任务用户>/.claude/.credentials.json`（或 Codex 的对应文件）被拒绝。
+   3. `env` 里没有注入的密钥和 GitHub token；`cat /proc/*/environ` 读不到 CLI 的环境；`cat ~<任务用户>/.claude/.credentials.json`（或 Codex 的对应文件）被拒绝。命令里连 vsock CID 2 端口 1025（比如 `python3 -c 'import socket; socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM).connect((2, 1025))'`）失败（EPERM），`git credential fill` 拿不到任务的 token。
    4. 在工作目录里改一个文件；交还后 `ls -l` 显示它属于任务 uid，CLI 接着做。
 4. **团队**
    1. A 的个人电脑跑 B 的任务：B 只看到「暂停」；A 能接管。

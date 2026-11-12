@@ -15,8 +15,17 @@ export const LINK_IDLE_MS = 90_000;
 export const ASSIGN_RETRY_MS = 30_000;
 /** Below this much free disk a machine takes no new runs. */
 export const MIN_FREE_DISK_BYTES = 5 * 1024 ** 3;
-/** The daemon cancels a run after this; status "timeout". */
+/**
+ * The default time limit of one run (盯 1.6): work time, without waits. The team can change it
+ * (`/v1/settings/runs`); at the limit the run saves its state and goes on in a new turn.
+ */
 export const MAX_RUN_MS = 2 * 60 * 60_000;
+
+/** "45 分钟", "2 小时", "2.5 小时": how long a run worked, for topic notes. */
+export function workTime(minutes: number): string {
+  if (minutes < 120) return `${Math.max(1, Math.round(minutes))} 分钟`;
+  return `${(Math.round((minutes / 60) * 10) / 10).toString()} 小时`;
+}
 /** Longest progress message body we stream (the message body limit is 32,768). */
 export const MAX_PROGRESS_CHARS = 30_000;
 /** Longest result message body. */
@@ -68,6 +77,10 @@ export const TEXT = {
   /** After the desk's own tries (盯活), named as they happened: told once. */
   gaveUp: (minutes: number, tries: string[]) =>
     tries.length > 0 ? `卡住了：${minutes} 分钟没有进展，我自己试过（${tries.join("、")}）还是不行，需要你看一下。` : `卡住了：${minutes} 分钟没有进展，需要你看一下。`,
+  /** 盯 1.6: turns at the time limit made no progress; the work stops and people are told once. */
+  limitStopped: (worked: string, turns: number) => `已经做了 ${worked}，最近 ${turns} 轮都没有新进展，我先停下了，需要你看一下。`,
+  /** 盯 1.6: the time limit came and the work could not go on (no computer to continue on). */
+  timeUp: (worked: string) => `已经做了 ${worked}，到了单次时限，这次先停下了。需要的话请再 @我。`,
   progress: "进行中…",
   done: "完成了。",
   failed: (why: string) => (why ? `没有完成：${why}` : "没有完成。"),

@@ -9,12 +9,15 @@ export class ApiError extends Error {
     readonly reason?: string,
     /** 1.1, `rate_limited`: `ErrorBody.retryAfterMs`. */
     readonly retryAfterMs?: number,
+    /** Usable: `ErrorBody.memberIds`, the members the reason is about (e.g. `relay.member_unavailable`). */
+    readonly memberIds?: string[],
   ) {
     super(message);
   }
   toBody(): ErrorBody {
     const body: ErrorBody = this.reason ? { code: this.code, message: this.message, reason: this.reason } : { code: this.code, message: this.message };
     if (this.retryAfterMs !== undefined) body.retryAfterMs = Math.max(0, Math.ceil(this.retryAfterMs));
+    if (this.memberIds && this.memberIds.length > 0) body.memberIds = this.memberIds.slice(0, 20);
     return body;
   }
 }
@@ -41,7 +44,7 @@ export function toErrorBody(err: unknown): ErrorBody {
 
 export function unwrap<T>(r: Result<T>): T {
   if (r.ok) return r.value;
-  throw new ApiError(r.error.code, r.error.message, r.error.reason);
+  throw new ApiError(r.error.code, r.error.message, r.error.reason, undefined, r.error.memberIds);
 }
 
 /** The `reason` of a frame that failed its schema: a named card rule, or a deferred secret input. */

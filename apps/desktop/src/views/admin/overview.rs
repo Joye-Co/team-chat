@@ -596,6 +596,7 @@ pub(super) fn attention_panel(items: Vec<model::Attention>, cx: &App) -> gpui::D
                 AttentionKind::Budget => Sym::BarChart,
                 AttentionKind::Invite => Sym::Invite,
                 AttentionKind::Limit => Sym::BarChart,
+                AttentionKind::AiService => Sym::AiMember,
             };
             let c = tone_color(a.tone, &k);
             div()

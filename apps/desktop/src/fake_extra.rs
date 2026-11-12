@@ -118,6 +118,7 @@ pub fn sample_runs(now: Millis) -> Vec<BotRunSummary> {
     const MIN: i64 = 60_000;
     vec![
         BotRunSummary {
+            hold: Default::default(),
             id: "run-login-1".into(),
             bot_id: "m-coder".into(),
             group_id: "g-dev".into(),
@@ -130,10 +131,13 @@ pub fn sample_runs(now: Millis) -> Vec<BotRunSummary> {
             started_at: Some(now - 178 * MIN),
             ended_at: None,
             updated_at: now - 10 * MIN,
+            model: Some("claude-opus-5-5".into()),
+            effort: Some("high".into()),
             summary: None,
             plan: Vec::new(),
         },
         BotRunSummary {
+            hold: Default::default(),
             id: "run-blocked-1".into(),
             bot_id: "m-deploy".into(),
             group_id: "g-dev".into(),
@@ -146,12 +150,15 @@ pub fn sample_runs(now: Millis) -> Vec<BotRunSummary> {
             started_at: Some(now - 2 * 24 * 60 * MIN + MIN),
             ended_at: Some(now - 2 * 24 * 60 * MIN + 7 * MIN),
             updated_at: now - 2 * 24 * 60 * MIN + 7 * MIN,
+            model: None,
+            effort: None,
             summary: Some("打包失败：找不到签名证书。".into()),
             plan: Vec::new(),
         },
         // The finished run of the 私聊 话题 `t-dm-2` (完成): its plan and its
         // time, so the inspector agrees with the 完成 badge.
         BotRunSummary {
+            hold: Default::default(),
             id: "run-dm-cache-1".into(),
             bot_id: "m-coder".into(),
             group_id: "d-coder".into(),
@@ -164,6 +171,8 @@ pub fn sample_runs(now: Millis) -> Vec<BotRunSummary> {
             started_at: Some(now - 8 * 60 * MIN + MIN),
             ended_at: Some(now - 7 * 60 * MIN),
             updated_at: now - 7 * 60 * MIN,
+            model: None,
+            effort: None,
             summary: Some("完成，释放了 42 GB。".into()),
             plan: vec![
                 PlanItem::new("找出超过 7 天的构建缓存", PlanState::Done),

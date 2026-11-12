@@ -698,6 +698,7 @@ mod run_tests {
 
     fn run(id: &str, bot: &str) -> BotRunSummary {
         BotRunSummary {
+            hold: Default::default(),
             id: id.into(),
             bot_id: bot.into(),
             group_id: "g".into(),
@@ -710,6 +711,8 @@ mod run_tests {
             started_at: Some(0),
             ended_at: None,
             updated_at: 0,
+            model: None,
+            effort: None,
             summary: None,
             plan: Vec::new(),
         }

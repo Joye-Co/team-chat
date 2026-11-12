@@ -152,23 +152,26 @@ If a step fails, the message says what to do; see also [When something goes wron
 The code works once and for 7 days. For a new one, run
 `scripts/setup-server.sh production --sign-in-code`.
 
-Check: the app opens as you, with your team's default group. 设置 › 机器 is there.
+Check: the app opens as you, with your team's default group. 设置 › 电脑 is there.
 
 ### 6. Let your AI members work on this computer
 
 1. Install Claude Code or Codex on this computer and sign in to it, so that `claude --version`
-   or `codex --version` works in a terminal. The app does not check the sign-in yet; run the
-   CLI once and make sure it answers.
-2. In the app open **设置 › 机器** and click **用这台电脑**. The app registers this computer
-   with your server, writes the background service's config and token and starts it (launchd
-   on a Mac, a scheduled task on Windows). It updates the service with the app.
+   or `codex --version` works in a terminal.
+2. In the app open **设置 › 电脑** and click **用这台电脑**. The app registers this computer
+   with your server as your own computer, writes the background service's config and token and
+   starts it (launchd on a Mac, a scheduled task on Windows). It updates the service with the
+   app. Its card in **团队管理 › 电脑** then checks three lines: the service runs, a CLI was
+   found, and it is signed in; a missing line says what to do. Details:
+   [INSTALL.md, Let AI members work on your computer](INSTALL.md#let-ai-members-work-on-your-computer).
 
-Check: the computer is in the list in 设置 › 机器 and online. On Ubuntu,
+Check: the computer is in the list in 设置 › 电脑 and online, with all three lines fine. On Ubuntu,
 `bun server/scripts/admin.ts machines --env production` shows it as `healthy`.
 
 ### 7. Your first AI member
 
-In **团队管理**, click **添加 AI 成员**, let it work on this computer, then @
+In **团队管理 › 成员**, click **添加 AI 成员**, choose **在电脑上工作** and its 运行方式, let it work
+on this computer (or 任意一台空闲电脑), then @
 it in a topic of your group and give it something to do. [ONBOARDING.zh.md](ONBOARDING.zh.md)
 explains the app.
 
@@ -356,7 +359,7 @@ and people who sign in with an invite code use these AI members without setting 
 - `systemctl --user status team-chat-daemon` is `active (running)`; the log is
   `~/.local/state/team-chat-daemon/daemon.log`.
 - On the Ubuntu machine of Part 1, `bun server/scripts/admin.ts machines --env production`
-  shows the host as `healthy`; in the app it is online in 设置 › 机器.
+  shows the host as `healthy`; in the app it is online in 设置 › 电脑.
 - Let an AI member work on this host (pick the host where the app lets you choose the AI
   member's computer, or on the Ubuntu machine
   `bun server/scripts/admin.ts runner --env production --bot <member id> --runtime claude --labels vm`)

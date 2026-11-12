@@ -129,6 +129,11 @@ impl Gate {
         )
     }
 
+    /// A secret's approval waits for a person's answer.
+    pub fn waiting(&self) -> bool {
+        self.lock().pending.is_some()
+    }
+
     /// The approval id is one this module made (not the CLI's).
     pub fn owns(&self, approval_id: &str) -> bool {
         approval_id.starts_with(PREFIX)

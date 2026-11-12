@@ -1,9 +1,9 @@
 # Machine protocol (version 1)
 
 The contract between the machine daemon (`apps/daemon`) and the server's **MachineLink**
-Durable Object (one per machine). The daemon runs on a team machine (a shared Mac, a member's
-laptop, later a container), connects out to the server (no inbound ports), receives runs for
-bot members, runs a coding CLI for each run in its own folder, and streams normalized progress
+Durable Object (one per machine). The daemon runs on a computer, the team's (a shared Mac, a
+Linux host with VMs) or one person's (their own laptop), connects out to the server (no inbound
+ports), receives runs for bot members, runs a coding CLI for each run in its own folder, and streams normalized progress
 back. **BotDesk** (one per bot member) decides what to run and turns run events into topic
 messages; it talks to MachineLink, never to the daemon.
 
@@ -20,11 +20,11 @@ made by the server (except the ids below that the daemon or the CLI makes), one 
 
 ## Machine token
 
-- The owner adds a machine in settings (机器) or with `bun scripts/admin.ts machine --name
-  <n> [--labels a,b]` (the token goes to a mode-600 file, never to the terminal):
-  `POST /v1/machines`. The server makes a row in D1 (`machines`: id, name, labels, token hash,
-  created by and at, revoked at, last seen) and a token `tm_` + 43 characters of base64url
-  (32 random bytes), shown once. The server stores only the SHA-256 hex digest, like member
+- An admin adds a team machine, and anyone their own, in the app (设置 › 电脑: 用这台电脑 or
+  添加电脑) or with `bun server/scripts/admin.ts machine --name <n> [--labels a,b]` (the token goes to a
+  mode-600 file, never to the terminal): `POST /v1/machines`. The server makes a row in D1
+  (`machines`: id, name, labels, token hash, created by and at, revoked at, last seen) and a
+  token `tm_` + 43 characters of base64url (32 random bytes), shown once. The server stores only the SHA-256 hex digest, like member
   tokens. `DELETE /v1/machines/:id` revokes it: the link closes with
   `error.code = "unauthorized"` and new upgrades get 401.
 - The daemon reads the token from `token_file` (mode 600; the daemon refuses group- or
@@ -69,7 +69,9 @@ CliInfo   = { runtime: string, kind: "codex" | "claude" | "acp" | "pty", command
               version?: string, available: boolean }
               // runtime = the name configured on the machine; run.assign.runtime names one
 Health    = { diskFreeBytes, diskTotalBytes, load1, load5, load15, cpuCount, activeRuns }
-RunCursor = { runId, lastSeq: number /* highest seq produced */, done: boolean }
+RunCursor = { runId, lastSeq: number /* highest seq produced */, done: boolean,
+              active?: boolean /* usable 盯 1.4: the processes the CLI started used CPU since the
+                                  last sample (100 ms in 15 s); absent = not known */ }
 Usage     = { inputTokens: number, outputTokens: number, costUsd?: number,
               models?: ModelUsage[] /* per model the run used; older daemons omit it */ }
 ModelUsage = { model: string /* the id the CLI reported */, inputTokens /* not cached */,
@@ -95,6 +97,8 @@ KnownRun = { runId, ackedSeq: number }
   envAllowlist: string[],          // names of daemon env vars the CLI may see (see Environment)
   leaseMs: number,                 // e.g. 600000
   maxDurationMs?: number,          // the daemon cancels the run after this; status "timeout"
+                                   // (usable: the team limit + 30 min, a backstop; BotDesk saves
+                                   // and continues the run at the limit itself)
   sessionUpload?: { url: string, headers?: Record<string, string> },
   kind?: "aside",                  // 1.1, feature "aside": a read-only side chat run
   resumeSessionId?: string,        // 1.1, feature "resume": continue this CLI session (<= 128)
@@ -146,7 +150,8 @@ RunEvent =
 - `status: "preparing"` comes first (worktree setup), then `running`.
 - `status: "stalled"` is sent once after `stall_minutes` (default 5) without any event, or
   after 30 minutes while a `tool.call` has no `tool.result` yet (the CLI waits for a step); the
-  next event clears it. BotDesk uses it for the topic's stuck state.
+  next event clears it, and so do the CLI's tools while they use CPU (usable 盯 1.4). BotDesk
+  takes it as a signal only.
 - `tool.result.itemId` equals the `tool.call.itemId` it answers.
 - `plan` carries the CLI's own to-do list, mapped by the daemon: Claude Code's `TodoWrite` tool
   input (`todos[].content`, `status` `completed` -> `done`, `in_progress` -> `current`,
@@ -214,7 +219,7 @@ RunEvent =
 
 ## Metrics
 
-Since 1.2.7 every heartbeat carries `metrics`, the numbers of the owner's monitor (protocol.md,
+Since 1.2.7 every heartbeat carries `metrics`, the numbers of the machine monitor (protocol.md,
 "Machine monitor"). Old servers ignore the field; the server reads it apart from the heartbeat, so
 metrics it cannot parse are dropped and the heartbeat still renews the leases. Every number is
 optional: a platform may not have it.
@@ -234,8 +239,8 @@ HomeUse        = { memberId, usedBytes /* on the host disk */, sizeBytes? /* abs
   speculative pages), uptime, and bytes per second received and sent on the host's own interfaces
   (`/proc/net/dev` without `lo`, `tap*`, `fc*`, `veth*`, `docker*`, `virbr*`, `br-*`; Linux only).
 - **VMs** (`[vm]`): the executor records each run's VM as it boots (`booting`), answers
-  (`running`, with `bootMs`: Firecracker start to a connected guest agent), is paused by 接管
-  (`paused`) and goes. `cpuCores` is the Firecracker process's CPU time since the previous sample
+  (`running`, with `bootMs`: Firecracker start to a connected guest agent) and goes. `paused`
+  stays a valid value, but no VM reports it now: 暂停 and 接管 stop only the CLI in the VM. `cpuCores` is the Firecracker process's CPU time since the previous sample
   divided by the wall time (1.0 = one thread); `memBytes` its `VmRSS` (the guest pages it
   touched); `scratchBytes` the blocks the sparse scratch disk uses. `vmSlots` is
   `max_parallel_runs`; `boot` covers the last 50 boots. Without `[vm]`, `runs` lists the daemon's
@@ -252,8 +257,10 @@ HomeUse        = { memberId, usedBytes /* on the host disk */, sizeBytes? /* abs
 
 ## Accounts and keys (feature `accounts`)
 
-The owner signs the machine's CLIs in and gives it API keys from the app (团队管理 › 订阅账号 and
-API 密钥), never through a shell on the machine. A daemon that can do this reports feature
+An admin signs a machine's CLIs in and gives it API keys from the app (团队管理 › 账号与密钥:
+订阅账号 and API 密钥), never through a shell on the machine. 团队管理 opens only for owners and
+admins, so a member who registered a personal machine signs its CLI in in a terminal on that
+machine (`claude`, `codex login`); the app has no member path for it yet. A daemon that can do this reports feature
 `accounts` and its public key; the server sends these frames only to such a daemon.
 
 ```ts
@@ -330,7 +337,8 @@ CliUsage   = { runtime, at, windows: { kind, label?, usedPct, resetsAt? }[] }
 - The daemon's own `stalled` status is a signal only: the server does not restart a run for
   it. A silent run gets one nudge, then is restarted in the same session on the same machine,
   then on another machine when one can take it, and only then is it marked `blocked`.
-- The server's lease is 10 minutes (`leaseMs = 600000`) and `maxDurationMs` is 2 hours.
+- The server's lease is 10 minutes (`leaseMs = 600000`) and `maxDurationMs` is the team's run
+  time limit (default 2 hours) plus 30 minutes (docs/protocol.md, "Run time limit").
 - The server closes the link when it hears nothing for 90 s. The daemon drops the link when
   it receives nothing for 3 heartbeat intervals and reconnects with exponential backoff
   (0.5 s to 30 s, with jitter).
@@ -652,7 +660,7 @@ run.assign += { effort?: string }   // only to a daemon with feature "effort"
 
 The daemon reports what each CLI can run, so settings offer a list instead of a text field. It
 finds the list when it connects (each `hello`), with a 15 s limit per CLI; a CLI it cannot ask
-reports no `models`, and settings then let the owner type a model id.
+reports no `models`, and settings then let an admin type a model id.
 
 - **Codex**: a short `codex app-server` session: `initialize`, `initialized`, `model/list`. Each
   model that is not `hidden` becomes a `CliModel` (`id`, `displayName` as `name`,
@@ -724,7 +732,8 @@ An AI member runs with every permission; only the few kinds the team checked nee
   command waits until the first is answered, then asks (or passes, see scope).
 - **scope "run"** (这件事里都同意): with `approve`, later matches of the same kind in this run pass
   without asking. The server leaves the kind out of `gates` of the run's follow-ups and retries.
-- **While a command waits** the daemon sends no `stalled` status and the run keeps its deadline;
+- **While a command waits** the daemon sends no `stalled` status and the deadline moves by the
+  time waited (usable 盯 1.8; also while a `chat-run secret` approval waits);
   `run.cancel` stops the CLI as usual (the hook ends with it).
 - **When it cannot ask**: a gated run whose `chat-run` socket or hook settings cannot be set up
   fails before the CLI starts. If the hook cannot reach the daemon during the run (not inside a
@@ -777,8 +786,18 @@ An AI member runs with every permission; only the few kinds the team checked nee
   same patterns decide. So a command inside a script, `git -C . push origin main`, a plain
   `git push` while `main` is checked out and `B=main; git push origin HEAD:$B` all stop.
   Claude Code runs Bash with the `PATH` of the user's shell profile, so a gated Claude Code run
-  on Unix also gets `CLAUDE_ENV_FILE=<run folder>/.claude-env.sh`, which puts the shims first
-  again before each command. Codex (and an ACP agent) runs each command in the user's login
+  also gets `CLAUDE_ENV_FILE=<run folder>/.claude-env.sh`, which puts the shims first again
+  before each command (on Windows Git Bash, whose `/etc/profile` puts `/mingw64/bin` and
+  `/usr/bin` first: the file names the shims in MSYS form, `/c/…/bin`, and its own path is
+  written with `/`). Every gated run on the host also gets `BASH_ENV=<run folder>/.bash-env.sh`:
+  bash reads it in every non-interactive shell, and a login bash (`bash -lc`, as Codex runs
+  commands when the user's shell is bash; `bash -l script`) reads it after `/etc/profile` and
+  the user's profile. It reads the user's own `BASH_ENV` first (`CHAT_RUN_USER_BASH_ENV`,
+  expanded as bash expands `BASH_ENV`, so `$HOME/.bashenv` still works), then puts the shims
+  first on `PATH`, once. Codex reads `~/.bashrc` when it captures the user's bash only while
+  `BASH_ENV` is empty; so in a gated Codex or ACP run with no own `BASH_ENV`, a login,
+  non-interactive bash reads `~/.bashrc` itself, once per process tree
+  (`CHAT_RUN_BASHRC_READ=1` is exported after it). Codex (and an ACP agent) runs each command in the user's login
   shell (`zsh -lc`); on macOS `/etc/zprofile` runs `path_helper`, which puts the system folders
   before the inherited `PATH`. So a gated Codex or ACP run on the host (Unix) gets
   `ZDOTDIR=<run folder>/zsh`, whose `.zshenv`, `.zprofile`, `.zshrc` and `.zlogin` each read the
@@ -799,9 +818,10 @@ An AI member runs with every permission; only the few kinds the team checked nee
   (a script that pushes twice). The runtime's next command ends that. Another kind in the same
   command asks at its shim; what a shim asks and a person approves holds the same way.
 - **Not a security boundary**: this guards against mistakes. A program started by its full
-  path, a login shell other than zsh whose system profile resets `PATH` (Codex with `bash` as
-  the user's shell, a login shell inside the VM image, Git Bash on Windows with `/mingw64/bin`
-  ahead of the shims), or a merge through a web page is not seen. The floor is the repository's
+  path, a login shell whose start-up files the run cannot reach (`sh -l`, which reads only
+  `/etc/profile` and `~/.profile`; a login shell inside the VM image, whose `/etc/profile`
+  resets `PATH`; a user profile that sets its own `BASH_ENV`), or a merge through a web page is
+  not seen. The floor is the repository's
   branch protection and the production environment's own required approval.
 - Side chat runs and the PTY runtime are never gated (the server sends no gates to a CLI that
   does not report `gates`).
@@ -1201,7 +1221,9 @@ plain folder without a limit until it is emptied). `home_gb = 0` keeps plain fol
 a new one; the daemon refuses while a run of that member is on the machine and holds that
 member's new runs (`busy`) while it empties. The CLI's system note says what is kept (the working
 folder for the next run in the topic, the home folder for all runs), and that processes left
-running when the turn ends are killed. 接管 pauses and resumes the whole VM. When the CLI exits
+running when the turn ends are killed. 暂停 and 接管 stop only the CLI's process group (the
+agent's `Hold`); the VM keeps running, and a person's commands run in it as another user (feature
+`takeover-isolated`, see "Usable features"). When the CLI exits
 the agent syncs the shares before the daemon reads them; then the VM, its tap, its exports and
 its scratch disk go.
 

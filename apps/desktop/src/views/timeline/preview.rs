@@ -356,6 +356,7 @@ impl TopicSamples {
 
         let runs = vec![
             BotRunSummary {
+                hold: Default::default(),
                 id: RUN_DONE.into(),
                 bot_id: "m-coder".into(),
                 group_id: GROUP.into(),
@@ -368,10 +369,13 @@ impl TopicSamples {
                 started_at: Some(main[4].created_at - 252_000),
                 ended_at: Some(main[4].created_at),
                 updated_at: main[4].created_at,
+                model: None,
+                effort: None,
                 summary: None,
                 plan: Vec::new(),
             },
             BotRunSummary {
+                hold: Default::default(),
                 id: RUN_LIVE.into(),
                 bot_id: "m-reviewer".into(),
                 group_id: GROUP.into(),
@@ -384,6 +388,8 @@ impl TopicSamples {
                 started_at: Some(now - 134_000),
                 ended_at: None,
                 updated_at: now - 2_000,
+                model: None,
+                effort: None,
                 summary: None,
                 plan: Vec::new(),
             },
@@ -391,6 +397,7 @@ impl TopicSamples {
             // `Taro 的进度` (the mockup's four steps). It waits for Joye's
             // review, so the timeline shows no bot-at-work row.
             BotRunSummary {
+                hold: Default::default(),
                 id: RUN_SHORT.into(),
                 bot_id: "m-taro".into(),
                 group_id: GROUP.into(),
@@ -403,6 +410,8 @@ impl TopicSamples {
                 started_at: Some(short[1].created_at),
                 ended_at: None,
                 updated_at: short[2].created_at,
+                model: None,
+                effort: None,
                 summary: None,
                 plan: vec![
                     PlanItem::new("写标题和正文", PlanState::Done),

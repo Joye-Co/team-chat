@@ -1,0 +1,7 @@
+{
+  "kind": "UpdateRunSettingsRequest",
+  "valid": true,
+  "value": {
+    "limitMinutes": 240
+  }
+}

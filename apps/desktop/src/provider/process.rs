@@ -36,6 +36,8 @@ struct Inner {
     generation: u64,
     runs: HashMap<String, RunEntry>,
     machines: HashMap<String, String>,
+    /// Usable: machine id -> the person whose own computer it is (team computers are absent).
+    machine_owners: HashMap<String, String>,
     machines_at: Option<Instant>,
     machines_loading: bool,
     /// Runs whose stop was asked and not answered yet.
@@ -288,8 +290,12 @@ impl CoreProvider {
             if fetch {
                 inner.machines_loading = true;
             }
-            (inner.machines.clone(), fetch)
+            (
+                (inner.machines.clone(), inner.machine_owners.clone()),
+                fetch,
+            )
         };
+        let (names, owners) = names;
         if fetch {
             let this = self.clone();
             let http = account.client.http();
@@ -305,6 +311,10 @@ impl CoreProvider {
                         Ok(list) => {
                             for m in list {
                                 inner.machines.insert(m.id.clone(), m.name.clone());
+                                match &m.owner_id {
+                                    Some(o) => inner.machine_owners.insert(m.id.clone(), o.clone()),
+                                    None => inner.machine_owners.remove(&m.id),
+                                };
                             }
                         }
                         // Not every member may list machines; the id is shown instead.
@@ -322,6 +332,25 @@ impl CoreProvider {
         runs.into_iter()
             .map(|r| BotRunSummary {
                 machine_name: r.machine_id.as_ref().and_then(|m| names.get(m).cloned()),
+                hold: crate::data::run_phase::RunHold {
+                    phase: r.phase,
+                    waiting_for: r.waiting_for,
+                    paused_by: r.paused_by,
+                    hold_kind: r.hold_kind,
+                    held_at: r.held_at.map(|t| t as i64),
+                    takeover: r.takeover,
+                    last_handback: r.last_handback.map(|h| crate::data::run_phase::Handback {
+                        by: h.by,
+                        held_ms: h.held_ms,
+                        commands: h.commands,
+                        files: h.files,
+                        head_from: h.head_from,
+                        head_to: h.head_to,
+                    }),
+                    requested_for: r.requested_for,
+                    machine_owner: r.machine_id.as_ref().and_then(|m| owners.get(m).cloned()),
+                    queue_position: r.queue_position,
+                },
                 id: r.id,
                 bot_id: r.bot_id,
                 group_id: group_id.to_string(),
@@ -333,6 +362,8 @@ impl CoreProvider {
                 started_at: r.started_at.map(|t| t as i64),
                 ended_at: r.ended_at.map(|t| t as i64),
                 updated_at: r.updated_at as i64,
+                model: r.model,
+                effort: r.effort,
                 summary: r.summary,
                 plan: r
                     .plan

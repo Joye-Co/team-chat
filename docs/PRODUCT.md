@@ -5,10 +5,20 @@ When this file and the snapshot disagree, this file wins for V1.
 
 ## What it is
 
-A macOS work chat for one small team: an owner, 4 to 10 people, and about 5 bots. People and bots
-are equal members. Development, product and other work are discussed, assigned and delivered
-here, so the team stops using Feishu and Slack. Each 群 is a chat first (its 群聊); a topic opens
-from it when a piece of work needs its own thread, like a Feishu topic in a group chat.
+A work chat for one person or one small team (an owner, up to about 10 people, and a few AI
+members), with one implementation for both. People and AI members (bots) are equal members.
+Development, product and other work are discussed, assigned and delivered here, so the team
+stops using Feishu and Slack. Each 群 is a chat first (its 群聊); a topic opens from it when a
+piece of work needs its own thread, like a Feishu topic in a group chat.
+
+- **Clients**: Mac and Windows, the same app with the same features ([design/WINDOWS.md](design/WINDOWS.md)).
+- **Server**: every team runs its own (Cloudflare Workers), also one person alone; there is no
+  hosted service ([SELF-HOSTING.md](SELF-HOSTING.md)). The person who sets it up is its first 所有者.
+- **Computers** (电脑, where AI members work): Mac, Windows and Linux; a Linux host can run each
+  run in its own VM. One person uses the computer the app runs on (用这台电脑) or adds another;
+  a team uses the team's computers, for example one Linux host, and anyone may add their own.
+- **How AI members work**: see "AI members at work" below. The plan that finishes this
+  (the usable milestone) is [plans/usable.zh.md](plans/usable.zh.md).
 
 ## Interface words
 
@@ -23,7 +33,7 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
 
 - Topic status, `waitingOn` and the members working on it follow the work (runs, cards, results);
   nobody sets them by hand. The topic menu only has 重命名 and 关注. Bots are
-  members: there is no 暂停 for a member; you tell it in the topic, and 停止 ends one run.
+  members: there is no 暂停 for a member; you tell it in the topic, 暂停 holds one run, and 停止 ends one run.
 - Topic status chips say who is waited on and for what:
 
   | `TopicStatus` | Chip when the viewer is in `waitingOn` | Chip otherwise |
@@ -78,6 +88,13 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
   a proper name, not a product noun; 连接 GitHub, 连接…, 重新连接…, 断开…, 已连接为 @{login}, 还没连接,
   需要重新连接, 验证码 (GitHub's own word), 复制验证码, 打开 GitHub, 授权, 组织, 仓库, PR, 以后再说,
   去 GitHub 撤销, and {name} 在等你连接 GitHub.
+- Words for a run's state and 接管 (docs/plans/usable/design-takeover.zh.md §3.9): 暂停, 继续, 已暂停,
+  已停止, 没做完, 在等电脑, 排队第 {n} 个, 电脑不在线, 正在准备, 等 {who} 回复, 等 {who} 批准,
+  卡住了，需要你看一下, {who} 暂停了 {member}, 你在操作 {computer}, {who} 在操作 {computer}, 已停下,
+  替 {who} 交还, 去回复, 运行, 中止, 运行中, 成功, 失败, 已中止, 工作目录, 在访达中打开 / 在资源管理器中打开,
+  留句话给 {member}, {who} 接管了 {member}, {who} 交还了 {member}, 跑了 {k} 条命令, 改了 {files}, and the
+  reminders {member} 还停着，等你交还 and {who} 接管 {member} 已经 {h} 小时. 暂停 stops one run for a
+  while (继续 lets it go on); it is not a setting of the member. 暂停, 等你 and 完成 never share words.
 - The three 身份 of a team (design-roles): 所有者, 管理员 and 普通成员, with 身份 itself and the menu
   items 设为所有者, 设为管理员, 设为普通成员. 负责人 stays the member a 话题 is assigned to and is
   never a 身份.
@@ -117,8 +134,10 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
   the topic up to now. Only I see the questions and answers. A suggested step goes into the topic
   only when I press its button.
 - **实时查看 + 接管**: a member's computer beside the topic while it works: its terminal rebuilt from
-  the run's steps, the plan, 验收标准, and 回放 by step. 接管 pauses the member so I can act; 交还 lets
-  it continue from that step; 停止 cancels the run.
+  the run's steps, the plan, 验收标准, and 回放 by step. Each run shows one state (see "AI members at
+  work"). 暂停 holds the run and 继续 lets it go on; 接管 holds it for me and opens a command box in
+  the run's 工作目录 (when its computer supports take-over); 交还 lets it continue from that step
+  with a summary of what I did; 停止 cancels the run.
 - **⌘K 交代或搜索**: one field to hand work to a member (交给 <member> starts a topic addressed to
   it in the chosen 群; ⌘↵ hands it to the main bot) or to find 话题, 产出 and 成员.
 - **群**: opening a 群 (or a 私聊) shows its 群聊: one chat timeline with the composer at the
@@ -131,7 +150,7 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
 - **成员**: every member with filters (全部, 在做事, 等人); a member's page shows 现在, 这周 (topics,
   产出, cost), 最近交付, 需要批准的事, 能用的工具, 电脑 and 最近的问题. Changing a member opens the settings
   forms.
-- **常用设置**: an owner changes what changes most about an AI member, which computer it works on
+- **常用设置**: an admin changes what changes most about an AI member, which computer it works on
   (one of the team's or any free one), without opening settings: from the menu of its messages
   (also a right-click on its avatar), from 在哪干活 › 更换电脑… on its page and from ⋯ in 团队管理
   (which also has 编辑…). A pick saves at once; 更多设置… opens the full edit sheet. Models and
@@ -176,9 +195,14 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
   An inline page starts at its top and fades out at the bottom edge when more lies below; 展开
   opens all of it. Artboard: Media.
 - **Settings**: 外观 (theme: follow the system, light or dark; 侧栏样式), my profile (name, 岗位,
-  avatar), 成员 (invite, change level, deactivate, add a bot member and its 岗位, 机器 and
-  credential), 机器 (connected machines and their health), 通知 (mute a 群, follow topics),
-  diagnostics, sign out, and a developer-view switch.
+  avatar), 成员, 电脑 (我的电脑, 团队的电脑 and 同事的电脑: 用这台电脑, 添加电脑, rename, remove,
+  不再用这台电脑, and on my own computer which AI members do my work there), 通知 (mute a 群,
+  follow topics), diagnostics, sign out, and a developer-view switch.
+- **团队管理** (a window for admins, from Settings or the app menu): members (invite, 身份,
+  deactivate, 添加 AI 成员 and its 岗位, 运行方式 and computer), usage, activity, the team's 电脑
+  (health, and the VMs of a Linux host), 账号与密钥 (subscription sign-ins of each computer and API
+  keys), and 团队设置: AI 服务, the team's models, 默认规则 (approvals and spend) and 团队记忆.
+  Members cannot open it; they read the team settings they need where they use them.
 - **Menu bar item**: the app can stay in the menu bar and keep its connection.
 
 ## Behavior
@@ -216,12 +240,72 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
   (see [plans/usable/design-roles.zh.md](plans/usable/design-roles.zh.md)). Clients and bots use
   the same API. Every write is audited with who asked, who did it, which credential, and what
   changed.
-- Sign-in for V1 is an invite code that becomes a token in the macOS Keychain. After that a
-  member can add a sign-in email in 账号 and sign in on any Mac with a 6-digit code sent there.
+- Sign-in for V1 is an invite code (the first 所有者 gets one from the setup script) that becomes
+  a token in the macOS Keychain or the Windows Credential Manager. After that a member can add a
+  sign-in email in 账号 and sign in on any computer with a 6-digit code sent there.
   The app keeps one session per server (正式服务器, 测试服务器 or another), so switching servers
   from the app menu does not sign out. OAuth sign-in is later.
-- Distribution: a DMG signed with the team's own certificate (not notarized). GitHub Releases keeps every build; the server also serves the
-  latest DMG to holders of an invite code and to members, and the app updates itself from it.
+- Distribution: a DMG signed with the team's own certificate (not notarized) and a Windows
+  installer. GitHub Releases keeps every build; the server also serves the latest one to holders
+  of an invite code and to members, and the app updates itself from it.
+
+## AI members at work
+
+What is built on main; [plans/usable.zh.md](plans/usable.zh.md) tracks what is left and how it is
+checked on real computers, and [design/agent-harness.zh.md](design/agent-harness.zh.md) is the
+design it came from.
+
+- **Front desk and executor**: an @mention, a DM or a follow-up first reaches the AI member's
+  front desk on the server. With an AI 服务 (a model key the admins set in 团队管理) it makes one of
+  four decisions: answer at once, hand the work to the executor with a written brief, ask one
+  question (a card; the topic waits on the answer), or stay silent. Without one, every request
+  goes to the executor, and a plain 停 from the requester stops the run. The executor is a
+  coding CLI (Claude Code, Codex, or an agent over ACP) that the daemon starts on a computer. It reads the
+  topic, 产出, cards, decisions, members and memory, and posts cards, 产出 and reports, with the
+  `chat-run` command the daemon puts on its PATH (not an MCP server). The CLI runs with full
+  permissions; only the gated actions below stop it.
+- **Continuing**: a member's runs in one topic share one CLI session, one working folder and one
+  branch, so a follow-up continues where the last run stopped; a DM continues its last session
+  until the person says 新任务 (or the front desk finds the request is new work). A run that
+  starts again (a restart, a daemon restart, a move to another computer) gets a recovery note
+  with what it already did outside the computer.
+- **Watching the work** (盯活) is done by code, not by a model: one nudge after 5 silent minutes, a
+  reminder for a step repeated 4 times, a retry in the same session, another computer last; at
+  most 3 fixes, then one note in the topic. A computer that drops off is waited for (30 minutes
+  before another one takes over; a team with one computer waits on). At the team's time limit
+  (default 2 hours) the run saves its state and goes on in a new turn; two turns in a row without
+  progress stop it. A run that hits a subscription limit waits until the limit resets.
+- **Results are checked**: a run that reports blocked or waiting does not mark the 话题 完成; the
+  result card's numbers come from the run log; a failure says in one sentence why (not signed in,
+  limit reached, model not available, network, CLI not installed) and what to do.
+- **Approvals** (要批准的动作): the team checks a few kinds of actions in 默认规则 (merging to main,
+  deploying to production, changing production config, deleting data, publishing). The daemon
+  stops them at the step that would run them (Claude Code's hook, Codex's and ACP's permission
+  requests, and shims for `git`, `gh` and other tools first on the run's PATH) and the approver
+  gets a card; 这件事里都同意 covers the rest of that piece of work. This guards against mistakes;
+  branch protection and production approvals stay the real limit.
+- **Several AI members**: each @mention starts its own run; an AI member may hand the whole piece
+  of work to another (转交) or give a part to another in its own 话题 (分出去), whose result comes
+  back; a person may write an order, `@A → @B → @C` (按顺序做), where each step starts from the
+  results of the step before. 全部停止 stops every run of that piece of work. No member is
+  responsible for a 话题 alone.
+- **Run states and 接管**: every run shows one state: 正在做, waiting for a person (a question, an
+  approval, a reply), 在等电脑 (queued, offline, starting, a limit), 已暂停, taken over, 做完了,
+  失败 or 已停止. The server works it out for every run (`BotRun.phase`, with `holdKind`,
+  `takeover` and `lastHandback`); the app works it out from `status` and `pausedBy` only for an
+  older server. 暂停, 继续, 接管 and 交还 move between them (`POST /v1/runs/:id/pause`, `/resume`,
+  `/takeover`; the commands of 接管 go through `/v1/runs/:id/commands`); who may do which is in
+  [plans/usable/design-takeover.zh.md](plans/usable/design-takeover.zh.md). The command box of 接管
+  needs the computer's daemon to support it (feature `takeover`).
+- **Memory** (沉淀): four layers, the team's, a 群's, an AI member's and a person's own. What was
+  learned in a 群 is read only by people in that 群; a person's own only by that person. AI members
+  note what they learn during the day; once a night in the team's time zone the AI 服务 sorts the
+  day's notes, with no card to confirm, and 记忆更新 lists each change with 撤回. Without an AI 服务
+  there is no sorting and no lessons after a run; the memory screens say so.
+- **Computers**: each computer is the team's or one person's. Admins add and manage the team's;
+  anyone adds their own (用这台电脑 makes this computer one's own), and a personal computer only
+  does the work its owner asks for. CLI sign-ins stay on the computer, and the app seals each
+  API key for the computer that uses it, so the server never sees it in clear text.
 
 ## Bot members
 
@@ -252,7 +336,7 @@ V1 is not an MVP. The team works in it every day, stably. Done when all of these
    delivery, search, catch-up, reconnects, mention notifications and the 100 MB upload; the
    rest is not measured yet (see docs/RUNBOOK.md, Quality smoke).
 3. **Bots**: external bots join with a bot token and the TypeScript bot SDK. Runner-backed bots
-   run coding CLIs (Codex, Claude Code) through the machine daemon on a team machine: they
+   run coding CLIs (Codex, Claude Code, ACP agents) through the machine daemon on a computer: they
    acknowledge once, stream progress, post results, take follow-ups in the topic, and stalls are
    detected. Every bot run is captured (normalized events plus the CLI's raw session in R2) and
    visible in the process view.
@@ -276,4 +360,4 @@ V1 is not an MVP. The team works in it every day, stably. Done when all of these
 
 Later, not V1: decisions as first-class objects and typed backlinks, catch-up summaries, task
 graphs, semantic search, cost tracking (the 成本 page may say 即将推出), Cloudflare Containers
-runners, email or OAuth sign-in, mobile, Windows and Linux.
+runners, OAuth sign-in, mobile, a Linux app.

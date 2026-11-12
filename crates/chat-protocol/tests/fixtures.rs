@@ -96,7 +96,8 @@ check!(
     MachineGithubWaitRequest,
     RunCommandRequest,
     RunCommandResponse,
-    UpdateAiServiceSwitchesRequest
+    UpdateAiServiceSwitchesRequest,
+    UpdateRunSettingsRequest
 );
 
 fn validated<T: DeserializeOwned + Serialize + Check>(v: &Value) -> Result<Value, String> {
@@ -366,6 +367,11 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ),
     ("RunCommandRequest", validated::<RunCommandRequest>),
     ("RunCommandResponse", validated::<RunCommandResponse>),
+    ("RunSettings", plain::<RunSettings>),
+    (
+        "UpdateRunSettingsRequest",
+        validated::<UpdateRunSettingsRequest>,
+    ),
 ];
 
 fn fixtures_root() -> PathBuf {

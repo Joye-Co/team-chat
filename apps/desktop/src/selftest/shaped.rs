@@ -457,6 +457,24 @@ impl ChatProvider for Shaped {
     fn hand_back_run(&self, group_id: &str, topic_id: &str, run_id: &str) -> AdminReply<()> {
         self.inner.hand_back_run(group_id, topic_id, run_id)
     }
+    fn pause_run(&self, g: &str, t: &str, run_id: &str) -> AdminReply<()> {
+        self.inner.pause_run(g, t, run_id)
+    }
+    fn resume_run(&self, g: &str, t: &str, run_id: &str, note: Option<String>) -> AdminReply<()> {
+        self.inner.resume_run(g, t, run_id, note)
+    }
+    fn run_command(&self, run_id: &str, command: String) -> AdminReply<String> {
+        self.inner.run_command(run_id, command)
+    }
+    fn cancel_run_command(&self, run_id: &str, command_id: &str) -> AdminReply<()> {
+        self.inner.cancel_run_command(run_id, command_id)
+    }
+    fn hand_commands(&self, run_id: &str) -> Vec<crate::data::run_phase::HandCommand> {
+        self.inner.hand_commands(run_id)
+    }
+    fn run_work_folder(&self, run_id: &str) -> Option<std::path::PathBuf> {
+        self.inner.run_work_folder(run_id)
+    }
     fn member_stats(&self, member_id: &str) -> Option<v2::MemberStats> {
         self.inner.member_stats(member_id)
     }

@@ -83,6 +83,24 @@ pub fn duration_text(ms: u64) -> String {
     }
 }
 
+/// The model and 思考强度 the run really used (`claude-opus-5-5 · 思考强度高`); `None` until
+/// the CLI said which model it runs. With no 思考强度 the CLI ran at its default: the model alone.
+pub fn model_line(run: &BotRunSummary) -> Option<String> {
+    let model = run.model.as_deref().filter(|m| !m.trim().is_empty())?;
+    Some(
+        match run.effort.as_deref().filter(|e| !e.trim().is_empty()) {
+            Some(e) => fill(
+                p::FACT_MODEL_EFFORT,
+                &[
+                    ("name", model),
+                    ("effort", &crate::views::settings::members::effort_text(e)),
+                ],
+            ),
+            None => model.to_string(),
+        },
+    )
+}
+
 /// How long a run took, or has run so far.
 pub fn run_duration(run: &BotRunSummary, now: Millis) -> Option<u64> {
     let start = run.started_at?;
@@ -538,6 +556,9 @@ impl ProcessView {
         let mut facts: Vec<AnyElement> = Vec::new();
         if let Some(name) = run.machine_name.clone().or_else(|| run.machine_id.clone()) {
             facts.push(label_value(p::FACT_MACHINE, value(name), cx).into_any_element());
+        }
+        if let Some(line) = model_line(run) {
+            facts.push(label_value(p::FACT_MODEL, value(line), cx).into_any_element());
         }
         if let Some(by) = run.requested_by.as_deref().and_then(|id| self.member(id)) {
             facts.push(
@@ -1058,9 +1079,48 @@ mod tests {
         assert_eq!(duration_text(3_720_000), "1 小时 2 分钟");
     }
 
+    /// The work record names the model and 思考强度 the run really used; nothing before the
+    /// CLI said which model it runs.
+    #[test]
+    fn the_model_line_is_what_really_ran() {
+        let mut run = BotRunSummary {
+            hold: Default::default(),
+            id: "r".into(),
+            bot_id: "b".into(),
+            group_id: "g".into(),
+            topic_id: "t".into(),
+            machine_id: None,
+            machine_name: None,
+            status: RunStatus::Running,
+            requested_by: None,
+            created_at: 0,
+            started_at: None,
+            ended_at: None,
+            updated_at: 0,
+            model: None,
+            effort: Some("high".into()),
+            summary: None,
+            plan: Vec::new(),
+        };
+        assert_eq!(model_line(&run), None);
+        run.model = Some("claude-haiku-5-5".into());
+        assert_eq!(
+            model_line(&run).as_deref(),
+            Some("claude-haiku-5-5 · 思考强度高")
+        );
+        run.effort = None;
+        assert_eq!(model_line(&run).as_deref(), Some("claude-haiku-5-5"));
+        run.effort = Some("turbo".into());
+        assert_eq!(
+            model_line(&run).as_deref(),
+            Some("claude-haiku-5-5 · 思考强度turbo")
+        );
+    }
+
     #[test]
     fn run_duration_uses_now_while_active() {
         let mut run = BotRunSummary {
+            hold: Default::default(),
             id: "r".into(),
             bot_id: "b".into(),
             group_id: "g".into(),
@@ -1073,6 +1133,8 @@ mod tests {
             started_at: Some(1_000),
             ended_at: None,
             updated_at: 2_000,
+            model: None,
+            effort: None,
             summary: None,
             plan: Vec::new(),
         };
@@ -1088,6 +1150,7 @@ mod tests {
     #[test]
     fn only_the_person_who_asked_gets_stop_on_the_pending_row() {
         let mut run = BotRunSummary {
+            hold: Default::default(),
             id: "r".into(),
             bot_id: "b".into(),
             group_id: "g".into(),
@@ -1100,6 +1163,8 @@ mod tests {
             started_at: None,
             ended_at: None,
             updated_at: 0,
+            model: None,
+            effort: None,
             summary: None,
             plan: Vec::new(),
         };

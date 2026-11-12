@@ -52,6 +52,8 @@ pub enum TeamSortKey {
 pub struct Team {
     pub roster: Option<TeamRoster>,
     pub week: Option<TeamUsage>,
+    /// The team's AI 服务 is set up; `None` until read.
+    pub ai_configured: Option<bool>,
     pub error: Option<String>,
     pub tab: TeamTab,
     pub sort: (TeamSortKey, bool),
@@ -66,6 +68,7 @@ impl Team {
         Team {
             roster: None,
             week: None,
+            ai_configured: None,
             error: None,
             tab: TeamTab::default(),
             sort: (TeamSortKey::Spend, true),
@@ -132,12 +135,17 @@ impl AdminView {
         let roster = self.services.provider.team_roster();
         let (from, to) = super::usage::UsageRange::Week.span(crate::selftest::clock::local_now());
         let week = self.services.provider.team_usage(from, to);
+        let ai = self.services.provider.ai_service();
         if self.fleet.monitors.is_empty() {
             self.fetch_fleet(cx);
         }
         cx.spawn(async move |this, cx| {
             let (r, w) = (answer(roster).await, answer(week).await);
+            let ai = answer(ai).await;
             let _ = this.update(cx, |this, cx| {
+                if let Ok(ai) = ai {
+                    this.team.ai_configured = Some(ai.provider.is_some());
+                }
                 match r {
                     Ok(r) => {
                         this.team.roster = Some(r);

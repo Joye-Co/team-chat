@@ -207,11 +207,44 @@ pub fn run_state(
     name: &str,
     paused_by: Option<&str>,
     me: Option<&str>,
-    who: impl FnOnce(&str) -> String,
+    who: impl Fn(&str) -> String,
 ) -> StateLine {
     use crate::copy::{fill, topic_rail as c};
-    if let Some(by) = paused_by {
-        let detail = if Some(by) == me {
+    use crate::data::run_phase::{RunPhase, phase_of};
+    // Usable (design-takeover 3.9): the run's phase. A pause and a take-over both stop the
+    // member; a server phase other than 在做 has its own words.
+    let paused_by = paused_by.or(run.hold.paused_by.as_deref());
+    let mut held_run;
+    let run = if paused_by.is_some() && run.hold.paused_by.is_none() {
+        held_run = run.clone();
+        held_run.hold.paused_by = paused_by.map(Into::into);
+        &held_run
+    } else {
+        run
+    };
+    let (phase, _) = phase_of(run);
+    let server_phase = run
+        .hold
+        .phase
+        .as_deref()
+        .and_then(RunPhase::parse)
+        .is_some();
+    if let Some(by) = paused_by.filter(|_| phase.held()) {
+        // An older server's hold (no kind) keeps the words of before.
+        let detail = if phase == RunPhase::Paused && run.hold.hold_kind.as_deref() == Some("pause")
+        {
+            if Some(by) == me {
+                fill(
+                    crate::copy::live::LIVE_PHASE_PAUSED_YOU,
+                    &[("member", name)],
+                )
+            } else {
+                fill(
+                    crate::copy::live::LIVE_PHASE_PAUSED,
+                    &[("who", &who(by)), ("member", name)],
+                )
+            }
+        } else if Some(by) == me {
             c::STATE_PAUSED_YOU.to_string()
         } else {
             fill(c::STATE_PAUSED_OTHER, &[("who", &who(by))])
@@ -223,6 +256,28 @@ pub fn run_state(
             short: c::STATE_PAUSED_SHORT.to_string(),
             detail: Some(detail),
             paused: true,
+            name: Some(name.to_string()),
+        };
+    }
+    // A server that says the run waits (for a person, an approval, a computer) or ended is
+    // believed; an older one keeps the words of before.
+    if server_phase && phase != RunPhase::Working {
+        let words = crate::views::live::phase::phase_words(
+            run,
+            &crate::views::live::phase::Names {
+                member: name,
+                computer: run.machine_name.as_deref().unwrap_or(name),
+                me,
+            },
+            &who,
+        );
+        return StateLine {
+            text: format!("{name} {}", words.text),
+            tone: tone_of(words.badge),
+            badge: words.badge,
+            short: words.short,
+            detail: None,
+            paused: false,
             name: Some(name.to_string()),
         };
     }
@@ -639,6 +694,7 @@ mod tests {
 
     fn run(id: &str, status: RunStatus, started: i64, plan: Vec<PlanItem>) -> BotRunSummary {
         BotRunSummary {
+            hold: Default::default(),
             id: id.into(),
             bot_id: "forge".into(),
             group_id: "g".into(),
@@ -651,6 +707,8 @@ mod tests {
             started_at: Some(started),
             ended_at: None,
             updated_at: started,
+            model: None,
+            effort: None,
             summary: None,
             plan,
         }
@@ -728,6 +786,29 @@ mod tests {
         assert_ne!(mine.tone, StateTone::Live);
         let other = run_state(&r, "Forge", Some("w"), Some("me"), |_| "小王".into());
         assert_eq!(other.detail.as_deref(), Some("小王 在操作它的电脑"));
+    }
+
+    #[test]
+    fn a_pause_a_wait_and_a_take_over_read_apart() {
+        let mut r = run("now", RunStatus::Running, 3, plan());
+        r.hold.paused_by = Some("w".into());
+        r.hold.hold_kind = Some("pause".into());
+        r.hold.phase = Some("paused".into());
+        let paused = run_state(&r, "Forge", None, Some("me"), |_| "小王".into());
+        assert!(paused.paused);
+        assert_eq!(paused.detail.as_deref(), Some("小王 暂停了 Forge"));
+        r.hold = Default::default();
+        r.hold.phase = Some("waiting_person".into());
+        r.hold.waiting_for = Some("question".into());
+        r.requested_by = Some("me".into());
+        let waiting = run_state(&r, "Forge", None, Some("me"), |_| String::new());
+        assert_eq!(waiting.text, "Forge 等你回复");
+        assert!(!waiting.paused);
+        assert_ne!(waiting.badge, paused.badge);
+        // An older server: a waiting run keeps the words of before.
+        r.hold.phase = None;
+        let old = run_state(&r, "Forge", None, Some("me"), |_| String::new());
+        assert_eq!(old.text, "Forge 在做 2/5");
     }
 }
 

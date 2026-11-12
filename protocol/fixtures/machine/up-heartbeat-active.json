@@ -1,0 +1,26 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "usable (盯 1.4): the processes the run's CLI started used CPU since the last heartbeat",
+  "value": {
+    "t": "heartbeat",
+    "at": 1793627580000,
+    "health": {
+      "diskFreeBytes": 120000000000,
+      "diskTotalBytes": 494000000000,
+      "load1": 3.5,
+      "load5": 3.1,
+      "load15": 2.4,
+      "cpuCount": 10,
+      "activeRuns": 1
+    },
+    "runs": [
+      {
+        "runId": "01JBX0RUN000000000000000AU",
+        "lastSeq": 42,
+        "done": false,
+        "active": true
+      }
+    ]
+  }
+}
