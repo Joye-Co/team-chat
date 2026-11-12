@@ -128,8 +128,20 @@ export function contextRows(sql: SqlStorage, viewerId: string, topicId: string, 
         row.ext = { ...row.ext, cardState: seen.cardState as ContextRow["ext"]["cardState"] };
       }
       if (row.ext.artifactRefs?.length) row.ext = { ...row.ext, artifactRefs: withArtifactTitles(sql, row.ext.artifactRefs) };
+      row.ext = withQuoteTopic(sql, row.ext, topicId);
       return row;
     });
+}
+
+/**
+ * The quote with the quoted message's topic when it is another topic, so the run reads it with
+ * `chat-run topic message --id <m> --topic <t>` (a read without `--topic` looks in its own topic).
+ */
+export function withQuoteTopic(sql: SqlStorage, ext: ContextRow["ext"], topicId: string): ContextRow["ext"] {
+  const q = ext.replyTo;
+  if (!q) return ext;
+  const at = sql.exec<{ topic_id: string }>("SELECT topic_id FROM messages WHERE id = ?", q.messageId).toArray()[0]?.topic_id;
+  return at && at !== topicId ? { ...ext, replyTo: { ...q, topicId: at } } : ext;
 }
 
 /** 产出 references with the 产出's current title, so a run's lines name what they point at. */
@@ -637,7 +649,7 @@ async function plan(c: DeliverContext, row: OutboxRow): Promise<Plan | null> {
   // The routing owner now (a run may have started in the topic since the message was written).
   const owner = m.targets ? null : routingOwner(c.sql, m.topicId);
   const ext = c.sql.exec<{ ext: string | null }>("SELECT ext FROM messages WHERE id = ?", m.messageId).toArray()[0]?.ext ?? null;
-  const parsed = parseExt(ext);
+  const parsed = withQuoteTopic(c.sql, parseExt(ext), m.topicId);
   const quoted = parsed.replyTo?.authorId;
   // A message without an @ that quotes a participant or answers its approval goes to that member;
   // in a 群聊, one that the front desk's open question waits on goes to the member that asked (接 1.8).

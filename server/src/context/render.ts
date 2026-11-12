@@ -16,7 +16,11 @@ export interface ContextRow {
 
 /** The parts of `Message` that live in `messages.ext` and matter to a run. */
 export interface MessageExt {
-  replyTo?: { messageId: string; authorId: string; excerpt: string };
+  /**
+   * `topicId` is the quoted message's topic, added when the row is read (bots/room.ts
+   * `withQuoteTopic`) and only when it is not the row's own topic.
+   */
+  replyTo?: { messageId: string; authorId: string; excerpt: string; topicId?: string };
   attachments?: { fileId: string; name: string; mime: string; size: number; width?: number; height?: number }[];
   /** `title` is the 产出's current title, added when the row is read (bots/room.ts `contextRows`). */
   artifactRefs?: { artifactId: string; version: number; title?: string }[];
@@ -122,7 +126,8 @@ export function renderMessage(r: ContextRow, names: Names, bodyChars = LINE_BODY
 }
 
 function quoteLine(q: NonNullable<MessageExt["replyTo"]>, names: Names): string {
-  return `  ↪ quotes m ${q.messageId} (${names(q.authorId)}: ${short(q.excerpt, 120)})`;
+  const where = q.topicId ? ` in t ${q.topicId}` : "";
+  return `  ↪ quotes m ${q.messageId}${where} (${names(q.authorId)}: ${short(q.excerpt, 120)})`;
 }
 
 function fileLines(x: MessageExt): string[] {

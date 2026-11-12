@@ -476,9 +476,8 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                                 if let Some(m) = spec.model.clone().or(spec.cfg.model.clone()) {
                                     params["model"] = json!(m);
                                 }
-                                if let Some(n) = spec.note.as_ref().filter(|_| chat_run_works(&spec)) {
-                                    params["developerInstructions"] = json!(n);
-                                }
+                                let note = spec.note.as_deref().filter(|_| chat_run_works(&spec));
+                                params["developerInstructions"] = json!(developer_instructions(note));
                                 match spec.resume_session_id.clone() {
                                     Some(tid) => {
                                         let mut resume = params.clone();
@@ -734,6 +733,21 @@ pub fn gate_answer(method: &str, params: &Value, gates: &crate::gates::Gates) ->
 /// in the working folder (the file transport of [`crate::chat_run`]; the sandbox blocks unix
 /// socket connects, and the daemon never opens the network for it). A `read-only` or unknown
 /// sandbox blocks it, so the run gets no `chat-run` note.
+/// Codex runs a command in the `workdir` the model gives, and the model copies the long work
+/// folder path it was told, sometimes wrong: a folder that does not exist fails with "Failed to
+/// create unified exec process: No such file or directory (os error 2)" (verify 2, problem 7).
+pub const WORKDIR_NOTE: &str = "Your commands already run in your working folder: leave `workdir` \
+out for it, and copy any other folder's path exactly. \"Failed to create unified exec process: No \
+such file or directory\" means the workdir does not exist.";
+
+/// The run's `developerInstructions`: the chat-run note when the run has it, then [`WORKDIR_NOTE`].
+pub fn developer_instructions(note: Option<&str>) -> String {
+    match note {
+        Some(n) => format!("{n}\n\n{WORKDIR_NOTE}"),
+        None => WORKDIR_NOTE.to_string(),
+    }
+}
+
 pub fn chat_run_works(spec: &RunSpec) -> bool {
     let (_, sandbox) = thread_policy(spec);
     !spec.aside && matches!(sandbox.as_str(), "workspace-write" | "danger-full-access")
@@ -849,5 +863,19 @@ pub(crate) fn take_late_input(
             let _ = emit.send(RunEvent::InputAccepted { input_id });
             queued.push_back(text);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn developer_instructions_say_to_leave_the_workdir_out() {
+        assert_eq!(developer_instructions(None), WORKDIR_NOTE);
+        let both = developer_instructions(Some("chat-run note"));
+        assert!(both.starts_with("chat-run note\n\n"));
+        assert!(both.ends_with(WORKDIR_NOTE));
+        assert!(WORKDIR_NOTE.contains("leave `workdir`"));
     }
 }

@@ -471,7 +471,7 @@ impl AdminView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let k = native_colors(cx);
-        let name = model::cli_name(&c.kind, &c.runtime);
+        let name = model::cli_entry_name(&c.kind, &c.runtime);
         let logged_in = c.login == "logged_in";
         let (state, word) = if !c.available {
             (BadgeState::Offline, m::LOGIN_UNKNOWN)

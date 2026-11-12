@@ -6,6 +6,7 @@ import {
   type MachineView,
   TEXT,
   candidates,
+  cliEntryName,
   clockText,
   failureKind,
   failureWords,
@@ -14,7 +15,7 @@ import {
 import { SIGNED_OUT_MARK_MS, signedOutRuntimes } from "../src/bots/link";
 import type { BotsEnv } from "../src/bots/env";
 import { Daemon, HEALTH, downViolations, mention, world } from "./daemon";
-import { Client, protocolViolations, waitUntil } from "./helpers";
+import { Client, api, protocolViolations, waitUntil } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
 
@@ -93,6 +94,14 @@ describe("failure kinds: pure rules", () => {
       const w = failureWords(k, ctx);
       expect(`${w.sentence}${w.next}`).not.toMatch(/CLI|session|token|runtime|会话|令牌/i);
     }
+  });
+
+  it("name a runtime entry that is not the kind's own, so two entries of one CLI are told apart", () => {
+    expect(cliEntryName("codex", "codex")).toBe("Codex");
+    expect(cliEntryName("codex", "codexout")).toBe("Codex（codexout）");
+    expect(cliEntryName("claude", "claude")).toBe("Claude Code");
+    expect(cliEntryName("acp", "gemini")).toBe("gemini");
+    expect(cliEntryName(undefined, "codexout")).toBe("codexout");
   });
 
   it("take the runtime out while a heartbeat or a failed run says it is signed out", () => {
@@ -185,6 +194,22 @@ describe("failure kinds in the topic", () => {
     await d.next((f) => f.t === "run.assign" && d.frames.filter((x) => x.t === "run.assign").length > assigns);
     await runEnded(topic2);
     await closeAll(c, oc, d);
+  });
+
+  it("name the signed-out runtime entry when it is not the CLI's own (verify 2, problem 8)", async () => {
+    const w = await world();
+    const set = await api(`/v1/bots/${w.bot.id}/runner`, { method: "PUT", token: w.owner.token, body: { runtime: "codexout" } });
+    expect(set.status, JSON.stringify(set.body)).toBe(200);
+    const { d } = await Daemon.connect(w.machineToken, { runtime: "codexout" });
+    const { c } = await Client.connect(w.human.token);
+    const topicId = await mention(c, w);
+    const { runId } = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId });
+    await d.acked(runId, d.done(runId, { status: "failed", error: "Not logged in", failure: { kind: "signed_out" } }));
+    const msg = await waitUntil(() => botMessages(c, topicId, w.bot.id)[0], 5000, "signed-out note");
+    expect(msg.body).toBe(TEXT.failedWith(TEXT.failure.signedOut("mac-mini", "Codex（codexout）"), TEXT.next.signInAsk(["Joye"])));
+    c.close();
+    d.close();
   });
 
   it("say to change the model (a limit waits for its reset: limit-wait.test.ts)", async () => {

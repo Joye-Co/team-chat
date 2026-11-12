@@ -37,6 +37,11 @@ const row = (seq: number, body: string, ext: ContextRow["ext"] = {}, authorId = 
 const names = (id: string) => ({ u1: "张三", u2: "李四" })[id] ?? id;
 
 describe("render", () => {
+  it("names the topic of a quote from another topic", () => {
+    const text = renderMessage(row(8, "看这条", { replyTo: { messageId: "m3", authorId: "u2", excerpt: "先别动生产", topicId: "t9" } }), names);
+    expect(text).toContain("  ↪ quotes m m3 in t t9 (李四: 先别动生产)");
+  });
+
   it("keeps files, quotes and cards as lines and cuts long bodies with a hint", () => {
     const text = renderMessage(
       row(7, "看下这张图", {
@@ -219,6 +224,28 @@ describe("run context", () => {
     expect(b.prompt.slice(b.prompt.indexOf("Request from"))).toContain(`[file f ${second}`);
     d.send({ t: "run.accept", runId: b.runId });
     await d.acked(b.runId, d.done(b.runId, { status: "succeeded", resultText: "ok" }));
+    d.close();
+    c.close();
+  });
+
+  it("a quote from another topic names that topic, so the run reads it by id (verify 2, problem 3)", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["context"] });
+    const { c } = await Client.connect(w.human.token);
+    const main = mainTopicId(w.gid);
+    const quoted = await send(c, w.gid, main, "提醒一下：本周的暗号是「青柠檬 7381」");
+    const req = await c.ok({ t: "send", groupId: w.gid, clientMsgId: clientMsgId(), body: "@dev 引用的暗号是什么", mentions: [w.bot.id], replyTo: { messageId: quoted.message.id } });
+    expect(req.message.topicId).not.toBe(main);
+    const a = await d.next((f) => f.t === "run.assign");
+    const text = a.prompt.slice(a.prompt.indexOf("Request from"));
+    expect(text).toContain(`↪ quotes m ${quoted.message.id} in t ${main} (Alice: 提醒一下`);
+    expect(a.prompt).toContain("add `--topic <t id>`");
+    const auth = { authorization: `Bearer ${w.machineToken}` };
+    const one = await SELF.fetch(`${BASE}/v1/machine/runs/${a.runId}/topic/messages/${quoted.message.id}?topic=${main}`, { headers: auth });
+    expect(one.status).toBe(200);
+    expect(((await one.json()) as any).message.text).toContain("青柠檬 7381");
+    d.send({ t: "run.accept", runId: a.runId });
+    await d.acked(a.runId, d.done(a.runId, { status: "succeeded", resultText: "ok" }));
     d.close();
     c.close();
   });

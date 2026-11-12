@@ -5,7 +5,7 @@
 // 接 1.9 / 1.13: hand-offs run per (topic, member); a decision on an old topic is made again.
 import { CardV2, mainTopicId } from "@chat/protocol";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { isNewTask } from "../src/agent/frontdesk";
+import { isAddOn, isNewTask } from "../src/agent/frontdesk";
 import { askCard } from "../src/bots/desk/front";
 import { Daemon, downViolations, world, type World } from "./daemon";
 import { Client, type TestMember, api, clientMsgId, createMember, protocolViolations, waitUntil } from "./helpers";
@@ -80,6 +80,18 @@ describe("rules", () => {
     expect(isNewTask("New task: weekly report")).toBe(true);
     expect(isNewTask("这不是新任务，接着改")).toBe(false);
     expect(isNewTask("再加一行")).toBe(false);
+    expect(isNewTask("@Forge 另一件事：只回答 7+8 等于几")).toBe(true);
+  });
+
+  it("know words that add to the work already asked for (接 1.5)", () => {
+    expect(isAddOn("@dev 顺便看下 lint")).toBe(true);
+    expect(isAddOn("@dev 加上数据")).toBe(true);
+    expect(isAddOn("补充：还要支持邮箱")).toBe(true);
+    expect(isAddOn("@Forge 另一件事：只回答 7+8 等于几")).toBe(false);
+    expect(isAddOn("@dev 写一下周报")).toBe(false);
+    expect(isAddOn("@dev 还有 lint")).toBe(true);
+    expect(isAddOn("@dev 还有一件事：写周报")).toBe(false);
+    expect(isAddOn("另外一件事：写周报")).toBe(false);
   });
 
   it("write the front desk's question as a valid card ask", () => {
@@ -176,6 +188,67 @@ describe("the 群聊 (接 1.5)", () => {
     await d.acked(b.runId, d.done(b.runId, { status: "succeeded", resultText: "ok" }));
     d.close();
     alice.close();
+    joye.close();
+  });
+});
+
+describe("the same person's second request in the 群聊 (verify 2, problem 10)", () => {
+  it("starts its own run next to the first instead of joining it", async () => {
+    const w = await world();
+    const forge = await addBot(w, "Forge");
+    const { d } = await Daemon.connect(w.machineToken, { features: ["resume"], maxParallelRuns: 4 });
+    const { c: joye } = await Client.connect(w.owner.token);
+    const main = mainTopicId(w.gid);
+
+    // The verification's two messages: the second comes while the first run works.
+    await send(joye, w.gid, main, "@Forge 运行 sleep 40，然后只回答：甲", { mentions: [forge.id] });
+    const a = await d.next((f) => f.t === "run.assign");
+    expect(a.prompt).toContain("只回答：甲");
+    d.send({ t: "run.accept", runId: a.runId });
+    await joye.waitEvent((e) => e.type === "run.updated" && e.data.run.id === a.runId && e.data.run.status === "running");
+    await send(joye, w.gid, main, "@Forge 另一件事：只回答 7+8 等于几", { mentions: [forge.id] });
+    const b = await d.next((f) => f.t === "run.assign" && f.runId !== a.runId);
+    expect(b.prompt.slice(b.prompt.indexOf("Request from"))).toContain("7+8");
+    d.send({ t: "run.accept", runId: b.runId });
+    // Without a word that says so it is a new request too (the requester's runs no longer take
+    // every @ of theirs, the rule #225 kept).
+    await send(joye, w.gid, main, "@Forge 只回答 3+4 等于几", { mentions: [forge.id] });
+    const third = await d.next((f) => f.t === "run.assign" && f.runId !== a.runId && f.runId !== b.runId);
+    expect(third.prompt.slice(third.prompt.indexOf("Request from"))).toContain("3+4");
+    d.send({ t: "run.accept", runId: third.runId });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(d.frames.some((f) => f.t === "run.input")).toBe(false);
+
+    // A message of the same person that adds to the work still reaches a running run.
+    await joye.waitEvent((e) => e.type === "run.updated" && e.data.run.id === b.runId && e.data.run.status === "running");
+    await send(joye, w.gid, main, "@Forge 顺便说一下怎么算的", { mentions: [forge.id] });
+    await d.next((f) => f.t === "run.input" && f.text === "@Forge 顺便说一下怎么算的");
+    expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(3);
+
+    await d.acked(third.runId, d.done(third.runId, { status: "succeeded", resultText: "7" }));
+    await d.acked(a.runId, d.done(a.runId, { status: "succeeded", resultText: "甲" }));
+    await d.acked(b.runId, d.done(b.runId, { status: "succeeded", resultText: "15" }));
+    d.close();
+    joye.close();
+  });
+
+  it("an @ stop word from the requester stops their run instead of starting one (接 1.12)", async () => {
+    const w = await world();
+    const forge = await addBot(w, "Forge");
+    const { d } = await Daemon.connect(w.machineToken, { features: ["resume"], maxParallelRuns: 4 });
+    const { c: joye } = await Client.connect(w.owner.token);
+    const main = mainTopicId(w.gid);
+
+    await send(joye, w.gid, main, "@Forge 运行 sleep 40，然后只回答：甲", { mentions: [forge.id] });
+    const a = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId: a.runId });
+    await joye.waitEvent((e) => e.type === "run.updated" && e.data.run.id === a.runId && e.data.run.status === "running");
+    await send(joye, w.gid, main, "@Forge 停", { mentions: [forge.id] });
+    expect(await d.next((f) => f.t === "run.cancel")).toMatchObject({ runId: a.runId });
+    await joye.waitEvent((e) => e.type === "run.updated" && e.data.run.id === a.runId && e.data.run.status === "cancelled");
+    await new Promise((r) => setTimeout(r, 200));
+    expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(1);
+    d.close();
     joye.close();
   });
 });

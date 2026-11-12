@@ -162,6 +162,8 @@ export type RunRow = {
   // desk-limit-wait (模 3.4, 盯 1.5)
   /** While a queued run waits for its computer's subscription limit: when it resets (server clock); else null. */
   limit_until: number | null;
+  /** Verify 2, problem 9: why a queued run waits (`offline`); NULL: every machine is busy. */
+  wait_for?: string | null;
   // desk-time-limit (盯 1.4, 1.6, 1.8, 1.11, 5.5)
   /** The team's time limit (ms of counted work) when the run was assigned, or null (the default). */
   limit_ms: number | null;
@@ -595,6 +597,12 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
           // "api_key"); the weekly budget counts by it. Old rows: NULL (the machine's sign-in now).
           name: "desk-login-method",
           up: `ALTER TABLE runs ADD COLUMN login_method TEXT;`,
+        },
+        {
+          // Verify 2, problem 9: a queued run says whether it waits for a computer to come
+          // online (`offline`) or for a free one. Old rows: NULL (waiting for a free one).
+          name: "desk-wait-for",
+          up: `ALTER TABLE runs ADD COLUMN wait_for TEXT;`,
         },
       ]);
       const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'bot_id'").toArray()[0];

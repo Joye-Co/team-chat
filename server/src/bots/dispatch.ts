@@ -39,7 +39,7 @@ export const LIMIT_SLACK_MS = 60_000;
 
 /** How a run with the `context` feature reads what the prompt left out. */
 export const CONTEXT_TOOLS_RULE =
-  "The topic lines above are only part of the topic. Read older messages with `chat-run topic history --before <seq>`, a whole message with `chat-run topic message --id <m id>`, search with `chat-run search --query <text>` (add `--group` for every topic of the group) and get a file with `chat-run file get --id <f id>` (leave out `--out`: the file goes to the run's downloads folder, outside your working folder, and the printed path says where). Look things up instead of guessing.";
+  "The topic lines above are only part of the topic. Read older messages with `chat-run topic history --before <seq>`, a whole message with `chat-run topic message --id <m id>` (a quote `in t <t id>` is in another topic: add `--topic <t id>`), search with `chat-run search --query <text>` (add `--group` for every topic of the group) and get a file with `chat-run file get --id <f id>` (leave out `--out`: the file goes to the run's downloads folder, outside your working folder, and the printed path says where). Look things up instead of guessing.";
 
 /** Topic texts the bot posts. Product words only (PRODUCT.md): no developer words. */
 export const TEXT = {
@@ -190,6 +190,16 @@ export function cliName(kind: string | undefined, runtime: string): string {
   if (kind === "claude") return "Claude Code";
   if (kind === "codex") return "Codex";
   return runtime;
+}
+
+/**
+ * A runtime entry as the computer's 订阅账号 page shows it (verify 2, problem 8): the CLI's name,
+ * and the entry's own name when it is not the kind's (`Codex（codexout）`), so two entries of
+ * one CLI on a computer are told apart.
+ */
+export function cliEntryName(kind: string | undefined, runtime: string): string {
+  const cli = cliName(kind, runtime);
+  return (kind === "claude" || kind === "codex") && runtime !== kind ? `${cli}（${runtime}）` : cli;
 }
 
 /** `11 月 13 日 15:00` (`今天 15:00` on the same day) on the team's clock `zone`. */

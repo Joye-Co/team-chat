@@ -152,10 +152,21 @@ export async function decide(cfg: ModelConfig, input: DecideInput, opts: CallOpt
  * 接 3.2: words that start a new piece of work in a DM's chat area (without a front desk), at the
  * start of the message: the next request there otherwise continues the member's last session.
  */
-const NEW_TASK = /^(?:新任务|新的任务|另一个任务|换个任务|开个新任务|重新开始|从头开始|new task\b)/iu;
+const NEW_TASK = /^(?:新任务|新的任务|另一个任务|另一件事|另外一件事|换个任务|开个新任务|重新开始|从头开始|new task\b)/iu;
 
 export function isNewTask(body: string): boolean {
   return NEW_TASK.test(body.replace(/@\S+/g, "").trim());
+}
+
+/**
+ * 接 1.5 (verify 2, problem 10): words at the start of a message that add to the work the person
+ * already asked for ("顺便看下 lint", "补充：…", "加上数据"). In the 群聊 only such a message with
+ * an @ goes to that person's running run; any other @ request is a new piece of work next to it.
+ */
+const ADD_ON = /^(?:顺便|顺带|补充|加上|再加|还要|还得|还有(?!一件事|件事|个事|一个事)|也要|也把|改成|改为|换成|对了|另外|然后再|刚才那|上面那|also\b|btw\b|and also\b|plus\b)/iu;
+
+export function isAddOn(body: string): boolean {
+  return !isNewTask(body) && ADD_ON.test(body.replace(/@\S+/g, "").trim());
 }
 
 /** The work order as the executor's prompt shows it. */

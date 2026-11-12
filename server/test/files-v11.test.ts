@@ -290,7 +290,7 @@ describe("SF-3 queued runs (排队)", () => {
     await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === first.runId && e.data.run.status === "running");
     const t2 = await mention(c, w, "@dev 第二件事");
     const q2 = (await c.waitEvent((e) => e.type === "run.updated" && e.data.run.topicId === t2 && e.data.run.queuePosition !== undefined)).data.run;
-    expect(q2).toMatchObject({ status: "created", queuePosition: 1 });
+    expect(q2).toMatchObject({ status: "created", queuePosition: 1, phase: "waiting_computer", waitingFor: "queue" });
     expect(q2.machineId).toBeUndefined();
     expect(q2.queuedAt).toBeGreaterThan(0);
     const t3 = await mention(c, w, "@dev 第三件事");

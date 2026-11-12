@@ -892,8 +892,10 @@ Rules:
   a mention from someone who has no active run of the bot there starts its own run next to the
   running ones, with its own result and its own session. A message that quotes a run's request,
   progress or approval card, or an input it took, goes to that run; an approval answer to the run
-  that waits for it; the requester's own words to their newest run; a message that starts with
-  新任务 (or answers the front desk's question) starts a new run. An answer or a live event on a
+  that waits for it; the requester's own words to their newest run when they have no @, come in
+  a DM, or start with words that add to it (顺便, 补充, 加上, 还有, 还要, 改成, also, …); any other mention
+  of theirs in the 群聊, and a message that starts with 新任务 or 另一件事 (or answers the front
+  desk's question), starts a new run. An answer or a live event on a
   card goes to the run that posted the card, and a part handed back to the run that gave it out.
   A retry or a hand-over may start next to the running ones. In a topic the bot has one run
   at a time, as above.
@@ -1095,7 +1097,9 @@ contract, but its shape is fixed here so the developer view and the daemon notes
     [card · 选部署时间 · 2 answers: 李四 选了「周五晚上」]
   ```
 
-  `#42` is the message's seq. The time is on the team's clock (`TEAM_TIME_ZONE`, default
+  `#42` is the message's seq. A quote of a message in another topic of the group names that
+  topic (`↪ quotes m 01J… in t 01J… (王五: …)`), so the run reads it with
+  `chat-run topic message --id <m> --topic <t>`. The time is on the team's clock (`TEAM_TIME_ZONE`, default
   Asia/Shanghai). A system message (`kind: "system"`) is one line in brackets. A 产出 line
   carries the 产出's current title.
 - **The request whole.** The request and every follow-up carry the same indented lines for the
@@ -1121,7 +1125,7 @@ contract, but its shape is fixed here so the developer view and the daemon notes
   message of that bot or is a follow-up of its run (input left over). A new request starts a new
   session with the 群聊's lines as above. In a DM's 群聊 (usable 接 3.2) the next request
   continues the bot's last session there, unless it starts with 新任务 (or similar words: 新的任务,
-  另一个任务, 换个任务, 重新开始, new task) or the front desk dispatches it with `newTask: true`. A
+  另一个任务, 另一件事, 换个任务, 重新开始, new task) or the front desk dispatches it with `newTask: true`. A
   request next to a running one in a chat area always starts a new session; a follow-up or a
   retry continues its own run's session.
 - **What it carried.** Every run keeps its prompt and a manifest; owners read them with
@@ -2723,6 +2727,10 @@ RunHandback = { by, heldMs, commands, files: string[] /* <= 20 */, headFrom?, he
 RunCommandRequest = { command: string /* 1..4000 */ }
 RunCommandResponse = { commandId /* [A-Za-z0-9_-]{1,64} */ }
 ```
+
+A run that waits for a machine (`status: "created"`, `queuedAt`) is `phase: "waiting_computer"`:
+`waitingFor: "offline"` when the machines that could take it are offline, `"queue"` when they
+are busy, `"limit"` as below.
 
 Subscription limit (usable 模 3.4): a run whose CLI stops at its subscription limit
 (`failure.kind: "limit"`) does not fail. It ends as `cancelled` (summary `restarted: subscription

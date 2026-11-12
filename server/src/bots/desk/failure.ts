@@ -3,7 +3,7 @@
 // names the computer; the requester is pointed to its sign-in when they may manage it, and the
 // people who may are mentioned otherwise.
 import { teamZone } from "../../memory/consolidate";
-import { type FailureKind, type SignInBy, TEXT, cliName, failureWords } from "../dispatch";
+import { type FailureKind, type SignInBy, TEXT, cliEntryName, cliName, failureWords } from "../dispatch";
 import type { BotsEnv } from "../env";
 import { linkStub } from "../env";
 
@@ -93,7 +93,9 @@ export async function failureNote(
   },
 ): Promise<FailureNote> {
   const now = o.now ?? Date.now();
-  const cli = cliName(o.machines.find((m) => m.kind)?.kind, o.runtime);
+  const kind = o.machines.find((m) => m.kind)?.kind;
+  // Signing in is done per runtime entry: name the entry when it is not the kind's own.
+  const cli = o.kind === "signed_out" ? cliEntryName(kind, o.runtime) : cliName(kind, o.runtime);
   const sign: { by: SignInBy; mentions: string[] } =
     o.kind === "signed_out" ? await signInBy(env, o.machines, o.requesterId, o.groupId) : { by: { names: [] }, mentions: [] };
   const words = failureWords(o.kind, { machines: o.machines.map((m) => m.name), cli, resetsAt: o.resetsAt, now, zone: teamZone(env), signIn: sign.by, ownModel: o.ownModel });
