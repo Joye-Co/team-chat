@@ -129,7 +129,7 @@ export abstract class DeskStall extends DeskEvents {
         await this.serial(id, async () => {
           const r = this.run(id);
           if (!r || r.ended_at !== null || r.machine_id || !r.queued_at) return;
-          const none = runner ? this.whyNone(r, runner, machines) : null;
+          const none = runner ? this.whyNone(r, runner, machines, await this.placeCtx(r)) : null;
           if (runner && r.kind !== RUN_KIND_ASIDE && none?.why === "signed_out") {
             // 模 3.1: what it waited for is a sign-in: say which computer needs it.
             const note = await this.signedOutNote(r, runner.runtime, none.machines);
@@ -266,7 +266,7 @@ export abstract class DeskStall extends DeskEvents {
     const runner = await loadRunner(this.env.DB, this.botId as string);
     if (!runner?.enabled) return false;
     const exclude = [r.machine_id, ...(JSON.parse(r.excluded) as string[])];
-    return this.pick(r, runner, await loadMachines(this.env), exclude) !== null;
+    return this.pick(r, runner, await loadMachines(this.env), exclude, await this.placeCtx(r)) !== null;
   }
 
   /** A `run.input` from the desk to the CLI (not a member's message: it is not kept as input). */
