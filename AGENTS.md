@@ -68,7 +68,9 @@ Read [docs/PRODUCT.md](docs/PRODUCT.md) (what we build, interface words, V1 bar)
   the same time. Stop only processes you started, after checking that `ps -p <pid> -o command=`
   shows your worktree path.
 - **Tooling**: bun for JS packages (`bun install`, `bun run`), cargo for Rust, and wrangler from
-  the server package (`bunx wrangler` inside `server/`).
+  the server package (`bunx wrangler` inside `server/`). `bun install` turns on the
+  `.githooks/pre-commit` hook, which runs rustfmt on the staged Rust files; never skip it with
+  `--no-verify`.
 - **Look at UI work in the sandbox**: `bun run dev:desktop` opens the real app (the real provider,
   nothing faked) on this worktree's local server with the sample team of
   `scripts/sandbox/seed.ts`, signed in, and reopens it on every save. When a feature needs data
