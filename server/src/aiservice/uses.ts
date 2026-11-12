@@ -3,11 +3,13 @@
 // - the config for one use, which never throws: a key that cannot be read (the Worker secret
 //   missing or changed) counts as "not set up" for the caller and as a failed call here;
 // - every call recorded under its use: the last result, failures in a row, and tokens per hour;
-// - after FAIL_STREAK failures in a row one alert (AiServiceConfig.failing, 团队管理 › 要注意) and
-//   one 活动记录 entry for the admins; the next good call clears it with another entry.
-import type { AiServiceConfig, AiServiceStatus, AiServiceSwitches, ServiceUsage } from "@chat/protocol";
+// - after FAIL_STREAK failures in a row one alert (AiServiceConfig.failing, 团队管理 › 要注意), one
+//   活动记录 entry and one `ai.failing` notification to the admins; the next good call clears it
+//   with another entry, and so does switching off the uses that were failing.
+import { type AiFailingTransient, type AiServiceConfig, type AiServiceFailing, type AiServiceStatus, type AiServiceSwitches, SETTINGS_FEATURE, type ServiceUsage } from "@chat/protocol";
 import { recordActivity } from "../activity/events";
-import type { Env } from "../core/env";
+import { featureTransient } from "../core/gateway";
+import { type Env, gatewayStub } from "../core/env";
 import type { Logger } from "../core/logger";
 import { type PriceList, costOf, matchModel } from "../usage/prices";
 import type { AiUse, CallUsage, ModelConfig, Tracker } from "./providers";
@@ -44,6 +46,50 @@ export function switchStatements(db: D1Database, req: Partial<AiServiceSwitches>
       )
       .bind(k, req[k] ? 1 : 0, now, by),
   );
+}
+
+const usesOf = (k: Switch): AiUse[] => (Object.keys(SWITCH_OF) as AiUse[]).filter((u) => SWITCH_OF[u] === k);
+
+const DELETE_ALERT_IF_NONE_FAILING = `DELETE FROM ai_service_alert WHERE scope = ? AND NOT EXISTS (SELECT 1 FROM ai_service_health WHERE failures >= ?)`;
+
+/**
+ * For the switches `req` turns off: their uses' records go (they make no calls, so no good call
+ * would ever clear them), and the alert when no use still at FAIL_STREAK is left. The last
+ * statement is the alert's; pass its result to `afterSwitchedOff`. Empty when nothing is turned off.
+ */
+export function switchedOffStatements(db: D1Database, req: Partial<AiServiceSwitches>): D1PreparedStatement[] {
+  const uses = SWITCHES.filter((k) => req[k] === false).flatMap(usesOf);
+  if (uses.length === 0) return [];
+  return [
+    db.prepare(`DELETE FROM ai_service_health WHERE use IN (${uses.map(() => "?").join(", ")})`).bind(...uses),
+    db.prepare(DELETE_ALERT_IF_NONE_FAILING).bind(ALERT, FAIL_STREAK),
+  ];
+}
+
+/** Writes `ai.recovered` when switching uses off took the alert down. Never throws. */
+export async function afterSwitchedOff(db: D1Database, alertResult: D1Result | undefined, req: Partial<AiServiceSwitches>, now: number, by: string): Promise<void> {
+  if ((alertResult?.meta.changes ?? 0) === 0) return;
+  const off = SWITCHES.filter((k) => req[k] === false);
+  await recordActivity(db, { at: now, kind: "key", action: "ai.recovered", actorId: by, target: off.join(","), details: { switchedOff: off } }).catch(() => {});
+}
+
+/** The admins (human, active) learn of a raised alert on their connections with `settings/1`. Never throws. */
+export async function notifyAdmins(env: Env, failing: AiServiceFailing, log?: Logger): Promise<void> {
+  try {
+    const admins = (
+      await env.DB.prepare("SELECT id FROM members WHERE level = 'owner' AND kind = 'human' AND deactivated = 0 ORDER BY id LIMIT 50").all<{ id: string }>()
+    ).results;
+    const event: AiFailingTransient = { type: "ai.failing", failing };
+    await Promise.all(
+      admins.map((m) =>
+        gatewayStub(env, m.id)
+          .deliver([featureTransient(SETTINGS_FEATURE, event)])
+          .catch((err) => log?.warn("ai failing notice not delivered", { memberId: m.id, err })),
+      ),
+    );
+  } catch (err) {
+    log?.warn("ai failing notice failed", { err });
+  }
 }
 
 /** A new or removed config starts with a clean record: the old failures were about the old key. */
@@ -104,9 +150,7 @@ export async function recordCall(env: Env, use: AiUse, model: string, r: CallOut
              ON CONFLICT (use) DO UPDATE SET at = excluded.at, ok = 1, error = NULL, failures = 0, ok_at = excluded.ok_at`,
           )
           .bind(use, now, now),
-        db
-          .prepare(`DELETE FROM ai_service_alert WHERE scope = ? AND NOT EXISTS (SELECT 1 FROM ai_service_health WHERE failures >= ?)`)
-          .bind(ALERT, FAIL_STREAK),
+        db.prepare(DELETE_ALERT_IF_NONE_FAILING).bind(ALERT, FAIL_STREAK),
       ]);
       if ((res[2].meta.changes ?? 0) > 0) {
         log?.info("ai service works again", { use });
@@ -130,6 +174,7 @@ export async function recordCall(env: Env, use: AiUse, model: string, r: CallOut
     if ((res[2].meta.changes ?? 0) > 0) {
       log?.warn("ai service keeps failing", { use, error });
       await recordActivity(db, { at: now, kind: "key", action: "ai.failing", target: use, details: { use, model, error, failures: FAIL_STREAK } });
+      await notifyAdmins(env, { since: now, use, error }, log);
     }
   } catch (err) {
     log?.warn("ai service call not recorded", { use, err });

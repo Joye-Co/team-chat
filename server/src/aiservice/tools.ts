@@ -73,7 +73,7 @@ async function anthropicTool(cfg: ModelConfig, req: ToolRequest, opts: CallOptio
     } catch (err) {
       return anthropicFailure<ToolResult & { ok: false }>(err);
     }
-  }, opts.sleep);
+  }, opts.sleep, opts.retries);
 }
 
 type ToolCompletion = {

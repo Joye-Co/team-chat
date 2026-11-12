@@ -17,12 +17,14 @@ export const machineLoginMethods =
       .catch(() => ({}));
 
 /**
- * The runs that count against a budget: all but those whose machine's CLI for their runtime is
- * signed in with a subscription now (the same rule 用量 uses for 订阅里已包含). A run with no
- * machine, or a sign-in the machine does not report, counts.
+ * The runs that count against a budget: all but those that ran on a subscription sign-in. A run
+ * keeps the sign-in it was sent with (`loginMethod`); only a run from before that was kept falls
+ * back to its machine's sign-in now (the rule 用量 uses for 订阅里已包含). A run with no machine,
+ * or a sign-in nobody reported, counts.
  */
 export async function paidRuns(runs: UsageRun[], methodsOf: LoginMethodsOf): Promise<UsageRun[]> {
-  const ids = [...new Set(runs.flatMap((r) => (r.machineId && r.runtime ? [r.machineId] : [])))];
+  const ids = [...new Set(runs.flatMap((r) => (!r.loginMethod && r.machineId && r.runtime ? [r.machineId] : [])))];
   const methods = new Map(await Promise.all(ids.map(async (id) => [id, await methodsOf(id)] as const)));
-  return runs.filter((r) => !(r.machineId && r.runtime && methods.get(r.machineId)?.[r.runtime] === "subscription"));
+  const methodOf = (r: UsageRun) => r.loginMethod || (r.machineId && r.runtime ? methods.get(r.machineId)?.[r.runtime] : undefined);
+  return runs.filter((r) => methodOf(r) !== "subscription");
 }

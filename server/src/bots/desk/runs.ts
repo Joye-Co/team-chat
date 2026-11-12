@@ -548,7 +548,12 @@ export abstract class DeskRuns extends DeskCore {
     const resumePrompt = frame.resumeSessionId ? this.meta(`prompt_resume:${r.id}`) : null;
     if (resumePrompt !== null) frame.prompt = resumePrompt;
     this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `sent:${r.id}`, resumePrompt !== null ? "resume" : "full");
-    this.sql.exec("UPDATE runs SET machine_id = ?, runtime = ? WHERE id = ?", machine.id, runner.runtime, r.id);
+    // 模 4.1: the sign-in the run starts on, from the machine's latest heartbeat; the budget counts by it.
+    const methods = await linkStub(this.env, machine.id)
+      .loginMethods()
+      .catch((): Record<string, string> => ({}));
+    const loginMethod = methods[runner.runtime] ?? null;
+    this.sql.exec("UPDATE runs SET machine_id = ?, runtime = ?, login_method = ? WHERE id = ?", machine.id, runner.runtime, loginMethod, r.id);
     r.machine_id = machine.id;
     r.runtime = runner.runtime;
     await this.env.DB.prepare("UPDATE bot_runs SET machine_id = ? WHERE id = ?").bind(machine.id, r.id).run();

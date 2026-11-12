@@ -48,6 +48,10 @@ export interface CallOptions {
   sleep?: Sleep;
   /** Records the call under its use: health, the failing alert and tokens (uses.ts `tracker`). */
   track?: Tracker;
+  /** Tries after the first; the retry policy's `RETRIES` when absent (测试连接 passes 0). */
+  retries?: number;
+  /** One attempt's timeout; the path's own when absent. */
+  timeoutMs?: number;
 }
 
 export function short(text: string): string {
@@ -74,7 +78,7 @@ export function takesEffort(model: string): boolean {
 
 /** An Anthropic client that leaves retrying to retry.ts. */
 export function anthropicClient(cfg: ModelConfig, timeout: number, opts: CallOptions): Anthropic {
-  return new Anthropic({ apiKey: cfg.apiKey, maxRetries: 0, timeout, fetch: opts.fetch ?? ((...a) => fetch(...a)) });
+  return new Anthropic({ apiKey: cfg.apiKey, maxRetries: 0, timeout: opts.timeoutMs ?? timeout, fetch: opts.fetch ?? ((...a) => fetch(...a)) });
 }
 
 /**
@@ -121,7 +125,7 @@ async function callAnthropic(cfg: ModelConfig, req: ModelRequest, opts: CallOpti
     } catch (err) {
       return anthropicFailure<ModelResult & { ok: false }>(err);
     }
-  }, opts.sleep);
+  }, opts.sleep, opts.retries);
 }
 
 type CompletionUsage = {
@@ -163,7 +167,7 @@ export async function postCompletions<B>(
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${cfg.apiKey}` },
         body: JSON.stringify({ model: cfg.model, stream: false, ...payload }),
-        signal: AbortSignal.timeout(timeout),
+        signal: AbortSignal.timeout(opts.timeoutMs ?? timeout),
       });
     } catch (err) {
       // A timeout or a network error: no answer, worth another try.
@@ -183,7 +187,7 @@ export async function postCompletions<B>(
       return { result: { ok: false, error: short(`${res.status} ${message || res.statusText}`) }, retry: retryable(res.status), ...(after !== undefined ? { afterMs: after } : {}) };
     }
     return { result: { ok: true, body, text }, retry: false };
-  }, opts.sleep);
+  }, opts.sleep, opts.retries);
 }
 
 type Completion = { choices?: { message?: { content?: string | null } }[]; usage?: CompletionUsage };

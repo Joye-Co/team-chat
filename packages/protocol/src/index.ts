@@ -129,6 +129,7 @@ import { TeamUsage } from "./usage.ts";
 import { TeamRoster } from "./roster.ts";
 import { LoginCodeRequest, MachineLogin, MachineMonitor, MachineSecretsResponse, SetSecretRequest, StartLoginRequest } from "./monitor.ts";
 import {
+  AiFailingTransient,
   AiServiceConfig,
   WorkerModel,
   WorkerModelsResponse,
@@ -476,6 +477,8 @@ export const TransientEvent = z.discriminatedUnion("type", [
   DigestTransient,
   // usable: only to the person's own connections whose hello has feature "github/1".
   GithubStatusTransient,
+  // usable: only to admins' connections whose hello has feature "settings/1".
+  AiFailingTransient,
 ]);
 export type TransientEvent = z.infer<typeof TransientEvent>;
 

@@ -1,0 +1,13 @@
+{
+  "kind": "TransientEvent",
+  "valid": true,
+  "description": "only to admins' connections with feature settings/1, once when failing is raised",
+  "value": {
+    "type": "ai.failing",
+    "failing": {
+      "since": 1762214400000,
+      "use": "front_desk",
+      "error": "401 Authentication Fails"
+    }
+  }
+}

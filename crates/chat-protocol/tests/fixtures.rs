@@ -520,8 +520,8 @@ fn every_frame_and_event_type_has_a_valid_fixture() {
         ]
     );
     assert_eq!(valid("Event", "type").len(), 19);
-    // 9 + usable "github.status".
-    assert_eq!(valid("TransientEvent", "type").len(), 10);
+    // 9 + usable "github.status" and "ai.failing".
+    assert_eq!(valid("TransientEvent", "type").len(), 11);
 }
 
 #[test]

@@ -453,6 +453,12 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
           name: "desk-run-code",
           up: `ALTER TABLE runs ADD COLUMN code TEXT;`,
         },
+        {
+          // Usable 模 4.1: how the run's CLI was signed in when the run was sent ("subscription" |
+          // "api_key"); the weekly budget counts by it. Old rows: NULL (the machine's sign-in now).
+          name: "desk-login-method",
+          up: `ALTER TABLE runs ADD COLUMN login_method TEXT;`,
+        },
       ]);
       const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'bot_id'").toArray()[0];
       this.botId = row?.value ?? null;

@@ -19,7 +19,7 @@ import type { HooksEnv } from "../integrations/secrets";
 import { PING, callModel, type ModelConfig } from "./providers";
 import { type AiRow, SCOPE, decryptKey, encryptKey, keyHint, loadRow, publicConfig } from "./store";
 import { PING_TOOL, callTool } from "./tools";
-import { CALLS_KEEP_MS, aiStatus, healthFields, loadSwitches, resetHealthStatements, switchStatements } from "./uses";
+import { CALLS_KEEP_MS, afterSwitchedOff, aiStatus, healthFields, loadSwitches, resetHealthStatements, switchStatements, switchedOffStatements } from "./uses";
 
 export { loadModelConfig } from "./store";
 export { callModel } from "./providers";
@@ -28,6 +28,12 @@ export { tracker, useConfig } from "./uses";
 /** 模 1.6: the Worker secret the key is encrypted with, named when it is missing. */
 export const SECRET_MISSING =
   "the Worker secret HOOK_SECRET_KEY is not set on this server (it encrypts the AI 服务 key): run `wrangler secret put HOOK_SECRET_KEY` with at least 16 characters, then save again";
+
+/**
+ * 测试连接: each check is one attempt with this timeout, no retries, so both together answer
+ * well inside the clients' 30 s HTTP timeout and a timeout still reaches the admin as `error`.
+ */
+export const TEST_CHECK_MS = 12_000;
 
 export function requireSecret(env: Env): void {
   const secret = (env as HooksEnv).HOOK_SECRET_KEY;
@@ -128,10 +134,16 @@ registerRoute({
     const before = await loadSwitches(env.DB);
     const after = { ...before, ...Object.fromEntries(Object.entries(req).filter(([, v]) => v !== undefined)) };
     const now = Date.now();
-    await env.DB.batch([
-      ...switchStatements(env.DB, req, a.memberId, now),
+    // A use switched off makes no calls: its record goes, and the alert with it when no other use
+    // still fails (else the alert would stay up until the use is switched on again).
+    const sw = switchStatements(env.DB, req, a.memberId, now);
+    const off = switchedOffStatements(env.DB, req);
+    const res = await env.DB.batch([
+      ...sw,
+      ...off,
       auditStatement(env.DB, a, { action: "settings.ai", target: SCOPE, details: { switches: { before, after } } }, now),
     ]);
+    if (off.length > 0) await afterSwitchedOff(env.DB, res[sw.length + off.length - 1], req, now, a.memberId);
     return adminConfig(env, await loadRow(env.DB));
   },
 });
@@ -142,15 +154,18 @@ registerRoute({
   auth: "owner",
   async handler({ env, body }): Promise<AiServiceTestResult> {
     const req = await body(TestAiServiceRequest);
+    // Saving needs the secret: say so before the admin saves, whether or not a key is given.
+    requireSecret(env);
     const cfg = await resolve(env, req, await loadRow(env.DB));
     const started = Date.now();
     // 模 1.7: titles and summaries make a plain text call; the front desk, the review and the
     // tidy a forced tool call, which some models cannot make. Both are tried; each says how it went.
-    const textRes = await callModel(cfg, PING);
+    const once = { retries: 0, timeoutMs: TEST_CHECK_MS };
+    const textRes = await callModel(cfg, PING, once);
     const text: AiServiceCheck = textRes.ok ? { ok: true } : { ok: false, error: textRes.error };
     let tool: AiServiceCheck | undefined;
     if (textRes.ok) {
-      const toolRes = await callTool(cfg, PING_TOOL);
+      const toolRes = await callTool(cfg, PING_TOOL, once);
       tool = toolRes.ok ? { ok: true } : { ok: false, error: toolRes.error };
     }
     const latencyMs = Date.now() - started;

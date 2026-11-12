@@ -34,11 +34,11 @@ export interface Attempt<T> {
 export type Sleep = (ms: number) => Promise<void>;
 const realSleep: Sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Runs `attempt` until it needs no retry or the retries run out; the last result counts. */
-export async function withRetry<T>(attempt: (n: number) => Promise<Attempt<T>>, sleep: Sleep = realSleep): Promise<T> {
+/** Runs `attempt` until it needs no retry or `retries` run out; the last result counts. */
+export async function withRetry<T>(attempt: (n: number) => Promise<Attempt<T>>, sleep: Sleep = realSleep, retries: number = RETRIES): Promise<T> {
   for (let n = 0; ; n++) {
     const a = await attempt(n);
-    if (!a.retry || n >= RETRIES) return a.result;
+    if (!a.retry || n >= retries) return a.result;
     await sleep(a.afterMs ?? BACKOFF_MS[Math.min(n, BACKOFF_MS.length - 1)]);
   }
 }

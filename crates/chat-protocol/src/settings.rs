@@ -711,6 +711,14 @@ pub struct AiServiceFailing {
     pub error: String,
 }
 
+/// Usable (盯 5.6): transient `ai.failing`, once when `failing` is raised, only to admins'
+/// connections whose hello has feature `settings/1`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiFailingTransient {
+    pub failing: AiServiceFailing,
+}
+
 /// Usable (模 1.3): `GET /v1/settings/ai/status` (any member). Each use is `configured` and its switch on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

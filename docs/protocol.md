@@ -2723,6 +2723,7 @@ UpdateAiServiceSwitchesRequest = { frontDesk?, titles?, memory? }   // at least 
 AiServiceStatus = { configured: boolean, frontDesk: boolean, titles: boolean, memory: boolean }
 AiServiceCheck = { ok: boolean, error?: string }
 AiServiceTestResult += { text?: AiServiceCheck, tool?: AiServiceCheck }
+TransientEvent += { type: "ai.failing", failing: AiServiceFailing }   // admins with feature settings/1
 ServiceUsage = { calls, failures, costUsd, inputTokens, outputTokens, cacheReadTokens?, unpricedTokens?,
                  uses: { use, calls, inputTokens, outputTokens }[] /* <= 16, most tokens first */ }
 TeamUsage += { service?: ServiceUsage }
@@ -2742,18 +2743,26 @@ Rules:
   `configured` and that switch.
 - Every call is recorded under its use (D1 `ai_service_health`): `failures` counts failed calls
   in a row and a good call sets it to 0. When any use reaches 3 failures in a row the server
-  raises `failing` once (D1 `ai_service_alert`) and writes one 活动记录 entry, kind `key`, action
-  `ai.failing` (`target` the use, `details: { use, model, error, failures }`). The next good call
-  of a use, when no use is at 3 or more any more, removes it and writes `ai.recovered`. `PUT` and
-  `DELETE /v1/settings/ai` start a clean record (no `uses`, no `failing`).
+  raises `failing` once (D1 `ai_service_alert`), writes one 活动记录 entry, kind `key`, action
+  `ai.failing` (`target` the use, `details: { use, model, error, failures }`), and sends one
+  `ai.failing` transient to every admin's connections whose hello has feature `settings/1` (a
+  client shows it as a notification; an admin who is not connected sees `failing` and 活动记录).
+  The next good call of a use, when no use is at 3 or more any more, removes it and writes
+  `ai.recovered`. Switching a use off removes that use's record (it makes no calls, so nothing
+  would clear it), and the alert with it when no use still at 3 is left (`ai.recovered` with
+  `actorId` the admin and `details.switchedOff`). `PUT` and `DELETE /v1/settings/ai` start a clean
+  record (no `uses`, no `failing`).
 - A saved key that cannot be decrypted (the Worker secret `HOOK_SECRET_KEY` missing or changed)
   never fails the work that wanted it: that use proceeds as not set up and records a failed call
   ("the saved API key cannot be read…"). `PUT` or `test` without `apiKey` then answer `invalid`
-  with reason `ai.key_unreadable`; any `PUT` or `test` on a server without the secret answers
-  `internal` with reason `ai.secret_missing` and a message that names the secret.
+  with reason `ai.key_unreadable`; any `PUT` or `test` (with or without `apiKey`, so the admin
+  learns it before saving) on a server without the secret answers `internal` with reason
+  `ai.secret_missing` and a message that names the secret.
 - `test` makes a plain text call (`text`), then, when it worked, a forced tool call (`tool`), as
   the front desk, the review and the tidy make. `ok` is both; `error` is the first failure, the
-  tool one prefixed `forced tool call: `. Older clients read `ok` and `error` as before.
+  tool one prefixed `forced tool call: `. Older clients read `ok` and `error` as before. Each check
+  is one attempt with a 12 s timeout and no retries, so the answer, a timeout included, arrives
+  inside a client's 30 s HTTP timeout.
 - Retries, both providers alike: a 408, 429, any 5xx (Anthropic's 529 included), a timeout or a
   network error is tried again twice, after 1 s and 3 s, or after the provider's `retry-after`
   (at most 10 s). Other errors are final.
@@ -2766,6 +2775,8 @@ Rules:
   one `from` falls in), priced per model like runs, and is absent when there were no calls. It
   is not part of `total`.
 - Weekly budget (decided: usable section 4): a run counts against `weeklyBudgetCents`, and toward
-  `budget.reached`, unless its machine's CLI for its runtime reports `method: "subscription"` in
-  the latest heartbeat (`MachineMetrics.logins`), the rule 用量 uses for 订阅里已包含. A run with no
-  machine, or a sign-in the machine does not report, counts.
+  `budget.reached`, unless it ran on a subscription: the desk keeps the `method` its machine's CLI
+  for its runtime reported (`MachineMetrics.logins`, latest heartbeat) when the run was sent, so a
+  later change of sign-in does not rewrite the week. A run from before that was kept falls back to
+  the machine's sign-in now, the rule 用量 uses for 订阅里已包含. A run with no machine, or a
+  sign-in the machine did not report, counts.

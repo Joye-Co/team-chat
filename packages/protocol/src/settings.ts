@@ -294,6 +294,16 @@ export const AiServiceFailing = z.object({
 });
 export type AiServiceFailing = z.infer<typeof AiServiceFailing>;
 
+/**
+ * Usable (盯 5.6): transient `ai.failing`, once when `failing` is raised, to every admin's
+ * connections whose hello has feature "settings/1". A client shows it as a notification.
+ */
+export const AiFailingTransient = z.object({
+  type: z.literal("ai.failing"),
+  failing: AiServiceFailing,
+});
+export type AiFailingTransient = z.infer<typeof AiFailingTransient>;
+
 /** `GET /v1/settings/ai` (owner). Never carries the key: only whether one is set and its last 4 characters. */
 export const AiServiceConfig = z.object({
   /** null = not set up: topics keep their first line as the title. */

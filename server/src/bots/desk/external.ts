@@ -20,6 +20,8 @@ export interface UsageRun {
   requestedBy: string;
   machineId: string | null;
   runtime: string | null;
+  /** How the run's CLI was signed in when it was sent; absent on runs from before it was kept. */
+  loginMethod?: string | null;
   topicId: string;
   costUsd: number;
   inputTokens: number;
@@ -345,8 +347,8 @@ export class BotDesk extends DeskInteract {
   async usageRuns(botId: string, from: number, to: number): Promise<UsageRun[]> {
     this.bind(botId);
     return this.sql
-      .exec<{ ended_at: number; requested_by: string; machine_id: string | null; runtime: string | null; topic_id: string; usage: string | null }>(
-        "SELECT ended_at, requested_by, machine_id, runtime, topic_id, usage FROM runs WHERE ended_at >= ? AND ended_at < ? AND external = 0",
+      .exec<{ ended_at: number; requested_by: string; machine_id: string | null; runtime: string | null; login_method: string | null; topic_id: string; usage: string | null }>(
+        "SELECT ended_at, requested_by, machine_id, runtime, login_method, topic_id, usage FROM runs WHERE ended_at >= ? AND ended_at < ? AND external = 0",
         from,
         to,
       )
@@ -363,6 +365,7 @@ export class BotDesk extends DeskInteract {
           requestedBy: r.requested_by,
           machineId: r.machine_id,
           runtime: r.runtime,
+          ...(r.login_method ? { loginMethod: r.login_method } : {}),
           topicId: r.topic_id,
           costUsd: u?.costUsd ?? 0,
           inputTokens: u?.inputTokens ?? 0,
