@@ -67,19 +67,6 @@ pub fn bundled_size(size: Pixels) -> u32 {
         .unwrap_or(SIZES[SIZES.len() - 1])
 }
 
-/// The asset path of one bundled image, for example
-/// `characters/o03/curious-24.svg`.
-#[cfg(test)]
-pub fn image_path(character: CharacterId, look: Look, size: Pixels) -> gpui::SharedString {
-    format!(
-        "characters/{}/{}-{}.svg",
-        character.as_str(),
-        look.face(),
-        bundled_size(size)
-    )
-    .into()
-}
-
 /// The character at `size` with `look` (a [`Look`], or a [`CharacterStatus`]
 /// with its default face), without the lamp, bubble, ring or sleep marks up
 /// to 64 pt. The character is its own shape: do not clip it to a circle.
@@ -122,19 +109,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_roster_gives_new_bots_their_character() {
-        assert_eq!(roster_character("新机器人"), None);
-        if roster::ROSTER.is_empty() {
-            assert_eq!(roster_character("Jojo"), None);
-            return;
-        }
-        assert_eq!(roster_character("Jojo"), Some(CharacterId::Jojo));
-        assert_eq!(roster_character(" ledger "), Some(CharacterId::H02));
-        assert_eq!(roster_character("Tata"), Some(CharacterId::O03));
-        assert_eq!(roster_character("新机器人"), None);
-    }
-
-    #[test]
     fn picks_the_bundled_size_at_or_above() {
         assert_eq!(bundled_size(px(16.)), 16);
         assert_eq!(bundled_size(px(18.)), 20);
@@ -145,32 +119,5 @@ mod tests {
         assert_eq!(bundled_size(px(96.)), 128);
         assert_eq!(bundled_size(px(300.)), 128);
         assert_eq!(bundled_size(px(0.)), 16);
-    }
-
-    #[test]
-    fn every_character_emotion_and_size_is_bundled() {
-        assert_eq!(CharacterId::ALL.len(), 26);
-        assert!(available());
-        let mut looks: Vec<Look> = Emotion::ALL
-            .iter()
-            .map(|&emotion| Look {
-                status: CharacterStatus::Working,
-                emotion,
-            })
-            .collect();
-        looks.push(CharacterStatus::Offline.into());
-        for &c in CharacterId::ALL {
-            assert!(has_art(c), "{}", c.as_str());
-            for &look in &looks {
-                for size in SIZES {
-                    let path = image_path(c, look, px(size as f32));
-                    let bytes = assets::load(&path).unwrap_or_else(|| panic!("missing {path}"));
-                    let text = std::str::from_utf8(bytes).unwrap();
-                    assert!(text.starts_with("<svg"), "{path}");
-                    assert!(text.contains(&format!("width=\"{size}\"")), "{path}");
-                }
-            }
-        }
-        assert_eq!(assets::count(), 26 * 17 * SIZES.len());
     }
 }

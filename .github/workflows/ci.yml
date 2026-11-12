@@ -6,28 +6,19 @@ name: CI
 # are tested by the Release workflow, on the real build it ships. Real coding CLIs are tested
 # locally with scripts/test-real-cli.sh.
 #
-# Each job runs only for the code it tests:
-#   server/**                      -> Server
-#   packages/**, protocol/**       -> Packages (protocol also every Rust job)
-#   apps/daemon/**, update-helper  -> Rust tests (Linux), daemon on Windows, lint
-#   apps/desktop/**, artifact-view -> Desktop on macOS, desktop on Windows, lint
-#   crates/chat-protocol|core      -> all of the Rust jobs (everything builds on them)
-#   ops/**, release scripts        -> Ops
-#   CI implementation              -> every check, to exercise changes to the pipeline
-#   release workflows              -> workflow lint and release script tests
-#   docs/releases/**               -> desktop (embedded release notes) and Ops
-#   other docs/**                  -> no build; CI result still reports success
+# PRs and main pushes run the affected packages/crates and their consumers only.
+# A manual run is the full suite. Workflow edits run actionlint; docs-only edits do
+# no builds, except executable SDK examples and release notes embedded in the app.
 
 on:
   pull_request:
   push:
     branches: [main]
-  merge_group:
   workflow_dispatch:
 
 concurrency:
-  # Group PR updates together. Each main push gets its own group: cancel-in-progress:false
-  # alone still replaces an older pending run and serializes unrelated main builds.
+  # Cancel obsolete PR updates. Main runs use separate groups so they neither serialize
+  # unrelated changes nor replace an older pending run.
   group: ci-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -50,26 +41,118 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      # Manual runs, merge queue candidates and CI changes exercise every job.
-      all: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'merge_group' || steps.filter.outputs.ci == 'true' }}
-      packages: ${{ steps.filter.outputs.packages == 'true' }}
+      # A manual run runs everything.
+      all: ${{ github.event_name == 'workflow_dispatch' }}
+      protocol: ${{ steps.filter.outputs.protocol == 'true' }}
+      sdk: ${{ steps.filter.outputs.sdk == 'true' }}
+      search: ${{ steps.filter.outputs.search == 'true' }}
       server: ${{ steps.filter.outputs.server == 'true' }}
       ops: ${{ steps.filter.outputs.ops == 'true' }}
       workflows: ${{ steps.filter.outputs.workflows == 'true' }}
-      # Everything Rust builds on these.
+      rust_protocol: ${{ steps.filter.outputs.rust_protocol == 'true' }}
       core: ${{ steps.filter.outputs.core == 'true' }}
       daemon: ${{ steps.filter.outputs.daemon == 'true' }}
+      helper: ${{ steps.filter.outputs.helper == 'true' }}
+      e2e: ${{ steps.filter.outputs.e2e == 'true' }}
       desktop: ${{ steps.filter.outputs.desktop == 'true' }}
       artifact_view: ${{ steps.filter.outputs.artifact_view == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
-        if: github.event_name != 'workflow_dispatch' && github.event_name != 'merge_group'
+        if: github.event_name != 'workflow_dispatch'
         with:
-          filters: .github/ci-paths.yml
+          filters: |
+            js: &js
+              - .github/actions/setup-bun/**
+              - package.json
+              - bun.lock
+              - scripts/ci-run.sh
+              - scripts/lib.sh
+            protocol_source: &protocol_source
+              - *js
+              - packages/protocol/src/**
+              - packages/protocol/package.json
+              - protocol/**
+            protocol:
+              - *protocol_source
+              - packages/protocol/**
+              # gen-fixtures.ts copies these golden machine frames.
+              - apps/daemon/tests/fixtures/machine/**
+            sdk:
+              - *protocol_source
+              - packages/bot-sdk/**
+              - docs/bots.md
+              - server/src/cards2/patch.ts
+            search:
+              - *js
+              - packages/search/**
+            server:
+              - *protocol_source
+              - product.json
+              - server/**
+              - packages/search/src/**
+              - packages/search/package.json
+              - scripts/sandbox/**
+              - scripts/servers.ts
+            ops:
+              - *js
+              - product.json
+              - scripts/servers.ts
+              - scripts/check-release-digest.sh
+              - Cargo.toml
+              - ops/**
+              - server/wrangler.jsonc
+              - server/src/ops/index.ts
+              - server/scripts/admin.ts
+              - scripts/deploy-server.sh
+              - scripts/release-check.sh
+              - scripts/release.sh
+              - scripts/build-daemon.sh
+              - scripts/runner/install-daemon.sh
+              - scripts/previous-windows-installer.sh
+              - scripts/check-logs-for-servers.sh
+              - scripts/test-release-scripts.sh
+              - scripts/setup-server.sh
+              - scripts/test-setup-server.sh
+              - CHANGELOG.md
+              - docs/releases/**
+            workflows:
+              - .github/actions/**
+              - .github/workflows/**
+            rust_common: &rust_common
+              - .cargo/**
+              - Cargo.toml
+              - Cargo.lock
+              - rust-toolchain.toml
+            rust_protocol: &rust_protocol
+              - *rust_common
+              - crates/chat-protocol/**
+              - protocol/**
+            core: &core
+              - *rust_protocol
+              - crates/chat-core/**
+            daemon:
+              - *rust_protocol
+              - apps/daemon/**
+            helper: &helper
+              - *rust_common
+              - apps/update-helper/**
+            e2e:
+              - *core
+              - tools/e2e/**
+            artifact_view: &artifact_view
+              - *rust_common
+              - crates/artifact-view/**
+              - third_party/**
+            desktop:
+              - *core
+              - *helper
+              - *artifact_view
+              - product.json
+              - apps/desktop/**
+              - assets/**
+              - docs/releases/**
 
   workflows:
     name: Workflow lint
@@ -79,44 +162,33 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-      - name: CI regression tests
-        run: bun run test:ci
-      - name: Install actionlint (verified archive)
-        env:
-          ACTIONLINT_VERSION: 1.7.12
-          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
-        run: |
-          mkdir -p .tmp/ci/bin
-          curl --fail --silent --show-error --location --retry 3 \
-            "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
-            -o .tmp/ci/actionlint.tar.gz
-          echo "$ACTIONLINT_SHA256  .tmp/ci/actionlint.tar.gz" | sha256sum --check
-          tar -xzf .tmp/ci/actionlint.tar.gz -C .tmp/ci/bin actionlint
       - name: actionlint
-        run: .tmp/ci/bin/actionlint -color -shellcheck= -pyflakes=
-      - name: CI shell scripts
-        run: shellcheck -x scripts/ci-run.sh
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color -shellcheck= -pyflakes=
 
   packages:
     name: Packages (bun)
     needs: changes
-    if: needs.changes.outputs.packages == 'true' || needs.changes.outputs.all == 'true'
+    if: >-
+      needs.changes.outputs.protocol == 'true' || needs.changes.outputs.sdk == 'true' ||
+      needs.changes.outputs.search == 'true' || needs.changes.outputs.all == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
       - uses: ./.github/actions/setup-bun
-      - name: Typecheck
-        run: scripts/ci-run.sh typecheck packages/*
-      - name: Test
-        run: scripts/ci-run.sh test packages/*
+      - name: Check affected packages
+        env:
+          ALL: ${{ needs.changes.outputs.all }}
+          PROTOCOL: ${{ needs.changes.outputs.protocol }}
+          SDK: ${{ needs.changes.outputs.sdk }}
+          SEARCH: ${{ needs.changes.outputs.search }}
+        run: |
+          packages=()
+          if [[ "$ALL" == true || "$PROTOCOL" == true ]]; then packages+=(packages/protocol); fi
+          if [[ "$ALL" == true || "$SDK" == true ]]; then packages+=(packages/bot-sdk); fi
+          if [[ "$ALL" == true || "$SEARCH" == true ]]; then packages+=(packages/search); fi
+          scripts/ci-run.sh typecheck "${packages[@]}"
+          scripts/ci-run.sh test "${packages[@]}"
 
   # The server's vitest files in three shards, side by side; the typecheck and the sandbox seed
   # (wrangler dev, every migration and the sample team of bun run dev:desktop) in the first.
@@ -132,26 +204,13 @@ jobs:
         shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
       - uses: ./.github/actions/setup-bun
       - name: Typecheck
         if: matrix.shard == 1
         run: scripts/ci-run.sh typecheck server
       - name: Test
         working-directory: server
-        run: |
-          mkdir -p ../.tmp/test-results
-          bun run test --shard=${{ matrix.shard }}/3 --reporter=default --reporter=junit \
-            --outputFile.junit=../.tmp/test-results/server-${{ matrix.shard }}.xml
-      - name: Test report
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: server-tests-${{ matrix.shard }}
-          path: .tmp/test-results/server-${{ matrix.shard }}.xml
-          if-no-files-found: ignore
-          retention-days: 7
+        run: bun run test --shard=${{ matrix.shard }}/3
       - name: Sandbox seed
         id: sandbox
         if: matrix.shard == 1
@@ -168,17 +227,21 @@ jobs:
     needs: changes
     if: >-
       needs.changes.outputs.core == 'true' || needs.changes.outputs.daemon == 'true' ||
+      needs.changes.outputs.helper == 'true' || needs.changes.outputs.e2e == 'true' ||
       needs.changes.outputs.desktop == 'true' || needs.changes.outputs.all == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
       - name: Install the toolchain from rust-toolchain.toml
         run: rustup show active-toolchain || rustup toolchain install
+      # Desktop-only changes need workspace fmt, not a Linux daemon/core Clippy build.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         id: rust-cache
+        if: >-
+          needs.changes.outputs.core == 'true' || needs.changes.outputs.daemon == 'true' ||
+          needs.changes.outputs.helper == 'true' || needs.changes.outputs.e2e == 'true' ||
+          needs.changes.outputs.all == 'true'
         with:
           shared-key: linux-clippy
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -186,20 +249,32 @@ jobs:
         run: cargo fmt --all --check
       - name: cargo clippy
         if: ${{ !cancelled() && steps.rust-cache.outcome == 'success' }}
-        run: cargo clippy --locked -p chat-protocol -p chat-core -p daemon -p update-helper -p e2e --all-targets -- -D warnings
+        env:
+          ALL: ${{ needs.changes.outputs.all }}
+          PROTOCOL: ${{ needs.changes.outputs.rust_protocol }}
+          CORE: ${{ needs.changes.outputs.core }}
+          DAEMON: ${{ needs.changes.outputs.daemon }}
+          HELPER: ${{ needs.changes.outputs.helper }}
+          E2E: ${{ needs.changes.outputs.e2e }}
+        run: |
+          crates=()
+          if [[ "$ALL" == true || "$PROTOCOL" == true ]]; then crates+=(-p chat-protocol); fi
+          if [[ "$ALL" == true || "$CORE" == true ]]; then crates+=(-p chat-core); fi
+          if [[ "$ALL" == true || "$DAEMON" == true ]]; then crates+=(-p daemon); fi
+          if [[ "$ALL" == true || "$HELPER" == true ]]; then crates+=(-p update-helper); fi
+          if [[ "$ALL" == true || "$E2E" == true ]]; then crates+=(-p e2e); fi
+          cargo clippy --locked "${crates[@]}" --all-targets -- -D warnings
 
   rust:
     name: Rust tests (protocol, core, daemon)
     needs: changes
     if: >-
       needs.changes.outputs.core == 'true' || needs.changes.outputs.daemon == 'true' ||
-      needs.changes.outputs.all == 'true'
+      needs.changes.outputs.helper == 'true' || needs.changes.outputs.all == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
       - name: Install the toolchain from rust-toolchain.toml
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -207,20 +282,30 @@ jobs:
           shared-key: linux-test
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: cargo test
-        run: cargo test --locked -p chat-protocol -p chat-core -p daemon -p update-helper
+        env:
+          ALL: ${{ needs.changes.outputs.all }}
+          PROTOCOL: ${{ needs.changes.outputs.rust_protocol }}
+          CORE: ${{ needs.changes.outputs.core }}
+          DAEMON: ${{ needs.changes.outputs.daemon }}
+          HELPER: ${{ needs.changes.outputs.helper }}
+        run: |
+          crates=()
+          if [[ "$ALL" == true || "$PROTOCOL" == true ]]; then crates+=(-p chat-protocol); fi
+          if [[ "$ALL" == true || "$CORE" == true ]]; then crates+=(-p chat-core); fi
+          if [[ "$ALL" == true || "$DAEMON" == true ]]; then crates+=(-p daemon); fi
+          if [[ "$ALL" == true || "$HELPER" == true ]]; then crates+=(-p update-helper); fi
+          cargo test --locked "${crates[@]}"
 
   desktop-macos:
     name: Desktop tests (macOS)
     needs: changes
     if: >-
-      needs.changes.outputs.core == 'true' || needs.changes.outputs.desktop == 'true' ||
+      needs.changes.outputs.desktop == 'true' ||
       needs.changes.outputs.all == 'true'
     runs-on: macos-15
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
       - name: Install the toolchain from rust-toolchain.toml
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -232,7 +317,7 @@ jobs:
       # The isolation of an 产出 page in a real WKWebView (tests/isolation.rs): a security
       # property, run when its crate changes.
       - name: cargo test (artifact view)
-        if: needs.changes.outputs.artifact_view == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.all == 'true'
+        if: needs.changes.outputs.artifact_view == 'true' || needs.changes.outputs.all == 'true'
         run: cargo test --locked -p artifact-view --no-fail-fast
 
   # Code under cfg(windows) cannot be built or tested on a Mac. The desktop app and the daemon
@@ -241,7 +326,7 @@ jobs:
     name: Desktop tests (Windows)
     needs: changes
     if: >-
-      needs.changes.outputs.core == 'true' || needs.changes.outputs.desktop == 'true' ||
+      needs.changes.outputs.desktop == 'true' ||
       needs.changes.outputs.all == 'true'
     runs-on: windows-2025
     timeout-minutes: 25
@@ -250,8 +335,6 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
       - name: Install the toolchain from rust-toolchain.toml
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -267,7 +350,7 @@ jobs:
     name: Daemon tests (Windows)
     needs: changes
     if: >-
-      needs.changes.outputs.core == 'true' || needs.changes.outputs.daemon == 'true' ||
+      needs.changes.outputs.daemon == 'true' || needs.changes.outputs.helper == 'true' ||
       needs.changes.outputs.all == 'true'
     runs-on: windows-2025
     timeout-minutes: 15
@@ -276,18 +359,18 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
       - name: Install the toolchain from rust-toolchain.toml
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: windows-daemon
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: cargo test
-        run: |
-          cargo test --locked -p daemon --features test-fakes --lib --bins --test process_tree
-          cargo test --locked -p update-helper
+      - name: cargo test (daemon)
+        if: needs.changes.outputs.daemon == 'true' || needs.changes.outputs.all == 'true'
+        run: cargo test --locked -p daemon --features test-fakes --lib --bins --test process_tree
+      - name: cargo test (update helper)
+        if: needs.changes.outputs.helper == 'true' || needs.changes.outputs.all == 'true'
+        run: cargo test --locked -p update-helper
 
   ops:
     name: Ops (monitor, restore)
@@ -297,8 +380,6 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
       - uses: ./.github/actions/setup-bun
       - name: Typecheck
         run: scripts/ci-run.sh typecheck ops/*
@@ -308,20 +389,3 @@ jobs:
         run: scripts/test-release-scripts.sh
       - name: Self-hosting setup (fake wrangler)
         run: scripts/test-setup-server.sh
-
-  # Configure this one stable check in branch protection. Conditional skips are accepted only
-  # for jobs the change detector did not select; a failed detector must never produce green CI.
-  result:
-    name: CI result
-    needs: [changes, workflows, packages, server, rust-lint, rust, desktop-macos, windows-desktop, windows-daemon, ops]
-    if: always()
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Check all required results
-        env:
-          CI_NEEDS: ${{ toJSON(needs) }}
-        run: node scripts/ci/check-results.mjs

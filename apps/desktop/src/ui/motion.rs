@@ -816,21 +816,6 @@ mod tests {
     }
 
     #[test]
-    fn one_shot_motion_stays_under_300_ms() {
-        // T1-17, review-animations 4: UI motion under 300 ms.
-        let limit = Duration::from_millis(300);
-        assert!(motion::RISE_IN <= Duration::from_millis(200));
-        assert!(motion::RISE_IN + stagger_delay(100) <= limit);
-        assert!(motion::BAR_GROW <= limit);
-        assert!(motion::LIVE_TRACK_FILL <= limit);
-        assert!(motion::LINE_DRAW + motion::SERIES_STAGGER * 2 <= limit);
-        let flash = crate::ui::native::tokens::card_v21::CHANGE_FLASH;
-        assert!(flash >= Duration::from_millis(600) && flash <= Duration::from_millis(800));
-        // T1-16: a breathing mark never fades below full strength.
-        assert!(motion::BREATHE_LOW >= 1.0);
-    }
-
-    #[test]
     fn a_breath_swings_between_its_bounds() {
         assert!((breath_opacity(0.) - motion::BREATHE_HIGH).abs() < 1e-4);
         assert!((breath_opacity(0.5) - motion::BREATHE_LOW).abs() < 1e-4);

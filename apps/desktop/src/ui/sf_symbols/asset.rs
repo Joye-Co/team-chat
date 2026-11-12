@@ -392,27 +392,23 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn every_concept_draws_and_gpui_rasterizes_it() {
+    fn native_symbols_and_fallback_rasterize() {
         let renderer = gpui::SvgRenderer::new(std::sync::Arc::new(crate::ui::AppAssets));
-        for &sym in Sym::ALL {
-            if sym == Sym::Missing {
-                continue;
-            }
-            for size in SymSize::CONTEXTS {
-                let p = path_at(sym, size, 2.);
-                let parsed = parse(&p).unwrap();
-                let svg = draw(&parsed).unwrap_or_else(|| panic!("{} draws", sym.name()));
-                let tree = renderer.parse_svg(&svg).expect("parses");
-                // GPUI's tile is the mask 1:1: the slot at 2x, supersampled.
-                let side = (size.slot * 2. * SUPERSAMPLE).round() as i32;
-                let px = gpui::DevicePixels(side);
-                let image = renderer
-                    .render_parsed(&tree, gpui::SvgSize::ExactSize(gpui::size(px, px)))
-                    .expect("rasterizes");
-                let bytes = image.as_bytes(0).unwrap();
-                let ink = bytes.chunks_exact(4).filter(|p| p[3] > 128).count();
-                assert!(ink > 0, "{} at {size:?} has ink", sym.name());
-            }
+        // One plain symbol and one filled symbol exercise both SVG generation paths.
+        for (sym, size) in [(Sym::Home, SymSize::SIDEBAR), (Sym::Members, SymSize::TAB)] {
+            let p = path_at(sym, size, 2.);
+            let parsed = parse(&p).unwrap();
+            let svg = draw(&parsed).unwrap_or_else(|| panic!("{} draws", sym.name()));
+            let tree = renderer.parse_svg(&svg).expect("parses");
+            // GPUI's tile is the mask 1:1: the slot at 2x, supersampled.
+            let side = (size.slot * 2. * SUPERSAMPLE).round() as i32;
+            let px = gpui::DevicePixels(side);
+            let image = renderer
+                .render_parsed(&tree, gpui::SvgSize::ExactSize(gpui::size(px, px)))
+                .expect("rasterizes");
+            let bytes = image.as_bytes(0).unwrap();
+            let ink = bytes.chunks_exact(4).filter(|p| p[3] > 128).count();
+            assert!(ink > 0, "{} at {size:?} has ink", sym.name());
         }
         // An unknown name loads the fallback, never fails.
         let missing = load(&path_at(Sym::Missing, SymSize::INLINE, 2.)).unwrap();

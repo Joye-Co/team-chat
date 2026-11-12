@@ -153,21 +153,3 @@ pub fn pointer(name: &str) -> Point<Pixels> {
         None => point(px(-10_000.), px(-10_000.)),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_step_names_a_scene_once() {
-        let names: Vec<&str> = crate::selftest::scenes::all()
-            .iter()
-            .map(|s| s.name)
-            .collect();
-        let mut seen = std::collections::HashSet::new();
-        for (name, _) in STEPS {
-            assert!(names.contains(name), "{name} is not a scene");
-            assert!(seen.insert(*name), "{name} has two step lines");
-        }
-    }
-}

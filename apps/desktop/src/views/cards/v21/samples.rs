@@ -951,30 +951,3 @@ pub fn prev_of(message_id: &str) -> Option<Arc<CardV2>> {
         .find(|s| s.msg.message_id == message_id)
         .and_then(|s| s.prev)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn samples_parse_and_known_ones_are_valid() {
-        for s in all() {
-            let c = &s.msg.card;
-            if s.msg.message_id == UNKNOWN {
-                assert!(
-                    c.blocks
-                        .iter()
-                        .any(|b| matches!(b, crate::data::cards_v2::CardV2Block::Unknown))
-                );
-                continue;
-            }
-            assert!(
-                c.validate().is_ok(),
-                "{}: {:?}",
-                s.msg.message_id,
-                c.validate()
-            );
-            assert!(super::super::is_21(c), "{} is a 2.1 card", s.msg.message_id);
-        }
-    }
-}

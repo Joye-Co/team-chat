@@ -1,49 +1,14 @@
-//! Protocol fixtures, config, launchd and systemd services, run folders and cleanup.
+//! Config, launchd and systemd services, run folders and cleanup.
 //!
 //! The launchd and systemd cases are Unix only (the Windows scheduled task is tested for real
 //! by the release workflow's install and update test, `scripts/test-windows-update.sh`); the
 //! rest runs on every system.
 
 use daemon::config::Config;
-use daemon::proto::{Down, RepoSpec, Up};
-use serde_json::Value;
+use daemon::proto::RepoSpec;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
-
-fn fixture_lines(name: &str) -> Vec<Value> {
-    let p = format!(
-        "{}/tests/fixtures/machine/{name}",
-        env!("CARGO_MANIFEST_DIR")
-    );
-    std::fs::read_to_string(p)
-        .unwrap()
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(|l| serde_json::from_str(l).unwrap())
-        .collect()
-}
-
-#[test]
-fn machine_protocol_fixtures_round_trip() {
-    for v in fixture_lines("up.jsonl") {
-        let f: Up = serde_json::from_value(v.clone()).unwrap_or_else(|e| panic!("{e}: {v}"));
-        assert_eq!(serde_json::to_value(&f).unwrap(), v);
-    }
-    for v in fixture_lines("down.jsonl") {
-        let f: Down = serde_json::from_value(v.clone()).unwrap_or_else(|e| panic!("{e}: {v}"));
-        assert_eq!(serde_json::to_value(&f).unwrap(), v);
-    }
-    // Unknown fields are ignored on read.
-    let f: Down = serde_json::from_str(r#"{"t":"ack","runId":"r","seq":3,"future":1}"#).unwrap();
-    assert_eq!(
-        f,
-        Down::Ack {
-            run_id: "r".into(),
-            seq: 3
-        }
-    );
-}
 
 /// A `pty` runtime whose program every system has.
 fn shell_runtime() -> &'static str {

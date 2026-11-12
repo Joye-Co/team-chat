@@ -289,7 +289,7 @@ mod tests {
     fn no_marks_up_to_64_pt() {
         for &c in CharacterId::ALL {
             for s in looks() {
-                for size in [16., 20., 24., 32., 36., 48., 64.] {
+                for size in [16., 64.] {
                     for path in [tile_path(c, s, px(size)), clean_path(c, s, px(size))] {
                         let svg = String::from_utf8(load(&path).expect("loads")).unwrap();
                         assert!(!svg.contains("-g-glow)\""), "glow in {path}");

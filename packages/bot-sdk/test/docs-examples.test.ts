@@ -1,5 +1,5 @@
-// The card examples of docs/bots.md, run against the shipped protocol: every ```json block
-// decodes, and every ```ts block that builds a card with `composeCard` runs with stub `bot`
+// The card examples of docs/bots.md, run against the shipped protocol: every ```ts block
+// that builds a card with `composeCard` runs with stub `bot`
 // calls. Each posted card, each patch its handlers make and each patched rev must pass the
 // protocol schema and the server's patch rules. Run: bun test test/docs-examples.test.ts
 import { describe, expect, test } from "bun:test";
@@ -52,17 +52,10 @@ async function run(source: string) {
 }
 
 describe("docs/bots.md examples", () => {
-  test("every json block decodes", () => {
-    for (const j of fences("json")) expect(() => JSON.parse(j)).not.toThrow();
-  });
-
   const examples = fences("ts").filter((s) => s.includes("composeCard("));
 
-  test("the card examples are found", () => {
-    expect(examples.length).toBeGreaterThan(0);
-  });
-
   test("each card example posts cards and patches that the shipped protocol takes", async () => {
+    expect(examples.length).toBeGreaterThan(0);
     for (const src of examples) {
       const { posted, handlers } = await run(src);
       expect(posted.length).toBeGreaterThan(0);

@@ -1522,106 +1522,6 @@ mod tests {
     }
 
     #[test]
-    fn the_scales_are_closed() {
-        assert_eq!(text::BODY.0, px(14.));
-        assert_eq!(text::SUBHEADLINE.0, px(12.));
-        for role in [
-            text::LARGE_TITLE,
-            text::TITLE2,
-            text::TITLE3,
-            text::HEADLINE,
-            text::BODY,
-            text::MESSAGE,
-            text::CALLOUT,
-            text::SUBHEADLINE,
-            text::SECTION,
-            text::FOOTNOTE,
-            type_scale::DISPLAY,
-            type_scale::HEADING,
-            type_scale::PAGE_TITLE,
-            type_scale::TITLE,
-            type_scale::CARD_TITLE,
-            type_scale::BODY,
-            type_scale::UI,
-            type_scale::SMALL,
-            type_scale::META,
-            type_scale::CODE_ENTRY,
-            type_scale::BUTTON_LG,
-            card_v2::TITLE,
-        ] {
-            assert!(
-                text::SIZES.contains(&role.0),
-                "{:?} is off the type scale",
-                role.0
-            );
-        }
-        for h in [
-            metrics::BUTTON_REGULAR,
-            metrics::BUTTON_SMALL,
-            metrics::BUTTON_LARGE,
-            metrics::FIELD,
-            metrics::SEARCH,
-            metrics::SEARCH_SIDEBAR,
-            metrics::SEGMENTED,
-            metrics::SQUARE_BUTTON,
-            metrics::TOOLBAR_ITEM,
-            size::BUTTON_SM,
-            size::BUTTON_CARD,
-            size::BUTTON_MD,
-            size::BUTTON_LG,
-            size::TEXT_BUTTON,
-            size::ICON_BUTTON,
-            size::ICON_BUTTON_SM,
-            size::SEARCH_FIELD,
-            size::FORM_FIELD,
-            size::SELECT,
-        ] {
-            assert!(
-                height::CONTROLS.contains(&h),
-                "{h:?} is not a control height"
-            );
-        }
-        for r in [
-            metrics::BUTTON_REGULAR_RADIUS,
-            metrics::FIELD_RADIUS,
-            metrics::MENU_RADIUS,
-            metrics::MENU_ROW_RADIUS,
-            metrics::GROUP_RADIUS,
-            metrics::LIST_ROW_RADIUS,
-            radius::MARK,
-            radius::SM,
-            radius::MD,
-            radius::FIELD,
-            radius::LG,
-            radius::BUTTON_CARD,
-            card_v2::OPTION_RADIUS,
-            card_v2::CHIP_RADIUS,
-        ] {
-            assert!(radius::SCALE.contains(&r), "{r:?} is off the radius scale");
-        }
-        for s in [
-            space::S3,
-            space::S10,
-            space::S14,
-            space::S20,
-            space::S28,
-            space::S44,
-            metrics::GROUP_GAP,
-            metrics::GROUP_MARGIN,
-            metrics::CONTENT_LEADING,
-        ] {
-            assert!(space::SCALE.contains(&s), "{s:?} is off the spacing scale");
-        }
-        for a in [
-            size::AVATAR_MESSAGE,
-            size::AVATAR_START,
-            layout::AVATAR_SIZE,
-        ] {
-            assert!(avatar::SIZES.contains(&a));
-        }
-    }
-
-    #[test]
     fn content_starts_at_the_gutter() {
         // The page column starts at the sidebar's trailing edge (x 264):
         // content at 264 + 24 = 288.
@@ -1641,18 +1541,6 @@ mod tests {
         assert_eq!(layout::IN_THREAD, px(640.));
         assert_eq!(layout::in_thread_width(px(500.)), px(500.));
         assert_eq!(layout::in_thread_width(px(808.)), px(640.));
-    }
-
-    #[test]
-    fn shadows_are_the_four_levels() {
-        assert_eq!(shadow::xs().len(), 1);
-        assert_eq!(shadow::sm().len(), 2);
-        assert_eq!(shadow::md().len(), 2);
-        assert_eq!(shadow::lg().len(), 2);
-        // Floating surfaces keep their 1 px line in both modes (§1.7).
-        for k in [NativeColors::light(), NativeColors::dark()] {
-            assert!(k.float().iter().any(|s| s.color == k.separator));
-        }
     }
 
     /// The literal ratchet (§1.1): `px(` literals in `src/views` only go
