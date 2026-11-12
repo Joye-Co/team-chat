@@ -1061,6 +1061,7 @@ mod tests {
     #[test]
     fn run_duration_uses_now_while_active() {
         let mut run = BotRunSummary {
+            hold: Default::default(),
             id: "r".into(),
             bot_id: "b".into(),
             group_id: "g".into(),
@@ -1088,6 +1089,7 @@ mod tests {
     #[test]
     fn only_the_person_who_asked_gets_stop_on_the_pending_row() {
         let mut run = BotRunSummary {
+            hold: Default::default(),
             id: "r".into(),
             bot_id: "b".into(),
             group_id: "g".into(),

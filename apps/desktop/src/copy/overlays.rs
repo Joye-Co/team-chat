@@ -55,6 +55,9 @@ crate::copy! {
     STOP_REFUSED = "没能停止",
     TAKE_OVER_REFUSED = "没能接管",
     HAND_BACK_REFUSED = "没能交还",
+    PAUSE_REFUSED = "没能暂停",
+    CONTINUE_REFUSED = "没能继续",
+    COMMAND_REFUSED = "没能运行这条命令",
     DM_REFUSED = "没能开始私聊",
     // --- v12/fx-overlays: update ---
     MENU_CHECK = "检查更新…",

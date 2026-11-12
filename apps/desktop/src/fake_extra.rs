@@ -118,6 +118,7 @@ pub fn sample_runs(now: Millis) -> Vec<BotRunSummary> {
     const MIN: i64 = 60_000;
     vec![
         BotRunSummary {
+            hold: Default::default(),
             id: "run-login-1".into(),
             bot_id: "m-coder".into(),
             group_id: "g-dev".into(),
@@ -134,6 +135,7 @@ pub fn sample_runs(now: Millis) -> Vec<BotRunSummary> {
             plan: Vec::new(),
         },
         BotRunSummary {
+            hold: Default::default(),
             id: "run-blocked-1".into(),
             bot_id: "m-deploy".into(),
             group_id: "g-dev".into(),
@@ -152,6 +154,7 @@ pub fn sample_runs(now: Millis) -> Vec<BotRunSummary> {
         // The finished run of the 私聊 话题 `t-dm-2` (完成): its plan and its
         // time, so the inspector agrees with the 完成 badge.
         BotRunSummary {
+            hold: Default::default(),
             id: "run-dm-cache-1".into(),
             bot_id: "m-coder".into(),
             group_id: "d-coder".into(),

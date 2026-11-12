@@ -26,6 +26,8 @@ pub mod page_host;
 pub mod github;
 /// 沉淀: 记得的事, 团队约定 and the daily 记忆更新.
 pub mod memory;
+// Usable (design-takeover T6): a run's one state and who may hold it.
+pub mod run_phase;
 pub use github::{GithubAccount, GithubDevice, GithubPoll, GithubState, GithubWait};
 use std::{fmt, path::PathBuf, sync::Arc};
 
@@ -819,6 +821,8 @@ pub struct BotRunSummary {
     /// The bot's plan for this run, in order: what it did, does now, waits
     /// for and does later. Empty when the run has none.
     pub plan: Vec<PlanItem>,
+    /// Usable: its phase, who holds it and on whose computer it runs ([`run_phase`]).
+    pub hold: run_phase::RunHold,
 }
 
 /// The state of one plan item (docs/protocol.md, "Run plans").
@@ -1144,6 +1148,8 @@ pub enum AdminError {
     RateLimited,
     /// Someone changed it first (a memory line undone twice, a version clash).
     Conflict,
+    /// The server refused a hold or a command for the run's state (design-takeover 3.2).
+    Refused(run_phase::RunRefusal),
     Other,
 }
 
@@ -2485,6 +2491,36 @@ pub trait ChatProvider: Send + Sync + 'static {
     /// 交还: lets a paused run go on (`run.resume`).
     fn hand_back_run(&self, _group_id: &str, _topic_id: &str, _run_id: &str) -> AdminReply<()> {
         reply_now(Err(AdminError::Unsupported))
+    }
+    /// 暂停 (usable): stops a run without taking it over (`POST /v1/runs/:id/pause`).
+    fn pause_run(&self, _group_id: &str, _topic_id: &str, _run_id: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// 继续 or 交还 with the words for the member (`POST /v1/runs/:id/resume`, `note`).
+    fn resume_run(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        run_id: &str,
+        _note: Option<String>,
+    ) -> AdminReply<()> {
+        self.hand_back_run(group_id, topic_id, run_id)
+    }
+    /// Runs one command of mine in a run I took over: its id (`POST /v1/runs/:id/commands`).
+    fn run_command(&self, _run_id: &str, _command: String) -> AdminReply<String> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Stops my running command in a run I hold.
+    fn cancel_run_command(&self, _run_id: &str, _command_id: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// The commands people ran while holding the run (`hand.*` events), oldest first.
+    fn hand_commands(&self, _run_id: &str) -> Vec<run_phase::HandCommand> {
+        Vec::new()
+    }
+    /// The run's work folder, when the run is on this computer.
+    fn run_work_folder(&self, _run_id: &str) -> Option<PathBuf> {
+        None
     }
     /// The 成员 page detail of a member. The default counts this week's
     /// runs from the cache.
