@@ -103,18 +103,17 @@ impl TimelineView {
             crate::app::RightPane::Live(id) => Some(id),
             _ => None,
         };
-        let mut out: Vec<AnyElement> = runs
-            .iter()
-            .map(|run| {
-                self.follow_live(&run.id, cx);
-                let paused_by = p.machine_screen(&run.id).and_then(|s| s.paused_by);
-                if in_pane.as_deref() == Some(run.id.as_str()) {
-                    return self.plan_line(run, paused_by.is_some(), cx);
-                }
-                let times = p.run_step_times(&run.id);
-                self.plan_card(run, paused_by.is_some(), &times, cx)
-            })
-            .collect();
+        // Usable (design-takeover 3.5): 接管了 / 交还了 above the cards.
+        let mut out: Vec<AnyElement> = self.hold_lines(cx);
+        out.extend(runs.iter().map(|run| {
+            self.follow_live(&run.id, cx);
+            let paused_by = p.machine_screen(&run.id).and_then(|s| s.paused_by);
+            if in_pane.as_deref() == Some(run.id.as_str()) {
+                return self.plan_line(run, paused_by.is_some(), cx);
+            }
+            let times = p.run_step_times(&run.id);
+            self.plan_card(run, paused_by.is_some(), &times, cx)
+        }));
         out.extend(self.failed_run_alert(cx));
         out
     }

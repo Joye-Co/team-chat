@@ -175,7 +175,9 @@ struct Data {
     cards: HashMap<String, Arc<card::Card>>,
     artifacts: Vec<(GroupId, ArtifactSummary)>,
     side_chat: Vec<SideChatMessage>,
-    paused_by: Option<MemberId>,
+    /// Usable (T6, T7): the sample live run's phase fields and its held commands.
+    hold: run_phase::RunHold,
+    hand: Vec<run_phase::HandCommand>,
     // topic track (v11/topic): who approved PR #61 and when.
     approval: Option<(MemberId, Millis)>,
     /// My own notify settings, so the 通知 sections and menus can be tried
@@ -292,6 +294,7 @@ struct RunSpec<'a> {
 
 fn run(s: RunSpec) -> BotRunSummary {
     BotRunSummary {
+        hold: Default::default(),
         id: s.id.into(),
         bot_id: s.bot.into(),
         group_id: s.group.into(),
@@ -1077,7 +1080,13 @@ impl V2Samples {
             cards,
             artifacts,
             side_chat,
-            paused_by: None,
+            hold: run_phase::RunHold {
+                // A personal Mac of mine, which takes commands.
+                takeover: Some("commands".into()),
+                machine_owner: Some(ME.into()),
+                ..Default::default()
+            },
+            hand: Vec::new(),
             approval: None,
             muted_groups: Default::default(),
             levels: HashMap::new(),
@@ -1148,7 +1157,56 @@ impl V2Samples {
 
     /// Takes over the live run in a scene (`live-takeover`).
     pub fn set_paused_by(&self, member: Option<MemberId>) {
-        self.with(|d| d.paused_by = member);
+        self.update_hold(|h| {
+            h.paused_by = member.clone();
+            h.hold_kind = member.as_ref().map(|_| "takeover".into());
+            h.held_at = member.as_ref().map(|_| at(9, 50));
+            h.phase = member.as_ref().map(|_| "taken_over".into());
+        });
+    }
+
+    /// Usable (T6, T7 scenes): changes the live run's phase fields.
+    pub fn update_hold(&self, f: impl FnOnce(&mut run_phase::RunHold)) {
+        self.with(|d| f(&mut d.hold));
+        self.emit(vec![Change::Runs {
+            group_id: DEV.into(),
+            topic_id: T_VIRTUAL.into(),
+        }]);
+    }
+
+    /// Usable (T7 scenes): the commands of the person holding the live run.
+    pub fn set_hand(&self, hand: Vec<run_phase::HandCommand>) {
+        self.with(|d| d.hand = hand);
+        self.emit(vec![Change::RunLog {
+            run_id: RUN_VIRTUAL.into(),
+        }]);
+    }
+
+    /// 继续 / 交还: the hold ends; a hand-back with commands leaves its summary.
+    fn release_hold(&self) {
+        self.with(|d| {
+            let h = &mut d.hold;
+            if let Some(by) = h.paused_by.take() {
+                let took_over = h.hold_kind.as_deref() == Some("takeover");
+                let commands = d.hand.iter().filter(|c| c.by == by).count() as u64;
+                if took_over {
+                    h.last_handback = Some(run_phase::Handback {
+                        by,
+                        held_ms: h
+                            .held_at
+                            .map_or(0, |t| (crate::selftest::clock::now_ms() - t).max(0) as u64),
+                        commands,
+                        files: Vec::new(),
+                        head_from: None,
+                        head_to: None,
+                    });
+                }
+            }
+            h.hold_kind = None;
+            h.held_at = None;
+            h.phase = None;
+            d.hand.clear();
+        });
         self.emit(vec![Change::Runs {
             group_id: DEV.into(),
             topic_id: T_VIRTUAL.into(),
@@ -1535,6 +1593,12 @@ impl ChatProvider for V2Samples {
                 .filter(|r| r.topic_id == topic_id)
                 .filter(|r| !(self.quiet && r.status.is_active()))
                 .cloned()
+                .map(|mut r| {
+                    if r.id == RUN_VIRTUAL {
+                        r.hold = d.hold.clone();
+                    }
+                    r
+                })
                 .collect()
         });
         runs.sort_by_key(|r| std::cmp::Reverse(r.created_at));
@@ -1909,7 +1973,7 @@ impl ChatProvider for V2Samples {
             ],
             started_at: Some(at(9, 31)),
             takeover_url: None,
-            paused_by: self.with(|d| d.paused_by.clone()),
+            paused_by: self.with(|d| d.hold.paused_by.clone()),
         })
     }
     fn acceptance_criteria(&self, run_id: &str) -> Vec<AcceptanceItem> {
@@ -1944,12 +2008,104 @@ impl ChatProvider for V2Samples {
         }
     }
     fn take_over_run(&self, _group_id: &str, _topic_id: &str, _run_id: &str) -> AdminReply<()> {
-        self.set_paused_by(Some(ME.into()));
+        self.update_hold(|h| {
+            h.paused_by = Some(ME.into());
+            h.hold_kind = Some("takeover".into());
+            h.held_at = Some(crate::selftest::clock::now_ms());
+            h.phase = Some("taken_over".into());
+        });
         reply_now(Ok(()))
     }
     fn hand_back_run(&self, _group_id: &str, _topic_id: &str, _run_id: &str) -> AdminReply<()> {
-        self.set_paused_by(None);
+        self.release_hold();
         reply_now(Ok(()))
+    }
+    fn pause_run(&self, _group_id: &str, _topic_id: &str, _run_id: &str) -> AdminReply<()> {
+        self.update_hold(|h| {
+            h.paused_by = Some(ME.into());
+            h.hold_kind = Some("pause".into());
+            h.held_at = Some(crate::selftest::clock::now_ms());
+            h.phase = Some("paused".into());
+        });
+        reply_now(Ok(()))
+    }
+    fn resume_run(
+        &self,
+        _g: &str,
+        _t: &str,
+        _run_id: &str,
+        _note: Option<String>,
+    ) -> AdminReply<()> {
+        self.release_hold();
+        reply_now(Ok(()))
+    }
+    /// A sample command ends at once: its first word picks the output.
+    fn run_command(&self, run_id: &str, command: String) -> AdminReply<String> {
+        if run_id != RUN_VIRTUAL {
+            return reply_now(Err(AdminError::Unsupported));
+        }
+        let held = self.with(|d| d.hold.paused_by.as_deref() == Some(ME));
+        if !held {
+            return reply_now(Err(AdminError::Conflict));
+        }
+        let id = self.with(|d| format!("hc-{}", d.hand.len() + 1));
+        let (ok, output) = match command.split_whitespace().next() {
+            Some("git") => (
+                true,
+                "On branch bot/forge-virtual\nnothing to commit, working tree clean\n",
+            ),
+            Some("ls") => (true, "Cargo.toml\napps\ncrates\ndocs\n"),
+            _ => (false, "command not found\n"),
+        };
+        self.with(|d| {
+            d.hand.push(run_phase::HandCommand {
+                id: id.clone(),
+                command,
+                by: ME.into(),
+                output: output.into(),
+                result: Some(run_phase::HandResult {
+                    ok,
+                    exit_code: Some(if ok { 0 } else { 127 }),
+                    ms: 40,
+                    ..Default::default()
+                }),
+                at: crate::selftest::clock::now_ms(),
+            })
+        });
+        self.emit(vec![Change::RunLog {
+            run_id: RUN_VIRTUAL.into(),
+        }]);
+        reply_now(Ok(id))
+    }
+    fn cancel_run_command(&self, _run_id: &str, command_id: &str) -> AdminReply<()> {
+        self.with(|d| {
+            if let Some(c) = d
+                .hand
+                .iter_mut()
+                .find(|c| c.id == command_id && c.result.is_none())
+            {
+                c.result = Some(run_phase::HandResult::default());
+            }
+        });
+        self.emit(vec![Change::RunLog {
+            run_id: RUN_VIRTUAL.into(),
+        }]);
+        reply_now(Ok(()))
+    }
+    fn hand_commands(&self, run_id: &str) -> Vec<run_phase::HandCommand> {
+        if run_id != RUN_VIRTUAL {
+            return Vec::new();
+        }
+        self.with(|d| d.hand.clone())
+    }
+    /// The sample run is on this computer (a made-up folder; 在访达中打开 shows it).
+    fn run_work_folder(&self, run_id: &str) -> Option<std::path::PathBuf> {
+        (run_id == RUN_VIRTUAL).then(|| {
+            std::path::PathBuf::from(format!(
+                "~/{}-runs/lines/forge-virtual/work",
+                env!("PRODUCT_SLUG")
+            ))
+        })
     }
     fn member_stats(&self, member_id: &str) -> Option<MemberStats> {
         let mut stats = MemberStats::default();

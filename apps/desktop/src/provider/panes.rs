@@ -8,6 +8,10 @@
 //!   run's `plan` events give each step its start time (回放). 验收标准 and `pausedBy` come from
 //!   the cached `BotRun`; 接管 / 交还 are `Client::pause_run` / `resume_run`. The machine's
 //!   `takeoverUrl` comes from the machine list (owners and run requesters only).
+//! - Usable 接管 (design-takeover T6, T7): 暂停 / 接管 / 继续 / 交还 are `pause_run`,
+//!   `take_over_run` and `resume_run` (with the note); my commands go out with `run_command`,
+//!   and their `hand.*` events come back in the same run log, read every second while the run
+//!   is taken over.
 
 use std::{
     collections::HashMap,
@@ -35,16 +39,28 @@ use crate::data::{
 
 /// A running run's log is read again at most this often while the pane asks for it.
 const LIVE_REFRESH: Duration = Duration::from_millis(1500);
+/// While a person took the run over, its log (their commands' output) every second.
+const HELD_REFRESH: Duration = Duration::from_millis(1000);
 /// Lines of one tool output kept on the screen.
 const OUTPUT_LINES: usize = 12;
 /// Screen lines kept per run.
 const SCREEN_KEEP: usize = 400;
+/// A person's commands kept per run.
+const HAND_KEEP: usize = 200;
 /// Messages of a side chat read from the cache.
 const SIDE_CHAT_LIMIT: usize = 200;
 /// Newest messages of the source topic searched for a posted suggestion.
 const POSTED_SCAN: usize = 200;
 /// The machine list is read again at most this often (for `takeoverUrl`).
 const MACHINES_REFRESH: Duration = Duration::from_secs(60);
+
+/// What [`CoreProvider::hold_inner`] asks of the server.
+pub(super) enum Hold {
+    Pause,
+    TakeOver,
+    /// 继续 or 交还, with the words for the member.
+    Resume(Option<String>),
+}
 
 /// Per-account state of the two panes; cleared when the account changes.
 #[derive(Default)]
@@ -90,6 +106,8 @@ struct LiveEntry {
     step_times: Vec<Option<Millis>>,
     /// The plan step the run is on now.
     step: Option<usize>,
+    /// Usable: the commands of the person holding the run, oldest first.
+    hand: Vec<crate::data::run_phase::HandCommand>,
     loading: bool,
     fetched_at: Option<Instant>,
 }
@@ -182,8 +200,58 @@ impl LiveEntry {
                         });
                     }
                 }
+                RunEvent::HandCommand {
+                    command_id,
+                    command,
+                    by,
+                } => {
+                    if !self.hand.iter().any(|h| &h.id == command_id) {
+                        self.hand.push(crate::data::run_phase::HandCommand {
+                            id: command_id.clone(),
+                            command: command.clone(),
+                            by: by.clone(),
+                            at,
+                            ..Default::default()
+                        });
+                    }
+                }
+                RunEvent::HandOutput { command_id, text } => {
+                    if let Some(h) = self.hand.iter_mut().find(|h| &h.id == command_id) {
+                        crate::data::run_phase::push_output(&mut h.output, text);
+                    }
+                }
+                RunEvent::HandResult {
+                    command_id,
+                    ok,
+                    exit_code,
+                    ms,
+                    timed_out,
+                    error,
+                } => {
+                    let result = crate::data::run_phase::HandResult {
+                        ok: *ok,
+                        exit_code: *exit_code,
+                        ms: *ms,
+                        timed_out: timed_out.unwrap_or(false),
+                        error: error.clone(),
+                    };
+                    match self.hand.iter_mut().find(|h| &h.id == command_id) {
+                        Some(h) => h.result = Some(result),
+                        // A refusal (`busy`, `not_held`) may come without its command.
+                        None => self.hand.push(crate::data::run_phase::HandCommand {
+                            id: command_id.clone(),
+                            result: Some(result),
+                            at,
+                            ..Default::default()
+                        }),
+                    }
+                }
                 _ => {}
             }
+        }
+        if self.hand.len() > HAND_KEEP {
+            let cut = self.hand.len() - HAND_KEEP;
+            self.hand.drain(..cut);
         }
         if self.lines.len() > SCREEN_KEEP {
             let cut = self.lines.len() - SCREEN_KEEP;
@@ -604,7 +672,7 @@ impl CoreProvider {
 
     /// Reads more of a run's log when the cache is stale (a running run every
     /// [`LIVE_REFRESH`], an ended one once).
-    fn refresh_live(&self, run_id: &str, active: bool) {
+    fn refresh_live(&self, run_id: &str, active: bool, held: bool) {
         let Some(a) = self.account() else {
             return;
         };
@@ -618,7 +686,7 @@ impl CoreProvider {
                 .or_default();
             let stale = match entry.fetched_at {
                 None => true,
-                Some(t) => active && t.elapsed() >= LIVE_REFRESH,
+                Some(t) => active && t.elapsed() >= if held { HELD_REFRESH } else { LIVE_REFRESH },
             };
             if entry.loading || !stale {
                 return;
@@ -698,7 +766,8 @@ impl CoreProvider {
     pub(super) fn machine_screen_inner(&self, run_id: &str) -> Option<MachineScreen> {
         let a = self.account()?;
         let run = a.client.store().run(run_id).ok().flatten()?;
-        self.refresh_live(run_id, run.is_active());
+        let taken_over = run.paused_by.is_some() && run.hold_kind.as_deref() == Some("takeover");
+        self.refresh_live(run_id, run.is_active(), taken_over);
         if run.paused_by.is_some() {
             self.refresh_takeover();
         }
@@ -796,23 +865,25 @@ impl CoreProvider {
         entry.step_times.iter().map_while(|t| *t).collect()
     }
 
-    /// 接管 (`pause`) or 交还 (`resume`); `Change::Runs` when the answer is in.
-    pub(super) fn pause_inner(
+    /// 暂停, 接管, or 继续 / 交还 with a note; `Change::Runs` when the answer is in.
+    pub(super) fn hold_inner(
         &self,
         group_id: &str,
         topic_id: &str,
         run_id: &str,
-        pause: bool,
+        hold: Hold,
     ) -> AdminReply<()> {
         let (tx, rx) = oneshot::channel();
         let Some(a) = self.account() else {
             let _ = tx.send(Err(AdminError::Offline));
             return rx;
         };
-        let handle = if pause {
-            a.client.pause_run(run_id)
-        } else {
-            a.client.resume_run(run_id, None)
+        let handle = match hold {
+            Hold::Pause => a.client.pause_run(run_id),
+            Hold::TakeOver => a.client.take_over_run(run_id),
+            Hold::Resume(note) => a
+                .client
+                .resume_run(run_id, note.filter(|n| !n.trim().is_empty())),
         };
         let this = self.clone();
         let change = vec![Change::Runs {
@@ -828,12 +899,78 @@ impl CoreProvider {
             let _ = tx.send(match result {
                 Ok(_) => Ok(()),
                 Err(e) => {
-                    tracing::warn!(error = %e, pause, "cannot pause or resume a run");
+                    tracing::warn!(error = %e, "cannot pause, take over or resume a run");
                     Err(super::settings::admin_error(&e))
                 }
             });
         });
         rx
+    }
+
+    /// One command of mine in a run I took over; its output comes in the run log.
+    pub(super) fn run_command_inner(&self, run_id: &str, command: String) -> AdminReply<String> {
+        let (tx, rx) = oneshot::channel();
+        let Some(a) = self.account() else {
+            let _ = tx.send(Err(AdminError::Offline));
+            return rx;
+        };
+        let handle = a.client.run_command(run_id, command);
+        let this = self.clone();
+        let id = run_id.to_string();
+        a.client.spawn(async move {
+            let result = match handle.await {
+                Ok(r) => r,
+                Err(e) => Err(ClientError::Runtime(e.to_string())),
+            };
+            // Read the log now, so the command shows without waiting for the next poll.
+            this.refresh_live(&id, true, true);
+            let _ = tx.send(result.map_err(|e| {
+                tracing::info!(error = %e, "a command was refused");
+                super::settings::admin_error(&e)
+            }));
+        });
+        rx
+    }
+
+    pub(super) fn cancel_run_command_inner(
+        &self,
+        run_id: &str,
+        command_id: &str,
+    ) -> AdminReply<()> {
+        let (tx, rx) = oneshot::channel();
+        let Some(a) = self.account() else {
+            let _ = tx.send(Err(AdminError::Offline));
+            return rx;
+        };
+        let handle = a.client.cancel_run_command(run_id, command_id);
+        a.client.spawn(async move {
+            let result = match handle.await {
+                Ok(r) => r,
+                Err(e) => Err(ClientError::Runtime(e.to_string())),
+            };
+            let _ = tx.send(result.map_err(|e| super::settings::admin_error(&e)));
+        });
+        rx
+    }
+
+    pub(super) fn hand_commands_inner(
+        &self,
+        run_id: &str,
+    ) -> Vec<crate::data::run_phase::HandCommand> {
+        let generation = self.panes_generation();
+        let mut cache = lock(&self.shared.panes.inner);
+        cache
+            .for_generation(generation)
+            .live
+            .get(run_id)
+            .map(|e| e.hand.clone())
+            .unwrap_or_default()
+    }
+
+    pub(super) fn run_work_folder_inner(&self, run_id: &str) -> Option<std::path::PathBuf> {
+        let a = self.account()?;
+        let run = a.client.store().run(run_id).ok().flatten()?;
+        super::work_folder::work_folder(run.machine_id.as_deref(), run_id)
     }
 }
 

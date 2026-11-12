@@ -990,6 +990,7 @@ pub fn all() -> Vec<&'static Scene> {
         crate::views::topic_page::scenes::SCENES,
         crate::views::side_chat::scenes::SCENES,
         crate::views::live::scenes::SCENES,
+        crate::views::live::scenes::PHASE_SCENES,
         crate::views::nav::ask_scenes::SCENES,
         crate::views::group_page::scenes::SCENES,
         crate::views::members_page::scenes::SCENES,

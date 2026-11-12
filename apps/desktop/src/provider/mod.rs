@@ -60,6 +60,7 @@ mod system_events;
 mod this_mac;
 #[cfg(test)]
 mod wire_live;
+mod work_folder;
 // --- settings-backend track ---
 mod settings_backend;
 // --- end settings-backend track ---
@@ -2676,11 +2677,41 @@ impl ChatProvider for CoreProvider {
     }
 
     fn take_over_run(&self, group_id: &str, topic_id: &str, run_id: &str) -> AdminReply<()> {
-        self.pause_inner(group_id, topic_id, run_id, true)
+        self.hold_inner(group_id, topic_id, run_id, panes::Hold::TakeOver)
     }
 
     fn hand_back_run(&self, group_id: &str, topic_id: &str, run_id: &str) -> AdminReply<()> {
-        self.pause_inner(group_id, topic_id, run_id, false)
+        self.hold_inner(group_id, topic_id, run_id, panes::Hold::Resume(None))
+    }
+
+    fn pause_run(&self, group_id: &str, topic_id: &str, run_id: &str) -> AdminReply<()> {
+        self.hold_inner(group_id, topic_id, run_id, panes::Hold::Pause)
+    }
+
+    fn resume_run(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        run_id: &str,
+        note: Option<String>,
+    ) -> AdminReply<()> {
+        self.hold_inner(group_id, topic_id, run_id, panes::Hold::Resume(note))
+    }
+
+    fn run_command(&self, run_id: &str, command: String) -> AdminReply<String> {
+        self.run_command_inner(run_id, command)
+    }
+
+    fn cancel_run_command(&self, run_id: &str, command_id: &str) -> AdminReply<()> {
+        self.cancel_run_command_inner(run_id, command_id)
+    }
+
+    fn hand_commands(&self, run_id: &str) -> Vec<crate::data::run_phase::HandCommand> {
+        self.hand_commands_inner(run_id)
+    }
+
+    fn run_work_folder(&self, run_id: &str) -> Option<std::path::PathBuf> {
+        self.run_work_folder_inner(run_id)
     }
 
     // --- end of the panes track ---
