@@ -35396,6 +35396,34 @@
             "pushed"
           ]
         },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "effort": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "failure": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            },
+            "resetsAt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
         "phase": {
           "type": "string",
           "minLength": 1,
@@ -35492,6 +35520,9 @@
               "type": "string"
             },
             "model": {
+              "type": "string"
+            },
+            "effort": {
               "type": "string"
             }
           },
@@ -36258,6 +36289,9 @@
                       "type": "string"
                     },
                     "model": {
+                      "type": "string"
+                    },
+                    "effort": {
                       "type": "string"
                     }
                   },
@@ -37103,6 +37137,24 @@
                 "head",
                 "pushed"
               ]
+            },
+            "failure": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 32
+                },
+                "resetsAt": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "kind"
+              ]
             }
           },
           "required": [
@@ -37503,6 +37555,34 @@
                 "pushed"
               ]
             },
+            "model": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "effort": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            },
+            "failure": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 32
+                },
+                "resetsAt": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            },
             "phase": {
               "type": "string",
               "minLength": 1,
@@ -37624,6 +37704,9 @@
                             "type": "string"
                           },
                           "model": {
+                            "type": "string"
+                          },
+                          "effort": {
                             "type": "string"
                           }
                         },
@@ -38468,6 +38551,24 @@
                       "branch",
                       "head",
                       "pushed"
+                    ]
+                  },
+                  "failure": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 32
+                      },
+                      "resetsAt": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "kind"
                     ]
                   }
                 },
@@ -43332,6 +43433,9 @@
                       "plan": {
                         "type": "string",
                         "maxLength": 64
+                      },
+                      "confirmed": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -43560,6 +43664,9 @@
                       "type": "string"
                     },
                     "model": {
+                      "type": "string"
+                    },
+                    "effort": {
                       "type": "string"
                     }
                   },
@@ -44404,6 +44511,24 @@
                 "branch",
                 "head",
                 "pushed"
+              ]
+            },
+            "failure": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 32
+                },
+                "resetsAt": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "kind"
               ]
             }
           },

@@ -2,7 +2,7 @@
 
 use daemon::proto::RunEvent;
 use daemon::runtime::acp::AcpNormalizer;
-use daemon::runtime::claude::ClaudeNormalizer;
+use daemon::runtime::claude::{ClaudeNormalizer, EXITED_EARLY};
 use daemon::runtime::codex::CodexNormalizer;
 use serde_json::Value;
 
@@ -129,6 +129,47 @@ fn codex_real_auth_failure_sample() {
         e => panic!("{e:?}"),
     }
     assert_eq!(n.last_turn_status.as_deref(), Some("failed"));
+    // "workspace routing discovery unauthorized (401)", with codexErrorInfo "other".
+    let f = n.failure_of(n.last_error.as_deref()).unwrap();
+    assert_eq!(f.kind, "signed_out");
+}
+
+#[test]
+fn codex_failure_kinds_and_the_limit_reset() {
+    let mut n = CodexNormalizer::default();
+    // The account's windows: the short one is used up.
+    n.on_notification(
+        "account/rateLimits/updated",
+        &serde_json::json!({ "rateLimits": {
+            "primary": { "usedPercent": 100.0, "windowDurationMins": 300, "resetsAt": 1762142400 },
+            "secondary": { "usedPercent": 40.0, "windowDurationMins": 10080, "resetsAt": 1762700000 }
+        } }),
+    );
+    n.on_notification(
+        "turn/completed",
+        &serde_json::json!({ "threadId": "t", "turn": { "id": "u1", "status": "failed",
+            "error": { "message": "You've hit your usage limit.", "codexErrorInfo": "usageLimitExceeded" } } }),
+    );
+    let f = n.failure_of(n.last_error.as_deref()).unwrap();
+    assert_eq!(f.kind, "limit");
+    assert_eq!(f.resets_at, Some(1_762_142_400_000));
+
+    let mut n = CodexNormalizer::default();
+    n.on_notification(
+        "error",
+        &serde_json::json!({ "error": { "message": "stream disconnected",
+            "codexErrorInfo": { "responseStreamConnectionFailed": { "httpStatusCode": 502 } } },
+            "willRetry": false, "threadId": "t", "turnId": "u1" }),
+    );
+    assert_eq!(n.failure_of(None).unwrap().kind, "network");
+    // A turn that failed for a reason with no kind.
+    let mut n = CodexNormalizer::default();
+    n.on_notification(
+        "turn/completed",
+        &serde_json::json!({ "threadId": "t", "turn": { "id": "u1", "status": "failed",
+            "error": { "message": "context window exceeded", "codexErrorInfo": "contextWindowExceeded" } } }),
+    );
+    assert_eq!(n.failure_of(n.last_error.as_deref()), None);
 }
 
 #[test]
@@ -162,7 +203,8 @@ fn claude_success_sample() {
         RunEvent::Session {
             session_id: "s-1".into(),
             runtime: "claude".into(),
-            model: Some("claude-test".into())
+            model: Some("claude-test".into()),
+            effort: None
         }
     );
     // Tool use ids from the stream; block indices continue across assistant events.
@@ -294,6 +336,75 @@ fn claude_real_auth_failure_sample() {
         e => panic!("{e:?}"),
     }
     assert!(n.last_is_error);
+    // The assistant message's `error: "authentication_failed"`.
+    assert_eq!(n.failure_of(None).unwrap().kind, "signed_out");
+}
+
+/// Claude Code 2.1 with no sign-in at all (an empty config folder): the words and the typed
+/// error as it printed them.
+#[test]
+fn claude_not_logged_in_and_the_limit_reset() {
+    let mut n = ClaudeNormalizer::default();
+    n.queue_turn();
+    n.on_line(
+        &serde_json::json!({ "type": "assistant", "message": { "id": "m1", "model": "<synthetic>",
+        "content": [{ "type": "text", "text": "Not logged in · Please run /login" }] },
+        "error": "authentication_failed", "is_api_error_message": true }),
+    );
+    n.on_line(
+        &serde_json::json!({ "type": "result", "subtype": "success", "is_error": true,
+        "result": "Not logged in · Please run /login", "session_id": "s" }),
+    );
+    assert_eq!(n.failure_of(None).unwrap().kind, "signed_out");
+
+    // The account's limit refused the request; the event names the reset in seconds.
+    let mut n = ClaudeNormalizer::default();
+    n.queue_turn();
+    n.on_line(&serde_json::json!({ "type": "rate_limit_event",
+        "rate_limit_info": { "status": "rejected", "resetsAt": 1762142400, "rateLimitType": "five_hour" },
+        "uuid": "u", "session_id": "s" }));
+    n.on_line(
+        &serde_json::json!({ "type": "assistant", "message": { "id": "m1",
+        "content": [{ "type": "text", "text": "You've hit your session limit · resets 3pm" }] },
+        "error": "rate_limit" }),
+    );
+    n.on_line(&serde_json::json!({ "type": "result", "is_error": true,
+        "result": "You've hit your session limit · resets 3pm", "session_id": "s" }));
+    let f = n.failure_of(None).unwrap();
+    assert_eq!(f.kind, "limit");
+    assert_eq!(f.resets_at, Some(1_762_142_400_000));
+
+    // A later turn that went well: the earlier error is not the run's reason.
+    let mut n = ClaudeNormalizer::default();
+    n.queue_turn();
+    n.on_line(
+        &serde_json::json!({ "type": "assistant", "message": { "id": "m1",
+        "content": [{ "type": "text", "text": "x" }] }, "error": "overloaded" }),
+    );
+    n.on_line(&serde_json::json!({ "type": "result", "is_error": true, "result": "x", "session_id": "s" }));
+    n.queue_turn();
+    n.on_line(&serde_json::json!({ "type": "result", "is_error": false, "result": "done", "session_id": "s" }));
+    assert_eq!(
+        n.failure_of(Some("claude exited before the turn ended: ")),
+        None
+    );
+}
+
+#[test]
+fn claude_session_names_the_effort_it_runs_with() {
+    let mut n = ClaudeNormalizer::default();
+    n.effort = Some("high".into());
+    let evs = n.on_line(&serde_json::json!({ "type": "system", "subtype": "init",
+        "session_id": "s-1", "model": "claude-test" }));
+    assert_eq!(
+        evs,
+        [RunEvent::Session {
+            session_id: "s-1".into(),
+            runtime: "claude".into(),
+            model: Some("claude-test".into()),
+            effort: Some("high".into()),
+        }]
+    );
 }
 
 #[test]
@@ -588,5 +699,19 @@ fn codex_reports_its_model_with_cached_input_apart() {
             m.cache_read_tokens
         ),
         ("gpt-5.1-codex", 400, 100, Some(600))
+    );
+}
+
+#[test]
+fn claude_early_exit_with_another_programs_401_is_not_signed_out() {
+    let n = ClaudeNormalizer::default();
+    let tail = format!("{EXITED_EARLY}mcp server: HTTP 401 Unauthorized");
+    assert_eq!(n.failure_of(Some(&tail)).unwrap().kind, "other");
+    let own = format!("{EXITED_EARLY}Not logged in · Please run /login");
+    assert_eq!(n.failure_of(Some(&own)).unwrap().kind, "signed_out");
+    // The CLI's own result text keeps every sign-in word.
+    assert_eq!(
+        n.failure_of(Some("401 Unauthorized")).unwrap().kind,
+        "signed_out"
     );
 }

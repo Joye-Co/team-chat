@@ -1,0 +1,18 @@
+{
+  "kind": "RunLogEntry",
+  "valid": true,
+  "description": "Usable: a failed run.done with its failure kind and the time the limit resets",
+  "value": {
+    "t": "run.done",
+    "runId": "01JBX0RUN000000000000000AU",
+    "seq": 9,
+    "at": 1762128060000,
+    "status": "failed",
+    "error": "You've hit your session limit · resets 3pm",
+    "durationMs": 4100,
+    "failure": {
+      "kind": "limit",
+      "resetsAt": 1762142400000
+    }
+  }
+}

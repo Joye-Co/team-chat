@@ -17,6 +17,7 @@ import {
   MAX_PLAN_ITEMS,
   MAX_PLAN_TEXT_CHARS,
   type RunPlan,
+  RunFailure,
   RunPlanItem,
   RUN_KIND_ASIDE,
   RunCode,
@@ -131,6 +132,12 @@ export type RunRow = {
   // desk-run-code (design-relay R5)
   /** JSON of `RunCode` from run.done (branch, head, pushed), or null when not known. */
   code: string | null;
+  // desk-failure-model (模 2.2, 2.3, 2.10)
+  /** JSON of `RunFailure` of a failed run, or null. */
+  failure: string | null;
+  /** The model and 思考强度 the CLI really ran with (the session event), or null. */
+  model: string | null;
+  effort: string | null;
 };
 
 /**
@@ -469,6 +476,16 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
           up: `ALTER TABLE runs ADD COLUMN code TEXT;`,
         },
         {
+          // 模 2.2, 2.3, 2.10: why a run failed (run.done.failure, JSON) and the model and
+          // 思考强度 it really ran with (the session event). Old rows: NULL.
+          name: "desk-failure-model",
+          up: `
+            ALTER TABLE runs ADD COLUMN failure TEXT;
+            ALTER TABLE runs ADD COLUMN model TEXT;
+            ALTER TABLE runs ADD COLUMN effort TEXT;
+          `,
+        },
+        {
           // Usable 模 4.1: how the run's CLI was signed in when the run was sent ("subscription" |
           // "api_key"); the weekly budget counts by it. Old rows: NULL (the machine's sign-in now).
           name: "desk-login-method",
@@ -573,6 +590,10 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
     if (r.retry_of) run.retryOf = r.retry_of;
     const code = codeOf(r.code);
     if (code) run.code = code;
+    if (r.model) run.model = r.model;
+    if (r.effort) run.effort = r.effort;
+    const failure = r.failure ? RunFailure.safeParse(JSON.parse(r.failure)) : null;
+    if (failure?.success) run.failure = failure.data;
     if (r.queued_at && r.ended_at === null && r.status === "created" && !r.machine_id) {
       run.queuedAt = r.queued_at;
       run.queuePosition = this.queuePosition(r);

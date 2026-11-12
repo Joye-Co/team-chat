@@ -10,6 +10,7 @@ pub mod config;
 pub mod daemon;
 pub mod doctor;
 pub mod executor;
+pub mod failure;
 pub mod gates;
 pub mod github;
 pub mod health;

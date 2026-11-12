@@ -2,7 +2,7 @@
 // status events in the group log and the run log. See docs/protocol.md, "Bot runs".
 import { z } from "zod";
 import { eventBase, Id, Millis, Name, Seq } from "./common.ts";
-import { AcceptanceItem, CliInfo, Effort, Health, Labels, MAX_ACCEPTANCE_ITEMS, MachineFeature, RunLogEntry, Usage } from "./machine.ts";
+import { AcceptanceItem, CliInfo, Effort, Health, Labels, MAX_ACCEPTANCE_ITEMS, MachineFeature, RunFailure, RunLogEntry, Usage } from "./machine.ts";
 import { RunPlan } from "./plan.ts";
 import { Artifact, ArtifactVersion } from "./files.ts";
 import { GroupDecision, RecordedDecision } from "./card2.ts";
@@ -63,6 +63,12 @@ export const BotRun = z.object({
   chainId: Id.optional(),
   /** Where the run left its code (`run.done.code`). */
   code: RunCode.optional(),
+  /** The model the CLI really ran with (the `session` run event). */
+  model: z.string().min(1).max(200).optional(),
+  /** The 思考强度 the CLI really ran with (the `session` run event); absent = its default. */
+  effort: z.string().min(1).max(32).optional(),
+  /** Why a failed run failed (`run.done.failure`); absent = not known. */
+  failure: RunFailure.optional(),
   ...runPhaseFields,
 });
 export type BotRun = z.infer<typeof BotRun>;

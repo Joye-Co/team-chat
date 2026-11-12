@@ -121,6 +121,9 @@ pub struct Outcome {
     /// The CLI's own raw session file, when it keeps one.
     pub session_file: Option<PathBuf>,
     pub usage: Option<Usage>,
+    /// Why a failed run failed, from what the CLI reported (its typed errors); None leaves it to
+    /// the error text ([`crate::failure::of_run`]).
+    pub failure: Option<crate::proto::RunFailure>,
 }
 
 impl Outcome {
@@ -133,6 +136,7 @@ impl Outcome {
             session_id: None,
             session_file: None,
             usage: None,
+            failure: None,
         }
     }
 }

@@ -96,6 +96,11 @@ cd ~/Library/Application\ Support/co.joye.teamchat && zip -r ~/Desktop/teamchat-
 
 ## Uninstall
 
+0. If this Mac was set up with 用这台电脑 (AI members work on it), first choose
+   **不再用这台电脑…** in the ⋯ menu of this computer in **Settings › 电脑**: it leaves the team,
+   its background service (launchd) is stopped and removed, and the files that registered it in
+   `~/.config/team-chat/` (`daemon.toml`, `machine-token`, `machine.key`, `secrets.json`) are
+   deleted. Without this step the service keeps pointing at an app that is gone.
 1. Quit Cahoots (also from the menu bar item) and move `/Applications/Cahoots.app` to the
    Bin.
 2. Optional: delete `~/Library/Application Support/co.joye.teamchat/` (the logs are in it).
@@ -176,6 +181,9 @@ program did at each step; send it too.
 
 ### Uninstall
 
+0. If this computer was set up with 用这台电脑, first choose **不再用这台电脑…** in the ⋯ menu of
+   this computer in **Settings › 电脑**: it leaves the team, its background task is removed and
+   the files that registered it in `%USERPROFILE%\.config\team-chat\` are deleted.
 1. Quit Cahoots (also from the icon in the notification area).
 2. Open **Settings → Apps → Installed apps**, find Cahoots and choose **Uninstall**. Or run
    `"%LOCALAPPDATA%\Programs\Cahoots\uninstall.exe"` (add `/S` for no window).
