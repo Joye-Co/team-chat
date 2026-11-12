@@ -528,10 +528,7 @@ impl Session {
             features: Some(
                 CLIENT_FEATURES
                     .iter()
-                    .chain([
-                        &crate::proto::FEATURE_SETTINGS,
-                        &crate::proto::FEATURE_GITHUB,
-                    ])
+                    .chain([&crate::proto::FEATURE_SETTINGS])
                     .map(|f| f.to_string())
                     .collect(),
             ),
@@ -1705,10 +1702,9 @@ impl Session {
             }
             // settings-backend: the daily digest (feature "settings/1").
             TransientEvent::Digest(d) => self.shared.emit(ClientUpdate::Digest(Box::new(d))),
-            // usable: my GitHub sign-in changed (feature "github/1").
-            TransientEvent::GithubStatus(g) => {
-                self.shared.emit(ClientUpdate::GithubStatus(Box::new(g)))
-            }
+            // usable: per-person GitHub sign-in is gone (design-github-identity.zh.md §3.7);
+            // only a server talking to an older client sends it.
+            TransientEvent::GithubStatus(_) => {}
             // usable: the AI 服务 keeps failing (admins, feature "settings/1"); the screens read
             // `AiServiceConfig.failing` for now.
             TransientEvent::AiFailing(_) => {}

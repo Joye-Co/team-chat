@@ -375,10 +375,11 @@ impl MachinesPage {
             (true, false) => format!("{} · {facts}", s::MACHINE_THIS),
             (false, _) => facts,
         };
-        // Usable (GitHub, §3.7): an older daemon cannot use the GitHub I connected.
-        let facts = match super::github::machine_hint(m, &self.services) {
-            Some(hint) => format!("{hint} · {facts}"),
-            None => facts,
+        // Usable (GitHub, §3.7): the computer's own GitHub sign-in leads the description.
+        let facts = match (github_note(m), facts.is_empty()) {
+            (Some(note), true) => note,
+            (Some(note), false) => format!("{note} · {facts}"),
+            (None, _) => facts,
         };
         widgets::ItemRow::new(
             ElementId::Name(format!("machine-{}", m.id).into()),
@@ -699,6 +700,19 @@ pub fn unhealthy_tip(why: Option<&str>) -> &'static str {
         Some(unhealthy::DISK) => s::MACHINE_UNHEALTHY_TIP_DISK,
         _ => s::MACHINE_UNHEALTHY_TIP,
     }
+}
+
+/// Usable (design-github-identity.zh.md §3.7): the computer's own GitHub sign-in, as the
+/// server tells it (admins and the owner); nothing when it does not. A signed-in report
+/// without an account name says nothing either.
+fn github_note(m: &MachineInfo) -> Option<String> {
+    let g = m.github.as_ref()?;
+    if g.state == "signed_in" {
+        return g
+            .signed_in_login()
+            .map(|login| fill(s::MACHINE_GITHUB_ON, &[("login", login)]));
+    }
+    Some(s::MACHINE_GITHUB_OFF.to_string())
 }
 
 /// The second line of a computer row, most important first: what it does
@@ -1194,6 +1208,30 @@ pub fn open_add_machine(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// §3.7: signed in shows the account, every other state 未登录 GitHub, absent nothing.
+    #[test]
+    fn the_computer_row_says_its_github_sign_in() {
+        let with = |state: &str, login: Option<&str>| MachineInfo {
+            github: Some(crate::data::MachineGithub {
+                state: state.into(),
+                login: login.map(Into::into),
+            }),
+            ..MachineInfo::default()
+        };
+        assert_eq!(
+            github_note(&with("signed_in", Some("acme-bot"))).as_deref(),
+            Some("GitHub @acme-bot")
+        );
+        for state in ["signed_out", "no_gh", "unknown", "newer"] {
+            assert_eq!(
+                github_note(&with(state, None)).as_deref(),
+                Some(s::MACHINE_GITHUB_OFF)
+            );
+        }
+        assert_eq!(github_note(&with("signed_in", None)), None);
+        assert_eq!(github_note(&MachineInfo::default()), None);
+    }
 
     /// 机 5.6: 异常 says which check failed; an unknown one or an older server keeps the
     /// general words.

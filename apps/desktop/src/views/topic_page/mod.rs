@@ -661,8 +661,6 @@ impl Render for TopicPage {
             .flex()
             .flex_col()
             .bg(k.bg)
-            // Usable: an AI member waits for me to connect GitHub (§2.16, top of the column).
-            .children(crate::views::github_banner::slot(cx))
             // Usable: the 按顺序做 bar, under the title, above the plan cards.
             .child(self.relay_strip.clone())
             .child(div().flex_1().min_h(px(0.)).child(self.timeline.clone()))

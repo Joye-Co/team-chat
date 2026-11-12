@@ -291,11 +291,6 @@ fn provider(start: Start, worst_case: bool) -> Arc<dyn ChatProvider> {
             fake.set_role_view(view);
             fake
         }
-        Start::Github(shape) => {
-            let fake = fake::FakeProvider::new();
-            fake.set_github(shape);
-            fake
-        }
         // --- provider track ---
         Start::Core => {
             static SHOT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);

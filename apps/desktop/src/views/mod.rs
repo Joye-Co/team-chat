@@ -8,7 +8,6 @@ pub mod columns;
 pub mod composer;
 pub mod connection_banner;
 pub mod files;
-pub mod github_banner;
 pub mod login;
 // --- v11/media ---
 pub mod media;

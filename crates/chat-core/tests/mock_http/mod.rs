@@ -40,12 +40,6 @@ pub struct HttpState {
     pub not_owner: bool,
     pub devices: Vec<Device>,
     // --- end settings-backend track ---
-    // --- usable: GitHub sign-in ---
-    pub github_account: Option<GithubAccount>,
-    pub github_waits: Vec<GithubWait>,
-    /// Polls answered `pending` before the sign-in is done.
-    pub github_pending_polls: u32,
-    // --- end usable: GitHub sign-in ---
     // --- memory ---
     pub memories: Vec<MemoryItem>,
     pub memory_updates: Vec<MemoryUpdate>,
@@ -669,41 +663,6 @@ async fn handle(st: Arc<Mutex<HttpState>>, req: Request<Incoming>) -> Response<F
             ok(json!({"revoked": 1}))
         }
         // --- end settings-backend track ---
-        // --- usable: GitHub sign-in (docs/protocol.md "GitHub sign-in") ---
-        (&Method::GET, ["v1", "me", "github"]) => ok(GithubStatusResponse {
-            available: true,
-            unavailable_reason: None,
-            account: s.github_account.clone(),
-            waits: s.github_waits.clone(),
-        }),
-        (&Method::POST, ["v1", "me", "github", "device"]) => ok(json!({
-            "deviceId": "D1", "userCode": "WDJB-MJHT",
-            "verificationUri": "https://github.com/login/device",
-            "interval": 5, "expiresAt": 900_000,
-        })),
-        (&Method::POST, ["v1", "me", "github", "device", "D1", "poll"]) => {
-            if s.github_pending_polls > 0 {
-                s.github_pending_polls -= 1;
-                return ok(json!({"state": "pending"}));
-            }
-            let account = GithubAccount {
-                login: "octo".into(),
-                name: Some("Octo Cat".into()),
-                status: "ok".into(),
-                connected_at: 7,
-            };
-            s.github_account = Some(account.clone());
-            s.github_waits.clear();
-            ok(json!({"state": "done", "account": account}))
-        }
-        (&Method::POST, ["v1", "me", "github", "device", _, "poll"]) => {
-            err(StatusCode::NOT_FOUND, "not_found")
-        }
-        (&Method::DELETE, ["v1", "me", "github"]) => {
-            s.github_account = None;
-            ok(json!({"ok": true}))
-        }
-        // --- end usable: GitHub sign-in ---
         // --- memory: just enough of docs/protocol.md "Memory" for the client ---
         (&Method::GET, ["v1", "memories"]) => {
             s.memory_queries.push(query.clone());
