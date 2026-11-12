@@ -6,7 +6,7 @@
 import { utf8Bytes } from "@chat/protocol";
 import type { Env } from "../core/env";
 import { logger } from "../core/logger";
-import { fitsGroupSql } from "./access";
+import { runReadableSql } from "./access";
 import { score } from "./relevance";
 import type { MemoryRow } from "./store";
 
@@ -27,8 +27,12 @@ export const MEMORY_RUN_NOTE =
 export interface MemoryReader {
   botId: string;
   groupId: string;
-  /** The person who asked: their preferences come along. */
+  /** The person the run works for (`readerOf`): their preferences come along. */
   requesterId?: string | null;
+  /** The groups the run may read (`readableGroups`, its own among them): memories learned there come along. */
+  groups: string[];
+  /** A search (`chat-run memory search`): the group layer of every readable group, not only this one's. */
+  searchGroups?: boolean;
 }
 
 export interface MemoryFor extends MemoryReader {
@@ -45,22 +49,24 @@ function scopesOf(o: MemoryReader) {
 }
 
 /**
- * The memories this reader may see in this group: the team's, the group's, the member's (its own
- * pending ones too) and the requester's active ones, each only where everyone in the group is
- * in the group it was learned in. Newest change first. `ids` limits it to those memories.
+ * The memories this reader may see in this group: the team's, the group's (with `searchGroups`
+ * every readable group's), the member's (its own pending ones too) and the requester's active
+ * ones, each only when it was learned in a group the run may read (design-visibility 3.5).
+ * Newest change first. `ids` limits it to those memories.
  */
 export async function readableMemories(db: D1Database, o: MemoryReader, ids?: string[]): Promise<MemoryRow[]> {
   const s = scopesOf(o);
-  const only = ids ? ` AND m.id IN (${ids.map((_, i) => `?${7 + i}`).join(", ")})` : "";
+  const only = ids ? ` AND m.id IN (${ids.map((_, i) => `?${8 + i}`).join(", ")})` : "";
+  const extra = o.searchGroups ? o.groups.map((g) => `group:${g}`) : [];
   return (
     await db
       .prepare(
-        // A memory learned in a group goes only where everyone in this group is in that group.
-        `SELECT * FROM memories m WHERE ((status = 'active' AND scope IN (?1, ?2, ?3, ?4)) OR (status = 'pending' AND scope = ?3 AND author_id = ?5))
-           AND ${fitsGroupSql("m", 6)}${only}
+        // A memory learned in a group goes only into runs that may read that group.
+        `SELECT * FROM memories m WHERE ((status = 'active' AND (scope IN (?1, ?2, ?3, ?4) OR scope IN (SELECT value FROM json_each(?7)))) OR (status = 'pending' AND scope = ?3 AND author_id = ?5))
+           AND ${runReadableSql("m", 6)}${only}
          ORDER BY updated_at DESC, id DESC LIMIT ${MAX_CANDIDATES}`,
       )
-      .bind(s.team, s.group, s.member, s.person ?? "", o.botId, o.groupId, ...(ids ?? []))
+      .bind(s.team, s.group, s.member, s.person ?? "", o.botId, JSON.stringify(o.groups), JSON.stringify(extra), ...(ids ?? []))
       .all<MemoryRow>()
   ).results;
 }

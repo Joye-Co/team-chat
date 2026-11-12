@@ -8,7 +8,7 @@ import { tracker, useConfig } from "../aiservice/uses";
 import type { CallOptions } from "../aiservice/providers";
 import { type ToolSpec, callTool } from "../aiservice/tools";
 import type { Env } from "../core/env";
-import { fitsGroupSql } from "./access";
+import { runReadableSql } from "./access";
 import { insertStatements, type MemoryRow } from "./store";
 
 export const MAX_LESSONS = 3;
@@ -49,8 +49,10 @@ export interface RetroInput {
   botId: string;
   botName?: string;
   runId: string;
-  /** The run's group: the lessons are read only there. */
+  /** Where the lessons come from: the run's group, or the other group it read (`unknown` for two or more). */
   groupId: string;
+  /** The groups the run may read (`readableGroups`): lessons known there are not repeated. */
+  groups: string[];
   status: RunStatus;
   requesterId: string;
   request: string;
@@ -77,8 +79,8 @@ export async function retroAfterRun(env: Env, i: RetroInput, opts: CallOptions =
   const cfg = await useConfig(env, "retro");
   if (!cfg) return 0;
   const known = (
-    await env.DB.prepare(`SELECT text FROM memories m WHERE scope = ?1 AND status IN ('active', 'pending') AND ${fitsGroupSql("m", 2)} ORDER BY updated_at DESC LIMIT 30`)
-      .bind(`member:${i.botId}`, i.groupId)
+    await env.DB.prepare(`SELECT text FROM memories m WHERE scope = ?1 AND status IN ('active', 'pending') AND ${runReadableSql("m", 2)} ORDER BY updated_at DESC LIMIT 30`)
+      .bind(`member:${i.botId}`, JSON.stringify(i.groups))
       .all<Pick<MemoryRow, "text">>()
   ).results;
   const system = [
