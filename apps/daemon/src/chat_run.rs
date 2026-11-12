@@ -178,7 +178,7 @@ pub struct Outputs {
     gate: OnceLock<Arc<crate::secrets::Gate>>,
     /// The run's gated actions (`chat-run gate`, the CLI's hook).
     gates: OnceLock<Arc<crate::gates::Gates>>,
-    /// Feature "github", `app` mode: the run's GitHub (`git-credential`, the `gh` proxy).
+    /// Feature "github-host", a VM run: the host's GitHub (`git-credential`, the `gh` proxy).
     github: OnceLock<Arc<crate::github::Run>>,
 }
 
@@ -692,7 +692,7 @@ pub async fn handle(
             return error(
                 "not_found",
                 Some("github.off"),
-                "this run does not use a GitHub sign-in from the app",
+                "this run does not get GitHub from the daemon (git and gh are the computer's own)",
             );
         };
         let body = req.get("body").cloned().unwrap_or(Value::Null);
@@ -1735,7 +1735,7 @@ pub fn main(args: Vec<String>) -> i32 {
     if args.len() == 1 && args[0] == "gate-alive" {
         return crate::gates::alive_main();
     }
-    // git's credential helper in a run that uses the app's GitHub (crate::github).
+    // git's credential helper in a VM run: the host's GitHub (crate::github).
     if args[0] == crate::github::OP_CREDENTIAL {
         return crate::github::credential_main(&args[1..]);
     }
