@@ -30,6 +30,8 @@ pub const CARD_GET: &str = "card.get";
 pub const DECISIONS_LIST: &str = "decisions.list";
 pub const MEMBER_LIST: &str = "member.list";
 pub const TOPIC_STATE: &str = "topic.state";
+/// The groups the run may read (feature `groups`): its own and those of the person it works for.
+pub const GROUP_LIST: &str = "group.list";
 pub const OPS: &[&str] = &[
     TOPIC_HISTORY,
     TOPIC_MESSAGE,
@@ -43,6 +45,7 @@ pub const OPS: &[&str] = &[
     DECISIONS_LIST,
     MEMBER_LIST,
     TOPIC_STATE,
+    GROUP_LIST,
 ];
 /// `decisions.list` page size: 1-100.
 pub const MAX_DECISIONS_LIMIT: u64 = 100;
@@ -123,13 +126,25 @@ fn id_field<'a>(body: &'a Value, k: &str) -> Result<&'a str, Value> {
         .ok_or_else(|| err("invalid", None, format!("{k} is required")))
 }
 
-/// `topic=<id>` for `topicId`: another topic of the run's group (the server refuses any other).
+/// `topic=<id>` for `topicId`: a topic the run may read.
 fn topic(body: &Value) -> Result<Option<String>, Value> {
     match &body["topicId"] {
         Value::Null => Ok(None),
         v => match v.as_str().filter(|s| valid_id(s)) {
             Some(id) => Ok(Some(format!("topic={id}"))),
             None => Err(err("invalid", None, "topicId must be a topic id")),
+        },
+    }
+}
+
+/// `group=<id>` for `groupId`: another group the run may read (the server answers `not_found`
+/// for one it may not).
+fn group(body: &Value) -> Result<Option<String>, Value> {
+    match &body["groupId"] {
+        Value::Null => Ok(None),
+        v => match v.as_str().filter(|s| valid_id(s)) {
+            Some(id) => Ok(Some(format!("group={id}"))),
+            None => Err(err("invalid", None, "groupId must be a group id")),
         },
     }
 }
@@ -149,15 +164,16 @@ pub fn read_path(run: &str, op: &str, body: &Value) -> Result<String, Value> {
                 }
             }
             q.extend(topic(body)?);
+            q.extend(group(body)?);
             Ok(format!("/v1/machine/runs/{run}/topic/messages{}", query(q)))
         }
         TOPIC_MESSAGE => {
             let id = id_field(body, "messageId")?;
-            let q = query(topic(body)?.into_iter().collect());
+            let q = query(topic(body)?.into_iter().chain(group(body)?).collect());
             Ok(format!("/v1/machine/runs/{run}/topic/messages/{id}{q}"))
         }
         TOPIC_STATE => {
-            let q = query(topic(body)?.into_iter().collect());
+            let q = query(topic(body)?.into_iter().chain(group(body)?).collect());
             Ok(format!("/v1/machine/runs/{run}/topic/state{q}"))
         }
         ARTIFACT_LIST => {
@@ -173,6 +189,7 @@ pub fn read_path(run: &str, op: &str, body: &Value) -> Result<String, Value> {
                 return Err(err("invalid", None, "topicId goes with scope topic"));
             }
             q.extend(topic(body)?);
+            q.extend(group(body)?);
             Ok(format!("/v1/machine/runs/{run}/artifacts{}", query(q)))
         }
         ARTIFACT_GET => {
@@ -187,12 +204,17 @@ pub fn read_path(run: &str, op: &str, body: &Value) -> Result<String, Value> {
             Ok(format!("/v1/machine/runs/{run}/cards/{id}"))
         }
         DECISIONS_LIST => {
-            let q = number(body, "limit", 1, MAX_DECISIONS_LIMIT)?
+            let mut q: Vec<String> = number(body, "limit", 1, MAX_DECISIONS_LIMIT)?
                 .map(|n| vec![format!("limit={n}")])
                 .unwrap_or_default();
+            q.extend(group(body)?);
             Ok(format!("/v1/machine/runs/{run}/decisions{}", query(q)))
         }
-        MEMBER_LIST => Ok(format!("/v1/machine/runs/{run}/members")),
+        MEMBER_LIST => {
+            let q = query(group(body)?.into_iter().collect());
+            Ok(format!("/v1/machine/runs/{run}/members{q}"))
+        }
+        GROUP_LIST => Ok(format!("/v1/machine/runs/{run}/groups")),
         CONTEXT_SEARCH => {
             let Some(query) = body["query"].as_str().filter(|s| !s.trim().is_empty()) else {
                 return Err(err("invalid", None, "query is required"));
@@ -200,16 +222,23 @@ pub fn read_path(run: &str, op: &str, body: &Value) -> Result<String, Value> {
             let scope = match &body["scope"] {
                 Value::Null => "topic",
                 v => match v.as_str() {
-                    Some(s @ ("topic" | "group")) => s,
-                    _ => return Err(err("invalid", None, "scope must be topic or group")),
+                    Some(s @ ("topic" | "group" | "all")) => s,
+                    _ => return Err(err("invalid", None, "scope must be topic, group or all")),
                 },
             };
+            let group = group(body)?;
+            if scope == "all" && group.is_some() {
+                return Err(err("invalid", None, "groupId does not go with scope all"));
+            }
             let mut p = format!(
                 "/v1/machine/runs/{run}/search?q={}&scope={scope}",
                 encode(query)
             );
             if let Some(n) = number(body, "limit", 1, MAX_SEARCH_LIMIT)? {
                 p.push_str(&format!("&limit={n}"));
+            }
+            if let Some(g) = group {
+                p.push_str(&format!("&{g}"));
             }
             Ok(p)
         }
@@ -789,6 +818,55 @@ mod tests {
             p(MEMORY_SEARCH, json!({ "query": "x" })).unwrap(),
             "/v1/machine/runs/R1/memories?q=x"
         );
+        // Another group the run may read (feature `groups`).
+        assert_eq!(
+            p(GROUP_LIST, json!({})).unwrap(),
+            "/v1/machine/runs/R1/groups"
+        );
+        assert_eq!(
+            p(
+                TOPIC_HISTORY,
+                json!({ "limit": 5, "topicId": "T2", "groupId": "G2" })
+            )
+            .unwrap(),
+            "/v1/machine/runs/R1/topic/messages?limit=5&topic=T2&group=G2"
+        );
+        assert_eq!(
+            p(TOPIC_MESSAGE, json!({ "messageId": "M1", "groupId": "G2" })).unwrap(),
+            "/v1/machine/runs/R1/topic/messages/M1?group=G2"
+        );
+        assert_eq!(
+            p(TOPIC_STATE, json!({ "topicId": "T2", "groupId": "G2" })).unwrap(),
+            "/v1/machine/runs/R1/topic/state?topic=T2&group=G2"
+        );
+        assert_eq!(
+            p(ARTIFACT_LIST, json!({ "scope": "group", "groupId": "G2" })).unwrap(),
+            "/v1/machine/runs/R1/artifacts?scope=group&group=G2"
+        );
+        assert_eq!(
+            p(DECISIONS_LIST, json!({ "limit": 7, "groupId": "G2" })).unwrap(),
+            "/v1/machine/runs/R1/decisions?limit=7&group=G2"
+        );
+        assert_eq!(
+            p(DECISIONS_LIST, json!({ "groupId": "G2" })).unwrap(),
+            "/v1/machine/runs/R1/decisions?group=G2"
+        );
+        assert_eq!(
+            p(MEMBER_LIST, json!({ "groupId": "G2" })).unwrap(),
+            "/v1/machine/runs/R1/members?group=G2"
+        );
+        assert_eq!(
+            p(
+                CONTEXT_SEARCH,
+                json!({ "query": "x", "scope": "group", "groupId": "G2", "limit": 5 })
+            )
+            .unwrap(),
+            "/v1/machine/runs/R1/search?q=x&scope=group&limit=5&group=G2"
+        );
+        assert_eq!(
+            p(CONTEXT_SEARCH, json!({ "query": "x", "scope": "all" })).unwrap(),
+            "/v1/machine/runs/R1/search?q=x&scope=all"
+        );
         for (op, bad) in [
             (TOPIC_HISTORY, json!({ "limit": 0 })),
             (TOPIC_HISTORY, json!({ "limit": 101 })),
@@ -797,7 +875,21 @@ mod tests {
             (TOPIC_MESSAGE, json!({ "messageId": "../files/F" })),
             (CONTEXT_SEARCH, json!({ "query": " " })),
             (CONTEXT_SEARCH, json!({ "query": "x", "limit": 51 })),
-            (CONTEXT_SEARCH, json!({ "query": "x", "scope": "all" })),
+            (
+                CONTEXT_SEARCH,
+                json!({ "query": "x", "scope": "everywhere" }),
+            ),
+            (
+                CONTEXT_SEARCH,
+                json!({ "query": "x", "scope": "all", "groupId": "G2" }),
+            ),
+            (CONTEXT_SEARCH, json!({ "query": "x", "groupId": "../G" })),
+            (TOPIC_HISTORY, json!({ "groupId": "a/b" })),
+            (TOPIC_MESSAGE, json!({ "messageId": "M1", "groupId": 3 })),
+            (TOPIC_STATE, json!({ "groupId": "" })),
+            (ARTIFACT_LIST, json!({ "groupId": "G 2" })),
+            (DECISIONS_LIST, json!({ "groupId": "../x" })),
+            (MEMBER_LIST, json!({ "groupId": "?x" })),
             ("card.post", json!({})),
             (TOPIC_HISTORY, json!({ "topicId": "../x" })),
             (TOPIC_STATE, json!({ "topicId": 3 })),
