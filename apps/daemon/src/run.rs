@@ -546,6 +546,7 @@ pub async fn supervise(ctx: RunCtx) {
                     run_id: run_id.clone(),
                     root: cwd.clone(),
                     redactor: redactor.clone(),
+                    downloads: Some(dir.join(crate::chat_run_context::DOWNLOADS_DIR)),
                 });
                 let host =
                     start_chat_run(&dir, &cwd, files, &run_id, &out, outputs.clone(), &mut env);

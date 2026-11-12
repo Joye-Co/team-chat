@@ -253,7 +253,7 @@ impl ClaudeNormalizer {
                         item_id: id.clone(),
                         turn_id: self.turn(),
                         ok,
-                        output: Some(truncate(&value_text(&b["content"]), OUTPUT_LIMIT)),
+                        output: Some(super::truncate_output(&value_text(&b["content"]))),
                         exit_code: None,
                     });
                     if let (true, Some((name, input))) = (ok, self.tools.get(&id))

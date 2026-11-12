@@ -21,7 +21,18 @@ with `chat-run card patch` at its rev and writes each answer to chatcard-<n>.jso
 decided to gate-<n>.json; "pushes" makes a git repository on main with no remote and calls
 the Bash tool with pushes to main written in ways the patterns miss, runs each command the hooks
 let through in a shell (where the run's shims are first on PATH) and writes the hooks' decision,
-the exit code and standard error of each to push-<n>.json.
+the exit code and standard error of each to push-<n>.json;
+"hold" reads the next stdin line (a follow-up the daemon sends while the turn is open) before it
+answers, writes its text to held.json and takes it as the next turn;
+"seefile" writes to seefile.json whether kept.txt is in the working folder, the git branch there
+and `git status --porcelain`; "keepfile" then writes kept.txt and leaves it uncommitted;
+"memo:<text>" runs `chat-run memory note --scope member --kind lesson --text <text>` and
+writes its exit code and output to remember.json;
+"readback" runs the read commands `chat-run member list`, `topic state` and `artifact list`
+(with "topic:<id>", of that topic), `artifact get --id <first listed>`, `decisions list` and, with "card:<message id>", `card get`,
+and writes each answer to readback.json.
+`--version` prints the version of the Claude Code the Windows tests gate (2.1.322).
+Every turn's text goes to prompts.jsonl ({"pid", "sid", "n", "text"}, one line each, appended).
 The arguments are written to argv.json in the working directory (in the run folder above it, with
 the failed write's errno in aside-write.json, when the working directory is read-only); with --settings, the settings
 and the ASIDE_PROBE variable they set go to settings-seen.json.
@@ -35,6 +46,9 @@ if args == ["--help"]:
     print("Options:\n  --effort <level>          Effort level for the current session\n"
           "                            (low, medium, high, xhigh, max)\n"
           "  --model <model>           Model for the current session")
+    sys.exit(0)
+if args == ["--version"]:
+    print("2.1.322 (Claude Code)")
     sys.exit(0)
 sid = args[args.index("--session-id") + 1] if "--session-id" in args else "fake-session"
 if "--resume" in args:
@@ -118,14 +132,70 @@ session = open(os.path.join(proj, sid + ".jsonl"), "a")
 def out(o):
     sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
 
+def turn_text(line):
+    return "".join(c.get("text", "") for c in json.loads(line)["message"]["content"])
+
+def chat_run(*a):
+    r = subprocess.run(["chat-run", *a], capture_output=True, text=True)
+    try:
+        v = json.loads(r.stdout)
+    except ValueError:
+        v = None
+    return {"code": r.returncode, "out": v, "err": r.stderr[-400:]}
+
+def git_out(*a):
+    try:
+        return subprocess.run(["git", *a], capture_output=True, text=True).stdout.strip()
+    except OSError:
+        return None
+
 n = 0
-for line in sys.stdin:
+# Lines read ahead by "hold", taken as the next turns.
+pending = []
+while True:
+    line = pending.pop(0) if pending else sys.stdin.readline()
+    if not line:
+        break
+    if not line.strip():
+        continue
     msg = json.loads(line)
     text = "".join(c.get("text", "") for c in msg["message"]["content"])
     # Modes come from the request and what follows it, not from the rules the server puts in
     # front of it (the acceptance rule says "changes" and "artifact").
     cue = text.rsplit("\nRequest from ", 1)[-1]
     session.write(json.dumps({"type": "user", "text": text}) + "\n"); session.flush()
+    with open(os.path.join(rec, "prompts.jsonl"), "a") as pf:
+        pf.write(json.dumps({"pid": os.getpid(), "sid": sid, "n": n + 1, "text": text}) + "\n")
+    if "hold" in cue:
+        nxt = sys.stdin.readline()
+        open("held.json", "w").write(json.dumps({"text": turn_text(nxt) if nxt.strip() else None}))
+        if nxt:
+            pending.append(nxt)
+    if "seefile" in cue:
+        open("seefile.json", "w").write(json.dumps({"kept": os.path.exists("kept.txt"), "branch": git_out("rev-parse", "--abbrev-ref", "HEAD"),
+                                                    "status": git_out("status", "--porcelain")}))
+    if "keepfile" in cue:
+        open("kept.txt", "w").write("kept by %d\n" % os.getpid())
+    m = re.search(r"memo:(\S+)", cue)
+    if m:
+        r = subprocess.run(["chat-run", "memory", "note", "--scope", "member", "--kind", "lesson", "--text", m.group(1)], capture_output=True, text=True)
+        try:
+            v = json.loads(r.stdout)
+        except ValueError:
+            v = None
+        open("remember.json", "w").write(json.dumps({"code": r.returncode, "out": v, "err": r.stderr[-400:]}))
+    if "readback" in cue:
+        topic = re.search(r"topic:(\S+)", cue)
+        where = ["--topic", topic.group(1)] if topic else []
+        got = {"members": chat_run("member", "list"), "state": chat_run("topic", "state", *where), "artifacts": chat_run("artifact", "list", *where)}
+        arts = (got["artifacts"]["out"] or {}).get("artifacts") or []
+        if arts:
+            got["artifact"] = chat_run("artifact", "get", "--id", arts[0]["id"])
+        got["decisions"] = chat_run("decisions", "list")
+        card = re.search(r"card:(\S+)", cue)
+        if card:
+            got["card"] = chat_run("card", "get", "--message", card.group(1))
+        open("readback.json", "w").write(json.dumps(got))
     if n == 0:
         out({"type": "system", "subtype": "init", "cwd": os.getcwd(), "session_id": sid, "model": "fake-model"})
     n += 1

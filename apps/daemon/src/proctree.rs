@@ -466,15 +466,17 @@ mod tests {
             .parse()
             .unwrap();
         let _ = std::fs::remove_file(&pidfile);
+        let hit = |t: &Target| matches!(*t, Target::Pid(p, _) | Target::Group(p, _) if p == pid);
+        // Up to 15 s: on a loaded CI runner the copy of sleep can take seconds to start and to be
+        // re-parented (2 s was not always enough on the macOS runners).
         let mut found = vec![];
-        for _ in 0..100 {
+        for _ in 0..750 {
             found = orphans(&dir.path().join("runs/r1"));
-            if !found.is_empty() {
+            if found.iter().any(hit) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        let hit = |t: &Target| matches!(*t, Target::Pid(p, _) | Target::Group(p, _) if p == pid);
         assert!(found.iter().any(hit), "{found:?}");
         assert!(!orphans(&dir.path().join("runs/r2")).iter().any(hit));
         assert!(

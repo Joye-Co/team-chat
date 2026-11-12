@@ -1,6 +1,7 @@
 // The output contract of a run (docs/protocol.md, "Bot runs"): when a run succeeds the bot posts
 // one Card v2 with intent "done" and its proof: the result, pull requests it names, the test
-// counts it reports, its 验收标准 and the 产出 versions it made. Pure rules here; the group room
+// counts its recorded test runs show (what it only says is shown as a claim), its 验收标准 and
+// the 产出 versions it made. Pure rules here; the group room
 // side (`bots.runProof`) reads what the room knows about the run.
 import { type AcceptanceItem, type Card, CardV2, type CardV2Block, cardV2ToV1 } from "@chat/protocol";
 import { ApiError } from "../core/errors";
@@ -11,6 +12,11 @@ import { firstLine } from "./dispatch";
 export const PROOF_TEXT = {
   doneTitle: "做完了",
   tests: (passed: number, failed: number) => (failed > 0 ? `测试：${passed} 个通过，${failed} 个没通过` : `测试：${passed} 个通过`),
+  /** 接 5.1: counts the result names that no test run in the run's log shows. */
+  testsClaimed: (passed: number, failed: number) =>
+    failed > 0 ? `测试：它说 ${passed} 个通过，${failed} 个没通过（运行记录里没有）` : `测试：它说 ${passed} 个通过（运行记录里没有）`,
+  /** 接 5.1: a criterion marked met without a file, link or 产出 to show it. */
+  claimed: "它说已经做到，没有附证据",
   artifact: (title: string, version: number) => cutUnits(`${title}（第 ${version} 版）`, 200),
 } as const;
 
@@ -89,6 +95,38 @@ export function testCounts(text: string): TestCounts | null {
   return skipped > 0 ? { passed, failed, skipped } : { passed, failed };
 }
 
+/** A tool that runs a command (Claude Code `Bash`, Codex `shell`, ACP terminals). */
+const COMMAND_TOOL = /bash|shell|exec|command|terminal|run/i;
+/** A command that runs tests. */
+const TEST_COMMAND = /test|pytest|vitest|jest|mocha|rspec|spec\b|phpunit|ctest/i;
+
+/**
+ * 接 5.1: the test counts of the run's last test command, from its recorded tool calls and results
+ * (`run_log` events in order), summed over that command's summary lines. Null when the run ran no
+ * test command whose output has a summary line. The CLI's own words never count here.
+ */
+export function testsFromLog(events: unknown[]): TestCounts | null {
+  const calls = new Map<string, string>();
+  let last: TestCounts | null = null;
+  for (const raw of events) {
+    const ev = raw as { type?: unknown; itemId?: unknown; tool?: unknown; title?: unknown; input?: unknown; output?: unknown } | null;
+    if (!ev || typeof ev.itemId !== "string") continue;
+    if (ev.type === "tool.call") {
+      const tool = typeof ev.tool === "string" ? ev.tool : "";
+      if (!COMMAND_TOOL.test(tool)) continue;
+      const input = ev.input as { command?: unknown } | null | undefined;
+      const command = typeof input?.command === "string" ? input.command : Array.isArray(input?.command) ? input.command.join(" ") : "";
+      calls.set(ev.itemId, `${typeof ev.title === "string" ? ev.title : ""} ${command}`);
+    } else if (ev.type === "tool.result" && typeof ev.output === "string") {
+      const command = calls.get(ev.itemId);
+      if (command === undefined || !TEST_COMMAND.test(command)) continue;
+      const counts = testCounts(ev.output);
+      if (counts) last = counts;
+    }
+  }
+  return last;
+}
+
 /** A card title is plain text: inline code ticks of the first line go. */
 function plainTitle(line: string): string {
   return line.replace(/`([^`\n]+)`/g, "$1");
@@ -101,6 +139,8 @@ export function doneCard(opts: {
   prs: PrRef[];
   artifacts: ArtifactProof[];
   acceptance: AcceptanceItem[];
+  /** 接 5.1: test counts from the run's recorded tool results (`testsFromLog`); absent = none. */
+  tests?: TestCounts | null;
 }): CardV2 | null {
   const blocks: CardV2Block[] = [];
   const text = opts.result.trim();
@@ -110,7 +150,7 @@ export function doneCard(opts: {
   const head = lines.findIndex((l) => l.trim() !== "");
   const rest = head < 0 ? "" : lines.slice(head + 1).join("\n").trim();
   if (rest !== "") blocks.push({ type: "text", id: "result", text: cutUnits(rest, CARD_TEXT_UNITS) });
-  const tests = testCounts(text);
+  const tests = opts.tests ?? null;
   if (tests) {
     blocks.push({
       type: "evidence",
@@ -120,15 +160,23 @@ export function doneCard(opts: {
       // Readers take the counts from here, not from the label.
       tests,
     });
+  } else {
+    // 接 5.1: counts only the result names are a claim: shown as said, never as passed, and
+    // without `tests` (readers count only what a run recorded).
+    const said = testCounts(text);
+    if (said) blocks.push({ type: "evidence", id: "tests", label: PROOF_TEXT.testsClaimed(said.passed, said.failed), state: said.failed > 0 ? "fail" : "info" });
   }
   opts.acceptance.slice(0, 20).forEach((a, i) => {
+    // 接 5.1: "met" needs something to show it (a file, a link or a 产出); a bare word is a claim.
+    const shown = Boolean(a.evidence?.fileId || a.evidence?.url || a.evidence?.artifact);
     const b: Extract<CardV2Block, { type: "evidence" }> = {
       type: "evidence",
       id: `acceptance-${i + 1}`,
       label: cutUnits(a.text, 200),
-      state: a.state === "pending" ? "info" : a.state,
+      state: a.state === "pending" || (a.state === "pass" && !shown) ? "info" : a.state,
     };
-    if (a.evidence?.text) b.detail = cutUnits(a.evidence.text, 1000);
+    if (a.state === "pass" && !shown) b.detail = cutUnits(a.evidence?.text ? `${PROOF_TEXT.claimed}：${a.evidence.text}` : PROOF_TEXT.claimed, 1000);
+    else if (a.evidence?.text) b.detail = cutUnits(a.evidence.text, 1000);
     if (a.evidence?.fileId) b.fileId = a.evidence.fileId;
     if (a.evidence?.url) b.url = a.evidence.url;
     if (a.evidence?.artifact) b.artifact = a.evidence.artifact;
@@ -170,6 +218,39 @@ export function doneCard(opts: {
  */
 export function hasProof(card: CardV2): boolean {
   return card.blocks.some((b) => b.id !== "result");
+}
+
+type EvidenceLeaf = Extract<CardV2Block, { type: "evidence" }>;
+
+/** 接 5.1 on a done card the CLI posted itself: its evidence lines tell only what the run shows. */
+function truthfulEvidence(b: EvidenceLeaf, logged: TestCounts | null): EvidenceLeaf {
+  if (b.tests) {
+    const { tests: said, ...rest } = b;
+    // Counts the run's log shows replace the card's; counts it does not show are a claim.
+    if (logged) return { ...rest, label: PROOF_TEXT.tests(logged.passed, logged.failed), state: logged.failed > 0 ? "fail" : "pass", tests: logged };
+    return { ...rest, label: PROOF_TEXT.testsClaimed(said.passed, said.failed), state: said.failed > 0 ? "fail" : "info" };
+  }
+  if (b.state === "pass" && !b.fileId && !b.url && !b.artifact && !b.recording) {
+    return { ...b, state: "info", detail: cutUnits(b.detail ? `${PROOF_TEXT.claimed}：${b.detail}` : PROOF_TEXT.claimed, 1000) };
+  }
+  return b;
+}
+
+/**
+ * 接 5.1 / problem 5: a done card a run posts with `chat-run card post` is the run's result, so it
+ * follows the rules of the server's own (`doneCard`): test counts come from the run's recorded
+ * tool results (`testsFromLog`), and a line marked passed with nothing to show it reads as a
+ * claim. Other cards pass unchanged.
+ */
+export function truthfulDoneCard<C>(card: C, logged: TestCounts | null): C {
+  const c = card as { intent?: unknown; blocks?: unknown } | null;
+  if (!c || c.intent !== "done" || !Array.isArray(c.blocks)) return card;
+  const fix = (b: CardV2Block): CardV2Block => {
+    if (b.type === "evidence") return truthfulEvidence(b, logged);
+    if (b.type === "group" && b.blocks) return { ...b, blocks: b.blocks.map((x) => (x.type === "evidence" ? truthfulEvidence(x, logged) : x)) };
+    return b;
+  };
+  return { ...c, blocks: (c.blocks as CardV2Block[]).map(fix) } as C;
 }
 
 /**

@@ -35246,7 +35246,8 @@
                 "interaction.resolve",
                 "artifact.data",
                 "artifact.reply",
-                "desk.note"
+                "desk.note",
+                "run.report"
               ]
             },
             "body": {
@@ -35850,7 +35851,8 @@
                         "interaction.resolve",
                         "artifact.data",
                         "artifact.reply",
-                        "desk.note"
+                        "desk.note",
+                        "run.report"
                       ]
                     },
                     "body": {
@@ -36847,7 +36849,8 @@
                               "interaction.resolve",
                               "artifact.data",
                               "artifact.reply",
-                              "desk.note"
+                              "desk.note",
+                              "run.report"
                             ]
                           },
                           "body": {
@@ -39618,7 +39621,8 @@
                         "interaction.resolve",
                         "artifact.data",
                         "artifact.reply",
-                        "desk.note"
+                        "desk.note",
+                        "run.report"
                       ]
                     },
                     "body": {

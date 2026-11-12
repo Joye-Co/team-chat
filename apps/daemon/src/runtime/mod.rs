@@ -327,6 +327,31 @@ pub fn value_text(v: &Value) -> String {
 }
 
 pub const OUTPUT_LIMIT: usize = 16 * 1024;
+/// The end of a long tool output that [`truncate_output`] keeps.
+const OUTPUT_TAIL: usize = 4 * 1024;
+
+/// A tool result's output within [`OUTPUT_LIMIT`] bytes: its start and its last 4 KiB, with the
+/// cut marked between them. A test runner prints its summary at the end, and the server reads
+/// the test counts of a run from it (接 5.1).
+pub fn truncate_output(s: &str) -> String {
+    if s.len() <= OUTPUT_LIMIT {
+        return s.to_string();
+    }
+    let mut head = OUTPUT_LIMIT - OUTPUT_TAIL;
+    while !s.is_char_boundary(head) {
+        head -= 1;
+    }
+    let mut tail = s.len() - OUTPUT_TAIL;
+    while !s.is_char_boundary(tail) {
+        tail += 1;
+    }
+    format!(
+        "{}\n[... {} bytes cut]\n{}",
+        &s[..head],
+        tail - head,
+        &s[tail..]
+    )
+}
 
 /// A random UUID v4 string.
 pub fn uuid_v4() -> String {
@@ -415,5 +440,25 @@ impl PlanTracker {
             return None;
         }
         Some(RunEvent::Plan { items: plan })
+    }
+}
+
+#[cfg(test)]
+mod output_tests {
+    use super::*;
+
+    #[test]
+    fn a_long_tool_output_keeps_its_start_and_its_end() {
+        let short = "ok\n12 passed".to_string();
+        assert_eq!(truncate_output(&short), short);
+        let long = format!(
+            "start\n{}\ntest result: ok. 12 passed; 0 failed",
+            "日志".repeat(20_000)
+        );
+        let cut = truncate_output(&long);
+        assert!(cut.len() <= OUTPUT_LIMIT + 64, "{}", cut.len());
+        assert!(cut.starts_with("start\n"));
+        assert!(cut.ends_with("test result: ok. 12 passed; 0 failed"));
+        assert!(cut.contains(" bytes cut]"));
     }
 }
