@@ -252,9 +252,11 @@ and people who sign in with an invite code use these AI members without setting 
 - Memory: each running VM may use up to 4 GiB (`[vm] mem_mib`); plan for that times the runs
   you allow at once (`max_parallel_runs`). The daemon refuses a new run when the free memory
   does not cover one more VM above a fifth of the memory kept free.
-- Disk: the base image (a few GB), 32 GB of sparse scratch space per running VM, and each AI
-  member's home folder: a disk image of 20 GB (`[vm] home_gb`) in `/srv/runner/home-images`,
-  taking only what the member uses. Start with 200 GB free.
+- Disk: the base image (a few GB), 32 GB of sparse scratch space per running VM, each topic's
+  working folder, and each repository's dependency caches and tools in `<work_root>/caches`
+  (shared by all AI members and topics of that repository; when the disk runs low the least
+  recently used go first, with no size limit per member). A Rust repository's caches can take
+  tens of GB. Start with 200 GB free.
 - Your server from Part 1, and the Ubuntu machine with its `~/.config/team-chat/production/`.
 
 ### Install
@@ -321,7 +323,7 @@ and people who sign in with an invite code use these AI members without setting 
    run `claude` and follow its sign-in, and `codex login --device-auth` (or sign them in from
    the app, 团队管理 › 订阅账号). These sign-ins are never shared with the VMs: each run gets a
    copy it cannot use to change them (Codex: without the refresh token; the host refreshes it),
-   and each AI member keeps its own session records in its home folder. For Claude Code, a
+   and session records stay with each topic's working folder. For Claude Code, a
    long-lived token is best: run `claude setup-token` as runner and give its token to the host
    as an API key named `CLAUDE_CODE_OAUTH_TOKEN` (团队管理 › 订阅账号, for all members); without
    it each run gets the host's current access token.
@@ -377,17 +379,30 @@ and people who sign in with an invite code use these AI members without setting 
   `bash scripts/runner/build-base-image.sh` again. Runs that already started keep their image.
 - **Host**: `unattended-upgrades` installs security updates; `host-setup.sh` may be run again
   after `git checkout` of a new version. Run it again whenever `scripts/runner/runner-vm` or
-  `runner-vm.nft` changed (it reinstalls the root helper and reloads the firewall); the AI
-  members' homes are kept.
-- **From a version that shared the sign-in folders with the VMs** (before home images): as root,
-  `git checkout` the new version in `/root/team-chat` and run `bash scripts/runner/host-setup.sh`
-  again. The daemon updates itself and may do so first: until `host-setup.sh` has run, its runs
-  keep working with the AI members' homes as plain folders without a size limit, and its log and
-  `team-chat-daemon doctor` say that the root helper must be installed again. Remove `shares = [...]` from `[vm]` in `daemon.toml` if you
-  added it (the daemon skips those folders anyway). Each AI member's existing home folder moves
-  into its 20 GB image on its next run; one that is larger stays a folder without a limit until
-  it is emptied. Sessions from before continue: a run that resumes one gets it copied into its
-  member's folder.
+  `runner-vm.nft` changed (it reinstalls the root helper and reloads the firewall). Topics'
+  working folders and repository caches are kept.
+- **Caches**: as runner, `~/.local/bin/team-chat-daemon caches` lists each repository's cache
+  (key, repository, size, last used); `team-chat-daemon caches clear <key>` (or `all`) removes
+  one, for example after a broken toolchain or tool, and refuses a cache a run is using. The
+  daemon also removes the least recently used caches by itself when `work_root` has less than
+  `min_free_gb` free.
+- **From a version with AI member home folders** (`/srv/runner/homes`, 1.2.7 and before): the
+  daemon from 1.2.8 keeps no home folders. As root, `git checkout` the new version in
+  `/root/team-chat` and run `bash scripts/runner/host-setup.sh` again, then rebuild the base
+  image (it adds rustup and sccache). host-setup keeps only each member's session records
+  (`.claude/projects`, `.codex/sessions`, `.pi/agent/sessions`) in `/srv/runner/homes/<id>`,
+  removes the home images and `/srv/runner/home-images`, and is safe to run again. Tools
+  installed in the old home folders are not moved: the daemon installs a repository's Rust
+  toolchain into its cache on the first run, and AI members install other tools again as they
+  need them. The daemon may update itself first: until host-setup has run, old sessions resume
+  from the still mounted home images, but after a reboot they are found again only once
+  host-setup has run; until then a topic that cannot resume its session gets its whole history
+  as the prompt instead. Remove `homes` and `home_gb` from `[vm]` in `daemon.toml`
+  (they are ignored; `team-chat-daemon doctor` notes a `home_gb` and warns while old home images
+  are still on disk).
+- **From a version that shared the sign-in folders with the VMs** (before home images): do the
+  step above. Also remove `shares = [...]` from `[vm]` in `daemon.toml` if you added it (the
+  daemon skips those folders anyway).
 
 ## What nobody has run for real yet
 

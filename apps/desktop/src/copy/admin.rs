@@ -298,7 +298,7 @@ crate::copy! {
     THIS_PC_SIGNED_IN_READING = "正在读取登录状态…",
     THIS_PC_SIGNED_IN_WAITING = "找到后再登录",
     FLEET_NOTE_TITLE = "任务怎么分到电脑上",
-    FLEET_NOTE_DESC = "按 AI 成员能去的电脑挑一台在线、有空位、最闲的；都满了就排队。Linux 电脑上每个任务开一台独立的 VM，任务结束就销毁。",
+    FLEET_NOTE_DESC = "按 AI 成员能去的电脑挑一台在线、有空位、最闲的；都满了就排队。设成用虚拟机的电脑上，每个任务开一台独立的虚拟机：话题里的代码和仓库的依赖留在电脑上，其余随任务结束清掉；其他电脑上的东西一直保留。",
 
     ACTIVITY_TITLE = "活动记录",
     ACTIVITY_SUB = "团队里谁做了什么：成员、密钥、电脑、批准和预算的改动都记在这里",

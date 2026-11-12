@@ -224,9 +224,9 @@ AI 成员。
   `grep -Ecw 'vmx|svm' /proc/cpuinfo` 大于 0。
 - 内存：每台运行中的虚拟机最多用 4 GiB（`[vm] mem_mib`），乘上允许同时跑的任务数（`max_parallel_runs`）。
   可用内存不够再开一台（另外留出总内存的五分之一）时，daemon 不接新任务。
-- 磁盘：基础镜像（几 GB）、每台运行中的虚拟机 32 GB 稀疏的临时空间、每个 AI 成员的家目录：
-  `/srv/runner/home-images` 里一个 20 GB 的磁盘镜像（`[vm] home_gb`），只占实际用到的部分。
-  先留 200 GB。
+- 磁盘：基础镜像（几 GB）、每台运行中的虚拟机 32 GB 稀疏的临时空间、每个话题的工作目录，以及
+  `<work_root>/caches` 里每个仓库的依赖缓存和工具（这个仓库的所有 AI 成员、所有话题共用；磁盘不够时先删最久
+  没用的，没有每个成员的大小限制）。一个 Rust 仓库的缓存可能有几十 GB。先留 200 GB。
 - 第一部分的服务器，以及那台存着 `~/.config/team-chat/production/` 的 Ubuntu 机器。
 
 ### 安装
@@ -286,8 +286,8 @@ AI 成员。
 7. **CLI 登录。** 用 root 装 Node.js 22（第一部分第 1 步里 NodeSource 那几行）和 CLI：
    `npm install -g @anthropic-ai/claude-code @openai/codex`。再用 runner 登录：运行 `claude` 按提示登录，
    以及 `codex login --device-auth`（也可以在 app 的 团队管理 › 订阅账号 里登录）。这些登录不共享给虚拟机：
-   每个任务拿到一份改不了宿主机登录的副本（Codex 去掉 refresh token，由宿主机统一刷新），每个 AI 成员的
-   会话记录放在它自己的家目录里。Claude Code 最好用长期令牌：用 runner 运行 `claude setup-token`，把令牌
+   每个任务拿到一份改不了宿主机登录的副本（Codex 去掉 refresh token，由宿主机统一刷新），会话记录跟着
+   每个话题的工作目录。Claude Code 最好用长期令牌：用 runner 运行 `claude setup-token`，把令牌
    作为名为 `CLAUDE_CODE_OAUTH_TOKEN` 的 API 密钥加给这台主机（团队管理 › 订阅账号，给所有成员）；
    不加的话，每个任务拿宿主机当前的 access token。
 8. **配置**，用 runner：`team-chat-daemon example-config > ~/.config/team-chat/daemon.toml`，然后改成：
@@ -338,14 +338,21 @@ AI 成员。
   `bash scripts/runner/build-base-image.sh`。已经开始的任务继续用旧镜像。
 - **主机**：`unattended-upgrades` 自动装安全更新；`git checkout` 新版本后可以再跑一遍 `host-setup.sh`。
   `scripts/runner/runner-vm` 或 `runner-vm.nft` 有改动时一定要再跑一遍（重装 root 辅助脚本、重载防火墙）；
-  AI 成员的家目录会保留。
-- **从把登录目录共享给虚拟机的旧版本升级**（家目录镜像之前）：用 root 在 `/root/team-chat` 里
-  `git checkout` 新版本，再跑一遍 `bash scripts/runner/host-setup.sh`。daemon 会自己更新，可能比这一步早：
-  在 `host-setup.sh` 跑完之前，任务照常能跑，只是 AI 成员的家目录还是不限大小的普通文件夹，daemon 的日志和
-  `team-chat-daemon doctor` 会提示需要重装 root 辅助脚本。`daemon.toml`
-  的 `[vm]` 里如果写过 `shares = [...]` 就删掉（daemon 反正会跳过这些目录）。每个 AI 成员原有的家目录在它
-  下一次任务时搬进它的 20 GB 镜像；超过大小的保持为不限大小的文件夹，直到被清空。以前的会话能接着用：
-  续接时把那一个会话文件拷进成员自己的目录。
+  话题的工作目录和仓库缓存会保留。
+- **缓存**：用 runner，`~/.local/bin/team-chat-daemon caches` 列出每个仓库的缓存（key、仓库、大小、最近使用）；
+  `team-chat-daemon caches clear <key>`（或 `all`）删掉一个，比如工具链或工具坏了的时候；正在被任务用的缓存
+  会拒绝。`work_root` 剩余空间低于 `min_free_gb` 时，daemon 自己先删最久没用的缓存。
+- **从有 AI 成员家目录的版本升级**（`/srv/runner/homes`，1.2.7 及以前）：daemon 从 1.2.8 起不再保留家目录。
+  用 root 在 `/root/team-chat` 里 `git checkout` 新版本，再跑一遍 `bash scripts/runner/host-setup.sh`，然后重建
+  基础镜像（加了 rustup 和 sccache）。host-setup 在 `/srv/runner/homes/<id>` 里只留每个成员的会话记录
+  （`.claude/projects`、`.codex/sessions`、`.pi/agent/sessions`），删掉家目录镜像和 `/srv/runner/home-images`，
+  可以重复跑。旧家目录里装过的工具不搬：daemon 在第一次运行时把仓库的 Rust 工具链装进它的缓存，其他工具
+  AI 成员需要时再装。daemon 可能先自己更新：host-setup 跑之前，旧会话从还挂着的家目录镜像续接；但主机重启
+  之后，要等 host-setup 跑完旧会话才重新找得到，在那之前续接不上的话题会把完整记录作为提示发给 CLI。把
+  `daemon.toml` 的 `[vm]` 里的 `homes`、`home_gb` 删掉（已经不起作用；设了 `home_gb` 时
+  `team-chat-daemon doctor` 会提示，旧家目录镜像还在盘上时会警告）。
+- **从把登录目录共享给虚拟机的旧版本升级**（家目录镜像之前）：按上一条做。另外 `daemon.toml` 的 `[vm]`
+  里如果写过 `shares = [...]` 就删掉（daemon 反正会跳过这些目录）。
 
 ## 还没有人真正走过的部分
 

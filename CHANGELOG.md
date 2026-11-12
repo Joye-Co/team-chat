@@ -3,6 +3,20 @@
 Each release is tagged `v<version>` and has a GitHub Release with the DMG, the machine daemon
 and the Windows installer; GitHub shows each file's SHA-256. Release notes for the team are in Chinese in `docs/releases/`.
 
+## 1.2.8 (unreleased)
+
+- VM hosts (`[vm]`): the daemon keeps no AI member home folders any more (the 20 GB home images,
+  `[vm].homes` / `home_gb`, `runner-vm home-up` / `home-clear` and the heartbeat's `homes` are
+  gone; the protocol fields stay for older daemons). A topic keeps its code, build outputs and
+  CLI sessions in `<work_root>/lines/<line>/cli/` and is cleaned with its line; a repository
+  keeps its dependency caches and user-level tools in `<work_root>/caches/<repo key>/`, shared by
+  all members and topics and removed least recently used when the disk runs low; everything else
+  goes with the VM. `daemon caches` lists and clears caches. Run `scripts/runner/host-setup.sh`
+  again as root and rebuild the base image; until host-setup has run, old sessions survive a
+  reboot only after it does. Tools installed in old home folders are not migrated: the daemon
+  installs a repository's Rust toolchain into its cache, and AI members install other tools
+  again. Computers without VMs keep the real home folder.
+
 ## 1.2.7 (2026-11-11)
 
 Notes: [docs/releases/1.2.7.md](docs/releases/1.2.7.md). D1 migrations `0013_activity`,

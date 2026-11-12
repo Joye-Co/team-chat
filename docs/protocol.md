@@ -2829,7 +2829,9 @@ RunCursor    += { active?: boolean }   // machine-protocol.md, heartbeat
 
 On a Linux host that runs each run in a VM, every AI member has a home folder of fixed size
 (machine-protocol.md, "MicroVM runs"). A daemon with feature `homes` reports them with its
-heartbeat, and the monitor passes the latest report on:
+heartbeat, and the monitor passes the latest report on. daemon 从 1.2.8 起不再保留成员家目录，也不再报告
+`homes`: it sends neither the feature nor `metrics.homes`, so the clear route answers
+`machine.too_old` for it; the types, the route and their fixtures stay for older daemons.
 
 ```ts
 HomeUse = { memberId, usedBytes /* on the host disk */, sizeBytes? /* absent = no limit */ }
