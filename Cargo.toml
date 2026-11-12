@@ -31,3 +31,7 @@ gpui-pre-apple = { path = "third_party/gpui-pre-apple" }
 # gpui-component with a menu style the app sets (NATIVE.md §7.3: 24 pt rows, 13 pt text,
 # radius 12, the glass edge and float shadow, the accent highlight). See src/menu/style.rs.
 gpui-component = { path = "third_party/gpui-component" }
+
+# Hashing in debug builds (tests hash a 150 MB upload) runs at release speed.
+[profile.dev.package.sha2]
+opt-level = 3

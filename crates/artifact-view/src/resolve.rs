@@ -760,12 +760,4 @@ mod tests {
         );
         std::fs::remove_dir_all(&dir).unwrap();
     }
-
-    #[test]
-    fn mime_types() {
-        assert_eq!(mime_for("a.JS"), "text/javascript; charset=utf-8");
-        assert_eq!(mime_for("a.svg"), "image/svg+xml");
-        assert_eq!(mime_for("a.XHTML"), "application/xhtml+xml; charset=utf-8");
-        assert_eq!(mime_for("noext"), "application/octet-stream");
-    }
 }

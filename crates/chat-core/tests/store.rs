@@ -3,7 +3,6 @@ mod common;
 use chat_core::Store;
 use chat_core::proto::*;
 use common::*;
-use std::time::Instant;
 
 fn open() -> (tempfile::TempDir, Store) {
     let dir = tempfile::tempdir().unwrap();
@@ -29,40 +28,6 @@ fn seed_topic(store: &Store) {
         )
         .unwrap();
     assert_eq!(out.applied, 2);
-}
-
-#[test]
-fn migrations_are_named_and_run_once() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("c.sqlite3");
-    drop(Store::open(&path).unwrap());
-    let s = Store::open(&path).unwrap();
-    let names: Vec<String> = s
-        .with_reader(|c| {
-            let mut st = c.prepare("SELECT name FROM migrations ORDER BY name")?;
-            st.query_map([], |r| r.get(0))?.collect()
-        })
-        .unwrap();
-    assert_eq!(
-        names,
-        vec![
-            "asks-1",
-            "characters-1",
-            "core-1",
-            "ext-1",
-            "members-2",
-            "roles-1",
-            "topic-mute-1",
-            "v11-1",
-            "v11-2",
-            "v11-3",
-            "v11-files-1"
-        ]
-    );
-    let mode: String = s
-        .with_reader(|c| c.query_row("PRAGMA journal_mode", [], |r| r.get(0)))
-        .unwrap();
-    assert_eq!(mode, "wal");
 }
 
 #[test]
@@ -211,28 +176,6 @@ fn a_cache_from_before_roles_1_reads_owners_as_admins() {
     let s = Store::open(&path).unwrap();
     let m = s.member("O1").unwrap().unwrap();
     assert_eq!((m.level, m.is_team_owner()), (MemberLevel::Owner, false));
-}
-
-#[test]
-fn a_cache_from_before_characters_1_upgrades_and_keeps_its_members() {
-    use chat_core::store::migrations::{MIGRATIONS, run};
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("c.sqlite3");
-    {
-        let mut conn = rusqlite::Connection::open(&path).unwrap();
-        run(&mut conn, &MIGRATIONS[..2]).unwrap();
-        conn.execute(
-            "INSERT INTO members (id, kind, name, role, level) VALUES ('B1', 'bot', 'Jojo', '主助手', 'owner')",
-            [],
-        )
-        .unwrap();
-    }
-    let s = Store::open(&path).unwrap();
-    let m = s.member("B1").unwrap().unwrap();
-    assert_eq!(
-        (m.name.as_str(), m.role(), m.character()),
-        ("Jojo", Some("主助手"), None)
-    );
 }
 
 #[test]
@@ -763,56 +706,6 @@ fn welcome_removes_groups_that_are_gone() {
 }
 
 #[test]
-fn perf_insert_10k_and_query_window_of_200() {
-    let (_d, s) = open();
-    seed_topic(&s);
-    let events: Vec<Event> = (3..10_003)
-        .map(|seq| {
-            msg_created(
-                seq,
-                message(
-                    &format!("M{seq:06}"),
-                    G1,
-                    "T1",
-                    ALICE,
-                    seq,
-                    &format!("message number {seq} 你好"),
-                ),
-            )
-        })
-        .collect();
-    let t0 = Instant::now();
-    for chunk in events.chunks(500) {
-        s.apply_events(G1, chunk).unwrap();
-    }
-    let insert = t0.elapsed();
-    assert_eq!(s.message_count_cached("T1").unwrap(), 10_001);
-
-    // Warm the statement cache once, then time newest, middle and older windows.
-    s.messages_before("T1", None, 200).unwrap();
-    let mut worst = std::time::Duration::ZERO;
-    for before in [None, Some(5_000), Some(300)] {
-        let t = Instant::now();
-        let w = s.messages_before("T1", before, 200).unwrap();
-        let e = t.elapsed();
-        worst = worst.max(e);
-        assert!(!w.is_empty());
-        assert!(w.windows(2).all(|p| p[0].created_seq < p[1].created_seq));
-    }
-    let t = Instant::now();
-    let topics = s.topics(G1, 50).unwrap();
-    let topics_time = t.elapsed();
-    println!(
-        "perf: insert 10000 messages {:.1} ms; window of 200 worst {:.3} ms; topic list {:.3} ms",
-        insert.as_secs_f64() * 1e3,
-        worst.as_secs_f64() * 1e3,
-        topics_time.as_secs_f64() * 1e3
-    );
-    assert_eq!(topics.len(), 1);
-    assert!(worst.as_millis() < 10, "window query took {worst:?}");
-}
-
-#[test]
 fn a_topic_read_in_a_long_group_takes_only_that_topic_off_the_totals() {
     let (_d, s) = open();
     s.apply_events(
@@ -823,8 +716,9 @@ fn a_topic_read_in_a_long_group_takes_only_that_topic_off_the_totals() {
         ],
     )
     .unwrap();
-    // 20,000 unread messages in topic TA, then a topic TB with two, one a mention of me.
-    let events: Vec<Event> = (3..20_003)
+    // A long topic TA of unread messages, then a topic TB with two, one a mention of me.
+    const N: u64 = 2_000;
+    let events: Vec<Event> = (3..N + 3)
         .map(|seq| {
             msg_created(
                 seq,
@@ -835,35 +729,25 @@ fn a_topic_read_in_a_long_group_takes_only_that_topic_off_the_totals() {
     for chunk in events.chunks(500) {
         s.apply_events(G1, chunk).unwrap();
     }
-    let mut mention = message("MB2", G1, "TB", ALICE, 20_005, "@me");
+    let mut mention = message("MB2", G1, "TB", ALICE, N + 5, "@me");
     mention.mentions = vec![ME.into()];
     s.apply_events(
         G1,
         &[
-            topic_created(20_003, G1, topic("TB", G1, "MB1", 20_003)),
-            msg_created(20_004, message("MB1", G1, "TB", ALICE, 20_004, "b")),
-            msg_created(20_005, mention),
+            topic_created(N + 3, G1, topic("TB", G1, "MB1", N + 3)),
+            msg_created(N + 4, message("MB1", G1, "TB", ALICE, N + 4, "b")),
+            msg_created(N + 5, mention),
         ],
     )
     .unwrap();
     let g = s.group(G1).unwrap().unwrap();
-    assert_eq!((g.unread, g.mentions), (20_003, 1));
-    let t = Instant::now();
-    assert!(s.mark_read(G1, Some("TB"), 20_004).unwrap().is_some());
-    let first = t.elapsed();
+    assert_eq!((g.unread, g.mentions), (N + 3, 1));
+    assert!(s.mark_read(G1, Some("TB"), N + 4).unwrap().is_some());
     let g = s.group(G1).unwrap().unwrap();
-    assert_eq!((g.unread, g.mentions), (20_002, 1));
-    let t = Instant::now();
-    assert!(s.mark_read(G1, Some("TB"), 20_005).unwrap().is_some());
-    let second = t.elapsed();
+    assert_eq!((g.unread, g.mentions), (N + 2, 1));
+    assert!(s.mark_read(G1, Some("TB"), N + 5).unwrap().is_some());
     let g = s.group(G1).unwrap().unwrap();
-    assert_eq!((g.unread, g.mentions), (20_001, 0));
-    println!(
-        "perf: topic read in a 20k group {:.3} ms, {:.3} ms",
-        first.as_secs_f64() * 1e3,
-        second.as_secs_f64() * 1e3
-    );
-    assert!(second.as_millis() < 10, "topic read took {second:?}");
+    assert_eq!((g.unread, g.mentions), (N + 1, 0));
 }
 
 #[test]

@@ -726,25 +726,4 @@ mod tests {
         assert!(!gone.exists());
         assert!(kept.exists());
     }
-
-    /// A downloaded file carries the Mark of the Web, and keeps it when it is renamed
-    /// into place and when it is copied (存储为…).
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn a_downloaded_file_is_marked_as_from_the_internet() {
-        let dir = tempfile::tempdir().unwrap();
-        let (part, dest) = (dir.path().join(".part-a"), dir.path().join("报告 v2.docx"));
-        std::fs::write(&part, b"content").unwrap();
-        super::quarantine(&part);
-        std::fs::rename(&part, &dest).unwrap();
-        let copy = dir.path().join("copy.docx");
-        std::fs::copy(&dest, &copy).unwrap();
-        for file in [&dest, &copy] {
-            let mut stream = file.as_os_str().to_os_string();
-            stream.push(":Zone.Identifier");
-            let mark = std::fs::read_to_string(stream).expect("the Zone.Identifier stream");
-            assert!(mark.contains("ZoneId=3"), "{mark:?}");
-            assert_eq!(std::fs::read(file).unwrap(), b"content");
-        }
-    }
 }

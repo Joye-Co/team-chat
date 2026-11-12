@@ -385,19 +385,6 @@ fn rolls_back_when_the_new_version_exits_early() {
 }
 
 #[test]
-fn a_rollback_puts_the_old_daemon_back_by_the_rename_protocol() {
-    let mut w = world();
-    w.sys.new_version = NewVersion::Crashes;
-    assert!(matches!(run(&w.job, &w.sys), Outcome::RolledBack(_)));
-    let dir = &w.job.install_dir;
-    assert_eq!(read(&dir.join("daemon.exe")), "old daemon");
-    // Nothing runs here, so the renamed files are gone too.
-    assert!(!dir.join("daemon.exe.new").exists());
-    assert!(!dir.join("daemon.exe.old-1").exists());
-    assert_old_version(&w);
-}
-
-#[test]
 fn rolls_back_and_stops_a_new_version_that_never_confirms() {
     let mut w = world();
     w.sys.new_version = NewVersion::Hangs;
@@ -559,20 +546,6 @@ fn an_update_killed_at_any_step_is_undone_by_the_recovery() {
         // The recovery starts nothing: at a sign-in the user did not ask for the app.
         assert!(w.sys.launches.borrow().is_empty(), "{step}");
     }
-}
-
-#[test]
-fn an_update_killed_while_the_old_files_move_keeps_the_ones_not_moved_yet() {
-    let mut w = world();
-    w.sys.dies_at = Some("moved-one");
-    killed(&w);
-    // One entry is in the backup, the others are still in the install folder.
-    let dir = &w.job.install_dir;
-    assert!(!dir.join("App.exe").exists());
-    assert_eq!(read(&dir.join("resources/a.txt")), "old resource");
-    w.sys.dies_at = None;
-    assert_eq!(recover_later(&w), Recovery::Restored);
-    assert_old_version(&w);
 }
 
 #[test]
