@@ -76,6 +76,10 @@ pub struct MemoryBoard {
     ai_off: bool,
     /// A person's board while nobody is signed in: it reads and shows nothing.
     signed_out: bool,
+    /// Me and the names of members, read from the provider once per change
+    /// to the members or the session: a frame reads no store.
+    me: std::cell::RefCell<Option<Option<crate::data::Member>>>,
+    names: std::cell::RefCell<std::collections::HashMap<String, Option<String>>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -93,6 +97,8 @@ impl MemoryBoard {
                 // Who may write follows my level; 我的约定 follows who uses the server.
                 // 我的偏好 is the signed-in person's, also after a change of account.
                 if changes.any(|c| matches!(c, Change::Members | Change::Session)) {
+                    this.me.replace(None);
+                    this.names.borrow_mut().clear();
                     let rescoped = this.rescope();
                     let folded = this.single_user();
                     if rescoped || folded != this.folded {
@@ -118,6 +124,8 @@ impl MemoryBoard {
             folded: false,
             ai_off: false,
             signed_out: false,
+            me: Default::default(),
+            names: Default::default(),
             _subscriptions: subscriptions,
         };
         this.rescope();
@@ -265,10 +273,11 @@ impl MemoryBoard {
     }
 
     fn writer_of(&self, scope: &MemoryScope) -> bool {
-        let me = match self.services.provider.session() {
+        let mut me = self.me.borrow_mut();
+        let me = me.get_or_insert_with(|| match self.services.provider.session() {
             SessionState::SignedIn { me, .. } => Some(me),
             _ => None,
-        };
+        });
         model::can_write(scope, me.as_ref())
     }
 
@@ -288,10 +297,16 @@ impl MemoryBoard {
     }
 
     fn name_of(&self, id: &str) -> String {
-        self.services
-            .provider
-            .member(id)
-            .map(|m| crate::ui::avatar::name_beside_avatar(&m.name).to_string())
+        self.names
+            .borrow_mut()
+            .entry(id.to_string())
+            .or_insert_with(|| {
+                self.services
+                    .provider
+                    .member(id)
+                    .map(|m| crate::ui::avatar::name_beside_avatar(&m.name).to_string())
+            })
+            .clone()
             .unwrap_or_else(|| {
                 if self.name.is_empty() {
                     c::SOMEONE.to_string()
