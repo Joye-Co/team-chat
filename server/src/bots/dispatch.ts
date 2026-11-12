@@ -39,7 +39,7 @@ export const LIMIT_SLACK_MS = 60_000;
 
 /** How a run with the `context` feature reads what the prompt left out. */
 export const CONTEXT_TOOLS_RULE =
-  "The topic lines above are only part of the topic. Read older messages with `chat-run topic history --before <seq>`, a whole message with `chat-run topic message --id <m id>` (a quote `in t <t id>` is in another topic: add `--topic <t id>`), search with `chat-run search --query <text>` (add `--group` for every topic of the group) and get a file with `chat-run file get --id <f id>`. Look things up instead of guessing.";
+  "The topic lines above are only part of the topic. Read older messages with `chat-run topic history --before <seq>`, a whole message with `chat-run topic message --id <m id>` (a quote `in t <t id>` is in another topic: add `--topic <t id>`), search with `chat-run search --query <text>` (add `--group` for every topic of the group) and get a file with `chat-run file get --id <f id>` (leave out `--out`: the file goes to the run's downloads folder, outside your working folder, and the printed path says where). Look things up instead of guessing.";
 
 /** Topic texts the bot posts. Product words only (PRODUCT.md): no developer words. */
 export const TEXT = {
@@ -85,6 +85,8 @@ export const TEXT = {
   done: "完成了。",
   failed: (why: string) => (why ? `没有完成：${why}` : "没有完成。"),
   cancelled: "已停止，没有完成。",
+  /** A person stopped the whole piece of work (全部停止): the line says who. */
+  cancelledBy: (name: string) => (name ? `已被 ${name} 停止，没有完成。` : "已停止，没有完成。"),
   /** design-relay R2: the summary of a run that handed its work over (转交). */
   handedOver: (name: string) => `已转交给 ${name}`,
   followUpLimit: "后面的消息没有接着处理，需要的话请再 @我。",

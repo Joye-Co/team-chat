@@ -384,7 +384,7 @@ export abstract class DeskInput extends DeskRelay {
   // -------------------------------------------------------------------------
 
   /** A member stops a run: the machine gets run.cancel, and the run ends here at once. */
-  async cancel(botId: string, runId: string, actorId: string): Promise<Result<BotRun>> {
+  async cancel(botId: string, runId: string, actorId: string, chainId?: string): Promise<Result<BotRun>> {
     return result(() => {
       this.bind(botId);
       return this.serial(runId, async () => {
@@ -393,14 +393,16 @@ export abstract class DeskInput extends DeskRelay {
         if (r.ended_at !== null) throw new ApiError("conflict", "the run ended");
         // design-relay R2: the room hears who stopped it, and stops the parts it gave out.
         this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `stoppedBy:${r.id}`, actorId);
-        await this.stop(r);
+        // 全部停止 of a piece of work: the topic of each part says who stopped it.
+        const text = chainId ? TEXT.cancelledBy((await this.names([actorId])).get(actorId) ?? "") : TEXT.cancelled;
+        await this.stop(r, text);
         this.log.info("run cancelled", { runId, actorId });
         return this.toRun(r);
       });
     });
   }
 
-  protected async stop(r: RunRow): Promise<void> {
+  protected async stop(r: RunRow, text: string = TEXT.cancelled): Promise<void> {
     if (r.machine_id && !r.external) {
       try {
         await linkStub(this.env, r.machine_id).toRun({ t: "run.cancel", runId: r.id } as never);
@@ -410,10 +412,10 @@ export abstract class DeskInput extends DeskRelay {
     }
     this.planBuckets.delete(r.id);
     if (r.external) {
-      await this.setStatus(r, "cancelled", { ended_at: Date.now(), summary: TEXT.cancelled });
+      await this.setStatus(r, "cancelled", { ended_at: Date.now(), summary: text });
       return;
     }
-    await this.end(r, "cancelled", TEXT.cancelled, "open", TEXT.cancelled);
+    await this.end(r, "cancelled", text, "open", text);
   }
 
   /** The bot was deactivated: stop its active runs and give up its topics. */
