@@ -7,6 +7,7 @@
     "ops/*"
   ],
   "scripts": {
+    "test:ci": "bun test scripts/ci",
     "gen:protocol": "bun run --cwd packages/protocol gen:protocol",
     "gen:schema": "bun run --cwd packages/protocol gen:schema",
     "gen:fixtures": "bun run --cwd packages/protocol gen:fixtures",

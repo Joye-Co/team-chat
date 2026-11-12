@@ -1,0 +1,76 @@
+# Used by dorny/paths-filter. Regression cases live in scripts/ci/config.test.ts.
+# Changes to the CI implementation exercise every job, including the cache setup.
+ci:
+  - .github/workflows/ci.yml
+  - .github/ci-paths.yml
+  - .github/actions/**
+  - scripts/ci/**
+  - scripts/ci-run.sh
+js: &js
+  - .bun-version
+  - package.json
+  - bun.lock
+  - product.json
+  - scripts/ci-run.sh
+  - scripts/lib.sh
+  - scripts/servers.ts
+packages:
+  - *js
+  - packages/**
+  - protocol/**
+  # gen-fixtures.ts copies the daemon's golden machine frames into protocol/fixtures.
+  - apps/daemon/tests/fixtures/machine/**
+server:
+  - *js
+  - server/**
+  - packages/**
+  - scripts/sandbox/**
+ops:
+  - *js
+  - packages/**
+  - Cargo.toml
+  - scripts/check-release-digest.sh
+  - .github/workflows/release*.yml
+  - ops/**
+  - server/wrangler.jsonc
+  - server/src/ops/index.ts
+  - server/scripts/admin.ts
+  - scripts/deploy-server.sh
+  - scripts/release-check.sh
+  - scripts/release.sh
+  - scripts/build-daemon.sh
+  - scripts/runner/install-daemon.sh
+  - scripts/previous-windows-installer.sh
+  - scripts/check-logs-for-servers.sh
+  - scripts/test-release-scripts.sh
+  - scripts/setup-server.sh
+  - scripts/test-setup-server.sh
+  - CHANGELOG.md
+  - docs/releases/**
+workflows:
+  - .github/workflows/**
+  - .github/actions/**
+  - .github/ci-paths.yml
+  - scripts/ci/**
+core:
+  - .cargo/**
+  - Cargo.toml
+  - Cargo.lock
+  - rust-toolchain.toml
+  - crates/chat-protocol/**
+  - crates/chat-core/**
+  - protocol/**
+daemon:
+  - apps/daemon/**
+  - apps/update-helper/**
+  - tools/e2e/**
+desktop:
+  # build.rs embeds the release notes in the app.
+  - docs/releases/**
+  - product.json
+  - apps/desktop/**
+  - crates/artifact-view/**
+  - assets/**
+  - third_party/**
+artifact_view:
+  - crates/artifact-view/**
