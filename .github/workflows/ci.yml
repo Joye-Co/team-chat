@@ -62,6 +62,8 @@ jobs:
               - *js
               - packages/**
               - protocol/**
+              # gen-fixtures.ts copies the daemon's golden machine frames into protocol/fixtures.
+              - apps/daemon/tests/fixtures/machine/**
               - scripts/sandbox/**
             server:
               - *js

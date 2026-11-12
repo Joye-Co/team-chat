@@ -13,6 +13,7 @@ import { requestAuthors, requestText } from "../../context/render";
 import type { CardAnswerIn, CardPress, TopicMessage } from "../room";
 import { ACTIVE, type RunRow, result } from "./core";
 import { DeskDelegate } from "./delegate";
+import { isChainStop } from "./delegate_card";
 import { isProgressQuestion, isStopRequest, progressAnswer } from "../../agent/supervise";
 import { isNewTask } from "../../agent/frontdesk";
 
@@ -215,6 +216,7 @@ export abstract class DeskInput extends DeskDelegate {
         m.body,
         Date.now(),
       );
+      this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `stoppedBy:${r.id}`, m.authorId);
       await this.stop(r);
       this.log.info("run stopped by text", { runId: r.id, actorId: m.authorId });
       return;
@@ -311,6 +313,8 @@ export abstract class DeskInput extends DeskDelegate {
     const key = `answer:${a.groupId}:${a.seq}`;
     // People only: an answer by a bot never reaches a bot (no loops).
     if (a.actorKind !== "human" || this.handledMessage(key)) return;
+    // design-relay R2: 全部停止 on a hand-over card stops the piece of work, it is no run input.
+    if (isChainStop(a.answer.actionId)) return this.chainStopPressed(a.groupId, a.answer.messageId, a.answer.actionId, a.actorId);
     if (this.messagesInFlight.has(key)) throw new ApiError("conflict", "answer is being handled");
     this.messagesInFlight.add(key);
     try {
@@ -385,6 +389,8 @@ export abstract class DeskInput extends DeskDelegate {
         const r = this.run(runId);
         if (!r) throw new ApiError("not_found", "run not found");
         if (r.ended_at !== null) throw new ApiError("conflict", "the run ended");
+        // design-relay R2: the room hears who stopped it, and stops the parts it gave out.
+        this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `stoppedBy:${r.id}`, actorId);
         await this.stop(r);
         this.log.info("run cancelled", { runId, actorId });
         return this.toRun(r);

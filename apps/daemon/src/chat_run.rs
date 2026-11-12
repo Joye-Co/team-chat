@@ -100,10 +100,13 @@ lesson|playbook|preference|convention|fact|decision --text <text> [--when <text>
 requester's preferences, group for conventions people said here, with `--source` the id of the \
 person's message that says it (without one it stays your own). Notes are reviewed once a day; the \
 team's memory is never written by a run. \
-When another AI member of the group should do the work, hand it over with `chat-run handoff \
---member <name> --goal <text> [--done-when \"check; check\"] [--notes <text>]` (then stop), or give \
-a part out with `chat-run assign --member <name> --goal <text> ...`: it gets its own topic and its \
-result comes back to you as input. \
+Read who is in the group with `chat-run member list` first. Hand the whole piece of work over \
+only when another AI member really should do it: `chat-run handoff --member <name> --goal <text> \
+[--done-when \"check; check\"] [--notes <text>]`, push your branch first, then stop. Give a part \
+out with `chat-run assign --member <name> --goal <text> ...`: it is done in its own topic and its \
+result comes back to you as input by itself, so do not poll for it; never hand work back to the \
+member that gave it to you, and never message other members: what they need goes into your result \
+or a 产出. \
 Each prints the JSON result and exits 0, or prints the \
 error with its reason and exits 1. A page opens beside the conversation in a pane about 400 pt \
 wide: make it work at that width (a row of tabs wraps or scrolls sideways, nothing is cut off). \
@@ -126,7 +129,7 @@ types: {blocks}. `chat-run card schema` prints its JSON Schema; `chat-run --help
 }
 
 /// The JSON Schema of a Card v2 document (`protocol/schema/CardV2.schema.json`, made from the
-/// protocol package's Zod with `bun run gen:schema`): the shape; the server checks the write
+/// protocol package's Zod with `bun run gen:protocol`): the shape; the server checks the write
 /// rules too.
 pub const CARD_SCHEMA: &str = include_str!("../../../protocol/schema/CardV2.schema.json");
 
@@ -921,8 +924,8 @@ pub const USAGE: &str = "usage:
   chat-run artifact data --artifact <artifactId> --version <n> --file data.json [--base-data-rev <n>] [--cause <eventId>]
   chat-run artifact reply --event <eventId> (--file reply.json | --decline <text>)
   chat-run desk note --text <text>
-  chat-run handoff --member <name> --goal <text> [--done-when \"check; check\"] [--notes <text>]
-  chat-run assign --member <name> --goal <text> [--done-when \"check; check\"] [--notes <text>]
+  chat-run handoff --member <name> --goal <text> [--done-when \"check; check\"] [--notes <text>]   (转交: then stop)
+  chat-run assign --member <name> --goal <text> [--done-when \"check; check\"] [--notes <text>]    (分出去: the result comes back)
   chat-run secret <NAME>
   chat-run gate   (the CLI's PreToolUse hook; reads the hook input on standard input)
   chat-run file upload --file <path> [--name <name>] [--mime <type>]
@@ -2398,6 +2401,33 @@ mod tests {
             "chat-run file get",
         ] {
             assert!(n.contains(c) && USAGE.contains(c), "{c}");
+        }
+    }
+
+    #[test]
+    fn note_teaches_hand_over_and_split_off_after_the_member_list() {
+        let n = note();
+        let list = n
+            .find("chat-run member list` first")
+            .expect("member list first");
+        let handoff = n.find("chat-run handoff --member").expect("handoff");
+        let assign = n.find("chat-run assign --member").expect("assign");
+        assert!(list < handoff && handoff < assign);
+        for c in [
+            "then stop",
+            "do not poll",
+            "never hand work back",
+            "never message other members",
+            "push your branch first",
+        ] {
+            assert!(n.contains(c), "{c}");
+        }
+        for c in [
+            "chat-run handoff",
+            "chat-run assign",
+            "chat-run member list",
+        ] {
+            assert!(USAGE.contains(c), "{c}");
         }
     }
 

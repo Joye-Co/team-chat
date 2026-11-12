@@ -136,6 +136,19 @@ export type RunRow = {
   requested_for: string | null;
 };
 
+/**
+ * A run's place in its chain (design-relay R2, meta `chain:<runId>`): the room's step, its depth
+ * and path, and what every later step gets: the root request as text and the root topic.
+ */
+export interface ChainMeta {
+  chainId: string;
+  seq: number;
+  depth: number;
+  path: string[];
+  rootRequest?: string;
+  rootTopicId?: string;
+}
+
 /** A stored or reported code location (`run.done.code`), or null when it is not a valid one. */
 export function codeOf(v: unknown): RunCode | null {
   if (v === null || v === undefined) return null;
@@ -167,6 +180,8 @@ export const QUEUE_RETRY_MS = 15_000;
 export const START_STUCK_MS = 2 * 60_000;
 /** Follow-up runs in a row (leftover input after a run ended) before the bot stops chaining. */
 export const MAX_FOLLOW_UPS = 5;
+/** A run report the room does not take is sent again by the alarm for at most this long. */
+export const PENDING_STATE_MAX_MS = 24 * 60 * 60_000;
 /** Plan updates over HTTP, per run: 2 per second, bursts of 10. */
 export const PLAN_RATE = { rate: 2, burst: 10 };
 
@@ -777,23 +792,103 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
     return this.approvalCard(r)?.noOwner ? "requester" : this.approver(kind);
   }
 
-  protected async topic(r: RunRow, status: TopicStatus, waitingOn: string[] = []): Promise<void> {
+  protected async topic(
+    r: RunRow,
+    status: TopicStatus,
+    waitingOn: string[] = [],
+    end?: Pick<WorkState, "outcome" | "result">,
+  ): Promise<void> {
     // A side chat answers in the asker's DM; its topic keeps no work status.
     if (r.kind === RUN_KIND_ASIDE) return;
     // Usable (design-relay R1): the room keeps this run's report and rolls the topic's status up
     // from every AI member working there; the routing owner is set when a run claims the topic.
+    // R2: with the run's step of its chain, how it ended, who stopped it and its result.
+    const s: WorkState = { topicId: r.topic_id, runId: r.id, status, waitingOn, ended: r.ended_at !== null };
+    const chain = this.chainOf(r);
+    if (chain) s.chain = { chainId: chain.chainId, seq: chain.seq };
+    if (s.ended) {
+      if (end?.outcome) s.outcome = end.outcome;
+      if (end?.result !== undefined) s.result = end.result.slice(0, 4000);
+      const stoppedBy = this.meta(`stoppedBy:${r.id}`);
+      if (stoppedBy) s.stoppedBy = stoppedBy;
+      const handed = this.handedOverOf(r.id);
+      if (handed) s.handedOver = handed.to;
+    }
+    await this.sendWorkState(r.group_id, s);
+  }
+
+  /**
+   * Sends a run's report to its room. A report that fails is kept (meta `pendingState:<runId>`)
+   * and sent again by the alarm, so the room's rows and chains do not miss a run's end.
+   */
+  protected async sendWorkState(groupId: string, s: WorkState): Promise<boolean> {
+    const key = `pendingState:${s.runId}`;
     try {
-      unwrap(
-        await this.room(r).rpc(r.group_id, "bots.workState", this.actor(), {
-          topicId: r.topic_id,
-          runId: r.id,
-          status,
-          waitingOn,
-          ended: r.ended_at !== null,
-        } satisfies WorkState),
-      );
+      unwrap(await roomStub(this.env, groupId).rpc(groupId, "bots.workState", this.actor(), s));
+      this.sql.exec("DELETE FROM meta WHERE key = ?", key);
+      return true;
     } catch (err) {
-      this.log.warn("topic update failed", { runId: r.id, status, err });
+      this.log.warn("topic update failed", { runId: s.runId, status: s.status, err });
+      // The room refused it for good (the topic or the bot is gone), or it failed for a day: dropped.
+      const code = (err as { code?: string } | null)?.code;
+      const prev = this.meta(key);
+      const since = prev ? ((JSON.parse(prev) as { at?: number }).at ?? Date.now()) : Date.now();
+      if (code === "forbidden" || code === "not_found" || code === "invalid" || Date.now() - since > PENDING_STATE_MAX_MS) {
+        this.sql.exec("DELETE FROM meta WHERE key = ?", key);
+        return false;
+      }
+      this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", key, JSON.stringify({ groupId, s, at: since }));
+      await this.scheduleStall().catch(() => {});
+      return false;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Chains (design-relay R2)
+  // -------------------------------------------------------------------------
+
+  /**
+   * The run's place in its chain (meta `chain:<runId>`, or `chainFor:<trigger>` written before a
+   * handed-over run started). A retry, a restart or a follow-up of a run is the same step.
+   */
+  protected chainOf(r: Pick<RunRow, "id" | "trigger_message_id" | "retry_of" | "follow_up_of">): ChainMeta | null {
+    let cur: Pick<RunRow, "id" | "trigger_message_id" | "retry_of" | "follow_up_of"> | undefined = r;
+    for (let i = 0; cur && i < 20; i++) {
+      const raw = this.meta(`chain:${cur.id}`) ?? this.meta(`chainFor:${cur.trigger_message_id}`);
+      if (raw) {
+        try {
+          return JSON.parse(raw) as ChainMeta;
+        } catch {
+          return null;
+        }
+      }
+      const prev: string | null = cur.retry_of ?? cur.follow_up_of;
+      cur = prev ? this.run(prev) : undefined;
+    }
+    return null;
+  }
+
+  /** The member a run handed its work over to (meta `handedOver:<runId>`), or null. */
+  protected handedOverOf(runId: string): { to: string; name: string; at: number } | null {
+    const raw = this.meta(`handedOver:${runId}`);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as { to: string; name: string; at: number };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Results of split-off parts kept for a run that had no machine yet; taken once. */
+  protected takeParts(runId: string): string | null {
+    const raw = this.meta(`partsIn:${runId}`);
+    if (raw === null) return null;
+    this.sql.exec("DELETE FROM meta WHERE key = ?", `partsIn:${runId}`);
+    try {
+      const parts = JSON.parse(raw) as string[];
+      return parts.length > 0 ? parts.join("\n\n") : null;
+    } catch {
+      return null;
     }
   }
 
