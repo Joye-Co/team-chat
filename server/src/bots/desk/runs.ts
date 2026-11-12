@@ -20,7 +20,6 @@ import { groupMembers, membersText } from "../../context/read";
 import { loadMachines, loadRunner } from "../store";
 import { ANONYMOUS_ID } from "../../cards2/privacy";
 import { githubFor } from "../../github/assign";
-import { supersedeWaits } from "../../github/machine";
 import { DeskCore, QUEUED, readGroupsOf, type RunRow } from "./core";
 import { readableGroups, readerOf } from "../../context/reach";
 import { takeoverOf } from "./hold";
@@ -191,8 +190,6 @@ export abstract class DeskRuns extends DeskCore {
         )
           .bind(runId, botId, m.groupId, m.topicId, now)
           .run();
-        // A new run of this member in a topic answers the GitHub waits of its earlier ones there.
-        if (!isMainTopicId(m.topicId)) await supersedeWaits(this.env, botId, m.topicId).catch((err) => this.log.warn("github waits cleanup failed", { runId, err }));
         const all = await loadMachines(this.env);
         const ctx = await this.placeCtx(r);
         // design-roles 3.3: no machine may ever take it for its person (the member works only on
@@ -918,9 +915,9 @@ export abstract class DeskRuns extends DeskCore {
     const resumePrompt = frame.resumeSessionId ? this.meta(`prompt_resume:${r.id}`) : null;
     if (resumePrompt !== null) frame.prompt = resumePrompt;
     this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `sent:${r.id}`, resumePrompt !== null ? "resume" : "full");
-    // Whose GitHub the run uses on this machine (design-github-identity 3.2); never the token.
+    // The computer's own GitHub sign-in, commits by the AI member, who asked (design-github-identity 3.2).
     const github = r.kind === RUN_KIND_ASIDE ? null : await githubFor(this.env, { requestedFor: r.requested_for, requestedBy: r.requested_by, botId: this.botId as string }, machine);
-    if (github) frame.github = github.github;
+    if (github) frame.github = github;
     // design-vm-state 3.2: the full prompt too, for when the machine cannot find the session.
     if (resumePrompt !== null) withFullPrompt(frame, prompt);
     // 模 4.1: the sign-in the run starts on, from the machine's latest heartbeat; the budget counts by it.
@@ -940,7 +937,7 @@ export abstract class DeskRuns extends DeskCore {
     );
     r.machine_id = machine.id;
     r.runtime = runner.runtime;
-    await this.env.DB.prepare("UPDATE bot_runs SET machine_id = ?, github_member_id = ? WHERE id = ?").bind(machine.id, github?.memberId ?? null, r.id).run();
+    await this.env.DB.prepare("UPDATE bot_runs SET machine_id = ? WHERE id = ?").bind(machine.id, r.id).run();
     this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `prompt:${r.id}`, prompt);
     await linkStub(this.env, machine.id).assign(machine.id, this.botId as string, frame);
   }

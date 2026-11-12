@@ -20,6 +20,7 @@ import { UNKNOWN_GROUP } from "../../memory/store";
 import { readableGroups, readerOf } from "../../context/reach";
 import { DAEMON_RESTARTED, LIMIT_REACHED, MAX_DAEMON_RESUMES, MAX_LIMIT_WAITS } from "../../agent/recovery";
 import { HANDBACK_RETRY_MS, HOLD_CLI_TEXT, HOLD_TEXT } from "./hold";
+import { missingText } from "../../github/text";
 
 /** A run event of a person's command or hand-back (`hand.*`, design-takeover 3.6). */
 function isHandFrame(f: SeqFrame): boolean {
@@ -236,6 +237,10 @@ export abstract class DeskEvents extends DeskRuns {
             planChanged = true;
           }
           break;
+        case "github":
+          // design-github-identity 3.4: git or gh found no GitHub sign-in on the computer.
+          if (ev.state === "missing" || ev.state === "invalid") await this.githubMissing(r, ev.state, typeof ev.reason === "string" ? ev.reason : undefined);
+          break;
         default:
           break;
       }
@@ -250,6 +255,34 @@ export abstract class DeskEvents extends DeskRuns {
     if (planChanged && !done) await this.setStatus(r, r.status);
     if (done) await this.finish(r, done);
     else await this.scheduleStall();
+  }
+
+  /**
+   * The run found no GitHub sign-in on its computer: said once per run in the topic, with no
+   * mention and no blocked status (the run ends as it ends). On a team computer the admins are
+   * told through the computer's alert; on a personal computer the message names its owner.
+   */
+  protected async githubMissing(r: RunRow, state: "missing" | "invalid", reason?: string): Promise<void> {
+    const key = `github_said:${r.id}`;
+    if (this.meta(key) !== null) return;
+    this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", key, state);
+    const row = r.machine_id
+      ? await this.env.DB.prepare("SELECT m.owner_id, p.name FROM machines m LEFT JOIN members p ON p.id = m.owner_id WHERE m.id = ?")
+          .bind(r.machine_id)
+          .first<{ owner_id: string | null; name: string | null }>()
+      : null;
+    // A deleted computer counts as a team computer.
+    const owner = row?.owner_id ? (row.name ?? row.owner_id) : null;
+    try {
+      await this.post(r, `run:${r.id}:github`, missingText(state, owner));
+    } catch (err) {
+      this.log.warn("github note failed", { runId: r.id, err });
+    }
+    if (owner === null && r.machine_id) {
+      await linkStub(this.env, r.machine_id)
+        .githubMissing(reason ?? state)
+        .catch((err) => this.log.warn("github alert failed", { runId: r.id, err }));
+    }
   }
 
   /**
@@ -578,8 +611,7 @@ export abstract class DeskEvents extends DeskRuns {
     // close now; an answer taken back in the meantime is left out.
     const left: typeof unread = [];
     for (const x of unread) if (await this.answerStartsRun(r, x.message_id)) left.push(x);
-    // None of them starts a run: a GitHub connection that waited for them goes on now.
-    if (left.length === 0) return this.resumeAfterGithub(r, false);
+    if (left.length === 0) return;
     if (this.followUpDepth(r) >= MAX_FOLLOW_UPS) {
       try {
         await this.note(r, TEXT.followUpLimit);
@@ -708,12 +740,10 @@ export abstract class DeskEvents extends DeskRuns {
       r.result_message_id = id;
     }
     await this.setStatus(r, status, { ended_at: now, summary: cut(summary, 280) || null });
-    // A run that stopped for someone's GitHub is not done: the topic waits on that person.
-    const githubFor = status !== "cancelled" ? this.githubWaitingOn(r.id) : null;
     // The room ends the run's step of its chain: a split-off's result (stopped ones too) goes
     // back to its giver from there. A private card's answerer is never named on the wire: the
     // topic waits on nobody then.
-    await this.topic(r, githubFor ? "blocked" : topicStatus, githubFor ? (this.anonymous(r) ? [] : [githubFor]) : waitingOn, {
+    await this.topic(r, topicStatus, waitingOn, {
       outcome: status,
       result: handed ? summary : body,
     });
@@ -721,7 +751,6 @@ export abstract class DeskEvents extends DeskRuns {
     // A slot may be free now: the next queued run (排队) gets it. Not awaited: it takes other
     // runs' turns and must not wait inside this run's turn.
     void this.dispatchQueued().catch((err) => this.log.warn("queue dispatch failed", { err }));
-    if (status !== "cancelled" && this.meta(`github_resume:${r.id}`) !== null) await this.resumeAfterGithub(r);
   }
 
   /** 复盘 (memory/retro.ts): lessons from a run that ran on a machine, after it ended. Never fails the run. */
