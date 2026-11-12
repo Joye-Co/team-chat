@@ -6,14 +6,20 @@
 //! ends. So the daemon counts consumed lines, not written ones: the CLI echoes every user line
 //! it takes up (`isReplay`), and a new turn follows a `result` only while a written line is
 //! still unread. When no turn is open and no line is unread, stdin is closed and the CLI
-//! exits. The raw session is
+//! exits. A turn that ends while a command it put in the background (`run_in_background`) still
+//! runs has not finished the work: stdin stays open, and the CLI's own turn on the command's
+//! notification goes on with it (the daemon writes [`BACKGROUND_DONE`] when the CLI does not
+//! start one). A command still running after [`BACKGROUND_WAIT`] (a server, a watcher) gets one
+//! line ([`BACKGROUND_STILL`]) and the turn after it ends the run as usual. A `result` of no turns with no text while a written line is unread is the CLI
+//! clearing a notification left from the session before (a background command a restart
+//! stopped), not the answer to the line (verification pass 2, problem 4). The raw session is
 //! `$CLAUDE_CONFIG_DIR/projects/<cwd with non-alphanumerics as '-'>/<session id>.jsonl`
 //! (default config dir `~/.claude`).
 
 use super::*;
 use crate::proto::{FileChange, RunEvent, Usage, truncate};
 use serde_json::{Value, json};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 pub struct ClaudeRuntime;
 
@@ -65,6 +71,64 @@ pub struct ClaudeNormalizer {
     plan: PlanTracker,
     /// Claude Code's task tools: (task id once known, subject, status), in creation order.
     tasks: Vec<(Option<String>, String, String)>,
+    /// The CLI's background commands still running (task ids of `task_started` with
+    /// `is_backgrounded`, until their `task_notification`; `background_tasks_changed` lists them).
+    background: HashSet<String>,
+}
+
+/// The line the daemon writes when a command the CLI put in the background finished after the
+/// turn ended and the CLI did not go on by itself within [`BACKGROUND_NUDGE`].
+pub const BACKGROUND_DONE: &str = "[team-chat] Written automatically (not a message from a person): \
+the command you ran in the background has finished. Continue the work from where you stopped. \
+When you need a command's result, wait for it in the foreground before you end your turn: \
+the work counts as done only when your turn ends with nothing left running.";
+/// A `result` of no turns and no text that is no error: the CLI cleared a background command's
+/// notification without the model; it answers no line.
+pub fn idle_result(v: &Value) -> bool {
+    v["type"] == "result"
+        && v["is_error"].as_bool() != Some(true)
+        && v["subtype"].as_str().is_none_or(|s| s == "success")
+        && v["num_turns"].as_u64() == Some(0)
+        && v["result"].as_str().is_none_or(str::is_empty)
+}
+
+/// How long the daemon waits for the CLI's own turn after its last background command finished.
+pub const BACKGROUND_NUDGE: Duration = Duration::from_secs(15);
+/// How long a run whose turn ended waits for the commands the CLI left in the background. The
+/// run sends nothing while it waits, so this stays well below the server's nudge (5 minutes of
+/// quiet, `NUDGE_MS`) and stall restart (10 minutes): the daemon's [`BACKGROUND_STILL`] comes
+/// first, and a command that needs longer is then waited for in the foreground, as an open tool
+/// call the server gives its longer tool limit.
+pub const BACKGROUND_WAIT: Duration = Duration::from_secs(4 * 60);
+
+/// [`BACKGROUND_WAIT`] unless a test shortened it ([`set_background_wait`]), in milliseconds.
+static BACKGROUND_WAIT_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Tests only: how long a run waits for its background commands instead of [`BACKGROUND_WAIT`].
+#[doc(hidden)]
+pub fn set_background_wait(d: Duration) {
+    BACKGROUND_WAIT_MS.store(d.as_millis() as u64, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn background_wait_for() -> Duration {
+    match BACKGROUND_WAIT_MS.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => BACKGROUND_WAIT,
+        ms => Duration::from_millis(ms),
+    }
+}
+/// The line the daemon writes when a background command still runs after [`BACKGROUND_WAIT`].
+pub const BACKGROUND_STILL: &str = "[team-chat] Written automatically (not a message from a person): \
+your turn ended while a command you ran in the background still runs. If the work needs its \
+result, wait for it now in the foreground; if you no longer need it (a server, a watcher), stop \
+it. Then end your turn with the result: the run ends after this turn.";
+
+/// What the daemon writes when a run waits after a turn that left background commands.
+#[derive(Clone, Copy, PartialEq)]
+enum Wake {
+    /// They finished and the CLI did not go on: [`BACKGROUND_DONE`].
+    Done,
+    /// One still runs after [`BACKGROUND_WAIT`]: [`BACKGROUND_STILL`].
+    Still,
 }
 
 /// The start of a run's error when the CLI exited before its turn ended; the stderr tail follows.
@@ -114,6 +178,19 @@ impl ClaudeNormalizer {
         self.open.clone()
     }
 
+    /// A background command of the CLI still runs.
+    pub fn background_running(&self) -> bool {
+        !self.background.is_empty()
+    }
+
+    /// The CLI starts a turn of its own (on a background command's notification): it opens one.
+    fn own_turn(&mut self) -> Vec<RunEvent> {
+        if self.open.is_some() {
+            return vec![];
+        }
+        vec![self.start_turn()]
+    }
+
     pub fn on_line(&mut self, v: &Value) -> Vec<RunEvent> {
         match v["type"].as_str().unwrap_or_default() {
             "system" => match v["subtype"].as_str() {
@@ -131,6 +208,29 @@ impl ClaudeNormalizer {
                     state: "retrying".into(),
                     message: v["error"].as_str().map(str::to_string),
                 }],
+                Some("task_started") => {
+                    if let (Some(id), Some(true)) =
+                        (v["task_id"].as_str(), v["is_backgrounded"].as_bool())
+                    {
+                        self.background.insert(id.to_string());
+                    }
+                    vec![]
+                }
+                Some("task_notification") => {
+                    if let Some(id) = v["task_id"].as_str() {
+                        self.background.remove(id);
+                    }
+                    vec![]
+                }
+                Some("background_tasks_changed") => {
+                    if let Some(tasks) = v["tasks"].as_array() {
+                        self.background = tasks
+                            .iter()
+                            .filter_map(|t| t["task_id"].as_str().map(str::to_string))
+                            .collect();
+                    }
+                    vec![]
+                }
                 _ => vec![],
             },
             // The account's limits as the CLI last heard them; "rejected" = the limit refused
@@ -150,7 +250,7 @@ impl ClaudeNormalizer {
                 match e["type"].as_str() {
                     Some("message_start") => {
                         self.current_msg = e["message"]["id"].as_str().map(str::to_string);
-                        vec![]
+                        self.own_turn()
                     }
                     Some("content_block_delta") if e["delta"]["type"] == "text_delta" => {
                         let msg = self.current_msg.clone().unwrap_or_else(|| "m".into());
@@ -190,7 +290,7 @@ impl ClaudeNormalizer {
                 let blocks = m["content"].as_array().cloned().unwrap_or_default();
                 let base = *self.consumed.get(&msg).unwrap_or(&0);
                 self.consumed.insert(msg.clone(), base + blocks.len());
-                let mut out = vec![];
+                let mut out = self.own_turn();
                 for (i, b) in blocks.iter().enumerate() {
                     let item_id = format!("{msg}:{}", base + i);
                     match b["type"].as_str() {
@@ -284,6 +384,14 @@ impl ClaudeNormalizer {
                 let is_error = v["is_error"].as_bool() == Some(true)
                     || v["subtype"].as_str().is_some_and(|s| s != "success");
                 let text = v["result"].as_str().map(str::to_string);
+                // No turn and no text: the CLI cleared a notification (one left from the session
+                // before, a background command's), not an answer to a line: no turn ends.
+                if idle_result(v) {
+                    if let Some(sid) = v["session_id"].as_str() {
+                        self.session_id.get_or_insert_with(|| sid.to_string());
+                    }
+                    return vec![];
+                }
                 self.last_is_error = is_error;
                 if text.is_some() {
                     self.last_result = text.clone();
@@ -755,17 +863,39 @@ run unasked. The run was not started.",
     }
     let mut control_open = true;
     let mut exited_early = false;
+    // The last turn ended while a background command ran: the work goes on after it.
+    let mut background_wait = false;
+    // When the daemon writes a line about it (Wake), unless the CLI starts a turn by itself first.
+    let mut wake: Option<(tokio::time::Instant, Wake)> = None;
+    // BACKGROUND_STILL was written: the next turn ends the run whatever still runs.
+    let mut still_asked = false;
     loop {
         tokio::select! {
             line = p.next_line() => {
-                let Some(line) = line else { exited_early = norm.open_turns() > 0; break };
+                let Some(line) = line else {
+                    exited_early = norm.open_turns() > 0 || background_wait;
+                    break;
+                };
                 let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
                 for ev in norm.on_line(&v) {
                     let _ = emit.send(ev);
                 }
-                if v["type"] == "result" && norm.open_turns() == 0 {
+                if background_wait {
+                    if norm.open_turns() > 0 {
+                        background_wait = false;
+                        wake = None;
+                    } else if !norm.background_running() && wake.is_none_or(|(_, w)| w != Wake::Done) {
+                        wake = Some((tokio::time::Instant::now() + BACKGROUND_NUDGE, Wake::Done));
+                    }
+                }
+                if v["type"] == "result" && norm.open_turns() == 0 && !idle_result(&v) {
                     let mut late = VecDeque::new();
                     super::codex::take_late_input(&mut control, &mut late, &emit);
+                    if late.is_empty() && norm.background_running() && !norm.last_is_error && !still_asked {
+                        background_wait = true;
+                        wake = Some((tokio::time::Instant::now() + background_wait_for(), Wake::Still));
+                        continue;
+                    }
                     if late.is_empty() { break; }
                     for text in late {
                         for ev in norm.queue_turn() { let _ = emit.send(ev); }
@@ -774,11 +904,33 @@ run unasked. The run was not started.",
                     if exited_early { break; }
                 }
             }
+            _ = async {
+                match wake {
+                    Some((at, _)) => tokio::time::sleep_until(at).await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                let line = match wake.take().map(|(_, w)| w) {
+                    Some(Wake::Still) => {
+                        still_asked = true;
+                        BACKGROUND_STILL
+                    }
+                    _ => BACKGROUND_DONE,
+                };
+                background_wait = false;
+                for ev in norm.queue_turn() { let _ = emit.send(ev); }
+                if p.write_json(&user_line(line)).await.is_err() {
+                    exited_early = true;
+                    break;
+                }
+            }
             c = control.recv(), if control_open => {
                 let Some(c) = c else { control_open = false; continue };
                 match c {
                     Control::Input { input_id, text } => {
                         let _ = emit.send(RunEvent::InputAccepted { input_id });
+                        background_wait = false;
+                        wake = None;
                         for ev in norm.queue_turn() { let _ = emit.send(ev); }
                         if p.write_json(&user_line(&text)).await.is_err() {
                             exited_early = true;

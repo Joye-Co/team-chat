@@ -22,8 +22,9 @@ import { ANONYMOUS_ID } from "../../cards2/privacy";
 import { githubFor } from "../../github/assign";
 import { supersedeWaits } from "../../github/machine";
 import { DeskCore, QUEUED, type RunRow } from "./core";
+import { takeoverOf } from "./hold";
 import { type FailureNote, failureNote } from "./failure";
-import { LIMIT_NOTE, LIMIT_REACHED, type LoggedFrame, type RecoveryFacts, outwardAction, recoveryNote, stepOf } from "../../agent/recovery";
+import { LIMIT_NOTE, LIMIT_REACHED, type LoggedFrame, type RecoveryFacts, backgroundStep, outwardAction, recoveryNote, stepOf } from "../../agent/recovery";
 import type { RunProof } from "../proof";
 import { needsReply, reportOf } from "./report";
 import { runLimitMs } from "../../settings/runs";
@@ -290,6 +291,7 @@ export abstract class DeskRuns extends DeskCore {
     const chain = this.retryChain(runId);
     const steps: string[] = [];
     const actions: string[] = [];
+    const background: string[] = [];
     for (const run of [...chain].reverse()) {
       const rows = this.sql
         .exec<{ frame: string }>(
@@ -308,6 +310,8 @@ export abstract class DeskRuns extends DeskCore {
         if (step) steps.push(step);
         const action = outwardAction(f);
         if (action) actions.push(action);
+        const bg = backgroundStep(f);
+        if (bg) background.push(bg);
       }
     }
     const last = chain[0];
@@ -328,7 +332,7 @@ export abstract class DeskRuns extends DeskCore {
     }
     // The newest plan any try reported.
     const plan = chain.map((x) => this.planOf(x)).find((x) => x !== null && x.length > 0) ?? null;
-    return { why, tries: chain.length, plan, steps, actions, prs, artifacts };
+    return { why, tries: chain.length, plan, steps, actions, prs, artifacts, background };
   }
 
   /** The recovery note a restart of `runId` starts with (盯 1.2). */
@@ -746,7 +750,21 @@ export abstract class DeskRuns extends DeskCore {
     // Whose GitHub the run uses on this machine (design-github-identity 3.2); never the token.
     const github = r.kind === RUN_KIND_ASIDE ? null : await githubFor(this.env, { requestedFor: r.requested_for, requestedBy: r.requested_by, botId: this.botId as string }, machine);
     if (github) frame.github = github.github;
-    this.sql.exec("UPDATE runs SET machine_id = ?, runtime = ? WHERE id = ?", machine.id, runner.runtime, r.id);
+    // 模 4.1: the sign-in the run starts on, from the machine's latest heartbeat; the budget counts by it.
+    const methods = await linkStub(this.env, machine.id)
+      .loginMethods()
+      .catch((): Record<string, string> => ({}));
+    const loginMethod = methods[runner.runtime] ?? null;
+    // design-takeover 3.6: how a person can take over the run on this machine.
+    r.takeover = takeoverOf(machine);
+    this.sql.exec(
+      "UPDATE runs SET machine_id = ?, runtime = ?, login_method = ?, takeover = ? WHERE id = ?",
+      machine.id,
+      runner.runtime,
+      loginMethod,
+      r.takeover,
+      r.id,
+    );
     r.machine_id = machine.id;
     r.runtime = runner.runtime;
     await this.env.DB.prepare("UPDATE bot_runs SET machine_id = ?, github_member_id = ? WHERE id = ?").bind(machine.id, github?.memberId ?? null, r.id).run();
@@ -801,6 +819,11 @@ export abstract class DeskRuns extends DeskCore {
     return this.serial(runId, async () => {
       const r = this.run(runId);
       if (!r || r.ended_at !== null || r.machine_id !== machineId) return false;
+      // design-takeover 3.7: a run a person holds is not moved or ended; it waits for its machine.
+      if (r.paused_by) {
+        this.log.info("lease ran out while held", { runId, machineId });
+        return true;
+      }
       return this.machineLost(r);
     });
   }

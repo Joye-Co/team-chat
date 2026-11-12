@@ -2281,8 +2281,10 @@ Rules:
 - Calls: `anthropic` through the Messages API; `deepseek` (`https://api.deepseek.com`) and
   `openai-compatible` (`baseUrl`) through `POST <base>/chat/completions` with
   `Authorization: Bearer <key>`. A provider error (status, message) is `ok: false` in `test`,
-  never an HTTP error of ours. Each call times out after 20 s.
+  never an HTTP error of ours. Each call times out after 20 s (a forced tool call after 30 s).
 - Suggested models: `deepseek-chat` for DeepSeek, `claude-haiku-5-5` for Anthropic.
+- Usable additions (switches, health, the status flag, the two checks of `test`, tokens on
+  用量): see "AI 服务: switches, health and usage" under Usable extensions.
 - Not set up: a topic keeps its first line as its title.
 
 ## Worker models (设置 › 模型)
@@ -2830,3 +2832,80 @@ MachineMonitor += { homes?: HomeUse[] /* <= 500; absent on other machines */ }
 | Method and path | Who | Body | Response |
 | --- | --- | --- | --- |
 | `POST /v1/machines/:id/homes/:memberId/clear` | whoever manages the machine (team machine: an admin; personal machine: its owner) | | `{ ok: true }` once `home.clear` is sent to the daemon; `conflict` when the machine is offline (`machine.offline`, never queued) or keeps no homes (`machine.too_old`); `not_found` for an id that is not `[A-Za-z0-9]{1,64}`; audited as `machine.home.clear`. The daemon refuses while a run of that member is on the machine; the next heartbeat shows the result |
+
+## AI 服务: switches, health and usage
+
+The team's model (the AI 服务 above, decided 2: a separate key the team owns; only admins change
+it) serves five uses: `front_desk` (前台), `title` (AI 话题标题), `summary` (topic summaries),
+`retro` (the review after a run) and `tidy` (the nightly memory tidy). Module `settings.ts` /
+`settings.rs`, `usage.ts` / `usage.rs`.
+
+```ts
+AI_SERVICE_USES = ["front_desk", "title", "summary", "retro", "tidy"]   // open string
+AiServiceSwitches = { frontDesk: boolean, titles: boolean /* title + summary */, memory: boolean /* retro + tidy */ }
+AiServiceUseHealth = { use, at, ok: boolean, error?: string /* <= 500 */, failures /* in a row */, okAt? }
+AiServiceFailing = { since, use, error }
+AiServiceConfig += { switches?: AiServiceSwitches  /* absent = all on */,
+                     uses?: AiServiceUseHealth[]   /* <= 16, the uses that made a call */,
+                     failing?: AiServiceFailing    /* raised: 团队管理 › 要注意 */ }
+UpdateAiServiceSwitchesRequest = { frontDesk?, titles?, memory? }   // at least one; absent keeps
+AiServiceStatus = { configured: boolean, frontDesk: boolean, titles: boolean, memory: boolean }
+AiServiceCheck = { ok: boolean, error?: string }
+AiServiceTestResult += { text?: AiServiceCheck, tool?: AiServiceCheck }
+TransientEvent += { type: "ai.failing", failing: AiServiceFailing }   // admins with feature settings/1
+ServiceUsage = { calls, failures, costUsd, inputTokens, outputTokens, cacheReadTokens?, unpricedTokens?,
+                 uses: { use, calls, inputTokens, outputTokens }[] /* <= 16, most tokens first */ }
+TeamUsage += { service?: ServiceUsage }
+```
+
+| Method and path | Who | Body | Response |
+| --- | --- | --- | --- |
+| `GET /v1/settings/ai/status` | any member | | `AiServiceStatus`: no provider, model or health, only what is on |
+| `PUT /v1/settings/ai/switches` | admin | `UpdateAiServiceSwitchesRequest` | `AiServiceConfig`; audited as `settings.ai` (`details.switches: { before, after }`) |
+
+Rules:
+
+- Switches default on (D1 `ai_service_switches`, migration 0018; a missing row is on) and stay
+  when the config is removed. A use that is off works as if no AI 服务 were set up: the front
+  desk hands every request straight to a run, titles stay the first line, no summary, no review,
+  and the tidy makes pending memories active as they are. `AiServiceStatus` fields are
+  `configured` and that switch.
+- Every call is recorded under its use (D1 `ai_service_health`): `failures` counts failed calls
+  in a row and a good call sets it to 0. When any use reaches 3 failures in a row the server
+  raises `failing` once (D1 `ai_service_alert`), writes one 活动记录 entry, kind `key`, action
+  `ai.failing` (`target` the use, `details: { use, model, error, failures }`), and sends one
+  `ai.failing` transient to every admin's connections whose hello has feature `settings/1` (a
+  client shows it as a notification; an admin who is not connected sees `failing` and 活动记录).
+  The next good call of a use, when no use is at 3 or more any more, removes it and writes
+  `ai.recovered`. Switching a use off removes that use's record (it makes no calls, so nothing
+  would clear it), and the alert with it when no use still at 3 is left (`ai.recovered` with
+  `actorId` the admin and `details.switchedOff`). `PUT` and `DELETE /v1/settings/ai` start a clean
+  record (no `uses`, no `failing`).
+- A saved key that cannot be decrypted (the Worker secret `HOOK_SECRET_KEY` missing or changed)
+  never fails the work that wanted it: that use proceeds as not set up and records a failed call
+  ("the saved API key cannot be read…"). `PUT` or `test` without `apiKey` then answer `invalid`
+  with reason `ai.key_unreadable`; any `PUT` or `test` (with or without `apiKey`, so the admin
+  learns it before saving) on a server without the secret answers `internal` with reason
+  `ai.secret_missing` and a message that names the secret.
+- `test` makes a plain text call (`text`), then, when it worked, a forced tool call (`tool`), as
+  the front desk, the review and the tidy make. `ok` is both; `error` is the first failure, the
+  tool one prefixed `forced tool call: `. Older clients read `ok` and `error` as before. Each check
+  is one attempt with a 12 s timeout and no retries, so the answer, a timeout included, arrives
+  inside a client's 30 s HTTP timeout.
+- Retries, both providers alike: a 408, 429, any 5xx (Anthropic's 529 included), a timeout or a
+  network error is tried again twice, after 1 s and 3 s, or after the provider's `retry-after`
+  (at most 10 s). Other errors are final.
+- Prompt cache: on Anthropic the system prompt is one block with `cache_control: ephemeral` (the
+  tools and the system prompt are each use's stable prefix). DeepSeek and OpenAI-compatible
+  providers cache a repeated prefix themselves; their cached input is counted as
+  `cacheReadTokens` (`prompt_cache_hit_tokens`, or `prompt_tokens_details.cached_tokens`).
+- 用量: D1 `ai_service_calls` keeps calls, failures and tokens per hour, use and model (400
+  days). `TeamUsage.service` sums the hours that start in `[from, to)` (the first hour is the
+  one `from` falls in), priced per model like runs, and is absent when there were no calls. It
+  is not part of `total`.
+- Weekly budget (decided: usable section 4): a run counts against `weeklyBudgetCents`, and toward
+  `budget.reached`, unless it ran on a subscription: the desk keeps the `method` its machine's CLI
+  for its runtime reported (`MachineMetrics.logins`, latest heartbeat) when the run was sent, so a
+  later change of sign-in does not rewrite the week. A run from before that was kept falls back to
+  the machine's sign-in now, the rule 用量 uses for 订阅里已包含. A run with no machine, or a
+  sign-in the machine did not report, counts.

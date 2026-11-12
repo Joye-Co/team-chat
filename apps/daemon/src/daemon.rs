@@ -37,6 +37,9 @@ pub const FEATURES: &[&str] = &[
     feature::EFFORT,
     feature::GATES,
     feature::GITHUB,
+    // Every executor runs a person's commands (local: as the daemon's user; a VM: as another
+    // user, and `takeover-isolated` says so).
+    feature::TAKEOVER,
 ];
 
 /// `run.done.error` of a run found unfinished at start: the server continues it in its session.
@@ -604,6 +607,7 @@ impl Daemon {
                                 .copied()
                                 .chain(self.machine_key.as_ref().map(|_| feature::ACCOUNTS))
                                 .chain(self.cfg.vm.as_ref().map(|_| feature::HOMES))
+                                .chain(self.cfg.vm.as_ref().map(|_| feature::TAKEOVER_ISOLATED))
                                 .map(str::to_string)
                                 .collect(),
                         ),
@@ -715,11 +719,17 @@ impl Daemon {
                     let _ = r.control.send(Control::Cancel.into());
                 }
             }
-            // usable: `hold` is for feature "takeover", which this daemon does not report yet.
-            Down::RunPause { run_id, by, .. } => {
+            Down::RunPause { run_id, by, hold } => {
                 if let Some(r) = self.runs.get(&run_id).filter(|r| !r.done) {
-                    log!("run {run_id} paused");
-                    let _ = r.control.send(RunCtl::Pause { by });
+                    log!(
+                        "run {run_id} {}",
+                        if hold.is_some() {
+                            "taken over"
+                        } else {
+                            "paused"
+                        }
+                    );
+                    let _ = r.control.send(RunCtl::Pause { by, hold });
                 }
             }
             Down::RunResume { run_id, note } => {
@@ -775,9 +785,38 @@ impl Daemon {
                 }
             }
             Down::HomeClear { member_id } => self.on_home_clear(member_id),
-            // usable: feature "takeover" is not reported yet, so the server sends neither.
-            Down::RunCommand { run_id, .. } | Down::RunCommandCancel { run_id, .. } => {
-                log!("run {run_id}: take-over commands are not supported");
+            // Feature "takeover": the run checks that the sender holds it.
+            Down::RunCommand {
+                run_id,
+                command_id,
+                command,
+                by,
+            } => {
+                let valid = chat_protocol::takeover::is_hand_command_id(&command_id)
+                    && !command.is_empty()
+                    && command.chars().count() <= chat_protocol::takeover::MAX_HAND_COMMAND_CHARS;
+                match self.runs.get(&run_id).filter(|r| !r.done) {
+                    Some(r) if valid => {
+                        log!(
+                            "run {run_id}: command {} of the person holding it",
+                            crate::chat_run::safe_word(&command_id)
+                        );
+                        let _ = r.control.send(RunCtl::Command {
+                            id: command_id,
+                            command,
+                            by,
+                        });
+                    }
+                    _ => log!(
+                        "run {}: command refused",
+                        crate::chat_run::safe_word(&run_id)
+                    ),
+                }
+            }
+            Down::RunCommandCancel { run_id, command_id } => {
+                if let Some(r) = self.runs.get(&run_id).filter(|r| !r.done) {
+                    let _ = r.control.send(RunCtl::CommandCancel { id: command_id });
+                }
             }
             Down::RunOutputResult(res) => {
                 let run_id = res.run_id.clone();

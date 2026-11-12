@@ -1,0 +1,6 @@
+{
+  "kind": "UpdateAiServiceSwitchesRequest",
+  "valid": false,
+  "description": "at least one switch",
+  "value": {}
+}

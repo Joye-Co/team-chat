@@ -85,7 +85,8 @@ folder and run `chat-run artifact create --title <title> --dir <folder>` (or `--
 upload --file <path>` uploads one file. The prompt carries only part of the topic: read older \
 messages, whole messages, search and files with `chat-run topic history [--before <seq>] \
 [--after <seq>] [--limit <n>]`, `chat-run topic message --id <messageId>`, `chat-run search \
---query <text> [--group] [--limit <n>]` and `chat-run file get --id <fileId> [--out <path>]`. \
+--query <text> [--group] [--limit <n>]` and `chat-run file get --id <fileId>` (without --out it \
+goes to the run's downloads folder, outside your working folder; the printed path says where). \
 Members work together through 产出 and state; read them (`--topic <id>` reads another topic of \
 this group, also for topic history and topic message):
 - `chat-run topic state [--topic <id>]`: who did what, the 产出 and their versions, open cards, decisions
@@ -952,8 +953,10 @@ patch ops (or {\"ops\": [...]}). A file name of - reads standard input. Files, f
 产出 come from the run's working folder only; a folder's entry is index.html unless --entry
 says otherwise. The prompt carries only part of the topic: topic history (oldest first, seqs
 exclusive), topic message (the whole message), search (this topic, or every topic of the
-group with --group) and file get (into --out in the working folder, else downloads/<fileId>/
-of the run's folder, outside the working folder; the result's path says where) read the rest.
+group with --group) and file get read the rest. file get without --out (best: leave it out)
+writes downloads/<fileId>/<name> in the run's folder, outside the working folder, and prints
+that path; --out may name a path in the working folder (it is then committed with your work),
+in that downloads folder or in the system temp folder (e.g. \"$(mktemp -d)/x.png\").
 --topic reads another topic of the run's group, never another group.
 artifact get prints the 产出's versions and the entry file's text when it is text; --out also
 writes the entry file there (inside the working folder). report says how the work ended (done,

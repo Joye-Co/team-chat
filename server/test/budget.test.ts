@@ -86,6 +86,26 @@ describe("budget pause", () => {
     expect(a.entries.find((e) => e.action === "budget.raised")).toMatchObject({ actorId: w.owner.id, target: w.bot.id, details: { extraCents: 100 } });
   });
 
+  // Verification pass 2, problem 6: two held runs, both cards pressed: each topic says it once.
+  it("says once in each topic that the budget was raised, when two cards are pressed at once", async () => {
+    const { w, d, c, co } = await spent(100);
+    const t1 = await mention(c, w, "@dev job one");
+    const card1 = await budgetCard(c, t1);
+    const t2 = await mention(c, w, "@dev job two");
+    const card2 = await budgetCard(c, t2);
+    await Promise.all([
+      co.ok({ t: "card.action", groupId: w.gid, messageId: card1.id, actionId: card1.card.actions[0].id }),
+      co.ok({ t: "card.action", groupId: w.gid, messageId: card2.id, actionId: card2.card.actions[0].id }),
+    ]);
+    const notes = (topicId: string) =>
+      c.events().filter((e) => e.type === "message.created" && e.data.message.topicId === topicId && String(e.data.message.body).includes("加了 $1 预算"));
+    await waitUntil(() => notes(t1).length > 0 && notes(t2).length > 0, 5000, "raised notes");
+    await new Promise((r) => setTimeout(r, 500));
+    expect(notes(t1)).toHaveLength(1);
+    expect(notes(t2)).toHaveLength(1);
+    d.close();
+  });
+
   it("cancels the held run when the owners choose 先停, and says so in the topic", async () => {
     const { w, d, c, co } = await spent(100);
     const assigned = d.frames.filter((f) => f.t === "run.assign").length;

@@ -48,6 +48,18 @@ pub struct WorkerModelsPanel {
 }
 
 /// The runtime names the computers report, `claude` and `codex` first.
+/// The 前台 row of 模型 names only the provider and model; what the front desk does,
+/// and what is off without an AI service, is said once, in the AI 服务 list above.
+fn front_value(front: Option<&AiServiceSettings>) -> String {
+    match front.and_then(|f| f.provider.map(|p| (p, f.model.clone()))) {
+        Some((p, model)) => fill(
+            s::MODELS_FRONT_VALUE,
+            &[("provider", provider_label(p)), ("name", &model)],
+        ),
+        None => s::MODELS_FRONT_UNSET.into(),
+    }
+}
+
 fn runtimes(machines: &[MachineInfo]) -> Vec<String> {
     let mut all: Vec<String> = machines
         .iter()
@@ -178,24 +190,15 @@ impl WorkerModelsPanel {
 
     fn front_row(&self, front: Option<&AiServiceSettings>, cx: &mut Context<Self>) -> FormRow {
         let k = crate::ui::native::native_colors(cx);
-        let value: String = match front.and_then(|f| f.provider.map(|p| (p, f.model.clone()))) {
-            Some((p, model)) => fill(
-                s::MODELS_FRONT_VALUE,
-                &[("provider", provider_label(p)), ("name", &model)],
-            ),
-            None => s::MODELS_FRONT_UNSET.into(),
-        };
-        FormRow::new(s::MODELS_FRONT)
-            .detail(s::MODELS_FRONT_DETAIL)
-            .min_height(crate::ui::native::tokens::height::FORM_ROW_TWO)
-            .control(
-                div()
-                    .max_w(size::SETTINGS_FIELD_WIDTH)
-                    .text_right()
-                    .n_subheadline()
-                    .text_color(k.secondary)
-                    .child(value),
-            )
+        let value = front_value(front);
+        FormRow::new(s::MODELS_FRONT).control(
+            div()
+                .max_w(size::SETTINGS_FIELD_WIDTH)
+                .text_right()
+                .n_subheadline()
+                .text_color(k.secondary)
+                .child(value),
+        )
     }
 
     fn runtime_row(
@@ -399,5 +402,16 @@ mod tests {
             runtimes(&[m(&["acp", "codex"]), m(&["claude", "codex"])]),
             vec!["claude", "codex", "acp"]
         );
+    }
+
+    /// The 前台 row repeats none of the AI 服务 list's words: it names the provider and
+    /// model, or only that the AI service is not set up.
+    #[test]
+    fn the_front_row_names_only_the_model() {
+        assert_eq!(front_value(None), s::MODELS_FRONT_UNSET);
+        assert_ne!(s::MODELS_FRONT_UNSET, s::AI_USE_FRONT_OFF);
+        assert!(!s::MODELS_FRONT_UNSET.contains(s::AI_USE_FRONT_OFF));
+        let unset = AiServiceSettings::default();
+        assert_eq!(front_value(Some(&unset)), s::MODELS_FRONT_UNSET);
     }
 }

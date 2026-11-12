@@ -1000,6 +1000,7 @@ async fn pause_resume_answer_acceptance_and_aside() {
                         "effort",
                         "gates",
                         "github",
+                        "takeover",
                         "accounts"
                     ]
                     .map(String::from)[..]
@@ -1287,6 +1288,237 @@ impl Drop for Reap {
 
 fn file_len(p: &Path) -> u64 {
     std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)
+}
+
+#[cfg(unix)]
+fn hand_result(f: &Up, id: &str) -> bool {
+    matches!(f, Up::RunEvent { event: RunEvent::HandResult { command_id, .. }, .. } if command_id == id)
+}
+
+#[cfg(unix)]
+fn command(run: &str, id: &str, command: &str, by: &str) -> Down {
+    Down::RunCommand {
+        run_id: run.into(),
+        command_id: id.into(),
+        command: command.into(),
+        by: by.into(),
+    }
+}
+
+/// Usable, feature "takeover" (design-takeover T4): a pause becomes a take-over; only the
+/// person holding the run runs commands, one at a time, in the work folder, without the run's
+/// env; input for the CLI waits; at hand-back the server gets `hand.summary` and the CLI the
+/// note on what the person did, then their words, then the waiting input. A resume of a run
+/// that is not held still reports `paused: false`.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_person_takes_over_runs_commands_and_hands_back() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let cfg = write_config(tmp.path(), &m.url);
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
+    send(&mut ws, &welcome(vec![])).await;
+
+    send(&mut ws, &assign("h1", "fake", "tick", None)).await;
+    let dir = work_of(tmp.path(), "h1");
+    let mut frames = collect(&mut ws, "h1", true, |f| {
+        matches!(
+            f,
+            Up::RunEvent {
+                event: RunEvent::TurnStarted { .. },
+                ..
+            }
+        )
+    })
+    .await;
+    let pid: i32 = wait_file(&dir.join("fake.pid"))
+        .await
+        .trim()
+        .parse()
+        .unwrap();
+    wait_file(&dir.join("ticks.txt")).await;
+
+    // A resume while nothing is held is still answered.
+    send(
+        &mut ws,
+        &Down::RunResume {
+            run_id: "h1".into(),
+            note: None,
+        },
+    )
+    .await;
+    frames.extend(collect(&mut ws, "h1", true, |f| is_paused(f, false)).await);
+
+    // Before the take-over, no command runs.
+    send(&mut ws, &command("h1", "c0", "echo no", "u1")).await;
+    let refused = collect(&mut ws, "h1", true, |f| hand_result(f, "c0")).await;
+    assert!(events(&refused).iter().any(|e| matches!(e,
+        RunEvent::HandResult { ok: false, error: Some(e), .. } if e == "not_held")));
+
+    // A pause, then a take-over of the same run.
+    for hold in [None, Some("takeover".to_string())] {
+        send(
+            &mut ws,
+            &Down::RunPause {
+                run_id: "h1".into(),
+                by: Some("u1".into()),
+                hold,
+            },
+        )
+        .await;
+        frames.extend(collect(&mut ws, "h1", true, |f| is_paused(f, true)).await);
+    }
+    assert!(stopped(pid), "CLI not stopped");
+
+    // Someone else cannot run commands.
+    send(&mut ws, &command("h1", "c1", "echo no", "u2")).await;
+    let refused = collect(&mut ws, "h1", true, |f| hand_result(f, "c1")).await;
+    assert!(events(&refused).iter().any(|e| matches!(e,
+        RunEvent::HandResult { ok: false, error: Some(e), .. } if e == "not_held")));
+
+    // Input for the CLI waits for the hand-back.
+    send(
+        &mut ws,
+        &Down::RunInput {
+            run_id: "h1".into(),
+            input_id: "in-later".into(),
+            text: "after the hand-back".into(),
+            author_id: Some("u3".into()),
+            answer: None,
+            artifact_event: None,
+        },
+    )
+    .await;
+
+    // The holder's command: in the work folder, with output, exit code and no run env.
+    send(
+        &mut ws,
+        &command(
+            "h1",
+            "c2",
+            "echo out; echo err >&2; echo \"run=[$CHAT_RUN_ID] path=[$PATH]\"; printf x > made.txt; exit 3",
+            "u1",
+        ),
+    )
+    .await;
+    let c2 = collect(&mut ws, "h1", true, |f| hand_result(f, "c2")).await;
+    let evs = events(&c2);
+    assert!(evs.iter().any(|e| matches!(e,
+        RunEvent::HandCommand { command_id, by, .. } if command_id == "c2" && by == "u1")));
+    let out: String = evs
+        .iter()
+        .filter_map(|e| match e {
+            RunEvent::HandOutput { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(out.contains("out\n") && out.contains("err\n"), "{out}");
+    assert!(out.contains("run=[]"), "{out}");
+    assert!(!out.contains("/runs/h1/bin"), "{out}");
+    assert!(evs.iter().any(|e| matches!(
+        e,
+        RunEvent::HandResult {
+            ok: false,
+            exit_code: Some(3),
+            ..
+        }
+    )));
+    assert!(dir.join("made.txt").is_file());
+    assert!(stopped(pid), "the CLI ran while held");
+
+    // One at a time; a cancel ends a long one.
+    send(&mut ws, &command("h1", "c3", "sleep 60", "u1")).await;
+    collect(&mut ws, "h1", true, |f| {
+        matches!(f, Up::RunEvent { event: RunEvent::HandCommand { command_id, .. }, .. } if command_id == "c3")
+    })
+    .await;
+    send(&mut ws, &command("h1", "c4", "echo no", "u1")).await;
+    let busy = collect(&mut ws, "h1", true, |f| hand_result(f, "c4")).await;
+    assert!(events(&busy).iter().any(|e| matches!(e,
+        RunEvent::HandResult { ok: false, error: Some(e), .. } if e == "busy")));
+    send(
+        &mut ws,
+        &Down::RunCommandCancel {
+            run_id: "h1".into(),
+            command_id: "c3".into(),
+        },
+    )
+    .await;
+    let c3 = collect(&mut ws, "h1", true, |f| hand_result(f, "c3")).await;
+    assert!(
+        events(&c3)
+            .iter()
+            .any(|e| matches!(e, RunEvent::HandResult { ok: false, .. }))
+    );
+
+    // Hand back with words.
+    send(
+        &mut ws,
+        &Down::RunResume {
+            run_id: "h1".into(),
+            note: Some("I made made.txt".into()),
+        },
+    )
+    .await;
+    frames.extend(collect(&mut ws, "h1", true, |f| matches!(f, Up::RunDone(_))).await);
+    let evs = events(&frames);
+    let summary = evs
+        .iter()
+        .find_map(|e| match e {
+            RunEvent::HandSummary(s) => Some(s.clone()),
+            _ => None,
+        })
+        .expect("hand.summary");
+    assert_eq!(summary.by, "u1");
+    assert_eq!(summary.commands, 2);
+    assert!(
+        summary.files.contains(&"made.txt".to_string()),
+        "{summary:?}"
+    );
+    let accepted: Vec<&str> = evs
+        .iter()
+        .filter_map(|e| match e {
+            RunEvent::InputAccepted { input_id } => Some(input_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(accepted, vec!["resume-1", "in-later"], "{evs:?}");
+    let replies: Vec<&str> = evs
+        .iter()
+        .filter_map(|e| match e {
+            RunEvent::Message { role, text, .. } if role == "assistant" => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    let note = replies
+        .iter()
+        .find(|t| t.starts_with("reply 2:"))
+        .expect("hand-back note");
+    assert!(
+        note.contains("[team-chat] A person held your computer. Member u1 paused you"),
+        "{note}"
+    );
+    assert!(note.contains("ran 2 commands in"), "{note}");
+    assert!(note.contains("→ failed (exit 3)"), "{note}");
+    assert!(
+        note.contains("`sleep 60` → stopped by the person"),
+        "{note}"
+    );
+    assert!(note.contains("changed: made.txt"), "{note}");
+    assert!(note.contains("Member u1's note: I made made.txt"), "{note}");
+    assert!(
+        replies.contains(&"reply 3: after the hand-back"),
+        "{replies:?}"
+    );
+    assert_eq!(done(&frames).status, "succeeded");
+
+    let _ = stop_tx.send(());
+    let _ = daemon.await;
 }
 
 /// Tool commands that a CLI starts in their own session or process group (Claude Code's Bash

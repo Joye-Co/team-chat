@@ -315,6 +315,9 @@ pub enum TransientEvent {
     // Usable: sent only to the person's own connections whose hello has feature "github/1".
     #[serde(rename = "github.status")]
     GithubStatus(crate::github::GithubStatusTransient),
+    // Usable: sent only to admins' connections whose hello has feature "settings/1".
+    #[serde(rename = "ai.failing")]
+    AiFailing(crate::settings::AiFailingTransient),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

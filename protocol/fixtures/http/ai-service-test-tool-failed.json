@@ -1,0 +1,17 @@
+{
+  "kind": "AiServiceTestResult",
+  "valid": true,
+  "description": "usable: the text call works, the forced tool call does not",
+  "value": {
+    "ok": false,
+    "error": "forced tool call: no tool call",
+    "latencyMs": 900,
+    "text": {
+      "ok": true
+    },
+    "tool": {
+      "ok": false,
+      "error": "no tool call"
+    }
+  }
+}

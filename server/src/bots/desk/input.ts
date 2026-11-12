@@ -1,7 +1,7 @@
 // BotDesk input: topic messages for the bot (new runs, follow-up input, text approvals), card
 // presses on approval cards, and stopping runs (cancel by a member, a deactivated bot).
 import { type Approver, type BotRun, isMainTopicId, RUN_KIND_ASIDE } from "@chat/protocol";
-import { loadModelConfig } from "../../aiservice";
+import { useConfig } from "../../aiservice/uses";
 import { roomStub } from "../../core/env";
 import { ApiError, type Result, unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
@@ -205,7 +205,7 @@ export abstract class DeskInput extends DeskRelay {
       return;
     }
     // 接 1.12: a plain "停" from the requester stops the run (with a front desk, it decides).
-    if (m.authorId === r.requested_by && isStopRequest(m.body) && !(await loadModelConfig(this.env))) {
+    if (m.authorId === r.requested_by && isStopRequest(m.body) && !(await useConfig(this.env, "front_desk", this.log))) {
       // Recorded as a taken input, so a retried delivery does not stop or start anything again.
       this.sql.exec(
         "INSERT INTO inputs (id, run_id, message_id, author_id, body, at, accepted) VALUES (?, ?, ?, ?, ?, ?, 1)",
@@ -382,7 +382,7 @@ export abstract class DeskInput extends DeskRelay {
   // -------------------------------------------------------------------------
 
   /** A member stops a run: the machine gets run.cancel, and the run ends here at once. */
-  async cancel(botId: string, runId: string, actorId: string): Promise<Result<BotRun>> {
+  async cancel(botId: string, runId: string, actorId: string, chainId?: string): Promise<Result<BotRun>> {
     return result(() => {
       this.bind(botId);
       return this.serial(runId, async () => {
@@ -391,14 +391,16 @@ export abstract class DeskInput extends DeskRelay {
         if (r.ended_at !== null) throw new ApiError("conflict", "the run ended");
         // design-relay R2: the room hears who stopped it, and stops the parts it gave out.
         this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", `stoppedBy:${r.id}`, actorId);
-        await this.stop(r);
+        // 全部停止 of a piece of work: the topic of each part says who stopped it.
+        const text = chainId ? TEXT.cancelledBy((await this.names([actorId])).get(actorId) ?? "") : TEXT.cancelled;
+        await this.stop(r, text);
         this.log.info("run cancelled", { runId, actorId });
         return this.toRun(r);
       });
     });
   }
 
-  protected async stop(r: RunRow): Promise<void> {
+  protected async stop(r: RunRow, text: string = TEXT.cancelled): Promise<void> {
     if (r.machine_id && !r.external) {
       try {
         await linkStub(this.env, r.machine_id).toRun({ t: "run.cancel", runId: r.id } as never);
@@ -408,10 +410,10 @@ export abstract class DeskInput extends DeskRelay {
     }
     this.planBuckets.delete(r.id);
     if (r.external) {
-      await this.setStatus(r, "cancelled", { ended_at: Date.now(), summary: TEXT.cancelled });
+      await this.setStatus(r, "cancelled", { ended_at: Date.now(), summary: text });
       return;
     }
-    await this.end(r, "cancelled", TEXT.cancelled, "open", TEXT.cancelled);
+    await this.end(r, "cancelled", text, "open", text);
   }
 
   /** The bot was deactivated: stop its active runs and give up its topics. */

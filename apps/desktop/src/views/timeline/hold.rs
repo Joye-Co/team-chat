@@ -115,6 +115,8 @@ mod tests {
             started_at: None,
             ended_at: None,
             updated_at: 0,
+            model: None,
+            effort: None,
             summary: None,
             plan: Vec::new(),
             hold,

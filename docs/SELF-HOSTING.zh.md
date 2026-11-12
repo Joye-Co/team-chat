@@ -135,21 +135,23 @@ bun server/scripts/admin.ts members --env production
 
 登录码只能用一次，7 天内有效。要新的就运行 `scripts/setup-server.sh production --sign-in-code`。
 
-检查：应用以你的身份打开，有团队的默认群；设置里有 **机器** 这一页。
+检查：应用以你的身份打开，有团队的默认群；设置里有 **电脑** 这一页。
 
 ### 6. 让 AI 成员在这台电脑上干活
 
 1. 在这台电脑上装 Claude Code 或 Codex 并登录，让终端里 `claude --version` 或 `codex --version` 能运行。
-   应用现在还不检查 CLI 有没有登录；自己先跑一次 CLI，确认它能回话。
-2. 在应用里打开 **设置 › 机器**，点 **用这台电脑**。应用会把这台电脑登记到你的服务器，写好后台服务的配置和
-   令牌并启动它（Mac 上是 launchd，Windows 上是计划任务），以后跟着应用一起更新。
+2. 在应用里打开 **设置 › 电脑**，点 **用这台电脑**。应用会把这台电脑登记到你的服务器，作为你自己的电脑，写好后台服务的
+   配置和令牌并启动它（Mac 上是 launchd，Windows 上是计划任务），以后跟着应用一起更新。之后 **团队管理 › 电脑** 里这台电脑的
+   卡片检查三项：后台服务在运行、找到 CLI、已登录，缺哪项就说怎么补。详细见
+   [INSTALL.zh.md 的「让 AI 成员在你的电脑上干活」](INSTALL.zh.md#让-ai-成员在你的电脑上干活)。
 
-检查：设置 › 机器 的列表里有这台电脑，显示在线。在 Ubuntu 上运行
+检查：设置 › 电脑 的列表里有这台电脑，显示在线，三项都好了。在 Ubuntu 上运行
 `bun server/scripts/admin.ts machines --env production`，它显示为 `healthy`。
 
 ### 7. 第一个 AI 成员
 
-在 **团队管理** 里点 **添加 AI 成员**，加一个 AI 成员，让它在这台电脑上干活，然后在群里的一个话题里 @ 它，
+在 **团队管理 › 成员** 里点 **添加 AI 成员**，工作方式选 **在电脑上工作**，选好运行方式，让它在这台电脑（或任意一台空闲电脑）
+上干活，然后在群里的一个话题里 @ 它，
 交代一件事。应用的用法见 [ONBOARDING.zh.md](ONBOARDING.zh.md)。
 
 要拉人进来，给每个人生成一个邀请码：在应用里（团队管理 › 成员），或者在 Ubuntu 上运行
@@ -201,7 +203,8 @@ scripts/setup-server.sh production
 | `deployed, but wrangler printed no workers.dev address` | 账号还没有 `workers.dev` 子域名（第 3 步第 2 条），或者你用的是自己的域名：加 `--url <地址>` 再运行。 |
 | 第一次部署后马上出现 `could not make the first owner` | 新放上去的密钥要过一会儿才生效：等一分钟再运行。 |
 | `this server has an owner already` | owner 是在另一台机器上建的：把那台的 `~/.config/team-chat/production/` 复制过来。 |
-| 应用里保存 AI 服务时报 `hooks are not configured on this server` | Worker 上没有 `HOOK_SECRET_KEY`：运行 `scripts/setup-server.sh production`。 |
+| 应用里保存 AI 服务时报 `the Worker secret HOOK_SECRET_KEY is not set on this server`（旧版本报 `hooks are not configured on this server`） | Worker 上没有 `HOOK_SECRET_KEY`：运行 `scripts/setup-server.sh production`。 |
+| 保存或测试 AI 服务时报 `the saved API key cannot be read` | `HOOK_SECRET_KEY` 换过，存着的 key 解不开了：在 AI 服务里重新填一次 key。 |
 | 应用提示「连不上服务器」 | 检查地址（要带 `https://`），再 `curl <地址>/v1/health`。 |
 | `/v1/health reports <x>, expected <y>` | 部署还没生效，或者失败了：再运行 `scripts/deploy-server.sh production`，看它的输出。 |
 

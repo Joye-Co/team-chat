@@ -1,0 +1,8 @@
+{
+  "kind": "AiServiceStatus",
+  "valid": false,
+  "description": "every field is required",
+  "value": {
+    "configured": false
+  }
+}

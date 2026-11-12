@@ -32,6 +32,13 @@ working folder (relayfail-<k>.done marks it); "relaystall:<k>" sleeps like "hang
 "readback" runs the read commands `chat-run member list`, `topic state` and `artifact list`
 (with "topic:<id>", of that topic), `artifact get --id <first listed>`, `decisions list` and, with "card:<message id>", `card get`,
 and writes each answer to readback.json.
+"stalenote" first clears a notification left from the session before like Claude Code after a
+restart (`task_notification` stopped, then a `result` of no turns and no text), then answers.
+"background" puts a command in the background (`task_started` with `is_backgrounded`) and ends
+its turn while it runs; 0.3 s later its `task_notification` comes. With "bgself" the CLI then
+takes a turn of its own ("continued after the background command"); with "bgidle" it clears the
+notification with a `result` of no turns and waits for the next stdin line; with "bgnever" the
+command never finishes (a server).
 `--version` prints the version of the Claude Code the Windows tests gate (2.1.322).
 Every turn's text goes to prompts.jsonl ({"pid", "sid", "n", "text"}, one line each, appended).
 The arguments are written to argv.json in the working directory (in the run folder above it, with
@@ -167,6 +174,9 @@ while True:
     # A relay step's order carries the step before's result (another member's words, here the
     # fake's echo of its prompt): no mode comes from it.
     cue = cue.split("\nResult of step ", 1)[0]
+    # The daemon's hand-back note after a take-over is no request ("changes" has "hang").
+    if text.startswith("[team-chat] A person held"):
+        cue = ""
     session.write(json.dumps({"type": "user", "text": text}) + "\n"); session.flush()
     with open(os.path.join(rec, "prompts.jsonl"), "a") as pf:
         pf.write(json.dumps({"pid": os.getpid(), "sid": sid, "n": n + 1, "text": text}) + "\n")
@@ -329,6 +339,14 @@ while True:
             seen_cmds.append({"command": cmd, "denied": denied, "ran": ran})
             out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": tid, "content": denied or "ran: " + cmd}]}, "session_id": sid})
         open("push-%d.json" % n, "w").write(json.dumps({"commands": seen_cmds}))
+    if "stalenote" in cue and n == 1:
+        out({"type": "system", "subtype": "task_notification", "task_id": "bold", "status": "stopped", "session_id": sid})
+        out({"type": "result", "subtype": "success", "is_error": False, "num_turns": 0, "result": "", "session_id": sid})
+    if "background" in cue and n == 1:
+        out({"type": "assistant", "message": {"id": mid, "content": [{"type": "tool_use", "id": "toolu_bg", "name": "Bash", "input": {"command": "sleep 1", "run_in_background": True}}]}, "session_id": sid})
+        out({"type": "system", "subtype": "task_started", "task_id": "bbg1", "tool_use_id": "toolu_bg", "is_backgrounded": True, "session_id": sid})
+        out({"type": "system", "subtype": "background_tasks_changed", "tasks": [{"task_id": "bbg1"}], "session_id": sid})
+        out({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_bg", "content": "Command running in background with ID: bbg1."}]}, "session_id": sid})
     out({"type": "stream_event", "event": {"type": "message_start", "message": {"id": mid}}, "session_id": sid})
     reply = "reply %d: %s" % (n, text)
     k = 5 if "slow" in cue else 2
@@ -345,3 +363,15 @@ while True:
     session.write(json.dumps({"type": "assistant", "text": reply}) + "\n"); session.flush()
     out({"type": "result", "subtype": "success", "is_error": False, "result": reply, "session_id": sid,
          "usage": {"input_tokens": 3, "output_tokens": 4}, "total_cost_usd": 0.001})
+    if "background" in cue and n == 1 and "bgnever" not in cue:
+        time.sleep(0.3)
+        out({"type": "system", "subtype": "task_notification", "task_id": "bbg1", "status": "completed", "session_id": sid})
+        out({"type": "system", "subtype": "background_tasks_changed", "tasks": [], "session_id": sid})
+        if "bgself" in cue:
+            n += 1
+            own = "m%d" % n
+            out({"type": "stream_event", "event": {"type": "message_start", "message": {"id": own}}, "session_id": sid})
+            out({"type": "assistant", "message": {"id": own, "content": [{"type": "text", "text": "continued after the background command"}]}, "session_id": sid})
+            out({"type": "result", "subtype": "success", "is_error": False, "num_turns": 1, "result": "continued after the background command", "session_id": sid})
+        elif "bgidle" in cue:
+            out({"type": "result", "subtype": "success", "is_error": False, "num_turns": 0, "result": "", "session_id": sid})

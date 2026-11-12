@@ -78,8 +78,10 @@ impl AdminView {
 
     /// 要注意 of the whole team: each machine's items (named), AI members near their budget and
     /// invites about to end.
-    fn home_attention(&self, now: u64) -> Vec<Attention> {
-        let mut out = vec![];
+    fn home_attention(&self, now: u64, ai_configured: Option<bool>) -> Vec<Attention> {
+        let mut out: Vec<Attention> = model::ai_service_attention(ai_configured)
+            .into_iter()
+            .collect();
         let names = |id: &str| self.member_name(id);
         let time = |t: u64| super::clock_day(t);
         for x in self.machines.iter().flatten() {
@@ -177,6 +179,13 @@ impl AdminView {
             };
         };
         let week = self.usage.range == UsageRange::Week;
+        // What the AI 服务 page saved last wins over what 总览 read when it opened.
+        let ai_configured = self
+            .ai
+            .read(cx)
+            .saved()
+            .map(|s| s.provider.is_some())
+            .or(self.team.ai_configured);
         let members = self.services.provider.members();
         let active: Vec<_> = members.iter().filter(|x| !x.deactivated).collect();
         let ai = active.iter().filter(|x| x.kind == MemberKind::Bot).count();
@@ -311,7 +320,7 @@ impl AdminView {
                             .flex_none()
                             .flex()
                             .child(super::overview::attention_panel(
-                                self.home_attention(now),
+                                self.home_attention(now, ai_configured),
                                 cx,
                             )),
                     ),

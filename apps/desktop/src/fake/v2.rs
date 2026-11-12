@@ -330,6 +330,8 @@ fn run(s: RunSpec) -> BotRunSummary {
         started_at: Some(s.started),
         ended_at: s.ended,
         updated_at: s.ended.unwrap_or(s.started + 20 * MIN),
+        model: None,
+        effort: None,
         summary: None,
         plan: s.plan,
     }

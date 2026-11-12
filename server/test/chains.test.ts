@@ -9,6 +9,7 @@ import { MAX_DEPTH, MAX_HANDOFFS, confirmStep, reserveStep, stepReport, stopChai
 import type { RoomContext, RoomTx } from "../src/core/registry";
 import { closedCard, handoverCard, lastWords, workOrderText } from "../src/bots/desk/delegate_card";
 import { topicStateText } from "../src/context/read";
+import { TEXT } from "../src/bots/dispatch";
 import { Daemon, type World, downViolations, mention, world } from "./daemon";
 import { Client, type TestMember, api, clientMsgId, createMember, protocolViolations } from "./helpers";
 
@@ -489,6 +490,32 @@ describe("stopping", () => {
       }
     });
     expect(refused).toBe("delegation.stopped");
+    d.close();
+    c.close();
+  });
+
+  // Verification pass 2, problem 5: a stop through the API (not the card's button) still shows in
+  // the giver's topic, on the split-off card, and in the part's topic, with who stopped it.
+  it("a stop shows on the split-off card and in the part's topic, with who stopped it", async () => {
+    const w = await world();
+    const qa = await addBot(w, "qa");
+    const { d } = await Daemon.connect(w.machineToken, { maxParallelRuns: 4 });
+    const { c } = await Client.connect(w.human.token);
+    await mention(c, w);
+    const a = await started(d, w.bot.id);
+    expect((await output(d, a.runId, "o1", "member.assign", { member: "qa", goal: "写文档" })).ok).toBe(true);
+    const b = await started(d, qa.id);
+    const card = await c.waitEvent((e) => e.type === "message.created" && e.data.message.cardV2?.actions?.[0]?.id?.startsWith("chain.stop:"));
+    const m = card.data.message;
+    const chainId = m.cardV2.actions[0].id.slice("chain.stop:".length);
+    const res = await api(`/v1/groups/${w.gid}/chains/${chainId}/stop`, { method: "POST", token: w.human.token });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const closed = await c.waitEvent((e) => e.type === "message.updated" && e.data.messageId === m.id && e.data.cardV2 && (e.data.cardV2.actions ?? []).length === 0);
+    expect(closed.data.cardV2.blocks.at(-1).text).toBe("被 Alice 停止");
+    const line = await c.waitEvent((e) => e.type === "message.created" && e.data.message.authorId === qa.id && e.data.message.body === TEXT.cancelledBy("Alice"));
+    expect(line.data.message.body).toBe("已被 Alice 停止，没有完成。");
+    const ended = await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === b.runId && e.data.run.endedAt !== undefined);
+    expect(ended.data.run.status).toBe("cancelled");
     d.close();
     c.close();
   });

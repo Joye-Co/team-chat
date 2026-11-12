@@ -434,6 +434,7 @@ mod tests {
             key_set: true,
             key_hint: Some("a1b2".into()),
             updated_at: 1,
+            ..Default::default()
         };
         let s = ai_from(&stored);
         assert_eq!(s.provider, Some(AiProviderKind::Deepseek));

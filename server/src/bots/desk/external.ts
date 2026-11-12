@@ -20,6 +20,8 @@ export interface UsageRun {
   requestedBy: string;
   machineId: string | null;
   runtime: string | null;
+  /** How the run's CLI was signed in when it was sent; absent on runs from before it was kept. */
+  loginMethod?: string | null;
   topicId: string;
   costUsd: number;
   inputTokens: number;
@@ -28,6 +30,7 @@ export interface UsageRun {
   models?: ModelUsage[];
 }
 import { DeskGithub } from "./github";
+import type { RunViewer } from "./hand";
 import { type DeskRollup, deskRollup } from "../../monitor/rollup";
 
 /** A run held at the budget (meta `budget_hold:{runId}`): the state when it was held. */
@@ -139,7 +142,9 @@ export class BotDesk extends DeskGithub {
     for (const { run } of this.heldRuns()) {
       await this.serial(run.id, async () => {
         const r = this.run(run.id);
-        if (!r || r.ended_at !== null) return;
+        // Another press let it go meanwhile (two budget cards pressed at once): its note is
+        // in the topic already (verification pass 2, problem 6).
+        if (!r || r.ended_at !== null || this.meta(`budget_hold:${r.id}`) === null) return;
         this.sql.exec("DELETE FROM meta WHERE key = ?", `budget_hold:${r.id}`);
         const now = Date.now();
         this.sql.exec("UPDATE runs SET queued_at = ? WHERE id = ?", now, r.id);
@@ -345,8 +350,8 @@ export class BotDesk extends DeskGithub {
   async usageRuns(botId: string, from: number, to: number): Promise<UsageRun[]> {
     this.bind(botId);
     return this.sql
-      .exec<{ ended_at: number; requested_by: string; machine_id: string | null; runtime: string | null; topic_id: string; usage: string | null }>(
-        "SELECT ended_at, requested_by, machine_id, runtime, topic_id, usage FROM runs WHERE ended_at >= ? AND ended_at < ? AND external = 0",
+      .exec<{ ended_at: number; requested_by: string; machine_id: string | null; runtime: string | null; login_method: string | null; topic_id: string; usage: string | null }>(
+        "SELECT ended_at, requested_by, machine_id, runtime, login_method, topic_id, usage FROM runs WHERE ended_at >= ? AND ended_at < ? AND external = 0",
         from,
         to,
       )
@@ -363,6 +368,7 @@ export class BotDesk extends DeskGithub {
           requestedBy: r.requested_by,
           machineId: r.machine_id,
           runtime: r.runtime,
+          ...(r.login_method ? { loginMethod: r.login_method } : {}),
           topicId: r.topic_id,
           costUsd: u?.costUsd ?? 0,
           inputTokens: u?.inputTokens ?? 0,
@@ -383,18 +389,32 @@ export class BotDesk extends DeskGithub {
     runId: string,
     afterSeq = 0,
     limit = DEFAULT_PAGE,
+    viewer?: RunViewer,
   ): Promise<{ run: BotRun; entries: unknown[]; hasMore: boolean; lastSeq: number } | null> {
     this.bind(botId);
     const r = this.run(runId);
     if (!r) return null;
     const n = Math.max(1, Math.min(limit, MAX_PAGE));
-    const rows = this.sql
-      .exec<{ frame: string }>("SELECT frame FROM run_log WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?", runId, afterSeq, n + 1)
-      .toArray();
+    // design-takeover 3.6: entries the viewer may not see are left out; a page is never empty
+    // while more follow (a client pages from the seq of the last entry it got).
+    const entries: unknown[] = [];
+    let cursor = afterSeq;
+    let hasMore = false;
+    // Scans on until an entry is found or the log ends; after the first page in larger steps.
+    for (let size = n; ; size = MAX_PAGE) {
+      const rows = this.sql
+        .exec<{ seq: number; frame: string }>("SELECT seq, frame FROM run_log WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?", runId, cursor, size + 1)
+        .toArray();
+      const page = rows.slice(0, size);
+      entries.push(...this.visibleEntries(runId, page.map((x) => JSON.parse(x.frame)), viewer));
+      hasMore = rows.length > size;
+      if (page.length > 0) cursor = page[page.length - 1].seq;
+      if (!hasMore || entries.length > 0) break;
+    }
     return {
       run: this.toRun(r),
-      entries: rows.slice(0, n).map((x) => JSON.parse(x.frame)),
-      hasMore: rows.length > n,
+      entries: entries.slice(0, n),
+      hasMore: hasMore || entries.length > n,
       lastSeq: r.last_seq,
     };
   }
