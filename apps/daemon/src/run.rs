@@ -260,6 +260,57 @@ turns are not in it. Check before you build on them."
 /// A run that waits for a tool call it started counts as stalled only after this long.
 const TOOL_STALL: Duration = Duration::from_secs(30 * 60);
 
+/// 盯 1.4: tools that used this much CPU between two ticks (15 s) are working.
+const TOOLS_BUSY_NS: u64 = 100_000_000;
+
+/// 盯 1.4: whether each running run's tools are working, by run id; the heartbeat's
+/// `RunCursor.active`. A run that is not here (paused, not started, ended) is not known.
+static ACTIVE: std::sync::Mutex<std::collections::BTreeMap<String, bool>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+/// `RunCursor.active` of a run: None when not known.
+pub fn active(run_id: &str) -> Option<bool> {
+    ACTIVE.lock().ok()?.get(run_id).copied()
+}
+
+fn set_active(run_id: &str, v: Option<bool>) {
+    if let Ok(mut m) = ACTIVE.lock() {
+        match v {
+            Some(b) => {
+                m.insert(run_id.to_string(), b);
+            }
+            None => {
+                m.remove(run_id);
+            }
+        }
+    }
+}
+
+/// Whether the tools used at least [`TOOLS_BUSY_NS`] of CPU between two samples: a process
+/// that was there before counts what it used since, a new one all it used. Without an earlier
+/// sample nothing is known yet: not busy.
+fn tools_busy(
+    before: Option<&std::collections::HashMap<i32, u64>>,
+    now: Option<&std::collections::HashMap<i32, u64>>,
+) -> bool {
+    let (Some(before), Some(now)) = (before, now) else {
+        return false;
+    };
+    let used: u64 = now
+        .iter()
+        .map(|(pid, ns)| ns.saturating_sub(before.get(pid).copied().unwrap_or(0)))
+        .sum();
+    used >= TOOLS_BUSY_NS
+}
+
+/// 盯 1.8: the run's deadline after `waited` of waiting for a person's approval: moved by it.
+fn wait_moves(
+    deadline: Option<tokio::time::Instant>,
+    waited: Duration,
+) -> Option<tokio::time::Instant> {
+    deadline.map(|d| d + waited)
+}
+
 const BASE_ENV: &[&str] = &[
     "PATH",
     "HOME",
@@ -897,6 +948,7 @@ async fn run_runtime(
     const TICK: Duration = Duration::from_secs(15);
     let mut tick = tokio::time::interval(TICK);
     let mut ticked = Instant::now();
+    let mut tools_before: Option<std::collections::HashMap<i32, u64>> = None;
     let mut paused: Option<Paused> = None;
     let mut resumes = 0u32;
     let mut control_open = true;
@@ -1011,15 +1063,29 @@ async fn run_runtime(
                 // the CLI did not run either. That time is no silence of the CLI and no part
                 // of the run's time limit.
                 let now = Instant::now();
-                if let Some(asleep) = crate::sys::slept(now.duration_since(ticked), TICK) {
+                let step = now.duration_since(ticked);
+                let asleep = crate::sys::slept(step, TICK);
+                if let Some(asleep) = asleep {
                     (last, deadline) = after_sleep(last, deadline, asleep, now, paused.is_some());
                 }
                 ticked = now;
                 if paused.is_some() {
+                    set_active(&assign.run_id, None);
+                    tools_before = None;
                     continue;
                 }
-                // A command waiting for a person is not stuck (the server shows waiting_answer).
-                if own.gates.waiting() {
+                // A command waiting for a person is not stuck (the server shows waiting_answer),
+                // and 盯 1.8: its wait is no part of the run's time limit.
+                if own.gates.waiting() || own.secrets.waiting() {
+                    last = Instant::now();
+                    deadline = wait_moves(deadline, step.saturating_sub(asleep.unwrap_or_default()));
+                }
+                // 盯 1.4: the tools the CLI started (a build, a test run) are working.
+                let tools_now = exec.tools_cpu(&run_dir);
+                let busy = tools_busy(tools_before.as_ref(), tools_now.as_ref());
+                set_active(&assign.run_id, tools_now.as_ref().map(|_| busy));
+                tools_before = tools_now;
+                if busy {
                     last = Instant::now();
                 }
                 let limit = if open_tools.is_empty() { stall } else { stall.max(TOOL_STALL) };
@@ -1036,6 +1102,7 @@ async fn run_runtime(
             }
         }
     };
+    set_active(&assign.run_id, None);
     // Never leave a stopped group behind (the runtime already reaped the CLI).
     if let Some(p) = paused.take() {
         p.resume();
@@ -1081,6 +1148,49 @@ mod tests {
         assert_eq!(vm_run_need(&a), Duration::from_secs(9000));
         a.max_duration_ms = Some(600_000);
         assert_eq!(vm_run_need(&a), Duration::from_secs(2400));
+    }
+
+    /// 盯 1.4: tools are busy when they used 100 ms of CPU since the last sample: what a known
+    /// process used since, all that a new one used; nothing is known from one sample.
+    #[test]
+    fn tools_are_busy_when_they_use_cpu_between_samples() {
+        let m = |v: &[(i32, u64)]| {
+            v.iter()
+                .copied()
+                .collect::<std::collections::HashMap<_, _>>()
+        };
+        let before = m(&[(10, 5_000_000_000), (11, 1_000)]);
+        assert!(!tools_busy(None, Some(&before)));
+        assert!(!tools_busy(Some(&before), None));
+        // A `sleep 600` and an idle shell: nothing moves.
+        assert!(!tools_busy(Some(&before), Some(&before)));
+        assert!(!tools_busy(
+            Some(&before),
+            Some(&m(&[(10, 5_050_000_000), (11, 1_000)]))
+        ));
+        // A compiler at work.
+        assert!(tools_busy(
+            Some(&before),
+            Some(&m(&[(10, 5_200_000_000), (11, 1_000)]))
+        ));
+        // A new test process that already used 0.3 s; one that ended does not count against.
+        assert!(tools_busy(Some(&before), Some(&m(&[(12, 300_000_000)]))));
+        // The registry the heartbeat reads.
+        set_active("run-busy-1", Some(true));
+        assert_eq!(active("run-busy-1"), Some(true));
+        set_active("run-busy-1", None);
+        assert_eq!(active("run-busy-1"), None);
+    }
+
+    /// 盯 1.8: the wait for a person's approval moves the deadline by the time waited.
+    #[test]
+    fn an_approval_wait_moves_the_deadline() {
+        let d = tokio::time::Instant::now() + Duration::from_secs(600);
+        assert_eq!(
+            wait_moves(Some(d), Duration::from_secs(15)),
+            Some(d + Duration::from_secs(15))
+        );
+        assert_eq!(wait_moves(None, Duration::from_secs(15)), None);
     }
 
     /// A sleep moves a working run's clocks by the time asleep, once. A paused run's clocks
