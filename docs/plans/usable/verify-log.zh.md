@@ -135,3 +135,86 @@
 - 改了什么：`scripts/runner/host-setup.sh` 的 apt 列表加 `gh`；SELF-HOSTING（中英）加「给 AI 成员一个 GitHub 账号」。
 - 查过的：`shellcheck scripts/runner/host-setup.sh` 无输出。在团队的一台 Ubuntu 24.04.5 主机上只读查看：`apt-cache policy gh` 的候选版本是 Ubuntu 自己的 `2.45.0`（universe），所以不用另加 GitHub 的软件源；这个版本有文档里用到的 `gh auth login`（浏览器码和 `--with-token`）、`gh auth status`、`gh auth token --hostname`。主机上没有改任何东西。
 - 没走的：没有全新的 Ubuntu 主机，没有重跑 `host-setup.sh`；没有机器账号，所以「在主机上登录」「电脑页显示 `GitHub @<login>`」「提醒来和走」这几步没有真做。这些归 design-github-identity.zh.md 第 7 节的验收。
+
+# 第三轮
+
+- 日期：2026-11-12
+- 测的 main：`228318a3`
+- 在哪跑：同一台 Mac，做法和前两轮一样：本 worktree 自己的沙盒服务器（`wrangler dev`，端口在给这一轮的范围里，加了 `--test-scheduled`，并把 `TEAM_TIME_ZONE` 设成一个当时正好是凌晨 2–3 点的时区，好让夜间整理在本轮里按时跑），样例团队来自 `scripts/sandbox/seed.ts`，种子开出的样例任务先取消；从这份代码编出来的 daemon（1.2.7）以 runner-1 连上，`max_parallel_runs = 4`。接管另开了第二个 daemon，作为 Joye 的个人电脑「Joye 的 Mac」。没有开桌面应用，全部通过公开 API 和 WebSocket。
+- 真 CLI：Claude Code 2.1.319、Codex CLI 0.159.0，用这台电脑上已经登录的订阅。Forge、Scout（Claude Code）指向一个没有远端的一次性仓库，Taro（Codex）指向另一个，Ledger 用 Codex、不带仓库。
+- **这一轮配了 AI 服务**：provider `deepseek`，model `deepseek-chat`，key 从本机 mode 600 的文件读进请求，不打印、不进日志。
+- 证据：脚本和输出在 worktree 的 `.tmp/verify/`（不进仓库）。运行 id 是这次本地沙盒里的，不是任何部署环境的。
+- 这一轮按协调要求提前收尾，没来得及做的在表里标「没法跑」并写明原因。
+
+## 结果
+
+| 路径或条目 | 做了什么 | 结果 | 证据 | 备注 |
+| --- | --- | --- | --- | --- |
+| AI 服务：测试连接、保存、状态 | 先用错 key 测，再用真 key 测，小王（成员）试着保存，Joye 保存，不带 key 再测一次，读状态 | 通过 | 错 key：`ok: false`，`error` 是 DeepSeek 的 401 原文（只露 key 末 4 位）；真 key：`ok: true`、`text.ok`、`tool.ok`（约 1.9 s）；小王保存 `forbidden`；保存后 `keyHint` 只有末 4 位，`switches` 三项全开；不带 key 用已存的 key 测 `ok`；成员读 `/v1/settings/ai/status` 从全 false 变成全 true；之后 `uses` 里 front_desk、retro、title 都是 `ok, failures: 0` | 整轮 AI 服务调用：front_desk 26、retro 29、title 6、summary 1、tidy 3，失败 0 |
+| 前台：问题直接答 | Joye @Forge「用一两句话说说 rebase 和 merge 的区别，不用动代码」 | 通过 | 决定 `reply`（0.97，约 1.6 s），Forge 在话题里直接回答，没有 run | |
+| 前台：派活带交代单 | Joye @Forge 新建 `fd.txt` 写 hello、不提交 | 通过 | 决定 `dispatch`，`brief` 有 goal、3 条 doneWhen、notes；run `01M77G9ZTJS0HKKZCWR97BCSJP` 的提示词里有「Work order from your front desk … Goal: … Done when: …」；做完，结果是 done 卡 | |
+| 前台：不带 @ 的跟进 | 同一话题不带 @ 说「在 fd.txt 末尾再加一行 world」 | 通过 | 决定 `dispatch`，brief 里写明接着前面那件事；新 run `01M77GQWBJ0J3SCF26XKA8WWS7` 做完，文件两行 | |
+| 前台：闲聊不出声 | 同一话题不带 @ 说「好的，辛苦啦 👍」，等 45 秒 | 通过 | 决定 `skip`，没有新消息、没有新 run、没有留下 👀 | |
+| AI 话题标题 | 上面两个话题都没给标题 | 通过 | 标题被换成「git rebase 与 merge 区别」「新建 fd.txt 写入 hello」 | |
+| 话题摘要 | 小王和 Joye 在一个话题里发 64 条长消息，第 3 条写暗号和回滚负责人；之后 @Forge 只按提示词回答 | 通过 | room 的 `topic_summaries` 有这个话题的摘要（到 #199，写了暗号、负责人、待确认事项）；前台据此直接 `reply` 答对暗号和负责人 | 之后再派一个 run，它的上下文 66 条全部放得下（`omitted: 0`），提示词里没有用到摘要；「被预算挤掉的部分用摘要顶上」这一半没有真触发 |
+| 运行后的经验总结 | Scout 被要求用 `python add.py` 运行（这台电脑没有 `python`） | 通过 | run `01M77GYC6VV8PFF5HD1HABJN91` 结束后约 10 秒，Scout 的成员层多了一条 `lesson`，`pending`：「这个环境里 python 不存在，只有 python3 …」，带 evidence（`command not found: python`）和 when，`fromGroup` 是 `开发`，来源是这个 run | 后面每个 run 都写了 1–4 条，有重复和互相矛盾的（新问题 3） |
+| 夜间整理（按需跑） | 等到团队时区 03:00，用 `--test-scheduled` 触发每小时的 cron | 通过 | `memory_runs` 记了 3 个 scope 和 `~stale`；`GET /v1/memories/updates`：Forge 17 行、Scout 6 行、Taro 2 行，都是 `added`，记忆变 `active`（version 2）；tidy 3 次调用全部成功 | 没有一条被合并或停用，见新问题 3 |
+| 记忆更新撤回 | 撤回 Forge 的第一行 `added` | 通过 | `undoneAt` 有值；那条记忆变 `retired`，version 3；再撤一次 `409 already undone` | |
+| 能看到什么：别的群 | Joye（在 `夹夹增长`）在 `开发` @Forge 查李雪在 `夹夹增长` 里发的口令 | 通过 | run `01M77HB8NRDJKHDR0E65PDMDDF`：`chat-run group list` → `search --in <夹夹增长>` → `topic history --in`；答对，并说明出处是 `夹夹增长` | 它把口令原样发进了 `开发`，`开发` 里有不在 `夹夹增长` 的人。设计允许「只带过来需要的那句、说明出处」，这里就是这么做的 |
+| 能看到什么：交代人不在的群 | Alex（在 `开发`，不在 `夹夹增长`）问同样的问题 | 通过 | `group list` 只有 开发、运维、全员；`search --all` 找不到；回答「查不到，你不在夹夹增长群里」 | 原本让小王当交代人，被新问题 1 挡住，换成 Alex |
+| 能看到什么：私聊 | Joye 在 `开发` 问「我和小王的私聊里的口令」「我在私聊里告诉你的口令」；再在和 Forge 的私聊里问 | 通过 | 两个都答「查不到」，`group list` 里没有私聊；在和 Forge 的私聊里问，答对 | |
+| 第二轮问题 1：`chat-run report` 里的命令文字被误拦 | Forge 跑 `git -C . push origin main`、Taro（Codex）跑 `git push origin main`，都按「拒绝」，再让它们用 `chat-run report --state blocked --text` 原样写出那条命令 | 通过 | 两边都只有一张卡，拒绝后原地变「已拒绝：合并到 main」「Joye 拒绝了 · …」、没有按钮；带命令文字的 `chat-run report` 直接 `ok`，没有第二张卡；run 结束 `phase: needs_reply` | 卡上的时间用的是默认时区，不是团队时区（新问题 4） |
+| 第二轮问题 2：`file get --out` 到临时目录 | 请求里要求下载到 `mktemp -d` 的目录 | 通过 | `chat-run file get --out "$D/shapes.png"` 成功，返回 `inWorkFolder: false`；图看对 | |
+| 第二轮问题 3：引用的消息在别的话题 | 引用 `开发` 群聊里的一条消息，要求按 id 读原文 | 通过 | 提示词里的引用行是 `↪ quotes m <id> in t main-<group>`；`chat-run topic message --id … --topic …` 读到原文；manifest `files: 1, refs: 1` | |
+| 第二轮问题 4：daemon 正常停之后续上的 run | 三步，第二步后台 `sleep 90`，sleep 时 SIGTERM 停 daemon 再开 | 通过 | 原 run `cancelled`（`restarted: daemon restarted`）；最后续上的 run `01M77KXS76PWRBZAT49NG005FK` 用同一个 sessionId，发现后台 sleep 被中断，重跑 sleep、等它结束才写 step2，文件「step1\nstep2」，如实说明，`done` | 中间多了一次白跑的 run，见新问题 5 |
+| 恢复：daemon 被杀（SIGKILL） | 三步，第二步前台 `python3 … sleep(90)`，sleep 时 `kill -9` daemon 再开 | 通过 | 原 run `cancelled` → 新 run `01M77M347BX6E65F0GMTQS77C3`（`retryOf`），同一个 sessionId，先查文件和 git，没重做 step1，重跑 sleep 后写 step2，`done` | |
+| 第二轮问题 5：分出去被停后话题里看得见 | Forge 用 `chat-run assign` 把「前台 sleep 150 后答 4+4」分给 Scout；Scout 开始约 25 秒后小王调 chain stop | 部分通过 | `stoppedRuns: 1`；Scout 的子话题「已被 小王 停止，没有完成。」（说了是谁）；主话题里那张「Forge 把一部分分给 Scout」卡的「全部停止」按钮没了 | 卡片标题和正文没变，主话题里仍看不出「被 小王 停止」，Forge 最后一句还是「结果会自动回到我这里」 |
+| 分出去：结果交回 | 同上，没有停（第一次脚本取错了 chain id，停止返回 `not_found`，这件事就跑完了） | 通过 | Scout 跑完后，Forge 在主话题新开一轮，提示词以「The part you gave to Scout is done …」开头，Forge 答「4+4 = 8」 | |
+| 转交 | Forge 用 `chat-run handoff` 转交给 Scout 答 5+5 | 通过 | 卡片「Forge 把这件事转交给 Scout」；Scout 在同一话题答「5 + 5 = 10」 | 做完以后卡上仍挂着「全部停止」（新问题 6） |
+| 转交 + 全部停止 | 转交给 Scout 前台 sleep 150；Joye 在卡上按「全部停止」 | 通过 | 卡上按钮没了；Scout「已被 Joye 停止，没有完成。」 | 卡片文字同样没写已停止 |
+| 第二轮问题 6：订阅的任务不计入预算 | Scout 的每周预算设成 1 美分，再交代一个小任务 | 通过 | run 直接 `done`，没有预算卡 | |
+| 第二轮问题 10：群聊里同一成员的第二件事 | `开发` 群聊连发「@Forge 前台 sleep 40 后答：甲」「@Forge 另一件事：…」 | 通过 | 第二件是问题时，前台直接答「15」，第一件的 run 答「甲」；第二件是活（`echo 乙-ok`）时，两个 run 同时在跑，各自答「甲」「乙-ok」 | |
+| 接力：走完 | 夹夹增长：`@Ledger 说三种水果 → @Taro 翻成英文` | 通过 | 接力 `running` → 第 1 步 done、第 2 步 working → `done`；两个 run 各一条结果 | 两位 Codex 成员，不带仓库 |
+| 接力：仓库里的两位成员 | 开发：`@Forge 新建 relay.txt → @Scout 末尾加一行`，要求不提交 | 不通过 | 第 1 步 done 后接力 `paused, reason: not_pushed`，Scout 一直没开始 | 新问题 2 |
+| 接力：停止 | `@Forge 前台 sleep 200 后答 1 → @Scout 答 2`；第 1 步做了 25 秒小王停止 | 通过 | `state: stopped, stoppedBy: 小王`；Forge 的 run `cancelled`；话题里「已被 小王 停止，没有完成。」；再停一次 `409 the relay has ended` | |
+| 接力：重来 | 第 1 步读不存在的文件、按要求报 blocked；Joye 补一句内容后调 retry | 部分通过 | 第一次 `paused, reason: step_blocked`；retry 后 `running`，Forge 重新做了这一步（用了 Joye 补的内容）；之后又因 `not_pushed` 停住，没走到第 2 步 | 重来本身对；卡住的是新问题 2。重来上限（第 4 次被拒）没测 |
+| 接管 | Joye 交代 Scout 的事放在 Joye 的个人电脑上；Scout 前台 sleep 150 时 Joye 接管，跑 `echo b >> take.txt && cat take.txt && git status --short`，交还 | 通过 | 接管后 run `phase: taken_over, holdKind: takeover`；运行事件 `hand.command`、`hand.output`（`a\nb\n?? take.txt`）、`hand.result`、`hand.summary`；陈晨（管理员）跑命令 `forbidden`，接管 `conflict run.held`；交还后同一个 run 接着做（没开新 run），`lastHandback {commands: 1, files: [take.txt]}`；Scout 的结果说有人在它暂停时执行了 `echo b >> take.txt`，它没有重复 | 团队电脑上的接管要 `takeover-isolated`（虚拟机），这台 Mac 没有，没测 |
+| 时限：单步几分钟不被杀 | Forge 前台跑 `python3 … sleep(420)` | 通过 | run 7.3 分钟 `done`，输出 `long-ok`；没有催促、重来或续跑的运行事件 | 30 分钟以上的单步没测 |
+| GitHub 按电脑 | `GET /v1/me/github`、`POST …/device`；看电脑；@Forge 跑 `gh auth status` | 通过 | `available: false, unavailableReason: off`；device `conflict github.off`；runner-1 和 Joye 的 Mac 都是 `github.state: signed_in`；run 里的 `gh` 是运行目录里的包装，用这台电脑钥匙串里的登录，`GH_TOKEN`、`GITHUB_TOKEN` 都没设；D1 的 `github_accounts`、`github_device`、`github_logins`、`github_waits` 都是 0 行 | |
+| 第二轮问题 7：Codex 第一条命令起不来 | 这一轮 Codex 跑了 4 次 | 没再出现 | | 只见过一次，仍不确定 |
+| 第二轮问题 8：两个 Codex 条目的登录提示 | 配了 `codexout` 条目、写好脚本 | 没法跑 | | 协调要求提前收尾，没跑 |
+| 电脑离线时交代、排队的 `phase`（第二轮问题 9） | 脚本写好 | 没法跑 | | 提前收尾；`requestedFor` 这一半看到了：这一轮人交代的 run 都有 |
+| 额度撞线等重置 | | 没法跑 | | 真账号上没法安全地撞线，只能用假 CLI 的测试 |
+| 转交的上限（3 层、8 次、回环） | | 没法跑 | | 真模型不会主动触发，只有单元测试 |
+
+## 第二轮问题现在的状态
+
+| 第二轮问题 | 现在 |
+| --- | --- |
+| 1 `chat-run report` 里的命令文字被误拦 | 已解决（Claude Code 和 Codex 都试了） |
+| 2 `file get --out` 只许写在工作目录 | 已解决 |
+| 3 引用的消息在别的话题读不到 | 已解决 |
+| 4 daemon 重启后一轮没跑就说完成 | 已解决；带出新问题 5 |
+| 5 全部停止之后主话题看不到 | 部分解决：按钮去掉了，子话题说了谁停的；卡片文字和主话题状态仍看不出已停止 |
+| 6 样例预算拦订阅任务 | 已解决（「加 $1」那句出现两遍没复查） |
+| 7 Codex 第一条命令起不来 | 这一轮没出现 |
+| 8 两个 Codex 条目的登录提示 | 没测 |
+| 9 排队时没有 `phase`；没有 `requestedFor` | `requestedFor` 已解决；排队的 `phase` 没测 |
+| 10 群聊里同一成员的第二件事被并掉 | 已解决 |
+| 第一轮备注 9 个人的 Claude Code 设置带进 AI 成员 | 没复查 |
+
+## 新发现的问题
+
+1. **普通成员交代团队电脑上的 AI 成员，因为他自己的个人电脑勾了这个成员、而那台电脑从没连过，任务立刻失败。** 小王在 `开发` @Forge `echo hi`：run `01M77HESF7GX1A576XWQJ4TFQR` 一创建就 `failed`，话题里「现在没有能接手的电脑，给我配好电脑后再 @我。」；同样的话陈晨来说，在 runner-1 上做完。原因：种子里小王的「小王的 MacBook」（个人电脑，从没连上过）勾了 Forge。`server/src/bots/dispatch.ts` 的 `placesFor` 在交代人勾过时只用勾过的电脑；`whyNoMachine` 里 `known` 只算报过 `clis` 的电脑，从没 hello 过的电脑被当成「没有电脑」（`why: "none"`），于是不排队、直接失败。design-roles 3.3 说勾过的电脑不在线时应排队，并在话题里写「在等{电脑}上线。不想等的话，在设置 › 电脑里取消勾选。」（`TEXT.waitPersonal`）。从没连过的电脑也应按「离线、排队、说清在等哪台」处理。复现：沙盒种子原样，以小王 @Forge。
+2. **仓库没有远端时，接力在第 1 步之后永远停在 `not_pushed`。** 两位 Claude Code 成员用同一个没有 origin 的仓库：`@Forge 新建 relay.txt → @Scout 末尾加一行`（请求里说不提交），Forge 做完后接力 `paused, reason: not_pushed`，Scout 从没开始；重来以后又停在同一处。design-relay 的规则是「前一步代码 `pushed=false` 且下一步换了成员 → 停住」，但这里根本推不上去：没有 remote、请求要求不提交、两位成员在同一台电脑同一个仓库。建议：本机仓库没有 `origin`，或者两步在同一台电脑、同一个 `repo.path` 时，不按 `not_pushed` 停；否则停住时话题里要说清「代码没推上去，下一位接不上」以及怎么办。现在话题里没有任何说明。Forge 为了交接自己把文件发成了产出，说明提示词里也没说清这种情况怎么交接。
+3. **经验总结写得太多、太具体，夜间整理全部照单收下。** 一轮测试下来 Forge 有 17 条、Scout 6 条、Taro 2 条，整理后全部 `added` 成 `active`，没有一条被合并或丢掉。其中 Taro 的两条文字完全相同；Forge 有两条互相矛盾（「Scout 在独立话题里执行，结果不会自动回到本话题，必须主动轮询」和「assign 分出去的子任务结果会自动回到我这里，不用轮询」，后一条是对的）；还有不少只对这次测试有意义的（「take.txt 被外部进程追加了 b」）。要修：复盘的提示词要求只写以后用得上、和已有经验不重复的，0 条是常态；整理时至少合并文字相同的，和已有记忆矛盾的标出来或只留一条；整理结果里可以有 `retired`。相关：`server/src/memory/retro.ts`、`server/src/memory/consolidate.ts`。
+4. **审批卡上的时间不按团队时区。** 沙盒设了 `TEAM_TIME_ZONE`（不是上海），卡片「Joye 拒绝了 · 17:31」仍是上海时间（当时团队时区是 02:31）。`server/src/bots/desk/events.ts` 第 353 行的 `stamp(Date.now())` 用了默认时区，应传 `teamZone(this.env)`。和接 2.9（时间用团队时区）是同一类。
+5. **daemon 正在停的时候还接了新的重来，白跑一次。** SIGTERM 后 daemon 打出 `daemon stopping`，原 run 结束成 `restarted: daemon restarted`，服务端立刻把重来的 run `01M77KX7D515N6YDMWFM3QYXAD` 派给同一个正在退出的 daemon，它 `accepted` 后又被当成 `daemon restarted` 取消，第三个 run 才真正接着做。结果是对的，只是多一次重来、多一次 CLI 启动。daemon 处于 `stopping` 时应拒绝新的 `run.assign`（例如回 `draining`），服务端等它重连再派。
+6. **（小）转交或分出去的事做完以后，卡片上的「全部停止」还在。** 转交给 Scout、Scout 答完以后，「Forge 把这件事转交给 Scout」卡仍挂着「全部停止」；被停止时按钮会去掉，做完时不会。按 design-relay「话题里看得见」，做完也应原地改成「{B} 做完了」并去掉按钮。
+
+## 这一轮没有覆盖的
+
+- 桌面应用、Windows、Linux 主机（虚拟机、团队电脑上的接管 `takeover-isolated`）、自己部署服务器、ACP。
+- 额度撞线等重置：只能用假 CLI 的测试。
+- 电脑离线时交代和排队的 `phase`、两个 Codex 条目的登录提示、接力重来的次数上限、转交的上限、30 分钟以上的单步：协调要求提前收尾，没跑。
+- 摘要在运行提示词里顶替被挤掉的消息：这次的话题放得下，没有触发。
