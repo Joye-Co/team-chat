@@ -6,7 +6,9 @@
 //! approval card to the requester and the owners) and fails with `pending`; once the server
 //! answers `run.approval approve`, the same command prints the value for [`GRANT`]. The daemon
 //! answers `approval.resolved` itself; the CLI never sees the approval. The values are in the
-//! redaction list like `env_passthrough` values.
+//! redaction list like `env_passthrough` values. A key saved in the app with "ask before each
+//! use" (机 4.3, `secret.set.ask`) is gated the same way for the AI members it is for; its value
+//! comes from the machine's key store instead of the daemon's environment.
 
 use crate::proto::RunEvent;
 use serde_json::{Value, json};
@@ -34,6 +36,9 @@ struct State {
 /// The gated secrets of one run.
 pub struct Gate {
     names: Vec<String>,
+    /// 机 4.3: the values of keys saved in the app with "ask before each use"; the other names
+    /// are read from the daemon's environment.
+    values: HashMap<String, String>,
     state: Mutex<State>,
 }
 
@@ -42,8 +47,20 @@ impl Gate {
     pub fn new(names: Vec<String>) -> Gate {
         Gate {
             names,
+            values: HashMap::new(),
             state: Mutex::default(),
         }
+    }
+
+    /// 机 4.3: adds the app's keys that ask before each use (`SecretStore::ask_for`).
+    pub fn with_values(mut self, keys: Vec<(String, String)>) -> Gate {
+        for (name, value) in keys {
+            if !self.names.contains(&name) {
+                self.names.push(name.clone());
+            }
+            self.values.insert(name, value);
+        }
+        self
     }
 
     /// The gated variables of `gated_env` that the assignment allows (none for a side chat).
@@ -85,6 +102,9 @@ impl Gate {
             return err("denied", format!("a person denied {name} for this run"));
         }
         if st.granted.get(name).is_some_and(|until| now < *until) {
+            if let Some(v) = self.values.get(name) {
+                return json!({ "ok": true, "result": v });
+            }
             return match std::env::var(name) {
                 Ok(v) if !v.is_empty() => json!({ "ok": true, "result": v }),
                 _ => err("unavailable", format!("{name} is not set on this machine")),
@@ -266,6 +286,29 @@ mod tests {
         assert_eq!(
             gate.get(&json!({ "name": "Y" }), &emit, t0)["error"]["code"],
             "pending"
+        );
+    }
+
+    #[test]
+    fn a_key_from_the_app_that_asks_first_is_given_after_approval() {
+        let name = "TEAMCHAT_TEST_APP_ASK_KEY";
+        let gate = Gate::for_run(&[], &[], false)
+            .with_values(vec![(name.to_string(), "app-value-123".to_string())]);
+        assert_eq!(gate.names(), [name]);
+        assert!(gate.note().is_some_and(|n| n.contains(name)));
+        let (seen, emit) = emitted();
+        let t0 = Instant::now();
+        let body = json!({ "name": name });
+        assert_eq!(gate.get(&body, &emit, t0)["error"]["code"], "pending");
+        let id = match seen.lock().unwrap().as_slice() {
+            [RunEvent::ApprovalRequest { approval_id, .. }] => approval_id.clone(),
+            other => panic!("expected one approval.request, got {other:?}"),
+        };
+        gate.answer(&id, true, t0).unwrap();
+        // The value is the app's, not the daemon's environment (where it is not set).
+        assert_eq!(
+            gate.get(&body, &emit, t0),
+            json!({ "ok": true, "result": "app-value-123" })
         );
     }
 }

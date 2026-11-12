@@ -47,10 +47,29 @@ pub mod feature {
     pub const TAKEOVER_ISOLATED: &str = "takeover-isolated";
     /// Usable: the `homes` metrics and `home.clear` (VM hosts: each AI member's home folder).
     pub const HOMES: &str = "homes";
+    /// Usable (机 4.3): `secret.set.ask`: an app key runs get only after a person approves.
+    pub const ASK_KEYS: &str = "ask-keys";
+    /// Usable (机 5.1): `CliLogin.confirmed` is also `true` on a certain `logged_in`, so a
+    /// `logged_in` without it may come from the credential files alone.
+    pub const SIGN_IN_CONFIRMED: &str = "sign-in-confirmed";
 }
 
 /// Most entries of `MachineMetrics.homes`.
 pub const MAX_HOMES: usize = 500;
+
+/// Most entries of `MachineMetrics.problems` (机 5.4).
+pub const MAX_DAEMON_PROBLEMS: usize = 20;
+/// Most characters of one `DaemonProblem.text`.
+pub const MAX_PROBLEM_CHARS: usize = 500;
+
+/// Usable (机 5.4): one warning or error line of the daemon's log, redacted on the machine.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DaemonProblem {
+    /// When it was logged (machine clock in a heartbeat; server clock in the monitor).
+    pub at: u64,
+    pub text: String,
+}
 
 /// Usable, feature "homes": one AI member's kept home folder on a VM host.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -218,7 +237,9 @@ pub struct CliLogin {
     /// Usable: `true` when a `logged_out` state is certain: the CLI's own status check, run with
     /// the env its runs get, said so, or a run just failed because it is not signed in. `None` =
     /// from the credential files only (or an older daemon). Only a confirmed `logged_out` keeps
-    /// runs away from the runtime.
+    /// runs away from the runtime. Feature "sign-in-confirmed": also `true` on a certain
+    /// `logged_in` (the status check said so, a key saved from the app, or the runtime's last run
+    /// succeeded).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confirmed: Option<bool>,
 }
@@ -233,6 +254,9 @@ pub struct SecretInfo {
     #[serde(default)]
     pub members: Vec<String>,
     pub updated_at: u64,
+    /// Usable (机 4.3): a run gets it only after a person approves; sent only when true.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ask: bool,
 }
 
 /// One usage window of a subscription.
@@ -347,6 +371,10 @@ pub struct MachineMetrics {
     /// Usable, feature "homes": each AI member's home folder (at most [`MAX_HOMES`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub homes: Option<Vec<HomeUse>>,
+    /// Usable (机 5.4): the last warning and error lines of the daemon's log, oldest first
+    /// (at most [`MAX_DAEMON_PROBLEMS`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problems: Option<Vec<DaemonProblem>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1067,6 +1095,9 @@ pub enum Down {
         sealed: String,
         #[serde(default)]
         members: Vec<String>,
+        /// Usable (机 4.3): runs get it only after a person approves.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        ask: bool,
     },
     /// Feature "accounts": forget an API key.
     #[serde(rename = "secret.delete", rename_all = "camelCase")]

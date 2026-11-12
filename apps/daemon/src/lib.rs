@@ -19,6 +19,7 @@ pub mod health;
 pub mod input;
 pub mod metrics;
 pub mod models;
+pub mod problems;
 #[cfg(unix)]
 pub mod proctree;
 #[cfg(not(unix))]

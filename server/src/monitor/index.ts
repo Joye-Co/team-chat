@@ -183,6 +183,8 @@ export function buildMonitor(input: {
   if (metrics?.boot) out.boot = metrics.boot;
   if (lastFailure) out.lastFailure = lastFailure;
   if (metrics?.homes) out.homes = metrics.homes;
+  // 机 5.4: 最近的问题, on the server clock like the usage windows.
+  if (metrics?.problems) out.problems = metrics.problems.map((p) => ({ at: Math.max(0, p.at + offset), text: p.text }));
   if (health) {
     out.host = {
       load1: health.load1,

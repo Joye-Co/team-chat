@@ -9,7 +9,8 @@ export interface AuditEntry {
 /** A prepared audit insert, so it can join the batch (transaction) of the write it records. */
 export function auditStatement(
   db: D1Database,
-  actor: Pick<AuthContext, "memberId" | "tokenId"> | null,
+  // A write the server makes for a member (a DM it opens) has no credential.
+  actor: (Pick<AuthContext, "memberId"> & { tokenId?: string | null }) | null,
   entry: AuditEntry,
   at = Date.now(),
 ): D1PreparedStatement {

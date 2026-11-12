@@ -111,6 +111,7 @@ async function visibleMachines(env: Env, a: AuthContext, only?: string): Promise
       ...(m.revoked ? { revoked: true } : {}),
       connected: m.connected,
       healthy: m.healthy,
+      ...(m.unhealthy ? { unhealthy: m.unhealthy } : {}),
       runningRuns: [],
     });
   }

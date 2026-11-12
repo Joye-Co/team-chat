@@ -1,0 +1,26 @@
+{
+  "kind": "Machine",
+  "valid": true,
+  "description": "usable: connected, not healthy because free disk is below the limit",
+  "value": {
+    "id": "01JBX0MACHINE00000000000AV",
+    "name": "laptop",
+    "labels": [],
+    "createdBy": "01JBX0OWNER0000000000000AA",
+    "createdAt": 1762128000000,
+    "connected": true,
+    "healthy": false,
+    "unhealthy": "disk",
+    "lastHeartbeatAt": 1762128030000,
+    "health": {
+      "diskFreeBytes": 2000000000,
+      "diskTotalBytes": 500000000000,
+      "load1": 0.4,
+      "load5": 0.3,
+      "load15": 0.2,
+      "cpuCount": 8,
+      "activeRuns": 0
+    },
+    "runningRuns": []
+  }
+}

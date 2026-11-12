@@ -228,7 +228,9 @@ optional: a platform may not have it.
 MachineMetrics = { at /* sample time, machine clock */, uptimeSecs?, cpuPct? /* 0-100 */, cpuThreads?,
                    memTotalBytes?, memAvailableBytes?, netRxBps?, netTxBps?, vmSlots?,
                    boot?: { avgMs, maxMs, samples }, runs: VmRunMetrics[] /* <= 64 */, logins?: CliLogin[],
-                   homes?: HomeUse[] /* <= 500, feature "homes" */ }
+                   homes?: HomeUse[] /* <= 500, feature "homes" */,
+                   problems?: DaemonProblem[] /* <= 20, oldest first; usable, any daemon */ }
+DaemonProblem  = { at /* when logged, machine clock */, text /* 1..500 characters, redacted */ }
 VmRunMetrics   = { runId, phase: "booting" | "running" | "paused", startedAt, bootMs?, cpuCores?, memBytes?, scratchBytes? }
 CliLogin       = { runtime, state: "logged_in" | "logged_out" | "unknown", method?: "subscription" | "api_key" }
 HomeUse        = { memberId, usedBytes /* on the host disk */, sizeBytes? /* absent = no limit */ }
@@ -254,6 +256,10 @@ HomeUse        = { memberId, usedBytes /* on the host disk */, sizeBytes? /* abs
   runtime's `env`, or `env_passthrough` with the daemon's own value); Codex is `logged_in` with
   `tokens` (`subscription`) or `OPENAI_API_KEY` (`api_key`) in `$CODEX_HOME/auth.json`, or the
   same variable as above. Otherwise `logged_out`.
+- **Problems** (usable, 机 5.4): the last 20 warning and error lines the daemon logged since it
+  started (the link going down, a server error, a key or home it could not save, a failed self
+  update, a run that failed, by status only), kept in memory and redacted with every value the
+  daemon knows when the heartbeat is made. Absent while there are none.
 
 ## Accounts and keys (feature `accounts`)
 
@@ -267,12 +273,13 @@ machine (`claude`, `codex login`); the app has no member path for it yet. A daem
 hello.machine += { publicKey?: string }   // X25519, base64 of 32 bytes
 // server -> daemon
 { t: "account.login", loginId, runtime, op: "start" | "code" | "cancel", code? /* <= 2048 */ }
-{ t: "secret.set", name /* [A-Z_][A-Z0-9_]{0,63} */, sealed /* base64 sealed box */, members: string[] }
+{ t: "secret.set", name /* [A-Z_][A-Z0-9_]{0,63} */, sealed /* base64 sealed box */, members: string[],
+  ask?: true /* usable, feature "ask-keys": runs get it only after a person approves */ }
 { t: "secret.delete", name }
 // daemon -> server
 { t: "account.login.status", loginId, runtime, state, url?, userCode?, account?: { email?, plan? }, error? }
 MachineMetrics += { secrets?: SecretInfo[], usage?: CliUsage[] }   // CliLogin += { email?, plan? }
-SecretInfo = { name, last4, members: string[] /* empty = every run */, updatedAt }
+SecretInfo = { name, last4, members: string[] /* empty = every run */, updatedAt, ask?: true }
 CliUsage   = { runtime, at, windows: { kind, label?, usedPct, resetsAt? }[] }
 ```
 
@@ -286,6 +293,10 @@ CliUsage   = { runtime, at, windows: { kind, label?, usedPct, resetsAt? }[] }
   environment variables, under the runtime's own fixed `env`; side chat runs get none. Every
   value the daemon has held is masked like the machine token in all it sends. The heartbeat
   reports names and the last 4 characters only (none for values shorter than 12).
+- **Keys that ask first** (usable, feature `ask-keys`, 机 4.3): a key saved with `ask: true` is
+  never in a run's environment. Runs of its members get it as a gated secret, like a `gated_env`
+  variable (see "Environment"): `chat-run secret <NAME>` asks a person to approve and, once
+  approved, prints the value for 30 minutes. A daemon without the feature never gets `ask`.
 - **Sign-in** (`op: "start"`): the daemon runs the CLI's own login with the runtime's
   environment and `BROWSER=true`, reads its output and reports each step. Claude Code:
   `claude auth login --claudeai` prints a link (`state: "open_url"`, `url`); the person signs in
@@ -995,6 +1006,8 @@ safe default named below). Protocol side: protocol.md, "Usable extensions".
 | `takeover` | Takes `run.pause.hold = "takeover"`, `run.command` and `run.command.cancel`; emits the `hand.*` run events. |
 | `takeover-isolated` | With `takeover` (VM runs, `runsIn: "vm"`): a person's commands run as another user than the run, so they cannot read the run's own credentials. |
 | `homes` | VM hosts (`[vm]`): reports `metrics.homes` (each AI member's home folder) and takes `home.clear`. |
+| `ask-keys` | With `accounts`: takes `secret.set.ask` and keeps such a key out of runs' environments until a person approves (see "Accounts and keys"). |
+| `sign-in-confirmed` | Sends `CliLogin.confirmed: true` on a certain `logged_in` too (see "Accounts and keys"), so the server ends a signed-out alert only on a sign-in that is known to work. |
 
 ```ts
 // daemon -> server
@@ -1123,7 +1136,11 @@ the app, or the check every 10 minutes) or a later run of it succeeds.
 own status check said so, or a run just failed with `signed_out`. A `logged_out` from the
 credential files alone (they do not know every way a CLI signs in, such as Claude Code's
 `apiKeyHelper` or a token in its env) or from an older daemon has no `confirmed`; it is shown to
-people but keeps no runs away.
+people but keeps no runs away. A daemon with feature `sign-in-confirmed` also sends
+`confirmed: true` on a `logged_in` that is certain: the CLI's own status check said signed in, a
+key saved from the app serves it, or the runtime's last run succeeded (and no run failed to sign
+in since). A `logged_in` from the credential files alone has no `confirmed`; the server does not
+end a signed-out alert on it (protocol.md, "Computers that need their managers").
 
 The sign-in state in `metrics.logins` is the CLI's own status check when the daemon has one
 (feature `accounts`, every 10 minutes and after each sign-in): `claude auth status --json`

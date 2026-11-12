@@ -190,6 +190,7 @@ impl Sampler {
             secrets: None,
             usage: None,
             homes: None,
+            problems: None,
         }
     }
 
@@ -686,8 +687,11 @@ pub fn apply_sign_in(
     failed_sign_in: bool,
 ) {
     use crate::accounts::SignIn;
+    // Feature "sign-in-confirmed": a `logged_in` the CLI's check or an app key vouches for.
+    let mut certain = false;
     match check {
         Some(SignIn::In(a)) => {
+            certain = true;
             l.email = a.email.clone();
             l.plan = a.plan.clone();
             l.state = login_state::LOGGED_IN.into();
@@ -710,6 +714,7 @@ pub fn apply_sign_in(
     if key_saved && l.state == login_state::LOGGED_OUT {
         l.state = login_state::LOGGED_IN.into();
         l.method = Some("api_key".into());
+        certain = true;
     }
     if failed_sign_in {
         l.state = login_state::LOGGED_OUT.into();
@@ -717,7 +722,14 @@ pub fn apply_sign_in(
         l.confirmed = Some(true);
     }
     if l.state != login_state::LOGGED_OUT {
-        l.confirmed = None;
+        l.confirmed = certain.then_some(true);
+    }
+}
+
+/// Feature "sign-in-confirmed": the runtime's last run succeeded, so its `logged_in` is certain.
+pub fn confirm_worked(l: &mut CliLogin, worked: bool) {
+    if worked && l.state == login_state::LOGGED_IN {
+        l.confirmed = Some(true);
     }
 }
 
@@ -933,16 +945,26 @@ mod tests {
             (l.state.as_str(), l.method.as_deref(), l.plan.as_deref()),
             (login_state::LOGGED_IN, Some("subscription"), Some("max"))
         );
-        // A check that could not run leaves the files' answer.
+        // The check vouches for it: a certain `logged_in` (feature "sign-in-confirmed").
+        assert_eq!(l.confirmed, Some(true));
+        // A check that could not run leaves the files' answer, not a certain one.
         let mut l = files(login_state::LOGGED_IN, Some("subscription"));
         apply_sign_in(&mut l, Some(&SignIn::Unknown), false, false);
-        assert_eq!(l.state, login_state::LOGGED_IN);
+        assert_eq!(
+            (l.state.as_str(), l.confirmed),
+            (login_state::LOGGED_IN, None)
+        );
+        // ... until a run of it succeeds.
+        confirm_worked(&mut l, false);
+        assert_eq!(l.confirmed, None);
+        confirm_worked(&mut l, true);
+        assert_eq!(l.confirmed, Some(true));
         // An API key saved from the app.
         let mut l = files(login_state::LOGGED_OUT, None);
         apply_sign_in(&mut l, Some(&SignIn::Out), true, false);
         assert_eq!(
-            (l.state.as_str(), l.method.as_deref()),
-            (login_state::LOGGED_IN, Some("api_key"))
+            (l.state.as_str(), l.method.as_deref(), l.confirmed),
+            (login_state::LOGGED_IN, Some("api_key"), Some(true))
         );
         // A run that just failed to sign in wins over everything.
         let mut l = files(login_state::LOGGED_IN, Some("subscription"));
@@ -951,6 +973,9 @@ mod tests {
             (l.state.as_str(), l.confirmed),
             (login_state::LOGGED_OUT, Some(true))
         );
+        // A worked mark never turns a signed-out CLI into a certain sign-in.
+        confirm_worked(&mut l, true);
+        assert_eq!(l.state, login_state::LOGGED_OUT);
         assert_eq!(api_key_name("codex"), Some("OPENAI_API_KEY"));
         assert_eq!(api_key_name("acp"), None);
     }

@@ -474,7 +474,7 @@ impl HttpClient {
     }
 
     /// Owner: gives the machine an API key. The value is sealed to `public_key` here, so only
-    /// the machine can open it.
+    /// the machine can open it. `ask`: runs get it only after a person approves (机 4.3).
     pub async fn set_machine_secret(
         &self,
         machine_id: &str,
@@ -482,13 +482,18 @@ impl HttpClient {
         name: &str,
         value: &str,
         members: Vec<String>,
+        ask: bool,
     ) -> ApiResult<()> {
         let sealed = seal_secret(public_key, value).map_err(ApiError::Invalid)?;
         let _: serde_json::Value = self
             .call(
                 Method::PUT,
                 &format!("/v1/machines/{}/secrets/{}", enc(machine_id), enc(name)),
-                Some(&crate::proto::monitor::SetSecretRequest { sealed, members }),
+                Some(&crate::proto::monitor::SetSecretRequest {
+                    sealed,
+                    members,
+                    ask: Some(ask),
+                }),
                 true,
             )
             .await?;

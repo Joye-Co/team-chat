@@ -377,6 +377,9 @@ export const PersonalBot = z.object({
 });
 export type PersonalBot = z.infer<typeof PersonalBot>;
 
+/** `Machine.unhealthy` values (机 5.6); readers treat an unknown one as a failed check without a name. */
+export const MACHINE_UNHEALTHY = ["heartbeat", "disk"] as const;
+
 export const Machine = z.object({
   id: Id,
   name: Name,
@@ -389,6 +392,11 @@ export const Machine = z.object({
   connected: z.boolean(),
   /** Accepts new runs: connected, recent heartbeat, enough free disk. */
   healthy: z.boolean(),
+  /**
+   * Usable (机 5.6): the check that failed when connected and not healthy: "heartbeat" (no
+   * heartbeat for 90 s) or "disk" (free disk below the limit). Open string; absent otherwise.
+   */
+  unhealthy: z.string().min(1).max(32).optional(),
   lastHeartbeatAt: Millis.optional(),
   daemonVersion: z.string().optional(),
   os: z.string().optional(),

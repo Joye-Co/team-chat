@@ -611,8 +611,14 @@ export function registerCoreRoutes(): void {
 }
 
 /** The DM of `actor` and `memberId`: the existing one, else a new one (the race with the other
- * member made the same DM is resolved to the winner). Returns its group id. */
-async function findOrCreateDm(env: Env, waitUntil: Wait, a: AuthContext, memberId: string): Promise<string> {
+ * member made the same DM is resolved to the winner). Returns its group id. The server opens one
+ * for an AI member too (monitor/alerts.ts), without a credential. */
+export async function findOrCreateDm(
+  env: Env,
+  waitUntil: Wait,
+  a: Pick<AuthContext, "memberId"> & { tokenId?: string | null },
+  memberId: string,
+): Promise<string> {
   const dmKey = [a.memberId, memberId].sort().join(":");
   const existing = await env.DB.prepare("SELECT id FROM groups WHERE dm_key = ?").bind(dmKey).first<{ id: string }>();
   if (existing) return existing.id;

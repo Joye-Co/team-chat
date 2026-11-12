@@ -2212,6 +2212,7 @@ impl ChatProvider for CoreProvider {
         name: &str,
         value: crate::data::SecretText,
         members: Vec<String>,
+        ask: bool,
     ) -> AdminReply<()> {
         let (id, key, name) = (
             machine_id.to_string(),
@@ -2221,7 +2222,7 @@ impl ChatProvider for CoreProvider {
         self.request(move |client, _| async move {
             client
                 .http()
-                .set_machine_secret(&id, &key, &name, value.expose(), members)
+                .set_machine_secret(&id, &key, &name, value.expose(), members, ask)
                 .await
                 .map_err(|e| settings::api_error(&e))
         })

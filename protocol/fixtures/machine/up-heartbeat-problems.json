@@ -1,0 +1,33 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "usable: the last warning and error lines of the daemon's log, redacted on the machine",
+  "value": {
+    "t": "heartbeat",
+    "at": 1762128000000,
+    "health": {
+      "diskFreeBytes": 2000000000,
+      "diskTotalBytes": 500000000000,
+      "load1": 0.4,
+      "load5": 0.3,
+      "load15": 0.2,
+      "cpuCount": 8,
+      "activeRuns": 0
+    },
+    "runs": [],
+    "metrics": {
+      "at": 1762127999900,
+      "runs": [],
+      "problems": [
+        {
+          "at": 1762127880000,
+          "text": "link down: read: connection reset"
+        },
+        {
+          "at": 1762127940000,
+          "text": "self-update: cannot reach the release server"
+        }
+      ]
+    }
+  }
+}

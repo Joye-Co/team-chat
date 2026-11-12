@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::machine::{BootStats, HomeUse, LoginAccount, SecretInfo, UsageWindow};
+use crate::machine::{BootStats, DaemonProblem, HomeUse, LoginAccount, SecretInfo, UsageWindow};
 
 /// `MonitorRange` values.
 pub mod range {
@@ -199,6 +199,10 @@ pub struct MachineMonitor {
     /// heartbeat; absent on other machines.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub homes: Option<Vec<HomeUse>>,
+    /// Usable (机 5.4): the last warning and error lines of the daemon's log (server clock),
+    /// oldest first; absent before a daemon that reports them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problems: Option<Vec<DaemonProblem>>,
 }
 
 /// `POST /v1/machines/:id/logins`
@@ -251,4 +255,8 @@ pub struct SetSecretRequest {
     pub sealed: String,
     #[serde(default)]
     pub members: Vec<String>,
+    /// Usable (机 4.3): runs get it only after a person approves (每次用之前要批准). `None` keeps
+    /// what the key has now (an older client), so this client always sends `Some`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ask: Option<bool>,
 }

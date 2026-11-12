@@ -159,6 +159,16 @@ struct StoredSecret {
     #[serde(default)]
     members: Vec<String>,
     updated_at: u64,
+    /// 机 4.3: runs never get it in their environment; they ask with `chat-run secret <NAME>`
+    /// and a person approves (每次用之前要批准).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    ask: bool,
+}
+
+impl StoredSecret {
+    fn for_member(&self, member: &str) -> bool {
+        self.members.is_empty() || self.members.iter().any(|m| m == member)
+    }
 }
 
 /// The keys the machine holds (`secrets.json`, mode 600).
@@ -190,7 +200,13 @@ impl SecretStore {
         write_private(&self.path, &bytes).map_err(|e| format!("cannot save the key: {e}"))
     }
 
-    pub fn set(&mut self, name: &str, value: String, members: Vec<String>) -> Result<(), String> {
+    pub fn set(
+        &mut self,
+        name: &str,
+        value: String,
+        members: Vec<String>,
+        ask: bool,
+    ) -> Result<(), String> {
         if !valid_name(name) || reserved(name) {
             return Err(format!("{name} is not a name a key can take"));
         }
@@ -204,6 +220,7 @@ impl SecretStore {
                 value,
                 members,
                 updated_at: crate::proto::now_ms(),
+                ask,
             },
         );
         self.save()
@@ -225,15 +242,25 @@ impl SecretStore {
                 last4: last4(&s.value),
                 members: s.members.clone(),
                 updated_at: s.updated_at,
+                ask: s.ask,
             })
             .collect()
     }
 
-    /// The keys a run of `member` gets.
+    /// The keys a run of `member` gets in its environment (not the ones that ask first).
     pub fn env_for(&self, member: &str) -> Vec<(String, String)> {
         self.keys
             .iter()
-            .filter(|(_, s)| s.members.is_empty() || s.members.iter().any(|m| m == member))
+            .filter(|(_, s)| !s.ask && s.for_member(member))
+            .map(|(k, s)| (k.clone(), s.value.clone()))
+            .collect()
+    }
+
+    /// 机 4.3: the keys a run of `member` may ask for (`chat-run secret`) once a person approves.
+    pub fn ask_for(&self, member: &str) -> Vec<(String, String)> {
+        self.keys
+            .iter()
+            .filter(|(_, s)| s.ask && s.for_member(member))
             .map(|(k, s)| (k.clone(), s.value.clone()))
             .collect()
     }
@@ -638,17 +665,23 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("secrets.json");
         let mut s = SecretStore::at(path.clone());
-        s.set("OPENAI_API_KEY", "sk-proj-abcdefghij9xQz".into(), vec![])
-            .unwrap();
+        s.set(
+            "OPENAI_API_KEY",
+            "sk-proj-abcdefghij9xQz".into(),
+            vec![],
+            false,
+        )
+        .unwrap();
         s.set(
             "GITHUB_TOKEN",
             "ghp_0123456789abcdefa1b2".into(),
             vec!["bot1".into()],
+            false,
         )
         .unwrap();
-        assert!(s.set("PATH", "x".repeat(20), vec![]).is_err());
-        assert!(s.set("CHAT_RUN_ID", "x".repeat(20), vec![]).is_err());
-        assert!(s.set("lower", "x".repeat(20), vec![]).is_err());
+        assert!(s.set("PATH", "x".repeat(20), vec![], false).is_err());
+        assert!(s.set("CHAT_RUN_ID", "x".repeat(20), vec![], false).is_err());
+        assert!(s.set("lower", "x".repeat(20), vec![], false).is_err());
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -666,6 +699,52 @@ mod tests {
         assert_eq!(s.env_for("bot2").len(), 1);
         assert_eq!(s.env_for("bot1").len(), 2);
         assert_eq!(last4("short"), "");
+    }
+
+    #[test]
+    fn a_key_that_asks_first_stays_out_of_the_environment() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secrets.json");
+        let mut s = SecretStore::at(path.clone());
+        s.set(
+            "CF_TOKEN",
+            "cf-0123456789abcdef".into(),
+            vec!["bot1".into()],
+            true,
+        )
+        .unwrap();
+        s.set(
+            "OPENAI_API_KEY",
+            "sk-proj-abcdefghij9xQz".into(),
+            vec![],
+            false,
+        )
+        .unwrap();
+        // Kept across a restart, and an old file without the field reads as "no".
+        let s = SecretStore::at(path.clone());
+        assert_eq!(
+            s.env_for("bot1"),
+            vec![(
+                "OPENAI_API_KEY".to_string(),
+                "sk-proj-abcdefghij9xQz".to_string()
+            )]
+        );
+        assert_eq!(
+            s.ask_for("bot1"),
+            vec![("CF_TOKEN".to_string(), "cf-0123456789abcdef".to_string())]
+        );
+        assert!(s.ask_for("bot2").is_empty());
+        let infos = s.infos();
+        assert!(infos.iter().find(|i| i.name == "CF_TOKEN").unwrap().ask);
+        assert!(
+            !infos
+                .iter()
+                .find(|i| i.name == "OPENAI_API_KEY")
+                .unwrap()
+                .ask
+        );
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(raw.matches("\"ask\"").count(), 1);
     }
 
     #[test]

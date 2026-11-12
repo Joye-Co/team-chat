@@ -2917,3 +2917,47 @@ Rules:
   later change of sign-in does not rewrite the week. A run from before that was kept falls back to
   the machine's sign-in now, the rule 用量 uses for 订阅里已包含. A run with no machine, or a
   sign-in the machine did not report, counts.
+
+## Computers that need their managers
+
+Work line 8 of the usable milestone (机 5.1, 5.4, 5.6, 4.3). Modules: `bots.ts`, `machine.ts`,
+`monitor.ts` / `bots.rs`, `machine.rs`, `monitor.rs`.
+
+```ts
+Machine += { unhealthy?: string }      // connected and not healthy: "heartbeat" | "disk" (MACHINE_UNHEALTHY); open
+DaemonProblem = { at, text /* 1..500, redacted on the machine */ }
+MachineMonitor += { problems?: DaemonProblem[] /* <= 20, oldest first; at on the server clock */ }
+SecretInfo += { ask?: true }           // runs get the key only after a person approves; sent only when true
+SetSecretRequest += { ask?: boolean }  // 每次用之前要批准; absent keeps the key's (false when new)
+```
+
+- **Which check failed** (机 5.6): `unhealthy` is `heartbeat` when no heartbeat came for 90 s
+  and `disk` when free disk is below 5 GiB. Absent when healthy, offline or removed. Readers
+  show an unknown value as a failed check without a name.
+- **最近的问题** (机 5.4): the daemon's last warning and error lines from its latest heartbeat
+  (machine-protocol.md, "Metrics"), moved onto the server clock.
+- **Keys that ask first** (机 4.3): `PUT …/secrets/:name` with `ask: true` needs a daemon with
+  feature `ask-keys`: otherwise `conflict` with `machine.too_old` (an older daemon would give the
+  key to every run), or `machine.offline`. The audit details carry `ask: true`. A request without
+  `ask` keeps what the key has now (the latest heartbeat's `SecretInfo.ask`; a new key does not
+  ask), so a new value from an older client never turns approval off; turning it off takes an
+  explicit `ask: false`, which clients send every time.
+- **Alerts** (机 5.1): MachineLink keeps which of these are up and tells the computer's
+  managers (a team computer: the active admins, at most 20; a personal one: its owner) once per
+  alert:
+  - `offline`: no link for 10 minutes while an AI member is placed on the computer
+    (`BotRunner.machineId`) or checked on it by its owner;
+  - `signed_out:<runtime>`: a CLI the heartbeat last saw `logged_in` is now a confirmed
+    `logged_out`. It ends on a `logged_in` that is certain (`confirmed: true`, from a daemon with
+    feature `sign-in-confirmed`; from an older daemon any `logged_in`), not on one from the
+    credential files after a failed run's mark ran out, and when a heartbeat with logins no longer
+    reports the runtime;
+  - `disk`: free disk below 5 GiB; it ends at 6 GiB or more, so a disk at the line does not flap.
+
+  The notice is a message of an AI member that depends on the computer (for a sign-in or the
+  disk of a team computer, else one placed nowhere) in its DM with each manager, opening a
+  话题 titled with the problem and mentioning the manager, so the usual notification and push
+  carry it (`notify: "mention"`). Without such an AI member nobody is told (团队管理 › 要注意
+  still shows it). When the alert ends (the link is back, the CLI is signed in, there is room),
+  the AI member edits the message to say it recovered and sets the 话题 `done`. A removed
+  computer ends its alerts the same way.

@@ -21,6 +21,16 @@ macro_rules! log {
     }};
 }
 
+/// A log line that is a warning or an error: also kept for 最近的问题 (机 5.4, `problems`).
+macro_rules! warn {
+    ($($a:tt)*) => {{
+        let at = crate::proto::now_ms();
+        let line = format!($($a)*);
+        eprintln!("{at} {line}");
+        crate::problems::record(at, &line);
+    }};
+}
+
 /// Frames buffered per run before message deltas are dropped (finals are always kept).
 const BUFFER_SOFT_CAP: usize = 20_000;
 
@@ -40,6 +50,7 @@ pub const FEATURES: &[&str] = &[
     // Every executor runs a person's commands (local: as the daemon's user; a VM: as another
     // user, and `takeover-isolated` says so).
     feature::TAKEOVER,
+    feature::SIGN_IN_CONFIRMED,
 ];
 
 /// `run.done.error` of a run found unfinished at start: the server continues it in its session.
@@ -137,6 +148,9 @@ pub struct Daemon {
     /// Runtimes whose last run failed because the CLI is not signed in, and since when: they
     /// report `logged_out` until the CLI's status check says signed in again (模 3.2).
     signed_out: Arc<std::sync::Mutex<HashMap<String, Instant>>>,
+    /// Runtimes whose last run succeeded: their `logged_in` is certain (feature
+    /// "sign-in-confirmed").
+    worked: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     /// Values masked besides the config's: every key this process has held.
     key_values: Vec<String>,
     /// The daemon is shutting down: the runs it stops itself end as `daemon restarted`.
@@ -187,6 +201,7 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
         usage: Arc::new(std::sync::Mutex::new(vec![])),
         accounts: Arc::new(std::sync::Mutex::new(HashMap::new())),
         signed_out: Arc::new(std::sync::Mutex::new(HashMap::new())),
+        worked: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         key_values,
         stopping: false,
         clearing: Arc::default(),
@@ -219,7 +234,7 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
     let mut updater = match crate::selfupdate::Updater::new(d.cfg.self_update) {
         Ok(u) => Some(u),
         Err(why) => {
-            log!("self-update off: {why}");
+            warn!("self-update off: {why}");
             None
         }
     };
@@ -267,7 +282,7 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
                             log!("installed a new version of the daemon; restarting");
                             break;
                         }
-                        Some(Err(e)) => log!("self-update: {e}"),
+                        Some(Err(e)) => warn!("self-update: {e}"),
                         _ => {}
                     }
                 }
@@ -472,7 +487,7 @@ impl Daemon {
             return None;
         }
         if self.redactor.text(url) != url {
-            log!("takeover_url not reported: it looks like it holds a secret");
+            warn!("takeover_url not reported: it looks like it holds a secret");
             return None;
         }
         Some(url.to_string())
@@ -566,7 +581,7 @@ impl Daemon {
 
     fn drop_link(&mut self, why: &str) {
         if self.link.is_some() || self.connecting {
-            log!("link down: {why}");
+            warn!("link down: {why}");
         }
         self.link = None;
         self.welcomed = false;
@@ -606,6 +621,7 @@ impl Daemon {
                                 .iter()
                                 .copied()
                                 .chain(self.machine_key.as_ref().map(|_| feature::ACCOUNTS))
+                                .chain(self.machine_key.as_ref().map(|_| feature::ASK_KEYS))
                                 .chain(self.cfg.vm.as_ref().map(|_| feature::HOMES))
                                 .chain(self.cfg.vm.as_ref().map(|_| feature::TAKEOVER_ISOLATED))
                                 .map(str::to_string)
@@ -626,7 +642,7 @@ impl Daemon {
                 self.last_rx = Instant::now();
                 match serde_json::from_str::<Down>(&text) {
                     Ok(f) => self.on_frame(f),
-                    Err(e) => log!("ignored server frame: {e}"),
+                    Err(e) => warn!("ignored server frame: {e}"),
                 }
             }
             LinkEvent::Closed(epoch, why) if epoch == self.epoch => self.drop_link(&why),
@@ -645,7 +661,7 @@ impl Daemon {
                 if let Some(id) = &self.cfg.machine_id
                     && id != &machine_id
                 {
-                    log!("server machine id differs from config machine_id");
+                    warn!("server machine id differs from config machine_id");
                 }
                 self.welcomed = true;
                 self.backoff_ms = 500;
@@ -748,7 +764,7 @@ impl Daemon {
                     self.gc(&run_id);
                 }
             }
-            Down::Error { error } => log!("server error {}: {}", error.code, error.message),
+            Down::Error { error } => warn!("server error {}: {}", error.code, error.message),
             // 1.1 interaction loop: one `<teamchat-event>` user turn; the runtime answers
             // `input.accepted` as for `run.input`. A run that has ended takes nothing (BotDesk
             // starts a follow-up run).
@@ -776,10 +792,11 @@ impl Daemon {
                 name,
                 sealed,
                 members,
-            } => self.on_secret_set(&name, &sealed, members),
+                ask,
+            } => self.on_secret_set(&name, &sealed, members, ask),
             Down::SecretDelete { name } => {
                 if let Err(e) = self.keys.delete(&name) {
-                    log!("key {}: {e}", crate::chat_run::safe_word(&name));
+                    warn!("key {}: {e}", crate::chat_run::safe_word(&name));
                 } else {
                     log!("key {} removed", crate::chat_run::safe_word(&name));
                 }
@@ -807,7 +824,7 @@ impl Daemon {
                             by,
                         });
                     }
-                    _ => log!(
+                    _ => warn!(
                         "run {}: command refused",
                         crate::chat_run::safe_word(&run_id)
                     ),
@@ -964,10 +981,13 @@ impl Daemon {
         );
         log!("run {id} accepted ({})", a.runtime);
         self.send_now(&Up::RunAccept { run_id: id });
-        let keys = if a.kind.is_some() {
-            vec![]
+        let (keys, ask_keys) = if a.kind.is_some() {
+            (vec![], vec![])
         } else {
-            self.keys.env_for(&a.bot_member_id)
+            (
+                self.keys.env_for(&a.bot_member_id),
+                self.keys.ask_for(&a.bot_member_id),
+            )
         };
         let gated = self
             .clis
@@ -985,6 +1005,7 @@ impl Daemon {
             outputs,
             exec: self.exec.clone(),
             keys,
+            ask_keys,
         }));
     }
 
@@ -1024,9 +1045,15 @@ impl Daemon {
                         if self.stopping && !r.cancel_asked {
                             interrupted_by_stop(d, r.resume_session.as_deref());
                         }
-                        log!("run {id} done: {}", d.status);
+                        // The status only: the run's error is the CLI's text, and only the
+                        // run's own redactor knows every value the run learned.
+                        if d.status == "failed" {
+                            warn!("run {id} done: failed");
+                        } else {
+                            log!("run {id} done: {}", d.status);
+                        }
                         if let Some(rt) = &r.runtime {
-                            note_sign_in(&self.signed_out, rt, d);
+                            note_sign_in(&self.signed_out, &self.worked, rt, d);
                         }
                     }
                     Up::RunSession(s) => s.seq = seq,
@@ -1220,7 +1247,7 @@ impl Daemon {
         tokio::spawn(async move {
             match crate::vm_home::clear(&vm, &member_id).await {
                 Ok(()) => log!("home of {safe} emptied"),
-                Err(e) => log!("home of {safe}: {e}"),
+                Err(e) => warn!("home of {safe}: {e}"),
             }
             clearing
                 .lock()
@@ -1229,16 +1256,16 @@ impl Daemon {
         });
     }
 
-    fn on_secret_set(&mut self, name: &str, sealed: &str, members: Vec<String>) {
+    fn on_secret_set(&mut self, name: &str, sealed: &str, members: Vec<String>, ask: bool) {
         let Some(key) = self.machine_key.clone() else {
             return;
         };
         let safe = crate::chat_run::safe_word(name);
         let value = match key.unseal(sealed) {
             Ok(v) => v,
-            Err(e) => return log!("key {safe}: {e}"),
+            Err(e) => return warn!("key {safe}: {e}"),
         };
-        match self.keys.set(name, value.clone(), members) {
+        match self.keys.set(name, value.clone(), members, ask) {
             Ok(()) => {
                 log!("key {safe} saved");
                 mask_in_runs(&self.runs, &value);
@@ -1249,7 +1276,7 @@ impl Daemon {
                     &self.key_values,
                 ));
             }
-            Err(e) => log!("key {safe}: {e}"),
+            Err(e) => warn!("key {safe}: {e}"),
         }
     }
 
@@ -1344,6 +1371,14 @@ impl Daemon {
             }
         }
         drop(marks);
+        let worked = self.worked.lock().unwrap_or_else(|e| e.into_inner());
+        for l in m.logins.iter_mut().flatten() {
+            crate::metrics::confirm_worked(l, worked.contains(&l.runtime));
+        }
+        drop(worked);
+        // 机 5.4: 最近的问题, redacted with every key this daemon knows now.
+        let problems = crate::problems::recent(&self.redactor);
+        m.problems = (!problems.is_empty()).then_some(problems);
         m
     }
 }
@@ -1352,16 +1387,24 @@ impl Daemon {
 const SIGNED_OUT_MARK: Duration = Duration::from_secs(15 * 60);
 
 /// A run of `runtime` ended: one that failed because the CLI is not signed in marks it signed
-/// out; one that succeeded shows the CLI works, so the mark goes.
-fn note_sign_in(marks: &std::sync::Mutex<HashMap<String, Instant>>, runtime: &str, d: &RunDone) {
+/// out; one that succeeded shows the CLI works, so the mark goes and its sign-in is certain.
+fn note_sign_in(
+    marks: &std::sync::Mutex<HashMap<String, Instant>>,
+    worked: &std::sync::Mutex<std::collections::HashSet<String>>,
+    runtime: &str,
+    d: &RunDone,
+) {
     let mut m = marks.lock().unwrap_or_else(|e| e.into_inner());
+    let mut w = worked.lock().unwrap_or_else(|e| e.into_inner());
     if d.failure
         .as_ref()
         .is_some_and(|f| f.kind == crate::proto::failure_kind::SIGNED_OUT)
     {
         m.insert(runtime.to_string(), Instant::now());
+        w.remove(runtime);
     } else if d.status == "succeeded" {
         m.remove(runtime);
+        w.insert(runtime.to_string());
     }
 }
 
@@ -1404,6 +1447,7 @@ mod tests {
     #[test]
     fn a_run_that_failed_to_sign_in_marks_its_cli_until_one_succeeds() {
         let marks = std::sync::Mutex::new(HashMap::new());
+        let worked = std::sync::Mutex::new(std::collections::HashSet::new());
         let done = |status: &str, kind: Option<&str>| RunDone {
             run_id: "r1".into(),
             seq: 1,
@@ -1419,15 +1463,30 @@ mod tests {
             code: None,
             failure: kind.map(crate::proto::RunFailure::new),
         };
-        note_sign_in(&marks, "claude", &done("failed", Some("network")));
+        note_sign_in(&marks, &worked, "claude", &done("failed", Some("network")));
         assert!(marks.lock().unwrap().is_empty());
-        note_sign_in(&marks, "claude", &done("failed", Some("signed_out")));
+        note_sign_in(
+            &marks,
+            &worked,
+            "claude",
+            &done("failed", Some("signed_out")),
+        );
         assert!(marks.lock().unwrap().contains_key("claude"));
         // Another runtime's success leaves it.
-        note_sign_in(&marks, "codex", &done("succeeded", None));
+        note_sign_in(&marks, &worked, "codex", &done("succeeded", None));
         assert!(marks.lock().unwrap().contains_key("claude"));
-        note_sign_in(&marks, "claude", &done("succeeded", None));
+        assert!(!worked.lock().unwrap().contains("claude"));
+        note_sign_in(&marks, &worked, "claude", &done("succeeded", None));
         assert!(marks.lock().unwrap().is_empty());
+        // Its sign-in is certain now, until a run fails to sign in again.
+        assert!(worked.lock().unwrap().contains("claude"));
+        note_sign_in(
+            &marks,
+            &worked,
+            "claude",
+            &done("failed", Some("signed_out")),
+        );
+        assert!(!worked.lock().unwrap().contains("claude"));
     }
 
     #[test]

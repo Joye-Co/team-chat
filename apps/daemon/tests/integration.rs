@@ -991,7 +991,9 @@ async fn pause_resume_answer_acceptance_and_aside() {
                         "gates",
                         "github",
                         "takeover",
-                        "accounts"
+                        "sign-in-confirmed",
+                        "accounts",
+                        "ask-keys"
                     ]
                     .map(String::from)[..]
                 )

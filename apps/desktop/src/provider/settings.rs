@@ -197,6 +197,7 @@ pub(super) fn machine(m: &proto::Machine) -> MachineInfo {
         labels: m.labels.clone(),
         connected: m.connected,
         healthy: m.healthy,
+        unhealthy: m.unhealthy.clone(),
         last_heartbeat_at: m.last_heartbeat_at.map(|v| v as i64),
         version: m.daemon_version.clone(),
         disk_free_bytes: health.map(|h| h.disk_free_bytes),

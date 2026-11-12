@@ -84,6 +84,64 @@ pub fn page(
                 ),
         )
         .child(members(d, sort, name, member, view, cx))
+        .when_some(problems(d, time, cx), |d, p| d.child(p))
+}
+
+// ---------------------------------------------------------------------------
+// 最近的问题 (机 5.4)
+
+/// The daemon's last warning and error lines, newest first; nothing before a daemon that sends
+/// them or while there are none.
+fn problems(d: &MachineMonitor, time: &dyn Fn(u64) -> String, cx: &App) -> Option<gpui::Div> {
+    let lines = d.problems.as_ref().filter(|p| !p.is_empty())?;
+    let k = native_colors(cx);
+    Some(
+        panel(cx)
+            .p(space::S24)
+            .gap(space::S8)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(space::S4)
+                    .child(
+                        div()
+                            .n_title3()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child(m::PROBLEMS_TITLE),
+                    )
+                    .child(
+                        div()
+                            .n_footnote()
+                            .text_color(k.secondary)
+                            .child(m::PROBLEMS_DESC),
+                    ),
+            )
+            .children(lines.iter().rev().enumerate().map(|(i, p)| {
+                div()
+                    .flex()
+                    .items_start()
+                    .gap(space::S12)
+                    .py(space::S8)
+                    .when(i > 0, |d| d.border_t_1().border_color(k.separator))
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(t::COL_TOKENS)
+                            .n_footnote()
+                            .n_figures()
+                            .text_color(k.secondary)
+                            .child(time(p.at)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(gpui::Pixels::ZERO)
+                            .n_style(text::MONO)
+                            .child(p.text.clone()),
+                    )
+            })),
+    )
 }
 
 // ---------------------------------------------------------------------------

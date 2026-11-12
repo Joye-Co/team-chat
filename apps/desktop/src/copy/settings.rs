@@ -415,6 +415,8 @@ crate::copy! {
     THIS_MAC_ELSEWHERE_HINT = "这台电脑上运行的是单独安装的版本，不会跟着应用更新。改用应用里的版本后，以后会自动更新。",
     MACHINE_NEVER_ONLINE = "从未上线",
     MACHINE_UNHEALTHY_TIP = "最近一次自检没有通过，AI 成员暂时不会派活到这台电脑",
+    MACHINE_UNHEALTHY_TIP_HEARTBEAT = "自检没有通过：超过 90 秒没收到这台电脑的消息，AI 成员暂时不会派活到这台电脑",
+    MACHINE_UNHEALTHY_TIP_DISK = "自检没有通过：磁盘可用空间不到 5 GB，AI 成员暂时不会派活到这台电脑。清理一些空间后会自己恢复",
     MACHINE_COPY_NAME = "复制名称",
     MACHINE_ADD_FAILED = "没有添加这台电脑",
     MEMBERS_FILTER = "按名字或岗位筛选",
