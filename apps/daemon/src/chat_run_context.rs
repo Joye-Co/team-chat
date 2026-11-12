@@ -281,6 +281,13 @@ pub enum Target {
 /// `out` (absolute, or relative to the working folder) resolved inside the working folder:
 /// what exists is resolved with its symbolic links, the rest must be plain names.
 pub fn resolve_out(root: &Path, out: &str) -> Result<Target, Value> {
+    resolve_out_in(root, &[], out)
+}
+
+/// [`resolve_out`], where an absolute `out` may also be inside one of the folders of `also`
+/// (resolved like the working folder; one that does not exist is left out). A relative `out`
+/// stays inside the working folder.
+pub fn resolve_out_in(root: &Path, also: &[PathBuf], out: &str) -> Result<Target, Value> {
     // Windows: see `chat_run_files::inside`.
     let out = if cfg!(windows) {
         crate::sys::windows_plain_path(out)
@@ -304,16 +311,24 @@ pub fn resolve_out(root: &Path, out: &str) -> Result<Target, Value> {
         )
     })?;
     let outside = || {
+        let mut places = format!("the run's working folder {}", root.display());
+        for a in also {
+            places.push_str(&format!(" or {}", a.display()));
+        }
         err(
             "forbidden",
             Some("file.outside_workspace"),
-            format!(
-                "{out} is outside the run's working folder {}",
-                root.display()
-            ),
+            format!("{out} is outside {places}"),
         )
     };
     let p = Path::new(out);
+    let also: Vec<PathBuf> = if p.is_absolute() {
+        also.iter()
+            .filter_map(|a| std::fs::canonicalize(a).ok())
+            .collect()
+    } else {
+        vec![]
+    };
     let p = if p.is_absolute() {
         p.to_path_buf()
     } else {
@@ -338,7 +353,7 @@ pub fn resolve_out(root: &Path, out: &str) -> Result<Target, Value> {
     for n in rest.iter().rev() {
         path.push(n);
     }
-    if !path.starts_with(&root) {
+    if !path.starts_with(&root) && !also.iter().any(|a| path.starts_with(a)) {
         return Err(outside());
     }
     if path.is_dir() || (out.ends_with('/') && !path.exists()) {
@@ -384,21 +399,43 @@ fn download_dir(downloads: &Path, file_id: &str) -> Result<PathBuf, Value> {
     })
 }
 
-/// Downloads one file of the run's group: into the run folder, or to `out` in the working folder.
+/// Where an absolute `file get --out` may write besides the working folder: the run's
+/// downloads folder and the system's temporary folder, where `mktemp` makes its folders
+/// (verification pass 2, problem 2: a model that names a file must not have to put it in the
+/// working folder, where it would be committed to the member's branch).
+fn get_out_places(local: &Local) -> Vec<PathBuf> {
+    let mut places: Vec<PathBuf> = local.downloads.iter().cloned().collect();
+    places.push(std::env::temp_dir());
+    if cfg!(unix) {
+        places.push(PathBuf::from("/tmp"));
+    }
+    places
+}
+
+/// Downloads one file of the run's group: into the run folder, or to `out` (in the working
+/// folder, the run's downloads folder or the system's temporary folder).
 async fn get(local: &Local, body: &Value) -> Value {
     let Some(file_id) = body["fileId"].as_str().filter(|s| valid_id(s)) else {
         return err("invalid", None, "fileId is required");
     };
     let out = body["out"].as_str().filter(|s| !s.is_empty());
     let target = match (out, &local.downloads) {
-        (Some(out), _) => resolve_out(&local.root, out),
+        (Some(out), downloads) => {
+            if let Some(d) = downloads {
+                let _ = std::fs::create_dir_all(d);
+            }
+            resolve_out_in(&local.root, &get_out_places(local), out)
+        }
         (None, Some(downloads)) => download_dir(downloads, file_id).map(Target::Dir),
         (None, None) => default_dir(&local.root, file_id).map(Target::Dir),
     };
-    let in_work = out.is_some() || local.downloads.is_none();
     let target = match target {
         Ok(t) => t,
         Err(e) => return e,
+    };
+    let in_work = match (&target, std::fs::canonicalize(&local.root)) {
+        (Target::File(p) | Target::Dir(p), Ok(root)) => p.starts_with(root),
+        _ => true,
     };
     let path = format!("/v1/machine/runs/{}/files/{file_id}", local.run_id);
     let (u, c) = match (url(local, &path), client(FILE_TIMEOUT)) {
@@ -1124,6 +1161,41 @@ mod tests {
         let a = handle(FILE_GET, &json!({ "fileId": "F1", "out": "in/a.png" }), &l).await;
         assert_eq!(a["result"]["inWorkFolder"], true);
         assert!(work.join("in/a.png").exists());
+        // Verification pass 2, problem 2: an absolute `--out` in the system's temporary folder
+        // (`$(mktemp -d)/shapes.png`) or the run's downloads folder is taken too, and is not
+        // in the working folder.
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("shapes.png");
+        let a = handle(
+            FILE_GET,
+            &json!({ "fileId": "F1", "out": out.display().to_string() }),
+            &l,
+        )
+        .await;
+        assert_eq!(a["result"]["inWorkFolder"], false, "{a}");
+        assert_eq!(std::fs::read(&out).unwrap(), b"png");
+        let out = run.path().join("downloads/mine.png");
+        let a = handle(
+            FILE_GET,
+            &json!({ "fileId": "F1", "out": out.display().to_string() }),
+            &l,
+        )
+        .await;
+        assert_eq!(a["result"]["inWorkFolder"], false, "{a}");
+        assert!(out.exists());
+        // A relative path that leaves the working folder, or anywhere else, is still refused.
+        let a = handle(FILE_GET, &json!({ "fileId": "F1", "out": "../x.png" }), &l).await;
+        assert_eq!(a["error"]["reason"], "file.outside_workspace");
+        if cfg!(unix) {
+            let home = std::env::var("HOME").unwrap();
+            let a = handle(
+                FILE_GET,
+                &json!({ "fileId": "F1", "out": format!("{home}/x-not-written.png") }),
+                &l,
+            )
+            .await;
+            assert_eq!(a["error"]["reason"], "file.outside_workspace");
+        }
     }
 
     #[tokio::test]

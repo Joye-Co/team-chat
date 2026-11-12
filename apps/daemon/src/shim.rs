@@ -150,9 +150,12 @@ export PATH\n"
 // --- What a shim asks about. ------------------------------------------------------------------
 
 /// One argument as a word of the line the patterns match: the separators that split a shell
-/// line into commands become spaces, so one invocation stays one command.
+/// line into commands become spaces, so one invocation stays one command. An argument with
+/// whitespace in it (a commit message, `--text "…"`) is quoted: the gates read it as data, so
+/// `git commit -m "before git push origin main"` is not a push (crate::gates `Part`).
 fn word(a: &str) -> String {
-    a.chars()
+    let w: String = a
+        .chars()
         .map(|c| {
             if matches!(c, '\n' | '\r' | ';' | '|' | '&') {
                 ' '
@@ -160,7 +163,12 @@ fn word(a: &str) -> String {
                 c
             }
         })
-        .collect()
+        .collect();
+    if w.chars().any(char::is_whitespace) {
+        format!("'{}'", w.replace('\'', ""))
+    } else {
+        w
+    }
 }
 
 fn line(program: &str, args: &[String]) -> String {
@@ -861,7 +869,20 @@ mod tests {
         // A separator inside an argument does not make a second command.
         assert_eq!(
             check_text("gh", &s(&["issue", "comment", "-b", "a; b\nc"]), d, None),
-            "gh issue comment -b a  b c"
+            "gh issue comment -b 'a  b c'"
+        );
+        // Text an argument mentions is not the command (verification pass 2, problem 1).
+        assert_eq!(
+            kind("git", &["commit", "-m", "before git push origin main"], d),
+            None
+        );
+        assert_eq!(
+            kind(
+                "gh",
+                &["pr", "comment", "5", "-b", "then: gh pr merge 5"],
+                d
+            ),
+            None
         );
     }
 

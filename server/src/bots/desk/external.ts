@@ -139,7 +139,9 @@ export class BotDesk extends DeskGithub {
     for (const { run } of this.heldRuns()) {
       await this.serial(run.id, async () => {
         const r = this.run(run.id);
-        if (!r || r.ended_at !== null) return;
+        // Another press let it go meanwhile (two budget cards pressed at once): its note is
+        // in the topic already (verification pass 2, problem 6).
+        if (!r || r.ended_at !== null || this.meta(`budget_hold:${r.id}`) === null) return;
         this.sql.exec("DELETE FROM meta WHERE key = ?", `budget_hold:${r.id}`);
         const now = Date.now();
         this.sql.exec("UPDATE runs SET queued_at = ? WHERE id = ?", now, r.id);

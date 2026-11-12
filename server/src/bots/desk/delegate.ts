@@ -325,7 +325,7 @@ export abstract class DeskDelegate extends DeskFront {
     const messageId = this.meta(`partCard:${p.chainId}:${p.seq}`);
     if (!messageId) return;
     const why = p.state === "cancelled" && p.stoppedBy ? CARD_TEXT.stoppedBy((await this.names([p.stoppedBy])).get(p.stoppedBy) ?? "") : cut(p.result.split("\n").find((l) => l.trim() !== "") ?? "", 200);
-    const line = p.state === "done" ? CARD_TEXT.partDone(fromName, giverName) : CARD_TEXT.partNotDone(fromName, why);
+    const line = p.state === "done" ? CARD_TEXT.partDone(fromName, giverName) : p.chainStopped && p.stoppedBy ? why : CARD_TEXT.partNotDone(fromName, why);
     await this.closeChainCard(p.groupId, messageId, line);
   }
 

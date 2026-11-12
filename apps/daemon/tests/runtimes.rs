@@ -2174,3 +2174,63 @@ command = '{shell}'
     assert_eq!(get("sh").models, None);
     assert_eq!(get("sh").efforts, None);
 }
+
+/// Verification pass 2, problem 4: a turn that ends while a command it put in the background
+/// still runs is not the end of the work; the CLI's own turn on the command's notification is.
+#[tokio::test]
+async fn claude_waits_for_its_background_command_and_its_own_turn_after_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = spec(
+        dir.path(),
+        "claude",
+        &fake("fake_claude.py"),
+        &[],
+        "background bgself",
+    );
+    let (o, _) = drive(s, |_| None).await;
+    assert_eq!(o.status, Status::Succeeded, "{o:?}");
+    assert_eq!(
+        o.result_text.as_deref(),
+        Some("continued after the background command")
+    );
+}
+
+/// When the CLI only clears the notification, the daemon tells it to go on.
+#[tokio::test]
+async fn claude_is_told_to_go_on_when_its_background_command_finished() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = spec(
+        dir.path(),
+        "claude",
+        &fake("fake_claude.py"),
+        &[],
+        "background bgidle",
+    );
+    let (o, _) = drive(s, |_| None).await;
+    assert_eq!(o.status, Status::Succeeded, "{o:?}");
+    let text = o.result_text.unwrap_or_default();
+    assert!(text.starts_with("reply 2: "), "{text}");
+    assert!(text.contains(runtime::claude::BACKGROUND_DONE), "{text}");
+}
+
+/// A resumed session first clears the notification of a background command the restart
+/// stopped (a `result` of no turns and no text): that is not the answer to the prompt.
+#[tokio::test]
+async fn claude_does_not_take_a_cleared_notification_for_the_answer() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = spec(
+        dir.path(),
+        "claude",
+        &fake("fake_claude.py"),
+        &[],
+        "stalenote go on",
+    );
+    let (o, evs) = drive(s, |_| None).await;
+    assert_eq!(o.status, Status::Succeeded, "{o:?}");
+    assert_eq!(o.result_text.as_deref(), Some("reply 1: stalenote go on"));
+    let ended = evs
+        .iter()
+        .filter(|e| matches!(e, RunEvent::TurnCompleted { .. }))
+        .count();
+    assert_eq!(ended, 1);
+}

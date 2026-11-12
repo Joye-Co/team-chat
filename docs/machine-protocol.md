@@ -695,7 +695,14 @@ An AI member runs with every permission; only the few kinds the team checked nee
   its plain words: the program without its folder, quotes and `.exe` / `.cmd` / `.bat` /
   `.com` / `.ps1`, the arguments without quotes (`"C:\Program Files\GitHub CLI\gh.exe" pr merge 5`,
   `gh.exe pr merge 5` and `'gh' pr merge 5` are all `gh pr merge 5`), so a pattern holds for
-  every spelling a shell accepts. An MCP tool call is matched as
+  every spelling a shell accepts. The text inside a quoted argument that holds whitespace is
+  data, not a command: a match that starts there does not count, and a separator inside it does
+  not split (`chat-run report --text "git push origin main was declined"` and
+  `git commit -m "before git push origin main"` are no push). A quoted argument stays code when
+  it is in the program word, follows a script flag (`-c`, `-lc`, `-ic`, `-Command`, `/c`: the
+  script of `bash -c '…'`), is an argument of `eval`, or is double-quoted with a command
+  substitution (`$(…)`, `` `…` ``) in it. A shim's line quotes each argument with whitespace the
+  same way. An MCP tool call is matched as
   `<tool name> <input JSON>`. The first kind (assignment order) with a matching pattern wins. A
   pattern the daemon cannot compile is left out and logged; a kind left with none is dropped.
 - **Claude Code** (`CliInfo.gates = true`): the run gets `--settings <run folder>/.gate-settings.json`
@@ -871,11 +878,14 @@ ContextHit = { messageId, topicId, topicTitle?, seq, authorName, at, snippet }
 - `context.search` searches the run's topic, or with `scope: "group"` (`--group`) every topic of the
   run's group the bot member can read. `limit` 1-50, default 20, newest first.
 - `file.get` gives a file of the run's group (ready, not deleted). The daemon writes it to `out`,
-  which must be inside the run's working folder after symbolic links are resolved (`forbidden`,
-  `file.outside_workspace` otherwise); without `out`, to `<run folder>/downloads/<fileId>/<name>`,
+  which must be inside the run's working folder after symbolic links are resolved; an absolute
+  `out` may also be inside the run's downloads folder (`<run folder>/downloads`) or the system's
+  temporary folder (`$TMPDIR`, and `/tmp` on Unix: where `mktemp -d` makes its folders)
+  (`forbidden`, `file.outside_workspace` otherwise). Without `out` (the default, and what the
+  usage tells a model to use), to `<run folder>/downloads/<fileId>/<name>`,
   outside the working folder, so a download never ends up in the member's branch when the
   daemon commits what a run left uncommitted. The result says where: `{ path, name, mime, size,
-  inWorkFolder }` (`inWorkFolder: false` for the default). Daemons before this wrote the default
+  inWorkFolder }` (`inWorkFolder: false` for anything outside the working folder). Daemons before this wrote the default
   to `<working folder>/.chat-files/<fileId>/<name>` (with a `.gitignore` of `*`). It refuses files
   over 100 MiB with `too_large`. `chat-run` waits up to 5 minutes for it.
 - `topic.state` is one compact state card of a topic, at most 2000 characters: who did what (the
@@ -1290,7 +1300,7 @@ secret split over two deltas is redacted whole.
 | kind | Command | Protocol |
 | --- | --- | --- |
 | `codex` | `codex app-server` | JSON-RPC lines on stdio (v2): `initialize`, `initialized`, `thread/start {cwd, approvalPolicy, sandbox, model?}`, `turn/start`, `turn/steer`, `turn/interrupt`; notifications `turn/*`, `item/*`, `item/agentMessage/delta`, `thread/tokenUsage/updated`, `error`; server requests `item/commandExecution/requestApproval`, `item/fileChange/requestApproval` |
-| `claude` | `claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --replay-user-messages --session-id <uuid> --permission-mode <mode>` | one JSON line per user message in (a line the CLI reads while a turn runs joins that turn; the CLI echoes each line it takes up, and the run ends when a `result` arrives with no line unread); `system/init`, `stream_event` (text deltas), `assistant`, `user` (tool results), `result` out |
+| `claude` | `claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --replay-user-messages --session-id <uuid> --permission-mode <mode>` | one JSON line per user message in (a line the CLI reads while a turn runs joins that turn; the CLI echoes each line it takes up, and the run ends when a `result` arrives with no line unread and no command the CLI put in the background still running: `system/task_started` with `is_backgrounded` until its `system/task_notification`; after it the CLI's own turn goes on, and when none starts within 15 s the daemon writes a line that says the command finished; one still running after 10 minutes (a server, a watcher) gets one line that says to wait for it in the foreground or stop it, and the turn after it ends the run; a `result` of no turns and no text answers no line); `system/init`, `stream_event` (text deltas), `assistant`, `user` (tool results), `result` out |
 | `acp` | configured, e.g. `gemini --acp`, `opencode acp` | Agent Client Protocol v1 (JSON-RPC 2.0): `initialize`, `session/new` or `session/load` (resume, when the agent has `loadSession`), `session/prompt`, `session/update`, `session/request_permission`, `session/cancel`. No effort setting and no read-only mode: the daemon reports no `efforts` and `aside: false` |
 | `pty` | configured; `{prompt}` in args is replaced | a pseudo terminal; output without ANSI codes streams as message item `out` |
 
