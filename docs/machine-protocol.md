@@ -790,8 +790,12 @@ An AI member runs with every permission; only the few kinds the team checked nee
   written with `/`). Every gated run on the host also gets `BASH_ENV=<run folder>/.bash-env.sh`:
   bash reads it in every non-interactive shell, and a login bash (`bash -lc`, as Codex runs
   commands when the user's shell is bash; `bash -l script`) reads it after `/etc/profile` and
-  the user's profile. It reads the user's own `BASH_ENV` first (`CHAT_RUN_USER_BASH_ENV`), then
-  puts the shims first on `PATH`, once. Codex (and an ACP agent) runs each command in the user's login
+  the user's profile. It reads the user's own `BASH_ENV` first (`CHAT_RUN_USER_BASH_ENV`,
+  expanded as bash expands `BASH_ENV`, so `$HOME/.bashenv` still works), then puts the shims
+  first on `PATH`, once. Codex reads `~/.bashrc` when it captures the user's bash only while
+  `BASH_ENV` is empty; so in a gated Codex or ACP run with no own `BASH_ENV`, a login,
+  non-interactive bash reads `~/.bashrc` itself, once per process tree
+  (`CHAT_RUN_BASHRC_READ=1` is exported after it). Codex (and an ACP agent) runs each command in the user's login
   shell (`zsh -lc`); on macOS `/etc/zprofile` runs `path_helper`, which puts the system folders
   before the inherited `PATH`. So a gated Codex or ACP run on the host (Unix) gets
   `ZDOTDIR=<run folder>/zsh`, whose `.zshenv`, `.zprofile`, `.zshrc` and `.zlogin` each read the

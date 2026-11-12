@@ -672,8 +672,10 @@ pub async fn supervise(ctx: RunCtx) {
                 }
                 // Every bash of the run (Codex's `bash -lc` when the user's shell is bash, Git
                 // Bash, a `bash -l script`) reads BASH_ENV after the profiles that reset PATH.
+                // Codex then skips ~/.bashrc when it captures the shell: the file reads it.
                 if !exec.isolated()
-                    && let Err(e) = crate::shim::set_bash_env(&mut env, &dir, &bin)
+                    && let Err(e) =
+                        crate::shim::set_bash_env(&mut env, &dir, &bin, rt.kind != "claude")
                 {
                     eprintln!("{} run {run_id}: no bash env file: {e}", now_ms());
                 }

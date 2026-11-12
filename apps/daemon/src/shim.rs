@@ -153,18 +153,42 @@ pub const BASH_ENV: &str = "BASH_ENV";
 /// The user's own `BASH_ENV`, which the run's file reads first.
 pub const ENV_USER_BASH_ENV: &str = "CHAT_RUN_USER_BASH_ENV";
 
+/// Set (exported) once a bash of the run read `~/.bashrc` for [`bash_env_file`], so the
+/// shells it starts do not read it again.
+pub const ENV_BASHRC_READ: &str = "CHAT_RUN_BASHRC_READ";
+
 /// Writes `<run folder>/.bash-env.sh`, for [`BASH_ENV`]: reads the user's own `BASH_ENV`
-/// ([`ENV_USER_BASH_ENV`]), then puts `bin` first on `PATH` again, once. Returns the value for
-/// [`BASH_ENV`].
-pub fn bash_env_file(run_dir: &Path, bin: &str) -> std::io::Result<String> {
+/// ([`ENV_USER_BASH_ENV`], expanded as bash expands `BASH_ENV`), then puts `bin` first on
+/// `PATH` again, once. Returns the value for [`BASH_ENV`].
+///
+/// With `read_bashrc` (Codex, an ACP agent): Codex reads `~/.bashrc` when it captures the
+/// user's bash only while `BASH_ENV` is empty, which the run's `BASH_ENV` never is. So a login,
+/// non-interactive bash of the run with no own `BASH_ENV` reads `~/.bashrc` itself, once per
+/// process tree ([`ENV_BASHRC_READ`]).
+pub fn bash_env_file(run_dir: &Path, bin: &str, read_bashrc: bool) -> std::io::Result<String> {
     let file = run_dir.join(".bash-env.sh");
     let quoted = sh_quote(&shell_dir(bin));
     let user = ENV_USER_BASH_ENV;
+    let guard = ENV_BASHRC_READ;
+    let bashrc = if read_bashrc {
+        format!(
+            "elif [ -z \"${{{guard}:-}}\" ] && shopt -q login_shell && [[ $- != *i* ]] \
+&& [ -n \"${{HOME-}}\" ] && [ -r \"$HOME/.bashrc\" ]; then\n\
+  export {guard}=1\n\
+  . \"$HOME/.bashrc\"\n"
+        )
+    } else {
+        String::new()
+    };
     std::fs::write(
         &file,
         format!(
             "# Written for a run: reads your own BASH_ENV, then puts the run's tools first on PATH.\n\
-if [ -n \"${{{user}:-}}\" ] && [ -r \"${user}\" ]; then . \"${user}\"; fi\n\
+if [ -n \"${{{user}:-}}\" ]; then\n\
+  eval \"__chat_run_user=\\\"${{{user}}}\\\"\"\n\
+  if [ -r \"$__chat_run_user\" ]; then . \"$__chat_run_user\"; fi\n\
+  unset __chat_run_user\n\
+{bashrc}fi\n\
 __chat_run_bin={quoted}\n\
 __chat_run_path=\":$PATH:\"\n\
 while [[ \"$__chat_run_path\" == *\":$__chat_run_bin:\"* ]]; do\n\
@@ -185,15 +209,16 @@ pub fn set_bash_env(
     env: &mut Vec<(String, String)>,
     run_dir: &Path,
     bin: &str,
+    read_bashrc: bool,
 ) -> std::io::Result<()> {
-    let file = bash_env_file(run_dir, bin)?;
+    let file = bash_env_file(run_dir, bin, read_bashrc)?;
     let own = env
         .iter()
         .find(|(k, _)| k == BASH_ENV)
         .map(|(_, v)| v.clone())
         .or_else(|| std::env::var(BASH_ENV).ok())
         .filter(|v| !v.is_empty() && *v != file);
-    env.retain(|(k, _)| k != BASH_ENV && k != ENV_USER_BASH_ENV);
+    env.retain(|(k, _)| k != BASH_ENV && k != ENV_USER_BASH_ENV && k != ENV_BASHRC_READ);
     if let Some(own) = own {
         env.push((ENV_USER_BASH_ENV.into(), own));
     }
@@ -1108,7 +1133,7 @@ mod tests {
         std::fs::create_dir_all(&run_dir).unwrap();
         let bin = run_dir.join("it's bin").display().to_string();
         let mut env = vec![(BASH_ENV.to_string(), own.display().to_string())];
-        set_bash_env(&mut env, &run_dir, &bin).unwrap();
+        set_bash_env(&mut env, &run_dir, &bin, false).unwrap();
         assert_eq!(
             env.iter().filter(|(k, _)| k == BASH_ENV).count(),
             1,
@@ -1151,6 +1176,104 @@ mod tests {
                 assert_eq!(got, seen, "{bash:?} {args:?}: {out}");
             }
         }
+    }
+
+    /// Codex captures the user's bash with `bash -lc '<capture>'`, whose capture reads
+    /// `~/.bashrc` only while `BASH_ENV` is empty (codex-cli 0.159.0). The run's file reads it
+    /// in its place, once per process tree, and only with no own `BASH_ENV`; a Claude Code run
+    /// (no `read_bashrc`) leaves it alone as before.
+    #[cfg(unix)]
+    #[test]
+    fn a_codex_bash_capture_still_reads_the_bashrc() {
+        let bashes = bashes();
+        if bashes.is_empty() {
+            eprintln!("no bash here: skipped");
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join(".bash_profile"), "export PATH=/opt/first:$PATH\n").unwrap();
+        std::fs::write(
+            home.join(".bashrc"),
+            "export READS=\"${READS:-}rc\"\nexport PATH=/opt/rc:$PATH\nalias ll='ls -l'\n",
+        )
+        .unwrap();
+        let bin = tmp.path().join("bin").display().to_string();
+        // Codex's capture: reads the bashrc itself only with no BASH_ENV, then prints the
+        // shell's state (here: what the commands it runs later would see).
+        let capture = r#"if [ -z "${BASH_ENV-}" ] && [ -n "${HOME-}" ] && [ -r "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi
+printf '%s|%s|%s|' "$PATH" "$READS" "$(alias ll 2>/dev/null)"
+bash -lc 'printf "%s|%s" "$PATH" "$READS"'"#;
+        for bash in &bashes {
+            for codex in [true, false] {
+                let run_dir = tmp.path().join(format!("run-{codex}"));
+                std::fs::create_dir_all(&run_dir).unwrap();
+                let mut env = vec![];
+                set_bash_env(&mut env, &run_dir, &bin, codex).unwrap();
+                let out = Command::new(bash)
+                    .args(["-lc", capture])
+                    .env_clear()
+                    .env("HOME", &home)
+                    .env(
+                        "PATH",
+                        format!("{}:/usr/bin:/bin", bash.parent().unwrap().display()),
+                    )
+                    .envs(env.iter().map(|(k, v)| (k, v)))
+                    .output()
+                    .unwrap();
+                assert!(out.status.success(), "{bash:?}: {out:?}");
+                let out = String::from_utf8_lossy(&out.stdout).to_string();
+                let parts: Vec<&str> = out.split('|').collect();
+                assert_eq!(parts.len(), 5, "{bash:?} {codex}: {out}");
+                for path in [parts[0], parts[3]] {
+                    assert!(
+                        path.starts_with(&format!("{bin}:")),
+                        "{bash:?} {codex}: {out}"
+                    );
+                }
+                if codex {
+                    assert!(parts[0].contains("/opt/rc"), "{bash:?}: {out}");
+                    assert_eq!(parts[1], "rc", "{bash:?}: {out}");
+                    assert!(parts[2].contains("ls -l"), "{bash:?}: {out}");
+                    // The bash the capture starts inherits what the bashrc exported and does
+                    // not read it a second time.
+                    assert_eq!(parts[4], "rc", "{bash:?}: {out}");
+                } else {
+                    assert_eq!(parts[1], "", "{bash:?}: {out}");
+                    assert_eq!(parts[4], "", "{bash:?}: {out}");
+                }
+            }
+        }
+    }
+
+    /// Bash expands `BASH_ENV` before it reads it, so the user's own `$HOME/.bashenv` still
+    /// counts once the run's file reads it.
+    #[cfg(unix)]
+    #[test]
+    fn the_users_own_bash_env_is_expanded_as_bash_does() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("my home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join(".bashenv"), "OWN=yes\n").unwrap();
+        let run_dir = tmp.path().join("run");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        let bin = run_dir.join("bin").display().to_string();
+        let mut env = vec![(BASH_ENV.to_string(), "$HOME/.bashenv".to_string())];
+        set_bash_env(&mut env, &run_dir, &bin, true).unwrap();
+        let out = Command::new("bash")
+            .args(["-c", r#"printf '%s|%s' "${OWN:-no}" "${PATH%%:*}""#])
+            .env_clear()
+            .env("HOME", &home)
+            .env("PATH", "/usr/bin:/bin")
+            .envs(env.iter().map(|(k, v)| (k, v)))
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout),
+            format!("yes|{bin}"),
+            "{out:?}"
+        );
     }
 
     #[test]
