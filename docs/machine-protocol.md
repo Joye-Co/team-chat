@@ -576,7 +576,9 @@ and the server checks the write rules too. The CLI learns about `chat-run` from 
 that names the commands, the card fields, every block type of that schema and
 `chat-run card schema`: Claude Code
 `--append-system-prompt`, Codex `thread/start.developerInstructions`, ACP the text before the
-first prompt; the PTY gets none.
+first prompt; the PTY gets none. Codex's `developerInstructions` also tell it that commands
+already run in its working folder, so it leaves `workdir` out: a mistyped one fails with
+"Failed to create unified exec process: No such file or directory".
 
 The envelope JSON holds `messageId`, `rev`, `askId`, `answerId`, `eventId`, `event`, `actionId`,
 `blockId`, `value`, `inputs`, `editedValues`, `actor` and `block` (card), or `artifactId`,
