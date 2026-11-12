@@ -1709,6 +1709,9 @@ impl Session {
             TransientEvent::GithubStatus(g) => {
                 self.shared.emit(ClientUpdate::GithubStatus(Box::new(g)))
             }
+            // usable: the AI 服务 keeps failing (admins, feature "settings/1"); the screens read
+            // `AiServiceConfig.failing` for now.
+            TransientEvent::AiFailing(_) => {}
         }
     }
 

@@ -1,0 +1,11 @@
+{
+  "kind": "AiServiceStatus",
+  "valid": true,
+  "description": "usable: any member reads whether the team's model is set up and which uses are on",
+  "value": {
+    "configured": true,
+    "frontDesk": false,
+    "titles": true,
+    "memory": true
+  }
+}

@@ -252,6 +252,58 @@ export const AiBaseUrl = z.string().max(256).regex(/^https:\/\/[\x21-\x7e]+$/, "
 /** An API key. Sent only to the server; never returned. */
 export const AiApiKey = z.string().min(8).max(512).regex(Token);
 
+/**
+ * Usable (模 1.1): what the team's model is used for. Each is on unless an admin turned it off:
+ * `frontDesk` (前台), `titles` (AI 话题标题 and topic summaries), `memory` (the review after a run
+ * and the nightly tidy). Off works as if no AI 服务 were set up, for that use only.
+ */
+export const AiServiceSwitches = z.object({ frontDesk: z.boolean(), titles: z.boolean(), memory: z.boolean() });
+export type AiServiceSwitches = z.infer<typeof AiServiceSwitches>;
+
+/** `PUT /v1/settings/ai/switches` (admin): absent fields keep. Response: `AiServiceConfig`. */
+export const UpdateAiServiceSwitchesRequest = z
+  .object({ frontDesk: z.boolean().optional(), titles: z.boolean().optional(), memory: z.boolean().optional() })
+  .refine((v) => v.frontDesk !== undefined || v.titles !== undefined || v.memory !== undefined, "at least one switch");
+export type UpdateAiServiceSwitchesRequest = z.infer<typeof UpdateAiServiceSwitchesRequest>;
+
+/** `AiServiceUseHealth.use` values. Open: a newer server may add one. */
+export const AI_SERVICE_USES = ["front_desk", "title", "summary", "retro", "tidy"] as const;
+
+/** Usable (模 1.4): the last call of one use of the team's model. */
+export const AiServiceUseHealth = z.object({
+  /** One of AI_SERVICE_USES. */
+  use: z.string().min(1).max(32),
+  /** When the last call ended. */
+  at: Millis,
+  ok: z.boolean(),
+  /** The last call's error (the provider's status and message, or why the key could not be read). */
+  error: z.string().max(500).optional(),
+  /** Failed calls in a row; 0 after a success. */
+  failures: z.int().nonnegative(),
+  /** The last good call. */
+  okAt: Millis.optional(),
+});
+export type AiServiceUseHealth = z.infer<typeof AiServiceUseHealth>;
+
+/** Usable (模 1.4): raised after several failed calls in a row (any use); cleared by the next good call. */
+export const AiServiceFailing = z.object({
+  since: Millis,
+  /** The use whose failures raised it (AI_SERVICE_USES). */
+  use: z.string().min(1).max(32),
+  error: z.string().max(500),
+});
+export type AiServiceFailing = z.infer<typeof AiServiceFailing>;
+
+/**
+ * Usable (盯 5.6): transient `ai.failing`, once when `failing` is raised, to every admin's
+ * connections whose hello has feature "settings/1". A client shows it as a notification.
+ */
+export const AiFailingTransient = z.object({
+  type: z.literal("ai.failing"),
+  failing: AiServiceFailing,
+});
+export type AiFailingTransient = z.infer<typeof AiFailingTransient>;
+
 /** `GET /v1/settings/ai` (owner). Never carries the key: only whether one is set and its last 4 characters. */
 export const AiServiceConfig = z.object({
   /** null = not set up: topics keep their first line as the title. */
@@ -265,8 +317,27 @@ export const AiServiceConfig = z.object({
   keyHint: z.string().max(4).nullable(),
   /** 0 = never changed. */
   updatedAt: Millis,
+  /** Usable: the per-use switches; absent (an older server) = all on. */
+  switches: AiServiceSwitches.optional(),
+  /** Usable: the last call of each use that has made one. */
+  uses: z.array(AiServiceUseHealth).max(16).optional(),
+  /** Usable: present while the model keeps failing (团队管理 › 要注意). */
+  failing: AiServiceFailing.optional(),
 });
 export type AiServiceConfig = z.infer<typeof AiServiceConfig>;
+
+/**
+ * Usable (模 1.3, 盯 4.6): `GET /v1/settings/ai/status` (any member): whether the team's model is
+ * set up and which uses are on, with no details, so every screen can say what does not happen.
+ */
+export const AiServiceStatus = z.object({
+  configured: z.boolean(),
+  /** Each is `configured` and its switch on. */
+  frontDesk: z.boolean(),
+  titles: z.boolean(),
+  memory: z.boolean(),
+});
+export type AiServiceStatus = z.infer<typeof AiServiceStatus>;
 
 const needsBaseUrl = (v: { provider: AiProvider; baseUrl?: string | null }, ctx: z.RefinementCtx) => {
   if (v.provider === "openai-compatible" && !v.baseUrl) ctx.addIssue({ code: "custom", path: ["baseUrl"], message: "openai-compatible needs baseUrl" });
@@ -293,11 +364,20 @@ export type UpdateAiServiceRequest = z.infer<typeof UpdateAiServiceRequest>;
 export const TestAiServiceRequest = UpdateAiServiceRequest;
 export type TestAiServiceRequest = UpdateAiServiceRequest;
 
+/** One check of 测试连接. */
+export const AiServiceCheck = z.object({ ok: z.boolean(), error: z.string().max(500).optional() });
+export type AiServiceCheck = z.infer<typeof AiServiceCheck>;
+
 export const AiServiceTestResult = z.object({
+  /** Usable: every check passed. */
   ok: z.boolean(),
   /** The provider's error (status and message), when not ok. Plain text, may be English. */
   error: z.string().max(500).optional(),
   latencyMs: z.int().min(0),
+  /** Usable (模 1.7): a plain text call (titles, summaries). */
+  text: AiServiceCheck.optional(),
+  /** Usable (模 1.7): a forced tool call (the front desk, the review, the tidy); absent when the text call failed. */
+  tool: AiServiceCheck.optional(),
 });
 export type AiServiceTestResult = z.infer<typeof AiServiceTestResult>;
 

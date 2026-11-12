@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateAiServiceSwitchesRequest",
+  "valid": true,
+  "description": "absent switches keep",
+  "value": {
+    "frontDesk": false
+  }
+}

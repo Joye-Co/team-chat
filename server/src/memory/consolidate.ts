@@ -9,8 +9,8 @@
 // promotion with such a source is only proposed (a flagged line) for a person to decide.
 import { MemoryKind, type MemoryUpdate } from "@chat/protocol";
 import { z } from "zod";
-import { loadModelConfig } from "../aiservice";
 import type { CallOptions, ModelConfig } from "../aiservice/providers";
+import { tracker, useConfig } from "../aiservice/uses";
 import { type ToolSpec, callTool } from "../aiservice/tools";
 import type { Env } from "../core/env";
 import type { Logger } from "../core/logger";
@@ -319,13 +319,14 @@ export async function consolidateAll(env: Env, opts: { now?: number; log?: Logge
   if (hour < CONSOLIDATE_HOUR) return out;
   const db = env.DB;
   const scopes = (await db.prepare("SELECT DISTINCT scope FROM memories WHERE status = 'pending' AND created_at < ? ORDER BY scope").bind(cutoff).all<{ scope: string }>()).results.map((r) => r.scope);
-  const cfg = scopes.length > 0 ? await loadModelConfig(env).catch(() => null) : null;
+  const cfg = scopes.length > 0 ? await useConfig(env, "tidy", opts.log) : null;
+  const call: CallOptions = cfg ? { track: tracker(env, "tidy", cfg, opts.log), ...opts.call } : {};
   for (const scope of scopes) {
     if (!(await claim(db, day, scope, now))) continue;
     const c: Ctx = { db, day, now, log: opts.log, ops: 0 };
     try {
       const pending = (await db.prepare("SELECT * FROM memories WHERE scope = ? AND status = 'pending' AND created_at < ? ORDER BY created_at LIMIT 100").bind(scope, cutoff).all<MemoryRow>()).results;
-      if (cfg) await withModel(c, cfg, scope, pending, opts.call ?? {});
+      if (cfg) await withModel(c, cfg, scope, pending, call);
       else for (const p of pending) await activate(c, p);
       await db.prepare("UPDATE memory_runs SET ops = ? WHERE day = ? AND scope = ?").bind(c.ops, day, scope).run();
       out.scopes.push(scope);
