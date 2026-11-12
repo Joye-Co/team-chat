@@ -1,364 +1,192 @@
-# 每个人的 GitHub 身份
+# GitHub 身份按电脑
 
-状态：设计已定，待拆 PR（2026-11-12）。属于 [usable.zh.md](../usable.zh.md) 线 8，对应「已定 3」和审计条目机 4.1、4.5。
+状态：定稿，待拆 PR（2026-11-12）。属于 [usable.zh.md](../usable.zh.md) 线 8，替换「已定 3」（每个人连接自己的 GitHub）。本文完整替换旧版。审批部分接 [design-roles.zh.md](design-roles.zh.md) 留下的「团队电脑上受控操作只由管理员批准」。
 
 ## 1. 目标
 
 负责人原话（2026-11-12）：
 
-> 登录方面，每个人 onboard 时先登录一下自己的 GitHub，以后就用它，所以我们会保存所有人的 GitHub 凭证。
+> 对于跑在vps的负责开发的bot就给它一个独立身份, 所有人跟他对话他都是用这个独立身份
 
-起因（2026-11-10）：
+此前他否掉了「自己注册一个 OAuth App」（#210 的设备码登录就是 OAuth App）。已定，不再讨论：
 
-> 假设有 10 个 bot，可能后面会有其他真人用，可能会有不同的 GitHub 登录凭证，这个要怎么保存呢？
+1. **个人电脑**：用电脑主人自己在这台电脑上的 gh / git 登录（daemon 现在的 `machine` 模式）。
+2. **团队电脑**（VPS）：管理员在主机上用一个机器账号登录一次；这台电脑上的每个 AI 成员替任何人做事都用它。虚拟机里的 git 和 gh 通过 daemon 的凭证助手和 gh 包装拿主机的登录，虚拟机里不存。
+3. 提交记在 AI 成员名下；PR 正文写明谁交代的。
+4. 产品不再保存任何人的 GitHub 凭证：撤掉或关掉 #210、#233、#238 加的东西和 #214 里「向服务器取令牌」的一半；daemon 的助手和包装保留，令牌改从电脑自己的登录取。
+5. 团队电脑上的受控操作（合并到 main、发布到生产、改生产配置、删除数据、对外发布）由管理员批准，交代人不能批；个人电脑上由电脑主人批准。批准人算法、谁能点卡片、「谁来批准」设置一起改。
+6. 验收例子：实习生 @ 开发用的 AI 成员改一个他在 GitHub 上没权限的仓库；AI 成员用机器账号干完、开 PR，合并到 main 时停下等管理员。
 
-团队级的 GitHub App 已被否掉，因为产品也有一个人单独用的场景。
+约束：一个人用自己的电脑不多出任何只有团队才要的步骤；只求能用；协议只做加法；任务读不到的密钥不进日志；界面文字简体中文、取自文案目录、叫「电脑」。
 
-这一版要做到：
+## 2. 现状（origin/main，716cd316）
 
-1. 每个人上手时在应用里连接一次自己的 GitHub，产品保存凭证。
-2. 一个人交代的任务（含转交、分出去、接力、重试）在 GitHub 上用他的身份拉代码、推代码、开 PR。
-3. 没连接的人交代了要用 GitHub 的事，AI 成员当场说清楚，他点一下就能连上；连上后任务自己接着做，不用他再说一遍。
+**服务端按人存 GitHub（#210、#233）**
+- `server/src/github/`：设备码登录 `routes.ts:48-190`；令牌加密存 D1（`store.ts:52`，迁移 `0017_github_accounts.sql`）；`loadAccount` 直接 `SELECT * FROM github_accounts`，没有 catch（`store.ts:39-40`）；`features.ts:28` 注册。
+- 派工：`bots/desk/runs.ts:874` 调 `githubFor`（`github/assign.ts:105`），团队电脑和虚拟机走 `app`（交代人的令牌）；`committerOf` 在 `assign.ts:87`，`authorOf` 用人的 GitHub 身份（:92）。`runs.ts:893` 写 `bot_runs.github_member_id`。
+- 机器路由 `github/machine.ts`（发令牌、`/wait`、`/rejected`）；等人连接 `bots/desk/github.ts`（meta `github_wait:`/`github_resume:`），`events.ts:576,706-718` 把已结束的运行的话题置 blocked 且 waitingOn=[那个人]，`stall.ts:381`。
+- 部署顺序：`scripts/deploy-server.sh:112-117` 先 `d1 migrations apply`，再 `wrangler deploy`。
 
-上手时的「以后再说」是本设计有意留的软化，不是负责人的话：理由是已定的「一个人用不多一步」，他在自己的电脑上不连也能照今天的样子用。
+**daemon（#214）**：`apps/daemon/src/github.rs` 的 `app` 模式设 `!chat-run git-credential` 和 gh 包装（`/opt/runner/bin/gh`），每用一次 `Run::fetch`（:258）问服务器要令牌并加进脱敏表；`run.rs:165,221` 自己克隆时放 HTTP 头；`run.rs:546` `clear_home`。`daemon.rs:632` 报 `runsIn`。VM 主机的 daemon 以 `runner` 用户运行（`scripts/runner/host-setup.sh:8,64`），主机没装 gh，基础镜像装了。脱敏覆盖 `gh[pousr]_`、`github_pat_`（`redact.rs:41-42`）。
 
-## 2. 现状
+**桌面端（#238）**：`views/settings/github.rs`（`machine_hint` :467，被 `views/settings/machines.rs:379` 用）、`views/github_banner.rs`（`app.rs:916`）、`provider/github.rs`、`data/github.rs`、`fake/github.rs`、`crates/chat-core/src/github.rs`、`prefs.rs:44 github_prompted`、`copy/settings.rs` 的 `GITHUB_*`、`docs/PRODUCT.md:87-90`。电脑列表的 `MachineInfo.github` 只是「daemon 有没有 github feature」（`provider/settings.rs:244`，读 owners-only 的 `features`）。
 
-- 产品不管 GitHub 身份。只有 `apps/daemon/src/config.rs:409` 的 `env_passthrough` 示例（`GITHUB_TOKEN`）和脱敏规则 `apps/daemon/src/redact.rs:41`（`gh[pousr]_[A-Za-z0-9]{30,}`）。
-- 本机执行（Mac、Windows、不开虚拟机的 Linux）：CLI 就是电脑主人这个系统用户，用电脑上现成的 `gh`、SSH key、`~/.gitconfig`（`docs/machine-protocol.md:828`）。
-- Linux 虚拟机：每个 AI 成员一个长期家目录（`apps/daemon/src/executor/firecracker.rs:377`），`docs/machine-protocol.md:816` 写明 `gh auth login` 的结果下次还在。谁输了验证码，之后这个成员所有任务都用谁（机 4.1）；令牌明文在 `~/.config/gh/hosts.yml`，任务能读写。虚拟机里 PATH 被换成 `GUEST_PATH`（`firecracker.rs:29`，`/opt/runner/bin` 打头），`SSH_AUTH_SOCK` 被去掉（`firecracker.rs:143`）。
-- 镜像没设 git 的 user.name/email（`scripts/runner/base-image/Dockerfile:34-38`），第一次提交就报错（机 4.5）。
-- daemon 自己在 CLI 启动前克隆和 fetch 裸镜像 `<work_root>/repos/`，再 `git worktree add`（`docs/machine-protocol.md:788-793`），用的是电脑用户自己的 git 凭证。
-- 已有密钥通道：App 把密钥封给电脑公钥（`apps/daemon/src/accounts.rs:1-14`），服务器只转发密文（`server/src/monitor/accounts.ts:1-4`），电脑存 `secrets.json`；只有 owner 能操作，按电脑存。
-- 服务器已有加密存储：`server/src/integrations/secrets.ts:37` `encryptSecret`（AES-GCM，Worker secret `HOOK_SECRET_KEY`），没配时抛 `hooks are not configured`（`secrets.ts:31`）。AI 服务的 key 也用它（`server/src/aiservice/store.ts:40`）。`docs/INSTALL*.md` 没提这个 secret，只有 `docs/ENVIRONMENTS.md:91,113` 和 RUNBOOK 提。
-- 「谁交代的」：desk DO 的 `runs.requested_by`（`server/src/bots/desk/runs.ts:82`）；转交、分出去沿用最初交代人（`server/src/bots/desk/delegate.ts:70,97,181`）；重试复用原请求。私密卡片的作答人对外是 `anonymous`（`server/src/cards2/privacy.ts:21,72`），但 desk 拿得到真作答人 `claim.askerId`（`runs.ts:376-382`）。集成事件的 hook 记着 `hooks.created_by`（`server/migrations/0003_integrations.sql:12`）；AI 成员是谁加的记在 `members.created_by`（`0001_core.sql:11`）。
-- desk DO 的 `runs.ended_at` 是运行是否结束的唯一准数（`server/src/bots/desk/core.ts:48,124` `ACTIVE`，`takeover.ts:38` 已这样用）。D1 的 `bot_runs`（`0003_bots.sql:29-36`）只是索引，记 `machine_id`。
-- 跟进：运行结束后还有人的输入，desk 起一条 `follow_up_of` 的新运行（`core.ts:704` `start(m, followUpOf, ...)`，深度上限 `events.ts:386`）。
-- `run.assign` 原样存进 MachineLink 的 SQLite 用于重发（`server/src/bots/link.ts:175`），不能放令牌。
-- 电脑用机器令牌走 HTTPS 已有先例：`PUT /v1/machine/runs/:id/session`（`server/src/bots/routes.ts:261-266`，先查 `bot_runs.machine_id`）。
-- `chat-run` 是 daemon 程序本身按名字分流；`<运行目录>/bin` 放在 PATH 最前（`chat_run.rs:296` `install_link`）。秘密操作 `secrets::OP` 在 daemon 本地处理、不上传（`chat_run.rs:644`），其他操作都作为运行事件 `output` 上传等服务器（`chat_run.rs:1-7`）。Codex 走文件通道，答案写成工作目录里 mode 600 的 `<id>.res`，`chat-run` 读完即删（`chat_run.rs:13-19`）。客户端等待上限 15 s + 5 s（`chat_run.rs:44,1515-1521`）。
-- 每次运行在开始时克隆一份 redactor（`apps/daemon/src/run.rs:148,249,319,462`）；`secret.set` 换的是全局 Arc（`daemon.rs:1005-1017`），进行中的运行看不到新值。
-- `github_logins`（`0003_integrations.sql:19-24`）：登录名小写，`updated_at NOT NULL`，owner 手工维护，用来把 PR 卡片对上人。
+**审批**
+- `approvalKind`（`desk/core.ts:880`）：开着的审批属于哪类受控操作（`GATE_KINDS`，`packages/protocol/src/settings.ts:118`），普通的「先问一下」没有类别，返回 null。
+- 通知谁：`core.ts:937 approversOrRequester`，按团队规则 `approver`/每类批准人；规则是 owners 而群里没有管理员就退回交代人，卡片写 `approvalNoOwner`（`dispatch.ts:110`，`events.ts:359`）。话题的 waitingOn 也用它（`events.ts:123 approvers`）。
+- 谁能批：`input.ts:153 mayApprove`：个人电脑上主人和 `requested_for`/`requested_by`；团队电脑上管理员，规则不是 owners 时交代人也行。卡片 `input.ts:299 cardAction`、文字 `input.ts:207`，都经 `approverOfOpen`（`core.ts:972`）。
+- 告诉 CLI 找谁：`settings/rules.ts:234 policyPrompt`（`who()` :239）。
+- 桌面：设置 › 默认规则的「谁来批准」（`views/settings/members.rs:706-752`，`copy/settings.rs:319-321`），成员页说明 `members_page/mod.rs:1597`。
+- 测试：`server/test/gates.test.ts`、`server/test/settings.test.ts`。
+
+**可以直接用的**：电脑提醒 `server/src/monitor/alerts.ts`（`AlertKind` 只在 :23，不是协议类型；`notifyAlert` :151 在 AI 成员和管理者的私聊里发并 @；团队电脑通知管理员，个人电脑通知主人）；`heartbeatAlerts`（`bots/link.ts:508`）；电脑列表 `bots/store.ts:99-112` 从 `linkStub.status()` 拼 `Machine`（`packages/protocol/src/bots.ts:383`）。
 
 ## 3. 设计
 
-### 3.1 关键决定
+### 3.1 一条规则：用电脑自己的登录
 
-| 决定 | 选择 | 理由 |
+服务端不再决定用谁的 GitHub，只告诉 daemon「谁交代的」和「提交写谁」。
+
+| 运行方式 | git 和 gh 用什么 | 谁登录 |
 | --- | --- | --- |
-| 登录方式 | 唯一主路径：GitHub OAuth App 设备码登录，服务器发起和轮询，应用只显示验证码 | Mac、Windows 同一套代码；应用不经手令牌；团队主机也能用。 |
-| 导入现成 `gh` 登录 | 不做 | 只对本机成立；令牌属于 gh 的 App，`gh auth logout` 就失效。 |
-| 粘贴令牌 | 不做 | 要自己生成 PAT、懂 scope，多一步多一个概念。 |
-| OAuth App 还是 GitHub App | OAuth App | 权限等于这个人自己的权限，不用在仓库上装 App（负责人已否掉安装步骤）；令牌不过期，不用做刷新。 |
-| client id 从哪来 | 默认 `product.json` 的 `githubClientId`（产品公开的 OAuth App，开 Device Flow）；Worker 变量 `GITHUB_CLIENT_ID` 覆盖 | 设备码流程只要公开 client id，不要 secret，自己部署的人不用多注册。代价：授权页显示的是产品账号，组织批准一次对所有部署有效，产品账号理论上能整体吊销；改名的 fork 或不想依赖产品账号的人自己建 App 填变量（G6 写清楚）。 |
-| 权限范围 | `repo read:org workflow` | 推代码、开 PR、常用 `gh` 命令；`workflow` 用于改 `.github/workflows`。 |
-| 存在哪 | 服务器 D1，AES-GCM 加密，AAD `github:<memberId>`，密钥沿用 `HOOK_SECRET_KEY` | 见下段比较。 |
-| 怎么交给任务 | 不进 `run.assign`、不进 CLI 环境变量。git 凭证助手和 `gh` 代理用到时向 daemon 要，daemon 每次都用机器令牌向服务器取，不缓存 | 帧会落盘；环境变量会被打印和继承；不缓存则断开立刻生效，不需要「忘掉令牌」帧。 |
-| 没连接时 | 助手立刻失败，不在助手里等；运行以「在等人连 GitHub」结束；他连上后服务器自动起跟进 | CLI 的 shell 工具 2 分钟就杀进程（`machine-protocol.md:386`），`chat-run` 客户端也只等 20 s，原地等做不成。 |
-| 署名 | 作者是人，提交者是 AI 成员 | 贡献算在人身上；GitHub 显示「X authored，{成员} committed」；只靠环境变量，不改仓库、不写钩子。 |
+| 直接在电脑上（`runsIn: "host"`：Mac、Windows、没开虚拟机的 Linux） | 这个系统用户本来的 gh、git 凭证、SSH key，和今天一样，daemon 什么都不碰 | 个人电脑：主人。团队电脑：管理员用机器账号登录这个系统用户 |
+| 虚拟机里（`runsIn: "vm"`） | 每用一次，经 daemon 取主机上 **daemon 所在用户（`runner`）** 的 `gh auth token` | 不论个人还是团队，都是有主机 root 的人以 `runner` 用户登录一次 |
 
-**为什么存在服务器，不封给每台电脑**：封给电脑时，令牌在人的应用里，应用要给每台有资格的电脑各封一份；新加电脑要等他打开应用；接力、重试、集成事件常在人不在线时发生；失效检测也没地方做。存在服务器的代价是服务器运营者能解密；但团队里运营者就是管理员，管理员本来就管着团队主机，令牌运行时总要到那台主机上，封给电脑挡不住他；一个人用时服务器就是他自己的。AI 服务的 key 已经这样存（已定 2），负责人原话也是「我们会保存」。
+个人电脑和团队电脑同一套代码。一个人在 Mac 上用，什么都不用做，也看不到任何 GitHub 设置。
 
-### 3.2 一个任务用谁的身份（身份人）
+### 3.2 服务端发给 daemon（`run.assign.github`）
 
-服务器派活时按顺序算，第一条命中就用：
+`githubFor`（`github/assign.ts`）改成同步拼装，不查账号：
+- `source` 一律 `"machine"`，不再发 `"app"`、`login`、`rewriteSsh`。
+- `memberId`：按现有 `identityPerson`（`assign.ts:39`）。
+- `committer` 和 `author` 都填 `committerOf(botId, botName)`（`ai-<botId>@users.noreply.invalid`）；旧 daemon 拿到 `author` 就设 `GIT_AUTHOR_*`（`github.rs:113-116`），不用改 daemon。
+- 新可选字段 `askedBy?: string`（≤100 字）：交代人在团队里的显示名；匿名的私密卡片作答运行（`requested_by = anonymous`）不发。
+- 下发条件不变（`runs.ts:874`）。`bot_runs.github_member_id` 不再写。
 
-1. 有真人交代（运行的 `requested_for`，即协议的 `BotRun.requestedFor`，规则见 design-roles 3.3）：用他。私密卡片作答等 `requested_by` 为 `anonymous` 的，`requested_for` 是真作答人，不落到第 3 条。（G3 实现时更正：`claim.askerId` 只是单独问私聊里的提问人；私密卡片的真作答人只在房间里，房间把它作为 `CardAnswerIn.voterId` 交给 desk，只用于 `requested_for`，不进运行、提示和线上字段。）转交、分出去、接力沿用最初交代人，重试复用原请求，都由 `requested_for` 带过去，走这条。
-2. 集成事件（交代人是 hook 对应的成员）：用 `hooks.created_by`。（G3 实现时注：今天 hook 的消息不会让 AI 成员开工——AI 成员和 hook 的消息都不进 desk——所以这条按「`requested_by` 是某个 hook 的成员」来认，等以后有这条路时自然生效。）
-3. 没有人交代（定时、AI 成员自己起的）：用这个 AI 成员的 `members.created_by`。
+### 3.3 daemon：虚拟机里用主机的登录（新 feature `github-host`）
 
-算出的人已被移出团队（`members.deactivated = 1`）时，改用团队里最早的在用的人类管理员（`level = 'owner'` 且 `kind = 'human'`；design-roles 里 `level='owner'` 就是管理员，含所有者，所以合并前后是同一条查询）。理由：没人负责的事落给还在的负责人，不 @ 已经走了的人。
+- `Run::fetch()` 改为在主机上以 daemon 自己的用户执行 `gh auth token --hostname github.com`（daemon 的环境，10 秒超时）：成功得 `Token` 并加进本次脱敏表；找不到 gh → `Missing("no_gh")`；没登录 → `Missing("signed_out")`；其他 → `Failed`。每用一次取一次，不缓存、不落盘、不进 CLI 环境变量、不作为事件上报。
+- 何时装助手：只看 `cfg.vm.is_some()`。虚拟机里的运行设 `!chat-run git-credential`、gh 包装、`CHAT_GITHUB_AS`（机器账号 login，取不到写 `this computer`），SSH 地址固定改写成 HTTPS。直接在电脑上跑：和今天 `machine` 模式一样。收到 `"app"` 当 `"machine"`。
+- daemon 自己的克隆和 fetch（`run.rs:165,221`）：虚拟机模式用同一个 `fetch()` 放 HTTP 头；直接在电脑上用电脑的 git。
+- 取不到令牌：每次运行只发一次运行事件 `{ type: "github", state: "missing", reason: "no_gh" | "signed_out" }`（`reason` 新可选字段）；助手对 git 返回 `quit=1`，给 CLI 的话：`This computer is not signed in to GitHub. Stop and report it; do not try to sign in.` 推送认证失败（`erase`）发一次 `state: "invalid"`，并马上重查状态。删掉 `/wait`、`/rejected` 调用。
+- gh 包装多拒绝 `auth token`、`auth status --show-token`/`-t`（已拒 `login|logout|refresh|setup-git`）。
+- 系统说明（`github::note`，`run.rs:724`）：提交人是谁；虚拟机里加「git 和 gh 以这台电脑的 GitHub 账号工作，不要登录」；有 `askedBy` 时加 `When you open a pull request, end its body with the line "交代人：{askedBy}".`
+- 心跳 `metrics.github?: { state: "signed_in" | "signed_out" | "no_gh" | "unknown", login? }`：`gh auth status --hostname github.com` 的退出码，login 用 `gh api user --jq .login`；启动时、每 10 分钟、遇到 `invalid` 时查。两种运行方式都报（服务端决定给谁看）。
+- `hello.features` 加 `github-host`。`clear_home` 保留，等 B 部分删家目录镜像时一起删。
 
-跟进是新运行，按新消息的作者重新算：A 等着连 GitHub 时 B 说「继续」，这次就用 B。这是有意的：谁说话谁负责。
+### 3.4 服务端：撤掉按人存的 GitHub
 
-**电脑分两类模式**：
+- 删除 `server/src/github/{api,routes,store,hooks,machine}.ts`、`bots/desk/github.ts`、`core.ts:1140-1146 githubWaitingOn`、`events.ts` 的 `resumeAfterGithub`/`githubFor` 分支（:576、:706-718）、`stall.ts:381`。`external.ts:56` 直接继承 `DeskInteract`。
+- 兼容桩（`server/src/github/index.ts`）：`GET /v1/me/github` → `{ available: false, unavailableReason: "off", waits: [] }`；`POST …/device`、`…/poll` → `conflict`（`github.off`）；`DELETE` → `{ ok: true }`；不再推 `github.status`；`/v1/machine/runs/:id/github*` 不注册（404，旧 daemon 只在 `app` 模式调）。
+- D1 迁移 `server/migrations/0019_github_off.sql` **只删行不删表**：`DELETE FROM github_device; DELETE FROM github_waits; DELETE FROM github_accounts;`。理由：部署脚本先迁移后发 Worker，间隙里旧 Worker 还在查这些表；回滚到旧版也要能跑。表在下一个版本的迁移 `00NN_github_drop.sql` 里 `DROP TABLE`（间隙里旧 Worker 新写的等待行随之删掉，里面没有密钥）。
+- desk DO 命名迁移 `github-off-1`：把 `github_wait:%`、`github_resume:%` 里的 runId 存进 meta `github_off_pending`（JSON 数组），再删这些键。DO 下次 `bind(botId)` 后异步跑 `clearGithubWaits()`：对每个 runId 读出运行，`this.topic(r, r.status === "done" ? "done" : "failed", [], { outcome: r.status, result: r.summary ?? "" })`，清掉话题上「等某人连接 GitHub」的 blocked；做完删键。
+- `product.json` 删 `githubClientId`。
+- 运行事件 `github`（`desk/events.ts` 新 case），`missing`/`invalid` 每次运行在话题里只说一次（消息 id `run:<id>:github`），不 @ 人、不置 blocked，运行照「失败归类」结束。文案在 `server/src/github/text.ts`：
+  - 团队电脑：`这台电脑还没有登录 GitHub，推不了代码。已通知管理员，登录好后再 @我。`（invalid：`这台电脑的 GitHub 登录失效了。已通知管理员，重新登录后再 @我。`），并调 `linkStub(env, machineId).githubMissing(reason)`（见 3.6）。
+  - 个人电脑（只会是 Linux 虚拟机主机）：`这台电脑还没有登录 GitHub，推不了代码。请电脑主人 {owner} 在电脑上登录后再 @我。` 不发提醒。
 
-| 电脑 | 身份人已连 | 没连 |
-| --- | --- | --- |
-| 身份人自己的个人电脑，且本机执行（不开虚拟机） | `app`，作者用他本机 gitconfig | `machine`：电脑上现成的 gh、SSH、gitconfig（就是他自己，和今天一样） |
-| 别人的个人电脑（只会因规则 2、3 发生），本机执行 | `machine` | `machine` |
-| 团队电脑，或任何虚拟机执行 | `app` | `app`：没连，用到时请他连 |
+### 3.5 审批：受控操作按电脑定批准人
 
-「个人电脑」「团队电脑」按 [design-roles.zh.md](design-roles.zh.md) 的电脑归属字段。G3 实现时归属字段已在 main 上：`machines.owner_id`（`MachineView.ownerId`）等于身份人是他自己的个人电脑，是别人就是别人的个人电脑，为空是团队电脑。虚拟机执行永远走 `app`：虚拟机里没有主人的 SSH，家目录里只有以前借来的登录，正是机 4.1。电脑是否虚拟机执行由 daemon 在 `hello.machine.runsIn` 里报（见 3.5）；旧 daemon 没报的不发 `github`，行为不变。
+只改**受控操作**（`approvalKind(r)` 属于 `GATE_KINDS`）。没有类别的普通审批完全照旧（`approversOrRequester`、`mayApprove` 现在的逻辑、`approver` 设置）。
 
-### 3.3 数据和存储（D1）
+新函数 `approversFor(r, kind)`（`desk/core.ts`）：kind 为 null 时返回 `approversOrRequester(r, kind)`；否则按电脑（`machineOwnerOf`，`input.ts:168`）：
 
-G2 的迁移 `server/migrations/0017_github_accounts.sql`：
+| 电脑 | 通知谁（mentions、话题 waitingOn） | 谁能点卡片、回「同意」 | 群里没有这个人时 |
+| --- | --- | --- | --- |
+| 团队电脑（`owner_id` 为空或电脑已删） | 群里在职的真人管理员（≤20） | 群里在职的真人管理员；交代人不行，除非他是管理员 | 卡片加 `approvalNoAdmin`，@ 交代人；没人能批，直到管理员进群 |
+| 个人电脑 | 电脑主人 | 只有电脑主人 | 卡片加 `approvalNoMachineOwner`，@ 交代人；同上 |
 
-```sql
-CREATE TABLE github_accounts (
-  member_id TEXT PRIMARY KEY REFERENCES members(id),
-  github_user_id INTEGER NOT NULL UNIQUE,  -- 一个 GitHub 账号只连一个成员
-  login TEXT NOT NULL,
-  name TEXT,                               -- GitHub 资料名，空则用 login
-  token_enc TEXT NOT NULL,                 -- v1.<iv>.<ct>，AAD = 'github:' || member_id
-  scopes TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('ok', 'invalid')),
-  connected_at INTEGER NOT NULL,
-  checked_at INTEGER NOT NULL
-);
-CREATE TABLE github_device (               -- 进行中的设备码登录，15 分钟过期
-  id TEXT PRIMARY KEY, member_id TEXT NOT NULL,
-  device_enc TEXT NOT NULL,                -- 加密的 device_code，AAD = 'github-device:' || id
-  interval_s INTEGER NOT NULL, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL
-);
-```
+- 文案（`dispatch.ts` 的 `TEXT`，替换 `approvalNoOwner` 用于受控操作的那条路）：`approvalNoAdmin = "这类操作要管理员批准，可这个群里没有管理员。请把一位管理员拉进群来批准。"`；`approvalNoMachineOwner = "这类操作要这台电脑的主人批准，可他不在这个群里。请把他拉进群来批准。"`。卡片 meta 记 `noApprover: true`（不再为受控操作记 `noOwner`）。运行一直等，等待不计时限（现有规则）。
+- 批准人必须在群里：卡片只有群成员能看、能按（`cardAction` 从群房间来），按可见范围（A 部分）群外的人看不到这个群。所以不发到群外管理员的私聊，这一版要求管理员进群（第 8 节）。
+- `mayApprove(r, actorId, kind, level, approver, machineOwner, gated)` 加 `gated`：`gated` 时只看上表；否则原逻辑不变。
+- 改调用处：`core.ts approvers()`（`events.ts:123` 话题 waitingOn）、`events.ts:359` 发卡片、`input.ts:207` 文字批准、`input.ts:299 cardAction`、「这件事里都同意」。`approverOfOpen` 只给普通审批用。
+- `policyPrompt(p, gated, gateWho: "admin" | "owner")`：受控操作那几行写 `a team admin` 或 `the owner of this computer`；`runs.ts:723` 按电脑传。花费等其他行仍用 `who()`。
+- 团队规则：每类批准人 `approvers` 读写照旧，不再生效；`approver` 只管普通审批。
+- 桌面：「谁来批准」下拉保留，标签改 `RULES_APPROVER = "其他要确认的事谁来批准"`；它上面加一行只读说明 `RULES_GATED_NOTE = "上面这几件事：团队的电脑上由管理员批准，个人的电脑上由电脑主人批准。"`。成员页 `members_page/mod.rs:1597` 的说明同步。一个人用：他既是管理员又是主人，界面上只多一行说明。
 
-G3 的迁移 `server/migrations/0017_github_runs.sql`（同号允许，见 AGENTS）：
+### 3.6 电脑的 GitHub 状态和提醒
 
-```sql
-ALTER TABLE bot_runs ADD COLUMN github_member_id TEXT;  -- 派活时算出的身份人
-CREATE TABLE github_waits (                             -- 在等某人连 GitHub 的运行
-  run_id TEXT PRIMARY KEY, member_id TEXT NOT NULL,
-  group_id TEXT NOT NULL, topic_id TEXT NOT NULL, bot_id TEXT NOT NULL,
-  reason TEXT NOT NULL CHECK (reason IN ('not_connected', 'invalid')),
-  created_at INTEGER NOT NULL
-);
-CREATE INDEX github_waits_member ON github_waits(member_id);
-```
+- **服务端存值**：`MachineLink` 每次心跳把 `metrics.github` 存 meta `github`（`bots/link.ts`），`status()` 带出去。
+- **电脑列表**（`Machine.github?: MachineGithub`，`packages/protocol/src/bots.ts:383`；`bots/store.ts:99-112` 填）：只发给管理员和这台电脑的主人；`runsIn: "vm"` 时任何状态都发，`"host"` 时只在 `signed_in` 时发（主机模式下 git 可能用 SSH 或钥匙串，没登录 gh 不代表推不了）。
+- **监控**（`MachineMonitor.github?` 和 `runsIn?`，`packages/protocol/src/monitor.ts:119`，管理员看）：原样转发。
+- **提醒**（`server/src/monitor/alerts.ts`）：`AlertKind` 加 `"github"`，key `github`，只对 `runsIn: "vm"` 的电脑。开始：心跳从 `signed_in` 变成 `signed_out`/`no_gh`；或团队电脑上 desk 调了 `githubMissing()` 而当前没有这条提醒（第一天管理员还没登录的情况）。结束：心跳 `signed_in`，或电脑不再报这一项。每台电脑同时只有一条（现有 key 去重）。通知谁照旧（团队→管理员，个人→主人）。文案 `ALERT_TEXT`：
+  - 标题 `githubTitle(machine) = "{machine} 没有登录 GitHub"`；
+  - 正文给管理员：`AI 成员在这台电脑上推代码、开 PR 要用它。请到 团队管理 › 电脑，选 {machine}，照说明在电脑上登录。`；给个人电脑主人：`AI 成员在这台电脑上推代码、开 PR 要用它。请在这台电脑上为运行 AI 成员的系统账户登录 GitHub。`
 
-- 连接成功时写对照表：`INSERT INTO github_logins (login, member_id, updated_at) VALUES (lower(?), ?, ?) ON CONFLICT(login) DO NOTHING`。理由：owner 手工设的不被覆盖。断开不删。
-- 成员被停用时：core 已有 feature 钩子 `registerMemberDeactivated`（`server/src/core/registry.ts`，`deactivateMember` 之后由 `afterDeactivate` 调用），github 模块用它删他的 `github_accounts`、`github_device` 行；G3 用同一个钩子删自己的 `github_waits` 行。
-- 运行是否还活着不另加列，取令牌时问 desk DO（3.4）。
+### 3.7 桌面端
 
-### 3.4 服务端
+- 删除：`views/settings/github.rs`、`views/github_banner.rs`、`provider/github.rs`、`data/github.rs`、`fake/github.rs`、`crates/chat-core/src/github.rs` 和 `crates/chat-core/tests/github.rs`，`app.rs:916` 的安装，`account.rs` 的 GitHub 区块，`topic_page/mod.rs` 和 `selftest/*` 的相关场景，`copy/settings.rs` 的 `GITHUB_*`，只给横条用的 token。不再声明 `github/1`。`prefs.rs` 的 `github_prompted` 读到就忽略，不再写。
+- 设置 › 电脑（`views/settings/machines.rs:379`，`machine_hint` 换成读 `Machine.github`）：说明前加 `MACHINE_GITHUB_ON = "GitHub @{login}"` 或 `MACHINE_GITHUB_OFF = "未登录 GitHub"`（`signed_out`、`no_gh`、`unknown` 都是它）；没有字段不显示。`copy/settings.rs` 受目录测试约束（`copy/mod.rs:546` 禁 cli、token…），这里不出现命令、gh、runner。
+- 团队管理 › 电脑监控（`views/admin`，`copy/admin.rs:1` 标为开发者视图，允许命令）：一行「GitHub」：`已登录 @{login}` / `未登录` / `没装 gh`；未登录和没装时副文案：`runsIn: "vm"` 写 `在主机上运行 sudo -iu runner gh auth login`，`"host"` 写 `用运行 AI 成员的系统用户运行 gh auth login`。
+- 不提供在应用里登录 GitHub 的按钮。
 
-新目录 `server/src/github/`，`index.ts` 由 G2 建，暴露 `registerGithub()` 和一个空的 `machineRoutes` 注册点，G3 只往里追加。所有路由用 Zod 校验。外部地址 `GITHUB_BASE`（默认 `https://github.com`）和 `GITHUB_API_BASE`（默认 `https://api.github.com`）可由变量覆盖，供测试指向假 GitHub。
+### 3.8 主机和文档
 
-| 路由 | 鉴权 | 做什么 |
-| --- | --- | --- |
-| `GET /v1/me/github` | 成员 | `{ available, unavailableReason?, account?: { login, name?, status, connectedAt }, waits: { runId, groupId, topicId, botId, reason }[] }` |
-| `POST /v1/me/github/device` | 成员 | 调 `login/device/code`，存 device 行，回 `{ deviceId, userCode, verificationUri, interval, expiresAt }` |
-| `POST /v1/me/github/device/:id/poll` | 本人 | 调 `login/oauth/access_token`，回 `{ state: "pending" \| "slow_down" \| "done" \| "expired" \| "denied" \| "taken", account? }`。done：`GET /user` 取 id/login/name，加密保存，删 device 行，写对照表，给本人会话推 `github.status`，然后恢复他所有的等待（见下）。 |
-| `DELETE /v1/me/github` | 本人 | 删行，推 `github.status`（无 account）。 |
-| `GET /v1/machine/runs/:id/github` | 机器令牌 | 取令牌，检查见下。 |
-| `POST /v1/machine/runs/:id/github/wait` | 机器令牌 | daemon 报「要用但没连/失效」，body `{ reason }`。 |
-| `POST /v1/machine/runs/:id/github/rejected` | 机器令牌 | git 报认证失败后重新验一次令牌。 |
-
-- `available`：`client id` 和 `HOOK_SECRET_KEY` 都有才为 true。缺哪个，`unavailableReason` 给 `no_client_id` 或 `no_secret_key`（github 模块自己检查，不把 `hooks are not configured` 透出去）。
-- `GET .../github` 依次检查：`bot_runs.machine_id` 是这台电脑；`github_member_id` 非空；向 desk DO 取这次运行（现成的 `getRun`，不另加 `run.live`），确认 `ended_at IS NULL` 且 DO 里的 `machine_id` 也是这台电脑（任何结束路径——完成、取消、超时、租约丢失、转到别的电脑、`external.ts:277`——都落到 DO 的 `ended_at` 或换 `machine_id`，所以只查这一处）；电脑对此人有资格（3.2 表格不是 `machine` 的那几格）；此人已连且 `status = 'ok'`。
-  - 通过：`{ token, login }`。没连：404（`not_found`）`github.not_connected`。失效：409（`conflict`）`github.invalid`（`ErrorCode` 是封闭的，没有对应 410 的值，所以用 `conflict`）。没资格或运行已结束：403（`forbidden`）`github.not_allowed`。
-  - 每次发放写审计 `github.token.issue`（runId、machineId、memberId，不记值）。
-- `/wait`：`INSERT INTO github_waits ... ON CONFLICT(run_id) DO NOTHING`，只有真插入了一行才动作，所以每次运行只处理一次且不怕并发：
-  - 由这个 AI 成员在话题里发一条普通消息 @ 身份人：没连时「@{名字} 这一步要用你的 GitHub。连接 GitHub 后我会自己接着做。」；失效时「@{名字} 你的 GitHub 连接失效了，重新连接后我会自己接着做。」
-  - 不另发事件；@ 本身带系统通知。
-- **恢复**：此人连接成功时，对他每条 `github_waits` 先删行（删到才动作，并发只恢复一次），再调 desk DO 新 RPC `githubResume(runId, memberId)`。desk 以那次运行为 `follow_up_of` 起一条跟进，交代人沿用原运行，提示里写「{名字} 已连接 GitHub，从停下的地方接着做」。原运行还没结束（AI 成员还在汇报）就等它结束再起，和现有「运行结束后有剩余输入」同一条路（`events.ts:386` 的深度上限照样生效）。等待的运行若已被别人跟进过（话题里之后有了这个成员的新运行；群聊区里有它的跟进或重试），不重复起；这个成员在话题里起新运行时，同一话题里它之前的等待行一并删掉，横幅随之消失。等待中的运行结束时话题标「blocked」、`waitingOn` 是身份人，不标完成；「只承诺没做」的自动继续在等待时不起。`/wait` 时此人其实已连上，就不 @，直接记下运行结束后恢复。
-- `/rejected`：用 `GET /user` 验一次；401 就标 `invalid` 并推 `github.status`。只在这里验，不做定时检查（OAuth App 令牌不过期）。
-- 派活：`server/src/bots/desk/runs.ts` 的 `assign()` 里调用 `githubFor(env, { requestedFor, requestedBy, botId }, machine)`（新文件 `server/src/github/assign.ts`；它要查 D1，是异步的，所以不放在同步的 `assignFrame` 里）。单独问的只读运行不带。只在电脑报了 `github` 功能时填 `frame.github`，并写 `bot_runs.github_member_id`。
-- 令牌不进 `run.assign`、DO 存储、运行事件、日志、审计详情。
-
-### 3.5 协议（只加不改）
-
-`docs/protocol.md`、`packages/protocol`、`crates/chat-protocol`、`protocol/fixtures` 同一提交改。
-
-成员客户端：
-
-```ts
-GithubAccount = { login, name?, status: "ok" | "invalid", connectedAt }
-// 新的临时事件（TransientEvent），只推给本人那些 hello.features 带 "github/1" 的连接；没有 account 表示已断开
-{ type: "github.status", account?: GithubAccount }
-```
-
-G1 已确认：Rust 的 `TransientEvent` 遇到不认识的 `type` 会解析失败（`protocol/fixtures/transient/unknown-type.json` 锁着），所以 `github.status` 只发给在 hello 里声明了 `github/1` 的连接（和 `digest` 只发给 `settings/1` 一样）；旧客户端收不到，靠 `GET /v1/me/github` 拿（应用回到前台和打开设置时取）。G5 在桌面端的 hello 里加 `github/1`。
-
-所有新的状态、原因、`runsIn`、`source` 在协议里都是开放字符串（Zod `z.string()`、Rust `String`，已知值导出成常量），新值不会让旧读者解析失败；下面写成联合只是列出已知值。
-
-电脑（`docs/machine-protocol.md`，新功能 `github`）：
-
-```ts
-hello.machine += { runsIn?: "host" | "vm" }   // 有 github 功能的 daemon 必报
-run.assign += { github?: RunGithub }           // 只发给报了 github 的 daemon
-RunGithub = {
-  source: "app" | "machine",
-  memberId: string,                            // 身份人
-  login?: string,                              // 已连时
-  author?: { name: string, email: string },    // 见 3.6「署名」；缺省表示用本机 gitconfig
-  committer: { name: string, email: string },  // 这个 AI 成员
-  rewriteSsh?: boolean                         // 团队电脑和虚拟机为 true
-}
-// RunEvent 新类型（过程视图里能看到）
-{ type: "github", state: "used" | "missing" | "invalid", login? }
-```
-
-### 3.6 daemon
-
-新文件 `apps/daemon/src/github.rs`；`daemon.rs:28` 的 `FEATURES` 加 `github`；hello 里报 `runsIn`。
-
-**署名**（`run.rs:98` `build_env` 末尾，`a.github` 有值时）：
-
-- 提交者：两种模式都设 `GIT_COMMITTER_NAME/EMAIL` 为 AI 成员（名字是显示名，邮箱 `ai-<memberId>@users.noreply.invalid`）。
-- 作者：`author` 有值才设 `GIT_AUTHOR_NAME/EMAIL`。服务器只在团队电脑和虚拟机上给：已连时是 GitHub 名字和 `<id>+<login>@users.noreply.github.com`；没连时是他的成员显示名和 `<memberId>@users.noreply.invalid`（不然虚拟机里第一次提交就报错，机 4.5）。在自己的个人电脑上不给，沿用本机 gitconfig，公司邮箱这类要求不受影响。
-
-**凭证（`app` 模式）**，都用命令行级 `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n`：
-
-- `credential.https://github.com.helper` = 空串（清掉系统、全局里的助手，包括 Git for Windows 的 `credential.helper=manager`，只对 github.com）。
-- 再加 `credential.https://github.com.helper` = `!chat-run git-credential`。
-- `rewriteSsh` 时加 `url.https://github.com/.insteadOf` = `git@github.com:` 和 `ssh://git@github.com/`，并去掉 `SSH_AUTH_SOCK`。
-- 不把令牌放进任何环境变量。
-
-**daemon 自己的 git**：镜像克隆、fetch、`git worktree add` 在 `app` 模式下用同一套环境（清掉 github.com 的助手、`rewriteSsh` 的改写），令牌由 daemon 进程内直接取（不经 socket），只作为这几条 git 子进程的 `http.https://github.com/.extraHeader`（`GIT_CONFIG_*`，不进镜像配置、不进 CLI 环境）；这时 CLI 还没启动。取不到（没连或失效）时不带凭证试一次，公开仓库照常；私有仓库失败就报 `/wait`，运行以等待结束（发 `github` 事件 `missing`），不启动 CLI。镜像按仓库地址在一台电脑上共用，不按人分：B 的运行能读到 A 的令牌 fetch 下来的分支。这一版接受，写进第 5 节。
-
-**`gh` 代理**（`app` 模式）：
-
-- 本机：`install_link`（`chat_run.rs:296`）在 `bin/` 里多放一个指向 daemon 的 `gh`（Windows 上 `gh.exe`）。
-- 虚拟机：工具盘加 `/opt/runner/bin/gh` 指向 agent 程序（`firecracker.rs:4,87`），因为虚拟机里 PATH 是 `GUEST_PATH`，`bin/` 不在上面。工具盘由 daemon 自己做（`firecracker.rs` `stage_tools`），不是 `scripts/runner/` 的脚本。
-- 代理只在环境里有 `CHAT_GITHUB_AS`（`app` 模式才设，值是身份人的名字，不是秘密）时取令牌和拦 `gh auth login`；没有时原样运行真 gh，所以旧服务器、`machine` 模式下虚拟机里的 gh 行为不变。
-- 代理按启动名分流：向 daemon 要令牌，从 PATH 里跳过 `bin/` 和 `/opt/runner/bin` 找真 `gh`，带 `GH_TOKEN` 运行它，透传输入输出和退出码。真 gh 及它起的子进程（扩展、别名）会继承 `GH_TOKEN`，这一版接受。
-- `gh auth login|logout|refresh|setup-git` 直接拦下，输出 `GitHub sign-in is handled by the app for <name>; do not sign in here.`，退出码 1。
-- 没装 gh 就照原样报没装。
-
-**chat-run 新操作** `git-credential`、`github.token`：和 `secrets::OP` 一样在 daemon 的 `chat_run::handle` 里提前分支本地处理（`chat_run.rs:644` 旁边），绝不走 `outputs.add` 上传。每次调用都向服务器取一次，不缓存。
-
-- `git-credential get`：`host=github.com` 返回 `username=x-access-token`、`password=<令牌>`；别的 host 返回空。
-- `git-credential erase`：调 `/rejected`。
-- 404/409：发 `github` 事件 `missing`/`invalid`，调 `/wait`，立刻返回失败。助手在 stderr 写一行：`GitHub is not connected for <name> (they have been asked). Stop and report that you are waiting for them to connect GitHub.` git 随即报认证失败。
-- 文件通道（Codex）：答案照现有规则写 mode 600 的 `.res`，`chat-run` 读完即删；测试确认调用后没有 `.res` 留下。
-
-**脱敏**：每个运行的 redactor 改成可追加：`Redactor::for_run` 给运行一个 `Arc<RwLock<Vec<String>>>` 额外值列表，daemon 循环里这次运行的帧、`events.jsonl`、产出文件、会话上传（`run.rs:462`）的脱敏都读它；`stderr.log` 是 CLI 直接写的文件，运行结束后有追加值时整份过一遍脱敏重写；github 模块每取到一次令牌就追加。`redact.rs:41` 的规则继续兜底。chat-run 的操作日志只记 ok 或失败。
-
-**虚拟机家目录**：有 `github` 字段的运行开始前，在宿主机上删掉 `<homes>/<botId>/.config/gh/hosts.yml` 和 `.git-credentials`，并把家目录 `.gitconfig` 里 github.com 的 `credential.*helper` 和带令牌的 `url.*` 段删掉（`firecracker.rs:377` 附近）。日志只写 `removed an old GitHub sign-in`。所有虚拟机运行都走 `app`，所以这一步每次都做。
-
-**给 CLI 的系统说明**（英文，一行或两行）：
-
-> GitHub: git and gh act as <login> (<name>, who asked). Do not run gh auth login. If git says GitHub is not connected, stop and report that you are waiting for <name>. If GitHub refuses because of "OAuth App access restrictions", stop and report that an owner of that organization must approve the app at https://github.com/organizations/<org>/settings/oauth_application_policy.
-
-`machine` 模式：不装代理、不设助手，只设提交者。
-
-### 3.7 桌面端（Mac、Windows 同一套代码）
-
-- **连接 sheet**（新文件 `apps/desktop/src/views/settings/github.rs`，gpui-component 的 sheet、button、spinner）：大字等宽显示 8 位验证码，带「复制验证码」；「打开 GitHub」复制验证码并用浏览器打开 `verificationUri`。按 `interval` 轮询，成功显示「已连接为 @login」，1 秒后关。过期、取消、账号已被占用各一句，都带「再试一次」。底部一行小字提醒组织授权。
-- **设置 › 账号**（`views/settings/account.rs`）新增「GitHub」一组：未连接显示「连接…」；已连接显示 `@login` 和「断开…」（确认对话框，带去 GitHub 撤销的链接；断开失败时组里显示「没能断开 GitHub」和原因，带「重试」）；失效显示「需要重新连接」和「重新连接…」。`available` 为 false 时：owner/管理员看到「服务器还没配好，暂时不能连接 GitHub」，其他人不显示这一组。
-- **上手**：第一次登录成功后，`available` 为 true 且没连接，弹一次连接 sheet，带「以后再说」。每个账号每台设备只弹一次，记在本地偏好。
-- **话题横幅**：打开话题、收到 `github.status`、应用回到前台时取 `GET /v1/me/github`；`waits` 里有这个话题，就在话题顶部显示「{成员}在等你连接 GitHub」或「{成员}在等你重新连接 GitHub」，带「连接 GitHub」按钮，点了直接弹连接 sheet。连上后横幅消失，任务自己继续。
-- **电脑页**：daemon 没有 `github` 功能的电脑显示「这台电脑更新后，AI 成员才能用你连接的 GitHub」。只在本人已连接时显示（没连的人看不到任何 GitHub 字样）；服务器只给 owner 返回电脑的 `features`，所以普通成员看不到这句。
-- G5 实现时的更正：界面文案不能有「任务」（PRODUCT.md 的开发者用词），电脑页那句改成「AI 成员」；「未连接」是 COMPLETENESS §2.15 留给断网的词，账号页改成「还没连接」；轮询结果 `taken` 不带对方名字，所以那句改成「这个 GitHub 账号已经连在另一位成员上」。
-
-**新增界面文案**（`apps/desktop/src/copy/settings.rs` 新一段 `github`）：
-
-```text
-GitHub
-连接 GitHub
-连接…
-重新连接…
-断开…
-已连接为 @{login}
-还没连接
-需要重新连接
-AI 成员替你拉代码、推代码、开 PR 时用这个账号
-在 GitHub 页面输入这串验证码
-复制验证码
-已复制
-打开 GitHub
-正在准备验证码…
-正在等你在 GitHub 上确认…
-验证码过期了
-你在 GitHub 上取消了授权
-这个 GitHub 账号已经连在另一位成员上
-再试一次
-以后再说
-要用组织里的仓库，在 GitHub 授权页上给那个组织点「Grant」或「Request」
-断开 GitHub？
-断开后，AI 成员不能再用你的 GitHub。要彻底收回，到 GitHub 的设置里撤销授权。
-断开
-去 GitHub 撤销
-没能断开 GitHub
-服务器还没配好，暂时不能连接 GitHub
-{成员} 在等你连接 GitHub
-{成员} 在等你重新连接 GitHub
-连上后 {成员} 会自己接着做，不用再说一遍
-这台电脑更新后，AI 成员才能用你连接的 GitHub
-```
-
-没有新产品名词：GitHub 是专名，验证码是 GitHub 自己的说法，成员、电脑沿用现有用词。AI 成员在话题里发的两句 @ 消息放在服务端文案（`server/src/github/text.ts`），同样受用词约束。
-
-### 3.8 一个人用时
-
-- 自己部署的服务器、自己的 Mac：第一次登录弹一次「连接 GitHub」，不到 1 分钟。
-- 点「以后再说」：他的电脑是个人电脑、本机执行，走 `machine`，用他电脑上现成的 gh、SSH、gitconfig。和今天唯一的不同：提交者变成 AI 成员（作者还是他）。
-- 连了：作者照旧是他本机 gitconfig；推代码用保存的令牌，换一台自己的 Linux 主机（虚拟机执行）也能直接推，不用在虚拟机里再登录。
-- 只有一台 Linux 主机、用虚拟机执行、又没连：任务一用到私有仓库就停下 @ 他；他连上后自己接着做。
-- 他看不到任何团队概念：没有「各人」「管理员」字样。
-
-### 3.9 团队用时
-
-- 每人上手时连接自己的 GitHub。A 交代的事用 A 的推送权限，B 的用 B 的。
-- 团队主机不用主机上的任何登录，也不用家目录里留下的旧登录。
-- 没连的人第一次交代要用 GitHub 的事：被 @ 一次，话题里有横幅；点一下连上，任务自己接着做。
-- 公司组织限制 OAuth 应用时，AI 成员在话题里说清要组织 owner 批准，并给出设置页地址。
-- 有人离开团队：他的连接删掉；他建的 hook、加的 AI 成员之后的任务落到最早的 owner 身上。
-- 管理员能看到也只能看到审计：谁的令牌在什么时候被哪台电脑、哪次运行取过。
+- `scripts/runner/host-setup.sh` 的 apt 列表加 `gh`。
+- `docs/SELF-HOSTING(.zh).md` 加「给 AI 成员一个 GitHub 账号」：建机器账号，只给需要的仓库写权限；`sudo -iu runner gh auth login`，或细粒度令牌 `gh auth login --with-token`（只开 Contents、Pull requests 读写，设过期）；main 开分支保护。不用 `gh auth setup-git`。非虚拟机的团队电脑：用运行 daemon 的系统用户登录。
 
 ## 4. 兼容和迁移
 
-- **旧客户端**：不认识新路由和事件，不会连接（G1 确认未知事件被忽略）。他们被 @ 的是普通文字消息，能看到；更新应用后就能连。在自己的个人电脑上走 `machine`，行为不变。
-- **旧 daemon**：没有 `github` 功能，服务器不发 `github` 字段、不发令牌，行为和今天一样。线 8 的自动更新会把它们带上来。
-- **旧服务器配新 daemon**：没有 `github` 字段，daemon 什么都不装，也不删家目录文件。
-- **旧数据**：`bot_runs.github_member_id` 允许为空，老运行没有身份人，不能取令牌。`github_logins` 原样保留。虚拟机家目录里的旧登录在第一次带 `github` 字段的运行时删除。
-- **没配 `HOOK_SECRET_KEY` 的服务器**：G6 让自部署脚本在缺这个 secret 时自动生成并 `wrangler secret put`（AI 服务 key 也要它），INSTALL 写明。仍然缺时 owner/管理员在设置里看到原因，所有电脑按 `machine` 处理（团队电脑和虚拟机不发 `github`），即今天的行为。
+| 已有的东西 | 处理 |
+| --- | --- |
+| D1 里的账号和令牌（#210） | 本版 `0019_github_off.sql` 删行（含加密令牌），表留着；下一版 `00NN_github_drop.sql` 删表。顺序写进发版说明。运维在 GitHub 上删掉那个 OAuth App（所有令牌一次作废），删 Worker 变量 `GITHUB_CLIENT_ID`（记在私有 ops 仓库）；发版说明提醒个人可去 GitHub 设置撤销 |
+| 等人连接 GitHub 的运行（D1 `github_waits`、desk meta） | 行删掉；desk 迁移 `github-off-1` 把这些话题的 blocked/waitingOn 清掉（3.4） |
+| 旧客户端（#238） | `GET /v1/me/github` 返回 `available: false`：成员看不到 GitHub 区块（`settings/github.rs:508`），管理员看到一行「不可用」，升级后消失 |
+| 旧 daemon（没有 `github-host`） | 收到 `machine`：主机上照旧；虚拟机里只设提交人，没有 GitHub（和 #214 之前一样）。团队主机必须先升级 daemon（验收第 0 步）。不报 `metrics.github`，电脑页不显示这一行 |
+| `bot_runs.github_member_id` | 不读不删 |
+| 团队规则里的 `approver`、`approvers` | 保留；`approvers` 不再生效，`approver` 只管普通审批。上线时还开着的受控操作卡片，按新规则判断谁能批 |
+| 协议里的 `source: "app"`、`login`、`rewriteSsh`、`MachineGithubTokenResponse`、`MachineGithubWaitRequest`、`github.status` | 标注「不再发送」，类型和 fixtures 保留，含义不变 |
+| 成员家目录里留下的 gh 登录 | `clear_home` 继续清，直到 B 部分删家目录 |
 
 ## 5. 安全
 
-- 服务器只存密文；AAD 绑定 memberId（device 行绑定 id），行之间不能互换。
-- 令牌只从 `GET /v1/machine/runs/:id/github` 流出，且只给：分到这次运行、DO 里还没结束、对这个人有资格的电脑。设备码轮询时令牌留在服务器，不回给应用。
-- 电脑上不缓存、不写文件、不进 CLI 环境变量、不进家目录。每次 git 或 gh 用到时现取，交给那个 git 进程，或那个 gh 进程及其子进程。Codex 文件通道的 `.res` 文件只在毫秒级时间内存在，mode 600。
-- 执行者权限全开（已定方向），运行期间任务能用 `git credential fill` 拿到令牌。范围是这个人自己的 GitHub 权限，只在他交代的那次运行期间。
-- 不是完全按人隔离：AI 成员的家目录和电脑上的镜像被不同交代人的运行共用。A 的运行克隆下来的内容、写进家目录的东西，B 之后的运行能读到；推送权限是按人的，读不是。这一版接受，文档写清；虚拟机家目录里带令牌的 `url.*` 和凭证文件每次运行前清掉。
-- 脱敏：取到的值追加进这次运行的精确匹配列表，加上 `gh*_` 规则；运行事件、`stderr.log`、原始会话上传都过脱敏。
-- 断开或被停用：删服务器那一行，正在跑的任务下一次 git/gh 就取不到。要在 GitHub 那边彻底失效得本人去撤销（没有 client secret，服务器替不了），界面给链接。
-- 失效检测：只在 git 报认证失败时验一次，401 标失效并通知本人。
-- 设备码 15 分钟过期，`device_code` 加密保存，只有本人能轮询自己那条。
-- 团队电脑和虚拟机去掉 `SSH_AUTH_SOCK`、SSH 地址改写成 HTTPS，不会用到主机自己的 key。
+- 产品里不再有 GitHub 凭证：服务器、App、协议都没有。机器账号令牌只在主机 `runner` 的 gh 配置（`~runner/.config/gh/hosts.yml`，600）；主机的 `~` 不挂进虚拟机。
+- 令牌每次用时取、用完丢：不写虚拟机磁盘、不进 CLI 环境变量、不作事件上报、不进 daemon 日志，加进本次脱敏表（帧、文件、会话上传、`stderr.log`）。
+- **已知限制（写进 SELF-HOSTING）**：git 推送必须拿到令牌，任务里的进程可以自己调凭证助手（`git credential fill`）在运行期间读到它；gh 包装挡住 `auth token`/`--show-token` 只是挡最直接的用法。缓解：机器账号最小仓库和权限、细粒度令牌带过期、main 分支保护、虚拟机用完丢（B 部分）。主机侧注入认证头的代理这一版不做。
+- 接管时人执行的命令里没有 `chat-run`（design-takeover），拿不到令牌。
+- 团队电脑上交代人批不了受控操作；真正的底线仍是 GitHub 分支保护（设置页那句话保留）。
+- 个人电脑上运行的权限和主人一样（机 3.1 已说明），无新增风险。
 
 ## 6. 拆成哪些 PR
 
-前置操作（不是产品决定）：负责人用产品账号在 GitHub 建 OAuth App，开 Device Flow，把 client id 写进 `product.json` 的 `githubClientId`。在那之前本地和 staging 用 `GITHUB_CLIENT_ID` 变量，不阻塞开发。
+顺序：G1 → G4、G5、G6 并行 → G2（要 G4 的 `githubMissing`）→ G3 → G7。G4/G5/G6 改的文件互不重叠；G2、G3 都改 desk 文件，按顺序。
 
-| PR | 做什么 | 主要文件 | 依赖 | 怎么测 |
+| PR | 做什么 | 改哪些文件 | 依赖 | 怎么测 |
 | --- | --- | --- | --- | --- |
-| G1 协议（并进四份设计共用的协议 PR，新模块 `github.ts` / `github.rs`） | 3.5 的字段、事件、`runsIn`、`github` RunEvent、fixtures；确认未知事件被忽略 | `docs/protocol.md`、`docs/machine-protocol.md`、`packages/protocol/src/`、`crates/chat-protocol/src/`、`protocol/fixtures/` | — | 两边 fixture 测试；未知事件解码测试 |
-| G2 服务端连接 | `0017_github_accounts.sql`、加密存储、设备码路由、`/v1/me/github`（`waits` 先返回空数组）、断开、`available` 和原因、对照表、停用钩子（用现成的 `registerMemberDeactivated`）、`github/index.ts` 注册点 | `server/src/github/{index,routes,store,api,hooks}.ts`、`server/src/features.ts` | G1 | vitest：mock GitHub fetch，覆盖 pending、slow_down、done、expired、denied、taken；库里和日志没有明文；对照表不覆盖手工行；停用后行被删 |
-| G3 服务端派活 | 身份人规则（含 anonymous、离开团队）、`frame.github`、`0017_github_runs.sql`、机器取令牌、`/wait`、`/rejected`、恢复跟进、desk RPC `githubWait` 和 `githubResume`（取运行用现成的 `getRun`）、`waits` 查询、话题 @ 文案 | `server/src/github/{assign,machine,text}.ts`（恢复在 `machine.ts` 里）；`server/src/bots/desk/runs.ts:397` 一行；`server/src/bots/desk/github.ts`（新，两个 RPC）；往 `github/index.ts` 追加 | G1、G2。design-roles 没合并就按 3.2 的临时规则 | vitest：3.2 表格每一格；规则 1–3 和回落；别的电脑取令牌被拒；完成、取消、超时、租约丢失、转电脑后取令牌都被拒；`/wait` 并发只发一次 @；连上后起跟进且只起一次 |
-| G4 daemon | `github` 功能和 `runsIn`、署名环境、助手、`gh` 代理（本机和工具盘）、daemon 自己 fetch 的凭证、可追加脱敏、家目录清理、系统说明 | `apps/daemon/src/github.rs`（新）、`run.rs`、`chat_run.rs`（本地分支）、`daemon.rs`（FEATURES、hello、每次运行的 redactor）、`workspace.rs`（daemon 自己 git 的环境）、`redact.rs`、`executor/firecracker.rs`（工具盘由 daemon 做） | G1 | cargo test：mock 服务器，本地 http 远端上跑 `git credential fill`、`git push`；`gh auth login` 被拦；404 立刻失败并报 `/wait`；`stderr.log` 和会话上传里令牌被遮；文件通道调用后无 `.res`；guest PATH 解析 `gh` 到代理；Windows CI 上 `gh.exe` 分流，并验证空助手清掉系统级 `credential.helper=manager` |
-| G5 桌面端 | 连接 sheet、账号页一组、上手弹一次、话题横幅、电脑页提示、文案、截图自测数据 | `apps/desktop/src/views/settings/{github,account}.rs`、`copy/settings.rs`、`data.rs`、`provider/` 的 HTTP 调用、`fake/`（只为截图自测） | G1；横幅的数据要 G3，之前按 G2 的空 `waits` 做 | 文案目录测试；截图自测（浅色、深色、Mac、Windows）：未连接、等确认、已连接、失效、不可用、横幅 |
-| G6 文档、部署和端到端 | 自部署脚本生成 `HOOK_SECRET_KEY`；INSTALL 写 client id 覆盖和自建 OAuth App；上手指南加连接 GitHub；改 `machine-protocol.md:816` 那段；`tools/e2e` 场景 | `scripts/deploy-server.sh`、`docs/INSTALL*.md`、`docs/ONBOARDING.zh.md`、`docs/machine-protocol.md`、`tools/e2e/` | G3、G4 | 照文档在新 Ubuntu 上部署一遍；e2e：假 GitHub（`GITHUB_API_BASE`）下，没连 → @ → 连接 → 自动跟进推送成功；集成事件用 hook 建立人；重试仍用原交代人 |
+| G1 协议 | `RunGithub.askedBy?`；`MachineGithub`；`MachineMetrics.github?`；`Machine.github?`；`MachineMonitor.github?`、`runsIn?`；运行事件 `github` 加 `reason?`；feature `github-host`；`unavailableReason` 加 `"off"`；废弃字段标注；protocol.md「GitHub sign-in」改为停用，machine-protocol.md「GitHub」重写 | `docs/protocol.md`、`docs/machine-protocol.md`、`packages/protocol/src/{github,machine,monitor,bots}.ts`、`crates/chat-protocol/src/{github,machine,monitor,bots}.rs`、`protocol/fixtures/**` | 无 | 两套 fixture 测试；新 fixtures：带 `askedBy` 的 assign、带 `github` 的心跳、带 `github` 的电脑列表和监控 |
+| G4 服务端：电脑 GitHub 状态 | 3.6：心跳存值、`status()`、电脑列表按 runsIn 过滤、监控转发、提醒 `github`、RPC `githubMissing(reason)` | `server/src/bots/link.ts`、`server/src/bots/store.ts`、`server/src/monitor/{alerts,index}.ts`、`server/test/monitor.test.ts`、`server/test/machines*.test.ts` | G1 | vitest：signed_in→signed_out 发提醒、回来结束；从没登录且没人调 `githubMissing` 不提醒；团队电脑 `githubMissing` 发一次、再调不重复；host 电脑不提醒；列表里 host 只在 signed_in 时有 `github`，成员（非主人）拿不到 |
+| G5 daemon | 3.3 | `apps/daemon/src/{github,run,daemon,metrics,chat_run}.rs`、`apps/daemon/tests/github.rs`、`apps/daemon/tests/redact.rs` | G1；和 B 部分的 daemon PR 都改 `run.rs`，G5 先合 | 测试里主机 PATH 放假 `gh` 打印 `ghp_…`：VM 模式助手拿到、各处打码；假 gh 退出非 0：`quit=1`、`missing` 带 reason 只发一次；host 模式没有助手；`gh auth token` 被拒；心跳带 `github` |
+| G6 桌面端 | 3.7 和 3.5 的界面 | `apps/desktop/src/{app,data,fake}.rs`、`{data,fake,provider}/github.rs`（删）、`provider/{mod,settings,snapshot}.rs`、`views/github_banner.rs`（删）、`views/settings/{github(删),account,machines,members,prefs}.rs`、`views/admin/*` 监控、`views/members_page/mod.rs`、`views/topic_page/mod.rs`、`copy/{settings,admin}.rs`、`ui/native/tokens.rs`、`selftest/*`、`crates/chat-core/src/{github(删),engine,client,lib}.rs`、`crates/chat-core/tests/github.rs`（删） | G1 | `cargo test`（文案目录、自检截图）；`bun run dev:desktop` 亮暗截图：电脑页两种状态、监控三种状态、默认规则说明行；上手和话题无 GitHub 提示 |
+| G2 服务端：撤掉按人存 | 3.2、3.4 | `server/src/github/*`、`server/src/bots/desk/{github,external,core,events,stall,runs}.ts`、`server/src/features.ts`、`server/migrations/0019_github_off.sql`、`product.json`、`server/test/github-*.test.ts` | G1、G4 | vitest：assign 永远 `machine`，author=committer=AI 成员，`askedBy` 正确、匿名不发；`/v1/me/github` 返回 off；机器路由 404；迁移后三表为空但存在；`github-off-1` 后原 blocked 话题 waitingOn 为空；`missing` 团队/个人各说一次、团队调了 `githubMissing`、重复事件不再说 |
+| G3 服务端：受控操作批准人 | 3.5 服务端 | `server/src/bots/desk/{core,input,events,runs}.ts`、`server/src/settings/rules.ts`、`server/src/bots/dispatch.ts`、`server/test/gates.test.ts`、`server/test/settings.test.ts` | G2 | 见下 |
+| G7 文档和主机 | 3.8；PRODUCT.md GitHub 用词换成新词表；usable.zh.md 已定 3 和线 8；machine.zh.md 机 4.1 指向本文 | `scripts/runner/host-setup.sh`、`docs/SELF-HOSTING.md`、`docs/SELF-HOSTING.zh.md`、`docs/PRODUCT.md`、`docs/plans/usable.zh.md`、`docs/plans/usable/machine.zh.md` | G2、G5；`host-setup.sh` 等 B 部分改它的 PR 合并后 | 新 Ubuntu 上照文档走一遍（第 7 节） |
 
-- G2、G4、G5 改的文件互不重叠，可以并行。G3 只在 `desk/runs.ts` 加一行、desk 加一个新文件，要和线 1–3 改 desk 的会话错开合并。
-- 沙箱：连接要真 GitHub，`scripts/sandbox/seed.ts` 不造连接；本地开发用开发者自己的 OAuth App 走真设备码（不需要回调地址）。
+G3 测试：`gates.test.ts` 里「交代人批准受控操作」「个人电脑上交代人批准」两类用例翻转为被忽略，「approver=owners」用例改为只对普通审批断言；新增：团队电脑上实习生能批普通审批、不能批合并到 main，管理员能；群里没管理员时卡片带 `approvalNoAdmin` 并 @ 交代人，交代人仍不能批；个人电脑上受控操作只有主人能批（管理员、交代人都不行），主人不在群时带 `approvalNoMachineOwner` 并 @ 交代人；话题 waitingOn 用新批准人；团队规则 `approvers.mergeMain = "requester"` 不影响；`policyPrompt` 两种写法。`settings.test.ts` 里断言 `approvers` 生效的用例改为只断言能存能读。
 
-## 7. 真电脑上的验收步骤
+G7 的 PRODUCT.md 新词表（替换 `docs/PRODUCT.md:87-90`）：「GitHub @{login}」「未登录 GitHub」「这台电脑还没有登录 GitHub」「这台电脑的 GitHub 登录失效了」「其他要确认的事谁来批准」以及 3.5、3.6 的卡片和提醒原文；删去旧词「连接 GitHub」「验证码」「{name} 在等你连接 GitHub」等 #238 的说法。
 
-每一步留截图或日志。一个测试仓库（私有），A、B 两个 GitHub 账号。
+## 7. 真电脑上的验收
 
-1. **Mac，一个人用**：新部署服务器（照 INSTALL，确认 `HOOK_SECRET_KEY` 自动生成），第一次登录弹「连接 GitHub」，点「以后再说」。让 AI 成员改仓库开 PR：用电脑上现成的 gh，作者是本人 gitconfig，提交者是 AI 成员。
-2. **同一台 Mac**：设置 › 账号里连接 A，再交代同样的事。PR 由 A 创建，提交显示「A authored，{成员} committed」；过程视图和原始会话下载里搜 `gho_` 找不到。
-3. **Windows**：重复第 2 步，确认 `gh.exe` 代理生效，Git for Windows 的 manager 助手没被用到。
-4. **Linux 团队主机（虚拟机）**：A、B 通过邀请码进团队，A 已连，B 没连。A 交代的事以 A 身份拉取私有仓库并推送成功。主机上成员家目录没有 `hosts.yml`、`.git-credentials`；任务里跑 `env | grep -i -e gh -e token` 没有令牌；`which gh` 是 `/opt/runner/bin/gh`。
-5. **同一台主机，B 交代**：话题里出现 @B 的消息，B 的应用里话题顶部有横幅；运行以「在等 B 连接 GitHub」结束，话题不标完成。B 点横幅连接，不说话，几秒内自动起跟进并推送成功，作者是 B；A 的令牌没有出现在 B 这次运行的审计里。
-6. **另一人说「继续」**：重复第 5 步的等待，这次 A 在话题里说「继续」，跟进用 A 的身份推送（有意的行为）；B 之后再连接不会再起一次。
-7. **转交**：A 交代给成员甲，甲转交给乙，乙的推送用 A。
-8. **重试**：让运行失败后重来，仍用 A。
-9. **集成事件**：hook 由 A 建，事件触发的任务用 A；把 A 停用后再触发，用最早的 owner，@ 的是 owner。
-10. **断开和撤销**：A 在运行中断开，下一次 `git push` 取不到令牌，走等待流程。A 重连后到 GitHub 撤销授权，下一次推送被标「需要重新连接」，A 被 @ 并看到横幅；重连后任务自己接着做。
-11. **组织限制**：用开了 OAuth 应用限制的组织仓库，AI 成员在话题里说明要组织 owner 批准并给出地址。
-12. **旧 daemon**：主机 daemon 保持旧版本，任务行为和现在一样，电脑页显示「这台电脑更新后，任务才能用你连接的 GitHub」。
+准备：团队 Linux 主机已装带 G5 的 daemon；服务器部署到 G3；Mac 装带 G6 的应用。管理员 A、实习生 I（GitHub 账号对 `<org>/<repo>` 无权限），开发用 AI 成员 D 在团队主机上，群「开发」有 A 和 I。
 
-## 8. 这一版不做的
+0. 第一天：主机还没登录。I @D 改 README。话题出现「这台电脑还没有登录 GitHub…已通知管理员…」只一次；A 在私聊收到「<主机> 没有登录 GitHub」。A 在主机运行 `sudo -iu runner gh auth login` 登录 `<org>-bot`；10 分钟内提醒变为已恢复，团队管理 › 电脑显示「已登录 @<org>-bot」，设置 › 电脑显示「GitHub @<org>-bot」。
+1. I 说：`@D 在 <org>/<repo> 把 README 的错别字改了，开个 PR`。检查：PR 作者 `<org>-bot`；`git log -1 --format='%an <%ae> / %cn'` 两处都是 D；PR 正文最后一行 `交代人：<I>`；运行中虚拟机里 `ls ~/.config/gh` 没有 `hosts.yml`、`env | grep -i token` 无输出；daemon 日志、`stderr.log`、运行事件里搜 `gh[pousr]_`、`github_pat_` 搜不到。
+2. I 说 `@D 合并到 main`：`gh pr merge` 被拦，卡片 @A。I 点「同意」、回「同意」都无效；A 点后合并成功，审计记 A。另让 D 做一件普通需确认的事，I 能批。
+3. 把 A 移出「开发」，让 D 合并另一个 PR：卡片显示「这类操作要管理员批准，可这个群里没有管理员…」并 @I，I 批不了；A 回群后能批。
+4. 主机上 `sudo -iu runner gh auth logout`：10 分钟内两处电脑页变「未登录」，A 收到提醒。D 再推送：话题出现登录提示只一次。重新登录后提醒恢复。
+5. 一个人：新 Mac 从头安装「用这台电脑」，Mac 上已 `gh auth login` 自己的账号（再试一次只用 SSH key、没装 gh）。交代 D2 开 PR：由他的账号推送，提交作者 D2；应用里没有任何 GitHub 设置、横条、提示（只用 SSH 时电脑页也不显示 GitHub）；合并到 main 的卡片发给他，他能批。默认规则页只多一行说明。
+6. 个人电脑主人不在群：成员 M 的个人 Mac，D3 的活跑在上面，在一个 M 不在的群里让 D3 合并到 main：卡片显示「…电脑的主人…不在这个群里…」并 @ 交代人，交代人批不了；把 M 拉进群后 M 能批。
+7. 旧数据：staging 上先保留 #210 的账号数据和一个等连接的话题再部署。部署后三表为空、表还在；那个话题不再 blocked；旧版应用打开不报错。部署期间旧 Worker 派工不报错。
+8. Windows 当个人电脑走一遍第 5 步。
 
-- GitHub Enterprise Server、粘贴令牌、从 `gh` 导入现成登录；GitLab 等其他平台。
-- 按人隔离读取：家目录和镜像按人分开。
-- 没连时已做的提交，作者邮箱是占位邮箱；连上后不改写历史。
-- 提交签名（GPG、SSH signing）；`Co-authored-by` trailer。
-- 给 AI 成员单独配 GitHub 账号（机 4.1 方案 B）。
-- 管理员在成员列表里看每人连没连。
-- 服务器替人到 GitHub 撤销授权（要 client secret）；令牌轮换；换用会过期的 GitHub App 用户令牌。
-- 定时检查令牌是否还有效。
-- `GITHUB_TOKEN` 这类环境变量形式给其他工具；其他工具可以用 `gh auth token`（经代理）。
-- 拦住 gh 扩展、别名起的子进程继承 `GH_TOKEN`。
+每一步结果原样记进 [verify-log.zh.md](verify-log.zh.md)。
 
-## 9. 还要负责人定的
+## 8. 这一版不做
 
-无。唯一要负责人动手的是第 6 节开头的前置操作：建 OAuth App、把 client id 写进 `product.json`。
-
-### 对两份评审的处理
-
-两份评审的意见都已采纳，只有一条没照原样做：评审二建议在助手或 gh 代理里检测组织限制返回的 403。没这么做，因为助手看不到 HTTP 响应，代理要截取 stderr 才能看到。改成在系统说明里写明这种情况，由 AI 成员在话题里报告，效果相同，也更简单。
+- 令牌完全不进虚拟机（主机侧注入认证头的代理，或 daemon 代为推送）。
+- GitHub App、按人的 GitHub 身份、应用里登录 GitHub。
+- 一台电脑多个 GitHub 账号（按仓库、按 AI 成员）；GitHub Enterprise 和其他代码托管平台。
+- PR 自动打标签、指派审阅人；在主机上强制 PR 正文写交代人（靠系统说明，验收检查）。
+- 批准人不在群时改发私聊、在群外处理审批：这一版要求批准人进群。
+- 每类操作单独设批准人（数据保留，界面不再提供）。
+- 删 D1 旧表：下一版。
