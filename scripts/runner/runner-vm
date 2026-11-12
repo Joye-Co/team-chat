@@ -5,17 +5,113 @@
 #   runner-vm up <slot>                     tap rvm<slot> for the runner user, host side of the slot's /30
 #   runner-vm export <slot> <path> rw|ro    NFS export of <path> to the slot's guest address only
 #   runner-vm down <slot>                   removes the slot's exports and its tap
+#   runner-vm home-up <homes> <member> <gb> mounts the AI member's home image at <homes>/<member>,
+#                                           made on first use (<gb> GB, grown when <gb> is larger)
+#   runner-vm home-clear <homes> <member>   unmounts and deletes it: the next run starts empty
 #
-# Slot n uses 10.200.0.0/16 at offset 4n: host .1, guest .2. Paths must be under /srv/runner or
-# the runner user's home. The static firewall (/etc/runner-vm.nft) does the rest.
+# Slot n uses 10.200.0.0/16 at offset 4n: host .1, guest .2. Exported paths must be under
+# /srv/runner or the runner user's home, and never the runner's home itself, one of its dot
+# folders (the CLIs' sign-ins, the daemon's config and token, SSH keys) or the host's images.
+# Home images live in <homes>/../home-images (root's, listable by the runner's group); <homes>
+# must be under /srv/runner. Home commands of one member wait for each other (flock).
+# A home folder from before the images moves into its image on its first home-up; when it does
+# not fit, it stays a folder without a limit (and a `<member>.unlimited` mark) until cleared.
+# The static firewall (/etc/runner-vm.nft) does the rest.
 set -euo pipefail
 
 RUNNER_USER="${RUNNER_USER:-runner}"
+DATA=/srv/runner
 STATE=/run/runner-vm
 runner_home="$(getent passwd "$RUNNER_USER" | cut -d: -f6)"
-ROOTS=(/srv/runner "$runner_home")
+ROOTS=("$DATA" "$runner_home")
 
 die() { echo "runner-vm: $*" >&2; exit 2; }
+
+uid="$(id -u "$RUNNER_USER")"
+gid="$(id -g "$RUNNER_USER")"
+
+# home-up and home-clear: the homes folder, the member and where its image is.
+home_args() {
+  homes="$(realpath -m -- "${1:-}")"
+  member="${2:-}"
+  [[ "$homes" == "$DATA"/* ]] || die "homes must be under $DATA"
+  case "$homes" in
+    "$DATA"/images|"$DATA"/kernels|"$DATA"/home-images|"$DATA"/vms) die "$homes cannot hold homes" ;;
+  esac
+  [[ "$member" =~ ^[A-Za-z0-9]{1,64}$ ]] || die "bad member id"
+  images="$(dirname "$homes")/home-images"
+  dir="$homes/$member"
+  img="$images/$member.ext4"
+  # The runner user lists the images (the daemon reports each one's use); each stays root's.
+  [[ -d "$images" ]] || install -d -o root -g "$gid" -m 750 "$images"
+  chown root:"$gid" "$images"
+  chmod 750 "$images"
+  # One home command per member at a time: two runs that start together never mount or make
+  # the same image twice.
+  exec 9>"$images/$member.lock"
+  flock 9
+}
+
+case "${1:-}" in
+  home-up)
+    home_args "${2:-}" "${3:-}"
+    gb="${4:-}"
+    [[ "$gb" =~ ^[0-9]{1,5}$ ]] && (( gb > 0 )) || die "bad size"
+    [[ -d "$homes" ]] || install -d -o "$uid" -g "$gid" -m 755 "$homes"
+    # A larger size grows the mounted image (ext4 grows online); a smaller one leaves it.
+    grow() {
+      local want dev
+      want=$(( gb << 30 ))
+      [[ -f "$img" ]] && (( want > $(stat -c %s "$img") )) || return 0
+      dev="$(findmnt -n -o SOURCE --target "$dir")"
+      truncate -s "$want" "$img"
+      losetup -c "$dev"
+      resize2fs "$dev" >/dev/null 2>&1 || echo "runner-vm: $dir could not grow" >&2
+    }
+    if mountpoint -q "$dir"; then
+      grow
+      exit 0
+    fi
+    [[ -f "$images/$member.unlimited" && -d "$dir" ]] && exit 0
+    old=""
+    if [[ ! -f "$img" ]]; then
+      tmp="$img.tmp"
+      rm -f "$tmp"
+      truncate -s "${gb}G" "$tmp"
+      chmod 600 "$tmp"
+      if [[ -d "$dir" && -n "$(ls -A "$dir" 2>/dev/null)" ]]; then
+        # A home from before the images: copied into the image with owners and modes.
+        if ! mkfs.ext4 -q -F -L home -m 0 -E "root_owner=$uid:$gid" -d "$dir" "$tmp" 2>/dev/null; then
+          rm -f "$tmp"
+          touch "$images/$member.unlimited"
+          echo "runner-vm: $dir does not fit in $gb GB; it stays a folder without a limit" >&2
+          exit 0
+        fi
+        old="$homes/.before-image-$member"
+        rm -rf --one-file-system "$old"
+        mv "$dir" "$old"
+      else
+        mkfs.ext4 -q -F -L home -m 0 -E "root_owner=$uid:$gid" "$tmp"
+      fi
+      mv "$tmp" "$img"
+    fi
+    mkdir -p "$dir"
+    chown "$uid:$gid" "$dir"
+    mount -o loop,nosuid,nodev,discard "$img" "$dir"
+    [[ -n "$old" ]] && rm -rf --one-file-system "$old"
+    grow
+    exit 0
+    ;;
+  home-clear)
+    home_args "${2:-}" "${3:-}"
+    if mountpoint -q "$dir"; then
+      umount "$dir" || die "$dir is in use"
+    fi
+    rm -f "$img" "$images/$member.unlimited"
+    rm -rf --one-file-system "$dir"
+    exit 0
+    ;;
+esac
 
 slot="${2:-}"
 [[ "$slot" =~ ^[0-9]{1,5}$ ]] && (( slot < 16384 )) || die "bad slot"
@@ -40,10 +136,17 @@ case "${1:-}" in
     path="$(realpath -e -- "${3:-}")" || die "no such path"
     ok=0
     for r in "${ROOTS[@]}"; do
-      [[ -n "$r" && ( "$path" == "$r" || "$path" == "$r"/* ) ]] && ok=1
+      [[ -n "$r" && "$path" == "$r"/* ]] && ok=1
     done
-    (( ok )) || die "$path is outside ${ROOTS[*]}"
-    uid="$(id -u "$RUNNER_USER")"; gid="$(id -g "$RUNNER_USER")"
+    (( ok )) || die "$path is not inside ${ROOTS[*]}"
+    if [[ -n "$runner_home" && "$path" == "$runner_home"/* ]]; then
+      rel="${path#"$runner_home"/}"
+      [[ "$rel" == .* ]] && die "$path is a private folder of $RUNNER_USER"
+    fi
+    case "$path" in
+      "$DATA"/images|"$DATA"/images/*|"$DATA"/kernels|"$DATA"/kernels/*|"$DATA"/home-images|"$DATA"/home-images/*|"$DATA"/homes)
+        die "$path is not shared" ;;
+    esac
     exportfs -o "$mode,sync,no_subtree_check,all_squash,anonuid=$uid,anongid=$gid" "$guest:$path"
     echo "$path" >> "$STATE/$slot"
     ;;
@@ -56,5 +159,5 @@ case "${1:-}" in
     fi
     ip link del "$tap" 2>/dev/null || true
     ;;
-  *) die "usage: runner-vm up|export|down <slot> ..." ;;
+  *) die "usage: runner-vm up|export|down <slot> ..., or home-up|home-clear <homes> <member> ..." ;;
 esac

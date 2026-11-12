@@ -843,12 +843,18 @@ impl AdminView {
                     }),
             )
             .children(me.map(|me| {
-                SidebarFooter::new(
+                let footer = SidebarFooter::new(
                     "admin-me",
                     MemberAvatar::new(Some(&me), crate::ui::native::tokens::avatar::SM),
                     me.name.clone(),
-                )
-                .detail(m::ROLE_OWNER, cx)
+                );
+                // My 身份; one person alone has none to show (design-roles 3.10).
+                match crate::views::settings::my_role(&self.services)
+                    .filter(|_| !crate::views::settings::solo(&self.services))
+                {
+                    Some(role) => footer.detail(team::role_word(role), cx),
+                    None => footer,
+                }
             }))
     }
 

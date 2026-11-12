@@ -39,7 +39,7 @@ use gpui_component::button::Button;
 use crate::{
     app::Services,
     copy::settings as s,
-    data::{MemberLevel, SessionState},
+    data::{MemberLevel, SessionState, TeamRole},
     theme,
     ui::{
         Sym,
@@ -152,12 +152,98 @@ impl Page {
     }
 }
 
-/// True when I am signed in as an owner (the admin actions show).
+/// True when I am signed in as a 管理员 or a 所有者 (the admin actions show). The name stays
+/// from before roles: the wire level `owner` is both (design-roles 3.9).
 pub fn i_am_owner(services: &Services) -> bool {
     matches!(
         services.provider.session(),
         SessionState::SignedIn { me, .. } if me.level == MemberLevel::Owner
     )
+}
+
+/// My 身份, `None` when signed out.
+pub fn my_role(services: &Services) -> Option<TeamRole> {
+    let SessionState::SignedIn { me, .. } = services.provider.session() else {
+        return None;
+    };
+    // The directory has the newest copy of me, mark included.
+    let all = services.provider.members();
+    let me = all.iter().find(|m| m.id == me.id).cloned().unwrap_or(me);
+    Some(TeamRole::of(&me, &all))
+}
+
+/// True when I am the team's 所有者: I change 身份 and stop 管理员 and 所有者.
+pub fn i_am_team_owner(services: &Services) -> bool {
+    my_role(services) == Some(TeamRole::Owner)
+}
+
+/// One person uses this team: exactly one active human member. Then nothing about 身份 (and,
+/// for the computers, nothing about 团队 or 我的) shows (design-roles 3.9, 3.10).
+pub fn solo(services: &Services) -> bool {
+    solo_in(&services.provider.members())
+}
+
+pub fn solo_in(members: &[crate::data::Member]) -> bool {
+    members
+        .iter()
+        .filter(|m| !m.deactivated && !m.is_bot())
+        .count()
+        == 1
+}
+
+/// The word of a 身份: 所有者, 管理员 or 普通成员.
+pub fn role_text(role: TeamRole) -> &'static str {
+    match role {
+        TeamRole::Owner => s::ROLE_TEAM_OWNER,
+        TeamRole::Admin => s::LEVEL_OWNER,
+        TeamRole::Member => s::LEVEL_MEMBER,
+    }
+}
+
+/// The 「设为…」 item of a 身份.
+pub fn set_role_text(role: TeamRole) -> &'static str {
+    match role {
+        TeamRole::Owner => s::SET_ROLE_OWNER,
+        TeamRole::Admin => s::SET_ROLE_ADMIN,
+        TeamRole::Member => s::SET_ROLE_MEMBER,
+    }
+}
+
+/// The 身份 a 所有者 can give `target` from its row (design-roles 3.9): the other two, and never
+/// 所有者 to an AI member. Empty for myself, a deactivated member, or when I am not the 所有者.
+pub fn roles_to_offer(
+    target: &crate::data::Member,
+    current: TeamRole,
+    me: Option<&str>,
+    i_am_team_owner: bool,
+) -> Vec<TeamRole> {
+    if !i_am_team_owner || target.deactivated || me == Some(target.id.as_str()) {
+        return Vec::new();
+    }
+    [TeamRole::Owner, TeamRole::Admin, TeamRole::Member]
+        .into_iter()
+        .filter(|r| *r != current && !(target.is_bot() && *r == TeamRole::Owner))
+        .collect()
+}
+
+/// True when I may stop (or bring back) `target`: a 管理员 handles 普通成员 and AI members at
+/// 普通成员; a 管理员 or 所有者 target needs the 所有者 (design-roles 3.2).
+pub fn may_deactivate(target_role: TeamRole, i_am_team_owner: bool) -> bool {
+    i_am_team_owner || target_role == TeamRole::Member
+}
+
+/// True when a member's "⋯" menu has an item: an active AI member's own items, a 「设为…」, or
+/// 停用 / 恢复. A deactivated AI member a 管理员 may not bring back has none, so no button.
+pub fn has_member_menu(target: &crate::data::Member, offer: &[TeamRole], may_stop: bool) -> bool {
+    may_stop || !offer.is_empty() || (target.is_bot() && !target.deactivated)
+}
+
+/// The text of a failed 身份 change: refused means only the 所有者 may do it.
+pub fn role_error_text(e: crate::data::AdminError) -> &'static str {
+    match e {
+        crate::data::AdminError::Forbidden => s::ERR_OWNER_ONLY,
+        e => widgets::error_text(e),
+    }
 }
 
 /// The title row that holds the traffic lights and the window title.
@@ -659,6 +745,45 @@ mod tests {
     use gpui::{TestAppContext, VisualTestContext};
 
     use super::*;
+
+    fn member(kind: crate::data::MemberKind, deactivated: bool) -> crate::data::Member {
+        crate::data::Member {
+            id: "m-1".into(),
+            name: "Scout".into(),
+            kind,
+            level: crate::data::MemberLevel::Owner,
+            role: None,
+            avatar_url: None,
+            deactivated,
+            online: false,
+            character: None,
+            team_owner: false,
+        }
+    }
+
+    /// No "⋯" for a deactivated AI 管理员 that a 管理员 (not the 所有者) sees: nothing to pick.
+    #[test]
+    fn member_menu_only_when_it_has_items() {
+        use crate::data::MemberKind::{Bot, Human};
+        let off_bot = member(Bot, true);
+        let may_stop = may_deactivate(TeamRole::Admin, false);
+        let offer = roles_to_offer(&off_bot, TeamRole::Admin, Some("me"), false);
+        assert!(!has_member_menu(&off_bot, &offer, may_stop));
+        assert!(
+            has_member_menu(&off_bot, &[], true),
+            "the 所有者 can bring it back"
+        );
+        assert!(
+            has_member_menu(&member(Bot, false), &[], false),
+            "an active AI member"
+        );
+        assert!(!has_member_menu(&member(Human, false), &[], false));
+        assert!(has_member_menu(
+            &member(Human, false),
+            &[TeamRole::Member],
+            false
+        ));
+    }
 
     /// Tab walks the Settings window (E3): the root holds the focus in a
     /// fresh window, Tab moves it to a control, and ⇧Tab moves it on.

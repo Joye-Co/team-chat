@@ -3,15 +3,18 @@
 //! The VM boots the read-only base image with a per-run scratch disk as its writable layer and
 //! the tools disk (this binary as `vm-agent`, `chat-run` and the `gh` proxy of feature
 //! "github", which finds the image's real `gh` after `/opt/runner/bin` on `GUEST_PATH`). The
-//! run folder, the run's git dir and the CLIs' config folders (`[vm].shares`) are NFS shares
-//! of this host, mounted in the VM at their host paths, so everything the daemon reads and
-//! writes (worktree, session files, 产出, `stderr.log`) stays where it is. Stdin and stdout go
-//! over vsock to `vm-agent` ([`super::vmwire`]); `chat-run` reaches the run's socket through
-//! vsock as well.
+//! run folder, the working folder, the run's git dir and the member's own folder (its home
+//! with its CLIs' folders, [`crate::vm_home`]) are NFS shares of this host, mounted in the VM at
+//! their host paths, so everything the daemon reads and writes (worktree, session files, 产出,
+//! `stderr.log`) stays where it is; the home is mounted at the VM's `$HOME` too. This host's
+//! CLI sign-in folders are never shared: the run has a copy of the sign-in it cannot use to
+//! change them ([`crate::vm_login`]). Stdin and stdout go over vsock to `vm-agent`
+//! ([`super::vmwire`]); `chat-run` reaches the run's socket through vsock as well.
 //!
-//! Root-only steps (the VM's tap device, NFS exports) go through `[vm].helper` with `sudo -n`
-//! (`scripts/runner/host-setup.sh` installs it). The network rules are static: VMs reach the
-//! internet, never this host (except NFS), private ranges or each other.
+//! Root-only steps (the VM's tap device, NFS exports, the members' home images) go through
+//! `[vm].helper` with `sudo -n` (`scripts/runner/host-setup.sh` installs it). The network rules
+//! are static: VMs reach the internet, never this host (except NFS on their own tap's address),
+//! private ranges or each other.
 
 use super::vmwire::{self, AGENT_PORT, CHAT_RUN_PORT, Tag};
 use super::{BoxFuture, Executor, Process, Spawned, Stopped};
@@ -86,7 +89,10 @@ fn stage_tools(exe: &[u8], stage: &Path) -> std::io::Result<()> {
     let agent = stage.join(crate::vm_agent::NAME);
     std::fs::write(&agent, exe)?;
     std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o755))?;
-    for name in [crate::chat_run::NAME, crate::github::GH] {
+    // `gh` is the proxy of feature "github" and a shim; the others are shims of gated
+    // actions (crate::shim), each finding the image's real program after the tools folder.
+    let names = std::iter::once(crate::chat_run::NAME).chain(crate::shim::NAMES.iter().copied());
+    for name in names {
         std::os::unix::fs::symlink(
             format!("/opt/runner/{}", crate::vm_agent::NAME),
             stage.join("bin").join(name),
@@ -167,7 +173,7 @@ pub fn guest_env(env: &[(String, String)]) -> (Vec<(String, String)>, Option<Str
 }
 
 /// Runs `[vm].helper <args>` as root (sudo without a password prompt).
-async fn helper(cfg: &VmConfig, args: &[&str]) -> Result<(), String> {
+pub(crate) async fn helper(cfg: &VmConfig, args: &[&str]) -> Result<(), String> {
     let out = tokio::process::Command::new("sudo")
         .arg("-n")
         .arg(&cfg.helper)
@@ -382,6 +388,21 @@ struct Job {
     args: Vec<String>,
 }
 
+/// A folder never shared with a VM: the daemon user's home itself, or anything in one of its
+/// dot folders (the CLIs' sign-ins, the daemon's config and machine token, SSH keys). The
+/// root helper refuses these too.
+fn private_share(home: &Path, p: &Path) -> bool {
+    let home = std::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
+    let p = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    match p.strip_prefix(&home) {
+        Ok(rest) => rest
+            .components()
+            .next()
+            .is_none_or(|c| c.as_os_str().to_string_lossy().starts_with('.')),
+        Err(_) => false,
+    }
+}
+
 /// The bot's home folder under `homes` and the VM's `$HOME`: made on first use. None when
 /// homes are off, the run names no bot, or the folder cannot be made (the run still works, on
 /// the scratch disk).
@@ -426,20 +447,30 @@ impl Job {
     }
 
     /// The paths shared with the VM: the run folder, the working folder (a line's folder, kept
-    /// on this host for the member's next run in the topic), the run's git dir, the CLIs'
-    /// folders.
+    /// on this host for the member's next run in the topic), the run's git dir, the member's
+    /// own folder (its home, or its CLIs' folders without homes), and `[vm].shares`.
     fn shares(&self) -> Vec<PathBuf> {
         let mut out = vec![self.run_dir.clone(), self.cwd.clone()];
         if let Some(gd) = workspace::read_meta(&self.run_dir).and_then(|m| m.git_dir) {
             out.push(gd);
         }
+        if let Some(d) = self
+            .env
+            .iter()
+            .find(|(k, _)| k == "CHAT_BOT_MEMBER_ID")
+            .and_then(|(_, bot)| crate::vm_home::member_dir(&self.cfg, bot))
+        {
+            out.push(d);
+        }
+        let home = crate::config::home();
         for s in &self.cfg.shares {
-            if s.is_dir() {
+            if s.is_dir() && !private_share(&home, s) {
                 out.push(s.clone());
             }
         }
         out.iter()
             .filter_map(|p| std::fs::canonicalize(p).ok())
+            .filter(|p| !private_share(&home, p))
             .fold(vec![], |mut acc: Vec<PathBuf>, p| {
                 if !acc.iter().any(|a| p.starts_with(a)) {
                     acc.retain(|a| !a.starts_with(&p));
@@ -456,8 +487,14 @@ impl Job {
         // A crash can leave the slot's tap and exports behind.
         let _ = helper(&self.cfg, &["down", &slot]).await;
         helper(&self.cfg, &["up", &slot]).await?;
-        let shares = self.shares();
-        for s in shares.iter().chain(self.home.iter().map(|(h, _)| h)) {
+        let mut shares = self.shares();
+        // The home is the member's folder, so a share already; never one twice.
+        if let Some((h, _)) = &self.home
+            && !shares.iter().any(|s| h.starts_with(s))
+        {
+            shares.push(h.clone());
+        }
+        for s in &shares {
             helper(&self.cfg, &["export", &slot, &s.to_string_lossy(), "rw"]).await?;
         }
         let _ = std::fs::remove_dir_all(&self.vm_dir);
@@ -795,6 +832,67 @@ mod tests {
         assert_eq!(GUEST_PATH.split(':').next(), Some(crate::github::GUEST_BIN));
         let (env, _) = guest_env(&[("CHAT_GITHUB_AS".to_string(), "Ann".to_string())]);
         assert!(env.contains(&("CHAT_GITHUB_AS".to_string(), "Ann".to_string())));
+    }
+
+    #[test]
+    fn the_daemon_users_home_and_its_dot_folders_are_never_shared() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        for d in [".claude", ".config/team-chat", "team-chat-runs/r1"] {
+            std::fs::create_dir_all(home.join(d)).unwrap();
+        }
+        assert!(private_share(&home, &home));
+        assert!(private_share(&home, &home.join(".claude")));
+        assert!(private_share(&home, &home.join(".config/team-chat")));
+        assert!(!private_share(&home, &home.join("team-chat-runs/r1")));
+        assert!(!private_share(&home, tmp.path()));
+    }
+
+    #[test]
+    fn a_vm_shares_its_members_folder_at_its_host_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = |s: &str| {
+            let d = tmp.path().join(s);
+            std::fs::create_dir_all(&d).unwrap();
+            d
+        };
+        let (run_dir, cwd, homes) = (p("runs/r1"), p("lines/l1"), p("homes"));
+        let mut cfg = crate::config::Config::parse(&format!(
+            "server_url = \"http://127.0.0.1:1\"\ntoken_file = \"/nonexistent\"\n[runtimes.claude]\nkind = \"claude\"\n[vm]\nkernel = \"/k\"\nrootfs = \"/r\"\nhomes = \"{}\"\n",
+            homes.display()
+        ))
+        .unwrap()
+        .vm
+        .take()
+        .unwrap();
+        // An old config that still names the CLIs' sign-in folders: they are skipped.
+        cfg.shares = vec![crate::config::home().join(".claude")];
+        let env = vec![
+            ("HOME".to_string(), "/home/runner".to_string()),
+            ("CHAT_BOT_MEMBER_ID".to_string(), "01BOT".to_string()),
+        ];
+        let home = bot_home(&cfg.homes, &env);
+        let job = Job {
+            cfg: cfg.clone(),
+            slots: Arc::default(),
+            slot: 0,
+            tools: PathBuf::new(),
+            vm_dir: p("vms/r1"),
+            run_dir: run_dir.clone(),
+            cwd: cwd.clone(),
+            env,
+            home: home.clone(),
+            program: "claude".into(),
+            args: vec![],
+        };
+        let shares = job.shares();
+        let canon = |d: &Path| std::fs::canonicalize(d).unwrap();
+        assert!(shares.contains(&canon(&homes.join("01BOT"))));
+        assert!(shares.contains(&canon(&run_dir)) && shares.contains(&canon(&cwd)));
+        assert_eq!(shares.len(), 3, "{shares:?}");
+        let (host, guest) = home.unwrap();
+        assert_eq!(host, canon(&homes.join("01BOT")));
+        assert_eq!(guest, "/home/runner");
     }
 
     #[test]

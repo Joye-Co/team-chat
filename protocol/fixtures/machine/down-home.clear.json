@@ -1,0 +1,9 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "usable, feature homes: empty one AI member's home folder",
+  "value": {
+    "t": "home.clear",
+    "memberId": "01JBX0BOT000000000000000AC"
+  }
+}

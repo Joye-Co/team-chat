@@ -63,10 +63,18 @@ pub fn aside_capable(kind: &str) -> bool {
 pub fn vm_note(vm: &crate::config::VmConfig) -> String {
     let kept = if vm.homes.as_os_str().is_empty() {
         "Your working folder is kept for your next run in this topic; nothing outside it is kept."
+            .to_string()
     } else {
-        "Your working folder is kept for your next run in this topic, and your home folder \
+        let size = if crate::vm_home::limited(vm) {
+            format!(" Your home folder holds {} GB in all.", vm.home_gb)
+        } else {
+            String::new()
+        };
+        format!(
+            "Your working folder is kept for your next run in this topic, and your home folder \
 ($HOME) for all your runs: install tools and sign in there, and look there for what a run in \
-another topic left. /tmp and everything else outside these two are gone after this run."
+another topic left. /tmp and everything else outside these two are gone after this run.{size}"
+        )
     };
     format!(
         "You run in a virtual machine that was started for this run and is deleted when you end \
@@ -74,6 +82,12 @@ your turn. {kept} Every process still running when your turn ends is killed: whe
 something you need the result of (a sign-in that waits for a person, a build, a test run), wait \
 for it in the foreground before you finish, never in the background."
     )
+}
+
+/// How long a VM run's sign-in must last: the run's limit (2 hours when the server sets none)
+/// and half an hour more.
+pub fn vm_run_need(a: &RunAssign) -> Duration {
+    Duration::from_millis(a.max_duration_ms.unwrap_or(2 * 3_600_000)) + Duration::from_secs(1800)
 }
 
 /// The run's working folder. A side chat run gets its own (read-only) checkout; every other
@@ -454,6 +468,11 @@ pub async fn supervise(ctx: RunCtx) {
             redactor.clone(),
         ))
     });
+    // A VM member's own folder (its home: a fixed-size disk image), ready before anything uses it.
+    let vm_member = match cfg.vm.as_ref().filter(|_| exec.isolated()) {
+        Some(vm) => Some(crate::vm_home::ensure(vm, &assign.bot_member_id).await),
+        None => None,
+    };
     // A VM member's kept home: no GitHub sign-in of an earlier run is used again.
     if let (Some(vm), Some(_)) = (&cfg.vm, &github)
         && crate::github::clear_home(&vm.homes, &assign.bot_member_id)
@@ -483,6 +502,26 @@ pub async fn supervise(ctx: RunCtx) {
                     }
                 }
             }
+            // In a VM the CLI uses its member's own folders and a copy of the sign-in that cannot
+            // change this host's (机 3.2).
+            let vm_ready = match &vm_member {
+                Some(Ok(member)) => crate::vm_login::prepare(
+                    &rt,
+                    member,
+                    &cwd,
+                    assign.resume_session_id.as_deref(),
+                    vm_run_need(&assign),
+                    &mut env,
+                )
+                .await
+                .map(|token| {
+                    if let Some(t) = token {
+                        redactor.add(&t);
+                    }
+                }),
+                Some(Err(e)) => Err(format!("the AI member's home folder is not ready: {e}")),
+                None => Ok(()),
+            };
             // Marks the run's processes, also tools that leave the CLI's tree (proctree).
             env.push((proctree::ENV_FOLDER.into(), dir.display().to_string()));
             let gate = Arc::new(crate::secrets::Gate::for_run(
@@ -530,6 +569,63 @@ pub async fn supervise(ctx: RunCtx) {
                     .unwrap_or_default(),
             ));
             outputs.set_gates(gates.clone());
+            // Shims first on PATH for the programs the kinds are about: commands inside scripts
+            // and spellings the patterns miss stop too (crate::shim). In a VM they are on the
+            // tools disk.
+            if !gates.is_empty() && chat_run.is_some() {
+                let bin = if exec.isolated() {
+                    crate::github::GUEST_BIN.to_string()
+                } else {
+                    let path = env
+                        .iter()
+                        .find(|(k, _)| k == "PATH")
+                        .map(|(_, v)| std::ffi::OsString::from(v))
+                        .unwrap_or_default();
+                    if let Err(e) = crate::shim::install(&dir.join("bin"), &path) {
+                        eprintln!("{} run {run_id}: shims left out: {e}", now_ms());
+                    }
+                    dir.join("bin").display().to_string()
+                };
+                env.retain(|(k, _)| k != crate::shim::ENV_GATES);
+                env.push((crate::shim::ENV_GATES.into(), "1".into()));
+                // Claude Code runs Bash with the PATH of the user's shell profile: put the shims
+                // first again before each command. (Windows: Git Bash, not done there.)
+                if rt.kind == "claude"
+                    && cfg!(unix)
+                    && !env.iter().any(|(k, _)| k == crate::shim::CLAUDE_ENV_FILE)
+                {
+                    match crate::shim::claude_env_file(&dir, &bin) {
+                        Ok(f) => {
+                            env.push((crate::shim::CLAUDE_ENV_FILE.into(), f.display().to_string()))
+                        }
+                        Err(e) => eprintln!("{} run {run_id}: no Claude env file: {e}", now_ms()),
+                    }
+                }
+                // Codex (and an ACP agent) runs each command in the user's login shell
+                // (`zsh -lc`): on macOS path_helper, or a profile, would put the shims last.
+                // A zsh of the run reads the user's own files, then puts them first again.
+                // (A login bash re-reads the system profile with no such hook: not covered.)
+                if rt.kind != "claude" && cfg!(unix) && !exec.isolated() {
+                    match crate::shim::zsh_dotdir(&dir, &bin) {
+                        Ok(zdot) => {
+                            let own = env
+                                .iter()
+                                .find(|(k, _)| k == crate::shim::ZDOTDIR)
+                                .map(|(_, v)| v.clone())
+                                .or_else(|| std::env::var(crate::shim::ZDOTDIR).ok())
+                                .filter(|v| !v.is_empty());
+                            env.retain(|(k, _)| {
+                                k != crate::shim::ZDOTDIR && k != crate::shim::ENV_USER_ZDOTDIR
+                            });
+                            if let Some(own) = own {
+                                env.push((crate::shim::ENV_USER_ZDOTDIR.into(), own));
+                            }
+                            env.push((crate::shim::ZDOTDIR.into(), zdot.display().to_string()));
+                        }
+                        Err(e) => eprintln!("{} run {run_id}: no zsh files: {e}", now_ms()),
+                    }
+                }
+            }
             let gate_hook =
                 (!gates.is_empty()).then(|| dir.join("bin").join(crate::chat_run::link_name()));
             let gate_alive = (!gates.is_empty()).then(|| gates.alive());
@@ -578,7 +674,9 @@ pub async fn supervise(ctx: RunCtx) {
             };
             let work = spec.cwd.clone();
             // The hook asks through chat-run: a gated run never goes on without it.
-            let res = if ungated {
+            let res = if let Err(e) = vm_ready {
+                (Outcome::failed(e), false)
+            } else if ungated {
                 (
                     Outcome::failed(format!(
                         "this run has commands that need a person's approval, and the {} on \
@@ -952,6 +1050,29 @@ async fn run_runtime(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_vm_run_is_told_its_home_size_and_its_sign_in_outlasts_its_limit() {
+        let vm = |extra: &str| {
+            Config::parse(&format!(
+                "server_url = \"http://127.0.0.1:1\"\ntoken_file = \"/nonexistent\"\n[runtimes.claude]\nkind = \"claude\"\n[vm]\nkernel = \"/k\"\nrootfs = \"/r\"\n{extra}"
+            ))
+            .unwrap()
+            .vm
+            .unwrap()
+        };
+        assert!(vm_note(&vm("")).contains("Your home folder holds 20 GB in all."));
+        assert!(!vm_note(&vm("home_gb = 0\n")).contains("GB in all"));
+        assert!(vm_note(&vm("homes = ''\n")).contains("nothing outside it is kept"));
+        let mut a: RunAssign = serde_json::from_value(serde_json::json!({
+            "runId": "r1", "botMemberId": "B1", "groupId": "g", "topicId": "t",
+            "runtime": "claude", "prompt": "p", "leaseMs": 600000
+        }))
+        .unwrap();
+        assert_eq!(vm_run_need(&a), Duration::from_secs(9000));
+        a.max_duration_ms = Some(600_000);
+        assert_eq!(vm_run_need(&a), Duration::from_secs(2400));
+    }
 
     /// A sleep moves a working run's clocks by the time asleep, once. A paused run's clocks
     /// stay: the hand-back moves them by the whole pause, sleep included.
