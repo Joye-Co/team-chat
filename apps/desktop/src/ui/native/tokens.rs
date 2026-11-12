@@ -681,6 +681,21 @@ pub mod avatar {
     pub const PRESENCE_RING: Pixels = px(2.);
 }
 
+/// The pastel fill of an agent avatar tile (§1.8), one of eight per member
+/// (`theme::MEMBER_TINTS` order: Jojo, Watch, Taro, Forge, Tata, Ledger,
+/// Pocket, Scout). The one exception to the black and white palette: the
+/// character art needs a light, colored ground to read in both modes.
+pub mod member_tint {
+    pub const LIGHT: [u32; 8] = [
+        0xF3E6BFFF, 0xD8ECEFFF, 0xEFDDEBFF, 0xF6E1D3FF, 0xDCE5F7FF, 0xF4DDE3FF, 0xE4E2F4FF,
+        0xDCEFE2FF,
+    ];
+    pub const DARK: [u32; 8] = [
+        0xCFC39EFF, 0xB4C6C9FF, 0xCAB9C6FF, 0xD0BDB0FF, 0xB8C1D2FF, 0xCDB9BEFF, 0xC0BED0FF,
+        0xB7C9BCFF,
+    ];
+}
+
 /// Shadows (§1.7). GPUI blurs by the standard deviation and CSS by twice
 /// it, so each CSS blur is halved here.
 pub mod shadow {

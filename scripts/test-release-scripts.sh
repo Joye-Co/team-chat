@@ -90,7 +90,8 @@ upload_stub() {
         notes: Buffer.from(req.headers.get("x-release-notes") ?? "", "base64").toString("utf8"),
       }));
       const windows = url.pathname.endsWith("/assets/windows");
-      require("node:fs").appendFileSync(process.env.UPLOAD_OUT.replace(/upload\.json$/, "uploads.log"), (windows ? "windows" : "macos") + "\n");
+      const other = url.pathname.match(/\/assets\/([a-z0-9_-]+)$/);
+      require("node:fs").appendFileSync(process.env.UPLOAD_OUT.replace(/upload\.json$/, "uploads.log"), (other ? other[1] : "macos") + "\n");
       const status = (windows ? process.env.STUB_WINDOWS : process.env.STUB_MACOS) || process.argv[2];
       return new Response("{}", { status: ok ? Number(status) : 401 });
     } })' "$PORT" "$1" >"$WORK/stub.log" 2>&1 &
@@ -184,8 +185,8 @@ else
 fi
 
 # --- the previous Windows installer, for the publisher comparison of a release -----------------
-# A stand-in for gh: releases newest first; v9.9.9 is the release being made (the macOS job has
-# created it already), v9.9.8 has no installer, v9.9.7 has one. GH_FAIL makes one call fail.
+# A stand-in for gh: releases newest first; v9.9.9 is the release being made (it exists
+# already), v9.9.8 has no installer, v9.9.7 has one. GH_FAIL makes one call fail.
 FAKE_BIN="$WORK/fake-bin"
 rm -rf "$FAKE_BIN" "$WORK/previous" && mkdir -p "$FAKE_BIN"
 cat >"$FAKE_BIN/gh" <<'GH'
@@ -545,6 +546,30 @@ upload_stub 200
 expect ok "add-windows completes it" rel --add-windows "$SB/win/$NAME-9.9.9-setup.exe" --asset "$SB/win/x-daemon-9.9.9-x86_64-pc-windows-msvc.exe"
 expect ok "the server got the installer" is "$(uploads)" "windows "
 expect ok "and the GitHub Release has both systems" is "$(released)" "$NAME-9.9.9-setup.exe $NAME-9.9.9.dmg x-daemon-9.9.9-aarch64-apple-darwin x-daemon-9.9.9-x86_64-pc-windows-msvc.exe "
+
+# The two halves of the Release workflow: --build-only on the Mac, --prebuilt where it publishes.
+sandbox; upload_stub 200
+printf 'linux daemon' >"$SB/win/$(product slug)-daemon-9.9.9-x86_64-unknown-linux-gnu"
+LINUX=(--linux-daemon "$SB/win/$(product slug)-daemon-9.9.9-x86_64-unknown-linux-gnu")
+expect ok "build-only builds without the installer" rel --notes docs/releases/9.9.9.md --build-only
+expect ok "and keeps the DMG, the daemon and the version files" bash -c "test -s '$SB/repo/dist/$NAME-9.9.9.dmg' && test -s '$SB/repo/dist/x-daemon-9.9.9-aarch64-apple-darwin' && grep -q '9.9.9' '$SB/repo/dist/release-files/Cargo.toml' && grep -qE '^## 9\.9\.9 \([0-9-]+\)$' '$SB/repo/dist/release-files/CHANGELOG.md'"
+expect ok "the working tree is as before" bash -c "[ -z \"\$(git -C '$SB/repo' status --porcelain)\" ]"
+expect ok "nothing is tagged, released or uploaded" bash -c "[ -z \"\$(git -C '$SB/origin.git' tag)\" ] && [ ! -d '$SB/gh/v9.9.9' ] && [ ! -e '$WORK/uploads.log' ]"
+expect fail "build-only takes no installer" rel --build-only --windows-installer "$SB/win/$NAME-9.9.9-setup.exe"
+mv "$SB/repo/dist" "$SB/mac"
+# What is published is that build, not one made again where it is published.
+printf 'the dmg the Mac built' >"$SB/mac/$NAME-9.9.9.dmg"
+expect ok "a dry run of the publishing half checks the build" rel "${BOTH[@]}" "${LINUX[@]}" --prebuilt "$SB/mac" --dry-run
+expect ok "and changes nothing" bash -c "[ -z \"\$(git -C '$SB/repo' status --porcelain)\" ] && [ ! -d '$SB/gh/v9.9.9' ]"
+expect ok "the publishing half releases the prebuilt files" rel "${BOTH[@]}" "${LINUX[@]}" --prebuilt "$SB/mac"
+expect ok "the GitHub Release holds every system's files" is "$(released)" "$NAME-9.9.9-setup.exe $NAME-9.9.9.dmg $(product slug)-daemon-9.9.9-x86_64-unknown-linux-gnu x-daemon-9.9.9-aarch64-apple-darwin x-daemon-9.9.9-x86_64-pc-windows-msvc.exe "
+expect ok "the DMG is the one that was built" is "$(cat "$SB/gh/v9.9.9/$NAME-9.9.9.dmg" 2>/dev/null)" "the dmg the Mac built"
+expect ok "the server got the DMG, the installer and the Linux daemon" is "$(uploads)" "macos windows linux-x86_64 "
+expect ok "main has the release commit with the version" bash -c "[ \"\$(git -C '$SB/origin.git' log --format=%s -1 main)\" = 'chore(release): v9.9.9' ] && git -C '$SB/origin.git' show main:Cargo.toml | grep -q 9.9.9"
+sandbox; upload_stub 200
+expect fail "a prebuilt folder without the build is refused" rel "${BOTH[@]}" --prebuilt "$SB/win"
+expect ok "before anything is public" bash -c "[ -z \"\$(git -C '$SB/origin.git' tag)\" ] && [ ! -d '$SB/gh/v9.9.9' ]"
+expect fail "a Linux daemon of another name is refused" rel "${BOTH[@]}" --linux-daemon "$SB/win/x-daemon-9.9.9-x86_64-pc-windows-msvc.exe"
 
 # A server without the installer's route in a release: red, not a silent skip.
 sandbox; STUB_WINDOWS=404 upload_stub 200

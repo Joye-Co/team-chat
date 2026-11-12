@@ -1,7 +1,7 @@
 name: Release
 
-# Makes a desktop release on a macOS runner by running scripts/release.sh, the same script a
-# maintainer runs on a Mac: release-check, version and CHANGELOG date, build-dmg + test-dmg,
+# Makes a desktop release by running scripts/release.sh, the same script a maintainer runs on
+# a Mac: release-check, version and CHANGELOG date, build-dmg + test-dmg,
 # build-daemon, the chore(release) commit on main, the tag, the GitHub Release with the DMG and the
 # daemon (GitHub keeps each asset's SHA-256 digest), and PUT /v1/admin/releases/<version> on production.
 #
@@ -9,20 +9,24 @@ name: Release
 # Not on a tag push: the release commit (version and CHANGELOG date) must come before the tag,
 # so a tag trigger would put that step back on somebody's Mac; and a dispatch can be a dry run.
 #
-# A release is one thing for both systems. The job "Windows installer" runs first: it builds,
-# signs and tests <name>-<version>-setup.exe on a Windows runner (install, uninstall, and the
-# update from the previous release with the daemon running). Only when it is green does the
-# macOS job publish: one GitHub Release with the DMG, the installer and the daemons, and both
-# files on production. A Windows build that fails stops the release before anything is public.
+# A release is one thing for every system. Three jobs build at the same time: "Mac app" builds,
+# signs and checks the DMG and the Mac daemon (scripts/release.sh --build-only), "Windows
+# installer" builds, signs and tests <name>-<version>-setup.exe (install, uninstall, and the
+# update from the previous release with the daemon running), "Linux daemon" builds the daemon
+# for Linux hosts. Only when all three are green does the job "Publish" make anything public
+# (scripts/release.sh --prebuilt): the release commit and the tag on main, one GitHub Release
+# with the DMG, the installer and the daemons, and the files on production. A build that
+# fails stops the release before anything is public.
 # A release that stopped after its tag was pushed and before the GitHub Release was made is
-# resumed by starting mode release again: both jobs then build the tag. The Mac alone is
+# resumed by starting mode release again: every job then builds the tag. The Mac alone is
 # released only with release_mac_without_windows (an emergency; the run says so loudly).
 #
 # Modes:
 #   dry-run       (default, any branch) preflight and plan, then set the version in the working
-#                 tree, build, sign and check the DMG, the daemon and the Windows installer;
-#                 commits, tags and uploads nothing. The built files are kept as workflow
-#                 artifacts for 7 days.
+#                 tree, build, sign and check the DMG, the daemons and the Windows installer,
+#                 and check in "Publish" that they are what a release would publish; commits,
+#                 tags and uploads nothing. The built files are kept as workflow artifacts
+#                 for 7 days.
 #   release       (main only) the whole release, both systems.
 #   upload-only   (main only) download the DMG and the installer from the GitHub Release
 #                 v<version> and upload them to production again (scripts/release.sh
@@ -48,9 +52,9 @@ name: Release
 #
 # Linux: the job "Linux daemon" builds <slug>-daemon-<version>-x86_64-unknown-linux-gnu (the
 # daemon alone, for Linux hosts) on an Ubuntu runner in the modes dry-run and release.
-# "Publish the Linux daemon" adds it to the GitHub Release and uploads it to production as the
-# linux-x86_64 file of the release, which Linux daemons update themselves from (release), or
-# uploads the daemon of the GitHub Release again (upload-only). A prerelease: GitHub only.
+# "Publish" adds it to the GitHub Release and uploads it to production as the linux-x86_64
+# file of the release, which Linux daemons update themselves from (release), or uploads the
+# daemon of the GitHub Release again (upload-only). A prerelease: GitHub only.
 
 # The jobs are in release-jobs.yml (a called workflow, so that the server URLs are masked in
 # the logs).

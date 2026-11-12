@@ -229,6 +229,11 @@ jobs:
       needs.changes.outputs.all == 'true'
     runs-on: macos-15
     timeout-minutes: 20
+    env:
+      # The crates under third_party/ (gpui and its components) are path dependencies: the
+      # Rust cache does not keep them, sccache does.
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install the toolchain from rust-toolchain.toml
@@ -237,6 +242,7 @@ jobs:
         with:
           shared-key: macos
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
       - name: cargo test
         run: cargo test --locked -p desktop
       # The isolation of an 产出 page in a real WKWebView (tests/isolation.rs): a security
@@ -255,6 +261,11 @@ jobs:
       needs.changes.outputs.all == 'true'
     runs-on: windows-2025
     timeout-minutes: 25
+    env:
+      # The crates under third_party/ (gpui and its components) are path dependencies: the
+      # Rust cache does not keep them, sccache does.
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
     defaults:
       run:
         shell: bash
@@ -266,6 +277,7 @@ jobs:
         with:
           shared-key: windows-desktop
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
       - name: cargo test
         run: cargo test --locked -p desktop
 

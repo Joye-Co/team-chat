@@ -455,7 +455,11 @@ pub fn restore(services: &Services, cx: &mut App) {
     let (todo, group, topic) = resolve_saved(saved.as_ref(), &groups, |g, t| {
         provider.topic(g, t).is_some()
     });
-    let page = saved.as_ref().and_then(saved_page);
+    // The first start opens 首页, where 从这里开始 walks a new member to the first 话题.
+    let page = match &saved {
+        Some(s) => saved_page(s),
+        None => Some(Place::Desk),
+    };
     services.nav.update(cx, |nav, cx| {
         match page {
             Some(Place::Desk) => return nav.open_desk(cx),

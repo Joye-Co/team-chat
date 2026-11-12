@@ -19,6 +19,7 @@ pub mod done;
 pub mod list;
 pub mod model;
 pub mod scenes;
+pub mod start;
 pub mod working;
 
 use std::{collections::HashMap, rc::Rc, time::Duration};
@@ -52,6 +53,9 @@ use crate::{
 /// The rows a section shows before its `看全部` footer.
 const SECTION_ROWS: usize = 6;
 
+/// How often 从这里开始 asks again whether a computer came online.
+const COMPUTERS_EVERY: Duration = Duration::from_secs(10);
+
 pub use model::{Answer, AskCard, Snapshot};
 
 /// How long an answer waits before it is sent; 撤回 shows meanwhile.
@@ -82,20 +86,41 @@ pub struct DeskPage {
     /// Sections opened past [`SECTION_ROWS`] with `看全部`.
     expanded: std::collections::HashSet<&'static str>,
     next_token: u64,
+    /// 从这里开始: a computer is online for AI 成员 (`None` until `machines()` answered).
+    computer_ready: Option<bool>,
     _subscriptions: Vec<Subscription>,
+    _computers: gpui::Task<()>,
 }
 
 impl DeskPage {
     pub fn new(services: Services, cx: &mut Context<Self>) -> Self {
         cx.default_global::<model::DeskAnswers>();
         let subscriptions = vec![
-            cx.subscribe(&services.hub, |this, _, _: &Changes, cx| {
+            cx.subscribe(&services.hub, |this, _, changes: &Changes, cx| {
                 this.snapshot = None;
+                if changes.any(|c| matches!(c, crate::data::Change::Session)) {
+                    this.load_computers(cx);
+                }
                 cx.notify();
             }),
             cx.observe(&services.nav, |_, _, cx| cx.notify()),
         ];
+        // 从这里开始 ticks 准备电脑 by itself once a computer comes online.
+        let computers = cx.spawn(async move |this, cx| {
+            loop {
+                let Ok(()) = this.update(cx, |this, cx| {
+                    if this.computer_ready != Some(true) {
+                        this.load_computers(cx);
+                    }
+                }) else {
+                    break;
+                };
+                cx.background_executor().timer(COMPUTERS_EVERY).await;
+            }
+        });
         Self {
+            computer_ready: None,
+            _computers: computers,
             services,
             snapshot: None,
             answers: HashMap::new(),
@@ -105,6 +130,28 @@ impl DeskPage {
             next_token: 0,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Asks the server whether any computer is online, for 从这里开始.
+    fn load_computers(&mut self, cx: &mut Context<Self>) {
+        if self.start_facts().involved {
+            return;
+        }
+        let reply = self.services.provider.machines();
+        let this_mac = self.services.provider.this_mac();
+        cx.spawn(async move |this, cx| {
+            let ready = match reply.await {
+                Ok(Ok(list)) => start::Facts::computer_of(&list, this_mac),
+                _ => return,
+            };
+            let _ = this.update(cx, |this, cx| {
+                if this.computer_ready != Some(ready) {
+                    this.computer_ready = Some(ready);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
     }
 
     /// What the page shows: read once per change (a breathing dot renders
@@ -385,98 +432,6 @@ impl DeskPage {
                 Some((Sym::Waiting, k.secondary)),
                 cx,
             ))
-    }
-}
-
-impl DeskPage {
-    /// Onboarding: 首页 for a member no 话题 involves yet (a new member): 从这里开始,
-    /// with the way to talk to the default bot (its 私聊), to start a 话题 and to open the
-    /// first 群, instead of 都处理完了 to someone who has not started. None once any
-    /// 话题 involves me.
-    fn first_run(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let p = &self.services.provider;
-        let me = self.services.me();
-        let groups = p.groups();
-        let involved = groups.iter().any(|g| {
-            p.topics(&g.id)
-                .iter()
-                .any(|t| crate::views::rail::model::involves_me(p.as_ref(), me.as_deref(), t))
-        });
-        if involved {
-            return None;
-        }
-        let k = native_colors(cx);
-        let bot = p
-            .side_chat_default_member()
-            .and_then(|id| p.member(&id))
-            .filter(|m| Some(&m.id) != me.as_ref());
-        let mut actions = Vec::new();
-        if let Some(bot) = &bot {
-            let id = bot.id.clone();
-            actions.push(
-                push_button(
-                    "desk-start-dm",
-                    fill(c::DESK_START_DM, &[("name", &bot.name)]),
-                    PushStyle::Default,
-                    PushSize::Small,
-                    cx,
-                )
-                .on_click(move |_, _, cx| crate::views::nav::open_dm_with(id.clone(), cx))
-                .into_any_element(),
-            );
-        }
-        let topic_style = if bot.is_some() {
-            PushStyle::Outline
-        } else {
-            PushStyle::Default
-        };
-        actions.push(
-            push_button(
-                "desk-start-topic",
-                c::DESK_NEW_TOPIC,
-                topic_style,
-                PushSize::Small,
-                cx,
-            )
-            .on_click(|_, window, cx| window.dispatch_action(Box::new(NewTopic), cx))
-            .into_any_element(),
-        );
-        if let Some(g) = groups
-            .iter()
-            .find(|g| g.kind == crate::data::GroupKind::Group)
-        {
-            let (nav, id) = (self.services.nav.clone(), g.id.clone());
-            actions.push(
-                push_button(
-                    "desk-start-group",
-                    fill(c::DESK_START_GROUP, &[("name", &g.name)]),
-                    PushStyle::Outline,
-                    PushSize::Small,
-                    cx,
-                )
-                .on_click(move |_, _, cx| {
-                    let id = id.clone();
-                    nav.update(cx, |n, cx| n.open_group(id, cx))
-                })
-                .into_any_element(),
-            );
-        }
-        Some(
-            div()
-                .flex_none()
-                .flex()
-                .rounded(m::FRAME_RADIUS)
-                .border_1()
-                .border_color(k.separator)
-                .child(page::page_empty(
-                    Sym::Compose,
-                    c::DESK_START_TITLE,
-                    c::DESK_START_BODY,
-                    actions,
-                    cx,
-                ))
-                .into_any_element(),
-        )
     }
 }
 
