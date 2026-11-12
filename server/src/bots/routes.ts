@@ -43,6 +43,7 @@ import {
   loadRunner,
   newMachineToken,
   requireMachineManager,
+  requireMachineRow,
   revokeMachines,
   runIndex,
 } from "./store";
@@ -57,6 +58,13 @@ export function sessionKey(runId: string): string {
 async function requireBot(db: D1Database, id: string) {
   const m = await getMember(db, id);
   if (!m || m.kind !== "bot") throw new ApiError("not_found", "bot not found");
+  return m;
+}
+
+/** The AI member, when the caller may manage it: an admin, or (design-personal-ai) its own person. */
+async function requireBotFor(db: D1Database, a: AuthContext, id: string) {
+  const m = await requireBot(db, id);
+  if (a.member.level !== "owner" && m.owner_id !== a.memberId) throw new ApiError("forbidden", "only an admin or its own person manages this AI member");
   return m;
 }
 
@@ -87,7 +95,9 @@ async function visibleMachines(env: Env, a: AuthContext, only?: string): Promise
       out.push({ ...m, personalBots });
       continue;
     }
-    if (view.ownerId === undefined && admin) {
+    // design-personal-ai: a computer an admin set up for someone (an intern's on the team's host)
+    // stays the admins' to look after: they see it in full (its owner's checked AI members aside).
+    if ((view.ownerId === undefined || row.created_by !== view.ownerId) && admin) {
       out.push(m);
       continue;
     }
@@ -187,25 +197,32 @@ export function registerBotRoutes(): void {
   registerRoute({
     method: "PUT",
     path: "/v1/bots/:id/runner",
-    auth: "owner",
+    auth: "member",
     async handler({ env, params, auth, body }) {
       const req = await body(SetBotRunnerRequest);
-      await requireBot(env.DB, params.id);
       const a = auth as AuthContext;
-      if (req.machineId) {
+      const bot = await requireBotFor(env.DB, a, params.id);
+      const stored = await env.DB.prepare("SELECT machine_id FROM bot_runners WHERE member_id = ?")
+        .bind(params.id)
+        .first<{ machine_id: string | null }>();
+      const machineId = req.machineId === undefined ? (stored?.machine_id ?? null) : req.machineId;
+      // design-personal-ai: an AI member of someone's own runs only on that person's machines.
+      if (bot.owner_id && !machineId) {
+        throw new ApiError("invalid", "an AI member of someone's own runs on one of his computers", "bot.own_needs_machine");
+      }
+      if (machineId) {
         const m = await env.DB.prepare("SELECT id, owner_id FROM machines WHERE id = ? AND revoked_at IS NULL")
-          .bind(req.machineId)
+          .bind(machineId)
           .first<{ id: string; owner_id: string | null }>();
         if (!m) throw new ApiError("not_found", "machine not found");
-        // Placing an AI member on a personal machine is its owner's call; sending the stored
-        // machine back (an edit of the model, runtime or labels) is always allowed.
-        if (m.owner_id && m.owner_id !== a.memberId) {
-          const stored = await env.DB.prepare("SELECT machine_id FROM bot_runners WHERE member_id = ?")
-            .bind(params.id)
-            .first<{ machine_id: string | null }>();
-          if (stored?.machine_id !== req.machineId) {
-            throw new ApiError("forbidden", "only its owner places an AI member on a personal machine", "machine.not_yours");
+        if (bot.owner_id) {
+          if (m.owner_id !== bot.owner_id) {
+            throw new ApiError("forbidden", "an AI member of someone's own runs only on his computers", "machine.not_yours");
           }
+        } else if (m.owner_id && m.owner_id !== a.memberId && stored?.machine_id !== machineId) {
+          // Placing an AI member on a personal machine is its owner's call; sending the stored
+          // machine back (an edit of the model, runtime or labels) is always allowed.
+          throw new ApiError("forbidden", "only its owner places an AI member on a personal machine", "machine.not_yours");
         }
       }
       const now = Date.now();
@@ -250,8 +267,9 @@ export function registerBotRoutes(): void {
   registerRoute({
     method: "GET",
     path: "/v1/bots/:id/runner",
-    auth: "owner",
-    async handler({ env, params }) {
+    auth: "member",
+    async handler({ env, params, auth }) {
+      await requireBotFor(env.DB, auth as AuthContext, params.id);
       const r = await loadRunner(env.DB, params.id);
       if (!r) throw new ApiError("not_found", "bot is not runner-backed");
       return r;
@@ -261,8 +279,9 @@ export function registerBotRoutes(): void {
   registerRoute({
     method: "DELETE",
     path: "/v1/bots/:id/runner",
-    auth: "owner",
+    auth: "member",
     async handler({ env, params, auth }) {
+      await requireBotFor(env.DB, auth as AuthContext, params.id);
       const res = await env.DB.batch([
         env.DB.prepare("DELETE FROM bot_runners WHERE member_id = ?").bind(params.id),
         auditStatement(env.DB, auth as AuthContext, { action: "bot.runner.delete", target: params.id }),
@@ -286,10 +305,18 @@ export function registerBotRoutes(): void {
       const a = auth as AuthContext;
       // An admin without `personal` makes a team machine (as before); a member always makes his own.
       const admin = a.member.level === "owner";
-      const personal = req.personal ?? !admin;
+      if (req.ownerId !== undefined && !admin) throw new ApiError("forbidden", "only an admin adds a computer for someone else", "machine.team_admin_only");
+      const personal = req.ownerId !== undefined || (req.personal ?? !admin);
       if (!personal && !admin) throw new ApiError("forbidden", "only an admin adds a team machine", "machine.team_admin_only");
-      if (personal && a.member.kind !== "human") throw new ApiError("forbidden", "only people have personal machines");
-      const ownerId = personal ? a.memberId : null;
+      let ownerId = personal ? a.memberId : null;
+      if (req.ownerId !== undefined) {
+        // design-personal-ai: an admin sets up a computer that belongs to someone (an intern's on the team's host).
+        const owner = await getMember(env.DB, req.ownerId);
+        if (!owner || owner.kind !== "human" || owner.deactivated) throw new ApiError("invalid", "ownerId is not an active person");
+        ownerId = owner.id;
+      } else if (personal && a.member.kind !== "human") {
+        throw new ApiError("forbidden", "only people have personal machines");
+      }
       const now = Date.now();
       const id = ulid(now);
       const token = newMachineToken();
@@ -301,7 +328,7 @@ export function registerBotRoutes(): void {
         auditStatement(
           env.DB,
           a,
-          { action: "machine.create", target: id, details: { name: req.name, labels, ...(personal ? { personal: true } : {}) } },
+          { action: "machine.create", target: id, details: { name: req.name, labels, ...(personal ? { personal: true } : {}), ...(req.ownerId ? { ownerId } : {}) } },
           now,
         ),
       ]);
@@ -339,10 +366,18 @@ export function registerBotRoutes(): void {
     async handler({ env, ctx, params, auth, body }) {
       const req = await body(UpdateMachineRequest);
       const a = auth as AuthContext;
-      const m = await requireMachineManager(env.DB, a, params.id);
+      // design-personal-ai: the VM size is an admin's call on every computer, also one that is
+      // someone's own (the host it runs on is the team's).
+      if (req.vm !== undefined && a.member.level !== "owner") throw new ApiError("forbidden", "only an admin sets the VM size", "machine.team_admin_only");
+      const onlyVm = req.name === undefined && req.owner === undefined;
+      const m = onlyVm ? await requireMachineRow(env.DB, params.id) : await requireMachineManager(env.DB, a, params.id);
       const now = Date.now();
       const stmts: D1PreparedStatement[] = [];
       const details: Record<string, unknown> = {};
+      if (req.vm !== undefined) {
+        stmts.push(env.DB.prepare("UPDATE machines SET vm_vcpus = ?, vm_mem_mib = ? WHERE id = ?").bind(req.vm?.vcpus ?? null, req.vm?.memMib ?? null, m.id));
+        details.vm = req.vm;
+      }
       // An ownership change re-checks the owner it was decided on in every statement, with the
       // owner UPDATE last: of two concurrent changes only the first wins, the other changes nothing.
       let guard = "";

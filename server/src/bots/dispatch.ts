@@ -1,6 +1,6 @@
 // Pure rules of the bots feature: machine choice, health gating, approval answers, prompt and
 // progress text. No I/O here, so the rules are easy to test.
-import type { BotRunner, CliInfo, Health, Machine, MachineInfo } from "@chat/protocol";
+import type { BotRunner, CliInfo, Health, Machine, MachineInfo, VmSize } from "@chat/protocol";
 import type { GithubState } from "../monitor/alerts";
 import { REFS_RULE } from "./refs";
 
@@ -338,6 +338,8 @@ export interface MachineView {
    * (`loadMachineViews`): any state when it runs tasks in VMs, else only `signed_in`.
    */
   github?: GithubState;
+  /** design-personal-ai: the VM size an admin set for this machine's runs. */
+  vm?: VmSize;
 }
 
 export function mergeLabels(owner: string[], daemon: string[] | undefined): string[] {
@@ -398,6 +400,8 @@ export interface DispatchCtx {
   fromMachine?: string | null;
   /** Who last changed the AI member's runner (`bot_runners.updated_by`). */
   updatedBy?: string | null;
+  /** design-personal-ai: the AI member's own person; it runs only on his computers, for anyone. */
+  botOwnerId?: string | null;
 }
 
 /**
@@ -409,6 +413,8 @@ export interface DispatchCtx {
  */
 export function mayTake(m: Pick<MachineView, "id" | "labels" | "ownerId" | "personalBots">, runner: RunnerPlace, ctx?: DispatchCtx): boolean {
   const placed = runner.machineId ? m.id === runner.machineId : labelsMatch(runner.labels, m.labels);
+  // design-personal-ai: someone's own AI member works only on his computers, and there for anyone.
+  if (ctx?.botOwnerId) return placed && m.ownerId === ctx.botOwnerId;
   if (!m.ownerId || !ctx) return placed;
   if (ctx.requestedFor === m.ownerId) return placed || m.personalBots?.has(ctx.botId) === true || ctx.fromMachine === m.id;
   return ctx.requestedFor === null && runner.machineId === m.id && ctx.updatedBy === m.ownerId;
@@ -559,6 +565,7 @@ export function toMachine(m: MachineView, createdBy: string, createdAt: number, 
   if (m.health) out.health = m.health;
   if (m.clis) out.clis = m.clis;
   if (m.github) out.github = m.github;
+  if (m.vm) out.vm = m.vm;
   return out;
 }
 

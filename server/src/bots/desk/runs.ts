@@ -308,6 +308,9 @@ export abstract class DeskRuns extends DeskCore {
    */
   protected async placeCtx(r: Pick<RunRow, "id" | "requested_for">): Promise<DispatchCtx> {
     const ctx: DispatchCtx = { botId: this.botId as string, requestedFor: r.requested_for ?? null };
+    // design-personal-ai: an AI member of someone's own runs only on that person's computers.
+    const bot = await this.env.DB.prepare("SELECT owner_id FROM members WHERE id = ?").bind(ctx.botId).first<{ owner_id: string | null }>();
+    if (bot?.owner_id) ctx.botOwnerId = bot.owner_id;
     const from = this.meta(`fromMachine:${r.id}`);
     if (from) ctx.fromMachine = from;
     if (ctx.requestedFor === null) {
@@ -885,6 +888,8 @@ export abstract class DeskRuns extends DeskCore {
     // Only a CLI that can continue it (ACP: an agent with session/load); else the full prompt.
     const prev = machine && resumesRuntime(machine, runner.runtime) ? this.lastSession(r, runner) : undefined;
     if (prev?.session_id && prev.machine_id === machine?.id) frame.resumeSessionId = prev.session_id;
+    // design-personal-ai: the VM size an admin set for this computer (a daemon without VMs ignores it).
+    if (machine?.vm) frame.vm = machine.vm;
     return frame;
   }
 

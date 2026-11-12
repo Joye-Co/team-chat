@@ -3017,6 +3017,9 @@ Rules:
   it. Its owner's machine takes work for it from anyone (the owner chose to let it work there);
   the other rules of personal machines are unchanged.
 - Deactivating a person deactivates his AI members too.
+- `GET /v1/machines`: a personal machine an admin added for someone (`createdBy` is not its
+  `ownerId`) comes in full to admins too, without `personalBots`; its logins, keys, name and
+  removal stay with its owner.
 - `run.assign.vm` carries the machine's `vm` (machine-protocol.md, "Usable features"); the
   daemon caps it at its own limits. A change applies from the next run.
 - Old clients ignore `ownerId` and `vm` and show such an AI member as the team's.

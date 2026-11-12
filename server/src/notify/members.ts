@@ -1,6 +1,6 @@
 // Members admin (PATCH /v1/members/:id) and the audit log reader (GET /v1/audit).
 // See docs/protocol.md, "Members and preferences" and "Audit".
-import { type AuditEntry, MAX_AUDIT_LIMIT, UpdateMemberRequest } from "@chat/protocol";
+import { type AuditEntry, MAX_AUDIT_LIMIT, MAX_OWN_BOTS, UpdateMemberRequest } from "@chat/protocol";
 import { type AuthContext, requireTeamOwner } from "../core/auth";
 import { type MemberRow, getMember, isTeamOwner, toMember } from "../core/db";
 import { gatewayStub } from "../core/env";
@@ -17,15 +17,25 @@ registerRoute({
     const req = await body(UpdateMemberRequest);
     const isOwner = a.member.level === "owner";
     const self = params.id === a.memberId;
-    if (!isOwner && !self) throw new ApiError("forbidden", "only an owner can change other members");
+    const target = await getMember(env.DB, params.id);
+    // Usable (design-personal-ai): a person edits his own AI member's name, 岗位, avatar and
+    // whether it is in use, nothing else.
+    const myBot = !isOwner && !!target && target.kind === "bot" && target.owner_id === a.memberId;
+    if (!isOwner && !self && !myBot) throw new ApiError("forbidden", "only an owner can change other members");
     if (
       !isOwner &&
-      (req.level !== undefined || req.teamOwner !== undefined || req.deactivated !== undefined || req.character !== undefined || req.reportsTo !== undefined || req.weeklyBudgetCents !== undefined)
+      (req.level !== undefined || req.teamOwner !== undefined || req.reportsTo !== undefined || req.weeklyBudgetCents !== undefined ||
+        (!myBot && (req.deactivated !== undefined || req.character !== undefined)))
     ) {
       throw new ApiError("forbidden", "only an owner can change level, character, reportsTo, the budget or deactivate");
     }
-    const target = await getMember(env.DB, params.id);
     if (!target) throw new ApiError("not_found", "member not found");
+    if (myBot && req.deactivated === false && target.deactivated) {
+      const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM members WHERE kind = 'bot' AND owner_id = ? AND deactivated = 0")
+        .bind(a.memberId)
+        .first<{ n: number }>();
+      if ((n?.n ?? 0) >= MAX_OWN_BOTS) throw new ApiError("forbidden", "you already have an AI member of your own", "bot.own_limit");
+    }
     // design-roles 3.2: an admin's or a 所有者's record is the 所有者's to change.
     if (!self && target.level === "owner") requireTeamOwner(a, "only a team owner can change an admin");
     if (req.teamOwner === true && target.kind !== "human") throw new ApiError("invalid", "an AI member cannot be the team owner");

@@ -160,14 +160,15 @@ describe("invites", () => {
     expect(keys.results.some((k) => k.key.includes("198.51.100"))).toBe(false);
   });
 
-  it("creates bots with a token (owner only)", async () => {
+  it("creates bots with a token (an admin; a member only his own, see personal-ai.test.ts)", async () => {
     const owner = await createMember({ level: "owner" });
     const r = await api("/v1/bots", { token: owner.token, body: { name: "Builder", role: "CI" } });
     expect(r.status).toBe(200);
     expect(r.body.member).toMatchObject({ kind: "bot", name: "Builder", level: "member" });
     expect((await api("/v1/me", { token: r.body.token })).body.kind).toBe("bot");
     const member = await createMember();
-    expect((await api("/v1/bots", { token: member.token, body: { name: "B" } })).status).toBe(403);
+    expect((await api("/v1/bots", { token: member.token, body: { name: "B" } })).body.member.ownerId).toBe(member.id);
+    expect((await api("/v1/bots", { token: member.token, body: { name: "C" } })).status).toBe(403);
   });
 });
 

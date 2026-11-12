@@ -59,13 +59,16 @@ export interface MachineRow {
   last_seen_at: number | null;
   /** Usable (migration 0017_machine_owner): the person whose own machine it is; NULL = a team machine. */
   owner_id?: string | null;
+  /** Usable (migration 0020_personal_ai): the VM size an admin set; NULL = the daemon's own. */
+  vm_vcpus?: number | null;
+  vm_mem_mib?: number | null;
 }
 
 /** D1 rows joined with each link's live status. */
 export async function loadMachineViews(env: Env, opts: { includeRevoked?: boolean } = {}) {
   const [rows, checked] = await Promise.all([
     env.DB.prepare(
-      `SELECT id, name, labels, created_by, created_at, revoked_at, last_seen_at, owner_id FROM machines
+      `SELECT id, name, labels, created_by, created_at, revoked_at, last_seen_at, owner_id, vm_vcpus, vm_mem_mib FROM machines
        ${opts.includeRevoked ? "" : "WHERE revoked_at IS NULL"} ORDER BY created_at, id`,
     ).all<MachineRow>(),
     env.DB.prepare("SELECT machine_id, bot_id, repo_path FROM machine_bots ORDER BY created_at, bot_id").all<{
@@ -95,6 +98,7 @@ export async function loadMachineViews(env: Env, opts: { includeRevoked?: boolea
         base.ownerId = row.owner_id;
         base.personalBots = checkedBots.get(row.id) ?? new Map();
       }
+      if (row.vm_vcpus && row.vm_mem_mib) base.vm = { vcpus: row.vm_vcpus, memMib: row.vm_mem_mib };
       if (row.revoked_at !== null) return { row, view: base };
       try {
         const s = await linkStub(env, row.id).status();
@@ -142,6 +146,16 @@ export interface ManagedMachine {
  * The machine, when the caller may manage it (`mayManageMachine`): `not_found` for an unknown
  * (or, unless `includeRevoked`, a removed) machine, `forbidden` with `machine.not_yours` otherwise.
  */
+/** A machine that is not removed, whoever asks (the caller checks who may change what). */
+export async function requireMachineRow(db: D1Database, machineId: string): Promise<ManagedMachine> {
+  const row = await db
+    .prepare("SELECT id, name, owner_id, revoked_at FROM machines WHERE id = ?")
+    .bind(machineId)
+    .first<ManagedMachine>();
+  if (!row || row.revoked_at !== null) throw new ApiError("not_found", "machine not found");
+  return row;
+}
+
 export async function requireMachineManager(
   db: D1Database,
   auth: Pick<AuthContext, "memberId" | "member">,
