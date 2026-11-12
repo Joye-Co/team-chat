@@ -99,7 +99,7 @@ async function noteRead(env: Env, rd: Reader, gids: Iterable<string>): Promise<v
 /** Names of groups of kind "group" (other groups a run reads are never DMs). */
 async function groupNames(env: Env, gids: string[]): Promise<Map<string, string>> {
   if (gids.length === 0) return new Map();
-  const rows = await env.DB.prepare("SELECT id, name FROM groups WHERE id IN (SELECT value FROM json_each(?))")
+  const rows = await env.DB.prepare("SELECT id, name FROM groups WHERE id IN (SELECT value FROM json_each(?)) AND deleted_at IS NULL")
     .bind(JSON.stringify(gids))
     .all<{ id: string; name: string }>();
   return new Map(rows.results.map((r) => [r.id, r.name]));
@@ -437,7 +437,7 @@ export function registerContextRoutes(): void {
       const rd = await reader(request, env, params.id);
       const ids = [...(await readableGroups(env.DB, rd.run, rd.forId))];
       const rows = (
-        await env.DB.prepare("SELECT * FROM groups WHERE id IN (SELECT value FROM json_each(?))").bind(JSON.stringify(ids)).all<GroupRow>()
+        await env.DB.prepare("SELECT * FROM groups WHERE id IN (SELECT value FROM json_each(?)) AND deleted_at IS NULL").bind(JSON.stringify(ids)).all<GroupRow>()
       ).results;
       const byId = new Map(rows.map((r) => [r.id, r]));
       const groups: RunGroupsResponse["groups"] = [];

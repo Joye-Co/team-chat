@@ -1,7 +1,8 @@
 // Removes the content of a deleted message from a group room's SQLite: the message row, its
-// stored events, and the quote excerpts of messages that quote it. Used for live deletes and for
-// `message.deleted` events imported from the archive. Attachments and 产出 references are removed
-// by the files feature (its event writer for `message.deleted`).
+// stored events, and the quote excerpts of messages that quote it. Used for live deletes, for
+// `message.deleted` events imported from the archive and for each message of a deleted topic.
+// Attachments and 产出 references are removed by the files feature (its event writer for
+// `message.deleted`).
 
 export function scrubDeletedMessage(sql: SqlStorage, messageId: string, deletedAt: number): void {
   sql.exec(
@@ -38,4 +39,35 @@ export function scrubDeletedMessage(sql: SqlStorage, messageId: string, deletedA
       id,
     );
   }
+}
+
+/** The title a deleted topic's stored events keep (a title is never empty on the wire). */
+export const DELETED_TITLE = "…";
+
+/**
+ * Marks a topic deleted (`topic.delete`, live and imported): its row leaves `topics` and every
+ * member's `topic_states`, so the topic is unknown everywhere (`not_found`), and
+ * `deleted_topics` keeps the first result. The messages are scrubbed by the caller.
+ */
+export function forgetDeletedTopic(sql: SqlStorage, topicId: string, deletedAt: number, deletedBy: string, messages: number): void {
+  sql.exec(
+    "INSERT OR IGNORE INTO deleted_topics (topic_id, deleted_at, deleted_by, messages) VALUES (?, ?, ?, ?)",
+    topicId,
+    deletedAt,
+    deletedBy,
+    messages,
+  );
+  // Its title is usually the first line of its first message: the stored events lose it too.
+  sql.exec(
+    "UPDATE events SET data = json_set(data, '$.topic.title', ?) WHERE topic_id = ? AND type = 'topic.created'",
+    DELETED_TITLE,
+    topicId,
+  );
+  sql.exec(
+    "UPDATE events SET data = json_set(data, '$.title', ?) WHERE topic_id = ? AND type = 'topic.updated' AND json_type(data, '$.title') = 'text'",
+    DELETED_TITLE,
+    topicId,
+  );
+  sql.exec("DELETE FROM topics WHERE id = ?", topicId);
+  sql.exec("DELETE FROM topic_states WHERE topic_id = ?", topicId);
 }

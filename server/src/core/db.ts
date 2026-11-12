@@ -17,6 +17,8 @@ export interface MemberRow {
   weekly_budget_cents?: number | null;
   /** Usable (migration 0017_roles): 1 for a 所有者; absent before it ran. */
   team_owner?: number;
+  /** Hide and delete (migration 0020): set when the AI member was deleted; absent before it ran. */
+  deleted_at?: number | null;
 }
 
 export interface GroupRow {
@@ -30,6 +32,8 @@ export interface GroupRow {
   /** 1.1 */
   purpose?: string | null;
   update_seq?: number;
+  /** Hide and delete (migration 0020): set when the 群 was deleted. getGroup leaves it out. */
+  deleted_at?: number | null;
 }
 
 export function toMember(row: MemberRow): Member {
@@ -42,6 +46,10 @@ export function toMember(row: MemberRow): Member {
     avatarUrl: row.avatar_url,
   };
   if (row.deactivated) m.deactivated = true;
+  if (row.deleted_at) {
+    m.deleted = true;
+    m.deactivated = true;
+  }
   if (isTeamOwner(row)) m.teamOwner = true;
   // Only known ids reach the wire: clients reject unknown ones.
   const character = CharacterId.safeParse(row.character);
@@ -66,7 +74,8 @@ export async function listMembers(db: D1Database): Promise<MemberRow[]> {
 }
 
 export async function getGroup(db: D1Database, id: string): Promise<GroupRow | null> {
-  return db.prepare("SELECT * FROM groups WHERE id = ?").bind(id).first<GroupRow>();
+  // A deleted group answers not_found everywhere (docs/protocol.md, "Hide and delete").
+  return db.prepare("SELECT * FROM groups WHERE id = ? AND deleted_at IS NULL").bind(id).first<GroupRow>();
 }
 
 export async function groupMemberIds(db: D1Database, groupId: string): Promise<string[]> {
@@ -95,7 +104,7 @@ export async function groupsOfMember(
       `SELECT g.*, (SELECT json_group_array(member_id) FROM
          (SELECT member_id FROM group_members WHERE group_id = g.id ORDER BY added_at, member_id)) AS member_ids
        FROM groups g JOIN group_members gm ON gm.group_id = g.id
-       WHERE gm.member_id = ? ORDER BY g.created_at, g.id`,
+       WHERE gm.member_id = ? AND g.deleted_at IS NULL ORDER BY g.created_at, g.id`,
     )
     .bind(memberId)
     .all<GroupRow & { member_ids: string }>();

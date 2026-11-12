@@ -479,7 +479,10 @@ registerRoomRpc("artifacts.list", (room, _actor, args) => {
         "SELECT * FROM artifacts WHERE topic_id = ? ORDER BY updated_at DESC, id DESC",
         topicId,
       )
-    : room.sql.exec<ArtifactRow>("SELECT * FROM artifacts ORDER BY updated_at DESC, id DESC");
+    : room.sql.exec<ArtifactRow>(
+        // The 产出 of a deleted topic are left out (docs/protocol.md, "Hide and delete").
+        "SELECT * FROM artifacts WHERE topic_id NOT IN (SELECT topic_id FROM deleted_topics) ORDER BY updated_at DESC, id DESC",
+      );
   return rows.toArray().map((r) => toArtifact(room, r as ArtifactRow));
 });
 
@@ -704,7 +707,8 @@ registerEventWriter(forgetDeletedRefs);
 
 // After a delete commits: D1 stops serving the files, then R2 drops their bytes.
 registerAfterCommit(async (event, h) => {
-  if (event.type !== "message.deleted") return;
+  // topic.delete scrubs every message of the topic without storing message.deleted events.
+  if (event.type !== "message.deleted" && event.type !== "topic.deleted") return;
   const rows = h.sql.exec<{ file_id: string }>("SELECT file_id FROM file_deletions LIMIT 100").toArray();
   if (rows.length === 0) return;
   const now = Date.now();

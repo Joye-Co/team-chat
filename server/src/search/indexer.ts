@@ -81,6 +81,12 @@ export function indexEvent(e: ArchivedEvent, sql: SqlStorage): void {
         if (id) searchIndex(sql).delete(id);
         return;
       }
+      case "topic.deleted": {
+        // Its messages left the index as they were scrubbed; the title goes too.
+        const topicId = typeof data.topicId === "string" ? data.topicId : e.topicId;
+        if (topicId) searchIndex(sql).delete(TITLE_PREFIX + topicId);
+        return;
+      }
       case "topic.created": {
         const t = data.topic as Data | undefined;
         if (!t || typeof t.id !== "string" || typeof t.title !== "string") return;

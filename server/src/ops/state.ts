@@ -98,6 +98,17 @@ registerRoomRpc("ops.messageSeqs", (room, actor, args) => {
   return out;
 });
 
+/** Ids of the messages of these (deleted) topics, for scrubbing older archive files. Internal. */
+registerRoomRpc("ops.topicMessageIds", (room, actor, args) => {
+  if (actor) throw new ApiError("forbidden", "internal only");
+  const { topicIds } = args as { topicIds: string[] };
+  const out: string[] = [];
+  for (const topicId of topicIds) {
+    for (const r of room.sql.exec<{ id: string }>("SELECT id FROM messages WHERE topic_id = ?", topicId).toArray()) out.push(r.id);
+  }
+  return out;
+});
+
 /** The newest seq stored at or before `at` (ms), for a point-in-time restore of the archive. */
 registerRoomRpc("ops.seqAt", (room, actor, args) => {
   if (actor) throw new ApiError("forbidden", "internal only");
