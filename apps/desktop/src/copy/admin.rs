@@ -107,7 +107,7 @@ crate::copy! {
     ATT_OFFLINE_META = "最后一次心跳 {ago}",
     ATT_NONE = "没有要注意的事",
     ATT_AI_UNSET = "还没设置 AI 服务",
-    ATT_AI_UNSET_META = "前台、话题摘要和记忆整理都没在工作；到 AI 服务里配一把 Key",
+    ATT_AI_UNSET_META = "前台、话题标题、话题摘要和记忆整理都没在工作；到 AI 服务里填上团队的 API Key",
     ATT_BUDGET = "{name} 用了预算的 {pct}%",
     ATT_BUDGET_META = "每周预算 {budget}，到了会先停下来问你",
     ATT_BUDGET_PAUSED = "{name} 到了预算，{n} 件事停下来等你",

@@ -2952,8 +2952,6 @@ mod tests {
         }
     }
 
-    /// The grid is one Tab stop on the chosen look; the arrow keys walk the
-    /// tiles, and Tab stays on the tile the arrows reached (E3, §2.9).
     /// 单独设置模型 off saves no model of the member's own, so the team's setting runs; on,
     /// the sheet's picks are saved.
     #[test]
@@ -2969,6 +2967,8 @@ mod tests {
         );
     }
 
+    /// The grid is one Tab stop on the chosen look; the arrow keys walk the
+    /// tiles, and Tab stays on the tile the arrows reached (E3, §2.9).
     #[gpui::test]
     fn the_look_grid_is_one_tab_stop(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {

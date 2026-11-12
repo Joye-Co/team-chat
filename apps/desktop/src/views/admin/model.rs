@@ -574,6 +574,17 @@ mod tests {
         assert_eq!(ai_service_attention(None), None);
     }
 
+    /// The 要注意 row names the same four uses the AI 服务 page lists, and the API Key.
+    #[test]
+    fn the_unset_ai_service_row_names_all_four_uses() {
+        use crate::copy::settings as s;
+        for use_ in [s::AI_USE_FRONT, s::AI_USE_TITLES, s::AI_USE_SUMMARY] {
+            assert!(m::ATT_AI_UNSET_META.contains(use_), "{use_}");
+        }
+        assert!(m::ATT_AI_UNSET_META.contains("记忆"));
+        assert!(m::ATT_AI_UNSET_META.contains(s::AI_KEY));
+    }
+
     fn sample() -> MachineMonitor {
         MachineMonitor {
             machine: MonitorMachine {
