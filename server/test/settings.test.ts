@@ -97,7 +97,9 @@ describe("settings rules", () => {
     expect(rules).toContain("merge into the main branch");
     expect(rules).toContain("¥50");
     expect(policyPrompt(p)).not.toContain("main branch");
-    expect(policyPrompt(p)).toContain("a team owner");
+    // The team approver is saved, but gated actions go to the computer's approvers (an admin here).
+    expect(policyPrompt(p)).toContain("a team admin");
+    expect(policyPrompt(p)).not.toContain("a team owner");
     const none = applyPolicyUpdate(
       team,
       { askBefore: { mergeMain: false, deployProd: false, prodConfig: false, deleteData: false, externalPublish: false }, maxSpendCny: null },

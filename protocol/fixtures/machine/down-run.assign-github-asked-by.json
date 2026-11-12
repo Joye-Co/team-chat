@@ -1,0 +1,29 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "the computer's own sign-in; author and committer are the AI member; askedBy goes into the PR body",
+  "value": {
+    "t": "run.assign",
+    "runId": "01JBX0RUN000000000000000AU",
+    "botMemberId": "01JBX0BOT000000000000000AC",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "runtime": "claude",
+    "prompt": "Topic: 修好登录\n\n实习生: @dev 改一下 README",
+    "envAllowlist": [],
+    "leaseMs": 600000,
+    "github": {
+      "source": "machine",
+      "memberId": "01JBX0ALICE0000000000000AB",
+      "author": {
+        "name": "dev",
+        "email": "ai-01JBX0BOT000000000000000AC@users.noreply.invalid"
+      },
+      "committer": {
+        "name": "dev",
+        "email": "ai-01JBX0BOT000000000000000AC@users.noreply.invalid"
+      },
+      "askedBy": "实习生"
+    }
+  }
+}

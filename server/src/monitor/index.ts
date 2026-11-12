@@ -183,6 +183,9 @@ export function buildMonitor(input: {
   if (metrics?.boot) out.boot = metrics.boot;
   if (lastFailure) out.lastFailure = lastFailure;
   if (metrics?.homes) out.homes = metrics.homes;
+  // design-github-identity 3.6: the computer's GitHub sign-in as the heartbeat said, and where runs go.
+  if (status?.github) out.github = status.github;
+  if (info?.runsIn) out.runsIn = info.runsIn;
   // 机 5.4: 最近的问题, on the server clock like the usage windows.
   if (metrics?.problems) out.problems = metrics.problems.map((p) => ({ at: Math.max(0, p.at + offset), text: p.text }));
   if (health) {

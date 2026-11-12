@@ -191,6 +191,7 @@ impl Sampler {
             usage: None,
             homes: None,
             problems: None,
+            github: None,
         }
     }
 
@@ -750,6 +751,36 @@ pub fn logins(cfg: &Config) -> Vec<CliLogin> {
         .collect()
 }
 
+/// How often the daemon looks at the computer's GitHub sign-in (besides at start and after a
+/// push was refused).
+pub const GITHUB_EVERY: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// The computer's GitHub for the heartbeat (`metrics.github`, feature "github-host"): `gh auth
+/// status`'s exit code for the daemon's own user and, when signed in, the login (`gh api
+/// user`). `path` overrides the daemon's `PATH` (tests). The token is never read here.
+pub async fn github(path: Option<&std::ffi::OsStr>) -> chat_protocol::machine::MachineGithub {
+    let state = match crate::github::host_gh_output(
+        path,
+        &["auth", "status", "--hostname", crate::github::HOST],
+    )
+    .await
+    {
+        Ok(None) => "no_gh",
+        Ok(Some(o)) if o.status.success() => "signed_in",
+        Ok(Some(o)) if o.status.code().is_some() => "signed_out",
+        _ => "unknown",
+    };
+    let login = if state == "signed_in" {
+        crate::github::host_login(path).await
+    } else {
+        None
+    };
+    chat_protocol::machine::MachineGithub {
+        state: state.into(),
+        login,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -978,5 +1009,29 @@ mod tests {
         assert_eq!(l.state, login_state::LOGGED_OUT);
         assert_eq!(api_key_name("codex"), Some("OPENAI_API_KEY"));
         assert_eq!(api_key_name("acp"), None);
+    }
+
+    /// Feature "github-host": `metrics.github` from the host's `gh auth status` exit code, and
+    /// the login from `gh api user` when signed in.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_computers_github_comes_from_gh_auth_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let gh = dir.path().join("gh");
+        let path = dir.path().as_os_str();
+        let state = |g: chat_protocol::machine::MachineGithub| (g.state, g.login);
+        assert_eq!(state(github(Some(path)).await), ("no_gh".into(), None));
+        std::fs::write(
+            &gh,
+            "#!/bin/sh\ncase \"$1 $2\" in\n  \"auth status\") exit 0 ;;\n  \"api user\") echo org-bot; exit 0 ;;\nesac\nexit 1\n",
+        )
+        .unwrap();
+        crate::sys::set_mode(&gh, 0o755).unwrap();
+        assert_eq!(
+            state(github(Some(path)).await),
+            ("signed_in".into(), Some("org-bot".into()))
+        );
+        std::fs::write(&gh, "#!/bin/sh\nexit 1\n").unwrap();
+        assert_eq!(state(github(Some(path)).await), ("signed_out".into(), None));
     }
 }

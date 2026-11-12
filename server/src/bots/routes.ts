@@ -112,6 +112,8 @@ async function visibleMachines(env: Env, a: AuthContext, only?: string): Promise
       connected: m.connected,
       healthy: m.healthy,
       ...(m.unhealthy ? { unhealthy: m.unhealthy } : {}),
+      // design-github-identity 3.6: the GitHub sign-in only for admins and the computer's owner.
+      ...(admin && m.github ? { github: m.github } : {}),
       runningRuns: [],
     });
   }

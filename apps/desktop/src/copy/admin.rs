@@ -50,6 +50,12 @@ crate::copy! {
     LOGIN_OUT = "未登录",
     LOGIN_UNKNOWN = "未知",
     CLI_MISSING = "未安装",
+    // Usable (design-github-identity.zh.md §3.7): the computer's own GitHub sign-in.
+    STRIP_GITHUB = "GitHub",
+    GITHUB_IN = "已登录 @{login}",
+    GITHUB_NO_GH = "没装 gh",
+    GITHUB_HINT_VM = "在主机上运行 sudo -iu runner gh auth login",
+    GITHUB_HINT_HOST = "用运行 AI 成员的系统用户运行 gh auth login",
 
     KPI_CPU = "CPU",
     KPI_MEM = "内存",

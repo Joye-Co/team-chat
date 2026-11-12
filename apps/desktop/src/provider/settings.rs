@@ -240,11 +240,11 @@ pub(super) fn machine(m: &proto::Machine) -> MachineInfo {
                 efforts: c.efforts.clone().unwrap_or_default(),
             })
             .collect(),
-        // Usable: the server tells owners what the daemon supports.
-        github: m
-            .features
-            .as_ref()
-            .map(|f| f.iter().any(|x| x == proto::machine::feature::GITHUB)),
+        // Usable: the computer's own GitHub sign-in (admins and its owner only).
+        github: m.github.as_ref().map(|g| crate::data::MachineGithub {
+            state: g.state.clone(),
+            login: g.login.clone(),
+        }),
     }
 }
 

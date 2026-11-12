@@ -109,6 +109,9 @@ export async function loadMachineViews(env: Env, opts: { includeRevoked?: boolea
           runningRuns: s.runningRuns,
           ...(s.signedOut ? { signedOut: s.signedOut } : {}),
           ...(s.limited ? { limited: s.limited } : {}),
+          // design-github-identity 3.6: on the host git may sign in some other way (SSH, the
+          // keychain), so only a sign-in is news there; in VMs the host's sign-in is the only way.
+          ...(s.github && (s.info?.runsIn === "vm" || s.github.state === "signed_in") ? { github: s.github } : {}),
         };
         return { row, view };
       } catch {
