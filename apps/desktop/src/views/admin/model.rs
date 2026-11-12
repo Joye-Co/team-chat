@@ -152,6 +152,17 @@ pub fn cli_name(kind: &str, runtime: &str) -> String {
     }
 }
 
+/// A runtime entry as the topic's sign-in note names it: the CLI's name, and the entry's own
+/// name when it is not the kind's (`Codex（codexout）`), so two entries of one CLI differ.
+pub fn cli_entry_name(kind: &str, runtime: &str) -> String {
+    let cli = cli_name(kind, runtime);
+    if matches!(kind, "claude" | "codex") && runtime != kind {
+        fill(m::CLI_ENTRY, &[("cli", &cli), ("entry", runtime)])
+    } else {
+        cli
+    }
+}
+
 /// The tone of a dot or an icon.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tone {
@@ -329,7 +340,10 @@ pub fn attention(
         if c.available && c.login == login_state::LOGGED_OUT {
             out.push(Attention {
                 kind: AttentionKind::CliLoggedOut,
-                title: fill(m::ATT_CLI_OUT, &[("cli", &cli_name(&c.kind, &c.runtime))]),
+                title: fill(
+                    m::ATT_CLI_OUT,
+                    &[("cli", &cli_entry_name(&c.kind, &c.runtime))],
+                ),
                 meta: if c.failed_today > 0 {
                     fill(m::ATT_CLI_OUT_FAILED, &[("n", &c.failed_today.to_string())])
                 } else {
@@ -547,6 +561,14 @@ pub fn memory_split(d: &MachineMonitor) -> Option<(f32, f32, f32, u64, u64, u64)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cli_entry_name_tells_two_entries_of_one_cli_apart() {
+        assert_eq!(cli_entry_name("codex", "codex"), "Codex");
+        assert_eq!(cli_entry_name("codex", "codexout"), "Codex（codexout）");
+        assert_eq!(cli_entry_name("claude", "claude"), "Claude Code");
+        assert_eq!(cli_entry_name("acp", "gemini"), "gemini");
+    }
     use chat_core::proto::monitor::{
         MonitorCli, MonitorFailure, MonitorHost, MonitorMachine, MonitorQueue,
     };

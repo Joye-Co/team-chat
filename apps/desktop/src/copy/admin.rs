@@ -174,6 +174,7 @@ crate::copy! {
     ACCOUNTS_EMPTY = "这台电脑上没有 Claude Code 或 Codex",
     ACCOUNTS_EMPTY_DESC = "在那台电脑上装好 Claude Code 或 Codex 后，它们会出现在这里。这台电脑的安装命令在 电脑 页。",
     CLI_META = "版本 {version}",
+    CLI_ENTRY = "{cli}（{entry}）",
     METHOD_SUBSCRIPTION = "订阅账号",
     METHOD_API_KEY = "API 密钥",
     LOGIN = "登录",

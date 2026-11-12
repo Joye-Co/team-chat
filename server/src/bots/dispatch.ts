@@ -182,6 +182,16 @@ export function cliName(kind: string | undefined, runtime: string): string {
   return runtime;
 }
 
+/**
+ * A runtime entry as the computer's 订阅账号 page shows it (verify 2, problem 8): the CLI's name,
+ * and the entry's own name when it is not the kind's (`Codex（codexout）`), so two entries of
+ * one CLI on a computer are told apart.
+ */
+export function cliEntryName(kind: string | undefined, runtime: string): string {
+  const cli = cliName(kind, runtime);
+  return (kind === "claude" || kind === "codex") && runtime !== kind ? `${cli}（${runtime}）` : cli;
+}
+
 /** `11 月 13 日 15:00` (`今天 15:00` on the same day) on the team's clock `zone`. */
 export function clockText(at: number, now: number, zone: string): string {
   const parts = (t: number) => {
