@@ -556,6 +556,13 @@ export const RunGate = z.object({
 export type RunGate = z.infer<typeof RunGate>;
 export const MAX_RUN_GATES = 16;
 
+/** Usable: a VM's size (`run.assign.vm`, `Machine.vm`). */
+export const VmSize = z.object({
+  vcpus: z.int().min(1).max(16),
+  memMib: z.int().min(1024).max(65536),
+});
+export type VmSize = z.infer<typeof VmSize>;
+
 export const RunAssignFrame = z.object({
   t: z.literal("run.assign"),
   runId: RunId,
@@ -582,6 +589,8 @@ export const RunAssignFrame = z.object({
   gates: z.array(RunGate).max(MAX_RUN_GATES).optional(),
   /** Usable, feature "github": whose GitHub the run uses and how. */
   github: RunGithub.optional(),
+  /** Usable: the VM size an admin set for this machine; the daemon caps it at its `[vm] max_*`. */
+  vm: VmSize.optional(),
 });
 export type RunAssignFrame = z.infer<typeof RunAssignFrame>;
 

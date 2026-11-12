@@ -1,0 +1,11 @@
+{
+  "kind": "UpdateMachineRequest",
+  "valid": false,
+  "description": "vcpus is 1 to 16",
+  "value": {
+    "vm": {
+      "vcpus": 64,
+      "memMib": 4096
+    }
+  }
+}

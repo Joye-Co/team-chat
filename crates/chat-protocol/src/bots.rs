@@ -1218,6 +1218,13 @@ pub struct Machine {
         skip_serializing_if = "Option::is_none"
     )]
     pub github: Option<crate::machine::MachineGithub>,
+    /// Usable: the VM size an admin set for this machine's runs; `None` = the daemon's own `[vm]`.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub vm: Option<crate::machine::VmSize>,
 }
 
 /// Usable: at most this many AI members on one personal machine.
@@ -1255,6 +1262,13 @@ pub struct CreateMachineRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub personal: Option<bool>,
+    /// Usable: admins only, the person the new machine belongs to (implies personal).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub owner_id: Option<String>,
 }
 
 impl CreateMachineRequest {
@@ -1287,12 +1301,22 @@ pub struct UpdateMachineRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub owner: Option<Option<String>>,
+    /// Admins only: the VM size of the machine's runs; `Some(None)` (`null`) = the daemon's own.
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub vm: Option<Option<crate::machine::VmSize>>,
 }
 
 impl UpdateMachineRequest {
     pub fn validate(&self) -> Validation {
-        if self.name.is_none() && self.owner.is_none() {
-            return fail("name", "name or owner is required");
+        if self.name.is_none() && self.owner.is_none() && self.vm.is_none() {
+            return fail("name", "name, owner or vm is required");
+        }
+        if let Some(Some(v)) = &self.vm {
+            v.validate()?;
         }
         if let Some(n) = &self.name {
             check_name("name", n)?;

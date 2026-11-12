@@ -444,6 +444,36 @@ pub struct SessionUpload {
     pub headers: BTreeMap<String, String>,
 }
 
+/// Usable: a VM's size (`run.assign.vm`, `Machine.vm`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VmSize {
+    pub vcpus: u32,
+    pub mem_mib: u32,
+}
+
+pub const VM_VCPUS_MAX: u32 = 16;
+pub const VM_MEM_MIB_MIN: u32 = 1024;
+pub const VM_MEM_MIB_MAX: u32 = 65536;
+
+impl VmSize {
+    pub fn validate(&self) -> crate::limits::Validation {
+        let fail = |field, message: &str| {
+            Err(crate::limits::ValidationError {
+                field,
+                message: message.into(),
+            })
+        };
+        if self.vcpus < 1 || self.vcpus > VM_VCPUS_MAX {
+            return fail("vm.vcpus", "vcpus is 1 to 16");
+        }
+        if self.mem_mib < VM_MEM_MIB_MIN || self.mem_mib > VM_MEM_MIB_MAX {
+            return fail("vm.memMib", "memMib is 1024 to 65536");
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunAssign {
@@ -482,6 +512,9 @@ pub struct RunAssign {
     /// Usable, feature "github": whose GitHub the run uses and how.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github: Option<crate::github::RunGithub>,
+    /// Usable: the VM size an admin set for this machine; the daemon caps it at its `[vm] max_*`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vm: Option<VmSize>,
 }
 
 /// A Card v2 answer given to a run (`run.input.answer`).

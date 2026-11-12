@@ -103,6 +103,10 @@
             },
             "teamOwner": {
               "type": "boolean"
+            },
+            "ownerId": {
+              "type": "string",
+              "minLength": 1
             }
           },
           "required": [
@@ -204,6 +208,10 @@
               },
               "teamOwner": {
                 "type": "boolean"
+              },
+              "ownerId": {
+                "type": "string",
+                "minLength": 1
               }
             },
             "required": [
@@ -52951,6 +52959,10 @@
               },
               "teamOwner": {
                 "type": "boolean"
+              },
+              "ownerId": {
+                "type": "string",
+                "minLength": 1
               }
             },
             "required": [

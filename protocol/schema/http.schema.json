@@ -92,6 +92,10 @@
         },
         "teamOwner": {
           "type": "boolean"
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": [
@@ -19697,6 +19701,10 @@
             },
             "teamOwner": {
               "type": "boolean"
+            },
+            "ownerId": {
+              "type": "string",
+              "minLength": 1
             }
           },
           "required": [
@@ -19875,6 +19883,10 @@
             },
             "teamOwner": {
               "type": "boolean"
+            },
+            "ownerId": {
+              "type": "string",
+              "minLength": 1
             }
           },
           "required": [
@@ -20181,6 +20193,10 @@
             },
             "teamOwner": {
               "type": "boolean"
+            },
+            "ownerId": {
+              "type": "string",
+              "minLength": 1
             }
           },
           "required": [
@@ -20316,6 +20332,10 @@
         },
         "teamOwner": {
           "type": "boolean"
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": [
@@ -20417,6 +20437,10 @@
           },
           "teamOwner": {
             "type": "boolean"
+          },
+          "ownerId": {
+            "type": "string",
+            "minLength": 1
           }
         },
         "required": [
@@ -20526,6 +20550,10 @@
             "o19",
             "o20"
           ]
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": [
@@ -20625,6 +20653,10 @@
             },
             "teamOwner": {
               "type": "boolean"
+            },
+            "ownerId": {
+              "type": "string",
+              "minLength": 1
             }
           },
           "required": [
@@ -25065,6 +25097,10 @@
         },
         "teamOwner": {
           "type": "boolean"
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": [
@@ -41026,6 +41062,25 @@
           "required": [
             "state"
           ]
+        },
+        "vm": {
+          "type": "object",
+          "properties": {
+            "vcpus": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16
+            },
+            "memMib": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 65536
+            }
+          },
+          "required": [
+            "vcpus",
+            "memMib"
+          ]
         }
       },
       "required": [
@@ -41057,6 +41112,10 @@
         },
         "personal": {
           "type": "boolean"
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": [
@@ -41325,6 +41384,25 @@
               },
               "required": [
                 "state"
+              ]
+            },
+            "vm": {
+              "type": "object",
+              "properties": {
+                "vcpus": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 16
+                },
+                "memMib": {
+                  "type": "integer",
+                  "minimum": 1024,
+                  "maximum": 65536
+                }
+              },
+              "required": [
+                "vcpus",
+                "memMib"
               ]
             }
           },
@@ -41610,6 +41688,25 @@
             },
             "required": [
               "state"
+            ]
+          },
+          "vm": {
+            "type": "object",
+            "properties": {
+              "vcpus": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 16
+              },
+              "memMib": {
+                "type": "integer",
+                "minimum": 1024,
+                "maximum": 65536
+              }
+            },
+            "required": [
+              "vcpus",
+              "memMib"
             ]
           }
         },
@@ -45290,6 +45387,25 @@
                 "source",
                 "memberId",
                 "committer"
+              ]
+            },
+            "vm": {
+              "type": "object",
+              "properties": {
+                "vcpus": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 16
+                },
+                "memMib": {
+                  "type": "integer",
+                  "minimum": 1024,
+                  "maximum": 65536
+                }
+              },
+              "required": [
+                "vcpus",
+                "memMib"
               ]
             }
           },
@@ -68373,6 +68489,32 @@
             {
               "type": "string",
               "const": "me"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "vm": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "vcpus": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 16
+                },
+                "memMib": {
+                  "type": "integer",
+                  "minimum": 1024,
+                  "maximum": 65536
+                }
+              },
+              "required": [
+                "vcpus",
+                "memMib"
+              ]
             },
             {
               "type": "null"

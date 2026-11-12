@@ -88,6 +88,14 @@ pub struct Member {
         skip_serializing_if = "Option::is_none"
     )]
     pub team_owner: Option<bool>,
+    /// Usable: an AI member's own person (its 主人), who may edit it and whose machines run
+    /// it; `None` = the team's.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub owner_id: Option<String>,
 }
 
 impl Member {

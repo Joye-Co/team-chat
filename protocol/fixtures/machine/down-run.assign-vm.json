@@ -1,0 +1,20 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "usable: the VM size an admin set for this machine",
+  "value": {
+    "t": "run.assign",
+    "runId": "01JBX0RUN0000000000000VM01",
+    "botMemberId": "01JBX0BOT000000000000000AC",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "runtime": "claude",
+    "prompt": "Topic: 修好登录\n\nAlice: @小助手 修一下",
+    "envAllowlist": [],
+    "leaseMs": 600000,
+    "vm": {
+      "vcpus": 2,
+      "memMib": 4096
+    }
+  }
+}

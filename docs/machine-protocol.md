@@ -1070,6 +1070,10 @@ RunEvent +=
 
 // server -> daemon
 run.assign += { github?: RunGithub }              // feature "github"
+run.assign += { vm?: { vcpus, memMib } }          // usable: the VM size an admin set for this machine;
+                                                  // a daemon with [vm] uses it for the run's VM, capped at
+                                                  // [vm] max_vcpus / max_mem_mib (default: the host's cores
+                                                  // and memory); absent = [vm] vcpus / mem_mib. Others ignore it.
 RunGithub = {
   source: "machine" | "app",     // the server sends only "machine" (the computer's own sign-in); "app" is no longer sent; unknown = "machine"
   memberId,                      // the person the run works for
