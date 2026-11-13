@@ -2875,6 +2875,10 @@ impl ChatProvider for CoreProvider {
         self.topic_changes_inner(group_id, topic_id)
     }
 
+    fn topic_diff(&self, group_id: &str, topic_id: &str) -> Option<crate::data::v2::TopicDiff> {
+        self.topic_diff_inner(group_id, topic_id)
+    }
+
     fn pinned_ask(&self, group_id: &str, topic_id: &str) -> Option<crate::data::v2::AskItem> {
         self.pinned_ask_inner(group_id, topic_id)
     }

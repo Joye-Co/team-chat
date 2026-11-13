@@ -53,6 +53,13 @@ crate::copy! {
     CHANGES_LINE = "#{n} +{add} −{del} · {files} 个文件",
     // The 改动 pane: the PR opens in the browser.
     CHANGES_OPEN_IN_BROWSER = "在浏览器中打开",
+    CHANGES_FILES = "文件",
+    CHANGES_LOADING = "正在读取改动…",
+    CHANGES_FAILED = "改动没读出来，可以在浏览器里看",
+    CHANGES_NOT_SENT = "成员的电脑还没把改动传上来，下次它做完会带上",
+    CHANGES_NO_PATCH = "二进制文件，或改动太长，在浏览器里看",
+    CHANGES_TRUNCATED = "只列了前 {n} 个文件，其余的在浏览器里看",
+    CHANGES_RENAMED = "从 {path} 改名",
     CHECKS_LINE = "{passed}/{total} 项检查通过 · {state}",
     MACHINE_IDLE = "空闲",
     COST_TIME = "用时 {time}",

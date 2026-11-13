@@ -2389,7 +2389,8 @@ pub(crate) fn metrics_with(
 // ---------------------------------------------------------------------------
 // Diff
 
-fn diff(
+/// A unified diff in a `sunken` well with its path and counts (cards and the 改动 pane).
+pub(crate) fn diff(
     path: Option<&str>,
     text: &str,
     adds: Option<u64>,

@@ -2437,6 +2437,11 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn topic_changes(&self, _group_id: &str, _topic_id: &str) -> Option<v2::TopicChanges> {
         None
     }
+    /// The files and patches of a 话题's PR (改动 pane), when its member's computer sent them.
+    /// Cheap: the first call starts the download and the provider emits a change when it ends.
+    fn topic_diff(&self, _group_id: &str, _topic_id: &str) -> Option<v2::TopicDiff> {
+        None
+    }
     /// What one run used.
     fn run_usage(&self, _run_id: &str) -> Option<v2::RunUsage> {
         None

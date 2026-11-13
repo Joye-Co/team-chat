@@ -85,13 +85,17 @@ fn detail(text: impl Into<SharedString>, cx: &App) -> gpui::Div {
         .child(text.into())
 }
 
-/// The 改动 pane: the 话题's PR as a title, its counts when GitHub sent
-/// them, 检查 and 状态 as StatusBadges, and the PR in the browser. A PR
-/// link without a title shows its number; counts that never arrived are
-/// left out rather than drawn as `+0 −0`.
+/// What the 改动 pane needs to open and close a file's patch.
+pub(super) type ToggleFile = std::rc::Rc<dyn Fn(String, &mut App)>;
+
+/// The 改动 pane: the 话题's PR as a title, its counts when they arrived, 检查 and 状态 as
+/// StatusBadges, then its files, each opening to its patch. A PR link without a title shows
+/// its number; counts that never arrived are left out rather than drawn as `+0 −0`.
 pub(super) fn changes_pane_body(
     changes: Option<crate::data::v2::TopicChanges>,
-    window: &mut gpui::Window,
+    diff: Option<crate::data::v2::TopicDiff>,
+    open: &std::collections::HashSet<String>,
+    toggle: ToggleFile,
     cx: &App,
 ) -> AnyElement {
     use crate::ui::native::{PushSize, PushStyle, metrics, push_button};
@@ -109,7 +113,6 @@ pub(super) fn changes_pane_body(
             .child(EmptyLine::new(c::RAIL_EMPTY_CHANGES).icon(Sym::PullRequest))
             .into_any_element();
     };
-    let _ = window;
     let number = format!("#{}", ch.number);
     let title = ch.title.trim();
     let has_title = !title.is_empty();
@@ -150,7 +153,7 @@ pub(super) fn changes_pane_body(
             cx,
         )
     });
-    let open = ch.url.clone().map(|url| {
+    let browser = ch.url.clone().map(|url| {
         div().pt(space::S4).flex().child(
             push_button(
                 "changes-open-pr",
@@ -162,7 +165,7 @@ pub(super) fn changes_pane_body(
             .on_click(move |_, _, cx| cx.open_url(&url)),
         )
     });
-    let body = pad(div())
+    let head = pad(div())
         .child(
             div()
                 .w_full()
@@ -197,13 +200,140 @@ pub(super) fn changes_pane_body(
             cx,
         ))
         .children(checks)
-        .children(open);
+        .children(browser);
+    let files = changed_files(diff, open, toggle, cx);
     div()
         .id("changes-pane")
         .size_full()
         .overflow_y_scroll()
-        .child(body)
+        .child(head)
+        .child(
+            div()
+                .w_full()
+                .border_t_1()
+                .border_color(k.separator)
+                .px(metrics::INSPECTOR_PAD)
+                .py(space::S12)
+                .flex()
+                .flex_col()
+                .gap(space::S8)
+                .child(
+                    div()
+                        .n_subheadline()
+                        .text_color(k.secondary)
+                        .child(c::CHANGES_FILES),
+                )
+                .child(files),
+        )
         .into_any_element()
+}
+
+/// The files of the PR, each a row that opens to its patch; or one quiet line while the diff
+/// is not there (not sent up, downloading, unreadable).
+fn changed_files(
+    diff: Option<crate::data::v2::TopicDiff>,
+    open: &std::collections::HashSet<String>,
+    toggle: ToggleFile,
+    cx: &App,
+) -> AnyElement {
+    use crate::data::v2::TopicDiff;
+    let k = native_colors(cx);
+    let quiet = |text: &'static str, sym: Sym| EmptyLine::new(text).icon(sym).into_any_element();
+    let files = match diff {
+        None => return quiet(c::CHANGES_NOT_SENT, Sym::PullRequest),
+        Some(TopicDiff::Loading) => return quiet(c::CHANGES_LOADING, Sym::PullRequest),
+        Some(TopicDiff::Failed) => return quiet(c::CHANGES_FAILED, Sym::NeedsYou),
+        Some(TopicDiff::Ready(f)) => f,
+    };
+    let mut list = div().w_full().flex().flex_col().gap(space::S4);
+    for (i, f) in files.files.iter().enumerate() {
+        let is_open = open.contains(&f.path);
+        let path = f.path.clone();
+        let toggle = toggle.clone();
+        let (name, dir) = match f.path.rsplit_once('/') {
+            Some((d, n)) => (n.to_string(), Some(d.to_string())),
+            None => (f.path.clone(), None),
+        };
+        let row = div()
+            .id(ElementId::Name(format!("changes-file-{i}").into()))
+            .w_full()
+            .min_h(px(32.))
+            .px(space::S6)
+            .rounded(radius::MD)
+            .flex()
+            .items_center()
+            .gap(space::S8)
+            .cursor_pointer()
+            .hover(|el| el.bg(k.row_hover))
+            .on_click(move |_, _, cx| toggle(path.clone(), cx))
+            .child(mark(
+                if is_open {
+                    Sym::ChevronDown
+                } else {
+                    Sym::ChevronRight
+                },
+                k.tertiary,
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(div().n_body().text_color(k.label).one_line().child(name))
+                    .children(
+                        f.previous_path
+                            .as_ref()
+                            .map(|p| fill(c::CHANGES_RENAMED, &[("path", p)]))
+                            .or(dir)
+                            .map(|d| {
+                                div()
+                                    .n_subheadline()
+                                    .text_color(k.secondary)
+                                    .child(crate::ui::truncate::TruncText::new(d).middle())
+                            }),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .n_subheadline()
+                    .n_figures()
+                    .text_color(k.secondary)
+                    .child(format!("+{} −{}", f.additions, f.deletions)),
+            );
+        list = list.child(row);
+        if is_open {
+            list = list.child(match &f.patch {
+                Some(p) => div()
+                    .w_full()
+                    .pb(space::S8)
+                    .child(crate::views::cards::v2::blocks::diff(
+                        Some(&f.path),
+                        p,
+                        Some(f.additions),
+                        Some(f.deletions),
+                        cx,
+                    ))
+                    .into_any_element(),
+                None => div()
+                    .pl(px(28.))
+                    .pb(space::S8)
+                    .child(detail(c::CHANGES_NO_PATCH, cx))
+                    .into_any_element(),
+            });
+        }
+    }
+    if files.truncated {
+        list = list.child(div().pt(space::S4).child(detail(
+            fill(
+                c::CHANGES_TRUNCATED,
+                &[("n", &files.files.len().to_string())],
+            ),
+            cx,
+        )));
+    }
+    list.into_any_element()
 }
 
 impl TopicRail {

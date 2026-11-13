@@ -107,6 +107,36 @@ pub enum ChangeState {
     Closed,
 }
 
+/// One file of a 话题's PR diff.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChangedFile {
+    pub path: String,
+    /// The old path of a renamed file.
+    pub previous_path: Option<String>,
+    /// GitHub's word: "added", "removed", "modified", "renamed", ….
+    pub status: String,
+    pub additions: u64,
+    pub deletions: u64,
+    /// Unified diff hunks; `None` for a binary file or one too long to send.
+    pub patch: Option<String>,
+}
+
+/// The files of a 话题's PR, as its member's computer read them.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct PrFiles {
+    pub files: Vec<ChangedFile>,
+    /// The PR changes more files than listed.
+    pub truncated: bool,
+}
+
+/// The diff of a 话题's PR: still downloading, read, or not readable.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TopicDiff {
+    Loading,
+    Ready(std::sync::Arc<PrFiles>),
+    Failed,
+}
+
 /// 改动: the code change of a 话题 (a PR).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TopicChanges {
