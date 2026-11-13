@@ -207,6 +207,12 @@ pub(super) fn machine(m: &proto::Machine) -> MachineInfo {
             .unwrap_or(m.running_runs.len() as u32)
             .max(m.running_runs.len() as u32),
         max_parallel_runs: m.max_parallel_runs,
+        parallel_runs: m.parallel_runs,
+        limits: m
+            .features
+            .iter()
+            .flatten()
+            .any(|f| f == proto::machine::feature::LIMITS),
         runtimes,
         owner_id: m.owner_id.clone(),
         personal_bots: m
@@ -815,6 +821,7 @@ impl CoreProvider {
         machine_id: &str,
         name: Option<String>,
         owner: Option<Option<String>>,
+        parallel_runs: Option<Option<u32>>,
     ) -> AdminReply<MachineInfo> {
         let name = name.map(|n| n.trim().to_string());
         if name.as_deref() == Some("") {
@@ -822,7 +829,11 @@ impl CoreProvider {
         }
         let id = machine_id.to_string();
         self.request(move |client, _| async move {
-            let req = proto::UpdateMachineRequest { name, owner };
+            let req = proto::UpdateMachineRequest {
+                name,
+                owner,
+                parallel_runs,
+            };
             let m = client
                 .http()
                 .update_machine(&id, &req)

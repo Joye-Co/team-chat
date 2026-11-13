@@ -37,6 +37,8 @@ export const MACHINE_FEATURE_HOMES = "homes";
 export const MACHINE_FEATURE_ASK_KEYS = "ask-keys";
 /** Usable (机 5.1): `CliLogin.confirmed` is also `true` on a certain `logged_in`. */
 export const MACHINE_FEATURE_SIGN_IN_CONFIRMED = "sign-in-confirmed";
+/** `machine.limits`: the daemon takes how many runs it may do at once from the server. */
+export const MACHINE_FEATURE_LIMITS = "limits";
 
 export const MachineInfo = z.object({
   /** The id configured on the machine (optional); the token is authoritative. */
@@ -732,6 +734,9 @@ export const MachineDownFrame = z.discriminatedUnion("t", [
     ask: z.boolean().optional(),
   }),
   z.object({ t: z.literal("secret.delete"), name: SecretName }),
+  // Feature "limits": how many runs the daemon may do at once, set in the app; absent = its own
+  // config. Sent after every welcome and on every change while connected.
+  z.object({ t: z.literal("machine.limits"), maxParallelRuns: z.int().min(1).max(100).optional() }),
   // Usable, feature "homes": empty one AI member's home folder; sent only while connected.
   z.object({ t: z.literal("home.clear"), memberId: Id }),
   // Usable, feature "takeover": a command of the person holding the run; sent only while connected.

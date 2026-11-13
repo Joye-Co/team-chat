@@ -407,6 +407,9 @@ export type PersonalBot = z.infer<typeof PersonalBot>;
 /** `Machine.unhealthy` values (机 5.6); readers treat an unknown one as a failed check without a name. */
 export const MACHINE_UNHEALTHY = ["heartbeat", "disk"] as const;
 
+/** The most runs a machine may be set to do at once (`Machine.parallelRuns`). */
+export const MAX_PARALLEL_RUNS = 100;
+
 export const Machine = z.object({
   id: Id,
   name: Name,
@@ -428,7 +431,14 @@ export const Machine = z.object({
   daemonVersion: z.string().optional(),
   os: z.string().optional(),
   arch: z.string().optional(),
+  /** What the daemon's own config allows (`hello.machine.maxParallelRuns`). */
   maxParallelRuns: z.int().nonnegative().optional(),
+  /**
+   * How many runs it may do at once as set in the app (`UpdateMachineRequest.parallelRuns`);
+   * absent = the daemon's own `maxParallelRuns`. A daemon without feature "limits" still refuses
+   * more than its own number.
+   */
+  parallelRuns: z.int().min(1).max(MAX_PARALLEL_RUNS).optional(),
   health: Health.optional(),
   clis: z.array(CliInfo).optional(),
   /** Ids of the runs this machine holds now. */
@@ -460,8 +470,12 @@ export const UpdateMachineRequest = z
     name: Name.optional(),
     /** "me" = make it my own machine; null = give it to the team. */
     owner: z.literal("me").nullable().optional(),
+    /** How many runs it may do at once; null = what the daemon's config says. */
+    parallelRuns: z.int().min(1).max(MAX_PARALLEL_RUNS).nullable().optional(),
   })
-  .refine((r) => r.name !== undefined || r.owner !== undefined, { message: "name or owner is required" });
+  .refine((r) => r.name !== undefined || r.owner !== undefined || r.parallelRuns !== undefined, {
+    message: "name, owner or parallelRuns is required",
+  });
 export type UpdateMachineRequest = z.infer<typeof UpdateMachineRequest>;
 /** `PUT /v1/machines/:id/bots/:botId` (the machine's owner, usable). Response: `Machine`. */
 export const SetMachineBotRequest = z.object({

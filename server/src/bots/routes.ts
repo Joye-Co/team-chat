@@ -362,6 +362,10 @@ export function registerBotRoutes(): void {
         stmts.push(env.DB.prepare(`UPDATE machines SET name = ? WHERE id = ?${guard}`).bind(req.name, m.id, ...guardArgs));
         details.name = req.name;
       }
+      if (req.parallelRuns !== undefined && req.parallelRuns !== m.parallel_runs) {
+        stmts.push(env.DB.prepare(`UPDATE machines SET parallel_runs = ? WHERE id = ?${guard}`).bind(req.parallelRuns, m.id, ...guardArgs));
+        details.parallelRuns = req.parallelRuns;
+      }
       if (req.owner === null && m.owner_id) {
         stmts.push(
           env.DB.prepare(`DELETE FROM machine_bots WHERE machine_id = ?${guard}`).bind(m.id, ...guardArgs),
@@ -392,7 +396,9 @@ export function registerBotRoutes(): void {
           throw new ApiError("conflict", "the machine's owner changed meanwhile");
         }
         await auditStatement(env.DB, a, { action: "machine.update", target: m.id, details }, now).run();
-        if (details.owner !== undefined) redispatch(env, ctx, await runnerBots(env.DB));
+        if (details.parallelRuns !== undefined) await linkStub(env, m.id).setLimits(req.parallelRuns ?? null);
+        // More room, or a new owner: queued runs may fit now.
+        if (details.owner !== undefined || details.parallelRuns !== undefined) redispatch(env, ctx, await runnerBots(env.DB));
       }
       return oneMachine(env, a, m.id);
     },

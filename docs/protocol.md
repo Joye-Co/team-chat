@@ -868,7 +868,11 @@ Rules:
 - Labels are 1..64 of `[A-Za-z0-9_.:-]`, at most 20. A machine shows its owner labels plus the
   labels its daemon reports, but only owner labels route runs. A machine qualifies for a bot when it has all of the bot's
   labels, reports the bot's `runtime` as available, is connected with a heartbeat in the last
-  90 s, has fewer active runs than `maxParallelRuns` and at least 5 GiB free disk (`healthy`).
+  90 s, has fewer active runs than its limit and at least 5 GiB free disk (`healthy`). The limit
+  is `Machine.parallelRuns` when it is set (`PATCH /v1/machines/:id`), else `maxParallelRuns`; a
+  daemon without feature `limits` keeps refusing more than its own `maxParallelRuns`, so there
+  the limit is the smaller of the two. The server sends the set number to the daemon as
+  `machine.limits` (machine-protocol.md).
   Among those the server picks the one with the fewest active runs, then the lowest load.
   1.2.2: a runner with `machineId` runs only on that machine (its labels do not count; the other
   conditions do). `PUT` without `machineId` keeps the stored one, `null` clears it, and an
@@ -2578,14 +2582,16 @@ Machine += {
   personalBots?: { botId, repoPath?: string /* 1..1024 */ }[]   // the owner's checked AI members; to the owner only, <= 200
 }
 CreateMachineRequest += { personal?: boolean } // true = my own machine
-UpdateMachineRequest = { name?: Name, owner?: "me" | null }    // at least one field
+UpdateMachineRequest = { name?: Name, owner?: "me" | null,    // at least one field
+                         parallelRuns?: number /* 1..100 */ | null }  // null = the daemon's own config
+Machine += { parallelRuns?: number /* 1..100 */ }  // set in the app; absent = maxParallelRuns
 SetMachineBotRequest = { repoPath?: string | null }            // absent keeps, null clears
 ```
 
 | Method and path | Who | Body | Response |
 | --- | --- | --- | --- |
 | `POST /v1/machines` | usable: any person; a member always makes a personal machine | `CreateMachineRequest` | `CreateMachineResponse`; `personal: false` from a member is `forbidden` (`machine.team_admin_only`); an admin without `personal` makes a team machine (as before) |
-| `PATCH /v1/machines/:id` | team machine: an admin; personal machine: its owner | `UpdateMachineRequest` | `Machine`; `owner: null` (give it to the team) only by an owner who is an admin; `owner: "me"` only by an admin, on a team machine; audited as `machine.update` |
+| `PATCH /v1/machines/:id` | team machine: an admin; personal machine: its owner | `UpdateMachineRequest` | `Machine`; `owner: null` (give it to the team) only by an owner who is an admin; `owner: "me"` only by an admin, on a team machine; `parallelRuns` by whoever may rename it; audited as `machine.update` |
 | `PUT /v1/machines/:id/bots/:botId` | the machine's owner | `SetMachineBotRequest` | `Machine`; my work for that AI member runs here; audited as `machine.bots.set` |
 | `DELETE /v1/machines/:id/bots/:botId` | the machine's owner | | `Machine`; audited as `machine.bots.delete` |
 

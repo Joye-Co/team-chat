@@ -352,6 +352,13 @@ pub const SCENES: &[Scene] = &[
         open: settings_scenes::open_machine_dialog,
     },
     Scene {
+        name: "settings-machine-parallel",
+        about: "Settings: 同时做几件事… on a computer, the number with − and +",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_machine_parallel,
+    },
+    Scene {
         name: "settings-members",
         about: "Settings: 成员 with the owner actions",
         start: Start::SignedIn,

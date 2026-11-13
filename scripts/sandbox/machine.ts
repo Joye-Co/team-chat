@@ -26,6 +26,8 @@ const log = (l: string) => console.log(`${new Date().toISOString()} ${l}`);
 const GIB = 1024 ** 3;
 const HEARTBEAT_MS = 10_000;
 const SLOTS = 12;
+/** Feature "limits": how many runs at once as set in the app (`machine.limits`); the config's 12 until then. */
+let slots = SLOTS;
 const HOST_MEM = 67_216_998_400;
 const HOST_OWN = 6.3 * GIB;
 const DISK_TOTAL = 996_432_412_672;
@@ -107,7 +109,7 @@ function metrics() {
     memAvailableBytes: Math.max(0, Math.round(HOST_MEM - HOST_OWN - vmMem)),
     netRxBps: Math.round(rx),
     netTxBps: Math.round(tx),
-    vmSlots: SLOTS,
+    vmSlots: slots,
     ...(recent.length
       ? { boot: { avgMs: Math.round(recent.reduce((a, b) => a + b, 0) / recent.length), maxMs: Math.max(...recent), samples: recent.length } }
       : {}),
@@ -276,7 +278,7 @@ function connect() {
     send({
       t: "hello",
       protocol: 1,
-      machine: { name: "runner-1", labels: ["sandbox"], daemonVersion: "1.2.7-sample", os: "linux", arch: "x86_64", maxParallelRuns: SLOTS, features: ["accounts"], publicKey: PUBLIC_KEY },
+      machine: { name: "runner-1", labels: ["sandbox"], daemonVersion: "1.2.7-sample", os: "linux", arch: "x86_64", maxParallelRuns: SLOTS, features: ["accounts", "limits"], publicKey: PUBLIC_KEY },
       clis: [
         { runtime: "claude", kind: "claude", command: "claude", version: "2.1.0 (Claude Code)", available: true },
         { runtime: "codex", kind: "codex", command: "codex", version: "codex-cli 0.159.0", available: true },
@@ -295,7 +297,7 @@ function connect() {
         tick();
         break;
       case "run.assign":
-        if (vms.size >= SLOTS) {
+        if (vms.size >= slots) {
           send({ t: "run.reject", runId: f.runId, reason: "busy", message: "all VM slots are in use" });
           break;
         }
@@ -350,6 +352,11 @@ function connect() {
       case "secret.set":
         secrets.set(f.name, { last4: "", members: f.members ?? [], updatedAt: Date.now() });
         log(`key ${f.name} kept (sealed; the sample cannot open it)`);
+        tick();
+        break;
+      case "machine.limits":
+        slots = f.maxParallelRuns ?? SLOTS;
+        log(`up to ${slots} runs at once`);
         tick();
         break;
       case "secret.delete":

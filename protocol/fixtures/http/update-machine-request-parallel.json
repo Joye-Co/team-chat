@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateMachineRequest",
+  "valid": true,
+  "description": "do up to 4 runs at once",
+  "value": {
+    "parallelRuns": 4
+  }
+}
