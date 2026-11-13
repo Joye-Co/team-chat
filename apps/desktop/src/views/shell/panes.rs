@@ -3,8 +3,8 @@
 //! floats it over the page in a narrow window.
 
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement, Pixels, Styled,
-    Subscription, Window, div,
+    AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    ParentElement, Pixels, Styled, Subscription, Window, div,
 };
 
 use crate::{
@@ -138,7 +138,11 @@ impl Panes {
                 .bg(k.separator),
         );
         Some(if floats {
+            // A floating pane lies over the page's toolbar row, which starts
+            // a window drag on mouse down; without occluding it, that drag
+            // took the press and the pane's close button never got a click.
             column
+                .occlude()
                 .absolute()
                 .top_0()
                 .right_0()

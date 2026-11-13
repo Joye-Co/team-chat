@@ -51,6 +51,8 @@ crate::copy! {
     CHANGES_MERGED = "已合并",
     CHANGES_CLOSED = "已关闭",
     CHANGES_LINE = "#{n} +{add} −{del} · {files} 个文件",
+    // The 改动 pane: the PR opens in the browser.
+    CHANGES_OPEN_IN_BROWSER = "在浏览器中打开",
     CHECKS_LINE = "{passed}/{total} 项检查通过 · {state}",
     MACHINE_IDLE = "空闲",
     COST_TIME = "用时 {time}",

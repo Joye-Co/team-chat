@@ -85,6 +85,127 @@ fn detail(text: impl Into<SharedString>, cx: &App) -> gpui::Div {
         .child(text.into())
 }
 
+/// The 改动 pane: the 话题's PR as a title, its counts when GitHub sent
+/// them, 检查 and 状态 as StatusBadges, and the PR in the browser. A PR
+/// link without a title shows its number; counts that never arrived are
+/// left out rather than drawn as `+0 −0`.
+pub(super) fn changes_pane_body(
+    changes: Option<crate::data::v2::TopicChanges>,
+    window: &mut gpui::Window,
+    cx: &App,
+) -> AnyElement {
+    use crate::ui::native::{PushSize, PushStyle, metrics, push_button};
+    let k = native_colors(cx);
+    let pad = |el: gpui::Div| {
+        el.w_full()
+            .flex()
+            .flex_col()
+            .gap(space::S12)
+            .px(metrics::INSPECTOR_PAD)
+            .py(space::S16)
+    };
+    let Some(ch) = changes else {
+        return pad(div())
+            .child(EmptyLine::new(c::RAIL_EMPTY_CHANGES).icon(Sym::PullRequest))
+            .into_any_element();
+    };
+    let _ = window;
+    let number = format!("#{}", ch.number);
+    let title = ch.title.trim();
+    let has_title = !title.is_empty();
+    let mut meta: Vec<String> = Vec::new();
+    if has_title {
+        meta.push(number.clone());
+    }
+    if ch.additions > 0 || ch.deletions > 0 {
+        meta.push(format!("+{} −{}", ch.additions, ch.deletions));
+    }
+    if ch.files > 0 {
+        meta.push(fill(c::INSPECTOR_FILES, &[("n", &ch.files.to_string())]));
+    }
+    let (state_kind, state_text) = match ch.state {
+        ChangeState::Merging => (BadgeState::Merging, c::CHANGES_MERGING),
+        ChangeState::Merged => (BadgeState::Done, c::CHANGES_MERGED),
+        ChangeState::Closed => (BadgeState::Offline, c::CHANGES_CLOSED),
+        _ => (BadgeState::Queued, c::CHANGES_OPEN),
+    };
+    let checks = (ch.checks_total > 0).then(|| {
+        let ok = ch.checks_passed == ch.checks_total;
+        label_value(
+            c::INSPECTOR_CHECKS,
+            StatusBadge::new(
+                if ok {
+                    BadgeState::Done
+                } else {
+                    BadgeState::Failed
+                },
+                fill(
+                    c::INSPECTOR_CHECKS_VALUE,
+                    &[
+                        ("passed", &ch.checks_passed.to_string()),
+                        ("total", &ch.checks_total.to_string()),
+                    ],
+                ),
+            ),
+            cx,
+        )
+    });
+    let open = ch.url.clone().map(|url| {
+        div().pt(space::S4).flex().child(
+            push_button(
+                "changes-open-pr",
+                c::CHANGES_OPEN_IN_BROWSER,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            )
+            .on_click(move |_, _, cx| cx.open_url(&url)),
+        )
+    });
+    let body = pad(div())
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .items_start()
+                .gap(space::S8)
+                .child(
+                    div()
+                        .flex_none()
+                        .pt(px(2.))
+                        .child(mark(Sym::PullRequest, k.secondary)),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .n_headline()
+                        .text_color(k.label)
+                        .child(if has_title {
+                            title.to_string()
+                        } else {
+                            number.clone()
+                        }),
+                ),
+        )
+        .when(!meta.is_empty(), |el| {
+            el.child(detail(meta.join(" · "), cx))
+        })
+        .child(label_value(
+            c::INSPECTOR_STATE,
+            StatusBadge::new(state_kind, state_text),
+            cx,
+        ))
+        .children(checks)
+        .children(open);
+    div()
+        .id("changes-pane")
+        .size_full()
+        .overflow_y_scroll()
+        .child(body)
+        .into_any_element()
+}
+
 impl TopicRail {
     fn section(
         &self,

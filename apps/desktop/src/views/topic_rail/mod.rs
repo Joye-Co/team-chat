@@ -21,8 +21,8 @@ use crate::{
         v2::{ArtifactPreview, Currency, Decision, Proof, TopicChanges, TopicCost},
     },
     theme::{self, Type as _, space},
-    ui::{self, Sym, native::NativeType as _},
-    views::shell::{PaneView, panes::watch, stub_body},
+    ui::{self, native::NativeType as _},
+    views::shell::{PaneView, panes::watch},
 };
 
 /// What the rail of one 话题 shows, read from the provider once per change
@@ -659,7 +659,7 @@ impl PaneView for ChangesPane {
 }
 
 impl Render for ChangesPane {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let changes = self
             .services
             .nav
@@ -667,13 +667,7 @@ impl Render for ChangesPane {
             .topic
             .clone()
             .and_then(|(g, t)| self.services.provider.topic_changes(&g, &t));
-        let line = changes.map(|ch| {
-            format!(
-                "#{} {} · +{} −{}",
-                ch.number, ch.title, ch.additions, ch.deletions
-            )
-        });
-        stub_body(Sym::PullRequest, c::TITLE_CHANGES, line, cx)
+        native::changes_pane_body(changes, window, cx)
     }
 }
 
