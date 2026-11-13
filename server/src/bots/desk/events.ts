@@ -1,6 +1,6 @@
 // BotDesk events: the run log from MachineLink, its effects (progress message, plan, approval
 // cards), and the end of a run (result, status, follow-up runs).
-import { type Card, RUN_KIND_ASIDE, RunDoneFrame, type RunStatus, type TopicStatus } from "@chat/protocol";
+import { type Card, RUN_KIND_ASIDE, RunDoneFrame, type RunPrState, type RunStatus, type TopicStatus } from "@chat/protocol";
 import { ApiError, unwrap } from "../../core/errors";
 import { MAX_RESULT_CHARS, Progress, TEXT, cut, failureKind, firstLine, readableError, stripAcceptance } from "../dispatch";
 import { type FailureNote, failedOn, failureNote } from "./failure";
@@ -792,47 +792,51 @@ export abstract class DeskEvents extends DeskRuns {
   }
 
   /**
-   * The state of the pull requests the result names, as the run's computer read them with its
-   * own `gh` when the run ended (`run.done.prs`). A pull request it could not read is absent.
+   * The pull requests the result names, as the run's computer read them with its own `gh` when
+   * the run ended (`run.done.prs`): state, title, size and the uploaded diff. A pull request it
+   * could not read is absent.
    */
-  protected livePrStates(r: Pick<RunRow, "id">): Map<string, string> {
-    const out = new Map<string, string>();
+  protected livePrStates(r: Pick<RunRow, "id">): Map<string, RunPrState> {
+    const out = new Map<string, RunPrState>();
     const row = this.sql
       .exec<{ frame: string }>(`SELECT frame FROM run_log WHERE run_id = ? AND frame LIKE '%"t":"run.done"%' ORDER BY seq DESC LIMIT 1`, r.id)
       .toArray()[0];
     if (!row) return out;
     try {
       const prs = RunDoneFrame.shape.prs.safeParse((JSON.parse(row.frame) as { prs?: unknown }).prs);
-      for (const p of prs.success ? (prs.data ?? []) : []) out.set(p.url, p.state);
+      for (const p of prs.success ? (prs.data ?? []) : []) out.set(p.url, p);
     } catch {
-      // A frame that does not parse knows no state.
+      // A frame that does not parse knows nothing.
     }
     return out;
   }
 
   /**
-   * The pull requests a result names get the state its computer read (`livePrStates`) on their
-   * topic link: a new link, or the newer state of a link the topic has. A pull request whose
-   * state is not known gets no link, so nothing shows it as open without knowing. Returns the
-   * topic's pull requests with the states now known.
+   * The pull requests a result names get what its computer read (`livePrStates`) on their topic
+   * link: a new link, or a link the topic has whose state, title, size or diff changed. A pull
+   * request whose state is not known gets no link, so nothing shows it as open without knowing.
+   * Returns the topic's pull requests with the states now known.
    */
-  protected async linkPrs(r: RunRow, proof: RunProof, body: string, live: Map<string, string>): Promise<PrRef[]> {
+  protected async linkPrs(r: RunRow, proof: RunProof, body: string, live: Map<string, RunPrState>): Promise<PrRef[]> {
     const prs = [...proof.prs];
     for (const pr of prRefs(body)) {
-      const state = live.get(pr.url);
-      if (!state) continue;
+      const read = live.get(pr.url);
+      if (!read) continue;
       const i = prs.findIndex((p) => p.url === pr.url);
-      if (i >= 0 && prs[i]?.state === state) continue;
-      const link: Record<string, unknown> = {
-        ...((i >= 0 ? prs[i]?.link : undefined) ?? { kind: "pr", repo: pr.repo, number: pr.number, url: pr.url, title: "", checks: [] }),
-        state,
-      };
+      const old = (i >= 0 ? prs[i]?.link : undefined) ?? { kind: "pr", repo: pr.repo, number: pr.number, url: pr.url, title: "", checks: [] };
+      const link: Record<string, unknown> = { ...old, state: read.state };
+      if (read.title) link.title = read.title;
+      if (read.additions !== undefined) link.additions = read.additions;
+      if (read.deletions !== undefined) link.deletions = read.deletions;
+      if (read.changedFiles !== undefined) link.changedFiles = read.changedFiles;
+      if (read.diff) link.diff = read.diff;
       // A merged or closed pull request waits to merge no more.
-      if (state !== "open" && state !== "draft") delete link.merge;
+      if (read.state !== "open" && read.state !== "draft") delete link.merge;
+      if (i >= 0 && JSON.stringify(link) === JSON.stringify(old)) continue;
       try {
         unwrap(await this.room(r).rpc(r.group_id, TOPIC_LINK_RPC, this.actor(), { topicId: r.topic_id, link }));
-        if (i >= 0) prs[i] = { ...(prs[i] as PrRef), state };
-        else prs.push({ ...pr, state });
+        if (i >= 0) prs[i] = { ...(prs[i] as PrRef), state: read.state, link };
+        else prs.push({ ...pr, state: read.state, link });
       } catch (err) {
         this.log.warn("topic link from the result failed", { runId: r.id, err });
       }
@@ -856,7 +860,7 @@ export abstract class DeskEvents extends DeskRuns {
         const live = this.livePrStates(r);
         const topicPrs = await this.linkPrs(r, proof, body, live);
         const named = prRefs(body).map((p) => {
-          const state = live.get(p.url);
+          const state = live.get(p.url)?.state;
           return state ? { ...p, state } : p;
         });
         const card = doneCard({

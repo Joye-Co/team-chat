@@ -5,6 +5,7 @@ import { z } from "zod";
 import { CardRev } from "./card2.ts";
 import { Id, Millis, Seq, utf8Bytes } from "./common.ts";
 import { RunPlan } from "./plan.ts";
+import { PrDiffRef } from "./links.ts";
 import { RunGithub } from "./github.ts";
 import { RunCode } from "./relay.ts";
 import { HandCommandId, MAX_HAND_COMMAND_CHARS, MAX_HAND_OUTPUT_BYTES, RunHandback } from "./takeover.ts";
@@ -483,6 +484,13 @@ export const RunEventFrame = z.object({
 export const RunPrState = z.object({
   url: z.string().min(1).max(300),
   state: z.string().min(1).max(32),
+  /** What else `gh` read: the title and the size of the change. */
+  title: z.string().max(500).optional(),
+  additions: z.int().nonnegative().optional(),
+  deletions: z.int().nonnegative().optional(),
+  changedFiles: z.int().nonnegative().optional(),
+  /** The diff the computer uploaded as a run file (`PrDiff` JSON); absent = not read. */
+  diff: PrDiffRef.optional(),
 });
 export type RunPrState = z.infer<typeof RunPrState>;
 /** At most this many pull requests in `run.done.prs`. */

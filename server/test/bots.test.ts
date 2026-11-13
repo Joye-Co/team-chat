@@ -285,7 +285,7 @@ describe("runner-backed bots", () => {
     const url = "https://github.com/acme/app/pull/7";
     const links = (topicId: string) => c.events().filter((e) => e.type === "topic.linked" && e.data.topicId === topicId);
     const runs = new Set<string>();
-    const runOnce = async (topicId: string | null, prs?: { url: string; state: string }[]) => {
+    const runOnce = async (topicId: string | null, prs?: Record<string, unknown>[]) => {
       const sent = await c.ok({
         t: "send",
         groupId: w.gid,
@@ -319,6 +319,16 @@ describe("runner-backed bots", () => {
     expect(merged.ref.target.state).toBe("merged");
     await waitUntil(() => links(first.topicId).length === 2, 5000, "two links");
     expect(links(first.topicId).map((e) => e.data.link.state)).toEqual(["open", "merged"]);
+
+    // gh also read the title, the size and the diff it sent up: the link carries them, and a
+    // later link without a diff keeps it.
+    const diff = { fileId: "F1", name: "pr-7.diff.json", size: 120, sha256: "a".repeat(64) };
+    await runOnce(first.topicId, [{ url, state: "merged", title: "Fix the thing", additions: 3, deletions: 1, changedFiles: 2, diff }]);
+    await waitUntil(() => links(first.topicId).length === 3, 5000, "three links");
+    expect(links(first.topicId)[2].data.link).toMatchObject({ title: "Fix the thing", additions: 3, deletions: 1, changedFiles: 2, diff });
+    await runOnce(first.topicId, [{ url, state: "closed" }]);
+    await waitUntil(() => links(first.topicId).length === 4, 5000, "four links");
+    expect(links(first.topicId)[3].data.link).toMatchObject({ state: "closed", title: "Fix the thing", diff });
     c.close();
     d.close();
   });
