@@ -455,6 +455,7 @@ impl Daemon {
                         duration_ms: now.saturating_sub(meta.started_at),
                         code: None,
                         resume_missed: None,
+                        prs: None,
                         failure: Some(crate::proto::RunFailure::new(
                             crate::proto::failure_kind::OTHER,
                         )),
@@ -1454,6 +1455,7 @@ mod tests {
             duration_ms: 0,
             code: None,
             resume_missed: None,
+            prs: None,
             failure: None,
         };
         let mut d = done("cancelled", None);
@@ -1487,6 +1489,7 @@ mod tests {
             duration_ms: 0,
             code: None,
             resume_missed: None,
+            prs: None,
             failure: kind.map(crate::proto::RunFailure::new),
         };
         note_sign_in(&marks, &worked, "claude", &done("failed", Some("network")));

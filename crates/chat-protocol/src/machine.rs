@@ -908,7 +908,22 @@ pub struct RunDone {
     /// `Some(true)`: `resume_session_id` was not found and the run used `full_prompt`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_missed: Option<bool>,
+    /// The pull requests the result names that the computer's `gh` could read; `None` = not known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prs: Option<Vec<RunPrState>>,
 }
+
+/// The state of a pull request a run's result names, as the run's computer read it with its own
+/// `gh` when the run ended: "open", "draft", "merged" or "closed" (the words of `topic.linked`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunPrState {
+    pub url: String,
+    pub state: String,
+}
+
+/// At most this many pull requests in `RunDone::prs`.
+pub const MAX_RUN_PRS: usize = 5;
 
 /// `RunFailure.kind` values (machine-protocol.md, "Failure kinds"). Open: an unknown kind reads
 /// as [`failure_kind::OTHER`].

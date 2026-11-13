@@ -1,13 +1,13 @@
 // BotDesk events: the run log from MachineLink, its effects (progress message, plan, approval
 // cards), and the end of a run (result, status, follow-up runs).
-import { type Card, RUN_KIND_ASIDE, type RunStatus, type TopicStatus } from "@chat/protocol";
+import { type Card, RUN_KIND_ASIDE, RunDoneFrame, type RunStatus, type TopicStatus } from "@chat/protocol";
 import { ApiError, unwrap } from "../../core/errors";
 import { MAX_RESULT_CHARS, Progress, TEXT, cut, failureKind, firstLine, readableError, stripAcceptance } from "../dispatch";
 import { type FailureNote, failedOn, failureNote } from "./failure";
 import { linkStub } from "../env";
 import { loadRunner } from "../store";
 import type { SeqFrame } from "../link";
-import { type RunProof, type TestCounts, doneCard, doneCardV1, hasProof, mergePrs, prRefs, testsFromLog } from "../proof";
+import { type PrRef, type RunProof, type TestCounts, doneCard, doneCardV1, hasProof, mergePrs, prRefs, testsFromLog } from "../proof";
 import { needsReply, parseReport, reportOf } from "./report";
 import { TOPIC_LINK_RPC } from "../../integrations/links";
 import { stamp } from "../../context/render";
@@ -792,19 +792,52 @@ export abstract class DeskEvents extends DeskRuns {
   }
 
   /**
-   * The pull requests a result names that the topic has no link for yet become `topic.linked`
-   * (state "open" until the GitHub adapter sends the real state, checks and size).
+   * The state of the pull requests the result names, as the run's computer read them with its
+   * own `gh` when the run ended (`run.done.prs`). A pull request it could not read is absent.
    */
-  protected async linkPrs(r: RunRow, proof: RunProof, body: string): Promise<void> {
+  protected livePrStates(r: Pick<RunRow, "id">): Map<string, string> {
+    const out = new Map<string, string>();
+    const row = this.sql
+      .exec<{ frame: string }>(`SELECT frame FROM run_log WHERE run_id = ? AND frame LIKE '%"t":"run.done"%' ORDER BY seq DESC LIMIT 1`, r.id)
+      .toArray()[0];
+    if (!row) return out;
+    try {
+      const prs = RunDoneFrame.shape.prs.safeParse((JSON.parse(row.frame) as { prs?: unknown }).prs);
+      for (const p of prs.success ? (prs.data ?? []) : []) out.set(p.url, p.state);
+    } catch {
+      // A frame that does not parse knows no state.
+    }
+    return out;
+  }
+
+  /**
+   * The pull requests a result names get the state its computer read (`livePrStates`) on their
+   * topic link: a new link, or the newer state of a link the topic has. A pull request whose
+   * state is not known gets no link, so nothing shows it as open without knowing. Returns the
+   * topic's pull requests with the states now known.
+   */
+  protected async linkPrs(r: RunRow, proof: RunProof, body: string, live: Map<string, string>): Promise<PrRef[]> {
+    const prs = [...proof.prs];
     for (const pr of prRefs(body)) {
-      if (proof.prs.some((p) => p.url === pr.url)) continue;
-      const link = { kind: "pr", repo: pr.repo, number: pr.number, url: pr.url, title: "", state: "open", checks: [] };
+      const state = live.get(pr.url);
+      if (!state) continue;
+      const i = prs.findIndex((p) => p.url === pr.url);
+      if (i >= 0 && prs[i]?.state === state) continue;
+      const link: Record<string, unknown> = {
+        ...((i >= 0 ? prs[i]?.link : undefined) ?? { kind: "pr", repo: pr.repo, number: pr.number, url: pr.url, title: "", checks: [] }),
+        state,
+      };
+      // A merged or closed pull request waits to merge no more.
+      if (state !== "open" && state !== "draft") delete link.merge;
       try {
         unwrap(await this.room(r).rpc(r.group_id, TOPIC_LINK_RPC, this.actor(), { topicId: r.topic_id, link }));
+        if (i >= 0) prs[i] = { ...(prs[i] as PrRef), state };
+        else prs.push({ ...pr, state });
       } catch (err) {
         this.log.warn("topic link from the result failed", { runId: r.id, err });
       }
     }
+    return prs;
   }
 
   /** Posts the result once (idempotent by client message id); returns its message id. */
@@ -820,11 +853,16 @@ export abstract class DeskEvents extends DeskRuns {
         const proof = unwrap(
           await this.room(r).rpc(r.group_id, "bots.runProof", this.actor(), { topicId: r.topic_id, runId: r.id, since: r.created_at }),
         ) as RunProof;
-        await this.linkPrs(r, proof, body);
+        const live = this.livePrStates(r);
+        const topicPrs = await this.linkPrs(r, proof, body, live);
+        const named = prRefs(body).map((p) => {
+          const state = live.get(p.url);
+          return state ? { ...p, state } : p;
+        });
         const card = doneCard({
           runId: r.id,
           result: body,
-          prs: mergePrs(proof.prs, prRefs(body)),
+          prs: mergePrs(topicPrs, named),
           artifacts: proof.artifacts,
           acceptance: this.acceptanceOf(r) ?? [],
           tests: this.loggedTests(r),

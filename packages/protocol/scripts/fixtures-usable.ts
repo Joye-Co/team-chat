@@ -406,4 +406,14 @@ export function addUsableFixtures({ ok, bad, T0, ID, base, topic }: UsableCtx) {
     durationMs: 12000,
     resumeMissed: true,
   }, "the session was not found, so the run used the full prompt");
+  ok("machine/up-run.done-prs.json", "MachineUpFrame", {
+    t: "run.done",
+    runId,
+    seq: 21,
+    at: T0 + 21,
+    status: "succeeded",
+    resultText: "合并了 https://github.com/Joye-Co/team-chat/pull/297",
+    durationMs: 9000,
+    prs: [{ url: "https://github.com/Joye-Co/team-chat/pull/297", state: "merged" }],
+  }, "the pull request the result names, as the computer's gh read it when the run ended");
 }
