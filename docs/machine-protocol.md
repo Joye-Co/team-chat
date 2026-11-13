@@ -1084,6 +1084,9 @@ RunGithub = {
 { t: "run.command.cancel", runId, commandId }                      // feature "takeover"
 { t: "home.clear", memberId }   // feature "homes"; only while connected: empty that AI member's home
                                  // folder (refused, and logged, while a run of it is on the machine)
+{ t: "machine.limits", maxParallelRuns? /* 1..100 */ }  // feature "limits": how many runs at once,
+                                 // set in the app; absent = the config's max_parallel_runs. Sent after
+                                 // every welcome and on each change; the daemon keeps it in memory only
 ```
 
 GitHub (feature `github`):
@@ -1361,7 +1364,7 @@ prompt and reports `run.done.resumeMissed` (see run.assign). The CLIs' own memor
 or not (`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, Codex `-c features.memories=false`; see
 Environment): what a member remembers lives in the product, not in a `cli/` folder.
 
-**Capacity.** Besides `max_parallel_runs` and the free disk of `work_root`
+**Capacity.** Besides the run limit (`max_parallel_runs`, or `machine.limits`) and the free disk of `work_root`
 (`health.diskFreeBytes`), a VM host
 refuses a run (`run.reject`, `busy`) when `MemAvailable` does not cover `[vm].mem_mib` for the
 new VM and for each accepted VM that has not booted yet, above a reserve of a fifth of the

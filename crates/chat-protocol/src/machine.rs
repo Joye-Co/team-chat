@@ -58,6 +58,8 @@ pub mod feature {
     /// Usable (机 5.1): `CliLogin.confirmed` is also `true` on a certain `logged_in`, so a
     /// `logged_in` without it may come from the credential files alone.
     pub const SIGN_IN_CONFIRMED: &str = "sign-in-confirmed";
+    /// `machine.limits`: the daemon takes how many runs it may do at once from the server.
+    pub const LIMITS: &str = "limits";
 }
 
 /// Most entries of `MachineMetrics.homes`.
@@ -1136,6 +1138,13 @@ pub enum Down {
     /// Feature "accounts": forget an API key.
     #[serde(rename = "secret.delete", rename_all = "camelCase")]
     SecretDelete { name: String },
+    /// Feature "limits": how many runs the daemon may do at once, set in the app; `None` = its
+    /// own config. Sent after every welcome and on every change while connected.
+    #[serde(rename = "machine.limits", rename_all = "camelCase")]
+    MachineLimits {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_parallel_runs: Option<u32>,
+    },
     /// Usable, feature "homes": empty one AI member's home folder. Sent only while connected;
     /// the daemon refuses while that member has a run on the machine.
     #[serde(rename = "home.clear", rename_all = "camelCase")]

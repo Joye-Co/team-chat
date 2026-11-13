@@ -12,7 +12,7 @@ use gpui::{
 };
 use gpui_component::{
     WindowExt as _,
-    input::{InputEvent, InputState},
+    input::{InputEvent, InputState, NumberInput},
     menu::{PopupMenu, PopupMenuItem},
 };
 
@@ -90,6 +90,9 @@ pub fn menu_items(
     if may.rename {
         menu = menu.item(item(s::MACHINE_RENAME, |sv, m, a, w, cx| {
             open_rename(sv, m, a, w, cx);
+        }));
+        menu = menu.item(item(s::MACHINE_PARALLEL, |sv, m, a, w, cx| {
+            open_parallel(sv, m, a, w, cx);
         }));
     }
     if may.to_team || may.to_mine {
@@ -465,6 +468,232 @@ pub fn open_rename(
                 shown
                     .read(cx)
                     .name
+                    .read(cx)
+                    .focus_handle(cx)
+                    .focus(window, cx);
+            }
+            dialog.child(shown.clone())
+        },
+    );
+    form
+}
+
+// --- 同时做几件事… ---
+
+/// The most a computer may be set to do at once (`Machine.parallelRuns`).
+pub const MAX_PARALLEL: u32 = 100;
+
+/// The typed number when it is a whole number in 1..=[`MAX_PARALLEL`].
+pub fn parse_parallel(text: &str) -> Option<u32> {
+    text.trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|n| (1..=MAX_PARALLEL).contains(n))
+}
+
+pub struct ParallelForm {
+    services: Services,
+    id: String,
+    name: String,
+    before: Option<u32>,
+    /// The daemon's own number when it is too old to take the app's (feature "limits").
+    old_cap: Option<u32>,
+    count: Entity<InputState>,
+    status: Status,
+    after: After,
+    _sub: gpui::Subscription,
+}
+
+impl ParallelForm {
+    fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.status.busy() {
+            return;
+        }
+        let Some(n) = parse_parallel(&self.count.read(cx).value()) else {
+            return;
+        };
+        if Some(n) == self.before {
+            window.close_dialog(cx);
+            return;
+        }
+        let reply = self
+            .services
+            .provider
+            .set_machine_parallel_runs(&self.id, Some(n));
+        self.status = Status::Busy(s::SAVING.into());
+        cx.notify();
+        let handle = window.window_handle();
+        cx.spawn(async move |this, cx| {
+            let result = answer(reply).await;
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(_) => {
+                    this.status = Status::Idle;
+                    let after = this.after.clone();
+                    let _ = handle.update(cx, |_, window, cx| window.close_dialog(cx));
+                    after(Ok(()), cx);
+                }
+                Err(e) => {
+                    this.status = Status::from_error(e);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+}
+
+impl Render for ParallelForm {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let k = native_colors(cx);
+        let busy = self.status.busy();
+        let typed = self.count.read(cx).value().trim().to_string();
+        let value = parse_parallel(&typed);
+        let problem = (!typed.is_empty() && value.is_none()).then(|| {
+            fill(
+                s::MACHINE_PARALLEL_RANGE,
+                &[("max", &MAX_PARALLEL.to_string())],
+            )
+        });
+        let off = busy || value.is_none();
+        let save = cx.entity();
+        let status = match (&problem, &self.status) {
+            (Some(p), _) => Some(sheet_status_error(p.clone(), cx)),
+            (None, Status::Failed(t)) => Some(sheet_status_error(
+                format!("{}：{t}", s::MACHINE_ACTION_FAILED),
+                cx,
+            )),
+            _ => None,
+        };
+        let old = self
+            .old_cap
+            .filter(|cap| value.is_some_and(|v| v > *cap))
+            .map(|cap| fill(s::MACHINE_PARALLEL_OLD, &[("n", &cap.to_string())]));
+        SheetLayout::new(fill(s::MACHINE_PARALLEL_TITLE, &[("name", &self.name)]))
+            .body(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap(tokens::space::S12)
+                    .child(
+                        sheet_form().child(sheet_form_row(
+                            s::MACHINE_PARALLEL_FIELD,
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(tokens::space::S8)
+                                .child(
+                                    div().w(tokens::metrics::NUMBER_FIELD).child(
+                                        NumberInput::new(&self.count)
+                                            .accessibility_label(s::MACHINE_PARALLEL_FIELD),
+                                    ),
+                                )
+                                .child(
+                                    div()
+                                        .n_body()
+                                        .text_color(k.label)
+                                        .child(s::MACHINE_PARALLEL_UNIT),
+                                ),
+                            cx,
+                        )),
+                    )
+                    .child(
+                        div()
+                            .n_footnote()
+                            .text_color(k.secondary)
+                            .child(s::MACHINE_PARALLEL_HINT),
+                    )
+                    .when_some(old, |d, t| {
+                        d.child(div().n_footnote().text_color(k.secondary).child(t))
+                    }),
+            )
+            .when_some(status, |l, st| l.status(st))
+            .buttons([
+                push_button(
+                    "machine-parallel-cancel",
+                    common::CANCEL,
+                    PushStyle::Outline,
+                    PushSize::Regular,
+                    cx,
+                )
+                .on_click(|_, window, cx| window.close_dialog(cx)),
+                disabled_push(
+                    push_button(
+                        "machine-parallel-save",
+                        common::SAVE,
+                        PushStyle::Default,
+                        PushSize::Regular,
+                        cx,
+                    ),
+                    off,
+                    cx,
+                )
+                .loading(busy)
+                .on_click(move |_, window, cx| save.update(cx, |f, cx| f.submit(window, cx))),
+            ])
+    }
+}
+
+/// 同时做几件事…: a sheet with a stepper, saved on 保存 or Return.
+pub fn open_parallel(
+    services: Services,
+    m: &MachineInfo,
+    after: After,
+    window: &mut Window,
+    cx: &mut App,
+) -> Entity<ParallelForm> {
+    let (id, name) = (m.id.clone(), m.name.clone());
+    let before = m.parallel_runs;
+    // What was set, not what an older daemon makes of it: the note under the field says that.
+    let start = m
+        .parallel_runs
+        .or(m.max_parallel_runs)
+        .unwrap_or(1)
+        .clamp(1, MAX_PARALLEL);
+    let old_cap = (!m.limits).then_some(m.max_parallel_runs).flatten();
+    let form = cx.new(|cx| {
+        let count = cx.new(|cx| {
+            let mut st = InputState::new(window, cx)
+                .step(1.)
+                .min(1.)
+                .max(MAX_PARALLEL as f64)
+                .validate(|t, _| t.len() <= 3 && t.chars().all(|c| c.is_ascii_digit()));
+            st.set_value(start.to_string(), window, cx);
+            st
+        });
+        let sub = cx.subscribe_in(
+            &count,
+            window,
+            |this: &mut ParallelForm, _, e: &InputEvent, window, cx| match e {
+                InputEvent::PressEnter { .. } => this.submit(window, cx),
+                InputEvent::Change => cx.notify(),
+                _ => {}
+            },
+        );
+        ParallelForm {
+            services,
+            id,
+            name,
+            before,
+            old_cap,
+            count,
+            status: Status::Idle,
+            after,
+            _sub: sub,
+        }
+    });
+    let shown = form.clone();
+    let first = std::cell::Cell::new(true);
+    widgets::open_sheet(
+        window,
+        cx,
+        SheetWidth::Form,
+        px(320.),
+        move |dialog, window, cx| {
+            if first.replace(false) {
+                shown
+                    .read(cx)
+                    .count
                     .read(cx)
                     .focus_handle(cx)
                     .focus(window, cx);
@@ -891,5 +1120,25 @@ mod tests {
             my_bots_summary(&m, &members).as_deref(),
             Some(fill(s::MACHINE_MY_BOTS_SUMMARY, &[("names", "Jojo、Forge")]).as_str())
         );
+    }
+
+    #[test]
+    fn a_computer_does_as_many_tasks_at_once_as_set() {
+        assert_eq!(parse_parallel(" 4 "), Some(4));
+        assert_eq!(parse_parallel("0"), None);
+        assert_eq!(parse_parallel("101"), None);
+        assert_eq!(parse_parallel(""), None);
+        let mut m = MachineInfo {
+            max_parallel_runs: Some(2),
+            ..Default::default()
+        };
+        assert_eq!(m.run_limit(), Some(2));
+        // An older daemon keeps to its own number; one with "limits" takes the app's.
+        m.parallel_runs = Some(5);
+        assert_eq!(m.run_limit(), Some(2));
+        m.limits = true;
+        assert_eq!(m.run_limit(), Some(5));
+        m.parallel_runs = Some(1);
+        assert_eq!(m.run_limit(), Some(1));
     }
 }

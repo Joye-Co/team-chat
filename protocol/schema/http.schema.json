@@ -40892,6 +40892,11 @@
           "minimum": 0,
           "maximum": 9007199254740991
         },
+        "parallelRuns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
         "health": {
           "type": "object",
           "properties": {
@@ -41192,6 +41197,11 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "parallelRuns": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
             "health": {
               "type": "object",
               "properties": {
@@ -41476,6 +41486,11 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991
+          },
+          "parallelRuns": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
           },
           "health": {
             "type": "object",
@@ -46056,6 +46071,23 @@
           "required": [
             "t",
             "name"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "t": {
+              "type": "string",
+              "const": "machine.limits"
+            },
+            "maxParallelRuns": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          "required": [
+            "t"
           ]
         },
         {
@@ -68439,6 +68471,18 @@
             {
               "type": "string",
               "const": "me"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parallelRuns": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
             },
             {
               "type": "null"

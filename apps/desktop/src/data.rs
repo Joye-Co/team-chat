@@ -1331,7 +1331,12 @@ pub struct MachineInfo {
     pub disk_total_bytes: Option<u64>,
     /// Runs on it now.
     pub active_runs: u32,
+    /// What the daemon's own config allows.
     pub max_parallel_runs: Option<u32>,
+    /// How many tasks at once as set in the app (`Machine.parallelRuns`); `None` = the daemon's own.
+    pub parallel_runs: Option<u32>,
+    /// The daemon takes the app's number (feature "limits"); an older one keeps to its own.
+    pub limits: bool,
     /// Runtime names it can run.
     pub runtimes: Vec<String>,
     /// What each available runtime reports it can run (feature "effort").
@@ -1402,6 +1407,16 @@ impl MachineInfo {
             None => Ownership::Team,
             Some(o) if Some(o) == me => Ownership::Mine,
             Some(_) => Ownership::Theirs,
+        }
+    }
+
+    /// How many tasks it takes at once: the app's number, else the daemon's own; an older daemon
+    /// (without feature "limits") no more than its own. `None` when not known yet.
+    pub fn run_limit(&self) -> Option<u32> {
+        match (self.parallel_runs, self.max_parallel_runs) {
+            (Some(set), Some(own)) if !self.limits => Some(set.min(own)),
+            (Some(set), _) => Some(set),
+            (None, own) => own,
         }
     }
 
@@ -2190,6 +2205,15 @@ pub trait ChatProvider: Send + Sync + 'static {
     }
     /// Usable: renames a computer (a team one: admins; my own: me).
     fn rename_machine(&self, _machine_id: &str, _name: String) -> AdminReply<MachineInfo> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// How many tasks the computer does at once (`None`: its own config's number); whoever may
+    /// rename it.
+    fn set_machine_parallel_runs(
+        &self,
+        _machine_id: &str,
+        _parallel_runs: Option<u32>,
+    ) -> AdminReply<MachineInfo> {
         reply_now(Err(AdminError::Unsupported))
     }
     /// Usable: 改成我的电脑 (`mine`, an admin) or 交给团队 (an admin who owns it).

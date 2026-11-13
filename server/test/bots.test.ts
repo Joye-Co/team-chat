@@ -12,6 +12,7 @@ import {
   isHealthy,
   isOnline,
   labelsMatch,
+  runLimit,
   whyNoMachine,
 } from "../src/bots/dispatch";
 import type { BotsEnv } from "../src/bots/env";
@@ -92,6 +93,19 @@ describe("dispatch rules", () => {
     const list = candidates([busy, noLabel, noRuntime, unavailable, full, lowDisk, idle], runner, now);
     expect(list.map((m) => m.id)).toEqual(["m3", "m2"]);
     expect(candidates([idle], runner, now, ["m3"])).toEqual([]);
+  });
+
+  it("take as many runs at once as set in the app; an old daemon no more than its own number", () => {
+    const full = { ...base, id: "m2", runningRuns: ["a", "b"] };
+    expect(candidates([full], runner, now)).toEqual([]);
+    const limits = { ...full, info: { ...full.info!, features: ["limits"] } };
+    expect(runLimit({ ...limits, parallelRuns: 4 })).toBe(4);
+    expect(candidates([{ ...limits, parallelRuns: 4 }], runner, now).map((m) => m.id)).toEqual(["m2"]);
+    expect(candidates([{ ...limits, parallelRuns: 2 }], runner, now)).toEqual([]);
+    // Fewer than the daemon's own works on any daemon; more only with feature "limits".
+    expect(runLimit({ ...full, parallelRuns: 1 })).toBe(1);
+    expect(runLimit({ ...full, parallelRuns: 4 })).toBe(2);
+    expect(candidates([{ ...full, parallelRuns: 4 }], runner, now)).toEqual([]);
   });
 
   it("run a runner pinned to one machine only there, whatever the labels", () => {

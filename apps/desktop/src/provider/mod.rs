@@ -2320,12 +2320,20 @@ impl ChatProvider for CoreProvider {
     }
 
     fn rename_machine(&self, machine_id: &str, name: String) -> AdminReply<MachineInfo> {
-        self.update_machine_inner(machine_id, Some(name), None)
+        self.update_machine_inner(machine_id, Some(name), None, None)
+    }
+
+    fn set_machine_parallel_runs(
+        &self,
+        machine_id: &str,
+        parallel_runs: Option<u32>,
+    ) -> AdminReply<MachineInfo> {
+        self.update_machine_inner(machine_id, None, None, Some(parallel_runs))
     }
 
     fn set_machine_owner(&self, machine_id: &str, mine: bool) -> AdminReply<MachineInfo> {
         let owner = mine.then(|| chat_core::proto::MACHINE_OWNER_ME.to_string());
-        self.update_machine_inner(machine_id, None, Some(owner))
+        self.update_machine_inner(machine_id, None, Some(owner), None)
     }
 
     fn remove_machine(&self, machine_id: &str) -> AdminReply<()> {

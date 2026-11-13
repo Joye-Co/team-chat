@@ -67,7 +67,14 @@ export function addUsableFixtures({ ok, bad, T0, ID, base, topic }: UsableCtx) {
   ok("http/update-machine-request-name.json", "UpdateMachineRequest", { name: "构建机" });
   ok("http/update-machine-request-mine.json", "UpdateMachineRequest", { owner: "me" }, "team -> my own machine");
   ok("http/update-machine-request-team.json", "UpdateMachineRequest", { owner: null }, "my own machine -> the team");
-  bad("http/update-machine-request-empty.json", "UpdateMachineRequest", {}, "name or owner is required");
+  bad("http/update-machine-request-empty.json", "UpdateMachineRequest", {}, "name, owner or parallelRuns is required");
+  ok("http/update-machine-request-parallel.json", "UpdateMachineRequest", { parallelRuns: 4 }, "do up to 4 runs at once");
+  ok("http/update-machine-request-parallel-clear.json", "UpdateMachineRequest", { parallelRuns: null }, "back to the daemon's own config");
+  bad("http/update-machine-request-parallel-zero.json", "UpdateMachineRequest", { parallelRuns: 0 }, "at least 1");
+  bad("http/update-machine-request-parallel-big.json", "UpdateMachineRequest", { parallelRuns: 101 }, "at most 100");
+  ok("entities/machine-parallel.json", "Machine", { ...machineBase, maxParallelRuns: 2, parallelRuns: 6 }, "set to 6 runs at once in the app; the daemon's config says 2");
+  ok("machine/down-machine.limits.json", "MachineDownFrame", { t: "machine.limits", maxParallelRuns: 6 }, "feature limits: up to 6 runs at once");
+  ok("machine/down-machine.limits-clear.json", "MachineDownFrame", { t: "machine.limits" }, "feature limits: the daemon's own config again");
   ok("entities/machine-cli-resume.json", "Machine", {
     id: "01JBX0MACHINE00000000000AW",
     name: "mac-mini",

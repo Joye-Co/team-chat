@@ -325,7 +325,7 @@ impl AdminView {
         let slots = d
             .map(|d| d.capacity.running + d.capacity.can_take)
             .filter(|n| *n > 0)
-            .or(x.max_parallel_runs)
+            .or(x.run_limit())
             .unwrap_or(0);
         let cpu = d.and_then(|d| d.host.as_ref()?.cpu_pct);
         let mem = d.and_then(|d| {
