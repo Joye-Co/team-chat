@@ -1076,6 +1076,23 @@ const CORE_SCENES: &[Scene] = &[
         open: open_main,
     },
     Scene {
+        name: "topic-core-changes",
+        about: "话题 page on the real provider with the 改动 pane open: the PR title, counts, 检查, 状态 and 在浏览器中打开",
+        start: Start::Core,
+        setup: |s, cx| {
+            v2_open_topic(
+                s,
+                crate::provider::seeded::GROUP,
+                crate::provider::seeded::TOPIC,
+                cx,
+            );
+            s.nav.update(cx, |nav, cx| {
+                nav.set_right_pane(crate::app::RightPane::Changes, cx)
+            });
+        },
+        open: open_main,
+    },
+    Scene {
         name: "core-desk",
         about: "首页 on the real provider and a seeded cache: the review ask that waits on me and Forge at work",
         start: Start::Core,

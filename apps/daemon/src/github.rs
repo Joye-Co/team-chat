@@ -16,6 +16,7 @@
 use crate::proto::RunEvent;
 use crate::redact::Redactor;
 use chat_protocol::github::RunGithub;
+use chat_protocol::links::{MAX_PR_DIFF_FILES, MAX_PR_PATCH_CHARS, PrDiff, PrDiffFile, PrDiffRef};
 use chat_protocol::machine::{MAX_RUN_PRS, RunPrState};
 use serde_json::{Value, json};
 use std::ffi::{OsStr, OsString};
@@ -285,28 +286,145 @@ pub fn pr_state_of(json: &[u8]) -> Option<&'static str> {
     }
 }
 
-/// The states of the pull requests `text` names, as this computer's `gh` reads them now, all at
-/// once and each within [`GH_TIMEOUT`]. A pull request gh cannot read (no gh, signed out, no
-/// access, too slow) is left out: its state is not known, and nothing is guessed for it.
-pub async fn result_pr_states(text: &str) -> Vec<RunPrState> {
+/// Where the diff of a pull request goes up: a file of the run, as the run's member.
+pub struct DiffUpload {
+    pub server_url: String,
+    pub token: Arc<String>,
+    pub run_id: String,
+    pub redactor: Arc<Redactor>,
+}
+
+/// GitHub's page size for the files of a pull request, and how many pages are read.
+const FILES_PAGE: usize = 100;
+const FILES_PAGES: usize = MAX_PR_DIFF_FILES / FILES_PAGE;
+
+/// `owner/name` and the number of a pull request link (`result_prs`' form).
+fn repo_and_number(url: &str) -> Option<(String, u64)> {
+    let rest = url.strip_prefix("https://github.com/")?;
+    let (repo, n) = rest.split_once("/pull/")?;
+    Some((repo.to_string(), n.parse().ok()?))
+}
+
+/// The diff of a pull request from the pages of `gh api repos/{o}/{r}/pulls/{n}/files`: at
+/// most [`MAX_PR_DIFF_FILES`] files; a patch over [`MAX_PR_PATCH_CHARS`] is left out.
+/// `truncated` when GitHub says the pull request changes more files than were read.
+pub fn diff_of(pages: &[Value], changed_files: Option<u64>) -> PrDiff {
+    let mut files: Vec<PrDiffFile> = Vec::new();
+    for f in pages.iter().filter_map(Value::as_array).flatten() {
+        if files.len() == MAX_PR_DIFF_FILES {
+            break;
+        }
+        let Some(path) = f["filename"].as_str().filter(|p| !p.is_empty()) else {
+            continue;
+        };
+        let cut = |s: &str, n: usize| s.chars().take(n).collect::<String>();
+        files.push(PrDiffFile {
+            path: cut(path, 1024),
+            previous_path: f["previous_filename"]
+                .as_str()
+                .filter(|p| !p.is_empty())
+                .map(|p| cut(p, 1024)),
+            status: cut(f["status"].as_str().unwrap_or("modified"), 32),
+            additions: f["additions"].as_u64().unwrap_or(0),
+            deletions: f["deletions"].as_u64().unwrap_or(0),
+            patch: f["patch"]
+                .as_str()
+                .filter(|p| p.chars().count() <= MAX_PR_PATCH_CHARS)
+                .map(str::to_string),
+        });
+    }
+    let truncated = changed_files.is_some_and(|n| n > files.len() as u64);
+    PrDiff {
+        files,
+        truncated: truncated.then_some(true),
+    }
+}
+
+/// Reads the files of a pull request with the computer's `gh` and sends them up as a run file
+/// (redacted like run events). `None` when gh cannot read them or the upload fails.
+async fn upload_diff(url: &str, changed_files: Option<u64>, up: &DiffUpload) -> Option<PrDiffRef> {
+    let (repo, number) = repo_and_number(url)?;
+    let mut pages: Vec<Value> = Vec::new();
+    for page in 1..=FILES_PAGES {
+        let path = format!("repos/{repo}/pulls/{number}/files?per_page={FILES_PAGE}&page={page}");
+        let o = host_gh_output(None, &["api", &path]).await.ok()??;
+        if !o.status.success() {
+            return None;
+        }
+        let v: Value = serde_json::from_slice(&o.stdout).ok()?;
+        let n = v.as_array().map_or(0, Vec::len);
+        pages.push(v);
+        if n < FILES_PAGE {
+            break;
+        }
+    }
+    let diff = diff_of(&pages, changed_files);
+    let text = up.redactor.text(&serde_json::to_string(&diff).ok()?);
+    let name = format!("pr-{number}.diff.json");
+    let meta = crate::chat_run_files::upload_bytes(
+        &up.server_url,
+        &up.token,
+        &up.run_id,
+        &name,
+        "application/json",
+        text.into_bytes(),
+    )
+    .await
+    .ok()?;
+    Some(PrDiffRef {
+        file_id: meta["id"].as_str()?.to_string(),
+        name: meta["name"].as_str().unwrap_or(&name).to_string(),
+        size: meta["size"].as_u64()?,
+        sha256: meta["sha256"].as_str()?.to_string(),
+    })
+}
+
+/// A pull request as `gh pr view --json state,isDraft,title,additions,deletions,changedFiles`
+/// prints it, without its diff. `None` when the state is not one of `pr_state_of`'s.
+pub fn pr_of(url: &str, json: &[u8]) -> Option<RunPrState> {
+    let state = pr_state_of(json)?;
+    let v: Value = serde_json::from_slice(json).ok()?;
+    Some(RunPrState {
+        url: url.to_string(),
+        state: state.into(),
+        title: v["title"].as_str().map(|t| t.chars().take(500).collect()),
+        additions: v["additions"].as_u64(),
+        deletions: v["deletions"].as_u64(),
+        changed_files: v["changedFiles"].as_u64(),
+        diff: None,
+    })
+}
+
+/// The pull requests `text` names, as this computer's `gh` reads them now (state, title, size
+/// and, with `up`, the diff sent up as a run file), all at once and each gh call within
+/// [`GH_TIMEOUT`]. A pull request gh cannot read (no gh, signed out, no access, too slow) is
+/// left out: its state is not known, and nothing is guessed for it.
+pub async fn result_pr_states(text: &str, up: Option<Arc<DiffUpload>>) -> Vec<RunPrState> {
     let mut tasks = tokio::task::JoinSet::new();
     for (i, url) in result_prs(text).into_iter().enumerate() {
+        let up = up.clone();
         tasks.spawn(async move {
-            let o = host_gh_output(None, &["pr", "view", &url, "--json", "state,isDraft"])
-                .await
-                .ok()??;
-            let state = o
+            let o = host_gh_output(
+                None,
+                &[
+                    "pr",
+                    "view",
+                    &url,
+                    "--json",
+                    "state,isDraft,title,additions,deletions,changedFiles",
+                ],
+            )
+            .await
+            .ok()??;
+            let mut pr = o
                 .status
                 .success()
-                .then(|| pr_state_of(&o.stdout))
+                .then(|| pr_of(&url, &o.stdout))
                 .flatten()?;
-            Some((
-                i,
-                RunPrState {
-                    url,
-                    state: state.into(),
-                },
-            ))
+            if let Some(up) = up {
+                pr.diff = upload_diff(&url, pr.changed_files, &up).await;
+            }
+            Some((i, pr))
         });
     }
     let mut got: Vec<(usize, RunPrState)> = tasks.join_all().await.into_iter().flatten().collect();
@@ -947,5 +1065,49 @@ mod tests {
         );
         assert_eq!(pr_state_of(br#"{"state":"WHAT"}"#), None);
         assert_eq!(pr_state_of(b"not json"), None);
+    }
+
+    #[test]
+    fn gh_pr_view_gives_the_title_and_size() {
+        let pr = pr_of(
+            "https://github.com/o/r/pull/5",
+            br#"{"state":"OPEN","isDraft":false,"title":"Fix it","additions":3,"deletions":1,"changedFiles":2}"#,
+        )
+        .unwrap();
+        assert_eq!(pr.state, "open");
+        assert_eq!(pr.title.as_deref(), Some("Fix it"));
+        assert_eq!(
+            (pr.additions, pr.deletions, pr.changed_files),
+            (Some(3), Some(1), Some(2))
+        );
+        assert_eq!(pr.diff, None);
+    }
+
+    #[test]
+    fn the_files_of_a_pull_request_become_its_diff() {
+        let big = "x".repeat(MAX_PR_PATCH_CHARS + 1);
+        let page = json!([
+            { "filename": "a.rs", "status": "modified", "additions": 2, "deletions": 1, "patch": "@@ -1 +1,2 @@\n-a\n+b\n+c" },
+            { "filename": "b.png", "status": "added", "additions": 0, "deletions": 0 },
+            { "filename": "new.rs", "previous_filename": "old.rs", "status": "renamed", "additions": 0, "deletions": 0 },
+            { "filename": "huge.json", "status": "modified", "additions": 9, "deletions": 9, "patch": big },
+            { "status": "modified" }
+        ]);
+        let d = diff_of(&[page], Some(4));
+        assert_eq!(d.files.len(), 4);
+        assert_eq!(
+            d.files[0].patch.as_deref(),
+            Some("@@ -1 +1,2 @@\n-a\n+b\n+c")
+        );
+        assert_eq!(d.files[1].patch, None);
+        assert_eq!(d.files[2].previous_path.as_deref(), Some("old.rs"));
+        assert_eq!(d.files[3].patch, None, "a patch over the limit is left out");
+        assert_eq!(d.truncated, None);
+        assert_eq!(diff_of(&[json!([])], Some(1)).truncated, Some(true));
+        assert!(d.validate().is_ok());
+        assert_eq!(
+            repo_and_number("https://github.com/o/r/pull/5"),
+            Some(("o/r".to_string(), 5))
+        );
     }
 }

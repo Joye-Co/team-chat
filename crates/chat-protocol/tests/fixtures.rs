@@ -55,6 +55,7 @@ check!(
     EndRunRequest,
     CardV2,
     TopicLink,
+    PrDiff,
     TopicContext,
     SetRunAcceptanceRequest,
     ResumeRunRequest,
@@ -255,6 +256,7 @@ const KINDS: &[(&str, RoundTrip)] = &[
     // 1.1
     ("CardV2", validated::<CardV2>),
     ("TopicLink", validated::<TopicLink>),
+    ("PrDiff", validated::<PrDiff>),
     ("TopicContext", validated::<TopicContext>),
     ("GroupDecision", plain::<GroupDecision>),
     ("DecisionsResponse", plain::<DecisionsResponse>),

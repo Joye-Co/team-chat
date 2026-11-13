@@ -416,4 +416,22 @@ export function addUsableFixtures({ ok, bad, T0, ID, base, topic }: UsableCtx) {
     durationMs: 9000,
     prs: [{ url: "https://github.com/Joye-Co/team-chat/pull/297", state: "merged" }],
   }, "the pull request the result names, as the computer's gh read it when the run ended");
+  ok("machine/up-run.done-prs-diff.json", "MachineUpFrame", {
+    t: "run.done",
+    runId,
+    seq: 22,
+    at: T0 + 22,
+    status: "succeeded",
+    resultText: "开了 https://github.com/Joye-Co/team-chat/pull/61",
+    durationMs: 9000,
+    prs: [{
+      url: "https://github.com/Joye-Co/team-chat/pull/61",
+      state: "open",
+      title: "fix: resend after reconnect",
+      additions: 3,
+      deletions: 1,
+      changedFiles: 2,
+      diff: { fileId: "01J9ZK3DIFF0000000000000001", name: "pr-61.diff.json", size: 412, sha256: "b".repeat(64) },
+    }],
+  }, "gh also read the title and size, and the computer sent the diff up as a run file");
 }

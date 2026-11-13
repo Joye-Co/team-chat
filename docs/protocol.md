@@ -1845,8 +1845,13 @@ TopicLink = { kind: "pr", repo /* owner/name */, number, url, title /* <= 500 */
               state /* plain text: open | draft | merged | closed */,
               checks: { name /* 1..200 */, conclusion /* 1..32, "pending" while it runs */ }[] /* <= 100 */,
               additions?, deletions?, changedFiles?,
-              merge?: { queuedAt, error? /* 1..200 */ } /* 1.1 */ }
+              merge?: { queuedAt, error? /* 1..200 */ } /* 1.1 */,
+              diff?: PrDiffRef }
 topic.linked (stored event) data: { topicId, link: TopicLink }   // actorId = the integration's bot
+PrDiffRef = { fileId /* 1..64 */, name /* 1..200 */, size, sha256 }
+PrDiff    = { files: { path /* 1..1024 */, previousPath? /* renamed from */, status /* 1..32, GitHub's word */,
+                       additions, deletions, patch? /* unified hunks, <= 65536 chars */ }[] /* <= 300 */,
+              truncated?: true /* the pull request changes more files than listed */ }
 ```
 
 Rules:
@@ -1855,6 +1860,12 @@ Rules:
   (`Topic: <id>` in its body) whenever its state, checks or size change. A link with the same
   `kind` and `url` replaces the older one; clients keep the newest per key.
 - Readers skip a `kind` they do not know (Rust `TopicLink::Unknown`).
+- `diff` (改动): the pull request's files and patches as a JSON `PrDiff` file of the topic's
+  group, sent up by the computer of the run whose result names the pull request
+  (machine-protocol.md, `run.done.prs`); clients read it with `GET /v1/files/:id/content` and
+  cache it by `sha256`. A file without a patch (binary, too long, or one GitHub leaves out) is
+  listed without one. A link stored without `diff` (the GitHub adapter) keeps the `diff` of the
+  topic's newest link of the same `url`, so the diff is the one of the last run that read it.
 - 1.1 `merge`: the pull request waits to merge. GitHub `pull_request` actions `enqueued` (merge
   queue) and `auto_merge_enabled` set `{ queuedAt }`; `dequeued` and `auto_merge_disabled` keep
   `queuedAt` and set `error` (GitHub's `reason` as plain text, `MERGE_CONFLICT` → `merge

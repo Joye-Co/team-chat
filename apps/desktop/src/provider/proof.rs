@@ -158,6 +158,7 @@ mod tests {
             deletions: Some(1),
             changed_files: Some(1),
             merge: None,
+            diff: None,
         });
         assert_eq!(
             of_card(&card, &[link]),

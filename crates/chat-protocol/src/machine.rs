@@ -920,6 +920,18 @@ pub struct RunDone {
 pub struct RunPrState {
     pub url: String,
     pub state: String,
+    /// What else `gh` read: the title and the size of the change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub additions: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deletions: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changed_files: Option<u64>,
+    /// The diff the computer uploaded as a run file (a `PrDiff` JSON); `None` = not read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff: Option<crate::links::PrDiffRef>,
 }
 
 /// At most this many pull requests in `RunDone::prs`.

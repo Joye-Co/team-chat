@@ -75,6 +75,18 @@ export function addFilesFixtures({ ok, bad, T0, ID, base, message }: InteractCtx
   const prLink = { kind: "pr", repo: "Joye-Co/team-chat", number: 61, url: "https://github.com/Joye-Co/team-chat/pull/61", title: "fix: resend after reconnect", state: "open", checks: [{ name: "CI", conclusion: "success" }] };
   ok("entities/topic-link-pr-merge-queued.json", "TopicLink", { ...prLink, merge: { queuedAt: T0 } });
   ok("entities/topic-link-pr-merge-failed.json", "TopicLink", { ...prLink, merge: { queuedAt: T0, error: "merge conflict" } });
+  const diffRef = { fileId: "01J9ZK3DIFF0000000000000001", name: "pr-61.diff.json", size: 412, sha256: "b".repeat(64) };
+  ok("entities/topic-link-pr-diff.json", "TopicLink", { ...prLink, additions: 3, deletions: 1, changedFiles: 2, diff: diffRef }, "the diff a run's computer sent up");
+  bad("entities/topic-link-pr-diff-bad-sha.json", "TopicLink", { ...prLink, diff: { ...diffRef, sha256: "nope" } }, "the diff's sha256 is 64 lowercase hex digits");
+  ok("entities/pr-diff.json", "PrDiff", {
+    files: [
+      { path: "crates/core/src/sync.rs", status: "modified", additions: 3, deletions: 1, patch: "@@ -10,4 +10,6 @@ fn resend()\n     let seq = last_acked();\n-    send_all();\n+    // Resend only what the server has not seen.\n+    send_after(seq);\n+    dedupe(seq);\n" },
+      { path: "docs/sync.md", previousPath: "docs/resend.md", status: "renamed", additions: 0, deletions: 0 },
+      { path: "assets/logo.png", status: "added", additions: 0, deletions: 0 },
+    ],
+  }, "a binary file and a rename without a patch");
+  ok("entities/pr-diff-truncated.json", "PrDiff", { files: [], truncated: true }, "more files than listed");
+  bad("entities/pr-diff-empty-path.json", "PrDiff", { files: [{ path: "", status: "modified", additions: 0, deletions: 0 }] }, "a file has a path");
   ok("events/topic.linked-merge-failed.json", "Event", { ...base, seq: 72, actorId: ID.bot, type: "topic.linked", data: { topicId: ID.topic, link: { ...prLink, merge: { queuedAt: T0, error: "checks failed" } } } });
 
   // SF-3: desk notes and queued runs (排队).
