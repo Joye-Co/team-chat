@@ -830,7 +830,10 @@ impl Daemon {
                 if n != self.run_limit {
                     log!(
                         "run limit: {}",
-                        n.map_or_else(|| format!("{} (config)", self.cfg.max_parallel_runs), |n| n.to_string())
+                        n.map_or_else(
+                            || format!("{} (config)", self.cfg.max_parallel_runs),
+                            |n| n.to_string()
+                        )
                     );
                 }
                 self.run_limit = n;

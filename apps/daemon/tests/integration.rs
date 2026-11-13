@@ -1005,6 +1005,7 @@ async fn pause_resume_answer_acceptance_and_aside() {
                         "github-host",
                         "takeover",
                         "sign-in-confirmed",
+                        "limits",
                         "accounts",
                         "ask-keys"
                     ]
@@ -1732,7 +1733,13 @@ async fn the_app_sets_how_many_runs_go_at_once() {
     let (mut ws, _) = m.conns.recv().await.unwrap();
     match next(&mut ws).await {
         Up::Hello { machine, .. } => {
-            assert!(machine.features.unwrap_or_default().iter().any(|f| f == "limits"));
+            assert!(
+                machine
+                    .features
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|f| f == "limits")
+            );
         }
         f => panic!("{f:?}"),
     }
@@ -1753,7 +1760,9 @@ async fn the_app_sets_how_many_runs_go_at_once() {
     })
     .await;
     assert!(
-        frames.iter().any(|f| matches!(f, Up::RunReject { reason, .. } if reason == "busy")),
+        frames
+            .iter()
+            .any(|f| matches!(f, Up::RunReject { reason, .. } if reason == "busy")),
         "{frames:?}"
     );
 
