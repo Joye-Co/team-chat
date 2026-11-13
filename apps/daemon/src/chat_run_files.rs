@@ -205,7 +205,15 @@ async fn upload(
         Err(e) => e.into_bytes(),
     };
     let mime = mime.unwrap_or_else(|| mime_of(name));
-    upload_bytes(&local.server_url, &local.token, &local.run_id, name, mime, bytes).await
+    upload_bytes(
+        &local.server_url,
+        &local.token,
+        &local.run_id,
+        name,
+        mime,
+        bytes,
+    )
+    .await
 }
 
 /// Sends `bytes` up as a file of the run (already redacted); returns the server's `FileMeta`

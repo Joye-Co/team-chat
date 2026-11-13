@@ -387,9 +387,7 @@ pub fn pr_of(url: &str, json: &[u8]) -> Option<RunPrState> {
     Some(RunPrState {
         url: url.to_string(),
         state: state.into(),
-        title: v["title"]
-            .as_str()
-            .map(|t| t.chars().take(500).collect()),
+        title: v["title"].as_str().map(|t| t.chars().take(500).collect()),
         additions: v["additions"].as_u64(),
         deletions: v["deletions"].as_u64(),
         changed_files: v["changedFiles"].as_u64(),
@@ -418,7 +416,11 @@ pub async fn result_pr_states(text: &str, up: Option<Arc<DiffUpload>>) -> Vec<Ru
             )
             .await
             .ok()??;
-            let mut pr = o.status.success().then(|| pr_of(&url, &o.stdout)).flatten()?;
+            let mut pr = o
+                .status
+                .success()
+                .then(|| pr_of(&url, &o.stdout))
+                .flatten()?;
             if let Some(up) = up {
                 pr.diff = upload_diff(&url, pr.changed_files, &up).await;
             }
@@ -1074,7 +1076,10 @@ mod tests {
         .unwrap();
         assert_eq!(pr.state, "open");
         assert_eq!(pr.title.as_deref(), Some("Fix it"));
-        assert_eq!((pr.additions, pr.deletions, pr.changed_files), (Some(3), Some(1), Some(2)));
+        assert_eq!(
+            (pr.additions, pr.deletions, pr.changed_files),
+            (Some(3), Some(1), Some(2))
+        );
         assert_eq!(pr.diff, None);
     }
 
@@ -1090,7 +1095,10 @@ mod tests {
         ]);
         let d = diff_of(&[page], Some(4));
         assert_eq!(d.files.len(), 4);
-        assert_eq!(d.files[0].patch.as_deref(), Some("@@ -1 +1,2 @@\n-a\n+b\n+c"));
+        assert_eq!(
+            d.files[0].patch.as_deref(),
+            Some("@@ -1 +1,2 @@\n-a\n+b\n+c")
+        );
         assert_eq!(d.files[1].patch, None);
         assert_eq!(d.files[2].previous_path.as_deref(), Some("old.rs"));
         assert_eq!(d.files[3].patch, None, "a patch over the limit is left out");
