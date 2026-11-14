@@ -3,6 +3,26 @@
 Each release is tagged `v<version>` and has a GitHub Release with the DMG, the machine daemon
 and the Windows installer; GitHub shows each file's SHA-256. Release notes for the team are in Chinese in `docs/releases/`.
 
+## 1.3.1 (unreleased)
+
+Notes: [docs/releases/1.3.1.md](docs/releases/1.3.1.md). D1 migrations `0020_hide_delete` and
+`0021_machine_limits` (new columns only). Protocol: additive (hide and delete, `hide-delete/1`;
+`Machine.parallelRuns` and the `machine.limits` frame; `run.done.prs` with state, title, size and
+diff; `TopicLink.diff`). The server is redeployed before the release. 1.3.0 clients and daemons
+keep working.
+
+- The 改动 pane draws when it floats over a narrow window, and its close button works.
+- The 改动 pane shows a pull request's title, size, state, checks, files and patches, read by the
+  run's computer with its own `gh` and uploaded as a run file.
+- Result cards and topic links show the pull request state the computer's `gh` reads; no
+  placeholder `open` when it is unknown; older cards follow the latest link.
+- Hide 群, 私聊 and 话题; delete 群, 话题 and deactivated AI members.
+- Set how many runs a computer does at once from Settings › 电脑.
+- Redesigned run details pane; a 从这里开始 checklist on 首页 for new members.
+- Fixes: AI member avatar tint, tall pictures in composer thumbnails.
+- CI: release builds for every system run at the same time with a rehearsal twice a week; main
+  runs no longer queue; a pre-commit hook formats staged Rust files.
+
 ## 1.3.0 (2026-11-12)
 
 Notes: [docs/releases/1.3.0.md](docs/releases/1.3.0.md). The "usable" milestone
