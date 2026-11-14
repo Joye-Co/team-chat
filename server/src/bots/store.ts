@@ -62,13 +62,15 @@ export interface MachineRow {
   /** Usable (migration 0020_personal_ai): the VM size an admin set; NULL = the daemon's own. */
   vm_vcpus?: number | null;
   vm_mem_mib?: number | null;
+  /** Migration 0021_machine_limits: how many runs at once, set in the app; NULL = the daemon's own. */
+  parallel_runs?: number | null;
 }
 
 /** D1 rows joined with each link's live status. */
 export async function loadMachineViews(env: Env, opts: { includeRevoked?: boolean } = {}) {
   const [rows, checked] = await Promise.all([
     env.DB.prepare(
-      `SELECT id, name, labels, created_by, created_at, revoked_at, last_seen_at, owner_id, vm_vcpus, vm_mem_mib FROM machines
+      `SELECT id, name, labels, created_by, created_at, revoked_at, last_seen_at, owner_id, vm_vcpus, vm_mem_mib, parallel_runs FROM machines
        ${opts.includeRevoked ? "" : "WHERE revoked_at IS NULL"} ORDER BY created_at, id`,
     ).all<MachineRow>(),
     env.DB.prepare("SELECT machine_id, bot_id, repo_path FROM machine_bots ORDER BY created_at, bot_id").all<{
@@ -94,6 +96,7 @@ export async function loadMachineViews(env: Env, opts: { includeRevoked?: boolea
         connected: false,
         runningRuns: [],
       };
+      if (row.parallel_runs) base.parallelRuns = row.parallel_runs;
       if (row.owner_id) {
         base.ownerId = row.owner_id;
         base.personalBots = checkedBots.get(row.id) ?? new Map();
@@ -140,22 +143,24 @@ export interface ManagedMachine {
   name: string;
   owner_id: string | null;
   revoked_at: number | null;
+  /** Migration 0021_machine_limits. */
+  parallel_runs: number | null;
 }
 
-/**
- * The machine, when the caller may manage it (`mayManageMachine`): `not_found` for an unknown
- * (or, unless `includeRevoked`, a removed) machine, `forbidden` with `machine.not_yours` otherwise.
- */
 /** A machine that is not removed, whoever asks (the caller checks who may change what). */
 export async function requireMachineRow(db: D1Database, machineId: string): Promise<ManagedMachine> {
   const row = await db
-    .prepare("SELECT id, name, owner_id, revoked_at FROM machines WHERE id = ?")
+    .prepare("SELECT id, name, owner_id, revoked_at, parallel_runs FROM machines WHERE id = ?")
     .bind(machineId)
     .first<ManagedMachine>();
   if (!row || row.revoked_at !== null) throw new ApiError("not_found", "machine not found");
   return row;
 }
 
+/**
+ * The machine, when the caller may manage it (`mayManageMachine`): `not_found` for an unknown
+ * (or, unless `includeRevoked`, a removed) machine, `forbidden` with `machine.not_yours` otherwise.
+ */
 export async function requireMachineManager(
   db: D1Database,
   auth: Pick<AuthContext, "memberId" | "member">,
@@ -163,7 +168,7 @@ export async function requireMachineManager(
   opts: { includeRevoked?: boolean } = {},
 ): Promise<ManagedMachine> {
   const row = await db
-    .prepare("SELECT id, name, owner_id, revoked_at FROM machines WHERE id = ?")
+    .prepare("SELECT id, name, owner_id, revoked_at, parallel_runs FROM machines WHERE id = ?")
     .bind(machineId)
     .first<ManagedMachine>();
   if (!row || (row.revoked_at !== null && !opts.includeRevoked)) throw new ApiError("not_found", "machine not found");

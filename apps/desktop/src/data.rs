@@ -1346,7 +1346,12 @@ pub struct MachineInfo {
     pub disk_total_bytes: Option<u64>,
     /// Runs on it now.
     pub active_runs: u32,
+    /// What the daemon's own config allows.
     pub max_parallel_runs: Option<u32>,
+    /// How many tasks at once as set in the app (`Machine.parallelRuns`); `None` = the daemon's own.
+    pub parallel_runs: Option<u32>,
+    /// The daemon takes the app's number (feature "limits"); an older one keeps to its own.
+    pub limits: bool,
     /// Runtime names it can run.
     pub runtimes: Vec<String>,
     /// What each available runtime reports it can run (feature "effort").
@@ -1447,6 +1452,16 @@ impl MachineInfo {
         self.owner_id
             .as_deref()
             .is_some_and(|o| !self.created_by.is_empty() && o != self.created_by)
+    }
+
+    /// How many tasks it takes at once: the app's number, else the daemon's own; an older daemon
+    /// (without feature "limits") no more than its own. `None` when not known yet.
+    pub fn run_limit(&self) -> Option<u32> {
+        match (self.parallel_runs, self.max_parallel_runs) {
+            (Some(set), Some(own)) if !self.limits => Some(set.min(own)),
+            (Some(set), _) => Some(set),
+            (None, own) => own,
+        }
     }
 
     /// True when `me` may rename, remove and set this computer up: a team computer needs an
@@ -2265,6 +2280,15 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn rename_machine(&self, _machine_id: &str, _name: String) -> AdminReply<MachineInfo> {
         reply_now(Err(AdminError::Unsupported))
     }
+    /// How many tasks the computer does at once (`None`: its own config's number); whoever may
+    /// rename it.
+    fn set_machine_parallel_runs(
+        &self,
+        _machine_id: &str,
+        _parallel_runs: Option<u32>,
+    ) -> AdminReply<MachineInfo> {
+        reply_now(Err(AdminError::Unsupported))
+    }
     /// Usable: 改成我的电脑 (`mine`, an admin) or 交给团队 (an admin who owns it).
     fn set_machine_owner(&self, _machine_id: &str, _mine: bool) -> AdminReply<MachineInfo> {
         reply_now(Err(AdminError::Unsupported))
@@ -2508,6 +2532,11 @@ pub trait ChatProvider: Send + Sync + 'static {
     }
     /// 改动 of a 话题 (its PR), when it has one.
     fn topic_changes(&self, _group_id: &str, _topic_id: &str) -> Option<v2::TopicChanges> {
+        None
+    }
+    /// The files and patches of a 话题's PR (改动 pane), when its member's computer sent them.
+    /// Cheap: the first call starts the download and the provider emits a change when it ends.
+    fn topic_diff(&self, _group_id: &str, _topic_id: &str) -> Option<v2::TopicDiff> {
         None
     }
     /// What one run used.

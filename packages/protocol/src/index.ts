@@ -46,7 +46,7 @@ import {
 } from "./card2.ts";
 import { ArtifactPreviewReadyEvent, MediaInfo } from "./media.ts";
 import { DeskNotedEvent, DeskNotesResponse, PutDeskNoteRequest, PutDeskNoteResponse } from "./desk.ts";
-import { TopicLink, TopicLinkedEvent } from "./links.ts";
+import { PrDiff, TopicLink, TopicLinkedEvent } from "./links.ts";
 import { CharacterId } from "./characters.ts";
 import {
   AddArtifactVersionRequest,
@@ -936,6 +936,7 @@ export const schemas = {
   // 1.1
   CardV2,
   TopicLink,
+  PrDiff,
   TopicContext,
   GroupDecision,
   DecisionsResponse,

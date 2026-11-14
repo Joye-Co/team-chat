@@ -1,0 +1,9 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "feature limits: up to 6 runs at once",
+  "value": {
+    "t": "machine.limits",
+    "maxParallelRuns": 6
+  }
+}

@@ -512,19 +512,15 @@ impl ComposerView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         use crate::ui::native::tokens::{gallery, radius};
-        use gpui::{ObjectFit, StyledImage as _, img};
+        use gpui::img;
         use gpui_component::button::{ButtonCustomVariant, ButtonVariants as _};
         let k = native_colors(cx);
         let side = gallery::DRAFT_THUMB;
         let live: std::collections::HashSet<String> = images.iter().map(|f| f.id.clone()).collect();
         PASTED.with_borrow_mut(|m| m.retain(|id, _| live.contains(id)));
         let thumbs = images.into_iter().map(|file| {
-            let picture: AnyElement = match &file.source {
-                NewFile::Path(path) => img(path.clone())
-                    .size_full()
-                    .rounded(radius::ITEM)
-                    .object_fit(ObjectFit::Cover)
-                    .into_any_element(),
+            let picture = match &file.source {
+                NewFile::Path(path) => img(path.clone()),
                 NewFile::Image { mime, bytes, .. } => {
                     let image = PASTED.with_borrow_mut(|m| {
                         m.entry(file.id.clone())
@@ -538,10 +534,6 @@ impl ComposerView {
                             .clone()
                     });
                     img(image)
-                        .size_full()
-                        .rounded(radius::ITEM)
-                        .object_fit(ObjectFit::Cover)
-                        .into_any_element()
                 }
             };
             let id = file.id.clone();
@@ -562,19 +554,15 @@ impl ComposerView {
             .rounded_full()
             .tooltip(crate::copy::files::DRAFT_IMAGE_REMOVE)
             .on_click(cx.listener(move |this, _, _, cx| this.remove_file(&id, cx)));
-            div()
+            draft_thumb(picture, side)
                 .id(ElementId::Name(SharedString::from(format!(
                     "image-draft-{}",
                     file.id
                 ))))
-                .relative()
-                .flex_none()
-                .size(side)
                 .rounded(radius::ITEM)
                 .border_1()
                 .border_color(k.separator)
                 .bg(k.fill)
-                .child(picture)
                 .child(div().absolute().top(px(-6.)).right(px(-6.)).child(remove))
         });
         div()
@@ -586,4 +574,20 @@ impl ComposerView {
             .children(thumbs)
             .into_any_element()
     }
+}
+
+/// One draft picture in its square, without the remove button: the picture fills the square
+/// and is cropped to it from the middle. It lies on the square's edges: in the square's flow
+/// its height came from its own proportions, and a tall screenshot ran out under the composer.
+pub(super) fn draft_thumb(picture: gpui::Img, side: gpui::Pixels) -> gpui::Div {
+    use crate::ui::native::tokens::radius;
+    use gpui::{ObjectFit, StyledImage as _};
+    div().relative().flex_none().size(side).child(
+        picture
+            .absolute()
+            .inset_0()
+            .size_full()
+            .rounded(radius::ITEM)
+            .object_fit(ObjectFit::Cover),
+    )
 }

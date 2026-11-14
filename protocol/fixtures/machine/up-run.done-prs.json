@@ -1,0 +1,20 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "the pull request the result names, as the computer's gh read it when the run ended",
+  "value": {
+    "t": "run.done",
+    "runId": "01JBX0RUN000000000000000AU",
+    "seq": 21,
+    "at": 1762128000021,
+    "status": "succeeded",
+    "resultText": "合并了 https://github.com/Joye-Co/team-chat/pull/297",
+    "durationMs": 9000,
+    "prs": [
+      {
+        "url": "https://github.com/Joye-Co/team-chat/pull/297",
+        "state": "merged"
+      }
+    ]
+  }
+}

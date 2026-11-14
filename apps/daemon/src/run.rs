@@ -924,6 +924,24 @@ this machine cannot be made to stop at them (update it)",
     } else {
         outcome.status.as_str()
     };
+    // The pull requests the result names, as this computer's gh sees them now (the topic's
+    // link and the done card show the real state, not a guess).
+    let prs = match outcome.result_text.as_deref() {
+        Some(t) if status == "succeeded" => {
+            // The diff goes up as a file of the run, which the server takes only while the
+            // run is active (before `run.done`); a side chat has no files.
+            let up = (assign.kind.as_deref() != Some(KIND_ASIDE)).then(|| {
+                std::sync::Arc::new(crate::github::DiffUpload {
+                    server_url: cfg.server_url.clone(),
+                    token: token.clone(),
+                    run_id: run_id.clone(),
+                    redactor: redactor.clone(),
+                })
+            });
+            crate::github::result_pr_states(t, up).await
+        }
+        _ => Vec::new(),
+    };
     send(Up::RunDone(RunDone {
         run_id: run_id.clone(),
         seq: 0,
@@ -943,6 +961,7 @@ this machine cannot be made to stop at them (update it)",
         failure: (status == "failed")
             .then(|| crate::failure::of_run(outcome.failure.as_ref(), outcome.error.as_deref())),
         resume_missed: outcome.resume_missed.then_some(true),
+        prs: (!prs.is_empty()).then_some(prs),
     }));
     if let Some(mut meta) = workspace::read_meta(&dir) {
         meta.finished_at = Some(now_ms());

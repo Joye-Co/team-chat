@@ -2335,7 +2335,7 @@ impl ChatProvider for CoreProvider {
         machine_id: &str,
         vm: Option<crate::data::VmSize>,
     ) -> AdminReply<MachineInfo> {
-        self.update_machine_inner(machine_id, None, None, Some(vm))
+        self.update_machine_inner(machine_id, None, None, Some(vm), None)
     }
 
     fn create_machine_as(
@@ -2348,12 +2348,20 @@ impl ChatProvider for CoreProvider {
     }
 
     fn rename_machine(&self, machine_id: &str, name: String) -> AdminReply<MachineInfo> {
-        self.update_machine_inner(machine_id, Some(name), None, None)
+        self.update_machine_inner(machine_id, Some(name), None, None, None)
+    }
+
+    fn set_machine_parallel_runs(
+        &self,
+        machine_id: &str,
+        parallel_runs: Option<u32>,
+    ) -> AdminReply<MachineInfo> {
+        self.update_machine_inner(machine_id, None, None, None, Some(parallel_runs))
     }
 
     fn set_machine_owner(&self, machine_id: &str, mine: bool) -> AdminReply<MachineInfo> {
         let owner = mine.then(|| chat_core::proto::MACHINE_OWNER_ME.to_string());
-        self.update_machine_inner(machine_id, None, Some(owner), None)
+        self.update_machine_inner(machine_id, None, Some(owner), None, None)
     }
 
     fn remove_machine(&self, machine_id: &str) -> AdminReply<()> {
@@ -2901,6 +2909,10 @@ impl ChatProvider for CoreProvider {
         topic_id: &str,
     ) -> Option<crate::data::v2::TopicChanges> {
         self.topic_changes_inner(group_id, topic_id)
+    }
+
+    fn topic_diff(&self, group_id: &str, topic_id: &str) -> Option<crate::data::v2::TopicDiff> {
+        self.topic_diff_inner(group_id, topic_id)
     }
 
     fn pinned_ask(&self, group_id: &str, topic_id: &str) -> Option<crate::data::v2::AskItem> {

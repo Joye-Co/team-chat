@@ -54,6 +54,8 @@ pub const FEATURES: &[&str] = &[
     // user, and `takeover-isolated` says so).
     feature::TAKEOVER,
     feature::SIGN_IN_CONFIRMED,
+    // `machine.limits`: how many runs at once comes from the app.
+    feature::LIMITS,
 ];
 
 /// `hello.machine.features`: [`FEATURES`], and those of a machine key (`keyed`) and of a VM
@@ -138,6 +140,8 @@ pub struct Daemon {
     epoch: u64,
     link: Option<mpsc::UnboundedSender<String>>,
     welcomed: bool,
+    /// Feature "limits": how many runs at once as set in the app; None = the config's.
+    run_limit: Option<u32>,
     connecting: bool,
     backoff_ms: u64,
     /// When the last heartbeat tick came, on the clock that counts the time the machine was
@@ -199,6 +203,7 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
         epoch: 0,
         link: None,
         welcomed: false,
+        run_limit: None,
         connecting: false,
         backoff_ms: 500,
         last_beat: crate::sys::since_boot(),
@@ -450,6 +455,7 @@ impl Daemon {
                         duration_ms: now.saturating_sub(meta.started_at),
                         code: None,
                         resume_missed: None,
+                        prs: None,
                         failure: Some(crate::proto::RunFailure::new(
                             crate::proto::failure_kind::OTHER,
                         )),
@@ -819,6 +825,20 @@ impl Daemon {
             }
             // Feature "homes" (#227): this daemon keeps no member homes.
             Down::HomeClear { .. } => log!("home.clear: homes are gone in this version"),
+            // Feature "limits": kept in memory; the server sends it again after every welcome.
+            Down::MachineLimits { max_parallel_runs } => {
+                let n = max_parallel_runs.filter(|n| (1..=1000).contains(n));
+                if n != self.run_limit {
+                    log!(
+                        "run limit: {}",
+                        n.map_or_else(
+                            || format!("{} (config)", self.cfg.max_parallel_runs),
+                            |n| n.to_string()
+                        )
+                    );
+                }
+                self.run_limit = n;
+            }
             // Feature "takeover": the run checks that the sender holds it.
             Down::RunCommand {
                 run_id,
@@ -903,7 +923,7 @@ impl Daemon {
                 format!("{} is not installed", rt.command()),
             );
         }
-        if self.active_count() >= self.cfg.max_parallel_runs {
+        if self.active_count() >= self.run_limit() {
             return self.reject(&id, "busy", "max_parallel_runs reached");
         }
         let (free, _) = health::run_disk(&self.cfg);
@@ -1302,9 +1322,14 @@ impl Daemon {
         });
     }
 
+    /// How many runs it takes at once: the app's number (`machine.limits`), else the config's.
+    fn run_limit(&self) -> u32 {
+        self.run_limit.unwrap_or(self.cfg.max_parallel_runs)
+    }
+
     /// The heartbeat's metrics: VMs from the executor, else the runs this daemon holds.
     fn metrics(&mut self) -> crate::proto::MachineMetrics {
-        let vm_slots = self.cfg.vm.as_ref().map(|_| self.cfg.max_parallel_runs);
+        let vm_slots = self.cfg.vm.as_ref().map(|_| self.run_limit());
         let local: Vec<crate::metrics::LocalRun> = if vm_slots.is_some() {
             vec![]
         } else {
@@ -1431,6 +1456,7 @@ mod tests {
             duration_ms: 0,
             code: None,
             resume_missed: None,
+            prs: None,
             failure: None,
         };
         let mut d = done("cancelled", None);
@@ -1464,6 +1490,7 @@ mod tests {
             duration_ms: 0,
             code: None,
             resume_missed: None,
+            prs: None,
             failure: kind.map(crate::proto::RunFailure::new),
         };
         note_sign_in(&marks, &worked, "claude", &done("failed", Some("network")));

@@ -352,6 +352,13 @@ pub const SCENES: &[Scene] = &[
         open: settings_scenes::open_machine_dialog,
     },
     Scene {
+        name: "settings-machine-parallel",
+        about: "Settings: 同时做几件事… on a computer, the number with − and +",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_machine_parallel,
+    },
+    Scene {
         name: "settings-members",
         about: "Settings: 成员 with the owner actions",
         start: Start::SignedIn,
@@ -1069,6 +1076,23 @@ const CORE_SCENES: &[Scene] = &[
                 crate::provider::seeded::TOPIC,
                 cx,
             )
+        },
+        open: open_main,
+    },
+    Scene {
+        name: "topic-core-changes",
+        about: "话题 page on the real provider with the 改动 pane open: the PR title, counts, 检查, 状态 and 在浏览器中打开",
+        start: Start::Core,
+        setup: |s, cx| {
+            v2_open_topic(
+                s,
+                crate::provider::seeded::GROUP,
+                crate::provider::seeded::TOPIC,
+                cx,
+            );
+            s.nav.update(cx, |nav, cx| {
+                nav.set_right_pane(crate::app::RightPane::Changes, cx)
+            });
         },
         open: open_main,
     },

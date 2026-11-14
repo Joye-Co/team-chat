@@ -1,0 +1,9 @@
+{
+  "kind": "PrDiff",
+  "valid": true,
+  "description": "more files than listed",
+  "value": {
+    "files": [],
+    "truncated": true
+  }
+}

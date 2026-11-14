@@ -826,3 +826,38 @@ fn a_pasted_bitmap_is_sent_as_png() {
     assert_eq!((mime.as_str(), extension.as_str()), ("image/png", "png"));
     assert!(bytes.starts_with(&[0x89, b'P', b'N', b'G']));
 }
+
+/// A tall screenshot stays inside its square in the composer: it is cropped to it, not drawn
+/// at its full length under the box.
+#[gpui::test]
+fn a_tall_picture_stays_in_its_square(cx: &mut TestAppContext) {
+    use std::{cell::RefCell, rc::Rc};
+
+    use gpui::{Bounds, Pixels, img, point, px, size};
+
+    let side = crate::ui::native::tokens::gallery::DRAFT_THUMB;
+    for (w, h) in [(771, 1747), (1747, 771)] {
+        let picture = Arc::new(gpui::RenderImage::new(vec![image::Frame::new(
+            image::RgbaImage::new(w, h),
+        )]));
+        let seen: Rc<RefCell<Vec<Bounds<Pixels>>>> = Rc::default();
+        let into = seen.clone();
+        cx.add_empty_window().draw(
+            point(px(0.), px(0.)),
+            size(px(400.), px(400.)),
+            move |_, _| {
+                div().flex().flex_wrap().pt(px(6.)).pr(px(6.)).child(
+                    native::draft_thumb(img(picture), side)
+                        .border_1()
+                        .on_children_prepainted(move |b, _, _| *into.borrow_mut() = b),
+                )
+            },
+        );
+        let picture = seen.borrow()[0];
+        let square = Bounds {
+            origin: point(px(1.), px(7.)),
+            size: size(side - px(2.), side - px(2.)),
+        };
+        assert_eq!(picture, square, "a {w}×{h} picture");
+    }
+}

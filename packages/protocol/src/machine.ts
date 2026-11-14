@@ -5,6 +5,7 @@ import { z } from "zod";
 import { CardRev } from "./card2.ts";
 import { Id, Millis, Seq, utf8Bytes } from "./common.ts";
 import { RunPlan } from "./plan.ts";
+import { PrDiffRef } from "./links.ts";
 import { RunGithub } from "./github.ts";
 import { RunCode } from "./relay.ts";
 import { HandCommandId, MAX_HAND_COMMAND_CHARS, MAX_HAND_OUTPUT_BYTES, RunHandback } from "./takeover.ts";
@@ -37,6 +38,8 @@ export const MACHINE_FEATURE_HOMES = "homes";
 export const MACHINE_FEATURE_ASK_KEYS = "ask-keys";
 /** Usable (机 5.1): `CliLogin.confirmed` is also `true` on a certain `logged_in`. */
 export const MACHINE_FEATURE_SIGN_IN_CONFIRMED = "sign-in-confirmed";
+/** `machine.limits`: the daemon takes how many runs it may do at once from the server. */
+export const MACHINE_FEATURE_LIMITS = "limits";
 
 export const MachineInfo = z.object({
   /** The id configured on the machine (optional); the token is authoritative. */
@@ -476,6 +479,25 @@ export const RunEventFrame = z.object({
   at: Millis,
   event: RunEvent,
 });
+/**
+ * The state of a pull request a run's result names, as the run's computer read it with its own
+ * `gh` when the run ended: "open", "draft", "merged" or "closed" (the words of `topic.linked`).
+ */
+export const RunPrState = z.object({
+  url: z.string().min(1).max(300),
+  state: z.string().min(1).max(32),
+  /** What else `gh` read: the title and the size of the change. */
+  title: z.string().max(500).optional(),
+  additions: z.int().nonnegative().optional(),
+  deletions: z.int().nonnegative().optional(),
+  changedFiles: z.int().nonnegative().optional(),
+  /** The diff the computer uploaded as a run file (`PrDiff` JSON); absent = not read. */
+  diff: PrDiffRef.optional(),
+});
+export type RunPrState = z.infer<typeof RunPrState>;
+/** At most this many pull requests in `run.done.prs`. */
+export const MAX_RUN_PRS = 5;
+
 export const RunDoneFrame = z.object({
   t: z.literal("run.done"),
   runId: RunId,
@@ -495,6 +517,8 @@ export const RunDoneFrame = z.object({
   failure: RunFailure.optional(),
   /** true: `resumeSessionId` was not found and the run used `run.assign.fullPrompt`. */
   resumeMissed: z.boolean().optional(),
+  /** The pull requests the result names that the computer's `gh` could read; absent = not known. */
+  prs: z.array(RunPrState).max(MAX_RUN_PRS).optional(),
 });
 export const RunSessionFrame = z.object({
   t: z.literal("run.session"),
@@ -741,6 +765,9 @@ export const MachineDownFrame = z.discriminatedUnion("t", [
     ask: z.boolean().optional(),
   }),
   z.object({ t: z.literal("secret.delete"), name: SecretName }),
+  // Feature "limits": how many runs the daemon may do at once, set in the app; absent = its own
+  // config. Sent after every welcome and on every change while connected.
+  z.object({ t: z.literal("machine.limits"), maxParallelRuns: z.int().min(1).max(100).optional() }),
   // Usable, feature "homes": empty one AI member's home folder; sent only while connected.
   z.object({ t: z.literal("home.clear"), memberId: Id }),
   // Usable, feature "takeover": a command of the person holding the run; sent only while connected.

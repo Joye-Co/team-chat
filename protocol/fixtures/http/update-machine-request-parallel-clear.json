@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateMachineRequest",
+  "valid": true,
+  "description": "back to the daemon's own config",
+  "value": {
+    "parallelRuns": null
+  }
+}

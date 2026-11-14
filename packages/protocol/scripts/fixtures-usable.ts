@@ -67,7 +67,14 @@ export function addUsableFixtures({ ok, bad, T0, ID, base, topic }: UsableCtx) {
   ok("http/update-machine-request-name.json", "UpdateMachineRequest", { name: "构建机" });
   ok("http/update-machine-request-mine.json", "UpdateMachineRequest", { owner: "me" }, "team -> my own machine");
   ok("http/update-machine-request-team.json", "UpdateMachineRequest", { owner: null }, "my own machine -> the team");
-  bad("http/update-machine-request-empty.json", "UpdateMachineRequest", {}, "name or owner is required");
+  bad("http/update-machine-request-empty.json", "UpdateMachineRequest", {}, "name, owner or parallelRuns is required");
+  ok("http/update-machine-request-parallel.json", "UpdateMachineRequest", { parallelRuns: 4 }, "do up to 4 runs at once");
+  ok("http/update-machine-request-parallel-clear.json", "UpdateMachineRequest", { parallelRuns: null }, "back to the daemon's own config");
+  bad("http/update-machine-request-parallel-zero.json", "UpdateMachineRequest", { parallelRuns: 0 }, "at least 1");
+  bad("http/update-machine-request-parallel-big.json", "UpdateMachineRequest", { parallelRuns: 101 }, "at most 100");
+  ok("entities/machine-parallel.json", "Machine", { ...machineBase, maxParallelRuns: 2, parallelRuns: 6 }, "set to 6 runs at once in the app; the daemon's config says 2");
+  ok("machine/down-machine.limits.json", "MachineDownFrame", { t: "machine.limits", maxParallelRuns: 6 }, "feature limits: up to 6 runs at once");
+  ok("machine/down-machine.limits-clear.json", "MachineDownFrame", { t: "machine.limits" }, "feature limits: the daemon's own config again");
   ok("entities/machine-cli-resume.json", "Machine", {
     id: "01JBX0MACHINE00000000000AW",
     name: "mac-mini",
@@ -399,4 +406,32 @@ export function addUsableFixtures({ ok, bad, T0, ID, base, topic }: UsableCtx) {
     durationMs: 12000,
     resumeMissed: true,
   }, "the session was not found, so the run used the full prompt");
+  ok("machine/up-run.done-prs.json", "MachineUpFrame", {
+    t: "run.done",
+    runId,
+    seq: 21,
+    at: T0 + 21,
+    status: "succeeded",
+    resultText: "合并了 https://github.com/Joye-Co/team-chat/pull/297",
+    durationMs: 9000,
+    prs: [{ url: "https://github.com/Joye-Co/team-chat/pull/297", state: "merged" }],
+  }, "the pull request the result names, as the computer's gh read it when the run ended");
+  ok("machine/up-run.done-prs-diff.json", "MachineUpFrame", {
+    t: "run.done",
+    runId,
+    seq: 22,
+    at: T0 + 22,
+    status: "succeeded",
+    resultText: "开了 https://github.com/Joye-Co/team-chat/pull/61",
+    durationMs: 9000,
+    prs: [{
+      url: "https://github.com/Joye-Co/team-chat/pull/61",
+      state: "open",
+      title: "fix: resend after reconnect",
+      additions: 3,
+      deletions: 1,
+      changedFiles: 2,
+      diff: { fileId: "01J9ZK3DIFF0000000000000001", name: "pr-61.diff.json", size: 412, sha256: "b".repeat(64) },
+    }],
+  }, "gh also read the title and size, and the computer sent the diff up as a run file");
 }

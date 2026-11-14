@@ -329,6 +329,8 @@ export interface MachineView {
   ownerId?: string;
   /** Usable: the owner's checked AI members on a personal machine (bot id -> repo path). */
   personalBots?: Map<string, string | null>;
+  /** How many runs it may do at once as set in the app (`machines.parallel_runs`); absent = the daemon's own. */
+  parallelRuns?: number;
   /** 模 3.1: runtimes whose CLI is not signed in (`MachineLink.status`); they take no runs. */
   signedOut?: string[];
   /** 模 3.4: runtimes at their subscription limit (`MachineLink.status`); they take no runs until then. */
@@ -458,6 +460,17 @@ export function personalBlock(machines: MachineView[], runner: RunnerPlace, ctx:
   return (pinned ?? would[0])?.ownerId ?? null;
 }
 
+/**
+ * How many runs the machine takes at once: the number set in the app, else the daemon's own. A
+ * daemon without feature "limits" still refuses more than its own number.
+ */
+export function runLimit(m: Pick<MachineView, "info" | "parallelRuns">): number {
+  const own = m.info?.maxParallelRuns ?? 1;
+  const set = m.parallelRuns;
+  const n = set === undefined ? own : hasFeature(m, "limits") ? set : Math.min(set, own);
+  return Math.max(1, n);
+}
+
 function activeRuns(m: MachineView): number {
   return Math.max(m.health?.activeRuns ?? 0, m.runningRuns.length);
 }
@@ -481,7 +494,7 @@ export function candidates(
         hasRuntime(m, runner.runtime) &&
         signedIn(m, runner.runtime) &&
         limitOf(m, runner.runtime, now) === null &&
-        activeRuns(m) < Math.max(1, m.info?.maxParallelRuns ?? 1),
+        activeRuns(m) < runLimit(m),
     )
     .sort((a, b) => activeRuns(a) - activeRuns(b) || (a.health?.load1 ?? 0) - (b.health?.load1 ?? 0) || a.id.localeCompare(b.id));
 }
@@ -562,6 +575,7 @@ export function toMachine(m: MachineView, createdBy: string, createdAt: number, 
     if (m.info.features) out.features = m.info.features;
     if (m.info.takeoverUrl) out.takeoverUrl = m.info.takeoverUrl;
   }
+  if (m.parallelRuns !== undefined) out.parallelRuns = m.parallelRuns;
   if (m.health) out.health = m.health;
   if (m.clis) out.clis = m.clis;
   if (m.github) out.github = m.github;

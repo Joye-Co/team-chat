@@ -58,6 +58,8 @@ pub mod feature {
     /// Usable (机 5.1): `CliLogin.confirmed` is also `true` on a certain `logged_in`, so a
     /// `logged_in` without it may come from the credential files alone.
     pub const SIGN_IN_CONFIRMED: &str = "sign-in-confirmed";
+    /// `machine.limits`: the daemon takes how many runs it may do at once from the server.
+    pub const LIMITS: &str = "limits";
 }
 
 /// Most entries of `MachineMetrics.homes`.
@@ -939,7 +941,34 @@ pub struct RunDone {
     /// `Some(true)`: `resume_session_id` was not found and the run used `full_prompt`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_missed: Option<bool>,
+    /// The pull requests the result names that the computer's `gh` could read; `None` = not known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prs: Option<Vec<RunPrState>>,
 }
+
+/// The state of a pull request a run's result names, as the run's computer read it with its own
+/// `gh` when the run ended: "open", "draft", "merged" or "closed" (the words of `topic.linked`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunPrState {
+    pub url: String,
+    pub state: String,
+    /// What else `gh` read: the title and the size of the change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub additions: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deletions: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changed_files: Option<u64>,
+    /// The diff the computer uploaded as a run file (a `PrDiff` JSON); `None` = not read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff: Option<crate::links::PrDiffRef>,
+}
+
+/// At most this many pull requests in `RunDone::prs`.
+pub const MAX_RUN_PRS: usize = 5;
 
 /// `RunFailure.kind` values (machine-protocol.md, "Failure kinds"). Open: an unknown kind reads
 /// as [`failure_kind::OTHER`].
@@ -1169,6 +1198,13 @@ pub enum Down {
     /// Feature "accounts": forget an API key.
     #[serde(rename = "secret.delete", rename_all = "camelCase")]
     SecretDelete { name: String },
+    /// Feature "limits": how many runs the daemon may do at once, set in the app; `None` = its
+    /// own config. Sent after every welcome and on every change while connected.
+    #[serde(rename = "machine.limits", rename_all = "camelCase")]
+    MachineLimits {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_parallel_runs: Option<u32>,
+    },
     /// Usable, feature "homes": empty one AI member's home folder. Sent only while connected;
     /// the daemon refuses while that member has a run on the machine.
     #[serde(rename = "home.clear", rename_all = "camelCase")]

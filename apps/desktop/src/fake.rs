@@ -2202,6 +2202,14 @@ impl ChatProvider for FakeProvider {
         self.set_machine_owner_fake(machine_id, mine)
     }
 
+    fn set_machine_parallel_runs(
+        &self,
+        machine_id: &str,
+        parallel_runs: Option<u32>,
+    ) -> AdminReply<MachineInfo> {
+        self.set_machine_parallel_runs_fake(machine_id, parallel_runs)
+    }
+
     fn remove_machine(&self, machine_id: &str) -> AdminReply<()> {
         self.remove_machine_fake(machine_id)
     }

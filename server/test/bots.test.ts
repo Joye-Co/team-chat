@@ -12,6 +12,7 @@ import {
   isHealthy,
   isOnline,
   labelsMatch,
+  runLimit,
   whyNoMachine,
 } from "../src/bots/dispatch";
 import type { BotsEnv } from "../src/bots/env";
@@ -92,6 +93,19 @@ describe("dispatch rules", () => {
     const list = candidates([busy, noLabel, noRuntime, unavailable, full, lowDisk, idle], runner, now);
     expect(list.map((m) => m.id)).toEqual(["m3", "m2"]);
     expect(candidates([idle], runner, now, ["m3"])).toEqual([]);
+  });
+
+  it("take as many runs at once as set in the app; an old daemon no more than its own number", () => {
+    const full = { ...base, id: "m2", runningRuns: ["a", "b"] };
+    expect(candidates([full], runner, now)).toEqual([]);
+    const limits = { ...full, info: { ...full.info!, features: ["limits"] } };
+    expect(runLimit({ ...limits, parallelRuns: 4 })).toBe(4);
+    expect(candidates([{ ...limits, parallelRuns: 4 }], runner, now).map((m) => m.id)).toEqual(["m2"]);
+    expect(candidates([{ ...limits, parallelRuns: 2 }], runner, now)).toEqual([]);
+    // Fewer than the daemon's own works on any daemon; more only with feature "limits".
+    expect(runLimit({ ...full, parallelRuns: 1 })).toBe(1);
+    expect(runLimit({ ...full, parallelRuns: 4 })).toBe(2);
+    expect(candidates([{ ...full, parallelRuns: 4 }], runner, now)).toEqual([]);
   });
 
   it("run a runner pinned to one machine only there, whatever the labels", () => {
@@ -278,6 +292,61 @@ describe("runner-backed bots", () => {
     expect((await api(`/v1/bots/${bot.id}/runner`, { token: owner.token })).status).toBe(404);
   });
 
+  it("a result's pull request shows the state its computer read, never a guessed one", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken);
+    const { c } = await Client.connect(w.human.token);
+    const url = "https://github.com/acme/app/pull/7";
+    const links = (topicId: string) => c.events().filter((e) => e.type === "topic.linked" && e.data.topicId === topicId);
+    const runs = new Set<string>();
+    const runOnce = async (topicId: string | null, prs?: Record<string, unknown>[]) => {
+      const sent = await c.ok({
+        t: "send",
+        groupId: w.gid,
+        ...(topicId ? { topicId } : {}),
+        clientMsgId: clientMsgId(),
+        body: "@dev ship it",
+        mentions: [w.bot.id],
+      });
+      const assign = await d.next((f) => f.t === "run.assign" && f.topicId === sent.message.topicId && !runs.has(f.runId));
+      runs.add(assign.runId);
+      d.send({ t: "run.accept", runId: assign.runId });
+      const seq = d.done(assign.runId, { status: "succeeded", exitCode: 0, resultText: `开了 PR：${url}`, durationMs: 1000, ...(prs ? { prs } : {}) });
+      await d.acked(assign.runId, seq);
+      const card = await waitUntil(
+        () => botMessages(c, sent.message.topicId, w.bot.id).find((m) => m.cardV2 && m.cardV2.data?.runId === assign.runId),
+        5000,
+        "done card",
+      );
+      return { topicId: sent.message.topicId as string, ref: card.cardV2.blocks.find((b: any) => b.type === "ref") };
+    };
+
+    // gh could not read it (an older daemon, no gh, signed out): no link and no state.
+    const first = await runOnce(null);
+    expect(first.ref.target).toEqual({ kind: "pr", url, repo: "acme/app", number: 7 });
+    expect(links(first.topicId)).toHaveLength(0);
+
+    // Read as open, then as merged: the topic's link follows, and so does the card.
+    const open = await runOnce(first.topicId, [{ url, state: "open" }]);
+    expect(open.ref.target.state).toBe("open");
+    const merged = await runOnce(first.topicId, [{ url, state: "merged" }]);
+    expect(merged.ref.target.state).toBe("merged");
+    await waitUntil(() => links(first.topicId).length === 2, 5000, "two links");
+    expect(links(first.topicId).map((e) => e.data.link.state)).toEqual(["open", "merged"]);
+
+    // gh also read the title, the size and the diff it sent up: the link carries them, and a
+    // later link without a diff keeps it.
+    const diff = { fileId: "F1", name: "pr-7.diff.json", size: 120, sha256: "a".repeat(64) };
+    await runOnce(first.topicId, [{ url, state: "merged", title: "Fix the thing", additions: 3, deletions: 1, changedFiles: 2, diff }]);
+    await waitUntil(() => links(first.topicId).length === 3, 5000, "three links");
+    expect(links(first.topicId)[2].data.link).toMatchObject({ title: "Fix the thing", additions: 3, deletions: 1, changedFiles: 2, diff });
+    await runOnce(first.topicId, [{ url, state: "closed" }]);
+    await waitUntil(() => links(first.topicId).length === 4, 5000, "four links");
+    expect(links(first.topicId)[3].data.link).toMatchObject({ state: "closed", title: "Fix the thing", diff });
+    c.close();
+    d.close();
+  });
+
   it("dispatch a mention to a machine, acknowledge with a reaction, post a done card and set the topic status", async () => {
     const w = await world();
     const { d } = await Daemon.connect(w.machineToken);
@@ -320,6 +389,8 @@ describe("runner-backed bots", () => {
       summary: "修好了",
       usage: { inputTokens: 1200, outputTokens: 340, costUsd: 0.05 },
       durationMs: 61_000,
+      // The computer's gh read the pull request's state when the run ended.
+      prs: [{ url: "https://github.com/acme/app/pull/42", state: "merged" }],
     });
     await d.acked(runId, seqDone);
     const card = await waitUntil(() => botMessages(c, topicId, w.bot.id).find((m) => m.cardV2), 5000, "done card");
@@ -329,14 +400,14 @@ describe("runner-backed bots", () => {
     // The first line is the title; the text block holds only the lines after it.
     expect(card.cardV2.blocks).toContainEqual({ type: "text", id: "result", text: result.split("\n").slice(1).join("\n") });
     expect(card.cardV2.blocks).toContainEqual({ type: "evidence", id: "tests", label: "测试：12 个通过", state: "pass", tests: { passed: 12, failed: 0 } });
-    // The pull request the result names becomes a topic link.
+    // The pull request the result names becomes a topic link with the state the computer read.
     const linked = await c.waitEvent((e) => e.type === "topic.linked" && e.data.topicId === topicId);
-    expect(linked.data.link).toMatchObject({ kind: "pr", repo: "acme/app", number: 42, url: "https://github.com/acme/app/pull/42", state: "open" });
+    expect(linked.data.link).toMatchObject({ kind: "pr", repo: "acme/app", number: 42, url: "https://github.com/acme/app/pull/42", state: "merged" });
     expect(card.cardV2.blocks).toContainEqual({
       type: "ref",
       id: "pr-1",
       label: "acme/app#42",
-      target: { kind: "pr", url: "https://github.com/acme/app/pull/42", repo: "acme/app", number: 42 },
+      target: { kind: "pr", url: "https://github.com/acme/app/pull/42", repo: "acme/app", number: 42, state: "merged" },
     });
     // Old clients get a derived v1 card. A 1.0.x client draws the body unless it is empty or
     // the card title, then the v1 text blocks: the result shows once.

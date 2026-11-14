@@ -37,6 +37,9 @@ use tokio::sync::{mpsc, watch};
 pub const GUEST_PATH: &str = "/opt/runner/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/rust/cargo/bin";
 /// The `chat-run` socket in the VM (relayed to the run's socket on the host).
 pub const GUEST_CHAT_RUN_SOCKET: &str = "/run/chat-run.sock";
+/// The most VMs at once (`[vm] max_parallel_runs` is at most this too).
+const MAX_SLOTS: usize = 1000;
+
 /// How long a VM may take from start to a connected agent.
 const BOOT_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -44,6 +47,9 @@ const BOOT_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct Firecracker {
     cfg: VmConfig,
     slots: Arc<Mutex<Vec<bool>>>,
+    /// The most slots: [`MAX_SLOTS`], or the configured count for a daemon that shares its
+    /// host (`slot_base` above 0), whose slots must stay in its own range.
+    max_slots: usize,
     tools: Mutex<Option<PathBuf>>,
     /// Each running VM's control channel by run folder (接管 reaches the VM by it).
     procs: Procs,
@@ -57,20 +63,35 @@ type Procs = Arc<Mutex<HashMap<PathBuf, mpsc::WeakUnboundedSender<Ctl>>>>;
 
 impl Firecracker {
     pub fn new(cfg: VmConfig, slots: u32) -> Firecracker {
+        let max_slots = if cfg.slot_base == 0 {
+            MAX_SLOTS
+        } else {
+            slots.max(1) as usize
+        };
         Firecracker {
             cfg,
             slots: Arc::new(Mutex::new(vec![false; slots.max(1) as usize])),
+            max_slots,
             tools: Mutex::new(None),
             procs: Arc::default(),
             execs: std::sync::atomic::AtomicU64::new(1),
         }
     }
 
-    /// A free slot of this daemon (`[vm] slot_base` on): the absolute slot, which names the
-    /// tap and the addresses.
+    /// A free VM slot (its tap device and addresses). The daemon decides how many runs it takes
+    /// (the config's `max_parallel_runs`, or the app's `machine.limits`), so the slots grow up to
+    /// [`MAX_SLOTS`] when the app allows more than the config (not on a shared host, see
+    /// `max_slots`). The absolute slot is `[vm] slot_base` + the index.
     fn take_slot(&self) -> Option<u32> {
         let mut s = self.slots.lock().unwrap_or_else(|e| e.into_inner());
-        let i = s.iter().position(|used| !used)?;
+        let i = match s.iter().position(|used| !used) {
+            Some(i) => i,
+            None if s.len() < self.max_slots => {
+                s.push(false);
+                s.len() - 1
+            }
+            None => return None,
+        };
         s[i] = true;
         Some(self.cfg.slot_base + i as u32)
     }

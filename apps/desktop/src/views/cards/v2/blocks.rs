@@ -2389,7 +2389,8 @@ pub(crate) fn metrics_with(
 // ---------------------------------------------------------------------------
 // Diff
 
-fn diff(
+/// A unified diff in a `sunken` well with its path and counts (cards and the 改动 pane).
+pub(crate) fn diff(
     path: Option<&str>,
     text: &str,
     adds: Option<u64>,
@@ -2948,6 +2949,22 @@ fn is_count(word: &str) -> bool {
     })
 }
 
+/// The state of the pull request at `url` from its 话题's newest link (`topic.linked`), in the
+/// words [`pr_state`] reads; `None` when the 话题 links another pull request or none.
+fn live_pr_state(ctx: &Ctx, url: &str) -> Option<String> {
+    use crate::data::v2::ChangeState;
+    let changes = ctx
+        .env
+        .provider
+        .topic_changes(&ctx.msg.group_id, &ctx.msg.topic_id)?;
+    (changes.url.as_deref() == Some(url)).then(|| match changes.state {
+        ChangeState::Open => "open".to_string(),
+        ChangeState::Merging => crate::copy::topic_rail::CHANGES_MERGING.to_string(),
+        ChangeState::Merged => "merged".to_string(),
+        ChangeState::Closed => "closed".to_string(),
+    })
+}
+
 fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
     let k = theme::colors(cx);
     let p = &ctx.env.provider;
@@ -2957,8 +2974,11 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
         };
         let (lead, name, line, right, right_state): (AnyElement, String, String, Option<String>, Option<BadgeState>) =
             match target {
-                RefTarget::Pr { state, number, repo, .. } => {
-                    let state = state.as_deref().map(pr_state);
+                RefTarget::Pr { state, number, repo, url, .. } => {
+                    // The 话题's newest link of this pull request knows its state now; the card
+                    // keeps the state it was posted with, which a merge later does not change.
+                    let now = live_pr_state(ctx, url);
+                    let state = now.or_else(|| state.clone()).as_deref().map(pr_state);
                     let tone = state.as_ref().map_or(PrTone::Plain, |s| s.tone);
                     (
                         ref_tile(

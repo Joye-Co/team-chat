@@ -1169,6 +1169,14 @@ pub struct Machine {
         skip_serializing_if = "Option::is_none"
     )]
     pub max_parallel_runs: Option<u32>,
+    /// How many runs it may do at once as set in the app (`UpdateMachineRequest.parallelRuns`);
+    /// `None` = the daemon's own `max_parallel_runs`.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub parallel_runs: Option<u32>,
     #[serde(
         default,
         deserialize_with = "non_null",
@@ -1308,15 +1316,35 @@ pub struct UpdateMachineRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub vm: Option<Option<crate::machine::VmSize>>,
+    /// How many runs it may do at once, 1..=[`MAX_PARALLEL_RUNS`]; `Some(None)` (`null`) = what
+    /// the daemon's config says.
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub parallel_runs: Option<Option<u32>>,
 }
+
+/// The most runs a machine may be set to do at once (`Machine.parallelRuns`).
+pub const MAX_PARALLEL_RUNS: u32 = 100;
 
 impl UpdateMachineRequest {
     pub fn validate(&self) -> Validation {
-        if self.name.is_none() && self.owner.is_none() && self.vm.is_none() {
-            return fail("name", "name, owner or vm is required");
+        if self.name.is_none()
+            && self.owner.is_none()
+            && self.vm.is_none()
+            && self.parallel_runs.is_none()
+        {
+            return fail("name", "name, owner, vm or parallelRuns is required");
         }
         if let Some(Some(v)) = &self.vm {
             v.validate()?;
+        }
+        if let Some(Some(n)) = self.parallel_runs
+            && !(1..=MAX_PARALLEL_RUNS).contains(&n)
+        {
+            return fail("parallelRuns", "parallelRuns is 1..100");
         }
         if let Some(n) = &self.name {
             check_name("name", n)?;

@@ -62,7 +62,14 @@ Before `welcome` the daemon sends nothing else, and the server sends nothing but
 { t: "run.done",    runId, seq, at, status: "succeeded" | "failed" | "cancelled" | "timeout",
   exitCode?: number, resultText?: string /* <= 64 KiB */, summary?: string /* first line, <= 280 chars */,
   error?: string /* <= 4 KiB */, sessionId?: string, usage?: Usage, durationMs: number,
-  resumeMissed?: boolean /* true: resumeSessionId was not found, the run used run.assign.fullPrompt */ }
+  resumeMissed?: boolean /* true: resumeSessionId was not found, the run used run.assign.fullPrompt */,
+  prs?: { url: string, state: "open" | "draft" | "merged" | "closed", title?: string /* <= 500 */,
+          additions?: number, deletions?: number, changedFiles?: number, diff?: PrDiffRef }[]
+  /* <= 5: the pull requests resultText names, as the computer's own gh read them when the run
+  ended; one gh could not read is left out. `diff`: before run.done the daemon reads the files
+  with `gh api repos/{o}/{r}/pulls/{n}/files` (up to 300 files), redacts them like run events
+  and sends the PrDiff JSON (docs/protocol.md "Topic links") up as a run file named
+  `pr-<n>.diff.json` (PUT /v1/machine/runs/:id/files); absent when gh or the upload failed */ }
 { t: "run.session", runId, seq, at, ok: boolean, source?: "cli" | "stream",
   bytes?: number, gzipBytes?: number, sha256?: string, error?: string }
 
@@ -1088,6 +1095,9 @@ RunGithub = {
 { t: "run.command.cancel", runId, commandId }                      // feature "takeover"
 { t: "home.clear", memberId }   // feature "homes"; only while connected: empty that AI member's home
                                  // folder (refused, and logged, while a run of it is on the machine)
+{ t: "machine.limits", maxParallelRuns? /* 1..100 */ }  // feature "limits": how many runs at once,
+                                 // set in the app; absent = the config's max_parallel_runs. Sent after
+                                 // every welcome and on each change; the daemon keeps it in memory only
 ```
 
 GitHub (feature `github`):
@@ -1386,7 +1396,7 @@ has `0 64`): an unlisted user or a slot outside its range is refused, and it exp
 the caller's home (not its dot folders) and `/srv/runner/u/<user>` (the team user: also
 `/srv/runner`, but not the other users' trees in `/srv/runner/u`).
 
-**Capacity.** Besides `max_parallel_runs` and the free disk of `work_root`
+**Capacity.** Besides the run limit (`max_parallel_runs`, or `machine.limits`) and the free disk of `work_root`
 (`health.diskFreeBytes`), a VM host
 refuses a run (`run.reject`, `busy`) when `MemAvailable` does not cover the new run's VM memory (the
 size above) for it and for each accepted VM that has not booted yet,
