@@ -795,6 +795,7 @@ mod tests {
             online: false,
             character: None,
             team_owner: false,
+            owner_id: None,
             deleted: false,
         }
     }

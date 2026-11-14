@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateMachineRequest",
+  "valid": true,
+  "description": "back to the daemon's own [vm] size",
+  "value": {
+    "vm": null
+  }
+}

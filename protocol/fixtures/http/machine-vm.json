@@ -1,0 +1,21 @@
+{
+  "kind": "Machine",
+  "valid": true,
+  "value": {
+    "id": "01JBX0MACH00000000000000AA",
+    "name": "实习生电脑",
+    "labels": [
+      "vm"
+    ],
+    "createdBy": "01JBX0OWNER0000000000000AA",
+    "createdAt": 1762128000000,
+    "connected": true,
+    "healthy": true,
+    "runningRuns": [],
+    "ownerId": "01JBX0ALICE0000000000000AB",
+    "vm": {
+      "vcpus": 2,
+      "memMib": 4096
+    }
+  }
+}

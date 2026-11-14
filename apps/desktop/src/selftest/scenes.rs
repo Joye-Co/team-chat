@@ -1050,6 +1050,10 @@ pub fn all() -> Vec<&'static Scene> {
         // --- usable R5: 电脑 with ownership ---
         crate::views::settings::selftest::COMPUTER_SCENES,
         // --- end usable R5 ---
+        // --- usable: a member's own AI member and VM sizes ---
+        crate::views::settings::selftest::OWN_AI_SCENES,
+        crate::views::admin::scenes::VM_SCENES,
+        // --- end usable: a member's own AI member and VM sizes ---
         // --- v14 state scenes: one line per track, in track order ---
         super::states::SCENES,
         // --- end v14 state scenes ---

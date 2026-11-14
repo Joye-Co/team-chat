@@ -735,7 +735,7 @@ pub fn open_shortcuts(
 
 /// Runs `f` on the window once it has taken its pane's height, as a sheet
 /// opened by a click finds it.
-fn after_fit(
+pub(crate) fn after_fit(
     handle: AnyWindowHandle,
     cx: &mut App,
     f: impl FnOnce(&mut gpui::Window, &mut App) + 'static,
@@ -1583,6 +1583,128 @@ pub fn open_edit_ai_pinned_elsewhere(
         cx,
     )
 }
+
+// --- usable: a member's own AI member (design-personal-ai 3.1, 3.2, 3.5) ---
+
+/// 添加 AI 成员 as a member who is not an admin: his own, on his own computers only.
+pub fn open_add_own_ai(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Members,
+        |s, w, cx| {
+            let form = super::members::open_add_bot(s, w, cx);
+            form.update(cx, |f, cx| f.fill("小助手", Some("claude"), w, cx));
+        },
+        cx,
+    )
+}
+
+/// The same with no computer of my own: the sheet says so and offers to add one.
+fn remove_my_computers(services: &Services, _: &mut App) {
+    for id in ["mc-air", "mc-home"] {
+        // The fake answers at once; the reply is not needed.
+        drop(services.provider.remove_machine(id));
+    }
+}
+
+/// 成员 as a member with an AI member of his own: its row says 你的 and has ⋯, and 添加 AI 成员
+/// is off with why.
+fn add_my_own_ai(services: &Services, _: &mut App) {
+    let runner = crate::data::RunnerSetup {
+        runtime: "claude".into(),
+        machine_id: Some("mc-air".into()),
+        ..Default::default()
+    };
+    drop(services.provider.create_bot_member_for(
+        "小助手".into(),
+        Some("前端助手".into()),
+        Some(crate::characters::CharacterId::O05),
+        Some(runner),
+        None,
+    ));
+}
+
+/// 添加 AI 成员 as an admin, for 陈晨: only 陈晨's computers.
+pub fn open_add_ai_for_person(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Members,
+        |s, w, cx| {
+            let form = super::members::open_add_bot(s, w, cx);
+            form.update(cx, |f, cx| {
+                f.fill("陈晨的助手", Some("claude"), w, cx);
+                f.set_owner(Some("m-chenchen".into()), cx);
+            });
+        },
+        cx,
+    )
+}
+
+/// 添加电脑 as an admin, for 小王: his own computer.
+pub fn open_computers_add_for_person(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Machines,
+        |s, w, cx| {
+            let form = super::machines::open_add_machine(s, w, cx);
+            form.update(cx, |form, cx| {
+                form.fill("小王的电脑", super::machines::InstallTarget::Linux, w, cx);
+                form.set_for_person("m-xiaowang".into(), cx);
+            });
+        },
+        cx,
+    )
+}
+
+pub const OWN_AI_SCENES: &[Scene] = &[
+    Scene {
+        name: "own-ai-add",
+        about: "添加 AI 成员 as a 普通成员: his own, no 工作方式 choice, only his computers",
+        start: Start::Roles(crate::fake::RoleView::Member),
+        setup: |_, _| {},
+        open: open_add_own_ai,
+    },
+    Scene {
+        name: "own-ai-add-no-computer",
+        about: "添加 AI 成员 as a 普通成员 with no computer of his own: why, and 添加电脑",
+        start: Start::Roles(crate::fake::RoleView::Member),
+        setup: remove_my_computers,
+        open: open_add_own_ai,
+    },
+    Scene {
+        name: "own-ai-members",
+        about: "成员 as a 普通成员 with his own AI member: 你的 on its row, ⋯, and 添加 AI 成员 off with why",
+        start: Start::Roles(crate::fake::RoleView::Member),
+        setup: add_my_own_ai,
+        open: open_members_end,
+    },
+    Scene {
+        name: "own-ai-admin-for-person",
+        about: "添加 AI 成员 as a 管理员 with 归谁 = 陈晨: only 陈晨's computers",
+        start: Start::Roles(crate::fake::RoleView::Admin),
+        setup: |_, _| {},
+        open: open_add_ai_for_person,
+    },
+    Scene {
+        name: "own-ai-admin-add-computer",
+        about: "添加电脑 as a 管理员 with 谁用这台电脑 = 小王",
+        start: Start::Roles(crate::fake::RoleView::Admin),
+        setup: |_, _| {},
+        open: open_computers_add_for_person,
+    },
+];
 
 /// The R5 scenes: a role view each (`fake::RoleView`).
 macro_rules! computers_scene {

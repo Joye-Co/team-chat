@@ -2,7 +2,7 @@
 // status events in the group log and the run log. See docs/protocol.md, "Bot runs".
 import { z } from "zod";
 import { eventBase, Id, Millis, Name, Seq } from "./common.ts";
-import { AcceptanceItem, CliInfo, Effort, Health, Labels, MAX_ACCEPTANCE_ITEMS, MachineFeature, MachineGithub, RunFailure, RunLogEntry, Usage } from "./machine.ts";
+import { AcceptanceItem, CliInfo, Effort, Health, Labels, MAX_ACCEPTANCE_ITEMS, MachineFeature, MachineGithub, RunFailure, VmSize, RunLogEntry, Usage } from "./machine.ts";
 import { RunPlan } from "./plan.ts";
 import { Artifact, ArtifactVersion } from "./files.ts";
 import { GroupDecision, RecordedDecision } from "./card2.ts";
@@ -453,6 +453,8 @@ export const Machine = z.object({
   personalBots: z.array(PersonalBot).max(MAX_PERSONAL_BOTS).optional(),
   /** Usable: the computer's own GitHub sign-in (`metrics.github`). Admins and the computer's owner only. */
   github: MachineGithub.optional(),
+  /** Usable: the VM size an admin set for this machine's runs; absent = the daemon's own `[vm]`. */
+  vm: VmSize.optional(),
 });
 export type Machine = z.infer<typeof Machine>;
 
@@ -462,6 +464,8 @@ export const CreateMachineRequest = z.object({
   labels: Labels.optional(),
   /** Usable: true = my own machine; absent = a team machine for an admin, my own for a member. */
   personal: z.boolean().optional(),
+  /** Usable: admins only, the person the new machine belongs to (implies personal). */
+  ownerId: Id.optional(),
 });
 export type CreateMachineRequest = z.infer<typeof CreateMachineRequest>;
 /** `PATCH /v1/machines/:id` (usable): rename it, or move it between the team and me. At least one field. */
@@ -470,11 +474,13 @@ export const UpdateMachineRequest = z
     name: Name.optional(),
     /** "me" = make it my own machine; null = give it to the team. */
     owner: z.literal("me").nullable().optional(),
+    /** Admins only: the VM size of the machine's runs; null = the daemon's own. */
+    vm: VmSize.nullable().optional(),
     /** How many runs it may do at once; null = what the daemon's config says. */
     parallelRuns: z.int().min(1).max(MAX_PARALLEL_RUNS).nullable().optional(),
   })
-  .refine((r) => r.name !== undefined || r.owner !== undefined || r.parallelRuns !== undefined, {
-    message: "name, owner or parallelRuns is required",
+  .refine((r) => r.name !== undefined || r.owner !== undefined || r.vm !== undefined || r.parallelRuns !== undefined, {
+    message: "name, owner, vm or parallelRuns is required",
   });
 export type UpdateMachineRequest = z.infer<typeof UpdateMachineRequest>;
 /** `PUT /v1/machines/:id/bots/:botId` (the machine's owner, usable). Response: `Machine`. */

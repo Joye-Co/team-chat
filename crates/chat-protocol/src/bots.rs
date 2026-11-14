@@ -1226,6 +1226,13 @@ pub struct Machine {
         skip_serializing_if = "Option::is_none"
     )]
     pub github: Option<crate::machine::MachineGithub>,
+    /// Usable: the VM size an admin set for this machine's runs; `None` = the daemon's own `[vm]`.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub vm: Option<crate::machine::VmSize>,
 }
 
 /// Usable: at most this many AI members on one personal machine.
@@ -1263,6 +1270,13 @@ pub struct CreateMachineRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub personal: Option<bool>,
+    /// Usable: admins only, the person the new machine belongs to (implies personal).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub owner_id: Option<String>,
 }
 
 impl CreateMachineRequest {
@@ -1295,6 +1309,13 @@ pub struct UpdateMachineRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub owner: Option<Option<String>>,
+    /// Admins only: the VM size of the machine's runs; `Some(None)` (`null`) = the daemon's own.
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub vm: Option<Option<crate::machine::VmSize>>,
     /// How many runs it may do at once, 1..=[`MAX_PARALLEL_RUNS`]; `Some(None)` (`null`) = what
     /// the daemon's config says.
     #[serde(
@@ -1310,8 +1331,15 @@ pub const MAX_PARALLEL_RUNS: u32 = 100;
 
 impl UpdateMachineRequest {
     pub fn validate(&self) -> Validation {
-        if self.name.is_none() && self.owner.is_none() && self.parallel_runs.is_none() {
-            return fail("name", "name, owner or parallelRuns is required");
+        if self.name.is_none()
+            && self.owner.is_none()
+            && self.vm.is_none()
+            && self.parallel_runs.is_none()
+        {
+            return fail("name", "name, owner, vm or parallelRuns is required");
+        }
+        if let Some(Some(v)) = &self.vm {
+            v.validate()?;
         }
         if let Some(Some(n)) = self.parallel_runs
             && !(1..=MAX_PARALLEL_RUNS).contains(&n)

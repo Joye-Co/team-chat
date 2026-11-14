@@ -3064,3 +3064,39 @@ Rules:
   Clients leave deleted members out of every list and picker (团队管理, @ mentions, add to
   群, new 私聊) and show their old messages as before. Pushed as `directory` with the member;
   audited as `member.delete`.
+
+## A member's own AI member and the VM size of a machine
+
+Modules: `index.ts`, `bots.ts`, `machine.ts` / `entities.rs`, `http.rs`, `bots.rs`, `machine.rs`.
+Design: [plans/usable/design-personal-ai.zh.md](plans/usable/design-personal-ai.zh.md).
+
+```ts
+Member += { ownerId?: string }                 // an AI member's own person (its 主人); absent = the team's
+CreateBotRequest += { ownerId?: string }       // admins only: the person the new AI member belongs to
+CreateMachineRequest += { ownerId?: string }   // admins only: the person the new machine belongs to (implies personal)
+VmSize = { vcpus: 1..16, memMib: 1024..65536 }
+Machine += { vm?: VmSize }                     // the size an admin set; absent = the daemon's own [vm]
+UpdateMachineRequest += { vm?: VmSize | null } // admins only; null = the daemon's own again
+MAX_OWN_BOTS = 1
+```
+
+| Method and path | Who | Body | Response |
+| --- | --- | --- | --- |
+| `POST /v1/bots` | an admin; usable: any person, for himself | `CreateBotRequest` | `{ member, token }`; a member who is not an admin always makes his own (`ownerId` = him; another `ownerId` is `forbidden`) and has at most `MAX_OWN_BOTS` active ones (`forbidden`, `bot.own_limit`); an admin's `ownerId` must be an active person (`invalid`) |
+| `PATCH /v1/members/:id` | also the AI member's owner | `UpdateMemberRequest` | the owner may change `name`, `role`, `character` and `deactivated` of his own AI member, nothing else |
+| `GET`, `PUT`, `DELETE /v1/bots/:id/runner` | also the AI member's owner | | the owner must name a machine of his own in `machineId` (`invalid`, `bot.own_needs_machine`; someone else's: `forbidden`, `machine.not_yours`) |
+| `POST /v1/machines` | as before | `CreateMachineRequest` | `ownerId` from a member who is not an admin is `forbidden`; it must be an active person (`invalid`) |
+| `PATCH /v1/machines/:id` | `vm`: an admin | `UpdateMachineRequest` | `Machine`; audited as `machine.update` with `vm` |
+
+Rules:
+
+- An AI member with `ownerId` runs only on its owner's own machines, also when an admin edits
+  it. Its owner's machine takes work for it from anyone (the owner chose to let it work there);
+  the other rules of personal machines are unchanged.
+- Deactivating a person deactivates his AI members too.
+- `GET /v1/machines`: a personal machine an admin added for someone (`createdBy` is not its
+  `ownerId`) comes in full to admins too, without `personalBots`; its logins, keys, name and
+  removal stay with its owner.
+- `run.assign.vm` carries the machine's `vm` (machine-protocol.md, "Usable features"); the
+  daemon caps it at its own limits. A change applies from the next run.
+- Old clients ignore `ownerId` and `vm` and show such an AI member as the team's.

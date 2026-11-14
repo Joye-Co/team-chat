@@ -94,6 +94,8 @@ pub struct Member {
     pub character: Option<crate::characters::CharacterId>,
     /// 所有者 (`teamOwner`); always with `level` `Owner`. Read it through [`TeamRole::of`].
     pub team_owner: bool,
+    /// Usable: an AI member's own person (its 主人, `ownerId`); `None` = the team's.
+    pub owner_id: Option<MemberId>,
     /// hide-delete/1: an AI member deleted for good (also `deactivated`). Its old messages
     /// keep its name and avatar; every list and picker leaves it out ([`Member::is_listed`]).
     pub deleted: bool,
@@ -104,10 +106,23 @@ impl Member {
         self.kind == MemberKind::Bot
     }
 
+    /// Usable: an active AI member of `me`'s own (design-personal-ai 3.1).
+    pub fn is_own_bot_of(&self, me: &str) -> bool {
+        self.is_bot() && !self.deactivated && self.owner_id.as_deref() == Some(me)
+    }
     /// Shown in lists and pickers: every member but a deleted AI member.
     pub fn is_listed(&self) -> bool {
         !self.deleted
     }
+}
+
+/// Usable: how many active AI members of his own a member who is not an admin may have
+/// (`MAX_OWN_BOTS`).
+pub const MAX_OWN_BOTS: usize = chat_core::proto::MAX_OWN_BOTS;
+
+/// Usable: whether `me`, not an admin, may add another AI member of his own.
+pub fn may_add_own_bot(members: &[Member], me: &str) -> bool {
+    members.iter().filter(|m| m.is_own_bot_of(me)).count() < MAX_OWN_BOTS
 }
 
 /// A name as views show it: no leading or trailing space and one space
@@ -1350,6 +1365,27 @@ pub struct MachineInfo {
     /// server tells admins and the computer's owner only, and a host-mode computer only when
     /// signed in).
     pub github: Option<MachineGithub>,
+    /// Usable: the VM size an admin set for its runs (`Machine.vm`); `None` = the computer's own.
+    pub vm: Option<VmSize>,
+    /// Who registered it (`Machine.createdBy`); empty when not told.
+    pub created_by: String,
+}
+
+/// Usable: a VM's size (`VmSize`): CPU cores and memory in MiB.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VmSize {
+    pub vcpus: u32,
+    pub mem_mib: u32,
+}
+
+impl VmSize {
+    pub const VCPUS: std::ops::RangeInclusive<u32> = 1..=16;
+    /// Memory in whole GB (1024 MiB each).
+    pub const MEM_GB: std::ops::RangeInclusive<u32> = 1..=64;
+
+    pub fn mem_gb(&self) -> u32 {
+        self.mem_mib.div_ceil(1024)
+    }
 }
 
 /// Usable (design-github-identity.zh.md §3.6): the GitHub sign-in a computer reports.
@@ -1408,6 +1444,14 @@ impl MachineInfo {
             Some(o) if Some(o) == me => Ownership::Mine,
             Some(_) => Ownership::Theirs,
         }
+    }
+
+    /// Usable (design-personal-ai 3.2): somebody's own computer an admin set up for him; the
+    /// server shows it to admins in full, and admins set its VM size.
+    pub fn set_up_for_owner(&self) -> bool {
+        self.owner_id
+            .as_deref()
+            .is_some_and(|o| !self.created_by.is_empty() && o != self.created_by)
     }
 
     /// How many tasks it takes at once: the app's number, else the daemon's own; an older daemon
@@ -2051,6 +2095,22 @@ pub trait ChatProvider: Send + Sync + 'static {
     ) -> AdminReply<BotCreated> {
         reply_now(Err(AdminError::Unsupported))
     }
+    /// Usable: adds an AI member as [`create_bot_member`](Self::create_bot_member) does, with
+    /// `owner_id` (admins only) the person it belongs to. A member who is not an admin always
+    /// makes his own, so he passes `None`.
+    fn create_bot_member_for(
+        &self,
+        name: String,
+        role: Option<String>,
+        character: Option<CharacterId>,
+        runner: Option<RunnerSetup>,
+        owner_id: Option<String>,
+    ) -> AdminReply<BotCreated> {
+        if owner_id.is_some() {
+            return reply_now(Err(AdminError::Unsupported));
+        }
+        self.create_bot_member(name, role, character, runner)
+    }
     /// Owner: how a bot member works on a machine (`GET /v1/bots/:id/runner`);
     /// `None` when it does not.
     fn bot_runner(&self, _member_id: &str) -> AdminReply<Option<RunnerSetup>> {
@@ -2202,6 +2262,19 @@ pub trait ChatProvider: Send + Sync + 'static {
         _personal: Option<bool>,
     ) -> AdminReply<MachineCreated> {
         self.create_machine(name, labels)
+    }
+    /// Usable, admins: registers a computer as `owner_id`'s own (`CreateMachineRequest.ownerId`).
+    fn create_machine_for(
+        &self,
+        _name: String,
+        _labels: Vec<String>,
+        _owner_id: String,
+    ) -> AdminReply<MachineCreated> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Usable, admins: the VM size of a computer's runs; `None` = the computer's own again.
+    fn set_machine_vm(&self, _machine_id: &str, _vm: Option<VmSize>) -> AdminReply<MachineInfo> {
+        reply_now(Err(AdminError::Unsupported))
     }
     /// Usable: renames a computer (a team one: admins; my own: me).
     fn rename_machine(&self, _machine_id: &str, _name: String) -> AdminReply<MachineInfo> {

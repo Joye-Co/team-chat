@@ -489,6 +489,22 @@ impl AdminView {
                     (true, None) => m::TEAM_AI.to_string(),
                     (false, role) => role.unwrap_or_default().to_string(),
                 };
+                // Usable: whose AI member it is (design-personal-ai 3.5).
+                let me = crate::views::settings::my_id(&self.services);
+                let sub = match crate::views::settings::members::whose_bot(
+                    &r.member,
+                    me.as_deref(),
+                    false,
+                    |id| {
+                        self.services
+                            .provider
+                            .member(id)
+                            .map(|p| crate::ui::avatar::name_beside_avatar(&p.name).to_string())
+                    },
+                ) {
+                    Some(whose) => format!("{whose} · {sub}"),
+                    None => sub,
+                };
                 let level = role_word(r.role);
                 let recent = if r.member.deactivated {
                     (m::TEAM_OFF.to_string(), k.secondary)
@@ -1289,6 +1305,7 @@ mod tests {
                 online: false,
                 character: None,
                 team_owner: false,
+                owner_id: None,
                 deleted: false,
             },
             role: if owner {

@@ -1,0 +1,12 @@
+{
+  "kind": "Member",
+  "valid": true,
+  "description": "usable: an AI member of Alice's own",
+  "value": {
+    "id": "01JBX0BOT000000000000000AC",
+    "kind": "bot",
+    "name": "小助手",
+    "level": "member",
+    "ownerId": "01JBX0ALICE0000000000000AB"
+  }
+}

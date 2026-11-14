@@ -133,13 +133,17 @@ impl AdminView {
     ) -> AnyElement {
         let k = native_colors(cx);
         // The team's computers and mine; other people's own computers are theirs to manage
-        // (they show in 设置 › 电脑).
+        // (they show in 设置 › 电脑), except one an admin set up for somebody (design-personal-ai
+        // 3.2): the server shows it to admins in full.
         let me = crate::views::settings::my_id(&self.services);
         let cards: Vec<AnyElement> = self
             .machines
             .iter()
             .flatten()
-            .filter(|x| x.ownership(me.as_deref()) != crate::data::Ownership::Theirs)
+            .filter(|x| {
+                x.ownership(me.as_deref()) != crate::data::Ownership::Theirs
+                    || (self.owner && x.set_up_for_owner())
+            })
             .map(|x| self.machine_card(x, now, window, cx))
             .collect();
         let services = self.services.clone();
@@ -306,8 +310,17 @@ impl AdminView {
             meta
         } else {
             let whose = match x.ownership(me.as_deref()) {
-                crate::data::Ownership::Mine => crate::copy::settings::MACHINE_MINE,
-                _ => crate::copy::settings::MACHINE_TEAM,
+                crate::data::Ownership::Mine => crate::copy::settings::MACHINE_MINE.to_string(),
+                crate::data::Ownership::Team => crate::copy::settings::MACHINE_TEAM.to_string(),
+                crate::data::Ownership::Theirs => {
+                    let who = x
+                        .owner_id
+                        .as_deref()
+                        .and_then(|id| self.services.provider.member(id))
+                        .map(|p| crate::ui::avatar::name_beside_avatar(&p.name).to_string())
+                        .unwrap_or_default();
+                    fill(crate::copy::settings::MACHINE_OF, &[("name", &who)])
+                }
             };
             format!("{whose} · {meta}")
         };
@@ -415,8 +428,29 @@ impl AdminView {
         let view = cx.entity();
         let name = x.name.clone();
         let this = self.services.provider.this_machine_id().as_deref() == Some(x.id.as_str());
-        let may =
+        let mut may =
             crate::views::settings::machine_actions::allowed(x, me.as_deref(), self.owner, this);
+        // Admins set the size of the VMs a VM computer runs (design-personal-ai 3.3).
+        may.vm = self.owner && vm;
+        let vm_size = may.vm.then(|| {
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(space::S8)
+                .n_footnote()
+                .child(
+                    div()
+                        .text_color(k.secondary)
+                        .child(crate::copy::settings::MACHINE_VM),
+                )
+                .child(
+                    div()
+                        .n_figures()
+                        .when(x.vm.is_none(), |d| d.text_color(k.secondary))
+                        .child(crate::views::settings::machine_actions::vm_size_text(x.vm)),
+                )
+        });
         let (services, machine, after) = (self.services.clone(), x.clone(), self.fleet_after(cx));
         let more = crate::views::settings::widgets::more_button(
             SharedString::from(format!("fleet-more-{}", x.id)),
@@ -503,6 +537,7 @@ impl AdminView {
                     .child(meter(m::KPI_CPU, pct(cpu), cpu.map(|v| (v / 100.) as f32)))
                     .child(meter(m::KPI_MEM, pct(mem), mem.map(|v| (v / 100.) as f32))),
             )
+            .children(vm_size)
             .child(
                 div()
                     .pt(space::S16)

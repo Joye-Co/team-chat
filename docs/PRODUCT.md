@@ -238,7 +238,10 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
   管理员 (admin: `level` `owner`, people and the AI members at that level) and 普通成员 (member:
   `level` `member`, everyone else and their AI members). A 所有者 is also an admin. Admins manage
   the team: the AI service key and model, the team's models, approval rules, invites, AI members,
-  team machines, usage and activity; members read the team settings. Only a 所有者 changes
+  team machines, usage and activity; members read the team settings. A member may make one AI
+  member of his own, edit it and place it only on his own computers; an admin may add a
+  computer for a member (an intern's on the team's Linux host) and sets its VM size
+  ([plans/usable/design-personal-ai.zh.md](plans/usable/design-personal-ai.zh.md)). Only a 所有者 changes
   anyone's role and deactivates, revokes or edits an admin or a 所有者. Invited people arrive as
   members and get a role afterwards. The team keeps at least one active 所有者; the person who
   sets up a server is its first 所有者, so someone using it alone notices no roles at all

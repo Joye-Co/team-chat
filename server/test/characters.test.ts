@@ -41,7 +41,8 @@ describe("member characters", () => {
       const r = await api("/v1/bots", { method: "POST", token: owner.token, body: { name: "Bad", character } });
       expect(r.status).toBe(400);
     }
-    expect((await api("/v1/bots", { method: "POST", token: m.token, body: { name: "X", character: "jojo" } })).status).toBe(403);
+    // A member's own AI member (design-personal-ai) still takes only known ids.
+    expect((await api("/v1/bots", { method: "POST", token: m.token, body: { name: "X", character: "o21" } })).status).toBe(400);
     expect((await api(`/v1/members/${m.id}`, { method: "PATCH", token: owner.token, body: { character: "o99" } })).status).toBe(400);
     // A member may change its own name and role, not its character.
     expect((await api(`/v1/members/${m.id}`, { method: "PATCH", token: m.token, body: { character: "jojo" } })).status).toBe(403);

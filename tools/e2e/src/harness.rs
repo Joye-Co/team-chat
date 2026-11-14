@@ -166,7 +166,7 @@ impl Harness {
         let name = self.name(label);
         let r = self
             .owner
-            .create_bot(&name, Some("e2e"), None)
+            .create_bot(&name, Some("e2e"), None, None)
             .await
             .context("create bot")?;
         self.adopt(r.member, r.token).await

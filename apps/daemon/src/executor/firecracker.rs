@@ -47,6 +47,9 @@ const BOOT_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct Firecracker {
     cfg: VmConfig,
     slots: Arc<Mutex<Vec<bool>>>,
+    /// The most slots: [`MAX_SLOTS`], or the configured count for a daemon that shares its
+    /// host (`slot_base` above 0), whose slots must stay in its own range.
+    max_slots: usize,
     tools: Mutex<Option<PathBuf>>,
     /// Each running VM's control channel by run folder (接管 reaches the VM by it).
     procs: Procs,
@@ -60,9 +63,15 @@ type Procs = Arc<Mutex<HashMap<PathBuf, mpsc::WeakUnboundedSender<Ctl>>>>;
 
 impl Firecracker {
     pub fn new(cfg: VmConfig, slots: u32) -> Firecracker {
+        let max_slots = if cfg.slot_base == 0 {
+            MAX_SLOTS
+        } else {
+            slots.max(1) as usize
+        };
         Firecracker {
             cfg,
             slots: Arc::new(Mutex::new(vec![false; slots.max(1) as usize])),
+            max_slots,
             tools: Mutex::new(None),
             procs: Arc::default(),
             execs: std::sync::atomic::AtomicU64::new(1),
@@ -71,19 +80,20 @@ impl Firecracker {
 
     /// A free VM slot (its tap device and addresses). The daemon decides how many runs it takes
     /// (the config's `max_parallel_runs`, or the app's `machine.limits`), so the slots grow up to
-    /// [`MAX_SLOTS`] when the app allows more than the config.
+    /// [`MAX_SLOTS`] when the app allows more than the config (not on a shared host, see
+    /// `max_slots`). The absolute slot is `[vm] slot_base` + the index.
     fn take_slot(&self) -> Option<u32> {
         let mut s = self.slots.lock().unwrap_or_else(|e| e.into_inner());
         let i = match s.iter().position(|used| !used) {
             Some(i) => i,
-            None if s.len() < MAX_SLOTS => {
+            None if s.len() < self.max_slots => {
                 s.push(false);
                 s.len() - 1
             }
             None => return None,
         };
         s[i] = true;
-        Some(i as u32)
+        Some(self.cfg.slot_base + i as u32)
     }
 
     /// The tools disk of this daemon binary: made once per binary, next to the VMs.
@@ -332,10 +342,13 @@ impl Executor for Firecracker {
         let (stdout_vm, stdout_host) = tokio::io::duplex(1 << 16);
         let (ctl_tx, ctl_rx) = mpsc::unbounded_channel();
         let (exit_tx, exit_rx) = watch::channel(None);
+        let (vcpus, mem_mib) = self.cfg.size(spec.vm);
         let job = Job {
             cfg: self.cfg.clone(),
             slots: self.slots.clone(),
             slot,
+            vcpus,
+            mem_mib,
             tools,
             vm_dir: self.cfg.dir.join(&spec.run_id),
             run_dir: spec.run_dir.clone(),
@@ -508,7 +521,11 @@ impl Process for VmProcess {
 struct Job {
     cfg: VmConfig,
     slots: Arc<Mutex<Vec<bool>>>,
+    /// The absolute slot (`[vm] slot_base` + the index in `slots`).
     slot: u32,
+    /// The VM's size: `run.assign.vm` capped at `[vm] max_*`, else `[vm] vcpus / mem_mib`.
+    vcpus: u32,
+    mem_mib: u32,
     tools: PathBuf,
     vm_dir: PathBuf,
     run_dir: PathBuf,
@@ -654,7 +671,7 @@ impl Job {
                 { "iface_id": "eth0", "host_dev_name": tap_name(self.slot), "guest_mac": mac },
             ],
             "vsock": { "guest_cid": 3, "uds_path": vsock },
-            "machine-config": { "vcpu_count": self.cfg.vcpus, "mem_size_mib": self.cfg.mem_mib },
+            "machine-config": { "vcpu_count": self.vcpus, "mem_size_mib": self.mem_mib },
         });
         let config_path = self.vm_dir.join("vm.json");
         std::fs::write(&config_path, config.to_string()).map_err(|e| e.to_string())?;
@@ -900,7 +917,11 @@ impl Job {
         }
         let _ = tokio::fs::remove_dir_all(&self.vm_dir).await;
         let mut s = self.slots.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(used) = s.get_mut(self.slot as usize) {
+        if let Some(used) = self
+            .slot
+            .checked_sub(self.cfg.slot_base)
+            .and_then(|i| s.get_mut(i as usize))
+        {
             *used = false;
         }
     }
@@ -1023,6 +1044,8 @@ mod tests {
             cfg: cfg.clone(),
             slots: Arc::default(),
             slot: 0,
+            vcpus: 2,
+            mem_mib: 4096,
             tools: PathBuf::new(),
             vm_dir: p("vms/r1"),
             run_dir: run_dir.clone(),
@@ -1039,6 +1062,20 @@ mod tests {
         assert!(!shares.iter().any(|s| s.starts_with(canon(&homes))));
         assert!(shares.contains(&canon(&run_dir)) && shares.contains(&canon(&cwd)));
         assert_eq!(shares.len(), 3, "{shares:?}");
+    }
+
+    #[test]
+    fn a_daemon_takes_slots_from_its_slot_base() {
+        let mut cfg = crate::config::Config::parse(
+            "server_url = \"http://127.0.0.1:1\"\ntoken_file = \"/x\"\n[vm]\nkernel = \"/k\"\nrootfs = \"/r\"\nslot_base = 64\n",
+        )
+        .unwrap();
+        let fc = Firecracker::new(cfg.vm.take().unwrap(), 2);
+        assert_eq!(fc.take_slot(), Some(64));
+        assert_eq!(fc.take_slot(), Some(65));
+        assert_eq!(fc.take_slot(), None);
+        assert_eq!(addrs(64), ("10.200.1.1".into(), "10.200.1.2".into()));
+        assert_eq!(tap_name(64), "rvm64");
     }
 
     #[test]

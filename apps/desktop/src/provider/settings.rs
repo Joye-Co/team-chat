@@ -215,6 +215,11 @@ pub(super) fn machine(m: &proto::Machine) -> MachineInfo {
             .any(|f| f == proto::machine::feature::LIMITS),
         runtimes,
         owner_id: m.owner_id.clone(),
+        created_by: m.created_by.clone(),
+        vm: m.vm.map(|v| crate::data::VmSize {
+            vcpus: v.vcpus,
+            mem_mib: v.mem_mib,
+        }),
         personal_bots: m
             .personal_bots
             .iter()
@@ -663,6 +668,7 @@ impl CoreProvider {
         role: Option<String>,
         character: Option<CharacterId>,
         runner: Option<RunnerSetup>,
+        owner_id: Option<String>,
     ) -> AdminReply<BotCreated> {
         let name = name.trim().to_string();
         if name.is_empty() {
@@ -675,7 +681,7 @@ impl CoreProvider {
             let http = client.http();
             let role = non_empty(role);
             let created = http
-                .create_bot(&name, role.as_deref(), character)
+                .create_bot(&name, role.as_deref(), character, owner_id.as_deref())
                 .await
                 .map_err(|e| api_error(&e))?;
             let member = convert::member(&created.member, false);
@@ -780,6 +786,7 @@ impl CoreProvider {
         name: String,
         labels: Vec<String>,
         personal: Option<bool>,
+        owner_id: Option<String>,
     ) -> AdminReply<MachineCreated> {
         let name = name.trim().to_string();
         if name.is_empty() {
@@ -795,6 +802,7 @@ impl CoreProvider {
                 name,
                 labels: (!labels.is_empty()).then_some(labels),
                 personal,
+                owner_id,
             };
             let r = client
                 .http()
@@ -821,6 +829,7 @@ impl CoreProvider {
         machine_id: &str,
         name: Option<String>,
         owner: Option<Option<String>>,
+        vm: Option<Option<crate::data::VmSize>>,
         parallel_runs: Option<Option<u32>>,
     ) -> AdminReply<MachineInfo> {
         let name = name.map(|n| n.trim().to_string());
@@ -829,9 +838,16 @@ impl CoreProvider {
         }
         let id = machine_id.to_string();
         self.request(move |client, _| async move {
+            let vm = vm.map(|v| {
+                v.map(|v| proto::machine::VmSize {
+                    vcpus: v.vcpus,
+                    mem_mib: v.mem_mib,
+                })
+            });
             let req = proto::UpdateMachineRequest {
                 name,
                 owner,
+                vm,
                 parallel_runs,
             };
             let m = client

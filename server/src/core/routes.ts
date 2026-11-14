@@ -3,6 +3,7 @@ import {
   AddGroupMemberRequest,
   BootstrapRequest,
   CreateBotRequest,
+  MAX_OWN_BOTS,
   CreateDmRequest,
   CreateGroupRequest,
   CreateInviteRequest,
@@ -406,27 +407,51 @@ export function registerCoreRoutes(): void {
   registerRoute({
     method: "POST",
     path: "/v1/bots",
-    auth: "owner",
+    // Usable (design-personal-ai): an admin makes any AI member; a person makes his own.
+    auth: "member",
     async handler({ env, auth, body, ctx }) {
       const req = await body(CreateBotRequest);
       const a = auth as AuthContext;
+      const admin = a.member.level === "owner";
+      let ownerId: string | null = null;
+      if (!admin) {
+        if (a.member.kind !== "human") throw new ApiError("forbidden", "only people have AI members of their own");
+        if (req.ownerId !== undefined && req.ownerId !== a.memberId) throw new ApiError("forbidden", "only an admin makes an AI member for someone else");
+        ownerId = a.memberId;
+      } else if (req.ownerId !== undefined) {
+        const owner = await getMember(env.DB, req.ownerId);
+        if (!owner || owner.kind !== "human" || owner.deactivated) throw new ApiError("invalid", "ownerId is not an active person");
+        ownerId = owner.id;
+      }
       const now = Date.now();
       const memberId = ulid(now);
       const tokenId = ulid(now);
       const token = newToken();
-      await env.DB.batch([
-        env.DB.prepare(
-          `INSERT INTO members (id, kind, name, role, level, created_at, created_by, character) VALUES (?, 'bot', ?, ?, 'member', ?, ?, ?)`,
-        ).bind(memberId, req.name, req.role ?? null, now, a.memberId, req.character ?? null),
-        env.DB.prepare(
-          "INSERT INTO tokens (id, token_hash, member_id, label, created_at) VALUES (?, ?, ?, 'bot', ?)",
-        ).bind(tokenId, await sha256Hex(token), memberId, now),
-        auditStatement(env.DB, a, {
-          action: "bot.create",
-          target: memberId,
-          details: { name: req.name, tokenId, ...(req.character ? { character: req.character } : {}) },
-        }, now),
-      ]);
+      // A member's limit is checked in the INSERT itself, so two requests at once cannot both pass.
+      const limit = admin ? -1 : MAX_OWN_BOTS;
+      const inserted = await env.DB.prepare(
+        `INSERT INTO members (id, kind, name, role, level, created_at, created_by, character, owner_id)
+         SELECT ?, 'bot', ?, ?, 'member', ?, ?, ?, ?
+         WHERE ? < 0 OR (SELECT COUNT(*) FROM members WHERE kind = 'bot' AND owner_id = ? AND deactivated = 0) < ?`,
+      )
+        .bind(memberId, req.name, req.role ?? null, now, a.memberId, req.character ?? null, ownerId, limit, ownerId, limit)
+        .run();
+      if (!inserted.meta.changes) throw new ApiError("forbidden", "you already have an AI member of your own", "bot.own_limit");
+      try {
+        await env.DB.batch([
+          env.DB.prepare(
+            "INSERT INTO tokens (id, token_hash, member_id, label, created_at) VALUES (?, ?, ?, 'bot', ?)",
+          ).bind(tokenId, await sha256Hex(token), memberId, now),
+          auditStatement(env.DB, a, {
+            action: "bot.create",
+            target: memberId,
+            details: { name: req.name, tokenId, ...(req.character ? { character: req.character } : {}), ...(ownerId ? { ownerId } : {}) },
+          }, now),
+        ]);
+      } catch (e) {
+        await env.DB.prepare("DELETE FROM members WHERE id = ?").bind(memberId).run();
+        throw e;
+      }
       const row = (await getMember(env.DB, memberId)) as MemberRow;
       const waitUntil = (p: Promise<unknown>) => ctx.waitUntil(p);
       await addToDefaultGroups(env, waitUntil, a, memberId);

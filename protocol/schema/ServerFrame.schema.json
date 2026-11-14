@@ -104,6 +104,10 @@
             "teamOwner": {
               "type": "boolean"
             },
+            "ownerId": {
+              "type": "string",
+              "minLength": 1
+            },
             "deleted": {
               "type": "boolean"
             }
@@ -207,6 +211,10 @@
               },
               "teamOwner": {
                 "type": "boolean"
+              },
+              "ownerId": {
+                "type": "string",
+                "minLength": 1
               },
               "deleted": {
                 "type": "boolean"
@@ -53129,6 +53137,10 @@
               },
               "teamOwner": {
                 "type": "boolean"
+              },
+              "ownerId": {
+                "type": "string",
+                "minLength": 1
               },
               "deleted": {
                 "type": "boolean"

@@ -1077,6 +1077,10 @@ RunEvent +=
 
 // server -> daemon
 run.assign += { github?: RunGithub }              // feature "github"
+run.assign += { vm?: { vcpus, memMib } }          // usable: the VM size an admin set for this machine;
+                                                  // a daemon with [vm] uses it for the run's VM, capped at
+                                                  // [vm] max_vcpus / max_mem_mib (default: the host's cores
+                                                  // and memory); absent = [vm] vcpus / mem_mib. Others ignore it.
 RunGithub = {
   source: "machine" | "app",     // the server sends only "machine" (the computer's own sign-in); "app" is no longer sent; unknown = "machine"
   memberId,                      // the person the run works for
@@ -1371,11 +1375,32 @@ prompt and reports `run.done.resumeMissed` (see run.assign). The CLIs' own memor
 or not (`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, Codex `-c features.memories=false`; see
 Environment): what a member remembers lives in the product, not in a `cli/` folder.
 
+**Size and slots.** `[vm]` keys:
+
+| key | default | what |
+| --- | --- | --- |
+| `vcpus`, `mem_mib` | 2, 4096 | the VM's size when `run.assign.vm` names none |
+| `max_vcpus`, `max_mem_mib` | the host's CPU count, total memory in MiB | the most `run.assign.vm` (the size an admin set for the machine) gets; a larger size is cut down to them. `max_vcpus` is 1–32, `max_mem_mib` at least 128 |
+| `slot_base` | 0 | the daemon's first VM slot: its VMs use slots `slot_base..slot_base+max_parallel_runs` (tap `rvm<slot>`, host `10.200.0.0/16` offset `4*slot` + 1, guest + 2); the range ends at or below 16384 |
+| `kernel`, `rootfs`, `dir`, `scratch_gb`, `firecracker`, `helper`, `shares` | | as in `daemon.toml` EXAMPLE |
+
+`daemon doctor` prints the slots and both sizes. **Several daemons on one host** (an admin gives
+members their own machine on the team's host): each runs as its own Unix user with its own
+machine token, `max_parallel_runs = 1`, a `slot_base` inside its range and `work_root` / `dir`
+under `/srv/runner/u/<user>` (a fixed-size disk image), sharing the read-only kernel and base
+image. `scripts/runner/host-setup.sh add-user <user> <first slot> <count> <disk GB>` makes all
+of it on the host and prints the daemon's config. The root helper `runner-vm` takes the caller
+from sudo (`SUDO_USER`, never an environment variable) and the caller's slots from
+`/etc/runner-vm.users` (`<user> <first slot> <count>`, root's, mode 644; the team user `runner`
+has `0 64`): an unlisted user or a slot outside its range is refused, and it exports only below
+the caller's home (not its dot folders) and `/srv/runner/u/<user>` (the team user: also
+`/srv/runner`, but not the other users' trees in `/srv/runner/u`).
+
 **Capacity.** Besides the run limit (`max_parallel_runs`, or `machine.limits`) and the free disk of `work_root`
 (`health.diskFreeBytes`), a VM host
-refuses a run (`run.reject`, `busy`) when `MemAvailable` does not cover `[vm].mem_mib` for the
-new VM and for each accepted VM that has not booted yet, above a reserve of a fifth of the
-memory (at least 2 GiB) for the running VMs to grow into.
+refuses a run (`run.reject`, `busy`) when `MemAvailable` does not cover the new run's VM memory (the
+size above) for it and for each accepted VM that has not booted yet,
+above a reserve of a fifth of the memory (at least 2 GiB) for the running VMs to grow into.
 
 The VMs reach the internet. A static nftables table (`scripts/runner/runner-vm.nft`) drops
 their traffic to the host (except NFS on the host address of their own tap), to private,

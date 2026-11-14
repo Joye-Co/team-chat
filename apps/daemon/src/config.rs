@@ -98,11 +98,24 @@ pub struct VmConfig {
     /// VM folders (sockets, scratch disks, console logs) and the tools disk.
     #[serde(default = "default_vm_dir")]
     pub dir: PathBuf,
+    /// The VM's size when the run does not name one (`run.assign.vm`).
     #[serde(default = "default_vm_vcpus")]
     pub vcpus: u32,
     /// The VM's memory cap; the host gives only the pages the VM touches.
     #[serde(default = "default_vm_mem_mib")]
     pub mem_mib: u32,
+    /// The most a run's own size (`run.assign.vm`, set by an admin per machine) may get.
+    /// Default: this host's CPU count.
+    #[serde(default)]
+    pub max_vcpus: Option<u32>,
+    /// Default: this host's total memory in MiB.
+    #[serde(default)]
+    pub max_mem_mib: Option<u32>,
+    /// This daemon's first VM slot: its VMs use slots `slot_base..slot_base +
+    /// max_parallel_runs` (tap `rvm<slot>`, addresses from the slot). Daemons of different
+    /// users on one host get ranges that do not overlap (`/etc/runner-vm.users`).
+    #[serde(default)]
+    pub slot_base: u32,
     /// Size of each run's writable layer (a sparse file).
     #[serde(default = "default_vm_scratch_gb")]
     pub scratch_gb: u32,
@@ -125,6 +138,64 @@ pub struct VmConfig {
     /// The size of those homes. Ignored; `daemon doctor` says so when it is set.
     #[serde(default)]
     pub home_gb: Option<u32>,
+}
+
+/// VM slots: 10.200.0.0/16 holds 16384 /30 networks.
+pub const VM_SLOTS: u32 = 16384;
+/// Firecracker's most vCPUs per VM.
+pub const VM_MAX_VCPUS: u32 = 32;
+
+impl VmConfig {
+    /// `max_vcpus`, or this host's CPU count.
+    pub fn max_vcpus(&self) -> u32 {
+        self.max_vcpus.unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|n| n.get() as u32)
+                .unwrap_or(1)
+        })
+    }
+
+    /// `max_mem_mib`, or this host's total memory in MiB (when it cannot be read: no cap
+    /// below the protocol's own).
+    pub fn max_mem_mib(&self) -> u32 {
+        self.max_mem_mib.unwrap_or_else(|| {
+            std::fs::read_to_string("/proc/meminfo")
+                .ok()
+                .and_then(|t| crate::metrics::parse_meminfo(&t))
+                .map(|(total, _)| u32::try_from(total >> 20).unwrap_or(u32::MAX))
+                .unwrap_or(u32::MAX)
+        })
+    }
+
+    /// The size of a run's VM (vCPUs, MiB): the run's own size capped at `max_*`, or
+    /// `vcpus` / `mem_mib` when it names none.
+    pub fn size(&self, asked: Option<crate::proto::VmSize>) -> (u32, u32) {
+        vm_size(
+            asked,
+            (self.vcpus, self.mem_mib),
+            (self.max_vcpus(), self.max_mem_mib()),
+        )
+    }
+
+    /// This daemon's VM slots.
+    pub fn slots(&self, max_parallel_runs: u32) -> std::ops::Range<u32> {
+        self.slot_base..self.slot_base.saturating_add(max_parallel_runs.max(1))
+    }
+}
+
+/// [`VmConfig::size`] with the host's limits given.
+pub fn vm_size(
+    asked: Option<crate::proto::VmSize>,
+    default: (u32, u32),
+    max: (u32, u32),
+) -> (u32, u32) {
+    match asked {
+        None => default,
+        Some(a) => (
+            a.vcpus.clamp(1, max.0.max(1)),
+            a.mem_mib.min(max.1).max(128),
+        ),
+    }
 }
 
 fn default_vm_dir() -> PathBuf {
@@ -410,6 +481,7 @@ impl Config {
             if self.max_parallel_runs > 1000 {
                 out.push("[vm] max_parallel_runs must be at most 1000".into());
             }
+            out.extend(vm_problems(vm, self.max_parallel_runs));
         }
         out
     }
@@ -435,6 +507,32 @@ impl Config {
         };
         format!("{base}/v1/machine/ws")
     }
+}
+
+/// The `[vm]` settings that cannot work, whatever the host has.
+pub fn vm_problems(vm: &VmConfig, max_parallel_runs: u32) -> Vec<String> {
+    let mut out = vec![];
+    if vm
+        .max_vcpus
+        .is_some_and(|n| !(1..=VM_MAX_VCPUS).contains(&n))
+    {
+        out.push(format!("[vm] max_vcpus must be 1 to {VM_MAX_VCPUS}"));
+    }
+    if vm.max_mem_mib.is_some_and(|n| n < 128) {
+        out.push("[vm] max_mem_mib must be at least 128".into());
+    }
+    if !(1..=VM_MAX_VCPUS).contains(&vm.vcpus) {
+        out.push(format!("[vm] vcpus must be 1 to {VM_MAX_VCPUS}"));
+    }
+    if vm.mem_mib < 128 {
+        out.push("[vm] mem_mib must be at least 128".into());
+    }
+    if u64::from(vm.slot_base) + u64::from(max_parallel_runs.max(1)) > u64::from(VM_SLOTS) {
+        out.push(format!(
+            "[vm] slot_base + max_parallel_runs must be at most {VM_SLOTS}"
+        ));
+    }
+    out
 }
 
 pub const EXAMPLE: &str = r#"# Machine daemon config
@@ -480,6 +578,11 @@ kind = "claude"
 # rootfs = "/srv/runner/images/base.ext4"
 # vcpus = 2
 # mem_mib = 4096                     # a cap; the host gives only what the VM touches
+#                                   # (vcpus and mem_mib: the size when the server sends none)
+# max_vcpus = 8                     # the most a size an admin sets for this machine may get
+# max_mem_mib = 16384               #   (run.assign.vm); default: this host's CPUs and memory
+# slot_base = 0                     # first VM slot (tap rvm<slot>); slots slot_base..+max_parallel_runs,
+#                                   # within this user's range in /etc/runner-vm.users
 "#;
 
 #[cfg(test)]
@@ -497,6 +600,62 @@ mod tests {
         assert_eq!(vm.home_gb, Some(20));
         assert_eq!(vm.homes, std::path::PathBuf::from("/srv/runner/homes"));
         assert!(!super::EXAMPLE.contains("home_gb"));
+    }
+
+    #[test]
+    fn a_runs_size_is_capped_at_the_hosts_max() {
+        use crate::proto::VmSize;
+        let size = |vcpus, mem_mib| Some(VmSize { vcpus, mem_mib });
+        // None: the configured size, even above the max.
+        assert_eq!(super::vm_size(None, (2, 4096), (1, 2048)), (2, 4096));
+        assert_eq!(
+            super::vm_size(size(4, 8192), (2, 4096), (8, 16384)),
+            (4, 8192)
+        );
+        assert_eq!(
+            super::vm_size(size(16, 65536), (2, 4096), (8, 16384)),
+            (8, 16384)
+        );
+        assert_eq!(
+            super::vm_size(size(1, 1024), (2, 4096), (8, 16384)),
+            (1, 1024)
+        );
+        // A max of 0 still gives the VM one vCPU.
+        assert_eq!(super::vm_size(size(4, 4096), (2, 4096), (0, 2048)).0, 1);
+        let base = "server_url = \"http://127.0.0.1:1\"\ntoken_file = \"/x\"\n[vm]\nkernel = \"/k\"\nrootfs = \"/r\"\n";
+        let vm = super::Config::parse(&format!("{base}max_vcpus = 3\nmax_mem_mib = 3000\n"))
+            .unwrap()
+            .vm
+            .unwrap();
+        assert_eq!(vm.size(size(16, 65536)), (3, 3000));
+        assert_eq!(vm.size(None), (2, 4096));
+        let vm = super::Config::parse(base).unwrap().vm.unwrap();
+        assert!(vm.max_vcpus() >= 1 && vm.max_mem_mib() >= 1);
+    }
+
+    #[test]
+    fn vm_limits_and_slots_are_checked() {
+        let parse = |extra: &str| {
+            super::Config::parse(&format!(
+                "server_url = \"http://127.0.0.1:1\"\ntoken_file = \"/x\"\n[vm]\nkernel = \"/k\"\nrootfs = \"/r\"\n{extra}"
+            ))
+            .unwrap()
+            .vm
+            .unwrap()
+        };
+        assert!(super::vm_problems(&parse(""), 12).is_empty());
+        let vm = parse("slot_base = 64\n");
+        assert_eq!(vm.slots(1), 64..65);
+        assert_eq!(parse("").slots(12), 0..12);
+        assert!(super::vm_problems(&vm, 1).is_empty());
+        assert!(super::vm_problems(&parse("slot_base = 16383\n"), 1).is_empty());
+        assert_eq!(
+            super::vm_problems(&parse("slot_base = 16383\n"), 2),
+            ["[vm] slot_base + max_parallel_runs must be at most 16384"]
+        );
+        assert_eq!(super::vm_problems(&parse("max_vcpus = 0\n"), 1).len(), 1);
+        assert_eq!(super::vm_problems(&parse("max_vcpus = 33\n"), 1).len(), 1);
+        assert_eq!(super::vm_problems(&parse("max_mem_mib = 64\n"), 1).len(), 1);
     }
 
     #[test]
