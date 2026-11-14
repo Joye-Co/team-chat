@@ -1,5 +1,6 @@
 //! The 产出 pane beside a 话题: the page live in the pane (the same child
-//! web view as the 产出 page), with its version and 在新窗口打开.
+//! web view as the 产出 page) or a Markdown document read in it, with its
+//! version and 在新窗口打开.
 
 use gpui::{
     Context, IntoElement, ParentElement, Pixels, Render, Styled, Subscription, Window, div, px,
@@ -68,8 +69,22 @@ impl Render for ArtifactPane {
         }
         // The page fills the pane under its header, on the pane's
         // background (§2.1), with the pane's 16 padding (§2.5).
-        let body = match self.folders.get(&self.services, &id, shown, cx) {
-            Some(Ok(folder)) if folder.is_page => embed(
+        let folder = self.folders.get(&self.services, &id, shown, cx);
+        // A Markdown document reads in the pane itself, with the same padding.
+        let reader = match &folder {
+            Some(Ok(f)) => crate::views::media::in_place::markdown(
+                "artifact-pane",
+                f,
+                &detail.summary.title,
+                crate::ui::native::tokens::layout::IN_THREAD,
+                space::S16,
+                cx,
+            ),
+            _ => None,
+        };
+        let body = match (folder, reader) {
+            (_, Some(doc)) => doc,
+            (Some(Ok(folder)), None) if folder.is_page => embed(
                 &self.services,
                 "artifact-pane",
                 &detail,
@@ -81,7 +96,7 @@ impl Render for ArtifactPane {
             .fill()
             .pad(space::S16)
             .into_any_element(),
-            Some(_) => {
+            (Some(_), None) => {
                 // Not a web page: a designed Empty with 打开 (§2.13), not a
                 // thumbnail floating in the middle of the pane.
                 let provider = self.services.provider.clone();
@@ -112,7 +127,7 @@ impl Render for ArtifactPane {
                 )
                 .into_any_element()
             }
-            None => div().size_full().into_any_element(),
+            (None, None) => div().size_full().into_any_element(),
         };
         let provider = self.services.provider.clone();
         let nav = self.services.nav.clone();
