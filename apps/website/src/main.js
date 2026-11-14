@@ -1,6 +1,14 @@
 // Scroll motion, the screenshot tours, the comparison tabs, the waitlist and the member builder. Plain DOM, no dependencies.
 (function(){
   var root=document.documentElement;
+  try{var savedTheme=localStorage.getItem("theme");if(savedTheme==="light"||savedTheme==="dark")root.dataset.theme=savedTheme;}catch(e){}
+  function curTheme(){if(root.dataset.theme==="light"||root.dataset.theme==="dark")return root.dataset.theme;return window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";}
+  var themeBtn=document.querySelector(".theme-btn");
+  if(themeBtn){themeBtn.setAttribute("aria-pressed",curTheme()==="dark"?"true":"false");
+    themeBtn.addEventListener("click",function(){var next=curTheme()==="dark"?"light":"dark";root.classList.add("theme-swap");root.dataset.theme=next;themeBtn.setAttribute("aria-pressed",next==="dark"?"true":"false");void root.offsetWidth;root.classList.remove("theme-swap");try{localStorage.setItem("theme",next);}catch(e){}});}
+  var nav=document.querySelector("nav"),navSc=null;
+  function syncNav(){if(!nav)return;var s=scrollY>12;if(s!==navSc){navSc=s;nav.classList.toggle("scrolled",s);}}
+  syncNav();addEventListener("scroll",syncNav,{passive:true});
   var reduce=window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;
   var io2="IntersectionObserver" in window;
   /* sliding pill behind the selected tab of a tab row */
@@ -66,10 +74,10 @@
   if(reduce||!io2)return;
   root.classList.add("motion");
   /* scroll reveal */
-  var groups=[[".center",0],[".chap-head>div",.12],[".trio>div",.1],[".chap .player",0],[".cmp .tabs",0],[".team",0],[".mem2 .txt>*",.06],[".mk",0],[".more3>div",.1],[".more4>div",.08],[".env",.08],[".split .shot",0],[".split .txt>*",.06],[".cta>*",.1]];
+  var groups=[[".center",0],[".chap-head>div",.06],[".trio>div",.06],[".chap .player",0],[".cmp .tabs",0],[".team",0],[".mem2 .txt>*",.05],[".mk",0],[".more3>div",.06],[".more4>div",.05],[".env",.05],[".split .shot",0],[".split .txt>*",.05],[".cta-box",0]];
   var els=[];
   groups.forEach(function(g){var list=[].slice.call(document.querySelectorAll(g[0]));list.forEach(function(el,i){if(el.classList.contains("rv"))return;el.classList.add("rv");var sib=el.parentElement?[].indexOf.call(el.parentElement.children,el):i;el.style.setProperty("--dl",(Math.min(sib,6)*g[1])+"s");els.push(el);});});
-  var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add("in");io.unobserve(e.target);}});},{rootMargin:"0px 0px -12% 0px",threshold:.08});
+  var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add("in");io.unobserve(e.target);}});},{rootMargin:"0px 0px -4% 0px",threshold:.02});
   els.concat([].slice.call(document.querySelectorAll(".windows,.cmp"))).forEach(function(el){io.observe(el);});
   /* safety: never leave content hidden */
   setTimeout(function(){var h=innerHeight;els.forEach(function(el){if(el.getBoundingClientRect().top<h)el.classList.add("in");});},1200);
@@ -101,16 +109,16 @@ var EN=document.documentElement.lang==="en";
 /* build a member: the chips on the left drive the member card on the right */
 (function(){
   var mk=document.querySelector(".mk");if(!mk)return;
-  var P={forge:["Forge","开发","Claude","Claude Code",["GitHub","数据库"]],tata:["Tata","产品","GPT","Codex",["Notion","日历"]],nova:["Nova","增长","DeepSeek","你自己的",["Gmail","自定义 connector"]],watch:["Watch","运维","Gemini","Claude Code",["GitHub","数据库","日历"]]};
-  if(EN)P={forge:["Forge","Engineering","Claude","Claude Code",["GitHub","Database"]],tata:["Tata","Product","GPT","Codex",["Notion","Calendar"]],nova:["Nova","Growth","DeepSeek","Your own",["Gmail","Custom connector"]],watch:["Watch","Ops","Gemini","Claude Code",["GitHub","Database","Calendar"]]};
+  var P={forge:["Forge","开发","Claude","Claude Code",["GitHub","数据库"]],tata:["Tata","产品","GPT","Codex",["Notion","日历"]],nova:["Nova","增长","DeepSeek","ACP / 自定义",["Gmail","自定义 connector"]],watch:["Watch","运维","Gemini","Claude Code",["GitHub","数据库","日历"]]};
+  if(EN)P={forge:["Forge","Engineering","Claude","Claude Code",["GitHub","Database"]],tata:["Tata","Product","GPT","Codex",["Notion","Calendar"]],nova:["Nova","Growth","DeepSeek","Custom ACP",["Gmail","Custom connector"]],watch:["Watch","Ops","Gemini","Claude Code",["GitHub","Database","Calendar"]]};
   var cur=P.forge,pres=[].slice.call(mk.querySelectorAll(".pre"));
   function $(id){return document.getElementById(id);}
   function opts(g){return [].slice.call(mk.querySelectorAll('[data-g="'+g+'"] .opt'));}
   function on(g){return opts(g).filter(function(b){return b.getAttribute("aria-pressed")==="true";}).map(function(b){return b.dataset.v;});}
   function put(id,t){var el=$(id);if(el.textContent===t)return;el.textContent=t;el.classList.remove("tick");void el.offsetWidth;el.classList.add("tick");}
   function render(){var m=on("m")[0],h=on("h")[0],t=on("t");put("mk-av",cur[0].charAt(0));put("mk-n",cur[0]);put("mk-role",cur[1]);put("mk-m",m);put("mk-h",h);put("mk-t",t.length?t.join(EN?", ":"、"):(EN?"None yet":"还没选"));
-    if(EN){put("mk-s",cur[0]+" runs "+m+" on "+(h==="Your own"?"your own harness":h)+(t.length?", with access to "+(t.length>1?t.slice(0,-1).join(", ")+(t.length>2?",":"")+" and "+t[t.length-1]:t[0]):"")+".");return;}
-    var text=cur[0]+" 用 "+m+" 跑在"+(h==="你自己的"?"你自己的 harness":h)+"上"+(t.length?"，能用"+(t.length>1?t.slice(0,-1).join("、")+"和"+t[t.length-1]:t[0]):"")+"。";
+    if(EN){put("mk-s",cur[0]+" runs "+m+" on "+(h==="Custom ACP"?"a custom ACP harness":h)+(t.length?", with access to "+(t.length>1?t.slice(0,-1).join(", ")+(t.length>2?",":"")+" and "+t[t.length-1]:t[0]):"")+".");return;}
+    var text=cur[0]+" 用 "+m+" 跑在"+(h==="ACP / 自定义"?"自定义 ACP harness":h)+"上"+(t.length?"，能用"+(t.length>1?t.slice(0,-1).join("、")+"和"+t[t.length-1]:t[0]):"")+"。";
     /* a space between Chinese and Latin text, none before punctuation */
     put("mk-s",text.replace(/([\u4e00-\u9fff])([A-Za-z])/g,"$1 $2").replace(/([A-Za-z])([\u4e00-\u9fff])/g,"$1 $2"));}
   function set(g,vals){opts(g).forEach(function(b){b.setAttribute("aria-pressed",vals.indexOf(b.dataset.v)>=0?"true":"false");});}
