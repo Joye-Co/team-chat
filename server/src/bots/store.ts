@@ -59,13 +59,15 @@ export interface MachineRow {
   last_seen_at: number | null;
   /** Usable (migration 0017_machine_owner): the person whose own machine it is; NULL = a team machine. */
   owner_id?: string | null;
+  /** Migration 0021_machine_limits: how many runs at once, set in the app; NULL = the daemon's own. */
+  parallel_runs?: number | null;
 }
 
 /** D1 rows joined with each link's live status. */
 export async function loadMachineViews(env: Env, opts: { includeRevoked?: boolean } = {}) {
   const [rows, checked] = await Promise.all([
     env.DB.prepare(
-      `SELECT id, name, labels, created_by, created_at, revoked_at, last_seen_at, owner_id FROM machines
+      `SELECT id, name, labels, created_by, created_at, revoked_at, last_seen_at, owner_id, parallel_runs FROM machines
        ${opts.includeRevoked ? "" : "WHERE revoked_at IS NULL"} ORDER BY created_at, id`,
     ).all<MachineRow>(),
     env.DB.prepare("SELECT machine_id, bot_id, repo_path FROM machine_bots ORDER BY created_at, bot_id").all<{
@@ -91,6 +93,7 @@ export async function loadMachineViews(env: Env, opts: { includeRevoked?: boolea
         connected: false,
         runningRuns: [],
       };
+      if (row.parallel_runs) base.parallelRuns = row.parallel_runs;
       if (row.owner_id) {
         base.ownerId = row.owner_id;
         base.personalBots = checkedBots.get(row.id) ?? new Map();
@@ -136,6 +139,8 @@ export interface ManagedMachine {
   name: string;
   owner_id: string | null;
   revoked_at: number | null;
+  /** Migration 0021_machine_limits. */
+  parallel_runs: number | null;
 }
 
 /**
@@ -149,7 +154,7 @@ export async function requireMachineManager(
   opts: { includeRevoked?: boolean } = {},
 ): Promise<ManagedMachine> {
   const row = await db
-    .prepare("SELECT id, name, owner_id, revoked_at FROM machines WHERE id = ?")
+    .prepare("SELECT id, name, owner_id, revoked_at, parallel_runs FROM machines WHERE id = ?")
     .bind(machineId)
     .first<ManagedMachine>();
   if (!row || (row.revoked_at !== null && !opts.includeRevoked)) throw new ApiError("not_found", "machine not found");

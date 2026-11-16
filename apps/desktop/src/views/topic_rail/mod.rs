@@ -21,8 +21,8 @@ use crate::{
         v2::{ArtifactPreview, Currency, Decision, Proof, TopicChanges, TopicCost},
     },
     theme::{self, Type as _, space},
-    ui::{self, Sym, native::NativeType as _},
-    views::shell::{PaneView, panes::watch, stub_body},
+    ui::{self, native::NativeType as _},
+    views::shell::{PaneView, panes::watch},
 };
 
 /// What the rail of one 话题 shows, read from the provider once per change
@@ -637,9 +637,14 @@ impl Render for TopicRail {
     }
 }
 
-/// The 改动 pane (the PR of the 话题). Foundation stub.
+/// The 改动 pane (the PR of the 话题): its summary and its files with their patches.
 pub struct ChangesPane {
     services: Services,
+    /// The files whose patch shows, for the 话题 in `open_for`.
+    open: std::collections::HashSet<String>,
+    open_for: Option<(String, String)>,
+    /// The first patch was opened for this 话题 (once its diff was read).
+    opened_first: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -648,6 +653,9 @@ impl ChangesPane {
         Self {
             _subscriptions: watch(&services, cx),
             services,
+            open: Default::default(),
+            open_for: None,
+            opened_first: false,
         }
     }
 }
@@ -660,20 +668,34 @@ impl PaneView for ChangesPane {
 
 impl Render for ChangesPane {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let changes = self
-            .services
-            .nav
-            .read(cx)
-            .topic
-            .clone()
-            .and_then(|(g, t)| self.services.provider.topic_changes(&g, &t));
-        let line = changes.map(|ch| {
-            format!(
-                "#{} {} · +{} −{}",
-                ch.number, ch.title, ch.additions, ch.deletions
-            )
+        let topic = self.services.nav.read(cx).topic.clone();
+        let p = &self.services.provider;
+        let changes = topic.as_ref().and_then(|(g, t)| p.topic_changes(g, t));
+        let diff = topic.as_ref().and_then(|(g, t)| p.topic_diff(g, t));
+        if self.open_for != topic {
+            self.open_for = topic;
+            self.open.clear();
+            self.opened_first = false;
+        }
+        // The first file with a patch shows open, once the diff is read.
+        if !self.opened_first
+            && let Some(crate::data::v2::TopicDiff::Ready(f)) = &diff
+        {
+            self.opened_first = true;
+            if let Some(first) = f.files.iter().find(|f| f.patch.is_some()) {
+                self.open.insert(first.path.clone());
+            }
+        }
+        let this = cx.entity().downgrade();
+        let toggle: native::ToggleFile = Rc::new(move |path: String, cx: &mut App| {
+            let _ = this.update(cx, |pane, cx| {
+                if !pane.open.remove(&path) {
+                    pane.open.insert(path);
+                }
+                cx.notify();
+            });
         });
-        stub_body(Sym::PullRequest, c::TITLE_CHANGES, line, cx)
+        native::changes_pane_body(changes, diff, &self.open, toggle, cx)
     }
 }
 

@@ -73,6 +73,15 @@ const REPORT_PAGE: &str = r#"<!doctype html><html><head><meta charset="utf-8"><t
 </body></html>"#;
 
 /// Makes the provider under `root` (emptied first). `now` is the time the 话题 ends at.
+/// The diff of the seeded PR, as a run's computer sends it up (`PrDiff` JSON).
+pub const PR_DIFF: &str = r#"{"files":[
+{"path":"crates/chat-core/src/sync.rs","status":"modified","additions":18,"deletions":6,"patch":"@@ -112,12 +112,24 @@ impl Sync {\n     /// Sends what the server has not acknowledged.\n     pub fn resend(&mut self) {\n-        for m in self.pending.drain(..) {\n-            self.send(m);\n-        }\n+        // Resume after the last seq the server acknowledged; drop what it already has.\n+        let from = self.last_acked;\n+        self.pending.retain(|m| m.seq > from);\n+        for m in &self.pending {\n+            self.send(m.clone());\n+        }\n     }\n \n     pub fn on_ack(&mut self, seq: u64) {\n-        self.last_acked = seq;\n+        self.last_acked = self.last_acked.max(seq);\n+        self.seen.insert(seq);\n     }"},
+{"path":"crates/chat-core/src/store/messages.rs","status":"modified","additions":9,"deletions":2,"patch":"@@ -40,7 +40,14 @@ pub fn insert(&self, m: &Message) -> Result<()> {\n-    self.db.execute(INSERT, params![m.id, m.seq, m.body])?;\n+    // A message seen twice after a reconnect is stored once.\n+    self.db.execute(\n+        \"INSERT INTO messages (id, seq, body) VALUES (?1, ?2, ?3) ON CONFLICT(id) DO NOTHING\",\n+        params![m.id, m.seq, m.body],\n+    )?;\n     Ok(())\n }"},
+{"path":"crates/chat-core/tests/reconnect.rs","status":"added","additions":46,"deletions":0,"patch":"@@ -0,0 +1,12 @@\n+//! A reconnect in the middle of a send never shows a message twice.\n+\n+#[test]\n+fn a_message_sent_before_a_reconnect_shows_once() {\n+    let mut s = Sync::new();\n+    s.send(msg(1));\n+    s.disconnect();\n+    s.on_ack(1);\n+    s.resend();\n+    assert_eq!(s.pending.len(), 0);\n+}"},
+{"path":"docs/sync.md","previousPath":"docs/resend.md","status":"renamed","additions":4,"deletions":1,"patch":"@@ -3,3 +3,6 @@\n-Clients resend every pending message after a reconnect.\n+Clients resend only the messages after the last seq the server acknowledged.\n+The server drops a message id it already stored."},
+{"path":"apps/desktop/assets/reconnect.png","status":"added","additions":0,"deletions":0}
+],"truncated":true}"#;
+
 pub fn seeded(root: &Path, now: u64) -> Arc<CoreProvider> {
     let _ = std::fs::remove_dir_all(root);
     let provider = CoreProvider::new(ProviderConfig {
@@ -162,6 +171,12 @@ pub fn seeded(root: &Path, now: u64) -> Arc<CoreProvider> {
         additions: Some(214),
         deletions: Some(63),
         changed_files: Some(12),
+        diff: Some(proto::PrDiffRef {
+            file_id: "01SEEDDIFF".into(),
+            name: "pr-61.diff.json".into(),
+            size: PR_DIFF.len() as u64,
+            sha256: pr_diff_sha(),
+        }),
     });
     let record_ask = json!({
         "v": 2, "rev": 1, "intent": "ask", "title": "重试间隔怎么改？", "fallback": "重试间隔怎么改？",
@@ -355,6 +370,19 @@ pub fn seeded(root: &Path, now: u64) -> Arc<CoreProvider> {
         let _ = std::fs::write(std::path::PathBuf::from(marker), b"");
     }
 
+    // The PR's diff is in the file cache, as after the 改动 pane read it once.
+    let files = client.config().files_dir().join(pr_diff_sha());
+    if std::fs::create_dir_all(&files).is_ok() {
+        let path = files.join("pr-61.diff.json");
+        if std::fs::write(&path, PR_DIFF).is_ok() {
+            let _ = store.file_cache_put(
+                &pr_diff_sha(),
+                &path.to_string_lossy(),
+                PR_DIFF.len() as u64,
+            );
+        }
+    }
+
     provider.install(SavedSession::new(SERVER, me), client, dir);
     provider.state().connection = Some(ConnectionState::Online);
     provider
@@ -479,3 +507,11 @@ mod tests {
 // desktop-data: the page aggregates on the seeded cache (成员, 首页, 群, 产出).
 #[cfg(test)]
 mod data_tests;
+
+fn pr_diff_sha() -> String {
+    use sha2::Digest as _;
+    sha2::Sha256::digest(PR_DIFF.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}

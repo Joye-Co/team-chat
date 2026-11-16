@@ -1559,6 +1559,7 @@ async fn machine_ownership_requests_reach_the_server_as_written() {
             &UpdateMachineRequest {
                 name: Some("书房的 Mac".into()),
                 owner: None,
+                parallel_runs: None,
             },
         )
         .await
@@ -1570,6 +1571,7 @@ async fn machine_ownership_requests_reach_the_server_as_written() {
         &UpdateMachineRequest {
             name: None,
             owner: Some(None),
+            parallel_runs: None,
         },
     )
     .await
@@ -1579,6 +1581,7 @@ async fn machine_ownership_requests_reach_the_server_as_written() {
         &UpdateMachineRequest {
             name: None,
             owner: Some(Some(MACHINE_OWNER_ME.into())),
+            parallel_runs: None,
         },
     )
     .await

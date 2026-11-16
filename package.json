@@ -18,6 +18,6 @@
     "test:server": "bun run --cwd server test",
     "typecheck:server": "bun run --cwd server typecheck",
     "admin": "bun server/scripts/admin.ts",
-    "prepare": "git config core.hooksPath .githooks || true"
+    "prepare": "bash scripts/hooks-path.sh || true"
   }
 }

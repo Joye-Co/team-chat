@@ -144,6 +144,8 @@ export interface LinkStatus {
   limited?: LimitedRuntime[];
   /** design-github-identity 3.6: the GitHub sign-in of the latest heartbeat. */
   github?: GithubState;
+  /** How many runs it may do at once as set in the app (`machines.parallel_runs`); absent = the daemon's own. */
+  parallelRuns?: number;
 }
 
 /** How long a run that failed to sign in keeps its runtime signed out without a heartbeat saying so. */
@@ -716,6 +718,10 @@ export class MachineLink extends DurableObject<BotsEnv> {
     });
     att.ready = true;
     ws.serializeAttachment(att);
+    // Feature "limits": the number set in the app, before any assign; then D1's, in case it
+    // changed while this link was asleep.
+    this.sendLimits(ws);
+    this.ctx.waitUntil(this.refreshLimits());
     this.backOnline(now);
     this.heldMachine(true);
     // Assigns that got no answer yet, then queued inputs, approvals and cancels.
@@ -1049,7 +1055,9 @@ export class MachineLink extends DurableObject<BotsEnv> {
     const signedOut = signedOutRuntimes(metrics?.logins, at, this.signedOutMarks(), Date.now());
     const limited = limitedRuntimes(this.limitMarks(), Date.now());
     const github = parse<GithubState>("github");
+    const parallelRuns = this.parallelRuns();
     return {
+      ...(parallelRuns !== null ? { parallelRuns } : {}),
       ...(signedOut.length > 0 ? { signedOut } : {}),
       ...(limited.length > 0 ? { limited } : {}),
       ...(github ? { github } : {}),
@@ -1121,6 +1129,40 @@ export class MachineLink extends DurableObject<BotsEnv> {
   /** 机 4.3: the connected daemon keeps `secret.set.ask` (feature "ask-keys"). */
   async hasAskKeys(): Promise<boolean> {
     return this.socket() !== null && this.hasFeature("ask-keys");
+  }
+
+  /** The run limit set in the app as this link last heard it; null = the daemon's own. */
+  private parallelRuns(): number | null {
+    const v = this.meta("parallel_runs");
+    return v ? Number(v) : null;
+  }
+
+  /** Feature "limits": tells the daemon how many runs it may do at once. */
+  private sendLimits(ws: WebSocket): void {
+    if (!this.hasFeature("limits")) return;
+    const n = this.parallelRuns();
+    this.send(ws, n === null ? { t: "machine.limits" } : { t: "machine.limits", maxParallelRuns: n });
+  }
+
+  private async refreshLimits(): Promise<void> {
+    if (!this.machineId) return;
+    try {
+      const row = await this.env.DB.prepare("SELECT parallel_runs FROM machines WHERE id = ?")
+        .bind(this.machineId)
+        .first<{ parallel_runs: number | null }>();
+      if (row) await this.setLimits(row.parallel_runs ?? null);
+    } catch (err) {
+      this.log.warn("run limit read failed", { err });
+    }
+  }
+
+  /** `PATCH /v1/machines/:id` set how many runs it may do at once; the daemon hears it now when connected. */
+  async setLimits(parallelRuns: number | null): Promise<void> {
+    if (parallelRuns === this.parallelRuns()) return;
+    if (parallelRuns === null) this.sql.exec("DELETE FROM meta WHERE key = 'parallel_runs'");
+    else this.setMeta("parallel_runs", String(parallelRuns));
+    const ws = this.socket();
+    if (ws) this.sendLimits(ws);
   }
 
   /** Usable, feature "homes": sends `home.clear` now (never queued), or why it cannot. */

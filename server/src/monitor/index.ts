@@ -11,6 +11,7 @@ import {
   type MonitorRun,
 } from "@chat/protocol";
 import { linkStub, deskStub } from "../bots/env";
+import { runLimit } from "../bots/dispatch";
 import { requireMachineManager } from "../bots/store";
 import type { AuthContext } from "../core/auth";
 import { ApiError } from "../core/errors";
@@ -98,7 +99,7 @@ export function buildMonitor(input: {
   const memVmBytes = onMachine.reduce((s, r) => s + (r.memBytes ?? 0), 0);
   const withMem = onMachine.filter((r) => r.memBytes !== undefined && r.memBytes > 0);
   const avgVmBytes = withMem.length ? Math.round(memVmBytes / withMem.length) : undefined;
-  const slots = metrics?.vmSlots ?? info?.maxParallelRuns ?? 0;
+  const slots = metrics?.vmSlots ?? (info ? runLimit({ info, parallelRuns: status?.parallelRuns }) : 0);
   const running = metrics ? onMachine.length : Math.max(onMachine.length, health?.activeRuns ?? 0);
 
   const today = { finished: 0, succeeded: 0, failed: 0, finishedYesterday: 0, tokens: 0 };

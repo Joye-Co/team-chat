@@ -44,6 +44,8 @@ export interface PrRef {
   repo: string;
   number: number;
   state?: string;
+  /** The topic's whole `topic.linked` link of this pull request, when it has one. */
+  link?: Record<string, unknown>;
 }
 
 export interface ArtifactProof {
@@ -310,7 +312,7 @@ registerRoomRpc("bots.runProof", (room, actor, args): RunProof => {
     const link = (JSON.parse(l.data) as { link?: { kind?: string; url?: string; repo?: string; number?: number; state?: string } }).link;
     if (link?.kind !== "pr" || !link.url || !link.repo || !link.number || seen.has(link.url)) continue;
     seen.add(link.url);
-    prs.push({ url: link.url, repo: link.repo, number: link.number, ...(link.state ? { state: link.state } : {}) });
+    prs.push({ url: link.url, repo: link.repo, number: link.number, ...(link.state ? { state: link.state } : {}), link });
   }
   return { prs: prs.slice(0, MAX_PRS), artifacts: artifacts.slice(0, MAX_ARTIFACTS) };
 });

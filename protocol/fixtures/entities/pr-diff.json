@@ -1,0 +1,29 @@
+{
+  "kind": "PrDiff",
+  "valid": true,
+  "description": "a binary file and a rename without a patch",
+  "value": {
+    "files": [
+      {
+        "path": "crates/core/src/sync.rs",
+        "status": "modified",
+        "additions": 3,
+        "deletions": 1,
+        "patch": "@@ -10,4 +10,6 @@ fn resend()\n     let seq = last_acked();\n-    send_all();\n+    // Resend only what the server has not seen.\n+    send_after(seq);\n+    dedupe(seq);\n"
+      },
+      {
+        "path": "docs/sync.md",
+        "previousPath": "docs/resend.md",
+        "status": "renamed",
+        "additions": 0,
+        "deletions": 0
+      },
+      {
+        "path": "assets/logo.png",
+        "status": "added",
+        "additions": 0,
+        "deletions": 0
+      }
+    ]
+  }
+}

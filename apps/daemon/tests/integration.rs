@@ -1005,6 +1005,7 @@ async fn pause_resume_answer_acceptance_and_aside() {
                         "github-host",
                         "takeover",
                         "sign-in-confirmed",
+                        "limits",
                         "accounts",
                         "ask-keys"
                     ]
@@ -1710,6 +1711,83 @@ async fn the_heartbeat_says_when_a_runs_tools_are_working() {
     .await;
     collect(&mut ws, "b1", true, |f| matches!(f, Up::RunDone(_))).await;
 
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+/// Feature "limits": the app's number of runs at once wins over the config's (3), until the
+/// server sends none again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_app_sets_how_many_runs_go_at_once() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let cfg = write_config(tmp.path(), &m.url);
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    match next(&mut ws).await {
+        Up::Hello { machine, .. } => {
+            assert!(
+                machine
+                    .features
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|f| f == "limits")
+            );
+        }
+        f => panic!("{f:?}"),
+    }
+    send(&mut ws, &welcome(vec![])).await;
+    send(
+        &mut ws,
+        &Down::MachineLimits {
+            max_parallel_runs: Some(1),
+        },
+    )
+    .await;
+
+    send(&mut ws, &assign("l1", "fake", "hang", None)).await;
+    wait_file(&work_of(tmp.path(), "l1").join("fake.pid")).await;
+    send(&mut ws, &assign("l2", "fake", "hang", None)).await;
+    let frames = collect(&mut ws, "l2", false, |f| {
+        matches!(f, Up::RunReject { .. } | Up::RunAccept { .. })
+    })
+    .await;
+    assert!(
+        frames
+            .iter()
+            .any(|f| matches!(f, Up::RunReject { reason, .. } if reason == "busy")),
+        "{frames:?}"
+    );
+
+    // Back to the config's 3: a second run goes.
+    send(
+        &mut ws,
+        &Down::MachineLimits {
+            max_parallel_runs: None,
+        },
+    )
+    .await;
+    send(&mut ws, &assign("l3", "fake", "hang", None)).await;
+    wait_file(&work_of(tmp.path(), "l3").join("fake.pid")).await;
+
+    for run in ["l1", "l3"] {
+        send(
+            &mut ws,
+            &Down::RunCancel {
+                run_id: run.into(),
+                reason: None,
+            },
+        )
+        .await;
+        collect(&mut ws, run, true, |f| matches!(f, Up::RunDone(_))).await;
+    }
     stop_tx.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(20), daemon)
         .await

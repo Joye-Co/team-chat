@@ -620,6 +620,17 @@ impl FakeProvider {
         })
     }
 
+    pub(super) fn set_machine_parallel_runs_fake(
+        &self,
+        id: &str,
+        parallel_runs: Option<u32>,
+    ) -> AdminReply<MachineInfo> {
+        self.change_machine(id, |m, _| {
+            m.parallel_runs = parallel_runs;
+            Ok(())
+        })
+    }
+
     pub(super) fn set_machine_owner_fake(&self, id: &str, mine: bool) -> AdminReply<MachineInfo> {
         self.change_machine(id, |m, admin| {
             if !admin {

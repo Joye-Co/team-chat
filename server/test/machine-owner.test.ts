@@ -202,6 +202,41 @@ describe("personal and team machines", () => {
     expect(acts.results.map((r) => JSON.parse(r.details))).toEqual([{ owner: null }, { owner: "me" }]);
   });
 
+  it("sets how many runs a machine does at once and tells its daemon", async () => {
+    const { admin, alice } = await team();
+    const add = await addMachine(admin, { name: "linux" });
+    const id = add.body.machine.id as string;
+    const { d } = await Daemon.connect(add.body.token, { features: ["limits"], maxParallelRuns: 2 });
+    // Nothing set yet: the daemon keeps its own number.
+    expect(await d.next((f) => f.t === "machine.limits")).toEqual({ t: "machine.limits" });
+    const set = await api(`/v1/machines/${id}`, { method: "PATCH", token: admin.token, body: { parallelRuns: 5 } });
+    expect(set.status, JSON.stringify(set.body)).toBe(200);
+    expect(Machine.parse(set.body)).toMatchObject({ maxParallelRuns: 2, parallelRuns: 5 });
+    expect(await d.next((f) => f.t === "machine.limits" && f.maxParallelRuns === 5)).toBeTruthy();
+    // Only whoever manages the machine; 1..100.
+    expect((await api(`/v1/machines/${id}`, { method: "PATCH", token: alice.token, body: { parallelRuns: 3 } })).status).toBe(403);
+    expect((await api(`/v1/machines/${id}`, { method: "PATCH", token: admin.token, body: { parallelRuns: 0 } })).status).toBe(400);
+    expect((await api(`/v1/machines/${id}`, { method: "PATCH", token: admin.token, body: { parallelRuns: 101 } })).status).toBe(400);
+    d.close();
+    // A daemon that connects again hears the number right after welcome.
+    const again = await Daemon.connect(add.body.token, { features: ["limits"] });
+    expect(await again.d.next((f) => f.t === "machine.limits")).toEqual({ t: "machine.limits", maxParallelRuns: 5 });
+    // null goes back to the daemon's own number.
+    const clear = await api(`/v1/machines/${id}`, { method: "PATCH", token: admin.token, body: { parallelRuns: null } });
+    expect(clear.body.parallelRuns).toBeUndefined();
+    await again.d.next((f) => f.t === "machine.limits" && f.maxParallelRuns === undefined && again.d.frames.filter((x: any) => x.t === "machine.limits").length === 2);
+    again.d.close();
+    // A daemon without the feature gets no frame.
+    const old = await Daemon.connect(add.body.token);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(old.d.frames.some((f: any) => f.t === "machine.limits")).toBe(false);
+    old.d.close();
+    const acts = await env.DB.prepare("SELECT details FROM activity WHERE machine_id = ? AND action = 'machine.update' ORDER BY id")
+      .bind(id)
+      .all<{ details: string }>();
+    expect(acts.results.map((r) => JSON.parse(r.details))).toEqual([{ parallelRuns: 5 }, { parallelRuns: null }]);
+  });
+
   it("lets only one of two concurrent ownership changes win", async () => {
     const { admin, admin2 } = await team();
     const teamId = (await addMachine(admin, { name: "linux" })).body.machine.id as string;

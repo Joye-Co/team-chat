@@ -728,6 +728,9 @@ fn machine_facts(m: &MachineInfo, now: chrono::DateTime<chrono::Local>) -> Strin
         Some(at) if at > 0 => fill(s::MACHINE_SEEN, &[("when", &relative_time(at, now))]),
         _ => s::MACHINE_NEVER_ONLINE.to_string(),
     });
+    if let Some(n) = m.run_limit() {
+        facts.push(fill(s::MACHINE_PARALLEL_FACT, &[("n", &n.to_string())]));
+    }
     if let Some(v) = &m.version {
         facts.push(fill(s::MACHINE_VERSION, &[("v", v)]));
     }

@@ -58,7 +58,8 @@ struct MyPress {
 
 enum Image {
     Loading,
-    Ready(PathBuf),
+    /// The local copy and the file's record (name, size, size in pixels, hash).
+    Ready(PathBuf, Box<proto::FileRef>),
     Failed,
 }
 
@@ -282,7 +283,7 @@ impl CardCache {
         {
             let mut images = lock(&self.images);
             match images.get(file_id) {
-                Some(Image::Ready(path)) => return Some(path.clone()),
+                Some(Image::Ready(path, _)) => return Some(path.clone()),
                 Some(Image::Loading | Image::Failed) => return None,
                 None => {}
             }
@@ -292,7 +293,7 @@ impl CardCache {
         let (c, id, images) = (client.clone(), file_id.to_string(), self.images.clone());
         client.spawn(async move {
             let image = match load_image(&c, &id).await {
-                Ok(path) => Image::Ready(path),
+                Ok((path, file)) => Image::Ready(path, Box::new(file)),
                 Err(reason) => {
                     tracing::info!(reason, "card image not loaded");
                     Image::Failed
@@ -303,11 +304,23 @@ impl CardCache {
         });
         None
     }
+
+    /// The record of a card image once its local copy is there ([`Self::image`]), for the
+    /// image viewer.
+    pub fn image_file(&self, file_id: &str) -> Option<proto::FileRef> {
+        match lock(&self.images).get(file_id) {
+            Some(Image::Ready(_, file)) => Some(file.as_ref().clone()),
+            _ => None,
+        }
+    }
 }
 
 /// Fetches the file record, checks that it is a ready image of a sane size,
 /// and downloads it into the file cache (or finds it there).
-async fn load_image(client: &Client, file_id: &str) -> Result<PathBuf, &'static str> {
+async fn load_image(
+    client: &Client,
+    file_id: &str,
+) -> Result<(PathBuf, proto::FileRef), &'static str> {
     let meta = client
         .http()
         .file_meta(file_id)
@@ -319,15 +332,23 @@ async fn load_image(client: &Client, file_id: &str) -> Result<PathBuf, &'static 
     {
         return Err("not a ready image");
     }
-    let file = meta.to_file_ref();
-    if let Some(path) = client.cached_file(&file) {
-        return Ok(path);
+    let mut file = meta.to_file_ref();
+    let path = match client.cached_file(&file) {
+        Some(path) => path,
+        None => client
+            .download_file(file.clone(), chat_core::no_progress())
+            .await
+            .map_err(|_| "download task")?
+            .map_err(|_| "download")?,
+    };
+    // A file a member uploads may carry no size in pixels; the image viewer zooms by it.
+    if (file.width.is_none() || file.height.is_none())
+        && let Ok((w, h)) = image::image_dimensions(&path)
+    {
+        file.width = Some(w);
+        file.height = Some(h);
     }
-    client
-        .download_file(file, chat_core::no_progress())
-        .await
-        .map_err(|_| "download task")?
-        .map_err(|_| "download")
+    Ok((path, file))
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {

@@ -37,6 +37,9 @@ use tokio::sync::{mpsc, watch};
 pub const GUEST_PATH: &str = "/opt/runner/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/rust/cargo/bin";
 /// The `chat-run` socket in the VM (relayed to the run's socket on the host).
 pub const GUEST_CHAT_RUN_SOCKET: &str = "/run/chat-run.sock";
+/// The most VMs at once (`[vm] max_parallel_runs` is at most this too).
+const MAX_SLOTS: usize = 1000;
+
 /// How long a VM may take from start to a connected agent.
 const BOOT_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -66,9 +69,19 @@ impl Firecracker {
         }
     }
 
+    /// A free VM slot (its tap device and addresses). The daemon decides how many runs it takes
+    /// (the config's `max_parallel_runs`, or the app's `machine.limits`), so the slots grow up to
+    /// [`MAX_SLOTS`] when the app allows more than the config.
     fn take_slot(&self) -> Option<u32> {
         let mut s = self.slots.lock().unwrap_or_else(|e| e.into_inner());
-        let i = s.iter().position(|used| !used)?;
+        let i = match s.iter().position(|used| !used) {
+            Some(i) => i,
+            None if s.len() < MAX_SLOTS => {
+                s.push(false);
+                s.len() - 1
+            }
+            None => return None,
+        };
         s[i] = true;
         Some(i as u32)
     }

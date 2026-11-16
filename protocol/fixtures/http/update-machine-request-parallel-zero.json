@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateMachineRequest",
+  "valid": false,
+  "description": "at least 1",
+  "value": {
+    "parallelRuns": 0
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "kind": "TopicLink",
+  "valid": true,
+  "description": "the diff a run's computer sent up",
+  "value": {
+    "kind": "pr",
+    "repo": "Joye-Co/team-chat",
+    "number": 61,
+    "url": "https://github.com/Joye-Co/team-chat/pull/61",
+    "title": "fix: resend after reconnect",
+    "state": "open",
+    "checks": [
+      {
+        "name": "CI",
+        "conclusion": "success"
+      }
+    ],
+    "additions": 3,
+    "deletions": 1,
+    "changedFiles": 2,
+    "diff": {
+      "fileId": "01J9ZK3DIFF0000000000000001",
+      "name": "pr-61.diff.json",
+      "size": 412,
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  }
+}

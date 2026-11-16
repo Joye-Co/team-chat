@@ -316,10 +316,18 @@ export async function seed(o: SeedOptions): Promise<Json> {
         entry: "重连重复问题复盘.md",
         files: [{ path: "重连重复问题复盘.md", fileId: review.fileId }],
       });
+      // Screenshots as a member uploads them (no size in pixels): the card's 证据 thumbnails,
+      // which open full size in the image viewer.
+      const shot = async (name: string, w: number, h: number, p: number) =>
+        (await forge.http.uploadFile({ ...reconnect, name, mime: "image/png", data: picture(w, h, p) })).fileId;
+      const before = await shot("修复前-重复两次.png", 1440, 900, 3);
+      const after = await shot("修复后-断线重放.png", 1440, 900, 5);
       await forge.done(reconnect, {
         title: "修好了：重连后不再重复",
         summary: "补拉事件时按 seq 去重；断线重放 50 次没有再出现重复。",
         evidence: [
+          { label: "修复前：同一条消息出现两次", state: "fail", fileId: before },
+          { label: "修复后：断线重放 50 次", state: "pass", fileId: after },
           { label: "单元测试 214 个", state: "pass" },
           { label: "断线重放 50 次", state: "pass", detail: "0 次重复" },
         ],

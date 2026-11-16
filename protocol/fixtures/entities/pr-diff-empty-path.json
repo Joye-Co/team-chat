@@ -1,0 +1,15 @@
+{
+  "kind": "PrDiff",
+  "valid": false,
+  "description": "a file has a path",
+  "value": {
+    "files": [
+      {
+        "path": "",
+        "status": "modified",
+        "additions": 0,
+        "deletions": 0
+      }
+    ]
+  }
+}

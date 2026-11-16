@@ -1,0 +1,8 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "feature limits: the daemon's own config again",
+  "value": {
+    "t": "machine.limits"
+  }
+}

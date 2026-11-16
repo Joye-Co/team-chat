@@ -1042,6 +1042,8 @@ pub mod metrics {
     pub const FIELD_PAD: Pixels = space::S12;
     pub const FIELD_NAME_WIDTH: Pixels = px(220.);
     pub const FIELD_CODE_WIDTH: Pixels = px(140.);
+    /// A number with its − and + (同时做几件事).
+    pub const NUMBER_FIELD: Pixels = px(120.);
     pub const SEARCH_SIDEBAR: Pixels = height::DEFAULT;
     pub const SEARCH: Pixels = height::DEFAULT;
     pub const SEARCH_SYMBOL: Pixels = px(16.);

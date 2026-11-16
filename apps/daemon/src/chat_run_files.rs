@@ -204,12 +204,40 @@ async fn upload(
         Ok(text) => local.redactor.text(&text).into_bytes(),
         Err(e) => e.into_bytes(),
     };
-    let sha = hex(&Sha256::digest(&bytes));
     let mime = mime.unwrap_or_else(|| mime_of(name));
-    let target = url(local, &format!("/v1/machine/runs/{}/files", local.run_id))?;
+    upload_bytes(
+        &local.server_url,
+        &local.token,
+        &local.run_id,
+        name,
+        mime,
+        bytes,
+    )
+    .await
+}
+
+/// Sends `bytes` up as a file of the run (already redacted); returns the server's `FileMeta`
+/// (or the error answer).
+pub(crate) async fn upload_bytes(
+    server_url: &str,
+    token: &str,
+    run_id: &str,
+    name: &str,
+    mime: &str,
+    bytes: Vec<u8>,
+) -> Result<Value, Value> {
+    let sha = hex(&Sha256::digest(&bytes));
+    let target = format!(
+        "{}/v1/machine/runs/{run_id}/files",
+        server_url.trim_end_matches('/')
+    );
+    // The machine token goes only to the configured server.
+    if !same_origin(&target, server_url) {
+        return Err(err("invalid", None, "bad server url"));
+    }
     let res = client(TIMEOUT)?
         .put(target)
-        .bearer_auth(local.token.as_str())
+        .bearer_auth(token)
         .header("Content-Type", mime)
         .header("X-File-Name", encode(name))
         .header("X-File-Sha256", sha)

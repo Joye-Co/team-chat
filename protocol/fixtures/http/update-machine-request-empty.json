@@ -1,6 +1,6 @@
 {
   "kind": "UpdateMachineRequest",
   "valid": false,
-  "description": "name or owner is required",
+  "description": "name, owner or parallelRuns is required",
   "value": {}
 }

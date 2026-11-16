@@ -1345,6 +1345,32 @@ pub fn open_machine_dialog(
     )
 }
 
+/// 机器 with 同时做几件事… open on the first computer.
+pub fn open_machine_parallel(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Machines,
+        |s, w, cx| {
+            // Set to 6 in the app on a computer whose older daemon keeps to its own 2.
+            let m = crate::data::MachineInfo {
+                id: "m-parallel".into(),
+                name: "办公室 Mac mini".into(),
+                connected: true,
+                max_parallel_runs: Some(2),
+                parallel_runs: Some(6),
+                ..Default::default()
+            };
+            let after: super::machine_actions::After = std::rc::Rc::new(|_, _| {});
+            super::machine_actions::open_parallel(s, &m, after, w, cx);
+        },
+        cx,
+    )
+}
+
 /// 机器 after 添加电脑 succeeded: the one-time sheet with the system picker on Windows and
 /// that system's install command.
 pub fn open_machine_created(

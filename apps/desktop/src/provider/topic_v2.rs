@@ -31,8 +31,8 @@ use crate::data::{
     pages::{ArtifactThumb, ThumbRow},
     reply_now,
     v2::{
-        ArtifactPreview, ArtifactStory, AskItem, AskKind, ChangeState, Currency, Decision,
-        PreviewRow, RunUsage, TopicChanges,
+        ArtifactPreview, ArtifactStory, AskItem, AskKind, ChangeState, ChangedFile, Currency,
+        Decision, PrFiles, PreviewRow, RunUsage, TopicChanges, TopicDiff,
     },
 };
 
@@ -73,6 +73,8 @@ struct Inner {
     reviews: HashMap<String, (Instant, Option<ReviewCard>)>,
     /// Artifact -> citing topics and when they were read.
     cited: HashMap<String, (Instant, Vec<(String, String)>)>,
+    /// PR diff file sha256 -> what was read from it (`Loading` while it downloads).
+    diffs: HashMap<String, TopicDiff>,
 }
 
 impl Inner {
@@ -94,6 +96,9 @@ impl Inner {
         }
         if self.reviews.len() >= MAX_ENTRIES {
             self.reviews.clear();
+        }
+        if self.diffs.len() >= MAX_ENTRIES {
+            self.diffs.clear();
         }
         self
     }
@@ -569,6 +574,67 @@ impl CoreProvider {
         Some(changes_of(&pr, approved))
     }
 
+    /// The diff of the 话题's PR: read from the cached file, else downloaded in the background
+    /// (a `Messages` change of the 话题 when it ends).
+    pub(super) fn topic_diff_inner(&self, group_id: &str, topic_id: &str) -> Option<TopicDiff> {
+        let d = self.pr_link(topic_id)?.diff?;
+        let file = FileAttachment {
+            file_id: d.file_id,
+            name: d.name,
+            size: d.size,
+            mime: "application/json".into(),
+            width: None,
+            height: None,
+            sha256: d.sha256,
+        };
+        let generation = self.topic_v2_generation();
+        if let Some(v) = lock(&self.shared.topic_v2.inner)
+            .for_generation(generation)
+            .diffs
+            .get(&file.sha256)
+        {
+            return Some(v.clone());
+        }
+        if let Some(path) = self.cached_file_inner(&file) {
+            let read = std::fs::read(&path)
+                .ok()
+                .and_then(|b| pr_files_of(&b))
+                .map_or(TopicDiff::Failed, |f| {
+                    TopicDiff::Ready(std::sync::Arc::new(f))
+                });
+            lock(&self.shared.topic_v2.inner)
+                .for_generation(generation)
+                .diffs
+                .insert(file.sha256.clone(), read.clone());
+            return Some(read);
+        }
+        lock(&self.shared.topic_v2.inner)
+            .for_generation(generation)
+            .diffs
+            .insert(file.sha256.clone(), TopicDiff::Loading);
+        let rx = self.fetch_file_inner(group_id, topic_id, &file);
+        let this = self.clone();
+        let change = Change::Messages {
+            group_id: group_id.to_string(),
+            topic_id: topic_id.to_string(),
+        };
+        chat_core::background().spawn(async move {
+            let ok = matches!(rx.await, Ok(Ok(_)));
+            {
+                let mut i = lock(&this.shared.topic_v2.inner);
+                let i = i.for_generation(generation);
+                if ok {
+                    // The next read finds it in the cache.
+                    i.diffs.remove(&file.sha256);
+                } else {
+                    i.diffs.insert(file.sha256.clone(), TopicDiff::Failed);
+                }
+            }
+            this.emit(vec![change]);
+        });
+        Some(TopicDiff::Loading)
+    }
+
     /// The newest card in a 话题 that asks for a review of its PR: a v2 ask about a PR (with
     /// a diff or a PR ref), else a v1 approval card while the 话题 waits on a review.
     fn review_card(&self, group_id: &str, topic_id: &str) -> Option<ReviewCard> {
@@ -989,6 +1055,7 @@ mod tests {
     fn a_pr_link_gives_the_changes_and_their_state() {
         let pr = proto::PrLink {
             merge: None,
+            diff: None,
             repo: "a/b".into(),
             number: 61,
             url: "https://github.com/a/b/pull/61".into(),
@@ -1199,4 +1266,26 @@ mod tests {
         assert_eq!(media_length(&p), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+/// The files of a PR diff file (`PrDiff` JSON, docs/protocol.md "Topic links"); `None` when it
+/// does not parse or breaks the protocol's limits.
+pub fn pr_files_of(bytes: &[u8]) -> Option<PrFiles> {
+    let d: proto::PrDiff = serde_json::from_slice(bytes).ok()?;
+    d.validate().ok()?;
+    Some(PrFiles {
+        truncated: d.truncated == Some(true),
+        files: d
+            .files
+            .into_iter()
+            .map(|f| ChangedFile {
+                path: f.path,
+                previous_path: f.previous_path,
+                status: f.status,
+                additions: f.additions,
+                deletions: f.deletions,
+                patch: f.patch,
+            })
+            .collect(),
+    })
 }
