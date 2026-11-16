@@ -650,7 +650,31 @@ fn render_image(
     {
         Some(path) => {
             let fallback = alt.unwrap_or(c::IMAGE).to_string();
+            // A click opens it full size in the image viewer, as a message picture.
+            let open = ctx.provider.card_image_file(file_id).map(|file| {
+                use crate::views::files::lightbox;
+                let opening = lightbox::Opening {
+                    group_id: message.group_id.clone(),
+                    topic_id: message.topic_id.clone(),
+                    message_id: message.id.clone(),
+                    file: file.clone(),
+                    provider: ctx.provider.clone(),
+                    set: Some(lightbox::Set {
+                        files: vec![file],
+                        author_id: message.author_id.clone(),
+                        created_at: message.created_at,
+                    }),
+                };
+                move |_: &gpui::ClickEvent, window: &mut Window, cx: &mut App| {
+                    cx.stop_propagation();
+                    lightbox::open(opening.clone(), window, cx);
+                }
+            });
             frame
+                .id(ElementId::Name(
+                    format!("card-image-{}-{file_id}", message.id).into(),
+                ))
+                .when_some(open, |el, open| el.cursor_pointer().on_click(open))
                 .child(
                     img(path)
                         .size_full()

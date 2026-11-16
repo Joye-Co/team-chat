@@ -533,6 +533,7 @@ pub fn open_lightbox(
                 message_id: "pv-g1".into(),
                 file: picture(1),
                 provider,
+                set: None,
             };
             root.update(cx, |root, cx| root.open_lightbox(opening, window, cx));
         })

@@ -1029,6 +1029,9 @@ impl ChatProvider for WorstCase {
     fn card_image(&self, group_id: &str, topic_id: &str, file_id: &str) -> Option<PathBuf> {
         self.inner.card_image(group_id, topic_id, file_id)
     }
+    fn card_image_file(&self, file_id: &str) -> Option<crate::data::FileAttachment> {
+        self.inner.card_image_file(file_id)
+    }
 
     // --- panes track (1.1.0): 单独问 and 实时查看 at their worst ---
 

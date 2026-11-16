@@ -901,6 +901,9 @@ fn image(ctx: &Ctx, file_id: &str, alt: Option<&str>, cx: &App) -> gpui::Statefu
         .h(px(200.))
         .rounded(theme::radius::MD)
         .overflow_hidden()
+        .when_some(open_picture(ctx, file_id), |el, open| {
+            el.cursor_pointer().on_click(open)
+        })
         .map(|el| match path {
             Some(p) => el.child(img(p).size_full().object_fit(ObjectFit::Cover)),
             None => missing_image(el, cx)
@@ -910,6 +913,55 @@ fn image(ctx: &Ctx, file_id: &str, alt: Option<&str>, cx: &App) -> gpui::Statefu
                     el.child(meta(div()).text_color(k.ink_3).child(a.to_string()))
                 }),
         })
+}
+
+/// The pictures of a card the image viewer goes through: its image blocks and the
+/// screenshots of its 证据, in the card's order, once each is downloaded.
+fn card_pictures(ctx: &Ctx) -> Vec<crate::data::FileAttachment> {
+    let mut seen = std::collections::HashSet::new();
+    ctx.card
+        .all_blocks()
+        .into_iter()
+        .filter_map(|b| match b {
+            CardV2Block::Image { file_id, .. } => Some(file_id.as_str()),
+            CardV2Block::Evidence {
+                file_id: Some(f), ..
+            } => Some(f.as_str()),
+            _ => None,
+        })
+        .filter(|f| seen.insert(*f))
+        .filter_map(|f| ctx.env.provider.card_image_file(f))
+        .collect()
+}
+
+/// A click that opens the card picture `file_id` full size in the image viewer (the
+/// one message pictures use), going through the card's pictures. `None` while the
+/// picture downloads: it is not clickable yet.
+fn open_picture(
+    ctx: &Ctx,
+    file_id: &str,
+) -> Option<impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static> {
+    use crate::views::files::lightbox;
+    let provider = ctx.env.provider.clone();
+    let file = provider.card_image_file(file_id)?;
+    let opening = lightbox::Opening {
+        group_id: ctx.msg.group_id.clone(),
+        topic_id: ctx.msg.topic_id.clone(),
+        message_id: ctx.msg.message_id.clone(),
+        file,
+        provider,
+        set: Some(lightbox::Set {
+            files: card_pictures(ctx),
+            author_id: ctx.msg.author_id.clone(),
+            created_at: ctx.msg.created_at,
+        }),
+    };
+    Some(
+        move |_: &gpui::ClickEvent, window: &mut Window, cx: &mut App| {
+            cx.stop_propagation();
+            lightbox::open(opening.clone(), window, cx);
+        },
+    )
 }
 
 /// An image with no file: a 1 px border on the card fill and the 16 image icon in
@@ -1910,6 +1962,10 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
                 .provider
                 .card_image(&ctx.msg.group_id, &ctx.msg.topic_id, file);
             div()
+                .id(ctx.id(format!("draft-image-{i}")))
+                .when_some(open_picture(ctx, file), |el, open| {
+                    el.cursor_pointer().on_click(open)
+                })
                 .w(px(54.))
                 .h(h)
                 .rounded(theme::radius::SM)
@@ -2685,6 +2741,9 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
                     .card_image(&ctx.msg.group_id, &ctx.msg.topic_id, file);
                 let thumb = div()
                     .id(ctx.id(format!("proof-shot-{file}")))
+                    .when_some(open_picture(ctx, file), |el, open| {
+                        el.cursor_pointer().on_click(open)
+                    })
                     .flex_1()
                     .min_w(px(0.))
                     .h(m::THUMB)
@@ -2738,8 +2797,14 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
                 )
             }))
             .when(more > 0, |el| {
+                // +N opens the first picture it stands for.
+                let open = thumbs
+                    .get(shown)
+                    .and_then(|(file, ..)| open_picture(ctx, file));
                 el.child(
                     div()
+                        .id(ctx.id("proof-shot-more"))
+                        .when_some(open, |el, open| el.cursor_pointer().on_click(open))
                         .flex_1()
                         .h(m::THUMB)
                         .rounded(theme::radius::MD)

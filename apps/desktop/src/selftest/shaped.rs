@@ -373,6 +373,9 @@ impl ChatProvider for Shaped {
     fn card_image(&self, group_id: &str, topic_id: &str, file_id: &str) -> Option<PathBuf> {
         self.inner.card_image(group_id, topic_id, file_id)
     }
+    fn card_image_file(&self, file_id: &str) -> Option<crate::data::FileAttachment> {
+        self.inner.card_image_file(file_id)
+    }
     fn desk_note(&self) -> Option<v2::DeskNote> {
         self.inner.desk_note()
     }
