@@ -91,6 +91,18 @@ pub fn span_text(copy: SpanCopy, ms: i64) -> String {
     fill(template, &values)
 }
 
+/// When a run ended: `今天 09:31`.
+pub fn ended_text(ended: Millis) -> String {
+    match model::local_day(ended) {
+        Some(day) => format!(
+            "{} {}",
+            model::day_label(day, crate::selftest::clock::local_now().date_naive()),
+            model::clock(ended)
+        ),
+        None => model::clock(ended),
+    }
+}
+
 impl TimelineView {
     /// One plan card per member that works in the open 话题, in the order
     /// they started.
@@ -115,7 +127,107 @@ impl TimelineView {
             self.plan_card(run, paused_by.is_some(), &times, cx)
         }));
         out.extend(self.failed_run_alert(cx));
+        out.extend(self.stopped_run_line(cx));
         out
+    }
+
+    /// One header row of the working card on the text column, the gutter
+    /// empty (§2.4): a run whose details show in the pane, or that ended.
+    fn run_line(
+        &self,
+        run: &BotRunSummary,
+        title: String,
+        badge: (crate::ui::native::BadgeState, String),
+        trailing: AnyElement,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let card = WorkingCard {
+            id: SharedString::from(format!("plan-line-{}", run.id)),
+            member: self.members.iter().find(|m| m.id == run.bot_id).cloned(),
+            title,
+            badge,
+            progress: None,
+            trailing: Some(trailing),
+            body: None,
+            footer: None,
+        }
+        .render(cx);
+        div()
+            .mt(space::S16)
+            .px(space::S8)
+            .flex()
+            .gap(space::S12)
+            .child(div().flex_none().w(GUTTER))
+            .child(div().flex_1().min_w_0().child(card))
+            .into_any_element()
+    }
+
+    /// `在右侧打开`, the trailing words of a run shown in the pane.
+    fn open_right_label(cx: &gpui::App) -> AnyElement {
+        div()
+            .flex_none()
+            .n_footnote()
+            .text_color(native_colors(cx).secondary)
+            .child(c::OPEN_RIGHT)
+            .into_any_element()
+    }
+
+    /// The member's name for a title beside its avatar (X-01).
+    fn run_member_name(&self, run: &BotRunSummary) -> String {
+        crate::copy::isolate(
+            self.members
+                .iter()
+                .find(|m| m.id == run.bot_id)
+                .map(|m| crate::ui::avatar::name_beside_avatar(&m.name))
+                .unwrap_or_default(),
+        )
+    }
+
+    /// A run someone stopped, at the foot of the 话题 while it is the newest:
+    /// one line, so the thread does not simply end at the member's last
+    /// words. The order's bar speaks for a step of 按顺序做.
+    fn stopped_run_line(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let start = |r: &BotRunSummary| r.started_at.unwrap_or(r.created_at);
+        let run = self.runs.iter().max_by_key(|r| start(r))?;
+        let in_relay = self
+            .topic
+            .as_ref()
+            .and_then(|t| t.relay.as_ref())
+            .is_some_and(|r| r.state != "done");
+        if run.status != crate::data::RunStatus::Cancelled || in_relay {
+            return None;
+        }
+        let in_pane = matches!(
+            self.services.nav.read(cx).visible_pane(),
+            crate::app::RightPane::Live(id) if id == run.id
+        );
+        let trailing = if in_pane {
+            Self::open_right_label(cx)
+        } else {
+            let id = run.id.clone();
+            push_button(
+                ElementId::Name(format!("run-stopped-view-{}", run.id).into()),
+                t::PLAN_VIEW,
+                PushStyle::Ghost,
+                PushSize::Small,
+                cx,
+            )
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                this.services.nav.update(cx, |nav, cx| {
+                    nav.set_right_pane(crate::app::RightPane::Live(id.clone()), cx)
+                });
+            }))
+            .into_any_element()
+        };
+        let title = fill(
+            l::LIVE_MEMBER_STOPPED,
+            &[("member", &self.run_member_name(run))],
+        );
+        let badge = (
+            crate::ui::native::BadgeState::Deactivated,
+            l::LIVE_PHASE_STOPPED.to_string(),
+        );
+        Some(self.run_line(run, title, badge, trailing, cx))
     }
 
     /// Follows the log of working run `id` every [`crate::views::process::POLL`] while it
@@ -153,48 +265,9 @@ impl TimelineView {
     /// StatusBadge (已暂停 while someone holds its computer) and
     /// `在右侧打开`, on the text column with the gutter empty.
     fn plan_line(&self, run: &BotRunSummary, held: bool, cx: &mut Context<Self>) -> AnyElement {
-        let bot = self.members.iter().find(|m| m.id == run.bot_id).cloned();
         let (doing, badge) = self.working_header(run, held);
-        self.pane_line(run, bot, doing, badge, cx)
-    }
-
-    /// The one line a run keeps in the thread while 实时查看 beside it shows
-    /// the run: its member, its title and badge, and 在右侧打开.
-    fn pane_line(
-        &self,
-        run: &BotRunSummary,
-        bot: Option<crate::data::Member>,
-        title: String,
-        badge: (crate::ui::native::BadgeState, String),
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let n = native_colors(cx);
-        let card = WorkingCard {
-            id: SharedString::from(format!("plan-line-{}", run.id)),
-            member: bot,
-            title,
-            badge,
-            progress: None,
-            trailing: Some(
-                div()
-                    .flex_none()
-                    .n_footnote()
-                    .text_color(n.secondary)
-                    .child(c::OPEN_RIGHT)
-                    .into_any_element(),
-            ),
-            body: None,
-            footer: None,
-        }
-        .render(cx);
-        div()
-            .mt(space::S16)
-            .px(space::S8)
-            .flex()
-            .gap(space::S12)
-            .child(div().flex_none().w(GUTTER))
-            .child(div().flex_1().min_w_0().child(card))
-            .into_any_element()
+        let trailing = Self::open_right_label(cx);
+        self.run_line(run, doing, badge, trailing, cx)
     }
 
     /// The working card's title and StatusBadge: `Forge 正在做：<step>`
@@ -282,10 +355,15 @@ impl TimelineView {
                 fill(template, &[("name", &name), ("step", &step)])
             })
             .unwrap_or_else(|| {
-                if stopping || phase != crate::data::run_phase::RunPhase::Working {
-                    name.clone()
-                } else {
-                    fill(c::STATE_WORKING_NO_PLAN, &[("name", &name)])
+                use crate::data::run_phase::RunPhase;
+                match phase {
+                    _ if stopping => name.clone(),
+                    RunPhase::Working => fill(c::STATE_WORKING_NO_PLAN, &[("name", &name)]),
+                    // The badge beside it says why: 在等电脑.
+                    RunPhase::WaitingComputer => {
+                        fill(t::STATE_WAITING_COMPUTER, &[("name", &name)])
+                    }
+                    _ => name.clone(),
                 }
             });
         (doing, badge)
@@ -329,25 +407,30 @@ impl TimelineView {
                             None => s.member_id == run.bot_id,
                         })
             });
+        let no_cause = if relay_step {
+            t::RUN_STUCK_TITLE
+        } else {
+            t::RUN_FAILED_TITLE_NO_CAUSE
+        };
+        // While the pane beside the thread shows this run, its alert states
+        // the cause and has 重试 and 查看日志 (A5): the thread keeps one line.
+        let in_pane = matches!(
+            self.services.nav.read(cx).visible_pane(),
+            crate::app::RightPane::Live(id) if id == run.id
+        );
+        if in_pane {
+            let title = fill(no_cause, &[("name", &self.run_member_name(run))]);
+            let badge = (
+                crate::ui::native::BadgeState::Failed,
+                l::LIVE_SHORT_FAILED.to_string(),
+            );
+            let trailing = Self::open_right_label(cx);
+            return Some(self.run_line(run, title, badge, trailing, cx));
+        }
         // The title states the cause (`打包失败：找不到签名证书`); with none, the
         // word of the order's bar for its step, else 没做完.
-        let title = cause.unwrap_or_else(|| {
-            let template = if relay_step {
-                t::RUN_STUCK_TITLE
-            } else {
-                t::RUN_FAILED_TITLE_NO_CAUSE
-            };
-            fill(template, &[("name", &name)])
-        });
-        let ended = run.ended_at.unwrap_or(run.updated_at);
-        let at = match model::local_day(ended) {
-            Some(day) => format!(
-                "{} {}",
-                model::day_label(day, crate::selftest::clock::local_now().date_naive()),
-                model::clock(ended)
-            ),
-            None => model::clock(ended),
-        };
+        let title = cause.unwrap_or_else(|| fill(no_cause, &[("name", &name)]));
+        let at = ended_text(run.ended_at.unwrap_or(run.updated_at));
         let step = run
             .plan
             .iter()
@@ -370,15 +453,24 @@ impl TimelineView {
                 None => fill(t::RUN_FAILED_TITLE_NO_CAUSE, &[("name", &short)]),
             };
             let (_, badge) = self.working_header(run, false);
-            return Some(self.pane_line(run, bot, title, badge, cx));
+            return Some(self.run_line(run, title, badge, Self::open_right_label(cx), cx));
         }
+        // The retry of a step of 按顺序做 is on the order's bar: its words say so.
         let detail = match &step {
             Some(step) => fill(
-                t::RUN_FAILED_DETAIL,
+                if relay_step {
+                    t::RUN_FAILED_DETAIL_RELAY
+                } else {
+                    t::RUN_FAILED_DETAIL
+                },
                 &[("name", &name), ("time", &at), ("step", step)],
             ),
             None => fill(
-                t::RUN_FAILED_DETAIL_NO_STEP,
+                if relay_step {
+                    t::RUN_FAILED_DETAIL_NO_STEP_RELAY
+                } else {
+                    t::RUN_FAILED_DETAIL_NO_STEP
+                },
                 &[("name", &name), ("time", &at)],
             ),
         };

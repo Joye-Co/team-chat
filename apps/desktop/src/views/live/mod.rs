@@ -185,6 +185,51 @@ impl LivePane {
         Some((me.to_string(), role, !m.is_bot() && !m.deactivated))
     }
 
+    /// Whether the viewer can start stopped `run` again: a person who asked
+    /// for it or an owner (the server's rule), while it is the 话题's newest
+    /// run and no order of 按顺序做 is under way (a lone run would leave it).
+    fn may_restart(&self, run: &BotRunSummary, cx: &App) -> bool {
+        let Some((g, t, _)) = self.target(cx) else {
+            return false;
+        };
+        let Some((me, role, person)) = self.viewer_of() else {
+            return false;
+        };
+        let p = &self.services.provider;
+        let newest = p
+            .runs(&g, &t)
+            .into_iter()
+            .max_by_key(|r| r.started_at.unwrap_or(r.created_at))
+            .is_some_and(|r| r.id == run.id);
+        let in_order = p
+            .topic(&g, &t)
+            .and_then(|t| t.relay)
+            .is_some_and(|r| r.state != "done");
+        person
+            && newest
+            && !in_order
+            && (crate::views::process::asked_by(run, Some(&me))
+                || role == crate::data::TeamRole::Owner)
+    }
+
+    /// A new run with the same request; a refusal is an alert.
+    fn retry_run(&self, bot_id: &str, run_id: &str, cx: &mut Context<Self>) {
+        use crate::copy::timeline as t;
+        let rx = self.services.provider.retry_member_problem(bot_id, run_id);
+        cx.spawn(async move |_, cx| {
+            if let Err(e) = rx.await.unwrap_or(Err(AdminError::Other)) {
+                let _ = cx.update(|cx| {
+                    alert_in_active_window(
+                        t::RUN_RETRY_REFUSED,
+                        crate::views::settings::widgets::error_text(e),
+                        cx,
+                    )
+                });
+            }
+        })
+        .detach();
+    }
+
     /// The words left for the member (继续, 交还), trimmed; `None` when empty.
     fn note_text(&self, cx: &App) -> Option<String> {
         self.note
@@ -676,8 +721,25 @@ impl LivePane {
                 // state that lasts.
                 (Sym::Failed, words.text.clone(), None)
             }
+            // A stopped run says so and when, as the other ended phases do.
+            RunPhase::Stopped => (
+                words.badge.symbol().unwrap_or(Sym::Stopped),
+                fill(c::LIVE_MEMBER_STOPPED, &[("member", bot)]),
+                run.ended_at.map(crate::views::timeline::plan::ended_text),
+            ),
             _ => return None,
         };
+        let restart = (words.phase == RunPhase::Stopped && self.may_restart(run, cx)).then(|| {
+            let (bot_id, run_id) = (run.bot_id.clone(), run.id.clone());
+            push_button(
+                "live-restart",
+                c::LIVE_RESTART,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| this.retry_run(&bot_id, &run_id, cx)))
+        });
         // What a failed run offers (§2.15): 重试 and 查看日志.
         let failed_actions = (words.phase == RunPhase::Failed).then(|| {
             use crate::copy::timeline as t;
@@ -690,25 +752,7 @@ impl LivePane {
                     PushSize::Small,
                     cx,
                 )
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    // A new run with the same request; a refusal is an alert.
-                    let rx = this
-                        .services
-                        .provider
-                        .retry_member_problem(&bot_id, &run_id);
-                    cx.spawn(async move |_, cx| {
-                        if let Err(e) = rx.await.unwrap_or(Err(AdminError::Other)) {
-                            let _ = cx.update(|cx| {
-                                alert_in_active_window(
-                                    t::RUN_RETRY_REFUSED,
-                                    crate::views::settings::widgets::error_text(e),
-                                    cx,
-                                )
-                            });
-                        }
-                    })
-                    .detach();
-                }))
+                .on_click(cx.listener(move |this, _, _, cx| this.retry_run(&bot_id, &run_id, cx)))
             };
             let log = push_button(
                 "live-view-log",
@@ -784,7 +828,8 @@ impl LivePane {
         let several_lines = cause.is_some()
             || detail.as_ref().is_some_and(|d| !d.is_empty())
             || reminder.is_some()
-            || failed_actions.is_some();
+            || failed_actions.is_some()
+            || restart.is_some();
         // The Alert anatomy (§2.15, D5): a bordered container, px 16.
         Some(
             div()
@@ -859,7 +904,8 @@ impl LivePane {
                                 )
                                 // The actions sit in the text column, under
                                 // the cause they answer (the Alert anatomy).
-                                .children(failed_actions.map(|a| a.mt(space::S8))),
+                                .children(failed_actions.map(|a| a.mt(space::S8)))
+                                .children(restart.map(|a| div().mt(space::S8).flex().child(a))),
                         )
                         .children(share.map(|b| div().flex_none().self_center().child(b))),
                 )

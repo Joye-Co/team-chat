@@ -623,9 +623,10 @@ impl TimelineView {
         }
     }
 
-    /// Every match of `query` in the loaded messages, oldest first. Recalled
-    /// messages and rows drawn in place of their body (cards, special rows)
-    /// are left out: their body text is not on screen.
+    /// Every match of `query` in the bodies of the loaded messages, oldest
+    /// first. Recalled messages, rows drawn in place of their body (cards,
+    /// special rows) and file names are not searched: the bar says so
+    /// ([`t::FIND_SCOPE`]).
     fn collect_matches(&self, query: &str) -> Vec<FindMatch> {
         let ctx = extras::ExtrasContext {
             provider: &self.services.provider,
@@ -814,6 +815,17 @@ impl TimelineView {
                         .tnum()
                         .text_color(n.secondary)
                         .child(count)
+                }))
+                // A word on screen in a card or a file name is not a match:
+                // the count must not read as the whole 话题. It gives way
+                // first in a narrow window: the step buttons stay.
+                .children((!find.query.is_empty()).then(|| {
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .n_footnote()
+                        .text_color(n.tertiary)
+                        .child(t::FIND_SCOPE)
                 }))
                 .child(div().flex_1())
                 .child(

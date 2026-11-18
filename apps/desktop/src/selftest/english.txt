@@ -244,8 +244,8 @@ Jojo 的提醒	Note from Jojo
 Jojo 转给了 Forge	Jojo handed it to Forge
 Jojo 看完再分给合适的成员	Jojo reads it and hands it to the right member
 Jojo	Jojo
-Joye 在 开发 发起	Joye started this in Engineering
-小王 在 开发 发起	Will started this in Engineering
+Joye 在「开发」发起	Joye started this in Engineering
+小王 在「开发」发起	Will started this in Engineering
 Joye 选了「{}」	Joye chose “{}”
 选了「{}」	Chose “{}”
 Joye 改过	Edited by Joye

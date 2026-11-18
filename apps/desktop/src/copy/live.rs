@@ -132,4 +132,6 @@ crate::copy! {
     LIVE_LAST_FRAME_AT = "最后画面",
     // The note on a paused run goes with 继续 (LIVE_NOTE_PLACEHOLDER: with 交还).
     LIVE_NOTE_PLACEHOLDER_RESUME = "继续时留句话给 {member}（可不填）",
+    // A stopped run starts again with the same request.
+    LIVE_RESTART = "重新开始",
 }
