@@ -542,7 +542,12 @@ impl MemoryBoard {
 
     /// One 记忆更新 line: the change as a badge, the memory's text and what it said before
     /// (or why), then 撤回 or 已撤回.
-    fn update_row(&self, line: model::UpdateLine, cx: &mut Context<Self>) -> AnyElement {
+    fn update_row(
+        &self,
+        line: model::UpdateLine,
+        badge_column: gpui::Pixels,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let k = native_colors(cx);
         let busy = self.busy.contains(&line.id);
         let id = line.id.clone();
@@ -636,7 +641,7 @@ impl MemoryBoard {
             .flex()
             .items_start()
             .gap(tokens::space::S12)
-            .child(div().flex_none().w(BADGE_COLUMN).flex().child(first_line(
+            .child(div().flex_none().w(badge_column).flex().child(first_line(
                 tokens::height::BADGE,
                 if needs_you {
                     page::status_badge(page::Status::NeedsYou, line.word, cx)
@@ -817,7 +822,9 @@ impl MemoryBoard {
             }
             widgets::list_empty(Sym::Book, c::UPDATES_EMPTY, None, cx).into_any_element()
         } else {
-            let rows = day
+            // One text edge for the day: the column is only as wide as the
+            // widest badge the day shows.
+            let lines: Vec<_> = day
                 .updates
                 .iter()
                 .map(|u| {
@@ -825,8 +832,19 @@ impl MemoryBoard {
                         Some(m) => self.writes(m),
                         None => writer,
                     };
-                    self.update_row(model::update_line(u, writes), cx)
+                    model::update_line(u, writes)
                 })
+                .collect();
+            let wide =
+                lines.iter().any(|l| l.word == c::CHANGE_FLAGGED) || crate::selftest::english::on();
+            let badge_column = if wide {
+                BADGE_COLUMN
+            } else {
+                tokens::size::MEMORY_BADGE_COLUMN_COMPACT
+            };
+            let rows = lines
+                .into_iter()
+                .map(|line| self.update_row(line, badge_column, cx))
                 .collect();
             self.frame(rows, cx)
         };
@@ -970,11 +988,7 @@ impl MemoryBoard {
         self.alert_surface(
             page::page_alert(
                 self.id("failed"),
-                if unsupported {
-                    AlertKind::Info
-                } else {
-                    AlertKind::Error
-                },
+                page::admin_alert_kind(e),
                 match self.scope {
                     _ if self.folded_mine() => c::MINE_FAILED,
                     MemoryScope::Team => c::TEAM_FAILED,

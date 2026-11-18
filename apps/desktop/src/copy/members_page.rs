@@ -63,7 +63,7 @@ crate::copy! {
     MEMBERS_WAITS_REVIEW_WORD = "等你审",
     MEMBERS_WHERE = "在哪干活",
     MEMBERS_WHERE_CHANGE = "更换电脑…",
-    MEMBERS_EDIT_MORE = "修改",
+    MEMBERS_EDIT_MORE = "修改…",
     // --- end pages track ---
     // --- v13/ux-pages: the member detail recipe (COMPLETENESS.md §2.18) ---
     MEMBERS_HAND_OVER_SHORT = "交代",
@@ -115,4 +115,6 @@ crate::copy! {
     // One group by name (MEMBERS_IN_GROUPS lists several), and a name inside that list.
     MEMBERS_IN_ONE_GROUP = "在「{group}」群",
     MEMBERS_GROUP_QUOTED = "「{group}」",
+    // The list column while the team cannot be reached.
+    MEMBERS_LIST_OFFLINE = "连上后显示成员",
 }
