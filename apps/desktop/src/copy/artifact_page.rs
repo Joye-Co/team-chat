@@ -21,22 +21,16 @@ crate::copy! {
     ARTIFACT_COPIED = "已复制",
     ARTIFACT_SIDE_CHAT = "单独问",
     ARTIFACT_COMPARE = "和 v{v} 对比",
-    ARTIFACT_OLD_VERSION = "你在看旧版本",
-    ARTIFACT_OLD_VERSION_LINE = "v{v} · {time} · {note}",
     ARTIFACT_BACK_TO = "回到 v{v}",
     // The tail after the 群 name; the name cuts first (§2.21).
     ARTIFACT_TOPIC_DONE = " · 完成 {time}",
     ARTIFACT_TOPIC_ACTIVE = " · {state}",
     ARTIFACT_DECISION_META = "{name} · {time} · {group}",
-    ARTIFACT_LIST_META = "v{v} · {kind} · {name}",
     ARTIFACT_SHARE_TEXT = "「{title}」v{v}",
-    ARTIFACT_BACK = "回到话题 {group} / {topic}",
     ARTIFACTS_EMPTY = "还没有产出",
     ARTIFACT_PAGE_SNAPSHOT = "这个产出在单独的窗口里打开",
     ARTIFACT_RESPONSE = "{name} {action}",
     ARTIFACT_RESPONSE_VALUE = "{name} {action}「{value}」",
-    ARTIFACT_COLLAPSE = "收起右栏",
-    ARTIFACT_EXPAND = "显示右栏",
     // --- track cards: the Finder-like 产出 list (NATIVE.md §9.6) ---
     ARTIFACTS_COUNT = "{n} 个",
     ARTIFACTS_VIEW_GRID = "图标",
@@ -47,9 +41,6 @@ crate::copy! {
     ARTIFACTS_COL_NAME = "名称",
     ARTIFACTS_COL_KIND = "类型",
     ARTIFACTS_COL_TOPIC = "话题",
-    ARTIFACTS_COL_TIME = "时间",
-    ARTIFACTS_NO_MATCH = "没有找到",
-    ARTIFACT_KIND_TIME = "{kind} · {time}",
     // --- end track cards ---
     // --- v13/ux-pages: the 产出 recipe (COMPLETENESS.md §2.18) ---
     ARTIFACTS_COL_BY = "做的人",
@@ -61,7 +52,6 @@ crate::copy! {
     ARTIFACTS_TILE_META = "v{v} · {topic}",
     ARTIFACTS_EMPTY_BODY = "成员做的网页、文件和图片都在这里，每个都有版本。",
     ARTIFACTS_NO_MATCH_TITLE = "没有找到「{q}」",
-    ARTIFACTS_NO_MATCH_BODY = "换个词试试，或者清空搜索看全部产出。",
     ARTIFACTS_CLEAR_SEARCH = "清空搜索",
     ARTIFACTS_MORE = "更多操作",
     ARTIFACTS_DAY_TODAY = "今天",
@@ -86,8 +76,6 @@ crate::copy! {
     ARTIFACT_RESPONSES_NONE = "这一页不收回应",
     ARTIFACT_OLD_VERSION_TITLE = "你在看 v{v}，不是最新版",
     ARTIFACT_IN_PANE = "在右侧打开",
-    ARTIFACT_STATUS_DONE = "完成",
-    ARTIFACT_STATUS_ACTIVE = "在做",
     // --- end v14/t3-pages ---
     // --- v15/r3-pages: the quiet-page check (artifact-quiet-page) ---
     ARTIFACT_QUIET_TITLE = "渠道预算",

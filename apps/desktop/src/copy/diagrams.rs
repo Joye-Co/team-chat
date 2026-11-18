@@ -2,7 +2,6 @@
 
 crate::copy! {
     BLOCK = "图",
-    CHIP_COUNT = "图 {n}",
     TYPE_FLOWCHART = "流程图",
     TYPE_SEQUENCE = "时序图",
     TYPE_STATE = "状态图",

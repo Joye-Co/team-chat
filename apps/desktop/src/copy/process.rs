@@ -2,7 +2,6 @@
 //! topic, step by step.
 
 crate::copy! {
-    TAB_DETAILS = "详情",
     TAB_PROCESS = "过程",
     EMPTY = "这个话题里还没有成员在后台工作",
     RUNS = "工作记录",
@@ -17,10 +16,6 @@ crate::copy! {
     STATUS_FAILED = "失败",
     STATUS_CANCELLED = "已取消",
     STATUS_STOPPING = "停止中",
-    RUN_ON = "运行于 {name}",
-    REQUESTED_BY = "{name} 发起",
-    STARTED_AT = "开始 {time}",
-    ENDED_AT = "结束 {time}",
     DURATION = "用时 {d}",
     DURATION_SECONDS = "{n} 秒",
     DURATION_MINUTES = "{m} 分钟",
@@ -77,7 +72,6 @@ crate::copy! {
     ACT_START = "看新消息",
     STOP = "停止…",
     STOPPING = "正在停止…",
-    STOP_FAILED = "没能停止：{reason}",
     STOP_FORBIDDEN = "只有群里的成员可以停止",
     // The facts of a run (a DescriptionList, COMPLETENESS §2.5).
     FACT_MACHINE = "电脑",

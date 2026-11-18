@@ -7,7 +7,6 @@ crate::copy! {
     HEADER_TITLE = "团队管理",
     HEADER_DESC = "所有者和管理员能打开",
     ROLE_OWNER = "所有者",
-    ROLE_ADMIN = "管理员",
     SETTINGS_CARD_DESC = "成员、用量、电脑、订阅账号和密钥都在这里。只有所有者和管理员能看到。",
     SETTINGS_CARD_OPEN = "打开团队管理",
 
@@ -36,7 +35,6 @@ crate::copy! {
     TITLE = "概览",
     SAMPLED_AT = "采集于 {time} · 每 5 秒刷新",
     WAITING_FIRST = "等第一份数据 · 每 5 秒刷新",
-    RANGE = "时间范围",
     RANGE_15M = "15 分钟",
     RANGE_1H = "1 小时",
     RANGE_24H = "24 小时",
@@ -259,7 +257,6 @@ crate::copy! {
     KEYS_LOADING_FAILED = "读不到这台电脑的密钥",
 
     MEMBERS_TITLE = "成员",
-    MEMBERS_SUB = "团队里的人和 AI 成员",
     RULES_TITLE = "默认规则",
     RULES_SUB = "AI 成员做事前要问谁、能花多少",
     MEMORY_TITLE = "团队记忆",
@@ -442,8 +439,6 @@ crate::copy! {
     TEAM_COL_TOPICS = "话题",
     TEAM_COL_SPEND = "本周花费",
     TEAM_COL_RECENT = "最近",
-    TEAM_COL_INVITED_BY = "谁邀请的",
-    TEAM_COL_EXPIRES = "过期",
     TEAM_AI_ROLE = "AI · {role}",
     TEAM_AI = "AI",
     TEAM_WORKING = "在干活",

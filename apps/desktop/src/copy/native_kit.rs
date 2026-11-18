@@ -87,13 +87,10 @@ crate::copy! {
     ASK_ALONE = "单独问",
     OUTPUTS = "产出",
     PR = "PR",
-    INSPECTOR = "显示检查器",
-    NEW_TOPIC = "新话题",
     // Sidebar
     HOME = "首页",
     MEMBERS = "成员",
     GROUP_DEV = "开发",
-    GROUP_DM = "私聊",
     TOPIC_A = "夜间告警降噪：合并重复的 5xx",
     TOPIC_B = "登录页改版",
     TOPIC_C = "支付回调重试",
@@ -101,8 +98,6 @@ crate::copy! {
     TIME_A = "09:12",
     TIME_B = "昨天",
     // Section labels of the gallery
-    SEC_TOOLBAR = "工具栏",
-    SEC_SIDEBAR = "边栏",
     SEC_BUTTONS = "按钮",
     SEC_CONTROLS = "开关和选择",
     SEC_FIELDS = "输入",
@@ -133,7 +128,6 @@ crate::copy! {
     // Pop-ups, segmented
     ON_LAUNCH_HOME = "打开首页",
     ON_LAUNCH_LAST = "打开上次的话题",
-    SORT = "排序",
     SEG_ALL = "全部",
     SEG_WORKING = "在做事",
     SEG_WAITING = "等人",

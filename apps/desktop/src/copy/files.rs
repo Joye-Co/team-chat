@@ -33,7 +33,6 @@ crate::copy! {
     ERR_SIGNED_OUT = "请先登录",
     ERR_OTHER = "出了点问题，请重试",
     PANEL_FILES = "文件",
-    PANEL_FILES_EMPTY = "这个话题还没有文件",
     KIND_FILE = "文件",
     KIND_IMAGE = "图片",
     KIND_PAGE = "网页",

@@ -15,9 +15,7 @@ crate::copy! {
     PAGE_ANSWERED = "{name} 在页面里回答了",
     PAGE_RETRY = "重试",
     PAGE_STOP_WAITING = "不等了",
-    PAGE_WATCH = "实时查看",
     PAGE_UPDATED_TO = "已更新到 v{n}",
     PAGE_NEWER = "有 v{n}",
     PAGE_REF_MENU = "就这里提问",
-    PAGE_REF_ADDED = "已放进话题的输入框",
 }

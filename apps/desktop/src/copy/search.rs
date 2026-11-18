@@ -32,9 +32,7 @@ crate::copy! {
     SEARCH_OFFLINE_DESC = "检查网络，连上以后重试",
     SEARCH_RETRY = "重试",
     // Status words of a palette row (2.12).
-    STATUS_NEEDS_YOU = "等你",
     STATUS_WORKING = "在做",
-    STATUS_WORKING_STEP = "在做 {step}",
     STATUS_DONE = "完成",
     STATUS_IDLE = "空闲",
     // 交代 when the query names someone who is not a member.

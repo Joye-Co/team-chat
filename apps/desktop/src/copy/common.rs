@@ -2,7 +2,6 @@
 
 crate::copy! {
     SEARCH_PLACEHOLDER = "搜索",
-    BOT_MARK = "机",
     ONLINE = "在线",
     OFFLINE = "离线",
     JUST_NOW = "刚刚",
@@ -24,8 +23,6 @@ crate::copy! {
     WEEKDAY_7 = "周日",
     TIME_UNKNOWN = "未知",
     CONNECTING = "正在连接…",
-    RECONNECTING = "连接已断开，正在重连…",
-    CONNECTION_OFFLINE = "离线",
     // §2.12, A5: one word per state, everywhere. A 话题 in progress reads
     // 在做 (with `n/m` when a member works on a plan), never 进行中.
     STATUS_IN_PROGRESS = "在做",
@@ -48,7 +45,6 @@ crate::copy! {
     CLOSE = "关闭",
     PANE_TOPIC = "详情",
     MEMBER_DEACTIVATED = "已停用",
-    MORE_ITEMS = "等 {n} 人",
     // --- v13/ux-pages: page states (COMPLETENESS.md §2.14, §2.15) ---
     PAGE_LOAD_FAILED = "连不上服务器",
     PAGE_LOAD_FAILED_LINE = "这台电脑上还没有这一页的内容，连上后会显示。",

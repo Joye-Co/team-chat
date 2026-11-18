@@ -53,7 +53,6 @@ pub mod settings;
 pub mod timeline;
 pub mod update;
 // v2 areas (1.1.0): one file per feature track, registered once here.
-pub mod appearance;
 pub mod artifact_page;
 pub mod cards_v2;
 // --- inc-cards21 ---
@@ -108,6 +107,10 @@ pub fn weekday(day: chrono::Weekday) -> &'static str {
 }
 
 /// Declares catalog entries: `copy! { KEY = "text", ... }`.
+///
+/// An entry no view reads is deleted, not kept: the test
+/// `every_entry_is_read_by_the_app` fails on one. (`allow(dead_code)` stays because
+/// some entries are read only on one system.)
 #[macro_export]
 macro_rules! copy {
     ($($name:ident = $text:expr),* $(,)?) => {
@@ -276,11 +279,6 @@ pub const SECTIONS: &[Section] = &[
     Section {
         name: "artifact_page",
         entries: artifact_page::ENTRIES,
-        developer: false,
-    },
-    Section {
-        name: "appearance",
-        entries: appearance::ENTRIES,
         developer: false,
     },
     Section {
@@ -745,6 +743,59 @@ mod tests {
     fn the_weekday_table_starts_on_monday() {
         assert_eq!(weekday(chrono::Weekday::Mon), "周一");
         assert_eq!(weekday(chrono::Weekday::Sun), "周日");
+    }
+
+    /// Every identifier in the app's source outside the catalog files (`mod.rs`
+    /// counts: it reads the weekday table), and in `build.rs`.
+    fn identifiers_outside_the_catalog() -> HashSet<String> {
+        fn walk(dir: &std::path::Path, catalog: &std::path::Path, out: &mut HashSet<String>) {
+            for entry in std::fs::read_dir(dir).expect("a source folder") {
+                let path = entry.expect("a source file").path();
+                if path.is_dir() {
+                    walk(&path, catalog, out);
+                } else if path.extension().is_some_and(|e| e == "rs")
+                    && (path.parent() != Some(catalog)
+                        || path.file_name().is_some_and(|n| n == "mod.rs"))
+                {
+                    read(&path, out);
+                }
+            }
+        }
+        fn read(path: &std::path::Path, out: &mut HashSet<String>) {
+            let source = std::fs::read_to_string(path).expect("a source file");
+            out.extend(
+                source
+                    .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                    .filter(|word| word.starts_with(|c: char| c.is_ascii_uppercase()))
+                    .map(str::to_string),
+            );
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut out = HashSet::new();
+        walk(&root.join("src"), &root.join("src/copy"), &mut out);
+        read(&root.join("build.rs"), &mut out);
+        out
+    }
+
+    /// An entry nothing reads only misleads the next writer with an old wording, so
+    /// the catalog holds none. The check goes by the key's name, so a key that two
+    /// sections share passes when either is read.
+    #[test]
+    fn every_entry_is_read_by_the_app() {
+        let used = identifiers_outside_the_catalog();
+        let mut unread = Vec::new();
+        for section in SECTIONS {
+            for (key, _) in section.entries {
+                if !used.contains(*key) {
+                    unread.push(format!("{}::{key}", section.name));
+                }
+            }
+        }
+        assert!(
+            unread.is_empty(),
+            "catalog entries nothing reads (delete them):\n{}",
+            unread.join("\n")
+        );
     }
 
     #[test]
