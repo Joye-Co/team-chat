@@ -319,7 +319,6 @@ crate::copy! {
     MACHINE_PARALLEL_HINT = "按这台电脑的内存和处理器来定，超出的事会排队。",
     MACHINE_PARALLEL_RANGE = "填 1 到 {max} 之间的整数",
     MACHINE_PARALLEL_OLD = "这台电脑上运行的版本较旧，现在最多同时做 {n} 件。\n更新后会按你填的数字来。",
-    MACHINE_PARALLEL_FACT = "最多同时做 {n} 件事",
     MACHINE_REMOVE = "移除…",
     MACHINE_REMOVE_TITLE = "移除这台电脑？",
     MACHINE_REMOVE_BODY = "AI 成员不会再到「{name}」上干活。想再用它，要在那台电脑上重新安装。",

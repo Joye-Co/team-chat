@@ -1004,6 +1004,7 @@ pub struct ItemRow {
     title: SharedString,
     title_lead: Option<AnyElement>,
     description: Option<SharedString>,
+    facts: Vec<SharedString>,
     meta: Option<SharedString>,
     value: Option<AnyElement>,
     menu: Option<AnyElement>,
@@ -1018,6 +1019,7 @@ impl ItemRow {
             title: title.into(),
             title_lead: None,
             description: None,
+            facts: Vec::new(),
             meta: None,
             value: None,
             menu: None,
@@ -1044,6 +1046,14 @@ impl ItemRow {
         self
     }
 
+    /// The second line as separate facts, most important first: a line too
+    /// long for the row ends after a whole fact, so a label never loses its
+    /// value (2.21).
+    pub fn facts(mut self, facts: Vec<String>) -> Self {
+        self.facts = facts.into_iter().map(SharedString::from).collect();
+        self
+    }
+
     /// A 12 muted tabular meta in front of the value column (a time).
     pub fn meta(mut self, text: impl Into<SharedString>) -> Self {
         self.meta = Some(text.into());
@@ -1067,12 +1077,68 @@ impl ItemRow {
     }
 }
 
+/// One line of `facts` joined by middle dots. A fact that does not fit wraps
+/// onto a second line the box clips, so the line ends on a fact boundary; the
+/// whole text is in a tooltip only when something was cut (2.21).
+fn fact_line(id: ElementId, facts: &[SharedString]) -> gpui::Stateful<Div> {
+    use crate::ui::{
+        native::tokens,
+        truncate::{any_cut, cut_line, text_tip},
+    };
+    use gpui::{AppContext as _, InteractiveElement as _, StatefulInteractiveElement as _};
+    let separator = format!(" {} ", crate::copy::native_kit::MIDDLE_DOT);
+    let whole: SharedString = facts.join(separator.as_str()).into();
+    let (segments, lines): (Vec<_>, Vec<_>) = facts
+        .iter()
+        .enumerate()
+        .map(|(i, fact)| {
+            let text = if i == 0 {
+                fact.to_string()
+            } else {
+                format!("{separator}{fact}")
+            };
+            let (styled, layout) = cut_line(text);
+            (
+                div()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .child(styled),
+                layout,
+            )
+        })
+        .unzip();
+    let wrapped = std::rc::Rc::new(std::cell::Cell::new(false));
+    let seen = wrapped.clone();
+    div()
+        .w_full()
+        .min_w_0()
+        .h(tokens::text::SUBHEADLINE.1)
+        .overflow_hidden()
+        .flex()
+        .flex_wrap()
+        .children(segments)
+        .on_children_prepainted(move |bounds, _, _| {
+            let first = bounds.first().map(|b| b.origin.y);
+            seen.set(bounds.iter().any(|b| Some(b.origin.y) != first));
+        })
+        .id(id)
+        .tooltip(move |window, cx| {
+            if wrapped.get() || any_cut(&lines) {
+                text_tip(whole.clone()).build(window, cx)
+            } else {
+                cx.new(|_| gpui::Empty).into()
+            }
+        })
+}
+
 impl gpui::RenderOnce for ItemRow {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         use crate::ui::native::{NativeType as _, metrics, native_colors, tokens};
         use gpui::InteractiveElement as _;
         let k = native_colors(cx);
-        let two_line = self.description.is_some();
+        let two_line = self.description.is_some() || !self.facts.is_empty();
         // TruncText: one line, "…", the full value in a tooltip only when
         // the line was cut (2.21).
         let title = crate::ui::truncate::TruncText::new(self.title.clone())
@@ -1084,6 +1150,18 @@ impl gpui::RenderOnce for ItemRow {
                 .id(ElementId::Name(format!("{}-desc", self.id).into()))
                 .n_subheadline()
                 .text_color(k.secondary)
+                .into_any_element()
+        });
+        let description = description.or_else(|| {
+            (!self.facts.is_empty()).then(|| {
+                fact_line(
+                    ElementId::Name(format!("{}-desc", self.id).into()),
+                    &self.facts,
+                )
+                .n_subheadline()
+                .text_color(k.secondary)
+                .into_any_element()
+            })
         });
         div()
             .id(self.id)
