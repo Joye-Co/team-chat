@@ -85,10 +85,10 @@ struct BottomEdge {
 }
 
 /// How much of the list's bottom a row must clear to be read whole: the fade,
-/// and while the 下面还有 pill shows, the band under the pill as well.
+/// or while the 下面还有 pill shows, the band under the pill and its soft edge.
 fn bottom_clear(pill: bool) -> gpui::Pixels {
     if pill {
-        space::S24 + metrics::SIDEBAR_WAITING_BAND
+        metrics::SIDEBAR_WAITING_FADE + metrics::SIDEBAR_WAITING_BAND
     } else {
         space::S24
     }
@@ -772,8 +772,9 @@ impl RailView {
 
     /// The pill over the list's bottom edge: `n` rows below wait on me, and
     /// a click scrolls to the first (row `ix`). It stands on an opaque band
-    /// that hides the rows it says are below; a taller row fades out above
-    /// the band (A4). The wheel still scrolls the list through the band.
+    /// that hides the rows it says are below; only the band's top edge is
+    /// soft, so a row above it never reads as dimmed (A4). The wheel still
+    /// scrolls the list through the band.
     fn waiting_below(&self, ix: usize, n: usize, cx: &mut Context<Self>) -> AnyElement {
         use crate::ui::{
             icons::sym as sym_icon,
@@ -789,11 +790,15 @@ impl RailView {
             .bottom_0()
             .flex()
             .flex_col()
-            .child(div().h(space::S24).bg(gpui::linear_gradient(
-                0.,
-                gpui::linear_color_stop(fill, 0.),
-                gpui::linear_color_stop(fill.opacity(0.), 1.),
-            )))
+            .child(
+                div()
+                    .h(metrics::SIDEBAR_WAITING_FADE)
+                    .bg(gpui::linear_gradient(
+                        0.,
+                        gpui::linear_color_stop(fill, 0.),
+                        gpui::linear_color_stop(fill.opacity(0.), 1.),
+                    )),
+            )
             .child(
                 div()
                     .id("rail-waiting-band")
@@ -1592,9 +1597,10 @@ mod tests {
             let row = this.list.bounds_for_item(ix).expect("the row is drawn");
             let bottom = this.list.viewport_bounds().bottom();
             assert!(row.bottom() <= bottom);
-            // A pill still up for other rows does not stand on the row it brought in.
+            // A pill still up for other rows neither stands on the row it
+            // brought in nor fades it: the row ends above the band's soft edge.
             if this.bottom_edge.get().waiting.is_some() {
-                assert!(row.bottom() <= bottom - metrics::SIDEBAR_WAITING_BAND);
+                assert!(row.bottom() <= bottom - bottom_clear(true));
             }
         });
         assert_ne!(

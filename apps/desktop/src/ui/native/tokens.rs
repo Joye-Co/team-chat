@@ -1020,6 +1020,8 @@ pub mod metrics {
     pub const SIDEBAR_ROW_INSET: Pixels = space::S8;
     /// The opaque band under the 下面还有 pill: one row plus the 4 below the pill.
     pub const SIDEBAR_WAITING_BAND: Pixels = px(36.);
+    /// The soft top edge of that band: short enough to leave the text of the row above it clean.
+    pub const SIDEBAR_WAITING_FADE: Pixels = space::S4;
     pub const SIDEBAR_ROW_RADIUS: Pixels = radius::CONTROL;
     pub const SIDEBAR_SLOT: Pixels = px(16.);
     pub const SIDEBAR_SYMBOL: Pixels = px(16.);
