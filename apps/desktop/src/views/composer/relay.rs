@@ -11,7 +11,7 @@ use crate::{
 /// The separators of an order on a message's first line (the server reads the same).
 pub const ARROWS: [&str; 3] = ["→", "->", "=>"];
 
-/// One line above the field, and whether it is an error (red) or a hint (muted).
+/// One line above the field, and whether it is an error (the x-circle before it) or a hint (muted).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RelayLine {
     pub text: String,

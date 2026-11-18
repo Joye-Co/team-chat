@@ -109,6 +109,60 @@ pub fn fit(lead: &str, part: &str, max: f32) -> (String, String) {
     )
 }
 
+/// The two runs of a label as they are drawn, side by side with no gap between them: the
+/// quiet lead ends with its `·` and the part starts with the one space after it, so every
+/// separator of a line has the same room on both sides (` · `). A lead that [`fit`] cut
+/// ends with `…` and the part follows it directly.
+fn runs(lead: &str, part: &str) -> (String, String) {
+    let lead = lead.trim_end();
+    if lead.is_empty() || lead.ends_with('…') {
+        return (lead.to_string(), part.to_string());
+    }
+    (lead.to_string(), format!(" {part}"))
+}
+
+/// The width of a composer chip in points, close enough to count rows: the frame, the
+/// glyph, the text at 14 pt and the ×, at most 320.
+pub fn chip_width(r: &DraftRef, updated: bool) -> f32 {
+    let (lead, part) = chip_text(r);
+    let (lead, part) = runs(&lead, &part);
+    let text = (width(&lead) + width(&part)) * 14.0 / 12.0;
+    let mark = if updated {
+        width(c::UPDATED) * 14.0 / 12.0 + 6.0
+    } else {
+        0.0
+    };
+    (8.0 + 16.0 + 6.0 + text + mark + 6.0 + 28.0 + 2.0).min(320.0)
+}
+
+/// How many of the chips `widths` show in a row `room` wide with `gap` between chips, so
+/// that they and the "+N" chip of the rest stay within 2 rows (§2.17). All of them when
+/// they fit by themselves.
+pub fn shown_in_two_rows(widths: &[f32], room: f32, gap: f32) -> usize {
+    /// The "+N" chip.
+    const MORE: f32 = 44.0;
+    let rows = |ws: &mut dyn Iterator<Item = f32>| {
+        let (mut rows, mut x) = (1, 0.0_f32);
+        for w in ws {
+            let w = w.min(room);
+            if x > 0.0 && x + gap + w > room {
+                rows += 1;
+                x = w;
+            } else {
+                x += if x > 0.0 { gap } else { 0.0 } + w;
+            }
+        }
+        rows
+    };
+    if rows(&mut widths.iter().copied()) <= 2 {
+        return widths.len();
+    }
+    (1..widths.len())
+        .rev()
+        .find(|n| rows(&mut widths[..*n].iter().copied().chain([MORE])) <= 2)
+        .unwrap_or(1)
+}
+
 /// The chip's text: quiet lead, strong part, cut to 320 pt minus the glyph and ×.
 /// [`width`] counts at 12 pt and the chip draws at 14, so the room is scaled; the
 /// lead then fits by itself and its "…" sits right before the part (no gap).
@@ -134,6 +188,7 @@ pub fn composer_chip(
     let k = theme::colors(cx);
     let id: ElementId = id.into();
     let (lead, part) = chip_text(r);
+    let (lead, part) = runs(&lead, &part);
     let full = r.input.label.clone();
     div()
         .id(id.clone())
@@ -172,9 +227,10 @@ pub fn composer_chip(
                 .min_w_0()
                 .flex()
                 .items_center()
-                .gap(space::S4)
+                // No gap: the lead ends with its `·` and the part starts with the space
+                // after it, the same ` · ` as inside the part (see [`runs`]).
                 .one_line()
-                .when(!lead.trim().is_empty(), |d| {
+                .when(!lead.is_empty(), |d| {
                     // The lead gives way to the part; its own ellipsis marks the cut, so
                     // no second "…" leaves a gap before the part.
                     // `fit` already cut the lead to its room and ended it with "…";
@@ -186,7 +242,7 @@ pub fn composer_chip(
                             .overflow_hidden()
                             .whitespace_nowrap()
                             .text_ellipsis()
-                            .child(lead.trim_end().trim_end_matches('·').trim_end().to_string()),
+                            .child(lead),
                     )
                 })
                 // The part stays whole (`fit` already cut it); the lead gives way.
@@ -283,6 +339,7 @@ fn sent_line(id: ElementId, r: &BlockRef, topic: (&str, &str), cx: &App) -> AnyE
         let (l, p) = label::split(&r.source.label, lead);
         fit(l, p, 480.0)
     };
+    let (lead, part) = runs(&lead, &part);
     let draft = DraftRef {
         input: r.source.clone(),
         group_id: topic.0.to_string(),
@@ -315,21 +372,23 @@ fn sent_line(id: ElementId, r: &BlockRef, topic: (&str, &str), cx: &App) -> AnyE
                 .flex_none()
                 .child(ui::icon(glyph(&r.source), theme::icon::TAG, k.ink_3)),
         )
-        .when(!lead.trim().is_empty(), |d| {
-            d.child(
-                div()
-                    .min_w_0()
-                    .flex_shrink(1.)
-                    .one_line()
-                    .child(lead.trim_end().to_string()),
-            )
-        })
+        // The two runs sit in one box with no gap (see [`runs`]); the gap of the line is
+        // only between the glyph and the text.
         .child(
             div()
-                .flex_none()
-                .one_line()
-                .when(!deleted, |d| d.text_color(k.ink_2))
-                .child(part),
+                .min_w_0()
+                .flex()
+                .items_center()
+                .when(!lead.is_empty(), |d| {
+                    d.child(div().min_w_0().flex_shrink(1.).one_line().child(lead))
+                })
+                .child(
+                    div()
+                        .flex_none()
+                        .one_line()
+                        .when(!deleted, |d| d.text_color(k.ink_2))
+                        .child(part),
+                ),
         )
         .into_any_element()
 }
@@ -347,6 +406,7 @@ pub fn side_lines(labels: &[String], cx: &App) -> AnyElement {
             let lead = label::lead_of(l);
             let (a, b) = label::split(l, lead);
             let (a, b) = fit(a, b, 240.0);
+            let (a, b) = runs(&a, &b);
             div()
                 .flex()
                 .items_center()
@@ -355,10 +415,16 @@ pub fn side_lines(labels: &[String], cx: &App) -> AnyElement {
                 .t_meta()
                 .text_color(k.ink_3)
                 .child(ui::icon(Sym::Quote, theme::icon::TAG, k.ink_3))
-                .when(!a.trim().is_empty(), |d| {
-                    d.child(div().flex_none().one_line().child(a.trim_end().to_string()))
-                })
-                .child(div().min_w_0().one_line().text_color(k.ink_2).child(b))
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex()
+                        .items_center()
+                        .when(!a.is_empty(), |d| {
+                            d.child(div().flex_none().one_line().child(a))
+                        })
+                        .child(div().min_w_0().one_line().text_color(k.ink_2).child(b)),
+                )
         }))
         .into_any_element()
 }
@@ -448,14 +514,23 @@ pub fn capped(chips: Vec<AnyElement>, labels: &[String]) -> Vec<AnyElement> {
     if chips.len() <= SHOWN_CHIPS + 1 {
         return chips;
     }
-    let rest = chips.len() - SHOWN_CHIPS;
+    capped_at(chips, labels, SHOWN_CHIPS)
+}
+
+/// The first `shown` chips with the rest folded into one "+N" chip (see
+/// [`shown_in_two_rows`] for a count from the row's real width).
+pub fn capped_at(chips: Vec<AnyElement>, labels: &[String], shown: usize) -> Vec<AnyElement> {
+    if chips.len() <= shown {
+        return chips;
+    }
+    let rest = chips.len() - shown;
     let folded = labels
         .iter()
-        .skip(SHOWN_CHIPS)
+        .skip(shown)
         .cloned()
         .collect::<Vec<_>>()
         .join("\n");
-    let mut out: Vec<AnyElement> = chips.into_iter().take(SHOWN_CHIPS).collect();
+    let mut out: Vec<AnyElement> = chips.into_iter().take(shown).collect();
     out.push(MoreChip { rest, folded }.into_any_element());
     out
 }
