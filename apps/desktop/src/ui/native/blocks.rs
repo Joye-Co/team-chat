@@ -745,3 +745,61 @@ pub fn description_row(
 pub fn selected_weight() -> gpui::FontWeight {
     MEDIUM_WEIGHT
 }
+
+// ---------------------------------------------------------------------------
+// Sideways scroll of a code box
+
+/// One part of a code box whose lines never wrap (§2.17, D13): `inner`
+/// keeps its content width and scrolls sideways inside the part, with a
+/// scrollbar along the part's bottom edge and a 16 fade to `fill` at its right
+/// edge whenever a line is cut, so the box never reads as clipped. `inner`
+/// gets that fact (known from the frame before) to leave room for the
+/// scrollbar under its last line.
+pub fn scroll_x(
+    id: impl Into<ElementId>,
+    fill: gpui::Hsla,
+    inner: impl FnOnce(bool) -> gpui::Div,
+    window: &mut Window,
+    cx: &mut App,
+) -> gpui::Div {
+    let id = id.into();
+    let scroll = window
+        .use_keyed_state(id.clone(), cx, |_, _| gpui::ScrollHandle::new())
+        .read(cx)
+        .clone();
+    let scrolls = scroll.max_offset().x > px(0.);
+    let fade = scrolls.then(|| {
+        div()
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .right_0()
+            .w(space::S16)
+            .bg(gpui::linear_gradient(
+                90.,
+                gpui::linear_color_stop(fill.opacity(0.), 0.),
+                gpui::linear_color_stop(fill, 1.),
+            ))
+    });
+    div()
+        .relative()
+        .w_full()
+        .min_w(px(0.))
+        .child(
+            div()
+                .id(id)
+                .w_full()
+                .flex()
+                .overflow_x_scroll()
+                .restrict_scroll_to_axis()
+                .track_scroll(&scroll)
+                .child(inner(scrolls).flex_none().min_w_full()),
+        )
+        .children(fade)
+        .child(
+            div().absolute().inset_0().child(
+                gpui_component::scroll::Scrollbar::horizontal(&scroll)
+                    .mode(gpui_component::scroll::ScrollbarMode::Always),
+            ),
+        )
+}

@@ -525,7 +525,15 @@ pub(crate) fn block(
             additions,
             deletions,
             ..
-        } => diff(path.as_deref(), text, *additions, *deletions, cx),
+        } => diff(
+            ctx.id(format!("diff-{ix}")),
+            path.as_deref(),
+            text,
+            *additions,
+            *deletions,
+            window,
+            cx,
+        ),
         CardV2Block::Evidence { .. } => evidence(ctx, &[b], window, cx),
         CardV2Block::Ref { .. } => refs(ctx, &[b], cx),
         CardV2Block::Group { label, blocks, .. } => group(
@@ -2480,16 +2488,26 @@ pub(crate) fn metrics_with(
 // Diff
 
 /// A unified diff in a `sunken` well with its path and counts (cards and the 改动 pane).
+/// Line numbers and signs stay put; the code never wraps and scrolls sideways as one
+/// column, with the code box's bottom scrollbar and right fade whenever a line is cut
+/// (D13). `id` names the well's scroll state.
 pub(crate) fn diff(
+    id: impl Into<gpui::ElementId>,
     path: Option<&str>,
     text: &str,
     adds: Option<u64>,
     dels: Option<u64>,
-    cx: &App,
+    window: &mut Window,
+    cx: &mut App,
 ) -> AnyElement {
     let k = theme::colors(cx);
     let (mut old, mut new) = (0u32, 0u32);
+    // Three columns of rows of one height each: the fixed gutter, the code
+    // that scrolls, and the hunk lines drawn over both at the well's width.
+    let mut gutter: Vec<AnyElement> = Vec::new();
     let mut lines: Vec<AnyElement> = Vec::new();
+    let mut hunks: Vec<AnyElement> = Vec::new();
+    let hunk_h = m::DIFF_LINE + px(4.);
     let (mut counted_a, mut counted_d) = (0u64, 0u64);
     for raw in text.lines() {
         if raw.starts_with("+++")
@@ -2518,9 +2536,11 @@ pub(crate) fn diff(
                     .and_then(|n| n.parse().ok())
                     .unwrap_or(1);
             }
-            lines.push(
+            gutter.push(div().h(hunk_h).into_any_element());
+            lines.push(div().h(hunk_h).into_any_element());
+            hunks.push(
                 div()
-                    .h(m::DIFF_LINE + px(4.))
+                    .h(hunk_h)
                     .px(space::S12)
                     .flex()
                     .items_center()
@@ -2569,7 +2589,8 @@ pub(crate) fn diff(
                 .justify_end()
                 .child(n.map(|n| n.to_string()).unwrap_or_default())
         };
-        lines.push(
+        hunks.push(div().h(m::DIFF_LINE).into_any_element());
+        gutter.push(
             div()
                 .h(m::DIFF_LINE)
                 .flex()
@@ -2590,24 +2611,44 @@ pub(crate) fn diff(
                             sign.replace('-', "−")
                         }),
                 )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w(px(0.))
-                        .whitespace_nowrap()
-                        .overflow_hidden()
-                        .text_color(k.ink)
-                        .child(body.replace('\t', "    ")),
-                )
+                .into_any_element(),
+        );
+        lines.push(
+            div()
+                .h(m::DIFF_LINE)
+                // The room of the fade, so a line's end is readable at the
+                // end of the scroll.
+                .pr(space::S16)
+                .flex()
+                .items_center()
+                .when_some(bg, |el, bg| el.bg(bg))
+                .whitespace_nowrap()
+                .text_color(k.ink)
+                .child(body.replace('\t', "    "))
                 .into_any_element(),
         );
     }
+    let well = ui::native::native_colors(cx).sheet;
+    let code = ui::native::blocks::scroll_x(
+        id,
+        well,
+        |scrolls| {
+            div()
+                .flex()
+                .flex_col()
+                // Room for the scrollbar under the last line.
+                .when(scrolls, |el| el.pb(space::S12))
+                .children(lines)
+        },
+        window,
+        cx,
+    );
     let adds = adds.unwrap_or(counted_a);
     let dels = dels.unwrap_or(counted_d);
     // A `sunken` well with its own 1 px line (§1.7: a fill step alone is not an edge).
     div()
         .rounded(theme::radius::MD)
-        .bg(ui::native::native_colors(cx).sheet)
+        .bg(well)
         .border_1()
         .border_color(k.line)
         .overflow_hidden()
@@ -2641,13 +2682,25 @@ pub(crate) fn diff(
         }))
         .child(
             div()
+                .relative()
                 .py(space::S4)
                 .text_size(crate::ui::native::tokens::text::MONO.0)
                 .line_height(m::DIFF_LINE)
                 .code_font()
                 .flex()
-                .flex_col()
-                .children(lines),
+                .items_start()
+                .child(div().flex_none().flex().flex_col().children(gutter))
+                .child(code.flex_1())
+                .child(
+                    div()
+                        .absolute()
+                        .top(space::S4)
+                        .left_0()
+                        .right_0()
+                        .flex()
+                        .flex_col()
+                        .children(hunks),
+                ),
         )
         .into_any_element()
 }

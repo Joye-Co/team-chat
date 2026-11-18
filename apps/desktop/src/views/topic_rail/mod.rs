@@ -667,7 +667,7 @@ impl PaneView for ChangesPane {
 }
 
 impl Render for ChangesPane {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let topic = self.services.nav.read(cx).topic.clone();
         let p = &self.services.provider;
         let changes = topic.as_ref().and_then(|(g, t)| p.topic_changes(g, t));
@@ -695,7 +695,7 @@ impl Render for ChangesPane {
                 cx.notify();
             });
         });
-        native::changes_pane_body(changes, diff, &self.open, toggle, cx)
+        native::changes_pane_body(changes, diff, &self.open, toggle, window, cx)
     }
 }
 

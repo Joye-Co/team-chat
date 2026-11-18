@@ -1,8 +1,8 @@
 //! One element per process step, in product words.
 
 use gpui::{
-    AnyElement, App, ElementId, Hsla, InteractiveElement as _, IntoElement, ParentElement,
-    StatefulInteractiveElement as _, Styled, Window, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, ElementId, Hsla, IntoElement, ParentElement, Styled, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 
 use crate::{
@@ -140,61 +140,29 @@ fn mono_scroll(
     window: &mut Window,
     cx: &mut App,
 ) -> gpui::Div {
-    let scroll = window
-        .use_keyed_state(id.clone(), cx, |_, _| gpui::ScrollHandle::new())
-        .read(cx)
-        .clone();
-    // Known from the frame before: a line is wider than the box.
-    let scrolls = scroll.max_offset().x > px(0.);
     let k = theme::colors(cx);
-    let fade = div()
-        .absolute()
-        .top_0()
-        .bottom_0()
-        .right_0()
-        .w(space::S16)
-        .bg(gpui::linear_gradient(
-            90.,
-            gpui::linear_color_stop(k.code_bg.opacity(0.), 0.),
-            gpui::linear_color_stop(k.code_bg, 1.),
-        ));
-    div()
-        .relative()
-        .w_full()
-        .min_w(px(0.))
-        .child(
+    // The shared sideways scroll of a code box (also the diff well).
+    ui::native::blocks::scroll_x(
+        id,
+        k.code_bg,
+        |scrolls| {
             div()
-                .id(id)
-                .w_full()
-                .flex()
-                .overflow_x_scroll()
-                .restrict_scroll_to_axis()
-                .track_scroll(&scroll)
-                .child(
-                    div()
-                        .flex_none()
-                        .min_w_full()
-                        .pl(space::S12)
-                        .pr(space::S16)
-                        .pt(space::S8)
-                        .pb(if scrolls { space::S16 } else { space::S8 })
-                        .t_code()
-                        .whitespace_nowrap()
-                        .text_color(color)
-                        .children(
-                            text.lines()
-                                .map(|l| div().child(l.to_string()))
-                                .collect::<Vec<_>>(),
-                        ),
-                ),
-        )
-        .child(fade)
-        .child(
-            div().absolute().inset_0().child(
-                gpui_component::scroll::Scrollbar::horizontal(&scroll)
-                    .mode(gpui_component::scroll::ScrollbarMode::Always),
-            ),
-        )
+                .pl(space::S12)
+                .pr(space::S16)
+                .pt(space::S8)
+                .pb(if scrolls { space::S16 } else { space::S8 })
+                .t_code()
+                .whitespace_nowrap()
+                .text_color(color)
+                .children(
+                    text.lines()
+                        .map(|l| div().child(l.to_string()))
+                        .collect::<Vec<_>>(),
+                )
+        },
+        window,
+        cx,
+    )
 }
 
 /// A command and what it printed in one code box: the command on top, its output under a

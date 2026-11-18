@@ -98,7 +98,8 @@ pub(super) fn changes_pane_body(
     diff: Option<crate::data::v2::TopicDiff>,
     open: &std::collections::HashSet<String>,
     toggle: ToggleFile,
-    cx: &App,
+    window: &mut gpui::Window,
+    cx: &mut App,
 ) -> AnyElement {
     use crate::ui::native::{PushSize, PushStyle, metrics, push_button};
     let k = native_colors(cx);
@@ -211,7 +212,7 @@ pub(super) fn changes_pane_body(
         ))
         .children(checks)
         .children(browser);
-    let files = changed_files(diff, open, toggle, cx);
+    let files = changed_files(diff, open, toggle, window, cx);
     div()
         .id("changes-pane")
         .size_full()
@@ -244,7 +245,8 @@ fn changed_files(
     diff: Option<crate::data::v2::TopicDiff>,
     open: &std::collections::HashSet<String>,
     toggle: ToggleFile,
-    cx: &App,
+    window: &mut gpui::Window,
+    cx: &mut App,
 ) -> AnyElement {
     use crate::data::v2::TopicDiff;
     let k = native_colors(cx);
@@ -321,7 +323,13 @@ fn changed_files(
                     // The row above names the file and its counts: the
                     // patch has no header of its own.
                     .child(crate::views::cards::v2::blocks::diff(
-                        None, p, None, None, cx,
+                        gpui::ElementId::Name(format!("changes-diff-{i}").into()),
+                        None,
+                        p,
+                        None,
+                        None,
+                        window,
+                        cx,
                     ))
                     .into_any_element(),
                 None => div()
