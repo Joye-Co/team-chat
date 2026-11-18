@@ -661,11 +661,14 @@ pub fn date_field(
     }
     let focused = state.focus_handle(cx).contains_focused(window, cx);
     (
-        // The box has the padding: the picker's own would push the text off the field column.
+        // The picker starts on the field's outer edge, so its calendar opens in line with the
+        // field; its leading padding keeps the text on the field column.
         div()
-            .mx(-space::S8)
+            .ml(-(metrics::FIELD_PAD + metrics::HAIRLINE))
+            .mr(-space::S8)
             .child(
                 DatePicker::new(&state)
+                    .pl(metrics::FIELD_PAD + metrics::HAIRLINE - space::S8)
                     .appearance(false)
                     // A date can be taken back: a required field then says it is missing.
                     .cleanable(true)
