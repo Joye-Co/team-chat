@@ -193,11 +193,42 @@ pub fn highlighter() -> Highlighter {
 
 /// [`highlighter`] that also fills the ⌘F matches of `marks` behind the code. A folded
 /// fence draws the first lines of its code: the marks past the cut are dropped.
+///
+/// The same marks get the same `Arc`: a code block keeps its highlights only while its
+/// highlighter is the same one, and a row is built on every frame.
 pub fn marked_highlighter(marks: Vec<super::CodeMark>) -> Highlighter {
     let base = highlighter();
     if marks.is_empty() {
         return base;
     }
+    MARKED.with(|built| {
+        let mut built = built.borrow_mut();
+        let known = built
+            .iter()
+            .find(|(b, m, _)| Arc::ptr_eq(b, &base) && *m == marks);
+        if let Some((_, _, marked)) = known {
+            return marked.clone();
+        }
+        let marked = fill_marks(base.clone(), marks.clone());
+        if built.len() == MARKED_KEPT {
+            built.remove(0);
+        }
+        built.push((base, marks, marked.clone()));
+        marked
+    })
+}
+
+/// How many marked highlighters stay built: more than the rows a window shows.
+const MARKED_KEPT: usize = 32;
+
+thread_local! {
+    /// The marked highlighters in use: the base, the marks and what they built.
+    static MARKED: RefCell<Vec<(Highlighter, Vec<super::CodeMark>, Highlighter)>> =
+        const { RefCell::new(Vec::new()) };
+}
+
+/// `base` with the fills of `marks` over its spans.
+fn fill_marks(base: Highlighter, marks: Vec<super::CodeMark>) -> Highlighter {
     Arc::new(move |block: &CodeBlock| {
         let code = block.code();
         let shown = code.trim_end();
