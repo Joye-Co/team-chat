@@ -1,6 +1,6 @@
 // The posted result leaves out the `acceptance` block: the done card shows the criteria.
 import { describe, expect, it } from "vitest";
-import { buildPrompt, stripAcceptance } from "../src/bots/dispatch";
+import { MESSAGE_FORMS_RULE, buildPrompt, stripAcceptance } from "../src/bots/dispatch";
 
 describe("stripAcceptance", () => {
   it("drops closed acceptance fences and keeps the rest", () => {
@@ -54,6 +54,14 @@ describe("the first rule of a run's prompt", () => {
     expect(prompt).toContain("goes into a 产出 or a card before you end");
     expect(prompt).toContain("one or two sentences, in the language of the request");
     expect(prompt).not.toContain("posted into the topic as is");
+  });
+
+  it("says what a message draws and where it is folded, with or without chat-run", () => {
+    for (const prompt of [buildPrompt(base), buildPrompt({ ...base, context: "[#1 m M · a · now] hi", contextTools: true })]) {
+      expect(prompt).toContain(MESSAGE_FORMS_RULE);
+    }
+    expect(MESSAGE_FORMS_RULE).toContain("at most 4 `mermaid` diagrams");
+    expect(MESSAGE_FORMS_RULE).toContain("put the conclusion first");
   });
 
   it("keeps the short rule where there is no chat-run to make one with", () => {

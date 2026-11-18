@@ -665,6 +665,13 @@ export const RESULT_FORM_RULE =
   "Your last message is the result people read first: one or two sentences, in the language of the request. Anything longer (a report, a table, a comparison, a design, a list of findings) goes into a 产出 or a card before you end; the last message then only names it and says what the reader still has to do.";
 
 /**
+ * What a message body draws and where the app folds it. The same sentence as `MESSAGE_FORMS` in
+ * apps/daemon/src/chat_run.rs, whose test holds it to the limits of the desktop app.
+ */
+export const MESSAGE_FORMS_RULE =
+  "A message draws Markdown tables, code fences with a language and at most 4 `mermaid` diagrams. A code fence over 30 lines is folded to 24, and a finished answer over about 60 rows or 4,000 characters to its first blocks: put the conclusion first.";
+
+/**
  * The text without its fenced `acceptance` blocks (the daemon already sent them as the run's
  * acceptance criteria, which the done card shows). An unclosed fence stays as it is.
  */
@@ -720,6 +727,7 @@ export function buildPrompt(opts: {
   const lines = [
     `You are ${opts.botName}, a member of a team chat. You were asked to work in the topic "${opts.title}".`,
     opts.contextTools ? RESULT_FORM_RULE : RESULT_RULE,
+    MESSAGE_FORMS_RULE,
     "People also watch what you say while you work: write those lines in the language of the request too.",
     ...(opts.acceptance ? [ACCEPTANCE_RULE] : []),
     ...(opts.refs ? [REFS_RULE] : []),

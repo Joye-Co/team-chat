@@ -66,6 +66,13 @@ const OPS: &[&str] = &[
     output_op::RUN_REPORT,
 ];
 
+/// What a message body draws and where the app folds it (desktop `diagrams::MAX_PER_MESSAGE` and
+/// `metrics::CODE_FOLD_*`, `BODY_FOLD_*`). The server's prompt says the same sentence
+/// (`MESSAGE_FORMS_RULE` in server/src/bots/dispatch.ts); a test holds all three together.
+const MESSAGE_FORMS: &str = "A message draws Markdown tables, code fences with a language and at \
+most 4 `mermaid` diagrams. A code fence over 30 lines is folded to 24, and a finished answer over \
+about 60 rows or 4,000 characters to its first blocks: put the conclusion first.";
+
 /// The note the CLI gets in its system prompt (Claude Code `--append-system-prompt`, Codex
 /// `developerInstructions`, ACP the first prompt).
 pub fn note() -> String {
@@ -81,6 +88,7 @@ Choose the form before you answer. Plain text is for an answer of a few sentence
 (HTML), never a long message.
 - something people fill in or act on together (a checklist, a sign-up, a board): a two-way 产出 page.
 - a flow, a sequence, states or a timeline: a `mermaid` fence in your message is drawn as a picture.
+{forms}
 After an answer or an event, patch that card or push that page's data; do not post a new message \
 for it.
 
@@ -137,8 +145,7 @@ reads them), person for the requester's preferences, group for conventions peopl
 `--source` the id of the person's message that says it (without one it stays your own). `chat-run memory search --query <words>` finds what the prompt \
 left out, with ids to cite.
 
-Hand over or give out work: before `handoff` or `assign`, read who is in the group with `chat-run \
-member list`. Hand the whole work over only when another AI member should do it: \
+Hand over or give out work: read `chat-run member list` first. Hand all of it over only when another AI member should do it: \
 `chat-run handoff --member <name> --goal <text> [--done-when \"check; check\"] [--notes <text>]`, \
 push your branch first, then stop. Give a part out with `chat-run assign --member <name> --goal \
 <text> ...`: it is done in its own topic and its result comes back to you as input by itself, so \
@@ -148,8 +155,7 @@ other members: what they need goes into your result or a 产出.
 Ending the run: deliver first, then speak: a result of more than a few sentences goes into a \
 产出 (or an `info` card for numbers) before your last message. Your last message becomes the \
 result card, shown with the 产出 at its top: say in one or two sentences what you made, then only \
-what the reader still has to do or check. Do not retell what the 产出 or a card shows and do not \
-list the steps you took. Before you stop, say how it ended with `chat-run report --state \
+what the reader still has to do or check. Do not retell the 产出 or a card, or list your steps. Before you stop, say how it ended with `chat-run report --state \
 done|blocked|waiting --text <one line>`: blocked when you cannot go on without something, waiting \
 when you wait for a person's answer. `chat-run \
 --help` shows every command.",
@@ -157,6 +163,7 @@ when you wait for a person's answer. `chat-run \
         scheme = crate::product::url_scheme(),
         auto = crate::product::auto_prefix(),
         blocks = crate::chat_run_cards::block_groups(),
+        forms = MESSAGE_FORMS,
     )
 }
 
@@ -3268,6 +3275,30 @@ make the ops for what it holds now and give its rev as --base-rev"
         // note before them had 5 472 characters; a quarter more (6 840) is the budget.
         let chars = n.chars().count();
         assert!(chars <= 6_840, "the note has {chars} characters");
+    }
+
+    #[test]
+    fn the_note_says_what_a_message_draws_with_the_limits_of_the_app() {
+        let source = |path: &str| {
+            let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            std::fs::read_to_string(root.join(path)).unwrap_or_else(|e| panic!("{path}: {e}"))
+        };
+        assert!(note().contains(MESSAGE_FORMS));
+        let one_line = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            source("server/src/bots/dispatch.ts").contains(&one_line(MESSAGE_FORMS)),
+            "the server's prompt says something else"
+        );
+        let tokens = source("apps/desktop/src/ui/native/tokens.rs");
+        for needle in [
+            "CODE_FOLD_OVER: usize = 30;",
+            "CODE_FOLD_LINES: usize = 24;",
+            "BODY_FOLD_OVER: usize = 60;",
+            "BODY_FOLD_CHARS: usize = 4000;",
+        ] {
+            assert!(tokens.contains(needle), "the app no longer says {needle}");
+        }
+        assert!(source("apps/desktop/src/diagrams/mod.rs").contains("MAX_PER_MESSAGE: usize = 4;"));
     }
 
     #[test]
