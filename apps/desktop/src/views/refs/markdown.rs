@@ -481,8 +481,8 @@ fn growing_column(columns: &[String], rows: &[Vec<String>], right: &[bool]) -> u
 /// A table (§2.7): a frame (radius 10, 1 px border), a header row h40 on the muted fill
 /// (12 medium muted, compact in a thread), rows h40 with a line between them, cells px 12
 /// (16 at the frame's edges). The text column with the longest content takes the free
-/// width, so the columns fill the frame; number columns keep the width of their longest value and never
-/// truncate. A table wider than the frame scrolls sideways inside it.
+/// width, so the columns fill the frame; number columns keep the width of their longest
+/// value and never truncate. A table wider than the frame scrolls sideways inside it.
 pub fn table(
     key: &str,
     columns: &[String],

@@ -208,7 +208,8 @@ pub fn ring(radius: gpui::Pixels, cx: &App) -> gpui::Div {
 /// The focus ring of a whole block: [`ring`] with 6 pt of clear space around the block,
 /// so its content never touches the line. It stays inside the 12 pt between blocks.
 fn block_ring(radius: gpui::Pixels, cx: &App) -> gpui::Div {
-    let reach = crate::ui::native::tokens::space::S6 + px(3.);
+    use crate::ui::native::tokens::{metrics::FOCUS_RING, space};
+    let reach = space::S6 + FOCUS_RING;
     ring(radius, cx)
         .top(-reach)
         .bottom(-reach)
