@@ -3479,7 +3479,7 @@ mod tests {
         );
         assert_eq!(
             placement_hint(Some("chen"), &list, team, person).as_deref(),
-            Some("这位成员在陈晨的电脑上，只做陈晨交代的事，只有陈晨能改。")
+            Some("这位成员在陈晨的电脑上，只做陈晨交代的事。只有陈晨能换电脑。")
         );
         assert_eq!(placement_hint(Some("t"), &list, team, person), None);
         // One person alone: nothing about whose.
