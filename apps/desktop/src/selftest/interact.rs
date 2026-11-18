@@ -81,7 +81,7 @@ const STEPS: &[(&str, Steps)] = &[
     // ⇧Tab from the window root: the pane and the composer take the first eight, then the
     // card from its end.
     ("refs-card-keyboard-bar", keys(&[BACK; 11])),
-    ("refs-card-keyboard-tabs", keys(&[BACK; 24])),
+    ("refs-card-keyboard-tabs", keys(&[BACK; 27])),
     ("refs-card-keyboard-metric", keys(&[BACK; 28])),
     ("refs-card-keyboard-point", keys(&[BACK; 14])),
     ("refs-card-keyboard-sort", keys(&[BACK; 9])),
