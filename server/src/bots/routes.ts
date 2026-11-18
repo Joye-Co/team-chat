@@ -263,16 +263,6 @@ export function registerBotRoutes(): void {
     path: "/v1/bots/:id/runner",
     auth: "owner",
     async handler({ env, params, auth }) {
-      // Taking an AI member off a personal machine is its owner's call, like placing it there.
-      const placed = await env.DB.prepare(
-        `SELECT m.owner_id FROM bot_runners r JOIN machines m ON m.id = r.machine_id AND m.revoked_at IS NULL
-         WHERE r.member_id = ?`,
-      )
-        .bind(params.id)
-        .first<{ owner_id: string | null }>();
-      if (placed?.owner_id && placed.owner_id !== (auth as AuthContext).memberId) {
-        throw new ApiError("forbidden", "only its owner takes an AI member off a personal machine", "machine.not_yours");
-      }
       const res = await env.DB.batch([
         env.DB.prepare("DELETE FROM bot_runners WHERE member_id = ?").bind(params.id),
         auditStatement(env.DB, auth as AuthContext, { action: "bot.runner.delete", target: params.id }),
