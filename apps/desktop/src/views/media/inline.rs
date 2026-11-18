@@ -1017,12 +1017,19 @@ fn audio(
                     crate::ui::native::tokens::icon::MD,
                     k.text_3,
                 ))
-                .child(footer_text)
-                .child(ui::icon(
-                    Sym::ChevronRight,
-                    crate::ui::native::tokens::icon::MD,
-                    k.text_3,
-                ))
+                // The chevron keeps to its label, as in the table card's footer.
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::S4)
+                        .child(footer_text)
+                        .child(ui::icon(
+                            Sym::ChevronRight,
+                            crate::ui::native::tokens::icon::MD,
+                            k.text_3,
+                        )),
+                )
                 .on_click(move |_, _, cx| open(&s, Opening::default(), cx))
                 .into_any_element()
         })

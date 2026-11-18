@@ -276,6 +276,10 @@ pub fn hover_button(id: &str, target: Rc<dyn Fn(&App) -> PartTarget>, cx: &App) 
         .child(
             ask_button_flat(ElementId::Name(format!("ask-{id}").into()), cx).on_click(
                 move |_, window, cx| {
+                    // Still hidden: a click here lands on nothing the person can see.
+                    if !shown {
+                        return;
+                    }
                     cx.stop_propagation();
                     ask_about(target(cx), RefIntent::Topic, window, cx);
                 },
