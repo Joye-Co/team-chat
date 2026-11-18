@@ -287,7 +287,11 @@ impl GeneralPage {
                     ],
                 )
             }
-            Some(Phase::Manual(_)) => u::BANNER_MANUAL.to_string(),
+            // The same words as the sidebar card, with the version.
+            Some(Phase::Manual(i)) => fill(
+                crate::copy::overlays::UPDATE_MANUAL_TITLE,
+                &[("version", &i.version)],
+            ),
             Some(other) => banner_text(other).unwrap_or_default(),
         };
         let title = fill(u::VERSION_TITLE, &[("version", version::CURRENT)]);
