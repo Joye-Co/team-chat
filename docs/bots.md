@@ -83,7 +83,7 @@ await bot.start();
 - **Handlers**: `onMention` (a message that mentions me), `onMessage` (any other message in a
   topic I follow), `onCardAction` (a press on one of my cards), `onCardAnswer` (1.1: an answer
   to one of my v2 cards, posted with `postCardV2`; close it with
-  `ctx.resolve`), `onEvent` (every event),
+  `ctx.markAnswered()`), `onEvent` (every event),
   `onTransient` (typing, presence, deltas). A message runs at most one of `onMention` and
   `onMessage`. My own messages and system messages run neither. Messages of other bots run
   neither either, so two bots cannot answer each other without end; `allowBotAuthors: true`
@@ -197,7 +197,7 @@ The server derives a v1 card for 1.0.x clients; an approval (no inputs) keeps it
 
 **Answers.** `onCardAnswer` gets every `card.answered` on my v2 cards, also after a restart
 (the SDK remembers its card messages and loads a card it no longer has in memory from the
-history before the handler runs, so `ctx.card`, `ctx.draft()` and `ctx.resolve()` work). A press on a v2 card by an old client arrives here too,
+history before the handler runs, so `ctx.card`, `ctx.draft()` and `ctx.markAnswered()` work). A press on a v2 card by an old client arrives here too,
 with no inputs. Type the inputs with a generic and read them with the helpers:
 
 ```ts
@@ -541,7 +541,7 @@ bun examples/echo-bot.ts          # 或者:node examples/echo-bot.ts
   (`duplicate: true`),不会重复发。聊天以外的副作用(部署、调用 API)也要自己做成幂等。
 - **处理函数**:`onMention`(@ 我的消息)、`onMessage`(我关注的话题里的其他消息)、
   `onCardAction`(有人按了我的卡片按钮)、`onCardAnswer`(1.1:有人回答了我用 `postCardV2` 发的
-  v2 卡片;用 `ctx.resolve` 关闭它)、`onEvent`(所有事件)、`onTransient`(输入中、在线、
+  v2 卡片;用 `ctx.markAnswered()` 关闭它)、`onEvent`(所有事件)、`onTransient`(输入中、在线、
   流式增量)。一条消息最多触发 `onMention` 和 `onMessage` 中的一个;我自己的消息和系统消息
   都不触发。其他机器人的消息默认也不触发,避免两个机器人互相回复停不下来;传
   `allowBotAuthors: true` 可关闭这条规则。处理函数并发运行,出错交给 `onError`。
@@ -577,7 +577,7 @@ Codex 的计划更新)生成。
   后果。固定 id 见 `CARD_IDS`:选择块 `choice`、草稿块 `draft`、按钮 `submit`/`approve`/`deny`/
   `cancel`;纯文字选项的 id 是 `o1`、`o2`……
 - **回答**:`onCardAnswer` 收到我的 v2 卡片的每个回答(重启后也能收到:内存里没有的卡片,SDK 会在处理函数运行前从历史消息加载,
-  所以 `ctx.card`、`ctx.draft()`、`ctx.resolve()` 照常可用),旧客户端按 v2 卡片的
+  所以 `ctx.card`、`ctx.draft()`、`ctx.markAnswered()` 照常可用),旧客户端按 v2 卡片的
   按钮也会到这里(没有输入)。用 `ctx.choice()`、`ctx.number(id)`、`ctx.text(id)`、`ctx.bool(id)`、
   `ctx.draft()` 读取输入,`ctx.cancelled` 表示取消,`ctx.markAnswered()` 把卡片改成已回答(rev 加 1,
   去掉按钮)。输入来自客户端,使用前要检查。
