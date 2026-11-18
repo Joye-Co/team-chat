@@ -1,7 +1,39 @@
 use daemon::config::{self, Config};
 use std::path::PathBuf;
 
-const USAGE: &str = "usage: daemon <run|doctor|install-service|uninstall-service|restart-service|example-config> [--config <file>] [--no-load] [--log-file <file>]\n       daemon caches [clear <key|all>] [--config <file>]\n       daemon private-dir <folder>";
+/// How this program was started (`<slug>-daemon`), for the text it prints.
+fn program() -> String {
+    std::env::args_os()
+        .next()
+        .map(PathBuf::from)
+        .and_then(|p| p.file_stem().map(|n| n.to_string_lossy().into_owned()))
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| format!("{}-daemon", daemon::product::slug()))
+}
+
+fn usage(program: &str) -> String {
+    format!(
+        "usage: {program} <run|doctor|install-service|uninstall-service|restart-service|example-config> [--config <file>] [--no-load] [--log-file <file>]\n       {program} caches [clear <key|all>] [--config <file>]\n       {program} private-dir <folder>\n       {program} --help | --version"
+    )
+}
+
+fn help(program: &str) -> String {
+    format!(
+        "{program} {version}: runs the bots of this computer.\n\n{usage}\n\ncommands:\n  run                     start the daemon (what the installed service runs)\n  doctor                  check the config, the server and the machine token, git and each\n                          runtime's CLI; exit code 0 when nothing is wrong\n  install-service         start the daemon by itself from now on: launchd on macOS,\n                          systemd --user on Linux, a scheduled task on Windows\n  uninstall-service       stop that daemon and remove the service\n  restart-service         Windows only: start the scheduled task's daemon again\n  example-config          print a config to start from\n  caches                  list the repository caches of a VM computer\n  caches clear <key|all>  remove one cache, or all of them\n  private-dir <folder>    make a folder that only this user can open\n  help, version           this text; the daemon's version\n\noptions:\n  --config <file>         the config to read (default: {config})\n  --no-load               install-service, uninstall-service: only write or remove the\n                          service's file; start and stop nothing\n  --log-file <file>       run, Windows only: write the log to this file\n  -h, --help              this text\n  -V, --version           the daemon's version\n",
+        version = daemon::selfupdate::VERSION,
+        usage = usage(program),
+        config = config::default_config_path().display(),
+    )
+}
+
+/// A command line that cannot be used: what was wrong, then the usage. Exit code 2.
+fn bad_usage(what: &str) -> ! {
+    let program = program();
+    exit_with(&format!(
+        "{what}\n{}\n`{program} --help` says what each one does",
+        usage(&program)
+    ))
+}
 
 fn main() {
     // The same binary is `chat-run` inside a run (a link named chat-run on the run's PATH).
@@ -24,7 +56,20 @@ fn main() {
     // Windows: CLIs installed where the user's PATH does not reach (see the function).
     daemon::sys::add_usual_program_folders();
     let mut args = std::env::args().skip(1);
-    let cmd = args.next().unwrap_or_default();
+    let Some(cmd) = args.next() else {
+        bad_usage("no command given")
+    };
+    match cmd.as_str() {
+        "--help" | "-h" | "help" => {
+            print!("{}", help(&program()));
+            return;
+        }
+        "--version" | "-V" | "version" => {
+            println!("{}", daemon::selfupdate::VERSION);
+            return;
+        }
+        _ => {}
+    }
     // The scheduled task's first action on Windows: put the program file back after an update
     // that was interrupted (daemon::selfupdate). Never an error: the daemon starts next.
     if cmd == "repair-program" {
@@ -38,7 +83,10 @@ fn main() {
     // that is already there is taken when it is private, or made private while it is still
     // empty; anything else is refused.
     if cmd == "private-dir" {
-        let dir = PathBuf::from(args.next().unwrap_or_else(|| exit_with(USAGE)));
+        let dir = PathBuf::from(
+            args.next()
+                .unwrap_or_else(|| bad_usage("private-dir needs a folder")),
+        );
         let made = daemon::sys::create_private_dir(&dir).or_else(|e| {
             let empty = std::fs::read_dir(&dir).is_ok_and(|mut d| d.next().is_none());
             if empty {
@@ -63,15 +111,20 @@ fn main() {
         match a.as_str() {
             "--config" => match args.next() {
                 Some(p) => config_path = PathBuf::from(p),
-                None => exit_with(USAGE),
+                None => bad_usage("--config needs a file"),
             },
             "--no-load" => load = false,
             "--log-file" => match args.next() {
                 Some(p) => log_file = Some(PathBuf::from(p)),
-                None => exit_with(USAGE),
+                None => bad_usage("--log-file needs a file"),
             },
+            "--help" | "-h" => {
+                print!("{}", help(&program()));
+                return;
+            }
             w if cmd == "caches" && !w.starts_with('-') => words.push(w.to_string()),
-            _ => exit_with(USAGE),
+            w if w.starts_with('-') => bad_usage(&format!("unknown option: {w}")),
+            w => bad_usage(&format!("{cmd} takes no argument: {w}")),
         }
     }
     let load_cfg = || Config::load(&config_path).unwrap_or_else(|e| exit_with(&e));
@@ -92,16 +145,13 @@ fn main() {
             {
                 exit_with(&e);
             }
+            // macOS and Linux: the service manager appends to the log for ever; a large one
+            // is moved aside before anything is written to it.
+            daemon::service::rotate_own_log();
             let cfg = load_cfg();
-            let mut problems = cfg.problems();
             // Windows: the config can hold a runtime's keys (`env`); like the token file it
             // must not be readable by other users of the machine.
-            if let Some(why) = daemon::sys::acl_problem(&config_path) {
-                problems.push(format!(
-                    "config {} must be private to this user: {why}",
-                    config_path.display()
-                ));
-            }
+            let problems = cfg.problems_at(&config_path);
             if !problems.is_empty() {
                 exit_with(&problems.join("\n"));
             }
@@ -149,7 +199,10 @@ fn main() {
         "doctor" => {
             let cfg = load_cfg();
             let rt = tokio::runtime::Runtime::new().unwrap_or_else(|e| exit_with(&e.to_string()));
-            let (report, ok) = rt.block_on(daemon::doctor::report(&cfg));
+            let (report, ok) = rt.block_on(async {
+                let server = daemon::doctor::check_server(&cfg).await;
+                daemon::doctor::report(&cfg, &config_path, Some(server)).await
+            });
             print!("{report}");
             std::process::exit(if ok { 0 } else { 1 });
         }
@@ -159,20 +212,14 @@ fn main() {
             // users can read, no token) is not registered: the task would start it every
             // minute and only its log would say why. launchd and systemd installs are as before.
             if cfg!(windows) {
-                let mut problems = cfg.problems();
-                if let Some(why) = daemon::sys::acl_problem(&config_path) {
-                    problems.push(format!(
-                        "config {} must be private to this user: {why}",
-                        config_path.display()
-                    ));
-                }
+                let problems = cfg.problems_at(&config_path);
                 if !problems.is_empty() {
                     exit_with(&problems.join("\n"));
                 }
             }
             let res = if cfg!(windows) {
                 std::env::current_exe()
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| format!("cannot find the daemon's own program file: {e}"))
                     .and_then(|exe| {
                         daemon::service::install_task(
                             &daemon::service::task_name(),
@@ -198,11 +245,26 @@ fn main() {
                 )
             };
             match res {
-                Ok(p) => println!("installed {}", p.display()),
+                Ok(p) => {
+                    let log = daemon::service::service_log();
+                    println!("installed {}", p.display());
+                    if load {
+                        println!("started; log: {}", log.display());
+                    } else {
+                        println!("not started (--no-load); its log will be {}", log.display());
+                    }
+                    println!(
+                        "to start it again: {}\nto stop and remove it: {} uninstall-service",
+                        daemon::service::restart_command(&program()),
+                        program()
+                    );
+                }
                 Err(e) => exit_with(&e),
             }
         }
         "uninstall-service" => {
+            // The service functions take a missing file as done: say which it was.
+            let was_installed = daemon::service::service_file().exists();
             let res = if cfg!(windows) {
                 daemon::service::uninstall_task(
                     &daemon::service::task_name(),
@@ -215,7 +277,8 @@ fn main() {
                 daemon::service::uninstall(&daemon::service::agents_dir(), load)
             };
             match res {
-                Ok(p) => println!("removed {}", p.display()),
+                Ok(p) if was_installed => println!("removed {}", p.display()),
+                Ok(p) => println!("nothing was installed at {}", p.display()),
                 Err(e) => exit_with(&e),
             }
         }
@@ -228,17 +291,34 @@ fn main() {
                 exit_with(&e);
             }
         }
+        "restart-service" => exit_with(&format!(
+            "restart-service is for the Windows scheduled task; on this system run: {}",
+            daemon::service::restart_command(&program())
+        )),
         // A VM computer's repository caches, for an administrator on the host.
         "caches" => {
             let cfg = load_cfg();
             match words.iter().map(String::as_str).collect::<Vec<_>>()[..] {
                 [] => {
-                    for c in daemon::vm_cache::list(&cfg.work_root) {
+                    let caches = daemon::vm_cache::list(&cfg.work_root);
+                    if caches.is_empty() {
+                        eprintln!("no caches in {}", cfg.work_root.display());
+                    }
+                    // The key stays the first word of each line of the output (what
+                    // `caches clear <key>` takes); the header goes to the terminal only.
+                    let width = caches.iter().map(|c| c.key.len()).max().unwrap_or(0);
+                    if !caches.is_empty() {
+                        eprintln!(
+                            "{:<width$}  {:>10}  {:<24}  REPOSITORY",
+                            "KEY", "SIZE", "LAST USED (UTC)"
+                        );
+                    }
+                    for c in &caches {
                         println!(
-                            "{}  {:>10}  {:>13}  {}",
+                            "{:<width$}  {:>10}  {:<24}  {}",
                             c.key,
-                            c.bytes,
-                            c.last_used_at,
+                            size(c.bytes),
+                            daemon::problems::stamp(c.last_used_at),
                             if c.repo.is_empty() { "-" } else { &c.repo }
                         );
                     }
@@ -255,12 +335,27 @@ fn main() {
                         std::process::exit(1);
                     }
                 }
-                _ => exit_with(USAGE),
+                _ => bad_usage(&format!("unknown caches command: {}", words.join(" "))),
             }
         }
         "example-config" => print!("{}", config::EXAMPLE),
-        _ => exit_with(USAGE),
+        _ => bad_usage(&format!("unknown command: {cmd}")),
     }
+}
+
+/// A size for people: `512 B`, `3.4 MiB`, `12.0 GiB`.
+fn size(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["KiB", "MiB", "GiB", "TiB"];
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+    let mut v = bytes as f64 / 1024.0;
+    let mut unit = 0;
+    while v >= 1024.0 && unit < UNITS.len() - 1 {
+        v /= 1024.0;
+        unit += 1;
+    }
+    format!("{v:.1} {}", UNITS[unit])
 }
 
 fn exit_with(msg: &str) -> ! {
