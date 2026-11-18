@@ -358,6 +358,9 @@ impl LoginView {
     /// Opens the server field and moves the focus into it with the whole
     /// URL selected, as a macOS field does when it takes the focus.
     fn open_server_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy() {
+            return;
+        }
         self.remember_server(cx);
         self.server_open = true;
         self.server.update(cx, |st, cx| {
@@ -401,6 +404,14 @@ impl LoginView {
     /// The address typed, trimmed and in lower case.
     fn email_text(&self, cx: &gpui::App) -> String {
         self.email.read(cx).value().trim().to_lowercase()
+    }
+
+    /// A request is out: the code is being checked or sent. The step stays
+    /// until the answer lands, so a refusal shows on the screen it belongs to.
+    fn busy(&self) -> bool {
+        self.preview_busy
+            || self.sending
+            || matches!(self.services.provider.session(), SessionState::SigningIn)
     }
 
     /// Shows `step` with the focus in its field.
@@ -649,10 +660,16 @@ impl LoginView {
     ) -> gpui::AnyElement {
         use crate::ui::native::tokens::space;
         let k = native_colors(cx);
-        let link = |id: &'static str, label: &'static str, cx: &mut Context<Self>| {
+        let quiet = |id: &'static str, label: &'static str, cx: &mut Context<Self>| {
             borderless_text(id, label, cx)
                 .text_color(k.secondary)
                 .font_weight(gpui::FontWeight::NORMAL)
+        };
+        // No link changes the step while a request is out.
+        let busy = self.busy();
+        let link = |id: &'static str, label: &'static str, cx: &mut Context<Self>| {
+            let b = quiet(id, label, cx);
+            crate::ui::native::disabled_push(b, busy, cx)
         };
         if server_step {
             let cancel = link("login-server-cancel", common::CANCEL, cx).on_click(
@@ -768,7 +785,7 @@ impl LoginView {
             .gap(space::S16)
             .child(row)
             .child(
-                link("login-add-cancel", common::CANCEL, cx)
+                quiet("login-add-cancel", common::CANCEL, cx)
                     .on_click(move |_, _, _| services.provider.cancel_add_account()),
             )
             .into_any_element()
@@ -779,9 +796,10 @@ impl Render for LoginView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         use crate::ui::native::tokens::space;
         let k = native_colors(cx);
-        let session = self.services.provider.session();
-        let signing_in =
-            self.preview_busy || self.sending || matches!(session, SessionState::SigningIn);
+        let signing_in = self.busy();
+        for code in [&self.code, &self.email_code] {
+            code.update(cx, |c, cx| c.set_busy(signing_in, cx));
+        }
         let step = self.step;
         let complete = match step {
             Step::Invite => self.input(cx).credential().is_some(),
@@ -809,6 +827,7 @@ impl Render for LoginView {
             NativeTextField::new("login-server", &self.server)
                 .size(FieldSize::Large)
                 .full_width()
+                .disabled(signing_in)
                 .error(error.is_some())
                 .into_any_element()
         } else {
@@ -817,6 +836,7 @@ impl Render for LoginView {
                 Step::Email => NativeTextField::new("login-email-field", &self.email)
                     .size(FieldSize::Large)
                     .full_width()
+                    .disabled(signing_in)
                     .error(error.is_some())
                     .into_any_element(),
                 Step::EmailCode => self.email_code.clone().into_any_element(),
@@ -934,6 +954,14 @@ impl Render for LoginView {
             }))
             .on_key_down(cx.listener(|this, e: &gpui::KeyDownEvent, window, cx| {
                 if e.keystroke.key != "escape" {
+                    return;
+                }
+                // While a request is out the step stays; 添加账号 still cancels.
+                if this.busy() {
+                    if this.step == Step::Invite && this.services.provider.adding_account() {
+                        this.services.provider.cancel_add_account();
+                        cx.stop_propagation();
+                    }
                     return;
                 }
                 // Esc goes one step back: out of the server step (the URL
