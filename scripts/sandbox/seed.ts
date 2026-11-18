@@ -17,7 +17,9 @@ import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   approvalCard,
+  blocks,
   Bot,
+  composeCard,
   decisionCard,
   draftCard,
   formCard,
@@ -276,6 +278,65 @@ flowchart LR
 
 - [x] 合并 PR #61
 - [ ] 下个版本发出后再观察一周
+`;
+
+/** Ledger's two-way 产出: the page reads its data snapshot and sends each change back as an event. */
+const BUDGET_PAGE = `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>11 月投放预算</title>
+<style>
+  ul { list-style: none; margin: 0 0 12px; padding: 0; }
+  li { display: flex; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--tc-border, #8884); }
+  li span:first-child { flex: 1; min-width: 0; }
+  li b { min-width: 72px; text-align: right; font-variant-numeric: tabular-nums; }
+  button { font: inherit; color: inherit; background: var(--tc-fill, #8882); border: 1px solid var(--tc-border, #8884);
+    border-radius: 8px; padding: 2px 10px; }
+  #total, #note { color: var(--tc-muted, #888); }
+  #note { font-size: 12px; min-height: 18px; margin: 8px 0 0; }
+</style>
+</head>
+<body>
+<h2>11 月投放预算</h2>
+<ul id="list"></ul>
+<p id="total"></p>
+<p id="note"></p>
+<script>
+  const tc = window.teamchat;
+  const canEmit = !!(tc && tc.can.emit);
+  const list = document.getElementById('list'), note = document.getElementById('note');
+  const STEP = 5000;
+  let channels = [];
+  const money = (n) => '¥' + n.toLocaleString('zh-CN');
+
+  function draw() {
+    list.replaceChildren(...channels.map((c) => {
+      const li = document.createElement('li'), name = document.createElement('span'), value = document.createElement('b');
+      name.textContent = c.name; value.textContent = money(c.amount);
+      const step = (delta, label) => {
+        const b = document.createElement('button');
+        b.textContent = label; b.disabled = !canEmit || c.amount + delta < 0;
+        b.onclick = () => {
+          const before = c.amount;
+          c.amount += delta; draw(); note.textContent = '';
+          tc.emit('budget.set', { channel: c.id, amount: c.amount })
+            .then(() => { note.textContent = '已发给 Ledger'; })
+            .catch(() => { c.amount = before; draw(); note.textContent = '没有发出去，再试一次。'; });
+        };
+        return b;
+      };
+      li.append(name, step(-STEP, '−'), value, step(STEP, '+'));
+      return li;
+    }));
+    document.getElementById('total').textContent = '合计 ' + money(channels.reduce((n, c) => n + c.amount, 0));
+  }
+
+  if (tc) tc.onData((data) => { channels = (data && data.channels) || []; draw(); });
+</script>
+</body>
+</html>
 `;
 
 export async function seed(o: SeedOptions): Promise<Json> {
@@ -567,6 +628,84 @@ export async function seed(o: SeedOptions): Promise<Json> {
       await ledger.updateTopic(report.groupId, report.topicId, { status: "done" });
     }
 
+    // 夹夹增长 / 11 月投放预算: a Card v2.1 (a row of metrics, a chart, a decision) and a two-way
+    // page with its declared events and a first data snapshot.
+    const budget = await topic("joye", growth, "11 月投放预算", "@Ledger 看下 10 月各渠道的效果，11 月预算怎么分", ["ledger"]);
+    {
+      const ledger = await as("ledger");
+      await ledger.setPlan(budget, plan(["拉各渠道数据", "做预算试算", "等 Joye 定方案"], 2, true));
+      const page = await ledger.http.publishHtml({
+        ...budget,
+        title: "11 月投放预算",
+        html: BUDGET_PAGE,
+        note: "第一版",
+        events: [
+          {
+            name: "budget.set",
+            kind: "emit",
+            label: "调整渠道预算",
+            schema: { type: "object", properties: { channel: { type: "string", maxLength: 32 }, amount: { type: "number" } }, required: ["channel", "amount"] },
+          },
+        ],
+        data: {
+          channels: [
+            { id: "weibo", name: "微博", amount: 40000 },
+            { id: "xhs", name: "小红书", amount: 45000 },
+            { id: "search", name: "搜索广告", amount: 15000 },
+          ],
+        },
+        preview: {
+          title: "11 月投放预算",
+          summary: "按渠道调整预算，改动会发给 Ledger。",
+          metrics: [
+            { label: "总预算", value: "¥100,000" },
+            { label: "渠道", value: "3 个" },
+          ],
+        },
+      });
+      await ledger.send(budget, {
+        cardV2: composeCard({
+          intent: "ask",
+          title: "11 月预算怎么分？",
+          summary: "小红书的获客成本最低，建议把预算往那边挪。",
+          ask: { from: [ids.joye], promise: "你定之前，我不会改投放计划。" },
+          blocks: [
+            blocks.row("numbers", [
+              blocks.metric({ id: "spend", label: "10 月花费", value: 92000, unit: "元", delta: 8, better: "down" }),
+              blocks.metric({ id: "signups", label: "新增用户", value: 6400, delta: 21, better: "up" }),
+              blocks.metric({ id: "cost", label: "获客成本", value: 14.4, unit: "元", delta: -11, better: "down" }),
+            ]),
+            blocks.chart({
+              id: "trend",
+              kind: "line",
+              label: "各渠道每周新增",
+              x: ["第 1 周", "第 2 周", "第 3 周", "第 4 周"],
+              series: [
+                { id: "weibo", name: "微博", values: [420, 460, 510, 480] },
+                { id: "xhs", name: "小红书", values: [510, 640, 780, 900] },
+                { id: "search", name: "搜索广告", values: [260, 250, 270, 260] },
+              ],
+              summary: "小红书四周一直在涨，微博和搜索广告基本持平。",
+              events: ["chart.select"],
+            }),
+            blocks.decision({
+              id: "plan",
+              label: "选一个方案",
+              required: true,
+              default: ["shift"],
+              options: [
+                { id: "shift", label: "往小红书挪 2 万", detail: "微博 4 万，小红书 4.5 万，搜索 1.5 万", recommended: true },
+                { id: "keep", label: "保持 10 月的分配" },
+              ],
+            }),
+            blocks.ref({ id: "sheet", label: "11 月投放预算", target: { kind: "artifact", artifactId: page.artifact.id, version: page.version.version } }),
+          ],
+          actions: [{ id: "confirm", label: "就这样", style: "primary", kind: "submit", inputs: ["plan"] }],
+        }),
+      });
+      await ledger.updateTopic(budget.groupId, budget.topicId, { status: "waiting_answer", waitingOn: [ids.joye] });
+    }
+
     // 夹夹增长 / 夹夹 4.0 需求: Tata asks 李雪 to fill a form (waits on someone else).
     const needs = await topic("tata", growth, "夹夹 4.0 需求", "收集一下用户最想要的功能。");
     await (await as("tata")).send(needs, {
@@ -654,7 +793,7 @@ export async function seed(o: SeedOptions): Promise<Json> {
       log(`order refused (${e instanceof Error ? e.message.slice(0, 80) : "error"}), sent as one request`);
       await topic("joye", dev, "设置页深色模式", "@Forge 给设置页加深色模式，做完请 @Scout 审一下", ["forge", "scout"]);
     }
-    log("topics: 16");
+    log("topics: 17");
 
     const machineId = await seedMachine(o, owner, ids, { dev, growth });
     // 电脑 with ownership (design-roles 3.3): 小王 (a 普通成员) adds his own computer, and his
