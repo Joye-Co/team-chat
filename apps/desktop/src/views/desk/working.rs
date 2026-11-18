@@ -49,7 +49,7 @@ pub fn render(
         .flex_none()
         .h(metrics::TOOLBAR_ROW)
         .pl(metrics::INSPECTOR_PAD)
-        .pr(tsp::S8)
+        .pr(metrics::TOOLBAR_TRAILING)
         .border_b_1()
         .border_color(k.separator)
         .flex()

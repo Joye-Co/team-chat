@@ -610,7 +610,7 @@ pub fn skeleton_list(
                 .children(bar.map(|b| Bone::new().h(text::META.0).w(b)))
         })
     };
-    page::frame(cx)
+    page::list_frame(cx)
         .children((0..n).map(|i| {
             let w = widths[i % widths.len()];
             div()

@@ -777,7 +777,7 @@ impl Render for GroupPage {
                         }))
                     });
                     let body = if total > 0 {
-                        page::frame(cx).children(topic_rows).children(footer)
+                        page::list_frame(cx).children(topic_rows).children(footer)
                     } else {
                         page::frame(cx).child(div().px(tsp::S16).child(page::compact_empty(
                             Sym::Topic,
@@ -802,7 +802,7 @@ impl Render for GroupPage {
                         cx,
                     )))
                 } else {
-                    page::frame(cx).children(done)
+                    page::list_frame(cx).children(done)
                 };
                 content = content.child(section(
                     page::section_header(
