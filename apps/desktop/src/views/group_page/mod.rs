@@ -34,7 +34,7 @@ use crate::{
             PushSize, PushStyle, ToolbarGroup, ToolbarItemKind, ToolbarRow, emphasized,
             native_colors,
             page::{self, PageLoad, Status},
-            push_button, toolbar_item,
+            push_button, toolbar_item, toolbar_labeled_item,
         },
         sf_symbols::{Sf, Sym},
     },
@@ -326,10 +326,9 @@ impl GroupPage {
                 PushSize::Regular,
                 cx,
             )
-            .icon(crate::ui::button_glyph(
+            .icon(crate::ui::icons::labeled_button_sym(
                 Sym::Plus,
-                crate::theme::icon::HEADER,
-                crate::theme::size::ICON_BUTTON,
+                crate::ui::SymSize::INLINE,
             )),
             !ready,
             cx,
@@ -342,11 +341,13 @@ impl GroupPage {
                 ToolbarRow::new(snap.name.clone())
                     .subtitle(subtitle)
                     .leading_inset(rows::toolbar_leading(&self.services, cx))
-                    .group(ToolbarGroup::new([toolbar_item(
+                    // D20: a toolbar item carries its word.
+                    .group(ToolbarGroup::new([toolbar_labeled_item(
                         "group-chat",
-                        Sf::ChevronLeft,
+                        Sf::Chat,
+                        c::GROUP_PAGE_CHAT,
                         c::GROUP_PAGE_BACK_TO_CHAT,
-                        ToolbarItemKind::Plain,
+                        false,
                         active,
                         window,
                         cx,
@@ -355,11 +356,12 @@ impl GroupPage {
                         let g = chat_group.clone();
                         chat_nav.update(cx, |n, cx| n.open_group_chat(g, cx))
                     })]))
-                    .group(ToolbarGroup::new([toolbar_item(
+                    .group(ToolbarGroup::new([toolbar_labeled_item(
                         "group-outputs",
                         Sf::Outputs,
                         c::GROUP_PAGE_OUTPUTS,
-                        ToolbarItemKind::Plain,
+                        c::GROUP_PAGE_OUTPUTS,
+                        false,
                         active,
                         window,
                         cx,
@@ -898,7 +900,7 @@ impl Render for GroupPage {
 /// The 群 commands of the toolbar's `ellipsis` pull-down: the same items as
 /// the 群's context menu in the sidebar (§7.3: every context-menu item also
 /// exists in the main UI). 静音 or 取消静音 and the 提醒 submenu; for a 群
-/// also 重命名群…, 添加成员… and, apart, 离开群… (it asks first).
+/// also 重命名…, 添加成员… and, apart, 离开群… (it asks first).
 fn group_menu(
     menu: gpui_component::menu::PopupMenu,
     services: &Services,

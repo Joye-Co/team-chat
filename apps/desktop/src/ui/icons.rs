@@ -174,6 +174,15 @@ pub fn button_sym(sym: Sym, size: SymSize, button: Pixels) -> Icon {
     ))
 }
 
+/// The icon of a labeled gpui-component `Button`: it draws its icon in a 16
+/// box beside the label, so the symbol comes at its true point size there.
+pub fn labeled_button_sym(sym: Sym, size: SymSize) -> Icon {
+    Icon::empty().path(super::sf_symbols::asset::path(
+        sym,
+        SymSize::new(size.point, 16., size.weight),
+    ))
+}
+
 /// An icon at a slot size and color: the concept's SF Symbol at the §6 size
 /// for that slot ([`SymSize::for_slot`]: 18 sidebar, 20 toolbar, 16 inline,
 /// 14 inline small, 24 tab).

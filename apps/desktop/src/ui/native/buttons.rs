@@ -238,11 +238,16 @@ pub fn disabled_push(b: Button, disabled: bool, _cx: &App) -> Button {
 }
 
 /// The primary of a short form that is not complete yet (the login, §2.20):
-/// inert, primary at 30 %, so it reads light and turns solid once the form
-/// is filled. Use [`disabled_push`] for any other disabled button.
-pub fn waiting_push(b: Button, waiting: bool) -> Button {
-    b.disabled(waiting)
-        .when(waiting, |b| b.opacity(metrics::PRIMARY_WAITING_OPACITY))
+/// inert, its fill primary at 30 %, so it reads light and turns solid once
+/// the form is filled. Only the fill is tinted: the label stays in the
+/// foreground color, readable on the light fill in both modes. Use
+/// [`disabled_push`] for any other disabled button.
+pub fn waiting_push(b: Button, waiting: bool, cx: &App) -> Button {
+    let k = native_colors(cx);
+    b.disabled(waiting).when(waiting, |b| {
+        b.bg(k.primary.opacity(metrics::PRIMARY_WAITING_OPACITY))
+            .text_color(k.label)
+    })
 }
 
 /// A loading button (§1.8): a 16 spinner in the icon slot, the label and
@@ -863,7 +868,9 @@ pub fn toolbar_labeled_item(
     let name = name.into();
     let (style, ink) = match (toggled, emphasized) {
         (true, _) => (PushStyle::Secondary, k.label),
-        (false, true) => (PushStyle::Ghost, k.secondary),
+        // §1.4: an item of the active window draws in the foreground; the
+        // muted fill alone says which pane is open (D20).
+        (false, true) => (PushStyle::Ghost, k.label),
         (false, false) => (PushStyle::Ghost, k.secondary),
     };
     let b = Button::new(id)
