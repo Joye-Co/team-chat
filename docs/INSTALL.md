@@ -56,8 +56,12 @@ xattr -dr com.apple.quarantine /Applications/Cahoots.app
 
 ## 4. Sign in
 
-1. Paste the invite code from your invite into the sign-in screen.
-2. Enter your name. You can change your name, 岗位 and avatar later in Settings.
+1. If your team runs its own server and its owner gave you the server address, first click
+   **使用其他服务器…** and enter that address. Otherwise leave the server as it is.
+2. Paste the invite code from your invite into the sign-in screen and click **加入**.
+
+There is no name to enter at sign-in: change your name, 岗位 and avatar afterwards in
+**设置 › 我的资料**.
 
 The invite code works once. The app swaps it for a sign-in token and keeps that token in your
 macOS Keychain, so you stay signed in after restarts. Do not share your invite code or post it
@@ -127,7 +131,8 @@ after you sign in.
 
 ## Send diagnostics
 
-When something goes wrong, open **Settings → 诊断** and send the diagnostics. They contain the
+When something goes wrong, open **设置 › 通用**, write what happened in the **诊断** section and
+click **发送诊断**. They contain the
 text you write, the app version, the kind of system and recent logs with tokens and invite codes
 removed; they do not contain your messages. Then tell your team's owner in the app what happened and at
 what time.
@@ -213,7 +218,7 @@ Paste a path with `%...%` into the address bar of File Explorer to open it.
 
 ### Send diagnostics
 
-As on the Mac: **Settings → 诊断**. If the app does not start, zip the log folder in PowerShell
+As on the Mac: **设置 › 通用**, section **诊断**, button **发送诊断**. If the app does not start, zip the log folder in PowerShell
 and send it to your team's owner another way:
 
 ```powershell
@@ -247,6 +252,24 @@ program did at each step; send it too.
    If this computer was one of the team's machines, there are also
    `%USERPROFILE%\.config\team-chat\` (the machine's identity) and
    `%LOCALAPPDATA%\team-chat-daemon\` (logs).
+
+## Troubleshooting
+
+- **"Cahoots is damaged and can't be opened"**: run the `xattr` command of step 3, then open the
+  app again.
+- **No Open Anyway button in Privacy & Security**: open the app from Applications once more, and
+  go to the settings right after the message; the button is there for about an hour after the
+  last attempt to open the app.
+- **It keeps showing 正在连接…**: check your network. If the network is fine, send diagnostics and
+  tell your team's owner.
+- **"Windows protected your PC"**: this appears while the installer is not signed. Click
+  **More info**, then **Run anyway**.
+- **邀请码不对，请检查后再试** at sign-in: the code is mistyped, already used or expired.
+  Ask your team's owner for a new one.
+- **连不上服务器，请检查地址和网络**: check the network and, when you entered the server address
+  yourself, that it is the full address starting with `https://`.
+- **这个版本太旧了，请更新应用**: download the newest version from the releases page and install it
+  over the old one.
 
 ## For maintainers
 
