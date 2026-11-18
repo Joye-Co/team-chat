@@ -803,7 +803,8 @@ fn members(
 ) -> impl IntoElement {
     let k = native_colors(cx);
     let rows = model::member_rows(d, sort, name);
-    let max_mem = rows.iter().map(|r| r.mem_bytes).max().unwrap_or(0);
+    // A bar is a share of the computer's memory, as on every other bar of these pages.
+    let mem_total = d.host.as_ref().and_then(|h| h.mem_total_bytes);
     let cols: [(SortKey, Option<gpui::Pixels>); 7] = [
         (SortKey::Name, None),
         (SortKey::Doing, Some(t::COL_COUNT)),
@@ -921,9 +922,14 @@ fn members(
                     .child(
                         cell(Some(t::COL_MEM), false)
                             .gap(space::S8)
-                            .child(div().flex_none().w(t::MEMBER_BAR_WIDTH).child(
-                                crate::ui::native::progress(model::share(r.mem_bytes, max_mem), cx),
-                            ))
+                            .when_some(mem_total, |d, total| {
+                                d.child(div().flex_none().w(t::MEMBER_BAR_WIDTH).child(
+                                    crate::ui::native::progress(
+                                        model::share(r.mem_bytes, total),
+                                        cx,
+                                    ),
+                                ))
+                            })
                             // Nothing in use reads as "—", never "0 B" (F5).
                             .child(div().flex_1().flex().justify_end().map(|d| {
                                 if r.mem_bytes == 0 {
