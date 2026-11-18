@@ -701,7 +701,7 @@ impl MemoryBoard {
             widgets::more_button(self.id(format!("more-{}", m.id)), window, cx)
                 .loading(busy)
                 .disabled(busy)
-                .dropdown_menu(move |menu, _, _| {
+                .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
                     let (edit_this, edit_item) = (this.clone(), item.clone());
                     let menu = if item.status == MemoryStatus::Retired {
                         menu
