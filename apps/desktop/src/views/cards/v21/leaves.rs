@@ -1261,8 +1261,9 @@ pub(crate) fn utc_offset(seconds: i32) -> String {
 }
 
 /// The hint of a slots block whose zone is not this computer's at the first slot: the
-/// zone's id and its offset (`Asia/Tokyo`, `UTC+9`). `local`: this computer's offset then,
-/// in seconds. `None` when both read the same clock.
+/// zone's name and its offset (按东京时间（UTC+9）), only the offset for a zone with no name
+/// in the catalog. `local`: this computer's offset then, in seconds. `None` when both read
+/// the same clock.
 pub(crate) fn zone_hint(tz: &str, at: Millis, local: i32) -> Option<String> {
     let offset = SlotZone::of(tz).offset(at)?;
     (offset != local).then(|| {

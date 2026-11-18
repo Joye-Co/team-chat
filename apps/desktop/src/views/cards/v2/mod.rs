@@ -449,8 +449,6 @@ fn has_draft(card: &CardV2) -> bool {
     })
 }
 
-/// The card has form fields (the optional note of a decision does not
-/// count: the footer draws it).
 /// A card that answers with a choice or fields draws the record line of the answer.
 fn has_record(card: &CardV2) -> bool {
     card.all_blocks()
@@ -458,6 +456,8 @@ fn has_record(card: &CardV2) -> bool {
         .any(|b| matches!(b, CardV2Block::Decision { .. } | CardV2Block::Input { .. }))
 }
 
+/// The card has form fields (the optional note of a decision does not
+/// count: the footer draws it).
 fn has_fields(card: &CardV2) -> bool {
     let note = blocks::footer_note_input(card).map(|(id, _)| id);
     card.all_blocks().iter().any(|b| match b {

@@ -177,11 +177,9 @@ pub fn table(node: &Node, b: &CardV2Block, window: &mut gpui::Window, cx: &mut A
                 .items_center()
                 .gap(space::S4)
                 .when(numeric[ci], |el| el.justify_end())
-                .when(sortable.unwrap_or(false), |el| {
-                    // The focus ring keeps air after a label that ends on the cell's edge.
-                    el.when(numeric[ci], |el| {
-                        el.relative().left(space::S4).pr(space::S4)
-                    })
+                // The focus ring keeps air after a label that ends on the cell's edge.
+                .when(sortable.unwrap_or(false) && numeric[ci], |el| {
+                    el.relative().left(space::S4).pr(space::S4)
                 })
                 .when(sortable.unwrap_or(false), |el| {
                     // A sort header is a control: a tab stop with Enter / Space, the row

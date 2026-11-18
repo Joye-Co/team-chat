@@ -5,8 +5,8 @@
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, ElementId, IntoElement, ParentElement, RenderOnce, SharedString, Styled,
-    Window, div, prelude::FluentBuilder as _,
+    AnyElement, App, ElementId, IntoElement, ParentElement, Pixels, RenderOnce, ScrollHandle,
+    SharedString, Styled, Window, div, point, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Sizable as _,
@@ -34,6 +34,7 @@ pub struct Segmented {
     segments: Vec<Segment>,
     selected: usize,
     disabled: bool,
+    reveal: Option<(ScrollHandle, Pixels)>,
     on_change: Option<Rc<dyn Fn(usize, &mut Window, &mut App)>>,
 }
 
@@ -44,8 +45,17 @@ impl Segmented {
             segments: segments.into_iter().collect(),
             selected: 0,
             disabled: false,
+            reveal: None,
             on_change: None,
         }
+    }
+
+    /// In a strip that scrolls sideways: each newly selected segment comes into `scroll`'s
+    /// view, `edge` clear of its right end (where the strip fades). Scrolling by hand stays
+    /// where it is put until the selection changes.
+    pub fn reveal_in(mut self, scroll: &ScrollHandle, edge: Pixels) -> Self {
+        self.reveal = Some((scroll.clone(), edge));
+        self
     }
 
     pub fn selected(mut self, ix: usize) -> Self {
@@ -143,7 +153,41 @@ impl RenderOnce for Segmented {
                 .into_any_element()
             })
             .collect();
+        let selected = self.selected;
+        let reveal = self.reveal.map(|(scroll, edge)| {
+            let shown = window.use_keyed_state(
+                ElementId::Name(format!("{id:?}-revealed").into()),
+                cx,
+                |_, _| None::<usize>,
+            );
+            move |items: Vec<gpui::Bounds<Pixels>>, window: &mut Window, cx: &mut App| {
+                let max = scroll.max_offset().x;
+                // Everything fits, or the strip is not measured yet.
+                if max <= px(0.) || *shown.read(cx) == Some(selected) {
+                    return;
+                }
+                let Some(item) = items.get(selected) else {
+                    return;
+                };
+                shown.update(cx, |s, _| *s = Some(selected));
+                let view = scroll.bounds();
+                let over = item.right() - (view.right() - edge);
+                let under = view.left() - item.left();
+                let shift = if under > px(0.) {
+                    under
+                } else if over > px(0.) {
+                    -over
+                } else {
+                    return;
+                };
+                let offset = scroll.offset();
+                let x = (offset.x + shift).min(px(0.)).max(-max);
+                scroll.set_offset(point(x, offset.y));
+                window.refresh();
+            }
+        });
         div()
+            .when_some(reveal, |d, reveal| d.on_children_prepainted(reveal))
             .flex_none()
             .h(metrics::SEGMENTED)
             .p(metrics::SEGMENT_INSET)

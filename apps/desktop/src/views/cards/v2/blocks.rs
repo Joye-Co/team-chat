@@ -1007,7 +1007,8 @@ pub(crate) fn table_with_refs(
         (Some(key), Some(w)) => Some((key, w)),
         _ => None,
     };
-    let fill = theme::colors(cx).bg;
+    // The fade ends in the card's own fill, in both themes.
+    let fill = ui::native::native_colors(cx).sheet;
     // The sideways scroll takes the window first; the parts below only read it.
     let scroll_state = scroller.map(|(key, w)| {
         let id = gpui::ElementId::Name(format!("{key}-scroll").into());
@@ -2128,31 +2129,19 @@ pub(crate) fn field_box(focused: bool, error: bool, height: gpui::Pixels, cx: &A
         .gap(space::S6)
 }
 
-/// [`line_input`] of a number: tabular figures against the field's right edge.
-fn number_input(field: &Field, disabled: bool, window: &mut Window, cx: &mut App) -> AnyElement {
-    let k = theme::colors(cx);
-    match field {
-        Field::Line(s) => ui::placeholder_input(
-            Input::new(s)
-                .appearance(false)
-                .disabled(disabled)
-                .with_size(gpui_component::Size::Small)
-                .px_0()
-                .py_0()
-                .text_right()
-                .n_figures()
-                .text_size(crate::ui::native::tokens::text::UI.0)
-                .line_height(px(20.))
-                .text_color(k.ink),
-            window,
-            cx,
-        ),
-        area => line_input(area, disabled, window, cx),
-    }
-}
-
 pub(crate) fn line_input(
     field: &Field,
+    disabled: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    field_input(field, false, disabled, window, cx)
+}
+
+/// The input of a field; `number`: tabular figures against the field's right edge.
+fn field_input(
+    field: &Field,
+    number: bool,
     disabled: bool,
     window: &mut Window,
     cx: &mut App,
@@ -2166,6 +2155,7 @@ pub(crate) fn line_input(
                 .with_size(gpui_component::Size::Small)
                 .px_0()
                 .py_0()
+                .when(number, |el| el.text_right().n_figures())
                 .text_size(crate::ui::native::tokens::text::UI.0)
                 .line_height(px(20.))
                 .text_color(k.ink),
@@ -2520,11 +2510,12 @@ pub(crate) fn input_control(
                 .when(number, |el| {
                     el.w(ui::native::metrics::FIELD_NUMBER_WIDTH).max_w_full()
                 })
-                .child(div().flex_1().min_w(px(0.)).child(if number {
-                    number_input(&field, !live, window, cx)
-                } else {
-                    line_input(&field, !live, window, cx)
-                }))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .child(field_input(&field, number, !live, window, cx)),
+                )
                 .when_some(unit, |el, u| {
                     el.child(
                         small(div())
