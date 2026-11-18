@@ -289,8 +289,8 @@ impl TimelineView {
         // when it can, on its own line only after a code block or a table.
         let mut mark_inline = false;
         let body: Option<AnyElement> = if deleted {
-            // A recalled message: 14 muted text, no icon (a recall is not a
-            // trash can).
+            // A recalled message (§2.7 tombstone): a 16 muted icon and 14
+            // muted text. The icon is the recall arrow, not a trash can.
             // Mine, recalled in this run: 重新编辑 puts the text back in the
             // composer.
             let reedit = self.can_reedit(message).then(|| {
@@ -311,6 +311,11 @@ impl TimelineView {
                     .gap(space::S8)
                     .t_body()
                     .text_color(colors.text_3)
+                    .child(ui::icons::icon(
+                        Sym::Undo,
+                        ui::native::tokens::icon::MD,
+                        colors.text_3,
+                    ))
                     .child(t::RECALLED)
                     .children(reedit)
                     .into_any_element(),
@@ -652,7 +657,9 @@ impl TimelineView {
             .gap(space::S12)
             // §2.6, T2-29: the hovered row gets the muted band at 50 %, so the
             // hover toolbar belongs to a row.
-            .when(v2 && hovered && !deleted, |el| {
+            // The band stays while the row's emoji picker is open: the
+            // toolbar stays too, and it must still belong to a row.
+            .when(v2 && (hovered || picking) && !deleted, |el| {
                 el.bg(crate::ui::native::native_colors(cx).fill.opacity(0.5))
             })
             // R2-12, E3: the row the arrow keys reached shows the kit's
@@ -768,7 +775,9 @@ impl TimelineView {
         ui::capsule(cx)
             .id(ElementId::Name(format!("hover-bar-{key}").into()))
             .absolute()
-            .top(px(-18.))
+            // It overlaps the row's top edge by 12, so most of it sits on
+            // its own row's name line, not on the row above.
+            .top(-space::S12)
             .right(ROW_INSET)
             .gap(space::S2)
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -1268,23 +1277,26 @@ impl TimelineView {
     /// decision v14): one row of outline sm buttons, so a short thread
     /// that stays top-anchored opens with what to do next instead of a
     /// blank column. 交代给成员 puts `@` in the composer; 添加成员… opens the
-    /// 群's add-members sheet (not in a DM); 话题信息 opens the inspector.
+    /// 群's add-members sheet; neither shows in a 私聊 (its one peer is the
+    /// member you already talk to). 详情 opens the inspector.
     fn start_actions(&self, topic: &Topic, in_group: bool, cx: &mut Context<Self>) -> AnyElement {
         use crate::ui::native::{PushSize, PushStyle, push_button};
-        let assign = push_button(
-            "start-assign",
-            t::START_ASSIGN,
-            PushStyle::Outline,
-            PushSize::Small,
-            cx,
-        )
-        .icon(ui::sym(
-            Sym::Mention,
-            ui::SymSize::INLINE,
-            theme::colors(cx).ink,
-        ))
-        .on_click(|_, window, cx| {
-            window.dispatch_action(Box::new(crate::app::MentionInComposer), cx)
+        let assign = in_group.then(|| {
+            push_button(
+                "start-assign",
+                t::START_ASSIGN,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            )
+            .icon(ui::sym(
+                Sym::Mention,
+                ui::SymSize::INLINE,
+                theme::colors(cx).ink,
+            ))
+            .on_click(|_, window, cx| {
+                window.dispatch_action(Box::new(crate::app::MentionInComposer), cx)
+            })
         });
         let add = in_group.then(|| {
             let services = self.services.clone();
@@ -1318,7 +1330,7 @@ impl TimelineView {
                 )
             })
         });
-        // A5: no 话题信息 while the inspector already shows.
+        // A5: no 详情 while the inspector already shows.
         let rail_open = matches!(
             self.services.nav.read(cx).visible_pane(),
             crate::app::RightPane::TopicRail
@@ -1344,7 +1356,8 @@ impl TimelineView {
         let info = (!rail_open && !chat).then(|| {
             push_button(
                 "start-topic-info",
-                t::START_TOPIC_INFO,
+                // The word of the toolbar item and of the pane it opens.
+                t::TOGGLE_PANEL,
                 PushStyle::Outline,
                 PushSize::Small,
                 cx,
@@ -1365,7 +1378,7 @@ impl TimelineView {
             .flex()
             .flex_wrap()
             .gap(space::S8)
-            .child(assign)
+            .children(assign)
             .children(add)
             .children(new_topic)
             .children(info)
