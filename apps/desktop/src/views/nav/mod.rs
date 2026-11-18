@@ -202,6 +202,14 @@ pub fn install(services: Services, status_item: bool, cx: &mut App) {
 
         if changes.any(|c| matches!(c, Change::Session)) {
             menus::refresh_server_menu(cx);
+            // Signed out: the unsent 新话题 message is not kept for whoever
+            // signs in next.
+            if !matches!(
+                services_of(cx).provider.session(),
+                crate::data::SessionState::SignedIn { .. }
+            ) {
+                set_new_topic_draft(None, cx);
+            }
         }
     })
     .detach();
