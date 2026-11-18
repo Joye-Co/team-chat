@@ -185,6 +185,8 @@ pub struct LoginView {
     email_error: Option<EmailError>,
     /// The server field is open (`更改`, or after an unreachable server).
     server_open: bool,
+    /// The URL when the server field opened: 取消 and Esc put it back.
+    server_before: Option<String>,
     /// Drawn inside a main window (signed out there): a sign-out moves to
     /// the login window.
     embedded: bool,
@@ -300,6 +302,7 @@ impl LoginView {
                             SessionState::SignedOut {
                                 last_error: Some(LoginError::ServerUnreachable),
                             } => {
+                                this.remember_server(cx);
                                 this.server_open = true;
                                 this.server.read(cx).focus_handle(cx).focus(window, cx);
                             }
@@ -343,6 +346,7 @@ impl LoginView {
             sending: false,
             email_error: None,
             server_open: false,
+            server_before: None,
             embedded: true,
             error: None,
             error_for: String::new(),
@@ -354,6 +358,7 @@ impl LoginView {
     /// Opens the server field and moves the focus into it with the whole
     /// URL selected, as a macOS field does when it takes the focus.
     fn open_server_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.remember_server(cx);
         self.server_open = true;
         self.server.update(cx, |st, cx| {
             let end = st.value().len();
@@ -362,6 +367,13 @@ impl LoginView {
         });
         self.sync_code(cx);
         cx.notify();
+    }
+
+    /// Keeps the URL the server step started from (once per visit of the step).
+    fn remember_server(&mut self, cx: &mut Context<Self>) {
+        if !self.server_open || self.server_before.is_none() {
+            self.server_before = Some(self.server.read(cx).value().to_string());
+        }
     }
 
     /// The text of the field that is up: the server, the code, or the email code.
@@ -395,9 +407,21 @@ impl LoginView {
     pub fn go_to(&mut self, step: Step, window: &mut Window, cx: &mut Context<Self>) {
         self.step = step;
         self.server_open = false;
+        self.server_before = None;
         self.error = None;
         self.email_error = None;
-        match step {
+        if step == Step::EmailCode {
+            self.email_code
+                .update(cx, |c, cx| c.set_value("", window, cx));
+        }
+        self.focus_step_field(window, cx);
+        self.sync_code(cx);
+        cx.notify();
+    }
+
+    /// Moves the focus into the field of the step that is up.
+    fn focus_step_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.step {
             Step::Invite => self.code.read(cx).focus_handle(cx).focus(window, cx),
             Step::Email => self.email.update(cx, |st, cx| {
                 let end = st.value().len();
@@ -405,14 +429,10 @@ impl LoginView {
                 st.set_selected_range(0..end, cx);
             }),
             Step::EmailCode => {
-                self.email_code
-                    .update(cx, |c, cx| c.set_value("", window, cx));
                 let code = self.email_code.clone();
                 code.read(cx).focus_handle(cx).focus(window, cx);
             }
         }
-        self.sync_code(cx);
-        cx.notify();
     }
 
     /// `发送验证码` (and `重新发送`): asks the server for a code at the address.
@@ -596,15 +616,27 @@ impl LoginView {
     fn continue_(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.server_open && (self.step != Step::Invite || self.input(cx).credential().is_none())
         {
-            self.close_server_field(window, cx);
+            self.close_server_field(true, window, cx);
         } else {
             self.submit(window, cx);
         }
     }
 
-    fn close_server_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let step = self.step;
-        self.go_to(step, window, cx);
+    /// Leaves the server step for the step under it, which keeps what was
+    /// typed there. `keep` (继续, Return, a named server) keeps the URL in
+    /// the field; without it (取消, Esc) the URL the step opened with is back.
+    fn close_server_field(&mut self, keep: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let before = self.server_before.take();
+        if !keep && let Some(url) = before {
+            self.server
+                .update(cx, |st, cx| st.set_value(url, window, cx));
+        }
+        self.server_open = false;
+        self.error = None;
+        self.email_error = None;
+        self.focus_step_field(window, cx);
+        self.sync_code(cx);
+        cx.notify();
     }
 
     /// The link row under 继续: on the code step `使用其他服务器…`, or a
@@ -623,8 +655,9 @@ impl LoginView {
                 .font_weight(gpui::FontWeight::NORMAL)
         };
         if server_step {
-            let cancel = link("login-server-cancel", common::CANCEL, cx)
-                .on_click(cx.listener(|this, _, window, cx| this.close_server_field(window, cx)));
+            let cancel = link("login-server-cancel", common::CANCEL, cx).on_click(
+                cx.listener(|this, _, window, cx| this.close_server_field(false, window, cx)),
+            );
             // The servers this build knows by name. On the Mac they are in the app menu's
             // 服务器 submenu, which the menu bar shows at the login window too; off the Mac
             // the login window has no menu bar, so they are links here, next to 取消.
@@ -645,7 +678,7 @@ impl LoginView {
                     link(id, label, cx).on_click(cx.listener(move |this, _, window, cx| {
                         this.server
                             .update(cx, |st, cx| st.set_value(url.to_string(), window, cx));
-                        this.close_server_field(window, cx);
+                        this.close_server_field(true, window, cx);
                     }))
                 }))
                 .child(cancel)
@@ -902,8 +935,15 @@ impl Render for LoginView {
                 if e.keystroke.key != "escape" {
                     return;
                 }
+                // Esc goes one step back: out of the server step (the URL
+                // as it was), from the email code to the address, from the
+                // address to the invite code; then it cancels 添加账号.
                 if this.server_open {
-                    this.close_server_field(window, cx);
+                    this.close_server_field(false, window, cx);
+                } else if this.step == Step::EmailCode {
+                    this.go_to(Step::Email, window, cx);
+                } else if this.step == Step::Email {
+                    this.go_to(Step::Invite, window, cx);
                 } else if this.services.provider.adding_account() {
                     this.services.provider.cancel_add_account();
                 } else {
@@ -1181,5 +1221,87 @@ mod tests {
     fn server_line_shows_the_host() {
         assert_eq!(server_host("https://team.joye.co/"), "team.joye.co");
         assert_eq!(server_host("http://127.0.0.1:8787"), "127.0.0.1:8787");
+    }
+}
+
+#[cfg(test)]
+mod flow_tests {
+    use std::sync::Arc;
+
+    use gpui::{TestAppContext, VisualTestContext};
+
+    use super::*;
+    use crate::{data::ChatProvider, fake::FakeProvider};
+
+    fn open(cx: &mut TestAppContext) -> (Entity<LoginView>, &mut VisualTestContext) {
+        cx.update(gpui_component::init);
+        let provider: Arc<dyn ChatProvider> = FakeProvider::new();
+        let (view, cx) = cx.add_window_view(move |window, cx| {
+            LoginView::new(Services::new(provider, cx), window, cx)
+        });
+        cx.run_until_parked();
+        (view, cx)
+    }
+
+    fn server(view: &Entity<LoginView>, cx: &mut VisualTestContext) -> String {
+        view.update(cx, |v, cx| v.server.read(cx).value().to_string())
+    }
+
+    fn type_server(view: &Entity<LoginView>, url: &str, cx: &mut VisualTestContext) {
+        view.update_in(cx, |v, window, cx| {
+            v.open_server_field(window, cx);
+            v.server
+                .update(cx, |st, cx| st.set_value(url.to_string(), window, cx));
+        });
+    }
+
+    /// 取消 and Esc put the URL back as it was; 继续 keeps the edit.
+    #[gpui::test]
+    fn cancel_on_the_server_step_restores_the_url(cx: &mut TestAppContext) {
+        let (view, cx) = open(cx);
+        let before = server(&view, cx);
+
+        type_server(&view, "https://half-typed", cx);
+        view.update_in(cx, |v, window, cx| v.close_server_field(false, window, cx));
+        assert_eq!(server(&view, cx), before);
+        assert!(!view.update(cx, |v, _| v.server_open));
+
+        type_server(&view, "", cx);
+        cx.run_until_parked();
+        cx.simulate_keystrokes("escape");
+        assert_eq!(server(&view, cx), before);
+        assert!(!view.update(cx, |v, _| v.server_open));
+
+        type_server(&view, "https://other.example", cx);
+        view.update_in(cx, |v, window, cx| v.continue_(window, cx));
+        assert_eq!(server(&view, cx), "https://other.example");
+        assert!(!view.update(cx, |v, _| v.server_open));
+    }
+
+    /// Leaving the server step keeps the digits typed on the email code step.
+    #[gpui::test]
+    fn the_server_step_keeps_the_email_code_typed(cx: &mut TestAppContext) {
+        let (view, cx) = open(cx);
+        view.update_in(cx, |v, window, cx| {
+            v.preview_email("a@example.com", Some("123"), window, cx)
+        });
+        type_server(&view, "https://half-typed", cx);
+        view.update_in(cx, |v, window, cx| v.close_server_field(false, window, cx));
+        assert_eq!(view.update(cx, |v, cx| v.email_code_digits(cx)), "123");
+        assert_eq!(view.update(cx, |v, _| v.step), Step::EmailCode);
+    }
+
+    /// Esc on the email steps goes one step back.
+    #[gpui::test]
+    fn escape_goes_back_from_the_email_steps(cx: &mut TestAppContext) {
+        let (view, cx) = open(cx);
+        view.update_in(cx, |v, window, cx| {
+            v.preview_email("a@example.com", Some("123"), window, cx)
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes("escape");
+        assert_eq!(view.update(cx, |v, _| v.step), Step::Email);
+        cx.simulate_keystrokes("escape");
+        assert_eq!(view.update(cx, |v, _| v.step), Step::Invite);
     }
 }
