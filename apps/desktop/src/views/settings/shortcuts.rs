@@ -186,6 +186,9 @@ impl ShortcutsPage {
             }))
         });
         div()
+            // The caps and 未设置 end on the row's value edge (2.8): the
+            // quiet button's own padding hangs past it.
+            .mr(-space::S8)
             .flex()
             .items_center()
             .gap(space::S8)
