@@ -41,7 +41,7 @@ crate::copy! {
     GROUP_PAGE_ELAPSED = "{step} · {time}",
     GROUP_PAGE_ARTIFACT_META = "v{v} · {kind} · {name}",
     GROUP_PAGE_KIND_PAGE = "网页",
-    GROUP_PAGE_KIND_FILE = "文档",
+    GROUP_PAGE_KIND_FILE = "文件",
     GROUP_PAGE_KIND_IMAGE = "图片",
     GROUP_PAGE_KIND_DECISION = "决定",
     GROUP_PAGE_MATCHES = "{n} 条",

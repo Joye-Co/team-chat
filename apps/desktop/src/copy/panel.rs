@@ -5,7 +5,6 @@ crate::copy! {
     ARTIFACTS = "产出",
     ARTIFACTS_EMPTY = "这个话题还没有产出",
     VERSION = "第 {n} 版",
-    KIND_PAGE = "页面",
     KIND_FILE = "文件",
     KIND_IMAGE = "图片",
     KIND_DECISION = "决定",
