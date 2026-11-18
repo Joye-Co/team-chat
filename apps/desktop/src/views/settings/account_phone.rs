@@ -22,8 +22,8 @@ use crate::{
         Sym,
         native::{
             CodeInput, CodeInputEvent, GroupedForm, NativeType as _, PushSize, PushStyle,
-            SectionTitle, SheetWidth, disabled_push, loading_push, metrics, native_colors,
-            push_button, sheet::sheet_status_error, tokens,
+            SectionTitle, SheetWidth, code_input_width, disabled_push, loading_push, metrics,
+            native_colors, push_button, sheet::sheet_status_error, tokens,
         },
     },
 };
@@ -421,7 +421,8 @@ impl PhoneSignIn {
                     | Offer::Loading => (common::CANCEL, PushStyle::Outline),
                     _ => (common::CANCEL, PushStyle::Ghost),
                 };
-                let close = push_button("phone-qr-close", label, style, PushSize::Regular, cx)
+                let close = push_button("phone-qr-close", label, style, PushSize::Large, cx)
+                    .w_full()
                     .on_click(move |_, window, cx| {
                         close_this.update(cx, |p, _| p.stop_offer());
                         window.close_dialog(cx)
@@ -450,9 +451,11 @@ impl PhoneSignIn {
             "phone-qr-renew",
             s::PHONE_QR_RENEW,
             PushStyle::Outline,
-            PushSize::Regular,
+            PushSize::Large,
             cx,
         )
+        .w(code_input_width(PHONE_CODE_LEN, PHONE_CODE_GROUP))
+        .max_w_full()
         .on_click(move |_, _, cx| this.update(cx, |p, cx| p.start_offer(cx)))
     }
 
@@ -655,7 +658,14 @@ fn sheet_column(
                 .justify_center()
                 .child(content),
         )
-        .children(cancel.map(|b| div().pt(tokens::space::S8).child(b)))
+        // The footer: 24 under the body, one shape with the code sheet's button.
+        .children(cancel.map(|b| {
+            div()
+                .w(code_input_width(PHONE_CODE_LEN, PHONE_CODE_GROUP))
+                .max_w_full()
+                .pt(tokens::space::S24)
+                .child(b)
+        }))
 }
 
 impl Render for PhoneSignIn {
