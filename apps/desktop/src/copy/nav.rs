@@ -39,7 +39,7 @@ crate::copy! {
     HIDE = "隐藏",
     DELETE_GROUP = "删除…",
     DELETE_GROUP_CONFIRM_TITLE = "删除这个群？",
-    DELETE_GROUP_CONFIRM_BODY = "所有成员都会失去「{name}」\n和里面的全部消息。\n删除后不能恢复。",
+    DELETE_GROUP_CONFIRM_BODY = "所有成员都会失去「{name}」\n和里面的全部话题、消息和产出。\n删除后不能恢复。",
     DELETE_OK = "删除",
     HIDE_GROUP_REFUSED = "没能隐藏这个群或私聊",
     DELETE_GROUP_REFUSED = "没能删除群",
