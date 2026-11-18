@@ -238,9 +238,25 @@ pub fn ghost_button(
 
 /// A disabled button: the same variant at 50 % (§1.8, D11), so a disabled
 /// primary never looks like Cancel.
-pub fn disabled_push(b: Button, disabled: bool, _cx: &App) -> Button {
-    b.disabled(disabled)
-        .when(disabled, |b| b.opacity(metrics::DISABLED_OPACITY))
+///
+/// A filled variant (primary, destructive) fades its fill only and keeps
+/// its label at full strength: element opacity fades each primitive on its
+/// own, so the label would be dimmed twice, once itself and once through
+/// the fill under it. The tinted and ghost variants have next to no fill,
+/// so there the opacity fades the label, which is what reads as disabled.
+pub fn disabled_push(mut b: Button, disabled: bool, cx: &App) -> Button {
+    if !disabled {
+        return b.disabled(false);
+    }
+    let k = native_colors(cx);
+    let fill = b.style().background.clone();
+    let filled = [k.primary, k.destructive_fill]
+        .into_iter()
+        .find(|c| fill == Some((*c).into()));
+    match filled {
+        Some(c) => b.disabled(true).bg(c.opacity(metrics::DISABLED_OPACITY)),
+        None => b.disabled(true).opacity(metrics::DISABLED_OPACITY),
+    }
 }
 
 /// The primary of a short form that is not complete yet (the login, §2.20):
@@ -841,7 +857,10 @@ pub fn toolbar_item(
     let name = name.into();
     let (style, ink) = match kind {
         ToolbarItemKind::Prominent => (PushStyle::Default, k.on_primary),
-        ToolbarItemKind::Toggled => (PushStyle::Secondary, k.label),
+        // An inactive window dims every item's ink, the toggled one too;
+        // its `muted` fill still says which pane is open.
+        ToolbarItemKind::Toggled if emphasized => (PushStyle::Secondary, k.label),
+        ToolbarItemKind::Toggled => (PushStyle::Secondary, k.secondary),
         ToolbarItemKind::Plain if emphasized => (PushStyle::Ghost, k.label),
         ToolbarItemKind::Plain => (PushStyle::Ghost, k.secondary),
     };
@@ -873,7 +892,8 @@ pub fn toolbar_labeled_item(
     let k = native_colors(cx);
     let name = name.into();
     let (style, ink) = match (toggled, emphasized) {
-        (true, _) => (PushStyle::Secondary, k.label),
+        (true, true) => (PushStyle::Secondary, k.label),
+        (true, false) => (PushStyle::Secondary, k.secondary),
         // §1.4: an item of the active window draws in the foreground; the
         // muted fill alone says which pane is open (D20).
         (false, true) => (PushStyle::Ghost, k.label),
@@ -916,7 +936,8 @@ pub fn toolbar_item_sym(
     let k = native_colors(cx);
     let name = name.into();
     let (style, ink) = match (toggled, emphasized) {
-        (true, _) => (PushStyle::Secondary, k.label),
+        (true, true) => (PushStyle::Secondary, k.label),
+        (true, false) => (PushStyle::Secondary, k.secondary),
         (false, true) => (PushStyle::Ghost, k.label),
         (false, false) => (PushStyle::Ghost, k.secondary),
     };
