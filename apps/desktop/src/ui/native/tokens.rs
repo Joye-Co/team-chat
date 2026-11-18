@@ -1485,7 +1485,7 @@ pub mod monitor {
     /// The budget after an amount (`/ $100`): the slot's least width, so every amount ends at
     /// one x and a longer budget pushes its amount instead of covering it.
     pub const TEAM_SPEND_BUDGET: Pixels = px(40.);
-    pub const TEAM_COL_RECENT: Pixels = px(76.);
+    pub const TEAM_COL_RECENT: Pixels = px(88.);
     pub const TEAM_CELL_PAD: Pixels = space::S8;
     /// The count after a bar in the member inspector (`999 个话题`), right-aligned.
     pub const TEAM_USE_COUNT: Pixels = px(64.);
@@ -1494,7 +1494,7 @@ pub mod monitor {
     pub const FLEET_ADD_TEXT: Pixels = px(320.);
     /// The member inspector beside the 成员 table (inside the page, not a
     /// right pane of the main window).
-    pub const MEMBER_INSPECTOR: Pixels = px(320.);
+    pub const MEMBER_INSPECTOR: Pixels = px(308.);
     /// The 要注意 card's share of the row next to 容量.
     pub const ATTENTION_SHARE: f32 = 0.41;
 }

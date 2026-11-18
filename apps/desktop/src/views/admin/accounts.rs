@@ -187,7 +187,14 @@ impl AdminView {
                 Page::Machines => self.fetch_fleet(cx),
                 Page::Activity if !self.activity.loaded => self.fetch_activity(false, cx),
                 Page::Usage => self.fetch_usage(cx),
-                Page::Members => self.fetch_team(cx),
+                Page::Members => {
+                    // A failure from an earlier visit is over: only a new one shows.
+                    self.team.role_error = None;
+                    self.team.role_retry = None;
+                    self.team.action_error = None;
+                    self.team.action_retry = None;
+                    self.fetch_team(cx)
+                }
                 Page::Home => self.fetch_home(cx),
                 Page::Memory => self.memory.update(cx, |m, cx| m.load(cx)),
                 _ => {}

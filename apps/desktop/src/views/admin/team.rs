@@ -301,6 +301,30 @@ impl AdminView {
         }
     }
 
+    /// The close button of a failed action's alert: for someone who will not try it again.
+    fn dismiss_action(
+        id: &'static str,
+        run: impl Fn(&mut Self) + 'static,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> gpui_component::button::Button {
+        let view = cx.entity();
+        crate::ui::native::icon_button(
+            id,
+            Sym::Close,
+            crate::copy::common::CLOSE,
+            crate::ui::native::IconSize::Small,
+            window,
+            cx,
+        )
+        .on_click(move |_, _, cx| {
+            view.update(cx, |v, cx| {
+                run(v);
+                cx.notify();
+            })
+        })
+    }
+
     pub(super) fn team_page(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let members = self.services.provider.members();
         let count = |f: &dyn Fn(&Member) -> bool| {
@@ -381,6 +405,15 @@ impl AdminView {
                         },
                         cx,
                     ))
+                    .action(Self::dismiss_action(
+                        "team-role-dismiss",
+                        |v| {
+                            v.team.role_error = None;
+                            v.team.role_retry = None;
+                        },
+                        window,
+                        cx,
+                    ))
             }))
             .children(self.team.action_error.clone().map(|(title, e)| {
                 Alert::new(Sym::Failed, title)
@@ -398,6 +431,15 @@ impl AdminView {
                         },
                         cx,
                     ))
+                    .action(Self::dismiss_action(
+                        "team-action-dismiss",
+                        |v| {
+                            v.team.action_error = None;
+                            v.team.action_retry = None;
+                        },
+                        window,
+                        cx,
+                    ))
             }))
             .child(
                 div()
@@ -407,7 +449,8 @@ impl AdminView {
                     .child(seg)
                     .child(div().flex_1())
                     .child(
-                        SearchField::new("team-search", &self.team.search).width(t::FLEET_ADD_TEXT),
+                        SearchField::new("team-search", &self.team.search)
+                            .width(t::MEMBER_INSPECTOR),
                     ),
             )
             .child(
@@ -491,7 +534,11 @@ impl AdminView {
                         } else {
                             Sym::Sort
                         };
-                        cell(*w, *right).child(
+                        // 本周花费 ends on the amounts, before the slot their budgets keep.
+                        let cell = cell(*w, *right).when(sk == TeamSortKey::Spend, |d| {
+                            d.pr(t::TEAM_CELL_PAD + t::TEAM_SPEND_BUDGET + space::S4)
+                        });
+                        cell.child(
                             div()
                                 .id(SharedString::from(format!("team-sort-{sk:?}")))
                                 .flex()
@@ -558,12 +605,15 @@ impl AdminView {
                     badge(crate::ui::native::BadgeState::Working, m::TEAM_WORKING)
                 } else if let Some(s) = r.ai_state {
                     s.into_any_element()
+                } else if r.member.online {
+                    badge(crate::ui::native::BadgeState::Online, m::TEAM_ONLINE_NOW)
                 } else {
                     match r.seen {
-                        Some(t) if now.saturating_sub(t) < 60_000 => {
-                            m::TEAM_ONLINE_NOW.into_any_element()
+                        Some(t) => {
+                            let d = model::duration(now.saturating_sub(t));
+                            TruncText::new(fill(m::FLEET_OFFLINE_FOR, &[("d", &d)]))
+                                .into_any_element()
                         }
-                        Some(t) => model::ago(now.saturating_sub(t)).into_any_element(),
                         // 从没上线 only once the roster said so: unread, nothing is known.
                         None if self.team.roster.is_some() => m::TEAM_NEVER.into_any_element(),
                         None => "—".into_any_element(),
@@ -727,7 +777,9 @@ impl AdminView {
         let team_owner = crate::views::settings::i_am_team_owner(&self.services);
         let me = self.services.me();
         let offer = crate::views::settings::roles_to_offer(x, role, me.as_deref(), team_owner);
-        let may_stop = crate::views::settings::may_deactivate(role, team_owner);
+        // Nobody stops themselves from here, as nobody changes their own 身份.
+        let may_stop = crate::views::settings::may_deactivate(role, team_owner)
+            && me.as_deref() != Some(x.id.as_str());
         if !crate::views::settings::has_member_menu(x, &offer, may_stop) {
             return div().into_any_element();
         }
@@ -948,13 +1000,18 @@ impl AdminView {
             .into_iter()
             .find(|r| r.member.id.as_str() == id);
         let (topics, spend) = row.as_ref().map(|r| (r.topics, r.spend)).unwrap_or((0, 0.));
-        let week_ago = now_ms().saturating_sub(7 * 86_400_000);
+        // The week the other two tiles count: from Monday.
+        let (week_from, week_to) =
+            super::usage::UsageRange::Week.span(crate::selftest::clock::local_now());
         let artifacts = self
             .services
             .provider
             .all_artifacts()
             .iter()
-            .filter(|(_, a)| a.created_by.as_str() == id && a.updated_at as u64 >= week_ago)
+            .filter(|(_, a)| {
+                a.created_by.as_str() == id
+                    && (week_from..week_to).contains(&(a.updated_at.max(0) as u64))
+            })
             .count();
         // Recent 话题: the ones they asked for or worked on, newest first.
         let mut recent: Vec<(String, String, crate::ui::native::BadgeState, String, u64)> = vec![];
@@ -1083,7 +1140,8 @@ impl AdminView {
             div()
                 .flex_1()
                 .min_w(gpui::Pixels::ZERO)
-                .p(space::S12)
+                .px(space::S8)
+                .py(space::S12)
                 .rounded(radius::CONTAINER)
                 .bg(k.group)
                 .border_1()
@@ -1091,7 +1149,9 @@ impl AdminView {
                 .flex()
                 .flex_col()
                 .child(
+                    // An amount stays on one line.
                     div()
+                        .whitespace_nowrap()
                         .n_title3()
                         .font_weight(gpui::FontWeight::SEMIBOLD)
                         .n_figures()
@@ -1395,10 +1455,16 @@ pub(super) fn confirm_deactivate(
     cx: &mut gpui::App,
 ) {
     use crate::views::nav::dialogs;
+    // What stops differs: an AI member's work, a person's way in.
+    let body = if services.provider.member(&id).is_some_and(|x| x.is_bot()) {
+        m::TEAM_DEACTIVATE_CONFIRM_BODY_AI
+    } else {
+        m::TEAM_DEACTIVATE_CONFIRM_BODY_PERSON
+    };
     dialogs::destructive_alert(
         "deactivate-member",
         m::TEAM_DEACTIVATE_CONFIRM_TITLE.to_string(),
-        fill(m::TEAM_DEACTIVATE_CONFIRM_BODY, &[("name", name)]),
+        fill(body, &[("name", name)]),
         m::TEAM_DEACTIVATE_OK,
         move |_, cx| set_deactivated(&services, &id, true, &view, cx),
         window,
