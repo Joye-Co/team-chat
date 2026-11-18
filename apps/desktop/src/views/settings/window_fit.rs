@@ -39,6 +39,12 @@ pub struct Fit {
 }
 
 impl Fit {
+    /// The pane is taller than the window may get, so the page scrolls for
+    /// good. False while the window is still growing to a pane that fits.
+    pub fn capped(&self) -> bool {
+        self.applied.get() >= f32::from(MAX_HEIGHT) - 1.
+    }
+
     /// The pane laid out at `wanted` (toolbar plus pane). Changes the window
     /// height after this frame when it differs from the window's.
     pub fn measured(

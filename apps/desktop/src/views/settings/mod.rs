@@ -220,6 +220,30 @@ pub fn set_role_text(role: TeamRole) -> &'static str {
     }
 }
 
+/// Runs `apply`, which changes `name`'s 身份 to `role`. Making someone a
+/// 所有者 hands them power over everyone, so that one asks first.
+pub fn ask_before_role(
+    role: TeamRole,
+    name: &str,
+    apply: impl Fn(&mut Window, &mut App) + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if role != TeamRole::Owner {
+        return apply(window, cx);
+    }
+    let name = crate::ui::avatar::name_beside_avatar(name).to_string();
+    crate::views::nav::dialogs::confirm_alert(
+        "set-owner",
+        crate::copy::fill(s::SET_OWNER_CONFIRM_TITLE, &[("name", &name)]),
+        crate::copy::fill(s::SET_OWNER_CONFIRM_BODY, &[("name", &name)]),
+        s::SET_OWNER_CONFIRM_OK,
+        apply,
+        window,
+        cx,
+    );
+}
+
 /// The 身份 a 所有者 can give `target` from its row (design-roles 3.9): the other two, and never
 /// 所有者 to an AI member. Empty for myself, a deactivated member, or when I am not the 所有者.
 pub fn roles_to_offer(
@@ -528,6 +552,20 @@ impl SettingsView {
             .collect();
         let fit = self.fit.clone();
         let handle = window.window_handle();
+        // A pane taller than the window shows its scrollbar at rest, in the
+        // page's side gutter: the cut at the bottom reads as a scroll (2.19).
+        let page_bar = (self.fit.capped()
+            && self.scroll.max_offset().y > crate::ui::native::tokens::space::S4)
+            .then(|| {
+                use gpui_component::scroll::{Scrollbar, ScrollbarMode};
+                div()
+                    .absolute()
+                    .top_0()
+                    .right_0()
+                    .bottom_0()
+                    .w(crate::ui::native::tokens::space::S12)
+                    .child(Scrollbar::vertical(&self.scroll).mode(ScrollbarMode::Always))
+            });
         // Nothing drawn has the focus (a closed sheet held it): the root
         // takes it back, so Tab still walks the pane.
         if window.focused(cx).is_none() {
@@ -596,47 +634,54 @@ impl SettingsView {
             )
             .child(
                 div()
-                    .id("settings-page")
+                    .relative()
                     .flex_1()
                     .min_h(px(0.))
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
+                    .w_full()
                     .child(
                         div()
-                            .w_full()
-                            .relative()
-                            // A pane fades in when the tab changes, instead
-                            // of swapping in one frame. It does not rise: the
-                            // window's height already moves, and a second
-                            // motion under it read as a jitter.
-                            .child(crate::ui::motion::fade_in(
-                                gpui::ElementId::Name(
-                                    format!("settings-pane-{}", self.page.slug()).into(),
-                                ),
-                                crate::theme::motion::NORMAL,
-                                div().relative().w_full().child(self.render_page()),
-                                cx,
-                            ))
-                            // Measures the pane as laid out; the window then
-                            // takes its height (§8: height follows the pane).
+                            .id("settings-page")
+                            .size_full()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.scroll)
                             .child(
-                                canvas(
-                                    move |bounds: Bounds<gpui::Pixels>, window, cx| {
-                                        fit.measured(
-                                            TOOLBAR_HEIGHT + bounds.size.height,
-                                            handle,
-                                            window,
-                                            cx,
-                                        );
-                                    },
-                                    |_, _, _, _| {},
-                                )
-                                .absolute()
-                                .top_0()
-                                .left_0()
-                                .size_full(),
+                                div()
+                                    .w_full()
+                                    .relative()
+                                    // A pane fades in when the tab changes, instead
+                                    // of swapping in one frame. It does not rise: the
+                                    // window's height already moves, and a second
+                                    // motion under it read as a jitter.
+                                    .child(crate::ui::motion::fade_in(
+                                        gpui::ElementId::Name(
+                                            format!("settings-pane-{}", self.page.slug()).into(),
+                                        ),
+                                        crate::theme::motion::NORMAL,
+                                        div().relative().w_full().child(self.render_page()),
+                                        cx,
+                                    ))
+                                    // Measures the pane as laid out; the window then
+                                    // takes its height (§8: height follows the pane).
+                                    .child(
+                                        canvas(
+                                            move |bounds: Bounds<gpui::Pixels>, window, cx| {
+                                                fit.measured(
+                                                    TOOLBAR_HEIGHT + bounds.size.height,
+                                                    handle,
+                                                    window,
+                                                    cx,
+                                                );
+                                            },
+                                            |_, _, _, _| {},
+                                        )
+                                        .absolute()
+                                        .top_0()
+                                        .left_0()
+                                        .size_full(),
+                                    ),
                             ),
-                    ),
+                    )
+                    .children(page_bar),
             )
     }
 }
