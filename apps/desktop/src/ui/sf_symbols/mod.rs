@@ -99,7 +99,7 @@ symbols! {
     SideChat = AskAside, MessageCircle;
     Outputs = Outputs, Layers;
     Computer = Computer, Monitor;
-    Changes = PullRequest, GitPullRequest;
+    Changes = Diff, FileDiff;
     PaneRight = Inspector, PanelRight;
     More = More, Ellipsis;
     // Sidebar destinations and rows (§9.1).
