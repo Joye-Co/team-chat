@@ -25,8 +25,8 @@ use crate::{
     copy::{common, overlays as o},
     data::{GroupId, StartTopicRequest},
     ui::native::{
-        NativeTextArea, PushSize, PushStyle, SheetLayout, SheetWidth, disabled_push,
-        native_sheet_keyboard, popup_button, push_button, sheet_buttons,
+        NativeTextArea, PushSize, PushStyle, SheetLayout, SheetWidth, disabled_push, metrics,
+        native_sheet_keyboard, popup_button, pull_down, push_button, sheet_buttons,
     },
     views::rail::model as rail_model,
 };
@@ -152,12 +152,13 @@ fn lead_with(body: &Entity<TextareaState>, mention: &str, window: &mut Window, c
     });
 }
 
-/// At most this many members show as buttons in the 交给 row.
+/// At most this many controls show in the 交给 row: a button per member, the
+/// last one the 其他成员 menu when more members are left.
 const HAND_TO_MAX: usize = 5;
 
 /// Who the 交给 row offers in `group_id` (onboarding: a new member does not know the
 /// names to @): the members of the 群 but me, bots first (they take work), each once.
-/// The first [`HAND_TO_MAX`] are buttons, the rest are in the row's 其他成员 menu.
+/// The row shows the first ones as buttons and the rest in its 其他成员 menu ([`HAND_TO_MAX`]).
 pub fn hand_to(services: &Services, group_id: &str) -> Vec<(String, String)> {
     let me = services.me();
     let ids = services
@@ -312,7 +313,7 @@ impl Render for NewTopicSheet {
         // The §2.8 textarea: the 标题 field's edge, fill and ring over four
         // lines (review 3 K-02).
         let body_field = NativeTextArea::new("new-topic-body", &self.body).rows(4);
-        let hand_row = self.hand_row(cx);
+        let hand_row = self.hand_row(window, cx);
         let [cancel, start] = sheet_buttons("new-topic", common::CANCEL, o::NEW_TOPIC_CREATE, cx);
         let (sheet_title, explanation) = (o::NEW_TOPIC_TITLE, o::NEW_TOPIC_EXPLANATION);
         div()
@@ -341,25 +342,33 @@ impl Render for NewTopicSheet {
 impl NewTopicSheet {
     /// 交给: one small button per member of the 群; a click leads the
     /// first message with @名字 (once). `None` when nobody can take it.
-    fn hand_row(&self, cx: &mut Context<Self>) -> Option<gpui::Div> {
+    fn hand_row(&self, window: &Window, cx: &mut Context<Self>) -> Option<gpui::Div> {
         let mut hand_to = self
             .group
             .as_deref()
             .map(|g| hand_to(&self.services, g))
             .unwrap_or_default();
-        let rest = hand_to.split_off(hand_to.len().min(HAND_TO_MAX));
+        // The menu takes the place of the last button, so the row stays two lines.
+        let shown = if hand_to.len() > HAND_TO_MAX {
+            HAND_TO_MAX - 1
+        } else {
+            hand_to.len()
+        };
+        let rest = hand_to.split_off(shown);
         (!hand_to.is_empty()).then(|| {
             let more =
                 (!rest.is_empty()).then(|| {
                     let body = self.body.clone();
-                    push_button(
+                    pull_down(
                         "new-topic-hand-more",
                         o::NEW_TOPIC_HAND_TO_MORE,
-                        PushStyle::Ghost,
                         PushSize::Small,
+                        window,
                         cx,
                     )
                     .dropdown_menu(move |menu, _, _| {
+                        // A big 群 scrolls inside the menu instead of outgrowing the window.
+                        let menu = menu.scrollable(true).max_h(metrics::MENU_LIST_MAX);
                         rest.iter().fold(menu, |menu, (_, name)| {
                             let body = body.clone();
                             let mention = format!("@{name}");
