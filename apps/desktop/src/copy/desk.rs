@@ -41,7 +41,7 @@ crate::copy! {
     DESK_KPI_DONE = "今天交付",
     DESK_KPI_QUEUE = "排队",
     DESK_KPI_WAITING_FOOT = "最早 {time}",
-    DESK_KPI_WAITING_NONE = "没有要你回答的事",
+    DESK_KPI_WAITING_NONE = "没有等你拍板的事",
     DESK_KPI_WORKING_FOOT = "{n} 个成员在干活",
     DESK_KPI_WORKING_NONE = "现在没有在干活的",
     DESK_KPI_DONE_FOOT = "最近 {time}",

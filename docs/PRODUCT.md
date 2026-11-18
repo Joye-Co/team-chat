@@ -83,7 +83,7 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
   and in 详情 → 成员 在做 and 参与过. Several members can work in a 话题 at once or one after
   another; no member is the one responsible for a 话题.
 - The settings window may also use 岗位 (role and how the member works), 权限 (permissions),
-  机器 (machines) and 成本 (cost).
+  机器 (machines) and 花费 (cost).
 - Words for a computer's GitHub (docs/plans/usable/design-github-identity.zh.md §3.5–3.7): GitHub is
   a proper name, not a product noun, and the sign-in belongs to the 电脑, never to a person; 仓库 and
   PR; GitHub @{login}, 未登录 GitHub, 这台电脑还没有登录 GitHub, 这台电脑的 GitHub 登录失效了; the
