@@ -307,7 +307,7 @@ impl PhoneSignIn {
             cx,
             SheetWidth::Form,
             px(500.),
-            move |dialog, window, cx| {
+            move |dialog, _, cx| {
                 let page = this.read(cx);
                 let k = native_colors(cx);
                 let status_line = |text: String, color: Hsla| {
@@ -415,7 +415,6 @@ impl PhoneSignIn {
                     | Offer::Loading => (common::CANCEL, PushStyle::Outline),
                     _ => (common::CANCEL, PushStyle::Ghost),
                 };
-                let _ = &window;
                 let close = push_button("phone-qr-close", label, style, PushSize::Regular, cx)
                     .on_click(move |_, window, cx| {
                         close_this.update(cx, |p, _| p.stop_offer());
@@ -580,7 +579,7 @@ impl PhoneSignIn {
                     )
                     .on_click(|_, window, cx| window.close_dialog(cx))
                 });
-                let _ = (k, &window);
+                let _ = k;
                 let ok = this.clone();
                 dialog
                     .on_ok(move |_, _, cx| {

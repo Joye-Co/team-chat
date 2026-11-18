@@ -1317,6 +1317,11 @@ fn capped(
 ) -> Div {
     use gpui::{InteractiveElement as _, StatefulInteractiveElement as _};
     use gpui_component::scroll::{Scrollbar, ScrollbarMode};
+    // In the gutter the bar stands alone, so it shows only while the body
+    // is cut (known from the frame before). A body that fits to within a
+    // few points has nothing to scroll to and gets no thumb.
+    let shown =
+        outset == Pixels::ZERO || scroll.max_offset().y > crate::ui::native::tokens::space::S4;
     div()
         .relative()
         .w_full()
@@ -1329,7 +1334,7 @@ fn capped(
                 .track_scroll(scroll)
                 .child(content),
         )
-        .child(
+        .children(shown.then(|| {
             div()
                 .absolute()
                 .top_0()
@@ -1345,8 +1350,8 @@ fn capped(
                     } else {
                         bar
                     }
-                }),
-        )
+                })
+        }))
 }
 
 /// A whole number with thousands separators (2.21): 1000000 → 1,000,000.

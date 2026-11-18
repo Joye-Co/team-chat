@@ -548,7 +548,6 @@ impl AccountPage {
                     cx,
                 )
                 .on_click(|_, window, cx| window.close_dialog(cx));
-                let _ = &window;
                 let ok = this.clone();
                 dialog
                     .on_ok(move |_, window, cx| {
