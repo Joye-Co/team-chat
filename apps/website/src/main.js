@@ -86,6 +86,8 @@
   addEventListener("scroll",function(){if(!tick){tick=true;requestAnimationFrame(upd);}},{passive:true});upd();
 })();
 var EN=document.documentElement.lang==="en";
+/* shortcuts: the page is written with the Mac keys; on Windows each one shows its Ctrl/Alt form (data-win) */
+if(/Windows/.test(navigator.userAgent||""))[].forEach.call(document.querySelectorAll("[data-win]"),function(k){k.textContent=k.dataset.win;});
 /* waitlist: GET /api/waitlist gives {count}; POST {email} books and gives the new {count}. The host serves that endpoint. */
 (function(){
   var form=document.querySelector(".wl");if(!form)return;
