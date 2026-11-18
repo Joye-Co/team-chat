@@ -9,6 +9,7 @@ use gpui::{
     Subscription, Window, div,
 };
 use gpui_component::{
+    WindowExt as _,
     input::{InputEvent, InputState},
     menu::{DropdownMenu as _, PopupMenuItem},
 };
@@ -16,13 +17,17 @@ use gpui_component::{
 use super::widgets::{self, Status, answer};
 use crate::{
     app::Services,
-    copy::{fill, settings as s},
+    copy::{common, fill, settings as s},
     data::{
         AiDraftProblem, AiProviderKind, AiServiceDraft, AiServiceSettings, AiTestOutcome, Change,
     },
-    ui::native::{
-        FormRow, GroupedForm, PushSize, PushStyle, SectionTitle, disabled_push, push_button,
-        tokens::{size, space},
+    ui::{
+        icons::Sym,
+        native::{
+            AlertLayout, FormRow, GroupedForm, NativeType as _, PushSize, PushStyle, SectionTitle,
+            alert_button, disabled_push, native_colors, push_button,
+            tokens::{icon, size, space},
+        },
     },
 };
 
@@ -331,6 +336,56 @@ impl AiServicePanel {
         let Some(draft) = self.checked(cx) else {
             return;
         };
+        // The provider just refused this draft: replacing a working service
+        // with it is asked first. A test that never reached it says nothing.
+        let replaces = self.saved.as_ref().is_some_and(|x| x.provider.is_some());
+        if replaces && matches!(self.action, AiAction::TestFailed(_)) {
+            self.confirm_untested(draft, window, cx);
+            return;
+        }
+        self.commit(draft, window, cx);
+    }
+
+    /// The alert before a draft the provider refused replaces the saved service.
+    fn confirm_untested(
+        &mut self,
+        draft: AiServiceDraft,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let panel = cx.entity();
+        widgets::open_alert(window, cx, move |_, cx| {
+            let (panel, draft) = (panel.clone(), draft.clone());
+            AlertLayout::new(s::AI_SAVE_UNTESTED_TITLE)
+                .icon(widgets::app_icon(cx))
+                .message(s::AI_SAVE_UNTESTED_BODY)
+                .buttons([
+                    alert_button(
+                        "ai-save-untested-ok",
+                        s::AI_SAVE_UNTESTED_OK,
+                        PushStyle::Default,
+                        false,
+                        cx,
+                    )
+                    .on_click(move |_, window, cx| {
+                        window.close_dialog(cx);
+                        panel.update(cx, |this, cx| this.commit(draft.clone(), window, cx));
+                    }),
+                    alert_button(
+                        "ai-save-untested-cancel",
+                        common::CANCEL,
+                        PushStyle::Outline,
+                        false,
+                        cx,
+                    )
+                    .on_click(|_, window, cx| window.close_dialog(cx)),
+                ])
+                .into_any_element()
+        });
+    }
+
+    /// Sends the draft to the server.
+    fn commit(&mut self, draft: AiServiceDraft, window: &mut Window, cx: &mut Context<Self>) {
         self.action = AiAction::Saving;
         cx.notify();
         let reply = self.services.provider.set_ai_service(draft);
@@ -354,12 +409,27 @@ impl AiServicePanel {
     /// The line or Alert under the group: the answer of the last try.
     fn answer_row(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
         let quiet = |t: SharedString| Some(widgets::quiet(t, cx).into_any_element());
+        // A try that worked is a status: the mark and the words (F1).
+        let k = native_colors(cx);
+        let done = |t: SharedString| {
+            Some(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(space::S6)
+                    .n_body()
+                    .text_color(k.label)
+                    .child(crate::ui::icons::icon(Sym::Done, icon::MD, k.green))
+                    .child(t)
+                    .into_any_element(),
+            )
+        };
         match &self.action {
             AiAction::Idle => None,
             AiAction::Testing => quiet(s::AI_TESTING.into()),
             AiAction::Saving => quiet(s::AI_SAVING.into()),
-            AiAction::TestOk(ms) => quiet(fill(s::AI_TEST_OK, &[("ms", &ms.to_string())]).into()),
-            AiAction::Saved => quiet(s::AI_SAVED.into()),
+            AiAction::TestOk(ms) => done(fill(s::AI_TEST_OK, &[("ms", &ms.to_string())]).into()),
+            AiAction::Saved => done(s::AI_SAVED.into()),
             AiAction::Problem(t) => {
                 Some(crate::ui::native::sheet_status_error(t.clone(), cx).into_any_element())
             }
@@ -429,7 +499,14 @@ impl AiServicePanel {
         if self.saved.is_none() && matches!(self.load, Status::Idle) {
             self.refresh(window, cx);
         }
-        let header = SectionTitle::new(s::SECTION_AI).description(s::SECTION_AI_HINT);
+        // Set up, the four are on: no promise of what setting it up will do.
+        let header = SectionTitle::new(s::SECTION_AI).description(
+            if self.saved.as_ref().is_some_and(|x| x.provider.is_some()) {
+                s::SECTION_AI_HINT_ON
+            } else {
+                s::SECTION_AI_HINT
+            },
+        );
         let Some(saved) = self.saved.clone() else {
             let body = match &self.load {
                 Status::Failed(t) => widgets::failed_alert(
@@ -495,6 +572,11 @@ impl AiServicePanel {
                     bad(AiDraftProblem::BaseUrlInvalid),
                 )));
             }
+            // The provider refused the key: the Alert blames this field.
+            let key_refused = matches!(
+                &self.action,
+                AiAction::TestFailed(t) if test_failure_cause(t) == Some(s::AI_TEST_FAILED_KEY)
+            );
             let key_detail = if self.kept_hint().is_some() {
                 s::AI_KEY_KEEP_HINT
             } else {
@@ -507,13 +589,21 @@ impl AiServicePanel {
                     .control(field(
                         "ai-key",
                         &self.key,
-                        bad(AiDraftProblem::KeyRequired) || bad(AiDraftProblem::KeyInvalid),
+                        bad(AiDraftProblem::KeyRequired)
+                            || bad(AiDraftProblem::KeyInvalid)
+                            || key_refused,
                     )),
             );
         }
         let testing = self.action == AiAction::Testing;
         let saving = self.action == AiAction::Saving;
         let no_provider = current.is_none();
+        // After a refusal saving is not the next step: the button steps back.
+        let save_style = if matches!(self.action, AiAction::TestFailed(_)) {
+            PushStyle::Outline
+        } else {
+            PushStyle::Default
+        };
         let buttons = div()
             .w_full()
             .flex()
@@ -536,13 +626,7 @@ impl AiServicePanel {
             )
             .child(
                 disabled_push(
-                    push_button(
-                        "ai-save",
-                        s::AI_SAVE,
-                        PushStyle::Default,
-                        PushSize::Regular,
-                        cx,
-                    ),
+                    push_button("ai-save", s::AI_SAVE, save_style, PushSize::Regular, cx),
                     no_provider || busy,
                     cx,
                 )
