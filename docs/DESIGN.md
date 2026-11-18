@@ -914,7 +914,7 @@ card with title, `● 在跑…`, labeled plan segments, an 排队 row), **这�
 `6` + `平均 38 分钟`, 产出 `4` + `3 个 PR · 1 个网页`, 成本 `¥132` + `上限 ¥300` + a bar), **最近交付** (ref rows
 with state tags `未合并 · 等你审` `you-ink`, `已合并`), **最近的问题** (`circle-alert` `bad` + text + `卡住了 · 昨天
 23:10` + `重试`). Right pane **工作环境**: 电脑 (live thumbnail + `Mac mini 在用` + disk bar), 需要你批准的事
-(`lock` rows: 合并到 main, 发布到生产, 改生产环境配置; note `做这些事之前，Forge 会先发卡片等你批准。`; a plain row
+(`lock` rows: 合并到 main, 发布到生产, 改生产环境配置; note `做这些事之前，Forge 会先发卡片等你批准。`; a muted line
 without a lock under them, `单次花费超过 ¥50 时提醒成员`, because the limit stops nothing;
 `修改` opens the settings form), 能用的工具 (name + scope tag `可以提 PR`, `只读`), 用到的决定. Stats come from
 the client runs cache and `BotRun.usage`.

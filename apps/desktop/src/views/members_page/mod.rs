@@ -1569,10 +1569,14 @@ impl MembersPage {
             .and_then(|r| r.as_ref().ok())
             .copied();
         let items: Vec<String> = rules.map(approval_items).unwrap_or_default();
-        // No lock: nothing waits for an approval here.
-        let spend = rules
-            .and_then(spend_reminder)
-            .map(|text| page::card_row("member-approval-spend", None, text, None, None, true, cx));
+        // A muted note, not a row: nothing waits for an approval here.
+        let spend = rules.and_then(spend_reminder).map(|text| {
+            div()
+                .pt(tsp::S8)
+                .n_callout()
+                .text_color(k.secondary)
+                .child(text)
+        });
         let body: AnyElement = match (&self.approvals, bot) {
             (_, false) => page::compact_empty(Sym::Lock, c::MEMBERS_APPROVALS_PERSON, None, cx)
                 .into_any_element(),
@@ -1622,7 +1626,6 @@ impl MembersPage {
                 .into_any_element(),
             (Some(Ok(_)), true) => {
                 let n = items.len();
-                let has_spend = spend.is_some();
                 div()
                     .flex()
                     .flex_col()
@@ -1633,7 +1636,7 @@ impl MembersPage {
                             a,
                             None,
                             None,
-                            i + 1 == n && !has_spend,
+                            i + 1 == n,
                             cx,
                         )
                     }))
