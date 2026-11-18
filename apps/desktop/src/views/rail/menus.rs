@@ -80,7 +80,8 @@ pub(super) fn group(
             }),
         )
         .separator();
-    let menu = nav_views::hide_delete::hide_group_item(menu, services, &hide);
+    // 隐藏 changes nothing for others: the red items sit apart from it.
+    let menu = nav_views::hide_delete::hide_group_item(menu, services, &hide).separator();
     let delete = hide.clone();
     let menu = menu.item(
         // T4-14: a destructive item reads in the destructive color (the

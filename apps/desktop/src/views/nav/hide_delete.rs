@@ -75,11 +75,13 @@ pub fn topic_items(
     );
     if may_delete_topic(services, topic) {
         let (s, g, tp) = (services.clone(), group_id.to_string(), topic.clone());
-        menu = menu.item(
-            destructive_item(r::TOPIC_DELETE).on_click(move |_, window, cx| {
-                confirm_delete_topic(s.clone(), &g, &tp, window, cx)
-            }),
-        );
+        menu =
+            menu.separator()
+                .item(
+                    destructive_item(r::TOPIC_DELETE).on_click(move |_, window, cx| {
+                        confirm_delete_topic(s.clone(), &g, &tp, window, cx)
+                    }),
+                );
     }
     menu
 }
