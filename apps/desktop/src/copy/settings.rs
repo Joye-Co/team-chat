@@ -238,7 +238,7 @@ crate::copy! {
     EMAIL_NONE = "还没有添加",
     EMAIL_ADD = "添加",
     EMAIL_CHANGE = "更改",
-    EMAIL_REMOVE_ITEM = "移除登录邮箱",
+    EMAIL_REMOVE_ITEM = "移除登录邮箱…",
     EMAIL_SHEET_TITLE = "设置登录邮箱",
     EMAIL_SHEET_HINT = "我们会发一个 6 位验证码到这个邮箱，确认是你的。",
     EMAIL_SEND = "发送验证码",
@@ -557,4 +557,7 @@ crate::copy! {
     // --- v14/t4 shared ---
     ROW_MORE = "更多",
     // --- end v14/t4 shared ---
+    EMAIL_REMOVE_CONFIRM_TITLE = "移除登录邮箱？",
+    EMAIL_REMOVE_CONFIRM_BODY = "之后不能再用这个邮箱登录。\n要用邮箱登录，需要重新添加。",
+    EMAIL_REMOVE_CONFIRM_OK = "移除",
 }
