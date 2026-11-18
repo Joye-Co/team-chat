@@ -407,8 +407,8 @@ fn conflict_rev3() -> Value {
             "summary": "新增群 38 个；抖音 10-14 到 10-16 埋点缺了 3 天。",
             "blocks": [
                 { "id": "kpis", "type": "row", "children": ["m_groups", "m_dau"] },
-                { "id": "m_groups", "type": "metric", "label": "新增群", "value": 38, "delta": 12, "unit": "%", "better": "up", "note": "比 9 月" },
-                { "id": "m_dau", "type": "metric", "label": "日活", "value": 2340, "delta": 4, "unit": "%", "better": "up", "note": "比 9 月" },
+                { "id": "m_groups", "type": "metric", "label": "新增群", "value": 38, "delta": 4, "better": "up", "note": "比 9 月" },
+                { "id": "m_dau", "type": "metric", "label": "日活", "value": 2340, "delta": 90, "better": "up", "note": "比 9 月" },
                 { "id": "check", "type": "decision", "label": "这个数据对不对？", "required": true, "fallbackText": "对 / 有问题",
                   "options": [ { "id": "ok", "label": "对，可以发周会" }, { "id": "wrong", "label": "有问题" } ],
                   "deliver": "onSubmit", "events": ["choice.change"] },
