@@ -80,7 +80,9 @@ Tests:
 | Server | `cd server && bun run typecheck && bun run test` |
 | Packages | `scripts/ci-run.sh typecheck packages/*` and `scripts/ci-run.sh test packages/*` |
 | Monitor | `cd ops/monitor && bunx vitest run && bunx tsc --noEmit` |
-| Rust | `cargo test -p chat-protocol -p chat-core -p daemon -p desktop -p artifact-view -p e2e` and `cargo clippy --workspace --all-targets -- -D warnings` |
+| Rust | `cargo test -p chat-protocol -p chat-core -p chat-ffi -p daemon -p update-helper -p desktop -p artifact-view` and, as CI runs it (the desktop app is not linted there), `cargo clippy -p chat-protocol -p chat-core -p chat-ffi -p daemon -p update-helper -p e2e --all-targets -- -D warnings` |
+| Scripts, restore tool | `bun run typecheck:scripts` and `cd ops/restore && bun run typecheck && bun test` |
+| Website | `bun run build:website && bun run check:website` |
 | Desktop self-tests | `desktop --selftest-smoke`, `--selftest-timeline 10000`, `--selftest-cards`, `--screenshot <dir> --theme both [--worst-case]` (see [apps/desktop/README.md](apps/desktop/README.md)) |
 | End to end | `cargo run -p e2e -- --base-url <url> --secrets-dir <dir>` (see [docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md)) |
 
