@@ -347,6 +347,8 @@ pub struct SidebarRow {
     disclosure: Option<bool>,
     /// A collapsed tail (`空闲 · 3`): the row at 70 % opacity.
     dim: bool,
+    /// A page that is listed but cannot open yet: the title in the muted color.
+    quiet: bool,
     // --- end v13/ux-pages ---
     /// The one right column (T1-08).
     right: RightColumn,
@@ -374,6 +376,7 @@ impl SidebarRow {
             trailing_el: None,
             disclosure: None,
             dim: false,
+            quiet: false,
             right: RightColumn::None,
             media: None,
             menu: None,
@@ -418,6 +421,13 @@ impl SidebarRow {
     /// The row opens to child rows; `open` says whether it is open now.
     pub fn disclosure(mut self, open: bool) -> Self {
         self.disclosure = Some(open);
+        self
+    }
+
+    /// A page that is listed but cannot open yet: the title in the one muted color (D1),
+    /// never a second opacity on top of it.
+    pub fn quiet(mut self, quiet: bool) -> Self {
+        self.quiet = quiet;
         self
     }
 
@@ -495,7 +505,13 @@ impl RenderOnce for SidebarRow {
             .map(|i| !i)
             .unwrap_or_else(|| emphasized(window));
         let (sel_symbol, sel_text) = k.selected_ink(active);
-        let text = if self.selected { sel_text } else { k.label };
+        let text = if self.selected {
+            sel_text
+        } else if self.quiet {
+            k.secondary
+        } else {
+            k.label
+        };
         // One media kind per group (§2.1): a row of a group drops media of
         // another kind and keeps an empty slot; state colors leave the
         // media column.

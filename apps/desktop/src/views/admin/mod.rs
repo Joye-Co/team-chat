@@ -606,7 +606,6 @@ impl AdminView {
                     .count() as u32
             })
             .unwrap_or(0);
-        let vm_count = data.map(model::running_now);
         // One person uses the server: 团队约定 is in 设置 › 我的约定 (盯 4.12).
         let team_memory = !self.memory.read(cx).folded();
         let members = self
@@ -619,23 +618,16 @@ impl AdminView {
         let icon = |s: Sym, on: bool| {
             sym_icon(s, SymSize::SIDEBAR, if on { k.label } else { k.secondary })
         };
-        let count = |n: u32, warn: bool| -> gpui::AnyElement {
-            let pill = crate::ui::native::CountPill::new(n);
-            if warn {
-                pill.tone(k.amber).into_any_element()
-            } else {
-                pill.into_any_element()
-            }
+        // A count pill is neutral (§1.8); what needs attention is said on the page it opens.
+        // Someone who may not open 团队管理 sees no counts either.
+        let owner = self.owner;
+        let count = |n: u32| -> gpui::AnyElement {
+            crate::ui::native::CountPill::new(n).into_any_element()
         };
-        // Pages that land in later changes: listed, not clickable yet.
+        // Pages that land in later changes: listed in the muted color with 即将推出 beside
+        // the name, not clickable yet.
         let soon = |id: SharedString, row: SidebarRow| {
-            div()
-                .id(id)
-                .opacity(0.5)
-                .tooltip(move |window, cx| {
-                    gpui_component::tooltip::Tooltip::new(m::NAV_SOON).build(window, cx)
-                })
-                .child(row)
+            div().id(id).child(row.quiet(true).trailing(m::NAV_SOON))
         };
         // The pages that work: selected when open.
         let current_page = self.page;
@@ -660,27 +652,22 @@ impl AdminView {
         // A machine's own pages sit under it, indented past its symbol.
         let view_for_sub = cx.entity();
         let on_overview = self.page == accounts::Page::Overview;
-        let sub =
-            |id: String, label: &'static str, live: bool, trailing: Option<gpui::AnyElement>| {
-                let selected = live && on_overview;
-                let row = SidebarRow::new(SharedString::from(id.clone()), label)
-                    .leading(div().w(SymSize::SIDEBAR.slot_px()))
-                    .selected(selected);
-                let row = match trailing {
-                    Some(el) => row.trailing_element(el),
-                    None => row,
-                };
-                if live {
-                    let view = view_for_sub.clone();
-                    div()
-                        .id(SharedString::from(format!("{id}-wrap")))
-                        .child(row.on_click(move |_, _, cx| {
-                            view.update(cx, |v, cx| v.show_page(accounts::Page::Overview, cx))
-                        }))
-                } else {
-                    soon(id.into(), row)
-                }
-            };
+        let sub = |id: String, label: &'static str, live: bool| {
+            let selected = live && on_overview;
+            let row = SidebarRow::new(SharedString::from(id.clone()), label)
+                .leading(div().w(SymSize::SIDEBAR.slot_px()))
+                .selected(selected);
+            if live {
+                let view = view_for_sub.clone();
+                div()
+                    .id(SharedString::from(format!("{id}-wrap")))
+                    .child(row.on_click(move |_, _, cx| {
+                        view.update(cx, |v, cx| v.show_page(accounts::Page::Overview, cx))
+                    }))
+            } else {
+                soon(id.into(), row)
+            }
+        };
         let view = cx.entity();
         let machines: Vec<gpui::AnyElement> = self
             .machines
@@ -695,7 +682,6 @@ impl AdminView {
                     x.name.clone(),
                 )
                 .leading(icon(Sym::Server, open))
-                .trailing_element(dot(if x.connected { k.green } else { k.secondary }))
                 .on_click(move |_, _, cx| {
                     let id = id.clone();
                     view.update(cx, |v, cx| {
@@ -705,33 +691,23 @@ impl AdminView {
                 });
                 if open {
                     row = row.disclosure(true);
+                } else if !x.connected {
+                    // The state in a word, never a bare dot (§2.12); an online computer
+                    // needs none.
+                    row = row.trailing(m::MACHINE_OFFLINE);
                 }
                 let mut out = vec![row.into_any_element()];
                 if open {
                     let base = format!("machine-{}", x.id);
                     out.push(
-                        sub(format!("{base}-overview"), m::NAV_OVERVIEW, true, None)
-                            .into_any_element(),
+                        sub(format!("{base}-overview"), m::NAV_OVERVIEW, true).into_any_element(),
                     );
+                    out.push(sub(format!("{base}-vms"), m::NAV_VMS, false).into_any_element());
+                    out.push(sub(format!("{base}-image"), m::NAV_IMAGE, false).into_any_element());
                     out.push(
-                        sub(
-                            format!("{base}-vms"),
-                            m::NAV_VMS,
-                            false,
-                            vm_count.map(|n| count(n, false)),
-                        )
-                        .into_any_element(),
+                        sub(format!("{base}-network"), m::NAV_NETWORK, false).into_any_element(),
                     );
-                    out.push(
-                        sub(format!("{base}-image"), m::NAV_IMAGE, false, None).into_any_element(),
-                    );
-                    out.push(
-                        sub(format!("{base}-network"), m::NAV_NETWORK, false, None)
-                            .into_any_element(),
-                    );
-                    out.push(
-                        sub(format!("{base}-logs"), m::NAV_LOGS, false, None).into_any_element(),
-                    );
+                    out.push(sub(format!("{base}-logs"), m::NAV_LOGS, false).into_any_element());
                 }
                 out
             })
@@ -792,7 +768,7 @@ impl AdminView {
                         m::NAV_MEMBERS,
                         Sym::Members,
                         accounts::Page::Members,
-                        (members > 0).then(|| count(members, false)),
+                        (owner && members > 0).then(|| count(members)),
                     ))
                     .child(live_page(
                         "nav-usage",
@@ -818,7 +794,7 @@ impl AdminView {
                         m::NAV_ALL_MACHINES,
                         Sym::Computer,
                         accounts::Page::Machines,
-                        self.machines.as_ref().map(|l| count(l.len() as u32, false)),
+                        self.machines.as_ref().map(|l| count(l.len() as u32)),
                     ))
                     .children(machines)
                     .child(
@@ -831,7 +807,7 @@ impl AdminView {
                         m::NAV_SUBSCRIPTIONS,
                         Sym::Account,
                         accounts::Page::Accounts,
-                        (logged_out > 0).then(|| count(logged_out, true)),
+                        (logged_out > 0).then(|| count(logged_out)),
                     ))
                     .child(live_page(
                         "nav-keys",
@@ -843,7 +819,7 @@ impl AdminView {
                             .as_ref()
                             .map(|s| s.secrets.len() as u32)
                             .filter(|n| *n > 0)
-                            .map(|n| count(n, false)),
+                            .map(count),
                     ))
                     .child(
                         group_label(m::NAV_SETTINGS, cx)
@@ -938,6 +914,8 @@ impl AdminView {
             .or_else(|| self.current().map(|d| d.machine.name.clone()));
         let overview = self.page == accounts::Page::Overview;
         let subtitle = match self.page {
+            // Someone who may not open 团队管理 is told nothing about the team here.
+            _ if !self.owner => String::new(),
             accounts::Page::Overview => match self.current() {
                 Some(d) => match d.sampled_at {
                     Some(at) => fill(m::SAMPLED_AT, &[("time", &clock(at))]),
@@ -1061,15 +1039,27 @@ impl AdminView {
                         )
                     }),
             )
-            .when(overview, |d| d.child(range))
-            .when(
-                matches!(self.page, accounts::Page::Usage | accounts::Page::Home),
-                |d| d.child(self.usage_range_control(cx)),
+            // The page's controls: one height (h32), one center line, one gap (§2.2).
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(space::S8)
+                    .when(overview, |d| d.child(range))
+                    .when(
+                        matches!(self.page, accounts::Page::Usage | accounts::Page::Home),
+                        |d| d.child(self.usage_range_control(cx)),
+                    )
+                    // Someone who may not open 团队管理 gets no team actions and no refresh.
+                    .when(self.page == accounts::Page::Members && self.owner, |d| {
+                        d.child(self.team_actions(cx))
+                    })
+                    .when(self.page == accounts::Page::Machines && self.owner, |d| {
+                        d.children(self.use_this_action(cx))
+                    })
+                    .when(self.owner, |d| d.child(refresh)),
             )
-            .when(self.page == accounts::Page::Members, |d| {
-                d.child(self.team_actions(cx))
-            })
-            .child(refresh)
     }
 
     fn body(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1085,6 +1075,16 @@ impl AdminView {
                 .child(
                     Empty::new(Sym::Lock, m::NOT_OWNER)
                         .description(m::NOT_OWNER_DESC)
+                        .action(
+                            push_button(
+                                "admin-not-owner-close",
+                                m::NOT_OWNER_CLOSE,
+                                PushStyle::Outline,
+                                PushSize::Small,
+                                cx,
+                            )
+                            .on_click(|_, window, _| window.remove_window()),
+                        )
                         .wide(),
                 )
                 .into_any_element();
@@ -1180,6 +1180,7 @@ impl AdminView {
                 Some(e) => pad
                     .child(
                         Alert::new(Sym::Failed, m::ERROR_TITLE)
+                            .on_surface()
                             .tone(AlertTone::Destructive)
                             .description(e)
                             .action(retry(cx)),
@@ -1193,6 +1194,7 @@ impl AdminView {
         if let Some(e) = failed {
             top.push(
                 Alert::new(Sym::Failed, m::ERROR_TITLE)
+                    .on_surface()
                     .tone(AlertTone::Destructive)
                     .description(e)
                     .action(retry(cx))
@@ -1204,6 +1206,7 @@ impl AdminView {
         {
             top.push(
                 Alert::new(Sym::Offline, m::OFFLINE_TITLE)
+                    .on_surface()
                     .tone(AlertTone::Warning)
                     .description(fill(
                         m::OFFLINE_DESC,
@@ -1214,6 +1217,7 @@ impl AdminView {
         } else if d.machine.connected && d.sampled_at.is_none() {
             top.push(
                 Alert::new(Sym::Info, m::NO_METRICS_TITLE)
+                    .on_surface()
                     .tone(AlertTone::Neutral)
                     .description(m::NO_METRICS_DESC)
                     .into_any_element(),

@@ -43,6 +43,7 @@ pub struct Alert {
     actions: Vec<AnyElement>,
     icon_color: Option<Hsla>,
     on_card: bool,
+    on_surface: bool,
 }
 
 impl Alert {
@@ -55,6 +56,7 @@ impl Alert {
             actions: Vec::new(),
             icon_color: None,
             on_card: false,
+            on_surface: false,
         }
     }
 
@@ -78,6 +80,14 @@ impl Alert {
     /// An action at the right (outline sm, or primary sm then outline sm).
     pub fn action(mut self, el: impl IntoElement) -> Self {
         self.actions.push(el.into_any_element());
+        self
+    }
+
+    /// The alert sits on a panel or a card: it takes that surface (no fill of its own) and
+    /// keeps the 1 px border. Without this it is opaque `content`, which a docked alert over
+    /// scrolling content needs, but which reads as a hole on a raised dark panel.
+    pub fn on_surface(mut self) -> Self {
+        self.on_surface = true;
         self
     }
 
@@ -110,7 +120,9 @@ impl RenderOnce for Alert {
             .rounded(radius::CONTAINER)
             .border_1()
             .border_color(edge)
-            .bg(if self.on_card { k.sheet } else { k.content })
+            .when(!self.on_surface, |d| {
+                d.bg(if self.on_card { k.sheet } else { k.content })
+            })
             .flex()
             .items_start()
             // A title-only alert is one line: icon, title and action share

@@ -496,6 +496,7 @@ impl AdminView {
             );
         let body: AnyElement = if let Some(e) = &a.error {
             Alert::new(Sym::Failed, m::ACTIVITY_FAILED)
+                .on_surface()
                 .tone(AlertTone::Destructive)
                 .description(e.clone())
                 .action(Self::retry_action(

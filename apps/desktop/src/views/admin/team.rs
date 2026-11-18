@@ -168,7 +168,7 @@ impl AdminView {
         .detach();
     }
 
-    /// 在干活 / 等你 / 空闲 of an AI member, from the machines' runs.
+    /// 在做 / 等你 / 空闲 of an AI member, from the machines' runs.
     fn ai_state(&self, id: &str) -> &'static str {
         let (mut running, mut waiting) = (0, 0);
         for d in self.fleet.monitors.values() {
@@ -252,7 +252,7 @@ impl AdminView {
                     "team-add-ai",
                     m::TEAM_ADD_AI,
                     PushStyle::Outline,
-                    PushSize::Small,
+                    PushSize::Regular,
                     cx,
                 )
                 .on_click(move |_, window, cx| {
@@ -264,7 +264,7 @@ impl AdminView {
                     "team-invite",
                     m::TEAM_INVITE,
                     PushStyle::Default,
-                    PushSize::Small,
+                    PushSize::Regular,
                     cx,
                 )
                 .on_click(move |_, window, cx| {
@@ -345,6 +345,7 @@ impl AdminView {
             .gap(space::S16)
             .children(self.team.error.clone().map(|e| {
                 Alert::new(Sym::Failed, m::TEAM_FAILED)
+                    .on_surface()
                     .tone(AlertTone::Destructive)
                     .description(e)
                     .action(Self::retry_action(
@@ -358,11 +359,13 @@ impl AdminView {
             }))
             .children(self.team.role_error.clone().map(|e| {
                 Alert::new(Sym::Failed, m::TEAM_ROLE_FAILED)
+                    .on_surface()
                     .tone(AlertTone::Destructive)
                     .description(e)
             }))
             .children(self.team.action_error.clone().map(|(title, e)| {
                 Alert::new(Sym::Failed, title)
+                    .on_surface()
                     .tone(AlertTone::Destructive)
                     .description(e)
             }))
@@ -397,7 +400,6 @@ impl AdminView {
         let k = native_colors(cx);
         let (key, desc) = self.team.sort;
         let rows = sort_rows(self.team_rows(cx), key, desc);
-        let max_spend = rows.iter().map(|r| r.spend).fold(0., f64::max);
         // One person alone sees no 身份 (design-roles 3.10).
         let solo = crate::views::settings::solo(&self.services);
         let cols: [(TeamSortKey, &'static str, Option<gpui::Pixels>, bool); 5] = [
@@ -465,7 +467,10 @@ impl AdminView {
                                 .flex()
                                 .items_center()
                                 .gap(space::S4)
+                                // The hover fill reaches 4 past the label on both sides;
+                                // the ink itself stays on the column's edge.
                                 .px(space::S4)
+                                .mx(-space::S4)
                                 .rounded(radius::ITEM)
                                 .hover(|s| s.bg(k.fill_hover))
                                 .n_section()
@@ -506,26 +511,26 @@ impl AdminView {
                     (false, role) => role.unwrap_or_default().to_string(),
                 };
                 let level = role_word(r.role);
-                let recent = if r.member.deactivated {
-                    (m::TEAM_OFF.to_string(), k.secondary)
+                // A state is a StatusBadge (icon + word, §2.12); 空闲 and a last-seen time
+                // are muted text. Never a colored text run.
+                let badge = |state, word: &'static str| {
+                    StatusBadge::new(state, word).dense().into_any_element()
+                };
+                let recent: AnyElement = if r.member.deactivated {
+                    m::TEAM_OFF.into_any_element()
+                } else if r.ai_state == Some(m::TEAM_WAITING) {
+                    badge(crate::ui::native::BadgeState::NeedsYou, m::TEAM_WAITING)
+                } else if r.ai_state == Some(m::TEAM_WORKING) {
+                    badge(crate::ui::native::BadgeState::Working, m::TEAM_WORKING)
                 } else if let Some(s) = r.ai_state {
-                    (
-                        s.to_string(),
-                        if s == m::TEAM_WAITING {
-                            k.amber
-                        } else if s == m::TEAM_WORKING {
-                            k.green
-                        } else {
-                            k.secondary
-                        },
-                    )
+                    s.into_any_element()
                 } else {
                     match r.seen {
                         Some(t) if now.saturating_sub(t) < 60_000 => {
-                            (m::TEAM_ONLINE_NOW.to_string(), k.secondary)
+                            m::TEAM_ONLINE_NOW.into_any_element()
                         }
-                        Some(t) => (model::ago(now.saturating_sub(t)), k.secondary),
-                        None => (m::TEAM_NEVER.to_string(), k.secondary),
+                        Some(t) => model::ago(now.saturating_sub(t)).into_any_element(),
+                        None => m::TEAM_NEVER.into_any_element(),
                     }
                 };
                 let spend = match r.budget_cents.filter(|b| *b > 0) {
@@ -538,11 +543,12 @@ impl AdminView {
                     ),
                     None => usd(r.spend),
                 };
-                let share = match r.budget_cents.filter(|b| *b > 0) {
-                    Some(b) => Some((r.spend / (b as f64 / 100.)) as f32),
-                    None if bot && max_spend > 0. => Some((r.spend / max_spend) as f32),
-                    None => None,
-                };
+                // The bar means one thing: spend against the budget. No budget, no bar.
+                let share = r
+                    .budget_cents
+                    .filter(|b| *b > 0)
+                    .map(|b| (r.spend / (b as f64 / 100.)) as f32);
+                let over = share.is_some_and(|s| s > 1.);
                 let more = self.member_menu(&r.member, r.role, window, cx);
                 let view = cx.entity();
                 let sel_id = id.clone();
@@ -594,14 +600,29 @@ impl AdminView {
                                 .flex()
                                 .flex_col()
                                 .gap(space::S4)
-                                .child(div().n_headline().child(spend))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap(space::S4)
+                                        .child(div().n_headline().child(spend))
+                                        // Over the budget: the state color on an icon, the
+                                        // amount stays foreground (§1.3).
+                                        .when(over, |d| {
+                                            d.child(sym_icon(
+                                                Sym::Warning,
+                                                SymSize::INLINE_SMALL,
+                                                k.amber,
+                                            ))
+                                        }),
+                                )
                                 .children(share.map(|s| progress(s, cx))),
                         ),
                     )
                     .child(
                         cell(Some(t::TEAM_COL_RECENT), false)
-                            .text_color(recent.1)
-                            .child(recent.0),
+                            .text_color(k.secondary)
+                            .child(recent),
                     )
                     .child(
                         div()
@@ -690,7 +711,7 @@ impl AdminView {
                         ),
                     )
                     .item(
-                        PopupMenuItem::new(crate::copy::settings::EDIT).on_click(
+                        PopupMenuItem::new(crate::copy::native_kit::EDIT).on_click(
                             move |_, window, cx| {
                                 crate::views::settings::members::open_edit_bot(
                                     s2.clone(),
@@ -852,11 +873,10 @@ impl AdminView {
         let _ = window;
         let k = native_colors(cx);
         let Some(id) = self.team.selected.clone() else {
+            // The compact Empty (§2.13): an icon and the line, never a lone line.
             return card_surface(cx)
                 .p(space::S24)
-                .n_body()
-                .text_color(k.secondary)
-                .child(m::TEAM_PICK)
+                .child(crate::ui::native::EmptyLine::new(m::TEAM_PICK).icon(Sym::Members))
                 .into_any_element();
         };
         let Some(x) = self.services.provider.member(&id) else {
@@ -1145,14 +1165,25 @@ impl AdminView {
                                         .flex_1()
                                         .child(progress(*n as f32 / max_use as f32, cx)),
                                 )
-                                .child(div().n_footnote().text_color(k.secondary).child(fill(
-                                    if by_topics {
-                                        m::HOME_WHO_TOPICS
-                                    } else {
-                                        m::TEAM_TIMES
-                                    },
-                                    &[("n", &n.to_string())],
-                                )))
+                                // A fixed, right-aligned count: the bar is the only part
+                                // that flexes, so every bar ends at one x.
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .w(t::TEAM_USE_COUNT)
+                                        .text_right()
+                                        .n_footnote()
+                                        .n_figures()
+                                        .text_color(k.secondary)
+                                        .child(fill(
+                                            if by_topics {
+                                                m::HOME_WHO_TOPICS
+                                            } else {
+                                                m::TEAM_TIMES
+                                            },
+                                            &[("n", &n.to_string())],
+                                        )),
+                                )
                         })),
                 )
             })

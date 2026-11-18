@@ -583,6 +583,8 @@ impl AdminView {
             PushSize::Small,
             cx,
         )
+        // It goes to API 密钥: the chevron says so at rest (a link has no rest mark of its own).
+        .child(sym_icon(Sym::ChevronRight, SymSize::INLINE_SMALL, k.label))
         .on_click(move |_, window, cx| {
             view.update(cx, |v, cx| {
                 v.show_page(Page::Keys, cx);
@@ -596,6 +598,7 @@ impl AdminView {
                     Sym::Warning,
                     fill(m::FAILED_TODAY, &[("n", &c.failed_today.to_string())]),
                 )
+                .on_surface()
                 .tone(AlertTone::Warning)
                 .into_any_element(),
             ),
@@ -655,7 +658,7 @@ impl AdminView {
             )
             .children(body)
             .when(flow_here.is_none(), |d| {
-                d.child(self.usage_block(c, now, cx))
+                d.children(self.usage_block(c, now, cx))
             })
             .child(
                 div()
@@ -670,17 +673,21 @@ impl AdminView {
             .into_any_element()
     }
 
-    fn usage_block(&self, c: &MonitorCli, now: u64, cx: &App) -> AnyElement {
+    /// The usage windows of a CLI; nothing when there is nothing to show, so the card's
+    /// column gap is not spent on an empty child.
+    fn usage_block(&self, c: &MonitorCli, now: u64, cx: &App) -> Option<AnyElement> {
         let k = native_colors(cx);
         let windows = c.usage.clone().unwrap_or_default();
         if windows.is_empty() {
-            return div()
-                .when(c.login == "logged_in", |d| {
-                    d.n_footnote().text_color(k.secondary).child(m::USAGE_NONE)
-                })
-                .into_any_element();
+            return (c.login == "logged_in").then(|| {
+                div()
+                    .n_footnote()
+                    .text_color(k.secondary)
+                    .child(m::USAGE_NONE)
+                    .into_any_element()
+            });
         }
-        div()
+        let block = div()
             .flex()
             .flex_col()
             .gap(space::S12)
@@ -732,7 +739,8 @@ impl AdminView {
                     )
                     .child(progress((w.used_pct / 100.) as f32, cx))
             }))
-            .into_any_element()
+            .into_any_element();
+        Some(block)
     }
 
     fn login_panel(
@@ -794,6 +802,7 @@ impl AdminView {
         if let Some(e) = &f.error {
             body = body.child(
                 Alert::new(Sym::Failed, m::LOGIN_FAILED)
+                    .on_surface()
                     .tone(AlertTone::Destructive)
                     .description(e.clone()),
             );
@@ -893,12 +902,14 @@ impl AdminView {
                         .unwrap_or_default();
                     body = body.child(
                         Alert::new(Sym::Done, fill(m::LOGIN_DONE, &[("who", &who)]))
+                            .on_surface()
                             .tone(AlertTone::Neutral),
                     );
                 }
                 phase::FAILED => {
                     body = body.child(
                         Alert::new(Sym::Failed, m::LOGIN_FAILED)
+                            .on_surface()
                             .tone(AlertTone::Destructive)
                             .description(st.and_then(|s| s.error.clone()).unwrap_or_default()),
                     );
@@ -962,6 +973,7 @@ impl AdminView {
         let Some(s) = secrets else {
             return match &self.acct.secrets_error {
                 Some(e) => Alert::new(Sym::Failed, m::KEYS_LOADING_FAILED)
+                    .on_surface()
                     .tone(AlertTone::Destructive)
                     .description(e.clone())
                     .action(Self::retry_action(
@@ -1057,7 +1069,10 @@ impl AdminView {
                         .flex()
                         .items_center()
                         .gap(space::S8)
-                        .child(div().flex().gap(space::S2).children(avatars))
+                        // No avatars (全部成员), no stack: an empty one still takes the gap.
+                        .when(!avatars.is_empty(), |d| {
+                            d.child(div().flex().gap(space::S2).children(avatars))
+                        })
                         .child(TruncText::new(who))
                         .into_any_element(),
                     div()
@@ -1090,7 +1105,11 @@ impl AdminView {
             .flex_col()
             .gap(space::S16)
             .when(!can_add, |d| {
-                d.child(Alert::new(Sym::Warning, m::KEYS_NO_PUBLIC_KEY).tone(AlertTone::Warning))
+                d.child(
+                    Alert::new(Sym::Warning, m::KEYS_NO_PUBLIC_KEY)
+                        .on_surface()
+                        .tone(AlertTone::Warning),
+                )
             })
             .child(
                 div()
@@ -1123,6 +1142,7 @@ impl AdminView {
             })
             .child(
                 Alert::new(Sym::Lock, m::KEYS_NOTE_TITLE)
+                    .on_surface()
                     .tone(AlertTone::Neutral)
                     .description(m::KEYS_NOTE_DESC),
             )
@@ -1280,12 +1300,11 @@ impl AdminView {
                             ),
                     )
             })
-            .children(
-                self.acct
-                    .form_error
-                    .clone()
-                    .map(|e| Alert::new(Sym::Failed, e).tone(AlertTone::Destructive)),
-            )
+            .children(self.acct.form_error.clone().map(|e| {
+                Alert::new(Sym::Failed, e)
+                    .on_surface()
+                    .tone(AlertTone::Destructive)
+            }))
             .child(
                 div()
                     .flex()
