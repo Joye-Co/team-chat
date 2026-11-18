@@ -1033,6 +1033,8 @@ fn after_sleep(
 /// Pause state of a run (接管).
 struct Paused {
     since: Instant,
+    /// The member id of the person who paused it (empty when the server did not say).
+    by: String,
     /// The stopped CLI and its tools (None while the CLI has not started yet).
     stopped: Option<Box<dyn Stopped>>,
     /// A person took over: their commands may run (design-takeover 3.4).
@@ -1174,6 +1176,7 @@ async fn run_runtime(
                             };
                             paused = Some(Paused {
                                 since: Instant::now(),
+                                by: by.clone().unwrap_or_default(),
                                 stopped,
                                 takeover,
                                 queued: vec![],
@@ -1191,11 +1194,11 @@ async fn run_runtime(
                             for ev in gate.push(RunEvent::Paused { paused: false, by: None }) {
                                 event(ev);
                             }
-                            if let Some(text) = words {
+                            if let Some(words) = words {
                                 resumes += 1;
                                 let _ = rt_tx.send(Control::Input {
                                     input_id: format!("resume-{resumes}"),
-                                    text,
+                                    text: crate::handback::pause_note("", None, &words),
                                 });
                             }
                             continue;
@@ -1210,7 +1213,10 @@ async fn run_runtime(
                                 event(RunEvent::HandSummary(summary));
                                 Some(text)
                             }
-                            None => words,
+                            // A plain pause: who paused it and for how long, then their words.
+                            None => words.map(|w| {
+                                crate::handback::pause_note(&p.by, Some(p.since.elapsed()), &w)
+                            }),
                         };
                         p.resume();
                         // The paused time does not count toward maxDurationMs or the stall.
