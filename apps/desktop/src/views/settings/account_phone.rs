@@ -549,8 +549,21 @@ impl PhoneSignIn {
                             .into_any_element(),
                     ),
                 };
-                // One column as wide as the code slots (2.20): the button of
-                // every step has their left and right edge.
+                // 完成 closes the last step; before it, 取消 under the button,
+                // as wide and as tall as it (the email sheet's pair).
+                let cancel = (!matches!(page.approve, Approve::Done { .. })).then(|| {
+                    push_button(
+                        "phone-code-close",
+                        common::CANCEL,
+                        PushStyle::Outline,
+                        PushSize::Large,
+                        cx,
+                    )
+                    .w_full()
+                    .on_click(|_, window, cx| window.close_dialog(cx))
+                });
+                // One column as wide as the code slots (2.20): the buttons of
+                // every step have their left and right edge.
                 let body = div()
                     .w(crate::ui::native::code_input::code_input_width(
                         PHONE_CODE_LEN,
@@ -567,18 +580,8 @@ impl PhoneSignIn {
                                 .child(sheet_status_error(e, cx)),
                         )
                     })
-                    .child(content);
-                // 完成 closes the last step; before it, 取消 under the button.
-                let cancel = (!matches!(page.approve, Approve::Done { .. })).then(|| {
-                    push_button(
-                        "phone-code-close",
-                        common::CANCEL,
-                        PushStyle::Ghost,
-                        PushSize::Regular,
-                        cx,
-                    )
-                    .on_click(|_, window, cx| window.close_dialog(cx))
-                });
+                    .child(content)
+                    .children(cancel.map(|b| div().w_full().pt(tokens::space::S8).child(b)));
                 let _ = k;
                 let ok = this.clone();
                 dialog
@@ -592,7 +595,7 @@ impl PhoneSignIn {
                     })
                     .on_cancel(|_, _, _| true)
                     .child(sheet_column(
-                        cancel,
+                        None,
                         Sym::Phone,
                         title,
                         hint,
@@ -673,7 +676,7 @@ impl Render for PhoneSignIn {
         )
         .on_click(move |_, window, cx| Self::open_code_sheet(page.clone(), window, cx));
         widgets::section(
-            SectionTitle::new(s::PHONE).description(s::PHONE_HINT),
+            SectionTitle::new(s::PHONE),
             // The one separator of a list with media (2.8): from the title x.
             GroupedForm::new().row(widgets::item_rows(
                 vec![

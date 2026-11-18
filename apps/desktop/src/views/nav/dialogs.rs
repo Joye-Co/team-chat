@@ -1241,6 +1241,43 @@ pub fn destructive_alert(
     });
 }
 
+/// A Tahoe alert (§7.2, 2.10) for a weighty choice that is not destructive:
+/// the filled `confirm` button on top (Return chooses it) and a Standard
+/// `取消` below. `on_confirm` runs when it is chosen.
+pub fn confirm_alert(
+    id: &'static str,
+    title: String,
+    message: String,
+    confirm: &'static str,
+    on_confirm: impl Fn(&mut Window, &mut App) + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let on_confirm = std::rc::Rc::new(on_confirm);
+    window.open_dialog(cx, move |dialog, _, cx| {
+        let (on_return, on_click) = (on_confirm.clone(), on_confirm.clone());
+        window_alert(dialog, cx)
+            .on_ok(move |_, window, cx| {
+                on_return(window, cx);
+                true
+            })
+            .child(
+                AlertLayout::new(title.clone())
+                    .icon(app_icon(metrics::ALERT_ICON))
+                    .message(message.clone())
+                    .buttons([
+                        alert_button((id, 0usize), confirm, PushStyle::Default, false, cx)
+                            .on_click(move |_, window, cx| {
+                                window.close_dialog(cx);
+                                on_click(window, cx);
+                            }),
+                        alert_button((id, 1usize), common::CANCEL, PushStyle::Outline, false, cx)
+                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                    ]),
+            )
+    });
+}
+
 /// Asks before leaving a group; on 离开 leaves it and moves away from it.
 pub fn confirm_leave(
     services: Services,

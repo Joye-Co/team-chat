@@ -934,7 +934,7 @@ pub fn open_email_sending(
     after_fit(handle, cx, move |window, cx| {
         let account = view.read(cx).account().clone();
         AccountPage::open_email_sheet(account.clone(), window, cx);
-        account.update(cx, |p, cx| p.preview_email_sending(cx));
+        account.update(cx, |p, cx| p.preview_email_sending(window, cx));
     });
     Ok(handle)
 }
@@ -1230,7 +1230,7 @@ pub fn open_bot_dialog(
             let worst = crate::selftest::worst_case().then(|| longest_member(&s).0);
             let form = super::members::open_add_bot(s, w, cx);
             if let Some(name) = worst {
-                form.update(cx, |f, cx| f.fill(&name, None, w, cx));
+                form.update(cx, |f, cx| f.fill(&name, Some(""), w, cx));
             }
         },
         cx,
@@ -1249,7 +1249,7 @@ pub fn open_bot_dialog_new_name(
         Page::Members,
         |s, w, cx| {
             let form = super::members::open_add_bot(s, w, cx);
-            form.update(cx, |f, cx| f.fill("发布巡检", None, w, cx));
+            form.update(cx, |f, cx| f.fill("发布巡检", Some(""), w, cx));
         },
         cx,
     )

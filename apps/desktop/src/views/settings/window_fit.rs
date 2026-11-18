@@ -36,9 +36,17 @@ pub struct Fit {
     /// Bumped per new target, so a running resize stops when a newer one
     /// starts.
     generation: std::rc::Rc<Cell<u64>>,
+    /// A resize is on its way: what is cut now may still fit.
+    resizing: std::rc::Rc<Cell<bool>>,
 }
 
 impl Fit {
+    /// The window has the height it can get, at the 760 limit or at a shorter
+    /// screen's: a pane still cut now scrolls for good.
+    pub fn settled(&self) -> bool {
+        !self.resizing.get()
+    }
+
     /// The pane laid out at `wanted` (toolbar plus pane). Changes the window
     /// height after this frame when it differs from the window's.
     pub fn measured(
@@ -70,6 +78,8 @@ impl Fit {
         let generation = self.generation.clone();
         let run = generation.get() + 1;
         generation.set(run);
+        let resizing = self.resizing.clone();
+        resizing.set(true);
         cx.spawn(async move |cx| {
             let Ok(Some((ns_window, now))) = handle.update(cx, |_, window, _| {
                 ns_window(window).map(|w| (w, window.viewport_size().height))
@@ -96,17 +106,22 @@ impl Fit {
                     };
                     set_height(ns_window, cur, px(h), false, false);
                     if t >= 1. {
-                        return;
+                        break;
                     }
                     cx.background_executor().timer(FRAME).await;
                 }
+            } else {
+                set_height(ns_window, now, px(target), false, first);
+                // The window was transparent until it had its own height, so it
+                // never shows the opening size and then jumps (the flicker).
+                if first {
+                    reveal(ns_window);
+                }
             }
-            set_height(ns_window, now, px(target), false, first);
-            // The window was transparent until it had its own height, so it
-            // never shows the opening size and then jumps (the flicker).
-            if first {
-                reveal(ns_window);
-            }
+            // A screen too short for the height leaves the frame as it was,
+            // and nothing else would draw the page again.
+            resizing.set(false);
+            let _ = handle.update(cx, |_, window, _| window.refresh());
         })
         .detach();
     }

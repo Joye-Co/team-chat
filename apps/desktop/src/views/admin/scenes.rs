@@ -458,6 +458,30 @@ fn open_roles_menu(
     Ok(handle)
 }
 
+/// 成员 as the 所有者 with the alert 设为所有者… asks before it hands over the team.
+fn open_roles_owner_confirm(
+    services: Services,
+    _content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = super::open_window(services, false, cx)?;
+    handle
+        .update(cx, |_, window, cx| {
+            view.update(cx, |v, cx| v.open_page(AdminPage::Members, window, cx))
+        })
+        .map_err(|e| e.to_string())?;
+    after_load(handle, view, cx, move |_, window, cx| {
+        crate::views::settings::ask_before_role(
+            crate::data::TeamRole::Owner,
+            "陈晨",
+            |_, _| {},
+            window,
+            cx,
+        );
+    });
+    Ok(handle)
+}
+
 macro_rules! scene {
     ($name:literal, $about:literal, $open:ident) => {
         Scene {
@@ -514,6 +538,12 @@ pub const SCENES: &[Scene] = &[
         "团队管理 › 成员 as the 所有者 with 陈晨's ⋯ menu open: 设为所有者, 设为普通成员, 停用",
         Owner,
         open_roles_menu
+    ),
+    roles_scene!(
+        "roles-owner-confirm",
+        "团队管理 › 成员 as the 所有者 with the alert before 设为所有者",
+        Owner,
+        open_roles_owner_confirm
     ),
     roles_scene!(
         "roles-admin",

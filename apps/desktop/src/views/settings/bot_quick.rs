@@ -27,7 +27,7 @@ use crate::{
         avatar::name_beside_avatar,
         native::{PushSize, PushStyle, SheetLayout, SheetWidth, push_button, tokens},
     },
-    views::nav::dialogs::{sheet_form, sheet_form_row},
+    views::nav::dialogs::{sheet_form, sheet_form_row, sheet_form_row_wrap},
 };
 
 /// The member's runner and the team's computers as they load.
@@ -172,8 +172,9 @@ impl BotQuick {
                         .map(|m| name_beside_avatar(&m.name).to_string())
                 });
             return div().w_full().child(
-                sheet_form().child(sheet_form_row(
+                sheet_form().child(sheet_form_row_wrap(
                     s::RUNNER_MACHINE,
+                    tokens::height::DEFAULT,
                     div()
                         .w_full()
                         .flex()
