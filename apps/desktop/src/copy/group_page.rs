@@ -62,9 +62,7 @@ crate::copy! {
     // --- end v13/wire ---
     // --- v14/t3-pages ---
     GROUP_PAGE_STATUS_DONE = "完成",
-    GROUP_PAGE_COUNT = "共 {n} 个话题",
     GROUP_PAGE_DONE_EMPTY = "这周还没有做完的话题",
-    GROUP_PAGE_DONE_EMPTY_BODY = "成员做完一个话题后，会列在这里，带上结果和用到的产出。",
     GROUP_PAGE_ACTIVE_EMPTY = "现在没有在做的话题",
     GROUP_PAGE_DECISIONS_EMPTY = "还没有记下的决定",
     // --- end v14/t3-pages ---

@@ -341,6 +341,8 @@ impl GroupPage {
                 ToolbarRow::new(snap.name.clone())
                     .subtitle(subtitle)
                     .leading_inset(rows::toolbar_leading(&self.services, cx))
+                    // The bar ends in the filled 新话题: on the list's gutter.
+                    .trailing_inset(crate::ui::native::tokens::layout::CONTENT_GUTTER)
                     // D20: a toolbar item carries its word.
                     .group(ToolbarGroup::new([toolbar_labeled_item(
                         "group-chat",
@@ -764,7 +766,9 @@ impl Render for GroupPage {
                         .map(|row| self.topic_row(row, cx))
                         .collect();
                     let slug = st.slug();
-                    let footer = if total > ACTIVE_ROWS {
+                    // The count is in the section header; a footer only when the
+                    // list is cut (§2.6).
+                    let footer = (total > ACTIVE_ROWS).then(|| {
                         let text = if self.show_all {
                             c::GROUP_PAGE_SHOW_LESS.to_string()
                         } else {
@@ -780,16 +784,9 @@ impl Render for GroupPage {
                             this.show_all = !this.show_all;
                             cx.notify();
                         }))
-                    } else {
-                        page::list_footer(
-                            SharedString::from(format!("group-count-{slug}")),
-                            fill(c::GROUP_PAGE_COUNT, &[("n", &total.to_string())]),
-                            None,
-                            cx,
-                        )
-                    };
+                    });
                     let body = if total > 0 {
-                        page::frame(cx).children(topic_rows).child(footer)
+                        page::frame(cx).children(topic_rows).children(footer)
                     } else {
                         page::frame(cx).child(div().px(tsp::S16).child(page::compact_empty(
                             Sym::Topic,
@@ -804,23 +801,17 @@ impl Render for GroupPage {
                         false,
                     ));
                 }
-                // 最近完成 always shows (an Empty when nothing is done); its
-                // frame hugs its rows and footer.
+                // 最近完成 always shows; with nothing done it has the same
+                // compact line as an empty 在做, and its frame hugs its rows.
                 let done_body = if done.is_empty() {
-                    page::frame(cx).child(page::page_empty(
+                    page::frame(cx).child(div().px(tsp::S16).child(page::compact_empty(
                         Sym::Done,
                         c::GROUP_PAGE_DONE_EMPTY,
-                        c::GROUP_PAGE_DONE_EMPTY_BODY,
-                        Vec::new(),
-                        cx,
-                    ))
-                } else {
-                    page::frame(cx).children(done).child(page::list_footer(
-                        "group-count-done",
-                        fill(c::GROUP_PAGE_COUNT, &[("n", &done_total.to_string())]),
                         None,
                         cx,
-                    ))
+                    )))
+                } else {
+                    page::frame(cx).children(done)
                 };
                 content = content.child(section(
                     page::section_header(
