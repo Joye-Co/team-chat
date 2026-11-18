@@ -58,6 +58,9 @@ pub struct MemoryBoard {
     services: Services,
     scope: MemoryScope,
     host: Host,
+    /// The board sits on the 团队管理 content panel, not in the settings
+    /// window: its alerts take that panel's fill.
+    admin_panel: bool,
     /// The AI member's name (`MemoryScope::Member`).
     name: String,
     memories: Option<Result<Vec<Memory>, AdminError>>,
@@ -113,6 +116,7 @@ impl MemoryBoard {
             services,
             scope,
             host,
+            admin_panel: false,
             name,
             memories: None,
             day: None,
@@ -282,6 +286,12 @@ impl MemoryBoard {
     }
 
     /// Whether I may change one memory: by its own scope (我的约定 holds two).
+    /// The board of 团队管理 › 记忆: it sits on that window's content panel.
+    pub fn on_admin_panel(mut self) -> Self {
+        self.admin_panel = true;
+        self
+    }
+
     fn writes(&self, m: &Memory) -> bool {
         match MemoryScope::parse(&m.scope) {
             Some(s) if s != self.scope => self.writer_of(&s),
@@ -519,13 +529,67 @@ impl MemoryBoard {
         let k = native_colors(cx);
         let busy = self.busy.contains(&line.id);
         let id = line.id.clone();
+        // A 可能过时 line asks for a decision: 编辑 and 停用 on the line, for the
+        // memory as it is now (none once it is retired or gone).
+        let flagged = line
+            .can_act
+            .then(|| match &self.memories {
+                Some(Ok(list)) => list
+                    .iter()
+                    .find(|m| m.id == line.memory_id && m.status != MemoryStatus::Retired)
+                    .cloned(),
+                _ => None,
+            })
+            .flatten();
         let trailing: Option<AnyElement> = if line.undone {
+            // Its own line box (12 / 16) centered on the first text line.
             Some(
-                div()
-                    .n_subheadline()
-                    .text_color(k.secondary)
-                    .child(c::UNDONE)
-                    .into_any_element(),
+                first_line(
+                    tokens::text::META.1,
+                    div()
+                        .n_subheadline()
+                        .text_color(k.secondary)
+                        .child(c::UNDONE),
+                )
+                .into_any_element(),
+            )
+        } else if let Some(memory) = flagged {
+            let busy = self.busy.contains(&memory.id);
+            let mid = memory.id.clone();
+            let edit = push_button(
+                self.id(format!("flag-edit-{}", line.id)),
+                c::EDIT,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            )
+            .disabled(busy)
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.open_sheet(Some(memory.clone()), window, cx)
+            }));
+            let retire = push_button(
+                self.id(format!("flag-retire-{}", line.id)),
+                c::RETIRE,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            )
+            .loading(busy)
+            .disabled(busy)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.set_status(mid.clone(), MemoryStatus::Retired, cx)
+            }));
+            Some(
+                first_line(
+                    tokens::height::SM,
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(tokens::space::S8)
+                        .child(edit)
+                        .child(retire),
+                )
+                .into_any_element(),
             )
         } else if line.can_undo {
             Some(
@@ -604,10 +668,7 @@ impl MemoryBoard {
             c::META,
             &[
                 ("source", &model::source_text(m, &name)),
-                (
-                    "time",
-                    &crate::views::group_page::kit::day_and_time(now, m.updated_at, false),
-                ),
+                ("time", &model::row_time(now, m.updated_at)),
             ],
         );
         let line = |key: &str, text: String| {
@@ -861,6 +922,7 @@ impl MemoryBoard {
         let k = native_colors(cx);
         match self.host {
             Host::Page => k.sheet,
+            Host::Settings if self.admin_panel => k.admin_panel(),
             Host::Settings => k.content,
         }
     }

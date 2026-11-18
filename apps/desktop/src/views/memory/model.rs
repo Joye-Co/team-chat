@@ -6,7 +6,7 @@ use chrono::{Datelike as _, NaiveDate};
 use crate::{
     copy::{fill, memory as c},
     data::{
-        Member, MemberLevel,
+        Member, MemberLevel, Millis,
         memory::{
             Memory, MemoryChange, MemoryDay, MemoryKind, MemoryScope, MemorySourceKind,
             MemoryStatus, MemoryUpdate,
@@ -205,6 +205,10 @@ pub struct UpdateLine {
     pub undone: bool,
     /// 撤回 shows: a writer, a change that can be undone, not undone yet.
     pub can_undo: bool,
+    /// The memory the line is about.
+    pub memory_id: String,
+    /// 编辑 and 停用 show: a writer, a 可能过时 line, not undone.
+    pub can_act: bool,
 }
 
 pub fn update_line(u: &MemoryUpdate, writer: bool) -> UpdateLine {
@@ -238,6 +242,8 @@ pub fn update_line(u: &MemoryUpdate, writer: bool) -> UpdateLine {
         detail,
         undone,
         can_undo: writer && undoable && !undone,
+        memory_id: u.memory_id.clone(),
+        can_act: writer && u.change == MemoryChange::Flagged && !undone,
     }
 }
 
@@ -278,6 +284,37 @@ pub fn day_label(day: &str, today: NaiveDate) -> String {
             c::DAY_DATE,
             &[("m", &d.month().to_string()), ("d", &d.day().to_string())],
         )
+    }
+}
+
+/// When a memory row was last changed: `今天 09:55`, `昨天`, else `10月19日`, the day form
+/// of 记忆更新 and of the rest of 团队管理 (the year's own form when it is not this year).
+pub fn row_time(now: Millis, at: Millis) -> String {
+    use chrono::{Local, TimeZone as _};
+    let (Some(n), Some(t)) = (
+        Local.timestamp_millis_opt(now).single(),
+        Local.timestamp_millis_opt(at).single(),
+    ) else {
+        return crate::copy::common::TIME_UNKNOWN.to_string();
+    };
+    if at <= 0 {
+        return crate::copy::common::TIME_UNKNOWN.to_string();
+    }
+    let (today, day) = (n.date_naive(), t.date_naive());
+    if day == today {
+        format!("{} {}", c::DAY_TODAY, t.format("%H:%M"))
+    } else if today.pred_opt() == Some(day) {
+        c::DAY_YESTERDAY.to_string()
+    } else if day.year() == today.year() {
+        fill(
+            crate::copy::common::MONTH_DAY,
+            &[
+                ("m", &day.month().to_string()),
+                ("d", &day.day().to_string()),
+            ],
+        )
+    } else {
+        crate::views::shell::day(at)
     }
 }
 
