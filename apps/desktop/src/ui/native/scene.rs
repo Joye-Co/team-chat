@@ -30,14 +30,17 @@ use super::{
     },
     sidebar::SidebarRow,
     toggles::{NativeCheckbox, NativeRadio, NativeSwitch, SwitchSize},
-    tokens::{NativeColors, NativeType as _, metrics, native_colors},
+    tokens::{NativeColors, NativeType as _, metrics, native_colors, space},
     toolbar::ToolbarRow,
 };
 use crate::{
     app::{Services, main_window_options},
     copy::native_kit as t,
     selftest::scenes::{Scene, Start, capture_bounds},
-    ui::sf_symbols::{Sf, Weight, symbol},
+    ui::{
+        Sym,
+        sf_symbols::{Sf, Weight, symbol},
+    },
 };
 
 /// The scenes' slice of the self-test (`selftest::scenes::all`).
@@ -167,7 +170,7 @@ fn section(title: &'static str, k: &NativeColors) -> gpui::Div {
     div()
         .flex()
         .flex_col()
-        .gap(px(10.))
+        .gap(space::S12)
         .child(div().n_section().text_color(k.secondary).child(title))
 }
 
@@ -475,17 +478,11 @@ impl NativeKit {
 
     fn form(&self, window: &mut Window, cx: &mut App) -> AnyElement {
         let k = native_colors(cx);
-        let device = |sf: Sf, window: &Window, cx: &App| {
-            symbol(
-                sf,
-                px(18.),
-                Weight::Regular,
-                native_colors(cx).secondary,
-                window,
-            )
-        };
-        section(t::SEC_FORM, &k)
-            .w(px(440.))
+        // The 28 icon box of a Settings list row (§2.19).
+        let device = |sym: Sym, cx: &App| crate::views::settings::widgets::icon_box_28(sym, cx);
+        // Form sections are 24 apart (§2.8).
+        let groups = div().flex().flex_col().gap(space::S24);
+        let groups = groups
             .child(
                 GroupedForm::new()
                     .header(t::FORM_GENERAL)
@@ -532,15 +529,18 @@ impl NativeKit {
                     // (§2.19), never select-then-"−".
                     .row(
                         FormRow::new(t::DEVICE_A)
-                            .leading(device(Sf::Computer, window, cx))
+                            .leading(device(Sym::Laptop, cx))
                             .control(device_value("kform-more-a", t::THIS_MAC, window, cx)),
                     )
                     .row(
                         FormRow::new(t::DEVICE_B)
-                            .leading(device(Sf::Machines, window, cx))
+                            .leading(device(Sym::MacMini, cx))
                             .control(device_value("kform-more-b", t::LAST_SEEN, window, cx)),
                     ),
-            )
+            );
+        section(t::SEC_FORM, &k)
+            .w(px(440.))
+            .child(groups)
             .into_any_element()
     }
 
@@ -647,7 +647,7 @@ impl NativeKit {
                 )
                 .child(
                     div().pt(px(8.)).child(
-                        popover_surface(px(40.), cx).w(px(240.)).p(px(12.)).child(
+                        popover_surface(cx).w(px(240.)).p(px(12.)).child(
                             div()
                                 .flex()
                                 .flex_col()

@@ -261,6 +261,11 @@ pub struct NativeColors {
     pub knob_on: Hsla,
     /// The active segmented trigger: `background` (dark: `input` on `muted`).
     pub segment: Hsla,
+    /// The segmented track. Light: the foreground at 6 %, a tint that reads
+    /// as `muted` on the white window and still steps over a group box
+    /// (whose fill is `muted` itself). Dark: `muted`, a step over the
+    /// window, a sheet and a group box already.
+    pub segment_track: Hsla,
     pub amber: Hsla,
     pub blue: Hsla,
     pub red: Hsla,
@@ -337,6 +342,11 @@ impl NativeColors {
             knob: if p.dark { p.foreground } else { p.background },
             knob_on: p.primary_foreground,
             segment: if p.dark { p.input } else { p.background },
+            segment_track: if p.dark {
+                p.muted
+            } else {
+                p.foreground.opacity(0.06)
+            },
             amber: p.warning,
             blue: p.info,
             red: p.destructive,
@@ -1106,7 +1116,6 @@ pub mod metrics {
     pub const MENU_SYMBOL: Pixels = px(16.);
     pub const MENU_ROW_PAD: Pixels = space::S8;
     pub const POPOVER_RADIUS: Pixels = radius::CONTROL;
-    pub const POPOVER_ARROW: Pixels = px(10.);
 }
 
 /// Card v2 sizes (DESIGN.md §7.10) on the scales; `theme::card_v2`.

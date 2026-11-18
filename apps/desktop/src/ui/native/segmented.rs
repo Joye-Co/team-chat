@@ -148,7 +148,7 @@ impl RenderOnce for Segmented {
             .h(metrics::SEGMENTED)
             .p(metrics::SEGMENT_INSET)
             .rounded(radius::CONTAINER)
-            .bg(k.fill)
+            .bg(k.segment_track)
             .flex()
             .items_center()
             .children(items)

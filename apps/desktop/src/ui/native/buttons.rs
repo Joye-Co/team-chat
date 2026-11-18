@@ -95,7 +95,9 @@ pub(super) fn look(style: PushStyle, k: &NativeColors) -> Look {
             border: None,
         },
         // A Mac push button: a soft tint, no frame (owner review: a border
-        // on every 编辑… / 取消 is noise).
+        // on every 编辑… / 取消 is noise; COMPLETENESS.md D11). The tint is
+        // of the text color, so unlike Secondary's opaque `muted` it shows
+        // on a group box and a sheet too.
         PushStyle::Outline => Look {
             fill: k.push,
             text: k.label,
@@ -238,11 +240,15 @@ pub fn disabled_push(b: Button, disabled: bool, _cx: &App) -> Button {
 }
 
 /// The primary of a short form that is not complete yet (the login, §2.20):
-/// inert, primary at 30 %, so it reads light and turns solid once the form
-/// is filled. Use [`disabled_push`] for any other disabled button.
-pub fn waiting_push(b: Button, waiting: bool) -> Button {
-    b.disabled(waiting)
-        .when(waiting, |b| b.opacity(metrics::PRIMARY_WAITING_OPACITY))
+/// inert, its fill at 30 % of primary, so it reads light and turns solid
+/// once the form is filled. Only the fill fades: the label keeps the full
+/// on-primary color, so the screen still names its next step. Use
+/// [`disabled_push`] for any other disabled button.
+pub fn waiting_push(b: Button, waiting: bool, cx: &App) -> Button {
+    let k = native_colors(cx);
+    b.disabled(waiting).when(waiting, |b| {
+        b.bg(k.primary.opacity(metrics::PRIMARY_WAITING_OPACITY))
+    })
 }
 
 /// A loading button (§1.8): a 16 spinner in the icon slot, the label and
