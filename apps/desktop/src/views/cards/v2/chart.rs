@@ -631,7 +631,12 @@ pub(crate) fn chart_with_peek(
     }
     let inks = [k.ink, k.ink_2, k.ink_3, k.line_2];
     // The legend keeps the room of its longest values, so reading a point never moves the card.
-    let legend_h = legend_extra(legend_lines(series, &peek_values, width));
+    // A legend that says no values takes the height of its own lines.
+    let legend_h = if peek_values.is_empty() {
+        px(0.)
+    } else {
+        legend_extra(legend_lines(series, &peek_values, width))
+    };
     let legend = (series.len() > 1).then(|| {
         div()
             .flex()

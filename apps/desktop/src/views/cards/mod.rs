@@ -241,11 +241,15 @@ pub fn render_card(
                     .child(ui::native::StatusBadge::new(badge, label).max_w(BADGE_MAX))
                     .when(quick, |el| {
                         el.child(
+                            // Beside a long status word the line cuts, it never wraps.
                             div()
+                                .flex_1()
                                 .min_w(px(0.))
                                 .t_meta()
                                 .text_color(k.text_3)
-                                .child(crate::copy::cards_v2::STRIP_WAITS_QUICK),
+                                .child(ui::truncate::TruncText::new(
+                                    crate::copy::cards_v2::STRIP_WAITS_QUICK,
+                                )),
                         )
                     })
             })

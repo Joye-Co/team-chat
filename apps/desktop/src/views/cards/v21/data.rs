@@ -472,27 +472,31 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &mut gpui::Window, cx: &mut A
         .filter(|_| several && selectable)
         .map(|s| (0..xs.len()).map(|i| value_text(s, i)).collect())
         .collect();
-    // The chosen point, under the plot.
-    let tip = point.as_ref().and_then(|(_, i)| point_text(*i));
     // Walking the points reads them: the focused or hovered one says its value in the label
     // row and takes the marker. Only Enter or a click picks it.
     let point_focus: Vec<gpui::FocusHandle> = (0..xs.len())
         .filter(|_| selectable)
         .map(|i| tab_stop(eid(node, format!("pt-focus-{id}-{i}")), window, cx))
         .collect();
-    let peek = selectable.then(|| {
-        // A click leaves the focus on its point: only the keyboard's focus outranks the pointer.
-        let at = point_focus
-            .iter()
-            .position(|h| h.is_focused(window))
-            .filter(|_| window.last_input_was_keyboard())
-            .or(node.ui.block(id).hot)
-            .filter(|i| point.as_ref().is_none_or(|(_, p)| p != i));
-        super::super::v2::ChartPeek {
-            point: at.and_then(|i| Some((i, point_text(i)?))),
-            read: at.or(point.as_ref().map(|(_, i)| *i)),
-            values: legend_values.clone(),
-        }
+    // A click leaves the focus on its point: only the keyboard's focus outranks the pointer.
+    let at = point_focus
+        .iter()
+        .position(|h| h.is_focused(window))
+        .filter(|_| window.last_input_was_keyboard())
+        .or(node.ui.block(id).hot)
+        .filter(|i| selectable && point.as_ref().is_none_or(|(_, p)| p != i));
+    let picked = point.as_ref().map(|(_, i)| *i);
+    // The chosen point, under the plot. The legend above it says the values of the point being
+    // read, so with several series this line names that point and the label row stays empty.
+    let date_below = several && picked.is_some();
+    let tip = picked.and_then(|i| point_text(if several { at.unwrap_or(i) } else { i }));
+    let peek = selectable.then(|| super::super::v2::ChartPeek {
+        point: at.and_then(|i| {
+            let text = point_text(i)?;
+            Some((i, if date_below { String::new() } else { text }))
+        }),
+        read: at.or(picked),
+        values: legend_values.clone(),
     });
     let drawn = super::super::v2::chart_el(
         ctx.id(format!("chart-{id}")),
