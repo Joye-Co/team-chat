@@ -78,19 +78,35 @@ img{display:block;max-width:100%;height:auto}
 nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:10;background:var(--nav);backdrop-filter:saturate(1.6) blur(16px);-webkit-backdrop-filter:saturate(1.6) blur(16px);border-bottom:1px solid var(--line);transition:box-shadow 220ms ease,border-color 220ms ease}
 nav.scrolled{box-shadow:var(--shadow-sm);border-bottom-color:color-mix(in srgb,var(--ink) 12%,transparent)}
 nav .wrap{height:60px;display:flex;align-items:center;justify-content:space-between;gap:16px}
-.brand{display:flex;align-items:center;gap:9px;font-weight:600;font-size:16px;letter-spacing:-.01em}
+.brand{display:flex;align-items:center;gap:9px;min-width:0;overflow:hidden;font-weight:600;font-size:16px;letter-spacing:-.01em;white-space:nowrap}
 .brand img{width:30px;height:30px;flex:none}
 .links{display:flex;gap:24px;font-size:14px;color:var(--ink-2)}
 .links a{transition:color .18s ease}
 .links a:hover,.links a.on{color:var(--ink)}
-.nav-r{display:flex;gap:8px;align-items:center}
-.nav-r .btn{height:34px;padding:0 14px;font-size:13.5px}
-.lang{height:34px;display:inline-flex;align-items:center;padding:0 9px;font-size:13.5px;color:var(--ink-2);border-radius:8px;transition:color .18s ease,background-color .18s ease}
+.nav-r{display:flex;gap:8px;align-items:center;flex:none}
+.nav-r .btn{height:34px;padding:0 14px;font-size:13.5px;white-space:nowrap}
+.lang{height:34px;display:inline-flex;white-space:nowrap;align-items:center;padding:0 9px;font-size:13.5px;color:var(--ink-2);border-radius:8px;transition:color .18s ease,background-color .18s ease}
 .lang:hover{color:var(--ink);background:var(--soft)}
 .theme-btn{width:34px;height:34px;display:inline-grid;place-items:center;padding:0;border-radius:999px;border:1px solid var(--line);background:var(--chip);color:var(--ink-2);box-shadow:var(--shadow-xs),var(--rim);cursor:pointer;transition:color .18s ease,border-color .18s ease,background-color .18s ease,transform 150ms var(--ease-out)}
 .theme-btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .theme-btn:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 .cta .ctas{margin-top:32px}
+/* phones: a tighter bar, so the English labels stay on one line; the narrowest ones also drop the button's arrow */
+@media (max-width:640px){
+  nav .wrap{gap:8px}
+  .nav-r{gap:6px}
+  .nav-r .btn{padding:0 12px}
+  .lang{padding:0 6px}
+}
+@media (max-width:374px){
+  nav .wrap{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+  .brand{gap:7px;font-size:15px}
+  .brand img{width:26px;height:26px}
+  .nav-r{gap:4px}
+  .nav-r .btn{padding:0 10px}
+  .nav-r .btn .arr{display:none}
+  .lang{padding:0 4px}
+}
 @media (prefers-reduced-transparency:reduce){
   nav{background:var(--bg);backdrop-filter:none;-webkit-backdrop-filter:none}
 }
