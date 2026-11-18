@@ -1165,16 +1165,6 @@ impl TopicRail {
         } else {
             c::INSPECTOR_TIME
         };
-        let mut section =
-            self.section(COST, title, cx)
-                .row(label_value(c::INSPECTOR_TIME, used, cx));
-        if let Some(cents) = cost.cost_cents {
-            section = section.row(label_value(
-                c::INSPECTOR_COST,
-                money_text(cents, cost.currency),
-                cx,
-            ));
-        }
         let when = match active {
             Some(at) => Some(run_since(at)),
             None => cost
@@ -1182,8 +1172,33 @@ impl TopicRail {
                 .zip(cost.ended_at)
                 .map(|(a, b)| when_range(a, b)),
         };
-        if let Some(when) = when {
-            section = section.row(label_value(c::INSPECTOR_WHEN, when, cx));
+        let mut section = self.section(COST, title, cx);
+        if let Some(cents) = cost.cost_cents {
+            section = section
+                .row(label_value(c::INSPECTOR_TIME, used, cx))
+                .row(label_value(
+                    c::INSPECTOR_COST,
+                    money_text(cents, cost.currency),
+                    cx,
+                ));
+            if let Some(when) = when {
+                section = section.row(label_value(c::INSPECTOR_WHEN, when, cx));
+            }
+        } else {
+            // The title already says 用时: one row, the duration and its
+            // range, never a second 用时 label under it.
+            let k = native_colors(cx);
+            section = section.row(row(cx).child(used).child(div().flex_1()).children(when.map(
+                |when| {
+                    div()
+                        .flex_none()
+                        .whitespace_nowrap()
+                        .n_subheadline()
+                        .n_figures()
+                        .text_color(k.secondary)
+                        .child(when)
+                },
+            )));
         }
         Some(section.into_any_element())
     }
