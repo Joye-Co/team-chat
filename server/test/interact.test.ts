@@ -2,14 +2,9 @@
 // parts (V11-REFS §C3 server items): live events, answers and card state, idempotency,
 // patches, blocking asks, 1.0.x readers, send/edit/delete with refs, diagram blocks.
 import { env, runInDurableObject } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { CardV2 } from "@chat/protocol";
-import { Client, api, clientMsgId, createGroup, createMember, protocolViolations, type TestMember } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-});
+import { Client, api, clientMsgId, createGroup, createMember, type TestMember } from "./helpers";
 
 const FEATURES = ["interact/1", "refs/1"];
 

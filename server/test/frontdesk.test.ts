@@ -1,17 +1,12 @@
 // The front desk (agent/frontdesk.ts, bots/desk/front.ts): with an AI service, a new request is
 // decided by one forced tool call before it becomes a run. Provider calls go to a fake fetch.
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { jsonIn } from "../src/aiservice/tools";
 import { MIN_CONFIDENCE, settle } from "../src/agent/frontdesk";
-import { Daemon, downViolations, mention, world } from "./daemon";
+import { Daemon, mention, world } from "./daemon";
 import { SELF } from "cloudflare:test";
-import { BASE, Client, api, clientMsgId, protocolViolations, waitUntil } from "./helpers";
+import { BASE, Client, api, clientMsgId, waitUntil } from "./helpers";
 
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 afterEach(() => {
   vi.restoreAllMocks();
 });

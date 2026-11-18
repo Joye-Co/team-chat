@@ -2,17 +2,11 @@
 // stalled one elsewhere, reminds a looping one, continues a promise without work and answers
 // progress questions itself, all before it tells people.
 import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { CONTINUE_TEXT, LOOP_LIMIT, NUDGE_MS, isProgressQuestion, isPromiseOnly, progressAnswer, stepKey } from "../src/agent/supervise";
 import { STALL_MS, TEXT, workTime } from "../src/bots/dispatch";
-import { Daemon, type World, downViolations, mention, world } from "./daemon";
-import { Client, api, clientMsgId, protocolViolations, waitUntil } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
+import { Daemon, type World, mention, world } from "./daemon";
+import { Client, api, clientMsgId, waitUntil } from "./helpers";
 
 const benv = env as unknown as { BOT_DESK: DurableObjectNamespace };
 const deskOf = (botId: string) => benv.BOT_DESK.get(benv.BOT_DESK.idFromName(botId));

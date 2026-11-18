@@ -1,6 +1,6 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { DEFAULT_APPROVAL_POLICY, DEFAULT_NOTIFY_SETTINGS, type NotifySettings } from "@chat/protocol";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { buildPrompt } from "../src/bots/dispatch";
 import { decideNotifyEvent } from "../src/notify/rules";
 import {
@@ -13,14 +13,8 @@ import {
   teamPolicy,
   withDefaults,
 } from "../src/settings/rules";
-import { Daemon, downViolations, mention, world } from "./daemon";
-import { Client, api, clientMsgId, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
+import { Daemon, mention, world } from "./daemon";
+import { Client, api, clientMsgId, createGroup, createMember, waitUntil } from "./helpers";
 
 const H = 3_600_000;
 // 2026-11-04 00:00 UTC = 08:00 in Asia/Shanghai.

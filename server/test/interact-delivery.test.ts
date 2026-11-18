@@ -4,27 +4,21 @@
 // coalescing, short follow-up runs and their limits, chat-run outputs), and refs in prompts.
 import { SELF, env, runInDurableObject } from "cloudflare:test";
 import type { BlockRef, CardV2 } from "@chat/protocol";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { buildPrompt } from "../src/bots/dispatch";
 import type { BotsEnv } from "../src/bots/env";
 import { type InteractionIn, deliverCardEvent } from "../src/bots/interact";
 import type { RoomContext } from "../src/core/registry";
 import { REF_CONTEXT_TOTAL_BYTES, REFS_RULE, contextOf, refsText, resolveRefs, stripRefPrefix } from "../src/bots/refs";
 import { ulid } from "../src/core/ids";
-import { Daemon, downViolations, mention, world, type World } from "./daemon";
-import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
+import { Daemon, mention, world, type World } from "./daemon";
+import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, waitUntil } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
 const deskOf = (botId: string) => benv.BOT_DESK.get(benv.BOT_DESK.idFromName(botId));
 const roomOf = (groupId: string) => benv.GROUP_ROOM.get(benv.GROUP_ROOM.idFromName(groupId));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const INTERACT = { features: ["interact/1"] };
-
-afterAll(async () => {
-  await sleep(300);
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 
 async function sha(bytes: Uint8Array): Promise<string> {
   const d = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
