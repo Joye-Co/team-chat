@@ -594,7 +594,7 @@ pub fn skeleton_list(
     cx: &App,
 ) -> AnyElement {
     use crate::ui::native::{
-        Bone,
+        Bone, metrics,
         page::{self, m},
         tokens::text,
     };
@@ -609,6 +609,13 @@ pub fn skeleton_list(
                 .justify_end()
                 .children(bar.map(|b| Bone::new().h(text::META.0).w(b)))
         })
+    };
+    // The two small buttons of the actions column: 看看, then the answer.
+    let button = |w: Pixels| {
+        Bone::new()
+            .h(metrics::BUTTON_SMALL)
+            .w(w)
+            .rounded(metrics::BUTTON_SMALL_RADIUS)
     };
     page::frame(cx)
         .children((0..n).map(|i| {
@@ -638,10 +645,20 @@ pub fn skeleton_list(
                         .child(Bone::new().h(text::META.0).w(gpui::relative(w * 0.6))),
                 )
                 // A badge-wide bar in the status column, a time-wide bar in
-                // the time column, a button-wide bar in the actions column.
+                // the time column, two buttons in the actions column.
                 .children(column(cols.status, Some(tsp::S48 + tsp::S16)))
                 .children(column(cols.time, Some(tsp::S32 + tsp::S8)))
-                .children(column(cols.actions, actions.then_some(tsp::S48)))
+                .children(cols.actions.map(|w| {
+                    div()
+                        .flex_none()
+                        .w(w)
+                        .flex()
+                        .justify_end()
+                        .gap(tsp::S8)
+                        .when(actions, |d| {
+                            d.child(button(tsp::S48)).child(button(tsp::S48 + tsp::S16))
+                        })
+                }))
         }))
         .into_any_element()
 }

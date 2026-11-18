@@ -97,7 +97,7 @@ pub fn render(
     if loading {
         week = week.row(page::skeleton_rows(
             "desk-w-sk",
-            SkeletonKind::Compact,
+            SkeletonKind::DescRow,
             3,
             cx,
         ));
