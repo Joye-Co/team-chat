@@ -271,7 +271,6 @@ impl RenderOnce for SidebarSection {
             .flex_none()
             .h(metrics::SIDEBAR_SECTION)
             .mx(metrics::SIDEBAR_ROW_INSET)
-            .pt(px(8.))
             .child(row)
             .when_some(self.on_toggle, |d, f| {
                 d.on_click(move |e, w, cx| f(e, w, cx))
@@ -583,7 +582,10 @@ impl RenderOnce for SidebarRow {
             ),
         };
         let (count, trailing_el) = match (self.disclosure, trailing_el, count) {
-            (Some(_), None, Some(n)) => (None, Some(count_capsule(n, cx).into_any_element())),
+            (Some(_), None, Some(n)) => (
+                None,
+                Some(count_capsule(n, self.selected).into_any_element()),
+            ),
             (_, el, n) => (n, el),
         };
         let right: Option<AnyElement> = match (self.disclosure, trailing_el) {
@@ -709,7 +711,7 @@ impl RenderOnce for SidebarRow {
                         .child(div().size(px(6.)).rounded_full().bg(color)),
                 )
             })
-            .when_some(count, |d, n| d.child(count_capsule(n, cx)))
+            .when_some(count, |d, n| d.child(count_capsule(n, self.selected)))
             .children(right)
             .when_some(self.on_click, |d, f| {
                 d.on_click(move |e, w, cx| f(e, w, cx))
@@ -931,10 +933,13 @@ impl RenderOnce for SidebarGroup {
     }
 }
 
-/// The sidebar count: the count pill (20, `muted` fill, tabular figures).
-fn count_capsule(n: u32, _cx: &App) -> gpui::Div {
+/// The sidebar count: the count pill (20, `muted` fill, tabular figures). On a selected
+/// row, whose fill is `muted` too, it takes the tint that shows on a fill.
+fn count_capsule(n: u32, selected: bool) -> gpui::Div {
     // COMPLETENESS.md §1.8: the one count pill.
-    div().flex_none().child(super::badge::CountPill::new(n))
+    div()
+        .flex_none()
+        .child(super::badge::CountPill::new(n).on_fill(selected))
 }
 
 /// The hover group of a sidebar row (its disclosure chevron).

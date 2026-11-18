@@ -347,8 +347,9 @@ impl NativeColors {
             knob: if p.dark { p.foreground } else { p.background },
             knob_on: p.primary_foreground,
             segment: if p.dark { p.input } else { p.background },
+            // Dark: the border tint, so the track steps up from a card and a group fill alike.
             segment_track: if p.dark {
-                p.muted
+                p.border
             } else {
                 p.foreground.opacity(0.06)
             },
@@ -1374,6 +1375,11 @@ pub mod lightbox {
     /// The round previous / next buttons at the sides.
     pub const NAV: Pixels = px(40.);
     pub const NAV_INSET: Pixels = px(16.);
+    /// White over the dark screen: the round buttons at rest, and any screen button under
+    /// the pointer and pressed.
+    pub const NAV_REST: f32 = 0.10;
+    pub const NAV_HOVER: f32 = 0.18;
+    pub const NAV_PRESSED: f32 = 0.24;
     /// Filmstrip thumbnails.
     pub const THUMB: Pixels = px(44.);
     pub const THUMB_GAP: Pixels = px(6.);

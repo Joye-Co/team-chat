@@ -66,6 +66,13 @@ pub const SCENES: &[Scene] = &[
         setup: |_, _| {},
         open: |s, c, cx| open(s, c, 2, cx),
     },
+    Scene {
+        name: "native-kit-4",
+        about: "Completeness kit (COMPLETENESS.md §2.7, §2.16): a page table with its footer (count, 每页, pager) and the loading skeletons",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| open(s, c, 3, cx),
+    },
 ];
 
 /// A device row's value and its "⋯" action (§2.19).
@@ -573,7 +580,7 @@ impl NativeKit {
                     .pt(px(40.))
                     .child(
                         div()
-                            .px(px(20.))
+                            .px(space::S24)
                             .pt(px(16.))
                             .flex()
                             .gap(px(32.))
@@ -852,8 +859,7 @@ impl NativeKit {
         use super::{
             Alert, AlertTone, Badge, BadgeState, BadgeVariant, Card, Column, CountPill, Empty,
             EmptyLine, IconSize, KeyCap, LIST_TITLE_INSET, ListRow, PushSize, PushStyle,
-            SkeletonKind, StatusBadge, icon_button, list_frame, media_box, push_button,
-            skeleton_rows, table, tokens::space,
+            StatusBadge, icon_button, list_frame, media_box, push_button, table, tokens::space,
         };
         use crate::ui::Sym;
         let k = native_colors(cx);
@@ -933,14 +939,14 @@ impl NativeKit {
                     "k3-d",
                     t::REMOVE,
                     PushStyle::Destructive,
-                    PushSize::Small,
+                    PushSize::Regular,
                     cx,
                 ))
                 .child(push_button(
                     "k3-l",
                     t::CONTINUE,
                     PushStyle::Default,
-                    PushSize::Large,
+                    PushSize::Regular,
                     cx,
                 ))
                 .child(icon_button(
@@ -955,14 +961,14 @@ impl NativeKit {
                     "k3-i2",
                     Sf::Plus,
                     t::ADD,
-                    IconSize::Small,
+                    IconSize::Regular,
                     window,
                     cx,
                 )),
         );
         let card = section(t::SEC_CARD, &k).child(
             Card::new()
-                .width(px(440.))
+                .width(px(420.))
                 .title(t::CARD_TITLE)
                 .description(t::CARD_DESCRIPTION)
                 .action(Badge::new(t::VERSION_3))
@@ -1062,63 +1068,6 @@ impl NativeKit {
                         )),
                 ),
         );
-        // A page table with its footer: the count, 第 3 / 3 页 and the four
-        // page buttons (§2.7).
-        let page_table = section(t::SEC_TABLE, &k).child({
-            use super::page::{Col, Pager, frame, table_footer};
-            let page_cols = || {
-                vec![
-                    Col {
-                        header: t::COL_NAME.into(),
-                        width: None,
-                        right: false,
-                    },
-                    Col {
-                        header: t::COL_VERSION.into(),
-                        width: Some(px(64.)),
-                        right: true,
-                    },
-                    Col {
-                        header: t::COL_UPDATED.into(),
-                        width: Some(px(80.)),
-                        right: true,
-                    },
-                ]
-            };
-            // The last page of 23 at 10 a page: 3 rows (review 4 K-18).
-            let page_rows = [
-                (t::TOPIC_A, t::VERSION_3, t::TIME_A),
-                (t::TOPIC_B, t::VERSION_1, t::TIME_A),
-                (t::TOPIC_C, t::VERSION_1, t::TIME_B),
-            ]
-            .into_iter()
-            .map(|(name, version, time)| {
-                (
-                    vec![cell(name), cell(version), cell(time)],
-                    Some(
-                        Box::new(|_: &gpui::ClickEvent, _: &mut Window, _: &mut App| {})
-                            as Box<dyn Fn(&gpui::ClickEvent, &mut Window, &mut App)>,
-                    ),
-                )
-            })
-            .collect();
-            div().flex().flex_col().gap(space::S16).child(
-                frame(cx)
-                    .child(super::page::table("k3-page", &page_cols(), page_rows, cx))
-                    .child(table_footer(
-                        "k3-page-footer",
-                        t::TABLE_COUNT_PAGED,
-                        Pager {
-                            page: 3,
-                            pages: 3,
-                            go: Some(std::rc::Rc::new(|_, _, _| {})),
-                            per_page: 10,
-                            set_per_page: Some(std::rc::Rc::new(|_, _, _| {})),
-                        },
-                        cx,
-                    )),
-            )
-        });
         let empty = section(t::SEC_EMPTY, &k).child(
             div().w_full().flex().flex_col().gap(space::S16).child(
                 div().h(px(260.)).child(
@@ -1141,15 +1090,6 @@ impl NativeKit {
                         .dashed(),
                 ),
             ),
-        );
-        let loading = section(t::SEC_LOADING, &k).child(
-            div()
-                .w_full()
-                .flex()
-                .flex_col()
-                .gap(space::S16)
-                .child(skeleton_rows(SkeletonKind::Message, 2))
-                .child(skeleton_rows(SkeletonKind::ListRow, 2)),
         );
         let feedback = section(t::SEC_FEEDBACK, &k).child(
             div()
@@ -1211,6 +1151,8 @@ impl NativeKit {
                 "pressed" => b.bg(look.pressed).into_any_element(),
                 "focus" => div()
                     .rounded(super::tokens::radius::CONTROL)
+                    // The surface under the ring, so the translucent fill stays the rest fill.
+                    .bg(k.content)
                     .shadow(k.focus_ring())
                     .child(b)
                     .into_any_element(),
@@ -1245,8 +1187,6 @@ impl NativeKit {
                         .child(state(n, PushStyle::Outline, t::CANCEL))
                 }),
             ));
-        // The middle column is wider: the page table's footer holds the
-        // count, 每页, the page and four page buttons (§2.7) on one line.
         let col_w = |w: f32| div().w(px(w)).flex().flex_col().gap(space::S24);
         let col = || col_w(420.);
         div()
@@ -1266,8 +1206,94 @@ impl NativeKit {
                     .child(card)
                     .child(matrix),
             )
-            .child(col_w(500.).child(list).child(tables).child(page_table))
-            .child(col().child(feedback).child(empty).child(loading))
+            .child(col_w(500.).child(list).child(tables))
+            .child(col().child(feedback).child(empty))
+            .into_any_element()
+    }
+
+    /// The specimens that need the height of their own page: the page table down to its
+    /// footer, and the loading skeletons.
+    fn page3(&self, cx: &mut App) -> AnyElement {
+        use super::{SkeletonKind, skeleton_rows, tokens::space};
+        let k = native_colors(cx);
+        let cell = |s: &'static str| crate::ui::truncate::TruncText::new(s).into_any_element();
+        // A page table with its footer: the count, 第 3 / 3 页 and the four
+        // page buttons (§2.7).
+        let page_table = section(t::SEC_TABLE, &k).child({
+            use super::page::{Col, Pager, frame, table_footer};
+            let page_cols = || {
+                vec![
+                    Col {
+                        header: t::COL_NAME.into(),
+                        width: None,
+                        right: false,
+                    },
+                    Col {
+                        header: t::COL_VERSION.into(),
+                        width: Some(px(64.)),
+                        right: true,
+                    },
+                    Col {
+                        header: t::COL_UPDATED.into(),
+                        width: Some(px(80.)),
+                        right: true,
+                    },
+                ]
+            };
+            // The last page of 23 at 10 a page: 3 rows (review 4 K-18).
+            let page_rows = [
+                (t::TOPIC_A, t::VERSION_3, t::TIME_A),
+                (t::TOPIC_B, t::VERSION_1, t::TIME_A),
+                (t::TOPIC_C, t::VERSION_1, t::TIME_B),
+            ]
+            .into_iter()
+            .map(|(name, version, time)| {
+                (
+                    vec![cell(name), cell(version), cell(time)],
+                    Some(
+                        Box::new(|_: &gpui::ClickEvent, _: &mut Window, _: &mut App| {})
+                            as Box<dyn Fn(&gpui::ClickEvent, &mut Window, &mut App)>,
+                    ),
+                )
+            })
+            .collect();
+            div().flex().flex_col().gap(space::S16).child(
+                frame(cx)
+                    .child(super::page::table("k3-page", &page_cols(), page_rows, cx))
+                    .child(table_footer(
+                        "k3-page-footer",
+                        t::TABLE_COUNT_PAGED,
+                        Pager {
+                            page: 3,
+                            pages: 3,
+                            go: Some(std::rc::Rc::new(|_, _, _| {})),
+                            per_page: 10,
+                            set_per_page: Some(std::rc::Rc::new(|_, _, _| {})),
+                        },
+                        cx,
+                    )),
+            )
+        });
+        let loading = section(t::SEC_LOADING, &k).child(
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(space::S16)
+                .child(skeleton_rows(SkeletonKind::Message, 2))
+                .child(skeleton_rows(SkeletonKind::ListRow, 2)),
+        );
+        // The page table's footer holds the count, 每页, the page and four page buttons
+        // (§2.7) on one line.
+        div()
+            .size_full()
+            .bg(k.content)
+            .p(space::S24)
+            .pt(metrics::TOOLBAR_ROW)
+            .flex()
+            .gap(space::S24)
+            .child(div().w(px(500.)).flex().flex_col().child(page_table))
+            .child(div().w(px(420.)).flex().flex_col().child(loading))
             .into_any_element()
     }
 }
@@ -1277,7 +1303,8 @@ impl Render for NativeKit {
         match self.page {
             0 => self.page0(window, cx),
             1 => self.page1(window, cx),
-            _ => self.page2(window, cx),
+            2 => self.page2(window, cx),
+            _ => self.page3(cx),
         }
     }
 }

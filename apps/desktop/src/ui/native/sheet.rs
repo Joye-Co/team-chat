@@ -317,7 +317,7 @@ impl RenderOnce for AlertLayout {
             // COMPLETENESS.md §2.10: w 260, p 16; the 48 icon, 12 below the
             // title 14 semibold, 4 below the body 12 muted, 16 below the
             // buttons stacked full width h32, gap 8.
-            .w(metrics::ALERT_WIDTH)
+            .w_full()
             .p(metrics::ALERT_PAD)
             .flex()
             .flex_col()
@@ -403,6 +403,7 @@ pub fn alert_surface(cx: &App) -> gpui::Div {
     let k = native_colors(cx);
     div()
         .flex_none()
+        .w(metrics::ALERT_WIDTH)
         .rounded(metrics::SHEET_RADIUS)
         .bg(k.sheet)
         .border_1()

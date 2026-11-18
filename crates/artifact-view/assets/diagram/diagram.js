@@ -181,6 +181,12 @@
       var svg = out.querySelector('svg');
       if (!svg) return fail(reqId, 'internal', 'no svg');
       sanitize(svg);
+      // WebKit does not pass a <text>'s dominant-baseline on to its <tspan>s, so a
+      // participant's name would sit on the baseline, above the middle of its box.
+      if (type === 'sequence') {
+        var names = svg.querySelectorAll('text.actor tspan');
+        for (var n = 0; n < names.length; n++) names[n].setAttribute('dominant-baseline', 'central');
+      }
       // A Gantt chart keeps a fixed 50 px band above its rows: crop the height to what is
       // drawn (rows and the axis under them), 8 px clear, so the chart hugs its rows.
       if (type === 'gantt') {

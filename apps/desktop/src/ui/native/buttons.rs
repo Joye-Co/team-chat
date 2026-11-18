@@ -701,8 +701,8 @@ pub fn tile_button(id: impl Into<ElementId>, side: Pixels, selected: bool, cx: &
         .when(selected, |b| b.bg(k.fill).border_1().border_color(k.label))
 }
 
-/// A tool on the dark media screen (lightbox, video): `ink` icon, white
-/// 10 % hover; a 32 square, or a `round` 36 circle for the pager arrows.
+/// A tool on the dark media screen (lightbox, video): `ink` icon, white fills from
+/// `tokens::lightbox`; a clear 32 square, or a `round` 36 circle for the pager arrows.
 pub fn screen_button(
     id: impl Into<ElementId>,
     sym: Sym,
@@ -717,8 +717,10 @@ pub fn screen_button(
     } else {
         metrics::BUTTON_REGULAR
     };
+    use super::tokens::lightbox as l;
+    let white = |alpha: f32| gpui::hsla(0., 0., 1., alpha);
     let rest = if round {
-        gpui::hsla(0., 0., 1., 0.10)
+        white(l::NAV_REST)
     } else {
         gpui::transparent_black()
     };
@@ -727,9 +729,11 @@ pub fn screen_button(
             ButtonCustomVariant::new(cx)
                 .color(rest)
                 .foreground(ink)
-                .hover(gpui::hsla(0., 0., 1., 0.18))
-                .active(gpui::hsla(0., 0., 1., 0.24)),
+                .hover(white(l::NAV_HOVER))
+                .active(white(l::NAV_PRESSED)),
         )
+        // The custom variant weakens its rest color; the fill is set on the button itself.
+        .when(round, |b| b.bg(rest))
         .icon(button_sym(sym, SymSize::for_slot(icon::MD), side))
         .with_size(side)
         .size(side)

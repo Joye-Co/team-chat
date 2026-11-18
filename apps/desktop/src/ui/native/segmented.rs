@@ -26,7 +26,7 @@ pub enum Segment {
 }
 
 /// The one tabs control (COMPLETENESS.md §1.8, K09): a list h32, p 3,
-/// radius 10, `muted` fill; triggers h26, px 8, 14 medium, inactive at 60 %
+/// radius 10, `segment_track` fill; triggers h26, px 8, 14 medium, inactive at 60 %
 /// foreground, the active one on `background` with shadow sm.
 #[derive(IntoElement)]
 pub struct Segmented {
