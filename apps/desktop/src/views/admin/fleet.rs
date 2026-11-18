@@ -21,7 +21,7 @@ use crate::{
         icons::sym as sym_icon,
         native::{
             Alert, AlertTone, BadgeState, NativeType as _, PushSize, PushStyle, StatusBadge,
-            TruncText, native_colors, panel_card_surface, push_button,
+            TruncText, native_colors, page, panel_card_surface, push_button,
             tokens::{avatar, height, monitor as t, radius, space},
         },
         sf_symbols::SymSize,
@@ -308,11 +308,6 @@ impl AdminView {
         };
         // The setup card above speaks of 这台电脑: say which card that is.
         let this = self.services.provider.this_machine_id().as_deref() == Some(x.id.as_str());
-        let meta = if this {
-            format!("{} · {meta}", crate::copy::settings::MACHINE_THIS)
-        } else {
-            meta
-        };
         let (badge, word) = if x.connected {
             (BadgeState::Online, m::MACHINE_ONLINE.to_string())
         } else {
@@ -471,10 +466,25 @@ impl AdminView {
                             .flex()
                             .flex_col()
                             .child(
-                                TruncText::new(x.name.clone())
-                                    .n_title3()
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .text_color(ink),
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(space::S8)
+                                    // A long name cuts first; the badge stays whole.
+                                    .child(
+                                        div().min_w(gpui::Pixels::ZERO).child(
+                                            TruncText::new(x.name.clone())
+                                                .n_title3()
+                                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                                .text_color(ink),
+                                        ),
+                                    )
+                                    .when(this, |d| {
+                                        d.child(div().flex_none().child(page::outline_badge(
+                                            crate::copy::settings::MACHINE_THIS,
+                                            cx,
+                                        )))
+                                    }),
                             )
                             .child(TruncText::new(meta).n_footnote().text_color(k.secondary)),
                     )
