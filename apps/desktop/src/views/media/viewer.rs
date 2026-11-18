@@ -246,6 +246,16 @@ impl MediaViewer {
                         + space::S32
                         + AUDIO_CUE * a.transcript.len().max(1) as f32,
                 ),
+                Data::Video(v) => Some(head + full::video_body_height(v)),
+                // A picture shorter than the room: the sheet ends under it, with no
+                // blank band above and below. Several pictures take the tallest, so
+                // the sheet does not jump from one to the next.
+                Data::Images(pics) => pics
+                    .iter()
+                    .map(|p| full::pics_body_height(p, pics.len() > 1))
+                    .try_fold(px(0.), |tall, h| h.map(|h| tall.max(h)))
+                    .filter(|h| *h > px(0.))
+                    .map(|h| head + h),
                 _ => None,
             },
         };
