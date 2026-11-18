@@ -272,28 +272,16 @@ impl DeskPage {
     }
 }
 
-/// `11 月 3 日 周一`.
+/// `11月3日 周一`.
 pub fn today_line() -> String {
     use chrono::Datelike as _;
     let now = crate::selftest::clock::local_now();
-    const DAYS: [&str; 7] = [
-        c::WEEKDAY_1,
-        c::WEEKDAY_2,
-        c::WEEKDAY_3,
-        c::WEEKDAY_4,
-        c::WEEKDAY_5,
-        c::WEEKDAY_6,
-        c::WEEKDAY_7,
-    ];
     crate::copy::fill(
         c::DESK_DATE,
         &[
             ("m", &now.month().to_string()),
             ("d", &now.day().to_string()),
-            (
-                "weekday",
-                DAYS[now.weekday().num_days_from_monday() as usize],
-            ),
+            ("weekday", crate::copy::weekday(now.weekday())),
         ],
     )
 }

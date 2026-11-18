@@ -59,7 +59,7 @@ crate::copy! {
     NOTES_CURRENT = "你现在用的是 {current}",
     NOTES_FOOTER = "更新时应用会重新打开，大约一分钟",
     NOTES_EMPTY = "这个版本没有写更新内容。",
-    DATE = "{month} 月 {day} 日",
+    DATE = "{month}月{day}日",
     WHATS_NEW_TITLE = "已更新到 {version}",
     WHATS_NEW_MORE = "还有：{titles}",
     WHATS_NEW_OK = "好",

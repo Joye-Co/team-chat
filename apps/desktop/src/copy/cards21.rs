@@ -53,7 +53,6 @@ crate::copy! {
     MATRIX_PICKED = "已选 {n}/{total} 行",
     MATRIX_ROW_HEAD = "事项",
     SLOT_ALL_FREE = "都能来",
-    WEEKDAYS = "周日 周一 周二 周三 周四 周五 周六",
     SLOT_MISSING = "缺 {names}",
     SLOT_MISSING_N = "缺 {n} 人",
     POLL_VOTES = "{n} 票 · {pct}%",

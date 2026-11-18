@@ -66,7 +66,7 @@ crate::copy! {
     ARTIFACTS_MORE = "更多操作",
     ARTIFACTS_DAY_TODAY = "今天",
     ARTIFACTS_DAY_YESTERDAY = "昨天",
-    ARTIFACTS_DAY = "{m} 月 {d} 日",
+    ARTIFACTS_DAY = "{m}月{d}日",
     ARTIFACT_NO_NOTE = "无说明",
     // --- end v13/ux-pages ---
     // --- v13/wire: 页面里的回应 from the server's page log ---

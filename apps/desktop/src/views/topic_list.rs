@@ -84,16 +84,7 @@ pub fn list_time(at: Millis, now: DateTime<Local>) -> String {
     } else if days == 1 {
         common::YESTERDAY.to_string()
     } else if days < 7 {
-        let names = [
-            nav::WEEKDAY_MON,
-            nav::WEEKDAY_TUE,
-            nav::WEEKDAY_WED,
-            nav::WEEKDAY_THU,
-            nav::WEEKDAY_FRI,
-            nav::WEEKDAY_SAT,
-            nav::WEEKDAY_SUN,
-        ];
-        names[then.weekday().num_days_from_monday() as usize].to_string()
+        crate::copy::weekday(then.weekday()).to_string()
     } else if then.year() == now.year() {
         format!("{}/{}", then.month(), then.day())
     } else {

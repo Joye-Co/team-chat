@@ -23,7 +23,7 @@ use gpui::{
 
 use crate::{
     app::{RightPane, Services},
-    copy::{fill, live as c, nav as n},
+    copy::{fill, live as c},
     data::{
         AdminError, BotRunSummary, Millis, PlanState,
         run_phase::{
@@ -1970,15 +1970,7 @@ fn now_ms() -> Millis {
 fn menu_clock() -> String {
     use chrono::Datelike as _;
     let now = crate::selftest::clock::local_now();
-    let day = match now.weekday() {
-        chrono::Weekday::Mon => n::WEEKDAY_MON,
-        chrono::Weekday::Tue => n::WEEKDAY_TUE,
-        chrono::Weekday::Wed => n::WEEKDAY_WED,
-        chrono::Weekday::Thu => n::WEEKDAY_THU,
-        chrono::Weekday::Fri => n::WEEKDAY_FRI,
-        chrono::Weekday::Sat => n::WEEKDAY_SAT,
-        chrono::Weekday::Sun => n::WEEKDAY_SUN,
-    };
+    let day = crate::copy::weekday(now.weekday());
     format!("{day} {}", now.format("%H:%M"))
 }
 

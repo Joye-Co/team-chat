@@ -13,6 +13,12 @@
 //!   option the reader picks says 我 (「只有 @我」「有人 @我」). Inside a sentence a
 //!   mention has a space on both sides: 「{n} 条 @你 的消息」.
 //! - An AI member is 它, a person is 对方 or the name. Never TA, 他 or 她.
+//! - A failure's title says what did not happen and to what: 「没能 + 动作 + 对象」
+//!   (「没能改电脑的设置」), never a bare 「没有改成」. The reason and the next step go in
+//!   the body. The server that cannot be reached is 「连不上服务器」.
+//! - Quotation marks are 「」, also around the name of a system app or folder.
+//! - Dates have no spaces: 「11月3日」「2026年11月3日」. Weekday names come from
+//!   [`weekday`].
 
 pub mod artifacts;
 pub mod cards;
@@ -84,6 +90,21 @@ pub const fn per_system(mac: &'static str, other: &'static str) -> &'static str 
     } else {
         other
     }
+}
+
+/// The name of a weekday, 周一 to 周日: the catalog has one weekday table
+/// (`common::WEEKDAY_1` … `WEEKDAY_7`) and every view reads it here.
+pub fn weekday(day: chrono::Weekday) -> &'static str {
+    const NAMES: [&str; 7] = [
+        common::WEEKDAY_1,
+        common::WEEKDAY_2,
+        common::WEEKDAY_3,
+        common::WEEKDAY_4,
+        common::WEEKDAY_5,
+        common::WEEKDAY_6,
+        common::WEEKDAY_7,
+    ];
+    NAMES[day.num_days_from_monday() as usize]
 }
 
 /// Declares catalog entries: `copy! { KEY = "text", ... }`.

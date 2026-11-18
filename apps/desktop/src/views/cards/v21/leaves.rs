@@ -1186,11 +1186,7 @@ fn weekday(at: Millis) -> (String, String, String) {
         let unknown = crate::views::shell::clock(at);
         return (unknown.clone(), unknown.clone(), unknown);
     };
-    let days: Vec<&str> = c::WEEKDAYS.split(' ').collect();
-    let w = days
-        .get(t.weekday().num_days_from_sunday() as usize)
-        .copied()
-        .unwrap_or("");
+    let w = crate::copy::weekday(t.weekday());
     (
         format!("{w} {}", t.format("%m-%d")),
         t.format("%H:%M").to_string(),

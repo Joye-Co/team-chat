@@ -9,7 +9,19 @@ crate::copy! {
     MINUTES_AGO = "{n} 分钟前",
     YESTERDAY = "昨天",
     TOMORROW = "明天",
+    // Dates are written without spaces, as the system writes them: 11月3日, 2026年11月3日
+    // (the catalog test holds every entry to it).
     MONTH_DAY = "{m}月{d}日",
+    MONTH_DAY_TIME = "{m}月{d}日 {time}",
+    DATE_TIME = "{y}年{m}月{d}日 {time}",
+    // The one weekday table: read it with `copy::weekday`.
+    WEEKDAY_1 = "周一",
+    WEEKDAY_2 = "周二",
+    WEEKDAY_3 = "周三",
+    WEEKDAY_4 = "周四",
+    WEEKDAY_5 = "周五",
+    WEEKDAY_6 = "周六",
+    WEEKDAY_7 = "周日",
     TIME_UNKNOWN = "未知",
     CONNECTING = "正在连接…",
     RECONNECTING = "连接已断开，正在重连…",

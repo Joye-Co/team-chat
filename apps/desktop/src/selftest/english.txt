@@ -221,7 +221,7 @@ AI 成员被 @ 后，在这些电脑上干活。	AI members work here when you @
 {} PR	{} PRs
 {} 月	{}
 10 月	October 
-11 月 3 日 周二	Tuesday, November 3
+11月3日 周二	Tuesday, November 3
 网页	Page
 办公室	Office
 

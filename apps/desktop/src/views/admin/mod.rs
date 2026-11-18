@@ -451,13 +451,22 @@ fn clock(ms: u64) -> String {
 }
 
 /// "10:31" in local time.
-/// "11 月 8 日 19:20" in local time.
+/// "11月8日 19:20" in local time.
 fn clock_day(ms: u64) -> String {
     use chrono::TimeZone as _;
     chrono::Local
         .timestamp_millis_opt(ms as i64)
         .single()
-        .map(|t| t.format("%-m 月 %-d 日 %H:%M").to_string())
+        .map(|t| {
+            crate::copy::fill(
+                crate::copy::common::MONTH_DAY_TIME,
+                &[
+                    ("m", &t.format("%-m").to_string()),
+                    ("d", &t.format("%-d").to_string()),
+                    ("time", &t.format("%H:%M").to_string()),
+                ],
+            )
+        })
         .unwrap_or_default()
 }
 

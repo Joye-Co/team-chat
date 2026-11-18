@@ -68,7 +68,15 @@ pub fn size_text(bytes: u64) -> String {
 pub fn date_text(at: Millis) -> String {
     use chrono::TimeZone as _;
     match chrono::Local.timestamp_millis_opt(at) {
-        chrono::LocalResult::Single(t) => t.format("%Y年%-m月%-d日 %H:%M").to_string(),
+        chrono::LocalResult::Single(t) => fill(
+            crate::copy::common::DATE_TIME,
+            &[
+                ("y", &t.format("%Y").to_string()),
+                ("m", &t.format("%-m").to_string()),
+                ("d", &t.format("%-d").to_string()),
+                ("time", &t.format("%H:%M").to_string()),
+            ],
+        ),
         _ => String::new(),
     }
 }

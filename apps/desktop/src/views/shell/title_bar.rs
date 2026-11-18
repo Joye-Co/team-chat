@@ -562,11 +562,11 @@ mod tests {
         );
         // A page with a date only.
         let desk = TitleBarSpec {
-            subtitle: Some("11 月 3 日 周二".into()),
+            subtitle: Some("11月3日 周二".into()),
             ..TitleBarSpec::page("首页")
         };
         let s = subtitle(&desk, &k).unwrap();
-        assert_eq!(s.text, "11 月 3 日 周二");
+        assert_eq!(s.text, "11月3日 周二");
         assert!(s.state.is_none());
         assert!(subtitle(&TitleBarSpec::page("成员"), &k).is_none());
     }
