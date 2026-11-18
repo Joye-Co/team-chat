@@ -14,7 +14,7 @@
   --hero-glow:radial-gradient(ellipse 70% 50% at 50% 0%,rgba(10,116,240,.06),transparent 70%);
   --ease-out:cubic-bezier(0.23,1,0.32,1);
   --ease-in-out:cubic-bezier(0.77,0,0.175,1);
-  --sans:"Geist","Noto Sans SC","PingFang SC",system-ui,sans-serif;
+  --sans:"Geist","Noto Sans SC","PingFang SC","Microsoft YaHei UI",system-ui,sans-serif;
   --mono:"Geist Mono",ui-monospace,"SF Mono",Menlo,monospace;
   color-scheme:light;
 }

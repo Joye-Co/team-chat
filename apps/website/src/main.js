@@ -10,12 +10,14 @@
   function syncNav(){if(!nav)return;var s=scrollY>12;if(s!==navSc){navSc=s;nav.classList.toggle("scrolled",s);}}
   syncNav();addEventListener("scroll",syncNav,{passive:true});
   var reduce=window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;
+  /* the web fonts load without blocking the first paint, so measured layout is redone when they arrive */
+  function fontsIn(fn){if(!document.fonts)return;if(document.fonts.ready)document.fonts.ready.then(fn);if(document.fonts.addEventListener)document.fonts.addEventListener("loadingdone",fn);}
   var io2="IntersectionObserver" in window;
   /* sliding pill behind the selected tab of a tab row */
   function slider(box){var ind=document.createElement("span");ind.className="ind still";box.insertBefore(ind,box.firstChild);box.classList.add("has-ind");
     function place(){var t=box.querySelector('[aria-selected="true"]');if(!t)return;ind.style.width=t.offsetWidth+"px";ind.style.height=t.offsetHeight+"px";ind.style.transform="translate("+t.offsetLeft+"px,"+t.offsetTop+"px)";if(box.scrollWidth>box.clientWidth+1)box.scrollTo({left:t.offsetLeft-(box.clientWidth-t.offsetWidth)/2,behavior:ind.classList.contains("still")?"auto":"smooth"});}
     place();requestAnimationFrame(function(){requestAnimationFrame(function(){ind.classList.remove("still");});});
-    addEventListener("resize",place);addEventListener("load",place);if(document.fonts&&document.fonts.ready)document.fonts.ready.then(place);return place;}
+    addEventListener("resize",place);addEventListener("load",place);fontsIn(place);return place;}
   /* screenshot tours: each step names an image (data-img, without -light/-dark) and the part to ring (data-f: left, top, width, height in percent).
      The frame zooms toward that part; when the step's bar fills, the next step starts. Pointing at the tour or scrolling it out of view holds it. */
   [].forEach.call(document.querySelectorAll(".player"),function(el){
@@ -60,7 +62,7 @@
   function scrolled(){tours.forEach(function(c){if(!c.classList.contains("scrolly"))return;var st=c.querySelector(".stick"),r=c.getBoundingClientRect(),top=stickTop(c),total=c.offsetHeight-st.offsetHeight;if(total<=0)return;
     var pr=Math.min(Math.max((top-r.top)/total,0),.999),pl=st.querySelector(".player"),i=Math.floor(pr*pl._n),vis=r.top<innerHeight&&r.bottom>0;if(vis&&(i!==c._last||!c._in))pl._go(i);c._last=i;c._in=vis;});}
   if(tours.length){var sTick=false;addEventListener("scroll",function(){if(!sTick){sTick=true;requestAnimationFrame(function(){sTick=false;scrolled();});}},{passive:true});
-    addEventListener("resize",fits);addEventListener("load",fits);if(document.fonts&&document.fonts.ready)document.fonts.ready.then(fits);fits();}
+    addEventListener("resize",fits);addEventListener("load",fits);fontsIn(fits);fits();}
   /* comparison: pick which alternative's panel shows */
   var cmp=document.querySelector(".cmp");
   if(cmp){cmp.classList.add("js");var ct=[].slice.call(cmp.querySelectorAll(".ctab")),vs=[].slice.call(cmp.querySelectorAll(".vs")),cPlace=slider(cmp.querySelector(".tabs"));
