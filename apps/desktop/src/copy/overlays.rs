@@ -4,7 +4,7 @@
 crate::copy! {
     // --- v12/overlays: sheets ---
     NEW_TOPIC_TITLE = "新话题",
-    NEW_TOPIC_EXPLANATION = "写下要做的事，标题由 AI 起；@ 成员就交给他。",
+    NEW_TOPIC_EXPLANATION = "写下要做的事，标题由 AI 起；@ 谁就交给谁。",
     NEW_TOPIC_GROUP = "群",
     NEW_TOPIC_NAME = "标题",
     NEW_TOPIC_NAME_PLACEHOLDER = "可以不填，默认取第一行",

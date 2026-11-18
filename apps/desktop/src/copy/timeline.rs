@@ -59,7 +59,7 @@ crate::copy! {
     // A sender's avatar: a click @s them and quotes the message in the composer.
     AVATAR_MENTION_TIP = "@{name}",
     // An AI member's avatar, for owners: the right-click menu also changes its computer.
-    AVATAR_MENTION_TIP_BOT = "点一下 @{name}，右键可以更换 TA 的电脑",
+    AVATAR_MENTION_TIP_BOT = "点一下 @{name}，右键可以更换它的电脑",
     MORE = "更多",
     FOLLOW = "关注话题",
     UNFOLLOW = "取消关注",
