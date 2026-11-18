@@ -24,4 +24,8 @@ crate::copy! {
     SIDE_CHAT_SOURCE_ARTIFACT = "「{title}」v{version}",
     SIDE_CHAT_SOURCES_SEP = "、",
     SIDE_CHAT_SOURCES_LAST = "和",
+    // The suggested questions of a 话题 that is 完成.
+    SIDE_CHAT_ASK_RESULT = "结论是什么？",
+    SIDE_CHAT_ASK_BASIS = "依据是什么？",
+    SIDE_CHAT_ASK_LEFT = "还有什么遗留问题？",
 }
