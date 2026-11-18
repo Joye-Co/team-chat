@@ -525,7 +525,14 @@ impl LivePane {
         // Why a run failed, under the title.
         let mut cause: Option<String> = None;
         let (sym, title, detail) = match words.phase {
-            RunPhase::Paused => (Sym::Pause, words.text.clone(), since),
+            RunPhase::Paused => {
+                icon_ink = words.badge.color(&n);
+                (
+                    words.badge.symbol().unwrap_or(Sym::Pause),
+                    words.text.clone(),
+                    since,
+                )
+            }
             RunPhase::TakenOver => (
                 Sym::Pointer,
                 words.text.clone(),
@@ -542,8 +549,9 @@ impl LivePane {
             ),
             RunPhase::NeedsReply => {
                 let stuck = matches!(phase_of(run).1, Some(WaitingFor::Stuck));
+                icon_ink = words.badge.color(&n);
                 (
-                    Sym::Reply,
+                    words.badge.symbol().unwrap_or(Sym::Reply),
                     if stuck {
                         c::LIVE_NEEDS_REPLY_STUCK.to_string()
                     } else {
@@ -561,8 +569,9 @@ impl LivePane {
                     .or_else(|| run.machine_name.clone())
                     .filter(|m| !m.trim().is_empty())
                     .unwrap_or_else(|| fill(c::LIVE_COMPUTER, &[("name", bot)]));
+                icon_ink = words.badge.color(&n);
                 (
-                    Sym::Hourglass,
+                    words.badge.symbol().unwrap_or(Sym::Hourglass),
                     words.text.clone(),
                     Some(
                         [
@@ -576,7 +585,14 @@ impl LivePane {
                     ),
                 )
             }
-            RunPhase::WaitingComputer => (Sym::Hourglass, words.text.clone(), since),
+            RunPhase::WaitingComputer => {
+                icon_ink = words.badge.color(&n);
+                (
+                    words.badge.symbol().unwrap_or(Sym::Hourglass),
+                    words.text.clone(),
+                    since,
+                )
+            }
             // Waiting on a person, or stuck: the state in words and for how long
             // (design-takeover 3.9: the banner is the 状态词), with the mark of the
             // header's badge.

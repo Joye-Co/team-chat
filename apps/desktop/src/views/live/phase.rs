@@ -50,7 +50,7 @@ pub fn phase_words(run: &BotRunSummary, n: &Names, name: impl Fn(&str) -> String
             (
                 c::LIVE_PHASE_STUCK.to_string(),
                 c::LIVE_SHORT_STUCK.to_string(),
-                BadgeState::Abnormal,
+                BadgeState::Failed,
             )
         }
         RunPhase::WaitingPerson | RunPhase::NeedsReply | RunPhase::WaitingApproval => {
