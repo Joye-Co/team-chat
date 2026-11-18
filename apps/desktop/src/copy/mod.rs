@@ -7,6 +7,12 @@
 //! Rules (docs/PRODUCT.md): Simplified Chinese; product nouns are only 成员, 群,
 //! 话题 and 产出; developer words only in [`dev`]. The product name is never
 //! typed here: use `{product}` and fill it with `env!("PRODUCT_NAME")`.
+//!
+//! One wording per concept (the tests at the end hold the ones a test can check):
+//! - Person: the app says 你 to the reader (「有人 @你 时提醒你」). Only the name of an
+//!   option the reader picks says 我 (「只有 @我」「有人 @我」). Inside a sentence a
+//!   mention has a space on both sides: 「{n} 条 @你 的消息」.
+//! - An AI member is 它, a person is 对方 or the name. Never TA, 他 or 她.
 
 pub mod artifacts;
 pub mod cards;

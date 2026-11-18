@@ -5,7 +5,6 @@ crate::copy! {
     TODO_EMPTY = "没有等你的事",
     TODO_EMPTY_HINT = "有人 @你 或话题等你回答、等你审时会出现在这里。",
     TODO_REASON_WAITING = "等你处理",
-    TODO_REASON_MENTIONED = "有人@你",
     TODO_MENTIONED_YOU = "@你",
     TODO_ALL = "全部 {n} 项 ›",
     GROUPS = "群",
@@ -32,15 +31,15 @@ crate::copy! {
     // the 提醒 submenu of a 群 or 私聊 (how this one conversation reminds me)
     NOTIFY_LEVEL = "提醒",
     NOTIFY_DEFAULT = "默认",
-    TOPIC_DEFAULT_HINT = "有人 @我 时提醒你。",
+    TOPIC_DEFAULT_HINT = "有人 @你 时提醒你。",
     NOTIFY_ALL = "所有消息",
     NOTIFY_MENTIONS = "只有 @我",
     // the 通知 section of a 群 / 话题 page's right pane
     NOTIFY_SECTION = "通知",
     FOLLOW_ROW = "关注",
     FOLLOW_HINT = "关注的话题有结果、等你处理时会提醒你。",
-    GROUP_MUTED_HINT = "已静音：只在有人 @我 时提醒。",
-    TOPIC_MUTED_HINT = "已静音：这个话题只在有人 @我 时提醒。",
+    GROUP_MUTED_HINT = "已静音：只在有人 @你 时提醒。",
+    TOPIC_MUTED_HINT = "已静音：这个话题只在有人 @你 时提醒。",
     LEAVE_GROUP = "离开群…",
     LEAVE_CONFIRM_TITLE = "离开「{name}」？",
     LEAVE_CONFIRM_BODY = "离开后不再收到这个群的消息。\n要回来，需要成员重新邀请你。",
@@ -152,6 +151,6 @@ crate::copy! {
     // --- end v12/behavior ---
     // menu bar item
     STATUS_ITEM_UNREAD = "{n} 条未读",
-    STATUS_ITEM_MENTIONS = "{n} 条@你的消息",
+    STATUS_ITEM_MENTIONS = "{n} 条 @你 的消息",
     STATUS_ITEM_NONE = "没有未读消息",
 }
