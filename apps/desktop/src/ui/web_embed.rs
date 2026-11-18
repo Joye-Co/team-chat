@@ -1199,8 +1199,8 @@ for(var j=0;j<hs.length;j++){{var q=hs[j].getBoundingClientRect();if(q.height>0&
 if(lh){{var after=false;for(var i=0;i<all.length;i++){{var el=all[i];if(el===d||/^(H[1-6]|FIGCAPTION)$/.test(el.tagName.toUpperCase()))continue;\
 var r=el.getBoundingClientRect();if(r.height>0&&r.width>0&&r.top>=lb-1&&r.bottom<=cut&&atomic(el,r)){{after=true;break;}}}}if(!after)cut=lh.top;}}\
 if(cut<h*0.35)cut=h;\
-if(cut<h){{var lz=-1;for(var i=0;i<all.length;i++){{var el=all[i];if(el===d)continue;var r=el.getBoundingClientRect();\
-if(r.height>0&&r.width>0&&r.bottom<=cut&&r.bottom>lz)lz=r.bottom;}}if(lz>0&&lz+16<cut)cut=lz+16;}}\
+var lz=-1;for(var i=0;i<all.length;i++){{var el=all[i];if(el===d)continue;var r=el.getBoundingClientRect();\
+if(r.height>0&&r.width>0&&r.bottom<=cut&&r.bottom>lz)lz=r.bottom;}}if(lz>0&&lz+16<cut)cut=cut<h?lz+16:Math.ceil(lz+16);\
 window.__tcEnd=Math.floor(cut);d.style.height=Math.max(0,Math.ceil(h-cut))+'px';d.style.opacity='1';}};\
 window.addEventListener('scroll',u,{{passive:true}});window.addEventListener('resize',u);\
 try{{var o=new ResizeObserver(u);o.observe(document.documentElement);\
