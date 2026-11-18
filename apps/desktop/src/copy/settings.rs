@@ -342,7 +342,7 @@ crate::copy! {
     MACHINE_MY_BOTS_FAILED = "没能保存在这台电脑上做的事",
     THIS_STOP = "不再用这台电脑…",
     THIS_STOP_TITLE = "不再用这台电脑？",
-    THIS_STOP_BODY = "这台电脑会从团队里移除，上面的后台服务也会卸载，AI 成员不会再在这里干活。你的聊天记录和登录不受影响。",
+    THIS_STOP_BODY = "这台电脑会移出团队，后台服务也会卸载。\nAI 成员不会再在这里干活。\n你的聊天记录和登录不受影响。",
     THIS_STOP_CONFIRM = "不再用",
     THIS_STOP_FAILED = "没有停用这台电脑",
     THIS_INTRO_TITLE = "让 AI 成员在这台电脑上干活",
