@@ -618,8 +618,9 @@ before looking for the hand-over card (`chat-run topic history --limit 5`). The 
 CLI gave one: `k` + 40 hex of SHA-256 over the run id, the op and the body. The same command in the
 same run gets the same key, so the server applies it once and answers a retry with the first
 result (`duplicate`); another run never gets the same key. A data push keeps its key until the
-server has confirmed it: after that the same body is a new push with a new key, because the server
-would answer a page set back to an earlier state (on, off, on) as `duplicate` and not apply it.
+server has confirmed another push of that version: after that the same body is a new push with a
+new key, because the server would answer a page set back to an earlier state (on, off, on) as
+`duplicate` and not apply it.
 `interaction.resolve` and
 `artifact.reply` are keyed by their event id; `desk.note` and `run.report` write the same value
 again. (Daemons before this rule answered
