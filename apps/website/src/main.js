@@ -5,6 +5,9 @@
   function curTheme(){if(root.dataset.theme==="light"||root.dataset.theme==="dark")return root.dataset.theme;return window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";}
   var themeBtn=document.querySelector(".theme-btn");
   if(themeBtn){themeBtn.setAttribute("aria-pressed",curTheme()==="dark"?"true":"false");
+    /* the hidden theme's screenshots are lazy: fetch the ones on show as soon as a switch looks likely */
+    var warm=function(){[].forEach.call(document.querySelectorAll(".pl-layer.on img,.shot img"),function(im){im.loading="eager";});};
+    themeBtn.addEventListener("pointerenter",warm,{once:true});themeBtn.addEventListener("focus",warm,{once:true});
     themeBtn.addEventListener("click",function(){var next=curTheme()==="dark"?"light":"dark";root.classList.add("theme-swap");root.dataset.theme=next;themeBtn.setAttribute("aria-pressed",next==="dark"?"true":"false");void root.offsetWidth;root.classList.remove("theme-swap");try{localStorage.setItem("theme",next);}catch(e){}});}
   var nav=document.querySelector("nav"),navSc=null;
   function syncNav(){if(!nav)return;var s=scrollY>12;if(s!==navSc){navSc=s;nav.classList.toggle("scrolled",s);}}
@@ -23,8 +26,12 @@
   [].forEach.call(document.querySelectorAll(".player"),function(el){
     var steps=[].slice.call(el.querySelectorAll(".ps")),pf=el.querySelector(".pf"),fit=el.classList.contains("fit"),layers={},order=[],cur=-1;
     pf.innerHTML="";
-    steps.forEach(function(st){var k=st.dataset.img;if(layers[k])return;var d=document.createElement("div");d.className="pl-layer";
-      d.innerHTML='<img class="l" alt="" src="'+k+'-light.webp"><img class="d" alt="" src="'+k+'-dark.webp">'+(fit?"":'<span class="pl-ring"></span>');pf.appendChild(d);layers[k]=d;order.push(k);});
+    /* lazy images: the hidden theme (display:none) and the tours further down are not fetched until they show.
+       Only the first screen of the hero's tour, in the theme on show, loads at once. */
+    var hero=!!el.closest(".hero-tour"),dark=curTheme()==="dark";
+    function shot(cls,src,first){return '<img class="'+cls+'" alt="" decoding="async" '+(first?'fetchpriority="high"':'loading="lazy"')+' src="'+src+'">';}
+    steps.forEach(function(st){var k=st.dataset.img;if(layers[k])return;var d=document.createElement("div"),first=hero&&!order.length;d.className="pl-layer";
+      d.innerHTML=shot("l",k+"-light.webp",first&&!dark)+shot("d",k+"-dark.webp",first&&dark)+(fit?"":'<span class="pl-ring"></span>');pf.appendChild(d);layers[k]=d;order.push(k);});
     function geo(f){if(!f)return null;var p=f.split(",").map(function(v){return parseFloat(v)/100;});var phone=matchMedia("(max-width:760px)").matches;
       var s=Math.max(1,Math.min(phone?2.4:1.32,(phone?.94:.86)/Math.max(p[2],p[3])));
       var x=Math.min(0,Math.max(1-s,.5-s*(p[0]+p[2]/2))),y=Math.min(0,Math.max(1-s,.5-s*(p[1]+p[3]/2)));return {s:s,x:x*100,y:y*100,p:p};}
