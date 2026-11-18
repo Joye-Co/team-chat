@@ -664,10 +664,18 @@ pub fn date_field(
         // The picker starts on the field's outer edge, so its calendar opens in line with the
         // field; its leading padding keeps the text on the field column.
         div()
+            .h_full()
             .ml(-(metrics::FIELD_PAD + metrics::HAIRLINE))
-            .mr(-space::S8)
+            // The trailing icon ends where the select's chevron does in the fields around it.
+            .mr(-space::S12)
             .child(
                 DatePicker::new(&state)
+                    // It fills the field's height, so the calendar is measured from the
+                    // field's edge and stays clear of the focus ring around it.
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .popup_gap(space::S6 + metrics::FOCUS_RING)
                     .pl(metrics::FIELD_PAD + metrics::HAIRLINE - space::S8)
                     .appearance(false)
                     // A date can be taken back: a required field then says it is missing.
@@ -762,6 +770,37 @@ mod date_tests {
         }
         let picked = text.borrow().clone();
         assert!(parse_date(&picked).is_some(), "picked {picked:?}");
+    }
+
+    /// The keyboard alone picks a day: Enter opens on the value, the arrows move, Enter picks,
+    /// and a move past the month's end follows into the next month.
+    #[gpui::test]
+    fn the_keyboard_picks_a_day(cx: &mut gpui::TestAppContext) {
+        use gpui::VisualTestContext;
+        cx.update(gpui_component::init);
+        let text = std::rc::Rc::new(std::cell::RefCell::new("2026-03-31".to_string()));
+        let shared = text.clone();
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                let view = cx.new(|_| Picker { text: shared });
+                cx.new(|cx| gpui_base::Root::new(view, window, cx))
+            })
+            .unwrap()
+        });
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
+        cx.run_until_parked();
+        cx.update(|window, cx| window.focus_next(cx));
+        cx.run_until_parked();
+        cx.simulate_keystrokes("enter right enter");
+        cx.run_until_parked();
+        assert_eq!(*text.borrow(), "2026-04-01");
+        // Esc leaves the value alone.
+        cx.simulate_keystrokes("enter down escape");
+        cx.run_until_parked();
+        assert_eq!(*text.borrow(), "2026-04-01");
+        cx.simulate_keystrokes("enter down space");
+        cx.run_until_parked();
+        assert_eq!(*text.borrow(), "2026-04-08");
     }
 
     /// A fresh field opens on its first Enter once Tab has put the focus on it.
