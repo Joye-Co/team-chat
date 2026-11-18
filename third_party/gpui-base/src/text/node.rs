@@ -2601,6 +2601,12 @@ impl CodeBlock {
                 .rounded(cx.theme().tokens.radius.md)
                 .child(actions(&self, window, cx))
         });
+        let backdrop = node_cx.code_block_backdrop.clone().map(|backdrop| {
+            div()
+                .absolute()
+                .inset_0()
+                .child(backdrop(&self, window, cx))
+        });
         // The id scopes the caller's action ids per code block, so plain ids
         // like `"copy"` don't collide across blocks.
         let id = block_element_id("codeblock", self.span, options.ix);
@@ -2633,6 +2639,7 @@ impl CodeBlock {
                         .child(Scrollbar::vertical(&scroll_handle)),
                 )
                 .children(actions)
+                .children(backdrop)
                 .children(lang_label)
                 .into_any_element()
         } else {
@@ -2663,6 +2670,7 @@ pub(crate) struct NodeContext {
     pub(crate) link_refs: HashMap<SharedString, LinkMark>,
     pub(crate) style: Arc<TextViewStyle>,
     pub(crate) code_block_actions: Option<Arc<CodeBlockActionsFn>>,
+    pub(crate) code_block_backdrop: Option<Arc<CodeBlockActionsFn>>,
     pub(crate) code_block_highlighter: Option<Arc<CodeBlockHighlighterFn>>,
     pub(crate) table_actions: Option<Arc<TableActionsFn>>,
     pub(crate) image_source: Option<Arc<super::text_view::ImageSourceFn>>,

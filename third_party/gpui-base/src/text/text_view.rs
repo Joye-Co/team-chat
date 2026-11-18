@@ -165,6 +165,7 @@ pub struct TextView {
     scrollable: bool,
     max_lines: Option<usize>,
     code_block_actions: Option<Arc<CodeBlockActionsFn>>,
+    code_block_backdrop: Option<Arc<CodeBlockActionsFn>>,
     code_block_highlighter: Option<Arc<CodeBlockHighlighterFn>>,
     table_actions: Option<Arc<TableActionsFn>>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
@@ -215,6 +216,7 @@ impl TextView {
             scrollable: false,
             max_lines: None,
             code_block_actions: None,
+            code_block_backdrop: None,
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
@@ -242,6 +244,7 @@ impl TextView {
             scrollable: false,
             max_lines: None,
             code_block_actions: None,
+            code_block_backdrop: None,
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
@@ -269,6 +272,7 @@ impl TextView {
             scrollable: false,
             max_lines: None,
             code_block_actions: None,
+            code_block_backdrop: None,
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
@@ -387,6 +391,19 @@ impl TextView {
         E: IntoElement,
     {
         self.code_block_actions = Some(Arc::new(move |code_block, window, cx| {
+            f(&code_block, window, cx).into_any_element()
+        }));
+        self
+    }
+
+    /// Sets a layer over a code block that scrolls sideways: as wide as the block and
+    /// pinned while the code scrolls.
+    pub fn code_block_backdrop<F, E>(mut self, f: F) -> Self
+    where
+        F: Fn(&CodeBlock, &mut Window, &mut App) -> E + Send + Sync + 'static,
+        E: IntoElement,
+    {
+        self.code_block_backdrop = Some(Arc::new(move |code_block, window, cx| {
             f(&code_block, window, cx).into_any_element()
         }));
         self
@@ -751,6 +768,7 @@ impl Element for TextView {
                 state.preserve_selection_for_reflow();
             }
             state.code_block_actions = self.code_block_actions.clone();
+            state.code_block_backdrop = self.code_block_backdrop.clone();
             state.code_block_highlighter = code_block_highlighter;
             state.table_actions = self.table_actions.clone();
             state.link_click_handler = self.link_click_handler.clone();

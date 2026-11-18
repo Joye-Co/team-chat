@@ -255,6 +255,9 @@ fn build(
         .when_some(diagram_plugin, |view, p| view.plugin(p))
         .when_some(table_plugin, |view, p| view.plugin(p))
         .code_block_highlighter(highlighter.unwrap_or_else(code::highlighter))
+        .code_block_backdrop(|code, _window, cx| {
+            diff_lines(&code.code(), code.lang().as_deref(), cx)
+        })
         .code_block_actions(move |code, _window, cx| {
             // The highlighter is built without the app: it learns the colors here.
             code::sync_colors(cx);
@@ -342,7 +345,6 @@ fn build(
                 .children(collapse)
                 .child(copy)
                 .child(code_edge_fade(&shown, cx))
-                .children(diff_lines(&shown, code.lang().as_deref(), cx))
                 .children(expand)
         })
         .on_link_click(|url, _event, _window, cx| {
@@ -402,32 +404,27 @@ fn code_block_style() -> StyleRefinement {
     code
 }
 
-/// The `+` and `-` lines of a diff fence: each tint runs the block's whole width, as a
-/// Card v2 diff row does (a text run's own background would stop at its last letter).
-/// Drawn from the pinned actions, like [`code_edge_fade`], so it holds while the code
-/// scrolls sideways; a tint this light leaves the text over it as it is.
-fn diff_lines(code: &str, info: Option<&str>, cx: &App) -> Option<impl IntoElement + use<>> {
+/// The `+` and `-` lines of a diff fence: each tint runs the block's whole inner width,
+/// as a Card v2 diff row does (a text run's own background would stop at its last letter).
+/// It holds while the code scrolls sideways; a tint this light leaves the text over it as
+/// it is.
+fn diff_lines(code: &str, info: Option<&str>, cx: &App) -> gpui::Div {
     use crate::ui::native::tokens::{card_v2, layout, text};
     let k = theme::colors(cx);
-    let lines = code::diff_lines(code, info.unwrap_or_default());
-    (!lines.is_empty()).then(|| {
-        // The actions sit 8 in from the block's top and right edges (gpui-base).
-        let inset = px(8.);
-        div()
-            .absolute()
-            .top(CODE_STRIP - inset)
-            .right(px(1.) - inset)
-            .w(layout::IN_THREAD)
-            .children(lines.into_iter().map(|(line, added)| {
+    // The block's own width: 640, or the column when that is narrower.
+    div().relative().w(layout::IN_THREAD).max_w_full().children(
+        code::diff_lines(code, info.unwrap_or_default())
+            .into_iter()
+            .map(|(line, added)| {
                 div()
                     .absolute()
-                    .top(text::MONO.1 * line as f32)
-                    .left_0()
-                    .w_full()
+                    .top(layout::BORDER + CODE_STRIP + text::MONO.1 * line as f32)
+                    .left(layout::BORDER)
+                    .right(layout::BORDER)
                     .h(text::MONO.1)
                     .bg(if added { k.ok } else { k.bad }.opacity(card_v2::DIFF_FILL))
-            }))
-    })
+            }),
+    )
 }
 
 /// The scroll cue of a code block (§2.17 "never a hard clip"): a 16 fade

@@ -95,8 +95,9 @@ Only the agents whose task says so deploy.
 - `third_party/gpui-pre-apple` is gpui-pre-apple 0.3.10 with one patch, also through
   `[patch.crates-io]`: a glyph with dilation 0 is drawn with font smoothing off (a bitmap
   context smooths by default, which made dark text one weight heavier).
-- `third_party/gpui-base` is gpui-base 0.8.1 with one patch, also through `[patch.crates-io]`: a
-  checked task box in Markdown is filled with the text color, not the link color.
+- `third_party/gpui-base` is gpui-base 0.8.1 with two patches, also through `[patch.crates-io]`: a
+  checked task box in Markdown is filled with the text color, not the link color, and
+  `code_block_backdrop` draws a layer as wide as a code block (the tint of whole diff lines).
 - chat-core runs networking on a background tokio runtime. The UI renders from the local SQLite
   cache and never waits for the network.
 

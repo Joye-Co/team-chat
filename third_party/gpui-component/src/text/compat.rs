@@ -168,6 +168,15 @@ impl TextView {
         self.inner = self.inner.code_block_actions(f);
         self
     }
+    /// Renders a layer as wide as every fenced code block, pinned while it scrolls.
+    pub fn code_block_backdrop<F, E>(mut self, f: F) -> Self
+    where
+        F: Fn(&CodeBlock, &mut Window, &mut App) -> E + Send + Sync + 'static,
+        E: IntoElement,
+    {
+        self.inner = self.inner.code_block_backdrop(f);
+        self
+    }
     /// Highlights fenced code blocks with the caller's own highlighter (byte
     /// ranges of [`CodeBlock::code`]). Pass the same `Arc` on every frame: a
     /// block keeps its highlights only while the highlighter is the same one.
