@@ -401,6 +401,62 @@ describe("BotDesk delivery", () => {
     for (const x of [c, d]) x.close();
   });
 
+  it("send every command of a window in order, merge only state events, and keep at most 20 waiting per card", async () => {
+    const w = await world();
+    const { d, c, topicId, runId } = await runningRun(w, { features: ["interact"] });
+    const desk = deskOf(w.bot.id);
+    const messageId = ulid();
+    const press = (id: string): InteractionIn => ({ ...interaction(w, topicId, messageId, "btns", { id }), event: "button.press" });
+    const change = (value: string): InteractionIn => ({ ...interaction(w, topicId, messageId, "pick", { value }), event: "choice.change" });
+    const endWindow = () =>
+      runInDurableObject(desk, async (o, state: DurableObjectState) => {
+        state.storage.sql.exec("UPDATE interact_windows SET until = 0");
+        await (o as unknown as { alarm(): Promise<void> }).alarm();
+      });
+    const sent = () => d.frames.filter((f) => f.t === "run.interaction");
+
+    // The first event goes at once; three presses and two changes follow inside the window.
+    await desk.interaction(w.bot.id, press("first"));
+    await d.next((f) => f.t === "run.interaction");
+    for (const x of [press("a"), change("yes"), press("b"), change("no"), press("c")]) {
+      expect(await desk.interaction(w.bot.id, x)).toEqual({ mode: "run", etaMs: 10_000 });
+    }
+    await sleep(200);
+    expect(sent()).toHaveLength(1);
+    await endWindow();
+    const card = await waitUntil(() => (sent().length >= 5 ? sent() : undefined), 5000);
+    // Every press arrives, in order; of the two changes only the newest.
+    expect(card.slice(1).map((f) => [f.event, f.value])).toEqual([
+      ["button.press", { id: "a" }],
+      ["button.press", { id: "b" }],
+      ["choice.change", { value: "no" }],
+      ["button.press", { id: "c" }],
+    ]);
+    expect(card.every((f) => f.runId === runId)).toBe(true);
+
+    // Page events with one name and different payloads are commands too.
+    const artifactId = ulid();
+    const emit = (id: number): InteractionIn => {
+      const eventId = ulid();
+      return { groupId: w.gid, topicId, eventId, source: { kind: "artifact", artifactId, version: 1, eventId, ask: false }, event: "add_item", value: { id }, actorId: w.human.id };
+    };
+    for (const id of [1, 2, 3]) await desk.interaction(w.bot.id, emit(id));
+    await endWindow();
+    const page = await waitUntil(() => {
+      const xs = sent().filter((f) => f.source.kind === "artifact");
+      return xs.length >= 3 ? xs : undefined;
+    }, 5000);
+    expect(page.map((f) => f.value)).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }]);
+
+    // 20 wait per card; one more is not taken, and the ack says nobody responds to it.
+    const other = ulid();
+    const more = (i: number): InteractionIn => ({ ...interaction(w, topicId, other, "btns", { id: `n${i}` }), event: "button.press" });
+    await desk.interaction(w.bot.id, more(0));
+    for (let i = 1; i <= 20; i++) expect((await desk.interaction(w.bot.id, more(i))).mode).toBe("run");
+    expect(await desk.interaction(w.bot.id, more(21))).toMatchObject({ mode: "none" });
+    for (const x of [c, d]) x.close();
+  });
+
   it("give older daemons run.input with the envelope, and a 1.1.0 daemon the typed frames", async () => {
     const w = await world();
     const { d, c, topicId, runId } = await runningRun(w);

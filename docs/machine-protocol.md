@@ -628,8 +628,13 @@ Server rules (BotDesk):
 - A daemon takes `run.answer` and `run.interaction` when it reports feature `interact` or
   `daemonVersion` 1.1.0 or newer. Another daemon gets `run.input` with `text` = a short summary
   line and the same envelope (and the typed `answer` with feature `answer`).
-- Live card events are coalesced per card: the first event goes at once, then only the newest
-  event per block in each 3 s window. Page `ask` events are never merged.
+- Live card events are held per card (page events per 产出 version): the first event goes at
+  once, the ones that follow in the same 3 s window go out in order when it ends. Only state
+  events merge: of `choice.change`, `input.change`, `chart.select`, `chart.clear`, `table.sort`,
+  `tab.open` and `draft.edit` the newest per block and event is kept. Every other card event
+  (`button.press`, `action.press`, `metric.press`, `table.rowSelect`, `answer.retract`) and every
+  page `emit` is a command: each one is sent. At most 20 events wait per card; one more is not
+  taken and its ack's `expect.mode` is `none`. Page `ask` events never wait for a window.
 - With no active run in the topic, a stored answer starts a run (as before), and a live event
   starts a short follow-up run whose prompt carries the envelope: at most 1 per card at a time
   (later events join it), 6 per hour per card, 30 per hour per member; over the limit the ack's

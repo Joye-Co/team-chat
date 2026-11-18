@@ -1,6 +1,6 @@
 // BotDesk interaction loop (INTERACT §6.2–§6.4): live card events and page events for this
-// runner member's cards and pages, coalesced to the newest event per block in each 3 s window
-// and given to the topic's run as `run.interaction` (or a text envelope for older daemons), or
+// runner member's cards and pages, held per card in 3 s windows (state events merge to the newest
+// per block, commands queue in order) and given to the topic's run as `run.interaction` (or a text envelope for older daemons), or
 // starting a short follow-up run within the limits; the `expect` of an ack; and the `chat-run`
 // outputs of a run (RunEvent `output`), performed as the bot with the rules of the matching
 // WebSocket frames and answered with `run.output.result`.
@@ -22,8 +22,16 @@ import { type RunRow, result } from "./core";
 import { DeskHand } from "./hand";
 import { isChainStop } from "./delegate_card";
 
-/** One coalescing window per card (or page version): the newest event per block in 3 s. */
+/** One coalescing window per card (or page version): 3 s. */
 export const COALESCE_MS = 3000;
+/**
+ * Card events that only say what a control shows now: inside a window the newest one per block
+ * replaces the older ones. Every other card event (a press, a row, a pick, a retract) and every
+ * page event is a command: each one is kept and sent in order.
+ */
+const STATE_EVENTS = new Set(["choice.change", "input.change", "chart.select", "chart.clear", "table.sort", "tab.open", "draft.edit"]);
+/** Events one card (or page version) keeps waiting at a time; one more is not taken (`expect.mode` "none"). */
+export const MAX_PENDING_PER_CARD = 20;
 /** Short follow-up runs started by live events: 1 per card at a time, 6 per hour per card, 30 per hour per member. */
 export const SHORT_RUNS_PER_CARD_HOUR = 6;
 export const SHORT_RUNS_PER_BOT_HOUR = 30;
@@ -110,8 +118,10 @@ export abstract class DeskInteract extends DeskHand {
       const names = await this.names([x.actorId]);
       const actor = { id: x.actorId, name: names.get(x.actorId) ?? x.actorId };
       if (target && !target.external) {
-        await this.queueInteraction(target, x, actor);
-        return this.runExpect(target);
+        if (await this.queueInteraction(target, x, actor)) return this.runExpect(target);
+        // The card's queue is full: nobody takes this one (a page `ask` settles at once).
+        if (x.source.kind === "artifact" && x.source.ask) await this.declinePageAsk(x);
+        return { mode: "none" };
       }
       // A page `ask` with no run to answer it is declined at once, so the page's promise settles.
       if (x.source.kind === "artifact" && x.source.ask) {
@@ -211,10 +221,12 @@ export abstract class DeskInteract extends DeskHand {
 
   /**
    * Coalescing per card: the first event of a window goes out at once; later ones in the same
-   * 3 s keep only the newest per block and go out when the window ends. Page `ask` events are
-   * never merged (each one waits for its reply).
+   * 3 s wait and go out in order when the window ends. Of the state events (`STATE_EVENTS`) only
+   * the newest per block waits; every command waits on its own, at most `MAX_PENDING_PER_CARD`
+   * per card. Page `ask` events skip the window (each one waits for its reply). False: the
+   * card's queue is full and the event was not taken.
    */
-  protected async queueInteraction(r: RunRow, x: InteractionIn, actor: { id: string; name: string }): Promise<void> {
+  protected async queueInteraction(r: RunRow, x: InteractionIn, actor: { id: string; name: string }): Promise<boolean> {
     const frame = this.interactionFrame(r, x, actor);
     const key = cardKey(x);
     const ask = x.source.kind === "artifact" && x.source.ask;
@@ -222,22 +234,31 @@ export abstract class DeskInteract extends DeskHand {
     const now = Date.now();
     // Not on a machine yet: kept until the run is accepted.
     if (!r.machine_id || r.status === "created") {
+      if (!this.pendingRoom(key, block)) return false;
       this.keepPending(key, block, r.id, frame, now);
-      return;
+      return true;
     }
     if (ask) {
       await this.sendInteraction(r, frame);
-      return;
+      return true;
     }
     const until = this.sql.exec<{ until: number }>("SELECT until FROM interact_windows WHERE card_key = ?", key).toArray()[0]?.until ?? 0;
     if (until > now || this.hasPending(key)) {
+      if (!this.pendingRoom(key, block)) return false;
       this.keepPending(key, block, r.id, frame, now);
       await this.scheduleStall();
-      return;
+      return true;
     }
     this.sql.exec("INSERT OR REPLACE INTO interact_windows (card_key, run_id, until) VALUES (?, ?, ?)", key, r.id, now + COALESCE_MS);
     await this.sendInteraction(r, frame);
     await this.scheduleStall();
+    return true;
+  }
+
+  /** Whether the card's queue takes this event: it replaces a waiting one, or the queue is not full. */
+  private pendingRoom(key: string, block: string): boolean {
+    if (this.sql.exec("SELECT 1 FROM interact_pending WHERE card_key = ? AND block_key = ?", key, block).toArray().length > 0) return true;
+    return this.sql.exec<{ n: number }>("SELECT count(*) AS n FROM interact_pending WHERE card_key = ?", key).one().n < MAX_PENDING_PER_CARD;
   }
 
   private hasPending(key: string): boolean {
@@ -274,10 +295,10 @@ export abstract class DeskInteract extends DeskHand {
     }
   }
 
-  /** Sends what waited for a window to end (or for the run's machine), newest per block. */
+  /** Sends what waited for a window to end (or for the run's machine), in the order it came. */
   protected async flushInteractions(onlyRun?: string): Promise<void> {
     const now = Date.now();
-    const rows = this.sql.exec<PendingRow>("SELECT * FROM interact_pending ORDER BY at").toArray() as PendingRow[];
+    const rows = this.sql.exec<PendingRow>("SELECT * FROM interact_pending ORDER BY at, rowid").toArray() as PendingRow[];
     const windows = new Map(
       this.sql
         .exec<{ card_key: string; until: number }>("SELECT card_key, until FROM interact_windows")
@@ -490,7 +511,9 @@ function cardKey(x: InteractionIn): string {
   return x.source.kind === "card" ? `card:${x.source.messageId}` : `artifact:${x.source.artifactId}:${x.source.version}`;
 }
 
+/** The pending key inside a card: one per block and state event, one per command. */
 function blockKey(x: InteractionIn): string {
-  if (x.source.kind === "artifact") return `event:${x.event}`;
-  return x.source.blockId ? `block:${x.source.blockId}` : `action:${x.source.actionId ?? ""}`;
+  if (x.source.kind === "artifact") return `event:${x.event}:${x.eventId}`;
+  const target = x.source.blockId ? `block:${x.source.blockId}` : `action:${x.source.actionId ?? ""}`;
+  return STATE_EVENTS.has(x.event) ? `${target}:${x.event}` : `${target}:${x.event}:${x.eventId}`;
 }
