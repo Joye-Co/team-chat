@@ -2608,6 +2608,7 @@ impl Render for BotForm {
                 let popup =
                     widgets::popup_fill("member-runtime", shown, unset, SheetWidth::List, cx)
                         .dropdown_menu(move |menu, _, _| {
+                            let menu = widgets::form_menu(menu, SheetWidth::List);
                             known.iter().fold(menu, |menu, o| {
                                 let (rt, input) = (o.runtime.clone(), input.clone());
                                 menu.item(
@@ -2675,6 +2676,7 @@ impl Render for BotForm {
                 let form = form.clone();
                 widgets::popup_fill("member-model", shown, false, SheetWidth::List, cx)
                     .dropdown_menu(move |menu, _, _| {
+                        let menu = widgets::form_menu(menu, SheetWidth::List);
                         options.iter().fold(menu, |menu, (id, text)| {
                             let (id, form) = (id.clone(), form.clone());
                             menu.item(
@@ -2715,6 +2717,7 @@ impl Render for BotForm {
                     let form = form.clone();
                     widgets::popup_fill("member-effort", shown, false, SheetWidth::List, cx)
                         .dropdown_menu(move |menu, _, _| {
+                            let menu = widgets::form_menu(menu, SheetWidth::List);
                             options.iter().fold(menu, |menu, (id, text)| {
                                 let (id, form) = (id.clone(), form.clone());
                                 menu.item(
@@ -2743,6 +2746,7 @@ impl Render for BotForm {
             } else {
                 widgets::popup_fill("member-machine", shown, false, SheetWidth::List, cx)
                     .dropdown_menu(move |menu, _, _| {
+                        let menu = widgets::form_menu(menu, SheetWidth::List);
                         options.iter().fold(menu, |menu, (id, text)| {
                             let (id, form) = (id.clone(), form.clone());
                             menu.item(

@@ -905,6 +905,15 @@ pub fn popup_fill(
         .when(unset, |b| b.text_color(k.secondary))
 }
 
+/// The menu of a [`popup_fill`]: at least as wide as its trigger, so it reads
+/// as belonging to the field.
+pub fn form_menu(
+    menu: gpui_component::menu::PopupMenu,
+    width: crate::ui::native::SheetWidth,
+) -> gpui_component::menu::PopupMenu {
+    menu.min_w(crate::views::nav::dialogs::form_field_width(width))
+}
+
 /// A row under a list group: the `+`/`−` buttons, then a quiet line.
 pub fn list_controls(buttons: impl IntoElement, note: impl Into<SharedString>, cx: &App) -> Div {
     div()
