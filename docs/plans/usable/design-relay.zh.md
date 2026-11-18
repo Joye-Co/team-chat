@@ -249,7 +249,7 @@ AddArtifactVersionRequest += { parentVersion?: number }
 
 ### 3.6 桌面端（Mac、Windows 同一份）
 
-- **按顺序做的条**（新文件 `apps/desktop/src/views/topic_page/relay_strip.rs`）：话题标题下、计划上。`topic.relay` 是 `running`、`paused`，或结束不到 1 天（看 `updatedAt`）时显示。一行：「按顺序做：小码 做完了 → 小审 在做 → 小码」+「第 2/3 步」；还没轮到的只显示名字（`ink-3`）。右边：在跑时「停止」；停住时「重试」「停止」，下面一行「停在 {name}：{原因}」。用 gpui-component 的 Button，颜色尺寸取 tokens，按 COMPLETENESS.md 画全每种状态。
+- **按顺序做的条**（新文件 `apps/desktop/src/views/topic_page/relay_strip.rs`）：话题标题下、计划上。`topic.relay` 是 `running`、`paused`，或结束不到 1 天（看 `updatedAt`）时显示。一行：「按顺序做：小码 做完了 → 小审 在做 → 小码」（位置看这串名字，不另写分数，免得和计划的 n/m 混淆）；还没轮到的只显示名字（`ink-3`）。右边：在跑时「停止」；停住时「重试」「停止」，下面一行「停在 {name}：{原因}」。用 gpui-component 的 Button，颜色尺寸取 tokens，按 COMPLETENESS.md 画全每种状态。
 - **输入框**：话题里第一行是箭头写法时，上方提示「按顺序做：小码 → 小审」；一条消息 @ 了两个以上 AI 成员时提示「想让他们按顺序做？用 → 连起来」（这是让人发现这个写法的地方）；群聊里写箭头时提示「按顺序做要在话题里用」。客户端不改写消息。发送被拒时按 reason 显示文案。
 - **详情栏的成员**：用 `Topic.participants`：在做的标「在做」，其余标「参与过」。不再显示「负责」（DESIGN.md §7.8 那一行同步改）。
 - **交接卡**：现有 Card v2 渲染，不写新代码。

@@ -1,6 +1,7 @@
 //! The 按顺序做 bar (docs/plans/usable/design-relay.zh.md §3.6) at the top of a 话题 whose
 //! work goes from member to member in an order a person wrote (`@A → @B → @A`): the steps
-//! with their state words, where it is (第 k/n 步), why it stopped, and 停止 / 重试.
+//! with their state words, why it stopped, and 停止 / 重试. The chain itself shows where it
+//! is: an `n/m` here would read as the plan's done/total beside it (§2.12).
 //!
 //! It shows while the relay runs or is paused, and for a day after it ended. The server
 //! moves the relay on; this bar only reads `Topic.relay` and calls the two routes.
@@ -38,8 +39,8 @@ pub struct StepView {
 #[derive(Clone, Debug, PartialEq)]
 pub struct StripView {
     pub steps: Vec<StepView>,
-    /// 第 k/n 步, or 都做完了.
-    pub position: String,
+    /// 都做完了 once the order is through.
+    pub position: Option<String>,
     /// Why it stopped, or what the current step waits for.
     pub line: Option<String>,
     pub can_stop: bool,
@@ -113,16 +114,12 @@ pub fn strip_view(
             word: step_word(&s.state),
         })
         .collect();
-    let step_of = fill(
-        c::RELAY_STEP_OF,
-        &[("k", &(current + 1).to_string()), ("n", &n.to_string())],
-    );
     let (position, line, can_stop, can_retry) = match relay.state.as_str() {
         "running" => {
             // The step's member still works on something else in this 话题.
             let line = (relay.steps[current].state == "queued")
                 .then(|| fill(c::RELAY_WHY_QUEUED, &[("name", &at)]));
-            (step_of, line, true, false)
+            (None, line, true, false)
         }
         "paused" => {
             let why = reason_text(relay.reason.as_deref(), &at, &before, stopped_by.as_deref());
@@ -131,9 +128,9 @@ pub fn strip_view(
             let shown = step_word(&relay.steps[current].state).map(|(w, _)| w);
             let line = (shown != Some(why.as_str()))
                 .then(|| fill(c::RELAY_STOPPED_AT, &[("name", &at), ("reason", &why)]));
-            (step_of, line, true, true)
+            (None, line, true, true)
         }
-        "done" => (c::RELAY_ALL_DONE.to_string(), None, false, false),
+        "done" => (Some(c::RELAY_ALL_DONE.to_string()), None, false, false),
         // `stopped`, or a state this version does not know: it stopped.
         _ => {
             let line = match stopped_by.as_deref() {
@@ -145,7 +142,7 @@ pub fn strip_view(
                     fill(c::RELAY_STOPPED_AT, &[("name", &at), ("reason", &why)])
                 }
             };
-            (step_of, Some(line), false, false)
+            (None, Some(line), false, false)
         }
     };
     Some(StripView {
@@ -360,13 +357,15 @@ impl Render for RelayStrip {
                                     )
                                     .children(steps),
                             )
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .n_footnote()
-                                    .text_color(k.secondary)
-                                    .child(SharedString::from(view.position.clone())),
-                            )
+                            .when_some(view.position.clone(), |d, position| {
+                                d.child(
+                                    div()
+                                        .flex_none()
+                                        .n_footnote()
+                                        .text_color(k.secondary)
+                                        .child(SharedString::from(position)),
+                                )
+                            })
                             .when(retry.is_some() || stop.is_some(), |d| {
                                 d.child(
                                     div()
@@ -436,7 +435,7 @@ mod tests {
             ],
         );
         let v = strip_view(&r, 2_000, &name).unwrap();
-        assert_eq!(v.position, "第 2/3 步");
+        assert_eq!(v.position, None);
         assert_eq!(
             v.steps,
             vec![
@@ -521,7 +520,7 @@ mod tests {
     fn a_done_relay_shows_for_a_day() {
         let r = relay("done", 1, vec![step("a", "done"), step("b", "done")]);
         let v = strip_view(&r, 2_000, &name).unwrap();
-        assert_eq!(v.position, "都做完了");
+        assert_eq!(v.position.as_deref(), Some("都做完了"));
         assert_eq!(v.line, None);
         assert!(strip_view(&r, 1_000 + SHOW_ENDED_MS, &name).is_some());
         assert!(strip_view(&r, 1_001 + SHOW_ENDED_MS, &name).is_none());
