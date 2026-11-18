@@ -4285,8 +4285,11 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                         let author = ctx.name(&a.summary.created_by);
                         let shown = version.unwrap_or(a.summary.version);
                         let newer = a.summary.version > shown;
+                        let glyph =
+                            crate::views::artifact_page::list::ListKind::of(p.as_ref(), &a.summary)
+                                .sym();
                         (
-                            ref_tile(crate::views::artifact_page::list::ListKind::of(p.as_ref(), &a.summary).sym(), false, cx),
+                            ref_tile(glyph, false, cx),
                             a.summary.title.clone(),
                             fill(
                                 c::REF_ARTIFACT_LINE,

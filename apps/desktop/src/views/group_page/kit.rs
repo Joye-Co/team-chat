@@ -449,7 +449,7 @@ pub fn artifact_thumb(
             );
         }
         return frame.flex().items_center().justify_center().child(ui::icon(
-            Sym::Document,
+            crate::views::artifact_page::list::ListKind::of(services.provider.as_ref(), a).sym(),
             theme::icon::ROW,
             k.ink_3,
         ));

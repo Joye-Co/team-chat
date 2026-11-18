@@ -1845,6 +1845,13 @@ pub fn reference_row(
     };
     let k = native_colors(cx);
     let target = artifact_id.to_string();
+    // The symbol of the kind, the same on every screen.
+    let glyph = provider(cx)
+        .and_then(|p| {
+            let a = p.artifact(artifact_id)?;
+            Some(crate::views::artifact_page::list::ListKind::of(p.as_ref(), &a.summary).sym())
+        })
+        .unwrap_or(Sym::Document);
     div()
         .id(id.into())
         // A button (E3): a Tab stop with the focus ring, Return and Space act,
@@ -1861,7 +1868,7 @@ pub fn reference_row(
         .flex()
         .items_center()
         .gap(tsp::S8)
-        .child(page::row_icon(Sym::Document, k.secondary))
+        .child(page::row_icon(glyph, k.secondary))
         .child(
             div()
                 .flex_1()
