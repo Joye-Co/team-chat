@@ -94,4 +94,8 @@ crate::copy! {
     ARTIFACTS_FILTER_GROUP = "群",
     ARTIFACTS_FILTER_CLEAR = "清除筛选",
     ARTIFACTS_FILTER_NO_MATCH = "没有符合筛选的产出",
+    // A search that found nothing while a filter narrows the list.
+    ARTIFACTS_NO_MATCH_FILTERED = "在当前筛选里没有找到「{q}」",
+    // The 产出 pane's button that opens this 产出 on the 产出 page.
+    ARTIFACT_OPEN_IN_PAGE = "在产出里打开",
 }

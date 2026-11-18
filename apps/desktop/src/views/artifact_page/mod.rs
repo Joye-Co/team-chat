@@ -990,6 +990,8 @@ impl ArtifactPage {
                     nk::PushSize::Small,
                     cx,
                 )
+                // The label ends on the times under it; the hover fill keeps its padding.
+                .mr(-tsp::S12)
                 .on_click(move |_, _, cx| {
                     cx.stop_propagation();
                     let id = id.clone();
@@ -1399,9 +1401,9 @@ impl ArtifactPage {
         };
         let active = nk::emphasized(window);
         // The view control is one Segmented h32 (§2.2, §1.8): 图标 | 列表.
-        // With nothing to show it is disabled at 50 % (§1.8).
+        // With nothing to show it is disabled at 50 % (§1.8): `Segmented` dims itself.
         let empty = total == 0;
-        let views = div().flex_none().when(empty, |d| d.opacity(0.5)).child(
+        let views = div().flex_none().child(
             nk::Segmented::new(
                 "artifacts-view",
                 [
@@ -1553,6 +1555,8 @@ impl ArtifactPage {
                 });
             })
         };
+        // The no-match cell holds 清除筛选 itself: the chip row does not repeat it (A5).
+        let cell_clears = matched == 0 && total > 0;
         let chips = (!filter.is_empty()).then(|| {
             enum Off {
                 Kind(list::ListKind),
@@ -1575,6 +1579,7 @@ impl ArtifactPage {
             }
             div()
                 .flex_none()
+                .min_h(nk::tokens::height::DEFAULT)
                 .flex()
                 .flex_wrap()
                 .items_center()
@@ -1597,9 +1602,17 @@ impl ArtifactPage {
                             });
                         })
                 }))
-                .child(clear_filter("artifacts-filter-clear", nk::PushStyle::Link))
+                .when(!cell_clears, |d| {
+                    d.child(clear_filter("artifacts-filter-clear", nk::PushStyle::Link))
+                })
                 .into_any_element()
         });
+        // §2.2: the filter row sits 16 under the toolbar and 16 over the table it narrows.
+        let page_gap = if chips.is_some() {
+            tsp::S16
+        } else {
+            page::m::GUTTER
+        };
         let leading = content_leading(&self.services, cx);
         let load = page::PageLoad::of(&self.services, total > 0);
         // The toolbar's last control ends on the content edge (x - 24), like the
@@ -1645,11 +1658,11 @@ impl ArtifactPage {
                             div()
                                 .min_h_full()
                                 .px(page::m::EDGE)
-                                .pt(page::m::GUTTER)
+                                .pt(page_gap)
                                 .pb(page::m::GUTTER)
                                 .flex()
                                 .flex_col()
-                                .gap(page::m::GUTTER)
+                                .gap(page_gap)
                                 .children(chips)
                                 .child(body),
                         ),
@@ -1881,8 +1894,9 @@ impl ArtifactPage {
                         )
                 }))
                 // The count in a footer row under the tiles (§2.6): its top
-                // border only, not a second, empty card (B2-16).
-                .child(footer)
+                // border only, not a second, empty card (B2-16). No table frame here,
+                // so it sits on the tiles' edges.
+                .child(footer.px_0())
                 .into_any_element()
         } else {
             // Table view (default): 名称, 类型, 话题, 做的人, 版本, 更新, ⋯. 名称 and
@@ -2006,8 +2020,10 @@ impl ArtifactPage {
                     .then(|| clear_filter("artifacts-unfilter", nk::PushStyle::Outline));
                 let title = if query.is_empty() {
                     c::ARTIFACTS_FILTER_NO_MATCH.to_string()
-                } else {
+                } else if filter.is_empty() {
                     fill(c::ARTIFACTS_NO_MATCH_TITLE, &[("q", &query)])
+                } else {
+                    fill(c::ARTIFACTS_NO_MATCH_FILTERED, &[("q", &query)])
                 };
                 div()
                     .h(px(96.))

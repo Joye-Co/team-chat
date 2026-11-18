@@ -161,7 +161,7 @@ impl Render for ArtifactPane {
                 let page = nk::icon_button_sym(
                     "artifact-pane-page",
                     S::Outputs,
-                    c::ARTIFACTS_TITLE,
+                    c::ARTIFACT_OPEN_IN_PAGE,
                     nk::IconSize::Regular,
                     cx,
                 )
