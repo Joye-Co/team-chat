@@ -479,12 +479,19 @@ fn markdown_card(
             footer(cx)
                 .id(ElementId::Name(format!("{}-more", spec.id).into()))
                 .focus_row(false, cx)
-                .child(fill(cm::MD_EXPAND, &[("m", &minutes.to_string())]))
-                .child(ui::icon(
-                    Sym::ChevronRight,
-                    crate::ui::native::tokens::icon::MD,
-                    k.text_3,
-                ))
+                // The chevron keeps to its label, as in the table card's footer.
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::S4)
+                        .child(fill(cm::MD_EXPAND, &[("m", &minutes.to_string())]))
+                        .child(ui::icon(
+                            Sym::ChevronRight,
+                            crate::ui::native::tokens::icon::MD,
+                            k.text_3,
+                        )),
+                )
                 .child(div().flex_1())
                 .child(chips)
                 .on_click(move |_, _, cx| open(&s, Opening::default(), cx)),

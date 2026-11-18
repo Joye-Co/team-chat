@@ -1482,7 +1482,7 @@ const PLAYER_HTML: &str = r##"<!doctype html><html><head><meta charset="utf-8"><
 html,body{margin:0;height:100%;background:#16161A;color:#C9C9D1;font:12px -apple-system,"Segoe UI Variable Text","Segoe UI","PingFang SC","Microsoft YaHei UI",sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden}
 @media (prefers-color-scheme: dark){html,body{background:#0B0B0D}}
 .wrap{position:absolute;inset:0;display:flex;flex-direction:column}
-.stage{flex:1;position:relative;min-height:0}
+.stage{flex:1;position:relative;min-height:0;background:url("{POSTER}") center/contain no-repeat}
 video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:transparent}
 .big{position:absolute;left:50%;top:50%;width:52px;height:52px;margin:-26px 0 0 -26px;border-radius:50%;border:0;background:rgba(255,255,255,.8);cursor:pointer;display:flex;align-items:center;justify-content:center}
 .big svg{width:20px;height:20px;margin-left:3px}
