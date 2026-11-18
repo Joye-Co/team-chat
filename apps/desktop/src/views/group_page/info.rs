@@ -9,7 +9,8 @@ use gpui::{
     prelude::FluentBuilder as _,
 };
 
-use super::{kind_label, kit, open_record_sheet, rows, rows::line, short_time};
+use super::{kit, open_record_sheet, rows, rows::line, short_time};
+use crate::views::artifact_page::list::ListKind;
 use crate::{
     app::{RightPane, Services},
     copy::{fill, group_page as c},
@@ -354,7 +355,7 @@ pub fn sections(
                                 c::GROUP_PAGE_ARTIFACT_META,
                                 &[
                                     ("v", &a.version.to_string()),
-                                    ("kind", kind_label(a.kind)),
+                                    ("kind", ListKind::of(services.provider.as_ref(), &a).label()),
                                     (
                                         "name",
                                         crate::ui::avatar::name_beside_avatar(&member_name(
