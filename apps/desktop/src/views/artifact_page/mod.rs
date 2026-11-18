@@ -139,7 +139,7 @@ pub fn forward_page_event(
             "page event without user input dropped"
         );
         if let Some(id) = &reply_id {
-            host::finish_request(&page, version, id, Err(Reject::NotAllowed), cx);
+            host::finish_request(&page, version, id, Err(Reject::NoUserAction), cx);
         }
         return;
     }

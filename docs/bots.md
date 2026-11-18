@@ -398,14 +398,16 @@ reaches its bot only through these calls.
 | `teamchat.ref({ label, value?, selector? })` | Puts a part of the page into the viewer's composer as a 引用提问 (`label` 1–80 characters, `value` at most 2048 bytes of JSON, at most 2 per second). |
 
 - **A call follows the viewer's own input.** `emit` and `ask` go through only within 2 s of a
-  click, drag or key press of the viewer in the page; one without rejects with `not_allowed`. Call
+  click, drag or key press of the viewer in the page; one without rejects with `no_user_action`. Call
   them from the event handler, not from a timer or on load.
 - **Payloads** are JSON of at most 16 KiB. Only declared names of the declared kind are sent. When
   a page sends faster than the app's pace, a later `emit` of the same name replaces the waiting
   one, which rejects with `rate_limited`.
-- **Errors.** A rejected call gives an `Error` with a `code`: `not_allowed` (not declared, no
-  capability, or no input of the viewer), `bad_request`, `too_large`, `rate_limited`, `offline`,
-  `timeout` (no reply to an `ask` in time), `declined` (the bot's `ctx.decline`), `failed` (the
+- **Errors.** A rejected call gives an `Error` with a `code`: `not_allowed` (not declared, or no
+  capability), `no_user_action` (no recent input of the viewer), `bad_payload` (the payload does
+  not fit the event's schema; `message` says where), `bad_request`, `too_large`, `rate_limited`,
+  `offline`, `timeout` (no reply to an `ask` in time), `declined` (the bot's `ctx.decline`; `message`
+  is its text), `failed` (the
   bot's handler threw, or the server refused the event), `reloaded` (the page was reloaded while
   the call was open) and `unknown_method`.
 - **Parts to ask about.** An element with `data-ref-label="…"` can be pointed at: ⌥-click (Alt on
@@ -858,10 +860,10 @@ Codex 的计划更新)生成。
   - `teamchat.ref({ label, value?, selector? })`:把页面的一部分放进成员的输入框(引用提问);`label` 1 到 80 个字,
     `value` 最多 2048 字节,每秒最多 2 次。
 
-  `emit` 和 `ask` 只在成员自己刚操作过页面(点击、拖动或按键后 2 秒内)时才发得出去,否则以 `not_allowed`
+  `emit` 和 `ask` 只在成员自己刚操作过页面(点击、拖动或按键后 2 秒内)时才发得出去,否则以 `no_user_action`
   失败:在事件处理函数里调用,不要放在定时器或页面加载时。payload 是 JSON,最多 16 KiB。发得比 App 的节奏
   快时,同名的后一个 `emit` 顶掉还在等的那个,被顶掉的以 `rate_limited` 失败。失败的调用得到带 `code` 的
-  `Error`:`not_allowed`、`bad_request`、`too_large`、`rate_limited`、`offline`、`timeout`(`ask` 没等到回复)、
+  `Error`:`not_allowed`、`no_user_action`、`bad_payload`(payload 不符合事件的 schema,`message` 说明位置)、`bad_request`、`too_large`、`rate_limited`、`offline`、`timeout`(`ask` 没等到回复)、
   `declined`(机器人 `ctx.decline`)、`failed`(机器人的处理函数出错,或服务器拒收)、`reloaded`(页面重新加载了)、
   `unknown_method`。带 `data-ref-label="…"` 的元素可以被指着提问:⌥ 点击(Windows 上是 Alt)或右键菜单把它
   放进输入框,`data-ref-value` 是它的值(JSON,否则当作文字;没有时取元素的文字,最多 200 个字)。

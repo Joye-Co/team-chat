@@ -88,10 +88,12 @@ before the first push) and again on every push; returns a function that unsubscr
 timeoutMs says otherwise (at most {ASK_MAX_S} s: your reply takes you a turn, so pass \
 {{timeoutMs: {ASK_MAX_S}000}}); {OPEN_ASKS} asks may be open at once
   A payload is JSON of at most {PAYLOAD_KIB} KiB. A call that fails rejects with an Error whose \
-.code is one of: not_allowed (the event is not declared, the viewer may only read, or it was sent \
-later than {USER_ACTION_S} s after the viewer's own input), bad_request, too_large, rate_limited \
-(sent too fast, or you cannot take work now), offline (nothing was sent), timeout, declined (you \
-declined the ask), failed, reloaded (a new version replaced the page), unknown_method.
+.code is one of: not_allowed (the event is not declared, or the viewer may only read), \
+no_user_action (sent later than {USER_ACTION_S} s after the viewer's own input), bad_payload (the \
+payload does not fit the event's schema; .message says where), bad_request, too_large, \
+rate_limited (sent too fast, or you cannot take work now), offline (nothing was sent), timeout, \
+declined (you declined the ask; .message is your text), failed, reloaded (a new version replaced \
+the page), unknown_method.
 
 Rules a page must follow
   - emit and ask work only within {USER_ACTION_S} s of the viewer's own click, drag or key press. \
@@ -511,7 +513,12 @@ mod tests {
         assert_eq!(theirs, SCHEMA_KEYS);
         // The error codes of the page API, the methods and the theme variables.
         let g = guide();
-        for line in bridge
+        let codes = bridge
+            .split("pub fn code(self)")
+            .nth(1)
+            .and_then(|s| s.split("\n    }\n").next())
+            .unwrap();
+        for line in codes
             .lines()
             .filter(|l| l.trim_start().starts_with("Reject::") && l.contains("=> \""))
         {
