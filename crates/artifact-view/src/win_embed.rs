@@ -20,7 +20,7 @@ use windows::core::{PCWSTR, w};
 use crate::embed::{EmbedOptions, Placement, Rect, place};
 use crate::page::{self, State};
 use crate::win::{self, MainThread, Page, PageConfig};
-use crate::{ArtifactEvent, Capabilities, Error, Reject, Snapshot, VersionSpec};
+use crate::{ArtifactEvent, Capabilities, Error, Snapshot, VersionSpec};
 
 /// What the container window and the host's subclass procedure reach the page through.
 struct Shared {
@@ -335,9 +335,17 @@ impl EmbeddedArtifact {
     /// Shows another version (new origin, content and data) in the same view. `caps` are
     /// that version's bridge capabilities.
     pub fn show_version(&self, spec: VersionSpec, caps: Capabilities) -> Result<(), Error> {
-        page::switch_version(&self.state, spec, caps)?;
+        if let Some(ended) = page::switch_version(&self.state, spec, caps)? {
+            self.page.emit(ended);
+        }
         self.page.load_current();
         Ok(())
+    }
+
+    /// Gives the page other colours and words for its `就这里提问` menu (the app's theme
+    /// changed), now and for its next load.
+    pub fn set_ref_menu(&self, menu: crate::RefMenu) {
+        self.page.set_ref_menu(menu);
     }
 
     pub fn version(&self) -> u32 {
@@ -358,7 +366,12 @@ impl EmbeddedArtifact {
 
     /// Finishes an open `emit` / `ask` of the page of `version`. False when it is no
     /// longer open (the host drops a late reply).
-    pub fn finish(&self, version: u32, reply_id: &Value, result: Result<Value, Reject>) -> bool {
+    pub fn finish(
+        &self,
+        version: u32,
+        reply_id: &Value,
+        result: Result<Value, crate::Failure>,
+    ) -> bool {
         self.page.finish(version, reply_id, result)
     }
 

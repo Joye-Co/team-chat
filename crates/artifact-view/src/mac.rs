@@ -3,6 +3,7 @@
 use std::cell::{Cell, RefCell};
 use std::ptr::NonNull;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use block2::{DynBlock, RcBlock};
@@ -11,8 +12,9 @@ use objc2::rc::{Retained, Weak};
 use objc2::runtime::{AnyObject, ProtocolObject, Sel};
 use objc2::{AllocAnyThread, DefinedClass, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
-    NSBackingStoreType, NSEvent, NSEventMask, NSEventType, NSLayoutAttribute, NSPopUpButton,
-    NSTitlebarAccessoryViewController, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask,
+    NSBackingStoreType, NSEvent, NSEventMask, NSEventType, NSLayoutAttribute, NSMenu,
+    NSPopUpButton, NSResponder, NSTitlebarAccessoryViewController,
+    NSUserInterfaceItemIdentification, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask,
     NSWindowTabbingMode, NSWorkspace,
 };
 use objc2_foundation::{
@@ -33,7 +35,7 @@ use crate::page::{self, NO_NETWORK_SCRIPT, Nav};
 pub(crate) use crate::page::{State, new_state, set_capabilities, switch_version};
 use crate::resolve::{self, Content, SCHEME};
 use crate::{
-    ArtifactEvent, Capabilities, Error, OpenOptions, Presentation, Reject, Snapshot, VersionItem,
+    ArtifactEvent, Capabilities, Error, Failure, OpenOptions, Presentation, Snapshot, VersionItem,
     VersionSpec, bridge, gate,
 };
 
@@ -51,8 +53,8 @@ macro_rules! disable_private_pref {
 }
 
 pub(crate) struct Ivars {
-    state: Rc<RefCell<State>>,
-    cb: Rc<dyn Fn(ArtifactEvent)>,
+    pub(crate) state: Rc<RefCell<State>>,
+    pub(crate) cb: Rc<dyn Fn(ArtifactEvent)>,
     webview: RefCell<Option<Weak<WKWebView>>>,
     window: RefCell<Option<Weak<NSWindow>>>,
     ucc: RefCell<Option<Weak<WKUserContentController>>>,
@@ -108,6 +110,13 @@ define_class!(
             handler.call((policy,));
         }
 
+        #[unsafe(method(webView:didCommitNavigation:))]
+        fn did_commit(&self, _web_view: &WKWebView, _navigation: Option<&WKNavigation>) {
+            // A new document of the page shown (its first load, its own reload, a link
+            // inside the origin): the old one is gone, and its open requests with it.
+            self.document_starts();
+        }
+
         #[unsafe(method(webView:didFinishNavigation:))]
         fn did_finish(&self, _web_view: &WKWebView, _navigation: Option<&WKNavigation>) {
             let version = self.ivars().state.borrow().version;
@@ -127,12 +136,17 @@ define_class!(
 
         #[unsafe(method(webViewWebContentProcessDidTerminate:))]
         fn process_terminated(&self, web_view: &WKWebView) {
-            let version = self.ivars().state.borrow().version;
-            self.emit(ArtifactEvent::LoadFailed { version, reason: "web content process ended".into() });
+            // The document is gone with its process: nothing can answer its requests.
+            self.document_starts();
             let n = self.ivars().reloads.get();
             if n < 1 {
+                // One reload by itself; the host hears of a failure only when the page
+                // does not come back.
                 self.ivars().reloads.set(n + 1);
                 self.load_current(web_view);
+            } else {
+                let version = self.ivars().state.borrow().version;
+                self.emit(ArtifactEvent::LoadFailed { version, reason: "web content process ended".into() });
             }
         }
     }
@@ -197,6 +211,13 @@ impl Controller {
             let (cb, event) = job.0;
             cb(event);
         });
+    }
+
+    /// A new document replaces the page's one: tells the host which open requests ended.
+    fn document_starts(&self) {
+        if let Some(ended) = page::document_started_event(&self.ivars().state) {
+            self.emit(ended);
+        }
     }
 
     fn load_failed(&self, error: &NSError) {
@@ -629,7 +650,7 @@ pub(crate) fn finish(
     web_view: &WKWebView,
     version: u32,
     reply_id: &Value,
-    result: Result<Value, Reject>,
+    result: Result<Value, Failure>,
 ) -> bool {
     match page::finish_script(state, version, reply_id, result) {
         Some(s) => {
@@ -638,6 +659,155 @@ pub(crate) fn finish(
         }
         None => false,
     }
+}
+
+/// See [`ArtifactWindow::set_ref_menu`].
+pub(crate) fn set_ref_menu(state: &RefCell<State>, web_view: &WKWebView, menu: crate::RefMenu) {
+    if let Some(s) = page::ref_menu_script(state, menu) {
+        unsafe { web_view.evaluateJavaScript_completionHandler(&NSString::from_str(&s), None) };
+    }
+}
+
+/// What the page's right-click menu keeps: the editing commands and Look Up. Everything
+/// that leaves the page or does nothing in it (reload, back, download, open in a new
+/// window, share, search the web, services) goes, as on Windows. WebKit names its items
+/// with these identifiers; an item it names otherwise, or not at all, goes too.
+const MENU_KEPT: [&str; 5] = [
+    "WKMenuItemIdentifierCopy",
+    "WKMenuItemIdentifierCut",
+    "WKMenuItemIdentifierPaste",
+    "WKMenuItemIdentifierSelectAll",
+    "WKMenuItemIdentifierLookUp",
+];
+
+/// True for a menu item of the page's right-click menu that stays ([`MENU_KEPT`]).
+pub(crate) fn keeps_menu_item(identifier: Option<&str>) -> bool {
+    identifier.is_some_and(|id| MENU_KEPT.contains(&id))
+}
+
+/// Trims the menu WebKit is about to show for a page (see [`MENU_KEPT`]). A menu with
+/// nothing left has no items, and AppKit shows no menu for it.
+fn trim_context_menu(menu: &NSMenu) {
+    for item in menu.itemArray().to_vec() {
+        let id = item.identifier().map(|s| s.to_string());
+        if !keeps_menu_item(id.as_deref()) {
+            menu.removeItem(&item);
+        }
+    }
+}
+
+pub(crate) struct WebIvars {
+    cb: Rc<dyn Fn(ArtifactEvent)>,
+    /// Wheel and trackpad scrolling goes to `host` (an inline page in a list).
+    pub(crate) pass_scroll: Cell<bool>,
+    host: Option<Weak<NSView>>,
+    /// Report keyboard focus changes (an embedded page).
+    report_focus: bool,
+    /// The developer view: the menu stays whole (Inspect Element).
+    inspectable: bool,
+}
+
+define_class!(
+    /// The page view of the 产出 window and of an embedded page. It trims the right-click
+    /// menu, reports keyboard focus changes, and with `pass_scroll` gives wheel and
+    /// trackpad scrolling to the host view.
+    // SAFETY: WKWebView may be subclassed; the overrides call the superclass and the class
+    // does not implement Drop.
+    #[unsafe(super(WKWebView, NSView, NSResponder, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "TeamChatArtifactPageWebView"]
+    #[ivars = WebIvars]
+    pub(crate) struct PageWebView;
+
+    impl PageWebView {
+        #[unsafe(method(becomeFirstResponder))]
+        fn become_first_responder(&self) -> bool {
+            // SAFETY: NSResponder's method with this signature.
+            let ok: bool = unsafe { msg_send![super(self), becomeFirstResponder] };
+            if ok && self.ivars().report_focus {
+                emit_async(&self.ivars().cb, ArtifactEvent::FocusChanged { focused: true });
+            }
+            ok
+        }
+
+        #[unsafe(method(resignFirstResponder))]
+        fn resign_first_responder(&self) -> bool {
+            // SAFETY: NSResponder's method with this signature.
+            let ok: bool = unsafe { msg_send![super(self), resignFirstResponder] };
+            if ok && self.ivars().report_focus {
+                emit_async(&self.ivars().cb, ArtifactEvent::FocusChanged { focused: false });
+            }
+            ok
+        }
+
+        #[unsafe(method(acceptsFirstMouse:))]
+        fn accepts_first_mouse(&self, event: Option<&NSEvent>) -> bool {
+            FIRST_MOUSE_FOR_SELF_TESTS.load(Ordering::Relaxed) || {
+                // SAFETY: NSView's method with this signature.
+                let ok: bool = unsafe { msg_send![super(self), acceptsFirstMouse: event] };
+                ok
+            }
+        }
+
+        #[unsafe(method(scrollWheel:))]
+        fn scroll_wheel(&self, event: &NSEvent) {
+            if self.ivars().pass_scroll.get()
+                && let Some(host) = self.ivars().host.as_ref().and_then(|h| h.load())
+            {
+                host.scrollWheel(event);
+                return;
+            }
+            // SAFETY: NSResponder's method with this signature.
+            unsafe { msg_send![super(self), scrollWheel: event] }
+        }
+
+        #[unsafe(method(willOpenMenu:withEvent:))]
+        fn will_open_menu(&self, menu: &NSMenu, event: &NSEvent) {
+            // SAFETY: NSView's method with this signature; WebKit fills the menu in it.
+            let _: () = unsafe { msg_send![super(self), willOpenMenu: menu, withEvent: event] };
+            if !self.ivars().inspectable {
+                trim_context_menu(menu);
+            }
+        }
+    }
+);
+
+impl PageWebView {
+    /// A page view with `config`. `host` is the view that scrolls for an inline page;
+    /// `report_focus` sends [`ArtifactEvent::FocusChanged`] (an embedded page).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        mtm: MainThreadMarker,
+        frame: NSRect,
+        config: &WKWebViewConfiguration,
+        cb: Rc<dyn Fn(ArtifactEvent)>,
+        host: Option<&NSView>,
+        pass_scroll: bool,
+        report_focus: bool,
+        inspectable: bool,
+    ) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(WebIvars {
+            cb,
+            pass_scroll: Cell::new(pass_scroll),
+            host: host.map(Weak::new),
+            report_focus,
+            inspectable,
+        });
+        // SAFETY: WKWebView's designated initializer.
+        unsafe { msg_send![super(this), initWithFrame: frame, configuration: config] }
+    }
+}
+
+/// Set by `EmbeddedArtifact::post_click`: see there.
+pub(crate) static FIRST_MOUSE_FOR_SELF_TESTS: AtomicBool = AtomicBool::new(false);
+
+fn emit_async(cb: &Rc<dyn Fn(ArtifactEvent)>, event: ArtifactEvent) {
+    let job = MainOnly((cb.clone(), event));
+    DispatchQueue::main().exec_async(move || {
+        let job = job;
+        let (cb, event) = job.0;
+        cb(event);
+    });
 }
 
 /// A window that shows one 产出. Main thread only. Dropping it closes the window.
@@ -710,9 +880,16 @@ impl ArtifactWindow {
         window.setTitle(&NSString::from_str(&title));
         window.center();
 
-        let web_view = unsafe {
-            WKWebView::initWithFrame_configuration(WKWebView::alloc(mtm), frame, &config.config)
-        };
+        let web_view: Retained<WKWebView> = Retained::into_super(PageWebView::new(
+            mtm,
+            frame,
+            &config.config,
+            controller.ivars().cb.clone(),
+            None,
+            false,
+            false,
+            inspectable,
+        ));
         wire(&web_view, &controller, inspectable);
         if transparent {
             // SAFETY: `drawsBackground` is a BOOL key WKWebView has answered to since macOS
@@ -751,7 +928,9 @@ impl ArtifactWindow {
     /// that version's bridge capabilities.
     pub fn show_version(&self, spec: VersionSpec, caps: Capabilities) -> Result<(), Error> {
         let version = spec.version;
-        switch_version(&self.state, spec, caps)?;
+        if let Some(ended) = switch_version(&self.state, spec, caps)? {
+            self.controller.emit(ended);
+        }
         if let Some(popup) = self.popup.borrow().as_ref() {
             popup.selectItemWithTag(version as isize);
         }
@@ -827,8 +1006,14 @@ impl ArtifactWindow {
     }
 
     /// Finishes an open `emit` / `ask` of the page of `version` (see [`finish`]).
-    pub fn finish(&self, version: u32, reply_id: &Value, result: Result<Value, Reject>) -> bool {
+    pub fn finish(&self, version: u32, reply_id: &Value, result: Result<Value, Failure>) -> bool {
         finish(&self.state, &self.web_view, version, reply_id, result)
+    }
+
+    /// Gives the page other colours and words for its `就这里提问` menu (the app's theme
+    /// changed), now and for its next load.
+    pub fn set_ref_menu(&self, menu: crate::RefMenu) {
+        set_ref_menu(&self.state, &self.web_view, menu);
     }
 
     pub fn is_closed(&self) -> bool {

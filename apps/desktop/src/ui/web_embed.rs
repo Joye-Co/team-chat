@@ -31,7 +31,7 @@
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
-use artifact_view::{ArtifactEvent, Capabilities, RefMenu, Reject, Snapshot, VersionSpec, Viewer};
+use artifact_view::{ArtifactEvent, Capabilities, Failure, RefMenu, Snapshot, VersionSpec, Viewer};
 use gpui::{
     AnyWindowHandle, App, AppContext as _, Bounds, Context, DispatchPhase, Element, ElementId,
     Entity, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement as _,
@@ -309,14 +309,38 @@ thread_local! {
     static LIVE: RefCell<Vec<gpui::WeakEntity<WebEmbedState>>> = const { RefCell::new(Vec::new()) };
 }
 
+/// What runs when an embedded page is gone for good ([`on_page_gone`]).
+type PageGone = Rc<dyn Fn(gpui::WeakEntity<WebEmbedState>, &mut App)>;
+
+struct PageGoneHook(PageGone);
+
+impl gpui::Global for PageGoneHook {}
+
+/// `f` runs when an embedded page is gone for good: its state left the cache (the
+/// window closed, or it was the oldest of too many), or it now shows another 产出. A page
+/// that only gave up its native view while off screen is not gone. The 产出 page host
+/// drops what it kept for the page.
+pub fn on_page_gone(f: impl Fn(gpui::WeakEntity<WebEmbedState>, &mut App) + 'static, cx: &mut App) {
+    cx.set_global(PageGoneHook(Rc::new(f)));
+}
+
+/// Tells the host, after the current update, that `page` is gone for good.
+fn page_gone(page: gpui::WeakEntity<WebEmbedState>, cx: &mut App) {
+    let Some(hook) = cx.try_global::<PageGoneHook>().map(|h| h.0.clone()) else {
+        return;
+    };
+    cx.defer(move |cx| hook(page, cx));
+}
+
 impl WebEmbedState {
     fn new(spec: WebEmbedSpec, cx: &mut Context<Self>) -> Self {
         let me = cx.weak_entity();
         LIVE.with(|l| {
             let mut l = l.borrow_mut();
             l.retain(|w| w.upgrade().is_some());
-            l.push(me);
+            l.push(me.clone());
         });
+        cx.on_release(move |_, cx| page_gone(me, cx)).detach();
         Self {
             spec,
             pass_scroll: false,
@@ -368,13 +392,20 @@ impl WebEmbedState {
     }
 
     /// Gives the page of `version` a data snapshot (the 产出 page host). False when no
-    /// such page shows.
-    pub fn push_data(&self, version: u32, snap: Snapshot) -> bool {
+    /// such page shows. The page redraws with the data, so its picture for overlays is
+    /// taken again and an inline page says again where it ends: the frame follows a page
+    /// that got longer or shorter.
+    pub fn push_data(&mut self, version: u32, snap: Snapshot, cx: &mut Context<Self>) -> bool {
         #[cfg(any(target_os = "macos", windows))]
         if let Some(n) = &self.native {
-            return n.push_data(version, snap);
+            let pushed = n.push_data(version, snap);
+            if pushed && self.phase == Phase::Ready {
+                self.snapshot_later(cx, 120);
+                self.measure_end_later(cx, 150);
+            }
+            return pushed;
         }
-        let _ = (version, snap);
+        let _ = (version, snap, cx);
         false
     }
 
@@ -384,7 +415,7 @@ impl WebEmbedState {
         &self,
         version: u32,
         reply_id: &serde_json::Value,
-        result: Result<serde_json::Value, Reject>,
+        result: Result<serde_json::Value, Failure>,
     ) -> bool {
         #[cfg(any(target_os = "macos", windows))]
         if let Some(n) = &self.native {
@@ -414,6 +445,34 @@ impl WebEmbedState {
             self._events = None;
             self.phase = Phase::Loading;
         }
+    }
+
+    /// Self-tests: the page's load fails now, as [`ArtifactEvent::LoadFailed`] reports it.
+    pub fn fail_for_self_test(&mut self, cx: &mut Context<Self>) {
+        let version = self.version();
+        self.on_native(
+            ArtifactEvent::LoadFailed {
+                version,
+                reason: "self-test".into(),
+            },
+            cx,
+        );
+    }
+
+    /// 重试 of a page that did not open: drops the view that failed (or that could not be
+    /// made) and loads the page again in a new one on the next frame.
+    pub fn retry(&mut self, cx: &mut Context<Self>) {
+        #[cfg(any(target_os = "macos", windows))]
+        {
+            self.native = None;
+        }
+        self._events = None;
+        self.phase = Phase::Loading;
+        self.fade = None;
+        self.base = None;
+        self.end = None;
+        self.end_read = false;
+        cx.notify();
     }
 
     pub fn phase(&self) -> &Phase {
@@ -499,7 +558,7 @@ impl WebEmbedState {
         false
     }
 
-    fn sync(&mut self, embed: &WebEmbed) {
+    fn sync(&mut self, embed: &WebEmbed, cx: &mut Context<Self>) {
         self.pass_scroll = embed.pass_scroll;
         self.autoplay = embed.autoplay;
         self.radius = embed.radius;
@@ -510,7 +569,14 @@ impl WebEmbedState {
         self.on_event = embed.on_event.clone();
         self.on_host = embed.on_host.clone();
         self.spec.viewer = embed.spec.viewer.clone();
-        self.spec.ref_menu = embed.spec.ref_menu.clone();
+        if self.spec.ref_menu != embed.spec.ref_menu {
+            self.spec.ref_menu = embed.spec.ref_menu.clone();
+            // The menu follows the theme in the page that is loaded, not only in the next.
+            #[cfg(any(target_os = "macos", windows))]
+            if let (Some(n), Some(menu)) = (&self.native, &self.spec.ref_menu) {
+                n.set_ref_menu(menu.clone());
+            }
+        }
         let same = self.spec.artifact_id == embed.spec.artifact_id
             && self.spec.version.version == embed.spec.version.version;
         #[cfg(any(target_os = "macos", windows))]
@@ -530,6 +596,10 @@ impl WebEmbedState {
             return;
         }
         let new_id = self.spec.artifact_id != embed.spec.artifact_id;
+        if new_id {
+            // The page of the 产出 shown until now is gone for good.
+            page_gone(cx.weak_entity(), cx);
+        }
         self.spec = embed.spec.clone();
         self.snapshot = None;
         self.phase = Phase::Loading;
@@ -586,6 +656,7 @@ impl WebEmbedState {
             ArtifactEvent::ExternalLink { .. }
             | ArtifactEvent::VersionSelected { .. }
             | ArtifactEvent::Ref { .. }
+            | ArtifactEvent::RequestsEnded { .. }
             | ArtifactEvent::Closed => {}
         }
         cx.notify();
@@ -640,7 +711,7 @@ impl WebEmbedState {
         if self.phase != Phase::Ready {
             return;
         }
-        let css = base_css(self.pad, self.fill, self.canvas, cx);
+        let css = base_css(self.pad, self.fill, self.canvas, false, cx);
         if self.base.as_deref() == Some(css.as_str()) {
             return;
         }
@@ -821,7 +892,8 @@ impl WebEmbedState {
         #[cfg(any(target_os = "macos", windows))]
         {
             self.attach(window, cx);
-            let covered = self.covered();
+            // A page that failed shows the Alert in its place: its blank view hides.
+            let covered = self.covered() || matches!(self.phase, Phase::Failed(_));
             if let Some(n) = &self.native {
                 n.set_dark(theme::is_dark(cx));
                 n.set_frame(rect(bounds), rect(visible), window.scale_factor() as f64);
@@ -854,7 +926,7 @@ impl WebEmbedState {
                         s.hit_covered = covered;
                         #[cfg(any(target_os = "macos", windows))]
                         if let Some(n) = &s.native {
-                            n.set_hidden(s.covered());
+                            n.set_hidden(s.covered() || matches!(s.phase, Phase::Failed(_)));
                         }
                         cx.notify();
                     }
@@ -893,7 +965,15 @@ fn over(top: gpui::Hsla, under: gpui::Hsla) -> gpui::Hsla {
 /// [`WebEmbedState::apply_base`]). It only supplies defaults (owner decision
 /// O-4): its rules sit in the `tc-base` cascade layer, so any color or type
 /// a page that a member made sets for itself wins.
-fn base_css(pad: Pixels, fill: bool, canvas: Canvas, cx: &App) -> String {
+///
+/// Besides text, tables and code it draws the plain controls a page uses (button, text
+/// input, select, textarea, checkbox, radio, progress) like the app's own: one height,
+/// one radius, the 3 px focus ring, 50 % when disabled, and `button[data-tc=primary]`
+/// filled. `opaque` is the 产出 window, which has no app surface behind the page: the
+/// page background is `--tc-bg` there, and transparent where the app draws it.
+fn base_css(pad: Pixels, fill: bool, canvas: Canvas, opaque: bool, cx: &App) -> String {
+    use crate::ui::native::tokens::{height, metrics, radius, space, text};
+    let px_of = |p: Pixels| f32::from(p).round();
     let k = canvas.colors(cx);
     // The surface the page sits on: its canvas when it fills an area, else its
     // card's fill (see `WebEmbed::render`).
@@ -909,10 +989,11 @@ fn base_css(pad: Pixels, fill: bool, canvas: Canvas, cx: &App) -> String {
     };
     format!(
         ":root{{--tc-pad:{pad}px;--tc-bg:{bg};--tc-fg:{fg};--tc-muted:{muted};--tc-border:{border};\
---tc-fill:{fill};--tc-primary:{fg};color-scheme:{scheme}}}\
+--tc-fill:{fill};--tc-primary:{fg};--tc-danger:{danger};--tc-radius:{radius}px;--tc-gap:{gap}px;\
+--tc-font-mono:{mono};color-scheme:{scheme}}}\
 @layer tc-base{{\
 html{{font:14px/22px -apple-system,BlinkMacSystemFont,'PingFang SC','Helvetica Neue','Segoe UI Variable Text','Segoe UI','Microsoft YaHei UI',sans-serif;\
-color:var(--tc-fg);background:transparent;-webkit-font-smoothing:antialiased}}\
+color:var(--tc-fg);background:{page};-webkit-font-smoothing:antialiased}}\
 body{{margin:0;padding:var(--tc-pad)}}\
 h1{{font-size:24px;line-height:32px;font-weight:600;margin:0 0 8px}}\
 h2{{font-size:18px;line-height:28px;font-weight:600;margin:24px 0 8px}}\
@@ -924,9 +1005,69 @@ th,td{{border-bottom:1px solid var(--tc-border);padding:8px 12px;text-align:star
 [data-tc-num]{{text-align:right!important}}\
 th{{font-size:12px;font-weight:500;color:var(--tc-muted)}}\
 hr{{border:0;border-top:1px solid var(--tc-border);margin:16px 0}}\
-code,pre{{font-family:ui-monospace,'SF Mono',Menlo,'Cascadia Mono',Consolas,monospace;font-size:13px}}\
-pre{{background:var(--tc-fill);border:1px solid var(--tc-border);border-radius:8px;padding:12px;overflow:auto}}}}",
-        pad = f32::from(pad).round(),
+code,pre{{font-family:var(--tc-font-mono);font-size:13px}}\
+pre{{background:var(--tc-fill);border:1px solid var(--tc-border);border-radius:8px;padding:12px;overflow:auto}}\
+button,input,select,textarea{{font:inherit;color:inherit;margin:0;box-sizing:border-box}}\
+button,input[type=button],input[type=submit],input[type=reset]{{height:{ctl}px;padding:0 {ctl_pad}px;\
+border:1px solid {edge};border-radius:var(--tc-radius);background:{control};font-size:{ui}px;\
+line-height:{ui_line}px;font-weight:500;white-space:nowrap;cursor:default}}\
+:is(button,input[type=button],input[type=submit],input[type=reset]):hover:not(:disabled){{background:{control_hover}}}\
+:is(button,input[type=button],input[type=submit],input[type=reset]):active:not(:disabled){{background:{pressed}}}\
+button[data-tc=primary]{{background:var(--tc-primary);border-color:var(--tc-primary);color:var(--tc-bg)}}\
+button[data-tc=primary]:hover:not(:disabled),button[data-tc=primary]:active:not(:disabled){{background:var(--tc-primary);opacity:.9}}\
+input:not([type]),input:is([type=text],[type=search],[type=email],[type=url],[type=tel],[type=number],[type=password],[type=date],[type=time],[type=datetime-local]),select,textarea{{\
+height:{ctl}px;padding:0 {ctl_pad}px;border:1px solid {edge};border-radius:var(--tc-radius);background:{control};\
+font-size:{ui}px;line-height:{ui_line}px;outline:0}}\
+textarea{{height:auto;min-height:{area}px;padding:{s6}px {ctl_pad}px;line-height:22px;resize:vertical;display:block;width:100%}}\
+select{{appearance:none;-webkit-appearance:none;padding-right:{s32}px;background-repeat:no-repeat;background-position:right {s8}px center;\
+background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none' stroke='{chevron}' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E\")}}\
+::placeholder{{color:var(--tc-muted);opacity:1}}\
+input:is([type=checkbox],[type=radio]){{accent-color:var(--tc-primary);width:{mark}px;height:{mark}px;margin:0 {s8}px 0 0;vertical-align:-3px}}\
+input[type=range]{{accent-color:var(--tc-primary)}}\
+progress{{appearance:none;-webkit-appearance:none;display:block;width:100%;height:{bar}px;border:0;border-radius:{bar_r}px;background:var(--tc-fill);overflow:hidden}}\
+progress::-webkit-progress-bar{{background:var(--tc-fill)}}\
+progress::-webkit-progress-value{{background:var(--tc-primary)}}\
+progress::-moz-progress-bar{{background:var(--tc-primary)}}\
+:is(button,input,select,textarea):focus-visible{{outline:0;border-color:{focus_edge};box-shadow:0 0 0 {ring}px {focus}}}\
+input:is([type=checkbox],[type=radio]):focus-visible{{outline:{ring}px solid {focus};outline-offset:1px;box-shadow:none}}\
+:is(button,input,select,textarea):disabled{{opacity:{disabled}}}\
+fieldset{{border:1px solid var(--tc-border);border-radius:{container}px;margin:0 0 16px;padding:12px 16px}}\
+legend{{padding:0 4px;font-size:12px;color:var(--tc-muted)}}\
+label{{line-height:{ui_line}px}}\
+label:has(>input:is([type=checkbox],[type=radio]))+label{{margin-left:var(--tc-gap)}}}}",
+        pad = px_of(pad),
+        page = if opaque {
+            "var(--tc-bg)"
+        } else {
+            "transparent"
+        },
+        danger = hex(k.red),
+        radius = px_of(radius::CONTROL),
+        gap = px_of(space::S12),
+        mono = "ui-monospace,'SF Mono',Menlo,'Cascadia Mono',Consolas,monospace",
+        ctl = px_of(height::SM),
+        ctl_pad = px_of(space::S12),
+        ui = px_of(text::UI.0),
+        ui_line = px_of(text::UI.1),
+        area = px_of(crate::ui::native::tokens::size::COMPOSER_MIN),
+        s6 = px_of(space::S6),
+        s8 = px_of(space::S8),
+        s32 = px_of(space::S32),
+        mark = px_of(crate::ui::native::tokens::icon::MD),
+        bar = px_of(height::PROGRESS),
+        bar_r = px_of(metrics::BAR_RADIUS),
+        ring = px_of(metrics::FOCUS_RING),
+        disabled = metrics::DISABLED_OPACITY,
+        container = px_of(radius::CONTAINER),
+        // Opaque on the page's surface, like the lines: a control on a card or in the
+        // pane reads as a raised control in both themes.
+        edge = hex(over(k.quaternary, surface)),
+        control = hex(over(k.control, surface)),
+        control_hover = hex(over(k.control_hover, surface)),
+        pressed = hex(over(k.pressed, surface)),
+        focus = hex(k.focus),
+        focus_edge = hex(over(k.focus, surface)),
+        chevron = hex(k.secondary).replace('#', "%23"),
         bg = hex(if fill { surface } else { k.content }),
         fg = hex(k.label),
         muted = hex(k.secondary),
@@ -951,6 +1092,20 @@ for(var i=0;i<n;i++){var any=false,all=true;body.forEach(function(r){var c=r.cel
 if(any&&all){rows.forEach(function(r){if(r.cells[i])r.cells[i].setAttribute('data-tc-num','');});}}});};\
 tcNum();if(!window.__tcNumObs&&window.MutationObserver&&document.body){var p=0;window.__tcNumObs=new MutationObserver(function(){if(p)return;p=1;setTimeout(function(){p=0;tcNum();},50);});\
 window.__tcNumObs.observe(document.body,{childList:true,subtree:true,characterData:true});}";
+
+/// The base stylesheet for a page in its own 产出 window, as the script that applies it:
+/// the same defaults and `--tc-*` variables an embedded page gets, on the app background
+/// (the window has no app surface behind the page). Run it after every load and when the
+/// theme changes; it replaces the one before.
+pub(crate) fn window_base_script(cx: &App) -> String {
+    base_script(&base_css(
+        crate::ui::native::tokens::space::S24,
+        true,
+        Canvas::Content,
+        true,
+        cx,
+    ))
+}
 
 /// The script that puts the base stylesheet first in a page's `<head>` (or replaces it).
 fn base_script(css: &str) -> String {
@@ -1182,9 +1337,10 @@ const MIN_INLINE_END: f32 = 120.;
 impl RenderOnce for WebEmbed {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let state = cached_state(&self, window, cx);
-        state.update(cx, |s, _| s.sync(&self));
+        state.update(cx, |s, cx| s.sync(&self, cx));
         let k = theme::colors(cx);
         let s = state.read(cx);
+        let failed = matches!(s.phase, Phase::Failed(_));
         // An inline page ends on its last whole block (or its own end).
         let height = match s.end {
             Some(end) if self.pass_scroll => end.min(self.height),
@@ -1197,7 +1353,31 @@ impl RenderOnce for WebEmbed {
             (_, true, Some(image)) | (Phase::Loading, _, Some(image)) => {
                 img(image.clone()).size_full().into_any_element()
             }
-            (Phase::Failed(_), _, _) => message(ca::LOAD_FAILED, k.text_3).into_any_element(),
+            // §2.15: the Alert in place of the page, with 重试; never a lone line in a well.
+            (Phase::Failed(_), _, _) => {
+                let again = state.downgrade();
+                div()
+                    .p(crate::ui::native::tokens::space::S12)
+                    .child(
+                        crate::ui::native::Alert::new(crate::ui::Sym::Failed, ca::LOAD_FAILED)
+                            .tone(crate::ui::native::AlertTone::Destructive)
+                            .when(!self.fill, |a| a.on_card())
+                            .description(ca::LOAD_FAILED_LINE)
+                            .action(
+                                crate::ui::native::push_button(
+                                    SharedString::from(format!("{}-retry", self.id)),
+                                    ca::LOAD_RETRY,
+                                    crate::ui::native::PushStyle::Outline,
+                                    crate::ui::native::PushSize::Small,
+                                    cx,
+                                )
+                                .on_click(move |_, _, cx| {
+                                    let _ = again.update(cx, |s, cx| s.retry(cx));
+                                }),
+                            ),
+                    )
+                    .into_any_element()
+            }
             (Phase::Loading, _, _) => message(ca::OPENING, k.text_3).into_any_element(),
             _ => div().into_any_element(),
         };
@@ -1207,7 +1387,9 @@ impl RenderOnce for WebEmbed {
             .relative()
             .w_full()
             .when(self.fill, |d| d.flex_1().h_full().min_h(px(0.)))
-            .when(!self.fill, |d| d.h(height).flex_none())
+            // A page that did not open: the frame hugs the Alert.
+            .when(!self.fill && failed, |d| d.flex_none())
+            .when(!self.fill && !failed, |d| d.h(height).flex_none())
             .rounded(self.radius)
             .when(self.bottom.0 > px(0.), |d| d.rounded_bl(self.bottom.0))
             .when(self.bottom.1 > px(0.), |d| d.rounded_br(self.bottom.1))
@@ -1795,6 +1977,55 @@ pub fn page_preview(artifact_id: &str, version: u32) -> Option<Arc<gpui::Image>>
 #[cfg(test)]
 mod tests {
     use super::virtual_key;
+    use super::{Canvas, base_css, window_base_script};
+    use crate::ui::native::tokens::space;
+
+    #[gpui::test]
+    fn the_base_stylesheet_draws_controls_and_fills_only_the_window(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            crate::theme::set_mode(gpui_component::ThemeMode::Light, cx);
+            let embedded = base_css(space::S16, true, Canvas::Content, false, cx);
+            // Everything a page may rely on is a variable with a value.
+            for var in [
+                "--tc-pad:16px",
+                "--tc-bg:",
+                "--tc-fg:",
+                "--tc-muted:",
+                "--tc-border:",
+                "--tc-fill:",
+                "--tc-primary:",
+                "--tc-danger:",
+                "--tc-radius:8px",
+                "--tc-gap:12px",
+                "--tc-font-mono:ui-monospace",
+            ] {
+                assert!(embedded.contains(var), "{var}");
+            }
+            // The defaults sit in the layer, so any rule of the page wins.
+            let (vars, layer) = embedded.split_once("@layer tc-base{").unwrap();
+            assert!(vars.starts_with(":root{") && !vars.contains("button"));
+            for rule in [
+                "height:28px",
+                "button[data-tc=primary]{background:var(--tc-primary)",
+                "accent-color:var(--tc-primary)",
+                ":focus-visible{outline:0",
+                "0 0 0 3px",
+                ":disabled{opacity:0.5}",
+                "progress::-webkit-progress-value{background:var(--tc-primary)}",
+            ] {
+                assert!(layer.contains(rule), "{rule}");
+            }
+            // Embedded, the app draws the surface behind the page; the 产出 window has
+            // none, so its page fills itself with the app background.
+            assert!(embedded.contains("background:transparent;-webkit-font-smoothing"));
+            let window = window_base_script(cx);
+            assert!(window.contains("background:var(--tc-bg);-webkit-font-smoothing"));
+            assert!(window.contains("--tc-pad:24px") && window.contains("__tc_base"));
+            // The same variables and rules in both.
+            assert!(window.contains("--tc-radius:8px") && window.contains("height:28px"));
+        });
+    }
 
     #[test]
     fn shortcut_keys_have_their_windows_key_codes() {

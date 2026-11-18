@@ -950,6 +950,10 @@ impl Page {
                     if nav != Nav::Allow {
                         args.SetCancel(true)?;
                         page.cancelled.borrow_mut().insert(id);
+                    } else {
+                        // A new document of the page shown (its first load, its own
+                        // reload, a link inside the origin): the old one's requests end.
+                        page.document_starts(true);
                     }
                     if let Nav::External(url) = nav {
                         page.emit(ArtifactEvent::ExternalLink { url });
@@ -1280,12 +1284,41 @@ impl Page {
             self.webview.borrow_mut().take();
             self.fail("web content process ended".into());
         } else if kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED {
-            self.fail("web content process ended".into());
+            // The document is gone with its process: nothing can answer its requests.
+            self.document_starts(false);
             let n = self.reloads.get();
             if n < 1 {
+                // One reload by itself; the host hears of a failure only when the page
+                // does not come back.
                 self.reloads.set(n + 1);
                 self.load_current();
+            } else {
+                self.fail("web content process ended".into());
             }
+        }
+    }
+
+    /// A new document replaces the page's one. With `old_alive` the old document can still
+    /// run (the navigation only starts): its open requests reject `reloaded` there. The
+    /// next document's request ids differ, so the scripts do nothing in it.
+    fn document_starts(&self, old_alive: bool) {
+        let Some(ArtifactEvent::RequestsEnded { version, reply_ids }) =
+            page::document_started_event(&self.state)
+        else {
+            return;
+        };
+        if old_alive {
+            for id in &reply_ids {
+                self.evaluate(&bridge::reject_script(id, Reject::Reloaded));
+            }
+        }
+        self.emit(ArtifactEvent::RequestsEnded { version, reply_ids });
+    }
+
+    /// See [`ArtifactWindow::set_ref_menu`].
+    pub(crate) fn set_ref_menu(&self, menu: crate::RefMenu) {
+        if let Some(script) = page::ref_menu_script(&self.state, menu) {
+            self.evaluate(&script);
         }
     }
 
@@ -1455,7 +1488,7 @@ impl Page {
         &self,
         version: u32,
         reply_id: &Value,
-        result: Result<Value, Reject>,
+        result: Result<Value, crate::Failure>,
     ) -> bool {
         match page::finish_script(&self.state, version, reply_id, result) {
             Some(script) => {
@@ -2273,10 +2306,18 @@ impl ArtifactWindow {
     /// that version's bridge capabilities.
     pub fn show_version(&self, spec: VersionSpec, caps: Capabilities) -> Result<(), Error> {
         let version = spec.version;
-        page::switch_version(&self.state, spec, caps)?;
+        if let Some(ended) = page::switch_version(&self.state, spec, caps)? {
+            self.page.emit(ended);
+        }
         self.select_in_picker(version);
         self.page.load_current();
         Ok(())
+    }
+
+    /// Gives the page other colours and words for its `就这里提问` menu (the app's theme
+    /// changed), now and for its next load.
+    pub fn set_ref_menu(&self, menu: crate::RefMenu) {
+        self.page.set_ref_menu(menu);
     }
 
     fn select_in_picker(&self, version: u32) {
@@ -2444,7 +2485,12 @@ impl ArtifactWindow {
 
     /// Finishes an open `emit` / `ask` of the page of `version`. False when it is no longer
     /// open (a late reply after a timeout or reload): the host drops it.
-    pub fn finish(&self, version: u32, reply_id: &Value, result: Result<Value, Reject>) -> bool {
+    pub fn finish(
+        &self,
+        version: u32,
+        reply_id: &Value,
+        result: Result<Value, crate::Failure>,
+    ) -> bool {
         self.page.finish(version, reply_id, result)
     }
 

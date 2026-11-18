@@ -83,7 +83,7 @@ button{font:inherit;font-size:14px;color:inherit;background:var(--card);border:1
       document.body.dataset.ask = 'answered';
     }, function(e){ el('a').className = 'a'; el('a').textContent = ''; document.body.dataset.ask = e.code; });
   });
-  // A page may not ask on its own: this one is refused (not_allowed).
+  // A page may not ask on its own: this one is refused (no_user_action).
   tc.ask('question', {text: 'auto'}).catch(function(e){document.body.dataset.scripted = e.code});
 })();
 </script></body></html>
