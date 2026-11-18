@@ -554,8 +554,10 @@ fn render_step(
                     };
                     div()
                         .flex()
-                        // The 12 pt kind and the 13 pt path share a baseline.
-                        .items_baseline()
+                        // The 12 pt kind sits on the middle of the 13 pt path's
+                        // line (a shared baseline drops the CJK word below
+                        // the Latin path).
+                        .items_center()
                         .gap(space::S8)
                         .child(
                             div()

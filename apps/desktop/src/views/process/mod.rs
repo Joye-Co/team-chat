@@ -1031,18 +1031,15 @@ fn developer_panel(rows: Vec<(&'static str, String)>, cx: &App) -> AnyElement {
         .collect::<Vec<_>>()
         .join("\n");
     // R2-07, F4: no inner inset, so its values share the one value x of
-    // the facts above; a rule above its header sets it apart.
+    // the facts above. No rules around its header: it is a labelled group
+    // like 步骤 under it, not a table head.
     div()
         .mt(space::S4)
-        .border_t_1()
-        .border_color(n.separator)
         .child(
             div()
                 .h(ui::native::tokens::height::FOOTER_ROW)
                 .flex()
                 .items_center()
-                // No rule under the header: with the one above it read as
-                // a table head between the card and the 步骤 label.
                 .child(
                     div()
                         .flex_1()
