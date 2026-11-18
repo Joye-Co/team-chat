@@ -465,7 +465,7 @@ crate::copy! {
     TEAM_JOINED = "加入",
     TEAM_JOINED_BY = "{date} · {who} 邀请",
     TEAM_DEVICES = "登录的设备",
-    TEAM_NO_DEVICES = "没有登录的设备",
+    TEAM_NO_DEVICES = "没有",
     TEAM_DEACTIVATE = "停用…",
     TEAM_REACTIVATE = "重新启用",
     // hide-delete/1: a deactivated AI 成员 leaves the team for good.

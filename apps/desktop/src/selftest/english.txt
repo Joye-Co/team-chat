@@ -99,6 +99,7 @@
 录屏 {}	Recording {}
 文件	Files
 状态	Status
+没有	None
 GitHub 未登录	GitHub signed out
 AI 成员推不了代码	AI members can't push code
 名称	Name

@@ -1349,7 +1349,10 @@ impl AdminView {
                         d.child(fact(
                             m::TEAM_MODELS,
                             if models.is_empty() {
-                                div().child(m::TEAM_NO_MODELS).into_any_element()
+                                div()
+                                    .text_color(k.secondary)
+                                    .child(m::TEAM_NO_MODELS)
+                                    .into_any_element()
                             } else {
                                 // One a line: names are long ("Claude Sonnet 5.5").
                                 div()
@@ -1373,6 +1376,8 @@ impl AdminView {
                             // above it.
                             .flex_1()
                             .text_right()
+                            // Nothing to name: quieter than the facts above it.
+                            .when(devices.is_empty(), |t| t.text_color(k.secondary))
                             .into_any_element(),
                         ))
                     }),
