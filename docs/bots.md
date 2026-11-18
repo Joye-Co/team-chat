@@ -296,7 +296,8 @@ and the `cause`, so the person's waiting state clears and their client shows "�
 or a function that records them on a `CardDraft` of the newest rev:
 `set(id, props)`, `replace(id, block)`, `insert(block, { parent?, after?, before?, index? })`,
 `remove(id)`, `data(pointer, value?)`, `cardProps({ title, summary, intent, fallback, ask,
-actions })`, `ask(ask | null)` (a new `ask.id` opens a new round; `null` closes it). On
+actions })`, `ask(ask | null)` (a new `ask.id` opens a new round; `null` closes it),
+`actions(list)` (replaces the card's actions; `[]` removes them). On
 `card.stale_rev` the SDK rebases on the newest rev (at most 3 tries) when every op still targets an
 existing id, else it throws `ChatError` `conflict` with `reason` `card.stale_rev`. On
 `rate_limited` it queues and merges the ops of the same message (at most one patch per second);
@@ -622,7 +623,8 @@ Codex 的计划更新)生成。
   需要决定时发 Card v2 提问。
 - **交互闭环(2.1)**:块用 `events` 声明实时事件(如 `choice.change`、`chart.select`)。
   `onCardEvent` 收到实时事件,`onCardAnswer` 收到已存的回答(重启后也能收到)。用 `ctx.patch(ops)`
-  原地修改卡片(SDK 自动带 `baseRev` 和 `cause`;`card.stale_rev` 时在最新 rev 上重试,最多 3 次;
+  原地修改卡片(可以传一个函数,在最新 rev 的 `CardDraft` 上记录修改:`set`、`replace`、`insert`、
+  `remove`、`data`、`cardProps`、`ask`、`actions(list)`,其中 `actions(list)` 替换卡片的按钮,`[]` 去掉按钮;SDK 自动带 `baseRev` 和 `cause`;`card.stale_rev` 时在最新 rev 上重试,最多 3 次;
   被限流时合并排队,每秒最多一次,只合并 cause 相同或没有 cause 的修改;合并的修改超时或遇到 `internal` 时,用同一个 `clientPatchId` 重发同一帧,`duplicate: true` 算作已应用),或用 `ctx.reply`、`ctx.postCard`、`ctx.resolve("ignored")` 回应。
   `ctx.done(card)` 发「做完了」卡片作为回应并结束运行;`ctx.setPlan`、`ctx.endRun`、`ctx.setAcceptance`
   在卡片所在的话题里和消息处理函数里一样可用。

@@ -50,6 +50,22 @@ export interface UploadInput {
   height?: number;
 }
 
+/** What `publishHtml` takes: one HTML page, optional extra files, and where the 产出 goes. */
+export interface PublishHtmlInput {
+  groupId: string;
+  topicId: string;
+  title: string;
+  html: string;
+  note?: string;
+  /** Adds a version to this 产出 instead of making a new one. */
+  artifactId?: string;
+  extraFiles?: { path: string; mime: string; data: Uint8Array | ArrayBuffer | Blob }[];
+  /** 1.1: events the page may send back (`emitEvent`); they reach `Bot.onArtifactEvent`. */
+  events?: ArtifactEventDecl[];
+  /** 1.1: this bot's run that made the version (`Bot.currentRun(topicId)`). */
+  runId?: string;
+}
+
 type Body = string | Uint8Array | ArrayBuffer | Blob;
 
 /**
@@ -149,15 +165,19 @@ export class HttpClient {
     return data as T;
   }
 
+  /** `GET /v1/health`: the server is up, and its version. */
   health(): Promise<{ ok: true; version: string }> {
     return this.request("GET", "/v1/health");
   }
+  /** `GET /v1/me`: the member this token belongs to. */
   me(): Promise<Member> {
     return this.request("GET", "/v1/me");
   }
+  /** `GET /v1/members`: every member of the team. */
   members(): Promise<Member[]> {
     return this.request("GET", "/v1/members");
   }
+  /** `GET /v1/groups`: the groups this member is in. */
   groups(): Promise<GroupSummary[]> {
     return this.request("GET", "/v1/groups");
   }
@@ -226,6 +246,7 @@ export class HttpClient {
     return this.request<BotRun>("POST", `/v1/runs/${encodeURIComponent(runId)}/end`, { json: req });
   }
 
+  /** `GET /v1/runs/:id`: one run with its plan and state. */
   getRun(runId: string): Promise<BotRun> {
     return this.request<BotRun>("GET", `/v1/runs/${encodeURIComponent(runId)}`);
   }
@@ -248,9 +269,11 @@ export class HttpClient {
   // Files and 产出
   // ---------------------------------------------------------------------------
 
+  /** `POST /v1/files`: makes the file record and returns where to upload the bytes. `uploadFile` does both steps. */
   createFile(req: CreateFileRequest): Promise<CreateFileResponse> {
     return this.request("POST", "/v1/files", { json: req });
   }
+  /** `GET /v1/files/:id`: a file's name, size, type and hash. */
   getFile(fileId: string): Promise<FileMeta> {
     return this.request("GET", `/v1/files/${encodeURIComponent(fileId)}`);
   }
@@ -306,11 +329,13 @@ export class HttpClient {
     if (!req.success) throw new ChatError("invalid", `bad media: ${req.error.issues[0]?.message ?? ""}`.trim());
     return this.request("PUT", `/v1/artifacts/${encodeURIComponent(artifactId)}/versions/${version}/media`, { json: req.data });
   }
+  /** `GET /v1/artifacts`: the 产出 of a group, or of one topic of it. */
   listArtifacts(groupId: string, topicId?: string): Promise<Artifact[]> {
     const q = new URLSearchParams({ groupId });
     if (topicId) q.set("topicId", topicId);
     return this.request("GET", `/v1/artifacts?${q}`);
   }
+  /** `GET /v1/artifacts/:id`: one 产出 with its versions. */
   getArtifact(artifactId: string): Promise<ArtifactResponse> {
     return this.request("GET", `/v1/artifacts/${encodeURIComponent(artifactId)}`);
   }
@@ -319,19 +344,7 @@ export class HttpClient {
    * Uploads one HTML page (and optional extra files) and makes a 产出 of kind `html`, or
    * adds a version when `artifactId` is given.
    */
-  async publishHtml(input: {
-    groupId: string;
-    topicId: string;
-    title: string;
-    html: string;
-    note?: string;
-    artifactId?: string;
-    extraFiles?: { path: string; mime: string; data: Uint8Array | ArrayBuffer | Blob }[];
-    /** 1.1: events the page may send back (`emitEvent`); they reach `Bot.onArtifactEvent`. */
-    events?: ArtifactEventDecl[];
-    /** 1.1: this bot's run that made the version (`Bot.currentRun(topicId)`). */
-    runId?: string;
-  }): Promise<ArtifactVersionResponse> {
+  async publishHtml(input: PublishHtmlInput): Promise<ArtifactVersionResponse> {
     // Before the uploads: a declaration the server refuses fails here.
     checkArtifactEvents(input.events);
     const entry = "index.html";

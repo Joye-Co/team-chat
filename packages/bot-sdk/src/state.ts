@@ -12,6 +12,7 @@ export function expandHome(path: string): string {
   return path.startsWith("~/") || path.startsWith("~\\") ? join(homedir(), path.slice(2)) : path;
 }
 
+/** Where one of the bot's card messages (or 产出) is. */
 export interface CardRef {
   groupId: string;
   topicId: string;

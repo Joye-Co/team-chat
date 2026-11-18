@@ -847,6 +847,7 @@ export class Bot {
     this.dropSocket("reconnect requested");
   }
 
+  /** True between a welcome and the next disconnect. Writes made while false wait for the connection. */
   get connected(): boolean {
     return this.ready;
   }
@@ -859,9 +860,11 @@ export class Bot {
     if (!this.meMember) throw new ChatError("invalid", "bot.me is set after the first welcome: await bot.start() first");
     return this.meMember;
   }
+  /** Every member of the team, from the last welcome and directory frames. */
   get members(): Member[] {
     return [...this.memberMap.values()];
   }
+  /** One member by id, when known. */
   member(id: string): Member | undefined {
     return this.memberMap.get(id);
   }
@@ -869,6 +872,7 @@ export class Bot {
   get groupSummaries(): GroupSummary[] {
     return [...this.summaryMap.values()];
   }
+  /** Whether the bot follows a topic: `onMessage` runs only for topics it follows. */
   isFollowing(groupId: string, topicId: string): boolean {
     return this.state.following[groupId]?.includes(topicId) ?? false;
   }
@@ -1152,6 +1156,10 @@ export class Bot {
     return w;
   }
 
+  /**
+   * Edits one of my messages: `body` replaces the whole body; cards, attachments and 产出
+   * references are replaced only when given. For cards prefer `updateCardV2` or `patchCard`.
+   */
   edit(groupId: string, messageId: string, input: EditInput): Promise<{ message: Message }> {
     const frame: Record<string, unknown> & { t: string } = { t: "edit", groupId, messageId, body: input.body };
     if (input.streaming !== undefined) frame.streaming = input.streaming;
@@ -1164,6 +1172,7 @@ export class Bot {
     return this.request(frame) as Promise<{ message: Message }>;
   }
 
+  /** Deletes one of my messages. */
   async deleteMessage(groupId: string, messageId: string): Promise<void> {
     await this.request({ t: "delete", groupId, messageId });
   }
@@ -1247,6 +1256,7 @@ export class Bot {
     return r.changed;
   }
 
+  /** Shows "typing" in a topic for a few seconds. Not sent (and not queued) while disconnected. */
   typing(groupId: string, topicId: string): void {
     this.sendRaw({ t: "typing", groupId, topicId });
   }
@@ -1265,7 +1275,7 @@ export class Bot {
   }
 
   /** Uploads a file over HTTP; put the result in `attachments`. */
-  uploadFile(input: UploadInput) {
+  uploadFile(input: UploadInput): Promise<FileRef> {
     return this.http.uploadFile(input);
   }
 
