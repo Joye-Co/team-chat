@@ -162,6 +162,9 @@ pub struct TimelineView {
     focus: focus::FocusState,
     /// ⌘F: the find bar and its matches (`timeline/find.rs`).
     find: Option<find::FindState>,
+    /// The long answers shown whole (`markdown::fold`): opened by the person,
+    /// or the target of a search, a reference jump or ⌘F. By row key.
+    unfolded: std::collections::HashSet<String>,
     /// The message row under the pointer (its hover toolbar shows).
     hovered: Option<String>,
     /// R2-12, E3: the thread is a Tab stop; ↑↓ move the row whose toolbar
@@ -362,6 +365,7 @@ impl TimelineView {
             activation: None,
             focus: focus::FocusState::default(),
             find: None,
+            unfolded: Default::default(),
             hovered: None,
             key_focus: cx.focus_handle().tab_index(0).tab_stop(true),
             keyboard_row: false,

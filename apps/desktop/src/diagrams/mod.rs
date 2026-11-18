@@ -49,6 +49,14 @@ pub struct DiagramSource {
     pub block_name: Option<String>,
 }
 
+impl DiagramSource {
+    /// Whether a node of this diagram can be referenced (问这里, ⌥-click): a fence
+    /// needs its block index, which a Markdown 产出 does not have.
+    pub fn can_ref(&self) -> bool {
+        !matches!(self.block, DiagramBlock::MarkdownFence { index: None, .. })
+    }
+}
+
 /// The block that holds the diagram.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DiagramBlock {

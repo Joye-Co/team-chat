@@ -28,6 +28,11 @@ pub const GROUP: &str = "g-dev";
 pub const MAIN: &str = "t-v21-alerts";
 pub const SHORT: &str = "t-v21-launch";
 pub const WORST: &str = "t-v21-worst";
+/// Code fences with their language: highlighted, and a long one folded.
+pub const CODE: &str = "t-v21-code";
+pub const CODE_FOLD: &str = "t-v21-code-fold";
+/// A long answer of an AI member, folded to its first blocks.
+pub const LONG_ANSWER: &str = "t-v21-long-answer";
 const ARTIFACT: &str = "art-v21-rules";
 const SHORT_DRAFT: &str = "art-v21-note";
 const SHORT_IMAGES: &str = "art-v21-images";
@@ -56,6 +61,155 @@ pub enum Sample {
     Stop,
     /// [`Sample::Stop`] after 停止 was pressed: both show `正在停止…`.
     Stopping,
+    /// Rust, TypeScript and diff fences in an answer: language names and highlighting.
+    Code,
+    /// A 49-line fence folded to its first 24 lines.
+    CodeFold,
+    /// A long answer folded to its first blocks, with 展开全文.
+    LongAnswer,
+    /// The same answer opened, scrolled to its end: 收起.
+    LongAnswerOpen,
+}
+
+const CODE_ANSWER: &str = "\
+去重放在收消息的入口，改了三处。
+
+服务端按 `(topic, seq)` 判断是不是见过：
+
+```rust
+/// 同一个话题里 seq 只增不减：见过的直接丢掉。
+pub fn accept(&mut self, topic: &str, seq: u64) -> bool {
+    let last = self.last_seq.entry(topic.to_string()).or_insert(0);
+    if seq <= *last {
+        return false; // 重连后补发的旧消息
+    }
+    *last = seq;
+    true
+}
+```
+
+客户端重连时带上自己的位置：
+
+```ts
+export async function resume(socket: Socket, topic: string) {
+  const since = store.lastSeq(topic) ?? 0;
+  // 只要 since 之后的消息
+  await socket.send({ type: \"resume\", topic, since });
+}
+```
+
+对应的改动：
+
+```diff
+--- a/src/net/reconnect.ts
++++ b/src/net/reconnect.ts
+@@ -18,3 +18,4 @@
+ const socket = await connect(url);
+-await socket.send({ type: \"resume\", topic });
++const since = store.lastSeq(topic) ?? 0;
++await socket.send({ type: \"resume\", topic, since });
+```
+";
+
+const CODE_FOLD_ANSWER: &str = "\
+完整的去重模块在这里，测试也一起补了：
+
+```rust
+use std::collections::HashMap;
+
+/// 每个话题记住见过的最大 seq。
+#[derive(Default)]
+pub struct Dedup {
+    last_seq: HashMap<String, u64>,
+    dropped: u64,
+}
+
+impl Dedup {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 同一个话题里 seq 只增不减：见过的直接丢掉。
+    pub fn accept(&mut self, topic: &str, seq: u64) -> bool {
+        let last = self.last_seq.entry(topic.to_string()).or_insert(0);
+        if seq <= *last {
+            self.dropped += 1;
+            return false;
+        }
+        *last = seq;
+        true
+    }
+
+    /// 重连时告诉服务端从哪里开始补。
+    pub fn since(&self, topic: &str) -> u64 {
+        self.last_seq.get(topic).copied().unwrap_or(0)
+    }
+
+    pub fn dropped(&self) -> u64 {
+        self.dropped
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_replayed_message_is_dropped() {
+        let mut d = Dedup::new();
+        assert!(d.accept(\"t1\", 1));
+        assert!(d.accept(\"t1\", 2));
+        assert!(!d.accept(\"t1\", 2));
+        assert_eq!(d.since(\"t1\"), 2);
+        assert_eq!(d.dropped(), 1);
+    }
+}
+```
+";
+
+/// A long answer: more than `BODY_FOLD_OVER` rows of headings, paragraphs, a
+/// list and a table.
+fn long_answer() -> String {
+    let mut out = String::from(
+        "## 结论\n\n重复消息来自重连后的补发：客户端没有告诉服务端自己看到了哪里，服务端就把最近一页全部重发了一遍。修复已经合并，下面是完整的复盘。\n\n\
+## 时间线\n\n\
+| 时间 | 发生了什么 | 谁 |\n|---|---|---|\n\
+| 21:04 | 机房网络抖动，约 300 个连接断开 | Sentry |\n\
+| 21:05 | 客户端自动重连，开始收到重复消息 | 李雪 |\n\
+| 21:20 | 定位到补发逻辑没有带位置 | Forge |\n\
+| 22:10 | 修复合并，灰度 10% | Forge |\n\
+| 23:30 | 全量，重复消息归零 | Sentry |\n\n\
+## 原因\n\n",
+    );
+    for (i, text) in [
+        "重连握手里只有话题 id，没有 seq。服务端不知道客户端的位置，只能按「最近 50 条」补发。",
+        "客户端收到补发后直接追加到列表末尾，没有按 seq 去重，所以每断一次就多一份。",
+        "这条路径在测试里只覆盖了「断线期间没有新消息」的情况，补发为空，问题一直没有暴露。",
+        "灰度环境的连接数太少，网络抖动时受影响的会话不到 5 个，告警阈值没有触发。",
+    ]
+    .iter()
+    .enumerate()
+    {
+        out.push_str(&format!("{}. {text}\n", i + 1));
+    }
+    out.push_str("\n## 修复\n\n");
+    for text in [
+        "握手带上 `since`：客户端把每个话题见过的最大 seq 发给服务端，服务端只补这之后的消息。",
+        "客户端入口去重：同一个话题里 seq 不大于已见最大值的消息直接丢掉，并计数上报。",
+        "补发改成分页：一次最多 200 条，超过的部分客户端继续要，避免重连风暴时一次推太多。",
+    ] {
+        out.push_str(&format!("- {text}\n"));
+    }
+    out.push_str("\n## 验证\n\n");
+    for i in 1..=18 {
+        out.push_str(&format!(
+            "第 {i} 轮压测：断开 {} 个连接，重连后重复消息 0 条，补发延迟中位数 {} 毫秒。\n\n",
+            i * 50,
+            120 + i * 3
+        ));
+    }
+    out.push_str("## 后续\n\n- [x] 补「断线期间有新消息」的测试\n- [x] 灰度告警阈值按比例算\n- [ ] 下周演练一次机房切换\n");
+    out
 }
 
 struct Topics {
@@ -469,11 +623,42 @@ impl TopicSamples {
         messages.insert(MAIN.to_string(), main);
         messages.insert(SHORT.to_string(), short);
         messages.insert(WORST.to_string(), worst);
+        // The code and long-answer topics: a question and one answer each.
+        let mut extra_topics = Vec::new();
+        for (id, title, ask, answer) in [
+            (
+                CODE,
+                "重连去重怎么改的",
+                "重连去重这块怎么改的？给我看下关键代码。",
+                CODE_ANSWER.to_string(),
+            ),
+            (
+                CODE_FOLD,
+                "去重模块的完整代码",
+                "把完整的去重模块贴出来，我过一遍。",
+                CODE_FOLD_ANSWER.to_string(),
+            ),
+            (
+                LONG_ANSWER,
+                "重复消息事故复盘",
+                "把这次重复消息的事故复盘写详细一点，时间线和验证都要。",
+                long_answer(),
+            ),
+        ] {
+            let msgs = vec![
+                message(id, 1, crate::fake::ME, today_at(10, 2, 0), ask),
+                message(id, 2, "m-coder", today_at(10, 6, 0), &answer),
+            ];
+            extra_topics.push(topic(id, title, TopicStatus::Open, "m-coder", &msgs));
+            messages.insert(id.to_string(), msgs);
+        }
+        let mut topics = vec![main_topic, short_topic, worst_topic];
+        topics.extend(extra_topics);
         Arc::new(Self {
             inner,
             offline,
             data: Topics {
-                topics: vec![main_topic, short_topic, worst_topic],
+                topics,
                 messages,
                 drafts: Mutex::new(drafts),
                 runs,
@@ -802,6 +987,9 @@ fn open(
         Sample::Main | Sample::Stop | Sample::Stopping => MAIN,
         Sample::Short => SHORT,
         Sample::Worst => WORST,
+        Sample::Code => CODE,
+        Sample::CodeFold => CODE_FOLD,
+        Sample::LongAnswer | Sample::LongAnswerOpen => LONG_ANSWER,
         Sample::Compose | Sample::React => SHORT,
     };
     services.nav.update(cx, |nav, cx| {
@@ -840,7 +1028,14 @@ fn open(
                 Sample::Short => {
                     timeline.update(cx, |t, cx| t.preview_hover(1, cx));
                 }
-                Sample::Worst | Sample::Stopping => {}
+                Sample::Worst
+                | Sample::Stopping
+                | Sample::Code
+                | Sample::CodeFold
+                | Sample::LongAnswer => {}
+                Sample::LongAnswerOpen => {
+                    timeline.update(cx, |t, cx| t.preview_unfold(1, cx));
+                }
                 // --- v12/fx-topic: the stop scene shows the confirmation
                 // alert that the plan card's 停止… opens.
                 Sample::Stop => {
@@ -902,4 +1097,32 @@ pub fn open_stopping(
 
 pub fn open_react(s: Services, c: Size<Pixels>, cx: &mut App) -> Result<AnyWindowHandle, String> {
     open(s, c, Sample::React, cx)
+}
+
+pub fn open_code(s: Services, c: Size<Pixels>, cx: &mut App) -> Result<AnyWindowHandle, String> {
+    open(s, c, Sample::Code, cx)
+}
+
+pub fn open_code_fold(
+    s: Services,
+    c: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open(s, c, Sample::CodeFold, cx)
+}
+
+pub fn open_long_answer(
+    s: Services,
+    c: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open(s, c, Sample::LongAnswer, cx)
+}
+
+pub fn open_long_answer_open(
+    s: Services,
+    c: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open(s, c, Sample::LongAnswerOpen, cx)
 }

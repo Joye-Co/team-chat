@@ -370,11 +370,74 @@ impl TimelineView {
             });
             // The message a search opened at: its matched words in bold
             // and underlined while the search bar shows (§2.17).
-            let body_source = match (self.search_query_for(&message.id), find_marks) {
-                (Some(query), _) => markdown::mark_query(shown_body, &query),
-                (None, Some((marked, _))) => marked,
-                (None, None) => shown_body.to_string(),
+            // A long finished answer of an AI member shows its first blocks and a
+            // 展开全文 row. It is decided from the text, before layout; my own
+            // messages, a streaming body and a row a search, a reference jump or
+            // ⌘F points into are never folded.
+            let fold_at = (!message.streaming
+                && author.as_ref().is_some_and(Member::is_bot)
+                && self.me.as_deref() != Some(message.author_id.as_str()))
+            .then(|| markdown::fold::body_fold_at(shown_body))
+            .flatten();
+            let search_query = self.search_query_for(&message.id);
+            if fold_at.is_some()
+                && !self.unfolded.contains(key)
+                && (search_query.is_some()
+                    || find_marks.is_some()
+                    || self.highlight_alpha(key) > 0.)
+            {
+                self.unfolded.insert(key.to_string());
+            }
+            let folded = fold_at.filter(|_| !self.unfolded.contains(key));
+            let body_source = match (search_query, find_marks, folded) {
+                (Some(query), _, _) => markdown::mark_query(shown_body, &query),
+                (None, Some((marked, _)), _) => marked,
+                (None, None, Some(at)) => shown_body[..at].to_string(),
+                (None, None, None) => shown_body.to_string(),
             };
+            let fold_row = fold_at.map(|at| {
+                let label = match folded {
+                    Some(_) => crate::copy::fill(
+                        t::BODY_EXPAND,
+                        &[(
+                            "m",
+                            &markdown::fold::reading_minutes(&shown_body[at..]).to_string(),
+                        )],
+                    ),
+                    None => t::BODY_COLLAPSE.to_string(),
+                };
+                let open = folded.is_some();
+                let row_key = key.to_string();
+                div().pt(space::S4).flex().child(
+                    ui::native::push_button(
+                        ElementId::Name(format!("fold-body-{key}").into()),
+                        label,
+                        ui::native::PushStyle::Ghost,
+                        ui::native::PushSize::Small,
+                        cx,
+                    )
+                    // The text lines up with the body: the button's padding hangs
+                    // into the gutter.
+                    .ml(-space::S12)
+                    .icon(ui::icons::labeled_button_sym(
+                        if open {
+                            Sym::ChevronDown
+                        } else {
+                            Sym::ChevronUp
+                        },
+                        ui::SymSize::INLINE,
+                    ))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if open {
+                            this.unfolded.insert(row_key.clone());
+                        } else {
+                            this.unfolded.remove(&row_key);
+                        }
+                        this.remeasure_key(&row_key);
+                        cx.notify();
+                    })),
+                )
+            });
             let (view, inline) = markdown::message_body_refs(
                 ElementId::Name(format!("body-{key}").into()),
                 body_source,
@@ -395,10 +458,20 @@ impl TimelineView {
             // F15 dir auto: a body whose first strong letter is right to
             // left (Arabic, Hebrew) aligns to the right.
             let view = view.w_full().text_color(colors.text_1);
-            Some(if crate::markdown::starts_rtl(&message.body) {
+            let view = if crate::markdown::starts_rtl(&message.body) {
                 view.text_right().into_any_element()
             } else {
                 view.into_any_element()
+            };
+            Some(match fold_row {
+                Some(row) => div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .child(view)
+                    .child(row)
+                    .into_any_element(),
+                None => view,
             })
         };
         // Sending (§7.5, §12): after 400 ms the body dims to 60 % with a
@@ -1594,6 +1667,16 @@ impl TimelineView {
     }
 
     /// Shows the hover toolbar on row `ix` (screenshot scenes).
+    /// Scene: the long answer of message `ix` shown whole.
+    pub fn preview_unfold(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if let Some(m) = self.messages.get(ix) {
+            let key = model::key(m).to_string();
+            self.unfolded.insert(key.clone());
+            self.remeasure_key(&key);
+            cx.notify();
+        }
+    }
+
     pub fn preview_hover(&mut self, ix: usize, cx: &mut Context<Self>) {
         self.hovered = self.messages.get(ix).map(|m| model::key(m).to_string());
         cx.notify();
