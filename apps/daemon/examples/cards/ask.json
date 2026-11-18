@@ -1,0 +1,24 @@
+{
+  "v": 2,
+  "rev": 1,
+  "intent": "ask",
+  "title": "选一个发布时间",
+  "summary": "两个时间都赶得上，周四更稳。",
+  "fallback": "选一个发布时间：周四上午（推荐）或周五下午。",
+  "ask": { "from": ["requester"] },
+  "blocks": [
+    {
+      "type": "decision",
+      "id": "when",
+      "label": "什么时候发布？",
+      "options": [
+        { "id": "thu", "label": "周四上午", "detail": "留一天观察", "recommended": true },
+        { "id": "fri", "label": "周五下午", "detail": "多一天测试" }
+      ]
+    }
+  ],
+  "actions": [
+    { "id": "ok", "label": "确定", "style": "primary", "inputs": ["when"] },
+    { "id": "later", "label": "先不定", "kind": "cancel" }
+  ]
+}

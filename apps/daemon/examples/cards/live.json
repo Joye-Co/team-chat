@@ -1,0 +1,30 @@
+{
+  "v": 2,
+  "catalog": "tc.card/2.1",
+  "rev": 1,
+  "intent": "info",
+  "title": "各渠道转化率",
+  "summary": "点一根柱子看这个渠道的明细。",
+  "fallback": "各渠道转化率：搜索 4.2%，群内邀请 9.8%，广告 1.6%。",
+  "blocks": [
+    {
+      "type": "chart",
+      "id": "rate",
+      "kind": "bar",
+      "unit": "%",
+      "x": ["搜索", "群内邀请", "广告"],
+      "series": [{ "id": "conv", "name": "转化率", "values": [4.2, 9.8, 1.6] }],
+      "events": ["chart.select", "chart.clear"]
+    },
+    {
+      "type": "buttons",
+      "id": "more",
+      "fallbackText": "按钮：换成上个月 / 导出明细",
+      "buttons": [
+        { "id": "prev", "label": "换成上个月" },
+        { "id": "export", "label": "导出明细" }
+      ],
+      "events": ["button.press"]
+    }
+  ]
+}

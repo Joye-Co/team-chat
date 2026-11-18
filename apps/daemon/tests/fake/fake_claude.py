@@ -12,7 +12,7 @@ process group);
 "chatrun" runs `chat-run card patch` from PATH and writes its exit code, output and the socket's
 mode to chatrun-<n>.json; "artifact" writes page/index.html and page/app.js and runs
 `chat-run artifact create --title 看板 --dir page`, writing its result to chatrun-<n>.json;
-"chatcard" reads `chat-run card schema`, posts a card built from it with `chat-run card post`,
+"chatcard" reads `chat-run card schema --full`, posts a card built from it with `chat-run card post`,
 posts it again (a retry: the idempotency key gives the same message), patches the posted card
 with `chat-run card patch` at its rev and writes each answer to chatcard-<n>.json;
 "gated" calls the Bash tool with `gh pr merge 12 --squash` and `ls` ("gated twice": and
@@ -181,6 +181,9 @@ while True:
     # The daemon's hand-back note after a take-over is no request ("changes" has "hang").
     if text.startswith("[team-chat] A person held"):
         cue = ""
+    # The line after an event envelope says how to answer it; it is no request either
+    # ("Nothing to change" has "hang", "artifact data" has "artifact").
+    cue = re.split(r"</[a-z]+-event>\n", cue, maxsplit=1)[0]
     session.write(json.dumps({"type": "user", "text": text}) + "\n"); session.flush()
     with open(os.path.join(rec, "prompts.jsonl"), "a") as pf:
         pf.write(json.dumps({"pid": os.getpid(), "sid": sid, "n": n + 1, "text": text}) + "\n")
@@ -304,8 +307,8 @@ while True:
             except ValueError:
                 v = None
             return {"code": r.returncode, "out": v, "err": r.stderr[-400:]}
-        schema = run("card", "schema")["out"] or {}
-        kinds = [b["properties"]["type"]["const"] for b in schema.get("properties", {}).get("blocks", {}).get("items", {}).get("oneOf", [])]
+        schema = run("card", "schema", "--full")["out"] or {}
+        kinds = [b["$ref"].rsplit("/", 1)[-1] for b in schema.get("$defs", {}).get("block", {}).get("oneOf", [])]
         card = {"v": 2, "rev": 1, "title": "chat-run card", "fallback": "chat-run card", "intent": "working", "blocks": [{"type": kinds[0], "id": "note", "text": "working"}]}
         card = {k: v for k, v in card.items() if k in schema.get("properties", {})}
         assert all(k in card for k in schema.get("required", [])), schema.get("required")

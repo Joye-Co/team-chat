@@ -55,7 +55,11 @@ export const DECIDE_TOOL: ToolSpec = {
         properties: {
           goal: { type: "string", description: "What to achieve, in one or two sentences, with the requester's intent." },
           doneWhen: { type: "array", items: { type: "string" }, description: "Checks that show the work is done (tests pass, PR open, file delivered…)." },
-          notes: { type: "string", description: "What the executor must know: constraints, decisions, message ids (m …) and file ids (f …) worth reading." },
+          notes: {
+            type: "string",
+            description:
+              "What the executor must know: constraints, decisions, message ids (m …) and file ids (f …) worth reading, and the form the result should take when the request implies one (a choice card, a data card, a 产出 page, a page people fill in together).",
+          },
         },
         required: ["goal"],
       },
@@ -93,7 +97,7 @@ export function systemPrompt(i: Pick<DecideInput, "botName" | "role" | "memory">
     "- dispatch: anything that needs the repository, files, commands, the web, a change, a check or a deliverable. Write the brief so the executor can start without rereading the whole topic.",
     "- ask: the request cannot be started as it is (what or where is unclear) and the topic does not answer it. Ask one short question.",
     "- skip: nothing for this member to do (the message is for someone else, or needs no answer).",
-    "When unsure between reply and dispatch, dispatch. Write replies short, in the language of the request, as the member (not as a front desk).",
+    "When unsure between reply and dispatch, dispatch. Write replies short, in the language of the request, as the member (not as a front desk); a `mermaid` fence in a reply is drawn as a diagram.",
     ...(i.memory ? ["", i.memory] : []),
   ].join("\n");
 }

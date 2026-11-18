@@ -1,0 +1,52 @@
+{
+  "kind": "CardV2",
+  "valid": true,
+  "description": "chat-run card example review (apps/daemon/examples/cards/review.json)",
+  "value": {
+    "v": 2,
+    "rev": 1,
+    "intent": "ask",
+    "title": "合并前看一眼：重试次数从 3 改成 5",
+    "fallback": "重试次数从 3 改成 5（src/retry.ts），CI 已通过。合并吗？",
+    "ask": {
+      "from": [
+        "requester"
+      ]
+    },
+    "blocks": [
+      {
+        "type": "text",
+        "id": "why",
+        "text": "上游接口高峰期偶尔超时，**3 次不够**。只改了这一个常量。"
+      },
+      {
+        "type": "diff",
+        "id": "change",
+        "path": "src/retry.ts",
+        "text": "@@ -12,3 +12,3 @@\n export function retry(fn) {\n-  const max = 3;\n+  const max = 5;\n",
+        "additions": 1,
+        "deletions": 1
+      },
+      {
+        "type": "evidence",
+        "id": "ci",
+        "label": "CI 通过",
+        "state": "pass",
+        "url": "https://example.com/ci/1024"
+      }
+    ],
+    "actions": [
+      {
+        "id": "approve",
+        "label": "合并",
+        "style": "primary",
+        "role": "approve"
+      },
+      {
+        "id": "reject",
+        "label": "先别合",
+        "kind": "reject"
+      }
+    ]
+  }
+}

@@ -2,7 +2,7 @@
 // decided by one forced tool call before it becomes a run. Provider calls go to a fake fetch.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { jsonIn } from "../src/aiservice/tools";
-import { MIN_CONFIDENCE, settle } from "../src/agent/frontdesk";
+import { DECIDE_TOOL, MIN_CONFIDENCE, settle, systemPrompt } from "../src/agent/frontdesk";
 import { Daemon, mention, world } from "./daemon";
 import { SELF } from "cloudflare:test";
 import { BASE, Client, api, clientMsgId, waitUntil } from "./helpers";
@@ -42,6 +42,15 @@ async function aiOn(token: string): Promise<void> {
 }
 
 describe("front desk rules", () => {
+  it("names the form of the result in the work order and knows that a mermaid fence is drawn", () => {
+    const brief = (DECIDE_TOOL.schema as any).properties.brief.properties;
+    expect(brief.notes.description).toContain("the form the result should take when the request implies one (a choice card, a data card, a 产出 page, a page people fill in together)");
+    const system = systemPrompt({ botName: "dev" });
+    expect(system).toContain("a `mermaid` fence in a reply is drawn as a diagram");
+    // The reply rule is unchanged: what moves a request from reply to dispatch is decided by the replay.
+    expect(system).toContain("- reply: conversation, thanks, or a question you can answer well from the topic and general knowledge alone.");
+  });
+
   it("falls back to a run when the answer is invalid, empty or unsure", () => {
     expect(settle({ action: "reply", reason: "hi", confidence: 0.9, reply: "你好" }).decision.action).toBe("reply");
     expect(settle({ action: "reply", reason: "x", confidence: MIN_CONFIDENCE - 0.1, reply: "maybe" })).toMatchObject({ decision: { action: "dispatch" }, fallback: "low confidence" });

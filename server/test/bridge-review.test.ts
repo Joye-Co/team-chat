@@ -246,6 +246,18 @@ describe("chat-run outputs", () => {
     expect(d2, JSON.stringify(d2)).toMatchObject({ ok: true, result: { dataRev: 2 } });
     const data = await api(`/v1/artifacts/${artifactId}/versions/1/data`, { token: w.human.token });
     expect(data.body).toMatchObject({ data: { n: 2 }, dataRev: 2 });
+    // The run reads the page's current data back (`chat-run artifact data` without --file), so
+    // it can change a shared state it did not keep from an earlier turn.
+    const read = async (q: string, id = artifactId) => {
+      const r = await SELF.fetch(`${BASE}/v1/machine/runs/${r2.runId}/artifacts/${id}/data${q}`, { headers: { authorization: `Bearer ${w.machineToken}` } });
+      return { status: r.status, body: (await r.json()) as any };
+    };
+    expect(await read("?version=1")).toMatchObject({ status: 200, body: { data: { n: 2 }, dataRev: 2 } });
+    expect((await read("")).status).toBe(400);
+    expect((await read("?version=9")).status).toBe(404);
+    expect((await read("?version=1", "a/b")).status).toBe(404);
+    expect((await read("?version=1", "NOSUCHARTIFACT")).status).toBe(404);
+    expect((await SELF.fetch(`${BASE}/v1/machine/runs/${r2.runId}/artifacts/${artifactId}/data?version=1`)).status).toBe(401);
     for (const x of [c, cb, d]) x.close();
   });
 

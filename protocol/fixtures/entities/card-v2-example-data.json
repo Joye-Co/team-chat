@@ -1,0 +1,81 @@
+{
+  "kind": "CardV2",
+  "valid": true,
+  "description": "chat-run card example data (apps/daemon/examples/cards/data.json)",
+  "value": {
+    "v": 2,
+    "rev": 1,
+    "intent": "info",
+    "title": "上周新增用户",
+    "summary": "比前一周多 18%，主要来自群内邀请。",
+    "fallback": "上周新增 1284 人，比前一周多 196 人；群内邀请占 48%。",
+    "blocks": [
+      {
+        "type": "metric",
+        "id": "total",
+        "label": "新增用户",
+        "value": 1284,
+        "unit": "人",
+        "delta": 196,
+        "better": "up"
+      },
+      {
+        "type": "chart",
+        "id": "daily",
+        "kind": "bar",
+        "label": "每天新增",
+        "unit": "人",
+        "x": [
+          "周一",
+          "周二",
+          "周三",
+          "周四",
+          "周五",
+          "周六",
+          "周日"
+        ],
+        "series": [
+          {
+            "name": "新增",
+            "values": [
+              150,
+              172,
+              168,
+              201,
+              230,
+              190,
+              173
+            ]
+          }
+        ],
+        "summary": "周五最高，230 人。"
+      },
+      {
+        "type": "table",
+        "id": "sources",
+        "columns": [
+          "来源",
+          "人数",
+          "占比"
+        ],
+        "rows": [
+          [
+            "群内邀请",
+            "612",
+            "48%"
+          ],
+          [
+            "搜索",
+            "398",
+            "31%"
+          ],
+          [
+            "其他",
+            "274",
+            "21%"
+          ]
+        ]
+      }
+    ]
+  }
+}
