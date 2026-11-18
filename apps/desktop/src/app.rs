@@ -912,10 +912,11 @@ impl RootView {
             ),
             cx.observe(&services.nav, |_, _, cx| cx.notify()),
         ];
-        // Alt+Tab is not a tap of Alt (the menus' key, WINDOWS.md §2).
+        // Alt+Tab is not a tap of Alt (the menus' key, WINDOWS.md §2), and neither is the
+        // Alt that GPUI presses to bring this window to the front.
         #[cfg(not(target_os = "macos"))]
         subscriptions.push(cx.observe_window_activation(window, |_, _, cx| {
-            crate::views::nav::menus::interrupt_alt_tap(cx)
+            crate::views::nav::menus::window_activation_changed(cx)
         }));
         // App-level banners (connection, update).
         let banner = cx.new(|cx| ConnectionBanner::new(services.clone(), cx));

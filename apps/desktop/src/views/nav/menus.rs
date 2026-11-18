@@ -300,30 +300,57 @@ fn toggle_window_menu_bar(window: &mut gpui::Window, cx: &mut App) {
     });
 }
 
-/// A tap of the Alt key by itself: pressed with no other modifier down and released with
-/// nothing between. Any key, mouse button or other modifier in between is a shortcut or
-/// a drag (Alt+←, Ctrl+Alt+F, AltGr, Alt+Tab, an Alt click), never a tap; neither is Alt
-/// held over a part of a message, which marks it for 引用提问 (`with_menu_bar_key`).
+/// The shortest time a person holds Alt in a tap. GPUI's `activate_window` on Windows
+/// presses and releases Alt itself (`SendInput`, so that Windows lets the window come to
+/// the front): the two arrive together and are not a tap.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+const ALT_TAP_MIN_HOLD: std::time::Duration = std::time::Duration::from_millis(30);
+
+/// How long after the window changed between active and not an Alt press is not a tap:
+/// the Alt that GPUI presses to bring the window to the front comes in this time.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+const ALT_TAP_QUIET_AFTER_ACTIVATION: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// A tap of the Alt key by itself: pressed with no other modifier down, held for at least
+/// [`ALT_TAP_MIN_HOLD`] and released with nothing between. Any key, mouse button or other
+/// modifier in between is a shortcut or a drag (Alt+←, Ctrl+Alt+F, AltGr, Alt+Tab, an Alt
+/// click), never a tap; neither is Alt held over a part of a message, which marks it for
+/// 引用提问 (`with_menu_bar_key`), nor the Alt GPUI presses when the app activates a window.
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 #[derive(Default)]
 struct AltTap {
     last: gpui::Modifiers,
-    armed: bool,
+    /// When the Alt press that may become a tap came.
+    pressed_at: Option<std::time::Instant>,
+    /// No press counts before this time ([`ALT_TAP_QUIET_AFTER_ACTIVATION`]).
+    quiet_until: Option<std::time::Instant>,
 }
 
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 impl AltTap {
-    /// Takes the modifiers now down; true when this change ends a tap.
-    fn modifiers_changed(&mut self, now: gpui::Modifiers) -> bool {
-        let tapped = self.armed && now == gpui::Modifiers::none();
-        self.armed = now == gpui::Modifiers::alt() && self.last == gpui::Modifiers::none();
+    /// Takes the modifiers now down and the time; true when this change ends a tap.
+    fn modifiers_changed(&mut self, now: gpui::Modifiers, at: std::time::Instant) -> bool {
+        let tapped = now == gpui::Modifiers::none()
+            && self
+                .pressed_at
+                .is_some_and(|pressed| at.duration_since(pressed) >= ALT_TAP_MIN_HOLD);
+        let quiet = self.quiet_until.is_some_and(|until| at < until);
+        self.pressed_at =
+            (now == gpui::Modifiers::alt() && self.last == gpui::Modifiers::none() && !quiet)
+                .then_some(at);
         self.last = now;
         tapped
     }
 
-    /// A key or a mouse button went down, or the window changed between active and not.
+    /// A key or a mouse button went down.
     fn interrupt(&mut self) {
-        self.armed = false;
+        self.pressed_at = None;
+    }
+
+    /// The window changed between active and not.
+    fn activation_changed(&mut self, at: std::time::Instant) {
+        self.pressed_at = None;
+        self.quiet_until = Some(at + ALT_TAP_QUIET_AFTER_ACTIVATION);
     }
 }
 
@@ -334,10 +361,19 @@ struct AltTapState(AltTap);
 #[cfg(not(target_os = "macos"))]
 impl gpui::Global for AltTapState {}
 
-/// The Alt tap is over: the main window changed between active and not (Alt+Tab).
+/// The Alt tap is over: a key or a mouse button went down.
 #[cfg(not(target_os = "macos"))]
-pub fn interrupt_alt_tap(cx: &mut App) {
+fn interrupt_alt_tap(cx: &mut App) {
     cx.default_global::<AltTapState>().0.interrupt();
+}
+
+/// The main window changed between active and not: an Alt tap is over (Alt+Tab), and the
+/// Alt that GPUI presses to bring a window to the front is not one.
+#[cfg(not(target_os = "macos"))]
+pub fn window_activation_changed(cx: &mut App) {
+    cx.default_global::<AltTapState>()
+        .0
+        .activation_changed(std::time::Instant::now());
 }
 
 /// Wraps the main window's content so that a tap of Alt opens the menus
@@ -351,7 +387,8 @@ pub fn with_menu_bar_key(content: impl gpui::IntoElement) -> gpui::AnyElement {
             // Alt held over a part of a message marks it for 引用提问: not the menus' key.
             let marking = crate::views::refs::affordance::pointer_on_part(cx);
             let tap = &mut cx.default_global::<AltTapState>().0;
-            let tapped = tap.modifiers_changed(event.modifiers) && !marking;
+            let tapped =
+                tap.modifiers_changed(event.modifiers, std::time::Instant::now()) && !marking;
             if marking {
                 tap.interrupt();
             }
@@ -922,11 +959,12 @@ mod tests {
         }
     }
 
-    /// The menus' key on Windows: only Alt pressed alone and released with nothing
-    /// between is a tap.
+    /// The menus' key on Windows: only Alt pressed alone, held as long as a person holds a
+    /// key, and released with nothing between is a tap.
     #[test]
     fn only_a_bare_alt_press_and_release_is_a_tap() {
         use gpui::Modifiers;
+        use std::time::{Duration, Instant};
         let none = Modifiers::none();
         let alt = Modifiers::alt();
         let ctrl_alt = Modifiers {
@@ -934,11 +972,15 @@ mod tests {
             alt: true,
             ..none
         };
+        let start = Instant::now();
+        // One change every 100 ms.
+        let at = |step: usize| start + Duration::from_millis(100 * step as u64);
         let changes = |steps: &[Modifiers]| {
             let mut tap = AltTap::default();
             steps
                 .iter()
-                .map(|step| tap.modifiers_changed(*step))
+                .enumerate()
+                .map(|(ix, step)| tap.modifiers_changed(*step, at(ix)))
                 .collect::<Vec<_>>()
         };
         assert_eq!(changes(&[alt, none]), [false, true]);
@@ -951,14 +993,32 @@ mod tests {
             [false; 4]
         );
         assert_eq!(changes(&[Modifiers::shift(), none]), [false; 2]);
-        // Alt+← (a key between), an Alt click, Alt+Tab (the window stops being active).
+        // Alt+← (a key between) and an Alt click.
         let mut tap = AltTap::default();
-        assert!(!tap.modifiers_changed(alt));
+        assert!(!tap.modifiers_changed(alt, at(0)));
         tap.interrupt();
-        assert!(!tap.modifiers_changed(none));
+        assert!(!tap.modifiers_changed(none, at(1)));
         // The next tap counts again.
-        assert!(!tap.modifiers_changed(alt));
-        assert!(tap.modifiers_changed(none));
+        assert!(!tap.modifiers_changed(alt, at(2)));
+        assert!(tap.modifiers_changed(none, at(3)));
+        // Alt+Tab: the window stops being active between the press and the release.
+        assert!(!tap.modifiers_changed(alt, at(4)));
+        tap.activation_changed(at(5));
+        assert!(!tap.modifiers_changed(none, at(6)));
+        // The Alt GPUI presses and releases at once when the app activates a window:
+        // shorter than a person's tap, on a window that was active already...
+        let mut tap = AltTap::default();
+        assert!(!tap.modifiers_changed(alt, start));
+        assert!(!tap.modifiers_changed(none, start + ALT_TAP_MIN_HOLD / 2));
+        // ...and, however slowly the two arrive, right after the window became active.
+        tap.activation_changed(at(1));
+        let soon = at(1) + ALT_TAP_QUIET_AFTER_ACTIVATION / 2;
+        assert!(!tap.modifiers_changed(alt, soon));
+        assert!(!tap.modifiers_changed(none, soon + ALT_TAP_MIN_HOLD * 2));
+        // A person's tap after that opens the menus.
+        let later = at(1) + ALT_TAP_QUIET_AFTER_ACTIVATION;
+        assert!(!tap.modifiers_changed(alt, later));
+        assert!(tap.modifiers_changed(none, later + ALT_TAP_MIN_HOLD));
     }
 
     /// The menu bar's part of F10 and the Alt tap (Windows): the first menu opens without
