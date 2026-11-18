@@ -174,6 +174,14 @@ impl AdminView {
                 Some(e) => Alert::new(Sym::Failed, m::USAGE_FAILED)
                     .tone(AlertTone::Destructive)
                     .description(e.clone())
+                    .action(Self::retry_action(
+                        "home-retry",
+                        |v, cx| {
+                            v.usage.error = None;
+                            v.fetch_home(cx);
+                        },
+                        cx,
+                    ))
                     .into_any_element(),
                 None => super::overview::page_skeleton(cx).into_any_element(),
             };

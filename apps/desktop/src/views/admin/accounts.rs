@@ -7,8 +7,8 @@
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, App, AppContext as _, ClipboardItem, Context, Entity, IntoElement,
-    ParentElement as _, SharedString, Styled, Window, div, prelude::FluentBuilder as _,
+    AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _,
+    SharedString, Styled, Window, div, prelude::FluentBuilder as _,
 };
 use gpui_component::input::InputState;
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
@@ -143,6 +143,29 @@ fn admin_error(e: AdminError) -> String {
         AdminError::Conflict => m::MACHINE_UNREACHABLE.to_string(),
         e => crate::views::settings::widgets::error_text(e).to_string(),
     }
+}
+
+/// Asks before deleting the key `name`: its value only lives on the computer, so a delete
+/// cannot be undone.
+pub(super) fn confirm_delete_key(
+    view: Entity<AdminView>,
+    name: String,
+    window: &mut Window,
+    cx: &mut gpui::App,
+) {
+    use crate::views::nav::dialogs;
+    dialogs::destructive_alert(
+        "delete-key",
+        fill(
+            m::KEYS_DELETE_CONFIRM_TITLE,
+            &[("name", &dialogs::short_name(&name))],
+        ),
+        m::KEYS_DELETE_CONFIRM_BODY.to_string(),
+        m::KEYS_DELETE,
+        move |window, cx| view.update(cx, |v, cx| v.delete_key(name.clone(), window, cx)),
+        window,
+        cx,
+    );
 }
 
 /// A valid key name: an environment variable name.
@@ -424,20 +447,32 @@ impl AdminView {
         cx.notify();
     }
 
-    fn delete_key(&mut self, name: String, cx: &mut Context<Self>) {
+    /// Deletes the key `name` on the selected computer; a refusal shows an alert with the
+    /// reason (the list stays as it was).
+    fn delete_key(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.selected.clone() else {
             return;
         };
         let reply = self.services.provider.delete_machine_secret(&id, &name);
-        cx.spawn(async move |this, cx| {
-            let result = answer(reply).await;
-            let _ = this.update(cx, |this, cx| {
-                match result {
-                    Ok(()) => this.acct.notice = Some(m::KEYS_SAVED.into()),
-                    Err(e) => this.acct.secrets_error = Some(admin_error(e)),
-                }
-                cx.notify();
-            });
+        let handle = window.window_handle();
+        cx.spawn(async move |this, cx| match answer(reply).await {
+            Ok(()) => {
+                let _ = this.update(cx, |this, cx| {
+                    this.acct.notice = Some(m::KEYS_DELETED.into());
+                    cx.notify();
+                });
+            }
+            Err(e) => {
+                let _ = handle.update(cx, |_, window, cx| {
+                    crate::views::nav::dialogs::error_alert(
+                        m::KEYS_DELETE_FAILED,
+                        admin_error(e),
+                        |_, _| {},
+                        window,
+                        cx,
+                    )
+                });
+            }
         })
         .detach();
     }
@@ -744,7 +779,7 @@ impl AdminView {
                         cx,
                     )
                     .on_click(move |_, _, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
+                        crate::views::media::parts::copy_text(copy.clone(), m::COPIED, cx)
                     }),
                 )
                 .child(
@@ -835,9 +870,11 @@ impl AdminView {
                                     )
                                     .on_click(
                                         move |_, _, cx| {
-                                            cx.write_to_clipboard(ClipboardItem::new_string(
+                                            crate::views::media::parts::copy_text(
                                                 copy.clone(),
-                                            ))
+                                                m::COPIED,
+                                                cx,
+                                            )
                                         },
                                     ),
                                 ),
@@ -927,6 +964,14 @@ impl AdminView {
                 Some(e) => Alert::new(Sym::Failed, m::KEYS_LOADING_FAILED)
                     .tone(AlertTone::Destructive)
                     .description(e.clone())
+                    .action(Self::retry_action(
+                        "keys-retry",
+                        |v, cx| {
+                            v.acct.secrets_error = None;
+                            v.fetch_secrets(cx);
+                        },
+                        cx,
+                    ))
                     .into_any_element(),
                 None => div()
                     .flex()
@@ -995,9 +1040,8 @@ impl AdminView {
                         }),
                     )
                     .item(
-                        PopupMenuItem::new(m::KEYS_DELETE).on_click(move |_, _, cx| {
-                            let n = del.clone();
-                            view.update(cx, |v, cx| v.delete_key(n, cx))
+                        PopupMenuItem::new(m::KEYS_DELETE).on_click(move |_, window, cx| {
+                            confirm_delete_key(view.clone(), del.clone(), window, cx)
                         }),
                     )
                 });

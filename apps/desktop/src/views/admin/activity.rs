@@ -498,6 +498,15 @@ impl AdminView {
             Alert::new(Sym::Failed, m::ACTIVITY_FAILED)
                 .tone(AlertTone::Destructive)
                 .description(e.clone())
+                .action(Self::retry_action(
+                    "activity-retry",
+                    |v, cx| {
+                        v.activity.error = None;
+                        v.activity.loaded = false;
+                        v.fetch_activity(false, cx);
+                    },
+                    cx,
+                ))
                 .into_any_element()
         } else if !a.loaded {
             div()

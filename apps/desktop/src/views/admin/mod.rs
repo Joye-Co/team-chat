@@ -324,6 +324,11 @@ impl AdminView {
                         | accounts::Page::Usage
                         | accounts::Page::Members => this.fetch_fleet(cx),
                         accounts::Page::Home => this.fetch_home(cx),
+                        // Opened before the first machine list: the keys had no machine
+                        // to read yet, and would stay a skeleton until the next poll.
+                        accounts::Page::Keys if this.acct.secrets.is_none() => {
+                            this.fetch_secrets(cx)
+                        }
                         _ => {}
                     }
                     this.fetch(cx);
@@ -399,6 +404,24 @@ impl AdminView {
     fn retry(&mut self, cx: &mut Context<Self>) {
         self.load = Load::Idle;
         self.refresh(cx);
+    }
+
+    /// The 重试 of a page's load-failure Alert (COMPLETENESS E1). `run` clears the page's
+    /// error, so the skeleton shows, and fetches again.
+    pub(super) fn retry_action(
+        id: &'static str,
+        run: impl Fn(&mut Self, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> gpui_component::button::Button {
+        let view = cx.entity();
+        push_button(id, m::RETRY, PushStyle::Outline, PushSize::Small, cx).on_click(
+            move |_, _, cx| {
+                view.update(cx, |v, cx| {
+                    run(v, cx);
+                    cx.notify();
+                })
+            },
+        )
     }
 
     fn machine(&self) -> Option<&MachineInfo> {
