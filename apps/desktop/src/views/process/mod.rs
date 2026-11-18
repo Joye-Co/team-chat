@@ -607,12 +607,13 @@ impl ProcessView {
                 }
             )
         });
-        let progress = run
-            .status
-            .is_active()
+        // After 停止 is pressed the run is 停止中: the card stops saying it is
+        // at work on a step, as the thread's working card does.
+        let stopping = self.services.provider.run_stopping(&run.id);
+        let progress = (run.status.is_active() && !stopping)
             .then(|| crate::views::topic_page::plan_progress(&run.plan))
             .flatten();
-        let about = if progress.is_some() {
+        let about = if progress.is_some() || stopping {
             None
         } else if run.status.is_active() {
             steps::live_action(&self.process.steps)
@@ -1032,18 +1033,15 @@ fn developer_panel(rows: Vec<(&'static str, String)>, cx: &App) -> AnyElement {
         .collect::<Vec<_>>()
         .join("\n");
     // R2-07, F4: no inner inset, so its values share the one value x of
-    // the facts above; a rule above its header sets it apart.
+    // the facts above. No rules around its header: it is a labelled group
+    // like 步骤 under it, not a table head.
     div()
         .mt(space::S4)
-        .border_t_1()
-        .border_color(n.separator)
         .child(
             div()
                 .h(ui::native::tokens::height::FOOTER_ROW)
                 .flex()
                 .items_center()
-                .border_b_1()
-                .border_color(n.separator)
                 .child(
                     div()
                         .flex_1()

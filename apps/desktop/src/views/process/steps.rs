@@ -110,12 +110,11 @@ fn block(_cx: &App) -> gpui::Div {
 /// breaks stay. `id` is unique within the step list.
 fn mono_box(id: ElementId, text: String, window: &mut Window, cx: &mut App) -> impl IntoElement {
     let k = theme::colors(cx);
-    mono_frame(None, cx).child(mono_scroll(id, text, k.text_1, window, cx))
+    mono_frame(cx).child(mono_scroll(id, text, k.text_1, window, cx))
 }
 
-/// The frame of a code box: 1 px border (tinted red for a failed command), radius 8, the
-/// code fill.
-fn mono_frame(edge: Option<Hsla>, cx: &App) -> gpui::Div {
+/// The frame of a code box: 1 px border, radius 8, the code fill.
+fn mono_frame(cx: &App) -> gpui::Div {
     let k = theme::colors(cx);
     let n = crate::ui::native::native_colors(cx);
     div()
@@ -124,7 +123,7 @@ fn mono_frame(edge: Option<Hsla>, cx: &App) -> gpui::Div {
         .min_w(px(0.))
         .rounded(theme::radius::MD)
         .border_1()
-        .border_color(edge.unwrap_or(n.separator))
+        .border_color(n.separator)
         .bg(k.code_bg)
         .overflow_hidden()
         .flex()
@@ -205,14 +204,14 @@ fn command_box(
     ix: usize,
     command: String,
     output: Option<(String, usize)>,
-    failed: bool,
     window: &mut Window,
     cx: &mut App,
 ) -> impl IntoElement {
     let k = theme::colors(cx);
     let n = crate::ui::native::native_colors(cx);
-    let edge = failed.then(|| n.red.opacity(0.5));
-    mono_frame(edge, cx)
+    // The box keeps the border token when the command failed: the step's
+    // badge and the Alert under it carry the state (§1.3).
+    mono_frame(cx)
         .child(mono_scroll(mono_id(ix, 0), command, k.text_1, window, cx))
         .when_some(output, |el, (out, more)| {
             el.child(
@@ -534,14 +533,7 @@ fn render_step(
             });
             block(cx)
                 .child(header)
-                .child(command_box(
-                    ix,
-                    clip(title, 400),
-                    out,
-                    *ok == Some(false),
-                    window,
-                    cx,
-                ))
+                .child(command_box(ix, clip(title, 400), out, window, cx))
                 .when_some(input.clone().filter(|_| developer), |el, json| {
                     el.child(label(
                         fill(dev::RUN_TOOL_INPUT, &[("json", &clip(&json, 600))]),
@@ -562,6 +554,10 @@ fn render_step(
                     };
                     div()
                         .flex()
+                        // The 12 pt kind sits on the middle of the 13 pt path's
+                        // line (a shared baseline drops the CJK word below
+                        // the Latin path).
+                        .items_center()
                         .gap(space::S8)
                         .child(
                             div()

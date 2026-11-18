@@ -161,10 +161,14 @@ pub fn phase_since(run: &BotRunSummary, phase: RunPhase) -> Option<Millis> {
     }
 }
 
-/// `· 已 12 分钟`, `· 已 2 小时 5 分钟`: how long the phase has lasted.
+/// `· 已 12 分钟`, `· 已 2 小时 5 分钟`, `· 刚刚` in the first minute: how long the phase has
+/// lasted.
 pub fn lasted(since: Millis, now: Millis) -> String {
     let minutes = ((now - since).max(0) / 60_000) as u64;
-    if minutes < 60 {
+    if minutes == 0 {
+        // The first minute reads 刚刚, never `已 0 分钟`.
+        c::LIVE_PHASE_JUST_NOW.to_string()
+    } else if minutes < 60 {
         fill(c::LIVE_PHASE_FOR, &[("n", &minutes.to_string())])
     } else {
         fill(

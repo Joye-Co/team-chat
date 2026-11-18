@@ -51,6 +51,11 @@ pub const DESK_COLUMNS: Columns = Columns {
     actions: Some(gpui::px(200.)),
 };
 
+/// The slot of the answer button inside the actions column: it holds the
+/// longest quick answer (`发布到生产`) and stays reserved in a row with no
+/// answer, so `看看` sits at one x in every row (§2.6, F27).
+const ANSWER_SLOT: gpui::Pixels = gpui::px(100.);
+
 /// The label of a quick answer in a menu: `发布到生产…` when it asks first
 /// (a Mac menu item that opens a dialog ends with `…`). A button shows the
 /// plain label (§2.18: no trailing `…` in button labels).
@@ -215,9 +220,16 @@ pub fn ask_row(
                         div()
                             .flex()
                             .items_center()
-                            .gap(gpui::px(8.))
+                            .gap(crate::ui::native::tokens::space::S8)
                             .child(look)
-                            .children(approve)
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .min_w(ANSWER_SLOT)
+                                    .flex()
+                                    .justify_end()
+                                    .children(approve),
+                            )
                             .into_any_element(),
                     ),
                 )

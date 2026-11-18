@@ -258,20 +258,24 @@ impl SectionTitle {
 impl RenderOnce for SectionTitle {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = native_colors(cx);
+        // The title, its count and the action share one row; the description
+        // runs under it at the full width, so the action never narrows it
+        // into a second line.
         div()
             .w_full()
             .flex()
-            .items_start()
-            .gap(space::S8)
+            .flex_col()
+            .gap(space::S4)
             .child(
                 div()
-                    .flex_1()
-                    .min_w(px(0.))
+                    .w_full()
                     .flex()
-                    .flex_col()
-                    .gap(space::S4)
+                    .items_start()
+                    .gap(space::S8)
                     .child(
                         div()
+                            .flex_1()
+                            .min_w(px(0.))
                             .flex()
                             .items_center()
                             .gap(space::S8)
@@ -284,12 +288,12 @@ impl RenderOnce for SectionTitle {
                             )
                             .children(self.count.map(super::badge::CountPill::new)),
                     )
-                    .children(
-                        self.description
-                            .map(|d| div().n_body().text_color(k.secondary).child(d)),
-                    ),
+                    .children(self.action.map(|a| div().flex_none().child(a))),
             )
-            .children(self.action.map(|a| div().flex_none().child(a)))
+            .children(
+                self.description
+                    .map(|d| div().n_body().text_color(k.secondary).child(d)),
+            )
     }
 }
 

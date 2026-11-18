@@ -246,6 +246,12 @@ impl TimelineView {
             bot.map(|m| crate::ui::avatar::name_beside_avatar(&m.name))
                 .unwrap_or_default(),
         );
+        // `正在做` / `在做` only while the member works: a run that waits for a
+        // computer or a person, or that someone holds, names its step (or
+        // only the member) without claiming work beside a badge that says
+        // otherwise.
+        let at_work =
+            crate::data::run_phase::phase_of(run).0 == crate::data::run_phase::RunPhase::Working;
         // With no plan step, the newest step of its log says what it does now.
         let doing = progress_of
             .and_then(|(_, _, now)| now)
