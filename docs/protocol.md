@@ -2849,7 +2849,7 @@ Rules:
   recently started a run in the topic, and a follow-up without an @ goes to it. Clients show who
   works from `participants` and no longer show one responsible member.
 - A relay starts from a person's message in a topic (not a 群聊) whose first line is `@A note →
-  @B note → @C note` (`→`, `->` or `=>`): 2 to 6 steps, the goal on the second line or after the
+  @B note → @C note` (`→`, `->`, `=>`, `-》` or `=》`): 2 to 6 steps, the goal on the second line or after the
   last @. The message does not go to each mentioned member; the room wakes one step after the
   other. `send` (and `POST /v1/groups/:id/messages`) refuses such a message with `invalid` and
   reason `relay.bad_steps` (a broken arrow line) or `relay.member_unavailable` (with `memberIds`:

@@ -8,8 +8,9 @@ use crate::{
     data::{Member, RelayRefusal},
 };
 
-/// The separators of an order on a message's first line (the server reads the same).
-pub const ARROWS: [&str; 3] = ["→", "->", "=>"];
+/// The separators of an order on a message's first line (the server reads the same). With
+/// Chinese punctuation on, `>` types as `》`.
+pub const ARROWS: [&str; 5] = ["→", "->", "=>", "-》", "=》"];
 
 /// One line above the field, and whether it is an error (the x-circle before it) or a hint (muted).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,13 +57,32 @@ pub fn order_names(text: &str, members: &[Member]) -> Option<Vec<String>> {
     segments.iter().map(|s| step_name(s, members)).collect()
 }
 
-/// The distinct AI members a draft names: picked from the @ list or typed as `@name`.
-pub fn ai_members_named(text: &str, picked: &[String], members: &[Member]) -> usize {
-    members
+/// The names of the distinct AI members a draft names, picked from the @ list or typed as
+/// `@name`: in the order the draft writes them, the ones only picked last. The longest name
+/// wins, as on the server: `@小码2` does not name 小码.
+pub fn ai_members_named(text: &str, picked: &[String], members: &[Member]) -> Vec<String> {
+    let longer_name_at = |at: usize, name: &str| {
+        members.iter().any(|o| {
+            o.name.len() > name.len()
+                && text[at..]
+                    .strip_prefix('@')
+                    .is_some_and(|rest| rest.starts_with(&o.name))
+        })
+    };
+    let mut named: Vec<(usize, String)> = members
         .iter()
         .filter(|m| m.is_bot() && !m.name.is_empty())
-        .filter(|m| picked.contains(&m.id) || text.contains(&format!("@{}", m.name)))
-        .count()
+        .filter_map(|m| {
+            let at = text
+                .match_indices(&format!("@{}", m.name))
+                .map(|(at, _)| at)
+                .find(|&at| !longer_name_at(at, &m.name));
+            (at.is_some() || picked.contains(&m.id))
+                .then(|| (at.unwrap_or(usize::MAX), m.name.clone()))
+        })
+        .collect();
+    named.sort_by_key(|(at, _)| *at);
+    named.into_iter().map(|(_, name)| name).collect()
 }
 
 /// Why the server refused my last message as 按顺序做; `None` for a reason this version
@@ -121,8 +141,11 @@ pub fn relay_line(
             order: true,
         });
     }
-    if !in_chat && ai_members_named(text, picked, members) >= 2 {
-        return hint(c::RELAY_HINT_DISCOVER.to_string());
+    if !in_chat && let [first, second, ..] = &ai_members_named(text, picked, members)[..] {
+        return hint(fill(
+            c::RELAY_HINT_DISCOVER,
+            &[("first", first), ("second", second)],
+        ));
     }
     None
 }
@@ -213,6 +236,11 @@ mod tests {
             order_names("@Code Bot -> @小审 => @小码 收尾", &m),
             Some(vec!["Code Bot".into(), "小审".into(), "小码".into()])
         );
+        // `>` typed with Chinese punctuation on.
+        assert_eq!(
+            order_names("@小码 -》 @小审 =》 @小码 收尾", &m),
+            Some(vec!["小码".into(), "小审".into(), "小码".into()])
+        );
         // An unknown name is still a step (the server says who cannot take it).
         assert_eq!(
             order_names("@小码 → @路人 看看", &m),
@@ -256,7 +284,20 @@ mod tests {
         let m = team();
         assert_eq!(
             relay_line("@小码 和 @小审 一起看看", &[], &m, false, false).map(|l| l.text),
-            Some("想让他们按顺序做？用 → 连起来".into())
+            Some("想让他们按顺序做？用 -> 连起来，比如 @小码 -> @小审".into())
+        );
+        // The example follows the draft's own order.
+        assert_eq!(
+            relay_line("@小审 和 @小码 一起看看", &[], &m, false, false).map(|l| l.text),
+            Some("想让他们按顺序做？用 -> 连起来，比如 @小审 -> @小码".into())
+        );
+        // A longer name is not the shorter name it starts with.
+        let mut similar = team();
+        similar.push(member("d", "小码2", true));
+        assert_eq!(relay_line("@小码2 看看", &[], &similar, false, false), None);
+        assert_eq!(
+            relay_line("@小码2 和 @小审 一起看看", &[], &similar, false, false).map(|l| l.text),
+            Some("想让他们按顺序做？用 -> 连起来，比如 @小码2 -> @小审".into())
         );
         // Picked from the @ list counts too; a person does not.
         assert!(relay_line("看看", &["a".into(), "b".into()], &m, false, false).is_some());

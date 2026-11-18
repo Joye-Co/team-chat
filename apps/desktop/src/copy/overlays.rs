@@ -53,4 +53,6 @@ crate::copy! {
     UPDATE_RESTART = "安装更新",
     UPDATE_READY = "新版本 {version} 已下载好",
     NEW_TOPIC_HAND_TO_MORE = "其他成员",
+    // The 停止 alert of a run that is the current step of a 按顺序做.
+    STOP_MESSAGE_RELAY_STEP = "这个顺序会停在这里，之后可以重试。",
 }

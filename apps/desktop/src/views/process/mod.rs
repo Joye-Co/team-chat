@@ -123,6 +123,17 @@ pub fn stop_run(services: &Services, run: &BotRunSummary, cx: &mut App) {
     let _ = window.update(cx, |_, window, cx| confirm_stop(&s, &r, window, cx));
 }
 
+/// `run_id` is the current step of a running 按顺序做: stopping the run holds the order at
+/// that step, and 重试 goes on from it.
+fn is_live_relay_step(relay: Option<&crate::data::TopicRelay>, run_id: &str) -> bool {
+    relay.is_some_and(|r| {
+        r.state == "running"
+            && r.steps
+                .get(r.current as usize)
+                .is_some_and(|s| s.run_id.as_deref() == Some(run_id))
+    })
+}
+
 /// The 停止 alert in `window`.
 pub fn confirm_stop(services: &Services, run: &BotRunSummary, window: &mut Window, cx: &mut App) {
     let name = services
@@ -130,11 +141,16 @@ pub fn confirm_stop(services: &Services, run: &BotRunSummary, window: &mut Windo
         .member(&run.bot_id)
         .map(|m| m.name)
         .unwrap_or_default();
+    let mut message = fill(o::STOP_MESSAGE, &[("name", &name)]);
+    let topic = services.provider.topic(&run.group_id, &run.topic_id);
+    if topic.is_some_and(|t| is_live_relay_step(t.relay.as_ref(), &run.id)) {
+        message = format!("{message}\n{}", o::STOP_MESSAGE_RELAY_STEP);
+    }
     let (s, r) = (services.clone(), run.clone());
     crate::views::nav::dialogs::destructive_alert(
         "stop-run",
         fill(o::STOP_TITLE, &[("name", &name)]),
-        fill(o::STOP_MESSAGE, &[("name", &name)]),
+        message,
         o::STOP_OK,
         move |_, cx| stop_run_now(&s, &r, cx),
         window,
@@ -1328,6 +1344,33 @@ impl Render for ProcessView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Only the run an order is waiting on holds the order when it stops.
+    #[test]
+    fn only_the_current_step_of_a_running_order_counts() {
+        let step = |run: Option<&str>| crate::data::TopicRelayStep {
+            member_id: "b".into(),
+            note: None,
+            state: "working".into(),
+            run_id: run.map(Into::into),
+        };
+        let mut relay = crate::data::TopicRelay {
+            id: "o".into(),
+            started_by: "me".into(),
+            goal: "g".into(),
+            current: 1,
+            state: "running".into(),
+            reason: None,
+            stopped_by: None,
+            updated_at: 0,
+            steps: vec![step(Some("r1")), step(Some("r2"))],
+        };
+        assert!(is_live_relay_step(Some(&relay), "r2"));
+        assert!(!is_live_relay_step(Some(&relay), "r1"));
+        assert!(!is_live_relay_step(None, "r2"));
+        relay.state = "paused".into();
+        assert!(!is_live_relay_step(Some(&relay), "r2"));
+    }
 
     #[test]
     fn durations_read_naturally() {

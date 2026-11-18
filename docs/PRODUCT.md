@@ -74,13 +74,14 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
 - Words for several AI members in one 话题 and for work that goes from member to member
   (docs/plans/usable/design-relay.zh.md §3.6). Never 接力 as a noun: an order a person writes
   (`@A → @B → @C`) is 按顺序做, and its steps use the closed set of status words above plus 停止:
-  按顺序做：{names}, 第 {k}/{n} 步, 停在 {name}：{reason}, 都做完了, {name} 停止了。要继续，在下面用 → 连起成员, 停止了, 重试, 停止…,
+  按顺序做：{names}, 第 {k}/{n} 步, 停在 {name}：{reason}, 都做完了, {name} 停止了。要继续，在下面再写一条顺序，比如 @{first} -> @{second}, 停止了, 重试, 停止顺序…,
   停止这个顺序？, 正在做的成员会停在现在这一步，后面的步不再开始。, 后面的步不再开始。, 要继续，得再写一条顺序。,
+  这个顺序会停在这里，之后可以重试。,
   没能开始按顺序做：{name} 现在接不了,
   没能停止, 没能重试; {a} 把这件事转交给 {b}, {a} 把一部分分给 {b}, 全部停止, 停止这件事里所有在做的？,
   做完的标准, {b} 做完了，结果已交回 {a}, {b} 没做完：{reason}, 被 {name} 停止; the reasons
   {name} 现在接不了这件事, 等 {name} 手上的做完, 交出次数到上限了, {name} 的代码还没推上去,
-  发起的人已经不在这个群, 没有交到 {name} 手上, 停住了; the composer's 想让他们按顺序做？用 → 连起来,
+  发起的人已经不在这个群, 没有交到 {name} 手上, 停住了; the composer's 想让他们按顺序做？用 -> 连起来，比如 @{first} -> @{second},
   按顺序做要在话题里用, 这个话题已经在按顺序做，先停止它, 按顺序做要写 2 到 6 步，同一个成员不能挨着;
   and in 详情 → 成员 在做 and 参与过. Several members can work in a 话题 at once or one after
   another; no member is the one responsible for a 话题.
