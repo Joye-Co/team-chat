@@ -96,6 +96,13 @@ jobs:
               - scripts/previous-windows-installer.sh
               - scripts/check-logs-for-servers.sh
               - scripts/test-release-scripts.sh
+              # test-release-scripts.sh checks the --help and the option errors of these too.
+              - scripts/build-dmg.sh
+              - scripts/build-windows-installer.sh
+              - scripts/test-dmg.sh
+              - scripts/dev-desktop.sh
+              - scripts/github-webhook.sh
+              - scripts/test-real-cli.sh
               - scripts/setup-server.sh
               - scripts/test-setup-server.sh
               - CHANGELOG.md
