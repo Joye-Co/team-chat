@@ -65,6 +65,16 @@ pub fn render(
                 .children(actions.iter().enumerate().map(|(ix, action)| {
                     option_row(ix, action, message, provider, sending, mine.as_deref(), cx)
                 }))
+                // A press answers at once: said before the first press, and under the rows
+                // so they stay where they are when the line goes.
+                .when(mine.is_none() && sending.is_none(), |d| {
+                    d.child(
+                        div()
+                            .t_meta()
+                            .text_color(colors.text_3)
+                            .child(crate::copy::cards_v2::STRIP_WAITS_QUICK),
+                    )
+                })
                 .into_any_element(),
         );
     } else if !actions.is_empty() {
