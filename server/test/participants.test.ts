@@ -143,10 +143,10 @@ describe("several AI members in one topic", () => {
     // Each acknowledges the request.
     await waitUntil(() => c.events().filter((e) => e.type === "reaction.changed" && e.data.messageId === sent.message.id && e.data.emoji === ACK_EMOJI).length === 2);
     await waitUntil(() => lastParticipants(c, topicId)?.length === 2, 5000, "two participants");
-    expect(lastParticipants(c, topicId)?.map((p) => [p.memberId, p.working])).toEqual([
-      [w.bot.id, true],
-      [ops.id, true],
-    ]);
+    // The list goes by who started first, and these two start at the same moment.
+    const listed = lastParticipants(c, topicId)?.map((p) => [p.memberId, p.working]);
+    expect(listed).toHaveLength(2);
+    expect(listed).toEqual(expect.arrayContaining([[w.bot.id, true], [ops.id, true]]));
     d.send({ t: "run.accept", runId: a.runId });
     d.send({ t: "run.accept", runId: b.runId });
     // One done, one failed at the same time: the topic is stuck, not done.
