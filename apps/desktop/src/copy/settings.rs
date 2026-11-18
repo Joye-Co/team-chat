@@ -132,6 +132,8 @@ crate::copy! {
     RUNNER_REPO_PLACEHOLDER = "仓库地址，或电脑上的文件夹",
     RUNNER_BRANCH = "基础分支",
     RUNNER_BRANCH_PLACEHOLDER = "例如：main",
+    BOT_NO_COMPUTER = "还没有连接的电脑。先添加一台，AI 成员才有地方干活。",
+    BOT_NO_COMPUTER_OPEN = "去添加电脑",
 
     // 电脑
     MACHINES = "电脑",

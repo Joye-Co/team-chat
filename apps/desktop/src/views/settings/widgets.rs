@@ -762,6 +762,42 @@ pub fn open_sheet(
     });
 }
 
+/// The step of a sheet that shows what was made once (a code, a command, a
+/// credential) with 完成 as its only button. The form's fields are gone by
+/// then, and the focus with them: the step takes the focus itself, so the
+/// sheet's keys still reach it (Return is 完成).
+pub struct DoneStep {
+    focus: gpui::FocusHandle,
+    taken: bool,
+}
+
+impl DoneStep {
+    pub fn new(cx: &mut App) -> Self {
+        Self {
+            focus: cx.focus_handle(),
+            taken: false,
+        }
+    }
+
+    /// The step around its `layout`; the first time it draws it takes the focus.
+    pub fn show(
+        &mut self,
+        layout: impl IntoElement,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> AnyElement {
+        use gpui::InteractiveElement as _;
+        if !std::mem::replace(&mut self.taken, true) {
+            self.focus.focus(window, cx);
+        }
+        div()
+            .w_full()
+            .track_focus(&self.focus)
+            .child(layout)
+            .into_any_element()
+    }
+}
+
 /// Opens a Tahoe alert (§7.2) on the settings window: 260 wide, attached
 /// under the toolbar like a sheet. `build` returns the `AlertLayout`.
 pub fn open_alert(

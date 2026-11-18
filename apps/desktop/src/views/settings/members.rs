@@ -1212,6 +1212,7 @@ pub struct InviteForm {
     kind: MemberKind,
     status: Status,
     created: Option<InviteCreated>,
+    done: widgets::DoneStep,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -1234,6 +1235,7 @@ impl InviteForm {
             kind: MemberKind::Human,
             status: Status::Idle,
             created: None,
+            done: widgets::DoneStep::new(cx),
             _subscriptions: subscriptions,
         }
     }
@@ -1302,7 +1304,7 @@ impl InviteForm {
 impl Render for InviteForm {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if let Some(created) = &self.created {
-            return SheetLayout::new(s::INVITE_CREATED)
+            let layout = SheetLayout::new(s::INVITE_CREATED)
                 .explanation(s::SHOWN_ONCE)
                 .body(secret_row(
                     "invite-code",
@@ -1324,8 +1326,8 @@ impl Render for InviteForm {
                     cx,
                 ))
                 .body(widgets::quiet(s::INVITE_DOWNLOAD_HINT, cx))
-                .buttons([done_button("invite-done", cx)])
-                .into_any_element();
+                .buttons([done_button("invite-done", cx)]);
+            return self.done.show(layout, window, cx);
         }
         let busy = self.status.busy();
         let (off, name_err, role_err) = name_role_problem(
@@ -1394,12 +1396,15 @@ impl Render for InviteForm {
 }
 
 /// Opens a form sheet holding `form`; Return runs `submit`, the first field
-/// takes the focus once.
+/// takes the focus once. On the step that shows what was `created` once
+/// (a code, a credential) Return is 完成, the default button there, and Esc
+/// does not close the sheet: only 完成 throws the once-only text away.
 fn open_form_sheet<V: Render>(
     form: Entity<V>,
     width: SheetWidth,
     floor: gpui::Pixels,
     first_field: impl Fn(&V) -> Option<Entity<InputState>> + 'static,
+    created: impl Fn(&V) -> bool + Clone + 'static,
     submit: impl Fn(&mut V, &mut Context<V>) + Clone + 'static,
     window: &mut Window,
     cx: &mut App,
@@ -1411,11 +1416,18 @@ fn open_form_sheet<V: Render>(
         {
             field.read(cx).focus_handle(cx).focus(window, cx);
         }
-        let (ok, submit) = (form.clone(), submit.clone());
+        let (ok, submit, on_created) = (form.clone(), submit.clone(), created.clone());
+        // Esc is refused on the created step (the sheet keeps its keys:
+        // without them Return would be dead too).
+        let (kept, is_created) = (form.clone(), created.clone());
         dialog
+            .on_cancel(move |_, _, cx| !is_created(kept.read(cx)))
             .on_ok(move |_, _, cx| {
-                ok.update(cx, |f, cx| submit(f, cx));
-                false
+                ok.update(cx, |f, cx| {
+                    let done = on_created(f);
+                    submit(f, cx);
+                    done
+                })
             })
             .child(form.clone())
     });
@@ -1428,6 +1440,7 @@ pub fn open_invite(services: Services, window: &mut Window, cx: &mut App) -> Ent
         SheetWidth::Form,
         px(470.),
         |f| (f.created.is_none()).then(|| f.name.clone()),
+        |f| f.created.is_some(),
         |f, cx| f.submit(cx),
         window,
         cx,
@@ -1767,6 +1780,10 @@ pub struct BotForm {
     branch: Entity<InputState>,
     /// The team's computers, for 在哪台电脑干活 and 运行方式.
     machines: Vec<MachineInfo>,
+    /// The server answered with the list of computers (it may be empty).
+    machines_loaded: bool,
+    /// A screenshot scene set the computers: the server's list does not replace them.
+    machines_fixed: bool,
     /// The sign-ins of each online computer's CLIs (its monitor), by computer id: 运行方式
     /// marks the ones that are not signed in.
     logins: std::collections::HashMap<String, Vec<chat_core::proto::monitor::MonitorCli>>,
@@ -1790,6 +1807,7 @@ pub struct BotForm {
     character: Option<CharacterId>,
     status: Status,
     created: Option<BotCreated>,
+    done: widgets::DoneStep,
     /// Set when the sheet edits an existing AI member.
     editing: Option<BotEditing>,
     /// The window the sheet is in: a saved edit closes it.
@@ -1804,7 +1822,11 @@ impl BotForm {
         cx.spawn(async move |this, cx| {
             if let Ok(list) = answer(machines).await {
                 let _ = this.update(cx, |this, cx| {
+                    if this.machines_fixed {
+                        return;
+                    }
                     this.machines = list;
+                    this.machines_loaded = true;
                     this.default_to_this_computer();
                     this.load_logins(cx);
                     cx.notify();
@@ -1842,6 +1864,8 @@ impl BotForm {
             services,
             runner: false,
             machines: Vec::new(),
+            machines_loaded: false,
+            machines_fixed: false,
             logins: Default::default(),
             this_machine,
             machine: None,
@@ -1853,10 +1877,56 @@ impl BotForm {
             character: None,
             status: Status::Idle,
             created: None,
+            done: widgets::DoneStep::new(cx),
             editing: None,
             window: window.window_handle(),
             _subscriptions: subscriptions,
         }
+    }
+
+    /// The sheet as a team with no computer sees it, for a screenshot scene.
+    pub fn preview_no_computers(&mut self, cx: &mut Context<Self>) {
+        self.machines.clear();
+        self.logins.clear();
+        self.machine = None;
+        self.machines_loaded = true;
+        self.machines_fixed = true;
+        self.runner = true;
+        cx.notify();
+    }
+
+    /// 在电脑上工作 with no computer connected: nothing can run this member
+    /// yet. One line says so, with the way to the 电脑 page (the sheet
+    /// closes; what was typed is short).
+    fn no_computer_notice(&self, cx: &mut Context<Self>) -> Option<gpui::Div> {
+        (self.machines_loaded && self.machines.is_empty()).then(|| {
+            let services = self.services.clone();
+            div()
+                .pb(tokens::space::S12)
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap(tokens::space::S8)
+                .child(
+                    div()
+                        .n_subheadline()
+                        .text_color(native_colors(cx).secondary)
+                        .child(s::BOT_NO_COMPUTER),
+                )
+                .child(
+                    push_button(
+                        "bot-no-computer-open",
+                        s::BOT_NO_COMPUTER_OPEN,
+                        PushStyle::Outline,
+                        PushSize::Small,
+                        cx,
+                    )
+                    .on_click(move |_, window, cx| {
+                        window.close_dialog(cx);
+                        super::open_page(services.clone(), super::Page::Machines, cx);
+                    }),
+                )
+        })
     }
 
     /// Turns the sheet into the edit sheet of `member` and loads its runner.
@@ -2229,9 +2299,8 @@ impl Render for BotForm {
                     .body(widgets::quiet(s::BOT_CREDENTIAL_HINT, cx)),
                 None => layout.explanation(fill(s::BOT_RUNNER_READY, &[("name", &name)])),
             };
-            return layout
-                .buttons([done_button("bot-done", cx)])
-                .into_any_element();
+            let layout = layout.buttons([done_button("bot-done", cx)]);
+            return self.done.show(layout, window, cx);
         }
         let busy = self.status.busy();
         let (off, name_err, role_err) =
@@ -2539,6 +2608,7 @@ impl Render for BotForm {
                     .flex()
                     .flex_col()
                     .child(section(s::RUNNER_SECTION))
+                    .children(self.no_computer_notice(cx))
                     .child(
                         sheet_form()
                             .child(sheet_form_row(s::RUNNER_MACHINE, machine, cx))
@@ -2679,6 +2749,7 @@ fn open_bot_sheet(form: Entity<BotForm>, window: &mut Window, cx: &mut App) -> E
         SheetWidth::List,
         px(660.),
         |f| (f.created.is_none()).then(|| f.name.clone()),
+        |f| f.created.is_some(),
         |f, cx| f.submit(cx),
         window,
         cx,
@@ -3268,5 +3339,65 @@ mod tests {
         assert_eq!(on.runner, Some(RunnerChange::Set(runner.clone())));
         let off = bot_edit("助手", None, Some(&runner), "助手", "", None);
         assert_eq!(off.runner, Some(RunnerChange::Remove));
+    }
+}
+
+#[cfg(test)]
+mod once_only_step_tests {
+    use std::sync::Arc;
+
+    use gpui::TestAppContext;
+
+    use super::*;
+    use crate::{data::ChatProvider, fake::FakeProvider};
+
+    struct Host;
+
+    impl Render for Host {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
+
+    /// The step that shows an invite code once: Esc does not throw it away,
+    /// and Return is 完成, its default button.
+    #[gpui::test]
+    fn escape_keeps_the_created_step_and_return_closes_it(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let provider: Arc<dyn ChatProvider> = FakeProvider::new();
+        let services = cx.update(|cx| Services::new(provider, cx));
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let host = cx.new(|_| Host);
+            gpui_component::Root::new(host, window, cx)
+        });
+        let form = cx.update(|window, cx| open_invite(services, window, cx));
+        cx.run_until_parked();
+
+        // While the form is being filled, Esc still closes the sheet.
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        assert!(!cx.update(|window, cx| window.has_active_dialog(cx)));
+
+        let services = form.read_with(cx, |f, _| f.services.clone());
+        let form = cx.update(|window, cx| open_invite(services, window, cx));
+        cx.run_until_parked();
+        form.update_in(cx, |f, window, cx| {
+            f.fill("新同事", window, cx);
+            f.fill_role("设计", window, cx);
+        });
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        assert!(
+            form.read_with(cx, |f, _| f.created.is_some()),
+            "the code is shown"
+        );
+
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        assert!(cx.update(|window, cx| window.has_active_dialog(cx)));
+
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        assert!(!cx.update(|window, cx| window.has_active_dialog(cx)));
     }
 }

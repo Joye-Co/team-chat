@@ -310,6 +310,13 @@ pub const SCENES: &[Scene] = &[
         open: settings_scenes::open_bot_dialog_runner,
     },
     Scene {
+        name: "settings-add-bot-no-computer",
+        about: "Settings: the add-bot dialog when no computer is connected: one line says so, with a button to the 电脑 page",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_bot_dialog_no_computer,
+    },
+    Scene {
         name: "settings-add-bot-new",
         about: "Settings: the add-bot dialog with a name outside the roster: the first free character is selected",
         start: Start::SignedIn,
