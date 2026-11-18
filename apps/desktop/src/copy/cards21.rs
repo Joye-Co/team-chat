@@ -173,7 +173,7 @@ crate::copy! {
     G_CONFIRM = "是或否",
     G_CONFIRM_NOTE = "两个按钮直接回答，不用再点提交",
     G_IMAGE = "图片选择",
-    G_IMAGE_NOTE = "选项是图，图下写字母和名字",
+    G_IMAGE_NOTE = "选项是图，图下写名字",
     G_FAILED = "失败",
     G_FAILED_NOTE = "回答没送到。红色只用在问题上，写清楚哪一步没成、答案还在不在",
     G_MATRIX = "矩阵",
@@ -262,7 +262,9 @@ crate::copy! {
     ZONE_CHICAGO = "芝加哥时间",
     ZONE_LOS_ANGELES = "洛杉矶时间",
     // Under buttons the member did not wire up.
-    BUTTONS_INERT = "这些按钮点了不会发给 {name}",
+    BUTTONS_INERT = "这些按钮只能看，{name} 收不到",
     // After {name} 接不了, when the member gave no reason this version knows: the block is locked.
     NONE_READ_ONLY = "这一块只能看",
+    // The gallery's caption over a block the viewer can try again.
+    I_NONE_RETRY = "稍后可以再试",
 }

@@ -553,20 +553,21 @@ impl Gallery21 {
                 (left, right)
             }
             Page::NoneReasons => {
-                let cell = |(id, _): (&str, &str), w: &mut Window, cx: &mut App| {
-                    item(
-                        c::I_NOTES_BUSY,
-                        "",
-                        self.card(id, me, None, "a", CardMode::Desk, w, cx),
-                        true,
-                        cx,
-                    )
-                };
+                let cell =
+                    |caption: &'static str, (id, _): (&str, &str), w: &mut Window, cx: &mut App| {
+                        item(
+                            caption,
+                            "",
+                            self.card(id, me, None, "a", CardMode::Desk, w, cx),
+                            true,
+                            cx,
+                        )
+                    };
                 let [a, b, d, e, f] = NONE_REASONS;
                 let left = column(vec![
-                    cell(a, window, cx),
-                    cell(b, window, cx),
-                    cell(d, window, cx),
+                    cell(c::I_NOTES_BUSY, a, window, cx),
+                    cell(c::I_NOTES_BUSY, b, window, cx),
+                    cell(c::I_NOTES_BUSY, d, window, cx),
                 ]);
                 let inert = item(
                     c::I_NO_EVENTS,
@@ -575,7 +576,11 @@ impl Gallery21 {
                     true,
                     cx,
                 );
-                let right = column(vec![cell(e, window, cx), cell(f, window, cx), inert]);
+                let right = column(vec![
+                    cell(c::I_NONE_RETRY, e, window, cx),
+                    cell(c::I_NONE_RETRY, f, window, cx),
+                    inert,
+                ]);
                 (left, right)
             }
             Page::Rejected => {

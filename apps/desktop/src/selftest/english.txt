@@ -118,8 +118,6 @@ AI 成员推不了代码	AI members can't push code
 用到的决定	Decisions used
 产出信息	Artifact info
 在右侧打开	Open on the right
-看 v2	View v2
-看 v1	View v1
 回到 v3	Back to v3
 你在看 v2，不是最新版	You're viewing v2, not the latest
 有 v3	v3 available

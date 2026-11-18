@@ -465,6 +465,10 @@ pub enum PendTone {
     Live,
     /// Grey, a still mark: no answer came, or the author will see it later.
     Quiet,
+    /// Grey, the ban mark: the author was turned off or left, nothing is coming.
+    Gone,
+    /// Grey, the ring: the author's computer is off.
+    Off,
     /// Red 失败: the step was not sent, or the author cannot take it now.
     Bad,
 }
@@ -497,12 +501,17 @@ pub fn pend_band(
         S::Slow => (words, String::new(), PendTone::Live),
         S::Silent | S::OfflineAnswer => (words, String::new(), PendTone::Quiet),
         // `expect.mode: none` (a block that takes no action, or a short-run limit): nothing
-        // failed and nothing is left to retry, so the band is the muted clock (D1-70).
-        // The badge holds a short state (§2.12); the rest is the meta line after it.
+        // failed, so the band is muted (D1-70). Its mark says what the reason is (§2.12): the
+        // ban for a member turned off, the ring for a computer that is off, the clock for
+        // the rest. The badge holds a short state; the rest is the meta line after it.
         S::Refused | S::RefusedAnswer => (
             crate::copy::fill(c::BUSY_STATE, &[("name", author)]),
             crate::views::artifacts::host::none_why(reason).to_string(),
-            PendTone::Quiet,
+            match reason {
+                Some(crate::data::page_host::NoneReason::MemberInactive) => PendTone::Gone,
+                Some(crate::data::page_host::NoneReason::RunnerOff) => PendTone::Off,
+                _ => PendTone::Quiet,
+            },
         ),
         S::OfflineLive | S::Busy | S::Forbidden | S::Rejected | S::Unhandled => {
             (c::BAND_FAILED.to_string(), words, PendTone::Bad)

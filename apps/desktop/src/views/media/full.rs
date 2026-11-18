@@ -309,6 +309,15 @@ pub fn failed(
         .into_any_element()
 }
 
+/// The kind's symbol of a version not read yet, from its name, so the header keeps its icon
+/// when the read finishes; the document for a name that says no kind (an artifact's title).
+fn head_symbol(title: &str) -> Sym {
+    match super::file_kind(title, "") {
+        super::MediaKind::File => Sym::Document,
+        kind => kind.icon(),
+    }
+}
+
 /// The header of a version that is not read yet (loading, failed): the same
 /// anatomy as the ready header (icon, title, the fixed actions), with copy,
 /// download and open disabled at 50 % until there is something to act on (§2.9).
@@ -333,7 +342,7 @@ fn bare_head(title: &str, close: CloseFn, cx: &App) -> gpui::Div {
         .gap(space::S8)
         .border_b_1()
         .border_color(n.separator)
-        .child(ui::icon(Sym::Document, px(16.), n.secondary))
+        .child(ui::icon(head_symbol(title), px(16.), n.secondary))
         .child(
             ui::native::file_name(title.to_string())
                 .flex_1()
@@ -1697,7 +1706,7 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
                 .flex()
                 .gap(space::S12)
                 .when(current == Some(i), |el| el.bg(k.selected))
-                .child(mono(super::clock_text(c.t), k.text_3).w(px(40.)))
+                .child(mono(super::time_text(c.t), k.text_3).w(px(40.)))
                 .child(
                     div()
                         .flex_1()
@@ -1719,7 +1728,7 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
         a.transcript
             .iter()
             .map(|c| {
-                let time = super::clock_text(c.t);
+                let time = super::time_text(c.t);
                 match &c.speaker {
                     Some(s) => format!("{time} {s} {}", c.text),
                     None => format!("{time} {}", c.text),
@@ -1739,7 +1748,7 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
             meta: Some(
                 format!(
                     "{} · {}",
-                    super::clock_text(a.duration),
+                    super::time_text(a.duration),
                     super::size_text(spec.media.bytes)
                 )
                 .into(),
@@ -1797,8 +1806,8 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
                             mono(
                                 format!(
                                     "{} / {}",
-                                    super::clock_text(position),
-                                    super::clock_text(a.duration)
+                                    super::time_text(position),
+                                    super::time_text(a.duration)
                                 ),
                                 k.text_1,
                             )

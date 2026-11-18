@@ -159,7 +159,7 @@ pub(crate) fn notification(ctx: &Ctx, _window: &mut Window, cx: &App) -> AnyElem
                         let primary = i == 0;
                         let b = button(
                             ctx.id(format!("notify-{i}")),
-                            action.label.clone(),
+                            super::shown_label(ctx.card, &action),
                             if primary {
                                 PushStyle::Default
                             } else {

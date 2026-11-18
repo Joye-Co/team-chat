@@ -632,7 +632,7 @@ with `…`. The band says the state once; the body never says it again.
 | 打分 (`rating`) | `评分` | Five 36 pt buttons (radius 8, no border) in a radio group, range `1–5 分` at the right; the chosen value says its label `清楚 · 4 分` |
 | 量表 (`scale`) | `量表` | 0–10 segmented row, ends `0 · 不会` and `10 · 一定会` |
 | 确认 (`confirm`) | `是或否` | Two buttons (`可以` primary, `不行` secondary) that answer at once; no submit |
-| 图片选择 (`imageChoice`) | `图片选择` | 2–4 images with a letter tile (20, `sunken`) + label under each; chosen: 1 pt `ink` border; footer `用这张` primary + `看大图` |
+| 图片选择 (`imageChoice`) | `图片选择` | 2–4 images with a label under each; chosen: 1 pt `ink` border; footer `用这张` primary + `看大图` |
 | 矩阵 (`matrix`) | `矩阵，每行选一个` | Rows = items, columns = options (max 8 × 5), radio cells, `已选 2/4 行` |
 | 时间段 (`slots`) | `选一个时间段` | Day columns of 52 pt slot cells (radius 9) with a mono time and `都能来` (`ok` check) or `缺 Alex` / `缺 2 人`; chosen: `sunken` + 1 pt `ink` border |
 | 投票 (`poll`) | `已投 7/13` + `今天 18:00 截止` | 44 pt option rows (radius 9) with the result as an `ink` 10 % fill behind the label, `12 票 · 40%` mono, voter tiles when public; my vote: 1 pt `ink` border + the `你投的` tag; `还没投：…` under; a voted viewer sees the grey band |
@@ -926,7 +926,7 @@ margins): embedded when the child WKWebView works, else a snapshot with `打开`
 Choices inside a member-made page are forwarded to that member (`artifact.event`); the page shows
 the record `你选了「B 站」· 10:12 · 已发给 Ledger`. Right pane **来龙去脉**: 来自话题 (check + topic + `拾光增长 ·
 做完了 09:40` + chevron; 做的人 / 要求 rows with tiles and tags), 版本 (rows `v3 加了渠道拆分 今天 09:40`, selected
-`sel`; `和 v2 对比`), 页面里的回应, 用到的决定, 被引用. Switching versions never animates; charts draw once
+`sel`), 页面里的回应, 用到的决定, 被引用. Switching versions never animates; charts draw once
 per version.
 
 ### 8.10 Settings → 外观 (new) and the rest
