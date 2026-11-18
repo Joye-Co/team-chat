@@ -14,7 +14,7 @@ use crate::{Capabilities, OpenOptions, Presentation, VersionSpec};
 /// Bump when the page, the config, the sanitizer or the bridge limits change: every cache
 /// key changes, so failures cached by an older renderer (such as the timeouts of a bridge
 /// that dropped large `rendered` events) are not shown again.
-pub const RENDERER_VERSION: u32 = 3;
+pub const RENDERER_VERSION: u32 = 4;
 /// The width of a Gantt chart: the content width of a card (D2-30).
 const GANTT_WIDTH: u32 = 600;
 /// The artifact id of the reserved origin (`teamchat-diagram-v<RENDERER_VERSION>`).
@@ -223,7 +223,9 @@ pub fn mermaid_config(t: &ThemeVars) -> Value {
 }
 
 /// Shape details the theme variables do not cover: no drop shadows, rounded boxes (the
-/// artboard's 6 px), hairline grid, no "today" line, labels in the UI font.
+/// artboard's 6 px), hairline grid, no "today" line, labels in the UI font, and a halo
+/// in the surface color behind the text of a sequence diagram (a message's words, a
+/// loop's condition), which the library draws straight over the lifelines.
 fn theme_css(t: &ThemeVars) -> String {
     format!(
         "* {{ filter: none !important; }}\
@@ -231,7 +233,10 @@ fn theme_css(t: &ThemeVars) -> String {
          .node rect, .node polygon, .node circle, rect.actor, rect.task {{ stroke-width: 1px; }}\
          .grid .tick line {{ stroke: {line}; opacity: 1; }} .grid path {{ stroke-width: 0; }}\
          .grid .tick text {{ fill: {ink3}; font-size: 12px; }} .today {{ display: none; }}\
-         text, tspan {{ font-family: {font}; }}",
+         text, tspan {{ font-family: {font}; }}\
+         .messageText, .loopText, .loopText tspan {{ paint-order: stroke; stroke: {surface}; \
+         stroke-width: 4px; stroke-linejoin: round; }}",
+        surface = t.raised,
         line = t.line,
         ink3 = t.ink_3,
         font = t.font_family
