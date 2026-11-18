@@ -177,6 +177,8 @@ pub struct CalendarState {
     today: NaiveDate,
     number_of_months: usize,
     disabled_matcher: Option<Rc<Matcher>>,
+    /// The day the keyboard is on, if the keyboard is driving the calendar.
+    cursor: Option<NaiveDate>,
 }
 
 impl CalendarState {
@@ -193,6 +195,7 @@ impl CalendarState {
             today,
             number_of_months: 1,
             disabled_matcher: None,
+            cursor: None,
         }
         .year_range((today.year() - 50, today.year() + 50))
     }
@@ -268,6 +271,25 @@ impl CalendarState {
     }
     pub fn date(&self) -> Date {
         self.date
+    }
+    /// The day the keyboard is on.
+    pub fn cursor(&self) -> Option<NaiveDate> {
+        self.cursor
+    }
+    /// Puts the keyboard on a day: the days view follows it to its month.
+    pub fn set_cursor(&mut self, cursor: Option<NaiveDate>) {
+        self.cursor = cursor;
+        let Some(day) = cursor else {
+            return;
+        };
+        self.view = CalendarView::Day;
+        let month = |year: i32, month0: i32| year * 12 + month0;
+        let first = month(self.current_year, self.current_month as i32 - 1);
+        let at = month(day.year(), day.month0() as i32);
+        if at < first || at >= first + self.number_of_months.max(1) as i32 {
+            self.current_year = day.year();
+            self.current_month = day.month() as u8;
+        }
     }
     pub fn set_number_of_months(&mut self, n: usize, _: &mut Window, cx: &mut Context<Self>) {
         self.number_of_months = n;
@@ -420,6 +442,7 @@ pub struct CalendarItemState {
     muted: bool,
     disabled: bool,
     today: bool,
+    focused: bool,
 }
 
 impl CalendarItemState {
@@ -432,6 +455,7 @@ impl CalendarItemState {
             muted: false,
             disabled: false,
             today: false,
+            focused: false,
         }
     }
 
@@ -463,6 +487,12 @@ impl CalendarItemState {
         self
     }
 
+    /// Set whether the keyboard is on this day.
+    pub fn focused(mut self, focused: bool) -> Self {
+        self.focused = focused;
+        self
+    }
+
     pub fn kind(&self) -> CalendarItemKind {
         self.kind
     }
@@ -485,6 +515,10 @@ impl CalendarItemState {
 
     pub fn is_today(&self) -> bool {
         self.today
+    }
+
+    pub fn is_focused(&self) -> bool {
+        self.focused
     }
 }
 
@@ -563,6 +597,7 @@ pub struct Calendar {
     state: Entity<CalendarState>,
     number_of_months: usize,
     first_day_of_week: Weekday,
+    year_first: bool,
     style: StyleRefinement,
     item: ItemRenderer,
     label: Labeler,
@@ -575,6 +610,7 @@ impl Calendar {
             state: state.clone(),
             number_of_months: 1,
             first_day_of_week: Weekday::Sun,
+            year_first: false,
             style: StyleRefinement::default(),
             item: Rc::new(|item, _, _, _| item.into_any_element()),
             label: Rc::new(|kind, value| match kind {
@@ -591,6 +627,12 @@ impl Calendar {
     }
     pub fn first_day_of_week(mut self, day: Weekday) -> Self {
         self.first_day_of_week = day;
+        self
+    }
+    /// Show the year before the month in the header, as languages that write dates
+    /// year first do. Default: month first.
+    pub fn year_first(mut self, year_first: bool) -> Self {
+        self.year_first = year_first;
         self
     }
     pub fn item(
@@ -663,10 +705,14 @@ impl RenderOnce for Calendar {
                 let s = self.state.read(cx);
                 (s.current_month() as i32, s.current_year())
             };
-            for (kind, value, active) in [
+            let mut toggles = [
                 (CalendarItemKind::MonthToggle, month, view.is_month()),
                 (CalendarItemKind::YearToggle, year, view.is_year()),
-            ] {
+            ];
+            if self.year_first {
+                toggles.reverse();
+            }
+            for (kind, value, active) in toggles {
                 let st = CalendarItemState::new(kind).active(active);
                 let entity = self.state.clone();
                 let mut item = CalendarItem::new(format!("calendar-{kind:?}"), st)
@@ -768,6 +814,7 @@ impl RenderOnce for Calendar {
                                 .muted(date.month() != m || disabled)
                                 .disabled(disabled)
                                 .today(date == s.today())
+                                .focused(s.cursor() == Some(date) && date.month() == m)
                         };
                         let mut item =
                             CalendarItem::new(format!("calendar-{date}-{offset}-{week_index}"), st)

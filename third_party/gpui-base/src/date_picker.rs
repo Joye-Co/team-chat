@@ -14,6 +14,7 @@ use crate::{
 };
 
 type OpenChange = Rc<dyn Fn(bool, &mut Window, &mut App)>;
+type Confirmed = Rc<dyn Fn(&mut Window, &mut App)>;
 
 /// Unstyled controlled date-picker root. Applications own its trigger, calendar,
 /// positioning, and visual presentation; Base owns focus and open/dismiss keyboard behavior.
@@ -26,6 +27,7 @@ pub struct DatePicker {
     style: StyleRefinement,
     children: Vec<AnyElement>,
     on_open_change: Option<OpenChange>,
+    on_confirm: Option<Confirmed>,
 }
 
 impl DatePicker {
@@ -38,6 +40,7 @@ impl DatePicker {
             style: StyleRefinement::default(),
             children: vec![],
             on_open_change: None,
+            on_confirm: None,
         }
     }
     pub fn open(mut self, open: bool) -> Self {
@@ -53,6 +56,12 @@ impl DatePicker {
         handler: impl Fn(bool, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.on_open_change = Some(Rc::new(handler));
+        self
+    }
+    /// Enter while the picker is open: the application picks what the keyboard is on.
+    /// Without it, Enter closes the picker.
+    pub fn on_confirm(mut self, handler: impl Fn(&mut Window, &mut App) + 'static) -> Self {
+        self.on_confirm = Some(Rc::new(handler));
         self
     }
 }
@@ -82,6 +91,7 @@ impl RenderOnce for DatePicker {
         let open = self.open;
         let disabled = self.disabled;
         let handler = self.on_open_change;
+        let confirmed = self.on_confirm;
         self.base
             .role(Role::ComboBox)
             .aria_expanded(open)
@@ -93,6 +103,8 @@ impl RenderOnce for DatePicker {
                     // value shown in the popup is the one the user wants.
                     if disabled {
                         cx.propagate();
+                    } else if let Some(confirmed) = confirmed.as_ref().filter(|_| open) {
+                        confirmed(window, cx);
                     } else if let Some(handler) = &handler {
                         handler(!open, window, cx);
                     }

@@ -2528,7 +2528,7 @@ pub(crate) fn input_control(
                 cx,
             );
             field_box(focused || lead, invalid, m::OPTION, cx)
-                .child(div().flex_1().min_w(px(0.)).child(picker))
+                .child(div().h_full().flex_1().min_w(px(0.)).child(picker))
                 .into_any_element()
         }
         InputKind::Number | InputKind::Slider | InputKind::Text | InputKind::Unknown => {

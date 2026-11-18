@@ -1361,7 +1361,6 @@ impl TimelineView {
     /// 群's add-members sheet; neither shows in a 私聊 (its one peer is the
     /// member you already talk to); a 话题 there offers 添加文件, the
     /// composer's file picker, so its block is never a bare title (A1).
-    /// 详情 opens the inspector.
     fn start_actions(&self, topic: &Topic, in_group: bool, cx: &mut Context<Self>) -> AnyElement {
         use crate::ui::native::{PushSize, PushStyle, push_button};
         let assign = in_group.then(|| {
@@ -1413,12 +1412,6 @@ impl TimelineView {
                 )
             })
         });
-        // A5: no 详情 while the inspector already shows.
-        let rail_open = matches!(
-            self.services.nav.read(cx).visible_pane(),
-            crate::app::RightPane::TopicRail
-        );
-        let nav = self.services.nav.clone();
         // The 群聊 has no inspector; its start block offers 新话题 instead.
         let chat = crate::data::is_main_topic(&topic.id);
         let new_topic = chat.then(|| {
@@ -1453,26 +1446,6 @@ impl TimelineView {
                 window.dispatch_action(Box::new(crate::app::AttachInComposer), cx)
             })
         });
-        let info = (!rail_open && !chat).then(|| {
-            push_button(
-                "start-topic-info",
-                // The word of the toolbar item and of the pane it opens.
-                t::TOGGLE_PANEL,
-                PushStyle::Outline,
-                PushSize::Small,
-                cx,
-            )
-            .icon(ui::sym(
-                Sym::Inspector,
-                ui::SymSize::INLINE,
-                theme::colors(cx).ink,
-            ))
-            .on_click(move |_, _, cx| {
-                nav.update(cx, |nav, cx| {
-                    nav.set_right_pane(crate::app::RightPane::TopicRail, cx)
-                })
-            })
-        });
         div()
             .pt(space::S4)
             .flex()
@@ -1482,7 +1455,6 @@ impl TimelineView {
             .children(add)
             .children(new_topic)
             .children(attach)
-            .children(info)
             .into_any_element()
     }
 

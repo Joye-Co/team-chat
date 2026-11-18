@@ -146,7 +146,8 @@ fn hand(id: &str, command: &str, output: &str, result: Option<HandResult>) -> Ha
         by: d::ME.into(),
         output: output.into(),
         result,
-        at: d::at(9, 52),
+        // Minutes before the scene's 10:21: a command with no result still counts as running.
+        at: d::at(10, 19),
     }
 }
 
