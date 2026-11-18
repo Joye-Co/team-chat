@@ -200,15 +200,18 @@ pub fn save_to_downloads(paths: &[&Path], cx: &mut App) {
     toast(cm::SAVED, cx);
 }
 
+/// Whether [`send_image`] has a 话题 to put a picture into: an attachment opened from the
+/// files list has none, so its viewer offers no 发到话题.
+pub fn can_send_image(target: &Target) -> bool {
+    target.provider.is_some() && !target.group_id.is_empty() && !target.topic_id.is_empty()
+}
+
 /// Puts a picture into the 话题's composer as a pending image: the person adds words and
 /// sends it (nothing is sent without them).
 pub fn send_image(target: &Target, bytes: Vec<u8>, cx: &mut App) {
-    let Some(provider) = &target.provider else {
+    let Some(provider) = target.provider.as_ref().filter(|_| can_send_image(target)) else {
         return;
     };
-    if target.group_id.is_empty() || target.topic_id.is_empty() {
-        return;
-    }
     provider.attach_files(
         &DraftKey::topic(target.group_id.clone(), target.topic_id.clone()),
         vec![NewFile::Image {

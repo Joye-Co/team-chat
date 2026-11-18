@@ -996,11 +996,36 @@ fn audio(
                         }),
                 ),
         )
-        .child(
+        .child(if a.transcript.is_empty() {
             footer(cx)
-                .child(ui::icon(Sym::Document, px(13.), k.text_3))
-                .child(footer_text),
-        )
+                .child(ui::icon(
+                    Sym::Document,
+                    crate::ui::native::tokens::icon::MD,
+                    k.text_3,
+                ))
+                .child(footer_text)
+                .into_any_element()
+        } else {
+            // The transcript reads in the viewer, as 显示全部 opens a table's rows.
+            let s = spec.clone();
+            footer(cx)
+                .id(ElementId::Name(format!("{}-transcript", spec.id).into()))
+                .focus_row(false, cx)
+                .gap(space::S8)
+                .child(ui::icon(
+                    Sym::Document,
+                    crate::ui::native::tokens::icon::MD,
+                    k.text_3,
+                ))
+                .child(footer_text)
+                .child(ui::icon(
+                    Sym::ChevronRight,
+                    crate::ui::native::tokens::icon::MD,
+                    k.text_3,
+                ))
+                .on_click(move |_, _, cx| open(&s, Opening::default(), cx))
+                .into_any_element()
+        })
         .into_any_element()
 }
 
