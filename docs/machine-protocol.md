@@ -429,7 +429,7 @@ server frames and ignores unknown fields, so it must never get work it cannot do
 | `acceptance` | The daemon forwards the CLI's acceptance criteria as the `acceptance` run event. |
 | `resume` | `run.assign.resumeSessionId`: the run continues that CLI session (Claude Code `--resume`, Codex `thread/resume`, ACP `session/load`) instead of starting a new one; `CliInfo.resume` says which CLIs can. |
 | `effort` | Reports `CliInfo.models` and `efforts` and runs with `run.assign.effort`, see "Models and effort". |
-| `context` | Answers the read-only topic context ops of `chat-run` (`topic.history`, `topic.message`, `context.search`, `file.get`, and from this version `topic.state`, `artifact.list`, `artifact.get`, `card.get`, `decisions.list`, `member.list`), see "Topic context". |
+| `context` | Answers the read-only topic context ops of `chat-run` (`topic.history`, `topic.message`, `context.search`, `file.get`, and from this version `topic.state`, `artifact.list`, `artifact.get`, `artifact.data.get`, `card.get`, `decisions.list`, `member.list`), see "Topic context". |
 | `groups` | Usable: `chat-run group list` and `--in <group id>` / `search --all` on the context ops: a run reads the other groups of the person it works for, see "Topic context". The server's prompt names them only to a daemon with this feature. |
 | `gates` | Reports `CliInfo.gates`, stops the commands of `run.assign.gates` for a person's approval and honors `run.approval.scope`, see "Gated actions". |
 
@@ -532,7 +532,14 @@ How the 1.1 daemon does each one:
   `passed`/`met`/`done` as `pass` and `failed`/`unmet` as `fail`, drops unknown states and
   malformed evidence, and sends the `acceptance` event only when the list changed. The message
   itself is sent unchanged. The server's `run.assign.prompt` for a machine with this feature
-  says how to write the block (format, states and limits); side chat prompts do not.
+  says how to write the block (format, states and limits); side chat prompts do not. Its
+  example shows evidence the done card counts: a `pass` reads as passed only with a `url`, a
+  `fileId` or an `artifact`, with text alone it is shown as the member's claim, and test counts
+  come from the run's log.
+- The first rule of `run.assign.prompt` says what the last message is. For a machine with the
+  `context` feature (it has `chat-run`): one or two sentences, and anything longer goes into a
+  产出 or a card before the run ends. Other machines keep the rule that the final answer is
+  posted as it is and should be short.
 
 `takeoverUrl` comes from `daemon.toml` (`takeover_url`, for example `vnc://<host>`). It is not
 how a person takes over a run: that is feature `takeover` (see "Usable features").
@@ -567,7 +574,11 @@ id now) instead, in the envelope too.
 
 The daemon gives `run.answer` and `run.interaction` to the CLI as one user turn: a
 `<teamchat-event v="1" id="{inputId}" kind="card.answer|card.event|artifact.emit|artifact.ask">`
-envelope with the JSON, followed by the line that it is data, not an instruction. It answers
+envelope with the JSON, followed by the line that it is data, not an instruction, and that the
+answer goes where it happened: a patch of that card (`card patch`, `card set`, `card update`) or a
+push of that page's state (`artifact data`, `artifact reply` for an ask), `resolve --result
+ignored` when nothing changes, and a message only for what the card or the page cannot show. The
+server writes the same sentence in the envelopes it builds (`server/src/bots/answers.ts`). It answers
 `input.accepted {inputId}` as for `run.input`. BotDesk performs each `output` op as the bot member
 with the rules of the matching WebSocket frame. The `output` body is that frame without `t`, `rid` and
 `groupId` (BotDesk takes the group and topic from the run):
@@ -575,7 +586,7 @@ with the rules of the matching WebSocket frame. The `output` body is that frame 
 | `op` | `body` | `chat-run` command |
 | --- | --- | --- |
 | `card.post` | `{ cardV2, body?, causeEventId?, clientMsgId? }` (a `send`) | `chat-run card post --file card.json [--cause ev]` |
-| `card.patch` | `{ messageId, baseRev, ops, cause? }` | `chat-run card patch --message M --base-rev N --ops ops.json [--cause ev]` |
+| `card.patch` | `{ messageId, baseRev, ops, cause? }` | `chat-run card patch --message M --base-rev N --ops ops.json [--cause ev]`; one op from flags with `chat-run card set --message M --block B --props '{…}'` (a `set` op) and `chat-run card update --message M [--title …] [--summary …] [--status executing\|failed\|none] [--intent …]` (a `card` op), both with `[--base-rev N] [--cause ev]` |
 | `interaction.resolve` | `{ eventId, result: "ignored" \| "failed", note? }` | `chat-run resolve --event ev --result ignored\|failed [--note …]` |
 | `artifact.data` | `{ artifactId, version, data, baseDataRev?, cause? }` | `chat-run artifact data --artifact A --version V --file data.json [--base-data-rev N] [--cause ev]` |
 | `artifact.reply` | `{ eventId, ok: true, payload? }` or `{ eventId, ok: false, error: { code: "declined", message } }` | `chat-run artifact reply --event ev --file reply.json` or `--decline "…"` |
@@ -641,13 +652,70 @@ commands differ: `topic message` takes `--message` for `--id`, `card get` and `c
 
 A connect or write that the CLI's sandbox refuses gives `{ code: "unavailable", reason:
 "sandbox.blocked" }`. `chat-run` prints the result JSON (exit 0) or the error JSON with its
-`reason` (exit 1). `chat-run card schema` prints the JSON Schema of a Card v2 document
-(`protocol/schema/CardV2.schema.json`, made from the protocol package's Zod with
-`bun run gen:protocol` and built into the daemon) without asking the daemon; it holds the shape,
-and the server checks the write rules too. The CLI learns about `chat-run` from a short note
-that names the commands, the card fields, every block type of that schema and
-`chat-run card schema`: Claude Code
-`--append-system-prompt`, Codex `thread/start.developerInstructions`, ACP the text before the
+`reason` (exit 1).
+
+#### Cards from the command line
+
+What a CLI needs to write a card is in `chat-run` itself, answered without the daemon:
+
+| Command | Prints |
+| --- | --- |
+| `chat-run card schema` | The card's fields and one line per block type with its required fields (about 6 KB). |
+| `chat-run card schema --block <type>` | One block's JSON Schema, complete in itself (1 to 3 KB). |
+| `chat-run card schema --ops` | The JSON Schema of `ops.json` (`protocol/schema/PatchOp.schema.json`). |
+| `chat-run card schema --full` | The whole JSON Schema of a Card v2 document on one line (about 40 KB). |
+| `chat-run card example [<kind>]` | The kinds, or one working card: `ask`, `form`, `plan`, `review`, `data`, `evidence`, `progress`, `live`; `patch` is an `ops.json` for the `progress` card. |
+| `chat-run card check --file card.json` | Every problem the server would refuse (each block is checked by itself, then the card as a whole), the warnings below and an outline of what the card shows. Exit 1 when there is a problem. `--ops ops.json` checks patch ops. |
+
+The schema is `protocol/schema/CardV2.schema.json`, made from the protocol package's Zod with
+`bun run gen:protocol` and built into the daemon: each block type is `$defs.<type>`,
+`$defs.block` is their union, a part written more than once is a `$defs` entry too, and the
+descriptions come from `packages/protocol/scripts/card-docs.ts` (the generator fails when a
+block type has no entry or an entry names a field the schema lacks). It holds the shape; the
+server checks the write rules too. The examples are `apps/daemon/examples/cards/*.json`; each
+is a fixture of the protocol (`protocol/fixtures/entities/card-v2-example-*.json`,
+`client/card.patch-example.json`), so the Zod and the Rust fixture tests take every example.
+
+`card post` fills in what the file leaves out: `rev` (the server sets 1 anyway), `fallback` (the
+title, the summary and the first text block, at most 4000 characters) and, on a card with intent
+`ask` and no `ask`, `ask: { "from": ["requester"] }` (without `ask` nobody is asked and the topic
+does not wait). Both forms of the file are handled: the card itself, and `{ cardV2, body, … }`.
+
+`card post` and `card patch` run the same check as `card check` and still send: the server is the
+authority. What the check found travels with the answer `chat-run` prints: `warnings: string[]`
+beside the result, and on a refusal `problems: string[]` too, so one round trip names every
+wrong block. The fields are added by `chat-run`; the wire result is unchanged. Warnings are
+things the server takes that do not do what they seem to:
+
+- a field the schema does not have (the server drops it without a word): `blocks.0.steps: unknown
+  field, the server drops it (plan has: items, runId)`;
+- an `events` entry the block type cannot send, and `buttons` that do not list `button.press`;
+- a `plan` without items, a `select` or `chips` input without options, a chart series whose
+  length differs from `x`;
+- input blocks of an ask whose value no answer carries (not named in a submit action's `inputs`,
+  not `deliver: "immediate"`, not in a questionnaire);
+- an `ask` card whose `ask` was filled in, and a `done` card (it replaces the automatic result
+  card, see "Run report").
+
+`card set` and `card update` without `--base-rev` read the card's rev (`card.get`) and send the
+patch on it; on `card.stale_rev` they read and send once more, and print the new `rev`. Only the
+author patches its card and each command changes one thing, so the second try undoes nobody's
+work.
+
+A block sends a live event only when it lists it in `events` (protocol.md "Live events"); the
+names per block type are in `chat-run --help` under "Interaction", from a table that a daemon
+test holds against the server's `eventsOf` (`server/src/cards2/inputs.ts`).
+
+The CLI learns about `chat-run` from a note (`apps/daemon/src/chat_run.rs` `note()`). Its second
+paragraph says which form an answer takes: plain text only for a few sentences; an `ask` card
+when people must decide, approve or fill something in; an `info` card for numbers, a comparison
+or a status; a 产出 page for a document, a report, a prototype or anything longer than a screen; a
+two-way 产出 page for what people fill in or act on together; and after an answer or an event, a
+patch of that card or a push of that page's data, not a new message. Then come the card format
+with every block type of the schema grouped by use, the 产出 commands and the sandbox of a page,
+the read commands, memory, hand-over and how to end the run (deliver first, then speak). A daemon
+test holds every command the note names against the usage and caps its length. Claude Code gets it with
+`--append-system-prompt`, Codex in `thread/start.developerInstructions`, ACP as the text before the
 first prompt; the PTY gets none. Codex's `developerInstructions` also tell it that commands
 already run in its working folder, so it leaves `workdir` out: a mistyped one fails with
 "Failed to create unified exec process: No such file or directory".
@@ -695,8 +763,8 @@ the run's member. The server gives the run's group, topic and `runId`, so the do
 | `op` | `body` | `chat-run` command |
 | --- | --- | --- |
 | `file.upload` | `{ path, name?, mime? }` | `chat-run file upload --file <path> [--name N] [--mime T]` → `{ file: FileMeta }` |
-| `artifact.create` | `{ title, dir \| file, entry?, kind?, note?, events?, media?, data? }` | `chat-run artifact create --title T (--dir D \| --file F) [--entry P] [--kind html\|file] [--note …] [--events e.json] [--media m.json] [--data d.json]` → `ArtifactVersionResponse` |
-| `artifact.version` | `{ artifactId, dir \| file, entry?, title?, note?, parentVersion?, events?, media?, data? }` | `chat-run artifact version --artifact A (--dir D \| --file F) [--parent N] [...]` → `ArtifactVersionResponse` |
+| `artifact.create` | `{ title, dir \| file, entry?, kind?, note?, events?, media?, data?, preview? }` | `chat-run artifact create --title T (--dir D \| --file F) [--entry P] [--kind html\|file] [--note …] [--summary S] [--metrics m.json] [--events e.json] [--data d.json] [--media m.json]` → `ArtifactVersionResponse` |
+| `artifact.version` | `{ artifactId, dir \| file, entry?, title?, note?, parentVersion?, events?, media?, data?, preview? }` | `chat-run artifact version --artifact A (--dir D \| --file F) [--parent N] [...]` → `ArtifactVersionResponse` |
 
 - Paths are made absolute by `chat-run` and must be inside the run's working folder after
   symbolic links are resolved; anything else gets `forbidden` with reason
@@ -708,6 +776,52 @@ the run's member. The server gives the run's group, topic and `runId`, so the do
   the 产出. `kind` defaults to
   `html` for an `.html`/`.htm` entry and `file` otherwise. The type of each file comes from its
   extension.
+
+- `preview` (`ArtifactPreview`, protocol.md "Artifacts") is what the 产出's card in the
+  conversation shows without opening the page: `--summary` (1 to 500 characters) is its
+  `summary` and `--metrics metrics.json` its `metrics` (a list, or `{ "metrics": [...] }`, of at
+  most 6 `{ label, value, delta? }`, each text of 1 to 40 characters). `chat-run` checks them
+  before anything is uploaded.
+- `--events events.json` is a list of `ArtifactEventDecl` (or `{ "events": [...] }`). `chat-run`
+  checks it before the upload and names what is wrong: an unknown key (the server would drop
+  `"type": "ask"` and declare an `emit`, so the page's `ask()` would fail with `not_allowed`), a
+  bad or repeated name, more than 20 events, a `kind` that is not `emit` or `ask`, and a `schema`
+  outside the supported subset (the keys of `TC_SCHEMA_KEYS`, at most 4 levels). The server's
+  refusal of a schema now says which rule it breaks (`unsupported schema: schema key $ref is
+  not supported`).
+
+#### Two-way pages from the command line
+
+`chat-run artifact guide` prints what the author of a two-way page must know, and `chat-run
+artifact example [--out <folder>]` prints or writes a starter (a shared checklist with one `emit`
+and one `ask`: `page/index.html`, and beside the page folder `events.json`, `data.json`,
+`reply.json`). Neither asks the daemon. The guide is the contract told to the member:
+
+- The page API `window.teamchat` (injected at document start in the app; absent in a normal
+  browser): `viewer`, `can { emit, ask, events }`, `onData(cb(data, { rev, cause? }))` (runs with
+  the current data, `null` before the first push, and on every push; returns the unsubscribe),
+  `getData()`, `emit(name, payload?)` → `{ eventId }`, `ask(name, payload?, { timeoutMs })` → the
+  reply (30 s by default, at most 120 s, 4 open at once). A rejected call is an `Error` with
+  `.code`: `not_allowed`, `bad_request`, `too_large`, `rate_limited`, `offline`, `timeout`,
+  `declined`, `failed`, `reloaded`, `unknown_method`.
+- `emit` and `ask` work only within 2 s of the viewer's own input: nothing is sent on load or
+  on a timer.
+- The sandbox: no network (every script, style, font and picture is a file of the version or a
+  `data:` URI; no fetch, XHR, WebSocket, iframe, worker or form submit); a link to the web asks
+  the person first.
+- The host stylesheet: the app gives the page its font, text color and table and code styles in
+  both themes on a transparent background, and the variables `--tc-fg`, `--tc-muted`,
+  `--tc-border`, `--tc-fill`, `--tc-bg`, `--tc-primary`, `--tc-pad` for the page's own parts.
+- The limits: 20 events, payload 16 KiB, reply 64 KiB within 120 s, data 256 KiB, 2 pushes a
+  second, `--cause` an event of the last 30 minutes.
+- Data belongs to one version and only the member that made the version pushes it; a new
+  version starts without data, so the author reads the current data and passes it with `--data`.
+  Emits of the same name sent in a burst are merged (the latest wins), so a page sends the full
+  value, never a toggle.
+
+Every number of the guide is read from its source by a daemon test (the protocol package, the
+page host in `crates/artifact-view`, `server/src/files/bridge.ts`), and the starter page is
+checked against the guide's own rules.
 
 ```ts
 PUT  /v1/machine/runs/:id/files      // machine token; body = the file's bytes
@@ -924,6 +1038,7 @@ with the machine token (results can be larger than a frame); they only read.
 | `topic.state` | `{ topicId?, groupId? }` | `chat-run topic state [--topic T] [--in G]` → `TopicStateResponse` |
 | `artifact.list` | `{ scope?, topicId?, groupId? }` | `chat-run artifact list [--group \| --topic T] [--in G]` → `RunArtifactsResponse` |
 | `artifact.get` | `{ artifactId, version?, out? }` | `chat-run artifact get --id A [--version N] [--out PATH]` → `RunArtifactResponse` (with `path` when `out` is set) |
+| `artifact.data.get` | `{ artifactId, version }` | `chat-run artifact data --artifact A --version V` (without `--file`) → `ArtifactDataResponse` `{ data, dataRev, updatedAt }` |
 | `card.get` | `{ messageId }` | `chat-run card get --message M` → `RunCardResponse` |
 | `decisions.list` | `{ limit?, groupId? }` | `chat-run decisions list [--limit N] [--in G]` → `RunDecisionsResponse` |
 | `member.list` | `{ groupId? }` | `chat-run member list [--in G]` → `RunMembersResponse` |
@@ -1006,6 +1121,11 @@ ContextHit = { messageId, topicId, topicTitle?, seq, authorName, at, snippet, gr
   file when that is text (`text/*`, JSON, XML, YAML, SVG; up to 200,000 characters, else
   `truncated`). Other files are read by id with `file.get`. With `out` the daemon also writes the
   entry file there, under the same rules as `file.get`.
+- `artifact.data.get` (`GET /v1/machine/runs/:id/artifacts/:artifactId/data?version=`) gives the
+  current data snapshot of a 产出 version of the run's own group and its `dataRev` (`data: null`,
+  `dataRev: 0` before the first push), so a member can change a shared page's state that it did
+  not keep from an earlier turn: read, change, push the whole state with `--file` and
+  `--base-data-rev <dataRev>`. A 产出 of another group is `forbidden`.
 - `card.get` gives a card message of the group whole: the card document, the open ask with the
   names it waits on, and the live answers (a private card shows only `answerCount`, as to members).
 - `decisions.list` gives the group's decisions (群里的决定), newest first, `limit` 1-100, default 20,
@@ -1037,7 +1157,11 @@ run that only promised work is skipped when the run reported `blocked` or `waiti
 
 When the CLI posted its own Card v2 with intent `done` (`card.post`) in the run, that card is the
 run's result: the server does not post the CLI's last message again, and `resultMessageId` names
-the card.
+the card. Such a card does not get what the automatic done card adds (the run's pull requests,
+its 产出 and the acceptance checks); only its evidence lines are made truthful (a `pass` without a
+file, a link, a 产出 or a recording reads as a claim, and test counts come from the run's log). The
+note therefore tells a CLI to post no `done` card: numbers go into an `info` card, and the last
+message stays the result. `chat-run card check` says the same about a `done` card.
 
 ### Memory notes (`chat-run`, daemon over HTTP; feature `context`)
 
