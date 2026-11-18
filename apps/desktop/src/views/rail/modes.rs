@@ -86,8 +86,8 @@ pub(super) enum Item {
         id: GroupId,
         n: usize,
     },
-    /// A: the server is unreachable and a 群 has no cached 话题: the one
-    /// muted line of the list that says they come back.
+    /// A: the server is unreachable and a 群 has no cached 话题: the
+    /// muted line that says they come back.
     Offline {
         id: GroupId,
     },
@@ -214,7 +214,6 @@ pub(super) fn work(p: &dyn ChatProvider, i: &Inputs) -> Vec<Entry> {
     let me = i.me.as_deref();
     let open = i.open.as_ref();
     let mut out: Vec<Vec<Item>> = Vec::new();
-    let mut offline_noted = false;
     let groups = p.groups();
     for g in groups.iter().filter(|g| g.kind == GroupKind::Group) {
         let listed: Vec<_> = p.topics(&g.id).into_iter().filter(model::listed).collect();
@@ -249,13 +248,10 @@ pub(super) fn work(p: &dyn ChatProvider, i: &Inputs) -> Vec<Entry> {
                 }),
                 Sync::Synced => section.push(Item::NoTopics { id: g.id.clone() }),
                 Sync::Syncing => section.push(Item::Syncing { id: g.id.clone() }),
-                // §2.13: one compact line for the whole list, under the
-                // first 群 with nothing cached, not one per 群.
-                Sync::Unreachable if !offline_noted => {
-                    offline_noted = true;
-                    section.push(Item::Offline { id: g.id.clone() });
-                }
-                Sync::Unreachable => {}
+                // §2.13: a compact line under every 群 with nothing cached,
+                // as the page beside it says per section, so no header
+                // stands alone.
+                Sync::Unreachable => section.push(Item::Offline { id: g.id.clone() }),
             }
         }
         if !folded {

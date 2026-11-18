@@ -662,7 +662,7 @@ impl NativeKit {
             // Sized to its rows, so the pane's edge covers the last one.
             inspector_column(cx)
                 .h_auto()
-                .pb(px(16.))
+                .pb(super::tokens::space::S16)
                 .child(
                     InspectorSection::new("ki-owner", t::INS_OWNER).row(label_value(
                         t::INS_MEMBER,

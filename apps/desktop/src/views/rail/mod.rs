@@ -594,9 +594,6 @@ impl RailView {
 impl Render for RailView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.refresh(cx);
-        if self.reveal_waits {
-            cx.on_next_frame(window, |_, _, cx| cx.notify());
-        }
         let nav = self.services.nav.read(cx);
         let page = nav.page();
         let mode = nav.rail_mode;
@@ -646,6 +643,12 @@ impl Render for RailView {
         let filter = self.filter_button(mode, cx);
         let no_rows = self.cache.as_ref().is_none_or(|c| c.entries.is_empty());
         let first_sync = syncing;
+        // The reveal waits one frame for the list's first layout; while the
+        // list is not drawn (the skeleton, the empty hint) there is nothing
+        // to wait for.
+        if self.reveal_waits && !no_rows && !first_sync {
+            cx.on_next_frame(window, |_, _, cx| cx.notify());
+        }
         // §2.14, A1-13: no create button while the first sync runs.
         // 新建 (onboarding): 新话题, 新建群 and 发起私聊 in one pull-down, so a
         // new member finds where a 群 or a 私聊 starts without the menu bar.
@@ -907,18 +910,22 @@ fn account_menu(
         .item(
             PopupMenuItem::new(c::ACCOUNT_ADD).on_click(move |_, _, _| add.provider.add_account()),
         )
-        // Both rows are built the same way, so each shows its shortcut
-        // (⌘, and ⌥⌘,) on every open.
-        .menu(
-            crate::copy::settings::MENU_SETTINGS,
-            Box::new(crate::app::ToggleSettings),
+        // Both rows are plain items that send their action: a shortcut read
+        // from the keymap shows only when the focus is where the key is
+        // bound, so it came and went from one open to the next. The
+        // shortcuts (⌘, and ⌥⌘,) are in the menu bar.
+        .item(
+            PopupMenuItem::new(crate::copy::settings::MENU_SETTINGS).on_click(|_, window, cx| {
+                window.dispatch_action(Box::new(crate::app::ToggleSettings), cx)
+            }),
         )
         // Owners only: 团队管理….
         .when(crate::views::settings::i_am_owner(services), |menu| {
-            menu.menu(
-                crate::copy::admin::MENU_OPEN,
-                Box::new(crate::views::admin::OpenTeamAdmin),
-            )
+            menu.item(PopupMenuItem::new(crate::copy::admin::MENU_OPEN).on_click(
+                |_, window, cx| {
+                    window.dispatch_action(Box::new(crate::views::admin::OpenTeamAdmin), cx)
+                },
+            ))
         })
         .separator()
         .item(
