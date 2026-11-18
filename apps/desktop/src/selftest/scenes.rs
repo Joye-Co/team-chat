@@ -838,6 +838,13 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::timeline::preview::open_code_fold,
     },
     Scene {
+        name: "topic-code-fold-find",
+        about: "⌘F on a word past the cut of a folded code fence: the fence is shown whole, with 收起 in its strip",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::timeline::preview::open_code_fold_find,
+    },
+    Scene {
         name: "topic-long-answer",
         about: "A long answer of an AI member folded to its first blocks, with 展开全文 and the reading time",
         start: Start::SignedIn,
@@ -928,6 +935,21 @@ pub const SCENES: &[Scene] = &[
                 c,
                 MediaSample::from_name("media-markdown").expect("sample"),
                 Some("seq"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-markdown-find-code",
+        about: "⌘F in the Markdown reader on a word that is only in a code block: a band behind the part that holds the current match",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open_finding(
+                s,
+                c,
+                MediaSample::from_name("media-markdown").expect("sample"),
+                Some("lastAckedSeq"),
                 cx,
             )
         },
@@ -1501,7 +1523,7 @@ fn media_ready(name: &str) -> Option<fn(&App) -> bool> {
         "media-html" => Some(|cx| {
             media_preview::ready(MediaSample::from_name("media-html").expect("sample"), cx)
         }),
-        "media-markdown" | "media-markdown-find" => Some(|cx| {
+        "media-markdown" | "media-markdown-find" | "media-markdown-find-code" => Some(|cx| {
             media_preview::ready(
                 MediaSample::from_name("media-markdown").expect("sample"),
                 cx,

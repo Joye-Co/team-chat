@@ -689,21 +689,27 @@ fn markdown_blocks(
         .then_some(head)
         .into_iter()
         .chain(parts_.into_iter().enumerate().map(|(i, (_, body))| {
-            // ⌘F: the matches of this part, the current one stronger.
+            // ⌘F: the matches of this part, the current one stronger. A current
+            // match that cannot carry a mark (in code, a link, a diagram) gets
+            // a band behind its part instead, as a row of a 话题 does.
+            let mut band = false;
             let body = match found.and_then(|f| f.matches.get(i).map(|m| (f, m))) {
                 Some((f, ranges)) if !ranges.is_empty() => {
-                    crate::views::timeline::find::mark_matches(
+                    let current = f.current.filter(|(part, _)| *part == i).map(|(_, m)| m);
+                    let (marked, current_marked) = crate::views::timeline::find::mark_matches(
                         &body,
                         ranges,
-                        f.current.filter(|(part, _)| *part == i).map(|(_, m)| m),
+                        current,
                         ui::native::tokens::find::match_fill(&palette),
                         ui::native::tokens::find::current_fill(&palette),
-                    )
-                    .0
+                    );
+                    band = current.is_some() && !current_marked;
+                    marked
                 }
                 _ => body,
             };
             div()
+                .when(band, |d| d.bg(ui::native::native_colors(cx).fill))
                 // A section sits further from the block above it than its heading
                 // sits from its own content, so each heading reads with what it heads.
                 .when(i > 0, |d| d.pt(space::S16))
