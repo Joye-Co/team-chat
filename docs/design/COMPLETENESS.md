@@ -33,7 +33,7 @@ The audits used two scales: the shadcn web scale (14 body, 36 controls) and a Ma
 | D8 | Form anatomy | One grouped FormRow in Settings **and** in every sheet (label left, control right). A textarea is a full-width row in the same group. | Settings and overlay audits both accept it; it keeps the Mac look. |
 | D9 | Page title | The Mac toolbar title (16 medium + 12 muted subtitle) is the page title of every main-window page. No second 24 px title in the content. 24 px titles appear only on full-window screens (login) and the member profile hero. | Keeps the Mac toolbar title; removes duplicate titles. |
 | D10 | Selected row | Muted fill (#f5f5f5 light / #262626 dark) + font-medium, radius 6 or 8. Never an inverted black row. | Today the palette, start-dm and mention popup use black rows and the sidebar uses gray. |
-| D11 | Cancel button | Outline variant (border + background). The secondary gray fill is not used for Cancel. | A disabled primary at 50% opacity must not look like Cancel. |
+| D11 | Cancel button | Outline variant. Owner decision 2026-11-06: the outline variant is a Mac push button, the foreground at 8 % as its fill (`push`; hover 12 %, pressed 16 %), with no border line and no shadow: a border on every 编辑… / 取消 is noise. Read every "outline" button in this file as this look. It is a tint of the text color, so it shows on the window, a group box and a sheet in both modes; secondary is the opaque `muted` fill and is not used for Cancel. | A disabled primary at 50% opacity must not look like Cancel. |
 | D12 | Progress | One Progress: h4, radius full, track = primary at 20%, value = primary. | Fixes the dark-mode inversion and the 3 progress styles. |
 | D13 | Right pane | One width for every right pane (inspector, 改动, side chat, 群资料, the live pane 实时查看 and the artifact pane): 400 by default. A drag on the pane's leading edge resizes it from 320 to 960 (rubber band past the bounds, double-click resets); the width is shared by every pane kind and remembered, so the column never jumps when one pane replaces another. Command and output boxes never wrap or clip a long line: it scrolls sideways inside the box, with a scrollbar on the box's bottom edge whenever a line is cut. (Owner decision 2026-11-10; replaces the 320 / 400 split of v14.) | Three widths (320 / 400 / 520) made the column jump between panes; a cut command line read as truncated. |
 | D14 | Error text (owner decision v16) | Every error says its words in the foreground color with a red icon, the failed message ("没有发出") too. Red text is never the only carrier. | One error recipe (2.15). |
@@ -68,7 +68,7 @@ The audits used two scales: the shadcn web scale (14 body, 36 controls) and a Ma
 | accent | #f5f5f5 | #262626 | Same value as muted. Menu and palette highlight |
 | muted-foreground | #737373 | #a1a1a1 | **All** secondary text, placeholders, meta, timestamps |
 | border | #e5e5e5 | rgb(255 255 255 / 16%) (owner decision v15: raised until ≥ 1.5:1) | **All** 1 px lines: toolbar border, pane borders, separators, frames |
-| input | #e5e5e5 | rgb(255 255 255 / 20%) | Input and outline button border, switch OFF track |
+| input | #e5e5e5 | rgb(255 255 255 / 20%) | Input and select border, switch OFF track |
 | ring | #a1a1a1 | #737373 | Focus ring, 3 px at 50% |
 | primary | #171717 | #e5e5e5 | Primary button, switch ON track, Progress value, selected chart bar |
 | primary-foreground | #fafafa | #171717 | Text on primary |
@@ -154,7 +154,7 @@ Agent avatars use a squircle at radius = size x 0.25 (8 at 32). Human avatars ar
 
 | Shadow | Value | On |
 |---|---|---|
-| xs | 0 1px 2px rgb(0 0 0 / .05) | input, outline button, KPI card |
+| xs | 0 1px 2px rgb(0 0 0 / .05) | input, select, KPI card |
 | sm | 0 1px 3px rgb(0 0 0 / .1), 0 1px 2px -1px rgb(0 0 0 / .1) | card, active segmented trigger |
 | md | 0 4px 6px -1px rgb(0 0 0 / .1), 0 2px 4px -2px rgb(0 0 0 / .1) | menu, popover, tooltip, toast, palette |
 | lg | 0 10px 15px -3px rgb(0 0 0 / .1), 0 4px 6px -4px rgb(0 0 0 / .1) | sheet, alert |
@@ -165,7 +165,7 @@ Elevation has 3 levels: content (none, xs, sm), float (md), modal (lg).
 
 | Control | Size | Detail |
 |---|---|---|
-| Button default | h32, px16 (px12 with icon), radius 8, 14 medium, icon 16, gap 8 | Variants: default (primary), outline, secondary (muted fill), ghost, destructive (red fill, white text), link. Outline hover (v16, K-04): `control_hover` = accent in light; in dark the input token at 50 % over the card fill, so the step over the dark control fill is visible |
+| Button default | h32, px16 (px12 with icon), radius 8, 14 medium, icon 16, gap 8 | Variants: default (primary), outline (D11: the foreground at 8 %, no border, no shadow; hover 12 %, pressed 16 %), secondary (muted fill), ghost, destructive (red fill, white text), link. Field-like buttons (a select) keep the input's fill, 1 px border and shadow xs; their hover (v16, K-04) is `control_hover` = accent in light; in dark the input token at 50 % over the card fill, so the step over the dark control fill is visible |
 | Button sm | h28, px12 | In form rows, table cells, card footers in dense cards |
 | Button lg | h36, px24 | Login, empty-state CTA in a full page, composer Send |
 | Icon button | 32 (sm 28), radius 8, icon 16 | Ghost in toolbars and rows |
@@ -659,7 +659,7 @@ Run every check on the light, dark and worst-case 1x PNG of a scene before the s
 - E1. Every list, table, pane and card region has a loading (skeleton at the real row height), empty (Empty component) and error (Alert with Retry) design, captured as its own scene.
 - E2. Each named state capture differs from its base screen in the state region (`diff.py` npx > 0) and shows an element named for the state.
 - E3. Every control shows default, hover, focus (3 px ring), disabled (50%), loading (spinner, width kept) and, for fields, error. F6 / ⌥Tab (⇧ back) move the focus between the window's regions: sidebar, thread, composer (v16, K-10). [visual; hover and focus are not in the current capture set]
-- E4. A disabled primary differs from Cancel (outline vs primary at 50%).
+- E4. A disabled primary differs from Cancel (the outline tint with full-strength text, D11, vs primary at 50%).
 - E5. Sheet height does not change when an error appears.
 
 ### F. Content
