@@ -347,8 +347,9 @@ impl NativeColors {
             knob: if p.dark { p.foreground } else { p.background },
             knob_on: p.primary_foreground,
             segment: if p.dark { p.input } else { p.background },
+            // Dark: the border tint, so the track steps up from a card and a group fill alike.
             segment_track: if p.dark {
-                p.muted
+                p.border
             } else {
                 p.foreground.opacity(0.06)
             },
