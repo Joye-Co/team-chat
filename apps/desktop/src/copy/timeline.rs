@@ -32,7 +32,7 @@ crate::copy! {
     DATE_OLDER = "{y}年{m}月{d}日",
     STARTED_LINE = "{starter} 发起 · {owner} 负责",
     STARTED_LINE_NO_OWNER = "{starter} 发起",
-    STARTED_IN = "{starter} 在 {group} 发起",
+    STARTED_IN = "{starter} 在「{group}」发起",
     START_ASSIGN = "交代给成员",
     START_ADD_MEMBERS = "添加成员…",
     BOT_WORKING = "正在工作",
@@ -78,7 +78,7 @@ crate::copy! {
     PLAN_DOING_NAMED = "{name} 正在做：{step}",
     // 1.1.1: the 群's own chat. Its start block says what it is for; a
     // message's menu opens a 话题 from it.
-    CHAT_START_GROUP = "在 {group} 里直接聊；要做一件事时，开个话题",
+    CHAT_START_GROUP = "在「{group}」里直接聊；要做一件事时，开个话题",
     CHAT_START_DM = "在这里直接聊；要做一件事时，开个话题",
     START_NEW_TOPIC = "新话题",
     MENU_OPEN_TOPIC = "开个话题",
@@ -105,4 +105,11 @@ crate::copy! {
     STEPS_DURATION_WHOLE_MIN = "{m} 分钟",
     // The run card of a run being stopped: the step it stops at.
     PLAN_HELD = "停在：{step}",
+    // The run card of a run that waits for a computer: the badge says why.
+    STATE_WAITING_COMPUTER = "{name} 还没开始",
+    // The failed-run alert of a step of 按顺序做: its 重试 is on the order's bar.
+    RUN_FAILED_DETAIL_RELAY = "{name} {time} 停在「{step}」。看看日志，处理好后点上方的重试。",
+    RUN_FAILED_DETAIL_NO_STEP_RELAY = "{name} {time} 停下了。看看日志，处理好后点上方的重试。",
+    // The find bar says what it searches: cards and file names are not searched.
+    FIND_SCOPE = "只查消息正文",
 }
