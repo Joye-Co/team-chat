@@ -545,7 +545,7 @@ crate::copy! {
     MACHINE_CREDENTIAL_HINT = "上面的命令已经带上它。只有手动配置时才用得到。",
     SECTION_AI_HINT_ON = "用团队自己的 API Key，费用由服务商按用量收取。只有管理员能看到和修改。",
     AI_SAVE_UNTESTED_TITLE = "保存没有通过测试的设置？",
-    AI_SAVE_UNTESTED_BODY = "保存后，前台、话题标题、话题摘要和记忆可能停止工作。",
+    AI_SAVE_UNTESTED_BODY = "前台、话题标题、话题摘要和记忆\n可能会停止工作。",
     AI_SAVE_UNTESTED_OK = "仍然保存",
     // --- end visual finish: settings ---
 }
