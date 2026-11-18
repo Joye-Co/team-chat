@@ -37,5 +37,8 @@ crate::copy! {
     STATUS_IDLE = "空闲",
     // 交代 when the query names someone who is not a member.
     NOBODY_NAMED = "没有叫 {name} 的成员",
+    // 产出 found by name, 话题 or maker: the section and a row's version.
+    SECTION_ARTIFACTS = "产出",
+    ARTIFACT_VERSION = "v{v}",
     // --- end v14/t4 palette ---
 }

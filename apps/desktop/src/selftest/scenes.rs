@@ -696,6 +696,13 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::search::preview::open_dialog,
     },
     Scene {
+        name: "search-artifact",
+        about: "⇧⌘F with 月报 typed on the v2 team: the 产出 section finds 10 月数据月报 by name, with its kind's symbol, version, 话题 and time",
+        start: Start::V2Files,
+        setup: |s, cx| s.nav.update(cx, |nav, cx| nav.open_desk(cx)),
+        open: crate::views::search::preview::open_artifact_dialog,
+    },
+    Scene {
         name: "search-hit",
         about: "A search hit 5,000 messages up opened in its 话题 and highlighted",
         start: Start::SignedIn,
