@@ -44,6 +44,23 @@ pub fn open_failed(services: &Services, cx: &mut App) {
     open_run(services, FAILED_TOPIC, FAILED_RUN, cx);
 }
 
+/// The failed run after 查看日志: the developer view, at the raw events.
+pub fn open_failed_log(services: &Services, cx: &mut App) {
+    open_failed(services, cx);
+    REVEAL_LOG.store(true, std::sync::atomic::Ordering::Relaxed);
+    services
+        .nav
+        .update(cx, |nav, cx| nav.set_developer_view(true, cx));
+}
+
+/// The scene's stand-in for the press of 查看日志: the view opens as if pressed.
+static REVEAL_LOG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether a new view starts as if 查看日志 was pressed (once).
+pub(super) fn take_reveal_log() -> bool {
+    REVEAL_LOG.swap(false, std::sync::atomic::Ordering::Relaxed)
+}
+
 /// The inspector of the topic where a bot member works.
 pub fn open_running_details(services: &Services, cx: &mut App) {
     open_details(services, TOPIC, cx);

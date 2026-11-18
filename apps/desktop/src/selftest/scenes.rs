@@ -766,6 +766,13 @@ pub const SCENES: &[Scene] = &[
         open: open_main,
     },
     Scene {
+        name: "process-failed-log",
+        about: "The 过程 tab of a failed bot run after 查看日志: the developer view, at the raw events",
+        start: Start::SignedIn,
+        setup: crate::views::process::preview::open_failed_log,
+        open: open_main,
+    },
+    Scene {
         name: "process-dev",
         about: "The 过程 tab with the developer view on: ids and raw events",
         start: Start::SignedIn,
