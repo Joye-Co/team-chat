@@ -610,7 +610,9 @@ impl AdminView {
                 } else {
                     match r.seen {
                         Some(t) => {
-                            let d = model::duration(now.saturating_sub(t));
+                            // Whole minutes at the finest: seconds would not fit the column.
+                            let minutes = (now.saturating_sub(t) / 60_000).max(1);
+                            let d = model::duration(minutes * 60_000);
                             TruncText::new(fill(m::FLEET_OFFLINE_FOR, &[("d", &d)]))
                                 .into_any_element()
                         }
@@ -719,7 +721,9 @@ impl AdminView {
                         ),
                     )
                     .child(
+                        // The ⋯ column beside it keeps the gap: the words get the padding.
                         cell(Some(t::TEAM_COL_RECENT), false)
+                            .pr(gpui::Pixels::ZERO)
                             .text_color(k.secondary)
                             .child(recent),
                     )
@@ -1149,13 +1153,11 @@ impl AdminView {
                 .flex()
                 .flex_col()
                 .child(
-                    // An amount stays on one line.
-                    div()
-                        .whitespace_nowrap()
+                    // An amount stays on one line and inside its tile.
+                    TruncText::new(v)
                         .n_title3()
                         .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .n_figures()
-                        .child(v),
+                        .n_figures(),
                 )
                 .child(div().n_footnote().text_color(k.secondary).child(l))
         };

@@ -545,61 +545,73 @@ impl AdminView {
                     .then(|| Some((detail_str(e, "groupId")?, e.target.as_deref()?)))
                     .flatten()
                     .map(|(g, t)| (g.to_string(), t.to_string()));
-                let row =
-                    div()
-                        .id(SharedString::from(format!("activity-{}", e.id)))
-                        .min_h(height::LIST_ROW)
-                        .px(space::S16)
-                        .py(space::S8)
-                        .flex()
-                        .items_center()
-                        .gap(space::S16)
-                        .child(
-                            div()
-                                .w(height::LIST_ROW)
-                                .flex_none()
-                                .n_style(text::MONO)
-                                .text_color(k.secondary)
-                                .child(super::clock_short(e.at)),
-                        )
-                        .child(
-                            div()
-                                .flex_none()
-                                .size(height::DEFAULT)
-                                .rounded(radius::CONTROL)
-                                .bg(k.fill)
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(sym_icon(
-                                    glyph,
-                                    SymSize::INLINE,
-                                    // A run that failed is the one red row, as on 总览 (§1.3).
-                                    if e.kind == kind::RUN {
-                                        k.red
-                                    } else {
-                                        k.secondary
-                                    },
-                                )),
-                        )
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w(gpui::Pixels::ZERO)
-                                .flex()
-                                .flex_col()
-                                .child(TruncText::new(title).n_headline())
-                                .children(meta.map(|t| {
+                let row = div()
+                    .id(SharedString::from(format!("activity-{}", e.id)))
+                    .min_h(height::LIST_ROW)
+                    .px(space::S16)
+                    .py(space::S8)
+                    .flex()
+                    .items_center()
+                    .gap(space::S16)
+                    .child(
+                        div()
+                            .w(height::LIST_ROW)
+                            .flex_none()
+                            .n_style(text::MONO)
+                            .text_color(k.secondary)
+                            .child(super::clock_short(e.at)),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .size(height::DEFAULT)
+                            .rounded(radius::CONTROL)
+                            .bg(k.fill)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(sym_icon(
+                                glyph,
+                                SymSize::INLINE,
+                                // A run that failed is the one red row, as on 总览 (§1.3).
+                                if e.kind == kind::RUN {
+                                    k.red
+                                } else {
+                                    k.secondary
+                                },
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(gpui::Pixels::ZERO)
+                            .flex()
+                            .flex_col()
+                            .child(TruncText::new(title).n_headline())
+                            .children(
+                                meta.map(|t| {
                                     TruncText::new(t).n_footnote().text_color(k.secondary)
-                                })),
-                        )
-                        .child(Badge::new(kind_label(&e.kind)));
+                                }),
+                            ),
+                    )
+                    .child(Badge::new(kind_label(&e.kind)))
+                    // Every row keeps the chevron's slot, so the badges share one edge.
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(SymSize::INLINE.slot_px())
+                            .flex()
+                            .justify_center()
+                            .when(topic.is_some(), |d| {
+                                d.child(sym_icon(Sym::ChevronRight, SymSize::INLINE, k.secondary))
+                            }),
+                    );
                 let row = match topic {
                     None => row.into_any_element(),
                     Some((group, topic)) => {
                         let nav = self.services.nav.clone();
                         row.focus_row(false, cx)
-                            .child(sym_icon(Sym::ChevronRight, SymSize::INLINE, k.secondary))
+                            .framed_ring(cx)
                             .on_click(move |_, _, cx| {
                                 let (g, t) = (group.clone(), topic.clone());
                                 nav.update(cx, |nav, cx| nav.open_topic(g.into(), t.into(), cx));
