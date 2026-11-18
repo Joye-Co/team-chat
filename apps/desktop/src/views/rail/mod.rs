@@ -453,10 +453,14 @@ impl RailView {
         match self.list.bounds_for_item(ix) {
             Some(row) if row.top() >= viewport.top() => {
                 // The bottom edge fades a row that has rows after it.
+                // With the pill up it keeps the room of that fade above the
+                // band too: the pill may go once this row is in view.
                 let clear = if ix == last {
                     px(0.)
+                } else if self.bottom_edge.get().waiting.is_some() {
+                    bottom_clear(false) + metrics::SIDEBAR_WAITING_BAND
                 } else {
-                    bottom_clear(self.bottom_edge.get().waiting.is_some())
+                    bottom_clear(false)
                 };
                 let under = row.bottom() + clear - viewport.bottom();
                 if under <= px(0.) {
