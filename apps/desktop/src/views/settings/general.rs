@@ -420,15 +420,17 @@ impl GeneralPage {
                     .text_color(k.secondary)
                     .child(t)
             };
+            // The steps are the next action of this row: body text, not a caption.
+            let step = |t: String| div().w_full().n_body().text_color(k.label).child(t);
             rows.push(
                 dependent()
                     .flex_col()
                     .items_start()
                     .gap(space::S4)
                     .child(line(u::MANUAL_STEPS.to_string()))
-                    .child(line(fill(u::MANUAL_STEP_1, &[("product", product)])))
-                    .child(line(fill(u::MANUAL_STEP_2, &[("product", product)])))
-                    .child(line(fill(u::MANUAL_STEP_3, &[("product", product)])))
+                    .child(step(fill(u::MANUAL_STEP_1, &[("product", product)])))
+                    .child(step(fill(u::MANUAL_STEP_2, &[("product", product)])))
+                    .child(step(fill(u::MANUAL_STEP_3, &[("product", product)])))
                     .into_any_element(),
             );
         }
@@ -926,7 +928,9 @@ fn admin_card(cx: &App) -> impl IntoElement {
                 push_button(
                     "open-admin",
                     a::SETTINGS_CARD_OPEN,
-                    PushStyle::Default,
+                    // Navigation, not the action of the tab: the one primary
+                    // stays with the version row.
+                    PushStyle::Outline,
                     PushSize::Small,
                     cx,
                 )
