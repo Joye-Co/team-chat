@@ -307,10 +307,12 @@ impl TimelineView {
                     || changes.any(|c| match c {
                         Change::Topics { group_id } => *group_id == g,
                         Change::Runs { group_id, topic_id } => *group_id == g && *topic_id == tid,
+                        // Connection: a message waiting to send shows whether it can.
                         Change::RunLog { .. }
                         | Change::Members
                         | Change::Session
-                        | Change::Groups => true,
+                        | Change::Groups
+                        | Change::Connection => true,
                         _ => false,
                     });
                 if touches {

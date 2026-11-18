@@ -498,6 +498,13 @@ impl TimelineView {
         let body = body.map(|b| {
             let pending = message.send_state == SendState::Pending;
             let spinner_color = colors.text_3;
+            // §2.12: with no connection nothing is in flight: the message
+            // waits, a still clock, until it can go.
+            let queued = !matches!(
+                self.services.provider.connection(),
+                crate::data::ConnectionState::Online
+            );
+            let queued_id = ElementId::Name(format!("queued-{key}").into());
             ui::motion::busy_gate(
                 ElementId::Name(format!("sending-{key}").into()),
                 pending,
@@ -515,13 +522,27 @@ impl TimelineView {
                                 .child(b),
                         )
                         .when(shown, |el| {
-                            el.child(
-                                div().flex_none().pb(px(3.)).child(
-                                    ui::spinner()
-                                        .with_size(theme::icon::CHIP)
-                                        .color(spinner_color),
-                                ),
-                            )
+                            el.child(div().flex_none().pb(px(3.)).child(if queued {
+                                div()
+                                    .id(queued_id.clone())
+                                    .child(
+                                        ui::Sym::Waiting
+                                            .icon(ui::SymSize::for_slot(theme::icon::CHIP))
+                                            .text_color(spinner_color),
+                                    )
+                                    .tooltip(|window, cx| {
+                                        gpui_component::tooltip::Tooltip::new(
+                                            crate::copy::composer::QUEUED_WHEN_ONLINE,
+                                        )
+                                        .build(window, cx)
+                                    })
+                                    .into_any_element()
+                            } else {
+                                ui::spinner()
+                                    .with_size(theme::icon::CHIP)
+                                    .color(spinner_color)
+                                    .into_any_element()
+                            }))
                         })
                         .into_any_element()
                 },
