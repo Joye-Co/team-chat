@@ -79,10 +79,14 @@ fn open_ask(
     bot: &str,
     route: AskRoute,
 ) -> Option<String> {
+    use crate::data::v2::AskKind;
+    // 去回复 answers a question: an approval or a review is not one.
+    let leads_here = |kind: AskKind| match route {
+        AskRoute::Approve => kind == AskKind::Approval,
+        AskRoute::Reply => !matches!(kind, AskKind::Approval | AskKind::Review),
+    };
     asks.iter()
-        .filter(|(a, done)| {
-            !done && (route == AskRoute::Reply || a.kind == crate::data::v2::AskKind::Approval)
-        })
+        .filter(|(a, done)| !done && leads_here(a.kind))
         .filter_map(|(a, _)| Some((a, a.message_id.as_ref()?)))
         .max_by_key(|(a, _)| (a.from == bot, a.at))
         .map(|(_, id)| id.to_string())
@@ -788,8 +792,8 @@ impl LivePane {
             RunPhase::WaitingPerson | RunPhase::WaitingApproval => {
                 icon_ink = words.badge.color(&n);
                 // A stuck run says what it stopped on: its own words when it left
-                // any, else the step of the plan it is on.
-                // A run waiting for approval names the step that waits for it.
+                // any, else the step of the plan it is on. A run waiting for approval
+                // names that step too.
                 let at_step = || {
                     run.plan
                         .iter()
@@ -2961,6 +2965,16 @@ mod tests {
         let reply = open_ask(&asks, "forge", AskRoute::Reply);
         assert_eq!(reply.as_deref(), Some("choice"));
         assert_eq!(open_ask(&asks[..1], "forge", AskRoute::Approve), None);
+    }
+
+    #[test]
+    fn the_way_to_a_reply_never_opens_an_approval_or_a_review() {
+        use crate::data::v2::AskKind::{Approval, Review};
+        let asks = [
+            (ask("approval", "forge", Approval, 9), false),
+            (ask("review", "forge", Review, 8), false),
+        ];
+        assert_eq!(open_ask(&asks, "forge", AskRoute::Reply), None);
     }
 
     #[test]
