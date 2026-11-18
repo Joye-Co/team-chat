@@ -290,7 +290,7 @@ impl TopicRail {
             push_button(
                 "rail-hand-to",
                 c::HAND_TO,
-                PushStyle::Outline,
+                PushStyle::Ghost,
                 PushSize::Small,
                 cx,
             ),
