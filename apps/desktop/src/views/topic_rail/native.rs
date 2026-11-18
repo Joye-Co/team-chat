@@ -728,13 +728,15 @@ impl TopicRail {
             let glyph = match item.state {
                 PlanState::Done => mark(Sym::Check, k.secondary),
                 // A run that ended at this step no longer works on it: the
-                // failed mark for a run that got stuck, the open circle for
-                // one a person stopped, never the spinner.
-                PlanState::Current if !run.status.is_active() => (run.status
-                    == crate::data::RunStatus::Failed)
-                    .then(|| state_mark(BadgeState::Failed, &k))
-                    .flatten()
-                    .unwrap_or_else(|| mark(Sym::Todo, k.secondary)),
+                // failed mark for a run that got stuck, the ban mark for one
+                // a person stopped (§2.12, as the title bar and the relay
+                // strip), never the spinner.
+                PlanState::Current if !run.status.is_active() => match run.status {
+                    crate::data::RunStatus::Failed => state_mark(BadgeState::Failed, &k),
+                    crate::data::RunStatus::Cancelled => state_mark(BadgeState::Deactivated, &k),
+                    _ => None,
+                }
+                .unwrap_or_else(|| mark(Sym::Todo, k.secondary)),
                 PlanState::Current => state_mark(BadgeState::Working, &k)
                     .unwrap_or_else(|| mark(Sym::Todo, k.secondary)),
                 PlanState::Waiting => state_mark(BadgeState::NeedsYou, &k)
