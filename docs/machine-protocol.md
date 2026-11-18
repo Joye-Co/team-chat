@@ -568,6 +568,9 @@ RunEvent += { type: "output", outputId, op: "card.post" | "card.patch" | "intera
 run.input.answer += { answerId?, askId?, eventId?, event?, blockId?, value? }
 ```
 
+The text envelope of a card event carries `rev` (what the person saw), `currentRev` when the card
+has moved on and `block` as the card has it at that rev, so a member patches from `currentRev`.
+
 On a private card (a non-public poll, an anonymous questionnaire; protocol.md "Private
 answers"), `actor` is `{ id: "anonymous", name: "anonymous" }`, and `run.input.authorId` too.
 The voter's id is not in the room's hand-off to the run either. A vote of a poll that shows
