@@ -798,7 +798,6 @@ fn tabs(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) -> AnyE
     else {
         return div().into_any_element();
     };
-    let k = theme::colors(cx);
     let current = node
         .ui
         .block(id)
@@ -807,7 +806,6 @@ fn tabs(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) -> AnyE
         .filter(|t| tabs.iter().any(|x| &x.id == t))
         .or_else(|| tabs.first().map(|t| t.id.clone()))
         .unwrap_or_default();
-    let _ = k;
     // The one tabs control of the kit (gpui-component buttons on a segment track, §1.8):
     // every tab a tab stop with its hover and focus ring. Many long labels scroll sideways
     // inside the card instead of pushing it wide.
@@ -821,12 +819,20 @@ fn tabs(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) -> AnyE
         interact::Emitter::of(node.ctx),
         id.clone(),
     );
+    // Tabs that do not fit scroll sideways and say so: the right end fades into the card
+    // (§2.21), the last tab clears the fade at the end, and the open tab is brought into view.
+    let scroll_id: gpui::ElementId = node.ctx.id(format!("tabs-scroll-{id}")).into();
+    let scroll = window
+        .use_keyed_state(scroll_id.clone(), cx, |_, _| gpui::ScrollHandle::new())
+        .read(cx)
+        .clone();
     let control = crate::ui::native::Segmented::new(
         node.ctx.id(format!("tabs-{id}")),
         tabs.iter()
             .map(|t| crate::ui::native::Segment::Label(t.label.clone().into())),
     )
     .selected(selected)
+    .reveal_in(&scroll, space::S16)
     .on_change(move |ix, _, cx| {
         let Some(tid) = ids.get(ix).cloned() else {
             return;
@@ -847,13 +853,60 @@ fn tabs(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) -> AnyE
             );
         }
     });
+    let scrolls = scroll.max_offset().x > px(0.);
+    let scrolled = scroll.offset().x < px(0.);
+    let card = crate::ui::native::native_colors(cx).sheet;
     let bar = div()
-        .id(node.ctx.id(format!("tabs-scroll-{id}")))
-        .max_w_full()
-        .flex()
-        .overflow_x_scroll()
-        .restrict_scroll_to_axis()
-        .child(control);
+        .relative()
+        .w_full()
+        .min_w(px(0.))
+        .child(
+            div()
+                .id(scroll_id)
+                .w_full()
+                .flex()
+                .overflow_x_scroll()
+                .restrict_scroll_to_axis()
+                .track_scroll(&scroll)
+                .child(
+                    div()
+                        .flex_none()
+                        .flex()
+                        .child(control)
+                        .when(scrolls, |el| el.pr(space::S16)),
+                ),
+        )
+        .when(scrolls, |el| {
+            el.child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .right_0()
+                    .w(space::S16)
+                    .bg(gpui::linear_gradient(
+                        90.,
+                        gpui::linear_color_stop(card.opacity(0.), 0.),
+                        gpui::linear_color_stop(card, 1.),
+                    )),
+            )
+        })
+        // Scrolled along, the tabs passed fade out at the left end the same way.
+        .when(scrolled, |el| {
+            el.child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left_0()
+                    .w(space::S16)
+                    .bg(gpui::linear_gradient(
+                        90.,
+                        gpui::linear_color_stop(card, 0.),
+                        gpui::linear_color_stop(card.opacity(0.), 1.),
+                    )),
+            )
+        });
     let pane = tabs
         .iter()
         .find(|t| t.id == current)
@@ -862,7 +915,7 @@ fn tabs(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) -> AnyE
         .flex()
         .flex_col()
         .gap(space::S12)
-        .child(div().flex().min_w(px(0.)).child(bar))
+        .child(bar)
         .children(pane)
         .into_any_element()
 }
@@ -882,12 +935,20 @@ fn questionnaire(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App
     let questions: Vec<&CardV2Block> = children.iter().filter_map(|id| child(node, id)).collect();
     let inputs: Vec<&&CardV2Block> = questions.iter().filter(|q| q.takes_input()).collect();
     let required: Vec<&&&CardV2Block> = inputs.iter().filter(|q| leaves::is_required(q)).collect();
+    // A blank text field is in the form's values, and it is not an answer.
+    let filled = |id: Option<&str>| {
+        use crate::views::cards::v2::form::Val;
+        id.and_then(|id| node.ctx.values.get(id))
+            .is_some_and(|v| match v {
+                Val::Text(t) => !t.trim().is_empty(),
+                Val::Choice(c) | Val::Order(c) => !c.is_empty(),
+                Val::Rows(r) => !r.is_empty(),
+                Val::Switch(_) | Val::Num(_) => true,
+            })
+    };
     let done = required
         .iter()
-        .filter(|q| {
-            form21::problem(node.ctx.card, q, &node.ctx.values).is_none()
-                && q.id().is_some_and(|id| node.ctx.values.contains_key(id))
-        })
+        .filter(|q| form21::problem(node.ctx.card, q, &node.ctx.values).is_none() && filled(q.id()))
         .count();
     let live = node.ctx.live();
     let mut col = div().flex().flex_col().min_w(px(0.));
@@ -897,15 +958,18 @@ fn questionnaire(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App
         let answered = inputs
             .iter()
             .filter(|q| {
-                q.id().is_some_and(|id| node.ctx.values.contains_key(id))
-                    && form21::problem(node.ctx.card, q, &node.ctx.values).is_none()
+                filled(q.id()) && form21::problem(node.ctx.card, q, &node.ctx.values).is_none()
             })
             .count();
-        let dashes = div().w(px(64.)).child(crate::ui::native::determinate_bar(
-            answered as f32 / inputs.len().max(1) as f32,
-            None,
-            cx,
-        ));
+        // The bar counts what the words beside it count: 必答 when there are any.
+        let share = if required.is_empty() {
+            answered as f32 / inputs.len().max(1) as f32
+        } else {
+            done as f32 / required.len() as f32
+        };
+        let dashes = div()
+            .w(px(64.))
+            .child(crate::ui::native::determinate_bar(share, None, cx));
         col = col.child(
             meta(div())
                 .mb(space::S8)

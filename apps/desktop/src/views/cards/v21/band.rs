@@ -492,7 +492,9 @@ pub fn pend_band(
     Some(match stage {
         S::Quiet => return None,
         // The author has it: waiting on someone else is the muted clock (§2.12).
-        S::Wait | S::Slow => (words, String::new(), PendTone::Quiet),
+        S::Wait => (words, String::new(), PendTone::Quiet),
+        // 还在处理: the member is at it, the working loader (§2.12).
+        S::Slow => (words, String::new(), PendTone::Live),
         S::Silent | S::OfflineAnswer => (words, String::new(), PendTone::Quiet),
         // `expect.mode: none` (a block that takes no action, or a short-run limit): nothing
         // failed and nothing is left to retry, so the band is the muted clock (D1-70).

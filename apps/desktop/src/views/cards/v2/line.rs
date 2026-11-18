@@ -258,15 +258,24 @@ pub fn plan_row(
             .n_body()
             // Work in progress is the working loader (§2.12), not a ring on the avatar.
             .child(ui::MemberAvatar::new(member.as_ref(), m::TILE))
-            .when(working, |el| {
-                el.child(
-                    gpui_component::Sizable::with_size(
-                        ui::motion::spinner(),
-                        crate::ui::native::tokens::icon::SM,
-                    )
-                    .color(ui::native::native_colors(cx).blue),
-                )
-            })
+            // One state slot, so stacked rows start their titles on one x.
+            .child(
+                div()
+                    .flex_none()
+                    .w(space::S16)
+                    .flex()
+                    .justify_center()
+                    .child(if working {
+                        gpui_component::Sizable::with_size(
+                            ui::motion::spinner(),
+                            crate::ui::native::tokens::icon::SM,
+                        )
+                        .color(ui::native::native_colors(cx).blue)
+                        .into_any_element()
+                    } else {
+                        ui::icon(Sym::Check, px(14.), k.ink_3).into_any_element()
+                    }),
+            )
             .child(
                 div()
                     .min_w(px(0.))

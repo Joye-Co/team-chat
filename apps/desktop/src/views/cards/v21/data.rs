@@ -142,6 +142,33 @@ pub fn table(node: &Node, b: &CardV2Block, window: &mut gpui::Window, cx: &mut A
             let emit = Emitter::of(ctx);
             let (uie, block, col_label) = (ctx.ui.clone(), id.clone(), label.clone());
             let group = gpui::SharedString::from(format!("th-{id}-{ci}"));
+            // The sort glyph shows on a header the table is not sorted by yet, under the
+            // pointer. A number column has it before the label: the label ends on the
+            // numbers' right edge.
+            let glyph = match sorted_here {
+                Some((_, asc)) => Some(
+                    ui::icon(
+                        if asc { Sym::ArrowUp } else { Sym::ArrowDown },
+                        px(12.),
+                        k.ink_2,
+                    )
+                    .into_any_element(),
+                ),
+                None if sortable.unwrap_or(false) => Some(
+                    div()
+                        .flex_none()
+                        .invisible()
+                        .group_hover(group.clone(), |s| s.visible())
+                        .child(ui::icon(Sym::Sort, px(12.), k.ink_3))
+                        .into_any_element(),
+                ),
+                None => None,
+            };
+            let (before, after) = if numeric[ci] {
+                (glyph, None)
+            } else {
+                (None, glyph)
+            };
             sized(div().id(eid(node, format!("th-{id}-{ci}"))), ci)
                 .when(ci == 0, |el| el.min_w(m::TABLE_COL_FIRST))
                 .when(ci > 0 && widths[ci].is_none(), |el| el.min_w(px(0.)))
@@ -150,6 +177,10 @@ pub fn table(node: &Node, b: &CardV2Block, window: &mut gpui::Window, cx: &mut A
                 .items_center()
                 .gap(space::S4)
                 .when(numeric[ci], |el| el.justify_end())
+                // The focus ring keeps air after a label that ends on the cell's edge.
+                .when(sortable.unwrap_or(false) && numeric[ci], |el| {
+                    el.relative().left(space::S4).pr(space::S4)
+                })
                 .when(sortable.unwrap_or(false), |el| {
                     // A sort header is a control: a tab stop with Enter / Space, the row
                     // hover, the pointer, and the sort glyph while it is not sorted by.
@@ -173,36 +204,20 @@ pub fn table(node: &Node, b: &CardV2Block, window: &mut gpui::Window, cx: &mut A
                         );
                         })
                 })
+                .children(before)
                 .child(
                     div()
                         .min_w(px(0.))
                         .child(crate::ui::truncate::TruncText::new(label.clone())),
                 )
-                // The sort glyph shows on a header the table is not sorted by yet, under
-                // the pointer.
-                .when(sortable.unwrap_or(false) && sorted_here.is_none(), |el| {
-                    el.child(
-                        div()
-                            .flex_none()
-                            .invisible()
-                            .group_hover(group.clone(), |s| s.visible())
-                            .child(ui::icon(Sym::Sort, px(12.), k.ink_3)),
-                    )
-                })
-                .when_some(sorted_here, |el, (_, asc)| {
-                    el.child(ui::icon(
-                        if asc { Sym::ArrowUp } else { Sym::ArrowDown },
-                        px(12.),
-                        k.ink_2,
-                    ))
-                })
+                .children(after)
         }));
     // The fold of every card table: ten rows, then 展开其余 n 行; a picked row never hides.
     let fold_key = ctx.id(format!("table-{id}"));
     let expanded = crate::views::cards::is_expanded(fold_key.as_ref(), cx);
     let (order, hidden) = b20::table_fold(rows, &order, expanded, &|ri| picked.contains(&keys[ri]));
     let more = b20::table_folds(rows.len())
-        .then(|| b20::fold_row(fold_key.as_ref(), hidden, expanded, cx));
+        .then(|| b20::flush_fold_row(fold_key.as_ref(), hidden, expanded, cx));
     let last = order.len().saturating_sub(1);
     let body = order.iter().enumerate().map(|(pos, ri)| {
         let r = &rows[*ri];
@@ -214,16 +229,17 @@ pub fn table(node: &Node, b: &CardV2Block, window: &mut gpui::Window, cx: &mut A
             super::leaves::PickTarget::of(node),
         );
         let mark_id = eid(node, format!("tr-{id}-{key}-mark"));
-        div()
+        // The hover and the selection reach past the content edge, rounded; the row's rule
+        // stays on the content width, straight, in line with the header's.
+        let line = div()
             .id(eid(node, format!("tr-{id}-{key}")))
             .flex()
             .items_center()
             .gap(space::S12)
-            .h(m::TABLE_ROW)
+            .flex_1()
             .mx(px(-6.))
             .px(px(6.))
             .rounded(crate::ui::native::tokens::radius::ITEM)
-            .when(pos < last, |el| el.border_b_1().border_color(k.line))
             .when(on, |el| el.bg(k.sunken))
             .text_color(k.ink)
             .when(can_pick, |el| {
@@ -286,7 +302,13 @@ pub fn table(node: &Node, b: &CardV2Block, window: &mut gpui::Window, cx: &mut A
                     Some(r) => r.cell(cell, *ri, ci, window, cx),
                     None => cell.into_any_element(),
                 }
-            }))
+            }));
+        div()
+            .h(m::TABLE_ROW)
+            .flex()
+            .flex_col()
+            .when(pos < last, |el| el.border_b_1().border_color(k.line))
+            .child(line)
     });
     let mut col = b20::small(div()).flex().flex_col();
     if let Some(tt) = title {
@@ -474,7 +496,8 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
                     div()
                         .absolute()
                         .top_0()
-                        .bottom_0()
+                        // The focus ring clears the x label under the point.
+                        .bottom(-space::S4)
                         .right_0()
                         .left(left)
                         .flex()
@@ -813,11 +836,7 @@ fn bar_rows(
         })
         .child(list)
         .when(xs.len() > t::BAR_ROWS_FOLD + 1, |el| {
-            el.child(div().flex().child(crate::views::cards::blocks::more_button(
-                fold_key.as_ref(),
-                hidden,
-                expanded,
-            )))
+            el.child(b20::flush_more(fold_key.as_ref(), hidden, expanded))
         })
         // The picked bar, as the column chart says it (`● B 站 · 9`).
         .when_some(
