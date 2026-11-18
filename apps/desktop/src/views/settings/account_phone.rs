@@ -22,8 +22,8 @@ use crate::{
         Sym,
         native::{
             CodeInput, CodeInputEvent, GroupedForm, NativeType as _, PushSize, PushStyle,
-            SectionTitle, SheetWidth, disabled_push, loading_push, native_colors, push_button,
-            sheet::sheet_status_error, tokens,
+            SectionTitle, SheetWidth, disabled_push, loading_push, metrics, native_colors,
+            push_button, sheet::sheet_status_error, tokens,
         },
     },
 };
@@ -307,7 +307,7 @@ impl PhoneSignIn {
             cx,
             SheetWidth::Form,
             px(500.),
-            move |dialog, window, cx| {
+            move |dialog, _, cx| {
                 let page = this.read(cx);
                 let k = native_colors(cx);
                 let status_line = |text: String, color: Hsla| {
@@ -350,9 +350,17 @@ impl PhoneSignIn {
                                     .when(expired || used, |d| d.opacity(0.2))
                                     .child(qr_image(&offer.qr_text)),
                             )
+                            // What the code under the QR is for.
                             .child(
                                 div()
                                     .pt(tokens::space::S12)
+                                    .n_subheadline()
+                                    .text_color(k.secondary)
+                                    .child(s::PHONE_QR_CODE_LABEL),
+                            )
+                            .child(
+                                div()
+                                    .pt(tokens::space::S4)
                                     .n_title3()
                                     .font_family(crate::theme::mono_font_family())
                                     .text_color(if expired { k.tertiary } else { k.label })
@@ -393,18 +401,25 @@ impl PhoneSignIn {
                     }
                 };
                 let close_this = this.clone();
-                let close = crate::ui::native::icon_button(
-                    "phone-qr-close",
-                    crate::ui::sf_symbols::Sf::Close,
-                    common::CLOSE,
-                    crate::ui::native::IconSize::Small,
-                    window,
-                    cx,
-                )
-                .on_click(move |_, window, cx| {
-                    close_this.update(cx, |p, _| p.stop_offer());
-                    window.close_dialog(cx)
-                });
+                // The only button while the phone is awaited (outline), and
+                // 关闭 once it has signed in; quiet under 换一个.
+                let (label, style) = match &page.offer {
+                    Offer::Ready {
+                        state: PhoneOfferState::Used { .. },
+                        ..
+                    } => (common::CLOSE, PushStyle::Outline),
+                    Offer::Ready {
+                        state: PhoneOfferState::Waiting,
+                        ..
+                    }
+                    | Offer::Loading => (common::CANCEL, PushStyle::Outline),
+                    _ => (common::CANCEL, PushStyle::Ghost),
+                };
+                let close = push_button("phone-qr-close", label, style, PushSize::Regular, cx)
+                    .on_click(move |_, window, cx| {
+                        close_this.update(cx, |p, _| p.stop_offer());
+                        window.close_dialog(cx)
+                    });
                 let cancel_this = this.clone();
                 dialog
                     .on_cancel(move |_, _, cx| {
@@ -412,7 +427,7 @@ impl PhoneSignIn {
                         true
                     })
                     .child(sheet_column(
-                        close,
+                        Some(close),
                         Sym::Phone,
                         s::PHONE_QR_TITLE,
                         s::PHONE_QR_HINT.to_string(),
@@ -534,8 +549,14 @@ impl PhoneSignIn {
                             .into_any_element(),
                     ),
                 };
+                // One column as wide as the code slots (2.20): the button of
+                // every step has their left and right edge.
                 let body = div()
-                    .w_full()
+                    .w(crate::ui::native::code_input::code_input_width(
+                        PHONE_CODE_LEN,
+                        PHONE_CODE_GROUP,
+                    ))
+                    .max_w_full()
                     .flex()
                     .flex_col()
                     .items_center()
@@ -547,15 +568,17 @@ impl PhoneSignIn {
                         )
                     })
                     .child(content);
-                let close = crate::ui::native::icon_button(
-                    "phone-code-close",
-                    crate::ui::sf_symbols::Sf::Close,
-                    common::CLOSE,
-                    crate::ui::native::IconSize::Small,
-                    window,
-                    cx,
-                )
-                .on_click(|_, window, cx| window.close_dialog(cx));
+                // 完成 closes the last step; before it, 取消 under the button.
+                let cancel = (!matches!(page.approve, Approve::Done { .. })).then(|| {
+                    push_button(
+                        "phone-code-close",
+                        common::CANCEL,
+                        PushStyle::Ghost,
+                        PushSize::Regular,
+                        cx,
+                    )
+                    .on_click(|_, window, cx| window.close_dialog(cx))
+                });
                 let _ = k;
                 let ok = this.clone();
                 dialog
@@ -569,7 +592,7 @@ impl PhoneSignIn {
                     })
                     .on_cancel(|_, _, _| true)
                     .child(sheet_column(
-                        close,
+                        cancel,
                         Sym::Phone,
                         title,
                         hint,
@@ -581,10 +604,11 @@ impl PhoneSignIn {
     }
 }
 
-/// One centered column like the email sheet: ✕ in the corner, the icon, the
-/// title, one line, then the content.
+/// One centered column like the email sheet (2.20): the icon, the title,
+/// one line, then the content, with the sheet's 24 on all four sides. The
+/// way out is `cancel` under the content, never a control in the corner.
 fn sheet_column(
-    close: Button,
+    cancel: Option<Button>,
     sym: Sym,
     title: &'static str,
     hint: String,
@@ -593,21 +617,11 @@ fn sheet_column(
 ) -> gpui::Div {
     let k = native_colors(cx);
     div()
-        .relative()
         .w_full()
-        .px(tokens::space::S32)
-        .pt(tokens::space::S32)
-        .pb(tokens::space::S24)
+        .p(metrics::SHEET_PAD)
         .flex()
         .flex_col()
         .items_center()
-        .child(
-            div()
-                .absolute()
-                .top(tokens::space::S12)
-                .right(tokens::space::S12)
-                .child(close),
-        )
         .child(crate::ui::native::feedback::icon_box(sym, cx))
         .child(
             div()
@@ -632,6 +646,7 @@ fn sheet_column(
                 .justify_center()
                 .child(content),
         )
+        .children(cancel.map(|b| div().pt(tokens::space::S8).child(b)))
 }
 
 impl Render for PhoneSignIn {

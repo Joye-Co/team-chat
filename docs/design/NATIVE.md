@@ -280,6 +280,7 @@ shape. The text inside every control is Body 13 pt unless noted.
 | Arrows | `arrow.up`, `arrow.down`, `arrow.right`; sort `arrow.up.arrow.down` |
 | Terminal | `terminal` |
 | Retry / refresh / undo | `arrow.counterclockwise` / `arrow.clockwise` / `arrow.uturn.backward` |
+| Random pick | `dice` |
 | Link / code | `link` / `chevron.left.forwardslash.chevron.right` |
 | Mention | `at` |
 | Text format | `textformat`, `bold`, `italic`, `strikethrough`, `text.alignleft` |

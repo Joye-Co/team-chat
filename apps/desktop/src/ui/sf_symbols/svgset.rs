@@ -179,6 +179,7 @@ svg_set! {
         Terminal = SquareTerminal @ 1.16, 0.88;
         Retry = RotateCcw @ 0.87, 1.02;
         Refresh = RotateCw @ 0.87, 1.02;
+        Random = Dices @ 1.04, 0.99;
         Undo = Undo2 @ 0.93, 0.91;
         Link = Link @ 1.05, 1.05;
         Code = Code @ 1.38, 0.90;

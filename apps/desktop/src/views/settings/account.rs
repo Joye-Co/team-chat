@@ -425,8 +425,8 @@ impl AccountPage {
                 // One centered column, one thing at a time (Stripe / Linear
                 // verification): the icon, the title and one line; the
                 // address or the six slots; one full-width button; quiet
-                // links under it. A ✕ in the corner closes, so the footer
-                // has no 取消 / OK pair.
+                // links under it, then a quiet 取消 (2.20: no control at the
+                // corners, the sheet's 24 on all four sides).
                 let full_button = |id: &'static str, label: &'static str, enabled: bool| {
                     loading_push(
                         disabled_push(
@@ -540,12 +540,11 @@ impl AccountPage {
                         )
                     }
                 };
-                let close = crate::ui::native::icon_button(
+                let close = push_button(
                     "email-close",
-                    crate::ui::sf_symbols::Sf::Close,
-                    common::CLOSE,
-                    crate::ui::native::IconSize::Small,
-                    window,
+                    common::CANCEL,
+                    PushStyle::Ghost,
+                    PushSize::Regular,
                     cx,
                 )
                 .on_click(|_, window, cx| window.close_dialog(cx));
@@ -565,7 +564,7 @@ impl AccountPage {
                     .child({
                         // The step below the icon slides in (24 pt from the
                         // trailing side, or the leading side on 换个邮箱) and
-                        // fades, once per step change; the icon and ✕ stay.
+                        // fades, once per step change; the icon and 取消 stay.
                         let step = div()
                             .w_full()
                             .flex()
@@ -622,22 +621,14 @@ impl AccountPage {
                         div()
                             .relative()
                             .w_full()
-                            .px(tokens::space::S32)
-                            .pt(tokens::space::S32)
-                            .pb(tokens::space::S24)
+                            .p(metrics::SHEET_PAD)
                             .flex()
                             .flex_col()
                             .items_center()
                             .overflow_hidden()
-                            .child(
-                                div()
-                                    .absolute()
-                                    .top(tokens::space::S12)
-                                    .right(tokens::space::S12)
-                                    .child(close),
-                            )
                             .child(crate::ui::native::feedback::icon_box(Sym::Mention, cx))
                             .child(step)
+                            .child(div().pt(tokens::space::S8).child(close))
                     })
             },
         );

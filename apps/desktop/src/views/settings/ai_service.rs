@@ -74,6 +74,9 @@ pub struct AiServicePanel {
     owner: bool,
     /// What the server keeps; `None` until it is read.
     saved: Option<AiServiceSettings>,
+    /// What the form last showed from the server: a late read never
+    /// overwrites a draft that has moved on from it.
+    shown: Option<AiServiceSettings>,
     load: Status,
     /// The provider picked in the form.
     provider: Option<AiProviderKind>,
@@ -131,6 +134,7 @@ impl AiServicePanel {
             owner: super::i_am_owner(&services),
             services,
             saved: None,
+            shown: None,
             load: Status::Idle,
             provider: None,
             model,
@@ -163,7 +167,11 @@ impl AiServicePanel {
                 match result {
                     Ok(saved) => {
                         this.saved = Some(saved.clone());
-                        this.show(&saved, window, cx);
+                        if this.untouched(cx) {
+                            this.show(&saved, window, cx);
+                        } else {
+                            this.update_key_placeholder(window, cx);
+                        }
                         this.load = Status::Idle;
                     }
                     Err(e) => this.load = Status::from_error(e),
@@ -177,6 +185,7 @@ impl AiServicePanel {
     /// Puts the saved values in the form (call after `saved` is set); the key
     /// field stays empty.
     fn show(&mut self, saved: &AiServiceSettings, window: &mut Window, cx: &mut Context<Self>) {
+        self.shown = Some(saved.clone());
         self.provider = saved.provider;
         let model = saved.model.clone();
         let base = saved.base_url.clone().unwrap_or_default();
@@ -187,6 +196,16 @@ impl AiServicePanel {
         self.key
             .update(cx, |st, cx| st.set_value(String::new(), window, cx));
         self.update_key_placeholder(window, cx);
+    }
+
+    /// The form still holds what it last showed (nothing, before the first
+    /// read): nobody has picked a provider or typed.
+    fn untouched(&self, cx: &Context<Self>) -> bool {
+        let shown = self.shown.clone().unwrap_or_default();
+        self.provider == shown.provider
+            && self.model.read(cx).value().as_ref() == shown.model.as_str()
+            && self.base_url.read(cx).value().as_ref() == shown.base_url.as_deref().unwrap_or("")
+            && self.key.read(cx).value().is_empty()
     }
 
     /// "已设置 ····abcd" while the saved key still applies, else 粘贴 API Key.
@@ -546,11 +565,20 @@ impl AiServicePanel {
                 .w_full()
                 .flex()
                 .flex_col()
-                .gap(space::S12)
-                .child(group)
-                .children(empty)
-                .children(self.answer_row(cx))
-                .child(buttons)
+                // The buttons belong to the form over them (12); the list
+                // of uses is the next block (24).
+                .gap(space::S24)
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(space::S12)
+                        .child(group)
+                        .children(empty)
+                        .children(self.answer_row(cx))
+                        .child(buttons),
+                )
                 .child(
                     div()
                         .flex()

@@ -262,6 +262,7 @@ crate::copy! {
     SIGN_OUT_TITLE = "退出登录？",
     SIGN_OUT_BODY = crate::copy::per_system("退出后，这台 Mac 不再收到团队的消息。", "退出后，这台电脑不再收到团队的消息。"),
     SIGN_OUT_DELETE_LOCAL = "同时删除本机数据",
+    PHONE_QR_CODE_LABEL = "扫不了码时，在手机上输入这个码",
     // 通知
     REMIND_ME = "提醒我",
     NOTIFY_WAITING = "需要我拍板的事",
@@ -412,7 +413,7 @@ crate::copy! {
     QUICK_TITLE = "{name} 的常用设置",
     QUICK_MENU = "更换电脑…",
     QUICK_MENU_NAMED = "更换 {name} 的电脑…",
-    QUICK_HINT = "选好马上保存，之后交给它的事在选的电脑上做。",
+    QUICK_HINT = "选好就生效。之后交给它的事，都在你选的电脑上做。",
     QUICK_EXTERNAL = "{name} 由外部程序接入，不在团队的电脑上干活。改工作方式请点更多设置。",
     QUICK_MORE = "更多设置…",
     BOT_PLACE_ANY_TEAM = "任意一台团队的电脑",

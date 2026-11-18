@@ -196,6 +196,8 @@ concepts! {
     Terminal = "terminal";
     Retry = "arrow.counterclockwise";
     Refresh = "arrow.clockwise";
+    /// Pick one at random (the look grid's last cell).
+    Random = "dice";
     Undo = "arrow.uturn.backward";
     Link = "link";
     Code = "chevron.left.forwardslash.chevron.right";
@@ -513,6 +515,7 @@ lucide! {
     RotateCcw => Retry,
     RotateCw => Refresh,
     RefreshCw => Refresh,
+    Dices => Random,
     Undo2 => Undo,
     Link => Link,
     Code => Code,

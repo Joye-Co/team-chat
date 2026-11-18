@@ -532,13 +532,23 @@ impl Status {
 
 /// A one-time secret (a command, a credential): its label above like any
 /// field of the sheet, the value in a bordered box in the code size with a
-/// copy button. One line that scrolls sideways, never wraps (D13). The
-/// value is never logged.
-pub fn secret_block(id: &'static str, label: &'static str, value: &str, cx: &App) -> Div {
+/// copy button. One line that scrolls sideways, never wraps (D13): while a
+/// line is cut, a scrollbar runs along the box's bottom edge. The caller
+/// keeps `scroll`. The value is never logged.
+pub fn secret_block(
+    id: &'static str,
+    label: &'static str,
+    value: &str,
+    scroll: &gpui::ScrollHandle,
+    cx: &App,
+) -> Div {
     use crate::ui::native::{metrics, native_colors, tokens};
     use gpui::{InteractiveElement as _, StatefulInteractiveElement as _};
+    use gpui_component::scroll::{Scrollbar, ScrollbarMode};
     let k = native_colors(cx);
     let value: SharedString = value.to_string().into();
+    // Known from the frame before: a line is wider than the box.
+    let scrolls = scroll.max_offset().x > Pixels::ZERO;
     field(
         label,
         div()
@@ -556,17 +566,40 @@ pub fn secret_block(id: &'static str, label: &'static str, value: &str, cx: &App
             .border_color(k.separator)
             .child(
                 div()
-                    .id(SharedString::from(format!("{id}-value")))
+                    .relative()
                     .flex_1()
                     .min_w(Pixels::ZERO)
-                    .overflow_x_scroll()
                     .child(
                         div()
-                            .whitespace_nowrap()
-                            .t_code()
-                            .text_color(k.label)
-                            .child(value.clone()),
-                    ),
+                            .id(SharedString::from(format!("{id}-value")))
+                            .w_full()
+                            .flex()
+                            .overflow_x_scroll()
+                            .restrict_scroll_to_axis()
+                            .track_scroll(scroll)
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .min_w_full()
+                                    // Room for the scrollbar under the last line.
+                                    .when(scrolls, |d| d.pb(tokens::space::S12))
+                                    // The last glyph clears the copy button
+                                    // at the end of the scroll.
+                                    .pr(tokens::space::S8)
+                                    .whitespace_nowrap()
+                                    .t_code()
+                                    .text_color(k.label)
+                                    .child(value.clone()),
+                            ),
+                    )
+                    .when(scrolls, |d| {
+                        d.child(
+                            div()
+                                .absolute()
+                                .inset_0()
+                                .child(Scrollbar::horizontal(scroll).mode(ScrollbarMode::Always)),
+                        )
+                    }),
             )
             .child(Clipboard::new(id).tooltip(s::COPY).value(value)),
         cx,
@@ -1253,8 +1286,42 @@ pub fn capped_list(
     max_h: Pixels,
     scroll: &gpui::ScrollHandle,
 ) -> Div {
+    capped(id, content, max_h, scroll, Pixels::ZERO)
+}
+
+/// The scrolling body of a sheet, capped at `max_h`: as [`capped_list`], with
+/// the scrollbar in the sheet's side padding, so the groups keep their whole
+/// width and one right edge with the footer buttons (2.9).
+pub fn sheet_body_list(
+    id: impl Into<ElementId>,
+    content: impl IntoElement,
+    max_h: Pixels,
+    scroll: &gpui::ScrollHandle,
+) -> Div {
+    capped(
+        id,
+        content,
+        max_h,
+        scroll,
+        crate::ui::native::tokens::space::S16,
+    )
+}
+
+/// `outset`: how far past the content's right edge the scrollbar sits.
+fn capped(
+    id: impl Into<ElementId>,
+    content: impl IntoElement,
+    max_h: Pixels,
+    scroll: &gpui::ScrollHandle,
+    outset: Pixels,
+) -> Div {
     use gpui::{InteractiveElement as _, StatefulInteractiveElement as _};
     use gpui_component::scroll::{Scrollbar, ScrollbarMode};
+    // In the gutter the bar stands alone, so it shows only while the body
+    // is cut (known from the frame before). A body that fits to within a
+    // few points has nothing to scroll to and gets no thumb.
+    let shown =
+        outset == Pixels::ZERO || scroll.max_offset().y > crate::ui::native::tokens::space::S4;
     div()
         .relative()
         .w_full()
@@ -1267,15 +1334,24 @@ pub fn capped_list(
                 .track_scroll(scroll)
                 .child(content),
         )
-        .child(
+        .children(shown.then(|| {
             div()
                 .absolute()
                 .top_0()
-                .right_0()
+                .right(-outset)
                 .bottom_0()
                 .w(crate::ui::native::tokens::space::S12)
-                .child(Scrollbar::vertical(scroll).mode(ScrollbarMode::Always)),
-        )
+                .child({
+                    let bar = Scrollbar::vertical(scroll).mode(ScrollbarMode::Always);
+                    // The bar draws on the scrolled box unless told to
+                    // use this strip.
+                    if outset > Pixels::ZERO {
+                        bar.viewport_from_layout()
+                    } else {
+                        bar
+                    }
+                })
+        }))
 }
 
 /// A whole number with thousands separators (2.21): 1000000 → 1,000,000.

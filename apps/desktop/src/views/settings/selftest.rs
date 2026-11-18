@@ -872,21 +872,25 @@ pub fn open_ai_service_failed(
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
     let (handle, view) = open_page(services, Page::General, cx)?;
-    after_fit(handle, cx, move |window, cx| {
+    after_fit(handle, cx, move |_, cx| {
         let general = view.read(cx).general().clone();
         let scroll = view.read(cx).scroll_handle();
         general.update(cx, |g, cx| g.show_ai_at_top(scroll, cx));
-        let ai = general.read(cx).ai_service().clone();
-        ai.update(cx, |p, cx| {
-            p.pick(crate::data::AiProviderKind::OpenaiCompatible, window, cx);
-            p.fill_for_test(
-                "qwen-turbo",
-                "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                "sk-bad-0000-test",
-                window,
-                cx,
-            );
-            p.test(cx);
+        // The panel reads the saved service when it is first drawn: the draft goes in
+        // after that, or the saved values would replace it.
+        after_fit(handle, cx, move |window, cx| {
+            let ai = general.read(cx).ai_service().clone();
+            ai.update(cx, |p, cx| {
+                p.pick(crate::data::AiProviderKind::OpenaiCompatible, window, cx);
+                p.fill_for_test(
+                    "qwen-turbo",
+                    "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "sk-bad-0000-test",
+                    window,
+                    cx,
+                );
+                p.test(cx);
+            });
         });
     });
     Ok(handle)
