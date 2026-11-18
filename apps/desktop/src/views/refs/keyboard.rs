@@ -273,7 +273,8 @@ fn on_key(
             ask_about(target, RefIntent::Topic, window, cx);
         }
         // Only on the block's own focus: Enter on a control inside it belongs to the control.
-        "enter" if !mods.shift && handle(key, cx).is_focused(window) => {
+        // One press asks once: a held key does not repeat it.
+        "enter" if !mods.shift && !e.is_held && handle(key, cx).is_focused(window) => {
             if let Some(i) = current(key, parts, cx) {
                 let target = (parts[i].target)(cx);
                 cx.stop_propagation();
