@@ -3778,6 +3778,8 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
             // its icon (§2.12: no free colored mark).
             Some(false) => Some((Sym::Check, k.ink_3)),
             Some(true) => Some((Sym::Close, k.bad)),
+            // Not checked: a muted mark, so it does not read as the answer's last line.
+            None if matches!(state, Some(EvidenceState::Info)) => Some((Sym::Info, k.ink_3)),
             None => None,
         };
         // Test counts say the result themselves (card2: read these, not the label).
