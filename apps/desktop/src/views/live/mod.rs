@@ -290,7 +290,11 @@ impl LivePane {
                 window,
                 |this: &mut Self, _, event: &InputEvent, window, cx| match event {
                     InputEvent::PressEnter { .. } => this.send_command(window, cx),
-                    InputEvent::Change if this.command_error.take().is_some() => cx.notify(),
+                    // 运行 follows the field (inert while it is empty).
+                    InputEvent::Change => {
+                        this.command_error = None;
+                        cx.notify();
+                    }
                     _ => {}
                 },
             ));
@@ -548,6 +552,30 @@ impl LivePane {
                     since,
                 )
             }
+            // An away computer is named, with what happens when it is back, so
+            // 停止 does not read as the only way out.
+            RunPhase::WaitingComputer if computer_away(run) => {
+                let computer = screen
+                    .machine_name
+                    .clone()
+                    .or_else(|| run.machine_name.clone())
+                    .filter(|m| !m.trim().is_empty())
+                    .unwrap_or_else(|| fill(c::LIVE_COMPUTER, &[("name", bot)]));
+                (
+                    Sym::Hourglass,
+                    words.text.clone(),
+                    Some(
+                        [
+                            Some(fill(c::LIVE_PHASE_OFFLINE_HINT, &[("computer", &computer)])),
+                            since,
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .collect::<Vec<_>>()
+                        .join(" · "),
+                    ),
+                )
+            }
             RunPhase::WaitingComputer => (Sym::Hourglass, words.text.clone(), since),
             // Waiting on a person, or stuck: the state in words and for how long
             // (design-takeover 3.9: the banner is the 状态词), with the mark of the
@@ -797,6 +825,7 @@ impl LivePane {
             )
             .child(div().flex_1().min_w_0().children(folder.map(|f| {
                 crate::ui::truncate::TruncText::new(f.display().to_string())
+                    .middle()
                     .flex_shrink(1.)
                     .into_any_element()
             })))
@@ -909,12 +938,18 @@ impl LivePane {
                     )
                     .on_click(cx.listener(move |this, _, _, cx| this.abort_command(&id, &cmd, cx)))
                 }),
+                // Nothing to run yet: the same primary at 50 % (§1.8), as the
+                // composer's send.
                 None => Some(
-                    push_button(
-                        "live-command-run",
-                        c::LIVE_CMD_RUN,
-                        PushStyle::Default,
-                        PushSize::Regular,
+                    ui::native::disabled_push(
+                        push_button(
+                            "live-command-run",
+                            c::LIVE_CMD_RUN,
+                            PushStyle::Default,
+                            PushSize::Regular,
+                            cx,
+                        ),
+                        state.read(cx).value().trim().is_empty(),
                         cx,
                     )
                     .on_click(cx.listener(|this, _, window, cx| this.send_command(window, cx))),
@@ -1057,6 +1092,7 @@ impl LivePane {
         cursor: bool,
         pointer: Option<String>,
         no_lines: &'static str,
+        frame_at: Option<Millis>,
         cx: &App,
     ) -> AnyElement {
         let k = theme::colors(cx);
@@ -1082,7 +1118,7 @@ impl LivePane {
             .child(c::LIVE_MENU_EDIT)
             .child(c::LIVE_MENU_WINDOW)
             .child(div().flex_1())
-            .child(div().mono().child(menu_clock()));
+            .child(div().mono().child(menu_clock(frame_at)));
         let dot = |color: gpui::Hsla| div().size(TRAFFIC).rounded_full().bg(color);
         let bar = div()
             .flex_none()
@@ -1274,6 +1310,9 @@ impl LivePane {
                 }
             };
             let selected = shown == Some(i);
+            // An ended run rests on its last step: that mark is filled, so
+            // the track always shows which step the screen is on.
+            let at = selected || (shown.is_none() && is_last);
             // The knob is foreground (§2.12: no state color as decoration).
             let dot = if is_last && active {
                 div()
@@ -1288,9 +1327,9 @@ impl LivePane {
                 div()
                     .size(MARK_DOT)
                     .rounded_full()
-                    .bg(if selected { k.ink } else { k.raised })
+                    .bg(if at { k.ink } else { k.raised })
                     .border_2()
-                    .border_color(if selected { k.ink } else { k.ink_3 })
+                    .border_color(if at { k.ink } else { k.ink_3 })
                     .into_any_element()
             };
             let id = ElementId::Name(format!("live-mark-{}-{i}", run.id).into());
@@ -2183,10 +2222,14 @@ fn now_ms() -> Millis {
     crate::selftest::clock::utc_now().timestamp_millis()
 }
 
-/// `周一 10:21`, the menu bar clock.
-fn menu_clock() -> String {
-    use chrono::Datelike as _;
-    let now = crate::selftest::clock::local_now();
+/// `周一 10:21`, the menu bar clock: now for a live screen, or the time of
+/// the frame `at` when the screen is the last one of an ended run, of a
+/// computer that is away, or of a replayed step.
+fn menu_clock(at: Option<Millis>) -> String {
+    use chrono::{Datelike as _, TimeZone as _};
+    let now = at
+        .and_then(|ms| chrono::Local.timestamp_millis_opt(ms).single())
+        .unwrap_or_else(crate::selftest::clock::local_now);
     let day = crate::copy::weekday(now.weekday());
     format!("{day} {}", now.format("%H:%M"))
 }
@@ -2398,6 +2441,15 @@ impl Render for LivePane {
             let last_step = times.last().copied().unwrap_or(0);
             run.updated_at.max(last_line).max(last_step)
         });
+        // The clock of the mock screen is the time of its frame: now while
+        // the screen is live, else when the frame was taken.
+        let frame_at = if replay_step.is_some() {
+            Some(lines.last().map_or(end, |l| l.at))
+        } else if ended || computer_away(&run) {
+            Some(end)
+        } else {
+            None
+        };
         let criteria = p.acceptance_criteria(&run_id);
         // A run still queued for a computer has not started: no step, no
         // terminal yet. Its empty screen says when it will show one.
@@ -2407,39 +2459,41 @@ impl Render for LivePane {
             c::LIVE_NO_LINES
         };
 
-        let body: AnyElement = match &self.developer {
-            Some(view) => div()
-                .flex_1()
-                .min_h(px(0.))
-                .child(view.clone())
-                .into_any_element(),
-            None => div()
-                .id("live-body")
-                .size_full()
-                .overflow_y_scroll()
-                .track_scroll(&self.scroll)
-                .child(
-                    div()
-                        // First content at y 68 (§2.2: 16 under the header).
-                        .pt(space::S16)
-                        .px(SIDE)
-                        // Nothing ends cut under the bottom bar (§2.21).
-                        .pb(space::S24)
-                        .flex()
-                        .flex_col()
-                        // §2.5: one gap between the pane's sections.
-                        .gap(space::S24)
-                        .children(
-                            self.phase_banner(
+        let body: AnyElement =
+            match &self.developer {
+                Some(view) => div()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .child(view.clone())
+                    .into_any_element(),
+                None => div()
+                    .id("live-body")
+                    .size_full()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.scroll)
+                    .child(
+                        div()
+                            // First content at y 68 (§2.2: 16 under the header).
+                            .pt(space::S16)
+                            .px(SIDE)
+                            // Nothing ends cut under the bottom bar (§2.21).
+                            .pb(space::S24)
+                            .flex()
+                            .flex_col()
+                            // §2.5: one gap between the pane's sections.
+                            .gap(space::S24)
+                            .children(self.phase_banner(
                                 &run, &bot, &screen, &words, run_rights, held_by_me, cx,
-                            ),
-                        )
-                        .child(self.screen(&screen, &lines, title, live_now, pointer, no_lines, cx))
-                        // T7: the command box under the terminal while someone holds it;
-                        // others see the holder's commands once there are some, never an
-                        // empty box that is not theirs.
-                        .children(
-                            (taken_over && (held_by_me || !p.hand_commands(&run_id).is_empty()))
+                            ))
+                            .child(self.screen(
+                                &screen, &lines, title, live_now, pointer, no_lines, frame_at, cx,
+                            ))
+                            // T7: the command box under the terminal while someone holds it;
+                            // others see the holder's commands once there are some, never an
+                            // empty box that is not theirs.
+                            .children(
+                                (taken_over
+                                    && (held_by_me || !p.hand_commands(&run_id).is_empty()))
                                 .then(|| {
                                     self.command_box(
                                         &run,
@@ -2449,46 +2503,45 @@ impl Render for LivePane {
                                         cx,
                                     )
                                 }),
-                        )
-                        // R2-06, A1: a section with no data keeps its place
-                        // as a compact empty, so the pane never ends in a
-                        // blank band.
-                        .child(
-                            self.replay(&run, &times, current, replay_step, end, !ended, cx)
-                                .unwrap_or_else(|| {
-                                    compact_panel(
-                                        c::LIVE_REPLAY,
-                                        c::LIVE_REPLAY_EMPTY,
-                                        Sym::Video,
-                                        cx,
-                                    )
-                                }),
-                        )
-                        .child(
-                            self.acceptance(&run, &criteria, working, cx)
-                                .unwrap_or_else(|| {
-                                    compact_panel(
-                                        c::LIVE_ACCEPTANCE,
-                                        c::LIVE_ACCEPTANCE_EMPTY,
-                                        Sym::Checklist,
-                                        cx,
-                                    )
-                                }),
-                        )
-                        .child(
-                            self.plan(&run, &times, &words, working, cx)
-                                .unwrap_or_else(|| {
+                            )
+                            // R2-06, A1: a section with no data keeps its place
+                            // as a compact empty, so the pane never ends in a
+                            // blank band.
+                            .child(
+                                self.replay(&run, &times, current, replay_step, end, !ended, cx)
+                                    .unwrap_or_else(|| {
+                                        compact_panel(
+                                            c::LIVE_REPLAY,
+                                            c::LIVE_REPLAY_EMPTY,
+                                            Sym::Video,
+                                            cx,
+                                        )
+                                    }),
+                            )
+                            .child(
+                                self.acceptance(&run, &criteria, working, cx)
+                                    .unwrap_or_else(|| {
+                                        compact_panel(
+                                            c::LIVE_ACCEPTANCE,
+                                            c::LIVE_ACCEPTANCE_EMPTY,
+                                            Sym::Checklist,
+                                            cx,
+                                        )
+                                    }),
+                            )
+                            .child(self.plan(&run, &times, &words, working, cx).unwrap_or_else(
+                                || {
                                     compact_panel(
                                         c::LIVE_PLAN,
                                         c::LIVE_PLAN_EMPTY,
                                         Sym::Checklist,
                                         cx,
                                     )
-                                }),
-                        ),
-                )
-                .into_any_element(),
-        };
+                                },
+                            )),
+                    )
+                    .into_any_element(),
+            };
         // R2-06, A4: when the sections run past the footer, the scrollbar
         // shows at rest, so a row under the footer reads as more to scroll,
         // never as a cut (§2.21).
