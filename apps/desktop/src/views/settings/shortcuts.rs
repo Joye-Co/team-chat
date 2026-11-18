@@ -144,7 +144,7 @@ impl ShortcutsPage {
                     k.secondary
                 })
                 .child(refused.unwrap_or_else(|| s::SHORTCUT_RECORD.into()))
-                .child(KeyCap::new("esc"))
+                .child(KeyCap::new(crate::copy::search::KEY_ESCAPE))
                 .on_mouse_down_out(cx.listener(|this, _, _, cx| this.stop(cx)))
                 .into_any_element();
         }

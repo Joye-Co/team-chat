@@ -912,6 +912,12 @@ impl RootView {
             ),
             cx.observe(&services.nav, |_, _, cx| cx.notify()),
         ];
+        // Alt+Tab is not a tap of Alt (the menus' key, WINDOWS.md §2), and neither is the
+        // Alt that GPUI presses to bring this window to the front.
+        #[cfg(not(target_os = "macos"))]
+        subscriptions.push(cx.observe_window_activation(window, |_, _, cx| {
+            crate::views::nav::menus::window_activation_changed(cx)
+        }));
         // App-level banners (connection, update).
         let banner = cx.new(|cx| ConnectionBanner::new(services.clone(), cx));
         let update_banner = cx.new(crate::updater::banner::UpdateBanner::new);
@@ -1212,11 +1218,15 @@ impl Render for RootView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = self.window_body(window, cx).into_any_element();
         use crate::ui::native::window_chrome;
-        if self.show_inactive {
+        let framed = if self.show_inactive {
             window_chrome::framed_main_inactive(env!("PRODUCT_NAME"), body, window, cx)
         } else {
             window_chrome::framed_main(env!("PRODUCT_NAME"), body, window, cx)
-        }
+        };
+        // A tap of Alt opens the menus of the title bar (WINDOWS.md §2).
+        #[cfg(not(target_os = "macos"))]
+        let framed = crate::views::nav::menus::with_menu_bar_key(framed);
+        framed
     }
 }
 

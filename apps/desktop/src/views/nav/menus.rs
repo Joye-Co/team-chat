@@ -30,7 +30,8 @@ gpui::actions!(
         Zoom,
         ToggleFullScreen,
         BringAllToFront,
-        ShowCharacterPalette
+        ShowCharacterPalette,
+        FocusMenuBar
     ]
 );
 
@@ -277,6 +278,130 @@ fn reload_window_menu_bar(cx: &mut App) {
     }
 }
 
+/// F10 and a tap of Alt in the main window (WINDOWS.md §2): the first menu opens with the
+/// keyboard focus, ← and → move between the menus, ↑ and ↓ inside one, and Esc (or the
+/// same key again) closes it and gives the focus back. Nothing happens in full screen
+/// (the title bar and its menus are hidden) and under a dialog.
+#[cfg(not(target_os = "macos"))]
+fn toggle_window_menu_bar(window: &mut gpui::Window, cx: &mut App) {
+    use gpui_component::WindowExt as _;
+    if window.is_fullscreen()
+        || !super::is_main_window(window.window_handle(), cx)
+        || window.has_active_dialog(cx)
+    {
+        return;
+    }
+    window_menu_bar(cx).update(cx, |bar, cx| {
+        if bar.is_activated() {
+            bar.deactivate(window, cx);
+        } else {
+            bar.activate(0, window, cx);
+        }
+    });
+}
+
+/// The shortest time a person holds Alt in a tap. GPUI's `activate_window` on Windows
+/// presses and releases Alt itself (`SendInput`, so that Windows lets the window come to
+/// the front): the two arrive together and are not a tap.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+const ALT_TAP_MIN_HOLD: std::time::Duration = std::time::Duration::from_millis(30);
+
+/// How long after the window changed between active and not an Alt press is not a tap:
+/// the Alt that GPUI presses to bring the window to the front comes in this time.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+const ALT_TAP_QUIET_AFTER_ACTIVATION: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// A tap of the Alt key by itself: pressed with no other modifier down, held for at least
+/// [`ALT_TAP_MIN_HOLD`] and released with nothing between. Any key, mouse button or other
+/// modifier in between is a shortcut or a drag (Alt+←, Ctrl+Alt+F, AltGr, Alt+Tab, an Alt
+/// click), never a tap; neither is Alt held over a part of a message, which marks it for
+/// 引用提问 (`with_menu_bar_key`), nor the Alt GPUI presses when the app activates a window.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+#[derive(Default)]
+struct AltTap {
+    last: gpui::Modifiers,
+    /// When the Alt press that may become a tap came.
+    pressed_at: Option<std::time::Instant>,
+    /// No press counts before this time ([`ALT_TAP_QUIET_AFTER_ACTIVATION`]).
+    quiet_until: Option<std::time::Instant>,
+}
+
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+impl AltTap {
+    /// Takes the modifiers now down and the time; true when this change ends a tap.
+    fn modifiers_changed(&mut self, now: gpui::Modifiers, at: std::time::Instant) -> bool {
+        let tapped = now == gpui::Modifiers::none()
+            && self
+                .pressed_at
+                .is_some_and(|pressed| at.duration_since(pressed) >= ALT_TAP_MIN_HOLD);
+        let quiet = self.quiet_until.is_some_and(|until| at < until);
+        self.pressed_at =
+            (now == gpui::Modifiers::alt() && self.last == gpui::Modifiers::none() && !quiet)
+                .then_some(at);
+        self.last = now;
+        tapped
+    }
+
+    /// A key or a mouse button went down.
+    fn interrupt(&mut self) {
+        self.pressed_at = None;
+    }
+
+    /// The window changed between active and not.
+    fn activation_changed(&mut self, at: std::time::Instant) {
+        self.pressed_at = None;
+        self.quiet_until = Some(at + ALT_TAP_QUIET_AFTER_ACTIVATION);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+#[derive(Default)]
+struct AltTapState(AltTap);
+
+#[cfg(not(target_os = "macos"))]
+impl gpui::Global for AltTapState {}
+
+/// The Alt tap is over: a key or a mouse button went down.
+#[cfg(not(target_os = "macos"))]
+fn interrupt_alt_tap(cx: &mut App) {
+    cx.default_global::<AltTapState>().0.interrupt();
+}
+
+/// The main window changed between active and not: an Alt tap is over (Alt+Tab), and the
+/// Alt that GPUI presses to bring a window to the front is not one.
+#[cfg(not(target_os = "macos"))]
+pub fn window_activation_changed(cx: &mut App) {
+    cx.default_global::<AltTapState>()
+        .0
+        .activation_changed(std::time::Instant::now());
+}
+
+/// Wraps the main window's content so that a tap of Alt opens the menus
+/// ([`toggle_window_menu_bar`]), as F10 does.
+#[cfg(not(target_os = "macos"))]
+pub fn with_menu_bar_key(content: impl gpui::IntoElement) -> gpui::AnyElement {
+    use gpui::{InteractiveElement as _, IntoElement as _, ParentElement as _, Styled as _, div};
+    div()
+        .size_full()
+        .on_modifiers_changed(|event, window, cx| {
+            // Alt held over a part of a message marks it for 引用提问: not the menus' key.
+            let marking = crate::views::refs::affordance::pointer_on_part(cx);
+            let tap = &mut cx.default_global::<AltTapState>().0;
+            let tapped =
+                tap.modifiers_changed(event.modifiers, std::time::Instant::now()) && !marking;
+            if marking {
+                tap.interrupt();
+            }
+            if tapped && window.is_window_active() {
+                toggle_window_menu_bar(window, cx);
+            }
+        })
+        .capture_key_down(|_, _, cx| interrupt_alt_tap(cx))
+        .capture_any_mouse_down(|_, _, cx| interrupt_alt_tap(cx))
+        .child(content)
+        .into_any_element()
+}
+
 #[cfg(target_os = "macos")]
 fn register_system_menus() {
     use objc2_app_kit::NSApplication;
@@ -457,7 +582,19 @@ pub fn install(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("ctrl-w", CloseWindow, None),
         KeyBinding::new("f11", ToggleFullScreen, None),
+        // The key that moves the keyboard to the menus in every Windows app; a tap of
+        // Alt does the same (`with_menu_bar_key`).
+        KeyBinding::new("f10", FocusMenuBar, None),
     ]);
+    #[cfg(not(target_os = "macos"))]
+    cx.on_action(|_: &FocusMenuBar, cx| {
+        // Deferred: a key binding dispatches while that window is being updated.
+        if let Some(window) = cx.active_window() {
+            cx.defer(move |cx| {
+                let _ = window.update(cx, |_, window, cx| toggle_window_menu_bar(window, cx));
+            });
+        }
+    });
     install_server_actions(cx);
     cx.on_action(|_: &Hide, cx| cx.hide());
     // Only macOS hides apps (GPUI's Windows platform has no such call); the menus of the
@@ -822,6 +959,111 @@ mod tests {
         }
     }
 
+    /// The menus' key on Windows: only Alt pressed alone, held as long as a person holds a
+    /// key, and released with nothing between is a tap.
+    #[test]
+    fn only_a_bare_alt_press_and_release_is_a_tap() {
+        use gpui::Modifiers;
+        use std::time::{Duration, Instant};
+        let none = Modifiers::none();
+        let alt = Modifiers::alt();
+        let ctrl_alt = Modifiers {
+            control: true,
+            alt: true,
+            ..none
+        };
+        let start = Instant::now();
+        // One change every 100 ms.
+        let at = |step: usize| start + Duration::from_millis(100 * step as u64);
+        let changes = |steps: &[Modifiers]| {
+            let mut tap = AltTap::default();
+            steps
+                .iter()
+                .enumerate()
+                .map(|(ix, step)| tap.modifiers_changed(*step, at(ix)))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(changes(&[alt, none]), [false, true]);
+        // Twice: the second tap closes the menus again.
+        assert_eq!(changes(&[alt, none, alt, none]), [false, true, false, true]);
+        // Ctrl+Alt+F and AltGr (Ctrl+Alt), whichever key is released first.
+        assert_eq!(changes(&[alt, ctrl_alt, alt, none]), [false; 4]);
+        assert_eq!(
+            changes(&[Modifiers::control(), ctrl_alt, alt, none]),
+            [false; 4]
+        );
+        assert_eq!(changes(&[Modifiers::shift(), none]), [false; 2]);
+        // Alt+← (a key between) and an Alt click.
+        let mut tap = AltTap::default();
+        assert!(!tap.modifiers_changed(alt, at(0)));
+        tap.interrupt();
+        assert!(!tap.modifiers_changed(none, at(1)));
+        // The next tap counts again.
+        assert!(!tap.modifiers_changed(alt, at(2)));
+        assert!(tap.modifiers_changed(none, at(3)));
+        // Alt+Tab: the window stops being active between the press and the release.
+        assert!(!tap.modifiers_changed(alt, at(4)));
+        tap.activation_changed(at(5));
+        assert!(!tap.modifiers_changed(none, at(6)));
+        // The Alt GPUI presses and releases at once when the app activates a window:
+        // shorter than a person's tap, on a window that was active already...
+        let mut tap = AltTap::default();
+        assert!(!tap.modifiers_changed(alt, start));
+        assert!(!tap.modifiers_changed(none, start + ALT_TAP_MIN_HOLD / 2));
+        // ...and, however slowly the two arrive, right after the window became active.
+        tap.activation_changed(at(1));
+        let soon = at(1) + ALT_TAP_QUIET_AFTER_ACTIVATION / 2;
+        assert!(!tap.modifiers_changed(alt, soon));
+        assert!(!tap.modifiers_changed(none, soon + ALT_TAP_MIN_HOLD * 2));
+        // A person's tap after that opens the menus.
+        let later = at(1) + ALT_TAP_QUIET_AFTER_ACTIVATION;
+        assert!(!tap.modifiers_changed(alt, later));
+        assert!(tap.modifiers_changed(none, later + ALT_TAP_MIN_HOLD));
+    }
+
+    /// The menu bar's part of F10 and the Alt tap (Windows): the first menu opens without
+    /// the mouse, a menu that does not exist opens nothing, and closing gives the focus
+    /// back to where it was.
+    #[gpui::test]
+    fn the_menu_bar_opens_and_closes_without_the_mouse(cx: &mut gpui::TestAppContext) {
+        struct Focused(gpui::FocusHandle);
+        impl gpui::Render for Focused {
+            fn render(
+                &mut self,
+                _: &mut gpui::Window,
+                _: &mut gpui::Context<Self>,
+            ) -> impl gpui::IntoElement {
+                use gpui::InteractiveElement as _;
+                gpui::div().id("field").track_focus(&self.0)
+            }
+        }
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            let menus = app_menus().into_iter().map(Menu::owned).collect();
+            gpui_component::GlobalState::global_mut(cx).set_app_menus(menus);
+        });
+        let window = cx.add_window(|window, cx| {
+            let focus = cx.focus_handle();
+            window.focus(&focus, cx);
+            Focused(focus)
+        });
+        cx.run_until_parked();
+        let bar = cx.update(gpui_component::menu::AppMenuBar::new);
+        window
+            .update(cx, |view, window, cx| {
+                bar.update(cx, |bar, cx| {
+                    bar.activate(usize::MAX, window, cx);
+                    assert!(!bar.is_activated());
+                    bar.activate(0, window, cx);
+                    assert!(bar.is_activated());
+                    bar.deactivate(window, cx);
+                    assert!(!bar.is_activated());
+                });
+                assert_eq!(window.focused(cx).as_ref(), Some(&view.0));
+            })
+            .unwrap();
+    }
+
     #[gpui::test]
     fn cmd_w_closes_the_window_and_the_menus_name_the_mac_commands(cx: &mut gpui::TestAppContext) {
         let names: Vec<String> = app_menus().iter().map(|m| m.name.to_string()).collect();
@@ -875,6 +1117,7 @@ mod tests {
             };
             assert_eq!(keys(&CloseWindow), ["ctrl-w"]);
             assert_eq!(keys(&ToggleFullScreen), ["f11"]);
+            assert_eq!(keys(&FocusMenuBar), ["f10"]);
             for none in [
                 Minimize.boxed_clone(),
                 Hide.boxed_clone(),
@@ -891,6 +1134,7 @@ mod tests {
                 ToggleFullScreen.boxed_clone(),
                 BringAllToFront.boxed_clone(),
                 ShowCharacterPalette.boxed_clone(),
+                FocusMenuBar.boxed_clone(),
                 UseProductionServer.boxed_clone(),
                 UseStagingServer.boxed_clone(),
             ] {

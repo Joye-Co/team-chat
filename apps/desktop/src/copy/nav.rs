@@ -88,7 +88,6 @@ crate::copy! {
     SWITCHER_IN_GROUP = "在当前群里搜索",
     SECTION_RECENT = "最近",
     SECTION_MESSAGES = "消息",
-    KEY_ESC = "esc",
     // topic list
     FILTER_ALL = "全部",
     FILTER_UNREAD = "未读",

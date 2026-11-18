@@ -159,6 +159,19 @@ async fn windows_checks(
     let Some(handle) = main(cx) else {
         return check("windows_main_window", false);
     };
+    // F10 opens the first menu of the title bar from the keyboard, and F10 again closes it
+    // (the same handler a tap of Alt runs).
+    let menus_open = |cx: &mut AsyncApp| {
+        cx.update(|cx| super::menus::window_menu_bar(cx).read(cx).is_activated())
+    };
+    let _ = handle.update(cx, |_, window, _| window.activate_window());
+    pause(cx).await;
+    key(handle, "f10", cx);
+    pause(cx).await;
+    check("windows_f10_opens_the_menus", menus_open(cx));
+    key(handle, "f10", cx);
+    pause(cx).await;
+    check("windows_f10_again_closes_the_menus", !menus_open(cx));
     // The switch below must not write this run's choice into the person's settings.
     crate::views::settings::prefs::stop_saving();
     // The switch off: no icon, and the app would end with its last window.

@@ -54,8 +54,20 @@ Looked at in the CI screenshots from the port (100 % scale).
 
 - Windows has no menu bar at the top of the screen. The same menus (NATIVE.md §10) sit in the
   window, in the title bar after the sidebar toggle, as gpui-component's `AppMenuBar`
-  (`views::nav::menus::window_menu_bar`). Alt moves focus to them. They leave out what only the
-  Mac has: 服务, 隐藏, 前置全部窗口, 表情与符号.
+  (`views::nav::menus::window_menu_bar`). `F10`, or a tap of Alt by itself, opens the first menu
+  with the keyboard focus: `←` `→` move between the menus, `↑` `↓` inside one, and `Esc` (or the
+  same key again) closes it and gives the focus back. Alt is a tap only when nothing came between
+  its press and its release: no other key or modifier, no mouse button, no change of the active
+  window (so `Alt+←`, `Ctrl+Alt+F`, AltGr and `Alt+Tab` never open a menu), and not while the
+  pointer is over a part of a message, where Alt marks it for 引用提问. GPUI presses and releases
+  Alt itself when the app brings a window to the front (`activate_window`), so an Alt held for
+  less than 30 ms, or pressed within 300 ms after the window became active, is not a tap either
+  (`AltTap`). Nothing opens in full screen (no title bar) or under a dialog. The menus have no
+  underlined access keys.
+- They leave out what only the Mac has: 服务, 隐藏, 隐藏其他, 全部显示 (Windows cannot hide an
+  app; its own keys minimize). The rest is there: 编辑 › 表情与符号 opens the system's emoji panel
+  (the app presses `Win+.`), and 窗口 › 前置全部窗口 raises every window of the app, the active
+  one last. 窗口 has no window list and 帮助 no menu search (the system adds those on the Mac).
 - The App menu's items move to where Windows keeps them: 设置… and 退出 under the first menu,
   关于 under 帮助. 关于 opens the app's own 关于 window, not a system panel.
 - The menu bar status item becomes an icon in the notification area (the tray), with the same
@@ -63,7 +75,12 @@ Looked at in the CI screenshots from the port (100 % scale).
   menu bar. While the icon is shown, closing the last window keeps the app running; without it,
   closing the last window quits.
 
-Only compiled.
+The menu bar was looked at in the Windows CI screenshots (every main-window scene). The
+`windows_*` checks of `--selftest-nav` run the handlers in the real app on a Windows machine (CI
+runs only the unit tests now): the tray switch adds and removes the icon and `Ctrl+W` with and
+without it ran in CI during the port; the two `windows_f10_*` checks (`F10` opens and closes the
+menus) are new and have not run yet. The Alt tap is unit-tested (`only_a_bare_alt_press_and_release_is_a_tap`) and not yet tried
+with a real key press on Windows; the tray menu and the emoji panel are not looked at.
 
 ## 3. Shortcuts
 
@@ -74,10 +91,21 @@ Only compiled.
   copy that names a key all use this form (`settings::shortcuts::shortcut_text`). Return is
   `Enter`, Delete is `Backspace`, Escape is `Esc`.
 - Differences in the bindings themselves: 设置 is `Ctrl+,`; close window `Ctrl+W`; full screen
-  `F11`; 显示侧栏 `Ctrl+Alt+S`; 返回 / 前进 `Alt+←` / `Alt+→`. Hide, Hide Others and Minimize have no binding (Windows has its own:
-  `Win+Down`).
+  `F11`; 显示侧栏 `Ctrl+Alt+S`; 返回 / 前进 `Alt+←` / `Alt+→`; 全局搜索 `Ctrl+Alt+F` (`Ctrl+Shift+F`
+  belongs to the Chinese input methods). Hide, Hide Others, Minimize and 表情与符号 have no
+  binding (Windows has its own: `Win+Down`, `Win+.`), and neither has 退出: `Alt+F4` and the
+  close button close a window, and Windows apps have no key that ends the whole app.
+- Keys only Windows has, beside the shared ones: `F10` and a tap of Alt for the menus (§2);
+  `F3` / `Shift+F3` for the next and the previous match beside `Ctrl+G` / `Ctrl+Shift+G`;
+  `F6` / `Shift+F6` to move between the window's regions (the Mac's `⌥Tab`: Windows keeps
+  `Alt+Tab`); in text, `Ctrl+Shift+Z` redoes beside `Ctrl+Y`, `Shift+Insert` pastes and
+  `Ctrl+Insert` copies.
+- Keys only the Mac has: `⌃P` / `⌃N` move a line in the two palettes. On Windows Ctrl is the
+  command key (`Ctrl+N` is 新话题), so there the arrows are the only line keys.
 
-Only compiled.
+The key lists are unit-tested on Windows in CI (`the_window_menu_commands_have_their_windows_keys`,
+the 快捷键 pane's tests), and the written form is in the Windows CI screenshots of the menus, the
+palettes and the 快捷键 pane. Not tried with real key presses, except `Ctrl+W` (§2).
 
 ## 4. Fonts
 
@@ -108,9 +136,20 @@ Only the families differ (`theme.rs`, `UI_FONT_STACK`, `MONO_FONT_STACK`, `UI_FO
 - Tabular figures (`tnum`) work in both Segoe families.
 - Pages drawn by a web view (产出, diagrams, previews) must name the same families in their CSS:
   `"Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI"` after `-apple-system`, and
-  `"Cascadia Mono", Consolas` for code.
+  `"Cascadia Mono", Consolas` for code. The Apple names come first in those lists, so the web
+  view gives them the same stacks (`PAGE_LOOK_CSS` in `crates/artifact-view/src/win.rs`):
+  `-apple-system` and `BlinkMacSystemFont` are Segoe UI Variable Text, then Segoe UI;
+  `PingFang SC` is Microsoft YaHei UI; `ui-monospace`, `SF Mono`, `Menlo` and `Monaco` are
+  Cascadia Mono, then Consolas. Each alias names a face per weight step by its full name
+  (`local()`), the older family after the newer one.
+- Code text in a view takes `theme::mono_font_family()`; the last-resort constant is private to
+  `theme.rs`.
 
-Only compiled; the stack's pick is unit-tested (`a_font_stack_picks_its_first_installed_family`).
+The native families are in the Windows CI screenshots; the stack's pick is unit-tested
+(`a_font_stack_picks_its_first_installed_family`). Whether `local()` finds the Segoe UI Variable
+and Cascadia Mono faces in WebView2 is not confirmed: until screenshots from a Windows machine
+(`scripts/windows-screenshots.sh`) show them, embedded pages may still draw Segoe UI and Consolas
+(the fallbacks).
 
 ## 5. Icons
 
@@ -310,7 +349,8 @@ or an older Lucide name reaches it.
 - The same scrollbar as on the Mac, with the same behavior: the app's own thin overlay bar, no
   track, no arrow buttons, never Windows' classic 17 px bar.
 
-Only compiled.
+In the Windows CI screenshots wherever a scene shows a bar; scrolling itself is not looked at
+on Windows.
 
 ## 7. Sheets, alerts and dialogs
 
@@ -324,7 +364,8 @@ Only compiled.
 - Copy that names the computer says 这台电脑 where the Mac says 这台 Mac; the copy catalog needs
   the Windows form of every such string.
 
-Only compiled.
+The app's own sheets and alerts are in the Windows CI screenshots. The system's dialogs (open,
+save, print, share) are only compiled.
 
 ## 8. Settings window
 
@@ -335,7 +376,8 @@ Only compiled.
 - 登录时启动 writes the current user's Run key; 菜单栏里显示 controls the tray icon (§2).
 - 机器 › 用这台电脑 installs a scheduled task instead of a launch agent; the pane looks the same.
 
-Only compiled.
+Every pane is in the Windows CI screenshots (the `settings-*` scenes). 登录时启动 and the
+scheduled task are not run there.
 
 ## 9. What the system decides
 
