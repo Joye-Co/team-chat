@@ -816,6 +816,29 @@ mod tests {
         }
     }
 
+    /// What the 更新了什么 sheet of this version draws: the headline, the first items in
+    /// full and the names of the rest.
+    #[test]
+    fn whats_new_of_this_version_has_no_developer_word() {
+        let (ascii, cjk) = crate::copy::tests::developer_words();
+        for (version, notes) in history().into_iter().filter(|(v, _)| v == version::CURRENT) {
+            let shown = notes
+                .items()
+                .take(HIGHLIGHTS)
+                .flat_map(|it| [it.title.clone().unwrap_or_default(), it.body.clone()]);
+            let rest = notes
+                .items()
+                .skip(HIGHLIGHTS)
+                .map(|it| it.name().to_string());
+            for text in shown.chain(rest).chain([notes.headline.to_string()]) {
+                // 任务栏 is the Windows taskbar, not a 任务.
+                let text = text.replace("任务栏", "");
+                let found = crate::copy::tests::found_words(&text, &ascii, &cjk);
+                assert!(found.is_empty(), "{version} shows {found:?}: {text}");
+            }
+        }
+    }
+
     #[test]
     fn parses_headline_and_items() {
         let text = SAMPLE.replace("{product}", env!("PRODUCT_NAME"));
