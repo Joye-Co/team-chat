@@ -24,7 +24,6 @@ use gpui::{
 };
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 
-use crate::ui::native::tokens::space as tsp;
 use crate::{
     app::{Place, RightPane, Services},
     copy::{fill, group_page as c, nav as nav_copy},
@@ -779,12 +778,13 @@ impl Render for GroupPage {
                     let body = if total > 0 {
                         page::list_frame(cx).children(topic_rows).children(footer)
                     } else {
-                        page::frame(cx).child(div().px(tsp::S16).child(page::compact_empty(
+                        // On the page's content edge, where the rows' media lands.
+                        page::frame(cx).child(page::compact_empty(
                             Sym::Topic,
                             c::GROUP_PAGE_ACTIVE_EMPTY,
                             None,
                             cx,
-                        )))
+                        ))
                     };
                     content = content.child(section(
                         page::section_header(st.title(), Some(total), None, None, cx),
@@ -795,12 +795,12 @@ impl Render for GroupPage {
                 // 最近完成 always shows; with nothing done it has the same
                 // compact line as an empty 在做, and its frame hugs its rows.
                 let done_body = if done.is_empty() {
-                    page::frame(cx).child(div().px(tsp::S16).child(page::compact_empty(
+                    page::frame(cx).child(page::compact_empty(
                         Sym::Done,
                         c::GROUP_PAGE_DONE_EMPTY,
                         None,
                         cx,
-                    )))
+                    ))
                 } else {
                     page::list_frame(cx).children(done)
                 };
