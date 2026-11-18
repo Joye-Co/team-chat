@@ -790,16 +790,26 @@ impl LoginView {
                 let resend = quiet("login-email-resend", label, cx);
                 let resend = crate::ui::native::disabled_push(resend, busy || waiting, cx)
                     .on_click(cx.listener(|this, _, window, cx| this.send_email_code(window, cx)));
+                let change = link("login-email-change", l::EMAIL_CHANGE, cx).on_click(
+                    cx.listener(|this, _, window, cx| this.go_to(Step::Email, window, cx)),
+                );
+                // Two even halves meeting at the middle: the longer countdown grows away from
+                // 换一个邮箱, which stays where it is.
                 return div()
+                    .w_full()
                     .flex()
                     .items_center()
-                    .justify_center()
                     .gap(space::S16)
-                    // Even figures: the row stays put while the seconds count down.
-                    .child(div().n_figures().child(resend))
-                    .child(link("login-email-change", l::EMAIL_CHANGE, cx).on_click(
-                        cx.listener(|this, _, window, cx| this.go_to(Step::Email, window, cx)),
-                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .justify_end()
+                            .n_figures()
+                            .child(resend),
+                    )
+                    .child(div().flex_1().min_w_0().flex().child(change))
                     .into_any_element();
             }
         }
