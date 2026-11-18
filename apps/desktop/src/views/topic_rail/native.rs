@@ -1118,10 +1118,12 @@ impl TopicRail {
                         )
                         .child(detail(line, cx)),
                 )
-                // On the center line of the name and its badge.
+                // On the center line of the name and its badge; the glyph
+                // takes the group's content edge, its hover in the inset.
                 .children(open.map(|open| {
                     div()
                         .flex_none()
+                        .mr(-space::S8)
                         .h(ui::native::tokens::height::BADGE)
                         .flex()
                         .items_center()
