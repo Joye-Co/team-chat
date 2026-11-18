@@ -554,7 +554,7 @@ impl SettingsView {
         let handle = window.window_handle();
         // A pane taller than the window shows its scrollbar at rest, in the
         // page's side gutter: the cut at the bottom reads as a scroll (2.19).
-        let page_bar = (self.fit.capped()
+        let page_bar = (self.fit.settled()
             && self.scroll.max_offset().y > crate::ui::native::tokens::space::S4)
             .then(|| {
                 use gpui_component::scroll::{Scrollbar, ScrollbarMode};
