@@ -52,7 +52,7 @@ pub fn sorted(rows: &[Vec<String>], col: usize, asc: bool) -> Vec<usize> {
     ix
 }
 
-pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) -> AnyElement {
+pub fn table(node: &Node, b: &CardV2Block, window: &mut gpui::Window, cx: &mut App) -> AnyElement {
     let CardV2Block::Table {
         id,
         columns,
@@ -72,7 +72,16 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
     if plain {
         // inc-integrate: cell, row and column parts for 引用提问 (REFS §A2.2, R4).
         let refs = super::parts::table_refs(node, b, cx);
-        let t = b20::table_with_refs(columns, rows, refs.as_ref(), Some(window), cx);
+        let fold = ctx.id(format!("table-{id}"));
+        let t = b20::table_with_refs(
+            Some(fold.as_ref()),
+            &|_| false,
+            columns,
+            rows,
+            refs.as_ref(),
+            Some(window),
+            cx,
+        );
         return match title {
             Some(tt) => div()
                 .flex()

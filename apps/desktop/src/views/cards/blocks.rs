@@ -269,7 +269,8 @@ fn column_width(columns: &[String], rows: &[Vec<String>], col: usize, numeric: b
     if numeric { w.ceil() } else { w.min(240.0) }
 }
 
-fn more_button(key: &str, hidden: usize, expanded: bool) -> Button {
+/// The 展开其余 n 行 / 收起 button of a folded table; the v2 tables and diffs share it.
+pub(crate) fn more_button(key: &str, hidden: usize, expanded: bool) -> Button {
     let label = if expanded {
         c::TABLE_LESS.to_string()
     } else {

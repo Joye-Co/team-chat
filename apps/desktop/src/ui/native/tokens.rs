@@ -1172,6 +1172,28 @@ pub mod card_v2 {
     pub const CHART: Pixels = px(100.);
     pub const THUMB: Pixels = px(84.);
     pub const LIVE_BAR: Pixels = px(2.);
+    /// Metrics that share one row; a longer run starts another row.
+    pub const METRICS_PER_ROW: usize = 4;
+    /// Table rows shown before the 展开 row, as the v1 table.
+    pub const TABLE_FOLD_ROWS: usize = 10;
+    /// The least a text column of a table keeps: the first (names) and the others.
+    pub const TABLE_COL_FIRST: Pixels = px(96.);
+    pub const TABLE_COL_MIN: Pixels = px(72.);
+    /// Diff lines shown before the 展开 row.
+    pub const DIFF_FOLD_LINES: usize = 24;
+    /// An image block: at most this wide and tall at its own ratio; the box of an image
+    /// whose size is not known yet.
+    pub const IMAGE_MAX_W: Pixels = px(480.);
+    pub const IMAGE_MAX_H: Pixels = px(360.);
+    pub const IMAGE_BOX: (Pixels, Pixels) = (px(320.), px(200.));
+    /// The play disc of a recording tile.
+    pub const PLAY_DISC: Pixels = px(28.);
+    /// Room between two x labels of a chart, and the narrowest bar that keeps its value
+    /// label.
+    pub const CHART_LABEL_GAP: Pixels = px(8.);
+    pub const CHART_BAR_LABEL: Pixels = px(28.);
+    /// The legend swatch of a chart series.
+    pub const CHART_SWATCH: Pixels = px(16.);
 
     pub const YOU_FILL: f32 = 0.10;
     pub const YOU_EDGE: f32 = 0.24;
@@ -1251,6 +1273,16 @@ pub mod card_v21 {
     pub const CHART_PICK_FILL: f32 = 0.06;
     pub const CHART_HOVER_FILL: f32 = 0.035;
     pub const REMOVE_OUT: Duration = Duration::from_millis(240);
+    /// Bar rows of a pickable bar chart shown before the 展开 row.
+    pub const BAR_ROWS_FOLD: usize = 12;
+    /// How long an answer may sit with its author before the record says so, and before it
+    /// offers 提醒一下: longer than a live event's waits, a queued run is normal.
+    pub const SOFT_ANSWER_LIVE: Duration = Duration::from_secs(30);
+    pub const HARD_ANSWER_LIVE: Duration = Duration::from_secs(180);
+    pub const SOFT_ANSWER_RUN: Duration = Duration::from_secs(90);
+    pub const HARD_ANSWER_RUN: Duration = Duration::from_secs(480);
+    pub const SOFT_ANSWER_STARTING: Duration = Duration::from_secs(180);
+    pub const HARD_ANSWER_STARTING: Duration = Duration::from_secs(720);
 }
 
 /// The images of a message (files::gallery): one picture keeps its ratio, more sit in a

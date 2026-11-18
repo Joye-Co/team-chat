@@ -40,10 +40,14 @@ pub enum Section {
     Notify,
     /// Loading, a card that cannot be read, a long choice (§2.14, §2.15).
     Load,
+    /// Blocks at the schema's limits: 6 metrics, long charts, a 200 by 20 table.
+    Many,
+    /// A 600-line diff, every kind of proof, long code.
+    Long,
 }
 
 impl Section {
-    pub const ALL: [Section; 14] = [
+    pub const ALL: [Section; 16] = [
         Section::States,
         Section::Choice,
         Section::Approve,
@@ -58,6 +62,8 @@ impl Section {
         Section::Page,
         Section::Notify,
         Section::Load,
+        Section::Many,
+        Section::Long,
     ];
 
     fn number(self) -> usize {
@@ -80,6 +86,8 @@ impl Section {
             Section::Page => c::GALLERY_S_PAGE,
             Section::Notify => c::GALLERY_S_NOTIFY,
             Section::Load => c::GALLERY_S_LOAD,
+            Section::Many => c::GALLERY_S_MANY,
+            Section::Long => c::GALLERY_S_LONG,
         }
     }
 
@@ -99,6 +107,8 @@ impl Section {
             Section::Page => c::GALLERY_S_PAGE_NOTE,
             Section::Notify => c::GALLERY_S_NOTIFY_NOTE,
             Section::Load => c::GALLERY_S_LOAD_NOTE,
+            Section::Many => c::GALLERY_S_MANY_NOTE,
+            Section::Long => c::GALLERY_S_LONG_NOTE,
         }
     }
 }
@@ -713,6 +723,49 @@ impl CardsGallery {
                     "",
                     self.card(CHOICE_LONG, d, me, None, "a", window, cx),
                 )],
+            ),
+            Section::Many => (
+                vec![
+                    item(
+                        c::GALLERY_MANY_METRICS,
+                        "",
+                        self.card(METRICS_MANY, d, me, None, "a", window, cx),
+                    ),
+                    item(
+                        c::GALLERY_MANY_POINTS,
+                        "",
+                        self.card(CHART_MANY, d, me, None, "a", window, cx),
+                    ),
+                    item(
+                        c::GALLERY_MANY_BARS,
+                        "",
+                        self.card(CHART_BARS, d, me, None, "a", window, cx),
+                    ),
+                ],
+                vec![item(
+                    c::GALLERY_MANY_ROWS,
+                    "",
+                    self.card(TABLE_BIG, d, me, None, "a", window, cx),
+                )],
+            ),
+            Section::Long => (
+                vec![item(
+                    c::GALLERY_LONG_DIFF,
+                    "",
+                    self.card(DIFF_LONG, d, me, None, "a", window, cx),
+                )],
+                vec![
+                    item(
+                        c::GALLERY_PROOF_KINDS,
+                        "",
+                        self.card(PROOF_KINDS, d, me, None, "a", window, cx),
+                    ),
+                    item(
+                        c::GALLERY_LONG_CODE,
+                        "",
+                        self.card(CODE_LONG, d, me, None, "a", window, cx),
+                    ),
+                ],
             ),
         };
         div()
