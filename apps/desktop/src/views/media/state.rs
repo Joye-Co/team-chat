@@ -30,7 +30,8 @@ pub struct MediaState {
     pub audio: Option<AudioPlayer>,
     pub speed: usize,
     pub sort: Option<(usize, bool)>,
-    pub toc: usize,
+    /// The selected row of the table of contents (⌘F moves it while a frame is drawn).
+    pub toc: std::rc::Rc<std::cell::Cell<usize>>,
     pub zoom: f32,
     pub sidebar: bool,
     pub wrap: bool,
@@ -57,7 +58,7 @@ impl MediaState {
             audio: None,
             speed: 1,
             sort: None,
-            toc: 0,
+            toc: Default::default(),
             zoom: 1.,
             sidebar: true,
             wrap: false,

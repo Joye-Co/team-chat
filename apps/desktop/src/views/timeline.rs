@@ -165,6 +165,8 @@ pub struct TimelineView {
     /// The long answers shown whole (`markdown::fold`): opened by the person,
     /// or the target of a search, a reference jump or ⌘F. By row key.
     unfolded: std::collections::HashSet<String>,
+    /// Rows a search, ⌘F or a reference jump pointed into: their code fences stay open.
+    code_open: std::collections::HashSet<String>,
     /// The message row under the pointer (its hover toolbar shows).
     hovered: Option<String>,
     /// R2-12, E3: the thread is a Tab stop; ↑↓ move the row whose toolbar
@@ -366,6 +368,7 @@ impl TimelineView {
             focus: focus::FocusState::default(),
             find: None,
             unfolded: Default::default(),
+            code_open: Default::default(),
             hovered: None,
             key_focus: cx.focus_handle().tab_index(0).tab_stop(true),
             keyboard_row: false,

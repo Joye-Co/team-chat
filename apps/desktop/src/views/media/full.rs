@@ -22,7 +22,7 @@ use gpui_component::{
 use crate::ui::native::FocusRow as _;
 
 use super::{
-    inline::{code_line, fit, group_digits},
+    inline::{LineMarks, code_line_marked, fit, group_digits},
     parts::{self, mono, tool},
     screen,
     state::{MediaState, SPEEDS, Target},
@@ -690,10 +690,12 @@ fn markdown_blocks(
         .then_some(head)
         .into_iter()
         .chain(parts_.into_iter().enumerate().map(|(i, (_, body))| {
-            // ⌘F: the matches of this part, the current one stronger. A current
-            // match that cannot carry a mark (in code, a link, a diagram) gets
-            // a band behind its part instead, as a row of a 话题 does.
+            // ⌘F: the matches of this part, the current one stronger; those in a code
+            // fence are painted by the fence's highlighter. A current match that cannot
+            // carry a mark (inline code, a link, a diagram) gets a band behind its part
+            // instead, as a row of a 话题 does.
             let mut band = false;
+            let mut code_marks = Vec::new();
             let body = match found.and_then(|f| f.matches.get(i).map(|m| (f, m))) {
                 Some((f, ranges)) if !ranges.is_empty() => {
                     let current = f.current.filter(|(part, _)| *part == i).map(|(_, m)| m);
@@ -704,19 +706,32 @@ fn markdown_blocks(
                         ui::native::tokens::find::match_fill(&palette),
                         ui::native::tokens::find::current_fill(&palette),
                     );
-                    band = current.is_some() && !current_marked;
+                    let (fences, current_fenced) = crate::views::timeline::find::fence_marks(
+                        &body,
+                        ranges,
+                        current,
+                        ui::native::tokens::find::match_fill(&palette),
+                        ui::native::tokens::find::current_fill(&palette),
+                    );
+                    code_marks = fences;
+                    band = current.is_some() && !current_marked && !current_fenced;
                     marked
                 }
                 _ => body,
             };
             div()
-                .when(band, |d| d.bg(ui::native::native_colors(cx).fill))
+                .when(band, |d| {
+                    d.bg(ui::native::native_colors(cx).fill)
+                        .rounded(radius::MD)
+                        .mx(-space::S8)
+                        .px(space::S8)
+                })
                 // A section sits further from the block above it than its heading
                 // sits from its own content, so each heading reads with what it heads.
                 .when(i > 0, |d| d.pt(space::S16))
                 .pb(space::S8)
                 // A ```mermaid fence of the document is drawn as a diagram.
-                .child(markdown::document_body(
+                .child(markdown::document_body_marked(
                     ElementId::Name(format!("{id}-md-{i}").into()),
                     body,
                     &markdown::DocContext {
@@ -724,6 +739,8 @@ fn markdown_blocks(
                         version: media.key.version,
                         part: i,
                     },
+                    code_marks,
+                    k.text_1,
                 ))
                 .into_any_element()
         }))
@@ -771,7 +788,7 @@ fn markdown_view(
     let k = theme::colors(cx);
     let (title, parts_) = sections(&md.text);
     let st = state.read(cx);
-    let (toc_on, selected, scroll) = (st.sidebar, st.toc, st.scroll.clone());
+    let (toc_on, toc_at, scroll) = (st.sidebar, st.toc.clone(), st.scroll.clone());
     let mut toc = div()
         .w(px(128.))
         .flex_none()
@@ -794,6 +811,8 @@ fn markdown_view(
     let bodies: Vec<&str> = parts_.iter().map(|(_, body)| body.as_str()).collect();
     let found = super::find::found(state, &bodies, cx);
     if let Some((part, _)) = found.as_ref().filter(|f| f.reveal).and_then(|f| f.current) {
+        // The table of contents names the part the document moves to.
+        toc_at.set(part);
         // The part's distance from the first part, both measured in one frame: the
         // sheet may still be sliding in, so a position in the window is not to be
         // trusted. Before the parts were laid out once, the next frame tries again.
@@ -807,6 +826,7 @@ fn markdown_view(
             _ => super::find::reveal_again(state, cx),
         }
     }
+    let selected = toc_at.get();
     for (i, (h, _)) in parts_.iter().enumerate() {
         let Some(h) = h else { continue };
         let go = state.clone();
@@ -826,7 +846,7 @@ fn markdown_view(
                 .on_click(move |_, _, cx| {
                     handle.scroll_to_top_of_item(i + offset);
                     go.update(cx, |s, cx| {
-                        s.toc = i;
+                        s.toc.set(i);
                         cx.notify();
                     });
                 }),
@@ -2044,6 +2064,11 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
         Some(f) => (0..c.lines.len()).map(|i| f.line_fill(i, cx)).collect(),
         None => Vec::new(),
     });
+    // The matches themselves, and which one is current (line, match on the line).
+    let marks: Arc<Vec<Vec<std::ops::Range<usize>>>> =
+        Arc::new(found.as_ref().map_or_else(Vec::new, |f| f.matches.clone()));
+    let current = found.as_ref().and_then(|f| f.current);
+    let list_marks = marks.clone();
     let list_lines = lines.clone();
     let list_fills = fills.clone();
     let list = uniform_list(id(spec, "lines"), lines.len(), move |range, _window, cx| {
@@ -2051,6 +2076,16 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
         range
             .map(|i| {
                 let mut block = starts[i];
+                let on_current = current.is_some_and(|(at, _)| at == i);
+                let line_marks =
+                    list_marks
+                        .get(i)
+                        .filter(|r| !r.is_empty())
+                        .map(|ranges| LineMarks {
+                            ranges,
+                            current: current.filter(|(at, _)| *at == i).map(|(_, m)| m),
+                            on_current,
+                        });
                 div()
                     .h(px(20.))
                     .flex()
@@ -2064,10 +2099,16 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
                             .pr(space::S12)
                             .flex()
                             .justify_end()
-                            .text_color(k.text_3)
+                            .text_color(if on_current { k.text_1 } else { k.text_3 })
                             .child((i + 1).to_string()),
                     )
-                    .child(code_line(&list_lines[i], lang, &mut block, cx))
+                    .child(code_line_marked(
+                        &list_lines[i],
+                        lang,
+                        &mut block,
+                        line_marks,
+                        cx,
+                    ))
             })
             .collect()
     })
@@ -2120,7 +2161,32 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
             .flex_1()
             .overflow_y_scroll()
             .t_code();
+        let sheet = ui::native::native_colors(cx).sheet;
         for (i, l) in lines.iter().enumerate() {
+            let on_current = current.is_some_and(|(at, _)| at == i);
+            // The same marks as the unwrapped lines, on text that may wrap.
+            let highlights: Vec<(std::ops::Range<usize>, gpui::HighlightStyle)> = marks
+                .get(i)
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .map(|(m, range)| {
+                    let now = current == Some((i, m));
+                    (
+                        range.clone(),
+                        gpui::HighlightStyle {
+                            font_weight: Some(theme::MEDIUM_WEIGHT),
+                            underline: Some(gpui::UnderlineStyle {
+                                thickness: ui::native::metrics::HAIRLINE,
+                                ..Default::default()
+                            }),
+                            color: now.then_some(sheet),
+                            background_color: now.then_some(k.text_1),
+                            ..Default::default()
+                        },
+                    )
+                })
+                .collect();
             col = col.child(
                 div()
                     .flex()
@@ -2132,15 +2198,14 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
                             .pr(space::S12)
                             .flex()
                             .justify_end()
-                            .text_color(k.text_3)
+                            .text_color(if on_current { k.text_1 } else { k.text_3 })
                             .child((i + 1).to_string()),
                     )
                     .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.))
-                            .text_color(k.text_1)
-                            .child(l.clone()),
+                        div().flex_1().min_w(px(0.)).text_color(k.text_1).child(
+                            gpui::StyledText::new(SharedString::from(l.clone()))
+                                .with_highlights(highlights),
+                        ),
                     ),
             );
         }

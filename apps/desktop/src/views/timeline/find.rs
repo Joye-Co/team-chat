@@ -283,6 +283,57 @@ pub fn mark_matches(
     (out, current_marked)
 }
 
+/// A code fence of a body and the fills of the matches in it, as ranges of its code.
+pub type FenceMarks = (String, Vec<(Range<usize>, Hsla)>);
+
+/// The matches of `ranges` that lie in a closed code fence of `source`, per fence (a
+/// diagram fence is drawn, not listed: its matches are left out), and whether the
+/// current one is among them.
+pub fn fence_marks(
+    source: &str,
+    ranges: &[Range<usize>],
+    current: Option<usize>,
+    other: Hsla,
+    strong: Hsla,
+) -> (Vec<FenceMarks>, bool) {
+    let mut out = Vec::new();
+    let mut current_in = false;
+    let mut open: Option<(usize, bool)> = None;
+    let mut at = 0;
+    for line in source.split_inclusive('\n') {
+        let start = at;
+        at += line.len();
+        let trimmed = line.trim();
+        if !(trimmed.starts_with("```") || trimmed.starts_with("~~~")) {
+            continue;
+        }
+        let Some((from, diagram)) = open.take() else {
+            let info = trimmed.trim_start_matches(['`', '~']);
+            open = Some((at, crate::diagrams::is_diagram_info(info)));
+            continue;
+        };
+        let code = source[from..start].trim_end_matches(['\n', '\r']);
+        let end = from + code.len();
+        let marks: Vec<_> = ranges
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| !diagram && from <= r.start && r.end <= end)
+            .map(|(i, r)| {
+                let now = current == Some(i);
+                current_in |= now;
+                (
+                    r.start - from..r.end - from,
+                    if now { strong } else { other },
+                )
+            })
+            .collect();
+        if !marks.is_empty() {
+            out.push((code.to_string(), marks));
+        }
+    }
+    (out, current_in)
+}
+
 /// `#RRGGBBAA` of a color, for a `<mark color>`.
 fn hex(color: Hsla) -> String {
     let c = gpui::Rgba::from(color);

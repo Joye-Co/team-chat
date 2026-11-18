@@ -2,7 +2,8 @@
 //! highlighting, with the app's own tokenizer (`views::media::text`), the one
 //! a code 产出 uses. Monochrome like there: keywords 600, strings and numbers
 //! `text-2`, comments `text-3` italic, so status colors keep their meaning.
-//! A `diff` fence gets the Card v2 diff fills on its `+` and `-` lines.
+//! The `+` and `-` lines of a `diff` fence are tinted across the block
+//! (`markdown::diff_lines`).
 
 use std::{cell::RefCell, ops::Range, sync::Arc};
 
@@ -11,7 +12,6 @@ use gpui_base::text::CodeBlock;
 
 use crate::{
     theme,
-    ui::native::tokens::card_v2 as m,
     views::media::text::{self, Tok},
 };
 
@@ -111,8 +111,6 @@ pub fn spans(code: &str, info: &str) -> Vec<(Range<usize>, Span)> {
 struct Palette {
     value: Hsla,
     comment: Hsla,
-    added: Hsla,
-    removed: Hsla,
 }
 
 impl Palette {
@@ -131,14 +129,8 @@ impl Palette {
                 font_style: Some(gpui::FontStyle::Italic),
                 ..Default::default()
             },
-            Span::Added => HighlightStyle {
-                background_color: Some(self.added),
-                ..Default::default()
-            },
-            Span::Removed => HighlightStyle {
-                background_color: Some(self.removed),
-                ..Default::default()
-            },
+            // Their tint is the whole line's, drawn behind the block's width.
+            Span::Added | Span::Removed => HighlightStyle::default(),
             Span::Meta => HighlightStyle {
                 color: Some(self.comment),
                 ..Default::default()
@@ -159,8 +151,6 @@ impl Palette {
         Self {
             value: k.text_2,
             comment: k.text_3,
-            added: m::mix(k.ok, k.bg, m::DIFF_FILL),
-            removed: m::mix(k.bad, k.bg, m::DIFF_FILL),
         }
     }
 
@@ -189,6 +179,79 @@ pub fn highlighter() -> Highlighter {
             .1
             .clone()
     })
+}
+
+/// The lines of a diff fence that are tinted: their index, and whether it is added.
+pub fn diff_lines(code: &str, info: &str) -> Vec<(usize, bool)> {
+    if !is_diff(info) {
+        return Vec::new();
+    }
+    let spans = spans(code, info);
+    let mut at = 0;
+    let mut out = Vec::new();
+    for (i, line) in code.split_inclusive('\n').enumerate() {
+        match spans.iter().find(|(r, _)| r.start == at) {
+            Some((_, Span::Added)) => out.push((i, true)),
+            Some((_, Span::Removed)) => out.push((i, false)),
+            _ => {}
+        }
+        at += line.len();
+    }
+    out
+}
+
+/// The app's highlighter with the find bar's matches on top: `marks` are the fences that
+/// hold one, each match in `ink` on its own fill.
+pub fn marked_highlighter(
+    marks: Vec<crate::views::timeline::find::FenceMarks>,
+    ink: Hsla,
+) -> Highlighter {
+    let base = highlighter();
+    Arc::new(move |block: &CodeBlock| {
+        let styles = base(block);
+        let code = block.code();
+        let code = code.trim_end_matches(['\n', '\r']);
+        match marks.iter().find(|(fence, _)| fence == code) {
+            Some((_, on)) => overlay(styles, on, ink),
+            None => styles,
+        }
+    })
+}
+
+/// `styles` cut around `marks`, then the marks: the runs must not overlap.
+fn overlay(
+    styles: Vec<(Range<usize>, HighlightStyle)>,
+    marks: &[(Range<usize>, Hsla)],
+    ink: Hsla,
+) -> Vec<(Range<usize>, HighlightStyle)> {
+    let mut out = Vec::new();
+    for (range, style) in styles {
+        let mut at = range.start;
+        for (mark, _) in marks {
+            if mark.end <= at || mark.start >= range.end {
+                continue;
+            }
+            if mark.start > at {
+                out.push((at..mark.start, style));
+            }
+            at = mark.end.min(range.end);
+        }
+        if at < range.end {
+            out.push((at..range.end, style));
+        }
+    }
+    out.extend(marks.iter().map(|(mark, fill)| {
+        (
+            mark.clone(),
+            HighlightStyle {
+                color: Some(ink),
+                background_color: Some(*fill),
+                ..Default::default()
+            },
+        )
+    }));
+    out.sort_by_key(|(range, _)| range.start);
+    out
 }
 
 /// Called while a code block draws: when the app's colors are not the ones
@@ -265,17 +328,16 @@ mod tests {
         let palette = Palette {
             value: gpui::red(),
             comment: gpui::blue(),
-            added: gpui::green(),
-            removed: gpui::red(),
         };
         assert_eq!(
             palette.style(Span::Keyword).font_weight,
             Some(gpui::FontWeight::SEMIBOLD)
         );
         assert_eq!(palette.style(Span::Value).color, Some(gpui::red()));
+        assert_eq!(palette.style(Span::Added).background_color, None);
         assert_eq!(
-            palette.style(Span::Added).background_color,
-            Some(gpui::green())
+            diff_lines("--- a\n+new\n same\n-old\n", "diff"),
+            [(1, true), (3, false)]
         );
         let block = CodeBlock::from_code("fn x() {}", Some("rust"));
         assert_eq!(block.lang().as_deref(), Some("rust"));
