@@ -136,11 +136,28 @@ pub fn open_started_from(
     true
 }
 
-/// At most this many members show in the 交给 row.
+/// Leads the first message with `mention` (once) and puts the caret at its end.
+fn lead_with(body: &Entity<TextareaState>, mention: &str, window: &mut Window, cx: &mut App) {
+    body.update(cx, |b, cx| {
+        let text = b.value().to_string();
+        let next = if text.contains(mention) {
+            text
+        } else {
+            format!("{mention} {}", text.trim_start())
+        };
+        let end = next.len();
+        b.set_value(next, window, cx);
+        b.set_selected_range(end..end, cx);
+        b.focus(window, cx);
+    });
+}
+
+/// At most this many members show as buttons in the 交给 row.
 const HAND_TO_MAX: usize = 5;
 
 /// Who the 交给 row offers in `group_id` (onboarding: a new member does not know the
 /// names to @): the members of the 群 but me, bots first (they take work), each once.
+/// The first [`HAND_TO_MAX`] are buttons, the rest are in the row's 其他成员 menu.
 pub fn hand_to(services: &Services, group_id: &str) -> Vec<(String, String)> {
     let me = services.me();
     let ids = services
@@ -157,11 +174,7 @@ pub fn hand_to(services: &Services, group_id: &str) -> Vec<(String, String)> {
         .filter(|m| ids.contains(&m.id) && Some(&m.id) != me.as_ref() && !m.deactivated)
         .collect();
     members.sort_by_key(|m| !m.is_bot());
-    members
-        .into_iter()
-        .take(HAND_TO_MAX)
-        .map(|m| (m.id, m.name))
-        .collect()
+    members.into_iter().map(|m| (m.id, m.name)).collect()
 }
 
 pub struct NewTopicSheet {
@@ -329,12 +342,33 @@ impl NewTopicSheet {
     /// 交给: one small button per member of the 群; a click leads the
     /// first message with @名字 (once). `None` when nobody can take it.
     fn hand_row(&self, cx: &mut Context<Self>) -> Option<gpui::Div> {
-        let hand_to = self
+        let mut hand_to = self
             .group
             .as_deref()
             .map(|g| hand_to(&self.services, g))
             .unwrap_or_default();
+        let rest = hand_to.split_off(hand_to.len().min(HAND_TO_MAX));
         (!hand_to.is_empty()).then(|| {
+            let more =
+                (!rest.is_empty()).then(|| {
+                    let body = self.body.clone();
+                    push_button(
+                        "new-topic-hand-more",
+                        o::NEW_TOPIC_HAND_TO_MORE,
+                        PushStyle::Ghost,
+                        PushSize::Small,
+                        cx,
+                    )
+                    .dropdown_menu(move |menu, _, _| {
+                        rest.iter().fold(menu, |menu, (_, name)| {
+                            let body = body.clone();
+                            let mention = format!("@{name}");
+                            menu.item(PopupMenuItem::new(name.clone()).on_click(
+                                move |_, window, cx| lead_with(&body, &mention, window, cx),
+                            ))
+                        })
+                    })
+                });
             let buttons = hand_to.into_iter().map(|(id, name)| {
                 let body = self.body.clone();
                 let mention = format!("@{name}");
@@ -345,26 +379,17 @@ impl NewTopicSheet {
                     PushSize::Small,
                     cx,
                 )
-                .on_click(move |_, window, cx| {
-                    let mention = mention.clone();
-                    body.update(cx, |b, cx| {
-                        let text = b.value().to_string();
-                        let next = if text.contains(&mention) {
-                            text
-                        } else {
-                            format!("{mention} {}", text.trim_start())
-                        };
-                        let end = next.len();
-                        b.set_value(next, window, cx);
-                        b.set_selected_range(end..end, cx);
-                        b.focus(window, cx);
-                    });
-                })
+                .on_click(move |_, window, cx| lead_with(&body, &mention, window, cx))
             });
             sheet_form_row_wrap(
                 o::NEW_TOPIC_HAND_TO,
                 PushSize::Small.height(),
-                div().flex().flex_wrap().gap(space::S6).children(buttons),
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap(space::S8)
+                    .children(buttons)
+                    .children(more),
                 cx,
             )
         })
