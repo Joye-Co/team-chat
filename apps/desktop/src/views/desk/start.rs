@@ -250,6 +250,7 @@ impl DeskPage {
                 d.child(
                     div()
                         .flex_none()
+                        .self_center()
                         .flex()
                         .items_center()
                         .gap(tsp::S8)
