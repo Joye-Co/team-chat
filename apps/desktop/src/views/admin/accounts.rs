@@ -156,11 +156,9 @@ pub(super) fn confirm_delete_key(
     use crate::views::nav::dialogs;
     dialogs::destructive_alert(
         "delete-key",
-        fill(
-            m::KEYS_DELETE_CONFIRM_TITLE,
-            &[("name", &dialogs::short_name(&name))],
-        ),
-        m::KEYS_DELETE_CONFIRM_BODY.to_string(),
+        // The whole name, in the body: it wraps, the one-line title cannot.
+        m::KEYS_DELETE_CONFIRM_TITLE.to_string(),
+        fill(m::KEYS_DELETE_CONFIRM_BODY, &[("name", &name)]),
         m::KEYS_DELETE_OK,
         move |window, cx| view.update(cx, |v, cx| v.delete_key(name.clone(), window, cx)),
         window,

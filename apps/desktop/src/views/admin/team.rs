@@ -1310,11 +1310,8 @@ pub(super) fn confirm_deactivate(
     use crate::views::nav::dialogs;
     dialogs::destructive_alert(
         "deactivate-member",
-        fill(
-            m::TEAM_DEACTIVATE_CONFIRM_TITLE,
-            &[("name", &dialogs::short_name(name))],
-        ),
-        m::TEAM_DEACTIVATE_CONFIRM_BODY.to_string(),
+        m::TEAM_DEACTIVATE_CONFIRM_TITLE.to_string(),
+        fill(m::TEAM_DEACTIVATE_CONFIRM_BODY, &[("name", name)]),
         m::TEAM_DEACTIVATE_OK,
         move |_, cx| set_deactivated(&services, &id, true, &view, cx),
         window,
@@ -1335,11 +1332,8 @@ fn confirm_delete_member(
     use crate::views::nav::dialogs;
     dialogs::destructive_alert(
         "delete-member",
-        fill(
-            m::TEAM_DELETE_CONFIRM_TITLE,
-            &[("name", &dialogs::short_name(name))],
-        ),
-        m::TEAM_DELETE_CONFIRM_BODY.to_string(),
+        m::TEAM_DELETE_CONFIRM_TITLE.to_string(),
+        fill(m::TEAM_DELETE_CONFIRM_BODY, &[("name", name)]),
         m::TEAM_DELETE_OK,
         move |window, cx| {
             let reply = services.provider.delete_member(&id);
