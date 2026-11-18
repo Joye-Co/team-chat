@@ -141,4 +141,6 @@ crate::copy! {
     LIVE_MEMBER_ENDED = "{member} 已停止",
     // A stuck run names the step it stopped on.
     LIVE_STUCK_AT = "停在：{step}",
+    // The banner's way to the approval card a run waits on.
+    LIVE_GO_APPROVE = "去批准",
 }

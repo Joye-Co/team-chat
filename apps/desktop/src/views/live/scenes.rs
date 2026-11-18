@@ -108,6 +108,10 @@ fn open_phase(
         ),
         RunPhase::Stopped => fake.end_live_run(crate::data::RunStatus::Cancelled, None, false),
         RunPhase::WaitingComputer if waiting == Some(WaitingFor::Queue) => fake.queue_live_run(),
+        RunPhase::WaitingApproval => fake.ask_on_live_run(crate::data::v2::AskKind::Approval),
+        RunPhase::WaitingPerson if waiting == Some(WaitingFor::Question) => {
+            fake.ask_on_live_run(crate::data::v2::AskKind::Choice)
+        }
         _ => {}
     }
     let provider: std::sync::Arc<dyn crate::data::ChatProvider> = if crate::selftest::worst_case() {

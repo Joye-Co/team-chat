@@ -197,6 +197,8 @@ struct Data {
     live_queued: bool,
     /// The live run finished every step (the 完成 scene).
     live_done: bool,
+    /// The card the live run waits on me for (the waiting phase scenes).
+    live_ask: Option<AskItem>,
     // topic track (v11/topic): who approved PR #61 and when.
     approval: Option<(MemberId, Millis)>,
     /// My own notify settings, so the 通知 sections and menus can be tried
@@ -1133,6 +1135,7 @@ impl V2Samples {
             hand: Vec::new(),
             live_queued: false,
             live_done: false,
+            live_ask: None,
             approval: None,
             muted_groups: Default::default(),
             levels: HashMap::new(),
@@ -1439,6 +1442,58 @@ impl V2Samples {
             group_id: DEV.into(),
             topic_id: T_VIRTUAL.into(),
         }]);
+    }
+
+    /// The waiting phase scenes: the live run's card in its 话题, open for me.
+    pub fn ask_on_live_run(&self, kind: AskKind) {
+        let approval = kind == AskKind::Approval;
+        let title = if approval {
+            "压测要占用测试库，现在开始吗？"
+        } else {
+            "滚动锚点按哪种方式修？"
+        };
+        let body = if approval {
+            serde_json::json!({
+                "v": 1,
+                "title": title,
+                "tone": "warning",
+                "blocks": [
+                    { "type": "text", "text": "压测期间测试库大约 10 分钟不能用。" }
+                ],
+                "actions": [
+                    { "id": "go", "label": "批准", "style": "primary" },
+                    { "id": "hold", "label": "先不做" }
+                ]
+            })
+        } else {
+            serde_json::json!({
+                "v": 1,
+                "title": title,
+                "blocks": [
+                    { "type": "text", "text": "Forge 推荐 A：改动小，不影响现有列表。" }
+                ],
+                "actions": [
+                    { "id": "a", "label": "A 按消息定位" },
+                    { "id": "b", "label": "B 按像素定位" }
+                ]
+            })
+        };
+        let when = at(9, 51);
+        let mut ask = message(DEV, T_VIRTUAL, 3, FORGE, when, title);
+        ask.id = format!("{T_VIRTUAL}-ask");
+        self.with(|d| {
+            d.cards.insert(ask.id.clone(), card(body));
+            d.live_ask = Some(AskItem {
+                group_id: DEV.into(),
+                topic_id: T_VIRTUAL.into(),
+                message_id: Some(ask.id.clone()),
+                from: FORGE.into(),
+                kind,
+                title: title.into(),
+                at: when,
+            });
+            d.messages.entry(T_VIRTUAL.into()).or_default().push(ask);
+        });
     }
 
     /// The phase scenes of an ended run: the live run itself ends (`status`,
@@ -2034,6 +2089,7 @@ impl ChatProvider for V2Samples {
         if approved {
             asks.retain(|a| a.topic_id != T_RECONNECT);
         }
+        asks.extend(self.with(|d| d.live_ask.clone()));
         asks
     }
     fn done_today(&self) -> Vec<DoneItem> {

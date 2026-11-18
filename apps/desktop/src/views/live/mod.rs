@@ -49,8 +49,44 @@ use crate::{
         process::{ProcessView, stop_run},
         shell::{PaneView, clock, member_name, panes::watch, stub_body},
         timeline::plan,
+        topic_page::asks_in_topic,
     },
 };
+
+/// Where the banner of a run that waits for me leads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AskRoute {
+    Approve,
+    Reply,
+}
+
+/// The way to the answer, only for the person the run waits for: anyone else reads
+/// `等 小王 批准` and has nothing to answer.
+fn ask_route(words: &phase::PhaseWords, waiting: Option<WaitingFor>) -> Option<AskRoute> {
+    if words.badge != BadgeState::NeedsYou {
+        return None;
+    }
+    match (words.phase, waiting) {
+        (RunPhase::WaitingApproval, _) => Some(AskRoute::Approve),
+        (RunPhase::WaitingPerson, Some(WaitingFor::Question)) => Some(AskRoute::Reply),
+        _ => None,
+    }
+}
+
+/// The message of the unanswered ask this route leads to: the newest, this member's first.
+fn open_ask(
+    asks: &[(crate::data::v2::AskItem, bool)],
+    bot: &str,
+    route: AskRoute,
+) -> Option<String> {
+    asks.iter()
+        .filter(|(a, done)| {
+            !done && (route == AskRoute::Reply || a.kind == crate::data::v2::AskKind::Approval)
+        })
+        .filter_map(|(a, _)| Some((a, a.message_id.as_ref()?)))
+        .max_by_key(|(a, _)| (a.from == bot, a.at))
+        .map(|(_, id)| id.to_string())
+}
 
 /// A terminal line in the screen preview (12 / 20 mono).
 const TERMINAL_LINE: Pixels = px(20.);
@@ -594,6 +630,36 @@ impl LivePane {
             .filter(|c| !c.is_empty())
     }
 
+    /// 去批准 / 去回复: shows the card that asks in the 话题, or the composer when no card
+    /// does. A full-width pane steps aside, or the card would open behind it.
+    fn go_to_ask(
+        &mut self,
+        run: &BotRunSummary,
+        ask: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.expanded = false;
+        cx.notify();
+        let Some(id) = ask else {
+            self.act(run, RunAction::GoReply, window, cx);
+            return;
+        };
+        let (g, t) = (run.group_id.clone(), run.topic_id.clone());
+        let seq = self
+            .services
+            .provider
+            .messages(&g, &t, 400)
+            .messages
+            .iter()
+            .find(|m| m.id == id)
+            .map_or(0, |m| m.created_seq);
+        let id = id.to_string();
+        self.services
+            .nav
+            .update(cx, |nav, cx| nav.open_message(g, t, id, seq, cx));
+    }
+
     /// The banner over the screen for a phase that needs words (design-takeover 3.9): who
     /// paused or holds the run and for how long, what an ended run waits for, which computer
     /// it waits for; under it the note for the member when I may continue or hand back.
@@ -723,13 +789,17 @@ impl LivePane {
                 icon_ink = words.badge.color(&n);
                 // A stuck run says what it stopped on: its own words when it left
                 // any, else the step of the plan it is on.
+                // A run waiting for approval names the step that waits for it.
+                let at_step = || {
+                    run.plan
+                        .iter()
+                        .find(|p| matches!(p.state, PlanState::Current | PlanState::Waiting))
+                        .map(|p| fill(c::LIVE_STUCK_AT, &[("step", &p.text)]))
+                };
                 if phase_of(run).1 == Some(WaitingFor::Stuck) {
-                    cause = self.run_cause(run).or_else(|| {
-                        run.plan
-                            .iter()
-                            .find(|p| matches!(p.state, PlanState::Current | PlanState::Waiting))
-                            .map(|p| fill(c::LIVE_STUCK_AT, &[("step", &p.text)]))
-                    });
+                    cause = self.run_cause(run).or_else(at_step);
+                } else if words.phase == RunPhase::WaitingApproval {
+                    cause = at_step();
                 }
                 (
                     words.badge.symbol().unwrap_or(Sym::NeedsYou),
@@ -763,6 +833,32 @@ impl LivePane {
                 cx,
             )
             .on_click(cx.listener(move |this, _, _, cx| this.retry_run(&bot_id, &run_id, cx)))
+        });
+        // The way to what the run waits for: 去批准 opens the approval card, 去回复 the
+        // question (or the composer when no card asks it).
+        let go_to_ask = ask_route(words, phase_of(run).1).and_then(|route| {
+            let ask = open_ask(
+                &asks_in_topic(
+                    &*self.services.provider,
+                    me.as_deref(),
+                    &run.group_id,
+                    &run.topic_id,
+                ),
+                &run.bot_id,
+                route,
+            );
+            let (id, label) = match route {
+                AskRoute::Approve => ("live-go-approve", c::LIVE_GO_APPROVE),
+                AskRoute::Reply => ("live-go-reply", c::LIVE_GO_REPLY),
+            };
+            (route == AskRoute::Reply || ask.is_some()).then(|| {
+                let run = run.clone();
+                push_button(id, label, PushStyle::Outline, PushSize::Small, cx).on_click(
+                    cx.listener(move |this, _, window, cx| {
+                        this.go_to_ask(&run, ask.as_deref(), window, cx)
+                    }),
+                )
+            })
         });
         // What a failed run offers (§2.15): 重试 and 查看日志.
         let failed_actions = (words.phase == RunPhase::Failed).then(|| {
@@ -853,7 +949,8 @@ impl LivePane {
             || detail.as_ref().is_some_and(|d| !d.is_empty())
             || reminder.is_some()
             || failed_actions.is_some()
-            || restart.is_some();
+            || restart.is_some()
+            || go_to_ask.is_some();
         // The Alert anatomy (§2.15, D5): a bordered container, px 16.
         Some(
             div()
@@ -929,7 +1026,8 @@ impl LivePane {
                                 // The actions sit in the text column, under
                                 // the cause they answer (the Alert anatomy).
                                 .children(failed_actions.map(|a| a.mt(space::S8)))
-                                .children(restart.map(|a| div().mt(space::S8).flex().child(a))),
+                                .children(restart.map(|a| div().mt(space::S8).flex().child(a)))
+                                .children(go_to_ask.map(|a| div().mt(space::S8).flex().child(a))),
                         )
                         .children(share.map(|b| div().flex_none().self_center().child(b))),
                 )
@@ -2807,6 +2905,63 @@ impl Render for LivePane {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn words(phase: RunPhase, badge: BadgeState) -> phase::PhaseWords {
+        phase::PhaseWords {
+            phase,
+            text: String::new(),
+            short: String::new(),
+            badge,
+        }
+    }
+
+    fn ask(
+        id: &str,
+        from: &str,
+        kind: crate::data::v2::AskKind,
+        at: Millis,
+    ) -> crate::data::v2::AskItem {
+        crate::data::v2::AskItem {
+            group_id: "g".into(),
+            topic_id: "t".into(),
+            message_id: Some(id.into()),
+            from: from.into(),
+            kind,
+            title: String::new(),
+            at,
+        }
+    }
+
+    #[test]
+    fn only_the_person_waited_for_gets_a_way_to_the_answer() {
+        let you = BadgeState::NeedsYou;
+        let approval = words(RunPhase::WaitingApproval, you);
+        assert_eq!(ask_route(&approval, None), Some(AskRoute::Approve));
+        let person = words(RunPhase::WaitingPerson, you);
+        assert_eq!(
+            ask_route(&person, Some(WaitingFor::Question)),
+            Some(AskRoute::Reply)
+        );
+        assert_eq!(ask_route(&person, Some(WaitingFor::Stuck)), None);
+        let other = words(RunPhase::WaitingApproval, BadgeState::Quiet);
+        assert_eq!(ask_route(&other, None), None);
+    }
+
+    #[test]
+    fn the_banner_opens_the_unanswered_ask_of_its_member() {
+        use crate::data::v2::AskKind::{Approval, Choice};
+        let asks = [
+            (ask("answered", "forge", Approval, 9), true),
+            (ask("other-bot", "scout", Approval, 8), false),
+            (ask("mine", "forge", Approval, 5), false),
+            (ask("choice", "forge", Choice, 7), false),
+        ];
+        let open = open_ask(&asks, "forge", AskRoute::Approve);
+        assert_eq!(open.as_deref(), Some("mine"));
+        let reply = open_ask(&asks, "forge", AskRoute::Reply);
+        assert_eq!(reply.as_deref(), Some("choice"));
+        assert_eq!(open_ask(&asks[..1], "forge", AskRoute::Approve), None);
+    }
 
     #[test]
     fn a_command_reads_running_then_its_end() {
