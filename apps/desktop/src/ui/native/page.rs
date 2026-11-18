@@ -179,6 +179,13 @@ pub fn frame(cx: &App) -> gpui::Div {
         .overflow_hidden()
 }
 
+/// A [`frame`] or a [`page_alert`] nested in a [`card`]: it takes the card's
+/// fill instead of the page background, which in dark mode is darker than
+/// the card and made the nested block a black well.
+pub fn on_card<E: gpui::Styled>(el: E, cx: &App) -> E {
+    el.bg(native_colors(cx).sheet)
+}
+
 /// A card (§2.4): radius 14, 1 px border, card fill, shadow sm.
 pub fn card(cx: &App) -> gpui::Div {
     let k = native_colors(cx);
@@ -630,7 +637,18 @@ impl Status {
 /// A StatusBadge (§2.12): an outline badge, h22, 12 medium text in
 /// `label`, with the state's 12 icon (or an 8 dot for presence) in its
 /// color. Built on gpui-component's `Tag`.
-pub fn status_badge(status: Status, text: impl Into<SharedString>, _cx: &App) -> AnyElement {
+pub fn status_badge(status: Status, text: impl Into<SharedString>, cx: &App) -> AnyElement {
+    status_badge_on(status, text, false, cx)
+}
+
+/// [`status_badge`] for a row that may sit on a muted surface (a selected
+/// row, a GroupBox): `on_fill` gives the badge a fill that shows there.
+pub fn status_badge_on(
+    status: Status,
+    text: impl Into<SharedString>,
+    on_fill: bool,
+    _cx: &App,
+) -> AnyElement {
     // COMPLETENESS.md §2.12: the one StatusBadge of the kit.
     use super::badge::{BadgeState as B, StatusBadge};
     let state = match status {
@@ -648,7 +666,9 @@ pub fn status_badge(status: Status, text: impl Into<SharedString>, _cx: &App) ->
         Status::Merging => B::Merging,
         Status::Waiting => B::Quiet,
     };
-    StatusBadge::new(state, text).into_any_element()
+    StatusBadge::new(state, text)
+        .on_fill(on_fill)
+        .into_any_element()
 }
 
 /// An outline badge with text only (a type, `v3`): h22, 12 medium.

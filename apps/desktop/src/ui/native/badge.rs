@@ -38,6 +38,7 @@ pub struct Badge {
     lead: Option<AnyElement>,
     dense: bool,
     max_w: Option<gpui::Pixels>,
+    fill: Option<Hsla>,
 }
 
 impl Badge {
@@ -48,7 +49,14 @@ impl Badge {
             lead: None,
             dense: false,
             max_w: None,
+            fill: None,
         }
+    }
+
+    /// Another fill than the variant's (a badge on a muted surface).
+    pub fn fill(mut self, fill: Hsla) -> Self {
+        self.fill = Some(fill);
+        self
     }
 
     pub fn variant(mut self, variant: BadgeVariant) -> Self {
@@ -100,6 +108,7 @@ impl RenderOnce for Badge {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = native_colors(cx);
         let (fill, edge, text) = badge_colors(self.variant, &k);
+        let fill = self.fill.unwrap_or(fill);
         div()
             .flex_none()
             .h(height::BADGE)
@@ -249,6 +258,7 @@ pub struct StatusBadge {
     label: SharedString,
     dense: bool,
     max_w: Option<gpui::Pixels>,
+    on_fill: bool,
 }
 
 impl StatusBadge {
@@ -258,7 +268,17 @@ impl StatusBadge {
             label: label.into(),
             dense: false,
             max_w: None,
+            on_fill: false,
         }
+    }
+
+    /// The badge sits on a muted surface (a selected row, a GroupBox): its
+    /// own muted fill would vanish there, so it takes the push tint
+    /// (foreground 8 %), which shows on every surface in both modes. Still
+    /// no line (v18).
+    pub fn on_fill(mut self, on_fill: bool) -> Self {
+        self.on_fill = on_fill;
+        self
     }
 
     pub fn dense(mut self) -> Self {
@@ -278,6 +298,9 @@ impl RenderOnce for StatusBadge {
         // A muted fill, no border (owner decision, v18: lines only where
         // they separate something).
         let mut b = Badge::new(self.label).secondary();
+        if self.on_fill {
+            b = b.fill(k.push);
+        }
         if let Some(mark) = state_mark(self.state, &k) {
             b = b.lead(mark);
         }

@@ -37,7 +37,7 @@ use crate::{
             CompactRow, NativeType as _, PushSize, PushStyle, Segment, Segmented, ToolbarGroup,
             ToolbarItemKind, ToolbarRow, borderless_button, emphasized, native_colors,
             page::{self, PageLoad, Status},
-            push_button, toolbar_item,
+            push_button, toolbar_item, toolbar_labeled_item,
         },
         sf_symbols::{Sf, Sym},
     },
@@ -391,14 +391,14 @@ impl MembersPage {
             }
         });
         let mut row = ToolbarRow::new(c::MEMBERS_PAGE_TITLE)
-            .leading_inset(rows::toolbar_leading(&self.services, cx))
-            .group(
-                div()
-                    .flex_none()
-                    .when(load != PageLoad::Ready, |d| d.opacity(0.5))
-                    .child(filter),
-            )
-            .group(rows::toolbar_capsule(add, cx));
+            .leading_inset(rows::toolbar_leading(&self.services, cx));
+        // The filter has nothing to filter until the team is here, and in
+        // this narrow column it left the state word (正在同步…) no room: it
+        // comes with the list.
+        if load == PageLoad::Ready {
+            row = row.group(div().flex_none().child(filter));
+        }
+        row = row.group(rows::toolbar_capsule(add, cx));
         // The subtitle slot stays in every state, so the title never moves.
         row = row.subtitle(match load {
             PageLoad::Ready => fill(c::MEMBERS_COUNT, &[("n", &entries.len().to_string())]),
@@ -559,9 +559,10 @@ impl MembersPage {
         let mut badge: Option<AnyElement> = None;
         match e.bucket {
             Bucket::Waiting => {
-                badge = Some(page::status_badge(
+                badge = Some(page::status_badge_on(
                     Status::NeedsYou,
                     c::MEMBERS_WAITS_ON_YOU,
+                    is_selected,
                     cx,
                 ));
                 parts.extend(e.extras.line.clone().or(e.ask.clone()));
@@ -579,7 +580,12 @@ impl MembersPage {
                     ),
                     None => c::MEMBERS_WORKING.to_string(),
                 };
-                badge = Some(page::status_badge(Status::Working, text, cx));
+                badge = Some(page::status_badge_on(
+                    Status::Working,
+                    text,
+                    is_selected,
+                    cx,
+                ));
             }
             Bucket::Idle => {
                 parts.push(
@@ -609,8 +615,11 @@ impl MembersPage {
             } else {
                 &s.short
             };
-            badge =
-                Some(crate::ui::native::StatusBadge::new(s.badge, text.clone()).into_any_element());
+            badge = Some(
+                crate::ui::native::StatusBadge::new(s.badge, text.clone())
+                    .on_fill(is_selected)
+                    .into_any_element(),
+            );
         }
         parts.retain(|p| !p.trim().is_empty());
         let mark = badge;
@@ -657,12 +666,15 @@ impl MembersPage {
     fn detail_toolbar(&self, e: &Entry, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let active = emphasized(window);
         let nav = self.services.nav.clone();
+        // Toolbar items carry their word (D20): a bare glyph had to be
+        // guessed.
         let mut items = vec![
-            toolbar_item(
+            toolbar_labeled_item(
                 "member-outputs",
                 Sf::Outputs,
                 c::MEMBERS_OUTPUTS_BUTTON,
-                ToolbarItemKind::Plain,
+                c::MEMBERS_OUTPUTS_BUTTON,
+                false,
                 active,
                 window,
                 cx,
@@ -673,11 +685,14 @@ impl MembersPage {
             let run = e.run.clone();
             let nav = self.services.nav.clone();
             items.push(
-                toolbar_item(
+                // The item opens 实时查看 of the member's run, so it says so;
+                // the tooltip names the computer it shows.
+                toolbar_labeled_item(
                     "member-computer",
                     Sf::Computer,
+                    crate::copy::live::LIVE_TITLE,
                     c::MEMBERS_COMPUTER_BUTTON,
-                    ToolbarItemKind::Plain,
+                    false,
                     active,
                     window,
                     cx,
@@ -858,7 +873,9 @@ impl MembersPage {
             body = body.child(
                 page::card_row(
                     "member-now-topic",
-                    None,
+                    // The 话题 icon, as the queued and waiting rows: one
+                    // icon column for the card.
+                    Some(page::row_icon(Sym::Topic, k.secondary)),
                     topic.map(|t| t.title).unwrap_or_default(),
                     Some(fill(c::MEMBERS_TOPIC_META, &[("group", &group), ("name", &by)]).into()),
                     Some(page::status_badge(Status::Working, badge, cx)),
@@ -1267,7 +1284,7 @@ impl MembersPage {
                     )
                 })
                 .collect();
-            page::frame(cx)
+            page::on_card(page::frame(cx), cx)
                 .child(page::table("member-deliveries", &cols, rows, cx))
                 .into_any_element()
         };
@@ -1301,12 +1318,15 @@ impl MembersPage {
         for (i, pr) in e.stats.problems.iter().enumerate() {
             let retried = pr.run_id.as_ref().is_some_and(|r| self.retried.contains(r));
             if retried {
-                body = body.child(page::page_alert(
-                    SharedString::from(format!("member-problem-{i}")),
-                    page::AlertKind::Info,
-                    fill(c::MEMBERS_RETRIED, &[("name", &name)]),
-                    Some(c::MEMBERS_RETRIED_NOTE.into()),
-                    None,
+                body = body.child(page::on_card(
+                    page::page_alert(
+                        SharedString::from(format!("member-problem-{i}")),
+                        page::AlertKind::Info,
+                        fill(c::MEMBERS_RETRIED, &[("name", &name)]),
+                        Some(c::MEMBERS_RETRIED_NOTE.into()),
+                        None,
+                        cx,
+                    ),
                     cx,
                 ));
                 continue;
@@ -1372,12 +1392,15 @@ impl MembersPage {
                 ),
                 None => stuck,
             };
-            body = body.child(page::page_alert(
-                SharedString::from(format!("member-problem-{i}")),
-                page::AlertKind::Error,
-                pr.text.clone(),
-                Some(description.into()),
-                retry,
+            body = body.child(page::on_card(
+                page::page_alert(
+                    SharedString::from(format!("member-problem-{i}")),
+                    page::AlertKind::Error,
+                    pr.text.clone(),
+                    Some(description.into()),
+                    retry,
+                    cx,
+                ),
                 cx,
             ));
         }
@@ -1546,26 +1569,29 @@ impl MembersPage {
             }
             (Some(Err(err)), true) => {
                 let busy = self.approvals_loading;
-                page::page_alert(
-                    "member-approvals-failed",
-                    page::AlertKind::Error,
-                    c::MEMBERS_APPROVALS_FAILED,
-                    Some(crate::views::settings::widgets::error_text(*err).into()),
-                    Some(
-                        push_button(
-                            "member-approvals-retry",
-                            c::MEMBERS_RETRY,
-                            PushStyle::Outline,
-                            PushSize::Small,
-                            cx,
-                        )
-                        .loading(busy)
-                        .disabled(busy)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.load_approvals(cx);
-                            cx.notify();
-                        }))
-                        .into_any_element(),
+                page::on_card(
+                    page::page_alert(
+                        "member-approvals-failed",
+                        page::AlertKind::Error,
+                        c::MEMBERS_APPROVALS_FAILED,
+                        Some(crate::views::settings::widgets::error_text(*err).into()),
+                        Some(
+                            push_button(
+                                "member-approvals-retry",
+                                c::MEMBERS_RETRY,
+                                PushStyle::Outline,
+                                PushSize::Small,
+                                cx,
+                            )
+                            .loading(busy)
+                            .disabled(busy)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.load_approvals(cx);
+                                cx.notify();
+                            }))
+                            .into_any_element(),
+                        ),
+                        cx,
                     ),
                     cx,
                 )
