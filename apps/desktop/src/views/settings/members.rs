@@ -1791,6 +1791,18 @@ pub fn placement_locked(
     stored.is_some() && (!machines_loaded || pinned_elsewhere(stored, machines, me).is_some())
 }
 
+/// The line under 运行方式 when the picked one is signed out: on the picked computer, or on
+/// every computer when none is picked.
+pub fn signed_out_hint(name: &str, machine: Option<&str>) -> String {
+    match machine {
+        Some(machine) => fill(
+            s::RUNNER_RUNTIME_SIGNED_OUT_HINT,
+            &[("name", name), ("machine", machine)],
+        ),
+        None => fill(s::RUNNER_RUNTIME_SIGNED_OUT_ANY_HINT, &[("name", name)]),
+    }
+}
+
 /// The line under 在哪台电脑干活: on my own computer only my work is done there; on someone
 /// else's, only theirs. Nothing when one person uses the server.
 pub fn placement_hint(
@@ -2602,10 +2614,15 @@ impl Render for BotForm {
                 );
             }
             // The picked one cannot work until it is signed in: said under the row.
+            let picked_name = self
+                .machine
+                .as_deref()
+                .and_then(|id| self.machines.iter().find(|m| m.id == id))
+                .map(|m| m.name.as_str());
             let signed_out_hint = known
                 .iter()
                 .find(|o| o.runtime == current && o.signed_out)
-                .map(|o| fill(s::RUNNER_RUNTIME_SIGNED_OUT_HINT, &[("name", &o.name)]));
+                .map(|o| signed_out_hint(&o.name, picked_name));
             let runtime: Option<gpui::AnyElement> = if only {
                 None
             } else if known.is_empty() {
