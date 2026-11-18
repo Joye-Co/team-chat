@@ -2888,6 +2888,16 @@ fn plan(
         .map(|id| ctx.name(&id))
         .or_else(|| ctx.me.as_ref().map(|me| ctx.name(me)))
         .unwrap_or_default();
+    // 看问题 goes to the card that holds the question; this card's own ask is already here.
+    let question = items
+        .iter()
+        .any(|it| it.state == RunPlanState::Waiting)
+        .then(|| {
+            crate::data::open_ask_card(&*ctx.env.provider, &ctx.msg.group_id, &ctx.msg.topic_id)
+        })
+        .flatten()
+        .filter(|m| m.id != ctx.msg.message_id)
+        .map(|m| m.id);
     let mut current_seen = false;
     let header_bar = super::strip_parts(ctx, cx).is_some_and(|p| p.bar.is_some());
     div()
@@ -2928,13 +2938,19 @@ fn plan(
                 RunPlanState::Pending => (k.ink_3, FontWeight::NORMAL),
             };
             let right: Option<AnyElement> = match it.state {
-                RunPlanState::Waiting => Some(
-                    small(div())
-                        .font_weight(theme::MEDIUM_WEIGHT)
-                        .text_color(k.ink)
-                        .child(c::PLAN_SEE_QUESTION)
-                        .into_any_element(),
-                ),
+                RunPlanState::Waiting => question.clone().map(|id| {
+                    let answerer = ctx.answerer();
+                    ui::native::push_button(
+                        ctx.id(format!("plan-see-question-{i}")),
+                        c::PLAN_SEE_QUESTION.to_string(),
+                        ui::native::PushStyle::Ghost,
+                        ui::native::PushSize::Small,
+                        cx,
+                    )
+                    .flex_none()
+                    .on_click(move |_, window, cx| answerer.open_message(&id, window, cx))
+                    .into_any_element()
+                }),
                 RunPlanState::Current => progress
                     .as_ref()
                     .and_then(|(_, l)| l.clone())
