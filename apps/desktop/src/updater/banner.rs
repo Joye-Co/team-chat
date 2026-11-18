@@ -356,7 +356,7 @@ pub fn update_card(
         Sym,
         icons::icon as sym_icon,
         native::{
-            IconSize, card_surface, icon_button, progress,
+            IconSize, icon_button, panel_card_surface, progress,
             tokens::{icon, radius, space},
         },
     };
@@ -559,7 +559,7 @@ pub fn update_card(
             .mx(metrics::SIDEBAR_ROW_INSET)
             .pb(space::S8)
             .child(
-                card_surface(cx)
+                panel_card_surface(cx)
                     .rounded(radius::CONTAINER)
                     // The dark sidebar already has the card's fill: lift the
                     // card one step there, so it reads as a surface.
