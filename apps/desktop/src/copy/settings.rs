@@ -547,5 +547,6 @@ crate::copy! {
     AI_SAVE_UNTESTED_TITLE = "保存没有通过测试的设置？",
     AI_SAVE_UNTESTED_BODY = "前台、话题标题、话题摘要和记忆\n可能会停止工作。",
     AI_SAVE_UNTESTED_OK = "仍然保存",
+    RUNNER_RUNTIME_SIGNED_OUT_HINT = "{name} 还没登录，登录后 AI 成员才能干活。",
     // --- end visual finish: settings ---
 }
