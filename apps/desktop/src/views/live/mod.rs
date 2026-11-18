@@ -2505,12 +2505,13 @@ fn confirm_hand_back_for(
         .map(|w| crate::ui::avatar::name_beside_avatar(&member_name(services, w)).to_string())
         .unwrap_or_default();
     let member = member_name(services, &run.bot_id);
+    let member = crate::ui::avatar::name_beside_avatar(&member);
     crate::views::nav::dialogs::confirm_alert(
         "live-hand-back-for",
         fill(c::LIVE_HAND_BACK_FOR_ASK_TITLE, &[("who", &who)]),
         fill(
             c::LIVE_HAND_BACK_FOR_ASK_BODY,
-            &[("who", &who), ("member", &member)],
+            &[("who", &who), ("member", member)],
         ),
         c::LIVE_HAND_BACK,
         on_confirm,
