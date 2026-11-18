@@ -511,3 +511,8 @@ Taro 推荐大字标题：上一条大字封面的点击率高了 40%。	Taro re
 没能读到我的偏好	Couldn't load your preferences
 没能读到我的约定	Couldn't load your rules
 无	None
+页面里的操作会发给 Ledger：{}	Actions on this page go to Ledger: {}
+：「{}」「{}」	: “{}” “{}”
+：「{}」	: “{}”
+「{}」「{}」	“{}” “{}”
+「{}」	“{}”
