@@ -94,13 +94,24 @@ impl Render for AboutView {
                     .text_color(k.secondary)
                     .child(version_line()),
             )
-            .child(
+            // The credit on two centered lines, broken at its comma: the
+            // art, then its author and licence.
+            .child({
+                let credits = credits_line();
+                let (art, by) = credits.split_once('，').unwrap_or((credits.as_str(), ""));
                 div()
+                    .w_full()
+                    .px(space::S24)
                     .pt(space::S8)
+                    .flex()
+                    .flex_col()
+                    .items_center()
                     .n_footnote()
                     .text_color(k.secondary)
-                    .child(credits_line()),
-            );
+                    .text_center()
+                    .child(art.to_string())
+                    .children((!by.is_empty()).then(|| by.to_string()))
+            });
         window_chrome::framed_fixed(title(), body, window, cx)
     }
 }

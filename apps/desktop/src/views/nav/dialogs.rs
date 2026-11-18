@@ -111,6 +111,53 @@ pub fn sheet_form_row_top(
     form_row(label.into(), control.into_any_element(), true, cx)
 }
 
+/// A row whose control wraps to several lines (a set of buttons): the label
+/// stays in its column on the center line of the first line, `line` high.
+pub fn sheet_form_row_wrap(
+    label: impl Into<gpui::SharedString>,
+    line: gpui::Pixels,
+    control: impl IntoElement,
+    cx: &App,
+) -> gpui::Div {
+    let k = native_colors(cx);
+    // The pair sits on the row's center line as one block, top-aligned
+    // inside, so one line of buttons looks like any other row.
+    let pair = div()
+        .w_full()
+        .flex()
+        .items_start()
+        .gap(FORM_GAP)
+        .child(
+            div()
+                .flex_none()
+                .w(FORM_LABEL)
+                .h(line)
+                .flex()
+                .items_center()
+                .n_body()
+                .text_color(k.label)
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(label.into()),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w(gpui::Pixels::ZERO)
+                .flex()
+                .child(control.into_any_element()),
+        );
+    div()
+        .w_full()
+        .min_h(metrics::FORM_ROW)
+        .px(metrics::FORM_ROW_INSET)
+        .py(crate::ui::native::tokens::space::S6)
+        .flex()
+        .items_center()
+        .child(pair)
+}
+
 fn form_row(
     label: gpui::SharedString,
     control: gpui::AnyElement,
