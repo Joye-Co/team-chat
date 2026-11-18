@@ -139,7 +139,19 @@ pub fn strip_view(
             let line = match stopped_by.as_deref() {
                 // A person stopped it: nothing is pending, so the line also
                 // says how to go on (the bar has no button in this state).
-                Some(who) if !who.is_empty() => fill(c::RELAY_STOPPED_BY, &[("name", who)]),
+                Some(who) if !who.is_empty() => {
+                    // The example order is this relay's own first two members.
+                    let first = name(&relay.steps[0].member_id);
+                    let second = relay
+                        .steps
+                        .get(1)
+                        .map_or_else(|| first.clone(), |s| name(&s.member_id));
+                    let example = fill(
+                        c::RELAY_ORDER_EXAMPLE,
+                        &[("first", &first), ("second", &second)],
+                    );
+                    fill(c::RELAY_STOPPED_BY, &[("name", who), ("example", &example)])
+                }
                 _ => {
                     let why = reason_text(relay.reason.as_deref(), &at, &before, None);
                     fill(c::RELAY_STOPPED_AT, &[("name", &at), ("reason", &why)])
@@ -508,7 +520,7 @@ mod tests {
         let v = strip_view(&r, 2_000, &name).unwrap();
         assert_eq!(
             v.line.as_deref(),
-            Some("Joye 停止了。要继续，在下面用 → 连起成员")
+            Some("Joye 停止了。要继续，在下面再写一条顺序，比如 @小码 → @小审")
         );
         assert_eq!(v.steps[1].word, Some(("停止了", BadgeState::Deactivated)));
         assert!(!v.can_stop && !v.can_retry);

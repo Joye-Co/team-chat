@@ -19,7 +19,10 @@ use crate::{
     app::RailMode,
     copy::rail as c,
     data::{ChatProvider, GroupId, GroupKind, Member, MemberId, Topic},
-    ui::{MemberAvatar, native::sidebar::RightColumn},
+    ui::{
+        MemberAvatar,
+        native::{sidebar::RightColumn, tokens::space},
+    },
 };
 
 type Open<'a> = Option<&'a (String, String)>;
@@ -187,17 +190,22 @@ pub(super) struct Inputs {
     pub open_members: Option<std::collections::HashSet<MemberId>>,
 }
 
-/// The space above a section: its header stays nearer its own rows than the
-/// section above. It is outside the header's h32 fill.
-const SECTION_GAP: Pixels = crate::ui::native::tokens::space::S8;
+/// The space above every group label but the first: outside the label's own
+/// 32 pt row, so a label reads as the start of a group and its selected fill
+/// stays a full row.
+const GROUP_GAP: Pixels = space::S8;
 
-/// A section's first row sits [`SECTION_GAP`] below the last one; the rows of
-/// one section touch.
+/// The inset of a compact empty line under a 群 label: its text starts at the
+/// x of the 话题 titles it stands in for (row padding 8, media 16, gap 8).
+const EMPTY_LINE_INSET: Pixels = space::S32;
+
+/// The flat rows of `list`, with [`GROUP_GAP`] above each section after the
+/// first.
 fn sections(list: Vec<Vec<Item>>) -> Vec<Entry> {
     let mut out = Vec::new();
-    for section in list {
+    for (si, section) in list.into_iter().enumerate() {
         for (i, item) in section.into_iter().enumerate() {
-            let gap = if i == 0 { SECTION_GAP } else { px(0.) };
+            let gap = if si > 0 && i == 0 { GROUP_GAP } else { px(0.) };
             out.push(Entry { gap, item });
         }
     }
@@ -528,9 +536,10 @@ pub(super) fn by_member(p: &dyn ChatProvider, i: &mut Inputs, side: &SideChats) 
         }
     }
     out.into_iter()
-        .map(|item| Entry {
-            gap: if matches!(item, Item::MemberSection { .. }) {
-                SECTION_GAP
+        .enumerate()
+        .map(|(ix, item)| Entry {
+            gap: if ix > 0 && matches!(item, Item::MemberSection { .. }) {
+                GROUP_GAP
             } else {
                 px(0.)
             },
@@ -706,7 +715,7 @@ impl RailView {
                 .id(SharedString::from(format!("rail-no-topics-{id}")))
                 .h(crate::ui::native::tokens::metrics::SIDEBAR_ROW)
                 .mx(crate::ui::native::tokens::metrics::SIDEBAR_ROW_INSET)
-                .pl(crate::ui::native::tokens::space::S8)
+                .pl(EMPTY_LINE_INSET)
                 .flex()
                 .items_center()
                 .child(crate::ui::native::EmptyLine::new(c::RAIL_NO_TOPICS))
@@ -715,7 +724,7 @@ impl RailView {
                 .id(SharedString::from(format!("rail-offline-{id}")))
                 .h(crate::ui::native::tokens::metrics::SIDEBAR_ROW)
                 .mx(crate::ui::native::tokens::metrics::SIDEBAR_ROW_INSET)
-                .pl(crate::ui::native::tokens::space::S8)
+                .pl(EMPTY_LINE_INSET)
                 .flex()
                 .items_center()
                 .child(crate::ui::native::EmptyLine::new(c::RAIL_OFFLINE_TOPICS))

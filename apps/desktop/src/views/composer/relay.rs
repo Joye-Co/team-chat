@@ -278,7 +278,7 @@ mod tests {
         };
         assert_eq!(
             refusal_text(&r("relay.member_unavailable", &["a", "b"]), name).as_deref(),
-            Some("没能开始按顺序做：小码、小审 现在接不了")
+            Some("没能开始按顺序做：小码、小审 现在接不了。换一位成员再发")
         );
         assert_eq!(
             refusal_text(&r("relay.running", &[]), name).as_deref(),

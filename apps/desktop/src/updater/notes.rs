@@ -561,7 +561,7 @@ pub fn open_whats_new(notes: Notes, place: Place, window: &mut Window, cx: &mut 
             div()
                 .w_full()
                 .px(metrics::SHEET_PAD)
-                .pt(space::S32)
+                .pt(metrics::SHEET_PAD)
                 .pb(space::S24)
                 .flex()
                 .flex_col()

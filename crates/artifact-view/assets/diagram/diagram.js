@@ -1,5 +1,5 @@
 // The TeamChat diagram renderer page. The host calls `window.tcRender(request)` with
-// `{reqId, source, config, limits}` (one request at a time) and gets back one bridge event:
+// `{reqId, source, config, limits, blockLabels}` (one request at a time) and gets back one bridge event:
 //   rendered {reqId, svg, width, height, nodes: [{id, label, kind, x, y, w, h}], type}
 //   failed   {reqId, reason: "parse" | "too_big" | "unsupported" | "internal", detail}
 // The page has no network and no navigation; it only calls `window.artifact.emitEvent`.

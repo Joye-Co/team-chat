@@ -76,4 +76,6 @@ crate::copy! {
     CARD_FAILED_DOWNLOAD_DETAIL = "下载中断了，检查网络后重试。",
     CARD_FAILED_CHECKSUM_DETAIL = "下载的文件不完整，已删除，请重试。",
     CARD_FAILED_INSTALL_DETAIL = "没能装上新版本，请重试。",
+    // The manual install's next step: the app has to quit first.
+    QUIT_TO_INSTALL = "退出 {product}",
 }
