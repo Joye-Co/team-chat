@@ -484,7 +484,7 @@ pub fn chart_overlay(
                     // The value leads (ink, medium); the series and the x are muted.
                     let (head, value) = match text.rsplit_once(super::label::SEP) {
                         Some((head, value)) => (
-                            Some(format!("{head}{}", super::label::SEP.trim_end())),
+                            Some(format!("{head}{}", super::label::SEP)),
                             value.to_string(),
                         ),
                         None => (None, text),
@@ -530,8 +530,15 @@ pub fn chart_overlay(
                                 .pl(crate::theme::space::S8)
                                 .t_meta()
                                 .text_color(k.ink_2)
-                                .children(head)
-                                .child(div().medium().text_color(k.ink).child(value))
+                                .child(
+                                    // One run of text: the separator keeps its
+                                    // own space on both sides.
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .children(head)
+                                        .child(div().medium().text_color(k.ink).child(value)),
+                                )
                                 .child(button),
                         )
                 });

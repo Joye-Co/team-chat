@@ -137,6 +137,8 @@ pub fn strip_view(
         // `stopped`, or a state this version does not know: it stopped.
         _ => {
             let line = match stopped_by.as_deref() {
+                // A person stopped it: nothing is pending, so the line also
+                // says how to go on (the bar has no button in this state).
                 Some(who) if !who.is_empty() => fill(c::RELAY_STOPPED_BY, &[("name", who)]),
                 _ => {
                     let why = reason_text(relay.reason.as_deref(), &at, &before, None);
@@ -481,7 +483,7 @@ mod tests {
         let mut r = relay("stopped", 1, vec![step("a", "done"), step("b", "stopped")]);
         r.stopped_by = Some("me".into());
         let v = strip_view(&r, 2_000, &name).unwrap();
-        assert_eq!(v.line.as_deref(), Some("Joye 停止了"));
+        assert_eq!(v.line.as_deref(), Some("Joye 停止了，要继续就再写一条顺序"));
         assert_eq!(v.steps[1].word, Some(("停止了", BadgeState::Deactivated)));
         assert!(!v.can_stop && !v.can_retry);
         // An unknown relay state reads as stopped too.
