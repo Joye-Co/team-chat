@@ -583,6 +583,14 @@ function wsUrl(base: string): string {
   return u.toString();
 }
 
+/** A URL for log lines: without user name and password. */
+function withoutUserInfo(url: string): string {
+  const u = new URL(url);
+  u.username = "";
+  u.password = "";
+  return u.toString();
+}
+
 function readToken(opts: BotOptions, log: Logger): string {
   if (opts.token) return opts.token.trim();
   if (!opts.tokenFile) throw new Error("pass token or tokenFile");
@@ -1253,13 +1261,16 @@ export class Bot {
 
   private connect(): void {
     if (this.stopped) return;
+    const target = wsUrl(this.url);
+    // What log lines name: the endpoint without credentials.
+    const endpoint = withoutUserInfo(target);
     let ws: WebSocket;
     try {
-      ws = new this.WS(wsUrl(this.url), {
+      ws = new this.WS(target, {
         headers: { authorization: `Bearer ${this.token}`, "user-agent": `chat-bot-sdk/${SDK_VERSION}` },
       });
     } catch (err) {
-      this.log.warn("websocket create failed", { err: String(err) });
+      this.log.warn("websocket create failed", { url: endpoint, err: String(err) });
       this.scheduleReconnect();
       return;
     }
@@ -1315,16 +1326,23 @@ export class Bot {
       this.stopPing();
       const wasReady = this.ready;
       this.setReady(false);
-      this.log.info("disconnected", { code: ev.code, reason: ev.reason, wasReady });
+      this.log.info("disconnected", { url: endpoint, code: ev.code, reason: ev.reason, wasReady });
       if (ev.code === 4001 || ev.code === 4000) {
         this.fail(new ChatError(ev.code === 4001 ? "unauthorized" : "unsupported_protocol", ev.reason || "closed by server"));
         return;
       }
       if (!opened) {
         // A rejected upgrade looks like a network error; ask over HTTP whether the token is bad.
-        void this.checkToken().then((bad) => {
-          if (bad) this.fail(new ChatError("unauthorized", "the server rejected the bot token"));
-          else this.scheduleReconnect();
+        void this.checkToken().then((check) => {
+          if (check.unauthorized) {
+            this.fail(new ChatError("unauthorized", "the server rejected the bot token"));
+            return;
+          }
+          const delay = this.scheduleReconnect();
+          // Before the first welcome `start()` still waits: say why, once per try.
+          if (!this.everConnected && delay !== null) {
+            this.log.warn(`cannot reach ${endpoint} (${check.problem}), retrying in ${(delay / 1000).toFixed(1)} s`, { url: endpoint, attempt: this.attempt });
+          }
         });
         return;
       }
@@ -1335,12 +1353,13 @@ export class Bot {
     };
   }
 
-  private async checkToken(): Promise<boolean> {
+  /** Asks over HTTP why the WebSocket did not open: a bad token, or what else went wrong. */
+  private async checkToken(): Promise<{ unauthorized: boolean; problem: string }> {
     try {
       await this.http.me();
-      return false;
+      return { unauthorized: false, problem: "HTTP works, but the WebSocket did not open" };
     } catch (err) {
-      return err instanceof ChatError && err.code === "unauthorized";
+      return { unauthorized: err instanceof ChatError && err.code === "unauthorized", problem: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -1373,8 +1392,9 @@ export class Bot {
     this.scheduleReconnect();
   }
 
-  private scheduleReconnect(): void {
-    if (this.stopped || this.reconnectTimer) return;
+  /** Plans the next connection try; returns its delay, or null when none was planned. */
+  private scheduleReconnect(): number | null {
+    if (this.stopped || this.reconnectTimer) return null;
     const base = Math.min(BACKOFF_MAX_MS, BACKOFF_MIN_MS * 2 ** this.attempt);
     const delay = Math.round(base / 2 + Math.random() * (base / 2));
     this.attempt++;
@@ -1383,6 +1403,7 @@ export class Bot {
       this.reconnectTimer = null;
       this.connect();
     }, delay);
+    return delay;
   }
 
   private startPing(ws: WebSocket): void {

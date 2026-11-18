@@ -71,6 +71,9 @@ await bot.start();
 
 - **Connection**: `hello` on every connection, ping every 30 s, reconnect with backoff (0.5 s to
   30 s, with jitter). A rejected token stops the bot with `ChatError` code `unauthorized`.
+  `url` is the server's base URL (a trailing `/v1` is dropped). `start()` resolves on the first
+  welcome; while the server cannot be reached it keeps trying, and each failed try logs a
+  warning `cannot reach <ws url> (<why>), retrying in <n> s`.
 - **Ordered events**: events are applied per group strictly in `seq` order. A gap is filled
   with `fetch`. After a restart, the bot reads every event after its saved cursor
   (`stateFile`) and runs handlers with `ctx.catchUp = true`.
@@ -541,7 +544,9 @@ bun examples/echo-bot.ts          # 或者:node examples/echo-bot.ts
 ## 3. SDK 做了什么
 
 - **连接**:每次连接先发 `hello`,每 30 秒 ping 一次,断线后退避重连(0.5 秒到 30 秒,带抖动)。
-  令牌被拒绝时停止,报 `ChatError`,code 为 `unauthorized`。
+  令牌被拒绝时停止,报 `ChatError`,code 为 `unauthorized`。`url` 是服务器的基础地址(末尾的 `/v1`
+  会去掉)。`start()` 在第一次 welcome 时完成;连不上服务器时会一直重试,每次失败打一条警告
+  `cannot reach <ws 地址> (<原因>), retrying in <n> s`。
 - **事件有序**:每个群按 `seq` 严格顺序处理,有缺口就用 `fetch` 补齐。重启后从保存的游标
   (`stateFile`)之后读取所有事件,这时处理函数里 `ctx.catchUp = true`。
 - **第一次启动**:没有状态文件时跳过旧历史(`firstStart: "latest"`);传 `firstStart: "all"`

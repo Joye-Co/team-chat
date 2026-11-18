@@ -52,10 +52,23 @@ export interface UploadInput {
 
 type Body = string | Uint8Array | ArrayBuffer | Blob;
 
+/**
+ * The server base URL without trailing slashes. The SDK adds `/v1/...` itself, so a base URL
+ * that ends with `/v1` loses it; any other path (a reverse-proxy prefix) is kept.
+ */
 export function normalizeBaseUrl(url: string): string {
-  const u = new URL(url);
-  if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("server url must be http:// or https://");
-  return u.toString().replace(/\/+$/, "");
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    throw new ChatError("invalid", "server url must look like http://127.0.0.1:8789 (scheme, host and port)");
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") throw new ChatError("invalid", "server url must be http:// or https://");
+  return u
+    .toString()
+    .replace(/\/+$/, "")
+    .replace(/\/v1$/, "")
+    .replace(/\/+$/, "");
 }
 
 /** Wait before try `i + 1`: the server's `retryAfterMs` when it is longer than the backoff (at most 30 s). */

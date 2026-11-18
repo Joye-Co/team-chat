@@ -917,6 +917,62 @@ describe("page event declarations", () => {
   });
 });
 
+describe("a server that cannot be reached", () => {
+  test("a base URL that ends with /v1 loses it; a proxy prefix is kept", () => {
+    const url = (u: string) => new Bot({ url: u, token: "t", logLevel: "silent" }).url;
+    expect(url("http://127.0.0.1:8789/v1/")).toBe("http://127.0.0.1:8789");
+    expect(url("http://127.0.0.1:8789/v1")).toBe("http://127.0.0.1:8789");
+    expect(url("http://127.0.0.1:8789/")).toBe("http://127.0.0.1:8789");
+    expect(url("https://host.example/chat/")).toBe("https://host.example/chat");
+    expect(url("https://host.example/chat/v1")).toBe("https://host.example/chat");
+    expect(new HttpClient({ url: "http://127.0.0.1:8789/v1", token: "t" }).url).toBe("http://127.0.0.1:8789");
+  });
+
+  test("before the first welcome each failed try warns with the endpoint, the reason and the delay", async () => {
+    // A socket that never opens: it closes like a refused connection.
+    class Refused {
+      readyState = 0;
+      onopen: (() => void) | null = null;
+      onmessage: (() => void) | null = null;
+      onclose: ((ev: { code: number; reason: string }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor() {
+        setTimeout(() => {
+          this.readyState = 3;
+          this.onclose?.({ code: 1006, reason: "" });
+        }, 0);
+      }
+      send(): void {}
+      close(): void {}
+    }
+    const lines: { level: string; msg: string; fields?: Record<string, unknown> }[] = [];
+    const logger = Object.fromEntries(
+      (["debug", "info", "warn", "error"] as const).map((level) => [level, (msg: string, fields?: Record<string, unknown>) => lines.push({ level, msg, fields })]),
+    ) as never;
+    const bot = new Bot({
+      url: "http://user:pw@127.0.0.1:1/v1",
+      token: "tc_secretsecretsecretsecretsecret",
+      WebSocket: Refused as never,
+      fetch: (async () => {
+        throw new Error("Unable to connect");
+      }) as never,
+      logger,
+      stopTimeoutMs: 100,
+    });
+    bots.push(bot);
+    const started = bot.start().catch((e) => e);
+    for (let i = 0; i < 300 && lines.filter((l) => l.level === "warn").length < 2; i++) await new Promise((r) => setTimeout(r, 10));
+    const warns = lines.filter((l) => l.level === "warn");
+    expect(warns.length).toBeGreaterThanOrEqual(2);
+    expect(warns[0]?.msg).toMatch(/^cannot reach ws:\/\/127\.0\.0\.1:1\/v1\/ws \(network: GET \/v1\/me failed: Unable to connect\), retrying in \d+\.\d s$/);
+    expect(lines.find((l) => l.msg === "disconnected")?.fields?.url).toBe("ws://127.0.0.1:1/v1/ws");
+    expect(JSON.stringify(lines)).not.toContain("tc_secret");
+    expect(JSON.stringify(lines)).not.toContain("pw@");
+    await bot.stop();
+    expect(((await started) as ChatError).code).toBe("closed");
+  });
+});
+
 describe("streams a handler leaves open", () => {
   /** `send` answers with a streaming message; `edit` with the edited one. */
   function streamServer(): FakeServer {
