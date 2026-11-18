@@ -764,8 +764,8 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "panel-plan",
-        about: "The side panel of the sample-card 话题: a plan list from a card",
-        start: Start::SignedIn,
+        about: "The side panel of a 话题 whose run has a plan: the 计划 section with its progress and steps",
+        start: Start::V2,
         setup: crate::views::process::preview::open_plan_details,
         open: open_main,
     },

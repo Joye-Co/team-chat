@@ -54,9 +54,14 @@ pub fn open_failed_details(services: &Services, cx: &mut App) {
     open_details(services, FAILED_TOPIC, cx);
 }
 
-/// The inspector of the sample-card topic: a plan from a card.
+/// The inspector of a 话题 whose run carries a plan (the v2 sample team: Forge on
+/// 话题列表虚拟滚动), so the 计划 section shows: progress, steps and their times.
 pub fn open_plan_details(services: &Services, cx: &mut App) {
-    open_details(services, crate::views::cards::samples::TOPIC, cx);
+    use crate::fake::v2 as d;
+    crate::selftest::scenes::v2_open_topic(services, d::DEV, d::T_VIRTUAL, cx);
+    services
+        .nav
+        .update(cx, |nav, cx| nav.set_right_pane(RightPane::TopicRail, cx));
 }
 
 fn open_details(services: &Services, topic: &str, cx: &mut App) {
