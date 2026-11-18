@@ -934,7 +934,7 @@ pub fn open_email_sending(
     after_fit(handle, cx, move |window, cx| {
         let account = view.read(cx).account().clone();
         AccountPage::open_email_sheet(account.clone(), window, cx);
-        account.update(cx, |p, cx| p.preview_email_sending(cx));
+        account.update(cx, |p, cx| p.preview_email_sending(window, cx));
     });
     Ok(handle)
 }

@@ -573,7 +573,7 @@ impl PhoneSignIn {
                     push_button(
                         "phone-code-close",
                         common::CANCEL,
-                        PushStyle::Ghost,
+                        PushStyle::Outline,
                         PushSize::Regular,
                         cx,
                     )
@@ -673,7 +673,7 @@ impl Render for PhoneSignIn {
         )
         .on_click(move |_, window, cx| Self::open_code_sheet(page.clone(), window, cx));
         widgets::section(
-            SectionTitle::new(s::PHONE).description(s::PHONE_HINT),
+            SectionTitle::new(s::PHONE),
             // The one separator of a list with media (2.8): from the title x.
             GroupedForm::new().row(widgets::item_rows(
                 vec![

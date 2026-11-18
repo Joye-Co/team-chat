@@ -227,7 +227,6 @@ crate::copy! {
     EMAIL_RATE = "请求太频繁，请稍后再试",
     EMAIL_NOT_SET_UP = "这个服务器还没开通邮箱登录",
     PHONE = "在手机上登录",
-    PHONE_HINT = "不用输邮箱和验证码，手机直接登录你的账号。",
     PHONE_SHOW_ROW = "用手机扫码登录",
     PHONE_SHOW = "显示二维码",
     PHONE_ENTER_ROW = "手机上显示了一个码",
@@ -374,7 +373,6 @@ crate::copy! {
     SHORTCUT_NEEDS_MODIFIER = crate::copy::per_system("要带上 ⌘、⌃ 或 ⌥", "要带上 Ctrl 或 Alt"),
     // --- end v12/settings track ---
     // --- v14/t4 lists ---
-    DEVICES_HINT = "你的账号在这些设备上登录着。",
     DEVICES_FAILED = "没有加载出登录的设备",
     DEVICE_SIGN_OUT_FAILED = "没有让这台设备退出登录",
     DEVICE_IN_USE = "正在使用",
@@ -535,5 +533,7 @@ crate::copy! {
     AI_TEST_FAILED_NOT_FOUND = "模型名或接口地址不对，检查后再试。",
     AI_TEST_FAILED_UNREACHABLE = "连不上服务商，检查网络和接口地址后再试。",
     SECTION_TEAM = "团队",
+    EMAIL_CHANGE_SHEET_TITLE = "更改登录邮箱",
+    EMAIL_CHANGE_SHEET_HINT = "现在的登录邮箱是 {email}，验证码会发到新邮箱。",
     // --- end visual finish: settings ---
 }
