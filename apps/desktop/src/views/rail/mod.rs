@@ -1551,7 +1551,8 @@ mod tests {
                 stranded = true;
                 let entries = this.cache.as_ref().unwrap().entries.clone();
                 assert!(entries[ix].item.opens_section(), "only an open header");
-                let fade = this.list.viewport_bounds().bottom() - space::S24;
+                // The edge was read with or without the pill: its band is the most it hides.
+                let fade = this.list.viewport_bounds().bottom() - bottom_clear(true);
                 assert!(
                     this.list
                         .bounds_for_item(ix + 1)
@@ -1589,7 +1590,12 @@ mod tests {
         }
         view.update(cx, |this, _| {
             let row = this.list.bounds_for_item(ix).expect("the row is drawn");
-            assert!(row.bottom() <= this.list.viewport_bounds().bottom());
+            let bottom = this.list.viewport_bounds().bottom();
+            assert!(row.bottom() <= bottom);
+            // A pill still up for other rows does not stand on the row it brought in.
+            if this.bottom_edge.get().waiting.is_some() {
+                assert!(row.bottom() <= bottom - metrics::SIDEBAR_WAITING_BAND);
+            }
         });
         assert_ne!(
             waiting(&view, cx).map(|(first, _)| first),
