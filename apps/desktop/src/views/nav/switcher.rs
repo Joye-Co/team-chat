@@ -771,6 +771,7 @@ impl Render for Switcher {
         let query = self.text(cx);
         let mut children: Vec<AnyElement> = Vec::new();
         let mut heights: Vec<(Pixels, bool)> = Vec::new();
+        let mut state_block = false;
         let mut active_child = 0;
         let mut ix = 0;
         let groups = self.groups.clone();
@@ -804,11 +805,13 @@ impl Render for Switcher {
                 ix += 1;
             }
         } else if self.searching {
+            state_block = true;
             for (el, h) in palette::loading_rows("switcher-loading", cx) {
                 children.push(el);
                 heights.push((h, true));
             }
         } else if let Some(e) = failed {
+            state_block = true;
             let (title, why) = if e == SearchError::Offline {
                 (
                     search_copy::SEARCH_OFFLINE,
@@ -841,7 +844,12 @@ impl Render for Switcher {
             - spot::FIELD
             - palette::FOOTER
             - palette::LIST_PAD * 2.;
-        let list_h = palette::list_height(&heights, room);
+        // A loading or failed search keeps its block whole under the hits.
+        let list_h = if state_block {
+            palette::state_block_height(&heights, room)
+        } else {
+            palette::list_height(&heights, room)
+        };
         // The 群 a search is scoped to (⌘F): a token before the text; click
         // or ⌫ in an empty field removes it. Its tooltip names the whole 群.
         let scope_token = self.scope.as_ref().map(|(_, name)| {
@@ -1257,6 +1265,14 @@ pub mod palette {
         cut.unwrap_or_else(|| super::whole_rows_height(heights, max - PEEK) + PEEK)
     }
 
+    /// The list height while it ends in a state block (the loading rows, a
+    /// failed search): the whole block shows, however much sits above it,
+    /// so it is never cut like a row that hints at more.
+    pub fn state_block_height(heights: &[(Pixels, bool)], room: Pixels) -> Pixels {
+        let total: Pixels = heights.iter().map(|(h, _)| *h).sum();
+        total.min(room.max(spot::ROW * 3.))
+    }
+
     /// One key hint of the footer: its Kbd caps, then the word.
     pub fn hint(keys: &[&'static str], label: impl Into<SharedString>, cx: &App) -> gpui::Div {
         let k = native_colors(cx);
@@ -1391,6 +1407,24 @@ pub mod palette {
 mod tests {
     use super::*;
     use crate::fake::{FakeProvider, ME};
+
+    #[test]
+    fn a_state_block_under_other_rows_stays_whole() {
+        let mut heights = vec![(spot::ROW, true); 6];
+        heights.push((spot::ROW * 3., true));
+        let room = spot::ROW * 20.;
+        assert_eq!(
+            palette::state_block_height(&heights, room),
+            spot::ROW * 9.,
+            "all 6 rows and the 3-row block"
+        );
+        assert!(palette::list_height(&heights, room) < spot::ROW * 9.);
+        // A short window still caps it.
+        assert_eq!(
+            palette::state_block_height(&heights, spot::ROW * 4.),
+            spot::ROW * 4.
+        );
+    }
 
     #[test]
     fn a_search_finds_a_产出_by_name_topic_and_maker() {

@@ -1299,6 +1299,9 @@ impl RootView {
                         .update(cx, |nav, cx| nav.toggle_sidebar(cx));
                 }))
                 .on_action(cx.listener(|this, _: &NewTopic, window, cx| {
+                    if crate::views::rail::model::cannot_create(&this.services) {
+                        return;
+                    }
                     // A 话题 lives in a 群. With none to pick (a new team, or
                     // only 私聊) the 新话题 sheet could never start one: the
                     // 新建群 sheet opens instead.

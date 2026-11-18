@@ -52,4 +52,5 @@ crate::copy! {
     MENU_RESTART = "安装 {version} 并重新打开",
     UPDATE_RESTART = "安装更新",
     UPDATE_READY = "新版本 {version} 已下载好",
+    NEW_TOPIC_HAND_TO_MORE = "其他成员",
 }

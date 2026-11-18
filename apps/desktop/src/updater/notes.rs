@@ -30,8 +30,14 @@ use crate::{
 
 include!(concat!(env!("OUT_DIR"), "/release_notes.rs"));
 
-/// Sections the app never shows: install steps for people who install by hand.
-const SKIPPED_SECTIONS: [&str; 1] = ["怎么更新"];
+/// Sections the app never shows: install steps for people who install by hand,
+/// and what the people who run the server have to do.
+const SKIPPED_SECTIONS: [&str; 4] = [
+    "怎么更新",
+    "给自己部署的人",
+    "管理员要做的事",
+    "管理员在发布后要做的事",
+];
 
 /// How many items the 已更新到 sheet shows in full; the rest are one line.
 const HIGHLIGHTS: usize = 3;
@@ -345,7 +351,6 @@ fn sections(notes: &Notes, cx: &App) -> gpui::Div {
                 .when(!s.title.is_empty(), |d| {
                     d.child(
                         div()
-                            .px(space::S4)
                             .n_section()
                             .text_color(k.secondary)
                             .child(s.title.clone()),
@@ -500,8 +505,8 @@ pub fn open_notes(
 
 /// 「已更新到 {version}」, laid out like the What's New sheet of Apple's own
 /// apps: the app icon and title centered, the first items as plain rows (a
-/// title over its text, no box), the rest as one line, one wide 好, and
-/// 查看全部更新记录 as a link under it.
+/// title over its text, no box), the rest as one line, and the sheet footer
+/// (§2.9): 查看全部更新记录 in the left slot, 好 on the right.
 pub fn open_whats_new(notes: Notes, place: Place, window: &mut Window, cx: &mut App) {
     let scroll_handle = gpui::ScrollHandle::new();
     open_sheet(place, SheetWidth::Form, window, cx, move |dialog, _, cx| {
@@ -587,33 +592,39 @@ pub fn open_whats_new(notes: Notes, place: Place, window: &mut Window, cx: &mut 
                 )))
                 .children(more)
                 .child(
-                    div().pt(space::S32).w_full().child(
-                        push_button(
-                            "whats-new-ok",
-                            u::WHATS_NEW_OK,
-                            PushStyle::Default,
-                            PushSize::Large,
-                            cx,
-                        )
+                    div()
+                        .pt(space::S24)
                         .w_full()
-                        .on_click(|_, window, cx| window.close_dialog(cx)),
-                    ),
-                )
-                .child(
-                    div().pt(space::S8).child(
-                        push_button(
-                            "whats-new-all",
-                            u::WHATS_NEW_ALL,
-                            PushStyle::Link,
-                            PushSize::Small,
-                            cx,
+                        .flex()
+                        .items_center()
+                        .child(
+                            push_button(
+                                "whats-new-all",
+                                u::WHATS_NEW_ALL,
+                                PushStyle::Link,
+                                PushSize::Small,
+                                cx,
+                            )
+                            // Its ink starts on the content edge.
+                            .px_0()
+                            .text_color(k.secondary)
+                            .on_click(move |_, window, cx| {
+                                window.close_dialog(cx);
+                                window
+                                    .defer(cx, move |window, cx| open_changelog(place, window, cx));
+                            }),
                         )
-                        .text_color(k.secondary)
-                        .on_click(move |_, window, cx| {
-                            window.close_dialog(cx);
-                            window.defer(cx, move |window, cx| open_changelog(place, window, cx));
-                        }),
-                    ),
+                        .child(div().flex_1())
+                        .child(
+                            push_button(
+                                "whats-new-ok",
+                                u::WHATS_NEW_OK,
+                                PushStyle::Default,
+                                PushSize::Regular,
+                                cx,
+                            )
+                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                        ),
                 ),
         )
     });
@@ -786,6 +797,24 @@ mod tests {
 - **引用时 @ 对方**：引用一条消息回复时，会自动 @ 发送者。
 - 修好了 `App` 启动时一连串加载失败的问题，见 [说明](https://example.com)。
 ";
+
+    #[test]
+    fn no_bundled_note_shows_the_word_daemon() {
+        for (version, notes) in history() {
+            let items = notes.items().flat_map(|it| {
+                [
+                    it.title.clone().unwrap_or_default().to_string(),
+                    it.body.to_string(),
+                ]
+            });
+            for text in items.chain([notes.headline.to_string()]) {
+                assert!(
+                    !text.to_lowercase().contains("daemon"),
+                    "{version} shows a developer word: {text}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn parses_headline_and_items() {

@@ -883,6 +883,9 @@ pub enum SkeletonKind {
     /// A sidebar item (§2.14): 16 square and a h14 bar, pitch 32, px 8, on
     /// the sidebar fill.
     SidebarItem,
+    /// A DescriptionList row ([`desc_row`]): a label bar in the 112 column,
+    /// a value bar after it, pitch 36.
+    DescRow,
 }
 
 /// The pitch of a member list row.
@@ -984,6 +987,27 @@ pub fn skeleton_rows(id: &str, kind: SkeletonKind, n: usize, cx: &App) -> AnyEle
                         .on_fill(true),
                 )
                 .into_any_element(),
+            SkeletonKind::DescRow => div()
+                .id(row_id)
+                .h(super::metrics::DESC_ROW)
+                .flex()
+                .items_center()
+                .gap(super::tokens::space::S8)
+                .child(
+                    div().flex_none().w(super::metrics::DESC_LABEL).child(
+                        Bone::new()
+                            .h(super::tokens::text::BODY.0)
+                            .w(gpui::relative(0.5 + 0.4 * w)),
+                    ),
+                )
+                .child(
+                    div().flex_1().min_w(px(0.)).child(
+                        Bone::new()
+                            .h(super::tokens::text::BODY.0)
+                            .w(super::tokens::space::S48),
+                    ),
+                )
+                .into_any_element(),
         }
     });
     match kind {
@@ -1022,7 +1046,7 @@ pub fn skeleton_rows(id: &str, kind: SkeletonKind, n: usize, cx: &App) -> AnyEle
             )
             .children(rows)
             .into_any_element(),
-        SkeletonKind::Compact | SkeletonKind::SidebarItem => {
+        SkeletonKind::Compact | SkeletonKind::SidebarItem | SkeletonKind::DescRow => {
             div().flex().flex_col().children(rows).into_any_element()
         }
     }
@@ -1209,14 +1233,14 @@ pub fn desc_row(label: impl Into<SharedString>, value: impl IntoElement, cx: &Ap
     let k = native_colors(cx);
     div()
         .flex_none()
-        .min_h(px(36.))
+        .min_h(super::metrics::DESC_ROW)
         .flex()
         .items_center()
-        .gap(px(8.))
+        .gap(super::tokens::space::S8)
         .child(
             TruncText::new(label)
                 .flex_none()
-                .w(px(112.))
+                .w(super::metrics::DESC_LABEL)
                 .n_body()
                 .text_color(k.secondary),
         )

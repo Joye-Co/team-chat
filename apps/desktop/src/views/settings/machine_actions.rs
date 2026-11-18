@@ -890,7 +890,7 @@ impl Render for MyBotsForm {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = native_colors(cx);
         let page = cx.entity();
-        let rows: Vec<gpui::AnyElement> = self
+        let rows: Vec<(gpui::AnyElement, gpui::Pixels)> = self
             .rows
             .iter()
             .flat_map(|r| {
@@ -927,6 +927,11 @@ impl Render for MyBotsForm {
                     )
                     .child(switch)
                     .into_any_element();
+                // The line under a member starts at its name (2.8).
+                let member = (
+                    member,
+                    tokens::metrics::FORM_ROW_INSET + tokens::avatar::SM + tokens::space::S12,
+                );
                 let repo = r.on.then(|| {
                     sheet_form_row(
                         s::RUNNER_REPO,
@@ -939,13 +944,18 @@ impl Render for MyBotsForm {
                     )
                     .into_any_element()
                 });
-                std::iter::once(member).chain(repo)
+                std::iter::once(member)
+                    .chain(repo.map(|row| (row, tokens::metrics::FORM_ROW_INSET)))
             })
             .collect();
         let list = if rows.is_empty() {
             widgets::quiet(s::MACHINE_MY_BOTS_EMPTY, cx).into_any_element()
         } else {
-            sheet_form().children(rows).into_any_element()
+            rows.into_iter()
+                .fold(sheet_form(), |form, (row, inset)| {
+                    form.child_with_inset(row, inset)
+                })
+                .into_any_element()
         };
         let status = match &self.status {
             Status::Failed(t) => Some(

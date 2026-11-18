@@ -4,7 +4,7 @@
 //! context menu and the 群 page's ⋯ menu. Settings → 通知 holds only the
 //! global ones.
 
-use gpui::{App, Context, IntoElement, ParentElement, Styled, Window, div, px};
+use gpui::{App, Context, IntoElement, ParentElement, Styled, Window, div};
 use gpui_component::{
     Disableable as _,
     menu::{DropdownMenu as _, PopupMenu, PopupMenuItem},
@@ -203,10 +203,10 @@ pub fn topic_select(
     let select = crate::ui::native::select_button(
         "topic-notify-level",
         now,
-        crate::ui::native::PushSize::Regular,
+        crate::ui::native::PushSize::Small,
         cx,
     )
-    .w(px(120.))
+    .w(LEVEL_POPUP)
     .dropdown_menu(move |menu, _, _| {
         let set = |label: &'static str, follow: bool, mute: bool| {
             let (s, g, t) = (s.clone(), g.clone(), t.clone());
@@ -217,7 +217,7 @@ pub fn topic_select(
                     s.provider.set_topic_following(&g, &t, follow);
                 })
         };
-        menu.min_w(px(120.))
+        menu.min_w(LEVEL_POPUP)
             .item(set(nav::FOLLOW_ROW, true, false))
             .item(set(nav::NOTIFY_DEFAULT, false, false))
             .item(set(nav::MUTE, false, true))
@@ -233,22 +233,15 @@ pub fn topic_select(
                 .w_full()
                 .rounded(crate::ui::native::metrics::GROUP_RADIUS)
                 .bg(k.group)
-                .pl(px(14.))
-                .pr(px(8.))
-                .h(px(48.))
+                .px(crate::ui::native::metrics::INSPECTOR_GROUP_INSET)
+                .h(crate::ui::native::metrics::FORM_ROW)
                 .flex()
                 .items_center()
                 .justify_between()
                 .child(div().n_body().text_color(k.label).child(nav::NOTIFY_LEVEL))
                 .child(select),
         )
-        .child(
-            div()
-                .px(px(2.))
-                .n_subheadline()
-                .text_color(k.secondary)
-                .child(hint),
-        )
+        .child(div().n_subheadline().text_color(k.secondary).child(hint))
 }
 
 #[cfg(test)]

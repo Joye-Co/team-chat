@@ -50,7 +50,7 @@ crate::copy! {
     // --- v13/wire ---
     GROUP_PAGE_PURPOSE_MORE = "修改群说明…",
     GROUP_PAGE_PURPOSE_TITLE = "群说明",
-    GROUP_PAGE_PURPOSE_EXPLANATION = "写在群名下面，说这个群做什么。群里的人都能看到。",
+    GROUP_PAGE_PURPOSE_EXPLANATION = "显示在群名后面，说这个群做什么。群里的人都能看到。",
     GROUP_PAGE_PURPOSE_LABEL = "说明",
     GROUP_PAGE_PURPOSE_PLACEHOLDER = "比如：orderbot 的上线、巡检和告警",
     GROUP_PAGE_PURPOSE_TOO_LONG = "最多 200 个字",

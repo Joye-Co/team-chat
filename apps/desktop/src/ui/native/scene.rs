@@ -455,21 +455,19 @@ impl NativeKit {
                         &k,
                     )),
             )
+            .child(hstack().items_start().child(sample(
+                t::STATE_DISABLED,
+                NativeTextField::new("kf-3", &self.name).disabled(true),
+                &k,
+            )))
             .child(
-                hstack()
-                    .items_start()
-                    .child(sample(
-                        t::STATE_DISABLED,
-                        NativeTextField::new("kf-3", &self.name).disabled(true),
-                        &k,
-                    ))
-                    .child(sample(
-                        t::STATE_REST,
-                        NativeTextField::new("kf-4", &self.code)
-                            .size(FieldSize::Large)
-                            .width(metrics::FIELD_CODE_WIDTH),
-                        &k,
-                    )),
+                hstack().items_start().child(sample(
+                    t::ROW_SIZE_LARGE,
+                    NativeTextField::new("kf-4", &self.code)
+                        .size(FieldSize::Large)
+                        .width(metrics::FIELD_CODE_WIDTH),
+                    &k,
+                )),
             )
             .child(
                 hstack()

@@ -22,7 +22,7 @@ crate::copy! {
     EMAIL_CHANGE = "换一个邮箱",
     USE_INVITE = "使用邀请码登录",
     EMAIL_ERROR_BAD_ADDRESS = "邮箱地址不对，请检查后再试",
-    EMAIL_ERROR_WRONG_CODE = "验证码不对或已过期",
+    EMAIL_ERROR_WRONG_CODE = "验证码不对或已过期，请重新输入或重新发送",
     EMAIL_ERROR_RATE = "请求太频繁，请稍后再试",
     EMAIL_ERROR_NOT_SET_UP = "这个服务器还没开通邮箱登录",
     SERVER_PRODUCTION = "正式服务器",

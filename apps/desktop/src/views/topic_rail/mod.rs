@@ -623,7 +623,6 @@ impl Render for TopicRail {
             sections.push(
                 div()
                     .w_full()
-                    .px(px(2.))
                     .n_subheadline()
                     .text_color(k.secondary)
                     .child(fill(
