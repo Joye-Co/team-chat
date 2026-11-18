@@ -1154,39 +1154,48 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
     // Each frame sits 4 inside its selection ring: the strip bleeds 4 on every side so
     // the frames, not the rings, keep the sheet's inset and the row's height.
     let mut strip = div().flex_none().m(-space::S4).flex();
+    let sheet = ui::native::native_colors(cx).sheet;
     for (i, f) in v.frames.iter().enumerate() {
         let go = spec.clone();
         let st2 = state.clone();
         let t = f.t;
-        strip = strip.child(
-            thumb_ring(sel == Some(i), radius::MD, cx)
-                .id(ElementId::Name(format!("{}-fr-{i}", spec.id).into()))
-                .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
-                .flex_1()
-                .min_w_0()
-                .h(crate::ui::native::tokens::height::TABLE_ROW + space::S8)
-                .child(
-                    div()
-                        .size_full()
-                        .rounded(radius::MARK)
-                        .overflow_hidden()
-                        .bg(s.bg)
-                        .child(
-                            img(f.path.clone())
-                                .size_full()
-                                .rounded(radius::MARK)
-                                .object_fit(ObjectFit::Cover),
-                        ),
-                )
-                .on_click(move |_, _, cx| {
-                    seek_player(&go, t, cx);
-                    st2.update(cx, |s, cx| {
-                        s.frame = Some(i);
-                        s.position = t;
-                        cx.notify();
-                    });
-                }),
-        );
+        strip =
+            strip.child(
+                thumb_ring(sel == Some(i), radius::MD, cx)
+                    .id(ElementId::Name(format!("{}-fr-{i}", spec.id).into()))
+                    .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
+                    .flex_1()
+                    .min_w_0()
+                    .h(crate::ui::native::tokens::height::TABLE_ROW + space::S8)
+                    .child(
+                        div()
+                            .relative()
+                            .size_full()
+                            .child(div().size_full().overflow_hidden().bg(s.bg).child(
+                                img(f.path.clone()).size_full().object_fit(ObjectFit::Cover),
+                            ))
+                            // A picture that covers its box is drawn past it and cut square
+                            // by the box, so its own radius is lost on the cut sides. The
+                            // corners come from a line of the sheet's fill over the gap
+                            // around the picture, round on its inner edge.
+                            .child(
+                                div()
+                                    .absolute()
+                                    .inset(-space::S2)
+                                    .rounded(radius::MARK + space::S2)
+                                    .border_2()
+                                    .border_color(sheet),
+                            ),
+                    )
+                    .on_click(move |_, _, cx| {
+                        seek_player(&go, t, cx);
+                        st2.update(cx, |s, cx| {
+                            s.frame = Some(i);
+                            s.position = t;
+                            cx.notify();
+                        });
+                    }),
+            );
     }
     let at = sel.and_then(|i| v.frames.get(i)).map_or(position, |f| f.t);
     let (copy_v, send_v, target) = (v.path.clone(), v.path.clone(), spec.target.clone());
@@ -1702,6 +1711,8 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
         .overflow_y_scroll()
         .border_r_1()
         .border_color(k.sep)
+        .bg(ui::native::native_colors(cx).sheet)
+        .rounded_bl(ui::native::metrics::SHEET_RADIUS)
         .p(space::S8)
         .flex()
         .flex_col()
@@ -1760,11 +1771,6 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
         .h_full()
         .overflow_scroll()
         .track_scroll(&pages)
-        .bg(k.code_bg)
-        .rounded_br(ui::native::metrics::SHEET_RADIUS)
-        .when(!sidebar, |el| {
-            el.rounded_bl(ui::native::metrics::SHEET_RADIUS)
-        })
         .p(space::S16)
         .flex()
         .flex_col()
@@ -1815,10 +1821,15 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
         .child(header)
         .child(toolbar)
         .child(
+            // The muted backdrop of the pages is this row's fill, not the scrolling
+            // pane's: the row ends at the sheet's bottom edge, so its corners follow
+            // the sheet's (children are clipped to the box, not to its radius).
             div()
                 .flex_1()
                 .min_h(px(0.))
                 .flex()
+                .bg(k.code_bg)
+                .rounded_b(ui::native::metrics::SHEET_RADIUS)
                 .when(sidebar, |el| el.child(thumbs))
                 .child(doc),
         )

@@ -191,10 +191,16 @@ impl Render for MediaViewer {
             ),
             _ => full::loading(&self.title, close_sheet(), cx),
         };
+        // The sheet's own height inside its 1 px line, as a length: the dialog lays its
+        // content out at the content's height, so "100 %" here would let a long
+        // document grow past the sheet (cut square at its bottom corners, and
+        // scrolled by nothing).
+        let height = self.height(window, cx) - crate::ui::native::tokens::layout::BORDER * 2.;
         div()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key))
-            .size_full()
+            .w_full()
+            .h(height)
             .flex()
             .flex_col()
             .rounded(metrics::SHEET_RADIUS)
