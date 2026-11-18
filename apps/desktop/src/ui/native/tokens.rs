@@ -1503,12 +1503,12 @@ pub mod monitor {
     /// 成员's table: narrow columns so a name of about 8 characters and its 岗位 fit beside the
     /// inspector at the default width; cells pad 8 a side.
     pub const TEAM_COL_LEVEL: Pixels = px(80.);
-    pub const TEAM_COL_TOPICS: Pixels = px(60.);
+    pub const TEAM_COL_TOPICS: Pixels = px(84.);
     pub const TEAM_COL_SPEND: Pixels = px(180.);
     /// The budget after an amount (`/ $100`): the slot's least width, so every amount ends at
     /// one x and a longer budget pushes its amount instead of covering it.
     pub const TEAM_SPEND_BUDGET: Pixels = px(40.);
-    pub const TEAM_COL_RECENT: Pixels = px(92.);
+    pub const TEAM_COL_RECENT: Pixels = px(68.);
     pub const TEAM_CELL_PAD: Pixels = space::S8;
     /// The count after a bar in the member inspector (`999 个话题`), right-aligned.
     pub const TEAM_USE_COUNT: Pixels = px(64.);

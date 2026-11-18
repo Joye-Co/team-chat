@@ -436,7 +436,7 @@ crate::copy! {
     TEAM_INVITE = "邀请成员",
     TEAM_COL_MEMBER = "成员",
     TEAM_COL_LEVEL = "身份",
-    TEAM_COL_TOPICS = "话题",
+    TEAM_COL_TOPICS = "本周话题",
     TEAM_COL_SPEND = "本周花费",
     TEAM_COL_RECENT = "状态",
     TEAM_AI_ROLE = "AI · {role}",
