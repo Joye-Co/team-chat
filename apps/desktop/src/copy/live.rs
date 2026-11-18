@@ -127,11 +127,18 @@ crate::copy! {
     // Under 在等电脑：电脑不在线: which computer, and what happens next.
     LIVE_PHASE_OFFLINE_HINT = "{computer} 回来后会接着做",
     // Held by a person while the computer is away: the banner says so at the top.
-    LIVE_HELD_OFFLINE_HINT = "{computer} 不在线，回来后才能继续操作",
+    LIVE_HELD_OFFLINE_HINT = "你还在接管，它回来后才能继续操作",
     // The replay's end label while the computer is away: the frame is not live.
     LIVE_LAST_FRAME_AT = "最后画面",
     // The note on a paused run goes with 继续 (LIVE_NOTE_PLACEHOLDER: with 交还).
     LIVE_NOTE_PLACEHOLDER_RESUME = "继续时留句话给 {member}（可不填）",
     // A stopped run starts again with the same request.
     LIVE_RESTART = "重新开始",
+    // The banner of a held run whose computer is away leads with that condition.
+    LIVE_PHASE_HELD_AWAY = "{computer} 不在线",
+    LIVE_HELD_OFFLINE_HINT_OTHER = "{who} 还在接管，它回来后才能继续操作",
+    // A stopped run is over; LIVE_MEMBER_STOPPED is the hold of a take-over.
+    LIVE_MEMBER_ENDED = "{member} 已停止",
+    // A stuck run names the step it stopped on.
+    LIVE_STUCK_AT = "停在：{step}",
 }

@@ -582,6 +582,18 @@ impl LivePane {
             ]))
     }
 
+    /// What a run reports went wrong, from the same source as the 话题's alert.
+    fn run_cause(&self, run: &BotRunSummary) -> Option<String> {
+        run.summary
+            .clone()
+            .or_else(|| {
+                let process = self.services.provider.run_process(&run.id);
+                crate::views::process::error_line(&process.steps)
+            })
+            .map(|c| c.trim().to_string())
+            .filter(|c| !c.is_empty())
+    }
+
     /// The banner over the screen for a phase that needs words (design-takeover 3.9): who
     /// paused or holds the run and for how long, what an ended run waits for, which computer
     /// it waits for; under it the note for the member when I may continue or hand back.
@@ -626,10 +638,20 @@ impl LivePane {
             // the top of the pane says so.
             RunPhase::TakenOver if computer_away(run) => {
                 icon_ink = n.amber;
+                let hint = match run.hold.paused_by.as_deref().filter(|_| !mine) {
+                    Some(by) => fill(
+                        c::LIVE_HELD_OFFLINE_HINT_OTHER,
+                        &[(
+                            "who",
+                            crate::ui::avatar::name_beside_avatar(&member_name(&self.services, by)),
+                        )],
+                    ),
+                    None => c::LIVE_HELD_OFFLINE_HINT.to_string(),
+                };
                 (
                     Sym::Pointer,
-                    words.text.clone(),
-                    Some(fill(c::LIVE_HELD_OFFLINE_HINT, &[("computer", &computer)])),
+                    fill(c::LIVE_PHASE_HELD_AWAY, &[("computer", &computer)]),
+                    Some(hint),
                 )
             }
             RunPhase::TakenOver => (
@@ -699,6 +721,16 @@ impl LivePane {
             // header's badge.
             RunPhase::WaitingPerson | RunPhase::WaitingApproval => {
                 icon_ink = words.badge.color(&n);
+                // A stuck run says what it stopped on: its own words when it left
+                // any, else the step of the plan it is on.
+                if phase_of(run).1 == Some(WaitingFor::Stuck) {
+                    cause = self.run_cause(run).or_else(|| {
+                        run.plan
+                            .iter()
+                            .find(|p| matches!(p.state, PlanState::Current | PlanState::Waiting))
+                            .map(|p| fill(c::LIVE_STUCK_AT, &[("step", &p.text)]))
+                    });
+                }
                 (
                     words.badge.symbol().unwrap_or(Sym::NeedsYou),
                     words.text.clone(),
@@ -708,15 +740,7 @@ impl LivePane {
             // A failed run says why (§2.15), from the same source as the 话题's alert.
             RunPhase::Failed => {
                 icon_ink = n.red;
-                cause = run
-                    .summary
-                    .clone()
-                    .or_else(|| {
-                        let process = self.services.provider.run_process(&run.id);
-                        crate::views::process::error_line(&process.steps)
-                    })
-                    .map(|c| c.trim().to_string())
-                    .filter(|c| !c.is_empty());
+                cause = self.run_cause(run);
                 // No `已 N 分钟`: a failure is an event with a cause, not a
                 // state that lasts.
                 (Sym::Failed, words.text.clone(), None)
@@ -724,7 +748,7 @@ impl LivePane {
             // A stopped run says so and when, as the other ended phases do.
             RunPhase::Stopped => (
                 words.badge.symbol().unwrap_or(Sym::Stopped),
-                fill(c::LIVE_MEMBER_STOPPED, &[("member", bot)]),
+                fill(c::LIVE_MEMBER_ENDED, &[("member", bot)]),
                 run.ended_at.map(crate::views::timeline::plan::ended_text),
             ),
             _ => return None,
@@ -1522,13 +1546,16 @@ impl LivePane {
                 .into_any_element()
         };
         // One label row under the track (never a label per mark, so two
-        // labels never share a span): the step 回放 shows, or the step the
-        // run is on, at the leading edge; `现在 10:21` in its own slot at the
-        // trailing edge.
-        let (label, done) = match shown.filter(|&i| i != last) {
-            Some(i) => (run.plan.get(i).map(|p| p.text.clone()), true),
-            None => (run.plan.get(last).map(|p| p.text.clone()), false),
-        };
+        // labels never share a span): the step and its time together at the
+        // trailing edge, under the playhead (`提 PR · 结束 09:55`). A step 回放
+        // shows carries its own time, the instant its mark stands at.
+        let earlier = shown.filter(|&i| i != last);
+        let done = earlier.is_some();
+        let label = run
+            .plan
+            .get(earlier.unwrap_or(last))
+            .map(|p| p.text.clone());
+        let mark_time = earlier.and_then(|i| times.get(i + 1).copied());
         // An away computer's picture is its last frame, not the present.
         let away = computer_away(run);
         let word = if away {
@@ -1538,18 +1565,19 @@ impl LivePane {
         } else {
             c::LIVE_ENDED_AT
         };
-        // The labels take the track's inset: the step starts where the line
-        // starts and the time ends under the last mark.
+        // The labels take the track's inset: the time ends under the last mark
+        // and the step gives way first.
+        let has_label = label.is_some();
         let labels = div()
             .mx(space::S12)
             .h(px(20.))
             .flex()
             .items_center()
-            .gap(space::S12)
+            .justify_end()
+            .gap(space::S6)
             .t_meta()
             .child(
                 div()
-                    .flex_1()
                     .min_w_0()
                     .flex()
                     .items_center()
@@ -1564,6 +1592,14 @@ impl LivePane {
                     })
                     .children(label.map(|t| div().min_w_0().one_line().child(t))),
             )
+            .when(has_label, |d| {
+                d.child(
+                    div()
+                        .flex_none()
+                        .text_color(k.ink_3)
+                        .child(c::LIVE_ACCEPTANCE_DOT),
+                )
+            })
             .child(
                 div()
                     .flex_none()
@@ -1572,13 +1608,17 @@ impl LivePane {
                     .gap(space::S6)
                     .medium()
                     .text_color(k.ink)
-                    .child(word)
+                    .when(mark_time.is_none(), |d| d.child(word))
                     .child(
                         div()
                             .mono()
                             .font_weight(gpui::FontWeight::NORMAL)
                             .text_color(k.ink_3)
-                            .child(clock(if active && !away { now_ms() } else { end })),
+                            .child(clock(mark_time.unwrap_or(if active && !away {
+                                now_ms()
+                            } else {
+                                end
+                            }))),
                     ),
             );
         Some(
