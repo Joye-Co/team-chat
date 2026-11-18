@@ -431,6 +431,11 @@ return JSON.stringify({height:b&&b.height,radius:b&&b.borderTopLeftRadius,border
 primary:p&&p.backgroundColor,ink:getComputedStyle(document.body).color,disabled:d&&d.opacity,\
 vars:['--tc-radius','--tc-gap','--tc-danger','--tc-font-mono','--tc-fg','--tc-bg'].every(function(v){return r.getPropertyValue(v).trim()!==''})});})()";
 
+/// Puts the focus in the form's first field and says whether it draws its focus ring.
+const FORM_FOCUS: &str = "(function(){var e=document.getElementById('name');\
+if(document.activeElement!==e){e.focus();e.setSelectionRange(e.value.length,e.value.length);}\
+return document.hasFocus()&&document.activeElement===e&&e.matches(':focus-visible')?'yes':'no:'+document.hasFocus();})()";
+
 /// The controls scene: both pages wrote no style, so what their controls look like is
 /// the host's base stylesheet. Checks it in each page, then puts the keyboard focus in
 /// the form's first field so the capture shows the focus ring.
@@ -465,12 +470,23 @@ async fn controls(
                 .await;
         }
     }
-    eval(
-        cx,
-        pane,
-        "(function(){var e=document.getElementById('name');e.focus();e.setSelectionRange(e.value.length,e.value.length);return 'ok'})()",
-    )
-    .await;
+    // The page holds the keyboard first: without it the field draws no ring and no caret.
+    cx.update(|cx| pane.read(cx).focus());
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let focused = eval(cx, pane, FORM_FOCUS).await;
+        if focused.contains("yes") {
+            break;
+        }
+        if Instant::now() > deadline {
+            return Err(format!(
+                "the form's first field did not take focus: {focused}"
+            ));
+        }
+        cx.background_executor()
+            .timer(Duration::from_millis(100))
+            .await;
+    }
     painted(cx, inline, "the checklist").await?;
     painted(cx, pane, "the form").await?;
     cx.background_executor()
