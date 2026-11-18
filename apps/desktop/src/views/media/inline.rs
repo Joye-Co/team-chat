@@ -731,10 +731,12 @@ fn video(spec: &InlineSpec, media: &Arc<Media>, v: &store::Video, cx: &App) -> A
                 .child(mono(super::time_text(duration), gpui::white())),
         )
         .child(
+            // Inside the straight part of the bottom edge: the frame clips to its box, not
+            // its curve, so a full-width strip would stick out at the rounded corners.
             div()
                 .absolute()
-                .left_0()
-                .right_0()
+                .left(crate::ui::native::tokens::radius::CONTAINER)
+                .right(crate::ui::native::tokens::radius::CONTAINER)
                 .bottom_0()
                 .child(chapter_ticks(
                     &v.chapters,

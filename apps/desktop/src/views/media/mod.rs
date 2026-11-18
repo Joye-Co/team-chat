@@ -217,16 +217,6 @@ pub fn time_text(seconds: f64) -> String {
     }
 }
 
-/// `09:40` (minutes always two digits), for transcripts and audio positions.
-pub fn clock_text(seconds: f64) -> String {
-    let s = seconds.max(0.).round() as u64;
-    if s >= 3600 {
-        time_text(seconds)
-    } else {
-        format!("{:02}:{:02}", s / 60, s % 60)
-    }
-}
-
 // --- the dark "screen" behind video and the lightbox (Media.dc.html `--screen`) ---------
 
 pub struct Screen {
@@ -319,6 +309,5 @@ mod tests {
         assert_eq!(time_text(42.), "0:42");
         assert_eq!(time_text(1868.), "31:08");
         assert_eq!(time_text(3723.), "1:02:03");
-        assert_eq!(clock_text(580.), "09:40");
     }
 }
