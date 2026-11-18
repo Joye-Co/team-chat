@@ -111,7 +111,9 @@ pub fn sections(
     // 成员: the name keeps its room; the 岗位 truncates first, and both
     // show in full in the tooltip.
     let members = listed_members(services, g);
-    let mut sec = InspectorSection::new("group-ins-members", c::GROUP_PAGE_MEMBERS_TITLE).grouped();
+    let mut sec = InspectorSection::new("group-ins-members", c::GROUP_PAGE_MEMBERS_TITLE)
+        .grouped()
+        .list_rows();
     let group = p.groups().into_iter().find(|x| x.id == g);
     if let Some(group) = group.filter(|x| x.kind == GroupKind::Group && !loading && !failed) {
         let services = services.clone();
@@ -163,7 +165,7 @@ pub fn sections(
             div()
                 .id(SharedString::from(format!("group-member-{}", m.id)))
                 .focus_row(false, cx)
-                .h(tsp::S32)
+                .h(crate::ui::native::metrics::INSPECTOR_LIST_ROW)
                 .flex()
                 .items_center()
                 .gap(tsp::S8)

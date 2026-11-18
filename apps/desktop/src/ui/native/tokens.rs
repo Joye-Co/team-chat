@@ -1097,6 +1097,16 @@ pub mod metrics {
     // Inspector and lists (§2.5, §2.6)
     pub const INSPECTOR_ROW: Pixels = height::ROW;
     pub const INSPECTOR_PAD: Pixels = space::S16;
+    /// A row of a list in a grouped inspector section (the members of a 群
+    /// or a 话题): the compact row, rows touching (§2.6).
+    pub const INSPECTOR_LIST_ROW: Pixels = height::ROW;
+    /// The strip at the top of a code block that holds its pinned actions
+    /// (问这里, copy); the code starts under it (K-05).
+    pub const CODE_BLOCK_STRIP: Pixels = height::ROW;
+    /// The height of the actions in that strip.
+    pub const CODE_BLOCK_ACTIONS: Pixels = px(24.);
+    /// Under the last line of a code block.
+    pub const CODE_BLOCK_PAD_BOTTOM: Pixels = space::S16;
     /// The label column of a DescriptionList and of every sheet.
     pub const LABEL_COLUMN: Pixels = px(112.);
     pub const LABEL_GAP: Pixels = space::S8;

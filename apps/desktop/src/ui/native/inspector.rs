@@ -58,6 +58,7 @@ pub struct InspectorSection {
     rows: Vec<AnyElement>,
     on_toggle: Option<Click>,
     grouped: bool,
+    list_rows: bool,
 }
 
 impl InspectorSection {
@@ -71,6 +72,7 @@ impl InspectorSection {
             rows: Vec::new(),
             on_toggle: None,
             grouped: false,
+            list_rows: false,
         }
     }
 
@@ -80,6 +82,14 @@ impl InspectorSection {
     /// padding and the gap between sections.
     pub fn grouped(mut self) -> Self {
         self.grouped = true;
+        self
+    }
+
+    /// A grouped section whose rows are a list of one kind (members): the
+    /// rows are [`metrics::INSPECTOR_LIST_ROW`] high and touch, so the same
+    /// list has one pitch in every pane (§2.6 compact rows, D13).
+    pub fn list_rows(mut self) -> Self {
+        self.list_rows = true;
         self
     }
 
@@ -183,7 +193,7 @@ impl RenderOnce for InspectorSection {
                             .py(px(10.))
                             .flex()
                             .flex_col()
-                            .gap(super::tokens::space::S6)
+                            .when(!self.list_rows, |d| d.gap(super::tokens::space::S6))
                             .children(self.rows),
                     )
                 })
