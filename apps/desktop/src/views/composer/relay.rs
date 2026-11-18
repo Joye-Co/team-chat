@@ -77,7 +77,7 @@ pub fn refusal_text(r: &RelayRefusal, name: impl Fn(&str) -> String) -> Option<S
                 .filter(|n| !n.is_empty())
                 .collect();
             Some(fill(
-                c::RELAY_WHY_UNAVAILABLE,
+                c::RELAY_REFUSED_UNAVAILABLE,
                 &[("name", &names.join(c::RELAY_NAMES_SEP))],
             ))
         }
@@ -278,7 +278,7 @@ mod tests {
         };
         assert_eq!(
             refusal_text(&r("relay.member_unavailable", &["a", "b"]), name).as_deref(),
-            Some("小码、小审 现在接不了这件事")
+            Some("没能开始按顺序做：小码、小审 现在接不了")
         );
         assert_eq!(
             refusal_text(&r("relay.running", &[]), name).as_deref(),
