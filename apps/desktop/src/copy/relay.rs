@@ -31,7 +31,7 @@ crate::copy! {
     RELAY_WHY_UNKNOWN = "停住了",
     // The composer.
     RELAY_HINT_ORDER = "按顺序做：{names}",
-    RELAY_HINT_DISCOVER = "想让他们按顺序做？用 → 连起来",
+    RELAY_HINT_DISCOVER = "想让他们按顺序做？用 -> 连起来，比如 @{first} -> @{second}",
     RELAY_HINT_IN_TOPIC = "按顺序做要在话题里用",
     RELAY_HINT_RUNNING = "这个话题已经在按顺序做，先停止它",
     RELAY_REFUSED_BAD_STEPS = "按顺序做要写 2 到 6 步，同一个成员不能挨着",

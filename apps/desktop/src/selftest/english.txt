@@ -82,6 +82,7 @@
 停用	Off
 停止…	Stop…
 停止顺序…	Stop order…
+想让他们按顺序做？用 -> 连起来，比如 {}	Want them to go in order? Join them with ->, like {}
 这个顺序会停在这里，之后可以重试。	The order stops here. You can retry it later.
 接管	Take over
 交还	Hand back

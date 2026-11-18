@@ -130,7 +130,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "topic-relay-discover",
-        about: "Composer naming two AI members: 想让他们按顺序做？用 → 连起来",
+        about: "Composer naming two AI members: 想让他们按顺序做？用 -> 连起来，比如 @Forge -> @Scout",
         start: Start::V2,
         setup: |s, cx| {
             draft(s, "@Forge 和 @Scout 一起看看这个");

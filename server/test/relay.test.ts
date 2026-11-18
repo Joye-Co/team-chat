@@ -68,6 +68,11 @@ describe("parsing an arrow line", () => {
       goal: "给设置页加深色模式",
       steps: [{ memberId: "A" }, { memberId: "B" }, { memberId: "A" }],
     });
+    // `>` typed with Chinese punctuation on.
+    expect(parseRelay("@小码 -》 @小审 =》 @小码 给设置页加深色模式", members)).toEqual({
+      goal: "给设置页加深色模式",
+      steps: [{ memberId: "A" }, { memberId: "B" }, { memberId: "A" }],
+    });
     // The longest name wins: @小码2 is not @小码 with the note 2.
     expect(parseRelay("@小码2 → @小码 收尾", members)?.steps.map((s) => s.memberId)).toEqual(["C", "A"]);
   });
