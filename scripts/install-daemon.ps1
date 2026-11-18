@@ -109,6 +109,13 @@ if ($DaemonUrl) {
     if (-not $Sha256) { throw '-DaemonUrl needs -Sha256: the hash the daemon must have, from a source you trust (not from the download location).' }
 }
 if ($Sha256 -and $Sha256 -notmatch '^[0-9a-fA-F]{64}$') { throw '-Sha256 must be 64 hex digits.' }
+# Before anything on this computer changes: a mistyped path must not leave half an install.
+if ($DaemonFile -and -not (Test-Path -LiteralPath $DaemonFile -PathType Leaf)) {
+    throw "-DaemonFile not found: $DaemonFile"
+}
+if (-not $Update -and $TokenFile -and -not (Test-Path -LiteralPath $TokenFile -PathType Leaf)) {
+    throw "-TokenFile not found: $TokenFile"
+}
 if ($DaemonUrl) { $sourceName = ([Uri]$DaemonUrl).Segments[-1] } else { $sourceName = Split-Path -Leaf $DaemonFile }
 if (-not $Slug) {
     if ($sourceName -match '^(.+?)-daemon') { $Slug = $Matches[1] }
@@ -214,3 +221,4 @@ if ($NoService) {
 if ($LASTEXITCODE -ne 0) { throw "install-service failed (exit code $LASTEXITCODE)." }
 Write-Host "The daemon runs as a scheduled task of $env:USERNAME and starts when you log on."
 Write-Host "Log: $(Join-Path (Join-Path $env:LOCALAPPDATA "$Slug-daemon") 'daemon.log')"
+Write-Host "To stop the daemon and remove the task: & '$exe' uninstall-service"
