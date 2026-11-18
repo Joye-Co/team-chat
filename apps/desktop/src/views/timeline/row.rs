@@ -240,7 +240,11 @@ impl TimelineView {
             me: self.me.as_deref(),
         };
         let above = extras::render(extras::Placement::AboveBody, message, &ctx, window, cx);
-        let v2_files = if v2 { self.v2_files(message, cx) } else { None };
+        let v2_files = if v2 {
+            self.v2_files(message, window, cx)
+        } else {
+            None
+        };
         let below = if v2_files.is_some() {
             let mut out = vec![];
             out.extend(v2_files);

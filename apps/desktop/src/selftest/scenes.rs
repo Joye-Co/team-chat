@@ -520,6 +520,13 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::files::preview::open,
     },
     Scene {
+        name: "files-inline",
+        about: "A message with an attached table and Markdown notes: each shows in the viewer a 产出 of its kind gets, not a bare file row",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::files::preview::open_inline,
+    },
+    Scene {
         name: "files-menu",
         about: "The files scene with the image's context menu: 打开, 在访达中显示, 快速查看, 共享…, 存储为…",
         start: Start::SignedIn,
@@ -1414,6 +1421,7 @@ pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
     // --- end inc-refs ---
     match name {
         "files-quick-look-page" => Some(crate::views::files::preview::quick_look_settled),
+        "files-inline" => Some(crate::views::files::preview::inline_ready),
         "artifact-v2-leave" => Some(crate::views::artifact_page::scenes::left),
         "web-embed" => Some(|cx| embed_preview::ready(EmbedMode::Topic, cx)),
         "web-embed-scrolled" => Some(|cx| embed_preview::ready(EmbedMode::Scrolled, cx)),

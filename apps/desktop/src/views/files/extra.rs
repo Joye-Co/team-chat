@@ -1,8 +1,12 @@
-//! The attachments of a message row: image previews and file rows.
+//! The attachments of a message row: image previews, the inline viewers of
+//! `views/media` for a document, a table, code, a PDF, a video or audio, and
+//! file rows for everything else.
 //!
-//! Every box has a fixed size from the message data (image pixel size, file
-//! row height), so a preview that finishes loading or a progress bar that
-//! ends never changes the row height.
+//! Every box has a fixed size from the message data (image pixel size, the
+//! viewer's box of the file's kind, file row height), so a preview that
+//! finishes loading or a progress bar that ends never changes the row height.
+//! The one exception is a file that could not be downloaded: its viewer box
+//! gives way to the file row, which says why and offers 重试.
 
 use std::sync::Arc;
 
@@ -44,7 +48,7 @@ impl MessageExtra for AttachmentsExtra {
         &self,
         message: &Message,
         ctx: &ExtrasContext,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut App,
     ) -> Option<AnyElement> {
         if message.attachments.is_empty() {
@@ -103,7 +107,20 @@ impl MessageExtra for AttachmentsExtra {
             } else if super::gallery::shows_inline(file) {
                 // Drawn by the gallery below.
             } else {
-                files = files.child(file_row(message, file, ctx.provider, id, cx));
+                // A file the app can show (a table, a document, code, a PDF, a
+                // video, audio) gets the same viewer as a 产出 of that kind.
+                let preview = inline_viewer(
+                    message,
+                    file,
+                    ctx.provider,
+                    format!("att-{row_key}-{index}-media"),
+                    window,
+                    cx,
+                );
+                files = files.child(match preview {
+                    Some(preview) => preview,
+                    None => file_row(message, file, ctx.provider, id, cx),
+                });
                 n_files += 1;
             }
         }
@@ -124,6 +141,90 @@ impl MessageExtra for AttachmentsExtra {
                 .into_any_element(),
         )
     }
+}
+
+/// The kind of viewer an attached file gets in the timeline, from the message
+/// data alone: a kind the app previews, small enough to fetch without asking
+/// (as a picture is). Not a picture (the gallery draws those) and not a web
+/// page: a page somebody attached never runs by itself, it opens from its row.
+pub fn inline_kind(file: &FileAttachment) -> Option<crate::views::media::MediaKind> {
+    use crate::views::media::{MediaKind, file_kind};
+    let kind = file_kind(&file.name, &file.mime);
+    let shown = !matches!(
+        kind,
+        MediaKind::File | MediaKind::Html | MediaKind::Image | MediaKind::ImageSet
+    );
+    (shown
+        && file.is_uploaded()
+        && !file.sha256.is_empty()
+        && file.size <= super::AUTO_DOWNLOAD_MAX_BYTES.min(kind.auto_load_limit()))
+    .then_some(kind)
+}
+
+/// The inline viewer of an attached file when it gets one ([`inline_kind`]),
+/// for every timeline that draws file items.
+pub fn inline_viewer(
+    message: &Message,
+    file: &FileAttachment,
+    provider: &Arc<dyn ChatProvider>,
+    id: String,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<AnyElement> {
+    let kind = inline_kind(file)?;
+    inline_preview(message, file, kind, provider, id, window, cx)
+}
+
+/// The inline viewer of an attached file: read from the file cache, fetched
+/// into it first when it is not there. `None` keeps the file row: while a
+/// download somebody started runs (the row shows its progress and 取消), and
+/// after a download failed (the row says why and offers 重试).
+fn inline_preview(
+    message: &Message,
+    file: &FileAttachment,
+    kind: crate::views::media::MediaKind,
+    provider: &Arc<dyn ChatProvider>,
+    id: String,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<AnyElement> {
+    use crate::views::media::{
+        inline,
+        state::Target,
+        store::{self, Load, MediaKey},
+    };
+    let key = MediaKey::file(&file.sha256);
+    let cached = provider.cached_file(file);
+    match (store::get(&key, cx), cached) {
+        (Some(Load::Failed(_)), None) => return None,
+        // It arrived after all (重试, or opened from its row): read it now.
+        (Some(Load::Failed(_)), Some(path)) => {
+            store::forget(&key, cx);
+            store::request_file(&key, &file.name, path, cx);
+        }
+        (Some(_), _) => {}
+        (None, Some(path)) => store::request_file(&key, &file.name, path, cx),
+        (None, None) => {
+            if provider.file_transfer(&download_key(file)).is_some() {
+                return None;
+            }
+            let fetch = provider.fetch_file(&message.group_id, &message.topic_id, file);
+            store::request_download(&key, &file.name, fetch, cx);
+        }
+    }
+    inline::render(
+        &inline::InlineSpec {
+            key,
+            kind,
+            title: file.name.clone(),
+            bytes: file.size,
+            // No provider: nothing here is a 产出 version to load or to send on.
+            target: Target::none(),
+            id: SharedString::from(id),
+        },
+        window,
+        cx,
+    )
 }
 
 /// The type glyph of a file tile.
@@ -594,3 +695,68 @@ mod media_state_tests {
     }
 }
 // --- end inc-host track ---
+
+#[cfg(test)]
+mod inline_tests {
+    use super::*;
+    use crate::views::media::MediaKind;
+
+    fn file(name: &str, mime: &str, size: u64) -> FileAttachment {
+        FileAttachment {
+            file_id: "f1".into(),
+            name: name.into(),
+            size,
+            mime: mime.into(),
+            width: None,
+            height: None,
+            sha256: "a".repeat(64),
+        }
+    }
+
+    #[test]
+    fn an_attached_file_gets_a_viewer_by_its_kind_and_size() {
+        assert_eq!(
+            inline_kind(&file("反馈.csv", "text/csv", 48_000)),
+            Some(MediaKind::Table)
+        );
+        assert_eq!(
+            inline_kind(&file("纪要.md", "", 2_000)),
+            Some(MediaKind::Markdown)
+        );
+        assert_eq!(
+            inline_kind(&file("录屏.mov", "video/quicktime", 4_400_000)),
+            Some(MediaKind::Video)
+        );
+        assert_eq!(
+            inline_kind(&file("报告.pdf", "application/pdf", 900_000)),
+            Some(MediaKind::Pdf)
+        );
+        assert_eq!(inline_kind(&file("a.rs", "", 900)), Some(MediaKind::Code));
+        // Too big to fetch without asking: the row, with 打开.
+        assert_eq!(
+            inline_kind(&file(
+                "发布会.mov",
+                "video/quicktime",
+                super::super::AUTO_DOWNLOAD_MAX_BYTES + 1
+            )),
+            None
+        );
+        // A page never runs by itself; a picture is the gallery's; an archive has no viewer.
+        assert_eq!(inline_kind(&file("index.html", "text/html", 900)), None);
+        assert_eq!(inline_kind(&file("a.png", "image/png", 900)), None);
+        assert_eq!(inline_kind(&file("a.zip", "application/zip", 900)), None);
+        // Still uploading: the upload row.
+        let mut uploading = file("反馈.csv", "text/csv", 48_000);
+        uploading.file_id.clear();
+        uploading.sha256.clear();
+        assert_eq!(inline_kind(&uploading), None);
+    }
+
+    #[test]
+    fn a_file_key_is_not_a_version() {
+        use crate::views::media::store::MediaKey;
+        let key = MediaKey::file(&"a".repeat(64));
+        assert!(key.is_file());
+        assert!(!MediaKey::new("art-1", 1).is_file());
+    }
+}

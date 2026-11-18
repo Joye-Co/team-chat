@@ -208,6 +208,83 @@ pub fn request_artifact(
     .detach();
 }
 
+impl MediaKey {
+    /// The key of a file attached to a message (not a 产出): its content hash,
+    /// with no version.
+    pub fn file(sha256: &str) -> Self {
+        Self::new(format!("file-{sha256}"), 0)
+    }
+
+    /// The key names an attached file ([`MediaKey::file`]).
+    pub fn is_file(&self) -> bool {
+        self.version == 0 && self.artifact_id.starts_with("file-")
+    }
+}
+
+/// Reads one file that is already on disk (an attachment in the file cache) as
+/// a version of itself: only this file is looked at, never its folder, which
+/// holds other people's files too.
+pub fn request_file(key: &MediaKey, title: &str, path: PathBuf, cx: &mut App) {
+    if matches!(get(key, cx), Some(Load::Ready(_))) {
+        return;
+    }
+    cx.default_global::<Store>()
+        .map
+        .insert(key.clone(), Load::Loading);
+    let (k, title) = (key.clone(), title.to_string());
+    let task = cx.background_executor().spawn(async move {
+        let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+        let entry = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let files = vec![MediaFile {
+            mime: mime_for(&entry).to_string(),
+            size: std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0),
+            path: entry.clone(),
+        }];
+        analyze_listed(k, title, dir, entry, files)
+    });
+    let key = key.clone();
+    cx.spawn(async move |cx: &mut AsyncApp| {
+        let media = task.await;
+        cx.update(|cx| set(key, Load::Ready(Arc::new(media)), cx));
+    })
+    .detach();
+}
+
+/// Waits for the download of an attached file (`fetch`, from
+/// `ChatProvider::fetch_file`), then reads it ([`request_file`]). A failed
+/// download leaves [`Load::Failed`].
+pub fn request_download(
+    key: &MediaKey,
+    title: &str,
+    fetch: crate::data::Reply<PathBuf>,
+    cx: &mut App,
+) {
+    if get(key, cx).is_some() {
+        return;
+    }
+    cx.default_global::<Store>()
+        .map
+        .insert(key.clone(), Load::Loading);
+    let (key, title) = (key.clone(), title.to_string());
+    cx.spawn(
+        async move |cx: &mut AsyncApp| match fetch.await.unwrap_or(Err(FileError::Other)) {
+            Ok(path) => {
+                cx.update(|cx| {
+                    forget(&key, cx);
+                    request_file(&key, &title, path, cx)
+                });
+            }
+            Err(e) => {
+                cx.update(|cx| set(key, Load::Failed(e), cx));
+            }
+        },
+    )
+    .detach();
+}
+
 /// Reads a version folder that is already on disk (also the self-test's sample 产出).
 pub fn request_folder(key: &MediaKey, title: &str, dir: PathBuf, entry: String, cx: &mut App) {
     if matches!(get(key, cx), Some(Load::Ready(_))) {
@@ -410,6 +487,17 @@ pub const FRAMES: usize = 6;
 /// [`Data::File`] with `preview_failed`.
 pub fn analyze(key: MediaKey, title: String, dir: PathBuf, entry: String) -> Media {
     let files = list_files(&dir);
+    analyze_listed(key, title, dir, entry, files)
+}
+
+/// [`analyze`] of `entry` with the files of its version given.
+fn analyze_listed(
+    key: MediaKey,
+    title: String,
+    dir: PathBuf,
+    entry: String,
+    files: Vec<MediaFile>,
+) -> Media {
     let kind = classify(&entry, &files);
     let bytes = files.iter().map(|f| f.size).sum();
     let path = dir.join(&entry);

@@ -101,6 +101,16 @@ struct Head {
     copy: Option<Rc<dyn Fn(&mut App)>>,
 }
 
+/// `v3` in a view's header. An attached file has no version: nothing.
+fn version_word(spec: &FullSpec) -> Option<String> {
+    (!spec.media.key.is_file()).then(|| {
+        fill(
+            cm::VERSION_CHIP,
+            &[("n", &spec.media.key.version.to_string())],
+        )
+    })
+}
+
 /// The 查找 toggle of a view that can be searched (Markdown, code, table): lit
 /// while the find bar is open.
 fn find_toggle(spec: &FullSpec, state: &Entity<MediaState>, cx: &App) -> Button {
@@ -842,15 +852,18 @@ fn markdown_view(
         spec.media.title.clone(),
         Head {
             meta: Some(
-                format!(
-                    "{} · {} · {}",
-                    cm::KIND_MARKDOWN,
-                    fill(
-                        cm::VERSION_CHIP,
-                        &[("n", &spec.media.key.version.to_string())]
-                    ),
-                    fill(cm::MD_WORDS, &[("n", &group_digits(md.stats.chars as u64))])
-                )
+                [
+                    Some(cm::KIND_MARKDOWN.to_string()),
+                    version_word(spec),
+                    Some(fill(
+                        cm::MD_WORDS,
+                        &[("n", &group_digits(md.stats.chars as u64))],
+                    )),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" · ")
                 .into(),
             ),
             toggles: vec![
@@ -2040,17 +2053,17 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
         spec.media.file_name().to_string(),
         Head {
             meta: Some(
-                format!(
-                    "{} · {}",
-                    fill(
-                        cm::VERSION_CHIP,
-                        &[("n", &spec.media.key.version.to_string())]
-                    ),
-                    fill(
+                [
+                    version_word(spec),
+                    Some(fill(
                         cm::CODE_NOTE,
-                        &[("lang", c.language), ("n", &lines.len().to_string())]
-                    )
-                )
+                        &[("lang", c.language), ("n", &lines.len().to_string())],
+                    )),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" · ")
                 .into(),
             ),
             toggles: vec![
