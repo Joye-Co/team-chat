@@ -117,7 +117,7 @@ pub enum PageSignal {
     /// The server answered one of my page events.
     Acked {
         client_event_id: String,
-        result: Result<PageAck, String>,
+        result: Result<PageAck, PageRefusal>,
     },
     /// The member's reply to one of my page asks.
     Reply {
@@ -126,6 +126,9 @@ pub enum PageSignal {
         payload: Option<Value>,
         /// `ok: false`: true for `declined`, false for `failed`.
         declined: bool,
+        /// `ok: false`: the member's own words (why it declined, what failed), for the
+        /// page's `Error.message`.
+        message: Option<String>,
     },
     /// A new data snapshot of a version (`data: None` when it is over 64 KiB: GET it).
     Data {
@@ -139,6 +142,31 @@ pub enum PageSignal {
     /// (`interaction.resolved`, INTERACT §4.4): it stops waiting.
     Resolved { event_id: String },
 }
+
+/// Why the server refused a page event: its reason id (`artifact.bad_payload`,
+/// `client.offline`, …) and its words (for a bad payload, which field broke the schema).
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct PageRefusal {
+    pub reason: String,
+    pub message: String,
+}
+
+impl From<&str> for PageRefusal {
+    fn from(reason: &str) -> Self {
+        Self {
+            reason: reason.to_string(),
+            message: String::new(),
+        }
+    }
+}
+
+/// A version's data could not be read now (no network, a server fault): try again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PageDataError;
+
+/// What [`ChatProvider::fetch_page_data`] answers: `(data, dataRev)`, `None` when the
+/// version has no data the viewer can read, or an error worth another try.
+pub type PageData = Result<Option<(Value, u64)>, PageDataError>;
 
 /// The ack of a page event.
 #[derive(Clone, Debug, PartialEq, Eq)]

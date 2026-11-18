@@ -9,7 +9,7 @@
 //!   with 已更新到 v4 in the frame's header.
 //! - `artifact_ask_pending`: a real click on 数据有问题 sends one `ask` (the page waits);
 //!   the footer says 等 Ledger 回应. The page's own `ask` on load, without a click, is
-//!   refused (`not_allowed`) and never reaches the member.
+//!   refused (`no_user_action`) and never reaches the member.
 //!
 //! Each scene checks itself after the capture ([`verify`]).
 
@@ -259,7 +259,7 @@ async fn run(handle: AnyWindowHandle, mode: Mode, cx: &mut AsyncApp) -> Result<(
     // The page got its snapshot (GET …/data) through onData.
     until(cx, &p3, REV, "1").await?;
     // The page's own ask on load never went out.
-    until(cx, &p3, SCRIPTED, "not_allowed").await?;
+    until(cx, &p3, SCRIPTED, "no_user_action").await?;
     let asks_before = |cx: &App| {
         host::sent(cx)
             .iter()

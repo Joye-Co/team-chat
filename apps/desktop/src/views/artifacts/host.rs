@@ -25,8 +25,8 @@ use std::{
 };
 
 use artifact_view::{
-    ArtifactEvent, Capabilities, DataCause, EventDecl, EventKind, RefMenu, Reject, Snapshot,
-    VersionSpec, Viewer,
+    ArtifactEvent, Capabilities, DataCause, EventDecl, EventKind, Failure, RefMenu, Reject,
+    Snapshot, VersionSpec, Viewer,
 };
 use futures::StreamExt as _;
 use gpui::{App, AsyncApp, Global, Hsla, SharedString, WeakEntity, Window};
@@ -36,8 +36,10 @@ use crate::{
     app::{Changes, Services},
     copy::{fill, page_host as cp},
     data::{
-        Change, ChatProvider, SessionState,
-        page_host::{ExpectMode, PageBridge, PageEventKind, PageSendError, PageSignal},
+        Change, ChatProvider, ConnectionState, SessionState,
+        page_host::{
+            ExpectMode, PageBridge, PageEventKind, PageRefusal, PageSendError, PageSignal,
+        },
     },
     theme,
     ui::web_embed::{self, WebEmbedState},
@@ -50,6 +52,17 @@ pub const UPDATED_FOR: Duration = Duration::from_secs(3);
 pub const OFFLINE_FOR: Duration = Duration::from_secs(4);
 /// Before this, a waiting event shows only its optimistic state (INTERACT §4.4).
 pub const QUIET_FOR: Duration = Duration::from_millis(400);
+/// How long after a data snapshot could not be read the host tries again, try by try.
+/// After the last one a page that has no data yet gets `null`.
+const FETCH_RETRY: [Duration; 3] = [
+    Duration::from_secs(1),
+    Duration::from_secs(3),
+    Duration::from_secs(10),
+];
+/// How long after an acked emit's last band phase (`没有回应`) the host still keeps the
+/// event to tie a late data push to it. After that it is dropped, so nothing is kept for
+/// a member that never answers.
+const EMIT_KEPT_FOR: Duration = Duration::from_secs(60);
 
 /// Which page a request came from.
 #[derive(Clone)]
@@ -136,7 +149,6 @@ struct Last {
 /// The app's page host. A global; [`start`] sets it.
 pub struct PageHost {
     provider: Option<Arc<dyn ChatProvider>>,
-    snapshots: HashMap<(String, u32), Snapshot>,
     fetching: HashSet<(String, u32)>,
     /// By client event id.
     pending: HashMap<String, Pending>,
@@ -153,15 +165,30 @@ pub struct PageHost {
     follow: HashMap<SharedString, bool>,
     /// Self-tests: events sent, as `(artifact, version, name, kind)`.
     sent: Vec<(String, u32, String, PageEventKind)>,
+    /// The connection was up when this host last looked (a reconnect reads the data of
+    /// every open page again).
+    online: bool,
 }
 
 impl Global for PageHost {}
 
+thread_local! {
+    /// The newest data snapshot of each version this host read or was pushed, by
+    /// `(产出, version)`. Beside the global so [`version_spec`], which has no app context,
+    /// can start a page with it. Main thread only, like the host.
+    static PAGE_SNAPSHOTS: std::cell::RefCell<HashMap<(String, u32), Snapshot>> =
+        std::cell::RefCell::new(HashMap::new());
+}
+
+fn snapshot_of(key: &(String, u32)) -> Option<Snapshot> {
+    PAGE_SNAPSHOTS.with(|s| s.borrow().get(key).cloned())
+}
+
 impl PageHost {
     fn new(provider: Option<Arc<dyn ChatProvider>>) -> Self {
+        PAGE_SNAPSHOTS.with(|s| s.borrow_mut().clear());
         Self {
             provider,
-            snapshots: HashMap::new(),
             fetching: HashSet::new(),
             pending: HashMap::new(),
             by_event: HashMap::new(),
@@ -171,6 +198,7 @@ impl PageHost {
             updated: HashMap::new(),
             follow: HashMap::new(),
             sent: Vec::new(),
+            online: true,
         }
     }
 }
@@ -195,10 +223,16 @@ pub fn start(services: &Services, cx: &mut App) {
     for (_, a) in provider.all_artifacts() {
         h.latest.insert(a.id.clone(), a.version);
     }
+    h.online = provider.connection() == ConnectionState::Online;
     cx.set_global(h);
+    // An embedded page that goes away for good takes its requests and band with it.
+    web_embed::on_page_gone(|page, cx| page_gone(&PageRef::Embed(page), cx), cx);
     cx.subscribe(&services.hub, |_, changes: &Changes, cx| {
         if changes.any(|c| matches!(c, Change::Artifacts { .. })) {
             on_artifacts_changed(changes, cx);
+        }
+        if changes.any(|c| matches!(c, Change::Connection)) {
+            on_connection_changed(cx);
         }
     })
     .detach();
@@ -260,6 +294,12 @@ pub fn version_spec(
         .with_entry(entry)
         .live_data()
         .with_events(decls(bridge.as_ref()));
+    // The snapshot this host has is in the page from its first script on (no empty
+    // state between the document's start and its load, or when an inline page that
+    // gave up its view comes back). The read after the load still follows.
+    // What caused that snapshot is old news for a new document.
+    let seed = snapshot_of(&(artifact_id.to_string(), version));
+    let spec = spec.with_snapshot(seed.map(|s| Snapshot::new(s.data, s.rev)));
     (
         spec,
         page_capabilities(bridge.as_ref(), provider.refs_supported()),
@@ -333,7 +373,20 @@ pub fn on_page_event(
             user_action,
             reply_id,
         } => {
-            // Paced (latest wins per name) and gated on the viewer's input.
+            if !user_action {
+                // Its own code, so the page's author can tell it from an undeclared event.
+                tracing::debug!(
+                    artifact_id,
+                    version,
+                    name,
+                    "page emit without user input dropped"
+                );
+                if let Some(id) = reply_id {
+                    finish(&page, *version, id, Err(Reject::NoUserAction.into()), cx);
+                }
+                return;
+            }
+            // Paced (latest wins per name).
             crate::views::artifact_page::forward_page_event(
                 page,
                 artifact_id,
@@ -355,7 +408,13 @@ pub fn on_page_event(
         } => {
             if !user_action {
                 tracing::debug!(artifact_id, version, "page ask without user input dropped");
-                finish(&page, *version, reply_id, Err(Reject::NotAllowed), cx);
+                finish(
+                    &page,
+                    *version,
+                    reply_id,
+                    Err(Reject::NoUserAction.into()),
+                    cx,
+                );
                 return;
             }
             if let Some(cid) = send(
@@ -377,9 +436,101 @@ pub fn on_page_event(
             label,
             value,
             selector,
-        } => ask_about(artifact_id, *version, label, value, selector, window, cx),
+            user_action,
+        } => {
+            // Like emit and ask: only right after the viewer's own input in the page (the
+            // ⌥-click and the 就这里提问 button are such input). A page cannot put chips
+            // into the composer by itself. The bridge answered the page already.
+            if !user_action {
+                tracing::debug!(artifact_id, version, "page ref without user input dropped");
+                return;
+            }
+            ask_about(artifact_id, *version, label, value, selector, window, cx)
+        }
+        ArtifactEvent::RequestsEnded { version, reply_ids } => {
+            requests_ended(&page, artifact_id, *version, reply_ids, cx)
+        }
         _ => {}
     }
+}
+
+/// A new document replaced the one in `page` (it reloaded itself, followed a link inside
+/// its origin, or its web content process started again): the requests of the old
+/// document can never be answered, so they stop waiting here too, and the band of the
+/// last one goes when this page owned it.
+fn requests_ended(
+    page: &PageRef,
+    artifact_id: &str,
+    version: u32,
+    reply_ids: &[Value],
+    cx: &mut App,
+) {
+    let h = host(cx);
+    let ended: Vec<String> = h
+        .pending
+        .iter()
+        .filter(|(_, p)| {
+            p.page.same(page)
+                && p.artifact_id == artifact_id
+                && p.version == version
+                && p.reply_id.as_ref().is_some_and(|id| reply_ids.contains(id))
+        })
+        .map(|(c, _)| c.clone())
+        .collect();
+    let key = (artifact_id.to_string(), version);
+    let mut owned_band = false;
+    for c in ended {
+        if let Some(p) = h.pending.remove(&c) {
+            forget(h, &p);
+        }
+        owned_band |= h
+            .last
+            .get(&key)
+            .is_some_and(|l| l.cid.as_deref() == Some(c.as_str()));
+    }
+    if owned_band && matches!(h.bands.get(&key), Some(Band::Waiting { .. })) {
+        h.bands.remove(&key);
+        h.last.remove(&key);
+    }
+    cx.refresh_windows();
+}
+
+/// `page` is gone for good (its 产出 window closed, an embedded page left the cache or
+/// shows another 产出): what this host kept for it goes. Its open requests have nobody to
+/// answer, and the band and 重试 of a version go when this page sent the version's last
+/// event; another open page of the version starts clean.
+pub fn page_gone(page: &PageRef, cx: &mut App) {
+    let Some(h) = cx.try_global::<PageHost>() else {
+        return;
+    };
+    let touched =
+        h.pending.values().any(|p| p.page.same(page)) || h.last.values().any(|l| l.page.same(page));
+    if !touched {
+        return;
+    }
+    let h = host(cx);
+    let gone: Vec<String> = h
+        .pending
+        .iter()
+        .filter(|(_, p)| p.page.same(page))
+        .map(|(c, _)| c.clone())
+        .collect();
+    for c in gone {
+        if let Some(p) = h.pending.remove(&c) {
+            forget(h, &p);
+        }
+    }
+    let keys: Vec<(String, u32)> = h
+        .last
+        .iter()
+        .filter(|(_, l)| l.page.same(page))
+        .map(|(k, _)| k.clone())
+        .collect();
+    for k in keys {
+        h.last.remove(&k);
+        h.bands.remove(&k);
+    }
+    cx.refresh_windows();
 }
 
 /// The handler a [`web_embed::WebEmbed`] of a 产出 page uses.
@@ -422,7 +573,7 @@ pub fn finish_request(
     result: Result<Value, Reject>,
     cx: &mut App,
 ) {
-    finish(page, version, reply_id, result, cx);
+    finish(page, version, reply_id, result.map_err(Into::into), cx);
 }
 
 /// Sends one event now. Returns its client event id when it went out.
@@ -515,7 +666,7 @@ fn send(
                 PageSendError::Refused => Reject::Failed,
             };
             if let Some(id) = &reply_id {
-                finish(&page, version, id, Err(reject), cx);
+                finish(&page, version, id, Err(reject.into()), cx);
             }
             if e == PageSendError::Offline {
                 host(cx).bands.insert(
@@ -571,9 +722,31 @@ fn time_out(cid: &str, cx: &mut App) {
     };
     forget(host(cx), &p);
     if let Some(id) = &p.reply_id {
-        finish(&p.page, p.version, id, Err(Reject::Timeout), cx);
+        finish(&p.page, p.version, id, Err(Reject::Timeout.into()), cx);
     }
     cx.refresh_windows();
+}
+
+/// Drops an acked emit that nothing answered (no data push, no `interaction.resolved`)
+/// [`EMIT_KEPT_FOR`] after its band reached 没有回应. The band stays (重试 sends the
+/// version's last event again); only the entry that waited for a late push goes.
+fn drop_emit_at(cid: String, after: Duration, cx: &mut App) {
+    cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.background_executor().timer(after).await;
+        cx.update(|cx| drop_emit(&cid, cx));
+    })
+    .detach();
+}
+
+fn drop_emit(cid: &str, cx: &mut App) {
+    let h = host(cx);
+    if h.pending
+        .get(cid)
+        .is_some_and(|p| p.kind == PageEventKind::Emit && p.event_id.is_some())
+        && let Some(p) = h.pending.remove(cid)
+    {
+        forget(h, &p);
+    }
 }
 
 /// Answers an open request of one page.
@@ -581,7 +754,7 @@ fn finish(
     page: &PageRef,
     version: u32,
     reply_id: &Value,
-    result: Result<Value, Reject>,
+    result: Result<Value, Failure>,
     cx: &mut App,
 ) {
     #[cfg(test)]
@@ -604,8 +777,19 @@ fn reject_for(reason: &str) -> Reject {
         Reject::RateLimited
     } else if reason.contains("undeclared") || reason.contains("no_bridge") {
         Reject::NotAllowed
+    } else if reason.contains("bad_payload") {
+        Reject::BadPayload
     } else {
         Reject::Failed
+    }
+}
+
+/// What the page gets for an event the server refused: the code of its reason, and the
+/// server's words (for `bad_payload`: which field broke the declared schema).
+fn failure_for(refusal: &PageRefusal) -> Failure {
+    Failure {
+        reject: reject_for(&refusal.reason),
+        message: Some(refusal.message.clone()).filter(|m| !m.trim().is_empty()),
     }
 }
 
@@ -625,7 +809,7 @@ pub fn on_signal(signal: PageSignal, cx: &mut App) {
                 {
                     let settled = match &result {
                         Ok(ack) => Ok(json!({ "eventId": ack.event_id })),
-                        Err(reason) => Err(reject_for(reason)),
+                        Err(refusal) => Err(failure_for(refusal)),
                     };
                     finish(&p.page, p.version, id, settled, cx);
                 }
@@ -671,7 +855,7 @@ pub fn on_signal(signal: PageSignal, cx: &mut App) {
                                 && let Some(id) = &p.reply_id
                                 && p.kind == PageEventKind::Ask
                             {
-                                finish(&p.page, p.version, id, Err(reject), cx);
+                                finish(&p.page, p.version, id, Err(reject.into()), cx);
                             }
                             refresh_at(OFFLINE_FOR, cx);
                         }
@@ -682,18 +866,26 @@ pub fn on_signal(signal: PageSignal, cx: &mut App) {
                             if let Some((soft, hard)) = mode.timings() {
                                 refresh_at(Duration::from_millis(soft), cx);
                                 refresh_at(Duration::from_millis(hard), cx);
+                                if kind == PageEventKind::Emit {
+                                    drop_emit_at(
+                                        client_event_id.clone(),
+                                        Duration::from_millis(hard) + EMIT_KEPT_FOR,
+                                        cx,
+                                    );
+                                }
                             }
                         }
                     }
                 }
-                Err(reason) => {
+                Err(refusal) => {
                     let Some(p) = host(cx).pending.remove(&client_event_id) else {
                         return;
                     };
                     forget(host(cx), &p);
-                    let reject = reject_for(&reason);
+                    let failure = failure_for(&refusal);
+                    let reject = failure.reject;
                     if let Some(id) = &p.reply_id {
-                        finish(&p.page, p.version, id, Err(reject), cx);
+                        finish(&p.page, p.version, id, Err(failure), cx);
                     }
                     let until = Instant::now() + OFFLINE_FOR;
                     let band = match reject {
@@ -720,6 +912,7 @@ pub fn on_signal(signal: PageSignal, cx: &mut App) {
             ok,
             payload,
             declined,
+            message,
         } => {
             let h = host(cx);
             let Some(cid) = h.by_event.remove(&event_id) else {
@@ -732,12 +925,18 @@ pub fn on_signal(signal: PageSignal, cx: &mut App) {
             h.bands
                 .insert((p.artifact_id.clone(), p.version), Band::Answered);
             if let Some(id) = &p.reply_id {
+                // The member's own words (why it declined) are the page's `e.message`.
                 let result = if ok {
                     Ok(payload.unwrap_or(Value::Null))
-                } else if declined {
-                    Err(Reject::Declined)
                 } else {
-                    Err(Reject::Failed)
+                    Err(Failure {
+                        reject: if declined {
+                            Reject::Declined
+                        } else {
+                            Reject::Failed
+                        },
+                        message,
+                    })
                 };
                 finish(&p.page, p.version, id, result, cx);
             }
@@ -832,12 +1031,17 @@ pub fn on_signal(signal: PageSignal, cx: &mut App) {
 /// the server's.
 fn give_data(page: &PageRef, artifact_id: &str, version: u32, cx: &mut App) {
     let key = (artifact_id.to_string(), version);
-    if let Some(s) = host(cx).snapshots.get(&key).cloned() {
+    if let Some(s) = snapshot_of(&key) {
         push_to(page, version, s, cx);
     }
     fetch(artifact_id, version, cx);
 }
 
+/// Reads the version's snapshot from the server and gives it to its open pages. A read
+/// that fails (no network, a server fault) is tried again after [`FETCH_RETRY`]; the
+/// page's `getData` keeps waiting meanwhile. Only when every try failed, and this host
+/// has no snapshot of the version, do the pages get `null`: never kept, so the next
+/// open or reconnect reads again.
 fn fetch(artifact_id: &str, version: u32, cx: &mut App) {
     let key = (artifact_id.to_string(), version);
     let h = host(cx);
@@ -847,36 +1051,105 @@ fn fetch(artifact_id: &str, version: u32, cx: &mut App) {
     if !h.fetching.insert(key.clone()) {
         return;
     }
-    let rx = provider.fetch_page_data(artifact_id, version);
     cx.spawn(async move |cx: &mut AsyncApp| {
-        let got = rx.await.ok().flatten();
+        let mut tries = 0;
+        let got = loop {
+            match provider.fetch_page_data(&key.0, key.1).await {
+                Ok(Ok(got)) => break Some(got),
+                _ if tries < FETCH_RETRY.len() => {
+                    cx.background_executor().timer(FETCH_RETRY[tries]).await;
+                    tries += 1;
+                }
+                _ => break None,
+            }
+        };
         cx.update(|cx| {
             host(cx).fetching.remove(&key);
-            let snap = match got {
-                Some((data, rev)) => Snapshot::new(data, rev),
-                // No data (or it could not be read): the page's getData resolves null.
-                None => Snapshot::new(Value::Null, 0),
-            };
-            store_and_push(&key.0, key.1, snap, cx);
+            match got {
+                Some(Some((data, rev))) => {
+                    store_and_push(&key.0, key.1, Snapshot::new(data, rev), cx)
+                }
+                // The version has no data: the page's getData resolves null.
+                Some(None) => store_and_push(&key.0, key.1, Snapshot::new(Value::Null, 0), cx),
+                None if snapshot_of(&key).is_none() => {
+                    push_to_pages(&key.0, key.1, &Snapshot::new(Value::Null, 0), cx)
+                }
+                None => {}
+            }
         });
     })
     .detach();
 }
 
+/// The connection changed: when it is up again, every open page reads its version's
+/// snapshot once more. A data push is transient (`artifact.data`), so one that came
+/// while this client was away is seen only this way. The bridge drops a snapshot whose
+/// rev the page has already, so a read that brings nothing new changes nothing.
+fn on_connection_changed(cx: &mut App) {
+    let h = host(cx);
+    let Some(provider) = h.provider.clone() else {
+        return;
+    };
+    let online = provider.connection() == ConnectionState::Online;
+    if std::mem::replace(&mut h.online, online) || !online {
+        return;
+    }
+    for (artifact_id, version) in open_pages(cx) {
+        fetch(&artifact_id, version, cx);
+    }
+}
+
+/// The `(产出, version)` of every page that is open now, in a 产出 window or embedded.
+fn open_pages(cx: &mut App) -> HashSet<(String, u32)> {
+    let mut pages: HashSet<(String, u32)> = super::window::shown_versions(cx).into_iter().collect();
+    for e in web_embed::all(cx) {
+        let s = e.read(cx);
+        if s.has_native() {
+            pages.insert((s.artifact_id().to_string(), s.version()));
+        }
+    }
+    #[cfg(test)]
+    pages.extend(tests::OPEN.with(|o| o.borrow().clone()));
+    pages
+}
+
 /// Keeps the newest snapshot of a version and gives it to every open page of it.
 pub fn store_and_push(artifact_id: &str, version: u32, snap: Snapshot, cx: &mut App) {
     let key = (artifact_id.to_string(), version);
-    let h = host(cx);
-    if h.snapshots.get(&key).is_some_and(|s| s.rev > snap.rev) {
-        return;
-    }
-    h.snapshots.insert(key, snap.clone());
-    super::window::push_to_window(artifact_id, version, &snap, cx);
-    for e in web_embed::all(cx) {
-        let s = e.read(cx);
-        if s.artifact_id() == artifact_id && s.version() == version {
-            s.push_data(version, snap.clone());
+    let newer = PAGE_SNAPSHOTS.with(|s| {
+        let mut s = s.borrow_mut();
+        if s.get(&key).is_some_and(|have| have.rev > snap.rev) {
+            return false;
         }
+        s.insert(key, snap.clone());
+        true
+    });
+    if newer {
+        push_to_pages(artifact_id, version, &snap, cx);
+    }
+}
+
+/// Gives `snap` to every open page of the version.
+fn push_to_pages(artifact_id: &str, version: u32, snap: &Snapshot, cx: &mut App) {
+    #[cfg(test)]
+    tests::PUSHED.with(|p| {
+        p.borrow_mut().push((
+            artifact_id.to_string(),
+            version,
+            snap.rev,
+            snap.data.clone(),
+        ))
+    });
+    super::window::push_to_window(artifact_id, version, snap, cx);
+    let pages: Vec<_> = web_embed::all(cx)
+        .into_iter()
+        .filter(|e| {
+            let s = e.read(cx);
+            s.artifact_id() == artifact_id && s.version() == version
+        })
+        .collect();
+    for e in pages {
+        e.update(cx, |s, cx| s.push_data(version, snap.clone(), cx));
     }
 }
 
@@ -886,7 +1159,7 @@ fn push_to(page: &PageRef, version: u32, snap: Snapshot, cx: &mut App) {
             super::window::push_to_window(id, version, &snap, cx);
         }
         PageRef::Embed(e) => {
-            let _ = e.read_with(cx, |s, _| s.push_data(version, snap));
+            let _ = e.update(cx, |s, cx| s.push_data(version, snap, cx));
         }
     }
 }
@@ -1610,7 +1883,7 @@ pub fn version_added(artifact_id: &str, version: u32, cx: &mut App) {
     }
     for p in open {
         if let Some(id) = &p.reply_id {
-            finish(&p.page, p.version, id, Err(Reject::Reloaded), cx);
+            finish(&p.page, p.version, id, Err(Reject::Reloaded.into()), cx);
         }
     }
     host(cx).bands.remove(&(artifact_id.to_string(), before));
@@ -1674,7 +1947,7 @@ mod tests {
     use crate::data::page_host::{PageAck, PageEventDecl};
     use std::cell::RefCell;
 
-    type Finished = Vec<(Value, Result<Value, Reject>)>;
+    type Finished = Vec<(Value, Result<Value, Failure>)>;
 
     thread_local! {
         /// Page requests [`finish`] answered on this test's thread.
@@ -1683,6 +1956,346 @@ mod tests {
 
     fn finished() -> Finished {
         FINISHED.with(|f| std::mem::take(&mut *f.borrow_mut()))
+    }
+
+    thread_local! {
+        /// Snapshots given to the open pages: `(产出, version, rev, data)`.
+        pub(super) static PUSHED: RefCell<Vec<(String, u32, u64, Value)>> =
+            const { RefCell::new(Vec::new()) };
+        /// Pages this test says are open.
+        pub(super) static OPEN: RefCell<Vec<(String, u32)>> = const { RefCell::new(Vec::new()) };
+    }
+
+    fn pushed() -> Vec<(u64, Value)> {
+        PUSHED
+            .with(|p| std::mem::take(&mut *p.borrow_mut()))
+            .into_iter()
+            .map(|(_, _, rev, data)| (rev, data))
+            .collect()
+    }
+
+    fn key() -> (String, u32) {
+        (ART.to_string(), 3)
+    }
+
+    fn wait(cx: &mut gpui::TestAppContext, d: Duration) {
+        cx.executor().advance_clock(d);
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn a_read_that_fails_is_tried_again_and_is_never_kept_as_no_data(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use crate::fake::v2::page_data_reads as reads;
+        cx.update(|cx| {
+            start_host(cx);
+            pushed();
+            // No network for the first two reads.
+            reads::fail_next(2);
+            fetch(ART, 3, cx);
+        });
+        cx.run_until_parked();
+        // The page's getData keeps waiting: nothing was pushed, nothing kept.
+        assert_eq!(reads::count(), 1);
+        assert!(pushed().is_empty() && snapshot_of(&key()).is_none());
+        // A second open meanwhile does not start a second read.
+        cx.update(|cx| fetch(ART, 3, cx));
+        wait(cx, FETCH_RETRY[0]);
+        assert_eq!(reads::count(), 2);
+        assert!(pushed().is_empty());
+        wait(cx, FETCH_RETRY[1]);
+        assert_eq!(reads::count(), 3);
+        let got = pushed();
+        assert_eq!(got.len(), 1);
+        assert_eq!((got[0].0, &got[0].1["total"]), (1, &json!(38)));
+        assert_eq!(snapshot_of(&key()).map(|s| s.rev), Some(1));
+        cx.update(|cx| assert!(host(cx).fetching.is_empty()));
+
+        // Every try fails and the host has nothing: the pages get null once, so their
+        // getData ends, but the host keeps no snapshot and the next open reads again.
+        cx.update(|cx| {
+            start_host(cx);
+            reads::fail_next(10);
+            fetch(ART, 3, cx);
+        });
+        for d in FETCH_RETRY {
+            cx.run_until_parked();
+            assert!(pushed().is_empty());
+            wait(cx, d);
+        }
+        assert_eq!(reads::count(), 4);
+        assert_eq!(pushed(), vec![(0, Value::Null)]);
+        assert!(snapshot_of(&key()).is_none());
+        reads::fail_next(0);
+        cx.update(|cx| fetch(ART, 3, cx));
+        cx.run_until_parked();
+        assert_eq!(snapshot_of(&key()).map(|s| s.rev), Some(1));
+
+        // With a snapshot in hand a failed read changes nothing for the pages.
+        pushed();
+        reads::fail_next(10);
+        cx.update(|cx| fetch(ART, 3, cx));
+        for d in FETCH_RETRY {
+            wait(cx, d);
+        }
+        assert!(pushed().is_empty());
+        assert_eq!(snapshot_of(&key()).map(|s| s.rev), Some(1));
+        reads::fail_next(0);
+    }
+
+    #[gpui::test]
+    fn a_reconnect_reads_the_data_of_the_open_pages_again(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            start_host(cx);
+            crate::fake::v2::page_data_reads::fail_next(0);
+            OPEN.with(|o| *o.borrow_mut() = vec![key()]);
+            // The page opened while the version had no data; a push came while away.
+            store_and_push(ART, 3, Snapshot::new(Value::Null, 0), cx);
+            pushed();
+            // Still up: nothing to do.
+            on_connection_changed(cx);
+        });
+        cx.run_until_parked();
+        assert!(pushed().is_empty());
+        cx.update(|cx| {
+            // The host saw the connection go; the provider says it is back.
+            host(cx).online = false;
+            on_connection_changed(cx);
+        });
+        cx.run_until_parked();
+        let got = pushed();
+        assert_eq!(got.len(), 1, "the newer snapshot goes to the open page");
+        assert_eq!(got[0].0, 1);
+        // The same rev again is not pushed twice (and the bridge would drop it).
+        cx.update(|cx| {
+            host(cx).online = false;
+            on_connection_changed(cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(pushed().len(), 1);
+        cx.update(|cx| assert!(host(cx).online));
+        OPEN.with(|o| o.borrow_mut().clear());
+    }
+
+    #[gpui::test]
+    fn a_page_starts_with_the_snapshot_the_host_has(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            start_host(cx);
+            let p = host(cx).provider.clone().unwrap();
+            let spec = |p: &dyn ChatProvider| {
+                version_spec(p, ART, 3, std::env::temp_dir(), "index.html".into()).0
+            };
+            // Nothing read yet: the page waits for the first read.
+            assert!(spec(p.as_ref()).initial.is_none() && spec(p.as_ref()).live);
+            let mut snap = Snapshot::new(json!({ "total": 9 }), 4);
+            snap.cause = Some(DataCause {
+                event_id: "ev-old".into(),
+                actor_id: "m-joye".into(),
+            });
+            store_and_push(ART, 3, snap, cx);
+            // A page that opens now (or an inline page that comes back) has it from its
+            // first script on, without the cause of a push it never saw.
+            assert_eq!(
+                spec(p.as_ref()).initial,
+                Some(Snapshot::new(json!({ "total": 9 }), 4))
+            );
+            // Another version starts empty.
+            let other = version_spec(p.as_ref(), ART, 2, std::env::temp_dir(), "i.html".into());
+            assert!(other.0.initial.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn requests_without_the_viewer_s_input_get_their_own_code(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            start_host(cx);
+            let page = || PageRef::Window(ART.into());
+            on_page_event(
+                page(),
+                ART,
+                &ArtifactEvent::Ask {
+                    version: 3,
+                    reply_id: json!(1),
+                    name: "question".into(),
+                    payload: Value::Null,
+                    timeout_ms: 1000,
+                    user_action: false,
+                },
+                None,
+                cx,
+            );
+            on_page_event(
+                page(),
+                ART,
+                &ArtifactEvent::Emit {
+                    version: 3,
+                    name: "filter".into(),
+                    payload: Value::Null,
+                    user_action: false,
+                    reply_id: Some(json!(2)),
+                },
+                None,
+                cx,
+            );
+            assert_eq!(
+                finished(),
+                vec![
+                    (json!(1), Err(Reject::NoUserAction.into())),
+                    (json!(2), Err(Reject::NoUserAction.into()))
+                ]
+            );
+            assert!(sent(cx).is_empty() && host(cx).pending.is_empty());
+            // A ref a page script makes by itself goes nowhere either (no window, no
+            // composer is touched; the artifact-ref-chip scene checks the composer).
+            on_page_event(
+                page(),
+                ART,
+                &ArtifactEvent::Ref {
+                    version: 3,
+                    label: "B 站".into(),
+                    value: None,
+                    selector: None,
+                    user_action: false,
+                },
+                None,
+                cx,
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn the_member_s_words_and_the_server_s_reach_the_page(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            start_host(cx);
+            // The member declines with a reason.
+            let cid = ask(PageRef::Window(ART.into()), 1, cx);
+            ack(&cid, "ev-1", ExpectMode::Live, cx);
+            on_signal(
+                PageSignal::Reply {
+                    event_id: "ev-1".into(),
+                    ok: false,
+                    payload: None,
+                    declined: true,
+                    message: Some("这周的数还没对完".into()),
+                },
+                cx,
+            );
+            assert_eq!(
+                finished(),
+                vec![(
+                    json!(1),
+                    Err(Failure::new(Reject::Declined, "这周的数还没对完"))
+                )]
+            );
+            // The server refuses a payload that breaks the declared schema.
+            let cid = ask(PageRef::Window(ART.into()), 2, cx);
+            on_signal(
+                PageSignal::Acked {
+                    client_event_id: cid,
+                    result: Err(PageRefusal {
+                        reason: "artifact.bad_payload".into(),
+                        message: "payload.week: expected a string".into(),
+                    }),
+                },
+                cx,
+            );
+            assert_eq!(
+                finished(),
+                vec![(
+                    json!(2),
+                    Err(Failure::new(
+                        Reject::BadPayload,
+                        "payload.week: expected a string"
+                    ))
+                )]
+            );
+            assert!(host(cx).pending.is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn a_new_document_or_a_closed_page_takes_its_requests_and_band_along(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(|cx| {
+            start_host(cx);
+            let window = || PageRef::Window(ART.into());
+            // The page reloads itself while its ask waits.
+            let cid = ask(window(), 5, cx);
+            ack(&cid, "ev-1", ExpectMode::Live, cx);
+            assert!(host(cx).bands.contains_key(&key()));
+            // Another request's id, or another page, ends nothing.
+            on_page_event(
+                window(),
+                ART,
+                &ArtifactEvent::RequestsEnded {
+                    version: 3,
+                    reply_ids: vec![json!(6)],
+                },
+                None,
+                cx,
+            );
+            let other = PageRef::Embed(WeakEntity::new_invalid());
+            let ended = ArtifactEvent::RequestsEnded {
+                version: 3,
+                reply_ids: vec![json!(5)],
+            };
+            on_page_event(other, ART, &ended, None, cx);
+            assert!(host(cx).pending.contains_key(&cid));
+            on_page_event(window(), ART, &ended, None, cx);
+            let h = host(cx);
+            assert!(h.pending.is_empty() && h.by_event.is_empty());
+            assert!(!h.bands.contains_key(&key()) && !h.last.contains_key(&key()));
+            // The late reply and the timeout find nothing; the page was never answered
+            // (its document is gone).
+            reply("ev-1", cx);
+            time_out(&cid, cx);
+            assert!(finished().is_empty());
+
+            // The 产出 window closes with an ask open and a band that says 没有回应.
+            let cid = ask(window(), 7, cx);
+            ack(&cid, "ev-2", ExpectMode::Run, cx);
+            // A page that never sent anything changes nothing when it goes.
+            page_gone(&PageRef::Embed(WeakEntity::new_invalid()), cx);
+            assert!(host(cx).pending.contains_key(&cid));
+            page_gone(&window(), cx);
+            let h = host(cx);
+            assert!(h.pending.is_empty() && h.by_event.is_empty());
+            assert!(h.bands.is_empty() && h.last.is_empty());
+            assert_eq!(band(ART, 3, cx), None, "the next open starts clean");
+            retry(ART, 3, cx);
+            assert!(host(cx).pending.is_empty(), "重试 of a page that is gone");
+        });
+    }
+
+    #[gpui::test]
+    fn an_emit_nobody_answers_is_not_kept_forever(cx: &mut gpui::TestAppContext) {
+        let cid = cx.update(|cx| {
+            start_host(cx);
+            let cid = emit(1, cx);
+            ack(&cid, "ev-1", ExpectMode::Live, cx);
+            assert_eq!(
+                finished(),
+                vec![(json!(1), Ok(json!({ "eventId": "ev-1" })))]
+            );
+            cid
+        });
+        let (_, hard) = ExpectMode::Live.timings().unwrap();
+        // While the band can still turn to 没有回应 and a little after, a late push
+        // would still find its event.
+        wait(
+            cx,
+            Duration::from_millis(hard) + EMIT_KEPT_FOR - Duration::from_secs(1),
+        );
+        cx.update(|cx| assert!(host(cx).pending.contains_key(&cid)));
+        wait(cx, Duration::from_secs(2));
+        cx.update(|cx| {
+            let h = host(cx);
+            assert!(h.pending.is_empty() && h.by_event.is_empty());
+            // The band and 重试 stay: the viewer can still send it again.
+            assert!(h.bands.contains_key(&key()) && h.last.contains_key(&key()));
+        });
     }
 
     const ART: &str = crate::fake::v2::ART_REPORT;
@@ -1745,6 +2358,7 @@ mod tests {
                 ok: true,
                 payload: Some(json!({ "answer": event })),
                 declined: false,
+                message: None,
             },
             cx,
         );
@@ -1863,7 +2477,10 @@ mod tests {
                 },
                 cx,
             );
-            assert_eq!(finished(), vec![(json!(3), Err(Reject::RateLimited))]);
+            assert_eq!(
+                finished(),
+                vec![(json!(3), Err(Reject::RateLimited.into()))]
+            );
         });
     }
 
@@ -1875,7 +2492,7 @@ mod tests {
             let cid = ask(PageRef::Embed(WeakEntity::new_invalid()), 11, cx);
             ack(&cid, "ev-1", ExpectMode::Run, cx);
             version_added(ART, 4, cx);
-            assert_eq!(finished(), vec![(json!(11), Err(Reject::Reloaded))]);
+            assert_eq!(finished(), vec![(json!(11), Err(Reject::Reloaded.into()))]);
             assert!(host(cx).pending.is_empty() && host(cx).by_event.is_empty());
             // Its later timeout or reply finds nothing open.
             time_out(&cid, cx);
@@ -1890,7 +2507,10 @@ mod tests {
             start_host(cx);
             let cid = ask(PageRef::Window(ART.into()), 9, cx);
             ack(&cid, "ev-1", ExpectMode::None, cx);
-            assert_eq!(finished(), vec![(json!(9), Err(Reject::RateLimited))]);
+            assert_eq!(
+                finished(),
+                vec![(json!(9), Err(Reject::RateLimited.into()))]
+            );
             let name = author_name(host(cx).provider.clone().unwrap().as_ref(), ART, 3);
             assert_eq!(
                 band(ART, 3, cx),
@@ -1899,7 +2519,7 @@ mod tests {
             // Offline still says 不在线.
             let cid = ask(PageRef::Window(ART.into()), 10, cx);
             ack(&cid, "ev-2", ExpectMode::Offline, cx);
-            assert_eq!(finished(), vec![(json!(10), Err(Reject::Offline))]);
+            assert_eq!(finished(), vec![(json!(10), Err(Reject::Offline.into()))]);
             assert_eq!(
                 band(ART, 3, cx),
                 Some(BandView::Failed(fill(cp::PAGE_OFFLINE, &[("name", &name)])))
@@ -2050,6 +2670,20 @@ mod tests {
         assert_eq!(reject_for("interact.rate_limited"), Reject::RateLimited);
         assert_eq!(reject_for("artifact.undeclared_event"), Reject::NotAllowed);
         assert_eq!(reject_for("artifact.no_bridge"), Reject::NotAllowed);
+        assert_eq!(reject_for("artifact.bad_payload"), Reject::BadPayload);
+        // The server's words reach the page with the code; none means the code's own.
+        let refusal = PageRefusal {
+            reason: "artifact.bad_payload".into(),
+            message: "payload.count: expected a number".into(),
+        };
+        assert_eq!(
+            failure_for(&refusal),
+            Failure::new(Reject::BadPayload, "payload.count: expected a number")
+        );
+        assert_eq!(
+            failure_for(&"client.offline".into()),
+            Reject::Offline.into()
+        );
         assert_eq!(reject_for(""), Reject::Failed);
     }
 

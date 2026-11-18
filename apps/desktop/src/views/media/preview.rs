@@ -637,7 +637,7 @@ impl ChatProvider for MediaThread {
         &self,
         artifact_id: &str,
         version: u32,
-    ) -> futures::channel::oneshot::Receiver<Option<(serde_json::Value, u64)>> {
+    ) -> futures::channel::oneshot::Receiver<crate::data::page_host::PageData> {
         self.inner.fetch_page_data(artifact_id, version)
     }
     fn send_page_event(

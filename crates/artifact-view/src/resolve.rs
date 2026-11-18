@@ -97,9 +97,9 @@ pub fn csp(host: &str) -> String {
     }
     format!(
         "default-src 'none'; script-src {me} 'unsafe-inline'; style-src {me} 'unsafe-inline'; \
-         img-src {me} data:; font-src {me} data:; media-src {me} data:; connect-src 'none'; \
-         frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'; \
-         manifest-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'"
+         img-src {me} data: blob:; font-src {me} data:; media-src {me} data: blob:; \
+         connect-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; \
+         object-src 'none'; manifest-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'"
     )
 }
 
@@ -471,6 +471,26 @@ mod tests {
         assert!(!c.contains("script-src 'self' artifact://teamchat-diagram-v1 'unsafe-inline'"));
         assert!(c.contains("connect-src 'none'"));
         assert!(csp("a1-v1").contains("'unsafe-inline'"));
+    }
+
+    #[test]
+    fn pages_show_blob_images_and_media_and_nothing_else_from_blobs() {
+        // canvas.toBlob -> createObjectURL -> <img> / <video>: in memory, same origin.
+        let c = csp("a1-v1");
+        assert!(c.contains("img-src 'self' artifact://a1-v1 data: blob:;"));
+        assert!(c.contains("media-src 'self' artifact://a1-v1 data: blob:;"));
+        // No script, worker, frame, font or connection from a blob.
+        assert_eq!(c.matches("blob:").count(), 2);
+        for part in [
+            "connect-src 'none'",
+            "frame-src 'none'",
+            "worker-src 'none'",
+            "child-src 'none'",
+            "font-src 'self' artifact://a1-v1 data:;",
+        ] {
+            assert!(c.contains(part), "{part}");
+        }
+        assert!(!csp("teamchat-diagram-v1").contains("blob:"));
     }
 
     #[test]
