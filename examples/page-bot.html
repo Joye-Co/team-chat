@@ -1,0 +1,219 @@
+<!doctype html>
+<!--
+  The page of examples/page-bot.ts: a sign-up sheet that talks to its bot through
+  window.teamchat (docs/bots.md, "The page side: window.teamchat").
+
+    teamchat.onData(cb)          the sheet's data, now and after every push of the bot
+    teamchat.emit("signup.join") tell the bot "I am in" (the bot pushes the new list to everyone)
+    teamchat.ask("signup.seats") ask the bot a question and wait for its private reply
+
+  The page never keeps the list itself: the bot owns it and every open copy shows the same one.
+  A call goes through only just after the viewer's own click or key press (within 2 s), so each
+  one starts in a click handler. Opened in a plain browser there is no window.teamchat, so the
+  page shows sample data.
+-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>团建报名</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --ink: #111;
+        --soft: #6b6b6b;
+        --line: #e5e5e5;
+        --fill: #f5f5f5;
+        --page: #fff;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --ink: #f5f5f5;
+          --soft: #a3a3a3;
+          --line: #2a2a2a;
+          --fill: #1a1a1a;
+          --page: #0a0a0a;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 20px;
+        font: 14px/1.5 -apple-system, system-ui, "Segoe UI", "PingFang SC", "Microsoft YaHei UI", sans-serif;
+        color: var(--ink);
+        background: var(--page);
+      }
+      h1 {
+        margin: 0;
+        font-size: 17px;
+        font-weight: 600;
+      }
+      .when {
+        margin: 2px 0 16px;
+        color: var(--soft);
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+      }
+      input {
+        flex: 1;
+        min-width: 0;
+        height: 34px;
+        padding: 0 10px;
+        font: inherit;
+        color: inherit;
+        background: var(--page);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+      button {
+        height: 34px;
+        padding: 0 14px;
+        font: inherit;
+        font-weight: 500;
+        white-space: nowrap;
+        color: var(--page);
+        background: var(--ink);
+        border: 1px solid var(--ink);
+        border-radius: 8px;
+      }
+      button.quiet {
+        color: var(--ink);
+        background: var(--page);
+        border-color: var(--line);
+      }
+      button:disabled {
+        opacity: 0.4;
+      }
+      #status {
+        min-height: 21px;
+        margin: 8px 0 12px;
+        color: var(--soft);
+      }
+      ul {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        border-top: 1px solid var(--line);
+      }
+      li {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      li span:last-child {
+        color: var(--soft);
+      }
+      li.me span:first-child {
+        font-weight: 600;
+      }
+      .empty {
+        padding: 16px 0;
+        color: var(--soft);
+      }
+    </style>
+  </head>
+  <body>
+    <h1 id="title">团建报名</h1>
+    <p class="when" id="when"></p>
+    <div class="row">
+      <input id="note" maxlength="40" placeholder="备注（可不填）：忌口、带家属…" />
+      <button id="join">报名</button>
+      <button id="leave" class="quiet" hidden>取消报名</button>
+      <button id="seats" class="quiet">还有名额吗？</button>
+    </div>
+    <p id="status"></p>
+    <ul id="list"></ul>
+
+    <script>
+      const tc = window.teamchat; // absent in a plain browser
+      const me = tc?.viewer?.memberId ?? null;
+      const $ = (id) => document.getElementById(id);
+      // What a rejected call means for the person. The codes are `Error.code` of teamchat calls.
+      const WHY = {
+        not_allowed: "这个页面现在不能报名。",
+        offline: "现在没连上，等一下再试。",
+        timeout: "没等到回应，再试一次。",
+        rate_limited: "点得太快了，等一下再试。",
+        declined: "没有成功。",
+        failed: "没有成功，再试一次。",
+      };
+      const say = (text) => ($("status").textContent = text);
+
+      /** Draws the sheet. `data` is the bot's snapshot: never trust its shape. */
+      function render(data) {
+        const people = Array.isArray(data?.people) ? data.people : [];
+        if (typeof data?.title === "string") $("title").textContent = data.title;
+        $("when").textContent = typeof data?.when === "string" ? data.when : "";
+        const list = $("list");
+        list.replaceChildren();
+        for (const p of people) {
+          const li = document.createElement("li");
+          if (p.memberId === me) li.className = "me";
+          // A row a member can point at and ask about (⌥-click, or the context menu).
+          li.setAttribute("data-ref-label", `报名 · ${p.name}`);
+          li.setAttribute("data-ref-value", JSON.stringify({ name: p.name, note: p.note ?? "" }));
+          const name = document.createElement("span");
+          name.textContent = p.name; // textContent: names and notes are other people's text
+          const note = document.createElement("span");
+          note.textContent = p.note ?? "";
+          li.append(name, note);
+          list.append(li);
+        }
+        if (people.length === 0) {
+          const li = document.createElement("li");
+          li.className = "empty";
+          li.textContent = "还没有人报名。";
+          list.append(li);
+        }
+        const joined = people.some((p) => p.memberId === me);
+        $("join").hidden = joined;
+        $("leave").hidden = !joined;
+        $("note").hidden = joined;
+      }
+
+      const buttons = () => [$("join"), $("leave"), $("seats")];
+
+      /** Runs one call to the bot from a click, and says what happened when it fails. */
+      async function call(doing, fn) {
+        for (const b of buttons()) b.disabled = true;
+        say(doing);
+        try {
+          say((await fn()) ?? "");
+        } catch (e) {
+          say(WHY[e.code] ?? "没有成功。");
+        } finally {
+          $("join").disabled = $("leave").disabled = !tc.can.emit;
+          $("seats").disabled = !tc.can.ask;
+        }
+      }
+
+      if (!tc) {
+        render({ title: "团建报名", when: "示例数据：在浏览器里直接打开，没有 window.teamchat。", people: [{ memberId: "a", name: "小林", note: "不吃辣" }] });
+        for (const b of buttons()) b.disabled = true;
+      } else {
+        // Called with the current snapshot, then again on every push (from anyone's action).
+        tc.onData((data) => render(data));
+        // `can` says what this copy may send: nothing when the version's bot left the team.
+        $("join").disabled = $("leave").disabled = !tc.can.emit;
+        $("seats").disabled = !tc.can.ask;
+        if (!tc.can.emit) say("这个版本现在只能看。");
+        // An emit resolves when the server took it. The list changes when the bot pushes it (onData).
+        $("join").addEventListener("click", () => call("正在报名…", async () => void (await tc.emit("signup.join", { note: $("note").value.trim() }))));
+        $("leave").addEventListener("click", () => call("正在取消…", async () => void (await tc.emit("signup.leave", null))));
+        // An ask resolves with the bot's reply, for this viewer only.
+        $("seats").addEventListener("click", () =>
+          call("正在问…", async () => {
+            const { left } = await tc.ask("signup.seats", null, { timeoutMs: 10000 });
+            return left > 0 ? `还有 ${left} 个名额。` : "名额满了。";
+          }),
+        );
+      }
+    </script>
+  </body>
+</html>
