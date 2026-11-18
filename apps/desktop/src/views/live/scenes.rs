@@ -86,6 +86,16 @@ fn open_phase(
     hold: impl FnOnce(&mut RunHold),
     hand: Vec<HandCommand>,
 ) -> Result<gpui::AnyWindowHandle, String> {
+    open_phase_with(content, cx, hold, hand).map(|(handle, _)| handle)
+}
+
+/// [`open_phase`], and the services of its window.
+fn open_phase_with(
+    content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+    hold: impl FnOnce(&mut RunHold),
+    hand: Vec<HandCommand>,
+) -> Result<(gpui::AnyWindowHandle, Services), String> {
     let fake = d::V2Samples::new();
     fake.update_hold(hold);
     fake.set_hand(hand);
@@ -121,7 +131,35 @@ fn open_phase(
     };
     let services = Services::new(provider, cx);
     live(&services, cx);
-    open_main(services, content, cx)
+    let handle = open_main(services.clone(), content, cx)?;
+    Ok((handle, services))
+}
+
+/// 替 小王 交还… pressed: the alert that asks first.
+fn open_hand_back_for_confirm(
+    _: Services,
+    content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<gpui::AnyWindowHandle, String> {
+    let (handle, services) = open_phase_with(content, cx, taken_over_by_other, Vec::new())?;
+    let run = services
+        .provider
+        .runs(d::DEV, d::T_VIRTUAL)
+        .into_iter()
+        .find(|r| r.id == d::RUN_VIRTUAL)
+        .ok_or("no sample run")?;
+    handle
+        .update(cx, |_, window, cx| {
+            super::confirm_hand_back_for(&services, &run, |_, _| {}, window, cx)
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(handle)
+}
+
+fn taken_over_by_other(h: &mut RunHold) {
+    held(h, d::XIAOWANG, "takeover");
+    h.machine_owner = None;
+    h.takeover = Some("isolated".into());
 }
 
 fn phase(h: &mut RunHold, phase: &str, waiting: Option<&str>) {
@@ -239,13 +277,16 @@ pub const PHASE_SCENES: &[Scene] = &[
     ),
     phase_scene!(
         "live-phase-taken-over-other",
-        "实时查看: 小王 took over Forge on a team VM; I am an admin (替 小王 交还)",
-        |h| {
-            held(h, d::XIAOWANG, "takeover");
-            h.machine_owner = None;
-            h.takeover = Some("isolated".into());
-        }
+        "实时查看: 小王 took over Forge on a team VM; I am an admin (替 小王 交还…)",
+        taken_over_by_other
     ),
+    Scene {
+        name: "live-hand-back-for-confirm",
+        about: "实时查看: an admin pressed 替 小王 交还…, the alert that asks first",
+        start: Start::V2,
+        setup: |_, _| {},
+        open: open_hand_back_for_confirm,
+    },
     phase_scene!(
         "live-phase-pause-only",
         "实时查看: a computer without take-over (an older daemon): 暂停 and 停止… only",

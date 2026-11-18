@@ -278,8 +278,33 @@ impl LivePane {
             .filter(|n| !n.is_empty())
     }
 
-    /// 暂停, 继续, 接管, 交还, 替 {who} 交还, 停止… and 去回复 (design-takeover 3.9).
+    /// 暂停, 继续, 接管, 交还, 替 {who} 交还…, 停止… and 去回复 (design-takeover 3.9).
     fn act(
+        &mut self,
+        run: &BotRunSummary,
+        action: RunAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if action == RunAction::HandBackFor {
+            let (view, asked) = (cx.weak_entity(), run.clone());
+            confirm_hand_back_for(
+                &self.services,
+                run,
+                move |window, cx| {
+                    let _ =
+                        view.update(cx, |this, cx| this.send_action(&asked, action, window, cx));
+                },
+                window,
+                cx,
+            );
+            return;
+        }
+        self.send_action(run, action, window, cx);
+    }
+
+    /// Carries out a button of the foot of the pane.
+    fn send_action(
         &mut self,
         run: &BotRunSummary,
         action: RunAction,
@@ -2462,6 +2487,36 @@ fn command_refusal(e: AdminError) -> &'static str {
         }
         _ => crate::copy::overlays::COMMAND_REFUSED,
     }
+}
+
+/// 替 {who} 交还… asks first: the person holding the run loses the computer and their running
+/// command stops (design-takeover 3.9).
+fn confirm_hand_back_for(
+    services: &Services,
+    run: &BotRunSummary,
+    on_confirm: impl Fn(&mut Window, &mut App) + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let who = run
+        .hold
+        .paused_by
+        .as_deref()
+        .map(|w| crate::ui::avatar::name_beside_avatar(&member_name(services, w)).to_string())
+        .unwrap_or_default();
+    let member = member_name(services, &run.bot_id);
+    crate::views::nav::dialogs::confirm_alert(
+        "live-hand-back-for",
+        fill(c::LIVE_HAND_BACK_FOR_ASK_TITLE, &[("who", &who)]),
+        fill(
+            c::LIVE_HAND_BACK_FOR_ASK_BODY,
+            &[("who", &who), ("member", &member)],
+        ),
+        c::LIVE_HAND_BACK,
+        on_confirm,
+        window,
+        cx,
+    );
 }
 
 /// The alert words of a refused 暂停, 接管, 继续 or 交还 (design-takeover 3.9 不可用).

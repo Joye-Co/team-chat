@@ -89,7 +89,7 @@ crate::copy! {
     LIVE_MEMBER_STOPPED = "{member} 已停下",
     LIVE_PAUSE = "暂停",
     LIVE_CONTINUE = "继续",
-    LIVE_HAND_BACK_FOR = "替 {who} 交还",
+    LIVE_HAND_BACK_FOR = "替 {who} 交还…",
     LIVE_GO_REPLY = "去回复",
     LIVE_OPEN_FOLDER = crate::copy::per_system("在访达中打开", "在文件资源管理器中打开"),
     LIVE_CMD_PLACEHOLDER = "在 {member} 的工作目录里运行一条命令",
@@ -143,4 +143,7 @@ crate::copy! {
     LIVE_STUCK_AT = "停在：{step}",
     // The banner's way to the approval card a run waits on.
     LIVE_GO_APPROVE = "去批准",
+    // 替 {who} 交还 asks first: it ends a colleague's hold of the computer.
+    LIVE_HAND_BACK_FOR_ASK_TITLE = "替 {who} 交还？",
+    LIVE_HAND_BACK_FOR_ASK_BODY = "{who} 正在运行的命令会中止，也不能再操作这台电脑，{member} 会接着做。",
 }
