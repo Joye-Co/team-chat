@@ -119,6 +119,14 @@ pub struct AccountPage {
     email_sent_to: Option<String>,
     email_busy: bool,
     email_error: Option<EmailError>,
+    /// 重新发送 is on its way (`email_busy` also covers checking a code).
+    email_resending: bool,
+    /// A code just went out again: the link row says so until the wait ends
+    /// or a wrong code takes its place.
+    email_resent: bool,
+    /// Seconds until 重新发送 comes back; 0 when it is there.
+    email_resend_wait: u32,
+    email_resend_timer: Option<gpui::Task<()>>,
     /// Bumped on every step change of the email sheet, so the new step
     /// plays its enter animation once.
     email_step: u32,
@@ -225,6 +233,10 @@ impl AccountPage {
             email_sent_to: None,
             email_busy: false,
             email_error: None,
+            email_resending: false,
+            email_resent: false,
+            email_resend_wait: 0,
+            email_resend_timer: None,
             email_step: 0,
             email_back: false,
             phone,
@@ -272,9 +284,43 @@ impl AccountPage {
             && current.is_none_or(|c| c.trim().to_lowercase() != typed)
     }
 
+    /// Forgets a resend: the sheet opens, or goes back to the address.
+    fn clear_email_resend(&mut self) {
+        self.email_resending = false;
+        self.email_resent = false;
+        self.email_resend_wait = 0;
+        self.email_resend_timer = None;
+    }
+
+    /// A code went out again: say so and rest 重新发送 for a moment, since
+    /// each new code replaces the one before it.
+    fn start_email_resend_wait(&mut self, cx: &mut Context<Self>) {
+        self.email_resent = true;
+        self.email_resend_wait = tokens::email_sheet::RESEND_WAIT_SECS;
+        self.email_resend_timer = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(tokens::email_sheet::RESEND_TICK)
+                    .await;
+                let waiting = this.update(cx, |this, cx| {
+                    this.email_resend_wait = this.email_resend_wait.saturating_sub(1);
+                    if this.email_resend_wait == 0 {
+                        this.email_resent = false;
+                    }
+                    cx.notify();
+                    this.email_resend_wait > 0
+                });
+                if !waiting.unwrap_or(false) {
+                    break;
+                }
+            }
+        }));
+    }
+
     /// 发送验证码 in the sheet.
     fn send_email_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.email_busy {
+        let resend = self.email_sent_to.is_some();
+        if self.email_busy || (resend && self.email_resend_wait > 0) {
             return;
         }
         let email = self.email_input.read(cx).value().trim().to_lowercase();
@@ -288,6 +334,7 @@ impl AccountPage {
             return;
         }
         self.email_busy = true;
+        self.email_resending = resend;
         self.email_error = None;
         let reply = self.services.provider.add_email_code(&email);
         let started = std::time::Instant::now();
@@ -300,11 +347,14 @@ impl AccountPage {
             }
             let _ = this.update_in(cx, |this, window, cx| {
                 this.email_busy = false;
+                this.email_resending = false;
                 match result {
                     Ok(()) => {
                         if this.email_sent_to.is_none() {
                             this.email_step += 1;
                             this.email_back = false;
+                        } else if resend {
+                            this.start_email_resend_wait(cx);
                         }
                         this.email_sent_to = Some(email);
                         this.email_code
@@ -353,6 +403,7 @@ impl AccountPage {
                     }
                     Err(e) => {
                         this.email_error = Some(e);
+                        this.email_resent = false;
                         this.email_code.update(cx, |c, cx| c.select_all(window, cx));
                     }
                 }
@@ -384,6 +435,7 @@ impl AccountPage {
         self.email_back = true;
         self.email_sent_to = None;
         self.email_error = None;
+        self.clear_email_resend();
         let handle = self.email_input.read(cx).focus_handle(cx);
         handle.focus(window, cx);
         cx.notify();
@@ -411,6 +463,20 @@ impl AccountPage {
         cx.notify();
     }
 
+    /// Self-test: the code step while 重新发送 is on its way.
+    pub fn preview_email_resending(&mut self, cx: &mut Context<Self>) {
+        self.email_busy = true;
+        self.email_resending = true;
+        cx.notify();
+    }
+
+    /// Self-test: the code step right after a code went out again.
+    pub fn preview_email_resent(&mut self, cx: &mut Context<Self>) {
+        self.email_resent = true;
+        self.email_resend_wait = tokens::email_sheet::RESEND_WAIT_SECS;
+        cx.notify();
+    }
+
     /// 添加… / 更改… : the 设置登录邮箱 sheet (the address, 发送验证码, then
     /// the six code slots; 取消 and 完成).
     pub fn open_email_sheet(this: Entity<Self>, window: &mut Window, cx: &mut App) {
@@ -418,6 +484,7 @@ impl AccountPage {
             p.email_sent_to = None;
             p.email_error = None;
             p.email_busy = false;
+            p.clear_email_resend();
             // The field asks for the new address; the line above it names
             // the one in use.
             p.email_input
@@ -537,28 +604,43 @@ impl AccountPage {
                                 .items_center()
                                 .n_body()
                                 .text_color(k.secondary)
-                                .child(s::EMAIL_VERIFYING)
+                                .child(if page.email_resending {
+                                    s::EMAIL_SENDING
+                                } else {
+                                    s::EMAIL_VERIFYING
+                                })
                         } else {
-                            div()
+                            let row = div()
                                 .flex()
                                 .items_center()
                                 .justify_center()
                                 .gap(tokens::space::S4)
                                 .n_body()
-                                .text_color(k.secondary)
-                                .child(s::EMAIL_NOT_RECEIVED)
-                                .child(
+                                .text_color(k.secondary);
+                            // Just sent again: what happened and when 重新发送
+                            // is back; 换个邮箱 stays in reach either way.
+                            let row = if page.email_resend_wait > 0 {
+                                let wait = page.email_resend_wait.to_string();
+                                row.when(page.email_resent, |d| {
+                                    d.child(s::EMAIL_RESENT)
+                                        .child(crate::copy::native_kit::MIDDLE_DOT)
+                                })
+                                .child(fill(s::EMAIL_RESEND_WAIT, &[("n", &wait)]))
+                            } else {
+                                row.child(s::EMAIL_NOT_RECEIVED).child(
                                     disabled_push(link("email-resend", s::EMAIL_RESEND), busy, cx)
                                         .on_click(move |_, window, cx| {
                                             resend.update(cx, |p, cx| p.send_email_code(window, cx))
                                         }),
                                 )
-                                .child(crate::copy::native_kit::MIDDLE_DOT)
-                                .child(link("email-other", s::EMAIL_OTHER_ADDRESS).on_click(
+                            };
+                            row.child(crate::copy::native_kit::MIDDLE_DOT).child(
+                                link("email-other", s::EMAIL_OTHER_ADDRESS).on_click(
                                     move |_, window, cx| {
                                         back.update(cx, |p, cx| p.edit_email_address(window, cx))
                                     },
-                                ))
+                                ),
+                            )
                         };
                         (
                             s::EMAIL_CODE_TITLE,
