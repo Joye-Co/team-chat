@@ -759,6 +759,46 @@ mod date_tests {
         assert!(parse_date(&picked).is_some(), "picked {picked:?}");
     }
 
+    /// A fresh field opens on its first Enter once Tab has put the focus on it.
+    #[gpui::test]
+    fn the_first_enter_opens_a_fresh_calendar(cx: &mut gpui::TestAppContext) {
+        use gpui::{Modifiers, VisualTestContext, point};
+        cx.update(gpui_component::init);
+        let text = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+        let shared = text.clone();
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                let view = cx.new(|_| Picker { text: shared });
+                cx.new(|cx| gpui_base::Root::new(view, window, cx))
+            })
+            .unwrap()
+        });
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
+        cx.run_until_parked();
+        cx.update(|window, cx| window.focus_next(cx));
+        cx.run_until_parked();
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        // Open now: one click on a day is enough, without clicking the field first.
+        'days: for y in (60..360).step_by(16) {
+            for x in (24..300).step_by(32) {
+                cx.simulate_click(point(px(x as f32), px(y as f32)), Modifiers::default());
+                cx.run_until_parked();
+                if !text.borrow().is_empty() {
+                    break 'days;
+                }
+                // A miss closes the calendar: Enter opens it again.
+                cx.simulate_keystrokes("escape");
+                cx.update(|window, cx| window.focus_next(cx));
+                cx.run_until_parked();
+                cx.simulate_keystrokes("enter");
+                cx.run_until_parked();
+            }
+        }
+        let picked = text.borrow().clone();
+        assert!(parse_date(&picked).is_some(), "picked {picked:?}");
+    }
+
     #[test]
     fn a_date_field_reads_only_the_wire_form() {
         let d = parse_date(" 2026-11-10 ").expect("a date");

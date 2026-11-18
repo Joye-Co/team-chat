@@ -618,6 +618,11 @@ async fn shoot(
                     if frames == 1 && scenes::ready_check(scene.name).is_none() {
                         press_keys(handle, scene.name, cx);
                     }
+                    // Enter runs an action of the focused control: it goes once a frame
+                    // has drawn the focus the keys before it moved.
+                    if frames == 3 {
+                        press_enter(handle, scene.name, cx);
+                    }
                 }
                 Err(_) => {
                     let _ = cx.update(|cx| {
@@ -770,14 +775,26 @@ fn press_keys(handle: AnyWindowHandle, name: &str, cx: &mut AsyncApp) {
             for key in keys.iter().copied() {
                 // The app root holds the focus in a fresh window, so the
                 // first Tab reaches the app's `FocusNext` like a real one.
+                if key == "enter" {
+                    break;
+                }
                 if let Ok(stroke) = gpui::Keystroke::parse(key) {
-                    // Enter runs an action of the focused control: the frame must know
-                    // where the keys before it moved the focus.
-                    if key == "enter" {
-                        window.draw(cx);
-                    }
                     window.dispatch_keystroke(stroke, cx);
                 }
+            }
+        })
+    });
+}
+
+/// Presses the Enter that ends the keys of a focus scene, if they have one.
+fn press_enter(handle: AnyWindowHandle, name: &str, cx: &mut AsyncApp) {
+    if !interact::steps(name).is_some_and(|s| s.keys.last() == Some(&"enter")) {
+        return;
+    }
+    let _ = cx.update(|cx| {
+        handle.update(cx, |_, window, cx| {
+            if let Ok(stroke) = gpui::Keystroke::parse("enter") {
+                window.dispatch_keystroke(stroke, cx);
             }
         })
     });
