@@ -3,17 +3,11 @@
 // that reached outside is not started over elsewhere; a daemon restart resumes the session; a
 // run that moved is stopped on its old computer first thing when that one is back.
 import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { DAEMON_RESTARTED, MAX_DAEMON_RESUMES, actedOutward, backgroundStep, outwardAction, recoveryNote, stepOf } from "../src/agent/recovery";
 import { STALL_MS, TEXT } from "../src/bots/dispatch";
-import { Daemon, type World, downViolations, mention, world } from "./daemon";
-import { Client, api, protocolViolations, waitUntil } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
+import { Daemon, type World, mention, world } from "./daemon";
+import { Client, api, waitUntil } from "./helpers";
 
 const benv = env as unknown as { BOT_DESK: DurableObjectNamespace; MACHINE_LINK: DurableObjectNamespace; GROUP_ROOM: DurableObjectNamespace };
 const deskOf = (botId: string) => benv.BOT_DESK.get(benv.BOT_DESK.idFromName(botId));

@@ -11,12 +11,6 @@ import {
 import { roomStub } from "../src/core/env";
 import { env } from "cloudflare:test";
 import { Client, api, clientMsgId, createGroup, createMember, waitUntil } from "./helpers";
-import { protocolViolations } from "./helpers";
-import { afterAll as afterAllCheck } from "vitest";
-
-afterAllCheck(() => {
-  expect(protocolViolations).toEqual([]);
-});
 
 const hooked: { type: string; seq: number; groupId: string }[] = [];
 

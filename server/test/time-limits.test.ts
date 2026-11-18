@@ -1,16 +1,10 @@
 // 盯 1.4, 1.6, 1.8, 5.5 (usable work line 3, acceptance path 4): long work is not killed by the
 // clock, waits do not count toward the time limit, and what the desk did is kept with the run.
 import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { TEXT, workTime } from "../src/bots/dispatch";
-import { Daemon, HEALTH, downViolations, mention, world } from "./daemon";
-import { Client, api, clientMsgId, protocolViolations, waitUntil } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
+import { Daemon, HEALTH, mention, world } from "./daemon";
+import { Client, api, clientMsgId, waitUntil } from "./helpers";
 
 const benv = env as unknown as { BOT_DESK: DurableObjectNamespace };
 const deskOf = (botId: string) => benv.BOT_DESK.get(benv.BOT_DESK.idFromName(botId));

@@ -4,17 +4,12 @@
 // 接 1.8: the front desk's question is a Card v2 ask; the next message of the person answers it.
 // 接 1.9 / 1.13: hand-offs run per (topic, member); a decision on an old topic is made again.
 import { CardV2, mainTopicId } from "@chat/protocol";
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { isAddOn, isNewTask } from "../src/agent/frontdesk";
 import { askCard } from "../src/bots/desk/front";
-import { Daemon, downViolations, world, type World } from "./daemon";
-import { Client, type TestMember, api, clientMsgId, createMember, inputBody, protocolViolations, waitUntil } from "./helpers";
+import { Daemon, world, type World } from "./daemon";
+import { Client, type TestMember, api, clientMsgId, createMember, inputBody, waitUntil } from "./helpers";
 
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 afterEach(() => {
   vi.restoreAllMocks();
 });

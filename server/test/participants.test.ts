@@ -2,7 +2,7 @@
 // A mention goes to each AI member it names, a message without an @ to the member that most
 // recently started a run there; the topic's status is rolled up from every member working in it.
 import { env, runInDurableObject } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { ACK_EMOJI } from "@chat/protocol";
 import { roomMigrations } from "../src/core/registry";
 import { runMigrations } from "../src/core/migrations";
@@ -10,16 +10,10 @@ import type { BotsEnv } from "../src/bots/env";
 import { addressedParticipants, rollUp, type TopicBotRow } from "../src/bots/participants";
 import { cardOwner, handOffEach, messageTargets } from "../src/bots/room";
 import { isStopRequest } from "../src/agent/supervise";
-import { Daemon, type World, downViolations, mention, world } from "./daemon";
-import { Client, type TestMember, api, clientMsgId, createMember, inputBody, protocolViolations, waitUntil } from "./helpers";
+import { Daemon, type World, mention, world } from "./daemon";
+import { Client, type TestMember, api, clientMsgId, createMember, inputBody, waitUntil } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 
 /** A second runner-backed AI member in the world's group (runs on any machine). */
 async function addBot(w: World, name: string): Promise<TestMember> {

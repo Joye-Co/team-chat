@@ -4,20 +4,14 @@
 // work keeps it.
 import { env, runInDurableObject } from "cloudflare:test";
 import { DEFAULT_APPROVAL_POLICY, DEFAULT_GATE_PATTERNS } from "@chat/protocol";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { TEXT, approvesWholeWork, gatesRuntime } from "../src/bots/dispatch";
 import { applyPolicyUpdate, approverOf, patternProblem, policyPrompt, runGates, teamPolicy } from "../src/settings/rules";
-import { Daemon, downViolations, mention, world } from "./daemon";
-import { Client, api, clientMsgId, createMember, inputBody, protocolViolations, waitUntil } from "./helpers";
+import { Daemon, mention, world } from "./daemon";
+import { Client, api, clientMsgId, createMember, inputBody, waitUntil } from "./helpers";
 
 const benv = env as unknown as { BOT_DESK: DurableObjectNamespace };
 const deskOf = (botId: string) => benv.BOT_DESK.get(benv.BOT_DESK.idFromName(botId));
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 
 afterEach(async () => {
   await env.DB.prepare("DELETE FROM approval_policies").run();

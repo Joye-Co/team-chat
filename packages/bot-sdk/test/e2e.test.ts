@@ -66,8 +66,9 @@ const hasFiles = await routeExists("POST", "/v1/files");
 const hasAcceptance = await routeExists("PUT", "/v1/runs/none/acceptance");
 
 // Probe the 1.1 interaction loop: welcome.features, and which new frames have a handler (a
-// frame without one gets "unknown frame type"). The server tracks land these one by one; a
-// test whose server part is missing is skipped with the reason printed below.
+// frame without one gets "unknown frame type"). The server of this repo has all of them: the
+// first test below fails when one is missing, so a server change that drops a route, a feature
+// or a frame handler cannot pass with the tests that need it skipped.
 const probe = new Bot({ url: server.url, token: ownerToken, logLevel: "error", markRead: false });
 await probe.start();
 const features = probe.serverFeatures;
@@ -92,12 +93,14 @@ const hasInteract = features.includes("interact/1") && handles.cardEvent && hand
 const hasAutoResolve = hasInteract && handles.resolve;
 const hasPageLoop = hasFiles && features.includes("interact/1") && handles.artifactData && handles.artifactReply;
 const hasRefs = features.includes("refs/1");
-const skipped: string[] = [];
-if (!hasInteract) skipped.push(`live card events and patches (welcome.features ${JSON.stringify(features)}, card.event ${handles.cardEvent}, card.patch ${handles.cardPatch})`);
-if (!hasAutoResolve) skipped.push(`automatic interaction.resolve (interaction.resolve handled: ${handles.resolve})`);
-if (!hasPageLoop) skipped.push(`page reply and data push (artifact.reply ${handles.artifactReply}, artifact.data ${handles.artifactData}, files ${hasFiles})`);
-if (!hasRefs) skipped.push("refs to parts (welcome.features has no refs/1, so blockRefs are not stored)");
-if (skipped.length > 0) console.warn(`bot-sdk e2e: this server lacks parts of 1.1; skipped: ${skipped.join("; ")}`);
+const missing: string[] = [];
+if (!hasHttpSend) missing.push("HTTP send (POST /v1/groups/:id/messages is not a route)");
+if (!hasFiles) missing.push("files (POST /v1/files is not a route)");
+if (!hasAcceptance) missing.push("acceptance criteria (PUT /v1/runs/:id/acceptance is not a route)");
+if (!hasInteract) missing.push(`live card events and patches (welcome.features ${JSON.stringify(features)}, card.event ${handles.cardEvent}, card.patch ${handles.cardPatch})`);
+if (!hasAutoResolve) missing.push(`automatic interaction.resolve (interaction.resolve handled: ${handles.resolve})`);
+if (!hasPageLoop) missing.push(`page reply and data push (artifact.reply ${handles.artifactReply}, artifact.data ${handles.artifactData}, files ${hasFiles})`);
+if (!hasRefs) missing.push("refs to parts (welcome.features has no refs/1, so blockRefs are not stored)");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -207,6 +210,10 @@ afterAll(async () => {
 // ---------------------------------------------------------------------------
 
 describe("bot sdk e2e", () => {
+  test("the server has every route, feature and frame handler these tests need", () => {
+    expect(missing).toEqual([]);
+  });
+
   test("connects with a token file and sees the default group", () => {
     expect(bot.me.id).toBe(botId);
     expect(bot.me.kind).toBe("bot");
@@ -1156,6 +1163,9 @@ describe("bot loops", () => {
   });
 });
 
+// The server log is removed with its temp folder at the end unless KEEP_E2E_DIR is set.
 console.error(
-  `bot-sdk e2e: http send ${hasHttpSend ? "on" : "off"}, files ${hasFiles ? "on" : "off"}, interact ${hasInteract ? "on" : "off"}, refs ${hasRefs ? "on" : "off"}; log ${server.logFile}`,
+  `bot-sdk e2e: http send ${hasHttpSend ? "on" : "off"}, files ${hasFiles ? "on" : "off"}, interact ${hasInteract ? "on" : "off"}, refs ${hasRefs ? "on" : "off"}; ${
+    process.env.KEEP_E2E_DIR ? `log ${server.logFile}` : "set KEEP_E2E_DIR=1 to keep the server log"
+  }`,
 );

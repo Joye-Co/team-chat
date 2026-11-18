@@ -7,6 +7,7 @@ dependencies.
 | --- | --- |
 | `bun run dev:website` | Builds into `dist/`, rebuilds on every save under `src/`, serves `http://127.0.0.1:4321/` |
 | `bun run build:website` | Builds into `apps/website/dist/`, ready for any static host |
+| `bun run check:website` | Checks the built pages: no placeholder left, every file and `#id` they name exists, and both pages have the same sections and tour steps. CI runs it after the build. |
 
 ## Layout
 

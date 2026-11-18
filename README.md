@@ -112,8 +112,10 @@ started by hand:
 | Packages | `scripts/ci-run.sh typecheck packages/*` and `scripts/ci-run.sh test packages/*` |
 | Ops (monitor, restore) | `scripts/ci-run.sh typecheck ops/*` and `scripts/ci-run.sh test ops/*` |
 | Release and setup scripts | `scripts/test-release-scripts.sh` and `scripts/test-setup-server.sh` (offline) |
-| Rust | `cargo fmt --all --check`, `cargo clippy --locked -p chat-protocol -p chat-core -p daemon -p update-helper -p e2e --all-targets -- -D warnings` and `cargo test --locked -p chat-protocol -p chat-core -p daemon -p update-helper` |
+| Rust | `cargo fmt --all --check`, `cargo clippy --locked -p chat-protocol -p chat-core -p chat-ffi -p daemon -p update-helper -p e2e --all-targets -- -D warnings` and `cargo test --locked -p chat-protocol -p chat-core -p chat-ffi -p daemon -p update-helper` |
 | Desktop | `cargo test --locked -p desktop` (on macOS and on Windows; needs the large desktop target) and, when `crates/artifact-view` changes, `cargo test --locked -p artifact-view --no-fail-fast` on macOS |
+| Scripts, restore tool | `bun run typecheck:scripts` and `cd ops/restore && bun run typecheck && bun test` |
+| Website | `bun run build:website && bun run check:website` |
 | Desktop self-tests | `desktop --selftest-smoke`, `--selftest-timeline 10000`, `--selftest-cards` (each with `--report <path>`), `--screenshot <dir> --theme both [--worst-case]` (see [apps/desktop/README.md](apps/desktop/README.md)) |
 | End to end | `cargo run -p e2e -- --base-url <url> --secrets-dir <dir>` (see [docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md)) |
 

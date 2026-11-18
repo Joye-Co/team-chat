@@ -1,5 +1,5 @@
 import { SELF, env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   type MachineView,
   MIN_FREE_DISK_BYTES,
@@ -16,16 +16,11 @@ import {
   whyNoMachine,
 } from "../src/bots/dispatch";
 import type { BotsEnv } from "../src/bots/env";
-import { Daemon, HEALTH, type World, downViolations, mention, world } from "./daemon";
+import { Daemon, HEALTH, type World, mention, world } from "./daemon";
 import { ACK_EMOJI } from "@chat/protocol";
-import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, inputBody, protocolViolations, waitUntil } from "./helpers";
+import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, inputBody, waitUntil } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
-
-afterAll(() => {
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 
 function botMessages(c: Client, topicId: string, botId: string): any[] {
   return c

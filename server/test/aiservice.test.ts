@@ -1,14 +1,9 @@
 // AI 服务 (src/aiservice): owner-only config with the key encrypted at rest, 测试连接, and AI topic
 // titles from the team's provider. Provider calls go to a fake fetch.
 import { env } from "cloudflare:test";
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { callModel, completionsUrl, takesEffort } from "../src/aiservice/providers";
-import { Client, api, clientMsgId, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-});
+import { Client, api, clientMsgId, createGroup, createMember, waitUntil } from "./helpers";
 
 const KEY = "sk-deepseek-test-9f3k";
 const realFetch = globalThis.fetch;

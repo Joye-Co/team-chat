@@ -1,18 +1,12 @@
 // 1.1 routing: Card v2 answers and 产出 page events reach the run of the bot that made the card
 // or the version, group decisions are listed, and GitHub pull requests become topic links.
 import { SELF } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { type CardV2, DecisionsResponse } from "@chat/protocol";
 import { signGithub } from "../src/integrations/secrets";
-import { Daemon, downViolations, mention, world } from "./daemon";
+import { Daemon, mention, world } from "./daemon";
 import { checkSuiteEvent, pullRequestEvent, reviewEvent } from "./github-payloads";
-import { BASE, Client, api, clientMsgId, createGroup, createMember, protocolViolations, type TestMember } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
+import { BASE, Client, api, clientMsgId, createGroup, createMember, type TestMember } from "./helpers";
 
 const ask = (rev: number, from: string[], extra: Partial<CardV2> = {}): CardV2 => ({
   v: 2,

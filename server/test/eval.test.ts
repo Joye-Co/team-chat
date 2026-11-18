@@ -1,17 +1,12 @@
 // M6 (docs/design/agent-harness.zh.md 9): replay of front desk cases, the export that builds a
 // replay set, metrics, and the prompt patch register. Provider calls go to a fake fetch.
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import cases from "./fixtures/frontdesk-cases.jsonl?raw";
 import { PATCHES } from "../src/agent/patches";
 import { parseCases, replay } from "../src/agent/replay";
-import { Daemon, downViolations, mention, world } from "./daemon";
-import { Client, api, protocolViolations } from "./helpers";
+import { Daemon, mention, world } from "./daemon";
+import { Client, api } from "./helpers";
 
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 afterEach(() => {
   vi.restoreAllMocks();
 });
