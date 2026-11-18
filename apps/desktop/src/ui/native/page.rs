@@ -45,6 +45,11 @@ pub mod m {
     pub const HEADER_GAP: Pixels = px(12.);
     /// Card grid and KPI gap.
     pub const GRID_GAP: Pixels = px(16.);
+    /// The inset of a tile grid: the tiles' outer 1 px ring lands on the
+    /// page gutter.
+    pub const TILE_GRID_INSET: Pixels = px(1.);
+    /// The gap of a tile grid, on both axes: 16 between the outer rings.
+    pub const TILE_GRID_GAP: Pixels = px(18.);
     /// A list frame, alert and empty state.
     pub const FRAME_RADIUS: Pixels = px(10.);
     /// A card.
@@ -202,9 +207,15 @@ pub fn on_card<E: gpui::Styled>(el: E, cx: &App) -> E {
     el.bg(native_colors(cx).sheet)
 }
 
-/// A card (§2.2 v18): the soft card surface, with no drawn line.
+/// A card (§2.2 v18): the soft card surface, its edge on the page gutter.
 pub fn card(cx: &App) -> gpui::Div {
-    super::blocks::card_surface(cx).flex().flex_col()
+    super::blocks::page_card_surface(cx).flex().flex_col()
+}
+
+/// A card whose content runs to its edges (a 产出 tile's picture): the ring
+/// stays outside the box, so its grid is inset by [`m::TILE_GRID_INSET`].
+pub fn tile_card(cx: &App) -> gpui::Div {
+    super::blocks::panel_card_surface(cx).flex().flex_col()
 }
 
 /// The hover group of a [`PageRow`].

@@ -134,8 +134,8 @@ pub fn card_surface(cx: &App) -> gpui::Div {
     div().rounded(radius::CARD).bg(k.sheet).shadow(s)
 }
 
-/// A card on a surface that has the card fill itself (the dark 团队管理
-/// panel): the 6 % ring cannot be told from the fill there, so in dark the
+/// A card whose 6 % ring cannot be told from what touches it in dark (the
+/// card fill of the 团队管理 panel, the near-black fill of a page): there the
 /// ring is the border color (§2.22: an edge of 1.5:1 at least). Light is
 /// [`card_surface`] unchanged.
 pub fn panel_card_surface(cx: &App) -> gpui::Div {
@@ -145,6 +145,22 @@ pub fn panel_card_surface(cx: &App) -> gpui::Div {
     }
     let mut s = shadow::sm();
     s.push(shadow::line(k.separator));
+    div().rounded(radius::CARD).bg(k.sheet).shadow(s)
+}
+
+/// The surface of a padded card on a page: [`panel_card_surface`] with its
+/// ring inside the box, so the card's visible edge lands on the page gutter
+/// with the alerts and frames above and below it. Content that runs to the
+/// card's edges would cover this ring; such a card keeps the outer ring.
+pub fn page_card_surface(cx: &App) -> gpui::Div {
+    let k = native_colors(cx);
+    let ring = if k.is_dark() {
+        k.separator
+    } else {
+        k.label.opacity(0.06)
+    };
+    let mut s = shadow::sm();
+    s.push(k.inner_edge(ring));
     div().rounded(radius::CARD).bg(k.sheet).shadow(s)
 }
 

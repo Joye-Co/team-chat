@@ -548,6 +548,42 @@ pub(super) fn by_member(p: &dyn ChatProvider, i: &mut Inputs, side: &SideChats) 
         .collect()
 }
 
+impl Item {
+    /// An open section header: rows follow it.
+    pub(super) fn opens_section(&self) -> bool {
+        matches!(
+            self,
+            Item::GroupHeader { folded: false, .. }
+                | Item::DmHeader { folded: false }
+                | Item::MemberSection { folded: false, .. }
+        )
+    }
+
+    /// A section header, open or folded.
+    pub(super) fn is_section_header(&self) -> bool {
+        matches!(
+            self,
+            Item::GroupHeader { .. } | Item::DmHeader { .. } | Item::MemberSection { .. }
+        )
+    }
+
+    /// How many 等你 this row shows. An open member's 话题 are rows of their
+    /// own and count there.
+    pub(super) fn waiting_on_me(&self) -> usize {
+        let needs_you = crate::ui::native::BadgeState::NeedsYou;
+        match self {
+            Item::Topic(t) if t.line.badge == needs_you => 1,
+            Item::Dm { line: Some(l), .. } if l.badge == needs_you => 1,
+            Item::MemberHead {
+                row,
+                expanded: false,
+                ..
+            } => row.waiting_on_me,
+            _ => 0,
+        }
+    }
+}
+
 impl RailView {
     /// Draws one list row from memory.
     pub(super) fn item(&self, item: &Item, cx: &mut Context<Self>) -> AnyElement {

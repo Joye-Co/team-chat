@@ -1777,8 +1777,10 @@ impl ArtifactPage {
                 .floor()
                 .max(1.) as u16)
                 .min(all.len().max(1) as u16);
-            let tile_w =
-                (width - page::m::GRID_GAP * (cols.saturating_sub(1)) as f32) / cols as f32;
+            let tile_w = (width
+                - page::m::TILE_GRID_INSET * 2.
+                - page::m::TILE_GRID_GAP * (cols.saturating_sub(1)) as f32)
+                / cols as f32;
             #[allow(clippy::type_complexity)]
             let mut days: Vec<(String, Vec<&(String, crate::data::ArtifactSummary)>)> = Vec::new();
             for item in &all {
@@ -1819,7 +1821,7 @@ impl ArtifactPage {
                             ],
                         );
                         let full = format!("{} · {meta}", a.title);
-                        page::card(cx)
+                        page::tile_card(cx)
                             .id(SharedString::from(format!("artifact-{}", a.id)))
                             .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                             .min_w_0()
@@ -1886,7 +1888,8 @@ impl ArtifactPage {
                             div()
                                 .grid()
                                 .grid_cols(cols)
-                                .gap(page::m::GRID_GAP)
+                                .px(page::m::TILE_GRID_INSET)
+                                .gap(page::m::TILE_GRID_GAP)
                                 .children(tiles),
                         )
                 }))
