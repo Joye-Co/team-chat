@@ -338,7 +338,7 @@ fn render_table(
                 }
             })
             .px(CELL_PAD)
-            .py(space::S6)
+            .h_full()
             .flex()
             .items_center()
             .when(num, |el| el.justify_end())
@@ -355,8 +355,12 @@ fn render_table(
                 ui::truncate::TruncText::new(text).into_any_element()
             })
     };
+    // Compact rows, 40 apart (§2.7): 问这里 has air inside the hovered row.
+    let row_h = crate::ui::native::tokens::height::TABLE_ROW_COMPACT;
     let header = div()
         .flex()
+        .items_center()
+        .h(row_h)
         .t_meta_medium()
         .text_color(colors.text_3)
         .children(
@@ -382,6 +386,8 @@ fn render_table(
     let body = rows[..shown].iter().enumerate().map(|(ri, row)| {
         let line = div()
             .flex()
+            .items_center()
+            .h(row_h)
             .border_t(theme::HAIRLINE)
             .border_color(colors.sep)
             .t_small()
