@@ -240,7 +240,9 @@ impl ComposerView {
         this
     }
 
-    /// The name of the member at work in the open 话题 (v2 only).
+    /// Who reads the draft before their next step in the open 话题 (v2 only):
+    /// the members at work it @s, or with no @ the one a plain message goes to.
+    /// A draft that @s only others reaches no one at work.
     fn working_member(&self) -> Option<String> {
         if !self.v2 || self.editing.is_some() {
             return None;
@@ -253,22 +255,36 @@ impl ComposerView {
             .provider
             .topic(&key.group_id, topic)
             .and_then(|t| t.owner_id);
-        let run = crate::views::topic_page::lead_run(&runs, owner.as_deref())?;
+        let lead = crate::views::topic_page::lead_run(&runs, owner.as_deref())?;
         // Only a member at work has a next step to read a message before: a run that
-        // waits, is held or is over gets the plain composer.
-        if crate::data::run_phase::phase_of(run).0 != crate::data::run_phase::RunPhase::Working {
-            return None;
+        // waits, is held or is over gets the plain composer. 停止 was pressed: the
+        // member stops at this step, so no next step reads a message either.
+        let reads = |run: &&crate::data::BotRunSummary| {
+            crate::data::run_phase::phase_of(run).0 == crate::data::run_phase::RunPhase::Working
+                && !self.services.provider.run_stopping(&run.id)
+        };
+        let name = |run: &crate::data::BotRunSummary| {
+            crate::views::shell::member_name(&self.services, &run.bot_id)
+        };
+        // The same reading of the draft as sending it.
+        let mentioned = model::resolve_mentions(
+            &self.last_text,
+            &self.picked,
+            &self.services.provider.members(),
+            &self.group_member_ids(),
+        );
+        if mentioned.is_empty() {
+            return Some(lead).filter(reads).map(name).filter(|n| !n.is_empty());
         }
-        // 停止 was pressed: the member stops at this step, so no next step
-        // reads a message either.
-        if self.services.provider.run_stopping(&run.id) {
-            return None;
-        }
-        Some(crate::views::shell::member_name(
-            &self.services,
-            &run.bot_id,
-        ))
-        .filter(|n| !n.is_empty())
+        let at_work = crate::views::topic_page::working_runs(&runs);
+        let names: Vec<String> = mentioned
+            .iter()
+            .filter_map(|id| at_work.iter().copied().find(|r| r.bot_id == *id))
+            .filter(reads)
+            .map(name)
+            .filter(|n| !n.is_empty())
+            .collect();
+        (!names.is_empty()).then(|| names.join("、"))
     }
 
     /// Switches to the v2 style of the 话题 page (topic track).
