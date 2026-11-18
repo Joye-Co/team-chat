@@ -618,11 +618,10 @@ impl AdminView {
                 } else {
                     match r.seen {
                         Some(t) => {
-                            // Whole minutes at the finest: seconds would not fit the column.
+                            // Whole minutes at the finest, and no 离线 before the time: anything
+                            // longer does not fit the column.
                             let minutes = (now.saturating_sub(t) / 60_000).max(1);
-                            let d = model::duration(minutes * 60_000);
-                            TruncText::new(fill(m::FLEET_OFFLINE_FOR, &[("d", &d)]))
-                                .into_any_element()
+                            TruncText::new(model::ago(minutes * 60_000)).into_any_element()
                         }
                         // 从没上线 only once the roster said so: unread, nothing is known.
                         None if self.team.roster.is_some() => m::TEAM_NEVER.into_any_element(),
