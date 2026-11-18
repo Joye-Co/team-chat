@@ -238,14 +238,8 @@ pub fn run(services: Services, report: PathBuf, finish: Finish, cx: &mut App) {
         };
 
         let restored = cx.update(|cx| services.nav.read(cx).place.clone());
-        check(
-            "restore_opens_first_group",
-            restored
-                == provider
-                    .groups()
-                    .first()
-                    .map(|g| Place::Group(g.id.clone())),
-        );
+        // Nothing is saved on a first start: `restore` opens 首页.
+        check("restore_opens_home", restored == Some(Place::Desk));
         check(
             "quick_switcher_opens",
             dialog_opens(handle, Box::new(QuickSwitch), cx).await,
