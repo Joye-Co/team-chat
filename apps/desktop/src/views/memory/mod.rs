@@ -402,6 +402,23 @@ impl MemoryBoard {
     // --- pieces ---
 
     fn about(&self, writer: bool) -> SharedString {
+        // With no AI 服务 nothing is tidied at night: the line does not
+        // promise it under the notice that says so.
+        if self.ai_off {
+            return match (&self.scope, writer) {
+                _ if self.folded_mine() => c::MINE_ABOUT_AI_OFF.into(),
+                (MemoryScope::Group(_), _) => c::GROUP_ABOUT_AI_OFF.into(),
+                (MemoryScope::Person(_), _) => c::PERSON_ABOUT_AI_OFF.into(),
+                (MemoryScope::Team, true) => c::TEAM_ABOUT_AI_OFF.into(),
+                (MemoryScope::Team, false) => c::TEAM_ABOUT_READONLY_AI_OFF.into(),
+                (MemoryScope::Member(_), true) => {
+                    fill(c::MEMORY_ABOUT_AI_OFF, &[("name", &self.name)]).into()
+                }
+                (MemoryScope::Member(_), false) => {
+                    fill(c::MEMORY_ABOUT_READONLY_AI_OFF, &[("name", &self.name)]).into()
+                }
+            };
+        }
         match (&self.scope, writer) {
             _ if self.folded_mine() => c::MINE_ABOUT.into(),
             (MemoryScope::Group(_), _) => c::GROUP_ABOUT.into(),

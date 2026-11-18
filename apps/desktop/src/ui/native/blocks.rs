@@ -302,7 +302,19 @@ impl RenderOnce for SectionTitle {
                             )
                             .children(self.count.map(super::badge::CountPill::new)),
                     )
-                    .children(self.action.map(|a| div().flex_none().child(a))),
+                    // The action lines up with the top of the title and
+                    // stays out of the row's height (its box is one title
+                    // line high and the button overflows it), so the
+                    // description sits 4 under the title with or without
+                    // an action (§2.3).
+                    .children(self.action.map(|a| {
+                        div()
+                            .flex_none()
+                            .h(super::tokens::text::HEADING.1)
+                            .flex()
+                            .items_start()
+                            .child(a)
+                    })),
             )
             .children(
                 self.description

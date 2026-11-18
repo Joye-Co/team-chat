@@ -768,7 +768,7 @@ impl NativeKit {
         let sheet = section(t::SEC_SHEET, &k).child(
             div()
                 .w(px(560.))
-                .h(px(380.))
+                .h(px(344.))
                 .rounded(px(12.))
                 .overflow_hidden()
                 .bg(k.content)
@@ -825,11 +825,11 @@ impl NativeKit {
             .pt(metrics::TOOLBAR_ROW)
             .flex()
             .flex_col()
-            .gap(px(28.))
+            .gap(space::S24)
             .child(
                 hstack()
                     .items_start()
-                    .gap(px(40.))
+                    .gap(space::S32)
                     .child(menu)
                     .child(inspector)
                     .child(list),
@@ -837,7 +837,7 @@ impl NativeKit {
             .child(
                 hstack()
                     .items_start()
-                    .gap(px(40.))
+                    .gap(space::S32)
                     .child(sheet)
                     .child(alert)
                     .child(progress),

@@ -1471,7 +1471,7 @@ impl RootView {
             .render(page, &pane, leading, active, &self.services, window, cx);
         let pane_el = if floats || right >= 1. {
             self.panes
-                .render(&drawn_pane, full_pane_w, floats, cx)
+                .render(&drawn_pane, full_pane_w, floats, active, cx)
                 .map(|el| {
                     if right < 1. {
                         div().opacity(right).child(el).into_any_element()
@@ -1482,7 +1482,7 @@ impl RootView {
         } else {
             // The column clips the pane at its full width while it slides.
             self.panes
-                .render(&drawn_pane, full_pane_w, false, cx)
+                .render(&drawn_pane, full_pane_w, false, active, cx)
                 .map(|el| {
                     div()
                         .flex_none()

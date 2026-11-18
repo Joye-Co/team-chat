@@ -205,7 +205,7 @@ impl BadgeState {
             BadgeState::Abnormal => Sym::Problem,
             BadgeState::Queued | BadgeState::Quiet => Sym::Waiting,
             BadgeState::Deactivated => Sym::Stopped,
-            BadgeState::Paused => Sym::Pause,
+            BadgeState::Paused => Sym::Paused,
             _ => return None,
         })
     }
@@ -346,6 +346,7 @@ pub struct CountPill {
     text: SharedString,
     show: bool,
     tone: Option<Hsla>,
+    on_fill: bool,
 }
 
 impl CountPill {
@@ -354,7 +355,16 @@ impl CountPill {
             text: cap(count).into(),
             show: count > 0,
             tone: None,
+            on_fill: false,
         }
+    }
+
+    /// The pill sits on a `muted` fill (an unselected segment on the
+    /// segmented track): it takes the push tint, which shows on any fill in
+    /// both modes, as [`Badge::on_fill`] does.
+    pub fn on_fill(mut self, on_fill: bool) -> Self {
+        self.on_fill = on_fill;
+        self
     }
 
     /// A pill with its own text (`@3`).
@@ -363,6 +373,7 @@ impl CountPill {
             text: text.into(),
             show: true,
             tone: None,
+            on_fill: false,
         }
     }
 
@@ -394,7 +405,7 @@ impl RenderOnce for CountPill {
             .min_w(height::COUNT)
             .px(space::S6)
             .rounded_full()
-            .bg(k.fill)
+            .bg(if self.on_fill { k.push } else { k.fill })
             .flex()
             .items_center()
             .justify_center()

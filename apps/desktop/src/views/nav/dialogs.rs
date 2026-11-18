@@ -81,7 +81,7 @@ impl gpui::RenderOnce for SheetForm {
             if ix + 1 < n {
                 group = group.child(
                     div()
-                        .ml(metrics::FORM_ROW_INSET)
+                        .mx(metrics::FORM_ROW_INSET)
                         .h(crate::ui::native::tokens::layout::HAIRLINE)
                         .bg(k.separator),
                 );

@@ -646,12 +646,12 @@ impl Render for MachinesPage {
                     .into_any_element()
             }
         };
-        // 云端 is not open to anyone yet: the row says so and an outline
-        // badge marks it; no dead button (F5, C1-03).
+        // 云端 is not open to anyone yet: an outline badge says so once
+        // (the section's line says what it will do); no dead button (F5,
+        // C1-03).
         let cloud = GroupedForm::new().row(
             widgets::ItemRow::new("cloud", s::CLOUD)
                 .media(widgets::icon_box_28(Sym::Cloud, cx))
-                .description(s::CLOUD_NOT_YET)
                 .value(crate::ui::native::Badge::new(s::CLOUD_COMING_SOON)),
         );
         widgets::pane()

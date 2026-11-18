@@ -636,7 +636,7 @@ impl Status {
             Status::Online => (None, k.green),
             Status::Offline => (None, k.secondary),
             Status::Deactivated => (Some(Sym::Stopped), k.secondary),
-            Status::Paused => (Some(Sym::Pause), k.secondary),
+            Status::Paused => (Some(Sym::Paused), k.secondary),
             Status::Merging => (Some(Sym::Spinner), k.blue),
             Status::Waiting => (Some(Sym::Waiting), k.secondary),
         }
