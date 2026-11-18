@@ -187,19 +187,17 @@ pub(super) struct Inputs {
     pub open_members: Option<std::collections::HashSet<MemberId>>,
 }
 
-/// A section's first row sits [`space::S6`] below the last one; rows of one
-/// section 1 pt apart.
+/// The space above a section: its header stays nearer its own rows than the
+/// section above. It is outside the header's h32 fill.
+const SECTION_GAP: Pixels = crate::ui::native::tokens::space::S8;
+
+/// A section's first row sits [`SECTION_GAP`] below the last one; the rows of
+/// one section touch.
 fn sections(list: Vec<Vec<Item>>) -> Vec<Entry> {
     let mut out = Vec::new();
     for section in list {
         for (i, item) in section.into_iter().enumerate() {
-            // A section's header stays nearer its own rows than the section
-            // above; the space is outside the header's h32 fill.
-            let gap = if i == 0 {
-                crate::ui::native::tokens::space::S8
-            } else {
-                px(0.)
-            };
+            let gap = if i == 0 { SECTION_GAP } else { px(0.) };
             out.push(Entry { gap, item });
         }
     }
@@ -530,7 +528,14 @@ pub(super) fn by_member(p: &dyn ChatProvider, i: &mut Inputs, side: &SideChats) 
         }
     }
     out.into_iter()
-        .map(|item| Entry { gap: px(0.), item })
+        .map(|item| Entry {
+            gap: if matches!(item, Item::MemberSection { .. }) {
+                SECTION_GAP
+            } else {
+                px(0.)
+            },
+            item,
+        })
         .collect()
 }
 
