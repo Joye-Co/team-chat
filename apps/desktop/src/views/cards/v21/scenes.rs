@@ -92,6 +92,21 @@ pub const SCENES: &[Scene] = &[
         "INTERACT 7.1 as 小王 sees it: the question read-only with 等 Joye",
         Page::Readonly
     ),
+    scene!(
+        "interact_rejected",
+        "INTERACT §4.4: a live event that did not get through: refused (forbidden), not sent with 重试, failed with no note with 重试, and failed with the member's note; the bar goes back each time",
+        Page::Rejected
+    ),
+    scene!(
+        "compose-fields",
+        "Card v2.1 schema fields: slots shown in the card's time zone with the zone named, a rank whose top 3 count, a number with its unit and help, the questionnaire's submitLabel; and two text blocks, two charts and pictures at their own ratio in one card",
+        Page::Fields
+    ),
+    scene!(
+        "compose-controls",
+        "Card v2.1 controls a keyboard walks: segmented tabs with five long labels, a metric that takes a press, 20 pickable bars folded to 12, and a sortable 40-row table to pick from folded to 10",
+        Page::Controls
+    ),
     // v11/pb-cards
     scene!(
         "interact_notes",
@@ -139,6 +154,20 @@ pub fn checks(name: &str) -> Option<crate::selftest::scenes::Checks> {
                 toasts > 0,
                 format!("the conflict toast is on screen ({toasts} toasts)"),
             )]
+        }),
+        "interact_rejected" => Some(|_, _| {
+            use super::samples::{NOTE_FORBIDDEN, NOTE_REJECTED, NOTE_UNHANDLED};
+            let retry = ids("card-retry");
+            vec![
+                check(
+                    retry.contains(NOTE_REJECTED) && retry.contains(NOTE_UNHANDLED),
+                    format!("没发出去 and 没能处理 offer 重试 ({retry:?})"),
+                ),
+                check(
+                    !retry.contains(NOTE_FORBIDDEN),
+                    format!("a forbidden step has no 重试 ({retry:?})"),
+                ),
+            ]
         }),
         "interact_pending" => Some(|_, _| {
             let retry = ids("card-retry");

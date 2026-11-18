@@ -215,6 +215,7 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
                 }
                 None => el,
             };
+            let el = copyable_run(ctx, &blocks[i..next], el, cx);
             out.push(div().mt(gap).min_w(px(0.)).child(el).into_any_element());
         }
         prev = Some(b);
@@ -249,6 +250,118 @@ pub(crate) fn block_key(b: &CardV2Block, ix: usize) -> String {
         Some(id) => id.to_string(),
         None => ix.to_string(),
     }
+}
+
+/// The text of a block as a person would paste it: the Markdown of a text block, a
+/// table as tab-separated lines, `label value` lines for fields and metrics, the steps of
+/// a list or a plan, a diff or code as it is, a proof with its result. `None` for blocks
+/// that are controls or pictures.
+pub(crate) fn block_text(b: &CardV2Block) -> Option<String> {
+    let lines = |v: Vec<String>| (!v.is_empty()).then(|| v.join("\n"));
+    match b {
+        CardV2Block::Text { text, .. } | CardV2Block::Code { text, .. } => Some(text.clone()),
+        CardV2Block::Diff { text, .. } => Some(text.clone()),
+        CardV2Block::Fields { fields, .. } => lines(
+            fields
+                .iter()
+                .map(|f| format!("{}\t{}", f.label, f.value))
+                .collect(),
+        ),
+        CardV2Block::Table { columns, rows, .. } => lines(
+            std::iter::once(columns.join("\t"))
+                .chain(rows.iter().map(|r| r.join("\t")))
+                .collect(),
+        ),
+        CardV2Block::List { items, .. } => lines(items.iter().map(|i| i.text.clone()).collect()),
+        CardV2Block::Plan { items, .. } => {
+            lines(items.iter().flatten().map(|i| i.text.clone()).collect())
+        }
+        CardV2Block::Metric {
+            label, value, unit, ..
+        } => {
+            let v = fmt_number(value.as_f64().unwrap_or(0.));
+            Some(match unit.as_deref() {
+                Some("%") => format!("{label} {v}%"),
+                Some(u) if !u.is_empty() => format!("{label} {v} {u}"),
+                _ => format!("{label} {v}"),
+            })
+        }
+        CardV2Block::Chart {
+            label, x, series, ..
+        } => {
+            let xs = x.clone().unwrap_or_default();
+            let mut out: Vec<String> = label.iter().cloned().collect();
+            out.push(
+                std::iter::once(String::new())
+                    .chain(xs.iter().cloned())
+                    .collect::<Vec<_>>()
+                    .join("\t"),
+            );
+            out.extend(series.iter().map(|s| {
+                std::iter::once(s.name.clone())
+                    .chain(s.values.iter().map(|v| v.to_string()))
+                    .collect::<Vec<_>>()
+                    .join("\t")
+            }));
+            lines(out)
+        }
+        CardV2Block::Evidence {
+            label,
+            detail,
+            tests,
+            url,
+            ..
+        } => {
+            let mut out = vec![match tests {
+                Some(t) => tests_text(t),
+                None => label.clone(),
+            }];
+            out.extend(detail.iter().cloned());
+            out.extend(url.iter().cloned());
+            lines(out)
+        }
+        _ => None,
+    }
+}
+
+/// `el` with 复制 in its context menu, which copies `text`: the way to take a number, a
+/// table or a diff out of a card where 引用提问 (whose part menus copy too) does not show.
+pub(crate) fn copyable(id: SharedString, text: String, el: AnyElement) -> AnyElement {
+    use gpui_component::menu::ContextMenuExt as _;
+    div()
+        .id(id)
+        .min_w(px(0.))
+        .child(el)
+        .context_menu(move |menu, _, _| {
+            let text = text.clone();
+            menu.item(
+                PopupMenuItem::new(crate::copy::refs::COPY).on_click(move |_, _, cx| {
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone()))
+                }),
+            )
+        })
+        .into_any_element()
+}
+
+/// [`copyable`] for the blocks `run` draws together, when the card shows no 引用提问 parts.
+pub(crate) fn copyable_run(
+    ctx: &Ctx,
+    run: &[&CardV2Block],
+    el: AnyElement,
+    cx: &App,
+) -> AnyElement {
+    if CardParts::of(ctx, cx).is_some() {
+        return el;
+    }
+    let text: Vec<String> = run.iter().filter_map(|b| block_text(b)).collect();
+    let Some(first) = run.first().filter(|_| !text.is_empty()) else {
+        return el;
+    };
+    copyable(
+        ctx.id(format!("copy-{}", block_key(first, 0))),
+        text.join("\n"),
+        el,
+    )
 }
 
 /// A reference to a 产出.
@@ -2052,6 +2165,7 @@ pub(crate) fn form_grid(
             label,
             placeholder,
             options,
+            help,
             ..
         } = b
         else {
@@ -2094,7 +2208,21 @@ pub(crate) fn form_grid(
                         .text_color(k.ink)
                         .child(label.clone()),
                 )
-                .child(div().flex_1().min_w(px(0.)).child(control))
+                // The field, and what the member says about it under it (`help`).
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .flex()
+                        .flex_col()
+                        .gap(space::S4)
+                        .child(control)
+                        .children(
+                            help.as_ref()
+                                .filter(|h| !h.trim().is_empty())
+                                .map(|h| meta(div()).text_color(k.ink_3).child(h.clone())),
+                        ),
+                )
                 .into_any_element(),
         );
     }
@@ -2257,6 +2385,15 @@ pub(crate) fn input_control(
                 .form
                 .update(cx, |f, cx| f.field(id, ph, false, window, cx));
             let focused = field.is_focused(window, cx);
+            // The unit of a number stays in the field, after the number (`unit`).
+            let unit = match ctx.card.block(id) {
+                Some(CardV2Block::Input {
+                    kind: InputKind::Number,
+                    unit: Some(u),
+                    ..
+                }) if !u.trim().is_empty() => Some(u.clone()),
+                _ => None,
+            };
             field_box(focused || lead, invalid, m::OPTION, cx)
                 .child(
                     div()
@@ -2264,6 +2401,15 @@ pub(crate) fn input_control(
                         .min_w(px(0.))
                         .child(line_input(&field, !live, window, cx)),
                 )
+                .when_some(unit, |el, u| {
+                    el.child(
+                        small(div())
+                            .flex_none()
+                            .whitespace_nowrap()
+                            .text_color(k.ink_3)
+                            .child(u),
+                    )
+                })
                 .when(kind == InputKind::Date, |el| {
                     el.child(ui::icon(Sym::Calendar, px(14.), k.ink_3))
                 })
@@ -4270,6 +4416,33 @@ mod tests {
             Some(true),
             "an unknown tone falls back"
         );
+    }
+
+    #[test]
+    fn a_block_copies_as_text_one_can_paste() {
+        let b = blocks(serde_json::json!([
+            { "type": "table", "id": "t", "columns": ["渠道", "新增群"], "rows": [["微博", "14"], ["合计", "38"]] },
+            { "type": "metric", "id": "m", "label": "日活", "value": 2340 },
+            { "type": "metric", "id": "p", "label": "留存", "value": 61, "unit": "%" },
+            { "type": "fields", "id": "f", "fields": [{ "label": "影响", "value": "重启 2 分钟" }] },
+            { "type": "diff", "id": "d", "text": "@@ -1 +1 @@\n-a\n+b" },
+            { "type": "evidence", "id": "e", "label": "CI", "tests": { "passed": 3, "failed": 1 },
+              "url": "https://ci.example.com/1" },
+            { "type": "divider", "id": "x" }
+        ]));
+        assert_eq!(
+            block_text(&b[0]).unwrap(),
+            "渠道\t新增群\n微博\t14\n合计\t38"
+        );
+        assert_eq!(block_text(&b[1]).unwrap(), "日活 2,340");
+        assert_eq!(block_text(&b[2]).unwrap(), "留存 61%");
+        assert_eq!(block_text(&b[3]).unwrap(), "影响\t重启 2 分钟");
+        assert_eq!(block_text(&b[4]).unwrap(), "@@ -1 +1 @@\n-a\n+b");
+        assert_eq!(
+            block_text(&b[5]).unwrap(),
+            "测试 3 项通过 · 1 失败\nhttps://ci.example.com/1"
+        );
+        assert_eq!(block_text(&b[6]), None, "nothing to copy");
     }
 
     #[test]

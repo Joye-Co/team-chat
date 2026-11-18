@@ -287,6 +287,8 @@ pub struct Preset {
     pub prev: Option<std::sync::Arc<CardV2>>,
     /// v11/pb-cards: blocks whose typed text a new rev kept (内容变了 · 用新的).
     pub drafts_kept: Vec<&'static str>,
+    /// The open tab of a tabs block, `(block id, tab id)` (screenshot scenes).
+    pub tab: Option<(&'static str, &'static str)>,
 }
 
 /// v11/pb-cards: the picked values of one block at one moment.

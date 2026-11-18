@@ -67,6 +67,23 @@ pub const NOTE_DRAFT: &str = "c21-note-draft";
 /// Ledger answered my click with a new message off screen.
 pub const NOTE_REPLY: &str = "c21-note-reply";
 
+/// My bar click the server refused: I may not do this step.
+pub const NOTE_FORBIDDEN: &str = "c21-note-forbidden";
+/// My bar click that did not get to Ledger (the server refused it for another reason).
+pub const NOTE_REJECTED: &str = "c21-note-rejected";
+/// Ledger answered my bar click with `failed` and no note.
+pub const NOTE_UNHANDLED: &str = "c21-note-unhandled";
+/// Ledger answered my bar click with `failed` and why.
+pub const NOTE_WHY: &str = "c21-note-why";
+/// Schema fields: slots in another time zone, a rank where only the top 3 count, a field
+/// with help and a number with its unit.
+pub const FIELDS: &str = "c21-fields";
+/// Two text blocks, two charts and three pictures in one card (element ids by block id).
+pub const TWINS: &str = "c21-twins";
+/// Controls a keyboard walks: five long tabs, a group, a metric that takes a press, a
+/// sortable 40-row table to pick from and a chart of 20 bars to pick from.
+pub const CONTROLS: &str = "c21-controls";
+
 /// One sample: the card message, stored answers, my answer on its way and my events
 /// (event times are ms before now).
 pub struct Sample21 {
@@ -898,6 +915,156 @@ pub fn all() -> Vec<Sample21> {
         ));
         out.push(s);
     }
+    // A live event that did not get through: the bar goes back and the card says why.
+    let failed_at = |id: &str, phase: CardEventPhase| {
+        let mut s = sample(id, GROWTH, T_REPORT, LEDGER, at(9, 40), bars_rev1());
+        let mut e = acked(
+            id,
+            "bars",
+            "chart.select",
+            click.clone(),
+            ExpectMode::Live,
+            LEDGER,
+        );
+        e.phase = phase;
+        s.events.push((1_000, e));
+        s
+    };
+    out.push(failed_at(
+        NOTE_FORBIDDEN,
+        CardEventPhase::Failed {
+            failure: CardEventFailure::Forbidden,
+            at: 0,
+        },
+    ));
+    out.push(failed_at(
+        NOTE_REJECTED,
+        CardEventPhase::Failed {
+            failure: CardEventFailure::Other,
+            at: 0,
+        },
+    ));
+    out.push(failed_at(
+        NOTE_UNHANDLED,
+        CardEventPhase::Resolved {
+            result: crate::data::cards_v2::InteractionResult::Failed,
+            note: None,
+            at: 0,
+        },
+    ));
+    out.push(failed_at(
+        NOTE_WHY,
+        CardEventPhase::Resolved {
+            result: crate::data::cards_v2::InteractionResult::Failed,
+            note: Some("B 站的数还没同步，过几分钟再点".into()),
+            at: 0,
+        },
+    ));
+    let day = 86_400_000;
+    let hour = 3_600_000;
+    out.push(sample(
+        FIELDS,
+        DEV,
+        T_V4,
+        JOJO,
+        at(10, 30),
+        with(
+            base("和东京那边对一下 4.0", "ask", "Jojo 问：什么时候开会、先做哪三件、订几个座位"),
+            json!({
+                "ask": { "from": [ME] },
+                "blocks": [
+                    { "id": "qs", "type": "questionnaire", "children": ["when", "order", "seats", "day"],
+                      "submitLabel": "发给东京", "fallbackText": "开会时间、优先级和座位" },
+                    { "id": "when", "type": "slots", "label": "哪个时间开会？", "tz": "Asia/Tokyo",
+                      "required": true, "fallbackText": "时间段", "slots": [
+                        { "id": "a", "start": at(10, 0) + day, "end": at(11, 0) + day },
+                        { "id": "b", "start": at(15, 0) + day, "end": at(15, 30) + day },
+                        { "id": "c", "start": at(10, 0) + 2 * day, "end": at(11, 0) + 2 * day, "conflicts": [LIXUE] },
+                        { "id": "d", "start": at(15, 0) + 2 * day - hour * 0, "end": at(16, 30) + 2 * day } ] },
+                    { "id": "order", "type": "rank", "label": "先做哪三件？", "rankTop": 3, "fallbackText": "排序",
+                      "items": [ { "id": "photos", "label": "按活动整理照片", "meta": "约 2 周" },
+                                 { "id": "share", "label": "群相册分享到微博", "meta": "约 4 天" },
+                                 { "id": "birthday", "label": "生日提醒", "meta": "约 3 天" },
+                                 { "id": "night", "label": "夜间消息汇总", "meta": "约 1 周" },
+                                 { "id": "weekly", "label": "群主周报", "meta": "约 1 周" } ] },
+                    { "id": "seats", "type": "input", "kind": "number", "label": "订几个座位？", "unit": "个",
+                      "min": 1, "max": 40, "default": 12, "help": "会议室最多坐 40 个人，含东京来的 6 位" },
+                    { "id": "day", "type": "input", "kind": "date", "label": "最晚哪天定下来？",
+                      "help": "东京那边要提前一周订机票" }
+                ],
+                "actions": [ { "id": "send", "label": "提交", "style": "primary", "kind": "submit" } ]
+            }),
+        ),
+    ));
+    let weeks = ["10-06", "10-13", "10-20", "10-27"];
+    out.push(sample(
+        TWINS,
+        GROWTH,
+        T_REPORT,
+        LEDGER,
+        at(10, 32),
+        with(
+            base("两段话、两张图和三张截图", "info", "Ledger：微博和 B 站各一段"),
+            json!({
+                "blocks": [
+                    { "id": "weibo_text", "type": "text", "text": "**微博**这个月涨得最快，四周里有三周在涨。" },
+                    { "id": "bili_text", "type": "text", "text": "**B 站**停更了两周，后两周才回来。" },
+                    { "id": "weibo", "type": "chart", "kind": "line", "label": "微博 · 每周", "x": weeks,
+                      "series": [ { "name": "新增群", "values": [2, 3, 4, 5] } ] },
+                    { "id": "bili", "type": "chart", "kind": "line", "label": "B 站 · 每周", "x": weeks,
+                      "series": [ { "name": "新增群", "values": [3, 1, 2, 3] } ] },
+                    { "id": "shots", "type": "row", "children": ["tall", "wide", "small"] },
+                    { "id": "tall", "type": "image", "fileId": "f-pic-tall", "alt": "手机截图" },
+                    { "id": "wide", "type": "image", "fileId": "f-pic-wide", "alt": "全景图" },
+                    { "id": "small", "type": "image", "fileId": "f-pic-small", "alt": "小图" },
+                    { "id": "pano", "type": "image", "fileId": "f-pic-wide", "alt": "全景图" }
+                ]
+            }),
+        ),
+    ));
+    let names: Vec<String> = (1..=20).map(|i| format!("渠道 {i:02}")).collect();
+    let counts: Vec<usize> = (0..20).map(|i| 3 + (i * 7) % 23).collect();
+    let rows: Vec<Vec<String>> = (0..40)
+        .map(|i| {
+            vec![
+                format!("渠道 {:02} · 一个很长很长的渠道名字，写不下的时候要截断", i + 1),
+                ["小王", "李雪", "Forge"][i % 3].to_string(),
+                ((i * 37) % 90 + 4).to_string(),
+            ]
+        })
+        .collect();
+    out.push(sample(
+        CONTROLS,
+        GROWTH,
+        T_REPORT,
+        LEDGER,
+        at(10, 34),
+        with(
+            base("这些都能用键盘走", "info", "Ledger：按渠道看、按人看"),
+            json!({
+                "blocks": [
+                    { "id": "dau", "type": "metric", "label": "日活（点一下看明细）", "value": 2340, "delta": 4,
+                      "better": "up", "events": ["metric.press"], "emitBy": "members" },
+                    { "id": "tabs", "type": "tabs", "tabs": [
+                        { "id": "a", "label": "全部渠道的每周新增", "children": ["bars"] },
+                        { "id": "b", "label": "按负责人拆开的明细", "children": ["table"] },
+                        { "id": "c", "label": "微博和它的三个子渠道", "children": ["g"] },
+                        { "id": "d", "label": "B 站停更那两周", "children": ["d_text"] },
+                        { "id": "e", "label": "抖音和小红书的试投放", "children": ["e_text"] } ] },
+                    { "id": "d_text", "type": "text", "text": "B 站 10 月中停更了两周。" },
+                    { "id": "e_text", "type": "text", "text": "两个新渠道各投了一周。" },
+                    { "id": "bars", "type": "chart", "kind": "bar", "label": "新增群 · 按渠道", "x": names,
+                      "series": [ { "id": "groups", "name": "新增群", "values": counts } ],
+                      "events": ["chart.select", "chart.clear"], "emitBy": "members" },
+                    { "id": "table", "type": "table", "title": "按负责人", "columns": ["渠道", "负责人", "新增群"],
+                      "rows": rows, "select": "multiple", "sortable": true,
+                      "events": ["table.select"], "emitBy": "members" },
+                    { "id": "g", "type": "group", "title": "明细", "summary": "点标题收起", "children": ["g_text"] },
+                    { "id": "g_text", "type": "text", "text": "这一组可以用键盘收起和展开。" }
+                ]
+            }),
+        ),
+    ));
     let mut draft = sample(
         NOTE_DRAFT,
         GROWTH,

@@ -1476,6 +1476,7 @@ impl ChatProvider for V2Samples {
         file_id: &str,
     ) -> Option<std::path::PathBuf> {
         pages_samples::sample_image(file_id)
+            .or_else(|| crate::views::cards::v2::samples::sample_picture(file_id))
     }
 
     fn session(&self) -> SessionState {

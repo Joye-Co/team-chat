@@ -481,9 +481,22 @@ fn move_item(order: &mut Vec<String>, item: &str, to: usize) {
 }
 
 pub fn rank(node: &Node, b: &CardV2Block, window: &Window, cx: &mut App) -> AnyElement {
-    let CardV2Block::Rank { id, items, cut, .. } = b else {
+    let CardV2Block::Rank {
+        id,
+        items,
+        cut,
+        rank_top,
+        ..
+    } = b
+    else {
         return div().into_any_element();
     };
+    // `rankTop`: only the first n count (and only they are sent). The rule after them
+    // says so, unless the author's own cut line stands at the same place.
+    let top = rank_top
+        .map(|n| n as usize)
+        .filter(|n| *n > 0 && *n < items.len())
+        .filter(|n| cut.as_ref().is_none_or(|c| c.after as usize != *n));
     let ctx = node.ctx;
     let k = theme::colors(cx);
     let live = live(node, b);
@@ -656,10 +669,14 @@ pub fn rank(node: &Node, b: &CardV2Block, window: &Window, cx: &mut App) -> AnyE
                 });
         }
         col = col.child(row);
-        if let Some(cut) = cut
+        let top_label = top
+            .filter(|n| *n == i + 1)
+            .map(|n| fill(c::RANK_TOP, &[("n", &n.to_string())]));
+        let cut_label = cut
             .as_ref()
             .filter(|c| c.after as usize == i + 1 && i + 1 < order.len())
-        {
+            .map(|c| c.label.clone());
+        if let Some(label) = cut_label.or(top_label) {
             col = col.child(
                 div()
                     .my(space::S2)
@@ -674,12 +691,7 @@ pub fn rank(node: &Node, b: &CardV2Block, window: &Window, cx: &mut App) -> AnyE
                             .border_dashed()
                             .border_color(k.line_2),
                     )
-                    .child(
-                        meta(div())
-                            .flex_none()
-                            .text_color(k.ink_3)
-                            .child(cut.label.clone()),
-                    )
+                    .child(meta(div()).flex_none().text_color(k.ink_3).child(label))
                     .child(
                         div()
                             .flex_1()
@@ -1190,20 +1202,87 @@ pub fn matrix(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
 // ---------------------------------------------------------------------------
 // slots
 
-fn weekday(at: Millis) -> (String, String, String) {
-    use chrono::{Datelike as _, Local, TimeZone as _};
-    let Some(t) =
-        crate::views::shell::known(at).and_then(|at| Local.timestamp_millis_opt(at).single())
-    else {
-        let unknown = crate::views::shell::clock(at);
-        return (unknown.clone(), unknown.clone(), unknown);
+/// The zone the slots of a card are shown in: the card's `tz` (an IANA id), else this
+/// computer's when the id is not one the app knows.
+#[derive(Clone, Copy)]
+pub(crate) struct SlotZone(Option<chrono_tz::Tz>);
+
+impl SlotZone {
+    pub(crate) fn of(tz: &str) -> Self {
+        Self(tz.trim().parse::<chrono_tz::Tz>().ok())
+    }
+
+    /// The day head (`周四 11-06`), the time (`15:00`) and the date (`2025-11-06`) of `at`
+    /// in the zone.
+    fn parts(self, at: Millis) -> Option<(String, String, String)> {
+        use chrono::{Datelike as _, Local, TimeZone as _};
+        let at = crate::views::shell::known(at)?;
+        fn of<Z: chrono::TimeZone>(t: chrono::DateTime<Z>) -> (String, String, String)
+        where
+            Z::Offset: std::fmt::Display,
+        {
+            let w = crate::copy::weekday(t.weekday());
+            (
+                format!("{w} {}", t.format("%m-%d")),
+                t.format("%H:%M").to_string(),
+                t.format("%Y-%m-%d").to_string(),
+            )
+        }
+        match self.0 {
+            Some(tz) => tz.timestamp_millis_opt(at).single().map(of),
+            None => Local.timestamp_millis_opt(at).single().map(of),
+        }
+    }
+
+    /// The zone's offset from UTC at `at`, in seconds; `None` for this computer's zone.
+    fn offset(self, at: Millis) -> Option<i32> {
+        use chrono::{Offset as _, TimeZone as _};
+        let t = self.0?.timestamp_millis_opt(at).single()?;
+        Some(t.offset().fix().local_minus_utc())
+    }
+}
+
+/// `UTC+9`, `UTC−3:30`, `UTC`: an offset in seconds as people write it.
+pub(crate) fn utc_offset(seconds: i32) -> String {
+    if seconds == 0 {
+        return "UTC".to_string();
+    }
+    let (sign, s) = if seconds < 0 {
+        ('−', -seconds)
+    } else {
+        ('+', seconds)
     };
-    let w = crate::copy::weekday(t.weekday());
-    (
-        format!("{w} {}", t.format("%m-%d")),
-        t.format("%H:%M").to_string(),
-        t.format("%Y-%m-%d").to_string(),
-    )
+    let (h, m) = (s / 3600, (s % 3600) / 60);
+    if m == 0 {
+        format!("UTC{sign}{h}")
+    } else {
+        format!("UTC{sign}{h}:{m:02}")
+    }
+}
+
+/// The hint of a slots block whose zone is not this computer's at the first slot: the
+/// zone's id and its offset (`Asia/Tokyo`, `UTC+9`). `local`: this computer's offset then,
+/// in seconds. `None` when both read the same clock.
+pub(crate) fn zone_hint(tz: &str, at: Millis, local: i32) -> Option<(String, String)> {
+    let offset = SlotZone::of(tz).offset(at)?;
+    (offset != local).then(|| (tz.trim().to_string(), utc_offset(offset)))
+}
+
+/// `15:00–16:00`: a slot from its start to its end in `zone`; only the start when the
+/// slot has no length.
+pub(crate) fn slot_range(zone: SlotZone, start: Millis, end: Millis) -> String {
+    let from = weekday(zone, start).1;
+    if end <= start {
+        return from;
+    }
+    format!("{from}–{}", weekday(zone, end).1)
+}
+
+fn weekday(zone: SlotZone, at: Millis) -> (String, String, String) {
+    zone.parts(at).unwrap_or_else(|| {
+        let unknown = crate::views::shell::clock(at);
+        (unknown.clone(), unknown.clone(), unknown)
+    })
 }
 
 pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
@@ -1211,6 +1290,7 @@ pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         id,
         slots,
         multiple,
+        tz,
         ..
     } = b
     else {
@@ -1222,6 +1302,21 @@ pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
     let multiple = multiple.unwrap_or(false);
     let picked = ctx.form.read(cx).choice(id).to_vec();
     let target = PickTarget::of(node);
+    // The slots read in the card's zone (`tz`); the block says which when that is not
+    // this computer's, so nobody answers for the wrong hour.
+    let zone = SlotZone::of(tz);
+    let weekday = |at: Millis| weekday(zone, at);
+    let zone_note = slots.first().and_then(|s| {
+        use chrono::{Local, Offset as _, TimeZone as _};
+        let at = s.start as Millis;
+        let local = Local
+            .timestamp_millis_opt(at)
+            .single()?
+            .offset()
+            .fix()
+            .local_minus_utc();
+        zone_hint(tz, at, local)
+    });
     // Columns by day, rows by time of day.
     let mut days: Vec<(String, String)> = Vec::new();
     let mut times: Vec<String> = Vec::new();
@@ -1238,7 +1333,7 @@ pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
     let nk = crate::ui::native::native_colors(cx);
     let cell = |s: &crate::data::cards_v2::Slot| {
         let on = picked.contains(&s.id);
-        let (_, time, _) = weekday(s.start as Millis);
+        let time = slot_range(zone, s.start as Millis, s.end as Millis);
         let conflicts = s.conflicts.clone().unwrap_or_default();
         let note = if conflicts.is_empty() {
             None
@@ -1341,6 +1436,12 @@ pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         }
         grid = grid.child(line);
     }
+    let grid = grid.children(zone_note.map(|(zone, offset)| {
+        hint(
+            fill(c::SLOTS_ZONE, &[("zone", &zone), ("offset", &offset)]),
+            cx,
+        )
+    }));
     framed(node, b, grid.into_any_element(), cx)
 }
 
@@ -2357,7 +2458,15 @@ pub fn unknown(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 )
                 .when_some(fallback, |el, t| {
                     el.child(b20::small(div()).text_color(k.ink_2).child(t))
-                }),
+                })
+                // What the block is, for whoever reports it: the card's catalog and the
+                // block's type, in mono (§7.13: `tc.card/2.2 · map`).
+                .children(unknown_type(ctx.card, at).map(|line| {
+                    meta(div())
+                        .mono()
+                        .text_color(k.ink_3)
+                        .child(crate::ui::truncate::TruncText::new(line))
+                })),
         )
         // The next step the block names, unless the footer already offers it.
         .when(!footer_updates, |el| {
@@ -2379,6 +2488,18 @@ pub fn unknown(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             )
         })
         .into_any_element()
+}
+
+/// `tc.card/2.2 · map`: the catalog of the card and the type of its unknown block at
+/// `index`. `None` when the block kept no type.
+pub(crate) fn unknown_type(card: &crate::data::cards_v2::CardV2, index: usize) -> Option<String> {
+    let kind = card.unknown.get(&index)?.type_name.trim();
+    (!kind.is_empty()).then(|| {
+        fill(
+            c::UNKNOWN_TYPE,
+            &[("catalog", card.catalog()), ("type", kind)],
+        )
+    })
 }
 
 /// The card's only input is a block this version does not know: 更新 and no submit.
@@ -2591,5 +2712,54 @@ mod leaf_tests {
         FOLDERS.with(|f| f.borrow_mut().insert(("a".into(), 1), failed));
         forget_folder("a", 1);
         assert!(FOLDERS.with(|f| f.borrow().get(&("a".to_string(), 1)).is_none()));
+    }
+}
+
+#[cfg(test)]
+mod schema_field_tests {
+    use super::*;
+
+    #[test]
+    fn slots_read_in_the_cards_zone_and_say_so_when_it_is_not_mine() {
+        // 2025-11-06 06:00 UTC is 15:00 in Tokyo and 14:00 in Shanghai.
+        let at: Millis = 1_762_408_800_000;
+        let tokyo = SlotZone::of("Asia/Tokyo");
+        assert_eq!(weekday(tokyo, at).1, "15:00");
+        assert_eq!(weekday(tokyo, at).2, "2025-11-06");
+        assert_eq!(weekday(SlotZone::of("Asia/Shanghai"), at).1, "14:00");
+        assert_eq!(slot_range(tokyo, at, at + 5_400_000), "15:00–16:30");
+        assert_eq!(slot_range(tokyo, at, at), "15:00", "no length: the start");
+        // A day that turns over in the zone moves to the next column.
+        assert_eq!(weekday(tokyo, at + 10 * 3_600_000).2, "2025-11-07");
+        // The hint names the zone and its offset when my clock reads another hour.
+        assert_eq!(
+            zone_hint("Asia/Tokyo", at, 8 * 3600),
+            Some(("Asia/Tokyo".to_string(), "UTC+9".to_string()))
+        );
+        assert_eq!(
+            zone_hint("Asia/Tokyo", at, 9 * 3600),
+            None,
+            "the same clock"
+        );
+        assert_eq!(zone_hint("Asia/Shanghai", at, 8 * 3600), None);
+        // An id the app does not know falls back to this computer's zone, with no hint.
+        assert_eq!(zone_hint("Mars/Olympus", at, 8 * 3600), None);
+        assert_eq!(utc_offset(0), "UTC");
+        assert_eq!(utc_offset(-(3 * 3600 + 1800)), "UTC−3:30");
+        assert_eq!(utc_offset(5 * 3600 + 2700), "UTC+5:45");
+    }
+
+    #[test]
+    fn an_unknown_block_says_its_catalog_and_type() {
+        let card: crate::data::cards_v2::CardV2 = serde_json::from_value(json!({
+            "v": 2, "catalog": "tc.card/2.2", "rev": 1, "intent": "info", "title": "t", "fallback": "f",
+            "blocks": [
+                { "id": "a", "type": "text", "text": "一" },
+                { "id": "m", "type": "map", "fallbackText": "地图：三家店的位置" }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(unknown_type(&card, 1).as_deref(), Some("tc.card/2.2 · map"));
+        assert_eq!(unknown_type(&card, 0), None, "a block this version knows");
     }
 }

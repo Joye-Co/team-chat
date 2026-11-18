@@ -251,6 +251,8 @@ impl CardUi {
 // ---------------------------------------------------------------------------
 // The tree
 
+use crate::ui::native::FocusRow as _;
+
 /// The card's blocks by id, and the top-level ones in reading order.
 pub(crate) struct Tree<'a> {
     by_id: HashMap<&'a str, &'a CardV2Block>,
@@ -563,7 +565,13 @@ pub(crate) fn render_node(
         _ => leaf(node, b, window, cx),
     };
     let el = interact::decorate(node, b, inner, window, cx);
-    parts::wrap(node, b, el, window, cx)
+    let el = parts::wrap(node, b, el, window, cx);
+    // 复制 where no 引用提问 part menu offers it. A container's children carry their own.
+    if b.is_container() {
+        el
+    } else {
+        b20::copyable_run(node.ctx, &[b], el, cx)
+    }
 }
 
 /// A leaf block: the 2.1 renderers, else the 2.0 one.
@@ -717,13 +725,20 @@ fn group(
         .min_w(px(0.))
         .h(crate::ui::native::tokens::height::SM)
         .when(can_collapse, |el| {
-            el.on_click(move |_, _, cx| {
-                ui.update(cx, |u, cx| {
-                    let b = u.block_mut(&gid);
-                    b.collapsed = Some(!closed);
-                    cx.notify();
+            // The head of a section that folds is a row control: the row hover reaching
+            // past the text, the pointer, a tab stop with the focus ring and Enter / Space.
+            el.mx(-space::S6)
+                .px(space::S6)
+                .rounded(crate::ui::native::tokens::radius::ITEM)
+                .focus_row(false, cx)
+                .cursor_pointer()
+                .on_click(move |_, _, cx| {
+                    ui.update(cx, |u, cx| {
+                        let b = u.block_mut(&gid);
+                        b.collapsed = Some(!closed);
+                        cx.notify();
+                    })
                 })
-            })
         })
         .when(can_collapse, |el| {
             el.child(ui::icon(
@@ -792,55 +807,53 @@ fn tabs(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) -> AnyE
         .filter(|t| tabs.iter().any(|x| &x.id == t))
         .or_else(|| tabs.first().map(|t| t.id.clone()))
         .unwrap_or_default();
+    let _ = k;
+    // The one tabs control of the kit (gpui-component buttons on a segment track, §1.8):
+    // every tab a tab stop with its hover and focus ring. Many long labels scroll sideways
+    // inside the card instead of pushing it wide.
+    let declared = b
+        .base()
+        .is_some_and(|x| x.events().iter().any(|e| e == "tab.open"));
+    let ids: Vec<String> = tabs.iter().map(|t| t.id.clone()).collect();
+    let selected = ids.iter().position(|t| *t == current).unwrap_or(0);
+    let (ui, emit, bid) = (
+        node.ctx.ui.clone(),
+        interact::Emitter::of(node.ctx),
+        id.clone(),
+    );
+    let control = crate::ui::native::Segmented::new(
+        node.ctx.id(format!("tabs-{id}")),
+        tabs.iter()
+            .map(|t| crate::ui::native::Segment::Label(t.label.clone().into())),
+    )
+    .selected(selected)
+    .on_change(move |ix, _, cx| {
+        let Some(tid) = ids.get(ix).cloned() else {
+            return;
+        };
+        let first = ui.update(cx, |u, cx| {
+            let b = u.block_mut(&bid);
+            b.tab = Some(tid.clone());
+            cx.notify();
+            b.opened.insert(tid.clone())
+        });
+        if first && declared {
+            emit.send(
+                &bid,
+                "tab.open",
+                serde_json::json!({ "tabId": tid }),
+                None,
+                cx,
+            );
+        }
+    });
     let bar = div()
+        .id(node.ctx.id(format!("tabs-scroll-{id}")))
+        .max_w_full()
         .flex()
-        .flex_none()
-        .p(px(2.))
-        .gap(crate::ui::native::tokens::space::S2)
-        .rounded(theme::radius::MD)
-        .bg(k.sunken)
-        .children(tabs.iter().map(|t| {
-            let on = t.id == current;
-            let ui = node.ctx.ui.clone();
-            let emit = interact::Emitter::of(node.ctx);
-            let (bid, tid) = (id.clone(), t.id.clone());
-            let declared = b
-                .base()
-                .is_some_and(|x| x.events().iter().any(|e| e == "tab.open"));
-            div()
-                .id(node.ctx.id(format!("tab-{id}-{}", t.id)))
-                .h(px(26.))
-                .px(space::S10)
-                .rounded(crate::ui::native::tokens::radius::ITEM)
-                .flex()
-                .items_center()
-                .text_size(crate::ui::native::tokens::text::UI.0)
-                .text_color(if on { k.ink } else { k.ink_2 })
-                .when(on, |el| {
-                    el.bg(k.bg)
-                        .font_weight(theme::MEDIUM_WEIGHT)
-                        .shadow(k.sec_hi())
-                })
-                .when(!on, |el| el.hover(|s| s.text_color(k.ink)))
-                .on_click(move |_, _, cx| {
-                    let first = ui.update(cx, |u, cx| {
-                        let b = u.block_mut(&bid);
-                        b.tab = Some(tid.clone());
-                        cx.notify();
-                        b.opened.insert(tid.clone())
-                    });
-                    if first && declared {
-                        emit.send(
-                            &bid,
-                            "tab.open",
-                            serde_json::json!({ "tabId": tid }),
-                            None,
-                            cx,
-                        );
-                    }
-                })
-                .child(t.label.clone())
-        }));
+        .overflow_x_scroll()
+        .restrict_scroll_to_axis()
+        .child(control);
     let pane = tabs
         .iter()
         .find(|t| t.id == current)
@@ -849,7 +862,7 @@ fn tabs(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) -> AnyE
         .flex()
         .flex_col()
         .gap(space::S12)
-        .child(div().flex().child(bar))
+        .child(div().flex().min_w(px(0.)).child(bar))
         .children(pane)
         .into_any_element()
 }

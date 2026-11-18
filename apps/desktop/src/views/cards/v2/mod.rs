@@ -231,9 +231,13 @@ pub fn render(
         .as_ref()
         .map(|p| p.drafts_kept.iter().map(|s| s.to_string()).collect())
         .unwrap_or_default();
+    let tab = env.preset.as_ref().and_then(|p| p.tab);
     let ui = window.use_keyed_state(SharedString::from(format!("{key}-ui")), cx, |_, _| {
         let mut u = super::v21::CardUi::new(prev);
         u.drafts_kept = kept.into_iter().collect();
+        if let Some((block, tab)) = tab {
+            u.block_mut(block).tab = Some(tab.to_string());
+        }
         u
     });
     let seen = ui.read(cx).seen.clone();
@@ -1392,7 +1396,14 @@ fn title(ctx: &Ctx, has_header: bool, cx: &App) -> AnyElement {
         // A title is one line of text: line breaks and runs of spaces collapse
         // (break-ui), and it wraps at most to 2 lines.
         .line_clamp(2)
-        .child(one_line_text(&ctx.card.title))
+        // 复制 on the title copies what the card says: its title and its one-line reading.
+        .child(blocks::copyable(
+            ctx.id("copy-title"),
+            card_text(ctx.card),
+            div()
+                .child(one_line_text(&ctx.card.title))
+                .into_any_element(),
+        ))
         // --- inc-cards21: the 2.1 summary line under the title ---
         .when_some(
             ctx.card
@@ -1412,6 +1423,26 @@ fn title(ctx: &Ctx, has_header: bool, cx: &App) -> AnyElement {
             },
         )
         .into_any_element()
+}
+
+/// The words of a card for the clipboard: its title, its summary and its fallback (the
+/// one-line reading every card carries), each once.
+pub(crate) fn card_text(card: &CardV2) -> String {
+    let mut out: Vec<String> = Vec::new();
+    for part in [
+        Some(one_line_text(&card.title)),
+        card.summary.clone(),
+        Some(card.fallback.clone()),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let part = part.trim().to_string();
+        if !part.is_empty() && !out.contains(&part) {
+            out.push(part);
+        }
+    }
+    out.join("\n")
 }
 
 /// A card that is not fetched yet (§2.14): the card frame with skeletons in
@@ -2279,13 +2310,70 @@ fn shown_label(card: &CardV2, action: &CardV2Action) -> String {
         || submit_action(card).is_some_and(|s| s.id == action.id);
     let asks_first = matches!(kind, CardActionKind::Submit | CardActionKind::Reject)
         && (kind == CardActionKind::Submit && guarded && irreversible || action.confirm.is_some());
+    let label = action_label(card, action);
     if asks_first {
-        crate::copy::fill(
-            crate::copy::desk::DESK_ACTION_MORE,
-            &[("label", &action.label)],
-        )
+        crate::copy::fill(crate::copy::desk::DESK_ACTION_MORE, &[("label", &label)])
     } else {
-        action.label.clone()
+        label
     }
 }
+
+/// The words on an answer button: the action's label, or, on the card's one submit, the
+/// `submitLabel` its questionnaire names (the member's own word for the step, bots.md).
+pub(crate) fn action_label(card: &CardV2, action: &CardV2Action) -> String {
+    let submit = submit_action(card).is_some_and(|s| s.id == action.id);
+    card.blocks
+        .iter()
+        .find_map(|b| match b {
+            CardV2Block::Questionnaire {
+                submit_label: Some(l),
+                ..
+            } if submit && !l.trim().is_empty() => Some(l.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| action.label.clone())
+}
 // --- end v13/ux-pages ---
+
+#[cfg(test)]
+mod label_tests {
+    use super::*;
+
+    #[test]
+    fn the_submit_button_takes_the_questionnaires_own_word() {
+        let card = |submit: Option<&str>| -> CardV2 {
+            let mut q = serde_json::json!({ "id": "qs", "type": "questionnaire", "children": ["ok"],
+                "fallbackText": "一个问题" });
+            if let Some(s) = submit {
+                q["submitLabel"] = serde_json::json!(s);
+            }
+            serde_json::from_value(serde_json::json!({
+                "v": 2, "catalog": "tc.card/2.1", "rev": 1, "intent": "ask", "title": "t", "fallback": "f",
+                "ask": { "from": ["me"] },
+                "blocks": [ q,
+                    { "id": "ok", "type": "confirm", "label": "可以吗", "yes": "可以", "no": "不行", "fallbackText": "f" } ],
+                "actions": [
+                    { "id": "send", "label": "提交", "style": "primary", "kind": "submit" },
+                    { "id": "later", "label": "晚点再说", "kind": "reject" } ]
+            }))
+            .unwrap()
+        };
+        let named = card(Some("一起提交"));
+        assert_eq!(
+            action_label(&named, &named.actions.as_ref().unwrap()[0]),
+            "一起提交"
+        );
+        assert_eq!(
+            action_label(&named, &named.actions.as_ref().unwrap()[1]),
+            "晚点再说",
+            "only the submit"
+        );
+        let plain = card(None);
+        assert_eq!(
+            action_label(&plain, &plain.actions.as_ref().unwrap()[0]),
+            "提交"
+        );
+        // The card's words for the clipboard: each line once.
+        assert_eq!(card_text(&plain), "t\nf");
+    }
+}

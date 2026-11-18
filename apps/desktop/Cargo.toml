@@ -17,6 +17,8 @@ qrcode = { version = "0.14", default-features = false }
 gpui-base = "=0.8.1"
 futures = "0.3"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# The time zone a card's time slots are shown in (`slots.tz`, views/cards/v21/leaves.rs).
+chrono-tz = { version = "0.10", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
 # The chat-core provider (src/provider/).

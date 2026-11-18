@@ -63,6 +63,31 @@ pub const METRICS_MANY: &str = "cv2-metrics-many";
 pub const CHART_MANY: &str = "cv2-chart-many";
 /// A 200-point bar chart.
 pub const CHART_BARS: &str = "cv2-chart-bars";
+/// Pictures of the image samples, written once to a temporary folder: a tall phone
+/// screenshot, a panorama and a small picture, as plain bands (no fonts needed).
+pub fn sample_picture(file_id: &str) -> Option<std::path::PathBuf> {
+    let (w, h) = match file_id {
+        "f-pic-tall" => (600u32, 1300u32),
+        "f-pic-wide" => (1600, 400),
+        "f-pic-small" => (200, 150),
+        _ => return None,
+    };
+    let dir = std::env::temp_dir()
+        .join("team-chat-v2-samples")
+        .join("pictures");
+    let path = dir.join(format!("{file_id}.png"));
+    if !path.exists() {
+        std::fs::create_dir_all(&dir).ok()?;
+        let bands = [[0xDC, 0xE3, 0xE8], [0xC9, 0xB9, 0xA6], [0xB7, 0xC4, 0xCF]];
+        let img = image::RgbImage::from_fn(w, h, |x, y| {
+            let band = if w > h { x * 6 / w } else { y * 6 / h } as usize;
+            image::Rgb(bands[band % bands.len()])
+        });
+        img.save(&path).ok()?;
+    }
+    Some(path)
+}
+
 /// A table at the schema's limits: 200 rows by 20 columns, with a 合计 row.
 pub const TABLE_BIG: &str = "cv2-table-big";
 /// A diff near the 32 KB limit: 600 lines in several hunks, one line 400 columns wide.
@@ -446,7 +471,10 @@ fn form_card() -> serde_json::Value {
                 { "id": "fe", "label": "前端实习" }, { "id": "data", "label": "数据实习" },
                 { "id": "design", "label": "设计实习" }
             ]},
-            { "type": "input", "id": "start", "kind": "date", "label": "入职日期", "required": true },
+            { "type": "input", "id": "start", "kind": "date", "label": "入职日期", "required": true,
+              "help": "周一入职的话，账号周五前开好" },
+            { "type": "input", "id": "days", "kind": "number", "label": "每周到岗", "unit": "天",
+              "min": 1, "max": 5, "default": 3 },
             { "type": "input", "id": "groups", "kind": "chips", "label": "要进的群", "options": [
                 { "id": "dev", "label": "开发" }, { "id": "ops", "label": "运维" },
                 { "id": "growth", "label": "拾光增长" }, { "id": "all", "label": "全员" }
