@@ -340,8 +340,9 @@ impl MembersPage {
             window,
             cx,
         )
-        // Nothing to add to while the team has not loaded (§2.15: the
-        // toolbar stays in place, its controls disabled).
+        // Nothing to add to while the team could not be read (§2.15: the
+        // toolbar stays in place, its controls disabled). The first sync
+        // draws no create button at all (§2.14), see below.
         .disabled(!owner || load != PageLoad::Ready)
         .when(load != PageLoad::Ready, |b| b.opacity(0.5))
         .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
@@ -398,7 +399,9 @@ impl MembersPage {
         if load == PageLoad::Ready {
             row = row.group(div().flex_none().child(filter));
         }
-        row = row.group(rows::toolbar_capsule(add, cx));
+        if load != PageLoad::Loading {
+            row = row.group(rows::toolbar_capsule(add, cx));
+        }
         // The subtitle slot stays in every state, so the title never moves.
         row = row.subtitle(match load {
             PageLoad::Ready => fill(c::MEMBERS_COUNT, &[("n", &entries.len().to_string())]),
@@ -735,14 +738,23 @@ impl MembersPage {
                 &[("name", &member_name(&self.services, r))],
             ));
         }
-        if !groups.is_empty() {
-            parts.push(fill(
+        // The names are quoted: a group called 开发 must not read as a verb.
+        match groups.as_slice() {
+            [] => {}
+            [group] => parts.push(fill(c::MEMBERS_IN_ONE_GROUP, &[("group", group)])),
+            several => parts.push(fill(
                 c::MEMBERS_IN_GROUPS,
                 &[
-                    ("groups", &groups.join(c::MEMBERS_LIST_SEP)),
-                    ("n", &count_word(groups.len())),
+                    (
+                        "groups",
+                        &several
+                            .iter()
+                            .map(|g| fill(c::MEMBERS_GROUP_QUOTED, &[("group", g)]))
+                            .collect::<String>(),
+                    ),
+                    ("n", &count_word(several.len())),
                 ],
-            ));
+            )),
         }
         let mut actions: Vec<AnyElement> = Vec::new();
         if m.is_bot() {
@@ -2037,9 +2049,11 @@ fn member_skeleton(cx: &App) -> gpui::Div {
                     d.child(
                         div()
                             .absolute()
-                            .bottom_0()
+                            // Where the loaded row draws its line: under the
+                            // row, out to the row's own edge.
+                            .bottom(-crate::ui::native::metrics::HAIRLINE)
                             .left(AVATAR + rows::ROW_GAP)
-                            .right_0()
+                            .right(-rows::ROW_PAD)
                             .h(crate::ui::native::metrics::HAIRLINE)
                             .bg(k.separator),
                     )
