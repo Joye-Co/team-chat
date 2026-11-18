@@ -352,6 +352,17 @@ fn split_match(label: &str, query: &str) -> Option<(String, String, String)> {
     Some((s(0..at), s(at..at + q.len()), s(at + q.len()..chars.len())))
 }
 
+/// Where `query` matches in `text`, in the char indices `weighted` takes.
+fn match_ranges(text: &str, query: &str) -> Vec<std::ops::Range<usize>> {
+    split_match(text, query)
+        .map(|(pre, hit, _)| {
+            let start = pre.chars().count();
+            start..start + hit.chars().count()
+        })
+        .into_iter()
+        .collect()
+}
+
 /// The leading symbol of a 话题 row (§6): needs you `amber`, live work a
 /// `blue` dot, done a `secondary` check, waiting a clock, otherwise `number`.
 pub fn topic_symbol(
@@ -665,14 +676,7 @@ impl Switcher {
             }
             None => (e.label.clone(), false),
         };
-        let ranges: Vec<std::ops::Range<usize>> = split_match(&label, query)
-            .map(|(pre, hit, _)| {
-                // `weighted` takes char indices.
-                let start = pre.chars().count();
-                start..start + hit.chars().count()
-            })
-            .into_iter()
-            .collect();
+        let ranges = match_ranges(&label, query);
         // A 群's member count never truncates; a 话题's 群 and a person's
         // 岗位 give way before the title.
         let (meta, count) = match (&self.scope, &e.target) {
@@ -702,7 +706,10 @@ impl Switcher {
             )
             .when(untitled, |el| el.text_color(ink2)),
         )
-        .children(meta.map(|d| palette::meta(d, ink2)))
+        .children(meta.map(|d| {
+            let ranges = match_ranges(&d, query);
+            palette::marked_meta(&d, &ranges, ink2)
+        }))
         .children(count.map(|c| palette::count(c, ink2)))
         .child(div().flex_1())
         .child(palette::trailing(status, time, active, ink2))
@@ -1133,6 +1140,16 @@ pub mod palette {
     /// The 14 muted meta after the title: it takes only the room the title
     /// leaves (no flex basis), so it gives way before the title.
     pub fn meta(text: impl Into<SharedString>, ink2: Hsla) -> gpui::Div {
+        meta_slot(ink2).child(text.into())
+    }
+
+    /// [`meta`] with the matched ranges in 600, as in the title; the ink
+    /// stays muted, so the title still leads.
+    pub fn marked_meta(text: &str, ranges: &[std::ops::Range<usize>], ink2: Hsla) -> gpui::Div {
+        meta_slot(ink2).child(weighted(text, ranges))
+    }
+
+    fn meta_slot(ink2: Hsla) -> gpui::Div {
         div()
             .flex_basis(gpui::Pixels::ZERO)
             .flex_grow(1000.)
@@ -1142,7 +1159,6 @@ pub mod palette {
             .whitespace_nowrap()
             .text_ellipsis()
             .text_color(ink2)
-            .child(text.into())
     }
 
     /// A count after the title and meta (`13 位成员`): never truncated.
