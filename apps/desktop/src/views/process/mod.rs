@@ -218,6 +218,9 @@ pub struct ProcessView {
     titled: bool,
     /// 全部记录 shows every run, not only the newest [`RUNS_FOLDED`].
     runs_expanded: bool,
+    /// The run whose 重试 waits for its answer: the button shows its spinner and takes no
+    /// second press.
+    retrying: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -257,6 +260,7 @@ impl ProcessView {
             raw_open: Default::default(),
             titled: true,
             runs_expanded: false,
+            retrying: None,
             _subscriptions: subscriptions,
         };
         this.open_topic(open, cx);
@@ -826,10 +830,33 @@ impl ProcessView {
                 PushSize::Regular,
                 cx,
             )
-            .on_click(cx.listener(move |this, _, _, cx| {
+            .loading(self.retrying.as_deref() == Some(run.id.as_str()))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                if this.retrying.is_some() {
+                    return;
+                }
+                // A new run with the same request. A refusal blocks: an alert, as on the
+                // run's row in the 话题.
                 let rx = this.services.provider.retry_member_problem(&bot, &id);
-                cx.spawn(async move |_, _| {
-                    let _ = rx.await;
+                this.retrying = Some(id.clone());
+                let handle = window.window_handle();
+                cx.spawn(async move |this, cx| {
+                    let result = rx.await.unwrap_or(Err(crate::data::AdminError::Other));
+                    let _ = this.update(cx, |this, cx| {
+                        this.retrying = None;
+                        cx.notify();
+                    });
+                    if let Err(e) = result {
+                        let _ = handle.update(cx, |_, window, cx| {
+                            crate::views::nav::dialogs::error_alert(
+                                crate::copy::timeline::RUN_RETRY_REFUSED,
+                                crate::views::settings::widgets::error_text(e),
+                                |_, _| {},
+                                window,
+                                cx,
+                            )
+                        });
+                    }
                 })
                 .detach();
                 cx.notify();
@@ -1031,7 +1058,7 @@ fn developer_panel(rows: Vec<(&'static str, String)>, cx: &App) -> AnyElement {
                         cx,
                     )
                     .on_click(move |_, _, cx| {
-                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone()))
+                        crate::views::media::parts::copy_text(text.clone(), p::COPIED, cx)
                     }),
                 ),
         )

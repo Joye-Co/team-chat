@@ -735,7 +735,7 @@ fn value_with_copy(
     window: &Window,
     cx: &App,
 ) -> gpui::Div {
-    use gpui::{ClipboardItem, InteractiveElement as _, StatefulInteractiveElement as _};
+    use gpui::{InteractiveElement as _, StatefulInteractiveElement as _};
     let k = native_colors(cx);
     let tip: SharedString = value.clone().into();
     let copy = value.clone();
@@ -769,7 +769,7 @@ fn value_with_copy(
                 cx,
             )
             .on_click(move |_, _, cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
+                crate::views::media::parts::copy_text(copy.clone(), s::COPIED, cx)
             }),
         )
 }
@@ -812,7 +812,6 @@ fn dev_value_with_copy(
     window: &Window,
     cx: &App,
 ) -> gpui::AnyElement {
-    use gpui::ClipboardItem;
     let copy = value.clone();
     div()
         .w_full()
@@ -837,7 +836,7 @@ fn dev_value_with_copy(
                 cx,
             )
             .on_click(move |_, _, cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
+                crate::views::media::parts::copy_text(copy.clone(), s::COPIED, cx)
             }),
         )
         .into_any_element()
