@@ -23,10 +23,11 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
-macro_rules! log {
-    ($($a:tt)*) => {{
-        eprintln!("{} {}", crate::proto::now_ms(), format!($($a)*));
-    }};
+/// The lines of this module say that a feature is off: kept for 最近的问题 too.
+macro_rules! warn {
+    ($($a:tt)*) => {
+        crate::problems::warn(format_args!($($a)*))
+    };
 }
 
 /// The folder of the machine key and the key store: the token file's.
@@ -82,18 +83,31 @@ impl MachineKey {
         let path = dir(cfg).join("machine.key");
         if path.exists() {
             if !private_enough(&path) {
-                log!("machine.key is readable by others; keys from the app are off");
+                warn!("machine.key is readable by others; keys from the app are off");
                 return None;
             }
-            let bytes = std::fs::read(&path).ok()?;
-            let raw: [u8; 32] = bytes.as_slice().try_into().ok()?;
+            let bytes = match std::fs::read(&path) {
+                Ok(b) => b,
+                Err(e) => {
+                    warn!("machine.key cannot be read: {e}; keys from the app are off");
+                    return None;
+                }
+            };
+            let Ok(raw) = <[u8; 32]>::try_from(bytes.as_slice()) else {
+                // The length only: never the bytes.
+                warn!(
+                    "machine.key is not a key ({} bytes, not 32); keys from the app are off",
+                    bytes.len()
+                );
+                return None;
+            };
             return Some(MachineKey {
                 secret: crypto_box::SecretKey::from(raw),
             });
         }
         let secret = crypto_box::SecretKey::generate(&mut crypto_box::aead::OsRng);
         if let Err(e) = write_private(&path, &secret.to_bytes()) {
-            log!("cannot write machine.key: {e}; keys from the app are off");
+            warn!("cannot write machine.key: {e}; keys from the app are off");
             return None;
         }
         Some(MachineKey { secret })
@@ -184,7 +198,7 @@ impl SecretStore {
 
     pub fn at(path: PathBuf) -> SecretStore {
         let keys = if path.exists() && !private_enough(&path) {
-            log!("secrets.json is readable by others; its keys are not used");
+            warn!("secrets.json is readable by others; its keys are not used");
             BTreeMap::new()
         } else {
             std::fs::read(&path)
