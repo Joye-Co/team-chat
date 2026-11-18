@@ -407,7 +407,7 @@ impl TopicRail {
             .child(
                 div()
                     .flex()
-                    .child(StatusBadge::new(badge, text).max_w(px(260.)).on_fill()),
+                    .child(StatusBadge::new(badge, text).max_w(px(260.)).on_fill(true)),
             )
             .children(detail.map(|step| {
                 div()
@@ -780,7 +780,7 @@ impl TopicRail {
             ChangeState::Closed => (BadgeState::Offline, c::CHANGES_CLOSED),
             _ => (BadgeState::Queued, c::CHANGES_OPEN),
         };
-        let state = StatusBadge::new(state_kind, state_text).on_fill();
+        let state = StatusBadge::new(state_kind, state_text).on_fill(true);
         let checks_ok = ch.checks_total > 0 && ch.checks_passed == ch.checks_total;
         let mut section = self
             .section(CHANGES, c::TOPIC_RAIL_CHANGES, cx)
@@ -819,7 +819,7 @@ impl TopicRail {
                             ],
                         ),
                     )
-                    .on_fill(),
+                    .on_fill(true),
                     cx,
                 )),
             );
@@ -1057,7 +1057,7 @@ impl TopicRail {
                                                 c::MACHINE_IDLE
                                             },
                                         )
-                                        .on_fill(),
+                                        .on_fill(true),
                                     ),
                                 ),
                         )

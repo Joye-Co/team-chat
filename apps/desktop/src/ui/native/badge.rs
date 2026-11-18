@@ -311,8 +311,8 @@ impl StatusBadge {
 
     /// The badge sits on a filled surface (an inspector `group` box): see
     /// [`Badge::on_fill`].
-    pub fn on_fill(mut self) -> Self {
-        self.on_fill = true;
+    pub fn on_fill(mut self, on_fill: bool) -> Self {
+        self.on_fill = on_fill;
         self
     }
 }
