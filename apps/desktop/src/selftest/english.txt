@@ -134,7 +134,7 @@
 只读	Read-only
 可以提 PR	Can open PRs
 可以部署和回滚	Can deploy and roll back
-添加成员…	Add member…
+添加 AI 成员…	Add AI member…
 添加电脑	Add computer
 用这台电脑	Use this computer
 团队的电脑	Team computers

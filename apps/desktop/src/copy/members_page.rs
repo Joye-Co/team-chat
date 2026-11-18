@@ -16,7 +16,6 @@ crate::copy! {
     MEMBERS_PICK = "选一位成员看详情",
     MEMBERS_ADD = "添加",
     MEMBERS_INVITE = "邀请同事",
-    MEMBERS_ADD_BOT = "添加成员",
     MEMBERS_SECTION_WAITING = "等你",
     MEMBERS_SECTION_WORKING = "在做事",
     MEMBERS_SECTION_IDLE = "空闲",
@@ -73,7 +72,7 @@ crate::copy! {
     // --- pages track (v12 native) ---
     MEMBERS_COUNT = "{n} 位",
     MEMBERS_INVITE_MORE = "邀请同事…",
-    MEMBERS_ADD_BOT_MORE = "添加成员…",
+    MEMBERS_ADD_BOT_MORE = "添加 AI 成员…",
     MEMBERS_FILTER_EMPTY = "没有成员在这个筛选里",
     MEMBERS_YOU_WORD = "你",
     MEMBERS_HAND_OVER_MORE = "交代…",

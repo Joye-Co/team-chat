@@ -13,7 +13,6 @@ crate::copy! {
     GROUP_PAGE_NEEDS_REVIEW_PR = "等你审 PR #{n}",
     GROUP_PAGE_NEEDS_DECISION = "需要你拍板",
     GROUP_PAGE_NEEDS_ANSWER = "等你回复",
-    GROUP_PAGE_WAITING_ON = "等{name} 确认",
     GROUP_PAGE_ASKED_BY = "{name} 提出",
     GROUP_PAGE_TESTS_PASSED = "测试 {n} 项通过",
     GROUP_PAGE_OUTPUTS_N = "产出 {n}",
