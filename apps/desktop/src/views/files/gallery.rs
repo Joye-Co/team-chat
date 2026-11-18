@@ -21,7 +21,7 @@ use gpui::{
 use gpui_component::menu::{ContextMenuExt as _, PopupMenuItem};
 
 use super::{
-    AUTO_DOWNLOAD_MAX_BYTES, OpenAction, error_text,
+    AUTO_DOWNLOAD_MAX_BYTES, OpenAction, copy_picture, error_text,
     export::{self, FileItem as _, FileRef},
     open_file,
 };
@@ -432,9 +432,16 @@ fn tile(
                     PopupMenuItem::new(label)
                         .on_click(move |_, _, cx| open_file(&provider, &g, &t, &file, what, cx))
                 };
+                let copy = {
+                    let (provider, file) = (p_menu.clone(), file_menu.clone());
+                    let (g, t) = (g_menu.clone(), t_menu.clone());
+                    PopupMenuItem::new(f::VIEWER_COPY)
+                        .on_click(move |_, _, cx| copy_picture(&provider, &g, &t, &file, cx))
+                };
                 let menu = menu
                     .item(item(f::VIEWER_OPEN, OpenAction::Open))
-                    .item(item(f::REVEAL, OpenAction::RevealInFinder));
+                    .item(item(f::REVEAL, OpenAction::RevealInFinder))
+                    .item(copy);
                 export::menu_items(menu, &menu_target, at)
             }),
         corners,

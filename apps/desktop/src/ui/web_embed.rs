@@ -305,6 +305,8 @@ pub struct WebEmbedState {
     end: Option<Pixels>,
     /// The read of `end` for the loaded document came back (with an end or without).
     end_read: bool,
+    /// The newest reading of the end: an older one still waiting stops.
+    end_reading: u64,
     /// The host base stylesheet given to the page, by its token values.
     base: Option<String>,
     #[cfg(any(target_os = "macos", windows))]
@@ -374,6 +376,7 @@ impl WebEmbedState {
             fade: None,
             end: None,
             end_read: false,
+            end_reading: 0,
             base: None,
             #[cfg(any(target_os = "macos", windows))]
             native: None,
@@ -735,42 +738,62 @@ impl WebEmbedState {
     /// Reads, after `delay_ms`, where an inline page ends on a whole block
     /// (`window.__tcEnd`, kept by the cover script; a heading is never the
     /// last block: it goes with the block it heads, §2.21) and shrinks the frame to it.
-    fn measure_end_later(&self, cx: &mut Context<Self>, delay_ms: u64) {
+    /// The page keeps settling after it loads (its styles, its fonts), so the end counts as
+    /// read once two readings agree or the readings run out.
+    fn measure_end_later(&mut self, cx: &mut Context<Self>, delay_ms: u64) {
         if !self.pass_scroll {
             return;
         }
+        self.end_reading += 1;
+        let reading = self.end_reading;
         #[cfg(any(target_os = "macos", windows))]
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(std::time::Duration::from_millis(delay_ms))
                 .await;
-            let (tx, rx) = futures::channel::oneshot::channel();
-            let started = this
-                .update(cx, |s, _| match &s.native {
-                    Some(n) => {
-                        n.evaluate_text("String(window.__tcEnd||'')", move |v| {
-                            let _ = tx.send(v);
-                        });
-                        true
-                    }
-                    None => false,
-                })
-                .unwrap_or(false);
-            if !started {
-                return;
-            }
-            let end = rx
-                .await
-                .ok()
-                .flatten()
-                .and_then(|v| v.parse::<f32>().ok())
-                .filter(|v| *v >= MIN_INLINE_END);
-            let _ = this.update(cx, |s, cx| {
-                s.end_read = true;
-                if let Some(end) = end {
-                    s.end = Some(px(end.ceil()));
+            let mut last = None;
+            for _ in 0..END_READS {
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let started = this
+                    .update(cx, |s, _| match &s.native {
+                        Some(n) if s.end_reading == reading => {
+                            n.evaluate_text("String(window.__tcEnd||'')", move |v| {
+                                let _ = tx.send(v);
+                            });
+                            true
+                        }
+                        _ => false,
+                    })
+                    .unwrap_or(false);
+                if !started {
+                    return;
                 }
-                cx.notify();
+                let end = rx
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .filter(|v| *v >= MIN_INLINE_END);
+                let settled = end.is_some() && end == last;
+                let _ = this.update(cx, |s, cx| {
+                    if let Some(end) = end.filter(|_| s.end_reading == reading) {
+                        s.end = Some(px(end.ceil()));
+                        cx.notify();
+                    }
+                });
+                if settled {
+                    break;
+                }
+                last = end;
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(END_READ_GAP_MS))
+                    .await;
+            }
+            let _ = this.update(cx, |s, cx| {
+                if s.end_reading == reading {
+                    s.end_read = true;
+                    cx.notify();
+                }
             });
         })
         .detach();
@@ -919,8 +942,14 @@ impl WebEmbedState {
                 }
             }
         }
+        let look = (self.fade.clone(), self.base.clone());
         self.apply_fade(cx);
         self.apply_base(cx);
+        // A new look (the theme) can move where the page ends.
+        if self.end_read && look != (self.fade.clone(), self.base.clone()) {
+            self.end_read = false;
+            self.measure_end_later(cx, 150);
+        }
         // Right after this frame shows, test whether an overlay that blocks the mouse lies
         // over the page (its hitbox is not the top one at a sample point).
         if !self.check_pending {
@@ -1008,6 +1037,7 @@ body{{margin:0;padding:var(--tc-pad)}}\
 h1{{font-size:24px;line-height:32px;font-weight:600;margin:0 0 8px}}\
 h2{{font-size:18px;line-height:28px;font-weight:600;margin:24px 0 8px}}\
 h3{{font-size:16px;line-height:24px;font-weight:600;margin:16px 0 8px}}\
+body>:first-child{{margin-top:0}}\
 p{{margin:0 0 12px}}small{{color:var(--tc-muted)}}\
 a{{color:inherit;text-underline-offset:2px}}\
 table{{border-collapse:collapse;width:100%;margin:8px 0 16px;font-variant-numeric:tabular-nums}}\
@@ -1030,6 +1060,7 @@ height:{ctl}px;padding:0 {ctl_pad}px;border:1px solid {edge};border-radius:var(-
 font-size:{ui}px;line-height:{ui_line}px;outline:0}}\
 label>br+:is(input:not([type]),input:is([type=text],[type=search],[type=email],[type=url],[type=tel],[type=number],[type=password],[type=date],[type=time],[type=datetime-local]),select),\
 p>input:only-child:is(:not([type]),[type=text],[type=search],[type=email],[type=url],[type=tel],[type=number],[type=password]){{display:block;width:100%}}\
+label>br+:is(input:not([type]),input:is([type=text],[type=search],[type=email],[type=url],[type=tel],[type=number],[type=password],[type=date],[type=time],[type=datetime-local]),select,textarea){{margin-top:{s8}px}}\
 p:has(>button):not(:has(>:not(button))){{display:flex;flex-wrap:wrap;align-items:center;gap:{s8}px}}\
 textarea{{height:auto;min-height:{area}px;padding:{s6}px {ctl_pad}px;line-height:22px;resize:vertical;display:block;width:100%}}\
 select{{appearance:none;-webkit-appearance:none;padding-right:{s32}px;background-repeat:no-repeat;background-position:right {s8}px center;\
@@ -1167,9 +1198,9 @@ var hs=document.body?document.body.querySelectorAll('h1,h2,h3,h4,h5,h6,figcaptio
 for(var j=0;j<hs.length;j++){{var q=hs[j].getBoundingClientRect();if(q.height>0&&q.bottom<=cut&&q.bottom>lb){{lb=q.bottom;lh=q;}}}}\
 if(lh){{var after=false;for(var i=0;i<all.length;i++){{var el=all[i];if(el===d||/^(H[1-6]|FIGCAPTION)$/.test(el.tagName.toUpperCase()))continue;\
 var r=el.getBoundingClientRect();if(r.height>0&&r.width>0&&r.top>=lb-1&&r.bottom<=cut&&atomic(el,r)){{after=true;break;}}}}if(!after)cut=lh.top;}}\
-if(cut<h*0.35)cut=h;\
-if(cut<h){{var lz=-1;for(var i=0;i<all.length;i++){{var el=all[i];if(el===d)continue;var r=el.getBoundingClientRect();\
-if(r.height>0&&r.width>0&&r.bottom<=cut&&r.bottom>lz)lz=r.bottom;}}if(lz>0&&lz+16<cut)cut=lz+16;}}\
+var tall=cut<h*0.35;if(tall)cut=h;\
+var lz=-1;for(var i=0;i<all.length;i++){{var el=all[i];if(el===d)continue;var r=el.getBoundingClientRect();\
+if(r.height>0&&r.width>0&&r.bottom<=cut&&r.bottom>lz)lz=r.bottom;}}if(!tall&&lz>0&&lz+16<cut)cut=cut<h?lz+16:Math.ceil(lz+16);\
 window.__tcEnd=Math.floor(cut);d.style.height=Math.max(0,Math.ceil(h-cut))+'px';d.style.opacity='1';}};\
 window.addEventListener('scroll',u,{{passive:true}});window.addEventListener('resize',u);\
 try{{var o=new ResizeObserver(u);o.observe(document.documentElement);\
@@ -1347,6 +1378,10 @@ fn rect(b: Bounds<Pixels>) -> artifact_view::Rect {
 
 /// The shortest an inline page's frame gets when it ends early.
 const MIN_INLINE_END: f32 = 120.;
+/// How many times an inline page's end is read before the last reading stands.
+const END_READS: usize = 12;
+/// The time between two readings of an inline page's end.
+const END_READ_GAP_MS: u64 = 200;
 
 impl RenderOnce for WebEmbed {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {

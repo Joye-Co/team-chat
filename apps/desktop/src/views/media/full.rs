@@ -169,7 +169,9 @@ fn head(
         Some(copy) => tools
             .child(action(spec, "copy", Sym::Copy, cm::COPY).on_click(move |_, _, cx| copy(cx))),
         None => tools.child(
+            // The label's ink at 50 % (§1.8), not the disabled ghost's dimmer one.
             action(spec, "copy", Sym::Copy, cm::COPY)
+                .text_color(n.label)
                 .disabled(true)
                 .opacity(0.5),
         ),
@@ -316,6 +318,8 @@ fn bare_head(title: &str, close: CloseFn, cx: &App) -> gpui::Div {
     let off = |id: &'static str, sym: Sym, name: &'static str| {
         ui::native::icon_button_bare(id, sym, ui::native::IconSize::Regular)
             .named(name)
+            // The label's ink at 50 % (§1.8), not the disabled ghost's dimmer one.
+            .text_color(n.label)
             .disabled(true)
             .opacity(0.5)
     };
@@ -1000,13 +1004,19 @@ fn lightbox(
         spec.media.title.clone(),
         Head {
             meta: Some(meta.join(" · ").into()),
-            toggles: vec![
-                action(spec, "send", Sym::SendTo, cm::SEND_TO_TOPIC).on_click(move |_, _, cx| {
-                    if let Ok(bytes) = std::fs::read(&send_path) {
-                        parts::send_image(&target, bytes, cx);
-                    }
-                }),
-            ],
+            // Only with a 话题 to send to: an attachment's viewer has none.
+            toggles: parts::can_send_image(&target)
+                .then(|| {
+                    action(spec, "send", Sym::SendTo, cm::SEND_TO_TOPIC).on_click(
+                        move |_, _, cx| {
+                            if let Ok(bytes) = std::fs::read(&send_path) {
+                                parts::send_image(&target, bytes, cx);
+                            }
+                        },
+                    )
+                })
+                .into_iter()
+                .collect(),
             copy: Some(Rc::new(move |cx: &mut App| {
                 parts::copy_image_file(&copy_path, cx)
             })),
@@ -1415,21 +1425,24 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
                                 }
                             }),
                         )
-                        .child(
-                            ui::native::push_button(
-                                id(spec, "sendf"),
-                                cm::VIDEO_SEND_FRAME,
-                                ui::native::PushStyle::Outline,
-                                ui::native::PushSize::Small,
-                                cx,
+                        // Only with a 话题 to send to: an attachment's viewer has none.
+                        .when(parts::can_send_image(&target), |row| {
+                            row.child(
+                                ui::native::push_button(
+                                    id(spec, "sendf"),
+                                    cm::VIDEO_SEND_FRAME,
+                                    ui::native::PushStyle::Outline,
+                                    ui::native::PushSize::Small,
+                                    cx,
+                                )
+                                .icon(ui::icon(Sym::SendTo, px(13.), k.text_2))
+                                .on_click(move |_, _, cx| {
+                                    if let Some(png) = store::frame_png(&send_v, at) {
+                                        parts::send_image(&target, png, cx);
+                                    }
+                                }),
                             )
-                            .icon(ui::icon(Sym::SendTo, px(13.), k.text_2))
-                            .on_click(move |_, _, cx| {
-                                if let Some(png) = store::frame_png(&send_v, at) {
-                                    parts::send_image(&target, png, cx);
-                                }
-                            }),
-                        ),
+                        }),
                 )
                 .child(strip),
         )
@@ -1863,14 +1876,17 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
     let side = state.clone();
     let toolbar = div()
         .h(crate::ui::native::tokens::height::FOOTER_ROW)
-        .px(space::S12)
+        // The header's 32 actions on the header's columns: the first glyph under its
+        // icon, the last under 关闭.
+        .pl(space::S8)
+        .pr(space::S12)
         .flex()
         .items_center()
         .gap(space::S8)
         .border_b_1()
         .border_color(k.sep)
         .child(
-            tool(id(spec, "side"), Sym::SidebarToggle, cm::PDF_SIDEBAR)
+            action(spec, "side", Sym::SidebarToggle, cm::PDF_SIDEBAR)
                 .selected(sidebar)
                 .on_click(move |_, _, cx| {
                     side.update(cx, |s, cx| {
@@ -1885,7 +1901,7 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
                 .h(crate::ui::native::tokens::icon::MD)
                 .bg(k.sep),
         )
-        .child(tool(id(spec, "prev"), Sym::ChevronLeft, cm::PDF_PREV).on_click(go(-1)))
+        .child(action(spec, "prev", Sym::ChevronLeft, cm::PDF_PREV).on_click(go(-1)))
         .child(
             mono(
                 fill(
@@ -1896,9 +1912,9 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
             )
             .text_size(crate::ui::native::tokens::text::UI.0),
         )
-        .child(tool(id(spec, "next"), Sym::ChevronRight, cm::PDF_NEXT).on_click(go(1)))
+        .child(action(spec, "next", Sym::ChevronRight, cm::PDF_NEXT).on_click(go(1)))
         .child(div().flex_1())
-        .child(tool(id(spec, "zout"), Sym::Minus, cm::PDF_ZOOM_OUT).on_click(zoom_by(1. / 1.25)))
+        .child(action(spec, "zout", Sym::Minus, cm::PDF_ZOOM_OUT).on_click(zoom_by(1. / 1.25)))
         .child(
             mono(format!("{}%", (zoom * 100.).round()), k.text_1)
                 .text_size(crate::ui::native::tokens::text::MONO.0)
@@ -1906,7 +1922,7 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
                 .flex()
                 .justify_center(),
         )
-        .child(tool(id(spec, "zin"), Sym::Plus, cm::PDF_ZOOM_IN).on_click(zoom_by(1.25)));
+        .child(action(spec, "zin", Sym::Plus, cm::PDF_ZOOM_IN).on_click(zoom_by(1.25)));
     let mut thumbs = div()
         .id(id(spec, "thumbs"))
         .w(px(104.))
@@ -2242,6 +2258,21 @@ fn block_starts(lines: &[String], lang: text::Lang) -> Vec<bool> {
 
 // --- table --------------------------------------------------------------------------
 
+/// The table as it shows, tab-separated: the header, then the rows in `order`.
+fn table_text(t: &text::Table, order: &[usize]) -> String {
+    let line = |cells: &[String]| {
+        cells
+            .iter()
+            .map(|c| c.replace(['\t', '\n', '\r'], " "))
+            .collect::<Vec<_>>()
+            .join("\t")
+    };
+    std::iter::once(line(&t.header))
+        .chain(order.iter().map(|&i| line(&t.rows[i])))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn table(spec: &FullSpec, t: &text::Table, state: &Entity<MediaState>, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
     let cols = t.header.len().max(1);
@@ -2337,6 +2368,7 @@ fn table(spec: &FullSpec, t: &text::Table, state: &Entity<MediaState>, cx: &App)
     let rows = Arc::new(t.rows.clone());
     let numeric = Arc::new(t.numeric.clone());
     let order = Arc::new(order);
+    let (copied, shown_order) = (spec.media.clone(), order.clone());
     let list = uniform_list(id(spec, "rows"), order.len(), move |range, _window, cx| {
         let k = theme::colors(cx);
         range
@@ -2396,6 +2428,18 @@ fn table(spec: &FullSpec, t: &text::Table, state: &Entity<MediaState>, cx: &App)
                 .into(),
             ),
             toggles: vec![find_toggle(spec, state, cx)],
+            copy: Some(Rc::new(move |cx: &mut App| {
+                let Data::Table(t) = &copied.data else {
+                    return;
+                };
+                // A file longer than the rows read: the file itself, so nothing is cut.
+                let whole = (t.rows.len() < t.total_rows)
+                    .then(|| std::fs::read(copied.entry_path()).ok())
+                    .flatten()
+                    .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
+                let text = whole.unwrap_or_else(|| table_text(t, &shown_order));
+                super::parts::copy_text(text, cm::COPIED, cx)
+            })),
             ..Head::default()
         },
         cx,

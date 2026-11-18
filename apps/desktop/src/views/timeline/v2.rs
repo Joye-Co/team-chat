@@ -670,8 +670,9 @@ impl TimelineView {
         ));
         // §2.4 compact in-thread card on the one card surface (v18: radius
         // 14, the card fill, shadow sm and the 6 % ring, no 1 px border),
-        // the one width, p 16.
-        let card = crate::ui::native::blocks::card_surface(cx)
+        // the one width, p 16. In dark its ring is the border color, as on every other
+        // card of the thread.
+        let card = crate::ui::native::blocks::panel_card_surface(cx)
             .w_full()
             .max_w(TEXT_MAX)
             .overflow_hidden()

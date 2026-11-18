@@ -300,40 +300,66 @@ fn build(
                     .text_color(k.text_3)
                     .child(name)
             });
-            let toggle = |open: bool, label: String| {
-                let full = text.clone();
-                crate::ui::native::push_button(
-                    ElementId::Name(format!("fold-code-{hash:x}").into()),
-                    label,
-                    crate::ui::native::PushStyle::Ghost,
-                    crate::ui::native::PushSize::Small,
-                    cx,
-                )
-                .on_click(move |_, _, cx| {
-                    cx.stop_propagation();
-                    fold::set_code_open(&full, open);
-                    cx.refresh_windows();
-                })
-            };
+            let toggle =
+                |part: &str, open: bool, label: String, style: crate::ui::native::PushStyle| {
+                    let full = text.clone();
+                    crate::ui::native::push_button(
+                        ElementId::Name(format!("fold-code-{part}-{hash:x}").into()),
+                        label,
+                        style,
+                        crate::ui::native::PushSize::Small,
+                        cx,
+                    )
+                    .on_click(move |_, _, cx| {
+                        cx.stop_propagation();
+                        fold::set_code_open(&full, open);
+                        cx.refresh_windows();
+                    })
+                };
             let lines = fold.as_ref().map_or(0, |f| f.lines).to_string();
             // 收起 sits in the strip; 展开 sits on the cut line, where the code stops.
-            let collapse = fold
-                .as_ref()
-                .filter(|f| f.open)
-                .map(|_| toggle(false, t::CODE_COLLAPSE.to_string()));
-            let expand = fold.as_ref().filter(|f| !f.open).map(|_| {
-                use crate::ui::native::{metrics::CODE_FOLD_LINES, tokens::text};
+            let collapse = fold.as_ref().filter(|f| f.open).map(|_| {
+                toggle(
+                    "top",
+                    false,
+                    t::CODE_COLLAPSE.to_string(),
+                    crate::ui::native::PushStyle::Ghost,
+                )
+            });
+            // The line under the code's last one, or the cut line of a folded block: an
+            // outline button, as text on the code's fill reads as code, with its edge on the
+            // copy glyph's.
+            let at_end = |line: usize, button: gpui_component::button::Button| {
+                use crate::ui::native::tokens::text;
                 div()
                     .absolute()
-                    .top(
-                        CODE_STRIP - px(8.) + text::MONO.1 * CODE_FOLD_LINES as f32
-                            - theme::space::S4,
-                    )
-                    .right_0()
-                    .child(toggle(
+                    .top(CODE_STRIP - px(8.) + text::MONO.1 * line as f32 - theme::space::S4)
+                    .right(CODE_END_INSET)
+                    .child(button)
+            };
+            let expand = fold.as_ref().filter(|f| !f.open).map(|_| {
+                at_end(
+                    crate::ui::native::metrics::CODE_FOLD_LINES,
+                    toggle(
+                        "end",
                         true,
                         crate::copy::fill(t::CODE_EXPAND, &[("n", &lines)]),
-                    ))
+                        crate::ui::native::PushStyle::Outline,
+                    ),
+                )
+            });
+            // A long open block folds again where the reading stopped, too: the strip's
+            // 收起 has scrolled away by then.
+            let collapse_end = fold.as_ref().filter(|f| f.open).map(|f| {
+                at_end(
+                    f.lines,
+                    toggle(
+                        "end",
+                        false,
+                        t::CODE_COLLAPSE.to_string(),
+                        crate::ui::native::PushStyle::Outline,
+                    ),
+                )
             });
             let copy = Clipboard::new(ElementId::Name(format!("copy-code-{hash:x}").into()))
                 .value(text.clone())
@@ -346,17 +372,25 @@ fn build(
                     crate::views::refs::markdown::code_target(body, source, &text)
                 })
                 .map(|target| {
-                    crate::views::refs::affordance::hover_button(
-                        &format!("code-{}-{hash:x}", target.block_id),
+                    let hover = format!("code-{}-{hash:x}", target.block_id);
+                    let button = crate::views::refs::affordance::hover_button(
+                        &hover,
                         std::rc::Rc::new(move |_: &gpui::App| target.clone()),
                         cx,
-                    )
+                    );
+                    (hover, button)
                 });
+            let (ask_hover, ask): (Option<String>, Option<gpui::AnyElement>) = ask.unzip();
             div()
+                .id(ElementId::Name(format!("code-actions-{hash:x}").into()))
                 .h(CODE_ACTIONS)
                 .flex()
                 .items_center()
                 .gap(theme::space::S4)
+                // Resting anywhere on the strip offers 问这里.
+                .when_some(ask_hover, |d, hover| {
+                    d.on_hover(crate::views::refs::affordance::track_hover(hover))
+                })
                 // The hidden 问这里 keeps its width: it goes first, so the language
                 // rests beside the copy button.
                 .children(ask)
@@ -365,6 +399,7 @@ fn build(
                 .child(copy)
                 .child(code_edge_fade(&shown, cx))
                 .children(expand)
+                .children(collapse_end)
         })
         .on_link_click(|url, _event, _window, cx| {
             if let Some(url) = safe_link(url) {
@@ -387,8 +422,8 @@ fn body_style() -> TextViewStyle {
 }
 
 use crate::ui::native::metrics::{
-    CODE_BLOCK_ACTIONS as CODE_ACTIONS, CODE_BLOCK_PAD_BOTTOM as CODE_PAD_BOTTOM,
-    CODE_BLOCK_STRIP as CODE_STRIP,
+    CODE_BLOCK_ACTIONS as CODE_ACTIONS, CODE_BLOCK_END_INSET as CODE_END_INSET,
+    CODE_BLOCK_PAD_BOTTOM as CODE_PAD_BOTTOM, CODE_BLOCK_STRIP as CODE_STRIP,
 };
 
 /// The code block (§2.4, §2.17; review 2 R1-04):

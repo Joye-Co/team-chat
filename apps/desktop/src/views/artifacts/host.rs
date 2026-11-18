@@ -1412,7 +1412,7 @@ pub fn capability_line(
 /// What a page may do, in words.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CapabilityLine {
-    /// 页面里的操作会发给 {name} · {labels}, or 页面能做的：读这份数据.
+    /// 页面里的操作会发给 {name}：「{label}」「{label}」, or 页面能做的：读这份数据.
     pub line: String,
     /// The part of [`line`](Self::line) that is never cut (who gets the page's actions,
     /// or the read-only line): it wraps when the footer is too narrow.
@@ -1421,8 +1421,9 @@ pub struct CapabilityLine {
     /// keeps each part whole, so a narrow footer wraps only before the name, never in it.
     /// `None` for the read-only line, which wraps like text.
     pub head_parts: Option<(String, String)>,
-    /// The declared event labels after the head (` · ` joined), cut first when the footer
-    /// is narrow; the whole line shows on hover.
+    /// The declared event labels after the head, each in 「」 so a button name never reads
+    /// as the app's own words; cut first when the footer is narrow, the whole line shows
+    /// on hover.
     pub labels: Option<String>,
     /// A runner-made page that declares `ask`: its answers go into the run log, which the
     /// 群 can read (INTERACT §6.3). The short catalog line and the full one.
@@ -1449,12 +1450,16 @@ fn capability_text(bridge: Option<PageBridge>, name: &str) -> CapabilityLine {
         .events
         .iter()
         .filter_map(|e| e.label.as_ref())
-        .map(|l| l.chars().take(40).collect::<String>())
+        // The cut stays inside the quotes, so the closing 」 survives.
+        .map(|l| {
+            let label = l.chars().take(40).collect::<String>();
+            fill(cp::PAGE_EVENT_LABEL, &[("label", &label)])
+        })
         .collect();
-    let labels = (!labels.is_empty()).then(|| labels.join(" · "));
+    let labels = (!labels.is_empty()).then(|| labels.concat());
     CapabilityLine {
         line: match &labels {
-            Some(l) => format!("{head} · {l}"),
+            Some(l) => format!("{head}{}", fill(cp::PAGE_SENDS_LABELS, &[("labels", l)])),
             None => head.clone(),
         },
         head,
@@ -1521,7 +1526,7 @@ pub fn page_footer(
                 .flex_1()
                 .min_w_0()
                 .one_line()
-                .child(format!(" · {labels}"))
+                .child(fill(cp::PAGE_SENDS_LABELS, &[("labels", &labels)]))
                 .tooltip(move |window, cx| Tooltip::new(full.clone()).build(window, cx)),
         ),
         (Some(_), true) => div().flex().items_center().child(
@@ -2775,7 +2780,7 @@ mod tests {
         assert!(
             t.labels
                 .as_deref()
-                .is_some_and(|l| l.starts_with("很长的事件名"))
+                .is_some_and(|l| l.starts_with("「很长的事件名"))
         );
         // No run log without a runner, or without ask.
         b.runner = false;

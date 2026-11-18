@@ -384,6 +384,41 @@ pub fn dim_window_buttons(window: &Window) {
     }
 }
 
+/// The traffic lights drawn for a dark surface while `dark` (the image viewer's black bar
+/// in a light window), else as the window's own appearance says. Only the three buttons
+/// change: the window's appearance is what the System theme follows.
+#[cfg(target_os = "macos")]
+pub fn window_buttons_on_dark(window: &Window, dark: bool) {
+    use objc2::{class, msg_send, runtime::AnyObject};
+    let Some(ns_window) = ns_window(window) else {
+        return;
+    };
+    // SAFETY: a live NSWindow on the main thread; every object may be nil and a nil
+    // appearance is the documented "inherit".
+    unsafe {
+        let appearance: *mut AnyObject = if dark {
+            let name: *mut AnyObject = msg_send![
+                class!(NSString),
+                stringWithUTF8String: c"NSAppearanceNameDarkAqua".as_ptr()
+            ];
+            msg_send![class!(NSAppearance), appearanceNamed: name]
+        } else {
+            std::ptr::null_mut()
+        };
+        // NSWindowCloseButton = 0, NSWindowMiniaturizeButton = 1, NSWindowZoomButton = 2.
+        for kind in [0usize, 1, 2] {
+            let button: *mut AnyObject = msg_send![ns_window, standardWindowButton: kind];
+            if !button.is_null() {
+                let _: () = msg_send![button, setAppearance: appearance];
+            }
+        }
+    }
+}
+
+/// Other systems draw their window buttons themselves.
+#[cfg(not(target_os = "macos"))]
+pub fn window_buttons_on_dark(_window: &Window, _dark: bool) {}
+
 /// Windows: the window loses its minimize and maximize boxes (and with them maximize on
 /// a double click of the title bar and Snap's maximize).
 #[cfg(target_os = "windows")]

@@ -895,17 +895,7 @@ impl ArtifactPage {
                     &[("time", &short_time(now, t.last_activity_at))],
                 )
             } else {
-                fill(
-                    c::ARTIFACT_TOPIC_ACTIVE,
-                    &[(
-                        "state",
-                        if state.short.is_empty() {
-                            &state.text
-                        } else {
-                            &state.short
-                        },
-                    )],
-                )
+                fill(c::ARTIFACT_TOPIC_ACTIVE, &[("state", &state.text)])
             };
             let meta = format!("{group}{tail}");
             let title = if t.title.trim().is_empty() {
@@ -1685,7 +1675,14 @@ impl ArtifactPage {
                 );
             }
             page::PageLoad::Loading => {
-                return shell(page::skeleton_table("artifacts-sk", &table_cols(), 5, cx));
+                // 名称 and 做的人 open with their 16 icon and avatar.
+                return shell(page::skeleton_table_with_media(
+                    "artifacts-sk",
+                    &table_cols(),
+                    5,
+                    &[0, 3],
+                    cx,
+                ));
             }
             page::PageLoad::Ready if total == 0 => {
                 return shell(
@@ -2158,16 +2155,6 @@ impl Render for ArtifactPage {
 /// (NATIVE.md §2: 20 pt), or after the traffic lights when the sidebar is hidden.
 fn content_leading(services: &Services, cx: &App) -> Pixels {
     crate::ui::native::metrics::TOOLBAR_LEADING.max(kit::leading(services, cx))
-}
-
-/// The symbol of a 产出's kind (NATIVE.md §6).
-pub(crate) fn kind_sym(kind: crate::data::ArtifactKind) -> Sym {
-    use crate::data::ArtifactKind as K;
-    match kind {
-        K::Page | K::Decision => Sym::Document,
-        K::File => Sym::File,
-        K::Image => Sym::Image,
-    }
 }
 
 /// True when a person value has room for its role beside the name: the name's

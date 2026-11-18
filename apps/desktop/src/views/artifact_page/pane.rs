@@ -102,7 +102,8 @@ impl Render for ArtifactPane {
                 let provider = self.services.provider.clone();
                 let open = id.clone();
                 crate::ui::native::page::page_empty(
-                    super::kind_sym(detail.summary.kind),
+                    super::list::ListKind::of(self.services.provider.as_ref(), &detail.summary)
+                        .sym(),
                     detail.summary.title.clone(),
                     c::ARTIFACT_PAGE_SNAPSHOT,
                     vec![

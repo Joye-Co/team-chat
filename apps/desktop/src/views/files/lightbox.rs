@@ -196,6 +196,8 @@ impl Lightbox {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        // The screen is black in both themes: the traffic lights are drawn for that.
+        crate::views::settings::window_fit::window_buttons_on_dark(window, true);
         let provider = services.provider.clone();
         let fixed = opening.set.is_some();
         let mut items = match &opening.set {
@@ -376,6 +378,7 @@ impl Lightbox {
     }
 
     fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        crate::views::settings::window_fit::window_buttons_on_dark(window, false);
         if let Some(f) = self.return_focus.take() {
             window.focus(&f, cx);
         }

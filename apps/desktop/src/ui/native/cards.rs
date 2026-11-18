@@ -49,9 +49,12 @@ pub mod card {
 /// The card container (COMPLETENESS.md §2.4, §1.7): the card surface,
 /// radius 14, a 1 px border, shadow sm; a fill step alone is not an edge.
 /// Callers add the insets where the content starts (a media block runs to
-/// the edges).
+/// the edges). In dark the ring is the border color (§2.22): the 6 % ring cannot be told
+/// from the card's fill.
 pub fn card_frame(cx: &App) -> gpui::Div {
-    super::blocks::card_surface(cx).w_full().overflow_hidden()
+    super::blocks::panel_card_surface(cx)
+        .w_full()
+        .overflow_hidden()
 }
 
 /// A well inside a card (draft, diff, code, compare panels, rank lists,

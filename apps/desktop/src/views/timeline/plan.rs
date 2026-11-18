@@ -825,8 +825,9 @@ impl WorkingCard {
         });
         // §2.4 compact card on the one card surface (v18: radius 14, the
         // card fill, shadow sm and the 6 % ring, no 1 px border), p 16,
-        // gap 16, the one in-thread width.
-        crate::ui::native::blocks::card_surface(cx)
+        // gap 16, the one in-thread width. In dark its ring is the border color, as on
+        // every other card of the thread.
+        crate::ui::native::blocks::panel_card_surface(cx)
             .id(self.id)
             .w_full()
             .max_w(super::v2::TEXT_MAX)

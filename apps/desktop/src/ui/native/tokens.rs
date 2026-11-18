@@ -1121,6 +1121,9 @@ pub mod metrics {
     pub const CODE_BLOCK_STRIP: Pixels = height::ROW;
     /// The height of the actions in that strip.
     pub const CODE_BLOCK_ACTIONS: Pixels = px(24.);
+    /// How far a button at a fold's end stands in from that strip's right edge: its edge
+    /// meets the edge of the copy glyph, which is centered in its own button.
+    pub const CODE_BLOCK_END_INSET: Pixels = px(5.);
     /// Under the last line of a code block.
     pub const CODE_BLOCK_PAD_BOTTOM: Pixels = space::S16;
     /// A code block of a message longer than `CODE_FOLD_OVER` lines shows its
