@@ -61,14 +61,10 @@ Deploy the same version as the app you will install: the newest release.
 git clone https://github.com/Joye-Co/team-chat.git
 cd team-chat
 git checkout "$(git describe --tags --abbrev=0 origin/main)"   # the newest release tag, v<version>
-[ -x scripts/setup-server.sh ] || git checkout main             # releases up to v1.2.7 lack it
 bun install --frozen-lockfile
 ```
 
-`scripts/setup-server.sh` first ships in the release after v1.2.7. Until that release exists,
-the second line keeps you on `main`; install the newest app all the same.
-
-Check: `git describe --tags` prints `v<version>` (on `main`, `v<version>-<n>-g<commit>`), and `ls server/node_modules/.bin/wrangler`
+Check: `git describe --tags` prints `v<version>`, and `ls server/node_modules/.bin/wrangler`
 finds wrangler. The server reports this version at `/v1/health` after the deploy.
 
 ### 3. Prepare the Cloudflare account
@@ -192,7 +188,6 @@ Keep the server at the version of the app: update it when a new release comes ou
 cd team-chat
 git fetch --tags origin
 git checkout "$(git describe --tags --abbrev=0 origin/main)"
-[ -x scripts/setup-server.sh ] || { git checkout main && git pull --ff-only; }
 bun install --frozen-lockfile
 scripts/setup-server.sh production
 ```
@@ -274,7 +269,9 @@ and people who sign in with an invite code use these AI members without setting 
    ```
 
    It installs the system packages, Docker, Firecracker and jailer (checked against their
-   SHA-256), the `runner` user (groups kvm and docker, lingering on), `/srv/runner` for images
+   SHA-256), the `runner` user (groups kvm and docker, lingering on), the daemon of the newest
+   release for that user (`scripts/runner/install-daemon.sh`, checked against the release's
+   SHA-256, in `~runner/.local/bin/team-chat-daemon`), `/srv/runner` for images
    and VMs, IP forwarding, the NFS server, the VMs' firewall (`runner-vm-net.service`) and the
    root helper `/usr/local/sbin/runner-vm` that the daemon may run with sudo. It copies root's
    SSH keys to the `runner` user. It is safe to run again.
@@ -286,24 +283,33 @@ and people who sign in with an invite code use these AI members without setting 
 3. **Base image**, as root: `bash scripts/runner/build-base-image.sh`. It builds
    `scripts/runner/base-image/Dockerfile` (Ubuntu with git, Node, Claude Code, Codex, gh and
    more) into `/srv/runner/images/base-<date>.ext4` and points `base.ext4` at it.
-4. **The daemon**, as runner (`ssh runner@<host>`; the rest of Part 2 runs as runner unless it
-   says root). Today it is built from source on the host:
+4. **The daemon and the runner's checkout**, as runner (`ssh runner@<host>`; the rest of Part 2
+   runs as runner unless it says root). Step 1 installed the daemon as
+   `~/.local/bin/team-chat-daemon`. Get the code for the scripts the next steps use, and check
+   the daemon:
+
+   ```sh
+   git clone https://github.com/Joye-Co/team-chat.git ~/team-chat
+   cd ~/team-chat && git checkout v<version>      # the version of your server, or main
+   ~/.local/bin/team-chat-daemon example-config | head -n 3   # check: it runs and prints the example config
+   ```
+
+   Step 1 installs the newest release. For another version run
+   `bash ~/team-chat/scripts/runner/install-daemon.sh --version <x.y.z>`: it downloads that
+   release's Linux daemon, checks its SHA-256 and puts it in the same place.
+
+   Only when the release has no Linux daemon (releases before 1.3.0) or the host is not x86_64,
+   step 1 warns that the daemon is not installed. Then build it from source on the host:
 
    ```sh
    curl --proto '=https' -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
    . "$HOME/.cargo/env"
-   git clone https://github.com/Joye-Co/team-chat.git ~/team-chat
-   cd ~/team-chat && git checkout v<version>      # the version of your server, or main
+   cd ~/team-chat
    out="$(scripts/build-daemon.sh)"   # rustup installs the toolchain of rust-toolchain.toml
    mkdir -p ~/.local/bin
    install -m 755 "$out" ~/.local/bin/team-chat-daemon.new
    mv -f ~/.local/bin/team-chat-daemon.new ~/.local/bin/team-chat-daemon
    ```
-
-   <!-- RELEASED DAEMON: when releases carry a Linux daemon, replace the commands above with the
-        download of that asset and its SHA-256 check, and describe its self-update here. -->
-   **Released daemon:** once releases carry a Linux daemon, this step becomes a download from
-   the releases page; until then, use the commands above.
 5. **Boot check**: `bash ~/team-chat/scripts/runner/boot-test.sh`. Expected: `vm-init: ready`,
    a line per tool with its version, and `firecracker exited after` a few seconds. A kernel
    that lacks something stops here with a kernel panic in the output.
@@ -428,10 +434,15 @@ it, is thrown away after its run.
 
 ### Update
 
-- **Daemon**: as runner, `cd ~/team-chat && git fetch --tags && git checkout v<new version>`,
-  then the last four lines of step 4, from `out="$(scripts/build-daemon.sh)"` on. Do not stop the service: the daemon sees
-  the new file, waits until no run is active, exits, and systemd starts the new version.
-  When releases carry a Linux daemon, this is where its self-update replaces these steps.
+- **Daemon**: it updates itself. About once an hour it asks your server for a newer release,
+  downloads the Linux daemon, checks its size and SHA-256, waits until no run is active, puts
+  the file in place and exits, and systemd starts the new version (`self_update = false` in
+  `daemon.toml` turns this off). Your server offers a Linux daemon only for a release whose
+  Linux daemon was uploaded to it; `release.sh --reupload` uploads the DMG and the Windows
+  installer only. Otherwise update by hand, as runner:
+  `cd ~/team-chat && git fetch --tags && git checkout v<new version> && bash scripts/runner/install-daemon.sh --version <new version>`.
+  Do not stop the service: the daemon sees the new file and restarts on it once no run is
+  active. A daemon built from source is updated with the build commands of step 4 again.
 - **Base image**: as root, `git checkout` the new version in `/root/team-chat` and run
   `bash scripts/runner/build-base-image.sh` again. Runs that already started keep their image.
 - **Host**: `unattended-upgrades` installs security updates; `host-setup.sh` may be run again
@@ -474,5 +485,6 @@ have not been carried out end to end on a fresh Ubuntu machine and a new Cloudfl
   address from wrangler's output, `wrangler secret list` and `secret put` on a new Worker.
 - Signing in with a self-hosted server in a release build of the app, 用这台电脑 against it, and
   `scripts/release.sh --reupload` from Ubuntu.
-- Part 2 from a fresh host: the guest kernel, the daemon built on the host, the CLI sign-ins and
-  the config above.
+- Part 2 from a fresh host: the guest kernel, the daemon that `host-setup.sh` installs from the
+  release and its self-update against a self-hosted server, the CLI sign-ins and the config
+  above.
