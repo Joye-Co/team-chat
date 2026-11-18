@@ -76,7 +76,7 @@ crate::copy! {
     TILE_QUEUE_NONE = "没有排队",
     TILE_BOOT = "平均启动用时",
     TILE_BOOT_MAX = "最慢 {time}",
-    TILE_BOOT_NONE = "还没启动过",
+    TILE_BOOT_NONE = "还没有启动数据",
     TILE_DONE = "今天跑完",
     TILE_DONE_MORE = "比昨天多 {n}",
     TILE_DONE_LESS = "比昨天少 {n}",

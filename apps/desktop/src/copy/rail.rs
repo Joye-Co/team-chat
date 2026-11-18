@@ -77,4 +77,6 @@ crate::copy! {
     ACCOUNT_SIGN_OUT_CONFIRM = "退出",
     // The sidebar's one line while the server is unreachable and a 群 has no cached 话题.
     RAIL_OFFLINE_TOPICS = "连上后显示话题",
+    // The sidebar pill: waiting rows hidden under the list's bottom edge, not the total.
+    RAIL_WAITS_BELOW_N = "下面还有 {n} 件等你",
 }
