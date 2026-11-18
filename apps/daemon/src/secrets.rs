@@ -20,6 +20,8 @@ use std::time::{Duration, Instant};
 pub const OP: &str = "secret.get";
 /// How long an approval lets the run read the value.
 pub const GRANT: Duration = Duration::from_secs(30 * 60);
+/// How often the agent is told to ask again while an approval waits (seconds).
+const RETRY_SECS: u64 = 30;
 /// Approval ids of this module start with this.
 const PREFIX: &str = "daemon-secret-";
 
@@ -92,14 +94,24 @@ impl Gate {
             return err("invalid", "name is required");
         };
         if !self.names.iter().any(|n| n == name) {
+            let may = match self.names.as_slice() {
+                [] => "none".to_string(),
+                names => names.join(", "),
+            };
             return err(
                 "not_allowed",
-                format!("{name} is not a secret this run may ask for"),
+                format!("{name} is not a secret this run may ask for; it may ask for: {may}"),
             );
         }
         let mut st = self.lock();
         if st.denied.contains(name) {
-            return err("denied", format!("a person denied {name} for this run"));
+            return err(
+                "denied",
+                format!(
+                    "a person denied {name} for this run: do not ask for it again. Finish what \
+you can without it and say what is missing with `chat-run report --state blocked --text <one line>`"
+                ),
+            );
         }
         if st.granted.get(name).is_some_and(|until| now < *until) {
             if let Some(v) = self.values.get(name) {
@@ -107,16 +119,21 @@ impl Gate {
             }
             return match std::env::var(name) {
                 Ok(v) if !v.is_empty() => json!({ "ok": true, "result": v }),
-                _ => err("unavailable", format!("{name} is not set on this machine")),
+                _ => err(
+                    "unavailable",
+                    format!(
+                        "{name} was approved but has no value on this machine, so asking again \
+does not help: a person has to set it there. Say so with `chat-run report --state blocked --text \
+<one line>`"
+                    ),
+                ),
             };
         }
         match &st.pending {
             Some((_, n)) if n == name => {
                 return err(
                     "pending",
-                    format!(
-                        "approval for {name} is waiting for a person; run this command again after it is approved"
-                    ),
+                    pending(name, "still waits for a person's approval"),
                 );
             }
             Some((_, other)) => {
@@ -143,9 +160,7 @@ impl Gate {
         });
         err(
             "pending",
-            format!(
-                "asked a person to approve {name}; run this command again after it is approved"
-            ),
+            pending(name, "needs a person's approval, asked just now"),
         )
     }
 
@@ -187,13 +202,26 @@ impl Gate {
         (!self.names.is_empty()).then(|| {
             format!(
                 "Production credentials ({}) are not in your environment. When a task needs one, \
-run `chat-run secret <NAME>`: the first call asks a person to approve and fails with \"pending\"; \
-run it again after approval and it prints the value (for example `TOKEN=$(chat-run secret NAME) \
-|| exit 1`). Never print the value or write it to a file.",
-                self.names.join(", ")
+run `chat-run secret <NAME>`: it prints the value (for example `TOKEN=$(chat-run secret NAME) \
+|| exit 1`). The first call asks a person to approve and fails with \"pending\": do not end \
+your turn, run it again about every {RETRY_SECS} seconds until it prints the value or fails with \
+\"denied\". An approval lasts {} minutes, then the command asks again. After \"denied\" do \
+not ask for that name again in this run: finish what you can without it and say what is missing \
+with `chat-run report --state blocked --text <one line>`. Never print the value or write it to a \
+file.",
+                self.names.join(", "),
+                GRANT.as_secs() / 60
             )
         })
     }
+}
+
+/// The `pending` message: what the state is and what to do next.
+fn pending(name: &str, state: &str) -> String {
+    format!(
+        "{name} {state}. Do not end your turn: run this command again in about {RETRY_SECS} \
+seconds, until it prints the value or fails with \"denied\""
+    )
 }
 
 fn err(code: &str, message: impl Into<String>) -> Value {
@@ -231,6 +259,13 @@ mod tests {
 
         let first = gate.get(&body, &emit, t0);
         assert_eq!(first["error"]["code"], "pending");
+        // The agent is told how to wait, in the answer and in its system prompt.
+        let note = gate.note().unwrap();
+        for text in [first["error"]["message"].as_str().unwrap(), note.as_str()] {
+            assert!(text.contains("about every 30 seconds") || text.contains("in about 30"));
+            assert!(text.contains("o not end your turn"), "{text}");
+        }
+        assert!(note.contains("An approval lasts 30 minutes"), "{note}");
         let id = match seen.lock().unwrap().as_slice() {
             [RunEvent::ApprovalRequest { approval_id, .. }] => approval_id.clone(),
             other => panic!("expected one approval.request, got {other:?}"),
@@ -260,9 +295,13 @@ mod tests {
         let gate = Gate::new(vec!["X".into(), "Y".into()]);
         let (seen, emit) = emitted();
         let t0 = Instant::now();
-        assert_eq!(
-            gate.get(&json!({ "name": "Z" }), &emit, t0)["error"]["code"],
-            "not_allowed"
+        let refused = gate.get(&json!({ "name": "Z" }), &emit, t0);
+        assert_eq!(refused["error"]["code"], "not_allowed");
+        assert!(
+            refused["error"]["message"]
+                .as_str()
+                .unwrap()
+                .ends_with("it may ask for: X, Y")
         );
         assert_eq!(gate.get(&json!({}), &emit, t0)["error"]["code"], "invalid");
 
@@ -276,10 +315,11 @@ mod tests {
             other => panic!("expected one approval.request, got {other:?}"),
         };
         gate.answer(&id, false, t0).unwrap();
-        assert_eq!(
-            gate.get(&json!({ "name": "X" }), &emit, t0)["error"]["code"],
-            "denied"
-        );
+        let denied = gate.get(&json!({ "name": "X" }), &emit, t0);
+        assert_eq!(denied["error"]["code"], "denied");
+        let msg = denied["error"]["message"].as_str().unwrap();
+        assert!(msg.contains("do not ask for it again"), "{msg}");
+        assert!(msg.contains("chat-run report --state blocked"), "{msg}");
         // The answered approval is gone: answering it again is not the gate's any more.
         assert!(gate.answer(&id, true, t0).is_none());
         // Y can be asked now.
