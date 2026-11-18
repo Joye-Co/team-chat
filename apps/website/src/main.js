@@ -73,9 +73,11 @@
   /* comparison: pick which alternative's panel shows */
   var cmp=document.querySelector(".cmp");
   if(cmp){cmp.classList.add("js");var ct=[].slice.call(cmp.querySelectorAll(".ctab")),vs=[].slice.call(cmp.querySelectorAll(".vs")),cPlace=slider(cmp.querySelector(".tabs"));
-    var cpick=function(t){if(t.getAttribute("aria-selected")==="true")return;ct.forEach(function(x){x.setAttribute("aria-selected",x===t?"true":"false");});
+    /* one tab stop for the row: only the picked tab is in the Tab order, the arrow keys move between tabs */
+    ct.forEach(function(x){x.tabIndex=x.getAttribute("aria-selected")==="true"?0:-1;});
+    var cpick=function(t){if(t.getAttribute("aria-selected")==="true")return;ct.forEach(function(x){x.setAttribute("aria-selected",x===t?"true":"false");x.tabIndex=x===t?0:-1;});
       vs.forEach(function(v){v.classList.toggle("on",v.dataset.i===t.dataset.i);});cPlace();};
-    ct.forEach(function(t,i){t.addEventListener("click",function(){cpick(t);});t.addEventListener("keydown",function(e){var n=e.key==="ArrowRight"?1:e.key==="ArrowLeft"?-1:0;if(n){var x=ct[(i+n+ct.length)%ct.length];x.focus();cpick(x);}});});}
+    ct.forEach(function(t,i){t.addEventListener("click",function(){cpick(t);});t.addEventListener("keydown",function(e){var x=e.key==="ArrowRight"?ct[(i+1)%ct.length]:e.key==="ArrowLeft"?ct[(i-1+ct.length)%ct.length]:e.key==="Home"?ct[0]:e.key==="End"?ct[ct.length-1]:null;if(x){e.preventDefault();x.focus();cpick(x);}});});}
   /* nav: mark the section in view */
   if(io2){var nl={};[].forEach.call(document.querySelectorAll(".links a"),function(a){nl[a.getAttribute("href").slice(1)]=a;});
     var spy=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){for(var k in nl)nl[k].classList.toggle("on",k===e.target.id);}});},{rootMargin:"-40% 0px -55% 0px"});
@@ -133,7 +135,7 @@ if(/Windows/.test(navigator.userAgent||""))[].forEach.call(document.querySelecto
     /* a space between Chinese and Latin text, none before punctuation */
     put("mk-s",text.replace(/([\u4e00-\u9fff])([A-Za-z])/g,"$1 $2").replace(/([A-Za-z])([\u4e00-\u9fff])/g,"$1 $2"));}
   function set(g,vals){opts(g).forEach(function(b){b.setAttribute("aria-pressed",vals.indexOf(b.dataset.v)>=0?"true":"false");});}
-  pres.forEach(function(b){b.addEventListener("click",function(){cur=P[b.dataset.p];pres.forEach(function(x){x.setAttribute("aria-selected",x===b?"true":"false");});set("m",[cur[2]]);set("h",[cur[3]]);set("t",cur[4]);render();});});
+  pres.forEach(function(b){b.addEventListener("click",function(){cur=P[b.dataset.p];pres.forEach(function(x){x.setAttribute("aria-pressed",x===b?"true":"false");});set("m",[cur[2]]);set("h",[cur[3]]);set("t",cur[4]);render();});});
   ["m","h"].forEach(function(g){opts(g).forEach(function(b){b.addEventListener("click",function(){set(g,[b.dataset.v]);render();});});});
   opts("t").forEach(function(b){b.addEventListener("click",function(){b.setAttribute("aria-pressed",b.getAttribute("aria-pressed")==="true"?"false":"true");render();});});
 })();

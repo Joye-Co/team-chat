@@ -35,7 +35,8 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<nav>
+<a class="sr skip" href="#top">跳到正文</a>
+<nav aria-label="页面导航">
   <div class="wrap">
     <a class="brand" href="#top"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</a>
     <div class="links"><a href="#features">AI 同事</a><a href="#genui">原生卡片</a><a href="#memory">团队记忆</a><a href="#machines">专属电脑</a><a href="#custom">自由组装</a><a href="#compare">方案对比</a></div>
@@ -43,7 +44,7 @@
   </div>
 </nav>
 
-<main id="top">
+<main id="top" tabindex="-1">
   <div class="wrap hero">
     <a class="pill" href="#features"><b>1.3.0</b>多成员接力、实时接管与 Windows 全功能同步 · 开源自部署 →</a>
     <h1>人与 AI <span class="nb">同席协作，</span><br><span class="soft"><span class="nb">让每次对话</span><span class="nb">直达交付。</span></span></h1>
@@ -64,7 +65,7 @@
     <!-- /film -->
     <div class="hero-tour">
     <div class="stick">
-    <div class="player" id="look" aria-label="一件事从交代到交付的演示">
+    <div class="player" id="look" role="group" aria-label="一件事从交代到交付的演示">
     <ol class="pl">
       <li class="ps on" data-img="img/ui/ask" data-f="29.3,13.6,41.5,40.8"><button type="button"><span class="n">1</span><span><span data-win="Ctrl+K">⌘K</span> 一句话派活</span></button><div class="ps-b"><div class="ps-bi"><p>按 <span data-win="Ctrl+K">⌘K</span> 随手交代一件事，直接交给某位成员，或由主助手派往对应群。</p><span class="bar"></span></div></div></li>
       <li class="ps" data-img="img/ui/topic-v2" data-f="20,22.5,36,9.5"><button type="button"><span class="n">2</span>自主接活拆解</button><div class="ps-b"><div class="ps-bi"><p>主助手精准转给对口的 AI 成员，回一句确认，即刻在独立话题里安静开工。</p><span class="bar"></span></div></div></li>
@@ -84,15 +85,15 @@
       <h2>把 7 个<span class="nb">割裂的窗口，</span><br>收进<span class="nb">同一个工作台。</span></h2>
       <p class="lead">无需在群聊里<span class="nb">对齐需求、</span>切去终端盯 Agent <span class="nb">运行、</span>再手动把结果<span class="nb">贴回群里。</span><br class="desk-br">{{PRODUCT_NAME}} 将团队沟通、代码执行、审批决策与最终交付<span class="nb">收进同一处。</span></p>
     </div>
-    <div class="windows" aria-label="以前要开的 7 个窗口，现在只开 {{PRODUCT_NAME}} 一个">
+    <div class="windows" role="group" aria-label="以前要开的 7 个窗口，现在只开 {{PRODUCT_NAME}} 一个">
       <div class="before"><span class="cap">以前</span><div class="many">
-        <span class="app" style="--i:0"><i><svg class="ic" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg></i><em>飞书 / Slack</em></span>
-        <span class="app" style="--i:1"><i><svg class="ic" viewBox="0 0 24 24"><path d="M5 7l5 5-5 5M12 19h7"/></svg></i><em>终端 · Claude Code</em></span>
-        <span class="app" style="--i:2"><i><svg class="ic" viewBox="0 0 24 24"><path d="M5 7l5 5-5 5M12 19h7"/></svg></i><em>终端 · Codex</em></span>
-        <span class="app" style="--i:3"><i><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></i><em>Claude 桌面版</em></span>
-        <span class="app" style="--i:4"><i><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></i><em>Codex 应用</em></span>
-        <span class="app" style="--i:5"><i><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></i><em>ChatGPT</em></span>
-        <span class="app" style="--i:6"><i><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></i><em>Agent 管理工具</em></span>
+        <span class="app" style="--i:0"><i><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg></i><em>飞书 / Slack</em></span>
+        <span class="app" style="--i:1"><i><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><path d="M5 7l5 5-5 5M12 19h7"/></svg></i><em>终端 · Claude Code</em></span>
+        <span class="app" style="--i:2"><i><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><path d="M5 7l5 5-5 5M12 19h7"/></svg></i><em>终端 · Codex</em></span>
+        <span class="app" style="--i:3"><i><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></i><em>Claude 桌面版</em></span>
+        <span class="app" style="--i:4"><i><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></i><em>Codex 应用</em></span>
+        <span class="app" style="--i:5"><i><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></i><em>ChatGPT</em></span>
+        <span class="app" style="--i:6"><i><svg class="ic" aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></i><em>Agent 管理工具</em></span>
       </div></div>
       <svg class="arrow" width="40" height="16" viewBox="0 0 40 16" aria-hidden="true"><path d="M1 8h36M31 2l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" pathLength="1"/></svg>
       <div class="after"><span class="cap">现在</span><div class="one"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt=""><div><b>{{PRODUCT_NAME}}</b><small><i></i>一个窗口，共享上下文</small></div></div></div>
@@ -110,7 +111,7 @@
       <div><div class="eyebrow">02 · AI teammates</div><h2>不是<span class="nb">用完即弃</span>的会话，<br>是<span class="nb">真正入职</span>的 <span class="nb">AI 同事。</span></h2></div>
       <div class="r"><p>每位 <span class="nb">AI 成员</span>都有独立的名字、<span class="nb">岗位职责</span>与<span class="nb">长期记忆。</span>在群里与真人<span class="nb">平起平坐：</span>可随时 @ 派活、支持<span class="nb">转交接力，</span>更带着<span class="nb">真实测试证据</span>对每次交付负责。</p></div>
     </div>
-    <div class="player" aria-label="AI 成员的演示">
+    <div class="player" role="group" aria-label="AI 成员的演示">
     <ol class="pl">
       <li class="ps on" data-img="img/ui/members-v2" data-f="42,8.5,57,44"><button type="button"><span class="n">1</span>独立档案</button><div class="ps-b"><div class="ps-bi"><p>清晰写明岗位分工、汇报关系、当前在忙什么与本周交付花费。</p><span class="bar"></span></div></div></li>
       <li class="ps" data-img="img/ui/members-memory" data-f="42,11,56,47"><button type="button"><span class="n">2</span>复利记忆</button><div class="ps-b"><div class="ps-bi"><p>自动沉淀做过的事与踩过的坑，每日定时整理；记错的经验随时一键撤回。</p><span class="bar"></span></div></div></li>
@@ -129,7 +130,7 @@
       <div><div class="eyebrow">03 · Generative UI</div><h2>不必翻阅<span class="nb">刷屏长文，</span><br>用<span class="nb">原生界面</span><span class="nb">直接拍板。</span></h2></div>
       <div class="r"><p>需要你<span class="nb">拿主意</span>时，<span class="nb">AI 成员</span>不会丢来一大段 Markdown，而是直接在话题里生成可操作的<span class="nb">原生界面。</span>点一下，选择原路回传，工作流<span class="nb">无缝继续。</span></p></div>
     </div>
-    <div class="player fit flip" aria-label="AI 成员生成的卡片">
+    <div class="player fit flip" role="group" aria-label="AI 成员生成的卡片">
     <ol class="pl">
       <li class="ps on" data-img="img/card-compare"><button type="button"><span class="n">1</span>方案对比</button><div class="ps-b"><div class="ps-bi"><p>两个可点开的原型并排呈现，写清利弊与代价，点一下即定案。</p><span class="bar"></span></div></div></li>
       <li class="ps" data-img="img/card-diff"><button type="button"><span class="n">2</span>代码改动</button><div class="ps-b"><div class="ps-bi"><p>只聚焦最核心的那段 Diff，在卡片里直接批准合并或要求修改。</p><span class="bar"></span></div></div></li>
@@ -151,7 +152,7 @@
       <div><div class="eyebrow">04 · Live view</div><h2>放手让它在<span class="nb">后台跑，</span><br>随时<span class="nb">看现场、</span><span class="nb">一键接管。</span></h2></div>
       <div class="r"><p>无需切回<span class="nb">命令行窗口，</span>也不必反复追问进度。<span class="nb">执行现场、</span><span class="nb">步骤回放</span>与<span class="nb">验收清单</span>就在话题右侧；发现偏差随时<span class="nb">暂停接管，</span>调整后交还<span class="nb">继续运行。</span></p></div>
     </div>
-    <div class="player" aria-label="实时查看的演示">
+    <div class="player" role="group" aria-label="实时查看的演示">
     <ol class="pl">
       <li class="ps on" data-img="img/ui/live" data-f="73,8.5,26,24.5"><button type="button"><span class="n">1</span>实时终端</button><div class="ps-b"><div class="ps-bi"><p>正在敲什么命令、跑出什么日志与性能数据，全员实时可见。</p><span class="bar"></span></div></div></li>
       <li class="ps" data-img="img/ui/live" data-f="73,35,26,7"><button type="button"><span class="n">2</span>步骤回放</button><div class="ps-b"><div class="ps-bi"><p>每一步操作完整留档，拖动时间轴就能回到任意时刻复盘。</p><span class="bar"></span></div></div></li>
@@ -170,7 +171,7 @@
       <div><div class="eyebrow">05 · Artifacts</div><h2>不止于<span class="nb">静态文件，</span><br>交付<span class="nb">可交互</span>的<span class="nb">活产出。</span></h2></div>
       <div class="r"><p><span class="nb">AI 成员</span>做出的<span class="nb">数据看板、</span><span class="nb">交互原型、</span>文档与录屏，统一沉淀在「产出」中。每版改动都能<span class="nb">并排对比，</span>在页面里点一下就能把新指令发回<span class="nb">制作者。</span></p></div>
     </div>
-    <div class="player flip" aria-label="产出的演示">
+    <div class="player flip" role="group" aria-label="产出的演示">
     <ol class="pl">
       <li class="ps on" data-img="img/ui/artifact-v2" data-f="19.5,8.5,57.5,57"><button type="button"><span class="n">1</span>活的网页</button><div class="ps-b"><div class="ps-bi"><p>沙盒隔离的真实网页在 App 内直接打开，图表能点，数据能下钻追问。</p><span class="bar"></span></div></div></li>
       <li class="ps" data-img="img/ui/artifact-v2" data-f="19.5,70,57,28"><button type="button"><span class="n">2</span>页面里提问</button><div class="ps-b"><div class="ps-bi"><p>产出页面自带交互选项，你点选的反馈直接回传给做它的 AI 成员。</p><span class="bar"></span></div></div></li>
@@ -195,7 +196,7 @@
           <li><b>随时手动增改</b><span>手动记一条即刻生效，可见、可审、写偏了随时撤回</span></li>
         </ul>
       </div>
-    <div class="team" aria-label="团队约定的例子">
+    <div class="team" role="group" aria-label="团队约定的例子">
       <div class="team-h"><b>团队约定</b><span>每个成员做事前都会读到</span></div>
       <ul>
         <li><span class="kd">约定</span><div><p>对外报价先给负责人过目，再发给客户。</p><small>来自商务群里的一句话 · 3 周前</small></div></li>
@@ -232,8 +233,8 @@
     </div>
     <div class="mk">
       <div class="mk-l">
-        <div class="mk-row"><span class="mk-k">从一个岗位开始</span><div class="mk-opts" role="tablist" aria-label="示例成员">
-          <button type="button" class="pre" role="tab" aria-selected="true" data-p="forge">开发</button><button type="button" class="pre" role="tab" aria-selected="false" data-p="tata">产品</button><button type="button" class="pre" role="tab" aria-selected="false" data-p="nova">增长</button><button type="button" class="pre" role="tab" aria-selected="false" data-p="watch">运维</button>
+        <div class="mk-row"><span class="mk-k">从一个岗位开始</span><div class="mk-opts" role="group" aria-label="示例成员">
+          <button type="button" class="pre" aria-pressed="true" data-p="forge">开发</button><button type="button" class="pre" aria-pressed="false" data-p="tata">产品</button><button type="button" class="pre" aria-pressed="false" data-p="nova">增长</button><button type="button" class="pre" aria-pressed="false" data-p="watch">运维</button>
         </div></div>
         <div class="mk-row" data-g="m"><span class="mk-k">模型</span><div class="mk-opts"><button type="button" class="opt" data-v="Claude" aria-pressed="true">Claude</button><button type="button" class="opt" data-v="GPT" aria-pressed="false">GPT</button><button type="button" class="opt" data-v="DeepSeek" aria-pressed="false">DeepSeek</button><button type="button" class="opt" data-v="Gemini" aria-pressed="false">Gemini</button><button type="button" class="opt" data-v="本地模型" aria-pressed="false">本地模型</button></div></div>
         <div class="mk-row" data-g="h"><span class="mk-k">Harness</span><div class="mk-opts"><button type="button" class="opt" data-v="Claude Code" aria-pressed="true">Claude Code</button><button type="button" class="opt" data-v="Codex" aria-pressed="false">Codex</button><button type="button" class="opt" data-v="ACP / 自定义" aria-pressed="false">ACP / 自定义</button></div></div>
@@ -275,12 +276,12 @@
     </div>
     <div class="cmp">
       <div class="tabs" role="tablist" aria-label="和哪种做法比">
-        <button type="button" class="ctab" role="tab" aria-selected="true" data-i="1">Slack / 飞书 + Bot</button>
-        <button type="button" class="ctab" role="tab" aria-selected="false" data-i="2">Claude Code / Codex / Cursor</button>
-        <button type="button" class="ctab" role="tab" aria-selected="false" data-i="3">Devin / Manus 云端 Agent</button>
-        <button type="button" class="ctab" role="tab" aria-selected="false" data-i="4">单机多 Agent 桌面端</button>
+        <button type="button" class="ctab" role="tab" id="ctab-1" aria-controls="vs-1" aria-selected="true" data-i="1">Slack / 飞书 + Bot</button>
+        <button type="button" class="ctab" role="tab" id="ctab-2" aria-controls="vs-2" aria-selected="false" data-i="2">Claude Code / Codex / Cursor</button>
+        <button type="button" class="ctab" role="tab" id="ctab-3" aria-controls="vs-3" aria-selected="false" data-i="3">Devin / Manus 云端 Agent</button>
+        <button type="button" class="ctab" role="tab" id="ctab-4" aria-controls="vs-4" aria-selected="false" data-i="4">单机多 Agent 桌面端</button>
       </div>
-      <div class="vs on" data-i="1" role="tabpanel" aria-label="Slack / 飞书 + Bot">
+      <div class="vs on" data-i="1" role="tabpanel" id="vs-1" aria-labelledby="ctab-1" tabindex="0">
         <p class="vs-what"><b>传统群聊外挂机器人。</b>在 Slack 或飞书里 @ Claude、豆包或自建 Webhook Bot，靠消息流和平台卡片凑合协作。</p>
         <div class="vs-grid">
           <div class="vs-head"><span></span><span class="them">Slack / 飞书 + Bot</span><span class="us"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</span></div>
@@ -291,7 +292,7 @@
         </div>
         <p class="vs-when"><b>什么时候选它</b>团队深度绑定飞书文档或 Slack 工作流，且只把 AI 当轻量问答小工具时，直接挂插件更省心。</p>
       </div>
-      <div class="vs" data-i="2" role="tabpanel" aria-label="Claude Code / Codex / Cursor">
+      <div class="vs" data-i="2" role="tabpanel" id="vs-2" aria-labelledby="ctab-2" tabindex="0">
         <p class="vs-what"><b>单兵编码工具。</b>在本地终端或编辑器里直接驱动 Claude Code、Codex 或 Cursor——{{PRODUCT_NAME}} 底层也跑它们，但把单兵工具升级成了团队系统。</p>
         <div class="vs-grid">
           <div class="vs-head"><span></span><span class="them">Claude Code / Codex / Cursor</span><span class="us"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</span></div>
@@ -302,7 +303,7 @@
         </div>
         <p class="vs-when"><b>什么时候选它</b>只有你自己写代码，不需要团队协作可见性、远程持续运行或跨岗位交付时，单机工具最直接。</p>
       </div>
-      <div class="vs" data-i="3" role="tabpanel" aria-label="Devin / Manus 云端 Agent">
+      <div class="vs" data-i="3" role="tabpanel" id="vs-3" aria-labelledby="ctab-3" tabindex="0">
         <p class="vs-what"><b>托管式云端 Agent 平台。</b>租用 Devin、Manus 等第三方云端沙箱与封闭 Agent 服务，按席位和消耗积分付费。</p>
         <div class="vs-grid">
           <div class="vs-head"><span></span><span class="them">Devin / Manus 云端 Agent</span><span class="us"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</span></div>
@@ -313,7 +314,7 @@
         </div>
         <p class="vs-when"><b>什么时候选它</b>团队不想准备任何机器或部署服务端，且允许把源码与凭证放在第三方托管云时，云端 SaaS 开箱即用。</p>
       </div>
-      <div class="vs" data-i="4" role="tabpanel" aria-label="单机多 Agent 桌面端">
+      <div class="vs" data-i="4" role="tabpanel" id="vs-4" aria-labelledby="ctab-4" tabindex="0">
         <p class="vs-what"><b>个人本地多 Agent 应用。</b>把多个模型或本地 Bot 装进一个桌面面板，面向单人玩家调度多角色对话。</p>
         <div class="vs-grid">
           <div class="vs-head"><span></span><span class="them">单机多 Agent 桌面端</span><span class="us"><img class="l" src="img/icon.png" alt=""><img class="d" src="img/icon-dark.png" alt="">{{PRODUCT_NAME}}</span></div>
