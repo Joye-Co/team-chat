@@ -49,7 +49,8 @@ pub fn form_field_width(width: SheetWidth) -> gpui::Pixels {
 }
 
 /// A sheet form (2.8 GroupBox): one group, radius 10, a 1 px border, the
-/// group fill; its rows are separated by 1 px lines inset to the label x.
+/// group fill; its rows are separated by 1 px lines inset 16 on both sides,
+/// like every grouped form.
 pub fn sheet_form() -> SheetForm {
     SheetForm::default()
 }
@@ -81,7 +82,7 @@ impl gpui::RenderOnce for SheetForm {
             if ix + 1 < n {
                 group = group.child(
                     div()
-                        .ml(metrics::FORM_ROW_INSET)
+                        .mx(metrics::FORM_ROW_INSET)
                         .h(crate::ui::native::tokens::layout::HAIRLINE)
                         .bg(k.separator),
                 );
@@ -358,7 +359,7 @@ impl MemberPicker {
         use crate::ui::native::tokens::{icon, radius, space};
         let k = native_colors(cx);
         let filled = highlighted || (chosen && mode == PickMode::One);
-        let surface = if filled { k.selection } else { k.content };
+        let surface = if filled { k.selection } else { k.sheet };
         // Beside the avatar a leading emoji is left out (X-01).
         let name: gpui::SharedString = ui::avatar::name_beside_avatar(&m.name).to_string().into();
         let tip = name.clone();
@@ -471,7 +472,7 @@ impl gpui::RenderOnce for MemberPicker {
                     .w_full()
                     .h(list_h)
                     .rounded(metrics::GROUP_RADIUS)
-                    .bg(k.content)
+                    .bg(k.sheet)
                     .border_1()
                     .border_color(k.separator)
                     .when_some(self.list_focus.as_ref(), |d, f| {
