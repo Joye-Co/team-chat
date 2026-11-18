@@ -166,7 +166,8 @@ pub struct TimelineView {
     /// or the target of a search, a reference jump or ⌘F. By row key.
     unfolded: std::collections::HashSet<String>,
     /// Rows a search, ⌘F or a reference jump pointed into: their code fences stay open.
-    code_open: std::collections::HashSet<String>,
+    /// The value says whether something points there now.
+    code_open: std::collections::HashMap<String, bool>,
     /// The message row under the pointer (its hover toolbar shows).
     hovered: Option<String>,
     /// R2-12, E3: the thread is a Tab stop; ↑↓ move the row whose toolbar
