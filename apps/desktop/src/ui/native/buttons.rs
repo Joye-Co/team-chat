@@ -421,6 +421,19 @@ pub fn popup_button(
     chevron_button(id, title, Sf::ChevronDown, size, window, cx)
 }
 
+/// A [`popup_button`] with nothing chosen yet: its title is the placeholder, in the muted
+/// ink of every empty field (COMPLETENESS 1.2).
+pub fn popup_button_placeholder(
+    id: impl Into<ElementId>,
+    title: impl Into<SharedString>,
+    size: PushSize,
+    window: &Window,
+    cx: &App,
+) -> Button {
+    let ink = native_colors(cx).tertiary;
+    chevron_button_inked(id, title, Some(ink), Sf::ChevronDown, size, window, cx)
+}
+
 /// A pop-up that reads as part of the line it sits in (a pane header's
 /// member, a toolbar's version, a palette's target): no frame and no fill
 /// at rest, the title in `label`, a 12 `chevron.down` in `secondary` 4
@@ -477,6 +490,19 @@ fn chevron_button(
     window: &Window,
     cx: &App,
 ) -> Button {
+    chevron_button_inked(id, title, None, chevron, size, window, cx)
+}
+
+/// [`chevron_button`] whose title takes `ink` instead of the button's own.
+fn chevron_button_inked(
+    id: impl Into<ElementId>,
+    title: impl Into<SharedString>,
+    ink: Option<gpui::Hsla>,
+    chevron: Sf,
+    size: PushSize,
+    window: &Window,
+    cx: &App,
+) -> Button {
     let k = native_colors(cx);
     let b = Button::new(id)
         .with_size(gpui_component::Size::Medium)
@@ -498,7 +524,11 @@ fn chevron_button(
             .items_center()
             .justify_between()
             .gap(space::S8)
-            .child(TruncText::new(title).flex_1())
+            .child(
+                TruncText::new(title)
+                    .flex_1()
+                    .when_some(ink, |el, ink| el.text_color(ink)),
+            )
             .child(div().flex_none().child(symbol(
                 chevron,
                 metrics::POPUP_CHEVRON_SLOT,

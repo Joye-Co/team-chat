@@ -2397,6 +2397,7 @@ pub(crate) fn input_control(
                 .as_ref()
                 .and_then(|c| options.iter().find(|o| &o.id == c))
                 .map(|o| o.label.clone());
+            let empty = text.is_none();
             let shown = text.unwrap_or_else(|| {
                 placeholder
                     .map(str::to_string)
@@ -2405,8 +2406,13 @@ pub(crate) fn input_control(
             // A pop-up button (NATIVE.md §5.3): the chosen option and the
             // `chevron.up.chevron.down` mark; the placeholder in `tertiary`.
             let _ = lead;
+            let popup = if empty {
+                ui::native::popup_button_placeholder
+            } else {
+                ui::native::popup_button
+            };
             let trigger = ui::native::disabled_push(
-                ui::native::popup_button(
+                popup(
                     ctx.id(format!("select-{id}")),
                     shown,
                     ui::native::PushSize::Small,
