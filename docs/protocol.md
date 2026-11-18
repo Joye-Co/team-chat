@@ -2084,8 +2084,10 @@ for the emitter with `interaction.resolved {result: "failed"}`; it never comes f
 whose ack said `none`.
 
 What an event's `value` holds. A block sends only the events of its row (`cardBlockEvents` in
-`packages/protocol`; `card.undeclared_event` otherwise), and a `value` of another shape is
-`invalid`:
+`packages/protocol`), and only those it declares in `events` (`card.undeclared_event` otherwise).
+Committing needs no declaration: `choice.submit`, `input.submit` and `compare.pick` of an
+`immediate` block, a `confirm`, a `compare` or a `poll`, and `action.press` of a `questionnaire`.
+A `value` of another shape is `invalid`:
 
 | Event | Block | `value` |
 | --- | --- | --- |
@@ -2184,9 +2186,10 @@ send += { causeEventId?, blockRefs? }      edit += { baseRev?, causeEventId? }
 transient interaction.resolved: { groupId, eventId, result: "ignored"|"failed"|"patched"|"posted"|"replied", messageId?, note? }
 ```
 
-`replace` swaps the whole block. When the old block was a container, the children the new block
-no longer names are removed with their own children, as `remove` does, unless an op of the same
-patch gives them a place (another container names them, or they are inserted again).
+`replace` swaps the whole block and `set` merges props into it. When either leaves a container
+naming fewer children, the children it no longer names are removed with their own children, as
+`remove` does, unless an op of the same patch gives them a place (another container names them,
+or they are inserted again).
 
 A cause (`card.patch.cause`, `send`/`edit` `causeEventId`) and `interaction.resolve` name an
 event of the last 30 minutes that the sender received: a card event on one of its cards, or a
