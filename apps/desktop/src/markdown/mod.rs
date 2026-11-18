@@ -205,15 +205,10 @@ fn body_style() -> TextViewStyle {
         .code_block(code_block_style())
 }
 
-/// The top strip of a code block that holds 问这里 and the copy button: the
-/// actions sit 8 from the top (gpui-base) and are at most 24 tall, so the
-/// strip is 32 and the first line's ascenders are never under the actions'
-/// fill (review 3 K-05).
-const CODE_STRIP: gpui::Pixels = px(32.);
-/// The tallest action in the strip.
-const CODE_ACTIONS: gpui::Pixels = px(24.);
-/// The bottom padding of a code block.
-const CODE_PAD_BOTTOM: gpui::Pixels = px(14.);
+use crate::ui::native::metrics::{
+    CODE_BLOCK_ACTIONS as CODE_ACTIONS, CODE_BLOCK_PAD_BOTTOM as CODE_PAD_BOTTOM,
+    CODE_BLOCK_STRIP as CODE_STRIP,
+};
 
 /// The code block (§2.4, §2.17; review 2 R1-04):
 /// - one width: the in-thread width (640), or the column when it is
