@@ -7,15 +7,17 @@ name: CI
 # locally with scripts/test-real-cli.sh.
 #
 # Each job runs only for the code it tests:
-#   server/**                      -> Server
+#   server/**                      -> Server, and Packages (the bot SDK's tests start this
+#                                     server and import its card patch code)
 #   packages/**, protocol/**       -> Packages (protocol also every Rust job)
+#   docs/bots.md, examples/**      -> Packages (the bot SDK's tests check the doc's examples and run the echo bot)
 #   scripts/**/*.ts                -> Packages (typecheck only)
 #   apps/daemon/**, update-helper  -> Rust tests (Linux), daemon on Windows, lint
 #   apps/desktop/**, artifact-view -> Desktop on macOS, desktop on Windows, lint
 #   crates/chat-protocol|core      -> all of the Rust jobs (everything builds on them)
 #   ops/**, release scripts        -> Ops
 #   .github/workflows/**           -> actionlint only
-#   docs/**                        -> nothing
+#   the rest of docs/**            -> nothing
 
 on:
   pull_request:
@@ -78,6 +80,14 @@ jobs:
               - protocol/**
               # gen-fixtures.ts copies the daemon's golden machine frames into protocol/fixtures.
               - apps/daemon/tests/fixtures/machine/**
+              # packages/bot-sdk/test starts `wrangler dev` of server/, runs the examples of
+              # docs/bots.md and imports server/src/cards2/patch.ts.
+              - server/src/**
+              - server/migrations/**
+              - server/wrangler.jsonc
+              - server/package.json
+              - docs/bots.md
+              - examples/**
               # The root scripts are typechecked here: they import the bot SDK and the protocol.
               - scripts/**/*.ts
               - scripts/tsconfig.json
@@ -154,7 +164,24 @@ jobs:
       - name: Typecheck (scripts)
         run: bun run typecheck:scripts
       - name: Test
+        env:
+          # Keeps the temp folder of the bot SDK's local server, for the log step below.
+          KEEP_E2E_DIR: "1"
         run: scripts/ci-run.sh test packages/*
+      # The SDK must also run under Node, without bun: the echo example, started with `node`
+      # (22.18 or later runs TypeScript files as they are).
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Bot SDK under Node
+        env:
+          KEEP_E2E_DIR: "1"
+        run: bun run --cwd packages/bot-sdk test:node
+      # The server side of a failed bot SDK test. The admin secret is not in this log: wrangler
+      # reads it from a file and prints "(hidden)".
+      - name: Bot SDK server log
+        if: failure()
+        run: tail -n 200 "${TMPDIR:-/tmp}"/bot-sdk-e2e-*/wrangler.log || true
 
   # The server's vitest files in three shards, side by side; the typecheck and the sandbox seed
   # (wrangler dev, every migration and the sample team of bun run dev:desktop) in the first.
