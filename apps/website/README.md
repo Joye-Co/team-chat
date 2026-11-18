@@ -27,6 +27,24 @@ not in the repository, because the film carries the operator's own character art
 and the build copies them to `dist/media/`. A page whose two files are missing is built without its film block
 (`<!-- film -->` … `<!-- /film -->` in the HTML). The dev server answers byte ranges, as a static host does.
 
+## Share previews
+
+Link previews (Slack, X, WeChat, Lark, iMessage) and search engines need absolute URLs, and the site's address
+is the operator's own, so it is not in this repository. Set `WEBSITE_ORIGIN` when you build for your host:
+
+```bash
+WEBSITE_ORIGIN=https://chat.example.com bun run build:website
+```
+
+The build then fills `{{ORIGIN}}` in the tags between `<!-- origin -->` and `<!-- /origin -->` in each page:
+`og:url`, `og:image`, `canonical` and the `hreflang` pair with `x-default`. Without the variable (the dev
+server, CI) those tags are left out and the page keeps the relative ones between `<!-- no-origin -->` and
+`<!-- /no-origin -->`, so previews show no picture until the deploy step sets it.
+
+The share pictures are `src/img/og-zh.jpg` and `src/img/og-en.jpg`: the top 2880x1512 of the light `desk`
+screenshot of each language, scaled to 1200x630 as JPEG (several services do not take WebP). Make them again
+when that screenshot changes.
+
 ## Screenshots
 
 Every screenshot comes from the app's own screenshot self-test, with the sample team of
