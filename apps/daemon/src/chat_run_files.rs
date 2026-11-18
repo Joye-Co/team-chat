@@ -392,6 +392,7 @@ async fn artifact_body(local: &Local, body: &Value, create: bool) -> Result<Valu
         "data",
         "preview",
         "parentVersion",
+        "keepData",
     ] {
         if !body[k].is_null() {
             out.insert(k.to_string(), body[k].clone());
@@ -615,6 +616,11 @@ mod tests {
         let body = json!({ "artifactId": "A", "entry": "index.html", "files": files });
         let out = artifact_body(&local, &body, false).await.unwrap();
         assert!(out.get("parentVersion").is_none());
+        assert!(out.get("keepData").is_none());
+        let body =
+            json!({ "artifactId": "A", "entry": "index.html", "files": files, "keepData": true });
+        let out = artifact_body(&local, &body, false).await.unwrap();
+        assert_eq!(out["keepData"], true);
     }
 
     /// The server of this `Local` answers nothing: an `invalid` answer proves that the entry

@@ -44,6 +44,8 @@ const OPEN_ASKS: usize = 4;
 /// Seconds after the viewer's input in which a page may send (artifact-view
 /// `USER_ACTION_WINDOW`).
 const USER_ACTION_S: u64 = 2;
+/// Longest `Error.message` a page gets (artifact-view `MAX_ERROR_MESSAGE_CHARS`).
+const ERROR_MESSAGE_CHARS: usize = 300;
 /// Data pushes a second per version (server `DATA_RATE`).
 const DATA_PER_S: u64 = 2;
 /// Seconds in which an ask takes its reply (server `REPLY_WINDOW_MS`).
@@ -93,19 +95,25 @@ no_user_action (sent later than {USER_ACTION_S} s after the viewer's own input),
 payload does not fit the event's schema; .message says where), bad_request, too_large, \
 rate_limited (sent too fast, or you cannot take work now), offline (nothing was sent), timeout, \
 declined (you declined the ask; .message is your text), failed, reloaded (a new version replaced \
-the page), unknown_method.
+the page), unknown_method. .message has at most {ERROR_MESSAGE_CHARS} characters.
 
 Rules a page must follow
   - emit and ask work only within {USER_ACTION_S} s of the viewer's own click, drag or key press. \
 Nothing can be sent on load or on a timer: for fresh data, push it yourself.
   - The page runs in a sandbox with no network: put every script, style, font and picture in \
-the folder and name it by a relative path (or a data: URI). No CDN, no web fonts, no fetch, XHR \
+the folder and name it by a relative path (or a data: URI; a picture or media the page makes \
+itself may use a blob: URL). No CDN, no web fonts, no fetch, XHR \
 or WebSocket, no iframe, no worker, no <form> submit: handle clicks in script. A link to a web \
 page asks the person before it opens in their browser.
+  - alert, confirm and prompt show nothing: they warn in the console and return undefined, false \
+and null. Draw your own dialog in the page.
   - Do not set fonts or colors for plain content: the app gives every page its font (14/22), \
-its text color, table and code styles in both themes, and a transparent background. Style your \
-own parts with var(--tc-fg), var(--tc-muted), var(--tc-border), var(--tc-fill), var(--tc-bg), \
-var(--tc-primary) and var(--tc-pad); never hard-code black or white and set no body background.
+its text color, table, code, button and field styles in both themes, and a transparent \
+background, in the pane and in the 产出 window alike. <button data-tc=\"primary\"> is the main \
+action (button[data-tc=primary]). Style your own parts with var(--tc-fg), var(--tc-muted), \
+var(--tc-border), var(--tc-fill), var(--tc-bg), var(--tc-primary), var(--tc-danger), \
+var(--tc-radius), var(--tc-gap), var(--tc-font-mono) and var(--tc-pad); there is no --tc-ok or \
+--tc-warn. Never hard-code black or white and set no body background.
   - It opens in a pane about 400 pt wide: nothing may be cut off at that width.
   - Guard it: `const tc = window.teamchat; if (!tc || !tc.can.emit) {{ /* read only */ }}`. When \
 emit rejects, put the control back and say why.
@@ -124,8 +132,8 @@ artifactId, version, eventId, event, value and actor.
   chat-run artifact reply --event <eventId> --file reply.json   (or --decline <text>)   answers \
 an ask, within {REPLY_WINDOW_S} s.
   - Data belongs to one version and only the member that made the version can push it. \
-`chat-run artifact version` starts without data: read the current data first and pass it with \
---data.
+`chat-run artifact version` starts without data: pass --keep-data to carry over the state of the \
+version it is made from (one you made; otherwise it starts empty) or --data with a new state.
   - Emits of the same name sent in a burst are merged: the latest is delivered and the earlier \
 ones reject with rate_limited. Send the full value ({{\"id\": \"b\", \"done\": true}}), never \
 \"toggle\".",
@@ -488,6 +496,10 @@ mod tests {
             (&bridge, format!("MAX_OPEN_ASKS: usize = {OPEN_ASKS};")),
             (
                 &bridge,
+                format!("MAX_ERROR_MESSAGE_CHARS: usize = {ERROR_MESSAGE_CHARS};"),
+            ),
+            (
+                &bridge,
                 format!("ASK_TIMEOUT_DEFAULT_MS: u64 = {ASK_DEFAULT_S}_000;"),
             ),
             (
@@ -543,6 +555,10 @@ mod tests {
             "--tc-fill",
             "--tc-bg",
             "--tc-primary",
+            "--tc-danger",
+            "--tc-radius",
+            "--tc-gap",
+            "--tc-font-mono",
             "--tc-pad",
         ] {
             assert!(
@@ -550,6 +566,14 @@ mod tests {
                 "{var}"
             );
         }
+        // The variables a page might guess are not there, and the guide says so.
+        for var in ["--tc-ok", "--tc-warn"] {
+            assert!(!css.contains(var) && g.contains(var), "{var}");
+        }
+        assert!(css.contains("button[data-tc=primary]") && g.contains("button[data-tc=primary]"));
+        // The dialogs are stubs that return exactly what the guide says.
+        assert!(bridge.contains("[['alert', undefined], ['confirm', false], ['prompt', null]]"));
+        assert!(g.contains("return undefined, false and null"));
         // The sandbox it describes is the content policy of the page host.
         let policy = source("crates/artifact-view/src/resolve.rs");
         for rule in [
@@ -558,9 +582,12 @@ mod tests {
             "worker-src 'none'",
             "form-action 'none'",
             "default-src 'none'",
+            "img-src {me} data: blob:",
+            "media-src {me} data: blob:",
         ] {
             assert!(policy.contains(rule), "{rule}");
         }
+        assert!(g.contains("blob: URL"));
         assert!(source("crates/artifact-view/src/mac.rs").contains("nonPersistentDataStore"));
         // Every command it names is in the usage.
         for cmd in [
@@ -578,6 +605,7 @@ mod tests {
         for flag in [
             "--events",
             "--data",
+            "--keep-data",
             "--summary",
             "--base-data-rev",
             "--cause",

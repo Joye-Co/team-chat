@@ -65,6 +65,9 @@ pub fn cli_text(
 struct CardEnvelope<'a> {
     message_id: &'a str,
     rev: u32,
+    /// The card's rev now, when it is past `rev` (the rev the person saw); `block` is at this rev.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current_rev: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     ask_id: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -150,6 +153,7 @@ pub fn answer_envelope(f: &RunAnswerFrame) -> String {
         &CardEnvelope {
             message_id,
             rev: *rev,
+            current_rev: None,
             ask_id: Some(ask_id),
             answer_id: Some(answer_id),
             event_id: f.event_id.as_deref(),
@@ -174,13 +178,14 @@ pub fn interaction_envelope(f: &RunInteractionFrame) -> String {
             block_id,
             action_id,
             rev,
-            ..
+            current_rev,
         } => envelope(
             &f.input_id,
             "card.event",
             &CardEnvelope {
                 message_id,
                 rev: *rev,
+                current_rev: *current_rev,
                 ask_id: None,
                 answer_id: None,
                 event_id: f.event_id.as_deref(),
@@ -353,6 +358,35 @@ show."
         let text = answer_envelope(&f);
         assert!(text.contains("\"tally\":{\"a\":2,\"b\":1}"), "{text}");
         assert!(!text.contains("\"value\""), "{text}");
+    }
+
+    #[test]
+    fn a_card_event_says_the_rev_the_card_is_at_now() {
+        let event = |current_rev| RunInteractionFrame {
+            run_id: "r1".into(),
+            input_id: "in-1".into(),
+            source: RunInteractionSource::Card {
+                message_id: "M".into(),
+                block_id: Some("check".into()),
+                action_id: None,
+                rev: 3,
+                current_rev,
+            },
+            event: "choice.change".into(),
+            value: None,
+            actor: actor(),
+            event_id: None,
+            block: Some(serde_json::json!({ "id": "check", "type": "choice" })),
+        };
+        let json = |f: &RunInteractionFrame| -> serde_json::Value {
+            serde_json::from_str(interaction_envelope(f).lines().nth(1).unwrap()).unwrap()
+        };
+        let moved = json(&event(Some(5)));
+        assert_eq!(moved["rev"], 3);
+        assert_eq!(moved["currentRev"], 5);
+        assert_eq!(moved["block"]["id"], "check");
+        // The card did not change since the person saw it: only `rev`.
+        assert!(json(&event(None)).get("currentRev").is_none());
     }
 
     #[test]

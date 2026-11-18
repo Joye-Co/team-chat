@@ -20,6 +20,7 @@
 // cards close in place (同意, 拒绝, 没用上); the team's model is used by a member without one;
 // each mention reaches its own member and a follow-up without one goes to the topic's latest;
 // a request for an offline computer waits for it; Codex and ACP runs stop gated actions by code;
+// a page's data survives being set back and a new version with --keep-data;
 // a run reads the group's members, 产出, cards, decisions and topic state with `chat-run`, and
 // lists the other groups of the person it works for and searches them (`group list`, `search --all`).
 //
@@ -754,6 +755,7 @@ async function landedChecks(x: Landed) {
   out.relay = await relayCheck(x);
   out.gatesByCode = await gatesByCodeCheck(x);
   out.readCommands = await readCommandsCheck(x);
+  out.pageData = await pageDataCheck(x);
   out.readGroups = await readGroupsCheck(x);
   if (x.daemon) out.offlineComputer = await offlineComputerCheck(x);
   return out;
@@ -881,7 +883,7 @@ async function memoryAudienceCheck({ owner, alice, bot, events, ws, work }: Land
  * PR #103: an approval card changes in place after 同意 (button) and after 拒绝 (text), and a card
  * nobody answered becomes 没用上 when its run ends.
  */
-async function approvalCardCheck({ alice, bot, groupId, work, events, ws }: Landed) {
+async function approvalCardCheck({ owner, alice, bot, groupId, work, events, ws }: Landed) {
   const TITLE = "需要你确认：合并到 main";
   const cardsIn = (topicId: string) =>
     events.filter((e) => e.type === "message.created" && e.data.message.topicId === topicId && e.data.message.authorId === bot.member.id && e.data.message.card?.title === TITLE).map((e) => e.data.message);
@@ -895,19 +897,31 @@ async function approvalCardCheck({ alice, bot, groupId, work, events, ws }: Land
     if (!u.body.includes(line)) throw new Error(`the closed card says ${JSON.stringify(u.body)}, not ${line}`);
   };
 
+  let denied = "";
   // "gated twice": two gated commands; the first is approved with the button, the second denied in words.
   const t = await say(events, ws, groupId, "@dev gated twice", { mentions: [bot.member.id] });
   const c1 = await until("first approval card", () => cardsIn(t.topicId)[0], 60_000);
   const approve = c1.card.actions.find((a: any) => a.id.startsWith("approve:"));
   if (!approve) throw new Error(`the approval card has no 同意: ${JSON.stringify(c1.card.actions)}`);
-  const rid = `landed-${++landedRid}`;
-  ws.send(JSON.stringify({ t: "card.action", rid, groupId, messageId: c1.id, actionId: approve.id }));
-  const pressed = await until("card.action ack", () => events.find((e) => e.frame?.rid === rid));
-  if (!pressed.frame.ok) throw new Error(`pressing 同意 failed: ${JSON.stringify(pressed.frame.error)}`);
-  await closed(c1.id, "已同意：合并到 main", "Alice 同意了");
-  const c2 = await until("second approval card", () => cardsIn(t.topicId)[1], 60_000);
-  await say(events, ws, groupId, "拒绝", { topicId: t.topicId });
-  await closed(c2.id, "已拒绝：合并到 main", "Alice 拒绝了");
+  // A gated action on a team computer is answered by an owner: Alice's press changes nothing.
+  const press = async (as: { ws: WebSocket; events: any[] }) => {
+    const rid = `landed-${++landedRid}`;
+    as.ws.send(JSON.stringify({ t: "card.action", rid, groupId, messageId: c1.id, actionId: approve.id }));
+    const pressed = await until("card.action ack", () => as.events.find((e) => e.frame?.rid === rid));
+    if (!pressed.frame.ok) throw new Error(`pressing 同意 failed: ${JSON.stringify(pressed.frame.error)}`);
+  };
+  await press({ ws, events });
+  const approver = await socket(owner);
+  try {
+    await press(approver);
+    await closed(c1.id, "已同意：合并到 main", "Joye 同意了");
+    const c2 = await until("second approval card", () => cardsIn(t.topicId)[1], 60_000);
+    await say(approver.events, approver.ws, groupId, "拒绝", { topicId: t.topicId });
+    await closed(c2.id, "已拒绝：合并到 main", "Joye 拒绝了");
+    denied = c2.id;
+  } finally {
+    approver.ws.close();
+  }
   const run = await ranDone(events, t.topicId, "approvals");
   const gate = JSON.parse(readFileSync(join(workOf(work, run.id), "gate-1.json"), "utf8")) as { commands: { command: string; denied: string | null }[] };
   const [merge12, ls, merge13] = gate.commands;
@@ -919,8 +933,8 @@ async function approvalCardCheck({ alice, bot, groupId, work, events, ws }: Land
   const waiting = runsIn(events, u.topicId).at(-1);
   await call("POST", `/v1/runs/${waiting.id}/cancel`, { token: alice.token });
   await closed(c3.id, "没用上：合并到 main", "这件事结束了，没等到回答");
-  step("approval cards: 同意 and 拒绝 close the card in place; an unanswered one says 没用上 when the run ends");
-  return { approved: c1.id, denied: c2.id, unused: c3.id };
+  step("approval cards: a member's 同意 changes nothing; the owner's 同意 and 拒绝 close the card in place; an unanswered one says 没用上 when the run ends");
+  return { approved: c1.id, denied, unused: c3.id };
 }
 
 /**
@@ -1051,19 +1065,21 @@ async function gatesByCodeCheck({ owner, groupId, work, events, ws }: Landed) {
       .map((e) => e.data.message);
   const closedAs = (messageId: string, title: string) =>
     until(`card closed as ${title}`, () => events.filter((e) => e.type === "message.updated" && e.data.messageId === messageId && e.data.card).at(-1)?.data.card.title === title);
+  // A gated action on a team computer is answered by an owner.
+  const approver = await socket(owner);
   const press = async (card: any) => {
     const approve = card.card.actions.find((a: any) => a.id.startsWith("approve:"));
     if (!approve) throw new Error(`the approval card has no 同意: ${JSON.stringify(card.card.actions)}`);
     const rid = `landed-${++landedRid}`;
-    ws.send(JSON.stringify({ t: "card.action", rid, groupId, messageId: card.id, actionId: approve.id }));
-    const ack = await until("card.action ack", () => events.find((e) => e.frame?.rid === rid));
+    approver.ws.send(JSON.stringify({ t: "card.action", rid, groupId, messageId: card.id, actionId: approve.id }));
+    const ack = await until("card.action ack", () => approver.events.find((e) => e.frame?.rid === rid));
     if (!ack.frame.ok) throw new Error(`pressing 同意 failed: ${JSON.stringify(ack.frame.error)}`);
   };
 
   const gx = await aiMember(owner, "gx", "codex");
   const t = await say(events, ws, groupId, "@gx gated", { mentions: [gx] });
   const push = await until("codex: the push asks a person", () => cardsIn(t.topicId, gx)[0], 60_000);
-  await say(events, ws, groupId, "拒绝", { topicId: t.topicId });
+  await say(approver.events, approver.ws, groupId, "拒绝", { topicId: t.topicId });
   await closedAs(push.id, "已拒绝：合并到 main");
   const merge = await until("codex: the MCP merge asks a person", () => cardsIn(t.topicId, gx)[1], 60_000);
   await press(merge);
@@ -1090,6 +1106,7 @@ async function gatesByCodeCheck({ owner, groupId, work, events, ws }: Landed) {
   if (cardsIn(w.topicId, ac).length !== 0) throw new Error("acp: a file write nobody gates asked a person");
   const written = messageOf(events, wr.resultMessageId);
   if (!written?.body.includes("permission yes")) throw new Error(`acp: the file write answered ${JSON.stringify(written?.body)}`);
+  approver.ws.close();
   step("gates by code: Codex (untrusted) asked a person only for the push (拒绝) and the MCP merge (同意); ACP asked for gh pr merge and not for a file write");
   return { codexRun: run.id, acpRuns: [ar.id, wr.id] };
 }
@@ -1129,6 +1146,26 @@ async function readCommandsCheck({ alice, bot, groupId, work, events, ws }: Land
   if (!Array.isArray(ok("decisions").decisions)) throw new Error(`decisions list: ${JSON.stringify(got.decisions)}`);
   step("chat-run read commands: a run in another topic read the members, that topic's state and 产出, the 产出's text, the card and the decisions");
   return { artifactId: listed.id, cardId };
+}
+
+/**
+ * The data of a two-way page from the command line: a state set back to an earlier one is applied
+ * (on, off, on), a new version keeps the data with `--keep-data` and starts empty without it.
+ */
+async function pageDataCheck({ groupId, bot, work, events, ws }: Landed) {
+  const t = await say(events, ws, groupId, "@dev pagedata", { mentions: [bot.member.id] });
+  const run = await ranDone(events, t.topicId, "page data");
+  const got = JSON.parse(readFileSync(join(workOf(work, run.id), "pagedata.json"), "utf8"));
+  for (const k of ["create", "on", "off", "onAgain", "read", "keep", "kept", "plain", "empty"]) {
+    if (got[k]?.code !== 0) throw new Error(`pagedata ${k}: ${JSON.stringify(got[k])}`);
+  }
+  if (got.onAgain.out?.duplicate) throw new Error(`the state set back was taken for a retry: ${JSON.stringify(got.onAgain.out)}`);
+  if (got.read.out?.data?.done !== true || got.read.out?.dataRev !== 4) throw new Error(`after on, off, on the page has ${JSON.stringify(got.read.out)}`);
+  if (got.kept.out?.data?.done !== true || got.kept.out?.dataRev !== 1) throw new Error(`--keep-data gave ${JSON.stringify(got.kept.out)}`);
+  if (got.empty.out?.data !== null || got.empty.out?.dataRev !== 0) throw new Error(`a version without --keep-data has ${JSON.stringify(got.empty.out)}`);
+  if (got.both?.code !== 1 || got.both.out?.error?.message !== "give one of --keep-data and --data") throw new Error(`--keep-data with --data: ${JSON.stringify(got.both)}`);
+  step("page data: on, off, on ends on; a new version keeps the data with --keep-data and starts empty without it");
+  return { runId: run.id };
 }
 
 /**

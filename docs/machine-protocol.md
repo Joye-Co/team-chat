@@ -568,6 +568,9 @@ RunEvent += { type: "output", outputId, op: "card.post" | "card.patch" | "intera
 run.input.answer += { answerId?, askId?, eventId?, event?, blockId?, value? }
 ```
 
+The text envelope of a card event carries `rev` (what the person saw), `currentRev` when the card
+has moved on and `block` as the card has it at that rev, so a member patches from `currentRev`.
+
 On a private card (a non-public poll, an anonymous questionnaire; protocol.md "Private
 answers"), `actor` is `{ id: "anonymous", name: "anonymous" }`, and `run.input.authorId` too.
 The voter's id is not in the room's hand-off to the run either. A vote of a poll that shows
@@ -614,7 +617,11 @@ before looking for the hand-over card (`chat-run topic history --limit 5`). The 
 (`clientMsgId`), `card.patch` (`clientPatchId`) and `artifact.data` (`clientPushId`) unless the
 CLI gave one: `k` + 40 hex of SHA-256 over the run id, the op and the body. The same command in the
 same run gets the same key, so the server applies it once and answers a retry with the first
-result (`duplicate`); another run never gets the same key. `interaction.resolve` and
+result (`duplicate`); another run never gets the same key. A data push keeps its key until the
+server has confirmed another push of that version: after that the same body is a new push with a
+new key, because the server would answer a page set back to an earlier state (on, off, on) as
+`duplicate` and not apply it.
+`interaction.resolve` and
 `artifact.reply` are keyed by their event id; `desk.note` and `run.report` write the same value
 again. (Daemons before this rule answered
 `server.too_old` for the acked case.) A
@@ -757,7 +764,7 @@ Server rules (BotDesk):
 - `output` bodies are the fields of the matching client frame without `t`, `rid` and `groupId`
   (always the run's group): `card.post {card | cardV2, cause?, body?}` (in the run's topic),
   `card.patch {messageId, baseRev, ops, cause?}`, `interaction.resolve {eventId, result, note?}`,
-  `artifact.data {artifactId, version, data, baseDataRev?, cause?}`, `artifact.reply {eventId, ok,
+  `artifact.data {artifactId, version, data, baseDataRev?, cause?, clientPushId?}`, `artifact.reply {eventId, ok,
   payload? | error?}` or `{eventId, decline: "…"}`. `card.post` takes an optional `clientMsgId`
   (1-64 characters, the daemon's idempotency key) as the `send` key. Without `clientMsgId` /
   `clientPatchId` / `clientPushId` in the body, the key is `run:{runId}:out:{outputId}` (posts) or
@@ -781,7 +788,7 @@ the run's member. The server gives the run's group, topic and `runId`, so the do
 | --- | --- | --- |
 | `file.upload` | `{ path, name?, mime? }` | `chat-run file upload --file <path> [--name N] [--mime T]` → `{ file: FileMeta }` |
 | `artifact.create` | `{ title, dir \| file, entry?, kind?, note?, events?, media?, data?, preview? }` | `chat-run artifact create --title T (--dir D \| --file F) [--entry P] [--kind html\|file] [--note …] [--summary S] [--metrics m.json] [--events e.json] [--data d.json] [--media m.json]` → `ArtifactVersionResponse` |
-| `artifact.version` | `{ artifactId, dir \| file, entry?, title?, note?, parentVersion?, events?, media?, data?, preview? }` | `chat-run artifact version --artifact A (--dir D \| --file F) [--parent N] [...]` → `ArtifactVersionResponse` |
+| `artifact.version` | `{ artifactId, dir \| file, entry?, title?, note?, parentVersion?, events?, media?, data?, keepData?, preview? }` | `chat-run artifact version --artifact A (--dir D \| --file F) [--parent N] [--keep-data] [...]` → `ArtifactVersionResponse` |
 
 - Paths are made absolute by `chat-run` and must be inside the run's working folder after
   symbolic links are resolved; anything else gets `forbidden` with reason
@@ -819,20 +826,28 @@ and one `ask`: `page/index.html`, and beside the page folder `events.json`, `dat
   the current data, `null` before the first push, and on every push; returns the unsubscribe),
   `getData()`, `emit(name, payload?)` → `{ eventId }`, `ask(name, payload?, { timeoutMs })` → the
   reply (30 s by default, at most 120 s, 4 open at once). A rejected call is an `Error` with
-  `.code`: `not_allowed`, `bad_request`, `too_large`, `rate_limited`, `offline`, `timeout`,
-  `declined`, `failed`, `reloaded`, `unknown_method`.
+  `.code`: `not_allowed`, `no_user_action`, `bad_payload`, `bad_request`, `too_large`,
+  `rate_limited`, `offline`, `timeout`, `declined`, `failed`, `reloaded`, `unknown_method`. Its
+  `.message` (at most 300 characters) carries the member's decline text or the server's schema
+  problem when there is one.
 - `emit` and `ask` work only within 2 s of the viewer's own input: nothing is sent on load or
   on a timer.
 - The sandbox: no network (every script, style, font and picture is a file of the version or a
-  `data:` URI; no fetch, XHR, WebSocket, iframe, worker or form submit); a link to the web asks
-  the person first.
-- The host stylesheet: the app gives the page its font, text color and table and code styles in
-  both themes on a transparent background, and the variables `--tc-fg`, `--tc-muted`,
-  `--tc-border`, `--tc-fill`, `--tc-bg`, `--tc-primary`, `--tc-pad` for the page's own parts.
+  `data:` URI, and a picture or media the page makes itself may use a `blob:` URL; no fetch, XHR,
+  WebSocket, iframe, worker or form submit); a link to the web asks the person first. `alert`,
+  `confirm` and `prompt` show nothing: they warn in the console and return `undefined`, `false`
+  and `null`.
+- The host stylesheet: the app gives the page its font, text color and table, code, button and
+  field styles in both themes on a transparent background, in the pane and in the 产出 window
+  alike; `button[data-tc=primary]` is the main action, and the variables `--tc-fg`, `--tc-muted`,
+  `--tc-border`, `--tc-fill`, `--tc-bg`, `--tc-primary`, `--tc-danger`, `--tc-radius`, `--tc-gap`,
+  `--tc-font-mono`, `--tc-pad` are for the page's own parts (there is no `--tc-ok` or `--tc-warn`).
 - The limits: 20 events, payload 16 KiB, reply 64 KiB within 120 s, data 256 KiB, 2 pushes a
   second, `--cause` an event of the last 30 minutes.
 - Data belongs to one version and only the member that made the version pushes it; a new
-  version starts without data, so the author reads the current data and passes it with `--data`.
+  version starts without data unless it gets `--data` or `--keep-data` (`keepData`: the snapshot of
+  the version it is made from, when the same member made that one; `chat-run` refuses both flags
+  together).
   Emits of the same name sent in a burst are merged (the latest wins), so a page sends the full
   value, never a toggle.
 
