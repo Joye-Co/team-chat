@@ -109,6 +109,8 @@ crate::copy! {
     MEMBERS_PLAN_LIMIT_INVALID = "请填 0 到 1000000 之间的金额，最多两位小数",
     MEMBERS_PLAN_REFUSED = "没能保存汇报和预算",
     MEMBERS_PLAN_READONLY = "只有管理员可以改",
+    MEMBERS_PLAN_EXPLANATION_PERSON = "{name} 向谁汇报。",
+    MEMBERS_PLAN_REFUSED_PERSON = "没能保存汇报",
     MEMBERS_RETRY_FAILED = "没能重试",
     MEMBERS_QUEUED_SINCE = "{time} 开始排队",
     // --- end v13/wire ---

@@ -121,7 +121,11 @@ impl PlanForm {
                     Ok(_) => window.close_dialog(cx),
                     Err(e) => {
                         error_alert(
-                            c::MEMBERS_PLAN_REFUSED,
+                            if this.member.is_bot() {
+                                c::MEMBERS_PLAN_REFUSED
+                            } else {
+                                c::MEMBERS_PLAN_REFUSED_PERSON
+                            },
                             crate::views::settings::widgets::error_text(e),
                             |_, _| {},
                             window,
@@ -211,11 +215,17 @@ impl Render for PlanForm {
             }
         }
         let [cancel, save] = sheet_buttons("member-plan", common::CANCEL, common::SAVE, cx);
-        SheetLayout::new(c::MEMBERS_PLAN)
-            .explanation(fill(
-                c::MEMBERS_PLAN_EXPLANATION,
-                &[("name", &self.member.name)],
-            ))
+        // A person has no budget: the sheet does not talk about one.
+        let (title, explanation) = if self.member.is_bot() {
+            (c::MEMBERS_PLAN, c::MEMBERS_PLAN_EXPLANATION)
+        } else {
+            (
+                c::MEMBERS_PLAN_REPORTS_ONLY,
+                c::MEMBERS_PLAN_EXPLANATION_PERSON,
+            )
+        };
+        SheetLayout::new(title)
+            .explanation(fill(explanation, &[("name", &self.member.name)]))
             .body(form)
             .buttons([
                 cancel.on_click(|_, window, cx| window.close_dialog(cx)),
