@@ -234,7 +234,8 @@ pub fn ghost_button(
 /// A disabled button: the same variant at 50 % (§1.8, D11), so a disabled
 /// primary never looks like Cancel.
 pub fn disabled_push(b: Button, disabled: bool, _cx: &App) -> Button {
-    b.disabled(disabled).when(disabled, |b| b.opacity(0.5))
+    b.disabled(disabled)
+        .when(disabled, |b| b.opacity(metrics::DISABLED_OPACITY))
 }
 
 /// The primary of a short form that is not complete yet (the login, §2.20):

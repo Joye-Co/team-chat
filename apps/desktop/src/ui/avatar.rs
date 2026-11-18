@@ -56,6 +56,7 @@ pub struct MemberAvatar {
     /// v3 status dot on the avatar: blue while the member works, amber
     /// while it waits on me.
     ring: Option<Ring>,
+    on_group: bool,
 }
 
 /// The status of an avatar (v3), drawn as a small dot on its corner.
@@ -89,7 +90,15 @@ impl MemberAvatar {
             }),
             status_override: None,
             ring: None,
+            on_group: false,
         }
+    }
+
+    /// The avatar sits on a group box: a person's letter disk takes the
+    /// on-group tint, since `muted` is the group's own fill in light.
+    pub fn on_group(mut self) -> Self {
+        self.on_group = true;
+        self
     }
 
     /// Older API: the v3 status dot. It draws nothing now (T1-09, §2.12:
@@ -279,7 +288,11 @@ impl RenderOnce for MemberAvatar {
                 .rounded_full()
                 // §1.8: one fallback for every person, me included: the muted
                 // fill, a 1 px border line (§2.22) and the initial in foreground.
-                .bg(k.avatar_bg)
+                .bg(if self.on_group {
+                    crate::ui::native::native_colors(cx).on_group
+                } else {
+                    k.avatar_bg
+                })
                 .text_color(k.avatar_fg)
                 .border_1()
                 .border_color(k.border)

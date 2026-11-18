@@ -38,6 +38,7 @@ pub struct Badge {
     lead: Option<AnyElement>,
     dense: bool,
     max_w: Option<gpui::Pixels>,
+    on_group: bool,
 }
 
 impl Badge {
@@ -48,7 +49,15 @@ impl Badge {
             lead: None,
             dense: false,
             max_w: None,
+            on_group: false,
         }
+    }
+
+    /// A secondary badge inside a group box: `muted` is the group's own
+    /// fill in light, so the pill takes the on-group tint instead.
+    pub fn on_group(mut self) -> Self {
+        self.on_group = true;
+        self
     }
 
     pub fn variant(mut self, variant: BadgeVariant) -> Self {
@@ -100,6 +109,11 @@ impl RenderOnce for Badge {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = native_colors(cx);
         let (fill, edge, text) = badge_colors(self.variant, &k);
+        let fill = if self.on_group && self.variant == BadgeVariant::Secondary {
+            k.on_group
+        } else {
+            fill
+        };
         div()
             .flex_none()
             .h(height::BADGE)
@@ -249,6 +263,7 @@ pub struct StatusBadge {
     label: SharedString,
     dense: bool,
     max_w: Option<gpui::Pixels>,
+    on_group: bool,
 }
 
 impl StatusBadge {
@@ -258,7 +273,14 @@ impl StatusBadge {
             label: label.into(),
             dense: false,
             max_w: None,
+            on_group: false,
         }
+    }
+
+    /// The badge of a row inside a group box (see [`Badge::on_group`]).
+    pub fn on_group(mut self) -> Self {
+        self.on_group = true;
+        self
     }
 
     pub fn dense(mut self) -> Self {
@@ -286,6 +308,9 @@ impl RenderOnce for StatusBadge {
         }
         if let Some(w) = self.max_w {
             b = b.max_w(w);
+        }
+        if self.on_group {
+            b = b.on_group();
         }
         b
     }

@@ -31,11 +31,8 @@ pub enum FieldSize {
     Regular,
     /// h28: inside a dense row.
     Small,
-    /// h36: the login card.
+    /// h36: the login card and the one field of a verification step.
     Large,
-    /// h44, the height of a code slot: the one field of a verification
-    /// step, beside a full-width button of the same height.
-    Hero,
 }
 
 impl FieldSize {
@@ -44,7 +41,6 @@ impl FieldSize {
             FieldSize::Regular => metrics::FIELD,
             FieldSize::Small => metrics::BUTTON_SMALL,
             FieldSize::Large => metrics::FIELD_LARGE,
-            FieldSize::Hero => metrics::CODE_SLOT.1,
         }
     }
 }

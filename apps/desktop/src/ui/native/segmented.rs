@@ -149,6 +149,9 @@ impl RenderOnce for Segmented {
             .p(metrics::SEGMENT_INSET)
             .rounded(radius::CONTAINER)
             .bg(k.fill)
+            // Disabled: 50 % opacity (§1.8), so a value that cannot be
+            // changed does not look like a live control.
+            .when(disabled, |d| d.opacity(metrics::DISABLED_OPACITY))
             .flex()
             .items_center()
             .children(items)

@@ -83,7 +83,6 @@ impl RenderOnce for GroupedForm {
                 d.child(
                     div()
                         .pb(metrics::GROUP_HEADER_GAP)
-                        .px(px(2.))
                         .n_headline()
                         .text_color(k.label)
                         .child(h),
@@ -94,7 +93,6 @@ impl RenderOnce for GroupedForm {
                 d.child(
                     div()
                         .pt(metrics::GROUP_HEADER_GAP)
-                        .px(px(2.))
                         .n_subheadline()
                         .text_color(k.secondary)
                         .child(f),
