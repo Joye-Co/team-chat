@@ -976,7 +976,7 @@ impl ComposerView {
     }
 
     /// The 添加文件 button: picks files with the system dialog.
-    fn pick_files(&mut self, cx: &mut Context<Self>) {
+    pub fn pick_files(&mut self, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(gpui::PathPromptOptions {
             files: true,
             directories: false,

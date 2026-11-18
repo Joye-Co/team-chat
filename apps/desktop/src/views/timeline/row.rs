@@ -1278,7 +1278,9 @@ impl TimelineView {
     /// that stays top-anchored opens with what to do next instead of a
     /// blank column. 交代给成员 puts `@` in the composer; 添加成员… opens the
     /// 群's add-members sheet; neither shows in a 私聊 (its one peer is the
-    /// member you already talk to). 详情 opens the inspector.
+    /// member you already talk to); a 话题 there offers 添加文件, the
+    /// composer's file picker, so its block is never a bare title (A1).
+    /// 详情 opens the inspector.
     fn start_actions(&self, topic: &Topic, in_group: bool, cx: &mut Context<Self>) -> AnyElement {
         use crate::ui::native::{PushSize, PushStyle, push_button};
         let assign = in_group.then(|| {
@@ -1353,6 +1355,23 @@ impl TimelineView {
             ))
             .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::app::NewTopic), cx))
         });
+        let attach = (!in_group && !chat).then(|| {
+            push_button(
+                "start-attach",
+                crate::copy::composer::ATTACH,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            )
+            .icon(ui::sym(
+                Sym::Attach,
+                ui::SymSize::INLINE,
+                theme::colors(cx).ink,
+            ))
+            .on_click(|_, window, cx| {
+                window.dispatch_action(Box::new(crate::app::AttachInComposer), cx)
+            })
+        });
         let info = (!rail_open && !chat).then(|| {
             push_button(
                 "start-topic-info",
@@ -1381,6 +1400,7 @@ impl TimelineView {
             .children(assign)
             .children(add)
             .children(new_topic)
+            .children(attach)
             .children(info)
             .into_any_element()
     }

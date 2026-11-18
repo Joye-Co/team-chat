@@ -46,6 +46,8 @@ gpui::actions!(
         ToggleSidebar,
         NewTopic,
         MentionInComposer,
+        // 添加文件 of a thread-start block: the composer's file picker.
+        AttachInComposer,
         // 开个话题: the caret into the composer of the 话题 just opened.
         FocusComposer,
         FocusNext,
@@ -1324,6 +1326,10 @@ impl RootView {
                 .on_action(cx.listener(|this, _: &MentionInComposer, window, cx| {
                     this.composer
                         .update(cx, |composer, cx| composer.insert_text("@", window, cx));
+                }))
+                .on_action(cx.listener(|this, _: &AttachInComposer, _, cx| {
+                    this.composer
+                        .update(cx, |composer, cx| composer.pick_files(cx));
                 }))
                 .on_action(cx.listener(|this, _: &FocusComposer, window, cx| {
                     this.composer
