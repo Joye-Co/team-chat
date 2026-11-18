@@ -217,6 +217,7 @@ crate::copy! {
     // v11/pb-cards: the notes scene.
     I_NOTES_OFFLINE = "成员不在线",
     I_NOTES_BUSY = "这一块不能操作",
+    I_NO_EVENTS = "成员没有接这些按钮",
     I_NOTES_DRAFT = "你在写的时候卡片变了",
     I_NOTES_REPLY = "成员回在了下面",
     I_REJECTED_FORBIDDEN = "这一步不归你",

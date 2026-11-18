@@ -568,7 +568,14 @@ impl Gallery21 {
                     cell(b, window, cx),
                     cell(d, window, cx),
                 ]);
-                let right = column(vec![cell(e, window, cx), cell(f, window, cx)]);
+                let inert = item(
+                    c::I_NO_EVENTS,
+                    "",
+                    self.card(NO_EVENTS, me, None, "a", CardMode::Desk, window, cx),
+                    true,
+                    cx,
+                );
+                let right = column(vec![cell(e, window, cx), cell(f, window, cx), inert]);
                 (left, right)
             }
             Page::Rejected => {

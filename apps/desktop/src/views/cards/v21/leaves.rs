@@ -1771,7 +1771,13 @@ pub fn buttons(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App)
         return div().into_any_element();
     };
     let ctx = node.ctx;
-    let live = live(node, b);
+    // A block that declares no `button.press` sends nothing (the server refuses the press):
+    // its buttons draw as what they are, not as controls that do nothing.
+    let pressable = super::interact::sends(ctx.card, b, "button.press");
+    if !pressable {
+        crate::selftest::drawn::mark("card-buttons-inert", id.clone());
+    }
+    let live = pressable && live(node, b);
     let armed = node.ui.block(id).focus.clone();
     let row = div()
         .flex()
@@ -1801,7 +1807,7 @@ pub fn buttons(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App)
                 },
                 cx,
             )
-            .disabled(!live)
+            .map(|el| ui::native::buttons::disabled_push(el, !live, cx))
             .on_click(move |_, _, cx| {
                 // A confirm asks once in place: the button says the confirm title, a second
                 // press sends.

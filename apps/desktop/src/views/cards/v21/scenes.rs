@@ -184,3 +184,10 @@ pub fn checks(name: &str) -> Option<crate::selftest::scenes::Checks> {
         _ => None,
     }
 }
+        "interact_none_reasons" => Some(|_, _| {
+            let inert = ids("card-buttons-inert");
+            vec![check(
+                inert.contains("inert"),
+                format!("a buttons block without events is not pressable ({inert:?})"),
+            )]
+        }),

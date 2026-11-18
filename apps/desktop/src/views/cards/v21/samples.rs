@@ -76,6 +76,11 @@ pub const NONE_REASONS: [(&str, &str); 5] = [
     ("c21-none-failed", "run.failed"),
 ];
 
+/// A section that folds over a table that sorts, both on the card's first view.
+pub const KEYS_TABLE: &str = "c21-keys-table";
+/// A buttons block that declares no `button.press`.
+pub const NO_EVENTS: &str = "c21-no-events";
+
 /// My bar click the server refused: I may not do this step.
 pub const NOTE_FORBIDDEN: &str = "c21-note-forbidden";
 /// My bar click that did not get to Ledger (the server refused it for another reason).
@@ -981,6 +986,41 @@ pub fn all() -> Vec<Sample21> {
         s.events.push((1_000, acked_none(id, "more", reason)));
         out.push(s);
     }
+    out.push(sample(
+        KEYS_TABLE,
+        GROWTH,
+        T_REPORT,
+        LEDGER,
+        at(10, 34),
+        with(
+            base("按负责人看", "info", "Ledger：按负责人看"),
+            json!({
+                "blocks": [
+                    { "id": "g", "type": "group", "title": "明细", "summary": "点标题收起", "children": ["g_text"] },
+                    { "id": "g_text", "type": "text", "text": "这一组可以用键盘收起和展开。" },
+                    { "id": "table", "type": "table", "title": "按负责人", "columns": ["渠道", "负责人", "新增群"],
+                      "rows": [["微博", "小王", "14"], ["B 站", "李雪", "9"], ["抖音", "Forge", "5"]],
+                      "sortable": true }
+                ]
+            }),
+        ),
+    ));
+    out.push(sample(
+        NO_EVENTS,
+        GROWTH,
+        T_REPORT,
+        LEDGER,
+        at(9, 40),
+        with(
+            base("这周的安排", "info", "Ledger：这周的安排"),
+            json!({
+                "blocks": [
+                    { "id": "inert", "type": "buttons", "fallbackText": "周一开会 / 周三发版",
+                      "buttons": [ { "id": "a", "label": "周一开会" }, { "id": "b", "label": "周三发版" } ] }
+                ]
+            }),
+        ),
+    ));
     // A live event that did not get through: the bar goes back and the card says why.
     let failed_at = |id: &str, phase: CardEventPhase| {
         let mut s = sample(id, GROWTH, T_REPORT, LEDGER, at(9, 40), bars_rev1());
