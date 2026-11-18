@@ -46,6 +46,13 @@ pub enum Page {
     Conflict,
     /// Interact: the report as someone the card does not ask.
     Readonly,
+    /// A live event that did not get through: refused, not sent, failed with and
+    /// without a note.
+    Rejected,
+    /// Schema fields the renderer reads, and blocks of one kind side by side.
+    Fields,
+    /// Controls a keyboard walks.
+    Controls,
 }
 
 pub struct Gallery21 {
@@ -543,6 +550,69 @@ impl Gallery21 {
                     .into_any_element();
                 (left, right)
             }
+            Page::Rejected => {
+                let cell = |caption: &'static str, id: &str, w: &mut Window, cx: &mut App| {
+                    item(
+                        caption,
+                        "",
+                        self.card(id, me, None, "a", CardMode::Desk, w, cx),
+                        true,
+                        cx,
+                    )
+                };
+                let left = column(vec![
+                    cell(c::I_REJECTED_FORBIDDEN, NOTE_FORBIDDEN, window, cx),
+                    cell(c::I_REJECTED_UNHANDLED, NOTE_UNHANDLED, window, cx),
+                ]);
+                let right = column(vec![
+                    cell(c::I_REJECTED_NOT_SENT, NOTE_REJECTED, window, cx),
+                    cell(c::I_REJECTED_WHY, NOTE_WHY, window, cx),
+                ]);
+                (left, right)
+            }
+            Page::Fields => (
+                item(
+                    c::I_FIELDS,
+                    c::I_FIELDS_NOTE,
+                    self.card(FIELDS, me, None, "a", CardMode::Desk, window, cx),
+                    true,
+                    cx,
+                ),
+                item(
+                    c::I_TWINS,
+                    c::I_TWINS_NOTE,
+                    self.card(TWINS, me, None, "a", CardMode::Desk, window, cx),
+                    true,
+                    cx,
+                ),
+            ),
+            Page::Controls => (
+                item(
+                    c::I_CONTROLS,
+                    c::I_CONTROLS_NOTE,
+                    self.card(CONTROLS, me, None, "a", CardMode::Desk, window, cx),
+                    true,
+                    cx,
+                ),
+                item(
+                    c::I_CONTROLS_TABLE,
+                    "",
+                    self.card(
+                        CONTROLS,
+                        me,
+                        Some(Preset {
+                            tab: Some(("tabs", "b")),
+                            ..Default::default()
+                        }),
+                        "b",
+                        CardMode::Desk,
+                        window,
+                        cx,
+                    ),
+                    true,
+                    cx,
+                ),
+            ),
             Page::Readonly => (
                 item(
                     c::I_READONLY,

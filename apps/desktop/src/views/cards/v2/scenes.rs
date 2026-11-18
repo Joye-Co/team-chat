@@ -108,6 +108,21 @@ pub const SCENES: &[Scene] = &[
         "Card v2 13: a card not fetched yet (skeleton), a card that cannot be read (Alert with 重试) and a choice with 8 options",
         Section::Load
     ),
+    gallery_scene!(
+        "cards-v2-many",
+        "Card v2 14 很多数据: 6 metrics in two rows, a 30-point and a 5-series line chart, a 200-point bar chart and a 200 by 20 table folded to 10 rows",
+        Section::Many
+    ),
+    gallery_scene!(
+        "cards-v2-long",
+        "Card v2 15 很长的内容: a 600-line diff folded to its first hunk, proofs with test counts, recordings, a 产出 and a link, and long code blocks",
+        Section::Long
+    ),
+    gallery_scene!(
+        "cards-v2-record",
+        "Card v2 16 答完以后: my stored answer with 撤回, a 撤回 the server refused, an answer the member has not started and one it never picked up with 提醒一下",
+        Section::Record
+    ),
     Scene {
         name: "cards-v2-topic",
         about: "The approval card of orderbot v2.14 上线 as a v2 card in its 话题",

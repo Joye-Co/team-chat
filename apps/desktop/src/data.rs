@@ -2702,6 +2702,15 @@ pub trait ChatProvider: Send + Sync + 'static {
     /// Takes back my answer while it is still queued (撤回), or forgets a
     /// refused one. Emits `Change::Messages` for the topic.
     fn withdraw_card_v2_answer(&self, _group_id: &str, _topic_id: &str, _message_id: &str) {}
+    /// True when my stored answer to the card can be taken back (撤回): it has an answer
+    /// id the server knows (`card.event answer.retract`).
+    fn can_retract_card_v2_answer(&self, _group_id: &str, _message_id: &str) -> bool {
+        false
+    }
+    /// Takes back my stored answer to the card (撤回). The request is one of my card
+    /// events ([`Self::card_v2_events`], event `answer.retract`): on its way, then gone
+    /// with the answer, or refused when the member has started. Emits `Change::Messages`.
+    fn retract_card_v2_answer(&self, _group_id: &str, _topic_id: &str, _message_id: &str) {}
 
     // --- inc-cards21: the interaction loop (INTERACT §3, §4.4) ---
 

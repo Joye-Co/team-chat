@@ -1,7 +1,9 @@
 //! The `chart` block: one line, area, bar or spark chart (DESIGN.md §7.10
 //! "Chart"). The main series is `ink` (solid, with a dot on its last point),
-//! the others `ink-3` dashed or `line-2` bars; three quiet grid lines; mono
-//! axis labels under the points; a legend at the right of the label row.
+//! each other series its own stroke of the mono palette ([`stroke`]); three quiet
+//! grid lines; mono axis labels under the points, only as many as fit
+//! ([`shown_labels`]); a legend at the right of the label row, under it when it
+//! does not fit.
 //! Lines draw in once ([`motion::LINE_DRAW`], each further series
 //! [`motion::SERIES_STAGGER`] later) and bars grow from zero once
 //! ([`motion::BAR_GROW`]), once per chart in the session; with Reduce motion
@@ -132,12 +134,139 @@ struct Paint {
     kind: ChartKind,
     series: Vec<Vec<f32>>,
     grid: Hsla,
-    main: Hsla,
-    other: Hsla,
-    bar_other: Hsla,
+    /// The color of each stroke of [`stroke`], by [`Ink`].
+    inks: [Hsla; 4],
     fill: Hsla,
     bg: Hsla,
     spark: bool,
+}
+
+/// The inks a series draws in, all of the mono palette (COMPLETENESS: black and white).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Ink {
+    Main = 0,
+    Second = 1,
+    Third = 2,
+    Faint = 3,
+}
+
+/// How the line of a series is cut.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Dash {
+    Solid,
+    Dashed,
+    Dotted,
+}
+
+/// The stroke of series `i` (a chart has at most five): the main series is solid `ink`;
+/// the others differ in ink and in dash, so no two read the same in the plot or in the
+/// legend.
+pub(crate) fn stroke(i: usize) -> (Ink, Dash) {
+    match i {
+        0 => (Ink::Main, Dash::Solid),
+        1 => (Ink::Second, Dash::Dashed),
+        2 => (Ink::Third, Dash::Solid),
+        3 => (Ink::Third, Dash::Dotted),
+        _ => (Ink::Faint, Dash::Solid),
+    }
+}
+
+/// The estimated width of an axis label: 12 pt mono, a CJK character one em.
+pub(crate) fn label_width(label: &str) -> f32 {
+    label
+        .chars()
+        .map(|c| if c.is_ascii() { 7.3 } else { 12. })
+        .sum()
+}
+
+/// The x labels a plot `width` wide shows: every k-th, so each keeps its own width and
+/// [`m::CHART_LABEL_GAP`]; always the first and the last. All of them when they fit.
+pub(crate) fn shown_labels(labels: &[String], width: f32) -> Vec<usize> {
+    let n = labels.len();
+    if n == 0 || width <= 0. {
+        return (0..n).collect();
+    }
+    let slot = width / n as f32;
+    let need =
+        labels.iter().map(|l| label_width(l)).fold(0f32, f32::max) + f32::from(m::CHART_LABEL_GAP);
+    if need <= slot {
+        return (0..n).collect();
+    }
+    let k = (need / slot).ceil().max(1.) as usize;
+    let mut out: Vec<usize> = (0..n).step_by(k).collect();
+    if out.last() != Some(&(n - 1)) {
+        // The last label always shows; the one before gives way when they would touch.
+        if out.len() > 1
+            && out
+                .last()
+                .is_some_and(|l| ((n - 1 - l) as f32) * slot < need)
+        {
+            out.pop();
+        }
+        out.push(n - 1);
+    }
+    out
+}
+
+/// The bars of a single-series bar chart that say their value: all of them while a bar's
+/// column is at least [`m::CHART_BAR_LABEL`] wide, else only the highest and the last.
+pub(crate) fn bar_labels(values: &[Option<f64>], width: f32) -> Vec<usize> {
+    let n = values.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    if width <= 0. || width / n as f32 >= f32::from(m::CHART_BAR_LABEL) {
+        return (0..n).collect();
+    }
+    let max = values
+        .iter()
+        .enumerate()
+        .filter_map(|(i, v)| v.map(|v| (i, v)))
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(i, _)| i);
+    let mut out: Vec<usize> = max.into_iter().collect();
+    if !out.contains(&(n - 1)) {
+        out.push(n - 1);
+    }
+    out.sort_unstable();
+    out
+}
+
+/// The plot widths of the charts drawn, by element id, from their last paint: the axis
+/// labels that fit depend on it.
+#[derive(Default)]
+struct PlotWidths(std::collections::HashMap<SharedString, f32>);
+
+impl gpui::Global for PlotWidths {}
+
+/// Most widths kept; past it the map starts over.
+const PLOT_WIDTHS_MAX: usize = 1024;
+
+/// The plot width of chart `id`: measured at its last paint, else the in-thread card's.
+fn plot_width(id: &SharedString, left: Pixels, cx: &App) -> f32 {
+    cx.try_global::<PlotWidths>()
+        .and_then(|w| w.0.get(id).copied())
+        .unwrap_or_else(|| f32::from(m::MAX_WIDTH - space::S16 * 2. - left))
+}
+
+/// Measures the plot of chart `id`; a change of width redraws once.
+fn measure_plot(id: SharedString) -> impl IntoElement {
+    canvas(
+        move |bounds, window, cx| {
+            let w = f32::from(bounds.size.width);
+            let widths = &mut cx.default_global::<PlotWidths>().0;
+            if widths.get(&id).is_none_or(|old| (old - w).abs() > 1.) {
+                if widths.len() >= PLOT_WIDTHS_MAX {
+                    widths.clear();
+                }
+                widths.insert(id.clone(), w);
+                window.refresh();
+            }
+        },
+        |_, _, _, _| {},
+    )
+    .absolute()
+    .inset_0()
 }
 
 /// How long a chart of `kind` with `series` series draws in.
@@ -196,7 +325,7 @@ fn paint(p: &Paint, b: Bounds<Pixels>, t: f32, window: &mut Window) {
                     origin: point(x + px(1.), b.bottom() - h),
                     size: gpui::size(bar_w - px(2.), h),
                 };
-                let color = if si == 0 { p.main } else { p.bar_other };
+                let color = p.inks[stroke(si).0 as usize];
                 window.paint_quad(quad(
                     rect,
                     px(2.),
@@ -241,17 +370,19 @@ fn paint(p: &Paint, b: Bounds<Pixels>, t: f32, window: &mut Window) {
                 window.paint_path(path, p.fill);
             }
         }
-        let mut line = if main {
-            PathBuilder::stroke(px(if p.spark { 1.5 } else { 2. }))
-        } else {
-            PathBuilder::stroke(px(1.5)).dash_array(&[px(4.), px(3.)])
+        let (ink, dash) = stroke(si);
+        let mut line = match dash {
+            Dash::Solid if main => PathBuilder::stroke(px(if p.spark { 1.5 } else { 2. })),
+            Dash::Solid => PathBuilder::stroke(px(1.5)),
+            Dash::Dashed => PathBuilder::stroke(px(1.5)).dash_array(&[px(4.), px(3.)]),
+            Dash::Dotted => PathBuilder::stroke(px(1.5)).dash_array(&[px(1.5), px(3.)]),
         };
         line.move_to(visible[0]);
         for q in &visible[1..] {
             line.line_to(*q);
         }
         if let Ok(path) = line.build() {
-            window.paint_path(path, if main { p.main } else { p.other });
+            window.paint_path(path, p.inks[ink as usize]);
         }
         if main && !p.spark && st >= 0.999 {
             let last = pts[pts.len() - 1];
@@ -264,7 +395,7 @@ fn paint(p: &Paint, b: Bounds<Pixels>, t: f32, window: &mut Window) {
                 d / 2.,
                 p.bg,
                 px(2.),
-                p.main,
+                p.inks[Ink::Main as usize],
                 Default::default(),
             ));
         }
@@ -292,9 +423,7 @@ pub(crate) fn chart(
         kind,
         series: series.iter().map(values).collect(),
         grid: k.line,
-        main: k.ink,
-        other: k.ink_3,
-        bar_other: k.line_2,
+        inks: [k.ink, k.ink_2, k.ink_3, k.line_2],
         fill: m::alpha(k.ink, 0.08),
         bg: k.bg,
         spark,
@@ -337,6 +466,7 @@ pub(crate) fn chart(
         plot_left(kind, series)
     };
     let label_h = px(18.);
+    let width = plot_width(&id, left, cx);
     let axis = (!ys.is_empty()).then(|| {
         div()
             .relative()
@@ -355,13 +485,19 @@ pub(crate) fn chart(
     });
     let bar_values = (kind == ChartKind::Bar && series.len() == 1 && !spark).then(|| {
         let s = &series[0];
+        let values: Vec<Option<f64>> = s.values.iter().map(|v| v.as_f64()).collect();
+        // Narrow bars say only the highest and the last value: a label over every one of
+        // 200 bars is a smear.
+        let labelled = bar_labels(&values, width);
         div()
             .absolute()
             .inset_0()
             .flex()
-            .children(s.values.iter().map(|v| {
+            .children(s.values.iter().enumerate().map(move |(i, v)| {
                 let col = div().relative().flex_1().h_full();
-                let Some(n) = v.as_f64() else { return col };
+                let Some(n) = v.as_f64().filter(|_| labelled.contains(&i)) else {
+                    return col;
+                };
                 let top = height * y_from_top(kind, series, n) - label_h - px(2.);
                 col.child(
                     meta(div())
@@ -372,6 +508,7 @@ pub(crate) fn chart(
                         .flex()
                         .justify_center()
                         .mono()
+                        .whitespace_nowrap()
                         .text_color(k.ink_2)
                         .child(super::blocks::fmt_number(n)),
                 )
@@ -389,33 +526,54 @@ pub(crate) fn chart(
                 .min_w(px(0.))
                 .h_full()
                 .child(drawn)
-                .children(bar_values),
+                .children(bar_values)
+                .when(!spark, |el| el.child(measure_plot(id.clone()))),
         )
         .into_any_element();
     if spark {
         return plot;
     }
+    let inks = [k.ink, k.ink_2, k.ink_3, k.line_2];
     let legend = (series.len() > 1).then(|| {
         div()
             .flex()
+            .flex_wrap()
             .items_center()
-            .gap(space::S16)
+            .gap_x(space::S16)
+            .gap_y(crate::ui::native::tokens::space::S4)
+            .min_w(px(0.))
             .children(series.iter().enumerate().map(|(i, s)| {
-                let swatch = if i == 0 {
-                    div().w(px(14.)).h(px(2.)).bg(k.ink).into_any_element()
-                } else {
-                    div()
-                        .flex()
-                        .gap(crate::ui::native::tokens::space::S2)
-                        .children((0..3).map(|_| div().w(px(3.)).h(px(1.5)).bg(k.ink_2)))
-                        .into_any_element()
+                // The swatch is the series' own stroke: its ink and its dash. Bars have
+                // no dash, so their swatch is the bar's fill.
+                let (ink, dash) = stroke(i);
+                let color = inks[ink as usize];
+                let (pieces, piece, h) = match dash {
+                    _ if kind == ChartKind::Bar => (1, m::CHART_SWATCH / 2., px(8.)),
+                    Dash::Solid => (1, m::CHART_SWATCH, px(2.)),
+                    Dash::Dashed => (3, px(4.), px(1.5)),
+                    Dash::Dotted => (4, px(1.5), px(1.5)),
                 };
+                let swatch = div()
+                    .flex_none()
+                    .w(m::CHART_SWATCH)
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .children((0..pieces).map(|_| {
+                        div()
+                            .w(piece)
+                            .h(h)
+                            .rounded(crate::ui::native::tokens::radius::CHECKBOX / 2.)
+                            .bg(color)
+                    }));
                 div()
+                    .flex_none()
+                    .max_w_full()
                     .flex()
                     .items_center()
                     .gap(space::S6)
                     .child(swatch)
-                    .child(s.name.clone())
+                    .child(crate::ui::truncate::TruncText::new(s.name.clone()))
             }))
     });
     let title = match (label, unit) {
@@ -428,38 +586,45 @@ pub(crate) fn chart(
         .flex_col()
         .gap(space::S12)
         .child(
+            // The title cuts with "…"; a legend that does not fit beside it goes under it.
             meta(div())
                 .flex()
+                .flex_wrap()
                 .items_center()
+                .gap_x(space::S16)
+                .gap_y(crate::ui::native::tokens::space::S4)
                 .text_color(k.ink_2)
                 .when_some(title, |el, t| {
                     el.child(
-                        div()
-                            .font_weight(theme::MEDIUM_WEIGHT)
-                            .text_color(k.ink)
-                            .child(t),
+                        div().flex_1().min_w(m::TABLE_COL_FIRST * 2.).child(
+                            crate::ui::truncate::TruncText::new(t)
+                                .font_weight(theme::MEDIUM_WEIGHT)
+                                .text_color(k.ink),
+                        ),
                     )
                 })
-                .when_some(legend, |el, l| el.child(div().ml_auto().child(l))),
+                .when_some(legend, |el, l| {
+                    el.child(div().ml_auto().max_w_full().min_w(px(0.)).child(l))
+                }),
         )
         .child(plot)
         .when(!x.is_empty(), |el| {
-            el.child(
-                meta(div())
-                    .flex()
-                    .pl(left)
-                    .text_color(k.ink_3)
-                    .mono()
-                    .children(x.iter().map(|l| {
+            // Only the labels that fit, each whole and centered under its point.
+            let n = x.len() as f32;
+            el.child(meta(div()).pl(left).text_color(k.ink_3).mono().child(
+                div().relative().w_full().h(label_h).children(
+                    shown_labels(x, width).into_iter().map(|i| {
                         div()
-                            .flex_1()
-                            .min_w(px(0.))
+                            .absolute()
+                            .top_0()
+                            .left(gpui::relative((i as f32 + 0.5) / n))
+                            .w(px(0.))
                             .flex()
                             .justify_center()
-                            .one_line()
-                            .child(crate::ui::truncate::TruncText::new(l.clone()))
-                    })),
-            )
+                            .child(div().flex_none().whitespace_nowrap().child(x[i].clone()))
+                    }),
+                ),
+            ))
         })
         .into_any_element()
 }
@@ -467,6 +632,61 @@ pub(crate) fn chart(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn x_labels_thin_to_what_fits_and_keep_both_ends() {
+        let days: Vec<String> = (1..=30).map(|d| format!("10-{d:02}")).collect();
+        // 30 dates in 600 pt: 20 pt each, a date needs 36.5 + 8.
+        let shown = shown_labels(&days, 600.);
+        assert_eq!(shown.first(), Some(&0));
+        assert_eq!(shown.last(), Some(&29));
+        assert!(shown.len() < 30 && shown.len() >= 8, "{shown:?}");
+        let slot = 600. / 30.;
+        let need = label_width("10-01") + f32::from(m::CHART_LABEL_GAP);
+        for w in shown.windows(2) {
+            assert!(
+                (w[1] - w[0]) as f32 * slot >= need,
+                "labels never touch: {shown:?}"
+            );
+        }
+        // 200 points: still the first and the last, and room between all of them.
+        let many: Vec<String> = (1..=200).map(|i| format!("#{i}")).collect();
+        let shown = shown_labels(&many, 600.);
+        assert_eq!((shown[0], *shown.last().unwrap()), (0, 199));
+        assert!(shown.len() <= 20, "{shown:?}");
+        // Four labels fit whole.
+        let four: Vec<String> = ["10-06", "10-13", "10-20", "10-27"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(shown_labels(&four, 600.), [0, 1, 2, 3]);
+        assert!(shown_labels(&[], 600.).is_empty());
+        // One CJK character is one em.
+        assert!(label_width("周一") > label_width("10"));
+    }
+
+    #[test]
+    fn narrow_bars_say_only_the_highest_and_the_last_value() {
+        let week: Vec<Option<f64>> = [4., 7., 5., 9., 6., 3., 4.].map(Some).to_vec();
+        assert_eq!(bar_labels(&week, 600.), [0, 1, 2, 3, 4, 5, 6]);
+        let many: Vec<Option<f64>> = (0..200).map(|i| Some(((i * 71) % 180) as f64)).collect();
+        let shown = bar_labels(&many, 600.);
+        assert_eq!(shown.len(), 2, "{shown:?}");
+        assert_eq!(shown[1], 199);
+        assert!(bar_labels(&[], 600.).is_empty());
+        assert_eq!(bar_labels(&[None, Some(1.)], 10.), [1]);
+    }
+
+    #[test]
+    fn the_five_series_of_a_chart_all_draw_differently() {
+        let strokes: std::collections::HashSet<(u8, u8)> = (0..5)
+            .map(|i| {
+                let (ink, dash) = stroke(i);
+                (ink as u8, dash as u8)
+            })
+            .collect();
+        assert_eq!(strokes.len(), 5);
+        assert_eq!(stroke(0), (Ink::Main, Dash::Solid));
+    }
 
     #[test]
     fn ranges_leave_headroom_and_bars_start_at_zero() {

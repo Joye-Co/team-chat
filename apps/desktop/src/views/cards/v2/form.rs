@@ -287,6 +287,8 @@ pub struct Preset {
     pub prev: Option<std::sync::Arc<CardV2>>,
     /// v11/pb-cards: blocks whose typed text a new rev kept (内容变了 · 用新的).
     pub drafts_kept: Vec<&'static str>,
+    /// The open tab of a tabs block, `(block id, tab id)` (screenshot scenes).
+    pub tab: Option<(&'static str, &'static str)>,
 }
 
 /// v11/pb-cards: the picked values of one block at one moment.
@@ -315,6 +317,8 @@ pub struct CardForm {
     pub checks_all: bool,
     /// inc-cards21: rank orders, numbers and matrix rows.
     other: HashMap<String, Val>,
+    /// When the answer record redraws next (its wait stage changes).
+    pub wake_at: Option<std::time::Instant>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -354,6 +358,7 @@ impl CardForm {
             refs_all: false,
             checks_all: false,
             other: HashMap::new(),
+            wake_at: None,
             _subscriptions: Vec::new(),
         };
         for (k, v) in &s.initial {

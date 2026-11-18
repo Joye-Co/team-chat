@@ -17,14 +17,16 @@ use gpui_component::{
 use serde_json::Value;
 
 use super::{Ctx, choice_text, form::Field, meta, option_label, state::CardState};
+use crate::copy::cards21 as c21;
 use crate::ui::native::FocusRow as _;
+use crate::views::cards::v21::interact;
 use crate::{
     copy::{cards_v2 as c, fill},
     data::{
         card::{CardField, CardListItem, CardListStatus, LinkTarget},
         cards_v2::{
             CardIntent, CardV2, CardV2Block, DecisionOption, EvidenceState, InputKind, InputOption,
-            MetricBetter, RefTarget, RunPlanItem, RunPlanState,
+            MetricBetter, MetricTone, RefTarget, RunPlanItem, RunPlanState,
         },
     },
     theme::{self, Type as _, card_v2 as m, card_v2::mix, space},
@@ -104,11 +106,26 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
                 )
             }
             CardV2Block::Metric { .. } => {
-                let j = run_end(&|x| matches!(x, CardV2Block::Metric { .. }));
+                // A row holds four metrics; a longer run goes on in the next row.
+                let end = run_end(&|x| matches!(x, CardV2Block::Metric { .. }));
+                let j = metric_row_end(i, end);
                 let parts = CardParts::of(ctx, cx);
+                // A run over one row keeps four columns in every row, so the numbers of
+                // its last, shorter row stand under the ones above.
+                let start = (0..i)
+                    .rev()
+                    .take_while(|p| matches!(blocks[*p], CardV2Block::Metric { .. }))
+                    .last()
+                    .unwrap_or(i);
+                let columns = if end - start > m::METRICS_PER_ROW {
+                    m::METRICS_PER_ROW
+                } else {
+                    j - i
+                };
                 (
-                    Some(metrics_with(
+                    Some(metrics_row(
                         &blocks[i..j],
+                        columns,
                         parts.as_ref(),
                         Some(window),
                         cx,
@@ -198,6 +215,7 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
                 }
                 None => el,
             };
+            let el = copyable_run(ctx, &blocks[i..next], el, cx);
             out.push(div().mt(gap).min_w(px(0.)).child(el).into_any_element());
         }
         prev = Some(b);
@@ -218,6 +236,134 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
     out
 }
 
+/// Where the row of metrics that starts at `start` ends, in a run that ends at `run_end`:
+/// [`m::METRICS_PER_ROW`] metrics share a row, so no metric of a longer run is dropped.
+fn metric_row_end(start: usize, run_end: usize) -> usize {
+    run_end.min(start + m::METRICS_PER_ROW)
+}
+
+/// The part of an element id that names block `b`: its id, so two blocks never share one
+/// (the 2.1 renderer draws every leaf with index 0), else its index in a 2.0 card whose
+/// block has no id.
+pub(crate) fn block_key(b: &CardV2Block, ix: usize) -> String {
+    match b.id().filter(|id| !id.is_empty()) {
+        Some(id) => id.to_string(),
+        None => ix.to_string(),
+    }
+}
+
+/// The text of a block as a person would paste it: the Markdown of a text block, a
+/// table as tab-separated lines, `label value` lines for fields and metrics, the steps of
+/// a list or a plan, a diff or code as it is, a proof with its result. `None` for blocks
+/// that are controls or pictures.
+pub(crate) fn block_text(b: &CardV2Block) -> Option<String> {
+    let lines = |v: Vec<String>| (!v.is_empty()).then(|| v.join("\n"));
+    match b {
+        CardV2Block::Text { text, .. } | CardV2Block::Code { text, .. } => Some(text.clone()),
+        CardV2Block::Diff { text, .. } => Some(text.clone()),
+        CardV2Block::Fields { fields, .. } => lines(
+            fields
+                .iter()
+                .map(|f| format!("{}\t{}", f.label, f.value))
+                .collect(),
+        ),
+        CardV2Block::Table { columns, rows, .. } => lines(
+            std::iter::once(columns.join("\t"))
+                .chain(rows.iter().map(|r| r.join("\t")))
+                .collect(),
+        ),
+        CardV2Block::List { items, .. } => lines(items.iter().map(|i| i.text.clone()).collect()),
+        CardV2Block::Plan { items, .. } => {
+            lines(items.iter().flatten().map(|i| i.text.clone()).collect())
+        }
+        CardV2Block::Metric {
+            label, value, unit, ..
+        } => {
+            let v = fmt_number(value.as_f64().unwrap_or(0.));
+            Some(match unit.as_deref() {
+                Some("%") => format!("{label} {v}%"),
+                Some(u) if !u.is_empty() => format!("{label} {v} {u}"),
+                _ => format!("{label} {v}"),
+            })
+        }
+        CardV2Block::Chart {
+            label, x, series, ..
+        } => {
+            let xs = x.clone().unwrap_or_default();
+            let mut out: Vec<String> = label.iter().cloned().collect();
+            out.push(
+                std::iter::once(String::new())
+                    .chain(xs.iter().cloned())
+                    .collect::<Vec<_>>()
+                    .join("\t"),
+            );
+            out.extend(series.iter().map(|s| {
+                std::iter::once(s.name.clone())
+                    .chain(s.values.iter().map(|v| v.to_string()))
+                    .collect::<Vec<_>>()
+                    .join("\t")
+            }));
+            lines(out)
+        }
+        CardV2Block::Evidence {
+            label,
+            detail,
+            tests,
+            url,
+            ..
+        } => {
+            let mut out = vec![match tests {
+                Some(t) => tests_text(t),
+                None => label.clone(),
+            }];
+            out.extend(detail.iter().cloned());
+            out.extend(url.iter().cloned());
+            lines(out)
+        }
+        _ => None,
+    }
+}
+
+/// `el` with 复制 in its context menu, which copies `text`: the way to take a number, a
+/// table or a diff out of a card where 引用提问 (whose part menus copy too) does not show.
+pub(crate) fn copyable(id: SharedString, text: String, el: AnyElement) -> AnyElement {
+    use gpui_component::menu::ContextMenuExt as _;
+    div()
+        .id(id)
+        .min_w(px(0.))
+        .child(el)
+        .context_menu(move |menu, _, _| {
+            let text = text.clone();
+            menu.item(
+                PopupMenuItem::new(crate::copy::refs::COPY).on_click(move |_, _, cx| {
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone()))
+                }),
+            )
+        })
+        .into_any_element()
+}
+
+/// [`copyable`] for the blocks `run` draws together, when the card shows no 引用提问 parts.
+pub(crate) fn copyable_run(
+    ctx: &Ctx,
+    run: &[&CardV2Block],
+    el: AnyElement,
+    cx: &App,
+) -> AnyElement {
+    if CardParts::of(ctx, cx).is_some() {
+        return el;
+    }
+    let text: Vec<String> = run.iter().filter_map(|b| block_text(b)).collect();
+    let Some(first) = run.first().filter(|_| !text.is_empty()) else {
+        return el;
+    };
+    copyable(
+        ctx.id(format!("copy-{}", block_key(first, 0))),
+        text.join("\n"),
+        el,
+    )
+}
+
 /// A reference to a 产出.
 fn is_output(b: &CardV2Block) -> bool {
     matches!(
@@ -236,6 +382,7 @@ fn is_passed_check(b: &CardV2Block) -> bool {
         CardV2Block::Evidence {
             state: Some(EvidenceState::Pass),
             file_id: None,
+            recording: None,
             ..
         }
     )
@@ -433,6 +580,7 @@ pub(crate) fn block(
     cx: &mut App,
 ) -> AnyElement {
     let k = theme::colors(cx);
+    let key = block_key(b, ix);
     match b {
         // Bots write Markdown here, like in a message: draw it the same way.
         CardV2Block::Text { text, .. } => div()
@@ -441,7 +589,7 @@ pub(crate) fn block(
             .line_height(px(22.))
             .text_color(k.ink_2)
             .child(
-                crate::markdown::message_body(ctx.id(format!("text-{ix}")), text.clone(), &[])
+                crate::markdown::message_body(ctx.id(format!("text-{key}")), text.clone(), &[])
                     .w_full(),
             )
             .into_any_element(),
@@ -449,7 +597,16 @@ pub(crate) fn block(
         CardV2Block::Table { columns, rows, .. } => {
             // 引用提问: cells, rows and columns (REFS §A2.2, R4).
             let refs = block_parts(ctx, b, cx).and_then(|p| p.table_refs());
-            table_with_refs(columns, rows, refs.as_ref(), Some(window), cx)
+            let fold = ctx.id(format!("table-{key}"));
+            table_with_refs(
+                Some(fold.as_ref()),
+                &|_| false,
+                columns,
+                rows,
+                refs.as_ref(),
+                Some(window),
+                cx,
+            )
         }
         CardV2Block::List { items, .. } => {
             list_with(items, block_parts(ctx, b, cx).as_ref(), Some(window), cx)
@@ -457,7 +614,15 @@ pub(crate) fn block(
         CardV2Block::Progress { value, label, .. } => {
             progress_bar(value.as_f64().unwrap_or(0.), label.as_deref(), None, cx)
         }
-        CardV2Block::Code { text, .. } => code(text, cx),
+        // The message's own code box (the v1 card draws it the same way): the text can be
+        // selected, the language is highlighted and named, and the box copies.
+        CardV2Block::Code { text, lang, .. } => crate::markdown::message_body(
+            ctx.id(format!("code-{key}")),
+            crate::views::cards::blocks::code_fence(lang.as_deref(), text),
+            &[],
+        )
+        .w_full()
+        .into_any_element(),
         CardV2Block::Image { file_id, alt, .. } => {
             let el = image(ctx, file_id, alt.as_deref(), cx);
             ref_parts::wrap_opt(
@@ -473,7 +638,7 @@ pub(crate) fn block(
             .h(crate::ui::native::tokens::layout::BORDER)
             .bg(k.line)
             .into_any_element(),
-        CardV2Block::Link { label, target, .. } => link(ctx, label, target, ix, cx),
+        CardV2Block::Link { label, target, .. } => link(ctx, label, target, &key, cx),
         CardV2Block::Decision {
             id,
             options,
@@ -503,7 +668,7 @@ pub(crate) fn block(
             ..
         } => {
             let el = super::chart::chart(
-                ctx.id(format!("chart-{ix}")),
+                ctx.id(format!("chart-{key}")),
                 *kind,
                 label.as_deref(),
                 unit.as_deref(),
@@ -525,8 +690,9 @@ pub(crate) fn block(
             additions,
             deletions,
             ..
-        } => diff(
-            ctx.id(format!("diff-{ix}")),
+        } => diff_folded(
+            ctx.id(format!("diff-{key}")),
+            Some(ctx.id(format!("diff-fold-{key}")).as_ref()),
             path.as_deref(),
             text,
             *additions,
@@ -640,21 +806,168 @@ fn percent(s: &str) -> Option<f32> {
         .and_then(|n| n.trim().parse::<f32>().ok())
 }
 
-pub(crate) fn table(columns: &[String], rows: &[Vec<String>], cx: &App) -> AnyElement {
-    table_with_refs(columns, rows, None, None, cx)
+pub(crate) fn table(columns: &[String], rows: &[Vec<String>], cx: &mut App) -> AnyElement {
+    table_with_refs(None, &|_| false, columns, rows, None, None, cx)
+}
+
+/// True when `row` is the total row of a table (`合计` in its first cell).
+fn is_total(row: &[String]) -> bool {
+    row.first().is_some_and(|x| x.trim() == c::TABLE_TOTAL)
+}
+
+/// The rows a table shows, in `order` (indices into `rows`), and how many the fold hides.
+/// Folded, it shows the first [`m::TABLE_FOLD_ROWS`], a `合计` row at the end, and every
+/// row `keep` names (a picked row never hides). A table one row over the fold shows whole:
+/// the 展开 row would take that row's place.
+pub(crate) fn table_fold(
+    rows: &[Vec<String>],
+    order: &[usize],
+    expanded: bool,
+    keep: &dyn Fn(usize) -> bool,
+) -> (Vec<usize>, usize) {
+    if expanded || order.len() <= m::TABLE_FOLD_ROWS + 1 {
+        return (order.to_vec(), 0);
+    }
+    let total = order
+        .last()
+        .copied()
+        .filter(|ri| rows.get(*ri).is_some_and(|r| is_total(r)));
+    let shown: Vec<usize> = order
+        .iter()
+        .enumerate()
+        .filter(|(pos, ri)| *pos < m::TABLE_FOLD_ROWS || Some(**ri) == total || keep(**ri))
+        .map(|(_, ri)| *ri)
+        .collect();
+    let hidden = order.len() - shown.len();
+    (shown, hidden)
+}
+
+/// True when a table of `rows` rows folds at all (its 展开 / 收起 row shows).
+pub(crate) fn table_folds(rows: usize) -> bool {
+    rows > m::TABLE_FOLD_ROWS + 1
+}
+
+/// The least width the columns of a table need: each number column its numbers
+/// (`widths`), each text column [`m::TABLE_COL_MIN`] ([`m::TABLE_COL_FIRST`] for the
+/// first), the gaps between them and the row padding. A card narrower than this scrolls
+/// the table sideways instead of cutting every cell to "…".
+pub(crate) fn table_min_width(widths: &[Option<gpui::Pixels>]) -> gpui::Pixels {
+    let cols: f32 = widths
+        .iter()
+        .enumerate()
+        .map(|(ci, w)| match w {
+            Some(w) => f32::from(*w),
+            None if ci == 0 => f32::from(m::TABLE_COL_FIRST),
+            None => f32::from(m::TABLE_COL_MIN),
+        })
+        .sum();
+    let gaps = f32::from(space::S12) * (widths.len().saturating_sub(1) as f32 + 2.);
+    px(cols + gaps)
+}
+
+/// The 展开其余 n 行 / 收起 row at the end of a folded table or diff: the fold of the v1
+/// table, kept per card element in [`crate::views::cards::Expanded`].
+pub(crate) fn fold_row(key: &str, hidden: usize, expanded: bool, cx: &App) -> Div {
+    let k = theme::colors(cx);
+    div()
+        .flex()
+        .px(space::S4)
+        .py(space::S4)
+        .border_t_1()
+        .border_color(k.line)
+        .child(crate::views::cards::blocks::more_button(
+            key, hidden, expanded,
+        ))
+}
+
+/// A wide table inside its frame: `content` keeps at least `min` and scrolls sideways when
+/// the card is narrower, with the code box's bottom scrollbar and right fade (D13).
+fn scroll_table(
+    key: &str,
+    min: gpui::Pixels,
+    content: Div,
+    fill: Hsla,
+    window: &mut Window,
+    cx: &mut App,
+) -> Div {
+    let id = gpui::ElementId::Name(format!("{key}-scroll").into());
+    let scroll = window
+        .use_keyed_state(id.clone(), cx, |_, _| gpui::ScrollHandle::new())
+        .read(cx)
+        .clone();
+    let scrolls = scroll.max_offset().x > px(0.);
+    div()
+        .relative()
+        .w_full()
+        .min_w(px(0.))
+        .child(
+            div()
+                .id(id)
+                .w_full()
+                .flex()
+                .overflow_x_scroll()
+                .restrict_scroll_to_axis()
+                .track_scroll(&scroll)
+                .child(
+                    content
+                        .flex_none()
+                        .w_full()
+                        .min_w(min)
+                        // Room for the scrollbar under the last row.
+                        .when(scrolls, |el| el.pb(space::S12)),
+                ),
+        )
+        .when(scrolls, |el| {
+            el.child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .right_0()
+                    .w(space::S16)
+                    .bg(gpui::linear_gradient(
+                        90.,
+                        gpui::linear_color_stop(fill.opacity(0.), 0.),
+                        gpui::linear_color_stop(fill, 1.),
+                    )),
+            )
+            // Only the strip under the rows: the rows keep their hover and their parts.
+            .child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .h(space::S12)
+                    .child(
+                        gpui_component::scroll::Scrollbar::horizontal(&scroll)
+                            .mode(gpui_component::scroll::ScrollbarMode::Always),
+                    ),
+            )
+        })
 }
 
 /// [`table`] with the 引用提问 parts of its cells, rows and header (inc-integrate): the
-/// same look, plus the 问这里 slot at the end of each row.
+/// same look, plus the 问这里 slot at the end of each row. `key` names the table's fold and
+/// sideways scroll (`None`: every row, no scroll); `keep` names rows the fold never hides.
 pub(crate) fn table_with_refs(
+    key: Option<&str>,
+    keep: &dyn Fn(usize) -> bool,
     columns: &[String],
     rows: &[Vec<String>],
     refs: Option<&crate::views::refs::markdown::TableRefs>,
-    window: Option<&gpui::Window>,
-    cx: &App,
+    mut window: Option<&mut Window>,
+    cx: &mut App,
 ) -> AnyElement {
-    let refs = refs.zip(window);
-    let k = theme::colors(cx);
+    let order: Vec<usize> = (0..rows.len()).collect();
+    let expanded = key.is_some_and(|key| crate::views::cards::is_expanded(key, cx));
+    let (shown, hidden) = match key {
+        Some(_) => table_fold(rows, &order, expanded, keep),
+        None => (order, 0),
+    };
+    let more = key
+        .filter(|_| table_folds(rows.len()))
+        .map(|key| fold_row(key, hidden, expanded, cx));
     let numeric_col: Vec<bool> = (0..columns.len())
         .map(|ci| {
             ci > 0
@@ -668,6 +981,64 @@ pub(crate) fn table_with_refs(
         .enumerate()
         .map(|(ci, n)| n.then(|| num_col_width(columns, rows, ci)))
         .collect();
+    let min_width = table_min_width(&widths);
+    let scroller = match (key, window.as_deref_mut()) {
+        (Some(key), Some(w)) => Some((key, w)),
+        _ => None,
+    };
+    let fill = theme::colors(cx).bg;
+    // The sideways scroll takes the window first; the parts below only read it.
+    let scroll_state = scroller.map(|(key, w)| {
+        let id = gpui::ElementId::Name(format!("{key}-scroll").into());
+        w.use_keyed_state(id, cx, |_, _| gpui::ScrollHandle::new());
+        key.to_string()
+    });
+    let window_ref: Option<&Window> = window.as_deref();
+    let refs = refs.zip(window_ref);
+    let cx_ref: &App = cx;
+    let content = table_content(
+        columns,
+        rows,
+        &shown,
+        &numeric_col,
+        &widths,
+        refs,
+        more.is_some(),
+        cx_ref,
+    );
+    let k = theme::colors(cx);
+    let frame = |inner: Div| {
+        // The compact table of §2.7 in a frame: radius 10 and a 1 px border.
+        div()
+            .rounded(crate::ui::native::tokens::radius::CONTAINER)
+            .border_1()
+            .border_color(k.line)
+            .overflow_hidden()
+            .flex()
+            .flex_col()
+            .child(inner)
+    };
+    let body = match (scroll_state, window) {
+        (Some(key), Some(w)) => scroll_table(&key, min_width, content, fill, w, cx),
+        _ => content,
+    };
+    frame(body).children(more).into_any_element()
+}
+
+/// The header and the shown rows of a table, without its frame.
+#[allow(clippy::too_many_arguments)]
+fn table_content(
+    columns: &[String],
+    rows: &[Vec<String>],
+    shown: &[usize],
+    numeric_col: &[bool],
+    widths: &[Option<gpui::Pixels>],
+    refs: Option<(&crate::views::refs::markdown::TableRefs, &Window)>,
+    folded: bool,
+    cx: &App,
+) -> Div {
+    let k = theme::colors(cx);
+    let _ = folded;
     let cell =
         |ci: usize, text: &str, head: bool, bold: bool| {
             let num = numeric_col.get(ci).copied().unwrap_or(false);
@@ -679,10 +1050,11 @@ pub(crate) fn table_with_refs(
             div()
                 .map(|el| match width {
                     Some(w) => el.flex_none().w(w),
-                    None => el.flex_1(),
+                    // A text column keeps a readable least width: past it the table
+                    // scrolls sideways (`scroll_table`).
+                    None if ci == 0 => el.flex_1().min_w(m::TABLE_COL_FIRST),
+                    None => el.flex_1().min_w(m::TABLE_COL_MIN),
                 })
-                .when(ci == 0, |el| el.flex_grow(1.).min_w(px(96.)))
-                .min_w(px(0.))
                 .flex()
                 .items_center()
                 .gap(space::S8)
@@ -712,15 +1084,11 @@ pub(crate) fn table_with_refs(
                 })
         };
     let last = rows.len().saturating_sub(1);
-    // The compact table of §2.7 in a frame: radius 10, a 1 px border, a muted
-    // 12 medium header, rows 40 apart with a line between them.
+    let last_shown = shown.len().saturating_sub(1);
+    // A muted 12 medium header, rows 40 apart with a line between them.
     small(div())
         .flex()
         .flex_col()
-        .rounded(crate::ui::native::tokens::radius::CONTAINER)
-        .border_1()
-        .border_color(k.line)
-        .overflow_hidden()
         .child(
             meta(div())
                 .flex()
@@ -747,15 +1115,17 @@ pub(crate) fn table_with_refs(
                     }
                 })),
         )
-        .children(rows.iter().enumerate().map(|(ri, r)| {
-            let total = ri == last && r.first().is_some_and(|x| x.trim() == c::TABLE_TOTAL);
+        .children(shown.iter().enumerate().map(|(pos, ri)| {
+            let ri = *ri;
+            let r = &rows[ri];
+            let total = ri == last && is_total(r);
             let line = div()
                 .flex()
                 .items_center()
                 .gap(space::S12)
                 .h(m::TABLE_ROW)
                 .px(space::S12)
-                .when(ri < last, |el| el.border_b_1().border_color(k.line))
+                .when(pos < last_shown, |el| el.border_b_1().border_color(k.line))
                 .text_color(k.ink);
             let line = match refs {
                 Some((rf, w)) => rf.row(line, ri, w, cx),
@@ -797,7 +1167,6 @@ pub(crate) fn table_with_refs(
                 )
             })
         }))
-        .into_any_element()
 }
 
 pub(crate) fn list(items: &[CardListItem], cx: &App) -> AnyElement {
@@ -907,33 +1276,73 @@ fn progress_bar(value: f64, label: Option<&str>, _count: Option<usize>, cx: &App
         .into_any_element()
 }
 
-fn code(text: &str, cx: &App) -> AnyElement {
-    let k = theme::colors(cx);
-    div()
-        .rounded(theme::radius::MD)
-        .bg(ui::native::native_colors(cx).sheet)
-        .border_1()
-        .border_color(k.line)
-        .px(space::S12)
-        .py(space::S8)
-        .text_size(crate::ui::native::tokens::text::META.0)
-        .line_height(px(20.))
-        .mono()
-        .text_color(k.ink)
-        .child(text.to_string())
-        .into_any_element()
+/// The size an image block draws at, in points: the picture's own ratio, never enlarged,
+/// inside [`m::IMAGE_MAX_W`] by [`m::IMAGE_MAX_H`], and no side under the gallery's least
+/// (a thin strip still reads as a picture). `None` (the size is not known yet): the
+/// 16:10 box.
+pub(crate) fn image_size(natural: Option<(u32, u32)>) -> (f32, f32) {
+    let Some((w, h)) = natural.filter(|(w, h)| *w > 0 && *h > 0) else {
+        return (f32::from(m::IMAGE_BOX.0), f32::from(m::IMAGE_BOX.1));
+    };
+    let (w, h) = (w as f32, h as f32);
+    let (max_w, max_h) = (f32::from(m::IMAGE_MAX_W), f32::from(m::IMAGE_MAX_H));
+    let least = f32::from(crate::ui::native::tokens::gallery::SINGLE_MIN);
+    let scale = (max_w / w).min(max_h / h).min(1.);
+    (
+        (w * scale).round().clamp(least.min(max_w), max_w),
+        (h * scale).round().clamp(least.min(max_h), max_h),
+    )
 }
 
-fn image(ctx: &Ctx, file_id: &str, alt: Option<&str>, cx: &App) -> gpui::Stateful<Div> {
+/// Sizes of card pictures read from their local copies, by path: the file record of a
+/// card image does not always carry them.
+#[derive(Default)]
+struct PictureSizes(std::collections::HashMap<std::path::PathBuf, Option<(u32, u32)>>);
+
+impl gpui::Global for PictureSizes {}
+
+/// The size in pixels of card picture `file_id`: from its file record, else read once from
+/// the header of its local copy. `None` while it downloads or when it cannot be read.
+fn picture_size(
+    ctx: &Ctx,
+    file_id: &str,
+    path: Option<&std::path::Path>,
+    cx: &mut App,
+) -> Option<(u32, u32)> {
+    if let Some(size) = ctx
+        .env
+        .provider
+        .card_image_file(file_id)
+        .and_then(|f| f.width.zip(f.height))
+    {
+        return Some(size);
+    }
+    let path = path?;
+    let sizes = &mut cx.default_global::<PictureSizes>().0;
+    if let Some(size) = sizes.get(path) {
+        return *size;
+    }
+    let size = image::image_dimensions(path).ok();
+    sizes.insert(path.to_path_buf(), size);
+    size
+}
+
+fn image(ctx: &Ctx, file_id: &str, alt: Option<&str>, cx: &mut App) -> gpui::Stateful<Div> {
     let k = theme::colors(cx);
     let path = ctx
         .env
         .provider
         .card_image(&ctx.msg.group_id, &ctx.msg.topic_id, file_id);
+    let natural = picture_size(ctx, file_id, path.as_deref(), cx);
+    let (w, h) = image_size(natural);
     div()
         .id(ctx.id(format!("image-{file_id}")))
-        .w(px(320.))
-        .h(px(200.))
+        // The picture keeps its ratio and gives way to a narrow column (a `row` of three):
+        // the width is the most it takes, the height follows.
+        .w(px(w))
+        .max_w_full()
+        .aspect_ratio(w / h)
+        .flex_none()
         .rounded(theme::radius::MD)
         .overflow_hidden()
         // A superseded or expired card dims its pictures; its text keeps the muted
@@ -943,6 +1352,11 @@ fn image(ctx: &Ctx, file_id: &str, alt: Option<&str>, cx: &App) -> gpui::Statefu
             el.cursor_pointer().on_click(open)
         })
         .map(|el| match path {
+            // A picture whose size is known shows whole on the sunken fill; one whose
+            // size is not fills the 16:10 box as before.
+            Some(p) if natural.is_some() => el
+                .bg(k.sunken)
+                .child(img(p).size_full().object_fit(ObjectFit::Contain)),
             Some(p) => el.child(img(p).size_full().object_fit(ObjectFit::Cover)),
             None => missing_image(el, cx)
                 .flex_col()
@@ -1019,7 +1433,7 @@ pub(crate) fn missing_image<E: Styled + ParentElement>(el: E, cx: &App) -> E {
         ))
 }
 
-fn link(ctx: &Ctx, label: &str, target: &LinkTarget, ix: usize, cx: &App) -> AnyElement {
+fn link(ctx: &Ctx, label: &str, target: &LinkTarget, key: &str, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
     let t = match target {
         LinkTarget::Url { url } => RefTarget::Url { url: url.clone() },
@@ -1037,7 +1451,7 @@ fn link(ctx: &Ctx, label: &str, target: &LinkTarget, ix: usize, cx: &App) -> Any
     };
     let a = ctx.answerer();
     small(div())
-        .id(ctx.id(format!("link-block-{ix}")))
+        .id(ctx.id(format!("link-block-{key}")))
         .flex()
         .items_center()
         .gap(space::S4)
@@ -1318,6 +1732,41 @@ pub(crate) fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement
     let expanded = ctx.form.read(cx).expanded;
     let a = ctx.answerer();
     let form = ctx.form.clone();
+    let provider = ctx.env.provider.clone();
+    let events = provider.card_v2_events(&ctx.msg.group_id, &ctx.msg.message_id);
+    // 撤回 of a stored answer (DESIGN §7.10 answered): while the card is still answered
+    // (the member has set no status and sent no new rev) and the server knows the answer.
+    // The server has the last word: a refusal says the member has started.
+    let stored = mine && !sending;
+    let retract = interact::retract_state(&events).filter(|_| stored);
+    // The server takes an answer back only for a while (INTERACT §3.6): past that the
+    // button would only ever be refused, so it goes.
+    let in_window = at.is_some_and(|at| interact::retract_open(at, ctx.env.now()));
+    let can_retract = stored
+        && retract != Some(interact::Retract::Refused)
+        && (in_window || retract == Some(interact::Retract::Sending))
+        && provider.can_retract_card_v2_answer(&ctx.msg.group_id, &ctx.msg.message_id);
+    // An answer nobody picks up says so (the record would read 已发给 for ever).
+    let waiting =
+        record_wait(ctx, &events, stored.then_some(at).flatten(), cx).filter(|_| retract.is_none());
+    let retract_el = can_retract.then(|| {
+        let (g, t, m) = (
+            ctx.msg.group_id.clone(),
+            ctx.msg.topic_id.clone(),
+            ctx.msg.message_id.clone(),
+        );
+        let p = provider.clone();
+        quiet_button(ctx.id("retract"), c::CARD_UNDO, cx)
+            .loading(retract == Some(interact::Retract::Sending))
+            .on_click(move |_, _, _| p.retract_card_v2_answer(&g, &t, &m))
+            .into_any_element()
+    });
+    let remind_el = (waiting == Some(interact::AnswerStage::Silent)).then(|| {
+        let (a, author, name) = (a.clone(), ctx.msg.author_id.clone(), ctx.author.clone());
+        quiet_button(ctx.id("remind"), c21::RECORD_REMIND, cx)
+            .on_click(move |_, _, _| a.mention(&author, &name, c21::RECORD_REMIND_MESSAGE))
+            .into_any_element()
+    });
     let action_el = if sending && mine {
         Some(
             quiet_button(ctx.id("undo"), c::CARD_UNDO, cx)
@@ -1361,14 +1810,27 @@ pub(crate) fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement
         })
         .child(div().min_w(px(0.)).one_line().text_color(k.ink).child(text))
         .when(mine, |el| {
-            el.child(div().flex_none().text_color(k.ink_3).child(fill(
-                if sending {
-                    c::RECORD_SENDING_TO
-                } else {
-                    c::RECORD_SENT_TO
-                },
-                &[("name", &ctx.author)],
-            )))
+            // Where the answer is: on its way, with the member, or with a member who has
+            // not started (and, at the end, never took it).
+            let tail = match (retract, waiting) {
+                (Some(interact::Retract::Refused), _) => c::RECORD_UNDO_REFUSED,
+                (Some(interact::Retract::NotSent), _) if can_retract => c::RECORD_UNDO_NOT_SENT,
+                (_, Some(interact::AnswerStage::Silent)) => c21::RECORD_NEVER_STARTED,
+                (_, Some(interact::AnswerStage::Slow)) => c21::RECORD_NOT_STARTED,
+                _ if sending => c::RECORD_SENDING_TO,
+                _ => c::RECORD_SENT_TO,
+            };
+            el.child(
+                div()
+                    .min_w(px(0.))
+                    .flex_shrink(1.)
+                    .one_line()
+                    .text_color(k.ink_3)
+                    .child(crate::ui::truncate::TruncText::new(fill(
+                        tail,
+                        &[("name", &ctx.author)],
+                    ))),
+            )
         })
         .child(
             div()
@@ -1387,6 +1849,8 @@ pub(crate) fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement
                         )
                     })
                 })
+                .children(remind_el)
+                .children(retract_el)
                 .children(action_el),
         );
     let details = (expanded).then(|| answered_fields(ctx, inputs.as_ref(), cx));
@@ -1402,6 +1866,69 @@ pub(crate) fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement
     } else {
         body.into_any_element()
     }
+}
+
+/// How long the member has had my stored answer of `at` without starting, or `None`: the
+/// member picked it up (a run in the 话题 since, or the 话题 moved on), the card has a
+/// status, or it is too soon. Schedules the redraw at the next stage.
+fn record_wait(
+    ctx: &Ctx,
+    events: &[crate::data::cards_v2::MyCardEvent],
+    at: Option<crate::data::Millis>,
+    cx: &mut App,
+) -> Option<interact::AnswerStage> {
+    let at = at?;
+    if ctx.card.status.is_some() || !matches!(ctx.state, CardState::Answered { .. }) {
+        return None;
+    }
+    let p = &ctx.env.provider;
+    let runs: Vec<crate::data::Millis> = p
+        .runs(&ctx.msg.group_id, &ctx.msg.topic_id)
+        .into_iter()
+        .filter(|r| r.bot_id == ctx.msg.author_id)
+        .map(|r| r.created_at)
+        .collect();
+    let activity = p
+        .topic(&ctx.msg.group_id, &ctx.msg.topic_id)
+        .map_or(0, |t| t.last_activity_at);
+    if interact::picked_up(at, &runs, activity) {
+        return None;
+    }
+    let now = ctx.env.now();
+    // A 2.1 answer's ack says how the member takes it; a 2.0 answer waits like a run.
+    // The ack of a 2.1 answer says how the member takes it, and that word stands (a
+    // member that is offline, or one that takes answers without a run, is not late).
+    // With no ack to go by (a 2.0 answer, or the app restarted since), only a member that
+    // has run in this 话题 before is expected to start a run for the answer.
+    let (stage, next) = if interact::has_answer(events) {
+        interact::answer_stage(events, now)
+    } else if !runs.is_empty() {
+        interact::answer_stage_since(at, crate::data::cards_v2::ExpectMode::Run, now)
+    } else {
+        (None, None)
+    };
+    if let Some(next) = next {
+        let wait = std::time::Duration::from_millis((next - now).max(0) as u64 + 20);
+        let due = std::time::Instant::now() + wait;
+        let form = ctx.form.clone();
+        let scheduled = form.read(cx).wake_at;
+        if scheduled.is_none_or(|w| {
+            w > due + std::time::Duration::from_millis(50) || w < std::time::Instant::now()
+        }) {
+            form.update(cx, |f, _| f.wake_at = Some(due));
+            cx.spawn(async move |cx: &mut gpui::AsyncApp| {
+                cx.background_executor().timer(wait).await;
+                cx.update(|cx| {
+                    form.update(cx, |f, cx| {
+                        f.wake_at = None;
+                        cx.notify();
+                    })
+                });
+            })
+            .detach();
+        }
+    }
+    stage
 }
 
 /// The submitted values as key-value rows.
@@ -1648,6 +2175,7 @@ pub(crate) fn form_grid(
             label,
             placeholder,
             options,
+            help,
             ..
         } = b
         else {
@@ -1671,26 +2199,40 @@ pub(crate) fn form_grid(
             cx,
         );
         let top = matches!(kind, InputKind::Chips | InputKind::Textarea);
+        let row = div()
+            .flex()
+            .when(top, |el| el.items_start())
+            .when(!top, |el| el.items_center())
+            .gap(space::S12)
+            // FormRow (§2.8, D8): the label left-aligned in a 112 column (gap
+            // included, so the field starts 112 in as in the sheets), the
+            // control fills the value column.
+            .child(
+                div()
+                    .n_body()
+                    .flex_none()
+                    .w(m::FORM_LABEL - space::S12)
+                    .one_line()
+                    .when(kind == &InputKind::Textarea, |el| el.pt(space::S4))
+                    .text_color(k.ink)
+                    .child(label.clone()),
+            )
+            .child(div().flex_1().min_w(px(0.)).child(control));
+        // What the member says about the field (`help`) goes under the field, so the
+        // label stays level with the field and not with the two of them.
+        let help = help.as_ref().filter(|h| !h.trim().is_empty()).map(|h| {
+            meta(div())
+                .pl(m::FORM_LABEL)
+                .text_color(k.ink_3)
+                .child(h.clone())
+        });
         rows.push(
             div()
                 .flex()
-                .when(top, |el| el.items_start())
-                .when(!top, |el| el.items_center())
-                .gap(space::S12)
-                // FormRow (§2.8, D8): the label left-aligned in a 112 column (gap
-                // included, so the field starts 112 in as in the sheets), the
-                // control fills the value column.
-                .child(
-                    div()
-                        .n_body()
-                        .flex_none()
-                        .w(m::FORM_LABEL - space::S12)
-                        .one_line()
-                        .when(kind == &InputKind::Textarea, |el| el.pt(space::S4))
-                        .text_color(k.ink)
-                        .child(label.clone()),
-                )
-                .child(div().flex_1().min_w(px(0.)).child(control))
+                .flex_col()
+                .gap(space::S4)
+                .child(row)
+                .children(help)
                 .into_any_element(),
         );
     }
@@ -1853,6 +2395,15 @@ pub(crate) fn input_control(
                 .form
                 .update(cx, |f, cx| f.field(id, ph, false, window, cx));
             let focused = field.is_focused(window, cx);
+            // The unit of a number stays in the field, after the number (`unit`).
+            let unit = match ctx.card.block(id) {
+                Some(CardV2Block::Input {
+                    kind: InputKind::Number,
+                    unit: Some(u),
+                    ..
+                }) if !u.trim().is_empty() => Some(u.clone()),
+                _ => None,
+            };
             field_box(focused || lead, invalid, m::OPTION, cx)
                 .child(
                     div()
@@ -1860,6 +2411,15 @@ pub(crate) fn input_control(
                         .min_w(px(0.))
                         .child(line_input(&field, !live, window, cx)),
                 )
+                .when_some(unit, |el, u| {
+                    el.child(
+                        small(div())
+                            .flex_none()
+                            .whitespace_nowrap()
+                            .text_color(k.ink_3)
+                            .child(u),
+                    )
+                })
                 .when(kind == InputKind::Date, |el| {
                     el.child(ui::icon(Sym::Calendar, px(14.), k.ink_3))
                 })
@@ -2324,6 +2884,26 @@ pub(crate) fn fmt_number(n: f64) -> String {
     }
 }
 
+/// How the change of a metric reads: good (`Some(true)`), bad, or neither. The author's
+/// `tone` wins over what `better` and the sign of `delta` say (card2: "overrides the tone").
+pub(crate) fn metric_good(
+    delta: Option<f64>,
+    better: Option<MetricBetter>,
+    tone: Option<MetricTone>,
+) -> Option<bool> {
+    match tone {
+        Some(MetricTone::Good) => return Some(true),
+        Some(MetricTone::Bad) => return Some(false),
+        Some(MetricTone::Neutral) => return None,
+        Some(MetricTone::Unknown) | None => {}
+    }
+    match (delta, better) {
+        (Some(d), Some(MetricBetter::Up)) => Some(d >= 0.),
+        (Some(d), Some(MetricBetter::Down)) => Some(d <= 0.),
+        _ => None,
+    }
+}
+
 pub(crate) fn metrics(blocks: &[&CardV2Block], cx: &App) -> AnyElement {
     metrics_with(blocks, None, None, cx)
 }
@@ -2335,12 +2915,26 @@ pub(crate) fn metrics_with(
     window: Option<&Window>,
     cx: &App,
 ) -> AnyElement {
+    metrics_row(blocks, blocks.len(), parts, window, cx)
+}
+
+/// One row of metrics in `columns` equal columns: a row with fewer metrics leaves the
+/// rest of its columns empty.
+pub(crate) fn metrics_row(
+    blocks: &[&CardV2Block],
+    columns: usize,
+    parts: Option<&CardParts>,
+    window: Option<&Window>,
+    cx: &App,
+) -> AnyElement {
     let k = theme::colors(cx);
     let n = ui::native::native_colors(cx);
+    let shown = blocks.len().min(m::METRICS_PER_ROW);
+    let empty = columns.min(m::METRICS_PER_ROW).saturating_sub(shown);
     div()
         .flex()
         .gap(space::S16)
-        .children(blocks.iter().take(4).map(|b| {
+        .children(blocks.iter().take(m::METRICS_PER_ROW).map(|b| {
             let bp = parts.filter(|_| window.is_some()).and_then(|p| p.block(b));
             let CardV2Block::Metric {
                 label,
@@ -2348,6 +2942,7 @@ pub(crate) fn metrics_with(
                 unit,
                 delta,
                 better,
+                tone,
                 note,
                 ..
             } = b
@@ -2356,11 +2951,7 @@ pub(crate) fn metrics_with(
             };
             let v = value.as_f64().unwrap_or(0.);
             let d = delta.as_ref().and_then(|d| d.as_f64());
-            let good = match (d, better) {
-                (Some(d), Some(MetricBetter::Up)) => Some(d >= 0.),
-                (Some(d), Some(MetricBetter::Down)) => Some(d <= 0.),
-                _ => None,
-            };
+            let good = metric_good(d, *better, *tone);
             let delta_text = d.map(|d| {
                 let sign = if d > 0. {
                     "+"
@@ -2484,6 +3075,7 @@ pub(crate) fn metrics_with(
                 });
             ref_parts::wrap_opt(bp.as_ref(), Pick::Metric, el, Anchor::Corner, window, cx)
         }))
+        .children((0..empty).map(|_| div().flex_1().min_w(px(0.))))
         .into_any_element()
 }
 
@@ -2503,7 +3095,59 @@ pub(crate) fn diff(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
+    diff_folded(id, None, path, text, adds, dels, window, cx)
+}
+
+/// True for the lines of a unified diff that are neither code nor a hunk head.
+fn diff_file_line(raw: &str) -> bool {
+    raw.starts_with("+++")
+        || raw.starts_with("---")
+        || raw.starts_with("diff ")
+        || raw.starts_with("index ")
+}
+
+/// How many code lines a folded diff shows, and how many it hides: the first hunk, up to
+/// [`m::DIFF_FOLD_LINES`] lines (DESIGN §7.10: one hunk in the card, the rest in the PR). A
+/// one-hunk diff a line over the fold shows whole.
+pub(crate) fn diff_fold(text: &str) -> (usize, usize) {
+    let (mut hunks, mut first, mut total) = (0usize, 0usize, 0usize);
+    for raw in text.lines().filter(|l| !diff_file_line(l)) {
+        if raw.starts_with("@@") {
+            hunks += 1;
+        } else {
+            total += 1;
+            if hunks <= 1 {
+                first += 1;
+            }
+        }
+    }
+    if hunks <= 1 && total <= m::DIFF_FOLD_LINES + 1 {
+        return (total, 0);
+    }
+    let shown = first.min(m::DIFF_FOLD_LINES);
+    (shown, total - shown)
+}
+
+/// [`diff`] that folds: with `fold` (the key of its 展开 state) a long diff shows its first
+/// hunk up to [`m::DIFF_FOLD_LINES`] lines and a row that opens the rest in place. The
+/// well never scrolls up and down inside the timeline.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn diff_folded(
+    id: impl Into<gpui::ElementId>,
+    fold: Option<&str>,
+    path: Option<&str>,
+    text: &str,
+    adds: Option<u64>,
+    dels: Option<u64>,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
     let k = theme::colors(cx);
+    let expanded = fold.is_some_and(|key| crate::views::cards::is_expanded(key, cx));
+    let (fold_shown, fold_hidden) = diff_fold(text);
+    // The code lines drawn: all of them, or the first hunk's while folded.
+    let limit = (fold.is_some() && !expanded && fold_hidden > 0).then_some(fold_shown);
+    let (mut hunk_ix, mut code_ix) = (0usize, 0usize);
     let (mut old, mut new) = (0u32, 0u32);
     // Three columns of rows of one height each: the fixed gutter, the code
     // that scrolls, and the hunk lines drawn over both at the well's width.
@@ -2513,14 +3157,11 @@ pub(crate) fn diff(
     let hunk_h = m::DIFF_LINE + px(4.);
     let (mut counted_a, mut counted_d) = (0u64, 0u64);
     for raw in text.lines() {
-        if raw.starts_with("+++")
-            || raw.starts_with("---")
-            || raw.starts_with("diff ")
-            || raw.starts_with("index ")
-        {
+        if diff_file_line(raw) {
             continue;
         }
         if let Some(rest) = raw.strip_prefix("@@") {
+            hunk_ix += 1;
             // @@ -42,7 +42,10 @@ context
             let mut it = rest.split_whitespace();
             if let Some(o) = it.next() {
@@ -2538,6 +3179,9 @@ pub(crate) fn diff(
                     .next()
                     .and_then(|n| n.parse().ok())
                     .unwrap_or(1);
+            }
+            if limit.is_some() && hunk_ix > 1 {
+                continue;
             }
             gutter.push(div().h(hunk_h).into_any_element());
             lines.push(div().h(hunk_h).into_any_element());
@@ -2583,6 +3227,13 @@ pub(crate) fn diff(
                 (Some(old - 1), Some(new - 1), None, k.ink_3)
             }
         };
+        // The counts and the line numbers follow every line; a folded diff draws only
+        // the first of them.
+        let drawn = limit.is_none_or(|n| hunk_ix <= 1 && code_ix < n);
+        code_ix += 1;
+        if !drawn {
+            continue;
+        }
         let num = |n: Option<u32>| {
             div()
                 .flex_none()
@@ -2705,6 +3356,10 @@ pub(crate) fn diff(
                         .children(hunks),
                 ),
         )
+        .children(
+            fold.filter(|_| fold_hidden > 0)
+                .map(|key| fold_row(key, fold_hidden, expanded, cx)),
+        )
         .into_any_element()
 }
 
@@ -2717,7 +3372,7 @@ pub(crate) fn proof_chip(
     id: SharedString,
     glyph: Option<(Sym, Hsla)>,
     label: String,
-    url: Option<String>,
+    url: Option<ProofOpen>,
     cx: &App,
 ) -> AnyElement {
     let n = ui::native::native_colors(cx);
@@ -2746,9 +3401,147 @@ pub(crate) fn proof_chip(
             ))
             .cursor_pointer()
             .hover(|s| s.underline())
-            .on_click(move |_, _, cx| cx.open_url(&url))
+            .on_click(move |_, window, cx| url(window, cx))
         })
         .into_any_element()
+}
+
+/// What a click on a proof does: opens its link, or its 产出 at the version it names.
+pub(crate) type ProofOpen = std::rc::Rc<dyn Fn(&mut Window, &mut App)>;
+
+/// The click of a proof: its `url`, else its 产出 (the handler of a 产出 reference row).
+fn proof_open(
+    ctx: &Ctx,
+    url: Option<&str>,
+    artifact: Option<&crate::data::cards_v2::ArtifactRef>,
+) -> Option<ProofOpen> {
+    if let Some(url) = url {
+        let url = url.to_string();
+        return Some(std::rc::Rc::new(move |_, cx| cx.open_url(&url)));
+    }
+    let a = artifact?;
+    let target = RefTarget::Artifact {
+        artifact_id: a.artifact_id.clone(),
+        version: Some(a.version),
+    };
+    let answerer = ctx.answerer();
+    Some(std::rc::Rc::new(move |window, cx| {
+        answerer.open(&target, window, cx)
+    }))
+}
+
+/// The words of a test result, from its counts and never from the author's label:
+/// `测试 148 项通过 · 0 失败`, with ` · 跳过 3` when some were skipped.
+pub(crate) fn tests_text(t: &crate::data::cards_v2::EvidenceTests) -> String {
+    let text = fill(
+        c::EVIDENCE_TESTS,
+        &[
+            ("passed", &t.passed.to_string()),
+            ("failed", &t.failed.to_string()),
+        ],
+    );
+    match t.skipped.filter(|n| *n > 0) {
+        Some(n) => fill(
+            c::EVIDENCE_TESTS_SKIPPED,
+            &[("tests", &text), ("n", &n.to_string())],
+        ),
+        None => text,
+    }
+}
+
+/// The mark of a proof: a failed test run or a failed check keeps the `bad` cross, a
+/// passed one the muted check (§2.12: no free colored mark). Counts win over `state`.
+pub(crate) fn proof_failed(
+    state: Option<EvidenceState>,
+    tests: Option<&crate::data::cards_v2::EvidenceTests>,
+) -> Option<bool> {
+    match (tests, state) {
+        (Some(t), _) => Some(t.failed > 0),
+        (None, Some(EvidenceState::Fail)) => Some(true),
+        (None, Some(EvidenceState::Pass)) => Some(false),
+        _ => None,
+    }
+}
+
+/// A tile of the proof strip: a screenshot, or a recording with its poster.
+struct Thumb {
+    /// The block's id (the element ids of the tile).
+    key: String,
+    /// The picture: the screenshot, or the poster frame of a recording.
+    file: Option<String>,
+    detail: Option<String>,
+    label: String,
+    part: Option<BlockParts>,
+    /// The video file of a recording and its length in ms.
+    recording: Option<(String, u64)>,
+}
+
+/// A click that plays the recording `file_id`: the video is a file of the 话题, opened the
+/// way its attachment opens. `None` when the 话题 does not list the file (yet): the tile
+/// then only shows its poster and length.
+fn open_recording(
+    ctx: &Ctx,
+    file_id: &str,
+) -> Option<impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static> {
+    let provider = ctx.env.provider.clone();
+    let (group, topic) = (ctx.msg.group_id.clone(), ctx.msg.topic_id.clone());
+    let file = provider
+        .topic_files(&group, &topic)
+        .into_iter()
+        .find(|f| f.file.file_id == file_id)?
+        .file;
+    Some(move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut App| {
+        cx.stop_propagation();
+        crate::views::files::open_file(
+            &provider,
+            &group,
+            &topic,
+            &file,
+            crate::views::files::OpenAction::Open,
+            cx,
+        );
+    })
+}
+
+/// The play disc and the length of a recording, over its tile.
+fn recording_marks(duration_ms: u64, cx: &App) -> [Div; 2] {
+    use crate::ui::native::tokens::gallery as g;
+    let n = ui::native::native_colors(cx);
+    [
+        div()
+            .absolute()
+            .inset_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .size(m::PLAY_DISC)
+                    .rounded_full()
+                    .bg(n.primary)
+                    .shadow(n.float())
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(ui::icon(
+                        Sym::Play,
+                        crate::ui::native::tokens::icon::SM,
+                        n.on_primary,
+                    )),
+            ),
+        div().absolute().right(space::S6).bottom(space::S6).child(
+            meta(div())
+                .h(g::BADGE_H)
+                .px(space::S6)
+                .rounded(crate::ui::native::tokens::radius::ITEM)
+                .bg(gpui::black().opacity(g::BADGE_SCRIM))
+                .flex()
+                .items_center()
+                .mono()
+                .text_color(gpui::white())
+                .child(crate::views::media::time_text(duration_ms as f64 / 1000.)),
+        ),
+    ]
 }
 
 fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut App) -> AnyElement {
@@ -2757,50 +3550,87 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
     let parts = CardParts::of(ctx, cx);
     let part = |b: &CardV2Block| parts.as_ref().and_then(|p| p.block(b));
     let window: &Window = window;
-    let mut thumbs: Vec<(String, Option<String>, String, Option<BlockParts>)> = Vec::new();
+    let mut thumbs: Vec<Thumb> = Vec::new();
     let mut lines: Vec<AnyElement> = Vec::new();
     let mut chips: Vec<AnyElement> = Vec::new();
     for (i, b) in blocks.iter().enumerate() {
         let CardV2Block::Evidence {
+            id,
             label,
             state,
             detail,
             file_id,
             url,
+            artifact,
+            tests,
+            recording,
             ..
         } = b
         else {
             continue;
         };
-        if let Some(f) = file_id {
-            thumbs.push((f.clone(), detail.clone(), label.clone(), part(b)));
+        // A recording is a tile with its poster, the play disc and its length; a
+        // screenshot a tile of its own.
+        if recording.is_some() || file_id.is_some() {
+            thumbs.push(Thumb {
+                key: block_key(b, i),
+                file: match recording {
+                    Some(r) => r.poster_file_id.clone(),
+                    None => file_id.clone(),
+                },
+                detail: detail.clone(),
+                label: label.clone(),
+                part: part(b),
+                recording: recording
+                    .as_ref()
+                    .map(|r| (r.file_id.clone(), r.duration_ms)),
+            });
+            let _ = id;
             continue;
         }
         let bp = part(b);
-        let glyph = match state {
+        let glyph = match proof_failed(*state, tests.as_ref()) {
             // A passed check is a muted mark; only a failure keeps color on
             // its icon (§2.12: no free colored mark).
-            Some(EvidenceState::Pass) => Some((Sym::Check, k.ink_3)),
-            Some(EvidenceState::Fail) => Some((Sym::Close, k.bad)),
-            _ => None,
+            Some(false) => Some((Sym::Check, k.ink_3)),
+            Some(true) => Some((Sym::Close, k.bad)),
+            None => None,
         };
+        // Test counts say the result themselves (card2: read these, not the label).
+        let label = match tests {
+            Some(t) => tests_text(t),
+            None => label.clone(),
+        };
+        let open = proof_open(ctx, url.as_deref(), artifact.as_ref());
         // A result with a sentence of detail reads as a line; a bare count
         // as a chip.
         if let Some(d) = detail.as_ref().filter(|d| d.chars().count() > 8) {
+            let head = small(div())
+                .id(ctx.id(format!("proof-line-head-{i}")))
+                .flex()
+                .items_center()
+                .gap(space::S8)
+                .text_color(k.ink)
+                .when_some(glyph, |el, (g, c)| el.child(ui::icon(g, px(14.), c)))
+                .child(div().min_w(px(0.)).child(label))
+                // A line that opens says so like a chip does: the ↗ after its label,
+                // underlined on hover.
+                .when_some(open, |el, open| {
+                    el.child(ui::icon(
+                        Sym::OpenExternal,
+                        crate::ui::native::tokens::icon::SM,
+                        k.ink,
+                    ))
+                    .cursor_pointer()
+                    .hover(|s| s.underline())
+                    .on_click(move |_, window, cx| open(window, cx))
+                });
             let line = div()
                 .id(ctx.id(format!("proof-line-{i}")))
                 .flex()
                 .flex_col()
                 .gap(space::S2)
-                .child(
-                    small(div())
-                        .flex()
-                        .items_center()
-                        .gap(space::S8)
-                        .text_color(k.ink)
-                        .when_some(glyph, |el, (g, c)| el.child(ui::icon(g, px(14.), c)))
-                        .child(label.clone()),
-                )
+                .child(div().flex().child(head))
                 .child(meta(div()).text_color(k.ink_3).child(d.clone()));
             lines.push(ref_parts::wrap_opt(
                 bp.as_ref(),
@@ -2813,9 +3643,9 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
         } else {
             let text = match detail {
                 Some(d) => format!("{label} {d}"),
-                None => label.clone(),
+                None => label,
             };
-            let chip = proof_chip(ctx.id(format!("proof-{i}")), glyph, text, url.clone(), cx);
+            let chip = proof_chip(ctx.id(format!("proof-{i}")), glyph, text, open, cx);
             chips.push(ref_parts::wrap_opt(
                 bp.as_ref(),
                 Pick::Evidence,
@@ -2832,15 +3662,26 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
         div()
             .flex()
             .gap(space::S8)
-            .children(thumbs.iter().take(shown).map(|(file, detail, label, bp)| {
-                let path = ctx
-                    .env
-                    .provider
-                    .card_image(&ctx.msg.group_id, &ctx.msg.topic_id, file);
+            .children(thumbs.iter().take(shown).map(|t| {
+                let (detail, label, bp, key) = (&t.detail, &t.label, &t.part, &t.key);
+                let path = t.file.as_ref().and_then(|file| {
+                    ctx.env
+                        .provider
+                        .card_image(&ctx.msg.group_id, &ctx.msg.topic_id, file)
+                });
                 let thumb = div()
-                    .id(ctx.id(format!("proof-shot-{file}")))
-                    .when_some(open_picture(ctx, file), |el, open| {
-                        el.cursor_pointer().on_click(open)
+                    .id(ctx.id(format!("proof-shot-{key}")))
+                    .map(|el| match &t.recording {
+                        // A recording plays; a screenshot opens in the image viewer.
+                        Some((video, _)) => el
+                            .relative()
+                            .when_some(open_recording(ctx, video), |el, open| {
+                                el.cursor_pointer().on_click(open)
+                            }),
+                        None => el.when_some(
+                            t.file.as_ref().and_then(|f| open_picture(ctx, f)),
+                            |el, open| el.cursor_pointer().on_click(open),
+                        ),
                     })
                     .flex_1()
                     .min_w(px(0.))
@@ -2880,13 +3721,20 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
                                     .one_line()
                                     .child(crate::ui::truncate::TruncText::new(l.to_string()))
                             })),
-                    });
+                    })
+                    .children(
+                        t.recording
+                            .as_ref()
+                            .map(|(_, ms)| recording_marks(*ms, cx))
+                            .into_iter()
+                            .flatten(),
+                    );
                 // The thumbnail clips, so the part wraps it: 问这里 sits inside its corner.
                 ref_parts::wrap_opt(
                     bp.as_ref(),
                     Pick::Evidence,
                     div()
-                        .id(ctx.id(format!("proof-shot-part-{file}")))
+                        .id(ctx.id(format!("proof-shot-part-{key}")))
                         .flex_1()
                         .min_w(px(0.))
                         .child(thumb),
@@ -2899,7 +3747,8 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
                 // +N opens the first picture it stands for.
                 let open = thumbs
                     .get(shown)
-                    .and_then(|(file, ..)| open_picture(ctx, file));
+                    .and_then(|t| t.file.as_ref())
+                    .and_then(|file| open_picture(ctx, file));
                 el.child(
                     div()
                         .id(ctx.id("proof-shot-more"))
@@ -2953,6 +3802,11 @@ fn no_evidence(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
                 }
                 | CardV2Block::Evidence {
                     detail: Some(_),
+                    ..
+                }
+                | CardV2Block::Evidence { tests: Some(_), .. }
+                | CardV2Block::Evidence {
+                    recording: Some(_),
                     ..
                 }
         )
@@ -3433,6 +4287,203 @@ mod tests {
         );
         it.started_at = None;
         assert_eq!(plan_time(&it, 0).as_deref(), Some("预计 20 分钟"));
+    }
+
+    fn blocks(v: serde_json::Value) -> Vec<CardV2Block> {
+        serde_json::from_value(v).expect("blocks parse")
+    }
+
+    #[test]
+    fn a_run_of_six_metrics_draws_all_six_in_two_rows() {
+        // The body walks a run row by row: every metric lands in exactly one row.
+        let (mut i, end, mut rows) = (0, 6, Vec::new());
+        while i < end {
+            let j = metric_row_end(i, end);
+            rows.push((i, j));
+            i = j;
+        }
+        assert_eq!(rows, [(0, 4), (4, 6)]);
+        assert_eq!(rows.iter().map(|(a, b)| b - a).sum::<usize>(), 6);
+        assert_eq!(metric_row_end(0, 3), 3, "a short run is one row");
+        assert_eq!(metric_row_end(8, 9), 9);
+    }
+
+    #[test]
+    fn element_ids_follow_the_block_id_not_the_index() {
+        let b = blocks(serde_json::json!([
+            { "type": "text", "id": "a", "text": "一" },
+            { "type": "text", "id": "b", "text": "二" },
+            { "type": "text", "id": "", "text": "三" }
+        ]));
+        // The 2.1 renderer draws every leaf with index 0.
+        assert_ne!(block_key(&b[0], 0), block_key(&b[1], 0));
+        assert_eq!(block_key(&b[0], 7), "a");
+        assert_eq!(block_key(&b[2], 7), "7", "no id: the index");
+    }
+
+    #[test]
+    fn a_long_table_folds_to_ten_rows_and_keeps_its_total_and_picked_rows() {
+        let mut rows: Vec<Vec<String>> = (0..199).map(|i| vec![format!("r{i}")]).collect();
+        rows.push(vec![c::TABLE_TOTAL.to_string()]);
+        let order: Vec<usize> = (0..rows.len()).collect();
+        let (shown, hidden) = table_fold(&rows, &order, false, &|_| false);
+        assert_eq!(shown.len(), m::TABLE_FOLD_ROWS + 1);
+        assert_eq!(shown.last(), Some(&199), "合计 stays in sight");
+        assert_eq!(hidden, 189);
+        // A picked row the fold would hide stays shown, in its place.
+        let (shown, hidden) = table_fold(&rows, &order, false, &|ri| ri == 57);
+        assert_eq!(&shown[10..], [57, 199]);
+        assert_eq!(hidden, 188);
+        // Expanded, or short: every row.
+        assert_eq!(
+            table_fold(&rows, &order, true, &|_| false),
+            (order.clone(), 0)
+        );
+        let short: Vec<Vec<String>> = (0..11).map(|i| vec![format!("r{i}")]).collect();
+        let order: Vec<usize> = (0..11).collect();
+        assert_eq!(table_fold(&short, &order, false, &|_| false).1, 0);
+        assert!(!table_folds(11) && table_folds(12));
+        // A sorted table folds in its sorted order.
+        let rows: Vec<Vec<String>> = (0..30).map(|i| vec![format!("r{i}")]).collect();
+        let order: Vec<usize> = (0..30).rev().collect();
+        assert_eq!(table_fold(&rows, &order, false, &|_| false).0[0], 29);
+    }
+
+    #[test]
+    fn twenty_columns_need_more_than_a_card_is_wide() {
+        // Four text columns and sixteen number columns.
+        let mut widths: Vec<Option<gpui::Pixels>> = vec![None; 4];
+        widths.extend(vec![Some(m::TABLE_NUM_COL); 16]);
+        assert!(
+            table_min_width(&widths) > m::MAX_WIDTH,
+            "it scrolls sideways"
+        );
+        // Four columns fit: no scroll.
+        let small = [None, Some(m::TABLE_NUM_COL), Some(m::TABLE_NUM_COL), None];
+        assert!(table_min_width(&small) < m::MAX_WIDTH / 1.5);
+    }
+
+    #[test]
+    fn a_long_diff_folds_to_its_first_hunk() {
+        let text = crate::views::cards::v2::samples::long_diff();
+        assert!(
+            text.len() < 32_768,
+            "inside the schema's limit: {}",
+            text.len()
+        );
+        assert!(text.lines().any(|l| l.len() >= 300), "one very wide line");
+        let (shown, hidden) = diff_fold(&text);
+        assert_eq!(shown, m::DIFF_FOLD_LINES);
+        assert_eq!(shown + hidden, 600);
+        // Two short hunks: the first shows whole, the second folds.
+        let two = "@@ -1,2 +1,2 @@\n-a\n+b\n@@ -9,2 +9,2 @@\n-c\n+d";
+        assert_eq!(diff_fold(two), (2, 2));
+        // One short hunk never folds; file lines are not code.
+        let one = "--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n-a\n+b\n c";
+        assert_eq!(diff_fold(one), (3, 0));
+        let edge: String = (0..=m::DIFF_FOLD_LINES)
+            .map(|i| format!(" l{i}\n"))
+            .collect();
+        assert_eq!(diff_fold(&edge).1, 0, "one line over the fold shows whole");
+    }
+
+    #[test]
+    fn an_image_keeps_its_ratio_inside_the_block() {
+        let (bw, bh) = (f32::from(m::IMAGE_BOX.0), f32::from(m::IMAGE_BOX.1));
+        assert_eq!(image_size(None), (bw, bh), "unknown size: the 16:10 box");
+        assert_eq!(image_size(Some((0, 10))), (bw, bh));
+        // A tall phone screenshot: as tall as the block allows, its width follows.
+        let (w, h) = image_size(Some((1170, 2532)));
+        assert_eq!(h, f32::from(m::IMAGE_MAX_H));
+        assert!((w / h - 1170. / 2532.).abs() < 0.01);
+        // A panorama: as wide as the block allows.
+        let (w, h) = image_size(Some((4000, 1000)));
+        assert_eq!((w, h), (f32::from(m::IMAGE_MAX_W), 120.));
+        // A small picture is never enlarged.
+        assert_eq!(image_size(Some((200, 150))), (200., 150.));
+        // A hairline strip keeps a side one can see.
+        let (w, _) = image_size(Some((10, 4000)));
+        assert!(w >= 96.);
+    }
+
+    #[test]
+    fn the_authors_tone_wins_over_better_and_delta() {
+        let up = Some(MetricBetter::Up);
+        assert_eq!(metric_good(Some(2.), up, None), Some(true));
+        assert_eq!(metric_good(Some(-2.), up, None), Some(false));
+        assert_eq!(metric_good(Some(-2.), up, Some(MetricTone::Neutral)), None);
+        assert_eq!(
+            metric_good(Some(0.6), None, Some(MetricTone::Bad)),
+            Some(false)
+        );
+        assert_eq!(
+            metric_good(Some(5.), None, Some(MetricTone::Good)),
+            Some(true)
+        );
+        assert_eq!(metric_good(Some(5.), None, None), None);
+        assert_eq!(
+            metric_good(Some(2.), up, Some(MetricTone::Unknown)),
+            Some(true),
+            "an unknown tone falls back"
+        );
+    }
+
+    #[test]
+    fn a_block_copies_as_text_one_can_paste() {
+        let b = blocks(serde_json::json!([
+            { "type": "table", "id": "t", "columns": ["渠道", "新增群"], "rows": [["微博", "14"], ["合计", "38"]] },
+            { "type": "metric", "id": "m", "label": "日活", "value": 2340 },
+            { "type": "metric", "id": "p", "label": "留存", "value": 61, "unit": "%" },
+            { "type": "fields", "id": "f", "fields": [{ "label": "影响", "value": "重启 2 分钟" }] },
+            { "type": "diff", "id": "d", "text": "@@ -1 +1 @@\n-a\n+b" },
+            { "type": "evidence", "id": "e", "label": "CI", "tests": { "passed": 3, "failed": 1 },
+              "url": "https://ci.example.com/1" },
+            { "type": "divider", "id": "x" }
+        ]));
+        assert_eq!(
+            block_text(&b[0]).unwrap(),
+            "渠道\t新增群\n微博\t14\n合计\t38"
+        );
+        assert_eq!(block_text(&b[1]).unwrap(), "日活 2,340");
+        assert_eq!(block_text(&b[2]).unwrap(), "留存 61%");
+        assert_eq!(block_text(&b[3]).unwrap(), "影响\t重启 2 分钟");
+        assert_eq!(block_text(&b[4]).unwrap(), "@@ -1 +1 @@\n-a\n+b");
+        assert_eq!(
+            block_text(&b[5]).unwrap(),
+            "测试 3 项通过 · 1 失败\nhttps://ci.example.com/1"
+        );
+        assert_eq!(block_text(&b[6]), None, "nothing to copy");
+    }
+
+    #[test]
+    fn test_counts_say_the_result_not_the_label() {
+        use crate::data::cards_v2::EvidenceTests;
+        let ok = EvidenceTests {
+            passed: 148,
+            failed: 0,
+            skipped: Some(3),
+        };
+        assert_eq!(tests_text(&ok), "测试 148 项通过 · 0 失败 · 跳过 3");
+        let bad = EvidenceTests {
+            passed: 31,
+            failed: 2,
+            skipped: None,
+        };
+        assert_eq!(tests_text(&bad), "测试 31 项通过 · 2 失败");
+        let none = EvidenceTests {
+            passed: 1,
+            failed: 0,
+            skipped: Some(0),
+        };
+        assert_eq!(tests_text(&none), "测试 1 项通过 · 0 失败");
+        // The counts decide the mark, whatever `state` says.
+        assert_eq!(
+            proof_failed(Some(EvidenceState::Pass), Some(&bad)),
+            Some(true)
+        );
+        assert_eq!(proof_failed(None, Some(&ok)), Some(false));
+        assert_eq!(proof_failed(Some(EvidenceState::Fail), None), Some(true));
+        assert_eq!(proof_failed(None, None), None);
     }
 
     #[test]

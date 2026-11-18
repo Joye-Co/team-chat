@@ -57,6 +57,54 @@ pub const PAGE: &str = "cv2-page";
 /// A run's done card around a web 产出 (the server's `doneCard`: result text, acceptance
 /// items, then the 产出 reference), as Jojo posted it for an article 解读.
 pub const DONE_PAGE: &str = "cv2-done-page";
+/// Six metrics in one run: two rows of numbers, none dropped.
+pub const METRICS_MANY: &str = "cv2-metrics-many";
+/// A 30-point line chart and a 5-series one.
+pub const CHART_MANY: &str = "cv2-chart-many";
+/// A 200-point bar chart.
+pub const CHART_BARS: &str = "cv2-chart-bars";
+/// Pictures of the image samples, written once to a temporary folder: a tall phone
+/// screenshot, a panorama and a small picture, as plain bands (no fonts needed).
+pub fn sample_picture(file_id: &str) -> Option<std::path::PathBuf> {
+    let (w, h) = match file_id {
+        "f-pic-tall" => (600u32, 1300u32),
+        "f-pic-wide" => (1600, 400),
+        "f-pic-small" => (200, 150),
+        _ => return None,
+    };
+    let dir = std::env::temp_dir()
+        .join("team-chat-v2-samples")
+        .join("pictures");
+    let path = dir.join(format!("{file_id}.png"));
+    if !path.exists() {
+        std::fs::create_dir_all(&dir).ok()?;
+        let bands = [[0xDC, 0xE3, 0xE8], [0xC9, 0xB9, 0xA6], [0xB7, 0xC4, 0xCF]];
+        let img = image::RgbImage::from_fn(w, h, |x, y| {
+            let band = if w > h { x * 6 / w } else { y * 6 / h } as usize;
+            image::Rgb(bands[band % bands.len()])
+        });
+        img.save(&path).ok()?;
+    }
+    Some(path)
+}
+
+/// A table at the schema's limits: 200 rows by 20 columns, with a 合计 row.
+pub const TABLE_BIG: &str = "cv2-table-big";
+/// A diff near the 32 KB limit: 600 lines in several hunks, one line 400 columns wide.
+pub const DIFF_LONG: &str = "cv2-diff-long";
+/// Every kind of proof: test counts, recordings, a 产出, a long result with a link.
+pub const PROOF_KINDS: &str = "cv2-proof-kinds";
+/// A 40-line code block and a 300-column one.
+pub const CODE_LONG: &str = "cv2-code-long";
+/// My stored answer, just made: 撤回 shows.
+pub const RECORD_FRESH: &str = "cv2-record-fresh";
+/// My 撤回 came back refused: the member has started.
+pub const RECORD_REFUSED: &str = "cv2-record-refused";
+/// My answer the member has had for a while, and one it never picked up.
+pub const RECORD_SLOW: &str = "cv2-record-slow";
+pub const RECORD_SILENT: &str = "cv2-record-silent";
+/// The 话题 of the answered samples: nothing happens in it after the answers.
+pub const T_RECORD: &str = "t-cv2-record";
 /// The message of the 轻回应 example (sample data).
 pub const ACK_BODY: &str = "本地试了，没再出现重复。";
 
@@ -82,6 +130,81 @@ struct Sample {
 
 fn card(v: serde_json::Value) -> CardV2 {
     serde_json::from_value(v).expect("sample v2 card parses")
+}
+
+/// A diff near the schema's 32 KB: a first hunk of 420 lines (its sixth line about 400
+/// columns wide), then six short hunks; 600 code lines in all.
+pub(crate) fn long_diff() -> String {
+    let mut out = String::from("@@ -1,300 +1,360 @@ export function reconcile(batch: Batch)\n");
+    let line = |out: &mut String, i: usize| {
+        let sign = match i % 7 {
+            0 => '-',
+            1 | 2 => '+',
+            _ => ' ',
+        };
+        out.push_str(&format!(
+            "{sign}  step{i:03}(batch, cursor, options.retry);\n"
+        ));
+    };
+    for i in 0..420 {
+        if i == 5 {
+            let cells: Vec<String> = (0..64).map(|n| format!("{n:04}")).collect();
+            out.push_str(&format!("+  const table = [{}];\n", cells.join(", ")));
+        } else {
+            line(&mut out, i);
+        }
+    }
+    for h in 0..6 {
+        let at = 500 + h * 40;
+        out.push_str(&format!("@@ -{at},30 +{at},30 @@ function part{h}()\n"));
+        for i in 0..30 {
+            line(&mut out, 420 + h * 30 + i);
+        }
+    }
+    out
+}
+
+/// A table at the schema's limits: `rows` rows (the last one 合计) by 20 columns, four of
+/// them text.
+pub(crate) fn big_table(rows: usize) -> serde_json::Value {
+    let mut columns: Vec<String> = ["渠道", "负责人", "地区", "备注"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    columns.extend((1..=16).map(|w| format!("第 {w} 周")));
+    let owners = ["小王", "李雪", "Aleksandra", "Forge"];
+    let places = ["华东", "华北", "海外", "西南"];
+    let mut body: Vec<Vec<String>> = (0..rows.saturating_sub(1))
+        .map(|r| {
+            let mut row = vec![
+                format!("渠道 {:03}", r + 1),
+                owners[r % owners.len()].to_string(),
+                places[r % places.len()].to_string(),
+                if r % 5 == 0 {
+                    "数据还在补"
+                } else {
+                    "正常"
+                }
+                .to_string(),
+            ];
+            row.extend((0..16).map(|w| ((r * 37 + w * 113) % 9_000 + 120).to_string()));
+            row
+        })
+        .collect();
+    let mut total = vec![
+        "合计".to_string(),
+        String::new(),
+        String::new(),
+        String::new(),
+    ];
+    total.extend((0..16).map(|w| {
+        body.iter()
+            .map(|r| r[4 + w].parse::<u64>().unwrap_or(0))
+            .sum::<u64>()
+            .to_string()
+    }));
+    body.push(total);
+    json!({ "type": "table", "id": "big", "columns": columns, "rows": body })
 }
 
 // --- worst-case card data (break-ui, F65): `--worst-case` reaches every block, not
@@ -348,7 +471,10 @@ fn form_card() -> serde_json::Value {
                 { "id": "fe", "label": "前端实习" }, { "id": "data", "label": "数据实习" },
                 { "id": "design", "label": "设计实习" }
             ]},
-            { "type": "input", "id": "start", "kind": "date", "label": "入职日期", "required": true },
+            { "type": "input", "id": "start", "kind": "date", "label": "入职日期", "required": true,
+              "help": "周一入职的话，账号周五前开好" },
+            { "type": "input", "id": "days", "kind": "number", "label": "每周到岗", "unit": "天",
+              "min": 1, "max": 5, "default": 3 },
             { "type": "input", "id": "groups", "kind": "chips", "label": "要进的群", "options": [
                 { "id": "dev", "label": "开发" }, { "id": "ops", "label": "运维" },
                 { "id": "growth", "label": "拾光增长" }, { "id": "all", "label": "全员" }
@@ -988,8 +1114,263 @@ fn all() -> Vec<Sample> {
         at(10, 12),
     ));
     out.push(page);
-    // --- inc-cards21: the Card v2.1 samples ---
+
+    // 14 很多数据 and 15 很长的内容: every block at the schema's limits.
+    out.push(sample(
+        METRICS_MANY,
+        GROWTH,
+        T_REPORT,
+        LEDGER,
+        at(9, 42),
+        None,
+        json!({
+            "v": 2, "rev": 1, "intent": "done", "title": "10 月的六个数",
+            "fallback": "新增群 38，日活 2,340，留存 61%",
+            "blocks": [
+                { "type": "metric", "id": "groups", "label": "新增群", "value": 38, "delta": 12,
+                  "better": "up", "note": "% 比 9 月" },
+                { "type": "metric", "id": "dau", "label": "日活", "value": 2340, "delta": 4,
+                  "better": "up", "note": "% 比 9 月" },
+                { "type": "metric", "id": "reply", "label": "平均回复", "value": 1.2, "unit": "秒",
+                  "delta": -0.3, "better": "down", "note": "秒" },
+                { "type": "metric", "id": "keep", "label": "次月留存", "value": 61, "unit": "%",
+                  "delta": -2, "better": "up", "tone": "neutral", "note": "季节波动" },
+                { "type": "metric", "id": "cost", "label": "每群成本", "value": 4.8, "unit": "元",
+                  "delta": 0.6, "tone": "bad", "note": "投放涨价" },
+                { "type": "metric", "id": "refund", "label": "退订", "value": 17, "delta": 5,
+                  "tone": "good", "note": "清掉了僵尸群" }
+            ]
+        }),
+    ));
+    let days: Vec<String> = (1..=30).map(|d| format!("10-{d:02}")).collect();
+    let wave = |seed: usize, base: usize| -> Vec<usize> {
+        (0..30)
+            .map(|i| base + (i * 37 + seed * 91) % 260 + i * 9)
+            .collect()
+    };
+    let months: Vec<String> = (1..=12).map(|m| format!("{m} 月")).collect();
+    let year = |seed: usize| -> Vec<usize> {
+        (0..12)
+            .map(|i| 400 + seed * 180 + (i * 53 + seed * 29) % 240)
+            .collect()
+    };
+    out.push(sample(
+        CHART_MANY,
+        GROWTH,
+        T_REPORT,
+        LEDGER,
+        at(9, 44),
+        None,
+        json!({
+            "v": 2, "rev": 1, "intent": "done", "title": "30 天和 5 条线",
+            "fallback": "日活 30 天；五个渠道一年",
+            "blocks": [
+                { "type": "chart", "id": "days", "kind": "line", "label": "日活 · 近 30 天",
+                  "x": days,
+                  "series": [
+                    { "name": "10 月", "values": wave(1, 1900) },
+                    { "name": "9 月", "values": wave(2, 1600) }
+                  ]},
+                { "type": "chart", "id": "year", "kind": "line", "unit": "个",
+                  "label": "各渠道新增群 · 全年按月（含试投放的两个新渠道和自然来的）",
+                  "x": months,
+                  "series": [
+                    { "name": "微博", "values": year(4) },
+                    { "name": "群内邀请", "values": year(3) },
+                    { "name": "B 站", "values": year(2) },
+                    { "name": "抖音", "values": year(1) },
+                    { "name": "小红书", "values": year(0) }
+                  ]}
+            ]
+        }),
+    ));
+    let ticks: Vec<String> = (1..=200).map(|i| format!("#{i}")).collect();
+    let loads: Vec<usize> = (0..200).map(|i| 40 + (i * 71) % 180 + i / 2).collect();
+    out.push(sample(
+        CHART_BARS,
+        GROWTH,
+        T_REPORT,
+        LEDGER,
+        at(9, 45),
+        None,
+        json!({
+            "v": 2, "rev": 1, "intent": "done", "title": "200 个采样点",
+            "fallback": "每次重连的耗时，200 个采样点",
+            "blocks": [
+                { "type": "chart", "id": "samples", "kind": "bar", "label": "重连耗时", "unit": "毫秒",
+                  "x": ticks, "series": [{ "name": "耗时", "values": loads }] },
+                { "type": "chart", "id": "week", "kind": "bar", "label": "一周新增群",
+                  "x": ["周一", "周二", "周三", "周四", "周五", "周六", "周日"],
+                  "series": [{ "name": "新增群", "values": [4, 7, 5, 9, 6, 3, 4] }] }
+            ]
+        }),
+    ));
+    out.push(sample(
+        TABLE_BIG,
+        GROWTH,
+        T_REPORT,
+        LEDGER,
+        at(9, 46),
+        None,
+        json!({
+            "v": 2, "rev": 1, "intent": "done", "title": "200 个渠道 16 周",
+            "fallback": "200 行 20 列的明细",
+            "blocks": [big_table(200)]
+        }),
+    ));
+    out.push(sample(
+        DIFF_LONG,
+        DEV,
+        T_RECONNECT,
+        FORGE,
+        at(10, 14),
+        None,
+        json!({
+            "v": 2, "rev": 1, "intent": "ask", "title": "PR #64 重写对账",
+            "fallback": "Forge 请你审 · 600 行",
+            "ask": { "from": [ME] },
+            "blocks": [
+                { "type": "evidence", "id": "tests", "label": "测试", "tests": { "passed": 212, "failed": 0 } },
+                { "type": "diff", "id": "d1", "path": "src/sync/reconcile.ts", "text": long_diff() }
+            ],
+            "actions": [
+                { "id": "approve", "label": "通过", "style": "primary" },
+                { "id": "changes", "label": "要改", "kind": "cancel" }
+            ]
+        }),
+    ));
+    out.push(sample(
+        PROOF_KINDS,
+        DEV,
+        T_RECONNECT,
+        FORGE,
+        at(10, 16),
+        None,
+        json!({
+            "v": 2, "rev": 1, "intent": "info", "title": "这次的证据",
+            "fallback": "录屏、测试结果、月报和一条压测记录",
+            "blocks": [
+                { "type": "evidence", "id": "rec", "label": "断网 60 秒后恢复",
+                  "recording": { "fileId": "f-rec-1", "durationMs": 83000, "posterFileId": "f-cover-c" } },
+                { "type": "evidence", "id": "rec2", "label": "弱网重试",
+                  "recording": { "fileId": "f-rec-2", "durationMs": 3723000 } },
+                { "type": "evidence", "id": "shot", "label": "重连后", "fileId": "f-cover-a" },
+                { "type": "evidence", "id": "bench", "label": "压测通过", "state": "pass",
+                  "url": "https://ci.example.com/orderbot/runs/8841",
+                  "detail": "1,000 个连接同时断开再重连，没有重复消息，最慢的一次 1.8 秒" },
+                { "type": "evidence", "id": "unit", "label": "单元测试",
+                  "tests": { "passed": 148, "failed": 0, "skipped": 3 } },
+                { "type": "evidence", "id": "e2e", "label": "端到端",
+                  "tests": { "passed": 31, "failed": 2 },
+                  "url": "https://ci.example.com/orderbot/runs/8842" },
+                { "type": "evidence", "id": "report", "label": "10 月月报",
+                  "artifact": { "artifactId": ART_REPORT, "version": 3 } }
+            ]
+        }),
+    ));
+    let script: String = (1..=40)
+        .map(|i| format!("step_{i:02}() {{ ./scripts/migrate.sh --shard {i} --dry-run=false; }}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let wide: String = format!(
+        "{{\"shards\":[{}]}}",
+        (0..48)
+            .map(|i| format!("\"s{i:03}\""))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    out.push(sample(
+        CODE_LONG,
+        DEV,
+        T_RECONNECT,
+        FORGE,
+        at(10, 18),
+        None,
+        json!({
+            "v": 2, "rev": 1, "intent": "info", "title": "迁移脚本",
+            "fallback": "40 步的迁移脚本和它的配置",
+            "blocks": [
+                { "type": "code", "id": "sh", "lang": "bash", "text": script },
+                { "type": "code", "id": "cfg", "lang": "json", "text": wide }
+            ]
+        }),
+    ));
+    // 16 答完以后: what the answer record says while the answer sits with the member.
     let now = crate::selftest::clock::now_ms();
+    for (id, ago) in [
+        (RECORD_FRESH, 10_000),
+        (RECORD_REFUSED, 20_000),
+        (RECORD_SLOW, 3 * 60_000),
+        (RECORD_SILENT, 25 * 60_000),
+    ] {
+        let mut s = sample(
+            id,
+            DEV,
+            T_RECORD,
+            FORGE,
+            now - ago - 60_000,
+            None,
+            choice_card(1),
+        );
+        s.answers.push(answer(
+            ME,
+            1,
+            "pick",
+            json!({ "style": "eight" }),
+            now - ago,
+        ));
+        // The ack of the answer said a run takes it: the record may say the run never
+        // started.
+        if id == RECORD_SLOW || id == RECORD_SILENT {
+            s.events.push(crate::data::cards_v2::MyCardEvent {
+                client_event_id: format!("ce-{id}"),
+                request: crate::data::cards_v2::CardEventRequest {
+                    rev: 1,
+                    action_id: Some("pick".into()),
+                    event: "action.press".into(),
+                    ..Default::default()
+                },
+                durable: true,
+                sent_at: now - ago - 80,
+                phase: crate::data::cards_v2::CardEventPhase::Acked {
+                    ack: crate::data::cards_v2::CardEventAck {
+                        event_id: format!("ev-{id}"),
+                        stored: true,
+                        answer_id: Some(format!("an-{id}")),
+                        duplicate: None,
+                        expect: crate::data::cards_v2::Expect {
+                            by: FORGE.into(),
+                            mode: crate::data::cards_v2::ExpectMode::Run,
+                            eta_ms: None,
+                        },
+                    },
+                    at: now - ago,
+                },
+                dropped: false,
+                reply: None,
+            });
+        }
+        if id == RECORD_REFUSED {
+            s.events.push(crate::data::cards_v2::MyCardEvent {
+                client_event_id: "ce-retract".into(),
+                request: crate::data::cards_v2::CardEventRequest {
+                    rev: 1,
+                    event: crate::views::cards::v21::interact::ANSWER_RETRACT.into(),
+                    ..Default::default()
+                },
+                durable: true,
+                sent_at: now - 5_000,
+                phase: crate::data::cards_v2::CardEventPhase::Failed {
+                    failure: crate::data::cards_v2::CardEventFailure::Conflict,
+                    at: now - 4_000,
+                },
+                dropped: false,
+                reply: None,
+            });
+        }
+        out.push(s);
+    }
+    // --- inc-cards21: the Card v2.1 samples ---
     out.extend(
         crate::views::cards::v21::samples::all()
             .into_iter()
@@ -1204,6 +1585,15 @@ impl SampleCards {
 
     /// Takes back `me`'s answer (the sample stands in for an answer that is
     /// still queued) or a refused one.
+    /// True when `me` has a stored answer to the card's rev (the sample team's 撤回).
+    pub fn can_retract(&self, message_id: &str, me: &str) -> bool {
+        self.lock().get(&Self::key(message_id)).is_some_and(|s| {
+            s.answers
+                .iter()
+                .any(|a| a.actor_id == me && a.rev == s.msg.card.rev)
+        })
+    }
+
     pub fn withdraw(&self, message_id: &str, me: &str) -> Option<(String, String)> {
         let mut map = self.lock();
         let s = map.get_mut(&Self::key(message_id))?;

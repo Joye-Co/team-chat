@@ -1476,6 +1476,7 @@ impl ChatProvider for V2Samples {
         file_id: &str,
     ) -> Option<std::path::PathBuf> {
         pages_samples::sample_image(file_id)
+            .or_else(|| crate::views::cards::v2::samples::sample_picture(file_id))
     }
 
     fn session(&self) -> SessionState {
@@ -2975,6 +2976,14 @@ impl ChatProvider for V2Samples {
             ]);
             return;
         }
+        if let Some((group_id, topic_id)) = self.cards_v2.withdraw(message_id, ME) {
+            self.emit(vec![Change::Messages { group_id, topic_id }, Change::Todo]);
+        }
+    }
+    fn can_retract_card_v2_answer(&self, _group_id: &str, message_id: &str) -> bool {
+        self.cards_v2.can_retract(message_id, ME)
+    }
+    fn retract_card_v2_answer(&self, _group_id: &str, _topic_id: &str, message_id: &str) {
         if let Some((group_id, topic_id)) = self.cards_v2.withdraw(message_id, ME) {
             self.emit(vec![Change::Messages { group_id, topic_id }, Change::Todo]);
         }

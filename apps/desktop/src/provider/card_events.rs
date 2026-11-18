@@ -242,7 +242,10 @@ impl CardEventLog {
 /// My 2.1 answer while it is queued or after it was refused, in the shape the card state
 /// reads (`CardV2Pending`). An acked answer shows from the stored answers.
 pub fn pending_answer(events: &[MyCardEvent]) -> Option<CardV2Pending> {
-    let e = events.iter().rev().find(|e| e.durable && !e.dropped)?;
+    // A 撤回 is queued like an answer, but it is not one.
+    let e = events.iter().rev().find(|e| {
+        e.durable && !e.dropped && e.request.event != chat_core::proto::EVENT_ANSWER_RETRACT
+    })?;
     let phase = match &e.phase {
         CardEventPhase::Sending => CardV2SendPhase::Sending,
         CardEventPhase::Failed { failure, .. } => CardV2SendPhase::Failed(match failure {
@@ -291,6 +294,27 @@ mod tests {
             event: "chart.select".into(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_queued_retract_is_not_an_answer_on_its_way() {
+        let events = CardEventLog::default();
+        let retract = CardEventRequest {
+            rev: 1,
+            event: chat_core::proto::EVENT_ANSWER_RETRACT.into(),
+            ..Default::default()
+        };
+        events.sent("m1", "c1".into(), retract, true, 10);
+        assert!(pending_answer(&events.events("m1")).is_none());
+        // An answer queued the same way is.
+        let answer = CardEventRequest {
+            rev: 1,
+            action_id: Some("ok".into()),
+            event: "action.press".into(),
+            ..Default::default()
+        };
+        events.sent("m2", "c2".into(), answer, true, 10);
+        assert!(pending_answer(&events.events("m2")).is_some());
     }
 
     fn ack(id: &str) -> CardEventAck {

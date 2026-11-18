@@ -15,6 +15,8 @@ pub use chat_core::proto::{
     CardWorkStatus, ChartKind, ChartSeries, DecisionOption, EvidenceState, InputKind, InputOption,
     MetricBetter, RefTarget, RunPlanItem, RunPlanState,
 };
+#[allow(unused_imports)]
+pub use chat_core::proto::{ArtifactRef, EvidenceRecording, EvidenceTests};
 // --- inc-cards21: Card v2.1 (containers, choice variants, the interaction loop) ---
 #[allow(unused_imports)]
 pub use chat_core::proto::{
