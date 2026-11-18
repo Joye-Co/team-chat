@@ -819,8 +819,19 @@ impl MemoryBoard {
                 None,
                 cx,
             )
+            .bg(self.alert_fill(cx))
             .into_any_element(),
         )
+    }
+
+    /// An alert's fill: the card's on a page (the board is a card there),
+    /// the window's in Settings.
+    fn alert_fill(&self, cx: &App) -> gpui::Hsla {
+        let k = native_colors(cx);
+        match self.host {
+            Host::Page => k.sheet,
+            Host::Settings => k.content,
+        }
     }
 
     fn load_failed(&self, e: AdminError, cx: &mut Context<Self>) -> AnyElement {
@@ -851,6 +862,7 @@ impl MemoryBoard {
             ),
             cx,
         )
+        .bg(self.alert_fill(cx))
         .into_any_element()
     }
 
@@ -919,6 +931,7 @@ impl MemoryBoard {
                 ),
                 cx,
             )
+            .bg(self.alert_fill(cx))
             .into_any_element(),
         )
     }

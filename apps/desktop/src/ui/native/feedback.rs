@@ -42,6 +42,7 @@ pub struct Alert {
     tone: AlertTone,
     actions: Vec<AnyElement>,
     icon_color: Option<Hsla>,
+    on_card: bool,
 }
 
 impl Alert {
@@ -53,7 +54,15 @@ impl Alert {
             tone: AlertTone::Neutral,
             actions: Vec::new(),
             icon_color: None,
+            on_card: false,
         }
+    }
+
+    /// The alert sits inside a card: it takes the card's fill instead of
+    /// the window's, so it is not a darker hole in dark mode.
+    pub fn on_card(mut self) -> Self {
+        self.on_card = true;
+        self
     }
 
     pub fn description(mut self, text: impl Into<SharedString>) -> Self {
@@ -101,9 +110,12 @@ impl RenderOnce for Alert {
             .rounded(radius::CONTAINER)
             .border_1()
             .border_color(edge)
-            .bg(k.content)
+            .bg(if self.on_card { k.sheet } else { k.content })
             .flex()
             .items_start()
+            // A title-only alert is one line: icon, title and action share
+            // its center.
+            .when(self.description.is_none(), |d| d.items_center())
             .gap(space::S12)
             .child(
                 // The icon centers on the title line (20 high).
@@ -353,11 +365,7 @@ impl Styled for Bone {
 
 /// The skeleton fill on `background` and on a filled surface.
 pub fn bone_fill(on_fill: bool, k: &NativeColors) -> Hsla {
-    if on_fill {
-        super::tokens::card_v2::mix(k.fill, k.pressed, 0.5)
-    } else {
-        k.fill
-    }
+    if on_fill { k.pressed } else { k.fill }
 }
 
 /// The pulse of a skeleton: one slow breath, 100 % to 70 %.
@@ -549,8 +557,8 @@ mod tests {
     #[test]
     fn skeletons_read_on_white_and_on_the_sidebar() {
         for k in [NativeColors::light(), NativeColors::dark()] {
-            // T1-07: the bar is the full muted fill; on the sidebar fill it
-            // is one half-step darker than muted.
+            // T1-07: the bar is the full muted fill; on the sidebar or a
+            // group fill it is the pressed step, one full step past muted.
             assert_eq!(bone_fill(false, &k), k.fill);
             assert_ne!(bone_fill(true, &k), k.sidebar);
             assert_ne!(bone_fill(true, &k), k.fill);

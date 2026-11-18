@@ -604,10 +604,10 @@ pub fn table(
     } else {
         height::TABLE_ROW
     };
-    let mut head = TableRow::new()
-        .h(height::TABLE_HEAD)
-        .border_b_1()
-        .border_color(k.separator);
+    // No border of our own: gpui-component's TableHeader draws the line
+    // under the header and each TableRow the line above it, so a second
+    // one here would stack to 2 pt.
+    let mut head = TableRow::new().h(height::TABLE_HEAD);
     for (ix, c) in columns.iter().enumerate() {
         let mut h = TableHead::new()
             .px(pad(ix))
@@ -646,10 +646,8 @@ pub fn table(
             ),
         );
     }
-    for (rix, cells) in rows.into_iter().enumerate() {
-        let mut row = TableRow::new().h(row_h).when(rix + 1 < count, |r| {
-            r.border_b_1().border_color(k.separator)
-        });
+    for cells in rows {
+        let mut row = TableRow::new().h(row_h);
         for (ix, cell) in cells.into_iter().enumerate() {
             let c = &columns[ix.min(n.saturating_sub(1))];
             let mut td = TableCell::new()

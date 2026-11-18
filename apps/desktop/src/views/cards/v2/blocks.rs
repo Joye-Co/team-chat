@@ -370,7 +370,9 @@ fn outputs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                 .rounded(crate::ui::native::tokens::radius::CONTAINER)
                 .border_1()
                 .border_color(n.separator)
-                .bg(n.content)
+                // The row sits in the card: the card's fill, the border
+                // is its only edge.
+                .bg(n.sheet)
                 .flex()
                 .items_center()
                 .gap(space::S12)
@@ -2883,6 +2885,7 @@ fn no_evidence(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
     // The §2.15 Alert (neutral, info icon, the action at the right), like 读不懂.
     Some(
         ui::native::Alert::new(Sym::Info, c::EVIDENCE_NONE)
+            .on_card()
             .action(
                 super::button(
                     ctx.id("ask-evidence"),

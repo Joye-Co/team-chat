@@ -1267,7 +1267,7 @@ impl MembersPage {
                     )
                 })
                 .collect();
-            page::frame(cx)
+            page::frame_on_card(cx)
                 .child(page::table("member-deliveries", &cols, rows, cx))
                 .into_any_element()
         };

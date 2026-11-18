@@ -169,13 +169,22 @@ pub fn section_header(
 /// clipped, and no border: the section header groups the rows, and a row
 /// shows itself with its hover fill (owner decision, v18).
 pub fn frame(cx: &App) -> gpui::Div {
-    let k = native_colors(cx);
+    frame_filled(native_colors(cx).content)
+}
+
+/// A [`frame`] inside a card (§2.4): it takes the card's fill, so the rows
+/// do not read as a hole cut into the card in dark mode.
+pub fn frame_on_card(cx: &App) -> gpui::Div {
+    frame_filled(native_colors(cx).sheet)
+}
+
+fn frame_filled(fill: gpui::Hsla) -> gpui::Div {
     div()
         .flex_none()
         .flex()
         .flex_col()
         .rounded(m::FRAME_RADIUS)
-        .bg(k.content)
+        .bg(fill)
         .overflow_hidden()
 }
 
@@ -363,7 +372,7 @@ pub fn list_footer(
         .id(id.into())
         .flex_none()
         .h(m::FOOTER_ROW)
-        .px(px(16.))
+        .px(m::ROW_PAD)
         .flex()
         .items_center()
         .justify_between()
@@ -1297,6 +1306,9 @@ pub fn table(
         .h(px(40.))
         .flex()
         .items_center()
+        // GPUI clips to a rectangle, so the frame's radius does not cut
+        // this fill: the band rounds its own top corners.
+        .rounded_t(m::FRAME_RADIUS)
         .bg(k.fill)
         .border_b_1()
         .border_color(k.separator)
@@ -1371,6 +1383,7 @@ pub fn skeleton_table(id: &str, cols: &[Col], n: usize, cx: &App) -> AnyElement 
         .id(SharedString::from(format!("{id}-skeleton")))
         .child(
             row(super::tokens::height::TABLE_HEAD, px(12.), true, 3)
+                .rounded_t(m::FRAME_RADIUS)
                 .bg(k.fill)
                 .border_b_1()
                 .border_color(k.separator),
