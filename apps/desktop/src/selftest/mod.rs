@@ -616,7 +616,7 @@ async fn shoot(
                     // A scene with native or async content presses its keys once
                     // that content is ready (below), so a key reaches it.
                     if frames == 1 && scenes::ready_check(scene.name).is_none() {
-                        press_keys(handle, scene.name, cx);
+                        press_keys(handle, scene.name, cx).await;
                     }
                     // Enter runs an action of the focused control: it goes once a frame
                     // has drawn the focus the keys before it moved.
@@ -658,7 +658,7 @@ async fn shoot(
             for _ in 0..2 {
                 let _ = next_frame(handle, cx).await;
             }
-            press_keys(handle, scene.name, cx);
+            press_keys(handle, scene.name, cx).await;
             let _ = next_frame(handle, cx).await;
             cx.background_executor().timer(options.settle).await;
         }
@@ -754,8 +754,14 @@ fn park_pointer(handle: AnyWindowHandle, at: gpui::Point<Pixels>, cx: &mut Async
     });
 }
 
-/// Presses the keys of a focus scene ([`interact`]) once.
-fn press_keys(handle: AnyWindowHandle, name: &str, cx: &mut AsyncApp) {
+/// How many times a Tab that moved no focus is pressed again.
+const TAB_RETRIES: usize = 3;
+
+/// Presses the keys of a focus scene ([`interact`]) once, a frame apart: Tab walks the
+/// tab stops of the last drawn frame, so a capture must not outrun the drawing. A Tab
+/// that moved no focus is pressed again, so a count of Tabs lands on the same control
+/// in every run.
+async fn press_keys(handle: AnyWindowHandle, name: &str, cx: &mut AsyncApp) {
     let Some(steps) = interact::steps(name) else {
         return;
     };
@@ -770,20 +776,32 @@ fn press_keys(handle: AnyWindowHandle, name: &str, cx: &mut AsyncApp) {
             .collect(),
         Err(_) => steps.keys.to_vec(),
     };
-    let _ = cx.update(|cx| {
-        handle.update(cx, |_, window, cx| {
-            for key in keys.iter().copied() {
-                // The app root holds the focus in a fresh window, so the
-                // first Tab reaches the app's `FocusNext` like a real one.
-                if key == "enter" {
-                    break;
-                }
-                if let Ok(stroke) = gpui::Keystroke::parse(key) {
-                    window.dispatch_keystroke(stroke, cx);
-                }
+    for key in keys.iter().copied() {
+        // The app root holds the focus in a fresh window, so the
+        // first Tab reaches the app's `FocusNext` like a real one.
+        if key == "enter" {
+            break;
+        }
+        let Ok(stroke) = gpui::Keystroke::parse(key) else {
+            continue;
+        };
+        let tries = if key.ends_with("tab") { TAB_RETRIES } else { 0 };
+        for _ in 0..=tries {
+            let moved = cx
+                .update(|cx| {
+                    handle.update(cx, |_, window, cx| {
+                        let before = window.focused(cx);
+                        window.dispatch_keystroke(stroke.clone(), cx);
+                        window.focused(cx) != before
+                    })
+                })
+                .unwrap_or(true);
+            let _ = next_frame(handle, cx).await;
+            if moved {
+                break;
             }
-        })
-    });
+        }
+    }
 }
 
 /// Presses the Enter that ends the keys of a focus scene, if they have one.
