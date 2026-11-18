@@ -4,7 +4,7 @@ import { type CardV2, type CardV2Block, cardBlockEvents, type PatchOp } from "@c
 import { describe, expect, it } from "vitest";
 import { eventsOf } from "../src/cards2/inputs";
 import { applyPatch, checkCard } from "../src/cards2/patch";
-import { type ApiError, issuesText } from "../src/core/errors";
+import { ApiError, issuesText } from "../src/core/errors";
 import { Daemon, mention, world } from "./daemon";
 import { Client, clientMsgId } from "./helpers";
 
@@ -134,6 +134,34 @@ describe("replace of a container", () => {
       { op: "insert", block: text("b") },
     ]);
     expect(ids(next)).toEqual(["s", "a", "c", "b"]);
+  });
+
+  it("a set that changes the children removes the ones no longer named", () => {
+    const next = applyPatch(start, [{ op: "set", id: "s", props: { children: ["a"] } }]);
+    expect(ids(next)).toEqual(["s", "a", "c"]);
+  });
+
+  it("a set of tabs removes the children of a tab that went away", () => {
+    const tabs = (list: { id: string; label: string; children: string[] }[]) => ({ type: "tabs", id: "t", tabs: list }) as unknown as CardV2Block;
+    const one = { id: "one", label: "一", children: ["a"] };
+    const two = { id: "two", label: "二", children: ["b"] };
+    const next = applyPatch(card([tabs([one, two]), text("a"), text("b")]), [
+      { op: "insert", block: text("c") },
+      { op: "set", id: "t", props: { tabs: [one, { ...two, children: ["c"] }] as never } },
+    ]);
+    expect(ids(next)).toEqual(["t", "a", "c"]);
+  });
+
+  it("broken children in the same patch are refused as invalid, not a crash", () => {
+    const two = card([stack("s", ["a", "b"]), stack("t", ["c"]), text("a"), text("b"), text("c")]);
+    const e = refused(() =>
+      applyPatch(two, [
+        { op: "set", id: "t", props: { children: 5 as never } },
+        { op: "replace", id: "s", block: stack("s", ["a"]) },
+      ]),
+    );
+    expect(e).toBeInstanceOf(ApiError);
+    expect(e.code).toBe("invalid");
   });
 
   it("leaves a replace that keeps its children alone", () => {
