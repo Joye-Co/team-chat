@@ -63,9 +63,10 @@ pub fn spans(code: &str, info: &str) -> Vec<(Range<usize>, Span)> {
         let mut at = 0;
         for line in code.split_inclusive('\n') {
             let text = line.trim_end_matches(['\n', '\r']);
-            let span = if text.starts_with("+++") || text.starts_with("---") {
-                Some(Span::Meta)
-            } else if text.starts_with("@@") || text.starts_with("diff ") {
+            let header = ["+++", "---", "@@", "diff "]
+                .iter()
+                .any(|mark| text.starts_with(mark));
+            let span = if header {
                 Some(Span::Meta)
             } else if text.starts_with('+') {
                 Some(Span::Added)

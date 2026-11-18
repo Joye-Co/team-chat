@@ -1889,7 +1889,7 @@ mod preview_disk {
                     Some((at, e.file_name().to_string_lossy().into_owned()))
                 })
                 .collect();
-            files.sort_by(|a, b| b.0.cmp(&a.0));
+            files.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
             for old in to_drop(files.into_iter().map(|(_, n)| n).collect(), KEEP) {
                 let _ = std::fs::remove_file(dir.join(old));
             }
