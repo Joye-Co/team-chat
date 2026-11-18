@@ -105,7 +105,7 @@ pub const SCENES: &[Scene] = &[
     ),
     gallery_scene!(
         "cards-v2-states",
-        "Card v2 13: a card not fetched yet (skeleton), a card that cannot be read (Alert with 重试) and a choice with 8 options",
+        "Card v2 13: a card not fetched yet (skeleton), a card that cannot be read (Alert with 检查更新) and a choice with 8 options",
         Section::Load
     ),
     gallery_scene!(
