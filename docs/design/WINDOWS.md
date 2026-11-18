@@ -53,8 +53,11 @@ Looked at in the Windows CI screenshots (100 % scale).
   same key again) closes it and gives the focus back. Alt is a tap only when nothing came between
   its press and its release: no other key or modifier, no mouse button, no change of the active
   window (so `Alt+←`, `Ctrl+Alt+F`, AltGr and `Alt+Tab` never open a menu), and not while the
-  pointer is over a part of a message, where Alt marks it for 引用提问. Nothing opens in full
-  screen (no title bar) or under a dialog. The menus have no underlined access keys.
+  pointer is over a part of a message, where Alt marks it for 引用提问. GPUI presses and releases
+  Alt itself when the app brings a window to the front (`activate_window`), so an Alt held for
+  less than 30 ms, or pressed within 300 ms after the window became active, is not a tap either
+  (`AltTap`). Nothing opens in full screen (no title bar) or under a dialog. The menus have no
+  underlined access keys.
 - They leave out what only the Mac has: 服务, 隐藏, 隐藏其他, 全部显示 (Windows cannot hide an
   app; its own keys minimize). The rest is there: 编辑 › 表情与符号 opens the system's emoji panel
   (the app presses `Win+.`), and 窗口 › 前置全部窗口 raises every window of the app, the active
@@ -66,11 +69,12 @@ Looked at in the Windows CI screenshots (100 % scale).
   menu bar. While the icon is shown, closing the last window keeps the app running; without it,
   closing the last window quits.
 
-The menu bar is looked at in the Windows CI screenshots (every main-window scene). CI also runs
-the handlers in the real app (`--selftest-nav`, the `windows_*` checks): `F10` opens and closes
-the menus, the tray switch adds and removes the icon, `Ctrl+W` with and without it. The Alt tap
-is unit-tested (`only_a_bare_alt_press_and_release_is_a_tap`) and not yet tried with a real key
-press on Windows; the tray menu and the emoji panel are not looked at.
+The menu bar was looked at in the Windows CI screenshots (every main-window scene). The
+`windows_*` checks of `--selftest-nav` run the handlers in the real app on a Windows machine (CI
+runs only the unit tests now): the tray switch adds and removes the icon and `Ctrl+W` with and
+without it ran in CI during the port; the two `windows_f10_*` checks (`F10` opens and closes the
+menus) are new and have not run yet. The Alt tap is unit-tested (`only_a_bare_alt_press_and_release_is_a_tap`) and not yet tried
+with a real key press on Windows; the tray menu and the emoji panel are not looked at.
 
 ## 3. Shortcuts
 
@@ -95,7 +99,7 @@ press on Windows; the tray menu and the emoji panel are not looked at.
 
 The key lists are unit-tested on Windows in CI (`the_window_menu_commands_have_their_windows_keys`,
 the 快捷键 pane's tests), and the written form is in the Windows CI screenshots of the menus, the
-palettes and the 快捷键 pane. Not tried with real key presses, except `Ctrl+W` and `F10` (§2).
+palettes and the 快捷键 pane. Not tried with real key presses, except `Ctrl+W` (§2).
 
 ## 4. Fonts
 
@@ -137,8 +141,9 @@ Only the families differ (`theme.rs`, `UI_FONT_STACK`, `MONO_FONT_STACK`, `UI_FO
 
 The native families are in the Windows CI screenshots; the stack's pick is unit-tested
 (`a_font_stack_picks_its_first_installed_family`). Whether `local()` finds the Segoe UI Variable
-and Cascadia Mono faces in WebView2 is not confirmed: until the `screen/` pictures of a Windows
-CI run show them, embedded pages may still draw Segoe UI and Consolas (the fallbacks).
+and Cascadia Mono faces in WebView2 is not confirmed: until screenshots from a Windows machine
+(`scripts/windows-screenshots.sh`) show them, embedded pages may still draw Segoe UI and Consolas
+(the fallbacks).
 
 ## 5. Icons
 
