@@ -724,7 +724,7 @@ impl Render for Lightbox {
         meta.push(size_text(item.file.size));
         let lights = cfg!(target_os = "macos") && !window.is_fullscreen();
         let lead = if lights {
-            layout::TRAFFIC_LIGHTS_INSET
+            layout::TRAFFIC_LIGHTS_INSET + space::S8
         } else {
             space::S16
         };

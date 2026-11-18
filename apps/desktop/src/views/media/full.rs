@@ -285,6 +285,7 @@ pub fn failed(
                 // failure, one Alert).
                 ui::native::Alert::new(Sym::Warning, cm::STATE_FAILED)
                     .tone(ui::native::AlertTone::Destructive)
+                    .on_card()
                     .description(cm::STATE_FAILED_RETRY)
                     .action(
                         ui::native::push_button(
@@ -439,8 +440,8 @@ fn file(spec: &FullSpec, cx: &App) -> AnyElement {
                         ui::native::push_button(
                             id(spec, "sysbig"),
                             cm::OPEN_WITH_SYSTEM,
-                            ui::PushStyle::Outline,
-                            ui::PushSize::Regular,
+                            ui::PushStyle::Default,
+                            ui::PushSize::Small,
                             cx,
                         )
                         .on_click(move |_, _, cx| parts::open_with_system(&path, cx)),
@@ -597,7 +598,7 @@ fn html(
     };
     let header = head(
         spec,
-        Sym::Document,
+        spec.media.kind.icon(),
         spec.media.title.clone(),
         Head {
             meta: Some(meta.into()),
@@ -859,7 +860,6 @@ fn markdown_view(
         Head {
             meta: Some(
                 [
-                    Some(cm::KIND_MARKDOWN.to_string()),
                     version_word(spec),
                     Some(fill(
                         cm::MD_WORDS,
@@ -1201,6 +1201,7 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
     let player: AnyElement = match player_dir(&spec.media, v) {
         Some(dir) => {
             let follow = state.clone();
+            let seek = spec.clone();
             WebEmbed::new(
                 id(spec, "player"),
                 WebEmbedSpec::new(
@@ -1217,6 +1218,12 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
                     && name == "time"
                 {
                     let t = payload["t"].as_f64().unwrap_or(0.);
+                    // The player's first report says it is there: the frame the view
+                    // opened at is applied now, and its 0 is not the position.
+                    if let Some(at) = follow.update(cx, |s, _| s.pending_seek.take()) {
+                        seek_player(&seek, at, cx);
+                        return;
+                    }
                     follow.update(cx, |s, cx| {
                         s.position = t;
                         cx.notify();
@@ -1472,9 +1479,9 @@ video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;backgr
 .speed{padding:2px 7px!important;font:12px -apple-system,"Segoe UI Variable Text","Segoe UI",sans-serif;font-variant-numeric:tabular-nums}
 </style></head><body><div class="wrap">
 <div class="stage"><video id="v" src="{SRC}" poster="{POSTER}" playsinline preload="metadata"></video>
-<button class="big" id="big" aria-label="{PLAY}"><svg viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z" fill="#141416"/></svg></button></div>
+<button class="big" id="big" aria-label="{PLAY}"><svg viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z" fill="none" stroke="#141416" stroke-width="1.75" stroke-linejoin="round"/></svg></button></div>
 <div class="bar">
-<button id="pp" aria-label="{PLAY}"><svg viewBox="0 0 24 24" id="ppi"><path d="M7 4l13 8-13 8z" fill="currentColor"/></svg></button>
+<button id="pp" aria-label="{PLAY}"><svg viewBox="0 0 24 24" id="ppi"><path d="M7 4l13 8-13 8z"/></svg></button>
 <span class="time" id="tm">0:00 <i>/ 0:00</i></span>
 <div class="track" id="tr"><div class="segs" id="segs"></div><div class="thumb" id="th"></div></div>
 <button class="speed" id="sp">1×</button>
@@ -1492,7 +1499,7 @@ parts.forEach(function(p){var d=document.createElement('div');d.className='seg';
 function layout(){var T=dur()||1;parts.forEach(function(p){var e=p.end==null?T:p.end;p.el.style.flex=Math.max(0.001,(e-p.t)/T)+' 1 0'})}
 function draw(){var T=dur()||1,t=v.currentTime;parts.forEach(function(p){var e=p.end==null?T:p.end;var f=Math.min(1,Math.max(0,(t-p.t)/(e-p.t)));p.el.firstChild.style.width=(f*100)+'%'});th.style.left=(t/T*100)+'%';tm.innerHTML=fmt(t)+' <i>/ '+fmt(T)+'</i>'}
 var last=-1;function report(){if(Math.abs(v.currentTime-last)<0.2)return;last=v.currentTime;try{window.artifact.emitEvent('time',{t:v.currentTime})}catch(e){}}
-function icon(){document.getElementById('ppi').innerHTML=v.paused?'<path d="M7 4l13 8-13 8z" fill="currentColor"/>':'<rect x="6" y="5" width="4" height="14" fill="currentColor"/><rect x="14" y="5" width="4" height="14" fill="currentColor"/>';document.getElementById('big').style.display=v.paused&&v.currentTime<0.01?'flex':'none'}
+function icon(){document.getElementById('ppi').innerHTML=v.paused?'<path d="M7 4l13 8-13 8z"/>':'<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>';document.getElementById('big').style.display=v.paused&&v.currentTime<0.01?'flex':'none'}
 function toggle(){if(v.paused)v.play();else v.pause()}
 document.getElementById('big').onclick=toggle;document.getElementById('pp').onclick=toggle;v.onclick=toggle;
 var speeds=[1,1.25,1.5,2,0.75],si=0;document.getElementById('sp').onclick=function(){si=(si+1)%speeds.length;v.playbackRate=speeds[si];this.textContent=speeds[si]+'×'};
@@ -1501,7 +1508,7 @@ document.getElementById('pip').onclick=function(){try{if(v.webkitSetPresentation
 if(!v.webkitSetPresentationMode&&!document.pictureInPictureEnabled)document.getElementById('pip').style.display='none';
 document.getElementById('tr').onclick=function(e){var r=this.getBoundingClientRect();v.currentTime=(e.clientX-r.left)/r.width*dur()};
 window.seekTo=function(t){v.currentTime=t;draw();report()};
-v.addEventListener('loadedmetadata',function(){layout();draw()});
+v.addEventListener('loadedmetadata',function(){layout();draw();report()});
 v.addEventListener('timeupdate',function(){draw();report()});
 v.addEventListener('play',icon);v.addEventListener('pause',icon);v.addEventListener('seeked',function(){draw();report();icon()});
 document.addEventListener('keydown',function(e){if(e.key===' '){e.preventDefault();toggle()}if(e.key==='ArrowRight')v.currentTime+=5;if(e.key==='ArrowLeft')v.currentTime-=5});
@@ -1658,7 +1665,7 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
                 .flex()
                 .gap(space::S12)
                 .when(current == Some(i), |el| el.bg(k.selected))
-                .child(mono(super::clock_text(c.t), k.text_3).w(px(40.)).pt(px(2.)))
+                .child(mono(super::clock_text(c.t), k.text_3).w(px(40.)))
                 .child(
                     div()
                         .flex_1()
@@ -1675,11 +1682,28 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
         );
     }
     let round = |idn: &str, icon: Sym, label: &'static str| tool(id(spec, idn), icon, label);
+    // The transcript is what this view can copy: every cue, as its rows read.
+    let transcript = (!a.transcript.is_empty()).then(|| {
+        a.transcript
+            .iter()
+            .map(|c| {
+                let time = super::clock_text(c.t);
+                match &c.speaker {
+                    Some(s) => format!("{time} {s} {}", c.text),
+                    None => format!("{time} {}", c.text),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    });
     let header = head(
         spec,
         Sym::Audio,
         spec.media.file_name().to_string(),
         Head {
+            copy: transcript.map(|all| -> Rc<dyn Fn(&mut App)> {
+                Rc::new(move |cx: &mut App| super::parts::copy_text(all.clone(), cm::COPIED, cx))
+            }),
             meta: Some(
                 format!(
                     "{} · {}",
@@ -1741,8 +1765,8 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
                             mono(
                                 format!(
                                     "{} / {}",
-                                    super::clock_text(position),
-                                    super::clock_text(a.duration)
+                                    super::time_text(position),
+                                    super::time_text(a.duration)
                                 ),
                                 k.text_1,
                             )
@@ -1963,7 +1987,7 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
     }
     let header = head(
         spec,
-        Sym::Document,
+        spec.media.kind.icon(),
         spec.media.file_name().to_string(),
         Head {
             meta: Some(
@@ -2055,7 +2079,7 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
     let toggle = state.clone();
     let header = head(
         spec,
-        Sym::CodeFile,
+        spec.media.kind.icon(),
         spec.media.file_name().to_string(),
         Head {
             meta: Some(

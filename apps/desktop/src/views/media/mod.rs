@@ -69,12 +69,14 @@ impl MediaKind {
 
     pub fn icon(self) -> Sym {
         match self {
-            MediaKind::Html | MediaKind::Markdown | MediaKind::Pdf => Sym::Document,
+            MediaKind::Html => Sym::Globe,
+            MediaKind::Pdf => Sym::PdfFile,
+            MediaKind::Markdown => Sym::Document,
             MediaKind::Image => Sym::Image,
             MediaKind::ImageSet => Sym::Images,
             MediaKind::Video => Sym::Video,
             MediaKind::Audio => Sym::Audio,
-            MediaKind::Code => Sym::CodeFile,
+            MediaKind::Code => Sym::Code,
             MediaKind::Table => Sym::Table,
             MediaKind::File => Sym::File,
         }
@@ -239,7 +241,8 @@ pub fn screen(cx: &App) -> Screen {
     Screen {
         bg: if dark { rgb(0x0B0B0D) } else { rgb(0x16161A) }.into(),
         ink: rgb(0xC9C9D1).into(),
-        dim: if dark { rgb(0x6E6E78) } else { rgb(0x7A7A84) }.into(),
+        // This screen is dark in both themes: the dark palette's muted text.
+        dim: crate::ui::native::tokens::Palette::dark().muted_foreground,
         line: gpui::hsla(0., 0., 1., 0.14),
     }
 }

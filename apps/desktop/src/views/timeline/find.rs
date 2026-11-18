@@ -623,7 +623,7 @@ impl TimelineView {
                 .children(count.map(|count| {
                     div()
                         .flex_none()
-                        .n_body()
+                        .n_footnote()
                         .tnum()
                         .text_color(n.secondary)
                         .child(count)

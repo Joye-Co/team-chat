@@ -270,7 +270,7 @@ pub fn bar(id: &SharedString, state: &Entity<MediaState>, cx: &App) -> Option<gp
             .children(count.map(|count| {
                 div()
                     .flex_none()
-                    .n_body()
+                    .n_footnote()
                     .tnum()
                     .text_color(n.secondary)
                     .child(count)

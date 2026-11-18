@@ -229,10 +229,16 @@ fn inline_preview(
 
 /// The type glyph of a file tile.
 fn file_icon(file: &FileAttachment) -> Sym {
+    use crate::views::media::{MediaKind, file_kind};
     if file.is_image() {
         Sym::Image
     } else if super::is_html(&file.name) {
         Sym::CodeFile
+    } else if matches!(
+        file_kind(&file.name, &file.mime),
+        MediaKind::Video | MediaKind::Audio
+    ) {
+        Sym::Play
     } else {
         Sym::Document
     }
@@ -245,7 +251,11 @@ pub fn kind_word(file: &FileAttachment) -> &'static str {
     } else if super::is_html(&file.name) {
         f::KIND_PAGE
     } else {
-        f::KIND_FILE
+        use crate::views::media::{MediaKind, file_kind};
+        match file_kind(&file.name, &file.mime) {
+            kind @ (MediaKind::Video | MediaKind::Audio) => kind.label(),
+            _ => f::KIND_FILE,
+        }
     }
 }
 
@@ -397,7 +407,22 @@ pub fn file_media_poster(sym: Sym, poster: Option<std::path::PathBuf>, cx: &App)
         .border_color(n.separator)
         .bg(n.fill)
         .overflow_hidden()
+        .relative()
         .child(img(path).size_full().object_fit(ObjectFit::Cover))
+        // §2.17: a video says it plays, on its poster too.
+        .when(sym == Sym::Play, |d| {
+            d.child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(crate::views::media::inline::play_badge(f32::from(
+                        crate::ui::native::tokens::space::S20,
+                    ))),
+            )
+        })
 }
 
 /// A borderless symbol button inside a file row (§5.2, §6): 24 × 24,

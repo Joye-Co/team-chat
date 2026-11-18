@@ -195,6 +195,8 @@ fn open_tool(spec: &InlineSpec, suffix: &str, opening: Opening) -> gpui_componen
         Sym::OpenExternal,
         cm::OPEN_IN_WINDOW,
     )
+    // The glyph, not the hit box, sits on the card's 16 content edge.
+    .mr(-space::S8)
     .on_click(move |_, _, cx| open(&s, opening.clone(), cx))
 }
 
@@ -237,13 +239,21 @@ fn html(spec: &InlineSpec, media: &Arc<Media>, cx: &App) -> AnyElement {
         )
         .capabilities(artifact_view::Capabilities::NONE),
     };
-    let mut embed = WebEmbed::new(
-        ElementId::Name(format!("{}-page", spec.id).into()),
-        page_spec,
-    )
-    .height(px(HTML_H))
-    .rounded(px(0.))
-    .pass_scroll(true);
+    let embed_id = ElementId::Name(format!("{}-page", spec.id).into());
+    // A page that did not open has nothing to expand or describe: 重试 is the way on.
+    let failed = crate::ui::web_embed::page_failed(&embed_id, cx);
+    let mut embed = WebEmbed::new(embed_id, page_spec)
+        .failed_inset(space::S16)
+        .height(px(HTML_H))
+        .rounded(px(0.))
+        // The page's text starts on the card's 16 content edge.
+        .pad(space::S16)
+        .pass_scroll(true);
+    if failed {
+        // Nothing under it: its fill ends at the card's bottom corners.
+        use crate::ui::native::tokens::{layout, radius as r};
+        embed = embed.rounded_bottom(r::CARD - layout::BORDER, r::CARD - layout::BORDER);
+    }
     if spec.target.provider.is_some() {
         embed = embed.on_host(host::embed_handler(id.clone()));
     }
@@ -281,7 +291,7 @@ fn html(spec: &InlineSpec, media: &Arc<Media>, cx: &App) -> AnyElement {
         .w(INLINE_W)
         .max_w_full()
         .child(
-            card_header(Sym::Document, spec.title.clone(), cx)
+            card_header(spec.kind.icon(), spec.title.clone(), cx)
                 .child(version_chip(spec.key.version, cx))
                 .children(notice)
                 .child(
@@ -297,7 +307,7 @@ fn html(spec: &InlineSpec, media: &Arc<Media>, cx: &App) -> AnyElement {
         )
         // The page sets its own height: it ends on a whole block (§2.21).
         .child(embed)
-        .child(foot)
+        .children((!failed).then_some(foot))
         .into_any_element()
 }
 
@@ -370,8 +380,12 @@ fn markdown_card(
             footer(cx)
                 .id(ElementId::Name(format!("{}-more", spec.id).into()))
                 .focus_row(false, cx)
-                .child(ui::icon(Sym::ChevronDown, px(14.), k.text_3))
                 .child(fill(cm::MD_EXPAND, &[("m", &minutes.to_string())]))
+                .child(ui::icon(
+                    Sym::ChevronRight,
+                    crate::ui::native::tokens::icon::MD,
+                    k.text_3,
+                ))
                 .child(div().flex_1())
                 .child(chips)
                 .on_click(move |_, _, cx| open(&s, Opening::default(), cx)),
@@ -854,8 +868,8 @@ fn audio(
                 .child(mono(
                     format!(
                         "{} / {}",
-                        super::clock_text(position),
-                        super::clock_text(a.duration)
+                        super::time_text(position),
+                        super::time_text(a.duration)
                     ),
                     k.text_2,
                 ))
@@ -897,7 +911,6 @@ fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyEl
         // Whole pages with the same 12 above and below: none is cut by the card's edge.
         .py(space::S12)
         .flex()
-        .justify_between()
         .gap(space::S8)
         .bg(k.code_bg)
         .rounded_b(
@@ -923,6 +936,12 @@ fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyEl
         shown += 1;
     }
     let shown = shown.max(1);
+    // One page has nothing to spread against: it stands in the middle of the strip.
+    thumbs = if shown == 1 {
+        thumbs.justify_center().items_center()
+    } else {
+        thumbs.justify_between()
+    };
     // Pages the strip does not show: the last tile says how many more.
     let more = (p.pages as usize).saturating_sub(shown);
     for (i, page) in p.images.iter().take(shown).enumerate() {
@@ -974,7 +993,7 @@ fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyEl
         .max_w_full()
         // The name row on top with the open tool, as on every sibling card (§2.4).
         .child(
-            card_header(Sym::Document, media.file_name().to_string(), cx)
+            card_header(spec.kind.icon(), media.file_name().to_string(), cx)
                 .child(mono(
                     format!(
                         "{} · {}",
@@ -1057,7 +1076,7 @@ fn code(spec: &InlineSpec, media: &Arc<Media>, c: &store::Code, cx: &App) -> Any
         .w(INLINE_W)
         .max_w_full()
         .child(
-            card_header(Sym::CodeFile, media.entry.clone(), cx)
+            card_header(spec.kind.icon(), media.entry.clone(), cx)
                 .child(div().t_meta().text_color(k.text_3).child(fill(
                     cm::CODE_RANGE,
                     &[
@@ -1172,7 +1191,11 @@ fn table(spec: &InlineSpec, media: &Arc<Media>, t: &text::Table, cx: &App) -> An
                     cm::TABLE_SHOW_ALL,
                     &[("n", &group_digits(t.total_rows as u64))],
                 ))
-                .child(ui::icon(Sym::ChevronRight, px(13.), k.text_2))
+                .child(ui::icon(
+                    Sym::ChevronRight,
+                    crate::ui::native::tokens::icon::MD,
+                    k.text_2,
+                ))
                 .on_click(move |_, _, cx| open(&s, Opening::default(), cx)),
         )
         .into_any_element()

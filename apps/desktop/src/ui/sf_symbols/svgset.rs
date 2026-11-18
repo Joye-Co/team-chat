@@ -213,6 +213,8 @@ svg_set! {
         Memory = MemoryStick @ 1.05, 0.85;
         Disk = HardDrive @ 1.16, 0.80;
         Network = Globe @ 1.00, 0.97;
+        Globe = Globe @ 1.00, 0.97;
+        PdfFile = FileType @ 0.83, 1.02;
         Key = KeyRound @ 0.66, 1.23;
         Layers = Layers @ 1.03, 1.05;
         Logs = FileSearch @ 0.90, 1.13;

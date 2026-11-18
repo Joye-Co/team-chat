@@ -330,8 +330,10 @@ fn build(
                 .flex()
                 .items_center()
                 .gap(theme::space::S4)
-                .children(language)
+                // The hidden 问这里 keeps its width: it goes first, so the language
+                // rests beside the copy button.
                 .children(ask)
+                .children(language)
                 .children(collapse)
                 .child(copy)
                 .child(code_edge_fade(&shown, cx))

@@ -233,6 +233,10 @@ concepts! {
     Memory = "memorychip";
     Disk = "internaldrive";
     Network = "network";
+    /// A web page (产出 of that kind).
+    Globe = "globe";
+    /// A PDF (产出 of that kind).
+    PdfFile = "doc.richtext";
     /// An API key.
     Key = "key";
     /// A machine's base image and environment.
