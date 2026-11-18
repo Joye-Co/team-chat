@@ -33,7 +33,6 @@ crate::copy! {
     SIGN_OUT_WIPE = "退出并删除本机记录",
     SIGN_OUT_WIPE_BUTTON = "删除并退出",
     SIGN_OUT_WIPE_HINT = crate::copy::per_system("删除这台 Mac 上的聊天记录和下载的产出，服务器上的内容不受影响", "删除这台电脑上的聊天记录和下载的产出，服务器上的内容不受影响"),
-    PROFILE_SAVE_HINT = "离开输入框或按回车即保存",
     SIGN_OUT_HINT = crate::copy::per_system("退出登录会保留这台 Mac 上的聊天记录，下次登录更快", "退出登录会保留这台电脑上的聊天记录，下次登录更快"),
     SIGN_OUT_WIPE_TITLE = "退出并删除本机记录？",
     SIGN_OUT_WIPE_BODY = crate::copy::per_system("这台 Mac 上的聊天记录和下载的产出会被删除。服务器上的内容不受影响，重新登录后会再同步。", "这台电脑上的聊天记录和下载的产出会被删除。服务器上的内容不受影响，重新登录后会再同步。"),

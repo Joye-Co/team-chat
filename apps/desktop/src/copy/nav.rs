@@ -73,7 +73,6 @@ crate::copy! {
     ADD_MEMBERS_TITLE = "添加成员到「{name}」",
     ALL_MEMBERS_IN = "所有成员都已在这个群里",
     // start DM picker
-    START_DM_PLACEHOLDER = "搜索成员，按回车开始私聊",
     DM_FAILED = "没能打开私聊：{reason}",
     // quick switcher
     QUICK_SWITCH_PLACEHOLDER = "搜索群、私聊、话题或成员",
@@ -86,7 +85,6 @@ crate::copy! {
     SWITCHER_IN_GROUP = "在当前群里搜索",
     SECTION_RECENT = "最近",
     SECTION_MESSAGES = "消息",
-    KEY_ESC = "esc",
     // topic list
     FILTER_ALL = "全部",
     FILTER_UNREAD = "未读",

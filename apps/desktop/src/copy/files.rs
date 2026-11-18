@@ -64,7 +64,7 @@ crate::copy! {
     VIEWER_LOADING_START = "正在载入原图",
     VIEWER_FAILED = "原图没能载入：{reason}",
     VIEWER_HINT = crate::copy::per_system(
-        "← → 切换 · 双击放大 · ⌘ 加滚轮缩放 · Esc 关闭",
+        "← → 切换 · 双击放大 · ⌘ 加滚轮缩放 · esc 关闭",
         "← → 切换 · 双击放大 · Ctrl 加滚轮缩放 · Esc 关闭"
     ),
     // --- the composer's image thumbnails ---
