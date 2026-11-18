@@ -190,11 +190,7 @@ impl RenderOnce for SpotlightField {
 
 /// The hairline between the field and the results.
 pub fn spotlight_divider(cx: &App) -> gpui::Div {
-    div()
-        .flex_none()
-        .mx(spot::INSET)
-        .h(px(1.))
-        .bg(native_colors(cx).separator)
+    div().flex_none().h(px(1.)).bg(native_colors(cx).separator)
 }
 
 /// A section header in the results: Section style (11 pt semibold),
