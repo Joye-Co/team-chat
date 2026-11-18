@@ -172,7 +172,7 @@ AI 成员被 @ 后，在这些电脑上干活。	AI members work here when you @
 你选了 A：一个输入框，粘贴自动识别	You chose A: a single field
 需要你批准的事	Needs your approval
 {} 件事等你拍板	{} things need your call
-下面还有 {} 件等你	{} more below need you
+下面还有 {} 件等你	{} more waiting below
 还没有启动数据	No boot data yet
 正在做	In progress
 在做	Working
