@@ -498,3 +498,16 @@ Taro 推荐大字标题：上一条大字封面的点击率高了 40%。	Taro re
 点一下就算选了	One click answers
 选好再提交	Choose, then submit
 检查更新…	Check for Updates…
+交还时留句话给 {}（可不填）	Leave {} a note for the hand-back (optional)
+继续时留句话给 {}（可不填）	Leave {} a note for when it continues (optional)
+{} 不在线，回来后才能继续操作	{} is offline. You can continue when it's back
+最后画面	Last frame
+结论是什么？	What's the conclusion?
+依据是什么？	What is it based on?
+还有什么遗留问题？	Anything still open?
+没能读到记得的事	Couldn't load this member's memory
+没能读到团队约定	Couldn't load team rules
+没能读到群里的约定	Couldn't load group rules
+没能读到我的偏好	Couldn't load your preferences
+没能读到我的约定	Couldn't load your rules
+无	None
