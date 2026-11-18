@@ -817,10 +817,12 @@ impl TimelineView {
                         .child(count)
                 }))
                 // A word on screen in a card or a file name is not a match:
-                // the count must not read as the whole 话题.
+                // the count must not read as the whole 话题. It gives way
+                // first in a narrow window: the step buttons stay.
                 .children((!find.query.is_empty()).then(|| {
                     div()
-                        .flex_none()
+                        .min_w_0()
+                        .truncate()
                         .n_footnote()
                         .text_color(n.tertiary)
                         .child(t::FIND_SCOPE)
