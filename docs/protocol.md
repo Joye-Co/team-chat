@@ -1472,7 +1472,7 @@ The server also writes events it notices itself (`audit_id` 0, no actor but the 
 | `machine` | `machine.offline` | the machine stayed disconnected 5 minutes; `at` is when it dropped, so brief reconnects write nothing |
 | `machine` | `machine.online` | it connected again after a `machine.offline`; `details { offlineMs }` |
 | `budget` | `budget.reached` | an AI member's spend this week (Monday 00:00 in the team's time zone, estimates included) reached its `weeklyBudgetCents`, once a week; `details { budgetCents, spentCents }` |
-| `budget` | `budget.paused` | a new run of an AI member at or over its budget was held for the owners (到了预算先停下来问); `actorId` the AI member, `details { runId, topicId, budgetCents /* with this week's extra */, spentCents, title? }` |
+| `budget` | `budget.paused` | a new run of an AI member at or over its budget was held for the owners (到了预算先停下来问); `actorId` the AI member, `details { runId, groupId? /* newer events */, topicId, budgetCents /* with this week's extra */, spentCents, title? }` |
 | `budget` | `budget.raised` | an owner chose 这周再加: `actorId` the owner, `target` the AI member, `details { extraCents, runId }` |
 | `budget` | `budget.stopped` | an owner chose 先停: the held run is cancelled; `details { runId, topicId, title? }` |
 

@@ -371,7 +371,7 @@ crate::copy! {
     ACT_MACHINE_ONLINE_META = "离线了 {d}",
     ACT_BUDGET_REACHED = "{actor} 本周花费到了预算 {budget}",
     ACT_BUDGET_REACHED_META = "已经花了 {spent}，再干活会先停下来问你",
-    ACT_BUDGET_PAUSED = "{actor} 到了这周的预算，停下来等你决定",
+    ACT_BUDGET_PAUSED = "{actor} 到了这周的预算，先停下了一个任务",
     ACT_BUDGET_PAUSED_META = "{title} · 这周花了 {spent}",
     ACT_BUDGET_PAUSED_SPENT = "这周花了 {spent}",
     ACT_BUDGET_RAISED = "{actor} 这周给 {target} 加了 {extra} 预算",

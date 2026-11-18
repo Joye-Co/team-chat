@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use chat_core::proto::activity::{ActivityEntry, kind};
 
-use super::AdminView;
+use super::{AdminView, model::AttentionKind};
 use crate::{
     copy::{admin as m, fill},
     data::MemberKind,
@@ -314,6 +314,31 @@ fn day_label(ms: u64) -> (chrono::NaiveDate, String) {
     (d, label)
 }
 
+/// Where a row of the log leads, when it leads anywhere.
+#[derive(Debug, PartialEq, Eq)]
+enum RowTarget {
+    /// The 话题 (group, topic).
+    Topic(String, String),
+    /// The 用量 page.
+    Usage,
+}
+
+/// A failed run leads to its 话题, where the reason is. A run held at the budget leads to the
+/// 话题 with the card that decides it; an event recorded before it named the group, to 用量.
+fn row_target(e: &ActivityEntry) -> Option<RowTarget> {
+    let topic = |id: Option<&str>| {
+        Some(RowTarget::Topic(
+            detail_str(e, "groupId")?.to_string(),
+            id?.to_string(),
+        ))
+    };
+    if e.kind == kind::RUN {
+        return topic(e.target.as_deref());
+    }
+    (e.action == "budget.paused")
+        .then(|| topic(detail_str(e, "topicId")).unwrap_or(RowTarget::Usage))
+}
+
 impl AdminView {
     /// Loads the first page (`more` false) or the next one with the current filters.
     pub(super) fn fetch_activity(&mut self, more: bool, cx: &mut Context<Self>) {
@@ -540,11 +565,7 @@ impl AdminView {
                     .and_then(|id| self.machines.iter().flatten().find(|x| x.id == id))
                     .map(crate::views::settings::machines::machine_glyph)
                     .unwrap_or_else(|| kind_icon(&e.kind));
-                // A failed run leads to its 话题, where the reason is.
-                let topic = (e.kind == kind::RUN)
-                    .then(|| Some((detail_str(e, "groupId")?, e.target.as_deref()?)))
-                    .flatten()
-                    .map(|(g, t)| (g.to_string(), t.to_string()));
+                let target = row_target(e);
                 let row = div()
                     .id(SharedString::from(format!("activity-{}", e.id)))
                     .min_h(height::LIST_ROW)
@@ -602,13 +623,13 @@ impl AdminView {
                             .w(SymSize::INLINE.slot_px())
                             .flex()
                             .justify_center()
-                            .when(topic.is_some(), |d| {
+                            .when(target.is_some(), |d| {
                                 d.child(sym_icon(Sym::ChevronRight, SymSize::INLINE, k.secondary))
                             }),
                     );
-                let row = match topic {
+                let row = match target {
                     None => row.into_any_element(),
-                    Some((group, topic)) => {
+                    Some(RowTarget::Topic(group, topic)) => {
                         let nav = self.services.nav.clone();
                         row.focus_row(false, cx)
                             .framed_ring(cx)
@@ -616,6 +637,17 @@ impl AdminView {
                                 let (g, t) = (group.clone(), topic.clone());
                                 nav.update(cx, |nav, cx| nav.open_topic(g.into(), t.into(), cx));
                                 crate::views::nav::show_main_window(cx);
+                            })
+                            .into_any_element()
+                    }
+                    Some(RowTarget::Usage) => {
+                        let view = cx.entity();
+                        row.focus_row(false, cx)
+                            .framed_ring(cx)
+                            .on_click(move |_, window, cx| {
+                                view.update(cx, |v, cx| {
+                                    v.open_page(AttentionKind::Budget.page(), window, cx)
+                                })
                             })
                             .into_any_element()
                     }
@@ -788,6 +820,28 @@ mod tests {
     }
 
     #[test]
+    fn a_held_run_leads_to_its_topic_or_to_usage() {
+        let held = entry(
+            "budget.paused",
+            "budget",
+            serde_json::json!({"groupId": "g1", "topicId": "t1"}),
+        );
+        assert_eq!(
+            row_target(&held),
+            Some(RowTarget::Topic("g1".into(), "t1".into()))
+        );
+        // Recorded before the event named its group.
+        let old = entry(
+            "budget.paused",
+            "budget",
+            serde_json::json!({"topicId": "t1"}),
+        );
+        assert_eq!(row_target(&old), Some(RowTarget::Usage));
+        let raised = entry("budget.raised", "budget", serde_json::json!({}));
+        assert_eq!(row_target(&raised), None);
+    }
+
+    #[test]
     fn server_events_read_as_sentences() {
         let machine = |_: &str| "vm-runner-1".to_string();
         let mut e = entry(
@@ -832,7 +886,7 @@ mod tests {
         assert_eq!(
             sentence(&p, &name, &machine),
             (
-                "Forge 到了这周的预算，停下来等你决定".into(),
+                "Forge 到了这周的预算，先停下了一个任务".into(),
                 Some("对一下账单 · 这周花了 $102".into())
             )
         );
