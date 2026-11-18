@@ -39,4 +39,6 @@ crate::copy! {
     // --- end v14/t4 nav ---
     ADD_TITLE = "添加账号",
     ADD_LEAD = "输入新账号的邀请码，当前账号仍保持登录。",
+    EMAIL_RESENT = "已重新发送，请查收最新一封",
+    EMAIL_RESEND_WAIT = "{n} 秒后可重新发送",
 }

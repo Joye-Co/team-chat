@@ -183,6 +183,12 @@ pub struct LoginView {
     sending: bool,
     /// The last refusal of an email request (sending a code).
     email_error: Option<EmailError>,
+    /// A code just went out again: the line under the slots says so.
+    email_resent: bool,
+    /// Seconds until `重新发送` comes back.
+    email_resend_wait: u32,
+    /// Counts [`Self::email_resend_wait`] down.
+    email_resend_timer: Option<gpui::Task<()>>,
     /// The server field is open (`更改`, or after an unreachable server).
     server_open: bool,
     /// The URL when the server field opened: 取消 and Esc put it back.
@@ -258,6 +264,11 @@ impl LoginView {
                         CodeInputEvent::Change => {
                             this.clear_stale_error(cx);
                             this.email_error = None;
+                            // The first digit typed answers the 已重新发送 line. The slots
+                            // emptied by the resend itself do not.
+                            if !this.email_code_digits(cx).is_empty() {
+                                this.email_resent = false;
+                            }
                             this.sync_code(cx);
                             // All six digits: sign in at once, as a one-time code does.
                             if this.email_code_digits(cx).len() == EMAIL_CODE_LEN
@@ -345,6 +356,9 @@ impl LoginView {
             sent_to: String::new(),
             sending: false,
             email_error: None,
+            email_resent: false,
+            email_resend_wait: 0,
+            email_resend_timer: None,
             server_open: false,
             server_before: None,
             embedded: true,
@@ -424,6 +438,9 @@ impl LoginView {
         if step == Step::EmailCode {
             self.email_code
                 .update(cx, |c, cx| c.set_value("", window, cx));
+        } else {
+            // Another address does not inherit the wait.
+            self.clear_email_resend();
         }
         self.focus_step_field(window, cx);
         self.sync_code(cx);
@@ -446,9 +463,43 @@ impl LoginView {
         }
     }
 
+    /// Forgets a resend: the person went back to the address.
+    fn clear_email_resend(&mut self) {
+        self.email_resent = false;
+        self.email_resend_wait = 0;
+        self.email_resend_timer = None;
+    }
+
+    /// A code went out again: say so and rest `重新发送` for a moment, since
+    /// each new code replaces the one before it.
+    fn start_email_resend_wait(&mut self, cx: &mut Context<Self>) {
+        use crate::ui::native::tokens::email_sheet;
+        self.email_resent = true;
+        self.email_resend_wait = email_sheet::RESEND_WAIT_SECS;
+        self.email_resend_timer = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(email_sheet::RESEND_TICK)
+                    .await;
+                let waiting = this.update(cx, |this, cx| {
+                    this.email_resend_wait = this.email_resend_wait.saturating_sub(1);
+                    if this.email_resend_wait == 0 {
+                        this.email_resent = false;
+                    }
+                    cx.notify();
+                    this.email_resend_wait > 0
+                });
+                if !waiting.unwrap_or(false) {
+                    break;
+                }
+            }
+        }));
+    }
+
     /// `发送验证码` (and `重新发送`): asks the server for a code at the address.
     fn send_email_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.sending {
+        let resend = self.step == Step::EmailCode;
+        if self.sending || (resend && self.email_resend_wait > 0) {
             return;
         }
         let email = self.email_text(cx);
@@ -476,6 +527,9 @@ impl LoginView {
                     Ok(()) => {
                         this.sent_to = email;
                         this.go_to(Step::EmailCode, window, cx);
+                        if resend {
+                            this.start_email_resend_wait(cx);
+                        }
                     }
                     Err(e) => this.email_error = Some(e),
                 }
@@ -609,6 +663,18 @@ impl LoginView {
         cx.notify();
     }
 
+    /// The code step just after `重新发送` went through, for a screenshot scene.
+    pub fn preview_email_resent(
+        &mut self,
+        email: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.preview_email(email, Some(""), window, cx);
+        self.start_email_resend_wait(cx);
+        cx.notify();
+    }
+
     /// Sets a custom server, for a screenshot scene.
     pub fn preview_server(&mut self, url: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.server
@@ -660,7 +726,7 @@ impl LoginView {
     ) -> gpui::AnyElement {
         use crate::ui::native::tokens::space;
         let k = native_colors(cx);
-        let quiet = |id: &'static str, label: &'static str, cx: &mut Context<Self>| {
+        let quiet = |id: &'static str, label: SharedString, cx: &mut Context<Self>| {
             borderless_text(id, label, cx)
                 .text_color(k.secondary)
                 .font_weight(gpui::FontWeight::NORMAL)
@@ -668,7 +734,7 @@ impl LoginView {
         // No link changes the step while a request is out.
         let busy = self.busy();
         let link = |id: &'static str, label: &'static str, cx: &mut Context<Self>| {
-            let b = quiet(id, label, cx);
+            let b = quiet(id, label.into(), cx);
             crate::ui::native::disabled_push(b, busy, cx)
         };
         if server_step {
@@ -713,14 +779,24 @@ impl LoginView {
                     .into_any_element();
             }
             Step::EmailCode => {
+                // Just sent again: the link counts down to when it is back.
+                let waiting = self.email_resend_wait > 0;
+                let label: SharedString = if waiting {
+                    let n = self.email_resend_wait.to_string();
+                    crate::copy::fill(l::EMAIL_RESEND_WAIT, &[("n", &n)]).into()
+                } else {
+                    l::EMAIL_RESEND.into()
+                };
+                let resend = quiet("login-email-resend", label, cx);
+                let resend = crate::ui::native::disabled_push(resend, busy || waiting, cx)
+                    .on_click(cx.listener(|this, _, window, cx| this.send_email_code(window, cx)));
                 return div()
                     .flex()
                     .items_center()
                     .justify_center()
                     .gap(space::S16)
-                    .child(link("login-email-resend", l::EMAIL_RESEND, cx).on_click(
-                        cx.listener(|this, _, window, cx| this.send_email_code(window, cx)),
-                    ))
+                    // Even figures: the row stays put while the seconds count down.
+                    .child(div().n_figures().child(resend))
                     .child(link("login-email-change", l::EMAIL_CHANGE, cx).on_click(
                         cx.listener(|this, _, window, cx| this.go_to(Step::Email, window, cx)),
                     ))
@@ -785,7 +861,7 @@ impl LoginView {
             .gap(space::S16)
             .child(row)
             .child(
-                quiet("login-add-cancel", common::CANCEL, cx)
+                quiet("login-add-cancel", common::CANCEL.into(), cx)
                     .on_click(move |_, _, _| services.provider.cancel_add_account()),
             )
             .into_any_element()
@@ -845,11 +921,26 @@ impl Render for LoginView {
         // Under the field: the error (owner decision v15: neutral 12 text
         // after a 16 destructive icon, as in every sheet footer). The slot
         // keeps its height, so nothing moves.
-        let under = error.map(|text| {
-            crate::ui::native::sheet::sheet_status_error(text, cx)
-                .id("login-error")
-                .max_w_full()
-        });
+        // After 重新发送 the same slot says a new code went out; an error goes first.
+        let resent = (self.email_resent && step == Step::EmailCode && !server_step && !signing_in)
+            .then(|| {
+                div()
+                    .id("login-resent")
+                    .max_w_full()
+                    .min_w_0()
+                    .n_footnote()
+                    .text_color(k.secondary)
+                    .child(crate::ui::truncate::TruncText::new(l::EMAIL_RESENT))
+                    .into_any_element()
+            });
+        let under = error
+            .map(|text| {
+                crate::ui::native::sheet::sheet_status_error(text, cx)
+                    .id("login-error")
+                    .max_w_full()
+                    .into_any_element()
+            })
+            .or(resent);
         let ready = if server_step {
             !server_url.trim().is_empty()
         } else {
@@ -1343,6 +1434,26 @@ mod flow_tests {
         view.update_in(cx, |v, window, cx| v.close_server_field(false, window, cx));
         assert_eq!(view.update(cx, |v, cx| v.email_code_digits(cx)), "123");
         assert_eq!(view.update(cx, |v, _| v.step), Step::EmailCode);
+    }
+
+    /// 重新发送 says it went out and rests; a typed digit takes the line away, and another
+    /// address does not inherit the wait.
+    #[gpui::test]
+    fn a_resend_is_confirmed_and_rests(cx: &mut TestAppContext) {
+        let (view, cx) = open(cx);
+        view.update_in(cx, |v, window, cx| {
+            v.preview_email_resent("a@example.com", window, cx)
+        });
+        cx.run_until_parked();
+        assert!(view.update(cx, |v, _| v.email_resent));
+        assert!(view.update(cx, |v, _| v.email_resend_wait > 0));
+        cx.simulate_input("1");
+        cx.run_until_parked();
+        assert_eq!(view.update(cx, |v, cx| v.email_code_digits(cx)), "1");
+        assert!(!view.update(cx, |v, _| v.email_resent));
+        assert!(view.update(cx, |v, _| v.email_resend_wait > 0));
+        view.update_in(cx, |v, window, cx| v.go_to(Step::Email, window, cx));
+        assert_eq!(view.update(cx, |v, _| v.email_resend_wait), 0);
     }
 
     /// Esc on the email steps goes one step back.

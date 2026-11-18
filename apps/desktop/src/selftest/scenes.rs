@@ -278,6 +278,13 @@ pub const SCENES: &[Scene] = &[
         },
     },
     Scene {
+        name: "login-email-resent",
+        about: "The login view just after 重新发送: the line under the slots says so and the link counts down",
+        start: Start::SignedOut,
+        setup: |_, _| {},
+        open: |services, content, cx| open_login(services, content, "%joye@example.com", false, cx),
+    },
+    Scene {
         name: "offline",
         about: "The connection banner above the sidebar footer while reconnecting",
         start: Start::Offline,
@@ -1828,9 +1835,12 @@ pub fn open_login(
                 l.preview_server(WORST_SERVER, window, cx);
             }
             // `=` shows 用邮箱登录 with that address; `#address digits` the
-            // code step with those digits typed.
+            // code step with those digits typed; `%address` that step just
+            // after 重新发送.
             if let Some(email) = code.strip_prefix('=') {
                 l.preview_email(email, None, window, cx)
+            } else if let Some(email) = code.strip_prefix('%') {
+                l.preview_email_resent(email, window, cx)
             } else if let Some(rest) = code.strip_prefix('#') {
                 let (email, digits) = rest.split_once(' ').unwrap_or((rest, ""));
                 l.preview_email(email, Some(digits), window, cx)
@@ -1882,6 +1892,9 @@ fn worst_login_code(code: &'static str) -> &'static str {
         }
         "#joye@example.com 042" => {
             "#huang.deshiou.product-design-and-frontend@northwind-industries-holdings.example.com 042"
+        }
+        "%joye@example.com" => {
+            "%huang.deshiou.product-design-and-frontend@northwind-industries-holdings.example.com"
         }
         // A long code against a long host that cannot be reached.
         "@K7QM2X9A" => "@K7QM2X9ABC3D",
