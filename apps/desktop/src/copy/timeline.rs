@@ -102,4 +102,5 @@ crate::copy! {
     CODE_COLLAPSE = "收起",
     BODY_EXPAND = "展开全文 · 约 {m} 分钟",
     BODY_COLLAPSE = "收起",
+    STEPS_DURATION_WHOLE_MIN = "{m} 分钟",
 }
