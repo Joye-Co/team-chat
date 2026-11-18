@@ -12,7 +12,9 @@ export function json(data: unknown, status = 200, headers: HeadersInit = {}): Re
 export function errorResponse(err: unknown): Response {
   const body = toErrorBody(err);
   if (!(err instanceof ApiError)) logger.error("unhandled error", { err });
-  return json({ error: body }, STATUS[body.code]);
+  // `Retry-After` is whole seconds; the exact wait is `retryAfterMs` in the body.
+  const headers: HeadersInit = body.retryAfterMs !== undefined ? { "retry-after": String(Math.ceil(body.retryAfterMs / 1000)) } : {};
+  return json({ error: body }, STATUS[body.code], headers);
 }
 
 /** Reads the request body as text, at most `limit` bytes. */
@@ -57,8 +59,7 @@ export async function readJson<S extends z.ZodType>(
   }
   const parsed = schema.safeParse(raw);
   if (!parsed.success) {
-    const first = parsed.error.issues[0];
-    throw new ApiError("invalid", `invalid body: ${first?.path.join(".") || "(root)"} ${first?.message ?? ""}`.trim());
+    throw new ApiError("invalid", `invalid body: ${issueText(parsed.error)}`);
   }
   return parsed.data;
 }
@@ -101,13 +102,16 @@ export function matchRoute<H>(
   routes: CompiledRoute<H>[],
   method: string,
   pathname: string,
-): { route: CompiledRoute<H>; params: Record<string, string> } | { route: null; pathMatched: boolean } {
-  let pathMatched = false;
+): { route: CompiledRoute<H>; params: Record<string, string> } | { route: null; pathMatched: boolean; allow: Method[] } {
+  // The methods of the routes this path has, for the 405 answer to a wrong method.
+  const allow: Method[] = [];
   for (const route of routes) {
     const m = route.regex.exec(pathname);
     if (!m) continue;
-    pathMatched = true;
-    if (route.method !== method) continue;
+    if (route.method !== method) {
+      if (!allow.includes(route.method)) allow.push(route.method);
+      continue;
+    }
     const params: Record<string, string> = {};
     try {
       route.keys.forEach((k, i) => {
@@ -118,5 +122,24 @@ export function matchRoute<H>(
     }
     return { route, params };
   }
-  return { route: null, pathMatched };
+  return { route: null, pathMatched: allow.length > 0, allow };
+}
+
+/** 405 for a path that exists under other methods: code `invalid`, the methods in `Allow`. */
+export function methodNotAllowed(allow: readonly string[]): Response {
+  const list = allow.join(", ");
+  return json({ error: { code: "invalid", message: `method not allowed: use ${list}` } }, 405, { allow: list });
+}
+
+/** Validates the query string with a zod schema; a failure names the parameter like `readJson` names a field. */
+export function readQuery<S extends z.ZodType>(url: URL, schema: S): z.infer<S> {
+  const parsed = schema.safeParse(Object.fromEntries(url.searchParams));
+  if (!parsed.success) throw new ApiError("invalid", `invalid query: ${issueText(parsed.error)}`);
+  return parsed.data;
+}
+
+/** `<path> <message>` of the first issue: which field broke which rule, never a value. */
+export function issueText(error: z.ZodError): string {
+  const first = error.issues[0];
+  return `${first?.path.join(".") || "(root)"} ${first?.message ?? ""}`.trim();
 }

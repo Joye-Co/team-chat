@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { AuthContext } from "../core/auth";
 import { roomStub } from "../core/env";
 import { ApiError, unwrap } from "../core/errors";
+import { readQuery } from "../core/http";
 import { registerRoomRpc, registerRoute } from "../core/registry";
 import { artifactGroup } from "./bridge";
 import { artifactRow } from "./room";
@@ -57,9 +58,8 @@ registerRoute({
   auth: "member",
   async handler({ env, url, params, auth }) {
     const a = auth as AuthContext;
-    const q = Query.safeParse(Object.fromEntries(url.searchParams));
-    if (!q.success) throw new ApiError("invalid", "bad before or limit");
+    const q = readQuery(url, Query);
     const groupId = await artifactGroup(env, params.id, a);
-    return unwrap(await roomStub(env, groupId).rpc(groupId, ARTIFACT_EVENTS_RPC, actorOf(a), { artifactId: params.id, ...q.data }));
+    return unwrap(await roomStub(env, groupId).rpc(groupId, ARTIFACT_EVENTS_RPC, actorOf(a), { artifactId: params.id, ...q }));
   },
 });
