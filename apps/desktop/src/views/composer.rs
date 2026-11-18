@@ -259,6 +259,11 @@ impl ComposerView {
         if crate::data::run_phase::phase_of(run).0.ended() {
             return None;
         }
+        // 停止 was pressed: the member stops at this step, so no next step
+        // reads a message either.
+        if self.services.provider.run_stopping(&run.id) {
+            return None;
+        }
         Some(crate::views::shell::member_name(
             &self.services,
             &run.bot_id,

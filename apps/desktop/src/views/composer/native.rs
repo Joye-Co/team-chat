@@ -387,7 +387,11 @@ impl ComposerView {
         }
         // Usable: 按顺序做 (design-relay §3.6): a hint muted, a refusal as an
         // error line.
-        if let Some(line) = self.relay_line_now() {
+        let relay_line = self.relay_line_now();
+        // The draft starts an order: Send does that, it is not a note to the
+        // member at work.
+        let starts_order = relay_line.as_ref().is_some_and(|l| l.order);
+        if let Some(line) = relay_line {
             above.push(if line.error {
                 error_line(line.text.into())
                     .id("composer-relay-line")
@@ -438,6 +442,8 @@ impl ComposerView {
                         &[("name", &name)],
                     )
                 })
+        } else if starts_order {
+            None
         } else {
             self.working
                 .as_ref()
