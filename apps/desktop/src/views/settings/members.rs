@@ -2888,13 +2888,16 @@ impl Render for BotForm {
                                     )
                             }),
                     )
-                    .child(
-                        div()
-                            .pt(tokens::space::S8)
-                            .n_subheadline()
-                            .text_color(k.secondary)
-                            .child(s::RUNNER_OWN_MODEL_HINT),
-                    )
+                    // It explains the off state, so it goes once the switch is on.
+                    .when(!own, |d| {
+                        d.child(
+                            div()
+                                .pt(tokens::space::S8)
+                                .n_subheadline()
+                                .text_color(k.secondary)
+                                .child(s::RUNNER_OWN_MODEL_HINT),
+                        )
+                    })
             }));
         }
         // The look of an existing member changes in its own sheet (更换形象…).
