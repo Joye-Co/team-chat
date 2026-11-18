@@ -96,4 +96,6 @@ crate::copy! {
     // stops at its step; waiting it only names the step.
     PLAN_HELD_NAMED = "{name} 停在：{step}",
     PLAN_STEP_NAMED = "{name}：{step}",
+    // The failed-run alert of the step 按顺序做 stopped at: the bar's word.
+    RUN_STUCK_TITLE = "{name} 卡住了",
 }

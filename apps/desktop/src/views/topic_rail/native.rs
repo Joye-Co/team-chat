@@ -540,7 +540,16 @@ impl TopicRail {
             if let Some(t) = d.topic.as_ref() {
                 section = section.action(self.assign_button(t, cx));
             }
-            section = section.note(c::RAIL_EMPTY_OWNER);
+            // Not while a run of this 话题 is at work (the thread shows its
+            // card before the server's member list names it).
+            let at_work = d
+                .run
+                .iter()
+                .chain(d.others.iter().map(|(r, _)| r))
+                .any(|r| r.status.is_active() && r.status != crate::data::RunStatus::Waiting);
+            if !at_work {
+                section = section.note(c::RAIL_EMPTY_OWNER);
+            }
         }
         let mut people: Vec<(crate::data::Member, Option<&'static str>)> = Vec::new();
         let lead = |id: Option<&str>, tag: &'static str, people: &mut Vec<_>| {

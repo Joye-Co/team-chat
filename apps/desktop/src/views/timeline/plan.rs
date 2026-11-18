@@ -302,8 +302,31 @@ impl TimelineView {
             })
             .map(|c| c.trim().trim_end_matches(['。', '.']).to_string())
             .filter(|c| !c.is_empty());
-        // The title states the cause (`打包失败：找不到签名证书`).
-        let title = cause.unwrap_or_else(|| fill(t::RUN_FAILED_TITLE_NO_CAUSE, &[("name", &name)]));
+        // A run that is the step 按顺序做 stopped at: the order's bar says
+        // 卡住了 beside its member and owns the retry (and its limit).
+        let relay_step = self
+            .topic
+            .as_ref()
+            .and_then(|t| t.relay.as_ref())
+            .is_some_and(|r| {
+                r.state == "paused"
+                    && r.steps
+                        .get(r.current as usize)
+                        .is_some_and(|s| match s.run_id.as_deref() {
+                            Some(id) => id == run.id,
+                            None => s.member_id == run.bot_id,
+                        })
+            });
+        // The title states the cause (`打包失败：找不到签名证书`); with none, the
+        // word of the order's bar for its step, else 没做完.
+        let title = cause.unwrap_or_else(|| {
+            let template = if relay_step {
+                t::RUN_STUCK_TITLE
+            } else {
+                t::RUN_FAILED_TITLE_NO_CAUSE
+            };
+            fill(template, &[("name", &name)])
+        });
         let ended = run.ended_at.unwrap_or(run.updated_at);
         let at = match model::local_day(ended) {
             Some(day) => format!(
@@ -336,19 +359,6 @@ impl TimelineView {
             self.services.nav.read(cx).visible_pane(),
             crate::app::RightPane::Live(id) if id == run.id
         );
-        let relay_step = self
-            .topic
-            .as_ref()
-            .and_then(|t| t.relay.as_ref())
-            .is_some_and(|r| {
-                r.state == "paused"
-                    && r.steps
-                        .get(r.current as usize)
-                        .is_some_and(|s| match s.run_id.as_deref() {
-                            Some(id) => id == run.id,
-                            None => s.member_id == run.bot_id,
-                        })
-            });
         let retry = (!in_pane && !relay_step).then(|| {
             let run = run.clone();
             push_button(
