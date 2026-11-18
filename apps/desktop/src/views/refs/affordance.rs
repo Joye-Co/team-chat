@@ -265,6 +265,21 @@ pub fn inline_button(id: &str, target: Rc<dyn Fn(&App) -> PartTarget>, cx: &App)
         .into_any_element()
 }
 
+/// [`inline_button`] inside a surface that already floats or in a row of its own (a chart
+/// tooltip, a step's text): the plain outline button, no second raised box.
+pub fn inline_button_flat(
+    id: &str,
+    target: Rc<dyn Fn(&App) -> PartTarget>,
+    cx: &App,
+) -> AnyElement {
+    ask_button_flat(ElementId::Name(format!("ask-{id}").into()), cx)
+        .on_click(move |_, window, cx| {
+            cx.stop_propagation();
+            ask_about(target(cx), RefIntent::Topic, window, cx);
+        })
+        .into_any_element()
+}
+
 /// The 问这里 button of a part whose renderer has no hover of its own (the action strip of a
 /// code fence): it keeps its place but shows only while the pointer is over it, so a capture
 /// or a glance at rest never shows it (§2.6 hover, E2).
