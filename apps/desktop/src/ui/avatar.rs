@@ -57,6 +57,8 @@ pub struct MemberAvatar {
     /// while it waits on me.
     ring: Option<Ring>,
     on_group: bool,
+    /// The avatar sits on a screen that is dark in both themes (the image viewer).
+    dark_screen: bool,
 }
 
 /// The status of an avatar (v3), drawn as a small dot on its corner.
@@ -91,6 +93,7 @@ impl MemberAvatar {
             status_override: None,
             ring: None,
             on_group: false,
+            dark_screen: false,
         }
     }
 
@@ -98,6 +101,13 @@ impl MemberAvatar {
     /// on-group tint, since `muted` is the group's own fill in light.
     pub fn on_group(mut self) -> Self {
         self.on_group = true;
+        self
+    }
+
+    /// The avatar sits on a screen that is dark in both themes (the image viewer,
+    /// §2.17): the fallback takes the dark palette whatever the app's theme is.
+    pub fn on_dark_screen(mut self) -> Self {
+        self.dark_screen = true;
         self
     }
 
@@ -140,6 +150,14 @@ impl RenderOnce for MemberAvatar {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = theme::colors(cx);
         let size = self.size;
+        // The fallback's fill, ink and line (§1.8), from the dark palette on a dark
+        // screen.
+        let (fallback_bg, fallback_fg, fallback_line) = if self.dark_screen {
+            let p = crate::ui::native::tokens::Palette::dark();
+            (p.muted, p.foreground, p.border)
+        } else {
+            (k.avatar_bg, k.avatar_fg, k.border)
+        };
         let surface = self.surface.unwrap_or(k.content);
         let small = size <= px(24.);
         // §1.8: the presence dot is 8 with a 2 px ring of the surface.
@@ -233,10 +251,10 @@ impl RenderOnce for MemberAvatar {
                         div()
                             .size(size)
                             .rounded(theme::radius::bot(size))
-                            .bg(k.avatar_bg)
-                            .text_color(k.avatar_fg)
+                            .bg(fallback_bg)
+                            .text_color(fallback_fg)
                             .border_1()
-                            .border_color(k.border)
+                            .border_color(fallback_line)
                             .flex()
                             .items_center()
                             .justify_center()
@@ -288,14 +306,14 @@ impl RenderOnce for MemberAvatar {
                 .rounded_full()
                 // §1.8: one fallback for every person, me included: the muted
                 // fill, a 1 px border line (§2.22) and the initial in foreground.
-                .bg(if self.on_group {
+                .bg(if self.on_group && !self.dark_screen {
                     crate::ui::native::native_colors(cx).on_group
                 } else {
-                    k.avatar_bg
+                    fallback_bg
                 })
-                .text_color(k.avatar_fg)
+                .text_color(fallback_fg)
                 .border_1()
-                .border_color(k.border)
+                .border_color(fallback_line)
                 .flex()
                 .items_center()
                 .justify_center()

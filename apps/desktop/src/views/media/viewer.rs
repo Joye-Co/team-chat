@@ -191,10 +191,16 @@ impl Render for MediaViewer {
             ),
             _ => full::loading(&self.title, close_sheet(), cx),
         };
+        // The sheet's own height inside its 1 px line, as a length: the dialog lays its
+        // content out at the content's height, so "100 %" here would let a long
+        // document grow past the sheet (cut square at its bottom corners, and
+        // scrolled by nothing).
+        let height = self.height(window, cx) - crate::ui::native::tokens::layout::BORDER * 2.;
         div()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key))
-            .size_full()
+            .w_full()
+            .h(height)
             .flex()
             .flex_col()
             .rounded(metrics::SHEET_RADIUS)
@@ -224,7 +230,13 @@ impl MediaViewer {
                     Some(head + space::S8 + space::S12 + px(20.) * c.lines.len() as f32)
                 }
                 Data::Table(t) => {
-                    Some(head + full::TABLE_ROW * (t.rows.len() as f32 + 1.) + full::FOOT_HEIGHT)
+                    let fixed = head + full::TABLE_ROW + full::FOOT_HEIGHT;
+                    let all = fixed + full::TABLE_ROW * t.rows.len() as f32;
+                    // A table longer than the room ends on half a row: a clear cue
+                    // that it scrolls, never a sliver of the next row that reads as
+                    // a second line above the footer.
+                    let shown = ((room - fixed) / full::TABLE_ROW - 0.5).floor().max(1.) + 0.5;
+                    Some(all.min(fixed + full::TABLE_ROW * shown))
                 }
                 // A short transcript: the sheet hugs it (A1): the player block,
                 // the transcript label, then one row per cue.

@@ -16,13 +16,12 @@ crate::copy! {
     EXPAND = "展开",
     COLLAPSE = "收起",
     OPEN_IN_WINDOW = "在窗口打开",
-    PAGE_EVENTS = "页面发出的事件",
-    PAGE_EVENTS_NONE = "这个版本还没有发出事件",
+    PAGE_EVENTS = "页面里的操作",
     MD_WORDS = "{n} 字",
     MD_EXPAND = "展开全文 · 约 {m} 分钟",
     MD_TABLES = "表格 {n}",
     MD_IMAGES = "图 {n}",
-    MD_TODO = "后续 {done}/{all}",
+    MD_TODO = "待办 {done}/{all}",
     MD_TOC = "目录",
     IMG_COUNT = "{n} 张",
     IMG_SAVE_ALL = "全部存到本机",
@@ -52,7 +51,6 @@ crate::copy! {
     AUDIO_TRANSCRIPT_COUNT = "文字稿 · {n} 句",
     AUDIO_NOTE = "波形在本机算出；点波形从那里放",
     PDF_PAGES = "{n} 页",
-    PDF_OPEN = "打开",
     PDF_PAGE_OF = "{i} / {n}",
     PDF_ZOOM_IN = "放大",
     PDF_ZOOM_OUT = "缩小",
@@ -92,6 +90,7 @@ crate::copy! {
     CANCEL = "取消",
     REMOVE = "移除",
     OPEN = "打开",
+    STATE_NO_PREVIEW_TITLE = "没有预览",
 }
 
 #[cfg(test)]

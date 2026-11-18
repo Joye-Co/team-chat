@@ -1167,7 +1167,7 @@ pub fn page_footer(
     };
     use gpui::{
         InteractiveElement as _, ParentElement as _, StatefulInteractiveElement as _, Styled as _,
-        div, px,
+        div,
     };
     use gpui_component::{Sizable as _, tooltip::Tooltip};
     let k = theme::colors(cx);
@@ -1247,7 +1247,7 @@ pub fn page_footer(
             .items_center()
             .gap(space::S4)
             .whitespace_nowrap()
-            .child(ui::icon(Sym::Info, tsp::S12, k.ink_3))
+            .child(ui::icon(Sym::Info, tsp::S12, n.secondary))
             .child(short)
             .tooltip(move |window, cx| Tooltip::new(whole.clone()).build(window, cx))
     }));
@@ -1260,7 +1260,7 @@ pub fn page_footer(
             .items_center()
             .gap(space::S6)
             .t_meta()
-            .text_color(k.text_2)
+            .text_color(n.secondary)
             .whitespace_nowrap()
     };
     let Some(view) = view else {
@@ -1280,13 +1280,13 @@ pub fn page_footer(
         // stays for work the member is doing.
         BandView::Waiting(t) => base.child(
             pill()
-                .child(ui::icon(Sym::Waiting, tsp::S12, k.text_2))
+                .child(ui::icon(Sym::Waiting, tsp::S12, n.secondary))
                 .child(t),
         ),
         BandView::Working(t) => base.child(busy(t)),
         BandView::NoAnswer(t) => {
             let (a, b) = (artifact_id.to_string(), artifact_id.to_string());
-            base.child(div().flex_none().text_color(k.text_2).child(t))
+            base.child(div().flex_none().text_color(n.secondary).child(t))
                 .child(
                     ui::native::push_button(
                         SharedString::from(format!("{id}-retry")),
@@ -1310,13 +1310,13 @@ pub fn page_footer(
         }
         BandView::Failed(t) => base.child(
             pill()
-                .child(ui::icon(Sym::Alert, px(13.), k.ink_3))
+                .child(ui::icon(Sym::Alert, tsp::S12, n.secondary))
                 .child(t),
         ),
         BandView::Done(t) => base.child(
             pill()
                 .id(SharedString::from(format!("{id}-band")))
-                .child(ui::icon(Sym::Check, px(13.), k.ok))
+                .child(ui::icon(Sym::Check, tsp::S12, k.ok))
                 .child(t),
         ),
     }

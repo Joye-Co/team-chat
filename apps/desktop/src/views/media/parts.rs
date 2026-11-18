@@ -23,7 +23,8 @@ pub fn card(cx: &App) -> Div {
     crate::ui::native::cards::card_frame(cx).flex().flex_col()
 }
 
-/// The header of an inline card: glyph, name, meta, then trailing tools.
+/// The header of an inline card: glyph, name 14 semibold (§2.4), meta, then trailing
+/// tools.
 pub fn card_header(icon: Sym, title: impl Into<SharedString>, cx: &App) -> Div {
     let k = theme::colors(cx);
     div()
@@ -40,8 +41,8 @@ pub fn card_header(icon: Sym, title: impl Into<SharedString>, cx: &App) -> Div {
         ))
         .child(
             crate::ui::native::file_name(title)
-                .t_small()
-                .medium()
+                .t_ui()
+                .semibold()
                 .text_color(k.text_1)
                 .flex_shrink(1.)
                 .min_w(px(0.)),

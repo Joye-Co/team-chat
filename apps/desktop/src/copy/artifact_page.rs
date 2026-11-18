@@ -83,4 +83,7 @@ crate::copy! {
     ARTIFACT_QUIET_PASSED = "没有替你发出回应",
     ARTIFACT_QUIET_FAILED = "替你发出了回应",
     // --- end v15/r3-pages ---
+    // The toolbar items' words (D20); the long forms stay as their tooltips.
+    ARTIFACT_OPEN_WINDOW_SHORT = "新窗口",
+    ARTIFACT_INFO_SHORT = "信息",
 }

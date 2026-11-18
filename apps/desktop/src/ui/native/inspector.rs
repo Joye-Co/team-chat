@@ -190,7 +190,10 @@ impl RenderOnce for InspectorSection {
                 .into_any_element();
         }
         // COMPLETENESS.md §2.5: px 16, sections 24 apart; the GroupLabel h32
-        // (12 medium muted) with an optional 28 ghost action.
+        // (12 medium muted) with an optional 28 ghost action. With an action the
+        // first row starts 4 lower, so the 28 control never sits 2 above a
+        // selected row's fill.
+        let has_action = self.action.is_some();
         div()
             .w_full()
             .px(metrics::INSPECTOR_PAD)
@@ -225,6 +228,9 @@ impl RenderOnce for InspectorSection {
                         d.on_click(move |e, w, cx| f(e, w, cx))
                     }),
             )
+            .when(has_action && !self.collapsed, |d| {
+                d.child(div().flex_none().h(super::tokens::space::S4))
+            })
             .when(!self.collapsed, |d| d.children(self.rows))
             .into_any_element()
     }

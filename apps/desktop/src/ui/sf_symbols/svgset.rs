@@ -168,6 +168,8 @@ svg_set! {
         Info = Info @ 1.00, 0.97;
         Help = CircleQuestionMark @ 1.00, 0.97;
         Return = CornerDownLeft @ 1.03, 0.87;
+        Wrap = TextWrap @ 0.92, 0.74;
+        SendTo = Send @ 1.02, 0.99;
         ReplyIndent = CornerDownRight @ 0.92, 0.74;
         Reply = Reply @ 1.05, 0.87;
         ArrowUp = ArrowUp @ 0.74, 0.90;

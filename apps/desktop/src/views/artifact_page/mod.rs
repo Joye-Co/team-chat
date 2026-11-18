@@ -405,7 +405,7 @@ fn version_time(now: Millis, at: Millis) -> String {
 impl ArtifactPage {
     /// The toolbar row (NATIVE.md §2, §5.1): the 产出's name as the title,
     /// `群 · 类型` as the subtitle (no breadcrumb, no tag), then the version
-    /// pop-up and one glass group: 分享, 在新窗口打开, 单独问.
+    /// pop-up and the labeled items (D20): 分享, 新窗口, 单独问, 信息.
     fn header(
         &self,
         detail: &ArtifactDetail,
@@ -434,54 +434,61 @@ impl ArtifactPage {
         let id = a.id.clone();
         // The version pop-up as a toolbar item (R12): the same capsule,
         // height and shape as the toolbar groups beside it.
-        let picker = nk::inline_popup(
-            "artifact-version",
-            format!("v{shown} · {}", version_time(now, at)),
-            window,
-            cx,
-        )
-        .h(nk::metrics::TOOLBAR_ITEM)
-        .px(nk::metrics::FIELD_PAD)
-        .rounded(nk::metrics::BUTTON_REGULAR_RADIUS)
-        .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
-            let mut menu = menu.label(c::ARTIFACT_VERSIONS);
-            for v in &versions {
-                let note = services
-                    .provider
-                    .artifact(&id)
-                    .and_then(|d| version_note(&services, &d, v.version))
-                    .unwrap_or_default();
-                let label = format!(
-                    "v{}  {}  {}",
-                    v.version,
-                    note,
-                    version_time(services.provider.clock_now(), v.created_at)
-                );
-                let nav = services.nav.clone();
-                let (id, ver) = (id.clone(), v.version);
-                menu = menu.item(PopupMenuItem::new(label).checked(ver == shown).on_click(
-                    move |_, _, cx| {
-                        let id = id.clone();
-                        nav.update(cx, |n, cx| n.open_artifact(id, Some(ver), cx))
-                    },
-                ));
-            }
-            menu
-        });
+        // While the inspector shows, its 版本 section says when each version was made:
+        // the item keeps only the number, so the subtitle beside the labeled items
+        // (D20) is not cut to two characters.
+        let picker_title = if self.aside_open {
+            format!("v{shown}")
+        } else {
+            format!("v{shown} · {}", version_time(now, at))
+        };
+        let picker = nk::inline_popup("artifact-version", picker_title, window, cx)
+            .h(nk::metrics::TOOLBAR_ITEM)
+            .px(nk::metrics::FIELD_PAD)
+            .rounded(nk::metrics::BUTTON_REGULAR_RADIUS)
+            .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
+                let mut menu = menu.label(c::ARTIFACT_VERSIONS);
+                for v in &versions {
+                    let note = services
+                        .provider
+                        .artifact(&id)
+                        .and_then(|d| version_note(&services, &d, v.version))
+                        .unwrap_or_default();
+                    let label = format!(
+                        "v{}  {}  {}",
+                        v.version,
+                        note,
+                        version_time(services.provider.clock_now(), v.created_at)
+                    );
+                    let nav = services.nav.clone();
+                    let (id, ver) = (id.clone(), v.version);
+                    menu = menu.item(PopupMenuItem::new(label).checked(ver == shown).on_click(
+                        move |_, _, cx| {
+                            let id = id.clone();
+                            nav.update(cx, |n, cx| n.open_artifact(id, Some(ver), cx))
+                        },
+                    ));
+                }
+                menu
+            });
         let share_text = fill(
             c::ARTIFACT_SHARE_TEXT,
             &[("title", &a.title), ("v", &shown.to_string())],
         );
         let active = nk::emphasized(window);
-        let share = nk::toolbar_item(
+        // D20: the toolbar's items carry their word, as on a 话题 (详情 / 产出 /
+        // 单独问), in one run with no separator.
+        let share_word = if self.copied {
+            c::ARTIFACT_COPIED
+        } else {
+            c::ARTIFACT_SHARE
+        };
+        let share = nk::toolbar_labeled_item(
             "artifact-share",
             crate::ui::sf_symbols::Sf::Copy,
-            if self.copied {
-                c::ARTIFACT_COPIED
-            } else {
-                c::ARTIFACT_SHARE
-            },
-            nk::ToolbarItemKind::Plain,
+            share_word,
+            share_word,
+            false,
             active,
             window,
             cx,
@@ -496,11 +503,12 @@ impl ArtifactPage {
         let nav = self.services.nav.clone();
         let (sg, st) = (detail.group_id.clone(), a.topic_id.clone());
         let made_by = a.created_by.clone();
-        let open_window = nk::toolbar_item(
+        let open_window = nk::toolbar_labeled_item(
             "artifact-open-window",
             crate::ui::sf_symbols::Sf::Open,
+            c::ARTIFACT_OPEN_WINDOW_SHORT,
             c::ARTIFACT_OPEN_WINDOW,
-            nk::ToolbarItemKind::Plain,
+            false,
             active,
             window,
             cx,
@@ -508,11 +516,12 @@ impl ArtifactPage {
         .on_click(move |_, _, cx| {
             crate::views::artifacts::window::open_artifact(&provider, &open_id, Some(shown), cx)
         });
-        let side_chat = nk::toolbar_item(
+        let side_chat = nk::toolbar_labeled_item(
             "artifact-side-chat",
             crate::ui::sf_symbols::Sf::SideChat,
             c::ARTIFACT_SIDE_CHAT,
-            nk::ToolbarItemKind::Plain,
+            c::ARTIFACT_SIDE_CHAT,
+            false,
             active,
             window,
             cx,
@@ -535,15 +544,12 @@ impl ArtifactPage {
             .join(" · ");
         // The inspector toggle (NATIVE.md §2): `sidebar.trailing`, toggled while 来龙去脉
         // shows. The inspector has no heading or button of its own.
-        let inspector = nk::toolbar_item(
+        let inspector = nk::toolbar_labeled_item(
             "artifact-inspector",
             crate::ui::sf_symbols::Sf::PaneRight,
+            c::ARTIFACT_INFO_SHORT,
             c::ARTIFACT_STORY,
-            if self.aside_open {
-                nk::ToolbarItemKind::Toggled
-            } else {
-                nk::ToolbarItemKind::Plain
-            },
+            self.aside_open,
             active,
             window,
             cx,
@@ -556,11 +562,14 @@ impl ArtifactPage {
         // Back to where the page was opened from: the 话题 whose 产出 it is, mostly.
         let back_to = back_label(self.services.nav.read(cx).artifact_return.as_ref());
         let nav = self.services.nav.clone();
-        let back = nk::toolbar_item(
+        // The chevron with its word (‹ 回到话题): the sidebar selection is on 产出
+        // here, so the item itself says where it leads.
+        let back = nk::toolbar_labeled_item(
             "artifact-back",
             crate::ui::sf_symbols::Sf::ChevronLeft,
             back_to,
-            nk::ToolbarItemKind::Plain,
+            back_to,
+            false,
             active,
             window,
             cx,
@@ -571,9 +580,12 @@ impl ArtifactPage {
             .leading_inset(leading)
             .leading(nk::ToolbarGroup::new([back]))
             .group(crate::views::group_page::rows::toolbar_capsule(picker, cx))
-            .group(nk::ToolbarGroup::new([share, open_window, side_chat]))
-            .group(crate::views::group_page::rows::toolbar_separator(cx))
-            .group(nk::ToolbarGroup::new([inspector]))
+            .group(nk::ToolbarGroup::new([
+                share,
+                open_window,
+                side_chat,
+                inspector,
+            ]))
             .into_any_element()
     }
 
@@ -958,7 +970,9 @@ impl ArtifactPage {
                 nk::push_button(
                     "artifact-compare",
                     fill(c::ARTIFACT_COMPARE, &[("v", &(shown - 1).to_string())]),
-                    nk::PushStyle::Outline,
+                    // §2.5: a section's action is the header's ghost action, so it
+                    // stacks no fill on the selected row under it.
+                    nk::PushStyle::Ghost,
                     nk::PushSize::Small,
                     cx,
                 )

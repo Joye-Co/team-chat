@@ -274,6 +274,8 @@ shape. The text inside every control is Body 13 pt unless noted.
 | New chat | `plus.bubble` |
 | Info / help | `info.circle` / `questionmark.circle` |
 | Return key | `return` |
+| Wrap long lines (the code viewer) | `arrow.turn.down.left` |
+| Send to a 话题 (a viewer's tool) | `paperplane` |
 | Reply | `arrowshape.turn.up.left`; indented reply `arrow.turn.down.right` |
 | Arrows | `arrow.up`, `arrow.down`, `arrow.right`; sort `arrow.up.arrow.down` |
 | Terminal | `terminal` |
