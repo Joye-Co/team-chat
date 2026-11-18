@@ -191,11 +191,15 @@ pub(super) struct Inputs {
 /// section 1 pt apart.
 fn sections(list: Vec<Vec<Item>>) -> Vec<Entry> {
     let mut out = Vec::new();
-    for (si, section) in list.into_iter().enumerate() {
+    for section in list {
         for (i, item) in section.into_iter().enumerate() {
-            // Section headers carry their own space above (§9.1).
-            let _ = (si, i);
-            let gap = px(0.);
+            // A section's header stays nearer its own rows than the section
+            // above; the space is outside the header's h32 fill.
+            let gap = if i == 0 {
+                crate::ui::native::tokens::space::S8
+            } else {
+                px(0.)
+            };
             out.push(Entry { gap, item });
         }
     }

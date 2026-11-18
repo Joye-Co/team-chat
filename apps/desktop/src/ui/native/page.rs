@@ -202,29 +202,9 @@ pub fn on_card<E: gpui::Styled>(el: E, cx: &App) -> E {
     el.bg(native_colors(cx).sheet)
 }
 
-/// A card (§2.4): radius 14, 1 px border, card fill, shadow sm.
+/// A card (§2.2 v18): the soft card surface, with no drawn line.
 pub fn card(cx: &App) -> gpui::Div {
-    let k = native_colors(cx);
-    div()
-        .flex()
-        .flex_col()
-        .rounded(m::CARD_RADIUS)
-        .border_1()
-        .border_color(k.separator)
-        .bg(k.sheet)
-        .shadow(shadow_sm(&k))
-}
-
-/// The xs and sm shadows of §1.7.
-fn shadow_sm(k: &super::NativeColors) -> Vec<gpui::BoxShadow> {
-    let a = if k.is_dark() { 0.3 } else { 0.06 };
-    vec![gpui::BoxShadow {
-        color: gpui::hsla(0., 0., 0., a),
-        offset: gpui::point(px(0.), px(1.)),
-        blur_radius: px(2.),
-        spread_radius: px(0.),
-        inset: false,
-    }]
+    super::blocks::card_surface(cx).flex().flex_col()
 }
 
 /// The hover group of a [`PageRow`].
@@ -506,6 +486,9 @@ pub fn table_footer(id: &str, count: impl Into<SharedString>, pager: Pager, cx: 
     div()
         .flex_none()
         .h(m::TABLE_FOOTER)
+        // Its line lands on the last row's bottom point, so that row keeps
+        // the 48 pitch of the rows above it.
+        .mt(-super::tokens::layout::BORDER)
         .px(px(16.))
         .border_t_1()
         .border_color(k.separator)
@@ -569,7 +552,7 @@ pub fn table_footer(id: &str, count: impl Into<SharedString>, pager: Pager, cx: 
 }
 
 /// A KPI card (§2.4): label 14 muted, the number 24 semibold tabular, a
-/// 14 muted footer line; radius 14, border, shadow xs, p 24.
+/// 14 muted footer line; the soft surface of [`card`], p 24.
 pub fn kpi_card(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
@@ -736,7 +719,8 @@ pub fn page_alert(
         .id(id.into())
         .flex_none()
         .w_full()
-        .px(px(16.))
+        // The border counts toward the 16 inset of the group rows around it.
+        .px(px(16.) - super::tokens::layout::BORDER)
         .py(px(12.))
         .rounded(m::FRAME_RADIUS)
         .border_1()
@@ -1353,6 +1337,9 @@ pub fn table(
             .flex()
             .items_center()
             .when(ri + 1 < total, |d| d.border_b_1().border_color(k.separator))
+            // The point a divider takes on the other rows: every row centers
+            // its content in the same 47.
+            .when(ri + 1 == total, |d| d.pb(super::tokens::layout::BORDER))
             .map(|d| {
                 if click.is_some() {
                     d.focus_row(false, cx).framed_ring(cx)
