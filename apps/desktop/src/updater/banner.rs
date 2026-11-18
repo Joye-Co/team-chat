@@ -89,7 +89,7 @@ impl UpdateSheet {
         }
     }
 
-    /// Under the ready alert's body (F49): the 12 muted 查看更新内容 link,
+    /// Under the ready alert's body (F49): the 查看更新内容 link (link color),
     /// or, once chosen, the notes themselves in a scrolling well.
     fn notes(
         &self,
@@ -129,8 +129,9 @@ impl UpdateSheet {
                 .justify_center()
                 .child(
                     crate::ui::native::borderless_text("update-ready-notes-link", u::NOTES, cx)
-                        .text_color(k.secondary)
-                        .n_footnote()
+                        // §1.3: link text in the info color, so it reads
+                        // as something to press, not a second caption.
+                        .text_color(k.blue)
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.notes_open = true;
                             cx.notify();

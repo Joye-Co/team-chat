@@ -22,9 +22,8 @@ use crate::{
         self, Sym, SymSize,
         native::{
             BadgeState, EmptyLine, FocusRow as _, InspectorSection, NativeType as _, StatusBadge,
-            badge::state_mark,
-            borderless_button, label_value, native_colors, progress,
-            tokens::{height, radius},
+            badge::state_mark, borderless_button, label_value, native_colors, progress,
+            tokens::radius,
         },
         sf_symbols::Sf,
     },
@@ -530,7 +529,7 @@ impl TopicRail {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let k = native_colors(cx);
-        let mut section = self.section(OWNER, c::TOPIC_RAIL_PEOPLE, cx);
+        let mut section = self.section(OWNER, c::TOPIC_RAIL_PEOPLE, cx).list_rows();
         // R2-17: no AI member took part yet: the header says so in a muted
         // note beside the ghost 指派 (§2.5). Not a compact empty among the
         // rows: the group lists the 群's members, so a line that reads "no
@@ -597,7 +596,7 @@ impl TopicRail {
                     // The fill reaches past the text by the padding, so the avatar stays on
                     // the section's left edge.
                     .mx(-space::S6)
-                    .min_h(height::SM)
+                    .h(crate::ui::native::metrics::INSPECTOR_LIST_ROW)
                     .px(space::S6)
                     .rounded(radius::MD)
                     .flex()

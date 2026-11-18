@@ -157,7 +157,7 @@ pub fn mail_row(
                 .child(
                     line(title)
                         .n_body()
-                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .font_weight(crate::theme::MEDIUM_WEIGHT)
                         .text_color(ink.title),
                 )
                 .child(

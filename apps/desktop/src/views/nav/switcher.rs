@@ -1044,7 +1044,7 @@ pub mod palette {
             .overflow_hidden()
             .whitespace_nowrap()
             .text_ellipsis()
-            .when(active, |d| d.font_weight(gpui::FontWeight::MEDIUM))
+            .when(active, |d| d.font_weight(crate::theme::MEDIUM_WEIGHT))
             .tooltip(move |window, cx| {
                 gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
             })
@@ -1296,12 +1296,16 @@ pub mod palette {
                 .mx(spot::INSET)
                 .flex()
                 .items_center()
-                .child(page_alert(
-                    id,
-                    AlertKind::Error,
-                    title,
-                    Some(description.into()),
-                    retry,
+                // The palette is a card surface: the alert takes its fill.
+                .child(crate::ui::native::page::on_card(
+                    page_alert(
+                        id,
+                        AlertKind::Error,
+                        title,
+                        Some(description.into()),
+                        retry,
+                        cx,
+                    ),
                     cx,
                 ))
                 .into_any_element(),

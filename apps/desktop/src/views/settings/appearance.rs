@@ -191,7 +191,7 @@ impl Render for AppearancePage {
                         .child(
                             div()
                                 .n_body()
-                                .when(on, |d| d.font_weight(gpui::FontWeight::MEDIUM))
+                                .when(on, |d| d.font_weight(crate::theme::MEDIUM_WEIGHT))
                                 .text_color(if on { k.label } else { k.secondary })
                                 .child(title),
                         ),

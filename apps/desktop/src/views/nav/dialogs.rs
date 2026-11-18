@@ -49,7 +49,8 @@ pub fn form_field_width(width: SheetWidth) -> gpui::Pixels {
 }
 
 /// A sheet form (2.8 GroupBox): one group, radius 10, a 1 px border, the
-/// group fill; its rows are separated by 1 px lines inset to the label x.
+/// group fill; its rows are separated by 1 px lines inset 16 on both sides,
+/// like every grouped form.
 pub fn sheet_form() -> SheetForm {
     SheetForm::default()
 }
@@ -358,7 +359,7 @@ impl MemberPicker {
         use crate::ui::native::tokens::{icon, radius, space};
         let k = native_colors(cx);
         let filled = highlighted || (chosen && mode == PickMode::One);
-        let surface = if filled { k.selection } else { k.content };
+        let surface = if filled { k.selection } else { k.sheet };
         // Beside the avatar a leading emoji is left out (X-01).
         let name: gpui::SharedString = ui::avatar::name_beside_avatar(&m.name).to_string().into();
         let tip = name.clone();
@@ -471,7 +472,7 @@ impl gpui::RenderOnce for MemberPicker {
                     .w_full()
                     .h(list_h)
                     .rounded(metrics::GROUP_RADIUS)
-                    .bg(k.content)
+                    .bg(k.sheet)
                     .border_1()
                     .border_color(k.separator)
                     .when_some(self.list_focus.as_ref(), |d, f| {
@@ -1250,36 +1251,13 @@ pub fn confirm_leave(
 ) {
     destructive_alert(
         "leave-group",
-        fill(nav::LEAVE_CONFIRM_TITLE, &[("name", &short_name(&name))]),
-        nav::LEAVE_CONFIRM_BODY.to_string(),
+        nav::LEAVE_CONFIRM_TITLE.to_string(),
+        fill(nav::LEAVE_CONFIRM_BODY, &[("name", &name)]),
         nav::LEAVE_OK,
         move |_, cx| leave(&services, &group_id, cx),
         window,
         cx,
     );
-}
-
-/// Display units an alert title holds for a name: CJK and other wide
-/// characters take 2, the rest 1 (2.10: the title fits one line).
-const TITLE_NAME_UNITS: usize = 20;
-
-/// `name` cut at the end with "…" to fit an alert title on one line.
-pub fn short_name(name: &str) -> String {
-    let units = |c: char| if c.is_ascii() { 1 } else { 2 };
-    if name.chars().map(units).sum::<usize>() <= TITLE_NAME_UNITS {
-        return name.to_string();
-    }
-    let mut used = 0;
-    let mut out = String::new();
-    for c in name.chars() {
-        if used + units(c) > TITLE_NAME_UNITS - 1 {
-            break;
-        }
-        used += units(c);
-        out.push(c);
-    }
-    out.push('…');
-    out
 }
 
 /// Leaves the 群 and, once the server took it, moves away from it. A refusal (offline, not
@@ -1377,14 +1355,6 @@ mod tests {
         assert_eq!(pick_step(Some(0), -1, 3), Some(0));
         // A filter that shrinks the list keeps the highlight on a row.
         assert_eq!(pick_step(Some(7), 1, 3), Some(2));
-    }
-
-    #[test]
-    fn alert_titles_cut_long_names() {
-        assert_eq!(short_name("设计"), "设计");
-        let cut = short_name(&"产品设计与前端体验改进讨论组".repeat(2));
-        assert!(cut.ends_with('…'));
-        assert!(cut.chars().count() <= 11);
     }
 
     #[test]

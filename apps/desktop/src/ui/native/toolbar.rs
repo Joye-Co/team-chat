@@ -71,6 +71,7 @@ pub struct ToolbarRow {
     state: Option<(Sf, Hsla)>,
     groups: Vec<AnyElement>,
     leading_inset: gpui::Pixels,
+    trailing_inset: gpui::Pixels,
     inactive: Option<bool>,
     /// A control before the title (the 产出 page's back button).
     leading: Option<AnyElement>,
@@ -84,6 +85,7 @@ impl ToolbarRow {
             state: None,
             groups: Vec::new(),
             leading_inset: metrics::TOOLBAR_LEADING,
+            trailing_inset: metrics::TOOLBAR_TRAILING,
             inactive: None,
             leading: None,
         }
@@ -118,6 +120,14 @@ impl ToolbarRow {
         self
     }
 
+    /// Where the last group ends: 16 by default, for ghost items whose own
+    /// padding puts the glyph on the 24 gutter. A bar that ends in a filled
+    /// control passes the gutter, so the fill ends with the content.
+    pub fn trailing_inset(mut self, inset: gpui::Pixels) -> Self {
+        self.trailing_inset = inset;
+        self
+    }
+
     /// Forces the inactive-window look (gallery); otherwise the window says.
     pub fn inactive(mut self, inactive: bool) -> Self {
         self.inactive = Some(inactive);
@@ -142,7 +152,7 @@ impl RenderOnce for ToolbarRow {
             .border_b_1()
             .border_color(k.separator)
             .pl(self.leading_inset)
-            .pr(metrics::TOOLBAR_TRAILING)
+            .pr(self.trailing_inset)
             .flex()
             .items_center()
             .gap(metrics::TOOLBAR_GROUP_GAP)

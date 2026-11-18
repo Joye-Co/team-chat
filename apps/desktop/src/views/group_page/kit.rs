@@ -552,7 +552,7 @@ pub fn pane_header(
                 .child(
                     div()
                         .n_title3()
-                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .font_weight(crate::theme::MEDIUM_WEIGHT)
                         .text_color(k.label)
                         .child(name),
                 )
