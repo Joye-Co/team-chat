@@ -110,6 +110,9 @@ pub struct RailView {
     /// The open 话题 and selected 群 the list last scrolled into view: a
     /// move from anywhere (search, a card, ⌘[) shows its row here too.
     revealed: Option<Selection>,
+    /// The reveal of the open place waits for the list's first layout: a
+    /// list that was never laid out has nothing to scroll by.
+    reveal_waits: bool,
     /// The virtual list of [`Cache::entries`].
     list: ListState,
     // --- v12/behavior ---
@@ -177,6 +180,7 @@ impl RailView {
             cache: None,
             session: None,
             revealed: None,
+            reveal_waits: false,
             list: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
             // Tab reaches the rows themselves (FocusRow); the list keeps a
             // handle for the arrow keys when it is focused as a whole.
@@ -246,6 +250,9 @@ impl RailView {
             inputs.folded_groups = self.folded_groups.clone();
         }
         if self.cache.as_ref().is_some_and(|c| c.inputs == inputs) {
+            if reveal {
+                self.reveal(selection);
+            }
             return;
         }
         let p = self.services.provider.clone();
@@ -296,10 +303,36 @@ impl RailView {
             inputs,
         });
         if reveal {
+            self.reveal(selection);
+        }
+    }
+
+    /// Scrolls the open place's row into view, once per selection. On a
+    /// cold open the list has no layout yet, so the reveal waits for the
+    /// next frame; a row that was not measured by then goes to the top.
+    fn reveal(&mut self, selection: Selection) {
+        let Some(ix) = self.selected_index() else {
             self.revealed = Some(selection);
-            if let Some(ix) = self.selected_index() {
-                self.list.scroll_to_reveal_item(ix);
-            }
+            self.reveal_waits = false;
+            return;
+        };
+        if self.list.viewport_bounds().size.height <= px(0.) {
+            self.reveal_waits = true;
+            return;
+        }
+        let waited = std::mem::take(&mut self.reveal_waits);
+        self.revealed = Some(selection);
+        if waited && ix > 0 && self.list.bounds_for_item(ix).is_none() {
+            self.list.scroll_to(gpui::ListOffset {
+                item_ix: ix,
+                offset_in_item: px(0.),
+            });
+        } else {
+            // The list's bottom edge fades its last row: bring the next row
+            // in too, so the open one is drawn whole.
+            let last = self.cache.as_ref().map_or(ix, |c| c.entries.len() - 1);
+            self.list.scroll_to_reveal_item((ix + 1).min(last));
+            self.list.scroll_to_reveal_item(ix);
         }
     }
 
@@ -559,8 +592,11 @@ impl RailView {
 }
 
 impl Render for RailView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.refresh(cx);
+        if self.reveal_waits {
+            cx.on_next_frame(window, |_, _, cx| cx.notify());
+        }
         let nav = self.services.nav.read(cx);
         let page = nav.page();
         let mode = nav.rail_mode;
@@ -614,28 +650,25 @@ impl Render for RailView {
         // 新建 (onboarding): 新话题, 新建群 and 发起私聊 in one pull-down, so a
         // new member finds where a 群 or a 私聊 starts without the menu bar.
         // ⌘N still starts a 话题 directly.
-        let new_topic = crate::ui::native::disabled_push(
-            self.tool("rail-new-topic", Sym::Compose, c::RAIL_NEW, cx),
-            first_sync,
-            cx,
-        )
-        .dropdown_menu_with_anchor(gpui::Anchor::TopRight, |menu, _, _| {
-            // Each item with its symbol, no separator: three ways to start
-            // something, one list (owner decision, 2026-11-08).
-            let go = |sym: Sym, label: &'static str, action: fn() -> Box<dyn gpui::Action>| {
-                PopupMenuItem::new(label)
-                    .icon(gpui_component::Icon::new(sym))
-                    .on_click(move |_, window, cx| window.dispatch_action(action(), cx))
-            };
-            menu.min_w(px(200.))
-                .item(go(Sym::Compose, c::RAIL_NEW_TOPIC, || Box::new(NewTopic)))
-                .item(go(Sym::Topic, c::RAIL_NEW_GROUP, || {
-                    Box::new(crate::views::nav::NewGroup)
-                }))
-                .item(go(Sym::Person, c::RAIL_START_DM, || {
-                    Box::new(crate::views::nav::StartDm)
-                }))
-        });
+        let new_topic = self
+            .tool("rail-new-topic", Sym::Compose, c::RAIL_NEW, cx)
+            .dropdown_menu_with_anchor(gpui::Anchor::TopRight, |menu, _, _| {
+                // Each item with its symbol, no separator: three ways to start
+                // something, one list (owner decision, 2026-11-08).
+                let go = |sym: Sym, label: &'static str, action: fn() -> Box<dyn gpui::Action>| {
+                    PopupMenuItem::new(label)
+                        .icon(gpui_component::Icon::new(sym))
+                        .on_click(move |_, window, cx| window.dispatch_action(action(), cx))
+                };
+                menu.min_w(px(200.))
+                    .item(go(Sym::Compose, c::RAIL_NEW_TOPIC, || Box::new(NewTopic)))
+                    .item(go(Sym::Topic, c::RAIL_NEW_GROUP, || {
+                        Box::new(crate::views::nav::NewGroup)
+                    }))
+                    .item(go(Sym::Person, c::RAIL_START_DM, || {
+                        Box::new(crate::views::nav::StartDm)
+                    }))
+            });
         let sidebar_fill = crate::views::shell::chrome::colors(cx).sidebar;
         // Owner decision (2026-11-08): the tools sit at the trailing end of
         // the traffic-light row, so the search field has the whole width
@@ -646,7 +679,15 @@ impl Render for RailView {
             .items_center()
             .gap(space::S4)
             .child(filter)
-            .child(new_topic);
+            // The slot stays, so the filter does not move when the sync ends.
+            .child(if first_sync {
+                div()
+                    .flex_none()
+                    .size(crate::ui::native::tokens::metrics::TOOLBAR_ITEM)
+                    .into_any_element()
+            } else {
+                new_topic.into_any_element()
+            });
         let (row_tools, search_tools) = if fullscreen {
             (None, Some(tools))
         } else {
@@ -866,12 +907,13 @@ fn account_menu(
         .item(
             PopupMenuItem::new(c::ACCOUNT_ADD).on_click(move |_, _, _| add.provider.add_account()),
         )
-        .item(
-            PopupMenuItem::new(crate::copy::settings::MENU_SETTINGS).on_click(|_, window, cx| {
-                window.dispatch_action(Box::new(crate::app::ToggleSettings), cx)
-            }),
+        // Both rows are built the same way, so each shows its shortcut
+        // (⌘, and ⌥⌘,) on every open.
+        .menu(
+            crate::copy::settings::MENU_SETTINGS,
+            Box::new(crate::app::ToggleSettings),
         )
-        // Owners only: 团队管理… (⌥⌘,).
+        // Owners only: 团队管理….
         .when(crate::views::settings::i_am_owner(services), |menu| {
             menu.menu(
                 crate::copy::admin::MENU_OPEN,

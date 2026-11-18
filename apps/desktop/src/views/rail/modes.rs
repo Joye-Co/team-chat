@@ -86,6 +86,11 @@ pub(super) enum Item {
         id: GroupId,
         n: usize,
     },
+    /// A: the server is unreachable and a 群 has no cached 话题: the one
+    /// muted line of the list that says they come back.
+    Offline {
+        id: GroupId,
+    },
     /// A: an open 群 with no cached 话题 while the first sync runs: sidebar
     /// item skeletons (§2.14, T-13).
     Syncing {
@@ -209,6 +214,7 @@ pub(super) fn work(p: &dyn ChatProvider, i: &Inputs) -> Vec<Entry> {
     let me = i.me.as_deref();
     let open = i.open.as_ref();
     let mut out: Vec<Vec<Item>> = Vec::new();
+    let mut offline_noted = false;
     let groups = p.groups();
     for g in groups.iter().filter(|g| g.kind == GroupKind::Group) {
         let listed: Vec<_> = p.topics(&g.id).into_iter().filter(model::listed).collect();
@@ -236,12 +242,19 @@ pub(super) fn work(p: &dyn ChatProvider, i: &Inputs) -> Vec<Entry> {
         // open 群 shows sidebar skeleton rows, and nothing while unreachable.
         if !folded && empty {
             match i.sync {
-                Sync::Synced if all > 0 => section.push(Item::OtherTopics {
+                // The count comes from the cache, so it shows offline too.
+                _ if all > 0 => section.push(Item::OtherTopics {
                     id: g.id.clone(),
                     n: all,
                 }),
                 Sync::Synced => section.push(Item::NoTopics { id: g.id.clone() }),
                 Sync::Syncing => section.push(Item::Syncing { id: g.id.clone() }),
+                // §2.13: one compact line for the whole list, under the
+                // first 群 with nothing cached, not one per 群.
+                Sync::Unreachable if !offline_noted => {
+                    offline_noted = true;
+                    section.push(Item::Offline { id: g.id.clone() });
+                }
                 Sync::Unreachable => {}
             }
         }
@@ -690,6 +703,15 @@ impl RailView {
                 .flex()
                 .items_center()
                 .child(crate::ui::native::EmptyLine::new(c::RAIL_NO_TOPICS))
+                .into_any_element(),
+            Item::Offline { id } => div()
+                .id(SharedString::from(format!("rail-offline-{id}")))
+                .h(crate::ui::native::tokens::metrics::SIDEBAR_ROW)
+                .mx(crate::ui::native::tokens::metrics::SIDEBAR_ROW_INSET)
+                .pl(crate::ui::native::tokens::space::S8)
+                .flex()
+                .items_center()
+                .child(crate::ui::native::EmptyLine::new(c::RAIL_OFFLINE_TOPICS))
                 .into_any_element(),
             Item::OtherTopics { id, n } => {
                 let nav = self.services.nav.clone();
