@@ -22,6 +22,8 @@ pub const OP: &str = "secret.get";
 pub const GRANT: Duration = Duration::from_secs(30 * 60);
 /// How often the agent is told to ask again while an approval waits (seconds).
 const RETRY_SECS: u64 = 30;
+/// After this long without an answer the agent is told to stop asking.
+const GIVE_UP: Duration = Duration::from_secs(10 * 60);
 /// Approval ids of this module start with this.
 const PREFIX: &str = "daemon-secret-";
 
@@ -30,6 +32,8 @@ struct State {
     /// The approval that waits for an answer: (approval id, name). One at a time: the server
     /// keeps one open approval per run.
     pending: Option<(String, String)>,
+    /// When that approval was asked for.
+    asked: Option<Instant>,
     granted: HashMap<String, Instant>,
     denied: HashSet<String>,
     next: u64,
@@ -131,10 +135,8 @@ does not help: a person has to set it there. Say so with `chat-run report --stat
         }
         match &st.pending {
             Some((_, n)) if n == name => {
-                return err(
-                    "pending",
-                    pending(name, "still waits for a person's approval"),
-                );
+                let waited = st.asked.map_or(Duration::ZERO, |t| now.duration_since(t));
+                return err("pending", pending(name, Some(waited)));
             }
             Some((_, other)) => {
                 return err(
@@ -149,6 +151,7 @@ does not help: a person has to set it there. Say so with `chat-run report --stat
         st.next += 1;
         let id = format!("{PREFIX}{}", st.next);
         st.pending = Some((id.clone(), name.to_string()));
+        st.asked = Some(now);
         drop(st);
         emit(RunEvent::ApprovalRequest {
             approval_id: id,
@@ -158,10 +161,7 @@ does not help: a person has to set it there. Say so with `chat-run report --stat
             kind: None,
             command: None,
         });
-        err(
-            "pending",
-            pending(name, "needs a person's approval, asked just now"),
-        )
+        err("pending", pending(name, None))
     }
 
     /// A secret's approval waits for a person's answer.
@@ -186,6 +186,7 @@ does not help: a person has to set it there. Say so with `chat-run report --stat
             _ => return None,
         };
         st.pending = None;
+        st.asked = None;
         if approve {
             st.granted.insert(name, now + GRANT);
         } else {
@@ -205,22 +206,50 @@ does not help: a person has to set it there. Say so with `chat-run report --stat
 run `chat-run secret <NAME>`: it prints the value (for example `TOKEN=$(chat-run secret NAME) \
 || exit 1`). The first call asks a person to approve and fails with \"pending\": do not end \
 your turn, run it again about every {RETRY_SECS} seconds until it prints the value or fails with \
-\"denied\". An approval lasts {} minutes, then the command asks again. After \"denied\" do \
+\"denied\". When nobody has answered after about {} minutes, stop asking: finish what you can \
+without it and say that you wait for the approval with `chat-run report --state waiting --text \
+<one line>`. An approval lasts {} minutes, then the command asks again. After \"denied\" do \
 not ask for that name again in this run: finish what you can without it and say what is missing \
 with `chat-run report --state blocked --text <one line>`. Never print the value or write it to a \
 file.",
                 self.names.join(", "),
+                GIVE_UP.as_secs() / 60,
                 GRANT.as_secs() / 60
             )
         })
     }
 }
 
-/// The `pending` message: what the state is and what to do next.
-fn pending(name: &str, state: &str) -> String {
+/// The `pending` message: what the state is and what to do next. `waited`: how long the
+/// approval has waited, None when it was asked for just now. The time is in the message so
+/// that each ask reads differently: the server takes the same step with the same output four
+/// times in a row for a loop and tells the CLI to stop repeating it.
+fn pending(name: &str, waited: Option<Duration>) -> String {
+    let Some(waited) = waited else {
+        return format!(
+            "{name} needs a person's approval, asked just now. {}",
+            ask_again()
+        );
+    };
+    let secs = waited.as_secs();
+    if waited < GIVE_UP {
+        return format!(
+            "{name} still waits for a person's approval (asked {secs} s ago). {}",
+            ask_again()
+        );
+    }
     format!(
-        "{name} {state}. Do not end your turn: run this command again in about {RETRY_SECS} \
-seconds, until it prints the value or fails with \"denied\""
+        "{name} still waits for a person's approval (asked {} min ago). Stop asking now: finish \
+what you can without it and say that you wait for the approval with `chat-run report --state \
+waiting --text <one line>`",
+        secs / 60
+    )
+}
+
+fn ask_again() -> String {
+    format!(
+        "Do not end your turn: run this command again in about {RETRY_SECS} seconds, until it \
+prints the value or fails with \"denied\""
     )
 }
 
@@ -270,8 +299,28 @@ mod tests {
             [RunEvent::ApprovalRequest { approval_id, .. }] => approval_id.clone(),
             other => panic!("expected one approval.request, got {other:?}"),
         };
-        // Asking again while it waits sends nothing new.
-        assert_eq!(gate.get(&body, &emit, t0)["error"]["code"], "pending");
+        assert!(
+            note.contains("after about 10 minutes, stop asking"),
+            "{note}"
+        );
+        // Asking again while it waits sends nothing new. Each answer says how long it has
+        // waited, so the server does not take the asks for a loop (same step, same output).
+        let again = |secs: u64| {
+            let v = gate.get(&body, &emit, t0 + Duration::from_secs(secs));
+            assert_eq!(v["error"]["code"], "pending");
+            v["error"]["message"].as_str().unwrap().to_string()
+        };
+        let (a, b) = (again(30), again(61));
+        assert!(a.contains("(asked 30 s ago). Do not end your turn"), "{a}");
+        assert!(b.contains("(asked 61 s ago)"), "{b}");
+        // After ten minutes without an answer the agent is told to stop asking.
+        let late = again(10 * 60 + 5);
+        assert!(
+            late.contains("(asked 10 min ago). Stop asking now"),
+            "{late}"
+        );
+        assert!(late.contains("chat-run report --state waiting"), "{late}");
+        assert!(!late.contains("o not end your turn"), "{late}");
         assert_eq!(seen.lock().unwrap().len(), 1);
 
         // An approval of the CLI is not the gate's.

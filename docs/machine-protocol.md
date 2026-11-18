@@ -1430,7 +1430,10 @@ CLI asks for one with `chat-run secret <NAME>`: the first call sends `approval.r
 `approval.resolved` and the same command prints the value for 30 minutes; after `deny` it fails
 with `denied` for the rest of the run. The daemon answers these approvals itself, the CLI never
 sees them: the command does not block, so the run's note and each answer say what to do next
-(`pending`: keep the turn and ask again about every 30 seconds; `denied`: do not ask again, go
+(`pending`: keep the turn and ask again about every 30 seconds, and after 10 minutes without an
+answer stop asking and report `waiting`; each `pending` message says how long the approval has
+waited, so the server's loop check, the same step with the same output four times, does not
+take the asks for a loop; `denied`: do not ask again, go
 on without it and report `blocked`; `not_allowed`: the names the run may ask for). Side chat runs
 get no gated variables.
 

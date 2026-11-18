@@ -1065,8 +1065,8 @@ create/version/get within about 5 minutes. Each prints the JSON result (exit 0) 
 (exit 1). When the CLI's sandbox blocks the connection to the daemon, the reason is
 sandbox.blocked. `chat-run secret` prints only the value (exit 0), or the error on standard
 error (exit 1); the first call asks a person to approve and fails with pending: run it again
-about every 30 seconds until it prints the value or fails with denied. An approval lasts 30
-minutes.";
+about every 30 seconds until it prints the value or fails with denied (after about 10 minutes
+without an answer: stop asking and report waiting). An approval lasts 30 minutes.";
 
 /// One command of the client: its words, its op and its flags.
 struct Command {
