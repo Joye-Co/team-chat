@@ -1298,17 +1298,7 @@ impl TimelineView {
         let media: AnyElement = match &peer {
             Some(m) => ui::MemberAvatar::new(Some(m), crate::ui::native::tokens::avatar::LG)
                 .into_any_element(),
-            None => div()
-                .size(crate::ui::native::tokens::avatar::LG)
-                .rounded(theme::radius::FIELD)
-                .border_1()
-                .border_color(n.separator)
-                .bg(n.fill)
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(ui::sym(Sym::Topic, ui::SymSize::TOOLBAR, n.secondary))
-                .into_any_element(),
+            None => crate::ui::native::icon_box(Sym::Topic, cx).into_any_element(),
         };
         let actions = self.start_actions(topic, peer.is_none(), cx);
         div()

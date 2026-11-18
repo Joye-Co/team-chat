@@ -423,11 +423,9 @@ impl TimelineView {
                 .px(space::S8)
                 .flex()
                 .gap(space::S12)
-                .child(
-                    div()
-                        .flex_none()
-                        .child(ui::MemberAvatar::new(bot.as_ref(), GUTTER)),
-                )
+                // The gutter stays empty, as beside the working card this
+                // alert replaces: its description names the member.
+                .child(div().flex_none().w(GUTTER))
                 .child(
                     div()
                         .flex_1()
