@@ -432,10 +432,12 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
     let n = xs.len();
     // The columns start where the plot does (after the y-axis labels).
     let left = super::super::v2::chart_plot_left(*kind, series);
+    // They end above the legend, which belongs to no column.
+    let legend = super::super::v2::chart_legend_room(series.len());
     let tint = div()
         .absolute()
         .top_0()
-        .bottom_0()
+        .bottom(legend)
         .right_0()
         .left(left)
         .flex()
@@ -474,7 +476,7 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
                     div()
                         .absolute()
                         .top_0()
-                        .bottom_0()
+                        .bottom(legend)
                         .right_0()
                         .left(left)
                         .flex()
