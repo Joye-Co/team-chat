@@ -125,7 +125,8 @@ pub fn phase_words(run: &BotRunSummary, n: &Names, name: impl Fn(&str) -> String
         }
         RunPhase::Done => (
             c::LIVE_PHASE_DONE.to_string(),
-            c::LIVE_PHASE_DONE.to_string(),
+            // A run's result is 已交付 (§2.12); 完成 belongs to the 话题.
+            crate::copy::common::STATUS_DELIVERED.to_string(),
             BadgeState::Done,
         ),
         RunPhase::Failed => (

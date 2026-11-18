@@ -105,7 +105,7 @@ crate::copy! {
     LIVE_CMD_OFFLINE = "电脑不在线，回来后才能运行",
     LIVE_CMD_BUSY = "已有一条命令在运行",
     LIVE_CMD_UNSUPPORTED = "这台电脑不支持在接管时运行命令",
-    LIVE_NOTE_PLACEHOLDER = "留句话给 {member}（可不填）",
+    LIVE_NOTE_PLACEHOLDER = "交还时留句话给 {member}（可不填）",
     LIVE_NOTE_COMMANDS = "你跑过的 {n} 条命令会一起告诉 {member}",
     LIVE_NOT_READY = "电脑还没准备好",
     LIVE_DAEMON_OLD = "这台电脑的后台服务太旧，更新后才能接管",
@@ -126,4 +126,10 @@ crate::copy! {
     LIVE_SHORT_FAILED = "失败",
     // Under 在等电脑：电脑不在线: which computer, and what happens next.
     LIVE_PHASE_OFFLINE_HINT = "{computer} 回来后会接着做",
+    // Held by a person while the computer is away: the banner says so at the top.
+    LIVE_HELD_OFFLINE_HINT = "{computer} 不在线，回来后才能继续操作",
+    // The replay's end label while the computer is away: the frame is not live.
+    LIVE_LAST_FRAME_AT = "最后画面",
+    // The note on a paused run goes with 继续 (LIVE_NOTE_PLACEHOLDER: with 交还).
+    LIVE_NOTE_PLACEHOLDER_RESUME = "继续时留句话给 {member}（可不填）",
 }

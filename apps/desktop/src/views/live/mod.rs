@@ -99,6 +99,8 @@ pub struct LivePane {
     /// Usable (design-takeover T6, T7): the words for the member that go with 继续 / 交还,
     /// the command field while I hold the run, and why the last command was refused.
     note: Option<Entity<InputState>>,
+    /// The note field's placeholder names 交还 (else 继续).
+    note_hand_back: bool,
     command: Option<Entity<InputState>>,
     command_error: Option<&'static str>,
     /// The run the two fields belong to.
@@ -120,6 +122,7 @@ impl LivePane {
             note: None,
             command: None,
             command_error: None,
+            note_hand_back: false,
             inputs_for: None,
             _inputs: Vec::new(),
         }
@@ -260,6 +263,7 @@ impl LivePane {
         run: &BotRunSummary,
         bot: &str,
         want_note: bool,
+        hand_back: bool,
         want_command: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -273,9 +277,26 @@ impl LivePane {
         }
         if !want_note {
             self.note = None;
-        } else if self.note.is_none() {
-            let placeholder = fill(c::LIVE_NOTE_PLACEHOLDER, &[("member", bot)]);
-            self.note = Some(cx.new(|cx| InputState::new(window, cx).placeholder(placeholder)));
+        } else {
+            // The field says which button carries the note; that can change
+            // while the field stays (a pause becomes a takeover).
+            let template = if hand_back {
+                c::LIVE_NOTE_PLACEHOLDER
+            } else {
+                c::LIVE_NOTE_PLACEHOLDER_RESUME
+            };
+            let placeholder = fill(template, &[("member", bot)]);
+            match &self.note {
+                None => {
+                    self.note =
+                        Some(cx.new(|cx| InputState::new(window, cx).placeholder(placeholder)));
+                }
+                Some(note) if self.note_hand_back != hand_back => {
+                    note.update(cx, |s, cx| s.set_placeholder(placeholder, window, cx));
+                }
+                Some(_) => {}
+            }
+            self.note_hand_back = hand_back;
         }
         if !want_command {
             self.command = None;
@@ -520,12 +541,30 @@ impl LivePane {
         let me = self.services.me();
         let since = phase::phase_since(run, words.phase).map(|t| phase::lasted(t, now));
         let since = since.map(|s| s.trim_start_matches(['·', ' ']).to_string());
-        // A state color sits on the icon only (§2.15); title and frame stay neutral.
+        // A state color sits on the icon (§2.15); the title stays neutral, and
+        // only a failed run's frame takes the destructive line.
         let mut icon_ink = n.label;
+        // The computer by name, for the lines about an away computer.
+        let computer = screen
+            .machine_name
+            .clone()
+            .or_else(|| run.machine_name.clone())
+            .filter(|m| !m.trim().is_empty())
+            .unwrap_or_else(|| fill(c::LIVE_COMPUTER, &[("name", bot)]));
         // Why a run failed, under the title.
         let mut cause: Option<String> = None;
         let (sym, title, detail) = match words.phase {
             RunPhase::Paused => (Sym::Pause, words.text.clone(), since),
+            // Still held, but nothing can be done on the computer right now:
+            // the top of the pane says so.
+            RunPhase::TakenOver if computer_away(run) => {
+                icon_ink = n.amber;
+                (
+                    Sym::Pointer,
+                    words.text.clone(),
+                    Some(fill(c::LIVE_HELD_OFFLINE_HINT, &[("computer", &computer)])),
+                )
+            }
             RunPhase::TakenOver => (
                 Sym::Pointer,
                 words.text.clone(),
@@ -554,29 +593,25 @@ impl LivePane {
             }
             // An away computer is named, with what happens when it is back, so
             // 停止 does not read as the only way out.
-            RunPhase::WaitingComputer if computer_away(run) => {
-                let computer = screen
-                    .machine_name
-                    .clone()
-                    .or_else(|| run.machine_name.clone())
-                    .filter(|m| !m.trim().is_empty())
-                    .unwrap_or_else(|| fill(c::LIVE_COMPUTER, &[("name", bot)]));
-                (
-                    Sym::Hourglass,
-                    words.text.clone(),
-                    Some(
-                        [
-                            Some(fill(c::LIVE_PHASE_OFFLINE_HINT, &[("computer", &computer)])),
-                            since,
-                        ]
-                        .into_iter()
-                        .flatten()
-                        .collect::<Vec<_>>()
-                        .join(" · "),
-                    ),
-                )
-            }
-            RunPhase::WaitingComputer => (Sym::Hourglass, words.text.clone(), since),
+            RunPhase::WaitingComputer if computer_away(run) => (
+                words.badge.symbol().unwrap_or(Sym::Waiting),
+                words.text.clone(),
+                Some(
+                    [
+                        Some(fill(c::LIVE_PHASE_OFFLINE_HINT, &[("computer", &computer)])),
+                        since,
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join(" · "),
+                ),
+            ),
+            RunPhase::WaitingComputer => (
+                words.badge.symbol().unwrap_or(Sym::Waiting),
+                words.text.clone(),
+                since,
+            ),
             // Waiting on a person, or stuck: the state in words and for how long
             // (design-takeover 3.9: the banner is the 状态词), with the mark of the
             // header's badge.
@@ -708,6 +743,11 @@ impl LivePane {
                         ))
                     }))
             });
+        // More than the title: the icon stays on the title's line (the Alert anatomy).
+        let several_lines = cause.is_some()
+            || detail.as_ref().is_some_and(|d| !d.is_empty())
+            || reminder.is_some()
+            || failed_actions.is_some();
         // The Alert anatomy (§2.15, D5): a bordered container, px 16.
         Some(
             div()
@@ -716,7 +756,15 @@ impl LivePane {
                 .py(space::S12)
                 .rounded(crate::ui::native::tokens::radius::CONTAINER)
                 .border_1()
-                .border_color(n.separator)
+                .border_color(if words.phase == RunPhase::Failed {
+                    crate::ui::native::feedback::alert_colors(
+                        crate::ui::native::feedback::AlertTone::Destructive,
+                        &n,
+                    )
+                    .2
+                } else {
+                    n.separator
+                })
                 .bg(n.content)
                 .flex()
                 .flex_col()
@@ -725,10 +773,8 @@ impl LivePane {
                     div()
                         .min_h(BANNER - space::S12 * 2.)
                         .flex()
-                        // With a cause under the title the icon sits on the
-                        // title's line (the Alert anatomy), not mid-block.
                         .map(|d| {
-                            if cause.is_some() {
+                            if several_lines {
                                 d.items_start()
                             } else {
                                 d.items_center()
@@ -778,7 +824,7 @@ impl LivePane {
                                 // the cause they answer (the Alert anatomy).
                                 .children(failed_actions.map(|a| a.mt(space::S8))),
                         )
-                        .children(share),
+                        .children(share.map(|b| div().flex_none().self_center().child(b))),
                 )
                 .children(note)
                 .into_any_element(),
@@ -1227,10 +1273,10 @@ impl LivePane {
         let pointer = pointer.map(|name| {
             div()
                 .absolute()
-                // Far enough from the right edge that the name tag (max
-                // 120) stays inside the frame.
-                .left(relative(0.5))
-                .top(relative(0.56))
+                // In the terminal's bottom corner, on the row `render` keeps
+                // free of lines, so the tag never covers one.
+                .right(space::S14)
+                .bottom(space::S4)
                 .child(ui::motion::rise(
                     "live-pointer",
                     0,
@@ -1262,7 +1308,6 @@ impl LivePane {
             .rounded(theme::radius::FIELD)
             .border_1()
             .border_color(k.line_2)
-            .shadow(k.lift())
             .overflow_hidden()
             .flex()
             .flex_col()
@@ -1276,9 +1321,8 @@ impl LivePane {
                     .flex_1()
                     .min_h(px(0.))
                     .rounded_b(theme::radius::FIELD - metrics::HAIRLINE)
-                    .bg(k.ph[1])
-                    .child(terminal)
-                    .children(pointer),
+                    .bg(k.sunken)
+                    .child(terminal.children(pointer)),
             )
             .into_any_element()
     }
@@ -1394,7 +1438,11 @@ impl LivePane {
             Some(i) => (run.plan.get(i).map(|p| p.text.clone()), true),
             None => (run.plan.get(last).map(|p| p.text.clone()), false),
         };
-        let word = if active {
+        // An away computer's picture is its last frame, not the present.
+        let away = computer_away(run);
+        let word = if away {
+            c::LIVE_LAST_FRAME_AT
+        } else if active {
             c::LIVE_NOW_AT
         } else {
             c::LIVE_ENDED_AT
@@ -1439,7 +1487,7 @@ impl LivePane {
                             .mono()
                             .font_weight(gpui::FontWeight::NORMAL)
                             .text_color(k.ink_3)
-                            .child(clock(if active { now_ms() } else { end })),
+                            .child(clock(if active && !away { now_ms() } else { end })),
                     ),
             );
         Some(
@@ -2359,6 +2407,7 @@ impl Render for LivePane {
             &run,
             &bot,
             run_rights.resume || run_rights.hand_back,
+            run_rights.hand_back,
             run_rights.run_commands,
             window,
             cx,
@@ -2417,7 +2466,17 @@ impl Render for LivePane {
         let room =
             (screen_h - MENU_BAR) * 0.84 - WINDOW_BAR - space::S12 * 2. - space::S2 - space::S2;
         let line = f32::from(TERMINAL_LINE);
-        let mut budget = f32::from(room) - if live_now { line } else { 0. };
+        // My pointer on the screen only while I took it over (a pause has no pointer).
+        let pointer = (taken_over && held_by_me)
+            .then(|| me.as_deref().map(|m| member_name(&self.services, m)))
+            .flatten();
+        // Its name tag keeps a row of the terminal to itself.
+        let pointer_room = if pointer.is_some() {
+            line + f32::from(space::S4)
+        } else {
+            0.
+        };
+        let mut budget = f32::from(room) - pointer_room - if live_now { line } else { 0. };
         let mut keep = 0;
         for (i, l) in lines.iter().enumerate().rev() {
             let gap = if i > 0 && l.kind == ScreenLineKind::Command {
@@ -2432,10 +2491,6 @@ impl Render for LivePane {
             keep += 1;
         }
         let lines: Vec<&ScreenLine> = lines[lines.len() - keep..].to_vec();
-        // My pointer on the screen only while I took it over (a pause has no pointer).
-        let pointer = (taken_over && held_by_me)
-            .then(|| me.as_deref().map(|m| member_name(&self.services, m)))
-            .flatten();
         let end = run.ended_at.unwrap_or_else(|| {
             let last_line = screen.lines.last().map(|l| l.at).unwrap_or(0);
             let last_step = times.last().copied().unwrap_or(0);
