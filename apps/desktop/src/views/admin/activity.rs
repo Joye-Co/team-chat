@@ -557,7 +557,16 @@ impl AdminView {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .child(sym_icon(kind_icon(&e.kind), SymSize::INLINE, k.secondary)),
+                                .child(sym_icon(
+                                    kind_icon(&e.kind),
+                                    SymSize::INLINE,
+                                    // A run that failed is the one red row, as on 总览 (§1.3).
+                                    if e.kind == kind::RUN {
+                                        k.red
+                                    } else {
+                                        k.secondary
+                                    },
+                                )),
                         )
                         .child(
                             div()
