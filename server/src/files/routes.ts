@@ -20,6 +20,7 @@ import { type AuthContext, requireTeamOwner } from "../core/auth";
 import { getMember, isGroupMember, toMember } from "../core/db";
 import { type Env, roomStub } from "../core/env";
 import { ApiError, unwrap } from "../core/errors";
+import { readQuery } from "../core/http";
 import { ulid } from "../core/ids";
 import { registerRoute } from "../core/registry";
 import { notifyMembersChanged } from "../core/routes";
@@ -373,14 +374,11 @@ export function registerFileRoutes(): void {
     auth: "member",
     async handler({ env, url, auth }) {
       const a = auth as AuthContext;
-      const q = z
-        .object({ groupId: z.string().min(1).max(64), topicId: z.string().min(1).max(64).optional() })
-        .safeParse(Object.fromEntries(url.searchParams));
-      if (!q.success) throw new ApiError("invalid", "groupId is required");
-      await requireGroupMember(env, q.data.groupId, a);
+      const q = readQuery(url, z.object({ groupId: z.string().min(1).max(64), topicId: z.string().min(1).max(64).optional() }));
+      await requireGroupMember(env, q.groupId, a);
       return unwrap(
-        await roomStub(env, q.data.groupId).rpc(q.data.groupId, "artifacts.list", actorOf(a), {
-          topicId: q.data.topicId,
+        await roomStub(env, q.groupId).rpc(q.groupId, "artifacts.list", actorOf(a), {
+          topicId: q.topicId,
         }),
       ) as Artifact[];
     },

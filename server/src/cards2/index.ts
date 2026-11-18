@@ -170,7 +170,7 @@ async function patchLocked(
     patchBuckets.set(key, bucket);
     if (patchBuckets.size > 2000) patchBuckets.clear();
   }
-  if (!bucket.take()) throw new ApiError("rate_limited", "too many patches for this card");
+  if (!bucket.take()) throw new ApiError("rate_limited", "too many patches for this card", undefined, bucket.waitMs());
   const nextState = await stateForWrite(room, dir, next, state, row.author_id, row.topic_id, now, row.id);
   const shown = cause ? shownCause(room.sql, cause) : undefined;
   if (shown) nextState.lastCause = shown;

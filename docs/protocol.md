@@ -220,7 +220,45 @@ backoff.
 ## HTTP API
 
 All requests send `Authorization: Bearer <token>` except `redeem` and `bootstrap`. Responses are
-JSON. Errors use HTTP status codes and the body `{ error: { code, message } }`.
+JSON. Errors use HTTP status codes and the body
+`{ error: { code, message, reason?, retryAfterMs?, memberIds? } }` (`ErrorBody`, the same object
+as in a failed `ack`).
+
+| `code` | HTTP status |
+| --- | --- |
+| `unauthorized` | 401 |
+| `forbidden` | 403 |
+| `not_found` | 404 |
+| `invalid` | 400 (405 for a wrong method, 426 for `GET /v1/ws` without a WebSocket upgrade) |
+| `conflict` | 409 |
+| `rate_limited` | 429 |
+| `too_large` | 413 |
+| `unsupported_protocol` | 400 |
+| `internal` | 500 |
+
+- Clients read `code`, not the status. `message` is English text for developers and logs: it may
+  change, so never match on it. `reason` names the specific rule when there is one (a stable
+  string such as `card.stale_rev`); `memberIds` (at most 20) are the members a reason is about.
+- A failure the server did not expect is 500 `internal` with the message `internal error`. The
+  detail is only in the server log; find it by the request's `cf-ray` header.
+- A path that exists under another method answers 405 with code `invalid`, the message
+  `method not allowed: use <methods>` and the methods in the `Allow` header. An unknown path is
+  404 `not_found`.
+- A 429 carries `retryAfterMs` when the server knows the wait (the per-credential post limits,
+  the sign-in attempt limits, the once-per-second card presses and answers, and the card, 产出
+  page and run update limits), and then also the `Retry-After` header in whole seconds, rounded
+  up. Without the field (the hourly upload quotas), back off on your own.
+- A body that fails its schema is `invalid` with `invalid body: <field path> <rule>`; a query
+  string, `invalid query: <parameter> <rule>`. Only the first problem is named, never a value.
+- The sign-in attempt limits (invite codes, passwords, email codes, sign-in codes and requests)
+  count per fixed window; the message says which one (`too many password attempts, try again in
+  42 s`) and `retryAfterMs` is the time until the window ends.
+- The `X-Admin-Secret` routes answer `unauthorized` with reason `admin.secret_missing` on a
+  server whose Worker secret `ADMIN_SECRET` is not set, and plain `unauthorized` for a wrong
+  value.
+- A member id that names no active member (`POST /v1/groups`, `POST /v1/groups/:id/members`,
+  `PUT /v1/integrations/github/logins`) is `invalid` with reason `member.unknown` and those ids
+  in `memberIds`. A group has at most 99 members when it is made.
 
 | Method and path | Who | Body | Response |
 | --- | --- | --- | --- |
@@ -769,6 +807,12 @@ Rules:
 - `secret` is `whk_` + 43 base64url characters, shown only in the create response. Because GitHub
   signs with the raw secret, the server stores it encrypted with a Worker secret, not as a digest.
   Comparisons are constant-time. A wrong secret or signature is `unauthorized`.
+- Without that Worker secret (`HOOK_SECRET_KEY`, at least 16 characters) `POST /v1/hooks`, `/in`
+  and `/github` answer `internal` with reason `hooks.secret_missing` and a message that names
+  the secret. A hook made under another value of it cannot be read any more: `/in` and `/github`
+  answer `internal` with reason `hooks.secret_unreadable` (delete the hook and make it again).
+  The server logs both with the hook id, because the sender of `/in` or `/github` is an outside
+  system that cannot fix them.
 - `/in` topic choice: `topicId` (a topic of the hook's group); else `topicKey` (the first post
   with a new key starts a topic titled `title`, later posts go to that topic; keys are per hook);
   else the hook's `topicId`; else a new topic. `clientMsgId` dedupes per hook as for `send`.
@@ -1046,7 +1090,9 @@ who took what.
   `run.input` to the giver's active run (`inputId` `desk-part-…`), or else as a follow-up run.
 - **Limits**: hand-overs chain at most 3 deep (`delegation.too_deep`). One piece of work gives out
   at most 8 parts (`delegation.too_many`). A member that is already working in the topic refuses
-  (`delegation.refused`).
+  (`delegation.refused`). Between the two desks the refusal is `conflict` with reason
+  `delegation.busy` (it already works in that topic) or `delegation.unavailable` (deactivated,
+  out of the group or without a runner); the giving run always hears `delegation.refused`.
 - Usable: limits count per chain, with new reasons; see "Participants, chains and relays".
 
 ### Front desk
@@ -1921,7 +1967,13 @@ ErrorBody += { reason?: string /* 1..64, e.g. "card.already_answered" */ }
   `card.stale_rev`, `card.superseded`, `card.already_answered`, `card.expired`,
   `card.retract_closed`, `card.rev_limit`, `interact.bot_emitter`, `interact.no_responder`,
   `interact.bad_cause`, `artifact.no_bridge`, `artifact.undeclared_event`, `artifact.stale_data`,
-  `artifact.reply_closed`.
+  `artifact.reply_closed`, `artifact.bad_payload` (`invalid`: the event's payload breaks the
+  schema the page declared; the message says where), `artifact.not_ask` (`invalid`: a reply to an
+  event that is not an ask) and `artifact.preview_ready` (`conflict`: another member sets the
+  preview of a version that already has one).
+- Run outputs (machine-protocol.md, `run.output.result`) add `report.invalid` (`invalid`: a
+  `run.report` body that is not a `RunReport`) and `output.not_supported` (`invalid`: an output
+  op this server does not take yet).
 - A card that breaks a count or range limit of its shape (blocks, children, options, series,
   points, rows, columns, embed height, rating max, poll voters) gets `card.limits`, the same on
   the server and in the Rust pre-check (`CardV2::problem`). A limit inside a union field (poll
@@ -2815,6 +2867,20 @@ Rules:
 - A held run (`paused`, `taken_over`) is never moved or ended because its machine is away; it
   keeps its phase, with `waitingFor: "offline"`. Commands run one at a time, at most 10 minutes
   each, in the run's work folder.
+- A `conflict` refusal of pause, take over, hand back and commands carries a `reason`. Clients
+  decide by the reason, not by the message:
+
+  | `reason` | When |
+  | --- | --- |
+  | `run.ended` | the run has ended |
+  | `run.no_machine` | the run has no machine (it waits for one, or it is an external run), or it is not open on its machine |
+  | `run.not_ready` | pause or take over while the run's computer is not ready yet (the run has not started working) |
+  | `run.held` | pause on a run that is already paused; take over a run someone else has taken over |
+  | `run.not_held` | hand back or a command on a run the caller does not hold |
+  | `run.no_pause` | the machine's daemon cannot pause runs (no feature `pause`) |
+  | `run.no_takeover` | the machine cannot be taken over (`takeover: "none"`) |
+  | `hand.busy` | a command while another command of the run is running |
+  | `hand.offline` | a command, or its cancel, while the run's machine is offline (never queued) |
 - `GET /v1/runs/:id/events` carries the run events `hand.command`, `hand.result` and
   `hand.summary` to everyone who may read the run, and `hand.output` only to the person holding
   it and admins. They are not the AI member's progress.

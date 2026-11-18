@@ -5,7 +5,7 @@ import { z } from "zod";
 import { auditStatement } from "../core/audit";
 import type { AuthContext } from "../core/auth";
 import { getGroup, isGroupMember } from "../core/db";
-import { gatewayStub, roomStub } from "../core/env";
+import { type Env, gatewayStub, roomStub } from "../core/env";
 import { ApiError, schemaReason, unwrap } from "../core/errors";
 import { LIMITS, TokenBucket } from "../core/ratelimit";
 import { type Actor, type FrameContext, frameValidators, registerGatewayRpc, registerRoute } from "../core/registry";
@@ -28,15 +28,22 @@ export function checkCardSize(raw: unknown): void {
 // Per-credential HTTP post limit. The bucket lives in the member's gateway (one object per
 // member), so all Worker isolates share it.
 const httpBuckets = new Map<string, TokenBucket>();
-registerGatewayRpc("http.post.take", (_gw, args) => {
+/** Takes one HTTP post of the token's bucket: `null`, or the milliseconds to wait when it is empty. */
+registerGatewayRpc("http.post.take", (_gw, args): number | null => {
   const { tokenId } = args as { tokenId: string };
   let b = httpBuckets.get(tokenId);
   if (!b) {
     b = new TokenBucket(LIMITS.write.rate, LIMITS.write.burst);
     httpBuckets.set(tokenId, b);
   }
-  return b.take();
+  return b.take() ? null : b.waitMs();
 });
+
+/** Counts one HTTP post of this token; throws `rate_limited` with the wait when the bucket is empty. */
+export async function takeHttpPost(env: Env, a: AuthContext): Promise<void> {
+  const waitMs = (await gatewayStub(env, a.memberId).rpc("http.post.take", { tokenId: a.tokenId })) as number | null;
+  if (waitMs !== null) throw new ApiError("rate_limited", "too many posts", undefined, waitMs);
+}
 
 registerRoute({
   method: "POST",
@@ -45,9 +52,7 @@ registerRoute({
   bodyLimit: POST_BODY_LIMIT,
   async handler({ env, auth, params, body, log }) {
     const a = auth as AuthContext;
-    if (!(await gatewayStub(env, a.memberId).rpc("http.post.take", { tokenId: a.tokenId }))) {
-      throw new ApiError("rate_limited", "too many posts");
-    }
+    await takeHttpPost(env, a);
     const group = await getGroup(env.DB, params.id);
     if (!group) throw new ApiError("not_found", "group not found");
     if (!(await isGroupMember(env.DB, group.id, a.memberId))) throw new ApiError("forbidden", "not a member of this group");
