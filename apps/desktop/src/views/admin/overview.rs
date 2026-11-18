@@ -16,12 +16,11 @@ use super::{
 };
 use crate::{
     copy::{admin as m, fill},
-    theme::Type as _,
     ui::{
         MemberAvatar, Sym,
         icons::sym as sym_icon,
         native::{
-            NativeColors, NativeType as _, TruncText, card_surface, native_colors, skeleton,
+            NativeColors, NativeType as _, TruncText, native_colors, panel_card_surface, skeleton,
             tokens::{avatar, height, monitor as t, radius, space, text},
         },
         sf_symbols::SymSize,
@@ -40,7 +39,7 @@ fn tone_color(tone: Tone, k: &NativeColors) -> Hsla {
 
 /// A card surface with the design's inner padding.
 fn panel(cx: &App) -> gpui::Div {
-    card_surface(cx).flex().flex_col()
+    panel_card_surface(cx).flex().flex_col()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -201,12 +200,15 @@ fn strip(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
                             .n_footnote()
                             .text_color(k.secondary)
                             .when(!prose.is_empty(), |d| d.child(prose.to_string()))
+                            // To run on another computer: in the command box, with copy.
                             .children(command.map(|c| {
-                                div()
-                                    .code_font()
-                                    .whitespace_nowrap()
-                                    .text_color(k.label)
-                                    .child(c.to_string())
+                                super::this_computer::command_box(
+                                    "github-hint-copy",
+                                    c.to_string(),
+                                    cx,
+                                )
+                                .mt(space::S4)
+                                .whitespace_nowrap()
                             })),
                     )
                 })

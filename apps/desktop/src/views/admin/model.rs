@@ -245,12 +245,24 @@ pub fn strip(d: &MachineMonitor, now: u64) -> Vec<StripCell> {
 /// report it.
 fn github_cell(d: &MachineMonitor) -> Option<StripCell> {
     let g = d.github.as_ref()?;
+    let vm = d.runs_in.as_deref() == Some("vm");
     let hint = || {
         Some(
-            if d.runs_in.as_deref() == Some("vm") {
+            if vm {
                 m::GITHUB_HINT_VM
             } else {
                 m::GITHUB_HINT_HOST
+            }
+            .to_string(),
+        )
+    };
+    // gh is not there to run: install it first.
+    let no_gh_hint = || {
+        Some(
+            if vm {
+                m::GITHUB_NO_GH_HINT_VM
+            } else {
+                m::GITHUB_NO_GH_HINT_HOST
             }
             .to_string(),
         )
@@ -265,7 +277,7 @@ fn github_cell(d: &MachineMonitor) -> Option<StripCell> {
             None,
         ),
         "signed_out" => (m::LOGIN_OUT.to_string(), Tone::Warn, hint()),
-        "no_gh" => (m::GITHUB_NO_GH.to_string(), Tone::Warn, hint()),
+        "no_gh" => (m::GITHUB_NO_GH.to_string(), Tone::Warn, no_gh_hint()),
         _ => (m::LOGIN_UNKNOWN.to_string(), Tone::Quiet, None),
     };
     Some(StripCell {
@@ -803,7 +815,14 @@ mod tests {
             (
                 "没装 gh".into(),
                 Tone::Warn,
-                Some("用运行 AI 成员的系统用户运行 gh auth login".into())
+                Some("先装好 gh，再用运行 AI 成员的系统用户运行 gh auth login".into())
+            )
+        );
+        assert_eq!(
+            hint_parts(m::GITHUB_NO_GH_HINT_VM),
+            (
+                "先在主机上装好 gh，再运行",
+                Some("sudo -iu runner gh auth login")
             )
         );
         assert_eq!(

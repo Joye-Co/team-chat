@@ -20,7 +20,7 @@ use crate::{
         MemberAvatar, Sym,
         native::{
             Alert, AlertTone, EmptyLine, NativeType as _, PushSize, PushStyle, TruncText,
-            card_surface, native_colors, progress, push_button,
+            native_colors, panel_card_surface, progress, push_button,
             tokens::{avatar, height, monitor as t, space},
         },
     },
@@ -374,11 +374,23 @@ impl AdminView {
             PushSize::Small,
             cx,
         )
+        // It leads to a page: a chevron says so.
+        .child(crate::ui::icons::sym(
+            Sym::ChevronRight,
+            crate::ui::sf_symbols::SymSize::INLINE_SMALL,
+            k.secondary,
+        ))
         .on_click(move |_, window, cx| {
             view.update(cx, |v, cx| v.open_page(AdminPage::Members, window, cx))
         });
+        // A ghost button has no edge at rest: pulled out by its padding, its content ends on
+        // the card's inset, where the amounts below end.
+        let all = div()
+            .flex_none()
+            .mr(-crate::ui::native::tokens::metrics::BUTTON_SMALL_PAD)
+            .child(all);
         let n = rows.len().min(WHO_ROWS);
-        card_surface(cx)
+        panel_card_surface(cx)
             .flex_1()
             .p(space::S24)
             .flex()

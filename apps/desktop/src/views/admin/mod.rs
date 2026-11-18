@@ -424,6 +424,14 @@ impl AdminView {
         )
     }
 
+    /// The selected computer's name, as the page subtitles say it.
+    pub(super) fn selected_machine_name(&self) -> String {
+        self.machine()
+            .map(|x| x.name.clone())
+            .or_else(|| self.current().map(|d| d.machine.name.clone()))
+            .unwrap_or_default()
+    }
+
     fn machine(&self) -> Option<&MachineInfo> {
         let id = self.selected.as_deref()?;
         self.machines.as_ref()?.iter().find(|x| x.id == id)
@@ -598,13 +606,9 @@ impl AdminView {
         let _ = window;
         let k = native_colors(cx);
         let data = self.current();
-        let logged_out = data
-            .map(|d| {
-                d.clis
-                    .iter()
-                    .filter(|c| c.available && c.login == "logged_out")
-                    .count() as u32
-            })
+        // What the page lists, as the other rows' counts do.
+        let subscriptions = data
+            .map(|d| d.clis.iter().filter(|c| c.available).count() as u32)
             .unwrap_or(0);
         // One person uses the server: 团队约定 is in 设置 › 我的约定 (盯 4.12).
         let team_memory = !self.memory.read(cx).folded();
@@ -636,14 +640,18 @@ impl AdminView {
                          s: Sym,
                          target: accounts::Page,
                          trailing: Option<gpui::AnyElement>| {
-            let on = current_page == target;
+            // Someone who may not open 团队管理 gets no page: the rows are drawn muted, with
+            // nothing selected and nothing to click.
+            let on = owner && current_page == target;
             let view = cx.entity();
-            let row = SidebarRow::new(id, label)
-                .leading(icon(s, on))
-                .selected(on)
-                .on_click(move |_, window, cx| {
+            let row = SidebarRow::new(id, label).leading(icon(s, on));
+            let row = if owner {
+                row.selected(on).on_click(move |_, window, cx| {
                     view.update(cx, |v, cx| v.open_page(target, window, cx))
-                });
+                })
+            } else {
+                row.quiet(true)
+            };
             match trailing {
                 Some(el) => row.trailing_element(el),
                 None => row,
@@ -807,7 +815,7 @@ impl AdminView {
                         m::NAV_SUBSCRIPTIONS,
                         Sym::Account,
                         accounts::Page::Accounts,
-                        (logged_out > 0).then(|| count(logged_out)),
+                        (owner && subscriptions > 0).then(|| count(subscriptions)),
                     ))
                     .child(live_page(
                         "nav-keys",
@@ -941,6 +949,8 @@ impl AdminView {
             accounts::Page::Usage => m::USAGE_PAGE_SUB.to_string(),
         };
         let page_title = match self.page {
+            // No page opens for someone who may not open 团队管理: the window's own name.
+            _ if !self.owner => m::HEADER_TITLE,
             accounts::Page::Overview => m::TITLE,
             accounts::Page::Accounts => m::ACCOUNTS_TITLE,
             accounts::Page::Keys => m::KEYS_TITLE,
@@ -976,9 +986,23 @@ impl AdminView {
         .loading(busy)
         .disabled(!self.owner || self.selected.is_none())
         .on_click(move |_, _, cx| view.update(cx, |v, cx| v.retry(cx)));
+        // Scrolled content passes under the header: a line marks the edge, only then.
+        let scrolled = self.scroll.offset().y < gpui::Pixels::ZERO;
         div()
             .id("admin-toolbar")
             .flex_none()
+            .relative()
+            .when(scrolled, |d| {
+                d.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .bottom_0()
+                        .h(crate::ui::native::tokens::metrics::HAIRLINE)
+                        .bg(k.separator),
+                )
+            })
             .px(space::S32)
             .pt(t::HEADER_PAD_TOP)
             .pb(t::HEADER_PAD_BOTTOM)

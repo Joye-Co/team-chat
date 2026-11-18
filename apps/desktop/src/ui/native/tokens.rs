@@ -1368,12 +1368,16 @@ pub mod monitor {
     pub const CHART_AXIS: Pixels = space::S16;
     /// The status strip's cell that carries a command to run: wide enough for the command on
     /// one line.
-    pub const STRIP_HINT_CELL: Pixels = px(272.);
+    pub const STRIP_HINT_CELL: Pixels = px(296.);
     /// Table columns of 按成员.
     pub const COL_COUNT: Pixels = px(80.);
     pub const COL_CPU: Pixels = px(96.);
     pub const COL_MEM: Pixels = px(200.);
     pub const COL_TOKENS: Pixels = px(120.);
+    /// 用量's budget column: the track, the warning icon's slot and the figures, each at one
+    /// x in every row. The figures' slot holds "103% / $1,000".
+    pub const COL_BUDGET: Pixels = px(248.);
+    pub const COL_BUDGET_LABEL: Pixels = px(92.);
     pub const COL_DONE: Pixels = px(104.);
     pub const COL_SPEND: Pixels = px(152.);
     /// 成员's table: narrow columns so a name of about 8 characters and its 岗位 fit beside the

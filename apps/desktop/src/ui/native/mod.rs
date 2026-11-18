@@ -47,7 +47,7 @@ pub use badge::{
 #[allow(unused_imports)]
 pub use blocks::{
     Card, Column, LIST_TITLE_INSET, ListRow, SectionTitle, card_surface, description_row,
-    group_label, list_frame, media_box, separator, table,
+    group_label, list_frame, media_box, panel_card_surface, separator, table,
 };
 #[allow(unused_imports)]
 pub use buttons::{

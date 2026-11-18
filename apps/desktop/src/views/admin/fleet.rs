@@ -22,7 +22,7 @@ use crate::{
         icons::sym as sym_icon,
         native::{
             Alert, AlertTone, BadgeState, NativeType as _, PushSize, PushStyle, StatusBadge,
-            TruncText, card_surface, native_colors, push_button,
+            TruncText, native_colors, panel_card_surface, push_button,
             tokens::{avatar, height, monitor as t, radius, space},
         },
         sf_symbols::SymSize,
@@ -434,7 +434,7 @@ impl AdminView {
             let id = id.clone();
             view.update(cx, |v, cx| v.open_machine(id, cx))
         });
-        card_surface(cx)
+        panel_card_surface(cx)
             .flex_1()
             .min_w(t::FLEET_CARD_MIN)
             .p(space::S24)

@@ -20,7 +20,8 @@ use crate::{
         MemberAvatar, Sym,
         native::{
             Alert, AlertTone, Empty, NativeTextField, NativeType as _, PushSize, PushStyle,
-            Segment, Segmented, TruncText, card_surface, native_colors, progress, push_button,
+            Segment, Segmented, TruncText, native_colors, panel_card_surface, progress,
+            push_button,
             tokens::{avatar, height, layout, monitor as t, radius, space, text},
         },
     },
@@ -143,7 +144,7 @@ pub(super) fn kpi_card(
     cx: &gpui::App,
 ) -> gpui::Div {
     let k = native_colors(cx);
-    card_surface(cx)
+    panel_card_surface(cx)
         .flex_1()
         .min_w(gpui::Pixels::ZERO)
         .p(space::S16)
@@ -566,9 +567,10 @@ impl AdminView {
         [
             k.label,
             k.label.opacity(0.62),
-            k.label.opacity(0.36),
-            // Clears 1.5:1 on the card in both themes.
-            k.label.opacity(0.26),
+            k.label.opacity(0.40),
+            // Even steps, so the two lightest can be told apart; the last still clears
+            // 1.5:1 on the card in both themes.
+            k.label.opacity(0.18),
         ]
     }
 
@@ -770,7 +772,7 @@ impl AdminView {
                     .child(div().size(t::SWATCH).rounded(radius::CHECKBOX).bg(c))
                     .child(n)
             });
-        card_surface(cx)
+        panel_card_surface(cx)
             .flex_1()
             .p(space::S24)
             .flex()
@@ -875,7 +877,7 @@ impl AdminView {
         let max = rows.iter().map(|r| r.2).fold(0., f64::max).max(0.01);
         let any_estimate = rows.iter().any(|r| r.4 > 0.);
         let unpriced: u64 = rows.iter().map(|r| r.5).sum();
-        card_surface(cx)
+        panel_card_surface(cx)
             .flex_1()
             // The notes wrap inside the card; a long one never widens it past the page.
             .min_w(gpui::Pixels::ZERO)
@@ -1050,7 +1052,7 @@ impl AdminView {
                     } else {
                         m::USAGE_COL_BUDGET_RANGE
                     },
-                    Some(t::COL_MEM),
+                    Some(t::COL_BUDGET),
                     false,
                 ))
             })
@@ -1159,24 +1161,37 @@ impl AdminView {
                     .when(tab == UsageTab::Bots, |d| {
                         d.child(
                             div()
-                                .w(t::COL_MEM)
+                                .w(t::COL_BUDGET)
                                 .flex_none()
                                 .px(space::S12)
                                 .flex()
                                 .items_center()
                                 .gap(space::S8)
+                                // One track length in every row, so the bars compare: the
+                                // icon and the figures after it keep fixed slots.
                                 .child(div().flex_1().child(progress(pct.unwrap_or(0.) as f32, cx)))
                                 // The state is on an icon, never on the text's color
                                 // (§1.3): amber when near the budget, red when at or over.
-                                .when(near || over, |d| {
-                                    d.child(sym_icon(
-                                        Sym::Warning,
-                                        SymSize::INLINE_SMALL,
-                                        if over { k.red } else { k.amber },
-                                    ))
-                                })
                                 .child(
                                     div()
+                                        .flex_none()
+                                        .w(SymSize::INLINE_SMALL.slot_px())
+                                        .flex()
+                                        .justify_center()
+                                        .when(near || over, |d| {
+                                            d.child(sym_icon(
+                                                Sym::Warning,
+                                                SymSize::INLINE_SMALL,
+                                                if over { k.red } else { k.amber },
+                                            ))
+                                        }),
+                                )
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .w(t::COL_BUDGET_LABEL)
+                                        .text_right()
+                                        .whitespace_nowrap()
                                         .n_footnote()
                                         .text_color(if over { k.label } else { k.secondary })
                                         .when(over, |d| d.font_weight(gpui::FontWeight::MEDIUM))
@@ -1226,7 +1241,7 @@ impl AdminView {
             .collect();
         let edit = self.usage.budget_for.clone().map(|id| {
             let (save, cancel) = (cx.entity(), cx.entity());
-            card_surface(cx)
+            panel_card_surface(cx)
                 .p(space::S16)
                 .flex()
                 .flex_col()

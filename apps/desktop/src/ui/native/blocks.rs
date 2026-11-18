@@ -134,6 +134,20 @@ pub fn card_surface(cx: &App) -> gpui::Div {
     div().rounded(radius::CARD).bg(k.sheet).shadow(s)
 }
 
+/// A card on a surface that has the card fill itself (the dark 团队管理
+/// panel): the 6 % ring cannot be told from the fill there, so in dark the
+/// ring is the border color (§2.22: an edge of 1.5:1 at least). Light is
+/// [`card_surface`] unchanged.
+pub fn panel_card_surface(cx: &App) -> gpui::Div {
+    let k = native_colors(cx);
+    if !k.is_dark() {
+        return card_surface(cx);
+    }
+    let mut s = shadow::sm();
+    s.push(shadow::line(k.separator));
+    div().rounded(radius::CARD).bg(k.sheet).shadow(s)
+}
+
 impl RenderOnce for Card {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = native_colors(cx);
@@ -555,6 +569,8 @@ pub struct Column {
     pub header: SharedString,
     pub right: bool,
     pub width: Option<Pixels>,
+    /// The row's "⋯" column: see [`Column::action`].
+    pub action: bool,
 }
 
 impl Column {
@@ -563,6 +579,7 @@ impl Column {
             header: header.into(),
             right: false,
             width: None,
+            action: false,
         }
     }
 
@@ -571,6 +588,18 @@ impl Column {
             header: header.into(),
             right: false,
             width: Some(width),
+            action: false,
+        }
+    }
+
+    /// The row's "⋯" column: no header, exactly as wide as the h28 icon
+    /// button and its insets, the button ending 8 pt from the frame.
+    pub fn action() -> Self {
+        Self {
+            header: SharedString::default(),
+            right: true,
+            width: Some(space::S4 + height::SM + space::S8),
+            action: true,
         }
     }
 
@@ -627,6 +656,10 @@ pub fn table(
             Some(w) => h.w(w).flex_none(),
             None => h.flex_1().min_w(px(0.)),
         };
+        if c.action {
+            // gpui-component's cells are at least 100 wide: this one is its button.
+            h = h.min_w(px(0.)).pl(space::S4).pr(space::S8);
+        }
         if c.right {
             h = h.text_right();
         }
@@ -666,6 +699,9 @@ pub fn table(
                 Some(w) => td.w(w).flex_none(),
                 None => td.flex_1().min_w(px(0.)),
             };
+            if c.action {
+                td = td.min_w(px(0.)).pl(space::S4).pr(space::S8);
+            }
             if c.right {
                 td = td.text_right().n_figures();
             }
@@ -684,6 +720,9 @@ pub fn table(
         .flex_col()
         .child(
             Table::new()
+                // The frame carries the fill, so a caller's `.bg(..)` on it
+                // reaches the rows (the 团队管理 panel's tables).
+                .bg(gpui::transparent_black())
                 // GPUI clips to a rectangle, so the frame's radius does
                 // not cut the header's fill: it rounds its own top corners.
                 .child(TableHeader::new().rounded_t(radius::CONTAINER).child(head))

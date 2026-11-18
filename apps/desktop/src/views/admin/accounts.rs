@@ -26,7 +26,7 @@ use crate::{
         native::{
             Alert, AlertTone, Badge, BadgeState, Column, Empty, NativeCheckbox, NativeSwitch,
             NativeTextField, NativeType as _, PushSize, PushStyle, StatusBadge, TruncText,
-            card_surface, native_colors, progress, push_button, skeleton, table,
+            native_colors, panel_card_surface, progress, push_button, skeleton, table,
             tokens::{avatar, height, monitor as t, radius, space, text},
         },
         sf_symbols::SymSize,
@@ -154,13 +154,14 @@ pub(super) fn confirm_delete_key(
     cx: &mut gpui::App,
 ) {
     use crate::views::nav::dialogs;
+    let machine = view.read(cx).selected_machine_name();
     dialogs::destructive_alert(
         "delete-key",
         fill(
             m::KEYS_DELETE_CONFIRM_TITLE,
             &[("name", &dialogs::short_name(&name))],
         ),
-        m::KEYS_DELETE_CONFIRM_BODY.to_string(),
+        fill(m::KEYS_DELETE_CONFIRM_BODY, &[("machine", &machine)]),
         m::KEYS_DELETE_OK,
         move |window, cx| view.update(cx, |v, cx| v.delete_key(name.clone(), window, cx)),
         window,
@@ -604,7 +605,7 @@ impl AdminView {
             ),
             None => None,
         };
-        card_surface(cx)
+        panel_card_surface(cx)
             .p(space::S24)
             .flex()
             .flex_col()
@@ -1097,7 +1098,7 @@ impl AdminView {
             Column::fixed(m::KEYS_COL_WHO, t::COL_MEM),
             Column::fixed(m::KEYS_COL_UPDATED, t::COL_TOKENS),
             Column::fixed(m::KEYS_COL_VALUE, t::COL_TOKENS),
-            Column::fixed("", height::LG),
+            Column::action(),
         ];
         div()
             .w_full()
@@ -1138,13 +1139,21 @@ impl AdminView {
                     .dashed()
                     .into_any_element()
             } else {
-                table(&columns, rows, true, m::KEYS_EMPTY, None, cx).into_any_element()
+                table(&columns, rows, true, m::KEYS_EMPTY, None, cx)
+                    .bg(k.admin_panel())
+                    .into_any_element()
             })
             .child(
-                Alert::new(Sym::Lock, m::KEYS_NOTE_TITLE)
-                    .on_surface()
-                    .tone(AlertTone::Neutral)
-                    .description(m::KEYS_NOTE_DESC),
+                Alert::new(
+                    Sym::Lock,
+                    fill(
+                        m::KEYS_NOTE_TITLE,
+                        &[("machine", &self.selected_machine_name())],
+                    ),
+                )
+                .on_surface()
+                .tone(AlertTone::Neutral)
+                .description(m::KEYS_NOTE_DESC),
             )
             .into_any_element()
     }
@@ -1200,7 +1209,7 @@ impl AdminView {
                 .text_color(k.secondary)
                 .child(t)
         };
-        card_surface(cx)
+        panel_card_surface(cx)
             .p(space::S24)
             .flex()
             .flex_col()
