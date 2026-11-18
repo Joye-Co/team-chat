@@ -40,6 +40,8 @@ struct Data {
     /// The other members' runs at work with a plan, and their step times:
     /// 计划 shows one block per run (A2-11).
     others: Vec<(BotRunSummary, Vec<Millis>)>,
+    /// The runs at work on a known computer, `run` first: 在哪干活 lists each.
+    at_work: Vec<BotRunSummary>,
     /// The 话题 has an order or runs of several members: 计划 names the member
     /// of every block.
     plan_led: bool,
@@ -79,6 +81,12 @@ impl Data {
                 .filter(|r| !r.plan.is_empty() && run.as_ref().is_none_or(|x| x.id != r.id))
                 .map(|r| (r.clone(), p.run_step_times(&r.id)))
                 .collect();
+        let mut at_work: Vec<BotRunSummary> = crate::views::topic_page::working_runs(&all_runs)
+            .into_iter()
+            .filter(|r| r.machine_name.is_some())
+            .cloned()
+            .collect();
+        at_work.sort_by_key(|r| run.as_ref().is_none_or(|x| x.id != r.id));
         let run_on_thread = run.as_ref().is_some_and(|x| {
             crate::views::topic_page::working_runs(&all_runs)
                 .iter()
@@ -90,6 +98,7 @@ impl Data {
             .and_then(|a| p.artifact_preview(&a.id, a.version));
         let decisions = p.topic_decisions(g, t);
         let mut ids: Vec<&str> = others.iter().map(|(r, _)| r.bot_id.as_str()).collect();
+        ids.extend(at_work.iter().map(|r| r.bot_id.as_str()));
         if let Some(t) = &topic {
             ids.extend(t.owner_id.as_deref());
             ids.push(&t.created_by);
@@ -116,6 +125,7 @@ impl Data {
             changes: p.topic_changes(g, t),
             run_on_thread,
             others,
+            at_work,
             plan_led,
             cost: p.topic_cost(g, t),
             recording: topic_recording(services, g, t),
@@ -327,7 +337,15 @@ impl TopicRail {
             .items_center()
             .gap(space::S8)
             .children(done)
-            .child(hand)
+            // Alone, the ghost's padding has no visible edge: its label takes
+            // the pane's content edge and the hover overhangs into the inset.
+            .child(
+                div()
+                    .when(waits, |el| {
+                        el.ml(-crate::ui::native::metrics::BUTTON_SMALL_PAD)
+                    })
+                    .child(hand),
+            )
             .into_any_element()
     }
 }

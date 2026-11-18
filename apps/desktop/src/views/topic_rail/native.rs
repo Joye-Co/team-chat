@@ -373,7 +373,7 @@ impl TopicRail {
     /// The trailing `arrow.up.forward` that opens `pane`.
     fn open_button(
         &self,
-        id: &'static str,
+        id: impl Into<ElementId>,
         name: &'static str,
         pane: RightPane,
         window: &mut gpui::Window,
@@ -991,12 +991,50 @@ impl TopicRail {
         Some(section.into_any_element())
     }
 
-    /// 在哪干活: the team computer (or the cloud runner) the member uses.
+    /// 在哪干活: the team computer (or the cloud runner) each member at work
+    /// uses; with none at work, the one `run` used. The header's arrow opens
+    /// the only run; several runs each have their own on their row.
     pub(super) fn native_where(
         &self,
         d: &Data,
         run: &BotRunSummary,
         window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let mut section = self.section(WHERE, c::WHERE_WORK, cx);
+        if d.at_work.len() > 1 {
+            for run in &d.at_work {
+                let open = self.open_button(
+                    ElementId::Name(format!("rail-see-machine-{}", run.id).into()),
+                    c::OPEN_MACHINE,
+                    RightPane::Live(run.id.clone()),
+                    window,
+                    cx,
+                );
+                section = section.row(self.where_row(d, run, Some(open), cx)?);
+            }
+            return Some(section.into_any_element());
+        }
+        let run = d.at_work.first().unwrap_or(run);
+        if run.status.is_active() {
+            section = section.action(self.open_button(
+                "rail-see-machine",
+                c::OPEN_MACHINE,
+                RightPane::Live(run.id.clone()),
+                window,
+                cx,
+            ));
+        }
+        section = section.row(self.where_row(d, run, None, cx)?);
+        Some(section.into_any_element())
+    }
+
+    /// One computer of 在哪干活: its symbol, name and badge, who uses it.
+    fn where_row(
+        &self,
+        d: &Data,
+        run: &BotRunSummary,
+        open: Option<AnyElement>,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let k = native_colors(cx);
@@ -1030,28 +1068,23 @@ impl TopicRail {
         } else {
             Sym::Computer
         };
-        let mut section = self.section(WHERE, c::WHERE_WORK, cx);
-        if busy {
-            section = section.action(self.open_button(
-                "rail-see-machine",
-                c::OPEN_MACHINE,
-                RightPane::Live(run.id.clone()),
-                window,
-                cx,
-            ));
-        }
-        section = section.row(
+        Some(
             div()
                 .w_full()
                 .py(space::S2)
                 .flex()
                 .items_start()
                 .gap(space::S8)
-                .child(div().flex_none().pt(px(1.)).child(ui::sym(
-                    sym,
-                    SymSize::INLINE,
-                    k.secondary,
-                )))
+                // As tall as the badge that sets the first line's height, so
+                // every machine symbol centers on the name beside it.
+                .child(
+                    div()
+                        .flex_none()
+                        .h(ui::native::tokens::height::BADGE)
+                        .flex()
+                        .items_center()
+                        .child(ui::sym(sym, SymSize::INLINE, k.secondary)),
+                )
                 .child(
                     div()
                         .flex_1()
@@ -1084,9 +1117,18 @@ impl TopicRail {
                                 ),
                         )
                         .child(detail(line, cx)),
-                ),
-        );
-        Some(section.into_any_element())
+                )
+                // On the center line of the name and its badge.
+                .children(open.map(|open| {
+                    div()
+                        .flex_none()
+                        .h(ui::native::tokens::height::BADGE)
+                        .flex()
+                        .items_center()
+                        .child(open)
+                }))
+                .into_any_element(),
+        )
     }
 
     pub(super) fn native_cost(&self, d: &Data, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -1114,11 +1156,15 @@ impl TopicRail {
             .and_then(|r| crate::views::topic_page::run_elapsed(self.services.provider.as_ref(), r))
             .unwrap_or(cost.duration_ms as i64);
         let used = crate::views::timeline::plan::span_text(crate::views::timeline::plan::TOOK, ms);
-        let mut section = self.section(COST, c::TOPIC_RAIL_COST, cx).row(label_value(
-            c::INSPECTOR_TIME,
-            used,
-            cx,
-        ));
+        // The title promises only what the rows below show.
+        let title = if cost.cost_cents.is_some() {
+            c::TOPIC_RAIL_COST
+        } else {
+            c::INSPECTOR_TIME
+        };
+        let mut section =
+            self.section(COST, title, cx)
+                .row(label_value(c::INSPECTOR_TIME, used, cx));
         if let Some(cents) = cost.cost_cents {
             section = section.row(label_value(
                 c::INSPECTOR_COST,
