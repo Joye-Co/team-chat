@@ -1103,7 +1103,8 @@ pub struct DmPicker {
     filter: Entity<InputState>,
     focus: gpui::FocusHandle,
     members: Vec<Member>,
-    active: usize,
+    /// The chosen row: none until a click, an arrow key or a search.
+    active: Option<usize>,
     scroll: gpui::ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -1124,7 +1125,9 @@ impl DmPicker {
             window,
             |this, _, event: &InputEvent, window, cx| match event {
                 InputEvent::Change => {
-                    this.active = 0;
+                    // A search chooses its top match, so type-then-Return opens it.
+                    let searching = !this.filter.read(cx).value().trim().is_empty();
+                    this.active = searching.then_some(0);
                     cx.notify();
                 }
                 InputEvent::PressEnter { .. } => this.confirm(window, cx),
@@ -1135,7 +1138,7 @@ impl DmPicker {
             filter,
             focus: cx.focus_handle().tab_stop(true),
             members,
-            active: 0,
+            active: None,
             scroll: gpui::ScrollHandle::new(),
             _subscriptions: subscriptions,
         }
@@ -1153,14 +1156,16 @@ impl DmPicker {
     /// ↑/↓ stop at the ends, as in every member picker (§2.9 one
     /// component, review 3 K-08).
     fn select(&mut self, delta: isize, cx: &mut Context<Self>) {
-        if let Some(ix) = pick_step(Some(self.active), delta, self.shown(cx).len()) {
-            self.active = ix;
+        if let Some(ix) = pick_step(self.active, delta, self.shown(cx).len()) {
+            self.active = Some(ix);
             cx.notify();
         }
     }
 
     fn confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let member = self.shown(cx).get(self.active).map(|m| m.id.clone());
+        let member = self
+            .active
+            .and_then(|ix| self.shown(cx).get(ix).map(|m| m.id.clone()));
         if let Some(id) = member {
             window.close_dialog(cx);
             super::open_dm_with(id, cx);
@@ -1171,17 +1176,15 @@ impl DmPicker {
 impl Render for DmPicker {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let shown = self.shown(cx);
-        if self.active >= shown.len() {
-            self.active = 0;
-        }
-        if !shown.is_empty() {
-            self.scroll.scroll_to_item(self.active);
+        self.active = self.active.filter(|ix| *ix < shown.len());
+        if let Some(ix) = self.active {
+            self.scroll.scroll_to_item(ix);
         }
         let rows: Vec<_> = shown
             .iter()
             .enumerate()
             .map(|(ix, m)| {
-                let active = ix == self.active;
+                let active = self.active == Some(ix);
                 MemberPicker::row(
                     gpui::SharedString::from(format!("dm-row-{}", m.id)),
                     m,
@@ -1190,7 +1193,7 @@ impl Render for DmPicker {
                     cx,
                 )
                 .on_click(cx.listener(move |this, e: &gpui::ClickEvent, window, cx| {
-                    this.active = ix;
+                    this.active = Some(ix);
                     if e.click_count() > 1 {
                         this.confirm(window, cx)
                     } else {
@@ -1200,10 +1203,9 @@ impl Render for DmPicker {
                 .into_any_element()
             })
             .collect();
-        let empty = rows.is_empty();
         let [cancel, open] = sheet_buttons("start-dm", common::CANCEL, o::START_DM_OPEN, cx);
         let cancel = cancel.on_click(|_, window, cx| window.close_dialog(cx));
-        let open = disabled_push(open, empty, cx)
+        let open = disabled_push(open, self.active.is_none(), cx)
             .on_click(cx.listener(|this, _, window, cx| this.confirm(window, cx)));
         // The picker's keys (one set for every member picker): ↑↓ move the
         // chosen row from the search field or the list, ↩ opens it.
