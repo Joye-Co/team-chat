@@ -161,7 +161,7 @@ pub(super) fn confirm_delete_key(
             &[("name", &dialogs::short_name(&name))],
         ),
         m::KEYS_DELETE_CONFIRM_BODY.to_string(),
-        m::KEYS_DELETE,
+        m::KEYS_DELETE_OK,
         move |window, cx| view.update(cx, |v, cx| v.delete_key(name.clone(), window, cx)),
         window,
         cx,
