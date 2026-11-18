@@ -44,6 +44,8 @@ const PAGE_EVENT_RATE = { rate: 5, burst: 10 };
 const PAGE_EVENT_HOURLY = 300;
 /** Data pushes per version: 2/s, bursts of 4. */
 const DATA_RATE = { rate: 2, burst: 4 };
+/** Push ids kept per version: a retry of one of the last 16 pushes is a repeat. */
+const KEEP_PUSH_IDS = 16;
 /** A reply must come within this long of its event. */
 export const REPLY_WINDOW_MS = 120_000;
 /** Idempotency of page events. */
@@ -322,7 +324,16 @@ registerRoomRpc(ARTIFACT_DATA_RPC, (room, actor, args): { dataRev: number; dupli
     .exec<{ data_rev: number; push_id: string | null }>("SELECT data_rev, push_id FROM artifact_data WHERE artifact_id = ? AND version = ?", d.artifactId, d.version)
     .toArray()[0];
   const rev = cur?.data_rev ?? 0;
-  if (d.clientPushId && cur?.push_id === d.clientPushId) return { dataRev: rev, duplicate: true };
+  if (d.clientPushId) {
+    // A push the server took before (one of the last 16) is not applied again, even when newer
+    // pushes followed it: the answer is the rev it made then.
+    const known = room.sql
+      .exec<{ data_rev: number }>("SELECT data_rev FROM artifact_pushes WHERE artifact_id = ? AND version = ? AND push_id = ?", d.artifactId, d.version, d.clientPushId)
+      .toArray()[0];
+    if (known) return { dataRev: known.data_rev, duplicate: true };
+    // A snapshot from before `artifact_pushes` keeps only its last id.
+    if (cur?.push_id === d.clientPushId) return { dataRev: rev, duplicate: true };
+  }
   if (d.baseDataRev !== undefined && d.baseDataRev !== rev) throw new ApiError("conflict", "the data changed", "artifact.stale_data");
   const now = Date.now();
   let causeActor: string | undefined;
@@ -353,6 +364,25 @@ registerRoomRpc(ARTIFACT_DATA_RPC, (room, actor, args): { dataRev: number; dupli
     now,
   );
   room.sql.exec("UPDATE artifact_versions SET data_rev = ? WHERE artifact_id = ? AND version = ?", next, d.artifactId, d.version);
+  if (d.clientPushId) {
+    room.sql.exec(
+      "INSERT OR REPLACE INTO artifact_pushes (artifact_id, version, push_id, data_rev, at) VALUES (?, ?, ?, ?, ?)",
+      d.artifactId,
+      d.version,
+      d.clientPushId,
+      next,
+      now,
+    );
+    room.sql.exec(
+      `DELETE FROM artifact_pushes WHERE artifact_id = ? AND version = ? AND push_id NOT IN
+         (SELECT push_id FROM artifact_pushes WHERE artifact_id = ? AND version = ? ORDER BY data_rev DESC LIMIT ?)`,
+      d.artifactId,
+      d.version,
+      d.artifactId,
+      d.version,
+      KEEP_PUSH_IDS,
+    );
+  }
   const bytes = utf8Bytes(text);
   const event: Record<string, unknown> = { type: "artifact.data", groupId: room.groupId, artifactId: d.artifactId, version: d.version, dataRev: next };
   // Inline up to 64 KiB; larger snapshots are read with GET …/data.
@@ -392,8 +422,8 @@ registerFrameHandler<ClientFrameOf<"artifact.data">>("artifact.data", {
     const { artifactId, version, data, baseDataRev, cause, clientPushId } = frame;
     const out = unwrap(
       await roomStub(c.env, frame.groupId).rpc(frame.groupId, ARTIFACT_DATA_RPC, c.actor, { artifactId, version, data, baseDataRev, cause, clientPushId }),
-    ) as { dataRev: number };
-    return { dataRev: out.dataRev };
+    ) as { dataRev: number; duplicate?: boolean };
+    return out.duplicate ? { dataRev: out.dataRev, duplicate: true } : { dataRev: out.dataRev };
   },
 });
 
@@ -517,9 +547,10 @@ registerRoute({
         data: req.data,
         baseDataRev: req.baseDataRev,
         cause: req.cause,
+        clientPushId: req.clientPushId,
       }),
-    ) as { dataRev: number };
-    return { dataRev: out.dataRev };
+    ) as { dataRev: number; duplicate?: boolean };
+    return out.duplicate ? { dataRev: out.dataRev, duplicate: true } : { dataRev: out.dataRev };
   },
 });
 

@@ -2093,14 +2093,20 @@ page event of one of its 产出 versions (`Cause.event` is the page event's name
 ### 产出 bridge
 
 ```ts
-{ t: "artifact.data", rid, groupId, artifactId, version, data /* <= 256 KiB */, baseDataRev?, cause?, clientPushId? }   // ack.result { dataRev }
+{ t: "artifact.data", rid, groupId, artifactId, version, data /* <= 256 KiB */, baseDataRev?, cause?, clientPushId? }   // ack.result ArtifactDataAck { dataRev, duplicate? }
 { t: "artifact.reply", rid, groupId, eventId, ok, payload? /* <= 64 KiB, ok: true */, error? { code: "declined"|"failed", message, reason? } }
 transient artifact.event: { groupId, topicId, artifactId, version, eventId, name, kind, payload?, actorId, at }   // to the version's creator
 transient artifact.data:  { groupId, artifactId, version, dataRev, data? /* inline when <= 64 KiB */, cause? }    // to every member
 transient artifact.reply: { groupId, eventId, ok, payload?, error? }                                               // to the asker only
 GET /v1/artifacts/:id/versions/:v/data  -> ArtifactDataResponse { data: JSON | null, dataRev, updatedAt }
-PUT /v1/artifacts/:id/versions/:v/data  PutArtifactDataRequest { data, baseDataRev?, cause? } -> ArtifactDataAck { dataRev }
+PUT /v1/artifacts/:id/versions/:v/data  PutArtifactDataRequest { data, baseDataRev?, cause?, clientPushId? /* 1..64 */ } -> ArtifactDataAck { dataRev, duplicate? }
 ```
+
+`clientPushId` makes a data push safe to send again after a lost answer: the server keeps the
+ids of a version's last 16 pushes, and a push with one of them is not applied again (not even
+when newer pushes followed it). Its answer is `{ dataRev: <the rev that push made>, duplicate:
+true }`, and no transient is sent. The checks of `baseDataRev`, `cause` and the rate apply to
+new pushes only.
 
 Rates: `artifact.data` 2 a second with bursts of 4 per version (`rate_limited` with
 `retryAfterMs`; push the newest data after the wait). `artifact.reply` is accepted within 120 s

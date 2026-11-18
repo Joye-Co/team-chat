@@ -121,6 +121,23 @@ registerRoomMigration({
   `,
 });
 
+// The last push ids of a version's data (files/bridge.ts keeps 16): a retry of an older push is
+// a repeat, not a new snapshot over a newer one. Old snapshots keep their one id in
+// `artifact_data.push_id`, which is still read.
+registerRoomMigration({
+  name: "files-pushes-1",
+  up: `
+    CREATE TABLE artifact_pushes (
+      artifact_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      push_id TEXT NOT NULL,
+      data_rev INTEGER NOT NULL,
+      at INTEGER NOT NULL,
+      PRIMARY KEY (artifact_id, version, push_id)
+    );
+  `,
+});
+
 // Usable (design-relay R4): the version a version was made from. Old rows keep NULL and read as
 // `version - 1`; new rows always store it.
 registerRoomMigration({

@@ -65729,6 +65729,9 @@
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
+        },
+        "duplicate": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -65812,6 +65815,11 @@
         "cause": {
           "type": "string",
           "minLength": 1
+        },
+        "clientPushId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
         }
       },
       "required": [

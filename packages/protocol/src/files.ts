@@ -340,7 +340,8 @@ export const ArtifactDataFrame = z.object({
   clientPushId: ClientEventId.optional(),
 });
 export type ArtifactDataFrame = z.infer<typeof ArtifactDataFrame>;
-export const ArtifactDataAck = z.object({ dataRev: z.int().positive() });
+/** `duplicate`: a `clientPushId` the server took before; `dataRev` is the rev that push made. */
+export const ArtifactDataAck = z.object({ dataRev: z.int().positive(), duplicate: z.boolean().optional() });
 export type ArtifactDataAck = z.infer<typeof ArtifactDataAck>;
 
 export const ArtifactReplyError = z.object({
@@ -427,6 +428,8 @@ export const PutArtifactDataRequest = z.object({
   data: jsonMax(MAX_ARTIFACT_DATA_BYTES, "data"),
   baseDataRev: Count.optional(),
   cause: Id.optional(),
+  /** As `artifact.data.clientPushId`: a retry with the same id is not applied again. */
+  clientPushId: ClientEventId.optional(),
 });
 export type PutArtifactDataRequest = z.infer<typeof PutArtifactDataRequest>;
 

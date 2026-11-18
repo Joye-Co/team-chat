@@ -187,7 +187,7 @@ describe("产出 bridge", () => {
     const tr = await co.next((f) => f.t === "transient" && f.event.type === "artifact.data");
     expect(tr.event).toEqual({ type: "artifact.data", groupId: gid, artifactId: id, version: 1, dataRev: 1, data: { a: 1 }, cause: ev.eventId });
     // The same push again is not a new rev; a stale base is refused.
-    expect(await push({ data: { a: 1 }, clientPushId: "p1" })).toMatchObject({ ok: true, result: { dataRev: 1 } });
+    expect(await push({ data: { a: 1 }, clientPushId: "p1" })).toEqual({ t: "ack", rid: expect.any(String), ok: true, result: { dataRev: 1, duplicate: true } });
     expect(await push({ data: { a: 2 }, baseDataRev: 0 })).toMatchObject({ ok: false, error: { code: "conflict", reason: "artifact.stale_data" } });
 
     // Over 64 KiB the transient carries no data; GET has it.
@@ -198,8 +198,23 @@ describe("产出 bridge", () => {
     expect((await api(path, { token: alice.token })).body).toMatchObject({ data: big, dataRev: 2 });
     // Over HTTP for the creator bot only.
     expect((await api(path, { method: "PUT", token: alice.token, body: { data: {} } })).status).toBe(403);
-    const put = await api(path, { method: "PUT", token: bot.token, body: { data: { a: 3 }, baseDataRev: 2 } });
+    const put = await api(path, { method: "PUT", token: bot.token, body: { data: { a: 3 }, baseDataRev: 2, clientPushId: "h1" } });
     expect(put.body).toEqual({ dataRev: 3 });
+    // A retry of an older push after a newer one (its answer was lost) is not applied over it,
+    // on the socket and over HTTP: viewers keep the newest data.
+    await co.next((f) => f.t === "transient" && f.event.type === "artifact.data" && f.event.dataRev === 3);
+    const seen = co.frames.filter((f) => f.t === "transient" && f.event.type === "artifact.data").length;
+    expect(await push({ data: { a: 1 }, clientPushId: "p1" })).toMatchObject({ ok: true, result: { dataRev: 1, duplicate: true } });
+    expect((await api(path, { method: "PUT", token: bot.token, body: { data: { a: 3 }, baseDataRev: 2, clientPushId: "h1" } })).body).toEqual({ dataRev: 3, duplicate: true });
+    expect((await api(path, { token: alice.token })).body).toMatchObject({ data: { a: 3 }, dataRev: 3 });
+    await sleep(100);
+    expect(co.frames.filter((f) => f.t === "transient" && f.event.type === "artifact.data")).toHaveLength(seen);
+    expect((await api(path, { method: "PUT", token: bot.token, body: { data: {}, clientPushId: "p".repeat(65) } })).status).toBe(400);
+    // A snapshot stored before push ids were kept apart still knows its last id.
+    await runInDurableObject(roomOf(gid), async (_o, state) => {
+      state.storage.sql.exec("DELETE FROM artifact_pushes WHERE push_id = 'h1'");
+    });
+    expect((await api(path, { method: "PUT", token: bot.token, body: { data: { a: 3 }, clientPushId: "h1" } })).body).toEqual({ dataRev: 3, duplicate: true });
     const art = await api(`/v1/artifacts/${id}`, { token: alice.token });
     expect(art.body.versions[0].dataRev).toBe(3);
     // A 1.0.x connection never gets the transient.

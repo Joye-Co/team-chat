@@ -881,6 +881,13 @@ impl ArtifactDataFrame {
 #[serde(rename_all = "camelCase")]
 pub struct ArtifactDataAck {
     pub data_rev: u64,
+    /// A `clientPushId` the server took before; `data_rev` is the rev that push made.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub duplicate: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1093,12 +1100,22 @@ pub struct PutArtifactDataRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub cause: Option<String>,
+    /// As `artifact.data.clientPushId`: a retry with the same id is not applied again.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub client_push_id: Option<String>,
 }
 
 impl PutArtifactDataRequest {
     pub fn validate(&self) -> Validation {
         if json_bytes(&self.data) > MAX_ARTIFACT_DATA_BYTES {
             return fail("data", "data exceeds 256 KiB");
+        }
+        if let Some(c) = &self.client_push_id {
+            check_chars("clientPushId", c, 1, 64)?;
         }
         self.cause
             .as_deref()

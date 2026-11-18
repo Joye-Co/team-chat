@@ -577,6 +577,7 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
   ok("http/card-event-ack-none-reason.json", "CardEventAck", { eventId: EV(4), stored: false, expect: { by: LEDGER, mode: "none", reason: "run.limit" } }, "nobody responds, and why");
   ok("http/artifact-event-ack-none-reason.json", "ArtifactEventAck", { eventId: EV(22), expect: { by: LEDGER, mode: "none", reason: "runner.off" } });
   ok("http/artifact-data-ack.json", "ArtifactDataAck", { dataRev: 2 });
+  ok("http/artifact-data-ack-duplicate.json", "ArtifactDataAck", { dataRev: 2, duplicate: true }, "a push id the server took before, with the rev it made");
   ok("server/welcome-features.json", "ServerFrame", {
     t: "welcome",
     protocol: 1,
@@ -685,6 +686,8 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
   ok("http/artifact-data-response-empty.json", "ArtifactDataResponse", { data: null, dataRev: 0, updatedAt: T0 });
   ok("http/put-artifact-data-request.json", "PutArtifactDataRequest", { data: { channels: { douyin: 7 } }, baseDataRev: 1, cause: EV(21) });
   bad("http/put-artifact-data-request-missing.json", "PutArtifactDataRequest", { baseDataRev: 1 }, "data is required");
+  ok("http/put-artifact-data-request-push-id.json", "PutArtifactDataRequest", { data: { channels: { douyin: 8 } }, clientPushId: "push-7" });
+  bad("http/put-artifact-data-request-push-id-long.json", "PutArtifactDataRequest", { data: {}, clientPushId: "p".repeat(65) }, "clientPushId is 1..64 characters");
 
   // -------------------------------------------------------------------------
   // Machine: answers, interactions and chat-run output
