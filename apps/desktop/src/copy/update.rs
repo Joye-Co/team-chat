@@ -49,7 +49,7 @@ crate::copy! {
     CARD_READY = "{version} 已下载好",
     CARD_READY_DETAIL = "安装时应用会重新打开，大约一分钟。",
     CARD_WAITING = "等消息发完再装",
-    CARD_MANUAL_DETAIL = crate::copy::per_system("安装盘已在访达中打开：退出 {product}，把它拖到「应用程序」替换旧版本。", "安装包已在文件资源管理器中选中：退出 {product}，双击安装包装上新版本。"),
+    CARD_MANUAL_DETAIL = crate::copy::per_system("安装盘已在访达中打开：退出 {product}，把安装盘里的 {product} 拖到「应用程序」替换旧版本。", "安装包已在文件资源管理器中选中：退出 {product}，双击安装包装上新版本。"),
     NOTES_PUBLISHED = "{date}发布 · 你现在用的是 {current}",
     NOTES_CURRENT = "你现在用的是 {current}",
     NOTES_FOOTER = "更新时应用会重新打开，大约一分钟。",
