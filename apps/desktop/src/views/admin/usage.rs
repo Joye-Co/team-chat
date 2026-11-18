@@ -1179,7 +1179,7 @@ impl AdminView {
                                     div()
                                         .n_footnote()
                                         .text_color(if over { k.label } else { k.secondary })
-                                        .when(over, |d| d.font_weight(gpui::FontWeight::MEDIUM))
+                                        .when(over, |d| d.font_weight(crate::theme::MEDIUM_WEIGHT))
                                         .child(match (pct, budget) {
                                             (Some(p), Some(b)) => fill(
                                                 m::USAGE_BUDGET_OF,

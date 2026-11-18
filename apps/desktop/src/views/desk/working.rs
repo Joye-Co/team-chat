@@ -65,7 +65,7 @@ pub fn render(
                 .child(
                     div()
                         .n_title3()
-                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .font_weight(crate::theme::MEDIUM_WEIGHT)
                         .text_color(k.label)
                         .child(c::DESK_RAIL_TITLE),
                 )

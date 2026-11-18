@@ -492,7 +492,7 @@ impl ProcessView {
                         div()
                             .n_body()
                             .text_color(n.label)
-                            .when(selected, |el| el.font_weight(gpui::FontWeight::MEDIUM))
+                            .when(selected, |el| el.font_weight(crate::theme::MEDIUM_WEIGHT))
                             .one_line()
                             .child(bot.map(|b| b.name).unwrap_or_default()),
                     )

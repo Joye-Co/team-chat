@@ -895,7 +895,7 @@ pub fn toolbar_labeled_item(
             .child(
                 div()
                     .text_size(px(13.))
-                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .font_weight(crate::theme::MEDIUM_WEIGHT)
                     .text_color(ink)
                     .whitespace_nowrap()
                     .child(label.into()),

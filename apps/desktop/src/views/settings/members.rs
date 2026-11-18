@@ -2427,7 +2427,7 @@ impl Render for BotForm {
             div()
                 .pb(tokens::space::S8)
                 .n_subheadline()
-                .font_weight(gpui::FontWeight::MEDIUM)
+                .font_weight(crate::theme::MEDIUM_WEIGHT)
                 .text_color(k.secondary)
                 .child(text)
         };

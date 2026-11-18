@@ -1515,7 +1515,7 @@ pub fn reference_row(
                 .whitespace_nowrap()
                 .text_ellipsis()
                 .n_body()
-                .font_weight(gpui::FontWeight::MEDIUM)
+                .font_weight(crate::theme::MEDIUM_WEIGHT)
                 .text_color(k.label)
                 .child(title.into()),
         )

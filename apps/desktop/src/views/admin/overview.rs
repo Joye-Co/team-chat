@@ -605,7 +605,7 @@ fn swatch(label: &'static str, value: &str, color: Option<Hsla>, cx: &App) -> im
         .child(
             div()
                 .n_figures()
-                .font_weight(gpui::FontWeight::MEDIUM)
+                .font_weight(crate::theme::MEDIUM_WEIGHT)
                 .text_color(k.label)
                 .child(value.to_string()),
         )

@@ -390,7 +390,7 @@ impl AdminView {
                         .child(
                             div()
                                 .n_figures()
-                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .font_weight(crate::theme::MEDIUM_WEIGHT)
                                 .text_color(ink)
                                 .child(value),
                         ),

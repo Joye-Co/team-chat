@@ -116,7 +116,7 @@ pub fn count_pill(n: usize, cx: &App) -> gpui::Div {
         .items_center()
         .justify_center()
         .n_callout()
-        .font_weight(gpui::FontWeight::MEDIUM)
+        .font_weight(crate::theme::MEDIUM_WEIGHT)
         .n_figures()
         .text_color(k.label)
         .child(crate::ui::chip::CountBadge::cap(n as u32))
@@ -309,7 +309,7 @@ impl PageRow {
                             .child(
                                 TruncText::new(self.title)
                                     .n_body()
-                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .font_weight(crate::theme::MEDIUM_WEIGHT)
                                     .text_color(k.label),
                             )
                             .children(self.title_trailing),
@@ -466,7 +466,7 @@ pub fn table_footer(id: &str, count: impl Into<SharedString>, pager: Pager, cx: 
         .child(
             div()
                 .n_body()
-                .font_weight(gpui::FontWeight::MEDIUM)
+                .font_weight(crate::theme::MEDIUM_WEIGHT)
                 .text_color(k.label)
                 .whitespace_nowrap()
                 .child(crate::copy::kit::TABLE_PER_PAGE),
@@ -524,7 +524,7 @@ pub fn table_footer(id: &str, count: impl Into<SharedString>, pager: Pager, cx: 
                     div()
                         .n_body()
                         .n_figures()
-                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .font_weight(crate::theme::MEDIUM_WEIGHT)
                         .text_color(k.label)
                         .child(label),
                 )
@@ -691,7 +691,7 @@ pub fn outline_badge(text: impl Into<SharedString>, cx: &App) -> AnyElement {
         .px(px(8.))
         .py(px(0.))
         .n_callout()
-        .font_weight(gpui::FontWeight::MEDIUM)
+        .font_weight(crate::theme::MEDIUM_WEIGHT)
         .text_color(k.label)
         .whitespace_nowrap()
         .child(text.into())
@@ -759,7 +759,7 @@ pub fn page_alert(
                 .child(
                     div()
                         .n_body()
-                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .font_weight(crate::theme::MEDIUM_WEIGHT)
                         // Owner decision v14 (T1-11): neutral title; the
                         // state color is on the icon and the border.
                         .text_color(k.label)
@@ -814,7 +814,7 @@ pub fn page_empty(
                         .child(
                             div()
                                 .n_title2()
-                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .font_weight(crate::theme::MEDIUM_WEIGHT)
                                 .text_color(k.label)
                                 .child(title.into()),
                         )
@@ -1369,7 +1369,7 @@ fn table_header(cols: &[Col], cx: &App) -> gpui::Div {
                 .when(!c.header.is_empty(), |d| d.overflow_hidden())
                 .whitespace_nowrap()
                 .n_body()
-                .font_weight(gpui::FontWeight::MEDIUM)
+                .font_weight(crate::theme::MEDIUM_WEIGHT)
                 .text_color(k.label)
                 .child(c.header.clone())
         }))
