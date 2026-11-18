@@ -183,6 +183,21 @@ pub fn at_ago(e: &MyCardEvent, ago: Millis, now: Millis) -> MyCardEvent {
     e
 }
 
+/// Today (this computer's date) at `hour:minute` on the clock of `zone`: the slots of a
+/// sample read the same hours on every computer.
+fn at_zone(zone: chrono_tz::Tz, hour: u32, minute: u32) -> Millis {
+    use chrono::{Local, TimeZone as _};
+    Local
+        .timestamp_millis_opt(at(12, 0))
+        .single()
+        .and_then(|noon| {
+            noon.date_naive()
+                .and_hms_opt(hour, minute, 0)
+                .and_then(|t| zone.from_local_datetime(&t).single())
+        })
+        .map_or_else(|| at(hour, minute), |t| t.timestamp_millis())
+}
+
 fn base(title: &str, intent: &str, fallback: &str) -> Value {
     json!({ "v": 2, "catalog": "tc.card/2.1", "rev": 1, "intent": intent, "title": title,
             "fallback": fallback })
@@ -638,7 +653,11 @@ pub fn all() -> Vec<Sample21> {
         ),
     ));
     let day = 24 * 3600 * 1000;
-    let slot = |id: &str, d: i64, h: u32, conflicts: Value| json!({ "id": id, "start": at(h, 0) + d * day, "end": at(h, 0) + d * day + 3600 * 1000, "conflicts": conflicts });
+    // The hours are the card's zone's (`tz`), whatever zone this computer is in.
+    let slot = |id: &str, d: i64, h: u32, conflicts: Value| {
+        let start = at_zone(chrono_tz::Asia::Shanghai, h, 0) + d * day;
+        json!({ "id": id, "start": start, "end": start + 3600 * 1000, "conflicts": conflicts })
+    };
     out.push(sample(
         SLOTS,
         ALL,
@@ -961,7 +980,7 @@ pub fn all() -> Vec<Sample21> {
         },
     ));
     let day = 86_400_000;
-    let hour = 3_600_000;
+    let tokyo = |h: u32, m: u32| at_zone(chrono_tz::Asia::Tokyo, h, m);
     out.push(sample(
         FIELDS,
         DEV,
@@ -977,10 +996,10 @@ pub fn all() -> Vec<Sample21> {
                       "submitLabel": "发给东京", "fallbackText": "开会时间、优先级和座位" },
                     { "id": "when", "type": "slots", "label": "哪个时间开会？", "tz": "Asia/Tokyo",
                       "required": true, "fallbackText": "时间段", "slots": [
-                        { "id": "a", "start": at(10, 0) + day, "end": at(11, 0) + day },
-                        { "id": "b", "start": at(15, 0) + day, "end": at(15, 30) + day },
-                        { "id": "c", "start": at(10, 0) + 2 * day, "end": at(11, 0) + 2 * day, "conflicts": [LIXUE] },
-                        { "id": "d", "start": at(15, 0) + 2 * day - hour * 0, "end": at(16, 30) + 2 * day } ] },
+                        { "id": "a", "start": tokyo(10, 0) + day, "end": tokyo(11, 0) + day },
+                        { "id": "b", "start": tokyo(15, 0) + day, "end": tokyo(15, 30) + day },
+                        { "id": "c", "start": tokyo(10, 0) + 2 * day, "end": tokyo(11, 0) + 2 * day, "conflicts": [LIXUE] },
+                        { "id": "d", "start": tokyo(15, 0) + 2 * day, "end": tokyo(16, 30) + 2 * day } ] },
                     { "id": "order", "type": "rank", "label": "先做哪三件？", "rankTop": 3, "fallbackText": "排序",
                       "items": [ { "id": "photos", "label": "按活动整理照片", "meta": "约 2 周" },
                                  { "id": "share", "label": "群相册分享到微博", "meta": "约 4 天" },

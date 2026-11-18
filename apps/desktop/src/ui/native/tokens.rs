@@ -1277,6 +1277,9 @@ pub mod card_v21 {
     pub const BAR_ROWS_FOLD: usize = 12;
     /// How long an answer may sit with its author before the record says so, and before it
     /// offers 提醒一下: longer than a live event's waits, a queued run is normal.
+    /// How long after an answer 撤回 is offered: the server's own window
+    /// (`RETRACT_WINDOW_MS`, server/src/cards2/events.ts).
+    pub const RETRACT_WINDOW: Duration = Duration::from_secs(600);
     pub const SOFT_ANSWER_LIVE: Duration = Duration::from_secs(30);
     pub const HARD_ANSWER_LIVE: Duration = Duration::from_secs(180);
     pub const SOFT_ANSWER_RUN: Duration = Duration::from_secs(90);

@@ -467,6 +467,20 @@ pub fn answer_stage(events: &[MyCardEvent], now: Millis) -> (Option<AnswerStage>
     answer_stage_since(*at, ack.expect.mode, now)
 }
 
+/// True when the log holds an answer of mine on the card (a durable event that is not a
+/// 撤回): its ack, not a guess, says how the author takes it.
+pub fn has_answer(events: &[MyCardEvent]) -> bool {
+    events
+        .iter()
+        .any(|e| e.durable && !e.dropped && e.request.event != ANSWER_RETRACT)
+}
+
+/// True while the server still takes back an answer stored at `at` ([`t::RETRACT_WINDOW`],
+/// the server's own window; it has the last word).
+pub fn retract_open(at: Millis, now: Millis) -> bool {
+    now - at < ms(t::RETRACT_WINDOW)
+}
+
 /// [`answer_stage`] of an answer the author has had since `at`, expected in `mode` (a
 /// 2.0 answer has no ack that says: it waits like a run).
 pub fn answer_stage_since(
@@ -506,8 +520,11 @@ pub const ANSWER_RETRACT: &str = "answer.retract";
 pub enum Retract {
     /// On its way: the button spins.
     Sending,
-    /// The server refused it: the member has started.
+    /// The server refused it because the answer can no longer be taken back: the member
+    /// has started.
     Refused,
+    /// It did not go through for another reason (not sent, too many at once): 撤回 stays.
+    NotSent,
 }
 
 /// The state of my newest 撤回 on the card, if it still shows: on its way, or refused. An
@@ -519,9 +536,12 @@ pub fn retract_state(events: &[MyCardEvent]) -> Option<Retract> {
         .find(|e| e.request.event == ANSWER_RETRACT && !e.dropped)?;
     match &e.phase {
         CardEventPhase::Sending => Some(Retract::Sending),
-        CardEventPhase::Failed { failure, .. } if *failure != CardEventFailure::Offline => {
-            Some(Retract::Refused)
-        }
+        // `card.retract_closed` (and an answer or a card that is gone) is a conflict.
+        CardEventPhase::Failed {
+            failure: CardEventFailure::Conflict,
+            ..
+        } => Some(Retract::Refused),
+        CardEventPhase::Failed { .. } => Some(Retract::NotSent),
         _ => None,
     }
 }
@@ -1503,6 +1523,21 @@ mod tests {
             at: 5,
         };
         assert_eq!(retract_state(&[refused.clone()]), Some(Retract::Refused));
+        // Only a refusal that says the answer is closed reads as "the member has started".
+        for failure in [
+            CardEventFailure::Other,
+            CardEventFailure::RateLimited,
+            CardEventFailure::Offline,
+        ] {
+            let mut lost = r.clone();
+            lost.phase = CardEventPhase::Failed { failure, at: 5 };
+            assert_eq!(retract_state(&[lost]), Some(Retract::NotSent));
+        }
+        // 撤回 shows only while the server would take the answer back.
+        assert!(retract_open(0, ms(t::RETRACT_WINDOW) - 1));
+        assert!(!retract_open(0, ms(t::RETRACT_WINDOW)));
+        assert!(has_answer(&[ev(ExpectMode::None, 0, true)]));
+        assert!(!has_answer(&[r.clone()]) && !has_answer(&[ev(ExpectMode::Live, 0, false)]));
         // Accepted: the answer goes with `card.retracted`; nothing stays here.
         let acked = ev(ExpectMode::Run, 0, true);
         let mut ok = r.clone();

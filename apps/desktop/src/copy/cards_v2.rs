@@ -51,6 +51,7 @@ crate::copy! {
     RECORD_SENT_TO = "· 已发给 {name}",
     RECORD_SENDING_TO = "· 正在发给 {name}",
     RECORD_UNDO_REFUSED = "· {name} 已经开始了，撤不回了",
+    RECORD_UNDO_NOT_SENT = "· 没撤回成，再试一次",
     RECORD_EXPAND = "展开",
     RECORD_COLLAPSE = "收起",
 

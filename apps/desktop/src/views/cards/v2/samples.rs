@@ -1319,6 +1319,37 @@ fn all() -> Vec<Sample> {
             json!({ "style": "eight" }),
             now - ago,
         ));
+        // The ack of the answer said a run takes it: the record may say the run never
+        // started.
+        if id == RECORD_SLOW || id == RECORD_SILENT {
+            s.events.push(crate::data::cards_v2::MyCardEvent {
+                client_event_id: format!("ce-{id}"),
+                request: crate::data::cards_v2::CardEventRequest {
+                    rev: 1,
+                    action_id: Some("pick".into()),
+                    event: "action.press".into(),
+                    ..Default::default()
+                },
+                durable: true,
+                sent_at: now - ago - 80,
+                phase: crate::data::cards_v2::CardEventPhase::Acked {
+                    ack: crate::data::cards_v2::CardEventAck {
+                        event_id: format!("ev-{id}"),
+                        stored: true,
+                        answer_id: Some(format!("an-{id}")),
+                        duplicate: None,
+                        expect: crate::data::cards_v2::Expect {
+                            by: FORGE.into(),
+                            mode: crate::data::cards_v2::ExpectMode::Run,
+                            eta_ms: None,
+                        },
+                    },
+                    at: now - ago,
+                },
+                dropped: false,
+                reply: None,
+            });
+        }
         if id == RECORD_REFUSED {
             s.events.push(crate::data::cards_v2::MyCardEvent {
                 client_event_id: "ce-retract".into(),

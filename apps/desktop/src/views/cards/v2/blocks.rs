@@ -1739,8 +1739,12 @@ pub(crate) fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement
     // The server has the last word: a refusal says the member has started.
     let stored = mine && !sending;
     let retract = interact::retract_state(&events).filter(|_| stored);
+    // The server takes an answer back only for a while (INTERACT §3.6): past that the
+    // button would only ever be refused, so it goes.
+    let in_window = at.is_some_and(|at| interact::retract_open(at, ctx.env.now()));
     let can_retract = stored
         && retract != Some(interact::Retract::Refused)
+        && (in_window || retract == Some(interact::Retract::Sending))
         && provider.can_retract_card_v2_answer(&ctx.msg.group_id, &ctx.msg.message_id);
     // An answer nobody picks up says so (the record would read 已发给 for ever).
     let waiting =
@@ -1810,6 +1814,7 @@ pub(crate) fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement
             // not started (and, at the end, never took it).
             let tail = match (retract, waiting) {
                 (Some(interact::Retract::Refused), _) => c::RECORD_UNDO_REFUSED,
+                (Some(interact::Retract::NotSent), _) if can_retract => c::RECORD_UNDO_NOT_SENT,
                 (_, Some(interact::AnswerStage::Silent)) => c21::RECORD_NEVER_STARTED,
                 (_, Some(interact::AnswerStage::Slow)) => c21::RECORD_NOT_STARTED,
                 _ if sending => c::RECORD_SENDING_TO,
@@ -1891,11 +1896,16 @@ fn record_wait(
     }
     let now = ctx.env.now();
     // A 2.1 answer's ack says how the member takes it; a 2.0 answer waits like a run.
-    let (stage, next) = match interact::answer_stage(events, now) {
-        (None, None) => {
-            interact::answer_stage_since(at, crate::data::cards_v2::ExpectMode::Run, now)
-        }
-        known => known,
+    // The ack of a 2.1 answer says how the member takes it, and that word stands (a
+    // member that is offline, or one that takes answers without a run, is not late).
+    // With no ack to go by (a 2.0 answer, or the app restarted since), only a member that
+    // has run in this 话题 before is expected to start a run for the answer.
+    let (stage, next) = if interact::has_answer(events) {
+        interact::answer_stage(events, now)
+    } else if !runs.is_empty() {
+        interact::answer_stage_since(at, crate::data::cards_v2::ExpectMode::Run, now)
+    } else {
+        (None, None)
     };
     if let Some(next) = next {
         let wait = std::time::Duration::from_millis((next - now).max(0) as u64 + 20);
@@ -2189,40 +2199,40 @@ pub(crate) fn form_grid(
             cx,
         );
         let top = matches!(kind, InputKind::Chips | InputKind::Textarea);
+        let row = div()
+            .flex()
+            .when(top, |el| el.items_start())
+            .when(!top, |el| el.items_center())
+            .gap(space::S12)
+            // FormRow (§2.8, D8): the label left-aligned in a 112 column (gap
+            // included, so the field starts 112 in as in the sheets), the
+            // control fills the value column.
+            .child(
+                div()
+                    .n_body()
+                    .flex_none()
+                    .w(m::FORM_LABEL - space::S12)
+                    .one_line()
+                    .when(kind == &InputKind::Textarea, |el| el.pt(space::S4))
+                    .text_color(k.ink)
+                    .child(label.clone()),
+            )
+            .child(div().flex_1().min_w(px(0.)).child(control));
+        // What the member says about the field (`help`) goes under the field, so the
+        // label stays level with the field and not with the two of them.
+        let help = help.as_ref().filter(|h| !h.trim().is_empty()).map(|h| {
+            meta(div())
+                .pl(m::FORM_LABEL)
+                .text_color(k.ink_3)
+                .child(h.clone())
+        });
         rows.push(
             div()
                 .flex()
-                .when(top, |el| el.items_start())
-                .when(!top, |el| el.items_center())
-                .gap(space::S12)
-                // FormRow (§2.8, D8): the label left-aligned in a 112 column (gap
-                // included, so the field starts 112 in as in the sheets), the
-                // control fills the value column.
-                .child(
-                    div()
-                        .n_body()
-                        .flex_none()
-                        .w(m::FORM_LABEL - space::S12)
-                        .one_line()
-                        .when(kind == &InputKind::Textarea, |el| el.pt(space::S4))
-                        .text_color(k.ink)
-                        .child(label.clone()),
-                )
-                // The field, and what the member says about it under it (`help`).
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w(px(0.))
-                        .flex()
-                        .flex_col()
-                        .gap(space::S4)
-                        .child(control)
-                        .children(
-                            help.as_ref()
-                                .filter(|h| !h.trim().is_empty())
-                                .map(|h| meta(div()).text_color(k.ink_3).child(h.clone())),
-                        ),
-                )
+                .flex_col()
+                .gap(space::S4)
+                .child(row)
+                .children(help)
                 .into_any_element(),
         );
     }
