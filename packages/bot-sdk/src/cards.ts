@@ -153,14 +153,6 @@ function cancelAction(label: string | undefined): CardV2Action[] {
 /** How many problems of one card an error lists. */
 const MAX_CARD_ISSUES = 5;
 
-/** Ids that occur more than once in a list, each once. */
-function repeated(ids: string[]): string[] {
-  const seen = new Set<string>();
-  const out = new Set<string>();
-  for (const id of ids) (seen.has(id) ? out : seen).add(id);
-  return [...out];
-}
-
 /** One schema issue as a line that names the block (or action) it is in. */
 function issueLine(card: CardV2, path: readonly PropertyKey[], message: string): string {
   const list = (key: PropertyKey | undefined): unknown[] | undefined => {
@@ -173,23 +165,6 @@ function issueLine(card: CardV2, path: readonly PropertyKey[], message: string):
     const rest = path.slice(2).join(".");
     const what = path[0] === "blocks" ? `block ${id}${typeof at.type === "string" ? ` (${at.type})` : ""}` : `action ${id}`;
     return `${what}${rest ? ` ${rest}` : ""}: ${message}`;
-  }
-  // The card-wide write rules come with the path `blocks`; say which ids they mean.
-  if (/block ids are unique/.test(message)) {
-    const all = (list("blocks") ?? []).flatMap((b) => {
-      const x = b as { id?: unknown; blocks?: { id?: unknown }[] };
-      return [x?.id, ...(Array.isArray(x?.blocks) ? x.blocks.map((c) => c?.id) : [])];
-    });
-    const twice = repeated(all.filter((x): x is string => typeof x === "string"));
-    if (twice.length > 0) return `${message} (used twice: ${twice.join(", ")})`;
-  }
-  if (/action ids are unique/.test(message)) {
-    const twice = repeated((list("actions") ?? []).map((a) => (a as { id?: unknown })?.id).filter((x): x is string => typeof x === "string"));
-    if (twice.length > 0) return `${message} (used twice: ${twice.join(", ")})`;
-  }
-  if (/at most one primary action/.test(message)) {
-    const primary = (list("actions") ?? []).filter((a) => (a as { style?: unknown })?.style === "primary").map((a) => String((a as { id?: unknown }).id));
-    return `actions: ${message} (primary: ${primary.join(", ")})`;
   }
   const where = path.join(".");
   // A write rule (`card.limits: …`) names its block itself; the path `blocks` adds nothing.

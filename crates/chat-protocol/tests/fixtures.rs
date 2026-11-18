@@ -719,6 +719,37 @@ fn diagram_checks_match_the_shared_cases() {
 }
 
 #[test]
+fn card_v2_write_rules_name_the_ids() {
+    let twice: CardV2 = serde_json::from_str(
+        r#"{"v":2,"rev":1,"intent":"info","title":"t","fallback":"f",
+            "blocks":[{"id":"a","type":"divider"},{"id":"b","type":"divider"},{"id":"a","type":"divider"},{"id":"b","type":"divider"}]}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        twice.problem().unwrap().message,
+        "block ids are unique (used twice: a, b)"
+    );
+    let actions: CardV2 = serde_json::from_str(
+        r#"{"v":2,"rev":1,"intent":"info","title":"t","fallback":"f","blocks":[],
+            "actions":[{"id":"x","label":"1"},{"id":"x","label":"2"}]}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        actions.problem().unwrap().message,
+        "action ids are unique (used twice: x)"
+    );
+    let primary: CardV2 = serde_json::from_str(
+        r#"{"v":2,"rev":1,"intent":"info","title":"t","fallback":"f","blocks":[],
+            "actions":[{"id":"go","label":"1","style":"primary"},{"id":"send","label":"2","style":"primary"}]}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        primary.problem().unwrap().message,
+        "at most one primary action (primary: go, send)"
+    );
+}
+
+#[test]
 fn card_v2_write_rules_name_the_reason() {
     let card: CardV2 = serde_json::from_str(
         r#"{"v":2,"catalog":"tc.card/2.1","rev":1,"intent":"info","title":"t","fallback":"f",
