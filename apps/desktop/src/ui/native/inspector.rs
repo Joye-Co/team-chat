@@ -93,6 +93,8 @@ impl InspectorSection {
         self
     }
 
+    /// Starts folded. Without [`Self::on_toggle`] the section keeps its own state
+    /// from there: its chevron always folds it.
     pub fn collapsed(mut self, collapsed: bool) -> Self {
         self.collapsed = collapsed;
         self
@@ -127,7 +129,33 @@ impl InspectorSection {
 impl RenderOnce for InspectorSection {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = native_colors(cx);
-        let chevron = if self.collapsed {
+        // A view that does not hold the state itself: the section remembers it, so a
+        // chevron is never a dead control.
+        let initial = self.collapsed;
+        let own = self
+            .on_toggle
+            .is_none()
+            .then(|| window.use_keyed_state(self.id.clone(), cx, |_, _| initial));
+        let collapsed = own.as_ref().map_or(initial, |s| *s.read(cx));
+        let on_toggle = self.on_toggle.clone().or_else(|| {
+            own.map(|s| -> Click {
+                Rc::new(move |_, _, cx| {
+                    s.update(cx, |c, cx| {
+                        *c = !*c;
+                        cx.notify();
+                    })
+                })
+            })
+        });
+        // A click on the action is the action's, not the header's.
+        let action = self.action.map(|el| {
+            div()
+                .id("section-action")
+                .flex_none()
+                .on_click(|_, _, cx| cx.stop_propagation())
+                .child(el)
+        });
+        let chevron = if collapsed {
             Sf::ChevronRight
         } else {
             Sf::ChevronDown
@@ -176,12 +204,10 @@ impl RenderOnce for InspectorSection {
                                 .text_color(k.secondary)
                                 .children(self.note.map(TruncText::new)),
                         )
-                        .children(self.action)
-                        .when_some(self.on_toggle, |d, f| {
-                            d.on_click(move |e, w, cx| f(e, w, cx))
-                        }),
+                        .children(action)
+                        .when_some(on_toggle, |d, f| d.on_click(move |e, w, cx| f(e, w, cx))),
                 )
-                .when(!self.collapsed, |d| {
+                .when(!collapsed, |d| {
                     d.child(
                         div()
                             .w_full()
@@ -203,7 +229,7 @@ impl RenderOnce for InspectorSection {
         // (12 medium muted) with an optional 28 ghost action. With an action the
         // first row starts 4 lower, so the 28 control never sits 2 above a
         // selected row's fill.
-        let has_action = self.action.is_some();
+        let has_action = action.is_some();
         div()
             .w_full()
             .px(metrics::INSPECTOR_PAD)
@@ -233,15 +259,13 @@ impl RenderOnce for InspectorSection {
                             .text_color(k.secondary)
                             .child(self.title),
                     )
-                    .children(self.action)
-                    .when_some(self.on_toggle, |d, f| {
-                        d.on_click(move |e, w, cx| f(e, w, cx))
-                    }),
+                    .children(action)
+                    .when_some(on_toggle, |d, f| d.on_click(move |e, w, cx| f(e, w, cx))),
             )
-            .when(has_action && !self.collapsed, |d| {
+            .when(has_action && !collapsed, |d| {
                 d.child(div().flex_none().h(super::tokens::space::S4))
             })
-            .when(!self.collapsed, |d| d.children(self.rows))
+            .when(!collapsed, |d| d.children(self.rows))
             .into_any_element()
     }
 }

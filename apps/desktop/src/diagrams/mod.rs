@@ -856,6 +856,7 @@ pub fn source_order(source: &str, nodes: &[renderer::DiagramNode]) -> Vec<Node> 
                     y: n.y as f32,
                     w: n.w as f32,
                     h: n.h as f32,
+                    head: n.head.map(|h| h as f32),
                 },
             )
         })

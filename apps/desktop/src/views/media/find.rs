@@ -1,8 +1,9 @@
 //! Find in a document of the viewer sheet (⌘F), with the find bar of a 话题
 //! (`timeline::find`): a field, `n / m`, the previous and the next match and
-//! close. A Markdown document marks every match in its text; a code file and
-//! a table mark the lines and rows that hold one. The view scrolls to the
-//! current match. Matching is the timeline's: case-insensitive, by characters.
+//! close. A Markdown document and a code file mark every match in their text
+//! (a code file also bands the lines that hold one); a table marks the rows
+//! that hold one. The view scrolls to the current match. Matching is the timeline's:
+//! case-insensitive, by characters.
 
 use std::{cell::Cell, ops::Range, rc::Rc};
 
@@ -270,7 +271,7 @@ pub fn bar(id: &SharedString, state: &Entity<MediaState>, cx: &App) -> Option<gp
             .children(count.map(|count| {
                 div()
                     .flex_none()
-                    .n_body()
+                    .n_footnote()
                     .tnum()
                     .text_color(n.secondary)
                     .child(count)

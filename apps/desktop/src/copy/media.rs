@@ -72,7 +72,7 @@ crate::copy! {
     STATE_READY = "可以看了",
     STATE_FAILED = "预览失败",
     STATE_FAILED_DETAIL = "预览失败 · 这种格式没法在应用里打开",
-    STATE_FAILED_RETRY = "这个版本没有读出来，可以再试一次。",
+    STATE_FAILED_RETRY = "这个文件暂时打不开，可以再试一次。",
     RETRY = "重试",
     STATE_TOO_LARGE_HINT = "可以先压缩，或放到共享盘再贴链接",
     STATE_TOO_LARGE_DETAIL = "{size}，超过 {limit}",

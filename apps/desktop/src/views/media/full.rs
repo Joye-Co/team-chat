@@ -22,7 +22,7 @@ use gpui_component::{
 use crate::ui::native::FocusRow as _;
 
 use super::{
-    inline::{code_line, fit, group_digits},
+    inline::{LineMarks, code_line_marked, fit, group_digits},
     parts::{self, mono, tool},
     screen,
     state::{MediaState, SPEEDS, Target},
@@ -285,6 +285,7 @@ pub fn failed(
                 // failure, one Alert).
                 ui::native::Alert::new(Sym::Warning, cm::STATE_FAILED)
                     .tone(ui::native::AlertTone::Destructive)
+                    .on_card()
                     .description(cm::STATE_FAILED_RETRY)
                     .action(
                         ui::native::push_button(
@@ -439,8 +440,8 @@ fn file(spec: &FullSpec, cx: &App) -> AnyElement {
                         ui::native::push_button(
                             id(spec, "sysbig"),
                             cm::OPEN_WITH_SYSTEM,
-                            ui::PushStyle::Outline,
-                            ui::PushSize::Regular,
+                            ui::PushStyle::Default,
+                            ui::PushSize::Small,
                             cx,
                         )
                         .on_click(move |_, _, cx| parts::open_with_system(&path, cx)),
@@ -597,7 +598,7 @@ fn html(
     };
     let header = head(
         spec,
-        Sym::Document,
+        spec.media.kind.icon(),
         spec.media.title.clone(),
         Head {
             meta: Some(meta.into()),
@@ -689,10 +690,12 @@ fn markdown_blocks(
         .then_some(head)
         .into_iter()
         .chain(parts_.into_iter().enumerate().map(|(i, (_, body))| {
-            // ⌘F: the matches of this part, the current one stronger. A current
-            // match that cannot carry a mark (in code, a link, a diagram) gets
-            // a band behind its part instead, as a row of a 话题 does.
+            // ⌘F: the matches of this part, the current one stronger; those in a code
+            // fence are painted by the fence's highlighter. A current match that cannot
+            // carry a mark (inline code, a link, a diagram) gets a band behind its part
+            // instead, as a row of a 话题 does.
             let mut band = false;
+            let mut code_marks = Vec::new();
             let body = match found.and_then(|f| f.matches.get(i).map(|m| (f, m))) {
                 Some((f, ranges)) if !ranges.is_empty() => {
                     let current = f.current.filter(|(part, _)| *part == i).map(|(_, m)| m);
@@ -703,19 +706,32 @@ fn markdown_blocks(
                         ui::native::tokens::find::match_fill(&palette),
                         ui::native::tokens::find::current_fill(&palette),
                     );
-                    band = current.is_some() && !current_marked;
+                    let (fences, current_fenced) = crate::views::timeline::find::fence_marks(
+                        &body,
+                        ranges,
+                        current,
+                        ui::native::tokens::find::match_fill(&palette),
+                        ui::native::tokens::find::current_fill(&palette),
+                    );
+                    code_marks = fences;
+                    band = current.is_some() && !current_marked && !current_fenced;
                     marked
                 }
                 _ => body,
             };
             div()
-                .when(band, |d| d.bg(ui::native::native_colors(cx).fill))
+                .when(band, |d| {
+                    d.bg(ui::native::native_colors(cx).fill)
+                        .rounded(radius::MD)
+                        .mx(-space::S8)
+                        .px(space::S8)
+                })
                 // A section sits further from the block above it than its heading
                 // sits from its own content, so each heading reads with what it heads.
                 .when(i > 0, |d| d.pt(space::S16))
                 .pb(space::S8)
                 // A ```mermaid fence of the document is drawn as a diagram.
-                .child(markdown::document_body(
+                .child(markdown::document_body_marked(
                     ElementId::Name(format!("{id}-md-{i}").into()),
                     body,
                     &markdown::DocContext {
@@ -723,6 +739,8 @@ fn markdown_blocks(
                         version: media.key.version,
                         part: i,
                     },
+                    code_marks,
+                    k.text_1,
                 ))
                 .into_any_element()
         }))
@@ -770,7 +788,7 @@ fn markdown_view(
     let k = theme::colors(cx);
     let (title, parts_) = sections(&md.text);
     let st = state.read(cx);
-    let (toc_on, selected, scroll) = (st.sidebar, st.toc, st.scroll.clone());
+    let (toc_on, toc_at, scroll) = (st.sidebar, st.toc.clone(), st.scroll.clone());
     let mut toc = div()
         .w(px(128.))
         .flex_none()
@@ -793,6 +811,8 @@ fn markdown_view(
     let bodies: Vec<&str> = parts_.iter().map(|(_, body)| body.as_str()).collect();
     let found = super::find::found(state, &bodies, cx);
     if let Some((part, _)) = found.as_ref().filter(|f| f.reveal).and_then(|f| f.current) {
+        // The table of contents names the part the document moves to.
+        toc_at.set(part);
         // The part's distance from the first part, both measured in one frame: the
         // sheet may still be sliding in, so a position in the window is not to be
         // trusted. Before the parts were laid out once, the next frame tries again.
@@ -806,6 +826,7 @@ fn markdown_view(
             _ => super::find::reveal_again(state, cx),
         }
     }
+    let selected = toc_at.get();
     for (i, (h, _)) in parts_.iter().enumerate() {
         let Some(h) = h else { continue };
         let go = state.clone();
@@ -825,7 +846,7 @@ fn markdown_view(
                 .on_click(move |_, _, cx| {
                     handle.scroll_to_top_of_item(i + offset);
                     go.update(cx, |s, cx| {
-                        s.toc = i;
+                        s.toc.set(i);
                         cx.notify();
                     });
                 }),
@@ -859,7 +880,6 @@ fn markdown_view(
         Head {
             meta: Some(
                 [
-                    Some(cm::KIND_MARKDOWN.to_string()),
                     version_word(spec),
                     Some(fill(
                         cm::MD_WORDS,
@@ -1201,6 +1221,7 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
     let player: AnyElement = match player_dir(&spec.media, v) {
         Some(dir) => {
             let follow = state.clone();
+            let seek = spec.clone();
             WebEmbed::new(
                 id(spec, "player"),
                 WebEmbedSpec::new(
@@ -1217,6 +1238,12 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
                     && name == "time"
                 {
                     let t = payload["t"].as_f64().unwrap_or(0.);
+                    // The player's first report says it is there: the frame the view
+                    // opened at is applied now, and its 0 is not the position.
+                    if let Some(at) = follow.update(cx, |s, _| s.pending_seek.take()) {
+                        seek_player(&seek, at, cx);
+                        return;
+                    }
                     follow.update(cx, |s, cx| {
                         s.position = t;
                         cx.notify();
@@ -1455,7 +1482,7 @@ const PLAYER_HTML: &str = r##"<!doctype html><html><head><meta charset="utf-8"><
 html,body{margin:0;height:100%;background:#16161A;color:#C9C9D1;font:12px -apple-system,"Segoe UI Variable Text","Segoe UI","PingFang SC","Microsoft YaHei UI",sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden}
 @media (prefers-color-scheme: dark){html,body{background:#0B0B0D}}
 .wrap{position:absolute;inset:0;display:flex;flex-direction:column}
-.stage{flex:1;position:relative;min-height:0}
+.stage{flex:1;position:relative;min-height:0;background:url("{POSTER}") center/contain no-repeat}
 video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:transparent}
 .big{position:absolute;left:50%;top:50%;width:52px;height:52px;margin:-26px 0 0 -26px;border-radius:50%;border:0;background:rgba(255,255,255,.8);cursor:pointer;display:flex;align-items:center;justify-content:center}
 .big svg{width:20px;height:20px;margin-left:3px}
@@ -1472,9 +1499,9 @@ video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;backgr
 .speed{padding:2px 7px!important;font:12px -apple-system,"Segoe UI Variable Text","Segoe UI",sans-serif;font-variant-numeric:tabular-nums}
 </style></head><body><div class="wrap">
 <div class="stage"><video id="v" src="{SRC}" poster="{POSTER}" playsinline preload="metadata"></video>
-<button class="big" id="big" aria-label="{PLAY}"><svg viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z" fill="#141416"/></svg></button></div>
+<button class="big" id="big" aria-label="{PLAY}"><svg viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z" fill="none" stroke="#141416" stroke-width="1.75" stroke-linejoin="round"/></svg></button></div>
 <div class="bar">
-<button id="pp" aria-label="{PLAY}"><svg viewBox="0 0 24 24" id="ppi"><path d="M7 4l13 8-13 8z" fill="currentColor"/></svg></button>
+<button id="pp" aria-label="{PLAY}"><svg viewBox="0 0 24 24" id="ppi"><path d="M7 4l13 8-13 8z"/></svg></button>
 <span class="time" id="tm">0:00 <i>/ 0:00</i></span>
 <div class="track" id="tr"><div class="segs" id="segs"></div><div class="thumb" id="th"></div></div>
 <button class="speed" id="sp">1×</button>
@@ -1492,7 +1519,7 @@ parts.forEach(function(p){var d=document.createElement('div');d.className='seg';
 function layout(){var T=dur()||1;parts.forEach(function(p){var e=p.end==null?T:p.end;p.el.style.flex=Math.max(0.001,(e-p.t)/T)+' 1 0'})}
 function draw(){var T=dur()||1,t=v.currentTime;parts.forEach(function(p){var e=p.end==null?T:p.end;var f=Math.min(1,Math.max(0,(t-p.t)/(e-p.t)));p.el.firstChild.style.width=(f*100)+'%'});th.style.left=(t/T*100)+'%';tm.innerHTML=fmt(t)+' <i>/ '+fmt(T)+'</i>'}
 var last=-1;function report(){if(Math.abs(v.currentTime-last)<0.2)return;last=v.currentTime;try{window.artifact.emitEvent('time',{t:v.currentTime})}catch(e){}}
-function icon(){document.getElementById('ppi').innerHTML=v.paused?'<path d="M7 4l13 8-13 8z" fill="currentColor"/>':'<rect x="6" y="5" width="4" height="14" fill="currentColor"/><rect x="14" y="5" width="4" height="14" fill="currentColor"/>';document.getElementById('big').style.display=v.paused&&v.currentTime<0.01?'flex':'none'}
+function icon(){document.getElementById('ppi').innerHTML=v.paused?'<path d="M7 4l13 8-13 8z"/>':'<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>';document.getElementById('big').style.display=v.paused&&v.currentTime<0.01?'flex':'none'}
 function toggle(){if(v.paused)v.play();else v.pause()}
 document.getElementById('big').onclick=toggle;document.getElementById('pp').onclick=toggle;v.onclick=toggle;
 var speeds=[1,1.25,1.5,2,0.75],si=0;document.getElementById('sp').onclick=function(){si=(si+1)%speeds.length;v.playbackRate=speeds[si];this.textContent=speeds[si]+'×'};
@@ -1501,7 +1528,7 @@ document.getElementById('pip').onclick=function(){try{if(v.webkitSetPresentation
 if(!v.webkitSetPresentationMode&&!document.pictureInPictureEnabled)document.getElementById('pip').style.display='none';
 document.getElementById('tr').onclick=function(e){var r=this.getBoundingClientRect();v.currentTime=(e.clientX-r.left)/r.width*dur()};
 window.seekTo=function(t){v.currentTime=t;draw();report()};
-v.addEventListener('loadedmetadata',function(){layout();draw()});
+v.addEventListener('loadedmetadata',function(){layout();draw();report()});
 v.addEventListener('timeupdate',function(){draw();report()});
 v.addEventListener('play',icon);v.addEventListener('pause',icon);v.addEventListener('seeked',function(){draw();report();icon()});
 document.addEventListener('keydown',function(e){if(e.key===' '){e.preventDefault();toggle()}if(e.key==='ArrowRight')v.currentTime+=5;if(e.key==='ArrowLeft')v.currentTime-=5});
@@ -1658,7 +1685,7 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
                 .flex()
                 .gap(space::S12)
                 .when(current == Some(i), |el| el.bg(k.selected))
-                .child(mono(super::clock_text(c.t), k.text_3).w(px(40.)).pt(px(2.)))
+                .child(mono(super::clock_text(c.t), k.text_3).w(px(40.)))
                 .child(
                     div()
                         .flex_1()
@@ -1675,11 +1702,28 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
         );
     }
     let round = |idn: &str, icon: Sym, label: &'static str| tool(id(spec, idn), icon, label);
+    // The transcript is what this view can copy: every cue, as its rows read.
+    let transcript = (!a.transcript.is_empty()).then(|| {
+        a.transcript
+            .iter()
+            .map(|c| {
+                let time = super::clock_text(c.t);
+                match &c.speaker {
+                    Some(s) => format!("{time} {s} {}", c.text),
+                    None => format!("{time} {}", c.text),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    });
     let header = head(
         spec,
         Sym::Audio,
         spec.media.file_name().to_string(),
         Head {
+            copy: transcript.map(|all| -> Rc<dyn Fn(&mut App)> {
+                Rc::new(move |cx: &mut App| super::parts::copy_text(all.clone(), cm::COPIED, cx))
+            }),
             meta: Some(
                 format!(
                     "{} · {}",
@@ -1741,8 +1785,8 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
                             mono(
                                 format!(
                                     "{} / {}",
-                                    super::clock_text(position),
-                                    super::clock_text(a.duration)
+                                    super::time_text(position),
+                                    super::time_text(a.duration)
                                 ),
                                 k.text_1,
                             )
@@ -1963,7 +2007,7 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
     }
     let header = head(
         spec,
-        Sym::Document,
+        spec.media.kind.icon(),
         spec.media.file_name().to_string(),
         Head {
             meta: Some(
@@ -2020,6 +2064,11 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
         Some(f) => (0..c.lines.len()).map(|i| f.line_fill(i, cx)).collect(),
         None => Vec::new(),
     });
+    // The matches themselves, and which one is current (line, match on the line).
+    let marks: Arc<Vec<Vec<std::ops::Range<usize>>>> =
+        Arc::new(found.as_ref().map_or_else(Vec::new, |f| f.matches.clone()));
+    let current = found.as_ref().and_then(|f| f.current);
+    let list_marks = marks.clone();
     let list_lines = lines.clone();
     let list_fills = fills.clone();
     let list = uniform_list(id(spec, "lines"), lines.len(), move |range, _window, cx| {
@@ -2027,6 +2076,16 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
         range
             .map(|i| {
                 let mut block = starts[i];
+                let on_current = current.is_some_and(|(at, _)| at == i);
+                let line_marks =
+                    list_marks
+                        .get(i)
+                        .filter(|r| !r.is_empty())
+                        .map(|ranges| LineMarks {
+                            ranges,
+                            current: current.filter(|(at, _)| *at == i).map(|(_, m)| m),
+                            on_current,
+                        });
                 div()
                     .h(px(20.))
                     .flex()
@@ -2040,10 +2099,16 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
                             .pr(space::S12)
                             .flex()
                             .justify_end()
-                            .text_color(k.text_3)
+                            .text_color(if on_current { k.text_1 } else { k.text_3 })
                             .child((i + 1).to_string()),
                     )
-                    .child(code_line(&list_lines[i], lang, &mut block, cx))
+                    .child(code_line_marked(
+                        &list_lines[i],
+                        lang,
+                        &mut block,
+                        line_marks,
+                        cx,
+                    ))
             })
             .collect()
     })
@@ -2055,7 +2120,7 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
     let toggle = state.clone();
     let header = head(
         spec,
-        Sym::CodeFile,
+        spec.media.kind.icon(),
         spec.media.file_name().to_string(),
         Head {
             meta: Some(
@@ -2096,7 +2161,32 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
             .flex_1()
             .overflow_y_scroll()
             .t_code();
+        let sheet = ui::native::native_colors(cx).sheet;
         for (i, l) in lines.iter().enumerate() {
+            let on_current = current.is_some_and(|(at, _)| at == i);
+            // The same marks as the unwrapped lines, on text that may wrap.
+            let highlights: Vec<(std::ops::Range<usize>, gpui::HighlightStyle)> = marks
+                .get(i)
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .map(|(m, range)| {
+                    let now = current == Some((i, m));
+                    (
+                        range.clone(),
+                        gpui::HighlightStyle {
+                            font_weight: Some(theme::MEDIUM_WEIGHT),
+                            underline: Some(gpui::UnderlineStyle {
+                                thickness: ui::native::metrics::HAIRLINE,
+                                ..Default::default()
+                            }),
+                            color: now.then_some(sheet),
+                            background_color: now.then_some(k.text_1),
+                            ..Default::default()
+                        },
+                    )
+                })
+                .collect();
             col = col.child(
                 div()
                     .flex()
@@ -2108,15 +2198,14 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
                             .pr(space::S12)
                             .flex()
                             .justify_end()
-                            .text_color(k.text_3)
+                            .text_color(if on_current { k.text_1 } else { k.text_3 })
                             .child((i + 1).to_string()),
                     )
                     .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.))
-                            .text_color(k.text_1)
-                            .child(l.clone()),
+                        div().flex_1().min_w(px(0.)).text_color(k.text_1).child(
+                            gpui::StyledText::new(SharedString::from(l.clone()))
+                                .with_highlights(highlights),
+                        ),
                     ),
             );
         }

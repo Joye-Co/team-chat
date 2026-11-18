@@ -6,7 +6,7 @@
 //! read the way Slack reads them, and Chinese `**结论：**正文` in bold (see
 //! [`source::fix_cjk_strong`]). Views call [`message_body`]; they never
 //! build a `TextView` for message text themselves. A Markdown 产出 renders
-//! through [`document_body`]. Code fences show their language and are
+//! through [`document_body_marked`]. Code fences show their language and are
 //! highlighted ([`code`]); in the timeline a long one is folded ([`fold`]).
 
 mod code;
@@ -141,6 +141,7 @@ pub fn message_body_refs(
             streaming: d.streaming,
         }),
         refs,
+        None,
         // A long code fence of a finished timeline message is folded; while
         // the body streams its text still changes under the fold.
         match diagrams {
@@ -164,10 +165,15 @@ pub struct DocContext {
 /// body, and its ```mermaid fences are drawn as diagrams (at most
 /// [`crate::diagrams::MAX_PER_MESSAGE`] per part). Nothing in a document is
 /// folded: the reader is where the whole text is read.
-pub fn document_body(
+///
+/// `code_marks` are the find bar's matches inside its code fences, painted in `ink` on
+/// each match's fill.
+pub fn document_body_marked(
     id: impl Into<ElementId>,
     text: impl Into<SharedString>,
     doc: &DocContext,
+    code_marks: Vec<crate::views::timeline::find::FenceMarks>,
+    ink: gpui::Hsla,
 ) -> TextView {
     build(
         id,
@@ -179,6 +185,7 @@ pub fn document_body(
             streaming: false,
         }),
         None,
+        (!code_marks.is_empty()).then(|| code::marked_highlighter(code_marks, ink)),
         CodeFolds::None,
     )
     .0
@@ -191,7 +198,7 @@ enum CodeFolds {
     None,
     /// Each shows its first lines until the person opens it.
     Folded,
-    /// Each is opened first (something points into this body), then as `Folded`.
+    /// Each is open until the person closes it (something points into this body).
     Open,
 }
 
@@ -208,6 +215,7 @@ fn build(
     edited: bool,
     diagrams: Option<DiagramsOf>,
     refs: Option<&crate::views::refs::markdown::RefsBody>,
+    highlighter: Option<code::Highlighter>,
     code_folds: CodeFolds,
 ) -> (TextView, bool) {
     let text: SharedString = text.into();
@@ -219,11 +227,8 @@ fn build(
     // The whole body, and the one drawn (its long code fences cut).
     let full_source = marked.unwrap_or(source);
     let fold_code = code_folds != CodeFolds::None;
-    if code_folds == CodeFolds::Open {
-        fold::open_all_code(&full_source);
-    }
     let source = if fold_code {
-        fold::fold_code_remembered(&full_source)
+        fold::fold_code_remembered(&full_source, code_folds == CodeFolds::Open)
     } else {
         full_source.clone()
     };
@@ -249,7 +254,10 @@ fn build(
         .plugin(EditedPlugin)
         .when_some(diagram_plugin, |view, p| view.plugin(p))
         .when_some(table_plugin, |view, p| view.plugin(p))
-        .code_block_highlighter(code::highlighter())
+        .code_block_highlighter(highlighter.unwrap_or_else(code::highlighter))
+        .code_block_backdrop(|code, _window, cx| {
+            diff_lines(&code.code(), code.lang().as_deref(), cx)
+        })
         .code_block_actions(move |code, _window, cx| {
             // The highlighter is built without the app: it learns the colors here.
             code::sync_colors(cx);
@@ -330,8 +338,10 @@ fn build(
                 .flex()
                 .items_center()
                 .gap(theme::space::S4)
-                .children(language)
+                // The hidden 问这里 keeps its width: it goes first, so the language
+                // rests beside the copy button.
                 .children(ask)
+                .children(language)
                 .children(collapse)
                 .child(copy)
                 .child(code_edge_fade(&shown, cx))
@@ -394,6 +404,29 @@ fn code_block_style() -> StyleRefinement {
     code
 }
 
+/// The `+` and `-` lines of a diff fence: each tint runs the block's whole inner width,
+/// as a Card v2 diff row does (a text run's own background would stop at its last letter).
+/// It holds while the code scrolls sideways; a tint this light leaves the text over it as
+/// it is.
+fn diff_lines(code: &str, info: Option<&str>, cx: &App) -> gpui::Div {
+    use crate::ui::native::tokens::{card_v2, layout, text};
+    let k = theme::colors(cx);
+    // The block's own width: 640, or the column when that is narrower.
+    div().relative().w(layout::IN_THREAD).max_w_full().children(
+        code::diff_lines(code, info.unwrap_or_default())
+            .into_iter()
+            .map(|(line, added)| {
+                div()
+                    .absolute()
+                    .top(layout::BORDER + CODE_STRIP + text::MONO.1 * line as f32)
+                    .left(layout::BORDER)
+                    .right(layout::BORDER)
+                    .h(text::MONO.1)
+                    .bg(if added { k.ok } else { k.bad }.opacity(card_v2::DIFF_FILL))
+            }),
+    )
+}
+
 /// The scroll cue of a code block (§2.17 "never a hard clip"): a 16 fade
 /// from transparent to the block fill over the block's right padding, from
 /// under the action strip to the bottom padding. A line that fits ends
@@ -430,8 +463,8 @@ pub struct DiagramContext {
     pub message_id: String,
     pub topic_id: String,
     pub streaming: bool,
-    /// A search, ⌘F or a reference jump points into this body: its long code
-    /// fences are opened, since what is pointed at may be past their cut.
+    /// A search, ⌘F or a reference jump pointed into this body: its long code
+    /// fences stay open, since what is pointed at may be past their cut.
     pub open_code: bool,
 }
 

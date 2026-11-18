@@ -25,10 +25,13 @@ pub struct MediaState {
     pub frame: Option<usize>,
     /// Audio position or the video's current time, in seconds.
     pub position: f64,
+    /// The video opened at a frame: where to move the player once it reports in.
+    pub pending_seek: Option<f64>,
     pub audio: Option<AudioPlayer>,
     pub speed: usize,
     pub sort: Option<(usize, bool)>,
-    pub toc: usize,
+    /// The selected row of the table of contents (⌘F moves it while a frame is drawn).
+    pub toc: std::rc::Rc<std::cell::Cell<usize>>,
     pub zoom: f32,
     pub sidebar: bool,
     pub wrap: bool,
@@ -51,10 +54,11 @@ impl MediaState {
             index: 0,
             frame: None,
             position: 0.,
+            pending_seek: None,
             audio: None,
             speed: 1,
             sort: None,
-            toc: 0,
+            toc: Default::default(),
             zoom: 1.,
             sidebar: true,
             wrap: false,

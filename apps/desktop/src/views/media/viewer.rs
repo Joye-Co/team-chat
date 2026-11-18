@@ -178,11 +178,14 @@ impl Render for MediaViewer {
                     id: SharedString::from(format!("viewer-{}", self.key.artifact_id)),
                     autoplay: self.opening.autoplay,
                 };
-                // The frame the view opened at: seek once the player is there.
+                // The frame the view opened at: the player moves there once it reports in.
                 if let (Data::Video(v), Some(f)) = (&media.data, self.opening.frame.take())
                     && let Some(fr) = v.frames.get(f)
                 {
-                    self.state.update(cx, |s, _| s.position = fr.t);
+                    self.state.update(cx, |s, _| {
+                        s.position = fr.t;
+                        s.pending_seek = Some(fr.t);
+                    });
                 }
                 full::render(&spec, &self.state, window, cx)
             }

@@ -126,6 +126,8 @@ fn fold_code_marked(
 thread_local! {
     /// The code blocks the person opened, by the hash of their whole code.
     static OPEN_CODE: RefCell<HashSet<u64>> = RefCell::new(HashSet::new());
+    /// The code blocks the person closed in a body that keeps its code open.
+    static CLOSED_CODE: RefCell<HashSet<u64>> = RefCell::new(HashSet::new());
     /// The folds on screen, by the hash of the code the renderer draws: the
     /// code block's actions only get that text.
     static SHOWN: RefCell<HashMap<u64, CodeFold>> = RefCell::new(HashMap::new());
@@ -141,8 +143,9 @@ const SHOWN_MAX: usize = 512;
 const APART: char = '\u{200B}';
 
 /// [`fold_code`] with the person's open blocks, remembering the folds for
-/// [`fold_of`].
-pub fn fold_code_remembered(source: &str) -> String {
+/// [`fold_of`]. With `open_all` (something pointed into this body) every long block is
+/// open except those the person closed there.
+pub fn fold_code_remembered(source: &str, open_all: bool) -> String {
     SHOWN.with(|shown| {
         let mut shown = shown.borrow_mut();
         if shown.len() > SHOWN_MAX {
@@ -176,14 +179,15 @@ pub fn fold_code_remembered(source: &str) -> String {
             }
         })
     };
-    let (out, folds) = OPEN_CODE.with(|open| {
-        let open = open.borrow();
-        fold_code_marked(
-            source,
-            &|full| open.contains(&text_hash(full)),
-            &mut cut_line,
-        )
-    });
+    let is_open = |full: &str| {
+        let hash = text_hash(full);
+        if open_all {
+            !CLOSED_CODE.with(|closed| closed.borrow().contains(&hash))
+        } else {
+            OPEN_CODE.with(|open| open.borrow().contains(&hash))
+        }
+    };
+    let (out, folds) = fold_code_marked(source, &is_open, &mut cut_line);
     SHOWN.with(|shown| {
         let mut shown = shown.borrow_mut();
         for fold in folds.into_iter().filter(|f| f.open) {
@@ -193,11 +197,11 @@ pub fn fold_code_remembered(source: &str) -> String {
     out
 }
 
-/// Opens every long code fence of `source`: a search, ⌘F or a reference jump
-/// points into this body, and what it points at may be past the cut.
-pub fn open_all_code(source: &str) {
+/// Something newly points into `source`: the long fences the person closed there
+/// open again, since what it points at may be past the cut.
+pub fn reopen_code(source: &str) {
     for fold in fold_code(source, &|_| false).1 {
-        set_code_open(&fold.full, true);
+        CLOSED_CODE.with(|closed| closed.borrow_mut().remove(&text_hash(&fold.full)));
     }
 }
 
@@ -215,6 +219,14 @@ pub fn set_code_open(full: &str, open: bool) {
             set.insert(hash);
         } else {
             set.remove(&hash);
+        }
+    });
+    CLOSED_CODE.with(|closed| {
+        let mut closed = closed.borrow_mut();
+        if open {
+            closed.remove(&hash);
+        } else {
+            closed.insert(hash);
         }
     });
 }
@@ -332,7 +344,7 @@ mod tests {
     #[test]
     fn the_remembered_fold_is_found_by_the_drawn_code_and_opens() {
         let body = fence("py", 40);
-        let folded = fold_code_remembered(&body);
+        let folded = fold_code_remembered(&body, false);
         let shown = folded
             .trim_start_matches("```py\n")
             .trim_end()
@@ -340,10 +352,10 @@ mod tests {
         let fold = fold_of(shown).expect("fold");
         assert_eq!(fold.lines, 40);
         set_code_open(&fold.full, true);
-        assert_eq!(fold_code_remembered(&body), body);
+        assert_eq!(fold_code_remembered(&body, false), body);
         assert!(fold_of(&fold.full).expect("open fold").open);
         set_code_open(&fold.full, false);
-        assert_ne!(fold_code_remembered(&body), body);
+        assert_ne!(fold_code_remembered(&body, false), body);
     }
 
     #[test]
@@ -357,7 +369,7 @@ mod tests {
             tail("old"),
             tail("new")
         );
-        let folded = fold_code_remembered(&body);
+        let folded = fold_code_remembered(&body, false);
         // What the renderer hands the actions of each block: the code between the fences.
         let drawn: Vec<&str> = folded
             .split("```rust\n")
@@ -369,7 +381,7 @@ mod tests {
         assert!(fold_of(drawn[0]).unwrap().full.ends_with("old 19"));
         assert!(fold_of(drawn[1]).unwrap().full.ends_with("new 19"));
         // The same on the next frame, and both cut lines read as the mark.
-        assert_eq!(fold_code_remembered(&body), folded);
+        assert_eq!(fold_code_remembered(&body, false), folded);
         for d in drawn {
             let cut = d.lines().last().unwrap();
             assert_eq!(cut.trim_end_matches(APART), CUT_MARK);
@@ -379,13 +391,17 @@ mod tests {
     #[test]
     fn a_body_a_search_points_into_shows_its_code_whole() {
         let body = format!("看这里：\n\n{}", fence("go", 45));
-        assert_ne!(fold_code_remembered(&body), body);
-        open_all_code(&body);
-        assert_eq!(fold_code_remembered(&body), body);
+        assert_ne!(fold_code_remembered(&body, false), body);
+        assert_eq!(fold_code_remembered(&body, true), body);
+        // Pointing into a body leaves nothing behind for another view of it.
+        assert_ne!(fold_code_remembered(&body, false), body);
+        // 收起 holds in the body that was pointed into, until it is pointed into again.
         let code = body.trim_start_matches("看这里：\n\n```go\n");
         let code = code.trim_end().trim_end_matches("```");
         set_code_open(code.trim_end(), false);
-        assert_ne!(fold_code_remembered(&body), body);
+        assert_ne!(fold_code_remembered(&body, true), body);
+        reopen_code(&body);
+        assert_eq!(fold_code_remembered(&body, true), body);
     }
 
     #[test]

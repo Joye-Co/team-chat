@@ -133,6 +133,8 @@ pub struct WebEmbed {
     height: Pixels,
     /// Fill the parent's height instead of [`WebEmbed::height`].
     fill: bool,
+    /// The side and bottom inset of the failure Alert ([`WebEmbed::failed_inset`]).
+    failed_inset: Option<Pixels>,
     canvas: Canvas,
     /// Draw the card frame (1 px border on the card fill) around the page.
     framed: bool,
@@ -158,6 +160,7 @@ impl WebEmbed {
             spec,
             height: px(320.),
             fill: false,
+            failed_inset: None,
             canvas: Canvas::Content,
             framed: false,
             radius: radius::LG,
@@ -182,6 +185,13 @@ impl WebEmbed {
     /// a 400 pane, §2.5). A page that sets its own padding keeps it.
     pub fn pad(mut self, pad: Pixels) -> Self {
         self.pad = pad;
+        self
+    }
+
+    /// A card whose content edge is `inset` and that shows nothing under a page that
+    /// failed: the Alert keeps to that edge and the card ends `inset` under it.
+    pub fn failed_inset(mut self, inset: Pixels) -> Self {
+        self.failed_inset = Some(inset);
         self
     }
 
@@ -1009,20 +1019,23 @@ code,pre{{font-family:var(--tc-font-mono);font-size:13px}}\
 pre{{background:var(--tc-fill);border:1px solid var(--tc-border);border-radius:8px;padding:12px;overflow:auto}}\
 button,input,select,textarea{{font:inherit;color:inherit;margin:0;box-sizing:border-box}}\
 button,input[type=button],input[type=submit],input[type=reset]{{height:{ctl}px;padding:0 {ctl_pad}px;\
-border:1px solid {edge};border-radius:var(--tc-radius);background:{control};font-size:{ui}px;\
+border:0;border-radius:var(--tc-radius);background:{push};font-size:{ui}px;\
 line-height:{ui_line}px;font-weight:500;white-space:nowrap;cursor:default}}\
-:is(button,input[type=button],input[type=submit],input[type=reset]):hover:not(:disabled){{background:{control_hover}}}\
-:is(button,input[type=button],input[type=submit],input[type=reset]):active:not(:disabled){{background:{pressed}}}\
+:is(button,input[type=button],input[type=submit],input[type=reset]):hover:not(:disabled){{background:{push_hover}}}\
+:is(button,input[type=button],input[type=submit],input[type=reset]):active:not(:disabled){{background:{push_pressed}}}\
 button[data-tc=primary]{{background:var(--tc-primary);border-color:var(--tc-primary);color:var(--tc-bg)}}\
 button[data-tc=primary]:hover:not(:disabled),button[data-tc=primary]:active:not(:disabled){{background:var(--tc-primary);opacity:.9}}\
 input:not([type]),input:is([type=text],[type=search],[type=email],[type=url],[type=tel],[type=number],[type=password],[type=date],[type=time],[type=datetime-local]),select,textarea{{\
 height:{ctl}px;padding:0 {ctl_pad}px;border:1px solid {edge};border-radius:var(--tc-radius);background:{control};\
 font-size:{ui}px;line-height:{ui_line}px;outline:0}}\
+label>br+:is(input:not([type]),input:is([type=text],[type=search],[type=email],[type=url],[type=tel],[type=number],[type=password],[type=date],[type=time],[type=datetime-local]),select),\
+p>input:only-child:is(:not([type]),[type=text],[type=search],[type=email],[type=url],[type=tel],[type=number],[type=password]){{display:block;width:100%}}\
+p:has(>button):not(:has(>:not(button))){{display:flex;flex-wrap:wrap;align-items:center;gap:{s8}px}}\
 textarea{{height:auto;min-height:{area}px;padding:{s6}px {ctl_pad}px;line-height:22px;resize:vertical;display:block;width:100%}}\
 select{{appearance:none;-webkit-appearance:none;padding-right:{s32}px;background-repeat:no-repeat;background-position:right {s8}px center;\
 background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none' stroke='{chevron}' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E\")}}\
 ::placeholder{{color:var(--tc-muted);opacity:1}}\
-input:is([type=checkbox],[type=radio]){{accent-color:var(--tc-primary);width:{mark}px;height:{mark}px;margin:0 {s8}px 0 0;vertical-align:-3px}}\
+input:is([type=checkbox],[type=radio]){{accent-color:var(--tc-primary);width:{mark}px;height:{mark}px;margin:0 {s8}px 0 0;vertical-align:-1px}}\
 input[type=range]{{accent-color:var(--tc-primary)}}\
 progress{{appearance:none;-webkit-appearance:none;display:block;width:100%;height:{bar}px;border:0;border-radius:{bar_r}px;background:var(--tc-fill);overflow:hidden}}\
 progress::-webkit-progress-bar{{background:var(--tc-fill)}}\
@@ -1031,8 +1044,8 @@ progress::-moz-progress-bar{{background:var(--tc-primary)}}\
 :is(button,input,select,textarea):focus-visible{{outline:0;border-color:{focus_edge};box-shadow:0 0 0 {ring}px {focus}}}\
 input:is([type=checkbox],[type=radio]):focus-visible{{outline:{ring}px solid {focus};outline-offset:1px;box-shadow:none}}\
 :is(button,input,select,textarea):disabled{{opacity:{disabled}}}\
-fieldset{{border:1px solid var(--tc-border);border-radius:{container}px;margin:0 0 16px;padding:12px 16px}}\
-legend{{padding:0 4px;font-size:12px;color:var(--tc-muted)}}\
+fieldset{{border:0;padding:0;margin:0 0 12px}}\
+legend{{padding:0;margin-bottom:4px;font-size:14px;line-height:20px;color:var(--tc-fg)}}\
 label{{line-height:{ui_line}px}}\
 label:has(>input:is([type=checkbox],[type=radio]))+label{{margin-left:var(--tc-gap)}}}}",
         pad = px_of(pad),
@@ -1058,13 +1071,14 @@ label:has(>input:is([type=checkbox],[type=radio]))+label{{margin-left:var(--tc-g
         bar_r = px_of(metrics::BAR_RADIUS),
         ring = px_of(metrics::FOCUS_RING),
         disabled = metrics::DISABLED_OPACITY,
-        container = px_of(radius::CONTAINER),
         // Opaque on the page's surface, like the lines: a control on a card or in the
         // pane reads as a raised control in both themes.
         edge = hex(over(k.quaternary, surface)),
         control = hex(over(k.control, surface)),
-        control_hover = hex(over(k.control_hover, surface)),
-        pressed = hex(over(k.pressed, surface)),
+        // A page's button is the app's outline button: the borderless tint (D11).
+        push = hex(over(k.push, surface)),
+        push_hover = hex(over(k.push_hover, surface)),
+        push_pressed = hex(over(k.push_pressed, surface)),
         focus = hex(k.focus),
         focus_edge = hex(over(k.focus, surface)),
         chevron = hex(k.secondary).replace('#', "%23"),
@@ -1356,8 +1370,11 @@ impl RenderOnce for WebEmbed {
             // §2.15: the Alert in place of the page, with 重试; never a lone line in a well.
             (Phase::Failed(_), _, _) => {
                 let again = state.downgrade();
+                let edge = crate::ui::native::tokens::space::S12;
                 div()
-                    .p(crate::ui::native::tokens::space::S12)
+                    .pt(edge)
+                    .px(self.failed_inset.unwrap_or(edge))
+                    .pb(self.failed_inset.unwrap_or(edge))
                     .child(
                         crate::ui::native::Alert::new(crate::ui::Sym::Failed, ca::LOAD_FAILED)
                             .tone(crate::ui::native::AlertTone::Destructive)
@@ -1564,6 +1581,15 @@ struct EmbedCache {
 }
 
 impl gpui::Global for EmbedCache {}
+
+/// Whether the embed `id` shows a page that did not open (in any window).
+pub fn page_failed(id: &ElementId, cx: &App) -> bool {
+    cx.try_global::<EmbedCache>().is_some_and(|c| {
+        c.entries.iter().any(|((_, embed), entry)| {
+            embed == id && matches!(entry.state.read(cx).phase, Phase::Failed(_))
+        })
+    })
+}
 
 /// The state of one embed, kept across frames in which a virtualized list does not
 /// render it.

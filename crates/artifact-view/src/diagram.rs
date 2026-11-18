@@ -188,6 +188,8 @@ pub fn mermaid_config(t: &ThemeVars) -> Value {
         },
         "sequence": {
             "useMaxWidth": false, "mirrorActors": false, "height": 40,
+            // The viewer and the card keep their own side inset.
+            "diagramMarginX": 8,
             "width": 132, "boxMargin": 8, "noteMargin": 8, "messageMargin": 32,
             "actorFontFamily": t.font_family, "noteFontFamily": t.font_family,
             "messageFontFamily": t.font_family
@@ -306,6 +308,8 @@ pub struct DiagramNode {
     pub y: f64,
     pub w: f64,
     pub h: f64,
+    /// A sequence participant: the height of its head box (`h` runs down the lifeline).
+    pub head: Option<f64>,
 }
 
 /// A rendered diagram before its raster.
@@ -378,6 +382,7 @@ pub fn parse_event(name: &str, payload: &Value) -> Option<RenderOutcome> {
                                 y: num(n, "y")?,
                                 w: num(n, "w")?.max(0.0),
                                 h: num(n, "h")?.max(0.0),
+                                head: num(n, "head").map(|h| h.max(0.0)),
                             })
                         })
                         .filter(|n| !n.id.is_empty())

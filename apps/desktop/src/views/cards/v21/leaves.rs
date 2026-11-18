@@ -2180,7 +2180,7 @@ fn embed_media(
     detail: Option<&crate::data::ArtifactDetail>,
     window: &mut Window,
     cx: &mut App,
-) -> Option<AnyElement> {
+) -> Option<(AnyElement, crate::views::media::inline::EmbedFacts)> {
     use crate::views::media::{self, MediaFile, inline, state::Target, store::MediaKey};
     // The folder is open: its entry says the kind while the 产出's record is still on its way.
     let files: Vec<MediaFile> = detail
@@ -2219,10 +2219,12 @@ fn embed_media(
             topic_id: ctx.msg.topic_id.clone(),
         },
         id: ctx.id(format!("embed-media-{block}")),
+        // The embed's frame is its card and its header says what the file is.
+        bare: true,
     };
     let el = inline::render(&spec, window, cx)?;
     crate::selftest::drawn::mark("embed-media", block.to_string());
-    Some(el)
+    Some((el, inline::embed_facts(&spec, cx)))
 }
 
 pub fn embed(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) -> AnyElement {
@@ -2273,10 +2275,12 @@ pub fn embed(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) ->
         }
         _ => None,
     };
+    let (media, facts) = match media {
+        Some((el, facts)) => (Some(el), facts),
+        None => (None, Default::default()),
+    };
     let body: AnyElement = match (state, shown) {
-        (_, EmbedBody::NotPage) if media.is_some() => {
-            div().p(space::S12).children(media).into_any_element()
-        }
+        (_, EmbedBody::NotPage) if media.is_some() => div().children(media).into_any_element(),
         (Some(Ok(f)), EmbedBody::Page) => {
             // inc-integrate: the 产出 page host owns the bridge (capabilities by author,
             // live data, asks, refs, the pending band); the block narrows the declared
@@ -2400,7 +2404,7 @@ pub fn embed(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) ->
                 .border_b_1()
                 .border_color(k.line)
                 .child(ui::icon(
-                    file.map_or(Sym::Document, crate::views::media::MediaKind::icon),
+                    file.map_or(Sym::Globe, crate::views::media::MediaKind::icon),
                     px(14.),
                     k.ink_3,
                 ))
@@ -2427,7 +2431,8 @@ pub fn embed(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) ->
                         .child(format!(
                             " · {}",
                             file.map_or(c::EMBED_KIND, crate::views::media::MediaKind::label)
-                        )),
+                        ))
+                        .children(facts.meta.map(|m| format!(" · {m}"))),
                 )
                 .when(page, |el| {
                     el.child(
@@ -2442,10 +2447,30 @@ pub fn embed(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) ->
                             .child(c::EMBED_SANDBOX),
                     )
                 })
+                .children(facts.copy.clone().map(|text| {
+                    div()
+                        .id(eid(node, format!("embed-copy-{id}")))
+                        .ml_auto()
+                        .flex_none()
+                        .size(px(24.))
+                        .rounded(crate::ui::native::tokens::radius::ITEM)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .hover(|s| s.bg(k.hover))
+                        .on_click(move |_, _, cx| {
+                            crate::views::media::parts::copy_text(
+                                text.clone(),
+                                crate::copy::media::COPIED,
+                                cx,
+                            )
+                        })
+                        .child(ui::icon(Sym::Copy, px(14.), k.ink_2))
+                }))
                 .child(
                     div()
                         .id(eid(node, format!("embed-open-{id}")))
-                        .when(!page, |el| el.ml_auto())
+                        .when(!page && facts.copy.is_none(), |el| el.ml_auto())
                         .flex_none()
                         .size(px(24.))
                         .rounded(crate::ui::native::tokens::radius::ITEM)

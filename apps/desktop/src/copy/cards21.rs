@@ -80,7 +80,7 @@ crate::copy! {
     // Leaves of 2.1.
     EMBED_KIND = "网页",
     EMBED_VERSION = "v{n}",
-    EMBED_SANDBOX = "沙盒 · 不能联网",
+    EMBED_SANDBOX = "沙盒 · 不联网",
     EMBED_OPEN = "在窗口打开",
     EMBED_FOOT = "页面里的操作会发给 {name}",
     EMBED_NO_APPROVE = "页面不能替你批准",
