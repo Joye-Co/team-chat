@@ -1767,6 +1767,8 @@ pub struct BotForm {
     branch: Entity<InputState>,
     /// The team's computers, for 在哪台电脑干活 and 运行方式.
     machines: Vec<MachineInfo>,
+    /// How the read of `machines` stands.
+    machines_load: MachinesLoad,
     /// The sign-ins of each online computer's CLIs (its monitor), by computer id: 运行方式
     /// marks the ones that are not signed in.
     logins: std::collections::HashMap<String, Vec<chat_core::proto::monitor::MonitorCli>>,
@@ -1797,21 +1799,16 @@ pub struct BotForm {
     _subscriptions: Vec<Subscription>,
 }
 
+/// The team's computers of the AI member sheet as they load.
+enum MachinesLoad {
+    Loading,
+    Failed(gpui::SharedString),
+    Loaded,
+}
+
 impl BotForm {
     pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let machines = services.provider.machines();
         let this_machine = services.provider.this_machine_id();
-        cx.spawn(async move |this, cx| {
-            if let Ok(list) = answer(machines).await {
-                let _ = this.update(cx, |this, cx| {
-                    this.machines = list;
-                    this.default_to_this_computer();
-                    this.load_logins(cx);
-                    cx.notify();
-                });
-            }
-        })
-        .detach();
         let input = |placeholder: &'static str, window: &mut Window, cx: &mut Context<Self>| {
             cx.new(|cx| InputState::new(window, cx).placeholder(placeholder))
         };
@@ -1832,7 +1829,7 @@ impl BotForm {
             cx.subscribe(&runtime, notify),
             cx.subscribe(&model_input, notify),
         ];
-        Self {
+        let mut form = Self {
             name,
             role,
             labels: input(s::RUNNER_LABELS_PLACEHOLDER, window, cx),
@@ -1842,6 +1839,7 @@ impl BotForm {
             services,
             runner: false,
             machines: Vec::new(),
+            machines_load: MachinesLoad::Loading,
             logins: Default::default(),
             this_machine,
             machine: None,
@@ -1856,7 +1854,43 @@ impl BotForm {
             editing: None,
             window: window.window_handle(),
             _subscriptions: subscriptions,
-        }
+        };
+        form.load_machines(cx);
+        form
+    }
+
+    /// Shows the sheet as when the computers did not load (self-test scenes).
+    pub fn show_machines_failed(&mut self, cx: &mut Context<Self>) {
+        self.machines.clear();
+        self.machines_load =
+            MachinesLoad::Failed(widgets::error_text(crate::data::AdminError::Offline).into());
+        cx.notify();
+    }
+
+    /// Reads the team's computers: the placement and 运行方式 choices come from them. A
+    /// failed read says so with 重试; it never looks like a team with no computer.
+    fn load_machines(&mut self, cx: &mut Context<Self>) {
+        self.machines_load = MachinesLoad::Loading;
+        let machines = self.services.provider.machines();
+        cx.spawn(async move |this, cx| {
+            let result = answer(machines).await;
+            let _ = this.update(cx, |this, cx| {
+                match result {
+                    Ok(list) => {
+                        this.machines = list;
+                        this.machines_load = MachinesLoad::Loaded;
+                        this.default_to_this_computer();
+                        this.load_logins(cx);
+                    }
+                    Err(e) => {
+                        this.machines_load = MachinesLoad::Failed(widgets::error_text(e).into())
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
     }
 
     /// Turns the sheet into the edit sheet of `member` and loads its runner.
@@ -2524,6 +2558,22 @@ impl Render for BotForm {
                     })
                     .into_any_element()
             };
+            let machines_loading = matches!(self.machines_load, MachinesLoad::Loading);
+            let machines_failed = match &self.machines_load {
+                MachinesLoad::Failed(text) => {
+                    let again = cx.entity();
+                    Some(div().pb(tokens::space::S8).child(widgets::failed_alert(
+                        "bot-machines-failed",
+                        s::COMPUTERS_FAILED,
+                        Some(text.clone()),
+                        Some(widgets::retry_button("bot-machines-retry", cx).on_click(
+                            move |_, _, cx| again.update(cx, |f, cx| f.load_machines(cx)),
+                        )),
+                        cx,
+                    )))
+                }
+                _ => None,
+            };
             let machine: gpui::AnyElement = match place_hint {
                 Some(hint) => div()
                     .flex()
@@ -2539,7 +2589,11 @@ impl Render for BotForm {
                     .flex()
                     .flex_col()
                     .child(section(s::RUNNER_SECTION))
-                    .child(
+                    .children(machines_failed)
+                    .child(if machines_loading {
+                        // The choices come from the computers: no rows until they are read.
+                        widgets::list_loading("bot-machines-loading", 2, false, cx)
+                    } else {
                         sheet_form()
                             .child(sheet_form_row(s::RUNNER_MACHINE, machine, cx))
                             .children(runtime.map(|r| sheet_form_row(s::RUNNER_RUNTIME, r, cx)))
@@ -2556,8 +2610,9 @@ impl Render for BotForm {
                                 &self.branch,
                                 false,
                                 cx,
-                            )),
-                    ),
+                            ))
+                            .into_any_element()
+                    }),
             );
             // 高级: the member's own model. Off (the everyday case), the team's setting runs.
             let own = self.own_model;

@@ -3,7 +3,8 @@
 //! [`InspectorSection`] with a disclosure header; Body rows with `secondary`
 //! labels and `label` values; actions as a trailing `arrow.up.forward`
 //! borderless button; plan progress as the 4 pt determinate bar. No pills,
-//! no text links, no hover fills on rows.
+//! no text links. A row that is itself a button (a changed file, a member)
+//! draws the row hover fill (COMPLETENESS.md E3); plain rows have none.
 
 use gpui::{
     AnyElement, App, ClickEvent, Context, ElementId, Hsla, InteractiveElement as _, IntoElement,
@@ -21,8 +22,9 @@ use crate::{
         self, Sym, SymSize,
         native::{
             BadgeState, EmptyLine, FocusRow as _, InspectorSection, NativeType as _, StatusBadge,
-            badge::state_mark, borderless_button, label_value, native_colors, progress,
-            tokens::radius,
+            badge::state_mark,
+            borderless_button, label_value, native_colors, progress,
+            tokens::{height, radius},
         },
         sf_symbols::Sf,
     },
@@ -574,13 +576,18 @@ impl TopicRail {
             section = section.row(
                 div()
                     .id(SharedString::from(format!("rail-member-{}", m.id)))
-                    .w_full()
-                    .min_h(px(28.))
+                    // The fill reaches past the text by the padding, so the avatar stays on
+                    // the section's left edge.
+                    .mx(-space::S6)
+                    .min_h(height::SM)
+                    .px(space::S6)
+                    .rounded(radius::MD)
                     .flex()
                     .items_center()
                     .gap(space::S8)
                     .n_body()
                     .cursor_pointer()
+                    .hover(|el| el.bg(k.row_hover))
                     .child(div().flex_1().min_w(px(0.)).child(self.person_in(
                         &m.id,
                         Some(&m),

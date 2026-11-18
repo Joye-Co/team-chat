@@ -276,14 +276,18 @@ impl Toast {
         note
     }
 
-    /// Pushes the toast on the active window (bottom-right, §2.16).
+    /// Pushes the toast on the active window (bottom-right, §2.16). It goes up after the
+    /// current update: a click handler runs inside its own window's update, where a second
+    /// update of that window is refused and the toast would be lost.
     pub fn push(self, cx: &mut App) {
         let note = self.notification();
         let target = cx
             .active_window()
             .or_else(|| cx.windows().into_iter().next());
         if let Some(window) = target {
-            let _ = window.update(cx, |_, window, cx| window.push_notification(note, cx));
+            cx.defer(move |cx| {
+                let _ = window.update(cx, |_, window, cx| window.push_notification(note, cx));
+            });
         }
     }
 }
@@ -445,6 +449,36 @@ impl RenderOnce for Banner {
 /// so parallel tests never see each other's floor.
 #[cfg(test)]
 pub(crate) static TOAST_FLOOR_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+mod toast_push_tests {
+    use gpui::{AppContext as _, Context, IntoElement, Render, TestAppContext, Window, div};
+    use gpui_component::WindowExt as _;
+
+    use crate::ui::icons::Sym;
+
+    struct Host;
+    impl Render for Host {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
+
+    /// A toast pushed from inside its window's own update (where every click handler
+    /// runs) still goes up.
+    #[gpui::test]
+    fn a_toast_pushed_from_a_click_handler_shows(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let host = cx.new(|_| Host);
+            gpui_component::Root::new(host, window, cx)
+        });
+        cx.update(|_, cx| super::Toast::new(Sym::Check, "done").push(cx));
+        cx.run_until_parked();
+        let shown = cx.update(|window, cx| window.notifications(cx).len());
+        assert_eq!(shown, 1);
+    }
+}
 
 #[cfg(test)]
 mod toast_floor_tests {

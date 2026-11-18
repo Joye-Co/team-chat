@@ -1025,6 +1025,57 @@ pub fn open_device_remove(
     Ok(handle)
 }
 
+/// 账号 with the alert before 移除登录邮箱 open.
+pub fn open_email_remove(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::Account, cx)?;
+    let account = view.read(cx).account().clone();
+    cx.spawn(async move |cx| {
+        cx.background_executor()
+            .timer(Duration::from_millis(120))
+            .await;
+        // The email loads off the UI thread.
+        wait_for(cx, |cx| {
+            cx.update(|cx| account.read(cx).has_email().then_some(()))
+        })
+        .await;
+        let _ = handle.update(cx, |_, window, cx| {
+            AccountPage::confirm_remove_email(account.clone(), window, cx);
+        });
+    })
+    .detach();
+    Ok(handle)
+}
+
+/// 成员 with the 添加 AI 成员 sheet working on the team's computers, whose list did not
+/// load: the Alert with 重试 over the rows.
+pub fn open_bot_dialog_machines_failed(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Members,
+        |s, w, cx| {
+            let form = super::members::open_add_bot(s, w, cx);
+            form.update(cx, |f, cx| f.fill("发布巡检", Some(""), w, cx));
+            // After the sample team's list came in.
+            cx.spawn(async move |cx| {
+                cx.background_executor()
+                    .timer(Duration::from_millis(150))
+                    .await;
+                let _ = form.update(cx, |f, cx| f.show_machines_failed(cx));
+            })
+            .detach();
+        },
+        cx,
+    )
+}
+
 // --- v14/t4 lists ---
 
 /// 账号 with 登录的设备 failed to load: the Alert with 重试.
@@ -1762,6 +1813,20 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedIn,
         setup: |_, _| {},
         open: open_device_remove,
+    },
+    Scene {
+        name: "settings-email-remove",
+        about: "Settings: the alert before 移除登录邮箱",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: open_email_remove,
+    },
+    Scene {
+        name: "settings-add-bot-machines-failed",
+        about: "Settings: the add-bot dialog when the team's computers did not load: the Alert with 重试",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: open_bot_dialog_machines_failed,
     },
     // --- v12/fx-overlays ---
     Scene {

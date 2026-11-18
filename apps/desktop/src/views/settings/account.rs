@@ -670,7 +670,9 @@ impl AccountPage {
                         move |menu, _, _| {
                             let page = page.clone();
                             menu.item(PopupMenuItem::new(s::EMAIL_REMOVE_ITEM).on_click(
-                                move |_, _, cx| page.update(cx, |p, cx| p.remove_email(cx)),
+                                move |_, window, cx| {
+                                    Self::confirm_remove_email(page.clone(), window, cx)
+                                },
                             ))
                         },
                     );
@@ -760,6 +762,11 @@ impl AccountPage {
 
     pub fn phone(&self) -> &Entity<super::account_phone::PhoneSignIn> {
         &self.phone
+    }
+
+    /// A sign-in email is loaded and set (self-test scenes).
+    pub fn has_email(&self) -> bool {
+        matches!(self.email, Some(Some(_)))
     }
 
     pub fn devices(&self) -> Option<&[DeviceInfo]> {
@@ -920,6 +927,41 @@ impl AccountPage {
             });
         })
         .detach();
+    }
+
+    /// "⋯" › 移除登录邮箱… : an alert first, since it takes away a way to sign in.
+    pub fn confirm_remove_email(this: Entity<Self>, window: &mut Window, cx: &mut App) {
+        if !this.read(cx).has_email() {
+            return;
+        }
+        widgets::open_alert(window, cx, move |_, cx| {
+            let page = this.clone();
+            AlertLayout::new(s::EMAIL_REMOVE_CONFIRM_TITLE)
+                .icon(widgets::app_icon(cx))
+                .message(s::EMAIL_REMOVE_CONFIRM_BODY)
+                .buttons([
+                    alert_button(
+                        "email-remove-ok",
+                        s::EMAIL_REMOVE_CONFIRM_OK,
+                        PushStyle::Outline,
+                        true,
+                        cx,
+                    )
+                    .on_click(move |_, window, cx| {
+                        page.update(cx, |p, cx| p.remove_email(cx));
+                        window.close_dialog(cx);
+                    }),
+                    alert_button(
+                        "email-remove-cancel",
+                        common::CANCEL,
+                        PushStyle::Outline,
+                        false,
+                        cx,
+                    )
+                    .on_click(|_, window, cx| window.close_dialog(cx)),
+                ])
+                .into_any_element()
+        });
     }
 
     /// "⋯" › 退出登录… on the selected device: an alert; this Mac signs out the

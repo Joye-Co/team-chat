@@ -34,6 +34,9 @@ pub struct TopicPage {
     composer: Entity<ComposerView>,
     /// Usable: the 按顺序做 bar at the top of the column.
     relay_strip: Entity<relay_strip::RelayStrip>,
+    /// 批准合并 or 撤回 of the pinned banner waits for its answer: the button shows its
+    /// spinner and takes no second press.
+    pinned_busy: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -60,6 +63,7 @@ impl TopicPage {
             timeline,
             composer,
             relay_strip,
+            pinned_busy: false,
         }
     }
 }

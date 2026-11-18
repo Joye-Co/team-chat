@@ -857,7 +857,8 @@ mod tests {
         assert!(p.group_muted(&new.id));
         p.set_group_muted(&new.id, false);
         assert!(!p.group_muted(&new.id));
-        p.leave_group(&new.id);
+        let mut left = p.leave_group(&new.id);
+        assert_eq!(left.try_recv().unwrap(), Some(Ok(())));
         assert_eq!(p.groups().len(), before);
         // A DM with a member who has none yet is created once.
         let peer = p

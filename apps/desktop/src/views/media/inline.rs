@@ -1011,7 +1011,7 @@ fn code(spec: &InlineSpec, media: &Arc<Media>, c: &store::Code, cx: &App) -> Any
                 .child(div().flex_1())
                 .child(
                     tool(copy_id, Sym::Copy, cm::COPY).on_click(move |_, _, cx| {
-                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text_all.clone()));
+                        super::parts::copy_text(text_all.clone(), cm::COPIED, cx);
                     }),
                 )
                 .child(open_tool(spec, "open", Opening::default())),

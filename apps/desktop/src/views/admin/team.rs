@@ -60,6 +60,8 @@ pub struct Team {
     pub selected: Option<String>,
     /// Why the last 「设为…」 did not go through.
     pub role_error: Option<String>,
+    /// Why the last 停用 or 重新启用 did not go through: the alert's title and the reason.
+    pub action_error: Option<(&'static str, String)>,
     search: Entity<InputState>,
 }
 
@@ -74,6 +76,7 @@ impl Team {
             sort: (TeamSortKey::Spend, true),
             selected: None,
             role_error: None,
+            action_error: None,
             search: cx.new(|cx| InputState::new(window, cx).placeholder(m::TEAM_SEARCH)),
         }
     }
@@ -344,9 +347,22 @@ impl AdminView {
                 Alert::new(Sym::Failed, m::TEAM_FAILED)
                     .tone(AlertTone::Destructive)
                     .description(e)
+                    .action(Self::retry_action(
+                        "team-retry",
+                        |v, cx| {
+                            v.team.error = None;
+                            v.fetch_team(cx);
+                        },
+                        cx,
+                    ))
             }))
             .children(self.team.role_error.clone().map(|e| {
                 Alert::new(Sym::Failed, m::TEAM_ROLE_FAILED)
+                    .tone(AlertTone::Destructive)
+                    .description(e)
+            }))
+            .children(self.team.action_error.clone().map(|(title, e)| {
+                Alert::new(Sym::Failed, title)
                     .tone(AlertTone::Destructive)
                     .description(e)
             }))
@@ -715,14 +731,23 @@ impl AdminView {
                 } else {
                     m::TEAM_DEACTIVATE
                 })
-                .on_click(move |_, _, cx| {
-                    let reply = services.provider.set_member_deactivated(&id, !off);
-                    let view = view.clone();
-                    cx.spawn(async move |cx| {
-                        let _ = answer(reply).await;
-                        let _ = view.update(cx, |v, cx| v.fetch_team(cx));
-                    })
-                    .detach();
+                .on_click({
+                    let name = name.clone();
+                    move |_, window, cx| {
+                        // 重新启用 undoes itself; 停用… asks first (the "…" promises it).
+                        if off {
+                            set_deactivated(&services, &id, false, &view, cx);
+                        } else {
+                            confirm_deactivate(
+                                services.clone(),
+                                id.clone(),
+                                &name,
+                                view.clone(),
+                                window,
+                                cx,
+                            );
+                        }
+                    }
                 }),
             );
             // hide-delete/1: a deactivated AI member can leave the team for good.
@@ -1210,6 +1235,60 @@ fn set_role(
         });
     })
     .detach();
+}
+
+/// Deactivates or reactivates `id` and reads the team again; a refusal shows on the page.
+fn set_deactivated(
+    services: &crate::app::Services,
+    id: &str,
+    deactivated: bool,
+    view: &Entity<AdminView>,
+    cx: &mut gpui::App,
+) {
+    let reply = services.provider.set_member_deactivated(id, deactivated);
+    let view = view.clone();
+    let title = if deactivated {
+        m::TEAM_DEACTIVATE_FAILED
+    } else {
+        m::TEAM_REACTIVATE_FAILED
+    };
+    cx.spawn(async move |cx| {
+        let result = answer(reply).await;
+        let _ = view.update(cx, |v, cx| {
+            v.team.action_error = result.err().map(|e| {
+                (
+                    title,
+                    crate::views::settings::widgets::error_text(e).to_string(),
+                )
+            });
+            v.fetch_team(cx)
+        });
+    })
+    .detach();
+}
+
+/// Asks before deactivating a member; on 停用 deactivates and reads the team again.
+pub(super) fn confirm_deactivate(
+    services: crate::app::Services,
+    id: String,
+    name: &str,
+    view: Entity<AdminView>,
+    window: &mut Window,
+    cx: &mut gpui::App,
+) {
+    use crate::views::nav::dialogs;
+    dialogs::destructive_alert(
+        "deactivate-member",
+        fill(
+            m::TEAM_DEACTIVATE_CONFIRM_TITLE,
+            &[("name", &dialogs::short_name(name))],
+        ),
+        m::TEAM_DEACTIVATE_CONFIRM_BODY.to_string(),
+        m::TEAM_DEACTIVATE_OK,
+        move |_, cx| set_deactivated(&services, &id, true, &view, cx),
+        window,
+        cx,
+    );
 }
 
 /// Asks before deleting a deactivated AI member for good (the 离开群 alert); on 删除 deletes

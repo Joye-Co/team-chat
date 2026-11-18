@@ -513,7 +513,6 @@ impl ComposerView {
     ) -> AnyElement {
         use crate::ui::native::tokens::{gallery, radius};
         use gpui::img;
-        use gpui_component::button::{ButtonCustomVariant, ButtonVariants as _};
         let k = native_colors(cx);
         let side = gallery::DRAFT_THUMB;
         let live: std::collections::HashSet<String> = images.iter().map(|f| f.id.clone()).collect();
@@ -537,22 +536,12 @@ impl ComposerView {
                 }
             };
             let id = file.id.clone();
-            let remove = Button::new(ElementId::Name(SharedString::from(format!(
-                "image-remove-{}",
-                file.id
-            ))))
-            .custom(
-                ButtonCustomVariant::new(cx)
-                    .color(gpui::hsla(0., 0., 0., 0.55))
-                    .foreground(gpui::white())
-                    .hover(gpui::hsla(0., 0., 0., 0.75))
-                    .active(gpui::hsla(0., 0., 0., 0.85)),
+            let remove = ui::native::over_image_button(
+                ElementId::Name(SharedString::from(format!("image-remove-{}", file.id))),
+                Sym::Close,
+                crate::copy::files::DRAFT_IMAGE_REMOVE,
+                cx,
             )
-            .icon(ui::button_glyph(Sym::Close, px(10.), px(20.)))
-            .with_size(px(20.))
-            .size(px(20.))
-            .rounded_full()
-            .tooltip(crate::copy::files::DRAFT_IMAGE_REMOVE)
             .on_click(cx.listener(move |this, _, _, cx| this.remove_file(&id, cx)));
             draft_thumb(picture, side)
                 .id(ElementId::Name(SharedString::from(format!(

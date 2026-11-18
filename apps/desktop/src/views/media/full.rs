@@ -782,7 +782,7 @@ fn markdown_view(
                     }),
             ],
             copy: Some(Rc::new(move |cx: &mut App| {
-                cx.write_to_clipboard(gpui::ClipboardItem::new_string(md_text.clone()))
+                super::parts::copy_text(md_text.clone(), cm::COPIED, cx)
             })),
         },
         cx,
@@ -1856,7 +1856,7 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
                     }),
             ],
             copy: Some(Rc::new(move |cx: &mut App| {
-                cx.write_to_clipboard(gpui::ClipboardItem::new_string(all.clone()))
+                super::parts::copy_text(all.clone(), cm::COPIED, cx)
             })),
         },
         cx,

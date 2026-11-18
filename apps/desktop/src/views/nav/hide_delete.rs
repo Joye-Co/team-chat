@@ -167,7 +167,7 @@ pub fn confirm_delete_topic(
 }
 
 /// A refused hide or delete: an alert with the reason (a refusal blocks, no toast).
-fn refused(title: &'static str, e: crate::data::AdminError, cx: &mut App) {
+pub(super) fn refused(title: &'static str, e: crate::data::AdminError, cx: &mut App) {
     in_main_window(cx, move |window, cx| {
         dialogs::error_alert(title, error_text(e), |_, _| {}, window, cx)
     });
