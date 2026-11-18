@@ -95,7 +95,6 @@ crate::copy! {
     MEMBERS_APPROVE_CONFIG = "改生产环境配置",
     MEMBERS_APPROVE_DELETE = "删除数据或文件",
     MEMBERS_APPROVE_PUBLISH = "对外发布",
-    MEMBERS_APPROVE_SPEND = "单次花费超过 ¥{n}",
     MEMBERS_APPROVALS_PERSON = "同事做事不用先批准",
     MEMBERS_APPROVALS_FAILED = "没能读到批准规则",
     MEMBERS_PLAN = "汇报和预算",
@@ -119,4 +118,6 @@ crate::copy! {
     MEMBERS_GROUP_QUOTED = "「{group}」",
     // The list column while the team cannot be reached.
     MEMBERS_LIST_OFFLINE = "连上后显示成员",
+    // Under 需要你批准的事: the spend limit only reminds the member, nothing is held for approval.
+    MEMBERS_SPEND_REMINDER = "单次花费超过 ¥{n} 时提醒成员",
 }

@@ -304,9 +304,10 @@ pub(crate) fn ai_member_word(
 }
 
 /// 需要你批准的事: the actions the team's rules make an AI member ask before, in the
-/// order of 设置 › 成员 › 默认规则.
+/// order of 设置 › 成员 › 默认规则. The spend limit is not one: it only reminds the member
+/// ([`spend_reminder`]).
 pub(crate) fn approval_items(r: ApprovalDefaults) -> Vec<String> {
-    let mut out: Vec<String> = [
+    [
         (r.merge_main, c::MEMBERS_APPROVE_MERGE),
         (r.deploy_prod, c::MEMBERS_APPROVE_DEPLOY),
         (r.prod_config, c::MEMBERS_APPROVE_CONFIG),
@@ -316,11 +317,13 @@ pub(crate) fn approval_items(r: ApprovalDefaults) -> Vec<String> {
     .into_iter()
     .filter(|(on, _)| *on)
     .map(|(_, t)| t.to_string())
-    .collect();
-    if let Some(n) = r.max_spend_cny {
-        out.push(fill(c::MEMBERS_APPROVE_SPEND, &[("n", &n.to_string())]));
-    }
-    out
+    .collect()
+}
+
+/// The line under 需要你批准的事 when the team has a spend limit.
+pub(crate) fn spend_reminder(r: ApprovalDefaults) -> Option<String> {
+    let n = crate::views::settings::widgets::grouped(r.max_spend_cny?.into());
+    Some(fill(c::MEMBERS_SPEND_REMINDER, &[("n", &n)]))
 }
 
 /// The list pane (§9.5): its own toolbar row with the segmented filter.
@@ -1566,6 +1569,10 @@ impl MembersPage {
             .and_then(|r| r.as_ref().ok())
             .copied();
         let items: Vec<String> = rules.map(approval_items).unwrap_or_default();
+        // No lock: nothing waits for an approval here.
+        let spend = rules
+            .and_then(spend_reminder)
+            .map(|text| page::card_row("member-approval-spend", None, text, None, None, true, cx));
         let body: AnyElement = match (&self.approvals, bot) {
             (_, false) => page::compact_empty(Sym::Lock, c::MEMBERS_APPROVALS_PERSON, None, cx)
                 .into_any_element(),
@@ -1602,12 +1609,20 @@ impl MembersPage {
                 )
                 .into_any_element()
             }
-            (Some(Ok(_)), true) if items.is_empty() => {
-                page::compact_empty(Sym::Lock, c::MEMBERS_APPROVALS_EMPTY, None, cx)
-                    .into_any_element()
-            }
+            (Some(Ok(_)), true) if items.is_empty() => div()
+                .flex()
+                .flex_col()
+                .child(page::compact_empty(
+                    Sym::Lock,
+                    c::MEMBERS_APPROVALS_EMPTY,
+                    None,
+                    cx,
+                ))
+                .children(spend)
+                .into_any_element(),
             (Some(Ok(_)), true) => {
                 let n = items.len();
+                let has_spend = spend.is_some();
                 div()
                     .flex()
                     .flex_col()
@@ -1618,10 +1633,11 @@ impl MembersPage {
                             a,
                             None,
                             None,
-                            i + 1 == n,
+                            i + 1 == n && !has_spend,
                             cx,
                         )
                     }))
+                    .children(spend)
                     .into_any_element()
             }
         };
@@ -2472,8 +2488,14 @@ mod wire_tests {
                 c::MEMBERS_APPROVE_CONFIG.into(),
                 c::MEMBERS_APPROVE_DELETE.into(),
                 c::MEMBERS_APPROVE_PUBLISH.into(),
-                fill(c::MEMBERS_APPROVE_SPEND, &[("n", "50")]),
             ]
+        );
+        assert_eq!(
+            spend_reminder(ApprovalDefaults {
+                max_spend_cny: Some(1_000_000),
+                ..ApprovalDefaults::default()
+            }),
+            Some(fill(c::MEMBERS_SPEND_REMINDER, &[("n", "1,000,000")]))
         );
         let none = ApprovalDefaults {
             merge_main: false,
@@ -2485,5 +2507,6 @@ mod wire_tests {
             approver: ApproverRole::Owners,
         };
         assert!(approval_items(none).is_empty());
+        assert_eq!(spend_reminder(none), None);
     }
 }
