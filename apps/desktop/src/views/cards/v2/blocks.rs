@@ -3482,25 +3482,39 @@ struct Thumb {
 fn open_recording(
     ctx: &Ctx,
     file_id: &str,
-) -> Option<impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static> {
+) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static {
     let provider = ctx.env.provider.clone();
     let (group, topic) = (ctx.msg.group_id.clone(), ctx.msg.topic_id.clone());
-    let file = provider
+    let listed = provider
         .topic_files(&group, &topic)
         .into_iter()
-        .find(|f| f.file.file_id == file_id)?
-        .file;
-    Some(move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut App| {
+        .find(|f| f.file.file_id == file_id)
+        .map(|f| f.file);
+    let file_id = file_id.to_string();
+    move |_: &gpui::ClickEvent, window: &mut Window, cx: &mut App| {
+        use crate::views::files::{OpenAction, open_file};
         cx.stop_propagation();
-        crate::views::files::open_file(
-            &provider,
-            &group,
-            &topic,
-            &file,
-            crate::views::files::OpenAction::Open,
-            cx,
-        );
-    })
+        if let Some(file) = &listed {
+            open_file(&provider, &group, &topic, file, OpenAction::Open, cx);
+            return;
+        }
+        let rx = provider.card_recording(&file_id);
+        let (provider, group, topic) = (provider.clone(), group.clone(), topic.clone());
+        let handle = window.window_handle();
+        cx.spawn(async move |cx: &mut gpui::AsyncApp| {
+            let found = rx.await.unwrap_or(Err(crate::data::FileError::Other));
+            cx.update(|cx| match found {
+                Ok(file) => open_file(&provider, &group, &topic, &file, OpenAction::Open, cx),
+                Err(_) => {
+                    use gpui_component::WindowExt as _;
+                    let note = crate::ui::overlay::Toast::new(ui::Sym::Failed, c::RECORDING_FAILED)
+                        .notification();
+                    let _ = handle.update(cx, |_, window, cx| window.push_notification(note, cx));
+                }
+            });
+        })
+        .detach();
+    }
 }
 
 /// The play disc and the length of a recording, over its tile.
@@ -3675,9 +3689,8 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
                         // A recording plays; a screenshot opens in the image viewer.
                         Some((video, _)) => el
                             .relative()
-                            .when_some(open_recording(ctx, video), |el, open| {
-                                el.cursor_pointer().on_click(open)
-                            }),
+                            .cursor_pointer()
+                            .on_click(open_recording(ctx, video)),
                         None => el.when_some(
                             t.file.as_ref().and_then(|f| open_picture(ctx, f)),
                             |el, open| el.cursor_pointer().on_click(open),

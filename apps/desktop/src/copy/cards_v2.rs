@@ -60,6 +60,7 @@ crate::copy! {
     FORM_INVALID = "{label}填得不对",
     FORM_READY = "提交后发给 {name}",
     FORM_DATE_PLACEHOLDER = "年-月-日",
+    RECORDING_FAILED = "这段录屏现在打不开，稍后再试",
     FORM_SELECT_PLACEHOLDER = "选{label}",
     FORM_LOCKED = "默认加入，不能取消",
     FORM_LIST_SEPARATOR = "、",
