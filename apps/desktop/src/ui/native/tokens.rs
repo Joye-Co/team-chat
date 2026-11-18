@@ -1135,8 +1135,11 @@ pub mod metrics {
     pub const CODE_BLOCK_ONE_LINE_PAD: Pixels = space::S12;
     /// The actions of a one-line block, centered on its 46 height.
     pub const CODE_BLOCK_ONE_LINE_ACTIONS_TOP: Pixels = px(11.);
-    /// The end of a one-line block's line: scrolled to its end, the code clears the actions.
-    pub const CODE_BLOCK_ONE_LINE_END: Pixels = px(160.);
+    /// How far the actions stand in from a code block's top and right edges.
+    pub const CODE_BLOCK_ACTIONS_INSET: Pixels = space::S8;
+    /// The end of a one-line block's line: scrolled to its end, the code clears the widest
+    /// actions (问这里, a long language name and copy).
+    pub const CODE_BLOCK_ONE_LINE_END: Pixels = px(200.);
     /// The narrowest link under the login form: 换一个邮箱 with its padding, so the two
     /// links of the code step are one width and sit even on the window's axis.
     pub const LOGIN_LINK_MIN: Pixels = px(94.);

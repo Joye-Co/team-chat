@@ -391,6 +391,7 @@ fn build(
                 .when_some(ask_hover, |d, hover| {
                     d.on_hover(crate::views::refs::affordance::track_hover(hover))
                 })
+                .children(code_end_cover(&shown, cx))
                 // The hidden 问这里 keeps its width: it goes first, so the language
                 // rests beside the copy button.
                 .children(ask)
@@ -429,7 +430,8 @@ fn body_style() -> TextViewStyle {
 }
 
 use crate::ui::native::metrics::{
-    CODE_BLOCK_ACTIONS as CODE_ACTIONS, CODE_BLOCK_END_INSET as CODE_END_INSET,
+    CODE_BLOCK_ACTIONS as CODE_ACTIONS, CODE_BLOCK_ACTIONS_INSET as CODE_ACTIONS_INSET,
+    CODE_BLOCK_END_INSET as CODE_END_INSET,
     CODE_BLOCK_ONE_LINE_ACTIONS_TOP as CODE_ONE_LINE_ACTIONS_TOP,
     CODE_BLOCK_ONE_LINE_PAD as CODE_ONE_LINE_PAD, CODE_BLOCK_PAD_BOTTOM as CODE_PAD_BOTTOM,
     CODE_BLOCK_STRIP as CODE_STRIP,
@@ -514,7 +516,7 @@ fn code_edge_fade(code: &str, cx: &App) -> impl IntoElement {
     let fill = gpui_component::ActiveTheme::theme(cx).muted;
     // The actions sit 8 in from the block's top and right edges (gpui-base);
     // the fade starts at the end of the strip and stops at the last line.
-    let inset = px(8.);
+    let inset = CODE_ACTIONS_INSET;
     div()
         .absolute()
         .map(|d| {
@@ -533,6 +535,23 @@ fn code_edge_fade(code: &str, cx: &App) -> impl IntoElement {
             gpui::linear_color_stop(fill.opacity(0.), 0.),
             gpui::linear_color_stop(fill, 1.),
         ))
+}
+
+/// A block of one line scrolls under its actions: this fills the inset between them and the
+/// block's edge, so no cut letter shows past the copy button. It starts under the button, to
+/// close the actions' rounded corners too.
+fn code_end_cover(code: &str, cx: &App) -> Option<gpui::Div> {
+    use crate::ui::native::tokens::{layout, text};
+    code_is_one_line(code).then(|| {
+        div()
+            .absolute()
+            .top(layout::BORDER + CODE_ONE_LINE_PAD - CODE_ONE_LINE_ACTIONS_TOP)
+            // Inside the block's 1 px border.
+            .right(layout::BORDER - CODE_ACTIONS_INSET)
+            .w(CODE_ACTIONS_INSET * 2. - layout::BORDER)
+            .h(text::MONO.1)
+            .bg(gpui_component::ActiveTheme::theme(cx).muted)
+    })
 }
 
 // --- v11/inc-diagrams: ```mermaid fences drawn as diagrams (REFS §B1) ---
