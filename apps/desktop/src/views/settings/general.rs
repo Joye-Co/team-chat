@@ -397,6 +397,10 @@ impl GeneralPage {
                 .items_center()
                 .gap(space::S8)
                 .child(
+                    sm("about-dismiss", u::DISMISS.into(), PushStyle::Outline, cx)
+                        .on_click(move |_, _, cx| updater.update(cx, |u, cx| u.dismiss(cx))),
+                )
+                .child(
                     sm(
                         "about-quit",
                         fill(u::QUIT_TO_INSTALL, &[("product", env!("PRODUCT_NAME"))]).into(),
@@ -404,10 +408,6 @@ impl GeneralPage {
                         cx,
                     )
                     .on_click(|_, _, cx| cx.dispatch_action(&crate::app::Quit)),
-                )
-                .child(
-                    sm("about-dismiss", u::DISMISS.into(), PushStyle::Outline, cx)
-                        .on_click(move |_, _, cx| updater.update(cx, |u, cx| u.dismiss(cx))),
                 )
                 .into_any_element(),
             Some(Phase::Checking) => disabled_push(
