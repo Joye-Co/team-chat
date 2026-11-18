@@ -1140,10 +1140,10 @@ mod tests {
 
     #[test]
     fn the_events_table_is_the_servers() {
-        // server/src/cards2/inputs.ts `eventsOf`: `case "<type>":` lines, then the `return [..]`
-        // they share.
-        let src = std::fs::read_to_string(repo().join("server/src/cards2/inputs.ts")).unwrap();
-        let body = src.split("export function eventsOf").nth(1).unwrap();
+        // packages/protocol/src/card2.ts `cardBlockEvents` (the server's `eventsOf`): `case
+        // "<type>":` lines, then the `return [..]` they share.
+        let src = std::fs::read_to_string(repo().join("packages/protocol/src/card2.ts")).unwrap();
+        let body = src.split("export function cardBlockEvents").nth(1).unwrap();
         let mut theirs: Vec<(String, Vec<String>)> = vec![];
         let mut cases: Vec<String> = vec![];
         let quoted = |l: &str| -> Vec<String> {
