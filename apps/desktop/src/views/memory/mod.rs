@@ -416,7 +416,7 @@ impl MemoryBoard {
     }
 
     fn add_button(&self, cx: &mut Context<Self>) -> AnyElement {
-        push_button(
+        let button = push_button(
             self.id("add"),
             c::ADD,
             if self.host == Host::Settings {
@@ -426,12 +426,13 @@ impl MemoryBoard {
             },
             PushSize::Small,
             cx,
-        )
+        );
         // Nothing to add to while the list loads or could not be read
-        // (§2.14); the button keeps its place so the header does not jump.
-        .disabled(!matches!(self.memories, Some(Ok(_))))
-        .on_click(cx.listener(|this, _, window, cx| this.open_sheet(None, window, cx)))
-        .into_any_element()
+        // (§2.14); the button keeps its place, at 50 %, so the header does
+        // not jump.
+        crate::ui::native::disabled_push(button, !matches!(self.memories, Some(Ok(_))), cx)
+            .on_click(cx.listener(|this, _, window, cx| this.open_sheet(None, window, cx)))
+            .into_any_element()
     }
 
     fn id(&self, part: impl std::fmt::Display) -> ElementId {
