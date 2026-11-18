@@ -203,6 +203,8 @@ export interface VersionInput {
   preview?: ArtifactPreview;
   /** Usable: the version this one was made from (checked by `artifacts.addVersion`). */
   parentVersion?: number;
+  /** Add version, bots only: without `data`, start with the parent version's snapshot. */
+  keepData?: boolean;
 }
 
 export function fileRecord(room: RoomContext, id: string): FileRecordRow | undefined {
@@ -347,7 +349,8 @@ function insertVersion(
     input.preview ? JSON.stringify(input.preview) : null,
     input.parentVersion ?? null,
   );
-  // A new version starts with the data of its request, or none (INTERACT §5.3).
+  // A new version starts with the data of its request, or none (INTERACT §5.3); `keepData`
+  // makes the parent's snapshot that data (`artifacts.addVersion`).
   if (input.data !== undefined) {
     room.sql.exec(
       "INSERT OR REPLACE INTO artifact_data (artifact_id, version, data, data_rev, push_id, updated_at) VALUES (?, ?, ?, 1, NULL, ?)",
@@ -364,7 +367,7 @@ function insertVersion(
  * `runId` only for its own run in the topic.
  */
 async function botVersionFields(room: RoomContext, actor: Actor, topicId: string, input: VersionInput): Promise<VersionInput> {
-  if (actor.kind !== "bot") return { ...input, events: undefined, runId: undefined, data: undefined };
+  if (actor.kind !== "bot") return { ...input, events: undefined, runId: undefined, data: undefined, keepData: undefined };
   for (const e of input.events ?? []) {
     const problem = schemaPatternProblem(e.schema);
     if (problem) throw new ApiError("invalid", `event ${e.name}: ${problem}`, "artifact.bad_schema");
@@ -454,8 +457,15 @@ registerRoomRpc("artifacts.addVersion", async (room, actor, args) => {
   if (!Number.isInteger(parentVersion) || parentVersion < 1 || parentVersion >= next || !versionRow(room, row.id, parentVersion)) {
     throw new ApiError("invalid", "parentVersion is not an existing version of this 产出", "artifact.bad_parent");
   }
+  // `keepData`: what people did on the parent version's page stays, when the same member made
+  // both (another member's snapshot may have a shape this page does not read).
+  let data = req.data;
+  if (data === undefined && req.keepData === true && versionRow(room, row.id, parentVersion)?.created_by === a.id) {
+    const kept = room.sql.exec<{ data: string }>("SELECT data FROM artifact_data WHERE artifact_id = ? AND version = ?", row.id, parentVersion).toArray()[0];
+    if (kept) data = JSON.parse(kept.data) as unknown;
+  }
   return room.commit((tx) => {
-    insertVersion(room, row.id, next, { ...req, parentVersion }, files, a.id, now);
+    insertVersion(room, row.id, next, { ...req, data, parentVersion }, files, a.id, now);
     room.sql.exec(
       "UPDATE artifacts SET current_version = ?, updated_at = ?, title = ? WHERE id = ?",
       next,

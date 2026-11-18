@@ -665,6 +665,14 @@ pub struct AddArtifactVersionRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub parent_version: Option<u32>,
+    /// `Some(true)`: without `data`, the version starts with the data snapshot of its parent
+    /// version when the same bot member made both. `None`: it starts empty.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub keep_data: Option<bool>,
 }
 
 impl AddArtifactVersionRequest {

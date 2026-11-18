@@ -676,6 +676,8 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
   bad("http/create-artifact-schema-ref.json", "CreateArtifactRequest", { ...createArt, events: [{ name: "x", schema: { $ref: "#/data/x" } }] }, "no $ref in a page event schema");
   bad("http/create-artifact-reserved-path.json", "CreateArtifactRequest", { ...createArt, files: [{ path: "__teamchat/mermaid.min.js", fileId: FILE }] }, "paths under __teamchat/ are reserved");
   bad("http/create-artifact-media-too-big.json", "CreateArtifactRequest", { ...createArt, media: { kind: "html", mime: "text/html", bytes: 30_000_000, preview: "pending" } }, "an html version is at most 20 MB");
+  ok("http/add-artifact-version-keep-data.json", "AddArtifactVersionRequest", { entry: "index.html", files: [{ path: "index.html", fileId: FILE }], events: [{ name: "pick" }], keepData: true });
+  bad("http/add-artifact-version-keep-data-bad.json", "AddArtifactVersionRequest", { entry: "index.html", files: [{ path: "index.html", fileId: FILE }], keepData: "yes" }, "keepData is a boolean");
   ok("http/add-artifact-version-media.json", "AddArtifactVersionRequest", { entry: "index.html", files: [{ path: "index.html", fileId: FILE }], events: [{ name: "pick" }], media: { kind: "html", mime: "text/html", bytes: 1000, preview: "ready" }, data: null });
   ok("http/artifact-data-response.json", "ArtifactDataResponse", { data: { channels: { douyin: 7 } }, dataRev: 2, updatedAt: T0 });
   ok("http/artifact-data-response-empty.json", "ArtifactDataResponse", { data: null, dataRev: 0, updatedAt: T0 });

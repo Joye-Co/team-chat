@@ -268,6 +268,11 @@ export const AddArtifactVersionRequest = z.object({
   title: Title.optional(),
   /** Usable: an existing version this one was made from; absent = the current version. */
   parentVersion: z.int().positive().optional(),
+  /**
+   * True: without `data`, the version starts with the data snapshot of its parent version when
+   * the same bot member made both (what people did on the page stays). Absent: it starts empty.
+   */
+  keepData: z.boolean().optional(),
 });
 export type AddArtifactVersionRequest = z.infer<typeof AddArtifactVersionRequest>;
 /**

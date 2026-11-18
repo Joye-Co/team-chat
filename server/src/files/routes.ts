@@ -679,6 +679,7 @@ export async function addArtifactVersionAs(
       preview: req.preview,
       data: req.data,
       parentVersion: req.parentVersion,
+      keepData: req.keepData,
     }),
   ) as ArtifactVersionResponse;
   await auditStatement(env.DB, a, {

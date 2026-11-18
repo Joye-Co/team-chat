@@ -205,6 +205,34 @@ describe("产出 bridge", () => {
     // A 1.0.x connection never gets the transient.
     await sleep(100);
     expect(old.frames.some((f) => f.t === "transient" && f.event.type === "artifact.data")).toBe(false);
+
+    // A new version starts empty; with keepData it starts with its parent's snapshot.
+    const version = async (m: TestMember, extra: Record<string, unknown> = {}) => {
+      const r = await api(`/v1/artifacts/${id}/versions`, { token: m.token, body: { entry: "index.html", files: [{ path: "index.html", fileId: await upload(m, gid) }], ...extra } });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      return r.body.version as { version: number; dataRev?: number };
+    };
+    const dataOf = async (v: number) => (await api(`/v1/artifacts/${id}/versions/${v}/data`, { token: alice.token })).body;
+    const v2 = await version(bot);
+    expect(v2).toMatchObject({ version: 2 });
+    expect(v2.dataRev ?? 0).toBe(0);
+    expect(await dataOf(2)).toMatchObject({ data: null, dataRev: 0 });
+    // Version 2 has no snapshot: keeping from it (the default parent) keeps nothing.
+    expect((await version(bot, { keepData: true })).dataRev ?? 0).toBe(0);
+    const v4 = await version(bot, { keepData: true, parentVersion: 1 });
+    expect(v4).toMatchObject({ version: 4, dataRev: 1 });
+    expect(await dataOf(4)).toMatchObject({ data: { a: 3 }, dataRev: 1 });
+    // Version 1 keeps its own snapshot and rev.
+    expect(await dataOf(1)).toMatchObject({ data: { a: 3 }, dataRev: 3 });
+    // `data` wins; a person's version, and one made from another member's version, keep nothing.
+    const v5 = await version(bot, { keepData: true, parentVersion: 1, data: { fresh: true } });
+    expect(await dataOf(v5.version)).toMatchObject({ data: { fresh: true }, dataRev: 1 });
+    const v6 = await version(alice, { keepData: true, parentVersion: 1 });
+    expect(await dataOf(v6.version)).toMatchObject({ data: null, dataRev: 0 });
+    const helper = await createMember({ kind: "bot", name: "helper" });
+    expect((await api(`/v1/groups/${gid}/members`, { token: owner.token, body: { memberId: helper.id } })).status).toBe(200);
+    const v7 = await version(helper, { keepData: true, parentVersion: 1 });
+    expect(await dataOf(v7.version)).toMatchObject({ data: null, dataRev: 0 });
     // 2 pushes per second, bursts of 4.
     const results = await Promise.all([1, 2, 3, 4, 5, 6].map((n) => push({ data: { n } })));
     const limited = results.find((r) => r.ok === false && r.error.code === "rate_limited");

@@ -1792,7 +1792,7 @@ ArtifactPreview = { title? /* 1..200 */, summary? /* 1..500 */,
 ArtifactEventDecl = { name /* 1..128; writes: [a-z][A-Za-z0-9_.-]{0,63}, unique */, label? /* <= 200 */,
                       kind?: "emit" | "ask" /* default emit */, schema?: TcSchema }
 CreateArtifactRequest += { events?, runId?, media?: MediaInfo, data?: JSON /* <= 256 KiB */, preview? }
-AddArtifactVersionRequest += { events?, runId?, media?, data?, preview? }
+AddArtifactVersionRequest += { events?, runId?, media?, data?, preview?, keepData?: boolean }
 { t: "artifact.event", rid, groupId, artifactId, version, clientEventId?, name, kind?, payload?: JSON /* <= 16 KiB */ }
    // ack.result (1.1 server) = ArtifactEventAck { eventId, duplicate?, expect: Expect }
 ```
@@ -1820,6 +1820,12 @@ Rules:
   first and scrape the HTML only when a version has none.
 - `events` and `runId` are accepted from bot members only; `runId` must be a run of the caller
   in the 产出's topic (else it is dropped). Other callers' values are dropped.
+- Data of a new version: a version without `data` starts empty (`dataRev` 0, `GET …/data` gives
+  `data: null`); what people did on the version before is not carried over. With `keepData: true`
+  and no `data`, the version starts with the snapshot of its parent version (`parentVersion`,
+  else the current one) as `dataRev` 1, when the same bot member made both versions and the
+  parent has a snapshot; otherwise it starts empty. `data` wins over `keepData`. `keepData` is
+  accepted from bot members only, like `data`.
 - `TcSchema` is a subset of JSON Schema: `type properties required enum items maxItems minimum
   maximum maxLength pattern (<= 200) description`, depth <= 4, no `$ref`. The server checks a
   `pattern` in linear time (no backtracking), so it refuses one with a backreference (`\1`,
