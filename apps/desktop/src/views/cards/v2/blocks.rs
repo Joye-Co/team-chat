@@ -531,6 +531,15 @@ fn outputs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                 .child(crate::ui::native::media_box(icon, cx))
                 .child(
                     div()
+        // The version the pane already shows says so; another version still opens.
+        let in_pane = detail.as_ref().is_some_and(|a| {
+            crate::views::artifacts::host::version_in_pane(
+                artifact_id,
+                *version,
+                a.summary.version,
+                cx,
+            )
+        });
                         .flex_1()
                         .min_w_0()
                         .flex()
@@ -549,7 +558,10 @@ fn outputs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                                 .text_color(n.secondary),
                         ),
                 )
-                .when(!gone, |el| {
+                .when(in_pane, |el| {
+                    el.child(crate::views::artifacts::host::in_pane_label(cx))
+                })
+                .when(!gone && !in_pane, |el| {
                     el.child(ui::icon(
                         Sym::OpenExternal,
                         theme::icon::HEADER,

@@ -593,12 +593,17 @@ impl TimelineView {
             else {
                 continue;
             };
-            let kind = p
+            let listed = p
                 .artifacts(&message.group_id, &message.topic_id)
                 .into_iter()
-                .find(|a| a.id == *artifact_id)
-                .map(|a| kind_text(a.kind))
-                .unwrap_or(c::KIND_PAGE);
+                .find(|a| a.id == *artifact_id);
+            let in_pane = crate::views::artifacts::host::version_in_pane(
+                artifact_id,
+                Some(*version),
+                listed.as_ref().map_or(*version, |a| a.version),
+                cx,
+            );
+            let kind = listed.map(|a| kind_text(a.kind)).unwrap_or(c::KIND_PAGE);
             let pane = RightPane::Artifact {
                 id: artifact_id.clone(),
                 version: Some(*version),
@@ -628,11 +633,15 @@ impl TimelineView {
                         )),
                 )
                 .child(div().flex_1())
-                .child(open_arrow(
-                    ElementId::Name(format!("v2-out-open-{key}-{artifact_id}").into()),
-                    c::OPEN_OUTPUT,
-                    cx,
-                ))
+                .child(if in_pane {
+                    crate::views::artifacts::host::in_pane_label(cx).into_any_element()
+                } else {
+                    open_arrow(
+                        ElementId::Name(format!("v2-out-open-{key}-{artifact_id}").into()),
+                        c::OPEN_OUTPUT,
+                        cx,
+                    )
+                })
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     let pane = pane.clone();
                     this.services
