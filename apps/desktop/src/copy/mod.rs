@@ -659,6 +659,94 @@ mod tests {
         }
     }
 
+    /// Every text a user reads, with its section and key (the `dev` section is the
+    /// developer view's own words).
+    fn user_texts() -> impl Iterator<Item = (&'static str, &'static str, &'static str)> {
+        SECTIONS
+            .iter()
+            .filter(|s| s.name != "dev")
+            .flat_map(|s| s.entries.iter().map(|(key, text)| (s.name, *key, *text)))
+    }
+
+    /// Quotations use 「」, never curly or straight double quotes.
+    #[test]
+    fn quotation_marks_are_corner_brackets() {
+        for (section, key, text) in user_texts() {
+            assert!(
+                !text.contains(['“', '”', '"']),
+                "{section}::{key} = {text:?} quotes without 「」"
+            );
+        }
+    }
+
+    /// A date is written as the system writes it, 「11月3日」「2026年11月3日」: no
+    /// space between a number and 年, 月 or 日.
+    #[test]
+    fn dates_have_no_spaces() {
+        for (section, key, text) in user_texts() {
+            for spaced in ["} 年", "年 {", "} 月", "月 {", "} 日"] {
+                assert!(
+                    !text.contains(spaced),
+                    "{section}::{key} = {text:?} writes a date with spaces"
+                );
+            }
+        }
+    }
+
+    /// A date format with Chinese in it is interface text: it is filled from a
+    /// catalog entry (`common::MONTH_DAY_TIME`, `common::DATE_TIME`), never typed
+    /// into a `format("%-m月%-d日")` call in a view.
+    #[test]
+    fn views_take_date_formats_from_the_catalog() {
+        fn walk(dir: &std::path::Path, found: &mut Vec<String>) {
+            for entry in std::fs::read_dir(dir).expect("a source folder") {
+                let path = entry.expect("a source file").path();
+                if path.is_dir() {
+                    if !path.ends_with("copy") {
+                        walk(&path, found);
+                    }
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    let source = std::fs::read_to_string(&path).expect("a source file");
+                    for (n, line) in source.lines().enumerate() {
+                        let Some(at) = line.find(".format(\"") else {
+                            continue;
+                        };
+                        let Some((format, _)) = string_literal(&line[at..]) else {
+                            continue;
+                        };
+                        if format.contains('%') && format.chars().any(is_han) {
+                            found.push(format!("{}:{}: {format}", path.display(), n + 1));
+                        }
+                    }
+                }
+            }
+        }
+        let mut found = Vec::new();
+        walk(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut found,
+        );
+        assert!(found.is_empty(), "{}", found.join("\n"));
+    }
+
+    /// An AI member is 它 and a person is 对方 or the name: never TA.
+    #[test]
+    fn nobody_is_called_ta() {
+        for (section, key, text) in user_texts() {
+            let words: Vec<&str> = text.split(|c: char| !c.is_ascii_alphanumeric()).collect();
+            assert!(
+                !words.contains(&"TA"),
+                "{section}::{key} = {text:?} says TA"
+            );
+        }
+    }
+
+    #[test]
+    fn the_weekday_table_starts_on_monday() {
+        assert_eq!(weekday(chrono::Weekday::Mon), "周一");
+        assert_eq!(weekday(chrono::Weekday::Sun), "周日");
+    }
+
     #[test]
     fn product_name_is_never_typed() {
         let name = env!("PRODUCT_NAME").to_lowercase();
