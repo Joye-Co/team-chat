@@ -399,6 +399,7 @@ impl AccountPage {
                     Ok(saved) => {
                         this.email = Some(Some(saved));
                         this.email_sent_to = None;
+                        this.clear_email_resend();
                         window.close_dialog(cx);
                     }
                     Err(e) => {
