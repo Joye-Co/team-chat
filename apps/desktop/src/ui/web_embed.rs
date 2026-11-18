@@ -105,6 +105,9 @@ pub struct WebEmbed {
     /// Draw the card frame (1 px border on the card fill) around the page.
     framed: bool,
     radius: Pixels,
+    /// The bottom-left and bottom-right radius of the fill, when the page ends at
+    /// the rounded corners of a sheet ([`WebEmbed::rounded_bottom`]).
+    bottom: (Pixels, Pixels),
     pass_scroll: bool,
     autoplay: bool,
     /// The page's side and top padding in the host base stylesheet (`--tc-pad`).
@@ -125,6 +128,7 @@ impl WebEmbed {
             fill: false,
             framed: false,
             radius: radius::LG,
+            bottom: (px(0.), px(0.)),
             pass_scroll: false,
             autoplay: false,
             pad: crate::ui::native::tokens::space::S24,
@@ -164,6 +168,14 @@ impl WebEmbed {
 
     pub fn rounded(mut self, r: Pixels) -> Self {
         self.radius = r;
+        self
+    }
+
+    /// Rounds the fill's bottom corners (left, right) on top of [`WebEmbed::rounded`]:
+    /// for a page whose bottom edge is a sheet's, so its square fill does not show
+    /// past the sheet's corners.
+    pub fn rounded_bottom(mut self, left: Pixels, right: Pixels) -> Self {
+        self.bottom = (left, right);
         self
     }
 
@@ -1117,6 +1129,8 @@ impl RenderOnce for WebEmbed {
             .when(self.fill, |d| d.flex_1().h_full().min_h(px(0.)))
             .when(!self.fill, |d| d.h(height).flex_none())
             .rounded(self.radius)
+            .when(self.bottom.0 > px(0.), |d| d.rounded_bl(self.bottom.0))
+            .when(self.bottom.1 > px(0.), |d| d.rounded_br(self.bottom.1))
             .overflow_hidden()
             // A page that fills a content area sits on the app background; inline it
             // sits on its card's fill. `framed` adds the card's 1 px line (§1.7).

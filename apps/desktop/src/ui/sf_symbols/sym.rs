@@ -180,6 +180,10 @@ concepts! {
     Info = "info.circle";
     Help = "questionmark.circle";
     Return = "return";
+    /// Wrap long lines (the code viewer's toggle).
+    Wrap = "arrow.turn.down.left";
+    /// Hand something to a 话题 (发到话题): a bare tool, unlike `Send` on its circle.
+    SendTo = "paperplane";
     ReplyIndent = "arrow.turn.down.right";
     Reply = "arrowshape.turn.up.left";
     ArrowUp = "arrow.up";
