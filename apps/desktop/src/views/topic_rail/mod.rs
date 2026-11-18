@@ -256,7 +256,7 @@ impl TopicRail {
 
     /// The actions of the 话题 at the top of the pane (owner decision,
     /// 2026-11-08: no pinned full-width footer): 标记完成 (outline, with a
-    /// check) and 交给… (ghost, a menu of the 群's members), small, side by
+    /// check) and 交给… (outline, §2.5; a menu of the 群's members), small, side by
     /// side. While the 话题 waits on a review, an answer or a merge,
     /// 标记完成 is not the next step (R2-17); 交给… stays.
     fn actions(&self, topic: &Topic, cx: &mut Context<Self>) -> AnyElement {
@@ -290,7 +290,7 @@ impl TopicRail {
             push_button(
                 "rail-hand-to",
                 c::HAND_TO,
-                PushStyle::Ghost,
+                PushStyle::Outline,
                 PushSize::Small,
                 cx,
             ),

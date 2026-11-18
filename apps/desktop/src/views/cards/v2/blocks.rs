@@ -2579,7 +2579,9 @@ pub(crate) fn diff(
         .overflow_hidden()
         .flex()
         .flex_col()
-        .child(
+        // No path: the caller names the file itself (the 改动 pane's file
+        // row), so the well has no header.
+        .children(path.map(|path| {
             div()
                 .h(crate::ui::native::tokens::height::LG)
                 .px(space::S12)
@@ -2588,7 +2590,8 @@ pub(crate) fn diff(
                 .gap(space::S8)
                 .border_b_1()
                 .border_color(k.line_2)
-                .text_size(crate::ui::native::tokens::text::UI.0)
+                // Mono has one size, 13 (§1.4).
+                .text_size(crate::ui::native::tokens::text::MONO.0)
                 .code_font()
                 .child(
                     div()
@@ -2596,19 +2599,16 @@ pub(crate) fn diff(
                         .min_w(px(0.))
                         .one_line()
                         .text_color(k.ink)
-                        .child(
-                            crate::ui::truncate::TruncText::new(path.unwrap_or("").to_string())
-                                .middle(),
-                        ),
+                        .child(crate::ui::truncate::TruncText::new(path.to_string()).middle()),
                 )
                 // Counts in muted text; the +/− glyph carries the meaning (§1.3).
                 .child(div().text_color(k.ink_3).child(format!("+{adds}")))
-                .child(div().text_color(k.ink_3).child(format!("−{dels}"))),
-        )
+                .child(div().text_color(k.ink_3).child(format!("−{dels}")))
+        }))
         .child(
             div()
                 .py(space::S4)
-                .text_size(crate::ui::native::tokens::text::META.0)
+                .text_size(crate::ui::native::tokens::text::MONO.0)
                 .line_height(m::DIFF_LINE)
                 .code_font()
                 .flex()

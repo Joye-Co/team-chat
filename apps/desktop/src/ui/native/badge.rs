@@ -38,6 +38,7 @@ pub struct Badge {
     lead: Option<AnyElement>,
     dense: bool,
     max_w: Option<gpui::Pixels>,
+    on_fill: bool,
 }
 
 impl Badge {
@@ -48,7 +49,17 @@ impl Badge {
             lead: None,
             dense: false,
             max_w: None,
+            on_fill: false,
         }
+    }
+
+    /// A secondary badge on a filled surface (a `group` box, the sidebar):
+    /// its fill is the foreground at 8 % (`push`), one step over the fill
+    /// under it in both modes. `muted` on `group` is the same gray in light,
+    /// so the pill would vanish. Still no border (v18).
+    pub fn on_fill(mut self, on_fill: bool) -> Self {
+        self.on_fill = on_fill;
+        self
     }
 
     pub fn variant(mut self, variant: BadgeVariant) -> Self {
@@ -100,6 +111,11 @@ impl RenderOnce for Badge {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = native_colors(cx);
         let (fill, edge, text) = badge_colors(self.variant, &k);
+        let fill = if self.on_fill && self.variant == BadgeVariant::Secondary {
+            k.push
+        } else {
+            fill
+        };
         div()
             .flex_none()
             .h(height::BADGE)
@@ -249,6 +265,7 @@ pub struct StatusBadge {
     label: SharedString,
     dense: bool,
     max_w: Option<gpui::Pixels>,
+    on_fill: bool,
 }
 
 impl StatusBadge {
@@ -258,6 +275,7 @@ impl StatusBadge {
             label: label.into(),
             dense: false,
             max_w: None,
+            on_fill: false,
         }
     }
 
@@ -270,6 +288,13 @@ impl StatusBadge {
         self.max_w = Some(w);
         self
     }
+
+    /// The badge sits on a filled surface (an inspector `group` box): see
+    /// [`Badge::on_fill`].
+    pub fn on_fill(mut self) -> Self {
+        self.on_fill = true;
+        self
+    }
 }
 
 impl RenderOnce for StatusBadge {
@@ -277,7 +302,7 @@ impl RenderOnce for StatusBadge {
         let k = native_colors(cx);
         // A muted fill, no border (owner decision, v18: lines only where
         // they separate something).
-        let mut b = Badge::new(self.label).secondary();
+        let mut b = Badge::new(self.label).secondary().on_fill(self.on_fill);
         if let Some(mark) = state_mark(self.state, &k) {
             b = b.lead(mark);
         }
