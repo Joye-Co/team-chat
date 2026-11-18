@@ -2002,6 +2002,15 @@ retract or an expiry of a card ask; a ref whose source was deleted) has no `card
 that was never edited. It is not an edit: a 1.1 client keeps its stored `editedAt` (no edited
 mark), and so does a restore. (1.0.x clients copy `editedAt` and show the mark.)
 
+Who answers an ask: `ask.from` lists member ids, `"owners"` and `"requester"`; the server stores
+the resolved member ids in `cardState.ask.from`. Only people answer, so a send, an edit or a
+patch that opens a new ask round or changes `ask.from` must name at least one person of the
+group who is not deactivated: ids that name none (a name in place of an id, only AI members)
+are `invalid`, `card.limits`, and the message lists them. `"owners"` or `"requester"` that
+resolve to no person (a run that nobody asked) are stored as the group's owners. A round whose
+people left the group later is kept; its author closes it or it expires. (Poll voters come
+from the poll's `voters`, people only.)
+
 Topic status with blocking asks: while a blocking ask in the topic is open, the topic is
 `waiting_answer` and `waitingOn` is the union of the open asks' `from` and the people of a
 `waiting_answer` set by `topic.update` (a run's approval). A `topic.update` in that time (for

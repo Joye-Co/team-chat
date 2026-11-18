@@ -443,6 +443,41 @@ describe("blocking asks and rounds", () => {
     expect(done.data.waitingOn).toEqual([]);
     for (const c of [co, ca, cbot]) c.close();
   });
+
+  it("refuse an ask that names nobody who can answer, on send, edit and patch, and give a requester ask with no person to the owners", async () => {
+    const { owner, alice, bot, gid, ca, cbot } = await setup();
+    const nobody = { ok: false, error: { code: "invalid", reason: "card.limits" } };
+    // A name in place of an id, and an AI member: nobody could answer.
+    const byName = await cbot.request({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "", cardV2: quick(["Alice"]) });
+    expect(byName).toMatchObject(nobody);
+    expect(byName.error.message).toContain("ask.from names nobody who can answer");
+    expect(byName.error.message).toContain("Alice");
+    expect(await cbot.request({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "", cardV2: quick([bot.id]) })).toMatchObject(nobody);
+    const noWait = await ca.request({ t: "fetch", groupId: gid, afterSeq: 0 });
+    expect(noWait.events.some((e: any) => e.type === "topic.updated" && e.data.status === "waiting_answer")).toBe(false);
+    // One person among the names is enough.
+    const mixed = (await send(cbot, gid, quick(["Alice", alice.id]))).message;
+    expect(mixed.cardState.ask.from).toEqual([alice.id]);
+    // "requester" in a topic the member opened itself names no person: the owners answer.
+    const own = (await send(cbot, gid, quick(["requester"]))).message;
+    expect(own.cardState.ask).toMatchObject({ status: "open", from: [owner.id] });
+
+    // An edit or a patch that changes `from`, or opens a new round, is checked the same way.
+    const m = (await send(cbot, gid, quick([alice.id]))).message;
+    expect(await cbot.request({ t: "edit", groupId: gid, messageId: m.id, body: "", cardV2: quick(["Alice"]), baseRev: 1 })).toMatchObject(nobody);
+    const patch = (ask: unknown, baseRev = 1) => cbot.request({ t: "card.patch", groupId: gid, messageId: m.id, baseRev, ops: [{ op: "card", props: { ask } }] });
+    expect(await patch({ from: [bot.id] })).toMatchObject(nobody);
+    expect(await patch({ id: "a2", from: ["nobody-here"] })).toMatchObject(nobody);
+    // A round whose person left stays as it is when another part of the card changes.
+    await env.DB.prepare("UPDATE members SET deactivated = 1 WHERE id = ?").bind(alice.id).run();
+    await (roomOf(gid) as unknown as { rpc(g: string, name: string, actor: null, args: unknown): Promise<unknown> }).rpc(gid, "cards.directoryChanged", null, {});
+    const kept = await cbot.request({ t: "card.patch", groupId: gid, messageId: m.id, baseRev: 1, ops: [{ op: "set", id: "info", props: { text: "改动都测过了，包括回滚。" } }] });
+    expect(kept, JSON.stringify(kept)).toMatchObject({ ok: true, result: { rev: 2 } });
+    expect(kept.result.message.cardState.ask).toMatchObject({ status: "open", from: [] });
+    // A new ask for her alone is refused: she cannot answer any more.
+    expect(await cbot.request({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "", cardV2: quick([alice.id]) })).toMatchObject(nobody);
+    for (const c of [ca, cbot]) c.close();
+  });
 });
 
 describe("1.0.x readers", () => {

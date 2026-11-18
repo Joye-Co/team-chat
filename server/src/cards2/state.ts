@@ -172,6 +172,37 @@ export async function resolveFrom(
   return [...out].filter((id) => dir.get(id)?.deactivated !== true);
 }
 
+const FROM_KEYWORDS = new Set(["owners", "requester"]);
+
+/**
+ * `ask.from` of a card write, as stored: at least one person who can answer. Only people answer
+ * (a bot's card event is refused), so an ask whose `from` names none would stay open with nobody
+ * to wait on. `owners` or `requester` that name no person (a run nobody asked: a scheduled or
+ * handed-over one) fall back to the group's owners; ids that name no person are `invalid`.
+ */
+function answerableFrom(room: RoomContext, dir: Directory, given: string[], resolved: string[]): string[] {
+  const person = (id: string) => {
+    const m = dir.get(id);
+    return m?.kind === "human" && !m.deactivated;
+  };
+  if (resolved.some(person)) return resolved;
+  if (given.some((f) => FROM_KEYWORDS.has(f))) {
+    const owners = room.memberIds().filter((id) => dir.get(id)?.level === "owner" && person(id));
+    return owners.length > 0 ? [...new Set([...resolved, ...owners])] : resolved;
+  }
+  const unknown = given
+    .filter((f) => !person(f))
+    .slice(0, 5)
+    .map((f) => (f.length > 40 ? `${f.slice(0, 40)}…` : f));
+  throw new ApiError(
+    "invalid",
+    `ask.from names nobody who can answer: use member ids of people in this group, "requester" or "owners" (not a person here: ${unknown.join(", ")})`,
+    "card.limits",
+  );
+}
+
+const sameList = (a: string[] | undefined, b: string[]) => a !== undefined && a.length === b.length && a.every((x, i) => x === b[i]);
+
 function pollVoters(room: RoomContext, dir: Directory, poll: Extract<Block, { type: "poll" }>): string[] {
   const ids = poll.voters === "group" ? room.memberIds() : poll.voters.filter((v) => room.isMember(v));
   return ids.filter((id) => dir.get(id)?.kind === "human" && !dir.get(id)?.deactivated);
@@ -238,6 +269,12 @@ export async function stateForWrite(
   now: number,
   /** The stored card's message (unset on send: `rememberRequester` stores the round's requester). */
   messageId?: string,
+  /**
+   * Set for a send, an edit and a patch (not for a read of an old card): the ask of a new round,
+   * or one whose `from` differs from `prevFrom` (the stored card's `ask.from`), must name a
+   * person (`answerableFrom`). A round whose people left since is kept as it is.
+   */
+  write?: { prevFrom?: string[] },
 ): Promise<CardState> {
   const state: CardState = { ...(prev ?? {}), answers: prev?.answers ?? [] };
   const ask = card.ask;
@@ -247,7 +284,8 @@ export async function stateForWrite(
     const id = ask.id ?? "a1";
     const poll = pollOf(card);
     const requester = roundRequester(room, dir, authorId, topicId, id, state.ask?.id === id, messageId, state);
-    const from = poll ? pollVoters(room, dir, poll) : await resolveFrom(room, dir, ask.from, authorId, topicId, requester);
+    let from = poll ? pollVoters(room, dir, poll) : await resolveFrom(room, dir, ask.from, authorId, topicId, requester);
+    if (!poll && write && (state.ask?.id !== id || !sameList(write.prevFrom, ask.from))) from = answerableFrom(room, dir, ask.from, from);
     const blocking = ask.blocking ?? card.intent === "ask";
     const expiresAt = ask.expiresAt ?? (poll ? poll.closesAt : undefined);
     if (state.ask && state.ask.id === id) {
