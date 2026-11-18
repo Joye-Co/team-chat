@@ -285,13 +285,13 @@ impl MemoryBoard {
         model::can_write(scope, me.as_ref())
     }
 
-    /// Whether I may change one memory: by its own scope (我的约定 holds two).
     /// The board of 团队管理 › 记忆: it sits on that window's content panel.
     pub fn on_admin_panel(mut self) -> Self {
         self.admin_panel = true;
         self
     }
 
+    /// Whether I may change one memory: by its own scope (我的约定 holds two).
     fn writes(&self, m: &Memory) -> bool {
         match MemoryScope::parse(&m.scope) {
             Some(s) if s != self.scope => self.writer_of(&s),
