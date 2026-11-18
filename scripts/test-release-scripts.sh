@@ -256,6 +256,7 @@ gh_stub() {
       if (p === "/v1/health") return Response.json({ ok: true, version: "gh" });
       if (p === "/repos/o/r/releases/latest" || p === "/repos/o/r/releases/tags/v9.9.9") return Response.json(v999);
       if (p === "/repos/o/r/releases/tags/v9.9.8") return Response.json(v998);
+      if (p.startsWith("/repos/o/limited/")) return new Response("rate limit", { status: 403 });
       if (p === `/dl/${name}`) return new Response(body);
       return new Response("not found", { status: 404 });
     } })' "$PORT" >"$WORK/stub.log" 2>&1 &
@@ -290,6 +291,22 @@ gh_stub
 expect ok "a matching download replaces the older daemon" install_daemon
 expect ok "with the release's file" is "$(cat "$HOST_DAEMON")" "$(printf '\177ELF the daemon of 9.9.9')"
 expect fail "a version that is not a release is refused" install_daemon --version 9.9
+# What stops the script says why, and never ends in a build of another version.
+expect fail "a named release that is not there stops" install_daemon --version 9.9.7
+cp "$WORK/out.log" "$WORK/said.log"
+expect ok "and says so, without building" bash -c "grep -q 'no release v9.9.7 in o/r' '$WORK/said.log' && ! grep -q building '$WORK/said.log'"
+expect fail "a GitHub that refuses stops" env DAEMON_REPO=o/limited GITHUB_API="http://127.0.0.1:$PORT" DAEMON_ARCH=x86_64 \
+  "$ROOT/scripts/runner/install-daemon.sh" --dest "$HOST_DAEMON"
+cp "$WORK/out.log" "$WORK/said.log"
+expect ok "and says the status" grep -q "GitHub answered HTTP 403 for o/limited" "$WORK/said.log"
+expect fail "a GitHub that cannot be reached stops" env DAEMON_REPO=o/r GITHUB_API="http://127.0.0.1:1" DAEMON_ARCH=x86_64 \
+  "$ROOT/scripts/runner/install-daemon.sh" --dest "$HOST_DAEMON"
+cp "$WORK/out.log" "$WORK/said.log"
+expect ok "and says it cannot reach it" grep -q "cannot reach http://127.0.0.1:1: " "$WORK/said.log"
+expect fail "an option without its value stops" install_daemon --version
+cp "$WORK/out.log" "$WORK/said.log"
+expect ok "and says which" grep -q -- "--version needs a value" "$WORK/said.log"
+expect ok "none of them touched the installed daemon" is "$(cat "$HOST_DAEMON")" "$(printf '\177ELF the daemon of 9.9.9')"
 # The service: none yet, one that starts a hand-built daemon elsewhere, one that starts this file.
 UNIT="$HOST/units/$(product slug)-daemon.service"
 expect ok "without a service" install_daemon

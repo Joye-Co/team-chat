@@ -439,7 +439,7 @@ it, is thrown away after its run.
   `runner-vm.nft` changed (it reinstalls the root helper and reloads the firewall). Topics'
   working folders and repository caches are kept.
 - **Caches**: as runner, `~/.local/bin/team-chat-daemon caches` lists each repository's cache
-  (key, repository, size, last used); `team-chat-daemon caches clear <key>` (or `all`) removes
+  (key, size, last used, repository); `team-chat-daemon caches clear <key>` (or `all`) removes
   one, for example after a broken toolchain or tool, and refuses a cache a run is using. The
   daemon also removes the least recently used caches by itself when `work_root` has less than
   `min_free_gb` free.
