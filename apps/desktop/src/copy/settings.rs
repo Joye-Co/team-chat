@@ -551,5 +551,7 @@ crate::copy! {
     RUNNER_RUNTIME_SIGNED_OUT_ANY_HINT = "{name} 在每台电脑上都还没登录，登录后才能干活。",
     EMAIL_RESENT = "已重新发送，请查收最新一封",
     EMAIL_RESEND_WAIT = "{n} 秒后可重新发送",
+    BOT_MODE_LOCKED_HINT = "这位成员在{person}的电脑上，只有{person}能改工作方式。",
+    EDIT_AI_PINNED_HINT = "改名字、岗位、运行方式和代码仓库，保存后马上生效。",
     // --- end visual finish: settings ---
 }

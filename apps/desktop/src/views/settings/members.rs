@@ -2252,6 +2252,26 @@ impl BotForm {
         }
     }
 
+    /// Whose own computer the edited member is stored on, when that is somebody else's: only
+    /// they can change 工作方式. None while the computers load, or when the name is unknown.
+    fn pinned_owner(&self) -> Option<String> {
+        let Some(BotEditing {
+            runner: RunnerLoad::Loaded(Some(stored)),
+            ..
+        }) = &self.editing
+        else {
+            return None;
+        };
+        let me = super::my_id(&self.services);
+        let machine =
+            pinned_elsewhere(stored.machine_id.as_deref(), &self.machines, me.as_deref())?;
+        let owner = self
+            .services
+            .provider
+            .member(machine.owner_id.as_deref()?)?;
+        Some(crate::ui::avatar::name_beside_avatar(&owner.name).to_string())
+    }
+
     /// The edited member's stored placement may not be ended from this sheet.
     fn runner_locked(&self) -> bool {
         let Some(BotEditing {
@@ -2551,12 +2571,14 @@ impl Render for BotForm {
         if runner_ready {
             // 工作方式: two choices side by side, the one in effect raised,
             // and one line on what it means under them.
-            let hint = if self.runner {
-                s::BOT_MODE_RUNNER_HINT
+            let hint = if let Some(person) = self.pinned_owner() {
+                fill(s::BOT_MODE_LOCKED_HINT, &[("person", &person)])
+            } else if self.runner {
+                s::BOT_MODE_RUNNER_HINT.to_string()
             } else if was_runner {
-                s::BOT_EDIT_EXTERNAL_HINT
+                s::BOT_EDIT_EXTERNAL_HINT.to_string()
             } else {
-                s::BOT_MODE_EXTERNAL_HINT
+                s::BOT_MODE_EXTERNAL_HINT.to_string()
             };
             body = body.child(
                 div()
@@ -2961,7 +2983,11 @@ impl Render for BotForm {
         let (title, explanation, default) = match &self.editing {
             Some(e) => (
                 fill(s::EDIT_AI_TITLE, &[("name", &one_line(&e.name))]),
-                s::EDIT_AI_HINT,
+                if self.pinned_owner().is_some() {
+                    s::EDIT_AI_PINNED_HINT
+                } else {
+                    s::EDIT_AI_HINT
+                },
                 common::SAVE,
             ),
             None => (s::ADD_AI_TITLE.to_string(), s::ADD_AI_HINT, s::BOT_CREATE),
