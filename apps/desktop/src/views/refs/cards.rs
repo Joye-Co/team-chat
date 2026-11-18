@@ -422,7 +422,7 @@ impl BlockParts {
             return None;
         }
         let me = self.clone();
-        Some(affordance::inline_button(
+        Some(affordance::inline_button_flat(
             &self.id(pick),
             Rc::new(move |_: &App| me.target(Some(pick))),
             cx,

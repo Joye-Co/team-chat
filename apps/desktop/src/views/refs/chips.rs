@@ -382,7 +382,16 @@ fn sent_line(id: ElementId, r: &BlockRef, topic: (&str, &str), cx: &App) -> AnyE
         .child(
             div()
                 .flex_none()
-                .child(ui::icon(glyph(&r.source), theme::icon::TAG, k.ink_3)),
+                // A withdrawn source has the mark of a withdrawn message (timeline row).
+                .child(ui::icon(
+                    if deleted {
+                        ui::Sym::Undo
+                    } else {
+                        glyph(&r.source)
+                    },
+                    theme::icon::TAG,
+                    k.ink_3,
+                )),
         )
         // The two runs sit in one box with no gap (see [`runs`]); the gap of the line is
         // only between the glyph and the text.

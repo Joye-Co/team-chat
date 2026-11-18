@@ -64,8 +64,8 @@ use crate::{
 pub use line::{notification_text, plan_row};
 // --- inc-cards21 ---
 pub(crate) use chart::{
-    chart as chart_el, legend_room as chart_legend_room, plot_left as chart_plot_left,
-    y_from_top as chart_y_from_top,
+    ChartPeek, chart_with_peek as chart_el, legend_room as chart_legend_room,
+    plot_left as chart_plot_left, y_from_top as chart_y_from_top,
 };
 // --- end inc-cards21 ---
 
@@ -1701,6 +1701,14 @@ fn full(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
     // --- end inc-cards21 ---
     let footer = footer(ctx, window, cx);
     let inset = ui::native::cards::card::INSET;
+    // A closing ref list keeps its last row's hover height and the card's one inset.
+    let bottom = if footer.is_some() {
+        space::S4
+    } else if !super::v21::is_21(ctx.card) && blocks::ends_in_ref_list(ctx, cx) {
+        inset - blocks::REF_ROW_PAD
+    } else {
+        inset
+    };
     let card = frame(false, cx)
         .flex()
         .flex_col()
@@ -1710,7 +1718,7 @@ fn full(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
             div()
                 .pt(inset)
                 .px(inset)
-                .pb(if footer.is_some() { space::S4 } else { inset })
+                .pb(bottom)
                 .flex()
                 .flex_col()
                 .min_w(px(0.))

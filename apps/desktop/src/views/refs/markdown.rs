@@ -56,8 +56,8 @@ pub const ROW_BUTTON_SLOT: f32 = 96.;
 
 /// The gap between a row's name and its 问这里 (Refs.dc.html).
 const NAME_GAP: f32 = 10.;
-/// The width of the 问这里 button (icon, label and padding at the extra-small size).
-const ASK_PILL: f32 = 68.;
+/// The width of the 问这里 button (icon, label and padding at the small size).
+const ASK_PILL: f32 = 92.;
 /// The room a table with references adds to its first column, so 问这里 fits after a
 /// row's name.
 pub const NAME_ROOM: f32 = NAME_GAP + ASK_PILL;
@@ -119,12 +119,33 @@ impl TableRefs {
             })
     }
 
-    /// True when 问这里 of a row sits right after its name. It never does now: the
-    /// row's action has one place, the row end (§2.6, E3), so it does not land over
-    /// the data column next to the name. Kept as the one switch the table renderers
-    /// ask.
-    pub fn beside(&self, _name: &str, _inner: Option<f32>, _window: &Window) -> bool {
-        false
+    /// True when 问这里 of a row sits right after its name (DESIGN.md: the row end is only
+    /// for a name that leaves no room), so it covers none of the row's values. `inner` is the
+    /// first column's width inside its padding; `None` takes the width the column had at its
+    /// last paint ([`TableRefs::measure`]).
+    pub fn beside(&self, name: &str, inner: Option<f32>, window: &Window) -> bool {
+        let Some(inner) = inner.or_else(|| self.measured_first()) else {
+            return false;
+        };
+        let style = window.text_style();
+        let run = gpui::TextRun {
+            len: name.len(),
+            font: style.font(),
+            color: style.color,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        let w = window
+            .text_system()
+            .shape_line(
+                gpui::SharedString::from(name.to_string()),
+                theme::type_scale::SMALL.0,
+                &[run],
+                None,
+            )
+            .width;
+        f32::from(w) + NAME_GAP + ASK_PILL <= inner
     }
 
     /// 问这里 after the row's name, for the hovered cell of `row` (see [`TableRefs::beside`]).
@@ -143,7 +164,7 @@ impl TableRefs {
                 .h(px(0.))
                 .flex()
                 .items_center()
-                .child(super::affordance::inline_button(
+                .child(super::affordance::inline_button_flat(
                     &id,
                     Rc::new(move |_: &App| {
                         target(TablePick::Cell { row, col }).unwrap_or_else(super::empty_target)
@@ -172,9 +193,41 @@ impl TableRefs {
         .into_any_element()
     }
 
-    /// [`Self::row_end`] floating over the row at the frame's right inset, so the last
-    /// column reaches that inset at rest (§2.7). The button is opaque and covers the last
-    /// value only while its row is hovered. Put it in a row that is `relative`.
+    /// The first column's width at its last paint ([`TableRefs::measure`]).
+    pub fn measured_first(&self) -> Option<f32> {
+        FIRST_COL.with(|m| m.borrow().get(&self.prefix).copied())
+    }
+
+    /// How many cells at the end of `row` make way while [`Self::row_end_over`] shows its
+    /// button: whole cells, last first, until the button has room, so no value is left cut
+    /// beside it. `trailing` is their widths from the row's end; `inset` the button's distance
+    /// from that end.
+    pub fn row_end_hides(
+        &self,
+        row: usize,
+        trailing: impl IntoIterator<Item = f32>,
+        inset: f32,
+        cx: &App,
+    ) -> usize {
+        if !matches!(self.hovered_in(row, cx), Some((_, true))) {
+            return 0;
+        }
+        let mut room = 0.;
+        let mut cells = 0;
+        for width in trailing {
+            if room >= ROW_BUTTON_SLOT + inset {
+                break;
+            }
+            room += width;
+            cells += 1;
+        }
+        cells
+    }
+
+    /// [`Self::row_end`] floating over the row at the frame's right inset, for a name that
+    /// leaves no room beside it: the last column reaches that inset at rest (§2.7), and the
+    /// cells under the button make way while it shows ([`Self::row_end_hides`]). Put it in a
+    /// row that is `relative`.
     pub fn row_end_over(&self, row: usize, cx: &App) -> AnyElement {
         div()
             .absolute()
@@ -562,13 +615,18 @@ pub fn table(
                 .map(|w| w - f32::from(space::S16) - f32::from(space::S12));
             !right.first().copied().unwrap_or(false) && r.beside(&name, inner, window)
         });
+        let hides = refs.filter(|_| !beside).map_or(0, |r| {
+            let trailing = widths.iter().skip(1).rev().copied();
+            r.row_end_hides(ri, trailing, f32::from(space::S12), cx)
+        });
         for (ci, w) in widths.iter().enumerate() {
             let mut el = cell(
                 row.get(ci).cloned().unwrap_or_default(),
                 ci,
                 *w,
                 right.get(ci).copied().unwrap_or(false),
-            );
+            )
+            .when(ci + hides >= widths.len(), |d| d.opacity(0.));
             if ci == 0 && beside {
                 el = el.children(refs.and_then(|r| r.name_button(ri, 0., cx)));
             }
@@ -577,7 +635,7 @@ pub fn table(
                 None => el.into_any_element(),
             });
         }
-        if let Some(r) = refs {
+        if let Some(r) = refs.filter(|_| !beside) {
             line = line.child(r.row_end_over(ri, cx));
         }
         line

@@ -1060,7 +1060,14 @@ pub fn image_choice(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                                 img(p)
                                     .size_full()
                                     .object_fit(ObjectFit::Cover)
-                                    .rounded(crate::ui::native::tokens::radius::CONTROL),
+                                    // Inside the chosen tile's 2 pt border it follows the
+                                    // border's inner curve.
+                                    .rounded(if on {
+                                        crate::ui::native::tokens::radius::CONTROL
+                                            - crate::ui::native::tokens::metrics::HAIRLINE * 2.
+                                    } else {
+                                        crate::ui::native::tokens::radius::CONTROL
+                                    }),
                             ),
                             None => b20::missing_image(el, cx),
                         })
@@ -1696,8 +1703,8 @@ pub fn compare(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) 
             .collect();
         let (form, block, option, target2) =
             (ctx.form.clone(), id.clone(), o.id.clone(), target.clone());
-        // A Regular push button (NATIVE.md §5.2): the recommended column's is the
-        // Default button; the chosen one says 已选 after a checkmark. No letters.
+        // A Regular outline push button (NATIVE.md §5.2): the 推荐 tag carries the
+        // recommendation; the chosen one says 已选 after a checkmark. No letters.
         let rec = o.recommended.unwrap_or(false);
         let pick = b20::option_button(
             eid(node, format!("cmp-{id}-{}", o.id)),
@@ -1706,7 +1713,6 @@ pub fn compare(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) 
             } else {
                 c::COMPARE_CHOOSE
             },
-            rec,
             on,
             live,
             cx,

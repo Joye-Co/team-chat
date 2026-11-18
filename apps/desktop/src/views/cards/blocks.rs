@@ -396,8 +396,13 @@ fn render_table(
             let inner = widths.first().map(|w| w - 2. * f32::from(CELL_PAD));
             r.beside(name, inner, window)
         });
+        let hides = table_refs.as_ref().filter(|_| !beside).map_or(0, |r| {
+            let trailing = widths.iter().skip(1).rev().copied();
+            r.row_end_hides(ri, trailing, f32::from(space::S12), cx)
+        });
         line.children(widths.iter().enumerate().map(|(i, w)| {
-            let mut el = cell_in(i, row.get(i).cloned().unwrap_or_default(), *w, false);
+            let mut el = cell_in(i, row.get(i).cloned().unwrap_or_default(), *w, false)
+                .when(i + hides >= widths.len(), |d| d.opacity(0.));
             if i == 0 && beside {
                 el = el.children(table_refs.as_ref().and_then(|r| r.name_button(ri, 0., cx)));
             }
@@ -406,7 +411,7 @@ fn render_table(
                 None => el.into_any_element(),
             }
         }))
-        .when_some(table_refs.as_ref(), |el, r| {
+        .when_some(table_refs.as_ref().filter(|_| !beside), |el, r| {
             el.child(r.row_end_over(ri, cx))
         })
     });

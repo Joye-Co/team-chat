@@ -138,6 +138,8 @@ struct Paint {
     fill: Hsla,
     bg: Hsla,
     spark: bool,
+    /// The point under the keyboard focus or the pointer ([`ChartPeek`]).
+    peek: Option<usize>,
 }
 
 /// The inks a series draws in, all of the mono palette (COMPLETENESS: black and white).
@@ -305,6 +307,22 @@ fn series_progress(kind: ChartKind, series: usize, si: usize, t: f32) -> f32 {
     motion::out_fn()(((t * total - delay) / run).clamp(0., 1.))
 }
 
+/// The hollow marker on a point of the main series.
+fn point_marker(p: &Paint, at: gpui::Point<Pixels>, window: &mut Window) {
+    let d = px(9.);
+    window.paint_quad(quad(
+        Bounds {
+            origin: point(at.x - d / 2., at.y - d / 2.),
+            size: gpui::size(d, d),
+        },
+        d / 2.,
+        p.bg,
+        px(2.),
+        p.inks[Ink::Main as usize],
+        Default::default(),
+    ));
+}
+
 /// Paints the chart at `t`, linear 0 → 1 over [`draw_time`].
 fn paint(p: &Paint, b: Bounds<Pixels>, t: f32, window: &mut Window) {
     let n = p.series.iter().map(Vec::len).max().unwrap_or(0);
@@ -397,22 +415,18 @@ fn paint(p: &Paint, b: Bounds<Pixels>, t: f32, window: &mut Window) {
             window.paint_path(path, p.inks[ink as usize]);
         }
         if main && !p.spark && st >= 0.999 {
-            let last = pts[pts.len() - 1];
-            let d = px(9.);
-            window.paint_quad(quad(
-                Bounds {
-                    origin: point(last.x - d / 2., last.y - d / 2.),
-                    size: gpui::size(d, d),
-                },
-                d / 2.,
-                p.bg,
-                px(2.),
-                p.inks[Ink::Main as usize],
-                Default::default(),
-            ));
+            point_marker(p, pts[pts.len() - 1], window);
+            if let Some(at) = p.peek.and_then(|i| pts.get(i)) {
+                point_marker(p, *at, window);
+            }
         }
     }
 }
+
+/// The point of a chart a person can pick from that is under the keyboard focus or the
+/// pointer: its index and what it says, in the label row. The row is kept while there is
+/// none, so the plot stays where it is.
+pub(crate) struct ChartPeek(pub Option<(usize, String)>);
 
 /// A chart block.
 pub(crate) fn chart(
@@ -424,7 +438,24 @@ pub(crate) fn chart(
     series: &[ChartSeries],
     cx: &App,
 ) -> AnyElement {
+    chart_with_peek(id, kind, label, unit, x, series, None, cx)
+}
+
+/// [`chart`] of a chart whose points can be picked.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn chart_with_peek(
+    id: SharedString,
+    kind: ChartKind,
+    label: Option<&str>,
+    unit: Option<&str>,
+    x: &[String],
+    series: &[ChartSeries],
+    peek: Option<ChartPeek>,
+    cx: &App,
+) -> AnyElement {
     let k = theme::colors(cx);
+    let pickable = peek.is_some();
+    let (peek_at, peek_text) = peek.and_then(|p| p.0).unzip();
     let spark = kind == ChartKind::Spark;
     let kind = if kind == ChartKind::Unknown {
         ChartKind::Line
@@ -439,6 +470,7 @@ pub(crate) fn chart(
         fill: m::alpha(k.ink, 0.08),
         bg: k.bg,
         spark,
+        peek: peek_at,
     });
     let height = if spark { px(28.) } else { m::CHART };
     let still = cx.reduce_motion();
@@ -603,7 +635,7 @@ pub(crate) fn chart(
             meta(div())
                 .flex()
                 .items_center()
-                .when(legend.is_some(), |el| el.min_h(m::META_LINE))
+                .when(legend.is_some() || pickable, |el| el.min_h(m::META_LINE))
                 .text_color(k.ink_2)
                 .when_some(title, |el, t| {
                     el.child(
@@ -612,6 +644,18 @@ pub(crate) fn chart(
                                 .font_weight(theme::MEDIUM_WEIGHT)
                                 .text_color(k.ink),
                         ),
+                    )
+                })
+                .when_some(peek_text, |el, t| {
+                    el.child(
+                        div()
+                            .flex_none()
+                            .ml_auto()
+                            .pl(space::S8)
+                            .whitespace_nowrap()
+                            .font_weight(theme::MEDIUM_WEIGHT)
+                            .text_color(k.ink)
+                            .child(t),
                     )
                 }),
         )

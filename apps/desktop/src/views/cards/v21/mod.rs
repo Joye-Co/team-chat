@@ -747,7 +747,7 @@ fn group(
                 } else {
                     Sym::ChevronDown
                 },
-                px(14.),
+                crate::ui::native::tokens::icon::MARK,
                 k.ink_3,
             ))
         })
@@ -782,7 +782,10 @@ fn group(
         col = col.child(
             div()
                 .mt(space::S6)
-                .when(can_collapse, |el| el.pl(space::S20))
+                .when(can_collapse, |el| {
+                    // On the head's title: past its chevron and their gap.
+                    el.pl(crate::ui::native::tokens::icon::MARK + space::S8)
+                })
                 .child(stack(node, children, window, cx)),
         );
     }
