@@ -843,6 +843,9 @@ pub struct MachineForm {
     /// 谁用这台电脑 (admins, when more than one person uses the server): only me. Members
     /// always add their own computer.
     only_me: bool,
+    /// The sideways scroll of the two one-time boxes of the done step (D13).
+    install_scroll: gpui::ScrollHandle,
+    credential_scroll: gpui::ScrollHandle,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -940,6 +943,8 @@ impl MachineForm {
             done: widgets::DoneStep::new(cx),
             target: InstallTarget::of_this_computer(),
             only_me: false,
+            install_scroll: gpui::ScrollHandle::new(),
+            credential_scroll: gpui::ScrollHandle::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -1037,33 +1042,11 @@ impl Render for MachineForm {
             let layout =
                 SheetLayout::new(fill(s::MACHINE_CREATED, &[("name", &created.machine.name)]))
                     .explanation(s::MACHINE_CREATED_HINT)
-                    .body(widgets::field(
-                        s::MACHINE_TARGET,
-                        widgets::choice(
-                            "machine-target",
-                            &InstallTarget::ALL.map(InstallTarget::label),
-                            InstallTarget::ALL
-                                .iter()
-                                .position(|t| *t == self.target)
-                                .unwrap_or(0),
-                            // The computer has its system's tag now: shown, not changed.
-                            true,
-                            {
-                                let form = cx.entity().downgrade();
-                                move |ix: usize, _: &mut Window, cx: &mut gpui::App| {
-                                    let _ = form.update(cx, |this, cx| {
-                                        this.set_target(InstallTarget::ALL[ix.min(2)], cx)
-                                    });
-                                }
-                            },
-                            cx,
-                        ),
-                        cx,
-                    ))
                     .body(widgets::secret_block(
                         "machine-install",
                         s::MACHINE_INSTALL,
                         &command,
+                        &self.install_scroll,
                         cx,
                     ))
                     .body(widgets::quiet(hint, cx))
@@ -1071,6 +1054,7 @@ impl Render for MachineForm {
                         "machine-credential",
                         s::MACHINE_CREDENTIAL,
                         created.credential.expose(),
+                        &self.credential_scroll,
                         cx,
                     ))
                     .buttons([push_button(
