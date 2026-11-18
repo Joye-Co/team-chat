@@ -2,7 +2,7 @@
 // copy; the result is checked as a whole card (the write schema: style keys and every write
 // rule). Nothing changes when an op or the result fails.
 import { CardV2, type CardV2Block, type PatchOp, childIds, MAX_CARD_V2_REVS } from "@chat/protocol";
-import { ApiError, schemaReason } from "../core/errors";
+import { ApiError, issuesText, schemaReason } from "../core/errors";
 
 type Block = CardV2Block;
 type Draft = Record<string, unknown> & { blocks: Block[]; data?: unknown };
@@ -10,6 +10,16 @@ type Draft = Record<string, unknown> & { blocks: Block[]; data?: unknown };
 const fail = (i: number, message: string): never => {
   throw new ApiError("invalid", `op ${i}: ${message}`);
 };
+
+/** The children a block names. A `set` may have broken the list: `checkCard` refuses that at the end. */
+function kids(b: Block): string[] {
+  try {
+    const list = childIds(b);
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
 
 /** The container (or compare option, or tab) whose children list `parent` names. */
 function childList(blocks: Block[], parent: string): string[] | undefined {
@@ -90,24 +100,32 @@ export function applyPatch(card: CardV2, ops: PatchOp[]): CardV2 {
     throw new ApiError("too_large", `at most ${MAX_CARD_V2_REVS} revs per card: post a new card (and close this one's ask) to go on`, "card.rev_limit");
   }
   const d = structuredClone(card) as unknown as Draft;
+  // Children a `replace` or `set` stopped naming: gone after the last op, unless an op gave them a place.
+  const dropped = new Set<string>();
+  const swap = (k: number, next: Block) => {
+    const kept = new Set(kids(next));
+    for (const c of kids(d.blocks[k])) if (!kept.has(c)) dropped.add(c);
+    d.blocks[k] = next;
+  };
   ops.forEach((op, i) => {
     const at = (id: string) => d.blocks.findIndex((b) => b.id === id);
     switch (op.op) {
       case "set": {
         const k = at(op.id);
         if (k < 0) fail(i, `no block ${op.id}`);
-        d.blocks[k] = { ...d.blocks[k], ...(op.props as object), id: d.blocks[k].id, type: d.blocks[k].type } as Block;
+        swap(k, { ...d.blocks[k], ...(op.props as object), id: d.blocks[k].id, type: d.blocks[k].type } as Block);
         break;
       }
       case "replace": {
         const k = at(op.id);
         if (k < 0) fail(i, `no block ${op.id}`);
         if (op.block.id !== op.id) fail(i, "replace keeps the block id");
-        d.blocks[k] = structuredClone(op.block);
+        swap(k, structuredClone(op.block));
         break;
       }
       case "insert": {
         if (at(op.block.id) >= 0) fail(i, `block ${op.block.id} exists`);
+        dropped.delete(op.block.id);
         if (op.parent !== undefined) {
           const list = childList(d.blocks, op.parent);
           if (!list) fail(i, `no container ${op.parent}`);
@@ -115,7 +133,7 @@ export function applyPatch(card: CardV2, ops: PatchOp[]): CardV2 {
           d.blocks.push(structuredClone(op.block));
         } else {
           // Top-level reading order is the order of the blocks no container names.
-          const named = new Set(d.blocks.flatMap((b) => childIds(b)));
+          const named = new Set(d.blocks.flatMap(kids));
           const top = d.blocks.filter((b) => !named.has(b.id)).map((b) => b.id);
           let k = d.blocks.length;
           if (op.before !== undefined) {
@@ -134,7 +152,7 @@ export function applyPatch(card: CardV2, ops: PatchOp[]): CardV2 {
         const gone = new Set([op.id]);
         const walk = (id: string) => {
           const b = d.blocks.find((x) => x.id === id);
-          if (b) for (const c of childIds(b)) if (!gone.has(c)) {
+          if (b) for (const c of kids(b)) if (!gone.has(c)) {
             gone.add(c);
             walk(c);
           }
@@ -164,11 +182,27 @@ export function applyPatch(card: CardV2, ops: PatchOp[]): CardV2 {
       }
     }
   });
+  dropOrphans(d, dropped);
   d.rev = card.rev + 1;
   return checkCard(d);
 }
 
-/** Parses a card with the write schema; the first problem becomes `invalid` with its reason. */
+/**
+ * Removes the blocks of `dropped` that no container names any more, and their children in turn,
+ * so a container's old children do not come back as top-level blocks.
+ */
+function dropOrphans(d: Draft, dropped: Set<string>): void {
+  const queue = [...dropped];
+  while (queue.length > 0) {
+    const id = queue.pop() as string;
+    const k = d.blocks.findIndex((b) => b.id === id);
+    if (k < 0 || d.blocks.some((b) => kids(b).includes(id))) continue;
+    queue.push(...kids(d.blocks[k]));
+    d.blocks.splice(k, 1);
+  }
+}
+
+/** Parses a card with the write schema: `invalid` names every problem, with the first one's reason. */
 export function checkCard(raw: unknown): CardV2 {
   const r = CardV2.safeParse(raw);
   if (r.success) return r.data;
@@ -176,5 +210,5 @@ export function checkCard(raw: unknown): CardV2 {
   const reason =
     schemaReason(raw as Record<string, unknown>, issue?.message) ?? schemaReason({ cardV2: raw }, issue?.message, ["cardV2", ...(issue?.path ?? [])]);
   if (/exceeds 64 KiB/.test(issue?.message ?? "")) throw new ApiError("too_large", "card exceeds 64 KiB");
-  throw new ApiError("invalid", `the patched card: ${issue?.path.join(".") || "(root)"} ${issue?.message ?? ""}`.trim(), reason);
+  throw new ApiError("invalid", `the patched card: ${issuesText(r.error.issues)}`, reason);
 }

@@ -1981,6 +1981,11 @@ ErrorBody += { reason?: string /* 1..64, e.g. "card.already_answered" */ }
 - Run outputs (machine-protocol.md, `run.output.result`) add `report.invalid` (`invalid`: a
   `run.report` body that is not a `RunReport`) and `output.not_supported` (`invalid`: an output
   op this server does not take yet).
+- A refused frame or card names every problem in `message`, `; ` between them: the problems that
+  name a rule first, at most five, then `and N more`. `reason` is the first problem's. A shape
+  problem hides the write rules until the shape is right, so a second try can find more. Repeated
+  block and action ids and several primary actions are named (`block ids are unique (used twice:
+  a, b)`, `at most one primary action (primary: go, send)`).
 - A card that breaks a count or range limit of its shape (blocks, children, options, series,
   points, rows, columns, embed height, rating max, poll voters) gets `card.limits`, the same on
   the server and in the Rust pre-check (`CardV2::problem`). A limit inside a union field (poll
@@ -2078,6 +2083,36 @@ before it took the event, or the event still waited and no other run could take 
 for the emitter with `interaction.resolved {result: "failed"}`; it never comes for an event
 whose ack said `none`.
 
+What an event's `value` holds. A block sends only the events of its row (`cardBlockEvents` in
+`packages/protocol`), and only those it declares in `events` (`card.undeclared_event` otherwise).
+Committing needs no declaration: `choice.submit`, `input.submit` and `compare.pick` of an
+`immediate` block, a `confirm`, a `compare` or a `poll`, and `action.press` of a `questionnaire`.
+A `value` of another shape is `invalid`:
+
+| Event | Block | `value` |
+| --- | --- | --- |
+| `choice.change`, `choice.submit` | `decision`, `imageChoice`, `slots`, `poll` | `{ value: optionId }`; several `{ values: optionId[] }`; the other option of a `decision` `{ value: "other", other: text /* 1..60 */ }`. 2.0 clients may send the bare id or id list |
+| `choice.change`, `choice.submit` | `confirm` | `{ value: boolean }` or the bare boolean |
+| `input.change`, `input.submit` | `input` (`input.submit`: kinds `text` and `number` only) | `{ value }`: text for `text`, `textarea`, `date`; a number for `number`, `slider`; a boolean for `switch`; an option id for `select`. `chips`: `{ values: string[] }` |
+| `input.change` | `rank` | `{ order: itemId[] }` |
+| `input.change` | `matrix` | `{ rows: { [rowId]: columnId } }` |
+| `input.change` | `rating`, `scale` | `{ value: integer }`, 1..5 or `min..max` |
+| `compare.pick` | `compare` | `{ value: optionId, note? }` |
+| `chart.select` | `chart` | `{ series, x, y, index }`; `series` is the series id, or its name without one |
+| `chart.clear` | `chart` | none |
+| `metric.press` | `metric` | none |
+| `table.rowSelect` | `table` | `{ values: rowKey[] }` (`rowKeys`, else the row index as text) |
+| `table.sort` | `table` | `{ column, dir: "asc" \| "desc" }` |
+| `button.press` | `buttons` | `{ buttonId }` |
+| `tab.open` | `tabs` | `{ tabId }` |
+| `draft.edit` | `draft` | `{ fieldId, value }` |
+| `action.press` | a footer action, `questionnaire` | none; the values go in `inputs`, by block id |
+| `answer.retract` | none | `{ answerId }` |
+
+The answerer can take an answer back (`answer.retract`) for 10 minutes after it was stored,
+while the card is still at the rev it had then, its author has posted nothing newer in the topic
+and the author has not started acting on the answer. After that: `conflict`, `card.retract_closed`.
+
 Rates (`rate_limited`, with `retryAfterMs`; the limits are per server location, so a client
 may see a little more): one answer per member and message a second; live events 5 a second
 with bursts of 10 per member and message, and 120 a minute per member and group; `card.patch`
@@ -2151,6 +2186,11 @@ send += { causeEventId?, blockRefs? }      edit += { baseRev?, causeEventId? }
 transient interaction.resolved: { groupId, eventId, result: "ignored"|"failed"|"patched"|"posted"|"replied", messageId?, note? }
 ```
 
+`replace` swaps the whole block and `set` merges props into it. When either leaves a container
+naming fewer children, the children it no longer names are removed with their own children, as
+`remove` does, unless an op of the same patch gives them a place (another container names them,
+or they are inserted again).
+
 A cause (`card.patch.cause`, `send`/`edit` `causeEventId`) and `interaction.resolve` name an
 event of the last 30 minutes that the sender received: a card event on one of its cards, or a
 page event of one of its 产出 versions (`Cause.event` is the page event's name; the card's
@@ -2159,6 +2199,9 @@ page event of one of its 产出 versions (`Cause.event` is the page event's name
 `interaction.resolved {result: "replied"}` to the emitter and mark the event resolved.
 
 ### 产出 bridge
+
+What a page itself can call (`window.teamchat`, its errors and limits) is in
+[docs/bots.md, "The page side: `window.teamchat`"](bots.md#the-page-side-windowteamchat).
 
 ```ts
 { t: "artifact.data", rid, groupId, artifactId, version, data /* <= 256 KiB */, baseDataRev?, cause?, clientPushId? }   // ack.result ArtifactDataAck { dataRev, duplicate? }

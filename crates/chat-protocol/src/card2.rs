@@ -2127,6 +2127,18 @@ pub(crate) fn lenient_card_v2<'de, D: Deserializer<'de>>(d: D) -> Result<Option<
     Ok(serde_json::from_value(v).ok())
 }
 
+/// The ids that occur more than once, each once, in the order of their second use.
+fn repeated_ids<'a>(ids: impl Iterator<Item = &'a str>) -> String {
+    let mut seen = BTreeSet::new();
+    let mut twice: Vec<&str> = Vec::new();
+    for id in ids {
+        if !seen.insert(id) && !twice.contains(&id) {
+            twice.push(id);
+        }
+    }
+    twice.join(", ")
+}
+
 /// A write rule a card breaks: `reason` goes to `ack.error.reason`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CardProblem {
@@ -2433,7 +2445,11 @@ impl CardV2 {
         for b in &all {
             let id = b.id().unwrap_or_default();
             if by_id.insert(id, b).is_some() {
-                return bad("card.limits", "block ids are unique".into());
+                let twice = repeated_ids(all.iter().map(|b| b.id().unwrap_or_default()));
+                return bad(
+                    "card.limits",
+                    format!("block ids are unique (used twice: {twice})"),
+                );
             }
             if id == "root" || id.starts_with('$') {
                 return bad("card.limits", format!("block id {id} is reserved"));
@@ -2676,15 +2692,25 @@ impl CardV2 {
         let actions = self.actions();
         let ids: BTreeSet<&str> = actions.iter().map(|a| a.id.as_str()).collect();
         if ids.len() != actions.len() {
-            return bad("card.limits", "action ids are unique".into());
+            let twice = repeated_ids(actions.iter().map(|a| a.id.as_str()));
+            return bad(
+                "card.limits",
+                format!("action ids are unique (used twice: {twice})"),
+            );
         }
-        if actions
+        let primary: Vec<&str> = actions
             .iter()
             .filter(|a| a.style == Some(CardV2ActionStyle::Primary))
-            .count()
-            > 1
-        {
-            return bad("card.limits", "at most one primary action".into());
+            .map(|a| a.id.as_str())
+            .collect();
+        if primary.len() > 1 {
+            return bad(
+                "card.limits",
+                format!(
+                    "at most one primary action (primary: {})",
+                    primary.join(", ")
+                ),
+            );
         }
         for a in actions {
             if let Some(inputs) = &a.inputs {
