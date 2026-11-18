@@ -14,7 +14,7 @@ import {
   withDefaults,
 } from "../src/settings/rules";
 import { Daemon, downViolations, mention, world } from "./daemon";
-import { Client, api, clientMsgId, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
+import { Client, api, clientMsgId, createGroup, createMember, inputBody, protocolViolations, waitUntil } from "./helpers";
 
 afterAll(async () => {
   await new Promise((r) => setTimeout(r, 300));
@@ -301,7 +301,7 @@ describe("approval policies", () => {
     // The requester's press and 同意 do not answer; the owner's press does.
     await c.ok({ t: "card.action", groupId: w.gid, messageId: card.id, actionId: "approve:a1" });
     await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "同意" });
-    await d.next((f) => f.t === "run.input" && f.text === "同意");
+    await d.next((f) => f.t === "run.input" && inputBody(f) === "同意");
     expect(d.frames.filter((f) => f.t === "run.approval")).toEqual([]);
     await co.ok({ t: "card.action", groupId: w.gid, messageId: card.id, actionId: "approve:a1" });
     expect(await d.next((f) => f.t === "run.approval")).toMatchObject({ approvalId: "a1", decision: "approve" });

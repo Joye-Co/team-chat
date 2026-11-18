@@ -144,7 +144,7 @@ describe("群聊", () => {
     // A later mention of dev goes to dev's active run.
     await c.ok({ t: "send", groupId: w.gid, topicId: main, clientMsgId: clientMsgId(), body: "@dev 还有 lint", mentions: [w.bot.id] });
     const input = await d.next((f) => f.t === "run.input");
-    expect(input).toMatchObject({ runId: first.runId, text: "@dev 还有 lint" });
+    expect(input).toMatchObject({ runId: first.runId, text: "Follow-up from Alice:\n@dev 还有 lint" });
 
     // The run's status reports change nothing on the 群聊.
     const s = d.done(first.runId, { status: "succeeded", exitCode: 0, resultText: "修好了", summary: "修好了" });

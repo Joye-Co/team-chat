@@ -70,6 +70,16 @@ export async function createGroup(owner: TestMember, memberIds: string[], name =
   return r.body.group.id as string;
 }
 
+/**
+ * What a person wrote in a `run.input` frame: the text after its `Follow-up from <name>:` line
+ * (the desk says who wrote a message it passes to a working run).
+ */
+export function inputBody(f: { text?: unknown }): string {
+  const text = String(f.text ?? "");
+  const nl = text.indexOf("\n");
+  return nl >= 0 && /^Follow-up from .+:$/.test(text.slice(0, nl)) ? text.slice(nl + 1) : text;
+}
+
 /** Polls `fn` (sync or async) every 10 ms until it returns a truthy value. */
 export async function waitUntil<T>(fn: () => T | undefined | false | PromiseLike<T | undefined | false>, ms = 5000, what = "condition"): Promise<T> {
   const start = Date.now();

@@ -12,7 +12,7 @@ import type { RoomContext } from "../src/core/registry";
 import { REF_CONTEXT_TOTAL_BYTES, REFS_RULE, contextOf, refsText, resolveRefs, stripRefPrefix } from "../src/bots/refs";
 import { ulid } from "../src/core/ids";
 import { Daemon, downViolations, mention, world, type World } from "./daemon";
-import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
+import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, inputBody, protocolViolations, waitUntil } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
 const deskOf = (botId: string) => benv.BOT_DESK.get(benv.BOT_DESK.idFromName(botId));
@@ -777,13 +777,13 @@ describe("refs in prompts", () => {
     const refs = [{ n: 1, label: "渠道表 · B 站", fromId: w.bot.id, messageId: "01JC0SRC00000000000000000A", block: { id: "channels", type: "table" }, changedSince: true, context: { type: "table", id: "channels" } }];
     const msg = (body: string) => ({ groupId: w.gid, topicId, messageId: ulid(), authorId: w.human.id, authorLevel: "member" as const, body, mentioned: false, refs });
     await desk.onMessage(w.bot.id, msg("为什么少了？"));
-    const first = await d.next((f) => f.t === "run.input" && f.text.startsWith("为什么少了？"));
+    const first = await d.next((f) => f.t === "run.input" && inputBody(f).startsWith("为什么少了？"));
     expect(first.text).toContain("Alice points at these parts of the conversation.");
     expect(first.text).toContain('"from":"dev"');
     expect(first.text).toContain('"changedSince":true');
     expect(first.text).toContain('<teamchat-ref-context n="1">');
     await desk.onMessage(w.bot.id, msg("那微博呢？"));
-    const second = await d.next((f) => f.t === "run.input" && f.text.startsWith("那微博呢？"));
+    const second = await d.next((f) => f.t === "run.input" && inputBody(f).startsWith("那微博呢？"));
     expect(second.text).toContain("<teamchat-refs>");
     expect(second.text).not.toContain("teamchat-ref-context");
     void runId;

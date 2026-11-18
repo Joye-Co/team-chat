@@ -8,7 +8,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { TEXT, approvesWholeWork, gatesRuntime } from "../src/bots/dispatch";
 import { applyPolicyUpdate, approverOf, patternProblem, policyPrompt, runGates, teamPolicy } from "../src/settings/rules";
 import { Daemon, downViolations, mention, world } from "./daemon";
-import { Client, api, clientMsgId, createMember, protocolViolations, waitUntil } from "./helpers";
+import { Client, api, clientMsgId, createMember, inputBody, protocolViolations, waitUntil } from "./helpers";
 
 const benv = env as unknown as { BOT_DESK: DurableObjectNamespace };
 const deskOf = (botId: string) => benv.BOT_DESK.get(benv.BOT_DESK.idFromName(botId));
@@ -159,7 +159,7 @@ describe("gated approvals", () => {
     expect(card.mentions).toEqual([w.owner.id]);
     await c.ok({ t: "card.action", groupId: w.gid, messageId: card.id, actionId: "approveall:daemon-gate-1" });
     await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "这件事里都同意" });
-    await d.next((f) => f.t === "run.input" && f.text === "这件事里都同意");
+    await d.next((f) => f.t === "run.input" && inputBody(f) === "这件事里都同意");
     expect(d.frames.filter((f) => f.t === "run.approval")).toEqual([]);
     await co.ok({ t: "card.action", groupId: w.gid, messageId: card.id, actionId: "approveall:daemon-gate-1" });
     expect(await d.next((f) => f.t === "run.approval")).toMatchObject({ approvalId: "daemon-gate-1", decision: "approve", scope: "run" });
@@ -210,7 +210,7 @@ describe("gated approvals", () => {
     expect(card.mentions).toEqual([w.owner.id]);
     // The requester's 同意 is plain input.
     await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "同意" });
-    await d.next((f) => f.t === "run.input" && f.text === "同意");
+    await d.next((f) => f.t === "run.input" && inputBody(f) === "同意");
     expect(d.frames.filter((f) => f.t === "run.approval")).toEqual([]);
     await co.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "同意" });
     const ans = await d.next((f) => f.t === "run.approval");
@@ -254,7 +254,7 @@ describe("gated approvals", () => {
     let other = "";
     for (const body of ["好的", "行", "ok"]) {
       other = (await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body })).message.id;
-      await d.next((f) => f.t === "run.input" && f.text === body);
+      await d.next((f) => f.t === "run.input" && inputBody(f) === body);
     }
     expect(d.frames.filter((f) => f.t === "run.approval")).toEqual([]);
     // 好 that quotes another message is input too.
@@ -263,7 +263,7 @@ describe("gated approvals", () => {
     expect(d.frames.filter((f) => f.t === "run.approval")).toEqual([]);
     // The requester's 好 in a reply to the card is input: a gated action is not theirs to approve.
     await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "好", replyTo: { messageId: card.id } });
-    await waitUntil(() => d.frames.filter((f) => f.t === "run.input" && f.text !== "好的" && f.text.includes("好")).length === 2, 5000, "the requester's 好 as input");
+    await waitUntil(() => d.frames.filter((f) => f.t === "run.input" && inputBody(f) !== "好的" && f.text.includes("好")).length === 2, 5000, "the requester's 好 as input");
     expect(d.frames.filter((f) => f.t === "run.approval")).toEqual([]);
     // An admin's 好 in a reply to the card answers it.
     await co.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "好", replyTo: { messageId: card.id } });
@@ -297,7 +297,7 @@ describe("gated approvals", () => {
     // The requester cannot answer it, by card or by text; the run keeps waiting.
     await c.ok({ t: "card.action", groupId: w.gid, messageId: card.id, actionId: "approve:daemon-gate-1" });
     await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "同意" });
-    await d.next((f) => f.t === "run.input" && f.text === "同意");
+    await d.next((f) => f.t === "run.input" && inputBody(f) === "同意");
     expect(d.frames.filter((f) => f.t === "run.approval")).toEqual([]);
     // An admin who joins the group can.
     expect((await api(`/v1/groups/${w.gid}/members`, { token: w.human.token, body: { memberId: w.owner.id } })).status).toBe(200);
@@ -342,7 +342,7 @@ describe("gated approvals", () => {
     await c.waitEvent((e) => e.type === "topic.updated" && e.data.topicId === topicId && e.data.status === "waiting_answer" && e.data.waitingOn?.[0] === w.owner.id);
     await c.ok({ t: "card.action", groupId: w.gid, messageId: gated.id, actionId: "approveall:gate-1" });
     await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "同意" });
-    await d.next((f) => f.t === "run.input" && f.text === "同意");
+    await d.next((f) => f.t === "run.input" && inputBody(f) === "同意");
     expect(d.frames.filter((f) => f.t === "run.approval" && f.approvalId === "gate-1")).toEqual([]);
     await co.ok({ t: "card.action", groupId: w.gid, messageId: gated.id, actionId: "approve:gate-1" });
     expect(await d.next((f) => f.t === "run.approval" && f.approvalId === "gate-1")).toMatchObject({ decision: "approve" });
