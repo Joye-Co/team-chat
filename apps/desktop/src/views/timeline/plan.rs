@@ -255,7 +255,20 @@ impl TimelineView {
                     })
                     .flatten()
             })
-            .map(|step| fill(t::PLAN_DOING_NAMED, &[("name", &name), ("step", &step)]))
+            .map(|step| {
+                // `正在做` only while the member works: a run that waits for
+                // a computer or a person, or that someone holds, names its
+                // step without claiming work beside a badge that says
+                // otherwise.
+                let at_work = crate::data::run_phase::phase_of(run).0
+                    == crate::data::run_phase::RunPhase::Working;
+                let line = if at_work {
+                    t::PLAN_DOING_NAMED
+                } else {
+                    t::PLAN_STEP_NAMED
+                };
+                fill(line, &[("name", &name), ("step", &step)])
+            })
             .unwrap_or_else(|| {
                 if stopping {
                     name.clone()

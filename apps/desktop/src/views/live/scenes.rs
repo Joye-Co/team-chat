@@ -76,7 +76,7 @@ pub fn open_stopping(
 
 // --- usable/takeover (design-takeover T6, T7): one scene per phase and the command box ---
 
-use crate::data::run_phase::{HandCommand, HandResult, RunHold};
+use crate::data::run_phase::{HandCommand, HandResult, RunHold, RunPhase, WaitingFor};
 
 /// The main window on 实时查看 of the sample run, its phase set by `hold` on its own
 /// provider (and its held commands by `hand`).
@@ -89,6 +89,27 @@ fn open_phase(
     let fake = d::V2Samples::new();
     fake.update_hold(hold);
     fake.set_hand(hand);
+    // The sample run follows its phase: an ended phase ends the run itself
+    // (its status, its end, why it failed), and a run queued for a computer
+    // has not started. Otherwise the thread, the plan and the replay would
+    // show a run at work under a header that says it is not.
+    let (phase, waiting) = {
+        let runs = crate::data::ChatProvider::runs(&*fake, d::DEV, d::T_VIRTUAL);
+        let run = runs.iter().find(|r| r.id == d::RUN_VIRTUAL);
+        run.map(crate::data::run_phase::phase_of)
+            .unwrap_or((RunPhase::Working, None))
+    };
+    match phase {
+        RunPhase::Done => fake.end_live_run(crate::data::RunStatus::Done, None, true),
+        RunPhase::Failed => fake.end_live_run(
+            crate::data::RunStatus::Failed,
+            Some("压测进程在第 8,000 条消息时退出，内存超过了上限"),
+            false,
+        ),
+        RunPhase::Stopped => fake.end_live_run(crate::data::RunStatus::Cancelled, None, false),
+        RunPhase::WaitingComputer if waiting == Some(WaitingFor::Queue) => fake.queue_live_run(),
+        _ => {}
+    }
     let provider: std::sync::Arc<dyn crate::data::ChatProvider> = if crate::selftest::worst_case() {
         crate::selftest::worst_case::WorstCase::new(fake)
     } else {

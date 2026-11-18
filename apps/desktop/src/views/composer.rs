@@ -250,6 +250,11 @@ impl ComposerView {
             .topic(&key.group_id, topic)
             .and_then(|t| t.owner_id);
         let run = crate::views::topic_page::lead_run(&runs, owner.as_deref())?;
+        // A run whose phase is over (已停止, 没做完, 完成) has no next step to
+        // read a message before.
+        if crate::data::run_phase::phase_of(run).0.ended() {
+            return None;
+        }
         Some(crate::views::shell::member_name(
             &self.services,
             &run.bot_id,

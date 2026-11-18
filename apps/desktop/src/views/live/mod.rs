@@ -516,6 +516,10 @@ impl LivePane {
         let me = self.services.me();
         let since = phase::phase_since(run, words.phase).map(|t| phase::lasted(t, now));
         let since = since.map(|s| s.trim_start_matches(['·', ' ']).to_string());
+        // A state color sits on the icon only (§2.15); title and frame stay neutral.
+        let mut icon_ink = n.label;
+        // Why a run failed, under the title.
+        let mut cause: Option<String> = None;
         let (sym, title, detail) = match words.phase {
             RunPhase::Paused => (Sym::Pause, words.text.clone(), since),
             RunPhase::TakenOver => (
@@ -545,8 +549,83 @@ impl LivePane {
                 )
             }
             RunPhase::WaitingComputer => (Sym::Hourglass, words.text.clone(), since),
+            // Waiting on a person, or stuck: the state in words and for how long
+            // (design-takeover 3.9: the banner is the 状态词), with the mark of the
+            // header's badge.
+            RunPhase::WaitingPerson | RunPhase::WaitingApproval => {
+                icon_ink = words.badge.color(&n);
+                (
+                    words.badge.symbol().unwrap_or(Sym::NeedsYou),
+                    words.text.clone(),
+                    since,
+                )
+            }
+            // A failed run says why (§2.15), from the same source as the 话题's alert.
+            RunPhase::Failed => {
+                icon_ink = n.red;
+                cause = run
+                    .summary
+                    .clone()
+                    .or_else(|| {
+                        let process = self.services.provider.run_process(&run.id);
+                        crate::views::process::error_line(&process.steps)
+                    })
+                    .map(|c| c.trim().to_string())
+                    .filter(|c| !c.is_empty());
+                (Sym::Failed, words.text.clone(), since)
+            }
             _ => return None,
         };
+        // What a failed run offers (§2.15): 重试 and 查看日志.
+        let failed_actions = (words.phase == RunPhase::Failed).then(|| {
+            use crate::copy::timeline as t;
+            let retry = {
+                let (bot_id, run_id) = (run.bot_id.clone(), run.id.clone());
+                push_button(
+                    "live-retry",
+                    t::RUN_RETRY,
+                    PushStyle::Default,
+                    PushSize::Small,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    // A new run with the same request; a refusal is an alert.
+                    let rx = this
+                        .services
+                        .provider
+                        .retry_member_problem(&bot_id, &run_id);
+                    cx.spawn(async move |_, cx| {
+                        if let Err(e) = rx.await.unwrap_or(Err(AdminError::Other)) {
+                            let _ = cx.update(|cx| {
+                                alert_in_active_window(
+                                    t::RUN_RETRY_REFUSED,
+                                    crate::views::settings::widgets::error_text(e),
+                                    cx,
+                                )
+                            });
+                        }
+                    })
+                    .detach();
+                }))
+            };
+            let log = push_button(
+                "live-view-log",
+                t::RUN_VIEW_LOG,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.show_steps(cx);
+                cx.notify();
+            }));
+            div()
+                .flex()
+                .items_center()
+                .gap(space::S8)
+                .child(retry)
+                .child(log)
+        });
         let reminder = phase::reminder(run, bot, me.as_deref(), now, |id| {
             crate::ui::avatar::name_beside_avatar(&member_name(&self.services, id)).to_string()
         });
@@ -603,7 +682,6 @@ impl LivePane {
         Some(
             div()
                 .flex_none()
-                .mb(px(12.))
                 .px(space::S16)
                 .py(space::S12)
                 .rounded(crate::ui::native::tokens::radius::CONTAINER)
@@ -617,9 +695,24 @@ impl LivePane {
                     div()
                         .min_h(BANNER - space::S12 * 2.)
                         .flex()
-                        .items_center()
+                        // With a cause under the title the icon sits on the
+                        // title's line (the Alert anatomy), not mid-block.
+                        .map(|d| {
+                            if cause.is_some() {
+                                d.items_start()
+                            } else {
+                                d.items_center()
+                            }
+                        })
                         .gap(space::S12)
-                        .child(sym.icon(SymSize::INLINE).text_color(n.label))
+                        .child(
+                            div()
+                                .flex_none()
+                                .h(crate::ui::native::tokens::text::UI.1)
+                                .flex()
+                                .items_center()
+                                .child(sym.icon(SymSize::INLINE).text_color(icon_ink)),
+                        )
                         .child(
                             div()
                                 .flex_1()
@@ -633,6 +726,11 @@ impl LivePane {
                                         .one_line()
                                         .child(title),
                                 )
+                                .children(cause.map(|c| {
+                                    crate::ui::truncate::clamped("live-failed-cause", c, 3)
+                                        .n_subheadline()
+                                        .text_color(n.secondary)
+                                }))
                                 .children(detail.filter(|d| !d.is_empty()).map(|d| {
                                     div()
                                         .n_subheadline()
@@ -650,6 +748,7 @@ impl LivePane {
                         .children(share),
                 )
                 .children(note)
+                .children(failed_actions)
                 .into_any_element(),
         )
     }
@@ -663,6 +762,7 @@ impl LivePane {
         run: &BotRunSummary,
         mine: bool,
         folder: Option<&std::path::Path>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let n = native_colors(cx);
@@ -727,41 +827,64 @@ impl LivePane {
                     let tail: Vec<&str> =
                         h.output.lines().filter(|l| !l.trim().is_empty()).collect();
                     let skip = tail.len().saturating_sub(HAND_LINES);
+                    // D13: the command and its output never wrap and are never cut; a
+                    // long line scrolls sideways. Who ran it and its state stay put.
                     div()
                         .flex()
-                        .flex_col()
-                        .gap(space::S2)
+                        .items_start()
+                        .gap(space::S8)
                         .child(
                             div()
-                                .min_h(TERMINAL_LINE)
+                                .flex_none()
+                                .h(TERMINAL_LINE)
                                 .flex()
                                 .items_center()
-                                .gap(space::S8)
-                                .child(div().flex_none().t_meta().text_color(k.ink_3).child(who))
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .one_line()
-                                        .t_meta()
-                                        .code_font()
-                                        .text_color(k.ink)
-                                        .child(format!("$ {}", h.command)),
-                                )
-                                .child(
-                                    div()
-                                        .flex_none()
-                                        .child(StatusBadge::new(state, word).dense()),
-                                ),
-                        )
-                        .children(tail[skip..].iter().map(|l| {
-                            div()
-                                .one_line()
                                 .t_meta()
-                                .code_font()
-                                .text_color(k.ink_2)
-                                .child(l.to_string())
-                        }))
+                                .text_color(k.ink_3)
+                                .child(who),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .gap(space::S2)
+                                .child(
+                                    div()
+                                        .min_h(TERMINAL_LINE)
+                                        .flex()
+                                        .items_center()
+                                        .gap(space::S8)
+                                        .child(command_lines(
+                                            ElementId::Name(
+                                                format!("live-command-line-{}", h.id).into(),
+                                            ),
+                                            vec![format!("$ {}", h.command)],
+                                            k.ink,
+                                            window,
+                                            cx,
+                                        ))
+                                        .child(
+                                            div()
+                                                .flex_none()
+                                                .child(StatusBadge::new(state, word).dense()),
+                                        ),
+                                )
+                                // The output takes the row's full width under
+                                // the command, from the command's x.
+                                .children((skip < tail.len()).then(|| {
+                                    command_lines(
+                                        ElementId::Name(
+                                            format!("live-command-output-{}", h.id).into(),
+                                        ),
+                                        tail[skip..].iter().map(|l| l.to_string()).collect(),
+                                        k.ink_2,
+                                        window,
+                                        cx,
+                                    )
+                                })),
+                        )
                         .into_any_element()
                 })
                 .collect()
@@ -824,7 +947,6 @@ impl LivePane {
         });
         div()
             .flex_none()
-            .mt(space::S16)
             .px(space::S16)
             .py(space::S12)
             .rounded(crate::ui::native::tokens::radius::CONTAINER)
@@ -1126,12 +1248,12 @@ impl LivePane {
         current: Option<usize>,
         shown: Option<usize>,
         end: Millis,
+        active: bool,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let k = theme::colors(cx);
         let start = *times.first()?;
         let span = (end - start).max(1) as f32;
-        let active = run.status.is_active();
         let last = current.unwrap_or(times.len().saturating_sub(1));
         let mut marks: Vec<AnyElement> = Vec::new();
         for i in 0..times.len() {
@@ -1231,7 +1353,10 @@ impl LivePane {
         } else {
             c::LIVE_ENDED_AT
         };
+        // The labels take the track's inset: the step starts where the line
+        // starts and the time ends under the last mark.
         let labels = div()
+            .mx(space::S12)
             .h(px(20.))
             .flex()
             .items_center()
@@ -1274,7 +1399,6 @@ impl LivePane {
         Some(
             div()
                 .flex_none()
-                .mt(space::S16)
                 .flex()
                 .items_start()
                 .gap(space::S12)
@@ -1402,6 +1526,7 @@ impl LivePane {
         &self,
         run: &BotRunSummary,
         items: &[AcceptanceItem],
+        working: bool,
         cx: &App,
     ) -> Option<AnyElement> {
         if items.is_empty() {
@@ -1446,15 +1571,16 @@ impl LivePane {
             }))
             .children(has_from.then(|| div().flex_none().child(c::LIVE_ACCEPTANCE_DOT)))
             .child(div().flex_none().child(tally));
-        let active = run.status.is_active();
         let rows = items.iter().enumerate().map(|(i, item)| {
             // The state as a status badge (never a bare colored dot or
             // colored words), in a 160 pt value column with the evidence.
             let status = match item.met {
                 Some(true) => status_badge(StatusKind::Done, c::LIVE_MET, cx),
                 Some(false) => status_badge(StatusKind::Failed, c::LIVE_NOT_MET, cx),
-                // T-16, §2.12: a criterion still being checked reads 在做.
-                None if active => status_badge(
+                // T-16, §2.12: a criterion still being checked reads 在做, only
+                // while the member works: a paused, waiting or ended run checks
+                // nothing.
+                None if working => status_badge(
                     StatusKind::Working,
                     crate::copy::topic_rail::STATE_WORKING_SHORT,
                     cx,
@@ -1503,7 +1629,6 @@ impl LivePane {
         Some(
             div()
                 .flex_none()
-                .mt(space::S16)
                 .pt(space::S12)
                 .px(space::S16)
                 .pb(space::S4)
@@ -1536,12 +1661,14 @@ impl LivePane {
         &self,
         run: &BotRunSummary,
         times: &[Millis],
-        held: bool,
+        words: &phase::PhaseWords,
+        working: bool,
         cx: &App,
     ) -> Option<AnyElement> {
         if run.plan.is_empty() {
             return None;
         }
+        let held = words.phase.held();
         let k = theme::colors(cx);
         let done = run
             .plan
@@ -1560,7 +1687,7 @@ impl LivePane {
         let bar = steps_bar(
             finished,
             total,
-            (run.status.is_active() && !held).then_some(native_colors(cx).blue),
+            working.then_some(native_colors(cx).blue),
             cx,
         );
         let now = run.ended_at.unwrap_or_else(now_ms);
@@ -1571,6 +1698,20 @@ impl LivePane {
                 PlanState::Current | PlanState::Waiting => {
                     let mark: AnyElement = if held {
                         ui::icon(Sym::Pause, theme::icon::TAG, k.ink_3).into_any_element()
+                    } else if words.phase == RunPhase::Done {
+                        // A step left open by a run that is done: a quiet ring.
+                        div()
+                            .size(px(10.))
+                            .rounded_full()
+                            .border(px(1.5))
+                            .border_color(k.line_2)
+                            .into_any_element()
+                    } else if !working {
+                        // The run waits, is stuck or ended: the mark of its
+                        // phase, the one the header's badge shows. Never the
+                        // working spinner.
+                        state_mark(words.badge, &native_colors(cx))
+                            .unwrap_or_else(|| div().into_any_element())
                     } else {
                         // §2.12: the step it is on spins (working); a step
                         // that waits on a person shows the needs-you icon.
@@ -1616,7 +1757,9 @@ impl LivePane {
                                         .text_color(k.ink)
                                         .child(p.text.clone()),
                                 )
-                                .children(started.map(|s| {
+                                // `已 N 分钟` counts a step that is still
+                                // open; an ended run has none.
+                                .children(started.filter(|_| !words.phase.ended()).map(|s| {
                                     div()
                                         .t_meta()
                                         .text_color(k.ink_2)
@@ -1677,7 +1820,6 @@ impl LivePane {
         Some(
             div()
                 .flex_none()
-                .mt(space::S16)
                 .rounded(crate::ui::native::tokens::radius::CONTAINER)
                 .border_1()
                 .border_color(native_colors(cx).separator)
@@ -1739,13 +1881,20 @@ impl LivePane {
         )
         .on_click(cx.listener(|this, _, _, cx| {
             if this.developer.take().is_none() {
-                let services = this.services.clone();
-                let view = cx.new(|cx| ProcessView::new(services, cx));
-                view.update(cx, |v, cx| v.set_visible(true, cx));
-                this.developer = Some(view);
+                this.show_steps(cx);
             }
             cx.notify();
         }))
+    }
+
+    /// The run's steps in place of the screen (开发者视图, 查看日志).
+    fn show_steps(&mut self, cx: &mut Context<Self>) {
+        if self.developer.is_none() {
+            let services = self.services.clone();
+            let view = cx.new(|cx| ProcessView::new(services, cx));
+            view.update(cx, |v, cx| v.set_visible(true, cx));
+            self.developer = Some(view);
+        }
     }
 }
 
@@ -1773,6 +1922,7 @@ impl LivePane {
         });
         let developer = self.services.nav.read(cx).developer_view;
         let nav = self.services.nav.clone();
+        let close = self.services.nav.clone();
         div()
             .size_full()
             .flex()
@@ -1797,16 +1947,25 @@ impl LivePane {
                             .child(crate::copy::process::RUNS),
                     )
                     .child(div().flex_1())
-                    .child(ToolbarGroup::new([sym_toolbar_toggle(
-                        "steps-developer",
-                        Sym::Terminal,
-                        c::LIVE_DEVELOPER,
-                        developer,
-                        cx,
-                    )
-                    .on_click(move |_, _, cx| {
-                        nav.update(cx, |nav, cx| nav.set_developer_view(!developer, cx))
-                    })])),
+                    // §2.2: the pane's header ends with its close button, as
+                    // the screen's header and every other right pane.
+                    .child(ToolbarGroup::new([
+                        sym_toolbar_toggle(
+                            "steps-developer",
+                            Sym::Terminal,
+                            c::LIVE_DEVELOPER,
+                            developer,
+                            cx,
+                        )
+                        .on_click(move |_, _, cx| {
+                            nav.update(cx, |nav, cx| nav.set_developer_view(!developer, cx))
+                        }),
+                        sym_toolbar_item("live-close", Sym::Close, c::LIVE_CLOSE, cx).on_click(
+                            move |_, _, cx| {
+                                close.update(cx, |nav, cx| nav.set_right_pane(RightPane::None, cx))
+                            },
+                        ),
+                    ])),
             )
             .child(div().flex_1().min_h(px(0.)).child(view))
             .children(stop.map(|stop| {
@@ -1830,7 +1989,6 @@ fn compact_panel(label: &'static str, line: &'static str, sym: Sym, cx: &App) ->
     let k = theme::colors(cx);
     div()
         .flex_none()
-        .mt(space::S16)
         .px(space::S16)
         .py(space::S12)
         .rounded(crate::ui::native::tokens::radius::CONTAINER)
@@ -1843,6 +2001,58 @@ fn compact_panel(label: &'static str, line: &'static str, sym: Sym, cx: &App) ->
         .child(div().t_meta_medium().text_color(k.ink_3).child(label))
         .child(crate::ui::native::EmptyLine::new(line).icon(sym))
         .into_any_element()
+}
+
+/// Lines of the command box in the terminal's type (D13): they never wrap and
+/// are never cut. A line wider than the box scrolls sideways, with a
+/// scrollbar along the block's bottom edge while one is.
+fn command_lines(
+    id: ElementId,
+    lines: Vec<String>,
+    ink: gpui::Hsla,
+    window: &mut Window,
+    cx: &mut App,
+) -> gpui::Div {
+    let scroll = window
+        .use_keyed_state(id.clone(), cx, |_, _| gpui::ScrollHandle::new())
+        .read(cx)
+        .clone();
+    // Known from the frame before: a line is wider than the box.
+    let scrolls = scroll.max_offset().x > px(0.);
+    div()
+        .relative()
+        .flex_1()
+        .min_w_0()
+        .child(
+            div()
+                .id(id)
+                .w_full()
+                .flex()
+                .overflow_x_scroll()
+                .restrict_scroll_to_axis()
+                .track_scroll(&scroll)
+                .child(
+                    div()
+                        .flex_none()
+                        .min_w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(space::S2)
+                        // Room for the scrollbar under the last line.
+                        .when(scrolls, |d| d.pb(space::S12))
+                        .t_meta()
+                        .code_font()
+                        .whitespace_nowrap()
+                        .text_color(ink)
+                        .children(lines.into_iter().map(|l| div().child(l))),
+                ),
+        )
+        .child(
+            div().absolute().inset_0().child(
+                gpui_component::scroll::Scrollbar::horizontal(&scroll)
+                    .mode(gpui_component::scroll::ScrollbarMode::Always),
+            ),
+        )
 }
 
 fn stop_button(stopping: bool, cx: &App) -> gpui_component::button::Button {
@@ -2132,7 +2342,12 @@ impl Render for LivePane {
             (Some(m), true) => m.clone(),
             (None, _) => shown_text.clone(),
         };
-        let live_now = run.status.is_active() && !held && replay_step.is_none();
+        // The member works now: not waiting, not held, not ended. The body
+        // follows the one phase the header reads (§2.12), so no panel says
+        // 在做 beside a header that says otherwise.
+        let working = words.phase == RunPhase::Working && run.status.is_active();
+        let ended = words.phase.ended() || !run.status.is_active();
+        let live_now = working && replay_step.is_none();
         // Show the newest lines that fit the terminal window, from its top.
         let window_w = window.viewport_size().width;
         // The shell gives the pane the one width of every right pane (D13:
@@ -2178,67 +2393,87 @@ impl Render for LivePane {
         });
         let criteria = p.acceptance_criteria(&run_id);
 
-        let body: AnyElement = match &self.developer {
-            Some(view) => div()
-                .flex_1()
-                .min_h(px(0.))
-                .child(view.clone())
-                .into_any_element(),
-            None => div()
-                .id("live-body")
-                .size_full()
-                .overflow_y_scroll()
-                .track_scroll(&self.scroll)
-                .child(
-                    div()
-                        // First content at y 68 (§2.2: 16 under the header).
-                        .pt(space::S16)
-                        .px(SIDE)
-                        // Nothing ends cut under the bottom bar (§2.21).
-                        .pb(space::S24)
-                        .flex()
-                        .flex_col()
-                        .children(
-                            self.phase_banner(
+        let body: AnyElement =
+            match &self.developer {
+                Some(view) => div()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .child(view.clone())
+                    .into_any_element(),
+                None => div()
+                    .id("live-body")
+                    .size_full()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.scroll)
+                    .child(
+                        div()
+                            // First content at y 68 (§2.2: 16 under the header).
+                            .pt(space::S16)
+                            .px(SIDE)
+                            // Nothing ends cut under the bottom bar (§2.21).
+                            .pb(space::S24)
+                            .flex()
+                            .flex_col()
+                            // §2.5: one gap between the pane's sections.
+                            .gap(space::S24)
+                            .children(self.phase_banner(
                                 &run, &bot, &screen, &words, run_rights, held_by_me, cx,
-                            ),
-                        )
-                        .child(self.screen(&screen, &lines, title, live_now, pointer, cx))
-                        // T7: the command box under the terminal while someone holds it;
-                        // others see the holder's commands once there are some, never an
-                        // empty box that is not theirs.
-                        .children(
-                            (taken_over && (held_by_me || !p.hand_commands(&run_id).is_empty()))
-                                .then(|| self.command_box(&run, held_by_me, folder.as_deref(), cx)),
-                        )
-                        // R2-06, A1: a section with no data keeps its place
-                        // as a compact empty, so the pane never ends in a
-                        // blank band.
-                        .child(
-                            self.replay(&run, &times, current, replay_step, end, cx)
-                                .unwrap_or_else(|| {
-                                    compact_panel(
-                                        c::LIVE_REPLAY,
-                                        c::LIVE_REPLAY_EMPTY,
-                                        Sym::Video,
+                            ))
+                            .child(self.screen(&screen, &lines, title, live_now, pointer, cx))
+                            // T7: the command box under the terminal while someone holds it;
+                            // others see the holder's commands once there are some, never an
+                            // empty box that is not theirs.
+                            .children(
+                                (taken_over
+                                    && (held_by_me || !p.hand_commands(&run_id).is_empty()))
+                                .then(|| {
+                                    self.command_box(
+                                        &run,
+                                        held_by_me,
+                                        folder.as_deref(),
+                                        window,
                                         cx,
                                     )
                                 }),
-                        )
-                        .child(self.acceptance(&run, &criteria, cx).unwrap_or_else(|| {
-                            compact_panel(
-                                c::LIVE_ACCEPTANCE,
-                                c::LIVE_ACCEPTANCE_EMPTY,
-                                Sym::Checklist,
-                                cx,
                             )
-                        }))
-                        .child(self.plan(&run, &times, held, cx).unwrap_or_else(|| {
-                            compact_panel(c::LIVE_PLAN, c::LIVE_PLAN_EMPTY, Sym::Checklist, cx)
-                        })),
-                )
-                .into_any_element(),
-        };
+                            // R2-06, A1: a section with no data keeps its place
+                            // as a compact empty, so the pane never ends in a
+                            // blank band.
+                            .child(
+                                self.replay(&run, &times, current, replay_step, end, !ended, cx)
+                                    .unwrap_or_else(|| {
+                                        compact_panel(
+                                            c::LIVE_REPLAY,
+                                            c::LIVE_REPLAY_EMPTY,
+                                            Sym::Video,
+                                            cx,
+                                        )
+                                    }),
+                            )
+                            .child(
+                                self.acceptance(&run, &criteria, working, cx)
+                                    .unwrap_or_else(|| {
+                                        compact_panel(
+                                            c::LIVE_ACCEPTANCE,
+                                            c::LIVE_ACCEPTANCE_EMPTY,
+                                            Sym::Checklist,
+                                            cx,
+                                        )
+                                    }),
+                            )
+                            .child(self.plan(&run, &times, &words, working, cx).unwrap_or_else(
+                                || {
+                                    compact_panel(
+                                        c::LIVE_PLAN,
+                                        c::LIVE_PLAN_EMPTY,
+                                        Sym::Checklist,
+                                        cx,
+                                    )
+                                },
+                            )),
+                    )
+                    .into_any_element(),
+            };
         // R2-06, A4: when the sections run past the footer, the scrollbar
         // shows at rest, so a row under the footer reads as more to scroll,
         // never as a cut (§2.21).

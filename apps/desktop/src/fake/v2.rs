@@ -180,6 +180,10 @@ struct Data {
     /// Usable (T6, T7): the sample live run's phase fields and its held commands.
     hold: run_phase::RunHold,
     hand: Vec<run_phase::HandCommand>,
+    /// The live run waits for a computer and has not started.
+    live_queued: bool,
+    /// The live run finished every step (the 完成 scene).
+    live_done: bool,
     // topic track (v11/topic): who approved PR #61 and when.
     approval: Option<(MemberId, Millis)>,
     /// My own notify settings, so the 通知 sections and menus can be tried
@@ -1114,6 +1118,8 @@ impl V2Samples {
                 ..Default::default()
             },
             hand: Vec::new(),
+            live_queued: false,
+            live_done: false,
             approval: None,
             muted_groups: Default::default(),
             levels: HashMap::new(),
@@ -1365,6 +1371,51 @@ impl V2Samples {
     /// Usable (T6, T7 scenes): changes the live run's phase fields.
     pub fn update_hold(&self, f: impl FnOnce(&mut run_phase::RunHold)) {
         self.with(|d| f(&mut d.hold));
+        self.emit(vec![Change::Runs {
+            group_id: DEV.into(),
+            topic_id: T_VIRTUAL.into(),
+        }]);
+    }
+
+    /// The phase scenes of an ended run: the live run itself ends (`status`,
+    /// its end, why), so the thread, the plan and the replay agree with the
+    /// phase. `all_done` finishes every step of its plan (完成).
+    pub fn end_live_run(&self, status: RunStatus, summary: Option<&str>, all_done: bool) {
+        self.with(|d| {
+            if let Some(r) = d.runs.iter_mut().find(|r| r.id == RUN_VIRTUAL) {
+                r.status = status;
+                r.ended_at = Some(at(9, 55));
+                r.summary = summary.map(Into::into);
+                if all_done {
+                    for p in &mut r.plan {
+                        p.state = PlanState::Done;
+                    }
+                }
+            }
+            if all_done && let Some(t) = d.topics.iter_mut().find(|t| t.id == T_VIRTUAL) {
+                t.status = TopicStatus::Done;
+            }
+            d.live_done = all_done;
+        });
+        self.emit(vec![Change::Runs {
+            group_id: DEV.into(),
+            topic_id: T_VIRTUAL.into(),
+        }]);
+    }
+
+    /// The scene of a run queued for a computer: it has not started, so it
+    /// has no computer, no screen lines and no step under way.
+    pub fn queue_live_run(&self) {
+        self.with(|d| {
+            d.live_queued = true;
+            if let Some(r) = d.runs.iter_mut().find(|r| r.id == RUN_VIRTUAL) {
+                r.started_at = None;
+                r.machine_name = None;
+                for p in &mut r.plan {
+                    p.state = PlanState::Pending;
+                }
+            }
+        });
         self.emit(vec![Change::Runs {
             group_id: DEV.into(),
             topic_id: T_VIRTUAL.into(),
@@ -2184,6 +2235,29 @@ impl ChatProvider for V2Samples {
             step: Some(step),
         };
         use ScreenLineKind as K;
+        // A run still queued for a computer has no screen yet.
+        if self.with(|d| d.live_queued) {
+            return Some(MachineScreen {
+                run_id: run_id.into(),
+                machine_name: None,
+                lines: Vec::new(),
+                started_at: None,
+                takeover_url: None,
+                paused_by: None,
+            });
+        }
+        // A finished run also has the screens of its last two steps.
+        let rest = if self.with(|d| d.live_done) {
+            vec![
+                line(K::Result, "跳到第 8,000 条：位置不变", 50, 2),
+                line(K::Command, "cargo test -p desktop topic_list", 51, 3),
+                line(K::Result, "test result: ok. 14 passed", 52, 3),
+                line(K::Command, "gh pr create --fill", 54, 4),
+                line(K::Result, "已创建 PR #62", 55, 4),
+            ]
+        } else {
+            Vec::new()
+        };
         Some(MachineScreen {
             run_id: run_id.into(),
             machine_name: Some("Mac mini".into()),
@@ -2199,7 +2273,10 @@ impl ChatProvider for V2Samples {
                 line(K::Result, "滚动 60 秒：平均 118 fps，最低 57 fps", 48, 2),
                 line(K::Result, "内存 212 MB", 48, 2),
                 line(K::Output, "跳到第 8,000 条，检查滚动位置…", 49, 2),
-            ],
+            ]
+            .into_iter()
+            .chain(rest)
+            .collect(),
             started_at: Some(at(9, 31)),
             takeover_url: None,
             paused_by: self.with(|d| d.hold.paused_by.clone()),
@@ -2209,6 +2286,21 @@ impl ChatProvider for V2Samples {
         if run_id != RUN_VIRTUAL {
             return Vec::new();
         }
+        // Nothing is checked before the run starts.
+        if self.with(|d| d.live_queued) {
+            return [
+                "一万条消息滚动不卡",
+                "内存不涨",
+                "跳到第 8,000 条后位置不跳",
+            ]
+            .into_iter()
+            .map(|text| AcceptanceItem {
+                text: text.into(),
+                ..Default::default()
+            })
+            .collect();
+        }
+        let done = self.with(|d| d.live_done);
         vec![
             // panes track: the 实时查看 artboard's 验收标准.
             AcceptanceItem {
@@ -2225,12 +2317,17 @@ impl ChatProvider for V2Samples {
             },
             AcceptanceItem {
                 text: "跳到第 8,000 条后位置不跳".into(),
+                met: done.then_some(true),
                 ..Default::default()
             },
         ]
     }
     fn run_step_times(&self, run_id: &str) -> Vec<Millis> {
         match run_id {
+            RUN_VIRTUAL if self.with(|d| d.live_queued) => Vec::new(),
+            RUN_VIRTUAL if self.with(|d| d.live_done) => {
+                vec![at(9, 31), at(9, 35), at(9, 46), at(9, 51), at(9, 54)]
+            }
             RUN_VIRTUAL => vec![at(9, 31), at(9, 35), at(9, 46)],
             RUN_RECONNECT => vec![at(9, 14), at(9, 22), at(9, 30), at(9, 41), at(9, 52)],
             _ => Vec::new(),

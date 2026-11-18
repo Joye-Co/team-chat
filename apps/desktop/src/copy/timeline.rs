@@ -93,4 +93,6 @@ crate::copy! {
     MENU_FIND = "查找…",
     MENU_FIND_NEXT = "查找下一个",
     MENU_FIND_PREVIOUS = "查找上一个",
+    // The working card's title while the member does not work (waits, is held).
+    PLAN_STEP_NAMED = "{name}：{step}",
 }
