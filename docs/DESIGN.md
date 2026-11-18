@@ -742,7 +742,7 @@ step; a diff line or hunk; a box on an evidence screenshot; a diagram node; an e
 | `问这里` | After 300 ms of rest, a gpui-component ghost xsmall button with `↳` at the part's top-right (table row: right after the row's name, 「B 站 [问这里]」, without changing the row height; when the name leaves no room in the first column, at the row end, centered on the row; in a card table it floats over the row end so the number columns stay at the right edge. Chart: in the tooltip; diagram: beside the node). Not shown on answer controls |
 | ⌥-click | Adds the part at once, also on controls (it does not pick the option); while ⌥ is held, parts show the outline |
 | Context menu | `就这里提问`, `单独问这里`, `复制`; on the card header `就这张卡提问` |
-| Keyboard | Tab into a block, arrows move a 2 pt `ink-3` part ring, ⌥↵ adds the part, ⇧⌥↵ the whole block |
+| Keyboard | Tab into a block, arrows move a 2 pt `ink-3` part ring, ↵ or ⌥↵ adds the part, ⇧⌥↵ the whole block |
 | Added | The part flashes `sel` for 600 ms and keeps a quiet `已引用` mark until the message is sent or the chip removed. From 首页, 群 or a 产出, TeamChat opens the 话题 and the toast says `已放进话题的输入框` |
 
 **Composer chips**: a row above the text input (beside the quote chip), wrapping; chip 26 pt,

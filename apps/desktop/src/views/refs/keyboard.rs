@@ -1,7 +1,8 @@
 //! Keyboard part focus inside a card block (REFS §A3): Tab moves focus into a card's blocks;
 //! arrow keys move a part focus ring inside the focused block (table: cells; ⇧ + arrows: the
-//! row or the column; chart: points; list and plan: items and steps); ⌥↵ adds the focused
-//! part (the whole block when no part has focus), ⇧⌥↵ the whole block; Esc leaves the block.
+//! row or the column; chart: points; list and plan: items and steps); ↵ presses the 问这里
+//! the focused part shows, ⌥↵ adds the focused part (the whole block when no part has focus),
+//! ⇧⌥↵ the whole block; Esc leaves the block.
 //!
 //! A renderer wraps a block (or a run of blocks drawn together) in [`focus_block`] with the
 //! block's parts as [`NavPart`]s. The parts keep their own element ids, so the affordances
@@ -270,6 +271,14 @@ fn on_key(
             };
             cx.stop_propagation();
             ask_about(target, RefIntent::Topic, window, cx);
+        }
+        // Only on the block's own focus: Enter on a control inside it belongs to the control.
+        "enter" if !mods.shift && handle(key, cx).is_focused(window) => {
+            if let Some(i) = current(key, parts, cx) {
+                let target = (parts[i].target)(cx);
+                cx.stop_propagation();
+                ask_about(target, RefIntent::Topic, window, cx);
+            }
         }
         "escape" => {
             hub(cx).update(cx, |h, cx| {
