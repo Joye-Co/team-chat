@@ -3194,7 +3194,7 @@ pub(crate) fn metrics_row(
                         .when_some(unit.clone().filter(|u| u != "%"), |el, u| {
                             el.child(div().n_body().text_color(k.ink_3).child(u))
                         })
-                        .when(unit.as_deref() == Some("%") && d.is_none(), |el| {
+                        .when(unit.as_deref() == Some("%"), |el| {
                             el.child(div().n_body().text_color(k.ink_3).child("%"))
                         }),
                 )
