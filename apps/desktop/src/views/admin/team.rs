@@ -22,7 +22,8 @@ use crate::{
         icons::sym as sym_icon,
         native::{
             Alert, AlertTone, Badge, NativeType as _, PushSize, PushStyle, SearchField, Segment,
-            Segmented, StatusBadge, TruncText, card_surface, native_colors, progress, push_button,
+            Segmented, StatusBadge, TruncText, native_colors, panel_card_surface, progress,
+            push_button,
             tokens::{avatar, height, monitor as t, radius, space},
         },
         sf_symbols::SymSize,
@@ -62,6 +63,10 @@ pub struct Team {
     pub role_error: Option<String>,
     /// Why the last 停用 or 重新启用 did not go through: the alert's title and the reason.
     pub action_error: Option<(&'static str, String)>,
+    /// The 「设为…」 that failed (who, which 身份), for its alert's 重试.
+    pub role_retry: Option<(String, TeamRole)>,
+    /// The 停用 (`true`) or 重新启用 that failed and for whom, for its alert's 重试.
+    pub action_retry: Option<(String, bool)>,
     search: Entity<InputState>,
 }
 
@@ -77,6 +82,8 @@ impl Team {
             selected: None,
             role_error: None,
             action_error: None,
+            role_retry: None,
+            action_retry: None,
             search: cx.new(|cx| InputState::new(window, cx).placeholder(m::TEAM_SEARCH)),
         }
     }
@@ -362,12 +369,35 @@ impl AdminView {
                     .on_surface()
                     .tone(AlertTone::Destructive)
                     .description(e)
+                    // The same call again; the alert leaves while it runs.
+                    .action(Self::retry_action(
+                        "team-role-retry",
+                        |v, cx| {
+                            v.team.role_error = None;
+                            if let Some((id, role)) = v.team.role_retry.take() {
+                                let view = cx.entity();
+                                set_role(&v.services, &id, role, &view, cx);
+                            }
+                        },
+                        cx,
+                    ))
             }))
             .children(self.team.action_error.clone().map(|(title, e)| {
                 Alert::new(Sym::Failed, title)
                     .on_surface()
                     .tone(AlertTone::Destructive)
                     .description(e)
+                    .action(Self::retry_action(
+                        "team-action-retry",
+                        |v, cx| {
+                            v.team.action_error = None;
+                            if let Some((id, off)) = v.team.action_retry.take() {
+                                let view = cx.entity();
+                                set_deactivated(&v.services, &id, off, &view, cx);
+                            }
+                        },
+                        cx,
+                    ))
             }))
             .child(
                 div()
@@ -874,7 +904,7 @@ impl AdminView {
         let k = native_colors(cx);
         let Some(id) = self.team.selected.clone() else {
             // The compact Empty (§2.13): an icon and the line, never a lone line.
-            return card_surface(cx)
+            return panel_card_surface(cx)
                 .p(space::S24)
                 .child(crate::ui::native::EmptyLine::new(m::TEAM_PICK).icon(Sym::Members))
                 .into_any_element();
@@ -1049,7 +1079,7 @@ impl AdminView {
                     .collect()
             })
             .unwrap_or_default();
-        card_surface(cx)
+        panel_card_surface(cx)
             .p(space::S24)
             .flex()
             .flex_col()
@@ -1256,9 +1286,11 @@ fn set_role(
 ) {
     let reply = services.provider.set_member_role(id, role);
     let view = view.clone();
+    let id = id.to_string();
     cx.spawn(async move |cx| {
         let result = answer(reply).await;
         let _ = view.update(cx, |v, cx| {
+            v.team.role_retry = result.is_err().then_some((id, role));
             v.team.role_error = result
                 .err()
                 .map(|e| crate::views::settings::role_error_text(e).to_string());
@@ -1283,9 +1315,11 @@ fn set_deactivated(
     } else {
         m::TEAM_REACTIVATE_FAILED
     };
+    let id = id.to_string();
     cx.spawn(async move |cx| {
         let result = answer(reply).await;
         let _ = view.update(cx, |v, cx| {
+            v.team.action_retry = result.is_err().then_some((id, deactivated));
             v.team.action_error = result.err().map(|e| {
                 (
                     title,

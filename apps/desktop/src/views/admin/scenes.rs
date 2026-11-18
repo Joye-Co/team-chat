@@ -393,6 +393,7 @@ fn open_members_failed(
             v.team.error = Some(offline_text());
             v.team.action_error =
                 Some((crate::copy::admin::TEAM_DEACTIVATE_FAILED, offline_text()));
+            v.team.action_retry = Some(("m-jojo".into(), true));
             cx.notify();
         })
     });
