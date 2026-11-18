@@ -607,17 +607,26 @@ impl ProcessView {
                 }
             )
         });
-        // After 停止 is pressed the run is 停止中: the card stops saying it is
-        // at work on a step, as the thread's working card does.
+        // After 停止 is pressed the run is 停止中: the card keeps its line and
+        // says 停在 the step, as the thread's working card does, so the log
+        // below does not jump.
         let stopping = self.services.provider.run_stopping(&run.id);
-        let progress = (run.status.is_active() && !stopping)
+        let progress = run
+            .status
+            .is_active()
             .then(|| crate::views::topic_page::plan_progress(&run.plan))
             .flatten();
-        let about = if progress.is_some() || stopping {
+        let about = if progress.is_some() {
             None
         } else if run.status.is_active() {
-            steps::live_action(&self.process.steps)
-                .map(|step| fill(crate::copy::timeline::PLAN_DOING, &[("step", &step)]))
+            let template = if stopping {
+                crate::copy::timeline::PLAN_HELD
+            } else {
+                crate::copy::timeline::PLAN_DOING
+            };
+            steps::live_action(&self.process.steps).map(|step| fill(template, &[("step", &step)]))
+        } else if stopping {
+            None
         } else {
             run.summary
                 .as_deref()
