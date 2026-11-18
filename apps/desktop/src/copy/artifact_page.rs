@@ -20,7 +20,6 @@ crate::copy! {
     ARTIFACT_SHARE = "分享",
     ARTIFACT_COPIED = "已复制",
     ARTIFACT_SIDE_CHAT = "单独问",
-    ARTIFACT_COMPARE = "看 v{v}",
     ARTIFACT_BACK_TO = "回到 v{v}",
     // The tail after the 群 name; the name cuts first (§2.21).
     ARTIFACT_TOPIC_DONE = " · 完成 {time}",

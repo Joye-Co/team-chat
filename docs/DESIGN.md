@@ -926,7 +926,7 @@ margins): embedded when the child WKWebView works, else a snapshot with `打开`
 Choices inside a member-made page are forwarded to that member (`artifact.event`); the page shows
 the record `你选了「B 站」· 10:12 · 已发给 Ledger`. Right pane **来龙去脉**: 来自话题 (check + topic + `拾光增长 ·
 做完了 09:40` + chevron; 做的人 / 要求 rows with tiles and tags), 版本 (rows `v3 加了渠道拆分 今天 09:40`, selected
-`sel`; `和 v2 对比`), 页面里的回应, 用到的决定, 被引用. Switching versions never animates; charts draw once
+`sel`), 页面里的回应, 用到的决定, 被引用. Switching versions never animates; charts draw once
 per version.
 
 ### 8.10 Settings → 外观 (new) and the rest

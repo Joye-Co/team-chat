@@ -967,28 +967,6 @@ impl ArtifactPage {
         // 版本.
         let id = detail.summary.id.clone();
         let mut versions = InspectorSection::new("artifact-ins-versions", c::ARTIFACT_VERSIONS);
-        if shown > 1 {
-            let nav = self.services.nav.clone();
-            let id = id.clone();
-            versions = versions.action(
-                nk::push_button(
-                    "artifact-compare",
-                    fill(c::ARTIFACT_COMPARE, &[("v", &(shown - 1).to_string())]),
-                    // §2.5: a section's action is the header's ghost action, so it
-                    // stacks no fill on the selected row under it.
-                    nk::PushStyle::Ghost,
-                    nk::PushSize::Small,
-                    cx,
-                )
-                // The label ends on the times under it; the hover fill keeps its padding.
-                .mr(-tsp::S12)
-                .on_click(move |_, _, cx| {
-                    cx.stop_propagation();
-                    let id = id.clone();
-                    nav.update(cx, |n, cx| n.open_artifact(id, Some(shown - 1), cx))
-                }),
-            );
-        }
         for v in &detail.versions {
             let on = v.version == shown;
             let nav = self.services.nav.clone();
