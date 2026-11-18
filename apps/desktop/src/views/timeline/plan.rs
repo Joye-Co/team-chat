@@ -153,13 +153,26 @@ impl TimelineView {
     /// StatusBadge (已暂停 while someone holds its computer) and
     /// `在右侧打开`, on the text column with the gutter empty.
     fn plan_line(&self, run: &BotRunSummary, held: bool, cx: &mut Context<Self>) -> AnyElement {
-        let n = native_colors(cx);
         let bot = self.members.iter().find(|m| m.id == run.bot_id).cloned();
         let (doing, badge) = self.working_header(run, held);
+        self.pane_line(run, bot, doing, badge, cx)
+    }
+
+    /// The one line a run keeps in the thread while 实时查看 beside it shows
+    /// the run: its member, its title and badge, and 在右侧打开.
+    fn pane_line(
+        &self,
+        run: &BotRunSummary,
+        bot: Option<crate::data::Member>,
+        title: String,
+        badge: (crate::ui::native::BadgeState, String),
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let n = native_colors(cx);
         let card = WorkingCard {
             id: SharedString::from(format!("plan-line-{}", run.id)),
             member: bot,
-            title: doing,
+            title,
             badge,
             progress: None,
             trailing: Some(
@@ -340,6 +353,25 @@ impl TimelineView {
             .iter()
             .find(|p| !matches!(p.state, PlanState::Done))
             .map(|p| p.text.clone());
+        // While the pane beside the thread shows this run, the pane says why
+        // and has 重试 and 查看日志 (A5): the thread keeps one line.
+        let in_pane = matches!(
+            self.services.nav.read(cx).visible_pane(),
+            crate::app::RightPane::Live(id) if id == run.id
+        );
+        if in_pane {
+            let short = crate::copy::isolate(
+                bot.as_ref()
+                    .map(|m| crate::ui::avatar::name_beside_avatar(&m.name))
+                    .unwrap_or_default(),
+            );
+            let title = match &step {
+                Some(step) => fill(t::PLAN_STEP_NAMED, &[("name", &short), ("step", step)]),
+                None => fill(t::RUN_FAILED_TITLE_NO_CAUSE, &[("name", &short)]),
+            };
+            let (_, badge) = self.working_header(run, false);
+            return Some(self.pane_line(run, bot, title, badge, cx));
+        }
         let detail = match &step {
             Some(step) => fill(
                 t::RUN_FAILED_DETAIL,
@@ -350,15 +382,9 @@ impl TimelineView {
                 &[("name", &name), ("time", &at)],
             ),
         };
-        // One 重试 and one 查看日志 on a screen (A5). While the pane beside
-        // the thread shows this run, its footer has both: the alert only
-        // points there. A run that is a step of 按顺序做 is retried by the
-        // order's bar (it owns the order and its retry limit).
-        let in_pane = matches!(
-            self.services.nav.read(cx).visible_pane(),
-            crate::app::RightPane::Live(id) if id == run.id
-        );
-        let retry = (!in_pane && !relay_step).then(|| {
+        // A run that is a step of 按顺序做 is retried by the order's bar (it
+        // owns the order and its retry limit).
+        let retry = (!relay_step).then(|| {
             let run = run.clone();
             push_button(
                 ElementId::Name(format!("run-retry-{}", run.id).into()),
@@ -395,7 +421,7 @@ impl TimelineView {
                 .detach();
             }))
         });
-        let log = (!in_pane).then(|| {
+        let log = {
             let id = run.id.clone();
             push_button(
                 ElementId::Name(format!("run-log-{}", run.id).into()),
@@ -409,13 +435,7 @@ impl TimelineView {
                     nav.set_right_pane(crate::app::RightPane::Live(id.clone()), cx)
                 });
             }))
-        });
-        let open_right = in_pane.then(|| {
-            div()
-                .n_footnote()
-                .text_color(n.secondary)
-                .child(c::OPEN_RIGHT)
-        });
+        };
         Some(
             div()
                 .mt(space::S16)
@@ -474,13 +494,12 @@ impl TimelineView {
                                 // wraps a lone `次。` (break-ui).
                                 .child(
                                     div()
-                                        .pt(if in_pane { space::S4 } else { space::S8 })
+                                        .pt(space::S8)
                                         .flex()
                                         .items_center()
                                         .gap(space::S8)
                                         .children(retry)
-                                        .children(log)
-                                        .children(open_right),
+                                        .child(log),
                                 ),
                         ),
                 )

@@ -332,11 +332,15 @@ impl LivePane {
         if text.is_empty() {
             return;
         }
-        // Never queued (design-takeover 3.2): an away computer is said before sending; the
-        // server judges a running command.
+        // Never queued (design-takeover 3.2): an away computer is said before sending.
         if computer_away(&run) {
             self.command_error = Some(c::LIVE_CMD_OFFLINE);
             cx.notify();
+            return;
+        }
+        // One command at a time: the field is off until this one ends.
+        let commands = self.services.provider.hand_commands(&run.id);
+        if running_command(&run, &commands, now_ms()).is_some() {
             return;
         }
         let reply = self.services.provider.run_command(&run.id, text.clone());
@@ -441,12 +445,23 @@ impl LivePane {
         if let Some(ms) =
             crate::views::topic_page::run_elapsed(self.services.provider.as_ref(), run)
         {
-            let copy = plan::SpanCopy {
-                minutes: c::LIVE_ELAPSED,
-                hours: c::LIVE_ELAPSED_HOURS,
+            // 已用 is a clock that runs; a run that ended says what it took.
+            let text = if phase_of(run).0.ended() {
+                fill(
+                    crate::copy::process::DURATION,
+                    &[("d", &plan::span_text(plan::TOOK, ms))],
+                )
+            } else {
+                plan::span_text(
+                    plan::SpanCopy {
+                        minutes: c::LIVE_ELAPSED,
+                        hours: c::LIVE_ELAPSED_HOURS,
+                    },
+                    ms,
+                )
             };
             parts.push(
-                crate::ui::truncate::TruncText::new(plan::span_text(copy, ms))
+                crate::ui::truncate::TruncText::new(text)
                     .id("live-elapsed")
                     .tnum()
                     .flex_shrink(1.)
@@ -603,13 +618,21 @@ impl LivePane {
             // 停止 does not read as the only way out.
             RunPhase::WaitingComputer if computer_away(run) => {
                 icon_ink = words.badge.color(&n);
+                // How long the computer has been gone, counted from its last
+                // frame: the run's own age is the header's clock.
+                let times = self.services.provider.run_step_times(&run.id);
+                let gone = (!screen.lines.is_empty() || !times.is_empty()).then(|| {
+                    phase::lasted(last_frame_at(run, screen, &times), now)
+                        .trim_start_matches(['·', ' '])
+                        .to_string()
+                });
                 (
                     words.badge.symbol().unwrap_or(Sym::Waiting),
                     words.text.clone(),
                     Some(
                         [
                             Some(fill(c::LIVE_PHASE_OFFLINE_HINT, &[("computer", &computer)])),
-                            since,
+                            gone,
                         ]
                         .into_iter()
                         .flatten()
@@ -861,11 +884,7 @@ impl LivePane {
         let k = theme::colors(cx);
         let me = self.services.me();
         let commands = self.services.provider.hand_commands(&run.id);
-        // A command of an earlier hold that never got its result is not running now.
-        let running = commands
-            .iter()
-            .find(|h| h.result.is_none() && this_hold(run, h))
-            .cloned();
+        let running = running_command(run, &commands, now_ms());
         let away = computer_away(run);
         crate::selftest::drawn::mark(
             "live-commands",
@@ -1016,9 +1035,10 @@ impl LivePane {
                 ),
             };
             // While the computer is away the box cannot run anything: say so, not as an error.
+            // A refusal keeps its words in the text color; the red is on its symbol (D14).
             let hint = match self.command_error {
-                Some(e) => Some((e, n.red)),
-                None => away.then_some((c::LIVE_CMD_OFFLINE, n.secondary)),
+                Some(e) => Some((e, true)),
+                None => away.then_some((c::LIVE_CMD_OFFLINE, false)),
             };
             div()
                 .flex()
@@ -1036,13 +1056,24 @@ impl LivePane {
                                     &state,
                                 )
                                 .full_width()
-                                .disabled(away)
+                                .disabled(away || running.is_some())
                                 .error(self.command_error.is_some()),
                             ),
                         )
                         .children(action.map(|a| div().flex_none().child(a))),
                 )
-                .children(hint.map(|(e, color)| div().n_footnote().text_color(color).child(e)))
+                .children(hint.map(|(e, refused)| {
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::S4)
+                        .n_footnote()
+                        .text_color(if refused { n.label } else { n.secondary })
+                        .when(refused, |d| {
+                            d.child(ui::sym(Sym::Warning, ui::SymSize::INLINE, n.red))
+                        })
+                        .child(e)
+                }))
         });
         div()
             .flex_none()
@@ -2269,6 +2300,33 @@ fn this_hold(run: &BotRunSummary, h: &HandCommand) -> bool {
     run.hold.held_at.is_none_or(|at| h.at >= at)
 }
 
+/// How long the server counts a command with no result as running
+/// (`HAND_COMMAND_MAX_MS`): a lost result does not lock the box for the whole hold.
+const HAND_COMMAND_MAX: Millis = 11 * 60_000;
+
+/// The command that runs now. One of an earlier hold that never got its
+/// result does not, nor does one past [`HAND_COMMAND_MAX`].
+fn running_command(
+    run: &BotRunSummary,
+    commands: &[HandCommand],
+    now: Millis,
+) -> Option<HandCommand> {
+    commands
+        .iter()
+        .find(|h| h.result.is_none() && this_hold(run, h) && now - h.at <= HAND_COMMAND_MAX)
+        .cloned()
+}
+
+/// When the screen's newest frame was taken: the run's end, else the last
+/// sign of it working.
+fn last_frame_at(run: &BotRunSummary, screen: &MachineScreen, times: &[Millis]) -> Millis {
+    run.ended_at.unwrap_or_else(|| {
+        let last_line = screen.lines.last().map(|l| l.at).unwrap_or(0);
+        let last_step = times.last().copied().unwrap_or(0);
+        run.updated_at.max(last_line).max(last_step)
+    })
+}
+
 /// The screen sharing address to offer, when it is one the app may open
 /// (`vnc`, `http` or `https`; never `file:`, `smb:` or another app's scheme).
 fn screen_share_url(screen: &MachineScreen) -> Option<String> {
@@ -2505,11 +2563,7 @@ impl Render for LivePane {
             keep += 1;
         }
         let lines: Vec<&ScreenLine> = lines[lines.len() - keep..].to_vec();
-        let end = run.ended_at.unwrap_or_else(|| {
-            let last_line = screen.lines.last().map(|l| l.at).unwrap_or(0);
-            let last_step = times.last().copied().unwrap_or(0);
-            run.updated_at.max(last_line).max(last_step)
-        });
+        let end = last_frame_at(&run, &screen, &times);
         // The clock of the mock screen is the time of its frame: now while
         // the screen is live, else when the frame was taken.
         let frame_at = if replay_step.is_some() {
