@@ -779,7 +779,7 @@ impl Render for GroupPage {
                     let body = if total > 0 {
                         page::frame(cx).children(topic_rows).children(footer)
                     } else {
-                        page::frame(cx).child(div().px(tsp::S16).child(page::compact_empty(
+                        page::frame(cx).child(div().px(tsp::S12).child(page::compact_empty(
                             Sym::Topic,
                             c::GROUP_PAGE_ACTIVE_EMPTY,
                             None,
@@ -795,8 +795,8 @@ impl Render for GroupPage {
                 // 最近完成 always shows; with nothing done it has the same
                 // compact line as an empty 在做, and its frame hugs its rows.
                 let done_body = if done.is_empty() {
-                    page::frame(cx).child(div().px(tsp::S16).child(page::compact_empty(
-                        Sym::Done,
+                    page::frame(cx).child(div().px(tsp::S12).child(page::compact_empty(
+                        Sym::Topic,
                         c::GROUP_PAGE_DONE_EMPTY,
                         None,
                         cx,
