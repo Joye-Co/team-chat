@@ -246,12 +246,12 @@ fn field_value(value: &str, color: gpui::Hsla) -> AnyElement {
     }
 }
 
-/// Width of a table column from its longest cell, in pixels. A text column stops at 240
-/// and cuts its cells with "…"; a number column takes its widest number, since numbers
-/// never cut (§2.7, F3): a tabular figure at 12 is about 7.6 wide, a CJK header 12.6.
 /// A table cell's side padding (§2.7).
 const CELL_PAD: gpui::Pixels = space::S12;
 
+/// Width of a table column from its longest cell, in pixels. A text column stops at 240
+/// and cuts its cells with "…"; a number column takes its widest number, since numbers
+/// never cut (§2.7, F3): a tabular figure at 12 is about 7.6 wide, a CJK header 12.6.
 fn column_width(columns: &[String], rows: &[Vec<String>], col: usize, numeric: bool) -> f32 {
     let ascii = if numeric { 7.6 } else { 7.0 };
     let longest = std::iter::once(columns.get(col).map(String::as_str).unwrap_or(""))

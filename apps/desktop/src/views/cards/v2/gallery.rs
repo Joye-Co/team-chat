@@ -741,19 +741,26 @@ impl CardsGallery {
             .overflow_hidden()
             .bg(n.content)
             .child(
-                div().bg(n.dim).p(space::S48).flex().justify_center().child(
-                    crate::ui::native::sheet_surface(crate::ui::native::SheetWidth::Form, cx)
-                        .overflow_hidden()
-                        .child(confirm::sheet(
-                            &text,
-                            Some(field),
-                            false,
-                            "gallery-sheet",
-                            None,
-                            None,
-                            cx,
-                        )),
-                ),
+                // Children are clipped to the box, not to its radius.
+                div()
+                    .rounded(theme::radius::LG)
+                    .bg(n.dim)
+                    .p(space::S48)
+                    .flex()
+                    .justify_center()
+                    .child(
+                        crate::ui::native::sheet_surface(crate::ui::native::SheetWidth::Form, cx)
+                            .overflow_hidden()
+                            .child(confirm::sheet(
+                                &text,
+                                Some(field),
+                                false,
+                                "gallery-sheet",
+                                None,
+                                None,
+                                cx,
+                            )),
+                    ),
             )
             .into_any_element()
     }

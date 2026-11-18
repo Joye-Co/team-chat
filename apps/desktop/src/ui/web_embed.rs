@@ -554,9 +554,7 @@ impl WebEmbedState {
                 self.phase = Phase::Ready;
                 // A new document: it has no fade and no base stylesheet yet.
                 self.fade = None;
-                // Start at the end this version reported last time, so a page that is
-                // opened again does not paint its declared height first and then snap.
-                self.end = known_end(self.artifact_id(), self.version());
+                self.end = None;
                 self.end_read = false;
                 self.base = None;
                 self.apply_base(cx);
@@ -689,9 +687,7 @@ impl WebEmbedState {
             let _ = this.update(cx, |s, cx| {
                 s.end_read = true;
                 if let Some(end) = end {
-                    let end = px(end.ceil());
-                    s.end = Some(end);
-                    remember_end(s.artifact_id(), s.version(), end);
+                    s.end = Some(px(end.ceil()));
                 }
                 cx.notify();
             });
@@ -1668,23 +1664,6 @@ thread_local! {
     /// (or a check page under the same id) never stands in for the latest one.
     static PREVIEWS: RefCell<std::collections::HashMap<(String, u32), Arc<gpui::Image>>> =
         RefCell::new(std::collections::HashMap::new());
-}
-
-thread_local! {
-    /// Where each inline page ended when it was last measured, by 产出 and version.
-    static ENDS: RefCell<std::collections::HashMap<(String, u32), Pixels>> =
-        RefCell::new(std::collections::HashMap::new());
-}
-
-fn remember_end(artifact_id: &str, version: u32, end: Pixels) {
-    ENDS.with(|e| {
-        e.borrow_mut()
-            .insert((artifact_id.to_string(), version), end)
-    });
-}
-
-fn known_end(artifact_id: &str, version: u32) -> Option<Pixels> {
-    ENDS.with(|e| e.borrow().get(&(artifact_id.to_string(), version)).copied())
 }
 
 fn remember_preview(artifact_id: &str, version: u32, image: Arc<gpui::Image>) {

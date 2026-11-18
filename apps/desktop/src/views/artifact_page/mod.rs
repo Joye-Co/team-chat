@@ -2056,6 +2056,10 @@ fn thumbnail(
                     .rounded(tokens::radius::CHECKBOX)
                     .border_1()
                     .border_color(n.separator)
+                    // The fill an inline page sits on: a snapshot of a page with no
+                    // background of its own is clear there, and the shadow must not
+                    // show through it.
+                    .bg(crate::theme::colors(cx).raised)
                     .shadow(tokens::shadow::xs())
                     .overflow_hidden()
                     .flex()
