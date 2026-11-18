@@ -103,7 +103,9 @@ await bot.start();
   `status`. `isRetryable(err)` is true for `network`, `timeout`, `internal` and `rate_limited`.
 - **Streaming**: `send` with `streaming: true`, `delta` frames batched every 100 ms, and a final
   `edit` with the full body and `streaming: false`. After a reconnect the writer sends the full
-  text again so readers miss nothing.
+  text again so readers miss nothing. A message stays "streaming" until that final edit, so
+  the SDK finishes a `ctx.stream()` writer that its handler left open (it returned or threw
+  before `finish()`), and `stop()` finishes every writer that is still open.
 
 | Method | Does |
 | --- | --- |
@@ -562,7 +564,9 @@ bun examples/echo-bot.ts          # 或者:node examples/echo-bot.ts
   `retryAfterMs`(被限流后要等多久)和 `memberIds`(例如 `relay.member_unavailable` 说的是哪些
   成员)。HTTP 调用还有 `status`。
 - **流式回复**:`send` 带 `streaming: true`,每 100 毫秒合并发一次 `delta`,最后 `edit` 发完整
-  正文并设 `streaming: false`。重连后会补发一次完整文本,读者不会漏内容。
+  正文并设 `streaming: false`。重连后会补发一次完整文本,读者不会漏内容。消息在最后这次 `edit`
+  之前一直是流式状态,所以处理函数没调 `finish()` 就返回或出错时,SDK 会替它结束 `ctx.stream()`
+  开的流;`stop()` 会结束所有还开着的流。
 
 方法列表见英文部分的表格。
 

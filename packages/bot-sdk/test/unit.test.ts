@@ -917,6 +917,89 @@ describe("page event declarations", () => {
   });
 });
 
+describe("streams a handler leaves open", () => {
+  /** `send` answers with a streaming message; `edit` with the edited one. */
+  function streamServer(): FakeServer {
+    const server = new FakeServer();
+    let n = 0;
+    server.on("send", (f) => ({ ok: true, result: { message: message({ id: `01JC0MSG0000000000000000S${++n}`, body: f.body, streaming: f.streaming === true }) } }));
+    server.on("edit", (f) => ({ ok: true, result: { message: message({ id: f.messageId as string, body: f.body, streaming: f.streaming === true }) } }));
+    return server;
+  }
+  const mention = (seq: number) => ({
+    seq,
+    groupId: GROUP_ID,
+    at: Date.now(),
+    actorId: HUMAN_ID,
+    type: "message.created",
+    data: { message: message({ id: `01JC0MSG0000000000000000M${seq}`, authorId: HUMAN_ID, body: "@Ledger go", mentions: [BOT_ID] }) },
+  });
+
+  test("a handler that throws after ctx.stream(): the SDK finishes the stream with the text it has", async () => {
+    const server = streamServer();
+    const bot = await start(server);
+    const errors: unknown[] = [];
+    bot.onError((e) => errors.push(e));
+    bot.onMention(async (ctx) => {
+      const w = await ctx.stream("working\n");
+      w.append("step 1\n");
+      throw new Error("boom");
+    });
+    server.event(mention(1));
+    const edit = await server.next((f) => f.t === "edit" && f.streaming === false);
+    expect(edit.messageId).toBe("01JC0MSG0000000000000000S1");
+    expect(edit.body).toBe("working\nstep 1\n");
+    for (let i = 0; i < 100 && errors.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(String(errors[0])).toContain("boom");
+  });
+
+  test("a handler that finishes its stream is left alone; a bot.stream() writer stays open until stop()", async () => {
+    const server = streamServer();
+    const bot = await start(server);
+    let handled = 0;
+    bot.onMention(async (ctx) => {
+      const w = await ctx.stream();
+      w.append("done");
+      await w.finish();
+      handled++;
+    });
+    const own = await bot.stream({ groupId: GROUP_ID, topicId: TOPIC_ID }, "long job\n");
+    server.event(mention(1));
+    for (let i = 0; i < 100 && handled === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 50));
+    const finals = () => server.of("edit").filter((f) => f.streaming === false);
+    expect(finals().map((f) => f.messageId)).toEqual(["01JC0MSG0000000000000000S2"]);
+    expect(own.done).toBe(false);
+    own.append("still going\n");
+    await bot.stop();
+    expect(own.done).toBe(true);
+    expect(finals().map((f) => [f.messageId, f.body])).toEqual([
+      ["01JC0MSG0000000000000000S2", "done"],
+      ["01JC0MSG0000000000000000S1", "long job\nstill going\n"],
+    ]);
+  });
+
+  test("stop() cuts a handler that still streams: the stream is finished before the connection closes", async () => {
+    const server = streamServer();
+    const bot = await start(server);
+    let release = () => {};
+    bot.onMention(async (ctx) => {
+      const w = await ctx.stream("half");
+      await new Promise<void>((r) => {
+        release = r;
+      });
+      expect(w.done).toBe(true);
+    });
+    server.event(mention(1));
+    await server.next((f) => f.t === "send");
+    await new Promise((r) => setTimeout(r, 20));
+    await bot.stop();
+    const final = server.of("edit").filter((f) => f.streaming === false);
+    expect(final.map((f) => f.body)).toEqual(["half"]);
+    release();
+  });
+});
+
 describe("ChatError details", () => {
   test("an HTTP error keeps the server's retryAfterMs and memberIds", async () => {
     const body = { error: { code: "rate_limited", message: "slow down", retryAfterMs: 1200, memberIds: [HUMAN_ID, 7] } };

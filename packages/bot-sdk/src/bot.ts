@@ -172,7 +172,11 @@ export interface MessageContext {
   catchUp: boolean;
   /** Posts in the same topic. Retries after a restart reuse the same clientMsgId, so no duplicate. */
   reply(input: string | SendInput): Promise<SendResult>;
-  /** Starts a streaming reply in the same topic. */
+  /**
+   * Starts a streaming reply in the same topic. Call `finish()` before the handler returns: a
+   * writer that is still open when the handler returns or throws is finished by the SDK with the
+   * text it has (and a warning in the log), so the message never stays "streaming".
+   */
   stream(input?: string | (SendInput & StreamOptions)): Promise<StreamWriter>;
   /** Changes this topic's status, waitingOn, owner or title. */
   updateTopic(change: TopicChange): Promise<Topic>;
@@ -617,6 +621,8 @@ export class Bot {
   private readonly groups = new Map<string, GroupState>();
   private readonly topics = new Map<string, TopicInfo>();
   private readonly streams = new Set<StreamWriter>();
+  /** The writers each message context opened, so the SDK can finish what a handler leaves open. */
+  private readonly contextStreams = new WeakMap<MessageContext, StreamWriter[]>();
   /** This bot's active run per topic, from `startRun` answers and `run.updated` events. */
   private readonly currentRuns = new Map<string, string>();
   private readonly running = new Set<Promise<unknown>>();
@@ -762,7 +768,10 @@ export class Bot {
     return p;
   }
 
-  /** Closes the connection, waits for running handlers (up to stopTimeoutMs) and saves state. */
+  /**
+   * Waits for running handlers (up to stopTimeoutMs), finishes streams that are still open (up to
+   * stopTimeoutMs again), closes the connection and saves state.
+   */
   async stop(): Promise<void> {
     if (this.stopped) return;
     // Let running handlers finish while the connection is still up.
@@ -775,6 +784,19 @@ export class Bot {
     ]);
     clearTimeout(waitTimer);
     if (this.stopped) return;
+    // Streams still open (a handler cut off above, or a `bot.stream()` writer nobody finished)
+    // would show as streaming for good: end them while the connection can still carry the edit.
+    if (this.ready && this.streams.size > 0) {
+      let streamTimer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        this.finishOpenStreams(this.streams, "stream still open at stop; finished it"),
+        new Promise((r) => {
+          streamTimer = setTimeout(r, this.opts.stopTimeoutMs ?? 10_000);
+        }),
+      ]);
+      clearTimeout(streamTimer);
+      if (this.stopped) return;
+    }
     this.stopped = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
@@ -1093,7 +1115,11 @@ export class Bot {
     return this.react(groupId, messageId, emoji);
   }
 
-  /** Starts a streaming message; append text to the writer, then call `finish()`. */
+  /**
+   * Starts a streaming message; append text to the writer, then call `finish()`. The server
+   * keeps the message "streaming" until then: `stop()` finishes the writers that are still open,
+   * and `ctx.stream()` writers are also finished when their handler ends.
+   */
   async stream(target: Target, input: string | (SendInput & StreamOptions) = {}): Promise<StreamWriter> {
     const i = typeof input === "string" ? { body: input } : input;
     const r = await this.send(target, { ...i, streaming: true });
@@ -1806,13 +1832,13 @@ export class Bot {
           if (aside && aside.dmGroupId === event.groupId) {
             // A side chat message is addressed to me, @ or not.
             this.follow(event.groupId, m.topicId);
-            if (this.asideHandlers.length > 0) for (const h of this.asideHandlers) jobs.push(() => h(this.asideContext(event, aside, catchUp)));
-            else for (const h of this.mentionHandlers) jobs.push(() => h(ctx()));
+            if (this.asideHandlers.length > 0) for (const h of this.asideHandlers) jobs.push(() => this.runMessageHandler(h, this.asideContext(event, aside, catchUp)));
+            else for (const h of this.mentionHandlers) jobs.push(() => this.runMessageHandler(h, ctx()));
           } else if (m.mentions.includes(me)) {
             this.follow(event.groupId, m.topicId);
-            for (const h of this.mentionHandlers) jobs.push(() => h(ctx()));
+            for (const h of this.mentionHandlers) jobs.push(() => this.runMessageHandler(h, ctx()));
           } else if (this.isFollowing(event.groupId, m.topicId)) {
-            for (const h of this.messageHandlers) jobs.push(() => h(ctx()));
+            for (const h of this.messageHandlers) jobs.push(() => this.runMessageHandler(h, ctx()));
           }
           this.scheduleRead(event.groupId);
           break;
@@ -1922,7 +1948,8 @@ export class Bot {
       if (!i.clientMsgId) i.clientMsgId = nextId();
       return i;
     };
-    return {
+    const opened: StreamWriter[] = [];
+    const ctx: MessageContext = {
       bot: this,
       event,
       message: m,
@@ -1930,7 +1957,11 @@ export class Bot {
       topicId: m.topicId,
       catchUp,
       reply: (input) => this.send(target, withId(input)),
-      stream: (input = {}) => this.stream(target, withId(input) as SendInput & StreamOptions),
+      stream: async (input = {}) => {
+        const w = await this.stream(target, withId(input) as SendInput & StreamOptions);
+        opened.push(w);
+        return w;
+      },
       updateTopic: (change) => this.updateTopic(m.groupId, m.topicId, change),
       typing: () => this.typing(m.groupId, m.topicId),
       setPlan: (plan) => this.setPlan({ groupId: m.groupId, topicId: m.topicId }, plan),
@@ -1944,6 +1975,38 @@ export class Bot {
       question: stripRefPrefix(m.body, m.blockRefs),
       resolveRef: (ref) => this.resolveRef(ref, m.groupId),
     };
+    this.contextStreams.set(ctx, opened);
+    return ctx;
+  }
+
+  /**
+   * Runs a message handler, then finishes the streams its context opened and the handler left
+   * open (it returned or threw before `finish()`): nothing else would end them, and the message
+   * would show as streaming for good. Writers made with `bot.stream()` are not touched.
+   */
+  private async runMessageHandler<C extends MessageContext>(h: Handler<C>, ctx: C): Promise<void> {
+    try {
+      await h(ctx);
+    } finally {
+      // After stop() nothing can be sent; stop() finished the open writers itself.
+      if (!this.stopped) await this.finishOpenStreams(this.contextStreams.get(ctx) ?? [], "handler left a stream open; finished it");
+    }
+  }
+
+  /** Finishes the writers that are still open with the text they have; errors are logged. */
+  private async finishOpenStreams(writers: Iterable<StreamWriter>, why: string): Promise<void> {
+    const open = [...writers].filter((w) => !w.done);
+    await Promise.all(
+      open.map(async (w) => {
+        this.log.warn(why, { groupId: w.groupId, messageId: w.messageId });
+        try {
+          await w.finish();
+        } catch (err) {
+          // A finish that started meanwhile is fine; anything else leaves the message streaming.
+          if (!w.done) this.log.warn("could not finish an open stream", { messageId: w.messageId, err: String(err) });
+        }
+      }),
+    );
   }
 
   private asideOf(groupId: string, topicId: string): TopicContext | undefined {
@@ -1954,11 +2017,14 @@ export class Bot {
   private asideContext(event: EventOf<"message.created">, ref: AsideRef, catchUp: boolean): AsideContext {
     const base = this.messageContext(event, catchUp);
     const aside = { groupId: ref.groupId, topicId: ref.topicId, uptoSeq: ref.uptoSeq };
-    return {
+    const ctx: AsideContext = {
       ...base,
       aside,
       source: (opts = {}) => this.sourceMessages(aside, opts.limit ?? 200),
     };
+    const opened = this.contextStreams.get(base);
+    if (opened) this.contextStreams.set(ctx, opened);
+    return ctx;
   }
 
   /** Messages of a side chat's topic up to `uptoSeq`, oldest first, at most `limit` newest. */
