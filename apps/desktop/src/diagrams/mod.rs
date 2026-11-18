@@ -489,6 +489,16 @@ pub fn clear_memory(cx: &mut App) {
     }
 }
 
+/// The frame tabs of a 时序图, by the keyword the diagram's source uses.
+const FRAME_WORDS: &[(&str, &str)] = &[
+    ("loop", crate::copy::diagrams::FRAME_LOOP),
+    ("alt", crate::copy::diagrams::FRAME_ALT),
+    ("opt", crate::copy::diagrams::FRAME_OPT),
+    ("par", crate::copy::diagrams::FRAME_PAR),
+    ("critical", crate::copy::diagrams::FRAME_CRITICAL),
+    ("break", crate::copy::diagrams::FRAME_BREAK),
+];
+
 /// The CSS font stack of diagram text: the system's interface and Chinese fonts.
 #[cfg(not(windows))]
 const DIAGRAM_FONTS: &str =
@@ -612,6 +622,7 @@ fn pump(cx: &mut App) {
         req_id,
         source: job.source.clone(),
         theme: theme_vars(job.theme),
+        frame_words: FRAME_WORDS,
     };
     #[cfg(any(target_os = "macos", windows))]
     if let Some(r) = &s.renderer {

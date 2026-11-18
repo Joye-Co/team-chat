@@ -1,5 +1,5 @@
 // The TeamChat diagram renderer page. The host calls `window.tcRender(request)` with
-// `{reqId, source, config, limits}` (one request at a time) and gets back one bridge event:
+// `{reqId, source, config, limits, frameWords}` (one request at a time) and gets back one bridge event:
 //   rendered {reqId, svg, width, height, nodes: [{id, label, kind, x, y, w, h}], type}
 //   failed   {reqId, reason: "parse" | "too_big" | "unsupported" | "internal", detail}
 // The page has no network and no navigation; it only calls `window.artifact.emitEvent`.
@@ -186,6 +186,14 @@
       if (type === 'sequence') {
         var names = svg.querySelectorAll('text.actor tspan');
         for (var n = 0; n < names.length; n++) names[n].setAttribute('dominant-baseline', 'central');
+        // A frame's tab shows Mermaid's keyword (loop, alt...): say it in the interface language.
+        var words = req.frameWords || {};
+        var tabs = svg.querySelectorAll('text.labelText');
+        for (var f = 0; f < tabs.length; f++) {
+          var leaf = tabs[f].querySelector('tspan') || tabs[f];
+          var word = (leaf.textContent || '').trim();
+          if (Object.prototype.hasOwnProperty.call(words, word)) leaf.textContent = words[word];
+        }
       }
       // A Gantt chart keeps a fixed 50 px band above its rows: crop the height to what is
       // drawn (rows and the axis under them), 8 px clear, so the chart hugs its rows.

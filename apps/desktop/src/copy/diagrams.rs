@@ -36,4 +36,11 @@ crate::copy! {
     OPEN_VIEWER = "打开查看器",
     TOO_DENSE = "图太大了，这里看不清",
     ALT = "{type}：{n} 个节点。",
+    // The tab of a frame in a 时序图, in place of the diagram's keyword.
+    FRAME_LOOP = "循环",
+    FRAME_ALT = "条件",
+    FRAME_OPT = "可选",
+    FRAME_PAR = "同时",
+    FRAME_CRITICAL = "关键",
+    FRAME_BREAK = "中断",
 }

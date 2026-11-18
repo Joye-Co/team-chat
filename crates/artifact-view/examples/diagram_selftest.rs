@@ -146,6 +146,7 @@ mod selftest {
                 req_id: i as u64 + 1,
                 source: source.to_string(),
                 theme: theme(),
+                frame_words: &[],
             });
         }
     }

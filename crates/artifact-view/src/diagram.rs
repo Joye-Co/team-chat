@@ -14,7 +14,7 @@ use crate::{Capabilities, OpenOptions, Presentation, VersionSpec};
 /// Bump when the page, the config, the sanitizer or the bridge limits change: every cache
 /// key changes, so failures cached by an older renderer (such as the timeouts of a bridge
 /// that dropped large `rendered` events) are not shown again.
-pub const RENDERER_VERSION: u32 = 5;
+pub const RENDERER_VERSION: u32 = 6;
 /// The width of a Gantt chart: the content width of a card (D2-30).
 const GANTT_WIDTH: u32 = 600;
 /// The artifact id of the reserved origin (`teamchat-diagram-v<RENDERER_VERSION>`).
@@ -251,6 +251,9 @@ pub struct RenderRequest {
     pub req_id: u64,
     pub source: String,
     pub theme: ThemeVars,
+    /// What a sequence diagram's frame tabs say instead of Mermaid's keywords
+    /// (`loop`, `alt`, ...), as (keyword, word) pairs in the interface language.
+    pub frame_words: &'static [(&'static str, &'static str)],
 }
 
 /// The script that starts a render. serde_json yields a valid JavaScript literal, so the
@@ -261,6 +264,7 @@ pub fn render_script(req: &RenderRequest) -> String {
         "source": req.source,
         "config": mermaid_config(&req.theme),
         "limits": { "maxNodes": MAX_NODES, "maxEdges": MAX_EDGES, "maxSide": MAX_SIDE },
+        "frameWords": req.frame_words.iter().copied().collect::<std::collections::BTreeMap<_, _>>(),
     });
     format!("window.tcRender({arg});void 0")
 }
@@ -876,10 +880,12 @@ mod tests {
             req_id: 7,
             source: "graph TD\nA[\"</script>\"]-->B');alert(1);//".into(),
             theme: theme(),
+            frame_words: &[("loop", "循环")],
         });
         assert!(s.starts_with("window.tcRender({"));
         assert!(s.ends_with("});void 0"));
         assert!(s.contains(r#"\"</script>\""#));
+        assert!(s.contains(r#""frameWords":{"loop":"循环"}"#));
     }
 
     #[test]
