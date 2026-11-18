@@ -9,6 +9,7 @@ name: CI
 # Each job runs only for the code it tests:
 #   server/**                      -> Server
 #   packages/**, protocol/**       -> Packages (protocol also every Rust job)
+#   scripts/**/*.ts                -> Packages (typecheck only)
 #   apps/daemon/**, update-helper  -> Rust tests (Linux), daemon on Windows, lint
 #   apps/desktop/**, artifact-view -> Desktop on macOS, desktop on Windows, lint
 #   crates/chat-protocol|core      -> all of the Rust jobs (everything builds on them)
@@ -77,6 +78,9 @@ jobs:
               - protocol/**
               # gen-fixtures.ts copies the daemon's golden machine frames into protocol/fixtures.
               - apps/daemon/tests/fixtures/machine/**
+              # The root scripts are typechecked here: they import the bot SDK and the protocol.
+              - scripts/**/*.ts
+              - scripts/tsconfig.json
             server:
               - *js
               - server/**
@@ -147,6 +151,8 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Typecheck
         run: scripts/ci-run.sh typecheck packages/*
+      - name: Typecheck (scripts)
+        run: bun run typecheck:scripts
       - name: Test
         run: scripts/ci-run.sh test packages/*
 
