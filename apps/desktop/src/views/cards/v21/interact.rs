@@ -336,7 +336,11 @@ pub fn stage_of(e: &MyCardEvent, now: Millis) -> Option<Pending> {
                 // it is said: offline, or `none` with the reason why.
                 let stage = match ack.expect.mode {
                     ExpectMode::Offline => Stage::OfflineAnswer,
-                    ExpectMode::None if none_reason(e).is_some() => Stage::RefusedAnswer,
+                    // A passing reason says nothing about a stored answer: it stays stored,
+                    // and there is no step to try again.
+                    ExpectMode::None if none_reason(e).is_some_and(|r| !r.retryable()) => {
+                        Stage::RefusedAnswer
+                    }
                     _ => return None,
                 };
                 return Some(Pending {
@@ -568,6 +572,33 @@ pub fn retract_state(events: &[MyCardEvent]) -> Option<Retract> {
         CardEventPhase::Failed { .. } => Some(Retract::NotSent),
         _ => None,
     }
+}
+
+/// The log without the refusals that no longer hold on the card at `rev`: `expect.mode: none`
+/// said how things were at that press, so a newer rev of the card, or a newer event of mine the
+/// author took, ends it.
+pub fn current(events: &[MyCardEvent], rev: u32) -> Vec<MyCardEvent> {
+    let took = |e: &MyCardEvent| {
+        !e.dropped
+            && match &e.phase {
+                CardEventPhase::Acked { ack, .. } => matches!(
+                    ack.expect.mode,
+                    ExpectMode::Live | ExpectMode::Run | ExpectMode::Starting
+                ),
+                CardEventPhase::Resolved { .. } => true,
+                _ => false,
+            }
+    };
+    events
+        .iter()
+        .enumerate()
+        .filter(|(i, e)| {
+            let refusal = matches!(&e.phase, CardEventPhase::Acked { ack, .. }
+                if ack.expect.mode == ExpectMode::None);
+            !refusal || (e.request.rev >= rev && !events[i + 1..].iter().any(took))
+        })
+        .map(|(_, e)| e.clone())
+        .collect()
 }
 
 /// The newest of my events on the card that still waits, if any (the band).
@@ -973,7 +1004,7 @@ pub fn decorate(
             .tree
             .parent(id)
             .is_some_and(|p| diff.is_some_and(|d| d.changed.contains_key(p)));
-    let pend = pending_at(&events, id, now);
+    let pend = pending_at(&current(&events, ctx.card.rev), id, now);
     let note = resolved_note(&events, id, now);
     let mark = super::band::surface_mark(ctx, node.tree, id);
     // Interact.dc.html 02 step 3: a block the rev inserted keeps a live tint and
@@ -1179,7 +1210,17 @@ fn pending_line(ctx: &Ctx, p: &Pending, words: bool, cx: &mut App) -> Option<Any
         return None;
     }
     let k = theme::colors(cx);
-    let text = stage_words(p.stage, &ctx.author);
+    // The line says the same reason the band would: 稍后再试 is not true of all of them.
+    let text = match (p.stage, none_reason(&p.event)) {
+        (Stage::Refused | Stage::RefusedAnswer, Some(r)) => fill(
+            crate::copy::page_host::PAGE_NONE,
+            &[
+                ("name", &ctx.author),
+                ("why", crate::views::artifacts::host::none_why(Some(r))),
+            ],
+        ),
+        _ => stage_words(p.stage, &ctx.author),
+    };
     let mut row = meta(div())
         .mt(space::S6)
         .flex()
@@ -1293,6 +1334,31 @@ mod none_reason_tests {
         assert!(refused(&[none("run.someday", false)], "bars", 1));
         assert!(!refused(&[none("run.limit", false)], "bars", 1));
         assert!(!refused(&[none("run.failed", false)], "bars", 1));
+    }
+
+    #[test]
+    fn a_stored_answer_says_nothing_of_a_reason_that_passes() {
+        assert!(stage_of(&none("run.failed", true), 1).is_none());
+        assert!(stage_of(&none("run.limit", true), 1).is_none());
+    }
+
+    #[test]
+    fn a_refusal_ends_with_a_newer_rev_or_a_press_the_author_took() {
+        let off = none("runner.off", false);
+        assert!(pending(&current(&[off.clone()], 1), 1_000_000).is_some());
+        assert!(pending(&current(&[off.clone()], 2), 1_000_000).is_none());
+        let answered = none("runner.off", true);
+        assert!(pending(&current(&[answered], 2), 1_000_000).is_none());
+        let mut took = samples::acked_none("t", "other", "runner.off");
+        if let CardEventPhase::Acked { ack, .. } = &mut took.phase {
+            ack.expect.mode = ExpectMode::Run;
+            ack.expect.reason = None;
+        }
+        let kept = current(&[off.clone(), took.clone()], 1);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].client_event_id, took.client_event_id);
+        // An older press the author took says nothing about the refusal after it.
+        assert_eq!(current(&[took, off], 1).len(), 2);
     }
 
     #[test]

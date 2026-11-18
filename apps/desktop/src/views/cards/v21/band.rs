@@ -518,7 +518,7 @@ pub fn pending(ctx: &Ctx) -> Option<PendBand> {
         .env
         .provider
         .card_v2_events(&ctx.msg.group_id, &ctx.msg.message_id);
-    let p = interact::pending(&events, ctx.env.now())?;
+    let p = interact::pending(&interact::current(&events, ctx.card.rev), ctx.env.now())?;
     let (label, detail, tone) = pend_band(p.stage, interact::none_reason(&p.event), &ctx.author)?;
     Some(PendBand {
         event_id: p.event.client_event_id,
