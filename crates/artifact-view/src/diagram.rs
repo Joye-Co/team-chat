@@ -14,7 +14,7 @@ use crate::{Capabilities, OpenOptions, Presentation, VersionSpec};
 /// Bump when the page, the config, the sanitizer or the bridge limits change: every cache
 /// key changes, so failures cached by an older renderer (such as the timeouts of a bridge
 /// that dropped large `rendered` events) are not shown again.
-pub const RENDERER_VERSION: u32 = 4;
+pub const RENDERER_VERSION: u32 = 5;
 /// The width of a Gantt chart: the content width of a card (D2-30).
 const GANTT_WIDTH: u32 = 600;
 /// The artifact id of the reserved origin (`teamchat-diagram-v<RENDERER_VERSION>`).
