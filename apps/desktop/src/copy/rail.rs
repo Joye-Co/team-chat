@@ -66,8 +66,6 @@ crate::copy! {
     ASK_WORKING_ON = "在做 {title}",
     ASK_SEND_TO = "发到",
     ASK_ARTIFACT_BY = "{name} 做的",
-    ASK_ARTIFACT_IMAGE = "图片",
-    ASK_ARTIFACT_DECISION = "决定",
     ASK_MEMBER_WEEK = "本周 {n} 个话题",
     ASK_GROUP_MEMBERS = "{n} 位成员",
     // --- accounts: the account menu of the sidebar footer ---

@@ -26,7 +26,7 @@ use gpui_component::{
 use crate::{
     app::{Place, Services},
     copy::{artifacts as art_copy, fill, nav as nav_copy, rail as c, search as search_copy},
-    data::{ArtifactKind, ArtifactSummary, GroupId, GroupKind, Member, StartTopicRequest, Topic},
+    data::{ArtifactSummary, GroupId, GroupKind, Member, StartTopicRequest, Topic},
     ui::{
         MemberAvatar, Sym,
         native::{
@@ -682,18 +682,13 @@ impl AskPalette {
         };
         let active = ix == self.active;
         let (_, ink2) = spotlight_ink(active, cx);
-        let kind = match artifact.kind {
-            ArtifactKind::Page => art_copy::PANEL_KIND_PAGE,
-            ArtifactKind::File => art_copy::KIND_FILE,
-            ArtifactKind::Image => c::ASK_ARTIFACT_IMAGE,
-            ArtifactKind::Decision => c::ASK_ARTIFACT_DECISION,
-        };
-        let glyph = match artifact.kind {
-            ArtifactKind::Page => Sym::Document,
-            ArtifactKind::Image => Sym::Image,
-            ArtifactKind::Decision => Sym::Check,
-            ArtifactKind::File => Sym::File,
-        };
+        // One kind, one word and symbol: the mapping of the 产出 page.
+        let list_kind = crate::views::artifact_page::list::ListKind::of(
+            self.services.provider.as_ref(),
+            artifact,
+        );
+        let kind = list_kind.label();
+        let glyph = list_kind.sym();
         let version = fill(
             art_copy::VERSION_SHORT,
             &[("n", &artifact.version.to_string())],

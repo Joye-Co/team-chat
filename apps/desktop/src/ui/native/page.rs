@@ -1410,16 +1410,35 @@ fn table_header(cols: &[Col], cx: &App) -> gpui::Div {
 /// column names are known before the rows are), and `n` (3 to 6) h48 rows with
 /// one bar per column at the column's width and alignment.
 pub fn skeleton_table(id: &str, cols: &[Col], n: usize, cx: &App) -> AnyElement {
-    skeleton_table_in(frame(cx), id, cols, n, cx)
+    skeleton_table_in(frame(cx), id, cols, n, &[], cx)
+}
+
+/// A [`skeleton_table`] whose columns at `media` open with a 16 icon or avatar: a 16
+/// bone and the 8 gap come before the bar, so the text does not move when rows arrive.
+pub fn skeleton_table_with_media(
+    id: &str,
+    cols: &[Col],
+    n: usize,
+    media: &[usize],
+    cx: &App,
+) -> AnyElement {
+    skeleton_table_in(frame(cx), id, cols, n, media, cx)
 }
 
 /// A [`skeleton_table`] inside a card (§2.4): on the card's fill, as the
 /// loaded table in a [`frame_on_card`].
 pub fn skeleton_table_on_card(id: &str, cols: &[Col], n: usize, cx: &App) -> AnyElement {
-    skeleton_table_in(frame_on_card(cx), id, cols, n, cx)
+    skeleton_table_in(frame_on_card(cx), id, cols, n, &[], cx)
 }
 
-fn skeleton_table_in(frame: gpui::Div, id: &str, cols: &[Col], n: usize, cx: &App) -> AnyElement {
+fn skeleton_table_in(
+    frame: gpui::Div,
+    id: &str,
+    cols: &[Col],
+    n: usize,
+    media: &[usize],
+    cx: &App,
+) -> AnyElement {
     let k = native_colors(cx);
     let n = n.clamp(*TABLE_SKELETON_ROWS.start(), *TABLE_SKELETON_ROWS.end());
     let count = cols.len();
@@ -1440,11 +1459,21 @@ fn skeleton_table_in(frame: gpui::Div, id: &str, cols: &[Col], n: usize, cx: &Ap
                     .pr(if i + 1 == count { px(16.) } else { px(0.) })
                     .flex()
                     .when(c.right, |d| d.justify_end())
-                    .child(Bone::new().h(bar).w(gpui::relative(if c.width.is_none() {
-                        w
-                    } else {
-                        0.7
-                    })))
+                    .map(|cell| {
+                        let line = Bone::new().h(bar).w(gpui::relative(if c.width.is_none() {
+                            w
+                        } else {
+                            0.7
+                        }));
+                        if media.contains(&i) {
+                            cell.items_center()
+                                .gap(super::tokens::space::S8)
+                                .child(Bone::new().flex_none().size(super::tokens::icon::MD))
+                                .child(div().flex_1().min_w(px(0.)).child(line))
+                        } else {
+                            cell.child(line)
+                        }
+                    })
             }))
     };
     frame

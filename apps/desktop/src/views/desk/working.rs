@@ -224,11 +224,9 @@ pub fn render(
     }
     let now = services.provider.clock_now();
     for (_, a) in recent.into_iter().take(4) {
-        let glyph = match a.kind {
-            crate::data::ArtifactKind::Image => Sym::Image,
-            crate::data::ArtifactKind::File => Sym::File,
-            _ => Sym::Document,
-        };
+        // One kind, one symbol: the mapping of the 产出 page and the switcher.
+        let glyph =
+            crate::views::artifact_page::list::ListKind::of(services.provider.as_ref(), &a).sym();
         // X-01: no leading emoji in a meta line either.
         let who = crate::ui::avatar::name_beside_avatar(&crate::views::shell::member_name(
             services,
