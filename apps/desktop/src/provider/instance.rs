@@ -101,6 +101,8 @@ const MAX_LINK: usize = 2048;
 pub struct LinkTarget {
     pub group_id: String,
     pub topic_id: Option<String>,
+    /// A 产出 of the 群 and the version the link names.
+    pub artifact: Option<(String, Option<u32>)>,
 }
 
 /// One id of a link's path, percent-encoded so any id is a single path segment.
@@ -149,8 +151,18 @@ pub fn link_to(group_id: &str, topic_id: Option<&str>) -> String {
     link
 }
 
-/// The 群 and 话题 a link names; `None` for any other link (the app then only comes to
-/// the front). What follows the 话题 (`/message/<m>`) is not read.
+/// The link of one version of a 产出: the link of its 话题, then
+/// `/artifact/<a>/version/<n>`. A version of the app that does not read the end opens the 话题.
+pub fn artifact_link(group_id: &str, topic_id: &str, artifact_id: &str, version: u32) -> String {
+    format!(
+        "{}/artifact/{}/version/{version}",
+        link_to(group_id, Some(topic_id)),
+        encode_segment(artifact_id)
+    )
+}
+
+/// The 群, 话题 and 产出 a link names; `None` for any other link (the app then only comes to
+/// the front). What follows them (`/message/<m>`) is not read.
 pub fn parse_link(link: &str) -> Option<LinkTarget> {
     if !is_link(link) || link.len() > MAX_LINK {
         return None;
@@ -162,11 +174,27 @@ pub fn parse_link(link: &str) -> Option<LinkTarget> {
         return None;
     }
     let group_id = decode_segment(parts.next()?)?;
-    let topic_id = match parts.next() {
-        Some("topic") => Some(decode_segment(parts.next()?)?),
-        _ => None,
-    };
-    Some(LinkTarget { group_id, topic_id })
+    let (mut topic_id, mut artifact) = (None, None);
+    while let Some(part) = parts.next() {
+        match part {
+            "topic" if topic_id.is_none() => topic_id = Some(decode_segment(parts.next()?)?),
+            "artifact" => {
+                let id = decode_segment(parts.next()?)?;
+                let version = match parts.next() {
+                    Some("version") => parts.next().and_then(|v| v.parse().ok()),
+                    _ => None,
+                };
+                artifact = Some((id, version));
+                break;
+            }
+            _ => break,
+        }
+    }
+    Some(LinkTarget {
+        group_id,
+        topic_id,
+        artifact,
+    })
 }
 
 /// Does what `command` asks, in the running app.
@@ -186,10 +214,13 @@ pub fn run(command: Command, services: &Services, cx: &mut App) {
             let topic = target
                 .topic_id
                 .filter(|t| provider.topic(&target.group_id, t).is_some());
-            services.nav.update(cx, |nav, cx| match topic {
-                Some(topic) => nav.open_topic(target.group_id, topic, cx),
-                None => nav.open_group_chat(target.group_id, cx),
-            });
+            services
+                .nav
+                .update(cx, |nav, cx| match (target.artifact, topic) {
+                    (Some((id, version)), _) => nav.open_artifact(id, version, cx),
+                    (None, Some(topic)) => nav.open_topic(target.group_id, topic, cx),
+                    (None, None) => nav.open_group_chat(target.group_id, cx),
+                });
         }
         Command::DockAction(index) => crate::views::nav::menus::run_dock_action(index, cx),
     }
@@ -637,6 +668,22 @@ mod tests {
         }
         let long = format!("link {}//{}", scheme_prefix(), "a".repeat(MAX_LINK));
         assert_eq!(Command::decode(&long), None);
+    }
+
+    #[test]
+    fn a_shared_artifact_link_opens_that_version() {
+        let link = artifact_link("g 1", "t1", "art/1", 3);
+        let target = parse_link(&link).expect("the link reads");
+        assert_eq!(target.group_id, "g 1");
+        assert_eq!(target.topic_id.as_deref(), Some("t1"));
+        assert_eq!(target.artifact, Some(("art/1".to_string(), Some(3))));
+        // A version that is no number still opens the 产出.
+        let scheme = env!("PRODUCT_URL_SCHEME");
+        let odd = parse_link(&format!("{scheme}://group/g/topic/t/artifact/a/version/x"));
+        assert_eq!(odd.unwrap().artifact, Some(("a".to_string(), None)));
+        // Other links name no 产出.
+        let plain = parse_link(&format!("{scheme}://group/g/topic/t/message/m")).unwrap();
+        assert_eq!(plain.artifact, None);
     }
 
     #[test]
