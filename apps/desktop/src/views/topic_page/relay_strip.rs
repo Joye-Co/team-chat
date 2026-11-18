@@ -522,7 +522,7 @@ mod tests {
         let v = strip_view(&r, 2_000, &name).unwrap();
         assert_eq!(
             v.line.as_deref(),
-            Some("Joye 停止了。要继续，在下面再写一条顺序，比如 @小码 → @小审")
+            Some("Joye 停止了。要继续，在下面再写一条顺序，比如 @小码 -> @小审")
         );
         assert_eq!(v.steps[1].word, Some(("停止了", BadgeState::Deactivated)));
         assert!(!v.can_stop && !v.can_retry);
@@ -542,7 +542,7 @@ mod tests {
         r.stopped_by = Some("me".into());
         assert_eq!(
             strip_view(&r, 2_000, &name).unwrap().line.as_deref(),
-            Some("Joye 停止了。要继续，在下面再写一条顺序，比如 @小审 → @小码")
+            Some("Joye 停止了。要继续，在下面再写一条顺序，比如 @小审 -> @小码")
         );
     }
 

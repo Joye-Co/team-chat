@@ -481,7 +481,7 @@ alone in `ink-3`) joined by `→`; at the right `第 2/3 步` or `都做完了` 
 outline sm 重试 (only while stopped at a step) and 停止 (while it runs or is stopped at a step). A
 second line in `ink-2` says why it stopped (`停在 Scout：卡住了`, `Joye 停止了`) or what the step
 waits for (`等 Scout 手上的做完`). It stays a day after it ended. The composer shows, above the text,
-`按顺序做：Forge → Scout → Forge` for an order on the first line, `想让他们按顺序做？用 → 连起来` when a
+`按顺序做：Forge → Scout → Forge` for an order on the first line, `想让他们按顺序做？用 -> 连起来，比如 @{first} -> @{second}` when a
 message names two or more AI members, and, in red, why the server refused an order.
 
 ### 7.9 Member identity: avatars, status dots and tags
