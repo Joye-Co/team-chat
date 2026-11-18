@@ -266,13 +266,12 @@ pub fn inline_button(id: &str, target: Rc<dyn Fn(&App) -> PartTarget>, cx: &App)
 }
 
 /// The 问这里 button of a part whose renderer has no hover of its own (the action strip of a
-/// code fence): it keeps its place but shows only while the pointer is over it, so a capture
-/// or a glance at rest never shows it (§2.6 hover, E2).
+/// code fence): it keeps its place but shows only after the pointer rested on the part, so a
+/// capture or a glance at rest never shows it (§2.6 hover, E2). The caller tracks the hover
+/// of the whole part with [`track_hover`] and this `id`.
 pub fn hover_button(id: &str, target: Rc<dyn Fn(&App) -> PartTarget>, cx: &App) -> AnyElement {
-    let shown = hub_of(cx).is_some_and(|h| h.read(cx).hovered(id));
+    let shown = hub_of(cx).is_some_and(|h| h.read(cx).hover_shown(id));
     div()
-        .id(ElementId::Name(format!("ask-slot-{id}").into()))
-        .on_hover(track_hover(id.to_string()))
         .when(!shown, |d| d.opacity(0.))
         .child(
             ask_button_flat(ElementId::Name(format!("ask-{id}").into()), cx).on_click(

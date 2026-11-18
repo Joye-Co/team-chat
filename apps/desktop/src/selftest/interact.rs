@@ -46,8 +46,8 @@ const BACK: &str = "shift-tab";
 const STEPS: &[(&str, Steps)] = &[
     // --- t5 ---
     ("state-hover-message", hover(600., 315., 600)),
-    // The 问这里 slot left of the copy button in the code block's top strip.
-    ("state-hover-code", hover(905., 410., 400)),
+    // The 问这里 slot left of the language label in the code block's top strip.
+    ("state-hover-code", hover(861., 422., 400)),
     // --- end t5 ---
     // --- t5-cards ---
     ("state-card-option-hover", hover(1011., 290., 400)),

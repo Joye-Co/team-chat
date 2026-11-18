@@ -64,15 +64,17 @@ pub fn fence_close(line: &str, ch: char, run: usize) -> bool {
 /// fences are left alone (they are drawn, not listed). The folds come back in
 /// source order, the open ones too (they get a 收起 button).
 pub fn fold_code(source: &str, is_open: &dyn Fn(&str) -> bool) -> (String, Vec<CodeFold>) {
-    fold_code_marked(source, is_open, &mut |_, _, _| CUT_MARK.to_string())
+    fold_code_marked(source, is_open, &mut |_, _, _| CUT_MARK.to_string(), false)
 }
 
 /// [`fold_code`] with the cut line of each folded fence chosen by `mark`, which
-/// gets the lines shown, the whole code and its line count.
+/// gets the lines shown, the whole code and its line count. With `end_room` an open long
+/// fence gets one empty line after its code, where its second 收起 stands.
 fn fold_code_marked(
     source: &str,
     is_open: &dyn Fn(&str) -> bool,
     mark: &mut dyn FnMut(&str, &str, usize) -> String,
+    end_room: bool,
 ) -> (String, Vec<CodeFold>) {
     let lines: Vec<&str> = source.split_inclusive('\n').collect();
     let mut out = String::with_capacity(source.len());
@@ -109,7 +111,11 @@ fn fold_code_marked(
                 open: false,
             });
         } else {
-            out.extend(lines[i..=close].iter().copied());
+            out.extend(lines[i..close].iter().copied());
+            if open && end_room {
+                out.push('\n');
+            }
+            out.push_str(lines[close]);
             if long {
                 folds.push(CodeFold {
                     shown: full.clone(),
@@ -188,7 +194,7 @@ pub fn fold_code_remembered(source: &str, open_all: bool) -> String {
             OPEN_CODE.with(|open| open.borrow().contains(&hash))
         }
     };
-    let (out, folds) = fold_code_marked(source, &is_open, &mut cut_line);
+    let (out, folds) = fold_code_marked(source, &is_open, &mut cut_line, true);
     SHOWN.with(|shown| {
         let mut shown = shown.borrow_mut();
         for fold in folds.into_iter().filter(|f| f.open) {
@@ -311,6 +317,11 @@ mod tests {
         format!("```{lang}\n{code}```\n")
     }
 
+    /// `body` with the empty line an open long fence gets above its closing fence.
+    fn with_end_room(body: &str) -> String {
+        body.replace("\n```\n", "\n\n```\n")
+    }
+
     #[test]
     fn a_long_fence_shows_its_first_lines_and_a_cut_mark() {
         let body = format!("before\n\n{}\nafter\n", fence("rust", 80));
@@ -360,7 +371,7 @@ mod tests {
         let fold = fold_of(shown).expect("fold");
         assert_eq!(fold.lines, 40);
         set_code_open(&fold.full, true);
-        assert_eq!(fold_code_remembered(&body, false), body);
+        assert_eq!(fold_code_remembered(&body, false), with_end_room(&body));
         assert!(fold_of(&fold.full).expect("open fold").open);
         set_code_open(&fold.full, false);
         assert_ne!(fold_code_remembered(&body, false), body);
@@ -407,17 +418,17 @@ mod tests {
     #[test]
     fn a_body_a_search_points_into_shows_its_code_whole() {
         let body = format!("看这里：\n\n{}", fence("go", 45));
-        assert_ne!(fold_code_remembered(&body, false), body);
-        assert_eq!(fold_code_remembered(&body, true), body);
+        assert_ne!(fold_code_remembered(&body, false), with_end_room(&body));
+        assert_eq!(fold_code_remembered(&body, true), with_end_room(&body));
         // Pointing into a body leaves nothing behind for another view of it.
-        assert_ne!(fold_code_remembered(&body, false), body);
+        assert_ne!(fold_code_remembered(&body, false), with_end_room(&body));
         // 收起 holds in the body that was pointed into, until it is pointed into again.
         let code = body.trim_start_matches("看这里：\n\n```go\n");
         let code = code.trim_end().trim_end_matches("```");
         set_code_open(code.trim_end(), false);
-        assert_ne!(fold_code_remembered(&body, true), body);
+        assert_ne!(fold_code_remembered(&body, true), with_end_room(&body));
         reopen_code(&body);
-        assert_eq!(fold_code_remembered(&body, true), body);
+        assert_eq!(fold_code_remembered(&body, true), with_end_room(&body));
     }
 
     #[test]
