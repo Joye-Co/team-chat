@@ -1714,34 +1714,30 @@ pub(crate) fn chosen_badge(cx: &App) -> Div {
         .child(Sym::Check.inline_small().text_color(n.on_primary))
 }
 
-/// A short option as a Regular push button (NATIVE.md §5.2): no letter
-/// badge; the recommended option in the Default style; the chosen one
-/// leads with a 13 pt checkmark. Disabled while the card is not live.
+/// A short option as a Regular outline push button (NATIVE.md §5.2): no
+/// letter badge; the one primary of the card is its submit action, so a filled
+/// option never reads as already chosen. The chosen one leads with a 13 pt
+/// checkmark. Disabled while the card is not live.
 pub(crate) fn option_button(
     id: SharedString,
     label: &str,
-    recommended: bool,
     picked: bool,
     enabled: bool,
     cx: &App,
 ) -> Button {
     use crate::ui::native as nk;
     let n = nk::native_colors(cx);
-    let style = if recommended {
-        nk::PushStyle::Default
-    } else {
-        nk::PushStyle::Outline
-    };
-    let ink = if recommended { n.on_primary } else { n.label };
     nk::disabled_push(
-        nk::push_button(id, "", style, nk::PushSize::Small, cx)
+        nk::push_button(id, "", nk::PushStyle::Outline, nk::PushSize::Small, cx)
             .flex_none()
             .child(
                 div()
                     .flex()
                     .items_center()
                     .gap(space::S4)
-                    .when(picked, |el| el.child(Sym::Check.inline().text_color(ink)))
+                    .when(picked, |el| {
+                        el.child(Sym::Check.inline().text_color(n.label))
+                    })
                     .child(label.to_string()),
             ),
         !enabled,
