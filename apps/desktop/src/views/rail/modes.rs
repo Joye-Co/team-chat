@@ -609,7 +609,9 @@ impl RailView {
                         // D1-56: beside the avatar, no leading emoji.
                         crate::ui::avatar::name_beside_avatar(name).to_string(),
                     )
-                    .leading(MemberAvatar::new(peer.as_ref(), ROW_AVATAR))
+                    // The roster can arrive after the list: the initial of
+                    // the printed name, never the no-name glyph beside a name.
+                    .leading(MemberAvatar::new(peer.as_ref(), ROW_AVATAR).fallback_name(name))
                     .selected(*selected)
                     .unread(*unread)
                     .muted(*muted)

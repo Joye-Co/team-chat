@@ -97,6 +97,16 @@ impl MemberAvatar {
         }
     }
 
+    /// The name to draw the initial from when the member record is not
+    /// loaded: the title the row prints beside the avatar. A loaded member
+    /// keeps its own name.
+    pub fn fallback_name(mut self, name: &str) -> Self {
+        if self.name.is_empty() {
+            self.name = name.to_string();
+        }
+        self
+    }
+
     /// The avatar sits on a group box: a person's letter disk takes the
     /// on-group tint, since `muted` is the group's own fill in light.
     pub fn on_group(mut self) -> Self {
