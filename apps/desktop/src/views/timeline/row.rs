@@ -287,7 +287,9 @@ impl TimelineView {
         let find_marks = (!deleted)
             .then(|| self.find_marked_body(key, shown_body, cx))
             .flatten();
-        let find_band = find_marks.as_ref().is_some_and(|(_, unmarked)| *unmarked)
+        let find_band = find_marks
+            .as_ref()
+            .is_some_and(|(_, _, unmarked)| *unmarked)
             || (model::is_jumbo(shown_body) && self.is_find_current_row(key));
         // The mark follows the last line (§7.5, U12): inside the body text
         // when it can, on its own line only after a code block or a table.
@@ -390,9 +392,13 @@ impl TimelineView {
                 self.unfolded.insert(key.to_string());
             }
             let folded = fold_at.filter(|_| !self.unfolded.contains(key));
+            let find_code = find_marks
+                .as_ref()
+                .map(|(_, code, _)| code.clone())
+                .unwrap_or_default();
             let body_source = match (search_query, find_marks, folded) {
                 (Some(query), _, _) => markdown::mark_query(shown_body, &query),
-                (None, Some((marked, _)), _) => marked,
+                (None, Some((marked, _, _)), _) => marked,
                 (None, None, Some(at)) => shown_body[..at].to_string(),
                 (None, None, None) => shown_body.to_string(),
             };
@@ -439,7 +445,7 @@ impl TimelineView {
                     })),
                 )
             });
-            let (view, inline) = markdown::message_body_refs(
+            let (view, inline) = markdown::message_body_found(
                 ElementId::Name(format!("body-{key}").into()),
                 body_source,
                 &markdown::mention_targets(&self.members, self.me.as_deref()),
@@ -455,6 +461,7 @@ impl TimelineView {
                     open_code: pointed_at,
                 }),
                 refs_body.as_ref(),
+                find_code,
             );
             mark_inline = inline;
             // F15 dir auto: a body whose first strong letter is right to

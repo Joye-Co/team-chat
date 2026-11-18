@@ -191,6 +191,34 @@ pub fn highlighter() -> Highlighter {
     })
 }
 
+/// [`highlighter`] that also fills the ⌘F matches of `marks` behind the code. A folded
+/// fence draws the first lines of its code: the marks past the cut are dropped.
+pub fn marked_highlighter(marks: Vec<super::CodeMark>) -> Highlighter {
+    let base = highlighter();
+    if marks.is_empty() {
+        return base;
+    }
+    Arc::new(move |block: &CodeBlock| {
+        let code = block.code();
+        let shown = code.trim_end();
+        let mut fills: Vec<(Range<usize>, HighlightStyle)> = marks
+            .iter()
+            .filter(|m| !shown.is_empty() && m.code.starts_with(shown))
+            .flat_map(|m| m.spans.iter())
+            .filter(|(r, _)| r.end <= code.len())
+            .map(|(r, color)| {
+                let style = HighlightStyle {
+                    background_color: Some(*color),
+                    ..Default::default()
+                };
+                (r.clone(), style)
+            })
+            .collect();
+        fills.sort_by_key(|(r, _)| r.start);
+        gpui::combine_highlights(base(block), fills).collect()
+    })
+}
+
 /// Called while a code block draws: when the app's colors are not the ones
 /// the highlighter was built with (the first dark frame, a change of mode or
 /// of contrast), the next frame gets a new highlighter.
