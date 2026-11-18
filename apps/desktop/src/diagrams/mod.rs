@@ -612,6 +612,16 @@ fn pump(cx: &mut App) {
         req_id,
         source: job.source.clone(),
         theme: theme_vars(job.theme),
+        block_labels: [
+            ("loop", crate::copy::diagrams::BLOCK_LOOP),
+            ("alt", crate::copy::diagrams::BLOCK_ALT),
+            ("opt", crate::copy::diagrams::BLOCK_OPT),
+            ("par", crate::copy::diagrams::BLOCK_PAR),
+            ("critical", crate::copy::diagrams::BLOCK_CRITICAL),
+            ("break", crate::copy::diagrams::BLOCK_BREAK),
+        ]
+        .map(|(keyword, word)| (keyword.to_string(), word.to_string()))
+        .to_vec(),
     };
     #[cfg(any(target_os = "macos", windows))]
     if let Some(r) = &s.renderer {

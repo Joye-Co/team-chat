@@ -150,6 +150,54 @@
     ).length;
   }
 
+  // WebKit does not pass a <text>'s dominant-baseline on to its <tspan>s, so a participant's
+  // name sits above the middle of its box: measure and move it. A name of several lines is one
+  // <text> per line, so a box's lines move together.
+  function centerActorNames(svg) {
+    var boxes = svg.querySelectorAll('rect.actor');
+    for (var i = 0; i < boxes.length; i++) {
+      var texts = boxes[i].parentNode.querySelectorAll('text.actor');
+      if (!texts.length) continue;
+      var top = Infinity, bottom = -Infinity;
+      for (var t = 0; t < texts.length; t++) {
+        var b = texts[t].getBBox();
+        top = Math.min(top, b.y);
+        bottom = Math.max(bottom, b.y + b.height);
+      }
+      var box = boxes[i].getBBox();
+      var delta = (box.y + box.height / 2) - (top + bottom) / 2;
+      for (var u = 0; u < texts.length; u++) {
+        var y = parseFloat(texts[u].getAttribute('y')) || 0;
+        texts[u].setAttribute('y', String(y + delta));
+      }
+    }
+  }
+
+  // How far a block's title sits below the frame's top edge, past where the library puts it.
+  var BLOCK_TITLE_DROP = 3;
+
+  // A block frame (loop, alt, ...) says its keyword in the interface language, and its title
+  // without the brackets of the source syntax.
+  function finishBlockLabels(svg, labels) {
+    var tags = svg.querySelectorAll('text.labelText');
+    for (var i = 0; i < tags.length; i++) {
+      var word = labels[(tags[i].textContent || '').trim()];
+      if (!word) continue;
+      var spans = tags[i].querySelectorAll('tspan');
+      (spans.length ? spans[0] : tags[i]).textContent = word;
+    }
+    var titles = svg.querySelectorAll('text.loopText');
+    for (var t = 0; t < titles.length; t++) {
+      var parts = titles[t].querySelectorAll('tspan');
+      var nodes = parts.length ? parts : [titles[t]];
+      for (var p = 0; p < nodes.length; p++) {
+        nodes[p].textContent = (nodes[p].textContent || '').replace(/^\[/, '').replace(/\]$/, '');
+      }
+      var y = parseFloat(titles[t].getAttribute('y')) || 0;
+      titles[t].setAttribute('y', String(y + BLOCK_TITLE_DROP));
+    }
+  }
+
   var seq = 0;
 
   window.tcRender = async function (req) {
@@ -181,11 +229,9 @@
       var svg = out.querySelector('svg');
       if (!svg) return fail(reqId, 'internal', 'no svg');
       sanitize(svg);
-      // WebKit does not pass a <text>'s dominant-baseline on to its <tspan>s, so a
-      // participant's name would sit on the baseline, above the middle of its box.
       if (type === 'sequence') {
-        var names = svg.querySelectorAll('text.actor tspan');
-        for (var n = 0; n < names.length; n++) names[n].setAttribute('dominant-baseline', 'central');
+        centerActorNames(svg);
+        finishBlockLabels(svg, req.blockLabels || {});
       }
       // A Gantt chart keeps a fixed 50 px band above its rows: crop the height to what is
       // drawn (rows and the axis under them), 8 px clear, so the chart hugs its rows.

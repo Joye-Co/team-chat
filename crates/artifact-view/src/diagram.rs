@@ -14,7 +14,7 @@ use crate::{Capabilities, OpenOptions, Presentation, VersionSpec};
 /// Bump when the page, the config, the sanitizer or the bridge limits change: every cache
 /// key changes, so failures cached by an older renderer (such as the timeouts of a bridge
 /// that dropped large `rendered` events) are not shown again.
-pub const RENDERER_VERSION: u32 = 5;
+pub const RENDERER_VERSION: u32 = 6;
 /// The width of a Gantt chart: the content width of a card (D2-30).
 const GANTT_WIDTH: u32 = 600;
 /// The artifact id of the reserved origin (`teamchat-diagram-v<RENDERER_VERSION>`).
@@ -251,15 +251,24 @@ pub struct RenderRequest {
     pub req_id: u64,
     pub source: String,
     pub theme: ThemeVars,
+    /// The words a sequence diagram's block frames show, by the keyword of the source
+    /// (`loop`, `alt`, ...). A keyword with no entry stays as the library draws it.
+    pub block_labels: Vec<(String, String)>,
 }
 
 /// The script that starts a render. serde_json yields a valid JavaScript literal, so the
 /// source cannot break out of the expression.
 pub fn render_script(req: &RenderRequest) -> String {
+    let labels: serde_json::Map<String, Value> = req
+        .block_labels
+        .iter()
+        .map(|(k, v)| (k.clone(), Value::String(v.clone())))
+        .collect();
     let arg = json!({
         "reqId": req.req_id,
         "source": req.source,
         "config": mermaid_config(&req.theme),
+        "blockLabels": labels,
         "limits": { "maxNodes": MAX_NODES, "maxEdges": MAX_EDGES, "maxSide": MAX_SIDE },
     });
     format!("window.tcRender({arg});void 0")
@@ -876,6 +885,7 @@ mod tests {
             req_id: 7,
             source: "graph TD\nA[\"</script>\"]-->B');alert(1);//".into(),
             theme: theme(),
+            block_labels: Vec::new(),
         });
         assert!(s.starts_with("window.tcRender({"));
         assert!(s.ends_with("});void 0"));
