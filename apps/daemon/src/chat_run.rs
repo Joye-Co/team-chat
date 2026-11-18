@@ -184,6 +184,9 @@ pub struct Outputs {
     local: OnceLock<Arc<crate::chat_run_files::Local>>,
     /// The run id: part of each output's idempotency key.
     run: String,
+    /// How often the server confirmed a data push, by the key of its body: the same state pushed
+    /// again after that is a new push, not a retry (see [`Outputs::with_push_key`]).
+    pushed: Mutex<HashMap<String, u64>>,
     /// The run's gated secrets (`chat-run secret`).
     gate: OnceLock<Arc<crate::secrets::Gate>>,
     /// The run's gated actions (`chat-run gate`, the CLI's hook).
@@ -233,6 +236,46 @@ impl Outputs {
             },
         );
         (id, rx)
+    }
+
+    /// `body` with its idempotency key, and for an `artifact.data` the key to pass to
+    /// [`Outputs::push_confirmed`]. A retry after an unknown result must carry the key of the
+    /// first try, but the server remembers a version's last pushes: a page set back to a state it
+    /// had (on, off, on) would be answered `duplicate` and not drawn. So the key changes once the
+    /// server has confirmed a push of that body.
+    fn with_push_key(&self, op: &str, body: Value) -> (Value, Option<String>) {
+        let own_key = key_field(op)
+            .and_then(|field| body.get(field))
+            .and_then(Value::as_str)
+            .is_some_and(|k| !k.is_empty());
+        if op != output_op::ARTIFACT_DATA || own_key {
+            return (with_key(&self.run, op, body), None);
+        }
+        let first = idempotency_key(&self.run, op, &body);
+        let confirmed = self
+            .pushed
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&first)
+            .copied()
+            .unwrap_or(0);
+        let key = match confirmed {
+            0 => first.clone(),
+            n => idempotency_key(&self.run, op, &json!([body, n])),
+        };
+        let mut body = body;
+        body["clientPushId"] = json!(key);
+        (body, Some(first))
+    }
+
+    /// The server applied the data push of `first` (or answered that it had).
+    fn push_confirmed(&self, first: &str) {
+        *self
+            .pushed
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(first.to_string())
+            .or_insert(0) += 1;
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Pending>> {
@@ -787,7 +830,7 @@ pub async fn handle(
         );
         return answer;
     }
-    let body = with_key(&outputs.run, op, body);
+    let (body, push) = outputs.with_push_key(op, body);
     // What a stale-rev answer needs to name the next command.
     let sent = json!({ "messageId": body["messageId"] });
     let (output_id, rx) = outputs.add();
@@ -799,6 +842,9 @@ pub async fn handle(
     match tokio::time::timeout(timeout, rx).await {
         Ok(Ok(r)) => {
             log_result(op, &output_id, &r);
+            if let (true, Some(first)) = (r.ok, &push) {
+                outputs.push_confirmed(first);
+            }
             with_next_step(result_json(r), &sent)
         }
         Ok(Err(_)) => error("cancelled", None, "the run ended"),
@@ -928,7 +974,7 @@ fn key_field(op: &str) -> Option<&'static str> {
 
 /// The idempotency key of one output: `k` + 40 hex of SHA-256 over the run id, the op and the
 /// body. The same command in the same run gets the same key, so a retry after a lost result is
-/// applied once; another run never gets it.
+/// applied once; another run never gets it. (`artifact.data`: until the server confirmed it.)
 pub fn idempotency_key(run_id: &str, op: &str, body: &Value) -> String {
     use sha2::Digest;
     let mut h = sha2::Sha256::new();
@@ -3635,6 +3681,79 @@ make the ops for what it holds now and give its rev as --base-rev"
             json!({ "eventId": "E", "result": "ignored" }),
         );
         assert_eq!(res, json!({ "eventId": "E", "result": "ignored" }));
+    }
+
+    /// Sends one data push and answers it with `answer` (None: no answer comes); the key it had.
+    async fn push_answered(outputs: &Arc<Outputs>, data: Value, answer: Option<bool>) -> String {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let emit = move |e: RunEvent| {
+            let _ = tx.send(e);
+        };
+        let line = serde_json::to_vec(&json!({
+            "op": "artifact.data",
+            "body": { "artifactId": "A", "version": 1, "data": data },
+        }))
+        .unwrap();
+        let wait = Duration::from_millis(if answer.is_some() { 5_000 } else { 20 });
+        let task = {
+            let outputs = outputs.clone();
+            tokio::spawn(async move { handle(&line, &outputs, &emit, wait).await })
+        };
+        let Some(RunEvent::Output {
+            output_id, body, ..
+        }) = rx.recv().await
+        else {
+            panic!("not an output event");
+        };
+        if let Some(ok) = answer {
+            assert!(outputs.resolve(RunOutputResult {
+                run_id: "r1".into(),
+                output_id,
+                ok,
+                result: ok.then(|| json!({ "dataRev": 1 })),
+                error: (!ok).then(|| RunOutputError {
+                    code: "rate_limited".into(),
+                    reason: None,
+                    message: "wait".into(),
+                    retry_after_ms: None,
+                }),
+            }));
+        }
+        task.await.unwrap();
+        body["clientPushId"].as_str().unwrap().to_string()
+    }
+
+    #[tokio::test]
+    async fn a_data_push_retried_keeps_its_key_and_a_state_set_back_gets_a_new_one() {
+        let outputs = Arc::new(Outputs::new("r1"));
+        let (on, off) = (json!({ "done": true }), json!({ "done": false }));
+        // No answer: the same command again is a retry, whatever came back last.
+        let first = push_answered(&outputs, on.clone(), None).await;
+        assert_eq!(push_answered(&outputs, on.clone(), None).await, first);
+        // Refused: nothing was applied, so the key is still free to use.
+        assert_eq!(
+            push_answered(&outputs, on.clone(), Some(false)).await,
+            first
+        );
+        assert_eq!(push_answered(&outputs, on.clone(), Some(true)).await, first);
+        // On, off, on: the server took the first `on`, the third is a new push.
+        let other = push_answered(&outputs, off.clone(), Some(true)).await;
+        let again = push_answered(&outputs, on.clone(), None).await;
+        assert!(![first.clone(), other].contains(&again), "{again}");
+        assert!(again.len() <= 64 && again.starts_with('k'));
+        // ... and it is retried under its own key until that one is confirmed too.
+        assert_eq!(push_answered(&outputs, on.clone(), Some(true)).await, again);
+        assert_ne!(push_answered(&outputs, on, Some(true)).await, again);
+        // A key the CLI gave stays, and another run starts over.
+        let (own, kept) = outputs.with_push_key(
+            "artifact.data",
+            json!({ "artifactId": "A", "version": 1, "data": {}, "clientPushId": "mine" }),
+        );
+        assert_eq!((own["clientPushId"].as_str(), kept), (Some("mine"), None));
+        assert_ne!(
+            push_answered(&Arc::new(Outputs::new("r2")), off, None).await,
+            first
+        );
     }
 
     #[test]
