@@ -1235,9 +1235,19 @@ pub fn short_name(name: &str) -> String {
     out
 }
 
+/// Leaves the 群 and, once the server took it, moves away from it. A refusal (offline, not
+/// allowed) shows an alert and the window stays where it was.
 fn leave(services: &Services, group_id: &str, cx: &mut App) {
-    move_away_from(services, group_id, cx);
-    services.provider.leave_group(group_id);
+    let reply = services.provider.leave_group(group_id);
+    let (services, group_id) = (services.clone(), group_id.to_string());
+    cx.spawn(async move |cx: &mut gpui::AsyncApp| {
+        let result = reply.await.unwrap_or(Err(crate::data::AdminError::Other));
+        cx.update(|cx| match result {
+            Ok(()) => move_away_from(&services, &group_id, cx),
+            Err(e) => super::hide_delete::refused(nav::LEAVE_REFUSED, e, cx),
+        });
+    })
+    .detach();
 }
 
 /// When the main window shows `group_id` (its page, its 群聊 or one of its 话题), opens

@@ -53,6 +53,7 @@ crate::copy! {
     DELETE_OK = "删除",
     HIDE_GROUP_REFUSED = "没能隐藏",
     DELETE_GROUP_REFUSED = "没能删除群",
+    LEAVE_REFUSED = "没能离开群",
     DELETE_GROUP_FORBIDDEN = "所有人默认加入的群不能删除。",
     // new group dialog
     GROUP_NAME_LABEL = "群名称",

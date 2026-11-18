@@ -920,7 +920,7 @@ impl ChatProvider for WorstCase {
     fn open_dm(&self, member_id: &str) -> AdminReply<GroupId> {
         self.inner.open_dm(member_id)
     }
-    fn leave_group(&self, group_id: &str) {
+    fn leave_group(&self, group_id: &str) -> crate::data::AdminReply<()> {
         self.inner.leave_group(group_id)
     }
     fn group_muted(&self, group_id: &str) -> bool {

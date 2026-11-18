@@ -1754,7 +1754,7 @@ impl ChatProvider for FakeProvider {
         reply_now(id.ok_or(AdminError::NotFound))
     }
 
-    fn leave_group(&self, group_id: &str) {
+    fn leave_group(&self, group_id: &str) -> AdminReply<()> {
         let left = self.with(|s| {
             let before = s.groups.len();
             s.groups.retain(|g| g.id != group_id);
@@ -1771,6 +1771,7 @@ impl ChatProvider for FakeProvider {
                 },
             ]);
         }
+        reply_now(Ok(()))
     }
 
     fn group_muted(&self, group_id: &str) -> bool {

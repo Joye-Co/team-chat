@@ -332,17 +332,24 @@ impl CoreProvider {
         rx
     }
 
-    pub(super) fn leave_group_inner(&self, group_id: &str) {
+    pub(super) fn leave_group_inner(&self, group_id: &str) -> AdminReply<()> {
         let Some(a) = self.account() else {
-            return;
+            return reply_now(Err(AdminError::Offline));
         };
         let http = a.client.http();
         let (group_id, me) = (group_id.to_string(), a.me.id.clone());
+        let (tx, rx) = futures::channel::oneshot::channel();
         chat_core::background().spawn(async move {
-            if let Err(e) = http.remove_group_member(&group_id, &me).await {
-                tracing::warn!(error = %e, "leave group refused");
-            }
+            let r = match http.remove_group_member(&group_id, &me).await {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    tracing::warn!(error = %e, "leave group refused");
+                    Err(super::settings::api_error(&e))
+                }
+            };
+            let _ = tx.send(r);
         });
+        rx
     }
 
     // ------------------------------------------------------------------
