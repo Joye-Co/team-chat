@@ -214,4 +214,7 @@ crate::copy! {
     COMPARE_CHOOSE = "选这个",
     COMPARE_CHOSEN = "已选",
     // --- end v12/fx-cards ---
+    // The move buttons of a rank row.
+    RANK_UP = "上移",
+    RANK_DOWN = "下移",
 }
