@@ -60,7 +60,7 @@ crate::copy! {
     ARTIFACTS_VERSION = "v{v}",
     ARTIFACTS_TILE_META = "v{v} · {topic}",
     ARTIFACTS_EMPTY_BODY = "成员做的网页、文档和图片都在这里，每个都有版本。",
-    ARTIFACTS_NO_MATCH_TITLE = "没有找到“{q}”",
+    ARTIFACTS_NO_MATCH_TITLE = "没有找到「{q}」",
     ARTIFACTS_NO_MATCH_BODY = "换个词试试，或者清空搜索看全部产出。",
     ARTIFACTS_CLEAR_SEARCH = "清空搜索",
     ARTIFACTS_MORE = "更多操作",

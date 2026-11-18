@@ -68,7 +68,7 @@ crate::copy! {
     QUOTE_UNAVAILABLE = "原消息不在已加载的范围内",
     MENU_COPY = "复制",
     MENU_COPY_LINK = "复制链接",
-    RECALL_CONFIRM_DETAIL = "撤回后其他成员只会看到“此消息已撤回”。",
+    RECALL_CONFIRM_DETAIL = "撤回后其他成员只会看到「此消息已撤回」。",
     // --- v12/fx-topic: the plan card's stop button (opens the alert) ---
     PLAN_STOP = "停止…",
     PLAN_DOING = "正在做：{step}",

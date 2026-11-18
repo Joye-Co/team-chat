@@ -24,7 +24,7 @@ crate::copy! {
     // A row with no date (2.15 dates).
     TIME_UNKNOWN = "未知",
     // Palette states (2.11): no match, failed message search.
-    NO_MATCH = "没有找到“{query}”",
+    NO_MATCH = "没有找到「{query}」",
     NO_MATCH_CLEAR = "清空搜索",
     SEARCH_FAILED = "没能搜索消息",
     SEARCH_OFFLINE = "连上以后才能搜索消息",
