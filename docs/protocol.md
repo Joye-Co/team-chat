@@ -2004,12 +2004,14 @@ it), `offline` (the SDK member is not connected: the event is not delivered) and
 will respond; show no waiting state). With `none`, `reason` says why when the server knows:
 `member.inactive` (the author was removed or turned off), `runner.off` (its runner is off),
 `run.external` (its run in the topic takes no events), `run.limit` and `run.failed` (a run could
-not start). Clients skip a `reason` they do not know. A live event to a runner member with no
+not start, or the run's computer no longer has it). Clients skip a `reason` they do not know. A live event to a runner member with no
 run in the topic starts a short run for it: one per card at a time (later events join it), at
 most 6 an hour per card and 30 an hour per member; a run takes at most 20 waiting events per
 card. Past either limit the ack is `none`, `run.limit`. A stored answer always starts a run.
-An event a run was given and did not take before it ended is resolved for the emitter with
-`interaction.resolved {result: "failed"}`.
+An event whose ack said `run` or `starting` and that no run takes after all (the run ended
+before it took the event, or the event still waited and no other run could take it) is resolved
+for the emitter with `interaction.resolved {result: "failed"}`; it never comes for an event
+whose ack said `none`.
 
 Rates (`rate_limited`, with `retryAfterMs`; the limits are per server location, so a client
 may see a little more): one answer per member and message a second; live events 5 a second
@@ -2036,7 +2038,8 @@ the resolved member ids in `cardState.ask.from`. Only people answer, so a send, 
 patch that opens a new ask round or changes `ask.from` must name at least one person of the
 group who is not deactivated: ids that name none (a name in place of an id, only AI members)
 are `invalid`, `card.limits`, and the message lists them. `"owners"` or `"requester"` that
-resolve to no person (a run that nobody asked) are stored as the group's owners. A round whose
+resolve to no person (a run that nobody asked) are stored as the group's owners; when no owner
+is in the group either, the write is `invalid`, `card.limits`. A round whose
 people left the group later is kept; its author closes it or it expires. (Poll voters come
 from the poll's `voters`, people only.)
 

@@ -1154,7 +1154,8 @@ export const Expect = z.object({
    * With mode "none": why nobody responds. "member.inactive" (the member was removed or turned
    * off), "runner.off" (its runner is off), "run.external" (its run in the topic takes no
    * events), "run.limit" (too many short runs this hour, or too many events waiting for this
-   * card), "run.failed" (a run could not start). Open: readers skip a value they do not know.
+   * card), "run.failed" (a run could not start, or the run's computer no longer has it). Open:
+   * readers skip a value they do not know.
    */
   reason: z.string().min(1).max(64).optional(),
 });

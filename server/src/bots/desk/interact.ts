@@ -139,7 +139,11 @@ export abstract class DeskInteract extends DeskHand {
     const names = await this.names([x.actorId]);
     const actor = { id: x.actorId, name: names.get(x.actorId) ?? x.actorId };
     if (target && !target.external) {
-      if (await this.queueInteraction(target, x, actor)) return this.runExpect(target);
+      const queued = await this.queueInteraction(target, x, actor);
+      if (queued === "taken") return this.runExpect(target);
+      // The run's machine no longer has the run: the ack says nobody responds (`sendInteraction`
+      // declined a page `ask`).
+      if (queued === "lost") return none("run.failed");
       // The card's queue is full: nobody takes this one (a page `ask` settles at once).
       if (x.source.kind === "artifact" && x.source.ask) await this.declinePageAsk(x);
       return none("run.limit");
@@ -264,10 +268,11 @@ export abstract class DeskInteract extends DeskHand {
    * Coalescing per card: the first event of a window goes out at once; later ones in the same
    * 3 s wait and go out in order when the window ends. Of the state events (`STATE_EVENTS`) only
    * the newest per block waits; every command waits on its own, at most `MAX_PENDING_PER_CARD`
-   * per card. Page `ask` events skip the window (each one waits for its reply). False: the
-   * card's queue is full and the event was not taken.
+   * per card. Page `ask` events skip the window (each one waits for its reply). "full": the
+   * card's queue is full and the event was not taken; "lost": it was sent now and the run's
+   * machine no longer has the run.
    */
-  protected async queueInteraction(r: RunRow, x: InteractionIn, actor: { id: string; name: string }): Promise<boolean> {
+  protected async queueInteraction(r: RunRow, x: InteractionIn, actor: { id: string; name: string }): Promise<"taken" | "full" | "lost"> {
     const frame = this.interactionFrame(r, x, actor);
     const key = cardKey(x);
     const ask = x.source.kind === "artifact" && x.source.ask;
@@ -275,25 +280,22 @@ export abstract class DeskInteract extends DeskHand {
     const now = Date.now();
     // Not on a machine yet: kept until the run is accepted.
     if (!r.machine_id || r.status === "created") {
-      if (!this.pendingRoom(key, block)) return false;
+      if (!this.pendingRoom(key, block)) return "full";
       this.keepPending(key, block, r.id, frame, now, JSON.stringify(x));
-      return true;
+      return "taken";
     }
-    if (ask) {
-      await this.sendInteraction(r, frame);
-      return true;
-    }
+    if (ask) return (await this.sendInteraction(r, frame, true)) ? "taken" : "lost";
     const until = this.sql.exec<{ until: number }>("SELECT until FROM interact_windows WHERE card_key = ?", key).toArray()[0]?.until ?? 0;
     if (until > now || this.hasPending(key)) {
-      if (!this.pendingRoom(key, block)) return false;
+      if (!this.pendingRoom(key, block)) return "full";
       this.keepPending(key, block, r.id, frame, now, JSON.stringify(x));
       await this.scheduleStall();
-      return true;
+      return "taken";
     }
+    if (!(await this.sendInteraction(r, frame, true))) return "lost";
     this.sql.exec("INSERT OR REPLACE INTO interact_windows (card_key, run_id, until) VALUES (?, ?, ?)", key, r.id, now + COALESCE_MS);
-    await this.sendInteraction(r, frame);
     await this.scheduleStall();
-    return true;
+    return "taken";
   }
 
   /** Whether the card's queue takes this event: it replaces a waiting one, or the queue is not full. */
@@ -318,7 +320,13 @@ export abstract class DeskInteract extends DeskHand {
     );
   }
 
-  protected async sendInteraction(r: RunRow, frame: InteractionFrame): Promise<void> {
+  /**
+   * Gives the event to the run's machine. False: the machine no longer has the run, so nobody
+   * takes it. `inAck` (the event's own ack is still open): the ack says so, and only a page
+   * `ask` is answered here; an `interaction.resolved` would reach the emitter before its ack.
+   * Later (an event that waited) the emitter is told with `failInteraction`.
+   */
+  protected async sendInteraction(r: RunRow, frame: InteractionFrame, inAck = false): Promise<boolean> {
     const now = Date.now();
     // accepted = 1: a live event is not leftover input for a follow-up run.
     this.sql.exec(
@@ -330,7 +338,7 @@ export abstract class DeskInteract extends DeskHand {
       String(frame.fallback.text),
       now,
     );
-    if (!r.machine_id || r.external) return;
+    if (!r.machine_id || r.external) return true;
     // Kept until the run takes it (`input.accepted`): a run that ends first never answers it.
     // A retract is not tracked: nothing waits for an answer to it.
     const ask = frame.source.kind === "artifact" && frame.source.ask;
@@ -342,13 +350,17 @@ export abstract class DeskInteract extends DeskHand {
     try {
       const res = await linkStub(this.env, r.machine_id).toRun(frame as never);
       // The machine no longer has the run: nobody takes the event.
-      if (!res.ok && tracked) {
-        this.sql.exec("DELETE FROM interact_sent WHERE input_id = ?", frame.inputId);
-        await this.failInteraction(r.group_id, eventId, ask);
+      if (!res.ok) {
+        if (tracked) {
+          this.sql.exec("DELETE FROM interact_sent WHERE input_id = ?", frame.inputId);
+          if (ask || !inAck) await this.failInteraction(r.group_id, eventId, ask);
+        }
+        return false;
       }
     } catch (err) {
       this.log.warn("run.interaction failed", { runId: r.id, err });
     }
+    return true;
   }
 
   /** The event a waiting row stands for (rows from before `x` was kept: read from the frame). */
@@ -372,14 +384,19 @@ export abstract class DeskInteract extends DeskHand {
     const x = this.pendingInput(row, r);
     if (!x) return;
     let expect: DeskExpect = { mode: "none" };
+    let threw = false;
     try {
       expect = await this.route(x);
     } catch (err) {
+      threw = true;
       this.log.warn("interaction reroute failed", { runId: row.run_id, err });
     }
-    // A page `ask` with no run was declined in `route`; a retract waits for no answer.
+    if (expect.mode !== "none" || x.event === "answer.retract") return; // a retract waits for no answer
+    // `route` declined a page `ask` itself, except where it stops before it looks for a run
+    // (the member or its runner is off) and when it threw.
     const ask = x.source.kind === "artifact" && x.source.ask;
-    if (expect.mode === "none" && !ask && x.event !== "answer.retract") await this.failInteraction(x.groupId, x.eventId, false);
+    if (ask && !threw && expect.reason !== "member.inactive" && expect.reason !== "runner.off") return;
+    await this.failInteraction(x.groupId, x.eventId, ask);
   }
 
   /**

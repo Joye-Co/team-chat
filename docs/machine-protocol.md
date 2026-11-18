@@ -639,10 +639,11 @@ Server rules (BotDesk):
   taken and its ack's `expect` is `none` with reason `run.limit`. Page `ask` events never wait
   for a window.
 - A live event belongs to the run once the daemon reports `input.accepted` for its `inputId`.
-  When the run ends before that (or the machine no longer has the run), the server resolves the
-  event for the emitter as `interaction.resolved {result: "failed"}` (a page `ask` gets a declined
-  reply, reason `run.ended`); it is not given to another run, because it may have been half
-  done. An event that still waited for its window or for the run's machine was never sent: it
+  When the run ends before that (or the machine no longer has the run when a waiting event is
+  sent), the server resolves the event for the emitter as `interaction.resolved {result:
+  "failed"}` (a page `ask` gets a declined reply, reason `run.ended`); it is not given to another
+  run, because it may have been half done. When the machine no longer has the run for an event
+  sent inside its own ack, that ack's `expect` is `none` with reason `run.failed` instead. An event that still waited for its window or for the run's machine was never sent: it
   goes to the member's run in the topic or starts a short follow-up run like a new event, and is
   resolved as failed only when neither takes it.
 - With no active run in the topic, a stored answer starts a run (as before), and a live event

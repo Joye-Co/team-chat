@@ -622,14 +622,68 @@ describe("BotDesk delivery", () => {
     d.event(runId, { type: "output", outputId: "p1", op: "card.post", body: { card: board } });
     const posted = await d.next((f) => f.t === "run.output.result" && f.outputId === "p1");
     const messageId = posted.result.messageId as string;
+    const press = () => c.ok({ t: "card.event", groupId: w.gid, messageId, rev: 1, clientEventId: crypto.randomUUID(), blockId: "btns", event: "button.press", value: { buttonId: "a" } });
+    const resolvedOf = (eventId: string) => c.frames.filter((f) => f.t === "transient" && f.event.type === "interaction.resolved" && f.event.eventId === eventId);
+    // The first press goes out; a second one waits for the window.
+    const first = await press();
+    await d.next((f) => f.t === "run.interaction" && f.eventId === first.eventId);
+    const waiting = await press();
+    expect(waiting.expect).toMatchObject({ mode: "run" });
     // The link gave the run up (the desk has not heard yet): `toRun` answers ok: false.
     await runInDurableObject(benv.MACHINE_LINK.get(benv.MACHINE_LINK.idFromName(w.machineId)), async (_o, state: DurableObjectState) => {
       state.storage.sql.exec("DELETE FROM runs WHERE run_id = ?", runId);
     });
-    const press = await c.ok({ t: "card.event", groupId: w.gid, messageId, rev: 1, clientEventId: crypto.randomUUID(), blockId: "btns", event: "button.press", value: { buttonId: "a" } });
-    const failed = await waitUntil(() => c.frames.find((f) => f.t === "transient" && f.event.type === "interaction.resolved" && f.event.eventId === press.eventId), 5000);
+    // The one that waited got its ack long ago: the person is told when it cannot be sent.
+    await runInDurableObject(deskOf(w.bot.id), async (o, state: DurableObjectState) => {
+      state.storage.sql.exec("UPDATE interact_windows SET until = 0");
+      await (o as unknown as { alarm(): Promise<void> }).alarm();
+    });
+    const failed = await waitUntil(() => resolvedOf(waiting.eventId)[0], 5000);
     expect(failed.event).toMatchObject({ result: "failed", messageId });
-    expect(d.frames.some((f) => f.t === "run.interaction")).toBe(false);
+    // A press that cannot be sent inside its own ack: the ack says nobody responds, and no
+    // `interaction.resolved` is sent ahead of that ack.
+    await runInDurableObject(deskOf(w.bot.id), async (_o, state: DurableObjectState) => {
+      state.storage.sql.exec("DELETE FROM interact_windows");
+    });
+    const late = await press();
+    expect(late.expect).toEqual({ by: w.bot.id, mode: "none", reason: "run.failed" });
+    await sleep(200);
+    expect(resolvedOf(late.eventId)).toEqual([]);
+    expect(d.frames.filter((f) => f.t === "run.interaction")).toHaveLength(1);
+    await runInDurableObject(deskOf(w.bot.id), async (_o, state: DurableObjectState) => {
+      expect(state.storage.sql.exec("SELECT 1 FROM interact_windows").toArray()).toEqual([]);
+    });
+    for (const x of [c, d]) x.close();
+  });
+
+  it("decline a page ask that waited for a run that ended, when the member's runner is off by then", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["interact", "output"] });
+    const { c } = await Client.connect(w.human.token, INTERACT);
+    const topicId = await mention(c, w);
+    // The run is not accepted yet: events for it wait.
+    const { runId } = await d.next((f) => f.t === "run.assign");
+    const made = await api("/v1/artifacts", {
+      token: w.bot.token,
+      body: { groupId: w.gid, topicId, title: "看板", kind: "html", entry: "index.html", files: [{ path: "index.html", fileId: await upload(w.bot, w.gid) }], events: EVENTS },
+    });
+    expect(made.status, JSON.stringify(made.body)).toBe(200);
+    const artifactId = made.body.artifact.id as string;
+    const ask = await c.ok({ t: "artifact.event", groupId: w.gid, artifactId, version: 1, name: "ask.total", kind: "ask", payload: { month: "2026-10" } });
+    expect(ask.expect.mode).not.toBe("none");
+    const off = await api(`/v1/bots/${w.bot.id}/runner`, {
+      method: "PUT",
+      token: w.owner.token,
+      body: { runtime: "codex", labels: ["off"], repo: { path: "/tmp/repo" }, baseBranch: "main", enabled: false },
+    });
+    expect(off.status, JSON.stringify(off.body)).toBe(200);
+    await runInDurableObject(deskOf(w.bot.id), async (o, state: DurableObjectState) => {
+      expect(state.storage.sql.exec("SELECT 1 FROM interact_pending").toArray()).toHaveLength(1);
+      state.storage.sql.exec("UPDATE runs SET status = 'cancelled', ended_at = ? WHERE id = ?", Date.now(), runId);
+      await (o as unknown as { alarm(): Promise<void> }).alarm();
+    });
+    const reply = await c.next((f) => f.t === "transient" && f.event.type === "artifact.reply" && f.event.eventId === ask.eventId);
+    expect(reply.event).toMatchObject({ ok: false, error: { code: "declined", reason: "run.ended" } });
     for (const x of [c, d]) x.close();
   });
 
