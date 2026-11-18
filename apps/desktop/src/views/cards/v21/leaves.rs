@@ -1771,7 +1771,13 @@ pub fn buttons(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App)
         return div().into_any_element();
     };
     let ctx = node.ctx;
-    let live = live(node, b);
+    // A block that declares no `button.press` sends nothing (the server refuses the press):
+    // its buttons draw as what they are, not as controls that do nothing.
+    let pressable = super::interact::sends(ctx.card, b, "button.press");
+    if !pressable {
+        crate::selftest::drawn::mark("card-buttons-inert", id.clone());
+    }
+    let live = pressable && live(node, b);
     let armed = node.ui.block(id).focus.clone();
     let row = div()
         .flex()
@@ -1801,7 +1807,7 @@ pub fn buttons(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App)
                 },
                 cx,
             )
-            .disabled(!live)
+            .map(|el| ui::native::buttons::disabled_push(el, !live, cx))
             .on_click(move |_, _, cx| {
                 // A confirm asks once in place: the button says the confirm title, a second
                 // press sends.
@@ -2132,7 +2138,63 @@ fn embed_body(state: &FolderState, has_detail: bool) -> EmbedBody {
     }
 }
 
-pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -> AnyElement {
+/// The inline preview of an embedded 产出 that is not a web page, the same one a message
+/// shows (`views/media`). `None` when its kind has no preview: the block then offers the
+/// window.
+fn embed_media(
+    ctx: &Ctx,
+    block: &str,
+    title: &str,
+    folder: &crate::data::ArtifactFolder,
+    detail: Option<&crate::data::ArtifactDetail>,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<AnyElement> {
+    use crate::views::media::{self, MediaFile, inline, state::Target, store::MediaKey};
+    // The folder is open: its entry says the kind while the 产出's record is still on its way.
+    let files: Vec<MediaFile> = detail
+        .and_then(|d| d.versions.iter().find(|v| v.version == folder.version))
+        .map(|v| {
+            v.files
+                .iter()
+                .map(|f| MediaFile {
+                    path: f.path.clone(),
+                    size: f.size,
+                    mime: f.mime.clone(),
+                })
+                .collect()
+        })
+        .unwrap_or_else(|| {
+            vec![MediaFile {
+                path: folder.entry.clone(),
+                size: 0,
+                mime: media::mime_for(&folder.entry).to_string(),
+            }]
+        });
+    let kind = ctx
+        .env
+        .provider
+        .artifact_media(&folder.artifact_id, folder.version)
+        .and_then(|m| media::poster::local_kind(m.kind))
+        .unwrap_or_else(|| media::classify(&folder.entry, &files));
+    let spec = inline::InlineSpec {
+        key: MediaKey::new(folder.artifact_id.clone(), folder.version),
+        kind,
+        title: title.to_string(),
+        bytes: files.iter().map(|f| f.size).sum(),
+        target: Target {
+            provider: Some(ctx.env.provider.clone()),
+            group_id: ctx.msg.group_id.clone(),
+            topic_id: ctx.msg.topic_id.clone(),
+        },
+        id: ctx.id(format!("embed-media-{block}")),
+    };
+    let el = inline::render(&spec, window, cx)?;
+    crate::selftest::drawn::mark("embed-media", block.to_string());
+    Some(el)
+}
+
+pub fn embed(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) -> AnyElement {
     let CardV2Block::Embed {
         id,
         artifact_id,
@@ -2174,7 +2236,16 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
             file.map_or(c::EMBED_KIND, crate::views::media::MediaKind::label)
         ),
     );
+    let media = match (&state, shown) {
+        (Some(Ok(f)), EmbedBody::NotPage) => {
+            embed_media(ctx, id, &name, f, detail.as_ref(), window, cx)
+        }
+        _ => None,
+    };
     let body: AnyElement = match (state, shown) {
+        (_, EmbedBody::NotPage) if media.is_some() => {
+            div().p(space::S12).children(media).into_any_element()
+        }
         (Some(Ok(f)), EmbedBody::Page) => {
             // inc-integrate: the 产出 page host owns the bridge (capabilities by author,
             // live data, asks, refs, the pending band); the block narrows the declared

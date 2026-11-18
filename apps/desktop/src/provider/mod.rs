@@ -2775,6 +2775,20 @@ impl ChatProvider for CoreProvider {
             .image(&a.client, file_id, move || this.emit(vec![change]))
     }
 
+    fn card_recording(&self, file_id: &str) -> crate::data::Reply<crate::data::FileAttachment> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let Some(a) = self.account() else {
+            let _ = tx.send(Err(crate::data::FileError::SignedOut));
+            return rx;
+        };
+        let (client, id) = (a.client.clone(), file_id.to_string());
+        a.client.spawn(async move {
+            let file = cards::load_recording(&client, &id).await;
+            let _ = tx.send(file.map(|f| convert::file_ref(&f)));
+        });
+        rx
+    }
+
     fn card_image_file(&self, file_id: &str) -> Option<crate::data::FileAttachment> {
         self.shared
             .cards

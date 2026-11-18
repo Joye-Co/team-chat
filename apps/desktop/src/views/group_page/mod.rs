@@ -28,7 +28,7 @@ use crate::ui::native::tokens::space as tsp;
 use crate::{
     app::{Place, RightPane, Services},
     copy::{fill, group_page as c, nav as nav_copy},
-    data::{ArtifactKind, BotRunSummary, PlanState, Topic, TopicStatus},
+    data::{BotRunSummary, PlanState, Topic, TopicStatus},
     ui::{
         native::{
             PushSize, PushStyle, ToolbarGroup, ToolbarItemKind, ToolbarRow, emphasized,
@@ -227,15 +227,6 @@ fn standing(t: &Topic, state: &crate::views::topic_page::StateLine) -> Standing 
         B::Failed | B::Abnormal => Standing::Stuck,
         _ if !t.waiting_on.is_empty() => Standing::OnOthers,
         _ => Standing::Other,
-    }
-}
-
-pub fn kind_label(kind: ArtifactKind) -> &'static str {
-    match kind {
-        ArtifactKind::Page => c::GROUP_PAGE_KIND_PAGE,
-        ArtifactKind::File => c::GROUP_PAGE_KIND_FILE,
-        ArtifactKind::Image => c::GROUP_PAGE_KIND_IMAGE,
-        ArtifactKind::Decision => c::GROUP_PAGE_KIND_DECISION,
     }
 }
 

@@ -482,7 +482,11 @@ pub struct PendBand {
 /// The band of a pending stage: the stage itself is the band's word (等 Ledger 回应, Ledger
 /// 还在处理, Ledger 没有回应), never a 处理中 that stays after the author stopped; a step that
 /// was not sent is the red 失败 of CARD21 §2 with the reason.
-pub fn pend_band(stage: interact::Stage, author: &str) -> Option<(String, String, PendTone)> {
+pub fn pend_band(
+    stage: interact::Stage,
+    reason: Option<crate::data::page_host::NoneReason>,
+    author: &str,
+) -> Option<(String, String, PendTone)> {
     use interact::Stage as S;
     let words = interact::stage_words(stage, author);
     Some(match stage {
@@ -493,9 +497,9 @@ pub fn pend_band(stage: interact::Stage, author: &str) -> Option<(String, String
         // `expect.mode: none` (a block that takes no action, or a short-run limit): nothing
         // failed and nothing is left to retry, so the band is the muted clock (D1-70).
         // The badge holds a short state (§2.12); the rest is the meta line after it.
-        S::Refused => (
+        S::Refused | S::RefusedAnswer => (
             crate::copy::fill(c::BUSY_STATE, &[("name", author)]),
-            c::BUSY_LATER.to_string(),
+            crate::views::artifacts::host::none_why(reason).to_string(),
             PendTone::Quiet,
         ),
         S::OfflineLive | S::Busy | S::Forbidden | S::Rejected | S::Unhandled => {
@@ -514,8 +518,8 @@ pub fn pending(ctx: &Ctx) -> Option<PendBand> {
         .env
         .provider
         .card_v2_events(&ctx.msg.group_id, &ctx.msg.message_id);
-    let p = interact::pending(&events, ctx.env.now())?;
-    let (label, detail, tone) = pend_band(p.stage, &ctx.author)?;
+    let p = interact::pending(&interact::current(&events, ctx.card.rev), ctx.env.now())?;
+    let (label, detail, tone) = pend_band(p.stage, interact::none_reason(&p.event), &ctx.author)?;
     Some(PendBand {
         event_id: p.event.client_event_id,
         stage: p.stage,

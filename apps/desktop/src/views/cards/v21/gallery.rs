@@ -42,6 +42,8 @@ pub enum Page {
     Drill,
     /// v11/pb-cards: offline, busy, a kept draft and a reply off screen.
     Notes,
+    /// Interact: a press nobody will respond to, one card per `expect.reason`.
+    NoneReasons,
     /// Interact: my answer refused because the card changed.
     Conflict,
     /// Interact: the report as someone the card does not ask.
@@ -548,6 +550,32 @@ impl Gallery21 {
                         cx,
                     ))
                     .into_any_element();
+                (left, right)
+            }
+            Page::NoneReasons => {
+                let cell = |(id, _): (&str, &str), w: &mut Window, cx: &mut App| {
+                    item(
+                        c::I_NOTES_BUSY,
+                        "",
+                        self.card(id, me, None, "a", CardMode::Desk, w, cx),
+                        true,
+                        cx,
+                    )
+                };
+                let [a, b, d, e, f] = NONE_REASONS;
+                let left = column(vec![
+                    cell(a, window, cx),
+                    cell(b, window, cx),
+                    cell(d, window, cx),
+                ]);
+                let inert = item(
+                    c::I_NO_EVENTS,
+                    "",
+                    self.card(NO_EVENTS, me, None, "a", CardMode::Desk, window, cx),
+                    true,
+                    cx,
+                );
+                let right = column(vec![cell(e, window, cx), cell(f, window, cx), inert]);
                 (left, right)
             }
             Page::Rejected => {

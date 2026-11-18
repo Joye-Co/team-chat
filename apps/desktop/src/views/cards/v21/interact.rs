@@ -9,10 +9,10 @@
 //! - Pending shows only to the emitter: nothing for 400 ms, then 等 {name} 回应, then
 //!   {name} 还在处理, then {name} 没有回应 with 重试 and 不等了 (§4.4, soft and hard from
 //!   `expect.mode`, §6.4).
-//! - `expect.mode: none` on a live event means the block was not interactive (INTERACT
-//!   §4.4) or that the author is over its limits (§6.2; the ack does not say which): the
-//!   block goes back to its state, is read-only for that rev with no 重试, and says
-//!   {name} 现在接不了，稍后再试 for 4 s at the block and in the band.
+//! - `expect.mode: none` on a live event means nobody will respond: nothing waits. The
+//!   block goes back to its state and the band says {name} 接不了 with `expect.reason`. A
+//!   reason that lasts (or no reason) leaves the block read-only for that rev with no 重试;
+//!   after `run.limit` and `run.failed` the block stays usable and the words go after 4 s.
 //! - A live event that comes back offline or busy puts the block back to its state before
 //!   the gesture (INTERACT §4.4) while the band says why for 4 s.
 //! - So does every other live event that did not get through: one the server refused
@@ -33,6 +33,8 @@
 //!   animation.
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
+
+use crate::data::page_host::NoneReason;
 
 use gpui::{
     AnyElement, App, Entity, IntoElement, ParentElement, Styled, Window, div,
@@ -267,6 +269,8 @@ pub enum Stage {
     Slow,
     /// {name} 没有回应: 重试, 不等了.
     Silent,
+    /// My stored answer will not be taken (`expect.mode: none` with a reason): {name} 接不了.
+    RefusedAnswer,
     /// `expect.mode: offline` for a live event: the step was not sent (4 s).
     OfflineLive,
     /// The author is offline; my answer is stored and they will see it.
@@ -309,6 +313,16 @@ fn ms(d: Duration) -> Millis {
     d.as_millis() as Millis
 }
 
+/// Why the author will not take event `e`, when its ack said (`expect.reason`).
+pub fn none_reason(e: &MyCardEvent) -> Option<NoneReason> {
+    match &e.phase {
+        CardEventPhase::Acked { ack, .. } if ack.expect.mode == ExpectMode::None => {
+            NoneReason::parse(ack.expect.reason.as_deref())
+        }
+        _ => None,
+    }
+}
+
 /// The pending state of one event at `now`, or `None` when it no longer waits.
 pub fn stage_of(e: &MyCardEvent, now: Millis) -> Option<Pending> {
     // A 撤回 is not a step the author answers: the record shows it ([`retract_state`]).
@@ -318,10 +332,20 @@ pub fn stage_of(e: &MyCardEvent, now: Millis) -> Option<Pending> {
     match &e.phase {
         CardEventPhase::Acked { ack, at } => {
             if e.durable || ack.stored {
-                // An answer follows the run (CARD21 §2); only an offline author is said.
-                return (ack.expect.mode == ExpectMode::Offline).then(|| Pending {
+                // An answer follows the run (CARD21 §2); only an author that will not take
+                // it is said: offline, or `none` with the reason why.
+                let stage = match ack.expect.mode {
+                    ExpectMode::Offline => Stage::OfflineAnswer,
+                    // A passing reason says nothing about a stored answer: it stays stored,
+                    // and there is no step to try again.
+                    ExpectMode::None if none_reason(e).is_some_and(|r| !r.retryable()) => {
+                        Stage::RefusedAnswer
+                    }
+                    _ => return None,
+                };
+                return Some(Pending {
                     event: e.clone(),
-                    stage: Stage::OfflineAnswer,
+                    stage,
                     mode: ack.expect.mode,
                     next_at: None,
                 });
@@ -336,11 +360,15 @@ pub fn stage_of(e: &MyCardEvent, now: Millis) -> Option<Pending> {
                 }
                 // The block was not interactive (INTERACT §4.4): its state goes back once
                 // and it is read-only from now on (`refused`); no band, no retry.
+                // A reason that lasts stays said: the block is read-only because of it.
                 ExpectMode::None => {
-                    if age >= ms(t::OFFLINE_NOTE) {
+                    if none_reason(e).is_some_and(|r| !r.retryable()) {
+                        (Stage::Refused, None)
+                    } else if age >= ms(t::OFFLINE_NOTE) {
                         return None;
+                    } else {
+                        (Stage::Refused, Some(at + ms(t::OFFLINE_NOTE)))
                     }
-                    (Stage::Refused, Some(at + ms(t::OFFLINE_NOTE)))
                 }
                 ExpectMode::Unknown => return None,
                 mode => {
@@ -546,6 +574,33 @@ pub fn retract_state(events: &[MyCardEvent]) -> Option<Retract> {
     }
 }
 
+/// The log without the refusals that no longer hold on the card at `rev`: `expect.mode: none`
+/// said how things were at that press, so a newer rev of the card, or a newer event of mine the
+/// author took, ends it.
+pub fn current(events: &[MyCardEvent], rev: u32) -> Vec<MyCardEvent> {
+    let took = |e: &MyCardEvent| {
+        !e.dropped
+            && match &e.phase {
+                CardEventPhase::Acked { ack, .. } => matches!(
+                    ack.expect.mode,
+                    ExpectMode::Live | ExpectMode::Run | ExpectMode::Starting
+                ),
+                CardEventPhase::Resolved { .. } => true,
+                _ => false,
+            }
+    };
+    events
+        .iter()
+        .enumerate()
+        .filter(|(i, e)| {
+            let refusal = matches!(&e.phase, CardEventPhase::Acked { ack, .. }
+                if ack.expect.mode == ExpectMode::None);
+            !refusal || (e.request.rev >= rev && !events[i + 1..].iter().any(took))
+        })
+        .map(|(_, e)| e.clone())
+        .collect()
+}
+
 /// The newest of my events on the card that still waits, if any (the band).
 pub fn pending(events: &[MyCardEvent], now: Millis) -> Option<Pending> {
     events.iter().rev().find_map(|e| stage_of(e, now))
@@ -561,6 +616,8 @@ pub fn refused(events: &[MyCardEvent], block: &str, rev: u32) -> bool {
             && e.request.block_id.as_deref() == Some(block)
             && matches!(&e.phase, CardEventPhase::Acked { ack, .. }
                 if !ack.stored && ack.expect.mode == ExpectMode::None)
+            // Worth another try: the block stays usable.
+            && !none_reason(e).is_some_and(NoneReason::retryable)
     })
 }
 
@@ -622,7 +679,7 @@ pub fn stage_words(stage: Stage, name: &str) -> String {
         Stage::OfflineAnswer => c::OFFLINE_ANSWER,
         Stage::Busy => c::BUSY,
         // The ack of a short-run limit is `expect.mode: none` too: say so (INTERACT §6.2).
-        Stage::Refused => c::BUSY,
+        Stage::Refused | Stage::RefusedAnswer => c::BUSY,
         Stage::Forbidden => c::REJECTED_FORBIDDEN,
         Stage::Rejected => c::REJECTED_NOT_SENT,
         Stage::Unhandled => c::RESOLVED_FAILED,
@@ -947,7 +1004,7 @@ pub fn decorate(
             .tree
             .parent(id)
             .is_some_and(|p| diff.is_some_and(|d| d.changed.contains_key(p)));
-    let pend = pending_at(&events, id, now);
+    let pend = pending_at(&current(&events, ctx.card.rev), id, now);
     let note = resolved_note(&events, id, now);
     let mark = super::band::surface_mark(ctx, node.tree, id);
     // Interact.dc.html 02 step 3: a block the rev inserted keeps a live tint and
@@ -1153,7 +1210,17 @@ fn pending_line(ctx: &Ctx, p: &Pending, words: bool, cx: &mut App) -> Option<Any
         return None;
     }
     let k = theme::colors(cx);
-    let text = stage_words(p.stage, &ctx.author);
+    // The line says the same reason the band would: 稍后再试 is not true of all of them.
+    let text = match (p.stage, none_reason(&p.event)) {
+        (Stage::Refused | Stage::RefusedAnswer, Some(r)) => fill(
+            crate::copy::page_host::PAGE_NONE,
+            &[
+                ("name", &ctx.author),
+                ("why", crate::views::artifacts::host::none_why(Some(r))),
+            ],
+        ),
+        _ => stage_words(p.stage, &ctx.author),
+    };
     let mut row = meta(div())
         .mt(space::S6)
         .flex()
@@ -1202,6 +1269,104 @@ fn pending_line(ctx: &Ctx, p: &Pending, words: bool, cx: &mut App) -> Option<Any
             });
     }
     Some(row.into_any_element())
+}
+
+#[cfg(test)]
+mod none_reason_tests {
+    use super::*;
+    use crate::views::cards::v21::{band, samples};
+
+    fn none(reason: &str, stored: bool) -> MyCardEvent {
+        let mut e = samples::acked_none("n", "bars", reason);
+        e.durable = stored;
+        if let CardEventPhase::Acked { ack, .. } = &mut e.phase {
+            ack.stored = stored;
+        }
+        e
+    }
+
+    #[test]
+    fn every_reason_has_its_own_words_and_ends_the_waiting() {
+        for (reason, parsed, why) in [
+            (
+                "member.inactive",
+                NoneReason::MemberInactive,
+                c::NONE_MEMBER_INACTIVE,
+            ),
+            ("runner.off", NoneReason::RunnerOff, c::NONE_RUNNER_OFF),
+            (
+                "run.external",
+                NoneReason::RunExternal,
+                c::NONE_RUN_EXTERNAL,
+            ),
+            ("run.limit", NoneReason::RunLimit, c::NONE_RUN_LIMIT),
+            ("run.failed", NoneReason::RunFailed, c::NONE_RUN_FAILED),
+        ] {
+            let e = none(reason, false);
+            assert_eq!(none_reason(&e), Some(parsed));
+            let p = stage_of(&e, 100).expect("the band says it");
+            assert_eq!(p.stage, Stage::Refused);
+            assert!(!spins(p.stage), "{reason}: nothing spins");
+            let (_, detail, _) = band::pend_band(p.stage, none_reason(&e), "Ledger").unwrap();
+            assert_eq!(detail, why);
+        }
+    }
+
+    #[test]
+    fn a_reason_this_version_does_not_know_is_skipped() {
+        let e = none("run.someday", false);
+        assert_eq!(none_reason(&e), None);
+        let (_, detail, _) = band::pend_band(Stage::Refused, None, "Ledger").unwrap();
+        assert_eq!(detail, c::BUSY_LATER);
+    }
+
+    #[test]
+    fn a_lasting_reason_stays_said_and_a_passing_one_goes() {
+        let late = ms(t::OFFLINE_NOTE) + 1;
+        let lasting = stage_of(&none("runner.off", false), late).expect("still said");
+        assert_eq!((lasting.stage, lasting.next_at), (Stage::Refused, None));
+        assert!(stage_of(&none("run.limit", false), late).is_none());
+    }
+
+    #[test]
+    fn only_a_passing_reason_leaves_the_block_usable() {
+        assert!(refused(&[none("member.inactive", false)], "bars", 1));
+        assert!(refused(&[none("run.someday", false)], "bars", 1));
+        assert!(!refused(&[none("run.limit", false)], "bars", 1));
+        assert!(!refused(&[none("run.failed", false)], "bars", 1));
+    }
+
+    #[test]
+    fn a_stored_answer_says_nothing_of_a_reason_that_passes() {
+        assert!(stage_of(&none("run.failed", true), 1).is_none());
+        assert!(stage_of(&none("run.limit", true), 1).is_none());
+    }
+
+    #[test]
+    fn a_refusal_ends_with_a_newer_rev_or_a_press_the_author_took() {
+        let off = none("runner.off", false);
+        assert!(pending(&current(&[off.clone()], 1), 1_000_000).is_some());
+        assert!(pending(&current(&[off.clone()], 2), 1_000_000).is_none());
+        let answered = none("runner.off", true);
+        assert!(pending(&current(&[answered], 2), 1_000_000).is_none());
+        let mut took = samples::acked_none("t", "other", "runner.off");
+        if let CardEventPhase::Acked { ack, .. } = &mut took.phase {
+            ack.expect.mode = ExpectMode::Run;
+            ack.expect.reason = None;
+        }
+        let kept = current(&[off.clone(), took.clone()], 1);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].client_event_id, took.client_event_id);
+        // An older press the author took says nothing about the refusal after it.
+        assert_eq!(current(&[took, off], 1).len(), 2);
+    }
+
+    #[test]
+    fn a_stored_answer_nobody_will_take_says_why_and_never_waits() {
+        let e = none("runner.off", true);
+        assert_eq!(stage_of(&e, 1).unwrap().stage, Stage::RefusedAnswer);
+        assert_eq!(answer_stage(&[e], 1_000_000), (None, None));
+    }
 }
 
 #[cfg(test)]

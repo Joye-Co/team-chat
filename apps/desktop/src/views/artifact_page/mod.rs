@@ -506,10 +506,7 @@ impl ArtifactPage {
                 }
                 menu
             });
-        let share_text = fill(
-            c::ARTIFACT_SHARE_TEXT,
-            &[("title", &a.title), ("v", &shown.to_string())],
-        );
+        let share_text = share_text(self.services.provider.as_ref(), a, shown);
         let active = nk::emphasized(window);
         // D20: the toolbar's items carry their word, as on a 话题 (详情 / 产出 /
         // 单独问), in one run with no separator.
@@ -2344,10 +2341,7 @@ fn artifact_menu(
         crate::views::files::export::FileRef::artifact(&services.provider, &a.id, &a.title);
     let (nav, id) = (services.nav.clone(), a.id.clone());
     let (provider, window_id) = (services.provider.clone(), a.id.clone());
-    let share_text = fill(
-        c::ARTIFACT_SHARE_TEXT,
-        &[("title", &a.title), ("v", &a.version.to_string())],
-    );
+    let share_text = share_text(services.provider.as_ref(), a, a.version);
     menu.item(
         PopupMenuItem::new(c::ARTIFACT_OPEN).on_click(move |_, _, cx| {
             let id = id.clone();
@@ -2368,6 +2362,38 @@ fn artifact_menu(
     .map(|menu| crate::views::files::export::menu_items(menu, &target, at))
 }
 // --- end v12/behavior ---
+
+/// What 分享 copies: the 产出's name and version, and the link that opens that version in the
+/// app. Only the name while the 群 of the 产出 is not known yet.
+fn share_text(
+    provider: &dyn crate::data::ChatProvider,
+    a: &crate::data::ArtifactSummary,
+    version: u32,
+) -> String {
+    let v = version.to_string();
+    match provider.artifact(&a.id) {
+        Some(d) => fill(
+            c::ARTIFACT_SHARE_TEXT,
+            &[
+                ("title", &a.title),
+                ("v", &v),
+                (
+                    "link",
+                    &crate::provider::instance::artifact_link(
+                        &d.group_id,
+                        &a.topic_id,
+                        &a.id,
+                        version,
+                    ),
+                ),
+            ],
+        ),
+        None => fill(
+            c::ARTIFACT_SHARE_TEXT_NO_LINK,
+            &[("title", &a.title), ("v", &v)],
+        ),
+    }
+}
 
 #[cfg(test)]
 mod search_tests {

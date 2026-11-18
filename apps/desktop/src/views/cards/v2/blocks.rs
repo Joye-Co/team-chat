@@ -2382,18 +2382,31 @@ pub(crate) fn input_control(
             let focused = field.is_focused(window, cx);
             area_field(&field, id, focused || lead, invalid, !live, window, cx)
         }
-        InputKind::Date
-        | InputKind::Number
-        | InputKind::Slider
-        | InputKind::Text
-        | InputKind::Unknown => {
-            let ph = match kind {
-                InputKind::Date => Some(placeholder.unwrap_or(c::FORM_DATE_PLACEHOLDER)),
-                _ => placeholder,
-            };
+        InputKind::Date => {
             let field = ctx
                 .form
-                .update(cx, |f, cx| f.field(id, ph, false, window, cx));
+                .update(cx, |f, cx| f.field(id, None, false, window, cx));
+            let value = field.text(cx);
+            let (form, block) = (ctx.form.clone(), id.to_string());
+            let (picker, focused) = ui::native::fields::date_field(
+                ctx.id(format!("date-{id}")),
+                &value,
+                placeholder.unwrap_or(c::FORM_DATE_PLACEHOLDER),
+                !live,
+                move |text, window, cx| {
+                    form.update(cx, |f, cx| f.set_line(&block, text, window, cx));
+                },
+                window,
+                cx,
+            );
+            field_box(focused || lead, invalid, m::OPTION, cx)
+                .child(div().flex_1().min_w(px(0.)).child(picker))
+                .into_any_element()
+        }
+        InputKind::Number | InputKind::Slider | InputKind::Text | InputKind::Unknown => {
+            let field = ctx
+                .form
+                .update(cx, |f, cx| f.field(id, placeholder, false, window, cx));
             let focused = field.is_focused(window, cx);
             // The unit of a number stays in the field, after the number (`unit`).
             let unit = match ctx.card.block(id) {
@@ -2419,9 +2432,6 @@ pub(crate) fn input_control(
                             .text_color(k.ink_3)
                             .child(u),
                     )
-                })
-                .when(kind == InputKind::Date, |el| {
-                    el.child(ui::icon(Sym::Calendar, px(14.), k.ink_3))
                 })
                 .into_any_element()
         }
@@ -3476,31 +3486,44 @@ struct Thumb {
     recording: Option<(String, u64)>,
 }
 
-/// A click that plays the recording `file_id`: the video is a file of the 话题, opened the
-/// way its attachment opens. `None` when the 话题 does not list the file (yet): the tile
-/// then only shows its poster and length.
+/// A click that plays the recording `file_id`, opened the way an attachment opens. A video
+/// the 话题 does not list is looked up by its id first; a Toast says when it cannot be read.
 fn open_recording(
     ctx: &Ctx,
     file_id: &str,
-) -> Option<impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static> {
+) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static {
     let provider = ctx.env.provider.clone();
     let (group, topic) = (ctx.msg.group_id.clone(), ctx.msg.topic_id.clone());
-    let file = provider
+    let listed = provider
         .topic_files(&group, &topic)
         .into_iter()
-        .find(|f| f.file.file_id == file_id)?
-        .file;
-    Some(move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut App| {
+        .find(|f| f.file.file_id == file_id)
+        .map(|f| f.file);
+    let file_id = file_id.to_string();
+    move |_: &gpui::ClickEvent, window: &mut Window, cx: &mut App| {
+        use crate::views::files::{OpenAction, open_file};
         cx.stop_propagation();
-        crate::views::files::open_file(
-            &provider,
-            &group,
-            &topic,
-            &file,
-            crate::views::files::OpenAction::Open,
-            cx,
-        );
-    })
+        if let Some(file) = &listed {
+            open_file(&provider, &group, &topic, file, OpenAction::Open, cx);
+            return;
+        }
+        let rx = provider.card_recording(&file_id);
+        let (provider, group, topic) = (provider.clone(), group.clone(), topic.clone());
+        let handle = window.window_handle();
+        cx.spawn(async move |cx: &mut gpui::AsyncApp| {
+            let found = rx.await.unwrap_or(Err(crate::data::FileError::Other));
+            cx.update(|cx| match found {
+                Ok(file) => open_file(&provider, &group, &topic, &file, OpenAction::Open, cx),
+                Err(_) => {
+                    use gpui_component::WindowExt as _;
+                    let note = crate::ui::overlay::Toast::new(ui::Sym::Failed, c::RECORDING_FAILED)
+                        .notification();
+                    let _ = handle.update(cx, |_, window, cx| window.push_notification(note, cx));
+                }
+            });
+        })
+        .detach();
+    }
 }
 
 /// The play disc and the length of a recording, over its tile.
@@ -3675,9 +3698,8 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
                         // A recording plays; a screenshot opens in the image viewer.
                         Some((video, _)) => el
                             .relative()
-                            .when_some(open_recording(ctx, video), |el, open| {
-                                el.cursor_pointer().on_click(open)
-                            }),
+                            .cursor_pointer()
+                            .on_click(open_recording(ctx, video)),
                         None => el.when_some(
                             t.file.as_ref().and_then(|f| open_picture(ctx, f)),
                             |el, open| el.cursor_pointer().on_click(open),

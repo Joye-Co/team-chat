@@ -1199,7 +1199,13 @@ impl MembersPage {
                         } => {
                             let kind = p
                                 .artifact(artifact_id)
-                                .map(|a| crate::views::group_page::kind_label(a.summary.kind))
+                                .map(|a| {
+                                    crate::views::artifact_page::list::ListKind::of(
+                                        p.as_ref(),
+                                        &a.summary,
+                                    )
+                                    .label()
+                                })
                                 .unwrap_or(crate::copy::group_page::GROUP_PAGE_KIND_PAGE);
                             (
                                 Sym::Document,

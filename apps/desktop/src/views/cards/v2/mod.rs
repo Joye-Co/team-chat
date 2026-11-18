@@ -1401,7 +1401,10 @@ fn title(ctx: &Ctx, has_header: bool, cx: &App) -> AnyElement {
             ctx.id("copy-title"),
             card_text(ctx.card),
             div()
-                .child(one_line_text(&ctx.card.title))
+                .child(gpui_base::SelectableText::new(
+                    ctx.id("title-text"),
+                    one_line_text(&ctx.card.title),
+                ))
                 .into_any_element(),
         ))
         // --- inc-cards21: the 2.1 summary line under the title ---
@@ -1418,7 +1421,7 @@ fn title(ctx: &Ctx, has_header: bool, cx: &App) -> AnyElement {
                         .n_message()
                         .font_weight(FontWeight::NORMAL)
                         .text_color(n.secondary)
-                        .child(s),
+                        .child(gpui_base::SelectableText::new(ctx.id("summary-text"), s)),
                 )
             },
         )

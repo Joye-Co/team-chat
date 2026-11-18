@@ -86,6 +86,19 @@ pub const ART_EMBED_BROKEN: &str = "art-v2-embed-broken";
 /// Embedded in a card but a single file, not a web page (这个产出不是网页).
 pub const ART_EMBED_FILE: &str = "art-v2-embed-file";
 
+/// A one-page PDF with a line of text, for the embed that is a file.
+const SAMPLE_PDF: &str = "%PDF-1.4
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 420 200]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj
+4 0 obj<</Length 48>>stream
+BT /F1 18 Tf 32 120 Td (Budget by channel) Tj ET
+endstream endobj
+5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj
+trailer<</Root 1 0 R/Size 6>>
+%%EOF
+";
+
 const MIN: i64 = 60_000;
 
 /// Today at `hh:mm` local time. The sample day runs from 09:00 to the
@@ -2913,7 +2926,7 @@ impl ChatProvider for V2Samples {
                 .join("team-chat-v2-samples")
                 .join(artifact_id);
             let _ = std::fs::create_dir_all(&dir);
-            let _ = std::fs::write(dir.join("预算.pdf"), "%PDF-1.4\n%%EOF\n");
+            let _ = std::fs::write(dir.join("预算.pdf"), SAMPLE_PDF);
             let (tx, rx) = futures::channel::oneshot::channel();
             let _ = tx.send(Ok(ArtifactFolder {
                 artifact_id: artifact_id.into(),

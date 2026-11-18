@@ -331,7 +331,7 @@ pub fn render(services: &Services, id: &str, version: Option<u32>, cx: &App) -> 
         format!(
             "{} · {} · v{v}",
             detail.summary.title,
-            crate::views::group_page::kind_label(detail.summary.kind)
+            crate::views::artifact_page::list::ListKind::of(p.as_ref(), &detail.summary).label()
         ),
         vec![open_window.into_any_element(), close.into_any_element()],
         cx,

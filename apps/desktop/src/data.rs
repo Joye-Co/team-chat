@@ -2349,6 +2349,10 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn card_image(&self, _group_id: &str, _topic_id: &str, _file_id: &str) -> Option<PathBuf> {
         None
     }
+    /// The record of a recording a card names by file id, when the 话题 does not list it.
+    fn card_recording(&self, _file_id: &str) -> Reply<FileAttachment> {
+        reply_err(FileError::NotFound)
+    }
     /// The file of a card image once [`Self::card_image`] has its local copy, for the
     /// image viewer (name, size, size in pixels). `None` before.
     fn card_image_file(&self, _file_id: &str) -> Option<FileAttachment> {

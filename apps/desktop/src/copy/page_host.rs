@@ -11,6 +11,7 @@ crate::copy! {
     PAGE_NO_ANSWER = "{name} 没有回应",
     PAGE_OFFLINE = "{name} 不在线，这一步没有发出",
     PAGE_BUSY = "{name} 现在接不了，稍后再试",
+    PAGE_NONE = "{name} 接不了，{why}",
     PAGE_PUSHED = "{name} 推来了新数据",
     PAGE_ANSWERED = "{name} 在页面里回答了",
     PAGE_RETRY = "重试",
@@ -18,4 +19,6 @@ crate::copy! {
     PAGE_UPDATED_TO = "已更新到 v{n}",
     PAGE_NEWER = "有 v{n}",
     PAGE_REF_MENU = "就这里提问",
+    PAGE_REF_HINT_MAC = "按住 ⌥ 点页面里的内容，或右键选「就这里提问」",
+    PAGE_REF_HINT_WIN = "按住 Alt 点页面里的内容，或右键选「就这里提问」",
 }
