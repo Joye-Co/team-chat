@@ -196,6 +196,10 @@ concepts! {
     Terminal = "terminal";
     Retry = "arrow.counterclockwise";
     Refresh = "arrow.clockwise";
+    /// Skip back 15 seconds (the audio viewer).
+    Back15 = "gobackward.15";
+    /// Skip forward 15 seconds (the audio viewer).
+    Forward15 = "goforward.15";
     /// Pick one at random (the look grid's last cell).
     Random = "dice";
     Undo = "arrow.uturn.backward";

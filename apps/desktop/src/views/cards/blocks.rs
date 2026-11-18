@@ -753,8 +753,12 @@ fn link_button(
         } => {
             let provider = ctx.provider.clone();
             let (id, version) = (artifact_id.clone(), *version);
+            // The symbol of the kind, the same on every screen.
+            let glyph = provider.artifact(&id).map_or(Sym::Document, |a| {
+                crate::views::artifact_page::list::ListKind::of(provider.as_ref(), &a.summary).sym()
+            });
             button
-                .icon(Sym::Document)
+                .icon(glyph)
                 .tooltip(c::OPEN_ARTIFACT)
                 .on_click(move |_, _, cx| {
                     crate::views::artifacts::window::open_artifact(&provider, &id, version, cx)

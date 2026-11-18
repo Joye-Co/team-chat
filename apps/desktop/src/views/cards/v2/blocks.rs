@@ -503,11 +503,12 @@ fn outputs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
         let (icon, title, line) = match &detail {
             Some(a) => {
                 let shown = version.unwrap_or(a.summary.version);
-                let (kind, icon) = match a.summary.kind {
-                    ArtifactKind::Page => (crate::copy::artifacts::CARD_KIND_PAGE, Sym::Document),
-                    ArtifactKind::Image => (crate::copy::artifacts::CARD_KIND_FILE, Sym::Image),
-                    _ => (crate::copy::artifacts::CARD_KIND_FILE, Sym::File),
+                let kind = match a.summary.kind {
+                    ArtifactKind::Page => crate::copy::artifacts::CARD_KIND_PAGE,
+                    _ => crate::copy::artifacts::CARD_KIND_FILE,
                 };
+                let icon =
+                    crate::views::artifact_page::list::ListKind::of(p.as_ref(), &a.summary).sym();
                 let mut line = fill(
                     c::REF_ARTIFACT_KIND_LINE,
                     &[
@@ -2888,6 +2889,16 @@ fn plan(
         .map(|id| ctx.name(&id))
         .or_else(|| ctx.me.as_ref().map(|me| ctx.name(me)))
         .unwrap_or_default();
+    // 看问题 goes to the card that holds the question; this card's own ask is already here.
+    let question = items
+        .iter()
+        .any(|it| it.state == RunPlanState::Waiting)
+        .then(|| {
+            crate::data::open_ask_card(&*ctx.env.provider, &ctx.msg.group_id, &ctx.msg.topic_id)
+        })
+        .flatten()
+        .filter(|m| m.id != ctx.msg.message_id)
+        .map(|m| m.id);
     let mut current_seen = false;
     let header_bar = super::strip_parts(ctx, cx).is_some_and(|p| p.bar.is_some());
     div()
@@ -2928,13 +2939,19 @@ fn plan(
                 RunPlanState::Pending => (k.ink_3, FontWeight::NORMAL),
             };
             let right: Option<AnyElement> = match it.state {
-                RunPlanState::Waiting => Some(
-                    small(div())
-                        .font_weight(theme::MEDIUM_WEIGHT)
-                        .text_color(k.ink)
-                        .child(c::PLAN_SEE_QUESTION)
-                        .into_any_element(),
-                ),
+                RunPlanState::Waiting => question.clone().map(|id| {
+                    let answerer = ctx.answerer();
+                    ui::native::push_button(
+                        ctx.id(format!("plan-see-question-{i}")),
+                        c::PLAN_SEE_QUESTION.to_string(),
+                        ui::native::PushStyle::Ghost,
+                        ui::native::PushSize::Small,
+                        cx,
+                    )
+                    .flex_none()
+                    .on_click(move |_, window, cx| answerer.open_message(&id, window, cx))
+                    .into_any_element()
+                }),
                 RunPlanState::Current => progress
                     .as_ref()
                     .and_then(|(_, l)| l.clone())
@@ -3178,7 +3195,7 @@ pub(crate) fn metrics_row(
                         .when_some(unit.clone().filter(|u| u != "%"), |el, u| {
                             el.child(div().n_body().text_color(k.ink_3).child(u))
                         })
-                        .when(unit.as_deref() == Some("%") && d.is_none(), |el| {
+                        .when(unit.as_deref() == Some("%"), |el| {
                             el.child(div().n_body().text_color(k.ink_3).child("%"))
                         }),
                 )
@@ -3773,6 +3790,10 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
         // A result with a sentence of detail reads as a line; a bare count
         // as a chip.
         if let Some(d) = detail.as_ref().filter(|d| d.chars().count() > 8) {
+            // A sentence about a check not made: a muted mark, so it does not read as the
+            // answer's last line. A bare chip (截图 6, 日志) stays unmarked.
+            let glyph = glyph
+                .or(matches!(state, Some(EvidenceState::Info)).then_some((Sym::Info, k.ink_3)));
             let head = small(div())
                 .id(ctx.id(format!("proof-line-head-{i}")))
                 .flex()
@@ -4264,8 +4285,11 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                         let author = ctx.name(&a.summary.created_by);
                         let shown = version.unwrap_or(a.summary.version);
                         let newer = a.summary.version > shown;
+                        let glyph =
+                            crate::views::artifact_page::list::ListKind::of(p.as_ref(), &a.summary)
+                                .sym();
                         (
-                            ref_tile(Sym::Document, false, cx),
+                            ref_tile(glyph, false, cx),
                             a.summary.title.clone(),
                             fill(
                                 c::REF_ARTIFACT_LINE,

@@ -280,6 +280,7 @@ shape. The text inside every control is Body 13 pt unless noted.
 | Arrows | `arrow.up`, `arrow.down`, `arrow.right`; sort `arrow.up.arrow.down` |
 | Terminal | `terminal` |
 | Retry / refresh / undo | `arrow.counterclockwise` / `arrow.clockwise` / `arrow.uturn.backward` |
+| Skip back / forward 15 seconds | `gobackward.15` / `goforward.15` |
 | Random pick | `dice` |
 | Link / code | `link` / `chevron.left.forwardslash.chevron.right` |
 | Mention | `at` |

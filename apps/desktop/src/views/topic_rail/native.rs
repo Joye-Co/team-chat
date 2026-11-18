@@ -895,10 +895,9 @@ impl TopicRail {
             let version = crate::views::artifacts::host::latest(&a.id, cx)
                 .map_or(a.version, |v| v.max(a.version));
             // A2-21: the kind's own symbol (an image is not a document).
-            let sym = match a.kind {
-                crate::data::ArtifactKind::Image => Sym::Image,
-                _ => Sym::Document,
-            };
+            let sym =
+                crate::views::artifact_page::list::ListKind::of(self.services.provider.as_ref(), a)
+                    .sym();
             // T-16, E3, F3: a row opens its 产出 (a tab stop), and a cut
             // title shows whole in a tooltip.
             let open = RightPane::Artifact {

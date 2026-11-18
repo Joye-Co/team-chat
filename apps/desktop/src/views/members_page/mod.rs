@@ -1208,18 +1208,17 @@ impl MembersPage {
                             artifact_id,
                             version,
                         } => {
-                            let kind = p
-                                .artifact(artifact_id)
-                                .map(|a| {
-                                    crate::views::artifact_page::list::ListKind::of(
-                                        p.as_ref(),
-                                        &a.summary,
-                                    )
-                                    .label()
-                                })
+                            let listed = p.artifact(artifact_id).map(|a| {
+                                crate::views::artifact_page::list::ListKind::of(
+                                    p.as_ref(),
+                                    &a.summary,
+                                )
+                            });
+                            let kind = listed
+                                .map(|l| l.label())
                                 .unwrap_or(crate::copy::group_page::GROUP_PAGE_KIND_PAGE);
                             (
-                                Sym::Document,
+                                listed.map_or(Sym::Document, |l| l.sym()),
                                 fill(
                                     c::MEMBERS_ARTIFACT,
                                     &[("title", &d.title), ("v", &version.to_string())],

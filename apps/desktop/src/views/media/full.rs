@@ -1770,7 +1770,7 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
                         .flex()
                         .items_center()
                         .gap(space::S12)
-                        .child(round("back", Sym::Retry, cm::AUDIO_BACK).on_click(
+                        .child(round("back", Sym::Back15, cm::AUDIO_BACK).on_click(
                             move |_, _, cx| {
                                 back.update(cx, |s, cx| {
                                     let t = s.position - 15.;
@@ -1785,7 +1785,7 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
                             cx,
                             move |_, _, cx| toggle.update(cx, |s, cx| s.toggle_audio(&path, cx)),
                         ))
-                        .child(round("fwd", Sym::Refresh, cm::AUDIO_FORWARD).on_click(
+                        .child(round("fwd", Sym::Forward15, cm::AUDIO_FORWARD).on_click(
                             move |_, _, cx| {
                                 fwd.update(cx, |s, cx| {
                                     let t = s.position + 15.;
