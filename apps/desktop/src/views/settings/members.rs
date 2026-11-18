@@ -1779,6 +1779,18 @@ pub fn pinned_elsewhere<'a>(
         .find(|m| m.id == id && m.ownership(me) == Ownership::Theirs)
 }
 
+/// A stored placement this sheet may not end: the member sits on somebody else's own computer,
+/// or the computers have not loaded, so that cannot be ruled out yet. 工作方式 stays put then;
+/// switching to 外部接入 would take the member off a computer that is its owner's to change.
+pub fn placement_locked(
+    stored: Option<&str>,
+    machines: &[MachineInfo],
+    machines_loaded: bool,
+    me: Option<&str>,
+) -> bool {
+    stored.is_some() && (!machines_loaded || pinned_elsewhere(stored, machines, me).is_some())
+}
+
 /// The line under 在哪台电脑干活: on my own computer only my work is done there; on someone
 /// else's, only theirs. Nothing when one person uses the server.
 pub fn placement_hint(
@@ -2228,6 +2240,23 @@ impl BotForm {
         }
     }
 
+    /// The edited member's stored placement may not be ended from this sheet.
+    fn runner_locked(&self) -> bool {
+        let Some(BotEditing {
+            runner: RunnerLoad::Loaded(Some(stored)),
+            ..
+        }) = &self.editing
+        else {
+            return false;
+        };
+        placement_locked(
+            stored.machine_id.as_deref(),
+            &self.machines,
+            matches!(self.machines_load, MachinesLoad::Loaded),
+            super::my_id(&self.services).as_deref(),
+        )
+    }
+
     /// What saving the edit sheet now would change; `None` until the runner
     /// is in.
     fn pending_edit(&self, cx: &App) -> Option<BotMemberEdit> {
@@ -2235,14 +2264,18 @@ impl BotForm {
         let RunnerLoad::Loaded(before) = &e.runner else {
             return None;
         };
-        Some(bot_edit(
+        let mut edit = bot_edit(
             &e.name,
             e.role.as_deref(),
             before.as_ref(),
             &self.value(&self.name, cx),
             &self.value(&self.role, cx),
             self.runner_fields(cx).as_ref(),
-        ))
+        );
+        if self.runner_locked() && matches!(edit.runner, Some(RunnerChange::Remove)) {
+            edit.runner = None;
+        }
+        Some(edit)
     }
 
     /// Saves the edit sheet; a saved edit closes it.
@@ -2528,7 +2561,7 @@ impl Render for BotForm {
                                 ],
                             )
                             .selected(if self.runner { 0 } else { 1 })
-                            .disabled(busy)
+                            .disabled(busy || self.runner_locked())
                             .on_change(move |ix, _, cx| {
                                 mode_page.update(cx, |f, cx| {
                                     f.runner = ix == 0;
@@ -3493,6 +3526,11 @@ mod tests {
         );
         assert!(pinned_elsewhere(Some("chen"), &list, Some("me")).is_some());
         assert!(pinned_elsewhere(Some("mine"), &list, Some("me")).is_none());
+        // 工作方式 is locked on someone else's computer, and until the computers are known.
+        assert!(placement_locked(Some("chen"), &list, true, Some("me")));
+        assert!(!placement_locked(Some("mine"), &list, true, Some("me")));
+        assert!(placement_locked(Some("mine"), &[], false, Some("me")));
+        assert!(!placement_locked(None, &[], false, Some("me")));
         let person = |id: &str| (id == "chen").then(|| "陈晨".to_string());
         assert_eq!(
             placement_hint(Some("mine"), &list, team, person).as_deref(),
