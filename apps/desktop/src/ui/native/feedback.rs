@@ -103,7 +103,15 @@ impl RenderOnce for Alert {
             .border_color(edge)
             .bg(k.content)
             .flex()
-            .items_start()
+            // A title alone shares one center line with the action; with a description
+            // the icon stays on the title line.
+            .map(|d| {
+                if self.description.is_none() {
+                    d.items_center()
+                } else {
+                    d.items_start()
+                }
+            })
             .gap(space::S12)
             .child(
                 // The icon centers on the title line (20 high).
