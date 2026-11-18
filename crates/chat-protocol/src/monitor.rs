@@ -79,6 +79,11 @@ pub struct MonitorRun {
     pub run_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub member_id: Option<String>,
+    /// The 话题 the run works in, on runs the server has open on the machine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub topic_id: Option<String>,
     /// [`run_state`]
     pub state: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

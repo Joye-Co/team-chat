@@ -1389,7 +1389,7 @@ MachineMonitor = {
   queue: { count, oldestAt? },      // runs of every runner bot waiting for a machine (排队)
   today: { finished, succeeded, failed, finishedYesterday, tokens },
   clis: { runtime, kind, available, version?, login: "logged_in" | "logged_out" | "unknown", failedToday }[],
-  runs: { runId, memberId?, state, startedAt?, bootMs?, cpuCores?, memBytes?, scratchBytes? }[],
+  runs: { runId, memberId?, groupId?, topicId?, state, startedAt?, bootMs?, cpuCores?, memBytes?, scratchBytes? }[],
   members: { memberId, running, waiting, queued, cpuCores, memBytes, tokensToday, finishedToday }[],
   lastFailure?: { runId, memberId, at, title? },
 }
@@ -1403,7 +1403,9 @@ MachineMonitor = {
   member of its run. `state` is `booting` (起机中), `paused` (接管), `waiting` (等你: the run's
   BotDesk status is `waiting`), else `running` (在跑); queued runs (排队) of every runner bot follow
   with `state: "queued"`. A daemon without metrics gives the server's open runs on the machine
-  instead. Clients read an unknown `state` as `running`.
+  instead. Clients read an unknown `state` as `running`. `groupId` and `topicId` name the 话题 of
+  a run the server has open on the machine, so 等你 can lead to where the reply goes; a VM the
+  server does not know and a queued run have neither.
 - **Capacity**: `slots` is the daemon's `vmSlots`, else `maxParallelRuns`. `canTake` is the free
   slots, and no more than fit in the available memory above `reserveBytes` (a fifth of the host,
   at least 2 GiB) at the average memory of the running VMs.

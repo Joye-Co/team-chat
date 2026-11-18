@@ -42303,6 +42303,14 @@
                 "type": "string",
                 "minLength": 1
               },
+              "groupId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "topicId": {
+                "type": "string",
+                "minLength": 1
+              },
               "state": {
                 "type": "string",
                 "minLength": 1,
