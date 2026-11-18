@@ -2382,18 +2382,34 @@ pub(crate) fn input_control(
             let focused = field.is_focused(window, cx);
             area_field(&field, id, focused || lead, invalid, !live, window, cx)
         }
-        InputKind::Date
-        | InputKind::Number
-        | InputKind::Slider
-        | InputKind::Text
-        | InputKind::Unknown => {
-            let ph = match kind {
-                InputKind::Date => Some(placeholder.unwrap_or(c::FORM_DATE_PLACEHOLDER)),
-                _ => placeholder,
-            };
+        InputKind::Date => {
             let field = ctx
                 .form
-                .update(cx, |f, cx| f.field(id, ph, false, window, cx));
+                .update(cx, |f, cx| f.field(id, None, false, window, cx));
+            let value = field.text(cx);
+            let (form, target) = (ctx.form.clone(), field);
+            let (picker, focused) = ui::native::fields::date_field(
+                ctx.id(format!("date-{id}")),
+                &value,
+                placeholder.unwrap_or(c::FORM_DATE_PLACEHOLDER),
+                !live,
+                move |text, window, cx| {
+                    if let super::form::Field::Line(s) = &target {
+                        s.update(cx, |s, cx| s.set_value(text, window, cx));
+                    }
+                    form.update(cx, |_, cx| cx.notify());
+                },
+                window,
+                cx,
+            );
+            field_box(focused || lead, invalid, m::OPTION, cx)
+                .child(div().flex_1().min_w(px(0.)).child(picker))
+                .into_any_element()
+        }
+        InputKind::Number | InputKind::Slider | InputKind::Text | InputKind::Unknown => {
+            let field = ctx
+                .form
+                .update(cx, |f, cx| f.field(id, placeholder, false, window, cx));
             let focused = field.is_focused(window, cx);
             // The unit of a number stays in the field, after the number (`unit`).
             let unit = match ctx.card.block(id) {
@@ -2419,9 +2435,6 @@ pub(crate) fn input_control(
                             .text_color(k.ink_3)
                             .child(u),
                     )
-                })
-                .when(kind == InputKind::Date, |el| {
-                    el.child(ui::icon(Sym::Calendar, px(14.), k.ink_3))
                 })
                 .into_any_element()
         }
@@ -3476,9 +3489,8 @@ struct Thumb {
     recording: Option<(String, u64)>,
 }
 
-/// A click that plays the recording `file_id`: the video is a file of the 话题, opened the
-/// way its attachment opens. `None` when the 话题 does not list the file (yet): the tile
-/// then only shows its poster and length.
+/// A click that plays the recording `file_id`, opened the way an attachment opens. A video
+/// the 话题 does not list is looked up by its id first; a Toast says when it cannot be read.
 fn open_recording(
     ctx: &Ctx,
     file_id: &str,
