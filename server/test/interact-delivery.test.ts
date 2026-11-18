@@ -457,6 +457,111 @@ describe("BotDesk delivery", () => {
     for (const x of [c, d]) x.close();
   });
 
+  it("tell the person when a run ends before it took their event, and give events that still waited to another run", async () => {
+    const w = await world();
+    const { d, c, topicId, runId } = await runningRun(w, { features: ["interact", "output"] });
+    const desk = deskOf(w.bot.id);
+    const board: CardV2 = {
+      v: 2,
+      catalog: "tc.card/2.1",
+      rev: 1,
+      intent: "info",
+      title: "发版清单",
+      fallback: "发版清单",
+      blocks: [{ type: "buttons", id: "btns", buttons: [{ id: "a", label: "A" }, { id: "b", label: "B" }, { id: "c", label: "C" }], events: ["button.press"], fallbackText: "A / B / C" }],
+    };
+    const post = async (run: string, outputId: string) => {
+      d.event(run, { type: "output", outputId, op: "card.post", body: { card: board } });
+      const posted = await d.next((f) => f.t === "run.output.result" && f.outputId === outputId && f.runId === run);
+      expect(posted, JSON.stringify(posted)).toMatchObject({ ok: true });
+      return posted.result.messageId as string;
+    };
+    const press = (messageId: string, id: string) =>
+      c.ok({ t: "card.event", groupId: w.gid, messageId, rev: 1, clientEventId: crypto.randomUUID(), blockId: "btns", event: "button.press", value: { buttonId: id } });
+    const resolvedOf = (eventId: string) => c.frames.filter((f) => f.t === "transient" && f.event.type === "interaction.resolved" && f.event.eventId === eventId);
+    const rerouteNow = () =>
+      runInDurableObject(desk, async (o, state: DurableObjectState) => {
+        // The desk woke itself for the events that waited (not waited out here).
+        expect(await state.storage.getAlarm()).not.toBeNull();
+        state.storage.sql.exec("UPDATE interact_windows SET until = 0");
+        await (o as unknown as { alarm(): Promise<void> }).alarm();
+      });
+
+    // (a) The run takes the first press, is given the second and ends before it takes it.
+    const m1 = await post(runId, "p1");
+    const taken = await press(m1, "a");
+    const first = await d.next((f) => f.t === "run.interaction" && f.eventId === taken.eventId);
+    d.event(runId, { type: "input.accepted", inputId: first.inputId });
+    await runInDurableObject(desk, async (_o, state: DurableObjectState) => {
+      state.storage.sql.exec("DELETE FROM interact_windows");
+    });
+    const lost = await press(m1, "b");
+    expect(lost.expect).toMatchObject({ mode: "run" });
+    await d.next((f) => f.t === "run.interaction" && f.eventId === lost.eventId);
+    // (b) A third press still waits for the window when the run ends.
+    const waiting = await press(m1, "c");
+    expect(waiting.expect).toMatchObject({ mode: "run" });
+    await d.acked(runId, d.done(runId, { status: "succeeded", resultText: "发了" }));
+    const failed = await c.next((f) => f.t === "transient" && f.event.type === "interaction.resolved" && f.event.eventId === lost.eventId);
+    expect(failed.event).toMatchObject({ result: "failed", messageId: m1 });
+    // The one the run took is the run's: nothing is said about it.
+    expect(resolvedOf(taken.eventId)).toEqual([]);
+    // The one that waited was never sent: it starts a short run, like a new event.
+    await rerouteNow();
+    const next = await d.next((f) => f.t === "run.assign" && f.runId !== runId);
+    expect(next.prompt).toContain(waiting.eventId);
+    expect(next.prompt).toContain('kind="card.event"');
+    expect(resolvedOf(waiting.eventId)).toEqual([]);
+
+    // With no run to take it (the limit of short runs is reached), the person is told.
+    d.send({ t: "run.accept", runId: next.runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === next.runId && e.data.run.status === "running");
+    const m2 = await post(next.runId, "p2");
+    const sent = await press(m2, "a");
+    await d.next((f) => f.t === "run.interaction" && f.eventId === sent.eventId);
+    const queued = await press(m2, "b");
+    await runInDurableObject(desk, async (_o, state: DurableObjectState) => {
+      for (let i = 0; i < 6; i++) state.storage.sql.exec("INSERT INTO interact_runs (run_id, card_key, at) VALUES (?, ?, ?)", `lim${i}`, `card:${m2}`, Date.now());
+    });
+    await d.acked(next.runId, d.done(next.runId, { status: "succeeded", resultText: "好了" }));
+    await c.next((f) => f.t === "transient" && f.event.type === "interaction.resolved" && f.event.eventId === sent.eventId && f.event.result === "failed");
+    await rerouteNow();
+    await c.next((f) => f.t === "transient" && f.event.type === "interaction.resolved" && f.event.eventId === queued.eventId && f.event.result === "failed");
+    expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(2);
+    await runInDurableObject(desk, async (_o, state: DurableObjectState) => {
+      expect(state.storage.sql.exec("SELECT 1 FROM interact_sent").toArray()).toEqual([]);
+      expect(state.storage.sql.exec("SELECT 1 FROM interact_pending").toArray()).toEqual([]);
+    });
+    void topicId;
+    for (const x of [c, d]) x.close();
+  });
+
+  it("tell the person when the run's computer no longer has the run", async () => {
+    const w = await world();
+    const { d, c, runId } = await runningRun(w, { features: ["interact", "output"] });
+    const board: CardV2 = {
+      v: 2,
+      catalog: "tc.card/2.1",
+      rev: 1,
+      intent: "info",
+      title: "发版清单",
+      fallback: "发版清单",
+      blocks: [{ type: "buttons", id: "btns", buttons: [{ id: "a", label: "A" }], events: ["button.press"], fallbackText: "A" }],
+    };
+    d.event(runId, { type: "output", outputId: "p1", op: "card.post", body: { card: board } });
+    const posted = await d.next((f) => f.t === "run.output.result" && f.outputId === "p1");
+    const messageId = posted.result.messageId as string;
+    // The link gave the run up (the desk has not heard yet): `toRun` answers ok: false.
+    await runInDurableObject(benv.MACHINE_LINK.get(benv.MACHINE_LINK.idFromName(w.machineId)), async (_o, state: DurableObjectState) => {
+      state.storage.sql.exec("DELETE FROM runs WHERE run_id = ?", runId);
+    });
+    const press = await c.ok({ t: "card.event", groupId: w.gid, messageId, rev: 1, clientEventId: crypto.randomUUID(), blockId: "btns", event: "button.press", value: { buttonId: "a" } });
+    const failed = await waitUntil(() => c.frames.find((f) => f.t === "transient" && f.event.type === "interaction.resolved" && f.event.eventId === press.eventId), 5000);
+    expect(failed.event).toMatchObject({ result: "failed", messageId });
+    expect(d.frames.some((f) => f.t === "run.interaction")).toBe(false);
+    for (const x of [c, d]) x.close();
+  });
+
   it("give older daemons run.input with the envelope, and a 1.1.0 daemon the typed frames", async () => {
     const w = await world();
     const { d, c, topicId, runId } = await runningRun(w);
