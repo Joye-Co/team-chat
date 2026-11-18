@@ -235,6 +235,9 @@ svg_set! {
         Paused = "pause-fill" @ 0.60, 0.78;
         // A small desktop computer seen from the front: a team machine.
         MacMini = "desktop-mini" @ 1.27, 0.50;
+        // The arrow around its number of seconds, which Lucide does not draw.
+        Back15 = "gobackward-15" @ 1.00, 1.09;
+        Forward15 = "goforward-15" @ 1.00, 1.09;
     }
 }
 

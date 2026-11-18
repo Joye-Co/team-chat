@@ -188,8 +188,9 @@ icons drawn for this app on Lucide's grid (`assets/icons/drawn/`). macOS keeps S
 Looked at on a Mac with `TC_SVG_ICONS=1`, light and dark, next to the SF Symbol screens. Not
 seen on Windows.
 
-Drawn for this app (8): `circle-alert-fill`, `circle-check-fill`, `circle-x-fill`,
-`triangle-alert-fill`, `circle-fill`, `star-fill`, `pause-fill`, `desktop-mini`.
+Drawn for this app (10): `circle-alert-fill`, `circle-check-fill`, `circle-x-fill`,
+`triangle-alert-fill`, `circle-fill`, `star-fill`, `pause-fill`, `desktop-mini`,
+`gobackward-15`, `goforward-15`.
 
 | Concept (`Sym::`) | SF Symbol (macOS) | Windows icon | Uses |
 | --- | --- | --- | --- |
@@ -300,6 +301,8 @@ Drawn for this app (8): `circle-alert-fill`, `circle-check-fill`, `circle-x-fill
 | Terminal | `terminal` | Lucide `square-terminal` | 12 |
 | Retry | `arrow.counterclockwise` | Lucide `rotate-ccw` | 3 |
 | Refresh | `arrow.clockwise` | Lucide `rotate-cw` | 9 |
+| Back15 | `gobackward.15` | drawn `gobackward-15` | 1 |
+| Forward15 | `goforward.15` | drawn `goforward-15` | 1 |
 | Undo | `arrow.uturn.backward` | Lucide `undo-2` | 0 |
 | Link | `link` | Lucide `link` | 3 |
 | Code | `chevron.left.forwardslash.chevron.right` | Lucide `code` | 3 |
