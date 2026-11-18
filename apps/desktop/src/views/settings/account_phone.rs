@@ -367,10 +367,16 @@ impl PhoneSignIn {
                                     .child(offer.code.clone()),
                             )
                             .child(match state {
-                                PhoneOfferState::Waiting => {
-                                    status_line(s::PHONE_QR_WAITING.into(), k.secondary)
-                                        .into_any_element()
-                                }
+                                PhoneOfferState::Waiting => div()
+                                    .pt(tokens::space::S16)
+                                    .flex()
+                                    .items_center()
+                                    .gap(tokens::space::S6)
+                                    .n_body()
+                                    .text_color(k.secondary)
+                                    .child(crate::ui::motion::spinner().color(k.secondary))
+                                    .child(s::PHONE_QR_WAITING)
+                                    .into_any_element(),
                                 PhoneOfferState::Used { device_name } => div()
                                     .pt(tokens::space::S16)
                                     .flex()
