@@ -44,10 +44,12 @@ pub enum Section {
     Many,
     /// A 600-line diff, every kind of proof, long code.
     Long,
+    /// The answer record while my answer sits with the member.
+    Record,
 }
 
 impl Section {
-    pub const ALL: [Section; 16] = [
+    pub const ALL: [Section; 17] = [
         Section::States,
         Section::Choice,
         Section::Approve,
@@ -64,6 +66,7 @@ impl Section {
         Section::Load,
         Section::Many,
         Section::Long,
+        Section::Record,
     ];
 
     fn number(self) -> usize {
@@ -88,6 +91,7 @@ impl Section {
             Section::Load => c::GALLERY_S_LOAD,
             Section::Many => c::GALLERY_S_MANY,
             Section::Long => c::GALLERY_S_LONG,
+            Section::Record => c::GALLERY_S_RECORD,
         }
     }
 
@@ -109,6 +113,7 @@ impl Section {
             Section::Load => c::GALLERY_S_LOAD_NOTE,
             Section::Many => c::GALLERY_S_MANY_NOTE,
             Section::Long => c::GALLERY_S_LONG_NOTE,
+            Section::Record => c::GALLERY_S_RECORD_NOTE,
         }
     }
 }
@@ -764,6 +769,32 @@ impl CardsGallery {
                         c::GALLERY_LONG_CODE,
                         "",
                         self.card(CODE_LONG, d, me, None, "a", window, cx),
+                    ),
+                ],
+            ),
+            Section::Record => (
+                vec![
+                    item(
+                        c::GALLERY_RECORD_FRESH,
+                        "",
+                        self.card(RECORD_FRESH, d, me, None, "a", window, cx),
+                    ),
+                    item(
+                        c::GALLERY_RECORD_REFUSED,
+                        "",
+                        self.card(RECORD_REFUSED, d, me, None, "a", window, cx),
+                    ),
+                ],
+                vec![
+                    item(
+                        c::GALLERY_RECORD_SLOW,
+                        "",
+                        self.card(RECORD_SLOW, d, me, None, "a", window, cx),
+                    ),
+                    item(
+                        c::GALLERY_RECORD_SILENT,
+                        "",
+                        self.card(RECORD_SILENT, d, me, None, "a", window, cx),
                     ),
                 ],
             ),

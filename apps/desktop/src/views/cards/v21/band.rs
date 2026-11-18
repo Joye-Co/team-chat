@@ -498,7 +498,9 @@ pub fn pend_band(stage: interact::Stage, author: &str) -> Option<(String, String
             c::BUSY_LATER.to_string(),
             PendTone::Quiet,
         ),
-        S::OfflineLive | S::Busy => (c::BAND_FAILED.to_string(), words, PendTone::Bad),
+        S::OfflineLive | S::Busy | S::Forbidden | S::Rejected | S::Unhandled => {
+            (c::BAND_FAILED.to_string(), words, PendTone::Bad)
+        }
     })
 }
 

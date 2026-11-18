@@ -71,6 +71,15 @@ pub const DIFF_LONG: &str = "cv2-diff-long";
 pub const PROOF_KINDS: &str = "cv2-proof-kinds";
 /// A 40-line code block and a 300-column one.
 pub const CODE_LONG: &str = "cv2-code-long";
+/// My stored answer, just made: 撤回 shows.
+pub const RECORD_FRESH: &str = "cv2-record-fresh";
+/// My 撤回 came back refused: the member has started.
+pub const RECORD_REFUSED: &str = "cv2-record-refused";
+/// My answer the member has had for a while, and one it never picked up.
+pub const RECORD_SLOW: &str = "cv2-record-slow";
+pub const RECORD_SILENT: &str = "cv2-record-silent";
+/// The 话题 of the answered samples: nothing happens in it after the answers.
+pub const T_RECORD: &str = "t-cv2-record";
 /// The message of the 轻回应 example (sample data).
 pub const ACK_BODY: &str = "本地试了，没再出现重复。";
 
@@ -1258,8 +1267,51 @@ fn all() -> Vec<Sample> {
             ]
         }),
     ));
-    // --- inc-cards21: the Card v2.1 samples ---
+    // 16 答完以后: what the answer record says while the answer sits with the member.
     let now = crate::selftest::clock::now_ms();
+    for (id, ago) in [
+        (RECORD_FRESH, 10_000),
+        (RECORD_REFUSED, 20_000),
+        (RECORD_SLOW, 3 * 60_000),
+        (RECORD_SILENT, 25 * 60_000),
+    ] {
+        let mut s = sample(
+            id,
+            DEV,
+            T_RECORD,
+            FORGE,
+            now - ago - 60_000,
+            None,
+            choice_card(1),
+        );
+        s.answers.push(answer(
+            ME,
+            1,
+            "pick",
+            json!({ "style": "eight" }),
+            now - ago,
+        ));
+        if id == RECORD_REFUSED {
+            s.events.push(crate::data::cards_v2::MyCardEvent {
+                client_event_id: "ce-retract".into(),
+                request: crate::data::cards_v2::CardEventRequest {
+                    rev: 1,
+                    event: crate::views::cards::v21::interact::ANSWER_RETRACT.into(),
+                    ..Default::default()
+                },
+                durable: true,
+                sent_at: now - 5_000,
+                phase: crate::data::cards_v2::CardEventPhase::Failed {
+                    failure: crate::data::cards_v2::CardEventFailure::Conflict,
+                    at: now - 4_000,
+                },
+                dropped: false,
+                reply: None,
+            });
+        }
+        out.push(s);
+    }
+    // --- inc-cards21: the Card v2.1 samples ---
     out.extend(
         crate::views::cards::v21::samples::all()
             .into_iter()
@@ -1473,6 +1525,15 @@ impl SampleCards {
 
     /// Takes back `me`'s answer (the sample stands in for an answer that is
     /// still queued) or a refused one.
+    /// True when `me` has a stored answer to the card's rev (the sample team's 撤回).
+    pub fn can_retract(&self, message_id: &str, me: &str) -> bool {
+        self.lock().get(&Self::key(message_id)).is_some_and(|s| {
+            s.answers
+                .iter()
+                .any(|a| a.actor_id == me && a.rev == s.msg.card.rev)
+        })
+    }
+
     pub fn withdraw(&self, message_id: &str, me: &str) -> Option<(String, String)> {
         let mut map = self.lock();
         let s = map.get_mut(&Self::key(message_id))?;

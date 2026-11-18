@@ -315,6 +315,8 @@ pub struct CardForm {
     pub checks_all: bool,
     /// inc-cards21: rank orders, numbers and matrix rows.
     other: HashMap<String, Val>,
+    /// When the answer record redraws next (its wait stage changes).
+    pub wake_at: Option<std::time::Instant>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -354,6 +356,7 @@ impl CardForm {
             refs_all: false,
             checks_all: false,
             other: HashMap::new(),
+            wake_at: None,
             _subscriptions: Vec::new(),
         };
         for (k, v) in &s.initial {

@@ -118,6 +118,11 @@ pub const SCENES: &[Scene] = &[
         "Card v2 15 很长的内容: a 600-line diff folded to its first hunk, proofs with test counts, recordings, a 产出 and a link, and long code blocks",
         Section::Long
     ),
+    gallery_scene!(
+        "cards-v2-record",
+        "Card v2 16 答完以后: my stored answer with 撤回, a 撤回 the server refused, an answer the member has not started and one it never picked up with 提醒一下",
+        Section::Record
+    ),
     Scene {
         name: "cards-v2-topic",
         about: "The approval card of orderbot v2.14 上线 as a v2 card in its 话题",

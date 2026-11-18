@@ -17,7 +17,9 @@ use gpui_component::{
 use serde_json::Value;
 
 use super::{Ctx, choice_text, form::Field, meta, option_label, state::CardState};
+use crate::copy::cards21 as c21;
 use crate::ui::native::FocusRow as _;
+use crate::views::cards::v21::interact;
 use crate::{
     copy::{cards_v2 as c, fill},
     data::{
@@ -1617,6 +1619,37 @@ pub(crate) fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement
     let expanded = ctx.form.read(cx).expanded;
     let a = ctx.answerer();
     let form = ctx.form.clone();
+    let provider = ctx.env.provider.clone();
+    let events = provider.card_v2_events(&ctx.msg.group_id, &ctx.msg.message_id);
+    // 撤回 of a stored answer (DESIGN §7.10 answered): while the card is still answered
+    // (the member has set no status and sent no new rev) and the server knows the answer.
+    // The server has the last word: a refusal says the member has started.
+    let stored = mine && !sending;
+    let retract = interact::retract_state(&events).filter(|_| stored);
+    let can_retract = stored
+        && retract != Some(interact::Retract::Refused)
+        && provider.can_retract_card_v2_answer(&ctx.msg.group_id, &ctx.msg.message_id);
+    // An answer nobody picks up says so (the record would read 已发给 for ever).
+    let waiting =
+        record_wait(ctx, &events, stored.then_some(at).flatten(), cx).filter(|_| retract.is_none());
+    let retract_el = can_retract.then(|| {
+        let (g, t, m) = (
+            ctx.msg.group_id.clone(),
+            ctx.msg.topic_id.clone(),
+            ctx.msg.message_id.clone(),
+        );
+        let p = provider.clone();
+        quiet_button(ctx.id("retract"), c::CARD_UNDO, cx)
+            .loading(retract == Some(interact::Retract::Sending))
+            .on_click(move |_, _, _| p.retract_card_v2_answer(&g, &t, &m))
+            .into_any_element()
+    });
+    let remind_el = (waiting == Some(interact::AnswerStage::Silent)).then(|| {
+        let (a, author, name) = (a.clone(), ctx.msg.author_id.clone(), ctx.author.clone());
+        quiet_button(ctx.id("remind"), c21::RECORD_REMIND, cx)
+            .on_click(move |_, _, _| a.mention(&author, &name, c21::RECORD_REMIND_MESSAGE))
+            .into_any_element()
+    });
     let action_el = if sending && mine {
         Some(
             quiet_button(ctx.id("undo"), c::CARD_UNDO, cx)
@@ -1660,14 +1693,26 @@ pub(crate) fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement
         })
         .child(div().min_w(px(0.)).one_line().text_color(k.ink).child(text))
         .when(mine, |el| {
-            el.child(div().flex_none().text_color(k.ink_3).child(fill(
-                if sending {
-                    c::RECORD_SENDING_TO
-                } else {
-                    c::RECORD_SENT_TO
-                },
-                &[("name", &ctx.author)],
-            )))
+            // Where the answer is: on its way, with the member, or with a member who has
+            // not started (and, at the end, never took it).
+            let tail = match (retract, waiting) {
+                (Some(interact::Retract::Refused), _) => c::RECORD_UNDO_REFUSED,
+                (_, Some(interact::AnswerStage::Silent)) => c21::RECORD_NEVER_STARTED,
+                (_, Some(interact::AnswerStage::Slow)) => c21::RECORD_NOT_STARTED,
+                _ if sending => c::RECORD_SENDING_TO,
+                _ => c::RECORD_SENT_TO,
+            };
+            el.child(
+                div()
+                    .min_w(px(0.))
+                    .flex_shrink(1.)
+                    .one_line()
+                    .text_color(k.ink_3)
+                    .child(crate::ui::truncate::TruncText::new(fill(
+                        tail,
+                        &[("name", &ctx.author)],
+                    ))),
+            )
         })
         .child(
             div()
@@ -1686,6 +1731,8 @@ pub(crate) fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement
                         )
                     })
                 })
+                .children(remind_el)
+                .children(retract_el)
                 .children(action_el),
         );
     let details = (expanded).then(|| answered_fields(ctx, inputs.as_ref(), cx));
@@ -1701,6 +1748,64 @@ pub(crate) fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement
     } else {
         body.into_any_element()
     }
+}
+
+/// How long the member has had my stored answer of `at` without starting, or `None`: the
+/// member picked it up (a run in the 话题 since, or the 话题 moved on), the card has a
+/// status, or it is too soon. Schedules the redraw at the next stage.
+fn record_wait(
+    ctx: &Ctx,
+    events: &[crate::data::cards_v2::MyCardEvent],
+    at: Option<crate::data::Millis>,
+    cx: &mut App,
+) -> Option<interact::AnswerStage> {
+    let at = at?;
+    if ctx.card.status.is_some() || !matches!(ctx.state, CardState::Answered { .. }) {
+        return None;
+    }
+    let p = &ctx.env.provider;
+    let runs: Vec<crate::data::Millis> = p
+        .runs(&ctx.msg.group_id, &ctx.msg.topic_id)
+        .into_iter()
+        .filter(|r| r.bot_id == ctx.msg.author_id)
+        .map(|r| r.created_at)
+        .collect();
+    let activity = p
+        .topic(&ctx.msg.group_id, &ctx.msg.topic_id)
+        .map_or(0, |t| t.last_activity_at);
+    if interact::picked_up(at, &runs, activity) {
+        return None;
+    }
+    let now = ctx.env.now();
+    // A 2.1 answer's ack says how the member takes it; a 2.0 answer waits like a run.
+    let (stage, next) = match interact::answer_stage(events, now) {
+        (None, None) => {
+            interact::answer_stage_since(at, crate::data::cards_v2::ExpectMode::Run, now)
+        }
+        known => known,
+    };
+    if let Some(next) = next {
+        let wait = std::time::Duration::from_millis((next - now).max(0) as u64 + 20);
+        let due = std::time::Instant::now() + wait;
+        let form = ctx.form.clone();
+        let scheduled = form.read(cx).wake_at;
+        if scheduled.is_none_or(|w| {
+            w > due + std::time::Duration::from_millis(50) || w < std::time::Instant::now()
+        }) {
+            form.update(cx, |f, _| f.wake_at = Some(due));
+            cx.spawn(async move |cx: &mut gpui::AsyncApp| {
+                cx.background_executor().timer(wait).await;
+                cx.update(|cx| {
+                    form.update(cx, |f, cx| {
+                        f.wake_at = None;
+                        cx.notify();
+                    })
+                });
+            })
+            .detach();
+        }
+    }
+    stage
 }
 
 /// The submitted values as key-value rows.

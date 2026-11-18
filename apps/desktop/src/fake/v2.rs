@@ -2974,6 +2974,14 @@ impl ChatProvider for V2Samples {
             self.emit(vec![Change::Messages { group_id, topic_id }, Change::Todo]);
         }
     }
+    fn can_retract_card_v2_answer(&self, _group_id: &str, message_id: &str) -> bool {
+        self.cards_v2.can_retract(message_id, ME)
+    }
+    fn retract_card_v2_answer(&self, _group_id: &str, _topic_id: &str, message_id: &str) {
+        if let Some((group_id, topic_id)) = self.cards_v2.withdraw(message_id, ME) {
+            self.emit(vec![Change::Messages { group_id, topic_id }, Change::Todo]);
+        }
+    }
     // --- end cards v2 track ---
 
     // --- inc-refs track ---
