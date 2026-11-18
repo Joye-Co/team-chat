@@ -1836,7 +1836,8 @@ Rules:
 - `artifact.event`: a human member of the group; the version exists (`not_found`), its creator is
   a bot member of the group that is not deactivated (`forbidden`, reason `artifact.no_bridge`),
   and it declares `name` with that `kind` (`invalid`, reason `artifact.undeclared_event`); the
-  payload fits the schema. At most 5 events per member per second. The event goes to the version's
+  payload fits the schema. At most 5 events a second with bursts of 10, and 300 an hour, per
+  member and version (`rate_limited` with `retryAfterMs`). The event goes to the version's
   creator: transient `artifact.event` (SDK bots) or `run.interaction` / `run.input` (runner bots).
 - The desktop gives a page `emit`/`ask` only when its version was made by a bot of the group and
   declares events of that kind. Page events never approve anything: a bot that needs a decision
@@ -2010,6 +2011,14 @@ card. Past either limit the ack is `none`, `run.limit`. A stored answer always s
 An event a run was given and did not take before it ended is resolved for the emitter with
 `interaction.resolved {result: "failed"}`.
 
+Rates (`rate_limited`, with `retryAfterMs`; the limits are per server location, so a client
+may see a little more): one answer per member and message a second; live events 5 a second
+with bursts of 10 per member and message, and 120 a minute per member and group; `card.patch`
+1 a second with bursts of 3 per message. `clientEventId` and `clientPatchId` make a repeat
+within 24 hours the same event or patch (`duplicate: true`); after that the id is free again.
+An event to a card whose author was removed or deactivated is `forbidden`,
+`interact.no_responder`.
+
 Draft answers: an answer that submits `draft` blocks (a footer action whose inputs name them,
 or a 2.0 submit) stores `contentHash` in its `CardAnswer`: the sha256 (lowercase hex of the
 UTF-8 bytes) of the draft texts it approves, in card order, each the edited text when edited,
@@ -2092,6 +2101,11 @@ transient artifact.reply: { groupId, eventId, ok, payload?, error? }            
 GET /v1/artifacts/:id/versions/:v/data  -> ArtifactDataResponse { data: JSON | null, dataRev, updatedAt }
 PUT /v1/artifacts/:id/versions/:v/data  PutArtifactDataRequest { data, baseDataRev?, cause? } -> ArtifactDataAck { dataRev }
 ```
+
+Rates: `artifact.data` 2 a second with bursts of 4 per version (`rate_limited` with
+`retryAfterMs`; push the newest data after the wait). `artifact.reply` is accepted within 120 s
+of its ask (`conflict`, `artifact.reply_closed` after that: push the result with
+`artifact.data`).
 
 A page `ask` that no run of the version's runner member will answer (the run ended and none is
 open in the topic) gets `artifact.reply` from that member at once: `ok: false`, `error { code:

@@ -168,6 +168,88 @@ describe("live card events", () => {
   });
 });
 
+describe("limits of card events", () => {
+  it("refuse an event to a card whose author cannot respond", async () => {
+    const { alice, bot, gid, ca, cbot } = await setup();
+    const m = (await send(cbot, gid, report([alice.id]))).message;
+    await env.DB.prepare("UPDATE members SET deactivated = 1 WHERE id = ?").bind(bot.id).run();
+    await (roomOf(gid) as unknown as { rpc(g: string, name: string, actor: null, args: unknown): Promise<unknown> }).rpc(gid, "cards.directoryChanged", null, {});
+    const select = { blockId: "trend", event: "chart.select", value: { series: "oct", x: "10-13", y: 12, index: 1 } };
+    expect(await ev(ca, gid, m.id, select)).toMatchObject({ ok: false, error: { code: "forbidden", reason: "interact.no_responder" } });
+    // An answer is refused the same way: nobody would act on it.
+    expect(await ev(ca, gid, m.id, { actionId: "send", event: "action.press", inputs: { check: { value: "ok" } } })).toMatchObject({
+      ok: false,
+      error: { code: "forbidden", reason: "interact.no_responder" },
+    });
+    for (const c of [ca, cbot]) c.close();
+  });
+
+  it("take one answer per member and message a second, and live events at 5 a second with bursts of 10", async () => {
+    const { alice, bob, gid, ca, cbot } = await setup();
+    const poll: CardV2 = {
+      v: 2,
+      catalog: "tc.card/2.1",
+      rev: 1,
+      intent: "ask",
+      title: "周五团建去哪？",
+      fallback: "周五团建去哪？",
+      ask: { from: ["owners"], blocking: false },
+      blocks: [
+        {
+          id: "where",
+          type: "poll",
+          label: "去哪",
+          options: [{ id: "a", label: "爬山" }, { id: "b", label: "火锅" }],
+          voters: [alice.id, bob.id],
+          closesAt: Date.now() + 60_000,
+          public: true,
+          changeable: true,
+          fallbackText: "投票：爬山或火锅",
+        },
+      ],
+    };
+    const p = (await send(cbot, gid, poll)).message;
+    expect(await ev(ca, gid, p.id, { blockId: "where", event: "choice.submit", value: { value: "a" } })).toMatchObject({ ok: true, result: { stored: true } });
+    const second = await ev(ca, gid, p.id, { blockId: "where", event: "choice.submit", value: { value: "b" } });
+    expect(second).toMatchObject({ ok: false, error: { code: "rate_limited" } });
+    expect(second.error.retryAfterMs).toBeGreaterThan(0);
+    expect(second.error.retryAfterMs).toBeLessThanOrEqual(1000);
+    // The refused vote changed nothing.
+    const kept = await ca.request({ t: "history", groupId: gid, topicId: p.topicId });
+    expect(kept.messages.find((x: any) => x.id === p.id).cardState.tally).toEqual({ a: 1, b: 0 });
+
+    // Live events: 10 at once, then 5 a second.
+    const m = (await send(cbot, gid, report([alice.id]))).message;
+    const burst = await Promise.all(
+      Array.from({ length: 14 }, (_, i) => ev(ca, gid, m.id, { blockId: "trend", event: "chart.select", value: { series: "oct", x: "10-13", y: 12, index: 1 }, clientEventId: `burst-${i}` })),
+    );
+    const taken = burst.filter((r) => r.ok);
+    const limited = burst.filter((r) => !r.ok);
+    expect(taken.length).toBeGreaterThanOrEqual(10);
+    expect(taken.length).toBeLessThanOrEqual(11);
+    expect(limited.every((r) => r.error.code === "rate_limited" && r.error.retryAfterMs > 0 && r.error.retryAfterMs <= 200)).toBe(true);
+    for (const c of [ca, cbot]) c.close();
+  });
+
+  it("take a client event id again once its first use is older than a day", async () => {
+    const { alice, gid, ca, cbot } = await setup();
+    const m = (await send(cbot, gid, report([alice.id]))).message;
+    const select = { blockId: "trend", event: "chart.select", value: { series: "oct", x: "10-13", y: 12, index: 1 }, clientEventId: "same-id" };
+    const first = await ev(ca, gid, m.id, select);
+    expect(first).toMatchObject({ ok: true });
+    expect(await ev(ca, gid, m.id, select)).toMatchObject({ ok: true, result: { eventId: first.result.eventId, duplicate: true } });
+    // The row outlives the 24 h window (pruning runs only now and then).
+    await runInDurableObject(roomOf(gid), async (_o, state) => {
+      state.storage.sql.exec("UPDATE card_events SET at = at - ? WHERE event_id = ?", 25 * 3600_000, first.result.eventId);
+    });
+    const again = await ev(ca, gid, m.id, select);
+    expect(again, JSON.stringify(again)).toMatchObject({ ok: true, result: { stored: false } });
+    expect(again.result.eventId).not.toBe(first.result.eventId);
+    expect(again.result.duplicate).toBeUndefined();
+    for (const c of [ca, cbot]) c.close();
+  });
+});
+
 describe("answers and card state", () => {
   it("store card.answered and message.updated with the state and the v1 card, once, and check expiry and the decision surface", async () => {
     const { alice, bob, bot, gid, ca, cb, cbot } = await setup();
