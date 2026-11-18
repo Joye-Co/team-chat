@@ -880,3 +880,44 @@ describe("page event declarations", () => {
     expect(() => checkArtifactEvents([{ name: "form.submit", schema: { type: "string", pattern: "^[a-z]{1,8}$" } }])).not.toThrow();
   });
 });
+
+describe("ChatError details", () => {
+  test("an HTTP error keeps the server's retryAfterMs and memberIds", async () => {
+    const body = { error: { code: "rate_limited", message: "slow down", retryAfterMs: 1200, memberIds: [HUMAN_ID, 7] } };
+    const http = new HttpClient({ url: "http://127.0.0.1:1", token: "t", fetch: (async () => new Response(JSON.stringify(body), { status: 429 })) as never });
+    const err = (await http.me().catch((e) => e)) as ChatError;
+    expect(err).toBeInstanceOf(ChatError);
+    expect(err.code).toBe("rate_limited");
+    expect(err.status).toBe(429);
+    expect(err.retryAfterMs).toBe(1200);
+    expect(err.memberIds).toEqual([HUMAN_ID]);
+    const plain = new ChatError("invalid", "x", 400, "some.reason");
+    expect(plain.retryAfterMs).toBeUndefined();
+    expect(plain.memberIds).toBeUndefined();
+    expect(plain.reason).toBe("some.reason");
+  });
+
+  test("a rate-limited HTTP send waits the server's retryAfterMs before the next try", async () => {
+    const times: number[] = [];
+    const http = new HttpClient({ url: "http://127.0.0.1:1", token: "t", fetch: (async () => {
+      times.push(Date.now());
+      if (times.length === 1) return new Response(JSON.stringify({ error: { code: "rate_limited", message: "slow down", retryAfterMs: 900 } }), { status: 429 });
+      return new Response(JSON.stringify({ message: message({ id: "01JC0MSG000000000000000070" }) }), { status: 200 });
+    }) as never });
+    await http.postMessage(GROUP_ID, { body: "hi" });
+    expect(times).toHaveLength(2);
+    expect((times[1] as number) - (times[0] as number)).toBeGreaterThanOrEqual(850);
+  });
+
+  test("a refused frame keeps memberIds and retryAfterMs from ack.error", async () => {
+    const server = new FakeServer();
+    server.on("send", () => ({ ok: false, error: { code: "invalid", message: "not available", reason: "relay.member_unavailable", memberIds: [HUMAN_ID] } }) as Reply);
+    server.on("react", () => ({ ok: false, error: { code: "forbidden", message: "no", retryAfterMs: 300 } }) as Reply);
+    const bot = await start(server);
+    const err = (await bot.send({ groupId: GROUP_ID, topicId: TOPIC_ID }, "hi").catch((e) => e)) as ChatError;
+    expect(err.reason).toBe("relay.member_unavailable");
+    expect(err.memberIds).toEqual([HUMAN_ID]);
+    const err2 = (await bot.react(GROUP_ID, "01JC0MSG000000000000000071", "👀").catch((e) => e)) as ChatError;
+    expect(err2.retryAfterMs).toBe(300);
+  });
+});

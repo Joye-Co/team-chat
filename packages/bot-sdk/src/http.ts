@@ -25,7 +25,7 @@ import type {
   SendResult,
 } from "@chat/protocol";
 import { MAX_FILE_BYTES, PutArtifactMediaRequest } from "@chat/protocol";
-import { ChatError, isRetryable } from "./errors.ts";
+import { ChatError, errorDetails, isRetryable } from "./errors.ts";
 import { checkArtifactEvents } from "./pattern.ts";
 
 export interface HttpClientOptions {
@@ -56,6 +56,13 @@ export function normalizeBaseUrl(url: string): string {
   const u = new URL(url);
   if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("server url must be http:// or https://");
   return u.toString().replace(/\/+$/, "");
+}
+
+/** Wait before try `i + 1`: the server's `retryAfterMs` when it is longer than the backoff (at most 30 s). */
+function retryDelay(err: unknown, i: number): number {
+  const backoff = Math.min(8000, 500 * 2 ** (i - 1));
+  const asked = err instanceof ChatError ? err.retryAfterMs : undefined;
+  return asked === undefined ? backoff : Math.min(30_000, Math.max(backoff, asked));
 }
 
 async function toBytes(data: Uint8Array | ArrayBuffer | Blob): Promise<Uint8Array> {
@@ -124,7 +131,7 @@ export class HttpClient {
     if (!res.ok) {
       const e = (data as { error?: { code?: string; message?: string; reason?: string } } | undefined)?.error;
       const code = (e?.code as ChatError["code"]) ?? (res.status === 401 ? "unauthorized" : res.status >= 500 ? "internal" : "invalid");
-      throw new ChatError(code, e?.message ?? `HTTP ${res.status}`, res.status, typeof e?.reason === "string" ? e.reason : undefined);
+      throw new ChatError(code, e?.message ?? `HTTP ${res.status}`, res.status, typeof e?.reason === "string" ? e.reason : undefined, errorDetails(e));
     }
     return data as T;
   }
@@ -159,7 +166,7 @@ export class HttpClient {
         return await this.request<SendResult>("POST", `/v1/groups/${encodeURIComponent(groupId)}/messages`, { json: body });
       } catch (err) {
         if (i >= attempts || !isRetryable(err)) throw err;
-        await new Promise((r) => setTimeout(r, Math.min(8000, 500 * 2 ** (i - 1))));
+        await new Promise((r) => setTimeout(r, retryDelay(err, i)));
       }
     }
   }
@@ -175,7 +182,7 @@ export class HttpClient {
         return await fn();
       } catch (err) {
         if (i >= attempts || !isRetryable(err)) throw err;
-        await new Promise((r) => setTimeout(r, Math.min(8000, 500 * 2 ** (i - 1))));
+        await new Promise((r) => setTimeout(r, retryDelay(err, i)));
       }
     }
   }

@@ -95,6 +95,10 @@ await bot.start();
   (`writeRate`; the server allows about 20 per member), so a burst of 50 sends lands in order.
   Rate-limited writes are retried after the server's `retryAfterMs`. A request fails with `timeout` after
   `requestTimeoutMs` (60 s). Frames are checked against the protocol schemas before sending.
+- **Errors**: a failed call throws `ChatError` with the server's `code` and, when the server
+  sends them, `reason`, `retryAfterMs` (how long to wait after `rate_limited`) and `memberIds`
+  (the members a reason such as `relay.member_unavailable` is about). HTTP calls also set
+  `status`. `isRetryable(err)` is true for `network`, `timeout`, `internal` and `rate_limited`.
 - **Streaming**: `send` with `streaming: true`, `delta` frames batched every 100 ms, and a final
   `edit` with the full body and `streaming: false`. After a reconnect the writer sends the full
   text again so readers miss nothing.
@@ -549,6 +553,9 @@ bun examples/echo-bot.ts          # 或者:node examples/echo-bot.ts
   owner 的,都会自动关注。用 `bot.setFollow(...)` 修改。
 - **写操作**会等连接可用,重连后重发(`send` 按 `clientMsgId` 幂等);被限流的写操作会重试;
   超过 `requestTimeoutMs`(60 秒)报 `timeout`。发送前先用协议 schema 校验。
+- **错误**:调用失败时抛出 `ChatError`,带服务器的 `code`;服务器给了的话还有 `reason`、
+  `retryAfterMs`(被限流后要等多久)和 `memberIds`(例如 `relay.member_unavailable` 说的是哪些
+  成员)。HTTP 调用还有 `status`。
 - **流式回复**:`send` 带 `streaming: true`,每 100 毫秒合并发一次 `delta`,最后 `edit` 发完整
   正文并设 `streaming: false`。重连后会补发一次完整文本,读者不会漏内容。
 

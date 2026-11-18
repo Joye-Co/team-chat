@@ -40,7 +40,7 @@ import {
   type TransientEvent,
 } from "@chat/protocol";
 import { answeredCard, checkCardV2, type DoneCardOptions, doneCard, failedV1Card } from "./cards.ts";
-import { ChatError } from "./errors.ts";
+import { ChatError, errorDetails } from "./errors.ts";
 import { HttpClient, normalizeBaseUrl, type UploadInput } from "./http.ts";
 import { opsFit, opsOf, type PatchInput } from "./interact.ts";
 import { findBlock as findRefBlock, findPart, stripRefPrefix } from "./refs.ts";
@@ -1482,7 +1482,7 @@ export class Bot {
       }
       this.pending.delete(rid);
       clearTimeout(p.timer);
-      p.reject(new ChatError(e.code, e.message, undefined, typeof e.reason === "string" ? e.reason : undefined));
+      p.reject(new ChatError(e.code, e.message, undefined, typeof e.reason === "string" ? e.reason : undefined, errorDetails(e)));
       return;
     }
     this.pending.delete(rid);
