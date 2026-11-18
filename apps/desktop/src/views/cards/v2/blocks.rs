@@ -2387,17 +2387,14 @@ pub(crate) fn input_control(
                 .form
                 .update(cx, |f, cx| f.field(id, None, false, window, cx));
             let value = field.text(cx);
-            let (form, target) = (ctx.form.clone(), field);
+            let (form, block) = (ctx.form.clone(), id.to_string());
             let (picker, focused) = ui::native::fields::date_field(
                 ctx.id(format!("date-{id}")),
                 &value,
                 placeholder.unwrap_or(c::FORM_DATE_PLACEHOLDER),
                 !live,
                 move |text, window, cx| {
-                    if let super::form::Field::Line(s) = &target {
-                        s.update(cx, |s, cx| s.set_value(text, window, cx));
-                    }
-                    form.update(cx, |_, cx| cx.notify());
+                    form.update(cx, |f, cx| f.set_line(&block, text, window, cx));
                 },
                 window,
                 cx,
