@@ -102,7 +102,7 @@ impl RenderOnce for Segmented {
                         .text_color(ink)
                         .whitespace_nowrap()
                         .child(l.clone())
-                        .child(super::badge::CountPill::new(*n))
+                        .child(super::badge::CountPill::new(*n).on_fill(!selected))
                         .into_any_element(),
                     Segment::Symbol(sf, _) => symbol(*sf, icon::MD, Weight::Regular, ink, window),
                 };
