@@ -381,7 +381,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "settings-notifications",
-        about: "Settings: 通知 per 群 and followed 话题",
+        about: "Settings: 通知, 提醒我 and 勿扰",
         start: Start::SignedIn,
         setup: |_, _| {},
         open: settings_scenes::open_notifications,
@@ -430,7 +430,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "settings-notifications-end",
-        about: "Settings: 通知 scrolled to the end: the 私聊 table and 关注的话题",
+        about: "Settings: 通知 with 每日摘要 and 勿扰 turned on",
         start: Start::SignedIn,
         setup: |_, _| {},
         open: settings_scenes::open_notifications_end,
@@ -631,7 +631,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "group-menu",
-        about: "The menu of a 群 row in the sidebar (right-click): 静音, 提醒 ▸, 重命名群…, 添加成员, 离开群",
+        about: "The menu of a 群 row in the sidebar (right-click): 静音, 提醒 ▸, 重命名…, 添加成员, 离开群",
         start: Start::SignedIn,
         setup: open_first_topic,
         open: crate::views::nav::selftest::scenes::group_menu,

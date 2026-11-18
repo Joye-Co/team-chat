@@ -624,15 +624,16 @@ pub mod scenes {
         cx: &mut App,
     ) -> Result<AnyWindowHandle, String> {
         over_main(services, content, cx, |services, window, cx| {
-            let group = services
-                .provider
-                .groups()
-                .into_iter()
-                .find(|g| g.kind == crate::data::GroupKind::Group);
-            if let Some(g) = group
-                && let Some(t) = services.provider.topics(&g.id).into_iter().next()
+            // The 话题 the window shows, so the sheet renames what is open.
+            let open = services.nav.read(cx).topic.clone();
+            if let Some((g, id)) = open
+                && let Some(t) = services
+                    .provider
+                    .topics(&g)
+                    .into_iter()
+                    .find(|t| t.id == id)
             {
-                crate::views::topic_menu::open_rename(services, &g.id, &t, window, cx);
+                crate::views::topic_menu::open_rename(services, &g, &t, window, cx);
             }
         })
     }

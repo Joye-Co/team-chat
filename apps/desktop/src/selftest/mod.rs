@@ -559,6 +559,24 @@ async fn shoot(
             if frames == 3 && !settled {
                 cx.background_executor().timer(options.settle).await;
                 settled = true;
+                // A sheet or alert that the scene opens from a timer (the
+                // settings window fits its size first) can start its
+                // entrance late in the settle pause. Draw it and let the
+                // entrance run out, so no capture shows a half-faded sheet
+                // with the page reading through it.
+                let dialog = cx.update(|cx| {
+                    handle
+                        .update(cx, |_, window, cx| {
+                            gpui_component::WindowExt::has_active_dialog(window, cx)
+                        })
+                        .unwrap_or(false)
+                });
+                if dialog {
+                    let _ = next_frame(handle, cx).await;
+                    cx.background_executor()
+                        .timer(crate::theme::motion::SLOW * 2)
+                        .await;
+                }
             }
             // A key scene parks the pointer once, before its keys.
             if frames == 0 || !interact::keys_only(scene.name) {

@@ -53,7 +53,8 @@ const STEPS: &[(&str, Steps)] = &[
     ("state-card-tooltip", hover(900., 530., 1200)),
     // --- end t5-cards ---
     // --- r1-kit ---
-    ("state-hover-sidebar", hover(120., 225., 300)),
+    // On a 话题 row (the 群 header above it has no hover fill).
+    ("state-hover-sidebar", hover(120., 243., 300)),
     (
         "state-key-sidebar",
         Steps {
@@ -79,12 +80,21 @@ const STEPS: &[(&str, Steps)] = &[
     // --- v16/c-cards ---
     ("state-hover-page-row", hover(535., 201., 300)),
     ("state-hover-artifact-row", hover(893., 189., 300)),
-    // ⇧Tab ×2 reaches the last row's "⋯"; ↑ ×3 walks to the first row and
+    // ⇧Tab ×3 goes back over the footer (the pager, the 每页 select) to the
+    // last row's "⋯"; ↑ ×3 walks to the first row and
     // ↓ to the second. The arrows step row to row, never to a "⋯" (K-14):
     // with a "⋯" in the arrow order the ring would land on row 2's "⋯".
     (
         "state-focus-artifact-row",
-        keys(&["shift-tab", "shift-tab", "up", "up", "up", "down"]),
+        keys(&[
+            "shift-tab",
+            "shift-tab",
+            "shift-tab",
+            "up",
+            "up",
+            "up",
+            "down",
+        ]),
     ),
     // (The 通知 pane lost its 按群设置 navigation row when 群 and 话题 got their own
     // notification settings; its rows are switches and pop-ups now, with no row hover.)
