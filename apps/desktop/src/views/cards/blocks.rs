@@ -406,8 +406,14 @@ fn render_table(
                 None => el.into_any_element(),
             }
         }))
-        .when_some(table_refs.as_ref(), |el, r| {
-            el.child(r.row_end_over(ri, cx))
+        .when_some(table_refs.as_ref().filter(|_| !beside), |el, r| {
+            let inset = crate::ui::native::tokens::space::S12;
+            let cover = crate::views::refs::markdown::cover_width(
+                widths.iter().skip(1).rev().copied(),
+                f32::from(inset),
+            );
+            let surface = crate::ui::native::native_colors(cx).sheet;
+            el.child(r.row_end_over(ri, cover, inset, surface, cx))
         })
     });
     div()

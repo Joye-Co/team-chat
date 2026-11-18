@@ -1193,15 +1193,19 @@ fn table_content(
             // A name too long for 问这里 beside it gets it at the row end, over the row, so
             // the number columns stay at the right edge (Interact.dc.html 02).
             .when_some(refs.filter(|_| !beside), |el, (rf, _)| {
-                el.relative().child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .bottom_0()
-                        .right_0()
-                        .flex()
-                        .child(rf.row_end(ri, cx)),
-                )
+                // From the row's right end: its padding, then each column and its gap.
+                let cells = (1..columns.len()).rev().map(|ci| {
+                    let w = widths
+                        .get(ci)
+                        .copied()
+                        .flatten()
+                        .unwrap_or(m::TABLE_COL_MIN);
+                    f32::from(w + space::S12)
+                });
+                let cover = crate::views::refs::markdown::cover_width(cells, 0.);
+                let surface = ui::native::native_colors(cx).sheet;
+                el.relative()
+                    .child(rf.row_end_over(ri, cover, px(0.), surface, cx))
             })
         }))
 }

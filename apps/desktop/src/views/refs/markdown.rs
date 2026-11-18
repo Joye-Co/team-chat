@@ -56,8 +56,8 @@ pub const ROW_BUTTON_SLOT: f32 = 96.;
 
 /// The gap between a row's name and its 问这里 (Refs.dc.html).
 const NAME_GAP: f32 = 10.;
-/// The width of the 问这里 button (icon, label and padding at the extra-small size).
-const ASK_PILL: f32 = 68.;
+/// The width of the 问这里 button (icon, label and padding at the small size).
+const ASK_PILL: f32 = 92.;
 /// The room a table with references adds to its first column, so 问这里 fits after a
 /// row's name.
 pub const NAME_ROOM: f32 = NAME_GAP + ASK_PILL;
@@ -66,6 +66,20 @@ thread_local! {
     /// The first column's inner width of each table at its last paint, by table prefix.
     static FIRST_COL: std::cell::RefCell<std::collections::HashMap<String, f32>> =
         std::cell::RefCell::default();
+}
+
+/// How far from a row's right end [`TableRefs::row_end_over`] hides the cells: whole cells,
+/// last first (`trailing`, their widths), until the button `inset` from that end has room.
+pub fn cover_width(trailing: impl IntoIterator<Item = f32>, inset: f32) -> f32 {
+    let need = ROW_BUTTON_SLOT + inset;
+    let mut width = 0.;
+    for cell in trailing {
+        if width >= need {
+            break;
+        }
+        width += cell;
+    }
+    width.max(need)
 }
 
 /// The references of one table: `target` builds the reference of a cell, row or column.
@@ -119,12 +133,35 @@ impl TableRefs {
             })
     }
 
-    /// True when 问这里 of a row sits right after its name. It never does now: the
-    /// row's action has one place, the row end (§2.6, E3), so it does not land over
-    /// the data column next to the name. Kept as the one switch the table renderers
-    /// ask.
-    pub fn beside(&self, _name: &str, _inner: Option<f32>, _window: &Window) -> bool {
-        false
+    /// True when 问这里 of a row sits right after its name (DESIGN.md: the row end is only
+    /// for a name that leaves no room), so it covers none of the row's values. `inner` is the
+    /// first column's width inside its padding; `None` takes the width the column had at its
+    /// last paint ([`TableRefs::measure`]).
+    pub fn beside(&self, name: &str, inner: Option<f32>, window: &Window) -> bool {
+        let Some(inner) =
+            inner.or_else(|| FIRST_COL.with(|m| m.borrow().get(&self.prefix).copied()))
+        else {
+            return false;
+        };
+        let style = window.text_style();
+        let run = gpui::TextRun {
+            len: name.len(),
+            font: style.font(),
+            color: style.color,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        let w = window
+            .text_system()
+            .shape_line(
+                gpui::SharedString::from(name.to_string()),
+                theme::type_scale::SMALL.0,
+                &[run],
+                None,
+            )
+            .width;
+        f32::from(w) + NAME_GAP + ASK_PILL <= inner
     }
 
     /// 问这里 after the row's name, for the hovered cell of `row` (see [`TableRefs::beside`]).
@@ -143,7 +180,7 @@ impl TableRefs {
                 .h(px(0.))
                 .flex()
                 .items_center()
-                .child(super::affordance::inline_button(
+                .child(super::affordance::inline_button_flat(
                     &id,
                     Rc::new(move |_: &App| {
                         target(TablePick::Cell { row, col }).unwrap_or_else(super::empty_target)
@@ -172,18 +209,35 @@ impl TableRefs {
         .into_any_element()
     }
 
-    /// [`Self::row_end`] floating over the row at the frame's right inset, so the last
-    /// column reaches that inset at rest (§2.7). The button is opaque and covers the last
-    /// value only while its row is hovered. Put it in a row that is `relative`.
-    pub fn row_end_over(&self, row: usize, cx: &App) -> AnyElement {
+    /// [`Self::row_end`] floating over the row, `inset` from its right end, for a name that
+    /// leaves no room beside it: the last column reaches the frame's inset at rest (§2.7).
+    /// While the button shows, a backing in the hovered row's color hides the `cover` points
+    /// of whole cells under it ([`cover_width`]), so no cut value is left beside the button.
+    /// `surface` is what the row lies on. Put it in a row that is `relative`.
+    pub fn row_end_over(
+        &self,
+        row: usize,
+        cover: f32,
+        inset: gpui::Pixels,
+        surface: gpui::Hsla,
+        cx: &App,
+    ) -> Div {
+        let shown = matches!(self.hovered_in(row, cx), Some((_, true)));
+        let fill = crate::ui::native::native_colors(cx).fill;
+        let backing = gpui::Hsla {
+            a: 1.,
+            ..theme::card_v2::mix(fill, surface, fill.a * 0.5)
+        };
         div()
             .absolute()
             .top_0()
             .bottom_0()
-            .right(space::S12)
+            .right_0()
+            .pr(inset)
             .flex()
+            .justify_end()
+            .when(shown, |d| d.w(px(cover)).bg(backing))
             .child(self.row_end(row, cx))
-            .into_any_element()
     }
 
     /// The slot at the end of a row: 问这里 for the hovered cell, at the row's right end
@@ -577,8 +631,12 @@ pub fn table(
                 None => el.into_any_element(),
             });
         }
-        if let Some(r) = refs {
-            line = line.child(r.row_end_over(ri, cx));
+        if let Some(r) = refs.filter(|_| !beside) {
+            let cover = cover_width(widths.iter().skip(1).rev().copied(), f32::from(space::S12));
+            line = line.child(
+                r.row_end_over(ri, cover, space::S12, n.window, cx)
+                    .when(ri + 1 == count, |d| d.rounded_br(inner_radius)),
+            );
         }
         line
     });
