@@ -236,6 +236,32 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
     out
 }
 
+/// True when the last thing in the card's body is a list of references with no 看全部
+/// under it: its last row brings [`REF_ROW_PAD`] of its own to the card's bottom inset.
+pub(crate) fn ends_in_ref_list(ctx: &Ctx, cx: &App) -> bool {
+    let blocks: Vec<&CardV2Block> = ctx
+        .card
+        .blocks
+        .iter()
+        .filter(|b| !matches!(b, CardV2Block::Unknown))
+        .collect();
+    let done = ctx.card.intent == CardIntent::Done;
+    let (blocks, folded) = if done {
+        done_order(blocks)
+    } else {
+        (blocks, Vec::new())
+    };
+    if !folded.is_empty() || no_evidence(ctx, cx).is_some() {
+        return false;
+    }
+    let run = blocks
+        .iter()
+        .rev()
+        .take_while(|b| matches!(b, CardV2Block::Ref { .. }))
+        .count();
+    run > 0 && run <= REFS_CAP + 1 && !blocks.last().is_some_and(|b| done && is_output(b))
+}
+
 /// Where the row of metrics that starts at `start` ends, in a run that ends at `run_end`:
 /// [`m::METRICS_PER_ROW`] metrics share a row, so no metric of a longer run is dropped.
 fn metric_row_end(start: usize, run_end: usize) -> usize {
@@ -505,6 +531,15 @@ fn outputs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
             ),
         };
         let gone = detail.is_none();
+        // The version the pane already shows says so; another version still opens.
+        let in_pane = detail.as_ref().is_some_and(|a| {
+            crate::views::artifacts::host::version_in_pane(
+                artifact_id,
+                *version,
+                a.summary.version,
+                cx,
+            )
+        });
         let a = ctx.answerer();
         let t = target.clone();
         Some(
@@ -531,15 +566,6 @@ fn outputs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                 .child(crate::ui::native::media_box(icon, cx))
                 .child(
                     div()
-        // The version the pane already shows says so; another version still opens.
-        let in_pane = detail.as_ref().is_some_and(|a| {
-            crate::views::artifacts::host::version_in_pane(
-                artifact_id,
-                *version,
-                a.summary.version,
-                cx,
-            )
-        });
                         .flex_1()
                         .min_w_0()
                         .flex()
@@ -1851,7 +1877,8 @@ pub(crate) fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement
         .flex()
         .items_center()
         .gap(space::S8)
-        .min_h(px(24.))
+        // The height of its 撤回 / 提醒一下, so the card keeps its height when they go.
+        .min_h(crate::ui::native::tokens::metrics::BUTTON_SMALL)
         .text_size(crate::ui::native::tokens::text::UI.0)
         .line_height(px(18.))
         .child(if sending {
@@ -3744,7 +3771,9 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
                 .items_center()
                 .gap(space::S8)
                 .text_color(k.ink)
-                .when_some(glyph, |el, (g, c)| el.child(ui::icon(g, px(14.), c)))
+                .when_some(glyph, |el, (g, c)| {
+                    el.child(ui::icon(g, crate::ui::native::tokens::icon::MARK, c))
+                })
                 .child(div().min_w(px(0.)).child(label))
                 // A line that opens says so like a chip does: the ↗ after its label,
                 // underlined on hover.
@@ -3764,7 +3793,15 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
                 .flex_col()
                 .gap(space::S2)
                 .child(div().flex().child(head))
-                .child(meta(div()).text_color(k.ink_3).child(d.clone()));
+                // The detail stands under the label; the mark hangs before both.
+                .child(
+                    meta(div())
+                        .when(glyph.is_some(), |el| {
+                            el.pl(crate::ui::native::tokens::icon::MARK + space::S8)
+                        })
+                        .text_color(k.ink_3)
+                        .child(d.clone()),
+                );
             lines.push(ref_parts::wrap_opt(
                 bp.as_ref(),
                 Pick::Evidence,
@@ -3921,7 +3958,14 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
             el.child(div().flex().flex_col().gap(space::S8).children(lines))
         })
         .when(!chips.is_empty(), |el| {
-            el.child(div().flex().flex_wrap().gap(space::S6).children(chips))
+            el.child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_x(space::S16)
+                    .gap_y(space::S4)
+                    .children(chips),
+            )
         })
         .into_any_element()
 }
@@ -3999,20 +4043,14 @@ fn no_evidence(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
 
 fn ref_tile(glyph: Sym, dashed: bool, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
-    div()
-        .flex_none()
-        .size(px(20.))
-        .flex()
-        .items_center()
-        .justify_center()
-        // A plain `secondary` symbol, no tile (NATIVE.md §6); a missing
-        // target reads `tertiary`.
-        .child(ui::icon(
-            glyph,
-            px(18.),
-            if dashed { k.ink_3 } else { k.ink_2 },
-        ))
-        .into_any_element()
+    // A plain `secondary` symbol, no tile (NATIVE.md §6); a missing target
+    // reads `tertiary`.
+    ui::icon(
+        glyph,
+        crate::ui::native::tokens::icon::MD,
+        if dashed { k.ink_3 } else { k.ink_2 },
+    )
+    .into_any_element()
 }
 
 /// How a PR ref's state reads: its icon and color.
@@ -4307,20 +4345,19 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                 .items_center()
                 .gap(space::S12)
                 .min_h(px(44.))
-                .py(space::S8)
+                .py(REF_ROW_PAD)
                 .when(!gone, |el| {
                     el.focus_row(false, cx)
                         .on_click(move |_, window, cx| a.open(&t, window, cx))
                 })
                 // One 24 media column for every kind, so every name starts
-                // at one x (F4).
+                // at one x (F4); the lead starts on the card title's edge.
                 .child(
                     div()
                         .flex_none()
                         .size(px(24.))
                         .flex()
                         .items_center()
-                        .justify_center()
                         .child(lead),
                 )
                 .child(
@@ -4410,6 +4447,9 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
 
 /// Rows a ref list shows before its 看全部 footer row.
 const REFS_CAP: usize = 5;
+
+/// The padding above and below the text of a ref row.
+pub(crate) const REF_ROW_PAD: gpui::Pixels = space::S8;
 
 #[cfg(test)]
 mod tests {

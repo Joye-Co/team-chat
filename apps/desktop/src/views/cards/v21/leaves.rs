@@ -1060,7 +1060,14 @@ pub fn image_choice(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                                 img(p)
                                     .size_full()
                                     .object_fit(ObjectFit::Cover)
-                                    .rounded(crate::ui::native::tokens::radius::CONTROL),
+                                    // Inside the chosen tile's 2 pt border it follows the
+                                    // border's inner curve.
+                                    .rounded(if on {
+                                        crate::ui::native::tokens::radius::CONTROL
+                                            - crate::ui::native::tokens::metrics::HAIRLINE * 2.
+                                    } else {
+                                        crate::ui::native::tokens::radius::CONTROL
+                                    }),
                             ),
                             None => b20::missing_image(el, cx),
                         })

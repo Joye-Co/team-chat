@@ -665,6 +665,8 @@ pub mod text {
 pub mod icon {
     use gpui::{Pixels, px};
     pub const SM: Pixels = px(12.);
+    /// The mark that hangs before a line of card text: a proof's result, a fold's chevron.
+    pub const MARK: Pixels = px(14.);
     pub const MD: Pixels = px(16.);
     pub const LG: Pixels = px(24.);
     /// The app icon at the top of a welcome sheet (已更新到 …).
