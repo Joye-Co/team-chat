@@ -1158,11 +1158,23 @@ pub fn character_picker(
             .tab_stop(rover == last)
             .disabled(disabled)
             .tooltip(s::CHARACTER_RANDOM)
-            .child(crate::ui::icons::icon(
-                ui::Sym::Refresh,
-                tokens::icon::MD,
-                k.secondary,
-            ))
+            // A cell of the grid like its siblings: the same squircle, on
+            // a quiet fill that shows on a sheet and on a group, with the
+            // dice (not the page's reload arrow).
+            .child(
+                div()
+                    .size(tile)
+                    .rounded(theme::radius::bot(tile))
+                    .bg(k.on_group)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(crate::ui::icons::icon(
+                        ui::Sym::Random,
+                        tokens::icon::MD,
+                        k.secondary,
+                    )),
+            )
             .on_click(move |_, window, cx| {
                 let all = CharacterId::ALL;
                 let nanos = std::time::SystemTime::now()
@@ -1988,37 +2000,32 @@ impl BotForm {
     }
 
     /// 在电脑上工作 with no computer connected: nothing can run this member
-    /// yet. One line says so, with the way to the 电脑 page (the sheet
-    /// closes; what was typed is short).
-    fn no_computer_notice(&self, cx: &mut Context<Self>) -> Option<gpui::Div> {
+    /// yet. The compact empty (2.13) as the group of the section says so,
+    /// with the way to the 电脑 page (the sheet closes; what was typed is
+    /// short).
+    fn no_computer_notice(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
         (matches!(self.machines_load, MachinesLoad::Loaded) && self.machines.is_empty()).then(
             || {
                 let services = self.services.clone();
-                div()
-                    .pb(tokens::space::S12)
-                    .flex()
-                    .flex_col()
-                    .items_start()
-                    .gap(tokens::space::S8)
-                    .child(
-                        div()
-                            .n_subheadline()
-                            .text_color(native_colors(cx).secondary)
-                            .child(s::BOT_NO_COMPUTER),
-                    )
-                    .child(
-                        push_button(
-                            "bot-no-computer-open",
-                            s::BOT_NO_COMPUTER_OPEN,
-                            PushStyle::Outline,
-                            PushSize::Small,
-                            cx,
-                        )
-                        .on_click(move |_, window, cx| {
-                            window.close_dialog(cx);
-                            super::open_page(services.clone(), super::Page::Machines, cx);
-                        }),
-                    )
+                let open = push_button(
+                    "bot-no-computer-open",
+                    s::BOT_NO_COMPUTER_OPEN,
+                    PushStyle::Ghost,
+                    PushSize::Small,
+                    cx,
+                )
+                .on_click(move |_, window, cx| {
+                    window.close_dialog(cx);
+                    super::open_page(services.clone(), super::Page::Machines, cx);
+                });
+                sheet_form()
+                    .child(widgets::list_empty(
+                        ui::Sym::Computer,
+                        s::BOT_NO_COMPUTER,
+                        Some(open.into_any_element()),
+                        cx,
+                    ))
+                    .into_any_element()
             },
         )
     }
@@ -2530,7 +2537,8 @@ impl Render for BotForm {
                     0,
                     RuntimeOption {
                         runtime: current.clone(),
-                        name: current.clone(),
+                        // By the name the listed ones have (Claude Code, Codex).
+                        name: crate::views::admin::cli_name(&current, &current),
                         signed_out: false,
                     },
                 );
@@ -2723,36 +2731,53 @@ impl Render for BotForm {
                     .into_any_element(),
                 None => machine,
             };
+            // No computer is connected: the notice stands where the rows
+            // would be. A member being edited keeps its rows under it, so
+            // what is saved (代码仓库, 基础分支) stays in reach.
+            let notice = self.no_computer_notice(cx);
+            let nothing_to_set = notice.is_some() && self.editing.is_none();
             body = body.child(
                 div()
                     .flex()
                     .flex_col()
-                    .child(section(s::RUNNER_SECTION))
-                    .children(machines_failed)
-                    .children(self.no_computer_notice(cx))
-                    .child(if machines_loading {
-                        // The choices come from the computers: no rows until they are read.
-                        widgets::list_loading("bot-machines-loading", 2, false, cx)
+                    .gap(if notice.is_some() && !nothing_to_set {
+                        tokens::space::S12
                     } else {
-                        sheet_form()
-                            .child(sheet_form_row(s::RUNNER_MACHINE, machine, cx))
-                            .children(runtime.map(|r| sheet_form_row(s::RUNNER_RUNTIME, r, cx)))
-                            .child(field_row(
-                                s::RUNNER_REPO,
-                                "member-repo",
-                                &self.repo,
-                                false,
-                                cx,
-                            ))
-                            .child(field_row(
-                                s::RUNNER_BRANCH,
-                                "member-branch",
-                                &self.branch,
-                                false,
-                                cx,
-                            ))
-                            .into_any_element()
-                    }),
+                        gpui::Pixels::ZERO
+                    })
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .child(section(s::RUNNER_SECTION))
+                            .children(machines_failed)
+                            .children(notice),
+                    )
+                    .children((!nothing_to_set).then(|| {
+                        if machines_loading {
+                            // The choices come from the computers: no rows until they are read.
+                            widgets::list_loading("bot-machines-loading", 2, false, cx)
+                        } else {
+                            sheet_form()
+                                .child(sheet_form_row(s::RUNNER_MACHINE, machine, cx))
+                                .children(runtime.map(|r| sheet_form_row(s::RUNNER_RUNTIME, r, cx)))
+                                .child(field_row(
+                                    s::RUNNER_REPO,
+                                    "member-repo",
+                                    &self.repo,
+                                    false,
+                                    cx,
+                                ))
+                                .child(field_row(
+                                    s::RUNNER_BRANCH,
+                                    "member-branch",
+                                    &self.branch,
+                                    false,
+                                    cx,
+                                ))
+                                .into_any_element()
+                        }
+                    })),
             );
             // 高级: the member's own model. Off (the everyday case), the team's setting runs.
             let own = self.own_model;
@@ -2766,7 +2791,7 @@ impl Render for BotForm {
                         cx.notify();
                     })
                 });
-            body = body.child(
+            body = body.children((!nothing_to_set).then(|| {
                 div()
                     .flex()
                     .flex_col()
@@ -2787,8 +2812,8 @@ impl Render for BotForm {
                             .n_subheadline()
                             .text_color(k.secondary)
                             .child(s::RUNNER_OWN_MODEL_HINT),
-                    ),
-            );
+                    )
+            }));
         }
         // The look of an existing member changes in its own sheet (更换形象…).
         // A build without the character pack has no looks to pick from.
@@ -2833,7 +2858,12 @@ impl Render for BotForm {
             .body(
                 // The scrollbar shows while the body overflows, so the cut
                 // at the bottom reads as a scroll, not as a clipped group.
-                widgets::capped_list("bot-form-body", body, metrics::SHEET_BODY_MAX, &self.scroll),
+                widgets::sheet_body_list(
+                    "bot-form-body",
+                    body,
+                    metrics::SHEET_BODY_MAX,
+                    &self.scroll,
+                ),
             )
             .when_some(failed, |l, f| l.body(f))
             .when_some(name_err.clone().or(role_err.clone()), |l, e| {
