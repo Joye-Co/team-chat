@@ -244,21 +244,23 @@ impl RenderOnce for InspectorSection {
                     .flex()
                     .items_center()
                     .gap(super::tokens::space::S4)
-                    .child(symbol(
+                    // The chevron trails the title, as in the grouped header.
+                    .child(
+                        div()
+                            .min_w(px(0.))
+                            .truncate()
+                            .n_section()
+                            .text_color(k.secondary)
+                            .child(self.title),
+                    )
+                    .child(div().flex_none().child(symbol(
                         chevron,
                         super::tokens::icon::SM,
                         Weight::Semibold,
                         k.secondary,
                         window,
-                    ))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.))
-                            .n_section()
-                            .text_color(k.secondary)
-                            .child(self.title),
-                    )
+                    )))
+                    .child(div().flex_1().min_w(px(0.)))
                     .children(action)
                     .when_some(on_toggle, |d, f| d.on_click(move |e, w, cx| f(e, w, cx))),
             )
