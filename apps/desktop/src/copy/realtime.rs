@@ -10,7 +10,7 @@ crate::copy! {
     TOPIC_HIDE = "隐藏",
     TOPIC_DELETE = "删除…",
     TOPIC_DELETE_CONFIRM_TITLE = "删除这个话题？",
-    TOPIC_DELETE_CONFIRM_BODY = "「{name}」\n话题里的消息和产出会对所有人删除。\n删除后不能恢复。",
+    TOPIC_DELETE_CONFIRM_BODY = "「{name}」\n所有人都会失去里面的消息和产出。\n删除后不能恢复。",
     TOPIC_DELETE_OK = "删除",
     JUMP_UNREAD = "{n} 条未读",
     TOPIC_TYPING = "{name} 正在输入…",

@@ -17,7 +17,7 @@ crate::copy! {
     EMAIL_SEND = "发送验证码",
     EMAIL_SENDING = "正在发送…",
     EMAIL_CODE_TITLE = "输入验证码",
-    EMAIL_CODE_LEAD = "若 {email} 是登录邮箱，会收到验证码。",
+    EMAIL_CODE_LEAD = "如果 {email} 是登录邮箱，验证码已发出。",
     EMAIL_RESEND = "重新发送",
     EMAIL_CHANGE = "换一个邮箱",
     USE_INVITE = "使用邀请码登录",
