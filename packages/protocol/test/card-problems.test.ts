@@ -1,7 +1,7 @@
 // The write rules of a card as a list: every problem, in the order `cardV2Problem` finds them,
 // and problems that name what they are about.
 import { describe, expect, test } from "bun:test";
-import { CardV2, cardV2Problem, cardV2Problems, CardV2Shape } from "../src/index.ts";
+import { type CardV2Block, CardV2, cardBlockEvents, cardV2Problem, cardV2Problems, CardV2Shape } from "../src/index.ts";
 
 const shape = (over: Record<string, unknown>) =>
   CardV2Shape.parse({ v: 2, catalog: "tc.card/2.1", rev: 1, intent: "info", title: "t", fallback: "t", blocks: [], ...over });
@@ -59,5 +59,17 @@ describe("cardV2Problems", () => {
   test("repeated action ids are named", () => {
     const card = shape({ actions: [{ id: "x", label: "一" }, { id: "x", label: "二" }] });
     expect(cardV2Problem(card)).toEqual({ reason: "card.limits", message: "action ids are unique (used twice: x)", path: ["actions"] });
+  });
+});
+
+describe("cardBlockEvents", () => {
+  const events = (b: Record<string, unknown>) => cardBlockEvents(b as CardV2Block);
+  test("says which live events a block can send", () => {
+    expect(events({ type: "decision" })).toEqual(["choice.change", "choice.submit"]);
+    expect(events({ type: "input", kind: "text" })).toEqual(["input.change", "input.submit"]);
+    expect(events({ type: "input", kind: "slider" })).toEqual(["input.change"]);
+    expect(events({ type: "chart" })).toEqual(["chart.select", "chart.clear"]);
+    expect(events({ type: "buttons" })).toEqual(["button.press"]);
+    expect(events({ type: "text" })).toEqual([]);
   });
 });

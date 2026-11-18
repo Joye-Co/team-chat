@@ -813,6 +813,43 @@ export function childIds(b: AnyBlock): string[] {
   }
 }
 
+/** The live events a block can send: the server refuses any other (`card.undeclared_event`). */
+export function cardBlockEvents(b: AnyBlock): string[] {
+  switch (b.type) {
+    case "decision":
+    case "imageChoice":
+    case "slots":
+    case "poll":
+    case "confirm":
+      return ["choice.change", "choice.submit"];
+    case "rank":
+    case "matrix":
+    case "rating":
+    case "scale":
+      return ["input.change"];
+    case "input":
+      return b.kind === "text" || b.kind === "number" ? ["input.change", "input.submit"] : ["input.change"];
+    case "chart":
+      return ["chart.select", "chart.clear"];
+    case "metric":
+      return ["metric.press"];
+    case "table":
+      return ["table.rowSelect", "table.sort"];
+    case "buttons":
+      return ["button.press"];
+    case "draft":
+      return ["draft.edit"];
+    case "compare":
+      return ["compare.pick"];
+    case "tabs":
+      return ["tab.open"];
+    case "questionnaire":
+      return ["action.press"];
+    default:
+      return [];
+  }
+}
+
 /** True for blocks whose value goes into an answer or an input event. */
 export function takesInput(b: AnyBlock): boolean {
   switch (b.type) {
