@@ -1068,8 +1068,8 @@ background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/s
 ::placeholder{{color:var(--tc-muted);opacity:1}}\
 input:is([type=checkbox],[type=radio]){{accent-color:var(--tc-primary);width:{mark}px;height:{mark}px;margin:0 {s8}px 0 0;vertical-align:-1px}}\
 input[type=range]{{accent-color:var(--tc-primary)}}\
-progress{{appearance:none;-webkit-appearance:none;display:block;width:100%;height:{bar}px;border:0;border-radius:{bar_r}px;background:var(--tc-fill);overflow:hidden}}\
-progress::-webkit-progress-bar{{background:var(--tc-fill)}}\
+progress{{appearance:none;-webkit-appearance:none;display:block;width:100%;height:{bar}px;border:0;border-radius:{bar_r}px;background:var(--tc-fill);background:color-mix(in srgb,var(--tc-primary) 20%,transparent);overflow:hidden}}\
+progress::-webkit-progress-bar{{background:transparent}}\
 progress::-webkit-progress-value{{background:var(--tc-primary)}}\
 progress::-moz-progress-bar{{background:var(--tc-primary)}}\
 :is(button,input,select,textarea):focus-visible{{outline:0;border-color:{focus_edge};box-shadow:0 0 0 {ring}px {focus}}}\
@@ -2238,6 +2238,8 @@ mod tests {
                 "0 0 0 3px",
                 ":disabled{opacity:0.5}",
                 "progress::-webkit-progress-value{background:var(--tc-primary)}",
+                "background:color-mix(in srgb,var(--tc-primary) 20%,transparent)",
+                "progress::-webkit-progress-bar{background:transparent}",
             ] {
                 assert!(layer.contains(rule), "{rule}");
             }
