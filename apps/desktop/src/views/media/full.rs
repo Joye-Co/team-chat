@@ -462,8 +462,14 @@ fn html(
                 .capabilities(artifact_view::Capabilities::NONE),
             )
             // The page sits on the sheet's background edge to edge, with the
-            // pane padding (§2.22: no darker panel without a line).
+            // pane padding (§2.22: no darker panel without a line). An attached file
+            // (its key has no version) was written for a browser's white page.
             .fill()
+            .canvas(if m.key.version == 0 {
+                crate::ui::web_embed::Canvas::Paper
+            } else {
+                crate::ui::web_embed::Canvas::Sheet
+            })
             .rounded(gpui::Pixels::ZERO)
             // Its fill ends at the sheet's bottom corners (the right one only while
             // no rail sits beside it).
@@ -649,6 +655,9 @@ fn markdown_blocks(
         .into_iter()
         .chain(parts_.into_iter().enumerate().map(|(i, (_, body))| {
             div()
+                // A section sits further from the block above it than its heading
+                // sits from its own content, so each heading reads with what it heads.
+                .when(i > 0, |d| d.pt(space::S16))
                 .pb(space::S8)
                 .child(markdown::message_body(
                     ElementId::Name(format!("{id}-md-{i}").into()),
@@ -812,6 +821,30 @@ fn markdown_view(
 
 // --- images -------------------------------------------------------------------------
 
+const PICS_STRIP_TOP: gpui::Pixels = space::S12;
+const PICS_STRIP_BOTTOM: gpui::Pixels = space::S16;
+
+/// The room above and below the picture in the picture sheet.
+fn pics_pad(many: bool) -> gpui::Pixels {
+    if many { space::S4 } else { space::S16 }
+}
+
+/// The height the picture sheet's body needs for `pic` fitted to the sheet's width
+/// (the sheet hugs a short picture, §2.21); `None` when its size is unknown.
+pub(super) fn pics_body_height(pic: &store::Pic, many: bool) -> Option<gpui::Pixels> {
+    if pic.width == 0 || pic.height == 0 {
+        return None;
+    }
+    let mut wide = ui::native::metrics::SHEET_WIDE - space::S16 * 2.;
+    let mut rest = pics_pad(many) * 2.;
+    if many {
+        // The previous and next buttons beside the picture, then the strip under it.
+        wide -= (ui::native::tokens::height::SM + space::S16) * 2.;
+        rest += PICS_STRIP_TOP + ui::native::tokens::height::TABLE_ROW + PICS_STRIP_BOTTOM;
+    }
+    Some(wide * (pic.height as f32 / pic.width as f32) + rest)
+}
+
 fn lightbox(
     spec: &FullSpec,
     pics: &[store::Pic],
@@ -920,7 +953,7 @@ fn lightbox(
                         .flex_1()
                         .min_w_0()
                         .h_full()
-                        .py(if many { space::S4 } else { space::S16 })
+                        .py(pics_pad(many))
                         .flex()
                         .items_center()
                         .justify_center()
@@ -936,7 +969,7 @@ fn lightbox(
         )
         // One picture: no strip, and the same 16 under the picture as beside it.
         .when(many, |el| {
-            el.child(div().pt(space::S12).pb(space::S16).child(strip))
+            el.child(div().pt(PICS_STRIP_TOP).pb(PICS_STRIP_BOTTOM).child(strip))
         })
         .into_any_element()
 }
@@ -1075,6 +1108,7 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
     let duration = info.map_or(0., |i| i.duration);
     let st = state.read(cx);
     let (position, picked) = (st.position, st.frame);
+    let player_h = player_height(v);
     let player: AnyElement = match player_dir(&spec.media, v) {
         Some(dir) => {
             let follow = state.clone();
@@ -1086,7 +1120,7 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
                 )
                 .capabilities(PLAYER_CAPS),
             )
-            .height(px(360.))
+            .height(player_h)
             .rounded(crate::ui::native::tokens::radius::CONTAINER)
             .autoplay(spec.autoplay)
             .on_event(move |e, _, cx| {
@@ -1225,11 +1259,13 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
                 .overflow_y_scroll()
                 // One left and right inset for every block, the header's (B7).
                 .px(space::S16)
-                .py(space::S12)
+                .pt(space::S12)
+                // The frames end 16 above the sheet's edge, as beside them.
+                .pb(space::S16)
                 .flex()
                 .flex_col()
                 .gap(space::S12)
-                .child(div().w_full().h(px(360.)).flex_none().child(player))
+                .child(div().w_full().h(player_h).flex_none().child(player))
                 .when(!v.chapters.is_empty(), |el| el.child(chapters))
                 .child(
                     div()
@@ -1283,6 +1319,42 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
                 .child(strip),
         )
         .into_any_element()
+}
+
+/// The control bar of the player page (`.bar` in [`PLAYER_HTML`]).
+const PLAYER_BAR: gpui::Pixels = px(44.);
+/// The tallest the player block gets.
+const PLAYER_MAX_H: gpui::Pixels = px(360.);
+
+/// The player block: as tall as the picture at the sheet's width plus its control bar,
+/// so the picture is not letterboxed inside its frame; a tall clip stops at the cap.
+fn player_height(v: &store::Video) -> gpui::Pixels {
+    match v.info {
+        Some(i) if i.width > 0 && i.height > 0 => {
+            let wide = ui::native::metrics::SHEET_WIDE - space::S16 * 2.;
+            (wide * (i.height as f32 / i.width as f32) + PLAYER_BAR).min(PLAYER_MAX_H)
+        }
+        _ => PLAYER_MAX_H,
+    }
+}
+
+/// The height of the video view under its header (the blocks of [`video`] and the gaps
+/// between them), so the sheet ends 16 under the frame strip instead of on slack.
+pub(super) fn video_body_height(v: &store::Video) -> gpui::Pixels {
+    use crate::ui::native::tokens::{height, layout};
+    let gap = space::S12;
+    let mut h = space::S12 + player_height(v);
+    if !v.chapters.is_empty() {
+        // The label (12 / 16, 4 under it), then a 32 row after a gap of 2 each.
+        h += gap + px(16.) + space::S4 + (height::DEFAULT + space::S2) * v.chapters.len() as f32;
+    }
+    // The rule, the frame actions, the strip (its frames; the rings bleed 4).
+    h += gap + layout::BORDER + gap + height::SM + gap;
+    if !v.frames.is_empty() {
+        h += height::TABLE_ROW;
+    }
+    // 16 under the frames, and the 2 the header's rule and pixel rounding take.
+    h + space::S16 + space::S2
 }
 
 /// The player page inside the window: the system video decoder, custom controls in the

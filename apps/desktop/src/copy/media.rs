@@ -91,6 +91,7 @@ crate::copy! {
     REMOVE = "移除",
     OPEN = "打开",
     STATE_NO_PREVIEW_TITLE = "没有预览",
+    STATE_FAILED_NAMED = "「{name}」预览失败",
 }
 
 #[cfg(test)]

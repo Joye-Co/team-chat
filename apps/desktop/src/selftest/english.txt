@@ -88,7 +88,7 @@
 计划	Plan
 检查	Checks
 达标	Met
-要求	Requirements
+提出的人	Requested by
 验收标准	Acceptance criteria
 改动	Diff
 看改动	View changes
@@ -111,8 +111,8 @@
 用到的决定	Decisions used
 产出信息	Artifact info
 在右侧打开	Open on the right
-和 v2 对比	Compare with v2
-和 v1 对比	Compare with v1
+看 v2	View v2
+看 v1	View v1
 回到 v3	Back to v3
 你在看 v2，不是最新版	You're viewing v2, not the latest
 有 v3	v3 available
@@ -276,7 +276,7 @@ Forge 干活时记下	Noted by Forge on the job
 在跑压测	Running a load test
 本周 4 个话题	4 topics this week
 这周的进度、排队的事和在用的电脑	This week's progress, queue and computers in use
-来龙去脉、版本和页面能做的	Background, versions and what the page can do
+来龙去脉、版本和这一页能做的事	Background, versions and what the page can do
 Scout 巡检 staging	Scout checks staging
 Scout	Scout
 24 项都通过	All 24 passed

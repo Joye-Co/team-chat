@@ -572,9 +572,10 @@ impl Render for Lightbox {
         };
         let stage = Stage {
             x: side,
-            y: top,
+            // The same 8 above the picture as above the strip.
+            y: top + f32::from(space::S8),
             w: (vw - side * 2.).max(1.),
-            h: (vh - top - bottom - f32::from(space::S8)).max(1.),
+            h: (vh - top - bottom - f32::from(space::S8) * 2.).max(1.),
         };
         if stage != self.stage {
             self.stage = stage;
@@ -722,9 +723,18 @@ impl Render for Lightbox {
         }
         meta.push(size_text(item.file.size));
         let lights = cfg!(target_os = "macos") && !window.is_fullscreen();
+        let lead = if lights {
+            layout::TRAFFIC_LIGHTS_INSET
+        } else {
+            space::S16
+        };
         let who = div()
             .flex_1()
             .min_w_0()
+            // The counter sits on the window's centre: the sender stops short of it.
+            .when(many, |d| {
+                d.max_w((px(vw / 2.) - lead - space::S48).max(px(0.)))
+            })
             .flex()
             .items_center()
             .gap(space::S8)
@@ -827,20 +837,24 @@ impl Render for Lightbox {
             .left_0()
             .right_0()
             .h(lb::BAR_H)
-            .pl(if lights {
-                layout::TRAFFIC_LIGHTS_INSET
-            } else {
-                space::S16
-            })
+            .pl(lead)
             .pr(space::S12)
             .flex()
             .items_center()
             .gap(space::S16)
-            .child(who)
+            // The counter is centred on the window (and so on the picture and the
+            // strip), not in the room the two unequal sides leave.
             .when(many, |el| {
                 el.child(
                     div()
-                        .flex_none()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
+                        .h(lb::BAR_H)
+                        .flex()
+                        .items_center()
+                        .justify_center()
                         .n_callout()
                         .n_figures()
                         .text_color(ink)
@@ -850,6 +864,8 @@ impl Render for Lightbox {
                         )),
                 )
             })
+            .child(who)
+            .child(div().flex_1())
             .child(tools)
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
 

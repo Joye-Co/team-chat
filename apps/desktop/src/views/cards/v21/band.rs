@@ -492,7 +492,12 @@ pub fn pend_band(stage: interact::Stage, author: &str) -> Option<(String, String
         S::Silent | S::OfflineAnswer => (words, String::new(), PendTone::Quiet),
         // `expect.mode: none` (a block that takes no action, or a short-run limit): nothing
         // failed and nothing is left to retry, so the band is the muted clock (D1-70).
-        S::Refused => (words, String::new(), PendTone::Quiet),
+        // The badge holds a short state (§2.12); the rest is the meta line after it.
+        S::Refused => (
+            crate::copy::fill(c::BUSY_STATE, &[("name", author)]),
+            c::BUSY_LATER.to_string(),
+            PendTone::Quiet,
+        ),
         S::OfflineLive | S::Busy => (c::BAND_FAILED.to_string(), words, PendTone::Bad),
     })
 }

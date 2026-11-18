@@ -2449,6 +2449,9 @@ pub(crate) fn metrics_with(
                     el.child(
                         div()
                             .mt(space::S8)
+                            // Badge-high with or without a badge, so sibling
+                            // metrics share one caption line.
+                            .h(crate::ui::native::tokens::height::BADGE)
                             .flex()
                             .items_center()
                             .gap(space::S8)
@@ -3080,6 +3083,47 @@ fn live_pr_state(ctx: &Ctx, url: &str) -> Option<String> {
     })
 }
 
+/// The title of the 话题's linked pull request, when `url` is that pull request: the
+/// card's own label is only `repo#number`.
+fn live_pr_title(ctx: &Ctx, url: &str) -> Option<(u32, String)> {
+    let changes = ctx
+        .env
+        .provider
+        .topic_changes(&ctx.msg.group_id, &ctx.msg.topic_id)?;
+    let title = changes.title.trim();
+    (changes.url.as_deref() == Some(url) && !title.is_empty())
+        .then(|| (changes.number, title.to_string()))
+}
+
+/// The two lines of a pull request row. With the title known: `#61 <title>` over the
+/// repo. Without it the label stands alone, and the repo is not said a second time
+/// under a label that already holds it.
+fn pr_row_text(
+    label: &str,
+    number: Option<u64>,
+    repo: Option<&str>,
+    live: Option<(u32, String)>,
+) -> (String, String) {
+    let repo = repo.unwrap_or_default();
+    match live {
+        Some((n, title)) => (
+            format!("#{} {title}", number.unwrap_or(u64::from(n))),
+            repo.to_string(),
+        ),
+        None => (
+            match number {
+                Some(n) if !label.contains(&format!("#{n}")) => format!("#{n} {label}"),
+                _ => label.to_string(),
+            },
+            if !repo.is_empty() && label.contains(repo) {
+                String::new()
+            } else {
+                repo.to_string()
+            },
+        ),
+    }
+}
+
 fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
     let k = theme::colors(cx);
     let p = &ctx.env.provider;
@@ -3095,17 +3139,16 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                     let now = live_pr_state(ctx, url);
                     let state = now.or_else(|| state.clone()).as_deref().map(pr_state);
                     let tone = state.as_ref().map_or(PrTone::Plain, |s| s.tone);
+                    let (name, line) =
+                        pr_row_text(label, *number, repo.as_deref(), live_pr_title(ctx, url));
                     (
                         ref_tile(
                             if tone == PrTone::Merged { Sym::Merge } else { Sym::PullRequest },
                             false,
                             cx,
                         ),
-                        match number {
-                            Some(n) if !label.contains(&format!("#{n}")) => format!("#{n} {label}"),
-                            _ => label.clone(),
-                        },
-                        repo.clone().unwrap_or_default(),
+                        name,
+                        line,
                         state.map(|s| s.text),
                         match tone {
                             PrTone::Waits => Some(BadgeState::NeedsYou),

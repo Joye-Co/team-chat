@@ -123,6 +123,33 @@ async fn wait_for_first_paint(cx: &mut AsyncApp) {
     eprintln!("an embedded page did not paint within 15 s");
 }
 
+/// Waits until every inline page on screen has said where it ends: its frame shrinks
+/// to that, and a capture before the read shows the taller declared height.
+async fn wait_for_inline_ends(handle: AnyWindowHandle, cx: &mut AsyncApp) {
+    let waiting = Instant::now();
+    while waiting.elapsed() < Duration::from_secs(3) {
+        let pending = cx.update(|cx| {
+            crate::ui::web_embed::live(cx).into_iter().any(|page| {
+                let page = page.read(cx);
+                page.shown() && page.end_pending()
+            })
+        });
+        if !pending {
+            if waiting.elapsed() > Duration::from_millis(50) {
+                // The frame with the fitted height still has to be drawn.
+                for _ in 0..2 {
+                    let _ = next_frame(handle, cx).await;
+                }
+            }
+            return;
+        }
+        cx.background_executor()
+            .timer(Duration::from_millis(50))
+            .await;
+        let _ = next_frame(handle, cx).await;
+    }
+}
+
 /// How long a scene's native content (a web page) may take to draw.
 const NATIVE_READY: Duration = Duration::from_secs(60);
 
@@ -642,6 +669,7 @@ async fn shoot(
         }
         // Also for a scene without a readiness check of its own (a page in a card).
         wait_for_first_paint(cx).await;
+        wait_for_inline_ends(handle, cx).await;
         let number = cx
             .update(|cx| handle.update(cx, |_, window, _| capture::window_number(window)))
             .map_err(|e| e.to_string())??;

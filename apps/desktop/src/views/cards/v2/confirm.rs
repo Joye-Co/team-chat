@@ -143,15 +143,17 @@ pub(crate) fn sheet(
 pub(crate) fn field_box(child: AnyElement, cx: &App) -> AnyElement {
     let n = crate::ui::native::native_colors(cx);
     let m = crate::ui::native::metrics::FIELD;
+    // The kit field recipe (`field_edge`): the fill, edge and ring of every sheet field.
+    let (edge, shadows) = crate::ui::native::field_edge(&n, true, false);
     div()
         .w(crate::ui::native::metrics::FIELD_NAME_WIDTH)
         .h(m)
         .px(crate::ui::native::metrics::FIELD_PAD)
         .rounded(crate::ui::native::metrics::FIELD_RADIUS)
         .border_1()
-        .border_color(n.separator)
-        .bg(n.content)
-        .shadow(n.focus_ring())
+        .border_color(edge)
+        .bg(n.control)
+        .shadow(shadows)
         .flex()
         .items_center()
         .text_size(crate::ui::native::tokens::text::UI.0)

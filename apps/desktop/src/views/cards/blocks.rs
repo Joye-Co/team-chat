@@ -246,6 +246,9 @@ fn field_value(value: &str, color: gpui::Hsla) -> AnyElement {
     }
 }
 
+/// A table cell's side padding (§2.7).
+const CELL_PAD: gpui::Pixels = space::S12;
+
 /// Width of a table column from its longest cell, in pixels. A text column stops at 240
 /// and cuts its cells with "…"; a number column takes its widest number, since numbers
 /// never cut (§2.7, F3): a tabular figure at 12 is about 7.6 wide, a CJK header 12.6.
@@ -262,7 +265,7 @@ fn column_width(columns: &[String], rows: &[Vec<String>], col: usize, numeric: b
                 .sum::<f32>()
         })
         .fold(0.0_f32, f32::max);
-    let w = (longest + 20.0).max(72.0);
+    let w = (longest + 2. * f32::from(CELL_PAD)).max(72.0);
     if numeric { w.ceil() } else { w.min(240.0) }
 }
 
@@ -323,9 +326,17 @@ fn render_table(
     let cell_in = |ci: usize, text: String, width: f32, head: bool| -> Div {
         let num = numeric.get(ci).copied().unwrap_or(false);
         div()
-            .w(px(width))
-            .flex_none()
-            .px(space::S10)
+            // §2.7: the columns fill the frame. The first (text) column takes the room
+            // that is left, with its measured width as the least; the others keep
+            // theirs, so the last one ends at the frame's right inset.
+            .map(|el| {
+                if ci == 0 {
+                    el.flex_grow(1.).flex_shrink(0.).min_w(px(width))
+                } else {
+                    el.w(px(width)).flex_none()
+                }
+            })
+            .px(CELL_PAD)
             .py(space::S6)
             .flex()
             .items_center()
@@ -382,7 +393,7 @@ fn render_table(
         // 问这里 after the row's name when the first column holds both (Refs.dc.html).
         let beside = table_refs.as_ref().is_some_and(|r| {
             let name = row.first().map(String::as_str).unwrap_or("");
-            let inner = widths.first().map(|w| w - 2. * f32::from(space::S10));
+            let inner = widths.first().map(|w| w - 2. * f32::from(CELL_PAD));
             r.beside(name, inner, window)
         });
         line.children(widths.iter().enumerate().map(|(i, w)| {
@@ -775,7 +786,7 @@ mod tests {
     fn a_number_column_fits_its_widest_number() {
         let cols = vec!["名称".to_string(), "数".to_string()];
         let rows = vec![vec!["a".to_string(), "1,284,567,890".to_string()]];
-        // 13 tabular figures at 12 plus the 10 + 10 padding, never cut at 240.
+        // 13 tabular figures at 12 plus the cell padding, never cut at 240.
         assert!(column_width(&cols, &rows, 1, true) >= 13. * 7.6 + 20.);
         let long = vec![vec!["a".to_string(), "9".repeat(40)]];
         assert!(column_width(&cols, &long, 1, true) > 240.);

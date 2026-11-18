@@ -50,8 +50,9 @@ impl RefsBody {
 // Table affordances (v1 card tables and Markdown tables)
 // ---------------------------------------------------------------------------------------
 
-/// Width of the slot at the end of each row that holds 问这里.
-pub const ROW_BUTTON_SLOT: f32 = 76.;
+/// Width of the slot at the end of each row that holds 问这里: the button (about 91
+/// at the small size) and the 4 after it, so it never lies over the last column.
+pub const ROW_BUTTON_SLOT: f32 = 96.;
 
 /// The gap between a row's name and its 问这里 (Refs.dc.html).
 const NAME_GAP: f32 = 10.;

@@ -433,7 +433,7 @@ fn tile(
                         .on_click(move |_, _, cx| open_file(&provider, &g, &t, &file, what, cx))
                 };
                 let menu = menu
-                    .item(item(f::OPEN_IMAGE, OpenAction::Open))
+                    .item(item(f::VIEWER_OPEN, OpenAction::Open))
                     .item(item(f::REVEAL, OpenAction::RevealInFinder));
                 export::menu_items(menu, &menu_target, at)
             }),
