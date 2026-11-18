@@ -423,11 +423,11 @@ reconnect after a server restart, catch-up after a bot restart, handler re-runs 
 duplicates, run plans (set, replaced, ended), and the 1.1 features: v2 card answers with
 inputs, a v1 press on a v2 card, `markAnswered`, the done card, side chats and page events.
 The 1.1 interaction loop runs there too (live events, patches with a rebase, the automatic
-resolve, an answer caught up after a restart, page replies and data pushes, refs to parts): each
-test that needs a server part the server does not have yet (`welcome.features`, or a frame that
-gets "unknown frame type") is skipped, and the run prints why. `bun test test/unit.test.ts` checks
-the same SDK logic against a fake server, without wrangler. `bun test/node-smoke.ts` runs the
-echo example under Node.
+resolve, an answer caught up after a restart, page replies and data pushes, refs to parts): the
+run fails, and names the part, when the server lacks a route, a `welcome.features` entry or a
+frame handler these tests need. `bun test test/unit.test.ts` checks the same SDK logic against a
+fake server, without wrangler. `bun run test:node` (`bun test/node-smoke.ts`) runs the echo
+example under Node 22.18 or later against the same local server.
 
 ## 6. Runner-backed bots: a coding CLI on a machine
 
@@ -629,9 +629,10 @@ TITLE="夜间构建" examples/notify.sh <groupId> "构建 142 通过"
 
 `cd packages/bot-sdk && bun test` 会在 8795 端口启动自己的 `wrangler dev`(临时目录里的空数据库),
 检查 @ 提及、回复、关注、流式回复、话题状态、服务器重启后重连、机器人重启后补收、处理函数重跑
-不重复发消息,以及 1.1 的卡片回答、交付卡片、单独问、页面事件和交互闭环(服务器还没有的部分会
-跳过并打印原因)。`bun test test/unit.test.ts` 用假服务器检查同样的逻辑,不启动 wrangler。
-`bun test/node-smoke.ts` 用 Node 运行 echo 示例。
+不重复发消息,以及 1.1 的卡片回答、交付卡片、单独问、页面事件和交互闭环(服务器缺少其中任何
+一部分,测试会失败并指出缺的是哪一部分)。`bun test test/unit.test.ts` 用假服务器检查同样的逻辑,
+不启动 wrangler。`bun run test:node`(即 `bun test/node-smoke.ts`)用 Node 22.18 或更新版本运行
+echo 示例。
 
 ## 6. 在电脑上干活的机器人(runner)
 
