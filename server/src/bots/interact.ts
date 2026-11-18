@@ -6,6 +6,7 @@
 import type { Expect, PartRef } from "@chat/protocol";
 import { type Env, gatewayStub } from "../core/env";
 import { featureTransient } from "../core/gateway";
+import { logger } from "../core/logger";
 import type { RoomContext } from "../core/registry";
 import { type CardEventDelivery, registerCardEventHandler, registerRequesterResolver } from "../cards2/delivery";
 import { onDirectoryForget } from "../cards2/state";
@@ -99,20 +100,26 @@ async function liveExpect(env: Env, authorId: string): Promise<Expect> {
  */
 export async function expectFor(env: Env, authorId: string, topicId: string): Promise<Expect> {
   const r = await responder(env, authorId);
-  if (r.kind === "none") return { by: authorId, mode: "none" };
+  if (r.kind === "none") return gone(authorId);
   if (r.kind === "live") return liveExpect(env, authorId);
   try {
     return { by: authorId, ...(await deskStub(env, authorId).expectFor(authorId, topicId)) };
-  } catch {
-    return { by: authorId, mode: "none" };
+  } catch (err) {
+    logger.warn("expect of a runner member failed", { err });
+    return { by: authorId, mode: "none", reason: "run.failed" };
   }
 }
+
+/** The `expect` for a member that was removed or turned off: nobody responds. */
+const gone = (memberId: string): Expect => ({ by: memberId, mode: "none", reason: "member.inactive" });
 
 async function toRunner(env: Env, authorId: string, x: InteractionIn): Promise<Expect> {
   try {
     return { by: authorId, ...(await deskStub(env, authorId).interaction(authorId, x)) };
-  } catch {
-    return { by: authorId, mode: "none" };
+  } catch (err) {
+    // The event reached nobody: the ack says so, and the log says why.
+    logger.warn("interaction delivery to a runner member failed", { event: x.event, source: x.source.kind, err });
+    return { by: authorId, mode: "none", reason: "run.failed" };
   }
 }
 
@@ -122,7 +129,7 @@ async function toRunner(env: Env, authorId: string, x: InteractionIn): Promise<E
  */
 export async function deliverCardEvent(room: RoomContext, authorId: string, e: LiveCardEvent): Promise<Expect> {
   const r = await responder(room.env, authorId);
-  if (r.kind === "none") return { by: authorId, mode: "none" };
+  if (r.kind === "none") return gone(authorId);
   if (r.kind === "runner") {
     const source: InteractionIn["source"] = { kind: "card", messageId: e.messageId, rev: e.rev };
     if (e.blockId) source.blockId = e.blockId;
@@ -153,7 +160,7 @@ export async function deliverCardEvent(room: RoomContext, authorId: string, e: L
 /** A page event for the version's creator (transient `artifact.event`, or BotDesk). */
 export async function deliverPageEvent(room: RoomContext, creatorId: string, e: LivePageEvent): Promise<Expect> {
   const r = await responder(room.env, creatorId);
-  if (r.kind === "none") return { by: creatorId, mode: "none" };
+  if (r.kind === "none") return gone(creatorId);
   if (r.kind === "runner") {
     const x: InteractionIn = {
       groupId: room.groupId,
@@ -207,7 +214,7 @@ function cardContext(room: RoomContext, e: CardEventDelivery): { block?: unknown
  */
 registerCardEventHandler(async (room, e) => {
   const r = await responder(room.env, e.authorId);
-  if (r.kind === "none") return { by: e.authorId, mode: "none" };
+  if (r.kind === "none") return gone(e.authorId);
   if (r.kind !== "runner") return undefined;
   if (e.stored) {
     // cards2 (F5): a retract inside the window reaches the run that has the answer.

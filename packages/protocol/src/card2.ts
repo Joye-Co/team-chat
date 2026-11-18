@@ -1146,7 +1146,18 @@ export type CardEventFrame = z.infer<typeof CardEventFrame>;
 /** Who responds to an event, and how soon (the server's estimate). */
 export const ExpectMode = z.enum(["live", "run", "starting", "offline", "none"]);
 export type ExpectMode = z.infer<typeof ExpectMode>;
-export const Expect = z.object({ by: Id, mode: ExpectMode, etaMs: Count.optional() });
+export const Expect = z.object({
+  by: Id,
+  mode: ExpectMode,
+  etaMs: Count.optional(),
+  /**
+   * With mode "none": why nobody responds. "member.inactive" (the member was removed or turned
+   * off), "runner.off" (its runner is off), "run.external" (its run in the topic takes no
+   * events), "run.limit" (too many short runs this hour, or too many events waiting for this
+   * card), "run.failed" (a run could not start). Open: readers skip a value they do not know.
+   */
+  reason: z.string().min(1).max(64).optional(),
+});
 export type Expect = z.infer<typeof Expect>;
 /** ack.result of `card.event` (and `card.answer` from a 1.1 server). */
 export const CardEventAck = z.object({

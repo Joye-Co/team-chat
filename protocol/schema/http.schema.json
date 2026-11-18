@@ -56252,6 +56252,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             }
           },
           "required": [
@@ -65694,6 +65699,11 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             }
           },
           "required": [

@@ -353,7 +353,7 @@ describe("live card events to the author", () => {
     expect(old.frames.some((f) => f.t === "transient" && f.event.type === "card.event")).toBe(false);
     // A deactivated author answers nothing.
     await env.DB.prepare("UPDATE members SET deactivated = 1 WHERE id = ?").bind(bot.id).run();
-    expect(await deliver(bot.id)).toEqual({ by: bot.id, mode: "none" });
+    expect(await deliver(bot.id)).toEqual({ by: bot.id, mode: "none", reason: "member.inactive" });
     for (const x of [co, old, cb]) x.close();
 
     // A runner member's event goes to its run.
@@ -492,7 +492,7 @@ describe("BotDesk delivery", () => {
     const more = (i: number): InteractionIn => ({ ...interaction(w, topicId, other, "btns", { id: `n${i}` }), event: "button.press" });
     await desk.interaction(w.bot.id, more(0));
     for (let i = 1; i <= 20; i++) expect((await desk.interaction(w.bot.id, more(i))).mode).toBe("run");
-    expect(await desk.interaction(w.bot.id, more(21))).toMatchObject({ mode: "none" });
+    expect(await desk.interaction(w.bot.id, more(21))).toEqual({ mode: "none", reason: "run.limit" });
     for (const x of [c, d]) x.close();
   });
 
@@ -666,15 +666,27 @@ describe("BotDesk delivery", () => {
     await runInDurableObject(desk, async (_o, state) => {
       for (let i = 0; i < 5; i++) state.storage.sql.exec("INSERT INTO interact_runs (run_id, card_key, at) VALUES (?, ?, ?)", `x${i}`, `card:${messageId}`, Date.now());
     });
-    expect(await desk.interaction(w.bot.id, interaction(w, topicId, messageId, "channels", { values: ["weibo"] }))).toEqual({ mode: "none" });
+    expect(await desk.interaction(w.bot.id, interaction(w, topicId, messageId, "channels", { values: ["weibo"] }))).toEqual({ mode: "none", reason: "run.limit" });
     await runInDurableObject(desk, async (_o, state) => {
       for (let i = 0; i < 30; i++) state.storage.sql.exec("INSERT INTO interact_runs (run_id, card_key, at) VALUES (?, ?, ?)", `y${i}`, `card:other${i}`, Date.now());
     });
-    expect(await desk.interaction(w.bot.id, interaction(w, topicId, ulid(), "channels", { values: ["weibo"] }))).toEqual({ mode: "none" });
+    expect(await desk.interaction(w.bot.id, interaction(w, topicId, ulid(), "channels", { values: ["weibo"] }))).toEqual({ mode: "none", reason: "run.limit" });
     expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(1);
     // A stored answer still starts a run.
     expect(await desk.expectFor(w.bot.id, topicId)).toEqual({ mode: "starting", etaMs: 40_000 });
     for (const x of [c, d]) x.close();
+
+    // A runner that is turned off, and a member that was removed, say so.
+    const off = await api(`/v1/bots/${w.bot.id}/runner`, {
+      method: "PUT",
+      token: w.owner.token,
+      body: { runtime: "codex", labels: ["off"], repo: { path: "/tmp/repo" }, baseBranch: "main", enabled: false },
+    });
+    expect(off.status, JSON.stringify(off.body)).toBe(200);
+    expect(await desk.interaction(w.bot.id, interaction(w, topicId, ulid(), "channels", { values: ["bili"] }))).toEqual({ mode: "none", reason: "runner.off" });
+    expect(await desk.expectFor(w.bot.id, topicId)).toEqual({ mode: "none", reason: "runner.off" });
+    await env.DB.prepare("UPDATE members SET deactivated = 1 WHERE id = ?").bind(w.bot.id).run();
+    expect(await desk.interaction(w.bot.id, interaction(w, topicId, ulid(), "channels", { values: ["bili"] }))).toEqual({ mode: "none", reason: "member.inactive" });
   });
 
   it("start a side chat run from an anonymous live event with the side chat's own person as the asker", async () => {

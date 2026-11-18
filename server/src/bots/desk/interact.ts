@@ -52,11 +52,17 @@ const ARTIFACT_REPLY_RPC = "artifacts.reply";
 /** Room RPC of the cards feature (cards2/index.ts): the receiver of an event resolves it. */
 const CARD_RESOLVE_RPC = "cards.resolve";
 
-/** What the client is told: who responds and how soon. */
+/** Why nobody responds (`Expect.reason` with mode "none"). */
+export type NoneReason = "member.inactive" | "runner.off" | "run.external" | "run.limit" | "run.failed";
+
+/** What the client is told: who responds and how soon, or why nobody does. */
 export interface DeskExpect {
   mode: ExpectMode;
   etaMs?: number;
+  reason?: NoneReason;
 }
+
+const none = (reason?: NoneReason): DeskExpect => (reason ? { mode: "none", reason } : { mode: "none" });
 
 type PendingRow = { card_key: string; block_key: string; run_id: string; frame: string; at: number; x: string | null };
 type SentRow = { input_id: string; run_id: string; event_id: string; ask: number };
@@ -83,9 +89,9 @@ export abstract class DeskInteract extends DeskHand {
   /** The `expect` of a stored answer to this bot's card in the topic (no limits: answers always start a run). */
   async expectFor(botId: string, topicId: string): Promise<DeskExpect> {
     this.bind(botId);
-    if (!(await this.botActive())) return { mode: "none" };
+    if (!(await this.botActive())) return none("member.inactive");
     const runner = await loadRunner(this.env.DB, botId);
-    if (!runner?.enabled) return { mode: "none" };
+    if (!runner?.enabled) return none("runner.off");
     const active = this.activeRun(topicId);
     if (active && !active.external) return this.runExpect(active);
     return { mode: "starting", etaMs: ETA_MS.starting };
@@ -120,9 +126,9 @@ export abstract class DeskInteract extends DeskHand {
   /** Gives the event to a run, or starts a short one (inside the "interact" turn). */
   protected async route(x: InteractionIn): Promise<DeskExpect> {
     const botId = this.botId as string;
-    if (!(await this.botActive())) return { mode: "none" };
+    if (!(await this.botActive())) return none("member.inactive");
     const runner = await loadRunner(this.env.DB, botId);
-    if (!runner?.enabled) return { mode: "none" };
+    if (!runner?.enabled) return none("runner.off");
     const byRun = x.runId ? this.run(x.runId) : undefined;
     const target =
       byRun && byRun.ended_at === null && !byRun.external
@@ -136,16 +142,16 @@ export abstract class DeskInteract extends DeskHand {
       if (await this.queueInteraction(target, x, actor)) return this.runExpect(target);
       // The card's queue is full: nobody takes this one (a page `ask` settles at once).
       if (x.source.kind === "artifact" && x.source.ask) await this.declinePageAsk(x);
-      return { mode: "none" };
+      return none("run.limit");
     }
     // A page `ask` with no run to answer it is declined at once, so the page's promise settles.
     if (x.source.kind === "artifact" && x.source.ask) {
       await this.declinePageAsk(x);
-      return { mode: "none" };
+      return none(target ? "run.external" : undefined);
     }
-    if (target) return { mode: "none" };
+    if (target) return none("run.external");
     // cards2 (F5): a retract never starts a run (no run has the answer).
-    if (x.event === "answer.retract") return { mode: "none" };
+    if (x.event === "answer.retract") return none();
     // No run: a short follow-up run, within the limits.
     const key = cardKey(x);
     const now = Date.now();
@@ -153,7 +159,7 @@ export abstract class DeskInteract extends DeskHand {
       .exec<{ n: number }>("SELECT count(*) AS n FROM interact_runs WHERE card_key = ? AND at > ?", key, now - HOUR_MS)
       .one().n;
     const perBot = this.sql.exec<{ n: number }>("SELECT count(*) AS n FROM interact_runs WHERE at > ?", now - HOUR_MS).one().n;
-    if (perCard >= SHORT_RUNS_PER_CARD_HOUR || perBot >= SHORT_RUNS_PER_BOT_HOUR) return { mode: "none" };
+    if (perCard >= SHORT_RUNS_PER_CARD_HOUR || perBot >= SHORT_RUNS_PER_BOT_HOUR) return none("run.limit");
     const inputId = ulid();
     await this.start({
       groupId: x.groupId,
@@ -164,9 +170,9 @@ export abstract class DeskInteract extends DeskHand {
       mentioned: true,
     });
     const started = this.activeRun(x.topicId);
-    if (!started || started.trigger_message_id !== `interact:${x.eventId}`) return { mode: "none" };
+    if (!started || started.trigger_message_id !== `interact:${x.eventId}`) return none("run.failed");
     this.sql.exec("INSERT OR IGNORE INTO interact_runs (run_id, card_key, at) VALUES (?, ?, ?)", started.id, key, now);
-    if (started.ended_at !== null) return { mode: "none" };
+    if (started.ended_at !== null) return none("run.failed");
     return { mode: "starting", etaMs: ETA_MS.starting };
   }
 

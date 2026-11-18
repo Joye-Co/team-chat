@@ -1976,7 +1976,8 @@ Readers keep unknown event names and an unknown `diagram.syntax` (show the sourc
 { t: "card.answer", ..., clientEventId?, contentHash? }        // short form of card.event action.press
 { t: "card.answer.retract", rid, groupId, messageId, answerId }   // short form of card.event answer.retract
 ack.result = CardEventAck { eventId, stored, answerId?, duplicate?, expect: Expect }
-Expect = { by: memberId, mode: "live" | "run" | "starting" | "offline" | "none", etaMs? }
+Expect = { by: memberId, mode: "live" | "run" | "starting" | "offline" | "none", etaMs?,
+           reason? /* 1..64, with "none": "member.inactive" | "runner.off" | "run.external" | "run.limit" | "run.failed" */ }
 
 card.answered (stored) data += { answerId?, askId?, eventId?, event?, blockId?, value? }   // actionId absent for an immediate commit
 card.retracted (stored) data: { messageId, answerId, askId?, eventId? }                     // actorId = the answerer
@@ -1995,6 +1996,19 @@ answer.retract`. `chart.select` sends `part {kind: "point"|"bar", keys: {series,
 other part kinds, have no `part` (`invalid`). A live event goes to
 the card's author only (transient `card.event`, audit action `card.event`); answers are stored.
 Members never write `cardState` or `cause`.
+
+`expect` says who responds to the event and how soon: `live` (an SDK member connected with
+`interact/1`), `run` (a runner member's run in the topic takes it), `starting` (a run starts for
+it), `offline` (the SDK member is not connected: the event is not delivered) and `none` (nobody
+will respond; show no waiting state). With `none`, `reason` says why when the server knows:
+`member.inactive` (the author was removed or turned off), `runner.off` (its runner is off),
+`run.external` (its run in the topic takes no events), `run.limit` and `run.failed` (a run could
+not start). Clients skip a `reason` they do not know. A live event to a runner member with no
+run in the topic starts a short run for it: one per card at a time (later events join it), at
+most 6 an hour per card and 30 an hour per member; a run takes at most 20 waiting events per
+card. Past either limit the ack is `none`, `run.limit`. A stored answer always starts a run.
+An event a run was given and did not take before it ended is resolved for the emitter with
+`interaction.resolved {result: "failed"}`.
 
 Draft answers: an answer that submits `draft` blocks (a footer action whose inputs name them,
 or a 2.0 submit) stores `contentHash` in its `CardAnswer`: the sha256 (lowercase hex of the

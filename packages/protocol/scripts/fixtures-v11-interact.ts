@@ -574,6 +574,8 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
   ok("http/card-event-ack-answer.json", "CardEventAck", { eventId: EV(3), stored: true, answerId: "01JC0AN0000000000000000001", duplicate: true, expect: { by: LEDGER, mode: "run", etaMs: 10_000 } });
   ok("http/card-patch-ack.json", "CardPatchAck", { message: { ...message, authorId: LEDGER, kind: "card", body: report.fallback, cardV2: { ...report, rev: 2 }, cause }, rev: 2 });
   ok("http/artifact-event-ack.json", "ArtifactEventAck", { eventId: EV(20), expect: { by: LEDGER, mode: "live" } });
+  ok("http/card-event-ack-none-reason.json", "CardEventAck", { eventId: EV(4), stored: false, expect: { by: LEDGER, mode: "none", reason: "run.limit" } }, "nobody responds, and why");
+  ok("http/artifact-event-ack-none-reason.json", "ArtifactEventAck", { eventId: EV(22), expect: { by: LEDGER, mode: "none", reason: "runner.off" } });
   ok("http/artifact-data-ack.json", "ArtifactDataAck", { dataRev: 2 });
   ok("server/welcome-features.json", "ServerFrame", {
     t: "welcome",

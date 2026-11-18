@@ -634,7 +634,8 @@ Server rules (BotDesk):
   `tab.open` and `draft.edit` the newest per block and event is kept. Every other card event
   (`button.press`, `action.press`, `metric.press`, `table.rowSelect`, `answer.retract`) and every
   page `emit` is a command: each one is sent. At most 20 events wait per card; one more is not
-  taken and its ack's `expect.mode` is `none`. Page `ask` events never wait for a window.
+  taken and its ack's `expect` is `none` with reason `run.limit`. Page `ask` events never wait
+  for a window.
 - A live event belongs to the run once the daemon reports `input.accepted` for its `inputId`.
   When the run ends before that (or the machine no longer has the run), the server resolves the
   event for the emitter as `interaction.resolved {result: "failed"}` (a page `ask` gets a declined
@@ -645,7 +646,7 @@ Server rules (BotDesk):
 - With no active run in the topic, a stored answer starts a run (as before), and a live event
   starts a short follow-up run whose prompt carries the envelope: at most 1 per card at a time
   (later events join it), 6 per hour per card, 30 per hour per member; over the limit the ack's
-  `expect.mode` is `none`.
+  `expect` is `none` with reason `run.limit` (protocol.md, "Events, answers and card state").
 - `output` bodies are the fields of the matching client frame without `t`, `rid` and `groupId`
   (always the run's group): `card.post {card | cardV2, cause?, body?}` (in the run's topic),
   `card.patch {messageId, baseRev, ops, cause?}`, `interaction.resolve {eventId, result, note?}`,

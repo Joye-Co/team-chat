@@ -3843,6 +3843,14 @@ pub struct Expect {
         skip_serializing_if = "Option::is_none"
     )]
     pub eta_ms: Option<u64>,
+    /// With mode `None`: why nobody responds. `member.inactive`, `runner.off`, `run.external`,
+    /// `run.limit`, `run.failed`; open, so readers skip a value they do not know.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reason: Option<String>,
 }
 
 /// `ack.result` of `card.event` (and of `card.answer` from a 1.1 server).
