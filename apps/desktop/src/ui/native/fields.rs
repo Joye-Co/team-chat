@@ -667,6 +667,8 @@ pub fn date_field(
             .child(
                 DatePicker::new(&state)
                     .appearance(false)
+                    // A date can be taken back: a required field then says it is missing.
+                    .cleanable(true)
                     .placeholder(placeholder.to_string())
                     .disabled(disabled)
                     .with_size(gpui_component::Size::Small),
