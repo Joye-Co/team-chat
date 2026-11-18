@@ -660,7 +660,16 @@ export const RunAnswerFrame = z.object({
 });
 export type RunAnswerFrame = z.infer<typeof RunAnswerFrame>;
 export const RunInteractionSource = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("card"), messageId: Id, blockId: z.string().min(1).max(64).optional(), actionId: z.string().min(1).max(64).optional(), rev: CardRev }),
+  z.object({
+    kind: z.literal("card"),
+    messageId: Id,
+    blockId: z.string().min(1).max(64).optional(),
+    actionId: z.string().min(1).max(64).optional(),
+    /** The rev the person saw when they sent the event. */
+    rev: CardRev,
+    /** The card's rev now, when it is past `rev` (the card changed since; `block` is from this rev). */
+    currentRev: CardRev.optional(),
+  }),
   z.object({ kind: z.literal("artifact"), artifactId: Id, version: z.int().positive(), eventId: Id, ask: z.boolean() }),
 ]);
 /** `run.interaction` (feature "interact"): a live card event or a page event for the run's CLI. */
@@ -675,7 +684,7 @@ export const RunInteractionFrame = z.object({
   actor: RunActor,
   /** The interaction's event id, which `card.patch.cause` / `send.causeEventId` name. */
   eventId: Id.optional(),
-  /** Card events: the block (or the action) as it was at `source.rev`. */
+  /** Card events: the block (or the action) as the card has it now (`source.currentRev ?? source.rev`). */
   block: z.json().optional(),
 });
 export type RunInteractionFrame = z.infer<typeof RunInteractionFrame>;

@@ -772,8 +772,21 @@ describe("BotDesk delivery", () => {
     const resolved = await c.next((f) => f.t === "transient" && f.event.type === "interaction.resolved" && f.event.eventId === live.eventId);
     expect(resolved.event).toMatchObject({ result: "patched" });
 
+    // An event sent from the rev the person still saw names both revs; the block is the card's now.
+    d.event(runId, { type: "output", outputId: "p3", op: "card.patch", body: { messageId, baseRev: 2, ops: [{ op: "set", id: "trend", props: { label: "新增群（B 站）" } }] } });
+    expect(await result("p3")).toMatchObject({ ok: true, result: { rev: 3 } });
+    await runInDurableObject(deskOf(w.bot.id), async (_o, state: DurableObjectState) => {
+      state.storage.sql.exec("DELETE FROM interact_windows");
+    });
+    const old = await c.ok({ t: "card.event", groupId: w.gid, messageId, rev: 1, clientEventId: crypto.randomUUID(), blockId: "trend", event: "chart.select", value: { series: "new", x: "微博", y: 4, index: 1 } });
+    const late = await d.next((f) => f.t === "run.interaction" && f.eventId === old.eventId);
+    expect(late.source).toEqual({ kind: "card", messageId, blockId: "trend", rev: 1, currentRev: 3 });
+    expect(late.block).toMatchObject({ id: "trend", label: "新增群（B 站）" });
+    // The one sent at the current rev has no currentRev.
+    expect(frame.source.currentRev).toBeUndefined();
+
     // An answer is stored and reaches the run as run.answer with the block.
-    const ans = await c.ok({ t: "card.event", groupId: w.gid, messageId, rev: 2, clientEventId: crypto.randomUUID(), actionId: "send", event: "action.press", inputs: { check: { value: "wrong" } } });
+    const ans = await c.ok({ t: "card.event", groupId: w.gid, messageId, rev: 3, clientEventId: crypto.randomUUID(), actionId: "send", event: "action.press", inputs: { check: { value: "wrong" } } });
     expect(ans).toMatchObject({ stored: true, expect: { by: w.bot.id, mode: "run" } });
     const ra = await d.next((f) => f.t === "run.answer");
     expect(ra).toMatchObject({ runId, eventId: ans.eventId, source: { kind: "card", messageId, askId: "verify", answerId: ans.answerId }, actionId: "send", inputs: { check: { value: "wrong" } } });

@@ -171,6 +171,7 @@ pub fn interaction_envelope(f: &RunInteractionFrame) -> String {
             block_id,
             action_id,
             rev,
+            ..
         } => envelope(
             &f.input_id,
             "card.event",
@@ -358,6 +359,7 @@ resolve, artifact data/reply) or with a short reply."
                 block_id: Some("check".into()),
                 action_id: None,
                 rev: 1,
+                current_rev: None,
             },
             event: "choice.change".into(),
             value: Some(

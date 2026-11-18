@@ -46067,6 +46067,11 @@
                       "type": "integer",
                       "exclusiveMinimum": 0,
                       "maximum": 4294967295
+                    },
+                    "currentRev": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 4294967295
                     }
                   },
                   "required": [

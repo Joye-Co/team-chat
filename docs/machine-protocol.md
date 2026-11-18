@@ -531,8 +531,10 @@ no credentials pass through chat. The server shows the address to owners and run
   actionId?, blockId?, event, value?, inputs?, editedValues?, actor: { id, name }, eventId?, block? /* the block at rev */,
   tally? /* counts-only poll: votes per option now */ }
 { t: "run.interaction", runId, inputId,
-  source: { kind: "card", messageId, blockId?, actionId?, rev } | { kind: "artifact", artifactId, version, eventId, ask },
-  event, value?, actor: { id, name }, eventId?, block? /* card events: the block or action at rev */ }
+  source: { kind: "card", messageId, blockId?, actionId?, rev /* the rev the person saw */,
+            currentRev? /* the card's rev now, when it is past rev */ }
+        | { kind: "artifact", artifactId, version, eventId, ask },
+  event, value?, actor: { id, name }, eventId?, block? /* card events: the block or action as the card has it now */ }
 // daemon -> server (feature "output", `chat-run`): a normal run.event with seq and ack
 RunEvent += { type: "output", outputId, op: "card.post" | "card.patch" | "interaction.resolve" | "artifact.data" | "artifact.reply" | "desk.note" | "run.report", body: JSON }
 // server -> daemon

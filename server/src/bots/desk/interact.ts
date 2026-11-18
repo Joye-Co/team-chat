@@ -235,6 +235,7 @@ export abstract class DeskInteract extends DeskHand {
       eventId: x.eventId,
       event: x.event,
     };
+    if (x.source.currentRev !== undefined) data.currentRev = x.source.currentRev;
     if (x.source.blockId) data.blockId = x.source.blockId;
     if (x.source.actionId) data.actionId = x.source.actionId;
     if (x.value !== undefined) data.value = x.value;

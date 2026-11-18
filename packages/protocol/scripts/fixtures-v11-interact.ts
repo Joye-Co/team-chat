@@ -719,6 +719,22 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
     },
     "a vote of a counts-only poll: no voter, no value, the tally",
   );
+  ok(
+    "machine/run.interaction-card-older-rev.json",
+    "MachineDownFrame",
+    {
+      t: "run.interaction",
+      runId: RUN,
+      inputId: "in-9",
+      source: { kind: "card", messageId: M, blockId: "check", rev: 1, currentRev: 3 },
+      event: "choice.change",
+      value: { value: "wrong" },
+      actor,
+      eventId: EV(2),
+      block: { id: "check", type: "decision", options: [{ id: "ok", label: "对" }, { id: "wrong", label: "有问题" }] },
+    },
+    "sent from rev 1 of a card that is at rev 3 now: the block is the one of rev 3",
+  );
   ok("machine/run.interaction-card.json", "MachineDownFrame", {
     t: "run.interaction",
     runId: RUN,
