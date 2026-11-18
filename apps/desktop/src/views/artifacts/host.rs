@@ -1167,7 +1167,7 @@ pub fn page_footer(
     };
     use gpui::{
         InteractiveElement as _, ParentElement as _, StatefulInteractiveElement as _, Styled as _,
-        div, px,
+        div,
     };
     use gpui_component::{Sizable as _, tooltip::Tooltip};
     let k = theme::colors(cx);

@@ -405,7 +405,7 @@ fn version_time(now: Millis, at: Millis) -> String {
 impl ArtifactPage {
     /// The toolbar row (NATIVE.md §2, §5.1): the 产出's name as the title,
     /// `群 · 类型` as the subtitle (no breadcrumb, no tag), then the version
-    /// pop-up and one glass group: 分享, 在新窗口打开, 单独问.
+    /// pop-up and the labeled items (D20): 分享, 新窗口, 单独问, 信息.
     fn header(
         &self,
         detail: &ArtifactDetail,
@@ -434,40 +434,43 @@ impl ArtifactPage {
         let id = a.id.clone();
         // The version pop-up as a toolbar item (R12): the same capsule,
         // height and shape as the toolbar groups beside it.
-        let picker = nk::inline_popup(
-            "artifact-version",
-            format!("v{shown} · {}", version_time(now, at)),
-            window,
-            cx,
-        )
-        .h(nk::metrics::TOOLBAR_ITEM)
-        .px(nk::metrics::FIELD_PAD)
-        .rounded(nk::metrics::BUTTON_REGULAR_RADIUS)
-        .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
-            let mut menu = menu.label(c::ARTIFACT_VERSIONS);
-            for v in &versions {
-                let note = services
-                    .provider
-                    .artifact(&id)
-                    .and_then(|d| version_note(&services, &d, v.version))
-                    .unwrap_or_default();
-                let label = format!(
-                    "v{}  {}  {}",
-                    v.version,
-                    note,
-                    version_time(services.provider.clock_now(), v.created_at)
-                );
-                let nav = services.nav.clone();
-                let (id, ver) = (id.clone(), v.version);
-                menu = menu.item(PopupMenuItem::new(label).checked(ver == shown).on_click(
-                    move |_, _, cx| {
-                        let id = id.clone();
-                        nav.update(cx, |n, cx| n.open_artifact(id, Some(ver), cx))
-                    },
-                ));
-            }
-            menu
-        });
+        // While the inspector shows, its 版本 section says when each version was made:
+        // the item keeps only the number, so the subtitle beside the labeled items
+        // (D20) is not cut to two characters.
+        let picker_title = if self.aside_open {
+            format!("v{shown}")
+        } else {
+            format!("v{shown} · {}", version_time(now, at))
+        };
+        let picker = nk::inline_popup("artifact-version", picker_title, window, cx)
+            .h(nk::metrics::TOOLBAR_ITEM)
+            .px(nk::metrics::FIELD_PAD)
+            .rounded(nk::metrics::BUTTON_REGULAR_RADIUS)
+            .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
+                let mut menu = menu.label(c::ARTIFACT_VERSIONS);
+                for v in &versions {
+                    let note = services
+                        .provider
+                        .artifact(&id)
+                        .and_then(|d| version_note(&services, &d, v.version))
+                        .unwrap_or_default();
+                    let label = format!(
+                        "v{}  {}  {}",
+                        v.version,
+                        note,
+                        version_time(services.provider.clock_now(), v.created_at)
+                    );
+                    let nav = services.nav.clone();
+                    let (id, ver) = (id.clone(), v.version);
+                    menu = menu.item(PopupMenuItem::new(label).checked(ver == shown).on_click(
+                        move |_, _, cx| {
+                            let id = id.clone();
+                            nav.update(cx, |n, cx| n.open_artifact(id, Some(ver), cx))
+                        },
+                    ));
+                }
+                menu
+            });
         let share_text = fill(
             c::ARTIFACT_SHARE_TEXT,
             &[("title", &a.title), ("v", &shown.to_string())],
