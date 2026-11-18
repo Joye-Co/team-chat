@@ -117,6 +117,10 @@ fn open_phase_with(
             false,
         ),
         RunPhase::Stopped => fake.end_live_run(crate::data::RunStatus::Cancelled, None, false),
+        RunPhase::NeedsReply => {
+            fake.end_live_run(crate::data::RunStatus::Done, None, false);
+            fake.report_on_live_run();
+        }
         RunPhase::WaitingComputer if waiting == Some(WaitingFor::Queue) => fake.queue_live_run(),
         RunPhase::WaitingApproval => fake.ask_on_live_run(crate::data::v2::AskKind::Approval),
         RunPhase::WaitingPerson if waiting == Some(WaitingFor::Question) => {
