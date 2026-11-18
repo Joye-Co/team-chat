@@ -88,7 +88,6 @@ crate::copy! {
     FIND_NOT_FOUND = "未找到",
     FIND_PREVIOUS = "上一个",
     FIND_NEXT = "下一个",
-    FIND_DONE = "完成",
     MENU_FIND = "查找…",
     MENU_FIND_NEXT = "查找下一个",
     MENU_FIND_PREVIOUS = "查找上一个",
