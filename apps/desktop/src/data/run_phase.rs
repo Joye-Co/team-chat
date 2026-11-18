@@ -319,13 +319,21 @@ pub enum RunAction {
     GoReply,
 }
 
-/// The buttons of a run, the primary first (design-takeover 3.9). A button the viewer may not
-/// use is left out, never drawn disabled.
+/// The buttons of a run, the likely next step first (design-takeover 3.9). A button the viewer
+/// may not use is left out, never drawn disabled.
 pub fn actions(run: &BotRunSummary, v: Viewer) -> Vec<RunAction> {
-    let (phase, _) = phase_of(run);
+    let (phase, waiting) = phase_of(run);
     let r = rights(run, v);
     let mut out = Vec::new();
     match phase {
+        // Stuck: pausing resolves nothing, taking over is how a person looks and fixes it.
+        RunPhase::WaitingPerson if waiting == Some(WaitingFor::Stuck) && r.take_over => {
+            out.push(RunAction::TakeOver);
+            if r.pause {
+                out.push(RunAction::Pause);
+            }
+            out.push(RunAction::Stop);
+        }
         RunPhase::Working | RunPhase::WaitingPerson | RunPhase::WaitingApproval => {
             if r.pause {
                 out.push(RunAction::Pause);
@@ -357,6 +365,21 @@ pub fn actions(run: &BotRunSummary, v: Viewer) -> Vec<RunAction> {
         RunPhase::Done | RunPhase::Failed | RunPhase::Stopped => {}
     }
     out
+}
+
+/// The one button of [`actions`] drawn as the primary, when one resolves the phase
+/// (design-takeover 3.9). 暂停 leads only a run at work: on a run that waits, the way to the
+/// answer is the banner's. 替 {who} 交还 overrides a colleague, so it never leads.
+pub fn primary_action(run: &BotRunSummary, actions: &[RunAction]) -> Option<RunAction> {
+    let (phase, waiting) = phase_of(run);
+    let waits_for_answer = phase == RunPhase::WaitingApproval
+        || (phase == RunPhase::WaitingPerson && waiting != Some(WaitingFor::Stuck));
+    actions.first().copied().filter(|a| match a {
+        RunAction::Stop | RunAction::HandBackFor => false,
+        RunAction::Pause => phase == RunPhase::Working,
+        RunAction::TakeOver => !waits_for_answer,
+        _ => true,
+    })
 }
 
 /// One command of the person holding a run (`hand.command`, `hand.output`, `hand.result`).
@@ -581,6 +604,48 @@ mod tests {
             ..alice
         };
         assert_eq!(actions(&run(RunStatus::Running), gone), [RunAction::Stop]);
+    }
+
+    #[test]
+    fn a_stuck_run_leads_with_take_over() {
+        let alice = viewer("alice", TeamRole::Member);
+        let mut r = run(RunStatus::Running);
+        r.hold.takeover = Some("isolated".into());
+        r.hold.phase = Some("waiting_person".into());
+        r.hold.waiting_for = Some("stuck".into());
+        let a = actions(&r, alice);
+        assert_eq!(a, [RunAction::TakeOver, RunAction::Pause, RunAction::Stop]);
+        assert_eq!(primary_action(&r, &a), Some(RunAction::TakeOver));
+        // Without the right to take over nothing here unsticks it: no primary.
+        r.hold.takeover = None;
+        let a = actions(&r, alice);
+        assert_eq!(a, [RunAction::Pause, RunAction::Stop]);
+        assert_eq!(primary_action(&r, &a), None);
+    }
+
+    #[test]
+    fn the_primary_is_the_step_that_resolves_the_phase() {
+        let alice = viewer("alice", TeamRole::Member);
+        let admin = viewer("ada", TeamRole::Owner);
+        let mut r = run(RunStatus::Running);
+        r.hold.takeover = Some("isolated".into());
+        let primary = |r: &BotRunSummary, v| primary_action(r, &actions(r, v));
+        assert_eq!(primary(&r, alice), Some(RunAction::Pause));
+        // A run that waits for an answer: the banner's 去回复 or 去批准 leads, not 暂停.
+        r.hold.phase = Some("waiting_person".into());
+        r.hold.waiting_for = Some("question".into());
+        assert_eq!(primary(&r, alice), None);
+        r.hold.phase = Some("waiting_approval".into());
+        r.hold.waiting_for = None;
+        assert_eq!(primary(&r, alice), None);
+        r.hold.phase = None;
+        r.hold.paused_by = Some("alice".into());
+        r.hold.hold_kind = Some("pause".into());
+        assert_eq!(primary(&r, alice), Some(RunAction::Continue));
+        // Taken over: the holder hands back; an admin who only watches gets no primary.
+        r.hold.hold_kind = Some("takeover".into());
+        assert_eq!(primary(&r, alice), Some(RunAction::HandBack));
+        assert_eq!(primary(&r, admin), None);
     }
 
     #[test]

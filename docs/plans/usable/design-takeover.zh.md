@@ -255,14 +255,18 @@ ALTER TABLE runs ADD COLUMN takeover TEXT;               -- BotRun.takeover：�
 - **状态词**：话题顶部任务条、成员页、桌面、实时查看标题统一读 `phase`。新增 `RunPhase` 和回退函数（服务端没有 `phase` 或值不认识时，用 `status` 和 `pausedBy` 算）。每个状态都是「词 · 已 N 分钟」，不留空白。
 - **实时查看**（`views/live/mod.rs`）底部：
 
-| phase | 按钮（第一个是主按钮） | 横幅 |
+主按钮只给能解决当前状态的那一步：在等人回答时主按钮是横幅里的「去回复」「去批准」，底部不再有主按钮。
+
+| phase | 按钮（**粗体**是主按钮） | 横幅 |
 | --- | --- | --- |
-| working、waiting_person、waiting_approval | 暂停、接管（我能接管时）、停止… | 状态词 |
-| needs_reply | 去回复（回到话题输入框） | 「{member} 在等你回复」或「卡住了」 |
+| working | **暂停**、接管（我能接管时）、停止… | 状态词 |
+| waiting_person（问题）、waiting_approval | 暂停、接管（我能接管时）、停止…，都是次按钮 | 状态词和 **去回复** / **去批准** |
+| waiting_person（卡住了） | **接管**、暂停、停止…；不能接管时只有暂停、停止…，都是次按钮 | 「卡住了，需要你看一下」 |
+| needs_reply | **去回复**（回到话题输入框） | 「{member} 在等你回复」或「卡住了」 |
 | waiting_computer | 停止… | 「在等电脑：…」 |
-| paused | 继续、接管（我能接管时）、停止… | 「{who} 暂停了 {member}」，下面留言框 |
-| taken_over（我） | 交还、停止… | 「你在操作 {computer} · {member} 已停下」；终端下面命令框和留言框 |
-| taken_over（别人） | 管理员看到「替 {who} 交还」 | 「{who} 在操作 {computer}」 |
+| paused | **继续**、接管（我能接管时）、停止… | 「{who} 暂停了 {member}」，下面留言框 |
+| taken_over（我） | **交还**、停止… | 「你在操作 {computer} · {member} 已停下」；终端下面命令框和留言框 |
+| taken_over（别人） | 管理员看到「替 {who} 交还」，是次按钮 | 「{who} 在操作 {computer}」 |
 
 - 「我能接管」按 3.2 在客户端也算一遍（读 `takeover`、线 13 的角色和电脑主人），服务端仍是裁判。不能接管的人看不到这个按钮，不用灰按钮占位。
 - 命令框用 gpui-component 的 `Input`，回车运行；有命令在跑时按钮变「中止」。人的命令在终端里一条一行，原地从「运行中」变成「成功」或「失败」（退出码只在开发者视图里）。

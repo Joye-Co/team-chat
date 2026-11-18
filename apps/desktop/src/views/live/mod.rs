@@ -28,7 +28,7 @@ use crate::{
         AdminError, BotRunSummary, Millis, PlanState,
         run_phase::{
             HandCommand, HandResult, RunAction, RunPhase, RunRefusal, RunRights, Viewer,
-            WaitingFor, actions, phase_of, rights,
+            WaitingFor, actions, phase_of, primary_action, rights,
         },
         v2::{AcceptanceItem, MachineScreen, ScreenLine, ScreenLineKind},
     },
@@ -857,7 +857,7 @@ impl LivePane {
             };
             (route == AskRoute::Reply || ask.is_some()).then(|| {
                 let run = run.clone();
-                push_button(id, label, PushStyle::Outline, PushSize::Small, cx).on_click(
+                push_button(id, label, PushStyle::Default, PushSize::Small, cx).on_click(
                     cx.listener(move |this, _, window, cx| {
                         this.go_to_ask(&run, ask.as_deref(), window, cx)
                     }),
@@ -1288,8 +1288,9 @@ impl LivePane {
             .unwrap_or_default();
         let hint = (actions.contains(&RunAction::TakeOver) && !phase_of(run).0.held())
             .then(|| fill(c::LIVE_TAKE_OVER_HINT, &[("name", bot)]));
-        let buttons = actions.iter().enumerate().map(|(i, a)| {
-            let style = if i == 0 && *a != RunAction::Stop {
+        let primary = primary_action(run, actions);
+        let buttons = actions.iter().map(|a| {
+            let style = if primary == Some(*a) {
                 PushStyle::Default
             } else {
                 PushStyle::Outline
