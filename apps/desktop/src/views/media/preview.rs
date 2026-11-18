@@ -885,6 +885,18 @@ pub fn open(
     sample: Sample,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
+    open_finding(services, content, sample, None, cx)
+}
+
+/// [`open`] with the viewer's find bar open and `find` typed in it
+/// (`media-markdown-find`, `media-code-find`).
+pub fn open_finding(
+    services: Services,
+    content: gpui::Size<Pixels>,
+    sample: Sample,
+    find: Option<&'static str>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
     if sample == Sample::States {
         return open_states(services, content, cx);
     }
@@ -932,7 +944,11 @@ pub fn open(
         };
         handle
             .update(cx, |_, window, cx| {
-                viewer::open_in(window, v.key(), name.to_string(), target, opening, cx);
+                let viewer =
+                    viewer::open_in(window, v.key(), name.to_string(), target, opening, cx);
+                if let Some(query) = find {
+                    viewer.update(cx, |v, cx| v.preview_find(query, window, cx));
+                }
             })
             .map_err(|e| e.to_string())?;
     }

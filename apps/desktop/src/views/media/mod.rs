@@ -17,6 +17,7 @@
 //!
 //! [`WebEmbed`]: crate::ui::web_embed::WebEmbed
 
+pub mod find;
 pub mod full;
 pub mod in_place;
 pub mod inline;

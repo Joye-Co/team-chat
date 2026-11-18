@@ -911,6 +911,36 @@ pub const SCENES: &[Scene] = &[
         },
     },
     Scene {
+        name: "media-markdown-find",
+        about: "⌘F in the Markdown reader: the find bar with seq typed, every match marked, the current one stronger, n / m",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open_finding(
+                s,
+                c,
+                MediaSample::from_name("media-markdown").expect("sample"),
+                Some("seq"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-code-find",
+        about: "⌘F in the code viewer: the find bar with seq typed, the lines that hold a match filled, the current one stronger",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open_finding(
+                s,
+                c,
+                MediaSample::from_name("media-code").expect("sample"),
+                Some("seq"),
+                cx,
+            )
+        },
+    },
+    Scene {
         name: "media-images",
         about: "Image set: grid of 4 with +n, lightbox with filmstrip",
         start: Start::SignedIn,
@@ -1463,7 +1493,7 @@ fn media_ready(name: &str) -> Option<fn(&App) -> bool> {
         "media-html" => Some(|cx| {
             media_preview::ready(MediaSample::from_name("media-html").expect("sample"), cx)
         }),
-        "media-markdown" => Some(|cx| {
+        "media-markdown" | "media-markdown-find" => Some(|cx| {
             media_preview::ready(
                 MediaSample::from_name("media-markdown").expect("sample"),
                 cx,
@@ -1481,7 +1511,7 @@ fn media_ready(name: &str) -> Option<fn(&App) -> bool> {
         "media-pdf" => Some(|cx| {
             media_preview::ready(MediaSample::from_name("media-pdf").expect("sample"), cx)
         }),
-        "media-code" => Some(|cx| {
+        "media-code" | "media-code-find" => Some(|cx| {
             media_preview::ready(MediaSample::from_name("media-code").expect("sample"), cx)
         }),
         "media-table" => Some(|cx| {

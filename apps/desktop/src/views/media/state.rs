@@ -40,6 +40,8 @@ pub struct MediaState {
     pub scroll: ScrollHandle,
     pub list: UniformListScrollHandle,
     pub pages: ScrollHandle,
+    /// ⌘F in the viewer sheet: the find bar of a document, a code file or a table.
+    pub find: Option<super::find::Find>,
     _poll: Option<Task<()>>,
 }
 
@@ -62,6 +64,7 @@ impl MediaState {
             scroll: ScrollHandle::new(),
             list: UniformListScrollHandle::new(),
             pages: ScrollHandle::new(),
+            find: None,
             _poll: None,
         }
     }

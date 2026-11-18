@@ -81,6 +81,12 @@ impl MediaViewer {
         }
     }
 
+    /// Scene: the find bar open with `query` typed.
+    pub fn preview_find(&mut self, query: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.state
+            .update(cx, |s, cx| s.find_with(query, window, cx));
+    }
+
     fn versions(&self) -> Vec<VersionRow> {
         let Some(p) = &self.target.provider else {
             return Vec::new();
@@ -196,9 +202,28 @@ impl Render for MediaViewer {
         // document grow past the sheet (cut square at its bottom corners, and
         // scrolled by nothing).
         let height = self.height(window, cx) - crate::ui::native::tokens::layout::BORDER * 2.;
+        // ⌘F, ⌘G and ⇧⌘G find in the document of the sheet (Markdown, code,
+        // table); the 话题 under the sheet keeps its own find bar closed.
+        use crate::views::timeline::find::{FindInTopic, FindNext, FindPrevious};
+        use gpui::prelude::FluentBuilder as _;
+        let searchable = matches!(
+            store::ready(&self.key, cx).as_deref().map(|m| &m.data),
+            Some(Data::Markdown(_) | Data::Code(_) | Data::Table(_))
+        );
         div()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key))
+            .when(searchable, |el| {
+                el.on_action(cx.listener(|this, _: &FindInTopic, window, cx| {
+                    this.state.update(cx, |s, cx| s.open_find(window, cx))
+                }))
+                .on_action(cx.listener(|this, _: &FindNext, _, cx| {
+                    this.state.update(cx, |s, cx| s.step_find(true, cx))
+                }))
+                .on_action(cx.listener(|this, _: &FindPrevious, _, cx| {
+                    this.state.update(cx, |s, cx| s.step_find(false, cx))
+                }))
+            })
             .w_full()
             .h(height)
             .flex()
@@ -259,7 +284,13 @@ impl MediaViewer {
                 _ => None,
             },
         };
-        natural.map_or(room, |n| n.min(room))
+        // The find bar takes a row of a sheet that hugs its content.
+        let bar = if self.state.read(cx).find.is_some() {
+            crate::ui::native::tokens::height::FOOTER_ROW
+        } else {
+            px(0.)
+        };
+        natural.map_or(room, |n| (n + bar).min(room))
     }
 }
 
