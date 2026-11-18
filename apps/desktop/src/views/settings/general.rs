@@ -392,11 +392,24 @@ impl GeneralPage {
                 .with_size(metrics::SPINNER)
                 .color(k.secondary)
                 .into_any_element(),
-            Some(Phase::Manual(_)) => {
-                sm("about-dismiss", u::DISMISS.into(), PushStyle::Outline, cx)
-                    .on_click(move |_, _, cx| updater.update(cx, |u, cx| u.dismiss(cx)))
-                    .into_any_element()
-            }
+            Some(Phase::Manual(_)) => div()
+                .flex()
+                .items_center()
+                .gap(space::S8)
+                .child(
+                    sm(
+                        "about-quit",
+                        fill(u::QUIT_TO_INSTALL, &[("product", env!("PRODUCT_NAME"))]).into(),
+                        PushStyle::Default,
+                        cx,
+                    )
+                    .on_click(|_, _, cx| cx.dispatch_action(&crate::app::Quit)),
+                )
+                .child(
+                    sm("about-dismiss", u::DISMISS.into(), PushStyle::Outline, cx)
+                        .on_click(move |_, _, cx| updater.update(cx, |u, cx| u.dismiss(cx))),
+                )
+                .into_any_element(),
             Some(Phase::Checking) => disabled_push(
                 sm("about-check", u::CHECK.into(), PushStyle::Outline, cx),
                 true,

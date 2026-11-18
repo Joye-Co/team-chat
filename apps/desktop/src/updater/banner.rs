@@ -212,7 +212,15 @@ impl Render for UpdateSheet {
                     .join("\n"),
                 )
                 .buttons([
-                    button("update-ok", u::DISMISS, PushStyle::Default, cx).on_click(
+                    alert_button(
+                        "update-quit",
+                        fill(u::QUIT_TO_INSTALL, &[("product", product)]),
+                        PushStyle::Default,
+                        false,
+                        cx,
+                    )
+                    .on_click(|_, _, cx| cx.dispatch_action(&crate::app::Quit)),
+                    button("update-ok", u::DISMISS, PushStyle::Outline, cx).on_click(
                         move |_, window, cx| {
                             u1.update(cx, |up, cx| up.dismiss(cx));
                             window.close_dialog(cx);
@@ -356,7 +364,6 @@ pub fn update_card(
     let info = phase.info()?.clone();
     let v = info.version.as_str();
     let product = env!("PRODUCT_NAME");
-    let headline = super::notes::Notes::parse(v, &info.notes).headline;
     let has_notes = !info.notes.trim().is_empty();
     let button = |id: &'static str, label: SharedString, style: PushStyle, cx: &App| {
         crate::ui::native::push_button(id, label, style, PushSize::Small, cx).w_full()
@@ -407,11 +414,9 @@ pub fn update_card(
                 Sym::Download,
                 k.blue,
                 fill(u::CARD_AVAILABLE, &[("version", v)]),
-                if headline.is_empty() {
-                    u::CARD_AVAILABLE_DETAIL.to_string()
-                } else {
-                    headline
-                },
+                // The headline lives in 改了什么: the card stays one height
+                // and always says the app will reopen.
+                u::CARD_AVAILABLE_DETAIL.to_string(),
             )
         }
         Phase::Downloading { done, total, .. } => {
@@ -474,6 +479,17 @@ pub fn update_card(
             u::INSTALLING.to_string(),
         ),
         Phase::Manual(_) => {
+            // Sized to its label: the product's name never cuts.
+            buttons.push(
+                crate::ui::native::push_button(
+                    "update-card-quit",
+                    fill(u::QUIT_TO_INSTALL, &[("product", product)]),
+                    PushStyle::Default,
+                    PushSize::Small,
+                    cx,
+                )
+                .on_click(|_, _, cx| cx.dispatch_action(&crate::app::Quit)),
+            );
             buttons.push(
                 button(
                     "update-card-dismiss",
@@ -517,11 +533,15 @@ pub fn update_card(
         _ => return None,
     };
     let busy = matches!(phase, Phase::WaitingForSends(_) | Phase::Installing(_));
+    let first_hugs = matches!(phase, Phase::Manual(_));
     let mark = div()
         .flex_none()
         .size(icon::LG)
         .rounded(radius::ITEM)
         .bg(k.fill)
+        // The dark card is lifted to the group fill: the box takes the next
+        // step up, so it still reads as a box.
+        .when(crate::theme::is_dark(cx), |d| d.bg(k.push))
         .flex()
         .items_center()
         .justify_center()
@@ -576,13 +596,20 @@ pub fn update_card(
                             .child(detail),
                     )
                     .when(!buttons.is_empty(), |d| {
-                        d.child(
-                            div().flex().gap(space::S8).children(
-                                buttons
-                                    .into_iter()
-                                    .map(|b| div().flex_1().min_w(gpui::Pixels::ZERO).child(b)),
-                            ),
-                        )
+                        d.child(div().flex().gap(space::S8).children(
+                            buttons.into_iter().enumerate().map(|(ix, b)| {
+                                div()
+                                    .min_w(gpui::Pixels::ZERO)
+                                    .map(|d| {
+                                        if first_hugs && ix == 0 {
+                                            d.flex_none()
+                                        } else {
+                                            d.flex_1()
+                                        }
+                                    })
+                                    .child(b)
+                            }),
+                        ))
                     }),
             )
             .into_any_element(),
