@@ -50,6 +50,7 @@ import {
   type BotStateData,
   type CardRef,
   emptyState,
+  expandHome,
   FileStateStore,
   MAX_REMEMBERED_CARDS,
   MAX_REMEMBERED_REFS,
@@ -71,9 +72,12 @@ export interface BotOptions {
   url: string;
   /** The bot token. Prefer `tokenFile`. */
   token?: string;
-  /** File that holds the bot token (mode 600). */
+  /** File that holds the bot token (mode 600). A leading `~` is the home folder. */
   tokenFile?: string;
-  /** Cursor and follow state file. Without it, state lives in memory and a restart starts at the newest events. */
+  /**
+   * Cursor and follow state file. Without it, state lives in memory and a restart starts at the
+   * newest events. A leading `~` is the home folder.
+   */
   stateFile?: string;
   /** Custom state store (instead of `stateFile`). */
   stateStore?: StateStore;
@@ -593,11 +597,21 @@ function withoutUserInfo(url: string): string {
 
 function readToken(opts: BotOptions, log: Logger): string {
   if (opts.token) return opts.token.trim();
-  if (!opts.tokenFile) throw new Error("pass token or tokenFile");
-  const mode = statSync(opts.tokenFile).mode & 0o077;
-  if (mode !== 0) log.warn("token file can be read by other users; run chmod 600 on it", { file: opts.tokenFile });
-  const token = readFileSync(opts.tokenFile, "utf8").trim();
-  if (!token) throw new Error(`token file is empty: ${opts.tokenFile}`);
+  if (!opts.tokenFile) throw new ChatError("invalid", "pass token or tokenFile");
+  const file = expandHome(opts.tokenFile);
+  let mode: number;
+  let token: string;
+  try {
+    mode = statSync(file).mode & 0o077;
+    token = readFileSync(file, "utf8").trim();
+  } catch (err) {
+    if ((err as { code?: string }).code === "ENOENT") {
+      throw new ChatError("invalid", `token file not found: ${file} (docs/bots.md, section 1, shows how to make one)`);
+    }
+    throw new ChatError("invalid", `cannot read the token file ${file}: ${(err as Error).message}`);
+  }
+  if (mode !== 0) log.warn("token file can be read by other users; run chmod 600 on it", { file });
+  if (!token) throw new ChatError("invalid", `token file is empty: ${file}`);
   return token;
 }
 
@@ -678,7 +692,7 @@ export class Bot {
     this.token = readToken(opts, this.log);
     this.http = new HttpClient({ url: this.url, token: this.token, fetch: opts.fetch });
     const WS = opts.WebSocket ?? (globalThis.WebSocket as unknown as WebSocketCtor | undefined);
-    if (!WS) throw new Error("no WebSocket implementation: use Bun or Node 22+, or pass the WebSocket option");
+    if (!WS) throw new ChatError("invalid", "no WebSocket implementation: use Bun or Node 22.18+, or pass the WebSocket option");
     this.WS = WS;
     this.store = opts.stateStore ?? (opts.stateFile ? new FileStateStore(opts.stateFile) : new MemoryStateStore());
     const loaded = this.store.load();
@@ -842,7 +856,7 @@ export class Bot {
   }
   /** My member record (after the first welcome). */
   get me(): Member {
-    if (!this.meMember) throw new ChatError("invalid", "not connected yet");
+    if (!this.meMember) throw new ChatError("invalid", "bot.me is set after the first welcome: await bot.start() first");
     return this.meMember;
   }
   get members(): Member[] {

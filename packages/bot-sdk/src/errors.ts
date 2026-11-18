@@ -9,7 +9,10 @@ export interface ChatErrorDetails {
   memberIds?: string[];
 }
 
-/** Every failure the SDK reports. `status` is the HTTP status for HTTP calls. */
+/**
+ * Every failure the SDK reports, bad options of `new Bot(...)` included (code `invalid`).
+ * `status` is the HTTP status for HTTP calls.
+ */
 export class ChatError extends Error {
   readonly code: ChatErrorCode;
   readonly status?: number;

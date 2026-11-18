@@ -8,15 +8,10 @@
 //   bun examples/ask-bot.ts
 //
 // Optional: CHAT_STATE_FILE (default: <token file>.state.json), LOG_LEVEL (debug|info|warn|error).
-import { homedir } from "node:os";
 import { Bot, decisionCard, type LogLevel } from "../packages/bot-sdk/src/index.ts";
 
-function expand(path: string): string {
-  return path.startsWith("~/") ? `${homedir()}${path.slice(1)}` : path;
-}
-
 const url = process.env.CHAT_URL;
-const tokenFile = process.env.CHAT_TOKEN_FILE && expand(process.env.CHAT_TOKEN_FILE);
+const tokenFile = process.env.CHAT_TOKEN_FILE;
 if (!url || !tokenFile) {
   console.error("set CHAT_URL and CHAT_TOKEN_FILE");
   process.exit(2);
@@ -24,8 +19,8 @@ if (!url || !tokenFile) {
 
 const bot = new Bot({
   url,
-  tokenFile,
-  stateFile: expand(process.env.CHAT_STATE_FILE ?? `${tokenFile}.state.json`),
+  tokenFile, // the SDK reads a leading ~ as the home folder, here and in stateFile
+  stateFile: process.env.CHAT_STATE_FILE ?? `${tokenFile}.state.json`,
   client: { name: "ask-bot", version: "1.1.0" },
   logLevel: (process.env.LOG_LEVEL as LogLevel | undefined) ?? "info",
 });

@@ -67,6 +67,11 @@ bot.onCardAction(async (ctx) => {
 await bot.start();
 ```
 
+`tokenFile` and `stateFile` read a leading `~` as the home folder, so a path from a `.env` file
+or a service unit works as written. Bad options (no token, a missing token file, a damaged state
+file, a URL that is not `http(s)://host`) make `new Bot(...)` throw `ChatError` `invalid` with
+the file or the option in the message.
+
 ## 3. What the SDK does
 
 - **Connection**: `hello` on every connection, ping every 30 s, reconnect with backoff (0.5 s to
@@ -539,7 +544,9 @@ bun examples/echo-bot.ts          # 或者:node examples/echo-bot.ts
 ```
 
 在机器人所在群的任意话题里 @ 它,它会回复 `echo: <内容>`。发 `@Deploy stream ...` 可以看到
-流式回复。最小示例见上面英文部分的代码,API 相同。
+流式回复。最小示例见上面英文部分的代码,API 相同。`tokenFile` 和 `stateFile` 开头的 `~` 会当作
+用户主目录。参数不对(没有令牌、令牌文件不存在、状态文件损坏、地址不是 `http(s)://主机`)时,
+`new Bot(...)` 抛出 `ChatError`(`invalid`),消息里写明是哪个文件或参数。
 
 ## 3. SDK 做了什么
 

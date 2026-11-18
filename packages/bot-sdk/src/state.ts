@@ -2,7 +2,15 @@
 // follows, its own card messages and 产出 (so card presses, answers and page events reach it
 // after a restart), and its side chat topics with the topic each one is about.
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { ChatError } from "./errors.ts";
+
+/** A path with a leading `~` (alone, or before `/` or `\`) replaced by the home folder. */
+export function expandHome(path: string): string {
+  if (path === "~") return homedir();
+  return path.startsWith("~/") || path.startsWith("~\\") ? join(homedir(), path.slice(2)) : path;
+}
 
 export interface CardRef {
   groupId: string;
@@ -66,14 +74,23 @@ export class MemoryStateStore implements StateStore {
 export class FileStateStore implements StateStore {
   readonly path: string;
 
+  /** A leading `~` in `path` is the home folder. */
   constructor(path: string) {
-    this.path = path;
+    this.path = expandHome(path);
   }
 
   load(): BotStateData | null {
     if (!existsSync(this.path)) return null;
-    const raw = JSON.parse(readFileSync(this.path, "utf8")) as Partial<BotStateData>;
-    if (raw.v !== 1) throw new Error(`unsupported bot state version in ${this.path}`);
+    // Deleting the file also drops the cursors, the followed topics and the remembered cards.
+    const hint = "delete it to start fresh (events from while the bot was away are skipped)";
+    let raw: Partial<BotStateData>;
+    try {
+      raw = JSON.parse(readFileSync(this.path, "utf8")) as Partial<BotStateData>;
+    } catch (err) {
+      throw new ChatError("invalid", `bot state file is not valid JSON: ${this.path} (${hint}): ${(err as Error).message}`);
+    }
+    if (!raw || typeof raw !== "object") throw new ChatError("invalid", `bot state file is not a JSON object: ${this.path} (${hint})`);
+    if (raw.v !== 1) throw new ChatError("invalid", `unsupported bot state version in ${this.path}`);
     return {
       v: 1,
       memberId: typeof raw.memberId === "string" ? raw.memberId : undefined,

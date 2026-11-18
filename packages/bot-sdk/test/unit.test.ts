@@ -1,7 +1,8 @@
 // Unit tests of the 1.1 interaction loop, refs and Card v2.1 builders against a fake server
 // (test/fake.ts): no network, no wrangler. Run: bun test test/unit.test.ts
-import { afterEach, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { ACK_EMOJI as PROTOCOL_ACK_EMOJI, type CardV2 } from "@chat/protocol";
 import {
@@ -15,6 +16,7 @@ import {
   checkArtifactEvents,
   checkDiagram,
   composeCard,
+  FileStateStore,
   HttpClient,
   MAX_PATTERN_INPUT,
   markdownBlocks,
@@ -914,6 +916,71 @@ describe("page event declarations", () => {
     expect(err3.reason).toBe("artifact.bad_schema");
     expect(calls).toBe(0);
     expect(() => checkArtifactEvents([{ name: "form.submit", schema: { type: "string", pattern: "^[a-z]{1,8}$" } }])).not.toThrow();
+  });
+});
+
+describe("setup errors", () => {
+  const dir = mkdtempSync(join(tmpdir(), "bot-sdk-setup-"));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  const make = (o: Record<string, unknown>) => new Bot({ url: "http://127.0.0.1:1", logLevel: "silent", ...o } as never);
+  const thrown = (fn: () => unknown): ChatError => {
+    try {
+      fn();
+    } catch (e) {
+      return e as ChatError;
+    }
+    throw new Error("did not throw");
+  };
+
+  test("bad options throw ChatError invalid with a message that says what to pass", () => {
+    const cases: [() => unknown, RegExp][] = [
+      [() => make({}), /pass token or tokenFile/],
+      [() => make({ token: "t", url: "ws://127.0.0.1:1" }), /must be http:\/\/ or https:\/\//],
+      [() => make({ token: "t", url: "127.0.0.1:8789" }), /http/],
+      [() => make({ token: "t", url: "not a url" }), /must look like http:\/\/127\.0\.0\.1:8789/],
+      [() => new HttpClient({ url: "not a url", token: "t" }), /must look like/],
+    ];
+    for (const [fn, text] of cases) {
+      const err = thrown(fn);
+      expect(err).toBeInstanceOf(ChatError);
+      expect(err.code).toBe("invalid");
+      expect(err.message).toMatch(text);
+    }
+    const early = thrown(() => make({ token: "t" }).me);
+    expect(early.code).toBe("invalid");
+    expect(early.message).toContain("await bot.start() first");
+  });
+
+  test("a missing or empty token file names the file", () => {
+    const missing = thrown(() => make({ tokenFile: join(dir, "nope.token") }));
+    expect(missing).toBeInstanceOf(ChatError);
+    expect(missing.message).toBe(`invalid: token file not found: ${join(dir, "nope.token")} (docs/bots.md, section 1, shows how to make one)`);
+    writeFileSync(join(dir, "empty.token"), "\n", { mode: 0o600 });
+    expect(thrown(() => make({ tokenFile: join(dir, "empty.token") })).message).toContain(`token file is empty: ${join(dir, "empty.token")}`);
+  });
+
+  test("tokenFile and stateFile read a leading ~ as the home folder", () => {
+    expect(new FileStateStore("~/x/state.json").path).toBe(join(homedir(), "x/state.json"));
+    expect(new FileStateStore("~").path).toBe(homedir());
+    expect(new FileStateStore("/tmp/~/state.json").path).toBe("/tmp/~/state.json");
+    expect(new FileStateStore("~user/state.json").path).toBe("~user/state.json");
+    const err = thrown(() => make({ tokenFile: "~/.bot-sdk-test-no-such-file.token" }));
+    expect(err.message).toContain(`token file not found: ${join(homedir(), ".bot-sdk-test-no-such-file.token")}`);
+  });
+
+  test("a damaged state file names the file and what deleting it costs", () => {
+    const file = join(dir, "state.json");
+    writeFileSync(file, '{"v":1,"cursors":{');
+    const err = thrown(() => make({ token: "t", stateFile: file }));
+    expect(err).toBeInstanceOf(ChatError);
+    expect(err.code).toBe("invalid");
+    expect(err.message).toContain(`bot state file is not valid JSON: ${file} (delete it to start fresh (events from while the bot was away are skipped))`);
+    writeFileSync(file, "null");
+    expect(thrown(() => make({ token: "t", stateFile: file })).message).toContain(`not a JSON object: ${file}`);
+    writeFileSync(file, '{"v":2}');
+    expect(thrown(() => make({ token: "t", stateFile: file })).message).toContain(`unsupported bot state version in ${file}`);
+    writeFileSync(file, '{"v":1,"cursors":{"g":3},"following":{},"cards":{}}');
+    expect(new FileStateStore(file).load()?.cursors).toEqual({ g: 3 });
   });
 });
 
