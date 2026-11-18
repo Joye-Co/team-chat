@@ -780,6 +780,15 @@ impl Render for RailView {
         // 新建 (onboarding): 新话题, 新建群 and 发起私聊 in one pull-down, so a
         // new member finds where a 群 or a 私聊 starts without the menu bar.
         // ⌘N still starts a 话题 directly.
+        // §2.14: with nothing cached and no server there is nowhere to create
+        // anything; the button stays in place, disabled at 50 %.
+        let disabled_new_topic = model::cannot_create(&self.services).then(|| {
+            crate::ui::native::disabled_push(
+                self.tool("rail-new-topic", Sym::Compose, c::RAIL_NEW, cx),
+                true,
+                cx,
+            )
+        });
         let new_topic = self
             .tool("rail-new-topic", Sym::Compose, c::RAIL_NEW, cx)
             .dropdown_menu_with_anchor(gpui::Anchor::TopRight, |menu, _, _| {
@@ -815,6 +824,8 @@ impl Render for RailView {
                     .flex_none()
                     .size(crate::ui::native::tokens::metrics::TOOLBAR_ITEM)
                     .into_any_element()
+            } else if let Some(disabled) = disabled_new_topic {
+                disabled.into_any_element()
             } else {
                 new_topic.into_any_element()
             });

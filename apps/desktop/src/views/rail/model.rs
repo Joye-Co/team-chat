@@ -20,6 +20,15 @@ use crate::{
     data::{ChatProvider, GroupId, GroupKind, Member, MemberId, Topic, TopicStatus},
 };
 
+/// Nothing can be created now: no 话题 is cached and the server cannot be
+/// reached, the state the pages show as their load failure (§2.15).
+pub fn cannot_create(services: &crate::app::Services) -> bool {
+    use crate::ui::native::page::PageLoad;
+    let p = &services.provider;
+    PageLoad::of(services, false) == PageLoad::Failed
+        && p.groups().iter().all(|g| p.topics(&g.id).is_empty())
+}
+
 /// What the slot at the start of a 话题 row shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RowState {
