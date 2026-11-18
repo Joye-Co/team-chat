@@ -254,9 +254,9 @@ impl ComposerView {
             .topic(&key.group_id, topic)
             .and_then(|t| t.owner_id);
         let run = crate::views::topic_page::lead_run(&runs, owner.as_deref())?;
-        // A run whose phase is over (已停止, 没做完, 完成) has no next step to
-        // read a message before.
-        if crate::data::run_phase::phase_of(run).0.ended() {
+        // Only a member at work has a next step to read a message before: a run that
+        // waits, is held or is over gets the plain composer.
+        if crate::data::run_phase::phase_of(run).0 != crate::data::run_phase::RunPhase::Working {
             return None;
         }
         // 停止 was pressed: the member stops at this step, so no next step
