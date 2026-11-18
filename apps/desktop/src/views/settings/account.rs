@@ -382,6 +382,9 @@ impl AccountPage {
             .update(cx, |st, cx| st.set_value(to.to_string(), window, cx));
         self.email_step += 1;
         self.email_sent_to = Some(to.to_string());
+        // As after 发送验证码: the first slot has the caret.
+        let handle = self.email_code.read(cx).focus_handle(cx);
+        handle.focus(window, cx);
         cx.notify();
     }
 
@@ -405,7 +408,13 @@ impl AccountPage {
             px(500.),
             move |dialog, window, cx| {
                 if first.replace(false) {
-                    let handle = this.read(cx).email_input.read(cx).focus_handle(cx);
+                    // The field of the step that is up: the address, or the code slots.
+                    let page = this.read(cx);
+                    let handle = if page.email_sent_to.is_some() {
+                        page.email_code.read(cx).focus_handle(cx)
+                    } else {
+                        page.email_input.read(cx).focus_handle(cx)
+                    };
                     handle.focus(window, cx);
                 }
                 let page = this.read(cx);
@@ -429,8 +438,6 @@ impl AccountPage {
                         PushSize::Large,
                     )
                     .w_full()
-                    .h(metrics::CODE_SLOT.1)
-                    .rounded(metrics::FIELD_RADIUS)
                 };
                 let link = |id: &'static str, label: &'static str| {
                     push_button(id, label, PushStyle::Link, PushSize::Small, cx)
@@ -448,15 +455,25 @@ impl AccountPage {
                         (
                             s::EMAIL_SHEET_TITLE,
                             s::EMAIL_SHEET_HINT.to_string(),
-                            NativeTextField::new("email-field", &page.email_input)
-                                .full_width()
-                                .size(crate::ui::native::FieldSize::Hero)
-                                .leading(crate::ui::icons::icon(
-                                    Sym::Mention,
-                                    tokens::icon::MD,
-                                    k.secondary,
-                                ))
-                                .error(error.is_some())
+                            // The h36 field of the login card, in a slot as
+                            // tall as the code slots of the next step, so the
+                            // sheet keeps its height between the two (E5).
+                            div()
+                                .w_full()
+                                .h(metrics::CODE_SLOT.1)
+                                .flex()
+                                .items_center()
+                                .child(
+                                    NativeTextField::new("email-field", &page.email_input)
+                                        .full_width()
+                                        .size(crate::ui::native::FieldSize::Large)
+                                        .leading(crate::ui::icons::icon(
+                                            Sym::Mention,
+                                            tokens::icon::MD,
+                                            k.secondary,
+                                        ))
+                                        .error(error.is_some()),
+                                )
                                 .into_any_element(),
                             Some(
                                 full_button(
@@ -629,7 +646,11 @@ impl AccountPage {
     /// 登录邮箱: my address (or 还没有添加) with 添加… / 更改…, and "⋯" ›
     /// 移除登录邮箱; a failed load shows the Alert with 重试.
     fn email_section(&self, window: &Window, cx: &mut Context<Self>) -> gpui::Div {
-        let header = SectionTitle::new(s::EMAIL).description(s::EMAIL_HINT);
+        // With an address set, the line says what it does, not what adding one would do.
+        let header = SectionTitle::new(s::EMAIL).description(match &self.email {
+            Some(Some(_)) => s::EMAIL_HINT_SET,
+            _ => s::EMAIL_HINT,
+        });
         let body: gpui::AnyElement = match (&self.email, &self.email_status) {
             (None, Status::Failed(t)) => widgets::failed_alert(
                 "email-failed",
@@ -1432,7 +1453,9 @@ impl Render for AccountPage {
                         push_button(
                             "sign-out",
                             s::SIGN_OUT_OPEN,
-                            PushStyle::Destructive,
+                            // The red fill is on the alert that confirms it
+                            // (2.10); at rest the page has no red.
+                            PushStyle::Outline,
                             PushSize::Regular,
                             cx,
                         ),
@@ -1447,28 +1470,14 @@ impl Render for AccountPage {
     }
 }
 
-/// My avatar in the 账号 header: a photo, or a letter disk on the quiet
-/// `quaternary` fill with `label` initials (never the bright ink disk).
+/// My avatar in the 账号 header: a photo, or the one letter fallback of
+/// every person (§1.8), on the profile card's group fill.
 fn account_avatar(me: Option<&Member>, size: gpui::Pixels, cx: &App) -> gpui::AnyElement {
     let k = native_colors(cx);
-    match me {
-        Some(m) if m.avatar_url.is_none() && !m.is_bot() => div()
-            .flex_none()
-            .size(size)
-            .rounded_full()
-            .bg(k.quaternary)
-            .flex()
-            .items_center()
-            .justify_center()
-            .text_size(size * 0.42)
-            .font_weight(gpui::FontWeight::SEMIBOLD)
-            .text_color(k.label)
-            .child(ui::avatar::monogram(&m.name, size))
-            .into_any_element(),
-        _ => ui::MemberAvatar::new(me, size)
-            .on(k.window)
-            .into_any_element(),
-    }
+    ui::MemberAvatar::new(me, size)
+        .on(k.group)
+        .on_group()
+        .into_any_element()
 }
 
 #[cfg(test)]

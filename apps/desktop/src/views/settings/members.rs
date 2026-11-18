@@ -7,8 +7,8 @@
 
 use gpui::{
     App, AppContext as _, Context, ElementId, Entity, Focusable as _, InteractiveElement as _,
-    IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled,
-    Subscription, Window, div, prelude::FluentBuilder as _, px,
+    IntoElement, ParentElement, Render, SharedString, Styled, Subscription, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Disableable as _, WindowExt as _,
@@ -86,8 +86,6 @@ fn one_line(text: &str) -> String {
 
 /// The width of every select in the 成员 tab (2.8: one value column).
 const SELECT_WIDTH: gpui::Pixels = tokens::size::SELECT_WIDTH;
-/// 在哪台电脑干活 shows a computer name and 这台电脑.
-const MACHINE_SELECT_WIDTH: gpui::Pixels = tokens::size::SELECT_WIDE;
 /// The spend limit field (2.8 number field).
 const SPEND_WIDTH: gpui::Pixels = metrics::LABEL_COLUMN;
 
@@ -523,6 +521,7 @@ impl MembersPage {
         let value: Option<gpui::AnyElement> = if m.deactivated {
             Some(
                 StatusBadge::new(BadgeState::Deactivated, common::MEMBER_DEACTIVATED)
+                    .on_group()
                     .into_any_element(),
             )
         } else if self.roster.solo {
@@ -651,11 +650,33 @@ impl MembersPage {
     /// "¥" in it and separators, and who approves; its loading and failed
     /// states.
     fn rules_section(&self, owner: bool, window: &Window, cx: &mut Context<Self>) -> gpui::Div {
-        let header = SectionTitle::new(s::RULES).description(if owner {
+        let about = if owner {
             s::RULES_FOOTER
         } else {
             s::RULES_READONLY
-        });
+        };
+        // 团队管理 › 默认规则 has the page title above it: the section title
+        // would say 默认规则 a second time, so only the description stays.
+        let header: gpui::AnyElement = if self.part == MembersPart::Rules {
+            div()
+                .n_body()
+                .text_color(native_colors(cx).secondary)
+                .child(about)
+                .into_any_element()
+        } else {
+            SectionTitle::new(s::RULES)
+                .description(about)
+                .into_any_element()
+        };
+        let section = |header: gpui::AnyElement, body: gpui::AnyElement| {
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(metrics::GROUP_HEADER_GAP)
+                .child(header)
+                .child(body)
+        };
         let Some(r) = self.rules else {
             let body = match &self.rules_status {
                 Status::Failed(t) => widgets::failed_alert(
@@ -671,7 +692,7 @@ impl MembersPage {
                     .row(widgets::list_loading("rules-loading", 2, false, cx))
                     .into_any_element(),
             };
-            return widgets::section(header, body);
+            return section(header, body);
         };
         let page = cx.entity();
         let switch = |id: &'static str,
@@ -751,10 +772,9 @@ impl MembersPage {
                 r.deploy_prod,
                 |r, v| r.deploy_prod = v,
             ))
-            // At rest the amount is right-aligned (2.8 number field).
-            .row(FormRow::new(s::RULES_SPEND).control(spend))
             // Usable (design-github-identity.zh.md §3.5): the gated actions follow the
-            // computer, not the dropdown below; read-only, it wraps.
+            // computer, not the dropdown below; read-only, it wraps. Right under the two
+            // switches it is about, above the spend limit (which only reminds).
             .row(
                 div()
                     .id("rules-gated-note")
@@ -768,6 +788,8 @@ impl MembersPage {
                     .text_color(native_colors(cx).secondary)
                     .child(s::RULES_GATED_NOTE),
             )
+            // At rest the amount is right-aligned (2.8 number field).
+            .row(FormRow::new(s::RULES_SPEND).control(spend))
             .row(FormRow::new(s::RULES_APPROVER).control(approver));
         // A value the server refused or a spend that is not a number: the
         // Alert under the group.
@@ -781,7 +803,7 @@ impl MembersPage {
             )),
             _ => None,
         };
-        widgets::section(
+        section(
             header,
             div()
                 .w_full()
@@ -789,7 +811,8 @@ impl MembersPage {
                 .flex_col()
                 .gap(tokens::space::S12)
                 .child(group)
-                .children(failed),
+                .children(failed)
+                .into_any_element(),
         )
     }
 }
@@ -1076,21 +1099,42 @@ fn done_button(id: &'static str, cx: &App) -> Button {
 /// 9 (2.9 avatar grid).
 const PICKER_COLUMNS: f32 = 9.;
 
+/// The tint of the picker's tiles for a member called `name` who wears
+/// `selected`: the key a member's avatar tile uses (the roster name, else
+/// the character), so the grid sits on the tint the avatar has.
+pub fn picker_tint(name: &str, selected: Option<CharacterId>, cx: &App) -> gpui::Hsla {
+    let named = theme::MEMBER_TINTS
+        .iter()
+        .any(|n| n.eq_ignore_ascii_case(name.trim()));
+    let k = theme::colors(cx);
+    match selected {
+        Some(c) if !named => k.member_tint(c.as_str()),
+        _ => k.member_tint(name),
+    }
+}
+
 /// The 26 characters and a random cell as a 9-column grid of 40 ghost
-/// tiles, gap 8, the idle look at 32; the chosen one has the selected fill
-/// and a `label` edge. `pick` gets the clicked (or the random) character.
+/// buttons, gap 8, each character in its squircle tile on `tint` (§1.6:
+/// dark art disappears on a dark fill, light art on a light one); the
+/// chosen one has the selected fill and a `label` edge around its tile.
+/// `pick` gets the clicked (or the random) character.
 ///
 /// The grid is one Tab stop (§2.9 grid, E3): the focused tile, else the
 /// chosen one, else the first; ← → ↑ ↓ walk the tiles inside it.
 pub fn character_picker(
     id: &'static str,
     selected: Option<CharacterId>,
+    tint: gpui::Hsla,
     disabled: bool,
     pick: impl Fn(CharacterId, &mut Window, &mut App) + Clone + 'static,
     window: &mut Window,
     cx: &mut App,
 ) -> gpui::Div {
     let count = CharacterId::ALL.len() + 1;
+    // The tile inside its 40 button: 2 on each side for the selected edge.
+    let tile = cell_tile();
+    let edge = theme::colors(cx).tile_edge();
+    let scale = window.scale_factor();
     let handles = window
         .use_keyed_state(
             SharedString::from(format!("{id}-focus")),
@@ -1173,11 +1217,23 @@ pub fn character_picker(
             .track_focus(&handles[ix])
             .tab_stop(rover == ix)
             .disabled(disabled)
-            .child(characters::image(
-                c,
-                CharacterStatus::Idle,
-                tokens::avatar::MD,
-            ))
+            .child(
+                div()
+                    .size(tile)
+                    .rounded(theme::radius::bot(tile))
+                    .bg(tint)
+                    .shadow(edge.clone())
+                    .overflow_hidden()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(characters::tile::tile_image(
+                        c,
+                        CharacterStatus::Idle.into(),
+                        tile,
+                        scale,
+                    )),
+            )
             .on_click(move |_, window, cx| pick(c, window, cx))
         }))
         .child(random);
@@ -1187,6 +1243,11 @@ pub fn character_picker(
         .justify_center()
         .on_key_down(walk)
         .child(grid)
+}
+
+/// The tile of one picker cell: the 40 cell less 2 on each side.
+fn cell_tile() -> gpui::Pixels {
+    tokens::avatar::LG - tokens::space::S4
 }
 
 /// The look a new bot gets until one is picked by hand: the roster's character for `name`,
@@ -1812,6 +1873,8 @@ pub struct BotForm {
     editing: Option<BotEditing>,
     /// The window the sheet is in: a saved edit closes it.
     window: gpui::AnyWindowHandle,
+    /// The scroll of the sheet's body.
+    scroll: gpui::ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -1871,6 +1934,7 @@ impl BotForm {
             done: widgets::DoneStep::new(cx),
             editing: None,
             window: window.window_handle(),
+            scroll: gpui::ScrollHandle::new(),
             _subscriptions: subscriptions,
         };
         form.load_machines(cx);
@@ -2481,13 +2545,15 @@ impl Render for BotForm {
                 )
             } else {
                 let input = self.runtime.clone();
-                let shown = known
+                let chosen = known
                     .iter()
                     .find(|o| o.runtime == current)
-                    .map(RuntimeOption::text)
-                    .unwrap_or_else(|| s::RUNNER_RUNTIME_PICK.to_string());
+                    .map(RuntimeOption::text);
+                // Nothing chosen yet: 选择 in the placeholder color.
+                let unset = chosen.is_none();
+                let shown = chosen.unwrap_or_else(|| s::RUNNER_RUNTIME_PICK.to_string());
                 Some(
-                    widgets::popup_fixed("member-runtime", shown, SELECT_WIDTH, window, cx)
+                    widgets::popup_fill("member-runtime", shown, unset, SheetWidth::List, cx)
                         .dropdown_menu(move |menu, _, _| {
                             known.iter().fold(menu, |menu, o| {
                                 let (rt, input) = (o.runtime.clone(), input.clone());
@@ -2545,7 +2611,7 @@ impl Render for BotForm {
                     .map(|(_, t)| t.clone())
                     .unwrap_or_default();
                 let form = form.clone();
-                widgets::popup_fixed("member-model", shown, SELECT_WIDTH, window, cx)
+                widgets::popup_fill("member-model", shown, false, SheetWidth::List, cx)
                     .dropdown_menu(move |menu, _, _| {
                         options.iter().fold(menu, |menu, (id, text)| {
                             let (id, form) = (id.clone(), form.clone());
@@ -2585,7 +2651,7 @@ impl Render for BotForm {
                         .map(|(_, t)| t.clone())
                         .unwrap_or_default();
                     let form = form.clone();
-                    widgets::popup_fixed("member-effort", shown, SELECT_WIDTH, window, cx)
+                    widgets::popup_fill("member-effort", shown, false, SheetWidth::List, cx)
                         .dropdown_menu(move |menu, _, _| {
                             options.iter().fold(menu, |menu, (id, text)| {
                                 let (id, form) = (id.clone(), form.clone());
@@ -2604,9 +2670,16 @@ impl Render for BotForm {
                         .into_any_element()
                 });
             let machine: gpui::AnyElement = if elsewhere {
-                widgets::row_value(shown, cx).into_any_element()
+                // Somebody else's computer: a set value that cannot be changed
+                // here is the same select, disabled (2.8).
+                disabled_push(
+                    widgets::popup_fill("member-machine", shown, false, SheetWidth::List, cx),
+                    true,
+                    cx,
+                )
+                .into_any_element()
             } else {
-                widgets::popup_fixed("member-machine", shown, MACHINE_SELECT_WIDTH, window, cx)
+                widgets::popup_fill("member-machine", shown, false, SheetWidth::List, cx)
                     .dropdown_menu(move |menu, _, _| {
                         options.iter().fold(menu, |menu, (id, text)| {
                             let (id, form) = (id.clone(), form.clone());
@@ -2641,6 +2714,7 @@ impl Render for BotForm {
             };
             let machine: gpui::AnyElement = match place_hint {
                 Some(hint) => div()
+                    .w_full()
                     .flex()
                     .flex_col()
                     .gap(tokens::space::S4)
@@ -2728,6 +2802,11 @@ impl Render for BotForm {
                         character_picker(
                             "bot-character",
                             Some(self.chosen_character(cx)),
+                            picker_tint(
+                                &self.value(&self.name, cx),
+                                Some(self.chosen_character(cx)),
+                                cx,
+                            ),
                             busy,
                             move |c, _, cx| {
                                 pick_page.update(cx, |f, cx| {
@@ -2752,11 +2831,9 @@ impl Render for BotForm {
         SheetLayout::new(title)
             .explanation(explanation)
             .body(
-                div()
-                    .id("bot-form-body")
-                    .max_h(px(460.))
-                    .overflow_y_scroll()
-                    .child(body),
+                // The scrollbar shows while the body overflows, so the cut
+                // at the bottom reads as a scroll, not as a clipped group.
+                widgets::capped_list("bot-form-body", body, metrics::SHEET_BODY_MAX, &self.scroll),
             )
             .when_some(failed, |l, f| l.body(f))
             .when_some(name_err.clone().or(role_err.clone()), |l, e| {
@@ -2865,6 +2942,7 @@ impl Render for CharacterForm {
             .body(character_picker(
                 "member-character",
                 self.selected,
+                picker_tint(&self.name, self.selected, cx),
                 self.status.busy(),
                 move |c, window, cx| page.update(cx, |this, cx| this.pick(c, window, cx)),
                 window,
@@ -3085,6 +3163,7 @@ mod tests {
                 .child(character_picker(
                     "grid",
                     Some(CharacterId::ALL[3]),
+                    gpui::transparent_black(),
                     false,
                     |_, _, _| {},
                     window,

@@ -65,8 +65,15 @@ pub fn native_sheet_keyboard(dialog: Dialog, width: SheetWidth, cx: &App) -> Dia
 /// included; the sheet hangs from under the toolbar row.
 pub fn native_sheet(dialog: Dialog, width: SheetWidth, cx: &App) -> Dialog {
     let k = native_colors(cx);
+    // The screenshot self-test draws a sheet at rest: a capture caught in
+    // the middle of the fade showed a see-through sheet.
+    let entrance = if crate::selftest::clock::is_pinned() {
+        DialogEntrance::None
+    } else {
+        SHEET_ENTRANCE
+    };
     dialog
-        .entrance(SHEET_ENTRANCE)
+        .entrance(entrance)
         .margin_top(super::window_chrome::sheet_top())
         .width(width.px())
         .close_button(false)

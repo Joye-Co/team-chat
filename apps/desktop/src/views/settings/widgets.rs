@@ -530,33 +530,43 @@ impl Status {
     }
 }
 
-/// A one-time secret: its label above, the value in a `code-bg` box (radius
-/// 10, padding 12, Menlo 13/20) with a copy button. The value is never logged.
-pub fn secret_block(id: impl Into<ElementId>, label: &'static str, value: &str, cx: &App) -> Div {
-    let k = theme::colors(cx);
+/// A one-time secret (a command, a credential): its label above like any
+/// field of the sheet, the value in a bordered box in the code size with a
+/// copy button. One line that scrolls sideways, never wraps (D13). The
+/// value is never logged.
+pub fn secret_block(id: &'static str, label: &'static str, value: &str, cx: &App) -> Div {
+    use crate::ui::native::{metrics, native_colors, tokens};
+    use gpui::{InteractiveElement as _, StatefulInteractiveElement as _};
+    let k = native_colors(cx);
     let value: SharedString = value.to_string().into();
     field(
         label,
         div()
             .w_full()
+            .min_h(metrics::FIELD)
             .flex()
-            .items_start()
-            .gap(space::S8)
-            .pl(space::S12)
-            .pr(space::S6)
-            .py(space::S6)
-            .rounded(theme::radius::FIELD)
-            .bg(k.code_bg)
+            .items_center()
+            .gap(tokens::space::S8)
+            .pl(tokens::space::S12)
+            .pr(tokens::space::S6)
+            .py(tokens::space::S6)
+            .rounded(metrics::FIELD_RADIUS)
+            .bg(k.control)
             .border_1()
-            .border_color(k.border)
+            .border_color(k.separator)
             .child(
                 div()
+                    .id(SharedString::from(format!("{id}-value")))
                     .flex_1()
-                    .min_w_0()
-                    .py(space::S4)
-                    .t_code()
-                    .text_color(k.code_text)
-                    .child(value.clone()),
+                    .min_w(Pixels::ZERO)
+                    .overflow_x_scroll()
+                    .child(
+                        div()
+                            .whitespace_nowrap()
+                            .t_code()
+                            .text_color(k.label)
+                            .child(value.clone()),
+                    ),
             )
             .child(Clipboard::new(id).tooltip(s::COPY).value(value)),
         cx,
@@ -623,23 +633,16 @@ pub fn native_status(status: &Status, cx: &App) -> Option<Div> {
         Status::Idle => return None,
         Status::Busy(t) | Status::Done(t) => (t.clone(), k.secondary),
         Status::Failed(t) => {
-            return Some(crate::ui::native::sheet_status_error(t.clone(), cx).px(px(2.)));
+            return Some(crate::ui::native::sheet_status_error(t.clone(), cx));
         }
     };
-    Some(
-        div()
-            .px(px(2.))
-            .n_subheadline()
-            .text_color(color)
-            .child(text),
-    )
+    Some(div().n_subheadline().text_color(color).child(text))
 }
 
 /// A `secondary` Subheadline line (a footer of my own, a field's help).
 pub fn quiet(text: impl Into<SharedString>, cx: &App) -> Div {
     use crate::ui::native::{NativeType as _, native_colors};
     div()
-        .px(px(2.))
         .n_subheadline()
         .text_color(native_colors(cx).secondary)
         .child(text.into())
@@ -841,6 +844,22 @@ pub fn popup_fixed(
     crate::ui::native::select_button(id, title, crate::ui::native::PushSize::Regular, cx).w(width)
 }
 
+/// A pop-up as wide as the value column of a `width` sheet's form row, so
+/// the selects and the text fields of one group share both edges (2.8).
+/// `unset` draws the title in the placeholder color: nothing is chosen yet.
+pub fn popup_fill(
+    id: impl Into<ElementId>,
+    title: impl Into<SharedString>,
+    unset: bool,
+    width: crate::ui::native::SheetWidth,
+    cx: &App,
+) -> Button {
+    let k = crate::ui::native::native_colors(cx);
+    crate::ui::native::select_button(id, title, crate::ui::native::PushSize::Regular, cx)
+        .w(crate::views::nav::dialogs::form_field_width(width))
+        .when(unset, |b| b.text_color(k.secondary))
+}
+
 /// A row under a list group: the `+`/`−` buttons, then a quiet line.
 pub fn list_controls(buttons: impl IntoElement, note: impl Into<SharedString>, cx: &App) -> Div {
     div()
@@ -913,8 +932,8 @@ pub fn section(header: crate::ui::native::SectionTitle, body: impl IntoElement) 
         .child(body)
 }
 
-/// The 28 icon box of a machine or device row (2.19): radius 6, muted
-/// fill, a 16 icon.
+/// The 28 icon box of a machine or device row (2.19): radius 6, a 16
+/// icon. It sits on a group box, so its fill is the on-group tint.
 pub fn icon_box_28(sym: Sym, cx: &App) -> Div {
     use crate::ui::native::{native_colors, tokens};
     let k = native_colors(cx);
@@ -922,7 +941,7 @@ pub fn icon_box_28(sym: Sym, cx: &App) -> Div {
         .flex_none()
         .size(tokens::height::SM)
         .rounded(tokens::radius::ITEM)
-        .bg(k.fill)
+        .bg(k.on_group)
         .flex()
         .items_center()
         .justify_center()
@@ -1101,6 +1120,7 @@ pub fn list_loading(_id: &str, rows: usize, two_line: bool, cx: &App) -> AnyElem
             group = group.child(
                 div()
                     .ml(metrics::FORM_ROW_INSET + tokens::height::SM + tokens::space::S12)
+                    .mr(metrics::FORM_ROW_INSET)
                     .h(tokens::layout::HAIRLINE)
                     .bg(k.separator),
             );
@@ -1205,7 +1225,13 @@ pub fn item_rows(rows: Vec<AnyElement>, media: Pixels, cx: &App) -> Div {
     let mut list = div().w_full().flex().flex_col();
     for (i, row) in rows.into_iter().enumerate() {
         if i > 0 {
-            list = list.child(div().ml(inset).h(tokens::layout::HAIRLINE).bg(k.separator));
+            list = list.child(
+                div()
+                    .ml(inset)
+                    .mr(metrics::FORM_ROW_INSET)
+                    .h(tokens::layout::HAIRLINE)
+                    .bg(k.separator),
+            );
         }
         list = list.child(row);
     }

@@ -192,6 +192,10 @@ pub struct NativeColors {
     pub sidebar: Hsla,
     /// The group box fill (§2.8): `muted` in light, a raised step in dark.
     pub group: Hsla,
+    /// The fill of a small part that sits on a group box (the 28 icon box,
+    /// a status badge, a letter avatar): the foreground at 8 %. `muted` is
+    /// the group's own fill in light, so a muted part there has no shape.
+    pub on_group: Hsla,
     /// `foreground`.
     pub label: Hsla,
     /// `muted-foreground`.
@@ -306,6 +310,7 @@ impl NativeColors {
             } else {
                 p.muted
             },
+            on_group: p.foreground.opacity(0.08),
             label: p.foreground,
             secondary: p.muted_foreground,
             tertiary: p.muted_foreground,
@@ -1072,6 +1077,8 @@ pub mod metrics {
     /// A disabled primary button before its form is complete: primary at
     /// 30 %, light, never a mid gray (§2.20).
     pub const PRIMARY_WAITING_OPACITY: f32 = 0.3;
+    /// A disabled control (§1.8): 50 % opacity.
+    pub const DISABLED_OPACITY: f32 = 0.5;
 
     // Progress (D12)
     pub const BAR: Pixels = height::PROGRESS;
@@ -1102,6 +1109,9 @@ pub mod metrics {
     pub const SHEET_WIDE: Pixels = px(560.);
     pub const SHEET_RADIUS: Pixels = radius::SHEET;
     pub const SHEET_PAD: Pixels = space::S24;
+    /// The most a long sheet body shows before it scrolls (the add and
+    /// edit AI member sheets): the cut lands in the middle of a form row.
+    pub const SHEET_BODY_MAX: Pixels = px(468.);
     pub const SHEET_BUTTON_EDGE: Pixels = space::S24;
     pub const SHEET_BUTTON_GAP: Pixels = space::S8;
     /// A Mac dialog button is never narrower than this, so 「好」 is not a square.
@@ -1525,6 +1535,17 @@ mod tests {
         for k in [NativeColors::light(), NativeColors::dark()] {
             assert_eq!(k.destructive_fill, c(DESTRUCTIVE_FILL));
             assert!(contrast(gpui::white(), k.destructive_fill) >= 4.5);
+        }
+    }
+
+    #[test]
+    fn a_part_on_a_group_shows_in_both_modes() {
+        // The icon box and the status badge of a settings row: at least 8
+        // levels off the group fill they sit on.
+        for k in [NativeColors::light(), NativeColors::dark()] {
+            let on = gpui::Rgba::from(k.group.blend(k.on_group));
+            let group = gpui::Rgba::from(k.group);
+            assert!((on.r - group.r).abs() * 255. >= 8.);
         }
     }
 

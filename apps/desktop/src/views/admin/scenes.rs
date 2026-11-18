@@ -32,6 +32,40 @@ fn open_with(
     Ok(handle)
 }
 
+/// 团队管理 at `page`, for a scene of a sheet that page opens (邀请成员, 添加 AI 成员, …):
+/// the forms and their scenes live in `views/settings`, the page that opens them is here.
+pub fn open_for_scene(
+    services: Services,
+    page: AdminPage,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open(services, page, cx)
+}
+
+/// 团队管理 › 团队约定 with its board and the page's scroll, for the 团队约定 scenes.
+pub fn open_memory_for_scene(
+    services: Services,
+    cx: &mut App,
+) -> Result<
+    (
+        AnyWindowHandle,
+        gpui::Entity<crate::views::memory::MemoryBoard>,
+        gpui::ScrollHandle,
+    ),
+    String,
+> {
+    let (handle, view) = super::open_window(services, false, cx)?;
+    let parts = handle
+        .update(cx, |_, window, cx| {
+            view.update(cx, |v, cx| {
+                v.open_page(AdminPage::Memory, window, cx);
+                (v.memory.clone(), v.scroll.clone())
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    Ok((handle, parts.0, parts.1))
+}
+
 fn open_home_month(
     services: Services,
     _content: Size<Pixels>,
