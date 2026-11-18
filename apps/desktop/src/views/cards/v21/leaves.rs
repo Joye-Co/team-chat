@@ -2323,13 +2323,12 @@ pub fn unknown(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
     let ctx = node.ctx;
     let k = theme::colors(cx);
     // CARD21 §6: the block's own fallbackText, when the sender gave one.
-    let fallback = ctx
-        .card
-        .blocks
-        .iter()
-        .position(|x| std::ptr::eq(x, b))
+    let at = ctx.card.blocks.iter().position(|x| std::ptr::eq(x, b));
+    let fallback = at
         .and_then(|i| ctx.card.unknown_fallback(i))
         .map(str::to_string);
+    let at = at.unwrap_or_default();
+    let footer_updates = only_input_unknown(ctx) && matches!(ctx.state, CardState::Pending);
     div()
         .p(space::S12)
         .rounded(theme::radius::MD)
@@ -2348,19 +2347,37 @@ pub fn unknown(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 .flex()
                 .flex_col()
                 .gap(space::S4)
+                .flex_1()
                 .min_w(px(0.))
                 .child(
-                    div().flex().items_baseline().gap(space::S8).child(
-                        b20::small(div())
-                            .font_weight(theme::MEDIUM_WEIGHT)
-                            .text_color(k.ink)
-                            .child(c::UNKNOWN_BLOCK),
-                    ),
+                    b20::small(div())
+                        .font_weight(theme::MEDIUM_WEIGHT)
+                        .text_color(k.ink)
+                        .child(c::UNKNOWN_BLOCK),
                 )
                 .when_some(fallback, |el, t| {
                     el.child(b20::small(div()).text_color(k.ink_2).child(t))
                 }),
         )
+        // The next step the block names, unless the footer already offers it.
+        .when(!footer_updates, |el| {
+            el.child(
+                div().flex_none().flex().items_center().child(
+                    ui::native::push_button(
+                        eid(node, format!("unknown-update-{at}")),
+                        fill(c::UPDATE_APP, &[("product", env!("PRODUCT_NAME"))]),
+                        ui::native::PushStyle::Ghost,
+                        ui::native::PushSize::Small,
+                        cx,
+                    )
+                    .on_click(|_, _, cx| {
+                        if let Some(u) = crate::updater::global(cx) {
+                            u.update(cx, |u, cx| u.check_now(cx));
+                        }
+                    }),
+                ),
+            )
+        })
         .into_any_element()
 }
 
