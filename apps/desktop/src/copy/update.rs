@@ -1,5 +1,7 @@
 //! In-app update: the banner in the main window and the 关于 section of settings.
 
+// One set of words: the app 重新打开 (never 重启), it takes 「大约一分钟」, a finished
+// download is 「已下载好」, and a version on offer is 「新版本 {version} 可以更新了」.
 crate::copy! {
     AVAILABLE = "新版本 {version} 可以更新了",
     UPDATE = "更新",
@@ -31,7 +33,7 @@ crate::copy! {
     // --- v14/t4 update ---
     VERSION_TITLE = "版本 {version}",
     // The detail under 版本 {current}: the title already names the current one.
-    NEW_VERSION = "新版本 {version} 可以更新",
+    NEW_VERSION = "新版本 {version} 可以更新了",
     DOWNLOAD_PROGRESS = "{percent}% · {done} / {total} MB",
     CANCEL_DOWNLOAD = "取消下载",
     NOTES = "查看更新内容",
@@ -42,8 +44,8 @@ crate::copy! {
     MANUAL_STEP_1 = "1. 退出 {product}",
     MANUAL_STEP_2 = crate::copy::per_system("2. 把安装盘里的 {product} 拖到「应用程序」", "2. 双击安装包，等它装完"),
     MANUAL_STEP_3 = crate::copy::per_system("3. 替换旧版本后再打开", "3. 再打开 {product}"),
-    READY_TITLE = "{product} {version} 已经下载好了",
-    READY_BODY = "当前 {current} → {version}，安装时会重启。",
+    READY_TITLE = "{product} {version} 已下载好",
+    READY_BODY = "当前 {current} → {version}，安装后重新打开。",
     PREVIEW_NOTES = "· 消息列表滚动更顺\n· 登录后不再偶尔漏掉新消息\n· 产出页可以按话题筛选",
     // --- end v14/t4 update ---
     // --- product updates: the sidebar card, notes, 已更新到 and 更新记录 ---
@@ -51,13 +53,13 @@ crate::copy! {
     CARD_AVAILABLE_DETAIL = "更新时应用会重新打开，大约一分钟。",
     CARD_NOTES = "改了什么",
     CARD_HIDE = "收起",
-    CARD_READY = "{version} 已经下载好了",
-    CARD_READY_DETAIL = "重启后就是新版本，大约一分钟。",
+    CARD_READY = "{version} 已下载好",
+    CARD_READY_DETAIL = "安装时应用会重新打开，大约一分钟。",
     CARD_WAITING = "等消息发完再装",
     CARD_MANUAL_DETAIL = crate::copy::per_system("安装盘已在访达中打开：退出 {product}，把它拖到「应用程序」替换旧版本。", "安装包已在文件资源管理器中选中：退出 {product}，双击安装包装上新版本。"),
     NOTES_PUBLISHED = "{date}发布 · 你现在用的是 {current}",
     NOTES_CURRENT = "你现在用的是 {current}",
-    NOTES_FOOTER = "更新时应用会重新打开，大约一分钟",
+    NOTES_FOOTER = "更新时应用会重新打开，大约一分钟。",
     NOTES_EMPTY = "这个版本没有写更新内容。",
     DATE = "{month}月{day}日",
     WHATS_NEW_TITLE = "已更新到 {version}",
@@ -72,6 +74,6 @@ crate::copy! {
     CHANGELOG_COLLAPSE = "收起 {version}",
     AUTO_DOWNLOAD = "有新版本时自动下载",
     SHOW_WHATS_NEW = "更新后告诉我改了什么",
-    SHOW_WHATS_NEW_HINT = "重启后第一次打开时，说说这次改了什么",
+    SHOW_WHATS_NEW_HINT = "更新后第一次打开时，说说这次改了什么",
     // --- end product updates ---
 }

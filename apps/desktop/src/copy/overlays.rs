@@ -29,14 +29,10 @@ crate::copy! {
     STOP_MESSAGE = "{name} 会停在现在这一步，已经做好的部分会留下。",
     STOP_OK = "停止",
     // --- v12/overlays: update sheet ---
-    UPDATE_TITLE = "新版本 {version} 可以更新了",
-    UPDATE_EXPLANATION = "更新时应用会重新打开，大约需要一分钟。",
-    UPDATE_DOWNLOADING_TITLE = "正在下载 {version}",
     UPDATE_INSTALLING_TITLE = "正在安装 {version}",
     UPDATE_MANUAL_TITLE = "需要手动安装 {version}",
     UPDATE_FAILED_TITLE = "没能更新到 {version}",
     UPDATE_HIDE = "隐藏",
-    UPDATE_STATUS = "正在下载 {version} · {percent}%",
     // --- v12/overlays: login ---
     LOGIN_CONTINUE = "继续",
     // --- v12/overlays: quiet status ---
@@ -63,9 +59,7 @@ crate::copy! {
     MENU_CHECK = "检查更新…",
     MENU_UPDATE_TO = "更新到 {version}",
     MENU_DOWNLOADING = "正在下载 {version}（{percent}%）",
-    MENU_RESTART = "重启安装 {version}",
-    UPDATE_READY_TITLE = "新版本 {version} 已下载好",
-    UPDATE_READY_EXPLANATION = "重启后就是新版本，大约需要一分钟。",
-    UPDATE_RESTART = "重启安装",
+    MENU_RESTART = "安装 {version} 并重新打开",
+    UPDATE_RESTART = "安装更新",
     UPDATE_READY = "新版本 {version} 已下载好",
 }
