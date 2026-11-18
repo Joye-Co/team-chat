@@ -35,7 +35,6 @@ crate::copy! {
     STARTED_IN = "{starter} 在 {group} 发起",
     START_ASSIGN = "交代给成员",
     START_ADD_MEMBERS = "添加成员…",
-    START_TOPIC_INFO = "话题信息",
     BOT_WORKING = "正在工作",
     MORE_WORKING = "另外 {n} 位成员在工作",
     VIEW_PROCESS = "查看过程",
@@ -93,4 +92,10 @@ crate::copy! {
     MENU_FIND = "查找…",
     MENU_FIND_NEXT = "查找下一个",
     MENU_FIND_PREVIOUS = "查找上一个",
+    // §2.4 working card while the run does not work: held (暂停, 接管) it
+    // stops at its step; waiting it only names the step.
+    PLAN_HELD_NAMED = "{name} 停在：{step}",
+    PLAN_STEP_NAMED = "{name}：{step}",
+    // The failed-run alert of the step 按顺序做 stopped at: the bar's word.
+    RUN_STUCK_TITLE = "{name} 卡住了",
 }

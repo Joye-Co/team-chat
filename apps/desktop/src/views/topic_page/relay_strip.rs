@@ -126,8 +126,12 @@ pub fn strip_view(
         }
         "paused" => {
             let why = reason_text(relay.reason.as_deref(), &at, &before, stopped_by.as_deref());
-            let line = fill(c::RELAY_STOPPED_AT, &[("name", &at), ("reason", &why)]);
-            (step_of, Some(line), true, true)
+            // The step's own badge already says 卡住了 beside its member: a
+            // line that repeats only that word is left out (A5).
+            let shown = step_word(&relay.steps[current].state).map(|(w, _)| w);
+            let line = (shown != Some(why.as_str()))
+                .then(|| fill(c::RELAY_STOPPED_AT, &[("name", &at), ("reason", &why)]));
+            (step_of, line, true, true)
         }
         "done" => (c::RELAY_ALL_DONE.to_string(), None, false, false),
         // `stopped`, or a state this version does not know: it stopped.
@@ -442,7 +446,8 @@ mod tests {
         let mut r = relay("paused", 1, vec![step("a", "done"), step("b", "failed")]);
         r.reason = Some("step_failed".into());
         let v = strip_view(&r, 2_000, &name).unwrap();
-        assert_eq!(v.line.as_deref(), Some("停在 小审：卡住了"));
+        // The step's badge says 卡住了: no line repeats it.
+        assert_eq!(v.line, None);
         assert_eq!(v.steps[1].word, Some(("卡住了", BadgeState::Failed)));
         assert!(v.can_stop && v.can_retry);
         r.reason = Some("not_pushed".into());

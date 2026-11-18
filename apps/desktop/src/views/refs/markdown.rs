@@ -184,36 +184,6 @@ impl TableRefs {
         self.row_end(row, cx)
     }
 
-    /// 问这里 for the hovered cell over the row's right end (16 in, centered on the h40
-    /// row, 6 px clear above and below): the columns keep the whole frame width.
-    pub fn row_end_overlay(&self, row: usize, beside: bool, cx: &App) -> Option<AnyElement> {
-        if beside {
-            return None;
-        }
-        let Some((col, true)) = self.hovered_in(row, cx) else {
-            return None;
-        };
-        let target = self.target.clone();
-        let id = self.cell_id(row, col);
-        Some(
-            div()
-                .absolute()
-                .top_0()
-                .bottom_0()
-                .right(space::S16)
-                .flex()
-                .items_center()
-                .child(super::affordance::inline_button(
-                    &id,
-                    Rc::new(move |_: &App| {
-                        target(TablePick::Cell { row, col }).unwrap_or_else(super::empty_target)
-                    }),
-                    cx,
-                ))
-                .into_any_element(),
-        )
-    }
-
     /// The slot at the end of a row: 问这里 for the hovered cell, at the row's right end
     /// and centered on its height (REFS §A3), however narrow the columns are.
     pub fn row_end(&self, row: usize, cx: &App) -> AnyElement {
@@ -534,11 +504,12 @@ pub fn table(
             .child(text)
     };
     let row_h = crate::ui::native::tokens::height::TABLE_ROW_COMPACT;
+    // The header's muted fill is a layer of the frame (below), not of this row: the row
+    // scrolls sideways with the table, and a clip does not follow the frame's radius.
     let mut header = div()
         .h(row_h)
         .flex()
         .items_center()
-        .bg(n.fill)
         .border_b_1()
         .border_color(n.separator)
         .t_meta_medium()
@@ -550,6 +521,14 @@ pub fn table(
             None => el.into_any_element(),
         });
     }
+    // 问这里 has its own trailing slot, as in a card's table: over the cells it would hide
+    // the very values the reader is about to ask about.
+    if refs.is_some() {
+        header = header.child(div().w(px(ROW_BUTTON_SLOT)).flex_none());
+    }
+    let frame_radius = crate::ui::native::tokens::radius::CONTAINER;
+    // The frame's radius less its 1 px border: what a fill inside it rounds to.
+    let inner_radius = frame_radius - px(1.);
     let count = rows.len();
     let body = rows.iter().enumerate().map(|(ri, row)| {
         let mut line = div()
@@ -557,6 +536,8 @@ pub fn table(
             .flex()
             .items_center()
             .when(ri + 1 < count, |d| d.border_b_1().border_color(n.separator))
+            // The last row's hover fill follows the frame's bottom corners.
+            .when(ri + 1 == count, |d| d.rounded_b(inner_radius))
             .t_small()
             .tnum()
             .text_color(n.label);
@@ -587,17 +568,28 @@ pub fn table(
             });
         }
         if let Some(r) = refs {
-            line = line.children(r.row_end_overlay(ri, beside, cx));
+            line = line.child(r.row_end_unless(ri, beside, cx));
         }
         line
     });
     div()
         .w_full()
         .my(space::S4)
-        .rounded(crate::ui::native::tokens::radius::CONTAINER)
+        .relative()
+        .rounded(frame_radius)
         .border_1()
         .border_color(n.separator)
         .overflow_hidden()
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .h(row_h)
+                .rounded_t(inner_radius)
+                .bg(n.fill),
+        )
         .child(
             div()
                 .id(ElementId::Name(format!("{key}-scroll").into()))

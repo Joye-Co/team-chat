@@ -614,7 +614,10 @@ impl TimelineView {
                     }
                 }))
                 .child(
+                    // The sm field: the bar is h40 (§2.17), and the h32 field's
+                    // focus ring would touch the lines above and below it.
                     SearchField::new("find-field", &find.input)
+                        .small()
                         .width(tokens::size::FIND_FIELD_WIDTH),
                 )
                 .children(count.map(|count| {

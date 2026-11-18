@@ -185,7 +185,8 @@ impl TimelineView {
     }
 
     /// The working card's title and StatusBadge: `Forge 正在做：<step>`
-    /// (no plan: `Forge 在做`) and 停止中, 已暂停, 等你 or `在做 2/5`.
+    /// (no plan: `Forge 在做`) and 停止中, 已暂停, 等你 or `在做 2/5`. A run
+    /// that is held reads `Forge 停在：<step>`, one that waits `Forge：<step>`.
     fn working_header(
         &self,
         run: &BotRunSummary,
@@ -200,6 +201,7 @@ impl TimelineView {
             .iter()
             .find(|s| matches!(s.state, PlanState::Current | PlanState::Waiting))
             .is_some_and(|s| s.state == PlanState::Waiting);
+        let mut phase = crate::data::run_phase::RunPhase::Working;
         let badge = if stopping {
             (BadgeState::Stopping, pr::STATUS_STOPPING.to_string())
         } else {
@@ -229,6 +231,7 @@ impl TimelineView {
                 },
                 member_name,
             );
+            phase = words.phase;
             crate::views::live::phase::card_badge(
                 &words,
                 progress_of.as_ref().map(|(step, total, _)| (*step, *total)),
@@ -255,9 +258,19 @@ impl TimelineView {
                     })
                     .flatten()
             })
-            .map(|step| fill(t::PLAN_DOING_NAMED, &[("name", &name), ("step", &step)]))
+            .map(|step| {
+                // The title never says 正在做 beside a badge that says it is
+                // not: a held run 停在 its step, a waiting one only names it.
+                use crate::data::run_phase::RunPhase;
+                let template = match phase {
+                    RunPhase::Working => t::PLAN_DOING_NAMED,
+                    p if p.held() => t::PLAN_HELD_NAMED,
+                    _ => t::PLAN_STEP_NAMED,
+                };
+                fill(template, &[("name", &name), ("step", &step)])
+            })
             .unwrap_or_else(|| {
-                if stopping {
+                if stopping || phase != crate::data::run_phase::RunPhase::Working {
                     name.clone()
                 } else {
                     fill(c::STATE_WORKING_NO_PLAN, &[("name", &name)])
@@ -289,8 +302,31 @@ impl TimelineView {
             })
             .map(|c| c.trim().trim_end_matches(['。', '.']).to_string())
             .filter(|c| !c.is_empty());
-        // The title states the cause (`打包失败：找不到签名证书`).
-        let title = cause.unwrap_or_else(|| fill(t::RUN_FAILED_TITLE_NO_CAUSE, &[("name", &name)]));
+        // A run that is the step 按顺序做 stopped at: the order's bar says
+        // 卡住了 beside its member and owns the retry (and its limit).
+        let relay_step = self
+            .topic
+            .as_ref()
+            .and_then(|t| t.relay.as_ref())
+            .is_some_and(|r| {
+                r.state == "paused"
+                    && r.steps
+                        .get(r.current as usize)
+                        .is_some_and(|s| match s.run_id.as_deref() {
+                            Some(id) => id == run.id,
+                            None => s.member_id == run.bot_id,
+                        })
+            });
+        // The title states the cause (`打包失败：找不到签名证书`); with none, the
+        // word of the order's bar for its step, else 没做完.
+        let title = cause.unwrap_or_else(|| {
+            let template = if relay_step {
+                t::RUN_STUCK_TITLE
+            } else {
+                t::RUN_FAILED_TITLE_NO_CAUSE
+            };
+            fill(template, &[("name", &name)])
+        });
         let ended = run.ended_at.unwrap_or(run.updated_at);
         let at = match model::local_day(ended) {
             Some(day) => format!(
@@ -315,7 +351,15 @@ impl TimelineView {
                 &[("name", &name), ("time", &at)],
             ),
         };
-        let retry = {
+        // One 重试 and one 查看日志 on a screen (A5). While the pane beside
+        // the thread shows this run, its footer has both: the alert only
+        // points there. A run that is a step of 按顺序做 is retried by the
+        // order's bar (it owns the order and its retry limit).
+        let in_pane = matches!(
+            self.services.nav.read(cx).visible_pane(),
+            crate::app::RightPane::Live(id) if id == run.id
+        );
+        let retry = (!in_pane && !relay_step).then(|| {
             let run = run.clone();
             push_button(
                 ElementId::Name(format!("run-retry-{}", run.id).into()),
@@ -351,8 +395,8 @@ impl TimelineView {
                 })
                 .detach();
             }))
-        };
-        let log = {
+        });
+        let log = (!in_pane).then(|| {
             let id = run.id.clone();
             push_button(
                 ElementId::Name(format!("run-log-{}", run.id).into()),
@@ -366,7 +410,13 @@ impl TimelineView {
                     nav.set_right_pane(crate::app::RightPane::Live(id.clone()), cx)
                 });
             }))
-        };
+        });
+        let open_right = in_pane.then(|| {
+            div()
+                .n_footnote()
+                .text_color(n.secondary)
+                .child(c::OPEN_RIGHT)
+        });
         Some(
             div()
                 .mt(space::S16)
@@ -427,12 +477,13 @@ impl TimelineView {
                                 // wraps a lone `次。` (break-ui).
                                 .child(
                                     div()
-                                        .pt(space::S8)
+                                        .pt(if in_pane { space::S4 } else { space::S8 })
                                         .flex()
                                         .items_center()
                                         .gap(space::S8)
-                                        .child(retry)
-                                        .child(log),
+                                        .children(retry)
+                                        .children(log)
+                                        .children(open_right),
                                 ),
                         ),
                 )
@@ -756,17 +807,13 @@ impl WorkingCard {
                         .child(format!("{step}/{total}")),
                 )
         });
-        // §2.4 compact card: radius 14, a 1 px border, the card fill,
-        // shadow-sm, p 16, gap 16, the one in-thread width.
-        div()
+        // §2.4 compact card on the one card surface (v18: radius 14, the
+        // card fill, shadow sm and the 6 % ring, no 1 px border), p 16,
+        // gap 16, the one in-thread width.
+        crate::ui::native::blocks::card_surface(cx)
             .id(self.id)
             .w_full()
             .max_w(super::v2::TEXT_MAX)
-            .rounded(tokens::radius::CARD)
-            .border_1()
-            .border_color(n.separator)
-            .bg(n.sheet)
-            .shadow(tokens::shadow::sm())
             .p(space::S16)
             .flex()
             .flex_col()

@@ -109,7 +109,6 @@
 来自话题	From topic
 被引用	Cited in
 用到的决定	Decisions used
-话题信息	Topic info
 产出信息	Artifact info
 在右侧打开	Open on the right
 和 v2 对比	Compare with v2
@@ -234,6 +233,9 @@ Forge 已暂停	Forge paused
 Forge 正在合并	Forge merging
 Forge 在做 {}	Forge working {}
 Forge 正在做：{}	Forge is working on: {}
+Forge 停在：{}	Forge stopped at: {}
+Forge：{}	Forge: {}
+Scout 卡住了	Scout is stuck
 Forge 会在下一步前看到	Forge sees this before its next step
 Jojo 的提醒	Note from Jojo
 Jojo 转给了 Forge	Jojo handed it to Forge

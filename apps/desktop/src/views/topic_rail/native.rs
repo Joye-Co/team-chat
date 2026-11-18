@@ -175,10 +175,18 @@ pub(super) fn changes_pane_body(
                 .items_start()
                 .gap(space::S8)
                 .child(
+                    // The title's icon: 16, centered on the title's first
+                    // line (the headline line box).
                     div()
                         .flex_none()
-                        .pt(px(2.))
-                        .child(mark(Sym::PullRequest, k.secondary)),
+                        .h(ui::native::tokens::text::HEADLINE.1)
+                        .flex()
+                        .items_center()
+                        .child(ui::icons::icon(
+                            Sym::PullRequest,
+                            ui::native::tokens::icon::MD,
+                            k.secondary,
+                        )),
                 )
                 .child(
                     div()
@@ -310,12 +318,10 @@ fn changed_files(
                 Some(p) => div()
                     .w_full()
                     .pb(space::S8)
+                    // The row above names the file and its counts: the
+                    // patch has no header of its own.
                     .child(crate::views::cards::v2::blocks::diff(
-                        Some(&f.path),
-                        p,
-                        Some(f.additions),
-                        Some(f.deletions),
-                        cx,
+                        None, p, None, None, cx,
                     ))
                     .into_any_element(),
                 None => div()
@@ -401,7 +407,7 @@ impl TopicRail {
             .child(
                 div()
                     .flex()
-                    .child(StatusBadge::new(badge, text).max_w(px(260.))),
+                    .child(StatusBadge::new(badge, text).max_w(px(260.)).on_fill()),
             )
             .children(detail.map(|step| {
                 div()
@@ -525,13 +531,25 @@ impl TopicRail {
     ) -> AnyElement {
         let k = native_colors(cx);
         let mut section = self.section(OWNER, c::TOPIC_RAIL_PEOPLE, cx);
-        // R2-17, §2.13: no AI member took part yet: a compact empty (icon and
-        // muted line), and the section header offers the ghost 指派 (§2.5).
+        // R2-17: no AI member took part yet: the header says so in a muted
+        // note beside the ghost 指派 (§2.5). Not a compact empty among the
+        // rows: the group lists the 群's members, so a line that reads "no
+        // members" on top of them contradicts the list (§2.13: an empty
+        // stands in place of the data).
         if !marks.iter().any(|(_, tag)| *tag != c::INSPECTOR_ASKED) {
             if let Some(t) = d.topic.as_ref() {
                 section = section.action(self.assign_button(t, cx));
             }
-            section = section.row(EmptyLine::new(c::RAIL_EMPTY_OWNER).icon(Sym::Person));
+            // Not while a run of this 话题 is at work (the thread shows its
+            // card before the server's member list names it).
+            let at_work = d
+                .run
+                .iter()
+                .chain(d.others.iter().map(|(r, _)| r))
+                .any(|r| r.status.is_active() && r.status != crate::data::RunStatus::Waiting);
+            if !at_work {
+                section = section.note(c::RAIL_EMPTY_OWNER);
+            }
         }
         let mut people: Vec<(crate::data::Member, Option<&'static str>)> = Vec::new();
         let lead = |id: Option<&str>, tag: &'static str, people: &mut Vec<_>| {
@@ -762,7 +780,7 @@ impl TopicRail {
             ChangeState::Closed => (BadgeState::Offline, c::CHANGES_CLOSED),
             _ => (BadgeState::Queued, c::CHANGES_OPEN),
         };
-        let state = StatusBadge::new(state_kind, state_text);
+        let state = StatusBadge::new(state_kind, state_text).on_fill();
         let checks_ok = ch.checks_total > 0 && ch.checks_passed == ch.checks_total;
         let mut section = self
             .section(CHANGES, c::TOPIC_RAIL_CHANGES, cx)
@@ -784,24 +802,27 @@ impl TopicRail {
                     .child(fill(c::INSPECTOR_FILES, &[("n", &ch.files.to_string())])),
             );
         if ch.checks_total > 0 {
-            section = section.row(div().pt(space::S6).child(label_value(
-                c::INSPECTOR_CHECKS,
-                StatusBadge::new(
-                    if checks_ok {
-                        BadgeState::Done
-                    } else {
-                        BadgeState::Failed
-                    },
-                    fill(
-                        c::INSPECTOR_CHECKS_VALUE,
-                        &[
-                            ("passed", &ch.checks_passed.to_string()),
-                            ("total", &ch.checks_total.to_string()),
-                        ],
-                    ),
-                ),
-                cx,
-            )));
+            section = section.row(
+                div().pt(space::S6).child(label_value(
+                    c::INSPECTOR_CHECKS,
+                    StatusBadge::new(
+                        if checks_ok {
+                            BadgeState::Done
+                        } else {
+                            BadgeState::Failed
+                        },
+                        fill(
+                            c::INSPECTOR_CHECKS_VALUE,
+                            &[
+                                ("passed", &ch.checks_passed.to_string()),
+                                ("total", &ch.checks_total.to_string()),
+                            ],
+                        ),
+                    )
+                    .on_fill(),
+                    cx,
+                )),
+            );
         }
         section = section.row(label_value(c::INSPECTOR_STATE, state, cx));
         Some(section.into_any_element())
@@ -1020,20 +1041,25 @@ impl TopicRail {
                                 .min_h(px(18.))
                                 .child(div().min_w_0().flex_shrink(1.).one_line().child(name))
                                 .child(div().flex_1())
-                                .child(div().flex_none().child(StatusBadge::new(
-                                    if busy {
-                                        BadgeState::Working
-                                    } else {
-                                        BadgeState::Offline
-                                    },
-                                    // §2.12, A2-13: the machine at work
-                                    // says the working word, 在做.
-                                    if busy {
-                                        c::STATE_WORKING_SHORT
-                                    } else {
-                                        c::MACHINE_IDLE
-                                    },
-                                ))),
+                                .child(
+                                    div().flex_none().child(
+                                        StatusBadge::new(
+                                            if busy {
+                                                BadgeState::Working
+                                            } else {
+                                                BadgeState::Offline
+                                            },
+                                            // §2.12, A2-13: the machine at work
+                                            // says the working word, 在做.
+                                            if busy {
+                                                c::STATE_WORKING_SHORT
+                                            } else {
+                                                c::MACHINE_IDLE
+                                            },
+                                        )
+                                        .on_fill(),
+                                    ),
+                                ),
                         )
                         .child(detail(line, cx)),
                 ),

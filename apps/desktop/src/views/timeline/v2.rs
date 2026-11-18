@@ -659,16 +659,12 @@ impl TimelineView {
             crate::ui::native::BadgeState::Done,
             crate::copy::common::STATUS_DELIVERED,
         ));
-        // §2.4 compact in-thread card: the one width, radius 14, a 1 px
-        // border, the card fill, shadow-sm, p 16.
-        let card = div()
+        // §2.4 compact in-thread card on the one card surface (v18: radius
+        // 14, the card fill, shadow sm and the 6 % ring, no 1 px border),
+        // the one width, p 16.
+        let card = crate::ui::native::blocks::card_surface(cx)
             .w_full()
             .max_w(TEXT_MAX)
-            .rounded(crate::ui::native::tokens::radius::CARD)
-            .border_1()
-            .border_color(n.separator)
-            .bg(n.sheet)
-            .shadow(crate::ui::native::tokens::shadow::sm())
             .overflow_hidden()
             .p(space::S16)
             .flex()

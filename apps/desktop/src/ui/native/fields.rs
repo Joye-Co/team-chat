@@ -469,6 +469,7 @@ pub struct SearchField {
     width: Option<Pixels>,
     focused: Option<bool>,
     clearable: bool,
+    small: bool,
 }
 
 impl SearchField {
@@ -480,7 +481,15 @@ impl SearchField {
             width: None,
             focused: None,
             clearable: false,
+            small: false,
         }
+    }
+
+    /// The sm field (§1.8: h28), for a bar only 40 tall: its 3 px focus ring
+    /// keeps 3 px of air to the bar's lines.
+    pub fn small(mut self) -> Self {
+        self.small = true;
+        self
     }
 
     /// A clear × at the trailing edge while the field has text (it empties
@@ -526,7 +535,11 @@ impl RenderOnce for SearchField {
                 Some(w) => d.w(w),
                 None => d.w_full(),
             })
-            .h(metrics::SEARCH)
+            .h(if self.small {
+                super::tokens::height::SM
+            } else {
+                metrics::SEARCH
+            })
             .pl(metrics::FIELD_PAD)
             .pr(metrics::FIELD_PAD)
             .rounded_full()

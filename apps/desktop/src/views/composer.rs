@@ -139,6 +139,9 @@ pub struct ComposerView {
     /// Backspace or Delete then removes them too. Typing, a click or a new
     /// selection drops it.
     chips_selected: bool,
+    /// The width of the chip row as last painted, in points (0 before the first paint):
+    /// the reference chips fold into "+N" by the rows they really take.
+    chips_room: std::rc::Rc<std::cell::Cell<f32>>,
     mention: Option<MentionPopup>,
     editing: Option<EditTarget>,
     typing: model::TypingThrottle,
@@ -218,6 +221,7 @@ impl ComposerView {
             files: Vec::new(),
             refs: Vec::new(),
             chips_selected: false,
+            chips_room: Default::default(),
             mention: None,
             editing: None,
             typing: model::TypingThrottle::default(),

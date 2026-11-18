@@ -106,6 +106,9 @@ impl Render for ConnectionBanner {
             .id("connection-status")
             .flex_none()
             .w_full()
+            // Docked above the composer (§2.17: 8 above it). The space is the
+            // banner's own, so it goes when the banner draws nothing.
+            .pb(crate::theme::space::S8)
             .child(alert)
             .into_any_element()
     }

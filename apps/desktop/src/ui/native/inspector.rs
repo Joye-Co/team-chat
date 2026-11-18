@@ -54,6 +54,7 @@ pub struct InspectorSection {
     title: SharedString,
     collapsed: bool,
     action: Option<AnyElement>,
+    note: Option<SharedString>,
     rows: Vec<AnyElement>,
     on_toggle: Option<Click>,
     grouped: bool,
@@ -66,6 +67,7 @@ impl InspectorSection {
             title: title.into(),
             collapsed: false,
             action: None,
+            note: None,
             rows: Vec::new(),
             on_toggle: None,
             grouped: false,
@@ -90,6 +92,14 @@ impl InspectorSection {
     /// edge of the header.
     pub fn action(mut self, el: impl IntoElement) -> Self {
         self.action = Some(el.into_any_element());
+        self
+    }
+
+    /// A 12 muted note in the header of a grouped section, before the
+    /// action (a fact about the section that is not one of its rows: no
+    /// member works on it yet). Cut at the tail.
+    pub fn note(mut self, text: impl Into<SharedString>) -> Self {
+        self.note = Some(text.into());
         self
     }
 
@@ -130,13 +140,14 @@ impl RenderOnce for InspectorSection {
                         .gap(super::tokens::space::S6)
                         .child(
                             div()
-                                .flex_1()
-                                .min_w(px(0.))
+                                .flex_none()
                                 .n_headline()
                                 .text_color(k.label)
                                 .child(self.title),
                         )
-                        .children(self.action)
+                        // The chevron trails the title; the action stands
+                        // alone at the trailing edge, so the two never read
+                        // as one pull-down.
                         .child(symbol(
                             chevron,
                             super::tokens::icon::SM,
@@ -144,6 +155,18 @@ impl RenderOnce for InspectorSection {
                             k.tertiary,
                             window,
                         ))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(px(0.))
+                                .pl(super::tokens::space::S6)
+                                .flex()
+                                .justify_end()
+                                .n_subheadline()
+                                .text_color(k.secondary)
+                                .children(self.note.map(TruncText::new)),
+                        )
+                        .children(self.action)
                         .when_some(self.on_toggle, |d, f| {
                             d.on_click(move |e, w, cx| f(e, w, cx))
                         }),

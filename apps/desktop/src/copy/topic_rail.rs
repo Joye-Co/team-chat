@@ -23,11 +23,11 @@ crate::copy! {
     // 1.1.1, the 群聊's title bar: see the 群's 话题.
     TITLE_GROUP_TOPICS = "这个群的话题",
     TITLE_DETAILS = "详情",
-    RAIL_EMPTY_REST = "还没有{names}，有了会出现在这里。",
+    RAIL_EMPTY_REST = "还没有{names}。",
     RAIL_EMPTY_NAME_PLAN = "计划",
     RAIL_EMPTY_NAME_CHANGES = "改动",
     RAIL_EMPTY_NAME_OUTPUTS = "产出",
-    RAIL_EMPTY_NAME_DECISIONS = "用到的决定",
+    RAIL_EMPTY_NAME_DECISIONS = "决定",
     RAIL_EMPTY_NAME_WHERE = "电脑",
     RAIL_EMPTY_NAME_COST = "用时",
     TITLE_TOPICS_SHORT = "话题",

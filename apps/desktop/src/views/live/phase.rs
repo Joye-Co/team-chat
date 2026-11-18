@@ -263,6 +263,11 @@ pub fn card_badge(
     progress: Option<(usize, usize)>,
     plan_waiting: bool,
 ) -> (BadgeState, String) {
+    // COMPLETENESS §2.4 (v16): while someone holds its computer the card
+    // says 已暂停, the word of the toolbar; who holds it is on the pane.
+    if words.phase == RunPhase::TakenOver {
+        return (BadgeState::Paused, c::LIVE_SHORT_PAUSED.to_string());
+    }
     if words.phase != RunPhase::Working {
         return (words.badge, words.short.clone());
     }
@@ -346,7 +351,7 @@ mod tests {
             (BadgeState::Paused, "已暂停".into())
         );
         r.hold.hold_kind = Some("takeover".into());
-        assert_eq!(card_badge(&words(&r), None, false).1, "你在操作");
+        assert_eq!(card_badge(&words(&r), None, false).1, "已暂停");
     }
 
     #[test]
