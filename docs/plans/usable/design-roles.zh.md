@@ -125,7 +125,7 @@ END;
 **谁能加**
 - `POST /v1/machines` 从 `auth:"owner"` 改成 `auth:"member"`，请求体加可选 `personal?: boolean`。
 - 普通成员加的一律是个人的电脑，传 `personal:false` 得 403 `machine.team_admin_only`。管理员不传时是团队的电脑（旧客户端行为不变）。
-- 新客户端：「用这台电脑」总是传 `personal:true`。「添加电脑」（装 daemon 的命令，机 1.8 / 线 10）普通成员也有，一律建个人的电脑；管理员的表单多一项「谁用这台电脑：团队 / 只有我」，默认团队，只在团队里有不止一位在用的人时显示。
+- 新客户端：「用这台电脑」总是传 `personal:true`。「添加电脑」（装 daemon 的命令，机 1.8 / 线 10）普通成员也有，一律建个人的电脑；管理员的表单多一项「谁用这台电脑：团队 / 只有我」，从「我的电脑」标题进来时默认只有我，其他入口默认团队，只在团队里有不止一位在用的人时显示。
 
 **谁算交代人**（新函数 `requesterOf`，放 `server/src/bots/desk/runs.ts`；种类判断 `requesterKind(db, id)` 放 `server/src/bots/store.ts`，返回 `human` / `hook`（在 `hooks` 表里有行的成员）/ `bot`）。每次运行在 desk 的 `runs` 表新列 `requested_for`（DO 迁移 `roles-1`）里存「替哪个人做」：
 

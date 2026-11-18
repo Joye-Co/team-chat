@@ -1287,6 +1287,27 @@ pub fn open_bot_dialog_runner(
     Ok(handle)
 }
 
+/// 成员 with the 添加 AI 成员 sheet and a tool that is not signed in picked: the line under
+/// 运行方式 says what that means.
+pub fn open_bot_dialog_runner_signed_out(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Members,
+        |s, w, cx| {
+            let form = super::members::open_add_bot(s, w, cx);
+            form.update(cx, |f, cx| {
+                f.fill("发布巡检", Some("codex"), w, cx);
+                f.pick_machine(Some("mc-mini".into()), w, cx);
+            });
+        },
+        cx,
+    )
+}
+
 /// 成员 with the 添加 AI 成员 sheet of a team that has no computer yet: one line says
 /// so, with the way to the 电脑 page.
 pub fn open_bot_dialog_no_computer(
@@ -1470,6 +1491,22 @@ pub fn open_machine_dialog(
         Page::Machines,
         |s, w, cx| {
             super::machines::open_add_machine(s, w, cx);
+        },
+        cx,
+    )
+}
+
+/// 机器 with 添加电脑 opened from the 我的电脑 header: 谁用这台电脑 starts on 只有我.
+pub fn open_machine_dialog_mine(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Machines,
+        |s, w, cx| {
+            super::machines::open_add_machine_as(s, true, w, cx);
         },
         cx,
     )
@@ -1930,6 +1967,20 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedIn,
         setup: |_, _| {},
         open: open_machines_loading,
+    },
+    Scene {
+        name: "settings-add-bot-runner-signed-out",
+        about: "Settings: the add-bot dialog with a tool that is not signed in picked: the line under 运行方式",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: open_bot_dialog_runner_signed_out,
+    },
+    Scene {
+        name: "settings-add-machine-mine",
+        about: "Settings: 添加电脑 from the 我的电脑 header: 谁用这台电脑 starts on 只有我",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: open_machine_dialog_mine,
     },
     // --- end v14/t4 lists ---
 ];

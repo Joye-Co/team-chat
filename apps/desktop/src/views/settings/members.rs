@@ -2568,6 +2568,11 @@ impl Render for BotForm {
                     },
                 );
             }
+            // The picked one cannot work until it is signed in: said under the row.
+            let signed_out_hint = known
+                .iter()
+                .find(|o| o.runtime == current && o.signed_out)
+                .map(|o| fill(s::RUNNER_RUNTIME_SIGNED_OUT_HINT, &[("name", &o.name)]));
             let runtime: Option<gpui::AnyElement> = if only {
                 None
             } else if known.is_empty() {
@@ -2585,7 +2590,7 @@ impl Render for BotForm {
                 // Nothing chosen yet: 选择 in the placeholder color.
                 let unset = chosen.is_none();
                 let shown = chosen.unwrap_or_else(|| s::RUNNER_RUNTIME_PICK.to_string());
-                Some(
+                let popup =
                     widgets::popup_fill("member-runtime", shown, unset, SheetWidth::List, cx)
                         .dropdown_menu(move |menu, _, _| {
                             known.iter().fold(menu, |menu, o| {
@@ -2600,9 +2605,18 @@ impl Render for BotForm {
                                         }),
                                 )
                             })
-                        })
+                        });
+                Some(match signed_out_hint {
+                    Some(hint) => div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(tokens::space::S4)
+                        .child(popup)
+                        .child(widgets::quiet(hint, cx))
                         .into_any_element(),
-                )
+                    None => popup.into_any_element(),
+                })
             };
             // 在哪台电脑干活: any free computer, one of the team's, or my own. Picking a
             // computer (or 任意) replaces the old hand-typed labels. An AI member placed on
@@ -2797,7 +2811,14 @@ impl Render for BotForm {
                                     machine,
                                     cx,
                                 ))
-                                .children(runtime.map(|r| sheet_form_row(s::RUNNER_RUNTIME, r, cx)))
+                                .children(runtime.map(|r| {
+                                    sheet_form_row_wrap(
+                                        s::RUNNER_RUNTIME,
+                                        tokens::height::DEFAULT,
+                                        r,
+                                        cx,
+                                    )
+                                }))
                                 .child(field_row(
                                     s::RUNNER_REPO,
                                     "member-repo",
@@ -3479,7 +3500,7 @@ mod tests {
         );
         assert_eq!(
             placement_hint(Some("chen"), &list, team, person).as_deref(),
-            Some("这位成员在陈晨的电脑上，只做陈晨交代的事，只有陈晨能改。")
+            Some("这位成员在陈晨的电脑上，只做陈晨交代的事。只有陈晨能换电脑。")
         );
         assert_eq!(placement_hint(Some("t"), &list, team, person), None);
         // One person alone: nothing about whose.

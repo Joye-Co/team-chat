@@ -392,9 +392,10 @@ impl MachinesPage {
         .into_any_element()
     }
 
-    fn open_add(this: Entity<Self>, window: &mut Window, cx: &mut App) {
+    /// 添加电脑 from a section's header: `only_me` starts the sheet on the section's owner.
+    fn open_add(this: Entity<Self>, only_me: bool, window: &mut Window, cx: &mut App) {
         let services = this.read(cx).services.clone();
-        let form = open_add_machine(services, window, cx);
+        let form = open_add_machine_as(services, only_me, window, cx);
         // Reload the list once the computer exists.
         cx.observe(&form, move |form, cx| {
             if form.read(cx).created().is_some() {
@@ -420,8 +421,22 @@ impl Render for MachinesPage {
                 PushSize::Small,
                 cx,
             )
-            .on_click(move |_, window, cx| Self::open_add(page.clone(), window, cx))
+            .on_click(move |_, window, cx| Self::open_add(page.clone(), true, window, cx))
         });
+        // 团队的电脑 has its own 添加电脑, so a computer lands in the section it was added from.
+        let team_add = |cx: &mut Context<Self>| {
+            (owner && !self.solo).then(|| {
+                let page = cx.entity();
+                push_button(
+                    "machine-add-team",
+                    s::COMPUTER_ADD_OPEN,
+                    PushStyle::Outline,
+                    PushSize::Small,
+                    cx,
+                )
+                .on_click(move |_, window, cx| Self::open_add(page.clone(), false, window, cx))
+            })
+        };
         // 用这台电脑: this Mac has no daemon yet, or runs one copied by hand that does not
         // update with the app.
         let use_label = match self.this_mac {
@@ -591,6 +606,9 @@ impl Render for MachinesPage {
                         s::TEAM_COMPUTERS_MEMBER_FOOTER
                     };
                     let mut header = SectionTitle::new(s::TEAM_COMPUTERS).description(team_footer);
+                    if let Some(add) = team_add(cx) {
+                        header = header.action(add);
+                    }
                     let team_body = if team.is_empty() {
                         empty(s::NO_COMPUTERS, cx)
                     } else {
@@ -628,9 +646,13 @@ impl Render for MachinesPage {
                     } else {
                         s::TEAM_COMPUTERS_MEMBER_FOOTER
                     };
+                    let mut header = SectionTitle::new(s::TEAM_COMPUTERS).description(team_footer);
+                    if let Some(add) = team_add(cx) {
+                        header = header.action(add);
+                    }
                     sections.push(
                         widgets::section(
-                            SectionTitle::new(s::TEAM_COMPUTERS).description(team_footer),
+                            header,
                             GroupedForm::new().row(widgets::list_loading(
                                 "team-machines-loading",
                                 2,
@@ -1175,7 +1197,21 @@ pub fn open_add_machine(
     window: &mut Window,
     cx: &mut App,
 ) -> Entity<MachineForm> {
-    let form = cx.new(|cx| MachineForm::new(services, window, cx));
+    open_add_machine_as(services, false, window, cx)
+}
+
+/// The 添加电脑 sheet with 谁用这台电脑 starting on 只有我 (`only_me`) or 团队.
+pub fn open_add_machine_as(
+    services: Services,
+    only_me: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> Entity<MachineForm> {
+    let form = cx.new(|cx| {
+        let mut form = MachineForm::new(services, window, cx);
+        form.only_me = only_me;
+        form
+    });
     let shown = form.clone();
     let first = std::cell::Cell::new(true);
     widgets::open_sheet(

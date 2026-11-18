@@ -417,7 +417,7 @@ crate::copy! {
     BOT_PLACE_TEAM_SUFFIX = "{name}（团队）",
     BOT_PLACE_MINE_SUFFIX = "{name}（我的）",
     BOT_PLACE_MINE_HINT = "放在你自己的电脑上：只有你交代的事会做。",
-    BOT_PINNED_OTHER_HINT = "这位成员在{person}的电脑上，只做{person}交代的事，只有{person}能改。",
+    BOT_PINNED_OTHER_HINT = "这位成员在{person}的电脑上，只做{person}交代的事。只有{person}能换电脑。",
     QUICK_SAVED = "已保存",
     BOT_EDIT_EXTERNAL_HINT = "它不再在电脑上工作，由你自己的程序接入。",
     CHARACTER_RANDOM = "随机选一个",
@@ -547,5 +547,6 @@ crate::copy! {
     AI_SAVE_UNTESTED_TITLE = "保存没有通过测试的设置？",
     AI_SAVE_UNTESTED_BODY = "前台、话题标题、话题摘要和记忆\n可能会停止工作。",
     AI_SAVE_UNTESTED_OK = "仍然保存",
+    RUNNER_RUNTIME_SIGNED_OUT_HINT = "{name} 还没登录，登录后 AI 成员才能干活。",
     // --- end visual finish: settings ---
 }
