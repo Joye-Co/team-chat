@@ -207,10 +207,9 @@ fn strip(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
                 .border_color(k.separator)
                 .flex()
                 .items_center()
-                .gap(space::S16)
+                .gap(space::S8)
                 .child(
                     div()
-                        .flex_1()
                         .min_w(gpui::Pixels::ZERO)
                         .flex()
                         .items_center()
@@ -218,7 +217,10 @@ fn strip(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
                         .n_footnote()
                         .text_color(k.secondary)
                         .child(sym_icon(Sym::Terminal, SymSize::INLINE_SMALL, k.secondary))
-                        .child(div().flex_none().text_color(k.label).child(label))
+                        // A sentence that names GitHub needs no label before it.
+                        .when(!prose.contains(label.as_str()), |d| {
+                            d.child(div().flex_none().text_color(k.label).child(label))
+                        })
                         .child(TruncText::new(prose.to_string())),
                 )
                 .children(command.map(|c| {
@@ -227,6 +229,8 @@ fn strip(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
                         .flex_none()
                         .whitespace_nowrap()
                 }))
+                // The command follows its sentence; what is left of the line stays empty.
+                .child(div().flex_1())
         }))
 }
 
@@ -692,7 +696,7 @@ pub(super) fn attention_panel(
             let icon = match a.kind {
                 AttentionKind::Waiting => Sym::Privacy,
                 AttentionKind::CliLoggedOut => Sym::Terminal,
-                AttentionKind::Queue => Sym::Hourglass,
+                AttentionKind::Queue => Sym::Waiting,
                 AttentionKind::Failed => Sym::Failed,
                 AttentionKind::Disk => Sym::Disk,
                 AttentionKind::Offline => Sym::Offline,

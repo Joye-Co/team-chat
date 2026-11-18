@@ -330,11 +330,12 @@ impl AttentionKind {
         match self {
             AttentionKind::CliLoggedOut | AttentionKind::Limit => AdminPage::Accounts,
             AttentionKind::Budget => AdminPage::Usage,
+            // 活动记录 has the failed run, and its row opens the 话题.
+            AttentionKind::Failed => AdminPage::Activity,
             AttentionKind::Invite => AdminPage::Members,
             AttentionKind::AiService => AdminPage::Ai,
             AttentionKind::Waiting
             | AttentionKind::Queue
-            | AttentionKind::Failed
             | AttentionKind::Disk
             | AttentionKind::Offline => AdminPage::Overview,
         }
@@ -356,6 +357,24 @@ pub struct Attention {
     pub tone: Tone,
     /// `None`: the row stays put (what it is about is on the page already open).
     pub target: Option<AttentionTarget>,
+}
+
+/// Where a row stands in 要注意: work that has stopped on the owner first, then what failed,
+/// computers that are gone, what to watch, and last what needs nothing done.
+fn attention_rank(a: &Attention) -> u8 {
+    match (a.kind, a.tone) {
+        (AttentionKind::Budget, Tone::Bad) => 0,
+        (AttentionKind::Waiting, _) => 1,
+        (AttentionKind::Offline, _) => 3,
+        (_, Tone::Bad) => 2,
+        (_, Tone::Warn) => 4,
+        _ => 5,
+    }
+}
+
+/// Puts a 要注意 list in reading order, the most urgent first; rows of one rank keep their order.
+pub fn rank_attention(list: &mut [Attention]) {
+    list.sort_by_key(attention_rank);
 }
 
 /// 模 1.3: one 要注意 row while the team's AI 服务 is not set up (`Some(false)`); nothing
@@ -428,7 +447,7 @@ pub fn attention(
     {
         out.push(Attention {
             kind: AttentionKind::Offline,
-            title: m::ATT_OFFLINE.into(),
+            title: fill(m::ATT_OFFLINE, &[("name", &d.machine.name)]),
             meta: fill(m::ATT_OFFLINE_META, &[("ago", &ago(now.saturating_sub(t)))]),
             tone: Tone::Bad,
             target: None,
@@ -449,7 +468,7 @@ pub fn attention(
         out.push(Attention {
             kind: AttentionKind::Waiting,
             title: fill(m::ATT_WAITING, &[("n", &n.to_string())]),
-            meta: who.join(" · "),
+            meta: fill(m::ATT_WAITING_META, &[("who", &who.join(" · "))]),
             tone: Tone::Warn,
             target: None,
         });
@@ -491,7 +510,8 @@ pub fn attention(
                     )
                 })
                 .unwrap_or_default(),
-            tone: Tone::Warn,
+            // A queue drains by itself: the resting state, as 排队 is everywhere else (§2.12).
+            tone: Tone::Quiet,
             target: None,
         });
     }
@@ -526,6 +546,7 @@ pub fn attention(
             machine: Some(d.machine.id.clone()),
         });
     }
+    rank_attention(&mut out);
     out
 }
 
@@ -852,7 +873,7 @@ mod tests {
             (
                 "未登录".into(),
                 Tone::Warn,
-                Some("在主机上运行 sudo -iu runner gh auth login".into())
+                Some("要登录 GitHub，到主机上运行 sudo -iu runner gh auth login".into())
             )
         );
         assert_eq!(
@@ -875,11 +896,17 @@ mod tests {
         );
         assert_eq!(
             hint_parts(m::GITHUB_HINT_VM),
-            ("在主机上运行", Some("sudo -iu runner gh auth login"))
+            (
+                "要登录 GitHub，到主机上运行",
+                Some("sudo -iu runner gh auth login")
+            )
         );
         assert_eq!(
             hint_parts(m::GITHUB_HINT_HOST),
-            ("切到运行 AI 成员的系统账号，执行", Some("gh auth login"))
+            (
+                "要登录 GitHub，切到运行 AI 成员的系统账号，执行",
+                Some("gh auth login")
+            )
         );
         assert_eq!(cell("unknown", None, Some("vm")).2, None);
         let mut d = sample();
@@ -912,15 +939,49 @@ mod tests {
             titles,
             vec![
                 "3 个 VM 在等你",
-                "Codex 未登录",
-                "4 个任务在排队",
                 "Ledger 的任务没跑成",
-                "磁盘只剩 50 B"
+                "Codex 未登录",
+                "磁盘只剩 50 B",
+                "4 个任务在排队"
             ]
         );
-        assert_eq!(list[0].meta, "Forge 2 个 · Ledger 1 个");
-        assert_eq!(list[1].meta, "今天 2 个任务没跑成");
-        assert_eq!(list[3].meta, "10:31 · 对一下十月的账单");
+        assert_eq!(list[0].meta, "Forge 2 个 · Ledger 1 个 · 到话题里回复");
+        assert_eq!(list[1].meta, "10:31 · 对一下十月的账单");
+        assert_eq!(list[2].meta, "今天 2 个任务没跑成");
+        assert_eq!(list[4].tone, Tone::Quiet);
+    }
+
+    /// Stopped work outranks a computer that is gone, and that outranks what is only worth watching.
+    #[test]
+    fn attention_rank_puts_stopped_work_above_offline_computers() {
+        let row = |kind, tone| Attention {
+            kind,
+            title: String::new(),
+            meta: String::new(),
+            tone,
+            target: None,
+        };
+        let mut list = vec![
+            row(AttentionKind::Invite, Tone::Info),
+            row(AttentionKind::Budget, Tone::Warn),
+            row(AttentionKind::Offline, Tone::Bad),
+            row(AttentionKind::Failed, Tone::Bad),
+            row(AttentionKind::Waiting, Tone::Warn),
+            row(AttentionKind::Budget, Tone::Bad),
+        ];
+        rank_attention(&mut list);
+        let kinds: Vec<(AttentionKind, Tone)> = list.iter().map(|a| (a.kind, a.tone)).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                (AttentionKind::Budget, Tone::Bad),
+                (AttentionKind::Waiting, Tone::Warn),
+                (AttentionKind::Failed, Tone::Bad),
+                (AttentionKind::Offline, Tone::Bad),
+                (AttentionKind::Budget, Tone::Warn),
+                (AttentionKind::Invite, Tone::Info),
+            ]
+        );
     }
 
     /// A row leads to where it is dealt with, on the computer it is about.
@@ -934,6 +995,7 @@ mod tests {
         assert_eq!(to(AttentionKind::CliLoggedOut).page, AdminPage::Accounts);
         assert_eq!(to(AttentionKind::Queue).page, AdminPage::Overview);
         assert_eq!(to(AttentionKind::Queue).machine.as_deref(), Some("m1"));
+        assert_eq!(to(AttentionKind::Failed).page, AdminPage::Activity);
         assert_eq!(AttentionKind::Limit.page(), AdminPage::Accounts);
         assert_eq!(AttentionKind::Budget.page(), AdminPage::Usage);
         assert_eq!(AttentionKind::Invite.page(), AdminPage::Members);

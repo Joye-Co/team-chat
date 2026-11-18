@@ -2,8 +2,8 @@
 //! grouped by day, filtered by 谁 / 类型 / 机器, kept 90 days on the server.
 
 use gpui::{
-    AnyElement, Context, IntoElement, ParentElement as _, Styled, Window, div,
-    prelude::FluentBuilder as _,
+    AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
+    StatefulInteractiveElement as _, Styled, Window, div, prelude::FluentBuilder as _,
 };
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use serde_json::Value;
@@ -18,8 +18,8 @@ use crate::{
         Sym,
         icons::sym as sym_icon,
         native::{
-            Alert, AlertTone, Badge, Empty, NativeType as _, PushSize, PushStyle, TruncText,
-            native_colors, push_button, skeleton,
+            Alert, AlertTone, Badge, Empty, FocusRow as _, NativeType as _, PushSize, PushStyle,
+            TruncText, native_colors, push_button, skeleton,
             tokens::{height, radius, space, text},
         },
         sf_symbols::SymSize,
@@ -63,7 +63,8 @@ fn kind_icon(k: &str) -> Sym {
         kind::APPROVAL => Sym::Check,
         kind::BUDGET => Sym::BarChart,
         kind::LOGIN => Sym::Account,
-        kind::MACHINE => Sym::Server,
+        // A computer that is gone: its own glyph is drawn while it is on the list.
+        kind::MACHINE => Sym::Computer,
         kind::RUN => Sym::Failed,
         _ => Sym::Info,
     }
@@ -532,8 +533,21 @@ impl AdminView {
                     days.push((date, label, vec![]));
                 }
                 let (title, meta) = sentence(e, &name, &machine);
+                let glyph = e
+                    .machine_id
+                    .as_deref()
+                    .filter(|_| e.kind == kind::MACHINE)
+                    .and_then(|id| self.machines.iter().flatten().find(|x| x.id == id))
+                    .map(crate::views::settings::machines::machine_glyph)
+                    .unwrap_or_else(|| kind_icon(&e.kind));
+                // A failed run leads to its 话题, where the reason is.
+                let topic = (e.kind == kind::RUN)
+                    .then(|| Some((detail_str(e, "groupId")?, e.target.as_deref()?)))
+                    .flatten()
+                    .map(|(g, t)| (g.to_string(), t.to_string()));
                 let row =
                     div()
+                        .id(SharedString::from(format!("activity-{}", e.id)))
                         .min_h(height::LIST_ROW)
                         .px(space::S16)
                         .py(space::S8)
@@ -558,7 +572,7 @@ impl AdminView {
                                 .items_center()
                                 .justify_center()
                                 .child(sym_icon(
-                                    kind_icon(&e.kind),
+                                    glyph,
                                     SymSize::INLINE,
                                     // A run that failed is the one red row, as on 总览 (§1.3).
                                     if e.kind == kind::RUN {
@@ -580,8 +594,22 @@ impl AdminView {
                                 })),
                         )
                         .child(Badge::new(kind_label(&e.kind)));
+                let row = match topic {
+                    None => row.into_any_element(),
+                    Some((group, topic)) => {
+                        let nav = self.services.nav.clone();
+                        row.focus_row(false, cx)
+                            .child(sym_icon(Sym::ChevronRight, SymSize::INLINE, k.secondary))
+                            .on_click(move |_, _, cx| {
+                                let (g, t) = (group.clone(), topic.clone());
+                                nav.update(cx, |nav, cx| nav.open_topic(g.into(), t.into(), cx));
+                                crate::views::nav::show_main_window(cx);
+                            })
+                            .into_any_element()
+                    }
+                };
                 if let Some(d) = days.last_mut() {
-                    d.2.push(row.into_any_element());
+                    d.2.push(row);
                 }
             }
             let view = cx.entity();

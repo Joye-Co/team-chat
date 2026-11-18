@@ -94,7 +94,15 @@ impl AdminView {
             if let Some(d) = self.fleet.monitors.get(&x.id) {
                 for a in model::attention(d, now, &names, &time) {
                     out.push(Attention {
-                        meta: if a.meta.is_empty() {
+                        title: if a.kind == AttentionKind::Offline {
+                            fill(m::ATT_OFFLINE, &[("name", &x.name)])
+                        } else {
+                            a.title.clone()
+                        },
+                        meta: if a.kind == AttentionKind::Offline {
+                            // The title names the computer already.
+                            a.meta.clone()
+                        } else if a.meta.is_empty() {
                             x.name.clone()
                         } else if a.kind == AttentionKind::CliLoggedOut {
                             // 去登录 narrows this row: what it cost is the part that must show.
@@ -112,8 +120,14 @@ impl AdminView {
             } else if !x.connected {
                 out.push(Attention {
                     kind: AttentionKind::Offline,
-                    title: m::ATT_OFFLINE.into(),
-                    meta: x.name.clone(),
+                    title: fill(m::ATT_OFFLINE, &[("name", &x.name)]),
+                    meta: x
+                        .last_heartbeat_at
+                        .map(|t| {
+                            let ago = model::ago(now.saturating_sub(t.max(0) as u64));
+                            fill(m::ATT_OFFLINE_META, &[("ago", &ago)])
+                        })
+                        .unwrap_or_default(),
                     tone: Tone::Bad,
                     target: Some(AttentionTarget {
                         page: AttentionKind::Offline.page(),
@@ -193,6 +207,7 @@ impl AdminView {
                 }
             }
         }
+        model::rank_attention(&mut out);
         out
     }
 

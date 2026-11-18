@@ -53,10 +53,13 @@ pub fn machine_monitor(machine_id: &str, range: &str) -> MachineMonitor {
         _ => (30, 30_000),
     };
     if machine_id != "mc-mini" {
+        // 团队 VPS is online in the machine list: its monitor says the same.
+        let online = machine_id == "mc-vps";
         return parse(json!({
             "machine": {
-                "id": machine_id, "name": "旧笔记本", "connected": false,
-                "lastHeartbeatAt": now - 3 * DAY, "os": "macos", "arch": "aarch64",
+                "id": machine_id, "name": "旧笔记本", "connected": online,
+                "lastHeartbeatAt": if online { now - 8_000 } else { now - 3 * DAY },
+                "os": "macos", "arch": "aarch64",
                 "daemonVersion": "0.3.2"
             },
             "series": { "range": range, "from": now - n as u64 * step, "stepMs": step,
@@ -305,7 +308,7 @@ pub fn team_activity() -> ActivityResponse {
             "run.failed",
             "m-taro",
             "t-weibo",
-            json!({ "machineId": "mc-mini", "details": { "title": "把这周的微博排期发出来", "requestedBy": "m-lixue" } }),
+            json!({ "machineId": "mc-mini", "details": { "groupId": "g-dev", "title": "把这周的微博排期发出来", "requestedBy": "m-lixue" } }),
         ),
         e(
             10,
