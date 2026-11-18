@@ -169,7 +169,7 @@ icons drawn for this app on Lucide's grid (`assets/icons/drawn/`). macOS keeps S
   toolbar), 1.0 px at 9 Semibold (the pop-up mark). Round caps and joins.
 - **Color**: the same tokens (`secondary` in sidebars and rows, `label` in the toolbar, a state
   color only when the icon is the state).
-- **Filled states** (needs you, done, failed, problem, the live dot, the filled star) are filled
+- **Filled states** (needs you, done, failed, problem, paused, the live dot, the filled star) are filled
   shapes with the mark cut out, like the symbols. Lucide has no filled icons, so these are drawn
   here from Lucide's outlines.
 - Where the Mac's symbol names Apple hardware or an Apple key, Windows draws the neutral thing:
@@ -188,8 +188,8 @@ icons drawn for this app on Lucide's grid (`assets/icons/drawn/`). macOS keeps S
 Looked at on a Mac with `TC_SVG_ICONS=1`, light and dark, next to the SF Symbol screens. Not
 seen on Windows.
 
-Drawn for this app (7): `circle-alert-fill`, `circle-check-fill`, `circle-x-fill`,
-`triangle-alert-fill`, `circle-fill`, `star-fill`, `desktop-mini`.
+Drawn for this app (8): `circle-alert-fill`, `circle-check-fill`, `circle-x-fill`,
+`triangle-alert-fill`, `circle-fill`, `star-fill`, `pause-fill`, `desktop-mini`.
 
 | Concept (`Sym::`) | SF Symbol (macOS) | Windows icon | Uses |
 | --- | --- | --- | --- |
@@ -222,6 +222,7 @@ Drawn for this app (7): `circle-alert-fill`, `circle-check-fill`, `circle-x-fill
 | Todo | `circle.dashed` | Lucide `circle-dashed` | 6 |
 | Circle | `circle` | Lucide `circle` | 1 |
 | Stopped | `nosign` | Lucide `ban` | 2 |
+| Paused | `pause.fill` | drawn `pause-fill` | 2 |
 | Hourglass | `hourglass` | Lucide `hourglass` | 1 |
 | Computer | `display` | Lucide `monitor` | 18 |
 | Laptop | `laptopcomputer` | Lucide `laptop` | 8 |

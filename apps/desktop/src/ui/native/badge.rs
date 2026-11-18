@@ -205,7 +205,7 @@ impl BadgeState {
             BadgeState::Abnormal => Sym::Problem,
             BadgeState::Queued | BadgeState::Quiet => Sym::Waiting,
             BadgeState::Deactivated => Sym::Stopped,
-            BadgeState::Paused => Sym::Pause,
+            BadgeState::Paused => Sym::Paused,
             _ => return None,
         })
     }

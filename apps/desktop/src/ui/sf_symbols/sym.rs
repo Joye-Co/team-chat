@@ -90,6 +90,9 @@ concepts! {
     Todo = "circle.dashed";
     Circle = "circle";
     Stopped = "nosign";
+    /// The paused state (`secondary`): the filled bars, which stay readable
+    /// at the 12 of a badge where the outlined media `pause` thins out.
+    Paused = "pause.fill";
     Hourglass = "hourglass";
     // Machines (§6).
     /// A team computer.

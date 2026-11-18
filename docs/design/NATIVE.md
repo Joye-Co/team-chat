@@ -254,7 +254,7 @@ shape. The text inside every control is Body 13 pt unless noted.
 | Open elsewhere | `arrow.up.forward` |
 | Alert in a row (quiet) | `exclamationmark.circle` in `secondary`; outlined warning `exclamationmark.triangle` |
 | Failed | `xmark.circle.fill` in `red` |
-| Not started | `circle.dashed`; stopped `nosign`; hourglass `hourglass` |
+| Not started | `circle.dashed`; stopped `nosign`; paused `pause.fill`; hourglass `hourglass` |
 | Offline | `wifi.slash` |
 | Muted / notify badge | `bell.slash` / `bell.badge` |
 | Branch / merge | `arrow.triangle.branch` / `arrow.triangle.merge` |

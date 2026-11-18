@@ -229,6 +229,7 @@ svg_set! {
         Problem = "triangle-alert-fill" @ 0.99, 0.90;
         Failed = "circle-x-fill" @ 1.00, 0.97;
         StarFill = "star-fill" @ 1.09, 1.05;
+        Paused = "pause-fill" @ 0.60, 0.78;
         // A small desktop computer seen from the front: a team machine.
         MacMini = "desktop-mini" @ 1.27, 0.50;
     }
