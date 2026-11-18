@@ -220,7 +220,7 @@ impl TimelineView {
             .into_any_element()
         };
         let title = fill(
-            l::LIVE_MEMBER_STOPPED,
+            l::LIVE_MEMBER_ENDED,
             &[("member", &self.run_member_name(run))],
         );
         let badge = (

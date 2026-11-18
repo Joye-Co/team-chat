@@ -157,4 +157,6 @@ crate::copy! {
     WITHDRAW_REFUSED = "没能撤回",
     // The quiet last line of the inspector of a 完成 话题.
     RAIL_EMPTY_REST_DONE = "没有{names}。",
+    // The toolbar of a held run whose computer is away.
+    STATE_PAUSED_AWAY = "它的电脑不在线",
 }

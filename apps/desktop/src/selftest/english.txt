@@ -372,7 +372,7 @@ CI 超时，PR #59 的检查没跑完	CI timed out before PR #59's checks finish
 orderbot、拾光、TeamChat 三个仓库	The orderbot, Keepsake and TeamChat repos
 单次花费超过 ¥50	Any single run over $50
 改生产环境配置	Change production config
-做这些事之前会先发卡片：团队的电脑上由管理员批准，个人的电脑上由电脑主人批准。其他要确认的事由交代的人或管理员批准。	Before doing any of these, it sends a card: an admin approves on a team computer, the owner on a personal one. Anything else that needs a yes is approved by the requester or an admin.
+做这些事之前会先发卡片请人批准：团队的电脑找管理员，个人的电脑找电脑主人，其他事找交代的人或管理员。Before doing any of these, it sends a card: an admin approves on a team computer, the owner on a personal one. Anything else that needs a yes is approved by the requester or an admin.
 压测用 1000 条消息就够了。	1,000 messages is enough for a load test.
 被「{}」取代	Replaced by “{}”
 依据：11 月 1 日和 2 日两次回滚，都是没跑压测就合并了	Why: both rollbacks on Nov 1 and 2 were merged without a load test
@@ -500,7 +500,12 @@ Taro 推荐大字标题：上一条大字封面的点击率高了 40%。	Taro re
 检查更新…	Check for Updates…
 交还时留句话给 {}（可不填）	Leave {} a note for the hand-back (optional)
 继续时留句话给 {}（可不填）	Leave {} a note for when it continues (optional)
-{} 不在线，回来后才能继续操作	{} is offline. You can continue when it's back
+{} 不在线	{} is offline
+你还在接管，它回来后才能继续操作	You still hold it. You can continue when it's back
+{} 还在接管，它回来后才能继续操作	{} still holds it. You can continue when it's back
+它的电脑不在线	Its computer is offline
+{} 已停止	{} stopped
+停在：{}	Stopped at: {}
 最后画面	Last frame
 结论是什么？	What's the conclusion?
 依据是什么？	What is it based on?

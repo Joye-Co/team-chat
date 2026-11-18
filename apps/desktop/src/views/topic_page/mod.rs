@@ -248,6 +248,8 @@ pub fn run_state(
                     &[("who", &who(by)), ("member", name)],
                 )
             }
+        } else if phase_of(run).1 == Some(crate::data::run_phase::WaitingFor::Offline) {
+            c::STATE_PAUSED_AWAY.to_string()
         } else if Some(by) == me {
             c::STATE_PAUSED_YOU.to_string()
         } else {
