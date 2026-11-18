@@ -1460,10 +1460,11 @@ pub mod monitor {
     /// inspector at the default width; cells pad 8 a side.
     pub const TEAM_COL_LEVEL: Pixels = px(80.);
     pub const TEAM_COL_TOPICS: Pixels = px(60.);
-    pub const TEAM_COL_SPEND: Pixels = px(184.);
-    /// The budget after an amount (`/ $100`): a fixed slot, so every amount ends at one x.
-    pub const TEAM_SPEND_BUDGET: Pixels = px(44.);
-    pub const TEAM_COL_RECENT: Pixels = px(84.);
+    pub const TEAM_COL_SPEND: Pixels = px(180.);
+    /// The budget after an amount (`/ $100`): the slot's least width, so every amount ends at
+    /// one x and a longer budget pushes its amount instead of covering it.
+    pub const TEAM_SPEND_BUDGET: Pixels = px(40.);
+    pub const TEAM_COL_RECENT: Pixels = px(76.);
     pub const TEAM_CELL_PAD: Pixels = space::S8;
     /// The count after a bar in the member inspector (`999 个话题`), right-aligned.
     pub const TEAM_USE_COUNT: Pixels = px(64.);

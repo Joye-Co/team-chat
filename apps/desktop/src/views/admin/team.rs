@@ -657,7 +657,7 @@ impl AdminView {
                                         .child(
                                             div()
                                                 .flex_none()
-                                                .w(t::TEAM_SPEND_BUDGET)
+                                                .min_w(t::TEAM_SPEND_BUDGET)
                                                 .text_right()
                                                 .whitespace_nowrap()
                                                 .n_footnote()

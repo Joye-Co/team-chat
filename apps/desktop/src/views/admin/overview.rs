@@ -766,11 +766,7 @@ pub(super) fn attention_panel(
                                     PushSize::Small,
                                     cx,
                                 )
-                                .child(sym_icon(
-                                    Sym::ChevronRight,
-                                    SymSize::INLINE_SMALL,
-                                    k.secondary,
-                                ))
+                                .child(sym_icon(Sym::ChevronRight, SymSize::INLINE, k.secondary))
                                 .on_click(move |_, window, cx| open(window, cx)),
                             )
                             .into_any_element()

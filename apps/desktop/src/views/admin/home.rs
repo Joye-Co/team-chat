@@ -96,6 +96,9 @@ impl AdminView {
                     out.push(Attention {
                         meta: if a.meta.is_empty() {
                             x.name.clone()
+                        } else if a.kind == AttentionKind::CliLoggedOut {
+                            // 去登录 narrows this row: what it cost is the part that must show.
+                            format!("{} · {}", a.meta, x.name)
                         } else {
                             format!("{} · {}", x.name, a.meta)
                         },
