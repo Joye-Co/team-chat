@@ -29,6 +29,21 @@ use crate::{
 /// Press lines shown under a card; older presses are summed up in one line.
 pub const SHOWN_PRESSES: usize = 3;
 
+/// True until my first press of an ask: a press answers at once, and the card says so.
+pub(super) fn awaits_first_press(message: &Message, ctx: &ExtrasContext) -> bool {
+    let provider = ctx.provider;
+    let sending = provider
+        .card_press_state(&message.group_id, &message.id)
+        .is_some_and(|s| s.phase == CardPressPhase::Sending);
+    let pressed = ctx.me.is_some_and(|me| {
+        provider
+            .card_presses(&message.group_id, &message.id)
+            .iter()
+            .any(|p| p.actor_id == me)
+    });
+    !sending && !pressed
+}
+
 /// The buttons, the press state line and the press lines, or nothing.
 pub fn render(
     card: &Card,
@@ -65,16 +80,6 @@ pub fn render(
                 .children(actions.iter().enumerate().map(|(ix, action)| {
                     option_row(ix, action, message, provider, sending, mine.as_deref(), cx)
                 }))
-                // A press answers at once: said before the first press, and under the rows
-                // so they stay where they are when the line goes.
-                .when(mine.is_none() && sending.is_none(), |d| {
-                    d.child(
-                        div()
-                            .t_meta()
-                            .text_color(colors.text_3)
-                            .child(crate::copy::cards_v2::STRIP_WAITS_QUICK),
-                    )
-                })
                 .into_any_element(),
         );
     } else if !actions.is_empty() {
