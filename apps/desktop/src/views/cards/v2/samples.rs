@@ -1342,6 +1342,7 @@ fn all() -> Vec<Sample> {
                             by: FORGE.into(),
                             mode: crate::data::cards_v2::ExpectMode::Run,
                             eta_ms: None,
+                            reason: None,
                         },
                     },
                     at: now - ago,

@@ -992,14 +992,18 @@ fn result_json(r: RunOutputResult) -> Value {
         code,
         reason,
         message,
-        ..
+        retry_after_ms,
     } = r.error.unwrap_or(RunOutputError {
         code: "failed".into(),
         reason: None,
         message: "the server did not say why".into(),
         retry_after_ms: None,
     });
-    error(&code, reason.as_deref(), message)
+    let mut refused = error(&code, reason.as_deref(), message);
+    if let Some(ms) = retry_after_ms {
+        refused["error"]["retryAfterMs"] = json!(ms);
+    }
+    refused
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2333,6 +2337,23 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_output_keeps_the_wait_the_server_named() {
+        let refused = result_json(RunOutputResult {
+            run_id: "r".into(),
+            output_id: "o".into(),
+            ok: false,
+            result: None,
+            error: Some(RunOutputError {
+                code: "rate_limited".into(),
+                reason: None,
+                message: "too many patches".into(),
+                retry_after_ms: Some(1500),
+            }),
+        });
+        assert_eq!(refused["error"]["retryAfterMs"], 1500);
+    }
+
+    #[test]
     fn report_command_builds_its_body_and_checks_state_and_text() {
         let (op, body) = request(&args(&[
             "report",
@@ -2913,6 +2934,7 @@ mod tests {
                     code: "conflict".into(),
                     reason: Some(reason.into()),
                     message: message.into(),
+                    retry_after_ms: None,
                 }),
             })
         };
