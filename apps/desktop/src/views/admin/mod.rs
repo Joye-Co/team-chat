@@ -458,6 +458,13 @@ impl AdminView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some((group, topic)) = target.topic.clone() {
+            self.services
+                .nav
+                .update(cx, |nav, cx| nav.open_topic(group.into(), topic.into(), cx));
+            crate::views::nav::show_main_window(cx);
+            return;
+        }
         if let Some(id) = target.machine.clone() {
             self.select_machine(id, cx);
         }

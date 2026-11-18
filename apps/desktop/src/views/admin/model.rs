@@ -342,11 +342,13 @@ impl AttentionKind {
     }
 }
 
-/// Where a 要注意 row leads: a page, on one computer when the page is per computer.
+/// Where a 要注意 row leads: a page, on one computer when the page is per computer; or the 话题
+/// (group, topic) where it is dealt with, which goes before the page.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AttentionTarget {
     pub page: AdminPage,
     pub machine: Option<String>,
+    pub topic: Option<(String, String)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -388,6 +390,7 @@ pub fn ai_service_attention(configured: Option<bool>) -> Option<Attention> {
         target: Some(AttentionTarget {
             page: AttentionKind::AiService.page(),
             machine: None,
+            topic: None,
         }),
     })
 }
@@ -455,6 +458,7 @@ pub fn attention(
     }
     let waiting: Vec<&MonitorMember> = d.members.iter().filter(|x| x.waiting > 0).collect();
     let n: u32 = waiting.iter().map(|x| x.waiting).sum();
+    let waiting_topic = oldest_waiting_topic(d);
     if n > 0 {
         let who: Vec<String> = waiting
             .iter()
@@ -468,7 +472,15 @@ pub fn attention(
         out.push(Attention {
             kind: AttentionKind::Waiting,
             title: fill(m::ATT_WAITING, &[("n", &n.to_string())]),
-            meta: fill(m::ATT_WAITING_META, &[("who", &who.join(" · "))]),
+            // Only a row that opens the 话题 may send the reader there.
+            meta: fill(
+                if waiting_topic.is_some() {
+                    m::ATT_WAITING_META
+                } else {
+                    m::ATT_WAITING_META_NO_TOPIC
+                },
+                &[("who", &who.join(" · "))],
+            ),
             tone: Tone::Warn,
             target: None,
         });
@@ -544,10 +556,23 @@ pub fn attention(
         a.target = Some(AttentionTarget {
             page: a.kind.page(),
             machine: Some(d.machine.id.clone()),
+            topic: (a.kind == AttentionKind::Waiting)
+                .then(|| waiting_topic.clone())
+                .flatten(),
         });
     }
     rank_attention(&mut out);
     out
+}
+
+/// The 话题 (group, topic) of the run that has waited longest for a reply.
+fn oldest_waiting_topic(d: &MachineMonitor) -> Option<(String, String)> {
+    d.runs
+        .iter()
+        .filter(|r| r.state == run_state::WAITING)
+        .filter_map(|r| Some((r.started_at, r.group_id.clone()?, r.topic_id.clone()?)))
+        .min_by_key(|(at, ..)| at.unwrap_or(u64::MAX))
+        .map(|(_, group, topic)| (group, topic))
 }
 
 /// A sortable column of 按成员.
@@ -719,7 +744,7 @@ mod tests {
         assert_eq!(cli_entry_name("acp", "gemini"), "gemini");
     }
     use chat_core::proto::monitor::{
-        MonitorCli, MonitorFailure, MonitorHost, MonitorMachine, MonitorQueue,
+        MonitorCli, MonitorFailure, MonitorHost, MonitorMachine, MonitorQueue, MonitorRun,
     };
 
     /// 模 1.3: 要注意 says so while the AI 服务 is not set up, and only once it was read.
@@ -945,10 +970,49 @@ mod tests {
                 "4 个任务在排队"
             ]
         );
-        assert_eq!(list[0].meta, "Forge 2 个 · Ledger 1 个 · 到话题里回复");
+        // No run names its 话题 here, so the row promises no way there.
+        assert_eq!(list[0].meta, "Forge 2 个 · Ledger 1 个 在等回复");
         assert_eq!(list[1].meta, "10:31 · 对一下十月的账单");
         assert_eq!(list[2].meta, "今天 2 个任务没跑成");
         assert_eq!(list[4].tone, Tone::Quiet);
+    }
+
+    /// 等你 opens the 话题 that has waited longest, and only then says to reply there.
+    #[test]
+    fn waiting_opens_the_oldest_waiting_topic() {
+        let run = |id: &str, state: &str, at: u64, topic: Option<&str>| MonitorRun {
+            run_id: id.into(),
+            member_id: Some("b".into()),
+            group_id: topic.map(|_| "g".to_string()),
+            topic_id: topic.map(str::to_string),
+            state: state.into(),
+            started_at: Some(at),
+            boot_ms: None,
+            cpu_cores: None,
+            mem_bytes: None,
+            scratch_bytes: None,
+        };
+        let mut d = sample();
+        d.runs = vec![
+            run("r1", run_state::WAITING, 30, Some("newer")),
+            run("r2", run_state::RUNNING, 10, Some("not-waiting")),
+            run("r3", run_state::WAITING, 20, Some("oldest")),
+            run("r4", run_state::WAITING, 5, None),
+        ];
+        let list = attention(&d, 10_000, &names, &|_| "10:31".into());
+        let row = list
+            .iter()
+            .find(|a| a.kind == AttentionKind::Waiting)
+            .expect("a row");
+        assert_eq!(row.meta, "Forge 2 个 · Ledger 1 个 · 到话题里回复");
+        let target = row.target.as_ref().expect("a target");
+        assert_eq!(target.topic, Some(("g".into(), "oldest".into())));
+        // Every other row keeps its page.
+        assert!(
+            list.iter()
+                .filter(|a| a.kind != AttentionKind::Waiting)
+                .all(|a| a.target.as_ref().is_some_and(|t| t.topic.is_none()))
+        );
     }
 
     /// Stopped work outranks a computer that is gone, and that outranks what is only worth watching.

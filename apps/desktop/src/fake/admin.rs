@@ -104,7 +104,8 @@ pub fn machine_monitor(machine_id: &str, range: &str) -> MachineMonitor {
         "runs": [
             { "runId": "r-1", "memberId": "m-coder", "state": "running", "startedAt": now - 12 * MIN,
               "cpuCores": 1.4, "memBytes": 2 * gib },
-            { "runId": "r-2", "memberId": "m-reviewer", "state": "waiting", "startedAt": now - 6 * MIN },
+            { "runId": "r-2", "memberId": "m-reviewer", "groupId": "g-dev", "topicId": "t-weibo",
+              "state": "waiting", "startedAt": now - 6 * MIN },
             { "runId": "r-3", "memberId": "m-docs", "state": "queued" }
         ],
         "members": [

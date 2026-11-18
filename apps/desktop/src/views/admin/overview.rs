@@ -648,12 +648,12 @@ fn attention(
     cx: &App,
 ) -> impl IntoElement {
     let mut items = model::attention(d, now, name, time);
-    // This computer's own page is already open: those rows have nowhere to lead.
+    // This computer's own page is already open: only a 话题 or another page is somewhere to go.
     for a in &mut items {
         a.target = a
             .target
             .take()
-            .filter(|t| t.page != super::AdminPage::Overview);
+            .filter(|t| t.topic.is_some() || t.page != super::AdminPage::Overview);
     }
     attention_panel(items, view, cx)
 }

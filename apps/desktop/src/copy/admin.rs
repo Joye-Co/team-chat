@@ -500,4 +500,5 @@ crate::copy! {
     ATT_WAITING_META = "{who} · 到话题里回复",
     TEAM_DEACTIVATE_CONFIRM_BODY_AI = "「{name}」停用后会停下手上的活，\n并交出负责的话题。\n之后可以重新启用。",
     TEAM_DEACTIVATE_CONFIRM_BODY_PERSON = "「{name}」停用后不能再登录团队，\n个人电脑也会被移除。\n重新启用后，电脑要重新添加。",
+    ATT_WAITING_META_NO_TOPIC = "{who} 在等回复",
 }

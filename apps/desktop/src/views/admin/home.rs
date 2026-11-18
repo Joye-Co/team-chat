@@ -110,10 +110,6 @@ impl AdminView {
                         } else {
                             format!("{} · {}", x.name, a.meta)
                         },
-                        target: Some(AttentionTarget {
-                            page: a.kind.page(),
-                            machine: Some(x.id.clone()),
-                        }),
                         ..a
                     });
                 }
@@ -132,6 +128,7 @@ impl AdminView {
                     target: Some(AttentionTarget {
                         page: AttentionKind::Offline.page(),
                         machine: Some(x.id.clone()),
+                        topic: None,
                     }),
                 });
             }
@@ -163,6 +160,7 @@ impl AdminView {
                         target: Some(AttentionTarget {
                             page: AttentionKind::Budget.page(),
                             machine: None,
+                            topic: None,
                         }),
                     });
                     continue;
@@ -183,6 +181,7 @@ impl AdminView {
                         target: Some(AttentionTarget {
                             page: AttentionKind::Budget.page(),
                             machine: None,
+                            topic: None,
                         }),
                     });
                 }
@@ -202,6 +201,7 @@ impl AdminView {
                         target: Some(AttentionTarget {
                             page: AttentionKind::Invite.page(),
                             machine: None,
+                            topic: None,
                         }),
                     });
                 }
