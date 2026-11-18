@@ -1096,8 +1096,10 @@ impl Render for RailView {
                             gpui::canvas(
                                 move |_, window, _| {
                                     let now = bottom_edge(&list, &entries);
+                                    // A refresh is ignored while a frame is
+                                    // drawn: the next frame shows the change.
                                     if edge.replace(now) != now {
-                                        window.refresh();
+                                        window.request_animation_frame();
                                     }
                                 },
                                 |_, _, _, _| (),
@@ -1487,10 +1489,23 @@ mod tests {
             let services = Services::new(provider, cx);
             RailView::new(services, window, cx)
         });
+        let notified = Rc::new(std::cell::Cell::new(0));
+        let count = notified.clone();
+        cx.update(|_, cx| {
+            cx.observe(&view, move |_, _| count.set(count.get() + 1))
+                .detach()
+        });
         let mut stranded = false;
         for height in (240..640).step_by(4) {
+            let before = view.update(cx, |this, _| this.bottom_edge.get());
             cx.simulate_resize(gpui::size(px(260.), px(height as f32)));
             cx.run_until_parked();
+            // What the edge hides now is drawn without waiting for an input.
+            if view.update(cx, |this, _| this.bottom_edge.get()) != before {
+                notified.set(0);
+                cx.update(|window, cx| window.simulate_next_frame(cx));
+                assert!(notified.get() > 0, "the next frame draws the new edge");
+            }
             view.update(cx, |this, _| {
                 let Some(ix) = this.bottom_edge.get().stranded else {
                     return;
