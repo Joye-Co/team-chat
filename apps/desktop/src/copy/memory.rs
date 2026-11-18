@@ -16,7 +16,7 @@ crate::copy! {
     MINE_TITLE = "我的约定",
     MINE_ABOUT = "成员替你做事前都会读这些。每天整理一次，记错了直接改或停用。",
     // No AI 服务 on the server (盯 4.6).
-    AI_OFF_TITLE = "还没配 AI 服务",
+    AI_OFF_TITLE = "还没设置 AI 服务",
     AI_OFF_BODY = "不会自动总结经验，夜里也不会整理：成员记下的，第二天原样生效。",
     AI_OFF_SETUP = "去设置",
     // 记忆更新: one day's changes, each line can be undone.
@@ -100,4 +100,13 @@ crate::copy! {
     SHEET_SAVE_NEW = "记下",
     SHEET_SAVE = "保存",
     SHEET_REFUSED = "没能保存",
+    // The same lines with no AI 服务 on the server: nothing is tidied at night, so they
+    // do not promise it (next to AI_OFF_BODY).
+    MEMORY_ABOUT_AI_OFF = "{name} 干活时会参考这些。记错了直接改或停用。",
+    MEMORY_ABOUT_READONLY_AI_OFF = "{name} 干活时会参考这些。管理员可以改。",
+    TEAM_ABOUT_AI_OFF = "每个成员做事前都会读。记错了直接改或停用。",
+    TEAM_ABOUT_READONLY_AI_OFF = "每个成员做事前都会读。管理员可以改。",
+    GROUP_ABOUT_AI_OFF = "在这个群干活的成员会参考这些。记错了直接改或停用。",
+    PERSON_ABOUT_AI_OFF = "你找成员干活时，它们会参考这些，只有你看得到。记错了直接改或停用。",
+    MINE_ABOUT_AI_OFF = "成员替你做事前都会读这些。记错了直接改或停用。",
 }
