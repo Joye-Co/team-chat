@@ -10,7 +10,8 @@
   ul { list-style: none; margin: 0 0 16px; padding: 0; }
   li { display: flex; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--tc-border, #8884); }
   li.done span { color: var(--tc-muted, #888); text-decoration: line-through; }
-  form { display: flex; gap: 8px; }
+  input[type=checkbox] { accent-color: var(--tc-primary, #666); }
+  form:not([hidden]) { display: flex; gap: 8px; }   /* a display rule would show a hidden form */
   input[type=text] { flex: 1; min-width: 0; font: inherit; color: inherit; background: transparent;
     border: 1px solid var(--tc-border, #8884); border-radius: 8px; padding: 4px 8px; }
   button { font: inherit; color: inherit; background: var(--tc-fill, #8882); border: 1px solid var(--tc-border, #8884);
@@ -49,7 +50,8 @@
     const input = document.getElementById('text'), text = input.value.trim();
     if (!text || !canAsk) return;
     note.textContent = '正在添加…';
-    try { await tc.ask('item.add', { text }); input.value = ''; say(); }   // the new list arrives through onData
+    // The answer takes the member a turn: wait the longest an ask may (the default is 30 s).
+    try { await tc.ask('item.add', { text }, { timeoutMs: 120000 }); input.value = ''; say(); }   // the new list arrives through onData
     catch (e) { say(e); }
   };
   if (!canAsk) document.getElementById('add').hidden = true;

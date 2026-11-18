@@ -85,7 +85,8 @@ before the first push) and again on every push; returns a function that unsubscr
   getData()                      a Promise of the current data, or null
   emit(name, payload?)           a Promise of {{eventId}}
   ask(name, payload?, {{timeoutMs}})   a Promise of your reply; it waits {ASK_DEFAULT_S} s unless \
-timeoutMs says otherwise (at most {ASK_MAX_S} s); {OPEN_ASKS} asks may be open at once
+timeoutMs says otherwise (at most {ASK_MAX_S} s: your reply takes you a turn, so pass \
+{{timeoutMs: {ASK_MAX_S}000}}); {OPEN_ASKS} asks may be open at once
   A payload is JSON of at most {PAYLOAD_KIB} KiB. A call that fails rejects with an Error whose \
 .code is one of: not_allowed (the event is not declared, the viewer may only read, or it was sent \
 later than {USER_ACTION_S} s after the viewer's own input), bad_request, too_large, rate_limited \
@@ -641,6 +642,11 @@ mod tests {
             "var(--tc-muted",
             "preventDefault()",
             "width=device-width",
+            // A viewer who may only read does not see the form: `hidden` must win over the
+            // page's own display rule.
+            "form:not([hidden])",
+            // The ask waits as long as the member's turn may take.
+            "{ timeoutMs: 120000 }",
         ] {
             assert!(EXAMPLE_PAGE.contains(needed), "{needed}");
         }
