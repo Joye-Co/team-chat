@@ -32,7 +32,7 @@ crate::copy! {
     RAIL_EMPTY_NAME_COST = "用时",
     TITLE_TOPICS_SHORT = "话题",
     // The 群聊's composer: plain chat, @ hands work to a member.
-    CHAT_COMPOSER_PLACEHOLDER = "在 {group} 里说点什么，@ 成员交代…",
+    CHAT_COMPOSER_PLACEHOLDER = "在「{group}」里说点什么，@ 成员交代…",
     CHAT_COMPOSER_PLACEHOLDER_DM = "说点什么…",
     OWNER_WORKING = "在做 {n}/{total}",
     CHANGES_OPEN = "未合并",
