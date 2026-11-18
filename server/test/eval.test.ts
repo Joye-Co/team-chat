@@ -49,6 +49,8 @@ describe("replay", () => {
     const ids = new Set(PATCHES.map((p) => p.id));
     expect(ids.size).toBe(PATCHES.length);
     for (const p of PATCHES) expect(p.why && p.failure && p.where && p.addedWith).toBeTruthy();
+    // The form rules (which form an answer takes) are registered: they are prompt text too.
+    expect(PATCHES.map((p) => p.id)).toContain("P5-result-form");
   });
 });
 
