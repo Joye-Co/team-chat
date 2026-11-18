@@ -131,6 +131,8 @@ pub enum Lang {
     Hash,
     /// `--` comments.
     Sql,
+    /// `<!-- -->` comments and quoted attribute values: XML, SVG, HTML source.
+    Markup,
     /// No comments (JSON, CSS treated as C-like for `/* */`).
     Plain,
 }
@@ -160,8 +162,44 @@ pub fn language(path: &str) -> Option<(&'static str, Lang)> {
         "toml" => ("TOML", Lang::Hash),
         "sql" => ("SQL", Lang::Sql),
         "json" | "jsonc" => ("JSON", Lang::CLike),
+        // A notebook is JSON; it opens as its source.
+        "ipynb" => ("Jupyter Notebook", Lang::CLike),
+        "xml" | "xsd" | "xsl" | "plist" => ("XML", Lang::Markup),
+        "svg" => ("SVG", Lang::Markup),
         "txt" | "log" => ("Text", Lang::Plain),
         _ => return None,
+    })
+}
+
+/// The display name and comment style of a code fence from its info string
+/// (` ```rust `, ` ```ts `, ` ```shell `): the names people write, then the
+/// file extensions of [`language`]. `diff` is not here: its lines are colored
+/// by their first character, not tokenized.
+pub fn language_of_info(info: &str) -> Option<(&'static str, Lang)> {
+    let name = info
+        .split(|c: char| c.is_whitespace() || c == ',' || c == '{')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    Some(match name.as_str() {
+        "" => return None,
+        "rust" => ("Rust", Lang::CLike),
+        "typescript" => ("TypeScript", Lang::CLike),
+        "javascript" | "node" => ("JavaScript", Lang::CLike),
+        "python" | "python3" => ("Python", Lang::Hash),
+        "ruby" => ("Ruby", Lang::Hash),
+        "shell" | "console" | "shellsession" | "fish" => ("Shell", Lang::Hash),
+        "golang" => ("Go", Lang::CLike),
+        "kotlin" => ("Kotlin", Lang::CLike),
+        "c++" => ("C++", Lang::CLike),
+        "csharp" | "c#" => ("C#", Lang::CLike),
+        "objc" | "objective-c" => ("Objective-C", Lang::CLike),
+        "json5" => ("JSON", Lang::CLike),
+        "dockerfile" | "docker" => ("Dockerfile", Lang::Hash),
+        "makefile" | "make" => ("Makefile", Lang::Hash),
+        "html" | "htm" | "vue" => ("HTML", Lang::Markup),
+        "text" | "plaintext" | "plain" => ("Text", Lang::Plain),
+        _ => return language(&format!("x.{name}")),
     })
 }
 
@@ -261,13 +299,18 @@ pub fn highlight(line: &str, lang: Lang, block: &mut bool) -> Vec<(Tok, String)>
         }
     };
     let b = line.as_bytes();
+    // The comment that runs over lines.
+    let (open, close) = match lang {
+        Lang::Markup => ("<!--", "-->"),
+        _ => ("/*", "*/"),
+    };
     let mut i = 0;
     while i < b.len() {
         if *block {
-            match line[i..].find("*/") {
+            match line[i..].find(close) {
                 Some(end) => {
-                    push(&mut out, Tok::Comment, &line[i..i + end + 2]);
-                    i += end + 2;
+                    push(&mut out, Tok::Comment, &line[i..i + end + close.len()]);
+                    i += end + close.len();
                     *block = false;
                 }
                 None => {
@@ -282,20 +325,26 @@ pub fn highlight(line: &str, lang: Lang, block: &mut bool) -> Vec<(Tok, String)>
             Lang::CLike => rest.starts_with("//"),
             Lang::Hash => rest.starts_with('#'),
             Lang::Sql => rest.starts_with("--"),
-            Lang::Plain => false,
+            Lang::Markup | Lang::Plain => false,
         };
         if comment_start {
             push(&mut out, Tok::Comment, rest);
             return out;
         }
-        if lang == Lang::CLike && rest.starts_with("/*") {
+        if matches!(lang, Lang::CLike | Lang::Markup) && rest.starts_with(open) {
             *block = true;
-            push(&mut out, Tok::Comment, "/*");
-            i += 2;
+            push(&mut out, Tok::Comment, open);
+            i += open.len();
             continue;
         }
         let c = b[i];
-        if lang != Lang::Plain && (c == b'"' || c == b'\'' || c == b'`') {
+        // In markup an apostrophe in text is not a quote.
+        let quote = match lang {
+            Lang::Plain => false,
+            Lang::Markup => c == b'"',
+            _ => c == b'"' || c == b'\'' || c == b'`',
+        };
+        if quote {
             let mut j = i + 1;
             while j < b.len() && b[j] != c {
                 if b[j] == b'\\' {
@@ -323,7 +372,7 @@ pub fn highlight(line: &str, lang: Lang, block: &mut bool) -> Vec<(Tok, String)>
                 j += 1;
             }
             let word = &line[i..j];
-            let tok = if lang != Lang::Plain && KEYWORDS.contains(&word) {
+            let tok = if !matches!(lang, Lang::Plain | Lang::Markup) && KEYWORDS.contains(&word) {
                 Tok::Keyword
             } else {
                 Tok::Plain
@@ -524,6 +573,39 @@ mod tests {
         assert_eq!(toks[0], (Tok::Comment, "still */".into()));
         assert_eq!(language("src/net/reconnect.ts").unwrap().0, "TypeScript");
         assert!(language("a.key").is_none());
+    }
+
+    #[test]
+    fn a_fence_info_names_its_language() {
+        assert_eq!(language_of_info("rust"), Some(("Rust", Lang::CLike)));
+        assert_eq!(language_of_info("TS"), Some(("TypeScript", Lang::CLike)));
+        assert_eq!(
+            language_of_info("python title=\"a.py\""),
+            Some(("Python", Lang::Hash))
+        );
+        assert_eq!(language_of_info("bash"), Some(("Shell", Lang::Hash)));
+        assert_eq!(language_of_info("shell"), Some(("Shell", Lang::Hash)));
+        assert_eq!(language_of_info("sql"), Some(("SQL", Lang::Sql)));
+        assert_eq!(language_of_info("json"), Some(("JSON", Lang::CLike)));
+        assert_eq!(language_of_info("html"), Some(("HTML", Lang::Markup)));
+        assert_eq!(language_of_info(""), None);
+        assert_eq!(language_of_info("brainfuck"), None);
+    }
+
+    #[test]
+    fn markup_and_notebooks_open_as_code() {
+        assert_eq!(language("logo.svg"), Some(("SVG", Lang::Markup)));
+        assert_eq!(language("feed.xml"), Some(("XML", Lang::Markup)));
+        assert_eq!(language("分析.ipynb").unwrap().0, "Jupyter Notebook");
+        let mut block = false;
+        let toks = highlight("<a href=\"x\">it's</a> <!-- note", Lang::Markup, &mut block);
+        assert!(toks.contains(&(Tok::Str, "\"x\"".into())));
+        assert!(block);
+        assert_eq!(toks.last().unwrap(), &(Tok::Comment, "<!-- note".into()));
+        assert!(!toks.iter().any(|(t, s)| *t == Tok::Str && s.contains("'s")));
+        let toks = highlight("still --> <b>", Lang::Markup, &mut block);
+        assert!(!block);
+        assert_eq!(toks[0], (Tok::Comment, "still -->".into()));
     }
 
     #[test]

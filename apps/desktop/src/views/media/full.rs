@@ -101,6 +101,39 @@ struct Head {
     copy: Option<Rc<dyn Fn(&mut App)>>,
 }
 
+/// `v3` in a view's header. An attached file has no version: nothing.
+fn version_word(spec: &FullSpec) -> Option<String> {
+    (!spec.media.key.is_file()).then(|| {
+        fill(
+            cm::VERSION_CHIP,
+            &[("n", &spec.media.key.version.to_string())],
+        )
+    })
+}
+
+/// The 查找 toggle of a view that can be searched (Markdown, code, table): lit
+/// while the find bar is open.
+fn find_toggle(spec: &FullSpec, state: &Entity<MediaState>, cx: &App) -> Button {
+    let open = state.read(cx).find.is_some();
+    let state = state.clone();
+    action(
+        spec,
+        "find",
+        Sym::Search,
+        crate::copy::timeline::FIND_PLACEHOLDER,
+    )
+    .selected(open)
+    .on_click(move |_, window, cx| {
+        state.update(cx, |s, cx| {
+            if s.find.is_some() {
+                s.close_find(cx)
+            } else {
+                s.open_find(window, cx)
+            }
+        })
+    })
+}
+
 /// A 32 ghost header action (§2.2).
 fn action(spec: &FullSpec, part: &str, icon: Sym, name: &'static str) -> Button {
     ui::native::icon_button_bare(id(spec, part), icon, ui::native::IconSize::Regular).named(name)
@@ -630,8 +663,10 @@ fn markdown_blocks(
     media: &Media,
     md: &store::Markdown,
     titled: bool,
+    found: Option<&super::find::Found>,
     cx: &App,
 ) -> Vec<AnyElement> {
+    let palette = k_palette(cx);
     let k = theme::colors(cx);
     let head = div()
         .pb(space::S12)
@@ -654,15 +689,40 @@ fn markdown_blocks(
         .then_some(head)
         .into_iter()
         .chain(parts_.into_iter().enumerate().map(|(i, (_, body))| {
+            // ⌘F: the matches of this part, the current one stronger. A current
+            // match that cannot carry a mark (in code, a link, a diagram) gets
+            // a band behind its part instead, as a row of a 话题 does.
+            let mut band = false;
+            let body = match found.and_then(|f| f.matches.get(i).map(|m| (f, m))) {
+                Some((f, ranges)) if !ranges.is_empty() => {
+                    let current = f.current.filter(|(part, _)| *part == i).map(|(_, m)| m);
+                    let (marked, current_marked) = crate::views::timeline::find::mark_matches(
+                        &body,
+                        ranges,
+                        current,
+                        ui::native::tokens::find::match_fill(&palette),
+                        ui::native::tokens::find::current_fill(&palette),
+                    );
+                    band = current.is_some() && !current_marked;
+                    marked
+                }
+                _ => body,
+            };
             div()
+                .when(band, |d| d.bg(ui::native::native_colors(cx).fill))
                 // A section sits further from the block above it than its heading
                 // sits from its own content, so each heading reads with what it heads.
                 .when(i > 0, |d| d.pt(space::S16))
                 .pb(space::S8)
-                .child(markdown::message_body(
+                // A ```mermaid fence of the document is drawn as a diagram.
+                .child(markdown::document_body(
                     ElementId::Name(format!("{id}-md-{i}").into()),
                     body,
-                    &[],
+                    &markdown::DocContext {
+                        artifact_id: media.key.artifact_id.clone(),
+                        version: media.key.version,
+                        part: i,
+                    },
                 ))
                 .into_any_element()
         }))
@@ -695,7 +755,9 @@ pub fn markdown_reader(
                 .max_w(measure + pad * 2.)
                 .mx_auto()
                 .p(pad)
-                .children(markdown_blocks(&id, title, parts_, media, md, true, cx)),
+                .children(markdown_blocks(
+                    &id, title, parts_, media, md, true, None, cx,
+                )),
         )
 }
 
@@ -727,6 +789,23 @@ fn markdown_view(
                 .child(cm::MD_TOC),
         );
     let offset = 0; // the sheet draws no title block: part i is child i
+    // ⌘F: the matches per part; the document scrolls to the part of the current one.
+    let bodies: Vec<&str> = parts_.iter().map(|(_, body)| body.as_str()).collect();
+    let found = super::find::found(state, &bodies, cx);
+    if let Some((part, _)) = found.as_ref().filter(|f| f.reveal).and_then(|f| f.current) {
+        // The part's distance from the first part, both measured in one frame: the
+        // sheet may still be sliding in, so a position in the window is not to be
+        // trusted. Before the parts were laid out once, the next frame tries again.
+        match (
+            scroll.bounds_for_item(offset),
+            scroll.bounds_for_item(part + offset),
+        ) {
+            (Some(first), Some(at)) => {
+                scroll.set_offset(gpui::point(px(0.), first.top() - at.top()));
+            }
+            _ => super::find::reveal_again(state, cx),
+        }
+    }
     for (i, (h, _)) in parts_.iter().enumerate() {
         let Some(h) = h else { continue };
         let go = state.clone();
@@ -768,6 +847,7 @@ fn markdown_view(
             &spec.media,
             md,
             false,
+            found.as_ref(),
             cx,
         ));
     let toggle = state.clone();
@@ -778,18 +858,22 @@ fn markdown_view(
         spec.media.title.clone(),
         Head {
             meta: Some(
-                format!(
-                    "{} · {} · {}",
-                    cm::KIND_MARKDOWN,
-                    fill(
-                        cm::VERSION_CHIP,
-                        &[("n", &spec.media.key.version.to_string())]
-                    ),
-                    fill(cm::MD_WORDS, &[("n", &group_digits(md.stats.chars as u64))])
-                )
+                [
+                    Some(cm::KIND_MARKDOWN.to_string()),
+                    version_word(spec),
+                    Some(fill(
+                        cm::MD_WORDS,
+                        &[("n", &group_digits(md.stats.chars as u64))],
+                    )),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" · ")
                 .into(),
             ),
             toggles: vec![
+                find_toggle(spec, state, cx),
                 action(spec, "toc", Sym::Outline, cm::MD_TOC)
                     .selected(toc_on)
                     .on_click(move |_, _, cx| {
@@ -808,6 +892,7 @@ fn markdown_view(
     );
     frame(cx)
         .child(header)
+        .children(super::find::bar(&spec.id, state, cx))
         .child(
             div()
                 .flex_1()
@@ -817,6 +902,10 @@ fn markdown_view(
                 .child(doc),
         )
         .into_any_element()
+}
+
+fn k_palette(cx: &App) -> ui::native::tokens::Palette {
+    theme::colors(cx).palette
 }
 
 // --- images -------------------------------------------------------------------------
@@ -1918,7 +2007,21 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
     let starts = Arc::new(block_starts(&c.lines, lang));
     let width = (c.lines.len().max(1).ilog10() + 1) as f32 * 8. + 24.;
     let wrap = state.read(cx).wrap;
+    // ⌘F: the lines that hold a match get a fill, the current one a stronger
+    // one; the list scrolls to it.
+    let found = super::find::found(state, &c.lines, cx);
+    if let Some((line, _)) = found.as_ref().filter(|f| f.reveal).and_then(|f| f.current) {
+        state
+            .read(cx)
+            .list
+            .scroll_to_item(line, gpui::ScrollStrategy::Center);
+    }
+    let fills: Arc<Vec<Option<gpui::Hsla>>> = Arc::new(match &found {
+        Some(f) => (0..c.lines.len()).map(|i| f.line_fill(i, cx)).collect(),
+        None => Vec::new(),
+    });
     let list_lines = lines.clone();
+    let list_fills = fills.clone();
     let list = uniform_list(id(spec, "lines"), lines.len(), move |range, _window, cx| {
         let k = theme::colors(cx);
         range
@@ -1927,6 +2030,9 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
                 div()
                     .h(px(20.))
                     .flex()
+                    .when_some(list_fills.get(i).copied().flatten(), |d, fill| {
+                        d.w_full().bg(fill)
+                    })
                     .child(
                         div()
                             .w(px(width))
@@ -1953,20 +2059,21 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
         spec.media.file_name().to_string(),
         Head {
             meta: Some(
-                format!(
-                    "{} · {}",
-                    fill(
-                        cm::VERSION_CHIP,
-                        &[("n", &spec.media.key.version.to_string())]
-                    ),
-                    fill(
+                [
+                    version_word(spec),
+                    Some(fill(
                         cm::CODE_NOTE,
-                        &[("lang", c.language), ("n", &lines.len().to_string())]
-                    )
-                )
+                        &[("lang", c.language), ("n", &lines.len().to_string())],
+                    )),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" · ")
                 .into(),
             ),
             toggles: vec![
+                find_toggle(spec, state, cx),
                 action(spec, "wrap", Sym::Wrap, cm::CODE_WRAP)
                     .selected(wrap)
                     .on_click(move |_, _, cx| {
@@ -1993,6 +2100,7 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
             col = col.child(
                 div()
                     .flex()
+                    .when_some(fills.get(i).copied().flatten(), |d, fill| d.bg(fill))
                     .child(
                         div()
                             .w(px(width))
@@ -2018,6 +2126,7 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
     };
     frame(cx)
         .child(header)
+        .children(super::find::bar(&spec.id, state, cx))
         // The same space above the first line's ink and under the last
         // line's (A4): 8 + the line's own leading at the top, 12 under it.
         .child(
@@ -2124,6 +2233,19 @@ fn table(spec: &FullSpec, t: &text::Table, state: &Entity<MediaState>, cx: &App)
                 }),
         ));
     }
+    // ⌘F: the rows (in the order shown) that hold a match, the current one stronger.
+    let row_texts: Vec<String> = order.iter().map(|&i| t.rows[i].join("\t")).collect();
+    let found = super::find::found(state, &row_texts, cx);
+    if let Some((row, _)) = found.as_ref().filter(|f| f.reveal).and_then(|f| f.current) {
+        state
+            .read(cx)
+            .list
+            .scroll_to_item(row, gpui::ScrollStrategy::Center);
+    }
+    let fills: Arc<Vec<Option<gpui::Hsla>>> = Arc::new(match &found {
+        Some(f) => (0..order.len()).map(|i| f.line_fill(i, cx)).collect(),
+        None => Vec::new(),
+    });
     let rows = Arc::new(t.rows.clone());
     let numeric = Arc::new(t.numeric.clone());
     let order = Arc::new(order);
@@ -2138,6 +2260,7 @@ fn table(spec: &FullSpec, t: &text::Table, state: &Entity<MediaState>, cx: &App)
                     .h(TABLE_ROW)
                     .flex()
                     .items_center()
+                    .when_some(fills.get(i).copied().flatten(), |r, fill| r.bg(fill))
                     .when(i + 1 < order.len(), |r| {
                         r.border_b_1().border_color(n.separator)
                     });
@@ -2184,12 +2307,14 @@ fn table(spec: &FullSpec, t: &text::Table, state: &Entity<MediaState>, cx: &App)
                 )
                 .into(),
             ),
+            toggles: vec![find_toggle(spec, state, cx)],
             ..Head::default()
         },
         cx,
     );
     frame(cx)
         .child(header)
+        .children(super::find::bar(&spec.id, state, cx))
         .child(table_head)
         .child(div().flex_1().min_h(px(0.)).flex().flex_col().child(list))
         .child(

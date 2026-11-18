@@ -481,7 +481,7 @@ fn image_with_hits(
             .w(px(fit.w))
             .h(px(full_h)),
     );
-    let refs_on = crate::views::refs::enabled(cx);
+    let refs_on = crate::views::refs::enabled(cx) && spec.origin.can_ref();
     for (i, node) in ready.meta.nodes.iter().enumerate() {
         let (x, y, w, h) = hit_rect(node, fit.scale);
         let (_, _, _, oh) = outline_rect(node, fit.scale);

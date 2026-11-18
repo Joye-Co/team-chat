@@ -113,11 +113,20 @@ pub fn grouped(
             (nav::SECTION_TOPICS, MAX_PER_GROUP)
         };
         let topics: Vec<Entry> = topics.into_iter().take(take).collect();
-        return if topics.is_empty() {
+        // A search in a 群 also finds the 产出 made there.
+        let artifacts: Vec<Entry> = if query.trim().is_empty() {
             Vec::new()
         } else {
-            vec![(label, topics)]
+            get(Section::Artifacts)
+                .into_iter()
+                .filter(|e| matches!(&e.target, Target::Artifact(g, _) if g == scope))
+                .take(MAX_PER_GROUP)
+                .collect()
         };
+        return [(label, topics), (search_copy::SECTION_ARTIFACTS, artifacts)]
+            .into_iter()
+            .filter(|(_, e)| !e.is_empty())
+            .collect();
     }
     let groups: Vec<(&'static str, Vec<Entry>)> = if query.trim().is_empty() {
         vec![
@@ -131,6 +140,7 @@ pub fn grouped(
     } else {
         [
             (nav::SECTION_TOPICS, Section::Topics),
+            (search_copy::SECTION_ARTIFACTS, Section::Artifacts),
             (nav::GROUPS, Section::Groups),
             (nav::DMS, Section::Dms),
             (nav::SECTION_MEMBERS, Section::Members),
@@ -149,6 +159,8 @@ pub enum Target {
     Topic(GroupId, TopicId),
     /// Opens the DM with this member, creating it when needed.
     Member(MemberId),
+    /// Opens a 产出 (its 群, its id) at its current version.
+    Artifact(GroupId, String),
 }
 
 #[derive(Clone, Debug)]
@@ -162,6 +174,10 @@ pub struct Entry {
     pub member: Option<Member>,
     /// For topics: the topic, for its status chip and time.
     pub topic: Option<Topic>,
+    /// For 产出: the symbol of its kind and when it was last updated.
+    pub artifact: Option<(Sym, crate::data::Millis)>,
+    /// More text a search matches besides the label (a 产出's 话题 and maker).
+    pub also: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -170,6 +186,9 @@ pub enum Section {
     Dms,
     Topics,
     Members,
+    /// 产出, by name, 话题 and maker. Only what this client has loaded: the
+    /// 产出 of the 话题 it knows.
+    Artifacts,
 }
 
 /// The switcher's entries in display order; empty sections are left out.
@@ -193,6 +212,8 @@ pub fn entries(provider: &dyn ChatProvider, me: Option<&str>) -> Vec<(Section, V
             },
             member: g.dm_peer.as_deref().and_then(find),
             topic: None,
+            artifact: None,
+            also: Vec::new(),
         };
         match g.kind {
             GroupKind::Group => group_entries.push(entry),
@@ -205,6 +226,8 @@ pub fn entries(provider: &dyn ChatProvider, me: Option<&str>) -> Vec<(Section, V
                 detail: Some(g.name.clone()),
                 member: None,
                 topic: Some(t),
+                artifact: None,
+                also: Vec::new(),
             });
         }
     }
@@ -227,6 +250,39 @@ pub fn entries(provider: &dyn ChatProvider, me: Option<&str>) -> Vec<(Section, V
             detail: m.role.clone(),
             member: Some(m.clone()),
             topic: None,
+            artifact: None,
+            also: Vec::new(),
+        })
+        .collect();
+    // 产出, newest first: the row reads `name  v3 · 话题` with its kind's symbol.
+    let artifact_entries: Vec<Entry> = provider
+        .all_artifacts()
+        .into_iter()
+        .map(|(group_id, a)| {
+            let topic = provider
+                .topic(&group_id, &a.topic_id)
+                .map(|t| topic_line(&t.title))
+                .filter(|t| !t.is_empty());
+            let maker = find(&a.created_by).map(|m| m.name);
+            let version = fill(
+                search_copy::ARTIFACT_VERSION,
+                &[("v", &a.version.to_string())],
+            );
+            Entry {
+                label: a.title.clone(),
+                detail: Some(match &topic {
+                    Some(topic) => format!("{version} · {topic}"),
+                    None => version,
+                }),
+                member: None,
+                topic: None,
+                artifact: Some((
+                    crate::views::artifact_page::list::ListKind::of(provider, &a).sym(),
+                    a.updated_at,
+                )),
+                also: topic.into_iter().chain(maker).collect(),
+                target: Target::Artifact(group_id, a.id),
+            }
         })
         .collect();
     [
@@ -234,6 +290,7 @@ pub fn entries(provider: &dyn ChatProvider, me: Option<&str>) -> Vec<(Section, V
         (Section::Dms, dm_entries),
         (Section::Topics, topic_entries),
         (Section::Members, member_entries),
+        (Section::Artifacts, artifact_entries),
     ]
     .into_iter()
     .filter(|(_, e)| !e.is_empty())
@@ -244,7 +301,12 @@ pub fn entries(provider: &dyn ChatProvider, me: Option<&str>) -> Vec<(Section, V
 /// case-insensitive substring of the label.
 pub fn matches(entry: &Entry, query: &str) -> bool {
     let query = query.trim().to_lowercase();
-    query.is_empty() || entry.label.to_lowercase().contains(&query)
+    query.is_empty()
+        || entry.label.to_lowercase().contains(&query)
+        || entry
+            .also
+            .iter()
+            .any(|text| text.to_lowercase().contains(&query))
 }
 
 /// Opens what an entry points at.
@@ -264,6 +326,12 @@ pub fn go(services: &Services, target: &Target, cx: &mut App) {
             });
         }
         Target::Member(m) => super::open_dm_with(m.clone(), cx),
+        Target::Artifact(_, id) => {
+            let id = id.clone();
+            services
+                .nav
+                .update(cx, |nav, cx| nav.open_artifact(id, None, cx));
+        }
     }
 }
 
@@ -577,6 +645,9 @@ impl Switcher {
         // StatusBadge at the right, never into a colored icon.
         let lead = match (&e.target, &e.member) {
             (Target::Topic(..), _) => palette::kind_icon(Sym::Topic, cx),
+            (Target::Artifact(..), _) => {
+                palette::kind_icon(e.artifact.map_or(Sym::File, |(sym, _)| sym), cx)
+            }
             (_, Some(m)) => div()
                 .flex_none()
                 .size(spot::SLOT)
@@ -614,7 +685,7 @@ impl Switcher {
                 Some(palette::time_text(t.last_activity_at)),
                 palette::topic_status(self.services.provider.as_ref(), me.as_deref(), t, active),
             ),
-            None => (None, None),
+            None => (e.artifact.map(|(_, at)| palette::time_text(at)), None),
         };
         spotlight_row(
             ElementId::NamedInteger("switcher-row".into(), ix as u64),
@@ -1320,6 +1391,45 @@ pub mod palette {
 mod tests {
     use super::*;
     use crate::fake::{FakeProvider, ME};
+
+    #[test]
+    fn a_search_finds_a_产出_by_name_topic_and_maker() {
+        use crate::fake::v2::{self, V2Samples};
+        let p = V2Samples::new();
+        let sections = entries(p.as_ref(), Some(v2::ME));
+        let found = |query: &str, scope: Option<&str>| -> Vec<Target> {
+            grouped(&sections, query, scope)
+                .into_iter()
+                .filter(|(label, _)| *label == search_copy::SECTION_ARTIFACTS)
+                .flat_map(|(_, e)| e)
+                .map(|e| e.target)
+                .collect()
+        };
+        let report = Target::Artifact(v2::GROWTH.into(), v2::ART_REPORT.into());
+        // No query: the switcher stays 最近, 群, 私聊.
+        assert!(found("", None).is_empty());
+        // By its name, in any case.
+        assert_eq!(found("数据月报", None), vec![report.clone()]);
+        // By who made it.
+        let ledger = p.member(v2::LEDGER).unwrap().name;
+        assert!(found(&ledger.to_uppercase(), None).contains(&report));
+        // By its 话题.
+        let topic = p.topic(v2::DEV, v2::T_RECONNECT).unwrap().title;
+        assert!(
+            found(&topic, None)
+                .contains(&Target::Artifact(v2::DEV.into(), v2::ART_RECONNECT.into()))
+        );
+        // Scoped to a 群: only what was made there.
+        assert_eq!(found("数据月报", Some(v2::GROWTH)), vec![report]);
+        assert!(found("数据月报", Some(v2::DEV)).is_empty());
+        let row = sections
+            .iter()
+            .filter(|(s, _)| *s == Section::Artifacts)
+            .flat_map(|(_, e)| e)
+            .find(|e| e.label == "10 月数据月报")
+            .unwrap();
+        assert!(row.detail.as_deref().unwrap().starts_with("v3 · "));
+    }
 
     fn search(p: &FakeProvider, q: &str) -> Vec<Target> {
         entries(p, Some(ME))

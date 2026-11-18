@@ -97,4 +97,9 @@ crate::copy! {
     PLAN_STEP_NAMED = "{name}：{step}",
     // The failed-run alert of the step 按顺序做 stopped at: the bar's word.
     RUN_STUCK_TITLE = "{name} 卡住了",
+    // A long code block and a long answer of an AI member are folded.
+    CODE_EXPAND = "展开全部 {n} 行",
+    CODE_COLLAPSE = "收起",
+    BODY_EXPAND = "展开全文 · 约 {m} 分钟",
+    BODY_COLLAPSE = "收起",
 }

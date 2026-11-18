@@ -208,6 +208,83 @@ pub fn request_artifact(
     .detach();
 }
 
+impl MediaKey {
+    /// The key of a file attached to a message (not a 产出): its content hash,
+    /// with no version.
+    pub fn file(sha256: &str) -> Self {
+        Self::new(format!("file-{sha256}"), 0)
+    }
+
+    /// The key names an attached file ([`MediaKey::file`]).
+    pub fn is_file(&self) -> bool {
+        self.version == 0 && self.artifact_id.starts_with("file-")
+    }
+}
+
+/// Reads one file that is already on disk (an attachment in the file cache) as
+/// a version of itself: only this file is looked at, never its folder, which
+/// holds other people's files too.
+pub fn request_file(key: &MediaKey, title: &str, path: PathBuf, cx: &mut App) {
+    if matches!(get(key, cx), Some(Load::Ready(_))) {
+        return;
+    }
+    cx.default_global::<Store>()
+        .map
+        .insert(key.clone(), Load::Loading);
+    let (k, title) = (key.clone(), title.to_string());
+    let task = cx.background_executor().spawn(async move {
+        let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+        let entry = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let files = vec![MediaFile {
+            mime: mime_for(&entry).to_string(),
+            size: std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0),
+            path: entry.clone(),
+        }];
+        analyze_listed(k, title, dir, entry, files)
+    });
+    let key = key.clone();
+    cx.spawn(async move |cx: &mut AsyncApp| {
+        let media = task.await;
+        cx.update(|cx| set(key, Load::Ready(Arc::new(media)), cx));
+    })
+    .detach();
+}
+
+/// Waits for the download of an attached file (`fetch`, from
+/// `ChatProvider::fetch_file`), then reads it ([`request_file`]). A failed
+/// download leaves [`Load::Failed`].
+pub fn request_download(
+    key: &MediaKey,
+    title: &str,
+    fetch: crate::data::Reply<PathBuf>,
+    cx: &mut App,
+) {
+    if get(key, cx).is_some() {
+        return;
+    }
+    cx.default_global::<Store>()
+        .map
+        .insert(key.clone(), Load::Loading);
+    let (key, title) = (key.clone(), title.to_string());
+    cx.spawn(
+        async move |cx: &mut AsyncApp| match fetch.await.unwrap_or(Err(FileError::Other)) {
+            Ok(path) => {
+                cx.update(|cx| {
+                    forget(&key, cx);
+                    request_file(&key, &title, path, cx)
+                });
+            }
+            Err(e) => {
+                cx.update(|cx| set(key, Load::Failed(e), cx));
+            }
+        },
+    )
+    .detach();
+}
+
 /// Reads a version folder that is already on disk (also the self-test's sample 产出).
 pub fn request_folder(key: &MediaKey, title: &str, dir: PathBuf, entry: String, cx: &mut App) {
     if matches!(get(key, cx), Some(Load::Ready(_))) {
@@ -313,6 +390,24 @@ fn write_jpeg(bitmap: &Bitmap, path: &Path) -> bool {
 }
 
 /// PNG bytes of a bitmap (a frame sent to the 话题 or copied).
+/// The text of a Markdown version. A mermaid file (`.mmd`, `.mermaid`) becomes a
+/// document of one ```mermaid fence, so the reader draws it with the diagram
+/// renderer and its checks, like a fence of any document. A source that holds a
+/// fence line cannot be wrapped and reads as text.
+pub fn diagram_document(entry: &str, text: String) -> String {
+    let ext = entry
+        .rsplit_once('.')
+        .map(|(_, e)| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    if !matches!(ext.as_str(), "mmd" | "mermaid") {
+        return text;
+    }
+    if text.lines().any(|l| l.trim_start().starts_with("```")) {
+        return text;
+    }
+    format!("```mermaid\n{}\n```\n", text.trim_end())
+}
+
 pub fn png_bytes(bitmap: &Bitmap) -> Option<Vec<u8>> {
     let img = image::RgbaImage::from_raw(bitmap.width, bitmap.height, bitmap.rgba.clone())?;
     let mut out = std::io::Cursor::new(Vec::new());
@@ -392,6 +487,17 @@ pub const FRAMES: usize = 6;
 /// [`Data::File`] with `preview_failed`.
 pub fn analyze(key: MediaKey, title: String, dir: PathBuf, entry: String) -> Media {
     let files = list_files(&dir);
+    analyze_listed(key, title, dir, entry, files)
+}
+
+/// [`analyze`] of `entry` with the files of its version given.
+fn analyze_listed(
+    key: MediaKey,
+    title: String,
+    dir: PathBuf,
+    entry: String,
+    files: Vec<MediaFile>,
+) -> Media {
     let kind = classify(&entry, &files);
     let bytes = files.iter().map(|f| f.size).sum();
     let path = dir.join(&entry);
@@ -400,6 +506,7 @@ pub fn analyze(key: MediaKey, title: String, dir: PathBuf, entry: String) -> Med
     let data = match kind {
         MediaKind::Html => Some(Data::Html),
         MediaKind::Markdown => read_text(&path, 5 << 20).map(|text| {
+            let text = diagram_document(&entry, text);
             Data::Markdown(Markdown {
                 outline: text::outline(&text),
                 stats: text::md_stats(&text),
@@ -530,6 +637,23 @@ pub fn frame_png(video: &Path, t: f64) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_mermaid_file_reads_as_a_document_of_one_diagram() {
+        assert_eq!(file_kind("流程.mmd", ""), MediaKind::Markdown);
+        assert_eq!(file_kind("flow.mermaid", "text/plain"), MediaKind::Markdown);
+        let doc = diagram_document("流程.mmd", "flowchart LR\n  A --> B\n\n".into());
+        assert_eq!(doc, "```mermaid\nflowchart LR\n  A --> B\n```\n");
+        assert_eq!(crate::diagrams::diagram_fences(&doc, false), vec![0]);
+        // Markdown stays as it is, and a source with a fence line is not wrapped.
+        assert_eq!(diagram_document("a.md", "# 标题".into()), "# 标题");
+        let odd = "flowchart LR\n```\nA --> B".to_string();
+        assert_eq!(diagram_document("a.mmd", odd.clone()), odd);
+        // SVG, XML and notebooks open as highlighted source.
+        assert_eq!(file_kind("logo.svg", "image/svg+xml"), MediaKind::Code);
+        assert_eq!(file_kind("feed.xml", ""), MediaKind::Code);
+        assert_eq!(file_kind("分析.ipynb", ""), MediaKind::Code);
+    }
 
     #[test]
     fn parses_vtt_cues_and_speakers() {

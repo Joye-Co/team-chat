@@ -281,7 +281,7 @@ impl DiagramViewer {
     /// Tab and ⇧Tab step through the diagram's nodes before the header's buttons
     /// (C-03, E3): `false` when the step leaves the nodes, so focus moves on.
     fn step_node(&mut self, forward: bool, cx: &mut Context<Self>) -> bool {
-        if !crate::views::refs::enabled(cx) {
+        if !crate::views::refs::enabled(cx) || !self.spec.origin.can_ref() {
             return false;
         }
         let Some(r) = self.ready(cx) else {
@@ -510,7 +510,7 @@ impl DiagramViewer {
                 .w(px(w))
                 .h(px(h)),
         );
-        let refs_on = crate::views::refs::enabled(cx);
+        let refs_on = crate::views::refs::enabled(cx) && self.spec.origin.can_ref();
         for (i, node) in ready.meta.nodes.iter().enumerate() {
             let (x, y, nw, nh) = hit_rect(node, z);
             let (_, _, _, oh) = super::view::outline_rect(node, z);

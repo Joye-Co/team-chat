@@ -725,7 +725,12 @@ impl TimelineView {
     /// The v2 file cards of a message whose files are not images: a 72x44
     /// thumbnail (a dark screen with a play mark for a video), the name and
     /// the mono length and size.
-    pub(super) fn v2_files(&self, message: &Message, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn v2_files(
+        &self,
+        message: &Message,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         if message.attachments.is_empty()
             || message
                 .attachments
@@ -736,6 +741,23 @@ impl TimelineView {
         }
         let n = native_colors(cx);
         let p = self.services.provider.clone();
+        // A file the app can show (a table, a document, code, a PDF, a video,
+        // audio) gets the viewer a 产出 of its kind gets (`files::extra`).
+        let mut previews: Vec<Option<AnyElement>> = message
+            .attachments
+            .iter()
+            .enumerate()
+            .map(|(i, file)| {
+                crate::views::files::extra::inline_viewer(
+                    message,
+                    file,
+                    &p,
+                    format!("v2-file-media-{}-{i}", message.id),
+                    window,
+                    cx,
+                )
+            })
+            .collect();
         Some(
             div()
                 .mt(space::S6)
@@ -743,6 +765,9 @@ impl TimelineView {
                 .flex_col()
                 .gap(space::S8)
                 .children(message.attachments.iter().enumerate().map(|(i, file)| {
+                    if let Some(preview) = previews[i].take() {
+                        return preview;
+                    }
                     let video = file.mime.starts_with("video/") || file.mime.starts_with("audio/");
                     // T-20, §2.17: one meta recipe for every file item,
                     // `<kind> · <size>` (a transfer adds its state).
@@ -822,6 +847,7 @@ impl TimelineView {
                                 cx,
                             );
                         }))
+                        .into_any_element()
                 }))
                 .into_any_element(),
         )

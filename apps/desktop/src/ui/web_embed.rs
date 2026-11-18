@@ -1961,16 +1961,180 @@ thread_local! {
 }
 
 fn remember_preview(artifact_id: &str, version: u32, image: Arc<gpui::Image>) {
+    preview_disk::save(artifact_id, version, &image);
     PREVIEWS.with(|p| {
         p.borrow_mut()
             .insert((artifact_id.to_string(), version), image)
     });
 }
 
-/// The rendered page of one version of `artifact_id` as last seen, if it was on screen
-/// this session.
+/// The rendered page of one version of `artifact_id` as last seen: on screen this
+/// session, else the picture kept on disk from an earlier one, so the 产出 list shows
+/// a page's thumbnail after a restart too.
 pub fn page_preview(artifact_id: &str, version: u32) -> Option<Arc<gpui::Image>> {
-    PREVIEWS.with(|p| p.borrow().get(&(artifact_id.to_string(), version)).cloned())
+    let key = (artifact_id.to_string(), version);
+    if let Some(image) = PREVIEWS.with(|p| p.borrow().get(&key).cloned()) {
+        return Some(image);
+    }
+    let image = preview_disk::load(artifact_id, version)?;
+    PREVIEWS.with(|p| p.borrow_mut().insert(key, image.clone()));
+    Some(image)
+}
+
+/// The page previews kept between launches: one small PNG per 产出 version under the
+/// cache folder (`<cache>/team-chat/page-previews`), written when a page was
+/// snapshotted and read back by [`page_preview`]. A cache: the newest
+/// [`preview_disk::KEEP`] stay. Self-tests and scenes neither read nor write it.
+mod preview_disk {
+    use std::{cell::RefCell, collections::HashSet, path::PathBuf, sync::Arc};
+
+    /// The width a preview is kept at (a tile is at most about 320 pt wide, at 2x).
+    pub const MAX_WIDTH: u32 = 640;
+    /// How many previews stay on disk.
+    pub const KEEP: usize = 400;
+
+    thread_local! {
+        /// Versions with no file, so a tile without a preview asks the disk once.
+        static MISSING: RefCell<HashSet<(String, u32)>> = RefCell::new(HashSet::new());
+    }
+
+    fn enabled() -> bool {
+        crate::views::settings::prefs::saving()
+    }
+
+    fn dir() -> PathBuf {
+        crate::paths::cache_base()
+            .join("team-chat")
+            .join("page-previews")
+    }
+
+    /// `<id>-v<version>.png`, the id kept to letters, digits, `-` and `_`.
+    pub fn file_name(artifact_id: &str, version: u32) -> String {
+        let id: String = artifact_id
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        format!("{id}-v{version}.png")
+    }
+
+    /// `png` scaled down to at most [`MAX_WIDTH`] wide, as PNG bytes. `None` when it
+    /// does not decode.
+    pub fn small_png(png: &[u8]) -> Option<Vec<u8>> {
+        let image = image::load_from_memory_with_format(png, image::ImageFormat::Png).ok()?;
+        let image = if image.width() > MAX_WIDTH {
+            let height = (u64::from(image.height()) * u64::from(MAX_WIDTH)
+                / u64::from(image.width()))
+            .max(1) as u32;
+            image.resize_exact(MAX_WIDTH, height, image::imageops::FilterType::Triangle)
+        } else {
+            image
+        };
+        let mut out = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut out, image::ImageFormat::Png).ok()?;
+        Some(out.into_inner())
+    }
+
+    /// The files of `names_by_age` (newest first) past the first `keep`.
+    pub fn to_drop(names_by_age: Vec<String>, keep: usize) -> Vec<String> {
+        names_by_age.into_iter().skip(keep).collect()
+    }
+
+    /// Writes the preview in the background (scaled down), then trims the folder.
+    pub fn save(artifact_id: &str, version: u32, image: &Arc<gpui::Image>) {
+        if !enabled() || image.format() != gpui::ImageFormat::Png {
+            return;
+        }
+        MISSING.with(|m| m.borrow_mut().remove(&(artifact_id.to_string(), version)));
+        let (image, name) = (image.clone(), file_name(artifact_id, version));
+        std::thread::spawn(move || {
+            let Some(png) = small_png(image.bytes()) else {
+                return;
+            };
+            let dir = dir();
+            if std::fs::create_dir_all(&dir).is_err()
+                || std::fs::write(dir.join(&name), png).is_err()
+            {
+                return;
+            }
+            let mut files: Vec<(std::time::SystemTime, String)> = std::fs::read_dir(&dir)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter_map(|e| {
+                    let at = e.metadata().ok()?.modified().ok()?;
+                    Some((at, e.file_name().to_string_lossy().into_owned()))
+                })
+                .collect();
+            files.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
+            for old in to_drop(files.into_iter().map(|(_, n)| n).collect(), KEEP) {
+                let _ = std::fs::remove_file(dir.join(old));
+            }
+        });
+    }
+
+    /// The preview kept for this version, if any.
+    pub fn load(artifact_id: &str, version: u32) -> Option<Arc<gpui::Image>> {
+        if !enabled() {
+            return None;
+        }
+        let key = (artifact_id.to_string(), version);
+        if MISSING.with(|m| m.borrow().contains(&key)) {
+            return None;
+        }
+        match std::fs::read(dir().join(file_name(artifact_id, version))) {
+            Ok(png) => Some(Arc::new(gpui::Image::from_bytes(
+                gpui::ImageFormat::Png,
+                png,
+            ))),
+            Err(_) => {
+                MISSING.with(|m| m.borrow_mut().insert(key));
+                None
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn a_preview_file_is_named_by_its_version_with_a_safe_id() {
+            assert_eq!(file_name("art-01HX_z", 3), "art-01HX_z-v3.png");
+            assert_eq!(file_name("../etc/passwd", 1), "___etc_passwd-v1.png");
+            assert_ne!(file_name("a", 1), file_name("a", 2));
+        }
+
+        #[test]
+        fn a_wide_snapshot_is_kept_small_and_a_small_one_as_it_is() {
+            let png = |w: u32, h: u32| {
+                let mut out = std::io::Cursor::new(Vec::new());
+                image::DynamicImage::ImageRgba8(image::RgbaImage::new(w, h))
+                    .write_to(&mut out, image::ImageFormat::Png)
+                    .unwrap();
+                out.into_inner()
+            };
+            let size = |bytes: &[u8]| {
+                let i = image::load_from_memory(bytes).unwrap();
+                (i.width(), i.height())
+            };
+            assert_eq!(size(&small_png(&png(2560, 1600)).unwrap()), (640, 400));
+            assert_eq!(size(&small_png(&png(320, 200)).unwrap()), (320, 200));
+            assert_eq!(small_png(b"not a png"), None);
+        }
+
+        #[test]
+        fn the_oldest_previews_past_the_limit_are_dropped() {
+            let names: Vec<String> = (0..5).map(|i| format!("{i}.png")).collect();
+            assert_eq!(to_drop(names.clone(), 3), ["3.png", "4.png"]);
+            assert!(to_drop(names, 10).is_empty());
+        }
+    }
 }
 // --- end v12/fx-cards ---
 

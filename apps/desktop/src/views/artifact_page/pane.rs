@@ -13,7 +13,7 @@ use crate::{
     theme::space,
     ui::Sym,
     views::{
-        group_page::{kind_label, kit},
+        group_page::kit,
         shell::{PaneView, panes::watch, stub_body},
     },
 };
@@ -194,7 +194,8 @@ impl Render for ArtifactPane {
                     format!(
                         "{} · {} · v{shown}",
                         detail.summary.title,
-                        kind_label(detail.summary.kind)
+                        super::list::ListKind::of(self.services.provider.as_ref(), &detail.summary)
+                            .label()
                     ),
                     vec![
                         open_window.into_any_element(),

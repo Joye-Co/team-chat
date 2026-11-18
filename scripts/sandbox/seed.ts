@@ -151,6 +151,83 @@ const html = (title: string, body: string) =>
   `<h1>${title}</h1>${body}</html>`;
 
 /** Forge's Markdown 产出 in 断线重连后消息重复: every block a document uses, a long code line and a long link. */
+/** An answer with code: fences with their language, a diff, and one long enough to fold. */
+const DEDUP_ANSWER = `去重放在收消息的入口。关键的改动：
+
+\`\`\`diff
+--- a/crates/chat-core/src/engine.rs
++++ b/crates/chat-core/src/engine.rs
+@@ -41,3 +41,4 @@
+ let events = fetch_since(last).await?;
+-self.apply(events);
++let fresh = self.dedup.filter(events);
++self.apply(fresh);
+\`\`\`
+
+完整的去重模块，测试也一起补了：
+
+\`\`\`rust
+use std::collections::HashMap;
+
+/// 每个话题记住见过的最大 seq。
+#[derive(Default)]
+pub struct Dedup {
+    last_seq: HashMap<String, u64>,
+    dropped: u64,
+}
+
+impl Dedup {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 同一个话题里 seq 只增不减：见过的直接丢掉。
+    pub fn accept(&mut self, topic: &str, seq: u64) -> bool {
+        let last = self.last_seq.entry(topic.to_string()).or_insert(0);
+        if seq <= *last {
+            self.dropped += 1;
+            return false;
+        }
+        *last = seq;
+        true
+    }
+
+    /// 重连时告诉服务端从哪里开始补。
+    pub fn since(&self, topic: &str) -> u64 {
+        self.last_seq.get(topic).copied().unwrap_or(0)
+    }
+
+    pub fn dropped(&self) -> u64 {
+        self.dropped
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_replayed_message_is_dropped() {
+        let mut d = Dedup::new();
+        assert!(d.accept("t1", 1));
+        assert!(d.accept("t1", 2));
+        assert!(!d.accept("t1", 2));
+        assert_eq!(d.since("t1"), 2);
+        assert_eq!(d.dropped(), 1);
+    }
+}
+\`\`\`
+`;
+
+/** A table a person attaches to a message: the timeline shows it in the table viewer. */
+const REPRO_CSV = `次数,断线秒数,补拉条数,重复条数
+1,12,3,0
+2,35,8,1
+3,41,11,1
+4,60,20,2
+5,90,34,3
+`;
+
 const RECONNECT_REVIEW_MD = `# 重连重复问题复盘
 
 日期 2026-11-03。**结论：**重连后补拉的事件没有按 \`seq\` 去重，同一条消息会画两次。*修复已在 PR #61。*
@@ -184,6 +261,14 @@ fn merge(events: Vec<Event>, seen: &mut HashSet<String>) -> Vec<Event> {
 1. 合并前按 \`seq\` 排序
 2. 跳过已经画过的 \`seq\`
 3. 加断线重放的测试
+
+\`\`\`mermaid
+flowchart LR
+  A[连接断开] --> B[重连]
+  B --> C{见过这个 seq?}
+  C -- 见过 --> D[丢掉]
+  C -- 没见过 --> E[画出来]
+\`\`\`
 
 参考：[重连协议](https://example.com/docs/protocol#reconnect)，以及完整日志 https://example.com/logs/2026-11-03/reconnect-duplicate-messages-desktop-client-trace-0b7c9e2f4a1d8e6b3c5f7a9d1e2b4c6d8f0a.txt
 
@@ -306,6 +391,12 @@ export async function seed(o: SeedOptions): Promise<Json> {
       await forge.ack(reconnect.groupId, (await forge.history(reconnect.groupId, reconnect.topicId)).messages[0]?.id ?? "");
       await forge.setPlan(reconnect, plan(["复现问题", "定位重复原因", "写修复和测试", "开 PR"], 4));
       await say("forge", reconnect, "**原因：**重连后补拉的事件没有按 `seq` 去重。修复在 PR #61，加了断线重放的测试。");
+      // Code in an answer (language names, highlighting, a long fence folded) and a table a
+      // person attaches (shown in its viewer, like a 产出 of that kind).
+      await say("forge", reconnect, DEDUP_ANSWER);
+      const me = await as("joye");
+      const repro = await me.uploadFile({ ...reconnect, name: "复现记录.csv", mime: "text/csv", data: new TextEncoder().encode(REPRO_CSV) });
+      await me.send(reconnect, { body: "我这边复现的记录，断得越久重复越多。", attachments: [repro] });
       // A Markdown 产出 (a file, not a page): the 产出 pane and page read it in place.
       const md = new TextEncoder().encode(RECONNECT_REVIEW_MD);
       const review = await forge.http.uploadFile({ ...reconnect, name: "重连重复问题复盘.md", mime: "text/markdown", data: md });

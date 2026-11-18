@@ -17,6 +17,7 @@
 //!
 //! [`WebEmbed`]: crate::ui::web_embed::WebEmbed
 
+pub mod find;
 pub mod full;
 pub mod in_place;
 pub mod inline;
@@ -120,6 +121,8 @@ pub fn file_kind(path: &str, mime: &str) -> MediaKind {
     match e.as_str() {
         "html" | "htm" => MediaKind::Html,
         "md" | "markdown" => MediaKind::Markdown,
+        // A mermaid file is read as a document of one diagram (`store::analyze`).
+        "mmd" | "mermaid" => MediaKind::Markdown,
         "mp4" | "mov" | "m4v" | "webm" if mime.starts_with("video/") || mime.is_empty() => {
             MediaKind::Video
         }

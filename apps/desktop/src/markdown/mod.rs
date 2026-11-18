@@ -5,8 +5,12 @@
 //! browser only for safe schemes, `@name` as a mention pill, and code fences
 //! read the way Slack reads them, and Chinese `**结论：**正文` in bold (see
 //! [`source::fix_cjk_strong`]). Views call [`message_body`]; they never
-//! build a `TextView` for message text themselves.
+//! build a `TextView` for message text themselves. A Markdown 产出 renders
+//! through [`document_body`]. Code fences show their language and are
+//! highlighted ([`code`]); in the timeline a long one is folded ([`fold`]).
 
+mod code;
+pub mod fold;
 mod source;
 
 use std::hash::{Hash, Hasher};
@@ -124,17 +128,108 @@ pub fn message_body_refs(
     diagrams: Option<&DiagramContext>,
     refs: Option<&crate::views::refs::markdown::RefsBody>,
 ) -> (TextView, bool) {
+    build(
+        id,
+        text,
+        mentions,
+        edited,
+        diagrams.map(|d| DiagramsOf {
+            home: DiagramHome::Message {
+                message_id: d.message_id.clone(),
+                topic_id: d.topic_id.clone(),
+            },
+            streaming: d.streaming,
+        }),
+        refs,
+        // A long code fence of a finished timeline message is folded; while
+        // the body streams its text still changes under the fold.
+        match diagrams {
+            Some(d) if !d.streaming && d.open_code => CodeFolds::Open,
+            Some(d) if !d.streaming => CodeFolds::Folded,
+            _ => CodeFolds::None,
+        },
+    )
+}
+
+/// The 产出 version a Markdown document is, and which of its parts a body is
+/// (a document is drawn as one body per heading).
+#[derive(Clone, Debug)]
+pub struct DocContext {
+    pub artifact_id: String,
+    pub version: u32,
+    pub part: usize,
+}
+
+/// A selectable Markdown view of one part of a Markdown 产出: like a message
+/// body, and its ```mermaid fences are drawn as diagrams (at most
+/// [`crate::diagrams::MAX_PER_MESSAGE`] per part). Nothing in a document is
+/// folded: the reader is where the whole text is read.
+pub fn document_body(
+    id: impl Into<ElementId>,
+    text: impl Into<SharedString>,
+    doc: &DocContext,
+) -> TextView {
+    build(
+        id,
+        text,
+        &[],
+        false,
+        Some(DiagramsOf {
+            home: DiagramHome::Document(doc.clone()),
+            streaming: false,
+        }),
+        None,
+        CodeFolds::None,
+    )
+    .0
+}
+
+/// What a body does with its long code fences.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CodeFolds {
+    /// Nothing: they are drawn whole, with no 展开 or 收起.
+    None,
+    /// Each shows its first lines until the person opens it.
+    Folded,
+    /// Each is opened first (something points into this body), then as `Folded`.
+    Open,
+}
+
+/// The diagrams of a body: where the body lives, and whether it still streams.
+struct DiagramsOf {
+    home: DiagramHome,
+    streaming: bool,
+}
+
+fn build(
+    id: impl Into<ElementId>,
+    text: impl Into<SharedString>,
+    mentions: &[MentionTarget],
+    edited: bool,
+    diagrams: Option<DiagramsOf>,
+    refs: Option<&crate::views::refs::markdown::RefsBody>,
+    code_folds: CodeFolds,
+) -> (TextView, bool) {
     let text: SharedString = text.into();
     let source = link_mentions(&fix_cjk_strong(&normalize_fences(&text)), mentions);
     let marked = edited
         .then(|| append_edited_mark(&source, t::EDITED))
         .flatten();
     let inline = marked.is_some();
-    let source = marked.unwrap_or(source);
+    // The whole body, and the one drawn (its long code fences cut).
+    let full_source = marked.unwrap_or(source);
+    let fold_code = code_folds != CodeFolds::None;
+    if code_folds == CodeFolds::Open {
+        fold::open_all_code(&full_source);
+    }
+    let source = if fold_code {
+        fold::fold_code_remembered(&full_source)
+    } else {
+        full_source.clone()
+    };
     let diagram_plugin = diagrams.map(|d| DiagramPlugin {
         allowed: crate::diagrams::diagram_fences(&source, d.streaming),
-        message_id: d.message_id.clone(),
-        topic_id: d.topic_id.clone(),
+        home: d.home,
         // inc-refs: `md:<index>` of each fence (REFS §A2.1), counted in the stored body.
         blocks: top_level_blocks(&source),
         block_offset: refs.map_or(0, |r| r.block_offset),
@@ -143,7 +238,7 @@ pub fn message_body_refs(
     let refs = refs.filter(|r| !r.message_id.is_empty());
     let table_plugin =
         refs.map(|r| crate::views::refs::markdown::TablePlugin::new(r.clone(), &source));
-    let code_refs = refs.map(|r| (r.clone(), source.clone()));
+    let code_refs = refs.map(|r| (r.clone(), full_source));
     // --- end inc-refs ---
     let view = TextView::markdown(id, source)
         .selectable(true)
@@ -154,11 +249,65 @@ pub fn message_body_refs(
         .plugin(EditedPlugin)
         .when_some(diagram_plugin, |view, p| view.plugin(p))
         .when_some(table_plugin, |view, p| view.plugin(p))
+        .code_block_highlighter(code::highlighter())
         .code_block_actions(move |code, _window, cx| {
-            let text = code.code();
+            // The highlighter is built without the app: it learns the colors here.
+            code::sync_colors(cx);
+            let shown = code.code();
+            // A long fence: the actions work on its whole code, not the lines drawn.
+            let fold = fold_code.then(|| fold::fold_of(&shown)).flatten();
+            let text: SharedString = match &fold {
+                Some(f) => f.full.clone().into(),
+                None => shown.clone(),
+            };
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             text.hash(&mut hasher);
             let hash = hasher.finish();
+            let k = theme::colors(cx);
+            let language = code.lang().and_then(|info| code::label(&info)).map(|name| {
+                div()
+                    .px(theme::space::S4)
+                    .text_size(theme::type_scale::META.0)
+                    .line_height(theme::type_scale::META.1)
+                    .font_family(crate::theme::ui_font_family())
+                    .text_color(k.text_3)
+                    .child(name)
+            });
+            let toggle = |open: bool, label: String| {
+                let full = text.clone();
+                crate::ui::native::push_button(
+                    ElementId::Name(format!("fold-code-{hash:x}").into()),
+                    label,
+                    crate::ui::native::PushStyle::Ghost,
+                    crate::ui::native::PushSize::Small,
+                    cx,
+                )
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    fold::set_code_open(&full, open);
+                    cx.refresh_windows();
+                })
+            };
+            let lines = fold.as_ref().map_or(0, |f| f.lines).to_string();
+            // 收起 sits in the strip; 展开 sits on the cut line, where the code stops.
+            let collapse = fold
+                .as_ref()
+                .filter(|f| f.open)
+                .map(|_| toggle(false, t::CODE_COLLAPSE.to_string()));
+            let expand = fold.as_ref().filter(|f| !f.open).map(|_| {
+                use crate::ui::native::{metrics::CODE_FOLD_LINES, tokens::text};
+                div()
+                    .absolute()
+                    .top(
+                        CODE_STRIP - px(8.) + text::MONO.1 * CODE_FOLD_LINES as f32
+                            - theme::space::S4,
+                    )
+                    .right_0()
+                    .child(toggle(
+                        true,
+                        crate::copy::fill(t::CODE_EXPAND, &[("n", &lines)]),
+                    ))
+            });
             let copy = Clipboard::new(ElementId::Name(format!("copy-code-{hash:x}").into()))
                 .value(text.clone())
                 .tooltip(t::COPY_CODE);
@@ -181,9 +330,12 @@ pub fn message_body_refs(
                 .flex()
                 .items_center()
                 .gap(theme::space::S4)
+                .children(language)
                 .children(ask)
+                .children(collapse)
                 .child(copy)
-                .child(code_edge_fade(&text, cx))
+                .child(code_edge_fade(&shown, cx))
+                .children(expand)
         })
         .on_link_click(|url, _event, _window, cx| {
             if let Some(url) = safe_link(url) {
@@ -278,6 +430,9 @@ pub struct DiagramContext {
     pub message_id: String,
     pub topic_id: String,
     pub streaming: bool,
+    /// A search, ⌘F or a reference jump points into this body: its long code
+    /// fences are opened, since what is pointed at may be past their cut.
+    pub open_code: bool,
 }
 
 /// Draws the first [`crate::diagrams::MAX_PER_MESSAGE`] closed ```mermaid fences of a
@@ -285,8 +440,7 @@ pub struct DiagramContext {
 struct DiagramPlugin {
     /// Byte offsets of the opening lines of the fences to draw.
     allowed: Vec<usize>,
-    message_id: String,
-    topic_id: String,
+    home: DiagramHome,
     blocks: Vec<(MdBlock, std::ops::Range<usize>)>,
     block_offset: usize,
 }
@@ -297,8 +451,17 @@ struct DiagramNode {
     index: Option<usize>,
     /// Diagrams drawn in this body (the `{block}` segment is omitted when there is one).
     count: usize,
-    message_id: String,
-    topic_id: String,
+    home: DiagramHome,
+}
+
+/// Where the body of a diagram fence lives.
+#[derive(Clone, Debug)]
+enum DiagramHome {
+    Message {
+        message_id: String,
+        topic_id: String,
+    },
+    Document(DocContext),
 }
 
 impl MarkdownPlugin for DiagramPlugin {
@@ -335,8 +498,7 @@ impl MarkdownPlugin for DiagramPlugin {
                         .position(|(_, r)| r.start <= at && at < r.end.max(r.start + 1))
                         .map(|i| i + self.block_offset),
                     count: self.allowed.len(),
-                    message_id: self.message_id.clone(),
-                    topic_id: self.topic_id.clone(),
+                    home: self.home.clone(),
                 },
             )
             .text(code.value.clone()),
@@ -347,19 +509,44 @@ impl MarkdownPlugin for DiagramPlugin {
         let Some(d) = node.data::<DiagramNode>() else {
             return div().into_any_element();
         };
+        let (id, message_id, topic_id, artifact, index) = match &d.home {
+            DiagramHome::Message {
+                message_id,
+                topic_id,
+            } => (
+                format!("{message_id}-{}", d.offset),
+                Some(message_id.clone()),
+                Some(topic_id.clone()),
+                None,
+                d.index,
+            ),
+            // A node of a document's diagram is not referenced: the block index of
+            // a reference is counted in a message body, and a document is drawn in
+            // parts. Without an index the diagram offers no 问这里.
+            DiagramHome::Document(doc) => (
+                format!(
+                    "{}-v{}-p{}-{}",
+                    doc.artifact_id, doc.version, doc.part, d.offset
+                ),
+                None,
+                None,
+                Some((doc.artifact_id.clone(), doc.version)),
+                None,
+            ),
+        };
         let spec = crate::diagrams::view::InlineSpec {
-            id: format!("{}-{}", d.message_id, d.offset).into(),
+            id: id.into(),
             source: d.source.clone(),
             title: None,
             caption: None,
             alt: None,
             origin: crate::diagrams::DiagramSource {
-                message_id: Some(d.message_id.clone()),
-                topic_id: Some(d.topic_id.clone()),
-                artifact: None,
+                message_id,
+                topic_id,
+                artifact,
                 block: crate::diagrams::DiagramBlock::MarkdownFence {
                     offset: d.offset,
-                    index: d.index,
+                    index,
                 },
                 block_name: crate::views::refs::parts::block_name(
                     None,
