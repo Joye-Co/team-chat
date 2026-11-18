@@ -41,9 +41,9 @@ use crate::{
     },
 };
 
-/// The one column set of every 首页 list (§2.6, F27): StatusBadge, time,
-/// and room for `看看` and one answer. Rows with no action keep the column
-/// empty, so badges and times sit at one x in every section.
+/// The column set of a 首页 list (§2.6, F27): StatusBadge, time, and room
+/// for `看看` and one answer. A section where no row has an action drops the
+/// actions column (§2.6), so its title and meta line take the room.
 pub const DESK_COLUMNS: Columns = Columns {
     // 112 holds `等你审 PR #61`, as on 群.
     status: Some(gpui::px(112.)),
@@ -51,10 +51,55 @@ pub const DESK_COLUMNS: Columns = Columns {
     actions: Some(gpui::px(200.)),
 };
 
-/// The slot of the answer button inside the actions column: it holds the
-/// longest quick answer (`发布到生产`) and stays reserved in a row with no
-/// answer, so `看看` sits at one x in every row (§2.6, F27).
-const ANSWER_SLOT: gpui::Pixels = gpui::px(100.);
+/// [`DESK_COLUMNS`] without the actions column: 正在做, 今天交付, and
+/// 刚处理 when no answer can still be taken back.
+pub const DESK_COLUMNS_PLAIN: Columns = Columns {
+    actions: None,
+    ..DESK_COLUMNS
+};
+
+/// The columns of an ask list: the actions column only when a row has one.
+pub fn ask_columns(asks: &[&AskCard], page: &DeskPage) -> Columns {
+    let any = asks.iter().any(|a| match page.local_answer(&a.key()) {
+        Some(l) => l.undoable,
+        None => a.answered.is_none(),
+    });
+    if any {
+        DESK_COLUMNS
+    } else {
+        DESK_COLUMNS_PLAIN
+    }
+}
+
+/// The width of the answer button in an ask list: the widest quick answer
+/// of the rows that still wait, so every answer has the same edges, `看看`
+/// sits at one x in every row with a gap of 8 (§2.6, F27), and a list with
+/// no quick answer puts `看看` at the right edge.
+pub fn answer_slot(asks: &[&AskCard], page: &DeskPage, window: &Window, cx: &App) -> gpui::Pixels {
+    let mut font = window.text_style().font();
+    font.weight = crate::theme::MEDIUM_WEIGHT;
+    asks.iter()
+        .filter(|a| !is_answered(a, page))
+        .filter_map(|a| quick_answer(a))
+        .map(|quick| {
+            let run = gpui::TextRun {
+                len: quick.label.len(),
+                font: font.clone(),
+                color: native_colors(cx).label,
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            let text = window.text_system().shape_line(
+                quick.label.clone().into(),
+                crate::ui::native::tokens::text::UI.0,
+                &[run],
+                None,
+            );
+            (text.width + PushSize::Small.pad() * 2.).ceil()
+        })
+        .fold(gpui::px(0.), |a, b| a.max(b))
+}
 
 /// The label of a quick answer in a menu: `发布到生产…` when it asks first
 /// (a Mac menu item that opens a dialog ends with `…`). A button shows the
@@ -122,6 +167,8 @@ pub fn ask_row(
     a: &AskCard,
     page: &DeskPage,
     snap: &Snapshot,
+    cols: Columns,
+    slot: gpui::Pixels,
     cx: &mut Context<DeskPage>,
 ) -> AnyElement {
     let k = native_colors(cx);
@@ -207,6 +254,8 @@ pub fn ask_row(
                         PushSize::Small,
                         cx,
                     )
+                    // Every answer of the list has the slot's width.
+                    .min_w(slot)
                     .on_click(move |_, window, cx| {
                         cx.stop_propagation();
                         press(page.clone(), ask.clone(), quick.clone(), window, cx);
@@ -222,14 +271,18 @@ pub fn ask_row(
                             .items_center()
                             .gap(crate::ui::native::tokens::space::S8)
                             .child(look)
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .min_w(ANSWER_SLOT)
-                                    .flex()
-                                    .justify_end()
-                                    .children(approve),
-                            )
+                            // A row with no quick answer keeps the slot
+                            // when another row has one (`看看` at one x).
+                            .when(slot > gpui::px(0.), |d| {
+                                d.child(
+                                    div()
+                                        .flex_none()
+                                        .min_w(slot)
+                                        .flex()
+                                        .justify_end()
+                                        .children(approve),
+                                )
+                            })
                             .into_any_element(),
                     ),
                 )
@@ -249,11 +302,7 @@ pub fn ask_row(
         actions,
         ..PageRow::new(a.item.title.clone())
     }
-    .render(
-        ElementId::Name(format!("desk-ask-{key}").into()),
-        DESK_COLUMNS,
-        cx,
-    )
+    .render(ElementId::Name(format!("desk-ask-{key}").into()), cols, cx)
     .on_click(move |_, _, cx| open_topic(&nav, &g, &t, cx))
     .context_menu(move |menu, _, _| {
         let services = menu_services.clone();
@@ -323,7 +372,7 @@ pub fn run_row(
     }
     .render(
         ElementId::Name(format!("desk-run-row-{i}").into()),
-        DESK_COLUMNS,
+        DESK_COLUMNS_PLAIN,
         cx,
     )
     .on_click(move |_, _, cx| {
@@ -365,7 +414,7 @@ pub fn done_row(
     }
     .render(
         ElementId::Name(format!("desk-done-{i}").into()),
-        DESK_COLUMNS,
+        DESK_COLUMNS_PLAIN,
         cx,
     )
     .on_click(move |_, _, cx| open_topic(&s1, &g, &t, cx))

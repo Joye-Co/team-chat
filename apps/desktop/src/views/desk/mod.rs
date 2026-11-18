@@ -507,11 +507,11 @@ impl Render for DeskPage {
                     ))
                     .child(section(
                         page::section_header(c::DESK_WORKING, None, None, None, cx),
-                        kit::skeleton_list("desk-sk-runs", list::DESK_COLUMNS, false, 3, cx),
+                        kit::skeleton_list("desk-sk-runs", list::DESK_COLUMNS_PLAIN, false, 3, cx),
                     ))
                     .child(section(
                         page::section_header(c::DESK_DONE_TODAY, None, None, None, cx),
-                        kit::skeleton_list("desk-sk-done", list::DESK_COLUMNS, false, 3, cx),
+                        kit::skeleton_list("desk-sk-done", list::DESK_COLUMNS_PLAIN, false, 3, cx),
                     ));
             }
             PageLoad::Ready => {
@@ -530,9 +530,11 @@ impl Render for DeskPage {
                         continue;
                     }
                     let n = asks.len();
+                    let cols = list::ask_columns(&asks, self);
+                    let slot = list::answer_slot(&asks, self, window, cx);
                     let rows: Vec<AnyElement> = asks
                         .into_iter()
-                        .map(|a| list::ask_row(a, self, &snap, cx))
+                        .map(|a| list::ask_row(a, self, &snap, cols, slot, cx))
                         .collect();
                     content = content.child(section(
                         page::section_header(title, Some(n), None, None, cx),
