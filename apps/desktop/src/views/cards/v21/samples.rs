@@ -1027,7 +1027,10 @@ pub fn all() -> Vec<Sample21> {
     let rows: Vec<Vec<String>> = (0..40)
         .map(|i| {
             vec![
-                format!("渠道 {:02} · 一个很长很长的渠道名字，写不下的时候要截断", i + 1),
+                format!(
+                    "渠道 {:02} · 一个很长很长的渠道名字，写不下的时候要截断",
+                    i + 1
+                ),
                 ["小王", "李雪", "Forge"][i % 3].to_string(),
                 ((i * 37) % 90 + 4).to_string(),
             ]
