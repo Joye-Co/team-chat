@@ -1025,44 +1025,6 @@ fn refusal(
     }
 }
 
-/// A pop-up row in a sheet: two choices, `on` is the second.
-fn choice_row(
-    label: &'static str,
-    id: &'static str,
-    options: [&'static str; 2],
-    second: bool,
-    disabled: bool,
-    pick: impl Fn(bool, &mut Window, &mut App) + 'static,
-    cx: &App,
-) -> gpui::Div {
-    let pick = std::rc::Rc::new(pick);
-    sheet_form_row(
-        label,
-        disabled_push(
-            widgets::popup_fill(
-                id,
-                options[usize::from(second)],
-                false,
-                SheetWidth::Form,
-                cx,
-            ),
-            disabled,
-            cx,
-        )
-        .dropdown_menu(move |menu, _, _| {
-            [false, true].into_iter().fold(menu, |menu, v| {
-                let pick = pick.clone();
-                menu.item(
-                    PopupMenuItem::new(options[usize::from(v)])
-                        .checked(v == second)
-                        .on_click(move |_, window, cx| pick(v, window, cx)),
-                )
-            })
-        }),
-        cx,
-    )
-}
-
 /// The two large buttons at the bottom of a form sheet: 取消 and `default`.
 fn sheet_actions(
     id: &'static str,
@@ -1287,7 +1249,6 @@ pub struct InviteForm {
     services: Services,
     name: Entity<InputState>,
     role: Entity<InputState>,
-    kind: MemberKind,
     status: Status,
     created: Option<InviteCreated>,
     done: widgets::DoneStep,
@@ -1310,7 +1271,6 @@ impl InviteForm {
             services,
             name,
             role,
-            kind: MemberKind::Human,
             status: Status::Idle,
             created: None,
             done: widgets::DoneStep::new(cx),
@@ -1355,7 +1315,8 @@ impl InviteForm {
         }
         let reply = self.services.provider.create_invite(InviteRequest {
             name,
-            kind: self.kind,
+            // An invite is for a person: 添加 AI 成员 is the one way to add an AI member.
+            kind: MemberKind::Human,
             // design-roles 3.9: everyone joins as 普通成员; a 所有者 gives 身份 afterwards.
             level: MemberLevel::Member,
             role: (!role.is_empty()).then_some(role),
@@ -1412,7 +1373,7 @@ impl Render for InviteForm {
             self.name.read(cx).value().trim(),
             self.role.read(cx).value().trim(),
         );
-        let (kind_page, submit, retry) = (cx.entity(), cx.entity(), cx.entity());
+        let (submit, retry) = (cx.entity(), cx.entity());
         let failed = refusal(
             "invite-failed",
             &self.status,
@@ -1436,24 +1397,6 @@ impl Render for InviteForm {
                         "member-role",
                         &self.role,
                         role_err.is_some(),
-                        cx,
-                    ))
-                    .child(choice_row(
-                        s::INVITE_KIND,
-                        "invite-kind",
-                        [s::KIND_HUMAN, s::KIND_AI],
-                        self.kind == MemberKind::Bot,
-                        busy,
-                        move |bot, _, cx| {
-                            kind_page.update(cx, |f, cx| {
-                                f.kind = if bot {
-                                    MemberKind::Bot
-                                } else {
-                                    MemberKind::Human
-                                };
-                                cx.notify();
-                            })
-                        },
                         cx,
                     )),
             )
