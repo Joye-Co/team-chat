@@ -355,7 +355,6 @@ crate::copy! {
     COMPUTER_ADD = "添加电脑",
     COMPUTER_ADD_HINT = "生成安装命令，到那台电脑上运行。",
     CLOUD = "云端",
-    CLOUD_NOT_YET = "还没有开放",
     CLOUD_COMING_SOON = "即将推出",
     CLOUD_FOOTER = "开放后，AI 成员也能在云端干活，不占团队的电脑。",
     // 外观
@@ -466,6 +465,7 @@ crate::copy! {
     MODELS_SAVING = "正在保存…",
     MODELS_SAVED = "已保存，之后的活都用它",
     MODELS_SAVE_FAILED = "模型没有保存",
+    MODELS_EFFORT_OF = "{name} 的思考强度",
     // --- 通用 › AI 服务 (owners) ---
     SECTION_AI = "AI 服务",
     SECTION_AI_HINT = "配好后开启下面四件事。用团队自己的 API Key，费用由服务商按用量收取。只有管理员能看到和修改。",
