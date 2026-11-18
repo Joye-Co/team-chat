@@ -381,7 +381,7 @@ runner 身份从主机的 `gh` 读出来。提交记在 AI 成员名下；PR 正
 - **主机**：`unattended-upgrades` 自动装安全更新；`git checkout` 新版本后可以再跑一遍 `host-setup.sh`。
   `scripts/runner/runner-vm` 或 `runner-vm.nft` 有改动时一定要再跑一遍（重装 root 辅助脚本、重载防火墙）；
   话题的工作目录和仓库缓存会保留。
-- **缓存**：用 runner，`~/.local/bin/team-chat-daemon caches` 列出每个仓库的缓存（key、仓库、大小、最近使用）；
+- **缓存**：用 runner，`~/.local/bin/team-chat-daemon caches` 列出每个仓库的缓存（key、大小、最近使用、仓库）；
   `team-chat-daemon caches clear <key>`（或 `all`）删掉一个，比如工具链或工具坏了的时候；正在被任务用的缓存
   会拒绝。`work_root` 剩余空间低于 `min_free_gb` 时，daemon 自己先删最久没用的缓存。
 - **从有 AI 成员家目录的版本升级**（`/srv/runner/homes`，1.2.7 及以前）：daemon 从 1.3.0 起不再保留家目录。

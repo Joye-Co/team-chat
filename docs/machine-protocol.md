@@ -38,6 +38,24 @@ MachineLink of that machine (`idFromName(machineId)`, location hint `oc`). One m
 most one live link: a new link replaces the old one (MachineLink closes the old socket with
 code 4002).
 
+### Close codes
+
+When the server closes the link itself, the WebSocket close code says why:
+
+| Code | Close reason | When | `error` frame first |
+| --- | --- | --- | --- |
+| 4000 | `unsupported protocol` | `hello.protocol` is not this protocol | `unsupported_protocol` |
+| 4001 | `unauthorized` | the machine was removed or its token revoked (at a frame, or while the link is open) | `unauthorized` |
+| 4002 | `replaced by a new link` | another link opened with this machine's token | none |
+| 4003 | `no frames for 90 s` | the link was idle for 90 s (no heartbeat arrived) | none |
+| 1011 | `storage unavailable` | BotDesk could not store a batch after 3 tries (see "Server side") | none |
+
+The daemon reconnects with backoff after every close and logs the code and the reason
+(`link down: closed by server (code 4002: replaced by a new link)`). Two codes do not go away
+by themselves, so its log line also says what to do: 4001 (check `token_file`, or add the
+computer again) and 4002 (two daemons run with the same token and close each other's link in
+turn: stop one).
+
 Every frame has a `t` field. The first daemon frame is `hello`; the server answers `welcome`.
 Before `welcome` the daemon sends nothing else, and the server sends nothing but `welcome` or
 `error`.
@@ -1315,8 +1333,8 @@ folder. What a run keeps:
   it). Known credential files in a cache (`cargo/credentials*`, `npm-global/etc/npmrc`,
   `bun/bunfig.toml`) are removed before each run. When `work_root` stays below `min_free_gb`
   after old run folders are gone, caches go least recently used first, skipping those in use;
-  there is no size limit and no expiry. `daemon caches` lists them (key, repository, size, last
-  used), `daemon caches clear <key|all>` removes them and refuses one in use.
+  there is no size limit and no expiry. `daemon caches` lists them (key, size, last used,
+  repository), `daemon caches clear <key|all>` removes them and refuses one in use.
 - **The computer**: sign-ins (below) and GitHub never go into a VM; each run gets them as it
   runs.
 - **Nothing else**: `$HOME` (the host's path, e.g. `/home/runner`, made on the VM's scratch
@@ -1442,8 +1460,20 @@ calls, see "Gated actions"), and `[vm]` with `kernel`, `rootfs`, `dir`, `vcpus`,
 found on PATH.
 
 - `daemon run`: the service. SIGTERM cancels all runs and exits.
-- `daemon doctor`: config problems, CLIs and versions, git, disk, load. Never prints secrets.
-  Exit code 1 when something is wrong.
+- `daemon --help` (`-h`, `help`) lists the commands and options; `daemon --version` (`-V`,
+  `version`) prints the daemon's version. A command line it cannot use says what was wrong
+  (`unknown option: …`, `--config needs a file`) before the usage and exits with code 2.
+- `daemon doctor`: the daemon's version and the config file it read, config problems (the ones
+  `run` and `install-service` stop at), whether the server takes the machine token, CLIs and
+  versions, git, disk, load. Never prints secrets. The server is asked over plain HTTP (the
+  request of "Updating itself"), never over the machine link, so a `doctor` next to a running
+  daemon does not replace its link. Exit code 1 when something is wrong; the last line then
+  says what (`NOT OK: 1 problem, the server check failed`).
+- Log lines start with the time in UTC (`2026-11-18T03:20:00.123Z`). The lines that are
+  warnings or errors are also sent as `metrics.problems`; the same line again right after
+  itself (a link that stays down) only moves that line's time. On macOS and Linux the service
+  manager appends to `daemon.log`; a log above 10 MB is copied to `daemon.log.1` and emptied
+  when the daemon starts, as on Windows.
 - `daemon install-service` writes `~/Library/LaunchAgents/<bundleId>.daemon.plist` (RunAtLoad,
   KeepAlive, the current PATH, logs in `~/Library/Logs/<slug>-daemon/`) and loads it with
   `launchctl bootstrap gui/<uid>`; `--no-load` only writes the file.

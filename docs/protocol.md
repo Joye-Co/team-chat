@@ -204,6 +204,19 @@ ErrorCode = "unauthorized" | "forbidden" | "not_found" | "invalid" | "conflict"
 - Keepalive: the client sends `ping` every 30 s; the server answers `pong` without waking up the
   object. The client reconnects with exponential backoff (0.5 s to 30 s, with jitter).
 
+### Close codes
+
+When the server closes a socket itself, the WebSocket close code says why. It sends an `error`
+frame with the same meaning first.
+
+| Code | Close reason | When | What the client does |
+| --- | --- | --- | --- |
+| 4000 | `unsupported protocol` | `hello.protocol` is not this protocol (`error.code` `unsupported_protocol`) | does not reconnect: it needs an update |
+| 4001 | `unauthorized` | the token was revoked or the member deactivated (`error.code` `unauthorized`; at `hello` or later, for example after a sign-out) | does not reconnect with this token: signs in again |
+
+Any other code (1000, 1006, 1011, …) is a link that dropped: the client reconnects with
+backoff.
+
 ## HTTP API
 
 All requests send `Authorization: Bearer <token>` except `redeem` and `bootstrap`. Responses are
