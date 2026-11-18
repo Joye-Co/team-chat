@@ -386,7 +386,7 @@ crate::copy! {
     USAGE_ESTIMATED = "≈{cost}",
     USAGE_PRICE_UNKNOWN = "{tokens} token · 价格未知",
     USAGE_UNPRICED_NOTE = "有 {tokens} token 的模型还没有公开价格，没算进花费",
-    USAGE_ESTIMATE_NOTE = "带 ≈ 的是估算：这个模型不报花费，按 token 数和公开价格算。",
+    USAGE_ESTIMATE_NOTE = "带 ≈ 的是估算：模型不报花费，按 token 数和公开价格算",
     USAGE_RANGE_WEEK = "本周",
     USAGE_RANGE_MONTH = "本月",
     USAGE_RANGE_LAST_MONTH = "上个月",

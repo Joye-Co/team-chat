@@ -646,7 +646,11 @@ impl AdminView {
                         .items_center()
                         .when(days <= 7 && d.cost_usd > 0., |c| {
                             c.child(
+                                // On the card's own fill: the budget rule runs behind
+                                // the bars and never through a value.
                                 div()
+                                    .px(space::S2)
+                                    .bg(k.sheet)
                                     .n_footnote()
                                     .n_figures()
                                     .text_color(k.secondary)
@@ -796,8 +800,8 @@ impl AdminView {
                     .min_h(height::LIST_ROW * 3.)
                     .flex()
                     .gap(space::S4)
-                    .children(bars)
-                    .children(line),
+                    .children(line)
+                    .children(bars),
             )
             .into_any_element()
     }
@@ -873,6 +877,8 @@ impl AdminView {
         let unpriced: u64 = rows.iter().map(|r| r.5).sum();
         card_surface(cx)
             .flex_1()
+            // The notes wrap inside the card; a long one never widens it past the page.
+            .min_w(gpui::Pixels::ZERO)
             .p(space::S24)
             .flex()
             .flex_col()

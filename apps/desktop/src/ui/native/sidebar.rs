@@ -424,7 +424,6 @@ impl SidebarRow {
         self
     }
 
-    /// A collapsed tail item, drawn at 70 % opacity.
     /// A page that is listed but cannot open yet: the title in the one muted color (D1),
     /// never a second opacity on top of it.
     pub fn quiet(mut self, quiet: bool) -> Self {
@@ -432,6 +431,7 @@ impl SidebarRow {
         self
     }
 
+    /// A collapsed tail item, drawn at 70 % opacity.
     pub fn dim(mut self, dim: bool) -> Self {
         self.dim = dim;
         self

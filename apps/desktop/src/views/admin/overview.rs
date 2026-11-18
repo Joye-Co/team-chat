@@ -761,7 +761,10 @@ fn members(
                     .flex()
                     .items_center()
                     .gap(space::S4)
+                    // The hover fill reaches 4 past the label; the ink stays on the
+                    // column's edge, as in the 成员 table.
                     .px(space::S4)
+                    .mx(-space::S4)
                     .rounded(radius::ITEM)
                     .hover(|s| s.bg(k.fill_hover))
                     .n_section()
