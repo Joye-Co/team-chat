@@ -109,7 +109,7 @@ crate::copy! {
     RECORD_REMIND_MESSAGE = "这张卡我已经答了，麻烦接着做。",
     CONFLICT_TOAST = "回答还没发出，请再看一眼",
     CONFLICT_TITLE = "卡片刚更新了",
-    CONFLICT_DETAIL = "你的回答还没发出，请再看一眼，再发给 {name}。",
+    CONFLICT_DETAIL = "你的回答还没发出。\n请再看一眼，再发给 {name}。",
     DRAFT_CHANGED = "内容变了",
     DRAFT_USE_NEW = "用新的",
     ATTRIBUTION_OTHER = "按 {name} 的选择",
