@@ -781,7 +781,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "panel-plan",
-        about: "The side panel of a 话题 whose run has a plan: the 计划 section with its progress and steps",
+        about: "The side panel of a 话题 whose run works on a plan: the thread's working card carries the steps, the panel does not repeat them",
         start: Start::V2,
         setup: crate::views::process::preview::open_plan_details,
         open: open_main,

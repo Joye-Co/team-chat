@@ -44,6 +44,8 @@ struct Data {
     /// of every block.
     plan_led: bool,
     changes: Option<TopicChanges>,
+    /// `run` is at work: the thread's working card draws its plan.
+    run_on_thread: bool,
     artifacts: Vec<ArtifactSummary>,
     /// The preview of the newest 产出.
     preview: Option<ArtifactPreview>,
@@ -77,6 +79,11 @@ impl Data {
                 .filter(|r| !r.plan.is_empty() && run.as_ref().is_none_or(|x| x.id != r.id))
                 .map(|r| (r.clone(), p.run_step_times(&r.id)))
                 .collect();
+        let run_on_thread = run.as_ref().is_some_and(|x| {
+            crate::views::topic_page::working_runs(&all_runs)
+                .iter()
+                .any(|r| r.id == x.id)
+        });
         let artifacts = p.artifacts(g, t);
         let preview = artifacts
             .first()
@@ -107,6 +114,7 @@ impl Data {
                 .map(|r| p.run_step_times(&r.id))
                 .unwrap_or_default(),
             changes: p.topic_changes(g, t),
+            run_on_thread,
             others,
             plan_led,
             cost: p.topic_cost(g, t),
@@ -159,6 +167,13 @@ pub fn people_marks(topic: &Topic) -> Vec<(MemberId, &'static str)> {
         out.push((by.clone(), c::INSPECTOR_ASKED));
     }
     out
+}
+
+/// While the PR merges, the member the state names (`Forge 正在合并`) leads the
+/// list with that word: 在做 would claim a run, 参与过 that it left.
+fn mark_merging(marks: &mut Vec<(MemberId, &'static str)>, owner: &MemberId) {
+    marks.retain(|(id, _)| id != owner);
+    marks.insert(0, (owner.clone(), c::STATE_MERGING_SHORT));
 }
 
 // --- v12/fx-topic: one trailing pane width (coordinator decision): the
@@ -597,7 +612,14 @@ impl Render for TopicRail {
         );
         // Usable (design-relay §3.6): who works here now and who took part, never one
         // responsible member.
-        let marks = topic.map(people_marks).unwrap_or_default();
+        let mut marks = topic.map(people_marks).unwrap_or_default();
+        if d.changes
+            .as_ref()
+            .is_some_and(|ch| ch.state == crate::data::v2::ChangeState::Merging)
+            && let Some(owner) = topic.and_then(|t| t.owner_id.as_ref())
+        {
+            mark_merging(&mut marks, owner);
+        }
         sections.push(self.native_owner(&d, &marks, cx));
         let mut empty: Vec<&'static str> = Vec::new();
         let mut add =
@@ -605,10 +627,14 @@ impl Render for TopicRail {
                 Some(el) => sections.push(el),
                 None => empty.push(name),
             };
-        let plan = run
-            .filter(|r| !r.plan.is_empty())
-            .map(|r| self.native_plan(&d, r, cx));
-        add(plan, c::RAIL_EMPTY_NAME_PLAN, &mut sections);
+        // A run at work has its plan on the thread's working card: never the
+        // same steps twice on one screen, and never named empty here either.
+        if !run.is_some_and(|r| d.run_on_thread && !r.plan.is_empty()) {
+            let plan = run
+                .filter(|r| !r.plan.is_empty())
+                .map(|r| self.native_plan(&d, r, cx));
+            add(plan, c::RAIL_EMPTY_NAME_PLAN, &mut sections);
+        }
         let changes = self.native_changes(&d, window, cx);
         add(changes, c::RAIL_EMPTY_NAME_CHANGES, &mut sections);
         let outputs = self.native_outputs(&d, window, cx);
@@ -627,7 +653,12 @@ impl Render for TopicRail {
                     .n_subheadline()
                     .text_color(k.secondary)
                     .child(fill(
-                        c::RAIL_EMPTY_REST,
+                        // A 完成 话题 expects nothing more: never 还没有.
+                        if topic.is_some_and(|t| t.status == crate::data::TopicStatus::Done) {
+                            c::RAIL_EMPTY_REST_DONE
+                        } else {
+                            c::RAIL_EMPTY_REST
+                        },
                         &[("names", &empty.join(crate::copy::rail::RAIL_NAMES_SEP))],
                     ))
                     .into_any_element(),

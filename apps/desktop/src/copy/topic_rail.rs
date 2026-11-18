@@ -155,4 +155,6 @@ crate::copy! {
     // --- end v12/topic ---
     APPROVE_REFUSED = "没能批准",
     WITHDRAW_REFUSED = "没能撤回",
+    // The quiet last line of the inspector of a 完成 话题.
+    RAIL_EMPTY_REST_DONE = "没有{names}。",
 }

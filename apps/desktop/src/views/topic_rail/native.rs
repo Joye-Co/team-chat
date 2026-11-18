@@ -204,12 +204,13 @@ pub(super) fn changes_pane_body(
         .when(!meta.is_empty(), |el| {
             el.child(detail(meta.join(" · "), cx))
         })
+        // 检查 then 状态, the order of the inspector's 改动 section.
+        .children(checks)
         .child(label_value(
             c::INSPECTOR_STATE,
             StatusBadge::new(state_kind, state_text),
             cx,
         ))
-        .children(checks)
         .children(browser);
     let files = changed_files(diff, open, toggle, window, cx);
     div()
@@ -630,8 +631,9 @@ impl TopicRail {
         section.into_any_element()
     }
 
-    /// 计划: the plan of the run the rail shows and, while more members
-    /// work (A2-11), one block per member's run, each led by its member.
+    /// 计划: the plan of a run that is not at work (one at work has it on the
+    /// thread's working card), led by its member when the 话题 has runs of
+    /// more than one member or an order.
     pub(super) fn native_plan(
         &self,
         d: &Data,
@@ -639,31 +641,18 @@ impl TopicRail {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mut section = self.section(PLAN, c::TOPIC_RAIL_PLAN, cx);
-        // §2.5: each block is led by its member whenever the 话题 has runs of
-        // more than one member or an order, so a finished plan is never read
-        // as the plan of the run the state names.
-        let many = !d.others.is_empty() || d.plan_led;
-        let blocks = std::iter::once((run, d.step_times.as_slice()))
-            .chain(d.others.iter().map(|(r, t)| (r, t.as_slice())));
-        for (i, (run, times)) in blocks.enumerate() {
-            if many {
-                let who = self.person(
-                    &format!("plan-{}", run.id),
-                    d.member(&run.bot_id).as_ref(),
-                    None,
-                    cx,
-                );
-                section = section.row(
-                    div()
-                        .w_full()
-                        .when(i > 0, |el| el.pt(space::S12))
-                        .pb(space::S4)
-                        .n_body()
-                        .child(who),
-                );
-            }
-            section = self.plan_rows(section, run, times, cx);
+        // §2.5: a finished plan is never read as the plan of the run the
+        // state names.
+        if d.plan_led {
+            let who = self.person(
+                &format!("plan-{}", run.id),
+                d.member(&run.bot_id).as_ref(),
+                None,
+                cx,
+            );
+            section = section.row(div().w_full().pb(space::S4).n_body().child(who));
         }
+        section = self.plan_rows(section, run, &d.step_times, cx);
         section.into_any_element()
     }
 
