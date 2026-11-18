@@ -911,7 +911,7 @@ pub(crate) fn strip_words(ctx: &Ctx) -> (String, String) {
 }
 
 /// The §2.12 word of an ask on this card: the ask's own kind when 需要你拍板 lists it,
-/// else 等你审 for a card that asks me about a PR (a review), else 等你回答.
+/// else 等你审 for a card that asks me about a PR or a diff (a review), else 等你回答.
 fn ask_word(ctx: &Ctx) -> &'static str {
     let listed = ctx
         .env
@@ -929,10 +929,11 @@ fn ask_word(ctx: &Ctx) -> &'static str {
         || ctx.card.all_blocks().iter().any(|b| {
             matches!(
                 b,
-                CardV2Block::Ref {
-                    target: RefTarget::Pr { .. },
-                    ..
-                }
+                CardV2Block::Diff { .. }
+                    | CardV2Block::Ref {
+                        target: RefTarget::Pr { .. },
+                        ..
+                    }
             )
         });
     let kind = listed.unwrap_or(if review {
@@ -1155,6 +1156,8 @@ pub(crate) fn strip_parts(ctx: &Ctx, cx: &App) -> Option<StripParts> {
         _ if updated.is_some() => None,
         Some(PendTone::Live) => Some(BadgeState::Working),
         Some(PendTone::Quiet) => Some(BadgeState::Queued),
+        Some(PendTone::Gone) => Some(BadgeState::Deactivated),
+        Some(PendTone::Off) => Some(BadgeState::Offline),
         Some(PendTone::Bad) => Some(BadgeState::Failed),
         None => Some(badge_state(ctx.state)?),
     };
