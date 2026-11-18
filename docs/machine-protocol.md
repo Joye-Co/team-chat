@@ -536,7 +536,7 @@ no credentials pass through chat. The server shows the address to owners and run
 // daemon -> server (feature "output", `chat-run`): a normal run.event with seq and ack
 RunEvent += { type: "output", outputId, op: "card.post" | "card.patch" | "interaction.resolve" | "artifact.data" | "artifact.reply" | "desk.note" | "run.report", body: JSON }
 // server -> daemon
-{ t: "run.output.result", runId, outputId, ok, result?, error? { code, reason?, message } }
+{ t: "run.output.result", runId, outputId, ok, result?, error? { code, reason?, message, retryAfterMs? /* rate_limited: wait, then send the same output again */ } }
 run.input.answer += { answerId?, askId?, eventId?, event?, blockId?, value? }
 ```
 

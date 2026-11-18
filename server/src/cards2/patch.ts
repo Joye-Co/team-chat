@@ -86,7 +86,9 @@ function pointer(doc: unknown, path: string, value: unknown, del: boolean, i: nu
  * `invalid` (op index in the message, or the write rule's `reason`) and changes nothing.
  */
 export function applyPatch(card: CardV2, ops: PatchOp[]): CardV2 {
-  if (card.rev >= MAX_CARD_V2_REVS) throw new ApiError("too_large", `at most ${MAX_CARD_V2_REVS} revs per card`, "card.rev_limit");
+  if (card.rev >= MAX_CARD_V2_REVS) {
+    throw new ApiError("too_large", `at most ${MAX_CARD_V2_REVS} revs per card: post a new card (and close this one's ask) to go on`, "card.rev_limit");
+  }
   const d = structuredClone(card) as unknown as Draft;
   ops.forEach((op, i) => {
     const at = (id: string) => d.blocks.findIndex((b) => b.id === id);

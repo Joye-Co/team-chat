@@ -23,8 +23,12 @@ export function checkCause(room: RoomContext, eventId: string, authorId: string,
     const page = pageCause(room.sql, eventId, authorId);
     if (page) return page;
   }
-  if (!r || r.author_id !== authorId || (messageId !== undefined && r.message_id !== messageId) || r.at < Date.now() - CAUSE_MAX_AGE_MS) {
+  if (!r || r.author_id !== authorId || (messageId !== undefined && r.message_id !== messageId)) {
     throw new ApiError("invalid", "cause is not a recent event of this card", "interact.bad_cause");
+  }
+  // The author's own event, only too old to be named: the write itself is fine without it.
+  if (r.at < Date.now() - CAUSE_MAX_AGE_MS) {
+    throw new ApiError("invalid", "the cause is older than 30 minutes: send it again without the cause", "interact.bad_cause");
   }
   return causeOf(r);
 }
@@ -103,7 +107,9 @@ registerMessageWriteHook({
         if (f.baseRev !== undefined ? f.baseRev !== stored.rev : f.cardV2.rev <= stored.rev) {
           throw new ApiError("conflict", "the card has a newer rev", "card.stale_rev");
         }
-        if (stored.rev >= MAX_CARD_V2_REVS) throw new ApiError("too_large", `at most ${MAX_CARD_V2_REVS} revs per card`, "card.rev_limit");
+        if (stored.rev >= MAX_CARD_V2_REVS) {
+          throw new ApiError("too_large", `at most ${MAX_CARD_V2_REVS} revs per card: post a new card (and close this one's ask) to go on`, "card.rev_limit");
+        }
       }
       const dir = await directory(room);
       card = { ...f.cardV2, rev: (stored?.rev ?? 0) + 1 };

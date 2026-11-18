@@ -55,14 +55,16 @@ const CAUSE_WINDOW_MS = 30 * 60_000;
 
 const buckets = new Map<string, TokenBucket[]>();
 
-function takeRate(key: string, limits: TokenBucket[] | (() => TokenBucket[])): boolean {
+/** Takes one from every bucket of `key`. 0: taken; else how long to wait (ms) before the next try. */
+function takeRate(key: string, limits: TokenBucket[] | (() => TokenBucket[])): number {
   let list = buckets.get(key);
   if (!list) {
     list = typeof limits === "function" ? limits() : limits;
     buckets.set(key, list);
     if (buckets.size > 10_000) buckets.delete(buckets.keys().next().value as string);
   }
-  return list.every((b) => b.take());
+  if (list.every((b) => b.take())) return 0;
+  return Math.max(1, Math.ceil(Math.max(...list.map((b) => b.waitMs()))));
 }
 
 type PageEventRow = {
@@ -222,9 +224,8 @@ registerRoomRpc(ARTIFACT_EVENT_RPC, async (room, actor, args): Promise<PageEvent
     if (problem) throw new ApiError("invalid", problem, "artifact.bad_payload");
   }
   const rateKey = `page:${room.groupId}:${a.id}:${e.artifactId}:${e.version}`;
-  if (!takeRate(rateKey, () => [new TokenBucket(PAGE_EVENT_RATE.rate, PAGE_EVENT_RATE.burst), new TokenBucket(PAGE_EVENT_HOURLY / 3600, PAGE_EVENT_HOURLY)])) {
-    throw new ApiError("rate_limited", "too many page events");
-  }
+  const eventWait = takeRate(rateKey, () => [new TokenBucket(PAGE_EVENT_RATE.rate, PAGE_EVENT_RATE.burst), new TokenBucket(PAGE_EVENT_HOURLY / 3600, PAGE_EVENT_HOURLY)]);
+  if (eventWait > 0) throw new ApiError("rate_limited", "too many page events", undefined, eventWait);
   // The row exists before the event goes out (F3): a fast reply or data push finds it, and a
   // repeat that comes while delivery waits is a duplicate. Same order as cards2 (insertEvent,
   // then finishAck).
@@ -327,19 +328,18 @@ registerRoomRpc(ARTIFACT_DATA_RPC, (room, actor, args): { dataRev: number; dupli
   let causeActor: string | undefined;
   if (d.cause !== undefined) {
     const cause = room.sql
-      .exec<{ actor_id: string }>(
-        "SELECT actor_id FROM page_events WHERE event_id = ? AND artifact_id = ? AND version = ? AND at > ?",
-        d.cause,
-        d.artifactId,
-        d.version,
-        now - CAUSE_WINDOW_MS,
-      )
+      .exec<{ actor_id: string; at: number }>("SELECT actor_id, at FROM page_events WHERE event_id = ? AND artifact_id = ? AND version = ?", d.cause, d.artifactId, d.version)
       .toArray()[0];
     if (!cause) throw new ApiError("invalid", "cause is not a recent event of this page", "interact.bad_cause");
+    // An event of this page, only too old to be named: the push itself is fine without it.
+    if (cause.at <= now - CAUSE_WINDOW_MS) {
+      throw new ApiError("invalid", "the cause is older than 30 minutes: push the data again without the cause", "interact.bad_cause");
+    }
     causeActor = cause.actor_id;
   }
-  if (!takeRate(`data:${room.groupId}:${d.artifactId}:${d.version}`, () => [new TokenBucket(DATA_RATE.rate, DATA_RATE.burst)])) {
-    throw new ApiError("rate_limited", "too many data pushes for this version");
+  const dataWait = takeRate(`data:${room.groupId}:${d.artifactId}:${d.version}`, () => [new TokenBucket(DATA_RATE.rate, DATA_RATE.burst)]);
+  if (dataWait > 0) {
+    throw new ApiError("rate_limited", `too many data pushes for this version: wait ${Math.ceil(dataWait / 1000)} s and push the newest data again`, undefined, dataWait);
   }
   const text = JSON.stringify(d.data);
   const next = rev + 1;
@@ -419,7 +419,9 @@ registerRoomRpc(ARTIFACT_REPLY_RPC, async (room, actor, args): Promise<{ duplica
     throw new ApiError("conflict", "the event has its answer", "artifact.reply_closed");
   }
   const now = Date.now();
-  if (now - ev.at > REPLY_WINDOW_MS) throw new ApiError("conflict", "the page stopped waiting", "artifact.reply_closed");
+  if (now - ev.at > REPLY_WINDOW_MS) {
+    throw new ApiError("conflict", `the page stopped waiting (${REPLY_WINDOW_MS / 1000} s): push the result with artifact.data instead`, "artifact.reply_closed");
+  }
   room.sql.exec("UPDATE page_events SET reply_hash = ?, replied_at = ?, resolved = coalesce(resolved, 'replied') WHERE event_id = ?", hash, now, ev.event_id);
   const reply: Record<string, unknown> = { type: "artifact.reply", groupId: room.groupId, eventId: ev.event_id, ok: r.ok };
   if (r.ok && r.payload !== undefined) reply.payload = r.payload;

@@ -504,7 +504,12 @@ export abstract class DeskInteract extends DeskHand {
     if (res.ok) {
       if (res.value !== undefined) frame.result = res.value;
     } else {
-      frame.error = { code: res.error.code, message: res.error.message, ...(res.error.reason ? { reason: res.error.reason } : {}) };
+      frame.error = {
+        code: res.error.code,
+        message: res.error.message,
+        ...(res.error.reason ? { reason: res.error.reason } : {}),
+        ...(res.error.retryAfterMs !== undefined ? { retryAfterMs: res.error.retryAfterMs } : {}),
+      };
     }
     if (!r.machine_id || r.external) return;
     try {
@@ -583,7 +588,7 @@ export abstract class DeskInteract extends DeskHand {
         // from the run's log only, and passes without evidence as claims.
         if (frame.cardV2 !== undefined) frame.cardV2 = truthfulDoneCard(frame.cardV2, this.loggedTests(r));
         const sent = await this.room(r).send(r.group_id, this.actor(), frame as never);
-        if (!sent.ok) throw new ApiError(sent.error.code, sent.error.message, sent.error.reason);
+        if (!sent.ok) throw new ApiError(sent.error.code, sent.error.message, sent.error.reason, sent.error.retryAfterMs);
         // Problem 5: a done card the CLI posted in the run's topic is the run's result (postResult).
         const v2 = (frame as { cardV2?: { intent?: unknown } }).cardV2;
         if (v2?.intent === "done" && sent.value.message.topicId === r.topic_id) {

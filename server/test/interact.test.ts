@@ -354,15 +354,28 @@ describe("card.patch", () => {
       ok: false,
       error: { code: "invalid", reason: "interact.bad_cause" },
     });
-    // Rate: bursts of 3, then 1 per second.
+    // The author's own event, but older than 30 minutes: the message says how to go on.
+    const stale = await ev(ca, gid, m.id, { rev: 2, blockId: "trend", event: "chart.select", value: { series: "oct", index: 0 } });
+    await runInDurableObject(roomOf(gid), async (_o, state) => {
+      state.storage.sql.exec("UPDATE card_events SET at = at - ? WHERE event_id = ?", 31 * 60_000, stale.result.eventId);
+    });
+    expect(await patch({ baseRev: 2, cause: stale.result.eventId, ops: [{ op: "remove", id: "why" }] })).toMatchObject({
+      ok: false,
+      error: { code: "invalid", reason: "interact.bad_cause", message: "the cause is older than 30 minutes: send it again without the cause" },
+    });
+    // Rate: bursts of 3, then 1 per second. The refusal says how long to wait.
     let rev = 2;
     const codes: string[] = [];
+    let last: any;
     for (let i = 0; i < 4; i++) {
-      const r = await patch({ baseRev: rev, ops: [{ op: "set", id: "why", props: { text: `第 ${i} 次` } }] });
-      if (r.ok) rev = r.result.rev;
-      codes.push(r.ok ? "ok" : r.error.code);
+      last = await patch({ baseRev: rev, ops: [{ op: "set", id: "why", props: { text: `第 ${i} 次` } }] });
+      if (last.ok) rev = last.result.rev;
+      codes.push(last.ok ? "ok" : last.error.code);
     }
     expect(codes.slice(-1)).toEqual(["rate_limited"]);
+    expect(last.error.message).toBe("too many patches for this card: wait 1 s and send the same patch again");
+    expect(last.error.retryAfterMs).toBeGreaterThan(0);
+    expect(last.error.retryAfterMs).toBeLessThanOrEqual(1000);
     // 300 revs per card.
     await runInDurableObject(roomOf(gid), async (_o, state) => {
       const row = state.storage.sql.exec<{ ext: string }>("SELECT ext FROM messages WHERE id = ?", other.id).one();
@@ -372,7 +385,7 @@ describe("card.patch", () => {
     });
     expect(await cbot.request({ t: "card.patch", groupId: gid, messageId: other.id, baseRev: 300, ops: [{ op: "remove", id: "m" }] })).toMatchObject({
       ok: false,
-      error: { code: "too_large", reason: "card.rev_limit" },
+      error: { code: "too_large", reason: "card.rev_limit", message: "at most 300 revs per card: post a new card (and close this one's ask) to go on" },
     });
     void bob;
     for (const c of [ca, cb, cbot]) c.close();

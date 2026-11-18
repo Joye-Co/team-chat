@@ -737,6 +737,13 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
   });
   ok("machine/run.output.result.json", "MachineDownFrame", { t: "run.output.result", runId: RUN, outputId: "o1", ok: true, result: { rev: 2 } });
   ok("machine/run.output.result-error.json", "MachineDownFrame", { t: "run.output.result", runId: RUN, outputId: "o2", ok: false, error: { code: "conflict", reason: "card.stale_rev", message: "the card changed" } });
+  ok("machine/run.output.result-rate-limited.json", "MachineDownFrame", {
+    t: "run.output.result",
+    runId: RUN,
+    outputId: "o3",
+    ok: false,
+    error: { code: "rate_limited", message: "too many patches for this card: wait 1 s and send the same patch again", retryAfterMs: 640 },
+  });
   ok("machine/run.event-output-patch.json", "MachineUpFrame", {
     t: "run.event",
     runId: RUN,

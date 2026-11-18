@@ -686,7 +686,15 @@ export const RunOutputResultFrame = z.object({
   outputId: z.string().min(1).max(64),
   ok: z.boolean(),
   result: z.json().optional(),
-  error: z.object({ code: z.string().min(1), reason: z.string().min(1).max(64).optional(), message: z.string() }).optional(),
+  error: z
+    .object({
+      code: z.string().min(1),
+      reason: z.string().min(1).max(64).optional(),
+      message: z.string(),
+      /** `rate_limited`: wait at least this long (ms), then send the same output again. */
+      retryAfterMs: z.int().nonnegative().optional(),
+    })
+    .optional(),
 });
 export type RunOutputResultFrame = z.infer<typeof RunOutputResultFrame>;
 

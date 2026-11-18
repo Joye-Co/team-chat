@@ -144,7 +144,7 @@ describe("产出 bridge", () => {
     });
     expect(await cb.request({ t: "artifact.reply", groupId: gid, eventId: late.eventId, ok: true, payload: {} })).toMatchObject({
       ok: false,
-      error: { code: "conflict", reason: "artifact.reply_closed" },
+      error: { code: "conflict", reason: "artifact.reply_closed", message: "the page stopped waiting (120 s): push the result with artifact.data instead" },
     });
     const declined = await co.ok({ ...ask, clientEventId: "c3" });
     await cb.ok({ t: "artifact.reply", groupId: gid, eventId: declined.eventId, ok: false, error: { code: "declined", message: "没有 10 月的数" } });
@@ -207,7 +207,18 @@ describe("产出 bridge", () => {
     expect(old.frames.some((f) => f.t === "transient" && f.event.type === "artifact.data")).toBe(false);
     // 2 pushes per second, bursts of 4.
     const results = await Promise.all([1, 2, 3, 4, 5, 6].map((n) => push({ data: { n } })));
-    expect(results.some((r) => r.ok === false && r.error.code === "rate_limited")).toBe(true);
+    const limited = results.find((r) => r.ok === false && r.error.code === "rate_limited");
+    expect(limited?.error.message).toBe("too many data pushes for this version: wait 1 s and push the newest data again");
+    expect(limited?.error.retryAfterMs).toBeGreaterThan(0);
+    // A cause that is this page's event but older than 30 minutes says how to go on.
+    await sleep(600);
+    await runInDurableObject(roomOf(gid), async (_o, state) => {
+      state.storage.sql.exec("UPDATE page_events SET at = at - ? WHERE event_id = ?", 31 * 60_000, ev.eventId);
+    });
+    expect(await push({ data: { a: 9 }, cause: ev.eventId })).toMatchObject({
+      ok: false,
+      error: { code: "invalid", reason: "interact.bad_cause", message: "the cause is older than 30 minutes: push the data again without the cause" },
+    });
     for (const x of [co, old, cb]) x.close();
   });
 
@@ -533,6 +544,23 @@ describe("BotDesk delivery", () => {
       expect(state.storage.sql.exec("SELECT 1 FROM interact_pending").toArray()).toEqual([]);
     });
     void topicId;
+    for (const x of [c, d]) x.close();
+  });
+
+  it("tell chat-run how long to wait when an output is rate limited", async () => {
+    const w = await world();
+    const { d, c, runId } = await runningRun(w, { features: ["interact", "output"] });
+    const result = (outputId: string) => d.next((f) => f.t === "run.output.result" && f.outputId === outputId);
+    d.event(runId, { type: "output", outputId: "p1", op: "card.post", body: { card: card() } });
+    const messageId = (await result("p1")).result.messageId as string;
+    let last: any;
+    for (let i = 0; i < 4; i++) {
+      d.event(runId, { type: "output", outputId: `q${i}`, op: "card.patch", body: { messageId, baseRev: i + 1, ops: [{ op: "card", props: { title: `月报 ${i}` } }] } });
+      last = await result(`q${i}`);
+    }
+    expect(last).toMatchObject({ ok: false, error: { code: "rate_limited", message: "too many patches for this card: wait 1 s and send the same patch again" } });
+    expect(last.error.retryAfterMs).toBeGreaterThan(0);
+    expect(last.error.retryAfterMs).toBeLessThanOrEqual(1000);
     for (const x of [c, d]) x.close();
   });
 

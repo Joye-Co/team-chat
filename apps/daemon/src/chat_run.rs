@@ -906,10 +906,12 @@ fn result_json(r: RunOutputResult) -> Value {
         code,
         reason,
         message,
+        ..
     } = r.error.unwrap_or(RunOutputError {
         code: "failed".into(),
         reason: None,
         message: "the server did not say why".into(),
+        retry_after_ms: None,
     });
     error(&code, reason.as_deref(), message)
 }
@@ -2636,6 +2638,7 @@ mod tests {
                 code: "conflict".into(),
                 reason: Some("card.stale_rev".into()),
                 message: "the card changed".into(),
+                retry_after_ms: None,
             }),
         }));
         let v = client.await.unwrap().unwrap();
@@ -2909,6 +2912,7 @@ mod tests {
                 code: "conflict".into(),
                 reason: Some("card.stale_rev".into()),
                 message: "the card changed".into(),
+                retry_after_ms: None,
             }),
         }));
         let v = client.await.unwrap().unwrap();

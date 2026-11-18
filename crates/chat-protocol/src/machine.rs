@@ -613,6 +613,9 @@ pub struct RunOutputError {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     pub message: String,
+    /// `rate_limited`: wait at least this long (ms), then send the same output again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after_ms: Option<u64>,
 }
 
 /// `run.output.result` (feature "output"): the answer to a RunEvent `output`.
