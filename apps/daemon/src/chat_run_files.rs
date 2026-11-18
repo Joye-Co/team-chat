@@ -390,6 +390,7 @@ async fn artifact_body(local: &Local, body: &Value, create: bool) -> Result<Valu
         "events",
         "media",
         "data",
+        "preview",
         "parentVersion",
     ] {
         if !body[k].is_null() {

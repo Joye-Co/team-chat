@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>发布前清单</title>
+<style>
+  /* The app gives the font, the text color and a transparent background: style only your own
+     parts, with the --tc-* variables (the value after the comma is for a plain browser). */
+  ul { list-style: none; margin: 0 0 16px; padding: 0; }
+  li { display: flex; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--tc-border, #8884); }
+  li.done span { color: var(--tc-muted, #888); text-decoration: line-through; }
+  form { display: flex; gap: 8px; }
+  input[type=text] { flex: 1; min-width: 0; font: inherit; color: inherit; background: transparent;
+    border: 1px solid var(--tc-border, #8884); border-radius: 8px; padding: 4px 8px; }
+  button { font: inherit; color: inherit; background: var(--tc-fill, #8882); border: 1px solid var(--tc-border, #8884);
+    border-radius: 8px; padding: 4px 12px; }
+  #note { color: var(--tc-muted, #888); font-size: 12px; min-height: 18px; margin: 8px 0 0; }
+</style>
+</head>
+<body>
+<h2>发布前清单</h2>
+<ul id="list"></ul>
+<form id="add"><input type="text" id="text" placeholder="加一项" maxlength="80"><button>添加</button></form>
+<p id="note"></p>
+<script>
+  const tc = window.teamchat;                       // absent in a normal browser
+  const canEmit = !!(tc && tc.can.emit), canAsk = !!(tc && tc.can.ask);
+  const list = document.getElementById('list'), note = document.getElementById('note');
+  let items = [];
+  const WHY = { offline: '现在离线，没有发出去。', rate_limited: '对方正忙，稍后再试。', declined: '没有被接受。', timeout: '等了很久没有回音。' };
+  const say = (e) => { note.textContent = e ? (WHY[e.code] || '没有发出去。') : ''; };
+
+  function draw() {
+    list.replaceChildren(...items.map((it) => {
+      const li = document.createElement('li'), box = document.createElement('input'), text = document.createElement('span');
+      box.type = 'checkbox'; box.checked = !!it.done; box.disabled = !canEmit;
+      text.textContent = it.text; li.className = it.done ? 'done' : ''; li.append(box, text);
+      box.onchange = () => {                        // show it at once, put it back when it was not sent
+        const done = box.checked; it.done = done; draw(); say();
+        tc.emit('item.toggle', { id: it.id, done }).catch((e) => { it.done = !done; draw(); say(e); });
+      };
+      return li;
+    }));
+  }
+
+  document.getElementById('add').onsubmit = async (ev) => {   // no <form> submit in the sandbox: handle it here
+    ev.preventDefault();
+    const input = document.getElementById('text'), text = input.value.trim();
+    if (!text || !canAsk) return;
+    note.textContent = '正在添加…';
+    try { await tc.ask('item.add', { text }); input.value = ''; say(); }   // the new list arrives through onData
+    catch (e) { say(e); }
+  };
+  if (!canAsk) document.getElementById('add').hidden = true;
+
+  // The state lives in the page data: onData runs with the current data (null before the first
+  // push) and again on every push. Keep nothing else in memory: a new version reloads the page.
+  if (tc) tc.onData((data) => { items = (data && data.items) || []; draw(); });
+  else { items = [{ id: 'a', text: '（预览）在浏览器里打开时没有数据', done: false }]; draw(); }
+</script>
+</body>
+</html>

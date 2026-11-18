@@ -10,7 +10,7 @@
 // first run's CLI session (`--resume`), and a second bot on the fake Codex app-server uses
 // `chat-run` through the file transport (local runs only).
 // The first run also uses `chat-run` (the fake CLI's word "chatcard"): it reads `chat-run card
-// schema`, posts a card built from it, posts it again (a retry: the idempotency key must give the
+// schema --full`, posts a card built from it, posts it again (a retry: the idempotency key must give the
 // same message, and the topic must hold the card once), and patches the posted card at its rev
 // (exit 0, the next rev). The run log must hold the `output` events with the token in the patch
 // body redacted, and the socket must be gone after the run.
@@ -376,8 +376,8 @@ async function runDaemonCheck(
   const chatRun = JSON.parse(readFileSync(join(workOf(work, runId), "chatcard-1.json"), "utf8"));
   const sockets = readdirSync(runDir).filter((f) => f.endsWith(".sock"));
   if (sockets.length > 0) throw new Error("chat-run socket left after the run");
-  // The card came from `chat-run card schema`; the post, its retry and the patch all worked.
-  if (!chatRun.kinds?.includes("text")) throw new Error(`chat-run card schema gave no block types: ${JSON.stringify(chatRun.kinds)}`);
+  // The card came from `chat-run card schema --full`; the post, its retry and the patch all worked.
+  if (!chatRun.kinds?.includes("text")) throw new Error(`chat-run card schema --full gave no block types: ${JSON.stringify(chatRun.kinds)}`);
   const posted = chatRun.post.out;
   if (chatRun.post.code !== 0 || !posted?.messageId) throw new Error(`chat-run card post failed: ${JSON.stringify(chatRun.post)}`);
   if (chatRun.again.code !== 0 || chatRun.again.out?.messageId !== posted.messageId) throw new Error(`the retry posted another card: ${JSON.stringify(chatRun.again)}`);
@@ -448,7 +448,7 @@ async function resumeCheck(groupId: string, topicId: string, firstRunId: string,
 /**
  * The Codex file transport: a second bot runs the fake Codex app-server (sandbox
  * workspace-write), whose `chat-run` uses the request folder `<work>/.chat-run-<run id>`
- * instead of the socket. It posts a card from `chat-run card schema` (and its retry, deduped) and
+ * instead of the socket. It posts a card from `chat-run card schema --full` (and its retry, deduped) and
  * patches it; the folder is gone after the run and the topic is done.
  */
 async function codexCheck(owner: string, groupId: string, work: string, events: any[], ws: WebSocket) {
