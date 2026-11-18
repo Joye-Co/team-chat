@@ -284,6 +284,19 @@ impl TimelineView {
                 let Some((g, tid)) = this.open.clone() else {
                     return;
                 };
+                // Back online: a page of older messages asked for while the
+                // connection was down was not sent. Ask again on the next draw.
+                if this.older_requested
+                    && !this.provider_loading
+                    && changes.any(|c| matches!(c, Change::Connection))
+                    && matches!(
+                        this.services.provider.connection(),
+                        crate::data::ConnectionState::Online
+                    )
+                {
+                    this.older_requested = false;
+                    cx.notify();
+                }
                 let touches = changes.touches_topic(&g, &tid)
                     || changes.any(|c| match c {
                         Change::Topics { group_id } => *group_id == g,
