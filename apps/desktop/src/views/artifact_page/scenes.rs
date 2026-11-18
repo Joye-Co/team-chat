@@ -90,6 +90,43 @@ pub const SCENES: &[Scene] = &[
         open: open_main,
     },
     Scene {
+        name: "artifacts-kinds",
+        about: "产出 with files of many kinds: each row names its 类型 (网页, PDF, 视频, 表格, Markdown, 代码) with its symbol",
+        start: Start::V2Files,
+        setup: |s, cx| s.nav.update(cx, |nav, cx| nav.open_artifacts(cx)),
+        open: open_main,
+    },
+    Scene {
+        name: "artifacts-kinds-grid",
+        about: "The same 产出 in the icon view: a tile without a picture shows its kind's symbol",
+        start: Start::V2Files,
+        setup: |s, cx| {
+            list_start(true, None);
+            s.nav.update(cx, |nav, cx| nav.open_artifacts(cx))
+        },
+        open: open_main,
+    },
+    Scene {
+        name: "artifacts-filter",
+        about: "产出 filtered to 视频: the 筛选 item lit, the chip over the table with 清除筛选, the footer's match count",
+        start: Start::V2Files,
+        setup: |s, cx| {
+            list_start_filtered(false, None, Some(super::list::ListKind::Video));
+            s.nav.update(cx, |nav, cx| nav.open_artifacts(cx))
+        },
+        open: open_main,
+    },
+    Scene {
+        name: "artifacts-filter-no-match",
+        about: "产出 filtered to 视频 with a search that finds nothing: the Empty cell with 清空搜索 and 清除筛选",
+        start: Start::V2Files,
+        setup: |s, cx| {
+            list_start_filtered(false, Some("季度预算"), Some(super::list::ListKind::Video));
+            s.nav.update(cx, |nav, cx| nav.open_artifacts(cx))
+        },
+        open: open_main,
+    },
+    Scene {
         name: "artifacts-no-match",
         about: "产出 with a search that finds nothing: the Empty state with 清空搜索",
         start: Start::V2,
@@ -128,13 +165,23 @@ pub const SCENES: &[Scene] = &[
 pub struct ListStart {
     pub grid: bool,
     pub query: Option<&'static str>,
+    /// A 类型 filter that is on.
+    pub kind: Option<super::list::ListKind>,
 }
 
 static LIST_START: std::sync::Mutex<Option<ListStart>> = std::sync::Mutex::new(None);
 
 fn list_start(grid: bool, query: Option<&'static str>) {
+    list_start_filtered(grid, query, None);
+}
+
+fn list_start_filtered(
+    grid: bool,
+    query: Option<&'static str>,
+    kind: Option<super::list::ListKind>,
+) {
     if let Ok(mut s) = LIST_START.lock() {
-        *s = Some(ListStart { grid, query });
+        *s = Some(ListStart { grid, query, kind });
     }
 }
 

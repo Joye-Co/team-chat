@@ -13,6 +13,7 @@
 //! about five per second ([`forward_page_event`]).
 
 pub mod gate_check;
+pub mod list;
 pub mod pane;
 pub mod scenes;
 
@@ -45,7 +46,7 @@ use crate::{
         web_embed::{WebEmbed, WebEmbedSpec},
     },
     views::{
-        group_page::{kind_label, kit, short_time},
+        group_page::{kit, short_time},
         shell::{PageView, TitleBarSpec, member_name, panes::watch, stub_body},
     },
 };
@@ -295,6 +296,8 @@ pub struct ArtifactPage {
     /// The table footer's page (1-based) and rows per page (§2.7).
     page: usize,
     per_page: usize,
+    /// The toolbar's filter: 类型, 群, 做的人.
+    filter: list::ListFilter,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -316,10 +319,26 @@ impl ListSort {
             ListSort::Kind => c::ARTIFACTS_SORT_KIND,
         }
     }
+
+    /// The name in the saved view settings.
+    fn slug(self) -> &'static str {
+        match self {
+            ListSort::Time => "time",
+            ListSort::Name => "name",
+            ListSort::Kind => "kind",
+        }
+    }
+
+    fn from_slug(slug: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|s| s.slug() == slug)
+    }
 }
 
 impl ArtifactPage {
     pub fn new(services: Services, cx: &mut Context<Self>) -> Self {
+        // The view the person left the list in (图标 or 列表, the order, rows
+        // per page) comes back on the next launch.
+        let (grid, sort, per_page) = list::ListPrefs::load();
         Self {
             _subscriptions: watch(&services, cx),
             services,
@@ -327,13 +346,29 @@ impl ArtifactPage {
             aside_open: true,
             copied: false,
             // A table first (§2.18); the icon view is one click away.
-            grid: false,
-            sort: ListSort::Time,
+            grid: grid.unwrap_or(false),
+            sort: sort
+                .as_deref()
+                .and_then(ListSort::from_slug)
+                .unwrap_or(ListSort::Time),
             search: None,
             list_width: Rc::new(Cell::new(px(0.))),
             page: 1,
-            per_page: page::PER_PAGE_CHOICES[0],
+            per_page: per_page
+                .filter(|n| page::PER_PAGE_CHOICES.contains(n))
+                .unwrap_or(page::PER_PAGE_CHOICES[0]),
+            filter: list::ListFilter::default(),
         }
+    }
+
+    /// Saves the list's view settings after the person changed one.
+    fn save_list_prefs(&self) {
+        list::ListPrefs {
+            grid: self.grid,
+            sort: self.sort.slug().to_string(),
+            per_page: self.per_page,
+        }
+        .save();
     }
 
     fn open(&self, cx: &App) -> Option<(String, Option<u32>)> {
@@ -535,7 +570,12 @@ impl ArtifactPage {
         });
         // inc-host: 已更新到 v{n} after a reload in place, or 有 v{n}, in the
         // subtitle.
-        let mut subtitle = vec![group, kind_label(a.kind).to_string()];
+        let mut subtitle = vec![
+            group,
+            list::ListKind::of(self.services.provider.as_ref(), a)
+                .label()
+                .to_string(),
+        ];
         subtitle.extend(host::notice(&a.id, shown, a.version, cx));
         let subtitle = subtitle
             .into_iter()
@@ -1250,6 +1290,9 @@ impl ArtifactPage {
         let start = fresh.then(scenes::take_list_start).flatten();
         if let Some(st) = &start {
             self.grid = st.grid;
+            if let Some(kind) = st.kind {
+                self.filter.toggle_kind(kind);
+            }
         }
         let search = self
             .search
@@ -1269,17 +1312,45 @@ impl ArtifactPage {
         let query = search.read(cx).value().trim().to_lowercase();
         let every = p.all_artifacts();
         let total = every.len();
+        // What each row is (网页, PDF, 视频, 表格, …), from what this client holds.
+        let kinds: std::collections::HashMap<String, list::ListKind> = every
+            .iter()
+            .map(|(_, a)| (a.id.clone(), list::ListKind::of(p.as_ref(), a)))
+            .collect();
+        let kind_of = |a: &crate::data::ArtifactSummary| {
+            kinds.get(&a.id).copied().unwrap_or(list::ListKind::File)
+        };
+        // The filter offers what the list holds: its kinds, 群 and makers.
+        let mut have_kinds: Vec<list::ListKind> = kinds.values().copied().collect();
+        have_kinds.sort();
+        have_kinds.dedup();
+        let mut have_groups: Vec<String> = Vec::new();
+        let mut have_makers: Vec<String> = Vec::new();
+        for (g, a) in &every {
+            if !have_groups.contains(g) {
+                have_groups.push(g.clone());
+            }
+            if !have_makers.contains(&a.created_by) {
+                have_makers.push(a.created_by.clone());
+            }
+        }
+        // A choice that left the list (its last 产出 was removed) is dropped.
+        self.filter.kinds.retain(|k| have_kinds.contains(k));
+        self.filter.groups.retain(|g| have_groups.contains(g));
+        self.filter.makers.retain(|m| have_makers.contains(m));
+        let filter = self.filter.clone();
         // The search reads what a row shows: the name, the 类型, the 话题 and
         // who made it (each looked up once per row).
         let mut all: Vec<_> = every
             .into_iter()
+            .filter(|(g, a)| filter.passes(kind_of(a), g, &a.created_by))
             .filter(|(g, a)| {
                 query.is_empty()
                     || row_matches(
                         &query,
                         &[
                             &a.title,
-                            kind_label(a.kind),
+                            kind_of(a).label(),
                             &p.topic(g, &a.topic_id).map(|t| t.title).unwrap_or_default(),
                             &member_name(&self.services, &a.created_by),
                         ],
@@ -1290,8 +1361,9 @@ impl ArtifactPage {
             ListSort::Time => all.sort_by(|x, y| y.1.updated_at.cmp(&x.1.updated_at)),
             ListSort::Name => all.sort_by(|x, y| x.1.title.cmp(&y.1.title)),
             ListSort::Kind => all.sort_by(|x, y| {
-                kind_label(x.1.kind)
-                    .cmp(kind_label(y.1.kind))
+                kind_of(&x.1)
+                    .label()
+                    .cmp(kind_of(&y.1).label())
                     .then(y.1.updated_at.cmp(&x.1.updated_at))
             }),
         }
@@ -1322,6 +1394,7 @@ impl ArtifactPage {
                     let _ = set.update(cx, |v, cx| {
                         v.per_page = n;
                         v.page = 1;
+                        v.save_list_prefs();
                         cx.notify();
                     });
                 })),
@@ -1346,6 +1419,7 @@ impl ArtifactPage {
                 move |ix, _, cx| {
                     let _ = this.update(cx, |v, cx| {
                         v.grid = ix == 0;
+                        v.save_list_prefs();
                         cx.notify();
                     });
                 }
@@ -1374,6 +1448,7 @@ impl ArtifactPage {
                             .on_click(move |_, _, cx| {
                                 let _ = this.update(cx, |v, cx| {
                                     v.sort = s;
+                                    v.save_list_prefs();
                                     cx.notify();
                                 });
                             }),
@@ -1381,6 +1456,152 @@ impl ArtifactPage {
                 }
                 menu
             }
+        });
+        // The filter as a toolbar item: its menu checks 类型, 群 and 做的人; the
+        // item stays lit while a filter is on.
+        let group_names: Vec<(String, String)> = have_groups
+            .iter()
+            .map(|g| {
+                let name = p
+                    .groups()
+                    .into_iter()
+                    .find(|x| x.id == *g)
+                    .map(|x| x.name)
+                    .unwrap_or_default();
+                (g.clone(), name)
+            })
+            .collect();
+        let maker_names: Vec<(String, String)> = have_makers
+            .iter()
+            .map(|m| (m.clone(), member_name(&self.services, m)))
+            .collect();
+        let filter_item = sym_toolbar_item(
+            "artifacts-filter",
+            Sym::Filter,
+            c::ARTIFACTS_FILTER,
+            !filter.is_empty(),
+            active,
+            cx,
+        )
+        .disabled(empty)
+        .when(empty, |b| b.opacity(0.5))
+        .dropdown_menu_with_anchor(gpui::Anchor::TopRight, {
+            let (this, filter) = (this.clone(), filter.clone());
+            let (kinds, groups, makers) =
+                (have_kinds.clone(), group_names.clone(), maker_names.clone());
+            move |mut menu, _, _| {
+                menu = menu.label(c::ARTIFACTS_COL_KIND);
+                for kind in kinds.iter().copied() {
+                    let this = this.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(kind.label())
+                            .checked(filter.kinds.contains(&kind))
+                            .on_click(move |_, _, cx| {
+                                let _ = this.update(cx, |v, cx| {
+                                    v.filter.toggle_kind(kind);
+                                    v.page = 1;
+                                    cx.notify();
+                                });
+                            }),
+                    );
+                }
+                menu = menu.separator().label(c::ARTIFACTS_FILTER_GROUP);
+                for (id, name) in groups.iter().cloned() {
+                    let this = this.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(name)
+                            .checked(filter.groups.contains(&id))
+                            .on_click(move |_, _, cx| {
+                                let _ = this.update(cx, |v, cx| {
+                                    v.filter.toggle_group(&id);
+                                    v.page = 1;
+                                    cx.notify();
+                                });
+                            }),
+                    );
+                }
+                menu = menu.separator().label(c::ARTIFACTS_COL_BY);
+                for (id, name) in makers.iter().cloned() {
+                    let this = this.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(name)
+                            .checked(filter.makers.contains(&id))
+                            .on_click(move |_, _, cx| {
+                                let _ = this.update(cx, |v, cx| {
+                                    v.filter.toggle_maker(&id);
+                                    v.page = 1;
+                                    cx.notify();
+                                });
+                            }),
+                    );
+                }
+                menu
+            }
+        });
+        // The filters that are on, as chips over the list: a click takes one off.
+        let clear_filter = |id: &'static str, style: nk::PushStyle| {
+            let this = this.clone();
+            nk::push_button(
+                id,
+                c::ARTIFACTS_FILTER_CLEAR,
+                style,
+                nk::PushSize::Small,
+                cx,
+            )
+            .on_click(move |_, _, cx| {
+                let _ = this.update(cx, |v, cx| {
+                    v.filter.clear();
+                    v.page = 1;
+                    cx.notify();
+                });
+            })
+        };
+        let chips = (!filter.is_empty()).then(|| {
+            enum Off {
+                Kind(list::ListKind),
+                Group(String),
+                Maker(String),
+            }
+            let mut on: Vec<(String, Off)> = Vec::new();
+            for kind in &filter.kinds {
+                on.push((kind.label().to_string(), Off::Kind(*kind)));
+            }
+            for (id, name) in &group_names {
+                if filter.groups.contains(id) {
+                    on.push((name.clone(), Off::Group(id.clone())));
+                }
+            }
+            for (id, name) in &maker_names {
+                if filter.makers.contains(id) {
+                    on.push((name.clone(), Off::Maker(id.clone())));
+                }
+            }
+            div()
+                .flex_none()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap(tsp::S8)
+                .children(on.into_iter().enumerate().map(|(i, (name, off))| {
+                    let this = this.clone();
+                    nk::chip_button(SharedString::from(format!("artifacts-chip-{i}")), true, cx)
+                        .child(div().flex().items_center().gap(tsp::S4).child(name).child(
+                            crate::ui::icons::icon(Sym::Close, nk::tokens::icon::SM, n.secondary),
+                        ))
+                        .on_click(move |_, _, cx| {
+                            let _ = this.update(cx, |v, cx| {
+                                match &off {
+                                    Off::Kind(k) => v.filter.toggle_kind(*k),
+                                    Off::Group(g) => v.filter.toggle_group(g),
+                                    Off::Maker(m) => v.filter.toggle_maker(m),
+                                }
+                                v.page = 1;
+                                cx.notify();
+                            });
+                        })
+                }))
+                .child(clear_filter("artifacts-filter-clear", nk::PushStyle::Link))
+                .into_any_element()
         });
         let leading = content_leading(&self.services, cx);
         let load = page::PageLoad::of(&self.services, total > 0);
@@ -1396,6 +1617,7 @@ impl ArtifactPage {
                 page::PageLoad::Failed => crate::copy::desk::DESK_SUBTITLE_OFFLINE.to_string(),
             })
             .group(views)
+            .group(nk::toolbar_slot(filter_item))
             .group(nk::toolbar_slot(sort))
             .group(
                 nk::SearchField::new("artifacts-search", &search)
@@ -1431,6 +1653,7 @@ impl ArtifactPage {
                                 .flex()
                                 .flex_col()
                                 .gap(page::m::GUTTER)
+                                .children(chips)
                                 .child(body),
                         ),
                 )
@@ -1508,7 +1731,7 @@ impl ArtifactPage {
                 nav.update(cx, |nav, cx| nav.open_artifact(id, None, cx))
             }
         };
-        let footer_text = if query.is_empty() {
+        let footer_text = if query.is_empty() && filter.is_empty() {
             fill(c::ARTIFACTS_FOOTER, &[("n", &total.to_string())])
         } else {
             fill(
@@ -1549,6 +1772,7 @@ impl ArtifactPage {
                 .min(all.len().max(1) as u16);
             let tile_w =
                 (width - page::m::GRID_GAP * (cols.saturating_sub(1)) as f32) / cols as f32;
+            #[allow(clippy::type_complexity)]
             let mut days: Vec<(String, Vec<&(String, crate::data::ArtifactSummary)>)> = Vec::new();
             for item in &all {
                 let day = day_label(now, item.1.updated_at);
@@ -1593,7 +1817,7 @@ impl ArtifactPage {
                             .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                             .min_w_0()
                             .overflow_hidden()
-                            .child(thumbnail(&self.services, a, tile_w, cx))
+                            .child(thumbnail(&self.services, a, kind_of(a), tile_w, cx))
                             .child(
                                 div()
                                     .p(tsp::S12)
@@ -1635,7 +1859,7 @@ impl ArtifactPage {
                                     &a.id,
                                     &a.title,
                                 ),
-                                kind_sym(a.kind),
+                                kind_of(a).sym(),
                             )
                             .context_menu({
                                 let (services, a) = (self.services.clone(), a.clone());
@@ -1680,7 +1904,7 @@ impl ArtifactPage {
                         .child(
                             div()
                                 .flex_none()
-                                .child(page::row_icon(kind_sym(a.kind), n.secondary)),
+                                .child(page::row_icon(kind_of(a).sym(), n.secondary)),
                         )
                         .child(
                             div()
@@ -1740,7 +1964,7 @@ impl ArtifactPage {
                     (
                         vec![
                             name,
-                            page::outline_badge(kind_label(a.kind), cx),
+                            page::outline_badge(kind_of(a).label(), cx),
                             cell_tip(
                                 format!("artifact-topic-{}", a.id),
                                 topic_name(g, &a.topic_id),
@@ -1768,16 +1992,26 @@ impl ArtifactPage {
             // (§2.7 empty).
             let no_match = all.is_empty().then(|| {
                 let search = search.clone();
-                let clear = nk::push_button(
-                    "artifacts-clear",
-                    c::ARTIFACTS_CLEAR_SEARCH,
-                    nk::PushStyle::Outline,
-                    nk::PushSize::Small,
-                    cx,
-                )
-                .on_click(move |_, window, cx| {
-                    search.update(cx, |s, cx| s.set_value("", window, cx));
+                // 清空搜索 when words were typed, 清除筛选 when a filter is on.
+                let clear = (!query.is_empty()).then(|| {
+                    nk::push_button(
+                        "artifacts-clear",
+                        c::ARTIFACTS_CLEAR_SEARCH,
+                        nk::PushStyle::Outline,
+                        nk::PushSize::Small,
+                        cx,
+                    )
+                    .on_click(move |_, window, cx| {
+                        search.update(cx, |s, cx| s.set_value("", window, cx));
+                    })
                 });
+                let unfilter = (!filter.is_empty())
+                    .then(|| clear_filter("artifacts-unfilter", nk::PushStyle::Outline));
+                let title = if query.is_empty() {
+                    c::ARTIFACTS_FILTER_NO_MATCH.to_string()
+                } else {
+                    fill(c::ARTIFACTS_NO_MATCH_TITLE, &[("q", &query)])
+                };
                 div()
                     .h(px(96.))
                     .flex()
@@ -1785,13 +2019,15 @@ impl ArtifactPage {
                     .items_center()
                     .justify_center()
                     .gap(tsp::S8)
+                    .child(div().n_body().text_color(n.secondary).child(title))
                     .child(
                         div()
-                            .n_body()
-                            .text_color(n.secondary)
-                            .child(fill(c::ARTIFACTS_NO_MATCH_TITLE, &[("q", &query)])),
+                            .flex()
+                            .items_center()
+                            .gap(tsp::S8)
+                            .children(clear)
+                            .children(unfilter),
                     )
-                    .child(clear)
             });
             // The frame hugs the table and ends in its footer row.
             page::frame(cx)
@@ -1973,6 +2209,7 @@ fn sym_toolbar_item(
 fn thumbnail(
     services: &Services,
     a: &crate::data::ArtifactSummary,
+    kind: list::ListKind,
     tile_w: Pixels,
     cx: &App,
 ) -> gpui::Div {
@@ -2061,7 +2298,7 @@ fn thumbnail(
                 .object_fit(gpui::ObjectFit::Contain),
         ),
         None => well.child(
-            kind_sym(a.kind)
+            kind.sym()
                 .icon(crate::ui::sf_symbols::SymSize::new(
                     40.,
                     48.,

@@ -86,4 +86,11 @@ crate::copy! {
     // The toolbar items' words (D20); the long forms stay as their tooltips.
     ARTIFACT_OPEN_WINDOW_SHORT = "新窗口",
     ARTIFACT_INFO_SHORT = "信息",
+    // The list's filter: its toolbar item, the 群 heading of its menu (类型 and 做的人
+    // are the column names), and the ways out.
+    ARTIFACTS_KIND_DOC = "文档",
+    ARTIFACTS_FILTER = "筛选",
+    ARTIFACTS_FILTER_GROUP = "群",
+    ARTIFACTS_FILTER_CLEAR = "清除筛选",
+    ARTIFACTS_FILTER_NO_MATCH = "没有符合筛选的产出",
 }

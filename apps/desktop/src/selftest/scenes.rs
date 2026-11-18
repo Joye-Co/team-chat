@@ -55,6 +55,9 @@ pub enum Start {
     /// The v2 sample team with a second member at work in 开发 / 虚拟列表
     /// (`fake::v2::V2Samples::with_second_run`).
     V2TwoRuns,
+    /// The v2 sample team with 产出 that are files of many kinds: a PDF, a video,
+    /// a table, a Markdown document, code (`fake::v2::V2Samples::with_file_artifacts`).
+    V2Files,
     // --- v13/ux-pages ---
     /// The v2 sample team's 群 with nothing synced yet, still connecting:
     /// the pages draw their skeletons (`selftest::page_states`).

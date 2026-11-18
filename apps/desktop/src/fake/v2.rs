@@ -1129,6 +1129,57 @@ impl V2Samples {
         }
     }
 
+    /// The sample team with 产出 that are files of many kinds (the 产出 list's 类型
+    /// column, symbols and filter): a PDF, a video, a table, a Markdown document and
+    /// a code file, each named after its file. Only the 产出 list scenes use it.
+    pub fn with_file_artifacts() -> Arc<Self> {
+        let s = Self::new();
+        s.with(|d| {
+            for (i, (id, group, topic, title, by)) in [
+                ("art-v2-f-pdf", OPS, T_RELEASE, "巡检报告-11-03.pdf", WATCH),
+                (
+                    "art-v2-f-video",
+                    DEV,
+                    T_RECONNECT,
+                    "重连测试录屏.mp4",
+                    FORGE,
+                ),
+                (
+                    "art-v2-f-table",
+                    GROWTH,
+                    T_REPORT,
+                    "10 月各渠道新增.csv",
+                    LEDGER,
+                ),
+                (
+                    "art-v2-f-doc",
+                    DEV,
+                    T_RECONNECT,
+                    "重连重复问题复盘.md",
+                    FORGE,
+                ),
+                ("art-v2-f-code", DEV, T_RECONNECT, "reconnect.ts", FORGE),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                d.artifacts.push((
+                    group.into(),
+                    artifact(
+                        id,
+                        topic,
+                        ArtifactKind::File,
+                        title,
+                        1,
+                        by,
+                        at(9, 30) - i as i64 * 7 * MIN,
+                    ),
+                ));
+            }
+        });
+        s
+    }
+
     /// The sample team as the Card v2 gallery shows it: Watch's release that I approved
     /// runs, so its 发布中 card offers 停止… (C-04). Only the gallery uses it: in the
     /// other scenes the release still waits for my approval.
@@ -1593,11 +1644,24 @@ impl ChatProvider for V2Samples {
                 created_by: summary.created_by.clone(),
                 created_at: summary.updated_at - (summary.version - v) as i64 * 24 * 60 * MIN,
                 // --- v11/media ---
-                entry: "index.html".into(),
-                files: vec![ArtifactVersionFile {
-                    path: "index.html".into(),
-                    size: 18_400,
-                    mime: "text/html".into(),
+                // A file 产出 holds the file it is named after; a page its index.
+                entry: if summary.kind == ArtifactKind::File {
+                    summary.title.clone()
+                } else {
+                    "index.html".into()
+                },
+                files: vec![if summary.kind == ArtifactKind::File {
+                    ArtifactVersionFile {
+                        path: summary.title.clone(),
+                        size: 48_000,
+                        mime: String::new(),
+                    }
+                } else {
+                    ArtifactVersionFile {
+                        path: "index.html".into(),
+                        size: 18_400,
+                        mime: "text/html".into(),
+                    }
                 }],
                 // --- end v11/media ---
             })
