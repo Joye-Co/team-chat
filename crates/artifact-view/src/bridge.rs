@@ -726,12 +726,6 @@ pub fn reply_script(reply: &Value) -> String {
     )
 }
 
-/// The script that rejects the request `id` of a document that may still be there (a
-/// navigation that only starts). In the next document no request has this id.
-pub fn reject_script(id: &Value, reject: Reject) -> String {
-    reply_script(&err_value(id, reject.code(), reject.message()))
-}
-
 /// The script that pushes a data snapshot to the page's `onData` callbacks
 /// (`teamchatdata`), with the same escaping as [`reply_script`].
 pub fn data_script(data: &Value, meta: &Value) -> String {
@@ -1113,6 +1107,8 @@ mod tests {
             .finish(&json!(2), Err(Reject::NoUserAction.into()))
             .unwrap();
         assert_eq!(reply_of(&s)["error"]["code"], "no_user_action");
+        // The words name the window the gate really uses.
+        assert_eq!(crate::gate::USER_ACTION_WINDOW.as_secs(), 2);
         assert!(
             reply_of(&s)["error"]["message"]
                 .as_str()
@@ -1181,10 +1177,6 @@ mod tests {
         b.reset();
         let o = b.handle(br#"{"id":"g","method":"getData"}"#, now());
         assert_eq!(reply_of(&o.reply.unwrap())["result"], json!({"n":1}));
-        assert_eq!(
-            reply_of(&reject_script(&json!("x"), Reject::Reloaded))["error"]["code"],
-            "reloaded"
-        );
     }
 
     #[test]

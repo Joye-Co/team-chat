@@ -1169,3 +1169,36 @@ pub fn open_external_url(url: &str) -> bool {
     };
     NSWorkspace::sharedWorkspace().openURL(&nsurl)
 }
+
+#[cfg(test)]
+mod menu_tests {
+    use super::keeps_menu_item;
+
+    #[test]
+    fn the_page_menu_keeps_only_editing_and_look_up() {
+        for kept in [
+            "WKMenuItemIdentifierCopy",
+            "WKMenuItemIdentifierCut",
+            "WKMenuItemIdentifierPaste",
+            "WKMenuItemIdentifierSelectAll",
+            "WKMenuItemIdentifierLookUp",
+        ] {
+            assert!(keeps_menu_item(Some(kept)), "{kept}");
+        }
+        // What leaves the page or does nothing in it goes, and so does an item WebKit
+        // names otherwise or not at all (separators, services, future items).
+        for gone in [
+            "WKMenuItemIdentifierReload",
+            "WKMenuItemIdentifierGoBack",
+            "WKMenuItemIdentifierDownloadLinkedFile",
+            "WKMenuItemIdentifierOpenLinkInNewWindow",
+            "WKMenuItemIdentifierShareMenu",
+            "WKMenuItemIdentifierSearchWeb",
+            "WKMenuItemIdentifierInspectElement",
+            "",
+        ] {
+            assert!(!keeps_menu_item(Some(gone)), "{gone}");
+        }
+        assert!(!keeps_menu_item(None));
+    }
+}

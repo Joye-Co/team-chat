@@ -35,10 +35,11 @@ use serde_json::{Value, json};
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{
     AcceleratorKeyPressedEventHandler, AddScriptToExecuteOnDocumentCreatedCompletedHandler,
-    CallDevToolsProtocolMethodCompletedHandler, ContextMenuRequestedEventHandler,
-    CoreWebView2CustomSchemeRegistration, CoreWebView2EnvironmentOptions,
-    CreateCoreWebView2ControllerCompletedHandler, CreateCoreWebView2EnvironmentCompletedHandler,
-    DownloadStartingEventHandler, ExecuteScriptCompletedHandler, FocusChangedEventHandler,
+    CallDevToolsProtocolMethodCompletedHandler, ContentLoadingEventHandler,
+    ContextMenuRequestedEventHandler, CoreWebView2CustomSchemeRegistration,
+    CoreWebView2EnvironmentOptions, CreateCoreWebView2ControllerCompletedHandler,
+    CreateCoreWebView2EnvironmentCompletedHandler, DownloadStartingEventHandler,
+    ExecuteScriptCompletedHandler, FocusChangedEventHandler,
     LaunchingExternalUriSchemeEventHandler, MoveFocusRequestedEventHandler,
     NavigationCompletedEventHandler, NavigationStartingEventHandler,
     NewWindowRequestedEventHandler, PermissionRequestedEventHandler, ProcessFailedEventHandler,
@@ -77,7 +78,7 @@ use crate::page::{self, Nav, State};
 use crate::resolve::{self, SCHEME};
 use crate::win_support::decode_base64;
 use crate::{
-    ArtifactEvent, Capabilities, Chrome, Error, OpenOptions, Presentation, Rect, Reject, Snapshot,
+    ArtifactEvent, Capabilities, Chrome, Error, OpenOptions, Presentation, Rect, Snapshot,
     VersionItem, VersionSpec, bridge, gate,
 };
 
@@ -950,10 +951,6 @@ impl Page {
                     if nav != Nav::Allow {
                         args.SetCancel(true)?;
                         page.cancelled.borrow_mut().insert(id);
-                    } else {
-                        // A new document of the page shown (its first load, its own
-                        // reload, a link inside the origin): the old one's requests end.
-                        page.document_starts(true);
                     }
                     if let Nav::External(url) = nav {
                         page.emit(ArtifactEvent::ExternalLink { url });
@@ -962,6 +959,22 @@ impl Page {
                 Ok(())
             }));
             webview.add_NavigationStarting(&navigate, &mut token)?;
+
+            // A new document of the page shown (its first load, its own reload, a link
+            // inside the origin): the old one is gone, and its open requests with it.
+            // `ContentLoading` comes before the new document's first script, and not for
+            // a navigation inside the document (`#part`, `history.pushState`), which
+            // `NavigationStarting` also reports: the page lives on there, with its
+            // requests and its data subscription. The same moment as WebKit's
+            // `didCommitNavigation`.
+            let weak = Rc::downgrade(self);
+            let loading = ContentLoadingEventHandler::create(Box::new(move |_, _| {
+                if let Some(page) = weak.upgrade() {
+                    page.document_starts();
+                }
+                Ok(())
+            }));
+            webview.add_ContentLoading(&loading, &mut token)?;
 
             // Frames: the CSP allows none, so no frame navigation is ever allowed, not even
             // inside the origin. A frame then only ever holds `about:blank` or `srcdoc`
@@ -1282,10 +1295,12 @@ impl Page {
             forget_environment(self.config.autoplay);
             self.controller.borrow_mut().take();
             self.webview.borrow_mut().take();
+            // Nothing can answer the page's requests any more.
+            self.document_starts();
             self.fail("web content process ended".into());
         } else if kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED {
             // The document is gone with its process: nothing can answer its requests.
-            self.document_starts(false);
+            self.document_starts();
             let n = self.reloads.get();
             if n < 1 {
                 // One reload by itself; the host hears of a failure only when the page
@@ -1298,21 +1313,12 @@ impl Page {
         }
     }
 
-    /// A new document replaces the page's one. With `old_alive` the old document can still
-    /// run (the navigation only starts): its open requests reject `reloaded` there. The
-    /// next document's request ids differ, so the scripts do nothing in it.
-    fn document_starts(&self, old_alive: bool) {
-        let Some(ArtifactEvent::RequestsEnded { version, reply_ids }) =
-            page::document_started_event(&self.state)
-        else {
-            return;
-        };
-        if old_alive {
-            for id in &reply_ids {
-                self.evaluate(&bridge::reject_script(id, Reject::Reloaded));
-            }
+    /// A new document replaces the page's one (or the page is gone with its process):
+    /// tells the host which open requests ended.
+    fn document_starts(&self) {
+        if let Some(ended) = page::document_started_event(&self.state) {
+            self.emit(ended);
         }
-        self.emit(ArtifactEvent::RequestsEnded { version, reply_ids });
     }
 
     /// See [`ArtifactWindow::set_ref_menu`].
