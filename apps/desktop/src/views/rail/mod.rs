@@ -759,8 +759,12 @@ impl RailView {
     /// The pill over the list's bottom edge: `n` rows below wait on me, and
     /// a click scrolls to the first (row `ix`).
     fn waiting_below(&self, ix: usize, n: usize, cx: &mut Context<Self>) -> AnyElement {
-        use crate::ui::native::{PushSize, PushStyle, native_colors, push_button, tokens::shadow};
-        let amber = native_colors(cx).amber;
+        use crate::ui::{
+            icons::sym as sym_icon,
+            native::{PushSize, PushStyle, native_colors, push_button, tokens::shadow},
+            sf_symbols::SymSize,
+        };
+        let k = native_colors(cx);
         div()
             .absolute()
             .left_0()
@@ -771,13 +775,14 @@ impl RailView {
             .child(
                 push_button(
                     "rail-waiting-below",
-                    crate::copy::fill(c::RAIL_WAITS_ON_YOU_N, &[("n", &n.to_string())]),
+                    crate::copy::fill(c::RAIL_WAITS_BELOW_N, &[("n", &n.to_string())]),
                     // Opaque: the rows scroll under it.
                     PushStyle::Secondary,
                     PushSize::Small,
                     cx,
                 )
-                .icon(gpui_component::Icon::new(Sym::NeedsYou).text_color(amber))
+                .icon(gpui_component::Icon::new(Sym::NeedsYou).text_color(k.amber))
+                .child(sym_icon(Sym::ArrowDown, SymSize::INLINE, k.secondary))
                 .shadow(shadow::sm())
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.scroll_to_open(ix);
