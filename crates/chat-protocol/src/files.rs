@@ -719,6 +719,14 @@ pub struct MachineCreateArtifactRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub data: Option<Value>,
+    /// 1.1: the author's preview card text and figures (`chat-run artifact create --summary
+    /// --metrics`).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub preview: Option<ArtifactPreview>,
 }
 
 impl MachineCreateArtifactRequest {
@@ -726,6 +734,7 @@ impl MachineCreateArtifactRequest {
         check_chars("title", &self.title, 1, MAX_TITLE_CHARS)?;
         check_version_input(&self.entry, &self.files, self.note.as_deref())?;
         check_events(self.events.as_deref())?;
+        check_preview(self.preview.as_ref())?;
         check_version_extras(self.media.as_ref(), self.data.as_ref())
     }
 }

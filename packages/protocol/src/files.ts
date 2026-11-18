@@ -167,7 +167,11 @@ export function tcSchemaProblem(schema: unknown, depth = 1): string | undefined 
   }
   return undefined;
 }
-export const TcSchema = z.json().refine((v) => tcSchemaProblem(v) === undefined, { message: "unsupported schema" });
+export const TcSchema = z.json().superRefine((v, ctx) => {
+  // The message says what is wrong (`unsupported schema: schema key $ref is not supported`).
+  const problem = tcSchemaProblem(v);
+  if (problem !== undefined) ctx.addIssue({ code: "custom", message: `unsupported schema: ${problem}` });
+});
 
 /** An event an interactive 产出 page may send. Only declared names of the declared kind are accepted. */
 export const ArtifactEventDecl = z.object({
