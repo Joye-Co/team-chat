@@ -247,7 +247,7 @@ describe("docs/bots.md: the window.teamchat reference is the real bridge", () =>
     const codes = [...BRIDGE.matchAll(/Reject::[A-Za-z]+ => "([a-z_]+)"/g)].map((m) => m[1] as string);
     expect(codes.length).toBeGreaterThan(0);
     const errors = section.slice(section.indexOf("**Errors.**"), section.indexOf("**Parts to ask about.**"));
-    const documented = [...errors.matchAll(/`([a-z_]+)`/g)].map((m) => m[1] as string).filter((c) => c !== "code" && c !== "ask");
+    const documented = [...errors.matchAll(/`([a-z_]+)`/g)].map((m) => m[1] as string).filter((c) => c !== "code" && c !== "message" && c !== "ask");
     expect([...new Set(documented)].sort()).toEqual([...new Set(codes)].sort());
     const num = (name: string) => {
       const m = BRIDGE.match(new RegExp(`pub const ${name}: [a-z0-9]+ = ([0-9_ *]+);`));
