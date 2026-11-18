@@ -17,7 +17,6 @@ crate::copy! {
     NAV_ACTIVITY = "活动记录",
     NAV_MACHINES = "电脑",
     NAV_ALL_MACHINES = "所有电脑",
-    NAV_OVERVIEW = "概览",
     NAV_ACCOUNTS = "账号与密钥",
     NAV_SUBSCRIPTIONS = "订阅账号",
     NAV_KEYS = "API 密钥",

@@ -332,6 +332,10 @@ impl AdminView {
                         }
                         _ => {}
                     }
+                    // The sidebar counts the keys before their page was opened.
+                    if this.page != accounts::Page::Keys && this.loaded_secrets().is_none() {
+                        this.fetch_secrets(cx);
+                    }
                     this.fetch(cx);
                 }
                 Err(e) => {
@@ -639,11 +643,14 @@ impl AdminView {
         // A count pill is neutral (§1.8); what needs attention is said on the page it opens.
         // Someone who may not open 团队管理 sees no counts either.
         let owner = self.owner;
-        let count = |n: u32| -> gpui::AnyElement {
-            crate::ui::native::CountPill::new(n).into_any_element()
-        };
         // The pages that work: selected when open.
         let current_page = self.page;
+        // On the selected row the pill keeps its shape against the row's own fill.
+        let count = |n: u32, target: accounts::Page| -> gpui::AnyElement {
+            crate::ui::native::CountPill::new(n)
+                .on_fill(owner && current_page == target)
+                .into_any_element()
+        };
         let live_page = |id: &'static str,
                          label: &'static str,
                          s: Sym,
@@ -666,25 +673,15 @@ impl AdminView {
                 None => row,
             }
         };
-        // A machine's own pages sit under it, indented past its symbol.
-        let view_for_sub = cx.entity();
         let on_overview = self.page == accounts::Page::Overview;
-        let sub = |id: String, label: &'static str| {
-            let view = view_for_sub.clone();
-            SidebarRow::new(SharedString::from(id), label)
-                .leading(div().w(SymSize::SIDEBAR.slot_px()))
-                .selected(on_overview)
-                .on_click(move |_, _, cx| {
-                    view.update(cx, |v, cx| v.show_page(accounts::Page::Overview, cx))
-                })
-        };
         let view = cx.entity();
         let machines: Vec<gpui::AnyElement> = self
             .machines
             .iter()
             .flatten()
-            .flat_map(|x| {
-                let open = self.selected.as_deref() == Some(x.id.as_str());
+            .map(|x| {
+                // A computer's page is its own row: nothing under it to choose between.
+                let open = on_overview && self.selected.as_deref() == Some(x.id.as_str());
                 let id = x.id.clone();
                 let view = view.clone();
                 let mut row = SidebarRow::new(
@@ -695,6 +692,7 @@ impl AdminView {
                     crate::views::settings::machines::machine_glyph(x),
                     open,
                 ))
+                .selected(open)
                 .on_click(move |_, _, cx| {
                     let id = id.clone();
                     view.update(cx, |v, cx| {
@@ -702,21 +700,12 @@ impl AdminView {
                         v.show_page(accounts::Page::Overview, cx)
                     })
                 });
-                if open {
-                    row = row.disclosure(true);
-                } else if !x.connected {
+                if !x.connected {
                     // The state in a word, never a bare dot (§2.12); an online computer
                     // needs none.
                     row = row.trailing(m::MACHINE_OFFLINE);
                 }
-                let mut out = vec![row.into_any_element()];
-                if open {
-                    out.push(
-                        sub(format!("machine-{}-overview", x.id), m::NAV_OVERVIEW)
-                            .into_any_element(),
-                    );
-                }
-                out
+                row.into_any_element()
             })
             .collect();
         let me = match self.services.provider.session() {
@@ -762,7 +751,12 @@ impl AdminView {
                     .pb(t::NAV_END_PAD)
                     .flex()
                     .flex_col()
-                    .child(group_label(m::NAV_TEAM, cx).h(t::NAV_GROUP_HEIGHT))
+                    .child(
+                        // A group label stands over its rows' icons.
+                        group_label(m::NAV_TEAM, cx)
+                            .pl(space::S16)
+                            .h(t::NAV_GROUP_HEIGHT),
+                    )
                     .child(live_page(
                         "nav-home",
                         m::NAV_HOME,
@@ -775,7 +769,7 @@ impl AdminView {
                         m::NAV_MEMBERS,
                         Sym::Members,
                         accounts::Page::Members,
-                        (owner && members > 0).then(|| count(members)),
+                        (owner && members > 0).then(|| count(members, accounts::Page::Members)),
                     ))
                     .child(live_page(
                         "nav-usage",
@@ -793,6 +787,7 @@ impl AdminView {
                     ))
                     .child(
                         group_label(m::NAV_MACHINES, cx)
+                            .pl(space::S16)
                             .h(t::NAV_GROUP_HEIGHT)
                             .mt(t::NAV_GROUP_TOP),
                     )
@@ -801,11 +796,14 @@ impl AdminView {
                         m::NAV_ALL_MACHINES,
                         Sym::Computer,
                         accounts::Page::Machines,
-                        self.machines.as_ref().map(|l| count(l.len() as u32)),
+                        self.machines
+                            .as_ref()
+                            .map(|l| count(l.len() as u32, accounts::Page::Machines)),
                     ))
                     .children(machines)
                     .child(
                         group_label(m::NAV_ACCOUNTS, cx)
+                            .pl(space::S16)
                             .h(t::NAV_GROUP_HEIGHT)
                             .mt(t::NAV_GROUP_TOP),
                     )
@@ -814,22 +812,22 @@ impl AdminView {
                         m::NAV_SUBSCRIPTIONS,
                         Sym::Account,
                         accounts::Page::Accounts,
-                        (owner && subscriptions > 0).then(|| count(subscriptions)),
+                        (owner && subscriptions > 0)
+                            .then(|| count(subscriptions, accounts::Page::Accounts)),
                     ))
                     .child(live_page(
                         "nav-keys",
                         m::NAV_KEYS,
                         Sym::Key,
                         accounts::Page::Keys,
-                        self.acct
-                            .secrets
-                            .as_ref()
+                        self.loaded_secrets()
                             .map(|s| s.secrets.len() as u32)
                             .filter(|n| *n > 0)
-                            .map(count),
+                            .map(|n| count(n, accounts::Page::Keys)),
                     ))
                     .child(
                         group_label(m::NAV_SETTINGS, cx)
+                            .pl(space::S16)
                             .h(t::NAV_GROUP_HEIGHT)
                             .mt(t::NAV_GROUP_TOP),
                     )
