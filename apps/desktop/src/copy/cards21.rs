@@ -245,7 +245,7 @@ crate::copy! {
     // Why the member cannot take a step (after {name} 接不了).
     NONE_MEMBER_INACTIVE = "它已停用或不在这个群了",
     NONE_RUNNER_OFF = "它的电脑现在没开",
-    NONE_RUN_EXTERNAL = "它这次工作不接收操作",
+    NONE_RUN_EXTERNAL = "它这次的工作中途改不了",
     NONE_RUN_LIMIT = "操作有点多，稍后再试",
     NONE_RUN_FAILED = "这次没能开始，再试一次",
     // A time zone with no name here says only its offset.

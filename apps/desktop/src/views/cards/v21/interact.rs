@@ -1118,11 +1118,14 @@ pub fn decorate(
                     .and_then(|i| node.tree.top[i].id())
                     .is_some_and(|prev| d.changed.contains_key(prev))
             });
+        // The last block ends on the card's own padding.
+        let last = node.tree.top.last().and_then(|x| x.id()) == Some(id);
         let tinted = if top {
             div()
                 .mx(-space::S16)
                 .px(space::S16)
-                .py(space::S12)
+                .pt(space::S12)
+                .when(!last, |el| el.pb(space::S12))
                 .when(after_tinted, |el| el.border_t_1().border_color(k.line))
                 .child(col)
         } else {

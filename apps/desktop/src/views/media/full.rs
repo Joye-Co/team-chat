@@ -1726,7 +1726,7 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
             meta: Some(
                 format!(
                     "{} · {}",
-                    super::time_text(a.duration),
+                    super::clock_text(a.duration),
                     super::size_text(spec.media.bytes)
                 )
                 .into(),
@@ -1784,8 +1784,8 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
                             mono(
                                 format!(
                                     "{} / {}",
-                                    super::time_text(position),
-                                    super::time_text(a.duration)
+                                    super::clock_text(position),
+                                    super::clock_text(a.duration)
                                 ),
                                 k.text_1,
                             )
