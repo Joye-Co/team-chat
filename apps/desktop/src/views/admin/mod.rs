@@ -909,11 +909,14 @@ impl AdminView {
                     .flex()
                     .flex_col()
                     .child(TruncText::new(m::HEADER_TITLE).n_headline())
-                    .child(
-                        TruncText::new(m::HEADER_DESC)
-                            .n_footnote()
-                            .text_color(k.secondary),
-                    ),
+                    // One person alone sees no 身份 (design-roles 3.10).
+                    .when(!crate::views::settings::solo(&self.services), |d| {
+                        d.child(
+                            TruncText::new(m::HEADER_DESC)
+                                .n_footnote()
+                                .text_color(k.secondary),
+                        )
+                    }),
             )
     }
 
