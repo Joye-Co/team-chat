@@ -6,6 +6,13 @@ import { ApiError } from "../core/errors";
 /** The Worker secret that encrypts hook secrets at rest (`wrangler secret put HOOK_SECRET_KEY`). */
 export type HooksEnv = Env & { HOOK_SECRET_KEY?: string };
 
+/** The Worker secret is missing or too short: nothing can be encrypted or read. Reason `hooks.secret_missing`. */
+export const HOOK_SECRET_MISSING =
+  "the Worker secret HOOK_SECRET_KEY is not set on this server (it encrypts hook secrets): run `wrangler secret put HOOK_SECRET_KEY` with at least 16 characters, then try again";
+/** A stored secret that the current Worker secret cannot read. Reason `hooks.secret_unreadable`. */
+export const HOOK_SECRET_UNREADABLE =
+  "the stored hook secret cannot be read (the Worker secret HOOK_SECRET_KEY changed): delete this hook and make it again";
+
 const enc = new TextEncoder();
 
 function b64url(bytes: Uint8Array): string {
@@ -28,7 +35,7 @@ export function newHookSecret(): string {
 
 async function aesKey(env: HooksEnv): Promise<CryptoKey> {
   const secret = env.HOOK_SECRET_KEY;
-  if (!secret || secret.length < 16) throw new ApiError("internal", "hooks are not configured on this server");
+  if (!secret || secret.length < 16) throw new ApiError("internal", HOOK_SECRET_MISSING, "hooks.secret_missing");
   const raw = await crypto.subtle.digest("SHA-256", enc.encode(secret));
   return crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
 }
@@ -46,16 +53,14 @@ export async function encryptSecret(env: HooksEnv, hookId: string, secret: strin
 
 export async function decryptSecret(env: HooksEnv, hookId: string, stored: string): Promise<string> {
   const [v, iv, ct] = stored.split(".");
-  if (v !== "v1" || !iv || !ct) throw new ApiError("internal", "bad stored hook secret");
+  // A missing Worker secret keeps its own reason: it is not an unreadable row.
+  const key = await aesKey(env);
+  if (v !== "v1" || !iv || !ct) throw new ApiError("internal", HOOK_SECRET_UNREADABLE, "hooks.secret_unreadable");
   try {
-    const pt = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: fromB64url(iv), additionalData: enc.encode(hookId) },
-      await aesKey(env),
-      fromB64url(ct),
-    );
+    const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromB64url(iv), additionalData: enc.encode(hookId) }, key, fromB64url(ct));
     return new TextDecoder().decode(pt);
   } catch {
-    throw new ApiError("internal", "cannot decrypt hook secret");
+    throw new ApiError("internal", HOOK_SECRET_UNREADABLE, "hooks.secret_unreadable");
   }
 }
 
