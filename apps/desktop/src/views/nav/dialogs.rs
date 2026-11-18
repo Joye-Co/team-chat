@@ -58,12 +58,23 @@ pub fn sheet_form() -> SheetForm {
 /// The group of a [`sheet_form`]; children are its rows.
 #[derive(IntoElement, Default)]
 pub struct SheetForm {
-    rows: Vec<gpui::AnyElement>,
+    /// Each row with the inset of the line under it.
+    rows: Vec<(gpui::AnyElement, gpui::Pixels)>,
+}
+
+impl SheetForm {
+    /// A row whose line starts at `inset`: a row with media insets it to the
+    /// title (2.8).
+    pub fn child_with_inset(mut self, row: impl IntoElement, inset: gpui::Pixels) -> Self {
+        self.rows.push((row.into_any_element(), inset));
+        self
+    }
 }
 
 impl ParentElement for SheetForm {
     fn extend(&mut self, elements: impl IntoIterator<Item = gpui::AnyElement>) {
-        self.rows.extend(elements);
+        self.rows
+            .extend(elements.into_iter().map(|e| (e, metrics::FORM_ROW_INSET)));
     }
 }
 
@@ -77,12 +88,13 @@ impl gpui::RenderOnce for SheetForm {
             .bg(k.group)
             .flex()
             .flex_col();
-        for (ix, row) in self.rows.into_iter().enumerate() {
+        for (ix, (row, inset)) in self.rows.into_iter().enumerate() {
             group = group.child(row);
             if ix + 1 < n {
                 group = group.child(
                     div()
-                        .mx(metrics::FORM_ROW_INSET)
+                        .ml(inset)
+                        .mr(metrics::FORM_ROW_INSET)
                         .h(crate::ui::native::tokens::layout::HAIRLINE)
                         .bg(k.separator),
                 );
@@ -478,7 +490,6 @@ impl gpui::RenderOnce for MemberPicker {
                     .when_some(self.list_focus.as_ref(), |d, f| {
                         d.key_context(PICK_LIST_CONTEXT).track_focus(f)
                     })
-                    .when(focused, |d| d.shadow(k.focus_ring()))
                     .overflow_hidden()
                     .child(
                         div()
@@ -514,7 +525,29 @@ impl gpui::RenderOnce for MemberPicker {
                                 gpui_component::scroll::Scrollbar::vertical(&self.scroll)
                                     .mode(gpui_component::scroll::ScrollbarMode::Always),
                             ),
-                    ),
+                    )
+                    // The ring is drawn inside the frame, so a focused list
+                    // keeps the sheet's one content column (2.9). The frame's
+                    // 1 pt border sits outside this layer's containing box.
+                    .when(focused, |d| {
+                        let edge = -metrics::HAIRLINE;
+                        let mut ring = div()
+                            .absolute()
+                            .top(edge)
+                            .right(edge)
+                            .bottom(edge)
+                            .left(edge)
+                            .rounded(metrics::GROUP_RADIUS)
+                            .border_color(k.focus);
+                        let width = Some(metrics::FOCUS_RING.into());
+                        ring.style().border_widths = gpui::EdgesRefinement {
+                            top: width,
+                            right: width,
+                            bottom: width,
+                            left: width,
+                        };
+                        d.child(ring)
+                    }),
             )
     }
 }
