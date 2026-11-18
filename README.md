@@ -93,7 +93,7 @@ bunx wrangler dev --port 8789 --inspector-port 9789
 # terminal 2, from the repository root, while the server runs
 bun server/scripts/admin.ts bootstrap --env local --name <owner>   # the first owner; prints file paths only
 bun server/scripts/admin.ts invite --self --env local              # a sign-in code for that owner, in a file
-scripts/dev-desktop.sh --real    # the app, signed out: enter http://127.0.0.1:8789 and the code
+scripts/dev-desktop.sh --real    # the app without the sandbox: at sign-in enter http://127.0.0.1:8789 and the code
 ```
 
 **Release DMG** (`dist/<name>-<version>.dmg`):
@@ -102,7 +102,7 @@ scripts/dev-desktop.sh --real    # the app, signed out: enter http://127.0.0.1:8
 scripts/build-dmg.sh && scripts/test-dmg.sh
 ```
 
-Tests. The first five rows are the commands CI runs
+Tests. The first six rows are the commands CI runs
 ([.github/workflows/ci.yml](.github/workflows/ci.yml)); the self-tests and the end-to-end run are
 started by hand:
 
@@ -111,6 +111,7 @@ started by hand:
 | Server | `cd server && bun run typecheck && bun run test` |
 | Packages | `scripts/ci-run.sh typecheck packages/*` and `scripts/ci-run.sh test packages/*` |
 | Ops (monitor, restore) | `scripts/ci-run.sh typecheck ops/*` and `scripts/ci-run.sh test ops/*` |
+| Release and setup scripts | `scripts/test-release-scripts.sh` and `scripts/test-setup-server.sh` (offline) |
 | Rust | `cargo fmt --all --check`, `cargo clippy --locked -p chat-protocol -p chat-core -p daemon -p update-helper -p e2e --all-targets -- -D warnings` and `cargo test --locked -p chat-protocol -p chat-core -p daemon -p update-helper` |
 | Desktop | `cargo test --locked -p desktop` (on macOS and on Windows; needs the large desktop target) and, when `crates/artifact-view` changes, `cargo test --locked -p artifact-view --no-fail-fast` on macOS |
 | Desktop self-tests | `desktop --selftest-smoke`, `--selftest-timeline 10000`, `--selftest-cards` (each with `--report <path>`), `--screenshot <dir> --theme both [--worst-case]` (see [apps/desktop/README.md](apps/desktop/README.md)) |

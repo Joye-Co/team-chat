@@ -132,7 +132,7 @@ after you sign in.
 ## Send diagnostics
 
 When something goes wrong, open **设置 › 通用**, write what happened in the **诊断** section and
-click **发送诊断**. They contain the
+click **发送诊断**. The diagnostics contain the
 text you write, the app version, the kind of system and recent logs with tokens and invite codes
 removed; they do not contain your messages. Then tell your team's owner in the app what happened and at
 what time.
