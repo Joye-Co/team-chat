@@ -58,9 +58,16 @@ pub fn machine_monitor(machine_id: &str, range: &str) -> MachineMonitor {
     };
     if machine_id != "mc-mini" {
         // 团队 VPS is online in the machine list: its monitor says the same.
-        let online = machine_id == "mc-vps"
-            || (machine_id == super::settings::MY_COMPUTER
-                && THIS_COMPUTER.load(std::sync::atomic::Ordering::Relaxed) == 2);
+        let idle_here = machine_id == super::settings::MY_COMPUTER
+            && THIS_COMPUTER.load(std::sync::atomic::Ordering::Relaxed) == 2;
+        let online = machine_id == "mc-vps" || idle_here;
+        // The idle computer has Claude Code, not signed in yet: what its setup card says.
+        let clis = if idle_here {
+            json!([{ "runtime": "claude", "kind": "claude", "available": true,
+                     "version": "2.1.0", "login": "logged_out", "failedToday": 0 }])
+        } else {
+            json!([])
+        };
         return parse(json!({
             "machine": {
                 "id": machine_id, "name": "旧笔记本", "connected": online,
@@ -73,7 +80,7 @@ pub fn machine_monitor(machine_id: &str, range: &str) -> MachineMonitor {
             "capacity": { "slots": 1, "running": 0, "canTake": 0 },
             "queue": { "count": 0 },
             "today": { "finished": 0, "succeeded": 0, "failed": 0, "finishedYesterday": 0, "tokens": 0 },
-            "clis": [], "runs": [], "members": []
+            "clis": clis, "runs": [], "members": []
         }));
     }
     let gib = 1024_u64 * 1024 * 1024;
