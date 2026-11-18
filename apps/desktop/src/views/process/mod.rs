@@ -925,7 +925,7 @@ impl ProcessView {
 
     /// 查看日志: the developer view, scrolled to the raw events at its end (the
     /// newest is last, so the failure is in view).
-    pub fn open_log(&mut self, cx: &mut Context<Self>) {
+    fn open_log(&mut self, cx: &mut Context<Self>) {
         self.reveal_log = true;
         self.services
             .nav
