@@ -504,7 +504,10 @@ pub fn topic_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> Sta
         .iter()
         .max_by_key(|r| r.updated_at)
         .is_some_and(|r| r.status == RunStatus::Cancelled);
-    if latest_stopped && topic.status != TopicStatus::Done {
+    // A stopped 按顺序做 is the same state though an older run is the newest
+    // one this window read: nothing is queued after a person stopped it.
+    let relay_stopped = topic.relay.as_ref().is_some_and(|r| r.state == "stopped");
+    if (latest_stopped || relay_stopped) && topic.status != TopicStatus::Done {
         return StateLine::plain(
             crate::copy::live::LIVE_PHASE_STOPPED.to_string(),
             BadgeState::Deactivated,

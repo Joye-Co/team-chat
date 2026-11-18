@@ -640,7 +640,10 @@ impl TopicRail {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mut section = self.section(PLAN, c::TOPIC_RAIL_PLAN, cx);
-        let many = !d.others.is_empty();
+        // §2.5: each block is led by its member whenever the 话题 has runs of
+        // more than one member or an order, so a finished plan is never read
+        // as the plan of the run the state names.
+        let many = !d.others.is_empty() || d.plan_led;
         let blocks = std::iter::once((run, d.step_times.as_slice()))
             .chain(d.others.iter().map(|(r, t)| (r, t.as_slice())));
         for (i, (run, times)) in blocks.enumerate() {
@@ -681,7 +684,9 @@ impl TopicRail {
             .filter(|i| i.state == PlanState::Done)
             .count();
         let all_done = done == total;
-        let live = run.status.is_active();
+        // §2.12: 在做 only while the run works (the 成员 header's test); a run
+        // that waits, stopped or failed says where it stands.
+        let live = run.status.is_active() && run.status != crate::data::RunStatus::Waiting;
         let took = match (run.started_at, run.ended_at) {
             (Some(a), Some(b)) => Some(((b - a).max(0)) as u64),
             _ => None,
@@ -689,11 +694,25 @@ impl TopicRail {
         let summary = row(cx)
             .child(if all_done {
                 fill(c::PLAN_ALL_DONE, &[("n", &total.to_string())])
-            } else {
+            } else if live {
                 // §2.12, T-02: one count, done/total, as the bar and the card.
                 fill(
                     c::OWNER_WORKING,
                     &[("n", &done.to_string()), ("total", &total.to_string())],
+                )
+            } else {
+                let at = run
+                    .plan
+                    .iter()
+                    .position(|i| i.state != PlanState::Done)
+                    .map_or(total, |i| i + 1);
+                fill(
+                    crate::copy::cards_v2::STRIP_STOPPED,
+                    &[
+                        ("n", &at.to_string()),
+                        ("done", &done.to_string()),
+                        ("total", &total.to_string()),
+                    ],
                 )
             })
             .child(div().flex_1())
@@ -712,7 +731,6 @@ impl TopicRail {
         } else {
             done as f32 / total as f32
         };
-        let _ = live;
         // D12: the one Progress (h4, primary on primary 20 %).
         let bar = div().py(space::S6).child(progress(value, cx));
         section = section.row(summary).row(bar);
@@ -721,6 +739,14 @@ impl TopicRail {
             // person has the needs-you icon; never a free colored dot.
             let glyph = match item.state {
                 PlanState::Done => mark(Sym::Check, k.secondary),
+                // A run that ended at this step no longer works on it: the
+                // failed mark for a run that got stuck, the open circle for
+                // one a person stopped, never the spinner.
+                PlanState::Current if !run.status.is_active() => (run.status
+                    == crate::data::RunStatus::Failed)
+                    .then(|| state_mark(BadgeState::Failed, &k))
+                    .flatten()
+                    .unwrap_or_else(|| mark(Sym::Todo, k.secondary)),
                 PlanState::Current => state_mark(BadgeState::Working, &k)
                     .unwrap_or_else(|| mark(Sym::Todo, k.secondary)),
                 PlanState::Waiting => state_mark(BadgeState::NeedsYou, &k)

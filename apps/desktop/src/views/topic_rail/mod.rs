@@ -40,6 +40,9 @@ struct Data {
     /// The other members' runs at work with a plan, and their step times:
     /// 计划 shows one block per run (A2-11).
     others: Vec<(BotRunSummary, Vec<Millis>)>,
+    /// The 话题 has an order or runs of several members: 计划 names the member
+    /// of every block.
+    plan_led: bool,
     changes: Option<TopicChanges>,
     artifacts: Vec<ArtifactSummary>,
     /// The preview of the newest 产出.
@@ -58,9 +61,15 @@ impl Data {
         let p = &services.provider;
         let topic = p.topic(g, t);
         let all_runs = p.runs(g, t);
+        let relay = topic.as_ref().and_then(|t| t.relay.as_ref());
+        let plan_led = relay.is_some()
+            || all_runs
+                .first()
+                .is_some_and(|a| all_runs.iter().any(|r| r.bot_id != a.bot_id));
         let run = rail_run(
             all_runs.clone(),
             topic.as_ref().and_then(|t| t.owner_id.as_deref()),
+            relay,
         );
         let others: Vec<(BotRunSummary, Vec<Millis>)> =
             crate::views::topic_page::working_runs(&all_runs)
@@ -99,6 +108,7 @@ impl Data {
                 .unwrap_or_default(),
             changes: p.topic_changes(g, t),
             others,
+            plan_led,
             cost: p.topic_cost(g, t),
             recording: topic_recording(services, g, t),
             topic,
@@ -518,7 +528,11 @@ pub fn preview_thumbnail(preview: &ArtifactPreview, cx: &App) -> AnyElement {
 
 /// The run of a 话题 the rail shows (runs come newest first): the owner's newest run, so
 /// the 负责 card and the 计划 card belong to the same member; else the newest run.
-fn rail_run(runs: Vec<BotRunSummary>, owner: Option<&str>) -> Option<BotRunSummary> {
+fn rail_run(
+    runs: Vec<BotRunSummary>,
+    owner: Option<&str>,
+    relay: Option<&crate::data::TopicRelay>,
+) -> Option<BotRunSummary> {
     // R2-04: while a member works, the rail shows the run the title bar and
     // the working card name (`topic_page::lead_run`), never an older one.
     if let Some(lead) = crate::views::topic_page::lead_run(&runs, owner)
@@ -526,7 +540,14 @@ fn rail_run(runs: Vec<BotRunSummary>, owner: Option<&str>) -> Option<BotRunSumma
     {
         return Some(lead.clone());
     }
-    let own = owner.and_then(|o| runs.iter().position(|r| r.bot_id == o));
+    // The run the state names comes first: the current step of an order that
+    // has not finished, never the finished plan of an earlier step.
+    let step = relay
+        .filter(|r| r.state != "done")
+        .and_then(|r| r.steps.get(r.current as usize))
+        .and_then(|s| s.run_id.as_deref())
+        .and_then(|id| runs.iter().position(|r| r.id == id));
+    let own = step.or_else(|| owner.and_then(|o| runs.iter().position(|r| r.bot_id == o)));
     let mut runs = runs;
     match own {
         Some(i) => Some(runs.swap_remove(i)),
@@ -750,10 +771,10 @@ mod run_tests {
                 run("old", "Forge"),
             ]
         };
-        assert_eq!(rail_run(runs(), Some("Forge")).unwrap().id, "forge");
-        assert_eq!(rail_run(runs(), Some("Taro")).unwrap().id, "scout");
-        assert_eq!(rail_run(runs(), None).unwrap().id, "scout");
-        assert!(rail_run(vec![], Some("Forge")).is_none());
+        assert_eq!(rail_run(runs(), Some("Forge"), None).unwrap().id, "forge");
+        assert_eq!(rail_run(runs(), Some("Taro"), None).unwrap().id, "scout");
+        assert_eq!(rail_run(runs(), None, None).unwrap().id, "scout");
+        assert!(rail_run(vec![], Some("Forge"), None).is_none());
     }
 }
 
