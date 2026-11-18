@@ -371,14 +371,7 @@ fn render_table(
                         None => el.into_any_element(),
                     }
                 }),
-        )
-        .when(table_refs.is_some(), |el| {
-            el.child(
-                div()
-                    .w(px(crate::views::refs::markdown::ROW_BUTTON_SLOT))
-                    .flex_none(),
-            )
-        });
+        );
     let body = rows[..shown].iter().enumerate().map(|(ri, row)| {
         let line = div()
             .flex()
@@ -408,7 +401,7 @@ fn render_table(
             }
         }))
         .when_some(table_refs.as_ref(), |el, r| {
-            el.child(r.row_end_unless(ri, beside, cx))
+            el.child(r.row_end_over(ri, cx))
         })
     });
     div()
