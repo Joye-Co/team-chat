@@ -91,8 +91,9 @@ const STEPS: &[(&str, Steps)] = &[
     ("state-focus-diagram-node", keys(&["tab", "tab"])),
     // --- end v16/c-cards ---
     // --- v16/tail2 ---
-    // ⇧Tab from the window root: the last tab stop of the pane.
-    ("state-focus-settings-row", keys(&["shift-tab"])),
+    // ⇧Tab from the window root: the last tab stop of the pane. The scene presses it
+    // itself, once 勿扰 is on and 从 and 到 are tab stops.
+    ("state-focus-settings-row", keys(&[])),
     // The scene clicks on its own; wait for the menu it opens.
     (
         "bot-quick-avatar-menu",

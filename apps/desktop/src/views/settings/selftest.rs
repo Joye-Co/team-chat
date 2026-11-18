@@ -639,10 +639,20 @@ macro_rules! scene_opener {
 }
 
 scene_opener!(open_profile, Page::Account);
-scene_opener!(open_members, Page::Members);
 scene_opener!(open_machines, Page::Machines);
 scene_opener!(open_notifications, Page::Notifications);
-scene_opener!(open_memory, Page::Memory);
+
+// 成员 and 团队约定 are pages of 团队管理 (`open_page` in `views/settings/mod.rs` sends
+// them there), so their scenes open that window: the Settings window has no such tab.
+
+/// 团队管理 › 团队约定.
+pub fn open_memory(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    crate::views::admin::scenes::open_memory_for_scene(services, cx).map(|(h, _, _)| h)
+}
 
 /// 团队约定 scrolled to its end: the kind groups and 已停用.
 pub fn open_memory_end(
@@ -650,8 +660,11 @@ pub fn open_memory_end(
     _content: gpui::Size<gpui::Pixels>,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
-    let (handle, view) = open_page(services, Page::Memory, cx)?;
-    after_fit(handle, cx, move |_, cx| view.read(cx).scroll_to_end());
+    let (handle, _, scroll) = crate::views::admin::scenes::open_memory_for_scene(services, cx)?;
+    after_fit(handle, cx, move |window, _| {
+        scroll.scroll_to_bottom();
+        window.refresh();
+    });
     Ok(handle)
 }
 
@@ -660,9 +673,8 @@ fn open_memory_sheet(
     services: Services,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
-    let (handle, view) = open_page(services, Page::Memory, cx)?;
+    let (handle, board, _) = crate::views::admin::scenes::open_memory_for_scene(services, cx)?;
     after_fit(handle, cx, move |window, cx| {
-        let board = view.read(cx).memory().clone();
         board.update(cx, |b, cx| b.open_for_scene(edit, window, cx));
     });
     Ok(handle)
@@ -772,23 +784,14 @@ pub fn open_models(
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
     let (handle, view) = open_page(services, Page::General, cx)?;
-    handle
-        .update(cx, |_, window, cx| {
-            let general = view.read(cx).general().clone();
-            general.update(cx, |g, cx| g.show_ai_here(cx));
-            window.on_next_frame(move |_, cx| view.read(cx).scroll_to_y(gpui::px(560.)));
-        })
-        .map_err(|e| e.to_string())?;
+    // Once the window has its height: the 模型 header stays at the top of the pane, in
+    // light and dark alike, however long the sections above it turn out.
+    after_fit(handle, cx, move |_, cx| {
+        let general = view.read(cx).general().clone();
+        let scroll = view.read(cx).scroll_handle();
+        general.update(cx, |g, cx| g.show_models_at_top(scroll, cx));
+    });
     Ok(handle)
-}
-
-/// 成员 scrolled to its end: 默认规则.
-pub fn open_members_end(
-    services: Services,
-    _content: gpui::Size<gpui::Pixels>,
-    cx: &mut App,
-) -> Result<AnyWindowHandle, String> {
-    open_end(services, Page::Members, cx)
 }
 
 /// 通知 with its lower groups at work: 每日摘要 and 勿扰 on (the pane fits
@@ -816,6 +819,29 @@ pub fn open_notifications_end(
     Ok(handle)
 }
 
+/// [`open_notifications_end`] after ⇧Tab from the window root: the focus ring on the pane's
+/// last tab stop (到). The key comes after 勿扰 is on: pressed with the first frame, it
+/// found 开启勿扰 as the last stop, because 从 and 到 were still off.
+pub fn open_notifications_focus_last(
+    services: Services,
+    content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let handle = open_notifications_end(services, content, cx)?;
+    cx.spawn(async move |cx| {
+        cx.background_executor()
+            .timer(Duration::from_millis(180))
+            .await;
+        let _ = handle.update(cx, |_, window, cx| {
+            if let Ok(stroke) = gpui::Keystroke::parse("shift-tab") {
+                window.dispatch_keystroke(stroke, cx);
+            }
+        });
+    })
+    .detach();
+    Ok(handle)
+}
+
 /// 通用 › AI 服务 after 测试连接 with the saved DeepSeek key: 连接正常.
 pub fn open_ai_service(
     services: Services,
@@ -825,9 +851,15 @@ pub fn open_ai_service(
     let (handle, view) = open_page(services, Page::General, cx)?;
     after_fit(handle, cx, move |_, cx| {
         let general = view.read(cx).general().clone();
-        general.update(cx, |g, cx| g.show_ai_here(cx));
-        let ai = general.read(cx).ai_service().clone();
-        ai.update(cx, |p, cx| p.test(cx));
+        // The section's header at the top of the pane: the answer and the buttons are
+        // under the fold otherwise.
+        let scroll = view.read(cx).scroll_handle();
+        general.update(cx, |g, cx| g.show_ai_at_top(scroll, cx));
+        // The panel reads the saved service when it is first drawn; 测试连接 needs it.
+        after_fit(handle, cx, move |_, cx| {
+            let ai = general.read(cx).ai_service().clone();
+            ai.update(cx, |p, cx| p.test(cx));
+        });
     });
     Ok(handle)
 }
@@ -842,7 +874,8 @@ pub fn open_ai_service_failed(
     let (handle, view) = open_page(services, Page::General, cx)?;
     after_fit(handle, cx, move |window, cx| {
         let general = view.read(cx).general().clone();
-        general.update(cx, |g, cx| g.show_ai_here(cx));
+        let scroll = view.read(cx).scroll_handle();
+        general.update(cx, |g, cx| g.show_ai_at_top(scroll, cx));
         let ai = general.read(cx).ai_service().clone();
         ai.update(cx, |p, cx| {
             p.pick(crate::data::AiProviderKind::OpenaiCompatible, window, cx);
@@ -855,8 +888,6 @@ pub fn open_ai_service_failed(
             );
             p.test(cx);
         });
-        // The Alert is under the fold: show the pane's end.
-        view.read(cx).scroll_to_end();
     });
     Ok(handle)
 }
@@ -1143,7 +1174,16 @@ fn open_with_dialog(
     open: fn(Services, &mut gpui::Window, &mut App),
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
-    let (handle, _) = open_page(services.clone(), page, cx)?;
+    // The sheets of 成员 open over 团队管理 › 成员, where their buttons are.
+    let handle = if page == Page::Members {
+        crate::views::admin::scenes::open_for_scene(
+            services.clone(),
+            crate::views::admin::AdminPage::Members,
+            cx,
+        )?
+    } else {
+        open_page(services.clone(), page, cx)?.0
+    };
     after_fit(handle, cx, move |window, cx| open(services, window, cx));
     Ok(handle)
 }
@@ -1757,13 +1797,6 @@ pub const SCENES: &[Scene] = &[
         start: Start::Roles(crate::fake::RoleView::Member),
         setup: |_, _| {},
         open: open_profile,
-    },
-    Scene {
-        name: "roles-members-pane",
-        about: "Settings: the 成员 pane as the 所有者: 所有者, 管理员 and 普通成员 down the column",
-        start: Start::Roles(crate::fake::RoleView::Owner),
-        setup: |_, _| {},
-        open: open_members,
     },
     Scene {
         name: "settings-general",

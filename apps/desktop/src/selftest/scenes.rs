@@ -366,13 +366,6 @@ pub const SCENES: &[Scene] = &[
         open: settings_scenes::open_machine_parallel,
     },
     Scene {
-        name: "settings-members",
-        about: "Settings: 成员 with the owner actions",
-        start: Start::SignedIn,
-        setup: |_, _| {},
-        open: settings_scenes::open_members,
-    },
-    Scene {
         name: "settings-machines",
         about: "Settings: 机器 and their health",
         start: Start::SignedIn,
@@ -420,13 +413,6 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedIn,
         setup: |_, _| {},
         open: settings_scenes::open_ai_service_failed,
-    },
-    Scene {
-        name: "settings-members-end",
-        about: "Settings: 成员 scrolled to the end, with the footnote under the table",
-        start: Start::SignedIn,
-        setup: |_, _| {},
-        open: settings_scenes::open_members_end,
     },
     Scene {
         name: "settings-notifications-end",
