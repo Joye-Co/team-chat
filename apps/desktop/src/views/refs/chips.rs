@@ -499,7 +499,7 @@ pub fn sent_refs(message: &Message, refs: &[BlockRef], cx: &App) -> AnyElement {
                     // The hover fill reaches past the text; the text stays on the lines' edge.
                     .px(space::S4)
                     .ml(-space::S4)
-                    .rounded(radius::CHECKBOX)
+                    .rounded(radius::ITEM)
                     .t_meta()
                     .text_color(k.ink_3)
                     .focus_row(false, cx)

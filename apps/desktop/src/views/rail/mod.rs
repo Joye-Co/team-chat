@@ -94,6 +94,17 @@ fn bottom_clear(pill: bool) -> gpui::Pixels {
     }
 }
 
+/// How far above the list's bottom a row must start to count as in view: the
+/// 24 edge, and while the 下面还有 pill shows, the band under the pill as well.
+/// The pill may go once the row is in view, so the room of that edge stays.
+fn row_room(pill: bool) -> gpui::Pixels {
+    if pill {
+        space::S24 + metrics::SIDEBAR_WAITING_BAND
+    } else {
+        space::S24
+    }
+}
+
 /// Reads [`BottomEdge`] from the list's last layout. A list that ends in
 /// view hides nothing. `pill`: the pill showed in that layout.
 fn bottom_edge(list: &ListState, entries: &[Entry], pill: bool) -> BottomEdge {
@@ -129,7 +140,7 @@ fn bottom_edge(list: &ListState, entries: &[Entry], pill: bool) -> BottomEdge {
             && entry.item.opens_section()
             && list
                 .bounds_for_item(ix + 1)
-                .is_none_or(|next| next.top() >= fade)
+                .is_none_or(|next| next.top() >= viewport.bottom() - row_room(pill))
         {
             edge.stranded = Some(ix);
         }
@@ -453,14 +464,10 @@ impl RailView {
         match self.list.bounds_for_item(ix) {
             Some(row) if row.top() >= viewport.top() => {
                 // The bottom edge fades a row that has rows after it.
-                // With the pill up it keeps the room of that fade above the
-                // band too: the pill may go once this row is in view.
                 let clear = if ix == last {
                     px(0.)
-                } else if self.bottom_edge.get().waiting.is_some() {
-                    bottom_clear(false) + metrics::SIDEBAR_WAITING_BAND
                 } else {
-                    bottom_clear(false)
+                    row_room(self.bottom_edge.get().waiting.is_some())
                 };
                 let under = row.bottom() + clear - viewport.bottom();
                 if under <= px(0.) {
@@ -1561,7 +1568,7 @@ mod tests {
                 let entries = this.cache.as_ref().unwrap().entries.clone();
                 assert!(entries[ix].item.opens_section(), "only an open header");
                 // The edge was read with or without the pill: its band is the most it hides.
-                let fade = this.list.viewport_bounds().bottom() - bottom_clear(true);
+                let fade = this.list.viewport_bounds().bottom() - row_room(true);
                 assert!(
                     this.list
                         .bounds_for_item(ix + 1)
@@ -1571,6 +1578,37 @@ mod tests {
             });
         }
         assert!(stranded, "some height leaves a label at the edge");
+
+        // Under the pill's band a first row shows too little to carry its label.
+        let mut behind_band = false;
+        for height in (240..640).step_by(1) {
+            cx.simulate_resize(gpui::size(px(260.), px(height as f32)));
+            cx.run_until_parked();
+            view.update(cx, |this, _| {
+                let edge = this.bottom_edge.get();
+                if edge.waiting.is_none() {
+                    return;
+                }
+                let bottom = this.list.viewport_bounds().bottom();
+                let entries = this.cache.as_ref().unwrap().entries.clone();
+                for ix in 0..entries.len().saturating_sub(1) {
+                    let label = this.list.bounds_for_item(ix);
+                    let first = this.list.bounds_for_item(ix + 1);
+                    if entries[ix].item.opens_section()
+                        && !entries[ix + 1].item.is_section_header()
+                        && label.is_some_and(|l| l.top() < bottom)
+                        && first.is_some_and(|r| {
+                            r.top() >= bottom - row_room(true)
+                                && r.top() < bottom - bottom_clear(true)
+                        })
+                    {
+                        behind_band = true;
+                        assert_eq!(edge.stranded, Some(ix), "its first row is behind the band");
+                    }
+                }
+            });
+        }
+        assert!(behind_band, "some height puts a first row behind the band");
 
         let waiting = |view: &gpui::Entity<RailView>, cx: &mut gpui::VisualTestContext| {
             view.update(cx, |this, _| this.bottom_edge.get().waiting)
