@@ -30,7 +30,7 @@ pub(super) fn topic(
 
 /// The menu of a 群 header or a DM row: 静音 or 取消静音 and the 提醒
 /// submenu (this conversation's own notify level); for a 群 also
-/// 重命名群…, 添加成员 and, apart, 离开群 (it asks first).
+/// 重命名…, 添加成员 and, apart, 离开群 (it asks first).
 pub(super) fn group(
     menu: PopupMenu,
     services: &Services,

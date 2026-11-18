@@ -24,13 +24,13 @@ fn destructive_item(label: &'static str) -> PopupMenuItem {
     })
 }
 
-/// Whether 删除群… shows: an owner, on a 群 (a 私聊 cannot be deleted). The server refuses
+/// Whether 删除… shows: an owner, on a 群 (a 私聊 cannot be deleted). The server refuses
 /// the default 群 (全员); the alert says so.
 pub fn may_delete_group(services: &Services, g: &GroupSummary) -> bool {
     services.provider.can_hide_delete() && g.kind == GroupKind::Group && i_am_owner(services)
 }
 
-/// Whether 删除话题… shows: its creator or an owner, never for the 群聊.
+/// Whether 删除… of a 话题 shows: its creator or an owner, never for the 群聊.
 pub fn may_delete_topic(services: &Services, topic: &Topic) -> bool {
     services.provider.can_hide_delete()
         && !is_main_topic(&topic.id)
@@ -46,7 +46,7 @@ pub fn hide_group_item(menu: PopupMenu, services: &Services, g: &GroupSummary) -
     menu.item(PopupMenuItem::new(nav::HIDE).on_click(move |_, _, cx| hide_group(&s, &id, cx)))
 }
 
-/// 删除群… for an owner's 群 menu; nothing otherwise.
+/// 删除… for an owner's 群 menu; nothing otherwise.
 pub fn delete_group_item(menu: PopupMenu, services: &Services, g: &GroupSummary) -> PopupMenu {
     if !may_delete_group(services, g) {
         return menu;
@@ -59,7 +59,7 @@ pub fn delete_group_item(menu: PopupMenu, services: &Services, g: &GroupSummary)
     )
 }
 
-/// 隐藏话题 and 删除话题… for a 话题's menu (not the 群聊), after a separator.
+/// 隐藏 and 删除… for a 话题's menu (not the 群聊), after a separator.
 pub fn topic_items(
     mut menu: PopupMenu,
     services: &Services,

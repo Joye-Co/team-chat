@@ -334,7 +334,7 @@ shape. The text inside every control is Body 13 pt unless noted.
   只有 @我, off while muted, a footnote says muted 群 still remind on @我). The 话题 inspector
   has a 通知 section after 状态: 关注 and 静音 (switches) and a footnote. The same commands are
   in the context menus: a 群 or 私聊 row and the 群 page's ⋯ menu carry 静音 / 取消静音 and
-  a 提醒 submenu; a 话题 row carries 关注 / 取消关注 and 静音话题 / 取消静音. A muted 群,
+  a 提醒 submenu; a 话题 row carries one 提醒 submenu (关注 / 默认 / 静音, the level checked). A muted 群,
   私聊 or 话题 shows `bell.slash` (11 pt, `secondary`) after its name in the sidebar. The
   settings window holds only what applies everywhere.
 - Popovers: radius 12, `sheet` fill, `float` shadow, an arrow pointing at the control; close on

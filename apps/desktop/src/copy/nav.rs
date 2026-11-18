@@ -37,7 +37,7 @@ crate::copy! {
     LEAVE_OK = "离开",
     // hide and delete of a 群 or 私聊 (hide-delete/1)
     HIDE = "隐藏",
-    DELETE_GROUP = "删除群…",
+    DELETE_GROUP = "删除…",
     DELETE_GROUP_CONFIRM_TITLE = "删除「{name}」？",
     DELETE_GROUP_CONFIRM_BODY = "所有成员都会失去这个群和全部消息。\n删除后不能恢复。",
     DELETE_OK = "删除",
@@ -55,7 +55,7 @@ crate::copy! {
     CREATE = "创建",
     ADD = "添加",
     // rename group dialog
-    RENAME_GROUP = "重命名群…",
+    RENAME_GROUP = "重命名…",
     RENAME_GROUP_TITLE = "重命名群",
     RENAME_GROUP_FORBIDDEN = "你已不在这个群里，不能重命名",
     // add members dialog
