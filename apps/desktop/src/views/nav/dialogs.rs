@@ -1250,8 +1250,8 @@ pub fn confirm_leave(
 ) {
     destructive_alert(
         "leave-group",
-        fill(nav::LEAVE_CONFIRM_TITLE, &[("name", &short_name(&name))]),
-        nav::LEAVE_CONFIRM_BODY.to_string(),
+        nav::LEAVE_CONFIRM_TITLE.to_string(),
+        fill(nav::LEAVE_CONFIRM_BODY, &[("name", &name)]),
         nav::LEAVE_OK,
         move |_, cx| leave(&services, &group_id, cx),
         window,

@@ -107,11 +107,9 @@ pub fn confirm_delete_group(
 ) {
     dialogs::destructive_alert(
         "delete-group",
-        fill(
-            nav::DELETE_GROUP_CONFIRM_TITLE,
-            &[("name", &dialogs::short_name(&name))],
-        ),
-        nav::DELETE_GROUP_CONFIRM_BODY.to_string(),
+        // The whole name, in the body: it wraps, the one-line title cannot.
+        nav::DELETE_GROUP_CONFIRM_TITLE.to_string(),
+        fill(nav::DELETE_GROUP_CONFIRM_BODY, &[("name", &name)]),
         nav::DELETE_OK,
         move |_, cx| delete_group(&services, &group_id, cx),
         window,
@@ -154,11 +152,8 @@ pub fn confirm_delete_topic(
     let (g, t) = (group_id.to_string(), topic.id.clone());
     dialogs::destructive_alert(
         "delete-topic",
-        fill(
-            r::TOPIC_DELETE_CONFIRM_TITLE,
-            &[("name", &dialogs::short_name(&topic.title))],
-        ),
-        r::TOPIC_DELETE_CONFIRM_BODY.to_string(),
+        r::TOPIC_DELETE_CONFIRM_TITLE.to_string(),
+        fill(r::TOPIC_DELETE_CONFIRM_BODY, &[("name", &topic.title)]),
         r::TOPIC_DELETE_OK,
         move |_, _| services.provider.delete_topic(&g, &t),
         window,
