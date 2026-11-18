@@ -32,7 +32,7 @@ server is [machine-protocol.md](machine-protocol.md).
 | `ops/monitor` | Monitor Worker |
 | `ops/restore` | Restore from the R2 archive and the local restore drill ([RUNBOOK.md](RUNBOOK.md#restore-from-the-r2-archive)) |
 | `examples` | Small bots on `packages/bot-sdk` (`echo-bot.ts`, `ask-bot.ts`) and `notify.sh`, which posts one message over HTTP |
-| `third_party` | Vendored crates used through `[patch.crates-io]` (`gpui-pre`, `gpui-pre-apple`, `gpui-component`) and the Lucide icon set; see Client below |
+| `third_party` | Vendored crates used through `[patch.crates-io]` (`gpui-pre`, `gpui-pre-apple`, `gpui-component`, `gpui-base`) and the Lucide icon set; see Client below |
 | `scripts` | `build-dmg.sh`, release and admin helpers |
 | `scripts/sandbox` | The local sandbox of `bun run dev:desktop`: `up.ts` starts this worktree's server, `seed.ts` fills it with the sample team through the public API |
 | `docs/PRODUCT.md` | Product brief: interface words, screens, V1 bar |
@@ -95,6 +95,8 @@ Only the agents whose task says so deploy.
 - `third_party/gpui-pre-apple` is gpui-pre-apple 0.3.10 with one patch, also through
   `[patch.crates-io]`: a glyph with dilation 0 is drawn with font smoothing off (a bitmap
   context smooths by default, which made dark text one weight heavier).
+- `third_party/gpui-base` is gpui-base 0.8.1 with one patch, also through `[patch.crates-io]`: a
+  checked task box in Markdown is filled with the text color, not the link color.
 - chat-core runs networking on a background tokio runtime. The UI renders from the local SQLite
   cache and never waits for the network.
 
