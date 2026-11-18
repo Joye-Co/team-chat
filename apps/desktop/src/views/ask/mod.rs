@@ -587,7 +587,9 @@ impl AskPalette {
                 fill(c::ASK_GIVE_DETAIL, &[("work", task)]),
             )
         };
-        // What the member does now: 在做 (the 话题 in its tooltip) or 空闲.
+        // What the member does now: 在做 (the 话题 in its tooltip) or 空闲. Only on a row
+        // that names the member (§7.11): beside 交给 Jojo 安排 the word would read as the
+        // hand-off's own state.
         let run = self
             .services
             .provider
@@ -595,6 +597,7 @@ impl AskPalette {
             .into_iter()
             .find(|r| r.bot_id == member.id);
         let status = match run {
+            _ if *helper && !*named => None,
             Some(r) => {
                 let topic = self
                     .services
