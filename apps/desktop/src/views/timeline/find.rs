@@ -562,8 +562,8 @@ impl TimelineView {
     /// count, the previous and next match and 完成 on one center line.
     pub(super) fn render_find_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         use crate::ui::native::{
-            IconSize, NativeType as _, PushSize, PushStyle, SearchField, disabled_push,
-            icon_button_sym, native_colors, push_button, tokens,
+            IconSize, NativeType as _, SearchField, disabled_push, icon_button_sym, native_colors,
+            tokens,
         };
         let find = self.find.as_ref()?;
         let n = native_colors(cx);
@@ -637,12 +637,14 @@ impl TimelineView {
                     step("find-next", Sym::ChevronDown, t::FIND_NEXT, cx)
                         .on_click(cx.listener(|this, _, _, cx| this.step_find(true, cx))),
                 )
+                // §2.17: close is the 28 ghost icon button; 完成 is the word of
+                // a done 话题 and never a button of this bar.
                 .child(
-                    push_button(
+                    icon_button_sym(
                         "find-done",
-                        t::FIND_DONE,
-                        PushStyle::Outline,
-                        PushSize::Regular,
+                        Sym::Close,
+                        crate::copy::common::CLOSE,
+                        IconSize::Regular,
                         cx,
                     )
                     .on_click(cx.listener(|this, _, window, cx| this.close_find(window, cx))),

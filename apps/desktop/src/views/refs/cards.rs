@@ -440,6 +440,7 @@ pub fn chart_overlay(
     window: &Window,
     cx: &App,
 ) -> Option<AnyElement> {
+    use crate::theme::Type as _;
     use gpui::{
         InteractiveElement as _, IntoElement as _, ParentElement as _, Styled as _, div,
         prelude::FluentBuilder as _,
@@ -480,8 +481,17 @@ pub fn chart_overlay(
                             _ => t,
                         })
                         .unwrap_or_default();
-                    // Above the point, or under it when the plot has no room above:
-                    // the tip never covers the point it describes.
+                    // The value leads (ink, medium); the series and the x are muted.
+                    let (head, value) = match text.rsplit_once(super::label::SEP) {
+                        Some((head, value)) => (
+                            Some(format!("{head}{}", super::label::SEP)),
+                            value.to_string(),
+                        ),
+                        None => (None, text),
+                    };
+                    // Above the point, over the chart's label row when the plot
+                    // itself has no room (the tip never covers the point or the
+                    // line that leads to it); under it only with no room at all.
                     let at = main
                         .values
                         .get(xi)
@@ -490,7 +500,7 @@ pub fn chart_overlay(
                             crate::views::cards::v2::chart_y_from_top(*kind, series, v)
                         });
                     let y = height * at;
-                    let top = if y - TIP_H - TIP_GAP >= gpui::px(0.) {
+                    let top = if y - TIP_H - TIP_GAP >= -top {
                         y - TIP_H - TIP_GAP
                     } else {
                         y + TIP_GAP
@@ -508,21 +518,27 @@ pub fn chart_overlay(
                             _ => el.justify_center(),
                         })
                         .child(
-                            div()
+                            // §1.7, §1.9: a tooltip is a float surface (the
+                            // opaque card fill, radius 8, a 1 px border,
+                            // shadow md), never a hole in the card.
+                            crate::ui::overlay::overlay_surface(cx)
                                 .flex_none()
                                 .flex()
                                 .items_center()
                                 .gap(crate::theme::space::S6)
                                 .p(crate::theme::space::S4)
                                 .pl(crate::theme::space::S8)
-                                .rounded(crate::theme::radius::MD)
-                                .border_1()
-                                .border_color(k.line)
-                                .bg(k.bg)
-                                .text_size(gpui::px(12.))
-                                .line_height(gpui::px(18.))
+                                .t_meta()
                                 .text_color(k.ink_2)
-                                .child(text)
+                                .child(
+                                    // One run of text: the separator keeps its
+                                    // own space on both sides.
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .children(head)
+                                        .child(div().medium().text_color(k.ink).child(value)),
+                                )
                                 .child(button),
                         )
                 });
@@ -546,9 +562,9 @@ pub fn chart_overlay(
     )
 }
 
-/// Height of the point tooltip (a 22 pt button, padding and the border), and its gap to
+/// Height of the point tooltip (the sm button, padding and the border), and its gap to
 /// the point.
-const TIP_H: gpui::Pixels = gpui::px(32.);
+const TIP_H: gpui::Pixels = gpui::px(38.);
 const TIP_GAP: gpui::Pixels = gpui::px(8.);
 
 /// The plot's offset in a chart element: below the label row when the chart has a label

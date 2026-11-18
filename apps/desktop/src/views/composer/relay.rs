@@ -16,6 +16,9 @@ pub const ARROWS: [&str; 3] = ["→", "->", "=>"];
 pub struct RelayLine {
     pub text: String,
     pub error: bool,
+    /// The draft is an order Send will start: the composer's other hint about
+    /// who reads the message next does not apply.
+    pub order: bool,
 }
 
 /// The member a step names: after its `@`, the longest member name it starts with, or the
@@ -93,7 +96,13 @@ pub fn relay_line(
     in_chat: bool,
     relay_live: bool,
 ) -> Option<RelayLine> {
-    let hint = |text: String| Some(RelayLine { text, error: false });
+    let hint = |text: String| {
+        Some(RelayLine {
+            text,
+            error: false,
+            order: false,
+        })
+    };
     if let Some(names) = order_names(text, members) {
         if in_chat {
             return hint(c::RELAY_HINT_IN_TOPIC.to_string());
@@ -102,10 +111,15 @@ pub fn relay_line(
             return Some(RelayLine {
                 text: c::RELAY_HINT_RUNNING.to_string(),
                 error: true,
+                order: false,
             });
         }
         let sep = format!(" {} ", c::RELAY_ARROW);
-        return hint(fill(c::RELAY_HINT_ORDER, &[("names", &names.join(&sep))]));
+        return Some(RelayLine {
+            text: fill(c::RELAY_HINT_ORDER, &[("names", &names.join(&sep))]),
+            error: false,
+            order: true,
+        });
     }
     if !in_chat && ai_members_named(text, picked, members) >= 2 {
         return hint(c::RELAY_HINT_DISCOVER.to_string());
@@ -131,7 +145,11 @@ impl super::ComposerView {
                 ))
             })
         {
-            return Some(RelayLine { text, error: true });
+            return Some(RelayLine {
+                text,
+                error: true,
+                order: false,
+            });
         }
         if self.last_text.trim().is_empty() {
             return None;
@@ -215,7 +233,8 @@ mod tests {
             relay_line(order, &[], &m, false, false),
             Some(RelayLine {
                 text: "按顺序做：小码 → 小审 → 小码".into(),
-                error: false
+                error: false,
+                order: true,
             })
         );
         assert_eq!(
@@ -226,7 +245,8 @@ mod tests {
             relay_line(order, &[], &m, false, true),
             Some(RelayLine {
                 text: "这个话题已经在按顺序做，先停止它".into(),
-                error: true
+                error: true,
+                order: false,
             })
         );
     }

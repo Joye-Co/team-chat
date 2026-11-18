@@ -259,6 +259,11 @@ impl ComposerView {
         if crate::data::run_phase::phase_of(run).0.ended() {
             return None;
         }
+        // 停止 was pressed: the member stops at this step, so no next step
+        // reads a message either.
+        if self.services.provider.run_stopping(&run.id) {
+            return None;
+        }
         Some(crate::views::shell::member_name(
             &self.services,
             &run.bot_id,
@@ -971,7 +976,7 @@ impl ComposerView {
     }
 
     /// The 添加文件 button: picks files with the system dialog.
-    fn pick_files(&mut self, cx: &mut Context<Self>) {
+    pub fn pick_files(&mut self, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(gpui::PathPromptOptions {
             files: true,
             directories: false,
