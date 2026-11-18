@@ -10,7 +10,7 @@ crate::copy! {
     ARTIFACT_BACK_LIST = "回到产出",
     ARTIFACT_FROM_TOPIC = "来自话题",
     ARTIFACT_MADE_BY = "做的人",
-    ARTIFACT_ASKED_BY = "要求",
+    ARTIFACT_ASKED_BY = "提出的人",
     ARTIFACT_DECISIONS = "用到的决定",
     ARTIFACT_VERSIONS = "版本",
     ARTIFACT_CITED_BY = "被引用",
@@ -20,7 +20,7 @@ crate::copy! {
     ARTIFACT_SHARE = "分享",
     ARTIFACT_COPIED = "已复制",
     ARTIFACT_SIDE_CHAT = "单独问",
-    ARTIFACT_COMPARE = "和 v{v} 对比",
+    ARTIFACT_COMPARE = "看 v{v}",
     ARTIFACT_BACK_TO = "回到 v{v}",
     // The tail after the 群 name; the name cuts first (§2.21).
     ARTIFACT_TOPIC_DONE = " · 完成 {time}",
@@ -66,7 +66,7 @@ crate::copy! {
     // --- end v13/wire ---
     // --- v14/t3-pages: the 产出 inspector (COMPLETENESS.md §2.5) ---
     ARTIFACT_INFO = "产出信息",
-    ARTIFACT_INFO_LINE = "来龙去脉、版本和页面能做的",
+    ARTIFACT_INFO_LINE = "来龙去脉、版本和这一页能做的事",
     ARTIFACT_CLOSE_INFO = "关闭产出信息",
     ARTIFACT_NO_TITLE = "（无标题）",
     ARTIFACT_NOBODY = "没有记录",

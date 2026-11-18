@@ -216,4 +216,8 @@ crate::copy! {
     // The move buttons of a rank row.
     RANK_UP = "上移",
     RANK_DOWN = "下移",
+    // The band of a step the member cannot take now: a short state in the badge, the
+    // rest in the muted line after it.
+    BUSY_STATE = "{name} 接不了",
+    BUSY_LATER = "稍后再试",
 }

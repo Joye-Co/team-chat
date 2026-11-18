@@ -2117,7 +2117,7 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
             div()
                 .p(space::S12)
                 .child(
-                    ui::native::Alert::new(Sym::Alert, c::EMBED_FAILED)
+                    ui::native::Alert::new(Sym::Failed, c::EMBED_FAILED)
                         .tone(ui::native::AlertTone::Destructive)
                         .description(c::EMBED_FAILED_DESC)
                         .action(
