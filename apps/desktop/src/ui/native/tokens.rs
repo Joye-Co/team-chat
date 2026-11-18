@@ -1099,6 +1099,11 @@ pub mod metrics {
     pub const INSPECTOR_PAD: Pixels = space::S16;
     /// The side inset of a filled group in the 详情 pane (D21).
     pub const INSPECTOR_GROUP_INSET: Pixels = px(14.);
+    /// A row of a DescriptionList (§2.5) and the column of its label.
+    pub const DESC_ROW: Pixels = px(36.);
+    pub const DESC_LABEL: Pixels = px(112.);
+    /// The tallest a menu of names grows before it scrolls.
+    pub const MENU_LIST_MAX: Pixels = px(264.);
     /// A row of a list in a grouped inspector section (the members of a 群
     /// or a 话题): the compact row, rows touching (§2.6).
     pub const INSPECTOR_LIST_ROW: Pixels = height::ROW;

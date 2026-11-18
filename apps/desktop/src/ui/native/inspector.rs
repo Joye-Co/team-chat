@@ -144,7 +144,7 @@ impl RenderOnce for InspectorSection {
                     div()
                         .id(self.id)
                         .min_h(px(28.))
-                        .pr(px(2.))
+                        .pr(super::tokens::space::S2)
                         .flex()
                         .items_center()
                         .gap(super::tokens::space::S6)
