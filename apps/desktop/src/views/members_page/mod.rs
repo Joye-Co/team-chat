@@ -30,6 +30,7 @@ use crate::{
         AdminError, ApprovalDefaults, ApproverRole, BotRunSummary, GroupKind, Member, MemberLevel,
         PlanState,
         pages::{DeliveryKind, DeliveryState, MemberExtras},
+        run_phase::{RunPhase, phase_of},
         v2::{Currency, MemberStats},
     },
     ui::{
@@ -110,6 +111,20 @@ pub fn set_scene_scroll(to: SceneScroll) {
 }
 
 /// What the list knows of one member.
+impl Filter {
+    /// Whether a member's row is in this filter. 在做事 asks about the run, not the row's
+    /// section: a member with a question for me sits under 等你 and may still be at work.
+    fn shows(self, bucket: Bucket, run: Option<&BotRunSummary>) -> bool {
+        match self {
+            Filter::All => true,
+            Filter::Working => {
+                bucket == Bucket::Working || run.is_some_and(|r| phase_of(r).0 == RunPhase::Working)
+            }
+            Filter::Waiting => bucket == Bucket::Waiting,
+        }
+    }
+}
+
 struct Entry {
     member: Member,
     bucket: Bucket,
@@ -410,11 +425,6 @@ impl MembersPage {
         // ToolbarRow draws the one 1 px line at y 52 itself (§2.2).
         let toolbar = div().flex_none().child(row);
 
-        let shown = |b: Bucket| match self.filter {
-            Filter::All => true,
-            Filter::Working => b == Bucket::Working,
-            Filter::Waiting => b == Bucket::Waiting,
-        };
         let focused = self.focus.is_focused(window);
         let active = emphasized(window);
         let mut list = div()
@@ -432,10 +442,10 @@ impl MembersPage {
             Bucket::Idle,
             Bucket::People,
         ] {
-            if !shown(bucket) {
-                continue;
-            }
-            let group: Vec<&Entry> = entries.iter().filter(|e| e.bucket == bucket).collect();
+            let group: Vec<&Entry> = entries
+                .iter()
+                .filter(|e| e.bucket == bucket && self.filter.shows(e.bucket, e.run.as_ref()))
+                .collect();
             if group.is_empty() {
                 continue;
             }
@@ -2287,11 +2297,7 @@ impl MembersPage {
         let filter = self.filter;
         self.entries()
             .into_iter()
-            .filter(|e| match filter {
-                Filter::All => true,
-                Filter::Working => e.bucket == Bucket::Working,
-                Filter::Waiting => e.bucket == Bucket::Waiting,
-            })
+            .filter(|e| filter.shows(e.bucket, e.run.as_ref()))
             .map(|e| e.member.id)
             .collect()
     }
@@ -2424,6 +2430,37 @@ mod behavior_tests {
 #[cfg(test)]
 mod wire_tests {
     use super::*;
+
+    #[test]
+    fn the_working_filter_asks_about_the_run_not_the_section() {
+        let mut run = BotRunSummary {
+            id: "r1".into(),
+            bot_id: "b1".into(),
+            group_id: "g1".into(),
+            topic_id: "t1".into(),
+            machine_id: None,
+            machine_name: None,
+            status: crate::data::RunStatus::Running,
+            requested_by: None,
+            created_at: 0,
+            started_at: Some(0),
+            ended_at: None,
+            updated_at: 0,
+            model: None,
+            effort: None,
+            summary: None,
+            plan: Vec::new(),
+            hold: Default::default(),
+        };
+        // At work with a question for me: under 等你, and in 在做事 too.
+        assert!(Filter::Working.shows(Bucket::Waiting, Some(&run)));
+        assert!(Filter::Waiting.shows(Bucket::Waiting, Some(&run)));
+        // A question with a run that waits on a person is not at work.
+        run.status = crate::data::RunStatus::Waiting;
+        assert!(!Filter::Working.shows(Bucket::Waiting, Some(&run)));
+        assert!(!Filter::Working.shows(Bucket::Waiting, None));
+        assert!(!Filter::Working.shows(Bucket::Idle, None));
+    }
 
     #[test]
     fn approvals_list_what_the_rules_turn_on_in_the_settings_order() {
