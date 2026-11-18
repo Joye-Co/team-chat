@@ -22,7 +22,7 @@ use super::{
     i_am_owner,
     widgets::{self, Status, answer},
 };
-use crate::views::nav::dialogs::{sheet_form, sheet_form_row};
+use crate::views::nav::dialogs::{sheet_form, sheet_form_row, sheet_form_row_wrap};
 use crate::{
     app::{Changes, Services},
     characters::{self, CharacterId, CharacterStatus},
@@ -1023,14 +1023,19 @@ fn choice_row(
     second: bool,
     disabled: bool,
     pick: impl Fn(bool, &mut Window, &mut App) + 'static,
-    window: &Window,
     cx: &App,
 ) -> gpui::Div {
     let pick = std::rc::Rc::new(pick);
     sheet_form_row(
         label,
         disabled_push(
-            widgets::popup_fixed(id, options[usize::from(second)], SELECT_WIDTH, window, cx),
+            widgets::popup_fill(
+                id,
+                options[usize::from(second)],
+                false,
+                SheetWidth::Form,
+                cx,
+            ),
             disabled,
             cx,
         )
@@ -1439,7 +1444,6 @@ impl Render for InviteForm {
                                 cx.notify();
                             })
                         },
-                        window,
                         cx,
                     )),
             )
@@ -2396,8 +2400,18 @@ impl Render for BotForm {
         let busy = self.status.busy();
         let (off, name_err, role_err) =
             name_role_problem(&self.value(&self.name, cx), &self.value(&self.role, cx));
-        // Work on the team's computers needs a runtime.
-        let off = off || (self.runner && self.runtime_value(cx).is_empty());
+        // Work on the team's computers needs a runtime. With everything else
+        // right and the select in sight, the footer says what is still missing.
+        let runtime_missing = self.runner && self.runtime_value(cx).is_empty();
+        let runtime_hint = (!off
+            && runtime_missing
+            && self.editing.is_none()
+            && matches!(self.machines_load, MachinesLoad::Loaded)
+            && !self.machines.is_empty()
+            && !self.runtime_options().is_empty()
+            && self.no_computer_notice(cx).is_none())
+        .then(|| widgets::quiet(s::BOT_RUNTIME_NEEDED, cx));
+        let off = off || runtime_missing;
         // Editing: the runner loads first; saving needs it in and a change.
         let load = self.editing.as_ref().map(|e| e.runner.clone());
         let runner_ready = !matches!(load, Some(RunnerLoad::Loading | RunnerLoad::Failed(_)));
@@ -2698,15 +2712,20 @@ impl Render for BotForm {
             let machines_failed = match &self.machines_load {
                 MachinesLoad::Failed(text) => {
                     let again = cx.entity();
-                    Some(div().pb(tokens::space::S8).child(widgets::failed_alert(
-                        "bot-machines-failed",
-                        s::COMPUTERS_FAILED,
-                        Some(text.clone()),
-                        Some(widgets::retry_button("bot-machines-retry", cx).on_click(
-                            move |_, _, cx| again.update(cx, |f, cx| f.load_machines(cx)),
-                        )),
-                        cx,
-                    )))
+                    // The rows of a member being edited follow under it.
+                    Some(
+                        div()
+                            .when(self.editing.is_some(), |d| d.pb(tokens::space::S8))
+                            .child(widgets::failed_alert(
+                                "bot-machines-failed",
+                                s::COMPUTERS_FAILED,
+                                Some(text.clone()),
+                                Some(widgets::retry_button("bot-machines-retry", cx).on_click(
+                                    move |_, _, cx| again.update(cx, |f, cx| f.load_machines(cx)),
+                                )),
+                                cx,
+                            )),
+                    )
                 }
                 _ => None,
             };
@@ -2721,11 +2740,13 @@ impl Render for BotForm {
                     .into_any_element(),
                 None => machine,
             };
-            // No computer is connected: the notice stands where the rows
-            // would be. A member being edited keeps its rows under it, so
-            // what is saved (代码仓库, 基础分支) stays in reach.
+            // No computer is connected, or the list did not load: the notice
+            // or the Alert stands where the rows would be. A member being
+            // edited keeps its rows under it, so what is saved (代码仓库,
+            // 基础分支) stays in reach.
             let notice = self.no_computer_notice(cx);
-            let nothing_to_set = notice.is_some() && self.editing.is_none();
+            let nothing_to_set =
+                (notice.is_some() || machines_failed.is_some()) && self.editing.is_none();
             body = body.child(
                 div()
                     .flex()
@@ -2749,7 +2770,12 @@ impl Render for BotForm {
                             widgets::list_loading("bot-machines-loading", 2, false, cx)
                         } else {
                             sheet_form()
-                                .child(sheet_form_row(s::RUNNER_MACHINE, machine, cx))
+                                .child(sheet_form_row_wrap(
+                                    s::RUNNER_MACHINE,
+                                    tokens::height::DEFAULT,
+                                    machine,
+                                    cx,
+                                ))
                                 .children(runtime.map(|r| sheet_form_row(s::RUNNER_RUNTIME, r, cx)))
                                 .child(field_row(
                                     s::RUNNER_REPO,
@@ -2788,7 +2814,12 @@ impl Render for BotForm {
                     .child(section(s::RUNNER_OWN_SECTION))
                     .child(
                         sheet_form()
-                            .child(sheet_form_row(s::RUNNER_OWN_MODEL, own_switch, cx))
+                            // A switch sits on the group's trailing edge (2.8).
+                            .child(sheet_form_row(
+                                s::RUNNER_OWN_MODEL,
+                                div().w_full().flex().justify_end().child(own_switch),
+                                cx,
+                            ))
                             .when(own, |f| {
                                 f.child(sheet_form_row(s::RUNNER_MODEL, model, cx))
                                     .children(
@@ -2859,6 +2890,7 @@ impl Render for BotForm {
             .when_some(name_err.clone().or(role_err.clone()), |l, e| {
                 l.status(crate::ui::native::sheet::sheet_status_error(e, cx))
             })
+            .when_some(runtime_hint, |l, h| l.status(h))
             .buttons(sheet_actions(
                 "bot",
                 default,
@@ -2871,7 +2903,13 @@ impl Render for BotForm {
 }
 
 pub fn open_add_bot(services: Services, window: &mut Window, cx: &mut App) -> Entity<BotForm> {
-    let form = cx.new(|cx| BotForm::new(services, window, cx));
+    let form = cx.new(|cx| {
+        let mut form = BotForm::new(services, window, cx);
+        // A new member works on a computer unless asked otherwise: 外部接入
+        // issues a credential, so it is never what a bare 添加 does.
+        form.runner = true;
+        form
+    });
     open_bot_sheet(form, window, cx)
 }
 
@@ -2959,15 +2997,19 @@ impl Render for CharacterForm {
             } else {
                 s::BOT_CHARACTER_HINT
             })
-            .body(character_picker(
-                "member-character",
-                self.selected,
-                picker_tint(&self.name, self.selected, cx),
-                self.status.busy(),
-                move |c, window, cx| page.update(cx, |this, cx| this.pick(c, window, cx)),
-                window,
-                cx,
-            ))
+            .body(
+                character_picker(
+                    "member-character",
+                    self.selected,
+                    picker_tint(&self.name, self.selected, cx),
+                    self.status.busy(),
+                    move |c, window, cx| page.update(cx, |this, cx| this.pick(c, window, cx)),
+                    window,
+                    cx,
+                )
+                // On the sheet's left edge, under the title.
+                .justify_start(),
+            )
             .when_some(
                 match &self.status {
                     Status::Failed(t) => Some(widgets::failed_alert(
