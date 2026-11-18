@@ -38,6 +38,24 @@ MachineLink of that machine (`idFromName(machineId)`, location hint `oc`). One m
 most one live link: a new link replaces the old one (MachineLink closes the old socket with
 code 4002).
 
+### Close codes
+
+When the server closes the link itself, the WebSocket close code says why:
+
+| Code | Close reason | When | `error` frame first |
+| --- | --- | --- | --- |
+| 4000 | `unsupported protocol` | `hello.protocol` is not this protocol | `unsupported_protocol` |
+| 4001 | `unauthorized` | the machine was removed or its token revoked (at a frame, or while the link is open) | `unauthorized` |
+| 4002 | `replaced by a new link` | another link opened with this machine's token | none |
+| 4003 | `no frames for 90 s` | the link was idle for 90 s (no heartbeat arrived) | none |
+| 1011 | `storage unavailable` | BotDesk could not store a batch after 3 tries (see "Server side") | none |
+
+The daemon reconnects with backoff after every close and logs the code and the reason
+(`link down: closed by server (code 4002: replaced by a new link)`). Two codes do not go away
+by themselves, so its log line also says what to do: 4001 (check `token_file`, or add the
+computer again) and 4002 (two daemons run with the same token and close each other's link in
+turn: stop one).
+
 Every frame has a `t` field. The first daemon frame is `hello`; the server answers `welcome`.
 Before `welcome` the daemon sends nothing else, and the server sends nothing but `welcome` or
 `error`.
@@ -113,7 +131,8 @@ KnownRun = { runId, ackedSeq: number }
   fullPrompt?: string,             // with resumeSessionId: the full prompt, for when that session
                                    // is not found; absent when the frame would pass 1 MiB
   gates?: RunGate[] }              // feature "gates": kinds the run stops at, see "Gated actions"
-{ t: "run.input",    runId, inputId, text, authorId?,            // a follow-up from the topic
+{ t: "run.input",    runId, inputId, text, authorId?,            // a follow-up from the topic; a person's
+                                                                 // message starts with the line `Follow-up from <name>:`
   answer?: RunAnswer, artifactEvent?: RunArtifactEvent }         // 1.1, feature "answer"
 { t: "run.approval", runId, approvalId, decision: "approve" | "deny",
   scope?: "run" }                                                // feature "gates": 这件事里都同意
@@ -404,7 +423,7 @@ server frames and ignores unknown fields, so it must never get work it cannot do
 
 | Feature | What the daemon does |
 | --- | --- |
-| `pause` | `run.pause`: interrupts the CLI turn where the CLI supports it, else sends SIGSTOP to the run's process group, stops the stall timer and the `maxDurationMs` clock, and emits `paused { paused: true, by }`. `run.resume`: SIGCONT, restarts both clocks (the deadline moves by the paused time), emits `paused { paused: false }` and gives `note` to the CLI as its next input when set. A cancel while paused resumes first. |
+| `pause` | `run.pause`: interrupts the CLI turn where the CLI supports it, else sends SIGSTOP to the run's process group, stops the stall timer and the `maxDurationMs` clock, and emits `paused { paused: true, by }`. `run.resume`: SIGCONT, restarts both clocks (the deadline moves by the paused time), emits `paused { paused: false }` and, when `note` is set, gives the CLI as its next input a line that says a person paused it, who (the member id) and for how long, then the note. A cancel while paused resumes first. |
 | `answer` | `run.input.answer` and `run.input.artifactEvent` reach the CLI as typed, untrusted data (a tool result of the CLI's own ask, or a user line with a fenced JSON block). `text` holds the same content as text for daemons without the feature. |
 | `aside` | `run.assign.kind = "aside"`: the run is read-only (Codex sandbox `read-only` with no MCP servers or web tools, Claude Code permission mode `plan` with only the read tools, no repo write) whatever `daemon.toml` or the CLI's own settings say. ACP agents and the PTY have no read-only mode: their `CliInfo.aside` is false and the daemon rejects such a run. |
 | `acceptance` | The daemon forwards the CLI's acceptance criteria as the `acceptance` run event. |
@@ -441,7 +460,7 @@ How the 1.1 daemon does each one:
   continue the session (no session file, `thread/resume` or `session/load` fails) it sends
   `fullPrompt` to the new session instead and sets `run.done.resumeMissed: true`, and the server
   records that the run got the full prompt (its run context shows the full prompt). Without
-  `fullPrompt` (an older server, or a frame that would pass 1 MiB) the daemon keeps the short prompt. In the 群聊 a run continues the last session only when its request
+  `fullPrompt` (an older server, or a frame that would pass 1 MiB) the daemon keeps the short prompt and, when the session is gone, puts a note before it (every runtime): this is a new session that does not remember the earlier turns, the prompt holds only what is new, read the topic with `chat-run topic history` first. In the 群聊 a run continues the last session only when its request
   quotes a message of that bot or follows up its run; other requests start a new session.
 
 - **pause**: the daemon stops the CLI's process group (`SIGSTOP`, the group from `run.json`) for
@@ -534,7 +553,7 @@ no credentials pass through chat. The server shows the address to owners and run
   source: { kind: "card", messageId, blockId?, actionId?, rev } | { kind: "artifact", artifactId, version, eventId, ask },
   event, value?, actor: { id, name }, eventId?, block? /* card events: the block or action at rev */ }
 // daemon -> server (feature "output", `chat-run`): a normal run.event with seq and ack
-RunEvent += { type: "output", outputId, op: "card.post" | "card.patch" | "interaction.resolve" | "artifact.data" | "artifact.reply" | "desk.note" | "run.report", body: JSON }
+RunEvent += { type: "output", outputId, op: "card.post" | "card.patch" | "interaction.resolve" | "artifact.data" | "artifact.reply" | "desk.note" | "member.handoff" | "member.assign" | "run.report", body: JSON }
 // server -> daemon
 { t: "run.output.result", runId, outputId, ok, result?, error? { code, reason?, message } }
 run.input.answer += { answerId?, askId?, eventId?, event?, blockId?, value? }
@@ -576,15 +595,31 @@ the server is too old to know `output`), else `{ ok: false, error: { code: "unav
 "server.not_connected" } }` ("not connected": the daemon's link to the server was down; the result
 is unknown, because a lost ack does not show that the server never got the output, and the server
 refuses the output as `output.expired` if it comes later). Both messages say that a retry of the
-same command is safe: the daemon puts an idempotency key in the body of `card.post`
+same command is safe, except for `member.handoff` and `member.assign`: the server has no key for
+those, so a second call gives the work out twice, and the message says not to run it again
+before looking for the hand-over card (`chat-run topic history --limit 5`). The daemon puts an idempotency key in the body of `card.post`
 (`clientMsgId`), `card.patch` (`clientPatchId`) and `artifact.data` (`clientPushId`) unless the
 CLI gave one: `k` + 40 hex of SHA-256 over the run id, the op and the body. The same command in the
 same run gets the same key, so the server applies it once and answers a retry with the first
 result (`duplicate`); another run never gets the same key. `interaction.resolve` and
-`artifact.reply` are keyed by their event id. (Daemons before this rule answered
+`artifact.reply` are keyed by their event id; `desk.note` and `run.report` write the same value
+again. (Daemons before this rule answered
 `server.too_old` for the acked case.) A
-daemon that does not answer `chat-run` in 20 s gives `{ code: "timeout", reason:
-"daemon.no_answer" }`. The transport depends on the runtime:
+daemon that does not answer `chat-run` in 20 s (35 s for the reads of "Topic context", about 5
+minutes for files, 产出 and `artifact get`) gives `{ code: "timeout", reason:
+"daemon.no_answer" }`; its message says that the same command may be run again only where that
+is so (not for the member ops, nor for `artifact create` and `artifact version`, which would
+make a second one). To a `card.stale_rev` or `artifact.stale_data` refusal `chat-run` adds how to
+go on (`chat-run card get --message M`, `--base-data-rev`); the server's message names the revs.
+
+A command line `chat-run` cannot read is `{ code: "invalid" }` with a message that says what the
+command takes (`unknown argument --group; topic history takes --before, --after, --limit,
+--topic, --in`, or the commands of the first word), and only that command's usage lines on
+standard error; `chat-run --help` (or `chat-run help`) prints the whole usage. A flag's value is
+the next word or follows `=` (`--limit 5`, `--limit=5`). An id goes by either name where the
+commands differ: `topic message` takes `--message` for `--id`, `card get` and `card patch` take
+`--id` for `--message`, `artifact get` takes `--artifact` for `--id`, `artifact version` and
+`artifact data` take `--id` for `--artifact`; giving both is `invalid`. The transport depends on the runtime:
 
 - Socket (Claude Code, ACP agents, the PTY): `CHAT_RUN_SOCKET` names a unix socket of the run
   (`<run folder>/chat-run.sock`, or a short path in `$TMPDIR` when that one is too long for a
@@ -661,13 +696,16 @@ the run's member. The server gives the run's group, topic and `runId`, so the do
 | --- | --- | --- |
 | `file.upload` | `{ path, name?, mime? }` | `chat-run file upload --file <path> [--name N] [--mime T]` → `{ file: FileMeta }` |
 | `artifact.create` | `{ title, dir \| file, entry?, kind?, note?, events?, media?, data? }` | `chat-run artifact create --title T (--dir D \| --file F) [--entry P] [--kind html\|file] [--note …] [--events e.json] [--media m.json] [--data d.json]` → `ArtifactVersionResponse` |
-| `artifact.version` | `{ artifactId, dir \| file, entry?, title?, note?, events?, media?, data? }` | `chat-run artifact version --artifact A (--dir D \| --file F) [...]` → `ArtifactVersionResponse` |
+| `artifact.version` | `{ artifactId, dir \| file, entry?, title?, note?, parentVersion?, events?, media?, data? }` | `chat-run artifact version --artifact A (--dir D \| --file F) [--parent N] [...]` → `ArtifactVersionResponse` |
 
 - Paths are made absolute by `chat-run` and must be inside the run's working folder after
   symbolic links are resolved; anything else gets `forbidden` with reason
   `file.outside_workspace`. `--dir` sends every regular file below the folder that is not
   hidden (a name starting with `.`), at most 500, with `/` paths relative to it. The entry is
-  `--entry`, else `index.html` when the folder has one, else the only file. `kind` defaults to
+  `--entry`, else `index.html` when the folder has one, else the only file. The daemon checks
+  the entry (given and one of the files, or a default) and the file count before it uploads
+  anything, and its refusal names some of the files, or says to pass a folder that holds only
+  the 产出. `kind` defaults to
   `html` for an `.html`/`.htm` entry and `file` otherwise. The type of each file comes from its
   extension.
 
@@ -851,7 +889,8 @@ An AI member runs with every permission; only the few kinds the team checked nee
   its command timeout (Claude Code's Bash tool: two minutes by default). So a shim's check waits
   at most 90 seconds (the shim's call 100). With no answer by then the command does not run: the
   answer is `deny` with `waiting: true` and a reason that tells the model to go on and run the
-  same command again later. The card stays open, and the one-question turn is free again. A
+  same command again later (the run's note names the three ways a gated command ends: approved,
+  declined, still waiting; and says to report `waiting`, not `done`, while one still waits). The card stays open, and the one-question turn is free again. A
   retry of the same command (same kind and `command`) before the answer waits for that card
   again; an answer that comes when no shim waits is kept and taken by the next retry of that
   command, once (approve: it runs, no second card; decline: it is refused). Another command's
@@ -881,7 +920,7 @@ with the machine token (results can be larger than a frame); they only read.
 | `topic.history` | `{ before?, after?, limit?, topicId?, groupId? }` | `chat-run topic history [--before SEQ] [--after SEQ] [--limit N] [--topic T] [--in G]` → `{ messages: ContextMessage[], hasMore }` |
 | `topic.message` | `{ messageId, topicId?, groupId? }` | `chat-run topic message --id M [--topic T] [--in G]` → `{ message: ContextMessage }` |
 | `context.search` | `{ query, scope?, limit?, groupId? }` | `chat-run search --query Q [--group \| --all] [--in G] [--limit N]` → `{ hits: ContextHit[] }` |
-| `file.get` | `{ fileId, out? }` | `chat-run file get --id F [--out PATH]` → `{ path, name, mime, size }` |
+| `file.get` | `{ fileId, out? }` | `chat-run file get --id F [--out PATH]` → `{ path, name, mime, size, inWorkFolder }` |
 | `topic.state` | `{ topicId?, groupId? }` | `chat-run topic state [--topic T] [--in G]` → `TopicStateResponse` |
 | `artifact.list` | `{ scope?, topicId?, groupId? }` | `chat-run artifact list [--group \| --topic T] [--in G]` → `RunArtifactsResponse` |
 | `artifact.get` | `{ artifactId, version?, out? }` | `chat-run artifact get --id A [--version N] [--out PATH]` → `RunArtifactResponse` (with `path` when `out` is set) |
@@ -917,8 +956,9 @@ ContextMessage = { id, seq, authorId, authorName, at /* ms */, text }
 ContextHit = { messageId, topicId, topicTitle?, seq, authorName, at, snippet, groupId?, groupName? }
 ```
 
-- The run must be on the calling machine and active. These ops only read, so a side chat run
-  (单独问) may call them too (its group is the side chat's).
+- The run must be on the calling machine and active. These ops only read, so the server's
+  routes take a side chat run (单独问) too (its group is the side chat's); the daemon installs no
+  `chat-run` for a side chat run today, so none calls them.
 - **Which groups** (usable, [plans/usable/design-visibility.zh.md](plans/usable/design-visibility.zh.md)):
   a run reads its own group, and when it works for a person (`requestedFor`, an active person; not
   a hook's run nor a private card's answer) every group of kind `group` that person is in, read
@@ -1022,7 +1062,8 @@ GET  /v1/machine/runs/:id/memories?q=<text>&limit=<1-50, default 10>   -> Memori
   works for, plus the `group` memories of the other groups the run may read; a memory learned in a
   group only when the run may read that group (protocol.md, "Memory", Source group). Hits
   match the query's words or Chinese two-character words, best first; each hit counts one use
-  (protocol.md, "Memory"). A side chat run may search. An empty `q` is `invalid`.
+  (protocol.md, "Memory"). The route takes a side chat run too (the daemon gives it no `chat-run`
+  today). An empty `q` is `invalid`.
 - A run that names a memory's id (as `[id]`) in its result or progress counts one use of it, when
   it may read it.
 
@@ -1315,8 +1356,8 @@ folder. What a run keeps:
   it). Known credential files in a cache (`cargo/credentials*`, `npm-global/etc/npmrc`,
   `bun/bunfig.toml`) are removed before each run. When `work_root` stays below `min_free_gb`
   after old run folders are gone, caches go least recently used first, skipping those in use;
-  there is no size limit and no expiry. `daemon caches` lists them (key, repository, size, last
-  used), `daemon caches clear <key|all>` removes them and refuses one in use.
+  there is no size limit and no expiry. `daemon caches` lists them (key, size, last used,
+  repository), `daemon caches clear <key|all>` removes them and refuses one in use.
 - **The computer**: sign-ins (below) and GitHub never go into a VM; each run gets them as it
   runs.
 - **Nothing else**: `$HOME` (the host's path, e.g. `/home/runner`, made on the VM's scratch
@@ -1406,7 +1447,13 @@ CLI asks for one with `chat-run secret <NAME>`: the first call sends `approval.r
 `使用 <NAME>`) and fails with `pending`; after `run.approval approve` the daemon emits
 `approval.resolved` and the same command prints the value for 30 minutes; after `deny` it fails
 with `denied` for the rest of the run. The daemon answers these approvals itself, the CLI never
-sees them. Side chat runs get no gated variables.
+sees them: the command does not block, so the run's note and each answer say what to do next
+(`pending`: keep the turn and ask again about every 30 seconds, and after 10 minutes without an
+answer stop asking and report `waiting`; each `pending` message says how long the approval has
+waited, so the server's loop check, the same step with the same output four times, does not
+take the asks for a loop; `denied`: do not ask again, go
+on without it and report `blocked`; `not_allowed`: the names the run may ask for). Side chat runs
+get no gated variables.
 
 Group members read run events, so the daemon redacts every frame before it sends or stores
 it, and the session file before upload: the exact values of the `env_passthrough` and
@@ -1442,8 +1489,20 @@ calls, see "Gated actions"), and `[vm]` with `kernel`, `rootfs`, `dir`, `vcpus`,
 found on PATH.
 
 - `daemon run`: the service. SIGTERM cancels all runs and exits.
-- `daemon doctor`: config problems, CLIs and versions, git, disk, load. Never prints secrets.
-  Exit code 1 when something is wrong.
+- `daemon --help` (`-h`, `help`) lists the commands and options; `daemon --version` (`-V`,
+  `version`) prints the daemon's version. A command line it cannot use says what was wrong
+  (`unknown option: …`, `--config needs a file`) before the usage and exits with code 2.
+- `daemon doctor`: the daemon's version and the config file it read, config problems (the ones
+  `run` and `install-service` stop at), whether the server takes the machine token, CLIs and
+  versions, git, disk, load. Never prints secrets. The server is asked over plain HTTP (the
+  request of "Updating itself"), never over the machine link, so a `doctor` next to a running
+  daemon does not replace its link. Exit code 1 when something is wrong; the last line then
+  says what (`NOT OK: 1 problem, the server check failed`).
+- Log lines start with the time in UTC (`2026-11-18T03:20:00.123Z`). The lines that are
+  warnings or errors are also sent as `metrics.problems`; the same line again right after
+  itself (a link that stays down) only moves that line's time. On macOS and Linux the service
+  manager appends to `daemon.log`; a log above 10 MB is copied to `daemon.log.1` and emptied
+  when the daemon starts, as on Windows.
 - `daemon install-service` writes `~/Library/LaunchAgents/<bundleId>.daemon.plist` (RunAtLoad,
   KeepAlive, the current PATH, logs in `~/Library/Logs/<slug>-daemon/`) and loads it with
   `launchctl bootstrap gui/<uid>`; `--no-load` only writes the file.

@@ -94,6 +94,37 @@ pub const MAX_LIVE: usize = 2;
 /// Cached embeds (with or without a native view) kept per app.
 const MAX_CACHED: usize = 24;
 
+/// What a page that fills its area sits on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Canvas {
+    /// The app background, in the app's theme (a 产出 page's content area).
+    #[default]
+    Content,
+    /// A sheet's fill, in the app's theme, so the sheet's header and body are one tone.
+    Sheet,
+    /// A white page in the light scheme in both themes, as a browser shows a file
+    /// that was written for the default page: an attached HTML file sets its text
+    /// colors but no background, and they must stay readable.
+    Paper,
+}
+
+impl Canvas {
+    fn colors(self, cx: &App) -> crate::ui::native::NativeColors {
+        match self {
+            Canvas::Paper => crate::ui::native::NativeColors::light(),
+            _ => crate::ui::native::native_colors(cx),
+        }
+    }
+
+    fn surface(self, cx: &App) -> gpui::Hsla {
+        let n = self.colors(cx);
+        match self {
+            Canvas::Sheet => n.sheet,
+            _ => n.content,
+        }
+    }
+}
+
 /// A live 产出 page in the layout. See the module docs.
 #[derive(IntoElement)]
 pub struct WebEmbed {
@@ -102,9 +133,13 @@ pub struct WebEmbed {
     height: Pixels,
     /// Fill the parent's height instead of [`WebEmbed::height`].
     fill: bool,
+    canvas: Canvas,
     /// Draw the card frame (1 px border on the card fill) around the page.
     framed: bool,
     radius: Pixels,
+    /// The bottom-left and bottom-right radius of the fill, when the page ends at
+    /// the rounded corners of a sheet ([`WebEmbed::rounded_bottom`]).
+    bottom: (Pixels, Pixels),
     pass_scroll: bool,
     autoplay: bool,
     /// The page's side and top padding in the host base stylesheet (`--tc-pad`).
@@ -123,8 +158,10 @@ impl WebEmbed {
             spec,
             height: px(320.),
             fill: false,
+            canvas: Canvas::Content,
             framed: false,
             radius: radius::LG,
+            bottom: (px(0.), px(0.)),
             pass_scroll: false,
             autoplay: false,
             pad: crate::ui::native::tokens::space::S24,
@@ -167,9 +204,23 @@ impl WebEmbed {
         self
     }
 
+    /// Rounds the fill's bottom corners (left, right) on top of [`WebEmbed::rounded`]:
+    /// for a page whose bottom edge is a sheet's, so its square fill does not show
+    /// past the sheet's corners.
+    pub fn rounded_bottom(mut self, left: Pixels, right: Pixels) -> Self {
+        self.bottom = (left, right);
+        self
+    }
+
     /// The page fills its parent (a page's content area) instead of a fixed height.
     pub fn fill(mut self) -> Self {
         self.fill = true;
+        self
+    }
+
+    /// What a page that fills its area sits on (the app background by default).
+    pub fn canvas(mut self, canvas: Canvas) -> Self {
+        self.canvas = canvas;
         self
     }
 
@@ -218,6 +269,7 @@ pub struct WebEmbedState {
     pad: Pixels,
     /// The page fills a content area (on the background), not a card.
     fill: bool,
+    canvas: Canvas,
     remember: bool,
     on_event: Option<EventHandler>,
     on_host: Option<HostHandler>,
@@ -231,6 +283,9 @@ pub struct WebEmbedState {
     hit_covered: bool,
     /// An [`occluder`] covered the page in this frame.
     cover_covered: bool,
+    /// A float band (the sticky date pill) cut the top of the page in this frame: the
+    /// snapshot shows in the strip beside the band, so the page reads as continuous.
+    band_cut: bool,
     check_pending: bool,
     focused: bool,
     /// The frame color the inline page's cut edge fades into, as last given to the page.
@@ -238,6 +293,8 @@ pub struct WebEmbedState {
     /// Where an inline page ends on a whole block (its own height when it fits): the
     /// frame shrinks to it, so no blank band sits under the cover.
     end: Option<Pixels>,
+    /// The read of `end` for the loaded document came back (with an end or without).
+    end_read: bool,
     /// The host base stylesheet given to the page, by its token values.
     base: Option<String>,
     #[cfg(any(target_os = "macos", windows))]
@@ -267,6 +324,7 @@ impl WebEmbedState {
             radius: px(0.),
             pad: crate::ui::native::tokens::space::S24,
             fill: false,
+            canvas: Canvas::Content,
             remember: true,
             on_event: None,
             on_host: None,
@@ -276,10 +334,12 @@ impl WebEmbedState {
             snapshot: None,
             hit_covered: false,
             cover_covered: false,
+            band_cut: false,
             check_pending: false,
             focused: false,
             fade: None,
             end: None,
+            end_read: false,
             base: None,
             #[cfg(any(target_os = "macos", windows))]
             native: None,
@@ -369,6 +429,12 @@ impl WebEmbedState {
         self.snapshot.is_some()
     }
 
+    /// An inline page is loaded but has not said yet where it ends (self-tests wait
+    /// for it, so a capture never shows the declared height in one theme only).
+    pub fn end_pending(&self) -> bool {
+        self.pass_scroll && self.phase == Phase::Ready && !self.end_read
+    }
+
     pub fn focused(&self) -> bool {
         self.focused
     }
@@ -439,6 +505,7 @@ impl WebEmbedState {
         self.radius = embed.radius;
         self.pad = embed.pad;
         self.fill = embed.fill;
+        self.canvas = embed.canvas;
         self.remember = embed.remember;
         self.on_event = embed.on_event.clone();
         self.on_host = embed.on_host.clone();
@@ -488,6 +555,7 @@ impl WebEmbedState {
                 // A new document: it has no fade and no base stylesheet yet.
                 self.fade = None;
                 self.end = None;
+                self.end_read = false;
                 self.base = None;
                 self.apply_base(cx);
                 // Let the page draw, then keep a picture for overlays.
@@ -572,7 +640,7 @@ impl WebEmbedState {
         if self.phase != Phase::Ready {
             return;
         }
-        let css = base_css(self.pad, self.fill, cx);
+        let css = base_css(self.pad, self.fill, self.canvas, cx);
         if self.base.as_deref() == Some(css.as_str()) {
             return;
         }
@@ -616,12 +684,13 @@ impl WebEmbedState {
                 .flatten()
                 .and_then(|v| v.parse::<f32>().ok())
                 .filter(|v| *v >= MIN_INLINE_END);
-            if let Some(end) = end {
-                let _ = this.update(cx, |s, cx| {
+            let _ = this.update(cx, |s, cx| {
+                s.end_read = true;
+                if let Some(end) = end {
                     s.end = Some(px(end.ceil()));
-                    cx.notify();
-                });
-            }
+                }
+                cx.notify();
+            });
         })
         .detach();
         #[cfg(not(any(target_os = "macos", windows)))]
@@ -738,9 +807,16 @@ impl WebEmbedState {
     ) {
         self.last_bounds = Some(bounds);
         self.parked = false;
+        let uncut = visible;
         // A float band over the top of the region (the sticky date pill) stays
         // above the page: the page shows only below it (§2.17, A4).
+        let whole = visible;
         let visible = below_bands(window, visible, cx);
+        let band_cut = visible != whole;
+        if band_cut != self.band_cut {
+            self.band_cut = band_cut;
+            cx.notify();
+        }
         self.cover_covered = covers_overlap(window, visible, cx);
         #[cfg(any(target_os = "macos", windows))]
         {
@@ -750,6 +826,15 @@ impl WebEmbedState {
                 n.set_dark(theme::is_dark(cx));
                 n.set_frame(rect(bounds), rect(visible), window.scale_factor() as f64);
                 n.set_hidden(covered);
+                // The band's float gives way to a page that shows under its
+                // place (`clip_band`).
+                if !covered && uncut.size.height > px(0.) {
+                    let id = window.window_handle().window_id();
+                    let frame = cx.default_global::<Covers>().windows.entry(id).or_default();
+                    if frame.pages.len() < 64 {
+                        frame.pages.push(uncut);
+                    }
+                }
             }
         }
         self.apply_fade(cx);
@@ -808,16 +893,20 @@ fn over(top: gpui::Hsla, under: gpui::Hsla) -> gpui::Hsla {
 /// [`WebEmbedState::apply_base`]). It only supplies defaults (owner decision
 /// O-4): its rules sit in the `tc-base` cascade layer, so any color or type
 /// a page that a member made sets for itself wins.
-fn base_css(pad: Pixels, fill: bool, cx: &App) -> String {
-    let k = crate::ui::native::native_colors(cx);
-    // The surface the page sits on: the background when it fills a content
-    // area, else its card's fill (see `WebEmbed::render`).
+fn base_css(pad: Pixels, fill: bool, canvas: Canvas, cx: &App) -> String {
+    let k = canvas.colors(cx);
+    // The surface the page sits on: its canvas when it fills an area, else its
+    // card's fill (see `WebEmbed::render`).
     let surface = if fill {
-        k.content
+        canvas.surface(cx)
     } else {
         theme::colors(cx).raised
     };
-    let scheme = if theme::is_dark(cx) { "dark" } else { "light" };
+    let scheme = if theme::is_dark(cx) && canvas != Canvas::Paper {
+        "dark"
+    } else {
+        "light"
+    };
     format!(
         ":root{{--tc-pad:{pad}px;--tc-bg:{bg};--tc-fg:{fg};--tc-muted:{muted};--tc-border:{border};\
 --tc-fill:{fill};--tc-primary:{fg};color-scheme:{scheme}}}\
@@ -838,7 +927,7 @@ hr{{border:0;border-top:1px solid var(--tc-border);margin:16px 0}}\
 code,pre{{font-family:ui-monospace,'SF Mono',Menlo,'Cascadia Mono',Consolas,monospace;font-size:13px}}\
 pre{{background:var(--tc-fill);border:1px solid var(--tc-border);border-radius:8px;padding:12px;overflow:auto}}}}",
         pad = f32::from(pad).round(),
-        bg = hex(k.content),
+        bg = hex(if fill { surface } else { k.content }),
         fg = hex(k.label),
         muted = hex(k.secondary),
         // Opaque on the page's own surface (the card fill inline): a line
@@ -1101,7 +1190,10 @@ impl RenderOnce for WebEmbed {
             Some(end) if self.pass_scroll => end.min(self.height),
             _ => self.height,
         };
-        let backdrop = match (&s.phase, s.covered(), &s.snapshot) {
+        // The snapshot also shows while a band cuts the page's top: the native view is
+        // clipped across its whole width below the band, and the picture fills the strip
+        // beside the band (§2.17: the pill is on top, with no full-width fill).
+        let backdrop = match (&s.phase, s.covered() || s.band_cut, &s.snapshot) {
             (_, true, Some(image)) | (Phase::Loading, _, Some(image)) => {
                 img(image.clone()).size_full().into_any_element()
             }
@@ -1117,10 +1209,16 @@ impl RenderOnce for WebEmbed {
             .when(self.fill, |d| d.flex_1().h_full().min_h(px(0.)))
             .when(!self.fill, |d| d.h(height).flex_none())
             .rounded(self.radius)
+            .when(self.bottom.0 > px(0.), |d| d.rounded_bl(self.bottom.0))
+            .when(self.bottom.1 > px(0.), |d| d.rounded_br(self.bottom.1))
             .overflow_hidden()
             // A page that fills a content area sits on the app background; inline it
             // sits on its card's fill. `framed` adds the card's 1 px line (§1.7).
-            .bg(if self.fill { n.content } else { k.raised })
+            .bg(if self.fill {
+                self.canvas.surface(cx)
+            } else {
+                k.raised
+            })
             .when(self.framed, |d| {
                 d.border_1().border_color(n.separator).bg(n.sheet)
             })
@@ -1245,6 +1343,11 @@ struct CoverFrame {
     rects: Vec<Bounds<Pixels>>,
     /// Floating bands (the sticky date pill) the page is cut below.
     bands: Vec<Bounds<Pixels>>,
+    /// Where the native pages of this frame show, before any band cut.
+    pages: Vec<Bounds<Pixels>>,
+    /// A native page showed under the band's place in the last frame
+    /// (`page_under_band`).
+    under_band: bool,
     /// Frames of this window so far (the embed cache's clock).
     count: u64,
 }
@@ -1259,6 +1362,7 @@ fn begin_frame(window: &Window, cx: &mut App) {
         frame.painting = false;
         frame.rects.clear();
         frame.bands.clear();
+        frame.pages.clear();
         frame.count += 1;
     }
 }
@@ -1422,20 +1526,123 @@ pub fn occluder() -> impl IntoElement {
         .top_0()
         .left_0()
         .size_full()
-        .child(Occluder { band: false })
+        .child(Occluder)
 }
 
 /// Wrap a small float that sits at the top of a scrolling region (the sticky date
 /// pill, §2.17) with this, as `occluder()`: an embedded page that reaches under it is
 /// cut below its bottom edge for as long as it is drawn, so the float stays on top of
 /// the native page (A4). The page keeps showing under the rest of the region.
-pub fn clip_band() -> impl IntoElement {
+///
+/// The cut runs across the page's whole width, so a page that fills the row under the
+/// float would show a blank strip beside it. The caller keeps this element at the
+/// float's place in every frame and draws the float only while [`page_under_band`] is
+/// false (`drawn`): the page is then cut at the region's own edge, like every other row.
+pub fn clip_band(drawn: bool) -> impl IntoElement {
     div()
         .absolute()
         .top_0()
         .left_0()
         .size_full()
-        .child(Occluder { band: true })
+        .child(Band { drawn })
+}
+
+/// A native page showed under the place of this window's [`clip_band`] in the last frame.
+pub fn page_under_band(window: &Window, cx: &App) -> bool {
+    let id = window.window_handle().window_id();
+    cx.try_global::<Covers>()
+        .and_then(|c| c.windows.get(&id))
+        .is_some_and(|f| f.under_band)
+}
+
+/// The place of a float band: registers the band while its float is drawn, and says after
+/// every frame whether a native page showed under it.
+struct Band {
+    drawn: bool,
+}
+
+impl IntoElement for Band {
+    type Element = Self;
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+impl Element for Band {
+    type RequestLayoutState = ();
+    type PrepaintState = Bounds<Pixels>;
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
+        let mut style = Style::default();
+        style.size.width = relative(1.).into();
+        style.size.height = relative(1.).into();
+        (window.request_layout(style, [], cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Bounds<Pixels> {
+        let visible = bounds.intersect(&window.content_mask().bounds);
+        if LIVE.with(|l| l.borrow().is_empty()) {
+            return visible;
+        }
+        begin_frame(window, cx);
+        if self.drawn {
+            let id = window.window_handle().window_id();
+            let frame = cx.default_global::<Covers>().windows.entry(id).or_default();
+            if frame.bands.len() >= 64 {
+                frame.bands.remove(0);
+            }
+            frame.bands.push(visible);
+        }
+        visible
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        place: &mut Bounds<Pixels>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let live = !LIVE.with(|l| l.borrow().is_empty());
+        if live {
+            // The pages of this frame are dropped before the next one, also
+            // when no page paints in it.
+            mark_painting(window, cx);
+        }
+        let id = window.window_handle().window_id();
+        let frame = cx.default_global::<Covers>().windows.entry(id).or_default();
+        let under = live && frame.pages.iter().any(|p| p.intersects(place));
+        if under != frame.under_band {
+            frame.under_band = under;
+            // The float shows or hides in the next frame.
+            window.on_next_frame(|window, _| window.refresh());
+        }
+    }
 }
 
 /// `visible` cut below every band of this frame that reaches into it.
@@ -1457,10 +1664,7 @@ fn below_bands(window: &Window, visible: Bounds<Pixels>, cx: &App) -> Bounds<Pix
     out
 }
 
-struct Occluder {
-    /// A band to cut the page below, not a cover that hides it.
-    band: bool,
-}
+struct Occluder;
 
 impl IntoElement for Occluder {
     type Element = Self;
@@ -1510,11 +1714,7 @@ impl Element for Occluder {
         let visible = bounds.intersect(&window.content_mask().bounds);
         let id = window.window_handle().window_id();
         let frame = cx.default_global::<Covers>().windows.entry(id).or_default();
-        let list = if self.band {
-            &mut frame.bands
-        } else {
-            &mut frame.rects
-        };
+        let list = &mut frame.rects;
         if list.len() >= 64 {
             list.remove(0);
         }

@@ -570,9 +570,9 @@ pub const MEDIUM_WEIGHT: FontWeight = FontWeight(501.);
 /// the Windows CI screenshots). Regular is the nearer miss.
 #[cfg(target_os = "windows")]
 pub const MEDIUM_WEIGHT: FontWeight = FontWeight(499.);
-/// The monospace font every version of this system has. Prefer
-/// [`mono_font_family`]: the best installed one.
-pub const MONO_FONT_FAMILY: &str = MONO_FONT_STACK[MONO_FONT_STACK.len() - 1];
+/// The monospace font every version of this system has. Private: views take
+/// [`mono_font_family`], the best installed one.
+const MONO_FONT_FAMILY: &str = MONO_FONT_STACK[MONO_FONT_STACK.len() - 1];
 
 static UI_FONT: OnceLock<SharedString> = OnceLock::new();
 static MONO_FONT: OnceLock<SharedString> = OnceLock::new();
@@ -2044,3 +2044,30 @@ mod tests {
 // --- inc-cards21: Card v2.1 sizes and timings live in ui/native/tokens.rs ---
 pub use crate::ui::native::tokens::card_v21;
 // --- end inc-cards21 ---
+
+#[cfg(test)]
+mod medium_weight {
+    /// An exact weight 500 draws Regular on macOS and Bold on Windows (see
+    /// [`super::MEDIUM_WEIGHT`]), so a title set with it loses its weight
+    /// step. Every medium text uses the constant.
+    #[test]
+    fn no_view_sets_the_exact_medium_weight() {
+        let banned = ["FontWeight", "::MEDIUM"].concat();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut stack = vec![root];
+        let mut found = Vec::new();
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|e| e == "rs")
+                    && std::fs::read_to_string(&path).unwrap().contains(&banned)
+                {
+                    found.push(path.display().to_string());
+                }
+            }
+        }
+        assert!(found.is_empty(), "use theme::MEDIUM_WEIGHT in: {found:?}");
+    }
+}

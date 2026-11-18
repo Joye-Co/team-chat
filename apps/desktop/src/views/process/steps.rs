@@ -1,8 +1,8 @@
 //! One element per process step, in product words.
 
 use gpui::{
-    AnyElement, App, ElementId, Hsla, InteractiveElement as _, IntoElement, ParentElement,
-    StatefulInteractiveElement as _, Styled, Window, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, ElementId, Hsla, IntoElement, ParentElement, Styled, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 
 use crate::{
@@ -110,12 +110,11 @@ fn block(_cx: &App) -> gpui::Div {
 /// breaks stay. `id` is unique within the step list.
 fn mono_box(id: ElementId, text: String, window: &mut Window, cx: &mut App) -> impl IntoElement {
     let k = theme::colors(cx);
-    mono_frame(None, cx).child(mono_scroll(id, text, k.text_1, window, cx))
+    mono_frame(cx).child(mono_scroll(id, text, k.text_1, window, cx))
 }
 
-/// The frame of a code box: 1 px border (tinted red for a failed command), radius 8, the
-/// code fill.
-fn mono_frame(edge: Option<Hsla>, cx: &App) -> gpui::Div {
+/// The frame of a code box: 1 px border, radius 8, the code fill.
+fn mono_frame(cx: &App) -> gpui::Div {
     let k = theme::colors(cx);
     let n = crate::ui::native::native_colors(cx);
     div()
@@ -124,7 +123,7 @@ fn mono_frame(edge: Option<Hsla>, cx: &App) -> gpui::Div {
         .min_w(px(0.))
         .rounded(theme::radius::MD)
         .border_1()
-        .border_color(edge.unwrap_or(n.separator))
+        .border_color(n.separator)
         .bg(k.code_bg)
         .overflow_hidden()
         .flex()
@@ -141,61 +140,29 @@ fn mono_scroll(
     window: &mut Window,
     cx: &mut App,
 ) -> gpui::Div {
-    let scroll = window
-        .use_keyed_state(id.clone(), cx, |_, _| gpui::ScrollHandle::new())
-        .read(cx)
-        .clone();
-    // Known from the frame before: a line is wider than the box.
-    let scrolls = scroll.max_offset().x > px(0.);
     let k = theme::colors(cx);
-    let fade = div()
-        .absolute()
-        .top_0()
-        .bottom_0()
-        .right_0()
-        .w(space::S16)
-        .bg(gpui::linear_gradient(
-            90.,
-            gpui::linear_color_stop(k.code_bg.opacity(0.), 0.),
-            gpui::linear_color_stop(k.code_bg, 1.),
-        ));
-    div()
-        .relative()
-        .w_full()
-        .min_w(px(0.))
-        .child(
+    // The shared sideways scroll of a code box (also the diff well).
+    ui::native::blocks::scroll_x(
+        id,
+        k.code_bg,
+        |scrolls| {
             div()
-                .id(id)
-                .w_full()
-                .flex()
-                .overflow_x_scroll()
-                .restrict_scroll_to_axis()
-                .track_scroll(&scroll)
-                .child(
-                    div()
-                        .flex_none()
-                        .min_w_full()
-                        .pl(space::S12)
-                        .pr(space::S16)
-                        .pt(space::S8)
-                        .pb(if scrolls { space::S16 } else { space::S8 })
-                        .t_code()
-                        .whitespace_nowrap()
-                        .text_color(color)
-                        .children(
-                            text.lines()
-                                .map(|l| div().child(l.to_string()))
-                                .collect::<Vec<_>>(),
-                        ),
-                ),
-        )
-        .child(fade)
-        .child(
-            div().absolute().inset_0().child(
-                gpui_component::scroll::Scrollbar::horizontal(&scroll)
-                    .mode(gpui_component::scroll::ScrollbarMode::Always),
-            ),
-        )
+                .pl(space::S12)
+                .pr(space::S16)
+                .pt(space::S8)
+                .pb(if scrolls { space::S16 } else { space::S8 })
+                .t_code()
+                .whitespace_nowrap()
+                .text_color(color)
+                .children(
+                    text.lines()
+                        .map(|l| div().child(l.to_string()))
+                        .collect::<Vec<_>>(),
+                )
+        },
+        window,
+        cx,
+    )
 }
 
 /// A command and what it printed in one code box: the command on top, its output under a
@@ -205,14 +172,14 @@ fn command_box(
     ix: usize,
     command: String,
     output: Option<(String, usize)>,
-    failed: bool,
     window: &mut Window,
     cx: &mut App,
 ) -> impl IntoElement {
     let k = theme::colors(cx);
     let n = crate::ui::native::native_colors(cx);
-    let edge = failed.then(|| n.red.opacity(0.5));
-    mono_frame(edge, cx)
+    // The box keeps the border token when the command failed: the step's
+    // badge and the Alert under it carry the state (§1.3).
+    mono_frame(cx)
         .child(mono_scroll(mono_id(ix, 0), command, k.text_1, window, cx))
         .when_some(output, |el, (out, more)| {
             el.child(
@@ -534,14 +501,7 @@ fn render_step(
             });
             block(cx)
                 .child(header)
-                .child(command_box(
-                    ix,
-                    clip(title, 400),
-                    out,
-                    *ok == Some(false),
-                    window,
-                    cx,
-                ))
+                .child(command_box(ix, clip(title, 400), out, window, cx))
                 .when_some(input.clone().filter(|_| developer), |el, json| {
                     el.child(label(
                         fill(dev::RUN_TOOL_INPUT, &[("json", &clip(&json, 600))]),
@@ -562,6 +522,10 @@ fn render_step(
                     };
                     div()
                         .flex()
+                        // The 12 pt kind sits on the middle of the 13 pt path's
+                        // line (a shared baseline drops the CJK word below
+                        // the Latin path).
+                        .items_center()
                         .gap(space::S8)
                         .child(
                             div()
@@ -691,11 +655,13 @@ fn render_step(
     Some(el.into_any_element())
 }
 
-/// The glyph column of the timeline: 20 wide, the step's glyph on the first line.
+/// The glyph column of the timeline: 20 wide, the step's glyph on the first line (a 20
+/// line box).
 const RAIL: gpui::Pixels = px(20.);
 
-/// One step on the timeline: its 16 glyph in the 20 rail, a 1 pt line from under the glyph
-/// to the next step, and the step's content with 16 below it.
+/// One step on the timeline: its 16 glyph in the 20 rail, a 1 pt line from under the
+/// glyph's line box to the next step's, and the step's content with 16 below it. The
+/// line spans the whole gap, so under a one-line step it still joins the two glyphs.
 fn timeline_row(step: &ProcessStep, content: AnyElement, last: bool, cx: &App) -> AnyElement {
     let (g, color) = glyph(step, cx);
     let n = crate::ui::native::native_colors(cx);
@@ -708,10 +674,10 @@ fn timeline_row(step: &ProcessStep, content: AnyElement, last: bool, cx: &App) -
             el.child(
                 div()
                     .absolute()
-                    .left(RAIL / 2. - px(0.5))
-                    .top(px(24.))
-                    .bottom(px(2.))
-                    .w(px(1.))
+                    .left((RAIL - crate::ui::native::metrics::HAIRLINE) / 2.)
+                    .top(RAIL)
+                    .bottom(gpui::Pixels::ZERO)
+                    .w(crate::ui::native::metrics::HAIRLINE)
                     .bg(n.separator),
             )
         })
@@ -719,7 +685,7 @@ fn timeline_row(step: &ProcessStep, content: AnyElement, last: bool, cx: &App) -
             div()
                 .flex_none()
                 .w(RAIL)
-                .h(px(20.))
+                .h(RAIL)
                 .flex()
                 .items_center()
                 .justify_center()

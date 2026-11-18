@@ -1,23 +1,15 @@
 //! Generative cards v2 (Cards.dc.html). The cards v2 track owns this file.
 
 crate::copy! {
-    // Kept from the foundation stub (other tracks may read them).
-    CARD_NEEDS_YOU = "等你回答",
     // A run result is 已交付 (D17); 完成 is a done 话题 (review 5 X-03).
     CARD_DELIVERED = "已交付",
-    CARD_WORKING = "正在做",
-    CARD_ANSWERED = "{name} 选了「{choice}」 · {time}",
-    CARD_SUPERSEDED = "这一版作废了",
     // §2.12 deactivated: an expired or superseded card; the detail says why.
     CARD_EXPIRED = "已停用",
     CARD_UNDO = "撤回",
 
     // The status strip: the state, who and when.
-    STRIP_WAITS = "{name} 在等你",
-    STRIP_WAITS_QUICK = "{name} 在等你 · 点一下就算选了",
-    STRIP_WAITS_CHOOSE = "{name} 在等你 · 选好再提交",
-    STRIP_WAITS_APPROVE = "{name} 在等你批准",
-    STRIP_WAITS_CONFIRM = "{name} 在等你确认",
+    STRIP_WAITS_QUICK = "点一下就算选了",
+    STRIP_WAITS_CHOOSE = "选好再提交",
     STRIP_FILL_READY_DETAIL = "都填好了",
     STRIP_WAITING_ON_DETAIL = "只有被问的人能选",
     STRIP_SENDING = "发送中",
@@ -41,7 +33,6 @@ crate::copy! {
     STRIP_DOING = "正在做：{step}",
     STRIP_WORKING_SELF = "{name} 在做",
     STRIP_ANSWER_AT = "{name} {label} {time}",
-    STRIP_STEP = "第 {n}/{total} 步",
     STRIP_DECIDED_AT = "{name} 拍板 {time}",
     STRIP_STOPPED = "停在第 {n} 步 · {done}/{total}",
     STRIP_FAILED = "失败",
@@ -61,10 +52,9 @@ crate::copy! {
     RECORD_SENDING_TO = "· 正在发给 {name}",
     RECORD_EXPAND = "展开",
     RECORD_COLLAPSE = "收起",
-    RECORD_EDITED = "改过：{fields}",
 
     // Forms.
-    FORM_MISSING = "还差{labels}",
+    FORM_MISSING = "还没填：{labels}",
     FORM_INVALID = "{label}填得不对",
     FORM_READY = "提交后发给 {name}",
     FORM_DATE_PLACEHOLDER = "年-月-日",
@@ -120,8 +110,6 @@ crate::copy! {
     REFS_ALL = "看全部 {count} 个",
     REFS_FEWER = "收起",
     REF_ARTIFACT_NEWER = "有新版本 v{version}",
-    REF_MEMBER_LINE = "{role}",
-    REF_OPEN = "打开",
 
     // Expired asks.
     ASK_AGAIN_MESSAGE = "这张卡过期了，还需要我拍板的话请再问一次。",
@@ -219,7 +207,6 @@ crate::copy! {
     CARD_DECODE_FAILED = "这张卡片打不开",
     CARD_DECODE_FAILED_DETAIL = "卡片的格式比这个版本新，更新后再看，或者让成员重发。",
     GALLERY_HOVER = "鼠标移上去",
-    GALLERY_LINE = "一行",
     GALLERY_MISSING = "缺数和旧数",
     GALLERY_S_PAGE = "交互产出",
     GALLERY_S_PAGE_NOTE = "话题里只放快照。页面里的操作会回到做它的成员。",

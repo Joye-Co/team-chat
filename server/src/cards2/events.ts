@@ -84,7 +84,7 @@ function prune<V>(m: Map<string, V>, keep: (v: V) => boolean): void {
 
 function rateAnswer(key: string, now: number): void {
   const last = answeredAt.get(key);
-  if (last !== undefined && now - last < ANSWER_INTERVAL_MS) throw new ApiError("rate_limited", "one answer per second");
+  if (last !== undefined && now - last < ANSWER_INTERVAL_MS) throw new ApiError("rate_limited", "one answer per second", undefined, ANSWER_INTERVAL_MS - (now - last));
   answeredAt.set(key, now);
   prune(answeredAt, (t) => now - t < ANSWER_INTERVAL_MS);
 }
@@ -100,8 +100,8 @@ function rateLive(groupId: string, actorId: string, messageId: string, now: numb
   const gk = `${groupId}:${actorId}`;
   const m = liveMinute.get(gk);
   const n = m && m.window === window ? m.n : 0;
-  if (n >= LIVE_PER_MINUTE) throw new ApiError("rate_limited", "too many card events this minute");
-  if (!b.take()) throw new ApiError("rate_limited", "too many card events");
+  if (n >= LIVE_PER_MINUTE) throw new ApiError("rate_limited", "too many card events this minute", undefined, (window + 1) * 60_000 - now);
+  if (!b.take()) throw new ApiError("rate_limited", "too many card events", undefined, b.waitMs());
   liveMinute.set(gk, { window, n: n + 1 });
   prune(liveMinute, (v) => v.window === window);
   if (liveBuckets.size > 2000) liveBuckets.clear();

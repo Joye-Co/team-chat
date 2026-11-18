@@ -480,7 +480,7 @@ fn move_item(order: &mut Vec<String>, item: &str, to: usize) {
     }
 }
 
-pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
+pub fn rank(node: &Node, b: &CardV2Block, window: &Window, cx: &mut App) -> AnyElement {
     let CardV2Block::Rank { id, items, cut, .. } = b else {
         return div().into_any_element();
     };
@@ -513,7 +513,6 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         .track_focus(&handle)
         .flex()
         .flex_col()
-        .p(space::S4)
         .rounded(crate::ui::native::tokens::radius::CONTROL)
         .border_1()
         // A bordered frame on the card fill, like the other wells: muted text keeps its
@@ -553,30 +552,30 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         let arrow = |up: bool| {
             let can = live && if up { i > 0 } else { i + 1 < order.len() };
             let (o, set, item) = (order.clone(), set.clone(), item_id.clone());
-            div()
-                .id(eid(
-                    node,
-                    format!("rank-{id}-{item_id}-{}", if up { "up" } else { "down" }),
-                ))
-                .flex_none()
-                .size(px(24.))
-                .rounded(crate::ui::native::tokens::radius::ITEM)
-                .flex()
-                .items_center()
-                .justify_center()
-                .when(can, |el| {
-                    el.hover(|s| s.bg(k.hover)).on_click(move |_, _, cx| {
-                        let mut o = o.clone();
-                        let to = if up { i - 1 } else { i + 1 };
-                        move_item(&mut o, &item, to);
-                        set(o, cx);
-                    })
-                })
-                .child(ui::icon(
+            // The 28 ghost icon button; the one that cannot move is disabled at 50 %.
+            ui::native::disabled_push(
+                ui::native::icon_button(
+                    eid(
+                        node,
+                        format!("rank-{id}-{item_id}-{}", if up { "up" } else { "down" }),
+                    ),
                     if up { Sym::ChevronUp } else { Sym::ChevronDown },
-                    px(14.),
-                    if can { k.ink_2 } else { k.ink_3 },
-                ))
+                    if up { c::RANK_UP } else { c::RANK_DOWN },
+                    ui::native::IconSize::Small,
+                    window,
+                    cx,
+                ),
+                !can,
+                cx,
+            )
+            .flex_none()
+            .on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                let mut o = o.clone();
+                let to = if up { i - 1 } else { i + 1 };
+                move_item(&mut o, &item, to);
+                set(o, cx);
+            })
         };
         // One list in one well (NATIVE.md rule 5): 32 pt rows split by hairlines, the
         // focused row on `selection`; no boxed rows.
@@ -586,7 +585,14 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             .h(crate::ui::native::tokens::height::DEFAULT)
             .pl(space::S12)
             .pr(space::S8)
-            .rounded(crate::ui::native::tokens::radius::ITEM)
+            // Straight hairlines between rows; only the list's own outer corners round,
+            // so the selection follows the frame.
+            .when(i == 0, |el| {
+                el.rounded_t(crate::ui::native::tokens::radius::CONTROL)
+            })
+            .when(i + 1 == order.len(), |el| {
+                el.rounded_b(crate::ui::native::tokens::radius::CONTROL)
+            })
             .when(is_focus, |el| el.bg(nk.selection))
             .when(i > 0, |el| el.border_t_1().border_color(nk.separator))
             .flex()
@@ -1037,7 +1043,13 @@ pub fn image_choice(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                                 .border_color(crate::ui::native::native_colors(cx).label)
                         })
                         .map(|el| match path {
-                            Some(p) => el.child(img(p).size_full().object_fit(ObjectFit::Cover)),
+                            // The radius goes on the picture: the wrapper does not clip it.
+                            Some(p) => el.child(
+                                img(p)
+                                    .size_full()
+                                    .object_fit(ObjectFit::Cover)
+                                    .rounded(crate::ui::native::tokens::radius::CONTROL),
+                            ),
                             None => b20::missing_image(el, cx),
                         })
                         .when(on, |el| {
@@ -1186,11 +1198,7 @@ fn weekday(at: Millis) -> (String, String, String) {
         let unknown = crate::views::shell::clock(at);
         return (unknown.clone(), unknown.clone(), unknown);
     };
-    let days: Vec<&str> = c::WEEKDAYS.split(' ').collect();
-    let w = days
-        .get(t.weekday().num_days_from_sunday() as usize)
-        .copied()
-        .unwrap_or("");
+    let w = crate::copy::weekday(t.weekday());
     (
         format!("{w} {}", t.format("%m-%d")),
         t.format("%H:%M").to_string(),
@@ -1451,7 +1459,7 @@ pub fn poll(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                         .gap(space::S8)
                         .child(lead)
                         .child(b20::option_title(&o.label, false, cx).flex_1())
-                        .child(div().flex().gap(px(-4.)).children(faces))
+                        .child(div().flex().gap(space::S2).children(faces))
                         .when(show, |el| {
                             el.child(
                                 div()
@@ -2109,7 +2117,8 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
             div()
                 .p(space::S12)
                 .child(
-                    ui::native::Alert::new(Sym::Alert, c::EMBED_FAILED)
+                    ui::native::Alert::new(Sym::Failed, c::EMBED_FAILED)
+                        .tone(ui::native::AlertTone::Destructive)
                         .description(c::EMBED_FAILED_DESC)
                         .action(
                             ui::native::push_button(
@@ -2167,6 +2176,9 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
         version: Some(*version),
     };
     let _ = (g, tp);
+    // The sandbox chip and the actions strip describe a page that is open: a file has
+    // neither, and a page that did not open has no actions to send.
+    let page = file.is_none() && shown != EmbedBody::Failed;
     div()
         .rounded(theme::radius::LG)
         .border_1()
@@ -2198,17 +2210,23 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                         .child(name),
                 )
                 .child(
+                    // One group with no gap, so the dot sits evenly between the two.
                     div()
                         .flex_none()
-                        .mono()
+                        .flex()
+                        .items_center()
                         .text_color(k.ink_3)
-                        .child(fill(c::EMBED_VERSION, &[("n", &version.to_string())])),
+                        .child(
+                            div()
+                                .mono()
+                                .child(fill(c::EMBED_VERSION, &[("n", &version.to_string())])),
+                        )
+                        .child(format!(
+                            " · {}",
+                            file.map_or(c::EMBED_KIND, crate::views::media::MediaKind::label)
+                        )),
                 )
-                .child(div().flex_none().text_color(k.ink_3).child(format!(
-                    "· {}",
-                    file.map_or(c::EMBED_KIND, crate::views::media::MediaKind::label)
-                )))
-                .when(file.is_none(), |el| {
+                .when(page, |el| {
                     el.child(
                         div()
                             .ml_auto()
@@ -2224,7 +2242,7 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                 .child(
                     div()
                         .id(eid(node, format!("embed-open-{id}")))
-                        .when(file.is_some(), |el| el.ml_auto())
+                        .when(!page, |el| el.ml_auto())
                         .flex_none()
                         .size(px(24.))
                         .rounded(crate::ui::native::tokens::radius::ITEM)
@@ -2237,7 +2255,7 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                 ),
         )
         .child(body)
-        .when(file.is_none(), |el| {
+        .when(page, |el| {
             el.child(
                 meta(div())
                     .h(crate::ui::native::tokens::height::DEFAULT)
@@ -2305,13 +2323,12 @@ pub fn unknown(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
     let ctx = node.ctx;
     let k = theme::colors(cx);
     // CARD21 §6: the block's own fallbackText, when the sender gave one.
-    let fallback = ctx
-        .card
-        .blocks
-        .iter()
-        .position(|x| std::ptr::eq(x, b))
+    let at = ctx.card.blocks.iter().position(|x| std::ptr::eq(x, b));
+    let fallback = at
         .and_then(|i| ctx.card.unknown_fallback(i))
         .map(str::to_string);
+    let at = at.unwrap_or_default();
+    let footer_updates = only_input_unknown(ctx) && matches!(ctx.state, CardState::Pending);
     div()
         .p(space::S12)
         .rounded(theme::radius::MD)
@@ -2330,28 +2347,37 @@ pub fn unknown(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 .flex()
                 .flex_col()
                 .gap(space::S4)
+                .flex_1()
                 .min_w(px(0.))
                 .child(
-                    div()
-                        .flex()
-                        .items_baseline()
-                        .gap(space::S8)
-                        .child(
-                            b20::small(div())
-                                .font_weight(theme::MEDIUM_WEIGHT)
-                                .text_color(k.ink)
-                                .child(c::UNKNOWN_BLOCK),
-                        )
-                        .child(meta(div()).mono().text_color(k.ink_3).child(format!(
-                            "{} · {}",
-                            ctx.card.catalog(),
-                            c::UNKNOWN_KIND
-                        ))),
+                    b20::small(div())
+                        .font_weight(theme::MEDIUM_WEIGHT)
+                        .text_color(k.ink)
+                        .child(c::UNKNOWN_BLOCK),
                 )
                 .when_some(fallback, |el, t| {
                     el.child(b20::small(div()).text_color(k.ink_2).child(t))
                 }),
         )
+        // The next step the block names, unless the footer already offers it.
+        .when(!footer_updates, |el| {
+            el.child(
+                div().flex_none().flex().items_center().child(
+                    ui::native::push_button(
+                        eid(node, format!("unknown-update-{at}")),
+                        fill(c::UPDATE_APP, &[("product", env!("PRODUCT_NAME"))]),
+                        ui::native::PushStyle::Ghost,
+                        ui::native::PushSize::Small,
+                        cx,
+                    )
+                    .on_click(|_, _, cx| {
+                        if let Some(u) = crate::updater::global(cx) {
+                            u.update(cx, |u, cx| u.check_now(cx));
+                        }
+                    }),
+                ),
+            )
+        })
         .into_any_element()
 }
 
@@ -2435,21 +2461,17 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
         .iter()
         .find(|b| matches!(b, CardV2Block::Poll { .. }))
     {
-        let mut items = vec![
-            meta(div())
-                .text_color(k.ink_3)
-                .child(if public.unwrap_or(false) {
-                    c::POLL_PUBLIC
-                } else {
-                    c::POLL_PRIVATE
-                })
-                .into_any_element(),
-        ];
-        // No buttons here: the rules read as one line.
+        // No buttons here: the rules read as one meta line, split by the dot.
+        let mut rules = String::from(if public.unwrap_or(false) {
+            c::POLL_PUBLIC
+        } else {
+            c::POLL_PRIVATE
+        });
         if changeable.unwrap_or(false) {
-            items.push(note(c::POLL_CHANGEABLE.into()).into_any_element());
+            rules.push_str(" · ");
+            rules.push_str(c::POLL_CHANGEABLE);
         }
-        return Some(Some(bar(items, None)));
+        return Some(Some(bar(vec![note(rules)], None)));
     }
     // Only immediate blocks (a confirm, a single pick): the press is the answer.
     let surface = ctx.card.surface_ids();

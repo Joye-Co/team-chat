@@ -33,6 +33,62 @@ function fences(lang: string, doc = DOC): string[] {
   return out;
 }
 
+/**
+ * What an example may use without declaring it. Each declaration is added only when the example
+ * names the identifier and does not declare it itself. One line in the file, so a line of the
+ * example is its line in the file minus 1.
+ */
+const AMBIENT: Record<string, string> = {
+  bot: 'declare const bot: import("@chat/bot-sdk").Bot;',
+  ctx: 'declare const ctx: import("@chat/bot-sdk").MessageContext;',
+  groupId: "declare const groupId: string;",
+  topicId: "declare const topicId: string;",
+  fileId: "declare const fileId: string;",
+  channelRows: "declare function channelRows(): Promise<string[][]>;",
+  PAGE: "declare const PAGE: string;",
+};
+
+/** Typechecks every ```ts block of the files; returns the errors as `<file>:<line>: <message>`. */
+async function typecheckFences(files: string[]): Promise<{ count: number; errors: string[] }> {
+  const pkg = join(import.meta.dir, "..");
+  const dir = join(pkg, ".tmp/doc-fences");
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  /** Module file name -> the doc file and the line of the block's first code line. */
+  const where = new Map<string, { file: string; line: number }>();
+  for (const file of files) {
+    const doc = readFileSync(join(ROOT, file), "utf8");
+    const re = /^```ts\n([\s\S]*?)^```$/gm;
+    for (let m = re.exec(doc); m; m = re.exec(doc)) {
+      const src = m[1] as string;
+      const name = `fence-${String(where.size + 1).padStart(2, "0")}.ts`;
+      const ambient = Object.entries(AMBIENT)
+        .filter(([id]) => new RegExp(`\\b${id}\\b`).test(src) && !new RegExp(`\\b(const|let|var|function)\\s+${id}\\b`).test(src))
+        .map(([, decl]) => decl)
+        .join(" ");
+      writeFileSync(join(dir, name), `${ambient}\n${src}\nexport {};\n`);
+      where.set(name, { file, line: doc.slice(0, m.index).split("\n").length + 1 });
+    }
+  }
+  writeFileSync(
+    join(dir, "tsconfig.json"),
+    JSON.stringify({ extends: "../../tsconfig.json", compilerOptions: { paths: { "@chat/bot-sdk": ["../../src/index.ts"] } }, include: ["./*.ts"] }),
+  );
+  // The repo's TypeScript is the native compiler (no JS API to call): run its command.
+  const tsc = Bun.spawn([process.execPath, "x", "tsc", "--noEmit", "--pretty", "false", "-p", dir], { cwd: pkg, stdout: "pipe", stderr: "pipe" });
+  const [out, err, code] = await Promise.all([new Response(tsc.stdout).text(), new Response(tsc.stderr).text(), tsc.exited]);
+  const errors: string[] = [];
+  for (const line of `${out}\n${err}`.split("\n")) {
+    const m = /(fence-\d+\.ts)\((\d+),\d+\): (.*)$/.exec(line);
+    const at = m && where.get(m[1] as string);
+    if (m && at) errors.push(`${at.file}:${at.line + Number(m[2]) - 2}: ${m[3]}`);
+    else if (/error/i.test(line)) errors.push(line.trim());
+  }
+  if (code !== 0 && errors.length === 0) errors.push(`tsc exited with ${code}: ${(out + err).trim().slice(0, 500)}`);
+  if (errors.length === 0) rmSync(dir, { recursive: true, force: true });
+  return { count: where.size, errors };
+}
+
 type Ctx = Record<string, unknown>;
 type Handler = (ctx: Ctx) => Promise<void>;
 type Filter = { name?: string; block?: string };
@@ -83,64 +139,11 @@ describe("docs/bots.md examples", () => {
     for (const j of fences("json")) expect(() => JSON.parse(j)).not.toThrow();
   });
 
-  test("every ts block of the guide and the README typechecks against the SDK", () => {
-    const blocksOf = [...fences("ts").map((s) => ["docs/bots.md", s] as const), ...fences("ts", README).map((s) => ["README.md", s] as const)];
-    expect(blocksOf.length).toBeGreaterThanOrEqual(8);
-    // What an example may use without declaring it: a started bot, a handler context, ids, its
-    // own data source and the page of the page example. A block that makes its own `bot` shadows.
-    const ambient = [
-      'import type * as __sdk from "@chat/bot-sdk";',
-      "declare const bot: __sdk.Bot;",
-      "declare const ctx: __sdk.MessageContext;",
-      "declare const groupId: string;",
-      "declare const topicId: string;",
-      "declare const fileId: string;",
-      "declare const channelRows: () => Promise<string[][]>;",
-      "declare const PAGE: string;",
-    ].join("\n");
-    const dir = join(PKG, ".tmp", "doc-fences");
-    rmSync(dir, { recursive: true, force: true });
-    mkdirSync(dir, { recursive: true });
-    const names: string[] = [];
-    blocksOf.forEach(([doc, src], i) => {
-      const lines = src.split("\n");
-      // Imports stay at the top of the module (also the ones that span lines); the rest is the body.
-      const imports: string[] = [];
-      const body: string[] = [];
-      let inImport = false;
-      for (const line of lines) {
-        if (inImport || /^import\s/.test(line)) {
-          imports.push(line);
-          inImport = !/from\s+["'][^"']+["'];?\s*(\/\/.*)?$/.test(line);
-        } else body.push(line);
-      }
-      const name = `fence-${String(i + 1).padStart(2, "0")}.ts`;
-      names.push(`${name} (${doc})`);
-      writeFileSync(join(dir, name), `${imports.join("\n")}\n${ambient}\nexport async function example(): Promise<void> {\n${body.join("\n")}\n}\n`);
-    });
-    writeFileSync(
-      join(dir, "tsconfig.json"),
-      JSON.stringify({
-        compilerOptions: {
-          target: "ES2022",
-          module: "ESNext",
-          moduleResolution: "bundler",
-          strict: true,
-          noEmit: true,
-          skipLibCheck: true,
-          allowImportingTsExtensions: true,
-          verbatimModuleSyntax: true,
-          types: ["bun"],
-          typeRoots: [join(PKG, "node_modules/@types")],
-          paths: { "@chat/bot-sdk": [join(PKG, "src/index.ts")] },
-        },
-        include: ["*.ts"],
-      }),
-    );
-    const r = Bun.spawnSync([join(PKG, "node_modules/.bin/tsc"), "--noEmit", "-p", join(dir, "tsconfig.json")], { cwd: dir, stdout: "pipe", stderr: "pipe" });
-    const out = `${r.stdout.toString()}${r.stderr.toString()}`.trim();
-    expect(r.exitCode === 0 ? "" : `${out}\nblocks: ${names.join(", ")}`).toBe("");
-  });
+  test("every ts block of the guide and the README typechecks against the SDK", async () => {
+    const { count, errors } = await typecheckFences(["docs/bots.md", "packages/bot-sdk/README.md"]);
+    expect(count).toBeGreaterThanOrEqual(8);
+    expect(errors).toEqual([]);
+  }, 120_000);
 
   const examples = fences("ts").filter((s) => s.includes("composeCard("));
 

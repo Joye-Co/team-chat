@@ -245,12 +245,24 @@ pub fn strip(d: &MachineMonitor, now: u64) -> Vec<StripCell> {
 /// report it.
 fn github_cell(d: &MachineMonitor) -> Option<StripCell> {
     let g = d.github.as_ref()?;
+    let vm = d.runs_in.as_deref() == Some("vm");
     let hint = || {
         Some(
-            if d.runs_in.as_deref() == Some("vm") {
+            if vm {
                 m::GITHUB_HINT_VM
             } else {
                 m::GITHUB_HINT_HOST
+            }
+            .to_string(),
+        )
+    };
+    // gh is not there to run: install it first.
+    let no_gh_hint = || {
+        Some(
+            if vm {
+                m::GITHUB_NO_GH_HINT_VM
+            } else {
+                m::GITHUB_NO_GH_HINT_HOST
             }
             .to_string(),
         )
@@ -265,7 +277,7 @@ fn github_cell(d: &MachineMonitor) -> Option<StripCell> {
             None,
         ),
         "signed_out" => (m::LOGIN_OUT.to_string(), Tone::Warn, hint()),
-        "no_gh" => (m::GITHUB_NO_GH.to_string(), Tone::Warn, hint()),
+        "no_gh" => (m::GITHUB_NO_GH.to_string(), Tone::Warn, no_gh_hint()),
         _ => (m::LOGIN_UNKNOWN.to_string(), Tone::Quiet, None),
     };
     Some(StripCell {
@@ -275,6 +287,21 @@ fn github_cell(d: &MachineMonitor) -> Option<StripCell> {
         cli: true,
         hint,
     })
+}
+
+/// The commands a GitHub hint ends with, longest first.
+const HINT_COMMANDS: [&str; 2] = ["sudo -iu runner gh auth login", "gh auth login"];
+
+/// A hint as its words and the command it ends with, so the page can set the words in the
+/// text font and the command in the code font.
+pub fn hint_parts(hint: &str) -> (&str, Option<&str>) {
+    HINT_COMMANDS
+        .iter()
+        .find_map(|c| {
+            hint.strip_suffix(c)
+                .map(|prose| (prose.trim_end(), Some(*c)))
+        })
+        .unwrap_or((hint, None))
 }
 
 /// What a 要注意 row is about (it picks the icon).
@@ -788,8 +815,23 @@ mod tests {
             (
                 "没装 gh".into(),
                 Tone::Warn,
-                Some("用运行 AI 成员的系统用户运行 gh auth login".into())
+                Some("先装好 gh，再用运行 AI 成员的系统用户运行 gh auth login".into())
             )
+        );
+        assert_eq!(
+            hint_parts(m::GITHUB_NO_GH_HINT_VM),
+            (
+                "先在主机上装好 gh，再运行",
+                Some("sudo -iu runner gh auth login")
+            )
+        );
+        assert_eq!(
+            hint_parts(m::GITHUB_HINT_VM),
+            ("在主机上运行", Some("sudo -iu runner gh auth login"))
+        );
+        assert_eq!(
+            hint_parts(m::GITHUB_HINT_HOST),
+            ("用运行 AI 成员的系统用户运行", Some("gh auth login"))
         );
         assert_eq!(cell("unknown", None, Some("vm")).2, None);
         let mut d = sample();

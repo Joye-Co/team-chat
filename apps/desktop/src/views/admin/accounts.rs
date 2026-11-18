@@ -7,8 +7,8 @@
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, App, AppContext as _, ClipboardItem, Context, Entity, IntoElement,
-    ParentElement as _, SharedString, Styled, Window, div, prelude::FluentBuilder as _,
+    AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _,
+    SharedString, Styled, Window, div, prelude::FluentBuilder as _,
 };
 use gpui_component::input::InputState;
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
@@ -26,7 +26,7 @@ use crate::{
         native::{
             Alert, AlertTone, Badge, BadgeState, Column, Empty, NativeCheckbox, NativeSwitch,
             NativeTextField, NativeType as _, PushSize, PushStyle, StatusBadge, TruncText,
-            card_surface, native_colors, progress, push_button, skeleton, table,
+            native_colors, panel_card_surface, progress, push_button, skeleton, table,
             tokens::{avatar, height, monitor as t, radius, space, text},
         },
         sf_symbols::SymSize,
@@ -143,6 +143,31 @@ fn admin_error(e: AdminError) -> String {
         AdminError::Conflict => m::MACHINE_UNREACHABLE.to_string(),
         e => crate::views::settings::widgets::error_text(e).to_string(),
     }
+}
+
+/// Asks before deleting the key `name`: its value only lives on the computer, so a delete
+/// cannot be undone.
+pub(super) fn confirm_delete_key(
+    view: Entity<AdminView>,
+    name: String,
+    window: &mut Window,
+    cx: &mut gpui::App,
+) {
+    use crate::views::nav::dialogs;
+    let machine = view.read(cx).selected_machine_name();
+    dialogs::destructive_alert(
+        "delete-key",
+        // The whole name, in the body: it wraps, the one-line title cannot.
+        m::KEYS_DELETE_CONFIRM_TITLE.to_string(),
+        fill(
+            m::KEYS_DELETE_CONFIRM_BODY,
+            &[("name", &name), ("machine", &machine)],
+        ),
+        m::KEYS_DELETE_OK,
+        move |window, cx| view.update(cx, |v, cx| v.delete_key(name.clone(), window, cx)),
+        window,
+        cx,
+    );
 }
 
 /// A valid key name: an environment variable name.
@@ -424,20 +449,32 @@ impl AdminView {
         cx.notify();
     }
 
-    fn delete_key(&mut self, name: String, cx: &mut Context<Self>) {
+    /// Deletes the key `name` on the selected computer; a refusal shows an alert with the
+    /// reason (the list stays as it was).
+    fn delete_key(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.selected.clone() else {
             return;
         };
         let reply = self.services.provider.delete_machine_secret(&id, &name);
-        cx.spawn(async move |this, cx| {
-            let result = answer(reply).await;
-            let _ = this.update(cx, |this, cx| {
-                match result {
-                    Ok(()) => this.acct.notice = Some(m::KEYS_SAVED.into()),
-                    Err(e) => this.acct.secrets_error = Some(admin_error(e)),
-                }
-                cx.notify();
-            });
+        let handle = window.window_handle();
+        cx.spawn(async move |this, cx| match answer(reply).await {
+            Ok(()) => {
+                let _ = this.update(cx, |this, cx| {
+                    this.acct.notice = Some(m::KEYS_DELETED.into());
+                    cx.notify();
+                });
+            }
+            Err(e) => {
+                let _ = handle.update(cx, |_, window, cx| {
+                    crate::views::nav::dialogs::error_alert(
+                        m::KEYS_DELETE_FAILED,
+                        admin_error(e),
+                        |_, _| {},
+                        window,
+                        cx,
+                    )
+                });
+            }
         })
         .detach();
     }
@@ -548,6 +585,8 @@ impl AdminView {
             PushSize::Small,
             cx,
         )
+        // It goes to API 密钥: the chevron says so at rest (a link has no rest mark of its own).
+        .child(sym_icon(Sym::ChevronRight, SymSize::INLINE_SMALL, k.label))
         .on_click(move |_, window, cx| {
             view.update(cx, |v, cx| {
                 v.show_page(Page::Keys, cx);
@@ -561,12 +600,13 @@ impl AdminView {
                     Sym::Warning,
                     fill(m::FAILED_TODAY, &[("n", &c.failed_today.to_string())]),
                 )
+                .on_surface()
                 .tone(AlertTone::Warning)
                 .into_any_element(),
             ),
             None => None,
         };
-        card_surface(cx)
+        panel_card_surface(cx)
             .p(space::S24)
             .flex()
             .flex_col()
@@ -620,7 +660,7 @@ impl AdminView {
             )
             .children(body)
             .when(flow_here.is_none(), |d| {
-                d.child(self.usage_block(c, now, cx))
+                d.children(self.usage_block(c, now, cx))
             })
             .child(
                 div()
@@ -635,17 +675,21 @@ impl AdminView {
             .into_any_element()
     }
 
-    fn usage_block(&self, c: &MonitorCli, now: u64, cx: &App) -> AnyElement {
+    /// The usage windows of a CLI; nothing when there is nothing to show, so the card's
+    /// column gap is not spent on an empty child.
+    fn usage_block(&self, c: &MonitorCli, now: u64, cx: &App) -> Option<AnyElement> {
         let k = native_colors(cx);
         let windows = c.usage.clone().unwrap_or_default();
         if windows.is_empty() {
-            return div()
-                .when(c.login == "logged_in", |d| {
-                    d.n_footnote().text_color(k.secondary).child(m::USAGE_NONE)
-                })
-                .into_any_element();
+            return (c.login == "logged_in").then(|| {
+                div()
+                    .n_footnote()
+                    .text_color(k.secondary)
+                    .child(m::USAGE_NONE)
+                    .into_any_element()
+            });
         }
-        div()
+        let block = div()
             .flex()
             .flex_col()
             .gap(space::S12)
@@ -697,7 +741,8 @@ impl AdminView {
                     )
                     .child(progress((w.used_pct / 100.) as f32, cx))
             }))
-            .into_any_element()
+            .into_any_element();
+        Some(block)
     }
 
     fn login_panel(
@@ -744,7 +789,7 @@ impl AdminView {
                         cx,
                     )
                     .on_click(move |_, _, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
+                        crate::views::media::parts::copy_text(copy.clone(), m::COPIED, cx)
                     }),
                 )
                 .child(
@@ -759,6 +804,7 @@ impl AdminView {
         if let Some(e) = &f.error {
             body = body.child(
                 Alert::new(Sym::Failed, m::LOGIN_FAILED)
+                    .on_surface()
                     .tone(AlertTone::Destructive)
                     .description(e.clone()),
             );
@@ -835,9 +881,11 @@ impl AdminView {
                                     )
                                     .on_click(
                                         move |_, _, cx| {
-                                            cx.write_to_clipboard(ClipboardItem::new_string(
+                                            crate::views::media::parts::copy_text(
                                                 copy.clone(),
-                                            ))
+                                                m::COPIED,
+                                                cx,
+                                            )
                                         },
                                     ),
                                 ),
@@ -856,12 +904,14 @@ impl AdminView {
                         .unwrap_or_default();
                     body = body.child(
                         Alert::new(Sym::Done, fill(m::LOGIN_DONE, &[("who", &who)]))
+                            .on_surface()
                             .tone(AlertTone::Neutral),
                     );
                 }
                 phase::FAILED => {
                     body = body.child(
                         Alert::new(Sym::Failed, m::LOGIN_FAILED)
+                            .on_surface()
                             .tone(AlertTone::Destructive)
                             .description(st.and_then(|s| s.error.clone()).unwrap_or_default()),
                     );
@@ -925,8 +975,17 @@ impl AdminView {
         let Some(s) = secrets else {
             return match &self.acct.secrets_error {
                 Some(e) => Alert::new(Sym::Failed, m::KEYS_LOADING_FAILED)
+                    .on_surface()
                     .tone(AlertTone::Destructive)
                     .description(e.clone())
+                    .action(Self::retry_action(
+                        "keys-retry",
+                        |v, cx| {
+                            v.acct.secrets_error = None;
+                            v.fetch_secrets(cx);
+                        },
+                        cx,
+                    ))
                     .into_any_element(),
                 None => div()
                     .flex()
@@ -995,9 +1054,8 @@ impl AdminView {
                         }),
                     )
                     .item(
-                        PopupMenuItem::new(m::KEYS_DELETE).on_click(move |_, _, cx| {
-                            let n = del.clone();
-                            view.update(cx, |v, cx| v.delete_key(n, cx))
+                        PopupMenuItem::new(m::KEYS_DELETE).on_click(move |_, window, cx| {
+                            confirm_delete_key(view.clone(), del.clone(), window, cx)
                         }),
                     )
                 });
@@ -1013,7 +1071,10 @@ impl AdminView {
                         .flex()
                         .items_center()
                         .gap(space::S8)
-                        .child(div().flex().gap(space::S2).children(avatars))
+                        // No avatars (全部成员), no stack: an empty one still takes the gap.
+                        .when(!avatars.is_empty(), |d| {
+                            d.child(div().flex().gap(space::S2).children(avatars))
+                        })
                         .child(TruncText::new(who))
                         .into_any_element(),
                     div()
@@ -1038,7 +1099,7 @@ impl AdminView {
             Column::fixed(m::KEYS_COL_WHO, t::COL_MEM),
             Column::fixed(m::KEYS_COL_UPDATED, t::COL_TOKENS),
             Column::fixed(m::KEYS_COL_VALUE, t::COL_TOKENS),
-            Column::fixed("", height::LG),
+            Column::action(),
         ];
         div()
             .w_full()
@@ -1046,7 +1107,11 @@ impl AdminView {
             .flex_col()
             .gap(space::S16)
             .when(!can_add, |d| {
-                d.child(Alert::new(Sym::Warning, m::KEYS_NO_PUBLIC_KEY).tone(AlertTone::Warning))
+                d.child(
+                    Alert::new(Sym::Warning, m::KEYS_NO_PUBLIC_KEY)
+                        .on_surface()
+                        .tone(AlertTone::Warning),
+                )
             })
             .child(
                 div()
@@ -1075,12 +1140,21 @@ impl AdminView {
                     .dashed()
                     .into_any_element()
             } else {
-                table(&columns, rows, true, m::KEYS_EMPTY, None, cx).into_any_element()
+                table(&columns, rows, true, m::KEYS_EMPTY, None, cx)
+                    .bg(k.admin_panel())
+                    .into_any_element()
             })
             .child(
-                Alert::new(Sym::Lock, m::KEYS_NOTE_TITLE)
-                    .tone(AlertTone::Neutral)
-                    .description(m::KEYS_NOTE_DESC),
+                Alert::new(
+                    Sym::Lock,
+                    fill(
+                        m::KEYS_NOTE_TITLE,
+                        &[("machine", &self.selected_machine_name())],
+                    ),
+                )
+                .on_surface()
+                .tone(AlertTone::Neutral)
+                .description(m::KEYS_NOTE_DESC),
             )
             .into_any_element()
     }
@@ -1136,7 +1210,7 @@ impl AdminView {
                 .text_color(k.secondary)
                 .child(t)
         };
-        card_surface(cx)
+        panel_card_surface(cx)
             .p(space::S24)
             .flex()
             .flex_col()
@@ -1236,12 +1310,11 @@ impl AdminView {
                             ),
                     )
             })
-            .children(
-                self.acct
-                    .form_error
-                    .clone()
-                    .map(|e| Alert::new(Sym::Failed, e).tone(AlertTone::Destructive)),
-            )
+            .children(self.acct.form_error.clone().map(|e| {
+                Alert::new(Sym::Failed, e)
+                    .on_surface()
+                    .tone(AlertTone::Destructive)
+            }))
             .child(
                 div()
                     .flex()
@@ -1322,7 +1395,9 @@ fn usage_words(w: &chat_core::proto::machine::UsageWindow) -> (String, Option<St
             m::USAGE_WINDOW,
             &[(
                 "span",
-                &head.replace(" hours", " 小时").replace(" days", " 天"),
+                &head
+                    .replace(" hours", &format!(" {}", m::USAGE_SPAN_HOURS))
+                    .replace(" days", &format!(" {}", m::USAGE_SPAN_DAYS)),
             )],
         ),
         "primary" => m::USAGE_PRIMARY.to_string(),

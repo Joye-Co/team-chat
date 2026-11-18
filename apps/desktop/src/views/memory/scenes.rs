@@ -1,4 +1,5 @@
-//! Screenshot scenes of 记得的事 (the 成员 page) and 团队约定 (设置), in every state.
+//! Screenshot scenes of 记得的事 (the 成员 page), 我的偏好 (设置) and 团队约定 (团队管理), in
+//! every state.
 
 use crate::{
     fake::{
@@ -153,57 +154,57 @@ pub const SCENES: &[Scene] = &[
         open: open_main,
     },
     Scene {
-        name: "settings-memory",
-        about: "Settings: 团队约定 with today's 记忆更新 and the conventions (owner)",
+        name: "admin-memory",
+        about: "团队管理 › 团队约定 with today's 记忆更新 and the conventions (owner)",
         start: Start::Memory(MemoryShape::Normal),
         setup: |_, _| {},
         open: settings_scenes::open_memory,
     },
     Scene {
-        name: "settings-memory-end",
-        about: "Settings: 团队约定 scrolled to its end: 事实 and 已停用",
+        name: "admin-memory-end",
+        about: "团队管理 › 团队约定 scrolled to its end: 事实 and 已停用",
         start: Start::Memory(MemoryShape::Normal),
         setup: |_, _| {},
         open: settings_scenes::open_memory_end,
     },
     Scene {
-        name: "settings-memory-empty",
-        about: "Settings: 团队约定 before anything is kept: the empty group with 记一条",
+        name: "admin-memory-empty",
+        about: "团队管理 › 团队约定 before anything is kept: the empty group with 记一条",
         start: Start::Memory(MemoryShape::Empty),
         setup: |_, _| {},
         open: settings_scenes::open_memory,
     },
     Scene {
-        name: "settings-memory-loading",
-        about: "Settings: 团队约定 while it loads (skeleton rows)",
+        name: "admin-memory-loading",
+        about: "团队管理 › 团队约定 while it loads (skeleton rows)",
         start: Start::Memory(MemoryShape::Loading),
         setup: |_, _| {},
         open: settings_scenes::open_memory,
     },
     Scene {
-        name: "settings-memory-failed",
-        about: "Settings: 团队约定 could not be read: the Alert with 重试",
+        name: "admin-memory-failed",
+        about: "团队管理 › 团队约定 could not be read: the Alert with 重试",
         start: Start::Memory(MemoryShape::Failed),
         setup: |_, _| {},
         open: settings_scenes::open_memory,
     },
     Scene {
-        name: "settings-memory-long",
-        about: "Settings: 团队约定 at its longest (break-ui)",
+        name: "admin-memory-long",
+        about: "团队管理 › 团队约定 at its longest (break-ui)",
         start: Start::Memory(MemoryShape::Long),
         setup: |_, _| {},
         open: settings_scenes::open_memory,
     },
     Scene {
-        name: "settings-memory-add",
-        about: "Settings: 团队约定 with the 记一条 sheet open",
+        name: "admin-memory-add",
+        about: "团队管理 › 团队约定 with the 记一条 sheet open",
         start: Start::Memory(MemoryShape::Normal),
         setup: |_, _| {},
         open: settings_scenes::open_memory_add,
     },
     Scene {
-        name: "settings-memory-edit",
-        about: "Settings: 团队约定 with the 编辑 sheet of a convention open",
+        name: "admin-memory-edit",
+        about: "团队管理 › 团队约定 with the 编辑 sheet of a convention open",
         start: Start::Memory(MemoryShape::Normal),
         setup: |_, _| {},
         open: settings_scenes::open_memory_edit,

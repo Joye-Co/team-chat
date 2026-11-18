@@ -6,9 +6,9 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use gpui::{
-    AnyElement, AnyWindowHandle, App, AppContext as _, Context, FontWeight, Hsla, IntoElement,
-    ParentElement, Pixels, Render, Size, Styled, Window, WindowBounds, div, linear_color_stop,
-    linear_gradient, prelude::FluentBuilder as _, px, rgb,
+    AnyElement, AnyWindowHandle, App, AppContext as _, Context, Hsla, IntoElement, ParentElement,
+    Pixels, Render, Size, Styled, Window, WindowBounds, div, linear_color_stop, linear_gradient,
+    prelude::FluentBuilder as _, px, rgb,
 };
 use gpui_component::ThemeMode;
 
@@ -298,7 +298,9 @@ fn rail_rows(set: Set, k: &theme::Colors, window: &Window) -> impl IntoElement {
             .mx(px(10.))
             .px(px(10.))
             .rounded(px(6.))
-            .when(on, |d| d.bg(k.rail_sel).font_weight(FontWeight::MEDIUM))
+            .when(on, |d| {
+                d.bg(k.rail_sel).font_weight(crate::theme::MEDIUM_WEIGHT)
+            })
             .flex()
             .items_center()
             .gap(px(8.))

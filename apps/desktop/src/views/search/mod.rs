@@ -42,7 +42,7 @@ pub fn install(cx: &mut App) {
 }
 
 fn open_deferred(everywhere: bool, cx: &mut App) {
-    super::nav::in_main_window(cx, move |window, cx| {
+    super::nav::in_shown_main_window(cx, move |window, cx| {
         if !window.has_active_dialog(cx) {
             open(super::nav::services_of(cx), everywhere, "", window, cx);
         }

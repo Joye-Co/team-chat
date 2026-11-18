@@ -405,7 +405,7 @@ fn version_time(now: Millis, at: Millis) -> String {
 impl ArtifactPage {
     /// The toolbar row (NATIVE.md §2, §5.1): the 产出's name as the title,
     /// `群 · 类型` as the subtitle (no breadcrumb, no tag), then the version
-    /// pop-up and one glass group: 分享, 在新窗口打开, 单独问.
+    /// pop-up and the labeled items (D20): 分享, 新窗口, 单独问, 信息.
     fn header(
         &self,
         detail: &ArtifactDetail,
@@ -434,54 +434,61 @@ impl ArtifactPage {
         let id = a.id.clone();
         // The version pop-up as a toolbar item (R12): the same capsule,
         // height and shape as the toolbar groups beside it.
-        let picker = nk::inline_popup(
-            "artifact-version",
-            format!("v{shown} · {}", version_time(now, at)),
-            window,
-            cx,
-        )
-        .h(nk::metrics::TOOLBAR_ITEM)
-        .px(nk::metrics::FIELD_PAD)
-        .rounded(nk::metrics::BUTTON_REGULAR_RADIUS)
-        .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
-            let mut menu = menu.label(c::ARTIFACT_VERSIONS);
-            for v in &versions {
-                let note = services
-                    .provider
-                    .artifact(&id)
-                    .and_then(|d| version_note(&services, &d, v.version))
-                    .unwrap_or_default();
-                let label = format!(
-                    "v{}  {}  {}",
-                    v.version,
-                    note,
-                    version_time(services.provider.clock_now(), v.created_at)
-                );
-                let nav = services.nav.clone();
-                let (id, ver) = (id.clone(), v.version);
-                menu = menu.item(PopupMenuItem::new(label).checked(ver == shown).on_click(
-                    move |_, _, cx| {
-                        let id = id.clone();
-                        nav.update(cx, |n, cx| n.open_artifact(id, Some(ver), cx))
-                    },
-                ));
-            }
-            menu
-        });
+        // While the inspector shows, its 版本 section says when each version was made:
+        // the item keeps only the number, so the subtitle beside the labeled items
+        // (D20) is not cut to two characters.
+        let picker_title = if self.aside_open {
+            format!("v{shown}")
+        } else {
+            format!("v{shown} · {}", version_time(now, at))
+        };
+        let picker = nk::inline_popup("artifact-version", picker_title, window, cx)
+            .h(nk::metrics::TOOLBAR_ITEM)
+            .px(nk::metrics::FIELD_PAD)
+            .rounded(nk::metrics::BUTTON_REGULAR_RADIUS)
+            .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
+                let mut menu = menu.label(c::ARTIFACT_VERSIONS);
+                for v in &versions {
+                    let note = services
+                        .provider
+                        .artifact(&id)
+                        .and_then(|d| version_note(&services, &d, v.version))
+                        .unwrap_or_default();
+                    let label = format!(
+                        "v{}  {}  {}",
+                        v.version,
+                        note,
+                        version_time(services.provider.clock_now(), v.created_at)
+                    );
+                    let nav = services.nav.clone();
+                    let (id, ver) = (id.clone(), v.version);
+                    menu = menu.item(PopupMenuItem::new(label).checked(ver == shown).on_click(
+                        move |_, _, cx| {
+                            let id = id.clone();
+                            nav.update(cx, |n, cx| n.open_artifact(id, Some(ver), cx))
+                        },
+                    ));
+                }
+                menu
+            });
         let share_text = fill(
             c::ARTIFACT_SHARE_TEXT,
             &[("title", &a.title), ("v", &shown.to_string())],
         );
         let active = nk::emphasized(window);
-        let share = nk::toolbar_item(
+        // D20: the toolbar's items carry their word, as on a 话题 (详情 / 产出 /
+        // 单独问), in one run with no separator.
+        let share_word = if self.copied {
+            c::ARTIFACT_COPIED
+        } else {
+            c::ARTIFACT_SHARE
+        };
+        let share = nk::toolbar_labeled_item(
             "artifact-share",
             crate::ui::sf_symbols::Sf::Copy,
-            if self.copied {
-                c::ARTIFACT_COPIED
-            } else {
-                c::ARTIFACT_SHARE
-            },
-            nk::ToolbarItemKind::Plain,
+            share_word,
+            share_word,
+            false,
             active,
             window,
             cx,
@@ -496,11 +503,12 @@ impl ArtifactPage {
         let nav = self.services.nav.clone();
         let (sg, st) = (detail.group_id.clone(), a.topic_id.clone());
         let made_by = a.created_by.clone();
-        let open_window = nk::toolbar_item(
+        let open_window = nk::toolbar_labeled_item(
             "artifact-open-window",
             crate::ui::sf_symbols::Sf::Open,
+            c::ARTIFACT_OPEN_WINDOW_SHORT,
             c::ARTIFACT_OPEN_WINDOW,
-            nk::ToolbarItemKind::Plain,
+            false,
             active,
             window,
             cx,
@@ -508,11 +516,12 @@ impl ArtifactPage {
         .on_click(move |_, _, cx| {
             crate::views::artifacts::window::open_artifact(&provider, &open_id, Some(shown), cx)
         });
-        let side_chat = nk::toolbar_item(
+        let side_chat = nk::toolbar_labeled_item(
             "artifact-side-chat",
             crate::ui::sf_symbols::Sf::SideChat,
             c::ARTIFACT_SIDE_CHAT,
-            nk::ToolbarItemKind::Plain,
+            c::ARTIFACT_SIDE_CHAT,
+            false,
             active,
             window,
             cx,
@@ -535,15 +544,12 @@ impl ArtifactPage {
             .join(" · ");
         // The inspector toggle (NATIVE.md §2): `sidebar.trailing`, toggled while 来龙去脉
         // shows. The inspector has no heading or button of its own.
-        let inspector = nk::toolbar_item(
+        let inspector = nk::toolbar_labeled_item(
             "artifact-inspector",
             crate::ui::sf_symbols::Sf::PaneRight,
+            c::ARTIFACT_INFO_SHORT,
             c::ARTIFACT_STORY,
-            if self.aside_open {
-                nk::ToolbarItemKind::Toggled
-            } else {
-                nk::ToolbarItemKind::Plain
-            },
+            self.aside_open,
             active,
             window,
             cx,
@@ -556,11 +562,14 @@ impl ArtifactPage {
         // Back to where the page was opened from: the 话题 whose 产出 it is, mostly.
         let back_to = back_label(self.services.nav.read(cx).artifact_return.as_ref());
         let nav = self.services.nav.clone();
-        let back = nk::toolbar_item(
+        // The chevron with its word (‹ 回到话题): the sidebar selection is on 产出
+        // here, so the item itself says where it leads.
+        let back = nk::toolbar_labeled_item(
             "artifact-back",
             crate::ui::sf_symbols::Sf::ChevronLeft,
             back_to,
-            nk::ToolbarItemKind::Plain,
+            back_to,
+            false,
             active,
             window,
             cx,
@@ -571,9 +580,12 @@ impl ArtifactPage {
             .leading_inset(leading)
             .leading(nk::ToolbarGroup::new([back]))
             .group(crate::views::group_page::rows::toolbar_capsule(picker, cx))
-            .group(nk::ToolbarGroup::new([share, open_window, side_chat]))
-            .group(crate::views::group_page::rows::toolbar_separator(cx))
-            .group(nk::ToolbarGroup::new([inspector]))
+            .group(nk::ToolbarGroup::new([
+                share,
+                open_window,
+                side_chat,
+                inspector,
+            ]))
             .into_any_element()
     }
 
@@ -718,7 +730,7 @@ impl ArtifactPage {
 
     /// The inspector (COMPLETENESS.md §2.5): a header band (`产出信息`, a
     /// line, close) on the toolbar row, then fixed sections in this order:
-    /// 来自话题 (with 做的人 and 要求), 版本, 这一页 (a live page), 页面里的回应,
+    /// 来自话题 (with 做的人 and 提出的人), 版本, 这一页 (a live page), 页面里的回应,
     /// 用到的决定 and 被引用. A section with no data shows one muted line and
     /// never disappears. Values truncate with a tooltip (the role first).
     fn story(
@@ -726,7 +738,7 @@ impl ArtifactPage {
         detail: &ArtifactDetail,
         shown: u32,
         live: bool,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         use crate::ui::native::{
@@ -743,48 +755,25 @@ impl ArtifactPage {
             }
         };
 
-        let close = nk::borderless_button(
+        // The same header band as every right pane (§2.2), so the close
+        // button stays where it is when one pane replaces another.
+        let close = nk::icon_button_sym(
             "artifact-info-close",
-            crate::ui::sf_symbols::Sf::Close,
+            Sym::Close,
             c::ARTIFACT_CLOSE_INFO,
-            window,
+            nk::IconSize::Regular,
             cx,
         )
         .on_click(cx.listener(|this, _, _, cx| {
             this.aside_open = false;
             cx.notify();
         }));
-        let header = div()
-            .flex_none()
-            .h(nk::metrics::TOOLBAR_ROW)
-            .pl(nk::metrics::INSPECTOR_PAD)
-            .pr(tsp::S8)
-            .border_b_1()
-            .border_color(k.separator)
-            .flex()
-            .items_center()
-            .gap(tsp::S8)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .items_center()
-                    .gap(gpui::px(8.))
-                    .child(
-                        div()
-                            .n_title3()
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(k.label)
-                            .child(c::ARTIFACT_INFO),
-                    )
-                    .child(
-                        line(c::ARTIFACT_INFO_LINE)
-                            .n_subheadline()
-                            .text_color(k.secondary),
-                    ),
-            )
-            .child(close);
+        let header = crate::views::group_page::kit::pane_header(
+            c::ARTIFACT_INFO,
+            c::ARTIFACT_INFO_LINE.into(),
+            vec![close.into_any_element()],
+            cx,
+        );
         let mut body = div()
             .id("artifact-story")
             .flex_1()
@@ -797,7 +786,7 @@ impl ArtifactPage {
             // the section's own 16 top sits under the header band.
             .child(div().flex_none().mt(-tsp::S12));
 
-        // 来自话题, then 做的人 and 要求 as a DescriptionList.
+        // 来自话题, then 做的人 and 提出的人 as a DescriptionList.
         let topic = story
             .topic
             .clone()
@@ -958,7 +947,9 @@ impl ArtifactPage {
                 nk::push_button(
                     "artifact-compare",
                     fill(c::ARTIFACT_COMPARE, &[("v", &(shown - 1).to_string())]),
-                    nk::PushStyle::Outline,
+                    // §2.5: a section's action is the header's ghost action, so it
+                    // stacks no fill on the selected row under it.
+                    nk::PushStyle::Ghost,
                     nk::PushSize::Small,
                     cx,
                 )
@@ -991,7 +982,9 @@ impl ArtifactPage {
                     .items_center()
                     .gap(tsp::S8)
                     .n_body()
-                    .when(on, |el| el.bg(k.fill).font_weight(gpui::FontWeight::MEDIUM))
+                    .when(on, |el| {
+                        el.bg(k.fill).font_weight(crate::theme::MEDIUM_WEIGHT)
+                    })
                     .child(
                         div()
                             .flex_none()
@@ -1274,11 +1267,24 @@ impl ArtifactPage {
             })
             .clone();
         let query = search.read(cx).value().trim().to_lowercase();
-        let total = p.all_artifacts().len();
-        let mut all: Vec<_> = p
-            .all_artifacts()
+        let every = p.all_artifacts();
+        let total = every.len();
+        // The search reads what a row shows: the name, the 类型, the 话题 and
+        // who made it (each looked up once per row).
+        let mut all: Vec<_> = every
             .into_iter()
-            .filter(|(_, a)| query.is_empty() || a.title.to_lowercase().contains(&query))
+            .filter(|(g, a)| {
+                query.is_empty()
+                    || row_matches(
+                        &query,
+                        &[
+                            &a.title,
+                            kind_label(a.kind),
+                            &p.topic(g, &a.topic_id).map(|t| t.title).unwrap_or_default(),
+                            &member_name(&self.services, &a.created_by),
+                        ],
+                    )
+            })
             .collect();
         match self.sort {
             ListSort::Time => all.sort_by(|x, y| y.1.updated_at.cmp(&x.1.updated_at)),
@@ -1395,6 +1401,8 @@ impl ArtifactPage {
                 nk::SearchField::new("artifacts-search", &search)
                     .sidebar()
                     .clearable()
+                    // Nothing to search with 0 产出, like the two controls before it.
+                    .disabled(empty)
                     .width(px(200.)),
             )
             .group(div().flex_none().w(px(0.)));
@@ -1539,6 +1547,8 @@ impl ArtifactPage {
                 .floor()
                 .max(1.) as u16)
                 .min(all.len().max(1) as u16);
+            let tile_w =
+                (width - page::m::GRID_GAP * (cols.saturating_sub(1)) as f32) / cols as f32;
             let mut days: Vec<(String, Vec<&(String, crate::data::ArtifactSummary)>)> = Vec::new();
             for item in &all {
                 let day = day_label(now, item.1.updated_at);
@@ -1583,7 +1593,7 @@ impl ArtifactPage {
                             .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                             .min_w_0()
                             .overflow_hidden()
-                            .child(thumbnail(&self.services, a, cx))
+                            .child(thumbnail(&self.services, a, tile_w, cx))
                             .child(
                                 div()
                                     .p(tsp::S12)
@@ -1599,7 +1609,7 @@ impl ArtifactPage {
                                         // at gap 4 (no void between, A1).
                                         div()
                                             .n_body()
-                                            .font_weight(gpui::FontWeight::MEDIUM)
+                                            .font_weight(crate::theme::MEDIUM_WEIGHT)
                                             .text_color(n.label)
                                             .line_clamp(2)
                                             .child(a.title.clone()),
@@ -1673,10 +1683,13 @@ impl ArtifactPage {
                                 .child(page::row_icon(kind_sym(a.kind), n.secondary)),
                         )
                         .child(
-                            div().min_w_0().font_weight(gpui::FontWeight::MEDIUM).child(
-                                crate::ui::truncate::TruncText::new(a.title.clone())
-                                    .id(SharedString::from(format!("artifact-name-{}", a.id))),
-                            ),
+                            div()
+                                .min_w_0()
+                                .font_weight(crate::theme::MEDIUM_WEIGHT)
+                                .child(
+                                    crate::ui::truncate::TruncText::new(a.title.clone())
+                                        .id(SharedString::from(format!("artifact-name-{}", a.id))),
+                                ),
                         )
                         .into_any_element();
                     // X-01: a leading emoji in the name is not shown beside
@@ -1820,6 +1833,32 @@ fn day_label(now: Millis, at: Millis) -> String {
     }
 }
 
+/// True when one of a row's `fields` holds `query` (already trimmed and in
+/// lower case), whatever the case of the field.
+fn row_matches(query: &str, fields: &[&str]) -> bool {
+    fields.iter().any(|f| f.to_lowercase().contains(query))
+}
+
+impl ArtifactPage {
+    /// ⌘F on the 产出 list: the caret goes to the toolbar's search field,
+    /// with its text selected. False when the page shows one 产出 (or the
+    /// list has not drawn yet), where there is no such field.
+    pub fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.open(cx).is_some() {
+            return false;
+        }
+        let Some(search) = self.search.clone() else {
+            return false;
+        };
+        search.update(cx, |state, cx| {
+            let end = state.value().len();
+            state.focus(window, cx);
+            state.set_selected_range(0..end, cx);
+        });
+        true
+    }
+}
+
 impl Render for ArtifactPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = theme::colors(cx);
@@ -1931,23 +1970,43 @@ fn sym_toolbar_item(
 /// The picture of a tile (§9.6, R11): the page's snapshot scaled to fit
 /// the tile whole (never a crop of one corner), a poster for media, else
 /// the kind's symbol with no frame, as Finder draws a document icon.
-fn thumbnail(services: &Services, a: &crate::data::ArtifactSummary, cx: &App) -> gpui::Div {
-    use crate::ui::native as nk;
+fn thumbnail(
+    services: &Services,
+    a: &crate::data::ArtifactSummary,
+    tile_w: Pixels,
+    cx: &App,
+) -> gpui::Div {
+    use crate::ui::native::{self as nk, tokens};
     use gpui::StyledImage as _;
     let n = nk::native_colors(cx);
-    let picture: Option<gpui::ImageSource> = crate::ui::web_embed::page_preview(&a.id, a.version)
-        .map(gpui::ImageSource::from)
-        .or_else(|| {
-            services
-                .provider
-                .artifact_poster(&a.id, a.version)
-                .map(gpui::ImageSource::from)
-        });
+    let picture: Option<(gpui::ImageSource, Option<(u32, u32)>)> =
+        crate::ui::web_embed::page_preview(&a.id, a.version)
+            .map(|image| {
+                let size = picture_size(PictureKey::Image(image.id), || {
+                    image::ImageReader::new(std::io::Cursor::new(image.bytes()))
+                        .with_guessed_format()
+                        .ok()?
+                        .into_dimensions()
+                        .ok()
+                });
+                (gpui::ImageSource::from(image), size)
+            })
+            .or_else(|| {
+                services
+                    .provider
+                    .artifact_poster(&a.id, a.version)
+                    .map(|path| {
+                        let size = picture_size(PictureKey::File(path.clone()), || {
+                            image::image_dimensions(&path).ok()
+                        });
+                        (gpui::ImageSource::from(path), size)
+                    })
+            });
     // The well follows the tile's top corners (inside its 1 px line), so
     // its fill never shows past the rounded border (§1.6).
     let well = div()
         .w_full()
-        .h(px(132.))
+        .h(tokens::artifact_tile::WELL_H)
         .rounded_t(page::m::CARD_RADIUS - crate::ui::native::metrics::HAIRLINE)
         .overflow_hidden()
         .bg(n.fill)
@@ -1955,7 +2014,48 @@ fn thumbnail(services: &Services, a: &crate::data::ArtifactSummary, cx: &App) ->
         .items_center()
         .justify_center();
     match picture {
-        Some(src) => well.p(tsp::S8).child(
+        // The snapshot as a sheet of paper (§1.7: a fill step alone is no edge):
+        // fitted whole, with its own line, radius and shadow, so the page's edge shows
+        // in both themes and when the page's background equals the well's. A page too
+        // tall to read when fitted keeps a least width and is cut at the bottom.
+        Some((src, Some((w, h)))) if w > 0 && h > 0 => {
+            let room_w = (tile_w - nk::metrics::HAIRLINE * 2. - tsp::S8 * 2.).max(px(1.));
+            let room_h = tokens::artifact_tile::WELL_H - tsp::S8 * 2.;
+            let ratio = w as f32 / h as f32;
+            let fitted_w = room_h * ratio;
+            let (bw, bh) = if fitted_w < tokens::artifact_tile::PAGE_MIN_W {
+                (tokens::artifact_tile::PAGE_MIN_W.min(room_w), room_h)
+            } else if fitted_w > room_w {
+                (room_w, room_w / ratio)
+            } else {
+                (fitted_w, room_h)
+            };
+            well.child(
+                div()
+                    .flex_none()
+                    .w(bw)
+                    .h(bh)
+                    .rounded(tokens::radius::CHECKBOX)
+                    .border_1()
+                    .border_color(n.separator)
+                    // The fill an inline page sits on: a snapshot of a page with no
+                    // background of its own is clear there, and the shadow must not
+                    // show through it.
+                    .bg(crate::theme::colors(cx).raised)
+                    .shadow(tokens::shadow::xs())
+                    .overflow_hidden()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        gpui::img(src)
+                            .flex_none()
+                            .w_full()
+                            .h((bw - nk::metrics::HAIRLINE * 2.) / ratio)
+                            .object_fit(gpui::ObjectFit::Fill),
+                    ),
+            )
+        }
+        Some((src, _)) => well.p(tsp::S8).child(
             gpui::img(src)
                 .size_full()
                 .object_fit(gpui::ObjectFit::Contain),
@@ -1970,6 +2070,26 @@ fn thumbnail(services: &Services, a: &crate::data::ArtifactSummary, cx: &App) ->
                 .text_color(n.secondary),
         ),
     }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum PictureKey {
+    Image(u64),
+    File(std::path::PathBuf),
+}
+
+/// The pixel size of a tile's picture, read from its header once.
+fn picture_size(key: PictureKey, read: impl FnOnce() -> Option<(u32, u32)>) -> Option<(u32, u32)> {
+    thread_local! {
+        static SIZES: std::cell::RefCell<std::collections::HashMap<PictureKey, Option<(u32, u32)>>> =
+            std::cell::RefCell::new(std::collections::HashMap::new());
+    }
+    if let Some(known) = SIZES.with(|s| s.borrow().get(&key).copied()) {
+        return known;
+    }
+    let size = read();
+    SIZES.with(|s| s.borrow_mut().insert(key, size));
+    size
 }
 // --- end v12/fx-cards ---
 
@@ -2011,3 +2131,18 @@ fn artifact_menu(
     .map(|menu| crate::views::files::export::menu_items(menu, &target, at))
 }
 // --- end v12/behavior ---
+
+#[cfg(test)]
+mod search_tests {
+    use super::row_matches;
+
+    /// The list's search reads the name, the 类型, the 话题 and the maker.
+    #[test]
+    fn the_search_reads_every_column_of_a_row() {
+        let row = ["发布说明 v2", "文档", "三月发版", "Jojo"];
+        for q in ["发布", "文档", "三月", "jojo", "V2"] {
+            assert!(row_matches(&q.to_lowercase(), &row), "{q}");
+        }
+        assert!(!row_matches("周报", &row));
+    }
+}

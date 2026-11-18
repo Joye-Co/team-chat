@@ -168,6 +168,8 @@ svg_set! {
         Info = Info @ 1.00, 0.97;
         Help = CircleQuestionMark @ 1.00, 0.97;
         Return = CornerDownLeft @ 1.03, 0.87;
+        Wrap = TextWrap @ 0.92, 0.74;
+        SendTo = Send @ 1.02, 0.99;
         ReplyIndent = CornerDownRight @ 0.92, 0.74;
         Reply = Reply @ 1.05, 0.87;
         ArrowUp = ArrowUp @ 0.74, 0.90;
@@ -177,6 +179,7 @@ svg_set! {
         Terminal = SquareTerminal @ 1.16, 0.88;
         Retry = RotateCcw @ 0.87, 1.02;
         Refresh = RotateCw @ 0.87, 1.02;
+        Random = Dices @ 1.04, 0.99;
         Undo = Undo2 @ 0.93, 0.91;
         Link = Link @ 1.05, 1.05;
         Code = Code @ 1.38, 0.90;
@@ -227,6 +230,7 @@ svg_set! {
         Problem = "triangle-alert-fill" @ 0.99, 0.90;
         Failed = "circle-x-fill" @ 1.00, 0.97;
         StarFill = "star-fill" @ 1.09, 1.05;
+        Paused = "pause-fill" @ 0.60, 0.78;
         // A small desktop computer seen from the front: a team machine.
         MacMini = "desktop-mini" @ 1.27, 0.50;
     }

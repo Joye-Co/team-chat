@@ -34,13 +34,11 @@ use crate::{
     app::Services,
     copy::{common, fill, settings as s},
     data::{MachineCreated, MachineInfo, Ownership, ThisMac},
-    theme,
     ui::{
         Sym,
         native::{
-            BadgeState, GroupedForm, NativeTextField, NativeType as _, PushSize, PushStyle,
-            SectionTitle, SheetLayout, SheetWidth, StatusBadge, disabled_push, metrics,
-            native_colors, push_button, tokens,
+            BadgeState, GroupedForm, NativeTextField, PushSize, PushStyle, SectionTitle,
+            SheetLayout, SheetWidth, StatusBadge, disabled_push, push_button, tokens,
         },
     },
     views::topic_list::relative_time,
@@ -307,11 +305,11 @@ impl MachinesPage {
     fn row(&self, m: &MachineInfo, window: &Window, cx: &mut Context<Self>) -> gpui::AnyElement {
         let now = crate::selftest::clock::local_now();
         let badge = if !m.connected {
-            StatusBadge::new(BadgeState::Offline, s::MACHINE_OFFLINE)
+            StatusBadge::new(BadgeState::Offline, s::MACHINE_OFFLINE).on_group()
         } else if !m.healthy {
-            StatusBadge::new(BadgeState::Abnormal, s::MACHINE_UNHEALTHY)
+            StatusBadge::new(BadgeState::Abnormal, s::MACHINE_UNHEALTHY).on_group()
         } else {
-            StatusBadge::new(BadgeState::Online, s::MACHINE_ONLINE)
+            StatusBadge::new(BadgeState::Online, s::MACHINE_ONLINE).on_group()
         };
         let badge = div()
             .id(ElementId::Name(format!("machine-state-{}", m.id).into()))
@@ -363,10 +361,12 @@ impl MachinesPage {
             Ownership::Team if !self.owner => String::new(),
             Ownership::Mine => {
                 let members = self.services.provider.members();
-                match actions::my_bots_summary(m, &members) {
-                    Some(work) => format!("{} · {work}", machine_facts(m, now)),
-                    None => machine_facts(m, now),
-                }
+                // What it does for me comes right after its state: the end
+                // of the line is what gets cut.
+                let mut facts = vec![machine_state(m, now)];
+                facts.extend(actions::my_bots_summary(m, &members));
+                facts.extend(machine_spec(m));
+                facts.join(" · ")
             }
             Ownership::Team => machine_facts(m, now),
         };
@@ -619,16 +619,39 @@ impl Render for MachinesPage {
                 ),
                 cx,
             ),
-            (None, _) => GroupedForm::new()
-                .row(widgets::list_loading("machines-loading", 2, true, cx))
-                .into_any_element(),
+            (None, _) => {
+                // The sections the list will fill, so the headers and the
+                // window height stay put when it arrives.
+                if !self.solo {
+                    let team_footer = if owner {
+                        s::TEAM_COMPUTERS_FOOTER
+                    } else {
+                        s::TEAM_COMPUTERS_MEMBER_FOOTER
+                    };
+                    sections.push(
+                        widgets::section(
+                            SectionTitle::new(s::TEAM_COMPUTERS).description(team_footer),
+                            GroupedForm::new().row(widgets::list_loading(
+                                "team-machines-loading",
+                                2,
+                                true,
+                                cx,
+                            )),
+                        )
+                        .into_any_element(),
+                    );
+                }
+                GroupedForm::new()
+                    .row(widgets::list_loading("machines-loading", 2, true, cx))
+                    .into_any_element()
+            }
         };
-        // 云端 is not open to anyone yet: the row says so and an outline
-        // badge marks it; no dead button (F5, C1-03).
+        // 云端 is not open to anyone yet: an outline badge says so once
+        // (the section's line says what it will do); no dead button (F5,
+        // C1-03).
         let cloud = GroupedForm::new().row(
             widgets::ItemRow::new("cloud", s::CLOUD)
                 .media(widgets::icon_box_28(Sym::Cloud, cx))
-                .description(s::CLOUD_NOT_YET)
                 .value(crate::ui::native::Badge::new(s::CLOUD_COMING_SOON)),
         );
         widgets::pane()
@@ -719,15 +742,26 @@ fn github_note(m: &MachineInfo) -> Option<String> {
 /// (or when it was last seen; a time of 0 is never), the version, the OS,
 /// then the other tags.
 fn machine_facts(m: &MachineInfo, now: chrono::DateTime<chrono::Local>) -> String {
-    let mut facts: Vec<String> = Vec::new();
-    facts.push(match m.last_heartbeat_at {
+    let mut facts = vec![machine_state(m, now)];
+    facts.extend(machine_spec(m));
+    facts.join(" · ")
+}
+
+/// What a computer does now, or when it was last seen.
+fn machine_state(m: &MachineInfo, now: chrono::DateTime<chrono::Local>) -> String {
+    match m.last_heartbeat_at {
         _ if m.connected && m.active_runs > 0 => {
             fill(s::MACHINE_BUSY, &[("n", &m.active_runs.to_string())])
         }
         _ if m.connected => s::MACHINE_IDLE.to_string(),
         Some(at) if at > 0 => fill(s::MACHINE_SEEN, &[("when", &relative_time(at, now))]),
         _ => s::MACHINE_NEVER_ONLINE.to_string(),
-    });
+    }
+}
+
+/// What a computer is: its limit, the version, the OS, then the other tags.
+fn machine_spec(m: &MachineInfo) -> Vec<String> {
+    let mut facts: Vec<String> = Vec::new();
     if let Some(n) = m.run_limit() {
         facts.push(fill(s::MACHINE_PARALLEL_FACT, &[("n", &n.to_string())]));
     }
@@ -740,7 +774,7 @@ fn machine_facts(m: &MachineInfo, now: chrono::DateTime<chrono::Local>) -> Strin
     if !tags.is_empty() {
         facts.push(tags.join("、"));
     }
-    facts.join(" · ")
+    facts
 }
 
 /// A tag that names the operating system.
@@ -802,12 +836,16 @@ pub struct MachineForm {
     name: Entity<InputState>,
     status: Status,
     created: Option<MachineCreated>,
+    done: widgets::DoneStep,
     /// The system of the computer being added (it need not be this one's): its tag and
     /// which install command the sheet shows (机 1.8).
     target: InstallTarget,
     /// 谁用这台电脑 (admins, when more than one person uses the server): only me. Members
     /// always add their own computer.
     only_me: bool,
+    /// The sideways scroll of the two one-time boxes of the done step (D13).
+    install_scroll: gpui::ScrollHandle,
+    credential_scroll: gpui::ScrollHandle,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -902,8 +940,11 @@ impl MachineForm {
             name,
             status: Status::Idle,
             created: None,
+            done: widgets::DoneStep::new(cx),
             target: InstallTarget::of_this_computer(),
             only_me: false,
+            install_scroll: gpui::ScrollHandle::new(),
+            credential_scroll: gpui::ScrollHandle::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -995,90 +1036,36 @@ impl MachineForm {
 }
 
 impl Render for MachineForm {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let k = native_colors(cx);
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if let Some(created) = &self.created {
             let (command, hint) = self.target.command(created);
-            let secret = |id: &'static str, label: &'static str, value: &str| {
-                let value: gpui::SharedString = value.to_string().into();
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .gap(crate::ui::native::tokens::space::S4)
-                    .child(div().n_body().text_color(k.label).child(label))
-                    .child(
-                        div()
-                            .w_full()
-                            .min_h(metrics::FIELD)
-                            .pl(metrics::FIELD_PAD)
-                            .pr(px(2.))
-                            .py(px(3.))
-                            .rounded(metrics::FIELD_RADIUS)
-                            .bg(k.content)
-                            .border_1()
-                            .border_color(k.separator)
-                            .flex()
-                            .items_start()
-                            .gap(crate::ui::native::tokens::space::S6)
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w(px(0.))
-                                    .font_family(theme::MONO_FONT_FAMILY)
-                                    .text_size(crate::ui::native::tokens::text::META.0)
-                                    .line_height(px(18.))
-                                    .text_color(k.label)
-                                    .child(value.clone()),
-                            )
-                            .child(
-                                gpui_component::clipboard::Clipboard::new(id)
-                                    .tooltip(s::COPY)
-                                    .value(value),
-                            ),
-                    )
-            };
-            return SheetLayout::new(fill(s::MACHINE_CREATED, &[("name", &created.machine.name)]))
-                .explanation(s::SHOWN_ONCE)
-                .body(widgets::field(
-                    s::MACHINE_TARGET,
-                    widgets::choice(
-                        "machine-target",
-                        &InstallTarget::ALL.map(InstallTarget::label),
-                        InstallTarget::ALL
-                            .iter()
-                            .position(|t| *t == self.target)
-                            .unwrap_or(0),
-                        // The computer has its system's tag now: shown, not changed.
-                        true,
-                        {
-                            let form = cx.entity().downgrade();
-                            move |ix: usize, _: &mut Window, cx: &mut gpui::App| {
-                                let _ = form.update(cx, |this, cx| {
-                                    this.set_target(InstallTarget::ALL[ix.min(2)], cx)
-                                });
-                            }
-                        },
+            let layout =
+                SheetLayout::new(fill(s::MACHINE_CREATED, &[("name", &created.machine.name)]))
+                    .explanation(s::MACHINE_CREATED_HINT)
+                    .body(widgets::secret_block(
+                        "machine-install",
+                        s::MACHINE_INSTALL,
+                        &command,
+                        &self.install_scroll,
                         cx,
-                    ),
-                    cx,
-                ))
-                .body(secret("machine-install", s::MACHINE_INSTALL, &command))
-                .body(widgets::quiet(hint, cx))
-                .body(secret(
-                    "machine-credential",
-                    s::MACHINE_CREDENTIAL,
-                    created.credential.expose(),
-                ))
-                .buttons([push_button(
-                    "machine-done",
-                    s::DONE,
-                    PushStyle::Default,
-                    PushSize::Regular,
-                    cx,
-                )
-                .on_click(|_, window, cx| window.close_dialog(cx))])
-                .into_any_element();
+                    ))
+                    .body(widgets::quiet(hint, cx))
+                    .body(widgets::secret_block(
+                        "machine-credential",
+                        s::MACHINE_CREDENTIAL,
+                        created.credential.expose(),
+                        &self.credential_scroll,
+                        cx,
+                    ))
+                    .buttons([push_button(
+                        "machine-done",
+                        s::DONE,
+                        PushStyle::Default,
+                        PushSize::Regular,
+                        cx,
+                    )
+                    .on_click(|_, window, cx| window.close_dialog(cx))]);
+            return self.done.show(layout, window, cx);
         }
         let busy = self.status.busy();
         let typed = self.name.read(cx).value().trim().to_string();
@@ -1145,6 +1132,10 @@ impl Render for MachineForm {
                     .child(sheet_form_row(s::MACHINE_TARGET, system, cx))
                     .children(who.map(|w| sheet_form_row(s::MACHINE_WHO_USES, w, cx))),
             )
+            // The app does the same in one click, on a computer that runs it.
+            .when(self.target != InstallTarget::Linux, |l| {
+                l.body(widgets::quiet(s::COMPUTER_ADD_TIP, cx))
+            })
             .when_some(failed, |l, f| l.body(f))
             .when_some(problem, |l, p| l.status(sheet_status_error(p, cx)))
             .buttons([
@@ -1197,10 +1188,18 @@ pub fn open_add_machine(
                     .focus(window, cx);
             }
             let ok = shown.clone();
+            // The 已添加 step shows its command and credential once: Return
+            // is 完成 (the default button) and Esc does not throw it away
+            // (the sheet keeps its keys: without them Return would be dead).
+            let kept = shown.clone();
             dialog
+                .on_cancel(move |_, _, cx| kept.read(cx).created.is_none())
                 .on_ok(move |_, _, cx| {
-                    ok.update(cx, |f, cx| f.submit(cx));
-                    false
+                    ok.update(cx, |f, cx| {
+                        let done = f.created.is_some();
+                        f.submit(cx);
+                        done
+                    })
                 })
                 .child(shown.clone())
         },

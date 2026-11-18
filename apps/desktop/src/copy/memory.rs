@@ -8,7 +8,6 @@ crate::copy! {
     TEAM_TITLE = "团队约定",
     TEAM_ABOUT = "每个成员做事前都会读。每天整理一次，记错了直接改或停用。",
     TEAM_ABOUT_READONLY = "每个成员做事前都会读。每天整理一次，管理员可以改。",
-    TEAM_LIST = "约定和事实",
     // 群里的约定 on a 群's page; 我的偏好 in 设置; 我的约定 when one person uses the server.
     GROUP_TITLE = "群里的约定",
     GROUP_ABOUT = "在这个群干活的成员会参考这些。每天整理一次，记错了直接改或停用。",
@@ -17,13 +16,12 @@ crate::copy! {
     MINE_TITLE = "我的约定",
     MINE_ABOUT = "成员替你做事前都会读这些。每天整理一次，记错了直接改或停用。",
     // No AI 服务 on the server (盯 4.6).
-    AI_OFF_TITLE = "还没配 AI 服务",
+    AI_OFF_TITLE = "还没设置 AI 服务",
     AI_OFF_BODY = "不会自动总结经验，夜里也不会整理：成员记下的，第二天原样生效。",
     AI_OFF_SETUP = "去设置",
     // 记忆更新: one day's changes, each line can be undone.
     UPDATES_TITLE = "记忆更新",
     UPDATES_TITLE_DAY = "记忆更新 · {day}",
-    UPDATES_ABOUT = "每天整理一次，直接生效。哪一行不对，撤回就行。",
     UPDATES_EMPTY = "还没有记忆更新",
     UPDATES_ADDED_N = "新增 {n} 条",
     UPDATES_CHANGED_N = "改了 {n} 条",
@@ -73,7 +71,7 @@ crate::copy! {
     MEMBER_EMPTY = "{name} 还没有记住什么。干完活的复盘和你记的会出现在这里。",
     TEAM_EMPTY = "还没有团队约定。记一条，每个成员做事前都会读到。",
     GROUP_EMPTY = "还没有群里的约定。记一条，在这个群干活的成员都会读到。",
-    PERSON_EMPTY = "还没有你的偏好。记一条，比如「回复写短一点」，你找成员干活时它们会照着做。",
+    PERSON_EMPTY = "还没有你的偏好。记一条，比如「回复写短一点」。",
     MINE_EMPTY = "还没有约定。记一条，成员替你做事前都会读到。",
     MEMBER_FAILED = "记得的事没有读到",
     TEAM_FAILED = "团队约定没有读到",
@@ -96,10 +94,19 @@ crate::copy! {
     SHEET_TEXT_PLACEHOLDER_MEMBER = "比如：合并前先跑压测",
     SHEET_TEXT_PLACEHOLDER_GROUP = "比如：这个群的产出都用中文写",
     SHEET_TEXT_PLACEHOLDER_PERSON = "比如：回复写短一点",
-    SHEET_WHEN = "什么时候用",
+    SHEET_WHEN = "适用",
     SHEET_WHEN_PLACEHOLDER = "可以不填，比如：上线 orderbot 时",
     SHEET_TOO_LONG = "最多 {n} 个字",
     SHEET_SAVE_NEW = "记下",
     SHEET_SAVE = "保存",
     SHEET_REFUSED = "没能保存",
+    // The same lines with no AI 服务 on the server: nothing is tidied at night, so they
+    // do not promise it (next to AI_OFF_BODY).
+    MEMORY_ABOUT_AI_OFF = "{name} 干活时会参考这些。记错了直接改或停用。",
+    MEMORY_ABOUT_READONLY_AI_OFF = "{name} 干活时会参考这些。管理员可以改。",
+    TEAM_ABOUT_AI_OFF = "每个成员做事前都会读。记错了直接改或停用。",
+    TEAM_ABOUT_READONLY_AI_OFF = "每个成员做事前都会读。管理员可以改。",
+    GROUP_ABOUT_AI_OFF = "在这个群干活的成员会参考这些。记错了直接改或停用。",
+    PERSON_ABOUT_AI_OFF = "你找成员干活时，它们会参考这些，只有你看得到。记错了直接改或停用。",
+    MINE_ABOUT_AI_OFF = "成员替你做事前都会读这些。记错了直接改或停用。",
 }

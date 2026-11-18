@@ -7,6 +7,7 @@ dependencies.
 | --- | --- |
 | `bun run dev:website` | Builds into `dist/`, rebuilds on every save under `src/`, serves `http://127.0.0.1:4321/` |
 | `bun run build:website` | Builds into `apps/website/dist/`, ready for any static host |
+| `bun run check:website` | Checks the built pages: no placeholder left, every file and `#id` they name exists, and both pages have the same sections and tour steps. CI runs it after the build. |
 
 ## Layout
 
@@ -15,7 +16,7 @@ dependencies.
 | `src/index.html` | The page. Write `{{PRODUCT_NAME}}` wherever the product name appears; the build fills it from `product.json`. |
 | `src/en.html` | The English page, served at `/en`. Same sections as `index.html`: change both together. `main.js` picks its strings from `<html lang>`. |
 | `src/styles.css` | Tokens for light and dark mode, layout, and the scroll motion (only under `.motion`, which `main.js` adds unless the viewer asked for reduced motion) |
-| `src/main.js` | Scroll reveals, the screenshot tours, the comparison (one panel per alternative, each with its own rows; the tabs pick the panel), the sliding pill of the tab rows, the nav link of the section in view, the member builder (chips drive the member card) and the waitlist form |
+| `src/main.js` | The Windows form of the shortcuts (`data-win` on a key written the Mac way), scroll reveals, the screenshot tours, the comparison (one panel per alternative, each with its own rows; the tabs pick the panel), the sliding pill of the tab rows, the nav link of the section in view, the member builder (chips drive the member card) and the waitlist form |
 | `src/img/` | WebP screenshots in light and dark pairs (`*-light.webp`, `*-dark.webp`) and the app icon |
 | `src/img/ui/` | The screens of the screenshot tours |
 
@@ -26,6 +27,24 @@ not in the repository, because the film carries the operator's own character art
 `film-zh.jpg`, `film-en.mp4` and `film-en.jpg` in `WEBSITE_MEDIA` (default `~/.config/team-chat/website/media`)
 and the build copies them to `dist/media/`. A page whose two files are missing is built without its film block
 (`<!-- film -->` … `<!-- /film -->` in the HTML). The dev server answers byte ranges, as a static host does.
+
+## Share previews
+
+Link previews (Slack, X, WeChat, Lark, iMessage) and search engines need absolute URLs, and the site's address
+is the operator's own, so it is not in this repository. Set `WEBSITE_ORIGIN` when you build for your host:
+
+```bash
+WEBSITE_ORIGIN=https://chat.example.com bun run build:website
+```
+
+The build then fills `{{ORIGIN}}` in the tags between `<!-- origin -->` and `<!-- /origin -->` in each page:
+`og:url`, `og:image`, `canonical` and the `hreflang` pair with `x-default`. Without the variable (the dev
+server, CI) those tags are left out and the page keeps the relative ones between `<!-- no-origin -->` and
+`<!-- /no-origin -->`, so previews show no picture until the deploy step sets it.
+
+The share pictures are `src/img/og-zh.jpg` and `src/img/og-en.jpg`: the top 2880x1512 of the light `desk`
+screenshot of each language, scaled to 1200x630 as JPEG (several services do not take WebP). Make them again
+when that screenshot changes.
 
 ## Screenshots
 

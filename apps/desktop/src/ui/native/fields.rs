@@ -31,11 +31,8 @@ pub enum FieldSize {
     Regular,
     /// h28: inside a dense row.
     Small,
-    /// h36: the login card.
+    /// h36: the login card and the one field of a verification step.
     Large,
-    /// h44, the height of a code slot: the one field of a verification
-    /// step, beside a full-width button of the same height.
-    Hero,
 }
 
 impl FieldSize {
@@ -44,7 +41,6 @@ impl FieldSize {
             FieldSize::Regular => metrics::FIELD,
             FieldSize::Small => metrics::BUTTON_SMALL,
             FieldSize::Large => metrics::FIELD_LARGE,
-            FieldSize::Hero => metrics::CODE_SLOT.1,
         }
     }
 }
@@ -473,6 +469,8 @@ pub struct SearchField {
     width: Option<Pixels>,
     focused: Option<bool>,
     clearable: bool,
+    small: bool,
+    disabled: bool,
 }
 
 impl SearchField {
@@ -484,7 +482,16 @@ impl SearchField {
             width: None,
             focused: None,
             clearable: false,
+            small: false,
+            disabled: false,
         }
+    }
+
+    /// The sm field (§1.8: h28), for a bar only 40 tall: its 3 px focus ring
+    /// keeps 3 px of air to the bar's lines.
+    pub fn small(mut self) -> Self {
+        self.small = true;
+        self
     }
 
     /// A clear × at the trailing edge while the field has text (it empties
@@ -509,6 +516,12 @@ impl SearchField {
         self.focused = Some(focused);
         self
     }
+
+    /// Nothing to search (§1.8): 50 % and no typing.
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
 }
 
 impl RenderOnce for SearchField {
@@ -516,7 +529,8 @@ impl RenderOnce for SearchField {
         let k = native_colors(cx);
         let focused = self
             .focused
-            .unwrap_or_else(|| self.state.read(cx).focus_handle(cx).is_focused(window));
+            .unwrap_or_else(|| self.state.read(cx).focus_handle(cx).is_focused(window))
+            && !self.disabled;
         let (edge, shadows) = field_edge(&k, focused, false);
         let shadows = if self.sidebar && !focused {
             Vec::new()
@@ -530,7 +544,11 @@ impl RenderOnce for SearchField {
                 Some(w) => d.w(w),
                 None => d.w_full(),
             })
-            .h(metrics::SEARCH)
+            .h(if self.small {
+                super::tokens::height::SM
+            } else {
+                metrics::SEARCH
+            })
             .pl(metrics::FIELD_PAD)
             .pr(metrics::FIELD_PAD)
             .rounded_full()
@@ -541,7 +559,8 @@ impl RenderOnce for SearchField {
             .flex()
             .items_center()
             .gap(space::S8)
-            .cursor_text()
+            .when(self.disabled, |d| d.opacity(0.5))
+            .when(!self.disabled, |d| d.cursor_text())
             .child(symbol(
                 Sf::Search,
                 icon::MD,
@@ -558,6 +577,7 @@ impl RenderOnce for SearchField {
                         Input::new(&self.state)
                             .appearance(false)
                             .cleanable(self.clearable)
+                            .disabled(self.disabled)
                             .with_size(gpui_component::Size::Small)
                             .px_0()
                             .py_0()

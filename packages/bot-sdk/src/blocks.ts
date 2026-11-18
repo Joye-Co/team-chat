@@ -71,17 +71,27 @@ export function checkDiagram(source: string): DiagramCheck {
 
 export const blocks = {
   // --- 2.0 leaves ------------------------------------------------------------
+  /** A paragraph of text. */
   text: (id: string, text: string): CardV2Block => ({ type: "text", id, text }),
+  /** Label and value pairs. */
   fields: (o: Input<"fields">): CardV2Block => ({ type: "fields", ...o }),
+  /** A table: `columns` and `rows` of cells; `rowKeys` give rows stable ids for refs and row events. */
   table: (o: Input<"table">): CardV2Block => ({ type: "table", ...o }),
+  /** A list of items. */
   list: (o: Input<"list">): CardV2Block => ({ type: "list", ...o }),
+  /** A progress bar: `value` from 0 to 1. */
   progress: (o: Input<"progress">): CardV2Block => ({ type: "progress", ...o }),
+  /** A block of code. */
   code: (o: Input<"code">): CardV2Block => ({ type: "code", ...o }),
+  /** A picture from an uploaded file of the group. */
   image: (o: Input<"image">): CardV2Block => ({ type: "image", ...o }),
+  /** A line between blocks. */
   divider: (id: string): CardV2Block => ({ type: "divider", id }),
+  /** A labelled link to its `target`. */
   link: (o: Input<"link">): CardV2Block => ({ type: "link", ...o }),
   /** CARD21 `choice` (wire name `decision`): single, or `multiple` with min/max, "other", recommended options. */
   decision: (o: Input<"decision">): CardV2Block => ({ type: "decision", ...o }),
+  /** One input of an ask (`kind`: text, textarea, number, select, date, switch, chips, slider); its value is in the answer's `inputs[id]`. */
   input: (o: Input<"input">): CardV2Block => ({ type: "input", ...o }),
   /** An input of kind `slider` (2.1): `min` < `max`, optional `step` and `unit`. */
   slider: (o: Omit<Input<"input">, "kind" | "min" | "max"> & { min: number; max: number }): CardV2Block => ({
@@ -89,25 +99,40 @@ export const blocks = {
     kind: "slider",
     ...o,
   }),
+  /** Markdown the answerer may edit before the submit; the edited text is in the answer's `editedValues[id]`. */
   draft: (o: Input<"draft">): CardV2Block => ({ type: "draft", ...o }),
+  /** A run's plan: live with `runId`; `items` is the snapshot for readers without the run. */
   plan: (o: Input<"plan">): CardV2Block => ({ type: "plan", ...o }),
+  /** One number with its label, `unit` and the change against the last value (`delta`, `better`). */
   metric: (o: Input<"metric">): CardV2Block => ({ type: "metric", ...o }),
+  /** A chart (`kind`): `x` labels and 1 or more `series` of values. */
   chart: (o: Input<"chart">): CardV2Block => ({ type: "chart", ...o }),
+  /** A unified diff of one file. */
   diff: (o: Input<"diff">): CardV2Block => ({ type: "diff", ...o }),
+  /** One line of proof: a label with a state, and a file, link, 产出, test counts or a recording. */
   evidence: (o: Input<"evidence">): CardV2Block => ({ type: "evidence", ...o }),
+  /** A labelled reference to a `target` (a pull request, for example). */
   ref: (o: Input<"ref">): CardV2Block => ({ type: "ref", ...o }),
 
   // --- 2.1 choice variants -----------------------------------------------------
+  /** Put 2–8 items in order; `rankTop` takes only the first n as the answer. */
   rank: (o: InputFb<"rank">): CardV2Block => ({ type: "rank", ...fb(o, o.label) }),
+  /** 1 to 5 stars (`max` is always 5). */
   rating: (o: Omit<InputFb<"rating">, "max">): CardV2Block => ({ type: "rating", max: 5, ...fb(o, o.label) }),
+  /** A whole number from `min` to `max`, with optional words at the two ends. */
   scale: (o: InputFb<"scale">): CardV2Block => ({ type: "scale", ...fb(o, o.label) }),
+  /** A yes or no question with its own two labels. */
   confirm: (o: InputFb<"confirm">): CardV2Block => ({ type: "confirm", ...fb(o, `${o.label}（${o.yes} / ${o.no}）`) }),
+  /** Choose between 2–4 pictures (uploaded files). */
   imageChoice: (o: InputFb<"imageChoice">): CardV2Block => ({
     type: "imageChoice",
     ...fb(o, `${o.label}：${o.options.map((x) => x.label).join(" / ")}`),
   }),
+  /** One pick per row from the same columns. */
   matrix: (o: InputFb<"matrix">): CardV2Block => ({ type: "matrix", ...fb(o, o.label) }),
+  /** Pick from up to 12 time slots, shown in the time zone `tz`. */
   slots: (o: InputFb<"slots">): CardV2Block => ({ type: "slots", ...fb(o, o.label) }),
+  /** A vote of the group (or of `voters`) on 2–6 options until `closesAt`. */
   poll: (o: InputFb<"poll">): CardV2Block => ({ type: "poll", ...fb(o, `${o.label}：${o.options.map((x) => x.label).join(" / ")}`) }),
 
   // --- 2.1 other leaves --------------------------------------------------------
@@ -130,12 +155,15 @@ export const blocks = {
   embed: (o: InputFb<"embed">): CardV2Block => ({ type: "embed", ...fb(o, o.title ?? "页面") }),
 
   // --- 2.1 containers (children: blocks or ids) ---------------------------------
+  /** Children one under the other. */
   stack: (id: string, children: Child[]): CardV2Block => nest({ type: "stack", id, children: ids(children) }, children),
   /** 2–3 columns side by side; `weights` (1..3 each) are the only proportion hint. Folds to a stack when narrow. */
   row: (id: string, children: Child[], o: { weights?: (1 | 2 | 3)[]; emphasis?: "high" | "low" } = {}): CardV2Block =>
     nest({ type: "row", id, children: ids(children), ...o }, children),
+  /** A titled section, `collapsible` when asked. */
   group: (o: Omit<Input<"group">, "children" | "blocks"> & { children: Child[] }): CardV2Block =>
     nest({ ...o, type: "group", children: ids(o.children) }, o.children),
+  /** Up to 4 options side by side (pros, cons, own children) to pick one from. */
   compare: (
     o: Omit<Input<"compare">, "options"> & {
       options: (Omit<BlockOf<"compare">["options"][number], "children"> & { children?: Child[] })[];
@@ -146,6 +174,7 @@ export const blocks = {
     const text = o.question ?? o.options.map((x) => x.label).join(" / ");
     return nest({ ...o, fallbackText: o.fallbackText ?? cut(text || "比较", 300), type: "compare", options } as CardV2Block, all);
   },
+  /** Up to 5 tabs, each with its own children; `selected` is the tab shown first. */
   tabs: (o: Omit<Input<"tabs">, "tabs"> & { tabs: { id: string; label: string; children: Child[] }[] }): CardV2Block => {
     const all: Child[] = o.tabs.flatMap((t) => t.children);
     return nest({ ...o, type: "tabs", tabs: o.tabs.map((t) => ({ ...t, children: ids(t.children) })) }, all);

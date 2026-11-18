@@ -310,6 +310,13 @@ pub const SCENES: &[Scene] = &[
         open: settings_scenes::open_bot_dialog_runner,
     },
     Scene {
+        name: "settings-add-bot-no-computer",
+        about: "Settings: the add-bot dialog when no computer is connected: one line says so, with a button to the 电脑 page",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_bot_dialog_no_computer,
+    },
+    Scene {
         name: "settings-add-bot-new",
         about: "Settings: the add-bot dialog with a name outside the roster: the first free character is selected",
         start: Start::SignedIn,
@@ -359,13 +366,6 @@ pub const SCENES: &[Scene] = &[
         open: settings_scenes::open_machine_parallel,
     },
     Scene {
-        name: "settings-members",
-        about: "Settings: 成员 with the owner actions",
-        start: Start::SignedIn,
-        setup: |_, _| {},
-        open: settings_scenes::open_members,
-    },
-    Scene {
         name: "settings-machines",
         about: "Settings: 机器 and their health",
         start: Start::SignedIn,
@@ -374,7 +374,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "settings-notifications",
-        about: "Settings: 通知 per 群 and followed 话题",
+        about: "Settings: 通知, 提醒我 and 勿扰",
         start: Start::SignedIn,
         setup: |_, _| {},
         open: settings_scenes::open_notifications,
@@ -415,15 +415,8 @@ pub const SCENES: &[Scene] = &[
         open: settings_scenes::open_ai_service_failed,
     },
     Scene {
-        name: "settings-members-end",
-        about: "Settings: 成员 scrolled to the end, with the footnote under the table",
-        start: Start::SignedIn,
-        setup: |_, _| {},
-        open: settings_scenes::open_members_end,
-    },
-    Scene {
         name: "settings-notifications-end",
-        about: "Settings: 通知 scrolled to the end: the 私聊 table and 关注的话题",
+        about: "Settings: 通知 with 每日摘要 and 勿扰 turned on",
         start: Start::SignedIn,
         setup: |_, _| {},
         open: settings_scenes::open_notifications_end,
@@ -624,7 +617,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "group-menu",
-        about: "The menu of a 群 row in the sidebar (right-click): 静音, 提醒 ▸, 重命名群…, 添加成员, 离开群",
+        about: "The menu of a 群 row in the sidebar (right-click): 静音, 提醒 ▸, 重命名…, 添加成员, 离开群",
         start: Start::SignedIn,
         setup: open_first_topic,
         open: crate::views::nav::selftest::scenes::group_menu,
@@ -771,8 +764,8 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "panel-plan",
-        about: "The side panel of the sample-card 话题: a plan list from a card",
-        start: Start::SignedIn,
+        about: "The side panel of a 话题 whose run has a plan: the 计划 section with its progress and steps",
+        start: Start::V2,
         setup: crate::views::process::preview::open_plan_details,
         open: open_main,
     },
@@ -1063,7 +1056,7 @@ pub fn all() -> Vec<&'static Scene> {
 const CORE_SCENES: &[Scene] = &[
     Scene {
         name: "topic-core",
-        about: "话题 page on the real provider and a seeded cache: 改动 from the PR link, the pinned review, 产出 with its preview, 用到的决定 and 用时和成本",
+        about: "话题 page on the real provider and a seeded cache: 改动 from the PR link, the pinned review, 产出 with its preview, 用到的决定 and 用时和花费",
         start: Start::Core,
         setup: |s, cx| {
             v2_open_topic(

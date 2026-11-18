@@ -69,11 +69,16 @@ pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("up", SelectPrevious, Some(CONTEXT)),
         KeyBinding::new("down", SelectNext, Some(CONTEXT)),
-        KeyBinding::new("ctrl-p", SelectPrevious, Some(CONTEXT)),
-        KeyBinding::new("ctrl-n", SelectNext, Some(CONTEXT)),
         KeyBinding::new("enter", OpenSelected, Some(CONTEXT)),
         // Inside the switcher Cmd+F scopes it to the current 群.
         KeyBinding::new(crate::secondary!("f"), ScopeToGroup, Some(CONTEXT)),
+    ]);
+    // ⌃P and ⌃N move a line on the Mac only, as in the ask palette (`views::ask`): on
+    // Windows Ctrl is the command key, Ctrl+N is 新话题 and Ctrl+P prints.
+    #[cfg(target_os = "macos")]
+    cx.bind_keys([
+        KeyBinding::new("ctrl-p", SelectPrevious, Some(CONTEXT)),
+        KeyBinding::new("ctrl-n", SelectNext, Some(CONTEXT)),
     ]);
 }
 
@@ -607,7 +612,7 @@ impl Switcher {
         let (time, status) = match &e.topic {
             Some(t) => (
                 Some(palette::time_text(t.last_activity_at)),
-                palette::topic_status(self.services.provider.as_ref(), me.as_deref(), t),
+                palette::topic_status(self.services.provider.as_ref(), me.as_deref(), t, active),
             ),
             None => (None, None),
         };
@@ -1039,7 +1044,7 @@ pub mod palette {
             .overflow_hidden()
             .whitespace_nowrap()
             .text_ellipsis()
-            .when(active, |d| d.font_weight(gpui::FontWeight::MEDIUM))
+            .when(active, |d| d.font_weight(crate::theme::MEDIUM_WEIGHT))
             .tooltip(move |window, cx| {
                 gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
             })
@@ -1128,6 +1133,7 @@ pub mod palette {
         p: &dyn ChatProvider,
         me: Option<&str>,
         topic: &Topic,
+        active: bool,
     ) -> Option<AnyElement> {
         // The one state mapping of a 话题 (§2.12, `topic_state`) in the
         // sidebar's words: 等你审 / 等你回答, 在做 n/m, 正在合并, 失败, 已暂停,
@@ -1145,6 +1151,8 @@ pub mod palette {
         Some(
             StatusBadge::new(badge, text)
                 .max_w(STATUS_MAX)
+                // The highlighted row has the badge's own fill.
+                .on_fill(active)
                 .into_any_element(),
         )
     }
@@ -1288,12 +1296,16 @@ pub mod palette {
                 .mx(spot::INSET)
                 .flex()
                 .items_center()
-                .child(page_alert(
-                    id,
-                    AlertKind::Error,
-                    title,
-                    Some(description.into()),
-                    retry,
+                // The palette is a card surface: the alert takes its fill.
+                .child(crate::ui::native::page::on_card(
+                    page_alert(
+                        id,
+                        AlertKind::Error,
+                        title,
+                        Some(description.into()),
+                        retry,
+                        cx,
+                    ),
                     cx,
                 ))
                 .into_any_element(),

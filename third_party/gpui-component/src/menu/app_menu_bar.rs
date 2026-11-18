@@ -117,6 +117,27 @@ impl AppMenuBar {
     fn has_activated_menu(&self) -> bool {
         self.selected_index.is_some()
     }
+
+    /// Whether one of the menus is open.
+    pub fn is_activated(&self) -> bool {
+        self.has_activated_menu()
+    }
+
+    /// Opens the menu at `ix` without the mouse (the key that moves focus to the menu
+    /// bar: F10 or Alt on Windows). The popup takes the focus, left and right move
+    /// between the menus, and Escape gives the focus back to where it was.
+    pub fn activate(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if ix < self.menus.len() {
+            self.set_selected_index(Some(ix), window, cx);
+        }
+    }
+
+    /// Closes the open menu, if any, and gives the focus back to where it was.
+    pub fn deactivate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.has_activated_menu() {
+            self.set_selected_index(None, window, cx);
+        }
+    }
 }
 
 impl Render for AppMenuBar {

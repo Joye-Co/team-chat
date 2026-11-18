@@ -61,15 +61,25 @@ pub fn install(cx: &mut App) {
         KeyBinding::new("shift-f3", FindPrevious, None),
     ]);
     cx.on_action(|_: &FindInTopic, cx| {
-        crate::views::nav::in_main_window(cx, |window, cx| {
+        crate::views::nav::in_shown_main_window(cx, |window, cx| {
             use gpui_component::WindowExt as _;
             if window.has_active_dialog(cx) {
                 return;
             }
             let services = crate::views::nav::services_of(cx);
-            let on_topic = services.nav.read(cx).page() == crate::app::Page::Topic;
+            let page = services.nav.read(cx).page();
+            // The 产出 list has its own search field in the toolbar: ⌘F
+            // goes there, as it goes to the find bar in a 话题.
+            if page == crate::app::Page::Artifacts
+                && let Some(root) = crate::app::root_view(window, cx)
+            {
+                let artifacts = root.read(cx).pages().artifact.clone();
+                if artifacts.update(cx, |list, cx| list.focus_search(window, cx)) {
+                    return;
+                }
+            }
             match timeline_of(window, cx) {
-                Some(timeline) if on_topic => {
+                Some(timeline) if page == crate::app::Page::Topic => {
                     timeline.update(cx, |this, cx| this.open_find(window, cx))
                 }
                 _ => crate::views::search::open(services, false, "", window, cx),
@@ -552,8 +562,8 @@ impl TimelineView {
     /// count, the previous and next match and 完成 on one center line.
     pub(super) fn render_find_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         use crate::ui::native::{
-            IconSize, NativeType as _, PushSize, PushStyle, SearchField, disabled_push,
-            icon_button_sym, native_colors, push_button, tokens,
+            IconSize, NativeType as _, SearchField, disabled_push, icon_button_sym, native_colors,
+            tokens,
         };
         let find = self.find.as_ref()?;
         let n = native_colors(cx);
@@ -604,7 +614,10 @@ impl TimelineView {
                     }
                 }))
                 .child(
+                    // The sm field: the bar is h40 (§2.17), and the h32 field's
+                    // focus ring would touch the lines above and below it.
                     SearchField::new("find-field", &find.input)
+                        .small()
                         .width(tokens::size::FIND_FIELD_WIDTH),
                 )
                 .children(count.map(|count| {
@@ -624,12 +637,14 @@ impl TimelineView {
                     step("find-next", Sym::ChevronDown, t::FIND_NEXT, cx)
                         .on_click(cx.listener(|this, _, _, cx| this.step_find(true, cx))),
                 )
+                // §2.17: close is the 28 ghost icon button; 完成 is the word of
+                // a done 话题 and never a button of this bar.
                 .child(
-                    push_button(
+                    icon_button_sym(
                         "find-done",
-                        t::FIND_DONE,
-                        PushStyle::Outline,
-                        PushSize::Regular,
+                        Sym::Close,
+                        crate::copy::common::CLOSE,
+                        IconSize::Regular,
                         cx,
                     )
                     .on_click(cx.listener(|this, _, window, cx| this.close_find(window, cx))),

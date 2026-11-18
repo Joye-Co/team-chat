@@ -1,5 +1,5 @@
 //! The 记一条 and 编辑 sheet of 记得的事 and 团队约定 (NATIVE.md §7.1, COMPLETENESS §2.9): 类型
-//! (a pop-up), 内容 (a textarea row) and 什么时候用 (one line). The default button is off
+//! (a pop-up), 内容 (a textarea row) and 适用 (one line). The default button is off
 //! while nothing can be saved, shows its spinner while the server answers, and a refusal
 //! opens an alert while the sheet stays open.
 

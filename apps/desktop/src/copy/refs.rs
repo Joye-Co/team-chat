@@ -12,11 +12,8 @@ crate::copy! {
     REPLACE_OLDEST = "换掉最早的一处",
     UPDATED = "已更新",
     DELETED = "原消息已撤回",
-    PUT_IN_TOPIC = "已放进话题的输入框",
-    GO_ASK = "去提问",
     REMOVE = "去掉这处引用",
     CITED = "引用了 {n} 处",
-    CITED_HERE = "已引用",
     // Part labels (REFS §A2.2). `{value}` is the text the person sees (number and unit).
     PART_CELL = "{row} · {col} {value}",
     PART_ROW = "{row} · 整行",

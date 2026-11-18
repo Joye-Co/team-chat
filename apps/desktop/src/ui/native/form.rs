@@ -9,7 +9,7 @@ use gpui::{
 };
 use gpui_component::input::{InputEvent, InputState};
 
-use super::tokens::{NativeType as _, metrics, native_colors};
+use super::tokens::{NativeType as _, height, metrics, native_colors, space};
 
 /// A grouped form section (§8): optional header (13 pt semibold `label`,
 /// 6 pt above), rows on a `group` fill with radius 10, an optional footer
@@ -83,7 +83,6 @@ impl RenderOnce for GroupedForm {
                 d.child(
                     div()
                         .pb(metrics::GROUP_HEADER_GAP)
-                        .px(px(2.))
                         .n_headline()
                         .text_color(k.label)
                         .child(h),
@@ -94,7 +93,6 @@ impl RenderOnce for GroupedForm {
                 d.child(
                     div()
                         .pt(metrics::GROUP_HEADER_GAP)
-                        .px(px(2.))
                         .n_subheadline()
                         .text_color(k.secondary)
                         .child(f),
@@ -170,14 +168,21 @@ impl FormRow {
 impl RenderOnce for FormRow {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = native_colors(cx);
+        // A two-line row (2.8): h 64, label over description with gap 4, py 12.
+        let two = self.detail.is_some();
+        let min_h = if two {
+            self.min_height.max(height::FORM_ROW_TWO)
+        } else {
+            self.min_height
+        };
         div()
             .w_full()
-            .min_h(self.min_height)
+            .min_h(min_h)
             .px(metrics::FORM_ROW_INSET)
-            .py(px(6.))
+            .py(if two { space::S12 } else { space::S6 })
             .flex()
             .items_center()
-            .gap(px(10.))
+            .gap(space::S12)
             .children(self.leading)
             .child(
                 div()
@@ -185,6 +190,7 @@ impl RenderOnce for FormRow {
                     .min_w(px(0.))
                     .flex()
                     .flex_col()
+                    .gap(space::S4)
                     .child(TruncText::new(self.label).n_body().text_color(k.label))
                     .when_some(self.detail, |d, t| {
                         d.child(TruncText::new(t).n_subheadline().text_color(k.secondary))

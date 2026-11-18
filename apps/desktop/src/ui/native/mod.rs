@@ -47,16 +47,16 @@ pub use badge::{
 #[allow(unused_imports)]
 pub use blocks::{
     Card, Column, LIST_TITLE_INSET, ListRow, SectionTitle, card_surface, description_row,
-    group_label, list_frame, media_box, separator, table,
+    group_label, list_frame, media_box, panel_card_surface, separator, table,
 };
 #[allow(unused_imports)]
 pub use buttons::{
     Glyph, IconSize, PushSize, PushStyle, ToolbarItemKind, borderless_button, borderless_text,
     borderless_variant, chip_button, disabled_push, ghost_button, group_row_button, icon_button,
     icon_button_bare, icon_button_styled, icon_button_sym, inline_popup, loading_push,
-    popup_button, pull_down, push_button, row_button, screen_button, select_button, square_button,
-    square_pair, tile_button, toolbar_item, toolbar_item_sym, toolbar_labeled_item, toolbar_tab,
-    waiting_push,
+    over_image_button, popup_button, pull_down, push_button, row_button, screen_button,
+    select_button, square_button, square_pair, tile_button, toolbar_item, toolbar_item_sym,
+    toolbar_labeled_item, toolbar_tab, waiting_push,
 };
 #[allow(unused_imports)]
 pub use code_input::{CodeInput, CodeInputEvent, code_input_width};

@@ -32,6 +32,40 @@ fn open_with(
     Ok(handle)
 }
 
+/// 团队管理 at `page`, for a scene of a sheet that page opens (邀请成员, 添加 AI 成员, …):
+/// the forms and their scenes live in `views/settings`, the page that opens them is here.
+pub fn open_for_scene(
+    services: Services,
+    page: AdminPage,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open(services, page, cx)
+}
+
+/// 团队管理 › 团队约定 with its board and the page's scroll, for the 团队约定 scenes.
+pub fn open_memory_for_scene(
+    services: Services,
+    cx: &mut App,
+) -> Result<
+    (
+        AnyWindowHandle,
+        gpui::Entity<crate::views::memory::MemoryBoard>,
+        gpui::ScrollHandle,
+    ),
+    String,
+> {
+    let (handle, view) = super::open_window(services, false, cx)?;
+    let parts = handle
+        .update(cx, |_, window, cx| {
+            view.update(cx, |v, cx| {
+                v.open_page(AdminPage::Memory, window, cx);
+                (v.memory.clone(), v.scroll.clone())
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    Ok((handle, parts.0, parts.1))
+}
+
 fn open_home_month(
     services: Services,
     _content: Size<Pixels>,
@@ -246,6 +280,131 @@ opener!(open_accounts, AdminPage::Accounts);
 opener!(open_keys, AdminPage::Keys);
 opener!(open_rules, AdminPage::Rules);
 
+/// Runs `then` on the view once the page's first data came in.
+fn after_load(
+    handle: AnyWindowHandle,
+    view: gpui::Entity<AdminView>,
+    cx: &mut App,
+    then: impl FnOnce(gpui::Entity<AdminView>, &mut gpui::Window, &mut App) + 'static,
+) {
+    cx.spawn(async move |cx| {
+        cx.background_executor()
+            .timer(std::time::Duration::from_millis(200))
+            .await;
+        let _ = handle.update(cx, |_, window, cx| then(view, window, cx));
+    })
+    .detach();
+}
+
+fn open_key_delete(
+    services: Services,
+    _content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = super::open_window(services, false, cx)?;
+    handle
+        .update(cx, |_, window, cx| {
+            view.update(cx, |v, cx| v.open_page(AdminPage::Keys, window, cx))
+        })
+        .map_err(|e| e.to_string())?;
+    // The keys come in after the machine list: wait for them (at most 3 s).
+    cx.spawn(async move |cx| {
+        for _ in 0..60 {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(50))
+                .await;
+            let name = view.read_with(cx, |v, _| {
+                v.acct
+                    .secrets
+                    .as_ref()
+                    .and_then(|s| s.secrets.first())
+                    .map(|s| s.name.clone())
+            });
+            if let Some(name) = name {
+                let _ = handle.update(cx, |_, window, cx| {
+                    super::accounts::confirm_delete_key(view.clone(), name, window, cx)
+                });
+                return;
+            }
+        }
+    })
+    .detach();
+    Ok(handle)
+}
+
+fn open_member_deactivate(
+    services: Services,
+    _content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = super::open_window(services.clone(), false, cx)?;
+    handle
+        .update(cx, |_, window, cx| {
+            view.update(cx, |v, cx| v.open_page(AdminPage::Members, window, cx))
+        })
+        .map_err(|e| e.to_string())?;
+    after_load(handle, view, cx, move |view, window, cx| {
+        let bot = services
+            .provider
+            .members()
+            .into_iter()
+            .find(|m| m.is_bot() && !m.deactivated);
+        if let Some(bot) = bot {
+            super::team::confirm_deactivate(services, bot.id, &bot.name, view, window, cx);
+        }
+    });
+    Ok(handle)
+}
+
+fn open_usage_failed(
+    services: Services,
+    _content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = super::open_window(services, false, cx)?;
+    handle
+        .update(cx, |_, window, cx| {
+            view.update(cx, |v, cx| v.open_page(AdminPage::Usage, window, cx))
+        })
+        .map_err(|e| e.to_string())?;
+    after_load(handle, view, cx, |view, _, cx| {
+        view.update(cx, |v, cx| {
+            v.usage.data = None;
+            v.usage.error = Some(offline_text());
+            cx.notify();
+        })
+    });
+    Ok(handle)
+}
+
+fn open_members_failed(
+    services: Services,
+    _content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = super::open_window(services, false, cx)?;
+    handle
+        .update(cx, |_, window, cx| {
+            view.update(cx, |v, cx| v.open_page(AdminPage::Members, window, cx))
+        })
+        .map_err(|e| e.to_string())?;
+    after_load(handle, view, cx, |view, _, cx| {
+        view.update(cx, |v, cx| {
+            v.team.error = Some(offline_text());
+            v.team.action_error =
+                Some((crate::copy::admin::TEAM_DEACTIVATE_FAILED, offline_text()));
+            v.team.action_retry = Some(("m-jojo".into(), true));
+            cx.notify();
+        })
+    });
+    Ok(handle)
+}
+
+/// The words of a request that failed offline.
+fn offline_text() -> String {
+    crate::views::settings::widgets::error_text(crate::data::AdminError::Offline).to_string()
+}
+
 /// The 身份 scenes (design-roles 3.9): 成员 as each viewer, with 陈晨 (or me, alone) selected so
 /// the inspector shows the 身份 line.
 fn open_roles(
@@ -293,7 +452,11 @@ macro_rules! scene {
             name: $name,
             about: $about,
             start: Start::SignedIn,
-            setup: |_, _| {},
+            // The GitHub shape is a process-wide switch: every scene sets the one it shows,
+            // or the shape of an earlier scene leaks into the next theme's pass.
+            setup: |_, _| {
+                crate::fake::admin::MONITOR_GITHUB.store(0, std::sync::atomic::Ordering::Relaxed)
+            },
             open: $open,
         }
     };
@@ -462,5 +625,25 @@ pub const SCENES: &[Scene] = &[
         "admin-keys",
         "团队管理 › API 密钥 of the Mac mini",
         open_keys
+    ),
+    scene!(
+        "admin-key-delete",
+        "团队管理 › API 密钥 with the alert before deleting the first key",
+        open_key_delete
+    ),
+    scene!(
+        "admin-member-deactivate",
+        "团队管理 › 成员 with the alert before 停用 of the first AI member",
+        open_member_deactivate
+    ),
+    scene!(
+        "admin-usage-failed",
+        "团队管理 › 用量 that did not load: the Alert with 重试",
+        open_usage_failed
+    ),
+    scene!(
+        "admin-members-failed",
+        "团队管理 › 成员 whose details did not load and a 停用 that was refused: both Alerts",
+        open_members_failed
     ),
 ];

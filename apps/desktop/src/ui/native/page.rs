@@ -116,7 +116,7 @@ pub fn count_pill(n: usize, cx: &App) -> gpui::Div {
         .items_center()
         .justify_center()
         .n_callout()
-        .font_weight(gpui::FontWeight::MEDIUM)
+        .font_weight(crate::theme::MEDIUM_WEIGHT)
         .n_figures()
         .text_color(k.label)
         .child(crate::ui::chip::CountBadge::cap(n as u32))
@@ -169,14 +169,30 @@ pub fn section_header(
 /// clipped, and no border: the section header groups the rows, and a row
 /// shows itself with its hover fill (owner decision, v18).
 pub fn frame(cx: &App) -> gpui::Div {
-    let k = native_colors(cx);
+    frame_filled(native_colors(cx).content)
+}
+
+/// A [`frame`] inside a card (§2.4): it takes the card's fill, so the rows
+/// do not read as a hole cut into the card in dark mode.
+pub fn frame_on_card(cx: &App) -> gpui::Div {
+    frame_filled(native_colors(cx).sheet)
+}
+
+fn frame_filled(fill: gpui::Hsla) -> gpui::Div {
     div()
         .flex_none()
         .flex()
         .flex_col()
         .rounded(m::FRAME_RADIUS)
-        .bg(k.content)
+        .bg(fill)
         .overflow_hidden()
+}
+
+/// A [`frame`] or a [`page_alert`] nested in a [`card`]: it takes the card's
+/// fill instead of the page background, which in dark mode is darker than
+/// the card and made the nested block a black well.
+pub fn on_card<E: gpui::Styled>(el: E, cx: &App) -> E {
+    el.bg(native_colors(cx).sheet)
 }
 
 /// A card (§2.4): radius 14, 1 px border, card fill, shadow sm.
@@ -293,7 +309,7 @@ impl PageRow {
                             .child(
                                 TruncText::new(self.title)
                                     .n_body()
-                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .font_weight(crate::theme::MEDIUM_WEIGHT)
                                     .text_color(k.label),
                             )
                             .children(self.title_trailing),
@@ -363,7 +379,7 @@ pub fn list_footer(
         .id(id.into())
         .flex_none()
         .h(m::FOOTER_ROW)
-        .px(px(16.))
+        .px(m::ROW_PAD)
         .flex()
         .items_center()
         .justify_between()
@@ -450,7 +466,7 @@ pub fn table_footer(id: &str, count: impl Into<SharedString>, pager: Pager, cx: 
         .child(
             div()
                 .n_body()
-                .font_weight(gpui::FontWeight::MEDIUM)
+                .font_weight(crate::theme::MEDIUM_WEIGHT)
                 .text_color(k.label)
                 .whitespace_nowrap()
                 .child(crate::copy::kit::TABLE_PER_PAGE),
@@ -508,7 +524,7 @@ pub fn table_footer(id: &str, count: impl Into<SharedString>, pager: Pager, cx: 
                     div()
                         .n_body()
                         .n_figures()
-                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .font_weight(crate::theme::MEDIUM_WEIGHT)
                         .text_color(k.label)
                         .child(label),
                 )
@@ -620,7 +636,7 @@ impl Status {
             Status::Online => (None, k.green),
             Status::Offline => (None, k.secondary),
             Status::Deactivated => (Some(Sym::Stopped), k.secondary),
-            Status::Paused => (Some(Sym::Pause), k.secondary),
+            Status::Paused => (Some(Sym::Paused), k.secondary),
             Status::Merging => (Some(Sym::Spinner), k.blue),
             Status::Waiting => (Some(Sym::Waiting), k.secondary),
         }
@@ -630,7 +646,18 @@ impl Status {
 /// A StatusBadge (§2.12): an outline badge, h22, 12 medium text in
 /// `label`, with the state's 12 icon (or an 8 dot for presence) in its
 /// color. Built on gpui-component's `Tag`.
-pub fn status_badge(status: Status, text: impl Into<SharedString>, _cx: &App) -> AnyElement {
+pub fn status_badge(status: Status, text: impl Into<SharedString>, cx: &App) -> AnyElement {
+    status_badge_on(status, text, false, cx)
+}
+
+/// [`status_badge`] for a row that may sit on a muted surface (a selected
+/// row, a GroupBox): `on_fill` gives the badge a fill that shows there.
+pub fn status_badge_on(
+    status: Status,
+    text: impl Into<SharedString>,
+    on_fill: bool,
+    _cx: &App,
+) -> AnyElement {
     // COMPLETENESS.md §2.12: the one StatusBadge of the kit.
     use super::badge::{BadgeState as B, StatusBadge};
     let state = match status {
@@ -648,7 +675,9 @@ pub fn status_badge(status: Status, text: impl Into<SharedString>, _cx: &App) ->
         Status::Merging => B::Merging,
         Status::Waiting => B::Quiet,
     };
-    StatusBadge::new(state, text).into_any_element()
+    StatusBadge::new(state, text)
+        .on_fill(on_fill)
+        .into_any_element()
 }
 
 /// An outline badge with text only (a type, `v3`): h22, 12 medium.
@@ -662,7 +691,7 @@ pub fn outline_badge(text: impl Into<SharedString>, cx: &App) -> AnyElement {
         .px(px(8.))
         .py(px(0.))
         .n_callout()
-        .font_weight(gpui::FontWeight::MEDIUM)
+        .font_weight(crate::theme::MEDIUM_WEIGHT)
         .text_color(k.label)
         .whitespace_nowrap()
         .child(text.into())
@@ -730,7 +759,7 @@ pub fn page_alert(
                 .child(
                     div()
                         .n_body()
-                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .font_weight(crate::theme::MEDIUM_WEIGHT)
                         // Owner decision v14 (T1-11): neutral title; the
                         // state color is on the icon and the border.
                         .text_color(k.label)
@@ -785,7 +814,7 @@ pub fn page_empty(
                         .child(
                             div()
                                 .n_title2()
-                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .font_weight(crate::theme::MEDIUM_WEIGHT)
                                 .text_color(k.label)
                                 .child(title.into()),
                         )
@@ -889,17 +918,6 @@ pub fn skeleton_rows(id: &str, kind: SkeletonKind, n: usize, cx: &App) -> AnyEle
                         .child(Bone::new().h(px(12.)).w(gpui::relative(w * 0.6))),
                 )
                 .child(Bone::new().h(px(12.)).w(px(40.)))
-                .when(i + 1 < n, |d| {
-                    d.child(
-                        div()
-                            .absolute()
-                            .bottom_0()
-                            .left(m::ROW_PAD + m::MEDIA + px(12.))
-                            .right(px(0.))
-                            .h(px(1.))
-                            .bg(k.separator),
-                    )
-                })
                 .into_any_element(),
             SkeletonKind::Compact => div()
                 .id(row_id)
@@ -1057,7 +1075,9 @@ pub fn load_failed(id: &str, services: &Services, cx: &App) -> AnyElement {
     let services = services.clone();
     page_alert(
         SharedString::from(format!("{id}-failed")),
-        AlertKind::Error,
+        // The cause is the connection, the same one the sidebar's offline
+        // Alert names: one severity for one cause.
+        AlertKind::Warning,
         cc::PAGE_LOAD_FAILED,
         Some(cc::PAGE_LOAD_FAILED_LINE.into()),
         Some(
@@ -1292,22 +1312,7 @@ pub fn table(
             .when(text, |d| d.overflow_hidden())
             .whitespace_nowrap()
     };
-    let header = div()
-        .flex_none()
-        .h(px(40.))
-        .flex()
-        .items_center()
-        .bg(k.fill)
-        .border_b_1()
-        .border_color(k.separator)
-        .children(cols.iter().enumerate().map(|(i, c)| {
-            // A page table's header is 14 medium foreground (§2.7).
-            cell(i, c.right, c.width)
-                .n_body()
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(k.label)
-                .child(c.header.clone())
-        }));
+    let header = table_header(cols, cx);
     let total = rows.len();
     let body = rows.into_iter().enumerate().map(|(ri, (cells, click))| {
         div()
@@ -1335,15 +1340,60 @@ pub fn table(
     div().flex().flex_col().child(header).children(body)
 }
 
-/// The loading shape of a [`table`] (§2.14): its frame, the h40 header with
-/// one bar per column, and `n` (3 to 6) h48 rows with one bar per column at
-/// the column's width and alignment.
+/// The header row of a [`table`] (§2.7): h40 on the muted fill, 14 medium labels,
+/// a line under it. Its top corners follow the frame's radius: the frame clips its
+/// children to its box, not to its corners, and draws no border that would hide a
+/// square fill.
+fn table_header(cols: &[Col], cx: &App) -> gpui::Div {
+    let k = native_colors(cx);
+    let n = cols.len();
+    div()
+        .flex_none()
+        .h(super::tokens::height::TABLE_HEAD)
+        .flex()
+        .items_center()
+        .bg(k.fill)
+        .rounded_t(m::FRAME_RADIUS)
+        .border_b_1()
+        .border_color(k.separator)
+        .children(cols.iter().enumerate().map(|(i, c)| {
+            div()
+                .min_w(px(0.))
+                .when_some(c.width, |d, w| d.flex_none().w(w))
+                .when(c.width.is_none(), |d| d.flex_1())
+                .pl(if i == 0 { px(16.) } else { px(12.) })
+                .pr(if i + 1 == n { px(16.) } else { px(0.) })
+                .flex()
+                .items_center()
+                .when(c.right, |d| d.justify_end())
+                .when(!c.header.is_empty(), |d| d.overflow_hidden())
+                .whitespace_nowrap()
+                .n_body()
+                .font_weight(crate::theme::MEDIUM_WEIGHT)
+                .text_color(k.label)
+                .child(c.header.clone())
+        }))
+}
+
+/// The loading shape of a [`table`] (§2.14): its frame, the real header (the
+/// column names are known before the rows are), and `n` (3 to 6) h48 rows with
+/// one bar per column at the column's width and alignment.
 pub fn skeleton_table(id: &str, cols: &[Col], n: usize, cx: &App) -> AnyElement {
+    skeleton_table_in(frame(cx), id, cols, n, cx)
+}
+
+/// A [`skeleton_table`] inside a card (§2.4): on the card's fill, as the
+/// loaded table in a [`frame_on_card`].
+pub fn skeleton_table_on_card(id: &str, cols: &[Col], n: usize, cx: &App) -> AnyElement {
+    skeleton_table_in(frame_on_card(cx), id, cols, n, cx)
+}
+
+fn skeleton_table_in(frame: gpui::Div, id: &str, cols: &[Col], n: usize, cx: &App) -> AnyElement {
     let k = native_colors(cx);
     let n = n.clamp(*TABLE_SKELETON_ROWS.start(), *TABLE_SKELETON_ROWS.end());
     let count = cols.len();
     let widths = [0.62, 0.45, 0.78, 0.54, 0.7, 0.4];
-    let row = |h: Pixels, bar: Pixels, on_fill: bool, seed: usize| {
+    let row = |h: Pixels, bar: Pixels, seed: usize| {
         div()
             .flex_none()
             .h(h)
@@ -1359,24 +1409,18 @@ pub fn skeleton_table(id: &str, cols: &[Col], n: usize, cx: &App) -> AnyElement 
                     .pr(if i + 1 == count { px(16.) } else { px(0.) })
                     .flex()
                     .when(c.right, |d| d.justify_end())
-                    .child(
-                        Bone::new()
-                            .h(bar)
-                            .w(gpui::relative(if c.width.is_none() { w } else { 0.7 }))
-                            .on_fill(on_fill),
-                    )
+                    .child(Bone::new().h(bar).w(gpui::relative(if c.width.is_none() {
+                        w
+                    } else {
+                        0.7
+                    })))
             }))
     };
-    frame(cx)
+    frame
         .id(SharedString::from(format!("{id}-skeleton")))
-        .child(
-            row(super::tokens::height::TABLE_HEAD, px(12.), true, 3)
-                .bg(k.fill)
-                .border_b_1()
-                .border_color(k.separator),
-        )
+        .child(table_header(cols, cx))
         .children((0..n).map(|i| {
-            row(super::tokens::height::TABLE_ROW, px(14.), false, i)
+            row(super::tokens::height::TABLE_ROW, px(14.), i)
                 .when(i + 1 < n, |d| d.border_b_1().border_color(k.separator))
         }))
         .into_any_element()

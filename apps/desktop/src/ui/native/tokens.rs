@@ -192,6 +192,10 @@ pub struct NativeColors {
     pub sidebar: Hsla,
     /// The group box fill (§2.8): `muted` in light, a raised step in dark.
     pub group: Hsla,
+    /// The fill of a small part that sits on a group box (the 28 icon box,
+    /// a status badge, a letter avatar): the foreground at 8 %. `muted` is
+    /// the group's own fill in light, so a muted part there has no shape.
+    pub on_group: Hsla,
     /// `foreground`.
     pub label: Hsla,
     /// `muted-foreground`.
@@ -261,6 +265,11 @@ pub struct NativeColors {
     pub knob_on: Hsla,
     /// The active segmented trigger: `background` (dark: `input` on `muted`).
     pub segment: Hsla,
+    /// The segmented track. Light: the foreground at 6 %, a tint that reads
+    /// as `muted` on the white window and still steps over a group box
+    /// (whose fill is `muted` itself). Dark: `muted`, a step over the
+    /// window, a sheet and a group box already.
+    pub segment_track: Hsla,
     pub amber: Hsla,
     pub blue: Hsla,
     pub red: Hsla,
@@ -301,6 +310,7 @@ impl NativeColors {
             } else {
                 p.muted
             },
+            on_group: p.foreground.opacity(0.08),
             label: p.foreground,
             secondary: p.muted_foreground,
             tertiary: p.muted_foreground,
@@ -337,6 +347,11 @@ impl NativeColors {
             knob: if p.dark { p.foreground } else { p.background },
             knob_on: p.primary_foreground,
             segment: if p.dark { p.input } else { p.background },
+            segment_track: if p.dark {
+                p.muted
+            } else {
+                p.foreground.opacity(0.06)
+            },
             amber: p.warning,
             blue: p.info,
             red: p.destructive,
@@ -1062,6 +1077,8 @@ pub mod metrics {
     /// A disabled primary button before its form is complete: primary at
     /// 30 %, light, never a mid gray (§2.20).
     pub const PRIMARY_WAITING_OPACITY: f32 = 0.3;
+    /// A disabled control (§1.8): 50 % opacity.
+    pub const DISABLED_OPACITY: f32 = 0.5;
 
     // Progress (D12)
     pub const BAR: Pixels = height::PROGRESS;
@@ -1080,6 +1097,16 @@ pub mod metrics {
     // Inspector and lists (§2.5, §2.6)
     pub const INSPECTOR_ROW: Pixels = height::ROW;
     pub const INSPECTOR_PAD: Pixels = space::S16;
+    /// A row of a list in a grouped inspector section (the members of a 群
+    /// or a 话题): the compact row, rows touching (§2.6).
+    pub const INSPECTOR_LIST_ROW: Pixels = height::ROW;
+    /// The strip at the top of a code block that holds its pinned actions
+    /// (问这里, copy); the code starts under it (K-05).
+    pub const CODE_BLOCK_STRIP: Pixels = height::ROW;
+    /// The height of the actions in that strip.
+    pub const CODE_BLOCK_ACTIONS: Pixels = px(24.);
+    /// Under the last line of a code block.
+    pub const CODE_BLOCK_PAD_BOTTOM: Pixels = space::S16;
     /// The label column of a DescriptionList and of every sheet.
     pub const LABEL_COLUMN: Pixels = px(112.);
     pub const LABEL_GAP: Pixels = space::S8;
@@ -1092,6 +1119,9 @@ pub mod metrics {
     pub const SHEET_WIDE: Pixels = px(560.);
     pub const SHEET_RADIUS: Pixels = radius::SHEET;
     pub const SHEET_PAD: Pixels = space::S24;
+    /// The most a long sheet body shows before it scrolls (the add and
+    /// edit AI member sheets): the cut lands in the middle of a form row.
+    pub const SHEET_BODY_MAX: Pixels = px(468.);
     pub const SHEET_BUTTON_EDGE: Pixels = space::S24;
     pub const SHEET_BUTTON_GAP: Pixels = space::S8;
     /// A Mac dialog button is never narrower than this, so 「好」 is not a square.
@@ -1106,7 +1136,6 @@ pub mod metrics {
     pub const MENU_SYMBOL: Pixels = px(16.);
     pub const MENU_ROW_PAD: Pixels = space::S8;
     pub const POPOVER_RADIUS: Pixels = radius::CONTROL;
-    pub const POPOVER_ARROW: Pixels = px(10.);
 }
 
 /// Card v2 sizes (DESIGN.md §7.10) on the scales; `theme::card_v2`.
@@ -1249,6 +1278,32 @@ pub mod gallery {
     pub const BADGE_H: Pixels = px(18.);
     /// The composer's thumbnails of images not sent yet.
     pub const DRAFT_THUMB: Pixels = px(64.);
+    /// A round icon button over a picture (the draft thumbnail's remove): its side, its
+    /// glyph, and black at these opacities at rest, under the pointer and pressed.
+    pub const OVER_BUTTON: Pixels = px(20.);
+    pub const OVER_GLYPH: Pixels = px(10.);
+    pub const OVER_SCRIM: f32 = 0.55;
+    pub const OVER_SCRIM_HOVER: f32 = 0.75;
+    pub const OVER_SCRIM_ACTIVE: f32 = 0.85;
+}
+
+/// The page strip of an inline PDF card: whole pages on a band, 12 above and below.
+pub mod pdf_strip {
+    use gpui::{Pixels, px};
+    pub const HEIGHT: Pixels = px(140.);
+    /// The box a page is fitted into (the band less its 12 + 12).
+    pub const PAGE_W: f32 = 120.;
+    pub const PAGE_H: f32 = 116.;
+}
+
+/// A tile of the 产出 icon view: the picture well over the name.
+pub mod artifact_tile {
+    use gpui::{Pixels, px};
+    /// The picture well.
+    pub const WELL_H: Pixels = px(132.);
+    /// The narrowest a page snapshot is drawn: a taller page keeps this width and
+    /// is cut at the bottom, so its first screen reads.
+    pub const PAGE_MIN_W: Pixels = px(96.);
 }
 
 /// The image viewer (files::lightbox): every picture of a 话题 on a dark screen over the
@@ -1261,7 +1316,9 @@ pub mod lightbox {
     pub const BACKDROP: f32 = 1.0;
     /// The top bar and the filmstrip float on black at this opacity.
     pub const BAR_SCRIM: f32 = 0.35;
-    pub const BAR_H: Pixels = px(52.);
+    /// The app's header band (§2.2), so the bar's content and the window buttons share
+    /// one centre line.
+    pub const BAR_H: Pixels = super::height::TOOLBAR;
     /// Room kept around the fitted picture.
     pub const PAD: Pixels = px(24.);
     /// The round previous / next buttons at the sides.
@@ -1321,12 +1378,10 @@ pub mod monitor {
     pub const HEADER_PAD_BOTTOM: Pixels = px(20.);
     /// Room under the last section of a page.
     pub const BODY_PAD_BOTTOM: Pixels = px(28.);
-    /// A 要注意 tile: its tone's color at this opacity under the symbol.
-    pub const ATTENTION_TINT: f32 = 0.10;
-    pub const ATTENTION_TINT_DARK: f32 = 0.14;
-    /// A sidebar group label: this tall, this far below the rows above (Admin artboard: 18 + 16 + 6).
-    pub const NAV_GROUP_HEIGHT: Pixels = px(24.);
-    pub const NAV_GROUP_TOP: Pixels = space::S12;
+    /// A sidebar group label: this tall, this far below the rows above. Sized so the whole
+    /// nav of an owner (one computer open) fits the window: no row is cut by the footer.
+    pub const NAV_GROUP_HEIGHT: Pixels = px(20.);
+    pub const NAV_GROUP_TOP: Pixels = space::S8;
     /// Room under the sidebar's last row, above the account footer.
     pub const NAV_END_PAD: Pixels = space::S8;
     /// The machine tile of the switcher.
@@ -1338,14 +1393,22 @@ pub mod monitor {
     pub const CAPACITY_BAR: Pixels = space::S8;
     /// The legend swatches and the state dots.
     pub const SWATCH: Pixels = space::S8;
-    /// The memory bar of a member row.
-    pub const MEMBER_BAR: Pixels = space::S6;
+    /// The memory bar of a member row (the one Progress, this wide).
     pub const MEMBER_BAR_WIDTH: Pixels = px(96.);
+    /// The x-axis labels of 每天的花费: one footnote line.
+    pub const CHART_AXIS: Pixels = space::S16;
+    /// The status strip's cell that carries a command to run: wide enough for the command on
+    /// one line.
+    pub const STRIP_HINT_CELL: Pixels = px(296.);
     /// Table columns of 按成员.
     pub const COL_COUNT: Pixels = px(80.);
     pub const COL_CPU: Pixels = px(96.);
     pub const COL_MEM: Pixels = px(200.);
     pub const COL_TOKENS: Pixels = px(120.);
+    /// 用量's budget column: the track, the warning icon's slot and the figures, each at one
+    /// x in every row. The figures' slot holds "103% / $1,000".
+    pub const COL_BUDGET: Pixels = px(248.);
+    pub const COL_BUDGET_LABEL: Pixels = px(92.);
     pub const COL_DONE: Pixels = px(104.);
     pub const COL_SPEND: Pixels = px(152.);
     /// 成员's table: narrow columns so a name of about 8 characters and its 岗位 fit beside the
@@ -1355,6 +1418,8 @@ pub mod monitor {
     pub const TEAM_COL_SPEND: Pixels = px(136.);
     pub const TEAM_COL_RECENT: Pixels = px(88.);
     pub const TEAM_CELL_PAD: Pixels = space::S8;
+    /// The count after a bar in the member inspector (`999 个话题`), right-aligned.
+    pub const TEAM_USE_COUNT: Pixels = px(64.);
     /// 机器 cards: the narrowest a card gets, and the width of 添加电脑's line.
     pub const FLEET_CARD_MIN: Pixels = px(320.);
     pub const FLEET_ADD_TEXT: Pixels = px(320.);
@@ -1505,6 +1570,17 @@ mod tests {
         for k in [NativeColors::light(), NativeColors::dark()] {
             assert_eq!(k.destructive_fill, c(DESTRUCTIVE_FILL));
             assert!(contrast(gpui::white(), k.destructive_fill) >= 4.5);
+        }
+    }
+
+    #[test]
+    fn a_part_on_a_group_shows_in_both_modes() {
+        // The icon box and the status badge of a settings row: at least 8
+        // levels off the group fill they sit on.
+        for k in [NativeColors::light(), NativeColors::dark()] {
+            let on = gpui::Rgba::from(k.group.blend(k.on_group));
+            let group = gpui::Rgba::from(k.group);
+            assert!((on.r - group.r).abs() * 255. >= 8.);
         }
     }
 

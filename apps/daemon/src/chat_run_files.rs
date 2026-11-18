@@ -24,7 +24,7 @@ pub const OPS: &[&str] = &[FILE_UPLOAD, ARTIFACT_CREATE, ARTIFACT_VERSION];
 
 /// The protocol's limits (`MAX_FILE_BYTES`, `MAX_ARTIFACT_FILES`).
 const MAX_FILE_BYTES: u64 = 100_000_000;
-const MAX_FILES: usize = 500;
+pub(crate) const MAX_FILES: usize = 500;
 /// How long `chat-run` waits for these ops (uploads take longer than an output).
 pub const TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -295,7 +295,11 @@ fn walk(dir: &Path, root: &Path, out: &mut Vec<(String, PathBuf)>) -> Result<(),
                 return Err(err(
                     "too_large",
                     None,
-                    format!("more than {MAX_FILES} files"),
+                    format!(
+                        "{} has more than {MAX_FILES} files: put only the 产出's own files in a \
+folder of their own (no node_modules, no build caches) and pass that folder",
+                        root.display()
+                    ),
                 ));
             }
         }
@@ -303,10 +307,14 @@ fn walk(dir: &Path, root: &Path, out: &mut Vec<(String, PathBuf)>) -> Result<(),
     Ok(())
 }
 
-/// `files` of a version from `dir` (a folder) or `file` (one file), uploaded; and the default
-/// entry (`index.html`, else the only file).
-async fn version_files(local: &Local, body: &Value) -> Result<(Vec<Value>, Option<String>), Value> {
-    let mut list: Vec<(String, PathBuf)> = vec![];
+/// The files of a version, as (path in the 产出, file on disk).
+type Listed = Vec<(String, PathBuf)>;
+
+/// The files of a version from `dir` (a folder) or `file` (one file), and its entry: `--entry`,
+/// else `index.html`, else the only file. Nothing is uploaded here, so a wrong or missing
+/// `--entry` costs no upload.
+fn version_list(local: &Local, body: &Value) -> Result<(Listed, Option<String>), Value> {
+    let mut list: Listed = vec![];
     if let Some(dir) = body["dir"].as_str() {
         let dir = inside(&local.root, dir)?;
         walk(&dir, &dir, &mut list)?;
@@ -324,25 +332,54 @@ async fn version_files(local: &Local, body: &Value) -> Result<(Vec<Value>, Optio
     if list.is_empty() {
         return Err(err("invalid", None, "no files to send"));
     }
-    let entry = if list.iter().any(|(p, _)| p == "index.html") {
-        Some("index.html".to_string())
-    } else if list.len() == 1 {
-        Some(list[0].0.clone())
-    } else {
-        None
+    // The first few paths, so the next call can name the right one.
+    let some = || {
+        let mut names: Vec<&str> = list.iter().take(5).map(|(p, _)| p.as_str()).collect();
+        if list.len() > names.len() {
+            names.push("...");
+        }
+        names.join(", ")
     };
+    let has = |e: &str| list.iter().any(|(p, _)| p == e);
+    let entry = match body["entry"].as_str() {
+        Some(e) if has(e) => e.to_string(),
+        Some(e) => {
+            return Err(err(
+                "invalid",
+                None,
+                format!(
+                    "--entry {e} is not one of the files (paths are relative to the folder, \
+with /): {}",
+                    some()
+                ),
+            ));
+        }
+        None if has("index.html") => "index.html".to_string(),
+        None if list.len() == 1 => list[0].0.clone(),
+        None => {
+            return Err(err(
+                "invalid",
+                None,
+                format!(
+                    "--entry is required for a folder without index.html: name the file that \
+opens first, one of {}",
+                    some()
+                ),
+            ));
+        }
+    };
+    Ok((list, Some(entry)))
+}
+
+/// The JSON body of a 产出 request from a `chat-run` body: uploads `dir`/`file` into `files`.
+async fn artifact_body(local: &Local, body: &Value, create: bool) -> Result<Value, Value> {
+    let (list, entry) = version_list(local, body)?;
     let mut files = vec![];
     for (rel, path) in &list {
         let name = rel.rsplit('/').next().unwrap_or(rel);
         let meta = upload(local, path, name, None).await?;
         files.push(json!({ "path": rel, "fileId": meta["id"] }));
     }
-    Ok((files, entry))
-}
-
-/// The JSON body of a 产出 request from a `chat-run` body: uploads `dir`/`file` into `files`.
-async fn artifact_body(local: &Local, body: &Value, create: bool) -> Result<Value, Value> {
-    let (files, entry) = version_files(local, body).await?;
     let mut out = serde_json::Map::new();
     for k in [
         "title",
@@ -362,26 +399,20 @@ async fn artifact_body(local: &Local, body: &Value, create: bool) -> Result<Valu
     if !files.is_empty() {
         out.insert("files".into(), json!(files));
     }
-    if !out.contains_key("entry")
-        && let Some(e) = entry
-    {
+    if let Some(e) = entry {
         out.insert("entry".into(), json!(e));
+    }
+    if !out.contains_key("files") {
+        return Err(err("invalid", None, "give --dir or --file"));
+    }
+    if !out.contains_key("entry") {
+        return Err(err("invalid", None, "--entry is required"));
     }
     if create && !out.contains_key("kind") {
         let html = out["entry"]
             .as_str()
             .is_some_and(|e| e.ends_with(".html") || e.ends_with(".htm"));
         out.insert("kind".into(), json!(if html { "html" } else { "file" }));
-    }
-    if !out.contains_key("files") {
-        return Err(err("invalid", None, "give --dir or --file"));
-    }
-    if !out.contains_key("entry") {
-        return Err(err(
-            "invalid",
-            None,
-            "--entry is required for a folder without index.html",
-        ));
     }
     Ok(Value::Object(out))
 }
@@ -583,5 +614,68 @@ mod tests {
         let body = json!({ "artifactId": "A", "entry": "index.html", "files": files });
         let out = artifact_body(&local, &body, false).await.unwrap();
         assert!(out.get("parentVersion").is_none());
+    }
+
+    /// The server of this `Local` answers nothing: an `invalid` answer proves that the entry
+    /// was checked before any file was uploaded.
+    #[tokio::test]
+    async fn the_entry_is_checked_before_any_upload() {
+        let root = tempfile::tempdir().unwrap();
+        let local = Local {
+            server_url: "http://127.0.0.1:9".into(),
+            token: Arc::new("tm_test".into()),
+            run_id: "R1".into(),
+            root: root.path().canonicalize().unwrap(),
+            redactor: Arc::new(Redactor::new(vec![])),
+            downloads: None,
+        };
+        let dir = local.root.join("out");
+        std::fs::create_dir_all(dir.join("pages")).unwrap();
+        std::fs::write(dir.join("pages/a.html"), "a").unwrap();
+        std::fs::write(dir.join("b.html"), "b").unwrap();
+        let dir = dir.display().to_string();
+        let e = artifact_body(&local, &json!({ "title": "t", "dir": dir }), true)
+            .await
+            .unwrap_err();
+        assert_eq!(e["error"]["code"], "invalid");
+        let msg = e["error"]["message"].as_str().unwrap();
+        assert!(msg.starts_with("--entry is required"), "{msg}");
+        assert!(msg.ends_with("one of b.html, pages/a.html"), "{msg}");
+        let e = artifact_body(
+            &local,
+            &json!({ "title": "t", "dir": dir, "entry": "a.html" }),
+            true,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(e["error"]["code"], "invalid");
+        let msg = e["error"]["message"].as_str().unwrap();
+        assert!(
+            msg.starts_with("--entry a.html is not one of the files"),
+            "{msg}"
+        );
+        // A right entry goes on to the upload (which this server refuses).
+        let e = artifact_body(
+            &local,
+            &json!({ "title": "t", "dir": dir, "entry": "pages/a.html" }),
+            true,
+        )
+        .await
+        .unwrap_err();
+        assert_ne!(e["error"]["code"], "invalid");
+    }
+
+    #[test]
+    fn a_folder_with_too_many_files_says_what_to_pass() {
+        let tmp = tempfile::tempdir().unwrap();
+        for i in 0..=MAX_FILES {
+            std::fs::write(tmp.path().join(format!("f{i}")), "").unwrap();
+        }
+        let mut out = vec![];
+        let e = walk(tmp.path(), tmp.path(), &mut out).unwrap_err();
+        assert_eq!(e["error"]["code"], "too_large");
+        let msg = e["error"]["message"].as_str().unwrap();
+        assert!(msg.contains("has more than 500 files"), "{msg}");
+        assert!(msg.contains("a folder of their own"), "{msg}");
     }
 }

@@ -464,6 +464,7 @@ impl AskPalette {
             return;
         };
         let provider = self.services.provider.clone();
+        let before = crate::views::nav::new_topic::topic_ids(provider.as_ref(), &group_id);
         provider.start_topic(StartTopicRequest {
             quote_of: None,
             group_id: group_id.clone(),
@@ -471,13 +472,16 @@ impl AskPalette {
             body: format!("@{} {task}", member.name),
             mentions: vec![member.id.clone()],
         });
+        // A refused start leaves the palette open with the typed task.
+        let Some(topic) =
+            crate::views::nav::new_topic::started_topic(provider.as_ref(), &group_id, &before)
+        else {
+            return;
+        };
         window.close_dialog(cx);
-        // The new 话题 is the newest one in the 群.
-        if let Some(topic) = provider.topics(&group_id).into_iter().next() {
-            self.services
-                .nav
-                .update(cx, |nav, cx| nav.open_topic(group_id, topic.id, cx));
-        }
+        self.services
+            .nav
+            .update(cx, |nav, cx| nav.open_topic(group_id, topic, cx));
     }
 
     /// ⌘Enter: 交给 Jojo 安排.
@@ -605,15 +609,17 @@ impl AskPalette {
                         .tooltip(move |window, cx| {
                             gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
                         })
-                        .child(StatusBadge::new(
-                            BadgeState::Working,
-                            search_copy::STATUS_WORKING,
-                        ))
+                        .child(
+                            StatusBadge::new(BadgeState::Working, search_copy::STATUS_WORKING)
+                                .on_fill(ix == self.active),
+                        )
                         .into_any_element(),
                 )
             }
             None if member.is_bot() => Some(
-                StatusBadge::new(BadgeState::Offline, search_copy::STATUS_IDLE).into_any_element(),
+                StatusBadge::new(BadgeState::Offline, search_copy::STATUS_IDLE)
+                    .on_fill(ix == self.active)
+                    .into_any_element(),
             ),
             None => None,
         };
@@ -662,7 +668,7 @@ impl AskPalette {
             .child(palette::meta(group, ink2))
             .child(div().flex_1())
             .child(palette::trailing(
-                palette::topic_status(p, me.as_deref(), topic),
+                palette::topic_status(p, me.as_deref(), topic, active),
                 Some(palette::time_text(topic.last_activity_at)),
                 active,
                 ink2,
@@ -903,16 +909,38 @@ impl Render for AskPalette {
             Some(t) => SpotlightField::new(&self.query).trailing(t),
             None => SpotlightField::new(&self.query),
         };
-        // The footer: ↑↓ 选择, ↩ 打开, ⌘↩ 交给 <helper> 安排, esc 关闭.
+        // The footer: ↑↓ 选择, ↩ <what Enter does on the selected row>, ⌘↩ 交给
+        // <helper> 安排, esc 关闭. On a 交给 row Enter hands the work over, so
+        // the hint says so in the row's own words; on the helper's row the
+        // ⌘↩ hint would repeat it and is left out.
         let mut hints = palette::basic_hints(cx);
-        if let Some(h) = self.items().find_map(|i| match i {
-            Item::Give {
-                member,
-                helper: true,
-                ..
-            } => Some(member.name.clone()),
-            _ => None,
-        }) {
+        let mut on_helper = false;
+        if let Some(Item::Give {
+            member,
+            helper,
+            named,
+            ..
+        }) = self.active_item()
+        {
+            let name = crate::ui::avatar::name_beside_avatar(&member.name);
+            on_helper = *helper;
+            let label = if *helper && !*named {
+                fill(c::ASK_GIVE_TO_JOJO, &[("name", name)])
+            } else {
+                fill(c::ASK_GIVE_TO, &[("name", name)])
+            };
+            hints[1] = palette::hint(&[search_copy::KEY_RETURN], label, cx);
+        }
+        if !on_helper
+            && let Some(h) = self.items().find_map(|i| match i {
+                Item::Give {
+                    member,
+                    helper: true,
+                    ..
+                } => Some(member.name.clone()),
+                _ => None,
+            })
+        {
             hints.insert(
                 2,
                 palette::hint(

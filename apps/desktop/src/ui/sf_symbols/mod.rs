@@ -140,6 +140,8 @@ symbols! {
     Invite = Invite, UserPlus;
     Download = Download, Download;
     Options = Options, SlidersHorizontal;
+    // The 群聊 of a 群, on the 群 page's toolbar.
+    Chat = OpenTopic, MessageCircle;
 }
 
 /// The point size AppKit draws a symbol at for a slot: 13 pt in a 16 pt
@@ -288,7 +290,7 @@ mod tests {
 
     #[test]
     fn every_symbol_draws_centered_in_its_slot() {
-        assert_eq!(Sf::ALL.len(), 41);
+        assert_eq!(Sf::ALL.len(), 42);
         for &scale in &[1., 2.] {
             for s in Sf::ALL {
                 let m = raster::draw(s.name(), point_for_slot(16.), Weight::Regular, 16., scale)

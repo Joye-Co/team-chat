@@ -431,7 +431,9 @@ fn dense_alert(spec: &InlineSpec, ready: &Ready, ui: &gpui::Entity<Ui>, cx: &App
     let viewer = normalize::normalize(&spec.source)
         .ok()
         .map(|nz| (spec.clone(), nz, ui.read(cx).focus.clone()));
-    let alert = ui::native::Alert::new(Sym::Diagram, c::TOO_DENSE)
+    // The neutral notices take the 16 info circle, the same ink box as the red
+    // x-circle of a failure, so sibling Alerts weigh the same.
+    let alert = ui::native::Alert::new(Sym::Info, c::TOO_DENSE)
         .icon_color(n.secondary)
         .description(crate::copy::fill(
             c::ERROR_NODES,
@@ -608,12 +610,25 @@ fn image_with_hits(
                 )
                 // A wider diagram scrolls sideways with a scrollbar that always shows
                 // (C-05): no fade over the drawing, and the cut edge reads as "more".
+                // It sits on the box's bottom edge (D13): out to the card's inner
+                // edges and down to the footer's line, not afloat in the canvas.
                 .when(scrolls, |d| {
                     d.child(
-                        div().absolute().inset_0().child(
-                            gpui_component::scroll::Scrollbar::horizontal(&scroll)
-                                .mode(gpui_component::scroll::ScrollbarMode::Always),
-                        ),
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left(px(-PAD))
+                            .right(px(-PAD))
+                            .bottom(-space::S12)
+                            .child(
+                                gpui_component::scroll::Scrollbar::horizontal(&scroll)
+                                    // Drawn in a box wider than the canvas by the
+                                    // card's padding: the content counts as much
+                                    // wider, so the thumb keeps its true share.
+                                    .viewport_from_layout()
+                                    .scroll_size(gpui::size(px(fit.w + 2. * PAD), px(fit.h)))
+                                    .mode(gpui_component::scroll::ScrollbarMode::Always),
+                            ),
                     )
                 }),
         )
@@ -758,9 +773,9 @@ fn error_frame(
     let source = spec.source.clone();
     let (icon, icon_color, fallback) = match error {
         ErrorKind::Failed => (Sym::Failed, n.red, c::ERROR_FAILED_DESC),
-        ErrorKind::TooBig => (Sym::Diagram, n.secondary, c::ERROR_TOO_BIG_DESC),
-        ErrorKind::Unsupported => (Sym::Diagram, n.secondary, c::ERROR_UNSUPPORTED_DESC),
-        ErrorKind::Forbidden => (Sym::Diagram, n.secondary, c::ERROR_FORBIDDEN_DESC),
+        ErrorKind::TooBig => (Sym::Info, n.secondary, c::ERROR_TOO_BIG_DESC),
+        ErrorKind::Unsupported => (Sym::Info, n.secondary, c::ERROR_UNSUPPORTED_DESC),
+        ErrorKind::Forbidden => (Sym::Info, n.secondary, c::ERROR_FORBIDDEN_DESC),
     };
     let hint_text = hint.and_then(|h| match h {
         Hint::Line(n) => super::normalize::original_line(&spec.source, n)

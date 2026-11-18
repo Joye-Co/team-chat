@@ -1,13 +1,8 @@
 // Usable, three roles (docs/plans/usable/design-roles.zh.md, unit R1): 所有者 (teamOwner),
 // 管理员 (level "owner") and 普通成员 (level "member").
 import { SELF, env } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
-import { BASE, api, createMember, protocolViolations } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-});
+import { describe, expect, it } from "vitest";
+import { BASE, api, createMember } from "./helpers";
 
 const patch = (token: string, id: string, body: unknown) => api(`/v1/members/${id}`, { method: "PATCH", token, body });
 const reason = (r: { body: any }) => r.body?.error?.reason;

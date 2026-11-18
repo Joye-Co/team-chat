@@ -18,7 +18,7 @@ use crate::{
     data::{AiServiceSettings, MachineInfo, WorkerModelSetting},
     ui::native::{
         FormRow, GroupedForm, SectionTitle, disabled_push,
-        tokens::{NativeType as _, size, space},
+        tokens::{size, space},
     },
 };
 
@@ -188,16 +188,11 @@ impl WorkerModelsPanel {
         .detach();
     }
 
-    fn front_row(&self, front: Option<&AiServiceSettings>, cx: &mut Context<Self>) -> FormRow {
-        let k = crate::ui::native::native_colors(cx);
-        let value = front_value(front);
+    /// 前台 is read-only here (it is set in AI 服务): an outline badge at
+    /// the value edge of the column of selects (2.8), not loose text.
+    fn front_row(&self, front: Option<&AiServiceSettings>) -> FormRow {
         FormRow::new(s::MODELS_FRONT).control(
-            div()
-                .max_w(size::SETTINGS_FIELD_WIDTH)
-                .text_right()
-                .n_subheadline()
-                .text_color(k.secondary)
-                .child(value),
+            crate::ui::native::Badge::new(front_value(front)).max_w(size::SETTINGS_FIELD_WIDTH),
         )
     }
 
@@ -207,9 +202,17 @@ impl WorkerModelsPanel {
         l: &Loaded,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> FormRow {
+    ) -> Vec<FormRow> {
         let busy = self.action == ModelsAction::Saving;
         let (models, efforts) = cli_choices(&l.machines, runtime, None);
+        // "Claude Code", "Codex", else the name it was configured with.
+        let name = l
+            .machines
+            .iter()
+            .flat_map(|m| m.clis.iter())
+            .find(|c| c.runtime == runtime)
+            .map(|c| crate::views::admin::cli_name(&c.kind, &c.runtime))
+            .unwrap_or_else(|| runtime.to_string());
         let current = l
             .workers
             .iter()
@@ -281,7 +284,8 @@ impl WorkerModelsPanel {
                 widgets::popup_fixed(
                     SharedString::from(format!("models-{runtime}-effort")),
                     shown,
-                    size::EFFORT_SELECT_WIDTH,
+                    // One width in the value column (2.8).
+                    size::MODEL_SELECT_WIDTH,
                     window,
                     cx,
                 ),
@@ -302,17 +306,12 @@ impl WorkerModelsPanel {
                 })
             })
         });
-        FormRow::new(runtime.to_string())
-            .detail(s::MODELS_WORKER_DETAIL)
-            .min_height(crate::ui::native::tokens::height::FORM_ROW_TWO)
-            .control(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(space::S8)
-                    .child(model)
-                    .children(effort),
-            )
+        // One control per row (2.8): the model, then 思考强度 as its own
+        // row under it.
+        let effort_label = fill(s::MODELS_EFFORT_OF, &[("name", &name)]);
+        std::iter::once(FormRow::new(name).control(model))
+            .chain(effort.map(|e| FormRow::new(effort_label).control(e)))
+            .collect()
     }
 
     pub fn section(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<gpui::Div> {
@@ -341,10 +340,10 @@ impl WorkerModelsPanel {
             };
             return Some(widgets::section(header, body));
         };
-        let mut group = GroupedForm::new().row(self.front_row(l.front.as_ref(), cx));
+        let mut group = GroupedForm::new().row(self.front_row(l.front.as_ref()));
         let names = runtimes(&l.machines);
         for rt in &names {
-            group = group.row(self.runtime_row(rt, &l, window, cx));
+            group = group.rows(self.runtime_row(rt, &l, window, cx));
         }
         let empty = names
             .is_empty()

@@ -360,7 +360,7 @@ impl Render for CodeInput {
                             .items_center()
                             .justify_center()
                             .n_style(text::TITLE)
-                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .font_weight(crate::theme::MEDIUM_WEIGHT)
                             .code_font()
                             .text_color(k.label)
                             .children(ch.map(|c| c.to_string()))

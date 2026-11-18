@@ -284,6 +284,19 @@ impl TimelineView {
                 let Some((g, tid)) = this.open.clone() else {
                     return;
                 };
+                // Back online: a page of older messages asked for while the
+                // connection was down was not sent. Ask again on the next draw.
+                if this.older_requested
+                    && !this.provider_loading
+                    && changes.any(|c| matches!(c, Change::Connection))
+                    && matches!(
+                        this.services.provider.connection(),
+                        crate::data::ConnectionState::Online
+                    )
+                {
+                    this.older_requested = false;
+                    cx.notify();
+                }
                 let touches = changes.touches_topic(&g, &tid)
                     || changes.any(|c| match c {
                         Change::Topics { group_id } => *group_id == g,
@@ -996,6 +1009,11 @@ impl Render for TimelineView {
             .filter(|top| self.date_label_gone(top.item_ix, top.offset_in_item))
             .and_then(|top| self.messages.get(top.item_ix));
         self.sticky_row = sticky_date.map(|m| model::key(m).to_string());
+        // A native page that fills the row under the pill's place would be
+        // cut across its whole width below the pill (a blank strip in the
+        // card): while one shows there the pill is not drawn, and the page
+        // is cut at the header line like every other row.
+        let page_under = crate::ui::web_embed::page_under_band(window, cx);
         let sticky_date = sticky_date.map(|m| {
             use crate::ui::native::{NativeType as _, native_colors};
             let n = native_colors(cx);
@@ -1004,14 +1022,15 @@ impl Render for TimelineView {
                 .top(STICKY_TOP)
                 .left_0()
                 .right_0()
+                .h(STICKY_H)
                 .pl(v2::LEADING)
                 .pr(v2::SIDE)
                 .flex()
                 .justify_center()
                 // P-02: a native page under the pill is cut below it, so
                 // the pill stays on top (`web_embed::clip_band`).
-                .child(crate::ui::web_embed::clip_band())
-                .child(
+                .child(crate::ui::web_embed::clip_band(!page_under))
+                .children((!page_under).then(|| {
                     ui::float_surface(cx)
                         .h(STICKY_H)
                         .px(space::S12)
@@ -1021,8 +1040,8 @@ impl Render for TimelineView {
                         .n_section()
                         .n_figures()
                         .text_color(n.secondary)
-                        .child(v2::date_label(m.created_at)),
-                )
+                        .child(v2::date_label(m.created_at))
+                }))
         });
         // §2.2: content scrolls under the header band with no fade. When
         // there is more below (the jump pill shows), the list's bottom edge

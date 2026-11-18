@@ -24,8 +24,8 @@ use crate::{
         Sym,
         icons::sym as sym_icon,
         native::{
-            NativeType as _, PushSize, PushStyle, card_surface, loading_push, metrics,
-            native_colors, push_button,
+            NativeType as _, PushSize, PushStyle, loading_push, metrics, native_colors,
+            panel_card_surface, push_button,
             tokens::{space, text},
         },
         sf_symbols::SymSize,
@@ -317,36 +317,7 @@ impl AdminView {
                 .flex()
                 .flex_col()
                 .gap(space::S8)
-                .child(
-                    div()
-                        .w_full()
-                        .min_h(metrics::FIELD)
-                        .pl(metrics::FIELD_PAD)
-                        .pr(px(2.))
-                        .py(px(3.))
-                        .rounded(metrics::FIELD_RADIUS)
-                        .bg(k.content)
-                        .border_1()
-                        .border_color(k.separator)
-                        .flex()
-                        .items_center()
-                        .gap(space::S6)
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w(px(0.))
-                                .font_family(theme::MONO_FONT_FAMILY)
-                                .text_size(text::META.0)
-                                .line_height(px(18.))
-                                .text_color(k.label)
-                                .child(command),
-                        )
-                        .child(
-                            gpui_component::clipboard::Clipboard::new("this-pc-install-copy")
-                                .tooltip(m::THIS_PC_COPY)
-                                .value(command),
-                        ),
-                )
+                .child(command_box("this-pc-install-copy", command, cx))
                 .child(
                     div().flex().child(
                         loading_push(
@@ -400,7 +371,7 @@ impl AdminView {
             (m::THIS_PC_TITLE, m::THIS_PC_DESC)
         };
         Some(
-            card_surface(cx)
+            panel_card_surface(cx)
                 .p(space::S24)
                 .flex()
                 .flex_col()
@@ -413,18 +384,20 @@ impl AdminView {
                         .child(div().n_headline().text_color(k.label).child(title))
                         .child(div().n_footnote().text_color(k.secondary).child(sub)),
                 )
-                .child(line(
-                    r.service,
-                    m::THIS_PC_SERVICE,
-                    service_desc,
-                    retry.map(|b| div().flex().child(b).into_any_element()),
-                    cx,
-                ))
+                // In the order of the work: the service starts once a CLI is there, and the
+                // sign-in is read through the service.
                 .child(line(
                     r.found,
                     m::THIS_PC_FOUND,
                     found_desc,
                     install.map(IntoElement::into_any_element),
+                    cx,
+                ))
+                .child(line(
+                    r.service,
+                    m::THIS_PC_SERVICE,
+                    service_desc,
+                    retry.map(|b| div().flex().child(b).into_any_element()),
                     cx,
                 ))
                 .child(line(
@@ -437,6 +410,45 @@ impl AdminView {
                 .into_any_element(),
         )
     }
+}
+
+/// A command to run elsewhere: the command in the code font on one line in a field-like box,
+/// with the copy button at its end (§2.19).
+pub(super) fn command_box(
+    id: &'static str,
+    command: impl Into<SharedString>,
+    cx: &gpui::App,
+) -> gpui::Div {
+    let k = native_colors(cx);
+    let command: SharedString = command.into();
+    div()
+        .w_full()
+        .min_h(metrics::FIELD)
+        .pl(metrics::FIELD_PAD)
+        .pr(px(2.))
+        .py(px(3.))
+        .rounded(metrics::FIELD_RADIUS)
+        .bg(k.content)
+        .border_1()
+        .border_color(k.separator)
+        .flex()
+        .items_center()
+        .gap(space::S6)
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.))
+                .font_family(theme::mono_font_family())
+                .text_size(text::META.0)
+                .line_height(px(18.))
+                .text_color(k.label)
+                .child(command.clone()),
+        )
+        .child(
+            gpui_component::clipboard::Clipboard::new(id)
+                .tooltip(m::THIS_PC_COPY)
+                .value(command),
+        )
 }
 
 /// One line: a mark, what it checks, where it stands and its next step.

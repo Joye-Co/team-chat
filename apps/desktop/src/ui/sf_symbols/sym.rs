@@ -90,6 +90,9 @@ concepts! {
     Todo = "circle.dashed";
     Circle = "circle";
     Stopped = "nosign";
+    /// The paused state (`secondary`): the filled bars, which stay readable
+    /// at the 12 of a badge where the outlined media `pause` thins out.
+    Paused = "pause.fill";
     Hourglass = "hourglass";
     // Machines (§6).
     /// A team computer.
@@ -180,6 +183,10 @@ concepts! {
     Info = "info.circle";
     Help = "questionmark.circle";
     Return = "return";
+    /// Wrap long lines (the code viewer's toggle).
+    Wrap = "arrow.turn.down.left";
+    /// Hand something to a 话题 (发到话题): a bare tool, unlike `Send` on its circle.
+    SendTo = "paperplane";
     ReplyIndent = "arrow.turn.down.right";
     Reply = "arrowshape.turn.up.left";
     ArrowUp = "arrow.up";
@@ -189,6 +196,8 @@ concepts! {
     Terminal = "terminal";
     Retry = "arrow.counterclockwise";
     Refresh = "arrow.clockwise";
+    /// Pick one at random (the look grid's last cell).
+    Random = "dice";
     Undo = "arrow.uturn.backward";
     Link = "link";
     Code = "chevron.left.forwardslash.chevron.right";
@@ -506,6 +515,7 @@ lucide! {
     RotateCcw => Retry,
     RotateCw => Refresh,
     RefreshCw => Refresh,
+    Dices => Random,
     Undo2 => Undo,
     Link => Link,
     Code => Code,

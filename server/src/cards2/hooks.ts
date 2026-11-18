@@ -101,7 +101,7 @@ registerMessageWriteHook({
       const stored = current.cardV2;
       if (stored) {
         if (f.baseRev !== undefined ? f.baseRev !== stored.rev : f.cardV2.rev <= stored.rev) {
-          throw new ApiError("conflict", "the card has a newer rev", "card.stale_rev");
+          throw new ApiError("conflict", `the card is at rev ${stored.rev}: read it again and send a newer rev`, "card.stale_rev");
         }
         if (stored.rev >= MAX_CARD_V2_REVS) throw new ApiError("too_large", `at most ${MAX_CARD_V2_REVS} revs per card`, "card.rev_limit");
       }

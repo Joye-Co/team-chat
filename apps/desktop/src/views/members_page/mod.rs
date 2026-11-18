@@ -37,7 +37,7 @@ use crate::{
             CompactRow, NativeType as _, PushSize, PushStyle, Segment, Segmented, ToolbarGroup,
             ToolbarItemKind, ToolbarRow, borderless_button, emphasized, native_colors,
             page::{self, PageLoad, Status},
-            push_button, toolbar_item,
+            push_button, toolbar_item, toolbar_labeled_item,
         },
         sf_symbols::{Sf, Sym},
     },
@@ -391,14 +391,14 @@ impl MembersPage {
             }
         });
         let mut row = ToolbarRow::new(c::MEMBERS_PAGE_TITLE)
-            .leading_inset(rows::toolbar_leading(&self.services, cx))
-            .group(
-                div()
-                    .flex_none()
-                    .when(load != PageLoad::Ready, |d| d.opacity(0.5))
-                    .child(filter),
-            )
-            .group(rows::toolbar_capsule(add, cx));
+            .leading_inset(rows::toolbar_leading(&self.services, cx));
+        // The filter has nothing to filter until the team is here, and in
+        // this narrow column it left the state word (正在同步…) no room: it
+        // comes with the list.
+        if load == PageLoad::Ready {
+            row = row.group(div().flex_none().child(filter));
+        }
+        row = row.group(rows::toolbar_capsule(add, cx));
         // The subtitle slot stays in every state, so the title never moves.
         row = row.subtitle(match load {
             PageLoad::Ready => fill(c::MEMBERS_COUNT, &[("n", &entries.len().to_string())]),
@@ -559,9 +559,10 @@ impl MembersPage {
         let mut badge: Option<AnyElement> = None;
         match e.bucket {
             Bucket::Waiting => {
-                badge = Some(page::status_badge(
+                badge = Some(page::status_badge_on(
                     Status::NeedsYou,
                     c::MEMBERS_WAITS_ON_YOU,
+                    is_selected,
                     cx,
                 ));
                 parts.extend(e.extras.line.clone().or(e.ask.clone()));
@@ -579,7 +580,12 @@ impl MembersPage {
                     ),
                     None => c::MEMBERS_WORKING.to_string(),
                 };
-                badge = Some(page::status_badge(Status::Working, text, cx));
+                badge = Some(page::status_badge_on(
+                    Status::Working,
+                    text,
+                    is_selected,
+                    cx,
+                ));
             }
             Bucket::Idle => {
                 parts.push(
@@ -609,8 +615,11 @@ impl MembersPage {
             } else {
                 &s.short
             };
-            badge =
-                Some(crate::ui::native::StatusBadge::new(s.badge, text.clone()).into_any_element());
+            badge = Some(
+                crate::ui::native::StatusBadge::new(s.badge, text.clone())
+                    .on_fill(is_selected)
+                    .into_any_element(),
+            );
         }
         parts.retain(|p| !p.trim().is_empty());
         let mark = badge;
@@ -657,12 +666,15 @@ impl MembersPage {
     fn detail_toolbar(&self, e: &Entry, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let active = emphasized(window);
         let nav = self.services.nav.clone();
+        // Toolbar items carry their word (D20): a bare glyph had to be
+        // guessed.
         let mut items = vec![
-            toolbar_item(
+            toolbar_labeled_item(
                 "member-outputs",
                 Sf::Outputs,
                 c::MEMBERS_OUTPUTS_BUTTON,
-                ToolbarItemKind::Plain,
+                c::MEMBERS_OUTPUTS_BUTTON,
+                false,
                 active,
                 window,
                 cx,
@@ -673,11 +685,14 @@ impl MembersPage {
             let run = e.run.clone();
             let nav = self.services.nav.clone();
             items.push(
-                toolbar_item(
+                // The item opens 实时查看 of the member's run, so it says so;
+                // the tooltip names the computer it shows.
+                toolbar_labeled_item(
                     "member-computer",
                     Sf::Computer,
+                    crate::copy::live::LIVE_TITLE,
                     c::MEMBERS_COMPUTER_BUTTON,
-                    ToolbarItemKind::Plain,
+                    false,
                     active,
                     window,
                     cx,
@@ -858,7 +873,9 @@ impl MembersPage {
             body = body.child(
                 page::card_row(
                     "member-now-topic",
-                    None,
+                    // The 话题 icon, as the queued and waiting rows: one
+                    // icon column for the card.
+                    Some(page::row_icon(Sym::Topic, k.secondary)),
                     topic.map(|t| t.title).unwrap_or_default(),
                     Some(fill(c::MEMBERS_TOPIC_META, &[("group", &group), ("name", &by)]).into()),
                     Some(page::status_badge(Status::Working, badge, cx)),
@@ -1053,7 +1070,7 @@ impl MembersPage {
         // 成本 and its weekly limit. The limit is in US cents
         // (`weeklyBudgetCents`); a cost is shown in the currency it was
         // reported in and never converted. Only a cost in US dollars is
-        // measured against the limit (`$132.00 / 上限 $300.00` with a
+        // measured against the limit (`$132.00 / 预算 $300.00` with a
         // Progress); a cost in another currency and the limit show as two
         // separate values with no ratio bar. No run reported a cost: `–`,
         // never a wrong $0.
@@ -1152,28 +1169,7 @@ impl MembersPage {
             page::compact_empty(Sym::Document, c::MEMBERS_DELIVERIES_EMPTY, None, cx)
                 .into_any_element()
         } else {
-            let cols = [
-                page::Col {
-                    header: c::MEMBERS_COL_NAME.into(),
-                    width: None,
-                    right: false,
-                },
-                page::Col {
-                    header: c::MEMBERS_COL_WHERE.into(),
-                    width: Some(px(120.)),
-                    right: false,
-                },
-                page::Col {
-                    header: c::MEMBERS_COL_TIME.into(),
-                    width: Some(px(96.)),
-                    right: true,
-                },
-                page::Col {
-                    header: c::MEMBERS_COL_STATE.into(),
-                    width: Some(px(104.)),
-                    right: true,
-                },
-            ];
+            let cols = delivery_cols();
             let rows = e
                 .extras
                 .deliveries
@@ -1267,7 +1263,7 @@ impl MembersPage {
                     )
                 })
                 .collect();
-            page::frame(cx)
+            page::frame_on_card(cx)
                 .child(page::table("member-deliveries", &cols, rows, cx))
                 .into_any_element()
         };
@@ -1301,12 +1297,15 @@ impl MembersPage {
         for (i, pr) in e.stats.problems.iter().enumerate() {
             let retried = pr.run_id.as_ref().is_some_and(|r| self.retried.contains(r));
             if retried {
-                body = body.child(page::page_alert(
-                    SharedString::from(format!("member-problem-{i}")),
-                    page::AlertKind::Info,
-                    fill(c::MEMBERS_RETRIED, &[("name", &name)]),
-                    Some(c::MEMBERS_RETRIED_NOTE.into()),
-                    None,
+                body = body.child(page::on_card(
+                    page::page_alert(
+                        SharedString::from(format!("member-problem-{i}")),
+                        page::AlertKind::Info,
+                        fill(c::MEMBERS_RETRIED, &[("name", &name)]),
+                        Some(c::MEMBERS_RETRIED_NOTE.into()),
+                        None,
+                        cx,
+                    ),
                     cx,
                 ));
                 continue;
@@ -1372,12 +1371,15 @@ impl MembersPage {
                 ),
                 None => stuck,
             };
-            body = body.child(page::page_alert(
-                SharedString::from(format!("member-problem-{i}")),
-                page::AlertKind::Error,
-                pr.text.clone(),
-                Some(description.into()),
-                retry,
+            body = body.child(page::on_card(
+                page::page_alert(
+                    SharedString::from(format!("member-problem-{i}")),
+                    page::AlertKind::Error,
+                    pr.text.clone(),
+                    Some(description.into()),
+                    retry,
+                    cx,
+                ),
                 cx,
             ));
         }
@@ -1546,26 +1548,29 @@ impl MembersPage {
             }
             (Some(Err(err)), true) => {
                 let busy = self.approvals_loading;
-                page::page_alert(
-                    "member-approvals-failed",
-                    page::AlertKind::Error,
-                    c::MEMBERS_APPROVALS_FAILED,
-                    Some(crate::views::settings::widgets::error_text(*err).into()),
-                    Some(
-                        push_button(
-                            "member-approvals-retry",
-                            c::MEMBERS_RETRY,
-                            PushStyle::Outline,
-                            PushSize::Small,
-                            cx,
-                        )
-                        .loading(busy)
-                        .disabled(busy)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.load_approvals(cx);
-                            cx.notify();
-                        }))
-                        .into_any_element(),
+                page::on_card(
+                    page::page_alert(
+                        "member-approvals-failed",
+                        page::AlertKind::Error,
+                        c::MEMBERS_APPROVALS_FAILED,
+                        Some(crate::views::settings::widgets::error_text(*err).into()),
+                        Some(
+                            push_button(
+                                "member-approvals-retry",
+                                c::MEMBERS_RETRY,
+                                PushStyle::Outline,
+                                PushSize::Small,
+                                cx,
+                            )
+                            .loading(busy)
+                            .disabled(busy)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.load_approvals(cx);
+                                cx.notify();
+                            }))
+                            .into_any_element(),
+                        ),
+                        cx,
                     ),
                     cx,
                 )
@@ -1626,7 +1631,7 @@ impl MembersPage {
         .into_any_element()
     }
 
-    /// 汇报和限额 (card): who the member reports to (`reportsTo`) and, for an AI member,
+    /// 汇报和预算 (card): who the member reports to (`reportsTo`) and, for an AI member,
     /// the weekly limit (`weeklyBudgetCents`, US cents). Owners change both in a sheet.
     fn plan(&self, e: &Entry, cx: &App) -> AnyElement {
         let k = native_colors(cx);
@@ -1707,7 +1712,7 @@ impl MembersPage {
         .into_any_element()
     }
 
-    /// True when I am an owner (owners set 汇报给 and 限额).
+    /// True when I am an owner (owners set 汇报给 and 预算).
     fn i_am_owner(&self) -> bool {
         match self.services.provider.session() {
             crate::data::SessionState::SignedIn { me, .. } => me.level == MemberLevel::Owner,
@@ -1745,6 +1750,8 @@ impl MembersPage {
                 .into_any_element()
         };
         page::titled_card("member-tools", c::MEMBERS_TOOLS, None, None, body, None, cx)
+            // Cards side by side share one height (§2.4 grid).
+            .flex_1()
             .into_any_element()
     }
 
@@ -1947,12 +1954,23 @@ impl MembersPage {
             )
             .child(pair_skeleton("member-sk-a", cx))
             // 最近交付 is a table in a card (§2.18): its header and rows.
-            .child(card_skeleton(
-                "member-sk-t",
-                page::SkeletonKind::TableRow,
-                3,
-                cx,
-            ))
+            .child(
+                page::card(cx)
+                    .p(page::m::GUTTER)
+                    .gap(page::m::GUTTER)
+                    .child(
+                        crate::ui::native::Bone::new()
+                            .h(crate::ui::native::tokens::text::HEADING.0)
+                            .w(gpui::relative(0.3))
+                            .rounded(tsp::S8),
+                    )
+                    .child(page::skeleton_table_on_card(
+                        "member-sk-t",
+                        &delivery_cols(),
+                        3,
+                        cx,
+                    )),
+            )
             .child(pair_skeleton("member-sk-b", cx))
     }
 }
@@ -2038,6 +2056,32 @@ fn card_skeleton(id: &str, kind: page::SkeletonKind, n: usize, cx: &App) -> gpui
                 .rounded(tsp::S8),
         )
         .child(page::skeleton_rows(id, kind, n, cx))
+}
+
+/// The columns of 最近交付: 名称, 在哪, 时间, 状态 (the table and its skeleton).
+fn delivery_cols() -> [page::Col; 4] {
+    [
+        page::Col {
+            header: c::MEMBERS_COL_NAME.into(),
+            width: None,
+            right: false,
+        },
+        page::Col {
+            header: c::MEMBERS_COL_WHERE.into(),
+            width: Some(px(120.)),
+            right: false,
+        },
+        page::Col {
+            header: c::MEMBERS_COL_TIME.into(),
+            width: Some(px(96.)),
+            right: true,
+        },
+        page::Col {
+            header: c::MEMBERS_COL_STATE.into(),
+            width: Some(px(104.)),
+            right: true,
+        },
+    ]
 }
 
 /// Two detail cards side by side (现在在做 | 这周), as skeletons.

@@ -197,6 +197,7 @@ export class CardDraft {
   ask(ask: CardAsk | null): this {
     return this.cardProps({ ask });
   }
+  /** Replaces the card's actions (its submit, cancel and other buttons); `[]` removes them. */
   actions(actions: CardV2Action[]): this {
     return this.cardProps({ actions });
   }

@@ -16,12 +16,11 @@ use super::{
 };
 use crate::{
     copy::{admin as m, fill},
-    theme::Type as _,
     ui::{
         MemberAvatar, Sym,
         icons::sym as sym_icon,
         native::{
-            NativeColors, NativeType as _, TruncText, card_surface, native_colors, skeleton,
+            NativeColors, NativeType as _, TruncText, native_colors, panel_card_surface, skeleton,
             tokens::{avatar, height, monitor as t, radius, space, text},
         },
         sf_symbols::SymSize,
@@ -40,7 +39,7 @@ fn tone_color(tone: Tone, k: &NativeColors) -> Hsla {
 
 /// A card surface with the design's inner padding.
 fn panel(cx: &App) -> gpui::Div {
-    card_surface(cx).flex().flex_col()
+    panel_card_surface(cx).flex().flex_col()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -189,14 +188,28 @@ fn strip(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
                         .child(dot(tone_color(c.tone, &k)))
                         .child(TruncText::new(c.value)),
                 )
-                // Usable: what to run on the computer, wrapped, in the code font.
+                // Usable: what to run on the computer. The words in the text font, the
+                // command in the code font on its own line, never broken (§1.4).
                 .when_some(c.hint, |d, h| {
-                    d.child(
+                    let (prose, command) = model::hint_parts(&h);
+                    d.flex_none().w(t::STRIP_HINT_CELL).child(
                         div()
+                            .flex()
+                            .flex_col()
+                            .gap(space::S2)
                             .n_footnote()
-                            .code_font()
                             .text_color(k.secondary)
-                            .child(h),
+                            .when(!prose.is_empty(), |d| d.child(prose.to_string()))
+                            // To run on another computer: in the command box, with copy.
+                            .children(command.map(|c| {
+                                super::this_computer::command_box(
+                                    "github-hint-copy",
+                                    c.to_string(),
+                                    cx,
+                                )
+                                .mt(space::S4)
+                                .whitespace_nowrap()
+                            })),
                     )
                 })
         }))
@@ -396,9 +409,14 @@ fn capacity(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
             .flex()
             .flex_wrap()
             .gap(space::S16)
-            .child(swatch(m::LEGEND_VM, &model::bytes(vb), k.label, cx))
-            .child(swatch(m::LEGEND_HOST, &model::bytes(hb), k.secondary, cx))
-            .child(swatch(m::LEGEND_FREE, &model::bytes(fb), k.fill, cx))
+            .child(swatch(m::LEGEND_VM, &model::bytes(vb), Some(k.label), cx))
+            .child(swatch(
+                m::LEGEND_HOST,
+                &model::bytes(hb),
+                Some(k.secondary),
+                cx,
+            ))
+            .child(swatch(m::LEGEND_FREE, &model::bytes(fb), None, cx))
     });
     let hint = match (cap.avg_vm_bytes, cap.reserve_bytes) {
         (Some(a), Some(r)) => fill(
@@ -477,35 +495,13 @@ fn capacity(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
         .p(space::S24)
         .gap(space::S16)
         .child(
-            div()
-                .flex()
-                .items_center()
-                .child(
-                    div()
-                        .flex_1()
-                        .n_title3()
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .child(m::CAPACITY),
-                )
-                .child(
-                    div()
-                        .id("capacity-all")
-                        .opacity(0.5)
-                        .flex()
-                        .items_center()
-                        .gap(space::S4)
-                        .n_body()
-                        .text_color(k.secondary)
-                        .tooltip(|window, cx| {
-                            gpui_component::tooltip::Tooltip::new(m::NAV_SOON).build(window, cx)
-                        })
-                        .child(m::SEE_ALL_VMS)
-                        .child(sym_icon(
-                            Sym::ChevronRight,
-                            SymSize::INLINE_SMALL,
-                            k.secondary,
-                        )),
-                ),
+            div().flex().items_center().child(
+                div()
+                    .flex_1()
+                    .n_title3()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .child(m::CAPACITY),
+            ),
         )
         .child(
             div()
@@ -587,7 +583,9 @@ fn seg(share: f32, color: Hsla, cx: &App) -> gpui::Div {
         .when(share <= 0., |d| d.w(gpui::Pixels::ZERO))
 }
 
-fn swatch(label: &'static str, value: &str, color: Hsla, cx: &App) -> impl IntoElement {
+/// A legend entry. `None` is the free part: an outline swatch (the offline-dot recipe of
+/// §2.12), since the track's own fill disappears on a white card.
+fn swatch(label: &'static str, value: &str, color: Option<Hsla>, cx: &App) -> impl IntoElement {
     let k = native_colors(cx);
     div()
         .flex()
@@ -600,15 +598,16 @@ fn swatch(label: &'static str, value: &str, color: Hsla, cx: &App) -> impl IntoE
                 .flex_none()
                 .size(t::SWATCH)
                 .rounded(radius::CHECKBOX)
-                .bg(color)
-                .border_1()
-                .border_color(k.separator),
+                .map(|d| match color {
+                    Some(c) => d.bg(c),
+                    None => d.border_1().border_color(k.secondary),
+                }),
         )
         .child(label)
         .child(
             div()
                 .n_figures()
-                .font_weight(gpui::FontWeight::MEDIUM)
+                .font_weight(crate::theme::MEDIUM_WEIGHT)
                 .text_color(k.label)
                 .child(value.to_string()),
         )
@@ -648,7 +647,7 @@ pub(super) fn attention_panel(items: Vec<model::Attention>, cx: &App) -> gpui::D
                         .child(m::ATTENTION),
                 )
                 .when(n > 0, |d| {
-                    d.child(crate::ui::native::CountPill::new(n as u32).tone(k.amber))
+                    d.child(crate::ui::native::CountPill::new(n as u32))
                 }),
         )
         .when(n == 0, |d| {
@@ -679,12 +678,8 @@ pub(super) fn attention_panel(items: Vec<model::Attention>, cx: &App) -> gpui::D
                         .flex_none()
                         .size(height::DEFAULT)
                         .rounded(radius::CONTROL)
-                        // The tone's color, faint, under the symbol in that color (Admin artboard).
-                        .bg(c.opacity(if k.is_dark() {
-                            t::ATTENTION_TINT_DARK
-                        } else {
-                            t::ATTENTION_TINT
-                        }))
+                        // The neutral icon box; the state color stays on the symbol (§1.3).
+                        .bg(k.fill)
                         .flex()
                         .items_center()
                         .justify_center()
@@ -768,7 +763,10 @@ fn members(
                     .flex()
                     .items_center()
                     .gap(space::S4)
+                    // The hover fill reaches 4 past the label; the ink stays on the
+                    // column's edge, as in the 成员 table.
                     .px(space::S4)
+                    .mx(-space::S4)
                     .rounded(radius::ITEM)
                     .hover(|s| s.bg(k.fill_hover))
                     .n_section()
@@ -824,7 +822,8 @@ fn members(
                     .child(cell(Some(t::COL_COUNT), true).child(r.doing.to_string()))
                     .child(
                         cell(Some(t::COL_COUNT), true)
-                            .text_color(if r.waiting > 0 { k.amber } else { k.secondary })
+                            // Weight, not a state color, marks a count above zero (§1.3).
+                            .text_color(if r.waiting > 0 { k.label } else { k.secondary })
                             .when(r.waiting > 0, |d| d.font_weight(gpui::FontWeight::SEMIBOLD))
                             .child(r.waiting.to_string()),
                     )
@@ -836,29 +835,17 @@ fn members(
                     .child(
                         cell(Some(t::COL_MEM), false)
                             .gap(space::S8)
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .w(t::MEMBER_BAR_WIDTH)
-                                    .h(t::MEMBER_BAR)
-                                    .rounded_full()
-                                    .bg(k.fill)
-                                    .overflow_hidden()
-                                    .child(
-                                        div()
-                                            .h_full()
-                                            .rounded_full()
-                                            .bg(k.label)
-                                            .w(relative(model::share(r.mem_bytes, max_mem))),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .flex()
-                                    .justify_end()
-                                    .child(model::bytes(r.mem_bytes)),
-                            ),
+                            .child(div().flex_none().w(t::MEMBER_BAR_WIDTH).child(
+                                crate::ui::native::progress(model::share(r.mem_bytes, max_mem), cx),
+                            ))
+                            // Nothing in use reads as "—", never "0 B" (F5).
+                            .child(div().flex_1().flex().justify_end().map(|d| {
+                                if r.mem_bytes == 0 {
+                                    d.text_color(k.secondary).child("—")
+                                } else {
+                                    d.child(model::bytes(r.mem_bytes))
+                                }
+                            })),
                     )
                     .child(cell(Some(t::COL_TOKENS), true).child(model::count_short(r.tokens)))
                     .child(

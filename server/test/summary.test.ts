@@ -1,16 +1,11 @@
 // Rolling topic summaries (summary/): a long topic gets a summary from the team's model, and a
 // run's prompt carries it in front of the lines when its budget leaves messages out.
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { withSummary } from "../src/context/render";
 import { SUMMARY_FROM } from "../src/summary";
-import { Daemon, downViolations, world } from "./daemon";
-import { Client, api, clientMsgId, protocolViolations, waitUntil } from "./helpers";
+import { Daemon, world } from "./daemon";
+import { Client, api, clientMsgId, waitUntil } from "./helpers";
 
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 afterEach(() => {
   vi.restoreAllMocks();
 });

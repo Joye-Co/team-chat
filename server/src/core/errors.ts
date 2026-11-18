@@ -44,7 +44,7 @@ export function toErrorBody(err: unknown): ErrorBody {
 
 export function unwrap<T>(r: Result<T>): T {
   if (r.ok) return r.value;
-  throw new ApiError(r.error.code, r.error.message, r.error.reason, undefined, r.error.memberIds);
+  throw new ApiError(r.error.code, r.error.message, r.error.reason, r.error.retryAfterMs, r.error.memberIds);
 }
 
 /** The `reason` of a frame that failed its schema: a named card rule, or a deferred secret input. */

@@ -725,7 +725,6 @@ impl CardsGallery {
 
     /// The confirm sheet as it opens, with the name half typed.
     fn sheet_preview(&self, cx: &App) -> AnyElement {
-        let k = theme::colors(cx);
         let Some(msg) = self.services.provider.card_v2(OPS, APPROVE) else {
             return div().into_any_element();
         };
@@ -735,25 +734,33 @@ impl CardsGallery {
             msg.card.ask.as_ref().and_then(|a| a.irreversible.as_ref()),
         );
         let field = confirm::field_box(div().child("orderbot-pr").into_any_element(), cx);
+        // The window dimmed by the real scrim token, as under the live sheet.
+        let n = crate::ui::native::native_colors(cx);
         div()
             .rounded(theme::radius::LG)
-            .bg(theme::card_v2::alpha(k.ink, 0.18))
-            .py(px(40.))
-            .px(px(48.))
-            .flex()
-            .justify_center()
+            .overflow_hidden()
+            .bg(n.content)
             .child(
-                crate::ui::native::sheet_surface(crate::ui::native::SheetWidth::Form, cx)
-                    .overflow_hidden()
-                    .child(confirm::sheet(
-                        &text,
-                        Some(field),
-                        false,
-                        "gallery-sheet",
-                        None,
-                        None,
-                        cx,
-                    )),
+                // Children are clipped to the box, not to its radius.
+                div()
+                    .rounded(theme::radius::LG)
+                    .bg(n.dim)
+                    .p(space::S48)
+                    .flex()
+                    .justify_center()
+                    .child(
+                        crate::ui::native::sheet_surface(crate::ui::native::SheetWidth::Form, cx)
+                            .overflow_hidden()
+                            .child(confirm::sheet(
+                                &text,
+                                Some(field),
+                                false,
+                                "gallery-sheet",
+                                None,
+                                None,
+                                cx,
+                            )),
+                    ),
             )
             .into_any_element()
     }

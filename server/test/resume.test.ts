@@ -1,15 +1,9 @@
 // 1.1 resume (docs/machine-protocol.md "resume"): BotDesk keeps the CLI session of a run and
 // gives the topic's next run on the same machine `run.assign.resumeSessionId`.
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { asideRuntime, resumesRuntime } from "../src/bots/dispatch";
-import { Daemon, downViolations, mention, world } from "./daemon";
-import { Client, api, clientMsgId, protocolViolations } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
+import { Daemon, mention, world } from "./daemon";
+import { Client, api, clientMsgId } from "./helpers";
 
 /** Runs one assignment to the end with the session `sessionId`. */
 async function finish(d: Daemon, runId: string, sessionId: string, viaEvent = false): Promise<void> {

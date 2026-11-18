@@ -358,6 +358,11 @@ pub fn seeded(root: &Path, now: u64) -> Arc<CoreProvider> {
         ),
     ];
     store.apply_events(GROUP, &events).expect("events");
+    // The seed is each 话题's whole history: nothing older is on a server, so the
+    // thread opens with its start block, not with a page that never arrives.
+    for topic in [TOPIC, TOPIC_WEEKLY] {
+        store.insert_history(topic, &[], false).expect("history");
+    }
 
     // Version 2 is on disk, as after it was opened once.
     if let Ok(dir) =

@@ -290,7 +290,7 @@ pub fn sentence(
     }
 }
 
-/// The day header of a time: 今天, 昨天, or "11 月 8 日".
+/// The day header of a time: 今天, 昨天, or "11月8日".
 fn day_label(ms: u64) -> (chrono::NaiveDate, String) {
     use chrono::TimeZone as _;
     let today = crate::selftest::clock::local_now().date_naive();
@@ -496,8 +496,18 @@ impl AdminView {
             );
         let body: AnyElement = if let Some(e) = &a.error {
             Alert::new(Sym::Failed, m::ACTIVITY_FAILED)
+                .on_surface()
                 .tone(AlertTone::Destructive)
                 .description(e.clone())
+                .action(Self::retry_action(
+                    "activity-retry",
+                    |v, cx| {
+                        v.activity.error = None;
+                        v.activity.loaded = false;
+                        v.fetch_activity(false, cx);
+                    },
+                    cx,
+                ))
                 .into_any_element()
         } else if !a.loaded {
             div()

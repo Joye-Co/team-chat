@@ -86,6 +86,11 @@ pub(super) enum Item {
         id: GroupId,
         n: usize,
     },
+    /// A: the server is unreachable and a 群 has no cached 话题: the
+    /// muted line that says they come back.
+    Offline {
+        id: GroupId,
+    },
     /// A: an open 群 with no cached 话题 while the first sync runs: sidebar
     /// item skeletons (§2.14, T-13).
     Syncing {
@@ -236,13 +241,17 @@ pub(super) fn work(p: &dyn ChatProvider, i: &Inputs) -> Vec<Entry> {
         // open 群 shows sidebar skeleton rows, and nothing while unreachable.
         if !folded && empty {
             match i.sync {
-                Sync::Synced if all > 0 => section.push(Item::OtherTopics {
+                // The count comes from the cache, so it shows offline too.
+                _ if all > 0 => section.push(Item::OtherTopics {
                     id: g.id.clone(),
                     n: all,
                 }),
                 Sync::Synced => section.push(Item::NoTopics { id: g.id.clone() }),
                 Sync::Syncing => section.push(Item::Syncing { id: g.id.clone() }),
-                Sync::Unreachable => {}
+                // §2.13: a compact line under every 群 with nothing cached,
+                // as the page beside it says per section, so no header
+                // stands alone.
+                Sync::Unreachable => section.push(Item::Offline { id: g.id.clone() }),
             }
         }
         if !folded {
@@ -600,7 +609,9 @@ impl RailView {
                         // D1-56: beside the avatar, no leading emoji.
                         crate::ui::avatar::name_beside_avatar(name).to_string(),
                     )
-                    .leading(MemberAvatar::new(peer.as_ref(), ROW_AVATAR))
+                    // The roster can arrive after the list: the initial of
+                    // the printed name, never the no-name glyph beside a name.
+                    .leading(MemberAvatar::new(peer.as_ref(), ROW_AVATAR).fallback_name(name))
                     .selected(*selected)
                     .unread(*unread)
                     .muted(*muted)
@@ -690,6 +701,15 @@ impl RailView {
                 .flex()
                 .items_center()
                 .child(crate::ui::native::EmptyLine::new(c::RAIL_NO_TOPICS))
+                .into_any_element(),
+            Item::Offline { id } => div()
+                .id(SharedString::from(format!("rail-offline-{id}")))
+                .h(crate::ui::native::tokens::metrics::SIDEBAR_ROW)
+                .mx(crate::ui::native::tokens::metrics::SIDEBAR_ROW_INSET)
+                .pl(crate::ui::native::tokens::space::S8)
+                .flex()
+                .items_center()
+                .child(crate::ui::native::EmptyLine::new(c::RAIL_OFFLINE_TOPICS))
                 .into_any_element(),
             Item::OtherTopics { id, n } => {
                 let nav = self.services.nav.clone();

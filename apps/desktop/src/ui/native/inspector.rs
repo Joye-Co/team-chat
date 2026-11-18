@@ -54,9 +54,11 @@ pub struct InspectorSection {
     title: SharedString,
     collapsed: bool,
     action: Option<AnyElement>,
+    note: Option<SharedString>,
     rows: Vec<AnyElement>,
     on_toggle: Option<Click>,
     grouped: bool,
+    list_rows: bool,
 }
 
 impl InspectorSection {
@@ -66,9 +68,11 @@ impl InspectorSection {
             title: title.into(),
             collapsed: false,
             action: None,
+            note: None,
             rows: Vec::new(),
             on_toggle: None,
             grouped: false,
+            list_rows: false,
         }
     }
 
@@ -81,6 +85,14 @@ impl InspectorSection {
         self
     }
 
+    /// A grouped section whose rows are a list of one kind (members): the
+    /// rows are [`metrics::INSPECTOR_LIST_ROW`] high and touch, so the same
+    /// list has one pitch in every pane (§2.6 compact rows, D13).
+    pub fn list_rows(mut self) -> Self {
+        self.list_rows = true;
+        self
+    }
+
     pub fn collapsed(mut self, collapsed: bool) -> Self {
         self.collapsed = collapsed;
         self
@@ -90,6 +102,14 @@ impl InspectorSection {
     /// edge of the header.
     pub fn action(mut self, el: impl IntoElement) -> Self {
         self.action = Some(el.into_any_element());
+        self
+    }
+
+    /// A 12 muted note in the header of a grouped section, before the
+    /// action (a fact about the section that is not one of its rows: no
+    /// member works on it yet). Cut at the tail.
+    pub fn note(mut self, text: impl Into<SharedString>) -> Self {
+        self.note = Some(text.into());
         self
     }
 
@@ -130,13 +150,14 @@ impl RenderOnce for InspectorSection {
                         .gap(super::tokens::space::S6)
                         .child(
                             div()
-                                .flex_1()
-                                .min_w(px(0.))
+                                .flex_none()
                                 .n_headline()
                                 .text_color(k.label)
                                 .child(self.title),
                         )
-                        .children(self.action)
+                        // The chevron trails the title; the action stands
+                        // alone at the trailing edge, so the two never read
+                        // as one pull-down.
                         .child(symbol(
                             chevron,
                             super::tokens::icon::SM,
@@ -144,6 +165,18 @@ impl RenderOnce for InspectorSection {
                             k.tertiary,
                             window,
                         ))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(px(0.))
+                                .pl(super::tokens::space::S6)
+                                .flex()
+                                .justify_end()
+                                .n_subheadline()
+                                .text_color(k.secondary)
+                                .children(self.note.map(TruncText::new)),
+                        )
+                        .children(self.action)
                         .when_some(self.on_toggle, |d, f| {
                             d.on_click(move |e, w, cx| f(e, w, cx))
                         }),
@@ -160,14 +193,17 @@ impl RenderOnce for InspectorSection {
                             .py(px(10.))
                             .flex()
                             .flex_col()
-                            .gap(super::tokens::space::S6)
+                            .when(!self.list_rows, |d| d.gap(super::tokens::space::S6))
                             .children(self.rows),
                     )
                 })
                 .into_any_element();
         }
         // COMPLETENESS.md §2.5: px 16, sections 24 apart; the GroupLabel h32
-        // (12 medium muted) with an optional 28 ghost action.
+        // (12 medium muted) with an optional 28 ghost action. With an action the
+        // first row starts 4 lower, so the 28 control never sits 2 above a
+        // selected row's fill.
+        let has_action = self.action.is_some();
         div()
             .w_full()
             .px(metrics::INSPECTOR_PAD)
@@ -202,6 +238,9 @@ impl RenderOnce for InspectorSection {
                         d.on_click(move |e, w, cx| f(e, w, cx))
                     }),
             )
+            .when(has_action && !self.collapsed, |d| {
+                d.child(div().flex_none().h(super::tokens::space::S4))
+            })
             .when(!self.collapsed, |d| d.children(self.rows))
             .into_any_element()
     }

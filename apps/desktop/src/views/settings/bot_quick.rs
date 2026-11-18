@@ -156,7 +156,7 @@ impl BotQuick {
         .detach();
     }
 
-    fn fields(&self, r: &RunnerSetup, window: &Window, cx: &mut Context<Self>) -> gpui::Div {
+    fn fields(&self, r: &RunnerSetup, _window: &Window, cx: &mut Context<Self>) -> gpui::Div {
         let me = super::my_id(&self.services);
         let view = PlaceView::of(&self.services, self.this_machine.as_deref(), me.as_deref());
         let picked = r.machine_id.clone();
@@ -175,11 +175,19 @@ impl BotQuick {
                 sheet_form().child(sheet_form_row(
                     s::RUNNER_MACHINE,
                     div()
+                        .w_full()
                         .flex()
                         .flex_col()
                         .gap(tokens::space::S4)
-                        .child(widgets::row_value(
-                            machine_choice_text(picked.as_deref(), &self.machines, view),
+                        .child(crate::ui::native::disabled_push(
+                            widgets::popup_fill(
+                                "quick-machine",
+                                machine_choice_text(picked.as_deref(), &self.machines, view),
+                                false,
+                                SheetWidth::List,
+                                cx,
+                            ),
+                            true,
                             cx,
                         ))
                         .children(hint.map(|h| widgets::quiet(h, cx))),
@@ -190,26 +198,20 @@ impl BotQuick {
         let options = machine_options(picked.as_deref(), &self.machines, view);
         let shown = machine_choice_text(picked.as_deref(), &self.machines, view);
         let view = cx.entity();
-        let select = widgets::popup_fixed(
-            "quick-machine",
-            shown,
-            tokens::size::SELECT_WIDE,
-            window,
-            cx,
-        )
-        .dropdown_menu(move |menu, _, _| {
-            options.iter().fold(menu, |menu, (id, text)| {
-                let (id, view) = (id.clone(), view.clone());
-                menu.item(
-                    PopupMenuItem::new(text.clone())
-                        .checked(id == picked)
-                        .on_click(move |_, _, cx| {
-                            let id = id.clone();
-                            view.update(cx, |q, cx| q.pick(id, cx))
-                        }),
-                )
-            })
-        });
+        let select = widgets::popup_fill("quick-machine", shown, false, SheetWidth::List, cx)
+            .dropdown_menu(move |menu, _, _| {
+                options.iter().fold(menu, |menu, (id, text)| {
+                    let (id, view) = (id.clone(), view.clone());
+                    menu.item(
+                        PopupMenuItem::new(text.clone())
+                            .checked(id == picked)
+                            .on_click(move |_, _, cx| {
+                                let id = id.clone();
+                                view.update(cx, |q, cx| q.pick(id, cx))
+                            }),
+                    )
+                })
+            });
         div()
             .w_full()
             .child(sheet_form().child(sheet_form_row(s::RUNNER_MACHINE, select, cx)))

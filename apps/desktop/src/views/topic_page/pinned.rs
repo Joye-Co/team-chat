@@ -16,7 +16,7 @@ use crate::{
     app::RightPane,
     copy::{common, fill, topic_rail as c},
     data::{
-        Millis,
+        AdminError, AdminReply, Millis,
         v2::{AskItem, AskKind, ChangeState},
     },
     ui::{
@@ -165,19 +165,50 @@ impl TopicPage {
         })
     }
 
-    fn approve(&mut self, g: String, t: String, cx: &mut Context<Self>) {
+    fn approve(&mut self, g: String, t: String, window: &mut Window, cx: &mut Context<Self>) {
+        if self.pinned_busy {
+            return;
+        }
         let reply = self.services.provider.approve_changes(&g, &t);
-        cx.spawn(async move |_, _| {
-            let _ = reply.await;
-        })
-        .detach();
-        cx.notify();
+        self.await_pinned(reply, c::APPROVE_REFUSED, window, cx);
     }
 
-    fn withdraw(&mut self, g: String, t: String, cx: &mut Context<Self>) {
+    fn withdraw(&mut self, g: String, t: String, window: &mut Window, cx: &mut Context<Self>) {
+        if self.pinned_busy {
+            return;
+        }
         let reply = self.services.provider.withdraw_changes_approval(&g, &t);
-        cx.spawn(async move |_, _| {
-            let _ = reply.await;
+        self.await_pinned(reply, c::WITHDRAW_REFUSED, window, cx);
+    }
+
+    /// Holds the banner's button busy until `reply` answers; a refusal blocks with an alert
+    /// titled `refused` (the banner stays as it was, so the press never looks like nothing).
+    fn await_pinned(
+        &mut self,
+        reply: AdminReply<()>,
+        refused: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.pinned_busy = true;
+        let handle = window.window_handle();
+        cx.spawn(async move |this, cx| {
+            let result = reply.await.unwrap_or(Err(AdminError::Other));
+            let _ = this.update(cx, |this, cx| {
+                this.pinned_busy = false;
+                cx.notify();
+            });
+            if let Err(e) = result {
+                let _ = handle.update(cx, |_, window, cx| {
+                    crate::views::nav::dialogs::error_alert(
+                        refused,
+                        crate::views::settings::widgets::error_text(e),
+                        |_, _| {},
+                        window,
+                        cx,
+                    )
+                });
+            }
         })
         .detach();
         cx.notify();
@@ -243,6 +274,7 @@ impl TopicPage {
             return None;
         }
         let (g, t) = (g.to_string(), t.to_string());
+        let busy = self.pinned_busy;
         let sm = |id: &str, label: &str, style: PushStyle, cx: &mut Context<Self>| {
             push_button(
                 ElementId::Name(SharedString::from(id.to_string())),
@@ -252,132 +284,132 @@ impl TopicPage {
                 cx,
             )
         };
-        let body: AnyElement = match state {
-            Pinned::Record {
-                text,
-                at,
-                withdraw,
-                merging,
-            } => {
-                let mut alert = Alert::new(if merging { Sym::Merge } else { Sym::Done }, text)
-                    .icon_color(if merging { k.blue } else { k.green });
-                if let Some(when) = when(at) {
-                    alert = alert.description(when);
+        let body: AnyElement =
+            match state {
+                Pinned::Record {
+                    text,
+                    at,
+                    withdraw,
+                    merging,
+                } => {
+                    let mut alert = Alert::new(if merging { Sym::Merge } else { Sym::Done }, text)
+                        .icon_color(if merging { k.blue } else { k.green });
+                    if let Some(when) = when(at) {
+                        alert = alert.description(when);
+                    }
+                    if withdraw {
+                        alert = alert.action(
+                            sm("pinned-withdraw", c::WITHDRAW, PushStyle::Outline, cx)
+                                .loading(busy)
+                                .on_click(cx.listener({
+                                    let (g, t) = (g.clone(), t.clone());
+                                    move |this, _: &ClickEvent, window, cx| {
+                                        this.withdraw(g.clone(), t.clone(), window, cx)
+                                    }
+                                })),
+                        );
+                    }
+                    alert.into_any_element()
                 }
-                if withdraw {
-                    alert = alert.action(
-                        sm("pinned-withdraw", c::WITHDRAW, PushStyle::Outline, cx).on_click(
-                            cx.listener({
-                                let (g, t) = (g.clone(), t.clone());
-                                move |this, _: &ClickEvent, _, cx| {
-                                    this.withdraw(g.clone(), t.clone(), cx)
-                                }
-                            }),
-                        ),
-                    );
-                }
-                alert.into_any_element()
-            }
-            Pinned::Review {
-                number,
-                files,
-                merger,
-                ..
-            } => Alert::new(
-                Sym::NeedsYou,
-                fill(c::REVIEW_TITLE, &[("n", &number.to_string())]),
-            )
-            .tone(AlertTone::Warning)
-            .description(fill(
-                c::REVIEW_LINE,
-                &[("files", &files.to_string()), ("name", &merger)],
-            ))
-            .action(
-                sm("pinned-see-changes", c::SEE_CHANGES, PushStyle::Outline, cx).on_click(
-                    cx.listener(|this, _: &ClickEvent, _, cx| {
-                        this.services
-                            .nav
-                            .update(cx, |nav, cx| nav.set_right_pane(RightPane::Changes, cx));
-                    }),
-                ),
-            )
-            .action(
-                sm(
-                    "pinned-request",
-                    c::REQUEST_CHANGES_MORE,
-                    PushStyle::Outline,
-                    cx,
+                Pinned::Review {
+                    number,
+                    files,
+                    merger,
+                    ..
+                } => Alert::new(
+                    Sym::NeedsYou,
+                    fill(c::REVIEW_TITLE, &[("n", &number.to_string())]),
                 )
-                .on_click(
-                    cx.listener(|this, _: &ClickEvent, window, cx| {
-                        this.request_changes(window, cx)
-                    }),
-                ),
-            )
-            .action(
-                sm("pinned-approve", c::APPROVE_MERGE, PushStyle::Default, cx).on_click(
-                    cx.listener({
+                .tone(AlertTone::Warning)
+                .description(fill(
+                    c::REVIEW_LINE,
+                    &[("files", &files.to_string()), ("name", &merger)],
+                ))
+                .action(
+                    sm("pinned-see-changes", c::SEE_CHANGES, PushStyle::Outline, cx).on_click(
+                        cx.listener(|this, _: &ClickEvent, _, cx| {
+                            this.services
+                                .nav
+                                .update(cx, |nav, cx| nav.set_right_pane(RightPane::Changes, cx));
+                        }),
+                    ),
+                )
+                .action(
+                    sm(
+                        "pinned-request",
+                        c::REQUEST_CHANGES_MORE,
+                        PushStyle::Outline,
+                        cx,
+                    )
+                    .on_click(cx.listener(
+                        |this, _: &ClickEvent, window, cx| this.request_changes(window, cx),
+                    )),
+                )
+                .action(
+                    sm("pinned-approve", c::APPROVE_MERGE, PushStyle::Default, cx)
+                        .loading(busy)
+                        .on_click(cx.listener({
+                            let (g, t) = (g.clone(), t.clone());
+                            move |this, _: &ClickEvent, window, cx| {
+                                this.approve(g.clone(), t.clone(), window, cx)
+                            }
+                        })),
+                )
+                .into_any_element(),
+                Pinned::Ask { ask } => {
+                    let from = fill(
+                        c::ASK_FROM,
+                        &[("name", &banner_name(&self.services, &ask.from))],
+                    );
+                    let line = match when(ask.at) {
+                        Some(at) => format!("{from} · {at}"),
+                        None => from,
+                    };
+                    // The title is the card's question, so banner and card never
+                    // disagree; the ask's own title only when there is no card.
+                    let title = ask
+                        .message_id
+                        .as_deref()
+                        .and_then(|id| {
+                            let p = &self.services.provider;
+                            p.card_v2(&g, id)
+                                .map(|c| c.card.title.clone())
+                                .or_else(|| p.card(&g, id).map(|c| c.title.clone()))
+                        })
+                        .filter(|t| !t.trim().is_empty())
+                        .unwrap_or_else(|| ask.title.clone());
+                    let mut alert = Alert::new(Sym::NeedsYou, title)
+                        .tone(AlertTone::Warning)
+                        .description(line);
+                    if ask.message_id.is_none() {
+                        // No card to open: 回答 starts the reply to the asker.
+                        let from = member_name(&self.services, &ask.from);
+                        alert = alert.action(
+                            sm("pinned-answer", c::ANSWER, PushStyle::Outline, cx).on_click(
+                                cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    let text = format!("@{from} ");
+                                    this.composer.update(cx, |composer, cx| {
+                                        composer.insert_text(&text, window, cx)
+                                    });
+                                }),
+                            ),
+                        );
+                    }
+                    if let Some(id) = ask.message_id.clone() {
                         let (g, t) = (g.clone(), t.clone());
-                        move |this, _: &ClickEvent, _, cx| this.approve(g.clone(), t.clone(), cx)
-                    }),
-                ),
-            )
-            .into_any_element(),
-            Pinned::Ask { ask } => {
-                let from = fill(
-                    c::ASK_FROM,
-                    &[("name", &banner_name(&self.services, &ask.from))],
-                );
-                let line = match when(ask.at) {
-                    Some(at) => format!("{from} · {at}"),
-                    None => from,
-                };
-                // The title is the card's question, so banner and card never
-                // disagree; the ask's own title only when there is no card.
-                let title = ask
-                    .message_id
-                    .as_deref()
-                    .and_then(|id| {
-                        let p = &self.services.provider;
-                        p.card_v2(&g, id)
-                            .map(|c| c.card.title.clone())
-                            .or_else(|| p.card(&g, id).map(|c| c.title.clone()))
-                    })
-                    .filter(|t| !t.trim().is_empty())
-                    .unwrap_or_else(|| ask.title.clone());
-                let mut alert = Alert::new(Sym::NeedsYou, title)
-                    .tone(AlertTone::Warning)
-                    .description(line);
-                if ask.message_id.is_none() {
-                    // No card to open: 回答 starts the reply to the asker.
-                    let from = member_name(&self.services, &ask.from);
-                    alert = alert.action(
-                        sm("pinned-answer", c::ANSWER, PushStyle::Outline, cx).on_click(
-                            cx.listener(move |this, _: &ClickEvent, window, cx| {
-                                let text = format!("@{from} ");
-                                this.composer.update(cx, |composer, cx| {
-                                    composer.insert_text(&text, window, cx)
-                                });
-                            }),
-                        ),
-                    );
+                        alert = alert.action(
+                            sm("pinned-see", c::SEE_QUESTION_SHORT, PushStyle::Outline, cx)
+                                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                    let (g, t, id) = (g.clone(), t.clone(), id.clone());
+                                    this.services
+                                        .nav
+                                        .update(cx, |nav, cx| nav.open_message(g, t, id, 0, cx));
+                                })),
+                        );
+                    }
+                    alert.into_any_element()
                 }
-                if let Some(id) = ask.message_id.clone() {
-                    let (g, t) = (g.clone(), t.clone());
-                    alert = alert.action(
-                        sm("pinned-see", c::SEE_QUESTION_SHORT, PushStyle::Outline, cx).on_click(
-                            cx.listener(move |this, _: &ClickEvent, _, cx| {
-                                let (g, t, id) = (g.clone(), t.clone(), id.clone());
-                                this.services
-                                    .nav
-                                    .update(cx, |nav, cx| nav.open_message(g, t, id, 0, cx));
-                            }),
-                        ),
-                    );
-                }
-                alert.into_any_element()
-            }
-        };
+            };
         let _ = window;
         Some(div().w_full().child(body).into_any_element())
     }

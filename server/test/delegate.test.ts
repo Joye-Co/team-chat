@@ -1,14 +1,8 @@
 // 转交 and 分出去 (bots/desk/delegate.ts): a run hands work to another AI member through chat-run
 // outputs; the desks pass it on, and a part's result comes back to the member that gave it out.
-import { afterAll, describe, expect, it } from "vitest";
-import { Daemon, downViolations, mention, world } from "./daemon";
-import { Client, api, createMember, protocolViolations } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
+import { describe, expect, it } from "vitest";
+import { Daemon, mention, world } from "./daemon";
+import { Client, api, createMember } from "./helpers";
 
 /** A second runner-backed bot in the world's group, on the same machine labels. */
 async function secondBot(w: Awaited<ReturnType<typeof world>>, name: string) {

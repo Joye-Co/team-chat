@@ -102,7 +102,7 @@ impl RenderOnce for Segmented {
                         .text_color(ink)
                         .whitespace_nowrap()
                         .child(l.clone())
-                        .child(super::badge::CountPill::new(*n))
+                        .child(super::badge::CountPill::new(*n).on_fill(!selected))
                         .into_any_element(),
                     Segment::Symbol(sf, _) => symbol(*sf, icon::MD, Weight::Regular, ink, window),
                 };
@@ -148,7 +148,10 @@ impl RenderOnce for Segmented {
             .h(metrics::SEGMENTED)
             .p(metrics::SEGMENT_INSET)
             .rounded(radius::CONTAINER)
-            .bg(k.fill)
+            .bg(k.segment_track)
+            // Disabled: 50 % opacity (§1.8), so a value that cannot be
+            // changed does not look like a live control.
+            .when(disabled, |d| d.opacity(metrics::DISABLED_OPACITY))
             .flex()
             .items_center()
             .children(items)

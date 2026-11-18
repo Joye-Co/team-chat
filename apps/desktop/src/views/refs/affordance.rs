@@ -102,6 +102,14 @@ fn hub_of(cx: &App) -> Option<gpui::Entity<RefsHub>> {
 /// symbol (NATIVE.md §5.2), never an ink pill.
 pub fn ask_button(id: impl Into<ElementId>, cx: &App) -> Button {
     let n = crate::ui::native::native_colors(cx);
+    ask_button_flat(id, cx).bg(n.sheet).shadow(n.float())
+}
+
+/// [`ask_button`] in a row of flat controls (the action strip of a code
+/// fence): the plain outline sm push button (D11, §1.8: its fill and hover
+/// from the tokens, no shadow), since it floats over nothing there.
+fn ask_button_flat(id: impl Into<ElementId>, cx: &App) -> Button {
+    let n = crate::ui::native::native_colors(cx);
     crate::ui::native::push_button(
         id,
         c::ASK_HERE,
@@ -109,8 +117,6 @@ pub fn ask_button(id: impl Into<ElementId>, cx: &App) -> Button {
         crate::ui::native::PushSize::Small,
         cx,
     )
-    .bg(n.sheet)
-    .shadow(n.float())
     .icon(ui::icon(Sym::Quote, px(16.), n.secondary))
 }
 
@@ -268,8 +274,22 @@ pub fn hover_button(id: &str, target: Rc<dyn Fn(&App) -> PartTarget>, cx: &App) 
         .id(ElementId::Name(format!("ask-slot-{id}").into()))
         .on_hover(track_hover(id.to_string()))
         .when(!shown, |d| d.opacity(0.))
-        .child(inline_button(id, target, cx))
+        .child(
+            ask_button_flat(ElementId::Name(format!("ask-{id}").into()), cx).on_click(
+                move |_, window, cx| {
+                    cx.stop_propagation();
+                    ask_about(target(cx), RefIntent::Topic, window, cx);
+                },
+            ),
+        )
         .into_any_element()
+}
+
+/// The pointer is over a part that can be asked about: Alt held there marks the part
+/// (⌥ click asks), so on Windows that Alt is not the menus' key (`nav::menus`).
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub fn pointer_on_part(cx: &App) -> bool {
+    hub_of(cx).is_some_and(|h| h.read(cx).hover.is_some())
 }
 
 /// The hover state of `id` for renderers that draw the button themselves.

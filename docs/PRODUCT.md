@@ -83,7 +83,7 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
   and in 详情 → 成员 在做 and 参与过. Several members can work in a 话题 at once or one after
   another; no member is the one responsible for a 话题.
 - The settings window may also use 岗位 (role and how the member works), 权限 (permissions),
-  机器 (machines) and 成本 (cost).
+  机器 (machines) and 花费 (cost).
 - Words for a computer's GitHub (docs/plans/usable/design-github-identity.zh.md §3.5–3.7): GitHub is
   a proper name, not a product noun, and the sign-in belongs to the 电脑, never to a person; 仓库 and
   PR; GitHub @{login}, 未登录 GitHub, 这台电脑还没有登录 GitHub, 这台电脑的 GitHub 登录失效了; the
@@ -96,9 +96,10 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
 - Words for a run's state and 接管 (docs/plans/usable/design-takeover.zh.md §3.9): 暂停, 继续, 已暂停,
   已停止, 没做完, 在等电脑, 排队第 {n} 个, 电脑不在线, 正在准备, 等 {who} 回复, 等 {who} 批准,
   卡住了，需要你看一下, {who} 暂停了 {member}, 你在操作 {computer}, {who} 在操作 {computer}, 已停下,
-  替 {who} 交还, 去回复, 运行, 中止, 运行中, 成功, 失败, 已中止, 工作目录, 在访达中打开 / 在资源管理器中打开,
+  替 {who} 交还, 去回复, 运行, 中止, 运行中, 成功, 失败, 已中止, 工作目录, 在访达中打开 / 在文件资源管理器中打开,
   留句话给 {member}, {who} 接管了 {member}, {who} 交还了 {member}, 跑了 {k} 条命令, 改了 {files}, and the
-  reminders {member} 还停着，等你交还 and {who} 接管 {member} 已经 {h} 小时. 暂停 stops one run for a
+  reminders {member} 还停着，等你交还 and {who} 接管 {member} 已经 {h} 小时, and under 电脑不在线 the line
+  {computer} 回来后会接着做. 暂停 stops one run for a
   while (继续 lets it go on); it is not a setting of the member. 暂停, 等你 and 完成 never share words.
 - The three 身份 of a team (design-roles): 所有者, 管理员 and 普通成员, with 身份 itself and the menu
   items 设为所有者, 设为管理员, 设为普通成员. 负责人 stays the member a 话题 is assigned to and is
@@ -133,7 +134,7 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
   rendered natively), the newest decision that waits on me pinned above the composer, and the
   composer (multi-line, Chinese IME, @mentions, quote a message, paste or drop images and files).
   On the right, the topic rail (详情): 成员 (everyone in the 群, who all see the 话题, with the AI
-  members at work marked 在做, those that took part 参与过, and the one who 提出 it), 计划, 改动, 产出, 用到的决定, 电脑, 用时和成本; a card
+  members at work marked 在做, those that took part 参与过, and the one who 提出 it), 计划, 改动, 产出, 用到的决定, 电脑, 用时和花费; a card
   with no data is hidden.
 - **单独问** (⌘;): a side chat with a member (the main bot by default) beside a topic. The member has read
   the topic up to now. Only I see the questions and answers. A suggested step goes into the topic

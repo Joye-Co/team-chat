@@ -427,6 +427,11 @@ impl SettingsView {
         self.scroll.scroll_to_bottom();
     }
 
+    /// The pane's scroll (self-tests).
+    pub fn scroll_handle(&self) -> gpui::ScrollHandle {
+        self.scroll.clone()
+    }
+
     pub fn general(&self) -> &Entity<GeneralPage> {
         &self.general
     }

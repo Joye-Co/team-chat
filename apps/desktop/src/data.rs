@@ -1875,8 +1875,11 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn rename_group(&self, _group_id: &str, _name: String) -> AdminReply<()> {
         reply_now(Err(AdminError::Unsupported))
     }
-    /// Leaves a group (`DELETE /v1/groups/:id/members/<me>`). Emits `Change::Groups`.
-    fn leave_group(&self, _group_id: &str) {}
+    /// Leaves a group (`DELETE /v1/groups/:id/members/<me>`). Emits `Change::Groups`. The
+    /// answer says whether the server took it, so a refusal can be shown.
+    fn leave_group(&self, _group_id: &str) -> AdminReply<()> {
+        reply_now(Ok(()))
+    }
     /// My mute preference of a group (`GroupSummary.muted`).
     fn group_muted(&self, _group_id: &str) -> bool {
         false
@@ -2099,7 +2102,7 @@ pub trait ChatProvider: Send + Sync + 'static {
         reply_now(Err(AdminError::Unsupported))
     }
 
-    /// Owners: 汇报给 and 限额 of a member (`PATCH /v1/members/:id` with `reportsTo` and
+    /// Owners: 汇报给 and 预算 of a member (`PATCH /v1/members/:id` with `reportsTo` and
     /// `weeklyBudgetCents`; `None` clears). Answers with the stored member.
     fn set_member_plan(&self, _member_id: &str, _plan: pages::MemberPlan) -> AdminReply<Member> {
         reply_now(Err(AdminError::Unsupported))
@@ -2475,7 +2478,7 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn run_usage(&self, _run_id: &str) -> Option<v2::RunUsage> {
         None
     }
-    /// 用时和成本 of a 话题. The default adds up the runs' times and usage.
+    /// 用时和花费 of a 话题. The default adds up the runs' times and usage.
     fn topic_cost(&self, group_id: &str, topic_id: &str) -> Option<v2::TopicCost> {
         let runs = self.runs(group_id, topic_id);
         if runs.is_empty() {

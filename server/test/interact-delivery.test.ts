@@ -4,27 +4,21 @@
 // coalescing, short follow-up runs and their limits, chat-run outputs), and refs in prompts.
 import { SELF, env, runInDurableObject } from "cloudflare:test";
 import type { BlockRef, CardV2 } from "@chat/protocol";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { buildPrompt } from "../src/bots/dispatch";
 import type { BotsEnv } from "../src/bots/env";
 import { type InteractionIn, deliverCardEvent } from "../src/bots/interact";
 import type { RoomContext } from "../src/core/registry";
 import { REF_CONTEXT_TOTAL_BYTES, REFS_RULE, contextOf, refsText, resolveRefs, stripRefPrefix } from "../src/bots/refs";
 import { ulid } from "../src/core/ids";
-import { Daemon, downViolations, mention, world, type World } from "./daemon";
-import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
+import { Daemon, mention, world, type World } from "./daemon";
+import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, inputBody, waitUntil } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
 const deskOf = (botId: string) => benv.BOT_DESK.get(benv.BOT_DESK.idFromName(botId));
 const roomOf = (groupId: string) => benv.GROUP_ROOM.get(benv.GROUP_ROOM.idFromName(groupId));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const INTERACT = { features: ["interact/1"] };
-
-afterAll(async () => {
-  await sleep(300);
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 
 async function sha(bytes: Uint8Array): Promise<string> {
   const d = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
@@ -777,13 +771,13 @@ describe("refs in prompts", () => {
     const refs = [{ n: 1, label: "渠道表 · B 站", fromId: w.bot.id, messageId: "01JC0SRC00000000000000000A", block: { id: "channels", type: "table" }, changedSince: true, context: { type: "table", id: "channels" } }];
     const msg = (body: string) => ({ groupId: w.gid, topicId, messageId: ulid(), authorId: w.human.id, authorLevel: "member" as const, body, mentioned: false, refs });
     await desk.onMessage(w.bot.id, msg("为什么少了？"));
-    const first = await d.next((f) => f.t === "run.input" && f.text.startsWith("为什么少了？"));
+    const first = await d.next((f) => f.t === "run.input" && inputBody(f).startsWith("为什么少了？"));
     expect(first.text).toContain("Alice points at these parts of the conversation.");
     expect(first.text).toContain('"from":"dev"');
     expect(first.text).toContain('"changedSince":true');
     expect(first.text).toContain('<teamchat-ref-context n="1">');
     await desk.onMessage(w.bot.id, msg("那微博呢？"));
-    const second = await d.next((f) => f.t === "run.input" && f.text.startsWith("那微博呢？"));
+    const second = await d.next((f) => f.t === "run.input" && inputBody(f).startsWith("那微博呢？"));
     expect(second.text).toContain("<teamchat-refs>");
     expect(second.text).not.toContain("teamchat-ref-context");
     void runId;

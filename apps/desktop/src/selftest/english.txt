@@ -88,7 +88,7 @@
 计划	Plan
 检查	Checks
 达标	Met
-要求	Requirements
+提出的人	Requested by
 验收标准	Acceptance criteria
 改动	Diff
 看改动	View changes
@@ -100,9 +100,8 @@
 版本	Version
 时间	Time
 用时	Time taken
-成本	Cost
 花费	Spend
-用时和成本	Time and cost
+用时和花费	Time and cost
 在哪	Where
 在哪干活	Where it works
 做的人	Made by
@@ -110,11 +109,10 @@
 来自话题	From topic
 被引用	Cited in
 用到的决定	Decisions used
-话题信息	Topic info
 产出信息	Artifact info
 在右侧打开	Open on the right
-和 v2 对比	Compare with v2
-和 v1 对比	Compare with v1
+看 v2	View v2
+看 v1	View v1
 回到 v3	Back to v3
 你在看 v2，不是最新版	You're viewing v2, not the latest
 有 v3	v3 available
@@ -129,13 +127,13 @@
 记一条	Add a note
 记得的事	Memory
 汇报给	Reports to
-汇报和限额	Reporting and limits
-每周限额	Weekly limit
+汇报和预算	Reporting and budget
+每周预算	Weekly budget
 能用的工具	Tools it can use
 只读	Read-only
 可以提 PR	Can open PRs
 可以部署和回滚	Can deploy and roll back
-添加成员…	Add member…
+添加 AI 成员…	Add AI member…
 添加电脑	Add computer
 用这台电脑	Use this computer
 团队的电脑	Team computers
@@ -214,7 +212,7 @@ AI 成员被 @ 后，在这些电脑上干活。	AI members work here when you @
 记忆更新	Memory update
 明天生效	Takes effect tomorrow
 第一版	First draft
-{} / 上限 {}	{} of {} limit
+{} / 预算 {}	{} of {} budget
 内存 {}	Memory {}
 现在 {}	Now {}
 磁盘 {}	Disk {}
@@ -222,7 +220,7 @@ AI 成员被 @ 后，在这些电脑上干活。	AI members work here when you @
 {} PR	{} PRs
 {} 月	{}
 10 月	October 
-11 月 3 日 周二	Tuesday, November 3
+11月3日 周二	Tuesday, November 3
 网页	Page
 办公室	Office
 
@@ -235,6 +233,9 @@ Forge 已暂停	Forge paused
 Forge 正在合并	Forge merging
 Forge 在做 {}	Forge working {}
 Forge 正在做：{}	Forge is working on: {}
+Forge 停在：{}	Forge stopped at: {}
+Forge：{}	Forge: {}
+Scout 卡住了	Scout is stuck
 Forge 会在下一步前看到	Forge sees this before its next step
 Jojo 的提醒	Note from Jojo
 Jojo 转给了 Forge	Jojo handed it to Forge
@@ -275,7 +276,7 @@ Forge 干活时记下	Noted by Forge on the job
 在跑压测	Running a load test
 本周 4 个话题	4 topics this week
 这周的进度、排队的事和在用的电脑	This week's progress, queue and computers in use
-来龙去脉、版本和页面能做的	Background, versions and what the page can do
+来龙去脉、版本和这一页能做的事	Background, versions and what the page can do
 Scout 巡检 staging	Scout checks staging
 Scout	Scout
 24 项都通过	All 24 passed
@@ -422,9 +423,6 @@ Joye 提出	Requested by Joye
 说说为什么，Tata 会写进需求（可选）	Say why (optional), and Tata will add it to the spec
 确定	Confirm
 打开原型	Open prototypes
-Forge 在等你批准	Forge is waiting for your approval
-Watch 在等你批准	Watch is waiting for your approval
-Taro 在等你确认	Taro is waiting for your OK
 PR #61 重连后按 seq 去重	PR #61 Dedupe by seq after reconnect
 通过	Approve
 要改	Request changes
@@ -490,3 +488,9 @@ Taro 推荐大字标题：上一条大字封面的点击率高了 40%。	Taro re
 选好后草稿里的封面会换掉	Your pick replaces the cover in the draft
 用这张	Use this one
 已 {}	{}
+还没填：{}	Still needed: {}
+上移	Move up
+下移	Move down
+点一下就算选了	One click answers
+选好再提交	Choose, then submit
+检查更新…	Check for Updates…

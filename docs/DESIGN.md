@@ -1,6 +1,13 @@
 # Design v3
 
-**v3 is the design of TeamChat 1.1.0.** It replaces v2.2. The owner found v2 "太朴素、太草稿了，不像
+> Two later files are binding and win over this one where they differ: the finish spec
+> [design/COMPLETENESS.md](design/COMPLETENESS.md) (pure black and white, one token module, one
+> scale, every state drawn) and the client rules [design/NATIVE.md](design/NATIVE.md), with
+> [design/WINDOWS.md](design/WINDOWS.md) for the Windows differences. NATIVE.md overrides §1–§8 and
+> §12–§13 here, and COMPLETENESS.md §4 replaces the §17 checklist. This file still owns Card v2
+> semantics (§7.10, §7.13–§7.17), member status words (§9), content (§10) and accessibility (§11).
+
+**v3 is the design of the app in 1.1.0.** It replaces v2.2. The owner found v2 "太朴素、太草稿了，不像
 production-ready" and asked for a polished, finished feel, more motion, a rethought left side and a
 right side modeled on Claude Desktop. v3 keeps the v2 rules that worked (96 pt composer, closed
 type scale, hover states on everything, color means something) and changes the rest: an ink-on-paper
@@ -171,8 +178,10 @@ border or a 1 pt top or bottom line in the same color; the result must match the
 
 ### 2.7 gpui-component theme mapping
 
-One JSON theme set (`apps/desktop/assets/theme.json`, `light` and `dark`). App-owned roles (state
-colors, member tints, shadows, `screen*`) live in `theme::Colors`.
+One token module (`apps/desktop/src/ui/native/tokens.rs`; its `Palette` holds the `light` and
+`dark` values), which `apps/desktop/src/theme.rs` loads into gpui-component's theme. App-owned
+roles (state colors, member tints, shadows, `screen*`) are read through `theme::Colors`, a view of
+the same palette.
 
 | Slot(s) | Token |
 | --- | --- |
@@ -356,7 +365,7 @@ and an accessible name; a 1 pt × 16 `line` divider before the rail toggle.
 | Page | State element | Right buttons |
 | --- | --- | --- |
 | Topic | One of: amber tag `需要你审 PR #61` (22 pt, radius 6, `you-bg`, 6 pt `you` dot, `meta` 500 `you-ink`) when the viewer is waited on; `live` 6 pt dot + `Forge 在做 3/5 · 跑一万条消息的压测` `ui` `ink-2` while a member works; `等小王` `ink-3`; `做完了 · 09:55` `ink-3`; nothing when open | 单独问 (`message-circle`, ⌘;), 产出 (`layers`), 电脑 (`monitor`, only while a member's computer is in use for this topic, with a 6 pt `live` dot at the top right), 改动 (`file-diff`, only with a change), divider, rail toggle (`panel-right`) |
-| 首页 | Date `11 月 3 日 周一` `meta` `ink-3` | — (the 正在做 column has its own toggle) |
+| 首页 | Date `11月3日 周一` `meta` `ink-3` | — (the 正在做 column has its own toggle) |
 | 群 | Purpose `ui` `ink-3`, member stack (20 pt, −4 overlap, max 5) + `9 位成员` | 单独问, 产出, `ellipsis`; 群资料 toggle in the pane header |
 | 成员 | Count `13` mono `ink-3`; detail: breadcrumb `成员 /` + name | 单独问, 产出, 电脑, rail toggle |
 | 产出 | Breadcrumb `群 /` + title + kind tag (`网页`) | Version picker (32 pt secondary: `v3` mono 600 + `今天 09:40` + chevron), `分享` secondary, `external-link` (open in its own window), 单独问; 来龙去脉 toggle in the pane header |
@@ -424,7 +433,7 @@ or irreversible actions open a confirm step (§7.10 批准).
 | Body | `body` 14/22, 4 pt under the meta line; paragraph gap 8 |
 | Event line | 20 pt, inset to the text column: 16 pt tile or glyph + `meta` `ink-3` (`Jojo 转给了 Forge`, `Forge 开始用 Mac mini`) + mono time |
 | Decision record | A full-width 40 pt row on `sunken`, radius 10: `check` 13 `ok` + `Joye 选了「改成指数退避，放进同一个 PR」` `ui` + mono time + text action `看问题` |
-| Date divider | Centered `11 月 3 日 周一` `meta` `ink-3` between two 1 pt `line` rules |
+| Date divider | Centered `11月3日 周一` `meta` `ink-3` between two 1 pt `line` rules |
 | File row | 300 wide, radius 10, 1 pt `line`, `lift`, padding 6 12 6 6, gap 12: a 72 × 44 real-content thumbnail (radius 6; a video shows its first frame or the `screen` miniature with a play disc), name `ui` 500, meta mono `0:18 · 4.2 MB` |
 | Reactions | 24 pt pills, radius 12, `sunken`, emoji 14 + count mono; mine 1 pt `ink-3` ring |
 | Hover | `hover` fill on the row + the hover toolbar (`bg`, `pop`, 28 pt buttons: reaction, quote, 单独问 about this, more) |
@@ -462,7 +471,7 @@ Topic rail cards, in this order:
 | 产出 | A real-content thumbnail (title + tiny table) 96 tall, radius 8, `line`; name `ui` 500 + `v2 · 09:55` mono; extra rows for recordings (`▶` tile 32 × 22 + name + `0:42`) |
 | 用到的决定 | `check` + decision text `ui` + `Joye 09:31` (16 avatar, mono) |
 | 电脑 | `monitor` 28 tile + `Mac mini` + `Forge 用完了 · 09:52`; right `○ 空闲` or `● 在用` (`live`) + text action `看 Forge 的电脑` |
-| 用时和成本 | `用时 41 分钟 · ¥6.20` mono + right `今天 09:14–09:55` |
+| 用时和花费 | `用时 41 分钟 · ¥6.20` mono + right `今天 09:14–09:55` |
 
 The 按顺序做 bar (design-relay §3.6) sits at the top of a 话题 whose work goes in an order a person
 wrote (`@A → @B → @C`), above the plan cards, on the composer insets: radius 10, a 1 pt `line`
@@ -1106,9 +1115,9 @@ each in light and dark. The app's screenshot self-test has a scene per artboard,
 same team data, so a capture can be compared side by side at 2x.
 
 Sync rules:
-- One token source per side: the HELMET2 block for the artboards; `theme.json` + `theme::Colors`
-  for the app. A value change updates this file, the artboard helmet and `theme.json` in one
-  commit.
+- One token source per side: the HELMET2 block for the artboards;
+  `apps/desktop/src/ui/native/tokens.rs` (loaded by `apps/desktop/src/theme.rs`) for the app. A
+  value change updates this file, the artboard helmet and `tokens.rs` in one commit.
 - Sizes are Rust enums or constants in `ui/` (`TextStyle`, `ControlSize`, `Radius`, `Space`), so an
   off-scale value does not compile. Views never write a color, size or duration literal.
 - Each visual pull request adds before and after captures at 2x in both themes.

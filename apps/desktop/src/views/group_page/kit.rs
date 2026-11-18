@@ -552,7 +552,7 @@ pub fn pane_header(
                 .child(
                     div()
                         .n_title3()
-                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .font_weight(crate::theme::MEDIUM_WEIGHT)
                         .text_color(k.label)
                         .child(name),
                 )
@@ -594,11 +594,10 @@ pub fn skeleton_list(
     cx: &App,
 ) -> AnyElement {
     use crate::ui::native::{
-        Bone, metrics, native_colors,
+        Bone,
         page::{self, m},
         tokens::text,
     };
-    let k = native_colors(cx);
     let n = n.clamp(3, 6);
     let widths = [0.62, 0.45, 0.78, 0.54, 0.7, 0.4];
     let column = |w: Option<Pixels>, bar: Option<Pixels>| {
@@ -622,8 +621,13 @@ pub fn skeleton_list(
                 .flex()
                 .items_center()
                 .gap(tsp::S12)
-                // The rows lead with the member avatar (owner decision v16).
-                .child(Bone::new().size(m::MEDIA).rounded_full())
+                // The rows lead with the AI member's tile (owner decision
+                // v16), and have no line between them (v18).
+                .child(
+                    Bone::new()
+                        .size(m::MEDIA)
+                        .rounded(crate::theme::radius::bot(m::MEDIA)),
+                )
                 .child(
                     div()
                         .flex_1()
@@ -638,17 +642,6 @@ pub fn skeleton_list(
                 .children(column(cols.status, Some(tsp::S48 + tsp::S16)))
                 .children(column(cols.time, Some(tsp::S32 + tsp::S8)))
                 .children(column(cols.actions, actions.then_some(tsp::S48)))
-                .when(i + 1 < n, |d| {
-                    d.child(
-                        div()
-                            .absolute()
-                            .bottom_0()
-                            .left(m::ROW_PAD + m::MEDIA + tsp::S12)
-                            .right_0()
-                            .h(metrics::HAIRLINE)
-                            .bg(k.separator),
-                    )
-                })
         }))
         .into_any_element()
 }

@@ -876,8 +876,10 @@ pub fn decorate(
                 .rounded(theme::radius::MD)
                 .child(col)
         };
-        // A change flashes in the muted fill only.
-        let rest = k.bg;
+        // A change flashes in the muted fill only and ends on the card itself (no
+        // resting fill: the border and the label carry the provenance), the same
+        // look as with Reduce Motion on.
+        let rest = k.hover.opacity(0.);
         if cx.reduce_motion() {
             return tinted.into_any_element();
         }

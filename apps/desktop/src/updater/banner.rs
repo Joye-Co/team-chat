@@ -1,7 +1,7 @@
 //! The update in the main window: a quiet card at the bottom of the sidebar
 //! ([`update_card`]) that follows the update from 有新版本 to 正在安装, and
-//! one alert (2.10) only for 重启安装, once a downloaded update is ready
-//! (default 重启安装, then 稍后). It also opens 已更新到 once after an
+//! one alert (2.10) only for 安装更新, once a downloaded update is ready
+//! (default 安装更新, then 稍后). It also opens 已更新到 once after an
 //! update. It renders [`Updater`] state and calls its commands; nothing here
 //! touches the network.
 
@@ -50,7 +50,7 @@ pub fn banner_text(phase: &Phase) -> Option<String> {
 }
 
 /// Which sheet a phase shows, keyed by version: only a ready update asks
-/// (重启安装); a sheet the user closed does not come back for it.
+/// (安装更新); a sheet the user closed does not come back for it.
 fn sheet_key(phase: &Phase) -> Option<String> {
     match phase {
         Phase::Ready { info, .. } => Some(format!("ready-{}", info.version)),
@@ -89,7 +89,7 @@ impl UpdateSheet {
         }
     }
 
-    /// Under the ready alert's body (F49): the 12 muted 查看更新内容 link,
+    /// Under the ready alert's body (F49): the 查看更新内容 link (link color),
     /// or, once chosen, the notes themselves in a scrolling well.
     fn notes(
         &self,
@@ -129,8 +129,9 @@ impl UpdateSheet {
                 .justify_center()
                 .child(
                     crate::ui::native::borderless_text("update-ready-notes-link", u::NOTES, cx)
-                        .text_color(k.secondary)
-                        .n_footnote()
+                        // §1.3: link text in the info color, so it reads
+                        // as something to press, not a second caption.
+                        .text_color(k.blue)
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.notes_open = true;
                             cx.notify();
@@ -236,7 +237,7 @@ impl Render for UpdateSheet {
     }
 }
 
-/// The update in the main window: the 重启安装 sheet once a downloaded
+/// The update in the main window: the 安装更新 sheet once a downloaded
 /// update is ready; nothing while it downloads (Settings › 通用 and the app
 /// menu show that).
 pub struct UpdateBanner {
@@ -489,7 +490,7 @@ pub fn update_card(
                 fill(u::CARD_MANUAL_DETAIL, &[("product", product)]),
             )
         }
-        Phase::Failed { .. } => {
+        Phase::Failed { failure, .. } => {
             buttons.push(
                 button("update-card-retry", u::RETRY.into(), PushStyle::Default, cx)
                     .on_click(move |_, _, cx| up.update(cx, |u, cx| u.start_update(cx))),
@@ -503,7 +504,14 @@ pub fn update_card(
                 Sym::Alert,
                 k.red,
                 fill(o::UPDATE_FAILED_TITLE, &[("version", v)]),
-                banner_text(phase).unwrap_or_default(),
+                // The title says it failed: the line says why and what to do.
+                match failure {
+                    Failure::Check => u::CARD_FAILED_CHECK_DETAIL,
+                    Failure::Download => u::CARD_FAILED_DOWNLOAD_DETAIL,
+                    Failure::Checksum => u::CARD_FAILED_CHECKSUM_DETAIL,
+                    Failure::Install => u::CARD_FAILED_INSTALL_DETAIL,
+                }
+                .to_string(),
             )
         }
         _ => return None,
@@ -533,6 +541,9 @@ pub fn update_card(
             .child(
                 card_surface(cx)
                     .rounded(radius::CONTAINER)
+                    // The dark sidebar already has the card's fill: lift the
+                    // card one step there, so it reads as a surface.
+                    .when(crate::theme::is_dark(cx), |d| d.bg(k.group))
                     .p(space::S12)
                     .flex()
                     .flex_col()

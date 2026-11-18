@@ -162,9 +162,9 @@ fn inline_box(kind: MediaKind) -> (gpui::Pixels, gpui::Pixels) {
         MediaKind::Markdown => (INLINE_W, px(MD_BODY_H + 34.)),
         MediaKind::Image => (INLINE_W, px(SINGLE_H)),
         MediaKind::ImageSet => (INLINE_W, px(GRID_H)),
-        MediaKind::Video => (px(VIDEO_W), px(VIDEO_W * 9. / 16. + 86.)),
+        MediaKind::Video => (px(VIDEO_W), px(VIDEO_W * 9. / 16. + 114.)),
         MediaKind::Audio => (px(AUDIO_W), px(70.)),
-        MediaKind::Pdf => (px(PDF_W), px(186.)),
+        MediaKind::Pdf => (px(PDF_W), crate::ui::native::tokens::pdf_strip::HEIGHT),
         MediaKind::Code => (INLINE_W, px(CODE_LINES as f32 * 20. + 16.)),
         MediaKind::Table => (
             INLINE_W,
@@ -250,16 +250,19 @@ fn html(spec: &InlineSpec, media: &Arc<Media>, cx: &App) -> AnyElement {
     let latest = host::latest(id, cx).unwrap_or(version);
     let notice = host::notice(id, version, latest, cx).map(|t| host::notice_chip(t, cx));
     let s = spec.clone();
-    let expand = div()
-        .id(ElementId::Name(format!("{}-expand", spec.id).into()))
-        .focus_row(false, cx)
-        .flex_none()
-        .flex()
-        .items_center()
-        .gap(space::S4)
-        .child(ui::icon(Sym::ChevronDown, px(14.), k.text_3))
-        .child(cm::EXPAND)
-        .on_click(move |_, _, cx| open(&s, Opening::default(), cx));
+    // §1.8: a ghost sm button in the card footer, so 展开 reads as a control and its
+    // own padding parts it from the capability line. The negative margin puts its
+    // label on the card's content edge.
+    let expand = ui::native::push_button(
+        ElementId::Name(format!("{}-expand", spec.id).into()),
+        cm::EXPAND,
+        ui::native::PushStyle::Ghost,
+        ui::native::PushSize::Small,
+        cx,
+    )
+    .flex_none()
+    .ml(-space::S12)
+    .on_click(move |_, _, cx| open(&s, Opening::default(), cx));
     let foot = match spec.target.provider.as_deref() {
         Some(p) => host::page_footer(
             &spec.id,
@@ -684,12 +687,35 @@ fn video(spec: &InlineSpec, media: &Arc<Media>, v: &store::Video, cx: &App) -> A
                 ),
         );
     }
-    let _ = media;
     div()
         .flex()
         .flex_col()
         .gap(space::S8)
         .child(poster)
+        // The file's name and size (§2.17: every attachment says what it is); the
+        // length is on the poster.
+        .child(
+            div()
+                .w(px(VIDEO_W))
+                .max_w_full()
+                .flex()
+                .items_center()
+                .gap(space::S8)
+                .child(ui::icon(
+                    Sym::Video,
+                    px(16.),
+                    crate::ui::native::native_colors(cx).secondary,
+                ))
+                .child(
+                    ui::native::file_name(media.file_name().to_string())
+                        .t_ui()
+                        .semibold()
+                        .text_color(k.text_1)
+                        .flex_shrink(1.)
+                        .min_w(px(0.)),
+                )
+                .child(mono(super::size_text(media.bytes), k.text_3)),
+        )
         .child(
             div()
                 .flex()
@@ -779,10 +805,22 @@ fn audio(
             &[("n", &a.transcript.len().to_string())],
         )
     };
-    let _ = media;
     card(cx)
         .w(px(AUDIO_W))
         .max_w_full()
+        .child(
+            card_header(Sym::Audio, media.file_name().to_string(), cx)
+                .child(mono(
+                    format!(
+                        "{} · {}",
+                        super::time_text(a.duration),
+                        super::size_text(media.bytes)
+                    ),
+                    k.text_3,
+                ))
+                .child(div().flex_1())
+                .child(open_tool(spec, "open", Opening::default())),
+        )
         .child(
             div()
                 .h(crate::ui::native::tokens::height::LIST_ROW)
@@ -841,9 +879,7 @@ fn audio(
         .child(
             footer(cx)
                 .child(ui::icon(Sym::Document, px(13.), k.text_3))
-                .child(footer_text)
-                .child(div().flex_1())
-                .child(open_tool(spec, "open", Opening::default())),
+                .child(footer_text),
         )
         .into_any_element()
 }
@@ -852,20 +888,33 @@ fn audio(
 
 fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
+    // The strip is the card's last child: its fill follows the card's bottom corners
+    // (children are clipped to the box, not to its radius).
+    use crate::ui::native::tokens::{gallery, pdf_strip, text};
     let mut thumbs = div()
-        .h(px(140.))
-        .px(space::S10)
-        .pt(space::S10)
+        .h(pdf_strip::HEIGHT)
+        .px(space::S16)
+        // Whole pages with the same 12 above and below: none is cut by the card's edge.
+        .py(space::S12)
         .flex()
+        .justify_between()
         .gap(space::S8)
         .bg(k.code_bg)
+        .rounded_b(
+            crate::ui::native::tokens::radius::CARD - crate::ui::native::tokens::layout::BORDER,
+        )
         .overflow_hidden();
-    // §2.4: as many whole pages as the 640 card holds (px 10, gap 8), so
-    // the strip has no void at the right and no page cut at the edge.
-    let mut room = PDF_W - 20.;
+    // §2.4: as many whole pages as the 640 card holds (px 16, gap 8), spread over
+    // the row, so the strip has no void at the right and no page cut at the edge.
+    let mut room = PDF_W - 32.;
     let mut shown = 0;
     for page in &p.images {
-        let (w, _) = fit(page.width, page.height, 120., 150.);
+        let (w, _) = fit(
+            page.width,
+            page.height,
+            pdf_strip::PAGE_W,
+            pdf_strip::PAGE_H,
+        );
         let need = if shown == 0 { w } else { w + 8. };
         if need > room {
             break;
@@ -873,14 +922,23 @@ fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyEl
         room -= need;
         shown += 1;
     }
-    for page in p.images.iter().take(shown.max(1)) {
-        let (w, h) = fit(page.width, page.height, 120., 150.);
+    let shown = shown.max(1);
+    // Pages the strip does not show: the last tile says how many more.
+    let more = (p.pages as usize).saturating_sub(shown);
+    for (i, page) in p.images.iter().take(shown).enumerate() {
+        let (w, h) = fit(
+            page.width,
+            page.height,
+            pdf_strip::PAGE_W,
+            pdf_strip::PAGE_H,
+        );
         thumbs = thumbs.child(
             div()
+                .relative()
                 .w(px(w))
                 .h(px(h))
                 .flex_none()
-                .rounded(px(3.))
+                .rounded(crate::ui::native::tokens::radius::CHECKBOX)
                 .overflow_hidden()
                 .border_1()
                 .border_color(k.border)
@@ -890,7 +948,22 @@ fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyEl
                     img(page.path.clone())
                         .size_full()
                         .object_fit(ObjectFit::Cover),
-                ),
+                )
+                .when(more > 0 && i + 1 == shown, |el| {
+                    el.child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .bg(gpui::hsla(0., 0., 0., gallery::MORE_SCRIM))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_size(text::HERO.0)
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(gpui::white())
+                            .child(format!("+{more}")),
+                    )
+                }),
         );
     }
     let s = spec.clone();
@@ -899,23 +972,9 @@ fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyEl
         .focus_row(false, cx)
         .w(px(PDF_W))
         .max_w_full()
-        .child(thumbs)
+        // The name row on top with the open tool, as on every sibling card (§2.4).
         .child(
-            div()
-                .h(crate::ui::native::tokens::height::FORM_ROW)
-                .px(space::S12)
-                .flex()
-                .items_center()
-                .gap(space::S8)
-                .border_t_1()
-                .border_color(k.sep)
-                .child(ui::icon(Sym::Document, theme::icon::ROW, k.text_2))
-                .child(
-                    ui::native::file_name(media.file_name().to_string())
-                        .t_small()
-                        .medium()
-                        .text_color(k.text_1),
-                )
+            card_header(Sym::Document, media.file_name().to_string(), cx)
                 .child(mono(
                     format!(
                         "{} · {}",
@@ -925,9 +984,9 @@ fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyEl
                     k.text_3,
                 ))
                 .child(div().flex_1())
-                .child(div().t_meta().text_color(k.text_2).child(cm::PDF_OPEN))
-                .child(ui::icon(Sym::ChevronRight, px(14.), k.text_2)),
+                .child(open_tool(spec, "open", Opening::default())),
         )
+        .child(thumbs)
         .on_click(move |_, _, cx| open(&s, Opening::default(), cx))
         .into_any_element()
 }
@@ -998,8 +1057,7 @@ fn code(spec: &InlineSpec, media: &Arc<Media>, c: &store::Code, cx: &App) -> Any
         .w(INLINE_W)
         .max_w_full()
         .child(
-            card_header(Sym::CodeFile, String::new(), cx)
-                .child(mono(media.entry.clone(), k.text_1))
+            card_header(Sym::CodeFile, media.entry.clone(), cx)
                 .child(div().t_meta().text_color(k.text_3).child(fill(
                     cm::CODE_RANGE,
                     &[
@@ -1011,7 +1069,7 @@ fn code(spec: &InlineSpec, media: &Arc<Media>, c: &store::Code, cx: &App) -> Any
                 .child(div().flex_1())
                 .child(
                     tool(copy_id, Sym::Copy, cm::COPY).on_click(move |_, _, cx| {
-                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text_all.clone()));
+                        super::parts::copy_text(text_all.clone(), cm::COPIED, cx);
                     }),
                 )
                 .child(open_tool(spec, "open", Opening::default())),

@@ -65,6 +65,9 @@ pub struct GeneralPage {
     models: Entity<super::worker_models::WorkerModelsPanel>,
     /// Self-tests only: AI 服务 under 通用 (it lives in 团队管理).
     ai_here: bool,
+    /// Self-tests: the pane's scroll, kept so that AI 服务 (`false`) or 模型 (`true`) is
+    /// at its top.
+    section_at_top: Option<(gpui::ScrollHandle, bool)>,
     updater: Option<Entity<updater::Updater>>,
     description: Entity<TextareaState>,
     status: Status,
@@ -109,6 +112,7 @@ impl GeneralPage {
             ai,
             models,
             ai_here: false,
+            section_at_top: None,
             updater,
             description,
             status: Status::Idle,
@@ -131,6 +135,22 @@ impl GeneralPage {
     /// Self-tests: draw 通用 › AI 服务 as before it moved to 团队管理.
     pub fn show_ai_here(&mut self, cx: &mut Context<Self>) {
         self.ai_here = true;
+        cx.notify();
+    }
+
+    /// Self-tests: [`Self::show_ai_here`] with the 模型 section's header kept at the top
+    /// of the pane, wherever the sections above it put it.
+    pub fn show_models_at_top(&mut self, scroll: gpui::ScrollHandle, cx: &mut Context<Self>) {
+        self.ai_here = true;
+        self.section_at_top = Some((scroll, true));
+        cx.notify();
+    }
+
+    /// Self-tests: [`Self::show_ai_here`] with the AI 服务 section's header kept at the top
+    /// of the pane, so its answer and buttons are in view.
+    pub fn show_ai_at_top(&mut self, scroll: gpui::ScrollHandle, cx: &mut Context<Self>) {
+        self.ai_here = true;
+        self.section_at_top = Some((scroll, false));
         cx.notify();
     }
 
@@ -278,16 +298,23 @@ impl GeneralPage {
             Some(Phase::Available(i)) => fill(u::NEW_VERSION, &[("version", &i.version)]),
             Some(Phase::Downloading { info, done, total }) => {
                 let total = if *total == 0 { info.size } else { *total };
+                // The title names the installed version: the line says which
+                // one is on its way.
                 fill(
-                    u::DOWNLOAD_PROGRESS,
+                    u::DOWNLOAD_PROGRESS_OF,
                     &[
+                        ("version", &info.version),
                         ("percent", &version::percent(*done, total).to_string()),
                         ("done", &megabytes(*done)),
                         ("total", &megabytes(total)),
                     ],
                 )
             }
-            Some(Phase::Manual(_)) => u::BANNER_MANUAL.to_string(),
+            // The same words as the sidebar card, with the version.
+            Some(Phase::Manual(i)) => fill(
+                crate::copy::overlays::UPDATE_MANUAL_TITLE,
+                &[("version", &i.version)],
+            ),
             Some(other) => banner_text(other).unwrap_or_default(),
         };
         let title = fill(u::VERSION_TITLE, &[("version", version::CURRENT)]);
@@ -393,15 +420,17 @@ impl GeneralPage {
                     .text_color(k.secondary)
                     .child(t)
             };
+            // The steps are the next action of this row: body text, not a caption.
+            let step = |t: String| div().w_full().n_body().text_color(k.label).child(t);
             rows.push(
                 dependent()
                     .flex_col()
                     .items_start()
                     .gap(space::S4)
                     .child(line(u::MANUAL_STEPS.to_string()))
-                    .child(line(fill(u::MANUAL_STEP_1, &[("product", product)])))
-                    .child(line(fill(u::MANUAL_STEP_2, &[("product", product)])))
-                    .child(line(fill(u::MANUAL_STEP_3, &[("product", product)])))
+                    .child(step(fill(u::MANUAL_STEP_1, &[("product", product)])))
+                    .child(step(fill(u::MANUAL_STEP_2, &[("product", product)])))
+                    .child(step(fill(u::MANUAL_STEP_3, &[("product", product)])))
                     .into_any_element(),
             );
         }
@@ -656,7 +685,7 @@ impl Render for GeneralPage {
             };
             dev_group = dev_group.row(dev_row(
                 dev::LABEL_CONNECTION,
-                StatusBadge::new(state, word).into_any_element(),
+                StatusBadge::new(state, word).on_group().into_any_element(),
                 cx,
             ));
             let me = self.me.id.clone();
@@ -718,7 +747,26 @@ impl Render for GeneralPage {
             .child(alerts)
             // AI 服务 and 模型 live in 团队管理; the self-tests still show them here.
             .when(owner && self.ai_here, |p| {
-                p.child(self.ai.clone()).child(self.models.clone())
+                let mark = |models: bool| {
+                    self.section_at_top
+                        .clone()
+                        .filter(|(_, m)| *m == models)
+                        .map(|(scroll, _)| section_top_marker(scroll))
+                };
+                p.child(
+                    div()
+                        .relative()
+                        .w_full()
+                        .children(mark(false))
+                        .child(self.ai.clone()),
+                )
+                .child(
+                    div()
+                        .relative()
+                        .w_full()
+                        .children(mark(true))
+                        .child(self.models.clone()),
+                )
             })
             .child(version)
             .child(developer_section)
@@ -735,7 +783,7 @@ fn value_with_copy(
     window: &Window,
     cx: &App,
 ) -> gpui::Div {
-    use gpui::{ClipboardItem, InteractiveElement as _, StatefulInteractiveElement as _};
+    use gpui::{InteractiveElement as _, StatefulInteractiveElement as _};
     let k = native_colors(cx);
     let tip: SharedString = value.clone().into();
     let copy = value.clone();
@@ -769,7 +817,7 @@ fn value_with_copy(
                 cx,
             )
             .on_click(move |_, _, cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
+                crate::views::media::parts::copy_text(copy.clone(), s::COPIED, cx)
             }),
         )
 }
@@ -812,7 +860,6 @@ fn dev_value_with_copy(
     window: &Window,
     cx: &App,
 ) -> gpui::AnyElement {
-    use gpui::ClipboardItem;
     let copy = value.clone();
     div()
         .w_full()
@@ -837,43 +884,53 @@ fn dev_value_with_copy(
                 cx,
             )
             .on_click(move |_, _, cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
+                crate::views::media::parts::copy_text(copy.clone(), s::COPIED, cx)
             }),
         )
         .into_any_element()
 }
 
+/// Self-tests: a mark at the top of a section that scrolls the pane until the section
+/// starts one pane margin under the toolbar, and again whenever a section above it
+/// changes its height.
+fn section_top_marker(scroll: gpui::ScrollHandle) -> impl IntoElement {
+    gpui::canvas(
+        move |bounds, window, _| {
+            let offset = scroll.offset();
+            let top = bounds.origin.y - scroll.bounds().origin.y - offset.y;
+            let want = -(top - metrics::GROUP_MARGIN)
+                .min(scroll.max_offset().y)
+                .max(gpui::Pixels::ZERO);
+            if (offset.y - want).abs() > gpui::px(0.5) {
+                scroll.set_offset(gpui::point(offset.x, want));
+                window.refresh();
+            }
+        },
+        |_, _, _, _| {},
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_0()
+}
+
 /// Owners: the way from 设置 to 团队管理 (its own window), on top of 通用.
 fn admin_card(cx: &App) -> impl IntoElement {
     use crate::copy::admin as a;
-    use crate::ui::native::{
-        PushSize, PushStyle, push_button,
-        tokens::{monitor as t, radius},
-    };
-    let k = native_colors(cx);
-    GroupedForm::new().row(
+    use crate::ui::native::{PushSize, PushStyle, push_button};
+    // A section like the others on the tab (2.19), its row with the 28
+    // icon box every settings row has.
+    let group = GroupedForm::new().row(
         FormRow::new(a::HEADER_TITLE)
             .detail(a::SETTINGS_CARD_DESC)
-            .leading(
-                div()
-                    .flex_none()
-                    .size(t::MACHINE_TILE)
-                    .rounded(radius::CONTROL)
-                    .bg(k.primary)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(crate::ui::icons::sym(
-                        crate::ui::Sym::Shield,
-                        crate::ui::sf_symbols::SymSize::INLINE,
-                        k.on_primary,
-                    )),
-            )
+            .leading(widgets::icon_box_28(crate::ui::Sym::Shield, cx))
             .control(
                 push_button(
                     "open-admin",
                     a::SETTINGS_CARD_OPEN,
-                    PushStyle::Default,
+                    // Navigation, not the action of the tab: the one primary
+                    // stays with the version row.
+                    PushStyle::Outline,
                     PushSize::Small,
                     cx,
                 )
@@ -881,7 +938,8 @@ fn admin_card(cx: &App) -> impl IntoElement {
                     window.dispatch_action(Box::new(crate::views::admin::OpenTeamAdmin), cx)
                 }),
             ),
-    )
+    );
+    widgets::section(SectionTitle::new(s::SECTION_TEAM), group)
 }
 
 /// 菜单栏里显示 (通知区域里显示 on Windows): what the switch does. Remembers the choice and

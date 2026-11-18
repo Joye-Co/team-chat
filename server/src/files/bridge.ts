@@ -55,14 +55,16 @@ const CAUSE_WINDOW_MS = 30 * 60_000;
 
 const buckets = new Map<string, TokenBucket[]>();
 
-function takeRate(key: string, limits: TokenBucket[] | (() => TokenBucket[])): boolean {
+/** Takes one from every bucket of `key`: `null`, or the milliseconds to wait for the bucket that is empty. */
+function takeRate(key: string, limits: TokenBucket[] | (() => TokenBucket[])): number | null {
   let list = buckets.get(key);
   if (!list) {
     list = typeof limits === "function" ? limits() : limits;
     buckets.set(key, list);
     if (buckets.size > 10_000) buckets.delete(buckets.keys().next().value as string);
   }
-  return list.every((b) => b.take());
+  for (const b of list) if (!b.take()) return b.waitMs();
+  return null;
 }
 
 type PageEventRow = {
@@ -222,9 +224,8 @@ registerRoomRpc(ARTIFACT_EVENT_RPC, async (room, actor, args): Promise<PageEvent
     if (problem) throw new ApiError("invalid", problem, "artifact.bad_payload");
   }
   const rateKey = `page:${room.groupId}:${a.id}:${e.artifactId}:${e.version}`;
-  if (!takeRate(rateKey, () => [new TokenBucket(PAGE_EVENT_RATE.rate, PAGE_EVENT_RATE.burst), new TokenBucket(PAGE_EVENT_HOURLY / 3600, PAGE_EVENT_HOURLY)])) {
-    throw new ApiError("rate_limited", "too many page events");
-  }
+  const eventWaitMs = takeRate(rateKey, () => [new TokenBucket(PAGE_EVENT_RATE.rate, PAGE_EVENT_RATE.burst), new TokenBucket(PAGE_EVENT_HOURLY / 3600, PAGE_EVENT_HOURLY)]);
+  if (eventWaitMs !== null) throw new ApiError("rate_limited", "too many page events", undefined, eventWaitMs);
   // The row exists before the event goes out (F3): a fast reply or data push finds it, and a
   // repeat that comes while delivery waits is a duplicate. Same order as cards2 (insertEvent,
   // then finishAck).
@@ -322,7 +323,7 @@ registerRoomRpc(ARTIFACT_DATA_RPC, (room, actor, args): { dataRev: number; dupli
     .toArray()[0];
   const rev = cur?.data_rev ?? 0;
   if (d.clientPushId && cur?.push_id === d.clientPushId) return { dataRev: rev, duplicate: true };
-  if (d.baseDataRev !== undefined && d.baseDataRev !== rev) throw new ApiError("conflict", "the data changed", "artifact.stale_data");
+  if (d.baseDataRev !== undefined && d.baseDataRev !== rev) throw new ApiError("conflict", `the data is at rev ${rev}, not ${d.baseDataRev}`, "artifact.stale_data");
   const now = Date.now();
   let causeActor: string | undefined;
   if (d.cause !== undefined) {
@@ -338,9 +339,8 @@ registerRoomRpc(ARTIFACT_DATA_RPC, (room, actor, args): { dataRev: number; dupli
     if (!cause) throw new ApiError("invalid", "cause is not a recent event of this page", "interact.bad_cause");
     causeActor = cause.actor_id;
   }
-  if (!takeRate(`data:${room.groupId}:${d.artifactId}:${d.version}`, () => [new TokenBucket(DATA_RATE.rate, DATA_RATE.burst)])) {
-    throw new ApiError("rate_limited", "too many data pushes for this version");
-  }
+  const dataWaitMs = takeRate(`data:${room.groupId}:${d.artifactId}:${d.version}`, () => [new TokenBucket(DATA_RATE.rate, DATA_RATE.burst)]);
+  if (dataWaitMs !== null) throw new ApiError("rate_limited", "too many data pushes for this version", undefined, dataWaitMs);
   const text = JSON.stringify(d.data);
   const next = rev + 1;
   room.sql.exec(

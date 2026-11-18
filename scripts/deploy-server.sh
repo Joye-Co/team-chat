@@ -36,7 +36,8 @@ while [ $# -gt 0 ]; do
     --print-version) PRINT=1; shift ;;
     --check-health) CHECK=1; shift ;;
     --expect) EXPECT="${2:-}"; [ -n "$EXPECT" ] || die "--expect needs a version"; shift 2 ;;
-    -*) die "unknown option $1" ;;
+    -h | --help) usage; exit 0 ;;
+    -*) die "unknown option $1 (see scripts/deploy-server.sh --help)" ;;
     *) [ -z "$ENV_NAME" ] || die "more than one env given"; ENV_NAME="$1"; shift ;;
   esac
 done

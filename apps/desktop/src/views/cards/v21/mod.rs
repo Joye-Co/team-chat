@@ -571,7 +571,7 @@ fn leaf(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) -> AnyE
     let ctx = node.ctx;
     match b {
         CardV2Block::Decision { .. } => leaves::decision(node, b, window, cx),
-        CardV2Block::Rank { .. } => leaves::rank(node, b, cx),
+        CardV2Block::Rank { .. } => leaves::rank(node, b, window, cx),
         CardV2Block::Rating { .. } => leaves::rating(node, b, cx),
         CardV2Block::Scale { .. } => leaves::scale(node, b, cx),
         CardV2Block::Confirm { .. } => leaves::confirm(node, b, cx),

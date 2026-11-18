@@ -34,6 +34,9 @@ pub struct TopicPage {
     composer: Entity<ComposerView>,
     /// Usable: the 按顺序做 bar at the top of the column.
     relay_strip: Entity<relay_strip::RelayStrip>,
+    /// 批准合并 or 撤回 of the pinned banner waits for its answer: the button shows its
+    /// spinner and takes no second press.
+    pinned_busy: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -60,6 +63,7 @@ impl TopicPage {
             timeline,
             composer,
             relay_strip,
+            pinned_busy: false,
         }
     }
 }
@@ -422,6 +426,15 @@ pub fn topic_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> Sta
         return StateLine::plain(cr::RAIL_ANSWERED.to_string(), BadgeState::Done)
             .short(cr::RAIL_ANSWERED);
     }
+    // §2.12: 等你回答 is an open ask. A 话题 that lists me with no ask because it is
+    // stuck (按顺序做 paused at a step, a member blocked) says 卡住了, the word of
+    // the order's bar; what to do next is 重试 there.
+    let stuck = topic.status == TopicStatus::Blocked
+        || topic.relay.as_ref().is_some_and(|r| r.state == "paused");
+    if mine && stuck {
+        return StateLine::plain(cm::STATUS_BLOCKED.to_string(), BadgeState::Failed)
+            .short(cm::STATUS_BLOCKED);
+    }
     if mine {
         let text = match topic.status {
             TopicStatus::WaitingReview => cm::STATUS_WAITING_REVIEW_ME,
@@ -443,6 +456,11 @@ pub fn topic_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> Sta
         }
         let paused_by = p.machine_screen(&run.id).and_then(|s| s.paused_by);
         let mut line = run_state(run, &who, paused_by.as_deref(), me, name);
+        // No plan: the newest step of the run's log says what it does now, as on
+        // its card in the thread (`Forge 正在做：写回复`).
+        if line.detail.is_none() && line.badge == BadgeState::Working && !line.paused {
+            line.detail = crate::views::process::live_action(&p.run_process(&run.id).steps);
+        }
         // A2-11: two members at work are one state, `2 个成员在做`. Usable: the
         // server's `participants` count members whose runs this window has not read.
         let at_work = working_runs(&runs).len().max(topic.working_members().len());
@@ -479,6 +497,22 @@ pub fn topic_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> Sta
             BadgeState::Failed,
         )
         .short(crate::copy::process::STATUS_FAILED);
+    }
+    // The newest run was stopped and the 话题 is not done: 已停止, the word of
+    // the run's own pane, never 排队 for work nobody waits to start.
+    let latest_stopped = runs
+        .iter()
+        .max_by_key(|r| r.updated_at)
+        .is_some_and(|r| r.status == RunStatus::Cancelled);
+    // A stopped 按顺序做 is the same state though an older run is the newest
+    // one this window read: nothing is queued after a person stopped it.
+    let relay_stopped = topic.relay.as_ref().is_some_and(|r| r.state == "stopped");
+    if (latest_stopped || relay_stopped) && topic.status != TopicStatus::Done {
+        return StateLine::plain(
+            crate::copy::live::LIVE_PHASE_STOPPED.to_string(),
+            BadgeState::Deactivated,
+        )
+        .short(crate::copy::live::LIVE_PHASE_STOPPED);
     }
     // Usable: the server says members work here (`participants`) though this
     // window has not read their runs (the sidebar): the same words as above.
@@ -674,8 +708,10 @@ impl Render for TopicPage {
                     .pb(space::S16)
                     .flex()
                     .flex_col()
-                    .gap(space::S10)
-                    .children(pinned)
+                    // §2.17: 8 above the composer. Each docked row brings its own
+                    // 8 under it: a stack gap would also count the connection
+                    // banner while it draws nothing, and double the space.
+                    .children(pinned.map(|p| div().w_full().pb(space::S8).child(p)))
                     // §2.15: the offline Alert docked above the composer.
                     .children(
                         cx.try_global::<crate::views::banners::AppBanners>()

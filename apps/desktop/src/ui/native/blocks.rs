@@ -134,6 +134,20 @@ pub fn card_surface(cx: &App) -> gpui::Div {
     div().rounded(radius::CARD).bg(k.sheet).shadow(s)
 }
 
+/// A card on a surface that has the card fill itself (the dark 团队管理
+/// panel): the 6 % ring cannot be told from the fill there, so in dark the
+/// ring is the border color (§2.22: an edge of 1.5:1 at least). Light is
+/// [`card_surface`] unchanged.
+pub fn panel_card_surface(cx: &App) -> gpui::Div {
+    let k = native_colors(cx);
+    if !k.is_dark() {
+        return card_surface(cx);
+    }
+    let mut s = shadow::sm();
+    s.push(shadow::line(k.separator));
+    div().rounded(radius::CARD).bg(k.sheet).shadow(s)
+}
+
 impl RenderOnce for Card {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = native_colors(cx);
@@ -258,20 +272,24 @@ impl SectionTitle {
 impl RenderOnce for SectionTitle {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = native_colors(cx);
+        // The title, its count and the action share one row; the description
+        // runs under it at the full width, so the action never narrows it
+        // into a second line.
         div()
             .w_full()
             .flex()
-            .items_start()
-            .gap(space::S8)
+            .flex_col()
+            .gap(space::S4)
             .child(
                 div()
-                    .flex_1()
-                    .min_w(px(0.))
+                    .w_full()
                     .flex()
-                    .flex_col()
-                    .gap(space::S4)
+                    .items_start()
+                    .gap(space::S8)
                     .child(
                         div()
+                            .flex_1()
+                            .min_w(px(0.))
                             .flex()
                             .items_center()
                             .gap(space::S8)
@@ -284,12 +302,24 @@ impl RenderOnce for SectionTitle {
                             )
                             .children(self.count.map(super::badge::CountPill::new)),
                     )
-                    .children(
-                        self.description
-                            .map(|d| div().n_body().text_color(k.secondary).child(d)),
-                    ),
+                    // The action lines up with the top of the title and
+                    // stays out of the row's height (its box is one title
+                    // line high and the button overflows it), so the
+                    // description sits 4 under the title with or without
+                    // an action (§2.3).
+                    .children(self.action.map(|a| {
+                        div()
+                            .flex_none()
+                            .h(super::tokens::text::HEADING.1)
+                            .flex()
+                            .items_start()
+                            .child(a)
+                    })),
             )
-            .children(self.action.map(|a| div().flex_none().child(a)))
+            .children(
+                self.description
+                    .map(|d| div().n_body().text_color(k.secondary).child(d)),
+            )
     }
 }
 
@@ -551,6 +581,8 @@ pub struct Column {
     pub header: SharedString,
     pub right: bool,
     pub width: Option<Pixels>,
+    /// The row's "⋯" column: see [`Column::action`].
+    pub action: bool,
 }
 
 impl Column {
@@ -559,6 +591,7 @@ impl Column {
             header: header.into(),
             right: false,
             width: None,
+            action: false,
         }
     }
 
@@ -567,6 +600,18 @@ impl Column {
             header: header.into(),
             right: false,
             width: Some(width),
+            action: false,
+        }
+    }
+
+    /// The row's "⋯" column: no header, exactly as wide as the h28 icon
+    /// button and its insets, the button ending 8 pt from the frame.
+    pub fn action() -> Self {
+        Self {
+            header: SharedString::default(),
+            right: true,
+            width: Some(space::S4 + height::SM + space::S8),
+            action: true,
         }
     }
 
@@ -604,10 +649,10 @@ pub fn table(
     } else {
         height::TABLE_ROW
     };
-    let mut head = TableRow::new()
-        .h(height::TABLE_HEAD)
-        .border_b_1()
-        .border_color(k.separator);
+    // No border of our own: gpui-component's TableHeader draws the line
+    // under the header and each TableRow the line above it, so a second
+    // one here would stack to 2 pt.
+    let mut head = TableRow::new().h(height::TABLE_HEAD);
     for (ix, c) in columns.iter().enumerate() {
         let mut h = TableHead::new()
             .px(pad(ix))
@@ -623,6 +668,10 @@ pub fn table(
             Some(w) => h.w(w).flex_none(),
             None => h.flex_1().min_w(px(0.)),
         };
+        if c.action {
+            // gpui-component's cells are at least 100 wide: this one is its button.
+            h = h.min_w(px(0.)).pl(space::S4).pr(space::S8);
+        }
         if c.right {
             h = h.text_right();
         }
@@ -646,10 +695,8 @@ pub fn table(
             ),
         );
     }
-    for (rix, cells) in rows.into_iter().enumerate() {
-        let mut row = TableRow::new().h(row_h).when(rix + 1 < count, |r| {
-            r.border_b_1().border_color(k.separator)
-        });
+    for cells in rows {
+        let mut row = TableRow::new().h(row_h);
         for (ix, cell) in cells.into_iter().enumerate() {
             let c = &columns[ix.min(n.saturating_sub(1))];
             let mut td = TableCell::new()
@@ -664,6 +711,9 @@ pub fn table(
                 Some(w) => td.w(w).flex_none(),
                 None => td.flex_1().min_w(px(0.)),
             };
+            if c.action {
+                td = td.min_w(px(0.)).pl(space::S4).pr(space::S8);
+            }
             if c.right {
                 td = td.text_right().n_figures();
             }
@@ -682,7 +732,12 @@ pub fn table(
         .flex_col()
         .child(
             Table::new()
-                .child(TableHeader::new().child(head))
+                // The frame carries the fill, so a caller's `.bg(..)` on it
+                // reaches the rows (the 团队管理 panel's tables).
+                .bg(gpui::transparent_black())
+                // GPUI clips to a rectangle, so the frame's radius does
+                // not cut the header's fill: it rounds its own top corners.
+                .child(TableHeader::new().rounded_t(radius::CONTAINER).child(head))
                 .child(body),
         )
         .children(footer.map(|f| {
@@ -740,4 +795,62 @@ pub fn description_row(
 /// A selected list or menu row weight (D10): font-medium.
 pub fn selected_weight() -> gpui::FontWeight {
     MEDIUM_WEIGHT
+}
+
+// ---------------------------------------------------------------------------
+// Sideways scroll of a code box
+
+/// One part of a code box whose lines never wrap (§2.17, D13): `inner`
+/// keeps its content width and scrolls sideways inside the part, with a
+/// scrollbar along the part's bottom edge and a 16 fade to `fill` at its right
+/// edge whenever a line is cut, so the box never reads as clipped. `inner`
+/// gets that fact (known from the frame before) to leave room for the
+/// scrollbar under its last line.
+pub fn scroll_x(
+    id: impl Into<ElementId>,
+    fill: gpui::Hsla,
+    inner: impl FnOnce(bool) -> gpui::Div,
+    window: &mut Window,
+    cx: &mut App,
+) -> gpui::Div {
+    let id = id.into();
+    let scroll = window
+        .use_keyed_state(id.clone(), cx, |_, _| gpui::ScrollHandle::new())
+        .read(cx)
+        .clone();
+    let scrolls = scroll.max_offset().x > px(0.);
+    let fade = scrolls.then(|| {
+        div()
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .right_0()
+            .w(space::S16)
+            .bg(gpui::linear_gradient(
+                90.,
+                gpui::linear_color_stop(fill.opacity(0.), 0.),
+                gpui::linear_color_stop(fill, 1.),
+            ))
+    });
+    div()
+        .relative()
+        .w_full()
+        .min_w(px(0.))
+        .child(
+            div()
+                .id(id)
+                .w_full()
+                .flex()
+                .overflow_x_scroll()
+                .restrict_scroll_to_axis()
+                .track_scroll(&scroll)
+                .child(inner(scrolls).flex_none().min_w_full()),
+        )
+        .children(fade)
+        .child(
+            div().absolute().inset_0().child(
+                gpui_component::scroll::Scrollbar::horizontal(&scroll)
+                    .mode(gpui_component::scroll::ScrollbarMode::Always),
+            ),
+        )
 }

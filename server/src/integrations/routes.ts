@@ -187,8 +187,11 @@ registerRoute({
     const { logins } = await body(LoginMap);
     const entries = Object.entries(logins).map(([l, id]) => [l.toLowerCase(), id] as const);
     const ids = [...new Set(entries.map(([, id]) => id))];
-    for (const id of ids) {
-      if (!(await getMember(env.DB, id))) throw new ApiError("invalid", "unknown member in logins");
+    const unknown: string[] = [];
+    for (const id of ids) if (!(await getMember(env.DB, id))) unknown.push(id);
+    if (unknown.length > 0) {
+      const login = entries.find(([, id]) => id === unknown[0])?.[0];
+      throw new ApiError("invalid", `unknown member in logins: ${unknown[0]} (login ${login})`, "member.unknown", undefined, unknown);
     }
     const now = Date.now();
     await env.DB.batch([
@@ -230,6 +233,19 @@ function frameContext(env: HooksEnv, r: HookRow, log: Logger): FrameContext {
   };
 }
 
+/**
+ * The hook's secret for an inbound post. The sender is an outside system that cannot fix the
+ * Worker secret, so a `hooks.secret_*` failure is also logged with the hook id for the admin.
+ */
+async function storedSecret(env: HooksEnv, r: HookRow, log: Logger): Promise<string> {
+  try {
+    return await decryptSecret(env, r.id, r.secret_enc);
+  } catch (err) {
+    if (err instanceof ApiError && err.reason) log.warn("hook secret cannot be read", { hookId: r.id, reason: err.reason });
+    throw err;
+  }
+}
+
 registerRoute({
   method: "POST",
   path: "/v1/hooks/:id/in",
@@ -239,7 +255,7 @@ registerRoute({
     const r = await activeHook(env, params.id);
     if (!r || r.kind !== "generic") throw new ApiError("not_found", "hook not found");
     const given = request.headers.get("x-hook-secret") ?? "";
-    if (!(await checkSecret(given, await decryptSecret(env, r.id, r.secret_enc)))) {
+    if (!(await checkSecret(given, await storedSecret(env, r, log)))) {
       throw new ApiError("unauthorized", "invalid hook secret");
     }
     const raw = parseJson(await readText(request, IN_BODY_LIMIT));
@@ -301,7 +317,7 @@ registerRoute({
     const r = await activeHook(env, params.id);
     if (!r || r.kind !== "github") throw new ApiError("not_found", "hook not found");
     const text = await readText(request, GITHUB_BODY_LIMIT);
-    const secret = await decryptSecret(env, r.id, r.secret_enc);
+    const secret = await storedSecret(env, r, log);
     if (!(await verifyGithub(secret, text, request.headers.get("x-hub-signature-256")))) {
       throw new ApiError("unauthorized", "invalid signature");
     }

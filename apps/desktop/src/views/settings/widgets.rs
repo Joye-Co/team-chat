@@ -68,7 +68,15 @@ pub fn size_text(bytes: u64) -> String {
 pub fn date_text(at: Millis) -> String {
     use chrono::TimeZone as _;
     match chrono::Local.timestamp_millis_opt(at) {
-        chrono::LocalResult::Single(t) => t.format("%Y年%-m月%-d日 %H:%M").to_string(),
+        chrono::LocalResult::Single(t) => fill(
+            crate::copy::common::DATE_TIME,
+            &[
+                ("y", &t.format("%Y").to_string()),
+                ("m", &t.format("%-m").to_string()),
+                ("d", &t.format("%-d").to_string()),
+                ("time", &t.format("%H:%M").to_string()),
+            ],
+        ),
         _ => String::new(),
     }
 }
@@ -522,33 +530,76 @@ impl Status {
     }
 }
 
-/// A one-time secret: its label above, the value in a `code-bg` box (radius
-/// 10, padding 12, Menlo 13/20) with a copy button. The value is never logged.
-pub fn secret_block(id: impl Into<ElementId>, label: &'static str, value: &str, cx: &App) -> Div {
-    let k = theme::colors(cx);
+/// A one-time secret (a command, a credential): its label above like any
+/// field of the sheet, the value in a bordered box in the code size with a
+/// copy button. One line that scrolls sideways, never wraps (D13): while a
+/// line is cut, a scrollbar runs along the box's bottom edge. The caller
+/// keeps `scroll`. The value is never logged.
+pub fn secret_block(
+    id: &'static str,
+    label: &'static str,
+    value: &str,
+    scroll: &gpui::ScrollHandle,
+    cx: &App,
+) -> Div {
+    use crate::ui::native::{metrics, native_colors, tokens};
+    use gpui::{InteractiveElement as _, StatefulInteractiveElement as _};
+    use gpui_component::scroll::{Scrollbar, ScrollbarMode};
+    let k = native_colors(cx);
     let value: SharedString = value.to_string().into();
+    // Known from the frame before: a line is wider than the box.
+    let scrolls = scroll.max_offset().x > Pixels::ZERO;
     field(
         label,
         div()
             .w_full()
+            .min_h(metrics::FIELD)
             .flex()
-            .items_start()
-            .gap(space::S8)
-            .pl(space::S12)
-            .pr(space::S6)
-            .py(space::S6)
-            .rounded(theme::radius::FIELD)
-            .bg(k.code_bg)
+            .items_center()
+            .gap(tokens::space::S8)
+            .pl(tokens::space::S12)
+            .pr(tokens::space::S6)
+            .py(tokens::space::S6)
+            .rounded(metrics::FIELD_RADIUS)
+            .bg(k.control)
             .border_1()
-            .border_color(k.border)
+            .border_color(k.separator)
             .child(
                 div()
+                    .relative()
                     .flex_1()
-                    .min_w_0()
-                    .py(space::S4)
-                    .t_code()
-                    .text_color(k.code_text)
-                    .child(value.clone()),
+                    .min_w(Pixels::ZERO)
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("{id}-value")))
+                            .w_full()
+                            .flex()
+                            .overflow_x_scroll()
+                            .restrict_scroll_to_axis()
+                            .track_scroll(scroll)
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .min_w_full()
+                                    // Room for the scrollbar under the last line.
+                                    .when(scrolls, |d| d.pb(tokens::space::S12))
+                                    // The last glyph clears the copy button
+                                    // at the end of the scroll.
+                                    .pr(tokens::space::S8)
+                                    .whitespace_nowrap()
+                                    .t_code()
+                                    .text_color(k.label)
+                                    .child(value.clone()),
+                            ),
+                    )
+                    .when(scrolls, |d| {
+                        d.child(
+                            div()
+                                .absolute()
+                                .inset_0()
+                                .child(Scrollbar::horizontal(scroll).mode(ScrollbarMode::Always)),
+                        )
+                    }),
             )
             .child(Clipboard::new(id).tooltip(s::COPY).value(value)),
         cx,
@@ -615,23 +666,16 @@ pub fn native_status(status: &Status, cx: &App) -> Option<Div> {
         Status::Idle => return None,
         Status::Busy(t) | Status::Done(t) => (t.clone(), k.secondary),
         Status::Failed(t) => {
-            return Some(crate::ui::native::sheet_status_error(t.clone(), cx).px(px(2.)));
+            return Some(crate::ui::native::sheet_status_error(t.clone(), cx));
         }
     };
-    Some(
-        div()
-            .px(px(2.))
-            .n_subheadline()
-            .text_color(color)
-            .child(text),
-    )
+    Some(div().n_subheadline().text_color(color).child(text))
 }
 
 /// A `secondary` Subheadline line (a footer of my own, a field's help).
 pub fn quiet(text: impl Into<SharedString>, cx: &App) -> Div {
     use crate::ui::native::{NativeType as _, native_colors};
     div()
-        .px(px(2.))
         .n_subheadline()
         .text_color(native_colors(cx).secondary)
         .child(text.into())
@@ -762,6 +806,42 @@ pub fn open_sheet(
     });
 }
 
+/// The step of a sheet that shows what was made once (a code, a command, a
+/// credential) with 完成 as its only button. The form's fields are gone by
+/// then, and the focus with them: the step takes the focus itself, so the
+/// sheet's keys still reach it (Return is 完成).
+pub struct DoneStep {
+    focus: gpui::FocusHandle,
+    taken: bool,
+}
+
+impl DoneStep {
+    pub fn new(cx: &mut App) -> Self {
+        Self {
+            focus: cx.focus_handle(),
+            taken: false,
+        }
+    }
+
+    /// The step around its `layout`; the first time it draws it takes the focus.
+    pub fn show(
+        &mut self,
+        layout: impl IntoElement,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> AnyElement {
+        use gpui::InteractiveElement as _;
+        if !std::mem::replace(&mut self.taken, true) {
+            self.focus.focus(window, cx);
+        }
+        div()
+            .w_full()
+            .track_focus(&self.focus)
+            .child(layout)
+            .into_any_element()
+    }
+}
+
 /// Opens a Tahoe alert (§7.2) on the settings window: 260 wide, attached
 /// under the toolbar like a sheet. `build` returns the `AlertLayout`.
 pub fn open_alert(
@@ -795,6 +875,22 @@ pub fn popup_fixed(
     // the chevron pinned at the trailing edge, so every select in a column
     // lines up (C1-06).
     crate::ui::native::select_button(id, title, crate::ui::native::PushSize::Regular, cx).w(width)
+}
+
+/// A pop-up as wide as the value column of a `width` sheet's form row, so
+/// the selects and the text fields of one group share both edges (2.8).
+/// `unset` draws the title in the placeholder color: nothing is chosen yet.
+pub fn popup_fill(
+    id: impl Into<ElementId>,
+    title: impl Into<SharedString>,
+    unset: bool,
+    width: crate::ui::native::SheetWidth,
+    cx: &App,
+) -> Button {
+    let k = crate::ui::native::native_colors(cx);
+    crate::ui::native::select_button(id, title, crate::ui::native::PushSize::Regular, cx)
+        .w(crate::views::nav::dialogs::form_field_width(width))
+        .when(unset, |b| b.text_color(k.secondary))
 }
 
 /// A row under a list group: the `+`/`−` buttons, then a quiet line.
@@ -869,8 +965,8 @@ pub fn section(header: crate::ui::native::SectionTitle, body: impl IntoElement) 
         .child(body)
 }
 
-/// The 28 icon box of a machine or device row (2.19): radius 6, muted
-/// fill, a 16 icon.
+/// The 28 icon box of a machine or device row (2.19): radius 6, a 16
+/// icon. It sits on a group box, so its fill is the on-group tint.
 pub fn icon_box_28(sym: Sym, cx: &App) -> Div {
     use crate::ui::native::{native_colors, tokens};
     let k = native_colors(cx);
@@ -878,7 +974,7 @@ pub fn icon_box_28(sym: Sym, cx: &App) -> Div {
         .flex_none()
         .size(tokens::height::SM)
         .rounded(tokens::radius::ITEM)
-        .bg(k.fill)
+        .bg(k.on_group)
         .flex()
         .items_center()
         .justify_center()
@@ -1057,6 +1153,7 @@ pub fn list_loading(_id: &str, rows: usize, two_line: bool, cx: &App) -> AnyElem
             group = group.child(
                 div()
                     .ml(metrics::FORM_ROW_INSET + tokens::height::SM + tokens::space::S12)
+                    .mr(metrics::FORM_ROW_INSET)
                     .h(tokens::layout::HAIRLINE)
                     .bg(k.separator),
             );
@@ -1161,7 +1258,13 @@ pub fn item_rows(rows: Vec<AnyElement>, media: Pixels, cx: &App) -> Div {
     let mut list = div().w_full().flex().flex_col();
     for (i, row) in rows.into_iter().enumerate() {
         if i > 0 {
-            list = list.child(div().ml(inset).h(tokens::layout::HAIRLINE).bg(k.separator));
+            list = list.child(
+                div()
+                    .ml(inset)
+                    .mr(metrics::FORM_ROW_INSET)
+                    .h(tokens::layout::HAIRLINE)
+                    .bg(k.separator),
+            );
         }
         list = list.child(row);
     }
@@ -1183,8 +1286,42 @@ pub fn capped_list(
     max_h: Pixels,
     scroll: &gpui::ScrollHandle,
 ) -> Div {
+    capped(id, content, max_h, scroll, Pixels::ZERO)
+}
+
+/// The scrolling body of a sheet, capped at `max_h`: as [`capped_list`], with
+/// the scrollbar in the sheet's side padding, so the groups keep their whole
+/// width and one right edge with the footer buttons (2.9).
+pub fn sheet_body_list(
+    id: impl Into<ElementId>,
+    content: impl IntoElement,
+    max_h: Pixels,
+    scroll: &gpui::ScrollHandle,
+) -> Div {
+    capped(
+        id,
+        content,
+        max_h,
+        scroll,
+        crate::ui::native::tokens::space::S16,
+    )
+}
+
+/// `outset`: how far past the content's right edge the scrollbar sits.
+fn capped(
+    id: impl Into<ElementId>,
+    content: impl IntoElement,
+    max_h: Pixels,
+    scroll: &gpui::ScrollHandle,
+    outset: Pixels,
+) -> Div {
     use gpui::{InteractiveElement as _, StatefulInteractiveElement as _};
     use gpui_component::scroll::{Scrollbar, ScrollbarMode};
+    // In the gutter the bar stands alone, so it shows only while the body
+    // is cut (known from the frame before). A body that fits to within a
+    // few points has nothing to scroll to and gets no thumb.
+    let shown =
+        outset == Pixels::ZERO || scroll.max_offset().y > crate::ui::native::tokens::space::S4;
     div()
         .relative()
         .w_full()
@@ -1197,15 +1334,24 @@ pub fn capped_list(
                 .track_scroll(scroll)
                 .child(content),
         )
-        .child(
+        .children(shown.then(|| {
             div()
                 .absolute()
                 .top_0()
-                .right_0()
+                .right(-outset)
                 .bottom_0()
                 .w(crate::ui::native::tokens::space::S12)
-                .child(Scrollbar::vertical(scroll).mode(ScrollbarMode::Always)),
-        )
+                .child({
+                    let bar = Scrollbar::vertical(scroll).mode(ScrollbarMode::Always);
+                    // The bar draws on the scrolled box unless told to
+                    // use this strip.
+                    if outset > Pixels::ZERO {
+                        bar.viewport_from_layout()
+                    } else {
+                        bar
+                    }
+                })
+        }))
 }
 
 /// A whole number with thousands separators (2.21): 1000000 → 1,000,000.

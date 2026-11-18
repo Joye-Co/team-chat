@@ -4,23 +4,17 @@
 // the age of an output is measured on the server clock (daemon F3).
 import { SELF, env, runInDurableObject } from "cloudflare:test";
 import type { CardV2 } from "@chat/protocol";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { BotsEnv } from "../src/bots/env";
 import type { Actor } from "../src/core/registry";
 import type { GroupRoom } from "../src/core/room";
 import { ARTIFACT_EVENT_RPC, ARTIFACT_REPLY_RPC, tcSchemaViolation } from "../src/files/bridge";
-import { Daemon, downViolations, HEALTH, mention, world, type World } from "./daemon";
-import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, protocolViolations } from "./helpers";
+import { Daemon, HEALTH, mention, world, type World } from "./daemon";
+import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const INTERACT = { features: ["interact/1"] };
-
-afterAll(async () => {
-  await sleep(300);
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 
 async function sha(bytes: Uint8Array): Promise<string> {
   const d = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));

@@ -207,11 +207,19 @@ fn row_frame(
             .border_color(n.separator)
             .bg(n.content)
     };
+    // While a transfer runs the two lines move up by the bar's room, so the bar
+    // sits a clear 4 under the meta line inside the same h60 (§2.17).
+    let lift = if progress.is_some() && !compact {
+        space::S12
+    } else {
+        px(0.)
+    };
     row.child(file_media(file_icon(file), cx))
         .child(
             div()
                 .flex_1()
                 .min_w(px(0.))
+                .pb(lift)
                 .flex()
                 .flex_col()
                 .child(
@@ -250,8 +258,8 @@ fn row_frame(
                 // Under the name and meta: the media box, then the gap.
                 track(p, cx)
                     .left(space::S12 + px(32.) + space::S12)
-                    .right(px(44.))
-                    .bottom(px(7.))
+                    .right(space::S8 + crate::ui::native::tokens::height::SM + space::S8)
+                    .bottom(space::S8)
             })
         })
 }

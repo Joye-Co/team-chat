@@ -302,7 +302,7 @@ export class BotDesk extends DeskInteract {
       bucket = new TokenBucket(PLAN_RATE.rate, PLAN_RATE.burst);
       this.planBuckets.set(runId, bucket);
     }
-    if (!bucket.take()) throw new ApiError("rate_limited", "too many plan updates for this run");
+    if (!bucket.take()) throw new ApiError("rate_limited", "too many plan updates for this run", undefined, bucket.waitMs());
     return this.serial(runId, async () => {
       const r = this.run(runId);
       if (!r) throw new ApiError("not_found", "run not found");

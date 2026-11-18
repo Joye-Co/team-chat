@@ -1,7 +1,8 @@
 // Unit tests of the 1.1 interaction loop, refs and Card v2.1 builders against a fake server
 // (test/fake.ts): no network, no wrangler. Run: bun test test/unit.test.ts
-import { afterEach, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { ACK_EMOJI as PROTOCOL_ACK_EMOJI, type CardV2 } from "@chat/protocol";
 import {
@@ -15,6 +16,7 @@ import {
   checkArtifactEvents,
   checkDiagram,
   composeCard,
+  FileStateStore,
   HttpClient,
   MAX_PATTERN_INPUT,
   markdownBlocks,
@@ -429,6 +431,42 @@ describe("answers", () => {
     expect(a.text("note")).toBe("后台是 7 个");
     expect(a.action?.id).toBe("send");
     expect(a.cancelled).toBe(false);
+  });
+
+  test("ctx.done in onCardAnswer: a handler that runs again posts with the same clientMsgId and the answer as cause", async () => {
+    const card = report();
+    const mid = "01JC0MSG000000000000000098";
+    const sends: Frame[] = [];
+    for (let round = 0; round < 2; round++) {
+      // Each round is a new process that reads the same answer again (the cursor was not saved).
+      const server = new FakeServer();
+      const store = new MemoryStateStore();
+      store.save({ v: 1, memberId: BOT_ID, cursors: { [GROUP_ID]: 0 }, following: {}, cards: { [mid]: { groupId: GROUP_ID, topicId: TOPIC_ID } } });
+      server.groups = [{ group: { id: GROUP_ID, kind: "group", name: "拾光增长", createdAt: 1 }, lastSeq: 1, readSeq: 0, unread: 0, mentions: 0 }];
+      server.on("fetch", () => ({
+        ok: true,
+        result: {
+          events: [{ seq: 1, groupId: GROUP_ID, at: Date.now(), actorId: HUMAN_ID, type: "card.answered", data: { messageId: mid, eventId: "EV7", rev: 1, actionId: "send", event: "action.press" } }],
+          hasMore: false,
+          lastSeq: 1,
+        },
+      }));
+      server.on("history", () => ({ ok: true, result: { messages: [message({ id: mid, kind: "card", card: { v: 1, title: card.title, blocks: [] }, cardV2: card })], hasMore: false } }));
+      server.on("send", (f) => ({ ok: true, result: { message: message({ id: "01JC0MSG000000000000000097", body: f.body }) } }));
+      const bot = new Bot({ url: "http://127.0.0.1:1", token: "t", WebSocket: server.WebSocket as never, stateStore: store, logLevel: "error", stopTimeoutMs: 500 });
+      bots.push(bot);
+      bot.onCardAnswer(async (ctx) => {
+        const r = await ctx.done({ title: "做完了", summary: "好了" });
+        expect(r.run).toBeNull();
+      });
+      await bot.start();
+      sends.push(await server.next((f) => f.t === "send"));
+      await bot.stop();
+    }
+    expect(sends[0]?.clientMsgId).toBe(`bot:${mid}:EV7:0`);
+    expect(sends[1]?.clientMsgId).toBe(sends[0]?.clientMsgId);
+    expect(sends[0]?.causeEventId).toBe("EV7");
+    expect((sends[0]?.cardV2 as CardV2).intent).toBe("done");
   });
 
   test("an answer caught up after a restart reads the card from the history", async () => {
@@ -878,5 +916,252 @@ describe("page event declarations", () => {
     expect(err3.reason).toBe("artifact.bad_schema");
     expect(calls).toBe(0);
     expect(() => checkArtifactEvents([{ name: "form.submit", schema: { type: "string", pattern: "^[a-z]{1,8}$" } }])).not.toThrow();
+  });
+});
+
+describe("setup errors", () => {
+  const dir = mkdtempSync(join(tmpdir(), "bot-sdk-setup-"));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  const make = (o: Record<string, unknown>) => new Bot({ url: "http://127.0.0.1:1", logLevel: "silent", ...o } as never);
+  const thrown = (fn: () => unknown): ChatError => {
+    try {
+      fn();
+    } catch (e) {
+      return e as ChatError;
+    }
+    throw new Error("did not throw");
+  };
+
+  test("bad options throw ChatError invalid with a message that says what to pass", () => {
+    const cases: [() => unknown, RegExp][] = [
+      [() => make({}), /pass token or tokenFile/],
+      [() => make({ token: "t", url: "ws://127.0.0.1:1" }), /must be http:\/\/ or https:\/\//],
+      [() => make({ token: "t", url: "127.0.0.1:8789" }), /http/],
+      [() => make({ token: "t", url: "not a url" }), /must look like http:\/\/127\.0\.0\.1:8789/],
+      [() => new HttpClient({ url: "not a url", token: "t" }), /must look like/],
+    ];
+    for (const [fn, text] of cases) {
+      const err = thrown(fn);
+      expect(err).toBeInstanceOf(ChatError);
+      expect(err.code).toBe("invalid");
+      expect(err.message).toMatch(text);
+    }
+    const early = thrown(() => make({ token: "t" }).me);
+    expect(early.code).toBe("invalid");
+    expect(early.message).toContain("await bot.start() first");
+  });
+
+  test("a missing or empty token file names the file", () => {
+    const missing = thrown(() => make({ tokenFile: join(dir, "nope.token") }));
+    expect(missing).toBeInstanceOf(ChatError);
+    expect(missing.message).toBe(`invalid: token file not found: ${join(dir, "nope.token")} (docs/bots.md, section 1, shows how to make one)`);
+    writeFileSync(join(dir, "empty.token"), "\n", { mode: 0o600 });
+    expect(thrown(() => make({ tokenFile: join(dir, "empty.token") })).message).toContain(`token file is empty: ${join(dir, "empty.token")}`);
+  });
+
+  test("tokenFile and stateFile read a leading ~ as the home folder", () => {
+    expect(new FileStateStore("~/x/state.json").path).toBe(join(homedir(), "x/state.json"));
+    expect(new FileStateStore("~").path).toBe(homedir());
+    expect(new FileStateStore("/tmp/~/state.json").path).toBe("/tmp/~/state.json");
+    expect(new FileStateStore("~user/state.json").path).toBe("~user/state.json");
+    const err = thrown(() => make({ tokenFile: "~/.bot-sdk-test-no-such-file.token" }));
+    expect(err.message).toContain(`token file not found: ${join(homedir(), ".bot-sdk-test-no-such-file.token")}`);
+  });
+
+  test("a damaged state file names the file and what deleting it costs", () => {
+    const file = join(dir, "state.json");
+    writeFileSync(file, '{"v":1,"cursors":{');
+    const err = thrown(() => make({ token: "t", stateFile: file }));
+    expect(err).toBeInstanceOf(ChatError);
+    expect(err.code).toBe("invalid");
+    expect(err.message).toContain(`bot state file is not valid JSON: ${file} (delete it to start fresh (events from while the bot was away are skipped))`);
+    writeFileSync(file, "null");
+    expect(thrown(() => make({ token: "t", stateFile: file })).message).toContain(`not a JSON object: ${file}`);
+    writeFileSync(file, '{"v":2}');
+    expect(thrown(() => make({ token: "t", stateFile: file })).message).toContain(`unsupported bot state version in ${file}`);
+    writeFileSync(file, '{"v":1,"cursors":{"g":3},"following":{},"cards":{}}');
+    expect(new FileStateStore(file).load()?.cursors).toEqual({ g: 3 });
+  });
+});
+
+describe("a server that cannot be reached", () => {
+  test("a base URL that ends with /v1 loses it; a proxy prefix is kept", () => {
+    const url = (u: string) => new Bot({ url: u, token: "t", logLevel: "silent" }).url;
+    expect(url("http://127.0.0.1:8789/v1/")).toBe("http://127.0.0.1:8789");
+    expect(url("http://127.0.0.1:8789/v1")).toBe("http://127.0.0.1:8789");
+    expect(url("http://127.0.0.1:8789/")).toBe("http://127.0.0.1:8789");
+    expect(url("https://host.example/chat/")).toBe("https://host.example/chat");
+    expect(url("https://host.example/chat/v1")).toBe("https://host.example/chat");
+    expect(url("http://v1")).toBe("http://v1");
+    expect(url("http://v1:8789/v1/")).toBe("http://v1:8789");
+    expect(new HttpClient({ url: "http://127.0.0.1:8789/v1", token: "t" }).url).toBe("http://127.0.0.1:8789");
+  });
+
+  test("before the first welcome each failed try warns with the endpoint, the reason and the delay", async () => {
+    // A socket that never opens: it closes like a refused connection.
+    class Refused {
+      readyState = 0;
+      onopen: (() => void) | null = null;
+      onmessage: (() => void) | null = null;
+      onclose: ((ev: { code: number; reason: string }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor() {
+        setTimeout(() => {
+          this.readyState = 3;
+          this.onclose?.({ code: 1006, reason: "" });
+        }, 0);
+      }
+      send(): void {}
+      close(): void {}
+    }
+    const lines: { level: string; msg: string; fields?: Record<string, unknown> }[] = [];
+    const logger = Object.fromEntries(
+      (["debug", "info", "warn", "error"] as const).map((level) => [level, (msg: string, fields?: Record<string, unknown>) => lines.push({ level, msg, fields })]),
+    ) as never;
+    const bot = new Bot({
+      url: "http://user:pw@127.0.0.1:1/v1",
+      token: "tc_secretsecretsecretsecretsecret",
+      WebSocket: Refused as never,
+      fetch: (async () => {
+        throw new Error("Unable to connect");
+      }) as never,
+      logger,
+      stopTimeoutMs: 100,
+    });
+    bots.push(bot);
+    const started = bot.start().catch((e) => e);
+    for (let i = 0; i < 300 && lines.filter((l) => l.level === "warn").length < 2; i++) await new Promise((r) => setTimeout(r, 10));
+    const warns = lines.filter((l) => l.level === "warn");
+    expect(warns.length).toBeGreaterThanOrEqual(2);
+    expect(warns[0]?.msg).toMatch(/^cannot reach ws:\/\/127\.0\.0\.1:1\/v1\/ws \(network: GET \/v1\/me failed: Unable to connect\), retrying in \d+\.\d s$/);
+    expect(lines.find((l) => l.msg === "disconnected")?.fields?.url).toBe("ws://127.0.0.1:1/v1/ws");
+    expect(JSON.stringify(lines)).not.toContain("tc_secret");
+    expect(JSON.stringify(lines)).not.toContain("pw@");
+    await bot.stop();
+    expect(((await started) as ChatError).code).toBe("closed");
+  });
+});
+
+describe("streams a handler leaves open", () => {
+  /** `send` answers with a streaming message; `edit` with the edited one. */
+  function streamServer(): FakeServer {
+    const server = new FakeServer();
+    let n = 0;
+    server.on("send", (f) => ({ ok: true, result: { message: message({ id: `01JC0MSG0000000000000000S${++n}`, body: f.body, streaming: f.streaming === true }) } }));
+    server.on("edit", (f) => ({ ok: true, result: { message: message({ id: f.messageId as string, body: f.body, streaming: f.streaming === true }) } }));
+    return server;
+  }
+  const mention = (seq: number) => ({
+    seq,
+    groupId: GROUP_ID,
+    at: Date.now(),
+    actorId: HUMAN_ID,
+    type: "message.created",
+    data: { message: message({ id: `01JC0MSG0000000000000000M${seq}`, authorId: HUMAN_ID, body: "@Ledger go", mentions: [BOT_ID] }) },
+  });
+
+  test("a handler that throws after ctx.stream(): the SDK finishes the stream with the text it has", async () => {
+    const server = streamServer();
+    const bot = await start(server);
+    const errors: unknown[] = [];
+    bot.onError((e) => errors.push(e));
+    bot.onMention(async (ctx) => {
+      const w = await ctx.stream("working\n");
+      w.append("step 1\n");
+      throw new Error("boom");
+    });
+    server.event(mention(1));
+    const edit = await server.next((f) => f.t === "edit" && f.streaming === false);
+    expect(edit.messageId).toBe("01JC0MSG0000000000000000S1");
+    expect(edit.body).toBe("working\nstep 1\n");
+    for (let i = 0; i < 100 && errors.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(String(errors[0])).toContain("boom");
+  });
+
+  test("a handler that finishes its stream is left alone; a bot.stream() writer stays open until stop()", async () => {
+    const server = streamServer();
+    const bot = await start(server);
+    let handled = 0;
+    bot.onMention(async (ctx) => {
+      const w = await ctx.stream();
+      w.append("done");
+      await w.finish();
+      handled++;
+    });
+    const own = await bot.stream({ groupId: GROUP_ID, topicId: TOPIC_ID }, "long job\n");
+    server.event(mention(1));
+    for (let i = 0; i < 100 && handled === 0; i++) await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 50));
+    const finals = () => server.of("edit").filter((f) => f.streaming === false);
+    expect(finals().map((f) => f.messageId)).toEqual(["01JC0MSG0000000000000000S2"]);
+    expect(own.done).toBe(false);
+    own.append("still going\n");
+    await bot.stop();
+    expect(own.done).toBe(true);
+    expect(finals().map((f) => [f.messageId, f.body])).toEqual([
+      ["01JC0MSG0000000000000000S2", "done"],
+      ["01JC0MSG0000000000000000S1", "long job\nstill going\n"],
+    ]);
+  });
+
+  test("stop() cuts a handler that still streams: the stream is finished before the connection closes", async () => {
+    const server = streamServer();
+    const bot = await start(server);
+    let release = () => {};
+    bot.onMention(async (ctx) => {
+      const w = await ctx.stream("half");
+      await new Promise<void>((r) => {
+        release = r;
+      });
+      expect(w.done).toBe(true);
+    });
+    server.event(mention(1));
+    await server.next((f) => f.t === "send");
+    await new Promise((r) => setTimeout(r, 20));
+    await bot.stop();
+    const final = server.of("edit").filter((f) => f.streaming === false);
+    expect(final.map((f) => f.body)).toEqual(["half"]);
+    release();
+  });
+});
+
+describe("ChatError details", () => {
+  test("an HTTP error keeps the server's retryAfterMs and memberIds", async () => {
+    const body = { error: { code: "rate_limited", message: "slow down", retryAfterMs: 1200, memberIds: [HUMAN_ID, 7] } };
+    const http = new HttpClient({ url: "http://127.0.0.1:1", token: "t", fetch: (async () => new Response(JSON.stringify(body), { status: 429 })) as never });
+    const err = (await http.me().catch((e) => e)) as ChatError;
+    expect(err).toBeInstanceOf(ChatError);
+    expect(err.code).toBe("rate_limited");
+    expect(err.status).toBe(429);
+    expect(err.retryAfterMs).toBe(1200);
+    expect(err.memberIds).toEqual([HUMAN_ID]);
+    const plain = new ChatError("invalid", "x", 400, "some.reason");
+    expect(plain.retryAfterMs).toBeUndefined();
+    expect(plain.memberIds).toBeUndefined();
+    expect(plain.reason).toBe("some.reason");
+  });
+
+  test("a rate-limited HTTP send waits the server's retryAfterMs before the next try", async () => {
+    const times: number[] = [];
+    const http = new HttpClient({ url: "http://127.0.0.1:1", token: "t", fetch: (async () => {
+      times.push(Date.now());
+      if (times.length === 1) return new Response(JSON.stringify({ error: { code: "rate_limited", message: "slow down", retryAfterMs: 900 } }), { status: 429 });
+      return new Response(JSON.stringify({ message: message({ id: "01JC0MSG000000000000000070" }) }), { status: 200 });
+    }) as never });
+    await http.postMessage(GROUP_ID, { body: "hi" });
+    expect(times).toHaveLength(2);
+    expect((times[1] as number) - (times[0] as number)).toBeGreaterThanOrEqual(850);
+  });
+
+  test("a refused frame keeps memberIds and retryAfterMs from ack.error", async () => {
+    const server = new FakeServer();
+    server.on("send", () => ({ ok: false, error: { code: "invalid", message: "not available", reason: "relay.member_unavailable", memberIds: [HUMAN_ID] } }) as Reply);
+    server.on("react", () => ({ ok: false, error: { code: "forbidden", message: "no", retryAfterMs: 300 } }) as Reply);
+    const bot = await start(server);
+    const err = (await bot.send({ groupId: GROUP_ID, topicId: TOPIC_ID }, "hi").catch((e) => e)) as ChatError;
+    expect(err.reason).toBe("relay.member_unavailable");
+    expect(err.memberIds).toEqual([HUMAN_ID]);
+    const err2 = (await bot.react(GROUP_ID, "01JC0MSG000000000000000071", "👀").catch((e) => e)) as ChatError;
+    expect(err2.retryAfterMs).toBe(300);
   });
 });

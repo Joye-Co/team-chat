@@ -74,6 +74,9 @@ pub struct AiServicePanel {
     owner: bool,
     /// What the server keeps; `None` until it is read.
     saved: Option<AiServiceSettings>,
+    /// What the form last showed from the server: a late read never
+    /// overwrites a draft that has moved on from it.
+    shown: Option<AiServiceSettings>,
     load: Status,
     /// The provider picked in the form.
     provider: Option<AiProviderKind>,
@@ -131,6 +134,7 @@ impl AiServicePanel {
             owner: super::i_am_owner(&services),
             services,
             saved: None,
+            shown: None,
             load: Status::Idle,
             provider: None,
             model,
@@ -163,7 +167,11 @@ impl AiServicePanel {
                 match result {
                     Ok(saved) => {
                         this.saved = Some(saved.clone());
-                        this.show(&saved, window, cx);
+                        if this.untouched(cx) {
+                            this.show(&saved, window, cx);
+                        } else {
+                            this.update_key_placeholder(window, cx);
+                        }
                         this.load = Status::Idle;
                     }
                     Err(e) => this.load = Status::from_error(e),
@@ -177,6 +185,7 @@ impl AiServicePanel {
     /// Puts the saved values in the form (call after `saved` is set); the key
     /// field stays empty.
     fn show(&mut self, saved: &AiServiceSettings, window: &mut Window, cx: &mut Context<Self>) {
+        self.shown = Some(saved.clone());
         self.provider = saved.provider;
         let model = saved.model.clone();
         let base = saved.base_url.clone().unwrap_or_default();
@@ -187,6 +196,16 @@ impl AiServicePanel {
         self.key
             .update(cx, |st, cx| st.set_value(String::new(), window, cx));
         self.update_key_placeholder(window, cx);
+    }
+
+    /// The form still holds what it last showed (nothing, before the first
+    /// read): nobody has picked a provider or typed.
+    fn untouched(&self, cx: &Context<Self>) -> bool {
+        let shown = self.shown.clone().unwrap_or_default();
+        self.provider == shown.provider
+            && self.model.read(cx).value().as_ref() == shown.model.as_str()
+            && self.base_url.read(cx).value().as_ref() == shown.base_url.as_deref().unwrap_or("")
+            && self.key.read(cx).value().is_empty()
     }
 
     /// "已设置 ····abcd" while the saved key still applies, else 粘贴 API Key.
@@ -338,13 +357,28 @@ impl AiServicePanel {
             AiAction::Problem(t) => {
                 Some(crate::ui::native::sheet_status_error(t.clone(), cx).into_any_element())
             }
-            AiAction::TestFailed(t) => Some(widgets::failed_alert(
-                "ai-test-failed",
-                s::AI_TEST_FAILED,
-                Some(t.clone()),
-                None,
-                cx,
-            )),
+            // The cause and the next step in plain words; the provider's own
+            // words stay under them, for whoever has to look it up.
+            AiAction::TestFailed(t) => {
+                let alert = widgets::failed_alert(
+                    "ai-test-failed",
+                    s::AI_TEST_FAILED,
+                    Some(test_failure_cause(t).map_or_else(|| t.clone(), Into::into)),
+                    None,
+                    cx,
+                );
+                Some(match test_failure_cause(t) {
+                    Some(_) => div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(space::S6)
+                        .child(alert)
+                        .child(widgets::quiet(t.clone(), cx))
+                        .into_any_element(),
+                    None => alert,
+                })
+            }
             AiAction::SaveFailed(t) => Some(widgets::failed_alert(
                 "ai-save-failed",
                 s::AI_SAVE_FAILED,
@@ -531,20 +565,61 @@ impl AiServicePanel {
                 .w_full()
                 .flex()
                 .flex_col()
-                .gap(space::S12)
-                .child(group)
-                .children(empty)
-                .children(self.answer_row(cx))
-                .child(buttons)
+                // The buttons belong to the form over them (12); the list
+                // of uses is the next block (24).
+                .gap(space::S24)
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(space::S12)
+                        .child(group)
+                        .children(empty)
+                        .children(self.answer_row(cx))
+                        .child(buttons),
+                )
                 .child(
                     div()
                         .flex()
                         .flex_col()
                         .gap(space::S8)
-                        .child(widgets::quiet(s::AI_USES, cx))
+                        // Set up, the four are on: a state, not a promise.
+                        .child(widgets::quiet(
+                            if configured {
+                                s::AI_USES_ON
+                            } else {
+                                s::AI_USES
+                            },
+                            cx,
+                        ))
                         .child(uses_form),
                 ),
         ))
+    }
+}
+
+/// What a failed 测试连接 most likely means, from the status the provider
+/// answered with (`401 …`) or the words of a network failure; `None` leaves
+/// the provider's words alone.
+pub fn test_failure_cause(text: &str) -> Option<&'static str> {
+    let status = text
+        .split_whitespace()
+        .next()
+        .filter(|w| w.len() == 3)
+        .and_then(|w| w.parse::<u16>().ok());
+    match status {
+        Some(401 | 403) => Some(s::AI_TEST_FAILED_KEY),
+        Some(404) => Some(s::AI_TEST_FAILED_NOT_FOUND),
+        Some(408 | 502 | 503 | 504) => Some(s::AI_TEST_FAILED_UNREACHABLE),
+        Some(_) => None,
+        None => {
+            let lower = text.to_lowercase();
+            ["timeout", "timed out", "network", "connect", "dns"]
+                .iter()
+                .any(|w| lower.contains(w))
+                .then_some(s::AI_TEST_FAILED_UNREACHABLE)
+        }
     }
 }
 
@@ -557,6 +632,25 @@ impl gpui::Render for AiServicePanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_test_names_its_cause() {
+        assert_eq!(
+            test_failure_cause("401 Authentication Fails (auth header format)"),
+            Some(s::AI_TEST_FAILED_KEY)
+        );
+        assert_eq!(
+            test_failure_cause("404 model not found"),
+            Some(s::AI_TEST_FAILED_NOT_FOUND)
+        );
+        assert_eq!(
+            test_failure_cause("Connection timed out"),
+            Some(s::AI_TEST_FAILED_UNREACHABLE)
+        );
+        // A status with no plain cause keeps the provider's words.
+        assert_eq!(test_failure_cause("429 rate limited"), None);
+        assert_eq!(test_failure_cause("出了点问题"), None);
+    }
 
     /// Set up, every use says 开启; not set up, each says what happens without it.
     #[test]

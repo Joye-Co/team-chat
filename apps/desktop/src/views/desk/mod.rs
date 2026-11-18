@@ -272,28 +272,16 @@ impl DeskPage {
     }
 }
 
-/// `11 月 3 日 周一`.
+/// `11月3日 周一`.
 pub fn today_line() -> String {
     use chrono::Datelike as _;
     let now = crate::selftest::clock::local_now();
-    const DAYS: [&str; 7] = [
-        c::WEEKDAY_1,
-        c::WEEKDAY_2,
-        c::WEEKDAY_3,
-        c::WEEKDAY_4,
-        c::WEEKDAY_5,
-        c::WEEKDAY_6,
-        c::WEEKDAY_7,
-    ];
     crate::copy::fill(
         c::DESK_DATE,
         &[
             ("m", &now.month().to_string()),
             ("d", &now.day().to_string()),
-            (
-                "weekday",
-                DAYS[now.weekday().num_days_from_monday() as usize],
-            ),
+            ("weekday", crate::copy::weekday(now.weekday())),
         ],
     )
 }
@@ -519,11 +507,11 @@ impl Render for DeskPage {
                     ))
                     .child(section(
                         page::section_header(c::DESK_WORKING, None, None, None, cx),
-                        kit::skeleton_list("desk-sk-runs", list::DESK_COLUMNS, false, 3, cx),
+                        kit::skeleton_list("desk-sk-runs", list::DESK_COLUMNS_PLAIN, false, 3, cx),
                     ))
                     .child(section(
                         page::section_header(c::DESK_DONE_TODAY, None, None, None, cx),
-                        kit::skeleton_list("desk-sk-done", list::DESK_COLUMNS, false, 3, cx),
+                        kit::skeleton_list("desk-sk-done", list::DESK_COLUMNS_PLAIN, false, 3, cx),
                     ));
             }
             PageLoad::Ready => {
@@ -542,9 +530,11 @@ impl Render for DeskPage {
                         continue;
                     }
                     let n = asks.len();
+                    let cols = list::ask_columns(&asks, self);
+                    let slot = list::answer_slot(&asks, self, window, cx);
                     let rows: Vec<AnyElement> = asks
                         .into_iter()
-                        .map(|a| list::ask_row(a, self, &snap, cx))
+                        .map(|a| list::ask_row(a, self, &snap, cols, slot, cx))
                         .collect();
                     content = content.child(section(
                         page::section_header(title, Some(n), None, None, cx),

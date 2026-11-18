@@ -250,7 +250,7 @@ export function policyPrompt(p: ApprovalPolicy, gated = false, gateWho: "admin" 
   }
   if (items.length > 0) {
     lines.push(
-      `Team rule: these need the approval of ${gateAsk}. When you run a command for one of them (for example \`gh pr merge\`, a production deploy), the machine asks the approver and the command waits for the answer; do not ask for it in the topic yourself. If a person declines, do not try again, do the rest another way:`,
+      `Team rule: these need the approval of ${gateAsk}. When you run a command for one of them (for example \`gh pr merge\`, a production deploy), the machine asks the approver itself; do not ask for it in the topic yourself. Approved: the command runs. Declined: do not try again, do the rest another way. Still waiting: it did not run yet, go on with other work and run the same command again later:`,
       ...items.map((x) => `- ${x}`),
       `When you do one of these another way (an API call, a web page), first ask ${gateAsk} in the topic and wait for the answer.`,
     );
