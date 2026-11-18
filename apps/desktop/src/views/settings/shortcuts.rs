@@ -501,27 +501,8 @@ impl Render for ShortcutsPage {
         let any_custom = !prefs::get().shortcuts.is_empty();
         let sections: Vec<_> = groups
             .into_iter()
-            .enumerate()
-            .map(|(ix, g)| {
-                let mut title = SectionTitle::new(g.menu);
-                if ix == 0 {
-                    title = title.description(s::SHORTCUTS_FOOTER);
-                    if any_custom {
-                        title = title.action(
-                            push_button(
-                                "shortcuts-reset-all",
-                                s::SHORTCUT_RESET_ALL,
-                                PushStyle::Outline,
-                                PushSize::Small,
-                                cx,
-                            )
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.stop(cx);
-                                reset(None, cx);
-                            })),
-                        );
-                    }
-                }
+            .map(|g| {
+                let title = SectionTitle::new(g.menu);
                 let rows: Vec<_> = g
                     .rows
                     .iter()
@@ -530,8 +511,39 @@ impl Render for ShortcutsPage {
                 widgets::section(title, GroupedForm::new().rows(rows))
             })
             .collect();
-        widgets::pane()
+        // What the whole tab does, said once under the search field (not as
+        // the description of whichever menu is first), with 全部恢复默认.
+        let reset_all = any_custom.then(|| {
+            push_button(
+                "shortcuts-reset-all",
+                s::SHORTCUT_RESET_ALL,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.stop(cx);
+                reset(None, cx);
+            }))
+        });
+        let top = div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(crate::ui::native::tokens::space::S8)
             .child(SearchField::new("shortcuts-filter", &self.filter))
+            .child(
+                div()
+                    .w_full()
+                    .min_h(crate::ui::native::tokens::height::SM)
+                    .flex()
+                    .items_center()
+                    .gap(crate::ui::native::tokens::space::S8)
+                    .child(widgets::quiet(s::SHORTCUTS_FOOTER, cx).flex_1())
+                    .children(reset_all),
+            );
+        widgets::pane()
+            .child(top)
             .children(sections)
             .children(empty.then(|| {
                 GroupedForm::new().row(widgets::list_empty(

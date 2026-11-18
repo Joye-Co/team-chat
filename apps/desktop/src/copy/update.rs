@@ -69,5 +69,7 @@ crate::copy! {
     AUTO_DOWNLOAD = "有新版本时自动下载",
     SHOW_WHATS_NEW = "更新后告诉我改了什么",
     SHOW_WHATS_NEW_HINT = "更新后第一次打开时，说说这次改了什么",
+    // Under 版本 {current} in 设置: which version is on its way.
+    DOWNLOAD_PROGRESS_OF = "正在下载 {version} · {percent}% · {done} / {total} MB",
     // --- end product updates ---
 }

@@ -207,9 +207,17 @@ impl WorkerModelsPanel {
         l: &Loaded,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> FormRow {
+    ) -> Vec<FormRow> {
         let busy = self.action == ModelsAction::Saving;
         let (models, efforts) = cli_choices(&l.machines, runtime, None);
+        // "Claude Code", "Codex", else the name it was configured with.
+        let name = l
+            .machines
+            .iter()
+            .flat_map(|m| m.clis.iter())
+            .find(|c| c.runtime == runtime)
+            .map(|c| crate::views::admin::cli_name(&c.kind, &c.runtime))
+            .unwrap_or_else(|| runtime.to_string());
         let current = l
             .workers
             .iter()
@@ -281,7 +289,8 @@ impl WorkerModelsPanel {
                 widgets::popup_fixed(
                     SharedString::from(format!("models-{runtime}-effort")),
                     shown,
-                    size::EFFORT_SELECT_WIDTH,
+                    // One width in the value column (2.8).
+                    size::MODEL_SELECT_WIDTH,
                     window,
                     cx,
                 ),
@@ -302,17 +311,11 @@ impl WorkerModelsPanel {
                 })
             })
         });
-        FormRow::new(runtime.to_string())
-            .detail(s::MODELS_WORKER_DETAIL)
-            .min_height(crate::ui::native::tokens::height::FORM_ROW_TWO)
-            .control(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(space::S8)
-                    .child(model)
-                    .children(effort),
-            )
+        // One control per row (2.8): the model, then 思考强度 as its own
+        // row under it.
+        std::iter::once(FormRow::new(name).control(model))
+            .chain(effort.map(|e| FormRow::new(s::RUNNER_EFFORT).control(e)))
+            .collect()
     }
 
     pub fn section(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<gpui::Div> {
@@ -344,7 +347,7 @@ impl WorkerModelsPanel {
         let mut group = GroupedForm::new().row(self.front_row(l.front.as_ref(), cx));
         let names = runtimes(&l.machines);
         for rt in &names {
-            group = group.row(self.runtime_row(rt, &l, window, cx));
+            group = group.rows(self.runtime_row(rt, &l, window, cx));
         }
         let empty = names
             .is_empty()

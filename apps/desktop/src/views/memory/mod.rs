@@ -825,9 +825,16 @@ impl MemoryBoard {
 
     fn load_failed(&self, e: AdminError, cx: &mut Context<Self>) -> AnyElement {
         let busy = self.loading;
+        // An older server has no such list: 重试 cannot help, and it is not
+        // a failure of this page, so the alert is neutral and has no action.
+        let unsupported = e == AdminError::Unsupported;
         page::page_alert(
             self.id("failed"),
-            AlertKind::Error,
+            if unsupported {
+                AlertKind::Info
+            } else {
+                AlertKind::Error
+            },
             match self.scope {
                 _ if self.folded_mine() => c::MINE_FAILED,
                 MemoryScope::Team => c::TEAM_FAILED,
@@ -836,7 +843,7 @@ impl MemoryBoard {
                 MemoryScope::Person(_) => c::PERSON_FAILED,
             },
             Some(widgets::error_text(e).into()),
-            Some(
+            (!unsupported).then(|| {
                 push_button(
                     self.id("retry"),
                     c::RETRY,
@@ -847,8 +854,8 @@ impl MemoryBoard {
                 .loading(busy)
                 .disabled(busy)
                 .on_click(cx.listener(|this, _, _, cx| this.load(cx)))
-                .into_any_element(),
-            ),
+                .into_any_element()
+            }),
             cx,
         )
         .into_any_element()
