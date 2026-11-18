@@ -675,6 +675,7 @@ impl MembersPage {
         // would say 默认规则 a second time, so only the description stays.
         let header: gpui::AnyElement = if self.part == MembersPart::Rules {
             div()
+                .max_w(tokens::layout::PAGE_MEASURE)
                 .n_body()
                 .text_color(native_colors(cx).secondary)
                 .child(about)
@@ -789,7 +790,11 @@ impl MembersPage {
                 |r, v| r.deploy_prod = v,
             ))
             // At rest the amount is right-aligned (2.8 number field).
-            .row(FormRow::new(s::RULES_SPEND).control(spend))
+            .row(
+                FormRow::new(s::RULES_SPEND)
+                    .when(owner, |row| row.detail(s::RULES_SPEND_HINT))
+                    .control(spend),
+            )
             .row(FormRow::new(s::RULES_APPROVER).control(approver));
         // A value the server refused or a spend that is not a number: the
         // Alert under the group.
@@ -920,7 +925,11 @@ impl Render for MembersPage {
             )
         });
         if self.part == MembersPart::Rules {
-            return widgets::pane().child(self.rules_section(owner, window, cx));
+            // The admin body already spaces its pages from the header: only the
+            // hairline stays, so a first card's ring is not clipped.
+            return widgets::pane()
+                .pt(metrics::HAIRLINE)
+                .child(self.rules_section(owner, window, cx));
         }
         widgets::pane()
             .child(members_section)

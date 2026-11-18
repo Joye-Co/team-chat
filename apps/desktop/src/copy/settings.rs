@@ -288,7 +288,7 @@ crate::copy! {
     RULES_APPROVER = "其他要确认的事谁来批准",
     APPROVER_REQUESTER = "交代的人或管理员",
     APPROVER_OWNERS = "只有管理员",
-    RULES_FOOTER = "AI 成员做这些事之前，会先停下来等人批准。这是防止失手，不是安全防线：真正的底线是 GitHub 的分支保护和生产环境自己的审批。付费 API、云资源和购买单次超过设定数时，会提醒成员先问批准的人，但不会拦下；模型花费不算在内，每周预算在「用量」里设，花到预算会先停下来问你。",
+    RULES_FOOTER = "AI 成员做这些事之前，会先停下来等人批准。这是防止失手，不是安全防线：真正的底线是 GitHub 的分支保护和生产环境自己的审批。",
     RULES_READONLY = "只有管理员可以改默认规则。",
     SPEND_INVALID = "请填 1 到 1,000,000 之间的整数",
     KIND_AI = "AI 成员",
@@ -551,5 +551,6 @@ crate::copy! {
     EMAIL_RESEND_WAIT = "{n} 秒后可重新发送",
     BOT_MODE_LOCKED_HINT = "这位成员在{person}的电脑上，只有{person}能改工作方式。",
     EDIT_AI_PINNED_HINT = "改名字、岗位、运行方式和代码仓库，保存后马上生效。",
+    RULES_SPEND_HINT = "付费 API、云资源和购买超过时提醒先问批准的人，但不拦下。模型花费不算在内，每周预算在「用量」里设，花到会先停下来问你。",
     // --- end visual finish: settings ---
 }
