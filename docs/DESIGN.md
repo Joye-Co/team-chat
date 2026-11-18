@@ -356,7 +356,7 @@ and an accessible name; a 1 pt × 16 `line` divider before the rail toggle.
 | Page | State element | Right buttons |
 | --- | --- | --- |
 | Topic | One of: amber tag `需要你审 PR #61` (22 pt, radius 6, `you-bg`, 6 pt `you` dot, `meta` 500 `you-ink`) when the viewer is waited on; `live` 6 pt dot + `Forge 在做 3/5 · 跑一万条消息的压测` `ui` `ink-2` while a member works; `等小王` `ink-3`; `做完了 · 09:55` `ink-3`; nothing when open | 单独问 (`message-circle`, ⌘;), 产出 (`layers`), 电脑 (`monitor`, only while a member's computer is in use for this topic, with a 6 pt `live` dot at the top right), 改动 (`file-diff`, only with a change), divider, rail toggle (`panel-right`) |
-| 首页 | Date `11 月 3 日 周一` `meta` `ink-3` | — (the 正在做 column has its own toggle) |
+| 首页 | Date `11月3日 周一` `meta` `ink-3` | — (the 正在做 column has its own toggle) |
 | 群 | Purpose `ui` `ink-3`, member stack (20 pt, −4 overlap, max 5) + `9 位成员` | 单独问, 产出, `ellipsis`; 群资料 toggle in the pane header |
 | 成员 | Count `13` mono `ink-3`; detail: breadcrumb `成员 /` + name | 单独问, 产出, 电脑, rail toggle |
 | 产出 | Breadcrumb `群 /` + title + kind tag (`网页`) | Version picker (32 pt secondary: `v3` mono 600 + `今天 09:40` + chevron), `分享` secondary, `external-link` (open in its own window), 单独问; 来龙去脉 toggle in the pane header |
@@ -424,7 +424,7 @@ or irreversible actions open a confirm step (§7.10 批准).
 | Body | `body` 14/22, 4 pt under the meta line; paragraph gap 8 |
 | Event line | 20 pt, inset to the text column: 16 pt tile or glyph + `meta` `ink-3` (`Jojo 转给了 Forge`, `Forge 开始用 Mac mini`) + mono time |
 | Decision record | A full-width 40 pt row on `sunken`, radius 10: `check` 13 `ok` + `Joye 选了「改成指数退避，放进同一个 PR」` `ui` + mono time + text action `看问题` |
-| Date divider | Centered `11 月 3 日 周一` `meta` `ink-3` between two 1 pt `line` rules |
+| Date divider | Centered `11月3日 周一` `meta` `ink-3` between two 1 pt `line` rules |
 | File row | 300 wide, radius 10, 1 pt `line`, `lift`, padding 6 12 6 6, gap 12: a 72 × 44 real-content thumbnail (radius 6; a video shows its first frame or the `screen` miniature with a play disc), name `ui` 500, meta mono `0:18 · 4.2 MB` |
 | Reactions | 24 pt pills, radius 12, `sunken`, emoji 14 + count mono; mine 1 pt `ink-3` ring |
 | Hover | `hover` fill on the row + the hover toolbar (`bg`, `pop`, 28 pt buttons: reaction, quote, 单独问 about this, more) |
@@ -462,7 +462,7 @@ Topic rail cards, in this order:
 | 产出 | A real-content thumbnail (title + tiny table) 96 tall, radius 8, `line`; name `ui` 500 + `v2 · 09:55` mono; extra rows for recordings (`▶` tile 32 × 22 + name + `0:42`) |
 | 用到的决定 | `check` + decision text `ui` + `Joye 09:31` (16 avatar, mono) |
 | 电脑 | `monitor` 28 tile + `Mac mini` + `Forge 用完了 · 09:52`; right `○ 空闲` or `● 在用` (`live`) + text action `看 Forge 的电脑` |
-| 用时和成本 | `用时 41 分钟 · ¥6.20` mono + right `今天 09:14–09:55` |
+| 用时和花费 | `用时 41 分钟 · ¥6.20` mono + right `今天 09:14–09:55` |
 
 The 按顺序做 bar (design-relay §3.6) sits at the top of a 话题 whose work goes in an order a person
 wrote (`@A → @B → @C`), above the plan cards, on the composer insets: radius 10, a 1 pt `line`

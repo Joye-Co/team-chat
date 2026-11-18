@@ -173,7 +173,7 @@ crate::copy! {
     INS_COMPUTER_VALUE = "办公室 Mac mini",
     INS_TIME = "用时",
     INS_TIME_VALUE = "38 分钟",
-    INS_COST_VALUE = "¥132 / 上限 ¥300",
+    INS_COST_VALUE = "¥132 / 预算 ¥300",
     // Sheet and alert
     SHEET_TITLE = "编辑资料",
     SHEET_EXPLANATION = "团队里的人会看到你的名字和岗位。",

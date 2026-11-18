@@ -193,7 +193,7 @@ Silent install, for scripts: `Cahoots-<version>-setup.exe /S`.
 ### Updates
 
 As on the Mac, the app checks the server, downloads the new installer, checks its SHA-256
-and offers 重启安装. The app then quits, a small update program
+and offers 安装更新. The app then quits, a small update program
 (`team-chat-update.exe`) replaces the files and opens the new version. If the new version
 does not start, the update program puts the old version back and opens it. To update by
 hand, quit the app and run a newer installer over the installed app; until the installer is

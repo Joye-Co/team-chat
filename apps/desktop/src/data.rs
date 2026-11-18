@@ -2475,7 +2475,7 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn run_usage(&self, _run_id: &str) -> Option<v2::RunUsage> {
         None
     }
-    /// 用时和成本 of a 话题. The default adds up the runs' times and usage.
+    /// 用时和花费 of a 话题. The default adds up the runs' times and usage.
     fn topic_cost(&self, group_id: &str, topic_id: &str) -> Option<v2::TopicCost> {
         let runs = self.runs(group_id, topic_id);
         if runs.is_empty() {

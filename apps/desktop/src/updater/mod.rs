@@ -3,7 +3,7 @@
 //! - [`Updater`] is an app-wide entity (a GPUI global, see [`install`]). It checks
 //!   `GET /v1/updates/latest` through chat-core when the app starts (as soon as a
 //!   session exists) and every 6 hours, downloads the DMG with progress (chat-core checks
-//!   size and SHA-256) and stops at [`Phase::Ready`]: the user chooses 重启安装 (a
+//!   size and SHA-256) and stops at [`Phase::Ready`]: the user chooses 安装更新 (a
 //!   sheet, Settings › 通用 or the app menu). Then it waits until no send is
 //!   pending, installs on a background thread ([`install::install`]) and relaunches.
 //!   The progress shows in Settings › 通用 (the version row) and in the app menu.
@@ -67,7 +67,7 @@ pub enum Phase {
         done: u64,
         total: u64,
     },
-    /// Downloaded and verified: waits for the user's 重启安装.
+    /// Downloaded and verified: waits for the user's 安装更新.
     Ready {
         info: UpdateInfo,
         dmg: PathBuf,
@@ -119,7 +119,7 @@ pub struct Updater {
     postponed: Option<(String, Instant)>,
     /// The running download, so 取消下载 can stop it.
     download: Option<tokio::task::AbortHandle>,
-    /// `--fake` with `UPDATE_PREVIEW`: 更新 and 重启安装 play the flow
+    /// `--fake` with `UPDATE_PREVIEW`: 更新 and 安装更新 play the flow
     /// without a server (see `preview::install_for_fake`).
     demo: bool,
 }
@@ -312,7 +312,7 @@ impl Updater {
     }
 
     fn tick(&mut self, cx: &mut Context<Self>) {
-        // A downloaded update waits for 重启安装; no check replaces it.
+        // A downloaded update waits for 安装更新; no check replaces it.
         if self.phase.busy() || matches!(self.phase, Phase::Ready { .. }) {
             return;
         }
@@ -380,7 +380,7 @@ impl Updater {
                 // A found update downloads in the background (unless 有新版本时
                 // 自动下载 is off); its progress shows in the sidebar card,
                 // Settings › 通用 and the app menu, and an alert asks for
-                // 重启安装 once it is ready.
+                // 安装更新 once it is ready.
                 if found && crate::views::settings::prefs::get().auto_download {
                     u.start_update(cx);
                 }
@@ -559,7 +559,7 @@ impl Updater {
         }
     }
 
-    /// "重启安装": installs a downloaded update (after pending sends) and
+    /// "安装更新": installs a downloaded update (after pending sends) and
     /// relaunches.
     pub fn install_now(&mut self, cx: &mut Context<Self>) {
         if let Phase::Ready { info, dmg } = self.phase.clone() {

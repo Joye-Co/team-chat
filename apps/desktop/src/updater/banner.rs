@@ -1,7 +1,7 @@
 //! The update in the main window: a quiet card at the bottom of the sidebar
 //! ([`update_card`]) that follows the update from 有新版本 to 正在安装, and
-//! one alert (2.10) only for 重启安装, once a downloaded update is ready
-//! (default 重启安装, then 稍后). It also opens 已更新到 once after an
+//! one alert (2.10) only for 安装更新, once a downloaded update is ready
+//! (default 安装更新, then 稍后). It also opens 已更新到 once after an
 //! update. It renders [`Updater`] state and calls its commands; nothing here
 //! touches the network.
 
@@ -50,7 +50,7 @@ pub fn banner_text(phase: &Phase) -> Option<String> {
 }
 
 /// Which sheet a phase shows, keyed by version: only a ready update asks
-/// (重启安装); a sheet the user closed does not come back for it.
+/// (安装更新); a sheet the user closed does not come back for it.
 fn sheet_key(phase: &Phase) -> Option<String> {
     match phase {
         Phase::Ready { info, .. } => Some(format!("ready-{}", info.version)),
@@ -236,7 +236,7 @@ impl Render for UpdateSheet {
     }
 }
 
-/// The update in the main window: the 重启安装 sheet once a downloaded
+/// The update in the main window: the 安装更新 sheet once a downloaded
 /// update is ready; nothing while it downloads (Settings › 通用 and the app
 /// menu show that).
 pub struct UpdateBanner {

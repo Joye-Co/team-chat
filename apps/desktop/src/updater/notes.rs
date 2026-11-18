@@ -4,7 +4,7 @@
 //!
 //! - [`Notes::parse`] keeps the headline and the item lists, and drops the
 //!   「怎么更新」 section (it is for people who install by hand).
-//! - [`open_notes`]: 「{version} 更新内容」 before an update, with 更新 or 重启安装.
+//! - [`open_notes`]: 「{version} 更新内容」 before an update, with 更新 or 安装更新.
 //! - [`open_whats_new`]: 「已更新到 {version}」 once, the first time the new
 //!   version opens (see [`take_whats_new`]).
 //! - [`open_changelog`]: 更新记录, every bundled version, the current one open.
@@ -130,7 +130,7 @@ impl Notes {
         self.headline.is_empty() && self.count() == 0
     }
 
-    /// The notes as plain lines (the 重启安装 alert, which has no room for
+    /// The notes as plain lines (the 安装更新 alert, which has no room for
     /// groups): the headline, then 「· 标题：内容」 per item.
     pub fn plain(&self) -> String {
         let mut lines = Vec::new();
@@ -250,7 +250,7 @@ pub fn take_whats_new(just_updated: bool) -> Option<Notes> {
     bundled(current)
 }
 
-/// 「11 月 7 日」 for a publish time in milliseconds; `None` when unknown.
+/// 「11月7日」 for a publish time in milliseconds; `None` when unknown.
 fn date(published_at: u64) -> Option<String> {
     use chrono::{Datelike as _, Local, TimeZone as _};
     if published_at == 0 {
@@ -362,7 +362,7 @@ fn scroll(id: &'static str, el: impl IntoElement) -> gpui::Stateful<gpui::Div> {
 }
 
 /// 「{version} 更新内容」 of an update that is not installed yet. Its buttons
-/// follow the update: 更新到 … while it waits, 重启安装 once downloaded, else 好.
+/// follow the update: 更新到 … while it waits, 安装更新 once downloaded, else 好.
 pub fn open_notes(
     info: chat_core::proto::UpdateInfo,
     place: Place,
