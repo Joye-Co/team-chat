@@ -7,7 +7,7 @@
 import { ClientFrame, type ExpectMode, MAX_DESK_NOTE_CHARS, type RunInteractionFrame, type RunStatus } from "@chat/protocol";
 import { isGroupMember } from "../../core/db";
 import { roomStub } from "../../core/env";
-import { ApiError, type Result, schemaReason, toErrorBody, unwrap } from "../../core/errors";
+import { ApiError, issuesText, type Result, schemaReason, toErrorBody, unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
 import { type FrameContext, frameHandlers, frameValidators } from "../../core/registry";
 import { setDeskNote } from "../../desknote";
@@ -601,8 +601,8 @@ export abstract class DeskInteract extends DeskHand {
       const schema = raw.t === "send" ? ClientFrame : handler?.schema ?? ClientFrame;
       const parsed = schema.safeParse(raw);
       if (!parsed.success) {
-        const issue = parsed.error.issues[0];
-        throw new ApiError("invalid", `invalid output: ${issue?.path.join(".") || "(root)"} ${issue?.message ?? ""}`.trim(), schemaReason(raw, issue?.message, issue?.path));
+        const issue = parsed.error.issues.find((i) => schemaReason({}, i.message)) ?? parsed.error.issues[0];
+        throw new ApiError("invalid", `invalid output: ${issuesText(parsed.error.issues)}`, schemaReason(raw, issue?.message, issue?.path));
       }
       const frame = parsed.data as Record<string, unknown> & { t: string };
       const c = this.outputContext();

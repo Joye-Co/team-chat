@@ -6,7 +6,7 @@ import { auditStatement } from "../core/audit";
 import type { AuthContext } from "../core/auth";
 import { getGroup, isGroupMember } from "../core/db";
 import { type Env, gatewayStub, roomStub } from "../core/env";
-import { ApiError, schemaReason, unwrap } from "../core/errors";
+import { ApiError, issuesText, schemaReason, unwrap } from "../core/errors";
 import { LIMITS, TokenBucket } from "../core/ratelimit";
 import { type Actor, type FrameContext, frameValidators, registerGatewayRpc, registerRoute } from "../core/registry";
 
@@ -64,7 +64,7 @@ registerRoute({
     const parsed = PostMessageRequest.safeParse(raw);
     if (!parsed.success) {
       const first = parsed.error.issues.find((i) => schemaReason({}, i.message)) ?? parsed.error.issues[0];
-      throw new ApiError("invalid", `invalid body: ${first?.path.join(".") || "(root)"} ${first?.message ?? ""}`.trim(), schemaReason(raw, first?.message, first?.path));
+      throw new ApiError("invalid", `invalid body: ${issuesText(parsed.error.issues)}`, schemaReason(raw, first?.message, first?.path));
     }
     const frame = { ...parsed.data, t: "send" as const, rid: "http", groupId: group.id };
     const actor: Actor = { id: a.memberId, level: a.member.level, kind: a.member.kind, tokenId: a.tokenId };
