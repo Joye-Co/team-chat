@@ -164,12 +164,10 @@ pub fn build(
     let muted = services.provider.topic_muted(group_id, &topic.id);
 
     let (s, g, tp) = (services.clone(), group_id.to_string(), topic.clone());
-    menu = menu
-        .item(
-            PopupMenuItem::new(r::RENAME)
-                .on_click(move |_, window, cx| open_rename(s.clone(), &g, &tp, window, cx)),
-        )
-        .separator();
+    menu = menu.item(
+        PopupMenuItem::new(r::RENAME)
+            .on_click(move |_, window, cx| open_rename(s.clone(), &g, &tp, window, cx)),
+    );
 
     // 提醒: the one level of the 话题 (关注 / 默认 / 静音), as the 详情 pane
     // sets it (D21), so a 话题 is never followed and muted at once and the
