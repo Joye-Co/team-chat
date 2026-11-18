@@ -301,8 +301,14 @@ fn tile(
     };
     let inner = match (&thumb, state) {
         // GPUI clips to the box, not to its corner radius: round the picture itself.
+        // The picture takes the tile's size and ratio: left to itself an image keeps
+        // its own ratio and grows past the box, and its bottom corners go with it.
         (Some(path), _) => round_corners(
-            img(path.clone()).size_full().object_fit(ObjectFit::Cover),
+            img(path.clone())
+                .w(px(w))
+                .h(px(h))
+                .aspect_ratio(w / h)
+                .object_fit(ObjectFit::Cover),
             corners,
             r,
         )

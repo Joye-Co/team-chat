@@ -728,10 +728,11 @@ impl Render for Lightbox {
             .flex()
             .items_center()
             .gap(space::S8)
-            .child(ui::MemberAvatar::new(
-                author.as_ref(),
-                crate::ui::native::tokens::avatar::SM,
-            ))
+            // The viewer is dark in both themes: so is the sender's avatar.
+            .child(
+                ui::MemberAvatar::new(author.as_ref(), crate::ui::native::tokens::avatar::SM)
+                    .on_dark_screen(),
+            )
             .child(
                 div()
                     .min_w_0()
