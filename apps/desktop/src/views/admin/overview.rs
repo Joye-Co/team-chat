@@ -22,7 +22,7 @@ use crate::{
         native::{
             FocusRow as _, NativeColors, NativeType as _, PushSize, PushStyle, TruncText,
             native_colors, panel_card_surface, push_button, skeleton,
-            tokens::{avatar, height, monitor as t, radius, space, text},
+            tokens::{avatar, height, metrics, monitor as t, radius, space, text},
         },
         sf_symbols::SymSize,
     },
@@ -761,7 +761,7 @@ pub(super) fn attention_panel(
                             .flex_none()
                             // Pulled out by its padding: a ghost button has no edge at rest, and
                             // its chevron stands over the other rows' chevrons.
-                            .mr(-(space::S8 + space::S2))
+                            .mr(-metrics::BUTTON_SMALL_PAD)
                             .child(
                                 push_button(
                                     SharedString::from(format!("attention-sign-in-{i}")),

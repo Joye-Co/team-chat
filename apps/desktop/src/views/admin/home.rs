@@ -572,9 +572,20 @@ impl AdminView {
             PushSize::Small,
             cx,
         )
+        // It leads to a page: a chevron says so, as on 全部成员.
+        .child(crate::ui::icons::sym(
+            Sym::ChevronRight,
+            crate::ui::sf_symbols::SymSize::INLINE_SMALL,
+            k.secondary,
+        ))
         .on_click(move |_, window, cx| {
             view.update(cx, |v, cx| v.open_page(AdminPage::Machines, window, cx))
         });
+        // Pulled out by its padding: its content ends on the edge of the cards below.
+        let manage = div()
+            .flex_none()
+            .mr(-crate::ui::native::tokens::metrics::BUTTON_SMALL_PAD)
+            .child(manage);
         let mut rows: Vec<AnyElement> = vec![];
         let mut it = cards.into_iter();
         while let Some(a) = it.next() {
