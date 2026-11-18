@@ -1342,6 +1342,8 @@ pub mod pdf_strip {
     /// The box a page is fitted into (the band less its 12 + 12).
     pub const PAGE_W: f32 = 120.;
     pub const PAGE_H: f32 = 116.;
+    /// The strip's width inside a card's embed frame.
+    pub const EMBED_W: f32 = 607.;
 }
 
 /// A tile of the 产出 icon view: the picture well over the name.

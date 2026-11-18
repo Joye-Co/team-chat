@@ -214,6 +214,7 @@ fn inline_preview(
     }
     inline::render(
         &inline::InlineSpec {
+            bare: false,
             key,
             kind,
             title: file.name.clone(),

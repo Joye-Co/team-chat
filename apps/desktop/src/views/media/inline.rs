@@ -46,6 +46,104 @@ pub struct InlineSpec {
     pub target: Target,
     /// Unique per row, so two rows that show the same 产出 keep separate state.
     pub id: SharedString,
+    /// Inside a frame that already names the 产出 (a card's embed): only the body, no
+    /// card and no header of its own. [`embed_facts`] says what the header would.
+    pub bare: bool,
+}
+
+/// What a bare preview's frame shows in its header once the version is read.
+#[derive(Default)]
+pub struct EmbedFacts {
+    /// Pages, length, rows and size, as the card's own header says them.
+    pub meta: Option<String>,
+    /// The text the header's copy button copies (code).
+    pub copy: Option<String>,
+}
+
+/// The header facts of a bare preview: nothing until the version is read.
+pub fn embed_facts(spec: &InlineSpec, cx: &App) -> EmbedFacts {
+    let Some(Load::Ready(media)) = store::get(&spec.key, cx) else {
+        return EmbedFacts::default();
+    };
+    if media.preview_failed {
+        return EmbedFacts::default();
+    }
+    let size = super::size_text(media.bytes);
+    let mut copy = None;
+    let meta = match &media.data {
+        Data::Markdown(md) => Some(fill(
+            cm::MD_WORDS,
+            &[("n", &group_digits(md.stats.chars as u64))],
+        )),
+        Data::Images(pics) => Some(format!(
+            "{} · {size}",
+            fill(cm::IMG_COUNT, &[("n", &pics.len().to_string())])
+        )),
+        Data::Video(v) => Some(format!(
+            "{} · {size}",
+            super::time_text(v.info.map_or(0., |i| i.duration))
+        )),
+        Data::Audio(a) => Some(format!("{} · {size}", super::time_text(a.duration))),
+        Data::Pdf(p) => Some(format!(
+            "{} · {size}",
+            fill(cm::PDF_PAGES, &[("n", &p.pages.to_string())])
+        )),
+        Data::Code(c) => {
+            let (first, last) = code_excerpt(c);
+            copy = Some(c.lines[first..last].join("\n"));
+            Some(fill(
+                cm::CODE_RANGE,
+                &[
+                    ("a", &(first + 1).to_string()),
+                    ("b", &last.to_string()),
+                    ("n", &c.lines.len().to_string()),
+                ],
+            ))
+        }
+        Data::Table(t) => Some(fill(
+            cm::TABLE_META,
+            &[
+                ("rows", &group_digits(t.total_rows as u64)),
+                ("cols", &t.header.len().max(1).to_string()),
+            ],
+        )),
+        Data::Html | Data::File => None,
+    };
+    EmbedFacts { meta, copy }
+}
+
+/// The frame of a preview: the card, or nothing but the column when it is bare.
+fn frame(spec: &InlineSpec, width: gpui::Pixels, cx: &App) -> gpui::Div {
+    if spec.bare {
+        div().w_full().flex().flex_col()
+    } else {
+        card(cx).w(width).max_w_full()
+    }
+}
+
+/// The card's header, unless the frame around a bare preview has its own.
+fn shown_head(spec: &InlineSpec, header: gpui::Div) -> Option<gpui::Div> {
+    (!spec.bare).then_some(header)
+}
+
+/// A preview that is no card (a state row, pictures, a video) keeps clear of the frame
+/// around it when it is bare.
+fn inset_when_bare(spec: &InlineSpec, el: impl IntoElement) -> AnyElement {
+    if spec.bare {
+        div().p(space::S12).child(el).into_any_element()
+    } else {
+        el.into_any_element()
+    }
+}
+
+/// The lines an inline code preview shows: from the first line with text.
+fn code_excerpt(c: &store::Code) -> (usize, usize) {
+    let first = c
+        .lines
+        .iter()
+        .position(|l| !l.trim().is_empty())
+        .unwrap_or(0);
+    (first, (first + CODE_LINES).min(c.lines.len()))
 }
 
 /// Height of the HTML page inline (Media.dc.html: 300).
@@ -89,11 +187,11 @@ pub fn render(spec: &InlineSpec, window: &mut Window, cx: &mut App) -> Option<An
     };
     match store::get(&spec.key, cx) {
         Some(Load::Ready(media)) => Some(ready(spec, &media, window, cx)),
-        Some(Load::Failed(_)) => Some(states::failed_row(spec, cx).into_any_element()),
+        Some(Load::Failed(_)) => Some(inset_when_bare(spec, states::failed_row(spec, cx))),
         Some(Load::Loading) => Some(loading(spec, cx)),
         None => {
             if spec.bytes > spec.kind.auto_load_limit() {
-                return Some(states::big_row(spec, cx).into_any_element());
+                return Some(inset_when_bare(spec, states::big_row(spec, cx)));
             }
             if let Some(provider) = spec.target.provider.clone() {
                 store::request_artifact(&provider, &spec.key, &spec.title, cx);
@@ -115,18 +213,18 @@ fn open(spec: &InlineSpec, opening: Opening, cx: &mut App) {
 
 fn ready(spec: &InlineSpec, media: &Arc<Media>, window: &mut Window, cx: &mut App) -> AnyElement {
     if media.preview_failed {
-        return states::failed_media_row(spec, media, cx).into_any_element();
+        return inset_when_bare(spec, states::failed_media_row(spec, media, cx));
     }
     match &media.data {
         Data::Html => html(spec, media, cx),
         Data::Markdown(md) => markdown_card(spec, media, md, cx),
-        Data::Images(pics) => images(spec, pics, cx),
-        Data::Video(v) => video(spec, media, v, cx),
+        Data::Images(pics) => inset_when_bare(spec, images(spec, pics, cx)),
+        Data::Video(v) => inset_when_bare(spec, video(spec, media, v, cx)),
         Data::Audio(a) => audio(spec, media, a, window, cx),
         Data::Pdf(p) => pdf(spec, media, p, cx),
         Data::Code(c) => code(spec, media, c, cx),
         Data::Table(t) => table(spec, media, t, cx),
-        Data::File => states::failed_media_row(spec, media, cx).into_any_element(),
+        Data::File => inset_when_bare(spec, states::failed_media_row(spec, media, cx)),
     }
 }
 
@@ -136,13 +234,15 @@ fn loading(spec: &InlineSpec, cx: &App) -> AnyElement {
     let (w, h) = inline_box(spec.kind);
     let _ = k;
     // §2.14: a skeleton of the final shape, no spinner text in an empty region.
-    card(cx)
-        .w(w)
-        .max_w_full()
-        .child(card_header(spec.kind.icon(), spec.title.clone(), cx).child(div().flex_1()))
+    frame(spec, w, cx)
+        .children(shown_head(
+            spec,
+            card_header(spec.kind.icon(), spec.title.clone(), cx).child(div().flex_1()),
+        ))
         .child(
             div()
                 .h(h)
+                .when(spec.bare, |d| d.pt(space::S16))
                 .px(space::S16)
                 .pb(space::S16)
                 .flex()
@@ -348,10 +448,9 @@ fn markdown_card(
         ));
     }
     let s = spec.clone();
-    card(cx)
-        .w(INLINE_W)
-        .max_w_full()
-        .child(
+    frame(spec, INLINE_W, cx)
+        .children(shown_head(
+            spec,
             card_header(Sym::Document, media.file_name().to_string(), cx)
                 .child(mono(
                     fill(cm::MD_WORDS, &[("n", &group_digits(md.stats.chars as u64))]),
@@ -359,7 +458,7 @@ fn markdown_card(
                 ))
                 .child(div().flex_1())
                 .child(open_tool(spec, "open", Opening::default())),
-        )
+        ))
         .child(
             // The excerpt ends on whole blocks (its first lines, a fence
             // closed) and the card hugs it: nothing is cut under the footer
@@ -592,6 +691,7 @@ fn video(spec: &InlineSpec, media: &Arc<Media>, v: &store::Video, cx: &App) -> A
         .focus_row(false, cx)
         .relative()
         .w(px(VIDEO_W))
+        .max_w_full()
         .h(px(h))
         .rounded(crate::ui::native::tokens::radius::CONTAINER)
         .overflow_hidden()
@@ -819,10 +919,9 @@ fn audio(
             &[("n", &a.transcript.len().to_string())],
         )
     };
-    card(cx)
-        .w(px(AUDIO_W))
-        .max_w_full()
-        .child(
+    frame(spec, px(AUDIO_W), cx)
+        .children(shown_head(
+            spec,
             card_header(Sym::Audio, media.file_name().to_string(), cx)
                 .child(mono(
                     format!(
@@ -834,7 +933,7 @@ fn audio(
                 ))
                 .child(div().flex_1())
                 .child(open_tool(spec, "open", Opening::default())),
-        )
+        ))
         .child(
             div()
                 .h(crate::ui::native::tokens::height::LIST_ROW)
@@ -914,12 +1013,16 @@ fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyEl
         .gap(space::S8)
         .bg(k.code_bg)
         .rounded_b(
-            crate::ui::native::tokens::radius::CARD - crate::ui::native::tokens::layout::BORDER,
+            if spec.bare {
+                radius::LG
+            } else {
+                crate::ui::native::tokens::radius::CARD
+            } - crate::ui::native::tokens::layout::BORDER,
         )
         .overflow_hidden();
     // §2.4: as many whole pages as the 640 card holds (px 16, gap 8), spread over
     // the row, so the strip has no void at the right and no page cut at the edge.
-    let mut room = PDF_W - 32.;
+    let mut room = if spec.bare { pdf_strip::EMBED_W } else { PDF_W } - 32.;
     let mut shown = 0;
     for page in &p.images {
         let (w, _) = fit(
@@ -986,13 +1089,12 @@ fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyEl
         );
     }
     let s = spec.clone();
-    card(cx)
+    frame(spec, px(PDF_W), cx)
         .id(ElementId::Name(format!("{}-pdf", spec.id).into()))
         .focus_row(false, cx)
-        .w(px(PDF_W))
-        .max_w_full()
         // The name row on top with the open tool, as on every sibling card (§2.4).
-        .child(
+        .children(shown_head(
+            spec,
             card_header(spec.kind.icon(), media.file_name().to_string(), cx)
                 .child(mono(
                     format!(
@@ -1004,7 +1106,7 @@ fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyEl
                 ))
                 .child(div().flex_1())
                 .child(open_tool(spec, "open", Opening::default())),
-        )
+        ))
         .child(thumbs)
         .on_click(move |_, _, cx| open(&s, Opening::default(), cx))
         .into_any_element()
@@ -1015,30 +1117,77 @@ fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyEl
 /// One highlighted line: keywords 600 `text-1`, strings and numbers `text-2`, comments
 /// `text-3` italic (monochrome, so status colors keep their meaning).
 pub fn code_line(line: &str, lang: text::Lang, block: &mut bool, cx: &App) -> gpui::Div {
+    code_line_marked(line, lang, block, None, cx)
+}
+
+/// What ⌘F marks on one line of code.
+pub struct LineMarks<'a> {
+    /// The matches on the line, as byte ranges.
+    pub ranges: &'a [std::ops::Range<usize>],
+    /// Which of them is the current match.
+    pub current: Option<usize>,
+    /// The line holds the current match: its strong band needs foreground ink.
+    pub on_current: bool,
+}
+
+/// [`code_line`] with the matches of the find bar: every match medium and underlined,
+/// the current one inverted, so stepping between two matches on a line shows.
+pub fn code_line_marked(
+    line: &str,
+    lang: text::Lang,
+    block: &mut bool,
+    marks: Option<LineMarks>,
+    cx: &App,
+) -> gpui::Div {
     let k = theme::colors(cx);
+    let ranges = marks.as_ref().map_or(&[][..], |m| m.ranges);
+    let current = marks.as_ref().and_then(|m| m.current);
+    let strong_band = marks.as_ref().is_some_and(|m| m.on_current);
     let mut row = div().flex().whitespace_nowrap();
+    let mut at = 0;
     for (tok, s) in text::highlight(line, lang, block) {
-        let el = div().child(s.replace('\t', "    "));
-        row = row.child(match tok {
-            Tok::Keyword => el
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_color(k.text_1),
-            Tok::Str | Tok::Num => el.text_color(k.text_2),
-            Tok::Comment => el.italic().text_color(k.text_3),
-            Tok::Plain => el.text_color(k.text_1),
-        });
+        let end = at + s.len();
+        // The token, cut where a match starts or ends (tabs are widened after the cut).
+        let mut cuts = vec![at, end];
+        cuts.extend(
+            ranges
+                .iter()
+                .flat_map(|r| [r.start, r.end])
+                .filter(|c| (at..end).contains(c)),
+        );
+        cuts.sort_unstable();
+        cuts.dedup();
+        for piece in cuts.windows(2) {
+            let (a, b) = (piece[0], piece[1]);
+            let hit = ranges.iter().position(|r| r.start <= a && b <= r.end);
+            let el = div().child(s[a - at..b - at].replace('\t', "    "));
+            let el = match tok {
+                Tok::Keyword => el
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(k.text_1),
+                Tok::Str | Tok::Num => el.text_color(k.text_2),
+                Tok::Comment => el.italic().text_color(k.text_3),
+                Tok::Plain => el.text_color(k.text_1),
+            };
+            row = row.child(
+                el.when(strong_band, |d| d.text_color(k.text_1))
+                    .when(hit.is_some(), |d| {
+                        d.font_weight(theme::MEDIUM_WEIGHT).underline()
+                    })
+                    .when(hit.is_some() && hit == current, |d| {
+                        d.bg(k.text_1)
+                            .text_color(ui::native::native_colors(cx).sheet)
+                    }),
+            );
+        }
+        at = end;
     }
     row
 }
 
 fn code(spec: &InlineSpec, media: &Arc<Media>, c: &store::Code, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
-    let first = c
-        .lines
-        .iter()
-        .position(|l| !l.trim().is_empty())
-        .unwrap_or(0);
-    let last = (first + CODE_LINES).min(c.lines.len());
+    let (first, last) = code_excerpt(c);
     // Long lines scroll sideways inside the card, never a hard clip (§2.17).
     let mut body = div()
         .id(ElementId::Name(format!("{}-code", spec.id).into()))
@@ -1072,10 +1221,9 @@ fn code(spec: &InlineSpec, media: &Arc<Media>, c: &store::Code, cx: &App) -> Any
     }
     let text_all = c.lines[first..last].join("\n");
     let copy_id = ElementId::Name(format!("{}-copy", spec.id).into());
-    card(cx)
-        .w(INLINE_W)
-        .max_w_full()
-        .child(
+    frame(spec, INLINE_W, cx)
+        .children(shown_head(
+            spec,
             card_header(spec.kind.icon(), media.entry.clone(), cx)
                 .child(div().t_meta().text_color(k.text_3).child(fill(
                     cm::CODE_RANGE,
@@ -1092,7 +1240,7 @@ fn code(spec: &InlineSpec, media: &Arc<Media>, c: &store::Code, cx: &App) -> Any
                     }),
                 )
                 .child(open_tool(spec, "open", Opening::default())),
-        )
+        ))
         .child(body)
         .into_any_element()
 }
@@ -1126,7 +1274,9 @@ fn table(spec: &InlineSpec, media: &Arc<Media>, t: &text::Table, cx: &App) -> An
         .h(TABLE_ROW)
         .flex()
         .items_center()
-        .border_y_1()
+        // A bare table sits right under its frame's header line.
+        .when(spec.bare, |d| d.border_b_1())
+        .when(!spec.bare, |d| d.border_y_1())
         .border_color(n.separator)
         .bg(n.fill);
     for (i, h) in t.header.iter().enumerate() {
@@ -1156,10 +1306,9 @@ fn table(spec: &InlineSpec, media: &Arc<Media>, t: &text::Table, cx: &App) -> An
         body = body.child(row);
     }
     let s = spec.clone();
-    card(cx)
-        .w(INLINE_W)
-        .max_w_full()
-        .child(
+    frame(spec, INLINE_W, cx)
+        .children(shown_head(
+            spec,
             card_header(Sym::Table, media.file_name().to_string(), cx)
                 .child(mono(
                     fill(
@@ -1173,7 +1322,7 @@ fn table(spec: &InlineSpec, media: &Arc<Media>, t: &text::Table, cx: &App) -> An
                 ))
                 .child(div().flex_1())
                 .child(open_tool(spec, "open", Opening::default())),
-        )
+        ))
         .child(head)
         .child(body)
         .child(
