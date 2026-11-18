@@ -6,11 +6,12 @@
 #   scripts/github-webhook.sh --repo <owner/name> --hook-file <file>
 #   scripts/github-webhook.sh --body-out <file>       # only write the request body (mode 600), no GitHub call
 #
-# The hook file is JSON with `url`, `secret` and `repo` (made by POST /v1/hooks, kind github; see
-# docs/integrations.md); the default is ~/.config/team-chat/production/github-hook.json. The
-# webhook goes on --repo, else on the hook file's `repo` (<owner/name>); with neither the script
-# stops. The secret goes from that file into a temp file (mode 600) that `gh api --input` reads,
-# and the temp file is deleted. The script never prints the secret.
+# The hook file is JSON with the `url` and `secret` of the hook (made by POST /v1/hooks, kind
+# github; see docs/integrations.md) and `repo`, the <owner/name> you write next to them; the
+# default is ~/.config/team-chat/production/github-hook.json. The webhook goes on --repo, else
+# on the hook file's `repo`; with neither the script stops. The secret goes from that file into
+# a temp file (mode 600) that `gh api --input` reads, and the temp file is deleted. The script
+# never prints the secret.
 set -euo pipefail
 # shellcheck source=scripts/lib.sh
 . "$(dirname "$0")/lib.sh"
