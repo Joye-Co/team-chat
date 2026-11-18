@@ -2099,7 +2099,7 @@ pub trait ChatProvider: Send + Sync + 'static {
         reply_now(Err(AdminError::Unsupported))
     }
 
-    /// Owners: 汇报给 and 限额 of a member (`PATCH /v1/members/:id` with `reportsTo` and
+    /// Owners: 汇报给 and 预算 of a member (`PATCH /v1/members/:id` with `reportsTo` and
     /// `weeklyBudgetCents`; `None` clears). Answers with the stored member.
     fn set_member_plan(&self, _member_id: &str, _plan: pages::MemberPlan) -> AdminReply<Member> {
         reply_now(Err(AdminError::Unsupported))

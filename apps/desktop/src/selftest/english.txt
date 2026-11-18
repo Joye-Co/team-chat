@@ -129,8 +129,8 @@
 记一条	Add a note
 记得的事	Memory
 汇报给	Reports to
-汇报和限额	Reporting and limits
-每周限额	Weekly limit
+汇报和预算	Reporting and budget
+每周预算	Weekly budget
 能用的工具	Tools it can use
 只读	Read-only
 可以提 PR	Can open PRs
@@ -214,7 +214,7 @@ AI 成员被 @ 后，在这些电脑上干活。	AI members work here when you @
 记忆更新	Memory update
 明天生效	Takes effect tomorrow
 第一版	First draft
-{} / 上限 {}	{} of {} limit
+{} / 预算 {}	{} of {} budget
 内存 {}	Memory {}
 现在 {}	Now {}
 磁盘 {}	Disk {}

@@ -54,7 +54,7 @@ pub const SCENES: &[Scene] = &[
     // --- v14/t3-pages ---
     Scene {
         name: "members-plan",
-        about: "成员: Forge's 汇报和限额 sheet open (the shared sheet form)",
+        about: "成员: Forge's 汇报和预算 sheet open (the shared sheet form)",
         start: Start::V2,
         setup: |s, cx| {
             s.nav
