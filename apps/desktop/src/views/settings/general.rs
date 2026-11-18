@@ -551,13 +551,19 @@ pub fn nav_row(
                         .text_color(k.secondary)
                         .child(v)
                 }))
-                .child(crate::ui::sf_symbols::symbol(
-                    crate::ui::sf_symbols::Sf::ChevronRight,
-                    crate::ui::native::tokens::icon::MD,
-                    crate::ui::sf_symbols::Weight::Regular,
-                    k.secondary,
-                    window,
-                )),
+                // The glyph's ink, not its box, on the group's trailing line.
+                .child(
+                    div()
+                        .flex_none()
+                        .mr(-space::S4)
+                        .child(crate::ui::sf_symbols::symbol(
+                            crate::ui::sf_symbols::Sf::ChevronRight,
+                            crate::ui::native::tokens::icon::MD,
+                            crate::ui::sf_symbols::Weight::Regular,
+                            k.secondary,
+                            window,
+                        )),
+                ),
         )
         .into_any_element()
 }
@@ -816,6 +822,8 @@ fn value_with_copy(
                 window,
                 cx,
             )
+            // The glyph, not the 28 hover box, on the group's trailing line.
+            .mr(-space::S6)
             .on_click(move |_, _, cx| {
                 crate::views::media::parts::copy_text(copy.clone(), s::COPIED, cx)
             }),
@@ -883,6 +891,7 @@ fn dev_value_with_copy(
                 window,
                 cx,
             )
+            .mr(-space::S6)
             .on_click(move |_, _, cx| {
                 crate::views::media::parts::copy_text(copy.clone(), s::COPIED, cx)
             }),

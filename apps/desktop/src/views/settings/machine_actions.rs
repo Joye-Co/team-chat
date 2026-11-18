@@ -603,12 +603,15 @@ impl Render for ParallelForm {
                     )
                     // The old service overrides the number: a warning, not fine print.
                     .when_some(old, |d, t| {
-                        d.child(page_alert(
-                            "machine-parallel-old",
-                            AlertKind::Warning,
-                            t,
-                            None,
-                            None,
+                        d.child(crate::ui::native::page::on_card(
+                            page_alert(
+                                "machine-parallel-old",
+                                AlertKind::Warning,
+                                t,
+                                None,
+                                None,
+                                cx,
+                            ),
                             cx,
                         ))
                     }),
@@ -959,15 +962,7 @@ impl Render for MyBotsForm {
             &[("name", &self.machine.name)],
         ))
         .explanation(s::MACHINE_MY_BOTS_HINT)
-        .body(
-            div()
-                .w_full()
-                .flex()
-                .flex_col()
-                .gap(tokens::space::S6)
-                .child(div().n_headline().child(s::MACHINE_MY_BOTS))
-                .child(list),
-        )
+        .body(list)
         .when_some(status, |l, st| l.status(st))
         .buttons([push_button(
             "my-bots-done",

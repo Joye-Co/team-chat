@@ -650,11 +650,17 @@ impl MembersPage {
     /// "¥" in it and separators, and who approves; its loading and failed
     /// states.
     fn rules_section(&self, owner: bool, window: &Window, cx: &mut Context<Self>) -> gpui::Div {
-        let about = if owner {
-            s::RULES_FOOTER
-        } else {
-            s::RULES_READONLY
-        };
+        // Usable (design-github-identity.zh.md §3.5): the gated actions follow the
+        // computer, not the approver select; said once above the rows.
+        let about = format!(
+            "{}\n{}",
+            if owner {
+                s::RULES_FOOTER
+            } else {
+                s::RULES_READONLY
+            },
+            s::RULES_GATED_NOTE
+        );
         // 团队管理 › 默认规则 has the page title above it: the section title
         // would say 默认规则 a second time, so only the description stays.
         let header: gpui::AnyElement = if self.part == MembersPart::Rules {
@@ -772,22 +778,6 @@ impl MembersPage {
                 r.deploy_prod,
                 |r, v| r.deploy_prod = v,
             ))
-            // Usable (design-github-identity.zh.md §3.5): the gated actions follow the
-            // computer, not the dropdown below; read-only, it wraps. Right under the two
-            // switches it is about, above the spend limit (which only reminds).
-            .row(
-                div()
-                    .id("rules-gated-note")
-                    .w_full()
-                    .min_h(metrics::FORM_ROW)
-                    .px(metrics::FORM_ROW_INSET)
-                    .py(tokens::space::S6)
-                    .flex()
-                    .items_center()
-                    .n_subheadline()
-                    .text_color(native_colors(cx).secondary)
-                    .child(s::RULES_GATED_NOTE),
-            )
             // At rest the amount is right-aligned (2.8 number field).
             .row(FormRow::new(s::RULES_SPEND).control(spend))
             .row(FormRow::new(s::RULES_APPROVER).control(approver));
