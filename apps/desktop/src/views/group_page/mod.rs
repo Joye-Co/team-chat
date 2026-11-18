@@ -796,7 +796,7 @@ impl Render for GroupPage {
                 // compact line as an empty 在做, and its frame hugs its rows.
                 let done_body = if done.is_empty() {
                     page::frame(cx).child(page::compact_empty(
-                        Sym::Done,
+                        Sym::Topic,
                         c::GROUP_PAGE_DONE_EMPTY,
                         None,
                         cx,
