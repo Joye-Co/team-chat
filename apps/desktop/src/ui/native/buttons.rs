@@ -717,8 +717,10 @@ pub fn screen_button(
     } else {
         metrics::BUTTON_REGULAR
     };
+    use super::tokens::lightbox as l;
+    let white = |alpha: f32| gpui::hsla(0., 0., 1., alpha);
     let rest = if round {
-        gpui::hsla(0., 0., 1., 0.10)
+        white(l::NAV_REST)
     } else {
         gpui::transparent_black()
     };
@@ -727,9 +729,11 @@ pub fn screen_button(
             ButtonCustomVariant::new(cx)
                 .color(rest)
                 .foreground(ink)
-                .hover(gpui::hsla(0., 0., 1., 0.18))
-                .active(gpui::hsla(0., 0., 1., 0.24)),
+                .hover(white(l::NAV_HOVER))
+                .active(white(l::NAV_PRESSED)),
         )
+        // The custom variant weakens its rest color; the fill is set on the button itself.
+        .when(round, |b| b.bg(rest))
         .icon(button_sym(sym, SymSize::for_slot(icon::MD), side))
         .with_size(side)
         .size(side)
