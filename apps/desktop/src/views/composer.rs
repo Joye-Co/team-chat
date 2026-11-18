@@ -12,7 +12,7 @@
 //! draft in the provider: text, mentions, quote and pending files. Pasted or
 //! dropped files and images become chips until the message is sent.
 
-mod model;
+pub(crate) mod model;
 mod native;
 mod relay;
 #[cfg(test)]
@@ -1076,8 +1076,8 @@ impl ComposerView {
         let refs: Vec<_> = self.refs.iter().map(|r| r.input.clone()).collect();
 
         // Clear first: opening the new topic below saves the old draft.
-        self.picked.clear();
-        self.quote = None;
+        let picked = std::mem::take(&mut self.picked);
+        let quote = self.quote.take();
         self.files.clear();
         self.refs.clear();
         self.rejected.clear();
@@ -1103,23 +1103,38 @@ impl ComposerView {
             }
             None => {
                 let group_id = key.group_id.clone();
+                let before = crate::views::nav::new_topic::topic_ids(provider.as_ref(), &group_id);
                 provider.start_topic_with_files(
                     StartTopicRequest {
                         quote_of,
                         group_id: group_id.clone(),
                         title,
-                        body,
+                        body: body.clone(),
                         mentions,
                     },
                     &key,
                     files,
                 );
-                provider.clear_draft(&key);
-                // Open the new topic: it is the newest one in the group.
-                if let Some(topic) = provider.topics(&group_id).into_iter().next() {
-                    self.services
-                        .nav
-                        .update(cx, |nav, cx| nav.open_topic(group_id, topic.id, cx));
+                // Open the 话题 this start made (another one of the 群 may be
+                // newer, or still uploading its files).
+                match crate::views::nav::new_topic::started_topic(
+                    provider.as_ref(),
+                    &group_id,
+                    &before,
+                ) {
+                    Some(topic) => {
+                        provider.clear_draft(&key);
+                        self.services
+                            .nav
+                            .update(cx, |nav, cx| nav.open_topic(group_id, topic, cx));
+                    }
+                    // The start was refused: the typed text goes back in the
+                    // field and its draft stays, nothing else opens.
+                    None => {
+                        self.picked = picked;
+                        self.quote = quote;
+                        self.set_text(&body, window, cx);
+                    }
                 }
             }
         }

@@ -289,6 +289,22 @@ fn new_topic_mode_uses_the_first_line_as_title(cx: &mut TestAppContext) {
     assert_eq!(h.provider.draft(&DraftKey::new_topic(GROUP)).body, "");
 }
 
+/// A refused start (here: the 群 is gone) opens no other 话题 and keeps the
+/// typed text in the field.
+#[gpui::test]
+fn a_refused_topic_start_keeps_the_text(cx: &mut TestAppContext) {
+    let (h, cx) = open(cx, None);
+    let nav = h.view.update(cx, |this, _| this.services.nav.clone());
+    nav.update(cx, |nav, cx| nav.open_group("g-gone".into(), cx));
+    cx.run_until_parked();
+    let topics_before = h.provider.topics(GROUP).len();
+    cx.simulate_input("这段话不能丢");
+    cx.simulate_keystrokes("enter");
+    assert_eq!(h.text(cx), "这段话不能丢");
+    assert_eq!(h.provider.topics(GROUP).len(), topics_before);
+    assert_eq!(nav.update(cx, |nav, _| nav.topic.clone()), None);
+}
+
 #[gpui::test]
 fn pending_files_become_chips_and_go_with_the_message(cx: &mut TestAppContext) {
     let (h, cx) = open(cx, Some(TOPIC));

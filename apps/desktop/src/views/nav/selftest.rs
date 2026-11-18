@@ -195,6 +195,7 @@ async fn windows_checks(
 
 pub fn run(services: Services, report: PathBuf, finish: Finish, cx: &mut App) {
     cx.set_activation_policy(ActivationPolicy::Accessory);
+    super::stay_in_background(cx);
     super::restore(&services, cx);
     if let Err(error) = app::open_main_window(services.clone(), false, None, cx) {
         finish(
@@ -237,14 +238,8 @@ pub fn run(services: Services, report: PathBuf, finish: Finish, cx: &mut App) {
         };
 
         let restored = cx.update(|cx| services.nav.read(cx).place.clone());
-        check(
-            "restore_opens_first_group",
-            restored
-                == provider
-                    .groups()
-                    .first()
-                    .map(|g| Place::Group(g.id.clone())),
-        );
+        // Nothing is saved on a first start: `restore` opens 首页.
+        check("restore_opens_home", restored == Some(Place::Desk));
         check(
             "quick_switcher_opens",
             dialog_opens(handle, Box::new(QuickSwitch), cx).await,
@@ -332,10 +327,9 @@ pub fn run(services: Services, report: PathBuf, finish: Finish, cx: &mut App) {
 
         key(handle, crate::secondary!("1"), cx);
         pause(cx).await;
-        let first = provider
-            .groups()
-            .first()
-            .map(|g| Place::Group(g.id.clone()));
+        // ⌘1…⌘9 count the sidebar's rows: the 群, then the 私聊.
+        let order = super::sidebar_order(&provider.groups());
+        let first = order.first().cloned().map(Place::Group);
         let place = cx.update(|cx| services.nav.read(cx).place.clone());
         check(
             "cmd_1_key_opens_first_group",
@@ -344,7 +338,7 @@ pub fn run(services: Services, report: PathBuf, finish: Finish, cx: &mut App) {
 
         dispatch(handle, Box::new(OpenGroup2), cx);
         pause(cx).await;
-        let second = provider.groups().get(1).map(|g| Place::Group(g.id.clone()));
+        let second = order.get(1).cloned().map(Place::Group);
         let place = cx.update(|cx| services.nav.read(cx).place.clone());
         check(
             "cmd_2_opens_second_group",

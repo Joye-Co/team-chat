@@ -464,6 +464,7 @@ impl AskPalette {
             return;
         };
         let provider = self.services.provider.clone();
+        let before = crate::views::nav::new_topic::topic_ids(provider.as_ref(), &group_id);
         provider.start_topic(StartTopicRequest {
             quote_of: None,
             group_id: group_id.clone(),
@@ -471,13 +472,16 @@ impl AskPalette {
             body: format!("@{} {task}", member.name),
             mentions: vec![member.id.clone()],
         });
+        // A refused start leaves the palette open with the typed task.
+        let Some(topic) =
+            crate::views::nav::new_topic::started_topic(provider.as_ref(), &group_id, &before)
+        else {
+            return;
+        };
         window.close_dialog(cx);
-        // The new 话题 is the newest one in the 群.
-        if let Some(topic) = provider.topics(&group_id).into_iter().next() {
-            self.services
-                .nav
-                .update(cx, |nav, cx| nav.open_topic(group_id, topic.id, cx));
-        }
+        self.services
+            .nav
+            .update(cx, |nav, cx| nav.open_topic(group_id, topic, cx));
     }
 
     /// ⌘Enter: 交给 Jojo 安排.

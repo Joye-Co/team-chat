@@ -1274,11 +1274,24 @@ impl ArtifactPage {
             })
             .clone();
         let query = search.read(cx).value().trim().to_lowercase();
-        let total = p.all_artifacts().len();
-        let mut all: Vec<_> = p
-            .all_artifacts()
+        let every = p.all_artifacts();
+        let total = every.len();
+        // The search reads what a row shows: the name, the 类型, the 话题 and
+        // who made it (each looked up once per row).
+        let mut all: Vec<_> = every
             .into_iter()
-            .filter(|(_, a)| query.is_empty() || a.title.to_lowercase().contains(&query))
+            .filter(|(g, a)| {
+                query.is_empty()
+                    || row_matches(
+                        &query,
+                        &[
+                            &a.title,
+                            kind_label(a.kind),
+                            &p.topic(g, &a.topic_id).map(|t| t.title).unwrap_or_default(),
+                            &member_name(&self.services, &a.created_by),
+                        ],
+                    )
+            })
             .collect();
         match self.sort {
             ListSort::Time => all.sort_by(|x, y| y.1.updated_at.cmp(&x.1.updated_at)),
@@ -1820,6 +1833,32 @@ fn day_label(now: Millis, at: Millis) -> String {
     }
 }
 
+/// True when one of a row's `fields` holds `query` (already trimmed and in
+/// lower case), whatever the case of the field.
+fn row_matches(query: &str, fields: &[&str]) -> bool {
+    fields.iter().any(|f| f.to_lowercase().contains(query))
+}
+
+impl ArtifactPage {
+    /// ⌘F on the 产出 list: the caret goes to the toolbar's search field,
+    /// with its text selected. False when the page shows one 产出 (or the
+    /// list has not drawn yet), where there is no such field.
+    pub fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.open(cx).is_some() {
+            return false;
+        }
+        let Some(search) = self.search.clone() else {
+            return false;
+        };
+        search.update(cx, |state, cx| {
+            let end = state.value().len();
+            state.focus(window, cx);
+            state.set_selected_range(0..end, cx);
+        });
+        true
+    }
+}
+
 impl Render for ArtifactPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = theme::colors(cx);
@@ -2011,3 +2050,18 @@ fn artifact_menu(
     .map(|menu| crate::views::files::export::menu_items(menu, &target, at))
 }
 // --- end v12/behavior ---
+
+#[cfg(test)]
+mod search_tests {
+    use super::row_matches;
+
+    /// The list's search reads the name, the 类型, the 话题 and the maker.
+    #[test]
+    fn the_search_reads_every_column_of_a_row() {
+        let row = ["发布说明 v2", "文档", "三月发版", "Jojo"];
+        for q in ["发布", "文档", "三月", "jojo", "V2"] {
+            assert!(row_matches(&q.to_lowercase(), &row), "{q}");
+        }
+        assert!(!row_matches("周报", &row));
+    }
+}

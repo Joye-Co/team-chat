@@ -802,6 +802,7 @@ pub struct MachineForm {
     name: Entity<InputState>,
     status: Status,
     created: Option<MachineCreated>,
+    done: widgets::DoneStep,
     /// The system of the computer being added (it need not be this one's): its tag and
     /// which install command the sheet shows (机 1.8).
     target: InstallTarget,
@@ -902,6 +903,7 @@ impl MachineForm {
             name,
             status: Status::Idle,
             created: None,
+            done: widgets::DoneStep::new(cx),
             target: InstallTarget::of_this_computer(),
             only_me: false,
             _subscriptions: subscriptions,
@@ -995,7 +997,7 @@ impl MachineForm {
 }
 
 impl Render for MachineForm {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = native_colors(cx);
         if let Some(created) = &self.created {
             let (command, hint) = self.target.command(created);
@@ -1038,47 +1040,48 @@ impl Render for MachineForm {
                             ),
                     )
             };
-            return SheetLayout::new(fill(s::MACHINE_CREATED, &[("name", &created.machine.name)]))
-                .explanation(s::SHOWN_ONCE)
-                .body(widgets::field(
-                    s::MACHINE_TARGET,
-                    widgets::choice(
-                        "machine-target",
-                        &InstallTarget::ALL.map(InstallTarget::label),
-                        InstallTarget::ALL
-                            .iter()
-                            .position(|t| *t == self.target)
-                            .unwrap_or(0),
-                        // The computer has its system's tag now: shown, not changed.
-                        true,
-                        {
-                            let form = cx.entity().downgrade();
-                            move |ix: usize, _: &mut Window, cx: &mut gpui::App| {
-                                let _ = form.update(cx, |this, cx| {
-                                    this.set_target(InstallTarget::ALL[ix.min(2)], cx)
-                                });
-                            }
-                        },
+            let layout =
+                SheetLayout::new(fill(s::MACHINE_CREATED, &[("name", &created.machine.name)]))
+                    .explanation(s::SHOWN_ONCE)
+                    .body(widgets::field(
+                        s::MACHINE_TARGET,
+                        widgets::choice(
+                            "machine-target",
+                            &InstallTarget::ALL.map(InstallTarget::label),
+                            InstallTarget::ALL
+                                .iter()
+                                .position(|t| *t == self.target)
+                                .unwrap_or(0),
+                            // The computer has its system's tag now: shown, not changed.
+                            true,
+                            {
+                                let form = cx.entity().downgrade();
+                                move |ix: usize, _: &mut Window, cx: &mut gpui::App| {
+                                    let _ = form.update(cx, |this, cx| {
+                                        this.set_target(InstallTarget::ALL[ix.min(2)], cx)
+                                    });
+                                }
+                            },
+                            cx,
+                        ),
                         cx,
-                    ),
-                    cx,
-                ))
-                .body(secret("machine-install", s::MACHINE_INSTALL, &command))
-                .body(widgets::quiet(hint, cx))
-                .body(secret(
-                    "machine-credential",
-                    s::MACHINE_CREDENTIAL,
-                    created.credential.expose(),
-                ))
-                .buttons([push_button(
-                    "machine-done",
-                    s::DONE,
-                    PushStyle::Default,
-                    PushSize::Regular,
-                    cx,
-                )
-                .on_click(|_, window, cx| window.close_dialog(cx))])
-                .into_any_element();
+                    ))
+                    .body(secret("machine-install", s::MACHINE_INSTALL, &command))
+                    .body(widgets::quiet(hint, cx))
+                    .body(secret(
+                        "machine-credential",
+                        s::MACHINE_CREDENTIAL,
+                        created.credential.expose(),
+                    ))
+                    .buttons([push_button(
+                        "machine-done",
+                        s::DONE,
+                        PushStyle::Default,
+                        PushSize::Regular,
+                        cx,
+                    )
+                    .on_click(|_, window, cx| window.close_dialog(cx))]);
+            return self.done.show(layout, window, cx);
         }
         let busy = self.status.busy();
         let typed = self.name.read(cx).value().trim().to_string();
@@ -1197,10 +1200,18 @@ pub fn open_add_machine(
                     .focus(window, cx);
             }
             let ok = shown.clone();
+            // The 已添加 step shows its command and credential once: Return
+            // is 完成 (the default button) and Esc does not throw it away
+            // (the sheet keeps its keys: without them Return would be dead).
+            let kept = shown.clone();
             dialog
+                .on_cancel(move |_, _, cx| kept.read(cx).created.is_none())
                 .on_ok(move |_, _, cx| {
-                    ok.update(cx, |f, cx| f.submit(cx));
-                    false
+                    ok.update(cx, |f, cx| {
+                        let done = f.created.is_some();
+                        f.submit(cx);
+                        done
+                    })
                 })
                 .child(shown.clone())
         },

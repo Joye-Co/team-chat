@@ -1229,6 +1229,27 @@ pub fn open_bot_dialog_runner(
     )
 }
 
+/// 成员 with the 添加 AI 成员 sheet of a team that has no computer yet: one line says
+/// so, with the way to the 电脑 page.
+pub fn open_bot_dialog_no_computer(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Members,
+        |s, w, cx| {
+            let form = super::members::open_add_bot(s, w, cx);
+            form.update(cx, |f, cx| {
+                f.fill("发布巡检", Some(""), w, cx);
+                f.preview_no_computers(cx);
+            });
+        },
+        cx,
+    )
+}
+
 /// 成员 with the look sheet of the first AI member open.
 pub fn open_character_dialog(
     services: Services,

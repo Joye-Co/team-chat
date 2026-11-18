@@ -69,6 +69,11 @@ struct NavGlobal {
     last_saved: Option<SavedNavigation>,
     /// A group the user asked for that the provider has not delivered yet.
     pending: Option<Pending>,
+    /// The unsent first message of the 新话题 sheet and its 群, kept while
+    /// the app runs: Esc or 取消 does not lose what was typed.
+    new_topic_draft: Option<(GroupId, String)>,
+    /// A self-test drives the app: commands never bring a window forward.
+    stay_back: bool,
 }
 
 /// Opens a group as soon as it arrives in `Change::Groups`.
@@ -173,6 +178,8 @@ pub fn install(services: Services, status_item: bool, cx: &mut App) {
         window: None,
         last_saved: None,
         pending: None,
+        new_topic_draft: None,
+        stay_back: false,
     });
     cx.subscribe(&services.hub, |_, changes: &Changes, cx| {
         if changes.any(|c| matches!(c, Change::Groups)) {
@@ -195,13 +202,21 @@ pub fn install(services: Services, status_item: bool, cx: &mut App) {
 
         if changes.any(|c| matches!(c, Change::Session)) {
             menus::refresh_server_menu(cx);
+            // Signed out: the unsent 新话题 message is not kept for whoever
+            // signs in next.
+            if !matches!(
+                services_of(cx).provider.session(),
+                crate::data::SessionState::SignedIn { .. }
+            ) {
+                set_new_topic_draft(None, cx);
+            }
         }
     })
     .detach();
     menus::refresh_server_menu(cx);
 
     cx.on_action(|_: &QuickSwitch, cx| {
-        in_main_window(cx, |window, cx| {
+        in_shown_main_window(cx, |window, cx| {
             if !window.has_active_dialog(cx) {
                 // 1.1.0: ⌘K is 交代或搜索 (the rail track's `views::ask`).
                 crate::views::ask::open(services_of(cx), window, cx);
@@ -209,14 +224,14 @@ pub fn install(services: Services, status_item: bool, cx: &mut App) {
         });
     });
     cx.on_action(|_: &NewGroup, cx| {
-        in_main_window(cx, |window, cx| {
+        in_shown_main_window(cx, |window, cx| {
             if !window.has_active_dialog(cx) {
                 dialogs::open_new_group(services_of(cx), window, cx);
             }
         });
     });
     cx.on_action(|_: &StartDm, cx| {
-        in_main_window(cx, |window, cx| {
+        in_shown_main_window(cx, |window, cx| {
             if !window.has_active_dialog(cx) {
                 dialogs::open_start_dm(services_of(cx), window, cx);
             }
@@ -318,6 +333,19 @@ pub fn is_main_window(window: AnyWindowHandle, cx: &App) -> bool {
         .is_some_and(|nav| nav.window == Some(window))
 }
 
+/// The navigation state of a unit test: `services`, and `window` as the main window.
+#[cfg(test)]
+pub(crate) fn install_for_test(services: Services, window: Option<AnyWindowHandle>, cx: &mut App) {
+    cx.set_global(NavGlobal {
+        services,
+        window,
+        last_saved: None,
+        pending: None,
+        new_topic_draft: None,
+        stay_back: false,
+    });
+}
+
 /// Registers the main window, where the navigation dialogs open.
 pub fn attach_window(window: &Window, cx: &mut App) {
     if cx.has_global::<NavGlobal>() {
@@ -345,23 +373,74 @@ fn with_main_window(cx: &mut App, f: impl FnOnce(&mut Window, &mut App)) -> bool
     handle.update(cx, |_, window, cx| f(window, cx)).is_ok()
 }
 
-/// Brings the main window to the front, or opens it again after it was closed.
-pub fn show_main_window(cx: &mut App) {
-    cx.defer(show_main_window_now);
+/// Runs `f` in the main window soon, with that window in front: a command
+/// that opens a palette or a sheet there (⌘K, 新建群…, 查找…) may come from
+/// the 设置 window, or after the main window was closed. Then the window
+/// comes forward, or opens again, before `f` runs. Signed out, the login
+/// window shows instead and `f` does not run.
+pub(crate) fn in_shown_main_window(cx: &mut App, f: impl FnOnce(&mut Window, &mut App) + 'static) {
+    cx.defer(move |cx| {
+        if cx.try_global::<NavGlobal>().is_some_and(|g| g.stay_back) {
+            with_main_window(cx, f);
+            return;
+        }
+        match show_main_window_now(cx) {
+            Shown::Login => {}
+            Shown::Front => {
+                with_main_window(cx, f);
+            }
+            // The new window draws its first frame before a sheet opens in it.
+            Shown::Opened => cx.defer(move |cx| {
+                with_main_window(cx, f);
+            }),
+        }
+    });
 }
 
-fn show_main_window_now(cx: &mut App) {
+/// A self-test drives the app without taking the focus from the person at
+/// the machine: from now on no command brings a window forward.
+pub(crate) fn stay_in_background(cx: &mut App) {
+    if cx.has_global::<NavGlobal>() {
+        cx.global_mut::<NavGlobal>().stay_back = true;
+    }
+}
+
+/// Brings the main window to the front, or opens it again after it was closed.
+pub fn show_main_window(cx: &mut App) {
+    cx.defer(|cx| {
+        show_main_window_now(cx);
+    });
+}
+
+/// What [`show_main_window_now`] showed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Shown {
+    /// Signed out: the login window.
+    Login,
+    /// The main window, which was open.
+    Front,
+    /// A new main window (the old one was closed), or none when it failed.
+    Opened,
+}
+
+fn show_main_window_now(cx: &mut App) -> Shown {
     cx.activate(true);
     // v12/fx-overlays: signed out, the Dock icon shows the login window.
-    if crate::views::login::show_login_window(services_of(cx), cx) {
-        return;
+    let services = services_of(cx);
+    if !matches!(
+        services.provider.session(),
+        crate::data::SessionState::SignedIn { .. }
+    ) {
+        crate::views::login::show_login_window(services, cx);
+        return Shown::Login;
     }
-    if !with_main_window(cx, |window, _| window.activate_window()) {
-        let services = services_of(cx);
-        if let Err(error) = crate::app::open_main_window(services, true, None, cx) {
-            eprintln!("failed to open the window: {error}");
-        }
+    if with_main_window(cx, |window, _| window.activate_window()) {
+        return Shown::Front;
     }
+    if let Err(error) = crate::app::open_main_window(services, true, None, cx) {
+        eprintln!("failed to open the window: {error}");
+    }
+    Shown::Opened
 }
 
 /// Shows the main window and runs `action` in it: a command that comes from outside any
@@ -583,12 +662,35 @@ fn open_pending(cx: &mut App) {
     }
 }
 
+/// The 群 and the 私聊 in the order the sidebar lists them: every 群, then
+/// every 私聊 (`rail::modes::work`). ⌘1…⌘9 count along this order.
+pub(crate) fn sidebar_order(groups: &[crate::data::GroupSummary]) -> Vec<GroupId> {
+    let of = |kind: GroupKind| groups.iter().filter(move |g| g.kind == kind);
+    of(GroupKind::Group)
+        .chain(of(GroupKind::Dm))
+        .map(|g| g.id.clone())
+        .collect()
+}
+
 fn open_group_at(index: usize, cx: &mut App) {
     let services = services_of(cx);
-    if let Some(group) = services.provider.groups().into_iter().nth(index) {
+    let order = sidebar_order(&services.provider.groups());
+    if let Some(group) = order.into_iter().nth(index) {
         services
             .nav
-            .update(cx, |nav, cx| nav.open_group_chat(group.id, cx));
+            .update(cx, |nav, cx| nav.open_group_chat(group, cx));
+    }
+}
+
+/// The first message left unsent in the 新话题 sheet, with its 群.
+pub(crate) fn new_topic_draft(cx: &App) -> Option<(GroupId, String)> {
+    cx.try_global::<NavGlobal>()?.new_topic_draft.clone()
+}
+
+/// Keeps (or with `None` forgets) the unsent first message of the 新话题 sheet.
+pub(crate) fn set_new_topic_draft(draft: Option<(GroupId, String)>, cx: &mut App) {
+    if cx.has_global::<NavGlobal>() {
+        cx.global_mut::<NavGlobal>().new_topic_draft = draft;
     }
 }
 
@@ -778,6 +880,74 @@ mod tests {
         let none = walk(&[("a", "1", false)]);
         assert_eq!(unread_target(&none, None, None, true), None);
         assert_eq!(unread_target(&[], None, None, false), None);
+    }
+
+    /// ⌘K, 新建群…, 查找… pressed with another window in front (设置): the main
+    /// window comes forward, then the command runs in it.
+    #[gpui::test]
+    fn a_command_from_another_window_brings_the_main_window_forward(cx: &mut gpui::TestAppContext) {
+        use std::{cell::Cell, rc::Rc, sync::Arc};
+        let provider: Arc<dyn ChatProvider> = FakeProvider::new();
+        let main = cx.add_window(|_, _| gpui::Empty);
+        let other = cx.add_window(|_, _| gpui::Empty);
+        cx.update(|cx| {
+            let services = Services::new(provider, cx);
+            install_for_test(services, Some(main.into()), cx);
+        });
+        other
+            .update(cx, |_, window, _| window.activate_window())
+            .unwrap();
+        cx.run_until_parked();
+        assert_eq!(cx.update(|cx| cx.active_window()), Some(other.into()));
+
+        let ran = Rc::new(Cell::new(false));
+        let flag = ran.clone();
+        cx.update(|cx| in_shown_main_window(cx, move |_, _| flag.set(true)));
+        cx.run_until_parked();
+        assert!(ran.get(), "the command ran in the main window");
+        assert_eq!(cx.update(|cx| cx.active_window()), Some(main.into()));
+
+        // A self-test never takes the focus: the command runs where it is.
+        other
+            .update(cx, |_, window, _| window.activate_window())
+            .unwrap();
+        cx.run_until_parked();
+        ran.set(false);
+        let flag = ran.clone();
+        cx.update(|cx| {
+            stay_in_background(cx);
+            in_shown_main_window(cx, move |_, _| flag.set(true));
+        });
+        cx.run_until_parked();
+        assert!(ran.get());
+        assert_eq!(cx.update(|cx| cx.active_window()), Some(other.into()));
+    }
+
+    /// ⌘1…⌘9 count the sidebar's rows: the 群 first, then the 私聊, each in
+    /// the provider's order, whatever had the newest activity.
+    #[test]
+    fn the_number_keys_follow_the_sidebar_order() {
+        let row = |id: &str, kind: GroupKind| GroupSummary {
+            id: id.into(),
+            kind,
+            name: id.into(),
+            member_ids: Vec::new(),
+            dm_peer: None,
+            last_seq: 0,
+            read_seq: 0,
+            unread: 0,
+            mentions: 0,
+            last_activity_at: 0,
+        };
+        // The provider's order: by last activity, 群 and 私聊 mixed.
+        let groups = [
+            row("dm-new", GroupKind::Dm),
+            row("g-a", GroupKind::Group),
+            row("dm-old", GroupKind::Dm),
+            row("g-b", GroupKind::Group),
+        ];
+        assert_eq!(sidebar_order(&groups), ["g-a", "g-b", "dm-new", "dm-old"]);
+        assert!(sidebar_order(&[]).is_empty());
     }
 
     #[test]

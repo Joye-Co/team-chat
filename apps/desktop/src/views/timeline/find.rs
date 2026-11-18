@@ -61,15 +61,25 @@ pub fn install(cx: &mut App) {
         KeyBinding::new("shift-f3", FindPrevious, None),
     ]);
     cx.on_action(|_: &FindInTopic, cx| {
-        crate::views::nav::in_main_window(cx, |window, cx| {
+        crate::views::nav::in_shown_main_window(cx, |window, cx| {
             use gpui_component::WindowExt as _;
             if window.has_active_dialog(cx) {
                 return;
             }
             let services = crate::views::nav::services_of(cx);
-            let on_topic = services.nav.read(cx).page() == crate::app::Page::Topic;
+            let page = services.nav.read(cx).page();
+            // The 产出 list has its own search field in the toolbar: ⌘F
+            // goes there, as it goes to the find bar in a 话题.
+            if page == crate::app::Page::Artifacts
+                && let Some(root) = crate::app::root_view(window, cx)
+            {
+                let artifacts = root.read(cx).pages().artifact.clone();
+                if artifacts.update(cx, |list, cx| list.focus_search(window, cx)) {
+                    return;
+                }
+            }
             match timeline_of(window, cx) {
-                Some(timeline) if on_topic => {
+                Some(timeline) if page == crate::app::Page::Topic => {
                     timeline.update(cx, |this, cx| this.open_find(window, cx))
                 }
                 _ => crate::views::search::open(services, false, "", window, cx),

@@ -1287,6 +1287,21 @@ impl RootView {
                         .update(cx, |nav, cx| nav.toggle_sidebar(cx));
                 }))
                 .on_action(cx.listener(|this, _: &NewTopic, window, cx| {
+                    // A 话题 lives in a 群. With none to pick (a new team, or
+                    // only 私聊) the 新话题 sheet could never start one: the
+                    // 新建群 sheet opens instead.
+                    if crate::views::rail::model::groups(this.services.provider.as_ref()).is_empty()
+                    {
+                        use gpui_component::WindowExt as _;
+                        if !window.has_active_dialog(cx) {
+                            crate::views::nav::dialogs::open_new_group(
+                                this.services.clone(),
+                                window,
+                                cx,
+                            );
+                        }
+                        return;
+                    }
                     // v12/overlays: ⌘N opens the 新话题 sheet (NATIVE.md §7.1).
                     let group = this.services.nav.read(cx).current_group();
                     crate::views::nav::new_topic::open_new_topic(
