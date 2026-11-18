@@ -257,7 +257,7 @@ as in a failed `ack`).
   server whose Worker secret `ADMIN_SECRET` is not set, and plain `unauthorized` for a wrong
   value.
 - A member id that names no active member (`POST /v1/groups`, `POST /v1/groups/:id/members`,
-  `PUT /v1/integrations/github/logins`) is `invalid` with reason `member.unknown` and those ids
+  `POST /v1/dms`) or no member at all (`PUT /v1/integrations/github/logins`) is `invalid` with reason `member.unknown` and those ids
   in `memberIds`. A group has at most 99 members when it is made.
 
 | Method and path | Who | Body | Response |
@@ -2875,8 +2875,8 @@ Rules:
   | `run.ended` | the run has ended |
   | `run.no_machine` | the run has no machine (it waits for one, or it is an external run), or it is not open on its machine |
   | `run.not_ready` | pause or take over while the run's computer is not ready yet (the run has not started working) |
-  | `run.held` | pause on a run that is already paused; take over a run someone else has taken over |
-  | `run.not_held` | hand back or a command on a run the caller does not hold |
+  | `run.held` | pause on a run that is already paused or taken over; take over a run someone else has taken over |
+  | `run.not_held` | hand back on a run nobody has paused or taken over; a command on a run that is not taken over (a run someone else holds answers `forbidden`) |
   | `run.no_pause` | the machine's daemon cannot pause runs (no feature `pause`) |
   | `run.no_takeover` | the machine cannot be taken over (`takeover: "none"`) |
   | `hand.busy` | a command while another command of the run is running |

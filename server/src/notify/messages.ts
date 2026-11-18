@@ -29,20 +29,22 @@ export function checkCardSize(raw: unknown): void {
 // member), so all Worker isolates share it.
 const httpBuckets = new Map<string, TokenBucket>();
 /** Takes one HTTP post of the token's bucket: `null`, or the milliseconds to wait when it is empty. */
-registerGatewayRpc("http.post.take", (_gw, args): number | null => {
+// `true` stays "taken" (its released meaning): a Worker and a gateway of different versions
+// can meet during a deploy. A number is the wait in ms.
+registerGatewayRpc("http.post.take", (_gw, args): true | number => {
   const { tokenId } = args as { tokenId: string };
   let b = httpBuckets.get(tokenId);
   if (!b) {
     b = new TokenBucket(LIMITS.write.rate, LIMITS.write.burst);
     httpBuckets.set(tokenId, b);
   }
-  return b.take() ? null : b.waitMs();
+  return b.take() ? true : Math.max(1, Math.ceil(b.waitMs()));
 });
 
 /** Counts one HTTP post of this token; throws `rate_limited` with the wait when the bucket is empty. */
 export async function takeHttpPost(env: Env, a: AuthContext): Promise<void> {
-  const waitMs = (await gatewayStub(env, a.memberId).rpc("http.post.take", { tokenId: a.tokenId })) as number | null;
-  if (waitMs !== null) throw new ApiError("rate_limited", "too many posts", undefined, waitMs);
+  const taken = (await gatewayStub(env, a.memberId).rpc("http.post.take", { tokenId: a.tokenId })) as boolean | number;
+  if (taken !== true) throw new ApiError("rate_limited", "too many posts", undefined, typeof taken === "number" ? taken : undefined);
 }
 
 registerRoute({
