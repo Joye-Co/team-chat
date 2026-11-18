@@ -276,6 +276,8 @@ pub fn open_plan_sheet(
         if first.replace(false) && form.read(cx).member.is_bot() {
             let limit = form.read(cx).limit.clone();
             limit.read(cx).focus_handle(cx).focus(window, cx);
+            // The first keystroke replaces the amount instead of joining it.
+            limit.update(cx, |s, cx| s.select_all(window, cx));
         }
         native_sheet(dialog, SheetWidth::Form, cx)
             .px_0()

@@ -341,7 +341,7 @@ impl DeskPage {
                 cx,
             )
         };
-        page::frame(cx).children(shown).child(footer)
+        page::list_frame(cx).children(shown).child(footer)
     }
 
     /// The KPI row (§2.4): 等你, 在做, 今天交付, 排队.

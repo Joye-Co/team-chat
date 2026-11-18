@@ -103,7 +103,7 @@ crate::copy! {
     MEMBERS_PLAN_REPORTS = "汇报给",
     MEMBERS_PLAN_LIMIT = "每周预算",
     MEMBERS_PLAN_LIMIT_UNIT = "美元",
-    MEMBERS_PLAN_NOBODY = "不汇报",
+    MEMBERS_PLAN_NOBODY = "无",
     MEMBERS_PLAN_EXPLANATION = "{name} 向谁汇报、每周最多花多少；到了预算会先停下来问你。",
     MEMBERS_PLAN_LIMIT_PLACEHOLDER = "不限",
     MEMBERS_PLAN_LIMIT_INVALID = "请填 0 到 1000000 之间的金额，最多两位小数",
@@ -112,4 +112,7 @@ crate::copy! {
     MEMBERS_RETRY_FAILED = "没能重试",
     MEMBERS_QUEUED_SINCE = "{time} 开始排队",
     // --- end v13/wire ---
+    // One group by name (MEMBERS_IN_GROUPS lists several), and a name inside that list.
+    MEMBERS_IN_ONE_GROUP = "在「{group}」群",
+    MEMBERS_GROUP_QUOTED = "「{group}」",
 }

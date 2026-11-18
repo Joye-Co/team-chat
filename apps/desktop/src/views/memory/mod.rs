@@ -1,5 +1,5 @@
 //! 沉淀 (docs/design/agent-harness.zh.md §7.7): 记得的事 on an AI member's page and
-//! 设置 › 团队约定. One board per scope: at the top the newest day's 记忆更新 (新增, 改了,
+//! 设置 › 团队约定. One board per scope: at the top the newest day's 记忆更新 (新增, 修改,
 //! 停用, 可能过时), each line with 撤回; then the memories grouped by kind, each with
 //! when it applies, its evidence, where it came from and "⋯" (编辑, 停用); then what was
 //! 停用, folded, with 恢复. Nothing asks before it is kept: people correct afterwards.
@@ -36,7 +36,7 @@ use crate::{
     },
     ui::{
         native::{
-            GroupedForm, NativeType as _, PushSize, PushStyle, SectionTitle, metrics,
+            GroupedForm, NativeType as _, PushSize, PushStyle, SectionTitle, feedback, metrics,
             native_colors,
             page::{self, AlertKind},
             push_button, tokens,
@@ -558,6 +558,8 @@ impl MemoryBoard {
                 _ => None,
             })
             .flatten();
+        // Only a line that still waits for that decision is marked as asking.
+        let needs_you = flagged.is_some();
         let trailing: Option<AnyElement> = if line.undone {
             // Its own line box (12 / 16) centered on the first text line.
             Some(
@@ -636,7 +638,11 @@ impl MemoryBoard {
             .gap(tokens::space::S12)
             .child(div().flex_none().w(BADGE_COLUMN).flex().child(first_line(
                 tokens::height::BADGE,
-                page::outline_badge(line.word, cx),
+                if needs_you {
+                    page::status_badge(page::Status::NeedsYou, line.word, cx)
+                } else {
+                    page::outline_badge(line.word, cx)
+                },
             )))
             .child(
                 div()
@@ -684,7 +690,10 @@ impl MemoryBoard {
         let meta = fill(
             c::META,
             &[
-                ("source", &model::source_text(m, &name)),
+                (
+                    "source",
+                    &model::source_text(m, &name, self.services.me().as_deref()),
+                ),
                 ("time", &model::row_time(now, m.updated_at)),
             ],
         );
@@ -877,14 +886,23 @@ impl MemoryBoard {
                 PushSize::Small,
                 cx,
             )
+            // The app's disclosure: right while folded, down while open.
+            .icon(crate::ui::icons::labeled_button_sym(
+                if open {
+                    Sym::ChevronDown
+                } else {
+                    Sym::ChevronRight
+                },
+                crate::ui::SymSize::INLINE,
+            ))
             .on_click(cx.listener(|this, _, _, cx| {
                 this.show_retired = !this.show_retired;
                 cx.notify();
             }))
             .into_any_element();
             let mut block = div().w_full().flex().flex_col().child(self.label(
-                fill(c::RETIRED_N, &[("n", &lists.retired.len().to_string())]),
-                None,
+                c::RETIRED,
+                Some(lists.retired.len()),
                 Some(toggle),
                 cx,
             ));
@@ -986,8 +1004,25 @@ impl MemoryBoard {
         .into_any_element()
     }
 
+    /// 团队约定 in the admin window with nothing at all: the board is the whole page
+    /// there, so it takes the page's Empty state (§2.13) and 记一条 moves into it.
+    fn page_empty(&self) -> bool {
+        self.admin_panel
+            && matches!(&self.memories, Some(Ok(m)) if m.is_empty())
+            && !matches!(&self.day, Some(Ok(d)) if !d.updates.is_empty())
+    }
+
     /// Nothing kept yet. 记一条 sits in the header already, so the line has no action.
     fn empty(&self, cx: &mut Context<Self>) -> AnyElement {
+        if self.page_empty() {
+            let mut state = feedback::Empty::new(Sym::Book, c::TEAM_EMPTY_TITLE)
+                .description(c::TEAM_EMPTY_BODY)
+                .wide();
+            if self.adds() {
+                state = state.action(self.add_button(cx));
+            }
+            return state.into_any_element();
+        }
         let text: SharedString = match &self.scope {
             _ if self.folded_mine() => c::MINE_EMPTY.into(),
             MemoryScope::Team => c::TEAM_EMPTY.into(),
@@ -1159,9 +1194,9 @@ fn first_line(h: gpui::Pixels, el: impl IntoElement) -> gpui::Div {
         .child(el)
 }
 
-/// The badge column of a 记忆更新 line: 72, as the time column, so the widest word
-/// (可能过时) fits and every line's text starts at one x.
-const BADGE_COLUMN: gpui::Pixels = page::m::TIME_COLUMN;
+/// The badge column of a 记忆更新 line: the widest badge (可能过时 with its mark)
+/// fits, and every line's text starts at one x.
+const BADGE_COLUMN: gpui::Pixels = tokens::size::MEMORY_BADGE_COLUMN;
 
 impl Render for MemoryBoard {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1209,10 +1244,12 @@ impl Render for MemoryBoard {
                 if let Some(n) = count {
                     header = header.count(n);
                 }
-                if let Some(a) = action {
+                if let Some(a) = action.filter(|_| !self.page_empty()) {
                     header = header.action(a);
                 }
                 widgets::pane()
+                    // The admin window starts its pages at its own top inset.
+                    .when(self.admin_panel, |d| d.pt(metrics::HAIRLINE))
                     .child(widgets::section(
                         header,
                         div()

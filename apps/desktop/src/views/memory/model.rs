@@ -175,12 +175,16 @@ pub fn lists_in<'a>(order: &[MemoryKind], memories: &'a [Memory]) -> Lists<'a> {
     Lists { groups, retired }
 }
 
-/// Where a memory came from, in words (来龙去脉). `name` reads a member id as a name.
-pub fn source_text(m: &Memory, name: &dyn Fn(&str) -> String) -> String {
+/// Where a memory came from, in words (来龙去脉). `name` reads a member id as a name;
+/// `me` is the signed-in member, who reads their own lines as 你.
+pub fn source_text(m: &Memory, name: &dyn Fn(&str) -> String, me: Option<&str>) -> String {
     let author = name(&m.author_id);
+    let mine = me == Some(m.author_id.as_str());
     match m.source {
+        MemorySourceKind::Manual if mine => c::SOURCE_MANUAL_SELF.to_string(),
         MemorySourceKind::Manual => fill(c::SOURCE_MANUAL, &[("name", &author)]),
         // A person changed what an AI wrote: say who, the change is the newest fact.
+        _ if m.human && mine => c::SOURCE_EDITED_SELF.to_string(),
         _ if m.human && m.source != MemorySourceKind::Manual => {
             fill(c::SOURCE_EDITED, &[("name", &author)])
         }
@@ -195,12 +199,12 @@ pub fn source_text(m: &Memory, name: &dyn Fn(&str) -> String) -> String {
 #[derive(Debug, PartialEq, Eq)]
 pub struct UpdateLine {
     pub id: String,
-    /// 新增, 改了, 停用 or 可能过时.
+    /// 新增, 修改, 停用 or 可能过时.
     pub word: &'static str,
     pub change: MemoryChange,
     /// The memory's text after the change (before it, for a retired one).
     pub text: String,
-    /// What it said before (改了), or why (the consolidation's note).
+    /// What it said before (修改), or why (the consolidation's note).
     pub detail: Option<String>,
     pub undone: bool,
     /// 撤回 shows: a writer, a change that can be undone, not undone yet.
@@ -247,7 +251,7 @@ pub fn update_line(u: &MemoryUpdate, writer: bool) -> UpdateLine {
     }
 }
 
-/// `新增 2 条，改了 1 条，停用 1 条` for the lines not undone; `None` when nothing is left.
+/// `新增 2 条，修改 1 条，停用 1 条` for the lines not undone; `None` when nothing is left.
 pub fn summary(day: &MemoryDay) -> Option<String> {
     let live: Vec<&MemoryUpdate> = day
         .updates
@@ -611,7 +615,7 @@ mod tests {
             ),
             true,
         );
-        assert_eq!(changed.word, "改了");
+        assert_eq!(changed.word, "修改");
         assert_eq!(changed.text, "text m1");
         assert_eq!(
             changed.detail.as_deref(),
@@ -695,16 +699,18 @@ mod tests {
             }
         };
         let mut m = mem("m", MemoryKind::Lesson, MemoryStatus::Active, 1);
-        assert_eq!(source_text(&m, &name), "Forge 干活时记下");
+        assert_eq!(source_text(&m, &name, None), "Forge 干活时记下");
         m.source = MemorySourceKind::Message;
-        assert_eq!(source_text(&m, &name), "从群里的消息记下");
+        assert_eq!(source_text(&m, &name, None), "从群里的消息记下");
         m.source = MemorySourceKind::Card;
-        assert_eq!(source_text(&m, &name), "从卡片的回答记下");
+        assert_eq!(source_text(&m, &name, None), "从卡片的回答记下");
         m.human = true;
         m.author_id = "m-joye".into();
-        assert_eq!(source_text(&m, &name), "Joye 改过");
+        assert_eq!(source_text(&m, &name, None), "Joye 改过");
+        assert_eq!(source_text(&m, &name, Some("m-joye")), "你改过");
         m.source = MemorySourceKind::Manual;
-        assert_eq!(source_text(&m, &name), "Joye 记的");
+        assert_eq!(source_text(&m, &name, Some("m-lisa")), "Joye 记的");
+        assert_eq!(source_text(&m, &name, Some("m-joye")), "你记的");
     }
 
     #[test]

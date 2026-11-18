@@ -172,6 +172,13 @@ pub fn frame(cx: &App) -> gpui::Div {
     frame_filled(native_colors(cx).content)
 }
 
+/// A [`frame`] of rows on a page: pulled out by the rows' own inset, so media,
+/// footer text and actions land on the page's content edges (§2.1) and the
+/// hover fill bleeds into the gutter.
+pub fn list_frame(cx: &App) -> gpui::Div {
+    frame(cx).mx(-m::ROW_PAD)
+}
+
 /// A [`frame`] inside a card (§2.4): it takes the card's fill, so the rows
 /// do not read as a hole cut into the card in dark mode.
 pub fn frame_on_card(cx: &App) -> gpui::Div {
@@ -980,7 +987,7 @@ pub fn skeleton_rows(id: &str, kind: SkeletonKind, n: usize, cx: &App) -> AnyEle
         }
     });
     match kind {
-        SkeletonKind::Row => frame(cx).children(rows).into_any_element(),
+        SkeletonKind::Row => list_frame(cx).children(rows).into_any_element(),
         SkeletonKind::TableRow => frame(cx)
             .child(
                 div()
