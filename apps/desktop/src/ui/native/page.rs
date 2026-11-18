@@ -1083,6 +1083,17 @@ impl PageLoad {
     }
 }
 
+/// The Alert severity of a failed request (§2.15): an unreachable server is the
+/// connection Warning of [`load_failed`], one severity for one cause; a request
+/// the server does not support is neutral; anything else is an Error.
+pub fn admin_alert_kind(err: crate::data::AdminError) -> AlertKind {
+    match err {
+        crate::data::AdminError::Unsupported => AlertKind::Info,
+        crate::data::AdminError::Offline => AlertKind::Warning,
+        _ => AlertKind::Error,
+    }
+}
+
 /// The failure of a page with no cached data (§2.15): an Alert with
 /// `重试`, which reconnects now.
 pub fn load_failed(id: &str, services: &Services, cx: &App) -> AnyElement {
@@ -1299,15 +1310,23 @@ pub struct Col {
 /// fill, rows h48 with 1 px lines between them, cells px12
 /// (first and last px16), one line each, truncating. The frame is the
 /// card's or the caller's.
-pub fn table(
-    id: &str,
-    cols: &[Col],
-    rows: Vec<(
-        Vec<AnyElement>,
-        Option<Box<dyn Fn(&gpui::ClickEvent, &mut gpui::Window, &mut App)>>,
-    )>,
-    cx: &App,
-) -> gpui::Div {
+pub fn table(id: &str, cols: &[Col], rows: Vec<TableRow>, cx: &App) -> gpui::Div {
+    table_in(id, cols, rows, false, cx)
+}
+
+/// A compact [`table`] inside a card (§2.7): 12 medium muted header labels and
+/// h40 rows, in a [`frame_on_card`].
+pub fn table_on_card(id: &str, cols: &[Col], rows: Vec<TableRow>, cx: &App) -> gpui::Div {
+    table_in(id, cols, rows, true, cx)
+}
+
+/// One row of a [`table`]: its cells and what a click on it does.
+pub type TableRow = (
+    Vec<AnyElement>,
+    Option<Box<dyn Fn(&gpui::ClickEvent, &mut gpui::Window, &mut App)>>,
+);
+
+fn table_in(id: &str, cols: &[Col], rows: Vec<TableRow>, compact: bool, cx: &App) -> gpui::Div {
     use gpui::StatefulInteractiveElement as _;
     let k = native_colors(cx);
     let n = cols.len();
@@ -1327,13 +1346,13 @@ pub fn table(
             .when(text, |d| d.overflow_hidden())
             .whitespace_nowrap()
     };
-    let header = table_header(cols, cx);
+    let header = table_header(cols, compact, cx);
     let total = rows.len();
     let body = rows.into_iter().enumerate().map(|(ri, (cells, click))| {
         div()
             .id(SharedString::from(format!("{id}-row-{ri}")))
             .flex_none()
-            .h(px(48.))
+            .h(table_row_height(compact))
             .flex()
             .items_center()
             .when(ri + 1 < total, |d| d.border_b_1().border_color(k.separator))
@@ -1358,11 +1377,20 @@ pub fn table(
     div().flex().flex_col().child(header).children(body)
 }
 
-/// The header row of a [`table`] (§2.7): h40 on the muted fill, 14 medium labels,
-/// a line under it. Its top corners follow the frame's radius: the frame clips its
-/// children to its box, not to its corners, and draws no border that would hide a
-/// square fill.
-fn table_header(cols: &[Col], cx: &App) -> gpui::Div {
+/// The row height of a [`table`] (§2.7): h48, h40 when compact.
+fn table_row_height(compact: bool) -> Pixels {
+    if compact {
+        super::tokens::height::TABLE_ROW_COMPACT
+    } else {
+        super::tokens::height::TABLE_ROW
+    }
+}
+
+/// The header row of a [`table`] (§2.7): h40 on the muted fill, 14 medium labels
+/// (12 medium muted when compact), a line under it. Its top corners follow the
+/// frame's radius: the frame clips its children to its box, not to its corners, and
+/// draws no border that would hide a square fill.
+fn table_header(cols: &[Col], compact: bool, cx: &App) -> gpui::Div {
     let k = native_colors(cx);
     let n = cols.len();
     div()
@@ -1386,9 +1414,15 @@ fn table_header(cols: &[Col], cx: &App) -> gpui::Div {
                 .when(c.right, |d| d.justify_end())
                 .when(!c.header.is_empty(), |d| d.overflow_hidden())
                 .whitespace_nowrap()
-                .n_body()
-                .font_weight(crate::theme::MEDIUM_WEIGHT)
-                .text_color(k.label)
+                .map(|d| {
+                    if compact {
+                        d.n_section().text_color(k.secondary)
+                    } else {
+                        d.n_body()
+                            .font_weight(crate::theme::MEDIUM_WEIGHT)
+                            .text_color(k.label)
+                    }
+                })
                 .child(c.header.clone())
         }))
 }
@@ -1397,16 +1431,23 @@ fn table_header(cols: &[Col], cx: &App) -> gpui::Div {
 /// column names are known before the rows are), and `n` (3 to 6) h48 rows with
 /// one bar per column at the column's width and alignment.
 pub fn skeleton_table(id: &str, cols: &[Col], n: usize, cx: &App) -> AnyElement {
-    skeleton_table_in(frame(cx), id, cols, n, cx)
+    skeleton_table_in(frame(cx), id, cols, n, false, cx)
 }
 
-/// A [`skeleton_table`] inside a card (§2.4): on the card's fill, as the
-/// loaded table in a [`frame_on_card`].
+/// A [`skeleton_table`] inside a card (§2.4): on the card's fill and compact,
+/// as the loaded [`table_on_card`].
 pub fn skeleton_table_on_card(id: &str, cols: &[Col], n: usize, cx: &App) -> AnyElement {
-    skeleton_table_in(frame_on_card(cx), id, cols, n, cx)
+    skeleton_table_in(frame_on_card(cx), id, cols, n, true, cx)
 }
 
-fn skeleton_table_in(frame: gpui::Div, id: &str, cols: &[Col], n: usize, cx: &App) -> AnyElement {
+fn skeleton_table_in(
+    frame: gpui::Div,
+    id: &str,
+    cols: &[Col],
+    n: usize,
+    compact: bool,
+    cx: &App,
+) -> AnyElement {
     let k = native_colors(cx);
     let n = n.clamp(*TABLE_SKELETON_ROWS.start(), *TABLE_SKELETON_ROWS.end());
     let count = cols.len();
@@ -1436,9 +1477,9 @@ fn skeleton_table_in(frame: gpui::Div, id: &str, cols: &[Col], n: usize, cx: &Ap
     };
     frame
         .id(SharedString::from(format!("{id}-skeleton")))
-        .child(table_header(cols, cx))
+        .child(table_header(cols, compact, cx))
         .children((0..n).map(|i| {
-            row(super::tokens::height::TABLE_ROW, px(14.), i)
+            row(table_row_height(compact), px(14.), i)
                 .when(i + 1 < n, |d| d.border_b_1().border_color(k.separator))
         }))
         .into_any_element()

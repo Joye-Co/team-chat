@@ -393,14 +393,13 @@ impl MembersPage {
         });
         let mut row = ToolbarRow::new(c::MEMBERS_PAGE_TITLE)
             .leading_inset(rows::toolbar_leading(&self.services, cx));
-        // The filter has nothing to filter until the team is here, and in
-        // this narrow column it left the state word (正在同步…) no room: it
-        // comes with the list.
-        if load == PageLoad::Ready {
-            row = row.group(div().flex_none().child(filter));
-        }
+        // While the first sync runs this narrow column leaves the state word
+        // (正在同步…) no room for the filter. A failed page keeps its toolbar's
+        // layout (§2.15): the filter stays, disabled until the list is back.
         if load != PageLoad::Loading {
-            row = row.group(rows::toolbar_capsule(add, cx));
+            row = row
+                .group(div().flex_none().child(filter))
+                .group(rows::toolbar_capsule(add, cx));
         }
         // The subtitle slot stays in every state, so the title never moves.
         row = row.subtitle(match load {
@@ -484,7 +483,7 @@ impl MembersPage {
                 .pt(tsp::S12)
                 .child(page::compact_empty(
                     Sym::Members,
-                    crate::copy::group_page::GROUP_PAGE_OFFLINE,
+                    c::MEMBERS_LIST_OFFLINE,
                     None,
                     cx,
                 ));
@@ -1282,7 +1281,7 @@ impl MembersPage {
                 })
                 .collect();
             page::frame_on_card(cx)
-                .child(page::table("member-deliveries", &cols, rows, cx))
+                .child(page::table_on_card("member-deliveries", &cols, rows, cx))
                 .into_any_element()
         };
         page::titled_card(
@@ -1569,7 +1568,7 @@ impl MembersPage {
                 page::on_card(
                     page::page_alert(
                         "member-approvals-failed",
-                        page::AlertKind::Error,
+                        page::admin_alert_kind(*err),
                         c::MEMBERS_APPROVALS_FAILED,
                         Some(crate::views::settings::widgets::error_text(*err).into()),
                         Some(

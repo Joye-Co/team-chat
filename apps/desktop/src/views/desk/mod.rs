@@ -1,7 +1,7 @@
 //! 首页 (COMPLETENESS.md §2.18): the toolbar row (title 首页, subtitle
 //! `3 件事等你拍板`, from the same needs-you query as the sidebar count),
 //! then Jojo's priority as an Alert, a KPI row (等你, 在做, 今天交付, 排队)
-//! and one section per queue (需要你拍板, 正在做, 今天交付), each a framed
+//! and one section per queue (需要你拍板, 在做, 今天交付), each a framed
 //! list with fixed columns. The right pane holds only what the list does
 //! not show (排队, 在哪干活). Every state is drawn: loading (skeletons),
 //! failed (Alert with 重试), empty (Empty state) and long lists (看全部).
@@ -37,10 +37,9 @@ use crate::{
     data::Millis,
     ui::{
         native::{
-            PushSize, PushStyle, ToolbarGroup, ToolbarItemKind, ToolbarRow, emphasized,
-            native_colors,
+            PushSize, PushStyle, ToolbarGroup, ToolbarRow, emphasized, native_colors,
             page::{self, PageLoad, m},
-            push_button, toolbar_item,
+            push_button, toolbar_labeled_item,
         },
         sf_symbols::{Sf, Sym},
     },
@@ -461,16 +460,12 @@ impl Render for DeskPage {
             } else {
                 c::DESK_SHOW_SIDE
             };
-            let kind = if show_side {
-                ToolbarItemKind::Toggled
-            } else {
-                ToolbarItemKind::Plain
-            };
-            toolbar = toolbar.group(ToolbarGroup::new([toolbar_item(
+            toolbar = toolbar.group(ToolbarGroup::new([toolbar_labeled_item(
                 "desk-inspector",
                 Sf::PaneRight,
+                c::DESK_RAIL_TITLE,
                 name,
-                kind,
+                show_side,
                 emphasized(window),
                 window,
                 cx,

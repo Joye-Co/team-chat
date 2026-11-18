@@ -4,7 +4,7 @@ crate::copy! {
     DESK_TITLE = "首页",
     DESK_NEEDS_YOU = "需要你拍板",
     DESK_DONE_TODAY = "今天交付",
-    DESK_WORKING = "正在做",
+    DESK_WORKING = "在做",
     DESK_QUEUE = "排队",
     DESK_DATE = "{m}月{d}日 {weekday}",
     // Card footers.
@@ -79,7 +79,7 @@ crate::copy! {
     DESK_START_AI_DONE = "团队里已有 AI 成员。",
     DESK_START_AI_OPEN = "添加 AI 成员",
     DESK_START_TASK = "交代第一件事",
-    DESK_START_TASK_TODO = "开个话题，@ 一位 AI 成员，写清要做什么。它收到后接着做，做完把结果发回话题。",
+    DESK_START_TASK_TODO = "开个话题，@ 一位 AI 成员，写清要做什么，它做完会发回结果。",
     DESK_SEE_ARTIFACTS = "看产出",
     DESK_RAIL_TITLE = "今天",
     DESK_WHERE = "在哪干活",

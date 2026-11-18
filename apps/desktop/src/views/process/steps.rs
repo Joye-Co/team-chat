@@ -92,6 +92,12 @@ fn label(text: String, cx: &App) -> impl IntoElement {
         .child(text)
 }
 
+/// The first line of a step: as tall as the status badge a 执行 step carries, so
+/// the glyph, a one-line label and the badge share one center line.
+fn first_line(child: impl IntoElement) -> gpui::Div {
+    div().min_h(FIRST_LINE).flex().items_center().child(child)
+}
+
 /// The content column of one step.
 fn block(_cx: &App) -> gpui::Div {
     div()
@@ -421,7 +427,7 @@ fn render_step(
             };
             let n = crate::ui::native::native_colors(cx);
             block(cx)
-                .child(label(who, cx))
+                .child(first_line(label(who, cx)))
                 .child(
                     div()
                         .t_body()
@@ -445,7 +451,7 @@ fn render_step(
                 return None;
             }
             block(cx)
-                .child(label(p::STEP_THINKING.to_string(), cx))
+                .child(first_line(label(p::STEP_THINKING.to_string(), cx)))
                 .child(
                     div()
                         .t_small()
@@ -473,6 +479,7 @@ fn render_step(
                 Some(false) => crate::ui::native::StatusKind::Failed,
             };
             let header = div()
+                .min_h(FIRST_LINE)
                 .flex()
                 .items_center()
                 .gap(space::S6)
@@ -549,10 +556,10 @@ fn render_step(
                 })
                 .collect();
             block(cx)
-                .child(label(
+                .child(first_line(label(
                     fill(p::STEP_FILES, &[("n", &changes.len().to_string())]),
                     cx,
-                ))
+                )))
                 .children(rows)
         }
         ProcessStep::Approval {
@@ -566,7 +573,7 @@ fn render_step(
                 Some(false) => p::APPROVAL_DENIED,
             };
             block(cx)
-                .child(label(p::STEP_APPROVAL.to_string(), cx))
+                .child(first_line(label(p::STEP_APPROVAL.to_string(), cx)))
                 .child(
                     div()
                         .t_body()
@@ -587,7 +594,9 @@ fn render_step(
                         .child(state),
                 )
         }
-        ProcessStep::TurnStarted => block(cx).child(label(p::STEP_TURN_STARTED.to_string(), cx)),
+        ProcessStep::TurnStarted => {
+            block(cx).child(first_line(label(p::STEP_TURN_STARTED.to_string(), cx)))
+        }
         ProcessStep::TurnCompleted { ok, error } => {
             let text = if *ok {
                 p::STEP_TURN_DONE
@@ -595,7 +604,7 @@ fn render_step(
                 p::STEP_TURN_FAILED
             };
             block(cx)
-                .child(label(text.to_string(), cx))
+                .child(first_line(label(text.to_string(), cx)))
                 .when_some(error.clone(), |el, e| {
                     el.child(
                         div()
@@ -610,7 +619,7 @@ fn render_step(
                 return None;
             }
             block(cx)
-                .child(label(p::STEP_STATUS.to_string(), cx))
+                .child(first_line(label(p::STEP_STATUS.to_string(), cx)))
                 .child(
                     div()
                         .t_small()
@@ -626,6 +635,7 @@ fn render_step(
         } => block(cx)
             .child(
                 div()
+                    .min_h(FIRST_LINE)
                     .flex()
                     .items_center()
                     .gap(space::S8)
@@ -655,9 +665,10 @@ fn render_step(
     Some(el.into_any_element())
 }
 
-/// The glyph column of the timeline: 20 wide, the step's glyph on the first line (a 20
-/// line box).
+/// The glyph column of the timeline: 20 wide, the step's glyph centered on the first line.
 const RAIL: gpui::Pixels = px(20.);
+/// The height of a step's first line: the status badge's.
+const FIRST_LINE: gpui::Pixels = crate::ui::native::tokens::height::BADGE;
 
 /// One step on the timeline: its 16 glyph in the 20 rail, a 1 pt line from under the
 /// glyph's line box to the next step's, and the step's content with 16 below it. The
@@ -675,7 +686,7 @@ fn timeline_row(step: &ProcessStep, content: AnyElement, last: bool, cx: &App) -
                 div()
                     .absolute()
                     .left((RAIL - crate::ui::native::metrics::HAIRLINE) / 2.)
-                    .top(RAIL)
+                    .top(FIRST_LINE)
                     .bottom(gpui::Pixels::ZERO)
                     .w(crate::ui::native::metrics::HAIRLINE)
                     .bg(n.separator),
@@ -685,7 +696,7 @@ fn timeline_row(step: &ProcessStep, content: AnyElement, last: bool, cx: &App) -
             div()
                 .flex_none()
                 .w(RAIL)
-                .h(RAIL)
+                .h(FIRST_LINE)
                 .flex()
                 .items_center()
                 .justify_center()
