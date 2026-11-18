@@ -150,9 +150,23 @@ pub fn relay_line(
     None
 }
 
+/// Which line the composer shows: the server's refusal only while the draft is empty. A new
+/// draft is the person's answer to it, so what that draft will do takes the place.
+fn line_for_draft(
+    refusal: Option<RelayLine>,
+    draft: &str,
+    line: impl FnOnce() -> Option<RelayLine>,
+) -> Option<RelayLine> {
+    if draft.trim().is_empty() {
+        refusal
+    } else {
+        line()
+    }
+}
+
 impl super::ComposerView {
-    /// The 按顺序做 line above the field now: why the server refused my last order here,
-    /// else what the draft's order will do (or a hint), none while editing.
+    /// The 按顺序做 line above the field now: on an empty draft why the server refused my
+    /// last order here, else what the draft's order will do (or a hint), none while editing.
     pub(super) fn relay_line_now(&self) -> Option<RelayLine> {
         if self.editing.is_some() {
             return None;
@@ -160,30 +174,29 @@ impl super::ComposerView {
         let key = self.key.as_ref()?;
         let p = &self.services.provider;
         let topic = key.topic_id.as_deref();
-        if let Some(t) = topic
-            && let Some(r) = p.relay_refusal(&key.group_id, t)
-            && let Some(text) = refusal_text(&r, |id| {
-                crate::copy::isolate(crate::ui::avatar::name_beside_avatar(
-                    &crate::views::shell::member_name(&self.services, id),
-                ))
+        let refusal = topic
+            .and_then(|t| p.relay_refusal(&key.group_id, t))
+            .and_then(|r| {
+                refusal_text(&r, |id| {
+                    crate::copy::isolate(crate::ui::avatar::name_beside_avatar(
+                        &crate::views::shell::member_name(&self.services, id),
+                    ))
+                })
             })
-        {
-            return Some(RelayLine {
+            .map(|text| RelayLine {
                 text,
                 error: true,
                 order: false,
             });
-        }
-        if self.last_text.trim().is_empty() {
-            return None;
-        }
-        let in_chat = topic.is_some_and(crate::data::is_main_topic);
-        let relay_live = topic
-            .and_then(|t| p.topic(&key.group_id, t))
-            .and_then(|t| t.relay)
-            .is_some_and(|r| matches!(r.state.as_str(), "running" | "paused"));
-        let members = crate::views::topic_menu::group_members(&self.services, &key.group_id);
-        relay_line(&self.last_text, &self.picked, &members, in_chat, relay_live)
+        line_for_draft(refusal, &self.last_text, || {
+            let in_chat = topic.is_some_and(crate::data::is_main_topic);
+            let relay_live = topic
+                .and_then(|t| p.topic(&key.group_id, t))
+                .and_then(|t| t.relay)
+                .is_some_and(|r| matches!(r.state.as_str(), "running" | "paused"));
+            let members = crate::views::topic_menu::group_members(&self.services, &key.group_id);
+            relay_line(&self.last_text, &self.picked, &members, in_chat, relay_live)
+        })
     }
 }
 
@@ -304,6 +317,32 @@ mod tests {
         assert!(relay_line("@小码 @Joye 看看", &[], &m, false, false).is_none());
         // Not in the 群聊.
         assert!(relay_line("@小码 和 @小审", &[], &m, true, false).is_none());
+    }
+
+    #[test]
+    fn a_new_draft_takes_the_place_of_the_refusal() {
+        let m = team();
+        let refusal = || {
+            Some(RelayLine {
+                text: "没能开始按顺序做".into(),
+                error: true,
+                order: false,
+            })
+        };
+        let line = |draft: &str| {
+            line_for_draft(refusal(), draft, || {
+                relay_line(draft, &[], &m, false, false)
+            })
+        };
+        // Nothing typed: the refusal stays up, and comes back when the draft is cleared.
+        assert_eq!(line(""), refusal());
+        assert_eq!(line("  \n"), refusal());
+        // The replacement order is read as an order, not as refused.
+        let order = line("@小码 -> @小审").expect("the order line");
+        assert!(order.order);
+        assert!(!order.error);
+        // A draft that is no order has no line at all.
+        assert_eq!(line("先等等"), None);
     }
 
     #[test]
