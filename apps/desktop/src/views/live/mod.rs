@@ -1593,7 +1593,12 @@ impl LivePane {
                     .children(label.map(|t| div().min_w_0().one_line().child(t))),
             )
             .when(has_label, |d| {
-                d.child(div().flex_none().text_color(k.ink_3).child("·"))
+                d.child(
+                    div()
+                        .flex_none()
+                        .text_color(k.ink_3)
+                        .child(c::LIVE_ACCEPTANCE_DOT),
+                )
             })
             .child(
                 div()

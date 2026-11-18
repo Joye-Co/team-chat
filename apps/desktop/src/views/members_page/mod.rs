@@ -110,7 +110,6 @@ pub fn set_scene_scroll(to: SceneScroll) {
     SCENE_SCROLL.store(to as u8, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// What the list knows of one member.
 impl Filter {
     /// Whether a member's row is in this filter. 在做事 asks about the run, not the row's
     /// section: a member with a question for me sits under 等你 and may still be at work.
@@ -125,6 +124,7 @@ impl Filter {
     }
 }
 
+/// What the list knows of one member.
 struct Entry {
     member: Member,
     bucket: Bucket,
