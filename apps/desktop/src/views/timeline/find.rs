@@ -438,7 +438,10 @@ pub fn fence_marks(
 fn fence_line_top(source: &str, at: usize) -> Option<gpui::Pixels> {
     use crate::{
         theme::type_scale::MESSAGE,
-        ui::native::{metrics::CODE_BLOCK_STRIP, tokens::text},
+        ui::native::{
+            metrics::{CODE_BLOCK_ONE_LINE_PAD, CODE_BLOCK_STRIP},
+            tokens::text,
+        },
     };
     let code = fences(source)
         .into_iter()
@@ -457,7 +460,12 @@ fn fence_line_top(source: &str, at: usize) -> Option<gpui::Pixels> {
         })
         .sum();
     let code_lines = source[code.start..at].matches('\n').count() as f32;
-    Some(MESSAGE.1 * text_lines + CODE_BLOCK_STRIP + text::MONO.1 * code_lines)
+    let first_line = if crate::markdown::code_is_one_line(&source[code.clone()]) {
+        CODE_BLOCK_ONE_LINE_PAD
+    } else {
+        CODE_BLOCK_STRIP
+    };
+    Some(MESSAGE.1 * text_lines + first_line + text::MONO.1 * code_lines)
 }
 
 /// `#RRGGBBAA` of a color, for a `<mark color>`.
