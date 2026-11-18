@@ -14,6 +14,7 @@ import {
   type PartRef,
 } from "@chat/protocol";
 import { checkCardV2 } from "./cards.ts";
+import { checkBlockEvents } from "./events.ts";
 
 type BlockOf<T extends CardV2Block["type"]> = Extract<CardV2Block, { type: T }>;
 /** A builder's input: the block without `type`; `fallbackText` gets a default where the protocol needs one. */
@@ -110,8 +111,15 @@ export const blocks = {
   poll: (o: InputFb<"poll">): CardV2Block => ({ type: "poll", ...fb(o, `${o.label}：${o.options.map((x) => x.label).join(" / ")}`) }),
 
   // --- 2.1 other leaves --------------------------------------------------------
-  /** 1–3 inline buttons; they send `button.press` (declare it in `events`) and never answer an ask. */
-  buttons: (o: InputFb<"buttons">): CardV2Block => ({ type: "buttons", ...fb(o, o.buttons.map((b) => b.label).join(" / ")) }),
+  /**
+   * 1–3 inline buttons; a press reaches `onCardEvent` as `button.press` (`ctx.button()` is the
+   * button id) and never answers an ask. `events` defaults to `["button.press"]`: without it the
+   * server refuses every press.
+   */
+  buttons: (o: InputFb<"buttons">): CardV2Block => ({
+    type: "buttons",
+    ...fb({ ...o, events: o.events ?? ["button.press"] }, o.buttons.map((b) => b.label).join(" / ")),
+  }),
   /** A Mermaid diagram. `fallbackText` defaults to `title`, else `图：<first node labels>`. */
   diagram: (o: Omit<InputFb<"diagram">, "syntax"> & { syntax?: string }): CardV2Block => {
     const labels = diagramLabels(o.source).slice(0, 5);
@@ -179,7 +187,10 @@ export interface ComposeCardOptions {
   rev?: number;
 }
 
-/** Makes a v2 card from top-level blocks (containers flatten), and checks every write rule. */
+/**
+ * Makes a v2 card from top-level blocks (containers flatten), and checks every write rule and
+ * that each block declares only live events its type can send (`blockEvents`).
+ */
 export function composeCard(o: ComposeCardOptions): CardV2 {
   const list = flattenBlocks(o.blocks);
   const uses21 = list.some((b) => CARD_21_TYPES.has(b.type) || (b.type === "group" && b.children !== undefined) || b.events !== undefined);
@@ -197,7 +208,9 @@ export function composeCard(o: ComposeCardOptions): CardV2 {
   if (o.ask) card.ask = o.ask;
   if (o.data !== undefined) card.data = o.data;
   if (o.actions) card.actions = o.actions;
-  return checkCardV2(card);
+  const checked = checkCardV2(card);
+  checkBlockEvents(checked.blocks);
+  return checked;
 }
 
 /** Part addresses (`PartRef`, docs/protocol.md "References to a part"). Keys are ids or 0-based indices. */

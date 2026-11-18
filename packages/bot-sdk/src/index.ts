@@ -59,7 +59,7 @@ export {
   mermaid,
   parts,
 } from "./blocks.ts";
-export { CardDraft, opsFit, type PatchInput } from "./interact.ts";
+export { type BlockProps, CardDraft, opsFit, type PatchInput } from "./interact.ts";
 export { blockEvents, checkBlockEvents, type EventPoint, type EventValueReaders, eventValueReaders } from "./events.ts";
 export { DELETED_REF_LABEL, findPart, type MarkdownBlock, markdownBlocks, refPrefix, stripRefPrefix } from "./refs.ts";
 export { ChatError, type ChatErrorCode, isRetryable } from "./errors.ts";
