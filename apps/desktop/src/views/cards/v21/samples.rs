@@ -67,6 +67,15 @@ pub const NOTE_DRAFT: &str = "c21-note-draft";
 /// Ledger answered my click with a new message off screen.
 pub const NOTE_REPLY: &str = "c21-note-reply";
 
+/// A press the member cannot take, one card per `expect.reason`.
+pub const NONE_REASONS: [(&str, &str); 5] = [
+    ("c21-none-inactive", "member.inactive"),
+    ("c21-none-runner", "runner.off"),
+    ("c21-none-external", "run.external"),
+    ("c21-none-limit", "run.limit"),
+    ("c21-none-failed", "run.failed"),
+];
+
 /// My bar click the server refused: I may not do this step.
 pub const NOTE_FORBIDDEN: &str = "c21-note-forbidden";
 /// My bar click that did not get to Ledger (the server refused it for another reason).
@@ -169,6 +178,22 @@ fn acked(
         dropped: false,
         reply: None,
     }
+}
+
+/// A live event of mine the server answered with `expect.mode: none` and `reason`.
+pub fn acked_none(id: &str, block: &str, reason: &str) -> MyCardEvent {
+    let mut e = acked(
+        id,
+        block,
+        "button.press",
+        json!({}),
+        ExpectMode::None,
+        LEDGER,
+    );
+    if let CardEventPhase::Acked { ack, .. } = &mut e.phase {
+        ack.expect.reason = Some(reason.into());
+    }
+    e
 }
 
 /// Moves an event to `now - ago`.
@@ -933,6 +958,27 @@ pub fn all() -> Vec<Sample21> {
             1_000,
             acked(id, "bars", "chart.select", click.clone(), mode, LEDGER),
         ));
+        out.push(s);
+    }
+    for (id, reason) in NONE_REASONS {
+        let mut s = sample(
+            id,
+            GROWTH,
+            T_REPORT,
+            LEDGER,
+            at(9, 40),
+            with(
+                base("按渠道再拆一次？", "info", "Ledger：按渠道再拆一次？"),
+                json!({
+                    "blocks": [
+                        { "id": "more", "type": "buttons", "events": ["button.press"],
+                          "fallbackText": "按渠道拆开",
+                          "buttons": [{ "id": "split", "label": "按渠道拆开" }] }
+                    ]
+                }),
+            ),
+        );
+        s.events.push((1_000, acked_none(id, "more", reason)));
         out.push(s);
     }
     // A live event that did not get through: the bar goes back and the card says why.

@@ -11,8 +11,8 @@ use super::CoreProvider;
 use crate::data::{
     ChatProvider as _,
     page_host::{
-        ExpectMode, PageAck, PageBridge, PageDataError, PageEventDecl, PageEventKind, PageRefusal,
-        PageSendError, PageSignal,
+        ExpectMode, NoneReason, PageAck, PageBridge, PageDataError, PageEventDecl, PageEventKind,
+        PageRefusal, PageSendError, PageSignal,
     },
 };
 
@@ -77,6 +77,7 @@ pub(super) fn signal(u: &ClientUpdate) -> Option<PageSignal> {
                 Ok(a) => Ok(PageAck {
                     event_id: a.event_id.clone(),
                     mode: mode(a.expect.mode),
+                    reason: NoneReason::parse(a.expect.reason.as_deref()),
                 }),
                 Err(e) => Err(PageRefusal {
                     reason: e.reason.clone().unwrap_or_default(),

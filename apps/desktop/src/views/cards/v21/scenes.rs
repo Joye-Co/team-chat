@@ -107,6 +107,11 @@ pub const SCENES: &[Scene] = &[
         "Card v2.1 controls a keyboard walks: segmented tabs with five long labels, a metric that takes a press, 20 pickable bars folded to 12, and a sortable 40-row table to pick from folded to 10",
         Page::Controls
     ),
+    scene!(
+        "interact_none_reasons",
+        "INTERACT §6.2 expect.reason: a press nobody will respond to says why (停用, 电脑没开, 这次工作不接收, 操作太多, 没能开始) and nothing waits",
+        Page::NoneReasons
+    ),
     // v11/pb-cards
     scene!(
         "interact_notes",

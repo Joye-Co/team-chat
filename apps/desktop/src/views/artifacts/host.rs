@@ -34,11 +34,12 @@ use serde_json::{Value, json};
 
 use crate::{
     app::{Changes, Services},
-    copy::{fill, page_host as cp},
+    copy::{cards21 as cc, fill, page_host as cp},
     data::{
         Change, ChatProvider, ConnectionState, SessionState,
         page_host::{
-            ExpectMode, PageBridge, PageEventKind, PageRefusal, PageSendError, PageSignal,
+            ExpectMode, NoneReason, PageBridge, PageEventKind, PageRefusal, PageSendError,
+            PageSignal,
         },
     },
     theme,
@@ -93,8 +94,11 @@ pub enum Band {
     },
     /// The member is not connected: nothing went out.
     Offline { until: Instant },
-    /// The member cannot take more now (rate limit).
-    Busy { until: Instant },
+    /// The member cannot take this now (rate limit, or `expect.mode: none` and why).
+    Busy {
+        until: Instant,
+        reason: Option<NoneReason>,
+    },
     /// The member pushed new data.
     Pushed,
     /// The member answered an ask in the page.
@@ -786,6 +790,29 @@ fn reject_for(reason: &str) -> Reject {
 
 /// What the page gets for an event the server refused: the code of its reason, and the
 /// server's words (for `bad_payload`: which field broke the declared schema).
+/// The words after {name} 接不了 for `expect.reason`; a reason this version does not know
+/// (or none) says 稍后再试.
+pub fn none_why(reason: Option<NoneReason>) -> &'static str {
+    match reason {
+        Some(NoneReason::MemberInactive) => cc::NONE_MEMBER_INACTIVE,
+        Some(NoneReason::RunnerOff) => cc::NONE_RUNNER_OFF,
+        Some(NoneReason::RunExternal) => cc::NONE_RUN_EXTERNAL,
+        Some(NoneReason::RunLimit) => cc::NONE_RUN_LIMIT,
+        Some(NoneReason::RunFailed) => cc::NONE_RUN_FAILED,
+        None => cc::BUSY_LATER,
+    }
+}
+
+/// What a page's `ask` gets when nobody will answer it: try later only when later can help,
+/// with the words the page can show.
+fn none_failure(reason: Option<NoneReason>) -> Failure {
+    match reason {
+        None => Reject::RateLimited.into(),
+        Some(r) if r.retryable() => Failure::new(Reject::RateLimited, none_why(reason)),
+        Some(_) => Failure::new(Reject::Failed, none_why(reason)),
+    }
+}
+
 fn failure_for(refusal: &PageRefusal) -> Failure {
     Failure {
         reject: reject_for(&refusal.reason),
@@ -842,20 +869,21 @@ pub fn on_signal(signal: PageSignal, cx: &mut App) {
                             if let Some(p) = &p {
                                 forget(h, p);
                             }
-                            // `none`: the member takes no more now (a runner over its
-                            // limit, INTERACT §6.2): 现在接不了，稍后再试, not 不在线.
+                            // `none`: nobody will answer, so the page stops waiting and
+                            // says why (`expect.reason`), not 不在线.
                             let until = Instant::now() + OFFLINE_FOR;
-                            let (band, reject) = if ack.mode == ExpectMode::None {
-                                (Band::Busy { until }, Reject::RateLimited)
+                            let (band, failure) = if ack.mode == ExpectMode::None {
+                                let reason = ack.reason;
+                                (Band::Busy { until, reason }, none_failure(reason))
                             } else {
-                                (Band::Offline { until }, Reject::Offline)
+                                (Band::Offline { until }, Reject::Offline.into())
                             };
                             h.bands.insert(key, band);
                             if let Some(p) = p
                                 && let Some(id) = &p.reply_id
                                 && p.kind == PageEventKind::Ask
                             {
-                                finish(&p.page, p.version, id, Err(reject.into()), cx);
+                                finish(&p.page, p.version, id, Err(failure), cx);
                             }
                             refresh_at(OFFLINE_FOR, cx);
                         }
@@ -890,7 +918,10 @@ pub fn on_signal(signal: PageSignal, cx: &mut App) {
                     let until = Instant::now() + OFFLINE_FOR;
                     let band = match reject {
                         Reject::Offline => Some(Band::Offline { until }),
-                        Reject::RateLimited => Some(Band::Busy { until }),
+                        Reject::RateLimited => Some(Band::Busy {
+                            until,
+                            reason: None,
+                        }),
                         _ => None,
                     };
                     let h = host(cx);
@@ -1284,7 +1315,12 @@ pub fn band(artifact_id: &str, version: u32, cx: &App) -> Option<BandView> {
         Band::Offline { until } => {
             (now < *until).then(|| BandView::Failed(fill(cp::PAGE_OFFLINE, &n)))
         }
-        Band::Busy { until } => (now < *until).then(|| BandView::Failed(fill(cp::PAGE_BUSY, &n))),
+        Band::Busy { until, reason } => (now < *until).then(|| {
+            BandView::Failed(match reason {
+                Some(r) => fill(cp::PAGE_NONE, &[n[0], ("why", none_why(Some(*r)))]),
+                None => fill(cp::PAGE_BUSY, &n),
+            })
+        }),
         Band::Pushed => Some(BandView::Done(fill(cp::PAGE_PUSHED, &n))),
         Band::Answered => Some(BandView::Done(fill(cp::PAGE_ANSWERED, &n))),
     }
@@ -2345,6 +2381,7 @@ mod tests {
                 result: Ok(PageAck {
                     event_id: event.into(),
                     mode,
+                    reason: None,
                 }),
             },
             cx,
@@ -2524,6 +2561,71 @@ mod tests {
                 band(ART, 3, cx),
                 Some(BandView::Failed(fill(cp::PAGE_OFFLINE, &[("name", &name)])))
             );
+        });
+    }
+
+    #[gpui::test]
+    fn the_page_says_why_nobody_will_answer_and_stops_waiting(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            start_host(cx);
+            let name = author_name(host(cx).provider.clone().unwrap().as_ref(), ART, 3);
+            for (n, reason, reject, why) in [
+                (
+                    1,
+                    NoneReason::MemberInactive,
+                    Reject::Failed,
+                    cc::NONE_MEMBER_INACTIVE,
+                ),
+                (
+                    2,
+                    NoneReason::RunnerOff,
+                    Reject::Failed,
+                    cc::NONE_RUNNER_OFF,
+                ),
+                (
+                    3,
+                    NoneReason::RunExternal,
+                    Reject::Failed,
+                    cc::NONE_RUN_EXTERNAL,
+                ),
+                (
+                    4,
+                    NoneReason::RunLimit,
+                    Reject::RateLimited,
+                    cc::NONE_RUN_LIMIT,
+                ),
+                (
+                    5,
+                    NoneReason::RunFailed,
+                    Reject::RateLimited,
+                    cc::NONE_RUN_FAILED,
+                ),
+            ] {
+                let cid = ask(PageRef::Window(ART.into()), n, cx);
+                on_signal(
+                    PageSignal::Acked {
+                        client_event_id: cid,
+                        result: Ok(PageAck {
+                            event_id: format!("ev-{n}"),
+                            mode: ExpectMode::None,
+                            reason: Some(reason),
+                        }),
+                    },
+                    cx,
+                );
+                assert_eq!(finished(), vec![(json!(n), Err(Failure::new(reject, why)))]);
+                assert_eq!(
+                    band(ART, 3, cx),
+                    Some(BandView::Failed(fill(
+                        cp::PAGE_NONE,
+                        &[("name", &name), ("why", why)]
+                    ))),
+                );
+                assert!(
+                    host(cx).pending.is_empty(),
+                    "nothing waits after {reason:?}"
+                );
+            }
         });
     }
 

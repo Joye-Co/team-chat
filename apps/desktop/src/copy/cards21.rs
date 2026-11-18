@@ -241,4 +241,10 @@ crate::copy! {
     // rest in the muted line after it.
     BUSY_STATE = "{name} 接不了",
     BUSY_LATER = "稍后再试",
+    // Why the member cannot take a step (after {name} 接不了).
+    NONE_MEMBER_INACTIVE = "它已停用或不在这个群了",
+    NONE_RUNNER_OFF = "它的电脑现在没开",
+    NONE_RUN_EXTERNAL = "它这次工作不接收操作",
+    NONE_RUN_LIMIT = "操作有点多，稍后再试",
+    NONE_RUN_FAILED = "这次没能开始，再试一次",
 }
