@@ -2,7 +2,9 @@
 
 Read [docs/PRODUCT.md](docs/PRODUCT.md) (what we build, interface words, V1 bar),
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (layout, components, environments) and
-[docs/protocol.md](docs/protocol.md) (wire contract) before you change code.
+[docs/protocol.md](docs/protocol.md) (wire contract) before you change code. For daemon and
+MachineLink work also read [docs/machine-protocol.md](docs/machine-protocol.md) (the contract
+between the daemon and the server).
 
 - **Public repo**: this repo is public open source (AGPL-3.0). Never commit an operator's
   deployment details (server URLs, D1/Worker ids, member/group/bot ids, who runs which bot on
@@ -13,11 +15,14 @@ Read [docs/PRODUCT.md](docs/PRODUCT.md) (what we build, interface words, V1 bar)
   name in code or UI strings. Infra ids (Worker, D1, crate and package names) use neutral names
   and do not change when the product is renamed. After a rename, add the old name to
   `formerNames` in `product.json`: the Windows installer keeps it as a second name of the app's
-  program, because an installed app starts `<old name>.exe` after it updates itself. Server URLs are not in `product.json`: the app and the
-  scripts read them from `deploy/servers.json` in the ops checkout.
+  program, because an installed app starts `<old name>.exe` after it updates itself. Server URLs
+  are not in `product.json`: the app and the scripts read them from `deploy/servers.json` in the
+  ops checkout.
 - **Interface text**: Simplified Chinese, only from the desktop copy catalog, only the four
   product nouns 成员, 群, 话题, 产出 (see PRODUCT.md). Developer words stay in the developer view
-  and in logs. The catalog test enforces this.
+  and in logs. The catalog is `apps/desktop/src/copy/<area>.rs`; its test
+  (`cargo test -p desktop copy::`, in `apps/desktop/src/copy/mod.rs`) enforces this against the
+  "Developer words appear only" bullet of PRODUCT.md.
 - **Design bar**: first-class visual design is a V1 requirement, not polish for later. Build
   every UI element from gpui-component (the first-class GPUI component library: button, input,
   list, popover, menu, dialog, tooltip, badge, avatar, tabs, switch, notification and the rest),
@@ -32,18 +37,28 @@ Read [docs/PRODUCT.md](docs/PRODUCT.md) (what we build, interface words, V1 bar)
   and content. The Windows app is the same app: [docs/design/WINDOWS.md](docs/design/WINDOWS.md) lists
   the only differences from NATIVE.md there (title bar and window buttons, in-window menus and
   tray, Ctrl shortcuts, fonts, the SVG icon set, scrollbars, dialogs), and COMPLETENESS.md binds
-  both systems. Keep every color, size and duration in theme tokens. Look at your screens: capture
-  only the app's own window (`screencapture -l <window id> -o -x <png>`, or the app's
-  screenshot self-test when it exists), never the full screen, in light and dark mode, and read
-  the PNGs. Before merging UI work, check it with the vendored skills in
-  `docs/design/skills/emilkowalski/`: `emil-design-eng` (polish), `review-animations` (motion),
-  `break-ui` (worst-case data) and `apple-design` (macOS feel). Web pages, if any, use the
-  libraries in `pick-ui-library`.
+  both systems. Keep every color, size and duration in theme tokens (`tokens.rs`; motion durations
+  in `theme::motion`, `apps/desktop/src/theme.rs`). Look at your screens: capture only the app's
+  own window, never the full screen, in light and dark mode, and read the PNGs. The screenshot
+  self-test does this: `desktop --screenshot <dir> --theme both [--scenes a,b] [--worst-case]`
+  (`desktop --list-scenes` prints the scene names; add a scene in
+  `apps/desktop/src/selftest/scenes.rs` or the feature folder's `scenes.rs`; every flag is in
+  [apps/desktop/README.md](apps/desktop/README.md)). For a window no scene covers, use
+  `screencapture -l <window id> -o -x <png>`. On a Windows machine run
+  `scripts/windows-screenshots.sh <dir>`; CI captures nothing. Before merging UI work, check it
+  with the vendored skills in `docs/design/skills/emilkowalski/`: `emil-design-eng` (polish),
+  `review-animations` (motion), `break-ui` (worst-case data) and `apple-design` (macOS feel);
+  how to apply them in GPUI is in [docs/design/CHECKLIST.md](docs/design/CHECKLIST.md). Web
+  pages, if any, use the libraries in `pick-ui-library`.
 - **Protocol changes**: update `docs/protocol.md`, `packages/protocol`, `crates/chat-protocol`
   and `protocol/fixtures` in one commit; write fixtures in `packages/protocol/scripts` and run
-  `bun run gen:protocol`, never edit `protocol/fixtures` or `protocol/schema` by hand. Both
-  fixture tests must pass. Additive changes only:
-  new optional fields, new frame and event types. Never change the meaning of a released field.
+  `bun run gen:protocol`, never edit `protocol/fixtures` or `protocol/schema` by hand. Machine
+  frames (daemon and MachineLink) also update `docs/machine-protocol.md` and their golden frames:
+  edit `apps/daemon/tests/fixtures/machine/{up,down}.jsonl`, and `bun run gen:protocol` copies them
+  into `protocol/fixtures/machine/`. Both fixture tests must pass (`bun run test:protocol` and
+  `cargo test -p chat-protocol`), and `cargo test -p daemon` for machine frames. Additive changes
+  only: new optional fields, new frame and event types. Never change the meaning of a released
+  field.
 - **Server**: TypeScript on Cloudflare Workers. Validate every client frame and HTTP body with
   the Zod schemas at the boundary. Durable Objects use location hint `oc`. Each Durable Object
   migrates its own SQLite on first access with named migrations (a `migrations` table keyed by
@@ -54,10 +69,13 @@ Read [docs/PRODUCT.md](docs/PRODUCT.md) (what we build, interface words, V1 bar)
 - **Secrets**: never print, log or commit tokens, invite codes or secrets. Use
   `wrangler secret put` for Worker secrets (`-c wrangler.deploy.jsonc --env <env>` on a deployed
   env), files under `~/.config/team-chat/<env>/` (mode 600)
-  for local copies, and the macOS Keychain on the client. Redact them on every log path.
+  for local copies, and the macOS Keychain or the Windows Credential Manager on the client.
+  Redact them on every log path.
 - **Rust builds**: every worktree uses its own `CARGO_TARGET_DIR` and shares compiled
   dependencies through sccache: `export RUSTC_WRAPPER=sccache CARGO_BUILD_JOBS=6`. Run
-  `. "$HOME/.cargo/env"` first.
+  `. "$HOME/.cargo/env"` first. Unless your task gives another folder, use
+  `<worktree>/.tmp/target`, the default of `bun run dev:desktop`: then one folder serves every
+  build of the worktree and is the one to delete.
 - **Disk space**: a desktop debug target takes 10–30 GB, and parallel worktrees filled the
   whole disk once. For agent and check builds also set `CARGO_PROFILE_DEV_DEBUG=0
   CARGO_INCREMENTAL=0`. Before you start builds, check `df -h ~`: stop and report when less
@@ -75,8 +93,11 @@ Read [docs/PRODUCT.md](docs/PRODUCT.md) (what we build, interface words, V1 bar)
   nothing faked) on this worktree's local server with the sample team of
   `scripts/sandbox/seed.ts`, signed in, and reopens it on every save. When a feature needs data
   the samples lack, add it to `seed.ts` through the public API in the same change; CI seeds a
-  fresh server on every PR. Do not add features to the in-process fake (`src/fake/`): it only
-  feeds the screenshot self-tests.
+  fresh server on every PR. The in-process fake (`apps/desktop/src/fake.rs`, `fake_extra.rs` and
+  `apps/desktop/src/fake/`) only feeds the screenshot self-tests: give it the sample data a new
+  screenshot scene needs to draw, in the same change, and nothing more. Never implement server
+  behavior in it; it is not kept in step with every server feature. A scene can also start from
+  the real provider on a seeded cache (`Start::Core` in `scenes.rs`).
 - **Tests**: server with vitest and `@cloudflare/vitest-pool-workers` (`bun run test` in
   `server/`); Rust with `cargo test`; end-to-end with `tools/e2e` against `wrangler dev`, the
   e2e environment or staging. A change is done when its tests pass and you ran them.
