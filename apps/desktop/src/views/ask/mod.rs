@@ -666,7 +666,7 @@ impl AskPalette {
             .child(palette::meta(group, ink2))
             .child(div().flex_1())
             .child(palette::trailing(
-                palette::topic_status(p, me.as_deref(), topic),
+                palette::topic_status(p, me.as_deref(), topic, active),
                 Some(palette::time_text(topic.last_activity_at)),
                 active,
                 ink2,

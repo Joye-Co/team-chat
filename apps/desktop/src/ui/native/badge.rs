@@ -38,6 +38,7 @@ pub struct Badge {
     lead: Option<AnyElement>,
     dense: bool,
     max_w: Option<gpui::Pixels>,
+    on_fill: bool,
 }
 
 impl Badge {
@@ -48,7 +49,16 @@ impl Badge {
             lead: None,
             dense: false,
             max_w: None,
+            on_fill: false,
         }
+    }
+
+    /// A secondary badge on a surface that already has the muted fill (a
+    /// selected row, a group box): it draws on `background`, so its pill
+    /// still shows. Borderless, as every secondary badge (v18).
+    pub fn on_fill(mut self) -> Self {
+        self.on_fill = true;
+        self
     }
 
     pub fn variant(mut self, variant: BadgeVariant) -> Self {
@@ -100,6 +110,11 @@ impl RenderOnce for Badge {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = native_colors(cx);
         let (fill, edge, text) = badge_colors(self.variant, &k);
+        let fill = if self.on_fill && self.variant == BadgeVariant::Secondary {
+            k.content
+        } else {
+            fill
+        };
         div()
             .flex_none()
             .h(height::BADGE)
@@ -249,6 +264,7 @@ pub struct StatusBadge {
     label: SharedString,
     dense: bool,
     max_w: Option<gpui::Pixels>,
+    on_fill: bool,
 }
 
 impl StatusBadge {
@@ -258,7 +274,15 @@ impl StatusBadge {
             label: label.into(),
             dense: false,
             max_w: None,
+            on_fill: false,
         }
+    }
+
+    /// On a muted surface (a selected row, a group box): see
+    /// [`Badge::on_fill`].
+    pub fn on_fill(mut self, on_fill: bool) -> Self {
+        self.on_fill = on_fill;
+        self
     }
 
     pub fn dense(mut self) -> Self {
@@ -286,6 +310,9 @@ impl RenderOnce for StatusBadge {
         }
         if let Some(w) = self.max_w {
             b = b.max_w(w);
+        }
+        if self.on_fill {
+            b = b.on_fill();
         }
         b
     }

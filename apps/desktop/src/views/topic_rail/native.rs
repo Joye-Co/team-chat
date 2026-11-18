@@ -401,7 +401,8 @@ impl TopicRail {
             .child(
                 div()
                     .flex()
-                    .child(StatusBadge::new(badge, text).max_w(px(260.))),
+                    // On the group fill: the badge draws on `background`.
+                    .child(StatusBadge::new(badge, text).max_w(px(260.)).on_fill(true)),
             )
             .children(detail.map(|step| {
                 div()
