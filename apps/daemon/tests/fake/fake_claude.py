@@ -32,6 +32,8 @@ working folder (relayfail-<k>.done marks it); "relaystall:<k>" sleeps like "hang
 "readback" runs the read commands `chat-run member list`, `topic state` and `artifact list`
 (with "topic:<id>", of that topic), `artifact get --id <first listed>`, `decisions list` and, with "card:<message id>", `card get`,
 and writes each answer to readback.json.
+"pagedata" makes a page with data, pushes on, off and on again, adds a version with --keep-data
+and one without, reads each and writes the answers to pagedata.json.
 "groupsread find:<word>" runs `chat-run group list` and `chat-run search --query <word> --all`
 (every group the run may read) and writes both answers to groupsread.json.
 "stalenote" first clears a notification left from the session before like Claude Code after a
@@ -217,6 +219,25 @@ while True:
         if card:
             got["card"] = chat_run("card", "get", "--message", card.group(1))
         open("readback.json", "w").write(json.dumps(got))
+    if "pagedata" in cue:
+        os.makedirs("datapage", exist_ok=True)
+        open("datapage/index.html", "w").write("<!doctype html><p>data</p>")
+        open("on.json", "w").write('{"done": true}')
+        open("off.json", "w").write('{"done": false}')
+        made = chat_run("artifact", "create", "--title", "数据页", "--dir", "datapage", "--data", "on.json")
+        aid = ((made["out"] or {}).get("artifact") or {}).get("id", "none")
+        at = ["--artifact", aid]
+        push = lambda f: chat_run("artifact", "data", *at, "--version", "1", "--file", f)
+        got = {"create": made, "on": push("on.json"), "off": push("off.json")}
+        time.sleep(1.1)
+        got["onAgain"] = push("on.json")
+        got["read"] = chat_run("artifact", "data", *at, "--version", "1")
+        got["both"] = chat_run("artifact", "version", *at, "--dir", "datapage", "--keep-data", "--data", "on.json")
+        got["keep"] = chat_run("artifact", "version", *at, "--dir", "datapage", "--keep-data")
+        got["kept"] = chat_run("artifact", "data", *at, "--version", "2")
+        got["plain"] = chat_run("artifact", "version", *at, "--dir", "datapage")
+        got["empty"] = chat_run("artifact", "data", *at, "--version", "3")
+        open("pagedata.json", "w").write(json.dumps(got))
     if "groupsread" in cue:
         word = re.search(r"find:(\S+)", cue)
         got = {"groups": chat_run("group", "list"),
