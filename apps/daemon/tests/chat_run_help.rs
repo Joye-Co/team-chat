@@ -1,5 +1,5 @@
 //! The help a member needs before it posts runs from the `chat-run` binary alone, without a
-//! daemon: the card schema in pieces, working examples, the check, the page guide and the
+//! daemon: the card schema in pieces, ready examples, the check, the page guide and the
 //! starter page.
 
 use std::process::Command;

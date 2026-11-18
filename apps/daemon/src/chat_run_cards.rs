@@ -1,8 +1,8 @@
 //! What `chat-run` knows about cards without the daemon: the schema in pieces (`card schema`),
-//! working cards (`card example`), a check before posting (`card check`), and what `card post`
+//! ready cards (`card example`), a check before posting (`card check`), and what `card post`
 //! fills in. The server stays the authority: nothing here refuses a card it would take.
 
-use chat_protocol::card2::{CardV2, CardV2Block, MAX_PATCH_OPS, PatchOp};
+use chat_protocol::card2::{CARD_CATALOG_21, CardV2, CardV2Block, MAX_PATCH_OPS, PatchOp};
 use serde_json::{Map, Value, json};
 use std::sync::OnceLock;
 
@@ -222,7 +222,7 @@ fallbackText). After the type: its required fields.\n",
     }
     out.push_str(
         "\n`chat-run card schema --block <type>` prints one block's JSON Schema, `--ops` the patch \
-ops of ops.json, `--full` the whole JSON Schema. `chat-run card example` lists working cards; \
+ops of ops.json, `--full` the whole JSON Schema. `chat-run card example` lists ready cards; \
 `chat-run card check --file card.json` checks yours before you post it.",
     );
     out
@@ -249,7 +249,7 @@ pub fn full_schema() -> String {
 // card example
 // ---------------------------------------------------------------------------------------------
 
-/// One working card (or ops.json): its kind, what it shows and the JSON text. The files are
+/// One ready card (or ops.json): its kind, what it shows and the JSON text. The files are
 /// fixtures of the protocol too (`packages/protocol/scripts/fixtures-examples.ts`).
 pub struct Example {
     pub kind: &'static str,
@@ -303,7 +303,8 @@ pub const EXAMPLES: &[Example] = &[
 /// `chat-run card example [kind]`: the list of kinds, or one example's JSON.
 pub fn example(kind: Option<&str>) -> Result<String, String> {
     let Some(kind) = kind else {
-        let mut out = String::from("chat-run card example <kind> prints a working card:\n");
+        let mut out =
+            String::from("chat-run card example <kind> prints a card that passes the check:\n");
         for e in EXAMPLES {
             out.push_str(&format!("  {}: {}\n", e.kind, e.about));
         }
@@ -337,7 +338,8 @@ pub fn example(kind: Option<&str>) -> Result<String, String> {
 const MAX_FALLBACK_CHARS: usize = 4000;
 
 /// Fills in what a card file may leave out, and says what it did that the author should know:
-/// `rev` (the server sets 1 on post anyway), `fallback` (the title, the summary and the first
+/// `rev` (the server sets 1 on post anyway), `catalog` (`tc.card/2.1` when a block needs it:
+/// without it the server refuses the card), `fallback` (the title, the summary and the first
 /// text block) and, on an `ask` card without `ask`, `ask: {"from": ["requester"]}` (without it
 /// nobody is asked and the topic does not wait).
 pub fn complete(card: &mut Value) -> Vec<String> {
@@ -347,6 +349,15 @@ pub fn complete(card: &mut Value) -> Vec<String> {
     };
     if !m.contains_key("rev") {
         m.insert("rev".into(), json!(1));
+    }
+    if !m.contains_key("catalog") {
+        // A block that does not parse is refused anyway; the catalog is filled in once it does.
+        let is_21 =
+            |b: &Value| serde_json::from_value::<CardV2Block>(b.clone()).is_ok_and(|b| b.is_21());
+        let blocks = m.get("blocks").and_then(Value::as_array);
+        if blocks.into_iter().flatten().any(is_21) {
+            m.insert("catalog".into(), json!(CARD_CATALOG_21));
+        }
     }
     if !m.contains_key("fallback") {
         let first_text = m
@@ -1219,6 +1230,25 @@ mod tests {
         assert!(complete(&mut card).is_empty());
         assert!(card.get("ask").is_none());
         assert_eq!(card["fallback"].as_str().unwrap().chars().count(), 4000);
+        // A 2.0 card gets no catalog.
+        assert!(card.get("catalog").is_none());
+        // A card with a block of the 2.1 catalog gets it (without it the server refuses the
+        // card); a catalog the file names stays.
+        let confirm = json!({ "type": "confirm", "id": "ok", "label": "合并？", "yes": "合并", "no": "先不", "fallbackText": "合并？" });
+        let mut card = json!({ "v": 2, "intent": "ask", "title": "t", "blocks": [confirm] });
+        complete(&mut card);
+        assert_eq!(card["catalog"], CARD_CATALOG_21);
+        let parsed: CardV2 = serde_json::from_value(card.clone()).unwrap();
+        assert_eq!(parsed.problem(), None);
+        let mut card = json!({ "v": 2, "catalog": "tc.card/2.0", "intent": "info", "title": "t", "blocks": [confirm] });
+        complete(&mut card);
+        assert_eq!(card["catalog"], "tc.card/2.0");
+        assert!(
+            check_card(&card)
+                .problems
+                .iter()
+                .any(|p| p.contains("needs catalog tc.card/2.1"))
+        );
     }
 
     #[test]
@@ -1331,7 +1361,7 @@ mod tests {
 
         // The first write rule over the whole card, with the server's reason.
         let c = check_card(&json!({
-            "v": 2, "intent": "info", "title": "t",
+            "v": 2, "catalog": "tc.card/2.0", "intent": "info", "title": "t",
             "blocks": [{ "type": "rating", "id": "r", "label": "l", "fallbackText": "f", "max": 5 }],
         }));
         assert_eq!(

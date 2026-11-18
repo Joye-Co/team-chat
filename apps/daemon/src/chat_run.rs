@@ -97,7 +97,7 @@ so post no other progress. Post no `done` card: yours would replace the result \
 card made from your last message, with its links to your pull requests and 产出. Blocks, by use: \
 {blocks}. A chart, a table or `buttons` that lists `events` \
 sends you what people press, and you patch the card. `chat-run card example` \
-lists working cards, `chat-run card schema --block <type>` prints a block's fields, and `chat-run card check --file card.json` names every wrong block before you post. Change a card with `chat-run card set \
+lists cards to start from, `chat-run card schema --block <type>` prints a block's fields, and `chat-run card check --file card.json` names every wrong block before you post. Change a card with `chat-run card set \
 --message <id> --block <blockId> --props <json>`, `chat-run card update --message <id> --status \
 executing|failed|none` or `chat-run card patch --message <id> --base-rev <rev> --ops ops.json`; `--cause <eventId>` names the event a post or a change answers. \
 `chat-run resolve --event <eventId> --result ignored|failed` closes an event you do not act on. \
@@ -109,12 +109,12 @@ your working folder and run `chat-run artifact create --title <title> --dir <fol
 <one sentence on what it shows>` (or `--file <path>`; `chat-run artifact version --artifact <id> \
 --dir <folder>` adds a version; `--metrics metrics.json` adds key numbers to the preview). \
 `--dir` takes every file of the folder: give it a folder that holds only the 产出. `chat-run file \
-upload --file <path>` uploads one file. A page opens beside the conversation in a pane about 400 \
-pt wide: nothing may be cut off at that width. It runs \
+upload --file <path>` uploads one file. A page opens in a pane about 400 pt wide: nothing may be \
+cut off. It runs \
 in a sandbox with no network (every script, style, font and picture is a file of the folder), \
 and the app gives it its font and colors in both themes: set none for plain content. An `embed` \
 block shows a page inside a card. For a two-way page run `chat-run artifact guide` first \
-(`chat-run artifact example` writes a starter). Answer its events \
+(`chat-run artifact example` prints a starter). Answer its events \
 with `chat-run artifact data --artifact <id> --version <n> --file data.json` (the whole new \
 state, to every open copy; without `--file` it reads the data) or, for an ask, `chat-run \
 artifact reply --event <eventId> --file reply.json` (or `--decline <text>`).
@@ -1039,11 +1039,11 @@ pub const USAGE: &str = "usage:
   chat-run memory search --query <text> [--limit <1-50>]
   chat-run report --state done|blocked|waiting --text <text, at most 2000 characters>
 
-card.json is a Card v2 document (or {\"cardV2\": ..., \"body\": ...}). `rev` and `fallback` may
-be left out on post, and an `ask` card without `ask` asks the requester. card schema, card
+card.json is a Card v2 document (or {\"cardV2\": ..., \"body\": ...}). `rev`, `fallback` and
+`catalog` may be left out on post, and an `ask` card without `ask` asks the requester. card schema, card
 example and card check need no daemon. card schema prints the card's fields and one line per
 block type; --block <type> one block's JSON Schema, --ops the schema of ops.json, --full the
-whole JSON Schema. card example lists working cards and prints one. card check lists what the
+whole JSON Schema. card example lists ready cards to start from and prints one. card check lists what the
 server would refuse (every wrong block, then the first rule the whole card breaks), the fields
 it would drop without a word and what the card shows; card post and card patch run the same
 check and print its warnings with the result.
@@ -3133,9 +3133,9 @@ make the ops for what it holds now and give its rev as --base-rev"
         }
         assert!(named >= 30, "{named}");
         // It is read on every run: the form rules were paid for by cutting, not by length. The
-        // note before them had about 5 470 characters; a quarter more is the budget.
+        // note before them had 5 472 characters; a quarter more (6 840) is the budget.
         let chars = n.chars().count();
-        assert!(chars <= 6_900, "the note has {chars} characters");
+        assert!(chars <= 6_840, "the note has {chars} characters");
     }
 
     #[test]

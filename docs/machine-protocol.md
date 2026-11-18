@@ -664,7 +664,7 @@ What a CLI needs to write a card is in `chat-run` itself, answered without the d
 | `chat-run card schema --block <type>` | One block's JSON Schema, complete in itself (1 to 3 KB). |
 | `chat-run card schema --ops` | The JSON Schema of `ops.json` (`protocol/schema/PatchOp.schema.json`). |
 | `chat-run card schema --full` | The whole JSON Schema of a Card v2 document on one line (about 40 KB). |
-| `chat-run card example [<kind>]` | The kinds, or one working card: `ask`, `form`, `plan`, `review`, `data`, `evidence`, `progress`, `live`; `patch` is an `ops.json` for the `progress` card. |
+| `chat-run card example [<kind>]` | The kinds, or one ready card: `ask`, `form`, `plan`, `review`, `data`, `evidence`, `progress`, `live`; `patch` is an `ops.json` for the `progress` card. |
 | `chat-run card check --file card.json` | Every problem the server would refuse (each block is checked by itself, then the card as a whole), the warnings below and an outline of what the card shows. Exit 1 when there is a problem. `--ops ops.json` checks patch ops. |
 
 The schema is `protocol/schema/CardV2.schema.json`, made from the protocol package's Zod with
@@ -676,7 +676,8 @@ server checks the write rules too. The examples are `apps/daemon/examples/cards/
 is a fixture of the protocol (`protocol/fixtures/entities/card-v2-example-*.json`,
 `client/card.patch-example.json`), so the Zod and the Rust fixture tests take every example.
 
-`card post` fills in what the file leaves out: `rev` (the server sets 1 anyway), `fallback` (the
+`card post` fills in what the file leaves out: `rev` (the server sets 1 anyway), `catalog`
+(`tc.card/2.1` when a block of that catalog is in the card), `fallback` (the
 title, the summary and the first text block, at most 4000 characters) and, on a card with intent
 `ask` and no `ask`, `ask: { "from": ["requester"] }` (without `ask` nobody is asked and the topic
 does not wait). Both forms of the file are handled: the card itself, and `{ cardV2, body, … }`.
