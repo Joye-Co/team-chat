@@ -14,7 +14,7 @@ use std::collections::HashSet;
 use gpui::{
     App, AppContext as _, Context, InteractiveElement as _, IntoElement, ParentElement, Render,
     SharedString, StatefulInteractiveElement as _, Styled, Window, div,
-    prelude::FluentBuilder as _,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::{WindowExt as _, dialog::Dialog};
 
@@ -35,6 +35,9 @@ const SKIPPED_SECTIONS: [&str; 1] = ["怎么更新"];
 
 /// How many items the 已更新到 sheet shows in full; the rest are one line.
 const HIGHLIGHTS: usize = 3;
+/// The longest headline (in characters) the What's New sheet centers: about
+/// two lines of 14 pt text at the sheet's width. A longer one is a paragraph.
+const HEADLINE_CENTERED_MAX: usize = 64;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Notes {
@@ -292,7 +295,8 @@ fn open_sheet(
             build,
         ),
         Place::Main => window.open_dialog(cx, move |dialog, window, cx| {
-            build(native_sheet(dialog, width, cx), window, cx)
+            // SheetLayout's own 24 is the only side inset (§2.9).
+            build(native_sheet(dialog, width, cx).px(px(0.)), window, cx)
         }),
     }
 }
@@ -352,13 +356,36 @@ fn sections(notes: &Notes, cx: &App) -> gpui::Div {
 }
 
 /// A scrolling body: header and buttons stay, the list scrolls (§2.9).
-fn scroll(id: &'static str, el: impl IntoElement) -> gpui::Stateful<gpui::Div> {
+/// While it overflows its scrollbar shows at rest, so a row cut at the
+/// bottom edge reads as more below. The well reaches 12 past the content
+/// column on both sides: the scrollbar's lane on the right, and room for a
+/// row's hover fill on the left; the content keeps the sheet's edges.
+fn scroll(id: &'static str, handle: &gpui::ScrollHandle, el: impl IntoElement) -> gpui::Div {
     div()
-        .id(id)
-        .w_full()
-        .max_h(metrics::SHEET_WIDE * 0.7)
-        .overflow_y_scroll()
-        .child(el)
+        .relative()
+        .mx(-space::S12)
+        .child(
+            div()
+                .id(id)
+                .w_full()
+                .max_h(metrics::SHEET_WIDE * 0.7)
+                .px(space::S12)
+                .overflow_y_scroll()
+                .track_scroll(handle)
+                .child(el),
+        )
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .right_0()
+                .bottom_0()
+                .w(space::S12)
+                .child(
+                    gpui_component::scroll::Scrollbar::vertical(handle)
+                        .mode(gpui_component::scroll::ScrollbarMode::Always),
+                ),
+        )
 }
 
 /// 「{version} 更新内容」 of an update that is not installed yet. Its buttons
@@ -370,6 +397,7 @@ pub fn open_notes(
     cx: &mut App,
 ) {
     let notes = Notes::parse(&info.version, &info.notes);
+    let scroll_handle = gpui::ScrollHandle::new();
     open_sheet(place, SheetWidth::List, window, cx, move |dialog, _, cx| {
         let k = native_colors(cx);
         let v = info.version.clone();
@@ -463,7 +491,7 @@ pub fn open_notes(
         dialog.on_ok(|_, _, _| true).child(
             SheetLayout::new(fill(u::NOTES_TITLE, &[("version", &v)]))
                 .explanation(explanation)
-                .body(scroll("update-notes", body))
+                .body(scroll("update-notes", &scroll_handle, body))
                 .when(status, |l| l.status(u::NOTES_FOOTER))
                 .buttons(buttons),
         )
@@ -475,49 +503,59 @@ pub fn open_notes(
 /// title over its text, no box), the rest as one line, one wide 好, and
 /// 查看全部更新记录 as a link under it.
 pub fn open_whats_new(notes: Notes, place: Place, window: &mut Window, cx: &mut App) {
+    let scroll_handle = gpui::ScrollHandle::new();
     open_sheet(place, SheetWidth::Form, window, cx, move |dialog, _, cx| {
         let k = native_colors(cx);
         let shown: Vec<&Item> = notes.items().take(HIGHLIGHTS).collect();
         let rest: Vec<&str> = notes.items().skip(HIGHLIGHTS).map(Item::name).collect();
-        let list = div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap(space::S20)
-            .children(shown.into_iter().map(|it| {
+        let list =
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(space::S20)
+                .children(shown.into_iter().map(|it| {
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(space::S4)
+                        .when_some(it.title.clone(), |d, t| {
+                            d.child(div().n_headline().text_color(k.label).child(t))
+                        })
+                        .when(!it.body.is_empty(), |d| {
+                            d.child(
+                                div()
+                                    .n_body()
+                                    .text_color(if it.title.is_some() {
+                                        k.secondary
+                                    } else {
+                                        k.label
+                                    })
+                                    .child(it.body.clone()),
+                            )
+                        })
+                }));
+        // The closing line sits under the well, never cut by it: two
+        // lines at most, ending in an ellipsis (查看全部更新记录 has the rest).
+        let more = (!rest.is_empty()).then(|| {
+            div().pt(space::S16).w_full().child(
                 div()
                     .w_full()
-                    .flex()
-                    .flex_col()
-                    .gap(space::S4)
-                    .when_some(it.title.clone(), |d, t| {
-                        d.child(div().n_headline().text_color(k.label).child(t))
-                    })
-                    .when(!it.body.is_empty(), |d| {
-                        d.child(
-                            div()
-                                .n_body()
-                                .text_color(if it.title.is_some() {
-                                    k.secondary
-                                } else {
-                                    k.label
-                                })
-                                .child(it.body.clone()),
-                        )
-                    })
-            }))
-            .when(!rest.is_empty(), |d| {
-                d.child(
-                    div()
-                        .n_footnote()
-                        .text_color(k.tertiary)
-                        .child(fill(u::WHATS_NEW_MORE, &[("titles", &rest.join("、"))])),
-                )
-            });
+                    .n_footnote()
+                    .text_color(k.tertiary)
+                    .line_clamp(2)
+                    .text_ellipsis()
+                    .child(fill(u::WHATS_NEW_MORE, &[("titles", &rest.join("、"))])),
+            )
+        });
+        // A headline of more than two lines reads as a paragraph: set it
+        // on the left edge like the items under it, not centered.
+        let long_headline = notes.headline.chars().count() > HEADLINE_CENTERED_MAX;
         dialog.on_ok(|_, _, _| true).child(
             div()
                 .w_full()
-                .px(space::S32)
+                .px(metrics::SHEET_PAD)
                 .pt(space::S32)
                 .pb(space::S24)
                 .flex()
@@ -536,18 +574,18 @@ pub fn open_whats_new(notes: Notes, place: Place, window: &mut Window, cx: &mut 
                         div()
                             .pt(space::S6)
                             .w_full()
-                            .text_center()
+                            .when(!long_headline, |d| d.text_center())
                             .n_body()
                             .text_color(k.secondary)
                             .child(notes.headline.clone()),
                     )
                 })
-                .child(
-                    div()
-                        .pt(space::S24)
-                        .w_full()
-                        .child(scroll("whats-new", list)),
-                )
+                .child(div().pt(space::S24).w_full().child(scroll(
+                    "whats-new",
+                    &scroll_handle,
+                    list,
+                )))
+                .children(more)
                 .child(
                     div().pt(space::S32).w_full().child(
                         push_button(
@@ -624,7 +662,9 @@ impl Render for Changelog {
             let hover = k.row_hover;
             let header = div()
                 .id(id)
-                .w_full()
+                // The hover fill overhangs by its padding, so the version
+                // and the group box keep the sheet's content edges (§2.9).
+                .mx(-space::S8)
                 .px(space::S8)
                 .py(space::S8)
                 .rounded(crate::ui::native::tokens::radius::CONTROL)
@@ -695,8 +735,7 @@ impl Render for Changelog {
                 .when(open && notes.count() > 0, |d| {
                     d.child(
                         div()
-                            .pl(space::S8 + space::S48 * 2. + space::S12)
-                            .pr(space::S8)
+                            .pl(space::S48 * 2. + space::S12)
                             .pt(space::S8)
                             .child(sections(notes, cx)),
                     )
@@ -708,6 +747,7 @@ impl Render for Changelog {
 
 pub fn open_changelog(place: Place, window: &mut Window, cx: &mut App) {
     let list = cx.new(|_| Changelog::new());
+    let scroll_handle = gpui::ScrollHandle::new();
     open_sheet(place, SheetWidth::List, window, cx, move |dialog, _, cx| {
         let n = list.read(cx).versions.len();
         dialog.on_ok(|_, _, _| true).child(
@@ -717,7 +757,7 @@ pub fn open_changelog(place: Place, window: &mut Window, cx: &mut App) {
                     fill(u::CHANGELOG_COUNT, &[("n", &n.to_string())]),
                     u::CHANGELOG_DESCRIPTION
                 ))
-                .body(scroll("changelog", list.clone()))
+                .body(scroll("changelog", &scroll_handle, list.clone()))
                 .buttons([push_button(
                     "changelog-ok",
                     u::NOTES_OK,

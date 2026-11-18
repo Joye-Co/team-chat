@@ -724,32 +724,34 @@ impl LoginView {
                 .into_any_element(),
             // A long host is cut in the middle (both ends name it), with the
             // full host in a tooltip (2.21).
+            // The email link stays first, as without a custom server. Both
+            // ends of the row are links with the same padding, so its ink
+            // is centered on the column.
             Some(host) => div()
                 .max_w_full()
                 .min_w_0()
                 .flex()
                 .items_center()
                 .justify_center()
-                .gap(space::S4)
-                .n_body()
-                .text_color(k.secondary)
+                .gap(space::S16)
+                .child(email)
                 .child(
-                    Sym::MacMini
-                        .icon(SymSize::INLINE_SMALL)
-                        .text_color(k.secondary),
+                    div()
+                        .min_w_0()
+                        .flex()
+                        .items_center()
+                        .gap(space::S4)
+                        .n_body()
+                        .text_color(k.secondary)
+                        .child(Sym::Server.icon(SymSize::INLINE).text_color(k.secondary))
+                        .child(
+                            crate::ui::truncate::TruncText::new(host)
+                                .id("login-host")
+                                .middle()
+                                .min_w_0(),
+                        )
+                        .child(link("login-server-change", l::CHANGE_SERVER, cx).on_click(open)),
                 )
-                .child(
-                    crate::ui::truncate::TruncText::new(host)
-                        .id("login-host")
-                        .middle()
-                        .min_w_0(),
-                )
-                .child(
-                    link("login-server-change", l::CHANGE_SERVER, cx)
-                        .text_color(k.label)
-                        .on_click(open),
-                )
-                .child(div().ml(space::S12).child(email))
                 .into_any_element(),
         };
         // 添加账号…: 取消 goes back to the account that stays signed in.
@@ -854,23 +856,16 @@ impl Render for LoginView {
         )
         .on_click(cx.listener(|this, _, window, cx| this.continue_(window, cx)));
         let link = self.render_link_row(server_step, custom.filter(|_| !server_step), cx);
-        let (title, description): (&'static str, SharedString) = if server_step {
-            (l::SERVER_TITLE, l::SERVER_LEAD.into())
+        let (title, description): (&'static str, gpui::AnyElement) = if server_step {
+            (l::SERVER_TITLE, l::SERVER_LEAD.into_any_element())
         } else {
             match step {
                 Step::Invite if self.services.provider.adding_account() => {
-                    (l::ADD_TITLE, l::ADD_LEAD.into())
+                    (l::ADD_TITLE, l::ADD_LEAD.into_any_element())
                 }
-                Step::Invite => (l::WELCOME, l::LEAD.into()),
-                Step::Email => (l::EMAIL_SIGN_IN, l::EMAIL_LEAD.into()),
-                Step::EmailCode => (
-                    l::EMAIL_CODE_TITLE,
-                    crate::copy::fill(
-                        l::EMAIL_CODE_LEAD,
-                        &[("email", &short_email(&self.sent_to))],
-                    )
-                    .into(),
-                ),
+                Step::Invite => (l::WELCOME, l::LEAD.into_any_element()),
+                Step::Email => (l::EMAIL_SIGN_IN, l::EMAIL_LEAD.into_any_element()),
+                Step::EmailCode => (l::EMAIL_CODE_TITLE, code_lead(&self.sent_to)),
             }
         };
         let column = div()
@@ -890,16 +885,22 @@ impl Render for LoginView {
             .child(
                 div()
                     .mt(space::S4)
+                    .w_full()
                     .n_body()
                     .text_color(k.secondary)
                     .text_center()
                     .child(description),
             )
+            // Every step keeps the slot of the tallest field (the code
+            // cells), so the column has one height and only the field
+            // changes from step to step.
             .child(
                 div()
                     .mt(space::S24)
                     .w_full()
+                    .h(crate::ui::native::metrics::CODE_SLOT.1)
                     .flex()
+                    .items_center()
                     .justify_center()
                     .child(field),
             )
@@ -969,8 +970,33 @@ impl Render for LoginView {
     }
 }
 
-/// A long address cut in the middle (both ends name it), so the lead stays
-/// at two lines.
+/// The lead of the code step on one line (§2.20): the words keep their
+/// width and the address between them is cut in the middle when it is long,
+/// with the whole address in a tooltip.
+fn code_lead(email: &str) -> gpui::AnyElement {
+    let (before, after) = l::EMAIL_CODE_LEAD
+        .split_once("{email}")
+        .unwrap_or((l::EMAIL_CODE_LEAD, ""));
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .justify_center()
+        .whitespace_nowrap()
+        .child(div().flex_none().child(before))
+        .child(
+            crate::ui::truncate::TruncText::new(short_email(email))
+                .id("login-sent-to")
+                .middle()
+                .tip(email.to_string())
+                .min_w_0(),
+        )
+        .child(div().flex_none().child(after))
+        .into_any_element()
+}
+
+/// A long address cut in the middle (both ends name it), so it never
+/// takes the whole line.
 fn short_email(email: &str) -> String {
     const MAX: usize = 32;
     let chars: Vec<char> = email.chars().collect();

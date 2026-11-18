@@ -489,7 +489,7 @@ pub fn update_card(
                 fill(u::CARD_MANUAL_DETAIL, &[("product", product)]),
             )
         }
-        Phase::Failed { .. } => {
+        Phase::Failed { failure, .. } => {
             buttons.push(
                 button("update-card-retry", u::RETRY.into(), PushStyle::Default, cx)
                     .on_click(move |_, _, cx| up.update(cx, |u, cx| u.start_update(cx))),
@@ -503,7 +503,14 @@ pub fn update_card(
                 Sym::Alert,
                 k.red,
                 fill(o::UPDATE_FAILED_TITLE, &[("version", v)]),
-                banner_text(phase).unwrap_or_default(),
+                // The title says it failed: the line says why and what to do.
+                match failure {
+                    Failure::Check => u::CARD_FAILED_CHECK_DETAIL,
+                    Failure::Download => u::CARD_FAILED_DOWNLOAD_DETAIL,
+                    Failure::Checksum => u::CARD_FAILED_CHECKSUM_DETAIL,
+                    Failure::Install => u::CARD_FAILED_INSTALL_DETAIL,
+                }
+                .to_string(),
             )
         }
         _ => return None,
@@ -533,6 +540,9 @@ pub fn update_card(
             .child(
                 card_surface(cx)
                     .rounded(radius::CONTAINER)
+                    // The dark sidebar already has the card's fill: lift the
+                    // card one step there, so it reads as a surface.
+                    .when(crate::theme::is_dark(cx), |d| d.bg(k.group))
                     .p(space::S12)
                     .flex()
                     .flex_col()

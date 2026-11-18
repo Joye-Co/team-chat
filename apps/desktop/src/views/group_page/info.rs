@@ -99,17 +99,19 @@ pub fn sections(
         .id("group-info")
         .size_full()
         .overflow_y_scroll()
+        // The settings look of the 话题 inspector (D21): grouped sections,
+        // the same insets and gap, so the column keeps one visual system.
+        .px(crate::ui::native::metrics::INSPECTOR_PAD)
+        .pt(tsp::S16)
         .pb(tsp::S24)
         .flex()
         .flex_col()
-        // Pull the first GroupLabel up: the section's own 16 top sits under
-        // the pane's header band.
-        .child(div().flex_none().mt(-tsp::S12));
+        .gap(tsp::S20);
 
     // 成员: the name keeps its room; the 岗位 truncates first, and both
     // show in full in the tooltip.
     let members = listed_members(services, g);
-    let mut sec = InspectorSection::new("group-ins-members", c::GROUP_PAGE_MEMBERS_TITLE);
+    let mut sec = InspectorSection::new("group-ins-members", c::GROUP_PAGE_MEMBERS_TITLE).grouped();
     let group = p.groups().into_iter().find(|x| x.id == g);
     if let Some(group) = group.filter(|x| x.kind == GroupKind::Group && !loading && !failed) {
         let services = services.clone();
@@ -214,7 +216,7 @@ pub fn sections(
         p.group_decisions(g)
     };
     let now = p.clock_now();
-    let mut sec = InspectorSection::new("group-ins-decisions", c::GROUP_PAGE_DECISIONS);
+    let mut sec = InspectorSection::new("group-ins-decisions", c::GROUP_PAGE_DECISIONS).grouped();
     if p.can_record_decision(g) && !loading && !failed {
         let services = services.clone();
         let group = g.to_string();
@@ -301,7 +303,8 @@ pub fn sections(
     } else {
         p.group_artifacts(g).into_iter().take(3).collect()
     };
-    let mut sec = InspectorSection::new("group-ins-outputs", c::GROUP_PAGE_RECENT_OUTPUTS);
+    let mut sec =
+        InspectorSection::new("group-ins-outputs", c::GROUP_PAGE_RECENT_OUTPUTS).grouped();
     if loading {
         sec = sec.row(page::skeleton_rows(
             "group-sk-o",
@@ -395,7 +398,7 @@ pub fn sections(
             // a member works (A5).
             .max_by_key(|r| (r.machine_name.is_some(), r.updated_at))
     };
-    let mut sec = InspectorSection::new("group-ins-where", c::GROUP_PAGE_WHERE);
+    let mut sec = InspectorSection::new("group-ins-where", c::GROUP_PAGE_WHERE).grouped();
     match run {
         None if loading => {
             sec = sec.row(page::skeleton_rows(

@@ -24,7 +24,6 @@ crate::copy! {
     CHECK_FAILED = "检查更新失败，请稍后再试",
     UPDATE_TO = "更新到 {version}",
     BANNER_DOWNLOADING = "正在下载 {version}",
-    BANNER_MANUAL = "需要手动安装新版本",
     // --- v14/t4 update ---
     VERSION_TITLE = "版本 {version}",
     // The detail under 版本 {current}: the title already names the current one.
@@ -72,4 +71,9 @@ crate::copy! {
     // Under 版本 {current} in 设置: which version is on its way.
     DOWNLOAD_PROGRESS_OF = "正在下载 {version} · {percent}% · {done} / {total} MB",
     // --- end product updates ---
+    // The sidebar card of a failed update: the cause and the next step.
+    CARD_FAILED_CHECK_DETAIL = "没能检查更新，检查网络后重试。",
+    CARD_FAILED_DOWNLOAD_DETAIL = "下载中断了，检查网络后重试。",
+    CARD_FAILED_CHECKSUM_DETAIL = "下载的文件不完整，已删除，请重试。",
+    CARD_FAILED_INSTALL_DETAIL = "没能装上新版本，请重试。",
 }

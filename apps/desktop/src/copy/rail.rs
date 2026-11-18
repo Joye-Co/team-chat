@@ -77,4 +77,6 @@ crate::copy! {
     ACCOUNT_SIGN_OUT_TITLE = "退出这个账号？",
     ACCOUNT_SIGN_OUT_BODY = crate::copy::per_system("退出后，这台 Mac 不再收到这个账号的消息。其他账号仍保持登录。", "退出后，这台电脑不再收到这个账号的消息。其他账号仍保持登录。"),
     ACCOUNT_SIGN_OUT_CONFIRM = "退出",
+    // The sidebar's one line while the server is unreachable and a 群 has no cached 话题.
+    RAIL_OFFLINE_TOPICS = "连上后显示话题",
 }

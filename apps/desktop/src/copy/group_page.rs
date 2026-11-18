@@ -78,4 +78,8 @@ crate::copy! {
     GROUP_PAGE_SECTION_QUEUED = "排队",
     GROUP_PAGE_UNKNOWN_MACHINE = "未知电脑",
     // --- end v16/p-pages ---
+    // The word of the toolbar item that opens the 群's chat (D20).
+    GROUP_PAGE_CHAT = "群聊",
+    // The field of the 记一条 sheet.
+    GROUP_PAGE_RECORD_LABEL = "决定",
 }

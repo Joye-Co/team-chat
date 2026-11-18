@@ -659,8 +659,10 @@ impl NativeKit {
                 ),
         );
         let inspector = section(t::SEC_INSPECTOR, &k).child(
+            // Sized to its rows, so the pane's edge covers the last one.
             inspector_column(cx)
-                .h(px(330.))
+                .h_auto()
+                .pb(super::tokens::space::S16)
                 .child(
                     InspectorSection::new("ki-owner", t::INS_OWNER).row(label_value(
                         t::INS_MEMBER,
@@ -686,7 +688,7 @@ impl NativeKit {
                 .child(
                     InspectorSection::new("ki-cost", t::INS_COST)
                         .row(label_value(t::INS_TIME, t::INS_TIME_VALUE, cx))
-                        .row(label_value(t::INS_COST, t::INS_COST_VALUE, cx))
+                        .row(label_value(t::INS_COST_ROW, t::INS_COST_VALUE, cx))
                         .row(div().pt(px(6.)).child(super::progress(0.44, cx))),
                 ),
         );

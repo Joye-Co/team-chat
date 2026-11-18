@@ -16,7 +16,9 @@ use gpui_component::{
     menu::{DropdownMenu as _, PopupMenuItem},
 };
 
-use super::dialogs::{form_field_width, sheet_form, sheet_form_row, sheet_form_row_top};
+use super::dialogs::{
+    form_field_width, sheet_form, sheet_form_row, sheet_form_row_top, sheet_form_row_wrap,
+};
 use crate::ui::native::tokens::space;
 use crate::{
     app::Services,
@@ -359,8 +361,9 @@ impl NewTopicSheet {
                     });
                 })
             });
-            sheet_form_row(
+            sheet_form_row_wrap(
                 o::NEW_TOPIC_HAND_TO,
+                PushSize::Small.height(),
                 div().flex().flex_wrap().gap(space::S6).children(buttons),
                 cx,
             )

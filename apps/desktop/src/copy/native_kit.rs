@@ -182,4 +182,6 @@ crate::copy! {
     ALERT_CONFIRM = "退出登录",
     // Progress
     PROGRESS_LABEL = "上传 3 个文件",
+    // The cost row of the inspector sample (its section is 用时和花费).
+    INS_COST_ROW = "花费",
 }

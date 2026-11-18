@@ -24,7 +24,7 @@ crate::copy! {
     SEARCH_MEMBERS = "搜索成员",
     // --- v12/overlays: alerts ---
     STOP_TITLE = "停止 {name} 的工作？",
-    STOP_MESSAGE = "{name} 会停在现在这一步，已经做好的部分会留下。",
+    STOP_MESSAGE = "{name} 会停在现在这一步。\n已经做好的部分会留下。",
     STOP_OK = "停止",
     // --- v12/overlays: update sheet ---
     UPDATE_INSTALLING_TITLE = "正在安装 {version}",

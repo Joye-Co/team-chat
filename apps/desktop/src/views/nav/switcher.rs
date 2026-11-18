@@ -612,7 +612,7 @@ impl Switcher {
         let (time, status) = match &e.topic {
             Some(t) => (
                 Some(palette::time_text(t.last_activity_at)),
-                palette::topic_status(self.services.provider.as_ref(), me.as_deref(), t),
+                palette::topic_status(self.services.provider.as_ref(), me.as_deref(), t, active),
             ),
             None => (None, None),
         };
@@ -1133,6 +1133,7 @@ pub mod palette {
         p: &dyn ChatProvider,
         me: Option<&str>,
         topic: &Topic,
+        active: bool,
     ) -> Option<AnyElement> {
         // The one state mapping of a 话题 (§2.12, `topic_state`) in the
         // sidebar's words: 等你审 / 等你回答, 在做 n/m, 正在合并, 失败, 已暂停,
@@ -1150,6 +1151,8 @@ pub mod palette {
         Some(
             StatusBadge::new(badge, text)
                 .max_w(STATUS_MAX)
+                // The highlighted row has the badge's own fill.
+                .on_fill(active)
                 .into_any_element(),
         )
     }

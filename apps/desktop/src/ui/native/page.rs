@@ -918,17 +918,6 @@ pub fn skeleton_rows(id: &str, kind: SkeletonKind, n: usize, cx: &App) -> AnyEle
                         .child(Bone::new().h(px(12.)).w(gpui::relative(w * 0.6))),
                 )
                 .child(Bone::new().h(px(12.)).w(px(40.)))
-                .when(i + 1 < n, |d| {
-                    d.child(
-                        div()
-                            .absolute()
-                            .bottom_0()
-                            .left(m::ROW_PAD + m::MEDIA + px(12.))
-                            .right(px(0.))
-                            .h(px(1.))
-                            .bg(k.separator),
-                    )
-                })
                 .into_any_element(),
             SkeletonKind::Compact => div()
                 .id(row_id)
@@ -1086,7 +1075,9 @@ pub fn load_failed(id: &str, services: &Services, cx: &App) -> AnyElement {
     let services = services.clone();
     page_alert(
         SharedString::from(format!("{id}-failed")),
-        AlertKind::Error,
+        // The cause is the connection, the same one the sidebar's offline
+        // Alert names: one severity for one cause.
+        AlertKind::Warning,
         cc::PAGE_LOAD_FAILED,
         Some(cc::PAGE_LOAD_FAILED_LINE.into()),
         Some(

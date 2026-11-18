@@ -139,6 +139,7 @@ pub fn group_section(services: &Services, group_id: &str, cx: &App) -> Inspector
             })
         });
     let section = InspectorSection::new("group-ins-notify", nav::NOTIFY_SECTION)
+        .grouped()
         .row(row(nav::MUTE, mute, cx))
         .row(row(nav::NOTIFY_LEVEL, level, cx));
     if muted {

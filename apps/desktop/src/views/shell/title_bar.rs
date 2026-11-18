@@ -306,8 +306,14 @@ fn heading_with(
         .tooltip(ui::tip_when_cut(vec![title_layout.clone()], move || {
             ui::truncate::text_tip(full_title.clone())
         }));
-    // The connection line replaces the subtitle, and the peer with it.
-    let peer = over.is_none().then(|| spec.peer.clone()).flatten();
+    // The connection line replaces the subtitle, and the peer with it; in
+    // a breadcrumb the peer's avatar stays, before the name it belongs to.
+    let crumbed =
+        spec.style == TitleStyle::Topic && spec.breadcrumb.as_ref().is_some_and(|c| !c.is_empty());
+    let peer = (over.is_none() || crumbed)
+        .then(|| spec.peer.clone())
+        .flatten();
+    let crumb_peer = peer.clone().filter(|_| crumbed);
     let sub = over.or_else(|| subtitle(spec, &k)).map(|s| {
         let full: SharedString = s.text.clone().into();
         let styled = StyledText::new(s.text.clone());
@@ -323,12 +329,8 @@ fn heading_with(
                     .flex_none()
                     .child(ui::sym(sym, ui::SymSize::INLINE_SMALL, color))
             }))
-            .children(s.state.clone().map(|(words, state)| {
-                div()
-                    .flex_none()
-                    .child(StatusBadge::new(state, words).max_w(BADGE_MAX))
-            }))
-            .children(peer.clone().map(|Peer(m)| {
+            // Without a breadcrumb the peer's avatar leads the subtitle.
+            .children(peer.clone().filter(|_| !crumbed).map(|Peer(m)| {
                 div().flex_none().child(ui::MemberAvatar::new(
                     Some(&m),
                     crate::ui::native::tokens::avatar::XS,
@@ -348,7 +350,17 @@ fn heading_with(
             .tooltip(ui::tip_when_cut(vec![layout.clone()], move || {
                 ui::truncate::text_tip(full.clone())
             }));
-        (line, layout)
+        // The badge is its own item of the heading row, never inside the
+        // subtitle's shrinking box: it keeps its width (up to BADGE_MAX,
+        // where its own ellipsis cuts it) and the title before it gives
+        // way, so the state is never clipped under the toolbar items
+        // (§2.21).
+        let badge = s.state.clone().map(|(words, state)| {
+            div()
+                .flex_none()
+                .child(StatusBadge::new(state, words).max_w(BADGE_MAX))
+        });
+        (line, layout, badge)
     });
     // The 群 of a 话题 before its title, `产品研发 ›`, in `secondary`; a
     // click opens the 群.
@@ -377,6 +389,12 @@ fn heading_with(
                         });
                     }
                 })
+                .children(crumb_peer.clone().map(|Peer(m)| {
+                    div().flex_none().child(ui::MemberAvatar::new(
+                        Some(&m),
+                        crate::ui::native::tokens::avatar::XS,
+                    ))
+                }))
                 .child(
                     div()
                         .min_w(px(0.))
@@ -394,10 +412,12 @@ fn heading_with(
                 )))
         });
     let _ = window;
-    let (sub_el, sub_layout) = match sub {
-        Some((el, layout)) => (Some(el), Some(layout)),
-        None => (None, None),
+    let (sub_el, sub_layout, badge) = match sub {
+        Some((el, layout, badge)) => (Some(el), Some(layout), badge),
+        None => (None, None, None),
     };
+    // The badge sits a subtitle gap (6) before the text, inside the row's 12.
+    let badged = badge.is_some();
     // One line on the traffic-light line: the title, then the subtitle
     // after it, never under it (owner decision, v18). The title keeps up to
     // 70 % of the row; the subtitle is cut first.
@@ -409,12 +429,19 @@ fn heading_with(
         .gap(space::S12)
         .children(crumb)
         .child(
+            // The title gives way to the state badge after it: it is cut
+            // with an ellipsis, the badge stays whole.
             div()
-                .flex_shrink_0()
+                .flex_shrink(1.)
+                .min_w(px(0.))
                 .max_w(gpui::relative(0.7))
                 .child(title),
         )
-        .children(sub_el.map(|s| div().flex_1().min_w(px(0.)).child(s)))
+        .children(badge)
+        .children(sub_el.map(|s| {
+            let d = div().flex_1().min_w(px(0.));
+            if badged { d.ml(-space::S6) } else { d }.child(s)
+        }))
         .into_any_element();
     (el, title_layout, sub_layout)
 }
