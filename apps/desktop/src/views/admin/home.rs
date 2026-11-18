@@ -49,14 +49,20 @@ fn now_ms() -> u64 {
         .max(0) as u64
 }
 
-/// 比上一段多 / 少 / 一样, for a count.
-fn compare(now: u64, before: u64) -> String {
+/// 比上周多 / 少 / 一样, for a count; `prev` names the range it is compared with.
+fn compare(now: u64, before: u64, prev: &str) -> String {
     if now == before {
-        m::HOME_SAME.to_string()
+        fill(m::HOME_SAME, &[("prev", prev)])
     } else if now > before {
-        fill(m::HOME_MORE, &[("n", &(now - before).to_string())])
+        fill(
+            m::HOME_MORE,
+            &[("prev", prev), ("n", &(now - before).to_string())],
+        )
     } else {
-        fill(m::HOME_LESS, &[("n", &(before - now).to_string())])
+        fill(
+            m::HOME_LESS,
+            &[("prev", prev), ("n", &(before - now).to_string())],
+        )
     }
 }
 
@@ -172,6 +178,7 @@ impl AdminView {
         let Some(u) = self.usage.data.clone() else {
             return match &self.usage.error {
                 Some(e) => Alert::new(Sym::Failed, m::USAGE_FAILED)
+                    .on_surface()
                     .tone(AlertTone::Destructive)
                     .description(e.clone())
                     .action(Self::retry_action(
@@ -259,7 +266,11 @@ impl AdminView {
                 },
                 Sym::Topic,
                 u.total.topics.to_string(),
-                compare(u.total.topics as u64, u.previous.topics as u64),
+                compare(
+                    u.total.topics as u64,
+                    u.previous.topics as u64,
+                    self.usage.range.previous_word(),
+                ),
                 None,
                 cx,
             ))
@@ -314,6 +325,9 @@ impl AdminView {
             .child(
                 div()
                     .flex()
+                    // Each card hugs its own content (§2.4): a short 谁在用 is not stretched
+                    // to a long 要注意.
+                    .items_start()
                     .gap(space::S16)
                     .child(
                         div()
@@ -549,8 +563,8 @@ mod tests {
 
     #[test]
     fn compare_says_more_less_or_same() {
-        assert_eq!(compare(5, 5), m::HOME_SAME);
-        assert_eq!(compare(7, 5), fill(m::HOME_MORE, &[("n", "2")]));
-        assert_eq!(compare(3, 5), fill(m::HOME_LESS, &[("n", "2")]));
+        assert_eq!(compare(5, 5, "上周"), "和上周一样");
+        assert_eq!(compare(7, 5, "上周"), "比上周多 2 个");
+        assert_eq!(compare(3, 5, "上个月"), "比上个月少 2 个");
     }
 }

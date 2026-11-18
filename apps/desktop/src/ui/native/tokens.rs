@@ -1328,12 +1328,10 @@ pub mod monitor {
     pub const HEADER_PAD_BOTTOM: Pixels = px(20.);
     /// Room under the last section of a page.
     pub const BODY_PAD_BOTTOM: Pixels = px(28.);
-    /// A 要注意 tile: its tone's color at this opacity under the symbol.
-    pub const ATTENTION_TINT: f32 = 0.10;
-    pub const ATTENTION_TINT_DARK: f32 = 0.14;
-    /// A sidebar group label: this tall, this far below the rows above (Admin artboard: 18 + 16 + 6).
-    pub const NAV_GROUP_HEIGHT: Pixels = px(24.);
-    pub const NAV_GROUP_TOP: Pixels = space::S12;
+    /// A sidebar group label: this tall, this far below the rows above. Sized so the whole
+    /// nav of an owner (one computer open) fits the window: no row is cut by the footer.
+    pub const NAV_GROUP_HEIGHT: Pixels = px(20.);
+    pub const NAV_GROUP_TOP: Pixels = space::S8;
     /// Room under the sidebar's last row, above the account footer.
     pub const NAV_END_PAD: Pixels = space::S8;
     /// The machine tile of the switcher.
@@ -1345,9 +1343,13 @@ pub mod monitor {
     pub const CAPACITY_BAR: Pixels = space::S8;
     /// The legend swatches and the state dots.
     pub const SWATCH: Pixels = space::S8;
-    /// The memory bar of a member row.
-    pub const MEMBER_BAR: Pixels = space::S6;
+    /// The memory bar of a member row (the one Progress, this wide).
     pub const MEMBER_BAR_WIDTH: Pixels = px(96.);
+    /// The x-axis labels of 每天的花费: one footnote line.
+    pub const CHART_AXIS: Pixels = space::S16;
+    /// The status strip's cell that carries a command to run: wide enough for the command on
+    /// one line.
+    pub const STRIP_HINT_CELL: Pixels = px(272.);
     /// Table columns of 按成员.
     pub const COL_COUNT: Pixels = px(80.);
     pub const COL_CPU: Pixels = px(96.);
@@ -1362,6 +1364,8 @@ pub mod monitor {
     pub const TEAM_COL_SPEND: Pixels = px(136.);
     pub const TEAM_COL_RECENT: Pixels = px(88.);
     pub const TEAM_CELL_PAD: Pixels = space::S8;
+    /// The count after a bar in the member inspector (`999 个话题`), right-aligned.
+    pub const TEAM_USE_COUNT: Pixels = px(64.);
     /// 机器 cards: the narrowest a card gets, and the width of 添加电脑's line.
     pub const FLEET_CARD_MIN: Pixels = px(320.);
     pub const FLEET_ADD_TEXT: Pixels = px(320.);

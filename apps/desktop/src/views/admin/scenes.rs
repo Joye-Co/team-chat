@@ -417,7 +417,11 @@ macro_rules! scene {
             name: $name,
             about: $about,
             start: Start::SignedIn,
-            setup: |_, _| {},
+            // The GitHub shape is a process-wide switch: every scene sets the one it shows,
+            // or the shape of an earlier scene leaks into the next theme's pass.
+            setup: |_, _| {
+                crate::fake::admin::MONITOR_GITHUB.store(0, std::sync::atomic::Ordering::Relaxed)
+            },
             open: $open,
         }
     };

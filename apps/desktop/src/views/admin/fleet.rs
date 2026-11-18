@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use gpui::{
     AnyElement, ClipboardItem, Context, InteractiveElement as _, IntoElement, ParentElement as _,
     SharedString, StatefulInteractiveElement as _, Styled, Window, div,
-    prelude::FluentBuilder as _, relative,
+    prelude::FluentBuilder as _,
 };
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 
@@ -208,54 +208,9 @@ impl AdminView {
                     .into_any_element(),
             );
         }
-        use crate::data::ThisMac;
-        let this_mac = match self.services.provider.this_mac() {
-            ThisMac::NotSetUp => Some(crate::copy::settings::THIS_MAC_USE),
-            ThisMac::Elsewhere => Some(crate::copy::settings::THIS_MAC_SWITCH),
-            ThisMac::Unavailable | ThisMac::Working => None,
-        };
-        let view = cx.entity();
-        // After a failed try the three lines below say what is wrong and offer 再试一次.
-        let this_mac =
-            this_mac.filter(|_| !self.fleet.this.failed && self.fleet.this.pinned.is_none());
-        let use_row = this_mac.is_some().then(|| {
-            div()
-                .flex()
-                .items_center()
-                .gap(space::S12)
-                .child(div().flex_1())
-                .children(this_mac.map(|label| {
-                    crate::ui::native::loading_push(
-                        push_button(
-                            "fleet-use-this-mac",
-                            label,
-                            PushStyle::Outline,
-                            PushSize::Small,
-                            cx,
-                        ),
-                        self.fleet.using,
-                        PushSize::Small,
-                    )
-                    .on_click(move |_, window, cx| {
-                        // 用这台电脑 says what it means first (机 3.1); moving an existing
-                        // set-up onto the app's daemon changes nothing it does.
-                        let view = view.clone();
-                        if label == crate::copy::settings::THIS_MAC_USE {
-                            let alone = crate::views::settings::solo(&view.read(cx).services);
-                            crate::views::settings::machine_actions::open_use_this(
-                                alone,
-                                move |cx| view.update(cx, |v, cx| v.use_this_mac(cx)),
-                                window,
-                                cx,
-                            );
-                        } else {
-                            view.update(cx, |v, cx| v.use_this_mac(cx))
-                        }
-                    })
-                }))
-        });
         let action_failed = self.fleet.action_failed.clone().map(|why| {
             Alert::new(Sym::Warning, crate::copy::settings::MACHINE_ACTION_FAILED)
+                .on_surface()
                 .tone(AlertTone::Warning)
                 .description(why)
         });
@@ -264,16 +219,60 @@ impl AdminView {
             .flex()
             .flex_col()
             .gap(space::S16)
-            .children(use_row)
             .children(action_failed)
             .children(self.this_computer_card(cx))
             .children(rows)
             .child(
                 Alert::new(Sym::Info, m::FLEET_NOTE_TITLE)
+                    .on_surface()
                     .tone(AlertTone::Neutral)
                     .description(m::FLEET_NOTE_DESC),
             )
             .into_any_element()
+    }
+
+    /// 用这台电脑 / 换到这个 App 来跑, in the page header beside refresh (§2.2: a page's
+    /// controls sit on one line). After a failed try the lines on the page say what is wrong
+    /// and offer 再试一次, so the button steps aside.
+    pub(super) fn use_this_action(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        use crate::data::ThisMac;
+        let label = match self.services.provider.this_mac() {
+            ThisMac::NotSetUp => Some(crate::copy::settings::THIS_MAC_USE),
+            ThisMac::Elsewhere => Some(crate::copy::settings::THIS_MAC_SWITCH),
+            ThisMac::Unavailable | ThisMac::Working => None,
+        }
+        .filter(|_| !self.fleet.this.failed && self.fleet.this.pinned.is_none())?;
+        let view = cx.entity();
+        Some(
+            crate::ui::native::loading_push(
+                push_button(
+                    "fleet-use-this-mac",
+                    label,
+                    PushStyle::Outline,
+                    PushSize::Regular,
+                    cx,
+                ),
+                self.fleet.using,
+                PushSize::Regular,
+            )
+            .on_click(move |_, window, cx| {
+                // 用这台电脑 says what it means first (机 3.1); moving an existing
+                // set-up onto the app's daemon changes nothing it does.
+                let view = view.clone();
+                if label == crate::copy::settings::THIS_MAC_USE {
+                    let alone = crate::views::settings::solo(&view.read(cx).services);
+                    crate::views::settings::machine_actions::open_use_this(
+                        alone,
+                        move |cx| view.update(cx, |v, cx| v.use_this_mac(cx)),
+                        window,
+                        cx,
+                    );
+                } else {
+                    view.update(cx, |v, cx| v.use_this_mac(cx))
+                }
+            })
+            .into_any_element(),
+        )
     }
 
     pub(super) fn machine_card(
@@ -372,7 +371,10 @@ impl AdminView {
         } else {
             fill(m::FLEET_MEMBERS, &[("n", &members.len().to_string())])
         };
-        let meter = |label: &'static str, value: String, share: Option<f32>| {
+        // An offline machine keeps its card, icon box, tracks and badge at full strength;
+        // only its words step back (§2.22: both themes draw the same shapes).
+        let ink = if x.connected { k.label } else { k.secondary };
+        let meter = |label: &'static str, value: String, share: Option<f32>, cx: &gpui::App| {
             div()
                 .flex_1()
                 .min_w(gpui::Pixels::ZERO)
@@ -389,23 +391,12 @@ impl AdminView {
                             div()
                                 .n_figures()
                                 .font_weight(gpui::FontWeight::MEDIUM)
+                                .text_color(ink)
                                 .child(value),
                         ),
                 )
-                .child(
-                    div()
-                        .h(t::MEMBER_BAR)
-                        .rounded_full()
-                        .bg(k.fill)
-                        .overflow_hidden()
-                        .children(share.map(|s| {
-                            div()
-                                .h_full()
-                                .rounded_full()
-                                .bg(k.label)
-                                .w(relative(s.clamp(0., 1.)))
-                        })),
-                )
+                // The one Progress (D12); no reading still draws the empty track.
+                .child(crate::ui::native::progress(share.unwrap_or(0.), cx))
         };
         let pct = |v: Option<f64>| {
             v.map(|v| format!("{}%", v.round() as i64))
@@ -450,7 +441,6 @@ impl AdminView {
             .flex()
             .flex_col()
             .gap(space::S16)
-            .when(!x.connected, |d| d.opacity(0.75))
             .child(
                 div()
                     .flex()
@@ -484,7 +474,8 @@ impl AdminView {
                             .child(
                                 TruncText::new(x.name.clone())
                                     .n_title3()
-                                    .font_weight(gpui::FontWeight::SEMIBOLD),
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(ink),
                             )
                             .child(TruncText::new(meta).n_footnote().text_color(k.secondary)),
                     )
@@ -499,9 +490,20 @@ impl AdminView {
                         m::FLEET_RUNNING,
                         format!("{running} / {slots}"),
                         (slots > 0).then(|| model::share(running as u64, slots as u64)),
+                        cx,
                     ))
-                    .child(meter(m::KPI_CPU, pct(cpu), cpu.map(|v| (v / 100.) as f32)))
-                    .child(meter(m::KPI_MEM, pct(mem), mem.map(|v| (v / 100.) as f32))),
+                    .child(meter(
+                        m::KPI_CPU,
+                        pct(cpu),
+                        cpu.map(|v| (v / 100.) as f32),
+                        cx,
+                    ))
+                    .child(meter(
+                        m::KPI_MEM,
+                        pct(mem),
+                        mem.map(|v| (v / 100.) as f32),
+                        cx,
+                    )),
             )
             .child(
                 div()
@@ -511,7 +513,10 @@ impl AdminView {
                     .flex()
                     .items_center()
                     .gap(space::S8)
-                    .child(div().flex().gap(space::S2).children(avatars))
+                    // No avatars, no stack: an empty one would still take the row's gap.
+                    .when(!avatars.is_empty(), |d| {
+                        d.child(div().flex().gap(space::S2).children(avatars))
+                    })
                     .child(
                         TruncText::new(footer)
                             .flex_1()

@@ -277,6 +277,21 @@ fn github_cell(d: &MachineMonitor) -> Option<StripCell> {
     })
 }
 
+/// The commands a GitHub hint ends with, longest first.
+const HINT_COMMANDS: [&str; 2] = ["sudo -iu runner gh auth login", "gh auth login"];
+
+/// A hint as its words and the command it ends with, so the page can set the words in the
+/// text font and the command in the code font.
+pub fn hint_parts(hint: &str) -> (&str, Option<&str>) {
+    HINT_COMMANDS
+        .iter()
+        .find_map(|c| {
+            hint.strip_suffix(c)
+                .map(|prose| (prose.trim_end(), Some(*c)))
+        })
+        .unwrap_or((hint, None))
+}
+
 /// What a 要注意 row is about (it picks the icon).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AttentionKind {
@@ -790,6 +805,14 @@ mod tests {
                 Tone::Warn,
                 Some("用运行 AI 成员的系统用户运行 gh auth login".into())
             )
+        );
+        assert_eq!(
+            hint_parts(m::GITHUB_HINT_VM),
+            ("在主机上运行", Some("sudo -iu runner gh auth login"))
+        );
+        assert_eq!(
+            hint_parts(m::GITHUB_HINT_HOST),
+            ("用运行 AI 成员的系统用户运行", Some("gh auth login"))
         );
         assert_eq!(cell("unknown", None, Some("vm")).2, None);
         let mut d = sample();
