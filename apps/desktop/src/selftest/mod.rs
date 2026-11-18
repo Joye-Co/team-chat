@@ -771,6 +771,11 @@ fn press_keys(handle: AnyWindowHandle, name: &str, cx: &mut AsyncApp) {
                 // The app root holds the focus in a fresh window, so the
                 // first Tab reaches the app's `FocusNext` like a real one.
                 if let Ok(stroke) = gpui::Keystroke::parse(key) {
+                    // Enter runs an action of the focused control: the frame must know
+                    // where the keys before it moved the focus.
+                    if key == "enter" {
+                        window.draw(cx);
+                    }
                     window.dispatch_keystroke(stroke, cx);
                 }
             }

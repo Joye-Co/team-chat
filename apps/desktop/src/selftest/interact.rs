@@ -40,6 +40,8 @@ const fn keys(keys: &'static [&'static str]) -> Steps {
     }
 }
 
+const BACK: &str = "shift-tab";
+
 /// One line per scene.
 const STEPS: &[(&str, Steps)] = &[
     // --- t5 ---
@@ -75,6 +77,22 @@ const STEPS: &[(&str, Steps)] = &[
         ]),
     ),
     ("state-focus-card-option", keys(&["tab", "down"])),
+    // --- the card controls a keyboard reaches (refs-card-keyboard-*) ---
+    // ⇧Tab from the window root: the pane and the composer take the first eight, then the
+    // card from its end.
+    ("refs-card-keyboard-bar", keys(&[BACK; 11])),
+    ("refs-card-keyboard-tabs", keys(&[BACK; 24])),
+    ("refs-card-keyboard-metric", keys(&[BACK; 28])),
+    ("refs-card-keyboard-point", keys(&[BACK; 14])),
+    ("refs-card-keyboard-sort", keys(&[BACK; 9])),
+    ("refs-card-keyboard-group", keys(&[BACK; 14])),
+    // Enter opens the calendar.
+    (
+        "refs-card-keyboard-date",
+        keys(&[
+            BACK, BACK, BACK, BACK, BACK, BACK, BACK, BACK, BACK, "enter",
+        ]),
+    ),
     ("state-focus-picker", keys(&["tab", "tab", "down"])),
     // --- end v15/r5-cards ---
     // --- v16/c-cards ---

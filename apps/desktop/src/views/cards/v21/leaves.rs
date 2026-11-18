@@ -2236,22 +2236,22 @@ pub fn embed(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) ->
             file.map_or(c::EMBED_KIND, crate::views::media::MediaKind::label)
         ),
     );
-    let body: AnyElement = match (state, shown) {
-        (Some(Ok(f)), EmbedBody::Page) => {
-            // inc-integrate: the 产出 page host owns the bridge (capabilities by author,
-            // live data, asks, refs, the pending band); the block narrows the declared
-            // events to its own `events` (embed.events ⊆ the version's events).
-            use crate::views::artifacts::host;
     let media = match (&state, shown) {
         (Some(Ok(f)), EmbedBody::NotPage) => {
             embed_media(ctx, id, &name, f, detail.as_ref(), window, cx)
         }
         _ => None,
     };
-            let p = ctx.env.provider.as_ref();
+    let body: AnyElement = match (state, shown) {
         (_, EmbedBody::NotPage) if media.is_some() => {
             div().p(space::S12).children(media).into_any_element()
         }
+        (Some(Ok(f)), EmbedBody::Page) => {
+            // inc-integrate: the 产出 page host owns the bridge (capabilities by author,
+            // live data, asks, refs, the pending band); the block narrows the declared
+            // events to its own `events` (embed.events ⊆ the version's events).
+            use crate::views::artifacts::host;
+            let p = ctx.env.provider.as_ref();
             let (mut spec, caps) =
                 host::version_spec(p, artifact_id, f.version, f.dir.clone(), f.entry.clone());
             if !declared.is_empty()

@@ -31,12 +31,22 @@ pub fn open_embed_states(
     content: gpui::Size<gpui::Pixels>,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
+    open_cards(services, content, &[EMBED_BROKEN, EMBED_FILE], cx)
+}
+
+/// The real main window on the report 话题, with the sample cards `ids` at the end of its
+/// thread (the app's own Tab and focus handling, which a gallery window does not have).
+pub fn open_cards(
+    services: Services,
+    content: gpui::Size<gpui::Pixels>,
+    ids: &[&str],
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
     let thread = crate::views::media::preview::MediaThread::with_cards(
         services.provider.clone(),
         d::GROWTH,
         d::T_REPORT,
-        [EMBED_BROKEN, EMBED_FILE]
-            .iter()
+        ids.iter()
             .map(|id| (id.to_string(), d::LEDGER.to_string()))
             .collect(),
     );
@@ -192,9 +202,9 @@ pub fn embed_states_checks(_: &Services, _: &mut App) -> Vec<Result<String, Stri
                 == 1,
             format!("only the web page keeps the 网页 frame ({frames:?})"),
         ),
-    ]
-}
         check(
             !ids("embed-media").is_empty(),
             "a 产出 that is not a web page shows its own preview".to_string(),
         ),
+    ]
+}
