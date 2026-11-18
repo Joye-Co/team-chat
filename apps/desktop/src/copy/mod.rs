@@ -384,7 +384,7 @@ pub fn ltr(line: String) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::collections::HashSet;
 
@@ -505,7 +505,7 @@ mod tests {
     /// Developer words from docs/PRODUCT.md: the bullet that starts with
     /// "Developer words appear only". "model names" stands for a list of model
     /// and CLI names, so those are added here.
-    fn developer_words() -> (Vec<String>, Vec<String>) {
+    pub(crate) fn developer_words() -> (Vec<String>, Vec<String>) {
         let product = include_str!("../../../../docs/PRODUCT.md");
         let start = product
             .find("Developer words appear only")
@@ -543,7 +543,7 @@ mod tests {
 
     /// Developer words found in `text`: whole ASCII words (case-insensitive,
     /// plural "s" too) and Chinese forms anywhere.
-    fn found_words(text: &str, ascii: &[String], cjk: &[String]) -> Vec<String> {
+    pub(crate) fn found_words(text: &str, ascii: &[String], cjk: &[String]) -> Vec<String> {
         let lower = text.to_lowercase();
         let words: HashSet<&str> = lower
             .split(|c: char| !c.is_ascii_alphanumeric())

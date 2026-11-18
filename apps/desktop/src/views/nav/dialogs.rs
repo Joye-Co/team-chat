@@ -317,6 +317,8 @@ pub struct MemberPicker {
     empty: gpui::SharedString,
     /// The list's focus (a Tab stop with the 3 px ring), when it takes keys.
     list_focus: Option<gpui::FocusHandle>,
+    /// A row holds the keyboard's ring, so the list box draws none.
+    row_ring: bool,
 }
 
 impl MemberPicker {
@@ -334,7 +336,14 @@ impl MemberPicker {
             rows,
             empty: empty.into(),
             list_focus: None,
+            row_ring: false,
         }
+    }
+
+    /// A row holds the keyboard's ring: the list box leaves its own off.
+    pub fn row_ring(mut self, on: bool) -> Self {
+        self.row_ring = on;
+        self
     }
 
     /// Makes the list a Tab stop that takes the picker's keys
@@ -358,19 +367,20 @@ impl MemberPicker {
         Self::row_highlighted(id, m, mode, chosen, false, cx)
     }
 
-    /// [`MemberPicker::row`] with the keyboard highlight of a multi-select
-    /// list: the muted row fill (the checkbox shows what is chosen).
+    /// [`MemberPicker::row`] with the keyboard's mark on a row of a
+    /// multi-select list: the focus ring, a line and never a fill, so the row
+    /// Space will toggle does not look hovered or selected.
     pub fn row_highlighted(
         id: gpui::SharedString,
         m: &Member,
         mode: PickMode,
         chosen: bool,
-        highlighted: bool,
+        ring: bool,
         cx: &App,
     ) -> gpui::Stateful<gpui::Div> {
         use crate::ui::native::tokens::{icon, radius, space};
         let k = native_colors(cx);
-        let filled = highlighted || (chosen && mode == PickMode::One);
+        let filled = chosen && mode == PickMode::One;
         let surface = if filled { k.selection } else { k.sheet };
         // Beside the avatar a leading emoji is left out (X-01).
         let name: gpui::SharedString = ui::avatar::name_beside_avatar(&m.name).to_string().into();
@@ -390,6 +400,9 @@ impl MemberPicker {
                 } else {
                     d.hover(|s| s.bg(k.fill.opacity(0.5)))
                 }
+            })
+            .when(ring, |d| {
+                d.shadow(crate::ui::native::focus::row_focus_ring(cx))
             })
             .when(mode == PickMode::Many, |d| {
                 d.child(NativeCheckbox::new(
@@ -461,7 +474,8 @@ impl gpui::RenderOnce for MemberPicker {
         let focused = self
             .list_focus
             .as_ref()
-            .is_some_and(|f| f.is_focused(window));
+            .is_some_and(|f| f.is_focused(window))
+            && !self.row_ring;
         div()
             .w_full()
             .flex()
@@ -680,6 +694,8 @@ pub struct NewGroupForm {
     list_focus: gpui::FocusHandle,
     /// The keyboard highlight, an index into the shown rows.
     active: Option<usize>,
+    /// Draws the keyboard's ring without a key press (a screenshot scene).
+    ring_shown: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -747,6 +763,7 @@ impl NewGroupForm {
             refusal: None,
             list_focus: cx.focus_handle().tab_stop(true),
             active: None,
+            ring_shown: false,
             _subscriptions: subscriptions,
         }
     }
@@ -879,6 +896,8 @@ impl Render for NewGroupForm {
         let new_group = self.mode == FormMode::NewGroup;
         // The highlight shows only while the list has the keyboard.
         let highlight = self.active.filter(|_| self.list_focus.is_focused(window));
+        // The ring follows the keys: a click on a row marks nothing (focus.rs).
+        let row_ring = highlight.is_some() && (self.ring_shown || window.last_input_was_keyboard());
         let typed = self.name.read(cx).value().to_string();
         // A field problem (a name that is too long) turns the default button
         // off and marks the field; an empty name only turns it off.
@@ -905,7 +924,7 @@ impl Render for NewGroupForm {
                     m,
                     PickMode::Many,
                     checked,
-                    highlight == Some(ix),
+                    row_ring && highlight == Some(ix),
                     cx,
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -964,7 +983,8 @@ impl Render for NewGroupForm {
                 nav::NO_MEMBERS_MATCH
             },
         )
-        .list_focus(&self.list_focus);
+        .list_focus(&self.list_focus)
+        .row_ring(row_ring);
         // The footer's left slot (2.9): the count, or the error.
         let status = if error {
             crate::ui::native::sheet::sheet_status_error(line, cx).into_any_element()
@@ -1064,6 +1084,7 @@ pub fn open_new_group_keyboard(services: Services, window: &mut Window, cx: &mut
     let form = cx.new(|cx| {
         let mut f = NewGroupForm::new(services, FormMode::NewGroup, window, cx);
         f.active = Some(1);
+        f.ring_shown = true;
         f.toggle_active(cx);
         f
     });

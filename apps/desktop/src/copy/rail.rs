@@ -3,7 +3,7 @@
 
 crate::copy! {
     RAIL_SEARCH = "搜索或交代",
-    RAIL_NEW_TOPIC = "新话题",
+    RAIL_NEW_TOPIC = "新话题…",
     // The 新建 pull-down at the top of the sidebar: 新话题, 新建群, 发起私聊.
     RAIL_NEW = "新建",
     RAIL_NEW_GROUP = "新建群…",

@@ -59,7 +59,7 @@ crate::copy! {
     DESK_COUNT = "共 {n} 件",
     DESK_EMPTY_TITLE = "都处理完了",
     DESK_EMPTY_BODY = "成员需要你拍板、开始干活或交付结果时，会出现在这里。",
-    DESK_NEW_TOPIC = "开个话题",
+    DESK_NEW_TOPIC = "开个话题…",
     // Onboarding: 首页 of a member no 话题 involves yet, instead of 都处理完了.
     DESK_START_TITLE = "从这里开始",
     DESK_START_BODY = "照这几步走，把第一件事交给 AI 成员。",

@@ -12,7 +12,7 @@ crate::copy! {
     GROUP_TITLE = "群里的约定",
     GROUP_ABOUT = "在这个群干活的成员会参考这些。每天整理一次，记错了直接改或停用。",
     PERSON_TITLE = "我的偏好",
-    PERSON_ABOUT = "你找成员干活时，它们会参考这些，只有你看得到。每天整理一次，记错了直接改或停用。",
+    PERSON_ABOUT = "成员替你干活时会参考这些，只有你看得到。每天整理一次，记错了直接改或停用。",
     MINE_TITLE = "我的约定",
     MINE_ABOUT = "成员替你做事前都会读这些。每天整理一次，记错了直接改或停用。",
     // No AI 服务 on the server (盯 4.6).
@@ -85,7 +85,7 @@ crate::copy! {
     SHEET_NEW_TEAM = "每个成员做事前都会读到，马上生效。",
     SHEET_NEW_MEMBER = "{name} 干活时会参考，马上生效。",
     SHEET_NEW_GROUP = "在这个群干活的成员都会读到，马上生效。",
-    SHEET_NEW_PERSON = "你找成员干活时它们会参考，只有你看得到，马上生效。",
+    SHEET_NEW_PERSON = "成员替你干活时会参考，只有你看得到，马上生效。",
     SHEET_NEW_MINE = "约定和事实每个成员都会读，偏好在你找成员时用。马上生效。",
     SHEET_EDIT_ABOUT = "改完马上生效，原来的版本会留着。",
     SHEET_KIND = "类型",
@@ -107,7 +107,7 @@ crate::copy! {
     TEAM_ABOUT_AI_OFF = "每个成员做事前都会读。记错了直接改或停用。",
     TEAM_ABOUT_READONLY_AI_OFF = "每个成员做事前都会读。管理员可以改。",
     GROUP_ABOUT_AI_OFF = "在这个群干活的成员会参考这些。记错了直接改或停用。",
-    PERSON_ABOUT_AI_OFF = "你找成员干活时，它们会参考这些，只有你看得到。记错了直接改或停用。",
+    PERSON_ABOUT_AI_OFF = "成员替你干活时会参考这些，只有你看得到。记错了直接改或停用。",
     MINE_ABOUT_AI_OFF = "成员替你做事前都会读这些。记错了直接改或停用。",
     // A memory the signed-in person wrote: this board speaks to them as 你.
     SOURCE_MANUAL_SELF = "你记的",

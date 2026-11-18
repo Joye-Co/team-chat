@@ -596,8 +596,9 @@ impl AdminView {
                     (false, role) => role.unwrap_or_default().to_string(),
                 };
                 let level = role_word(r.role);
-                // A state is a StatusBadge (icon + word, §2.12); 空闲 and a last-seen time
-                // are muted text. Never a colored text run.
+                // A state is a StatusBadge (icon + word, §2.12), never a colored text run.
+                // 空闲 and 离线 wear the outline dot; how long is in the tooltip, the column
+                // has no room for it.
                 let badge = |state, word: &'static str| {
                     StatusBadge::new(state, word)
                         .dense()
@@ -606,22 +607,34 @@ impl AdminView {
                         .into_any_element()
                 };
                 let recent: AnyElement = if r.member.deactivated {
-                    m::TEAM_OFF.into_any_element()
+                    badge(crate::ui::native::BadgeState::Deactivated, m::TEAM_OFF)
                 } else if r.ai_state == Some(m::TEAM_WAITING) {
                     badge(crate::ui::native::BadgeState::NeedsYou, m::TEAM_WAITING)
                 } else if r.ai_state == Some(m::TEAM_WORKING) {
                     badge(crate::ui::native::BadgeState::Working, m::TEAM_WORKING)
                 } else if let Some(s) = r.ai_state {
-                    s.into_any_element()
+                    badge(crate::ui::native::BadgeState::Offline, s)
                 } else if r.member.online {
                     badge(crate::ui::native::BadgeState::Online, m::TEAM_ONLINE_NOW)
                 } else {
                     match r.seen {
                         Some(t) => {
-                            // Whole minutes at the finest, and no 离线 before the time: anything
-                            // longer does not fit the column.
+                            // The state is the badge; how long is in its tooltip, whole minutes
+                            // at the finest.
                             let minutes = (now.saturating_sub(t) / 60_000).max(1);
-                            TruncText::new(model::ago(minutes * 60_000)).into_any_element()
+                            let d = model::duration(minutes * 60_000);
+                            let tip: SharedString = fill(m::FLEET_OFFLINE_FOR, &[("d", &d)]).into();
+                            div()
+                                .id(SharedString::from(format!("team-seen-{id}")))
+                                .tooltip(move |window, cx| {
+                                    gpui_component::tooltip::Tooltip::new(tip.clone())
+                                        .build(window, cx)
+                                })
+                                .child(badge(
+                                    crate::ui::native::BadgeState::Offline,
+                                    m::MACHINE_OFFLINE,
+                                ))
+                                .into_any_element()
                         }
                         // 从没上线 only once the roster said so: unread, nothing is known.
                         None if self.team.roster.is_some() => m::TEAM_NEVER.into_any_element(),

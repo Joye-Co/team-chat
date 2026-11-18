@@ -240,7 +240,7 @@ concepts! {
     /// A web page (产出 of that kind).
     Globe = "globe";
     /// A PDF (产出 of that kind).
-    PdfFile = "doc.richtext";
+    PdfFile = "list.bullet.rectangle.portrait";
     /// An API key.
     Key = "key";
     /// A machine's base image and environment.

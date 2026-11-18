@@ -14,9 +14,11 @@ use crate::{Capabilities, OpenOptions, Presentation, VersionSpec};
 /// Bump when the page, the config, the sanitizer or the bridge limits change: every cache
 /// key changes, so failures cached by an older renderer (such as the timeouts of a bridge
 /// that dropped large `rendered` events) are not shown again.
-pub const RENDERER_VERSION: u32 = 6;
+pub const RENDERER_VERSION: u32 = 7;
 /// The width of a Gantt chart: the content width of a card (D2-30).
 const GANTT_WIDTH: u32 = 600;
+/// The left gutter of a Gantt chart with no section names: room for half of the first tick.
+const GANTT_LEFT_NO_SECTIONS: u32 = 24;
 /// The artifact id of the reserved origin (`teamchat-diagram-v<RENDERER_VERSION>`).
 pub const ARTIFACT_ID: &str = "teamchat-diagram";
 /// The bundled library: `mermaid` 12.2.0 from npm, `dist/mermaid.min.js`, MIT
@@ -264,10 +266,19 @@ pub fn render_script(req: &RenderRequest) -> String {
         .iter()
         .map(|(k, v)| (k.clone(), Value::String(v.clone())))
         .collect();
+    let mut config = mermaid_config(&req.theme);
+    // Without sections the left gutter would hold no names: the bars start at the card's inset.
+    if !req
+        .source
+        .lines()
+        .any(|line| line.trim_start().starts_with("section"))
+    {
+        config["gantt"]["leftPadding"] = json!(GANTT_LEFT_NO_SECTIONS);
+    }
     let arg = json!({
         "reqId": req.req_id,
         "source": req.source,
-        "config": mermaid_config(&req.theme),
+        "config": config,
         "blockLabels": labels,
         "limits": { "maxNodes": MAX_NODES, "maxEdges": MAX_EDGES, "maxSide": MAX_SIDE },
     });

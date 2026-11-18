@@ -356,7 +356,7 @@ pub fn update_card(
         Sym,
         icons::icon as sym_icon,
         native::{
-            IconSize, card_surface, icon_button, progress,
+            IconSize, icon_button, panel_card_surface, progress,
             tokens::{icon, radius, space},
         },
     };
@@ -386,6 +386,9 @@ pub fn update_card(
     let mut buttons: Vec<gpui_component::button::Button> = Vec::new();
     let (sym, tint, title, detail): (Sym, gpui::Hsla, String, String) = match phase {
         Phase::Available(_) => {
+            if has_notes {
+                buttons.push(notes_button(cx));
+            }
             buttons.push(
                 button(
                     "update-card-update",
@@ -395,9 +398,6 @@ pub fn update_card(
                 )
                 .on_click(move |_, _, cx| up.update(cx, |u, cx| u.start_update(cx))),
             );
-            if has_notes {
-                buttons.push(notes_button(cx));
-            }
             let up = updater.clone();
             close = Some(
                 icon_button(
@@ -447,6 +447,9 @@ pub fn update_card(
             )
         }
         Phase::Ready { .. } => {
+            if has_notes {
+                buttons.push(notes_button(cx));
+            }
             buttons.push(
                 button(
                     "update-card-restart",
@@ -456,9 +459,6 @@ pub fn update_card(
                 )
                 .on_click(move |_, _, cx| up.update(cx, |u, cx| u.install_now(cx))),
             );
-            if has_notes {
-                buttons.push(notes_button(cx));
-            }
             (
                 Sym::Done,
                 k.green,
@@ -479,6 +479,15 @@ pub fn update_card(
             u::INSTALLING.to_string(),
         ),
         Phase::Manual(_) => {
+            buttons.push(
+                button(
+                    "update-card-dismiss",
+                    u::DISMISS.into(),
+                    PushStyle::Outline,
+                    cx,
+                )
+                .on_click(move |_, _, cx| up.update(cx, |u, cx| u.dismiss(cx))),
+            );
             // Sized to its label: the product's name never cuts.
             buttons.push(
                 crate::ui::native::push_button(
@@ -490,15 +499,6 @@ pub fn update_card(
                 )
                 .on_click(|_, _, cx| cx.dispatch_action(&crate::app::Quit)),
             );
-            buttons.push(
-                button(
-                    "update-card-dismiss",
-                    u::DISMISS.into(),
-                    PushStyle::Outline,
-                    cx,
-                )
-                .on_click(move |_, _, cx| up.update(cx, |u, cx| u.dismiss(cx))),
-            );
             (
                 Sym::Warning,
                 k.amber,
@@ -507,14 +507,14 @@ pub fn update_card(
             )
         }
         Phase::Failed { failure, .. } => {
+            let later = updater.clone();
+            buttons.push(
+                button("update-card-later", u::LATER.into(), PushStyle::Outline, cx)
+                    .on_click(move |_, _, cx| later.update(cx, |u, cx| u.postpone(cx))),
+            );
             buttons.push(
                 button("update-card-retry", u::RETRY.into(), PushStyle::Default, cx)
                     .on_click(move |_, _, cx| up.update(cx, |u, cx| u.start_update(cx))),
-            );
-            let up = updater.clone();
-            buttons.push(
-                button("update-card-later", u::LATER.into(), PushStyle::Outline, cx)
-                    .on_click(move |_, _, cx| up.update(cx, |u, cx| u.postpone(cx))),
             );
             (
                 Sym::Alert,
@@ -533,7 +533,8 @@ pub fn update_card(
         _ => return None,
     };
     let busy = matches!(phase, Phase::WaitingForSends(_) | Phase::Installing(_));
-    let first_hugs = matches!(phase, Phase::Manual(_));
+    // 退出 {product}, the primary at the row's end, keeps its label whole.
+    let hugging = matches!(phase, Phase::Manual(_)).then_some(1);
     let mark = div()
         .flex_none()
         .size(icon::LG)
@@ -559,7 +560,7 @@ pub fn update_card(
             .mx(metrics::SIDEBAR_ROW_INSET)
             .pb(space::S8)
             .child(
-                card_surface(cx)
+                panel_card_surface(cx)
                     .rounded(radius::CONTAINER)
                     // The dark sidebar already has the card's fill: lift the
                     // card one step there, so it reads as a surface.
@@ -601,7 +602,7 @@ pub fn update_card(
                                 div()
                                     .min_w(gpui::Pixels::ZERO)
                                     .map(|d| {
-                                        if first_hugs && ix == 0 {
+                                        if hugging == Some(ix) {
                                             d.flex_none()
                                         } else {
                                             d.flex_1()

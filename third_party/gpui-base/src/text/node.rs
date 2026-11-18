@@ -2553,6 +2553,7 @@ impl CodeBlock {
                     .child(lang)
             });
 
+        let one_line = !self.code().trim_end_matches('\n').contains('\n');
         let block = div()
             .w_full()
             .min_w_0()
@@ -2571,6 +2572,7 @@ impl CodeBlock {
             .line_height(relative(1.6))
             .relative()
             .refine_style(&style.code_block())
+            .when(one_line, |d| d.refine_style(style.code_block_one_line()))
             .child(
                 Inline::new(
                     self.state.clone(),
@@ -2595,7 +2597,12 @@ impl CodeBlock {
             div()
                 .id("actions")
                 .absolute()
-                .top_2()
+                .top(
+                    style
+                        .code_block_one_line_actions_top()
+                        .filter(|_| one_line)
+                        .unwrap_or(px(8.)),
+                )
                 .right_2()
                 .bg(style.code_background())
                 .rounded(cx.theme().tokens.radius.md)

@@ -80,7 +80,7 @@ crate::copy! {
     // message's menu opens a 话题 from it.
     CHAT_START_GROUP = "在「{group}」里直接聊；要做一件事时，开个话题",
     CHAT_START_DM = "在这里直接聊；要做一件事时，开个话题",
-    START_NEW_TOPIC = "新话题",
+    START_NEW_TOPIC = "新话题…",
     MENU_OPEN_TOPIC = "开个话题",
     // ⌘F: the find bar of the open 话题 (or 群聊, 私聊), and its 编辑 menu items.
     FIND_PLACEHOLDER = "查找",

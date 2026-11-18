@@ -391,6 +391,7 @@ fn build(
                 .when_some(ask_hover, |d, hover| {
                     d.on_hover(crate::views::refs::affordance::track_hover(hover))
                 })
+                .children(code_end_cover(&shown, cx))
                 // The hidden 问这里 keeps its width: it goes first, so the language
                 // rests beside the copy button.
                 .children(ask)
@@ -419,11 +420,21 @@ fn body_style() -> TextViewStyle {
     TextViewStyle::default()
         .table(table)
         .code_block(code_block_style())
+        .code_block_one_line(
+            StyleRefinement::default()
+                .pt(CODE_ONE_LINE_PAD)
+                .pb(CODE_ONE_LINE_PAD)
+                .pr(crate::ui::native::metrics::CODE_BLOCK_ONE_LINE_END),
+            Some(CODE_ONE_LINE_ACTIONS_TOP),
+        )
 }
 
 use crate::ui::native::metrics::{
-    CODE_BLOCK_ACTIONS as CODE_ACTIONS, CODE_BLOCK_END_INSET as CODE_END_INSET,
-    CODE_BLOCK_PAD_BOTTOM as CODE_PAD_BOTTOM, CODE_BLOCK_STRIP as CODE_STRIP,
+    CODE_BLOCK_ACTIONS as CODE_ACTIONS, CODE_BLOCK_ACTIONS_INSET as CODE_ACTIONS_INSET,
+    CODE_BLOCK_END_INSET as CODE_END_INSET,
+    CODE_BLOCK_ONE_LINE_ACTIONS_TOP as CODE_ONE_LINE_ACTIONS_TOP,
+    CODE_BLOCK_ONE_LINE_PAD as CODE_ONE_LINE_PAD, CODE_BLOCK_PAD_BOTTOM as CODE_PAD_BOTTOM,
+    CODE_BLOCK_STRIP as CODE_STRIP,
 };
 
 /// The code block (§2.4, §2.17; review 2 R1-04):
@@ -458,6 +469,11 @@ fn code_block_style() -> StyleRefinement {
     code
 }
 
+/// A block of one line has no action strip: its actions sit on the line.
+pub(crate) fn code_is_one_line(code: &str) -> bool {
+    !code.trim_end_matches('\n').contains('\n')
+}
+
 /// The `+` and `-` lines of a diff fence: each tint runs the block's whole inner width,
 /// as a Card v2 diff row does (a text run's own background would stop at its last letter).
 /// It holds while the code scrolls sideways; a tint this light leaves the text over it as
@@ -465,6 +481,11 @@ fn code_block_style() -> StyleRefinement {
 fn diff_lines(code: &str, info: Option<&str>, cx: &App) -> gpui::Div {
     use crate::ui::native::tokens::{card_v2, layout, text};
     let k = theme::colors(cx);
+    let first_line = if code_is_one_line(code) {
+        CODE_ONE_LINE_PAD
+    } else {
+        CODE_STRIP
+    };
     // The block's own width: 640, or the column when that is narrower.
     div().relative().w(layout::IN_THREAD).max_w_full().children(
         code::diff_lines(code, info.unwrap_or_default())
@@ -472,7 +493,7 @@ fn diff_lines(code: &str, info: Option<&str>, cx: &App) -> gpui::Div {
             .map(|(line, added)| {
                 div()
                     .absolute()
-                    .top(layout::BORDER + CODE_STRIP + text::MONO.1 * line as f32)
+                    .top(layout::BORDER + first_line + text::MONO.1 * line as f32)
                     .left(layout::BORDER)
                     .right(layout::BORDER)
                     .h(text::MONO.1)
@@ -487,19 +508,26 @@ fn diff_lines(code: &str, info: Option<&str>, cx: &App) -> gpui::Div {
 /// before it (the 16 padding), so the fade shows only on a line that runs
 /// past the edge, where it softens the cut into a cue that the block
 /// scrolls. It is drawn from the pinned actions, so it stays at the edge
-/// while the code scrolls.
+/// while the code scrolls. On a block of one line the actions share the line, so the
+/// fade ends at their leading edge.
 fn code_edge_fade(code: &str, cx: &App) -> impl IntoElement {
-    use crate::ui::native::tokens::text;
+    use crate::ui::native::tokens::{layout, text};
     let lines = code.trim_end_matches('\n').lines().count().max(1) as f32;
     let fill = gpui_component::ActiveTheme::theme(cx).muted;
     // The actions sit 8 in from the block's top and right edges (gpui-base);
     // the fade starts at the end of the strip and stops at the last line.
-    let inset = px(8.);
+    let inset = CODE_ACTIONS_INSET;
     div()
         .absolute()
-        .top(CODE_STRIP - inset)
-        // Inside the block's 1 px border.
-        .right(px(1.) - inset)
+        .map(|d| {
+            if code_is_one_line(code) {
+                d.top(layout::BORDER + CODE_ONE_LINE_PAD - CODE_ONE_LINE_ACTIONS_TOP)
+                    .right(gpui::relative(1.))
+            } else {
+                // Inside the block's 1 px border.
+                d.top(CODE_STRIP - inset).right(px(1.) - inset)
+            }
+        })
         .w(theme::space::S16)
         .h(text::MONO.1 * lines)
         .bg(gpui::linear_gradient(
@@ -507,6 +535,23 @@ fn code_edge_fade(code: &str, cx: &App) -> impl IntoElement {
             gpui::linear_color_stop(fill.opacity(0.), 0.),
             gpui::linear_color_stop(fill, 1.),
         ))
+}
+
+/// A block of one line scrolls under its actions: this fills the inset between them and the
+/// block's edge, so no cut letter shows past the copy button. It starts under the button, to
+/// close the actions' rounded corners too.
+fn code_end_cover(code: &str, cx: &App) -> Option<gpui::Div> {
+    use crate::ui::native::tokens::{layout, text};
+    code_is_one_line(code).then(|| {
+        div()
+            .absolute()
+            .top(layout::BORDER + CODE_ONE_LINE_PAD - CODE_ONE_LINE_ACTIONS_TOP)
+            // Inside the block's 1 px border.
+            .right(layout::BORDER - CODE_ACTIONS_INSET)
+            .w(CODE_ACTIONS_INSET * 2. - layout::BORDER)
+            .h(text::MONO.1)
+            .bg(gpui_component::ActiveTheme::theme(cx).muted)
+    })
 }
 
 // --- v11/inc-diagrams: ```mermaid fences drawn as diagrams (REFS §B1) ---

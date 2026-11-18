@@ -418,6 +418,10 @@ pub(super) fn resolve_component_style(
             StyleRefinement::default().text_size(text_size)
         })
         .with_code_block(code_block)
+        .with_code_block_one_line(
+            legacy.code_block_one_line.clone(),
+            legacy.code_block_one_line_actions_top,
+        )
         .with_table(table)
         .with_table_head(table_head)
         .with_table_cell(table_cell)

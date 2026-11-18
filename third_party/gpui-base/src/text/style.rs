@@ -21,6 +21,10 @@ pub struct TextViewStyle {
     paragraph_gap: Rems,
     heading: Arc<dyn Fn(u8) -> StyleRefinement + Send + Sync + 'static>,
     code_block: StyleRefinement,
+    /// Applied over `code_block` to a block of one line.
+    code_block_one_line: StyleRefinement,
+    /// The top of the actions of a block of one line, when not the default.
+    code_block_one_line_actions_top: Option<gpui::Pixels>,
     table: StyleRefinement,
     table_head: StyleRefinement,
     table_cell: StyleRefinement,
@@ -50,6 +54,8 @@ impl PartialEq for TextViewStyle {
             && (Arc::ptr_eq(&self.heading, &other.heading)
                 || (1..=6).all(|level| (self.heading)(level) == (other.heading)(level)))
             && self.code_block == other.code_block
+            && self.code_block_one_line == other.code_block_one_line
+            && self.code_block_one_line_actions_top == other.code_block_one_line_actions_top
             && self.table == other.table
             && self.table_head == other.table_head
             && self.table_cell == other.table_cell
@@ -93,6 +99,8 @@ impl TextViewStyle {
             paragraph_gap: rems(0.75),
             heading: Arc::new(|_| StyleRefinement::default()),
             code_block: StyleRefinement::default(),
+            code_block_one_line: StyleRefinement::default(),
+            code_block_one_line_actions_top: None,
             table: StyleRefinement::default(),
             table_head: StyleRefinement::default(),
             table_cell: StyleRefinement::default(),
@@ -170,6 +178,18 @@ impl TextViewStyle {
     /// its edge.
     pub fn with_code_block(mut self, style: StyleRefinement) -> Self {
         self.code_block = style;
+        self
+    }
+
+    /// Sets the refinement over the code block style for a block of one line, and where
+    /// its actions sit.
+    pub fn with_code_block_one_line(
+        mut self,
+        style: StyleRefinement,
+        actions_top: Option<gpui::Pixels>,
+    ) -> Self {
+        self.code_block_one_line = style;
+        self.code_block_one_line_actions_top = actions_top;
         self
     }
 
@@ -303,6 +323,16 @@ impl TextViewStyle {
     /// The style refinement for code blocks.
     pub fn code_block(&self) -> &StyleRefinement {
         &self.code_block
+    }
+
+    /// The refinement over [`Self::code_block`] for a block of one line.
+    pub fn code_block_one_line(&self) -> &StyleRefinement {
+        &self.code_block_one_line
+    }
+
+    /// The top of the actions of a block of one line, when not the default.
+    pub fn code_block_one_line_actions_top(&self) -> Option<gpui::Pixels> {
+        self.code_block_one_line_actions_top
     }
 
     /// The style refinement for the table container.
