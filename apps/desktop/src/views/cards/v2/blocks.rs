@@ -3779,8 +3779,6 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
             // its icon (§2.12: no free colored mark).
             Some(false) => Some((Sym::Check, k.ink_3)),
             Some(true) => Some((Sym::Close, k.bad)),
-            // Not checked: a muted mark, so it does not read as the answer's last line.
-            None if matches!(state, Some(EvidenceState::Info)) => Some((Sym::Info, k.ink_3)),
             None => None,
         };
         // Test counts say the result themselves (card2: read these, not the label).
@@ -3792,6 +3790,10 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
         // A result with a sentence of detail reads as a line; a bare count
         // as a chip.
         if let Some(d) = detail.as_ref().filter(|d| d.chars().count() > 8) {
+            // A sentence about a check not made: a muted mark, so it does not read as the
+            // answer's last line. A bare chip (截图 6, 日志) stays unmarked.
+            let glyph = glyph
+                .or(matches!(state, Some(EvidenceState::Info)).then_some((Sym::Info, k.ink_3)));
             let head = small(div())
                 .id(ctx.id(format!("proof-line-head-{i}")))
                 .flex()
