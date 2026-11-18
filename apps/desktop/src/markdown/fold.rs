@@ -38,7 +38,7 @@ pub fn text_hash(text: &str) -> u64 {
 }
 
 /// `(fence char, run length, info)` of an opening fence line at column 0.
-fn fence_open(line: &str) -> Option<(char, usize, &str)> {
+pub fn fence_open(line: &str) -> Option<(char, usize, &str)> {
     let text = line.trim_end_matches(['\n', '\r']);
     let ch = match text.chars().next() {
         Some(c @ ('`' | '~')) => c,
@@ -49,7 +49,8 @@ fn fence_open(line: &str) -> Option<(char, usize, &str)> {
     (run >= 3 && !(ch == '`' && info.contains('`'))).then_some((ch, run, info))
 }
 
-fn fence_close(line: &str, ch: char, run: usize) -> bool {
+/// Whether `line` closes a fence opened by a run of `run` `ch`.
+pub fn fence_close(line: &str, ch: char, run: usize) -> bool {
     let text = line.trim_end_matches(['\n', '\r']);
     let indent = text.len() - text.trim_start_matches(' ').len();
     let t = &text[indent..];
@@ -208,6 +209,13 @@ pub fn reopen_code(source: &str) {
 /// The fold whose drawn code is `shown`, if that code block is a long one.
 pub fn fold_of(shown: &str) -> Option<CodeFold> {
     SHOWN.with(|s| s.borrow().get(&text_hash(shown)).cloned())
+}
+
+/// The lines of a folded block above its cut line, from the code the renderer draws.
+/// `None` for a block that is drawn whole.
+pub fn folded_head(drawn: &str) -> Option<&str> {
+    let (head, cut) = drawn.rsplit_once('\n')?;
+    (cut.trim_end_matches(APART) == CUT_MARK).then_some(head)
 }
 
 /// Opens or closes the code block whose whole code is `full`.
@@ -386,6 +394,14 @@ mod tests {
             let cut = d.lines().last().unwrap();
             assert_eq!(cut.trim_end_matches(APART), CUT_MARK);
         }
+    }
+
+    #[test]
+    fn the_head_of_a_folded_block_is_what_stands_above_its_cut_line() {
+        assert_eq!(folded_head(&format!("a\nb\n{CUT_MARK}")), Some("a\nb"));
+        assert_eq!(folded_head(&format!("a\n{CUT_MARK}{APART}")), Some("a"));
+        assert_eq!(folded_head("a\nb"), None);
+        assert_eq!(folded_head(CUT_MARK), None);
     }
 
     #[test]

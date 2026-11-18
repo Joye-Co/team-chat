@@ -103,4 +103,6 @@ crate::copy! {
     BODY_EXPAND = "展开全文 · 约 {m} 分钟",
     BODY_COLLAPSE = "收起",
     STEPS_DURATION_WHOLE_MIN = "{m} 分钟",
+    // The run card of a run being stopped: the step it stops at.
+    PLAN_HELD = "停在：{step}",
 }

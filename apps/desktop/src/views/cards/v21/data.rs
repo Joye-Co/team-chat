@@ -454,10 +454,12 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
     let n = xs.len();
     // The columns start where the plot does (after the y-axis labels).
     let left = super::super::v2::chart_plot_left(*kind, series);
+    // They end above the legend, which belongs to no column.
+    let legend = super::super::v2::chart_legend_room(series.len());
     let tint = div()
         .absolute()
         .top_0()
-        .bottom_0()
+        .bottom(legend)
         .right_0()
         .left(left)
         .flex()
@@ -496,8 +498,8 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
                     div()
                         .absolute()
                         .top_0()
-                        // The focus ring clears the x label under the point.
-                        .bottom(-space::S4)
+                        // Above the legend; the focus ring clears the x label under the point.
+                        .bottom(legend - space::S4)
                         .right_0()
                         .left(left)
                         .flex()
@@ -898,8 +900,8 @@ pub fn metric(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App)
         .id(eid(node, format!("metric-{id}")))
         .mx(px(-8.))
         .px(px(8.))
-        .py(px(4.))
-        .my(px(-4.))
+        .py(crate::ui::native::tokens::space::S6)
+        .my(-crate::ui::native::tokens::space::S6)
         .rounded(theme::radius::MD)
         // A metric that answers a press looks and works like one: the row hover, the
         // pointer, a tab stop with the focus ring and Enter / Space.

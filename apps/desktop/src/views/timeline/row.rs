@@ -287,7 +287,9 @@ impl TimelineView {
         let find_marks = (!deleted)
             .then(|| self.find_marked_body(key, shown_body, cx))
             .flatten();
-        let find_band = find_marks.as_ref().is_some_and(|(_, unmarked)| *unmarked)
+        let find_band = find_marks
+            .as_ref()
+            .is_some_and(|(_, _, unmarked)| *unmarked)
             || (model::is_jumbo(shown_body) && self.is_find_current_row(key));
         // The mark follows the last line (§7.5, U12): inside the body text
         // when it can, on its own line only after a code block or a table.
@@ -399,9 +401,13 @@ impl TimelineView {
                 self.unfolded.insert(key.to_string());
             }
             let folded = fold_at.filter(|_| !self.unfolded.contains(key));
+            let find_code = find_marks
+                .as_ref()
+                .map(|(_, code, _)| code.clone())
+                .unwrap_or_default();
             let body_source = match (search_query, find_marks, folded) {
                 (Some(query), _, _) => markdown::mark_query(shown_body, &query),
-                (None, Some((marked, _)), _) => marked,
+                (None, Some((marked, _, _)), _) => marked,
                 (None, None, Some(at)) => shown_body[..at].to_string(),
                 (None, None, None) => shown_body.to_string(),
             };
@@ -448,7 +454,7 @@ impl TimelineView {
                     })),
                 )
             });
-            let (view, inline) = markdown::message_body_refs(
+            let (view, inline) = markdown::message_body_found(
                 ElementId::Name(format!("body-{key}").into()),
                 body_source,
                 &markdown::mention_targets(&self.members, self.me.as_deref()),
@@ -464,6 +470,7 @@ impl TimelineView {
                     open_code: self.code_open.contains_key(key),
                 }),
                 refs_body.as_ref(),
+                find_code,
             );
             mark_inline = inline;
             // F15 dir auto: a body whose first strong letter is right to
@@ -1307,17 +1314,7 @@ impl TimelineView {
         let media: AnyElement = match &peer {
             Some(m) => ui::MemberAvatar::new(Some(m), crate::ui::native::tokens::avatar::LG)
                 .into_any_element(),
-            None => div()
-                .size(crate::ui::native::tokens::avatar::LG)
-                .rounded(theme::radius::FIELD)
-                .border_1()
-                .border_color(n.separator)
-                .bg(n.fill)
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(ui::sym(Sym::Topic, ui::SymSize::TOOLBAR, n.secondary))
-                .into_any_element(),
+            None => crate::ui::native::icon_box(Sym::Topic, cx).into_any_element(),
         };
         let actions = self.start_actions(topic, peer.is_none(), cx);
         div()

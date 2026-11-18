@@ -50,8 +50,8 @@ impl RefsBody {
 // Table affordances (v1 card tables and Markdown tables)
 // ---------------------------------------------------------------------------------------
 
-/// Width of the slot at the end of each row that holds 问这里: the button (about 91
-/// at the small size) and the 4 after it, so it never lies over the last column.
+/// Width of the slot at the end of a row that holds 问这里: the button (about 91 at the
+/// small size) and the 4 after it.
 pub const ROW_BUTTON_SLOT: f32 = 96.;
 
 /// The gap between a row's name and its 问这里 (Refs.dc.html).
@@ -172,17 +172,18 @@ impl TableRefs {
         .into_any_element()
     }
 
-    /// The slot at the end of a row: 问这里 for the hovered cell, at the row's right end
-    /// and centered on its height (REFS §A3), when it does not sit after the row's name.
-    pub fn row_end_unless(&self, row: usize, beside: bool, cx: &App) -> AnyElement {
-        if beside {
-            return div()
-                .ml_auto()
-                .w(px(ROW_BUTTON_SLOT))
-                .flex_none()
-                .into_any_element();
-        }
-        self.row_end(row, cx)
+    /// [`Self::row_end`] floating over the row at the frame's right inset, so the last
+    /// column reaches that inset at rest (§2.7). The button is opaque and covers the last
+    /// value only while its row is hovered. Put it in a row that is `relative`.
+    pub fn row_end_over(&self, row: usize, cx: &App) -> AnyElement {
+        div()
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .right(space::S12)
+            .flex()
+            .child(self.row_end(row, cx))
+            .into_any_element()
     }
 
     /// The slot at the end of a row: 问这里 for the hovered cell, at the row's right end
@@ -445,9 +446,9 @@ impl MarkdownPlugin for TablePlugin {
     }
 }
 
-/// Column width from its longest cell, in points.
-fn column_width(columns: &[String], rows: &[Vec<String>], col: usize) -> f32 {
-    let longest = std::iter::once(columns.get(col).map(String::as_str).unwrap_or(""))
+/// The length of a column's longest cell, in Latin letters (a CJK character is 1.8).
+fn column_length(columns: &[String], rows: &[Vec<String>], col: usize) -> f32 {
+    std::iter::once(columns.get(col).map(String::as_str).unwrap_or(""))
         .chain(
             rows.iter()
                 .map(|r| r.get(col).map(String::as_str).unwrap_or("")),
@@ -457,15 +458,31 @@ fn column_width(columns: &[String], rows: &[Vec<String>], col: usize) -> f32 {
                 .map(|ch| if ch.is_ascii() { 1.0 } else { 1.8 })
                 .sum::<f32>()
         })
-        .fold(0.0_f32, f32::max);
-    (longest * 7.0 + 24.0).clamp(64.0, 280.0)
+        .fold(0.0_f32, f32::max)
+}
+
+/// Column width from its longest cell, in points.
+fn column_width(columns: &[String], rows: &[Vec<String>], col: usize) -> f32 {
+    (column_length(columns, rows, col) * 7.0 + 24.0).clamp(64.0, 280.0)
+}
+
+/// The column that takes a table's free width: the text column with the longest content,
+/// the first of equals; with only number columns, the first.
+fn growing_column(columns: &[String], rows: &[Vec<String>], right: &[bool]) -> usize {
+    (0..columns.len())
+        .filter(|i| !right.get(*i).copied().unwrap_or(false))
+        .rev()
+        .max_by(|a, b| {
+            column_length(columns, rows, *a).total_cmp(&column_length(columns, rows, *b))
+        })
+        .unwrap_or(0)
 }
 
 /// A table (§2.7): a frame (radius 10, 1 px border), a header row h40 on the muted fill
 /// (12 medium muted, compact in a thread), rows h40 with a line between them, cells px 12
-/// (16 at the frame's edges). The first text column takes the free width, so the columns
-/// fill the frame; number columns keep the width of their longest value and never
-/// truncate. A table wider than the frame scrolls sideways inside it.
+/// (16 at the frame's edges). The text column with the longest content takes the free
+/// width, so the columns fill the frame; number columns keep the width of their longest
+/// value and never truncate. A table wider than the frame scrolls sideways inside it.
 pub fn table(
     key: &str,
     columns: &[String],
@@ -485,10 +502,7 @@ pub fn table(
         *w += NAME_ROOM;
     }
     let last = columns.len().saturating_sub(1);
-    // The column that takes the free width: the first one that is not a number column.
-    let grow = (0..columns.len())
-        .find(|i| !right.get(*i).copied().unwrap_or(false))
-        .unwrap_or(0);
+    let grow = growing_column(columns, rows, right);
     let cell = |text: String, i: usize, width: f32, right: bool| -> Div {
         div()
             .when(i == grow, |d| d.flex_1().min_w(px(width)))
@@ -521,11 +535,6 @@ pub fn table(
             Some(r) => r.header(el, i, window, cx),
             None => el.into_any_element(),
         });
-    }
-    // 问这里 has its own trailing slot, as in a card's table: over the cells it would hide
-    // the very values the reader is about to ask about.
-    if refs.is_some() {
-        header = header.child(div().w(px(ROW_BUTTON_SLOT)).flex_none());
     }
     let frame_radius = crate::ui::native::tokens::radius::CONTAINER;
     // The frame's radius less its 1 px border: what a fill inside it rounds to.
@@ -569,7 +578,7 @@ pub fn table(
             });
         }
         if let Some(r) = refs {
-            line = line.child(r.row_end_unless(ri, beside, cx));
+            line = line.child(r.row_end_over(ri, cx));
         }
         line
     });

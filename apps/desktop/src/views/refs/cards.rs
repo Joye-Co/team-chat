@@ -567,8 +567,9 @@ pub fn chart_overlay(
 const TIP_H: gpui::Pixels = gpui::px(38.);
 const TIP_GAP: gpui::Pixels = gpui::px(8.);
 
-/// The plot's offset in a chart element: below the label row when the chart has a label
-/// or a legend (`views::cards::v2::chart`: an 18 pt row and a 12 pt gap).
+/// The plot's offset in a chart element: below the label row when the chart has a label,
+/// or a legend, whose chart keeps that row for the point tooltip
+/// (`views::cards::v2::chart`: an 18 pt row and a 12 pt gap).
 pub fn chart_plot_top(b: &CardV2Block) -> gpui::Pixels {
     match b {
         CardV2Block::Chart { label, series, .. } if label.is_some() || series.len() > 1 => {

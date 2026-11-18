@@ -18,7 +18,7 @@ use crate::{
     data::{AdminError, Millis, TopicRelay},
     ui::native::{
         BadgeState, NativeType as _, PushSize, PushStyle, StatusBadge, native_colors, push_button,
-        tokens::{radius, space},
+        tokens::{height, radius, space},
     },
     views::{shell::panes::watch, timeline::v2 as timeline_v2},
 };
@@ -269,7 +269,8 @@ impl Render for RelayStrip {
             push_button(
                 "relay-retry",
                 c::RELAY_RETRY,
-                PushStyle::Outline,
+                // The order is stuck: going on is the next step (§2.15).
+                PushStyle::Default,
                 PushSize::Small,
                 cx,
             )
@@ -279,6 +280,8 @@ impl Render for RelayStrip {
         });
         let stop = view.can_stop.then(|| {
             let (r, g, t) = (relay.clone(), g.clone(), t.clone());
+            let entity = cx.entity();
+            let paused = relay.state == "paused";
             push_button(
                 "relay-stop",
                 c::RELAY_STOP,
@@ -287,7 +290,24 @@ impl Render for RelayStrip {
                 cx,
             )
             .disabled(busy)
-            .on_click(cx.listener(move |this, _, _, cx| this.act(&r, &g, &t, false, cx)))
+            .on_click(move |_, window, cx| {
+                // A stopped order cannot go on: 停止 always asks (§2.10).
+                let (entity, r, g, t) = (entity.clone(), r.clone(), g.clone(), t.clone());
+                crate::views::nav::dialogs::destructive_alert(
+                    "relay-stop-confirm",
+                    c::RELAY_STOP_TITLE.to_string(),
+                    if paused {
+                        c::RELAY_STOP_MESSAGE_PAUSED
+                    } else {
+                        c::RELAY_STOP_MESSAGE_RUNNING
+                    }
+                    .to_string(),
+                    crate::copy::overlays::STOP_OK,
+                    move |_, cx| entity.update(cx, |this, cx| this.act(&r, &g, &t, false, cx)),
+                    window,
+                    cx,
+                )
+            })
         });
         let steps: Vec<AnyElement> = view
             .steps
@@ -317,6 +337,9 @@ impl Render for RelayStrip {
                     .child(
                         div()
                             .w_full()
+                            // As tall with its buttons as without: the bar
+                            // keeps its height when the order changes state.
+                            .min_h(height::SM)
                             .flex()
                             .items_center()
                             .gap(space::S12)
@@ -483,7 +506,10 @@ mod tests {
         let mut r = relay("stopped", 1, vec![step("a", "done"), step("b", "stopped")]);
         r.stopped_by = Some("me".into());
         let v = strip_view(&r, 2_000, &name).unwrap();
-        assert_eq!(v.line.as_deref(), Some("Joye 停止了，要继续就再写一条顺序"));
+        assert_eq!(
+            v.line.as_deref(),
+            Some("Joye 停止了。要继续，在下面用 → 连起成员")
+        );
         assert_eq!(v.steps[1].word, Some(("停止了", BadgeState::Deactivated)));
         assert!(!v.can_stop && !v.can_retry);
         // An unknown relay state reads as stopped too.

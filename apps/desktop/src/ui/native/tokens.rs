@@ -1219,6 +1219,8 @@ pub mod card_v2 {
     pub const CHART_BAR_LABEL: Pixels = px(28.);
     /// The legend swatch of a chart series.
     pub const CHART_SWATCH: Pixels = px(16.);
+    /// The line height of a card's 12 pt meta text.
+    pub const META_LINE: Pixels = px(18.);
 
     pub const YOU_FILL: f32 = 0.10;
     pub const YOU_EDGE: f32 = 0.24;

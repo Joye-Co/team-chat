@@ -128,6 +128,27 @@ pub fn message_body_refs(
     diagrams: Option<&DiagramContext>,
     refs: Option<&crate::views::refs::markdown::RefsBody>,
 ) -> (TextView, bool) {
+    message_body_found(id, text, mentions, edited, diagrams, refs, Vec::new())
+}
+
+/// The ⌘F matches inside one code fence of a body: the fence's code and, as byte ranges
+/// of that code, what to fill and with which color.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CodeMark {
+    pub code: String,
+    pub spans: Vec<(std::ops::Range<usize>, gpui::Hsla)>,
+}
+
+/// [`message_body_refs`] with the ⌘F matches inside its code fences filled.
+pub fn message_body_found(
+    id: impl Into<ElementId>,
+    text: impl Into<SharedString>,
+    mentions: &[MentionTarget],
+    edited: bool,
+    diagrams: Option<&DiagramContext>,
+    refs: Option<&crate::views::refs::markdown::RefsBody>,
+    code_marks: Vec<CodeMark>,
+) -> (TextView, bool) {
     build(
         id,
         text,
@@ -141,7 +162,6 @@ pub fn message_body_refs(
             streaming: d.streaming,
         }),
         refs,
-        None,
         // A long code fence of a finished timeline message is folded; while
         // the body streams its text still changes under the fold.
         match diagrams {
@@ -149,6 +169,7 @@ pub fn message_body_refs(
             Some(d) if !d.streaming => CodeFolds::Folded,
             _ => CodeFolds::None,
         },
+        code_marks,
     )
 }
 
@@ -166,14 +187,12 @@ pub struct DocContext {
 /// [`crate::diagrams::MAX_PER_MESSAGE`] per part). Nothing in a document is
 /// folded: the reader is where the whole text is read.
 ///
-/// `code_marks` are the find bar's matches inside its code fences, painted in `ink` on
-/// each match's fill.
+/// `code_marks` are the find bar's matches inside its code fences.
 pub fn document_body_marked(
     id: impl Into<ElementId>,
     text: impl Into<SharedString>,
     doc: &DocContext,
-    code_marks: Vec<crate::views::timeline::find::FenceMarks>,
-    ink: gpui::Hsla,
+    code_marks: Vec<CodeMark>,
 ) -> TextView {
     build(
         id,
@@ -185,8 +204,8 @@ pub fn document_body_marked(
             streaming: false,
         }),
         None,
-        (!code_marks.is_empty()).then(|| code::marked_highlighter(code_marks, ink)),
         CodeFolds::None,
+        code_marks,
     )
     .0
 }
@@ -215,8 +234,8 @@ fn build(
     edited: bool,
     diagrams: Option<DiagramsOf>,
     refs: Option<&crate::views::refs::markdown::RefsBody>,
-    highlighter: Option<code::Highlighter>,
     code_folds: CodeFolds,
+    code_marks: Vec<CodeMark>,
 ) -> (TextView, bool) {
     let text: SharedString = text.into();
     let source = link_mentions(&fix_cjk_strong(&normalize_fences(&text)), mentions);
@@ -254,7 +273,7 @@ fn build(
         .plugin(EditedPlugin)
         .when_some(diagram_plugin, |view, p| view.plugin(p))
         .when_some(table_plugin, |view, p| view.plugin(p))
-        .code_block_highlighter(highlighter.unwrap_or_else(code::highlighter))
+        .code_block_highlighter(code::marked_highlighter(code_marks))
         .code_block_backdrop(|code, _window, cx| {
             diff_lines(&code.code(), code.lang().as_deref(), cx)
         })

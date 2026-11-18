@@ -186,7 +186,8 @@ impl TimelineView {
 
     /// The working card's title and StatusBadge: `Forge 正在做：<step>`
     /// (no plan: `Forge 在做`) and 停止中, 已暂停, 等你 or `在做 2/5`. A run
-    /// that is held reads `Forge 停在：<step>`, one that waits `Forge：<step>`.
+    /// that is held or being stopped reads `Forge 停在：<step>`, one that
+    /// waits `Forge：<step>`.
     fn working_header(
         &self,
         run: &BotRunSummary,
@@ -250,19 +251,17 @@ impl TimelineView {
         let doing = progress_of
             .and_then(|(_, _, now)| now)
             .or_else(|| {
-                (!stopping)
-                    .then(|| {
-                        crate::views::process::live_action(
-                            &self.services.provider.run_process(&run.id).steps,
-                        )
-                    })
-                    .flatten()
+                crate::views::process::live_action(
+                    &self.services.provider.run_process(&run.id).steps,
+                )
             })
             .map(|step| {
                 // The title never says 正在做 beside a badge that says it is
-                // not: a held run 停在 its step, a waiting one only names it.
+                // not: a run being stopped or held 停在 its step, a waiting
+                // one only names it. (`phase` stays Working while stopping.)
                 use crate::data::run_phase::RunPhase;
                 let template = match phase {
+                    _ if stopping => t::PLAN_HELD_NAMED,
                     RunPhase::Working => t::PLAN_DOING_NAMED,
                     p if p.held() => t::PLAN_HELD_NAMED,
                     _ => t::PLAN_STEP_NAMED,
@@ -423,11 +422,9 @@ impl TimelineView {
                 .px(space::S8)
                 .flex()
                 .gap(space::S12)
-                .child(
-                    div()
-                        .flex_none()
-                        .child(ui::MemberAvatar::new(bot.as_ref(), GUTTER)),
-                )
+                // The gutter stays empty, as beside the working card this
+                // alert replaces: its description names the member.
+                .child(div().flex_none().w(GUTTER))
                 .child(
                     div()
                         .flex_1()

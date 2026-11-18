@@ -740,7 +740,6 @@ fn markdown_blocks(
                         part: i,
                     },
                     code_marks,
-                    k.text_1,
                 ))
                 .into_any_element()
         }))

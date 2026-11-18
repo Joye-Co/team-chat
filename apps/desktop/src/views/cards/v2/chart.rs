@@ -2,8 +2,7 @@
 //! "Chart"). The main series is `ink` (solid, with a dot on its last point),
 //! each other series its own stroke of the mono palette ([`stroke`]); three quiet
 //! grid lines; mono axis labels under the points, only as many as fit
-//! ([`shown_labels`]); a legend at the right of the label row, under it when it
-//! does not fit.
+//! ([`shown_labels`]); a legend under those labels, on the plot's left edge.
 //! Lines draw in once ([`motion::LINE_DRAW`], each further series
 //! [`motion::SERIES_STAGGER`] later) and bars grow from zero once
 //! ([`motion::BAR_GROW`]), once per chart in the session; with Reduce motion
@@ -156,6 +155,16 @@ pub(crate) enum Dash {
     Solid,
     Dashed,
     Dotted,
+}
+
+/// What the legend of a chart with `series` series adds under its axis labels: one line
+/// and the chart's gap. The columns of a chart to pick from stop above it.
+pub(crate) fn legend_room(series: usize) -> Pixels {
+    if series > 1 {
+        m::META_LINE + space::S12
+    } else {
+        px(0.)
+    }
 }
 
 /// The stroke of series `i` (a chart has at most five): the main series is solid `ink`;
@@ -589,13 +598,12 @@ pub(crate) fn chart(
         .flex_col()
         .gap(space::S12)
         .child(
-            // The title cuts with "…"; a legend that does not fit beside it goes under it.
+            // The title cuts with "…". The row stays with no title on a chart with a
+            // legend: a focused point's tooltip sits here, over neither line nor legend.
             meta(div())
                 .flex()
-                .flex_wrap()
                 .items_center()
-                .gap_x(space::S16)
-                .gap_y(crate::ui::native::tokens::space::S4)
+                .when(legend.is_some(), |el| el.min_h(m::META_LINE))
                 .text_color(k.ink_2)
                 .when_some(title, |el, t| {
                     el.child(
@@ -605,9 +613,6 @@ pub(crate) fn chart(
                                 .text_color(k.ink),
                         ),
                     )
-                })
-                .when_some(legend, |el, l| {
-                    el.child(div().ml_auto().max_w_full().min_w(px(0.)).child(l))
                 }),
         )
         .child(plot)
@@ -637,6 +642,10 @@ pub(crate) fn chart(
                     }),
                 ),
             ))
+        })
+        // Under the labels, on the plot's left edge.
+        .when_some(legend, |el, l| {
+            el.child(meta(div()).pl(left).text_color(k.ink_2).child(l))
         })
         .into_any_element()
 }

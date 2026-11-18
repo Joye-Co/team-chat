@@ -673,7 +673,8 @@ impl TimelineView {
             .child(
                 div()
                     .mt(space::S4)
-                    .n_title3()
+                    .n_headline()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(n.label)
                     .child(title),
             )

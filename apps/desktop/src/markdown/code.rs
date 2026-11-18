@@ -111,6 +111,8 @@ pub fn spans(code: &str, info: &str) -> Vec<(Range<usize>, Span)> {
 struct Palette {
     value: Hsla,
     comment: Hsla,
+    /// The text of a ⌘F match, on its fill.
+    ink: Hsla,
 }
 
 impl Palette {
@@ -151,6 +153,7 @@ impl Palette {
         Self {
             value: k.text_2,
             comment: k.text_3,
+            ink: k.text_1,
         }
     }
 
@@ -165,10 +168,10 @@ impl Palette {
     }
 }
 
-/// The highlighter of the colors last seen by [`sync_colors`] (the light ones
-/// before any code block was drawn). A body is built without the app, so the
+/// The colors last seen by [`sync_colors`] (the light ones before any code block
+/// was drawn) and their highlighter. A body is built without the app, so the
 /// colors come from the code blocks on screen.
-pub fn highlighter() -> Highlighter {
+fn current() -> (Palette, Highlighter) {
     CURRENT.with(|current| {
         current
             .borrow_mut()
@@ -176,7 +179,6 @@ pub fn highlighter() -> Highlighter {
                 let palette = Palette::of(&theme::colors_for(false, false));
                 (palette, palette.highlighter())
             })
-            .1
             .clone()
     })
 }
@@ -200,22 +202,76 @@ pub fn diff_lines(code: &str, info: &str) -> Vec<(usize, bool)> {
     out
 }
 
-/// The app's highlighter with the find bar's matches on top: `marks` are the fences that
-/// hold one, each match in `ink` on its own fill.
-pub fn marked_highlighter(
-    marks: Vec<crate::views::timeline::find::FenceMarks>,
-    ink: Hsla,
-) -> Highlighter {
-    let base = highlighter();
-    Arc::new(move |block: &CodeBlock| {
-        let styles = base(block);
-        let code = block.code();
-        let code = code.trim_end_matches(['\n', '\r']);
-        match marks.iter().find(|(fence, _)| fence == code) {
-            Some((_, on)) => overlay(styles, on, ink),
-            None => styles,
+/// The app's highlighter with the ⌘F matches of `marks` on top, each in the text color on its
+/// own fill.
+///
+/// The same marks get the same `Arc`: a code block keeps its highlights only while its
+/// highlighter is the same one, and a row is built on every frame.
+pub fn marked_highlighter(marks: Vec<super::CodeMark>) -> Highlighter {
+    let (palette, base) = current();
+    if marks.is_empty() {
+        return base;
+    }
+    MARKED.with(|built| {
+        let mut built = built.borrow_mut();
+        let known = built
+            .iter()
+            .find(|(b, m, _)| Arc::ptr_eq(b, &base) && *m == marks);
+        if let Some((_, _, marked)) = known {
+            return marked.clone();
         }
+        let marked = with_marks(base.clone(), marks.clone(), palette.ink);
+        if built.len() == MARKED_KEPT {
+            built.remove(0);
+        }
+        built.push((base, marks, marked.clone()));
+        marked
     })
+}
+
+/// How many marked highlighters stay built: more than the rows a window shows.
+const MARKED_KEPT: usize = 32;
+
+thread_local! {
+    /// The marked highlighters in use: the base, the marks and what they built.
+    static MARKED: RefCell<Vec<(Highlighter, Vec<super::CodeMark>, Highlighter)>> =
+        const { RefCell::new(Vec::new()) };
+}
+
+/// `base` with the matches of `marks` over its spans.
+fn with_marks(base: Highlighter, marks: Vec<super::CodeMark>, ink: Hsla) -> Highlighter {
+    Arc::new(move |block: &CodeBlock| {
+        overlay(base(block), &drawn_marks(&marks, &block.code()), ink)
+    })
+}
+
+/// The fills of `marks` on the code a block draws, in order and apart. A folded block
+/// draws the first lines of its fence: the matches past the cut are dropped. Fences that
+/// draw the same text share their matches, the stronger fill winning.
+fn drawn_marks(marks: &[super::CodeMark], drawn: &str) -> Vec<(Range<usize>, Hsla)> {
+    let drawn = drawn.trim_end_matches(['\n', '\r']);
+    let mut fills: Vec<(Range<usize>, Hsla)> = marks
+        .iter()
+        .filter(|m| m.code == drawn)
+        .flat_map(|m| m.spans.iter().cloned())
+        .collect();
+    if fills.is_empty()
+        && let Some(head) = super::fold::folded_head(drawn)
+    {
+        fills = marks
+            .iter()
+            .filter(|m| {
+                m.code
+                    .strip_prefix(head)
+                    .is_some_and(|rest| rest.starts_with('\n'))
+            })
+            .flat_map(|m| m.spans.iter().cloned())
+            .filter(|(r, _)| r.end <= head.len())
+            .collect();
+    }
+    fills.sort_by(|a, b| (a.0.start.cmp(&b.0.start)).then(b.1.a.total_cmp(&a.1.a)));
+    fills.dedup_by_key(|(r, _)| r.start);
+    fills
 }
 
 /// `styles` cut around `marks`, then the marks: the runs must not overlap.
@@ -328,6 +384,7 @@ mod tests {
         let palette = Palette {
             value: gpui::red(),
             comment: gpui::blue(),
+            ink: gpui::black(),
         };
         assert_eq!(
             palette.style(Span::Keyword).font_weight,
@@ -345,5 +402,69 @@ mod tests {
             of(&block.code(), &block.lang().unwrap(), Span::Keyword),
             ["fn"]
         );
+    }
+
+    fn mark(code: &str, spans: Vec<(Range<usize>, Hsla)>) -> crate::markdown::CodeMark {
+        crate::markdown::CodeMark {
+            code: code.to_string(),
+            spans,
+        }
+    }
+
+    #[test]
+    fn the_same_marks_keep_the_same_highlighter() {
+        let fill = gpui::red();
+        let a = marked_highlighter(vec![mark("let seq = 1;", vec![(4..7, fill)])]);
+        let b = marked_highlighter(vec![mark("let seq = 1;", vec![(4..7, fill)])]);
+        assert!(Arc::ptr_eq(&a, &b));
+        let other = marked_highlighter(vec![mark("let seq = 1;", vec![(0..3, fill)])]);
+        assert!(!Arc::ptr_eq(&a, &other));
+        assert!(Arc::ptr_eq(&marked_highlighter(Vec::new()), &current().1));
+    }
+
+    #[test]
+    fn a_match_is_drawn_in_the_ink_on_its_fill_over_the_code_spans() {
+        let fill = gpui::red();
+        let ink = gpui::green();
+        let bold = HighlightStyle {
+            font_weight: Some(gpui::FontWeight::SEMIBOLD),
+            ..Default::default()
+        };
+        let runs = overlay(vec![(0..6, bold)], &[(2..4, fill)], ink);
+        let ranges: Vec<_> = runs.iter().map(|(r, _)| r.clone()).collect();
+        assert_eq!(ranges, [0..2, 2..4, 4..6]);
+        assert_eq!(runs[1].1.color, Some(ink));
+        assert_eq!(runs[1].1.background_color, Some(fill));
+        assert_eq!(runs[0].1, bold);
+    }
+
+    #[test]
+    fn a_folded_block_keeps_only_the_marks_above_its_cut() {
+        use crate::markdown::fold::CUT_MARK;
+        let fill = gpui::red();
+        let code = "seq one\nseq two\nseq three";
+        let marks = [mark(
+            code,
+            vec![(0..3, fill), (8..11, fill), (16..19, fill)],
+        )];
+        // Drawn whole, with the newline the renderer keeps.
+        assert_eq!(drawn_marks(&marks, &format!("{code}\n")).len(), 3);
+        // Folded after two lines: the third match is past the cut.
+        let drawn = format!("seq one\nseq two\n{CUT_MARK}");
+        assert_eq!(drawn_marks(&marks, &drawn), [(0..3, fill), (8..11, fill)]);
+        // A block of other code gets none.
+        assert!(drawn_marks(&marks, &format!("other\n{CUT_MARK}")).is_empty());
+        assert!(drawn_marks(&marks, "seq one").is_empty());
+    }
+
+    #[test]
+    fn fences_that_draw_the_same_code_show_the_stronger_fill() {
+        let weak = gpui::black().opacity(0.1);
+        let strong = gpui::black().opacity(0.4);
+        let marks = [
+            mark("let seq;", vec![(4..7, weak)]),
+            mark("let seq;", vec![(4..7, strong)]),
+        ];
+        assert_eq!(drawn_marks(&marks, "let seq;"), [(4..7, strong)]);
     }
 }

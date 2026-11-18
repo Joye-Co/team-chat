@@ -64,7 +64,8 @@ use crate::{
 pub use line::{notification_text, plan_row};
 // --- inc-cards21 ---
 pub(crate) use chart::{
-    chart as chart_el, plot_left as chart_plot_left, y_from_top as chart_y_from_top,
+    chart as chart_el, legend_room as chart_legend_room, plot_left as chart_plot_left,
+    y_from_top as chart_y_from_top,
 };
 // --- end inc-cards21 ---
 
@@ -711,7 +712,7 @@ pub(crate) fn frame(_waits: bool, cx: &App) -> gpui::Div {
 /// 12/18 text, the artboard's meta line.
 pub(crate) fn meta(el: gpui::Div) -> gpui::Div {
     el.text_size(crate::ui::native::tokens::text::META.0)
-        .line_height(px(18.))
+        .line_height(crate::ui::native::tokens::card_v2::META_LINE)
 }
 
 /// The label and the detail of the strip.

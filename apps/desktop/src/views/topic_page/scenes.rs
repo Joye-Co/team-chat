@@ -133,7 +133,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "topic-relay-refused",
-        about: "Composer after the server refused my order: Scout 现在接不了这件事, in red",
+        about: "Composer after the server refused my order: 没能开始按顺序做：Scout 现在接不了, in red",
         start: Start::V2Relay(RelayShape::Refused),
         setup: |s, cx| v2_open_topic(s, d::DEV, d::T_VIRTUAL, cx),
         open: open_main,

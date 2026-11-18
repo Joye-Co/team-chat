@@ -74,7 +74,9 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
 - Words for several AI members in one 话题 and for work that goes from member to member
   (docs/plans/usable/design-relay.zh.md §3.6). Never 接力 as a noun: an order a person writes
   (`@A → @B → @C`) is 按顺序做, and its steps use the closed set of status words above plus 停止:
-  按顺序做：{names}, 第 {k}/{n} 步, 停在 {name}：{reason}, 都做完了, {name} 停止了, 停止了, 重试, 停止,
+  按顺序做：{names}, 第 {k}/{n} 步, 停在 {name}：{reason}, 都做完了, {name} 停止了。要继续，在下面用 → 连起成员, 停止了, 重试, 停止…,
+  停止这个顺序？, 正在做的成员会停在现在这一步，后面的步不再开始。, 后面的步不再开始。, 要继续，得再写一条顺序。,
+  没能开始按顺序做：{name} 现在接不了,
   没能停止, 没能重试; {a} 把这件事转交给 {b}, {a} 把一部分分给 {b}, 全部停止, 停止这件事里所有在做的？,
   做完的标准, {b} 做完了，结果已交回 {a}, {b} 没做完：{reason}, 被 {name} 停止; the reasons
   {name} 现在接不了这件事, 等 {name} 手上的做完, 交出次数到上限了, {name} 的代码还没推上去,

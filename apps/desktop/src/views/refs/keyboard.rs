@@ -205,6 +205,19 @@ pub fn ring(radius: gpui::Pixels, cx: &App) -> gpui::Div {
         .border_color(n.focus)
 }
 
+/// The focus ring of a whole block: [`ring`] with 6 pt of clear space around the block,
+/// so its content never touches the line. It stays inside the 12 pt between blocks.
+fn block_ring(radius: gpui::Pixels, cx: &App) -> gpui::Div {
+    use crate::ui::native::tokens::{metrics::FOCUS_RING, space};
+    let reach = space::S6 + FOCUS_RING;
+    ring(radius, cx)
+        .top(-reach)
+        .bottom(-reach)
+        .left(-reach)
+        .right(-reach)
+        .rounded(radius + reach)
+}
+
 /// The focused part of block `key`, as an index into `parts`.
 fn current(key: &str, parts: &[NavPart], cx: &App) -> Option<usize> {
     let h = cx.try_global::<super::HubGlobal>()?.0.read(cx);
@@ -301,7 +314,7 @@ pub fn focus_block(
         .track_focus(&f)
         .on_key_down(move |e: &KeyDownEvent, window, cx| on_key(&k, &parts, &whole, e, window, cx))
         .child(el)
-        .children(own_ring.then(|| ring(theme::radius::MD, cx)))
+        .children(own_ring.then(|| block_ring(theme::radius::MD, cx)))
         .into_any_element()
 }
 
