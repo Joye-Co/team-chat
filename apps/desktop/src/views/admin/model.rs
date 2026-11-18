@@ -5,6 +5,7 @@
 use chat_core::proto::machine::login_state;
 use chat_core::proto::monitor::{MachineMonitor, MonitorMember, run_state};
 
+use super::AdminPage;
 use crate::copy::{admin as m, fill};
 
 /// The ranges of the segmented control, in order.
@@ -107,7 +108,7 @@ pub fn duration(ms: u64) -> String {
     let s = ms / 1000;
     if s < 60 {
         fill(m::SECONDS, &[("n", &s.max(1).to_string())])
-    } else if s < 600 {
+    } else if s < 600 && s % 60 != 0 {
         fill(
             m::MINUTES_SECONDS,
             &[("m", &(s / 60).to_string()), ("s", &(s % 60).to_string())],
@@ -323,12 +324,38 @@ pub enum AttentionKind {
     AiService,
 }
 
+impl AttentionKind {
+    /// The page where a row of this kind is dealt with.
+    pub fn page(self) -> AdminPage {
+        match self {
+            AttentionKind::CliLoggedOut | AttentionKind::Limit => AdminPage::Accounts,
+            AttentionKind::Budget => AdminPage::Usage,
+            AttentionKind::Invite => AdminPage::Members,
+            AttentionKind::AiService => AdminPage::Ai,
+            AttentionKind::Waiting
+            | AttentionKind::Queue
+            | AttentionKind::Failed
+            | AttentionKind::Disk
+            | AttentionKind::Offline => AdminPage::Overview,
+        }
+    }
+}
+
+/// Where a 要注意 row leads: a page, on one computer when the page is per computer.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AttentionTarget {
+    pub page: AdminPage,
+    pub machine: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Attention {
     pub kind: AttentionKind,
     pub title: String,
     pub meta: String,
     pub tone: Tone,
+    /// `None`: the row stays put (what it is about is on the page already open).
+    pub target: Option<AttentionTarget>,
 }
 
 /// 模 1.3: one 要注意 row while the team's AI 服务 is not set up (`Some(false)`); nothing
@@ -339,6 +366,10 @@ pub fn ai_service_attention(configured: Option<bool>) -> Option<Attention> {
         title: m::ATT_AI_UNSET.into(),
         meta: m::ATT_AI_UNSET_META.into(),
         tone: Tone::Warn,
+        target: Some(AttentionTarget {
+            page: AttentionKind::AiService.page(),
+            machine: None,
+        }),
     })
 }
 
@@ -380,6 +411,7 @@ fn near_limit(
         title,
         meta,
         tone: if full { Tone::Bad } else { Tone::Warn },
+        target: None,
     })
 }
 
@@ -399,6 +431,7 @@ pub fn attention(
             title: m::ATT_OFFLINE.into(),
             meta: fill(m::ATT_OFFLINE_META, &[("ago", &ago(now.saturating_sub(t)))]),
             tone: Tone::Bad,
+            target: None,
         });
     }
     let waiting: Vec<&MonitorMember> = d.members.iter().filter(|x| x.waiting > 0).collect();
@@ -418,6 +451,7 @@ pub fn attention(
             title: fill(m::ATT_WAITING, &[("n", &n.to_string())]),
             meta: who.join(" · "),
             tone: Tone::Warn,
+            target: None,
         });
     }
     for c in &d.clis {
@@ -434,6 +468,7 @@ pub fn attention(
                     m::ATT_CLI_OUT_HINT.into()
                 },
                 tone: Tone::Warn,
+                target: None,
             });
         }
     }
@@ -457,6 +492,7 @@ pub fn attention(
                 })
                 .unwrap_or_default(),
             tone: Tone::Warn,
+            target: None,
         });
     }
     if let Some(f) = &d.last_failure {
@@ -469,6 +505,7 @@ pub fn attention(
                 None => when,
             },
             tone: Tone::Bad,
+            target: None,
         });
     }
     if let Some(h) = &d.host
@@ -480,6 +517,13 @@ pub fn attention(
             title: fill(m::ATT_DISK, &[("free", &bytes(h.disk_free_bytes))]),
             meta: m::ATT_DISK_META.into(),
             tone: Tone::Warn,
+            target: None,
+        });
+    }
+    for a in &mut out {
+        a.target = Some(AttentionTarget {
+            page: a.kind.page(),
+            machine: Some(d.machine.id.clone()),
         });
     }
     out
@@ -776,6 +820,7 @@ mod tests {
         assert_eq!(count_short(14_200), "14K");
         assert_eq!(count_short(950), "950");
         assert_eq!(duration(130_000), "2 分 10 秒");
+        assert_eq!(duration(180_000), "3 分钟");
         assert_eq!(duration(3 * 3_600_000 + 5), "3 小时");
         assert_eq!(ago(4_000), "刚刚");
         assert_eq!(seconds(1300), "1.3 秒");
@@ -815,7 +860,10 @@ mod tests {
             (
                 "没装 gh".into(),
                 Tone::Warn,
-                Some("先装好 gh，再用运行 AI 成员的系统用户运行 gh auth login".into())
+                Some(
+                    "先在那台电脑上装好 gh，再切到运行 AI 成员的系统账号，执行 gh auth login"
+                        .into()
+                )
             )
         );
         assert_eq!(
@@ -831,7 +879,7 @@ mod tests {
         );
         assert_eq!(
             hint_parts(m::GITHUB_HINT_HOST),
-            ("用运行 AI 成员的系统用户运行", Some("gh auth login"))
+            ("切到运行 AI 成员的系统账号，执行", Some("gh auth login"))
         );
         assert_eq!(cell("unknown", None, Some("vm")).2, None);
         let mut d = sample();
@@ -872,7 +920,23 @@ mod tests {
         );
         assert_eq!(list[0].meta, "Forge 2 个 · Ledger 1 个");
         assert_eq!(list[1].meta, "今天 2 个任务没跑成");
-        assert_eq!(list[3].meta, "对一下十月的账单 · 10:31");
+        assert_eq!(list[3].meta, "10:31 · 对一下十月的账单");
+    }
+
+    /// A row leads to where it is dealt with, on the computer it is about.
+    #[test]
+    fn attention_rows_lead_to_their_page_on_their_computer() {
+        let list = attention(&sample(), 10_000, &names, &|_| "10:31".into());
+        let to = |kind: AttentionKind| {
+            let a = list.iter().find(|a| a.kind == kind).expect("a row");
+            a.target.clone().expect("a target")
+        };
+        assert_eq!(to(AttentionKind::CliLoggedOut).page, AdminPage::Accounts);
+        assert_eq!(to(AttentionKind::Queue).page, AdminPage::Overview);
+        assert_eq!(to(AttentionKind::Queue).machine.as_deref(), Some("m1"));
+        assert_eq!(AttentionKind::Limit.page(), AdminPage::Accounts);
+        assert_eq!(AttentionKind::Budget.page(), AdminPage::Usage);
+        assert_eq!(AttentionKind::Invite.page(), AdminPage::Members);
     }
 
     #[test]

@@ -154,15 +154,11 @@ pub(super) fn confirm_delete_key(
     cx: &mut gpui::App,
 ) {
     use crate::views::nav::dialogs;
-    let machine = view.read(cx).selected_machine_name();
     dialogs::destructive_alert(
         "delete-key",
         // The whole name, in the body: it wraps, the one-line title cannot.
         m::KEYS_DELETE_CONFIRM_TITLE.to_string(),
-        fill(
-            m::KEYS_DELETE_CONFIRM_BODY,
-            &[("name", &name), ("machine", &machine)],
-        ),
+        fill(m::KEYS_DELETE_CONFIRM_BODY, &[("name", &name)]),
         m::KEYS_DELETE_OK,
         move |window, cx| view.update(cx, |v, cx| v.delete_key(name.clone(), window, cx)),
         window,
@@ -619,13 +615,13 @@ impl AdminView {
                     .child(
                         div()
                             .flex_none()
-                            .size(height::LG)
-                            .rounded(radius::CONTROL)
-                            .bg(k.primary)
+                            .size(height::DEFAULT)
+                            .rounded(radius::ITEM)
+                            .bg(k.fill)
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(sym_icon(Sym::Terminal, SymSize::INLINE, k.on_primary)),
+                            .child(sym_icon(Sym::Terminal, SymSize::INLINE, k.label)),
                     )
                     .child(
                         div()
@@ -669,7 +665,11 @@ impl AdminView {
                     .gap(space::S4)
                     .n_footnote()
                     .text_color(k.secondary)
-                    .child(m::USE_API_KEY_HINT)
+                    .child(if logged_in {
+                        m::USE_API_KEY_HINT_SIGNED_IN
+                    } else {
+                        m::USE_API_KEY_HINT
+                    })
                     .child(use_key),
             )
             .into_any_element()
@@ -960,6 +960,37 @@ impl AdminView {
     // -----------------------------------------------------------------------
     // API 密钥
 
+    /// The keys of the selected computer, once they are read.
+    pub(super) fn loaded_secrets(&self) -> Option<&MachineSecretsResponse> {
+        self.acct
+            .secrets
+            .as_ref()
+            .filter(|_| self.acct.secrets_for.as_deref() == self.selected.as_deref())
+    }
+
+    /// 添加密钥, in the page's one control line; nothing before the keys are read.
+    pub(super) fn keys_action(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let can_add = self.loaded_secrets()?.public_key.is_some();
+        let view = cx.entity();
+        Some(
+            crate::ui::native::disabled_push(
+                push_button(
+                    "keys-add",
+                    m::KEYS_ADD,
+                    PushStyle::Default,
+                    PushSize::Regular,
+                    cx,
+                ),
+                !can_add,
+                cx,
+            )
+            .on_click(move |_, window, cx| {
+                view.update(cx, |v, cx| v.open_key_form(None, window, cx))
+            })
+            .into_any_element(),
+        )
+    }
+
     pub(super) fn keys_page(
         &self,
         now: u64,
@@ -967,12 +998,7 @@ impl AdminView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let k = native_colors(cx);
-        let secrets = self
-            .acct
-            .secrets
-            .as_ref()
-            .filter(|_| self.acct.secrets_for.as_deref() == self.selected.as_deref());
-        let Some(s) = secrets else {
+        let Some(s) = self.loaded_secrets() else {
             return match &self.acct.secrets_error {
                 Some(e) => Alert::new(Sym::Failed, m::KEYS_LOADING_FAILED)
                     .on_surface()
@@ -995,20 +1021,7 @@ impl AdminView {
                     .into_any_element(),
             };
         };
-        let view = cx.entity();
         let can_add = s.public_key.is_some();
-        let add = crate::ui::native::disabled_push(
-            push_button(
-                "keys-add",
-                m::KEYS_ADD,
-                PushStyle::Default,
-                PushSize::Small,
-                cx,
-            ),
-            !can_add,
-            cx,
-        )
-        .on_click(move |_, window, cx| view.update(cx, |v, cx| v.open_key_form(None, window, cx)));
         let names = |ids: &[String]| -> (Vec<AnyElement>, String) {
             if ids.is_empty() {
                 return (vec![], m::KEYS_ALL_MEMBERS.to_string());
@@ -1044,21 +1057,24 @@ impl AdminView {
                     window,
                     cx,
                 )
-                .dropdown_menu(move |menu, _, _| {
-                    let (view, view2, del, rep) =
-                        (view.clone(), view2.clone(), del.clone(), rep.clone());
-                    menu.item(
-                        PopupMenuItem::new(m::KEYS_REPLACE).on_click(move |_, window, cx| {
-                            let n = rep.clone();
-                            view2.update(cx, |v, cx| v.open_key_form(Some(&n), window, cx))
-                        }),
-                    )
-                    .item(
-                        PopupMenuItem::new(m::KEYS_DELETE).on_click(move |_, window, cx| {
-                            confirm_delete_key(view.clone(), del.clone(), window, cx)
-                        }),
-                    )
-                });
+                .dropdown_menu_with_anchor(
+                    gpui::Anchor::TopRight,
+                    move |menu, _, _| {
+                        let (view, view2, del, rep) =
+                            (view.clone(), view2.clone(), del.clone(), rep.clone());
+                        menu.item(PopupMenuItem::new(m::KEYS_REPLACE).on_click(
+                            move |_, window, cx| {
+                                let n = rep.clone();
+                                view2.update(cx, |v, cx| v.open_key_form(Some(&n), window, cx))
+                            },
+                        ))
+                        .item(
+                            PopupMenuItem::new(m::KEYS_DELETE).on_click(move |_, window, cx| {
+                                confirm_delete_key(view.clone(), del.clone(), window, cx)
+                            }),
+                        )
+                    },
+                );
                 vec![
                     div()
                         .flex()
@@ -1113,25 +1129,11 @@ impl AdminView {
                         .tone(AlertTone::Warning),
                 )
             })
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .child(
-                        div()
-                            .flex_1()
-                            .n_body()
-                            .text_color(k.secondary)
-                            .child(fill(m::KEYS_COUNT, &[("n", &s.secrets.len().to_string())])),
-                    )
-                    .children(self.acct.notice.clone().map(|n| {
-                        div()
-                            .mr(space::S12)
-                            .n_footnote()
-                            .text_color(k.secondary)
-                            .child(n)
-                    }))
-                    .child(add),
+            .children(
+                self.acct
+                    .notice
+                    .clone()
+                    .map(|n| div().n_footnote().text_color(k.secondary).child(n)),
             )
             .when(self.acct.form_open, |d| d.child(self.key_form(cx)))
             .child(if s.secrets.is_empty() {

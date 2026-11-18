@@ -414,7 +414,7 @@ impl AdminView {
             window,
             cx,
         )
-        .dropdown_menu(move |menu, _, _| {
+        .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
             let name = name.clone();
             let menu = menu.item(PopupMenuItem::new(m::FLEET_COPY_NAME).on_click(
                 move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(name.clone())),
@@ -449,20 +449,17 @@ impl AdminView {
                     .child(
                         div()
                             .flex_none()
-                            .size(height::LG)
-                            .rounded(radius::CONTROL)
-                            .bg(if x.connected { k.primary } else { k.fill })
+                            .size(height::DEFAULT)
+                            .rounded(radius::ITEM)
+                            .bg(k.fill)
                             .flex()
                             .items_center()
                             .justify_center()
+                            // The same glyph as the sidebar and 设置 › 电脑.
                             .child(sym_icon(
-                                if vm { Sym::Server } else { Sym::Laptop },
+                                crate::views::settings::machines::machine_glyph(x),
                                 SymSize::INLINE,
-                                if x.connected {
-                                    k.on_primary
-                                } else {
-                                    k.secondary
-                                },
+                                ink,
                             )),
                     )
                     .child(

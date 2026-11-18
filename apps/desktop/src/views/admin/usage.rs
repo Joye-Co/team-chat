@@ -874,7 +874,8 @@ impl AdminView {
             }
         }
         rows.sort_by(|a, b| b.2.total_cmp(&a.2));
-        let max = rows.iter().map(|r| r.2).fold(0., f64::max).max(0.01);
+        // Each bar is the model's share of the period: together they fill one track.
+        let total = rows.iter().map(|r| r.2).sum::<f64>().max(0.01);
         let any_estimate = rows.iter().any(|r| r.4 > 0.);
         let unpriced: u64 = rows.iter().map(|r| r.5).sum();
         panel_card_surface(cx)
@@ -925,7 +926,7 @@ impl AdminView {
                                         )
                                     })),
                             )
-                            .child(progress((cost / max) as f32, cx))
+                            .child(progress((cost / total) as f32, cx))
                     }),
             )
             .when(any_estimate || unpriced > 0, |d| {
@@ -1168,8 +1169,9 @@ impl AdminView {
                                 .items_center()
                                 .gap(space::S8)
                                 // One track length in every row, so the bars compare: the
-                                // icon and the figures after it keep fixed slots.
-                                .child(div().flex_1().child(progress(pct.unwrap_or(0.) as f32, cx)))
+                                // icon and the figures after it keep fixed slots. No budget,
+                                // no track: an empty one would read as 0 % used.
+                                .child(div().flex_1().children(pct.map(|p| progress(p as f32, cx))))
                                 // The state is on an icon, never on the text's color
                                 // (§1.3): amber when near the budget, red when at or over.
                                 .child(
@@ -1333,12 +1335,11 @@ impl AdminView {
                     .child(tabs)
                     .child(div().flex_1())
                     .when(tab == UsageTab::Bots, |d| {
-                        d.child(
-                            div()
-                                .n_footnote()
-                                .text_color(k.secondary)
-                                .child(m::USAGE_BUDGET_HINT),
-                        )
+                        d.child(div().n_footnote().text_color(k.secondary).child(if week {
+                            m::USAGE_BUDGET_HINT
+                        } else {
+                            m::USAGE_BUDGET_HINT_PRORATED
+                        }))
                     }),
             )
             .children(edit)

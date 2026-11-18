@@ -805,7 +805,7 @@ fn tag_text(label: &str) -> String {
 /// server gets the server glyph (`Sym::Server` until the kit has
 /// `Sym::Server`), a notebook `laptopcomputer`, a Mac mini `macmini`,
 /// any other Mac `desktopcomputer`. The cloud glyph is only for 云端.
-fn machine_glyph(m: &MachineInfo) -> Sym {
+pub(crate) fn machine_glyph(m: &MachineInfo) -> Sym {
     let words: Vec<String> = std::iter::once(m.name.to_lowercase())
         .chain(m.labels.iter().map(|l| l.to_lowercase()))
         .collect();

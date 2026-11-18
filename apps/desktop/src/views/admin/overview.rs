@@ -20,7 +20,8 @@ use crate::{
         MemberAvatar, Sym,
         icons::sym as sym_icon,
         native::{
-            NativeColors, NativeType as _, TruncText, native_colors, panel_card_surface, skeleton,
+            FocusRow as _, NativeColors, NativeType as _, PushSize, PushStyle, TruncText,
+            native_colors, panel_card_surface, push_button, skeleton,
             tokens::{avatar, height, monitor as t, radius, space, text},
         },
         sf_symbols::SymSize,
@@ -80,7 +81,7 @@ pub fn page(
                         .w(relative(t::ATTENTION_SHARE))
                         .flex_none()
                         .flex()
-                        .child(attention(d, now, name, time, cx)),
+                        .child(attention(d, now, name, time, view.clone(), cx)),
                 ),
         )
         .child(members(d, sort, name, member, view, cx))
@@ -150,10 +151,13 @@ fn problems(d: &MachineMonitor, time: &dyn Fn(u64) -> String, cx: &App) -> Optio
 fn strip(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
     let k = native_colors(cx);
     let cells = model::strip(d, now);
-    let n = cells.len();
-    panel(cx)
-        .flex_row()
-        .overflow_hidden()
+    // What to run on the computer: a line of its own under the cells, so they keep one width.
+    let hint = cells
+        .iter()
+        .find_map(|c| c.hint.clone().map(|h| (c.label.clone(), h)));
+    let row = div()
+        .w_full()
+        .flex()
         .children(cells.into_iter().enumerate().map(|(i, c)| {
             div()
                 .flex_1()
@@ -164,7 +168,6 @@ fn strip(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
                 .flex_col()
                 .gap(space::S4)
                 .when(i > 0, |d| d.border_l_1().border_color(k.separator))
-                .when(i + 1 == n, |d| d)
                 .child(
                     div()
                         .flex()
@@ -188,30 +191,42 @@ fn strip(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
                         .child(dot(tone_color(c.tone, &k)))
                         .child(TruncText::new(c.value)),
                 )
-                // Usable: what to run on the computer. The words in the text font, the
-                // command in the code font on its own line, never broken (§1.4).
-                .when_some(c.hint, |d, h| {
-                    let (prose, command) = model::hint_parts(&h);
-                    d.flex_none().w(t::STRIP_HINT_CELL).child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(space::S2)
-                            .n_footnote()
-                            .text_color(k.secondary)
-                            .when(!prose.is_empty(), |d| d.child(prose.to_string()))
-                            // To run on another computer: in the command box, with copy.
-                            .children(command.map(|c| {
-                                super::this_computer::command_box(
-                                    "github-hint-copy",
-                                    c.to_string(),
-                                    cx,
-                                )
-                                .mt(space::S4)
-                                .whitespace_nowrap()
-                            })),
-                    )
-                })
+        }));
+    panel(cx)
+        .overflow_hidden()
+        .child(row)
+        // Usable: the words in the text font, named for what they sign in to; the command in
+        // the code font in its box with copy, never broken (§1.4).
+        .children(hint.map(|(label, h)| {
+            let (prose, command) = model::hint_parts(&h);
+            div()
+                .w_full()
+                .px(space::S16)
+                .py(space::S12)
+                .border_t_1()
+                .border_color(k.separator)
+                .flex()
+                .items_center()
+                .gap(space::S16)
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(gpui::Pixels::ZERO)
+                        .flex()
+                        .items_center()
+                        .gap(space::S6)
+                        .n_footnote()
+                        .text_color(k.secondary)
+                        .child(sym_icon(Sym::Terminal, SymSize::INLINE_SMALL, k.secondary))
+                        .child(div().flex_none().text_color(k.label).child(label))
+                        .child(TruncText::new(prose.to_string())),
+                )
+                .children(command.map(|c| {
+                    super::this_computer::command_box("github-hint-copy", c.to_string(), cx)
+                        .w_auto()
+                        .flex_none()
+                        .whitespace_nowrap()
+                }))
         }))
 }
 
@@ -380,6 +395,9 @@ fn kpi(c: Kpi, range: &str, cx: &App) -> impl IntoElement {
             div()
                 .id(SharedString::from(format!("{}-spark", c.id)))
                 .mt(space::S8)
+                // Inside the card's rounded corners: the fill never reaches them.
+                .px(space::S16)
+                .pb(space::S12)
                 .tooltip(move |window, cx| {
                     gpui_component::tooltip::Tooltip::new(aria.clone()).build(window, cx)
                 })
@@ -495,7 +513,8 @@ fn capacity(d: &MachineMonitor, now: u64, cx: &App) -> impl IntoElement {
         .p(space::S24)
         .gap(space::S16)
         .child(
-            div().flex().items_center().child(
+            // One header height beside 要注意, so the two titles share a line.
+            div().h(height::SM).flex().items_center().child(
                 div()
                     .flex_1()
                     .n_title3()
@@ -621,13 +640,27 @@ fn attention(
     now: u64,
     name: &dyn Fn(&str) -> String,
     time: &dyn Fn(u64) -> String,
+    view: Entity<AdminView>,
     cx: &App,
 ) -> impl IntoElement {
-    attention_panel(model::attention(d, now, name, time), cx)
+    let mut items = model::attention(d, now, name, time);
+    // This computer's own page is already open: those rows have nowhere to lead.
+    for a in &mut items {
+        a.target = a
+            .target
+            .take()
+            .filter(|t| t.page != super::AdminPage::Overview);
+    }
+    attention_panel(items, view, cx)
 }
 
-/// The 要注意 card: a list of items, or 没有要注意的事.
-pub(super) fn attention_panel(items: Vec<model::Attention>, cx: &App) -> gpui::Div {
+/// The 要注意 card: a list of items, or 没有要注意的事. A row with a target opens the page where
+/// it is dealt with.
+pub(super) fn attention_panel(
+    items: Vec<model::Attention>,
+    view: Entity<AdminView>,
+    cx: &App,
+) -> gpui::Div {
     let k = native_colors(cx);
     let n = items.len();
     panel(cx)
@@ -637,6 +670,8 @@ pub(super) fn attention_panel(items: Vec<model::Attention>, cx: &App) -> gpui::D
         .gap(space::S8)
         .child(
             div()
+                // One header height beside its neighbor, so the two titles share a line.
+                .h(height::SM)
                 .flex()
                 .items_center()
                 .gap(space::S8)
@@ -667,12 +702,18 @@ pub(super) fn attention_panel(items: Vec<model::Attention>, cx: &App) -> gpui::D
                 AttentionKind::AiService => Sym::AiMember,
             };
             let c = tone_color(a.tone, &k);
-            div()
+            let sign_in = a.kind == AttentionKind::CliLoggedOut;
+            let target = a.target.clone();
+            // The hover fill reaches 8 past the row's content, which stays on the card's inset.
+            let row = div()
                 .flex()
                 .items_center()
                 .gap(space::S12)
-                .py(space::S8)
-                .when(i > 0, |d| d.border_t_1().border_color(k.separator))
+                .my(space::S2)
+                .py(space::S6)
+                .mx(-space::S8)
+                .px(space::S8)
+                .rounded(radius::ITEM)
                 .child(
                     div()
                         .flex_none()
@@ -700,7 +741,52 @@ pub(super) fn attention_panel(items: Vec<model::Attention>, cx: &App) -> gpui::D
                                     .text_color(k.secondary),
                             )
                         }),
-                )
+                );
+            let row = match target {
+                None => row.into_any_element(),
+                Some(target) => {
+                    let open = {
+                        let (view, target) = (view.clone(), target.clone());
+                        move |window: &mut Window, cx: &mut App| {
+                            view.update(cx, |v, cx| v.open_attention(&target, window, cx))
+                        }
+                    };
+                    let trailing = if sign_in {
+                        let open = open.clone();
+                        div()
+                            .flex_none()
+                            // Pulled out by its padding: a ghost button has no edge at rest, and
+                            // its chevron stands over the other rows' chevrons.
+                            .mr(-(space::S8 + space::S2))
+                            .child(
+                                push_button(
+                                    SharedString::from(format!("attention-sign-in-{i}")),
+                                    m::ATT_CLI_SIGN_IN,
+                                    PushStyle::Ghost,
+                                    PushSize::Small,
+                                    cx,
+                                )
+                                .child(sym_icon(
+                                    Sym::ChevronRight,
+                                    SymSize::INLINE_SMALL,
+                                    k.secondary,
+                                ))
+                                .on_click(move |_, window, cx| open(window, cx)),
+                            )
+                            .into_any_element()
+                    } else {
+                        sym_icon(Sym::ChevronRight, SymSize::INLINE, k.secondary).into_any_element()
+                    };
+                    row.id(SharedString::from(format!("attention-{i}")))
+                        .focus_row(false, cx)
+                        .on_click(move |_, window, cx| open(window, cx))
+                        .child(trailing)
+                        .into_any_element()
+                }
+            };
+            div()
+                .when(i > 0, |d| d.border_t_1().border_color(k.separator))
+                .child(row)
         }))
 }
 

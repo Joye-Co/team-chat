@@ -447,6 +447,19 @@ impl AdminView {
             .flatten()
     }
 
+    /// A 要注意 row was opened: its computer, then its page.
+    fn open_attention(
+        &mut self,
+        target: &model::AttentionTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(id) = target.machine.clone() {
+            self.select_machine(id, cx);
+        }
+        self.open_page(target.page, window, cx);
+    }
+
     fn member_name(&self, id: &str) -> String {
         self.services
             .provider
@@ -629,11 +642,6 @@ impl AdminView {
         let count = |n: u32| -> gpui::AnyElement {
             crate::ui::native::CountPill::new(n).into_any_element()
         };
-        // Pages that land in later changes: listed in the muted color with 即将推出 beside
-        // the name, not clickable yet.
-        let soon = |id: SharedString, row: SidebarRow| {
-            div().id(id).child(row.quiet(true).trailing(m::NAV_SOON))
-        };
         // The pages that work: selected when open.
         let current_page = self.page;
         let live_page = |id: &'static str,
@@ -661,21 +669,14 @@ impl AdminView {
         // A machine's own pages sit under it, indented past its symbol.
         let view_for_sub = cx.entity();
         let on_overview = self.page == accounts::Page::Overview;
-        let sub = |id: String, label: &'static str, live: bool| {
-            let selected = live && on_overview;
-            let row = SidebarRow::new(SharedString::from(id.clone()), label)
+        let sub = |id: String, label: &'static str| {
+            let view = view_for_sub.clone();
+            SidebarRow::new(SharedString::from(id), label)
                 .leading(div().w(SymSize::SIDEBAR.slot_px()))
-                .selected(selected);
-            if live {
-                let view = view_for_sub.clone();
-                div()
-                    .id(SharedString::from(format!("{id}-wrap")))
-                    .child(row.on_click(move |_, _, cx| {
-                        view.update(cx, |v, cx| v.show_page(accounts::Page::Overview, cx))
-                    }))
-            } else {
-                soon(id.into(), row)
-            }
+                .selected(on_overview)
+                .on_click(move |_, _, cx| {
+                    view.update(cx, |v, cx| v.show_page(accounts::Page::Overview, cx))
+                })
         };
         let view = cx.entity();
         let machines: Vec<gpui::AnyElement> = self
@@ -690,7 +691,10 @@ impl AdminView {
                     SharedString::from(format!("machine-{}", x.id)),
                     x.name.clone(),
                 )
-                .leading(icon(Sym::Server, open))
+                .leading(icon(
+                    crate::views::settings::machines::machine_glyph(x),
+                    open,
+                ))
                 .on_click(move |_, _, cx| {
                     let id = id.clone();
                     view.update(cx, |v, cx| {
@@ -707,16 +711,10 @@ impl AdminView {
                 }
                 let mut out = vec![row.into_any_element()];
                 if open {
-                    let base = format!("machine-{}", x.id);
                     out.push(
-                        sub(format!("{base}-overview"), m::NAV_OVERVIEW, true).into_any_element(),
+                        sub(format!("machine-{}-overview", x.id), m::NAV_OVERVIEW)
+                            .into_any_element(),
                     );
-                    out.push(sub(format!("{base}-vms"), m::NAV_VMS, false).into_any_element());
-                    out.push(sub(format!("{base}-image"), m::NAV_IMAGE, false).into_any_element());
-                    out.push(
-                        sub(format!("{base}-network"), m::NAV_NETWORK, false).into_any_element(),
-                    );
-                    out.push(sub(format!("{base}-logs"), m::NAV_LOGS, false).into_any_element());
                 }
                 out
             })
@@ -936,10 +934,19 @@ impl AdminView {
                 m::ACCOUNTS_SUB,
                 &[("machine", machine_name.as_deref().unwrap_or_default())],
             ),
-            accounts::Page::Keys => fill(
-                m::KEYS_SUB,
-                &[("machine", machine_name.as_deref().unwrap_or_default())],
-            ),
+            accounts::Page::Keys => {
+                let sub = fill(
+                    m::KEYS_SUB,
+                    &[("machine", machine_name.as_deref().unwrap_or_default())],
+                );
+                match self.loaded_secrets() {
+                    Some(s) => {
+                        let n = s.secrets.len().to_string();
+                        format!("{sub} · {}", fill(m::KEYS_COUNT, &[("n", &n)]))
+                    }
+                    None => sub,
+                }
+            }
             accounts::Page::Members => self.team_subtitle(),
             accounts::Page::Home => self.home_subtitle(),
             accounts::Page::Machines => m::FLEET_SUB.to_string(),
@@ -1084,6 +1091,9 @@ impl AdminView {
                     .when(self.page == accounts::Page::Machines && self.owner, |d| {
                         d.children(self.use_this_action(cx))
                     })
+                    .when(self.page == accounts::Page::Keys && self.owner, |d| {
+                        d.children(self.keys_action(cx))
+                    })
                     .when(self.owner, |d| d.child(refresh)),
             )
     }
@@ -1100,6 +1110,8 @@ impl AdminView {
             .gap(space::S16);
         if !self.owner {
             return pad
+                // The whole panel: the Empty centers in it (§2.13).
+                .h_full()
                 .child(
                     Empty::new(Sym::Lock, m::NOT_OWNER)
                         .description(m::NOT_OWNER_DESC)
@@ -1137,6 +1149,7 @@ impl AdminView {
         {
             let services = self.services.clone();
             return pad
+                .h_full()
                 .child(
                     Empty::new(Sym::Server, m::NO_MACHINES)
                         .description(m::NO_MACHINES_DESC)

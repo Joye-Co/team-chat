@@ -391,9 +391,21 @@ fn open_members_failed(
     after_load(handle, view, cx, |view, _, cx| {
         view.update(cx, |v, cx| {
             v.team.error = Some(offline_text());
-            v.team.action_error =
-                Some((crate::copy::admin::TEAM_DEACTIVATE_FAILED, offline_text()));
-            v.team.action_retry = Some(("m-jojo".into(), true));
+            // The first AI member, as the 停用 alert's scene asks about.
+            let bot = v
+                .services
+                .provider
+                .members()
+                .into_iter()
+                .find(|m| m.is_bot() && !m.deactivated);
+            if let Some(bot) = bot {
+                let title = crate::copy::fill(
+                    crate::copy::admin::TEAM_DEACTIVATE_FAILED,
+                    &[("name", &bot.name)],
+                );
+                v.team.action_error = Some((title, offline_text()));
+                v.team.action_retry = Some((bot.id.to_string(), true));
+            }
             cx.notify();
         })
     });

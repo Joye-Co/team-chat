@@ -10,7 +10,7 @@ use gpui::{
 
 use super::{
     AdminPage, AdminView, model,
-    model::{Attention, AttentionKind, Tone},
+    model::{Attention, AttentionKind, AttentionTarget, Tone},
     usage::{UsageRange, kpi_card},
 };
 use crate::{
@@ -99,6 +99,10 @@ impl AdminView {
                         } else {
                             format!("{} · {}", x.name, a.meta)
                         },
+                        target: Some(AttentionTarget {
+                            page: a.kind.page(),
+                            machine: Some(x.id.clone()),
+                        }),
                         ..a
                     });
                 }
@@ -108,6 +112,10 @@ impl AdminView {
                     title: m::ATT_OFFLINE.into(),
                     meta: x.name.clone(),
                     tone: Tone::Bad,
+                    target: Some(AttentionTarget {
+                        page: AttentionKind::Offline.page(),
+                        machine: Some(x.id.clone()),
+                    }),
                 });
             }
         }
@@ -135,6 +143,10 @@ impl AdminView {
                             ],
                         ),
                         tone: Tone::Bad,
+                        target: Some(AttentionTarget {
+                            page: AttentionKind::Budget.page(),
+                            machine: None,
+                        }),
                     });
                     continue;
                 }
@@ -151,6 +163,10 @@ impl AdminView {
                         ),
                         meta: fill(m::ATT_BUDGET_META, &[("budget", &usd(cents as f64 / 100.))]),
                         tone: if share >= 1. { Tone::Bad } else { Tone::Warn },
+                        target: Some(AttentionTarget {
+                            page: AttentionKind::Budget.page(),
+                            machine: None,
+                        }),
                     });
                 }
             }
@@ -166,6 +182,10 @@ impl AdminView {
                             &[("when", &model::duration(i.expires_at - now))],
                         ),
                         tone: Tone::Info,
+                        target: Some(AttentionTarget {
+                            page: AttentionKind::Invite.page(),
+                            machine: None,
+                        }),
                     });
                 }
             }
@@ -194,6 +214,24 @@ impl AdminView {
             };
         };
         let week = self.usage.range == UsageRange::Week;
+        // The cards name their period in every range.
+        let (topics_label, spent_label, artifacts_label) = match self.usage.range {
+            UsageRange::Week => (
+                m::HOME_KPI_TOPICS_WEEK,
+                m::USAGE_SPENT_WEEK,
+                m::HOME_KPI_ARTIFACTS_WEEK,
+            ),
+            UsageRange::Month => (
+                m::HOME_KPI_TOPICS_MONTH,
+                m::USAGE_SPENT_MONTH,
+                m::HOME_KPI_ARTIFACTS_MONTH,
+            ),
+            UsageRange::LastMonth => (
+                m::HOME_KPI_TOPICS_LAST_MONTH,
+                m::USAGE_SPENT_LAST_MONTH,
+                m::HOME_KPI_ARTIFACTS_LAST_MONTH,
+            ),
+        };
         // What the AI 服务 page saved last wins over what 总览 read when it opened.
         let ai_configured = self
             .ai
@@ -259,11 +297,7 @@ impl AdminView {
                 cx,
             ))
             .child(kpi_card(
-                if week {
-                    m::HOME_KPI_TOPICS_WEEK
-                } else {
-                    m::HOME_KPI_TOPICS
-                },
+                topics_label,
                 Sym::Topic,
                 u.total.topics.to_string(),
                 compare(
@@ -275,11 +309,7 @@ impl AdminView {
                 cx,
             ))
             .child(kpi_card(
-                if week {
-                    m::USAGE_SPENT_WEEK
-                } else {
-                    m::USAGE_SPENT
-                },
+                spent_label,
                 Sym::BarChart,
                 usd(total),
                 match budget_cents {
@@ -301,11 +331,7 @@ impl AdminView {
                 cx,
             ))
             .child(kpi_card(
-                if week {
-                    m::HOME_KPI_ARTIFACTS_WEEK
-                } else {
-                    m::HOME_KPI_ARTIFACTS
-                },
+                artifacts_label,
                 Sym::Document,
                 artifacts.len().to_string(),
                 if artifacts.is_empty() {
@@ -343,6 +369,7 @@ impl AdminView {
                             .flex()
                             .child(super::overview::attention_panel(
                                 self.home_attention(now, ai_configured),
+                                cx.entity(),
                                 cx,
                             )),
                     ),
@@ -398,6 +425,8 @@ impl AdminView {
             .gap(space::S8)
             .child(
                 div()
+                    // One header height beside 要注意, so the two titles share a line.
+                    .h(height::SM)
                     .flex()
                     .items_center()
                     .gap(space::S8)

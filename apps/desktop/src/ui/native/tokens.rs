@@ -1445,9 +1445,6 @@ pub mod monitor {
     pub const MEMBER_BAR_WIDTH: Pixels = px(96.);
     /// The x-axis labels of 每天的花费: one footnote line.
     pub const CHART_AXIS: Pixels = space::S16;
-    /// The status strip's cell that carries a command to run: wide enough for the command on
-    /// one line.
-    pub const STRIP_HINT_CELL: Pixels = px(296.);
     /// Table columns of 按成员.
     pub const COL_COUNT: Pixels = px(80.);
     pub const COL_CPU: Pixels = px(96.);
@@ -1462,9 +1459,11 @@ pub mod monitor {
     /// 成员's table: narrow columns so a name of about 8 characters and its 岗位 fit beside the
     /// inspector at the default width; cells pad 8 a side.
     pub const TEAM_COL_LEVEL: Pixels = px(80.);
-    pub const TEAM_COL_TOPICS: Pixels = px(68.);
-    pub const TEAM_COL_SPEND: Pixels = px(136.);
-    pub const TEAM_COL_RECENT: Pixels = px(88.);
+    pub const TEAM_COL_TOPICS: Pixels = px(60.);
+    pub const TEAM_COL_SPEND: Pixels = px(184.);
+    /// The budget after an amount (`/ $100`): a fixed slot, so every amount ends at one x.
+    pub const TEAM_SPEND_BUDGET: Pixels = px(44.);
+    pub const TEAM_COL_RECENT: Pixels = px(84.);
     pub const TEAM_CELL_PAD: Pixels = space::S8;
     /// The count after a bar in the member inspector (`999 个话题`), right-aligned.
     pub const TEAM_USE_COUNT: Pixels = px(64.);

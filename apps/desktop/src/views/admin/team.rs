@@ -21,9 +21,9 @@ use crate::{
         MemberAvatar, Sym,
         icons::sym as sym_icon,
         native::{
-            Alert, AlertTone, Badge, NativeType as _, PushSize, PushStyle, SearchField, Segment,
-            Segmented, StatusBadge, TruncText, native_colors, panel_card_surface, progress,
-            push_button,
+            Alert, AlertTone, Badge, FocusRow as _, NativeType as _, PushSize, PushStyle,
+            SearchField, Segment, Segmented, StatusBadge, TruncText, native_colors,
+            panel_card_surface, progress, push_button,
             tokens::{avatar, height, monitor as t, radius, space},
         },
         sf_symbols::SymSize,
@@ -62,7 +62,7 @@ pub struct Team {
     /// Why the last 「设为…」 did not go through.
     pub role_error: Option<String>,
     /// Why the last 停用 or 重新启用 did not go through: the alert's title and the reason.
-    pub action_error: Option<(&'static str, String)>,
+    pub action_error: Option<(String, String)>,
     /// The 「设为…」 that failed (who, which 身份), for its alert's 重试.
     pub role_retry: Option<(String, TeamRole)>,
     /// The 停用 (`true`) or 重新启用 that failed and for whom, for its alert's 重试.
@@ -450,7 +450,7 @@ impl AdminView {
                 TeamSortKey::Spend,
                 m::TEAM_COL_SPEND,
                 Some(t::TEAM_COL_SPEND),
-                false,
+                true,
             ),
             (
                 TeamSortKey::Recent,
@@ -544,7 +544,11 @@ impl AdminView {
                 // A state is a StatusBadge (icon + word, §2.12); 空闲 and a last-seen time
                 // are muted text. Never a colored text run.
                 let badge = |state, word: &'static str| {
-                    StatusBadge::new(state, word).dense().into_any_element()
+                    StatusBadge::new(state, word)
+                        .dense()
+                        // The selected row's fill would swallow the badge's own.
+                        .on_fill(selected)
+                        .into_any_element()
                 };
                 let recent: AnyElement = if r.member.deactivated {
                     m::TEAM_OFF.into_any_element()
@@ -560,19 +564,17 @@ impl AdminView {
                             m::TEAM_ONLINE_NOW.into_any_element()
                         }
                         Some(t) => model::ago(now.saturating_sub(t)).into_any_element(),
-                        None => m::TEAM_NEVER.into_any_element(),
+                        // 从没上线 only once the roster said so: unread, nothing is known.
+                        None if self.team.roster.is_some() => m::TEAM_NEVER.into_any_element(),
+                        None => "—".into_any_element(),
                     }
                 };
-                let spend = match r.budget_cents.filter(|b| *b > 0) {
-                    Some(b) => fill(
-                        m::TEAM_SPEND_OF,
-                        &[
-                            ("spend", &usd(r.spend)),
-                            ("budget", &format!("${}", b / 100)),
-                        ],
-                    ),
-                    None => usd(r.spend),
-                };
+                let budget = r.budget_cents.filter(|b| *b > 0).map(|b| {
+                    fill(
+                        m::TEAM_SPEND_BUDGET,
+                        &[("budget", &format!("${}", b / 100))],
+                    )
+                });
                 // The bar means one thing: spend against the budget. No budget, no bar.
                 let share = r
                     .budget_cents
@@ -592,6 +594,9 @@ impl AdminView {
                     .n_figures()
                     .when(selected, |d| d.bg(k.selection))
                     .when(i + 1 < n, |d| d.border_b_1().border_color(k.separator))
+                    // Hover, a tab stop, the arrow keys, Enter and Space (§2.7).
+                    .focus_row(selected, cx)
+                    .framed_ring(cx)
                     .on_click(move |_, _, cx| {
                         let id = sel_id.clone();
                         view.update(cx, |v, cx| {
@@ -624,7 +629,7 @@ impl AdminView {
                     })
                     .child(cell(Some(t::TEAM_COL_TOPICS), true).child(r.topics.to_string()))
                     .child(
-                        cell(Some(t::TEAM_COL_SPEND), false).child(
+                        cell(Some(t::TEAM_COL_SPEND), true).child(
                             div()
                                 .w_full()
                                 .flex()
@@ -634,17 +639,31 @@ impl AdminView {
                                     div()
                                         .flex()
                                         .items_center()
+                                        .justify_end()
                                         .gap(space::S4)
-                                        .child(div().n_headline().child(spend))
-                                        // Over the budget: the state color on an icon, the
-                                        // amount stays foreground (§1.3).
+                                        // Over the budget: a word and an icon, before the
+                                        // amount so every amount ends at one x (§1.3, F1).
                                         .when(over, |d| {
-                                            d.child(sym_icon(
-                                                Sym::Warning,
-                                                SymSize::INLINE_SMALL,
-                                                k.amber,
-                                            ))
-                                        }),
+                                            d.child(
+                                                StatusBadge::new(
+                                                    crate::ui::native::BadgeState::NeedsYou,
+                                                    m::TEAM_OVER_BUDGET,
+                                                )
+                                                .dense()
+                                                .on_fill(selected),
+                                            )
+                                        })
+                                        .child(div().n_headline().child(usd(r.spend)))
+                                        .child(
+                                            div()
+                                                .flex_none()
+                                                .w(t::TEAM_SPEND_BUDGET)
+                                                .text_right()
+                                                .whitespace_nowrap()
+                                                .n_footnote()
+                                                .text_color(k.secondary)
+                                                .children(budget),
+                                        ),
                                 )
                                 .children(share.map(|s| progress(s, cx))),
                         ),
@@ -719,7 +738,7 @@ impl AdminView {
             window,
             cx,
         )
-        .dropdown_menu(move |menu, _, _| {
+        .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
             let (services, id, view) = (services.clone(), id.clone(), view.clone());
             // An AI member: 更换电脑… (常用设置) and 编辑… (everything). Without them 团队管理
             // had no way to change an AI member's computer.
@@ -1066,7 +1085,7 @@ impl AdminView {
                 .justify_between()
                 .gap(space::S12)
                 .n_body()
-                .child(div().text_color(k.secondary).child(l))
+                .child(div().flex_none().text_color(k.secondary).child(l))
                 .child(v)
         };
         let devices: Vec<String> = roster
@@ -1259,6 +1278,10 @@ impl AdminView {
                             } else {
                                 devices.join("、")
                             })
+                            // Cut or short, the value ends on the card's edge like the rows
+                            // above it.
+                            .flex_1()
+                            .text_right()
                             .into_any_element(),
                         ))
                     }),
@@ -1310,11 +1333,20 @@ fn set_deactivated(
 ) {
     let reply = services.provider.set_member_deactivated(id, deactivated);
     let view = view.clone();
-    let title = if deactivated {
-        m::TEAM_DEACTIVATE_FAILED
-    } else {
-        m::TEAM_REACTIVATE_FAILED
-    };
+    // The alert outlives the dialog: it names whom 重试 is about.
+    let name = services
+        .provider
+        .member(id)
+        .map(|x| x.name)
+        .unwrap_or_else(|| m::UNKNOWN_MEMBER.to_string());
+    let title = fill(
+        if deactivated {
+            m::TEAM_DEACTIVATE_FAILED
+        } else {
+            m::TEAM_REACTIVATE_FAILED
+        },
+        &[("name", &name)],
+    );
     let id = id.to_string();
     cx.spawn(async move |cx| {
         let result = answer(reply).await;
