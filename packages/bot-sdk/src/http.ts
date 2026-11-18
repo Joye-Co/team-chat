@@ -315,14 +315,16 @@ export class HttpClient {
     };
   }
 
-  /** Throws `ChatError` `invalid` before the request when `events` has a schema the server refuses. */
+  /** Throws `ChatError` before the request when `events` has a schema the server refuses (`invalid`) or `data` is over 256 KiB (`too_large`). */
   async createArtifact(req: CreateArtifactRequest): Promise<ArtifactVersionResponse> {
     checkArtifactEvents(req.events);
+    checkArtifactData(req.data);
     return this.request("POST", "/v1/artifacts", { json: req });
   }
-  /** Throws `ChatError` `invalid` before the request when `events` has a schema the server refuses. */
+  /** Throws `ChatError` before the request, as `createArtifact` does. */
   async addArtifactVersion(artifactId: string, req: AddArtifactVersionRequest): Promise<ArtifactVersionResponse> {
     checkArtifactEvents(req.events);
+    checkArtifactData(req.data);
     return this.request("POST", `/v1/artifacts/${encodeURIComponent(artifactId)}/versions`, { json: req });
   }
   /**

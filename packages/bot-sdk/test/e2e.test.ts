@@ -25,6 +25,8 @@ import {
 
 const PORT = Number(process.env.BOT_SDK_E2E_PORT ?? 8795);
 
+import { attach as attachPage, EVENTS as PAGE_EVENTS } from "../../../examples/page-bot.ts";
+import { attach as attachReport } from "../../../examples/report-bot.ts";
 import { localServer } from "./server.ts";
 
 const server = localServer(PORT);
@@ -1201,6 +1203,121 @@ describe("bot loops", () => {
     } finally {
       await taroBot.stop();
       await listener.stop();
+    }
+  });
+});
+
+describe("the runnable examples against the server (examples/report-bot.ts, examples/page-bot.ts)", () => {
+  const auth = { authorization: `Bearer ${ownerToken}` };
+  const transients: TransientEvent[] = [];
+  human.onTransient((e) => transients.push(e));
+  const frame = (f: Record<string, unknown> & { t: string }): Promise<any> => (human as unknown as { request(f: Record<string, unknown>): Promise<unknown> }).request(f);
+  let n = 0;
+  const clientEventId = () => `01JC0CEX${String(++n).padStart(18, "0")}`;
+
+  /** A new bot member with the handlers of one example. */
+  async function exampleBot(name: string, attach: (bot: Bot) => void): Promise<{ bot: Bot; id: string; errors: unknown[] }> {
+    const made = await post("/v1/bots", { name, role: "example" }, auth);
+    const b = new Bot({ url: server.url, token: made.token, stateStore: new MemoryStateStore(), logLevel: "warn", markRead: false });
+    const errors: unknown[] = [];
+    b.onError((e) => errors.push(e));
+    attach(b);
+    await b.start();
+    await waitFor(`the human knows ${name}`, () => human.members.some((m) => m.id === made.member.id));
+    return { bot: b, id: made.member.id, errors };
+  }
+
+  test.skipIf(!hasInteract)("report-bot: a mention gets the card; a point, the button, a live pick and the submit change it in place", async () => {
+    const { bot: reporter, id, errors } = await exampleBot("Reporter", attachReport);
+    try {
+      const t = await human.startTopic(generalId, { title: "十月月报", body: "@Reporter 发一下月报", mentions: [id] });
+      const posted = await waitFor("the report card", () =>
+        events.find((e) => e.type === "message.created" && e.data.message.authorId === id && e.data.message.topicId === t.message.topicId && e.data.message.cardV2 !== undefined),
+      );
+      if (posted.type !== "message.created") throw new Error("unreachable");
+      const messageId = posted.data.message.id;
+      expect(posted.data.message.cardV2?.ask?.from).toEqual([human.me.id]);
+      const rev = (k: number) =>
+        waitFor(`rev ${k}`, () => {
+          const e = events.find((x) => x.type === "message.updated" && x.data.messageId === messageId && x.data.cardV2?.rev === k);
+          return e?.type === "message.updated" ? e.data.cardV2 : undefined;
+        });
+      const live = (at: number, o: Record<string, unknown>) => frame({ t: "card.event", groupId: generalId, messageId, rev: at, clientEventId: clientEventId(), ...o });
+      const block = (card: CardV2, bid: string) => card.blocks.find((b) => b.id === bid) as Record<string, unknown> | undefined;
+
+      await live(1, { blockId: "trend", event: "chart.select", value: { series: "oct", x: "10-20", y: 2301, index: 2 }, part: parts.point("oct", "10-20") });
+      expect(block(await rev(2), "point")?.text).toBe("10-20 这一周，10 月日活 2,301。");
+
+      // The builder declared button.press: the server takes the press.
+      await live(2, { blockId: "more", event: "button.press", value: { buttonId: "channels" } });
+      const r3 = await rev(3);
+      expect(block(r3, "by_channel")?.type).toBe("table");
+      expect(block(r3, "more")).toBeUndefined();
+
+      await live(3, { blockId: "check", event: "choice.change", value: { value: "wrong" } });
+      const r4 = await rev(4);
+      expect(block(r4, "what")?.type).toBe("input");
+      expect(r4.actions?.[0]?.inputs).toEqual(["check", "what"]);
+
+      await live(4, { actionId: "send", event: "action.press", inputs: { check: { value: "wrong" }, what: { value: "新增群后台是 40" } } });
+      const r5 = await rev(5);
+      expect(r5.ask).toBeUndefined();
+      expect(r5.actions ?? []).toEqual([]);
+      expect(block(r5, "check")).toMatchObject({ type: "evidence", label: "要核对：新增群后台是 40" });
+      expect(errors).toEqual([]);
+
+      // Why the builder declares it: the server refuses the press of buttons that declare nothing.
+      const mute = await reporter.postCardV2(
+        { groupId: generalId, topicId: t.message.topicId },
+        composeCard({ intent: "info", title: "没声明事件的按钮", blocks: [blocks.buttons({ id: "more", buttons: [{ id: "channels", label: "按渠道拆开" }], events: [] })] }),
+      );
+      await waitFor("the human sees that card", () => events.find((e) => e.type === "message.created" && e.data.message.id === mute.message.id));
+      await expect(
+        frame({ t: "card.event", groupId: generalId, messageId: mute.message.id, rev: 1, clientEventId: clientEventId(), blockId: "more", event: "button.press", value: { buttonId: "channels" } }),
+      ).rejects.toMatchObject({ code: "invalid", reason: "card.undeclared_event" });
+    } finally {
+      await reporter.stop();
+    }
+  });
+
+  test.skipIf(!hasPageLoop)("page-bot: a mention publishes the page and embeds it; join, seats and leave go through the data snapshot", async () => {
+    const { bot: pager, id, errors } = await exampleBot("Pager", attachPage);
+    try {
+      const t = await human.startTopic(generalId, { title: "团建", body: "@Pager 做个报名页", mentions: [id] });
+      const posted = await waitFor("the card with the page", () =>
+        events.find((e) => e.type === "message.created" && e.data.message.authorId === id && e.data.message.topicId === t.message.topicId && e.data.message.cardV2 !== undefined),
+      );
+      if (posted.type !== "message.created") throw new Error("unreachable");
+      const embed = posted.data.message.cardV2?.blocks.find((b) => b.type === "embed");
+      if (embed?.type !== "embed") throw new Error("the card has no embed");
+      expect(embed.events).toEqual(PAGE_EVENTS.map((e) => e.name));
+      const { artifactId, version } = embed;
+      // The page as stored: the declared events, the first snapshot, the preview, the HTML.
+      const art = await human.http.getArtifact(artifactId);
+      expect(art.versions[0]?.events).toEqual(PAGE_EVENTS);
+      expect(art.versions[0]?.preview?.title).toBe("团建报名");
+      expect(await human.http.getArtifactData(artifactId, version)).toMatchObject({ data: { seats: 12, people: [] }, dataRev: 1 });
+
+      const send = (name: string, kind: "emit" | "ask", payload: unknown) =>
+        frame({ t: "artifact.event", groupId: generalId, artifactId, version, clientEventId: clientEventId(), name, kind, payload });
+      const pushed = (eventId: string) =>
+        waitFor(`the push for ${eventId}`, () => transients.find((e): e is Extract<TransientEvent, { type: "artifact.data" }> => e.type === "artifact.data" && e.cause === eventId));
+
+      const join = await send("signup.join", "emit", { note: "不吃辣" });
+      expect((await pushed(join.eventId)).data).toMatchObject({ people: [{ memberId: human.me.id, name: "Joye", note: "不吃辣" }] });
+      // The server holds the page to its declarations: a payload that does not fit the schema is refused.
+      await expect(send("signup.join", "emit", { note: 7 })).rejects.toMatchObject({ code: "invalid" });
+
+      const seats = await send("signup.seats", "ask", null);
+      const reply = await waitFor("the reply", () => transients.find((e): e is Extract<TransientEvent, { type: "artifact.reply" }> => e.type === "artifact.reply" && e.eventId === seats.eventId));
+      expect(reply).toMatchObject({ ok: true, payload: { left: 11 } });
+
+      const leave = await send("signup.leave", "emit", null);
+      expect((await pushed(leave.eventId)).data).toMatchObject({ people: [] });
+      expect(await human.http.getArtifactData(artifactId, version)).toMatchObject({ data: { people: [] }, dataRev: 3 });
+      expect(errors).toEqual([]);
+    } finally {
+      await pager.stop();
     }
   });
 });
