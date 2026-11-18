@@ -95,7 +95,7 @@ crate::copy! {
     SHEET_TEXT_PLACEHOLDER_GROUP = "比如：这个群的产出都用中文写",
     SHEET_TEXT_PLACEHOLDER_PERSON = "比如：回复写短一点",
     SHEET_WHEN = "适用",
-    SHEET_WHEN_PLACEHOLDER = "可以不填，比如：上线 orderbot 时",
+    SHEET_WHEN_PLACEHOLDER = "可以不填，比如：写周报时",
     SHEET_TOO_LONG = "最多 {n} 个字",
     SHEET_SAVE_NEW = "记下",
     SHEET_SAVE = "保存",
