@@ -308,7 +308,7 @@ const BUDGET_PAGE = `<!doctype html>
   const canEmit = !!(tc && tc.can.emit);
   const list = document.getElementById('list'), note = document.getElementById('note');
   const STEP = 5000;
-  let channels = [];
+  let channels = [], sending = false;
   const money = (n) => '¥' + n.toLocaleString('zh-CN');
 
   function draw() {
@@ -317,13 +317,14 @@ const BUDGET_PAGE = `<!doctype html>
       name.textContent = c.name; value.textContent = money(c.amount);
       const step = (delta, label) => {
         const b = document.createElement('button');
-        b.textContent = label; b.disabled = !canEmit || c.amount + delta < 0;
+        b.textContent = label; b.disabled = !canEmit || sending || c.amount + delta < 0;
         b.onclick = () => {
           const before = c.amount;
-          c.amount += delta; draw(); note.textContent = '';
+          c.amount += delta; sending = true; draw(); note.textContent = '';
           tc.emit('budget.set', { channel: c.id, amount: c.amount })
-            .then(() => { note.textContent = '已发给 Ledger'; })
-            .catch(() => { c.amount = before; draw(); note.textContent = '没有发出去，再试一次。'; });
+            .then(() => { note.textContent = '已提交，等 Ledger 确认。'; })
+            .catch(() => { c.amount = before; note.textContent = '没有提交成功，再试一次。'; })
+            .finally(() => { sending = false; draw(); });
         };
         return b;
       };
@@ -656,7 +657,7 @@ export async function seed(o: SeedOptions): Promise<Json> {
         },
         preview: {
           title: "11 月投放预算",
-          summary: "按渠道调整预算，改动会发给 Ledger。",
+          summary: "按渠道调整预算，改动提交给 Ledger 确认。",
           metrics: [
             { label: "总预算", value: "¥100,000" },
             { label: "渠道", value: "3 个" },
@@ -681,9 +682,9 @@ export async function seed(o: SeedOptions): Promise<Json> {
               label: "各渠道每周新增",
               x: ["第 1 周", "第 2 周", "第 3 周", "第 4 周"],
               series: [
-                { id: "weibo", name: "微博", values: [420, 460, 510, 480] },
-                { id: "xhs", name: "小红书", values: [510, 640, 780, 900] },
-                { id: "search", name: "搜索广告", values: [260, 250, 270, 260] },
+                { id: "weibo", name: "微博", values: [480, 520, 570, 540] },
+                { id: "xhs", name: "小红书", values: [560, 700, 860, 980] },
+                { id: "search", name: "搜索广告", values: [290, 300, 300, 300] },
               ],
               summary: "小红书四周一直在涨，微博和搜索广告基本持平。",
               events: ["chart.select"],
