@@ -730,7 +730,7 @@ impl ArtifactPage {
 
     /// The inspector (COMPLETENESS.md §2.5): a header band (`产出信息`, a
     /// line, close) on the toolbar row, then fixed sections in this order:
-    /// 来自话题 (with 做的人 and 要求), 版本, 这一页 (a live page), 页面里的回应,
+    /// 来自话题 (with 做的人 and 提出的人), 版本, 这一页 (a live page), 页面里的回应,
     /// 用到的决定 and 被引用. A section with no data shows one muted line and
     /// never disappears. Values truncate with a tooltip (the role first).
     fn story(
@@ -809,7 +809,7 @@ impl ArtifactPage {
             // the section's own 16 top sits under the header band.
             .child(div().flex_none().mt(-tsp::S12));
 
-        // 来自话题, then 做的人 and 要求 as a DescriptionList.
+        // 来自话题, then 做的人 and 提出的人 as a DescriptionList.
         let topic = story
             .topic
             .clone()
@@ -1422,6 +1422,8 @@ impl ArtifactPage {
                 nk::SearchField::new("artifacts-search", &search)
                     .sidebar()
                     .clearable()
+                    // Nothing to search with 0 产出, like the two controls before it.
+                    .disabled(empty)
                     .width(px(200.)),
             )
             .group(div().flex_none().w(px(0.)));
@@ -1566,6 +1568,8 @@ impl ArtifactPage {
                 .floor()
                 .max(1.) as u16)
                 .min(all.len().max(1) as u16);
+            let tile_w =
+                (width - page::m::GRID_GAP * (cols.saturating_sub(1)) as f32) / cols as f32;
             let mut days: Vec<(String, Vec<&(String, crate::data::ArtifactSummary)>)> = Vec::new();
             for item in &all {
                 let day = day_label(now, item.1.updated_at);
@@ -1610,7 +1614,7 @@ impl ArtifactPage {
                             .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                             .min_w_0()
                             .overflow_hidden()
-                            .child(thumbnail(&self.services, a, cx))
+                            .child(thumbnail(&self.services, a, tile_w, cx))
                             .child(
                                 div()
                                     .p(tsp::S12)
@@ -1984,23 +1988,43 @@ fn sym_toolbar_item(
 /// The picture of a tile (§9.6, R11): the page's snapshot scaled to fit
 /// the tile whole (never a crop of one corner), a poster for media, else
 /// the kind's symbol with no frame, as Finder draws a document icon.
-fn thumbnail(services: &Services, a: &crate::data::ArtifactSummary, cx: &App) -> gpui::Div {
-    use crate::ui::native as nk;
+fn thumbnail(
+    services: &Services,
+    a: &crate::data::ArtifactSummary,
+    tile_w: Pixels,
+    cx: &App,
+) -> gpui::Div {
+    use crate::ui::native::{self as nk, tokens};
     use gpui::StyledImage as _;
     let n = nk::native_colors(cx);
-    let picture: Option<gpui::ImageSource> = crate::ui::web_embed::page_preview(&a.id, a.version)
-        .map(gpui::ImageSource::from)
-        .or_else(|| {
-            services
-                .provider
-                .artifact_poster(&a.id, a.version)
-                .map(gpui::ImageSource::from)
-        });
+    let picture: Option<(gpui::ImageSource, Option<(u32, u32)>)> =
+        crate::ui::web_embed::page_preview(&a.id, a.version)
+            .map(|image| {
+                let size = picture_size(PictureKey::Image(image.id), || {
+                    image::ImageReader::new(std::io::Cursor::new(image.bytes()))
+                        .with_guessed_format()
+                        .ok()?
+                        .into_dimensions()
+                        .ok()
+                });
+                (gpui::ImageSource::from(image), size)
+            })
+            .or_else(|| {
+                services
+                    .provider
+                    .artifact_poster(&a.id, a.version)
+                    .map(|path| {
+                        let size = picture_size(PictureKey::File(path.clone()), || {
+                            image::image_dimensions(&path).ok()
+                        });
+                        (gpui::ImageSource::from(path), size)
+                    })
+            });
     // The well follows the tile's top corners (inside its 1 px line), so
     // its fill never shows past the rounded border (§1.6).
     let well = div()
         .w_full()
-        .h(px(132.))
+        .h(tokens::artifact_tile::WELL_H)
         .rounded_t(page::m::CARD_RADIUS - crate::ui::native::metrics::HAIRLINE)
         .overflow_hidden()
         .bg(n.fill)
@@ -2008,7 +2032,44 @@ fn thumbnail(services: &Services, a: &crate::data::ArtifactSummary, cx: &App) ->
         .items_center()
         .justify_center();
     match picture {
-        Some(src) => well.p(tsp::S8).child(
+        // The snapshot as a sheet of paper (§1.7: a fill step alone is no edge):
+        // fitted whole, with its own line, radius and shadow, so the page's edge shows
+        // in both themes and when the page's background equals the well's. A page too
+        // tall to read when fitted keeps a least width and is cut at the bottom.
+        Some((src, Some((w, h)))) if w > 0 && h > 0 => {
+            let room_w = (tile_w - nk::metrics::HAIRLINE * 2. - tsp::S8 * 2.).max(px(1.));
+            let room_h = tokens::artifact_tile::WELL_H - tsp::S8 * 2.;
+            let ratio = w as f32 / h as f32;
+            let fitted_w = room_h * ratio;
+            let (bw, bh) = if fitted_w < tokens::artifact_tile::PAGE_MIN_W {
+                (tokens::artifact_tile::PAGE_MIN_W.min(room_w), room_h)
+            } else if fitted_w > room_w {
+                (room_w, room_w / ratio)
+            } else {
+                (fitted_w, room_h)
+            };
+            well.child(
+                div()
+                    .flex_none()
+                    .w(bw)
+                    .h(bh)
+                    .rounded(tokens::radius::CHECKBOX)
+                    .border_1()
+                    .border_color(n.separator)
+                    .shadow(tokens::shadow::xs())
+                    .overflow_hidden()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        gpui::img(src)
+                            .flex_none()
+                            .w_full()
+                            .h((bw - nk::metrics::HAIRLINE * 2.) / ratio)
+                            .object_fit(gpui::ObjectFit::Fill),
+                    ),
+            )
+        }
+        Some((src, _)) => well.p(tsp::S8).child(
             gpui::img(src)
                 .size_full()
                 .object_fit(gpui::ObjectFit::Contain),
@@ -2023,6 +2084,26 @@ fn thumbnail(services: &Services, a: &crate::data::ArtifactSummary, cx: &App) ->
                 .text_color(n.secondary),
         ),
     }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum PictureKey {
+    Image(u64),
+    File(std::path::PathBuf),
+}
+
+/// The pixel size of a tile's picture, read from its header once.
+fn picture_size(key: PictureKey, read: impl FnOnce() -> Option<(u32, u32)>) -> Option<(u32, u32)> {
+    thread_local! {
+        static SIZES: std::cell::RefCell<std::collections::HashMap<PictureKey, Option<(u32, u32)>>> =
+            std::cell::RefCell::new(std::collections::HashMap::new());
+    }
+    if let Some(known) = SIZES.with(|s| s.borrow().get(&key).copied()) {
+        return known;
+    }
+    let size = read();
+    SIZES.with(|s| s.borrow_mut().insert(key, size));
+    size
 }
 // --- end v12/fx-cards ---
 

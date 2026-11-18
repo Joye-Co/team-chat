@@ -1277,6 +1277,25 @@ pub mod gallery {
     pub const OVER_SCRIM_ACTIVE: f32 = 0.85;
 }
 
+/// The page strip of an inline PDF card: whole pages on a band, 12 above and below.
+pub mod pdf_strip {
+    use gpui::{Pixels, px};
+    pub const HEIGHT: Pixels = px(140.);
+    /// The box a page is fitted into (the band less its 12 + 12).
+    pub const PAGE_W: f32 = 120.;
+    pub const PAGE_H: f32 = 116.;
+}
+
+/// A tile of the 产出 icon view: the picture well over the name.
+pub mod artifact_tile {
+    use gpui::{Pixels, px};
+    /// The picture well.
+    pub const WELL_H: Pixels = px(132.);
+    /// The narrowest a page snapshot is drawn: a taller page keeps this width and
+    /// is cut at the bottom, so its first screen reads.
+    pub const PAGE_MIN_W: Pixels = px(96.);
+}
+
 /// The image viewer (files::lightbox): every picture of a 话题 on a dark screen over the
 /// whole window, a top bar, a filmstrip, zoom and pan.
 pub mod lightbox {
@@ -1287,7 +1306,9 @@ pub mod lightbox {
     pub const BACKDROP: f32 = 1.0;
     /// The top bar and the filmstrip float on black at this opacity.
     pub const BAR_SCRIM: f32 = 0.35;
-    pub const BAR_H: Pixels = px(52.);
+    /// The app's header band (§2.2), so the bar's content and the window buttons share
+    /// one centre line.
+    pub const BAR_H: Pixels = super::height::TOOLBAR;
     /// Room kept around the fitted picture.
     pub const PAD: Pixels = px(24.);
     /// The round previous / next buttons at the sides.

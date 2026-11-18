@@ -470,6 +470,7 @@ pub struct SearchField {
     focused: Option<bool>,
     clearable: bool,
     small: bool,
+    disabled: bool,
 }
 
 impl SearchField {
@@ -482,6 +483,7 @@ impl SearchField {
             focused: None,
             clearable: false,
             small: false,
+            disabled: false,
         }
     }
 
@@ -514,6 +516,12 @@ impl SearchField {
         self.focused = Some(focused);
         self
     }
+
+    /// Nothing to search (§1.8): 50 % and no typing.
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
 }
 
 impl RenderOnce for SearchField {
@@ -521,7 +529,8 @@ impl RenderOnce for SearchField {
         let k = native_colors(cx);
         let focused = self
             .focused
-            .unwrap_or_else(|| self.state.read(cx).focus_handle(cx).is_focused(window));
+            .unwrap_or_else(|| self.state.read(cx).focus_handle(cx).is_focused(window))
+            && !self.disabled;
         let (edge, shadows) = field_edge(&k, focused, false);
         let shadows = if self.sidebar && !focused {
             Vec::new()
@@ -550,7 +559,8 @@ impl RenderOnce for SearchField {
             .flex()
             .items_center()
             .gap(space::S8)
-            .cursor_text()
+            .when(self.disabled, |d| d.opacity(0.5))
+            .when(!self.disabled, |d| d.cursor_text())
             .child(symbol(
                 Sf::Search,
                 icon::MD,
@@ -567,6 +577,7 @@ impl RenderOnce for SearchField {
                         Input::new(&self.state)
                             .appearance(false)
                             .cleanable(self.clearable)
+                            .disabled(self.disabled)
                             .with_size(gpui_component::Size::Small)
                             .px_0()
                             .py_0()
