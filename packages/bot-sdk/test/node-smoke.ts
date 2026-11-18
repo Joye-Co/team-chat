@@ -1,5 +1,5 @@
 // Runs the echo example under Node against a local server, mentions it once and checks the
-// reply. Run: bun test/node-smoke.ts (needs node 22+ on PATH).
+// reply. Run: bun test/node-smoke.ts (needs node 22.18+ on PATH).
 import { spawn } from "node:child_process";
 import { chmodSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";

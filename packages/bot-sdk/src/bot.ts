@@ -64,7 +64,7 @@ export const SDK_VERSION = "1.1.0";
 /** The reaction `ack()` adds by default: "I saw it and work on it" (the same one runner runs use). */
 export { ACK_EMOJI };
 
-/** A WebSocket constructor that accepts `{ headers }` (Bun, and Node 22+ through undici). */
+/** A WebSocket constructor that accepts `{ headers }` (Bun, and Node 22 and later through undici). */
 export type WebSocketCtor = new (url: string, opts?: { headers?: Record<string, string> }) => WebSocket;
 
 export interface BotOptions {

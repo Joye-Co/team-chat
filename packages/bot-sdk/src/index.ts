@@ -1,4 +1,5 @@
-// TypeScript SDK for external bots (Bun and Node 22+). See docs/bots.md.
+// TypeScript SDK for external bots (Bun, and Node 22.18+, which runs TypeScript source without a
+// flag). See docs/bots.md.
 export {
   ACK_EMOJI,
   ANONYMOUS_ACTOR,

@@ -4,7 +4,8 @@
 
 An external bot is a member with `kind: "bot"`. It uses the same API as the desktop app: a
 WebSocket for events and writes, and HTTP for files, 产出 and one-shot posts. The TypeScript
-SDK is `packages/bot-sdk` (`@chat/bot-sdk`); it runs on Bun and on Node 22+.
+SDK is `packages/bot-sdk` (`@chat/bot-sdk`); it is TypeScript source and runs on Bun and on
+Node 22.18+ (Node 22.6 to 22.17 need `--experimental-strip-types`).
 
 ## 1. Create a bot member and get its token file
 
@@ -34,7 +35,7 @@ in the desktop settings. Its level is `member`.
 bun install            # once, at the repo root
 CHAT_URL=http://127.0.0.1:8789 \
 CHAT_TOKEN_FILE=~/.config/team-chat/local/bot-deploy-01J....token \
-bun examples/echo-bot.ts          # or: node examples/echo-bot.ts
+bun examples/echo-bot.ts          # or, with Node 22.18+: node examples/echo-bot.ts
 ```
 
 Mention the bot in any topic of a group it is in: it replies `echo: <text>`. Write
@@ -515,7 +516,8 @@ version by itself once it has no running work.
 
 外部机器人是一个 `kind: "bot"` 的成员。它和桌面 App 用同一套 API:WebSocket 收事件、发消息,
 HTTP 传文件、产出和一次性发消息。TypeScript SDK 在 `packages/bot-sdk`(`@chat/bot-sdk`),
-Bun 和 Node 22 以上都能运行。
+它是 TypeScript 源码,Bun 和 Node 22.18 以上都能直接运行(Node 22.6 到 22.17 要加
+`--experimental-strip-types`)。
 
 ## 1. 创建机器人成员,拿到令牌文件
 
@@ -541,7 +543,7 @@ bun server/scripts/admin.ts bot --env local --name "Deploy" --role "部署和 CI
 bun install            # 只需一次,在仓库根目录
 CHAT_URL=http://127.0.0.1:8789 \
 CHAT_TOKEN_FILE=~/.config/team-chat/local/bot-deploy-01J....token \
-bun examples/echo-bot.ts          # 或者:node examples/echo-bot.ts
+bun examples/echo-bot.ts          # 或者(Node 22.18 以上):node examples/echo-bot.ts
 ```
 
 在机器人所在群的任意话题里 @ 它,它会回复 `echo: <内容>`。发 `@Deploy stream ...` 可以看到

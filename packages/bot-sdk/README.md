@@ -1,6 +1,7 @@
 # @chat/bot-sdk
 
-TypeScript SDK for external bots (Bun and Node 22+). The full guide, in English and Chinese, is
+TypeScript SDK for external bots. It is TypeScript source: it runs on Bun and on Node 22.18+
+(Node 22.6 to 22.17 need `--experimental-strip-types`). The full guide, in English and Chinese, is
 [docs/bots.md](../../docs/bots.md).
 
 ```ts
