@@ -285,7 +285,18 @@ impl TimelineView {
     }
 
     pub fn new(services: Services, cx: &mut Context<Self>) -> Self {
+        let refs_hub = crate::views::refs::hub(cx);
         let subscriptions = vec![
+            // 引用了 n 处 opened or folded: that row has a new height.
+            cx.subscribe(
+                &refs_hub,
+                |this, _, event: &crate::views::refs::RefsEvent, cx| {
+                    if let crate::views::refs::RefsEvent::SentRefsToggled(key) = event {
+                        this.remeasure_key(key);
+                        cx.notify();
+                    }
+                },
+            ),
             cx.subscribe(&services.hub, |this, _, changes: &Changes, cx| {
                 let Some((g, tid)) = this.open.clone() else {
                     return;
@@ -1332,6 +1343,50 @@ mod keyboard_tests {
         data::ChatProvider,
         fake::v2::{DEV, T_RECONNECT, V2Samples},
     };
+
+    /// 引用了 n 处 starts folded; opening it makes the row taller by its lines,
+    /// and folding it gives the height back.
+    #[gpui::test]
+    fn the_sent_references_open_and_fold_in_the_row(cx: &mut gpui::TestAppContext) {
+        use crate::fake::v2::{GROWTH, T_REPORT, refs_samples::THREE_MESSAGE};
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            bind_keys(cx);
+        });
+        let provider: Arc<dyn ChatProvider> = V2Samples::with_refs();
+        let (view, cx) = cx.add_window_view(move |_, cx| {
+            let services = Services::new(provider, cx);
+            services.nav.update(cx, |nav, cx| {
+                nav.open_topic(GROWTH.into(), T_REPORT.into(), cx)
+            });
+            TimelineView::new(services, cx)
+        });
+        cx.run_until_parked();
+        let mut grow = 0.;
+        let mut height = |view: &Entity<TimelineView>, cx: &mut gpui::VisualTestContext| {
+            // A taller window draws a frame without measuring the rows again.
+            grow += 1.;
+            cx.simulate_resize(gpui::size(px(900.), px(1600.) + px(grow)));
+            cx.run_until_parked();
+            view.update(cx, |this, _| {
+                let ix = this.row_index(THREE_MESSAGE).expect("the row is listed");
+                let row = this.list.bounds_for_item(ix).expect("the row is drawn");
+                row.size.height
+            })
+        };
+        let folded = height(&view, cx);
+        let toggle = |cx: &mut gpui::VisualTestContext| {
+            cx.update(|_, cx| {
+                crate::views::refs::hub(cx)
+                    .update(cx, |h, cx| h.toggle_sent_refs(THREE_MESSAGE.into(), cx))
+            })
+        };
+        toggle(cx);
+        let open = height(&view, cx);
+        assert!(open > folded, "the lines show under the row: {open:?}");
+        toggle(cx);
+        assert_eq!(height(&view, cx), folded);
+    }
 
     /// R2-12: with the thread focused, ↑ picks the newest message (its
     /// toolbar shows, as under the pointer) and walks back; ↓ comes forward.

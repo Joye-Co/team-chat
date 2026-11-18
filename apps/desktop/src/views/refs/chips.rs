@@ -17,7 +17,7 @@ use crate::{
     copy::refs as c,
     data::{ChatProvider, DraftRef, Message},
     theme::{self, Type as _, space},
-    ui::{self, NamedButton as _, Sym},
+    ui::{self, NamedButton as _, Sym, native::tokens::radius},
     views::timeline::extras::{ExtrasContext, MessageExtra, Placement},
 };
 
@@ -338,7 +338,7 @@ pub fn open_source(r: &DraftRef, cx: &mut App) {
 // ---------------------------------------------------------------------------------------
 
 /// The references above a sent message's body: one line per reference with a quote bar
-/// (Refs.dc.html §01); three or more fold into `引用了 n 处` with the lines under it.
+/// (Refs.dc.html §01); three or more fold into `引用了 n 处`, which opens to the lines under it.
 pub struct RefsExtra;
 
 fn sent_line(id: ElementId, r: &BlockRef, topic: (&str, &str), cx: &App) -> AnyElement {
@@ -472,6 +472,13 @@ pub fn sent_refs(message: &Message, refs: &[BlockRef], cx: &App) -> AnyElement {
         })
         .collect();
     let many = refs.len() >= 3;
+    // Three or more start folded; the row is keyed as the timeline keys it, so
+    // the timeline can measure it again when it opens.
+    let row = crate::views::timeline::model::key(message).to_string();
+    let open = !many
+        || cx
+            .try_global::<super::HubGlobal>()
+            .is_some_and(|h| h.0.read(cx).open_sent_refs.contains(&row));
     div()
         .mb(px(4.))
         .pl(px(10.))
@@ -483,18 +490,37 @@ pub fn sent_refs(message: &Message, refs: &[BlockRef], cx: &App) -> AnyElement {
         .when(many, |d| {
             d.child(
                 div()
+                    .id(ElementId::Name(format!("sref-fold-{key}").into()))
+                    .self_start()
                     .flex()
                     .items_center()
                     .gap(space::S6)
                     .h(px(22.))
+                    // The hover fill reaches past the text; the text stays on the lines' edge.
+                    .px(space::S4)
+                    .ml(-space::S4)
+                    .rounded(radius::CHECKBOX)
                     .t_meta()
                     .text_color(k.ink_3)
+                    .focus_row(false, cx)
+                    .on_click(move |_, _, cx| {
+                        let row = row.clone();
+                        super::hub(cx).update(cx, |h, cx| h.toggle_sent_refs(row, cx));
+                    })
                     .child(ui::icon(Sym::Quote, theme::icon::TAG, k.ink_3))
                     .child(super::cited(refs.len()))
-                    .child(ui::icon(Sym::ChevronDown, theme::icon::TAG, k.ink_3)),
+                    .child(ui::icon(
+                        if open {
+                            Sym::ChevronDown
+                        } else {
+                            Sym::ChevronRight
+                        },
+                        theme::icon::TAG,
+                        k.ink_3,
+                    )),
             )
         })
-        .children(lines)
+        .when(open, |d| d.children(lines))
         .into_any_element()
 }
 
