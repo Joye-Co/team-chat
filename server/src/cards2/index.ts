@@ -159,7 +159,7 @@ async function patchLocked(
   const dir = await directory(room);
   const { row, ext, card, state } = await loadCard(room, f.messageId, dir);
   if (row.author_id !== a.id) throw new ApiError("forbidden", "only the author can patch a card");
-  if (f.baseRev !== card.rev) throw new ApiError("conflict", "the card has a newer rev", "card.stale_rev");
+  if (f.baseRev !== card.rev) throw new ApiError("conflict", `the card is at rev ${card.rev}, not ${f.baseRev}: read it again and patch that rev`, "card.stale_rev");
   const cause = f.cause ? checkCause(room, f.cause, a.id, row.id) : undefined;
   const next = applyPatch(card, f.ops);
   checkEmbeds(room.sql, next);

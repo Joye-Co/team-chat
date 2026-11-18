@@ -322,7 +322,7 @@ registerRoomRpc(ARTIFACT_DATA_RPC, (room, actor, args): { dataRev: number; dupli
     .toArray()[0];
   const rev = cur?.data_rev ?? 0;
   if (d.clientPushId && cur?.push_id === d.clientPushId) return { dataRev: rev, duplicate: true };
-  if (d.baseDataRev !== undefined && d.baseDataRev !== rev) throw new ApiError("conflict", "the data changed", "artifact.stale_data");
+  if (d.baseDataRev !== undefined && d.baseDataRev !== rev) throw new ApiError("conflict", `the data is at rev ${rev}, not ${d.baseDataRev}`, "artifact.stale_data");
   const now = Date.now();
   let causeActor: string | undefined;
   if (d.cause !== undefined) {
