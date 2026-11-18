@@ -384,12 +384,9 @@ impl TimelineView {
             .then(|| markdown::fold::body_fold_at(shown_body))
             .flatten();
             let search_query = self.search_query_for(&message.id);
-            if fold_at.is_some()
-                && !self.unfolded.contains(key)
-                && (search_query.is_some()
-                    || find_marks.is_some()
-                    || self.highlight_alpha(key) > 0.)
-            {
+            let pointed_at =
+                search_query.is_some() || find_marks.is_some() || self.highlight_alpha(key) > 0.;
+            if fold_at.is_some() && !self.unfolded.contains(key) && pointed_at {
                 self.unfolded.insert(key.to_string());
             }
             let folded = fold_at.filter(|_| !self.unfolded.contains(key));
@@ -455,6 +452,7 @@ impl TimelineView {
                     },
                     topic_id: message.topic_id.clone(),
                     streaming: message.streaming,
+                    open_code: pointed_at,
                 }),
                 refs_body.as_ref(),
             );

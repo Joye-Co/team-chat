@@ -65,6 +65,8 @@ pub enum Sample {
     Code,
     /// A 49-line fence folded to its first 24 lines.
     CodeFold,
+    /// [`Sample::CodeFold`] with ⌘F on a word past the cut: the fence opens.
+    CodeFoldFind,
     /// A long answer folded to its first blocks, with 展开全文.
     LongAnswer,
     /// The same answer opened, scrolled to its end: 收起.
@@ -988,7 +990,7 @@ fn open(
         Sample::Short => SHORT,
         Sample::Worst => WORST,
         Sample::Code => CODE,
-        Sample::CodeFold => CODE_FOLD,
+        Sample::CodeFold | Sample::CodeFoldFind => CODE_FOLD,
         Sample::LongAnswer | Sample::LongAnswerOpen => LONG_ANSWER,
         Sample::Compose | Sample::React => SHORT,
     };
@@ -1035,6 +1037,9 @@ fn open(
                 | Sample::LongAnswer => {}
                 Sample::LongAnswerOpen => {
                     timeline.update(cx, |t, cx| t.preview_unfold(1, cx));
+                }
+                Sample::CodeFoldFind => {
+                    timeline.update(cx, |t, cx| t.find_query("replayed", window, cx));
                 }
                 // --- v12/fx-topic: the stop scene shows the confirmation
                 // alert that the plan card's 停止… opens.
@@ -1109,6 +1114,14 @@ pub fn open_code_fold(
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
     open(s, c, Sample::CodeFold, cx)
+}
+
+pub fn open_code_fold_find(
+    s: Services,
+    c: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open(s, c, Sample::CodeFoldFind, cx)
 }
 
 pub fn open_long_answer(

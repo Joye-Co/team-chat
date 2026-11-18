@@ -143,7 +143,11 @@ pub fn message_body_refs(
         refs,
         // A long code fence of a finished timeline message is folded; while
         // the body streams its text still changes under the fold.
-        diagrams.is_some_and(|d| !d.streaming),
+        match diagrams {
+            Some(d) if !d.streaming && d.open_code => CodeFolds::Open,
+            Some(d) if !d.streaming => CodeFolds::Folded,
+            _ => CodeFolds::None,
+        },
     )
 }
 
@@ -175,9 +179,20 @@ pub fn document_body(
             streaming: false,
         }),
         None,
-        false,
+        CodeFolds::None,
     )
     .0
+}
+
+/// What a body does with its long code fences.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CodeFolds {
+    /// Nothing: they are drawn whole, with no 展开 or 收起.
+    None,
+    /// Each shows its first lines until the person opens it.
+    Folded,
+    /// Each is opened first (something points into this body), then as `Folded`.
+    Open,
 }
 
 /// The diagrams of a body: where the body lives, and whether it still streams.
@@ -193,7 +208,7 @@ fn build(
     edited: bool,
     diagrams: Option<DiagramsOf>,
     refs: Option<&crate::views::refs::markdown::RefsBody>,
-    fold_code: bool,
+    code_folds: CodeFolds,
 ) -> (TextView, bool) {
     let text: SharedString = text.into();
     let source = link_mentions(&fix_cjk_strong(&normalize_fences(&text)), mentions);
@@ -203,6 +218,10 @@ fn build(
     let inline = marked.is_some();
     // The whole body, and the one drawn (its long code fences cut).
     let full_source = marked.unwrap_or(source);
+    let fold_code = code_folds != CodeFolds::None;
+    if code_folds == CodeFolds::Open {
+        fold::open_all_code(&full_source);
+    }
     let source = if fold_code {
         fold::fold_code_remembered(&full_source)
     } else {
@@ -411,6 +430,9 @@ pub struct DiagramContext {
     pub message_id: String,
     pub topic_id: String,
     pub streaming: bool,
+    /// A search, ⌘F or a reference jump points into this body: its long code
+    /// fences are opened, since what is pointed at may be past their cut.
+    pub open_code: bool,
 }
 
 /// Draws the first [`crate::diagrams::MAX_PER_MESSAGE`] closed ```mermaid fences of a

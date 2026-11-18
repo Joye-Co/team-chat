@@ -63,6 +63,16 @@ fn fence_close(line: &str, ch: char, run: usize) -> bool {
 /// fences are left alone (they are drawn, not listed). The folds come back in
 /// source order, the open ones too (they get a 收起 button).
 pub fn fold_code(source: &str, is_open: &dyn Fn(&str) -> bool) -> (String, Vec<CodeFold>) {
+    fold_code_marked(source, is_open, &mut |_, _, _| CUT_MARK.to_string())
+}
+
+/// [`fold_code`] with the cut line of each folded fence chosen by `mark`, which
+/// gets the lines shown, the whole code and its line count.
+fn fold_code_marked(
+    source: &str,
+    is_open: &dyn Fn(&str) -> bool,
+    mark: &mut dyn FnMut(&str, &str, usize) -> String,
+) -> (String, Vec<CodeFold>) {
     let lines: Vec<&str> = source.split_inclusive('\n').collect();
     let mut out = String::with_capacity(source.len());
     let mut folds = Vec::new();
@@ -86,12 +96,13 @@ pub fn fold_code(source: &str, is_open: &dyn Fn(&str) -> bool) -> (String, Vec<C
         if long && !open {
             out.push_str(lines[i]);
             let head = code[..CODE_FOLD_LINES].concat();
+            let cut = mark(head.trim_end_matches(['\n', '\r']), &full, code.len());
             out.push_str(&head);
-            out.push_str(CUT_MARK);
+            out.push_str(&cut);
             out.push('\n');
             out.push_str(lines[close]);
             folds.push(CodeFold {
-                shown: format!("{}\n{CUT_MARK}", head.trim_end_matches(['\n', '\r'])),
+                shown: format!("{}\n{cut}", head.trim_end_matches(['\n', '\r'])),
                 full,
                 lines: code.len(),
                 open: false,
@@ -124,25 +135,70 @@ thread_local! {
 /// their body is built.
 const SHOWN_MAX: usize = 512;
 
+/// Appended to the cut line of a fold whose first lines are those of another
+/// fold on screen (two versions of one file): it draws nothing and keeps the
+/// two drawn codes apart, so each block's actions find their own code.
+const APART: char = '\u{200B}';
+
 /// [`fold_code`] with the person's open blocks, remembering the folds for
 /// [`fold_of`].
 pub fn fold_code_remembered(source: &str) -> String {
-    let (out, folds) = OPEN_CODE.with(|open| {
-        let open = open.borrow();
-        fold_code(source, &|full| open.contains(&text_hash(full)))
+    SHOWN.with(|shown| {
+        let mut shown = shown.borrow_mut();
+        if shown.len() > SHOWN_MAX {
+            shown.clear();
+        }
     });
-    if !folds.is_empty() {
+    // The cut line of a fold: the mark, made longer until the drawn code is
+    // not the drawn code of a fold of other code.
+    let mut cut_line = |head: &str, full: &str, lines: usize| {
         SHOWN.with(|shown| {
             let mut shown = shown.borrow_mut();
-            if shown.len() > SHOWN_MAX {
-                shown.clear();
+            let mut cut = CUT_MARK.to_string();
+            loop {
+                let drawn = format!("{head}\n{cut}");
+                let hash = text_hash(&drawn);
+                match shown.get(&hash) {
+                    Some(other) if other.full != full => cut.push(APART),
+                    _ => {
+                        shown.insert(
+                            hash,
+                            CodeFold {
+                                shown: drawn,
+                                full: full.to_string(),
+                                lines,
+                                open: false,
+                            },
+                        );
+                        return cut;
+                    }
+                }
             }
-            for fold in folds {
-                shown.insert(text_hash(&fold.shown), fold);
-            }
-        });
-    }
+        })
+    };
+    let (out, folds) = OPEN_CODE.with(|open| {
+        let open = open.borrow();
+        fold_code_marked(
+            source,
+            &|full| open.contains(&text_hash(full)),
+            &mut cut_line,
+        )
+    });
+    SHOWN.with(|shown| {
+        let mut shown = shown.borrow_mut();
+        for fold in folds.into_iter().filter(|f| f.open) {
+            shown.insert(text_hash(&fold.shown), fold);
+        }
+    });
     out
+}
+
+/// Opens every long code fence of `source`: a search, ⌘F or a reference jump
+/// points into this body, and what it points at may be past the cut.
+pub fn open_all_code(source: &str) {
+    for fold in fold_code(source, &|_| false).1 {
+        set_code_open(&fold.full, true);
+    }
 }
 
 /// The fold whose drawn code is `shown`, if that code block is a long one.
@@ -174,11 +230,6 @@ pub fn rendered_rows(text: &str) -> usize {
         .sum()
 }
 
-/// Whether a finished answer is long enough to fold.
-pub fn is_long_body(body: &str) -> bool {
-    body.chars().count() > BODY_FOLD_CHARS || rendered_rows(body) > BODY_FOLD_OVER
-}
-
 /// Rows a block takes once drawn: a long code fence counts as its fold.
 fn block_rows(kind: MdBlock, text: &str) -> usize {
     let rows = rendered_rows(text);
@@ -193,26 +244,34 @@ fn block_rows(kind: MdBlock, text: &str) -> usize {
 /// whole top-level blocks, up to [`BODY_FOLD_ROWS`] rows, at least one block.
 /// `None` when the body is not long, or when the head would be the whole body
 /// (one giant block, or nothing after the head).
+///
+/// A body is long by what is drawn, more than [`BODY_FOLD_OVER`] rows or
+/// [`BODY_FOLD_CHARS`] characters: a long code fence counts as its fold, so a
+/// short answer around one long listing is not folded a second time.
 pub fn body_fold_at(body: &str) -> Option<usize> {
-    if !is_long_body(body) {
-        return None;
-    }
     let blocks = top_level_blocks(body);
-    let mut rows = 0;
+    let (mut rows, mut chars) = (0, 0);
     let mut end = 0;
+    // The end of the head, once a block no longer fits under it.
+    let mut head = None;
     for (i, (kind, range)) in blocks.iter().enumerate() {
         let text = body.get(range.clone()).unwrap_or_default();
         // The blank lines between two blocks are rows too.
         let gap = body
             .get(end..range.start)
             .map_or(0, |between| between.matches('\n').count().saturating_sub(1));
-        let next = rows + gap + block_rows(*kind, text);
-        if i > 0 && next > BODY_FOLD_ROWS {
-            break;
+        let drawn = block_rows(*kind, text);
+        let next = rows + gap + drawn;
+        if head.is_none() && i > 0 && next > BODY_FOLD_ROWS {
+            head = Some(end);
+        }
+        if drawn == rendered_rows(text) {
+            chars += text.chars().count();
         }
         rows = next;
         end = range.end;
     }
+    let end = head.filter(|_| chars > BODY_FOLD_CHARS || rows > BODY_FOLD_OVER)?;
     let rest = body.get(end..).unwrap_or_default();
     (end > 0 && !rest.trim().is_empty()).then_some(end)
 }
@@ -288,6 +347,48 @@ mod tests {
     }
 
     #[test]
+    fn two_folds_with_the_same_first_lines_keep_their_own_code() {
+        let head: String = (1..=CODE_FOLD_LINES)
+            .map(|i| format!("same {i}\n"))
+            .collect();
+        let tail = |tag: &str| -> String { (0..20).map(|i| format!("{tag} {i}\n")).collect() };
+        let body = format!(
+            "第一版：\n\n```rust\n{head}{}```\n\n第二版：\n\n```rust\n{head}{}```\n",
+            tail("old"),
+            tail("new")
+        );
+        let folded = fold_code_remembered(&body);
+        // What the renderer hands the actions of each block: the code between the fences.
+        let drawn: Vec<&str> = folded
+            .split("```rust\n")
+            .skip(1)
+            .map(|rest| rest.split("\n```").next().unwrap())
+            .collect();
+        assert_eq!(drawn.len(), 2);
+        assert_ne!(drawn[0], drawn[1]);
+        assert!(fold_of(drawn[0]).unwrap().full.ends_with("old 19"));
+        assert!(fold_of(drawn[1]).unwrap().full.ends_with("new 19"));
+        // The same on the next frame, and both cut lines read as the mark.
+        assert_eq!(fold_code_remembered(&body), folded);
+        for d in drawn {
+            let cut = d.lines().last().unwrap();
+            assert_eq!(cut.trim_end_matches(APART), CUT_MARK);
+        }
+    }
+
+    #[test]
+    fn a_body_a_search_points_into_shows_its_code_whole() {
+        let body = format!("看这里：\n\n{}", fence("go", 45));
+        assert_ne!(fold_code_remembered(&body), body);
+        open_all_code(&body);
+        assert_eq!(fold_code_remembered(&body), body);
+        let code = body.trim_start_matches("看这里：\n\n```go\n");
+        let code = code.trim_end().trim_end_matches("```");
+        set_code_open(code.trim_end(), false);
+        assert_ne!(fold_code_remembered(&body), body);
+    }
+
+    #[test]
     fn rows_count_wrapped_lines_and_full_width_characters() {
         assert_eq!(rendered_rows("a\n\nb"), 3);
         assert_eq!(rendered_rows(&"x".repeat(BODY_FOLD_UNITS + 1)), 2);
@@ -318,6 +419,25 @@ mod tests {
         assert!(code_first[..at].contains("line 120\n```"));
         assert!(code_first[..at].ends_with("说明一件事。"));
         assert!(at < code_first.trim_end().len());
+    }
+
+    #[test]
+    fn a_short_answer_around_one_long_listing_is_not_folded_twice() {
+        // The fence folds itself to its first lines: what is drawn is short.
+        let body = format!(
+            "改动在这里：\n\n{}\n完整的模块：\n\n{}\n就这些。\n",
+            fence("diff", 9),
+            fence("rust", 47)
+        );
+        assert!(rendered_rows(&body) > BODY_FOLD_OVER);
+        assert_eq!(body_fold_at(&body), None);
+        // Many characters, nearly all of them in the folded fence: the same.
+        let wide: String = (0..200)
+            .map(|i| format!("{}{i}\n", "x".repeat(40)))
+            .collect();
+        let body = format!("看这段：\n\n```rust\n{wide}```\n\n后面还有两句。\n\n没了。\n");
+        assert!(body.chars().count() > BODY_FOLD_CHARS);
+        assert_eq!(body_fold_at(&body), None);
     }
 
     #[test]
