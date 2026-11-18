@@ -197,6 +197,16 @@ pub fn parse_link(link: &str) -> Option<LinkTarget> {
     })
 }
 
+/// The 群, 话题 and 产出 to load for a link to a 产出 this device has not read yet.
+fn artifact_to_load(
+    target: &LinkTarget,
+    known: impl Fn(&str) -> bool,
+) -> Option<(&str, &str, &str)> {
+    let (id, _) = target.artifact.as_ref()?;
+    let topic = target.topic_id.as_deref()?;
+    (!known(id)).then_some((target.group_id.as_str(), topic, id.as_str()))
+}
+
 /// Does what `command` asks, in the running app.
 pub fn run(command: Command, services: &Services, cx: &mut App) {
     match command {
@@ -210,6 +220,12 @@ pub fn run(command: Command, services: &Services, cx: &mut App) {
             let provider = &services.provider;
             if !provider.groups().iter().any(|g| g.id == target.group_id) {
                 return;
+            }
+            // The page of a 产出 draws only what this device has: ask for the rest.
+            if let Some((group, topic, id)) =
+                artifact_to_load(&target, |id| provider.artifact(id).is_some())
+            {
+                provider.request_artifact(group, topic, id);
             }
             let topic = target
                 .topic_id
@@ -668,6 +684,15 @@ mod tests {
         }
         let long = format!("link {}//{}", scheme_prefix(), "a".repeat(MAX_LINK));
         assert_eq!(Command::decode(&long), None);
+    }
+
+    #[test]
+    fn a_link_loads_a_shared_artifact_this_device_has_not_read() {
+        let target = parse_link(&artifact_link("g", "t", "a", 2)).unwrap();
+        assert_eq!(artifact_to_load(&target, |_| false), Some(("g", "t", "a")));
+        assert_eq!(artifact_to_load(&target, |_| true), None);
+        let plain = parse_link(&link_to("g", Some("t"))).unwrap();
+        assert_eq!(artifact_to_load(&plain, |_| false), None);
     }
 
     #[test]
