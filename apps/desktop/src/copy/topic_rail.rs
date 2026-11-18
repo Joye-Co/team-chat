@@ -13,7 +13,7 @@ crate::copy! {
     TOPIC_RAIL_OUTPUTS = "产出",
     TOPIC_RAIL_DECISIONS = "用到的决定",
     TOPIC_RAIL_MACHINE = "电脑",
-    TOPIC_RAIL_COST = "用时和成本",
+    TOPIC_RAIL_COST = "用时和花费",
     TOPIC_RAIL_EMPTY = "这个话题还没有人在做",
     // A section with no data keeps its place with one quiet line.
     RAIL_EMPTY_OWNER = "还没有成员在做",
@@ -173,7 +173,7 @@ crate::copy! {
     INSPECTOR_CHECKS_VALUE = "{passed}/{total} 项通过",
     INSPECTOR_STATE = "状态",
     INSPECTOR_TIME = "用时",
-    INSPECTOR_COST = "成本",
+    INSPECTOR_COST = "花费",
     INSPECTOR_WHEN = "时间",
     INSPECTOR_WHEN_VALUE = "今天 {range}",
     INSPECTOR_WHEN_DAY = "{day} {range}",

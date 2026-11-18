@@ -100,9 +100,8 @@
 版本	Version
 时间	Time
 用时	Time taken
-成本	Cost
 花费	Spend
-用时和成本	Time and cost
+用时和花费	Time and cost
 在哪	Where
 在哪干活	Where it works
 做的人	Made by

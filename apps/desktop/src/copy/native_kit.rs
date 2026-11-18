@@ -172,7 +172,7 @@ crate::copy! {
     INS_OWNER = "负责",
     INS_PLAN = "计划",
     INS_WHERE = "在哪干活",
-    INS_COST = "用时和成本",
+    INS_COST = "用时和花费",
     INS_MEMBER = "成员",
     INS_MEMBER_VALUE = "小王",
     INS_COMPUTER = "电脑",

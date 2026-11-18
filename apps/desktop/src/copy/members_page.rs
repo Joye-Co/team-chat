@@ -41,7 +41,7 @@ crate::copy! {
     MEMBERS_AVERAGE = "平均 {n} 分钟",
     MEMBERS_OUTPUTS = "产出",
     MEMBERS_OUTPUT_KINDS = "{prs} PR · {pages} 网页",
-    MEMBERS_COST = "成本",
+    MEMBERS_COST = "花费",
     MEMBERS_PR = "PR #{n} {title}",
     MEMBERS_ARTIFACT = "产出「{title}」v{v}",
     MEMBERS_WAITS_REVIEW = "未合并 · 等你审",
