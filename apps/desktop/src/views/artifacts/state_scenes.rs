@@ -194,3 +194,7 @@ pub fn embed_states_checks(_: &Services, _: &mut App) -> Vec<Result<String, Stri
         ),
     ]
 }
+        check(
+            !ids("embed-media").is_empty(),
+            "a 产出 that is not a web page shows its own preview".to_string(),
+        ),
