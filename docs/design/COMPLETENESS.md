@@ -1,4 +1,4 @@
-# TeamChat completeness spec
+# Completeness spec
 
 Status: binding. Engineers implement this spec. Reviewers accept a screen only when it passes the checklist in section 4.
 It wins over `docs/design/NATIVE.md` and `docs/DESIGN.md` where they differ. The tokens of section 1 live in
@@ -7,7 +7,7 @@ It wins over `docs/design/NATIVE.md` and `docs/DESIGN.md` where they differ. The
 Note: the audit folders named below (`completeness/shadcn-bar/`, `component-system/`, `main-window/`, `audit-pages/`,
 `settings/`, `overlays/`, `content/`) hold the measurements and scripts behind this spec. They are not in this repository.
 
-Scope: the macOS client (Rust GPUI + gpui-component 0.8.1), branch `origin/v12/native`. The style stays pure black and white, like shadcn/ui new-york-v4 neutral. This spec does not ask for a new style. It asks for **finish**: every region designed, every state drawn, every value on one scale, nothing that reads as a draft.
+Scope: the desktop client on macOS and Windows (Rust GPUI + gpui-component 0.8.1; the Windows differences are in [WINDOWS.md](WINDOWS.md)), on `main`. The style stays pure black and white, like shadcn/ui new-york-v4 neutral. This spec does not ask for a new style. It asks for **finish**: every region designed, every state drawn, every value on one scale, nothing that reads as a draft.
 
 Keep the Mac client structure: the separate Settings window (640 wide, toolbar tab strip), sheets that drop from the toolbar edge, the toolbar title, the flush sidebar with traffic lights. Section 2.1 gives the coordinates.
 
@@ -51,7 +51,7 @@ The audits used two scales: the shadcn web scale (14 body, 36 controls) and a Ma
 
 ### 1.1 Tokens: one module
 
-- One token module: `ui/native/tokens.rs`. `theme.rs` `size::`, `radius::` and `type_scale::` become aliases, then are deleted.
+- One token module: `ui/native/tokens.rs`. Sizes, radii and text sizes live only there (`theme.rs` no longer has `size::`, `radius::` or `type_scale::`). Motion durations live in `theme::motion` (`apps/desktop/src/theme.rs`) and card timings in `tokens::card_v21`.
 - One color struct. `theme::apply` writes gpui-component `ThemeColor` in **one** pass (today 3 passes: base, v12/kit, v12/shell).
 - Check: `rg 'pub const' apps/desktop/src` finds heights, radii and text sizes only in `tokens.rs`.
 - Check: a test counts `px(` literals in `views/`. Today 1408. The count can only go down. Target for `.rounded(px(`, `.text_size(px(`, `.gap(px(` and `.h(px(` in views: 0.

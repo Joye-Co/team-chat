@@ -11,8 +11,14 @@ size read as device-independent pixels (1 pt = 1 px at 100 % scale). Minimum sys
 22H2.
 
 Status: nobody has run the app on a Windows machine yet. Each section says what was looked at
-(on a Mac, or in the Windows CI screenshots) and what is only compiled. Fix this file when a
-real machine shows otherwise.
+(on a Mac, or in the screenshots CI captured on Windows during the port) and what is only
+compiled. Fix this file when a real machine shows otherwise.
+
+CI no longer captures screenshots: on Windows it only compiles and runs the unit tests. To look
+at the Windows UI, build on a Windows machine (`cargo build -p desktop`) and run
+`scripts/windows-screenshots.sh <dir>` in Git Bash; it writes the PNGs, `screenshots.json` and
+`selftest.log` to `<dir>` (see 「怎么看 Windows 界面」 in
+[docs/plans/windows.zh.md](../plans/windows.zh.md)).
 
 ## 1. Title bar and window buttons
 
@@ -42,7 +48,7 @@ real machine shows otherwise.
   Windows it keeps the system's title bar, colored from the theme (`sidebar` fill, `label` text,
   `separator` border; dark when the app is dark) and with the app's icon.
 
-Looked at in the Windows CI screenshots (100 % scale).
+Looked at in the CI screenshots from the port (100 % scale).
 
 ## 2. Menus and the tray
 

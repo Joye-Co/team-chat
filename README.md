@@ -1,6 +1,6 @@
 # team-chat
 
-A macOS work chat for one small team, where people and bots are equal members. Every message
+A desktop work chat (macOS and Windows) for one small team, where people and bots are equal members. Every message
 belongs to a topic (话题) in a group (群); bots take work when they are @mentioned, stream their
 progress and deliver results (产出) into the topic. Client: Rust, GPUI and gpui-component.
 Server: Cloudflare Workers, Durable Objects, D1 and R2. The product name is a variable in
@@ -8,7 +8,10 @@ Server: Cloudflare Workers, Durable Objects, D1 and R2. The product name is a va
 
 - What we build, interface words and the V1 bar: [docs/PRODUCT.md](docs/PRODUCT.md)
 - Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); wire protocol: [docs/protocol.md](docs/protocol.md)
-- Visual design: [docs/DESIGN.md](docs/DESIGN.md)
+- Visual design: the binding finish spec [docs/design/COMPLETENESS.md](docs/design/COMPLETENESS.md)
+  and the client rules [docs/design/NATIVE.md](docs/design/NATIVE.md) (Windows differences:
+  [docs/design/WINDOWS.md](docs/design/WINDOWS.md)) win over [docs/DESIGN.md](docs/DESIGN.md),
+  which still owns cards, status words and content
 - Rules for contributors and coding agents: [AGENTS.md](AGENTS.md)
 - Changes per release: [CHANGELOG.md](CHANGELOG.md)
 
@@ -20,11 +23,16 @@ new member a download link with their invite code. No team server yet: set one u
 
 - New members (Chinese): [docs/ONBOARDING.zh.md](docs/ONBOARDING.zh.md) (download, first open,
   sign in, 群, 话题, 待办, 产出, @ a bot, notifications, diagnostics) and
-  [docs/INSTALL.zh.md](docs/INSTALL.zh.md) (install, update, uninstall).
-- English: [docs/INSTALL.md](docs/INSTALL.md).
+  [docs/INSTALL.zh.md](docs/INSTALL.zh.md) (install, update, uninstall; Windows:
+  [在 Windows 上安装](docs/INSTALL.zh.md#在-windows-上安装)).
+- English: [docs/INSTALL.md](docs/INSTALL.md) (Windows: [docs/INSTALL.md#windows](docs/INSTALL.md#windows)).
 
-The app needs an Apple silicon Mac with macOS 13 or later. It is not notarized: the first open
-goes through System Settings > Privacy & Security > Open Anyway. In-app updates do not ask again.
+On a Mac the app needs Apple silicon and macOS 13 or later (`<name>-<version>.dmg`). It is not
+notarized: the first open goes through System Settings > Privacy & Security > Open Anyway.
+On Windows it needs 64-bit Windows 10 (version 22H2) or Windows 11
+(`<name>-<version>-setup.exe`, no administrator rights). While the installer is not signed,
+SmartScreen asks on the first install: More info, then Run anyway. In-app updates do not ask
+again on either system.
 Server URLs are not part of this repository: a build takes the staging and production URLs from
 the operator's private ops checkout (`deploy/servers.json`, see
 [docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md#ops-checkout)) and offers them as 正式服务器 and
@@ -53,35 +61,60 @@ the deploy steps: [docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md). Incidents and ro
 
 ## Quick start
 
-Needs rustup (the toolchain in `rust-toolchain.toml`), bun 1.3 and the Xcode Command Line Tools.
+Needs rustup (the toolchain in `rust-toolchain.toml`), bun 1.3 and jq; on a Mac also the Xcode
+Command Line Tools. A desktop debug build takes 10–30 GB of disk; sccache and the build
+settings for several worktrees are in [AGENTS.md](AGENTS.md) (Rust builds, Disk space).
+
+**See the app.** One command; it starts its own local server on its own port, seeds the sample
+team of `scripts/sandbox/seed.ts`, opens the real app signed in as the sample owner, and builds
+and reopens it on every save. Nothing else has to run first.
 
 ```sh
 bun install --frozen-lockfile
+bun run dev:desktop              # --reset makes the samples again: scripts/dev-desktop.sh --reset
+```
 
-# Server: local Worker with local D1, R2 and Durable Objects
+`scripts/dev-desktop.sh` is written for macOS. On Windows build and run the app with
+`cargo run -p desktop` (target `x86_64-pc-windows-msvc`); notes on the Windows port are in
+[docs/plans/windows.zh.md](docs/plans/windows.zh.md).
+
+**A local server by hand** (server work; this is not the server `dev:desktop` uses). The Worker
+runs with local D1, R2 and Durable Objects and stays in the foreground:
+
+```sh
+# terminal 1
 cd server
 bunx wrangler d1 migrations apply DB --local
 bun scripts/admin.ts local-secret --env local        # writes server/.dev.vars (ADMIN_SECRET)
 bunx wrangler dev --port 8789 --inspector-port 9789
-cd ..
-bun server/scripts/admin.ts bootstrap --env local --url http://127.0.0.1:8789 --name <owner>
+```
 
-# Desktop app for UI work: the real app on a local server with a sample team, signed in,
-# rebuilt and reopened on every save (scripts/sandbox/; --reset makes the samples again)
-bun run dev:desktop
-# Release DMG: dist/<name>-<version>.dmg
+```sh
+# terminal 2, from the repository root, while the server runs
+bun server/scripts/admin.ts bootstrap --env local --name <owner>   # the first owner; prints file paths only
+bun server/scripts/admin.ts invite --self --env local              # a sign-in code for that owner, in a file
+scripts/dev-desktop.sh --real    # the app without the sandbox: at sign-in enter http://127.0.0.1:8789 and the code
+```
+
+**Release DMG** (`dist/<name>-<version>.dmg`):
+
+```sh
 scripts/build-dmg.sh && scripts/test-dmg.sh
 ```
 
-Tests:
+Tests. The first six rows are the commands CI runs
+([.github/workflows/ci.yml](.github/workflows/ci.yml)); the self-tests and the end-to-end run are
+started by hand:
 
 | What | Command |
 | --- | --- |
 | Server | `cd server && bun run typecheck && bun run test` |
 | Packages | `scripts/ci-run.sh typecheck packages/*` and `scripts/ci-run.sh test packages/*` |
-| Monitor | `cd ops/monitor && bunx vitest run && bunx tsc --noEmit` |
-| Rust | `cargo test -p chat-protocol -p chat-core -p daemon -p desktop -p artifact-view -p e2e` and `cargo clippy --workspace --all-targets -- -D warnings` |
-| Desktop self-tests | `desktop --selftest-smoke`, `--selftest-timeline 10000`, `--selftest-cards`, `--screenshot <dir> --theme both [--worst-case]` (see [apps/desktop/README.md](apps/desktop/README.md)) |
+| Ops (monitor, restore) | `scripts/ci-run.sh typecheck ops/*` and `scripts/ci-run.sh test ops/*` |
+| Release and setup scripts | `scripts/test-release-scripts.sh` and `scripts/test-setup-server.sh` (offline) |
+| Rust | `cargo fmt --all --check`, `cargo clippy --locked -p chat-protocol -p chat-core -p daemon -p update-helper -p e2e --all-targets -- -D warnings` and `cargo test --locked -p chat-protocol -p chat-core -p daemon -p update-helper` |
+| Desktop | `cargo test --locked -p desktop` (on macOS and on Windows; needs the large desktop target) and, when `crates/artifact-view` changes, `cargo test --locked -p artifact-view --no-fail-fast` on macOS |
+| Desktop self-tests | `desktop --selftest-smoke`, `--selftest-timeline 10000`, `--selftest-cards` (each with `--report <path>`), `--screenshot <dir> --theme both [--worst-case]` (see [apps/desktop/README.md](apps/desktop/README.md)) |
 | End to end | `cargo run -p e2e -- --base-url <url> --secrets-dir <dir>` (see [docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md)) |
 
 ## Release
@@ -92,6 +125,7 @@ From GitHub Actions (no Mac needed; secrets and modes in
 ```sh
 gh workflow run release.yml --ref main -f version=1.2.3                 # dry run: builds, changes nothing
 gh workflow run release.yml --ref main -f version=1.2.3 -f mode=release
+# add -f windows_unsigned=true while no Windows code signing is set up: without it the release refuses to run
 ```
 
 Or on the Mac that holds `~/.config/team-chat/production/admin-secret` and the signing files:
@@ -106,9 +140,12 @@ scripts/release.sh 1.2.3 --env staging --upload-only    # the same DMG for stagi
 `release.sh` runs in any worktree whose HEAD is `origin/main` and whose tree is clean. It sets
 the workspace version (Cargo), builds and checks the DMG (`scripts/build-dmg.sh`,
 `scripts/test-dmg.sh`) and the daemon, tags `v<version>`, creates the GitHub Release with the
-DMG and the daemon (GitHub shows each file's SHA-256), and uploads the DMG to the server
-(`PUT /v1/admin/releases/<version>`), which offers it as the in-app update and on invite
-download links. Write the notes in Chinese in `docs/releases/<version>.md` and add a
+DMG, the Windows installer given with `--windows-installer`, the daemon and, with
+`--linux-daemon`, the Linux daemon (GitHub shows each file's SHA-256), and uploads the DMG, the
+installer and the Linux daemon to the server (`PUT /v1/admin/releases/<version>`), which offers
+them as the in-app update and on invite download links. The GitHub Actions release builds all
+three in one run and publishes them together
+([docs/RUNBOOK.md](docs/RUNBOOK.md#release-from-github-actions)). Write the notes in Chinese in `docs/releases/<version>.md` and add a
 `CHANGELOG.md` entry headed `## <version> (unreleased)`; `release.sh` writes the date and stops
 when `scripts/release-check.sh <version>` finds a draft note or a version mismatch. After a
 release, deploy the server so `/v1/health` shows the version (`scripts/release-check.sh <version>

@@ -1,6 +1,13 @@
 # Design v3
 
-**v3 is the design of TeamChat 1.1.0.** It replaces v2.2. The owner found v2 "太朴素、太草稿了，不像
+> Two later files are binding and win over this one where they differ: the finish spec
+> [design/COMPLETENESS.md](design/COMPLETENESS.md) (pure black and white, one token module, one
+> scale, every state drawn) and the client rules [design/NATIVE.md](design/NATIVE.md), with
+> [design/WINDOWS.md](design/WINDOWS.md) for the Windows differences. NATIVE.md overrides §1–§8 and
+> §12–§13 here, and COMPLETENESS.md §4 replaces the §17 checklist. This file still owns Card v2
+> semantics (§7.10, §7.13–§7.17), member status words (§9), content (§10) and accessibility (§11).
+
+**v3 is the design of the app in 1.1.0.** It replaces v2.2. The owner found v2 "太朴素、太草稿了，不像
 production-ready" and asked for a polished, finished feel, more motion, a rethought left side and a
 right side modeled on Claude Desktop. v3 keeps the v2 rules that worked (96 pt composer, closed
 type scale, hover states on everything, color means something) and changes the rest: an ink-on-paper
@@ -171,8 +178,10 @@ border or a 1 pt top or bottom line in the same color; the result must match the
 
 ### 2.7 gpui-component theme mapping
 
-One JSON theme set (`apps/desktop/assets/theme.json`, `light` and `dark`). App-owned roles (state
-colors, member tints, shadows, `screen*`) live in `theme::Colors`.
+One token module (`apps/desktop/src/ui/native/tokens.rs`; its `Palette` holds the `light` and
+`dark` values), which `apps/desktop/src/theme.rs` loads into gpui-component's theme. App-owned
+roles (state colors, member tints, shadows, `screen*`) are read through `theme::Colors`, a view of
+the same palette.
 
 | Slot(s) | Token |
 | --- | --- |
@@ -1106,9 +1115,9 @@ each in light and dark. The app's screenshot self-test has a scene per artboard,
 same team data, so a capture can be compared side by side at 2x.
 
 Sync rules:
-- One token source per side: the HELMET2 block for the artboards; `theme.json` + `theme::Colors`
-  for the app. A value change updates this file, the artboard helmet and `theme.json` in one
-  commit.
+- One token source per side: the HELMET2 block for the artboards;
+  `apps/desktop/src/ui/native/tokens.rs` (loaded by `apps/desktop/src/theme.rs`) for the app. A
+  value change updates this file, the artboard helmet and `tokens.rs` in one commit.
 - Sizes are Rust enums or constants in `ui/` (`TextStyle`, `ControlSize`, `Radius`, `Space`), so an
   off-scale value does not compile. Views never write a color, size or duration literal.
 - Each visual pull request adds before and after captures at 2x in both themes.
