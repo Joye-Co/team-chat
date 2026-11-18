@@ -1169,28 +1169,7 @@ impl MembersPage {
             page::compact_empty(Sym::Document, c::MEMBERS_DELIVERIES_EMPTY, None, cx)
                 .into_any_element()
         } else {
-            let cols = [
-                page::Col {
-                    header: c::MEMBERS_COL_NAME.into(),
-                    width: None,
-                    right: false,
-                },
-                page::Col {
-                    header: c::MEMBERS_COL_WHERE.into(),
-                    width: Some(px(120.)),
-                    right: false,
-                },
-                page::Col {
-                    header: c::MEMBERS_COL_TIME.into(),
-                    width: Some(px(96.)),
-                    right: true,
-                },
-                page::Col {
-                    header: c::MEMBERS_COL_STATE.into(),
-                    width: Some(px(104.)),
-                    right: true,
-                },
-            ];
+            let cols = delivery_cols();
             let rows = e
                 .extras
                 .deliveries
@@ -1771,6 +1750,8 @@ impl MembersPage {
                 .into_any_element()
         };
         page::titled_card("member-tools", c::MEMBERS_TOOLS, None, None, body, None, cx)
+            // Cards side by side share one height (§2.4 grid).
+            .flex_1()
             .into_any_element()
     }
 
@@ -1973,12 +1954,23 @@ impl MembersPage {
             )
             .child(pair_skeleton("member-sk-a", cx))
             // 最近交付 is a table in a card (§2.18): its header and rows.
-            .child(card_skeleton(
-                "member-sk-t",
-                page::SkeletonKind::TableRow,
-                3,
-                cx,
-            ))
+            .child(
+                page::card(cx)
+                    .p(page::m::GUTTER)
+                    .gap(page::m::GUTTER)
+                    .child(
+                        crate::ui::native::Bone::new()
+                            .h(crate::ui::native::tokens::text::HEADING.0)
+                            .w(gpui::relative(0.3))
+                            .rounded(tsp::S8),
+                    )
+                    .child(page::skeleton_table_on_card(
+                        "member-sk-t",
+                        &delivery_cols(),
+                        3,
+                        cx,
+                    )),
+            )
             .child(pair_skeleton("member-sk-b", cx))
     }
 }
@@ -2064,6 +2056,32 @@ fn card_skeleton(id: &str, kind: page::SkeletonKind, n: usize, cx: &App) -> gpui
                 .rounded(tsp::S8),
         )
         .child(page::skeleton_rows(id, kind, n, cx))
+}
+
+/// The columns of 最近交付: 名称, 在哪, 时间, 状态 (the table and its skeleton).
+fn delivery_cols() -> [page::Col; 4] {
+    [
+        page::Col {
+            header: c::MEMBERS_COL_NAME.into(),
+            width: None,
+            right: false,
+        },
+        page::Col {
+            header: c::MEMBERS_COL_WHERE.into(),
+            width: Some(px(120.)),
+            right: false,
+        },
+        page::Col {
+            header: c::MEMBERS_COL_TIME.into(),
+            width: Some(px(96.)),
+            right: true,
+        },
+        page::Col {
+            header: c::MEMBERS_COL_STATE.into(),
+            width: Some(px(104.)),
+            right: true,
+        },
+    ]
 }
 
 /// Two detail cards side by side (现在在做 | 这周), as skeletons.

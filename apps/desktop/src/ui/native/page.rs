@@ -1379,6 +1379,16 @@ fn table_header(cols: &[Col], cx: &App) -> gpui::Div {
 /// column names are known before the rows are), and `n` (3 to 6) h48 rows with
 /// one bar per column at the column's width and alignment.
 pub fn skeleton_table(id: &str, cols: &[Col], n: usize, cx: &App) -> AnyElement {
+    skeleton_table_in(frame(cx), id, cols, n, cx)
+}
+
+/// A [`skeleton_table`] inside a card (§2.4): on the card's fill, as the
+/// loaded table in a [`frame_on_card`].
+pub fn skeleton_table_on_card(id: &str, cols: &[Col], n: usize, cx: &App) -> AnyElement {
+    skeleton_table_in(frame_on_card(cx), id, cols, n, cx)
+}
+
+fn skeleton_table_in(frame: gpui::Div, id: &str, cols: &[Col], n: usize, cx: &App) -> AnyElement {
     let k = native_colors(cx);
     let n = n.clamp(*TABLE_SKELETON_ROWS.start(), *TABLE_SKELETON_ROWS.end());
     let count = cols.len();
@@ -1406,7 +1416,7 @@ pub fn skeleton_table(id: &str, cols: &[Col], n: usize, cx: &App) -> AnyElement 
                     })))
             }))
     };
-    frame(cx)
+    frame
         .id(SharedString::from(format!("{id}-skeleton")))
         .child(table_header(cols, cx))
         .children((0..n).map(|i| {
