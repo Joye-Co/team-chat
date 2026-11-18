@@ -738,7 +738,7 @@ impl ArtifactPage {
         detail: &ArtifactDetail,
         shown: u32,
         live: bool,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         use crate::ui::native::{
@@ -755,48 +755,25 @@ impl ArtifactPage {
             }
         };
 
-        let close = nk::borderless_button(
+        // The same header band as every right pane (§2.2), so the close
+        // button stays where it is when one pane replaces another.
+        let close = nk::icon_button_sym(
             "artifact-info-close",
-            crate::ui::sf_symbols::Sf::Close,
+            Sym::Close,
             c::ARTIFACT_CLOSE_INFO,
-            window,
+            nk::IconSize::Regular,
             cx,
         )
         .on_click(cx.listener(|this, _, _, cx| {
             this.aside_open = false;
             cx.notify();
         }));
-        let header = div()
-            .flex_none()
-            .h(nk::metrics::TOOLBAR_ROW)
-            .pl(nk::metrics::INSPECTOR_PAD)
-            .pr(tsp::S8)
-            .border_b_1()
-            .border_color(k.separator)
-            .flex()
-            .items_center()
-            .gap(tsp::S8)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .items_center()
-                    .gap(gpui::px(8.))
-                    .child(
-                        div()
-                            .n_title3()
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(k.label)
-                            .child(c::ARTIFACT_INFO),
-                    )
-                    .child(
-                        line(c::ARTIFACT_INFO_LINE)
-                            .n_subheadline()
-                            .text_color(k.secondary),
-                    ),
-            )
-            .child(close);
+        let header = crate::views::group_page::kit::pane_header(
+            c::ARTIFACT_INFO,
+            c::ARTIFACT_INFO_LINE.into(),
+            vec![close.into_any_element()],
+            cx,
+        );
         let mut body = div()
             .id("artifact-story")
             .flex_1()
@@ -1005,7 +982,9 @@ impl ArtifactPage {
                     .items_center()
                     .gap(tsp::S8)
                     .n_body()
-                    .when(on, |el| el.bg(k.fill).font_weight(gpui::FontWeight::MEDIUM))
+                    .when(on, |el| {
+                        el.bg(k.fill).font_weight(crate::theme::MEDIUM_WEIGHT)
+                    })
                     .child(
                         div()
                             .flex_none()
@@ -1626,7 +1605,7 @@ impl ArtifactPage {
                                         // at gap 4 (no void between, A1).
                                         div()
                                             .n_body()
-                                            .font_weight(gpui::FontWeight::MEDIUM)
+                                            .font_weight(crate::theme::MEDIUM_WEIGHT)
                                             .text_color(n.label)
                                             .line_clamp(2)
                                             .child(a.title.clone()),
@@ -1700,10 +1679,13 @@ impl ArtifactPage {
                                 .child(page::row_icon(kind_sym(a.kind), n.secondary)),
                         )
                         .child(
-                            div().min_w_0().font_weight(gpui::FontWeight::MEDIUM).child(
-                                crate::ui::truncate::TruncText::new(a.title.clone())
-                                    .id(SharedString::from(format!("artifact-name-{}", a.id))),
-                            ),
+                            div()
+                                .min_w_0()
+                                .font_weight(crate::theme::MEDIUM_WEIGHT)
+                                .child(
+                                    crate::ui::truncate::TruncText::new(a.title.clone())
+                                        .id(SharedString::from(format!("artifact-name-{}", a.id))),
+                                ),
                         )
                         .into_any_element();
                     // X-01: a leading emoji in the name is not shown beside
