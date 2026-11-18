@@ -704,7 +704,7 @@ pub(crate) fn meta(el: gpui::Div) -> gpui::Div {
 }
 
 /// The label and the detail of the strip.
-pub(crate) fn strip_words(ctx: &Ctx, cx: &App) -> (String, String) {
+pub(crate) fn strip_words(ctx: &Ctx) -> (String, String) {
     // A name in a state line is cut first, so times and the state word stay.
     let author_short = short_name(&ctx.author);
     let author = author_short.as_str();
@@ -733,29 +733,28 @@ pub(crate) fn strip_words(ctx: &Ctx, cx: &App) -> (String, String) {
     match ctx.state {
         CardState::Pending => {
             // The §2.12 word of the ask (T, `topic_page::ask_words`): 等你审 for a
-            // review, 等你回答 for any other ask (a form and a draft too); the detail
-            // says what is left to do.
+            // review, 等你回答 for any other ask (a form and a draft too). The band says
+            // the state once (DESIGN.md §7.13): the detail is only the hint that helps
+            // (how the answer is sent), never the badge again in other words.
             let word = ask_word(ctx);
             if has_fields(ctx.card) {
                 let ready = form::problems(ctx.card, &ctx.values).is_empty();
                 if ready {
                     (word.into(), c::STRIP_FILL_READY_DETAIL.into())
                 } else {
-                    (word.into(), fill(c::STRIP_WAITS, &[("name", author)]))
+                    (word.into(), String::new())
                 }
-            } else if has_draft(ctx.card) && ctx.form.read(cx).editing.is_some() {
-                (word.into(), fill(c::STRIP_WAITS, &[("name", author)]))
+            } else if has_draft(ctx.card) {
+                (word.into(), String::new())
             } else {
                 let detail = if ctx.quick() {
                     c::STRIP_WAITS_QUICK
-                } else if has_draft(ctx.card) {
-                    c::STRIP_WAITS_CONFIRM
                 } else if takes_input(ctx.card) {
                     c::STRIP_WAITS_CHOOSE
                 } else {
-                    c::STRIP_WAITS_APPROVE
+                    ""
                 };
-                (word.into(), fill(detail, &[("name", author)]))
+                (word.into(), detail.into())
             }
         }
         CardState::WaitingOn => (waiting_on(ctx), c::STRIP_WAITING_ON_DETAIL.into()),
@@ -1105,7 +1104,10 @@ impl StripParts {
             Some(state) => ui::native::StatusBadge::new(state, self.label.clone())
                 .max_w(m::MAX_WIDTH / 2.)
                 .into_any_element(),
+            // The same muted fill as the StatusBadges beside it (§2.2), never the
+            // outline pill.
             None => ui::native::Badge::new(self.label.clone())
+                .secondary()
                 .icon(Sym::Refresh, n.secondary)
                 .max_w(m::MAX_WIDTH / 2.)
                 .into_any_element(),
@@ -1141,7 +1143,7 @@ pub(crate) fn strip_parts(ctx: &Ctx, cx: &App) -> Option<StripParts> {
     let (label, detail) = match (&waiting, &updated) {
         (Some((l, d, _)), _) => (l.clone(), d.clone()),
         (None, Some((l, d))) => (l.clone(), d.clone()),
-        (None, None) => super::v21::band::words(ctx, strip_words(ctx, cx)),
+        (None, None) => super::v21::band::words(ctx, strip_words(ctx)),
     };
     let right = (waiting.is_none() && updated.is_none())
         .then(|| super::v21::band::right(ctx))
@@ -1316,7 +1318,9 @@ fn header(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
         .flex()
         .items_center()
         .gap(space::S8)
-        .min_h(ui::native::cards::card::AVATAR)
+        // One row height with or without an action (the sm button), so sibling
+        // headers keep the same offsets.
+        .h(ui::native::cards::card::HEADER_ROW)
         .when(!in_topic, |el| {
             el.child(ui::MemberAvatar::new(
                 member.as_ref(),
@@ -1378,7 +1382,13 @@ fn title(ctx: &Ctx, has_header: bool, cx: &App) -> AnyElement {
         // A compact card's title: 14 semibold (§2.4).
         .n_headline()
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(n.label)
+        // A superseded or expired card: the title in the muted token, never a
+        // dimmed layer over text that is already muted (D1).
+        .text_color(if ctx.state.muted() {
+            n.secondary
+        } else {
+            n.label
+        })
         // A title is one line of text: line breaks and runs of spaces collapse
         // (break-ui), and it wraps at most to 2 lines.
         .line_clamp(2)
@@ -1435,7 +1445,8 @@ pub(crate) fn loading_card(cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-/// A card that cannot be read (§2.15): an Alert in its place, with 重试.
+/// A card that cannot be read (§2.15): an Alert in its place. The cause it names is
+/// a newer format, so its action is the app's 检查更新….
 pub(crate) fn failed_card(id: SharedString, cx: &App) -> AnyElement {
     let n = ui::native::native_colors(cx);
     div()
@@ -1444,7 +1455,19 @@ pub(crate) fn failed_card(id: SharedString, cx: &App) -> AnyElement {
             ui::native::Alert::new(Sym::Failed, c::CARD_DECODE_FAILED)
                 .description(c::CARD_DECODE_FAILED_DETAIL)
                 .icon_color(n.red)
-                .action(button(id, c::STRIP_RETRY, PushStyle::Outline, cx)),
+                .action(
+                    button(
+                        id,
+                        crate::copy::overlays::MENU_CHECK,
+                        PushStyle::Outline,
+                        cx,
+                    )
+                    .on_click(|_, _, cx| {
+                        if let Some(u) = crate::updater::global(cx) {
+                            u.update(cx, |u, cx| u.check_now(cx));
+                        }
+                    }),
+                ),
         )
         .into_any_element()
 }
@@ -1625,7 +1648,6 @@ fn full(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
     };
     // --- end inc-cards21 ---
     let footer = footer(ctx, window, cx);
-    let muted = ctx.state.muted();
     let inset = ui::native::cards::card::INSET;
     let card = frame(false, cx)
         .flex()
@@ -1646,7 +1668,6 @@ fn full(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
                         .flex()
                         .flex_col()
                         .min_w(px(0.))
-                        .when(muted, |el| el.opacity(m::MUTED))
                         .child(title)
                         .children(body),
                 ),
@@ -1768,8 +1789,8 @@ pub(crate) fn footer_stack(
 /// like the rest of the card, buttons 8 pt apart.
 pub(crate) fn card_footer(_cx: &App) -> gpui::Div {
     let inset = ui::native::cards::card::INSET;
-    // One footer row (§2.4): the buttons keep their width and a note cuts at
-    // its end instead of wrapping under them.
+    // One footer row (§2.4): the buttons keep their width. A note is never in
+    // this row: `footer_stack` puts it on its own line above the actions.
     div()
         .flex_none()
         .flex()
@@ -1950,8 +1971,8 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     );
                 }
                 link_buttons(&mut items, cx);
-                items.extend(lock_note(ctx, live, cx));
-                return Some(footer_stack(items, desc.take(), cx));
+                // The lock note is the footer's description: above the actions (§2.4).
+                return Some(footer_stack(items, lock_note(ctx, live, cx), cx));
             }
             if takes_input(ctx.card) {
                 // A decision with three or more options: an optional note
@@ -2010,11 +2031,10 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                 );
             }
             link_buttons(&mut items, cx);
-            items.extend(lock_note(ctx, live, cx));
             if items.is_empty() {
-                return None;
+                return lock_note(ctx, live, cx).map(|n| footer_stack(items, Some(n), cx));
             }
-            Some(footer_stack(items, desc.take(), cx))
+            Some(footer_stack(items, lock_note(ctx, live, cx), cx))
         }
         CardState::Sending { action_id } => {
             // The pressed control spins; the rest wait.

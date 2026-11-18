@@ -8,11 +8,8 @@ crate::copy! {
     CARD_UNDO = "撤回",
 
     // The status strip: the state, who and when.
-    STRIP_WAITS = "{name} 在等你",
-    STRIP_WAITS_QUICK = "{name} 在等你 · 点一下就算选了",
-    STRIP_WAITS_CHOOSE = "{name} 在等你 · 选好再提交",
-    STRIP_WAITS_APPROVE = "{name} 在等你批准",
-    STRIP_WAITS_CONFIRM = "{name} 在等你确认",
+    STRIP_WAITS_QUICK = "点一下就算选了",
+    STRIP_WAITS_CHOOSE = "选好再提交",
     STRIP_FILL_READY_DETAIL = "都填好了",
     STRIP_WAITING_ON_DETAIL = "只有被问的人能选",
     STRIP_SENDING = "发送中",
@@ -57,7 +54,7 @@ crate::copy! {
     RECORD_COLLAPSE = "收起",
 
     // Forms.
-    FORM_MISSING = "还差{labels}",
+    FORM_MISSING = "还没填：{labels}",
     FORM_INVALID = "{label}填得不对",
     FORM_READY = "提交后发给 {name}",
     FORM_DATE_PLACEHOLDER = "年-月-日",

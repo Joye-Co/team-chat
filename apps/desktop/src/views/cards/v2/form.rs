@@ -135,7 +135,7 @@ pub fn problems(card: &CardV2, values: &Values) -> Vec<Problem> {
     out
 }
 
-/// The labels of the missing required fields (`还差名字、岗位、入职日期`).
+/// The labels of the missing required fields (`还没填：名字、岗位、入职日期`).
 pub fn missing_labels(problems: &[Problem]) -> Vec<String> {
     problems
         .iter()

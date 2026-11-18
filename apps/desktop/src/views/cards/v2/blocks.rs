@@ -586,27 +586,44 @@ pub(crate) fn numeric(s: &str) -> bool {
 /// The width of number column `ci`: its widest header (12 pt) or mono cell (13 pt), at
 /// least [`m::TABLE_NUM_COL`], so the header and every row line up at the right.
 pub(crate) fn num_col_width(columns: &[String], rows: &[Vec<String>], ci: usize) -> gpui::Pixels {
-    // One CJK character is about one em; a tabular digit about 0.62 em, 0.66 em in
-    // the semibold total row, so the estimate takes the wider one.
-    let est = |t: &str, size: f32| -> f32 {
-        t.chars()
-            .map(|c| if c.is_ascii() { 0.66 * size } else { size })
-            .sum()
-    };
+    let est = est_width;
     let head = columns.get(ci).map_or(0., |h| est(h, 12.));
     let cells = rows
         .iter()
         .filter_map(|r| r.get(ci))
         .map(|v| {
-            let bar = if percent(v).is_some() {
-                f32::from(m::TABLE_PCT_BAR) + f32::from(space::S8)
+            // A share cell: the bar, the gap and the column's one figure slot.
+            if percent(v).is_some() {
+                f32::from(m::TABLE_PCT_BAR)
+                    + f32::from(space::S8)
+                    + pct_figure_width(rows, ci).map_or(0., f32::from)
             } else {
-                0.
-            };
-            est(v, 14.) + bar
+                est(v, 14.)
+            }
         })
         .fold(0f32, f32::max);
     px(head.max(cells).ceil() + 2.).max(m::TABLE_NUM_COL)
+}
+
+/// The estimated width of `t` at `size`: one CJK character is about one em; a tabular
+/// digit about 0.62 em, 0.66 em in the semibold total row, so it takes the wider one.
+fn est_width(t: &str, size: f32) -> f32 {
+    t.chars()
+        .map(|c| if c.is_ascii() { 0.66 * size } else { size })
+        .sum()
+}
+
+/// The slot of the figure beside a share bar in column `ci`: the widest percent of
+/// the column, so every bar of the column starts at one x whatever its row's figure.
+fn pct_figure_width(rows: &[Vec<String>], ci: usize) -> Option<gpui::Pixels> {
+    rows.iter()
+        .filter_map(|r| r.get(ci))
+        .filter(|v| percent(v).is_some())
+        // A little wider than the column estimate: the figure must never reach
+        // into the gap after its bar, in the semibold total row too.
+        .map(|v| (est_width(v, 14.) * 1.1).ceil())
+        .reduce(f32::max)
+        .map(px)
 }
 
 fn percent(s: &str) -> Option<f32> {
@@ -643,46 +660,49 @@ pub(crate) fn table_with_refs(
         .enumerate()
         .map(|(ci, n)| n.then(|| num_col_width(columns, rows, ci)))
         .collect();
-    let cell = |ci: usize, text: &str, head: bool, bold: bool| {
-        let num = numeric_col.get(ci).copied().unwrap_or(false);
-        let pct = (!head).then(|| percent(text)).flatten();
-        // Text columns share the width; number columns take what their numbers need.
-        let width = widths.get(ci).copied().flatten();
-        // A number column takes its widest value in every row (one x per column);
-        // numbers never truncate (§2.7).
-        div()
-            .map(|el| match width {
-                Some(w) => el.flex_none().w(w),
-                None => el.flex_1(),
-            })
-            .when(ci == 0, |el| el.flex_grow(1.).min_w(px(96.)))
-            .min_w(px(0.))
-            .flex()
-            .items_center()
-            .gap(space::S8)
-            .when(num, |el| el.justify_end())
-            .when_some(pct, |el, p| {
-                el.child(div().w(m::TABLE_PCT_BAR).child(ui::native::determinate_bar(
-                    (p / 100.).clamp(0., 1.) as f32,
-                    None,
-                    cx,
-                )))
-            })
-            .child(if num {
-                div()
-                    .flex_none()
-                    .whitespace_nowrap()
-                    .when(!head, |el| el.n_figures())
-                    .when(bold, |el| el.font_weight(FontWeight::SEMIBOLD))
-                    .child(text.to_string())
-                    .into_any_element()
-            } else {
-                // A text cell cuts at the end with the full text in a tooltip (§2.21).
-                ui::truncate::TruncText::new(text.to_string())
-                    .when(bold, |el| el.font_weight(FontWeight::SEMIBOLD))
-                    .into_any_element()
-            })
-    };
+    let cell =
+        |ci: usize, text: &str, head: bool, bold: bool| {
+            let num = numeric_col.get(ci).copied().unwrap_or(false);
+            let pct = (!head).then(|| percent(text)).flatten();
+            // Text columns share the width; number columns take what their numbers need.
+            let width = widths.get(ci).copied().flatten();
+            // A number column takes its widest value in every row (one x per column);
+            // numbers never truncate (§2.7).
+            div()
+                .map(|el| match width {
+                    Some(w) => el.flex_none().w(w),
+                    None => el.flex_1(),
+                })
+                .when(ci == 0, |el| el.flex_grow(1.).min_w(px(96.)))
+                .min_w(px(0.))
+                .flex()
+                .items_center()
+                .gap(space::S8)
+                .when(num, |el| el.justify_end())
+                .when_some(pct, |el, p| {
+                    // The bar neither moves nor shrinks with the figure beside it.
+                    el.child(div().flex_none().w(m::TABLE_PCT_BAR).child(
+                        ui::native::determinate_bar((p / 100.).clamp(0., 1.) as f32, None, cx),
+                    ))
+                })
+                .child(if num {
+                    div()
+                        .flex_none()
+                        .when_some(pct.and(pct_figure_width(rows, ci)), |el, w| {
+                            el.w(w).flex().justify_end()
+                        })
+                        .whitespace_nowrap()
+                        .when(!head, |el| el.n_figures())
+                        .when(bold, |el| el.font_weight(FontWeight::SEMIBOLD))
+                        .child(text.to_string())
+                        .into_any_element()
+                } else {
+                    // A text cell cuts at the end with the full text in a tooltip (§2.21).
+                    ui::truncate::TruncText::new(text.to_string())
+                        .when(bold, |el| el.font_weight(FontWeight::SEMIBOLD))
+                        .into_any_element()
+                })
+        };
     let last = rows.len().saturating_sub(1);
     // The compact table of §2.7 in a frame: radius 10, a 1 px border, a muted
     // 12 medium header, rows 40 apart with a line between them.
@@ -798,44 +818,49 @@ pub(crate) fn list_with(
                 Some(CardListStatus::Skipped) => (Some(Sym::Minus), k.ink_3, k.ink_3),
                 Some(CardListStatus::Todo) | None => (None, k.ink_3, k.ink_2),
             };
-            let row = div()
-                .id(SharedString::from(format!("list-item-{i}")))
-                .flex()
-                .items_center()
-                .gap(space::S10)
-                .min_h(px(24.))
-                .when(parts.is_some(), |el| el.mx(-space::S4).px(space::S4))
-                .child(
-                    div().flex_none().w(px(16.)).flex().justify_center().child(
-                        match (glyph, it.status) {
-                            (Some(g), _) => ui::icon(g, px(14.), color).into_any_element(),
-                            // Work in progress: the working loader (§2.12), not a dot.
-                            (None, Some(CardListStatus::InProgress)) => {
-                                gpui_component::Sizable::with_size(
-                                    ui::motion::spinner(),
-                                    crate::ui::native::tokens::icon::SM,
-                                )
-                                .color(color)
-                                .into_any_element()
-                            }
-                            _ => div()
-                                .size(px(5.))
-                                .rounded_full()
-                                .bg(k.ink_3)
-                                .into_any_element(),
-                        },
-                    ),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w(px(0.))
-                        .flex()
-                        .items_center()
-                        .gap(space::S8)
-                        .child(div().min_w(px(0.)).text_color(text).child(it.text.clone()))
-                        .children(parts.and_then(|(p, w)| p.button(pick, w, cx))),
-                );
+            let row =
+                div()
+                    .id(SharedString::from(format!("list-item-{i}")))
+                    .flex()
+                    .items_center()
+                    .gap(space::S10)
+                    .min_h(px(24.))
+                    .when(parts.is_some(), |el| el.mx(-space::S4).px(space::S4))
+                    .child(
+                        div().flex_none().w(px(16.)).flex().justify_center().child(
+                            match (glyph, it.status) {
+                                (Some(g), _) => ui::icon(g, px(14.), color).into_any_element(),
+                                // Work in progress: the working loader (§2.12), not a dot.
+                                (None, Some(CardListStatus::InProgress)) => {
+                                    gpui_component::Sizable::with_size(
+                                        ui::motion::spinner(),
+                                        crate::ui::native::tokens::icon::SM,
+                                    )
+                                    .color(color)
+                                    .into_any_element()
+                                }
+                                _ => div()
+                                    .size(px(5.))
+                                    .rounded_full()
+                                    .bg(k.ink_3)
+                                    .into_any_element(),
+                            },
+                        ),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .flex()
+                            .items_center()
+                            .gap(space::S8)
+                            .child(div().min_w(px(0.)).text_color(text).child(it.text.clone()))
+                            // The holder has no height: 问这里 never moves the step's text off
+                            // the centre it shares with its mark.
+                            .children(parts.and_then(|(p, w)| p.button(pick, w, cx)).map(|b| {
+                                div().flex_none().h(px(0.)).flex().items_center().child(b)
+                            })),
+                    );
             match parts {
                 Some((p, w)) => p.wrap_own(pick, row, w, cx),
                 None => row.into_any_element(),
@@ -903,6 +928,9 @@ fn image(ctx: &Ctx, file_id: &str, alt: Option<&str>, cx: &App) -> gpui::Statefu
         .h(px(200.))
         .rounded(theme::radius::MD)
         .overflow_hidden()
+        // A superseded or expired card dims its pictures; its text keeps the muted
+        // token's contrast instead (D1).
+        .when(ctx.state.muted(), |el| el.opacity(m::MUTED))
         .when_some(open_picture(ctx, file_id), |el, open| {
             el.cursor_pointer().on_click(open)
         })
@@ -1972,6 +2000,7 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
                 .h(h)
                 .rounded(theme::radius::SM)
                 .overflow_hidden()
+                .when(ctx.state.muted(), |el| el.opacity(m::MUTED))
                 .map(|el| match path {
                     Some(p) => el.child(img(p).size_full().object_fit(ObjectFit::Cover)),
                     // No file yet: the image icon in a bordered box, never a blank fill.
@@ -2013,7 +2042,7 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
                 .text_size(crate::ui::native::tokens::text::UI.0)
                 .line_height(px(22.))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(k.ink)
+                .text_color(if ctx.state.muted() { k.ink_2 } else { k.ink })
                 .line_clamp(2)
                 .text_ellipsis()
                 .child(t)
@@ -2220,6 +2249,9 @@ fn plan(
                         .flex_1()
                         .min_w(px(0.))
                         .flex()
+                        // The text keeps the centre of its mark and of 问这里 when the
+                        // button makes the line taller.
+                        .items_center()
                         .overflow_hidden()
                         // A long step ends in "…" with the full text in a
                         // tooltip; 问这里 stays after it (§2.21, F3).
@@ -2645,12 +2677,20 @@ pub(crate) fn proof_chip(
         .text_color(if has_url { n.label } else { n.secondary })
         .when_some(glyph, |el, (g, color)| {
             // Done reads quietly in a row: `checkmark` in `green`.
-            el.child(ui::icon(g, px(14.), color))
+            el.child(ui::icon(g, crate::ui::native::tokens::icon::SM, color))
         })
         .child(div().whitespace_nowrap().child(label))
         .when_some(url, |el, url| {
-            el.cursor_pointer()
-                .on_click(move |_, _, cx| cx.open_url(&url))
+            // A proof that opens says so: the ↗ after the label, underlined on hover
+            // (the muted-link recipe of COMPLETENESS §2).
+            el.child(ui::icon(
+                Sym::OpenExternal,
+                crate::ui::native::tokens::icon::SM,
+                n.label,
+            ))
+            .cursor_pointer()
+            .hover(|s| s.underline())
+            .on_click(move |_, _, cx| cx.open_url(&url))
         })
         .into_any_element()
 }
@@ -2754,6 +2794,7 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
                     .border_color(k.line)
                     .bg(k.bg)
                     .overflow_hidden()
+                    .when(ctx.state.muted(), |el| el.opacity(m::MUTED))
                     .map(|el| match path {
                         Some(p) => el.child(img(p).size_full().object_fit(ObjectFit::Cover)),
                         None => el
@@ -2930,6 +2971,9 @@ enum PrTone {
     Bad,
     /// Checks or a merge are running.
     Running,
+    /// Closed without a merge.
+    Closed,
+    /// Open, a draft, or free text: not merged yet.
     Plain,
 }
 
@@ -2950,7 +2994,7 @@ fn pr_state(raw: &str) -> PrState {
         "open" => (rail::CHANGES_OPEN, PrTone::Plain),
         "draft" => (c::REF_PR_DRAFT, PrTone::Plain),
         "merged" => (rail::CHANGES_MERGED, PrTone::Merged),
-        "closed" => (rail::CHANGES_CLOSED, PrTone::Plain),
+        "closed" => (rail::CHANGES_CLOSED, PrTone::Closed),
         "failed" => (c::REF_CHECK_FAILED, PrTone::Bad),
         _ => {
             // A free-text state such as "已合并 11-02" or
@@ -2971,6 +3015,8 @@ fn pr_state(raw: &str) -> PrState {
                         PrTone::Bad
                     } else if part == rail::CHANGES_MERGING || is_count(last) {
                         PrTone::Running
+                    } else if part == rail::CHANGES_CLOSED {
+                        PrTone::Closed
                     } else {
                         PrTone::Plain
                     }
@@ -2981,7 +3027,8 @@ fn pr_state(raw: &str) -> PrState {
                     PrTone::Waits => 1,
                     PrTone::Running => 2,
                     PrTone::Merged => 3,
-                    PrTone::Plain => 4,
+                    PrTone::Closed => 4,
+                    PrTone::Plain => 5,
                 })
                 .unwrap_or(PrTone::Plain);
             // The badge says the §2.12 word of its state (C-09): 等你审 for a review that
@@ -3065,7 +3112,10 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                             PrTone::Bad => Some(BadgeState::Failed),
                             PrTone::Running => Some(BadgeState::Working),
                             PrTone::Merged => Some(BadgeState::Done),
-                            PrTone::Plain => None,
+                            // The same marks as the 改动 pane (topic_rail native_changes):
+                            // the clock for a PR that is not merged, the ring for a closed one.
+                            PrTone::Closed => Some(BadgeState::Offline),
+                            PrTone::Plain => Some(BadgeState::Queued),
                         },
                     )
                 }
@@ -3300,6 +3350,7 @@ mod tests {
             (rail::CHANGES_MERGED, PrTone::Merged)
         );
         assert_eq!(pr_state("open").tone, PrTone::Plain);
+        assert_eq!(pr_state("closed").tone, PrTone::Closed);
     }
 
     #[test]

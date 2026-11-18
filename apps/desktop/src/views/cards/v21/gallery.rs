@@ -610,7 +610,13 @@ impl Render for Gallery21 {
                     .children(top)
                     .child(
                         div()
-                            .pt(px(32.))
+                            // Every page starts below the window buttons: the Compose
+                            // page has its title block above, the others this inset.
+                            .pt(if self.page == Page::Compose {
+                                space::S32
+                            } else {
+                                space::S48
+                            })
                             .pb(px(56.))
                             .when(self.page == Page::Compose, |el| {
                                 el.border_t_1().border_color(k.line)

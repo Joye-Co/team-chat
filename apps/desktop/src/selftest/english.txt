@@ -423,9 +423,6 @@ Joye 提出	Requested by Joye
 说说为什么，Tata 会写进需求（可选）	Say why (optional), and Tata will add it to the spec
 确定	Confirm
 打开原型	Open prototypes
-Forge 在等你批准	Forge is waiting for your approval
-Watch 在等你批准	Watch is waiting for your approval
-Taro 在等你确认	Taro is waiting for your OK
 PR #61 重连后按 seq 去重	PR #61 Dedupe by seq after reconnect
 通过	Approve
 要改	Request changes
@@ -491,3 +488,9 @@ Taro 推荐大字标题：上一条大字封面的点击率高了 40%。	Taro re
 选好后草稿里的封面会换掉	Your pick replaces the cover in the draft
 用这张	Use this one
 已 {}	{}
+还没填：{}	Still needed: {}
+上移	Move up
+下移	Move down
+点一下就算选了	One click answers
+选好再提交	Choose, then submit
+检查更新…	Check for Updates…

@@ -33,6 +33,8 @@ pub mod card {
     pub const SYMBOL_GAP: Pixels = space::S4;
     /// The header avatar.
     pub const AVATAR: Pixels = avatar::SM;
+    /// The header row: the height of its sm action, with or without one.
+    pub const HEADER_ROW: Pixels = height::SM;
     /// Space between the header, the title, the blocks and the footer
     /// (compact card gap 16).
     pub const STACK: Pixels = space::S16;

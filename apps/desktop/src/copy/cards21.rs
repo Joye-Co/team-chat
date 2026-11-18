@@ -83,7 +83,6 @@ crate::copy! {
     EMBED_NO_APPROVE = "页面不能替你批准",
     EMBED_LOADING = "正在打开页面",
     UNKNOWN_BLOCK = "这部分需要新版本",
-    UNKNOWN_KIND = "新类型",
     UPDATE_APP = "更新 {product}",
     UNKNOWN_FOOT = "认得的块照常显示，认不得的只显示它的后备文字",
     TABLE_SELECTED = "已选 {n} 行",
@@ -214,4 +213,7 @@ crate::copy! {
     COMPARE_CHOOSE = "选这个",
     COMPARE_CHOSEN = "已选",
     // --- end v12/fx-cards ---
+    // The move buttons of a rank row.
+    RANK_UP = "上移",
+    RANK_DOWN = "下移",
 }

@@ -30,9 +30,12 @@ pub(crate) fn overview(ctx: &Ctx, cx: &App) -> AnyElement {
         .child(
             div()
                 .n_headline()
-                .text_color(n.label)
+                .text_color(if ctx.state.muted() {
+                    n.secondary
+                } else {
+                    n.label
+                })
                 .one_line()
-                .when(ctx.state.muted(), |el| el.opacity(m::MUTED))
                 .child(crate::ui::truncate::TruncText::new(super::one_line_text(
                     &ctx.card.title,
                 ))),
