@@ -1817,7 +1817,7 @@ struct ShownConflicts(std::collections::HashSet<(gpui::WindowId, String)>);
 impl gpui::Global for ShownConflicts {}
 
 /// Shows the conflict Toast once per conflicting event (§2.16, owner decision on F53):
-/// 卡片刚更新了, what happened, and 看新版, which settles the event.
+/// 卡片刚更新了, that the answer did not go out, and 看新版, which settles the event.
 pub fn conflict_toast(ctx: &Ctx, window: &Window, cx: &mut App) {
     let events = ctx
         .env
@@ -1849,9 +1849,10 @@ pub fn conflict_toast(ctx: &Ctx, window: &Window, cx: &mut App) {
         ctx.msg.message_id.clone(),
     );
     let toast_id = format!("card-conflict-{m}");
+    let detail = fill(c::CONFLICT_DETAIL, &[("name", &ctx.author)]);
     cx.defer(move |cx| {
         let note = crate::ui::overlay::Toast::new(ui::Sym::Refresh, c::CONFLICT_TITLE)
-            .description(c::CONFLICT_DETAIL)
+            .description(detail)
             .action_button(crate::copy::cards_v2::STRIP_SEE_NEW, move |_, _| {
                 provider.drop_card_event(&g, &t, &m, &cid)
             })
