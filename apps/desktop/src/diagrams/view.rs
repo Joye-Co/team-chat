@@ -590,12 +590,15 @@ fn image_with_hits(
                 .child(
                     div()
                         .id(ElementId::Name(format!("dscroll-{id}").into()))
-                        .w_full()
+                        .when(!scrolls, |d| d.w_full().justify_center())
                         .flex()
-                        .when(!scrolls, |d| d.justify_center())
                         // Room under the drawing for the scrollbar, so it never covers it.
+                        // The scroller runs out to the frame, so the drawing is cut by the
+                        // frame's edge and not in open space; it still rests 16 inside it.
                         .when(scrolls, |d| {
-                            d.overflow_x_scroll()
+                            d.w(px(avail + 2. * PAD))
+                                .ml(px(-PAD))
+                                .overflow_x_scroll()
                                 .restrict_scroll_to_axis()
                                 .track_scroll(&scroll)
                                 .pb(space::S16)
@@ -603,11 +606,16 @@ fn image_with_hits(
                         .child(
                             div()
                                 .flex_none()
-                                .relative()
-                                .w(px(fit.w))
-                                .h(px(fit.h))
-                                .when(fit.clipped, |el| el.overflow_hidden())
-                                .child(layer),
+                                // The trailing inset counts in the scroll width.
+                                .when(scrolls, |d| d.w(px(fit.w + 2. * PAD)).px(px(PAD)))
+                                .child(
+                                    div()
+                                        .relative()
+                                        .w(px(fit.w))
+                                        .h(px(fit.h))
+                                        .when(fit.clipped, |el| el.overflow_hidden())
+                                        .child(layer),
+                                ),
                         ),
                 )
                 // A wider diagram scrolls sideways with a scrollbar that always shows
