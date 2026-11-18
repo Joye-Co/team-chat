@@ -44,8 +44,8 @@ crate::copy! {
     // --- mac-files: Quick Look, share, save as ---
     QUICK_LOOK = "快速查看",
     SHARE = "共享…",
-    SAVE_AS = "存储为…",
-    SAVE_FAILED = "无法存储「{name}」：{reason}",
+    SAVE_AS = crate::copy::per_system("存储为…", "另存为…"),
+    SAVE_FAILED = crate::copy::per_system("无法存储「{name}」：{reason}", "无法保存「{name}」：{reason}"),
     // --- end mac-files ---
     // --- the image viewer (files::lightbox) ---
     VIEWER_POSITION = "{i} / {n}",

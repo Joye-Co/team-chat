@@ -96,7 +96,7 @@ crate::copy! {
     LIVE_CONTINUE = "继续",
     LIVE_HAND_BACK_FOR = "替 {who} 交还",
     LIVE_GO_REPLY = "去回复",
-    LIVE_OPEN_FOLDER = crate::copy::per_system("在访达中打开", "在资源管理器中打开"),
+    LIVE_OPEN_FOLDER = crate::copy::per_system("在访达中打开", "在文件资源管理器中打开"),
     LIVE_CMD_PLACEHOLDER = "在 {member} 的工作目录里运行一条命令",
     LIVE_CMD_RUN = "运行",
     LIVE_CMD_ABORT = "中止",
