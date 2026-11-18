@@ -1400,9 +1400,9 @@ fn table_row_height(compact: bool) -> Pixels {
 }
 
 /// The header row of a [`table`] (§2.7): h40 on the muted fill, 14 medium labels
-/// (12 medium muted when compact), a line under it. Its top corners follow the frame's radius: the frame clips its
-/// children to its box, not to its corners, and draws no border that would hide a
-/// square fill.
+/// (12 medium muted when compact), a line under it. Its top corners follow the
+/// frame's radius: the frame clips its children to its box, not to its corners, and
+/// draws no border that would hide a square fill.
 fn table_header(cols: &[Col], compact: bool, cx: &App) -> gpui::Div {
     let k = native_colors(cx);
     let n = cols.len();

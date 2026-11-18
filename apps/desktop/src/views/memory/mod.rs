@@ -823,7 +823,8 @@ impl MemoryBoard {
             widgets::list_empty(Sym::Book, c::UPDATES_EMPTY, None, cx).into_any_element()
         } else {
             // One text edge for the day: the column is only as wide as the
-            // widest badge the day shows.
+            // widest badge the day shows. The English screenshots' words
+            // (Added) do not fit the two-character column.
             let lines: Vec<_> = day
                 .updates
                 .iter()
