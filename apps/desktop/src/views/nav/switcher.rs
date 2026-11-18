@@ -69,11 +69,16 @@ pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("up", SelectPrevious, Some(CONTEXT)),
         KeyBinding::new("down", SelectNext, Some(CONTEXT)),
-        KeyBinding::new("ctrl-p", SelectPrevious, Some(CONTEXT)),
-        KeyBinding::new("ctrl-n", SelectNext, Some(CONTEXT)),
         KeyBinding::new("enter", OpenSelected, Some(CONTEXT)),
         // Inside the switcher Cmd+F scopes it to the current 群.
         KeyBinding::new(crate::secondary!("f"), ScopeToGroup, Some(CONTEXT)),
+    ]);
+    // ⌃P and ⌃N move a line on the Mac only, as in the ask palette (`views::ask`): on
+    // Windows Ctrl is the command key, Ctrl+N is 新话题 and Ctrl+P prints.
+    #[cfg(target_os = "macos")]
+    cx.bind_keys([
+        KeyBinding::new("ctrl-p", SelectPrevious, Some(CONTEXT)),
+        KeyBinding::new("ctrl-n", SelectNext, Some(CONTEXT)),
     ]);
 }
 
