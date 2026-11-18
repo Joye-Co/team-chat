@@ -406,7 +406,7 @@ impl TopicRail {
             .min_w(px(0.))
             .rounded(ui::native::metrics::GROUP_RADIUS)
             .bg(k.group)
-            .px(px(14.))
+            .px(ui::native::metrics::INSPECTOR_GROUP_INSET)
             .py(px(12.))
             .flex()
             .flex_col()

@@ -1097,6 +1097,8 @@ pub mod metrics {
     // Inspector and lists (§2.5, §2.6)
     pub const INSPECTOR_ROW: Pixels = height::ROW;
     pub const INSPECTOR_PAD: Pixels = space::S16;
+    /// The side inset of a filled group in the 详情 pane (D21).
+    pub const INSPECTOR_GROUP_INSET: Pixels = px(14.);
     /// A row of a list in a grouped inspector section (the members of a 群
     /// or a 话题): the compact row, rows touching (§2.6).
     pub const INSPECTOR_LIST_ROW: Pixels = height::ROW;
