@@ -45,6 +45,10 @@ fn monitor_github() -> (Value, &'static str) {
     }
 }
 
+/// The 用这台电脑 scenes before anything can run: 0 this computer is the Mac mini, 1 a card of
+/// its own that is offline (the service has not started), 2 one that is online and idle.
+pub static THIS_COMPUTER: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
 pub fn machine_monitor(machine_id: &str, range: &str) -> MachineMonitor {
     let now = now();
     let (n, step) = match range {
@@ -54,7 +58,9 @@ pub fn machine_monitor(machine_id: &str, range: &str) -> MachineMonitor {
     };
     if machine_id != "mc-mini" {
         // 团队 VPS is online in the machine list: its monitor says the same.
-        let online = machine_id == "mc-vps";
+        let online = machine_id == "mc-vps"
+            || (machine_id == super::settings::MY_COMPUTER
+                && THIS_COMPUTER.load(std::sync::atomic::Ordering::Relaxed) == 2);
         return parse(json!({
             "machine": {
                 "id": machine_id, "name": "旧笔记本", "connected": online,

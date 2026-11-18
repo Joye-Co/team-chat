@@ -493,7 +493,26 @@ macro_rules! scene {
             // The GitHub shape is a process-wide switch: every scene sets the one it shows,
             // or the shape of an earlier scene leaks into the next theme's pass.
             setup: |_, _| {
-                crate::fake::admin::MONITOR_GITHUB.store(0, std::sync::atomic::Ordering::Relaxed)
+                crate::fake::admin::MONITOR_GITHUB.store(0, std::sync::atomic::Ordering::Relaxed);
+                crate::fake::admin::THIS_COMPUTER.store(0, std::sync::atomic::Ordering::Relaxed)
+            },
+            open: $open,
+        }
+    };
+}
+
+/// 用这台电脑 before anything can run: this computer is a card of its own, idle. `$shape` is
+/// [`crate::fake::admin::THIS_COMPUTER`].
+macro_rules! idle_computer_scene {
+    ($name:literal, $about:literal, $shape:literal, $open:ident) => {
+        Scene {
+            name: $name,
+            about: $about,
+            start: Start::SignedIn,
+            setup: |_, _| {
+                crate::fake::admin::MONITOR_GITHUB.store(0, std::sync::atomic::Ordering::Relaxed);
+                crate::fake::admin::THIS_COMPUTER
+                    .store($shape, std::sync::atomic::Ordering::Relaxed)
             },
             open: $open,
         }
@@ -508,6 +527,7 @@ macro_rules! github_scene {
             about: $about,
             start: Start::SignedIn,
             setup: |_, _| {
+                crate::fake::admin::THIS_COMPUTER.store(0, std::sync::atomic::Ordering::Relaxed);
                 crate::fake::admin::MONITOR_GITHUB
                     .store($shape, std::sync::atomic::Ordering::Relaxed)
             },
@@ -522,7 +542,9 @@ macro_rules! roles_scene {
             name: $name,
             about: $about,
             start: Start::Roles(crate::fake::RoleView::$view),
-            setup: |_, _| {},
+            setup: |_, _| {
+                crate::fake::admin::THIS_COMPUTER.store(0, std::sync::atomic::Ordering::Relaxed)
+            },
             open: $open,
         }
     };
@@ -625,14 +647,16 @@ pub const SCENES: &[Scene] = &[
         "团队管理 › 机器: a card per computer and 添加电脑",
         open_machines
     ),
-    scene!(
+    idle_computer_scene!(
         "admin-this-computer-no-cli",
         "团队管理 › 机器 after 用这台电脑 on a computer without Claude Code or Codex: the install command and 重新检查",
+        1,
         open_this_computer_no_cli
     ),
-    scene!(
+    idle_computer_scene!(
         "admin-this-computer-sign-in",
         "团队管理 › 机器 after 用这台电脑: Claude Code found but not signed in, with 登录",
+        2,
         open_this_computer_sign_in
     ),
     scene!(

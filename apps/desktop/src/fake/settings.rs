@@ -175,6 +175,27 @@ fn my_computer() -> MachineInfo {
     }
 }
 
+/// This computer right after 用这台电脑, before anything can run on it.
+fn idle_computer(online: bool) -> MachineInfo {
+    MachineInfo {
+        connected: online,
+        healthy: online,
+        last_heartbeat_at: online.then(|| super::now_ms() - 3_000),
+        runtimes: if online {
+            vec!["claude".into()]
+        } else {
+            Vec::new()
+        },
+        clis: if online {
+            sample_clis().into_iter().take(1).collect()
+        } else {
+            Vec::new()
+        },
+        personal_bots: Vec::new(),
+        ..my_computer()
+    }
+}
+
 /// The id of [`my_computer`]: this computer in the role views.
 pub const MY_COMPUTER: &str = "mc-air";
 
@@ -598,6 +619,15 @@ impl FakeProvider {
             return reply_now(Err(AdminError::Forbidden));
         }
         reply_now(f(m, admin).map(|()| m.clone()))
+    }
+
+    /// The 用这台电脑 scenes that are about an idle computer add it to the list.
+    pub(super) fn add_idle_computer(&self) {
+        let shape = super::admin::THIS_COMPUTER.load(std::sync::atomic::Ordering::Relaxed);
+        if shape != 0 && !self.has_machine(MY_COMPUTER) {
+            let mut st = self.settings.lock().unwrap();
+            st.machines.insert(0, idle_computer(shape == 2));
+        }
     }
 
     pub(super) fn has_machine(&self, id: &str) -> bool {

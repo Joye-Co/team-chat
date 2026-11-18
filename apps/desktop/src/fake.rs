@@ -2253,6 +2253,7 @@ impl ChatProvider for FakeProvider {
     fn use_this_mac(&self) -> AdminReply<()> {
         self.this_mac_used
             .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.add_idle_computer();
         reply_now(Ok(()))
     }
 
