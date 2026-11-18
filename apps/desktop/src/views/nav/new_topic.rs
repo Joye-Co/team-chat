@@ -43,22 +43,30 @@ pub fn bind_keys(cx: &mut App) {
     )]);
 }
 
-/// The members of `group_id` that `body` mentions (`@名字`).
+/// The members of `group_id` that `body` mentions (`@名字`), resolved as the
+/// composer resolves them: the longest name after each @ (or ＠) wins, and a
+/// deactivated member is never mentioned.
 pub fn mentioned(services: &Services, group_id: &str, body: &str) -> Vec<String> {
-    let ids = services
-        .provider
-        .groups()
-        .into_iter()
+    mentioned_among(
+        &services.provider.groups(),
+        &services.provider.members(),
+        group_id,
+        body,
+    )
+}
+
+fn mentioned_among(
+    groups: &[crate::data::GroupSummary],
+    members: &[crate::data::Member],
+    group_id: &str,
+    body: &str,
+) -> Vec<String> {
+    let ids = groups
+        .iter()
         .find(|g| g.id == group_id)
-        .map(|g| g.member_ids)
+        .map(|g| g.member_ids.as_slice())
         .unwrap_or_default();
-    services
-        .provider
-        .members()
-        .into_iter()
-        .filter(|m| ids.contains(&m.id) && body.contains(&format!("@{}", m.name)))
-        .map(|m| m.id)
-        .collect()
+    crate::views::composer::model::resolve_mentions(body, &[], members, ids)
 }
 
 /// The ids of the 话题 of `group_id` now.
@@ -176,11 +184,26 @@ impl NewTopicSheet {
                 .placeholder(body_placeholder)
         });
         let groups = rail_model::groups(services.provider.as_ref());
-        let group = group
-            .filter(|g| groups.iter().any(|(id, _)| id == g))
-            .or_else(|| groups.first().map(|(id, _)| id.clone()));
-        let subscriptions = vec![cx.subscribe(&body, |_, _, event: &InputEvent, cx| {
+        let listed = |g: &GroupId| groups.iter().any(|(id, _)| id == g);
+        // What was typed here and not sent (Esc, 取消, a refused start) is
+        // back, with the 群 it was written for.
+        let draft = super::new_topic_draft(cx).filter(|(g, _)| listed(g));
+        let group = match &draft {
+            Some((g, _)) => Some(g.clone()),
+            None => group
+                .filter(listed)
+                .or_else(|| groups.first().map(|(id, _)| id.clone())),
+        };
+        if let Some((_, text)) = draft {
+            body.update(cx, |b, cx| {
+                let end = text.len();
+                b.set_value(text, window, cx);
+                b.set_selected_range(end..end, cx);
+            });
+        }
+        let subscriptions = vec![cx.subscribe(&body, |this, _, event: &InputEvent, cx| {
             if let InputEvent::Change = event {
+                this.keep_draft(cx);
                 cx.notify();
             }
         })];
@@ -191,6 +214,18 @@ impl NewTopicSheet {
             body,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Keeps the unsent message for the next time the sheet opens (while
+    /// the app runs); an empty one is forgotten.
+    fn keep_draft(&self, cx: &mut Context<Self>) {
+        let text = self.body.read(cx).value().to_string();
+        let draft = self
+            .group
+            .clone()
+            .filter(|_| !text.trim().is_empty())
+            .map(|g| (g, text));
+        super::set_new_topic_draft(draft, cx);
     }
 
     fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -213,7 +248,9 @@ impl NewTopicSheet {
             quote_of: None,
         });
         window.close_dialog(cx);
+        // A refused start keeps the message for the next ⌘N.
         if let Some(topic) = started_topic(provider.as_ref(), &group_id, &before) {
+            super::set_new_topic_draft(None, cx);
             self.services
                 .nav
                 .update(cx, |nav, cx| nav.open_topic(group_id, topic, cx));
@@ -250,6 +287,7 @@ impl Render for NewTopicSheet {
                                     let id = id2.clone();
                                     let _ = this.update(cx, |this, cx| {
                                         this.group = Some(id);
+                                        this.keep_draft(cx);
                                         cx.notify();
                                     });
                                 }),
@@ -362,6 +400,161 @@ fn present(
             .child(view.clone())
     });
     sheet
+}
+
+#[cfg(test)]
+mod mention_tests {
+    use super::*;
+    use crate::data::{GroupKind, GroupSummary, Member, MemberKind, MemberLevel};
+
+    fn member(id: &str, name: &str) -> Member {
+        Member {
+            id: id.into(),
+            kind: MemberKind::Bot,
+            name: name.into(),
+            role: None,
+            level: MemberLevel::Member,
+            avatar_url: None,
+            deactivated: false,
+            online: true,
+            character: None,
+            team_owner: false,
+            deleted: false,
+        }
+    }
+
+    fn group(members: &[&str]) -> GroupSummary {
+        GroupSummary {
+            id: "g".into(),
+            kind: GroupKind::Group,
+            name: "研发".into(),
+            member_ids: members.iter().map(|m| m.to_string()).collect(),
+            dm_peer: None,
+            last_seq: 0,
+            read_seq: 0,
+            unread: 0,
+            mentions: 0,
+            last_activity_at: 0,
+        }
+    }
+
+    /// A member whose name starts another's (Jo / Jojo, 小明 / 小明明) is not
+    /// mentioned by the longer name, a deactivated member never is, and the
+    /// full-width ＠ counts.
+    #[test]
+    fn the_longest_name_after_the_at_is_the_one_mentioned() {
+        let mut gone = member("m-gone", "小明明明");
+        gone.deactivated = true;
+        let members = vec![
+            member("m-jo", "Jo"),
+            member("m-jojo", "Jojo"),
+            member("m-ming", "小明"),
+            member("m-mingming", "小明明"),
+            gone,
+            member("m-out", "Out"),
+        ];
+        let groups = vec![group(&["m-jo", "m-jojo", "m-ming", "m-mingming", "m-gone"])];
+        let of = |body: &str| mentioned_among(&groups, &members, "g", body);
+        assert_eq!(of("@Jojo 看一下发布"), vec!["m-jojo"]);
+        assert_eq!(of("@Jo 看一下发布"), vec!["m-jo"]);
+        assert_eq!(
+            of("＠小明明 写周报，@小明 审"),
+            vec!["m-mingming", "m-ming"]
+        );
+        // The deactivated 小明明明 is skipped: the longest live name wins.
+        assert_eq!(of("@小明明明"), vec!["m-mingming"]);
+        // Not in the 群, or an unknown 群: plain text.
+        assert!(of("@Out 你好").is_empty());
+        assert!(mentioned_among(&groups, &members, "g-other", "@Jo").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod draft_tests {
+    use std::sync::Arc;
+
+    use gpui::{TestAppContext, VisualTestContext};
+
+    use super::*;
+    use crate::data::ChatProvider;
+    use crate::fake::v2::{DEV, V2Samples};
+
+    struct Host;
+
+    impl Render for Host {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
+
+    /// ⌘N: the sheet over the window, after the one before it closed (Esc).
+    fn reopen(services: &Services, cx: &mut VisualTestContext) -> Entity<NewTopicSheet> {
+        let services = services.clone();
+        let sheet = cx.update(|window, cx| {
+            window.close_all_dialogs(cx);
+            open_new_topic(services, None, window, cx)
+        });
+        cx.run_until_parked();
+        sheet
+    }
+
+    fn type_in(sheet: &Entity<NewTopicSheet>, text: &str, cx: &mut VisualTestContext) {
+        sheet.update_in(cx, |s, window, cx| {
+            s.body.update(cx, |b, cx| b.set_value(text, window, cx));
+            s.keep_draft(cx);
+        });
+    }
+
+    /// What was typed and not sent (Esc, 取消) is in the sheet the next time
+    /// it opens, with its 群; starting the 话题 forgets it.
+    #[gpui::test]
+    fn the_unsent_message_is_back_when_the_sheet_reopens(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let provider: Arc<dyn ChatProvider> = V2Samples::new();
+        let services = cx.update(|cx| {
+            let services = Services::new(provider.clone(), cx);
+            super::super::install_for_test(services.clone(), None, cx);
+            services
+        });
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let host = cx.new(|_| Host);
+            gpui_component::Root::new(host, window, cx)
+        });
+        let last_group = rail_model::groups(provider.as_ref())
+            .pop()
+            .map(|(id, _)| id)
+            .expect("a 群");
+
+        let first = reopen(&services, cx);
+        first.update(cx, |s, _| s.group = Some(last_group.clone()));
+        type_in(&first, "写了\n好几行", cx);
+
+        let again = reopen(&services, cx);
+        let (group, text) = again.update(cx, |s, cx| {
+            (s.group.clone(), s.body.read(cx).value().to_string())
+        });
+        assert_eq!(group, Some(last_group));
+        assert_eq!(text, "写了\n好几行");
+
+        // An emptied field forgets it.
+        type_in(&again, "", cx);
+        assert_eq!(cx.update(|_, cx| super::super::new_topic_draft(cx)), None);
+
+        // A started 话题 forgets it too.
+        again.update(cx, |s, _| s.group = Some(DEV.into()));
+        type_in(&again, "发出去的", cx);
+        assert!(
+            cx.update(|_, cx| super::super::new_topic_draft(cx))
+                .is_some()
+        );
+        again.update_in(cx, |s, window, cx| s.submit(window, cx));
+        assert_eq!(cx.update(|_, cx| super::super::new_topic_draft(cx)), None);
+        let fresh = reopen(&services, cx);
+        assert_eq!(
+            fresh.update(cx, |s, cx| s.body.read(cx).value().to_string()),
+            ""
+        );
+    }
 }
 
 #[cfg(test)]
