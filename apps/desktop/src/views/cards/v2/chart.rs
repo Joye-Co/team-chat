@@ -586,13 +586,12 @@ pub(crate) fn chart(
         .flex_col()
         .gap(space::S12)
         .child(
-            // The title cuts with "…"; a legend that does not fit beside it goes under it.
+            // The title cuts with "…". The row stays with no title on a chart with a
+            // legend: a focused point's tooltip sits here, over neither line nor legend.
             meta(div())
                 .flex()
-                .flex_wrap()
                 .items_center()
-                .gap_x(space::S16)
-                .gap_y(crate::ui::native::tokens::space::S4)
+                .when(legend.is_some(), |el| el.min_h(px(18.)))
                 .text_color(k.ink_2)
                 .when_some(title, |el, t| {
                     el.child(
@@ -602,9 +601,6 @@ pub(crate) fn chart(
                                 .text_color(k.ink),
                         ),
                     )
-                })
-                .when_some(legend, |el, l| {
-                    el.child(div().ml_auto().max_w_full().min_w(px(0.)).child(l))
                 }),
         )
         .child(plot)
@@ -625,6 +621,10 @@ pub(crate) fn chart(
                     }),
                 ),
             ))
+        })
+        // Under the labels, on the plot's left edge.
+        .when_some(legend, |el, l| {
+            el.child(meta(div()).pl(left).text_color(k.ink_2).child(l))
         })
         .into_any_element()
 }

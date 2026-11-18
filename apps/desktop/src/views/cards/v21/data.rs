@@ -879,8 +879,8 @@ pub fn metric(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App)
         .id(eid(node, format!("metric-{id}")))
         .mx(px(-8.))
         .px(px(8.))
-        .py(px(4.))
-        .my(px(-4.))
+        .py(crate::ui::native::tokens::space::S6)
+        .my(-crate::ui::native::tokens::space::S6)
         .rounded(theme::radius::MD)
         // A metric that answers a press looks and works like one: the row hover, the
         // pointer, a tab stop with the focus ring and Enter / Space.
