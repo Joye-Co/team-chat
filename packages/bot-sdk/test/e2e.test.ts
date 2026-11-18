@@ -1079,6 +1079,55 @@ describe("1.1 interaction loop (INTERACT 8.4, REFS C3)", () => {
     expect(errors).toHaveLength(0);
   });
 
+  test.skipIf(!hasPageLoop)("a page keeps its state on the server: first data and preview, ctx.data with baseDataRev, HTTP data, the page log", async () => {
+    const t = await human.startTopic(generalId, { title: "团建报名", body: "做个报名页" });
+    const target = { groupId: generalId, topicId: t.message.topicId };
+    const preview = { title: "团建报名", summary: "周六 14:00", metrics: [{ label: "时间", value: "14:00" }] };
+    const v = await ledger.publishPage(target, {
+      title: "团建报名",
+      html: "<!doctype html><p>hi</p>",
+      events: [{ name: "signup.join", schema: { type: "object", properties: { note: { type: "string", maxLength: 40 } } } }],
+      data: { people: [] },
+      preview,
+    });
+    const id = v.artifact.id;
+    // The version starts with its snapshot and its preview: no page ever opens with null.
+    expect(v.version.dataRev).toBe(1);
+    expect(v.version.preview).toEqual(preview);
+    expect(await human.http.getArtifactData(id, 1)).toMatchObject({ data: { people: [] }, dataRev: 1 });
+
+    ledger.onArtifactEvent("signup.join", async (ctx) => {
+      if (ctx.artifactId !== id) return;
+      const { data, dataRev } = await ctx.data();
+      await ctx.pushData({ people: [...(data as { people: string[] }).people, ctx.actorId] }, { baseDataRev: dataRev });
+    });
+    const ack = await frame({ t: "artifact.event", groupId: generalId, artifactId: id, version: 1, clientEventId: clientEventId(), name: "signup.join", kind: "emit", payload: { note: "不吃辣" } });
+    await waitFor("the push of the join", () =>
+      transients.find((e) => e.type === "artifact.data" && e.artifactId === id && e.cause === ack.eventId),
+    );
+    expect(await ledger.http.getArtifactData(id, 1)).toMatchObject({ data: { people: [ownerId()] }, dataRev: 2 });
+
+    // A push based on an older rev is refused over the WebSocket and over HTTP; the right rev lands.
+    await expect(ledger.pushArtifactData(generalId, id, 1, { people: [] }, { baseDataRev: 1 })).rejects.toMatchObject({ code: "conflict" });
+    await expect(ledger.http.putArtifactData(id, 1, { people: [] }, { baseDataRev: 1 })).rejects.toMatchObject({ code: "conflict" });
+    expect(await ledger.http.putArtifactData(id, 1, { people: ["x"] }, { baseDataRev: 2 })).toEqual({ dataRev: 3 });
+    // Only the bot that made the version writes its data.
+    await expect(human.http.putArtifactData(id, 1, { people: [] })).rejects.toMatchObject({ code: "forbidden" });
+
+    // The page log has the event with its payload: what a restarted bot reads.
+    const log = await ledger.http.artifactEvents(id, { limit: 10 });
+    expect(log.hasMore).toBe(false);
+    expect(log.events).toHaveLength(1);
+    expect(log.events[0]).toMatchObject({ eventId: ack.eventId, artifactId: id, version: 1, name: "signup.join", kind: "emit", payload: { note: "不吃辣" }, actorId: ownerId() });
+
+    // A new version takes its own first snapshot and preview.
+    const v2 = await ledger.publishPage(target, { title: "团建报名", html: "<!doctype html><p>v2</p>", artifactId: id, data: { people: ["x", "y"] }, preview: { summary: "改到周日" } });
+    expect(v2.version.version).toBe(2);
+    expect(v2.version.preview).toEqual({ summary: "改到周日" });
+    expect(await ledger.http.getArtifactData(id, 2)).toMatchObject({ data: { people: ["x", "y"] }, dataRev: 1 });
+    expect(await ledger.http.getArtifactData(id, 1)).toMatchObject({ dataRev: 3 });
+  });
+
   test.skipIf(!hasRefs)("REFS C3 1-4: a question about a cell and a node; ctx.refs, ctx.question, resolveRef current, then not current", async () => {
     const card = composeCard({
       intent: "info",

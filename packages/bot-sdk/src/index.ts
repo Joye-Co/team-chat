@@ -12,10 +12,12 @@ export {
   type CardActionContext,
   type CardAnswerContext,
   type CardEventContext,
+  type CardEventFilter,
   type DoneResult,
   type EditInput,
   type EventContext,
   type MessageContext,
+  type PublishPageInput,
   type ResolvedRef,
   type SendInput,
   type Target,
@@ -58,10 +60,11 @@ export {
   parts,
 } from "./blocks.ts";
 export { CardDraft, opsFit, type PatchInput } from "./interact.ts";
+export { blockEvents, checkBlockEvents, type EventPoint, type EventValueReaders, eventValueReaders } from "./events.ts";
 export { DELETED_REF_LABEL, findPart, type MarkdownBlock, markdownBlocks, refPrefix, stripRefPrefix } from "./refs.ts";
 export { ChatError, type ChatErrorCode, isRetryable } from "./errors.ts";
 export { checkArtifactEvents, MAX_PATTERN_INPUT, patternProblem, schemaPatternProblem } from "./pattern.ts";
-export { HttpClient, type HttpClientOptions, type PostMessageInput, type UploadInput, sha256Hex } from "./http.ts";
+export { checkArtifactData, HttpClient, type HttpClientOptions, type PostMessageInput, type PublishHtmlInput, type UploadInput, sha256Hex } from "./http.ts";
 export { consoleLogger, type Logger, type LogLevel, redact } from "./log.ts";
 export { type AsideRef, type BotStateData, FileStateStore, MemoryStateStore, type StateStore } from "./state.ts";
 export { StreamWriter, type StreamOptions } from "./stream.ts";
