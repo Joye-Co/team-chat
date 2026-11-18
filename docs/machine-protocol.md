@@ -825,16 +825,22 @@ and one `ask`: `page/index.html`, and beside the page folder `events.json`, `dat
   the current data, `null` before the first push, and on every push; returns the unsubscribe),
   `getData()`, `emit(name, payload?)` → `{ eventId }`, `ask(name, payload?, { timeoutMs })` → the
   reply (30 s by default, at most 120 s, 4 open at once). A rejected call is an `Error` with
-  `.code`: `not_allowed`, `bad_request`, `too_large`, `rate_limited`, `offline`, `timeout`,
-  `declined`, `failed`, `reloaded`, `unknown_method`.
+  `.code`: `not_allowed`, `no_user_action`, `bad_payload`, `bad_request`, `too_large`,
+  `rate_limited`, `offline`, `timeout`, `declined`, `failed`, `reloaded`, `unknown_method`. Its
+  `.message` (at most 300 characters) carries the member's decline text or the server's schema
+  problem when there is one.
 - `emit` and `ask` work only within 2 s of the viewer's own input: nothing is sent on load or
   on a timer.
 - The sandbox: no network (every script, style, font and picture is a file of the version or a
-  `data:` URI; no fetch, XHR, WebSocket, iframe, worker or form submit); a link to the web asks
-  the person first.
-- The host stylesheet: the app gives the page its font, text color and table and code styles in
-  both themes on a transparent background, and the variables `--tc-fg`, `--tc-muted`,
-  `--tc-border`, `--tc-fill`, `--tc-bg`, `--tc-primary`, `--tc-pad` for the page's own parts.
+  `data:` URI, and a picture or media the page makes itself may use a `blob:` URL; no fetch, XHR,
+  WebSocket, iframe, worker or form submit); a link to the web asks the person first. `alert`,
+  `confirm` and `prompt` show nothing: they warn in the console and return `undefined`, `false`
+  and `null`.
+- The host stylesheet: the app gives the page its font, text color and table, code, button and
+  field styles in both themes on a transparent background, in the pane and in the 产出 window
+  alike; `button[data-tc=primary]` is the main action, and the variables `--tc-fg`, `--tc-muted`,
+  `--tc-border`, `--tc-fill`, `--tc-bg`, `--tc-primary`, `--tc-danger`, `--tc-radius`, `--tc-gap`,
+  `--tc-font-mono`, `--tc-pad` are for the page's own parts (there is no `--tc-ok` or `--tc-warn`).
 - The limits: 20 events, payload 16 KiB, reply 64 KiB within 120 s, data 256 KiB, 2 pushes a
   second, `--cause` an event of the last 30 minutes.
 - Data belongs to one version and only the member that made the version pushes it; a new
