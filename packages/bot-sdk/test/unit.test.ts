@@ -288,6 +288,35 @@ describe("patches", () => {
     expect(m3).toEqual(m2);
   });
 
+  test("merged drafts: a later draft may name a block an earlier part of the frame inserts, not one it removes", async () => {
+    const { server } = cardServer();
+    const bot = await start(server);
+    const r = await bot.postCardV2({ groupId: GROUP_ID, topicId: TOPIC_ID }, report());
+    let limited = false;
+    server.on("card.patch", (f) => {
+      if (!limited) {
+        limited = true;
+        return { ok: false, error: { code: "rate_limited", message: "slow down" } };
+      }
+      const next = { ...report(), rev: (f.baseRev as number) + 1 };
+      return { ok: true, result: { message: message({ id: r.message.id, kind: "card", cardV2: next }), rev: next.rev } };
+    });
+    const p1 = bot.patchCard(GROUP_ID, r.message.id, (d) => d.insert(blocks.text("extra", "新的一行")).remove("m_dau"));
+    await server.next((f) => f.t === "card.patch");
+    // Queued behind the limited frame: all three are built for the same rev and go as one frame.
+    const p2 = bot.patchCard(GROUP_ID, r.message.id, (d) => d.set<"text">("extra", { text: "改过的一行" }));
+    const p3 = bot.patchCard(GROUP_ID, r.message.id, (d) => d.set("m_dau", { value: 1 })).catch((e) => e as ChatError);
+    const [m1, m2, e3] = await Promise.all([p1, p2, p3]);
+    const frames = server.of("card.patch");
+    expect(frames).toHaveLength(3);
+    expect((frames[1]?.ops as { op: string }[]).map((o) => o.op)).toEqual(["insert", "remove", "set"]);
+    expect(m2).toEqual(m1);
+    // The third part names the removed block: it stays out of that frame, and on its own (the
+    // fake server's next rev has the block again) it is sent.
+    expect((frames[2]?.ops as { op: string; id?: string }[])[0]).toMatchObject({ op: "set", id: "m_dau" });
+    expect(e3).not.toBeInstanceOf(ChatError);
+  });
+
   test("a merged patch the server rejects: each part goes again alone, so one bad part fails only itself", async () => {
     const { server } = cardServer();
     const bot = await start(server);

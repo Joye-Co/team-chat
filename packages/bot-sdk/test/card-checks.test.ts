@@ -137,6 +137,13 @@ describe("CardDraft checks the ids it is given", () => {
     expect(() => d.insert(blocks.text("n", "x"), { after: "nope" })).toThrow(/: insert "n" after: no block "nope"/);
     expect(() => d.insert(blocks.text("n", "x"), { parent: "nope" })).toThrow(/: insert "n" parent: no block "nope"/);
     expect(() => d.insert(blocks.text("a", "again"))).toThrow('rev 1 has a block "a" already; use set or replace');
+    // A container whose nested child is in the card already: the error names the container and the
+    // child, and the container's own op is not recorded either.
+    const kids = () => [blocks.metric({ id: "m_dau", label: "日活", value: 2 }), blocks.metric({ id: "m_new", label: "新增", value: 3 })];
+    expect(() => d.replace("kpis", blocks.row("kpis", kids()))).toThrow(
+      'replace "kpis": rev 1 has its child "m_dau" already; change that block with set or replace, or remove it first',
+    );
+    expect(() => d.insert(blocks.row("more", kids()))).toThrow('insert "more": rev 1 has its child "m_dau" already');
     // Nothing was recorded by the refused calls.
     expect(d.ops).toEqual([]);
   });

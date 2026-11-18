@@ -2716,7 +2716,8 @@ export class Bot {
       if (batch.length > 0 && part.cause && cause && part.cause !== cause) break;
       let partOps: PatchOp[];
       try {
-        partOps = card ? opsOf(card, part.input) : Array.isArray(part.input) ? part.input : [];
+        // A draft of a later part counts what the earlier parts of this frame insert and remove.
+        partOps = card ? opsOf(card, part.input, ops) : Array.isArray(part.input) ? part.input : [];
       } catch (err) {
         if (batch.length > 0) break;
         lane.parts.shift();
@@ -2785,7 +2786,9 @@ export class Bot {
         let fits = false;
         if (fresh) {
           try {
-            fits = opsFit(fresh, batch.flatMap((p) => opsOf(fresh, p.input)));
+            const all: PatchOp[] = [];
+            for (const p of batch) all.push(...opsOf(fresh, p.input, all));
+            fits = opsFit(fresh, all);
           } catch {
             fits = false;
           }

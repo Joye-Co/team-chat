@@ -60,6 +60,14 @@ class KnownIds {
     const b = this.byId.get(id);
     if (b) for (const c of childrenOf(b)) this.remove(c);
   }
+  /** Counts ops made elsewhere (the earlier parts of one merged patch): what they insert, replace and remove. */
+  apply(ops: readonly PatchOp[]): void {
+    for (const op of ops) {
+      if (op.op === "insert") this.add(op.block);
+      else if (op.op === "replace") this.replace(op.id, op.block);
+      else if (op.op === "remove") this.remove(op.id);
+    }
+  }
   /** The block ids the card has now, in order, for an error text. */
   list(): string {
     const ids = [...this.byId.keys()].filter((id) => this.known.has(id));
@@ -114,9 +122,14 @@ export class CardDraft {
   readonly ops: PatchOp[] = [];
   private readonly known: KnownIds;
 
-  constructor(card: CardV2) {
+  /**
+   * `earlier` are ops that are applied before this draft's (the SDK merges queued patches of one
+   * card into one frame): the ids they insert count as known, the ids they remove do not.
+   */
+  constructor(card: CardV2, earlier: readonly PatchOp[] = []) {
     this.card = card;
     this.known = new KnownIds(card);
+    this.known.apply(earlier);
   }
 
   private need(id: string, what: string): void {
@@ -124,10 +137,28 @@ export class CardDraft {
     throw new ChatError("invalid", `${what}: no block "${id}" in rev ${this.card.rev}; blocks: ${this.known.list() || "(none)"}`);
   }
 
-  private add(block: CardV2Block, at: Placement): void {
-    if (this.known.has(block.id)) {
-      throw new ChatError("invalid", `insert: rev ${this.card.rev} has a block "${block.id}" already; use set or replace`);
+  /**
+   * Throws when one of `list` (a block and its nested children, flattened) is in the card
+   * already, before any of them is recorded. `inside` is the container being inserted or replaced.
+   */
+  private free(list: CardV2Block[], inside?: { what: "insert" | "replace"; id: string }): void {
+    const seen = new Set<string>();
+    for (const b of list) {
+      if (!this.known.has(b.id) && !seen.has(b.id)) {
+        seen.add(b.id);
+        continue;
+      }
+      const nested = inside !== undefined && b.id !== inside.id;
+      throw new ChatError(
+        "invalid",
+        nested
+          ? `${inside.what} "${inside.id}": rev ${this.card.rev} has its child "${b.id}" already; change that block with set or replace, or remove it first`
+          : `insert: rev ${this.card.rev} has a block "${b.id}" already; use set or replace`,
+      );
     }
+  }
+
+  private add(block: CardV2Block, at: Placement): void {
     this.ops.push({ op: "insert", block, ...at });
     this.known.add(block);
   }
@@ -157,6 +188,7 @@ export class CardDraft {
     this.need(id, "replace");
     const [first, ...nested] = flattenBlocks([block]);
     const next = { ...(first ?? block), id } as CardV2Block;
+    this.free(nested, { what: "replace", id });
     this.ops.push({ op: "replace", id, block: next });
     this.known.replace(id, next);
     for (const c of nested) this.add(c, {});
@@ -170,6 +202,7 @@ export class CardDraft {
       const ref = at[key];
       if (ref !== undefined) this.need(ref, `insert "${first.id}" ${key}`);
     }
+    this.free([first, ...nested], { what: "insert", id: first.id });
     this.add(first, at);
     for (const c of nested) this.add(c, {});
     return this;
@@ -206,10 +239,10 @@ export class CardDraft {
 /** What `patch` accepts: ops, or a function that records them on a draft of the newest rev. */
 export type PatchInput = PatchOp[] | ((draft: CardDraft) => void);
 
-/** The ops of one input against `card`. */
-export function opsOf(card: CardV2, input: PatchInput): PatchOp[] {
+/** The ops of one input against `card`; `earlier` are the ops sent before them in the same frame. */
+export function opsOf(card: CardV2, input: PatchInput, earlier: readonly PatchOp[] = []): PatchOp[] {
   if (Array.isArray(input)) return input;
-  const d = new CardDraft(card);
+  const d = new CardDraft(card, earlier);
   input(d);
   return d.ops;
 }
