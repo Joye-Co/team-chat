@@ -46,7 +46,7 @@ while [ $# -gt 0 ]; do
     --worker) WORKER="${2:-}"; [ -n "$WORKER" ] || die "--worker needs a name"; shift 2 ;;
     --d1) D1_NAME="${2:-}"; [ -n "$D1_NAME" ] || die "--d1 needs a name"; shift 2 ;;
     --bucket) BUCKET="${2:-}"; [ -n "$BUCKET" ] || die "--bucket needs a name"; shift 2 ;;
-    -h | --help) sed -n '2,29p' "$0"; exit 0 ;;
+    -h | --help) usage; exit 0 ;;
     -*) die "unknown option $1 (see scripts/setup-server.sh --help)" ;;
     *) [ -z "$ENV_NAME" ] || die "more than one env given"; ENV_NAME="$1"; shift ;;
   esac
