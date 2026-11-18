@@ -110,5 +110,5 @@ with the block's id before anything is sent. Details: docs/bots.md, "3b"; the pa
 `bun test` runs the unit tests (a fake server), the examples (`test/examples.test.ts` runs the
 real handlers of `examples/report-bot.ts` and `examples/page-bot.ts`), the guide's code blocks
 (`test/docs-examples.test.ts`) and the end-to-end tests against its own `wrangler dev` (port 8795,
-or `BOT_SDK_E2E_PORT`); end-to-end tests of 1.1 parts the server does not have yet are skipped
-with the reason printed.
+or `BOT_SDK_E2E_PORT`); the run fails, and names the part, when the server lacks a route, a
+`welcome.features` entry or a frame handler these tests need.

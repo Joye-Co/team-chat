@@ -197,14 +197,31 @@
         render({ title: "团建报名", when: "示例数据：在浏览器里直接打开，没有 window.teamchat。", people: [{ memberId: "a", name: "小林", note: "不吃辣" }] });
         for (const b of buttons()) b.disabled = true;
       } else {
+        // This viewer pressed 报名 and the bot's push for it has not come yet.
+        let joining = false;
         // Called with the current snapshot, then again on every push (from anyone's action).
-        tc.onData((data) => render(data));
+        // `meta.cause` names the page event that caused the push and who sent it: when the sheet
+        // is full the bot pushes the same list, so the one who tried is told why nothing changed.
+        tc.onData((data, meta) => {
+          render(data);
+          if (!joining || meta.cause?.actorId !== me) return;
+          joining = false;
+          if (!(Array.isArray(data?.people) && data.people.some((p) => p.memberId === me))) say("名额满了。");
+        });
         // `can` says what this copy may send: nothing when the version's bot left the team.
         $("join").disabled = $("leave").disabled = !tc.can.emit;
         $("seats").disabled = !tc.can.ask;
         if (!tc.can.emit) say("这个版本现在只能看。");
         // An emit resolves when the server took it. The list changes when the bot pushes it (onData).
-        $("join").addEventListener("click", () => call("正在报名…", async () => void (await tc.emit("signup.join", { note: $("note").value.trim() }))));
+        $("join").addEventListener("click", () =>
+          call("正在报名…", async () => {
+            joining = true;
+            await tc.emit("signup.join", { note: $("note").value.trim() }).catch((e) => {
+              joining = false;
+              throw e;
+            });
+          }),
+        );
         $("leave").addEventListener("click", () => call("正在取消…", async () => void (await tc.emit("signup.leave", null))));
         // An ask resolves with the bot's reply, for this viewer only.
         $("seats").addEventListener("click", () =>
