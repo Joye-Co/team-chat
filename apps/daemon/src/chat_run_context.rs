@@ -564,19 +564,23 @@ async fn get(local: &Local, body: &Value) -> Value {
 pub fn memory_body(body: &Value) -> Result<Value, Value> {
     let scope = body["scope"].as_str().unwrap_or("");
     if !matches!(scope, "member" | "person" | "group") {
-        return Err(err("invalid", None, "scope is member, person or group"));
+        return Err(err(
+            "invalid",
+            None,
+            "--scope must be member, person or group",
+        ));
     }
     let kind = body["kind"].as_str().unwrap_or("");
     if !MEMORY_KINDS.contains(&kind) {
         return Err(err(
             "invalid",
             None,
-            format!("kind is one of {}", MEMORY_KINDS.join(", ")),
+            format!("--kind must be one of {}", MEMORY_KINDS.join(", ")),
         ));
     }
     let text = body["text"].as_str().unwrap_or("").trim();
     if text.is_empty() || text.chars().count() > 500 {
-        return Err(err("invalid", None, "text is 1..500 characters"));
+        return Err(err("invalid", None, "--text needs 1-500 characters"));
     }
     let mut out = serde_json::json!({ "scope": scope, "kind": kind, "text": text });
     if let Some(w) = body["when"]
@@ -585,7 +589,7 @@ pub fn memory_body(body: &Value) -> Result<Value, Value> {
         .filter(|w| !w.is_empty())
     {
         if w.chars().count() > 300 {
-            return Err(err("invalid", None, "when is at most 300 characters"));
+            return Err(err("invalid", None, "--when takes at most 300 characters"));
         }
         out["when"] = Value::from(w);
     }
