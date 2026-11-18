@@ -659,10 +659,15 @@ fn markdown_blocks(
                 // sits from its own content, so each heading reads with what it heads.
                 .when(i > 0, |d| d.pt(space::S16))
                 .pb(space::S8)
-                .child(markdown::message_body(
+                // A ```mermaid fence of the document is drawn as a diagram.
+                .child(markdown::document_body(
                     ElementId::Name(format!("{id}-md-{i}").into()),
                     body,
-                    &[],
+                    &markdown::DocContext {
+                        artifact_id: media.key.artifact_id.clone(),
+                        version: media.key.version,
+                        part: i,
+                    },
                 ))
                 .into_any_element()
         }))

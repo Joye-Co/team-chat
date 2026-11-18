@@ -1458,6 +1458,18 @@ export function resumeFrom(s: SyncState) {
 }
 ```
 
+## 流程
+
+```mermaid
+flowchart LR
+  A[连接断开] --> B[指数退避重连]
+  B --> C{有确认过的 seq?}
+  C -- 有 --> D[从 seq + 1 继续]
+  C -- 没有 --> E[拉最近一页]
+  D --> F[按 seq 去重]
+  E --> F
+```
+
 ## 验证
 
 | 场景 | 结果 | 重连用时 | 重复 |
