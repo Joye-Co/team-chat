@@ -137,11 +137,14 @@ pub fn strip_view(
                 // A person stopped it: nothing is pending, so the line also
                 // says how to go on (the bar has no button in this state).
                 Some(who) if !who.is_empty() => {
-                    // The example order is this relay's own first two members.
-                    let first = name(&relay.steps[0].member_id);
+                    // The example goes on from the step it stopped at, so finished
+                    // steps are not done again. At the last step it starts one step
+                    // earlier: an order needs two members.
+                    let from = current.min(n.saturating_sub(2));
+                    let first = name(&relay.steps[from].member_id);
                     let second = relay
                         .steps
-                        .get(1)
+                        .get(from + 1)
                         .map_or_else(|| first.clone(), |s| name(&s.member_id));
                     let example = fill(
                         c::RELAY_ORDER_EXAMPLE,
@@ -526,6 +529,21 @@ mod tests {
         // An unknown relay state reads as stopped too.
         r.state = "archived".into();
         assert!(!strip_view(&r, 2_000, &name).unwrap().can_stop);
+        // Stopped in the middle: the example starts at the stopped step.
+        let mut r = relay(
+            "stopped",
+            1,
+            vec![
+                step("a", "done"),
+                step("b", "stopped"),
+                step("a", "pending"),
+            ],
+        );
+        r.stopped_by = Some("me".into());
+        assert_eq!(
+            strip_view(&r, 2_000, &name).unwrap().line.as_deref(),
+            Some("Joye 停止了。要继续，在下面再写一条顺序，比如 @小审 → @小码")
+        );
     }
 
     #[test]
