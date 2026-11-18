@@ -2326,7 +2326,7 @@ impl ChatProvider for V2Samples {
         match run_id {
             RUN_VIRTUAL if self.with(|d| d.live_queued) => Vec::new(),
             RUN_VIRTUAL if self.with(|d| d.live_done) => {
-                vec![at(9, 31), at(9, 35), at(9, 46), at(9, 51), at(9, 54)]
+                vec![at(9, 31), at(9, 35), at(9, 46), at(9, 50), at(9, 53)]
             }
             RUN_VIRTUAL => vec![at(9, 31), at(9, 35), at(9, 46)],
             RUN_RECONNECT => vec![at(9, 14), at(9, 22), at(9, 30), at(9, 41), at(9, 52)],

@@ -484,6 +484,19 @@ pub fn topic_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> Sta
         )
         .short(crate::copy::process::STATUS_FAILED);
     }
+    // The newest run was stopped and the 话题 is not done: 已停止, the word of
+    // the run's own pane, never 排队 for work nobody waits to start.
+    let latest_stopped = runs
+        .iter()
+        .max_by_key(|r| r.updated_at)
+        .is_some_and(|r| r.status == RunStatus::Cancelled);
+    if latest_stopped && topic.status != TopicStatus::Done {
+        return StateLine::plain(
+            crate::copy::live::LIVE_PHASE_STOPPED.to_string(),
+            BadgeState::Deactivated,
+        )
+        .short(crate::copy::live::LIVE_PHASE_STOPPED);
+    }
     // Usable: the server says members work here (`participants`) though this
     // window has not read their runs (the sidebar): the same words as above.
     if let Some(line) = participants_state(topic, name) {

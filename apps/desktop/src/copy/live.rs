@@ -120,4 +120,6 @@ crate::copy! {
     LIVE_TOPIC_FILES_MORE = "{files} 等 {n} 个文件",
     // The first minute of a phase, in the shape of LIVE_PHASE_FOR.
     LIVE_PHASE_JUST_NOW = "· 刚刚",
+    // The empty screen of a run that still waits for a computer.
+    LIVE_NO_LINES_QUEUED = "排到电脑后，这里会显示它的屏幕",
 }

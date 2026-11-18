@@ -572,7 +572,9 @@ impl LivePane {
                     })
                     .map(|c| c.trim().to_string())
                     .filter(|c| !c.is_empty());
-                (Sym::Failed, words.text.clone(), since)
+                // No `已 N 分钟`: a failure is an event with a cause, not a
+                // state that lasts.
+                (Sym::Failed, words.text.clone(), None)
             }
             _ => return None,
         };
@@ -743,12 +745,14 @@ impl LivePane {
                                     reminder.map(|r| {
                                         div().n_subheadline().text_color(n.amber).child(r)
                                     }),
-                                ),
+                                )
+                                // The actions sit in the text column, under
+                                // the cause they answer (the Alert anatomy).
+                                .children(failed_actions.map(|a| a.mt(space::S8))),
                         )
                         .children(share),
                 )
                 .children(note)
-                .children(failed_actions)
                 .into_any_element(),
         )
     }
@@ -1052,6 +1056,7 @@ impl LivePane {
         title: String,
         cursor: bool,
         pointer: Option<String>,
+        no_lines: &'static str,
         cx: &App,
     ) -> AnyElement {
         let k = theme::colors(cx);
@@ -1112,9 +1117,11 @@ impl LivePane {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(div().flex_none().child(
-                        crate::ui::native::EmptyLine::new(c::LIVE_NO_LINES).icon(Sym::Terminal),
-                    ))
+                    .child(
+                        div()
+                            .flex_none()
+                            .child(crate::ui::native::EmptyLine::new(no_lines).icon(Sym::Terminal)),
+                    )
                     .into_any_element(),
             ]
         } else {
@@ -2392,40 +2399,47 @@ impl Render for LivePane {
             run.updated_at.max(last_line).max(last_step)
         });
         let criteria = p.acceptance_criteria(&run_id);
+        // A run still queued for a computer has not started: no step, no
+        // terminal yet. Its empty screen says when it will show one.
+        let no_lines = if words.phase == RunPhase::WaitingComputer && run.started_at.is_none() {
+            c::LIVE_NO_LINES_QUEUED
+        } else {
+            c::LIVE_NO_LINES
+        };
 
-        let body: AnyElement =
-            match &self.developer {
-                Some(view) => div()
-                    .flex_1()
-                    .min_h(px(0.))
-                    .child(view.clone())
-                    .into_any_element(),
-                None => div()
-                    .id("live-body")
-                    .size_full()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
-                    .child(
-                        div()
-                            // First content at y 68 (§2.2: 16 under the header).
-                            .pt(space::S16)
-                            .px(SIDE)
-                            // Nothing ends cut under the bottom bar (§2.21).
-                            .pb(space::S24)
-                            .flex()
-                            .flex_col()
-                            // §2.5: one gap between the pane's sections.
-                            .gap(space::S24)
-                            .children(self.phase_banner(
+        let body: AnyElement = match &self.developer {
+            Some(view) => div()
+                .flex_1()
+                .min_h(px(0.))
+                .child(view.clone())
+                .into_any_element(),
+            None => div()
+                .id("live-body")
+                .size_full()
+                .overflow_y_scroll()
+                .track_scroll(&self.scroll)
+                .child(
+                    div()
+                        // First content at y 68 (§2.2: 16 under the header).
+                        .pt(space::S16)
+                        .px(SIDE)
+                        // Nothing ends cut under the bottom bar (§2.21).
+                        .pb(space::S24)
+                        .flex()
+                        .flex_col()
+                        // §2.5: one gap between the pane's sections.
+                        .gap(space::S24)
+                        .children(
+                            self.phase_banner(
                                 &run, &bot, &screen, &words, run_rights, held_by_me, cx,
-                            ))
-                            .child(self.screen(&screen, &lines, title, live_now, pointer, cx))
-                            // T7: the command box under the terminal while someone holds it;
-                            // others see the holder's commands once there are some, never an
-                            // empty box that is not theirs.
-                            .children(
-                                (taken_over
-                                    && (held_by_me || !p.hand_commands(&run_id).is_empty()))
+                            ),
+                        )
+                        .child(self.screen(&screen, &lines, title, live_now, pointer, no_lines, cx))
+                        // T7: the command box under the terminal while someone holds it;
+                        // others see the holder's commands once there are some, never an
+                        // empty box that is not theirs.
+                        .children(
+                            (taken_over && (held_by_me || !p.hand_commands(&run_id).is_empty()))
                                 .then(|| {
                                     self.command_box(
                                         &run,
@@ -2435,45 +2449,46 @@ impl Render for LivePane {
                                         cx,
                                     )
                                 }),
-                            )
-                            // R2-06, A1: a section with no data keeps its place
-                            // as a compact empty, so the pane never ends in a
-                            // blank band.
-                            .child(
-                                self.replay(&run, &times, current, replay_step, end, !ended, cx)
-                                    .unwrap_or_else(|| {
-                                        compact_panel(
-                                            c::LIVE_REPLAY,
-                                            c::LIVE_REPLAY_EMPTY,
-                                            Sym::Video,
-                                            cx,
-                                        )
-                                    }),
-                            )
-                            .child(
-                                self.acceptance(&run, &criteria, working, cx)
-                                    .unwrap_or_else(|| {
-                                        compact_panel(
-                                            c::LIVE_ACCEPTANCE,
-                                            c::LIVE_ACCEPTANCE_EMPTY,
-                                            Sym::Checklist,
-                                            cx,
-                                        )
-                                    }),
-                            )
-                            .child(self.plan(&run, &times, &words, working, cx).unwrap_or_else(
-                                || {
+                        )
+                        // R2-06, A1: a section with no data keeps its place
+                        // as a compact empty, so the pane never ends in a
+                        // blank band.
+                        .child(
+                            self.replay(&run, &times, current, replay_step, end, !ended, cx)
+                                .unwrap_or_else(|| {
+                                    compact_panel(
+                                        c::LIVE_REPLAY,
+                                        c::LIVE_REPLAY_EMPTY,
+                                        Sym::Video,
+                                        cx,
+                                    )
+                                }),
+                        )
+                        .child(
+                            self.acceptance(&run, &criteria, working, cx)
+                                .unwrap_or_else(|| {
+                                    compact_panel(
+                                        c::LIVE_ACCEPTANCE,
+                                        c::LIVE_ACCEPTANCE_EMPTY,
+                                        Sym::Checklist,
+                                        cx,
+                                    )
+                                }),
+                        )
+                        .child(
+                            self.plan(&run, &times, &words, working, cx)
+                                .unwrap_or_else(|| {
                                     compact_panel(
                                         c::LIVE_PLAN,
                                         c::LIVE_PLAN_EMPTY,
                                         Sym::Checklist,
                                         cx,
                                     )
-                                },
-                            )),
-                    )
-                    .into_any_element(),
-            };
+                                }),
+                        ),
+                )
+                .into_any_element(),
+        };
         // R2-06, A4: when the sections run past the footer, the scrollbar
         // shows at rest, so a row under the footer reads as more to scroll,
         // never as a cut (§2.21).
