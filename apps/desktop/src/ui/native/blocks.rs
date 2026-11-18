@@ -425,6 +425,7 @@ impl ListRow {
         self
     }
 
+    /// A selected row has the fill of a StatusBadge: its badge needs `on_fill`.
     pub fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
         self
@@ -528,49 +529,6 @@ impl RenderOnce for ListRow {
             })
     }
 }
-
-/// A framed list (§2.6): radius 10, a 1 px border; rows separated by a
-/// 1 px line inset to the title x, none after the last row; an optional
-/// footer row h40 ("看全部 23 个话题 →" or "共 12 个").
-pub fn list_frame(
-    rows: impl IntoIterator<Item = AnyElement>,
-    inset: Pixels,
-    footer: Option<AnyElement>,
-    cx: &App,
-) -> gpui::Div {
-    let k = native_colors(cx);
-    let mut frame = div()
-        .w_full()
-        .rounded(radius::CONTAINER)
-        .border_1()
-        .border_color(k.separator)
-        .bg(k.content)
-        .overflow_hidden()
-        .flex()
-        .flex_col();
-    for (ix, row) in rows.into_iter().enumerate() {
-        if ix > 0 {
-            frame = frame.child(div().ml(inset).h(px(1.)).bg(k.separator));
-        }
-        frame = frame.child(row);
-    }
-    frame.children(footer.map(|f| {
-        div()
-            .h(height::FOOTER_ROW)
-            .px(space::S12)
-            .border_t_1()
-            .border_color(k.separator)
-            .flex()
-            .items_center()
-            .n_body()
-            .text_color(k.secondary)
-            .child(f)
-    }))
-}
-
-/// The inset of a row separator in a list of media rows: px 12 + media 32
-/// + gap 12.
-pub const LIST_TITLE_INSET: Pixels = px(56.);
 
 // ---------------------------------------------------------------------------
 // Table (§2.7)

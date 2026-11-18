@@ -856,8 +856,8 @@ impl NativeKit {
     fn page2(&self, window: &mut Window, cx: &mut App) -> AnyElement {
         use super::{
             Alert, AlertTone, Badge, BadgeState, BadgeVariant, Card, Column, CountPill, Empty,
-            EmptyLine, IconSize, KeyCap, LIST_TITLE_INSET, ListRow, PushSize, PushStyle,
-            StatusBadge, icon_button, list_frame, media_box, push_button, table, tokens::space,
+            EmptyLine, IconSize, KeyCap, ListRow, PushSize, PushStyle, StatusBadge, icon_button,
+            media_box, push_button, table, tokens::space,
         };
         use crate::ui::Sym;
         let k = native_colors(cx);
@@ -997,7 +997,7 @@ impl NativeKit {
             ListRow::new("k3-r2", t::TOPIC_B)
                 .media(media_box(Sym::Topic, cx))
                 .meta(t::GROUP_DEV)
-                .status(StatusBadge::new(BadgeState::Working, t::ST_WORKING))
+                .status(StatusBadge::new(BadgeState::Working, t::ST_WORKING).on_fill(true))
                 .time(t::TIME_B)
                 .time_width(px(40.))
                 .actions(push_button(
@@ -1010,12 +1010,14 @@ impl NativeKit {
                 .selected(true)
                 .into_any_element(),
         ];
-        let list = section(t::SEC_LIST, &k).child(div().w_full().child(list_frame(
-            rows,
-            LIST_TITLE_INSET,
-            Some(div().child(t::LIST_FOOTER).into_any_element()),
-            cx,
-        )));
+        let list =
+            section(t::SEC_LIST, &k).child(
+                div()
+                    .w_full()
+                    .child(super::page::list_frame(cx).children(rows).child(
+                        super::page::list_footer("k3-footer", t::LIST_FOOTER, None, cx),
+                    )),
+            );
         let cols = [
             Column::flex(t::COL_NAME),
             Column::fixed(t::COL_KIND, px(80.)),
