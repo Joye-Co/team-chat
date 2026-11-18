@@ -178,7 +178,8 @@ const FROM_KEYWORDS = new Set(["owners", "requester"]);
  * `ask.from` of a card write, as stored: at least one person who can answer. Only people answer
  * (a bot's card event is refused), so an ask whose `from` names none would stay open with nobody
  * to wait on. `owners` or `requester` that name no person (a run nobody asked: a scheduled or
- * handed-over one) fall back to the group's owners; ids that name no person are `invalid`.
+ * handed-over one) fall back to the group's owners; ids that name no person, and a group with
+ * no owner to fall back to, are `invalid`.
  */
 function answerableFrom(room: RoomContext, dir: Directory, given: string[], resolved: string[]): string[] {
   const person = (id: string) => {
@@ -188,7 +189,13 @@ function answerableFrom(room: RoomContext, dir: Directory, given: string[], reso
   if (resolved.some(person)) return resolved;
   if (given.some((f) => FROM_KEYWORDS.has(f))) {
     const owners = room.memberIds().filter((id) => dir.get(id)?.level === "owner" && person(id));
-    return owners.length > 0 ? [...new Set([...resolved, ...owners])] : resolved;
+    if (owners.length > 0) return [...new Set([...resolved, ...owners])];
+    // No owner is in the group either: the author has to name a person.
+    throw new ApiError(
+      "invalid",
+      'ask.from names nobody who can answer: "requester" and "owners" name no person in this group, use the member id of a person in it',
+      "card.limits",
+    );
   }
   const unknown = given
     .filter((f) => !person(f))

@@ -557,6 +557,13 @@ describe("blocking asks and rounds", () => {
     const own = (await send(cbot, gid, quick(["requester"]))).message;
     expect(own.cardState.ask).toMatchObject({ status: "open", from: [owner.id] });
 
+    // A group with no owner in it has nobody to fall back to: the author is told to name a person.
+    const g2 = await createGroup(alice, [bot.id]);
+    const lone = await cbot.request({ t: "send", groupId: g2, clientMsgId: clientMsgId(), body: "", cardV2: quick(["requester"]) });
+    expect(lone).toMatchObject(nobody);
+    expect(lone.error.message).toBe('ask.from names nobody who can answer: "requester" and "owners" name no person in this group, use the member id of a person in it');
+    expect((await send(cbot, g2, quick([alice.id]))).message.cardState.ask.from).toEqual([alice.id]);
+
     // An edit or a patch that changes `from`, or opens a new round, is checked the same way.
     const m = (await send(cbot, gid, quick([alice.id]))).message;
     expect(await cbot.request({ t: "edit", groupId: gid, messageId: m.id, body: "", cardV2: quick(["Alice"]), baseRev: 1 })).toMatchObject(nobody);
