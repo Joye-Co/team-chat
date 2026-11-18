@@ -185,7 +185,7 @@ impl BotQuick {
                                 "quick-machine",
                                 machine_choice_text(picked.as_deref(), &self.machines, view),
                                 false,
-                                SheetWidth::List,
+                                SheetWidth::Form,
                                 cx,
                             ),
                             true,
@@ -199,7 +199,7 @@ impl BotQuick {
         let options = machine_options(picked.as_deref(), &self.machines, view);
         let shown = machine_choice_text(picked.as_deref(), &self.machines, view);
         let view = cx.entity();
-        let select = widgets::popup_fill("quick-machine", shown, false, SheetWidth::List, cx)
+        let select = widgets::popup_fill("quick-machine", shown, false, SheetWidth::Form, cx)
             .dropdown_menu(move |menu, _, _| {
                 options.iter().fold(menu, |menu, (id, text)| {
                     let (id, view) = (id.clone(), view.clone());
@@ -299,7 +299,7 @@ pub fn open_bot_quick(services: Services, member: &Member, window: &mut Window, 
     widgets::open_sheet(
         window,
         cx,
-        SheetWidth::List,
+        SheetWidth::Form,
         px(420.),
         move |dialog, _, _| dialog.child(form.clone()),
     );

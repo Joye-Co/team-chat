@@ -2179,7 +2179,12 @@ impl BotForm {
     }
 
     /// 在哪台电脑干活 picked: the hand-typed labels no longer count.
-    fn pick_machine(&mut self, id: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn pick_machine(
+        &mut self,
+        id: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.machine = id;
         self.machine_chosen = true;
         self.labels
@@ -2314,6 +2319,12 @@ impl BotForm {
 
     pub fn status(&self) -> &Status {
         &self.status
+    }
+
+    /// Scrolls the sheet's body to its end, the 形象 grid (self-test scenes).
+    pub fn scroll_to_end(&mut self, cx: &mut Context<Self>) {
+        self.scroll.scroll_to_bottom();
+        cx.notify();
     }
 
     pub fn fill(
@@ -2889,10 +2900,15 @@ impl Render for BotForm {
             .body(
                 // The scrollbar shows while the body overflows, so the cut
                 // at the bottom reads as a scroll, not as a clipped group.
+                // The body takes the height the window has to give.
                 widgets::sheet_body_list(
                     "bot-form-body",
                     body,
-                    metrics::SHEET_BODY_MAX,
+                    (window.viewport_size().height
+                        - widgets::sheet_top(window, cx)
+                        - metrics::SHEET_BODY_CHROME
+                        - tokens::space::S24)
+                        .max(metrics::SHEET_BODY_MAX),
                     &self.scroll,
                 ),
             )

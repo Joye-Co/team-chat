@@ -781,7 +781,18 @@ pub fn app_icon(cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-/// Opens a sheet attached under the settings toolbar (§7.1): Escape is
+/// Where a sheet of these panes hangs in `window`: the main window has its
+/// own toolbar line (§7.1), the settings and team windows stay under the
+/// settings toolbar's height.
+pub fn sheet_top(window: &Window, cx: &App) -> Pixels {
+    if crate::app::root_view(window, cx).is_some() {
+        crate::ui::native::window_chrome::sheet_top()
+    } else {
+        super::TOOLBAR_HEIGHT
+    }
+}
+
+/// Opens a sheet attached under the window's toolbar (§7.1): Escape is
 /// 取消, the window grows to `floor` while it is up. `build` lays out the
 /// inside with `SheetLayout` on the configured dialog.
 pub fn open_sheet(
@@ -799,8 +810,9 @@ pub fn open_sheet(
     use gpui_component::WindowExt as _;
     super::window_fit::sheet_floor(floor);
     window.open_dialog(cx, move |dialog, window, cx| {
+        let top = sheet_top(window, cx);
         let dialog = crate::ui::native::native_sheet(dialog, width, cx)
-            .margin_top(super::TOOLBAR_HEIGHT)
+            .margin_top(top)
             .px(px(0.));
         build(dialog, window, cx)
     });

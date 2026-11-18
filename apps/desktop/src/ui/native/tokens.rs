@@ -1144,9 +1144,11 @@ pub mod metrics {
     pub const SHEET_WIDE: Pixels = px(560.);
     pub const SHEET_RADIUS: Pixels = radius::SHEET;
     pub const SHEET_PAD: Pixels = space::S24;
-    /// The most a long sheet body shows before it scrolls (the add and
-    /// edit AI member sheets): the cut lands in the middle of a form row.
+    /// The least a long sheet body shows before it scrolls (the add and
+    /// edit AI member sheets); a taller window shows more of it.
     pub const SHEET_BODY_MAX: Pixels = px(468.);
+    /// What such a sheet spends around its body: title, explanation, footer.
+    pub const SHEET_BODY_CHROME: Pixels = px(176.);
     pub const SHEET_BUTTON_EDGE: Pixels = space::S24;
     pub const SHEET_BUTTON_GAP: Pixels = space::S8;
     /// A Mac dialog button is never narrower than this, so 「好」 is not a square.
