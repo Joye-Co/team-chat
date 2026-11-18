@@ -2779,7 +2779,9 @@ Rules:
 - `DELETE /v1/machines/:id`, `…/logins*`, `…/secrets*` and `…/monitor` need an admin on a team
   machine and the owner on a personal machine (`forbidden`, `machine.not_yours`). `PUT
   /v1/bots/:id/runner` that changes `machineId` to a personal machine needs its owner
-  (`machine.not_yours`); sending the stored `machineId` back is always allowed.
+  (`machine.not_yours`); sending the stored `machineId` back is always allowed. `DELETE
+  /v1/bots/:id/runner` of an AI member placed on a personal machine needs its owner too
+  (`machine.not_yours`).
 - `GET /v1/machines`: team machines as before (full for admins, cut down for members); my own
   personal machines in full; other people's personal machines as `id`, `name`, `createdBy`,
   `createdAt`, `ownerId`, `connected` and `healthy` (`labels` and `runningRuns` empty).
