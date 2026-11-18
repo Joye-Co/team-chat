@@ -336,6 +336,15 @@ fn hex(c: Hsla) -> String {
     format!("#{:02x}{:02x}{:02x}", b(c.r), b(c.g), b(c.b))
 }
 
+/// How to point at a part of a page, with this system's modifier key.
+pub fn ref_hint() -> &'static str {
+    if cfg!(target_os = "windows") {
+        cp::PAGE_REF_HINT_WIN
+    } else {
+        cp::PAGE_REF_HINT_MAC
+    }
+}
+
 /// The ⌥-click outline and `就这里提问` menu, in the app's theme.
 pub fn ref_menu(cx: &App) -> RefMenu {
     let k = theme::colors(cx);
@@ -1678,6 +1687,10 @@ pub fn page_rows(
     let mut rows = vec![text_row(Sym::Shield, line.line)];
     if let Some((_, whole)) = line.run_log {
         rows.push(text_row(Sym::Info, whole));
+    }
+    // A part of the page can be pointed at; nothing on the page itself says so.
+    if refs::enabled(cx) {
+        rows.push(text_row(Sym::AskAside, ref_hint().to_string()));
     }
     let Some(view) = band(artifact_id, version, cx) else {
         return rows;

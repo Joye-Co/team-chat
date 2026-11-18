@@ -19,4 +19,6 @@ crate::copy! {
     PAGE_UPDATED_TO = "已更新到 v{n}",
     PAGE_NEWER = "有 v{n}",
     PAGE_REF_MENU = "就这里提问",
+    PAGE_REF_HINT_MAC = "按住 ⌥ 点页面里的内容，或右键选「就这里提问」",
+    PAGE_REF_HINT_WIN = "按住 Alt 点页面里的内容，或右键选「就这里提问」",
 }
