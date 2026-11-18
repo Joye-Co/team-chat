@@ -74,6 +74,59 @@ struct Cache {
     has_topics: bool,
 }
 
+/// What the faded bottom edge of the list leaves out, from its last layout.
+#[derive(Clone, Copy, Default, PartialEq)]
+struct BottomEdge {
+    /// An open section header whose first row is still under the edge: it
+    /// waits for that row, so no label stands alone there.
+    stranded: Option<usize>,
+    /// The first row under the edge that waits on me, and how many do.
+    waiting: Option<(usize, usize)>,
+}
+
+/// Reads [`BottomEdge`] from the list's last layout. A list that ends in
+/// view hides nothing.
+fn bottom_edge(list: &ListState, entries: &[Entry]) -> BottomEdge {
+    let mut edge = BottomEdge::default();
+    let viewport = list.viewport_bounds();
+    let Some(last) = entries.len().checked_sub(1) else {
+        return edge;
+    };
+    let ends_in_view = list
+        .bounds_for_item(last)
+        .is_some_and(|row| row.bottom() <= viewport.bottom() + px(0.5));
+    if viewport.size.height <= px(0.) || ends_in_view {
+        return edge;
+    }
+    let fade = viewport.bottom() - space::S24;
+    for (ix, entry) in entries
+        .iter()
+        .enumerate()
+        .skip(list.logical_scroll_top().item_ix)
+    {
+        let row = list.bounds_for_item(ix);
+        let waits = entry.item.waiting_on_me();
+        if waits > 0 && row.is_none_or(|r| r.bottom() > fade) {
+            let (first, n) = edge.waiting.unwrap_or((ix, 0));
+            edge.waiting = Some((first, n + waits));
+        }
+        let drawn = row.is_some_and(|r| r.top() < viewport.bottom());
+        let has_row = entries
+            .get(ix + 1)
+            .is_some_and(|next| !next.item.is_section_header());
+        if drawn
+            && has_row
+            && entry.item.opens_section()
+            && list
+                .bounds_for_item(ix + 1)
+                .is_none_or(|next| next.top() >= fade)
+        {
+            edge.stranded = Some(ix);
+        }
+    }
+    edge
+}
+
 /// The traffic-light row at the top of the sidebar, under its 8 pt top
 /// padding: centred on the toolbar row's centre line (32 pt from the window
 /// top), so the lights, 隐藏侧栏 and the page title share one line.
@@ -119,6 +172,8 @@ pub struct RailView {
     settle: Option<Settle>,
     /// The virtual list of [`Cache::entries`].
     list: ListState,
+    /// What the list's bottom edge left out on the last layout.
+    bottom_edge: Rc<std::cell::Cell<BottomEdge>>,
     /// The list style and account whose rows `list` holds, and how many.
     listed: Option<((RailMode, Option<MemberId>), usize)>,
     // --- v12/behavior ---
@@ -206,6 +261,7 @@ impl RailView {
             reveal_tries: 0,
             settle: None,
             list: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
+            bottom_edge: Default::default(),
             listed: None,
             // Tab reaches the rows themselves (FocusRow); the list keeps a
             // handle for the arrow keys when it is focused as a whole.
@@ -475,6 +531,10 @@ impl RailView {
         div()
             .w_full()
             .pt(entry.gap)
+            // Kept in the layout, so the list does not move when it shows.
+            .when(self.bottom_edge.get().stranded == Some(ix), |d| {
+                d.invisible()
+            })
             .child(self.item(&entry.item, cx))
             .into_any_element()
     }
@@ -696,6 +756,37 @@ impl RailView {
         )
     }
 
+    /// The pill over the list's bottom edge: `n` rows below wait on me, and
+    /// a click scrolls to the first (row `ix`).
+    fn waiting_below(&self, ix: usize, n: usize, cx: &mut Context<Self>) -> AnyElement {
+        use crate::ui::native::{PushSize, PushStyle, native_colors, push_button, tokens::shadow};
+        let amber = native_colors(cx).amber;
+        div()
+            .absolute()
+            .left_0()
+            .right_0()
+            .bottom(space::S4)
+            .flex()
+            .justify_center()
+            .child(
+                push_button(
+                    "rail-waiting-below",
+                    crate::copy::fill(c::RAIL_WAITS_ON_YOU_N, &[("n", &n.to_string())]),
+                    // Opaque: the rows scroll under it.
+                    PushStyle::Secondary,
+                    PushSize::Small,
+                    cx,
+                )
+                .icon(gpui_component::Icon::new(Sym::NeedsYou).text_color(amber))
+                .shadow(shadow::sm())
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.scroll_to_open(ix);
+                    cx.notify();
+                })),
+            )
+            .into_any_element()
+    }
+
     /// Draws the inactive-window look (gray selection, `secondary` tools).
     pub fn set_show_inactive(&mut self, inactive: bool, cx: &mut Context<Self>) {
         if self.show_inactive != inactive {
@@ -770,6 +861,18 @@ impl Render for RailView {
                 .bounds_for_item(rows_n.saturating_sub(1))
                 .is_some_and(|row| row.bottom() <= self.list.viewport_bounds().bottom() + px(0.5));
         let separator = crate::ui::native::native_colors(cx).separator;
+        let entries_drawn = self
+            .cache
+            .as_ref()
+            .filter(|_| list_drawn)
+            .map(|c| c.entries.clone());
+        // A row that waits on me never hides under the edge unsaid.
+        let waiting_below = self
+            .bottom_edge
+            .get()
+            .waiting
+            .filter(|_| list_drawn)
+            .map(|(ix, n)| self.waiting_below(ix, n, cx));
         // The reveal waits one frame for the list's first layout; while the
         // list is not drawn (the skeleton, the empty hint) there is nothing
         // to wait for.
@@ -985,7 +1088,25 @@ impl Render for RailView {
                                     gpui::linear_color_stop(sidebar_fill.opacity(0.), 1.),
                                 )),
                         )
-                    }),
+                    })
+                    // After the list's layout: what its bottom edge hides now.
+                    .when_some(entries_drawn, |d, entries| {
+                        let (list, edge) = (self.list.clone(), self.bottom_edge.clone());
+                        d.child(
+                            gpui::canvas(
+                                move |_, window, _| {
+                                    let now = bottom_edge(&list, &entries);
+                                    if edge.replace(now) != now {
+                                        window.refresh();
+                                    }
+                                },
+                                |_, _, _, _| (),
+                            )
+                            .absolute()
+                            .size_full(),
+                        )
+                    })
+                    .children(waiting_below),
             )
             // §2.1, §2.15, T-13: offline, an Alert row above the footer.
             // A 话题 page docks the same Alert above its composer instead.
@@ -1353,6 +1474,74 @@ mod tests {
         assert!(
             !Rc::ptr_eq(&first, &entries(&view, cx)),
             "a change reads again"
+        );
+    }
+
+    /// A short window: a section label never stands alone at the bottom
+    /// edge, and the pill's scroll brings the row that waits on me into view.
+    #[gpui::test]
+    fn the_bottom_edge_keeps_labels_with_rows_and_says_who_waits(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+        let provider: Arc<dyn ChatProvider> = V2Samples::new();
+        let (view, cx) = cx.add_window_view(move |window, cx| {
+            let services = Services::new(provider, cx);
+            RailView::new(services, window, cx)
+        });
+        let mut stranded = false;
+        for height in (240..640).step_by(4) {
+            cx.simulate_resize(gpui::size(px(260.), px(height as f32)));
+            cx.run_until_parked();
+            view.update(cx, |this, _| {
+                let Some(ix) = this.bottom_edge.get().stranded else {
+                    return;
+                };
+                stranded = true;
+                let entries = this.cache.as_ref().unwrap().entries.clone();
+                assert!(entries[ix].item.opens_section(), "only an open header");
+                let fade = this.list.viewport_bounds().bottom() - space::S24;
+                assert!(
+                    this.list
+                        .bounds_for_item(ix + 1)
+                        .is_none_or(|row| row.top() >= fade),
+                    "its first row is still under the edge"
+                );
+            });
+        }
+        assert!(stranded, "some height leaves a label at the edge");
+
+        let waiting = |view: &gpui::Entity<RailView>, cx: &mut gpui::VisualTestContext| {
+            view.update(cx, |this, _| this.bottom_edge.get().waiting)
+        };
+        // The tallest window that still hides one: room to scroll the row in.
+        let mut below = None;
+        for height in (240..900).rev().step_by(4) {
+            cx.simulate_resize(gpui::size(px(260.), px(height as f32)));
+            cx.run_until_parked();
+            below = waiting(&view, cx);
+            if below.is_some() {
+                break;
+            }
+        }
+        let (ix, _) = below.expect("a row waits under the edge");
+        view.update(cx, |this, cx| {
+            this.scroll_to_open(ix);
+            cx.notify();
+        });
+        // A resize is what draws a frame in a test window; twice, as the
+        // edge is read after the list's layout.
+        for grow in [1., 2.] {
+            let size = view.update_in(cx, |_, window, _| window.viewport_size());
+            cx.simulate_resize(gpui::size(size.width, size.height + px(grow)));
+            cx.run_until_parked();
+        }
+        view.update(cx, |this, _| {
+            let row = this.list.bounds_for_item(ix).expect("the row is drawn");
+            assert!(row.bottom() <= this.list.viewport_bounds().bottom());
+        });
+        assert_ne!(
+            waiting(&view, cx).map(|(first, _)| first),
+            Some(ix),
+            "the pill no longer points at a row in view"
         );
     }
 
