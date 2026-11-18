@@ -1324,6 +1324,16 @@ pub mod card_v21 {
     pub const HARD_ANSWER_STARTING: Duration = Duration::from_secs(720);
 }
 
+/// The 设置登录邮箱 sheet: how long 重新发送 rests after a code went out again.
+pub mod email_sheet {
+    use std::time::Duration;
+
+    /// Seconds until 重新发送 comes back.
+    pub const RESEND_WAIT_SECS: u32 = 30;
+    /// How often the wait counts down.
+    pub const RESEND_TICK: Duration = Duration::from_secs(1);
+}
+
 /// The images of a message (files::gallery): one picture keeps its ratio, more sit in a
 /// mosaic with hairline gaps and one rounded outline, like Photos and Messages.
 pub mod gallery {

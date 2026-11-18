@@ -78,5 +78,34 @@ pub const SCENES: &[Scene] = &[
             Ok(handle)
         },
     },
+    Scene {
+        name: "members-plan-person",
+        about: "成员: 小王's 汇报 sheet open: a person has no budget, so the sheet names none",
+        start: Start::V2,
+        setup: |s, cx| {
+            s.nav
+                .update(cx, |nav, cx| nav.open_members(Some(d::XIAOWANG.into()), cx))
+        },
+        open: |services, content, cx| {
+            let handle = open_main(services.clone(), content, cx)?;
+            handle
+                .update(cx, |_, window, cx| {
+                    let Some(member) = services.provider.member(d::XIAOWANG) else {
+                        return;
+                    };
+                    let stats = services
+                        .provider
+                        .member_stats(d::XIAOWANG)
+                        .unwrap_or_default();
+                    let current = crate::data::pages::MemberPlan {
+                        reports_to: stats.reports_to,
+                        weekly_budget_cents: None,
+                    };
+                    super::plan::open_plan_sheet(services, member, current, window, cx)
+                })
+                .map_err(|e| e.to_string())?;
+            Ok(handle)
+        },
+    },
     // --- end v14/t3-pages ---
 ];

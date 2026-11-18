@@ -336,6 +336,14 @@ describe("personal and team machines", () => {
     expect(edit.status, JSON.stringify(edit.body)).toBe(200);
     expect(edit.body).toMatchObject({ machineId: aliceId, model: "gpt-5" });
     expect((await put({ model: "gpt-5.1" })).body.machineId).toBe(aliceId);
+    // Taking it off Alice's machine is hers to do: an admin's DELETE changes nothing.
+    const off = await api(`/v1/bots/${bot.id}/runner`, { method: "DELETE", token: admin.token });
+    expect(off.status).toBe(403);
+    expect(off.body.error?.reason).toBe("machine.not_yours");
+    expect((await api(`/v1/bots/${bot.id}/runner`, { token: admin.token })).body.machineId).toBe(aliceId);
+    // On the admin's own machine the DELETE goes through.
+    await env.DB.prepare("UPDATE bot_runners SET machine_id = ? WHERE member_id = ?").bind(adminOwn, bot.id).run();
+    expect((await api(`/v1/bots/${bot.id}/runner`, { method: "DELETE", token: admin.token })).status).toBe(200);
   });
 
   it("removes a machine by its manager, with its checks and pins", async () => {

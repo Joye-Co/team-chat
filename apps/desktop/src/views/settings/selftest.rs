@@ -956,6 +956,42 @@ pub fn open_email_code(
     Ok(handle)
 }
 
+/// The code step of the 设置登录邮箱 sheet while 重新发送 is on its way.
+pub fn open_email_resending(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::Account, cx)?;
+    after_fit(handle, cx, move |window, cx| {
+        let account = view.read(cx).account().clone();
+        AccountPage::open_email_sheet(account.clone(), window, cx);
+        account.update(cx, |p, cx| {
+            p.preview_email_sent("example.longname@example.com", window, cx);
+            p.preview_email_resending(cx);
+        });
+    });
+    Ok(handle)
+}
+
+/// The code step of the 设置登录邮箱 sheet right after a code went out again.
+pub fn open_email_resent(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::Account, cx)?;
+    after_fit(handle, cx, move |window, cx| {
+        let account = view.read(cx).account().clone();
+        AccountPage::open_email_sheet(account.clone(), window, cx);
+        account.update(cx, |p, cx| {
+            p.preview_email_sent("example.longname@example.com", window, cx);
+            p.preview_email_resent(cx);
+        });
+    });
+    Ok(handle)
+}
+
 /// The 用手机扫码登录 sheet with a QR code waiting for the phone.
 pub fn open_phone_qr(
     services: Services,
@@ -1894,6 +1930,20 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedIn,
         setup: |_, _| {},
         open: open_email_code,
+    },
+    Scene {
+        name: "settings-email-resending",
+        about: "Settings: the 设置登录邮箱 code step while 重新发送 is on its way",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: open_email_resending,
+    },
+    Scene {
+        name: "settings-email-resent",
+        about: "Settings: the 设置登录邮箱 code step after 重新发送: the sent line and the wait",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: open_email_resent,
     },
     Scene {
         name: "settings-phone-qr",
