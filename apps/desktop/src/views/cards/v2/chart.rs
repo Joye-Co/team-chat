@@ -192,6 +192,9 @@ pub(crate) fn shown_labels(labels: &[String], width: f32) -> Vec<usize> {
     if need <= slot {
         return (0..n).collect();
     }
+    // The end labels are pulled in to the plot's edges: their neighbours keep clear of that.
+    let widest = labels.iter().map(|l| label_width(l)).fold(0f32, f32::max);
+    let need = need + (widest / 2. - slot / 2.).max(0.);
     let k = (need / slot).ceil().max(1.) as usize;
     let mut out: Vec<usize> = (0..n).step_by(k).collect();
     if out.last() != Some(&(n - 1)) {
@@ -609,18 +612,27 @@ pub(crate) fn chart(
         )
         .child(plot)
         .when(!x.is_empty(), |el| {
-            // Only the labels that fit, each whole and centered under its point.
+            // Only the labels that fit, each whole and centered under its point; the first
+            // and the last stay inside the plot's edges.
             let n = x.len() as f32;
+            let last = x.len() - 1;
+            let slot = width / n;
             el.child(meta(div()).pl(left).text_color(k.ink_3).mono().child(
                 div().relative().w_full().h(label_h).children(
                     shown_labels(x, width).into_iter().map(|i| {
+                        let wide = label_width(&x[i]) > slot;
                         div()
                             .absolute()
                             .top_0()
-                            .left(gpui::relative((i as f32 + 0.5) / n))
-                            .w(px(0.))
                             .flex()
-                            .justify_center()
+                            .map(|el| match i {
+                                0 if wide => el.left_0().justify_start(),
+                                i if i == last && wide => el.right_0().justify_end(),
+                                i => el
+                                    .left(gpui::relative((i as f32 + 0.5) / n))
+                                    .w(px(0.))
+                                    .justify_center(),
+                            })
                             .child(div().flex_none().whitespace_nowrap().child(x[i].clone()))
                     }),
                 ),
