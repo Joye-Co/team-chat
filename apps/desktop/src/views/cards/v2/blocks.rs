@@ -503,11 +503,12 @@ fn outputs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
         let (icon, title, line) = match &detail {
             Some(a) => {
                 let shown = version.unwrap_or(a.summary.version);
-                let (kind, icon) = match a.summary.kind {
-                    ArtifactKind::Page => (crate::copy::artifacts::CARD_KIND_PAGE, Sym::Document),
-                    ArtifactKind::Image => (crate::copy::artifacts::CARD_KIND_FILE, Sym::Image),
-                    _ => (crate::copy::artifacts::CARD_KIND_FILE, Sym::File),
+                let kind = match a.summary.kind {
+                    ArtifactKind::Page => crate::copy::artifacts::CARD_KIND_PAGE,
+                    _ => crate::copy::artifacts::CARD_KIND_FILE,
                 };
+                let icon =
+                    crate::views::artifact_page::list::ListKind::of(p.as_ref(), &a.summary).sym();
                 let mut line = fill(
                     c::REF_ARTIFACT_KIND_LINE,
                     &[
@@ -4283,7 +4284,7 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                         let shown = version.unwrap_or(a.summary.version);
                         let newer = a.summary.version > shown;
                         (
-                            ref_tile(Sym::Document, false, cx),
+                            ref_tile(crate::views::artifact_page::list::ListKind::of(p.as_ref(), &a.summary).sym(), false, cx),
                             a.summary.title.clone(),
                             fill(
                                 c::REF_ARTIFACT_LINE,

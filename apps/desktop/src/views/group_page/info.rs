@@ -14,7 +14,7 @@ use crate::views::artifact_page::list::ListKind;
 use crate::{
     app::{RightPane, Services},
     copy::{fill, group_page as c},
-    data::{ArtifactKind, GroupKind, Member, PlanState},
+    data::{GroupKind, Member, PlanState},
     ui::{
         native::{
             FocusRow as _, InspectorSection, NativeType as _, borderless_button, native_colors,
@@ -328,11 +328,7 @@ pub fn sections(
     for a in outputs {
         let nav = services.nav.clone();
         let id = a.id.clone();
-        let glyph = match a.kind {
-            ArtifactKind::Image => Sym::Image,
-            ArtifactKind::File => Sym::File,
-            _ => Sym::Document,
-        };
+        let glyph = ListKind::of(services.provider.as_ref(), &a).sym();
         let title = a.title.clone();
         sec = sec.row(
             div()

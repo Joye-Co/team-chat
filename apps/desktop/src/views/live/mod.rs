@@ -1691,17 +1691,17 @@ impl LivePane {
             } else {
                 title
             };
+            let provider = self.services.provider.as_ref();
+            let glyph = provider.artifact(&id).map_or(Sym::Document, |a| {
+                crate::views::artifact_page::list::ListKind::of(provider, &a.summary).sym()
+            });
             out.push(
-                chip(
-                    format!("live-evidence-artifact-{index}"),
-                    Sym::Document,
-                    label,
-                )
-                .on_click(move |_, _, cx| {
-                    let id = id.clone();
-                    nav.update(cx, |nav, cx| nav.open_artifact(id, Some(version), cx))
-                })
-                .into_any_element(),
+                chip(format!("live-evidence-artifact-{index}"), glyph, label)
+                    .on_click(move |_, _, cx| {
+                        let id = id.clone();
+                        nav.update(cx, |nav, cx| nav.open_artifact(id, Some(version), cx))
+                    })
+                    .into_any_element(),
             );
         }
         out

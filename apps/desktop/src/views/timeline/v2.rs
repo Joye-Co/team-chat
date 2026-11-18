@@ -603,6 +603,9 @@ impl TimelineView {
                 listed.as_ref().map_or(*version, |a| a.version),
                 cx,
             );
+            let glyph = listed.as_ref().map_or(Sym::Document, |a| {
+                crate::views::artifact_page::list::ListKind::of(p.as_ref(), a).sym()
+            });
             let kind = listed.map(|a| kind_text(a.kind)).unwrap_or(c::KIND_PAGE);
             let pane = RightPane::Artifact {
                 id: artifact_id.clone(),
@@ -613,7 +616,7 @@ impl TimelineView {
                     ElementId::Name(format!("v2-out-{key}-{artifact_id}").into()),
                     cx,
                 )
-                .child(ui::sym(Sym::Document, ui::SymSize::INLINE, n.secondary))
+                .child(ui::sym(glyph, ui::SymSize::INLINE, n.secondary))
                 .child(
                     div()
                         .min_w_0()
