@@ -264,7 +264,11 @@ fn main() {
         }
         "uninstall-service" => {
             // The service functions take a missing file as done: say which it was.
-            let was_installed = daemon::service::service_file().exists();
+            // Windows: a task can be registered while the copy of its definition is gone.
+            let was_installed = daemon::service::service_file().exists()
+                || (cfg!(windows)
+                    && load
+                    && daemon::service::task_exists(&daemon::service::task_name()));
             let res = if cfg!(windows) {
                 daemon::service::uninstall_task(
                     &daemon::service::task_name(),

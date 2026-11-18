@@ -675,8 +675,12 @@ fn rotate_log(log: &Path, keep: u64) -> std::io::Result<bool> {
     Ok(true)
 }
 
-/// The file this process's stderr is, when it is a plain file (a service manager's log).
+/// The file this process's stderr is, when it is a plain file opened in append mode (a service
+/// manager's log). A file opened without append (`run > file 2>&1`) is left alone: its writer
+/// keeps its position, so after emptying the file it would write far past the new end.
+// The casts: `st_dev` and `st_ino` are `u64` on Linux and narrower on macOS.
 #[cfg(unix)]
+#[allow(clippy::unnecessary_cast)]
 fn stderr_file() -> Option<PathBuf> {
     use std::os::unix::fs::MetadataExt as _;
     // SAFETY: fstat fills the zeroed struct for an open descriptor and fails for a closed one.
@@ -685,6 +689,11 @@ fn stderr_file() -> Option<PathBuf> {
         (libc::fstat(2, &mut st) == 0).then_some(st)?
     };
     if st.st_mode & libc::S_IFMT != libc::S_IFREG {
+        return None;
+    }
+    // SAFETY: F_GETFL only reads the flags of the descriptor.
+    let flags = unsafe { libc::fcntl(2, libc::F_GETFL) };
+    if flags < 0 || flags & libc::O_APPEND == 0 {
         return None;
     }
     #[cfg(target_os = "linux")]
@@ -710,7 +719,7 @@ fn stderr_file() -> Option<PathBuf> {
 
 /// `run` on macOS and Linux: the service manager appends to the log for ever, so a log that
 /// grew past the limit is moved to `daemon.log.1` here, as [`log_to`] does on Windows. Nothing
-/// happens when the output is a terminal or a pipe.
+/// happens when the output is a terminal, a pipe, or a file not opened in append mode.
 pub fn rotate_own_log() {
     #[cfg(unix)]
     if let Some(log) = stderr_file()
