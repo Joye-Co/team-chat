@@ -700,12 +700,10 @@ pub fn open_parallel(
         px(320.),
         move |dialog, window, cx| {
             if first.replace(false) {
-                shown
-                    .read(cx)
-                    .count
-                    .read(cx)
-                    .focus_handle(cx)
-                    .focus(window, cx);
+                // The old number is selected, so typing replaces it.
+                let count = shown.read(cx).count.clone();
+                count.read(cx).focus_handle(cx).focus(window, cx);
+                count.update(cx, |state, cx| state.select_all(window, cx));
             }
             dialog.child(shown.clone())
         },

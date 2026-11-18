@@ -3223,6 +3223,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
         window: &mut Window,
         cx: &mut App,
     ) {
+        let composing = self.state.read(cx).ime_marked_range.is_some();
         let (focus_handle, show_cursor, disabled, selected_range, editor_style, editor_paddings) = {
             let state = self.state.read(cx);
             (
@@ -3445,7 +3446,13 @@ impl<M: InputModeKind> Element for TextElement<M> {
 
         // Paint blinking cursors (shared blink state for all carets)
         if focused && show_cursor {
+            // A Mac text field hides the caret while a range is selected. IME
+            // composition keeps its caret at the end of the marked text.
+            let hide_active = !selected_range.is_empty() && !composing;
             for cursor_info in prepaint.cursor_infos_with_scroll() {
+                if cursor_info.is_active && hide_active {
+                    continue;
+                }
                 window.paint_quad(fill(
                     snap_caret_to_device_pixels(cursor_info.bounds, window.scale_factor()),
                     editor_style.caret,

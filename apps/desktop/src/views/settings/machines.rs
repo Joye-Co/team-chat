@@ -355,10 +355,10 @@ impl MachinesPage {
                     .map(|o| crate::ui::avatar::name_beside_avatar(&o.name).to_string())
                     .unwrap_or_default();
                 // Cut down for me: whose it is, nothing about its work.
-                fill(s::MACHINE_OF, &[("name", &owner)])
+                vec![fill(s::MACHINE_OF, &[("name", &owner)])]
             }
             // A member sees a team computer's name and whether it is online, nothing more.
-            Ownership::Team if !self.owner => String::new(),
+            Ownership::Team if !self.owner => Vec::new(),
             Ownership::Mine => {
                 let members = self.services.provider.members();
                 // What it does for me comes right after its state: the end
@@ -366,27 +366,22 @@ impl MachinesPage {
                 let mut facts = vec![machine_state(m, now)];
                 facts.extend(actions::my_bots_summary(m, &members));
                 facts.extend(machine_spec(m));
-                facts.join(" · ")
+                facts
             }
             Ownership::Team => machine_facts(m, now),
         };
-        let facts = match (this, facts.is_empty()) {
-            (true, true) => s::MACHINE_THIS.to_string(),
-            (true, false) => format!("{} · {facts}", s::MACHINE_THIS),
-            (false, _) => facts,
-        };
         // Usable (GitHub, §3.7): the computer's own GitHub sign-in leads the description.
-        let facts = match (github_note(m), facts.is_empty()) {
-            (Some(note), true) => note,
-            (Some(note), false) => format!("{note} · {facts}"),
-            (None, _) => facts,
-        };
+        let facts: Vec<String> = github_note(m)
+            .into_iter()
+            .chain(this.then(|| s::MACHINE_THIS.to_string()))
+            .chain(facts)
+            .collect();
         widgets::ItemRow::new(
             ElementId::Name(format!("machine-{}", m.id).into()),
             m.name.clone(),
         )
         .media(widgets::icon_box_28(machine_glyph(m), cx))
-        .description(facts)
+        .facts(facts)
         .value(badge)
         .menu(more)
         .into_any_element()
@@ -767,10 +762,10 @@ fn github_note(m: &MachineInfo) -> Option<String> {
 /// The second line of a computer row, most important first: what it does
 /// (or when it was last seen; a time of 0 is never), the version, the OS,
 /// then the other tags.
-fn machine_facts(m: &MachineInfo, now: chrono::DateTime<chrono::Local>) -> String {
+fn machine_facts(m: &MachineInfo, now: chrono::DateTime<chrono::Local>) -> Vec<String> {
     let mut facts = vec![machine_state(m, now)];
     facts.extend(machine_spec(m));
-    facts.join(" · ")
+    facts
 }
 
 /// What a computer does now, or when it was last seen.
@@ -785,12 +780,10 @@ fn machine_state(m: &MachineInfo, now: chrono::DateTime<chrono::Local>) -> Strin
     }
 }
 
-/// What a computer is: its limit, the version, the OS, then the other tags.
+/// What a computer is: the version, the OS, then the other tags. Its limit is
+/// in the row's ⋯ menu.
 fn machine_spec(m: &MachineInfo) -> Vec<String> {
     let mut facts: Vec<String> = Vec::new();
-    if let Some(n) = m.run_limit() {
-        facts.push(fill(s::MACHINE_PARALLEL_FACT, &[("n", &n.to_string())]));
-    }
     if let Some(v) = &m.version {
         facts.push(fill(s::MACHINE_VERSION, &[("v", v)]));
     }

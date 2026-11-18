@@ -636,11 +636,13 @@ impl AccountPage {
                                 )
                             };
                             row.child(crate::copy::native_kit::MIDDLE_DOT).child(
-                                link("email-other", s::EMAIL_OTHER_ADDRESS).on_click(
-                                    move |_, window, cx| {
+                                // After the plain countdown the dot needs no link
+                                // padding on this side: it would sit off-center.
+                                link("email-other", s::EMAIL_OTHER_ADDRESS)
+                                    .when(page.email_resend_wait > 0, |l| l.pl_0())
+                                    .on_click(move |_, window, cx| {
                                         back.update(cx, |p, cx| p.edit_email_address(window, cx))
-                                    },
-                                ),
+                                    }),
                             )
                         };
                         (

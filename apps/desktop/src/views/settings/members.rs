@@ -675,6 +675,7 @@ impl MembersPage {
         // would say 默认规则 a second time, so only the description stays.
         let header: gpui::AnyElement = if self.part == MembersPart::Rules {
             div()
+                .max_w(tokens::layout::PAGE_MEASURE)
                 .n_body()
                 .text_color(native_colors(cx).secondary)
                 .child(about)
@@ -789,7 +790,11 @@ impl MembersPage {
                 |r, v| r.deploy_prod = v,
             ))
             // At rest the amount is right-aligned (2.8 number field).
-            .row(FormRow::new(s::RULES_SPEND).control(spend))
+            .row(
+                FormRow::new(s::RULES_SPEND)
+                    .when(owner, |row| row.detail(s::RULES_SPEND_HINT))
+                    .control(spend),
+            )
             .row(FormRow::new(s::RULES_APPROVER).control(approver));
         // A value the server refused or a spend that is not a number: the
         // Alert under the group.
@@ -920,7 +925,11 @@ impl Render for MembersPage {
             )
         });
         if self.part == MembersPart::Rules {
-            return widgets::pane().child(self.rules_section(owner, window, cx));
+            // The admin body already spaces its pages from the header: only the
+            // hairline stays, so a first card's ring is not clipped.
+            return widgets::pane()
+                .pt(metrics::HAIRLINE)
+                .child(self.rules_section(owner, window, cx));
         }
         widgets::pane()
             .child(members_section)
@@ -1023,44 +1032,6 @@ fn refusal(
         )),
         _ => None,
     }
-}
-
-/// A pop-up row in a sheet: two choices, `on` is the second.
-fn choice_row(
-    label: &'static str,
-    id: &'static str,
-    options: [&'static str; 2],
-    second: bool,
-    disabled: bool,
-    pick: impl Fn(bool, &mut Window, &mut App) + 'static,
-    cx: &App,
-) -> gpui::Div {
-    let pick = std::rc::Rc::new(pick);
-    sheet_form_row(
-        label,
-        disabled_push(
-            widgets::popup_fill(
-                id,
-                options[usize::from(second)],
-                false,
-                SheetWidth::Form,
-                cx,
-            ),
-            disabled,
-            cx,
-        )
-        .dropdown_menu(move |menu, _, _| {
-            [false, true].into_iter().fold(menu, |menu, v| {
-                let pick = pick.clone();
-                menu.item(
-                    PopupMenuItem::new(options[usize::from(v)])
-                        .checked(v == second)
-                        .on_click(move |_, window, cx| pick(v, window, cx)),
-                )
-            })
-        }),
-        cx,
-    )
 }
 
 /// The two large buttons at the bottom of a form sheet: 取消 and `default`.
@@ -1287,7 +1258,6 @@ pub struct InviteForm {
     services: Services,
     name: Entity<InputState>,
     role: Entity<InputState>,
-    kind: MemberKind,
     status: Status,
     created: Option<InviteCreated>,
     done: widgets::DoneStep,
@@ -1310,7 +1280,6 @@ impl InviteForm {
             services,
             name,
             role,
-            kind: MemberKind::Human,
             status: Status::Idle,
             created: None,
             done: widgets::DoneStep::new(cx),
@@ -1355,7 +1324,8 @@ impl InviteForm {
         }
         let reply = self.services.provider.create_invite(InviteRequest {
             name,
-            kind: self.kind,
+            // An invite is for a person: 添加 AI 成员 is the one way to add an AI member.
+            kind: MemberKind::Human,
             // design-roles 3.9: everyone joins as 普通成员; a 所有者 gives 身份 afterwards.
             level: MemberLevel::Member,
             role: (!role.is_empty()).then_some(role),
@@ -1412,7 +1382,7 @@ impl Render for InviteForm {
             self.name.read(cx).value().trim(),
             self.role.read(cx).value().trim(),
         );
-        let (kind_page, submit, retry) = (cx.entity(), cx.entity(), cx.entity());
+        let (submit, retry) = (cx.entity(), cx.entity());
         let failed = refusal(
             "invite-failed",
             &self.status,
@@ -1436,24 +1406,6 @@ impl Render for InviteForm {
                         "member-role",
                         &self.role,
                         role_err.is_some(),
-                        cx,
-                    ))
-                    .child(choice_row(
-                        s::INVITE_KIND,
-                        "invite-kind",
-                        [s::KIND_HUMAN, s::KIND_AI],
-                        self.kind == MemberKind::Bot,
-                        busy,
-                        move |bot, _, cx| {
-                            kind_page.update(cx, |f, cx| {
-                                f.kind = if bot {
-                                    MemberKind::Bot
-                                } else {
-                                    MemberKind::Human
-                                };
-                                cx.notify();
-                            })
-                        },
                         cx,
                     )),
             )
@@ -2665,6 +2617,7 @@ impl Render for BotForm {
                 let popup =
                     widgets::popup_fill("member-runtime", shown, unset, SheetWidth::List, cx)
                         .dropdown_menu(move |menu, _, _| {
+                            let menu = widgets::form_menu(menu, SheetWidth::List);
                             known.iter().fold(menu, |menu, o| {
                                 let (rt, input) = (o.runtime.clone(), input.clone());
                                 menu.item(
@@ -2732,6 +2685,7 @@ impl Render for BotForm {
                 let form = form.clone();
                 widgets::popup_fill("member-model", shown, false, SheetWidth::List, cx)
                     .dropdown_menu(move |menu, _, _| {
+                        let menu = widgets::form_menu(menu, SheetWidth::List);
                         options.iter().fold(menu, |menu, (id, text)| {
                             let (id, form) = (id.clone(), form.clone());
                             menu.item(
@@ -2772,6 +2726,7 @@ impl Render for BotForm {
                     let form = form.clone();
                     widgets::popup_fill("member-effort", shown, false, SheetWidth::List, cx)
                         .dropdown_menu(move |menu, _, _| {
+                            let menu = widgets::form_menu(menu, SheetWidth::List);
                             options.iter().fold(menu, |menu, (id, text)| {
                                 let (id, form) = (id.clone(), form.clone());
                                 menu.item(
@@ -2800,6 +2755,7 @@ impl Render for BotForm {
             } else {
                 widgets::popup_fill("member-machine", shown, false, SheetWidth::List, cx)
                     .dropdown_menu(move |menu, _, _| {
+                        let menu = widgets::form_menu(menu, SheetWidth::List);
                         options.iter().fold(menu, |menu, (id, text)| {
                             let (id, form) = (id.clone(), form.clone());
                             menu.item(
@@ -2941,13 +2897,16 @@ impl Render for BotForm {
                                     )
                             }),
                     )
-                    .child(
-                        div()
-                            .pt(tokens::space::S8)
-                            .n_subheadline()
-                            .text_color(k.secondary)
-                            .child(s::RUNNER_OWN_MODEL_HINT),
-                    )
+                    // It explains the off state, so it goes once the switch is on.
+                    .when(!own, |d| {
+                        d.child(
+                            div()
+                                .pt(tokens::space::S8)
+                                .n_subheadline()
+                                .text_color(k.secondary)
+                                .child(s::RUNNER_OWN_MODEL_HINT),
+                        )
+                    })
             }));
         }
         // The look of an existing member changes in its own sheet (更换形象…).

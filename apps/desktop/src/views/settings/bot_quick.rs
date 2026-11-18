@@ -201,6 +201,7 @@ impl BotQuick {
         let view = cx.entity();
         let select = widgets::popup_fill("quick-machine", shown, false, SheetWidth::Form, cx)
             .dropdown_menu(move |menu, _, _| {
+                let menu = widgets::form_menu(menu, SheetWidth::Form);
                 options.iter().fold(menu, |menu, (id, text)| {
                     let (id, view) = (id.clone(), view.clone());
                     menu.item(
