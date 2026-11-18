@@ -1,0 +1,15 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "value": {
+    "t": "run.output.result",
+    "runId": "01JBX0RUN000000000000000AU",
+    "outputId": "o3",
+    "ok": false,
+    "error": {
+      "code": "rate_limited",
+      "message": "too many patches for this card: wait 1 s and send the same patch again",
+      "retryAfterMs": 640
+    }
+  }
+}

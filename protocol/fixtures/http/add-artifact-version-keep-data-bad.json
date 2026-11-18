@@ -1,0 +1,15 @@
+{
+  "kind": "AddArtifactVersionRequest",
+  "valid": false,
+  "description": "keepData is a boolean",
+  "value": {
+    "entry": "index.html",
+    "files": [
+      {
+        "path": "index.html",
+        "fileId": "01JC0FIL0000000000000INDEX"
+      }
+    ],
+    "keepData": "yes"
+  }
+}

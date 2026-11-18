@@ -84,7 +84,9 @@ function prune<V>(m: Map<string, V>, keep: (v: V) => boolean): void {
 
 function rateAnswer(key: string, now: number): void {
   const last = answeredAt.get(key);
-  if (last !== undefined && now - last < ANSWER_INTERVAL_MS) throw new ApiError("rate_limited", "one answer per second", undefined, ANSWER_INTERVAL_MS - (now - last));
+  if (last !== undefined && now - last < ANSWER_INTERVAL_MS) {
+    throw new ApiError("rate_limited", "one answer per second", undefined, ANSWER_INTERVAL_MS - (now - last));
+  }
   answeredAt.set(key, now);
   prune(answeredAt, (t) => now - t < ANSWER_INTERVAL_MS);
 }
@@ -344,6 +346,16 @@ function insertEvent(
   room: RoomContext,
   r: { eventId: string; row: MessageRow; actor: Actor; a: CardEventArgs; stored: boolean; now: number; ack: CardEventAck; cardRev?: number },
 ): void {
+  // Rows are pruned only now and then: one older than the idempotency window that still has
+  // this client id gives the id up, instead of failing the unique index (as files/bridge.ts).
+  if (r.a.clientEventId) {
+    room.sql.exec(
+      "UPDATE card_events SET client_event_id = NULL WHERE actor_id = ? AND message_id = ? AND client_event_id = ?",
+      r.actor.id,
+      r.row.id,
+      r.a.clientEventId,
+    );
+  }
   room.sql.exec(
     `INSERT INTO card_events (event_id, message_id, author_id, actor_id, client_event_id, event, block_id, action_id, stored, at, ack, card_rev)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

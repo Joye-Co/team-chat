@@ -176,7 +176,7 @@ describe("answers to runner bots", () => {
     const other = await createMember({ kind: "bot", name: "other" });
     await api(`/v1/groups/${w.gid}/members`, { token: w.owner.token, body: { memberId: other.id } });
     const { c: co } = await Client.connect(other.token);
-    const third = (await cb.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "", cardV2: buttons("第三版", [other.id]) })).message;
+    const third = (await cb.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "", cardV2: buttons("第三版", [w.human.id, other.id]) })).message;
     expect(await co.request({ t: "card.answer", groupId: w.gid, messageId: third.id, rev: 1, actionId: "again" })).toMatchObject({
       ok: false,
       error: { code: "forbidden", reason: "interact.bot_emitter" },

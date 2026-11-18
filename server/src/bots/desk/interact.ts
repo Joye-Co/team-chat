@@ -1,10 +1,10 @@
 // BotDesk interaction loop (INTERACT §6.2–§6.4): live card events and page events for this
-// runner member's cards and pages, coalesced to the newest event per block in each 3 s window
-// and given to the topic's run as `run.interaction` (or a text envelope for older daemons), or
+// runner member's cards and pages, held per card in 3 s windows (state events merge to the newest
+// per block, commands queue in order) and given to the topic's run as `run.interaction` (or a text envelope for older daemons), or
 // starting a short follow-up run within the limits; the `expect` of an ack; and the `chat-run`
 // outputs of a run (RunEvent `output`), performed as the bot with the rules of the matching
 // WebSocket frames and answered with `run.output.result`.
-import { ClientFrame, type ExpectMode, MAX_DESK_NOTE_CHARS, type RunInteractionFrame } from "@chat/protocol";
+import { ClientFrame, type ExpectMode, MAX_DESK_NOTE_CHARS, type RunInteractionFrame, type RunStatus } from "@chat/protocol";
 import { isGroupMember } from "../../core/db";
 import { roomStub } from "../../core/env";
 import { ApiError, type Result, schemaReason, toErrorBody, unwrap } from "../../core/errors";
@@ -22,8 +22,16 @@ import { type RunRow, result } from "./core";
 import { DeskHand } from "./hand";
 import { isChainStop } from "./delegate_card";
 
-/** One coalescing window per card (or page version): the newest event per block in 3 s. */
+/** One coalescing window per card (or page version): 3 s. */
 export const COALESCE_MS = 3000;
+/**
+ * Card events that only say what a control shows now: inside a window the newest one per block
+ * replaces the older ones. Every other card event (a press, a row, a pick, a retract) and every
+ * page event is a command: each one is kept and sent in order.
+ */
+const STATE_EVENTS = new Set(["choice.change", "input.change", "chart.select", "chart.clear", "table.sort", "tab.open", "draft.edit"]);
+/** Events one card (or page version) keeps waiting at a time; one more is not taken (`expect.mode` "none"). */
+export const MAX_PENDING_PER_CARD = 20;
 /** Short follow-up runs started by live events: 1 per card at a time, 6 per hour per card, 30 per hour per member. */
 export const SHORT_RUNS_PER_CARD_HOUR = 6;
 export const SHORT_RUNS_PER_BOT_HOUR = 30;
@@ -32,17 +40,33 @@ export const OUTPUT_TIMEOUT_MS = 15_000;
 /** An output is performed only this soon after the daemon made it, on the server clock, so its result reaches `chat-run` in time. */
 export const OUTPUT_DEADLINE_MS = OUTPUT_TIMEOUT_MS - 3000;
 
+/**
+ * Events that still waited when their run ended go to another run this much later, so a run
+ * that replaces the ended one (a restart, a follow-up) is there to take them.
+ */
+export const REROUTE_AFTER_MS = 1000;
+
 const HOUR_MS = 3600_000;
 /** Room RPC of the 产出 bridge (files/bridge.ts): the receiver of a page `ask` answers it. */
 const ARTIFACT_REPLY_RPC = "artifacts.reply";
+/** Room RPC of the cards feature (cards2/index.ts): the receiver of an event resolves it. */
+const CARD_RESOLVE_RPC = "cards.resolve";
 
-/** What the client is told: who responds and how soon. */
+/** Why nobody responds (`Expect.reason` with mode "none"). */
+export type NoneReason = "member.inactive" | "runner.off" | "run.external" | "run.limit" | "run.failed";
+
+/** What the client is told: who responds and how soon, or why nobody does. */
 export interface DeskExpect {
   mode: ExpectMode;
   etaMs?: number;
+  reason?: NoneReason;
 }
 
-type PendingRow = { card_key: string; block_key: string; run_id: string; frame: string; at: number };
+const none = (reason?: NoneReason): DeskExpect => (reason ? { mode: "none", reason } : { mode: "none" });
+
+type PendingRow = { card_key: string; block_key: string; run_id: string; frame: string; at: number; x: string | null };
+type SentRow = { input_id: string; run_id: string; event_id: string; ask: number };
+type InteractionFrame = RunInteractionFrame & { fallback: Record<string, unknown> };
 
 /** `chat-run` ops and the client frame each one is performed as. */
 const OUTPUT_FRAME: Record<string, string> = {
@@ -65,9 +89,9 @@ export abstract class DeskInteract extends DeskHand {
   /** The `expect` of a stored answer to this bot's card in the topic (no limits: answers always start a run). */
   async expectFor(botId: string, topicId: string): Promise<DeskExpect> {
     this.bind(botId);
-    if (!(await this.botActive())) return { mode: "none" };
+    if (!(await this.botActive())) return none("member.inactive");
     const runner = await loadRunner(this.env.DB, botId);
-    if (!runner?.enabled) return { mode: "none" };
+    if (!runner?.enabled) return none("runner.off");
     const active = this.activeRun(topicId);
     if (active && !active.external) return this.runExpect(active);
     return { mode: "starting", etaMs: ETA_MS.starting };
@@ -96,69 +120,99 @@ export abstract class DeskInteract extends DeskHand {
       if (x.event === "action.press") await this.chainStopPressed(x.groupId, x.source.messageId, x.source.actionId, x.actorId);
       return { mode: "none" };
     }
-    return this.serial("interact", async () => {
-      if (!(await this.botActive())) return { mode: "none" };
-      const runner = await loadRunner(this.env.DB, botId);
-      if (!runner?.enabled) return { mode: "none" };
-      const byRun = x.runId ? this.run(x.runId) : undefined;
-      const target =
-        byRun && byRun.ended_at === null && !byRun.external
-          ? byRun
-          : x.source.kind === "card"
-            ? this.runOfCard(x.topicId, x.source.messageId)
-            : this.activeRun(x.topicId);
-      const names = await this.names([x.actorId]);
-      const actor = { id: x.actorId, name: names.get(x.actorId) ?? x.actorId };
-      if (target && !target.external) {
-        await this.queueInteraction(target, x, actor);
-        return this.runExpect(target);
-      }
-      // A page `ask` with no run to answer it is declined at once, so the page's promise settles.
-      if (x.source.kind === "artifact" && x.source.ask) {
-        await this.declinePageAsk(x);
-        return { mode: "none" };
-      }
-      if (target) return { mode: "none" };
-      // cards2 (F5): a retract never starts a run (no run has the answer).
-      if (x.event === "answer.retract") return { mode: "none" };
-      // No run: a short follow-up run, within the limits.
-      const key = cardKey(x);
-      const now = Date.now();
-      const perCard = this.sql
-        .exec<{ n: number }>("SELECT count(*) AS n FROM interact_runs WHERE card_key = ? AND at > ?", key, now - HOUR_MS)
-        .one().n;
-      const perBot = this.sql.exec<{ n: number }>("SELECT count(*) AS n FROM interact_runs WHERE at > ?", now - HOUR_MS).one().n;
-      if (perCard >= SHORT_RUNS_PER_CARD_HOUR || perBot >= SHORT_RUNS_PER_BOT_HOUR) return { mode: "none" };
-      const inputId = ulid();
-      await this.start({
-        groupId: x.groupId,
-        topicId: x.topicId,
-        messageId: `interact:${x.eventId}`,
-        authorId: x.actorId,
-        body: this.interactionText(x, actor, inputId),
-        mentioned: true,
-      });
-      const started = this.activeRun(x.topicId);
-      if (!started || started.trigger_message_id !== `interact:${x.eventId}`) return { mode: "none" };
-      this.sql.exec("INSERT OR IGNORE INTO interact_runs (run_id, card_key, at) VALUES (?, ?, ?)", started.id, key, now);
-      if (started.ended_at !== null) return { mode: "none" };
-      return { mode: "starting", etaMs: ETA_MS.starting };
+    return this.serial("interact", () => this.route(x));
+  }
+
+  /** Gives the event to a run, or starts a short one (inside the "interact" turn). */
+  protected async route(x: InteractionIn): Promise<DeskExpect> {
+    const botId = this.botId as string;
+    if (!(await this.botActive())) return none("member.inactive");
+    const runner = await loadRunner(this.env.DB, botId);
+    if (!runner?.enabled) return none("runner.off");
+    const byRun = x.runId ? this.run(x.runId) : undefined;
+    const target =
+      byRun && byRun.ended_at === null && !byRun.external
+        ? byRun
+        : x.source.kind === "card"
+          ? this.runOfCard(x.topicId, x.source.messageId)
+          : this.activeRun(x.topicId);
+    const names = await this.names([x.actorId]);
+    const actor = { id: x.actorId, name: names.get(x.actorId) ?? x.actorId };
+    if (target && !target.external) {
+      const queued = await this.queueInteraction(target, x, actor);
+      if (queued === "taken") return this.runExpect(target);
+      // The run's machine no longer has the run: the ack says nobody responds (`sendInteraction`
+      // declined a page `ask`).
+      if (queued === "lost") return none("run.failed");
+      // The card's queue is full: nobody takes this one (a page `ask` settles at once).
+      if (x.source.kind === "artifact" && x.source.ask) await this.declinePageAsk(x);
+      return none("run.limit");
+    }
+    // A page `ask` with no run to answer it is declined at once, so the page's promise settles.
+    if (x.source.kind === "artifact" && x.source.ask) {
+      await this.declinePageAsk(x);
+      return none(target ? "run.external" : undefined);
+    }
+    if (target) return none("run.external");
+    // cards2 (F5): a retract never starts a run (no run has the answer).
+    if (x.event === "answer.retract") return none();
+    // No run: a short follow-up run, within the limits.
+    const key = cardKey(x);
+    const now = Date.now();
+    const perCard = this.sql
+      .exec<{ n: number }>("SELECT count(*) AS n FROM interact_runs WHERE card_key = ? AND at > ?", key, now - HOUR_MS)
+      .one().n;
+    const perBot = this.sql.exec<{ n: number }>("SELECT count(*) AS n FROM interact_runs WHERE at > ?", now - HOUR_MS).one().n;
+    if (perCard >= SHORT_RUNS_PER_CARD_HOUR || perBot >= SHORT_RUNS_PER_BOT_HOUR) return none("run.limit");
+    const inputId = ulid();
+    await this.start({
+      groupId: x.groupId,
+      topicId: x.topicId,
+      messageId: `interact:${x.eventId}`,
+      authorId: x.actorId,
+      body: this.interactionText(x, actor, inputId),
+      mentioned: true,
     });
+    const started = this.activeRun(x.topicId);
+    if (!started || started.trigger_message_id !== `interact:${x.eventId}`) return none("run.failed");
+    this.sql.exec("INSERT OR IGNORE INTO interact_runs (run_id, card_key, at) VALUES (?, ?, ?)", started.id, key, now);
+    if (started.ended_at !== null) return none("run.failed");
+    return { mode: "starting", etaMs: ETA_MS.starting };
   }
 
   /** Answers a page `ask` that no run of this member answers: declined, reason `run.ended`. */
   protected async declinePageAsk(x: InteractionIn): Promise<void> {
     if (x.source.kind !== "artifact") return;
+    await this.declineAsk(x.groupId, x.source.eventId);
+  }
+
+  private async declineAsk(groupId: string, eventId: string): Promise<void> {
     try {
       unwrap(
-        await roomStub(this.env, x.groupId).rpc(x.groupId, ARTIFACT_REPLY_RPC, this.actor(), {
-          eventId: x.source.eventId,
+        await roomStub(this.env, groupId).rpc(groupId, ARTIFACT_REPLY_RPC, this.actor(), {
+          eventId,
           ok: false,
           error: { code: "declined", message: "no run of this member is open", reason: "run.ended" },
         }),
       );
     } catch (err) {
-      this.log.warn("page ask decline failed", { groupId: x.groupId, err });
+      this.log.warn("page ask decline failed", { groupId, err });
+    }
+  }
+
+  /**
+   * A live event no run will answer after its ack said one would: the emitter gets
+   * `interaction.resolved {result: "failed"}` (a page `ask` its declined reply), as the member
+   * that received it. An event that was answered in the meantime stays as it is.
+   */
+  protected async failInteraction(groupId: string, eventId: string, ask: boolean): Promise<void> {
+    if (ask) return this.declineAsk(groupId, eventId);
+    try {
+      const res = await roomStub(this.env, groupId).rpc(groupId, CARD_RESOLVE_RPC, this.actor(), { eventId, result: "failed" });
+      // conflict: resolved already (a patch or a post named it); not_found: its card is gone.
+      if (!res.ok && res.error.code !== "conflict" && res.error.code !== "not_found") this.log.warn("interaction resolve failed", { groupId, error: res.error.code });
+    } catch (err) {
+      this.log.warn("interaction resolve failed", { groupId, err });
     }
   }
 
@@ -185,6 +239,7 @@ export abstract class DeskInteract extends DeskHand {
       eventId: x.eventId,
       event: x.event,
     };
+    if (x.source.currentRev !== undefined) data.currentRev = x.source.currentRev;
     if (x.source.blockId) data.blockId = x.source.blockId;
     if (x.source.actionId) data.actionId = x.source.actionId;
     if (x.value !== undefined) data.value = x.value;
@@ -192,9 +247,9 @@ export abstract class DeskInteract extends DeskHand {
     return cardEventText(data, actor, x.title ?? null, inputId);
   }
 
-  protected interactionFrame(r: RunRow, x: InteractionIn, actor: { id: string; name: string }): RunInteractionFrame & { fallback: Record<string, unknown> } {
+  protected interactionFrame(r: RunRow, x: InteractionIn, actor: { id: string; name: string }): InteractionFrame {
     const inputId = ulid();
-    const frame: RunInteractionFrame & { fallback: Record<string, unknown> } = {
+    const frame: InteractionFrame = {
       t: "run.interaction",
       runId: r.id,
       inputId,
@@ -211,10 +266,13 @@ export abstract class DeskInteract extends DeskHand {
 
   /**
    * Coalescing per card: the first event of a window goes out at once; later ones in the same
-   * 3 s keep only the newest per block and go out when the window ends. Page `ask` events are
-   * never merged (each one waits for its reply).
+   * 3 s wait and go out in order when the window ends. Of the state events (`STATE_EVENTS`) only
+   * the newest per block waits; every command waits on its own, at most `MAX_PENDING_PER_CARD`
+   * per card. Page `ask` events skip the window (each one waits for its reply). "full": the
+   * card's queue is full and the event was not taken; "lost": it was sent now and the run's
+   * machine no longer has the run.
    */
-  protected async queueInteraction(r: RunRow, x: InteractionIn, actor: { id: string; name: string }): Promise<void> {
+  protected async queueInteraction(r: RunRow, x: InteractionIn, actor: { id: string; name: string }): Promise<"taken" | "full" | "lost"> {
     const frame = this.interactionFrame(r, x, actor);
     const key = cardKey(x);
     const ask = x.source.kind === "artifact" && x.source.ask;
@@ -222,40 +280,54 @@ export abstract class DeskInteract extends DeskHand {
     const now = Date.now();
     // Not on a machine yet: kept until the run is accepted.
     if (!r.machine_id || r.status === "created") {
-      this.keepPending(key, block, r.id, frame, now);
-      return;
+      if (!this.pendingRoom(key, block)) return "full";
+      this.keepPending(key, block, r.id, frame, now, JSON.stringify(x));
+      return "taken";
     }
-    if (ask) {
-      await this.sendInteraction(r, frame);
-      return;
-    }
+    if (ask) return (await this.sendInteraction(r, frame, true)) ? "taken" : "lost";
     const until = this.sql.exec<{ until: number }>("SELECT until FROM interact_windows WHERE card_key = ?", key).toArray()[0]?.until ?? 0;
     if (until > now || this.hasPending(key)) {
-      this.keepPending(key, block, r.id, frame, now);
+      if (!this.pendingRoom(key, block)) return "full";
+      this.keepPending(key, block, r.id, frame, now, JSON.stringify(x));
       await this.scheduleStall();
-      return;
+      return "taken";
     }
+    if (!(await this.sendInteraction(r, frame, true))) return "lost";
     this.sql.exec("INSERT OR REPLACE INTO interact_windows (card_key, run_id, until) VALUES (?, ?, ?)", key, r.id, now + COALESCE_MS);
-    await this.sendInteraction(r, frame);
     await this.scheduleStall();
+    return "taken";
+  }
+
+  /** Whether the card's queue takes this event: it replaces a waiting one, or the queue is not full. */
+  private pendingRoom(key: string, block: string): boolean {
+    if (this.sql.exec("SELECT 1 FROM interact_pending WHERE card_key = ? AND block_key = ?", key, block).toArray().length > 0) return true;
+    return this.sql.exec<{ n: number }>("SELECT count(*) AS n FROM interact_pending WHERE card_key = ?", key).one().n < MAX_PENDING_PER_CARD;
   }
 
   private hasPending(key: string): boolean {
     return this.sql.exec("SELECT 1 FROM interact_pending WHERE card_key = ? LIMIT 1", key).toArray().length > 0;
   }
 
-  private keepPending(key: string, block: string, runId: string, frame: unknown, at: number): void {
+  private keepPending(key: string, block: string, runId: string, frame: unknown, at: number, x: string | null): void {
     this.sql.exec(
-      "INSERT OR REPLACE INTO interact_pending (card_key, block_key, run_id, frame, at) VALUES (?, ?, ?, ?, ?)",
+      "INSERT OR REPLACE INTO interact_pending (card_key, block_key, run_id, frame, at, x) VALUES (?, ?, ?, ?, ?, ?)",
       key,
       block,
       runId,
       JSON.stringify(frame),
       at,
+      x,
     );
   }
 
-  protected async sendInteraction(r: RunRow, frame: RunInteractionFrame & { fallback: Record<string, unknown> }): Promise<void> {
+  /**
+   * Gives the event to the run's machine. False: the machine no longer has the run, so nobody
+   * takes it. `inAck` (the event's own ack is still open): the ack says so, and only a page
+   * `ask` is answered here; an `interaction.resolved` would reach the emitter before its ack.
+   * Later (an event that waited) the emitter is told with `failInteraction`.
+   */
+  protected async sendInteraction(r: RunRow, frame: InteractionFrame, inAck = false): Promise<boolean> {
+    const now = Date.now();
     // accepted = 1: a live event is not leftover input for a follow-up run.
     this.sql.exec(
       "INSERT INTO inputs (id, run_id, message_id, author_id, body, at, accepted) VALUES (?, ?, ?, ?, ?, ?, 1)",
@@ -264,20 +336,99 @@ export abstract class DeskInteract extends DeskHand {
       `interaction:${frame.inputId}`,
       frame.actor.id,
       String(frame.fallback.text),
-      Date.now(),
+      now,
     );
-    if (!r.machine_id || r.external) return;
+    if (!r.machine_id || r.external) return true;
+    // Kept until the run takes it (`input.accepted`): a run that ends first never answers it.
+    // A retract is not tracked: nothing waits for an answer to it.
+    const ask = frame.source.kind === "artifact" && frame.source.ask;
+    const eventId = frame.eventId ?? (frame.source.kind === "artifact" ? frame.source.eventId : undefined);
+    const tracked = eventId !== undefined && frame.event !== "answer.retract";
+    if (tracked) {
+      this.sql.exec("INSERT OR REPLACE INTO interact_sent (input_id, run_id, event_id, ask, at) VALUES (?, ?, ?, ?, ?)", frame.inputId, r.id, eventId, ask ? 1 : 0, now);
+    }
     try {
-      await linkStub(this.env, r.machine_id).toRun(frame as never);
+      const res = await linkStub(this.env, r.machine_id).toRun(frame as never);
+      // The machine no longer has the run: nobody takes the event.
+      if (!res.ok) {
+        if (tracked) {
+          this.sql.exec("DELETE FROM interact_sent WHERE input_id = ?", frame.inputId);
+          if (ask || !inAck) await this.failInteraction(r.group_id, eventId, ask);
+        }
+        return false;
+      }
     } catch (err) {
       this.log.warn("run.interaction failed", { runId: r.id, err });
     }
+    return true;
   }
 
-  /** Sends what waited for a window to end (or for the run's machine), newest per block. */
+  /** The event a waiting row stands for (rows from before `x` was kept: read from the frame). */
+  private pendingInput(row: PendingRow, r: RunRow | undefined): InteractionIn | undefined {
+    if (row.x) return JSON.parse(row.x) as InteractionIn;
+    if (!r) return undefined;
+    const frame = JSON.parse(row.frame) as InteractionFrame;
+    const eventId = frame.eventId ?? (frame.source.kind === "artifact" ? frame.source.eventId : undefined);
+    if (!eventId) return undefined;
+    const x: InteractionIn = { groupId: r.group_id, topicId: r.topic_id, eventId, source: frame.source, event: frame.event, actorId: frame.actor.id };
+    if (frame.value !== undefined) x.value = frame.value;
+    if (frame.block !== undefined) x.block = frame.block;
+    return x;
+  }
+
+  /**
+   * An event that still waited when its run ended was never sent: it goes to the run that is
+   * there now or starts a short one, like a new event. When nobody takes it the emitter is told.
+   */
+  private async reroute(row: PendingRow, r: RunRow | undefined): Promise<void> {
+    const x = this.pendingInput(row, r);
+    if (!x) return;
+    let expect: DeskExpect = { mode: "none" };
+    let threw = false;
+    try {
+      expect = await this.route(x);
+    } catch (err) {
+      threw = true;
+      this.log.warn("interaction reroute failed", { runId: row.run_id, err });
+    }
+    if (expect.mode !== "none" || x.event === "answer.retract") return; // a retract waits for no answer
+    // `route` declined a page `ask` itself, except where it stops before it looks for a run
+    // (the member or its runner is off) and when it threw.
+    const ask = x.source.kind === "artifact" && x.source.ask;
+    if (ask && !threw && expect.reason !== "member.inactive" && expect.reason !== "runner.off") return;
+    await this.failInteraction(x.groupId, x.eventId, ask);
+  }
+
+  /**
+   * The run ended: the events it was given and never took are resolved as failed (they may have
+   * been half done: they are not given to another run), and the ones that still wait for it go
+   * to another run a moment later (`flushInteractions`).
+   */
+  protected async settleEnded(r: RunRow): Promise<void> {
+    const sent = this.sql.exec<SentRow>("SELECT input_id, run_id, event_id, ask FROM interact_sent WHERE run_id = ?", r.id).toArray() as SentRow[];
+    this.sql.exec("DELETE FROM interact_sent WHERE run_id = ?", r.id);
+    for (const s of sent) await this.failInteraction(r.group_id, s.event_id, s.ask === 1);
+    const keys = this.sql.exec<{ card_key: string }>("SELECT DISTINCT card_key FROM interact_pending WHERE run_id = ?", r.id).toArray();
+    if (keys.length === 0) return;
+    const due = Date.now() + REROUTE_AFTER_MS;
+    for (const k of keys) this.sql.exec("INSERT OR REPLACE INTO interact_windows (card_key, run_id, until) VALUES (?, ?, ?)", k.card_key, r.id, due);
+    await this.scheduleStall();
+  }
+
+  protected override async setStatus(r: RunRow, status: RunStatus, change: Partial<RunRow> = {}): Promise<void> {
+    await super.setStatus(r, status, change);
+    if (change.ended_at === undefined || change.ended_at === null || r.external) return;
+    try {
+      await this.settleEnded(r);
+    } catch (err) {
+      this.log.warn("interactions of an ended run not settled", { runId: r.id, err });
+    }
+  }
+
+  /** Sends what waited for a window to end (or for the run's machine), in the order it came. */
   protected async flushInteractions(onlyRun?: string): Promise<void> {
     const now = Date.now();
-    const rows = this.sql.exec<PendingRow>("SELECT * FROM interact_pending ORDER BY at").toArray() as PendingRow[];
+    const rows = this.sql.exec<PendingRow>("SELECT * FROM interact_pending ORDER BY at, rowid").toArray() as PendingRow[];
     const windows = new Map(
       this.sql
         .exec<{ card_key: string; until: number }>("SELECT card_key, until FROM interact_windows")
@@ -290,9 +441,12 @@ export abstract class DeskInteract extends DeskHand {
       if ((windows.get(row.card_key) ?? 0) > now) continue;
       const r = this.run(row.run_id);
       this.sql.exec("DELETE FROM interact_pending WHERE card_key = ? AND block_key = ?", row.card_key, row.block_key);
-      if (!r || r.ended_at !== null) continue;
+      if (!r || r.ended_at !== null) {
+        await this.reroute(row, r);
+        continue;
+      }
       if (!r.machine_id || r.status === "created") {
-        this.keepPending(row.card_key, row.block_key, row.run_id, JSON.parse(row.frame), row.at);
+        this.keepPending(row.card_key, row.block_key, row.run_id, JSON.parse(row.frame), row.at, row.x);
         continue;
       }
       await this.sendInteraction(r, JSON.parse(row.frame));
@@ -374,7 +528,12 @@ export abstract class DeskInteract extends DeskHand {
     if (res.ok) {
       if (res.value !== undefined) frame.result = res.value;
     } else {
-      frame.error = { code: res.error.code, message: res.error.message, ...(res.error.reason ? { reason: res.error.reason } : {}) };
+      frame.error = {
+        code: res.error.code,
+        message: res.error.message,
+        ...(res.error.reason ? { reason: res.error.reason } : {}),
+        ...(res.error.retryAfterMs !== undefined ? { retryAfterMs: res.error.retryAfterMs } : {}),
+      };
     }
     if (!r.machine_id || r.external) return;
     try {
@@ -453,7 +612,7 @@ export abstract class DeskInteract extends DeskHand {
         // from the run's log only, and passes without evidence as claims.
         if (frame.cardV2 !== undefined) frame.cardV2 = truthfulDoneCard(frame.cardV2, this.loggedTests(r));
         const sent = await this.room(r).send(r.group_id, this.actor(), frame as never);
-        if (!sent.ok) throw new ApiError(sent.error.code, sent.error.message, sent.error.reason);
+        if (!sent.ok) throw new ApiError(sent.error.code, sent.error.message, sent.error.reason, sent.error.retryAfterMs);
         // Problem 5: a done card the CLI posted in the run's topic is the run's result (postResult).
         const v2 = (frame as { cardV2?: { intent?: unknown } }).cardV2;
         if (v2?.intent === "done" && sent.value.message.topicId === r.topic_id) {
@@ -490,7 +649,9 @@ function cardKey(x: InteractionIn): string {
   return x.source.kind === "card" ? `card:${x.source.messageId}` : `artifact:${x.source.artifactId}:${x.source.version}`;
 }
 
+/** The pending key inside a card: one per block and state event, one per command. */
 function blockKey(x: InteractionIn): string {
-  if (x.source.kind === "artifact") return `event:${x.event}`;
-  return x.source.blockId ? `block:${x.source.blockId}` : `action:${x.source.actionId ?? ""}`;
+  if (x.source.kind === "artifact") return `event:${x.event}:${x.eventId}`;
+  const target = x.source.blockId ? `block:${x.source.blockId}` : `action:${x.source.actionId ?? ""}`;
+  return STATE_EVENTS.has(x.event) ? `${target}:${x.event}` : `${target}:${x.event}:${x.eventId}`;
 }

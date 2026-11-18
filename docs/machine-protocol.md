@@ -550,12 +550,14 @@ no credentials pass through chat. The server shows the address to owners and run
   actionId?, blockId?, event, value?, inputs?, editedValues?, actor: { id, name }, eventId?, block? /* the block at rev */,
   tally? /* counts-only poll: votes per option now */ }
 { t: "run.interaction", runId, inputId,
-  source: { kind: "card", messageId, blockId?, actionId?, rev } | { kind: "artifact", artifactId, version, eventId, ask },
-  event, value?, actor: { id, name }, eventId?, block? /* card events: the block or action at rev */ }
+  source: { kind: "card", messageId, blockId?, actionId?, rev /* the rev the person saw */,
+            currentRev? /* the card's rev now, when it is past rev */ }
+        | { kind: "artifact", artifactId, version, eventId, ask },
+  event, value?, actor: { id, name }, eventId?, block? /* card events: the block or action as the card has it now */ }
 // daemon -> server (feature "output", `chat-run`): a normal run.event with seq and ack
 RunEvent += { type: "output", outputId, op: "card.post" | "card.patch" | "interaction.resolve" | "artifact.data" | "artifact.reply" | "desk.note" | "member.handoff" | "member.assign" | "run.report", body: JSON }
 // server -> daemon
-{ t: "run.output.result", runId, outputId, ok, result?, error? { code, reason?, message } }
+{ t: "run.output.result", runId, outputId, ok, result?, error? { code, reason?, message, retryAfterMs? /* rate_limited: wait, then send the same output again */ } }
 run.input.answer += { answerId?, askId?, eventId?, event?, blockId?, value? }
 ```
 
@@ -663,12 +665,26 @@ Server rules (BotDesk):
 - A daemon takes `run.answer` and `run.interaction` when it reports feature `interact` or
   `daemonVersion` 1.1.0 or newer. Another daemon gets `run.input` with `text` = a short summary
   line and the same envelope (and the typed `answer` with feature `answer`).
-- Live card events are coalesced per card: the first event goes at once, then only the newest
-  event per block in each 3 s window. Page `ask` events are never merged.
+- Live card events are held per card (page events per 产出 version): the first event goes at
+  once, the ones that follow in the same 3 s window go out in order when it ends. Only state
+  events merge: of `choice.change`, `input.change`, `chart.select`, `chart.clear`, `table.sort`,
+  `tab.open` and `draft.edit` the newest per block and event is kept. Every other card event
+  (`button.press`, `action.press`, `metric.press`, `table.rowSelect`, `answer.retract`) and every
+  page `emit` is a command: each one is sent. At most 20 events wait per card; one more is not
+  taken and its ack's `expect` is `none` with reason `run.limit`. Page `ask` events never wait
+  for a window.
+- A live event belongs to the run once the daemon reports `input.accepted` for its `inputId`.
+  When the run ends before that (or the machine no longer has the run when a waiting event is
+  sent), the server resolves the event for the emitter as `interaction.resolved {result:
+  "failed"}` (a page `ask` gets a declined reply, reason `run.ended`); it is not given to another
+  run, because it may have been half done. When the machine no longer has the run for an event
+  sent inside its own ack, that ack's `expect` is `none` with reason `run.failed` instead. An event that still waited for its window or for the run's machine was never sent: it
+  goes to the member's run in the topic or starts a short follow-up run like a new event, and is
+  resolved as failed only when neither takes it.
 - With no active run in the topic, a stored answer starts a run (as before), and a live event
   starts a short follow-up run whose prompt carries the envelope: at most 1 per card at a time
   (later events join it), 6 per hour per card, 30 per hour per member; over the limit the ack's
-  `expect.mode` is `none`.
+  `expect` is `none` with reason `run.limit` (protocol.md, "Events, answers and card state").
 - `output` bodies are the fields of the matching client frame without `t`, `rid` and `groupId`
   (always the run's group): `card.post {card | cardV2, cause?, body?}` (in the run's topic),
   `card.patch {messageId, baseRev, ops, cause?}`, `interaction.resolve {eventId, result, note?}`,

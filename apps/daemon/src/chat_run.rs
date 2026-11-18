@@ -997,10 +997,12 @@ fn result_json(r: RunOutputResult) -> Value {
         code,
         reason,
         message,
+        ..
     } = r.error.unwrap_or(RunOutputError {
         code: "failed".into(),
         reason: None,
         message: "the server did not say why".into(),
+        retry_after_ms: None,
     });
     error(&code, reason.as_deref(), message)
 }
@@ -3188,6 +3190,7 @@ make the ops for what it holds now and give its rev as --base-rev"
                 code: "conflict".into(),
                 reason: Some("card.stale_rev".into()),
                 message: "the card changed".into(),
+                retry_after_ms: None,
             }),
         }));
         let v = client.await.unwrap().unwrap();
@@ -3461,6 +3464,7 @@ make the ops for what it holds now and give its rev as --base-rev"
                 code: "conflict".into(),
                 reason: Some("card.stale_rev".into()),
                 message: "the card changed".into(),
+                retry_after_ms: None,
             }),
         }));
         let v = client.await.unwrap().unwrap();

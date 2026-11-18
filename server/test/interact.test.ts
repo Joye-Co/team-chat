@@ -163,6 +163,88 @@ describe("live card events", () => {
   });
 });
 
+describe("limits of card events", () => {
+  it("refuse an event to a card whose author cannot respond", async () => {
+    const { alice, bot, gid, ca, cbot } = await setup();
+    const m = (await send(cbot, gid, report([alice.id]))).message;
+    await env.DB.prepare("UPDATE members SET deactivated = 1 WHERE id = ?").bind(bot.id).run();
+    await (roomOf(gid) as unknown as { rpc(g: string, name: string, actor: null, args: unknown): Promise<unknown> }).rpc(gid, "cards.directoryChanged", null, {});
+    const select = { blockId: "trend", event: "chart.select", value: { series: "oct", x: "10-13", y: 12, index: 1 } };
+    expect(await ev(ca, gid, m.id, select)).toMatchObject({ ok: false, error: { code: "forbidden", reason: "interact.no_responder" } });
+    // An answer is refused the same way: nobody would act on it.
+    expect(await ev(ca, gid, m.id, { actionId: "send", event: "action.press", inputs: { check: { value: "ok" } } })).toMatchObject({
+      ok: false,
+      error: { code: "forbidden", reason: "interact.no_responder" },
+    });
+    for (const c of [ca, cbot]) c.close();
+  });
+
+  it("take one answer per member and message a second, and live events at 5 a second with bursts of 10", async () => {
+    const { alice, bob, gid, ca, cbot } = await setup();
+    const poll: CardV2 = {
+      v: 2,
+      catalog: "tc.card/2.1",
+      rev: 1,
+      intent: "ask",
+      title: "周五团建去哪？",
+      fallback: "周五团建去哪？",
+      ask: { from: ["owners"], blocking: false },
+      blocks: [
+        {
+          id: "where",
+          type: "poll",
+          label: "去哪",
+          options: [{ id: "a", label: "爬山" }, { id: "b", label: "火锅" }],
+          voters: [alice.id, bob.id],
+          closesAt: Date.now() + 60_000,
+          public: true,
+          changeable: true,
+          fallbackText: "投票：爬山或火锅",
+        },
+      ],
+    };
+    const p = (await send(cbot, gid, poll)).message;
+    expect(await ev(ca, gid, p.id, { blockId: "where", event: "choice.submit", value: { value: "a" } })).toMatchObject({ ok: true, result: { stored: true } });
+    const second = await ev(ca, gid, p.id, { blockId: "where", event: "choice.submit", value: { value: "b" } });
+    expect(second).toMatchObject({ ok: false, error: { code: "rate_limited" } });
+    expect(second.error.retryAfterMs).toBeGreaterThan(0);
+    expect(second.error.retryAfterMs).toBeLessThanOrEqual(1000);
+    // The refused vote changed nothing.
+    const kept = await ca.request({ t: "history", groupId: gid, topicId: p.topicId });
+    expect(kept.messages.find((x: any) => x.id === p.id).cardState.tally).toEqual({ a: 1, b: 0 });
+
+    // Live events: 10 at once, then 5 a second.
+    const m = (await send(cbot, gid, report([alice.id]))).message;
+    const burst = await Promise.all(
+      Array.from({ length: 14 }, (_, i) => ev(ca, gid, m.id, { blockId: "trend", event: "chart.select", value: { series: "oct", x: "10-13", y: 12, index: 1 }, clientEventId: `burst-${i}` })),
+    );
+    const taken = burst.filter((r) => r.ok);
+    const limited = burst.filter((r) => !r.ok);
+    expect(taken.length).toBeGreaterThanOrEqual(10);
+    expect(taken.length).toBeLessThanOrEqual(11);
+    expect(limited.every((r) => r.error.code === "rate_limited" && r.error.retryAfterMs > 0 && r.error.retryAfterMs <= 200)).toBe(true);
+    for (const c of [ca, cbot]) c.close();
+  });
+
+  it("take a client event id again once its first use is older than a day", async () => {
+    const { alice, gid, ca, cbot } = await setup();
+    const m = (await send(cbot, gid, report([alice.id]))).message;
+    const select = { blockId: "trend", event: "chart.select", value: { series: "oct", x: "10-13", y: 12, index: 1 }, clientEventId: "same-id" };
+    const first = await ev(ca, gid, m.id, select);
+    expect(first).toMatchObject({ ok: true });
+    expect(await ev(ca, gid, m.id, select)).toMatchObject({ ok: true, result: { eventId: first.result.eventId, duplicate: true } });
+    // The row outlives the 24 h window (pruning runs only now and then).
+    await runInDurableObject(roomOf(gid), async (_o, state) => {
+      state.storage.sql.exec("UPDATE card_events SET at = at - ? WHERE event_id = ?", 25 * 3600_000, first.result.eventId);
+    });
+    const again = await ev(ca, gid, m.id, select);
+    expect(again, JSON.stringify(again)).toMatchObject({ ok: true, result: { stored: false } });
+    expect(again.result.eventId).not.toBe(first.result.eventId);
+    expect(again.result.duplicate).toBeUndefined();
+    for (const c of [ca, cbot]) c.close();
+  });
+});
+
 describe("answers and card state", () => {
   it("store card.answered and message.updated with the state and the v1 card, once, and check expiry and the decision surface", async () => {
     const { alice, bob, bot, gid, ca, cb, cbot } = await setup();
@@ -349,15 +431,28 @@ describe("card.patch", () => {
       ok: false,
       error: { code: "invalid", reason: "interact.bad_cause" },
     });
-    // Rate: bursts of 3, then 1 per second.
+    // The author's own event, but older than 30 minutes: the message says how to go on.
+    const stale = await ev(ca, gid, m.id, { rev: 2, blockId: "trend", event: "chart.select", value: { series: "oct", index: 0 } });
+    await runInDurableObject(roomOf(gid), async (_o, state) => {
+      state.storage.sql.exec("UPDATE card_events SET at = at - ? WHERE event_id = ?", 31 * 60_000, stale.result.eventId);
+    });
+    expect(await patch({ baseRev: 2, cause: stale.result.eventId, ops: [{ op: "remove", id: "why" }] })).toMatchObject({
+      ok: false,
+      error: { code: "invalid", reason: "interact.bad_cause", message: "the cause is older than 30 minutes: send it again without the cause" },
+    });
+    // Rate: bursts of 3, then 1 per second. The refusal says how long to wait.
     let rev = 2;
     const codes: string[] = [];
+    let last: any;
     for (let i = 0; i < 4; i++) {
-      const r = await patch({ baseRev: rev, ops: [{ op: "set", id: "why", props: { text: `第 ${i} 次` } }] });
-      if (r.ok) rev = r.result.rev;
-      codes.push(r.ok ? "ok" : r.error.code);
+      last = await patch({ baseRev: rev, ops: [{ op: "set", id: "why", props: { text: `第 ${i} 次` } }] });
+      if (last.ok) rev = last.result.rev;
+      codes.push(last.ok ? "ok" : last.error.code);
     }
     expect(codes.slice(-1)).toEqual(["rate_limited"]);
+    expect(last.error.message).toBe("too many patches for this card: wait 1 s and send the same patch again");
+    expect(last.error.retryAfterMs).toBeGreaterThan(0);
+    expect(last.error.retryAfterMs).toBeLessThanOrEqual(1000);
     // 300 revs per card.
     await runInDurableObject(roomOf(gid), async (_o, state) => {
       const row = state.storage.sql.exec<{ ext: string }>("SELECT ext FROM messages WHERE id = ?", other.id).one();
@@ -367,7 +462,7 @@ describe("card.patch", () => {
     });
     expect(await cbot.request({ t: "card.patch", groupId: gid, messageId: other.id, baseRev: 300, ops: [{ op: "remove", id: "m" }] })).toMatchObject({
       ok: false,
-      error: { code: "too_large", reason: "card.rev_limit" },
+      error: { code: "too_large", reason: "card.rev_limit", message: "at most 300 revs per card: post a new card (and close this one's ask) to go on" },
     });
     void bob;
     for (const c of [ca, cb, cbot]) c.close();
@@ -437,6 +532,48 @@ describe("blocking asks and rounds", () => {
     const done = await co.waitEvent((e) => e.type === "topic.updated" && e.data.topicId === topicId && e.data.status === "in_progress");
     expect(done.data.waitingOn).toEqual([]);
     for (const c of [co, ca, cbot]) c.close();
+  });
+
+  it("refuse an ask that names nobody who can answer, on send, edit and patch, and give a requester ask with no person to the owners", async () => {
+    const { owner, alice, bot, gid, ca, cbot } = await setup();
+    const nobody = { ok: false, error: { code: "invalid", reason: "card.limits" } };
+    // A name in place of an id, and an AI member: nobody could answer.
+    const byName = await cbot.request({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "", cardV2: quick(["Alice"]) });
+    expect(byName).toMatchObject(nobody);
+    expect(byName.error.message).toContain("ask.from names nobody who can answer");
+    expect(byName.error.message).toContain("Alice");
+    expect(await cbot.request({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "", cardV2: quick([bot.id]) })).toMatchObject(nobody);
+    const noWait = await ca.request({ t: "fetch", groupId: gid, afterSeq: 0 });
+    expect(noWait.events.some((e: any) => e.type === "topic.updated" && e.data.status === "waiting_answer")).toBe(false);
+    // One person among the names is enough.
+    const mixed = (await send(cbot, gid, quick(["Alice", alice.id]))).message;
+    expect(mixed.cardState.ask.from).toEqual([alice.id]);
+    // "requester" in a topic the member opened itself names no person: the owners answer.
+    const own = (await send(cbot, gid, quick(["requester"]))).message;
+    expect(own.cardState.ask).toMatchObject({ status: "open", from: [owner.id] });
+
+    // A group with no owner in it has nobody to fall back to: the author is told to name a person.
+    const g2 = await createGroup(alice, [bot.id]);
+    const lone = await cbot.request({ t: "send", groupId: g2, clientMsgId: clientMsgId(), body: "", cardV2: quick(["requester"]) });
+    expect(lone).toMatchObject(nobody);
+    expect(lone.error.message).toBe('ask.from names nobody who can answer: "requester" and "owners" name no person in this group, use the member id of a person in it');
+    expect((await send(cbot, g2, quick([alice.id]))).message.cardState.ask.from).toEqual([alice.id]);
+
+    // An edit or a patch that changes `from`, or opens a new round, is checked the same way.
+    const m = (await send(cbot, gid, quick([alice.id]))).message;
+    expect(await cbot.request({ t: "edit", groupId: gid, messageId: m.id, body: "", cardV2: quick(["Alice"]), baseRev: 1 })).toMatchObject(nobody);
+    const patch = (ask: unknown, baseRev = 1) => cbot.request({ t: "card.patch", groupId: gid, messageId: m.id, baseRev, ops: [{ op: "card", props: { ask } }] });
+    expect(await patch({ from: [bot.id] })).toMatchObject(nobody);
+    expect(await patch({ id: "a2", from: ["nobody-here"] })).toMatchObject(nobody);
+    // A round whose person left stays as it is when another part of the card changes.
+    await env.DB.prepare("UPDATE members SET deactivated = 1 WHERE id = ?").bind(alice.id).run();
+    await (roomOf(gid) as unknown as { rpc(g: string, name: string, actor: null, args: unknown): Promise<unknown> }).rpc(gid, "cards.directoryChanged", null, {});
+    const kept = await cbot.request({ t: "card.patch", groupId: gid, messageId: m.id, baseRev: 1, ops: [{ op: "set", id: "info", props: { text: "改动都测过了，包括回滚。" } }] });
+    expect(kept, JSON.stringify(kept)).toMatchObject({ ok: true, result: { rev: 2 } });
+    expect(kept.result.message.cardState.ask).toMatchObject({ status: "open", from: [] });
+    // A new ask for her alone is refused: she cannot answer any more.
+    expect(await cbot.request({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "", cardV2: quick([alice.id]) })).toMatchObject(nobody);
+    for (const c of [ca, cbot]) c.close();
   });
 });
 

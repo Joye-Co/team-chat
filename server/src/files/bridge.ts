@@ -44,6 +44,8 @@ const PAGE_EVENT_RATE = { rate: 5, burst: 10 };
 const PAGE_EVENT_HOURLY = 300;
 /** Data pushes per version: 2/s, bursts of 4. */
 const DATA_RATE = { rate: 2, burst: 4 };
+/** Push ids kept per version: a retry of one of the last 16 pushes is a repeat. */
+const KEEP_PUSH_IDS = 16;
 /** A reply must come within this long of its event. */
 export const REPLY_WINDOW_MS = 120_000;
 /** Idempotency of page events. */
@@ -55,16 +57,16 @@ const CAUSE_WINDOW_MS = 30 * 60_000;
 
 const buckets = new Map<string, TokenBucket[]>();
 
-/** Takes one from every bucket of `key`: `null`, or the milliseconds to wait for the bucket that is empty. */
-function takeRate(key: string, limits: TokenBucket[] | (() => TokenBucket[])): number | null {
+/** Takes one from every bucket of `key`. 0: taken; else how long to wait (ms) before the next try. */
+function takeRate(key: string, limits: TokenBucket[] | (() => TokenBucket[])): number {
   let list = buckets.get(key);
   if (!list) {
     list = typeof limits === "function" ? limits() : limits;
     buckets.set(key, list);
     if (buckets.size > 10_000) buckets.delete(buckets.keys().next().value as string);
   }
-  for (const b of list) if (!b.take()) return b.waitMs();
-  return null;
+  if (list.every((b) => b.take())) return 0;
+  return Math.max(1, Math.ceil(Math.max(...list.map((b) => b.waitMs()))));
 }
 
 type PageEventRow = {
@@ -224,8 +226,8 @@ registerRoomRpc(ARTIFACT_EVENT_RPC, async (room, actor, args): Promise<PageEvent
     if (problem) throw new ApiError("invalid", problem, "artifact.bad_payload");
   }
   const rateKey = `page:${room.groupId}:${a.id}:${e.artifactId}:${e.version}`;
-  const eventWaitMs = takeRate(rateKey, () => [new TokenBucket(PAGE_EVENT_RATE.rate, PAGE_EVENT_RATE.burst), new TokenBucket(PAGE_EVENT_HOURLY / 3600, PAGE_EVENT_HOURLY)]);
-  if (eventWaitMs !== null) throw new ApiError("rate_limited", "too many page events", undefined, eventWaitMs);
+  const eventWait = takeRate(rateKey, () => [new TokenBucket(PAGE_EVENT_RATE.rate, PAGE_EVENT_RATE.burst), new TokenBucket(PAGE_EVENT_HOURLY / 3600, PAGE_EVENT_HOURLY)]);
+  if (eventWait > 0) throw new ApiError("rate_limited", "too many page events", undefined, eventWait);
   // The row exists before the event goes out (F3): a fast reply or data push finds it, and a
   // repeat that comes while delivery waits is a duplicate. Same order as cards2 (insertEvent,
   // then finishAck).
@@ -322,25 +324,34 @@ registerRoomRpc(ARTIFACT_DATA_RPC, (room, actor, args): { dataRev: number; dupli
     .exec<{ data_rev: number; push_id: string | null }>("SELECT data_rev, push_id FROM artifact_data WHERE artifact_id = ? AND version = ?", d.artifactId, d.version)
     .toArray()[0];
   const rev = cur?.data_rev ?? 0;
-  if (d.clientPushId && cur?.push_id === d.clientPushId) return { dataRev: rev, duplicate: true };
+  if (d.clientPushId) {
+    // A push the server took before (one of the last 16) is not applied again, even when newer
+    // pushes followed it: the answer is the rev it made then.
+    const known = room.sql
+      .exec<{ data_rev: number }>("SELECT data_rev FROM artifact_pushes WHERE artifact_id = ? AND version = ? AND push_id = ?", d.artifactId, d.version, d.clientPushId)
+      .toArray()[0];
+    if (known) return { dataRev: known.data_rev, duplicate: true };
+    // A snapshot from before `artifact_pushes` keeps only its last id.
+    if (cur?.push_id === d.clientPushId) return { dataRev: rev, duplicate: true };
+  }
   if (d.baseDataRev !== undefined && d.baseDataRev !== rev) throw new ApiError("conflict", `the data is at rev ${rev}, not ${d.baseDataRev}`, "artifact.stale_data");
   const now = Date.now();
   let causeActor: string | undefined;
   if (d.cause !== undefined) {
     const cause = room.sql
-      .exec<{ actor_id: string }>(
-        "SELECT actor_id FROM page_events WHERE event_id = ? AND artifact_id = ? AND version = ? AND at > ?",
-        d.cause,
-        d.artifactId,
-        d.version,
-        now - CAUSE_WINDOW_MS,
-      )
+      .exec<{ actor_id: string; at: number }>("SELECT actor_id, at FROM page_events WHERE event_id = ? AND artifact_id = ? AND version = ?", d.cause, d.artifactId, d.version)
       .toArray()[0];
     if (!cause) throw new ApiError("invalid", "cause is not a recent event of this page", "interact.bad_cause");
+    // An event of this page, only too old to be named: the push itself is fine without it.
+    if (cause.at <= now - CAUSE_WINDOW_MS) {
+      throw new ApiError("invalid", "the cause is older than 30 minutes: push the data again without the cause", "interact.bad_cause");
+    }
     causeActor = cause.actor_id;
   }
-  const dataWaitMs = takeRate(`data:${room.groupId}:${d.artifactId}:${d.version}`, () => [new TokenBucket(DATA_RATE.rate, DATA_RATE.burst)]);
-  if (dataWaitMs !== null) throw new ApiError("rate_limited", "too many data pushes for this version", undefined, dataWaitMs);
+  const dataWait = takeRate(`data:${room.groupId}:${d.artifactId}:${d.version}`, () => [new TokenBucket(DATA_RATE.rate, DATA_RATE.burst)]);
+  if (dataWait > 0) {
+    throw new ApiError("rate_limited", `too many data pushes for this version: wait ${Math.ceil(dataWait / 1000)} s and push the newest data again`, undefined, dataWait);
+  }
   const text = JSON.stringify(d.data);
   const next = rev + 1;
   room.sql.exec(
@@ -353,6 +364,25 @@ registerRoomRpc(ARTIFACT_DATA_RPC, (room, actor, args): { dataRev: number; dupli
     now,
   );
   room.sql.exec("UPDATE artifact_versions SET data_rev = ? WHERE artifact_id = ? AND version = ?", next, d.artifactId, d.version);
+  if (d.clientPushId) {
+    room.sql.exec(
+      "INSERT OR REPLACE INTO artifact_pushes (artifact_id, version, push_id, data_rev, at) VALUES (?, ?, ?, ?, ?)",
+      d.artifactId,
+      d.version,
+      d.clientPushId,
+      next,
+      now,
+    );
+    room.sql.exec(
+      `DELETE FROM artifact_pushes WHERE artifact_id = ? AND version = ? AND push_id NOT IN
+         (SELECT push_id FROM artifact_pushes WHERE artifact_id = ? AND version = ? ORDER BY data_rev DESC LIMIT ?)`,
+      d.artifactId,
+      d.version,
+      d.artifactId,
+      d.version,
+      KEEP_PUSH_IDS,
+    );
+  }
   const bytes = utf8Bytes(text);
   const event: Record<string, unknown> = { type: "artifact.data", groupId: room.groupId, artifactId: d.artifactId, version: d.version, dataRev: next };
   // Inline up to 64 KiB; larger snapshots are read with GET …/data.
@@ -392,8 +422,8 @@ registerFrameHandler<ClientFrameOf<"artifact.data">>("artifact.data", {
     const { artifactId, version, data, baseDataRev, cause, clientPushId } = frame;
     const out = unwrap(
       await roomStub(c.env, frame.groupId).rpc(frame.groupId, ARTIFACT_DATA_RPC, c.actor, { artifactId, version, data, baseDataRev, cause, clientPushId }),
-    ) as { dataRev: number };
-    return { dataRev: out.dataRev };
+    ) as { dataRev: number; duplicate?: boolean };
+    return out.duplicate ? { dataRev: out.dataRev, duplicate: true } : { dataRev: out.dataRev };
   },
 });
 
@@ -419,7 +449,9 @@ registerRoomRpc(ARTIFACT_REPLY_RPC, async (room, actor, args): Promise<{ duplica
     throw new ApiError("conflict", "the event has its answer", "artifact.reply_closed");
   }
   const now = Date.now();
-  if (now - ev.at > REPLY_WINDOW_MS) throw new ApiError("conflict", "the page stopped waiting", "artifact.reply_closed");
+  if (now - ev.at > REPLY_WINDOW_MS) {
+    throw new ApiError("conflict", `the page stopped waiting (${REPLY_WINDOW_MS / 1000} s): push the result with artifact.data instead`, "artifact.reply_closed");
+  }
   room.sql.exec("UPDATE page_events SET reply_hash = ?, replied_at = ?, resolved = coalesce(resolved, 'replied') WHERE event_id = ?", hash, now, ev.event_id);
   const reply: Record<string, unknown> = { type: "artifact.reply", groupId: room.groupId, eventId: ev.event_id, ok: r.ok };
   if (r.ok && r.payload !== undefined) reply.payload = r.payload;
@@ -515,9 +547,10 @@ registerRoute({
         data: req.data,
         baseDataRev: req.baseDataRev,
         cause: req.cause,
+        clientPushId: req.clientPushId,
       }),
-    ) as { dataRev: number };
-    return { dataRev: out.dataRev };
+    ) as { dataRev: number; duplicate?: boolean };
+    return out.duplicate ? { dataRev: out.dataRev, duplicate: true } : { dataRev: out.dataRev };
   },
 });
 

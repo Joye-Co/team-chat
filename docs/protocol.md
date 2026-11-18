@@ -1851,7 +1851,7 @@ ArtifactPreview = { title? /* 1..200 */, summary? /* 1..500 */,
 ArtifactEventDecl = { name /* 1..128; writes: [a-z][A-Za-z0-9_.-]{0,63}, unique */, label? /* <= 200 */,
                       kind?: "emit" | "ask" /* default emit */, schema?: TcSchema }
 CreateArtifactRequest += { events?, runId?, media?: MediaInfo, data?: JSON /* <= 256 KiB */, preview? }
-AddArtifactVersionRequest += { events?, runId?, media?, data?, preview? }
+AddArtifactVersionRequest += { events?, runId?, media?, data?, preview?, keepData?: boolean }
 { t: "artifact.event", rid, groupId, artifactId, version, clientEventId?, name, kind?, payload?: JSON /* <= 16 KiB */ }
    // ack.result (1.1 server) = ArtifactEventAck { eventId, duplicate?, expect: Expect }
 ```
@@ -1879,6 +1879,12 @@ Rules:
   first and scrape the HTML only when a version has none.
 - `events` and `runId` are accepted from bot members only; `runId` must be a run of the caller
   in the 产出's topic (else it is dropped). Other callers' values are dropped.
+- Data of a new version: a version without `data` starts empty (`dataRev` 0, `GET …/data` gives
+  `data: null`); what people did on the version before is not carried over. With `keepData: true`
+  and no `data`, the version starts with the snapshot of its parent version (`parentVersion`,
+  else the current one) as `dataRev` 1, when the same bot member made both versions and the
+  parent has a snapshot; otherwise it starts empty. `data` wins over `keepData`. `keepData` is
+  accepted from bot members only, like `data`.
 - `TcSchema` is a subset of JSON Schema: `type properties required enum items maxItems minimum
   maximum maxLength pattern (<= 200) description`, depth <= 4, no `$ref`. The server checks a
   `pattern` in linear time (no backtracking), so it refuses one with a backreference (`\1`,
@@ -1889,7 +1895,8 @@ Rules:
 - `artifact.event`: a human member of the group; the version exists (`not_found`), its creator is
   a bot member of the group that is not deactivated (`forbidden`, reason `artifact.no_bridge`),
   and it declares `name` with that `kind` (`invalid`, reason `artifact.undeclared_event`); the
-  payload fits the schema. At most 5 events per member per second. The event goes to the version's
+  payload fits the schema. At most 5 events a second with bursts of 10, and 300 an hour, per
+  member and version (`rate_limited` with `retryAfterMs`). The event goes to the version's
   creator: transient `artifact.event` (SDK bots) or `run.interaction` / `run.input` (runner bots).
 - The desktop gives a page `emit`/`ask` only when its version was made by a bot of the group and
   declares events of that kind. Page events never approve anything: a bot that needs a decision
@@ -2035,7 +2042,8 @@ Readers keep unknown event names and an unknown `diagram.syntax` (show the sourc
 { t: "card.answer", ..., clientEventId?, contentHash? }        // short form of card.event action.press
 { t: "card.answer.retract", rid, groupId, messageId, answerId }   // short form of card.event answer.retract
 ack.result = CardEventAck { eventId, stored, answerId?, duplicate?, expect: Expect }
-Expect = { by: memberId, mode: "live" | "run" | "starting" | "offline" | "none", etaMs? }
+Expect = { by: memberId, mode: "live" | "run" | "starting" | "offline" | "none", etaMs?,
+           reason? /* 1..64, with "none": "member.inactive" | "runner.off" | "run.external" | "run.limit" | "run.failed" */ }
 
 card.answered (stored) data += { answerId?, askId?, eventId?, event?, blockId?, value? }   // actionId absent for an immediate commit
 card.retracted (stored) data: { messageId, answerId, askId?, eventId? }                     // actorId = the answerer
@@ -2055,6 +2063,29 @@ other part kinds, have no `part` (`invalid`). A live event goes to
 the card's author only (transient `card.event`, audit action `card.event`); answers are stored.
 Members never write `cardState` or `cause`.
 
+`expect` says who responds to the event and how soon: `live` (an SDK member connected with
+`interact/1`), `run` (a runner member's run in the topic takes it), `starting` (a run starts for
+it), `offline` (the SDK member is not connected: the event is not delivered) and `none` (nobody
+will respond; show no waiting state). With `none`, `reason` says why when the server knows:
+`member.inactive` (the author was removed or turned off), `runner.off` (its runner is off),
+`run.external` (its run in the topic takes no events), `run.limit` and `run.failed` (a run could
+not start, or the run's computer no longer has it). Clients skip a `reason` they do not know. A live event to a runner member with no
+run in the topic starts a short run for it: one per card at a time (later events join it), at
+most 6 an hour per card and 30 an hour per member; a run takes at most 20 waiting events per
+card. Past either limit the ack is `none`, `run.limit`. A stored answer always starts a run.
+An event whose ack said `run` or `starting` and that no run takes after all (the run ended
+before it took the event, or the event still waited and no other run could take it) is resolved
+for the emitter with `interaction.resolved {result: "failed"}`; it never comes for an event
+whose ack said `none`.
+
+Rates (`rate_limited`, with `retryAfterMs`; the limits are per server location, so a client
+may see a little more): one answer per member and message a second; live events 5 a second
+with bursts of 10 per member and message, and 120 a minute per member and group; `card.patch`
+1 a second with bursts of 3 per message. `clientEventId` and `clientPatchId` make a repeat
+within 24 hours the same event or patch (`duplicate: true`); after that the id is free again.
+An event to a card whose author was removed or deactivated is `forbidden`,
+`interact.no_responder`.
+
 Draft answers: an answer that submits `draft` blocks (a footer action whose inputs name them,
 or a 2.0 submit) stores `contentHash` in its `CardAnswer`: the sha256 (lowercase hex of the
 UTF-8 bytes) of the draft texts it approves, in card order, each the edited text when edited,
@@ -2066,6 +2097,16 @@ retract or an expiry of a card ask; a ref whose source was deleted) has no `card
 `cardState` or `blockRefs`. Its `editedAt` is the stored `editedAt`, or `createdAt` for a message
 that was never edited. It is not an edit: a 1.1 client keeps its stored `editedAt` (no edited
 mark), and so does a restore. (1.0.x clients copy `editedAt` and show the mark.)
+
+Who answers an ask: `ask.from` lists member ids, `"owners"` and `"requester"`; the server stores
+the resolved member ids in `cardState.ask.from`. Only people answer, so a send, an edit or a
+patch that opens a new ask round or changes `ask.from` must name at least one person of the
+group who is not deactivated: ids that name none (a name in place of an id, only AI members)
+are `invalid`, `card.limits`, and the message lists them. `"owners"` or `"requester"` that
+resolve to no person (a run that nobody asked) are stored as the group's owners; when no owner
+is in the group either, the write is `invalid`, `card.limits`. A round whose
+people left the group later is kept; its author closes it or it expires. (Poll voters come
+from the poll's `voters`, people only.)
 
 Topic status with blocking asks: while a blocking ask in the topic is open, the topic is
 `waiting_answer` and `waitingOn` is the union of the open asks' `from` and the people of a
@@ -2120,14 +2161,25 @@ page event of one of its 产出 versions (`Cause.event` is the page event's name
 ### 产出 bridge
 
 ```ts
-{ t: "artifact.data", rid, groupId, artifactId, version, data /* <= 256 KiB */, baseDataRev?, cause?, clientPushId? }   // ack.result { dataRev }
+{ t: "artifact.data", rid, groupId, artifactId, version, data /* <= 256 KiB */, baseDataRev?, cause?, clientPushId? }   // ack.result ArtifactDataAck { dataRev, duplicate? }
 { t: "artifact.reply", rid, groupId, eventId, ok, payload? /* <= 64 KiB, ok: true */, error? { code: "declined"|"failed", message, reason? } }
 transient artifact.event: { groupId, topicId, artifactId, version, eventId, name, kind, payload?, actorId, at }   // to the version's creator
 transient artifact.data:  { groupId, artifactId, version, dataRev, data? /* inline when <= 64 KiB */, cause? }    // to every member
 transient artifact.reply: { groupId, eventId, ok, payload?, error? }                                               // to the asker only
 GET /v1/artifacts/:id/versions/:v/data  -> ArtifactDataResponse { data: JSON | null, dataRev, updatedAt }
-PUT /v1/artifacts/:id/versions/:v/data  PutArtifactDataRequest { data, baseDataRev?, cause? } -> ArtifactDataAck { dataRev }
+PUT /v1/artifacts/:id/versions/:v/data  PutArtifactDataRequest { data, baseDataRev?, cause?, clientPushId? /* 1..64 */ } -> ArtifactDataAck { dataRev, duplicate? }
 ```
+
+`clientPushId` makes a data push safe to send again after a lost answer: the server keeps the
+ids of a version's last 16 pushes, and a push with one of them is not applied again (not even
+when newer pushes followed it). Its answer is `{ dataRev: <the rev that push made>, duplicate:
+true }`, and no transient is sent. The checks of `baseDataRev`, `cause` and the rate apply to
+new pushes only.
+
+Rates: `artifact.data` 2 a second with bursts of 4 per version (`rate_limited` with
+`retryAfterMs`; push the newest data after the wait). `artifact.reply` is accepted within 120 s
+of its ask (`conflict`, `artifact.reply_closed` after that: push the result with
+`artifact.data`).
 
 A page `ask` that no run of the version's runner member will answer (the run ended and none is
 open in the topic) gets `artifact.reply` from that member at once: `ok: false`, `error { code:
