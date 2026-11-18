@@ -258,7 +258,7 @@ shape. The text inside every control is Body 13 pt unless noted.
 | Offline | `wifi.slash` |
 | Muted / notify badge | `bell.slash` / `bell.badge` |
 | Branch / merge | `arrow.triangle.branch` / `arrow.triangle.merge` |
-| Document, file, code file, missing file | `doc.text`, `doc`, `doc.plaintext`, `doc.questionmark` |
+| Document, file, code file, PDF, missing file | `doc.text`, `doc`, `doc.plaintext`, `list.bullet.rectangle.portrait`, `doc.questionmark` |
 | Diff | `plus.forwardslash.minus` |
 | Image, images | `photo`, `photo.on.rectangle` |
 | Copy | `doc.on.doc` |
