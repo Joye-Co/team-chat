@@ -254,12 +254,13 @@ pub(crate) fn ends_in_ref_list(ctx: &Ctx, cx: &App) -> bool {
     if !folded.is_empty() || no_evidence(ctx, cx).is_some() {
         return false;
     }
+    // A done card draws its 产出 as a list of their own, above the references.
     let run = blocks
         .iter()
         .rev()
-        .take_while(|b| matches!(b, CardV2Block::Ref { .. }))
+        .take_while(|b| matches!(b, CardV2Block::Ref { .. }) && !(done && is_output(b)))
         .count();
-    run > 0 && run <= REFS_CAP + 1 && !blocks.last().is_some_and(|b| done && is_output(b))
+    run > 0 && run <= REFS_CAP + 1
 }
 
 /// Where the row of metrics that starts at `start` ends, in a run that ends at `run_end`:
@@ -1211,13 +1212,24 @@ fn table_content(
                 !numeric_col.first().copied().unwrap_or(false)
                     && rf.beside(r.first().map(String::as_str).unwrap_or(""), None, w)
             });
+            // From the row's right end: its padding, then each column and its gap. A text
+            // column shares the row's width with the first one.
+            let hides = refs.filter(|_| !beside).map_or(0, |(rf, _)| {
+                let shared = rf.measured_first().map_or(m::TABLE_COL_MIN, gpui::px);
+                let trailing = (1..columns.len()).rev().map(|ci| {
+                    let w = widths.get(ci).copied().flatten();
+                    f32::from(w.unwrap_or(shared.max(m::TABLE_COL_MIN)) + space::S12)
+                });
+                rf.row_end_hides(ri, trailing, 0., cx)
+            });
             line.children((0..columns.len()).map(|ci| {
                 let mut el = cell(
                     ci,
                     r.get(ci).map(String::as_str).unwrap_or(""),
                     false,
                     total,
-                );
+                )
+                .when(ci + hides >= columns.len(), |d| d.opacity(0.));
                 if ci == 0 && beside {
                     el = el.children(
                         refs.and_then(|(rf, _)| rf.name_button(ri, f32::from(space::S8), cx)),
@@ -1231,19 +1243,15 @@ fn table_content(
             // A name too long for 问这里 beside it gets it at the row end, over the row, so
             // the number columns stay at the right edge (Interact.dc.html 02).
             .when_some(refs.filter(|_| !beside), |el, (rf, _)| {
-                // From the row's right end: its padding, then each column and its gap.
-                let cells = (1..columns.len()).rev().map(|ci| {
-                    let w = widths
-                        .get(ci)
-                        .copied()
-                        .flatten()
-                        .unwrap_or(m::TABLE_COL_MIN);
-                    f32::from(w + space::S12)
-                });
-                let cover = crate::views::refs::markdown::cover_width(cells, 0.);
-                let surface = ui::native::native_colors(cx).sheet;
-                el.relative()
-                    .child(rf.row_end_over(ri, cover, px(0.), surface, cx))
+                el.relative().child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .right_0()
+                        .flex()
+                        .child(rf.row_end(ri, cx)),
+                )
             })
         }))
 }

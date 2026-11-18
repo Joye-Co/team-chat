@@ -164,9 +164,10 @@ pub fn table(node: &Node, b: &CardV2Block, window: &mut gpui::Window, cx: &mut A
             // The sort glyph shows on a header the table is not sorted by yet, under the
             // pointer or the keyboard focus. A number column has it before the label: the
             // label ends on the numbers' right edge.
-            let focused = sort_focus[ci]
-                .as_ref()
-                .is_some_and(|h| h.is_focused(window));
+            let focused = window.last_input_was_keyboard()
+                && sort_focus[ci]
+                    .as_ref()
+                    .is_some_and(|h| h.is_focused(window));
             let glyph = match sorted_here {
                 Some((_, asc)) => Some(
                     ui::icon(
@@ -464,9 +465,11 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &mut gpui::Window, cx: &mut A
         .map(|i| tab_stop(eid(node, format!("pt-focus-{id}-{i}")), window, cx))
         .collect();
     let peek = selectable.then(|| {
+        // A click leaves the focus on its point: only the keyboard's focus outranks the pointer.
         let at = point_focus
             .iter()
             .position(|h| h.is_focused(window))
+            .filter(|_| window.last_input_was_keyboard())
             .or(node.ui.block(id).hot)
             .filter(|i| point.as_ref().is_none_or(|(_, p)| p != i));
         super::super::v2::ChartPeek(at.and_then(|i| Some((i, point_text(main?, i)?))))

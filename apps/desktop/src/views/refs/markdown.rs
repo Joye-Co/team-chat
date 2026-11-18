@@ -68,20 +68,6 @@ thread_local! {
         std::cell::RefCell::default();
 }
 
-/// How far from a row's right end [`TableRefs::row_end_over`] hides the cells: whole cells,
-/// last first (`trailing`, their widths), until the button `inset` from that end has room.
-pub fn cover_width(trailing: impl IntoIterator<Item = f32>, inset: f32) -> f32 {
-    let need = ROW_BUTTON_SLOT + inset;
-    let mut width = 0.;
-    for cell in trailing {
-        if width >= need {
-            break;
-        }
-        width += cell;
-    }
-    width.max(need)
-}
-
 /// The references of one table: `target` builds the reference of a cell, row or column.
 #[derive(Clone)]
 pub struct TableRefs {
@@ -138,9 +124,7 @@ impl TableRefs {
     /// first column's width inside its padding; `None` takes the width the column had at its
     /// last paint ([`TableRefs::measure`]).
     pub fn beside(&self, name: &str, inner: Option<f32>, window: &Window) -> bool {
-        let Some(inner) =
-            inner.or_else(|| FIRST_COL.with(|m| m.borrow().get(&self.prefix).copied()))
-        else {
+        let Some(inner) = inner.or_else(|| self.measured_first()) else {
             return false;
         };
         let style = window.text_style();
@@ -209,35 +193,50 @@ impl TableRefs {
         .into_any_element()
     }
 
-    /// [`Self::row_end`] floating over the row, `inset` from its right end, for a name that
-    /// leaves no room beside it: the last column reaches the frame's inset at rest (§2.7).
-    /// While the button shows, a backing in the hovered row's color hides the `cover` points
-    /// of whole cells under it ([`cover_width`]), so no cut value is left beside the button.
-    /// `surface` is what the row lies on. Put it in a row that is `relative`.
-    pub fn row_end_over(
+    /// The first column's width at its last paint ([`TableRefs::measure`]).
+    pub fn measured_first(&self) -> Option<f32> {
+        FIRST_COL.with(|m| m.borrow().get(&self.prefix).copied())
+    }
+
+    /// How many cells at the end of `row` make way while [`Self::row_end_over`] shows its
+    /// button: whole cells, last first, until the button has room, so no value is left cut
+    /// beside it. `trailing` is their widths from the row's end; `inset` the button's distance
+    /// from that end.
+    pub fn row_end_hides(
         &self,
         row: usize,
-        cover: f32,
-        inset: gpui::Pixels,
-        surface: gpui::Hsla,
+        trailing: impl IntoIterator<Item = f32>,
+        inset: f32,
         cx: &App,
-    ) -> Div {
-        let shown = matches!(self.hovered_in(row, cx), Some((_, true)));
-        let fill = crate::ui::native::native_colors(cx).fill;
-        let backing = gpui::Hsla {
-            a: 1.,
-            ..theme::card_v2::mix(fill, surface, fill.a * 0.5)
-        };
+    ) -> usize {
+        if !matches!(self.hovered_in(row, cx), Some((_, true))) {
+            return 0;
+        }
+        let mut room = 0.;
+        let mut cells = 0;
+        for width in trailing {
+            if room >= ROW_BUTTON_SLOT + inset {
+                break;
+            }
+            room += width;
+            cells += 1;
+        }
+        cells
+    }
+
+    /// [`Self::row_end`] floating over the row at the frame's right inset, for a name that
+    /// leaves no room beside it: the last column reaches that inset at rest (§2.7), and the
+    /// cells under the button make way while it shows ([`Self::row_end_hides`]). Put it in a
+    /// row that is `relative`.
+    pub fn row_end_over(&self, row: usize, cx: &App) -> AnyElement {
         div()
             .absolute()
             .top_0()
             .bottom_0()
-            .right_0()
-            .pr(inset)
+            .right(space::S12)
             .flex()
-            .justify_end()
-            .when(shown, |d| d.w(px(cover)).bg(backing))
             .child(self.row_end(row, cx))
+            .into_any_element()
     }
 
     /// The slot at the end of a row: 问这里 for the hovered cell, at the row's right end
@@ -616,13 +615,18 @@ pub fn table(
                 .map(|w| w - f32::from(space::S16) - f32::from(space::S12));
             !right.first().copied().unwrap_or(false) && r.beside(&name, inner, window)
         });
+        let hides = refs.filter(|_| !beside).map_or(0, |r| {
+            let trailing = widths.iter().skip(1).rev().copied();
+            r.row_end_hides(ri, trailing, f32::from(space::S12), cx)
+        });
         for (ci, w) in widths.iter().enumerate() {
             let mut el = cell(
                 row.get(ci).cloned().unwrap_or_default(),
                 ci,
                 *w,
                 right.get(ci).copied().unwrap_or(false),
-            );
+            )
+            .when(ci + hides >= widths.len(), |d| d.opacity(0.));
             if ci == 0 && beside {
                 el = el.children(refs.and_then(|r| r.name_button(ri, 0., cx)));
             }
@@ -632,11 +636,7 @@ pub fn table(
             });
         }
         if let Some(r) = refs.filter(|_| !beside) {
-            let cover = cover_width(widths.iter().skip(1).rev().copied(), f32::from(space::S12));
-            line = line.child(
-                r.row_end_over(ri, cover, space::S12, n.window, cx)
-                    .when(ri + 1 == count, |d| d.rounded_br(inner_radius)),
-            );
+            line = line.child(r.row_end_over(ri, cx));
         }
         line
     });
