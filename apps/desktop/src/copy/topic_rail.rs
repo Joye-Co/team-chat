@@ -187,4 +187,6 @@ crate::copy! {
     DONE_AT = "做完了 · {time}",
     DECISION_BY = "{name} · {time}",
     // --- end v12/topic ---
+    APPROVE_REFUSED = "没能批准",
+    WITHDRAW_REFUSED = "没能撤回",
 }
