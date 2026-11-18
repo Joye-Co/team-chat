@@ -65,7 +65,8 @@ pub use line::{notification_text, plan_row};
 // --- inc-cards21 ---
 pub(crate) use chart::{
     ChartPeek, chart_with_peek as chart_el, legend_room as chart_legend_room,
-    plot_left as chart_plot_left, y_from_top as chart_y_from_top,
+    pick_legend_room as chart_pick_legend_room, plot_left as chart_plot_left,
+    y_from_top as chart_y_from_top,
 };
 // --- end inc-cards21 ---
 

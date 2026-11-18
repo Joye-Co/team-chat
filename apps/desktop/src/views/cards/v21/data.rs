@@ -439,25 +439,41 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &mut gpui::Window, cx: &mut A
         .gap(space::S6)
         .min_w(px(0.));
     let main = series.first();
-    // A point's x and value.
-    let point_text = |s: &crate::data::cards_v2::ChartSeries, i: usize| {
+    // A point's value, with its unit.
+    let value_text = |s: &crate::data::cards_v2::ChartSeries, i: usize| {
         let v = s.values.get(i)?.as_f64()?;
-        let shown = match unit {
+        Some(match unit {
             Some(u) => format!("{} {u}", b20::fmt_number(v)),
             None => b20::fmt_number(v),
-        };
-        Some(fill(
-            c::CHART_POINT,
-            &[
-                ("x", xs.get(i).map(String::as_str).unwrap_or("")),
-                ("value", &shown),
-            ],
-        ))
+        })
     };
+    // Several series: the label says the x and the legend says each series' value after its
+    // name. One series: the label says both.
+    let several = series.len() > 1;
+    let point_text = |i: usize| {
+        if several {
+            series
+                .iter()
+                .any(|s| value_text(s, i).is_some())
+                .then(|| xs.get(i).cloned())
+                .flatten()
+        } else {
+            Some(fill(
+                c::CHART_POINT,
+                &[
+                    ("x", xs.get(i).map(String::as_str).unwrap_or("")),
+                    ("value", &value_text(main?, i)?),
+                ],
+            ))
+        }
+    };
+    let legend_values: Vec<Vec<Option<String>>> = series
+        .iter()
+        .filter(|_| several && selectable)
+        .map(|s| (0..xs.len()).map(|i| value_text(s, i)).collect())
+        .collect();
     // The chosen point, under the plot.
-    let tip = point
-        .as_ref()
-        .and_then(|(skey, i)| point_text(series.iter().find(|s| s.key() == skey)?, *i));
+    let tip = point.as_ref().and_then(|(_, i)| point_text(*i));
     // Walking the points reads them: the focused or hovered one says its value in the label
     // row and takes the marker. Only Enter or a click picks it.
     let point_focus: Vec<gpui::FocusHandle> = (0..xs.len())
@@ -472,7 +488,11 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &mut gpui::Window, cx: &mut A
             .filter(|_| window.last_input_was_keyboard())
             .or(node.ui.block(id).hot)
             .filter(|i| point.as_ref().is_none_or(|(_, p)| p != i));
-        super::super::v2::ChartPeek(at.and_then(|i| Some((i, point_text(main?, i)?))))
+        super::super::v2::ChartPeek {
+            point: at.and_then(|i| Some((i, point_text(i)?))),
+            read: at.or(point.as_ref().map(|(_, i)| *i)),
+            values: legend_values.clone(),
+        }
     });
     let drawn = super::super::v2::chart_el(
         ctx.id(format!("chart-{id}")),
@@ -500,7 +520,12 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &mut gpui::Window, cx: &mut A
     // The columns start where the plot does (after the y-axis labels).
     let left = super::super::v2::chart_plot_left(*kind, series);
     // They end above the legend, which belongs to no column.
-    let legend = super::super::v2::chart_legend_room(series.len());
+    let legend = if selectable {
+        let chart = ctx.id(format!("chart-{id}"));
+        super::super::v2::chart_pick_legend_room(&chart, *kind, series, &legend_values, cx)
+    } else {
+        super::super::v2::chart_legend_room(series.len())
+    };
     let tint = div()
         .absolute()
         .top_0()

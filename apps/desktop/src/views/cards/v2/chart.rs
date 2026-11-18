@@ -426,7 +426,55 @@ fn paint(p: &Paint, b: Bounds<Pixels>, t: f32, window: &mut Window) {
 /// The point of a chart a person can pick from that is under the keyboard focus or the
 /// pointer: its index and what it says, in the label row. The row is kept while there is
 /// none, so the plot stays where it is.
-pub(crate) struct ChartPeek(pub Option<(usize, String)>);
+pub(crate) struct ChartPeek {
+    pub point: Option<(usize, String)>,
+    /// The point whose values the legend says: the one under the focus, else the picked one.
+    pub read: Option<usize>,
+    /// What each series says at each point, for a chart of several series: the legend names
+    /// the series, so each value stands after its name. Empty for a single series.
+    pub values: Vec<Vec<Option<String>>>,
+}
+
+/// How many lines the legend of a chart to pick from needs when every series says its
+/// longest value, in a plot `width` wide.
+fn legend_lines(series: &[ChartSeries], values: &[Vec<Option<String>>], width: f32) -> usize {
+    let gap = f32::from(space::S16);
+    let (mut lines, mut used) = (1, 0f32);
+    for (i, s) in series.iter().enumerate() {
+        let longest = values
+            .get(i)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|v| label_width(v) + f32::from(space::S6))
+            .fold(0f32, f32::max);
+        let item = f32::from(m::CHART_SWATCH + space::S6) + label_width(&s.name) + longest;
+        if used > 0. && used + gap + item > width {
+            lines += 1;
+            used = item;
+        } else {
+            used += if used > 0. { gap } else { 0. } + item;
+        }
+    }
+    lines
+}
+
+/// The height the extra legend lines of [`legend_lines`] take.
+fn legend_extra(lines: usize) -> Pixels {
+    (m::META_LINE + crate::ui::native::tokens::space::S4) * lines.saturating_sub(1) as f32
+}
+
+/// [`legend_room`] of chart `id`, which can be picked from and says `values` in its legend.
+pub(crate) fn pick_legend_room(
+    id: &SharedString,
+    kind: ChartKind,
+    series: &[ChartSeries],
+    values: &[Vec<Option<String>>],
+    cx: &App,
+) -> Pixels {
+    let width = plot_width(id, plot_left(kind, series), cx);
+    legend_room(series.len()) + legend_extra(legend_lines(series, values, width))
+}
 
 /// A chart block.
 pub(crate) fn chart(
@@ -455,7 +503,11 @@ pub(crate) fn chart_with_peek(
 ) -> AnyElement {
     let k = theme::colors(cx);
     let pickable = peek.is_some();
-    let (peek_at, peek_text) = peek.and_then(|p| p.0).unzip();
+    let (peek_point, read, peek_values) = match peek {
+        Some(p) => (p.point, p.read, p.values),
+        None => (None, None, Vec::new()),
+    };
+    let (peek_at, peek_text) = peek_point.unzip();
     let spark = kind == ChartKind::Spark;
     let kind = if kind == ChartKind::Unknown {
         ChartKind::Line
@@ -578,6 +630,8 @@ pub(crate) fn chart_with_peek(
         return plot;
     }
     let inks = [k.ink, k.ink_2, k.ink_3, k.line_2];
+    // The legend keeps the room of its longest values, so reading a point never moves the card.
+    let legend_h = legend_extra(legend_lines(series, &peek_values, width));
     let legend = (series.len() > 1).then(|| {
         div()
             .flex()
@@ -586,7 +640,9 @@ pub(crate) fn chart_with_peek(
             .gap_x(space::S16)
             .gap_y(crate::ui::native::tokens::space::S4)
             .min_w(px(0.))
+            .when(legend_h > px(0.), |el| el.min_h(m::META_LINE + legend_h))
             .children(series.iter().enumerate().map(|(i, s)| {
+                let value = read.and_then(|at| peek_values.get(i)?.get(at).cloned().flatten());
                 // The swatch is the series' own stroke: its ink and its dash. Bars have
                 // no dash, so their swatch is the bar's fill.
                 let (ink, dash) = stroke(i);
@@ -618,6 +674,16 @@ pub(crate) fn chart_with_peek(
                     .gap(space::S6)
                     .child(swatch)
                     .child(crate::ui::truncate::TruncText::new(s.name.clone()))
+                    .when_some(value, |el, v| {
+                        el.child(
+                            div()
+                                .flex_none()
+                                .whitespace_nowrap()
+                                .font_weight(theme::MEDIUM_WEIGHT)
+                                .text_color(k.ink)
+                                .child(v),
+                        )
+                    })
             }))
     });
     let title = match (label, unit) {
