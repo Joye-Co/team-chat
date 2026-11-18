@@ -22,6 +22,7 @@ use crate::{
     copy::timeline as t,
     data::{ChatProvider, Member, Message},
     theme::{self, Type as _},
+    ui::native::tokens::space,
 };
 
 /// What an extra can read while it renders.
@@ -165,16 +166,46 @@ impl MessageExtra for QuoteExtra {
                 .provider
                 .quoted_message(&message.group_id, &message.id, quoted_id),
         };
+        // A 话题 started from a message has no words of its own: the quote is
+        // the whole first message, so it is drawn as one: the body recipe
+        // (14/22, Markdown), all of it, behind the quote bar. The author is
+        // named only when it is not the sender, whose name is one line above.
+        if alone && let Some(q) = quoted.as_ref().filter(|q| !q.deleted) {
+            let name = (q.author_id != message.author_id)
+                .then(|| ctx.member(&q.author_id).map(|m| m.name.clone()))
+                .flatten();
+            let body = crate::markdown::message_body(
+                gpui::ElementId::Name(format!("quote-body-{}", message.id).into()),
+                q.body.clone(),
+                &crate::markdown::mention_targets(ctx.members, ctx.me),
+            )
+            .w_full()
+            .text_color(colors.text_1);
+            return Some(
+                div()
+                    .mb(space::S4)
+                    .pl(space::S12)
+                    .border_l_2()
+                    .border_color(colors.quote_bar)
+                    .flex()
+                    .flex_col()
+                    .min_w(px(0.))
+                    .children(name.map(|n| {
+                        div()
+                            .t_callout()
+                            .semibold()
+                            .text_color(colors.text_1)
+                            .one_line()
+                            .child(n)
+                    }))
+                    .child(body)
+                    .into_any_element(),
+            );
+        }
         let (name, text) = match quoted {
             Some(q) if q.deleted => (
                 ctx.member(&q.author_id).map(|m| m.name.clone()),
                 t::RECALLED.to_string(),
-            ),
-            // A 话题 started from a message has no words of its own: the quote is
-            // the whole first message, so it shows the first lines, not one.
-            Some(q) if alone => (
-                ctx.member(&q.author_id).map(|m| m.name.clone()),
-                quote_lines(&q.body, ALONE_LINES),
             ),
             Some(q) => (
                 ctx.member(&q.author_id).map(|m| m.name.clone()),
@@ -184,8 +215,8 @@ impl MessageExtra for QuoteExtra {
         };
         Some(
             div()
-                .mb(px(4.))
-                .pl(px(10.))
+                .mb(space::S4)
+                .pl(space::S12)
                 .border_l_2()
                 .border_color(colors.quote_bar)
                 .flex()
@@ -204,16 +235,13 @@ impl MessageExtra for QuoteExtra {
                         .min_w(px(0.))
                         .type_role(theme::type_scale::QUOTE)
                         .text_color(colors.text_2)
-                        .line_clamp(if alone { ALONE_LINES } else { 2 })
+                        .line_clamp(2)
                         .child(text),
                 )
                 .into_any_element(),
         )
     }
 }
-
-/// The lines a quote shows when it is the whole message (a 话题 started from a message).
-const ALONE_LINES: usize = 6;
 
 /// The text lines of a body without their leading Markdown marks.
 fn text_lines(body: &str) -> impl Iterator<Item = &str> {
