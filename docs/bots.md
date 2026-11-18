@@ -577,7 +577,7 @@ bun examples/echo-bot.ts          # 或者(Node 22.18 以上):node examples/echo
   超过 `requestTimeoutMs`(60 秒)报 `timeout`。发送前先用协议 schema 校验。
 - **错误**:调用失败时抛出 `ChatError`,带服务器的 `code`;服务器给了的话还有 `reason`、
   `retryAfterMs`(被限流后要等多久)和 `memberIds`(例如 `relay.member_unavailable` 说的是哪些
-  成员)。HTTP 调用还有 `status`。
+  成员)。HTTP 调用还有 `status`。`isRetryable(err)` 对 `network`、`timeout`、`internal`、`rate_limited` 返回 true。
 - **流式回复**:`send` 带 `streaming: true`,每 100 毫秒合并发一次 `delta`,最后 `edit` 发完整
   正文并设 `streaming: false`。重连后会补发一次完整文本,读者不会漏内容。消息在最后这次 `edit`
   之前一直是流式状态,所以处理函数没调 `finish()` 就返回或出错时,SDK 会替它结束 `ctx.stream()`

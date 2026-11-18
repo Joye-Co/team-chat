@@ -80,11 +80,9 @@ export function normalizeBaseUrl(url: string): string {
     throw new ChatError("invalid", "server url must look like http://127.0.0.1:8789 (scheme, host and port)");
   }
   if (u.protocol !== "http:" && u.protocol !== "https:") throw new ChatError("invalid", "server url must be http:// or https://");
-  return u
-    .toString()
-    .replace(/\/+$/, "")
-    .replace(/\/v1$/, "")
-    .replace(/\/+$/, "");
+  const base = u.toString().replace(/\/+$/, "");
+  // Only a path that ends with /v1: a host named "v1" keeps its name.
+  return /\/v1\/*$/.test(u.pathname) ? base.replace(/\/v1$/, "").replace(/\/+$/, "") : base;
 }
 
 /** Wait before try `i + 1`: the server's `retryAfterMs` when it is longer than the backoff (at most 30 s). */

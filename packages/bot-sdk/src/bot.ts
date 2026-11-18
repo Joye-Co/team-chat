@@ -95,7 +95,7 @@ export interface BotOptions {
   markRead?: boolean;
   /** How long a request waits (connection included) before it fails with `timeout`. Default 60 s. */
   requestTimeoutMs?: number;
-  /** How long `stop()` waits for running handlers. Default 10 s. */
+  /** How long `stop()` waits for running handlers, and then again for the streams it finishes. Default 10 s. */
   stopTimeoutMs?: number;
   /**
    * Client-side pacing of write frames (send, edit, delete, topic.update, cards, page bridge).

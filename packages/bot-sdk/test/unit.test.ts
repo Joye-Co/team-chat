@@ -992,6 +992,8 @@ describe("a server that cannot be reached", () => {
     expect(url("http://127.0.0.1:8789/")).toBe("http://127.0.0.1:8789");
     expect(url("https://host.example/chat/")).toBe("https://host.example/chat");
     expect(url("https://host.example/chat/v1")).toBe("https://host.example/chat");
+    expect(url("http://v1")).toBe("http://v1");
+    expect(url("http://v1:8789/v1/")).toBe("http://v1:8789");
     expect(new HttpClient({ url: "http://127.0.0.1:8789/v1", token: "t" }).url).toBe("http://127.0.0.1:8789");
   });
 
