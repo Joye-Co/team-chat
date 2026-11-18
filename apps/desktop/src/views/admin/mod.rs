@@ -1005,7 +1005,8 @@ impl AdminView {
             })
             .px(space::S32)
             .pt(t::HEADER_PAD_TOP)
-            .pb(t::HEADER_PAD_BOTTOM)
+            // The body starts one hairline lower, see `body`.
+            .pb(t::HEADER_PAD_BOTTOM - crate::ui::native::tokens::metrics::HAIRLINE)
             .flex()
             .items_end()
             .gap(space::S12)
@@ -1090,6 +1091,8 @@ impl AdminView {
         let pad = div()
             .w_full()
             .px(space::S32)
+            // Room for the first card's ring: the scroll area clips at its top edge.
+            .pt(crate::ui::native::tokens::metrics::HAIRLINE)
             .pb(t::BODY_PAD_BOTTOM)
             .flex()
             .flex_col()

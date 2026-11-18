@@ -1193,6 +1193,7 @@ impl AdminView {
                                         .text_right()
                                         .whitespace_nowrap()
                                         .n_footnote()
+                                        .n_figures()
                                         .text_color(if over { k.label } else { k.secondary })
                                         .when(over, |d| d.font_weight(gpui::FontWeight::MEDIUM))
                                         .child(match (pct, budget) {
