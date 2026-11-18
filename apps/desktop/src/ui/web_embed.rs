@@ -811,9 +811,13 @@ impl WebEmbedState {
                     .await;
             }
             let (tx, rx) = futures::channel::oneshot::channel();
+            let (top_tx, top_rx) = futures::channel::oneshot::channel();
             let started = this
                 .update(cx, |s, _| match &s.native {
                     Some(n) if n.is_shown() => {
+                        n.evaluate_text("String(window.scrollY)", move |y| {
+                            let _ = top_tx.send(y);
+                        });
                         n.snapshot_png(move |png| {
                             let _ = tx.send(png);
                         });
@@ -826,6 +830,14 @@ impl WebEmbedState {
                 return;
             }
             if let Ok(Some(png)) = rx.await {
+                // A 产出's thumbnail is the top of its page: a scrolled view is only the
+                // backdrop. When the page does not say, the picture counts as the top.
+                let scrolled = top_rx
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|y| y.parse::<f32>().ok())
+                    .is_some_and(|y| y > 0.);
                 // Diagnosis of the 产出 thumbnail: which view's picture is the last one.
                 if std::env::var_os("TC_PREVIEW_LOG").is_some() && png.len() > 24 {
                     let dim =
@@ -843,7 +855,7 @@ impl WebEmbedState {
                 }
                 let image = Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, png));
                 let _ = this.update(cx, |s, cx| {
-                    if s.remember {
+                    if s.remember && !scrolled {
                         remember_preview(s.artifact_id(), s.version(), image.clone());
                     }
                     s.snapshot = Some(image);
