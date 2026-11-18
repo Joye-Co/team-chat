@@ -294,6 +294,18 @@ export interface CardEventContext {
    */
   resolve(result: "ignored" | "failed", note?: string): Promise<void>;
   updateTopic(change: TopicChange): Promise<Topic>;
+  /**
+   * Posts the result card (Card v2, intent "done") in the card's topic as the answer to this
+   * event and ends this bot's current run there: `failed` ends it as failed. A handler that runs
+   * again after a crash posts with the same clientMsgId, so the card is not posted twice.
+   */
+  done(card: CardV2 | DoneCardOptions): Promise<DoneResult>;
+  /** Sets the plan of this bot's current run in the card's topic (see `Bot.setPlan`). */
+  setPlan(plan: RunPlanItem[]): Promise<BotRun>;
+  /** Ends this bot's current run in the card's topic (see `Bot.endRun`). */
+  endRun(status: "done" | "failed" | "cancelled", summary?: string): Promise<BotRun | null>;
+  /** Replaces the 验收标准 of this bot's current run in the card's topic (see `Bot.setAcceptance`). */
+  setAcceptance(items: AcceptanceItem[]): Promise<BotRun>;
 }
 
 /**
@@ -2059,6 +2071,14 @@ export class Bot {
         await answered(this.resolveEvent(groupId, cause, result, note));
       },
       updateTopic: (change) => this.updateTopic(groupId, topicId, change),
+      done: (c) => {
+        // One id per call, taken before the first try: a write sent again without its cause keeps it.
+        const clientMsgId = nextId();
+        return answered(this.withCause(cause, (x) => this.done({ groupId, topicId }, c, x ? { clientMsgId, causeEventId: x } : { clientMsgId })));
+      },
+      setPlan: (plan) => this.setPlan({ groupId, topicId }, plan),
+      endRun: (status, summary) => this.endRun({ groupId, topicId }, status, summary),
+      setAcceptance: (items) => this.setAcceptance({ groupId, topicId }, items),
     };
     return { ctx, flags };
   }

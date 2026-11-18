@@ -26,7 +26,7 @@ bot.onMention(async (ctx) => {
 // 1.1: answers to v2 cards (decisionCard, approvalCard, draftCard, formCard), then a done card.
 bot.onCardAnswer<{ choice: string }>(async (ctx) => {
   await ctx.markAnswered();
-  await ctx.bot.done({ groupId: ctx.groupId, topicId: ctx.topicId }, { title: "做完了", summary: `选了 ${ctx.choice()}` });
+  await ctx.done({ title: "做完了", summary: `选了 ${ctx.choice()}` });
 });
 
 await bot.start();

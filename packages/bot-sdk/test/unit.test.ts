@@ -431,6 +431,42 @@ describe("answers", () => {
     expect(a.cancelled).toBe(false);
   });
 
+  test("ctx.done in onCardAnswer: a handler that runs again posts with the same clientMsgId and the answer as cause", async () => {
+    const card = report();
+    const mid = "01JC0MSG000000000000000098";
+    const sends: Frame[] = [];
+    for (let round = 0; round < 2; round++) {
+      // Each round is a new process that reads the same answer again (the cursor was not saved).
+      const server = new FakeServer();
+      const store = new MemoryStateStore();
+      store.save({ v: 1, memberId: BOT_ID, cursors: { [GROUP_ID]: 0 }, following: {}, cards: { [mid]: { groupId: GROUP_ID, topicId: TOPIC_ID } } });
+      server.groups = [{ group: { id: GROUP_ID, kind: "group", name: "拾光增长", createdAt: 1 }, lastSeq: 1, readSeq: 0, unread: 0, mentions: 0 }];
+      server.on("fetch", () => ({
+        ok: true,
+        result: {
+          events: [{ seq: 1, groupId: GROUP_ID, at: Date.now(), actorId: HUMAN_ID, type: "card.answered", data: { messageId: mid, eventId: "EV7", rev: 1, actionId: "send", event: "action.press" } }],
+          hasMore: false,
+          lastSeq: 1,
+        },
+      }));
+      server.on("history", () => ({ ok: true, result: { messages: [message({ id: mid, kind: "card", card: { v: 1, title: card.title, blocks: [] }, cardV2: card })], hasMore: false } }));
+      server.on("send", (f) => ({ ok: true, result: { message: message({ id: "01JC0MSG000000000000000097", body: f.body }) } }));
+      const bot = new Bot({ url: "http://127.0.0.1:1", token: "t", WebSocket: server.WebSocket as never, stateStore: store, logLevel: "error", stopTimeoutMs: 500 });
+      bots.push(bot);
+      bot.onCardAnswer(async (ctx) => {
+        const r = await ctx.done({ title: "做完了", summary: "好了" });
+        expect(r.run).toBeNull();
+      });
+      await bot.start();
+      sends.push(await server.next((f) => f.t === "send"));
+      await bot.stop();
+    }
+    expect(sends[0]?.clientMsgId).toBe(`bot:${mid}:EV7:0`);
+    expect(sends[1]?.clientMsgId).toBe(sends[0]?.clientMsgId);
+    expect(sends[0]?.causeEventId).toBe("EV7");
+    expect((sends[0]?.cardV2 as CardV2).intent).toBe("done");
+  });
+
   test("an answer caught up after a restart reads the card from the history", async () => {
     const server = new FakeServer();
     const store = new MemoryStateStore();

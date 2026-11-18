@@ -55,21 +55,21 @@ bot.onMention(async (ctx) => {
 
 bot.onCardAnswer<{ choice: string }>(async (ctx) => {
   await ctx.markAnswered(); // the card shows as answered: a higher rev and no buttons
-  const target = { groupId: ctx.groupId, topicId: ctx.topicId };
   if (ctx.cancelled) {
-    await bot.done(target, { title: "不做了", summary: "按你的意思,先不做。" });
+    await ctx.done({ title: "不做了", summary: "按你的意思,先不做。" });
     await ctx.updateTopic({ status: "done", waitingOn: [] });
     return;
   }
   const plan = ctx.choice() === "full" ? "完整版" : "简单版";
   await ctx.updateTopic({ status: "in_progress", waitingOn: [] });
-  await bot.setPlan(target, [
+  await ctx.setPlan([
     { text: "读需求", state: "done" },
     { text: "等你选方案", state: "done" },
     { text: `做${plan}`, state: "current" },
   ]);
   // ... do the work here ...
-  await bot.done(target, {
+  // ctx.done has a stable id: when this handler runs again after a crash, the card is not posted twice.
+  await ctx.done({
     title: "做完了",
     summary: `${plan}做好了。`,
     evidence: [{ label: "测试全部通过", state: "pass" }],

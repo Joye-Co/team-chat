@@ -77,8 +77,10 @@ await bot.start();
 - **First start**: with no state file, the bot skips old history (`firstStart: "latest"`); pass
   `firstStart: "all"` to handle it. Groups the bot joins later are read from their start.
 - **Cursors are saved after handlers finish**, so a crash runs a handler again. Replies from a
-  handler context (`ctx.reply`, `ctx.stream`) use a clientMsgId made from the message id, so the
+  handler context (`ctx.reply`, `ctx.stream`, `ctx.ask`, `ctx.postCard`, `ctx.done`) use a
+  clientMsgId made from the message (or card event) id, so the
   server answers the retry with the first reply (`duplicate: true`) and nothing is posted twice.
+  `bot.send`, `bot.done` and the other `bot.*` posts make a random id unless you pass `clientMsgId`.
   Effects outside the chat (deploys, API calls) must be idempotent too.
 - **Handlers**: `onMention` (a message that mentions me), `onMessage` (any other message in a
   topic I follow), `onCardAction` (a press on one of my cards), `onCardAnswer` (1.1: an answer
@@ -294,7 +296,9 @@ gets `timeout` or `internal`, the server may have applied it, so the SDK sends t
 with the same `clientPatchId` (at most 3 times); a `duplicate: true` ack counts as applied for every
 part. It splits a merged patch only after an answer that says nothing was applied.
 `ctx.reply(...)` and `ctx.postCard(card)` answer with a new message; `ctx.resolve("ignored" |
-"failed", note?)` answers without a change (the note shows under the block for 5 s). A live-event
+"failed", note?)` answers without a change (the note shows under the block for 5 s).
+`ctx.done(card)` posts the done card as the answer and ends the run; `ctx.setPlan`, `ctx.endRun`
+and `ctx.setAcceptance` work in the card's topic as they do in a message handler. A live-event
 handler that returns without one of them makes the SDK send `ignored` (`failed` when it throws),
 so the person never waits for nothing. Outside a handler: `bot.patchCard(groupId, messageId, ops,
 { baseRev?, cause?, clientPatchId? })` (with `baseRev` it never rebases), `bot.resolveEvent`,
@@ -541,8 +545,9 @@ bun examples/echo-bot.ts          # 或者:node examples/echo-bot.ts
 - **第一次启动**:没有状态文件时跳过旧历史(`firstStart: "latest"`);传 `firstStart: "all"`
   则处理全部历史。之后新加入的群从头读取。
 - **处理函数结束后才保存游标**,所以进程崩溃后处理函数会再跑一次。处理函数里的
-  `ctx.reply`、`ctx.stream` 用由消息 id 生成的 clientMsgId,服务器对重试返回第一次的回复
-  (`duplicate: true`),不会重复发。聊天以外的副作用(部署、调用 API)也要自己做成幂等。
+  `ctx.reply`、`ctx.stream`、`ctx.ask`、`ctx.postCard`、`ctx.done` 用由消息(或卡片事件)id 生成的
+  clientMsgId,服务器对重试返回第一次的回复(`duplicate: true`),不会重复发。`bot.send`、`bot.done`
+  等 `bot.*` 的发送用随机 id,除非自己传 `clientMsgId`。聊天以外的副作用(部署、调用 API)也要自己做成幂等。
 - **处理函数**:`onMention`(@ 我的消息)、`onMessage`(我关注的话题里的其他消息)、
   `onCardAction`(有人按了我的卡片按钮)、`onCardAnswer`(1.1:有人回答了我用 `postCardV2` 发的
   v2 卡片;用 `ctx.markAnswered()` 关闭它)、`onEvent`(所有事件)、`onTransient`(输入中、在线、
@@ -603,6 +608,8 @@ Codex 的计划更新)生成。
   `onCardEvent` 收到实时事件,`onCardAnswer` 收到已存的回答(重启后也能收到)。用 `ctx.patch(ops)`
   原地修改卡片(SDK 自动带 `baseRev` 和 `cause`;`card.stale_rev` 时在最新 rev 上重试,最多 3 次;
   被限流时合并排队,每秒最多一次,只合并 cause 相同或没有 cause 的修改;合并的修改超时或遇到 `internal` 时,用同一个 `clientPatchId` 重发同一帧,`duplicate: true` 算作已应用),或用 `ctx.reply`、`ctx.postCard`、`ctx.resolve("ignored")` 回应。
+  `ctx.done(card)` 发「做完了」卡片作为回应并结束运行;`ctx.setPlan`、`ctx.endRun`、`ctx.setAcceptance`
+  在卡片所在的话题里和消息处理函数里一样可用。
   实时事件的处理函数没有回应时,SDK 自动发 `ignored`(出错时发 `failed`)。服务器只接受 30 分钟内的
   cause:重启后读到的更早的回答,SDK 回应时不带 cause。
 - **Card v2.1 构造函数**:`composeCard({ intent, title, blocks, ... })` 和 `blocks.*`:容器 `stack`、
