@@ -1,4 +1,5 @@
-// A refused card says everything that is wrong with it at once.
+// A refused card says everything that is wrong with it at once, and `replace` of a container
+// takes the children it no longer names with it.
 import { type CardV2, type CardV2Block, cardBlockEvents, type PatchOp } from "@chat/protocol";
 import { describe, expect, it } from "vitest";
 import { eventsOf } from "../src/cards2/inputs";
@@ -10,6 +11,7 @@ import { Client, clientMsgId } from "./helpers";
 const text = (id: string): CardV2Block => ({ type: "text", id, text: id }) as CardV2Block;
 const stack = (id: string, children: string[]): CardV2Block => ({ type: "stack", id, children }) as CardV2Block;
 const card = (blocks: CardV2Block[]): CardV2 => ({ v: 2, catalog: "tc.card/2.1", rev: 1, intent: "info", title: "t", fallback: "t", blocks }) as CardV2;
+const ids = (c: CardV2) => c.blocks.map((b) => b.id);
 const refused = (f: () => unknown): ApiError => {
   try {
     f();
@@ -97,6 +99,45 @@ describe("a refused card over the wire", () => {
     expect(ack.error.message).toContain("block ids are unique (used twice: a)");
     expect(ack.error.message).toContain("stack s names no block nope");
     c.close();
+  });
+});
+
+describe("replace of a container", () => {
+  const start = card([stack("s", ["a", "b"]), text("a"), text("b"), text("c")]);
+
+  it("removes a child the new block no longer names", () => {
+    expect(ids(applyPatch(start, [{ op: "replace", id: "s", block: stack("s", ["a"]) }]))).toEqual(["s", "a", "c"]);
+  });
+
+  it("removes every child when the container becomes a leaf", () => {
+    expect(ids(applyPatch(start, [{ op: "replace", id: "s", block: text("s") }]))).toEqual(["s", "c"]);
+  });
+
+  it("removes the children of a removed child container too", () => {
+    const nested = card([stack("s", ["t", "c"]), stack("t", ["a"]), text("a"), text("c")]);
+    expect(ids(applyPatch(nested, [{ op: "replace", id: "s", block: stack("s", ["c"]) }]))).toEqual(["s", "c"]);
+  });
+
+  it("keeps a child that another container takes in the same patch", () => {
+    const two = card([stack("s", ["a", "b"]), stack("t", ["c"]), text("a"), text("b"), text("c")]);
+    const next = applyPatch(two, [
+      { op: "replace", id: "s", block: stack("s", ["a"]) },
+      { op: "replace", id: "t", block: stack("t", ["c", "b"]) },
+    ]);
+    expect(ids(next)).toEqual(["s", "t", "a", "b", "c"]);
+  });
+
+  it("keeps a block inserted again at the top level in the same patch", () => {
+    const next = applyPatch(start, [
+      { op: "replace", id: "s", block: stack("s", ["a"]) },
+      { op: "remove", id: "b" },
+      { op: "insert", block: text("b") },
+    ]);
+    expect(ids(next)).toEqual(["s", "a", "c", "b"]);
+  });
+
+  it("leaves a replace that keeps its children alone", () => {
+    expect(ids(applyPatch(start, [{ op: "replace", id: "s", block: stack("s", ["b", "a"]) }]))).toEqual(["s", "a", "b", "c"]);
   });
 });
 

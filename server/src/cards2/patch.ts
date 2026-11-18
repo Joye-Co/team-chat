@@ -90,6 +90,8 @@ export function applyPatch(card: CardV2, ops: PatchOp[]): CardV2 {
     throw new ApiError("too_large", `at most ${MAX_CARD_V2_REVS} revs per card: post a new card (and close this one's ask) to go on`, "card.rev_limit");
   }
   const d = structuredClone(card) as unknown as Draft;
+  // Children a `replace` stopped naming: gone after the last op, unless an op gave them a place.
+  const dropped = new Set<string>();
   ops.forEach((op, i) => {
     const at = (id: string) => d.blocks.findIndex((b) => b.id === id);
     switch (op.op) {
@@ -103,11 +105,14 @@ export function applyPatch(card: CardV2, ops: PatchOp[]): CardV2 {
         const k = at(op.id);
         if (k < 0) fail(i, `no block ${op.id}`);
         if (op.block.id !== op.id) fail(i, "replace keeps the block id");
+        const kept = new Set(childIds(op.block));
+        for (const c of childIds(d.blocks[k])) if (!kept.has(c)) dropped.add(c);
         d.blocks[k] = structuredClone(op.block);
         break;
       }
       case "insert": {
         if (at(op.block.id) >= 0) fail(i, `block ${op.block.id} exists`);
+        dropped.delete(op.block.id);
         if (op.parent !== undefined) {
           const list = childList(d.blocks, op.parent);
           if (!list) fail(i, `no container ${op.parent}`);
@@ -164,8 +169,24 @@ export function applyPatch(card: CardV2, ops: PatchOp[]): CardV2 {
       }
     }
   });
+  dropOrphans(d, dropped);
   d.rev = card.rev + 1;
   return checkCard(d);
+}
+
+/**
+ * Removes the blocks of `dropped` that no container names any more, and their children in turn,
+ * so a replaced container's old children do not come back as top-level blocks.
+ */
+function dropOrphans(d: Draft, dropped: Set<string>): void {
+  const queue = [...dropped];
+  while (queue.length > 0) {
+    const id = queue.pop() as string;
+    const k = d.blocks.findIndex((b) => b.id === id);
+    if (k < 0 || d.blocks.some((b) => childIds(b).includes(id))) continue;
+    queue.push(...childIds(d.blocks[k]));
+    d.blocks.splice(k, 1);
+  }
 }
 
 /** Parses a card with the write schema: `invalid` names every problem, with the first one's reason. */
