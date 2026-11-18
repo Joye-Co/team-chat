@@ -182,6 +182,8 @@ fn open_this_computer(
     inputs: super::this_computer::Inputs,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
+    // The scene is the moment after 用这台电脑: one of the cards is this computer.
+    drop(services.provider.use_this_mac());
     open_with(
         services,
         AdminPage::Machines,
