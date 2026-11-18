@@ -701,8 +701,8 @@ pub fn tile_button(id: impl Into<ElementId>, side: Pixels, selected: bool, cx: &
         .when(selected, |b| b.bg(k.fill).border_1().border_color(k.label))
 }
 
-/// A tool on the dark media screen (lightbox, video): `ink` icon, white
-/// 10 % hover; a 32 square, or a `round` 36 circle for the pager arrows.
+/// A tool on the dark media screen (lightbox, video): `ink` icon, white fills from
+/// `tokens::lightbox`; a clear 32 square, or a `round` 36 circle for the pager arrows.
 pub fn screen_button(
     id: impl Into<ElementId>,
     sym: Sym,

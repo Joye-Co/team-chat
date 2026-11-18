@@ -45,7 +45,7 @@ use crate::{
     ui::{
         self, Sym,
         native::{
-            NativeType as _, screen_button,
+            NativeType as _, metrics, screen_button,
             tokens::{layout, lightbox as lb},
         },
     },
@@ -882,6 +882,8 @@ impl Render for Lightbox {
                 .child(
                     screen_button(id, sym, name, true, ink, cx)
                         .disabled(!enabled)
+                        // The rest fill stays on a disabled button, so the end of the set fades.
+                        .when(!enabled, |b| b.opacity(metrics::DISABLED_OPACITY))
                         .on_click(cx.listener(move |this, _, _, cx| this.step(delta, cx))),
                 )
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
