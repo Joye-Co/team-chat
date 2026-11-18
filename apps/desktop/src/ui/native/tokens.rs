@@ -1130,6 +1130,16 @@ pub mod metrics {
     pub const CODE_BLOCK_END_INSET: Pixels = px(5.);
     /// Under the last line of a code block.
     pub const CODE_BLOCK_PAD_BOTTOM: Pixels = space::S16;
+    /// Above and under the line of a one-line code block: it has no strip, its actions
+    /// sit on the line.
+    pub const CODE_BLOCK_ONE_LINE_PAD: Pixels = space::S12;
+    /// The actions of a one-line block, centered on its 46 height.
+    pub const CODE_BLOCK_ONE_LINE_ACTIONS_TOP: Pixels = px(11.);
+    /// The end of a one-line block's line: scrolled to its end, the code clears the actions.
+    pub const CODE_BLOCK_ONE_LINE_END: Pixels = px(160.);
+    /// The narrowest link under the login form: 换一个邮箱 with its padding, so the two
+    /// links of the code step are one width and sit even on the window's axis.
+    pub const LOGIN_LINK_MIN: Pixels = px(94.);
     /// A code block of a message longer than `CODE_FOLD_OVER` lines shows its
     /// first `CODE_FOLD_LINES` lines and a 展开 button (the gap between the two
     /// keeps a fold from hiding only a few lines).

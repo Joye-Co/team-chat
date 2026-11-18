@@ -780,21 +780,30 @@ impl LoginView {
             }
             Step::EmailCode => {
                 // Just sent again: the link counts down to when it is back.
-                let waiting = self.email_resend_wait > 0;
-                let label: SharedString = if waiting {
+                // The wait is news to read, not a control that is off: plain muted text
+                // with the link's inset.
+                let resend = if self.email_resend_wait > 0 {
                     let n = self.email_resend_wait.to_string();
-                    crate::copy::fill(l::EMAIL_RESEND_WAIT, &[("n", &n)]).into()
+                    div()
+                        .px(space::S12)
+                        .n_body()
+                        .text_color(k.secondary)
+                        .child(crate::copy::fill(l::EMAIL_RESEND_WAIT, &[("n", &n)]))
+                        .into_any_element()
                 } else {
-                    l::EMAIL_RESEND.into()
+                    let resend = quiet("login-email-resend", l::EMAIL_RESEND.into(), cx)
+                        .min_w(crate::ui::native::metrics::LOGIN_LINK_MIN);
+                    crate::ui::native::disabled_push(resend, busy, cx)
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.send_email_code(window, cx)),
+                        )
+                        .into_any_element()
                 };
-                let resend = quiet("login-email-resend", label, cx);
-                let resend = crate::ui::native::disabled_push(resend, busy || waiting, cx)
-                    .on_click(cx.listener(|this, _, window, cx| this.send_email_code(window, cx)));
                 let change = link("login-email-change", l::EMAIL_CHANGE, cx).on_click(
                     cx.listener(|this, _, window, cx| this.go_to(Step::Email, window, cx)),
                 );
-                // Two even halves meeting at the middle: the longer countdown grows away from
-                // 换一个邮箱, which stays where it is.
+                // Two even halves meeting at the middle, the links one width at rest: the
+                // longer countdown grows away from 换一个邮箱, which stays where it is.
                 return div()
                     .w_full()
                     .flex()
