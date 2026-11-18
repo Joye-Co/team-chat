@@ -101,6 +101,4 @@ crate::copy! {
     DEV_RAW = "原始事件（{n} 条，最新的在最后；点一条展开并复制）",
     DEV_CONTEXT = "存下这次带的上下文（.txt）",
     COPIED = "已复制",
-    // The failed run's footer: its second button turns the developer view on.
-    OPEN_DEVELOPER = "打开开发者视图",
 }

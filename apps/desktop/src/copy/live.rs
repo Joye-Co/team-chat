@@ -122,4 +122,8 @@ crate::copy! {
     LIVE_PHASE_JUST_NOW = "· 刚刚",
     // The empty screen of a run that still waits for a computer.
     LIVE_NO_LINES_QUEUED = "排到电脑后，这里会显示它的屏幕",
+    // The failed badge: the status word of §2.12 (the banner keeps 没做完).
+    LIVE_SHORT_FAILED = "失败",
+    // Under 在等电脑：电脑不在线: which computer, and what happens next.
+    LIVE_PHASE_OFFLINE_HINT = "{computer} 回来后会接着做",
 }

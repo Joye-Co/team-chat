@@ -130,7 +130,9 @@ pub fn phase_words(run: &BotRunSummary, n: &Names, name: impl Fn(&str) -> String
         ),
         RunPhase::Failed => (
             c::LIVE_PHASE_FAILED.to_string(),
-            c::LIVE_PHASE_FAILED.to_string(),
+            // The badge says 失败, the one failed word of every StatusBadge
+            // (§2.12); 没做完 stays the banner's title above the cause.
+            c::LIVE_SHORT_FAILED.to_string(),
             BadgeState::Failed,
         ),
         RunPhase::Stopped => (

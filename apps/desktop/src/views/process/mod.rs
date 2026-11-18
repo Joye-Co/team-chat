@@ -866,9 +866,9 @@ impl ProcessView {
         let log = (!developer).then(|| {
             push_button(
                 "process-run-log",
-                // Not 查看日志: that word opens this pane from the thread.
-                // This one turns the developer view on.
-                p::OPEN_DEVELOPER,
+                // §2.15: 重试 over 查看日志. Here it opens the raw record (the
+                // developer view), the log the alert above points at.
+                crate::copy::timeline::RUN_VIEW_LOG,
                 PushStyle::Outline,
                 PushSize::Regular,
                 cx,

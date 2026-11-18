@@ -98,7 +98,8 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
   卡住了，需要你看一下, {who} 暂停了 {member}, 你在操作 {computer}, {who} 在操作 {computer}, 已停下,
   替 {who} 交还, 去回复, 运行, 中止, 运行中, 成功, 失败, 已中止, 工作目录, 在访达中打开 / 在文件资源管理器中打开,
   留句话给 {member}, {who} 接管了 {member}, {who} 交还了 {member}, 跑了 {k} 条命令, 改了 {files}, and the
-  reminders {member} 还停着，等你交还 and {who} 接管 {member} 已经 {h} 小时. 暂停 stops one run for a
+  reminders {member} 还停着，等你交还 and {who} 接管 {member} 已经 {h} 小时, and under 电脑不在线 the line
+  {computer} 回来后会接着做. 暂停 stops one run for a
   while (继续 lets it go on); it is not a setting of the member. 暂停, 等你 and 完成 never share words.
 - The three 身份 of a team (design-roles): 所有者, 管理员 and 普通成员, with 身份 itself and the menu
   items 设为所有者, 设为管理员, 设为普通成员. 负责人 stays the member a 话题 is assigned to and is

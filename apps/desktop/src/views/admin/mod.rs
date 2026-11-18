@@ -250,6 +250,7 @@ impl AdminView {
                 String::new(),
                 cx,
             )
+            .on_admin_panel()
         });
         let ai = cx.new(|cx| {
             crate::views::settings::ai_service::AiServicePanel::new(services.clone(), window, cx)

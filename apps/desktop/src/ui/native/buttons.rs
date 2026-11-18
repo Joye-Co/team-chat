@@ -64,7 +64,7 @@ impl PushSize {
         metrics::BUTTON_REGULAR_RADIUS
     }
 
-    fn pad(self) -> Pixels {
+    pub fn pad(self) -> Pixels {
         match self {
             PushSize::Regular => metrics::BUTTON_REGULAR_PAD,
             PushSize::Small => metrics::BUTTON_SMALL_PAD,

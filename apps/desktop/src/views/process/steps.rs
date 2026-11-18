@@ -687,11 +687,13 @@ fn render_step(
     Some(el.into_any_element())
 }
 
-/// The glyph column of the timeline: 20 wide, the step's glyph on the first line.
+/// The glyph column of the timeline: 20 wide, the step's glyph on the first line (a 20
+/// line box).
 const RAIL: gpui::Pixels = px(20.);
 
-/// One step on the timeline: its 16 glyph in the 20 rail, a 1 pt line from under the glyph
-/// to the next step, and the step's content with 16 below it.
+/// One step on the timeline: its 16 glyph in the 20 rail, a 1 pt line from under the
+/// glyph's line box to the next step's, and the step's content with 16 below it. The
+/// line spans the whole gap, so under a one-line step it still joins the two glyphs.
 fn timeline_row(step: &ProcessStep, content: AnyElement, last: bool, cx: &App) -> AnyElement {
     let (g, color) = glyph(step, cx);
     let n = crate::ui::native::native_colors(cx);
@@ -704,10 +706,10 @@ fn timeline_row(step: &ProcessStep, content: AnyElement, last: bool, cx: &App) -
             el.child(
                 div()
                     .absolute()
-                    .left(RAIL / 2. - px(0.5))
-                    .top(px(24.))
-                    .bottom(px(2.))
-                    .w(px(1.))
+                    .left((RAIL - crate::ui::native::metrics::HAIRLINE) / 2.)
+                    .top(RAIL)
+                    .bottom(gpui::Pixels::ZERO)
+                    .w(crate::ui::native::metrics::HAIRLINE)
                     .bg(n.separator),
             )
         })
@@ -715,7 +717,7 @@ fn timeline_row(step: &ProcessStep, content: AnyElement, last: bool, cx: &App) -
             div()
                 .flex_none()
                 .w(RAIL)
-                .h(px(20.))
+                .h(RAIL)
                 .flex()
                 .items_center()
                 .justify_center()
