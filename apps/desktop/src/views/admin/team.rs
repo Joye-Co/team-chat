@@ -387,6 +387,14 @@ impl AdminView {
                         },
                         cx,
                     ))
+                    .action(Self::dismiss_action(
+                        "team-dismiss",
+                        |v| {
+                            v.team.error = None;
+                        },
+                        window,
+                        cx,
+                    ))
             }))
             .children(self.team.role_error.clone().map(|e| {
                 Alert::new(Sym::Failed, m::TEAM_ROLE_FAILED)
