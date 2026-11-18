@@ -761,10 +761,21 @@ impl AdminView {
                 menu
             };
             let menu = offer.iter().fold(menu, |menu, &role| {
-                let (services, id, view) = (services.clone(), id.clone(), view.clone());
+                let (services, id, view, name) =
+                    (services.clone(), id.clone(), view.clone(), name.clone());
                 menu.item(
-                    PopupMenuItem::new(crate::views::settings::set_role_text(role))
-                        .on_click(move |_, _, cx| set_role(&services, &id, role, &view, cx)),
+                    PopupMenuItem::new(crate::views::settings::set_role_text(role)).on_click(
+                        move |_, window, cx| {
+                            let (services, id, view) = (services.clone(), id.clone(), view.clone());
+                            crate::views::settings::ask_before_role(
+                                role,
+                                &name,
+                                move |_, cx| set_role(&services, &id, role, &view, cx),
+                                window,
+                                cx,
+                            );
+                        },
+                    ),
                 )
             });
             if !may_stop {
@@ -1025,14 +1036,24 @@ impl AdminView {
             let services = self.services.clone();
             let view = cx.entity();
             let mid = id.clone();
+            let name = x.name.clone();
             crate::ui::native::pull_down("team-level", level_word, PushSize::Small, window, cx)
                 .dropdown_menu(move |menu, _, _| {
                     offer.iter().fold(menu, |menu, &role| {
-                        let (services, id, view) = (services.clone(), mid.clone(), view.clone());
+                        let (services, id, view, name) =
+                            (services.clone(), mid.clone(), view.clone(), name.clone());
                         menu.item(
                             PopupMenuItem::new(crate::views::settings::set_role_text(role))
-                                .on_click(move |_, _, cx| {
-                                    set_role(&services, &id, role, &view, cx)
+                                .on_click(move |_, window, cx| {
+                                    let (services, id, view) =
+                                        (services.clone(), id.clone(), view.clone());
+                                    crate::views::settings::ask_before_role(
+                                        role,
+                                        &name,
+                                        move |_, cx| set_role(&services, &id, role, &view, cx),
+                                        window,
+                                        cx,
+                                    );
                                 }),
                         )
                     })

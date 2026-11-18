@@ -250,7 +250,7 @@ END;
 | `LEVEL_OWNER` / `LEVEL_MEMBER`（settings，不变） | 管理员 / 普通成员 |
 | admin.rs 的 `LEVEL_OWNER` / `LEVEL_MEMBER` / `ROLE_OWNER` | 管理员 / 普通成员 / 所有者（原来是「负责人」，和话题负责成员撞词） |
 | `HEADER_DESC` / `SETTINGS_CARD_DESC`（admin） | 所有者和管理员能打开 / 成员、用量、电脑、订阅账号和密钥都在这里。只有所有者和管理员能看到。 |
-| `SET_ROLE_OWNER` / `SET_ROLE_ADMIN` / `SET_ROLE_MEMBER` | 设为所有者 / 设为管理员 / 设为普通成员 |
+| `SET_ROLE_OWNER` / `SET_ROLE_ADMIN` / `SET_ROLE_MEMBER` | 设为所有者… / 设为管理员 / 设为普通成员 |
 | `ERR_ADMIN_ONLY` | 只有管理员能改这一项。 |
 | `ERR_OWNER_ONLY` | 只有所有者能改身份。 |
 | `ERR_LAST_OWNER` | 团队至少要有一位所有者。 |

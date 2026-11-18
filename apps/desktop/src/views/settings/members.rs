@@ -622,11 +622,21 @@ impl MembersPage {
                     menu
                 };
                 offer.iter().fold(menu, |menu, &role| {
-                    let (page, target) = (page.clone(), member.id.clone());
+                    let (page, target, name) =
+                        (page.clone(), member.id.clone(), member.name.clone());
                     menu.item(PopupMenuItem::new(super::set_role_text(role)).on_click(
-                        move |_, _, cx| {
-                            let target = target.clone();
-                            page.update(cx, |p, cx| p.set_role(target, role, cx));
+                        move |_, window, cx| {
+                            let (page, target) = (page.clone(), target.clone());
+                            super::ask_before_role(
+                                role,
+                                &name,
+                                move |_, cx| {
+                                    let target = target.clone();
+                                    page.update(cx, |p, cx| p.set_role(target, role, cx));
+                                },
+                                window,
+                                cx,
+                            );
                         },
                     ))
                 })
