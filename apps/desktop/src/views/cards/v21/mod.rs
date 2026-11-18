@@ -1011,6 +1011,61 @@ pub(crate) fn question(text: &str, cx: &App) -> Div {
 }
 
 #[cfg(test)]
+mod selection_tests {
+    use gpui::{
+        AppContext as _, Modifiers, MouseButton, ParentElement as _, Render, Styled as _, div,
+        point, px,
+    };
+
+    struct Title;
+
+    impl Render for Title {
+        fn render(
+            &mut self,
+            _: &mut gpui::Window,
+            _: &mut gpui::Context<Self>,
+        ) -> impl gpui::IntoElement {
+            div()
+                .size_full()
+                .child(gpui_base::SelectableText::new("title", "十月复盘的结论"))
+        }
+    }
+
+    /// The window root draws the selection layer, so a run of card text selects by dragging.
+    #[gpui::test]
+    fn a_drag_over_card_text_selects_it(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                let view = cx.new(|_| Title);
+                cx.new(|cx| gpui_base::Root::new(view, window, cx))
+            })
+            .unwrap()
+        });
+        let cx = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+        cx.run_until_parked();
+        cx.simulate_mouse_down(
+            point(px(1.), px(6.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.simulate_mouse_move(
+            point(px(400.), px(6.)),
+            Some(MouseButton::Left),
+            Modifiers::default(),
+        );
+        cx.simulate_mouse_up(
+            point(px(400.), px(6.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.run_until_parked();
+        let text = cx.update(|window, cx| gpui_base::TextSelection::selected_text(window, cx));
+        assert_eq!(text, "十月复盘的结论");
+    }
+}
+
+#[cfg(test)]
 mod ui_tests {
     use super::*;
     use gpui::AppContext as _;
