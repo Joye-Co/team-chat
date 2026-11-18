@@ -312,7 +312,9 @@ impl RailView {
         match old {
             Some((was, n)) if was == listed => {
                 // Keep the scroll position: replace only the rows past the
-                // old end, and measure the others again.
+                // old end. The list measures the rows it draws on every
+                // frame, so the others need no reset (which also dropped
+                // the heights a reveal scrolls by).
                 let keep = n.min(entries.len());
                 if n != entries.len() {
                     self.list.splice(keep..n, entries.len() - keep);
@@ -951,7 +953,7 @@ impl Render for RailView {
                                 .left(metrics::SIDEBAR_ROW_INSET)
                                 .right(metrics::SIDEBAR_ROW_INSET)
                                 .top_0()
-                                .h(px(1.))
+                                .h(crate::ui::native::tokens::layout::HAIRLINE)
                                 .bg(separator),
                         )
                     })
