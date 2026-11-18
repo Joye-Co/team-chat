@@ -206,10 +206,14 @@
       var sr = svg.getBoundingClientRect();
       var nodes = found.map(function (n) {
         var b = n.el.getBoundingClientRect();
-        return {
+        var out = {
           id: String(n.id).slice(0, 256), label: n.label, kind: n.kind,
           x: b.left - sr.left, y: b.top - sr.top, w: b.width, h: b.height
         };
+        // A participant's group runs down its lifeline: say how tall its box is.
+        var box = n.kind === 'participant' && n.el.querySelector('rect.actor');
+        if (box) out.head = box.getBoundingClientRect().height;
+        return out;
       });
       var text = new XMLSerializer().serializeToString(svg);
       emit('rendered', { reqId: reqId, svg: text, width: w, height: h, nodes: nodes, type: type });

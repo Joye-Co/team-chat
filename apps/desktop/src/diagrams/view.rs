@@ -91,11 +91,13 @@ pub fn hit_rect(node: &Node, scale: f32) -> (f32, f32, f32, f32) {
 
 /// The box a hover or focus outline draws around: a sequence participant's hit area
 /// runs down its whole lifeline, so its outline keeps to the head box at the top
-/// (E3: one outline around the box only).
+/// (E3: one outline around the box only). A diagram cached without the box's height
+/// falls back to an estimate.
 pub fn outline_rect(node: &Node, scale: f32) -> (f32, f32, f32, f32) {
     let (x, y, w, h) = hit_rect(node, scale);
     if node.kind == "participant" {
-        (x, y, w, h.min(w * 0.6))
+        let head = node.head.map_or(h.min(w * 0.6), |head| head * scale);
+        (x, y, w, head)
     } else {
         (x, y, w, h)
     }
@@ -850,6 +852,7 @@ mod tests {
             y,
             w,
             h,
+            head: None,
         }
     }
 

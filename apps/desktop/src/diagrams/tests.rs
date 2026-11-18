@@ -12,6 +12,7 @@ fn node(id: &str, label: &str) -> renderer::DiagramNode {
         y: 0.,
         w: 10.,
         h: 10.,
+        head: None,
     }
 }
 
