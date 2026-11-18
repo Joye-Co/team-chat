@@ -52,6 +52,17 @@ pub fn sorted(rows: &[Vec<String>], col: usize, asc: bool) -> Vec<usize> {
     ix
 }
 
+/// A keyed focus handle of a control the keyboard reaches, so its render can ask whether it
+/// has the focus.
+fn tab_stop(key: gpui::SharedString, window: &mut gpui::Window, cx: &mut App) -> gpui::FocusHandle {
+    window
+        .use_keyed_state(key, cx, |_, cx| {
+            cx.focus_handle().tab_index(0).tab_stop(true)
+        })
+        .read(cx)
+        .clone()
+}
+
 pub fn table(node: &Node, b: &CardV2Block, window: &mut gpui::Window, cx: &mut App) -> AnyElement {
     let CardV2Block::Table {
         id,
@@ -128,6 +139,14 @@ pub fn table(node: &Node, b: &CardV2Block, window: &mut gpui::Window, cx: &mut A
         Some(w) => el.flex_none().w(w),
         None => el.flex_1(),
     };
+    // A sort header knows its focus: the keyboard sees the sort glyph the pointer does.
+    let sort_focus: Vec<Option<gpui::FocusHandle>> = (0..columns.len())
+        .map(|ci| {
+            sortable
+                .unwrap_or(false)
+                .then(|| tab_stop(eid(node, format!("th-focus-{id}-{ci}")), window, cx))
+        })
+        .collect();
     let head = meta(div())
         .flex()
         .items_center()
@@ -143,8 +162,11 @@ pub fn table(node: &Node, b: &CardV2Block, window: &mut gpui::Window, cx: &mut A
             let (uie, block, col_label) = (ctx.ui.clone(), id.clone(), label.clone());
             let group = gpui::SharedString::from(format!("th-{id}-{ci}"));
             // The sort glyph shows on a header the table is not sorted by yet, under the
-            // pointer. A number column has it before the label: the label ends on the
-            // numbers' right edge.
+            // pointer or the keyboard focus. A number column has it before the label: the
+            // label ends on the numbers' right edge.
+            let focused = sort_focus[ci]
+                .as_ref()
+                .is_some_and(|h| h.is_focused(window));
             let glyph = match sorted_here {
                 Some((_, asc)) => Some(
                     ui::icon(
@@ -157,8 +179,9 @@ pub fn table(node: &Node, b: &CardV2Block, window: &mut gpui::Window, cx: &mut A
                 None if sortable.unwrap_or(false) => Some(
                     div()
                         .flex_none()
-                        .invisible()
-                        .group_hover(group.clone(), |s| s.visible())
+                        .when(!focused, |el| {
+                            el.invisible().group_hover(group.clone(), |s| s.visible())
+                        })
                         .child(ui::icon(Sym::Sort, px(12.), k.ink_3))
                         .into_any_element(),
                 ),
@@ -181,6 +204,7 @@ pub fn table(node: &Node, b: &CardV2Block, window: &mut gpui::Window, cx: &mut A
                 .when(sortable.unwrap_or(false) && numeric[ci], |el| {
                     el.relative().left(space::S4).pr(space::S4)
                 })
+                .when_some(sort_focus[ci].as_ref(), |el, h| el.track_focus(h))
                 .when(sortable.unwrap_or(false), |el| {
                     // A sort header is a control: a tab stop with Enter / Space, the row
                     // hover, the pointer, and the sort glyph while it is not sorted by.
@@ -326,7 +350,7 @@ pub fn table(node: &Node, b: &CardV2Block, window: &mut gpui::Window, cx: &mut A
     col.into_any_element()
 }
 
-pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) -> AnyElement {
+pub fn chart(node: &Node, b: &CardV2Block, window: &mut gpui::Window, cx: &mut App) -> AnyElement {
     let CardV2Block::Chart {
         id,
         kind,
@@ -345,15 +369,6 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
     // 引用提问: the points (bars) of the main series are parts (REFS §A2.2).
     let parts = b20::block_parts(ctx, b, cx);
     let xs = x.clone().unwrap_or_default();
-    let drawn = super::super::v2::chart_el(
-        ctx.id(format!("chart-{id}")),
-        *kind,
-        label.as_deref(),
-        unit.as_deref(),
-        &xs,
-        series,
-        cx,
-    );
     let selectable = super::interact::sends(ctx.card, b, "chart.select")
         && super::interact::may_emit(ctx, b)
         && !xs.is_empty()
@@ -423,10 +438,9 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
         .gap(space::S6)
         .min_w(px(0.));
     let main = series.first();
-    // The chosen point: its x and value, in the label row.
-    let tip = point.as_ref().and_then(|(skey, i)| {
-        let s = series.iter().find(|s| s.key() == skey)?;
-        let v = s.values.get(*i)?.as_f64()?;
+    // A point's x and value.
+    let point_text = |s: &crate::data::cards_v2::ChartSeries, i: usize| {
+        let v = s.values.get(i)?.as_f64()?;
         let shown = match unit {
             Some(u) => format!("{} {u}", b20::fmt_number(v)),
             None => b20::fmt_number(v),
@@ -434,11 +448,39 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
         Some(fill(
             c::CHART_POINT,
             &[
-                ("x", xs.get(*i).map(String::as_str).unwrap_or("")),
+                ("x", xs.get(i).map(String::as_str).unwrap_or("")),
                 ("value", &shown),
             ],
         ))
+    };
+    // The chosen point, under the plot.
+    let tip = point
+        .as_ref()
+        .and_then(|(skey, i)| point_text(series.iter().find(|s| s.key() == skey)?, *i));
+    // Walking the points reads them: the focused or hovered one says its value in the label
+    // row and takes the marker. Only Enter or a click picks it.
+    let point_focus: Vec<gpui::FocusHandle> = (0..xs.len())
+        .filter(|_| selectable)
+        .map(|i| tab_stop(eid(node, format!("pt-focus-{id}-{i}")), window, cx))
+        .collect();
+    let peek = selectable.then(|| {
+        let at = point_focus
+            .iter()
+            .position(|h| h.is_focused(window))
+            .or(node.ui.block(id).hot)
+            .filter(|i| point.as_ref().is_none_or(|(_, p)| p != i));
+        super::super::v2::ChartPeek(at.and_then(|i| Some((i, point_text(main?, i)?))))
     });
+    let drawn = super::super::v2::chart_el(
+        ctx.id(format!("chart-{id}")),
+        *kind,
+        label.as_deref(),
+        unit.as_deref(),
+        &xs,
+        series,
+        peek,
+        cx,
+    );
     let overlay = parts.as_ref().filter(|_| !selectable).and_then(|p| {
         crate::views::refs::cards::chart_overlay(
             p,
@@ -542,6 +584,7 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
                                 .relative()
                                 .flex_1()
                                 .h_full()
+                                .track_focus(&point_focus[i])
                                 // Each point is a tab stop: ← → walk them, Enter or
                                 // Space picks (the click). The tint is the column's own.
                                 .focus_row_with(true, crate::ui::native::Arrows::Grid, cx)
