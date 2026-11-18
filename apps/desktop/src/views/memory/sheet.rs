@@ -11,7 +11,7 @@ use gpui::{
 };
 use gpui_component::{
     WindowExt as _,
-    input::{InputEvent, InputState, TextareaState},
+    input::{InputEvent, InputState, Position, TextareaState},
     menu::{DropdownMenu as _, PopupMenuItem},
 };
 
@@ -369,8 +369,19 @@ pub fn open(target: Target, original: Option<Memory>, window: &mut Window, cx: &
     let first = Cell::new(true);
     let build = move |dialog: gpui_component::dialog::Dialog, window: &mut Window, cx: &mut App| {
         if first.replace(false) {
-            let text = sheet.read(cx).text.clone();
+            let (text, editing) = {
+                let form = sheet.read(cx);
+                (form.text.clone(), form.original.is_some())
+            };
             text.read(cx).focus_handle(cx).focus(window, cx);
+            // Editing goes on from the end of what is written; a column past
+            // the line's end lands on its end.
+            if editing {
+                text.update(cx, |s, cx| {
+                    let last = s.value().split('\n').count().saturating_sub(1) as u32;
+                    s.set_cursor_position(Position::new(last, u32::MAX), window, cx);
+                });
+            }
         }
         dialog.child(sheet.clone())
     };

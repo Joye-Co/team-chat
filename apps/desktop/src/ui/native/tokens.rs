@@ -766,6 +766,8 @@ pub mod shadow {
 pub mod size {
     use super::{avatar, height};
     use gpui::{Pixels, px};
+    /// The change badge's column on a 记忆更新 line: 可能过时 with its mark.
+    pub const MEMORY_BADGE_COLUMN: Pixels = px(88.);
     pub const BUTTON_SM: Pixels = height::SM;
     pub const BUTTON_CARD: Pixels = height::SM;
     pub const BUTTON_CARD_PAD: Pixels = super::space::S12;
