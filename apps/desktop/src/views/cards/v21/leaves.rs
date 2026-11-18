@@ -798,7 +798,7 @@ pub fn rating(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 .child(ui::icon(
                     if on { Sym::StarFill } else { Sym::Star },
                     px(20.),
-                    if on { k.ink } else { k.line_2 },
+                    if on { k.ink } else { k.ink_3 },
                 ))
         }));
     let word = value.map(
@@ -1263,9 +1263,34 @@ pub(crate) fn utc_offset(seconds: i32) -> String {
 /// The hint of a slots block whose zone is not this computer's at the first slot: the
 /// zone's id and its offset (`Asia/Tokyo`, `UTC+9`). `local`: this computer's offset then,
 /// in seconds. `None` when both read the same clock.
-pub(crate) fn zone_hint(tz: &str, at: Millis, local: i32) -> Option<(String, String)> {
+pub(crate) fn zone_hint(tz: &str, at: Millis, local: i32) -> Option<String> {
     let offset = SlotZone::of(tz).offset(at)?;
-    (offset != local).then(|| (tz.trim().to_string(), utc_offset(offset)))
+    (offset != local).then(|| {
+        let offset = utc_offset(offset);
+        match zone_name(tz.trim()) {
+            Some(zone) => fill(c::SLOTS_ZONE, &[("zone", zone), ("offset", &offset)]),
+            None => fill(c::SLOTS_ZONE_OFFSET, &[("offset", &offset)]),
+        }
+    })
+}
+
+/// The name people use for a time zone; the raw id is a system value, never shown.
+fn zone_name(tz: &str) -> Option<&'static str> {
+    Some(match tz {
+        "Asia/Shanghai" => c::ZONE_SHANGHAI,
+        "Asia/Hong_Kong" => c::ZONE_HONG_KONG,
+        "Asia/Taipei" => c::ZONE_TAIPEI,
+        "Asia/Tokyo" => c::ZONE_TOKYO,
+        "Asia/Seoul" => c::ZONE_SEOUL,
+        "Asia/Singapore" => c::ZONE_SINGAPORE,
+        "Europe/London" => c::ZONE_LONDON,
+        "Europe/Paris" => c::ZONE_PARIS,
+        "Europe/Berlin" => c::ZONE_BERLIN,
+        "America/New_York" => c::ZONE_NEW_YORK,
+        "America/Chicago" => c::ZONE_CHICAGO,
+        "America/Los_Angeles" => c::ZONE_LOS_ANGELES,
+        _ => return None,
+    })
 }
 
 /// `15:00–16:00`: a slot from its start to its end in `zone`; only the start when the
@@ -1436,12 +1461,7 @@ pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         }
         grid = grid.child(line);
     }
-    let grid = grid.children(zone_note.map(|(zone, offset)| {
-        hint(
-            fill(c::SLOTS_ZONE, &[("zone", &zone), ("offset", &offset)]),
-            cx,
-        )
-    }));
+    let grid = grid.children(zone_note.map(|text| hint(text, cx)));
     framed(node, b, grid.into_any_element(), cx)
 }
 
@@ -1825,7 +1845,17 @@ pub fn buttons(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App)
                 emit.send(&block, "button.press", json!({ "buttonId": bid }), None, cx);
             })
         }));
-    row.into_any_element()
+    if pressable {
+        return row.into_any_element();
+    }
+    // Dimmed buttons say why, in the card itself.
+    div()
+        .flex()
+        .flex_col()
+        .gap(space::S6)
+        .child(row)
+        .child(hint(fill(c::BUTTONS_INERT, &[("name", &ctx.author)]), cx))
+        .into_any_element()
 }
 
 // ---------------------------------------------------------------------------
@@ -2805,7 +2835,12 @@ mod schema_field_tests {
         // The hint names the zone and its offset when my clock reads another hour.
         assert_eq!(
             zone_hint("Asia/Tokyo", at, 8 * 3600),
-            Some(("Asia/Tokyo".to_string(), "UTC+9".to_string()))
+            Some("按东京时间（UTC+9）".to_string())
+        );
+        // A zone with no name here says only its offset, never the raw id.
+        assert_eq!(
+            zone_hint("Asia/Kolkata", at, 8 * 3600),
+            Some("按 UTC+5:30 的时间".to_string())
         );
         assert_eq!(
             zone_hint("Asia/Tokyo", at, 9 * 3600),
