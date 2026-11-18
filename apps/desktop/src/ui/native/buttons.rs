@@ -180,7 +180,10 @@ fn styled(b: Button, style: PushStyle, cx: &App) -> Button {
     let k = native_colors(cx);
     let l = look(style, &k);
     b.custom(variant(l, cx))
-        .bg(l.fill)
+        // A clear fill is not set on the button itself: gpui-component replays the button's
+        // own style inside each state, and a clear one there would erase the fill of an open
+        // menu trigger (a ⋯ whose menu is showing).
+        .when(l.fill.a > 0., |b| b.bg(l.fill))
         .text_color(l.text)
         .map(|b| match l.border {
             Some(edge) => b.border_1().border_color(edge).shadow(shadow::xs()),
