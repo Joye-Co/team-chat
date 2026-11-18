@@ -169,7 +169,7 @@ fn open_member_ai_menu(
     let handle = open(services, AdminPage::Members, cx)?;
     crate::views::settings::selftest::click_when_drawn(
         handle,
-        (817., 220.),
+        (833., 220.),
         gpui::MouseButton::Left,
         cx,
     )?;
@@ -453,7 +453,7 @@ fn open_roles_menu(
     )?;
     crate::views::settings::selftest::click_when_drawn(
         handle,
-        (818., 317.),
+        (832., 316.),
         gpui::MouseButton::Left,
         cx,
     )?;
