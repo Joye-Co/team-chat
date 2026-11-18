@@ -9,7 +9,7 @@ crate::copy! {
     RELAY_ALL_DONE = "都做完了",
     RELAY_STOPPED_AT = "停在 {name}：{reason}",
     RELAY_STOPPED_BY = "{name} 停止了。要继续，在下面再写一条顺序，比如 {example}",
-    RELAY_STOP = "停止…",
+    RELAY_STOP = "停止顺序…",
     RELAY_RETRY = "重试",
     RELAY_STOP_REFUSED = "没能停止",
     RELAY_RETRY_REFUSED = "没能重试",

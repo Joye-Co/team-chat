@@ -81,6 +81,8 @@
 撤回	Undo
 停用	Off
 停止…	Stop…
+停止顺序…	Stop order…
+这个顺序会停在这里，之后可以重试。	The order stops here. You can retry it later.
 接管	Take over
 交还	Hand back
 回放	Replay

@@ -81,6 +81,13 @@ pub const SCENES: &[Scene] = &[
         open: open_main,
     },
     Scene {
+        name: "topic-relay-stop-step",
+        about: "停止… on the working card of an order's current step: the alert says the order stops here and 重试 goes on",
+        start: Start::V2Relay(RelayShape::Working),
+        setup: |s, cx| v2_open_topic(s, d::DEV, d::T_VIRTUAL, cx),
+        open: open_stop_step,
+    },
+    Scene {
         name: "topic-relay-queued",
         about: "按顺序做 bar: Scout 排队, 等 Scout 手上的做完",
         start: Start::V2Relay(RelayShape::Queued),
@@ -139,6 +146,27 @@ pub const SCENES: &[Scene] = &[
         open: open_main,
     },
 ];
+
+/// The 话题 with the alert that 停止… on Scout's working card opens.
+fn open_stop_step(
+    s: crate::app::Services,
+    content: gpui::Size<gpui::Pixels>,
+    cx: &mut gpui::App,
+) -> Result<gpui::AnyWindowHandle, String> {
+    let handle = open_main(s.clone(), content, cx)?;
+    let run = s
+        .provider
+        .runs(d::DEV, d::T_VIRTUAL)
+        .into_iter()
+        .find(|r| r.id == d::RUN_VIRTUAL_CHECK)
+        .ok_or("no sample run")?;
+    handle
+        .update(cx, |_, window, cx| {
+            crate::views::process::confirm_stop(&s, &run, window, cx)
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(handle)
+}
 
 /// Puts `text` in the composer draft of 开发 / 虚拟列表 before the window opens.
 fn draft(s: &crate::app::Services, text: &str) {
