@@ -680,7 +680,9 @@ pub fn table(
         .flex_col()
         .child(
             Table::new()
-                .child(TableHeader::new().child(head))
+                // GPUI clips to a rectangle, so the frame's radius does
+                // not cut the header's fill: it rounds its own top corners.
+                .child(TableHeader::new().rounded_t(radius::CONTAINER).child(head))
                 .child(body),
         )
         .children(footer.map(|f| {
