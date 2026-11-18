@@ -1,7 +1,9 @@
 //! Screenshot self-test scenes for [`WebEmbed`] in the real main window (E2, B3): an
 //! HTML 产出 live inline in the first 话题 and another one (with local video and audio)
 //! in the 产出 pane, the same 话题 scrolled so the inline page goes under the toolbar,
-//! and with the message menu over the inline page.
+//! and with the message menu over the inline page. `web-embed-controls` shows two pages
+//! that set no style at all (a checklist inline, a form in the pane): the host's base
+//! stylesheet draws their buttons, fields, checkboxes and progress like the app's own.
 //!
 //! The scenes check themselves after the capture ([`verify`]): the inline page is shown,
 //! clipped under the toolbar (scrolled) or hidden with its snapshot in its place
@@ -35,6 +37,10 @@ pub enum Mode {
     Topic,
     Scrolled,
     Covered,
+    /// Pages without any style of their own: the base stylesheet's controls.
+    Controls,
+    /// The inline page did not load: 产出页面没有加载出来 with 重试 in its place.
+    Failed,
 }
 
 #[derive(Default)]
@@ -64,7 +70,17 @@ fn embed(artifact_id: &str, cx: &App) -> Option<Entity<WebEmbedState>> {
 }
 
 /// Writes the sample 产出 pages to a temp folder: the weekly report and the media page.
-fn write_pages() -> Option<(PathBuf, PathBuf)> {
+fn write_pages(mode: Mode) -> Option<(PathBuf, PathBuf)> {
+    if mode == Mode::Controls {
+        let root = std::env::temp_dir().join("team-chat-embed-controls-scene");
+        let _ = std::fs::remove_dir_all(&root);
+        let (list, form) = (root.join("list"), root.join("form"));
+        std::fs::create_dir_all(&list).ok()?;
+        std::fs::create_dir_all(&form).ok()?;
+        std::fs::write(list.join("index.html"), CHECKLIST_HTML).ok()?;
+        std::fs::write(form.join("index.html"), FORM_HTML).ok()?;
+        return Some((list, form));
+    }
     let root = std::env::temp_dir().join("team-chat-embed-scene");
     let _ = std::fs::remove_dir_all(&root);
     let (weekly, media) = (root.join("weekly"), root.join("media"));
@@ -86,25 +102,30 @@ pub fn open(
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
     PROBE.with(|p| *p.borrow_mut() = Probe::default());
-    let (weekly, media) = write_pages().ok_or("cannot write the sample pages")?;
+    let (weekly, media) = write_pages(mode).ok_or("cannot write the sample pages")?;
+    let (sample, inline_title, pane_title) = match mode {
+        Mode::Controls => (CONTROLS_SAMPLE, CHECKLIST_TITLE, FORM_TITLE),
+        _ => (SAMPLE, SAMPLE_TITLE, MEDIA_TITLE),
+    };
     store::forget(&MediaKey::new(INLINE_ID, 1), cx);
     // Messages after the page: a few in the plain scene, all of them when the 话题
     // scrolls the page under the toolbar.
     let after = match mode {
-        Mode::Scrolled => &SAMPLE[2..],
-        _ => &SAMPLE[2..4],
+        Mode::Scrolled => &sample[2..],
+        Mode::Controls => &sample[2..],
+        _ => &sample[2..4],
     };
     let authors = ["m-alex", "m-coder"];
     let mut extras = vec![
         Extra {
             author: authors[0].into(),
-            body: SAMPLE[0].into(),
+            body: sample[0].into(),
             streaming: false,
             artifact: None,
         },
         Extra {
             author: authors[1].into(),
-            body: SAMPLE[1].into(),
+            body: sample[1].into(),
             streaming: false,
             artifact: Some(MediaKey::new(INLINE_ID, 1)),
         },
@@ -121,13 +142,13 @@ pub fn open(
         vec![
             PageArt {
                 id: INLINE_ID,
-                title: SAMPLE_TITLE.into(),
+                title: inline_title.into(),
                 author: authors[1],
                 dir: weekly,
             },
             PageArt {
                 id: PANE_ID,
-                title: MEDIA_TITLE.into(),
+                title: pane_title.into(),
                 author: authors[1],
                 dir: media,
             },
@@ -222,6 +243,12 @@ async fn run(handle: AnyWindowHandle, mode: Mode, cx: &mut AsyncApp) -> Result<(
     })
     .await
     .ok_or("the 产出 pane page did not load")?;
+    if mode == Mode::Controls {
+        return controls(cx, &inline, &pane).await;
+    }
+    if mode == Mode::Failed {
+        return failed(cx, &inline).await;
+    }
     // Local media from the 产出's own files: a real click on the video starts it (a
     // page in the pane plays media only after the viewer's input).
     let at: serde_json::Value = serde_json::from_str(
@@ -258,7 +285,7 @@ return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2});})()",
     }
     let clip_top = crate::ui::native::window_chrome::sheet_top();
     match mode {
-        Mode::Topic => {}
+        Mode::Topic | Mode::Controls | Mode::Failed => {}
         Mode::Scrolled => {
             // Wheel the real thread until the page's top sits CUT above the clip edge.
             for _ in 0..12 {
@@ -359,6 +386,99 @@ return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2});})()",
     Ok(())
 }
 
+/// The failed scene: the inline page's load fails (as when its web content process ends
+/// twice). The Alert with 重试 takes its place and the blank native view hides; 重试
+/// loads the page again in a new view. The capture shows the failed state.
+async fn failed(cx: &mut AsyncApp, inline: &Entity<WebEmbedState>) -> Result<(), String> {
+    let fail = |cx: &mut AsyncApp| {
+        cx.update(|cx| {
+            let page = embed(INLINE_ID, cx).ok_or("the inline page is gone")?;
+            page.update(cx, |s, cx| s.fail_for_self_test(cx));
+            Ok::<_, String>(page)
+        })
+    };
+    let _ = inline;
+    let page = fail(cx)?;
+    wait_for(cx, Duration::from_secs(5), |cx| {
+        let s = page.read(cx);
+        (matches!(s.phase(), Phase::Failed(_)) && !s.shown()).then_some(())
+    })
+    .await
+    .ok_or("the failed page's native view still shows over the alert")?;
+    // 重试: a new view, the page loads again.
+    cx.update(|cx| page.update(cx, |s, cx| s.retry(cx)));
+    wait_for(cx, PAGE_WAIT, |cx| {
+        embed(INLINE_ID, cx).filter(|e| e.read(cx).shown())
+    })
+    .await
+    .ok_or("重试 did not load the page again")?;
+    let page = fail(cx)?;
+    wait_for(cx, Duration::from_secs(5), |cx| {
+        (!page.read(cx).shown()).then_some(())
+    })
+    .await
+    .ok_or("the page failed again but its view still shows")?;
+    cx.background_executor()
+        .timer(Duration::from_millis(250))
+        .await;
+    Ok(())
+}
+
+/// What the base stylesheet made of a page's plain controls, as the page computes it.
+const CONTROL_LOOK: &str = "(function(){var q=function(s){var e=document.querySelector(s);return e?getComputedStyle(e):null},\
+b=q('button:not([data-tc])'),p=q('button[data-tc=primary]'),d=q('button:disabled,input:disabled'),r=getComputedStyle(document.documentElement);\
+return JSON.stringify({height:b&&b.height,radius:b&&b.borderTopLeftRadius,border:b&&b.borderTopWidth,family:b&&b.fontFamily===getComputedStyle(document.body).fontFamily,\
+primary:p&&p.backgroundColor,ink:getComputedStyle(document.body).color,disabled:d&&d.opacity,\
+vars:['--tc-radius','--tc-gap','--tc-danger','--tc-font-mono','--tc-fg','--tc-bg'].every(function(v){return r.getPropertyValue(v).trim()!==''})});})()";
+
+/// The controls scene: both pages wrote no style, so what their controls look like is
+/// the host's base stylesheet. Checks it in each page, then puts the keyboard focus in
+/// the form's first field so the capture shows the focus ring.
+async fn controls(
+    cx: &mut AsyncApp,
+    inline: &Entity<WebEmbedState>,
+    pane: &Entity<WebEmbedState>,
+) -> Result<(), String> {
+    for (page, what) in [(inline, "the checklist"), (pane, "the form")] {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let look: serde_json::Value =
+                serde_json::from_str(&eval(cx, page, CONTROL_LOOK).await).unwrap_or_default();
+            let ok = look["height"] == "28px"
+                && look["radius"] == "8px"
+                && look["border"] == "1px"
+                && look["family"] == true
+                && look["vars"] == true
+                // The primary button is filled with the text color.
+                && look["primary"] == look["ink"]
+                && (look["disabled"].is_null() || look["disabled"] == "0.5");
+            if ok {
+                break;
+            }
+            if Instant::now() > deadline {
+                return Err(format!(
+                    "{what} did not get the base control styles: {look}"
+                ));
+            }
+            cx.background_executor()
+                .timer(Duration::from_millis(100))
+                .await;
+        }
+    }
+    eval(
+        cx,
+        pane,
+        "(function(){var e=document.getElementById('name');e.focus();e.setSelectionRange(e.value.length,e.value.length);return 'ok'})()",
+    )
+    .await;
+    painted(cx, inline, "the checklist").await?;
+    painted(cx, pane, "the form").await?;
+    cx.background_executor()
+        .timer(Duration::from_millis(250))
+        .await;
+    Ok(())
+}
+
 /// Waits until `page` has drawn: the browser runs animation-frame callbacks only when it
 /// draws the page, so two of them in a row mean a picture of the page exists.
 async fn painted(
@@ -418,6 +538,36 @@ const SAMPLE: &[&str] = &[
     "下周的周报还用这个格式。",
     "可以，数字我会自动更新。",
 ];
+
+const CHECKLIST_TITLE: &str = "发版前检查";
+const FORM_TITLE: &str = "分享会报名";
+const CONTROLS_SAMPLE: &[&str] = &[
+    "发版前还差什么？列个清单，大家勾一下。",
+    "清单在下面，勾完三项就可以发。报名表放在右边的产出里了。",
+    "签名我下午来做。",
+];
+
+/// A checklist that sets no style: every control is the base stylesheet's.
+const CHECKLIST_HTML: &str = r#"<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"></head><body>
+<p><small>勾完三项就可以发</small></p>
+<p><label><input type="checkbox" checked>冒烟测试通过</label></p>
+<p><label><input type="checkbox" checked>更新日志写好了</label></p>
+<p><label><input type="checkbox">安装包签名</label></p>
+<p><progress value="2" max="3"></progress></p>
+<p><button data-tc="primary">发版</button> <button>再等等</button> <button disabled>回滚</button></p>
+</body></html>"#;
+
+/// A form that sets no style: fields, a select, radios, a disabled field and buttons.
+const FORM_HTML: &str = r#"<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"></head><body>
+<h3>周四分享会</h3>
+<p><small>填好后点报名，Coder 会把你加进名单</small></p>
+<p><label>小组<br><input id="name" value="增长小组"></label></p>
+<p><label>哪一场<br><select><option>周四下午 3 点</option><option>周五上午 10 点</option></select></label></p>
+<fieldset><legend>怎么参加</legend><label><input type="radio" name="how" checked>到场</label> <label><input type="radio" name="how">线上</label></fieldset>
+<p><label>想听什么<br><textarea placeholder="可以不写"></textarea></label></p>
+<p><input placeholder="邀请码（还没开放）" disabled></p>
+<p><button data-tc="primary">报名</button> <button>取消</button></p>
+</body></html>"#;
 
 /// A 2 s test pattern (H.264, 384 x 216).
 const CLIP_MP4: &[u8] = include_bytes!("preview/clip.mp4");
