@@ -20,7 +20,6 @@ export const dist = join(here, "dist");
 const media = process.env.WEBSITE_MEDIA ?? join(homedir(), ".config/team-chat/website/media");
 const PAGES: Record<string, string> = { "index.html": "zh", "en.html": "en" };
 
-
 // The origin as scheme://host[:port], without a path or a trailing slash; undefined when the variable is not set.
 function siteOrigin(): string | undefined {
   const raw = process.env.WEBSITE_ORIGIN?.trim();

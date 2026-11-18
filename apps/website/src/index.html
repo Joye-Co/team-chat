@@ -27,7 +27,8 @@
 <link rel="alternate" hreflang="en" href="en">
 <!-- /no-origin -->
 <link rel="icon" href="img/icon.png">
-<script>try{var t=localStorage.getItem("theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
+<!-- before the stylesheets: apply the saved theme, and fetch the first hero screenshot of the theme on show (never the hidden one) -->
+<script>(function(d){var t,l;try{t=localStorage.getItem("theme")}catch(e){}if(t==="light"||t==="dark")d.documentElement.dataset.theme=t;else t=window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";l=d.createElement("link");l.rel="preload";l.as="image";l.href="img/ui/ask-"+t+".webp";l.setAttribute("fetchpriority","high");d.head.appendChild(l)})(document)</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&display=swap" onload="this.onload=null;this.rel='stylesheet'">
@@ -73,7 +74,7 @@
       <li class="ps" data-img="img/ui/desk" data-f="20,37,56,34"><button type="button"><span class="n">4</span>首页集中拍板</button><div class="ps-b"><div class="ps-bi"><p>所有待确认的卡点、高危审批和方案选择自动汇入首页，点一下就能接着跑。</p><span class="bar"></span></div></div></li>
       <li class="ps" data-img="img/ui/topic-merged" data-f="22.5,44,45,43"><button type="button"><span class="n">5</span>带证据交付</button><div class="ps-b"><div class="ps-bi"><p>代码改动、真实测试数与操作录屏一并交回话题，经你点头批准后自动合并。</p><span class="bar"></span></div></div></li>
     </ol>
-    <div class="pf"><img class="l" src="img/ui/ask-light.webp" alt="" width="2880" height="1800" fetchpriority="high"><img class="d" src="img/ui/ask-dark.webp" alt="" width="2880" height="1800" loading="lazy"></div>
+    <div class="pf"><img class="l" src="img/ui/ask-light.webp" alt="" width="2880" height="1800" loading="lazy"><img class="d" src="img/ui/ask-dark.webp" alt="" width="2880" height="1800" loading="lazy"></div>
     </div>
     </div>
     </div>

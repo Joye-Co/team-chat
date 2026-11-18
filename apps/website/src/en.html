@@ -27,7 +27,8 @@
 <link rel="alternate" hreflang="en" href="en">
 <!-- /no-origin -->
 <link rel="icon" href="img/icon.png">
-<script>try{var t=localStorage.getItem("theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
+<!-- before the stylesheets: apply the saved theme, and fetch the first hero screenshot of the theme on show (never the hidden one) -->
+<script>(function(d){var t,l;try{t=localStorage.getItem("theme")}catch(e){}if(t==="light"||t==="dark")d.documentElement.dataset.theme=t;else t=window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";l=d.createElement("link");l.rel="preload";l.as="image";l.href="img/en/ui/ask-"+t+".webp";l.setAttribute("fetchpriority","high");d.head.appendChild(l)})(document)</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" onload="this.onload=null;this.rel='stylesheet'">
@@ -73,7 +74,7 @@
       <li class="ps" data-img="img/en/ui/desk" data-f="19.8,37.3,50.6,33"><button type="button"><span class="n">4</span>One approval queue</button><div class="ps-b"><div class="ps-bi"><p>Every pending decision and sign-off lands on Home so you can unblock agents in one click.</p><span class="bar"></span></div></div></li>
       <li class="ps" data-img="img/en/ui/topic-merged" data-f="20.3,39.5,50,47"><button type="button"><span class="n">5</span>Shipped with proof</button><div class="ps-b"><div class="ps-bi"><p>Diffs, verified test counts, and screen recordings arrive together. Approve, and it merges cleanly.</p><span class="bar"></span></div></div></li>
     </ol>
-    <div class="pf"><img class="l" src="img/en/ui/ask-light.webp" alt="" width="2880" height="1800" fetchpriority="high"><img class="d" src="img/en/ui/ask-dark.webp" alt="" width="2880" height="1800" loading="lazy"></div>
+    <div class="pf"><img class="l" src="img/en/ui/ask-light.webp" alt="" width="2880" height="1800" loading="lazy"><img class="d" src="img/en/ui/ask-dark.webp" alt="" width="2880" height="1800" loading="lazy"></div>
     </div>
     </div>
     </div>
