@@ -446,7 +446,7 @@ async fn controls(
                 serde_json::from_str(&eval(cx, page, CONTROL_LOOK).await).unwrap_or_default();
             let ok = look["height"] == "28px"
                 && look["radius"] == "8px"
-                && look["border"] == "1px"
+                && look["border"] == "0px"
                 && look["family"] == true
                 && look["vars"] == true
                 // The primary button is filled with the text color.

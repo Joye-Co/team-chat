@@ -21,7 +21,7 @@ crate::copy! {
     LINK_OPEN = "打开",
     LINK_CANCEL = "取消",
     LOAD_FAILED = "产出页面没有加载出来",
-    LOAD_FAILED_LINE = "可以再试一次。",
+    LOAD_FAILED_LINE = "页面的文件没有读出来，可以再试一次。",
     LOAD_RETRY = "重试",
     NEW = "上传产出",
     NEW_VERSION = "上传新版本",
