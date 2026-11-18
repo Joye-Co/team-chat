@@ -185,6 +185,33 @@ impl LivePane {
         Some((me.to_string(), role, !m.is_bot() && !m.deactivated))
     }
 
+    /// Whether the viewer can start stopped `run` again: a person who asked
+    /// for it or an owner (the server's rule), while it is the 话题's newest
+    /// run and no order of 按顺序做 is under way (a lone run would leave it).
+    fn may_restart(&self, run: &BotRunSummary, cx: &App) -> bool {
+        let Some((g, t, _)) = self.target(cx) else {
+            return false;
+        };
+        let Some((me, role, person)) = self.viewer_of() else {
+            return false;
+        };
+        let p = &self.services.provider;
+        let newest = p
+            .runs(&g, &t)
+            .into_iter()
+            .max_by_key(|r| r.started_at.unwrap_or(r.created_at))
+            .is_some_and(|r| r.id == run.id);
+        let in_order = p
+            .topic(&g, &t)
+            .and_then(|t| t.relay)
+            .is_some_and(|r| r.state != "done");
+        person
+            && newest
+            && !in_order
+            && (crate::views::process::asked_by(run, Some(&me))
+                || role == crate::data::TeamRole::Owner)
+    }
+
     /// A new run with the same request; a refusal is an alert.
     fn retry_run(&self, bot_id: &str, run_id: &str, cx: &mut Context<Self>) {
         use crate::copy::timeline as t;
@@ -679,12 +706,7 @@ impl LivePane {
             ),
             _ => return None,
         };
-        // The server lets the requester or an owner start it again.
-        let may_restart = crate::views::process::asked_by(run, me.as_deref())
-            || self
-                .viewer_of()
-                .is_some_and(|(_, role, _)| role == crate::data::TeamRole::Owner);
-        let restart = (words.phase == RunPhase::Stopped && may_restart).then(|| {
+        let restart = (words.phase == RunPhase::Stopped && self.may_restart(run, cx)).then(|| {
             let (bot_id, run_id) = (run.bot_id.clone(), run.id.clone());
             push_button(
                 "live-restart",
