@@ -237,6 +237,10 @@ pub struct ProcessView {
     /// The run whose 重试 waits for its answer: the button shows its spinner and takes no
     /// second press.
     retrying: Option<String>,
+    /// The body's scroll position, moved by 查看日志.
+    scroll: gpui::ScrollHandle,
+    /// 查看日志 was pressed: the next frame scrolls to the raw events at the end.
+    reveal_log: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -277,6 +281,8 @@ impl ProcessView {
             titled: true,
             runs_expanded: false,
             retrying: None,
+            scroll: gpui::ScrollHandle::new(),
+            reveal_log: preview::take_reveal_log(),
             _subscriptions: subscriptions,
         };
         this.open_topic(open, cx);
@@ -898,11 +904,7 @@ impl ProcessView {
                 PushSize::Regular,
                 cx,
             )
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.services
-                    .nav
-                    .update(cx, |nav, cx| nav.set_developer_view(true, cx));
-            }))
+            .on_click(cx.listener(|this, _, _, cx| this.open_log(cx)))
         });
         let n = native_colors(cx);
         Some(
@@ -919,6 +921,16 @@ impl ProcessView {
                 .children(log.map(|b| b.w_full()))
                 .into_any_element(),
         )
+    }
+
+    /// 查看日志: the developer view, scrolled to the raw events at its end (the
+    /// newest is last, so the failure is in view).
+    fn open_log(&mut self, cx: &mut Context<Self>) {
+        self.reveal_log = true;
+        self.services
+            .nav
+            .update(cx, |nav, cx| nav.set_developer_view(true, cx));
+        cx.notify();
     }
 
     fn render_developer_tail(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1138,6 +1150,9 @@ impl Render for ProcessView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = theme::colors(cx);
         let developer = self.services.nav.read(cx).developer_view;
+        if developer && std::mem::take(&mut self.reveal_log) {
+            self.scroll.scroll_to_bottom();
+        }
         let section = |title: &'static str, cx: &App| {
             div()
                 .pt(space::S16)
@@ -1150,6 +1165,7 @@ impl Render for ProcessView {
             .flex_1()
             .min_h(px(0.))
             .overflow_y_scroll()
+            .track_scroll(&self.scroll)
             .px(space::S16)
             .pb(space::S24);
         if self.runs.is_empty() {

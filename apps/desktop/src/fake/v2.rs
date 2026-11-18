@@ -1496,6 +1496,26 @@ impl V2Samples {
         });
     }
 
+    /// The needs-reply scene: the report of the ended run, which asks for the reply.
+    pub fn report_on_live_run(&self) {
+        let mut report = message(
+            DEV,
+            T_VIRTUAL,
+            3,
+            FORGE,
+            at(9, 54),
+            "压测跑完了：一万条消息滚动最低 57 fps，内存 212 MB。第 8,000 条的跳转还没检查，要我接着查吗？",
+        );
+        report.id = format!("{T_VIRTUAL}-report");
+        self.with(|d| {
+            d.messages.entry(T_VIRTUAL.into()).or_default().push(report);
+            // The 话题 waits on me for the reply, as the run's pane says.
+            if let Some(t) = d.topics.iter_mut().find(|t| t.id == T_VIRTUAL) {
+                t.waiting_on = vec![ME.into()];
+            }
+        });
+    }
+
     /// The phase scenes of an ended run: the live run itself ends (`status`,
     /// its end, why), so the thread, the plan and the replay agree with the
     /// phase. `all_done` finishes every step of its plan (完成).
@@ -2289,7 +2309,7 @@ impl ChatProvider for V2Samples {
     ) -> crate::data::AdminReply<crate::data::memory::MemoryUpdate> {
         self.inner.undo_memory_update(update_id)
     }
-    /// 需要你批准的事 of the samples: the team's rules (`GET /v1/settings/approvals`).
+    /// 要先批准的事 of the samples: the team's rules (`GET /v1/settings/approvals`).
     fn approval_defaults(&self) -> crate::data::AdminReply<crate::data::ApprovalDefaults> {
         crate::data::reply_now(Ok(crate::data::ApprovalDefaults {
             delete_data: false,

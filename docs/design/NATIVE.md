@@ -444,7 +444,7 @@ Panes:
   name Large title, 岗位 and who they report to `secondary`, a row of push buttons (`交代…`
   default, `单独问`, `暂停`), then grouped sections with label/value rows: 现在在做, 这周 (完成的
   话题 6 · 平均 38 分钟; 产出 4; 成本 ¥132 / 上限 ¥300 with a 4 pt bar), 最近交付 (rows),
-  在哪干活, 需要你批准的事, 能用的工具, 用到的决定. No stat tiles, no terminal preview tile.
+  在哪干活, 要先批准的事, 能用的工具, 用到的决定. No stat tiles, no terminal preview tile.
 
 ### 9.6 产出
 - Finder-like: toolbar segmented `square.grid.2x2` / `list.bullet`, a sort pop-up, search.

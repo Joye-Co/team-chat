@@ -4,7 +4,7 @@
 //! a Contacts card: avatar 64, the name as the Large title, 岗位 and who
 //! they report to, push buttons (交代… default, 单独问, 暂停), then grouped
 //! forms with label/value rows: 现在在做, 这周, 最近交付, 最近的问题, 在哪干活,
-//! 需要你批准的事, 能用的工具, 用到的决定. Stats come from the runs cache
+//! 要先批准的事, 能用的工具, 用到的决定. Stats come from the runs cache
 //! and `BotRun.usage`; 添加 and 修改 reuse the settings forms.
 
 pub mod plan;
@@ -80,7 +80,7 @@ pub struct MembersPage {
     retrying: HashSet<String>,
     /// 重试 the server refused, by run id.
     retry_errors: HashMap<String, AdminError>,
-    /// 需要你批准的事: the team's rules (`GET /v1/settings/approvals`); `None` before the
+    /// 要先批准的事: the team's rules (`GET /v1/settings/approvals`); `None` before the
     /// first answer.
     approvals: Option<Result<ApprovalDefaults, AdminError>>,
     approvals_loading: bool,
@@ -155,7 +155,7 @@ impl MembersPage {
         }
     }
 
-    /// Reads the team's approval rules (需要你批准的事); the answer redraws the page.
+    /// Reads the team's approval rules (要先批准的事); the answer redraws the page.
     fn load_approvals(&mut self, cx: &mut Context<Self>) {
         if self.approvals_loading {
             return;
@@ -303,7 +303,7 @@ pub(crate) fn ai_member_word(
     }
 }
 
-/// 需要你批准的事: the actions the team's rules make an AI member ask before, in the
+/// 要先批准的事: the actions the team's rules make an AI member ask before, in the
 /// order of 设置 › 成员 › 默认规则. The spend limit is not one: it only reminds the member
 /// ([`spend_reminder`]).
 pub(crate) fn approval_items(r: ApprovalDefaults) -> Vec<String> {
@@ -320,7 +320,7 @@ pub(crate) fn approval_items(r: ApprovalDefaults) -> Vec<String> {
     .collect()
 }
 
-/// The line under 需要你批准的事 when the team has a spend limit.
+/// The line under 要先批准的事 when the team has a spend limit.
 pub(crate) fn spend_reminder(r: ApprovalDefaults) -> Option<String> {
     let n = crate::views::settings::widgets::grouped(r.max_spend_cny?.into());
     Some(fill(c::MEMBERS_SPEND_REMINDER, &[("n", &n)]))
@@ -1556,7 +1556,7 @@ impl MembersPage {
         .into_any_element()
     }
 
-    /// 需要你批准的事 (card): what the team's rules make an AI member ask before
+    /// 要先批准的事 (card): what the team's rules make an AI member ask before
     /// (`GET /v1/settings/approvals`), who approves as the description, and `修改…`
     /// (设置 › 成员) in the header. A person needs no approval.
     fn approvals(&self, e: &Entry, cx: &mut Context<Self>) -> AnyElement {

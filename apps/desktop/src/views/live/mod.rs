@@ -709,7 +709,7 @@ impl LivePane {
         let since = phase::phase_since(run, words.phase).map(|t| phase::lasted(t, now));
         let since = since.map(|s| s.trim_start_matches(['·', ' ']).to_string());
         // A state color sits on the icon (§2.15); the title stays neutral, and
-        // only a failed run's frame takes the destructive line.
+        // only the frame of a failed or stuck run takes the destructive line.
         let mut icon_ink = n.label;
         // The computer by name, for the lines about an away computer.
         let computer = screen
@@ -744,7 +744,7 @@ impl LivePane {
                     None => c::LIVE_HELD_OFFLINE_HINT.to_string(),
                 };
                 (
-                    Sym::Pointer,
+                    Sym::Alert,
                     fill(c::LIVE_PHASE_HELD_AWAY, &[("computer", &computer)]),
                     Some(hint),
                 )
@@ -988,7 +988,7 @@ impl LivePane {
                 .py(space::S12)
                 .rounded(crate::ui::native::tokens::radius::CONTAINER)
                 .border_1()
-                .border_color(if words.phase == RunPhase::Failed {
+                .border_color(if words.badge == BadgeState::Failed {
                     crate::ui::native::feedback::alert_colors(
                         crate::ui::native::feedback::AlertTone::Destructive,
                         &n,
@@ -2050,7 +2050,10 @@ impl LivePane {
             match p.state {
                 PlanState::Current | PlanState::Waiting => {
                     let mark: AnyElement = if held {
-                        ui::icon(Sym::Pause, theme::icon::TAG, k.ink_3).into_any_element()
+                        // The header badge's own pause mark.
+                        state_mark(words.badge, &native_colors(cx)).unwrap_or_else(|| {
+                            ui::icon(Sym::Pause, theme::icon::TAG, k.ink_3).into_any_element()
+                        })
                     } else if words.phase == RunPhase::Done {
                         // A step left open by a run that is done: a quiet ring.
                         div()

@@ -145,5 +145,5 @@ crate::copy! {
     LIVE_GO_APPROVE = "去批准",
     // 替 {who} 交还 asks first: it ends a colleague's hold of the computer.
     LIVE_HAND_BACK_FOR_ASK_TITLE = "替 {who} 交还？",
-    LIVE_HAND_BACK_FOR_ASK_BODY = "{who} 正在运行的命令会中止，也不能再操作这台电脑，{member} 会接着做。",
+    LIVE_HAND_BACK_FOR_ASK_BODY = "{who} 将不能再操作这台电脑，\n运行中的命令会中止。\n{member} 会接着做。",
 }

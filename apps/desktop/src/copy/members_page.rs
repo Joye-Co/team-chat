@@ -7,7 +7,7 @@ crate::copy! {
     MEMBERS_FILTER_WAITING = "等你",
     MEMBERS_THIS_WEEK = "这周",
     MEMBERS_RECENT_DELIVERED = "最近交付",
-    MEMBERS_NEEDS_APPROVAL = "需要你批准的事",
+    MEMBERS_NEEDS_APPROVAL = "要先批准的事",
     MEMBERS_TOOLS = "能用的工具",
     MEMBERS_RECENT_PROBLEMS = "最近的问题",
     MEMBERS_HAND_OVER = "交代给 {name}",
@@ -118,6 +118,6 @@ crate::copy! {
     MEMBERS_GROUP_QUOTED = "「{group}」",
     // The list column while the team cannot be reached.
     MEMBERS_LIST_OFFLINE = "连上后显示成员",
-    // Under 需要你批准的事: the spend limit only reminds the member, nothing is held for approval.
+    // Under 要先批准的事: the spend limit only reminds the member, nothing is held for approval.
     MEMBERS_SPEND_REMINDER = "单次花费超过 ¥{n} 时提醒成员",
 }

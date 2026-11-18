@@ -183,13 +183,16 @@ pub fn ask_row(
         .or_else(|| a.answered.as_ref().map(|r| (r.record.clone(), r.at, false)));
     // Each name in a bidi isolate, so a right-to-left name keeps the
     // order of the line.
-    let from = fill(
-        c::DESK_ASK_FROM,
-        &[
-            ("name", &isolate(&snap.name_by_avatar(&a.item.from))),
-            ("topic", &isolate(&topic)),
-        ],
-    );
+    let name = isolate(&snap.name_by_avatar(&a.item.from));
+    // An ask titled like its 话题 names the asker alone: the title said the rest.
+    let from = if a.item.title == topic {
+        name
+    } else {
+        fill(
+            c::DESK_ASK_FROM,
+            &[("name", &name), ("topic", &isolate(&topic))],
+        )
+    };
     let (time, second, status, actions): (String, AnyElement, AnyElement, Option<AnyElement>) =
         match &done {
             Some((record, at, undoable)) => {
