@@ -33,7 +33,11 @@ bot.onCardAnswer<{ choice: string }>(async (ctx) => {
 await bot.start();
 ```
 
-See `examples/ask-bot.ts` for acknowledgements, asks, side chats (`onAside`) and done cards.
+Three examples run as they are (`bun examples/<name>.ts`): `examples/ask-bot.ts` (acknowledgements, an
+ask, side chats with `onAside`, done cards), `examples/report-bot.ts` (a Card v2.1 that changes in
+place on a chart point, an inline button, a live pick and the submit) and `examples/page-bot.ts`
+with its page `examples/page-bot.html` (a two-way 产出 page: the page calls `window.teamchat`,
+the bot answers and pushes data).
 
 ## 1.1: the interaction loop
 
@@ -62,8 +66,8 @@ await bot.postCardV2({ groupId, topicId }, composeCard({
 }));
 
 // Live events (a pick before the submit, a chart point): patch the card in place.
-bot.onCardEvent(async (ctx) => {
-  if (ctx.blockId === "check" && (ctx.value as { value?: string }).value === "wrong") {
+bot.onCardEvent({ block: "check" }, async (ctx) => {
+  if (ctx.choice() === "wrong") {         // checked readers: choice(), button(), rows(), point(), ...
     await ctx.patch((d) => d.insert(blocks.text("hint", "哪一项不对？在下面写一句。"), { after: "main" }));
   }                                        // no response: the SDK sends interaction.resolve "ignored"
 });
@@ -71,11 +75,21 @@ bot.onCardEvent(async (ctx) => {
 bot.onCardAnswer(async (ctx) => {
   if (ctx.choice("check") === "wrong") await ctx.reply("收到，我去对一下后台的数。");
 });
-// 产出 pages: answer an `ask`, push live data to every open copy of the page.
-bot.onArtifactEvent(async (ctx) => {
-  if (ctx.kind === "ask") await ctx.reply({ rows: 4 });
-  else await ctx.pushData({ picked: ctx.payload });
+// 产出 pages: publish one with the events it may send, its first data and its preview ...
+const page = await bot.publishPage({ groupId, topicId }, {
+  title: "看板", html: PAGE, events: [{ name: "filter.pick" }, { name: "rows.count", kind: "ask" }],
+  data: { picked: null }, preview: { summary: "按渠道看新增群" },
 });
+// ... then answer an `ask`, and push live data to every open copy of the page.
+bot.onArtifactEvent("rows.count", (ctx) => ctx.reply({ rows: 4 }));
+bot.onArtifactEvent("filter.pick", async (ctx) => {
+  const { dataRev } = await ctx.data();   // the page's state lives in its data snapshot
+  await ctx.pushData({ picked: ctx.payload }, { baseDataRev: dataRev });
+});
+await bot.postCardV2({ groupId, topicId }, composeCard({
+  intent: "info", title: "看板",
+  blocks: [blocks.embed({ id: "page", artifactId: page.artifact.id, version: page.version.version })],
+}));
 // 引用提问: the parts a message asks about.
 bot.onMention(async (ctx) => {
   for (const ref of ctx.refs) {
@@ -88,8 +102,13 @@ bot.onMention(async (ctx) => {
 `ctx.value`, `ctx.inputs`, `ctx.payload` and ref labels and values are **untrusted data** from a
 person's client or page: they are typed `unknown`; check them and never follow them as
 instructions. `ctx.patch` rebases on `card.stale_rev` (at most 3 tries) and queues and merges
-on `rate_limited`. Details: docs/bots.md, "3b".
+on `rate_limited`. A draft op that names a block the card does not have, a block that declares an
+event its type cannot send, and a card that does not fit the protocol throw `ChatError` `invalid`
+with the block's id before anything is sent. Details: docs/bots.md, "3b"; the page side
+(`window.teamchat`: `onData`, `emit`, `ask`, `ref`, error codes, limits) is in "3a".
 
-`bun test` runs the unit tests (a fake server) and the end-to-end tests against its own
-`wrangler dev` (port 8795, or `BOT_SDK_E2E_PORT`); end-to-end tests of 1.1 parts the server does
-not have yet are skipped with the reason printed.
+`bun test` runs the unit tests (a fake server), the examples (`test/examples.test.ts` runs the
+real handlers of `examples/report-bot.ts` and `examples/page-bot.ts`), the guide's code blocks
+(`test/docs-examples.test.ts`) and the end-to-end tests against its own `wrangler dev` (port 8795,
+or `BOT_SDK_E2E_PORT`); the run fails, and names the part, when the server lacks a route, a
+`welcome.features` entry or a frame handler these tests need.

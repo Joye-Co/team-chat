@@ -3,7 +3,11 @@
 import type {
   AcceptanceItem,
   AddArtifactVersionRequest,
+  ArtifactDataAck,
+  ArtifactDataResponse,
   ArtifactEventDecl,
+  ArtifactEventsResponse,
+  ArtifactPreview,
   BotRun,
   DeskNotesResponse,
   EndRunRequest,
@@ -24,7 +28,7 @@ import type {
   PutDeskNoteResponse,
   SendResult,
 } from "@chat/protocol";
-import { MAX_FILE_BYTES, PutArtifactMediaRequest } from "@chat/protocol";
+import { ArtifactPreview as ArtifactPreviewSchema, MAX_ARTIFACT_DATA_BYTES, MAX_FILE_BYTES, PutArtifactMediaRequest } from "@chat/protocol";
 import { ChatError, errorDetails, isRetryable } from "./errors.ts";
 import { checkArtifactEvents } from "./pattern.ts";
 
@@ -50,7 +54,7 @@ export interface UploadInput {
   height?: number;
 }
 
-/** What `publishHtml` takes: one HTML page, optional extra files, and where the 产出 goes. */
+/** `HttpClient.publishHtml`: one HTML page as a 产出 of kind `html`, or a new version of one. */
 export interface PublishHtmlInput {
   groupId: string;
   topicId: string;
@@ -60,8 +64,19 @@ export interface PublishHtmlInput {
   /** Adds a version to this 产出 instead of making a new one. */
   artifactId?: string;
   extraFiles?: { path: string; mime: string; data: Uint8Array | ArrayBuffer | Blob }[];
-  /** 1.1: events the page may send back (`emitEvent`); they reach `Bot.onArtifactEvent`. */
+  /**
+   * 1.1: events the page may send back (`teamchat.emit`, `teamchat.ask`); they reach
+   * `Bot.onArtifactEvent`. Only a bot's version keeps them.
+   */
   events?: ArtifactEventDecl[];
+  /**
+   * 1.1: the first data snapshot of the version (the page's `teamchat.getData` and `onData`), at
+   * most 256 KiB. Without it the page opens with `null` until the first `pushArtifactData`.
+   * Only a bot's version keeps it.
+   */
+  data?: unknown;
+  /** 1.1: the title, summary and up to 6 figures of the version's preview card. */
+  preview?: ArtifactPreview;
   /** 1.1: this bot's run that made the version (`Bot.currentRun(topicId)`). */
   runId?: string;
 }
@@ -96,6 +111,23 @@ async function toBytes(data: Uint8Array | ArrayBuffer | Blob): Promise<Uint8Arra
   if (data instanceof Uint8Array) return data;
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
   return new Uint8Array(await data.arrayBuffer());
+}
+
+/**
+ * Checks a data snapshot of a 产出 version as the server does: JSON of at most 256 KiB
+ * (`MAX_ARTIFACT_DATA_BYTES`). Throws `ChatError` `too_large` or `invalid` before anything is sent.
+ */
+export function checkArtifactData(data: unknown): void {
+  if (data === undefined) return;
+  let text: string | undefined;
+  try {
+    text = JSON.stringify(data);
+  } catch {
+    text = undefined;
+  }
+  if (text === undefined) throw new ChatError("invalid", "data is not JSON");
+  const bytes = new TextEncoder().encode(text).byteLength;
+  if (bytes > MAX_ARTIFACT_DATA_BYTES) throw new ChatError("too_large", `data is ${bytes} bytes; a snapshot is at most ${MAX_ARTIFACT_DATA_BYTES}`);
 }
 
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {
@@ -308,14 +340,16 @@ export class HttpClient {
     };
   }
 
-  /** Throws `ChatError` `invalid` before the request when `events` has a schema the server refuses. */
+  /** Throws `ChatError` before the request when `events` has a schema the server refuses (`invalid`) or `data` is over 256 KiB (`too_large`). */
   async createArtifact(req: CreateArtifactRequest): Promise<ArtifactVersionResponse> {
     checkArtifactEvents(req.events);
+    checkArtifactData(req.data);
     return this.request("POST", "/v1/artifacts", { json: req });
   }
-  /** Throws `ChatError` `invalid` before the request when `events` has a schema the server refuses. */
+  /** Throws `ChatError` before the request, as `createArtifact` does. */
   async addArtifactVersion(artifactId: string, req: AddArtifactVersionRequest): Promise<ArtifactVersionResponse> {
     checkArtifactEvents(req.events);
+    checkArtifactData(req.data);
     return this.request("POST", `/v1/artifacts/${encodeURIComponent(artifactId)}/versions`, { json: req });
   }
   /**
@@ -339,12 +373,53 @@ export class HttpClient {
   }
 
   /**
+   * `GET /v1/artifacts/:id/versions/:v/data` (1.1): the version's latest data snapshot, as every
+   * open copy of the page has it. `data` is null and `dataRev` 0 when the version has none. Read
+   * it after a restart instead of keeping the page's state only in process memory.
+   */
+  getArtifactData(artifactId: string, version: number): Promise<ArtifactDataResponse> {
+    return this.request("GET", `/v1/artifacts/${encodeURIComponent(artifactId)}/versions/${version}/data`);
+  }
+  /**
+   * `PUT /v1/artifacts/:id/versions/:v/data` (1.1): replaces the snapshot over HTTP, for a script
+   * without a connection (`Bot.pushArtifactData` is the same write over the WebSocket). Only the
+   * bot that made the version. `baseDataRev` makes the server refuse the write with `conflict`
+   * when the snapshot changed since that rev; `cause` names the page event it answers.
+   */
+  async putArtifactData(artifactId: string, version: number, data: unknown, opts: { baseDataRev?: number; cause?: string } = {}): Promise<ArtifactDataAck> {
+    if (data === undefined) throw new ChatError("invalid", "data is required (JSON; null is a value)");
+    checkArtifactData(data);
+    const json: Record<string, unknown> = { data };
+    if (opts.baseDataRev !== undefined) json.baseDataRev = opts.baseDataRev;
+    if (opts.cause) json.cause = opts.cause;
+    return this.request("PUT", `/v1/artifacts/${encodeURIComponent(artifactId)}/versions/${version}/data`, { json });
+  }
+  /**
+   * `GET /v1/artifacts/:id/events` (1.1): the stored page events of a 产出 (all its versions),
+   * newest first. `before` is an event id (lists older ones); `limit` is 1..200, default 100.
+   * `replied` is true on an ask its bot answered. The bot gets page events only while it is
+   * connected: read here what it missed.
+   */
+  artifactEvents(artifactId: string, opts: { before?: string; limit?: number } = {}): Promise<ArtifactEventsResponse> {
+    const q = new URLSearchParams();
+    if (opts.before) q.set("before", opts.before);
+    if (opts.limit !== undefined) q.set("limit", String(opts.limit));
+    const qs = q.toString();
+    return this.request("GET", `/v1/artifacts/${encodeURIComponent(artifactId)}/events${qs ? `?${qs}` : ""}`);
+  }
+
+  /**
    * Uploads one HTML page (and optional extra files) and makes a 产出 of kind `html`, or
    * adds a version when `artifactId` is given.
    */
   async publishHtml(input: PublishHtmlInput): Promise<ArtifactVersionResponse> {
-    // Before the uploads: a declaration the server refuses fails here.
+    // Before the uploads: a declaration, a snapshot or a preview the server refuses fails here.
     checkArtifactEvents(input.events);
+    checkArtifactData(input.data);
+    if (input.preview !== undefined) {
+      const p = ArtifactPreviewSchema.safeParse(input.preview);
+      if (!p.success) throw new ChatError("invalid", `preview: ${p.error.issues[0]?.path.join(".") ?? ""} ${p.error.issues[0]?.message ?? ""}`.trim());
+    }
     const entry = "index.html";
     const files = [
       { path: entry, fileId: (await this.uploadFile({ groupId: input.groupId, topicId: input.topicId, name: entry, mime: "text/html", data: new TextEncoder().encode(input.html) })).fileId },
@@ -356,6 +431,8 @@ export class HttpClient {
     }
     const extra = {
       ...(input.events ? { events: input.events } : {}),
+      ...(input.data !== undefined ? { data: input.data as CreateArtifactRequest["data"] } : {}),
+      ...(input.preview ? { preview: input.preview } : {}),
       ...(input.runId ? { runId: input.runId } : {}),
     };
     if (input.artifactId) {

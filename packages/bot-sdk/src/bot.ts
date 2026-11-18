@@ -9,6 +9,7 @@ import {
   AcceptanceItem,
   type ArtifactRef,
   type ArtifactVersion,
+  type ArtifactVersionResponse,
   type BlockRef,
   type BlockRefInput,
   type BotRun,
@@ -41,7 +42,8 @@ import {
 } from "@chat/protocol";
 import { answeredCard, checkCardV2, type DoneCardOptions, doneCard, failedV1Card } from "./cards.ts";
 import { ChatError, errorDetails } from "./errors.ts";
-import { HttpClient, normalizeBaseUrl, type UploadInput } from "./http.ts";
+import { type EventValueReaders, eventValueReaders } from "./events.ts";
+import { checkArtifactData, HttpClient, normalizeBaseUrl, type PublishHtmlInput, type UploadInput } from "./http.ts";
 import { opsFit, opsOf, type PatchInput } from "./interact.ts";
 import { findBlock as findRefBlock, findPart, stripRefPrefix } from "./refs.ts";
 import { consoleLogger, type Logger, type LogLevel } from "./log.ts";
@@ -166,6 +168,12 @@ export interface TopicChange {
   ownerId?: string | null;
 }
 
+/** `publishPage`: what `HttpClient.publishHtml` takes, without the topic (the context or target gives it). */
+export type PublishPageInput = Omit<PublishHtmlInput, "groupId" | "topicId">;
+
+/** Which live card events a handler gets: an event name, or a name and/or a block id. */
+export type CardEventFilter = string | { name?: string; block?: string };
+
 export interface MessageContext {
   bot: Bot;
   event: EventOf<"message.created">;
@@ -197,6 +205,13 @@ export interface MessageContext {
   ack(emoji?: string): Promise<boolean>;
   /** Posts a Card v2 (an ask, usually) in this topic. */
   ask(card: CardV2, input?: Omit<SendInput, "card" | "cardV2">): Promise<SendResult>;
+  /** Posts a Card v2 in this topic: the same call as `ask`, for a card that asks nothing (a report, an embedded page). */
+  postCard(card: CardV2, input?: Omit<SendInput, "card" | "cardV2">): Promise<SendResult>;
+  /**
+   * Publishes an HTML page as a 产出 of this topic (or a new version with `artifactId`), made by
+   * this bot's current run here. See `Bot.publishPage`.
+   */
+  publishPage(input: PublishPageInput): Promise<ArtifactVersionResponse>;
   /**
    * Posts the result card (Card v2, intent "done") in this topic and ends this bot's current run
    * there: `failed` ends it as failed. See `Bot.done`.
@@ -247,9 +262,11 @@ export type AnswerValue = string | number | boolean | null | AnswerValue[] | { [
 /**
  * An interaction with one of my v2 cards (2.1): a live event (transient `card.event`, only
  * while connected) or a stored answer (`card.answered`, also on catch-up). `value` and
- * `inputs` come from the client: check them before you act on them.
+ * `inputs` come from the client: check them before you act on them. The readers (`choice()`,
+ * `button()`, `rows()`, `tab()`, `point()`, `sort()`) read `value` and give undefined or [] when
+ * it has another shape; docs/bots.md, "Live events", has the value of each event.
  */
-export interface CardEventContext {
+export interface CardEventContext extends EventValueReaders {
   bot: Bot;
   groupId: string;
   topicId: string;
@@ -303,6 +320,11 @@ export interface CardEventContext {
   resolve(result: "ignored" | "failed", note?: string): Promise<void>;
   updateTopic(change: TopicChange): Promise<Topic>;
   /**
+   * Publishes an HTML page as a 产出 of the card's topic (see `Bot.publishPage`). It does not
+   * answer the event: patch the card (an `embed` of the new version) or post one.
+   */
+  publishPage(input: PublishPageInput): Promise<ArtifactVersionResponse>;
+  /**
    * Posts the result card (Card v2, intent "done") in the card's topic as the answer to this
    * event and ends this bot's current run there: `failed` ends it as failed. A handler that runs
    * again after a crash posts with the same clientMsgId, so the card is not posted twice.
@@ -333,9 +355,9 @@ export interface CardAnswerContext<I extends Record<string, unknown> = Record<st
   action?: CardV2Action;
   /** The answer is a cancel or a reject (or the ids "cancel" and "deny" when the action is not in the card). */
   cancelled: boolean;
-  /** Chosen option ids of a choice block (default id "choice"); [] when none. */
+  /** Chosen option ids of a choice block, read from `inputs` (default id "choice"); [] when none. */
   choices(blockId?: string): string[];
-  /** The first chosen option id of a choice block (default id "choice"). */
+  /** The first chosen option id of a choice block, read from `inputs` (default id "choice"). */
   choice(blockId?: string): string | undefined;
   /** An input as text (numbers and booleans are turned into text). */
   text(blockId: string): string | undefined;
@@ -379,7 +401,16 @@ export interface ArtifactEventContext {
   reply(payload: unknown): Promise<void>;
   /** Declines an `ask` (once); the page's promise rejects with `declined`. */
   decline(message: string): Promise<void>;
-  /** Replaces the version's data snapshot; every viewer's page gets it. `cause` is this event. */
+  /**
+   * The version's current data snapshot, read from the server (`data` is null and `dataRev` 0
+   * when it has none). Use it instead of state in process memory: it survives a restart.
+   */
+  data(): Promise<{ data: unknown; dataRev: number }>;
+  /**
+   * Replaces the version's data snapshot; every viewer's page gets it. `cause` is this event.
+   * With `baseDataRev` (the `dataRev` of `data()`) the server refuses the push with `conflict`
+   * when another push came in between: read again and retry.
+   */
   pushData(data: unknown, opts?: { baseDataRev?: number }): Promise<{ dataRev: number }>;
   /** Posts a message in the 产出's topic as the answer to this event. */
   postMessage(input: string | SendInput): Promise<SendResult>;
@@ -660,8 +691,8 @@ export class Bot {
   private readonly messageHandlers: Handler<MessageContext>[] = [];
   private readonly cardHandlers: Handler<CardActionContext>[] = [];
   private readonly answerHandlers: Handler<CardAnswerContext>[] = [];
-  private readonly artifactEventHandlers: Handler<ArtifactEventContext>[] = [];
-  private readonly cardEventHandlers: Handler<CardEventContext>[] = [];
+  private readonly artifactEventHandlers: { name?: string; run: Handler<ArtifactEventContext> }[] = [];
+  private readonly cardEventHandlers: { name?: string; block?: string; run: Handler<CardEventContext> }[] = [];
   private readonly asideHandlers: Handler<AsideContext>[] = [];
   /** v2 cards of my messages that this process saw, newest last (at most MAX_CACHED_CARDS). */
   private readonly cardCache = new Map<string, CardV2>();
@@ -732,8 +763,13 @@ export class Bot {
    * handler that does not answer makes the SDK answer for it: an `emit` gets `ignored`
    * (`failed` when it throws), an `ask` gets a decline.
    */
-  onArtifactEvent(h: Handler<ArtifactEventContext>): this {
-    this.artifactEventHandlers.push(h);
+  onArtifactEvent(h: Handler<ArtifactEventContext>): this;
+  /** Only the page events with this declared name (`onArtifactEvent("signup.join", h)`). */
+  onArtifactEvent(name: string, h: Handler<ArtifactEventContext>): this;
+  onArtifactEvent(a: string | Handler<ArtifactEventContext>, b?: Handler<ArtifactEventContext>): this {
+    if (typeof a === "function") this.artifactEventHandlers.push({ run: a });
+    else if (typeof b === "function") this.artifactEventHandlers.push({ name: a, run: b });
+    else throw new ChatError("invalid", "onArtifactEvent takes a handler, or an event name and a handler");
     return this;
   }
   /**
@@ -742,8 +778,17 @@ export class Bot {
    * connected. Respond with `ctx.patch`, `ctx.reply`, `ctx.postCard` or `ctx.resolve`; without
    * one the SDK sends `ignored` (or `failed` when the handler throws).
    */
-  onCardEvent(h: Handler<CardEventContext>): this {
-    this.cardEventHandlers.push(h);
+  onCardEvent(h: Handler<CardEventContext>): this;
+  /**
+   * Only the live events that match: an event name (`onCardEvent("button.press", h)`), or a
+   * name and/or a block id (`onCardEvent({ block: "check" }, h)`). An event no handler matches
+   * is resolved `ignored`.
+   */
+  onCardEvent(filter: CardEventFilter, h: Handler<CardEventContext>): this;
+  onCardEvent(a: CardEventFilter | Handler<CardEventContext>, b?: Handler<CardEventContext>): this {
+    if (typeof a === "function") this.cardEventHandlers.push({ run: a });
+    else if (typeof b === "function") this.cardEventHandlers.push({ ...(typeof a === "string" ? { name: a } : { name: a.name, block: a.block }), run: b });
+    else throw new ChatError("invalid", "onCardEvent takes a handler, or a filter and a handler");
     return this;
   }
   /**
@@ -1020,6 +1065,7 @@ export class Bot {
     data: unknown,
     opts: { baseDataRev?: number; cause?: string; clientPushId?: string } = {},
   ): Promise<{ dataRev: number }> {
+    checkArtifactData(data);
     const frame: Record<string, unknown> & { t: string } = {
       t: "artifact.data",
       groupId,
@@ -1031,6 +1077,19 @@ export class Bot {
     if (opts.baseDataRev !== undefined) frame.baseDataRev = opts.baseDataRev;
     if (opts.cause) frame.cause = opts.cause;
     return (await this.request(frame)) as { dataRev: number };
+  }
+
+  /**
+   * Publishes one HTML page as a 产出 of a topic (1.1), or a new version of `artifactId`:
+   * `HttpClient.publishHtml` with the topic filled in and `runId` set to this bot's current run
+   * there, so the version shows as made by that run. `events` declares what the page may send
+   * back (`onArtifactEvent`), `data` is the first snapshot its `teamchat.onData` gets, `preview`
+   * the text and figures of its preview card. Show the page in the topic with a card that has
+   * `blocks.embed({ artifactId, version })`, or with `artifactRefs` on a message.
+   */
+  publishPage(target: Required<Target>, input: PublishPageInput): Promise<ArtifactVersionResponse> {
+    const runId = input.runId ?? this.currentRuns.get(target.topicId);
+    return this.http.publishHtml({ ...input, groupId: target.groupId, topicId: target.topicId, ...(runId ? { runId } : {}) });
   }
 
   /** Answers a page `ask` (1.1, `artifact.reply`): once, within 120 s, private to the asker. */
@@ -2013,6 +2072,8 @@ export class Bot {
       endRun: (status, summary) => this.endRun({ groupId: m.groupId, topicId: m.topicId }, status, summary),
       ack: (emoji) => this.ack(m.groupId, m.id, emoji),
       ask: (card, input = {}) => this.postCardV2(target, card, withId(input)),
+      postCard: (card, input = {}) => this.postCardV2(target, card, withId(input)),
+      publishPage: (input) => this.publishPage(target, input),
       done: (card) => this.done(target, card, withId({})),
       setAcceptance: (items) => this.setAcceptance(target, items),
       aside: this.asideOf(m.groupId, m.topicId),
@@ -2182,6 +2243,8 @@ export class Bot {
         await answered(this.resolveEvent(groupId, cause, result, note));
       },
       updateTopic: (change) => this.updateTopic(groupId, topicId, change),
+      publishPage: (input) => this.publishPage({ groupId, topicId }, input),
+      ...eventValueReaders(rest.value),
       done: (c) => {
         // One id per call, taken before the first try: a write sent again without its cause keeps it.
         const clientMsgId = nextId();
@@ -2345,8 +2408,9 @@ export class Bot {
       );
       let threw = false;
       for (const h of this.cardEventHandlers) {
+        if ((h.name !== undefined && h.name !== e.event) || (h.block !== undefined && h.block !== e.blockId)) continue;
         try {
-          await h(ctx);
+          await h.run(ctx);
         } catch (err) {
           threw = true;
           this.emitError(err, `onCardEvent ${e.event} for ${e.messageId}`);
@@ -2366,8 +2430,9 @@ export class Bot {
       const { ctx, flags } = this.artifactEventContext(e);
       let threw = false;
       for (const h of this.artifactEventHandlers) {
+        if (h.name !== undefined && h.name !== e.name) continue;
         try {
-          await h(ctx);
+          await h.run(ctx);
         } catch (err) {
           threw = true;
           this.emitError(err, "onArtifactEvent");
@@ -2417,6 +2482,10 @@ export class Bot {
         once();
         await this.declineArtifact(groupId, eventId, message);
         flags.responded = true;
+      },
+      data: async () => {
+        const r = await this.http.getArtifactData(artifactId, version);
+        return { data: r.data, dataRev: r.dataRev };
       },
       pushData: async (data, opts = {}) => {
         const r = await this.pushArtifactData(groupId, artifactId, version, data, { ...opts, cause: eventId });
@@ -2647,7 +2716,8 @@ export class Bot {
       if (batch.length > 0 && part.cause && cause && part.cause !== cause) break;
       let partOps: PatchOp[];
       try {
-        partOps = card ? opsOf(card, part.input) : Array.isArray(part.input) ? part.input : [];
+        // A draft of a later part counts what the earlier parts of this frame insert and remove.
+        partOps = card ? opsOf(card, part.input, ops) : Array.isArray(part.input) ? part.input : [];
       } catch (err) {
         if (batch.length > 0) break;
         lane.parts.shift();
@@ -2716,7 +2786,9 @@ export class Bot {
         let fits = false;
         if (fresh) {
           try {
-            fits = opsFit(fresh, batch.flatMap((p) => opsOf(fresh, p.input)));
+            const all: PatchOp[] = [];
+            for (const p of batch) all.push(...opsOf(fresh, p.input, all));
+            fits = opsFit(fresh, all);
           } catch {
             fits = false;
           }
