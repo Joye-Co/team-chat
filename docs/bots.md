@@ -4,7 +4,8 @@
 
 An external bot is a member with `kind: "bot"`. It uses the same API as the desktop app: a
 WebSocket for events and writes, and HTTP for files, 产出 and one-shot posts. The TypeScript
-SDK is `packages/bot-sdk` (`@chat/bot-sdk`); it runs on Bun and on Node 22+.
+SDK is `packages/bot-sdk` (`@chat/bot-sdk`); it is TypeScript source and runs on Bun and on
+Node 22.18+ (Node 22.6 to 22.17 need `--experimental-strip-types`).
 
 ## 1. Create a bot member and get its token file
 
@@ -34,7 +35,7 @@ in the desktop settings. Its level is `member`.
 bun install            # once, at the repo root
 CHAT_URL=http://127.0.0.1:8789 \
 CHAT_TOKEN_FILE=~/.config/team-chat/local/bot-deploy-01J....token \
-bun examples/echo-bot.ts          # or: node examples/echo-bot.ts
+bun examples/echo-bot.ts          # or, with Node 22.18+: node examples/echo-bot.ts
 ```
 
 Mention the bot in any topic of a group it is in: it replies `echo: <text>`. Write
@@ -67,23 +68,33 @@ bot.onCardAction(async (ctx) => {
 await bot.start();
 ```
 
+`tokenFile` and `stateFile` read a leading `~` as the home folder, so a path from a `.env` file
+or a service unit works as written. Bad options (no token, a missing token file, a damaged state
+file, a URL that is not `http(s)://host`) make `new Bot(...)` throw `ChatError` `invalid` with
+the file or the option in the message.
+
 ## 3. What the SDK does
 
 - **Connection**: `hello` on every connection, ping every 30 s, reconnect with backoff (0.5 s to
   30 s, with jitter). A rejected token stops the bot with `ChatError` code `unauthorized`.
+  `url` is the server's base URL (a trailing `/v1` is dropped). `start()` resolves on the first
+  welcome; while the server cannot be reached it keeps trying, and each failed try logs a
+  warning `cannot reach <ws url> (<why>), retrying in <n> s`.
 - **Ordered events**: events are applied per group strictly in `seq` order. A gap is filled
   with `fetch`. After a restart, the bot reads every event after its saved cursor
   (`stateFile`) and runs handlers with `ctx.catchUp = true`.
 - **First start**: with no state file, the bot skips old history (`firstStart: "latest"`); pass
   `firstStart: "all"` to handle it. Groups the bot joins later are read from their start.
 - **Cursors are saved after handlers finish**, so a crash runs a handler again. Replies from a
-  handler context (`ctx.reply`, `ctx.stream`) use a clientMsgId made from the message id, so the
+  handler context (`ctx.reply`, `ctx.stream`, `ctx.ask`, `ctx.postCard`, `ctx.done`) use a
+  clientMsgId made from the message (or card event) id, so the
   server answers the retry with the first reply (`duplicate: true`) and nothing is posted twice.
+  `bot.send`, `bot.done` and the other `bot.*` posts make a random id unless you pass `clientMsgId`.
   Effects outside the chat (deploys, API calls) must be idempotent too.
 - **Handlers**: `onMention` (a message that mentions me), `onMessage` (any other message in a
   topic I follow), `onCardAction` (a press on one of my cards), `onCardAnswer` (1.1: an answer
   to one of my v2 cards, posted with `postCardV2`; close it with
-  `ctx.resolve`), `onEvent` (every event),
+  `ctx.markAnswered()`), `onEvent` (every event),
   `onTransient` (typing, presence, deltas). A message runs at most one of `onMention` and
   `onMessage`. My own messages and system messages run neither. Messages of other bots run
   neither either, so two bots cannot answer each other without end; `allowBotAuthors: true`
@@ -95,9 +106,15 @@ await bot.start();
   (`writeRate`; the server allows about 20 per member), so a burst of 50 sends lands in order.
   Rate-limited writes are retried after the server's `retryAfterMs`. A request fails with `timeout` after
   `requestTimeoutMs` (60 s). Frames are checked against the protocol schemas before sending.
+- **Errors**: a failed call throws `ChatError` with the server's `code` and, when the server
+  sends them, `reason`, `retryAfterMs` (how long to wait after `rate_limited`) and `memberIds`
+  (the members a reason such as `relay.member_unavailable` is about). HTTP calls also set
+  `status`. `isRetryable(err)` is true for `network`, `timeout`, `internal` and `rate_limited`.
 - **Streaming**: `send` with `streaming: true`, `delta` frames batched every 100 ms, and a final
   `edit` with the full body and `streaming: false`. After a reconnect the writer sends the full
-  text again so readers miss nothing.
+  text again so readers miss nothing. A message stays "streaming" until that final edit, so
+  the SDK finishes a `ctx.stream()` writer that its handler left open (it returned or threw
+  before `finish()`), and `stop()` finishes every writer that is still open.
 
 | Method | Does |
 | --- | --- |
@@ -197,7 +214,7 @@ The server derives a v1 card for 1.0.x clients; an approval (no inputs) keeps it
 
 **Answers.** `onCardAnswer` gets every `card.answered` on my v2 cards, also after a restart
 (the SDK remembers its card messages and loads a card it no longer has in memory from the
-history before the handler runs, so `ctx.card`, `ctx.draft()` and `ctx.resolve()` work). A press on a v2 card by an old client arrives here too,
+history before the handler runs, so `ctx.card`, `ctx.draft()` and `ctx.markAnswered()` work). A press on a v2 card by an old client arrives here too,
 with no inputs. Type the inputs with a generic and read them with the helpers:
 
 ```ts
@@ -280,7 +297,8 @@ and the `cause`, so the person's waiting state clears and their client shows "�
 or a function that records them on a `CardDraft` of the newest rev:
 `set(id, props)`, `replace(id, block)`, `insert(block, { parent?, after?, before?, index? })`,
 `remove(id)`, `data(pointer, value?)`, `cardProps({ title, summary, intent, fallback, ask,
-actions })`, `ask(ask | null)` (a new `ask.id` opens a new round; `null` closes it). On
+actions })`, `ask(ask | null)` (a new `ask.id` opens a new round; `null` closes it),
+`actions(list)` (replaces the card's actions; `[]` removes them). On
 `card.stale_rev` the SDK rebases on the newest rev (at most 3 tries) when every op still targets an
 existing id, else it throws `ChatError` `conflict` with `reason` `card.stale_rev`. On
 `rate_limited` it queues and merges the ops of the same message (at most one patch per second);
@@ -290,7 +308,9 @@ gets `timeout` or `internal`, the server may have applied it, so the SDK sends t
 with the same `clientPatchId` (at most 3 times); a `duplicate: true` ack counts as applied for every
 part. It splits a merged patch only after an answer that says nothing was applied.
 `ctx.reply(...)` and `ctx.postCard(card)` answer with a new message; `ctx.resolve("ignored" |
-"failed", note?)` answers without a change (the note shows under the block for 5 s). A live-event
+"failed", note?)` answers without a change (the note shows under the block for 5 s).
+`ctx.done(card)` posts the done card as the answer and ends the run; `ctx.setPlan`, `ctx.endRun`
+and `ctx.setAcceptance` work in the card's topic as they do in a message handler. A live-event
 handler that returns without one of them makes the SDK send `ignored` (`failed` when it throws),
 so the person never waits for nothing. Outside a handler: `bot.patchCard(groupId, messageId, ops,
 { baseRev?, cause?, clientPatchId? })` (with `baseRev` it never rebases), `bot.resolveEvent`,
@@ -496,7 +516,8 @@ version by itself once it has no running work.
 
 外部机器人是一个 `kind: "bot"` 的成员。它和桌面 App 用同一套 API:WebSocket 收事件、发消息,
 HTTP 传文件、产出和一次性发消息。TypeScript SDK 在 `packages/bot-sdk`(`@chat/bot-sdk`),
-Bun 和 Node 22 以上都能运行。
+它是 TypeScript 源码,Bun 和 Node 22.18 以上都能直接运行(Node 22.6 到 22.17 要加
+`--experimental-strip-types`)。
 
 ## 1. 创建机器人成员,拿到令牌文件
 
@@ -522,26 +543,31 @@ bun server/scripts/admin.ts bot --env local --name "Deploy" --role "部署和 CI
 bun install            # 只需一次,在仓库根目录
 CHAT_URL=http://127.0.0.1:8789 \
 CHAT_TOKEN_FILE=~/.config/team-chat/local/bot-deploy-01J....token \
-bun examples/echo-bot.ts          # 或者:node examples/echo-bot.ts
+bun examples/echo-bot.ts          # 或者(Node 22.18 以上):node examples/echo-bot.ts
 ```
 
 在机器人所在群的任意话题里 @ 它,它会回复 `echo: <内容>`。发 `@Deploy stream ...` 可以看到
-流式回复。最小示例见上面英文部分的代码,API 相同。
+流式回复。最小示例见上面英文部分的代码,API 相同。`tokenFile` 和 `stateFile` 开头的 `~` 会当作
+用户主目录。参数不对(没有令牌、令牌文件不存在、状态文件损坏、地址不是 `http(s)://主机`)时,
+`new Bot(...)` 抛出 `ChatError`(`invalid`),消息里写明是哪个文件或参数。
 
 ## 3. SDK 做了什么
 
 - **连接**:每次连接先发 `hello`,每 30 秒 ping 一次,断线后退避重连(0.5 秒到 30 秒,带抖动)。
-  令牌被拒绝时停止,报 `ChatError`,code 为 `unauthorized`。
+  令牌被拒绝时停止,报 `ChatError`,code 为 `unauthorized`。`url` 是服务器的基础地址(末尾的 `/v1`
+  会去掉)。`start()` 在第一次 welcome 时完成;连不上服务器时会一直重试,每次失败打一条警告
+  `cannot reach <ws 地址> (<原因>), retrying in <n> s`。
 - **事件有序**:每个群按 `seq` 严格顺序处理,有缺口就用 `fetch` 补齐。重启后从保存的游标
   (`stateFile`)之后读取所有事件,这时处理函数里 `ctx.catchUp = true`。
 - **第一次启动**:没有状态文件时跳过旧历史(`firstStart: "latest"`);传 `firstStart: "all"`
   则处理全部历史。之后新加入的群从头读取。
 - **处理函数结束后才保存游标**,所以进程崩溃后处理函数会再跑一次。处理函数里的
-  `ctx.reply`、`ctx.stream` 用由消息 id 生成的 clientMsgId,服务器对重试返回第一次的回复
-  (`duplicate: true`),不会重复发。聊天以外的副作用(部署、调用 API)也要自己做成幂等。
+  `ctx.reply`、`ctx.stream`、`ctx.ask`、`ctx.postCard`、`ctx.done` 用由消息(或卡片事件)id 生成的
+  clientMsgId,服务器对重试返回第一次的回复(`duplicate: true`),不会重复发。`bot.send`、`bot.done`
+  等 `bot.*` 的发送用随机 id,除非自己传 `clientMsgId`。聊天以外的副作用(部署、调用 API)也要自己做成幂等。
 - **处理函数**:`onMention`(@ 我的消息)、`onMessage`(我关注的话题里的其他消息)、
   `onCardAction`(有人按了我的卡片按钮)、`onCardAnswer`(1.1:有人回答了我用 `postCardV2` 发的
-  v2 卡片;用 `ctx.resolve` 关闭它)、`onEvent`(所有事件)、`onTransient`(输入中、在线、
+  v2 卡片;用 `ctx.markAnswered()` 关闭它)、`onEvent`(所有事件)、`onTransient`(输入中、在线、
   流式增量)。一条消息最多触发 `onMention` 和 `onMessage` 中的一个;我自己的消息和系统消息
   都不触发。其他机器人的消息默认也不触发,避免两个机器人互相回复停不下来;传
   `allowBotAuthors: true` 可关闭这条规则。处理函数并发运行,出错交给 `onError`。
@@ -549,8 +575,13 @@ bun examples/echo-bot.ts          # 或者:node examples/echo-bot.ts
   owner 的,都会自动关注。用 `bot.setFollow(...)` 修改。
 - **写操作**会等连接可用,重连后重发(`send` 按 `clientMsgId` 幂等);被限流的写操作会重试;
   超过 `requestTimeoutMs`(60 秒)报 `timeout`。发送前先用协议 schema 校验。
+- **错误**:调用失败时抛出 `ChatError`,带服务器的 `code`;服务器给了的话还有 `reason`、
+  `retryAfterMs`(被限流后要等多久)和 `memberIds`(例如 `relay.member_unavailable` 说的是哪些
+  成员)。HTTP 调用还有 `status`。`isRetryable(err)` 对 `network`、`timeout`、`internal`、`rate_limited` 返回 true。
 - **流式回复**:`send` 带 `streaming: true`,每 100 毫秒合并发一次 `delta`,最后 `edit` 发完整
-  正文并设 `streaming: false`。重连后会补发一次完整文本,读者不会漏内容。
+  正文并设 `streaming: false`。重连后会补发一次完整文本,读者不会漏内容。消息在最后这次 `edit`
+  之前一直是流式状态,所以处理函数没调 `finish()` 就返回或出错时,SDK 会替它结束 `ctx.stream()`
+  开的流;`stop()` 会结束所有还开着的流。
 
 方法列表见英文部分的表格。
 
@@ -577,7 +608,7 @@ Codex 的计划更新)生成。
   后果。固定 id 见 `CARD_IDS`:选择块 `choice`、草稿块 `draft`、按钮 `submit`/`approve`/`deny`/
   `cancel`;纯文字选项的 id 是 `o1`、`o2`……
 - **回答**:`onCardAnswer` 收到我的 v2 卡片的每个回答(重启后也能收到:内存里没有的卡片,SDK 会在处理函数运行前从历史消息加载,
-  所以 `ctx.card`、`ctx.draft()`、`ctx.resolve()` 照常可用),旧客户端按 v2 卡片的
+  所以 `ctx.card`、`ctx.draft()`、`ctx.markAnswered()` 照常可用),旧客户端按 v2 卡片的
   按钮也会到这里(没有输入)。用 `ctx.choice()`、`ctx.number(id)`、`ctx.text(id)`、`ctx.bool(id)`、
   `ctx.draft()` 读取输入,`ctx.cancelled` 表示取消,`ctx.markAnswered()` 把卡片改成已回答(rev 加 1,
   去掉按钮)。输入来自客户端,使用前要检查。
@@ -594,8 +625,11 @@ Codex 的计划更新)生成。
   需要决定时发 Card v2 提问。
 - **交互闭环(2.1)**:块用 `events` 声明实时事件(如 `choice.change`、`chart.select`)。
   `onCardEvent` 收到实时事件,`onCardAnswer` 收到已存的回答(重启后也能收到)。用 `ctx.patch(ops)`
-  原地修改卡片(SDK 自动带 `baseRev` 和 `cause`;`card.stale_rev` 时在最新 rev 上重试,最多 3 次;
+  原地修改卡片(可以传一个函数,在最新 rev 的 `CardDraft` 上记录修改:`set`、`replace`、`insert`、
+  `remove`、`data`、`cardProps`、`ask`、`actions(list)`,其中 `actions(list)` 替换卡片的按钮,`[]` 去掉按钮;SDK 自动带 `baseRev` 和 `cause`;`card.stale_rev` 时在最新 rev 上重试,最多 3 次;
   被限流时合并排队,每秒最多一次,只合并 cause 相同或没有 cause 的修改;合并的修改超时或遇到 `internal` 时,用同一个 `clientPatchId` 重发同一帧,`duplicate: true` 算作已应用),或用 `ctx.reply`、`ctx.postCard`、`ctx.resolve("ignored")` 回应。
+  `ctx.done(card)` 发「做完了」卡片作为回应并结束运行;`ctx.setPlan`、`ctx.endRun`、`ctx.setAcceptance`
+  在卡片所在的话题里和消息处理函数里一样可用。
   实时事件的处理函数没有回应时,SDK 自动发 `ignored`(出错时发 `failed`)。服务器只接受 30 分钟内的
   cause:重启后读到的更早的回答,SDK 回应时不带 cause。
 - **Card v2.1 构造函数**:`composeCard({ intent, title, blocks, ... })` 和 `blocks.*`:容器 `stack`、

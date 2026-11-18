@@ -1,6 +1,7 @@
 # @chat/bot-sdk
 
-TypeScript SDK for external bots (Bun and Node 22+). The full guide, in English and Chinese, is
+TypeScript SDK for external bots. It is TypeScript source: it runs on Bun and on Node 22.18+
+(Node 22.6 to 22.17 need `--experimental-strip-types`). The full guide, in English and Chinese, is
 [docs/bots.md](../../docs/bots.md).
 
 ```ts
@@ -26,7 +27,7 @@ bot.onMention(async (ctx) => {
 // 1.1: answers to v2 cards (decisionCard, approvalCard, draftCard, formCard), then a done card.
 bot.onCardAnswer<{ choice: string }>(async (ctx) => {
   await ctx.markAnswered();
-  await ctx.bot.done({ groupId: ctx.groupId, topicId: ctx.topicId }, { title: "做完了", summary: `选了 ${ctx.choice()}` });
+  await ctx.done({ title: "做完了", summary: `选了 ${ctx.choice()}` });
 });
 
 await bot.start();
