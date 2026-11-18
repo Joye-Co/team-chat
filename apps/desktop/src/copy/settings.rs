@@ -533,6 +533,8 @@ crate::copy! {
     AI_TEST_FAILED_NOT_FOUND = "模型名或接口地址不对，检查后再试。",
     AI_TEST_FAILED_UNREACHABLE = "连不上服务商，检查网络和接口地址后再试。",
     SECTION_TEAM = "团队",
+    AI_TEST_FAILED_OTHER = "服务商拒绝了这次请求，检查设置后再试。",
+    AI_USES_TITLE = "AI 服务能做的事",
     EMAIL_CHANGE_SHEET_TITLE = "更改登录邮箱",
     EMAIL_CHANGE_SHEET_HINT = "现在的登录邮箱是 {email}，验证码会发到新邮箱。",
     // --- end visual finish: settings ---

@@ -34,8 +34,10 @@ pub enum AiAction {
     Testing,
     Saving,
     TestOk(u64),
-    /// The provider's error text.
+    /// The provider refused: its own words, read for the cause and logged.
     TestFailed(SharedString),
+    /// The test never reached the provider: already in plain words.
+    TestError(SharedString),
     Saved,
     /// A field that is not right yet, or the server's refusal.
     Problem(SharedString),
@@ -309,8 +311,12 @@ impl AiServicePanel {
             let _ = this.update(cx, |this, cx| {
                 this.action = match result {
                     Ok(AiTestOutcome::Ok { latency_ms }) => AiAction::TestOk(latency_ms),
-                    Ok(AiTestOutcome::Failed(e)) => AiAction::TestFailed(e.into()),
-                    Err(e) => AiAction::TestFailed(widgets::error_text(e).into()),
+                    Ok(AiTestOutcome::Failed(e)) => {
+                        let detail = chat_core::diagnostics::redact(&e);
+                        tracing::warn!(%detail, "AI service test refused");
+                        AiAction::TestFailed(e.into())
+                    }
+                    Err(e) => AiAction::TestError(widgets::error_text(e).into()),
                 };
                 cx.notify();
             });
@@ -358,27 +364,25 @@ impl AiServicePanel {
                 Some(crate::ui::native::sheet_status_error(t.clone(), cx).into_any_element())
             }
             // The cause and the next step in plain words; the provider's own
-            // words stay under them, for whoever has to look it up.
-            AiAction::TestFailed(t) => {
-                let alert = widgets::failed_alert(
-                    "ai-test-failed",
-                    s::AI_TEST_FAILED,
-                    Some(test_failure_cause(t).map_or_else(|| t.clone(), Into::into)),
-                    None,
-                    cx,
-                );
-                Some(match test_failure_cause(t) {
-                    Some(_) => div()
-                        .w_full()
-                        .flex()
-                        .flex_col()
-                        .gap(space::S6)
-                        .child(alert)
-                        .child(widgets::quiet(t.clone(), cx))
-                        .into_any_element(),
-                    None => alert,
-                })
-            }
+            // words go to the log.
+            AiAction::TestFailed(t) => Some(widgets::failed_alert(
+                "ai-test-failed",
+                s::AI_TEST_FAILED,
+                Some(
+                    test_failure_cause(t)
+                        .unwrap_or(s::AI_TEST_FAILED_OTHER)
+                        .into(),
+                ),
+                None,
+                cx,
+            )),
+            AiAction::TestError(t) => Some(widgets::failed_alert(
+                "ai-test-failed",
+                s::AI_TEST_FAILED,
+                Some(t.clone()),
+                None,
+                cx,
+            )),
             AiAction::SaveFailed(t) => Some(widgets::failed_alert(
                 "ai-save-failed",
                 s::AI_SAVE_FAILED,
@@ -579,22 +583,15 @@ impl AiServicePanel {
                         .children(self.answer_row(cx))
                         .child(buttons),
                 )
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(space::S8)
-                        // Set up, the four are on: a state, not a promise.
-                        .child(widgets::quiet(
-                            if configured {
-                                s::AI_USES_ON
-                            } else {
-                                s::AI_USES
-                            },
-                            cx,
-                        ))
-                        .child(uses_form),
-                ),
+                // Set up, the four are on: a state, not a promise.
+                .child(widgets::section(
+                    if configured {
+                        SectionTitle::new(s::AI_USES_ON)
+                    } else {
+                        SectionTitle::new(s::AI_USES_TITLE).description(s::AI_USES)
+                    },
+                    uses_form,
+                )),
         ))
     }
 }
