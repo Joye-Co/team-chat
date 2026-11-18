@@ -1292,22 +1292,7 @@ pub fn table(
             .when(text, |d| d.overflow_hidden())
             .whitespace_nowrap()
     };
-    let header = div()
-        .flex_none()
-        .h(px(40.))
-        .flex()
-        .items_center()
-        .bg(k.fill)
-        .border_b_1()
-        .border_color(k.separator)
-        .children(cols.iter().enumerate().map(|(i, c)| {
-            // A page table's header is 14 medium foreground (§2.7).
-            cell(i, c.right, c.width)
-                .n_body()
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(k.label)
-                .child(c.header.clone())
-        }));
+    let header = table_header(cols, cx);
     let total = rows.len();
     let body = rows.into_iter().enumerate().map(|(ri, (cells, click))| {
         div()
@@ -1335,15 +1320,50 @@ pub fn table(
     div().flex().flex_col().child(header).children(body)
 }
 
-/// The loading shape of a [`table`] (§2.14): its frame, the h40 header with
-/// one bar per column, and `n` (3 to 6) h48 rows with one bar per column at
-/// the column's width and alignment.
+/// The header row of a [`table`] (§2.7): h40 on the muted fill, 14 medium labels,
+/// a line under it. Its top corners follow the frame's radius: the frame clips its
+/// children to its box, not to its corners, and draws no border that would hide a
+/// square fill.
+fn table_header(cols: &[Col], cx: &App) -> gpui::Div {
+    let k = native_colors(cx);
+    let n = cols.len();
+    div()
+        .flex_none()
+        .h(super::tokens::height::TABLE_HEAD)
+        .flex()
+        .items_center()
+        .bg(k.fill)
+        .rounded_t(m::FRAME_RADIUS)
+        .border_b_1()
+        .border_color(k.separator)
+        .children(cols.iter().enumerate().map(|(i, c)| {
+            div()
+                .min_w(px(0.))
+                .when_some(c.width, |d, w| d.flex_none().w(w))
+                .when(c.width.is_none(), |d| d.flex_1())
+                .pl(if i == 0 { px(16.) } else { px(12.) })
+                .pr(if i + 1 == n { px(16.) } else { px(0.) })
+                .flex()
+                .items_center()
+                .when(c.right, |d| d.justify_end())
+                .when(!c.header.is_empty(), |d| d.overflow_hidden())
+                .whitespace_nowrap()
+                .n_body()
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(k.label)
+                .child(c.header.clone())
+        }))
+}
+
+/// The loading shape of a [`table`] (§2.14): its frame, the real header (the
+/// column names are known before the rows are), and `n` (3 to 6) h48 rows with
+/// one bar per column at the column's width and alignment.
 pub fn skeleton_table(id: &str, cols: &[Col], n: usize, cx: &App) -> AnyElement {
     let k = native_colors(cx);
     let n = n.clamp(*TABLE_SKELETON_ROWS.start(), *TABLE_SKELETON_ROWS.end());
     let count = cols.len();
     let widths = [0.62, 0.45, 0.78, 0.54, 0.7, 0.4];
-    let row = |h: Pixels, bar: Pixels, on_fill: bool, seed: usize| {
+    let row = |h: Pixels, bar: Pixels, seed: usize| {
         div()
             .flex_none()
             .h(h)
@@ -1359,24 +1379,18 @@ pub fn skeleton_table(id: &str, cols: &[Col], n: usize, cx: &App) -> AnyElement 
                     .pr(if i + 1 == count { px(16.) } else { px(0.) })
                     .flex()
                     .when(c.right, |d| d.justify_end())
-                    .child(
-                        Bone::new()
-                            .h(bar)
-                            .w(gpui::relative(if c.width.is_none() { w } else { 0.7 }))
-                            .on_fill(on_fill),
-                    )
+                    .child(Bone::new().h(bar).w(gpui::relative(if c.width.is_none() {
+                        w
+                    } else {
+                        0.7
+                    })))
             }))
     };
     frame(cx)
         .id(SharedString::from(format!("{id}-skeleton")))
-        .child(
-            row(super::tokens::height::TABLE_HEAD, px(12.), true, 3)
-                .bg(k.fill)
-                .border_b_1()
-                .border_color(k.separator),
-        )
+        .child(table_header(cols, cx))
         .children((0..n).map(|i| {
-            row(super::tokens::height::TABLE_ROW, px(14.), false, i)
+            row(super::tokens::height::TABLE_ROW, px(14.), i)
                 .when(i + 1 < n, |d| d.border_b_1().border_color(k.separator))
         }))
         .into_any_element()
