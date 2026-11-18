@@ -1670,16 +1670,26 @@ pub fn compare(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) 
                 }
                 ComparePreview::Artifact { .. } => None,
             };
+            // The well clips to its box, not its curve: the picture takes the curve inside
+            // the well's border itself.
+            let curve = crate::ui::native::cards::card::WELL_RADIUS
+                - crate::ui::native::tokens::metrics::HAIRLINE;
             div()
                 .w_full()
                 .h(t::PREVIEW)
                 .bg(k.sunken)
+                .rounded_t(curve)
                 .flex()
                 .items_center()
                 .justify_center()
                 .overflow_hidden()
                 .map(|el| match path {
-                    Some(p) => el.child(img(p).size_full().object_fit(ObjectFit::Cover)),
+                    Some(p) => el.child(
+                        img(p)
+                            .size_full()
+                            .rounded_t(curve)
+                            .object_fit(ObjectFit::Cover),
+                    ),
                     None => el.child(ui::icon(Sym::Image, px(20.), k.ink_3)),
                 })
                 .into_any_element()
