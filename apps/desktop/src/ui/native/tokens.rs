@@ -1249,6 +1249,13 @@ pub mod gallery {
     pub const BADGE_H: Pixels = px(18.);
     /// The composer's thumbnails of images not sent yet.
     pub const DRAFT_THUMB: Pixels = px(64.);
+    /// A round icon button over a picture (the draft thumbnail's remove): its side, its
+    /// glyph, and black at these opacities at rest, under the pointer and pressed.
+    pub const OVER_BUTTON: Pixels = px(20.);
+    pub const OVER_GLYPH: Pixels = px(10.);
+    pub const OVER_SCRIM: f32 = 0.55;
+    pub const OVER_SCRIM_HOVER: f32 = 0.75;
+    pub const OVER_SCRIM_ACTIVE: f32 = 0.85;
 }
 
 /// The image viewer (files::lightbox): every picture of a 话题 on a dark screen over the

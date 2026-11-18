@@ -5,7 +5,7 @@
 use gpui::{
     AnyElement, App, Div, ElementId, InteractiveElement as _, IntoElement, ObjectFit,
     ParentElement, StatefulInteractiveElement as _, Styled, StyledImage as _, Window, div, img,
-    prelude::FluentBuilder as _, px, relative,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::{Disableable as _, button::Button};
 
@@ -545,7 +545,7 @@ fn render_list(
 }
 
 /// A progress block: the label `small` `text-2` with the percent at the
-/// right (12 `text-3`, tabular), then a 4 pt `accent` bar on a `field` track.
+/// right (12 `text-3`, tabular), then the one Progress (`ui::native::progress`).
 fn render_progress(_key: &str, value: f64, label: Option<&str>, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
     let percent = (value * 100.0).round();
@@ -576,15 +576,8 @@ fn render_progress(_key: &str, value: f64, label: Option<&str>, cx: &App) -> Any
                         .child(format!("{percent}%")),
                 ),
         )
-        .child(
-            div().h(px(4.)).w_full().rounded(px(2.)).bg(k.field).child(
-                div()
-                    .h_full()
-                    .w(relative(value.clamp(0.0, 1.0) as f32))
-                    .rounded(px(2.))
-                    .bg(k.accent),
-            ),
-        )
+        // The one Progress (D12): primary on primary 20 %, never the accent.
+        .child(crate::ui::native::progress(value as f32, cx))
         .into_any_element()
 }
 

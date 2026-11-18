@@ -717,6 +717,38 @@ pub fn screen_button(
         .tooltip(name)
 }
 
+/// A round icon button over a picture (the remove of a draft thumbnail): a white glyph
+/// on a black scrim that darkens under the pointer, so it reads on any picture in both
+/// themes. Sizes and opacities are the `gallery::OVER_*` tokens.
+pub fn over_image_button(
+    id: impl Into<ElementId>,
+    sym: Sym,
+    name: impl Into<SharedString>,
+    cx: &App,
+) -> Button {
+    use super::tokens::gallery as g;
+    let name = name.into();
+    let scrim = |alpha: f32| gpui::hsla(0., 0., 0., alpha);
+    Button::new(id)
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(scrim(g::OVER_SCRIM))
+                .foreground(gpui::white())
+                .hover(scrim(g::OVER_SCRIM_HOVER))
+                .active(scrim(g::OVER_SCRIM_ACTIVE)),
+        )
+        .icon(button_sym(
+            sym,
+            SymSize::for_slot(g::OVER_GLYPH),
+            g::OVER_BUTTON,
+        ))
+        .with_size(g::OVER_BUTTON)
+        .size(g::OVER_BUTTON)
+        .rounded_full()
+        .accessibility_label(name.clone())
+        .tooltip(name)
+}
+
 /// A tab of the Settings window's toolbar tab strip (Mac chrome, kept by
 /// COMPLETENESS.md §2.19): an 18 symbol over a 12 label; the selected tab
 /// has the `muted` fill. `active` is the key-window state.
