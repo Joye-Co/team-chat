@@ -797,8 +797,6 @@ fn reject_for(reason: &str) -> Reject {
     }
 }
 
-/// What the page gets for an event the server refused: the code of its reason, and the
-/// server's words (for `bad_payload`: which field broke the declared schema).
 /// The words after {name} 接不了 for `expect.reason`; a reason this version does not know
 /// (or none) says 稍后再试.
 pub fn none_why(reason: Option<NoneReason>) -> &'static str {
@@ -822,6 +820,8 @@ fn none_failure(reason: Option<NoneReason>) -> Failure {
     }
 }
 
+/// What the page gets for an event the server refused: the code of its reason, and the
+/// server's words (for `bad_payload`: which field broke the declared schema).
 fn failure_for(refusal: &PageRefusal) -> Failure {
     Failure {
         reject: reject_for(&refusal.reason),
