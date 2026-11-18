@@ -569,7 +569,6 @@ impl AdminView {
             .max(0.01)
             * 1.15;
         let days = u.daily.len().max(1);
-        let names: Vec<&str> = m::WEEKDAYS.split(',').collect();
         let today = crate::selftest::clock::local_now()
             .timestamp_millis()
             .max(0) as u64;
@@ -600,14 +599,8 @@ impl AdminView {
                 if today >= d.start && today < d.start + 86_400_000 {
                     m::ACTIVITY_TODAY.to_string()
                 } else if days <= 7 {
-                    t.map(|t| {
-                        names
-                            .get(t.weekday().num_days_from_monday() as usize)
-                            .copied()
-                            .unwrap_or("")
-                            .to_string()
-                    })
-                    .unwrap_or_default()
+                    t.map(|t| crate::copy::weekday(t.weekday()).to_string())
+                        .unwrap_or_default()
                 } else {
                     // A month's bars are too narrow for every date: the 1st and every 5th.
                     t.filter(|t| t.day() == 1 || t.day() % 5 == 0)

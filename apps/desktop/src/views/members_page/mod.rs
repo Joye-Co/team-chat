@@ -1053,7 +1053,7 @@ impl MembersPage {
         // 成本 and its weekly limit. The limit is in US cents
         // (`weeklyBudgetCents`); a cost is shown in the currency it was
         // reported in and never converted. Only a cost in US dollars is
-        // measured against the limit (`$132.00 / 上限 $300.00` with a
+        // measured against the limit (`$132.00 / 预算 $300.00` with a
         // Progress); a cost in another currency and the limit show as two
         // separate values with no ratio bar. No run reported a cost: `–`,
         // never a wrong $0.
@@ -1626,7 +1626,7 @@ impl MembersPage {
         .into_any_element()
     }
 
-    /// 汇报和限额 (card): who the member reports to (`reportsTo`) and, for an AI member,
+    /// 汇报和预算 (card): who the member reports to (`reportsTo`) and, for an AI member,
     /// the weekly limit (`weeklyBudgetCents`, US cents). Owners change both in a sheet.
     fn plan(&self, e: &Entry, cx: &App) -> AnyElement {
         let k = native_colors(cx);
@@ -1707,7 +1707,7 @@ impl MembersPage {
         .into_any_element()
     }
 
-    /// True when I am an owner (owners set 汇报给 and 限额).
+    /// True when I am an owner (owners set 汇报给 and 预算).
     fn i_am_owner(&self) -> bool {
         match self.services.provider.session() {
             crate::data::SessionState::SignedIn { me, .. } => me.level == MemberLevel::Owner,

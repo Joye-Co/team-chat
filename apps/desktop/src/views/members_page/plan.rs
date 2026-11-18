@@ -1,6 +1,6 @@
-//! The 汇报和限额 sheet (NATIVE.md §7.1) of the 成员 page, owners only: who the member
+//! The 汇报和预算 sheet (NATIVE.md §7.1) of the 成员 page, owners only: who the member
 //! reports to (`Member.reportsTo`, a pop-up of the team) and, for an AI member, the weekly
-//! limit (`Member.weeklyBudgetCents`, US dollars in the field). 保存 sends both fields with
+//! budget (`Member.weeklyBudgetCents`, US dollars in the field). 保存 sends both fields with
 //! `PATCH /v1/members/:id`; it is off while nothing changed or the amount is invalid, and
 //! a refusal opens an alert while the sheet stays open.
 
@@ -226,7 +226,7 @@ impl Render for PlanForm {
     }
 }
 
-/// Opens the 汇报和限额 sheet of `member` with its current values.
+/// Opens the 汇报和预算 sheet of `member` with its current values.
 pub fn open_plan_sheet(
     services: Services,
     member: Member,

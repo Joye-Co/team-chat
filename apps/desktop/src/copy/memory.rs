@@ -8,7 +8,6 @@ crate::copy! {
     TEAM_TITLE = "团队约定",
     TEAM_ABOUT = "每个成员做事前都会读。每天整理一次，记错了直接改或停用。",
     TEAM_ABOUT_READONLY = "每个成员做事前都会读。每天整理一次，管理员可以改。",
-    TEAM_LIST = "约定和事实",
     // 群里的约定 on a 群's page; 我的偏好 in 设置; 我的约定 when one person uses the server.
     GROUP_TITLE = "群里的约定",
     GROUP_ABOUT = "在这个群干活的成员会参考这些。每天整理一次，记错了直接改或停用。",
@@ -23,7 +22,6 @@ crate::copy! {
     // 记忆更新: one day's changes, each line can be undone.
     UPDATES_TITLE = "记忆更新",
     UPDATES_TITLE_DAY = "记忆更新 · {day}",
-    UPDATES_ABOUT = "每天整理一次，直接生效。哪一行不对，撤回就行。",
     UPDATES_EMPTY = "还没有记忆更新",
     UPDATES_ADDED_N = "新增 {n} 条",
     UPDATES_CHANGED_N = "改了 {n} 条",

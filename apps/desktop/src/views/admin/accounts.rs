@@ -1366,7 +1366,9 @@ fn usage_words(w: &chat_core::proto::machine::UsageWindow) -> (String, Option<St
             m::USAGE_WINDOW,
             &[(
                 "span",
-                &head.replace(" hours", " 小时").replace(" days", " 天"),
+                &head
+                    .replace(" hours", &format!(" {}", m::USAGE_SPAN_HOURS))
+                    .replace(" days", &format!(" {}", m::USAGE_SPAN_DAYS)),
             )],
         ),
         "primary" => m::USAGE_PRIMARY.to_string(),

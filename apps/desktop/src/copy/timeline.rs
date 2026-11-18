@@ -2,10 +2,6 @@
 
 crate::copy! {
     SELECT_TOPIC = "选一个话题，或写下第一行开始新话题",
-    NEW_TOPIC_HINT = "新话题：第一行会作为标题",
-    LOAD_OLDER = "加载更早的消息",
-    LOADING_OLDER = "正在加载…",
-    NO_OLDER = "已经到最早的消息",
     EDITED = "（已编辑）",
     RECALLED = "此消息已撤回",
     REEDIT = "重新编辑",
@@ -16,14 +12,10 @@ crate::copy! {
     TYPING_ONE = "{name} 正在输入…",
     TYPING_TWO = "{a}、{b} 正在输入…",
     TYPING_MANY = "{a}、{b} 和另外 {n} 人正在输入…",
-    MESSAGE_COUNT = "{n} 条消息",
-    STARTED_BY = "{name} 发起",
-    OWNED_BY = "{name} 负责",
     QUOTE = "引用",
     EDIT = "编辑",
     RECALL = "撤回",
     RECALL_CONFIRM = "撤回这条消息？",
-    SET_STATUS = "设置状态",
     TOGGLE_PANEL = "详情",
     NEW_MESSAGES = "新消息",
     JUMP_NEW = "{n} 条新消息",
@@ -59,7 +51,7 @@ crate::copy! {
     // A sender's avatar: a click @s them and quotes the message in the composer.
     AVATAR_MENTION_TIP = "@{name}",
     // An AI member's avatar, for owners: the right-click menu also changes its computer.
-    AVATAR_MENTION_TIP_BOT = "点一下 @{name}，右键可以更换 TA 的电脑",
+    AVATAR_MENTION_TIP_BOT = "点一下 @{name}，右键可以更换它的电脑",
     MORE = "更多",
     FOLLOW = "关注话题",
     UNFOLLOW = "取消关注",
@@ -68,7 +60,7 @@ crate::copy! {
     QUOTE_UNAVAILABLE = "原消息不在已加载的范围内",
     MENU_COPY = "复制",
     MENU_COPY_LINK = "复制链接",
-    RECALL_CONFIRM_DETAIL = "撤回后其他成员只会看到“此消息已撤回”。",
+    RECALL_CONFIRM_DETAIL = "撤回后其他成员只会看到「此消息已撤回」。",
     // --- v12/fx-topic: the plan card's stop button (opens the alert) ---
     PLAN_STOP = "停止…",
     PLAN_DOING = "正在做：{step}",

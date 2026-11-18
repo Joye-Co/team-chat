@@ -100,9 +100,8 @@
 版本	Version
 时间	Time
 用时	Time taken
-成本	Cost
 花费	Spend
-用时和成本	Time and cost
+用时和花费	Time and cost
 在哪	Where
 在哪干活	Where it works
 做的人	Made by
@@ -129,13 +128,13 @@
 记一条	Add a note
 记得的事	Memory
 汇报给	Reports to
-汇报和限额	Reporting and limits
-每周限额	Weekly limit
+汇报和预算	Reporting and budget
+每周预算	Weekly budget
 能用的工具	Tools it can use
 只读	Read-only
 可以提 PR	Can open PRs
 可以部署和回滚	Can deploy and roll back
-添加成员…	Add member…
+添加 AI 成员…	Add AI member…
 添加电脑	Add computer
 用这台电脑	Use this computer
 团队的电脑	Team computers
@@ -214,7 +213,7 @@ AI 成员被 @ 后，在这些电脑上干活。	AI members work here when you @
 记忆更新	Memory update
 明天生效	Takes effect tomorrow
 第一版	First draft
-{} / 上限 {}	{} of {} limit
+{} / 预算 {}	{} of {} budget
 内存 {}	Memory {}
 现在 {}	Now {}
 磁盘 {}	Disk {}
@@ -222,7 +221,7 @@ AI 成员被 @ 后，在这些电脑上干活。	AI members work here when you @
 {} PR	{} PRs
 {} 月	{}
 10 月	October 
-11 月 3 日 周二	Tuesday, November 3
+11月3日 周二	Tuesday, November 3
 网页	Page
 办公室	Office
 

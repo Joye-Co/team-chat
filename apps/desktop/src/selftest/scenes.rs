@@ -1070,7 +1070,7 @@ pub fn all() -> Vec<&'static Scene> {
 const CORE_SCENES: &[Scene] = &[
     Scene {
         name: "topic-core",
-        about: "话题 page on the real provider and a seeded cache: 改动 from the PR link, the pinned review, 产出 with its preview, 用到的决定 and 用时和成本",
+        about: "话题 page on the real provider and a seeded cache: 改动 from the PR link, the pinned review, 产出 with its preview, 用到的决定 and 用时和花费",
         start: Start::Core,
         setup: |s, cx| {
             v2_open_topic(

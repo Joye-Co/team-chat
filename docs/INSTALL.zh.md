@@ -168,7 +168,7 @@ cd ~/Library/Application\ Support/co.joye.teamchat && zip -r ~/Desktop/teamchat-
 
 ### 更新
 
-和 Mac 一样:App 检查服务器,下载新的安装包,校验 SHA-256,然后提示"重启安装"。点了以后 App 退出,
+和 Mac 一样:App 检查服务器,下载新的安装包,校验 SHA-256,然后提示"安装更新"。点了以后 App 退出,
 一个很小的更新程序(`team-chat-update.exe`)替换文件并打开新版本。如果新版本打不开,更新程序会把
 旧版本放回去并重新打开。想手动更新:先退出 App,再运行新的安装包,覆盖安装;手动下载的安装包在签名之前
 每次都会再出现 SmartScreen 提示。

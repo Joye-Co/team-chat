@@ -55,20 +55,12 @@ pub const LEADING: Pixels = crate::ui::native::tokens::space::S24;
 /// attachments, plan cards and embeds are min(640, text column).
 pub const TEXT_MAX: Pixels = crate::ui::native::tokens::layout::IN_THREAD;
 
-/// The date divider label: `11 月 3 日 周一`.
+/// The date divider label: `11月3日 周一`.
 pub fn date_label(at: crate::data::Millis) -> String {
     let Some(day) = model::local_day(at) else {
         return String::new();
     };
-    let w = match day.weekday() {
-        chrono::Weekday::Mon => c::WEEKDAY_1,
-        chrono::Weekday::Tue => c::WEEKDAY_2,
-        chrono::Weekday::Wed => c::WEEKDAY_3,
-        chrono::Weekday::Thu => c::WEEKDAY_4,
-        chrono::Weekday::Fri => c::WEEKDAY_5,
-        chrono::Weekday::Sat => c::WEEKDAY_6,
-        chrono::Weekday::Sun => c::WEEKDAY_7,
-    };
+    let w = crate::copy::weekday(day.weekday());
     fill(
         c::DATE_FULL,
         &[
