@@ -939,7 +939,8 @@ fn group_menu(
             }),
         )
         .separator();
-    let menu = nav_views::hide_delete::hide_group_item(menu, services, &hide);
+    // 隐藏 changes nothing for others: the red items sit apart from it.
+    let menu = nav_views::hide_delete::hide_group_item(menu, services, &hide).separator();
     // A destructive item reads in the destructive color (§2.11, T4-14).
     let menu = menu.item(
         PopupMenuItem::element(|_, cx: &mut App| {
