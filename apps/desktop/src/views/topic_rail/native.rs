@@ -1053,20 +1053,7 @@ impl TopicRail {
                 ],
             )
         };
-        let lower = name.to_lowercase();
-        let sym = if run
-            .machine_id
-            .as_deref()
-            .is_some_and(|id| id.starts_with("cloud"))
-        {
-            Sym::Cloud
-        } else if lower.contains("mini") {
-            Sym::MacMini
-        } else if lower.contains("book") || lower.contains("laptop") {
-            Sym::Laptop
-        } else {
-            Sym::Computer
-        };
+        let sym = crate::views::group_page::kit::machine_sym(&name, run.machine_id.as_deref());
         Some(
             div()
                 .w_full()
