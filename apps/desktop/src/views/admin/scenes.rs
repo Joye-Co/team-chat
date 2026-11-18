@@ -460,7 +460,7 @@ fn open_roles_menu(
     Ok(handle)
 }
 
-/// 成员 as the 所有者 with the alert 设为所有者… asks before it hands over the team.
+/// 成员 as the 所有者 with the alert 设为所有者… asks before it adds a second owner.
 fn open_roles_owner_confirm(
     services: Services,
     _content: Size<Pixels>,

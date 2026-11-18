@@ -1250,27 +1250,41 @@ pub fn open_bot_dialog_new_name(
         |s, w, cx| {
             let form = super::members::open_add_bot(s, w, cx);
             form.update(cx, |f, cx| f.fill("发布巡检", Some(""), w, cx));
+            // The grid is the end of the form, under the fold.
+            cx.spawn(async move |cx| {
+                cx.background_executor()
+                    .timer(Duration::from_millis(200))
+                    .await;
+                let _ = form.update(cx, |f, cx| f.scroll_to_end(cx));
+            })
+            .detach();
         },
         cx,
     )
 }
 
-/// 成员 with the 添加 AI 成员 sheet set to work on the team's computers: 运行方式 lists what
-/// the computers report by name, the ones not signed in marked.
+/// 成员 with the 添加 AI 成员 sheet set to work on the team's computers: the 运行方式 menu is
+/// open on what the computers report by name, the ones not signed in marked.
 pub fn open_bot_dialog_runner(
     services: Services,
     _content: gpui::Size<gpui::Pixels>,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
-    open_with_dialog(
+    let handle = open_with_dialog(
         services,
         Page::Members,
         |s, w, cx| {
             let form = super::members::open_add_bot(s, w, cx);
-            form.update(cx, |f, cx| f.fill("发布巡检", Some(""), w, cx));
+            form.update(cx, |f, cx| {
+                f.fill("发布巡检", Some(""), w, cx);
+                // The computer that reports a tool signed out.
+                f.pick_machine(Some("mc-mini".into()), w, cx);
+            });
         },
         cx,
-    )
+    )?;
+    click_when_drawn(handle, (668., 483.), gpui::MouseButton::Left, cx)?;
+    Ok(handle)
 }
 
 /// 成员 with the 添加 AI 成员 sheet of a team that has no computer yet: one line says

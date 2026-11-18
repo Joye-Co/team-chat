@@ -671,7 +671,11 @@ impl Render for MachinesPage {
             ))
             .children(sections)
             .child(widgets::section(
-                SectionTitle::new(s::CLOUD).description(s::CLOUD_FOOTER),
+                SectionTitle::new(s::CLOUD).description(if self.solo {
+                    s::CLOUD_FOOTER_SOLO
+                } else {
+                    s::CLOUD_FOOTER
+                }),
                 cloud,
             ))
     }
@@ -1057,6 +1061,7 @@ impl Render for MachineForm {
                         &self.credential_scroll,
                         cx,
                     ))
+                    .body(widgets::quiet(s::MACHINE_CREDENTIAL_HINT, cx))
                     .buttons([push_button(
                         "machine-done",
                         s::DONE,

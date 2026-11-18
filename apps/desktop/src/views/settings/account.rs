@@ -313,7 +313,15 @@ impl AccountPage {
                         let handle = code.read(cx).focus_handle(cx);
                         handle.focus(window, cx);
                     }
-                    Err(e) => this.email_error = Some(e),
+                    Err(e) => {
+                        this.email_error = Some(e);
+                        // The field was off while the code went out: back to
+                        // it to correct (a resend has no field on screen).
+                        if this.email_sent_to.is_none() {
+                            let handle = this.email_input.read(cx).focus_handle(cx);
+                            handle.focus(window, cx);
+                        }
+                    }
                 }
                 cx.notify();
             });
@@ -497,6 +505,7 @@ impl AccountPage {
                                             tokens::icon::MD,
                                             k.secondary,
                                         ))
+                                        .disabled(busy)
                                         .error(error.is_some()),
                                 )
                                 .into_any_element(),

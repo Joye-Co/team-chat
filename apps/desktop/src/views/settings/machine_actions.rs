@@ -379,7 +379,7 @@ impl Render for RenameForm {
         let problem = (!typed.is_empty())
             .then(|| widgets::check_len(&typed, 64).err())
             .flatten();
-        let off = busy || typed.is_empty() || problem.is_some();
+        let off = busy || typed.is_empty() || typed == self.before || problem.is_some();
         let save = cx.entity();
         let status = match (&problem, &self.status) {
             (Some(p), _) => Some(sheet_status_error(p.clone(), cx)),
