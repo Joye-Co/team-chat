@@ -695,7 +695,7 @@ pub(super) fn attention_panel(
         .children(items.into_iter().enumerate().map(|(i, a)| {
             let icon = match a.kind {
                 AttentionKind::Waiting => Sym::Privacy,
-                AttentionKind::CliLoggedOut => Sym::Terminal,
+                AttentionKind::CliLoggedOut | AttentionKind::Github => Sym::Terminal,
                 AttentionKind::Queue => Sym::Waiting,
                 AttentionKind::Failed => Sym::Failed,
                 AttentionKind::Disk => Sym::Disk,

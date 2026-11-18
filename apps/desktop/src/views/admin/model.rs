@@ -322,6 +322,8 @@ pub enum AttentionKind {
     Limit,
     /// 模 1.3: the team's AI 服务 is not set up.
     AiService,
+    /// A VM computer that cannot push: GitHub is signed out or gh is missing (§3.6).
+    Github,
 }
 
 impl AttentionKind {
@@ -337,7 +339,8 @@ impl AttentionKind {
             AttentionKind::Waiting
             | AttentionKind::Queue
             | AttentionKind::Disk
-            | AttentionKind::Offline => AdminPage::Overview,
+            | AttentionKind::Offline
+            | AttentionKind::Github => AdminPage::Overview,
         }
     }
 }
@@ -507,6 +510,22 @@ pub fn attention(
         if let Some(a) = near_limit(c, time) {
             out.push(a);
         }
+    }
+    // Only a VM computer: on a host git may push over SSH or the keychain (§3.6).
+    if d.runs_in.as_deref() == Some("vm")
+        && let Some(title) = d.github.as_ref().and_then(|g| match g.state.as_str() {
+            "signed_out" => Some(m::ATT_GITHUB_OUT),
+            "no_gh" => Some(m::GITHUB_NO_GH),
+            _ => None,
+        })
+    {
+        out.push(Attention {
+            kind: AttentionKind::Github,
+            title: title.into(),
+            meta: m::ATT_GITHUB_META.into(),
+            tone: Tone::Warn,
+            target: None,
+        });
     }
     if d.queue.count > 0 {
         out.push(Attention {
@@ -1063,6 +1082,29 @@ mod tests {
         assert_eq!(AttentionKind::Limit.page(), AdminPage::Accounts);
         assert_eq!(AttentionKind::Budget.page(), AdminPage::Usage);
         assert_eq!(AttentionKind::Invite.page(), AdminPage::Members);
+    }
+
+    #[test]
+    fn attention_lists_github_only_on_a_vm_computer() {
+        use chat_core::proto::machine::MachineGithub;
+        let rows = |state: &str, runs_in: &str| {
+            let mut d = sample();
+            d.github = Some(MachineGithub {
+                state: state.into(),
+                login: None,
+            });
+            d.runs_in = Some(runs_in.into());
+            attention(&d, 1_000, &|id| id.to_string(), &|_| "t".into())
+                .into_iter()
+                .filter(|a| a.kind == AttentionKind::Github)
+                .map(|a| a.title)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(rows("signed_out", "vm"), [m::ATT_GITHUB_OUT]);
+        assert_eq!(rows("no_gh", "vm"), [m::GITHUB_NO_GH]);
+        assert!(rows("signed_in", "vm").is_empty());
+        assert!(rows("signed_out", "host").is_empty());
+        assert!(rows("no_gh", "host").is_empty());
     }
 
     #[test]
