@@ -11,7 +11,7 @@ name: CI
 #                                     bot SDK's tests start this server and import its code)
 #   packages/**, protocol/**       -> Packages (protocol also every Rust job)
 #   docs/bots.md, examples/**      -> Packages (the bot SDK's tests run the examples)
-#   scripts/**/*.ts                -> Packages (typecheck only)
+#   scripts/**/*.ts                -> Packages (that job typechecks them)
 #   apps/daemon/**, update-helper  -> Rust tests (Linux), daemon on Windows, lint
 #   apps/desktop/**, artifact-view -> Desktop on macOS, desktop on Windows, lint
 #   crates/chat-protocol|core      -> all of the Rust jobs (everything builds on them)

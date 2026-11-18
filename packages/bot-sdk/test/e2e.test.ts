@@ -1163,6 +1163,9 @@ describe("bot loops", () => {
   });
 });
 
+// The server log is removed with its temp folder at the end unless KEEP_E2E_DIR is set.
 console.error(
-  `bot-sdk e2e: http send ${hasHttpSend ? "on" : "off"}, files ${hasFiles ? "on" : "off"}, interact ${hasInteract ? "on" : "off"}, refs ${hasRefs ? "on" : "off"}; log ${server.logFile}`,
+  `bot-sdk e2e: http send ${hasHttpSend ? "on" : "off"}, files ${hasFiles ? "on" : "off"}, interact ${hasInteract ? "on" : "off"}, refs ${hasRefs ? "on" : "off"}; ${
+    process.env.KEEP_E2E_DIR ? `log ${server.logFile}` : "set KEEP_E2E_DIR=1 to keep the server log"
+  }`,
 );
