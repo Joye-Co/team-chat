@@ -875,9 +875,30 @@ pub(crate) fn fold_row(key: &str, hidden: usize, expanded: bool, cx: &App) -> Di
         .py(space::S4)
         .border_t_1()
         .border_color(k.line)
+        // 4 + 8: the label starts on the 12 pt inset of the frame's cells.
+        .child(crate::views::cards::blocks::more_button(key, hidden, expanded).px(space::S8))
+}
+
+/// The 展开其余 n 行 / 收起 button of a list with no cell inset: the label starts on the
+/// content edge and the button's hover reaches out past it, as the rows' hover does.
+pub(crate) fn flush_more(key: &str, hidden: usize, expanded: bool) -> Div {
+    div()
+        .flex()
+        .ml(-ui::native::metrics::BUTTON_SMALL_PAD)
         .child(crate::views::cards::blocks::more_button(
             key, hidden, expanded,
         ))
+}
+
+/// [`fold_row`] of a table whose cells start on the content edge.
+pub(crate) fn flush_fold_row(key: &str, hidden: usize, expanded: bool, cx: &App) -> Div {
+    let k = theme::colors(cx);
+    div()
+        .flex()
+        .py(space::S4)
+        .border_t_1()
+        .border_color(k.line)
+        .child(flush_more(key, hidden, expanded))
 }
 
 /// A wide table inside its frame: `content` keeps at least `min` and scrolls sideways when
@@ -1010,12 +1031,28 @@ pub(crate) fn table_with_refs(
     let frame = |inner: Div| {
         // The compact table of §2.7 in a frame: radius 10 and a 1 px border.
         div()
+            .relative()
             .rounded(crate::ui::native::tokens::radius::CONTAINER)
             .border_1()
             .border_color(k.line)
             .overflow_hidden()
             .flex()
             .flex_col()
+            // The header's fill stays in the frame, inside its corners, while the rows
+            // scroll sideways under it (the clip is square).
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .h(m::TABLE_ROW)
+                    .rounded_t(
+                        crate::ui::native::tokens::radius::CONTAINER
+                            - crate::ui::native::tokens::metrics::HAIRLINE,
+                    )
+                    .bg(k.hover),
+            )
             .child(inner)
     };
     let body = match (scroll_state, window) {
@@ -1096,7 +1133,6 @@ fn table_content(
                 .gap(space::S12)
                 .h(m::TABLE_ROW)
                 .px(space::S12)
-                .bg(k.hover)
                 .border_b_1()
                 .border_color(k.line)
                 .font_weight(theme::MEDIUM_WEIGHT)
@@ -1354,10 +1390,18 @@ fn image(ctx: &Ctx, file_id: &str, alt: Option<&str>, cx: &mut App) -> gpui::Sta
         .map(|el| match path {
             // A picture whose size is known shows whole on the sunken fill; one whose
             // size is not fills the 16:10 box as before.
-            Some(p) if natural.is_some() => el
-                .bg(k.sunken)
-                .child(img(p).size_full().object_fit(ObjectFit::Contain)),
-            Some(p) => el.child(img(p).size_full().object_fit(ObjectFit::Cover)),
+            Some(p) if natural.is_some() => el.bg(k.sunken).child(
+                img(p)
+                    .size_full()
+                    .rounded(theme::radius::MD)
+                    .object_fit(ObjectFit::Contain),
+            ),
+            Some(p) => el.child(
+                img(p)
+                    .size_full()
+                    .rounded(theme::radius::MD)
+                    .object_fit(ObjectFit::Cover),
+            ),
             None => missing_image(el, cx)
                 .flex_col()
                 .gap(space::S8)
@@ -1877,36 +1921,8 @@ fn record_wait(
     at: Option<crate::data::Millis>,
     cx: &mut App,
 ) -> Option<interact::AnswerStage> {
-    let at = at?;
-    if ctx.card.status.is_some() || !matches!(ctx.state, CardState::Answered { .. }) {
-        return None;
-    }
-    let p = &ctx.env.provider;
-    let runs: Vec<crate::data::Millis> = p
-        .runs(&ctx.msg.group_id, &ctx.msg.topic_id)
-        .into_iter()
-        .filter(|r| r.bot_id == ctx.msg.author_id)
-        .map(|r| r.created_at)
-        .collect();
-    let activity = p
-        .topic(&ctx.msg.group_id, &ctx.msg.topic_id)
-        .map_or(0, |t| t.last_activity_at);
-    if interact::picked_up(at, &runs, activity) {
-        return None;
-    }
+    let (stage, next) = answer_wait(ctx, events, at?)?;
     let now = ctx.env.now();
-    // A 2.1 answer's ack says how the member takes it; a 2.0 answer waits like a run.
-    // The ack of a 2.1 answer says how the member takes it, and that word stands (a
-    // member that is offline, or one that takes answers without a run, is not late).
-    // With no ack to go by (a 2.0 answer, or the app restarted since), only a member that
-    // has run in this 话题 before is expected to start a run for the answer.
-    let (stage, next) = if interact::has_answer(events) {
-        interact::answer_stage(events, now)
-    } else if !runs.is_empty() {
-        interact::answer_stage_since(at, crate::data::cards_v2::ExpectMode::Run, now)
-    } else {
-        (None, None)
-    };
     if let Some(next) = next {
         let wait = std::time::Duration::from_millis((next - now).max(0) as u64 + 20);
         let due = std::time::Instant::now() + wait;
@@ -1929,6 +1945,58 @@ fn record_wait(
         }
     }
     stage
+}
+
+/// Whether my stored answer of `at` still waits for the member (还没开始, 一直没接): the
+/// record line says so, and the header must not say the member has it.
+pub(super) fn answer_unclaimed(ctx: &Ctx, actor: &str, at: crate::data::Millis) -> bool {
+    if ctx.me.as_deref() != Some(actor) {
+        return false;
+    }
+    let events = ctx
+        .env
+        .provider
+        .card_v2_events(&ctx.msg.group_id, &ctx.msg.message_id);
+    interact::retract_state(&events).is_none()
+        && answer_wait(ctx, &events, at).is_some_and(|(stage, _)| stage.is_some())
+}
+
+/// The stage of my stored answer of `at` and when the next one starts; `None` when the
+/// member picked it up, or the card has moved on.
+fn answer_wait(
+    ctx: &Ctx,
+    events: &[crate::data::cards_v2::MyCardEvent],
+    at: crate::data::Millis,
+) -> Option<(Option<interact::AnswerStage>, Option<crate::data::Millis>)> {
+    if ctx.card.status.is_some() || !matches!(ctx.state, CardState::Answered { .. }) {
+        return None;
+    }
+    let p = &ctx.env.provider;
+    let runs: Vec<crate::data::Millis> = p
+        .runs(&ctx.msg.group_id, &ctx.msg.topic_id)
+        .into_iter()
+        .filter(|r| r.bot_id == ctx.msg.author_id)
+        .map(|r| r.created_at)
+        .collect();
+    let activity = p
+        .topic(&ctx.msg.group_id, &ctx.msg.topic_id)
+        .map_or(0, |t| t.last_activity_at);
+    if interact::picked_up(at, &runs, activity) {
+        return None;
+    }
+    let now = ctx.env.now();
+    // A 2.1 answer's ack says how the member takes it; a 2.0 answer waits like a run.
+    // The ack of a 2.1 answer says how the member takes it, and that word stands (a
+    // member that is offline, or one that takes answers without a run, is not late).
+    // With no ack to go by (a 2.0 answer, or the app restarted since), only a member that
+    // has run in this 话题 before is expected to start a run for the answer.
+    Some(if interact::has_answer(events) {
+        interact::answer_stage(events, now)
+    } else if !runs.is_empty() {
+        interact::answer_stage_since(at, crate::data::cards_v2::ExpectMode::Run, now)
+    } else {
+        (None, None)
+    })
 }
 
 /// The submitted values as key-value rows.
@@ -2058,6 +2126,29 @@ pub(crate) fn field_box(focused: bool, error: bool, height: gpui::Pixels, cx: &A
         .flex()
         .items_center()
         .gap(space::S6)
+}
+
+/// [`line_input`] of a number: tabular figures against the field's right edge.
+fn number_input(field: &Field, disabled: bool, window: &mut Window, cx: &mut App) -> AnyElement {
+    let k = theme::colors(cx);
+    match field {
+        Field::Line(s) => ui::placeholder_input(
+            Input::new(s)
+                .appearance(false)
+                .disabled(disabled)
+                .with_size(gpui_component::Size::Small)
+                .px_0()
+                .py_0()
+                .text_right()
+                .n_figures()
+                .text_size(crate::ui::native::tokens::text::UI.0)
+                .line_height(px(20.))
+                .text_color(k.ink),
+            window,
+            cx,
+        ),
+        area => line_input(area, disabled, window, cx),
+    }
 }
 
 pub(crate) fn line_input(
@@ -2417,13 +2508,23 @@ pub(crate) fn input_control(
                 }) if !u.trim().is_empty() => Some(u.clone()),
                 _ => None,
             };
+            // A number is short (§2.8): right-aligned figures with the unit right after.
+            let number = matches!(
+                ctx.card.block(id),
+                Some(CardV2Block::Input {
+                    kind: InputKind::Number,
+                    ..
+                })
+            );
             field_box(focused || lead, invalid, m::OPTION, cx)
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w(px(0.))
-                        .child(line_input(&field, !live, window, cx)),
-                )
+                .when(number, |el| {
+                    el.w(ui::native::metrics::FIELD_NUMBER_WIDTH).max_w_full()
+                })
+                .child(div().flex_1().min_w(px(0.)).child(if number {
+                    number_input(&field, !live, window, cx)
+                } else {
+                    line_input(&field, !live, window, cx)
+                }))
                 .when_some(unit, |el, u| {
                     el.child(
                         small(div())
@@ -2580,7 +2681,12 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
                 .overflow_hidden()
                 .when(ctx.state.muted(), |el| el.opacity(m::MUTED))
                 .map(|el| match path {
-                    Some(p) => el.child(img(p).size_full().object_fit(ObjectFit::Cover)),
+                    Some(p) => el.child(
+                        img(p)
+                            .size_full()
+                            .rounded(theme::radius::SM)
+                            .object_fit(ObjectFit::Cover),
+                    ),
                     // No file yet: the image icon in a bordered box, never a blank fill.
                     None => missing_image(el, cx),
                 })
@@ -2765,16 +2871,17 @@ fn plan(
                 )
                 .color(k.live)
                 .into_any_element(),
-                _ => div()
-                    .size(px(9.))
-                    .rounded_full()
-                    .border(px(1.5))
-                    .border_color(if it.state == RunPlanState::Waiting {
+                // Not started: the mark of the working card (`views/timeline/plan.rs`).
+                _ => ui::sym(
+                    Sym::Todo,
+                    ui::SymSize::INLINE_SMALL,
+                    if it.state == RunPlanState::Waiting {
                         k.ink_2
                     } else {
                         k.ink_3
-                    })
-                    .into_any_element(),
+                    },
+                )
+                .into_any_element(),
             };
             let (text_color, weight) = match it.state {
                 RunPlanState::Done => (k.ink_2, FontWeight::NORMAL),
@@ -2830,7 +2937,6 @@ fn plan(
                         // The text keeps the centre of its mark and of 问这里 when the
                         // button makes the line taller.
                         .items_center()
-                        .overflow_hidden()
                         // A long step ends in "…" with the full text in a
                         // tooltip; 问这里 stays after it (§2.21, F3).
                         .child(
@@ -3541,7 +3647,8 @@ fn recording_marks(duration_ms: u64, cx: &App) -> [Div; 2] {
                 div()
                     .size(m::PLAY_DISC)
                     .rounded_full()
-                    .bg(n.primary)
+                    // The scrim of the duration chip: it reads on any frame, in both themes.
+                    .bg(gpui::black().opacity(g::BADGE_SCRIM))
                     .shadow(n.float())
                     .flex()
                     .items_center()
@@ -3549,7 +3656,7 @@ fn recording_marks(duration_ms: u64, cx: &App) -> [Div; 2] {
                     .child(ui::icon(
                         Sym::Play,
                         crate::ui::native::tokens::icon::SM,
-                        n.on_primary,
+                        gpui::white(),
                     )),
             ),
         div().absolute().right(space::S6).bottom(space::S6).child(
@@ -3715,7 +3822,16 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
                     .overflow_hidden()
                     .when(ctx.state.muted(), |el| el.opacity(m::MUTED))
                     .map(|el| match path {
-                        Some(p) => el.child(img(p).size_full().object_fit(ObjectFit::Cover)),
+                        // The clip is square: the picture rounds itself inside the border.
+                        Some(p) => el.child(
+                            img(p)
+                                .size_full()
+                                .rounded(
+                                    theme::radius::MD
+                                        - crate::ui::native::tokens::metrics::HAIRLINE,
+                                )
+                                .object_fit(ObjectFit::Cover),
+                        ),
                         None => el
                             .p(space::S8)
                             .flex()
@@ -3771,22 +3887,25 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
                     .get(shown)
                     .and_then(|t| t.file.as_ref())
                     .and_then(|file| open_picture(ctx, file));
+                // The wrapper keeps the border out of the flex base: four equal columns.
                 el.child(
-                    div()
-                        .id(ctx.id("proof-shot-more"))
-                        .when_some(open, |el, open| el.cursor_pointer().on_click(open))
-                        .flex_1()
-                        .h(m::THUMB)
-                        .rounded(theme::radius::MD)
-                        .border_1()
-                        .border_color(k.line)
-                        .bg(k.raised)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_size(crate::ui::native::tokens::text::UI.0)
-                        .text_color(k.ink_2)
-                        .child(fill(c::EVIDENCE_MORE, &[("n", &more.to_string())])),
+                    div().flex_1().min_w(px(0.)).child(
+                        div()
+                            .id(ctx.id("proof-shot-more"))
+                            .when_some(open, |el, open| el.cursor_pointer().on_click(open))
+                            .w_full()
+                            .h(m::THUMB)
+                            .rounded(theme::radius::MD)
+                            .border_1()
+                            .border_color(k.line)
+                            .bg(k.raised)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_size(crate::ui::native::tokens::text::UI.0)
+                            .text_color(k.ink_2)
+                            .child(fill(c::EVIDENCE_MORE, &[("n", &more.to_string())])),
+                    ),
                 )
             })
     });
@@ -4234,6 +4353,7 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                         // Every badge has an icon (§2.12): a newer version
                         // reads with the refresh mark.
                         None => ui::native::Badge::new(r)
+                            .secondary()
                             .icon(Sym::Refresh, ui::native::native_colors(cx).secondary)
                             .max_w(m::MAX_WIDTH / 4.)
                             .into_any_element(),

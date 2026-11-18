@@ -451,6 +451,13 @@ fn has_draft(card: &CardV2) -> bool {
 
 /// The card has form fields (the optional note of a decision does not
 /// count: the footer draws it).
+/// A card that answers with a choice or fields draws the record line of the answer.
+fn has_record(card: &CardV2) -> bool {
+    card.all_blocks()
+        .iter()
+        .any(|b| matches!(b, CardV2Block::Decision { .. } | CardV2Block::Input { .. }))
+}
+
 fn has_fields(card: &CardV2) -> bool {
     let note = blocks::footer_note_input(card).map(|(id, _)| id);
     card.all_blocks().iter().any(|b| match b {
@@ -751,10 +758,9 @@ pub(crate) fn strip_words(ctx: &Ctx) -> (String, String) {
             } else if has_draft(ctx.card) {
                 (word.into(), String::new())
             } else {
+                // A choice says what 提交 waits for at the button (the footer).
                 let detail = if ctx.quick() {
                     c::STRIP_WAITS_QUICK
-                } else if takes_input(ctx.card) {
-                    c::STRIP_WAITS_CHOOSE
                 } else {
                     ""
                 };
@@ -762,6 +768,10 @@ pub(crate) fn strip_words(ctx: &Ctx) -> (String, String) {
             }
         }
         CardState::WaitingOn => (waiting_on(ctx), c::STRIP_WAITING_ON_DETAIL.into()),
+        // A card with a record line says who it goes to there, once.
+        CardState::Sending { .. } if has_record(ctx.card) => {
+            (c::STRIP_SENDING.into(), String::new())
+        }
         CardState::Sending { .. } => (
             c::STRIP_SENDING.into(),
             fill(c::STRIP_SENDING_DETAIL, &[("name", author)]),
@@ -813,6 +823,9 @@ pub(crate) fn strip_words(ctx: &Ctx) -> (String, String) {
                         &[("name", &who), ("time", &at(answer))],
                     ),
                 )
+            } else if blocks::answer_unclaimed(ctx, &answer.actor_id, answer.at) {
+                // The record line says where the answer is: the member has not taken it.
+                (c::STRIP_ANSWERED.into(), String::new())
             } else {
                 (
                     c::STRIP_ANSWERED.into(),
@@ -1356,12 +1369,16 @@ fn header(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
     let conflict = super::v21::interact::conflicted(ctx).then(|| {
         div()
             .pt(space::S4)
+            // On the meta column, as the path line; a topic's header has no avatar.
+            .when(!in_topic, |el| {
+                el.pl(ui::native::cards::card::AVATAR + space::S8)
+            })
             .flex()
             .items_center()
             .gap(space::S4)
             .n_subheadline()
             .text_color(n.secondary)
-            .child(Sym::Alert.inline_small().text_color(n.secondary))
+            .child(Sym::Refresh.inline_small().text_color(n.secondary))
             .child(crate::copy::cards21::CONFLICT_TOAST)
     });
     Some(
@@ -1948,7 +1965,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     items.push(
                         button(
                             ctx.id("draft-done"),
-                            fill(c::DRAFT_DONE, &[("label", &submit.label)]),
+                            fill(c::DRAFT_DONE, &[("label", &shown_label(ctx.card, &submit))]),
                             PushStyle::Default,
                             cx,
                         )
@@ -1967,8 +1984,14 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                         .on_click(move |_, _, cx| form.update(cx, |f, cx| f.set_editing(false, cx)))
                         .into_any_element(),
                     );
-                    desc = Some(note(c::DRAFT_REPLACES.into(), false, cx));
-                    return Some(footer_stack(items, desc.take(), cx));
+                    // Publishing stays what it is while the words change: the lock note too.
+                    let notes = div()
+                        .flex()
+                        .flex_col()
+                        .gap(space::S4)
+                        .child(note(c::DRAFT_REPLACES.into(), false, cx))
+                        .children(lock_note(ctx, live, cx));
+                    return Some(footer_stack(items, Some(notes.into_any_element()), cx));
                 }
                 let a2 = a.clone();
                 let s2 = submit.clone();
@@ -2022,7 +2045,8 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                         cx,
                     ));
                 }
-                let ready = live && form::problems(ctx.card, &ctx.values).is_empty();
+                let picked = form::problems(ctx.card, &ctx.values).is_empty();
+                let ready = live && picked;
                 items.push(if ready {
                     let a = a.clone();
                     button(
@@ -2038,8 +2062,12 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                         .into_any_element()
                 });
                 link_buttons(&mut items, cx);
+                // Why 提交 is off, right above it, until something is picked.
+                if live && !picked {
+                    desc = Some(note(c::STRIP_WAITS_CHOOSE.into(), false, cx));
+                }
                 // --- inc-cards21: the ask's promise at the right ---
-                if super::v21::is_21(ctx.card)
+                else if super::v21::is_21(ctx.card)
                     && let Some(p) = ctx.card.ask.as_ref().and_then(|a| a.promise.clone())
                 {
                     desc = Some(note(p, false, cx));

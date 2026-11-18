@@ -1056,6 +1056,8 @@ pub mod metrics {
     pub const FIELD_RADIUS: Pixels = radius::CONTROL;
     pub const FIELD_PAD: Pixels = space::S12;
     pub const FIELD_NAME_WIDTH: Pixels = px(220.);
+    /// A number field in a card: the figures and their unit read together (§2.8).
+    pub const FIELD_NUMBER_WIDTH: Pixels = px(112.);
     pub const FIELD_CODE_WIDTH: Pixels = px(140.);
     /// A number with its − and + (同时做几件事).
     pub const NUMBER_FIELD: Pixels = px(120.);
