@@ -1320,7 +1320,7 @@ mod none_reason_tests {
         let e = none("run.someday", false);
         assert_eq!(none_reason(&e), None);
         let (_, detail, _) = band::pend_band(Stage::Refused, None, "Ledger").unwrap();
-        assert_eq!(detail, c::BUSY_LATER);
+        assert_eq!(detail, c::NONE_READ_ONLY);
     }
 
     #[test]

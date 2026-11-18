@@ -798,7 +798,7 @@ fn reject_for(reason: &str) -> Reject {
 }
 
 /// The words after {name} 接不了 for `expect.reason`; a reason this version does not know
-/// (or none) says 稍后再试.
+/// (or none) locks the block just the same, so it says the block is read-only.
 pub fn none_why(reason: Option<NoneReason>) -> &'static str {
     match reason {
         Some(NoneReason::MemberInactive) => cc::NONE_MEMBER_INACTIVE,
@@ -806,7 +806,7 @@ pub fn none_why(reason: Option<NoneReason>) -> &'static str {
         Some(NoneReason::RunExternal) => cc::NONE_RUN_EXTERNAL,
         Some(NoneReason::RunLimit) => cc::NONE_RUN_LIMIT,
         Some(NoneReason::RunFailed) => cc::NONE_RUN_FAILED,
-        None => cc::BUSY_LATER,
+        None => cc::NONE_READ_ONLY,
     }
 }
 

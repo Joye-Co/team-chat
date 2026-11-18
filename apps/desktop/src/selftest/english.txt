@@ -375,7 +375,7 @@ CI 超时，PR #59 的检查没跑完	CI timed out before PR #59's checks finish
 让 Ledger 拉一下 10 月各渠道的新增	Ledger, pull October signups by channel
 发到 拾光增长	Post to Keepsake Growth
 orderbot、拾光、TeamChat 三个仓库	The orderbot, Keepsake and TeamChat repos
-单次花费超过 ¥50	Any single run over $50
+单次花费超过 ¥50 时提醒成员	Reminds the member when a single run is over $50
 改生产环境配置	Change production config
 做这些事之前会先发卡片请人批准：团队的电脑找管理员，个人的电脑找电脑主人，其他事找交代的人或管理员。	Before doing any of these, it sends a card: an admin approves on a team computer, the owner on a personal one. Anything else that needs a yes is approved by the requester or an admin.
 压测用 1000 条消息就够了。	1,000 messages is enough for a load test.

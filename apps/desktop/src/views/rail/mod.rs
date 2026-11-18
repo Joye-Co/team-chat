@@ -84,9 +84,19 @@ struct BottomEdge {
     waiting: Option<(usize, usize)>,
 }
 
+/// How much of the list's bottom a row must clear to be read whole: the fade,
+/// and while the 下面还有 pill shows, the band under the pill as well.
+fn bottom_clear(pill: bool) -> gpui::Pixels {
+    if pill {
+        space::S24 + metrics::SIDEBAR_WAITING_BAND
+    } else {
+        space::S24
+    }
+}
+
 /// Reads [`BottomEdge`] from the list's last layout. A list that ends in
-/// view hides nothing.
-fn bottom_edge(list: &ListState, entries: &[Entry]) -> BottomEdge {
+/// view hides nothing. `pill`: the pill showed in that layout.
+fn bottom_edge(list: &ListState, entries: &[Entry], pill: bool) -> BottomEdge {
     let mut edge = BottomEdge::default();
     let viewport = list.viewport_bounds();
     let Some(last) = entries.len().checked_sub(1) else {
@@ -98,7 +108,7 @@ fn bottom_edge(list: &ListState, entries: &[Entry]) -> BottomEdge {
     if viewport.size.height <= px(0.) || ends_in_view {
         return edge;
     }
-    let fade = viewport.bottom() - space::S24;
+    let fade = viewport.bottom() - bottom_clear(pill);
     for (ix, entry) in entries
         .iter()
         .enumerate()
@@ -443,7 +453,11 @@ impl RailView {
         match self.list.bounds_for_item(ix) {
             Some(row) if row.top() >= viewport.top() => {
                 // The bottom edge fades a row that has rows after it.
-                let clear = if ix == last { px(0.) } else { space::S24 };
+                let clear = if ix == last {
+                    px(0.)
+                } else {
+                    bottom_clear(self.bottom_edge.get().waiting.is_some())
+                };
                 let under = row.bottom() + clear - viewport.bottom();
                 if under <= px(0.) {
                     return;
@@ -757,7 +771,9 @@ impl RailView {
     }
 
     /// The pill over the list's bottom edge: `n` rows below wait on me, and
-    /// a click scrolls to the first (row `ix`).
+    /// a click scrolls to the first (row `ix`). It stands on an opaque band
+    /// that hides the rows it says are below; a taller row fades out above
+    /// the band (A4). The wheel still scrolls the list through the band.
     fn waiting_below(&self, ix: usize, n: usize, cx: &mut Context<Self>) -> AnyElement {
         use crate::ui::{
             icons::sym as sym_icon,
@@ -765,29 +781,45 @@ impl RailView {
             sf_symbols::SymSize,
         };
         let k = native_colors(cx);
+        let fill = crate::views::shell::chrome::colors(cx).sidebar;
         div()
             .absolute()
             .left_0()
             .right_0()
-            .bottom(space::S4)
+            .bottom_0()
             .flex()
-            .justify_center()
+            .flex_col()
+            .child(div().h(space::S24).bg(gpui::linear_gradient(
+                0.,
+                gpui::linear_color_stop(fill, 0.),
+                gpui::linear_color_stop(fill.opacity(0.), 1.),
+            )))
             .child(
-                push_button(
-                    "rail-waiting-below",
-                    crate::copy::fill(c::RAIL_WAITS_BELOW_N, &[("n", &n.to_string())]),
-                    // Opaque: the rows scroll under it.
-                    PushStyle::Secondary,
-                    PushSize::Small,
-                    cx,
-                )
-                .icon(gpui_component::Icon::new(Sym::NeedsYou).text_color(k.amber))
-                .child(sym_icon(Sym::ArrowDown, SymSize::INLINE, k.secondary))
-                .shadow(shadow::sm())
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.scroll_to_open(ix);
-                    cx.notify();
-                })),
+                div()
+                    .id("rail-waiting-band")
+                    .block_mouse_except_scroll()
+                    .h(metrics::SIDEBAR_WAITING_BAND)
+                    .pb(space::S4)
+                    .bg(fill)
+                    .flex()
+                    .items_end()
+                    .justify_center()
+                    .child(
+                        push_button(
+                            "rail-waiting-below",
+                            crate::copy::fill(c::RAIL_WAITS_BELOW_N, &[("n", &n.to_string())]),
+                            PushStyle::Secondary,
+                            PushSize::Small,
+                            cx,
+                        )
+                        .icon(gpui_component::Icon::new(Sym::NeedsYou).text_color(k.amber))
+                        .child(sym_icon(Sym::ArrowDown, SymSize::INLINE, k.secondary))
+                        .shadow(shadow::sm())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.scroll_to_open(ix);
+                            cx.notify();
+                        })),
+                    ),
             )
             .into_any_element()
     }
@@ -1100,7 +1132,8 @@ impl Render for RailView {
                         d.child(
                             gpui::canvas(
                                 move |_, window, _| {
-                                    let now = bottom_edge(&list, &entries);
+                                    let pill = edge.get().waiting.is_some();
+                                    let now = bottom_edge(&list, &entries, pill);
                                     // A refresh is ignored while a frame is
                                     // drawn: the next frame shows the change.
                                     if edge.replace(now) != now {
@@ -1518,7 +1551,8 @@ mod tests {
                 stranded = true;
                 let entries = this.cache.as_ref().unwrap().entries.clone();
                 assert!(entries[ix].item.opens_section(), "only an open header");
-                let fade = this.list.viewport_bounds().bottom() - space::S24;
+                // The edge was read with or without the pill: its band is the most it hides.
+                let fade = this.list.viewport_bounds().bottom() - bottom_clear(true);
                 assert!(
                     this.list
                         .bounds_for_item(ix + 1)
@@ -1556,7 +1590,12 @@ mod tests {
         }
         view.update(cx, |this, _| {
             let row = this.list.bounds_for_item(ix).expect("the row is drawn");
-            assert!(row.bottom() <= this.list.viewport_bounds().bottom());
+            let bottom = this.list.viewport_bounds().bottom();
+            assert!(row.bottom() <= bottom);
+            // A pill still up for other rows does not stand on the row it brought in.
+            if this.bottom_edge.get().waiting.is_some() {
+                assert!(row.bottom() <= bottom - metrics::SIDEBAR_WAITING_BAND);
+            }
         });
         assert_ne!(
             waiting(&view, cx).map(|(first, _)| first),

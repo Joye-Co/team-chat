@@ -241,7 +241,6 @@ crate::copy! {
     // The band of a step the member cannot take now: a short state in the badge, the
     // rest in the muted line after it.
     BUSY_STATE = "{name} 接不了",
-    BUSY_LATER = "稍后再试",
     // Why the member cannot take a step (after {name} 接不了).
     NONE_MEMBER_INACTIVE = "它已停用或不在这个群了",
     NONE_RUNNER_OFF = "它的电脑现在没开",
@@ -264,4 +263,6 @@ crate::copy! {
     ZONE_LOS_ANGELES = "洛杉矶时间",
     // Under buttons the member did not wire up.
     BUTTONS_INERT = "这些按钮点了不会发给 {name}",
+    // After {name} 接不了, when the member gave no reason this version knows: the block is locked.
+    NONE_READ_ONLY = "这一块只能看",
 }
