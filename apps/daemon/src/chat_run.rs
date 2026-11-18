@@ -93,21 +93,20 @@ Cards: `chat-run card post --file card.json` posts a Card v2 document \
 block has a `type` and a unique `id`; text is Markdown. On an `ask` card \
 `\"ask\":{{\"from\":[\"requester\"]}}` says who answers (the person you work for), and a submit action names its input blocks in `inputs`. `working` is only for a \
 plan or a long job people asked to follow, which you patch; the run already shows your steps, \
-so post no other progress. Post no `done` card: yours would replace the result \
-card made from your last message, with its links to your pull requests and 产出. Blocks, by use: \
+so post no other progress. Post no `done` card: your last message becomes the result card. Blocks, by use: \
 {blocks}. A chart, a table or `buttons` that lists `events` \
 sends you what people press, and you patch the card. `chat-run card example` \
 lists cards to start from, `chat-run card schema --block <type>` prints a block's fields, and `chat-run card check --file card.json` names every wrong block before you post. Change a card with `chat-run card set \
 --message <id> --block <blockId> --props <json>`, `chat-run card update --message <id> --status \
 executing|failed|none` or `chat-run card patch --message <id> --base-rev <rev> --ops ops.json`; `--cause <eventId>` names the event a post or a change answers. \
 `chat-run resolve --event <eventId> --result ignored|failed` closes an event you do not act on. \
-`chat-run desk note --text <text>` sets your one-line priority for today on the group's home \
-page (\"\" clears it).
+`chat-run desk note --text <text>` sets your one-line priority on the group's home page.
 
 产出: to deliver a page or a file as a 产出, write it in \
 your working folder and run `chat-run artifact create --title <title> --dir <folder> --summary \
 <one sentence on what it shows>` (or `--file <path>`; `chat-run artifact version --artifact <id> \
---dir <folder>` adds a version; `--metrics metrics.json` adds key numbers to the preview). \
+--dir <folder>` adds a version, which starts with no data unless you pass `--keep-data` or \
+`--data`; `--metrics metrics.json` adds key numbers to the preview). \
 `--dir` takes every file of the folder: give it a folder that holds only the 产出. `chat-run file \
 upload --file <path>` uploads one file. A page opens in a pane about 400 pt wide: nothing may be \
 cut off. It runs \
@@ -121,8 +120,8 @@ artifact reply --event <eventId> --file reply.json` (or `--decline <text>`).
 
 Read before you guess: `chat-run topic history`, `chat-run topic message --id <messageId>`, \
 `chat-run search --query <text> [--group]` and `chat-run file get --id <fileId>` read what the \
-prompt left out of the topic. Members work together through 产出 and state; read them (`--topic \
-<id>` reads another topic of this group, also for topic history and topic message):
+prompt left out of the topic. Read the work of others (`--topic <id>` reads another topic of \
+this group):
 - `chat-run topic state`: who did what, the 产出 and their versions, open cards, decisions
 - `chat-run artifact list [--group]`: the 产出 of this topic or group
 - `chat-run artifact get --id <id> [--out <path>]`: a 产出's versions and content
@@ -134,13 +133,11 @@ Memory: keep what will matter in later work with `chat-run memory note --scope \
 member|person|group --kind lesson|playbook|preference|convention|fact|decision --text <text> \
 [--when <text>] [--source <messageId>]`: member for your own lessons and how-tos (only this group \
 reads them), person for the requester's preferences, group for conventions people said here, with \
-`--source` the id of the person's message that says it (without one it stays your own). Notes are \
-reviewed once a day; the team's memory is never written by a run. The prompt carries only part of \
-what is remembered: `chat-run memory search --query <words>` finds the rest you may \
-read, with ids to cite.
+`--source` the id of the person's message that says it (without one it stays your own). `chat-run memory search --query <words>` finds what the prompt \
+left out, with ids to cite.
 
 Hand over or give out work: before `handoff` or `assign`, read who is in the group with `chat-run \
-member list`. Hand the whole piece of work over only when another AI member really should do it: \
+member list`. Hand the whole work over only when another AI member should do it: \
 `chat-run handoff --member <name> --goal <text> [--done-when \"check; check\"] [--notes <text>]`, \
 push your branch first, then stop. Give a part out with `chat-run assign --member <name> --goal \
 <text> ...`: it is done in its own topic and its result comes back to you as input by itself, so \
@@ -152,8 +149,8 @@ Ending the run: deliver first, then speak: a result of more than a few sentences
 result card, shown with the 产出 at its top: say in one or two sentences what you made, then only \
 what the reader still has to do or check. Do not retell what the 产出 or a card shows and do not \
 list the steps you took. Before you stop, say how it ended with `chat-run report --state \
-done|blocked|waiting --text <one line>`: blocked when you cannot go on without something (a key, \
-an access, a decision), waiting when you asked a person and wait for the answer. `chat-run \
+done|blocked|waiting --text <one line>`: blocked when you cannot go on without something, waiting \
+when you wait for a person's answer. `chat-run \
 --help` shows every command.",
         name = crate::product::name(),
         scheme = crate::product::url_scheme(),
@@ -1029,7 +1026,7 @@ pub const USAGE: &str = "usage:
   chat-run artifact guide
   chat-run artifact example [--out <folder>]
   chat-run artifact create --title <title> (--dir <folder> | --file <path>) [--entry <path>] [--kind html|file] [--note <text>] [--summary <text, at most 500 characters>] [--metrics metrics.json] [--events events.json] [--data data.json] [--media media.json]
-  chat-run artifact version --artifact <artifactId> (--dir <folder> | --file <path>) [--entry <path>] [--title <title>] [--note <text>] [--parent <version>] [--summary <text, at most 500 characters>] [--metrics metrics.json] [--events events.json] [--data data.json] [--media media.json]
+  chat-run artifact version --artifact <artifactId> (--dir <folder> | --file <path>) [--entry <path>] [--title <title>] [--note <text>] [--parent <version>] [--summary <text, at most 500 characters>] [--metrics metrics.json] [--events events.json] [--data data.json | --keep-data] [--media media.json]
   chat-run topic history [--before <seq>] [--after <seq>] [--limit <1-100>] [--topic <topicId>] [--in <groupId>]
   chat-run topic message --id <messageId> [--topic <topicId>] [--in <groupId>]
   chat-run topic state [--topic <topicId>] [--in <groupId>]
@@ -1098,8 +1095,9 @@ page with its manifests, or writes them with --out; neither needs a daemon. even
 list of {\"name\", \"kind\": \"emit\"|\"ask\", \"label\", \"schema\"} (or {\"events\": [...]}), checked
 before anything is uploaded. --summary and metrics.json ([{\"label\":\"报名\",\"value\":\"12 位\",\"delta\":\"+3\"}],
 at most 6, each text of at most 40 characters) are the 产出's preview in the conversation.
-data.json is any JSON (the page's first state); artifact data without --file prints {data,
-dataRev}, with --file it replaces the whole state. media.json is the media metadata of a version
+data.json is any JSON (the page's first state); a new version starts with no data unless it has
+--data or --keep-data (the state of the version it is made from, when you made that version too);
+artifact data without --file prints {data, dataRev}, with --file it replaces the whole state. media.json is the media metadata of a version
 (protocol MediaInfo: kind, mime, bytes, ...); leave it out for a page.
 
 A file name of - reads standard input. A flag's value is the
@@ -1224,6 +1222,7 @@ const COMMANDS: &[Command] = &[
     ),
     Command {
         alias: &[("id", "artifact")],
+        bare: &["keep-data"],
         ..cmd(
             &["artifact", "version"],
             crate::chat_run_files::ARTIFACT_VERSION,
@@ -1530,11 +1529,19 @@ fn request_noted(args: &[String]) -> Result<(&'static str, Value, Vec<String>), 
     };
     let group = takes_group && args.iter().skip(1).any(|a| a == "--group");
     let all = is_search && args.iter().skip(1).any(|a| a == "--all");
+    let keep_data = args.len() >= 2
+        && args[0] == "artifact"
+        && args[1] == "version"
+        && args.iter().skip(2).any(|a| a == "--keep-data");
     let without_group: Vec<String>;
-    let args = if group || all {
+    let args = if group || all || keep_data {
         without_group = args
             .iter()
-            .filter(|a| !((group && *a == "--group") || (all && *a == "--all")))
+            .filter(|a| {
+                !((group && *a == "--group")
+                    || (all && *a == "--all")
+                    || (keep_data && *a == "--keep-data"))
+            })
             .cloned()
             .collect();
         &without_group[..]
@@ -1735,6 +1742,12 @@ fn request_noted(args: &[String]) -> Result<(&'static str, Value, Vec<String>), 
                         return Err("--parent must be a version number from 1".into());
                     }
                     put("parentVersion", json!(n));
+                }
+                if keep_data {
+                    if f.opt("data").is_some() {
+                        return Err("give one of --keep-data and --data".into());
+                    }
+                    put("keepData", json!(true));
                 }
             }
             match (f.opt("dir"), f.opt("file")) {
@@ -2522,6 +2535,50 @@ mod tests {
     }
 
     #[test]
+    fn artifact_version_keeps_the_data_only_when_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().to_str().unwrap();
+        let data = dir.path().join("data.json");
+        std::fs::write(&data, "{}").unwrap();
+        let data = data.to_str().unwrap();
+        let version = ["artifact", "version", "--artifact", "A", "--dir", d];
+        let with = |extra: &[&str]| request(&args(&[&version[..], extra].concat()));
+        let (op, body) = with(&["--keep-data"]).unwrap();
+        assert_eq!(op, crate::chat_run_files::ARTIFACT_VERSION);
+        assert_eq!(body["keepData"], true);
+        assert_eq!(body["artifactId"], "A");
+        // It takes no value, wherever it stands.
+        let (_, body) = request(&args(&[
+            "artifact",
+            "version",
+            "--keep-data",
+            "--artifact",
+            "A",
+            "--dir",
+            d,
+        ]))
+        .unwrap();
+        assert_eq!(body["keepData"], true);
+        // Two sources of the first state: the command says which one it refuses.
+        let e = with(&["--keep-data", "--data", data]).unwrap_err();
+        assert_eq!(e, "give one of --keep-data and --data");
+        // Only a new version has a parent to keep the data of.
+        let e = request(&args(&[
+            "artifact",
+            "create",
+            "--title",
+            "t",
+            "--dir",
+            d,
+            "--keep-data",
+        ]))
+        .unwrap_err();
+        assert!(e.contains("unknown argument --keep-data"), "{e}");
+        assert!(USAGE.contains("[--data data.json | --keep-data]"));
+        assert!(note().contains("starts with no data unless you pass `--keep-data`"));
+    }
+
+    #[test]
     fn artifact_version_takes_a_parent_version() {
         let dir = tempfile::tempdir().unwrap();
         let d = dir.path().to_str().unwrap();
@@ -2548,6 +2605,7 @@ mod tests {
         ]))
         .unwrap();
         assert!(body.get("parentVersion").is_none());
+        assert!(body.get("keepData").is_none());
         for bad in ["0", "x", "-1"] {
             assert!(
                 request(&args(&[

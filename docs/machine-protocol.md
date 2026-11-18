@@ -781,7 +781,7 @@ the run's member. The server gives the run's group, topic and `runId`, so the do
 | --- | --- | --- |
 | `file.upload` | `{ path, name?, mime? }` | `chat-run file upload --file <path> [--name N] [--mime T]` → `{ file: FileMeta }` |
 | `artifact.create` | `{ title, dir \| file, entry?, kind?, note?, events?, media?, data?, preview? }` | `chat-run artifact create --title T (--dir D \| --file F) [--entry P] [--kind html\|file] [--note …] [--summary S] [--metrics m.json] [--events e.json] [--data d.json] [--media m.json]` → `ArtifactVersionResponse` |
-| `artifact.version` | `{ artifactId, dir \| file, entry?, title?, note?, parentVersion?, events?, media?, data?, preview? }` | `chat-run artifact version --artifact A (--dir D \| --file F) [--parent N] [...]` → `ArtifactVersionResponse` |
+| `artifact.version` | `{ artifactId, dir \| file, entry?, title?, note?, parentVersion?, events?, media?, data?, keepData?, preview? }` | `chat-run artifact version --artifact A (--dir D \| --file F) [--parent N] [--keep-data] [...]` → `ArtifactVersionResponse` |
 
 - Paths are made absolute by `chat-run` and must be inside the run's working folder after
   symbolic links are resolved; anything else gets `forbidden` with reason
@@ -832,7 +832,9 @@ and one `ask`: `page/index.html`, and beside the page folder `events.json`, `dat
 - The limits: 20 events, payload 16 KiB, reply 64 KiB within 120 s, data 256 KiB, 2 pushes a
   second, `--cause` an event of the last 30 minutes.
 - Data belongs to one version and only the member that made the version pushes it; a new
-  version starts without data, so the author reads the current data and passes it with `--data`.
+  version starts without data unless it gets `--data` or `--keep-data` (`keepData`: the snapshot of
+  the version it is made from, when the same member made that one; `chat-run` refuses both flags
+  together).
   Emits of the same name sent in a burst are merged (the latest wins), so a page sends the full
   value, never a toggle.
 

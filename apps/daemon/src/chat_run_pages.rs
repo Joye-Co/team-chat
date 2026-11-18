@@ -124,8 +124,8 @@ artifactId, version, eventId, event, value and actor.
   chat-run artifact reply --event <eventId> --file reply.json   (or --decline <text>)   answers \
 an ask, within {REPLY_WINDOW_S} s.
   - Data belongs to one version and only the member that made the version can push it. \
-`chat-run artifact version` starts without data: read the current data first and pass it with \
---data.
+`chat-run artifact version` starts without data: pass --keep-data to carry over the state of the \
+version it is made from (one you made; otherwise it starts empty) or --data with a new state.
   - Emits of the same name sent in a burst are merged: the latest is delivered and the earlier \
 ones reject with rate_limited. Send the full value ({{\"id\": \"b\", \"done\": true}}), never \
 \"toggle\".",
@@ -578,6 +578,7 @@ mod tests {
         for flag in [
             "--events",
             "--data",
+            "--keep-data",
             "--summary",
             "--base-data-rev",
             "--cause",
