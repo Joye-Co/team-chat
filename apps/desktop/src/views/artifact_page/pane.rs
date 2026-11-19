@@ -13,7 +13,7 @@ use crate::{
     theme::space,
     ui::Sym,
     views::{
-        group_page::{kind_label, kit},
+        group_page::kit,
         shell::{PaneView, panes::watch, stub_body},
     },
 };
@@ -102,7 +102,8 @@ impl Render for ArtifactPane {
                 let provider = self.services.provider.clone();
                 let open = id.clone();
                 crate::ui::native::page::page_empty(
-                    super::kind_sym(detail.summary.kind),
+                    super::list::ListKind::of(self.services.provider.as_ref(), &detail.summary)
+                        .sym(),
                     detail.summary.title.clone(),
                     c::ARTIFACT_PAGE_SNAPSHOT,
                     vec![
@@ -161,7 +162,7 @@ impl Render for ArtifactPane {
                 let page = nk::icon_button_sym(
                     "artifact-pane-page",
                     S::Outputs,
-                    c::ARTIFACTS_TITLE,
+                    c::ARTIFACT_OPEN_IN_PAGE,
                     nk::IconSize::Regular,
                     cx,
                 )
@@ -194,7 +195,8 @@ impl Render for ArtifactPane {
                     format!(
                         "{} · {} · v{shown}",
                         detail.summary.title,
-                        kind_label(detail.summary.kind)
+                        super::list::ListKind::of(self.services.provider.as_ref(), &detail.summary)
+                            .label()
                     ),
                     vec![
                         open_window.into_any_element(),

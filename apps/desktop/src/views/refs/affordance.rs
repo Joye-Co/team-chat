@@ -102,6 +102,14 @@ fn hub_of(cx: &App) -> Option<gpui::Entity<RefsHub>> {
 /// symbol (NATIVE.md §5.2), never an ink pill.
 pub fn ask_button(id: impl Into<ElementId>, cx: &App) -> Button {
     let n = crate::ui::native::native_colors(cx);
+    ask_button_flat(id, cx).bg(n.sheet).shadow(n.float())
+}
+
+/// [`ask_button`] in a row of flat controls (the action strip of a code
+/// fence): the plain outline sm push button (D11, §1.8: its fill and hover
+/// from the tokens, no shadow), since it floats over nothing there.
+fn ask_button_flat(id: impl Into<ElementId>, cx: &App) -> Button {
+    let n = crate::ui::native::native_colors(cx);
     crate::ui::native::push_button(
         id,
         c::ASK_HERE,
@@ -109,8 +117,6 @@ pub fn ask_button(id: impl Into<ElementId>, cx: &App) -> Button {
         crate::ui::native::PushSize::Small,
         cx,
     )
-    .bg(n.sheet)
-    .shadow(n.float())
     .icon(ui::icon(Sym::Quote, px(16.), n.secondary))
 }
 
@@ -259,16 +265,41 @@ pub fn inline_button(id: &str, target: Rc<dyn Fn(&App) -> PartTarget>, cx: &App)
         .into_any_element()
 }
 
+/// [`inline_button`] inside a surface that already floats or in a row of its own (a chart
+/// tooltip, a step's text): the plain outline button, no second raised box.
+pub fn inline_button_flat(
+    id: &str,
+    target: Rc<dyn Fn(&App) -> PartTarget>,
+    cx: &App,
+) -> AnyElement {
+    ask_button_flat(ElementId::Name(format!("ask-{id}").into()), cx)
+        .on_click(move |_, window, cx| {
+            cx.stop_propagation();
+            ask_about(target(cx), RefIntent::Topic, window, cx);
+        })
+        .into_any_element()
+}
+
 /// The 问这里 button of a part whose renderer has no hover of its own (the action strip of a
-/// code fence): it keeps its place but shows only while the pointer is over it, so a capture
-/// or a glance at rest never shows it (§2.6 hover, E2).
+/// code fence): it keeps its place but shows only after the pointer rested on the part, so a
+/// capture or a glance at rest never shows it (§2.6 hover, E2). The caller tracks the hover
+/// of the whole part with [`track_hover`] and this `id`.
 pub fn hover_button(id: &str, target: Rc<dyn Fn(&App) -> PartTarget>, cx: &App) -> AnyElement {
-    let shown = hub_of(cx).is_some_and(|h| h.read(cx).hovered(id));
+    let shown = hub_of(cx).is_some_and(|h| h.read(cx).hover_shown(id));
     div()
-        .id(ElementId::Name(format!("ask-slot-{id}").into()))
-        .on_hover(track_hover(id.to_string()))
         .when(!shown, |d| d.opacity(0.))
-        .child(inline_button(id, target, cx))
+        .child(
+            ask_button_flat(ElementId::Name(format!("ask-{id}").into()), cx).on_click(
+                move |_, window, cx| {
+                    // Still hidden: a click here lands on nothing the person can see.
+                    if !shown {
+                        return;
+                    }
+                    cx.stop_propagation();
+                    ask_about(target(cx), RefIntent::Topic, window, cx);
+                },
+            ),
+        )
         .into_any_element()
 }
 

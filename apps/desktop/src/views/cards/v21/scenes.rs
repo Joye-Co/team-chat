@@ -92,6 +92,26 @@ pub const SCENES: &[Scene] = &[
         "INTERACT 7.1 as 小王 sees it: the question read-only with 等 Joye",
         Page::Readonly
     ),
+    scene!(
+        "interact_rejected",
+        "INTERACT §4.4: a live event that did not get through: refused (forbidden), not sent with 重试, failed with no note with 重试, and failed with the member's note; the bar goes back each time",
+        Page::Rejected
+    ),
+    scene!(
+        "compose-fields",
+        "Card v2.1 schema fields: slots shown in the card's time zone with the zone named, a rank whose top 3 count, a number with its unit and help, the questionnaire's submitLabel; and two text blocks, two charts and pictures at their own ratio in one card",
+        Page::Fields
+    ),
+    scene!(
+        "compose-controls",
+        "Card v2.1 controls a keyboard walks: segmented tabs with five long labels, a metric that takes a press, 20 pickable bars folded to 12, and a sortable 40-row table to pick from folded to 10",
+        Page::Controls
+    ),
+    scene!(
+        "interact_none_reasons",
+        "INTERACT §6.2 expect.reason: a press nobody will respond to says why (停用, 电脑没开, 这次工作不接收, 操作太多, 没能开始) and nothing waits",
+        Page::NoneReasons
+    ),
     // v11/pb-cards
     scene!(
         "interact_notes",
@@ -100,11 +120,77 @@ pub const SCENES: &[Scene] = &[
     ),
 ];
 
+/// The controls a keyboard reaches on the card of the real 话题, each with the focus ring
+/// (`selftest::interact` has the keys).
+macro_rules! key_scene {
+    ($name:literal, $card:ident, $about:literal) => {
+        Scene {
+            name: $name,
+            about: $about,
+            start: Start::V2,
+            setup: |_, _| {},
+            open: |s, c, cx| {
+                crate::views::artifacts::state_scenes::open_cards(
+                    s,
+                    c,
+                    &[super::samples::$card],
+                    cx,
+                )
+            },
+        }
+    };
+}
+
+pub const KEY_SCENES: &[Scene] = &[
+    key_scene!(
+        "refs-card-keyboard-metric",
+        CONTROLS,
+        "Tab reaches a metric that takes a press"
+    ),
+    key_scene!(
+        "refs-card-keyboard-tabs",
+        CONTROLS,
+        "Tab reaches a segmented tab of the card"
+    ),
+    key_scene!(
+        "refs-card-keyboard-bar",
+        CONTROLS,
+        "Tab reaches a bar row of a chart to pick from"
+    ),
+    key_scene!(
+        "refs-card-keyboard-point",
+        REPORT,
+        "Tab reaches a point of a line chart to pick from"
+    ),
+    key_scene!(
+        "refs-card-keyboard-date",
+        FIELDS,
+        "Tab reaches the date field of a questionnaire and Enter opens its calendar"
+    ),
+    key_scene!(
+        "refs-card-keyboard-group",
+        KEYS_TABLE,
+        "Tab reaches the head of a section that folds"
+    ),
+    key_scene!(
+        "refs-card-keyboard-sort",
+        KEYS_TABLE,
+        "Tab reaches a sort header of the long table"
+    ),
+];
+
 /// The checks of the Card v2.1 scenes.
 pub fn checks(name: &str) -> Option<crate::selftest::scenes::Checks> {
     use super::samples::NOTE_BUSY;
     use crate::selftest::drawn::{check, ids};
     match name {
+        "interact_none_reasons" => Some(|_, _| {
+            let inert = ids("card-buttons-inert");
+            vec![check(
+                inert.contains("inert"),
+                format!("a buttons block without events is not pressable ({inert:?})"),
+            )]
+        }),
         "interact_notes" => Some(|_, _| {
             let (retry, refused) = (ids("card-retry"), ids("card-refused"));
             vec![
@@ -139,6 +225,20 @@ pub fn checks(name: &str) -> Option<crate::selftest::scenes::Checks> {
                 toasts > 0,
                 format!("the conflict toast is on screen ({toasts} toasts)"),
             )]
+        }),
+        "interact_rejected" => Some(|_, _| {
+            use super::samples::{NOTE_FORBIDDEN, NOTE_REJECTED, NOTE_UNHANDLED};
+            let retry = ids("card-retry");
+            vec![
+                check(
+                    retry.contains(NOTE_REJECTED) && retry.contains(NOTE_UNHANDLED),
+                    format!("没发出去 and 没能处理 offer 重试 ({retry:?})"),
+                ),
+                check(
+                    !retry.contains(NOTE_FORBIDDEN),
+                    format!("a forbidden step has no 重试 ({retry:?})"),
+                ),
+            ]
         }),
         "interact_pending" => Some(|_, _| {
             let retry = ids("card-retry");

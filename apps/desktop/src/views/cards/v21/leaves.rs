@@ -53,13 +53,24 @@ pub fn is_required(b: &CardV2Block) -> bool {
         | CardV2Block::Rating { required, .. }
         | CardV2Block::Scale { required, .. }
         | CardV2Block::ImageChoice { required, .. }
-        | CardV2Block::Matrix { required, .. }
         | CardV2Block::Slots { required, .. }
         | CardV2Block::Poll { required, .. } => required.unwrap_or(true),
+        // The rule `form21` holds the submit button to: a matrix asks only for its required rows.
+        CardV2Block::Matrix { required, rows, .. } => {
+            required.unwrap_or(false) || rows.iter().any(|r| r.required.unwrap_or(false))
+        }
         CardV2Block::Input { required, .. } => required.unwrap_or(false),
         CardV2Block::Confirm { .. } | CardV2Block::Compare { .. } => true,
         _ => false,
     }
+}
+
+/// Whether a matrix asks for every row: the rule `form21` holds the submit button to.
+pub fn matrix_all_required(b: &CardV2Block) -> bool {
+    let CardV2Block::Matrix { required, rows, .. } = b else {
+        return false;
+    };
+    required.unwrap_or(false) || rows.iter().all(|r| r.required.unwrap_or(false))
 }
 
 /// The question line of a questionnaire child.
@@ -480,10 +491,23 @@ fn move_item(order: &mut Vec<String>, item: &str, to: usize) {
     }
 }
 
-pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
-    let CardV2Block::Rank { id, items, cut, .. } = b else {
+pub fn rank(node: &Node, b: &CardV2Block, window: &Window, cx: &mut App) -> AnyElement {
+    let CardV2Block::Rank {
+        id,
+        items,
+        cut,
+        rank_top,
+        ..
+    } = b
+    else {
         return div().into_any_element();
     };
+    // `rankTop`: only the first n count (and only they are sent). The rule after them
+    // says so, unless the author's own cut line stands at the same place.
+    let top = rank_top
+        .map(|n| n as usize)
+        .filter(|n| *n > 0 && *n < items.len())
+        .filter(|n| cut.as_ref().is_none_or(|c| c.after as usize != *n));
     let ctx = node.ctx;
     let k = theme::colors(cx);
     let live = live(node, b);
@@ -513,7 +537,6 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         .track_focus(&handle)
         .flex()
         .flex_col()
-        .p(space::S4)
         .rounded(crate::ui::native::tokens::radius::CONTROL)
         .border_1()
         // A bordered frame on the card fill, like the other wells: muted text keeps its
@@ -553,30 +576,30 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         let arrow = |up: bool| {
             let can = live && if up { i > 0 } else { i + 1 < order.len() };
             let (o, set, item) = (order.clone(), set.clone(), item_id.clone());
-            div()
-                .id(eid(
-                    node,
-                    format!("rank-{id}-{item_id}-{}", if up { "up" } else { "down" }),
-                ))
-                .flex_none()
-                .size(px(24.))
-                .rounded(crate::ui::native::tokens::radius::ITEM)
-                .flex()
-                .items_center()
-                .justify_center()
-                .when(can, |el| {
-                    el.hover(|s| s.bg(k.hover)).on_click(move |_, _, cx| {
-                        let mut o = o.clone();
-                        let to = if up { i - 1 } else { i + 1 };
-                        move_item(&mut o, &item, to);
-                        set(o, cx);
-                    })
-                })
-                .child(ui::icon(
+            // The 28 ghost icon button; the one that cannot move is disabled at 50 %.
+            ui::native::disabled_push(
+                ui::native::icon_button(
+                    eid(
+                        node,
+                        format!("rank-{id}-{item_id}-{}", if up { "up" } else { "down" }),
+                    ),
                     if up { Sym::ChevronUp } else { Sym::ChevronDown },
-                    px(14.),
-                    if can { k.ink_2 } else { k.ink_3 },
-                ))
+                    if up { c::RANK_UP } else { c::RANK_DOWN },
+                    ui::native::IconSize::Small,
+                    window,
+                    cx,
+                ),
+                !can,
+                cx,
+            )
+            .flex_none()
+            .on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                let mut o = o.clone();
+                let to = if up { i - 1 } else { i + 1 };
+                move_item(&mut o, &item, to);
+                set(o, cx);
+            })
         };
         // One list in one well (NATIVE.md rule 5): 32 pt rows split by hairlines, the
         // focused row on `selection`; no boxed rows.
@@ -586,7 +609,14 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             .h(crate::ui::native::tokens::height::DEFAULT)
             .pl(space::S12)
             .pr(space::S8)
-            .rounded(crate::ui::native::tokens::radius::ITEM)
+            // Straight hairlines between rows; only the list's own outer corners round,
+            // so the selection follows the frame.
+            .when(i == 0, |el| {
+                el.rounded_t(crate::ui::native::tokens::radius::CONTROL)
+            })
+            .when(i + 1 == order.len(), |el| {
+                el.rounded_b(crate::ui::native::tokens::radius::CONTROL)
+            })
             .when(is_focus, |el| el.bg(nk.selection))
             .when(i > 0, |el| el.border_t_1().border_color(nk.separator))
             .flex()
@@ -650,10 +680,14 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 });
         }
         col = col.child(row);
-        if let Some(cut) = cut
+        let top_label = top
+            .filter(|n| *n == i + 1)
+            .map(|n| fill(c::RANK_TOP, &[("n", &n.to_string())]));
+        let cut_label = cut
             .as_ref()
             .filter(|c| c.after as usize == i + 1 && i + 1 < order.len())
-        {
+            .map(|c| c.label.clone());
+        if let Some(label) = cut_label.or(top_label) {
             col = col.child(
                 div()
                     .my(space::S2)
@@ -668,12 +702,7 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                             .border_dashed()
                             .border_color(k.line_2),
                     )
-                    .child(
-                        meta(div())
-                            .flex_none()
-                            .text_color(k.ink_3)
-                            .child(cut.label.clone()),
-                    )
+                    .child(meta(div()).flex_none().text_color(k.ink_3).child(label))
                     .child(
                         div()
                             .flex_1()
@@ -780,7 +809,7 @@ pub fn rating(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 .child(ui::icon(
                     if on { Sym::StarFill } else { Sym::Star },
                     px(20.),
-                    if on { k.ink } else { k.line_2 },
+                    if on { k.ink } else { k.ink_3 },
                 ))
         }));
     let word = value.map(
@@ -1037,7 +1066,20 @@ pub fn image_choice(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                                 .border_color(crate::ui::native::native_colors(cx).label)
                         })
                         .map(|el| match path {
-                            Some(p) => el.child(img(p).size_full().object_fit(ObjectFit::Cover)),
+                            // The radius goes on the picture: the wrapper does not clip it.
+                            Some(p) => el.child(
+                                img(p)
+                                    .size_full()
+                                    .object_fit(ObjectFit::Cover)
+                                    // Inside the chosen tile's 2 pt border it follows the
+                                    // border's inner curve.
+                                    .rounded(if on {
+                                        crate::ui::native::tokens::radius::CONTROL
+                                            - crate::ui::native::tokens::metrics::HAIRLINE * 2.
+                                    } else {
+                                        crate::ui::native::tokens::radius::CONTROL
+                                    }),
+                            ),
                             None => b20::missing_image(el, cx),
                         })
                         .when(on, |el| {
@@ -1099,7 +1141,15 @@ pub fn matrix(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 .child(col.label.clone())
         }));
     let mut table = div().flex().flex_col().child(head);
+    // Only a matrix that asks for some of its rows has rows to tell apart.
+    let mark_required = !matrix_all_required(b);
     for (ri, r) in rows.iter().enumerate() {
+        let tag = (mark_required && r.required.unwrap_or(false)).then(|| {
+            meta(div())
+                .flex_none()
+                .text_color(k.ink_3)
+                .child(c::Q_REQUIRED)
+        });
         let mut line = div()
             .flex()
             .items_center()
@@ -1108,12 +1158,20 @@ pub fn matrix(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 el.border_b_1().border_color(k.line)
             })
             .child(
-                b20::small(div())
+                div()
                     .flex_1()
                     .min_w(px(0.))
-                    .one_line()
-                    .text_color(k.ink)
-                    .child(crate::ui::truncate::TruncText::new(r.label.clone())),
+                    .flex()
+                    .items_center()
+                    .gap(space::S8)
+                    .child(
+                        b20::small(div())
+                            .min_w(px(0.))
+                            .one_line()
+                            .text_color(k.ink)
+                            .child(crate::ui::truncate::TruncText::new(r.label.clone())),
+                    )
+                    .children(tag),
             );
         for col in columns {
             let on = set.get(&r.id) == Some(&col.id);
@@ -1178,24 +1236,113 @@ pub fn matrix(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
 // ---------------------------------------------------------------------------
 // slots
 
-fn weekday(at: Millis) -> (String, String, String) {
-    use chrono::{Datelike as _, Local, TimeZone as _};
-    let Some(t) =
-        crate::views::shell::known(at).and_then(|at| Local.timestamp_millis_opt(at).single())
-    else {
-        let unknown = crate::views::shell::clock(at);
-        return (unknown.clone(), unknown.clone(), unknown);
+/// The zone the slots of a card are shown in: the card's `tz` (an IANA id), else this
+/// computer's when the id is not one the app knows.
+#[derive(Clone, Copy)]
+pub(crate) struct SlotZone(Option<chrono_tz::Tz>);
+
+impl SlotZone {
+    pub(crate) fn of(tz: &str) -> Self {
+        Self(tz.trim().parse::<chrono_tz::Tz>().ok())
+    }
+
+    /// The day head (`周四 11-06`), the time (`15:00`) and the date (`2025-11-06`) of `at`
+    /// in the zone.
+    fn parts(self, at: Millis) -> Option<(String, String, String)> {
+        use chrono::{Datelike as _, Local, TimeZone as _};
+        let at = crate::views::shell::known(at)?;
+        fn of<Z: chrono::TimeZone>(t: chrono::DateTime<Z>) -> (String, String, String)
+        where
+            Z::Offset: std::fmt::Display,
+        {
+            let w = crate::copy::weekday(t.weekday());
+            (
+                format!("{w} {}", t.format("%m-%d")),
+                t.format("%H:%M").to_string(),
+                t.format("%Y-%m-%d").to_string(),
+            )
+        }
+        match self.0 {
+            Some(tz) => tz.timestamp_millis_opt(at).single().map(of),
+            None => Local.timestamp_millis_opt(at).single().map(of),
+        }
+    }
+
+    /// The zone's offset from UTC at `at`, in seconds; `None` for this computer's zone.
+    fn offset(self, at: Millis) -> Option<i32> {
+        use chrono::{Offset as _, TimeZone as _};
+        let t = self.0?.timestamp_millis_opt(at).single()?;
+        Some(t.offset().fix().local_minus_utc())
+    }
+}
+
+/// `UTC+9`, `UTC−3:30`, `UTC`: an offset in seconds as people write it.
+pub(crate) fn utc_offset(seconds: i32) -> String {
+    if seconds == 0 {
+        return "UTC".to_string();
+    }
+    let (sign, s) = if seconds < 0 {
+        ('−', -seconds)
+    } else {
+        ('+', seconds)
     };
-    let days: Vec<&str> = c::WEEKDAYS.split(' ').collect();
-    let w = days
-        .get(t.weekday().num_days_from_sunday() as usize)
-        .copied()
-        .unwrap_or("");
-    (
-        format!("{w} {}", t.format("%m-%d")),
-        t.format("%H:%M").to_string(),
-        t.format("%Y-%m-%d").to_string(),
-    )
+    let (h, m) = (s / 3600, (s % 3600) / 60);
+    if m == 0 {
+        format!("UTC{sign}{h}")
+    } else {
+        format!("UTC{sign}{h}:{m:02}")
+    }
+}
+
+/// The hint of a slots block whose zone is not this computer's at the first slot: the
+/// zone's name and its offset (按东京时间（UTC+9）), only the offset for a zone with no name
+/// in the catalog. `local`: this computer's offset then, in seconds. `None` when both read
+/// the same clock.
+pub(crate) fn zone_hint(tz: &str, at: Millis, local: i32) -> Option<String> {
+    let offset = SlotZone::of(tz).offset(at)?;
+    (offset != local).then(|| {
+        let offset = utc_offset(offset);
+        match zone_name(tz.trim()) {
+            Some(zone) => fill(c::SLOTS_ZONE, &[("zone", zone), ("offset", &offset)]),
+            None => fill(c::SLOTS_ZONE_OFFSET, &[("offset", &offset)]),
+        }
+    })
+}
+
+/// The name people use for a time zone; the raw id is a system value, never shown.
+fn zone_name(tz: &str) -> Option<&'static str> {
+    Some(match tz {
+        "Asia/Shanghai" => c::ZONE_SHANGHAI,
+        "Asia/Hong_Kong" => c::ZONE_HONG_KONG,
+        "Asia/Taipei" => c::ZONE_TAIPEI,
+        "Asia/Tokyo" => c::ZONE_TOKYO,
+        "Asia/Seoul" => c::ZONE_SEOUL,
+        "Asia/Singapore" => c::ZONE_SINGAPORE,
+        "Europe/London" => c::ZONE_LONDON,
+        "Europe/Paris" => c::ZONE_PARIS,
+        "Europe/Berlin" => c::ZONE_BERLIN,
+        "America/New_York" => c::ZONE_NEW_YORK,
+        "America/Chicago" => c::ZONE_CHICAGO,
+        "America/Los_Angeles" => c::ZONE_LOS_ANGELES,
+        _ => return None,
+    })
+}
+
+/// `15:00–16:00`: a slot from its start to its end in `zone`; only the start when the
+/// slot has no length.
+pub(crate) fn slot_range(zone: SlotZone, start: Millis, end: Millis) -> String {
+    let from = weekday(zone, start).1;
+    if end <= start {
+        return from;
+    }
+    format!("{from}–{}", weekday(zone, end).1)
+}
+
+fn weekday(zone: SlotZone, at: Millis) -> (String, String, String) {
+    zone.parts(at).unwrap_or_else(|| {
+        let unknown = crate::views::shell::clock(at);
+        (unknown.clone(), unknown.clone(), unknown)
+    })
 }
 
 pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
@@ -1203,6 +1350,7 @@ pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         id,
         slots,
         multiple,
+        tz,
         ..
     } = b
     else {
@@ -1214,6 +1362,21 @@ pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
     let multiple = multiple.unwrap_or(false);
     let picked = ctx.form.read(cx).choice(id).to_vec();
     let target = PickTarget::of(node);
+    // The slots read in the card's zone (`tz`); the block says which when that is not
+    // this computer's, so nobody answers for the wrong hour.
+    let zone = SlotZone::of(tz);
+    let weekday = |at: Millis| weekday(zone, at);
+    let zone_note = slots.first().and_then(|s| {
+        use chrono::{Local, Offset as _, TimeZone as _};
+        let at = s.start as Millis;
+        let local = Local
+            .timestamp_millis_opt(at)
+            .single()?
+            .offset()
+            .fix()
+            .local_minus_utc();
+        zone_hint(tz, at, local)
+    });
     // Columns by day, rows by time of day.
     let mut days: Vec<(String, String)> = Vec::new();
     let mut times: Vec<String> = Vec::new();
@@ -1230,7 +1393,7 @@ pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
     let nk = crate::ui::native::native_colors(cx);
     let cell = |s: &crate::data::cards_v2::Slot| {
         let on = picked.contains(&s.id);
-        let (_, time, _) = weekday(s.start as Millis);
+        let time = slot_range(zone, s.start as Millis, s.end as Millis);
         let conflicts = s.conflicts.clone().unwrap_or_default();
         let note = if conflicts.is_empty() {
             None
@@ -1333,6 +1496,7 @@ pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         }
         grid = grid.child(line);
     }
+    let grid = grid.children(zone_note.map(|text| hint(text, cx)));
     framed(node, b, grid.into_any_element(), cx)
 }
 
@@ -1451,7 +1615,7 @@ pub fn poll(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                         .gap(space::S8)
                         .child(lead)
                         .child(b20::option_title(&o.label, false, cx).flex_1())
-                        .child(div().flex().gap(px(-4.)).children(faces))
+                        .child(div().flex().gap(space::S2).children(faces))
                         .when(show, |el| {
                             el.child(
                                 div()
@@ -1533,16 +1697,26 @@ pub fn compare(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) 
                 }
                 ComparePreview::Artifact { .. } => None,
             };
+            // The well clips to its box, not its curve: the picture takes the curve inside
+            // the well's border itself.
+            let curve = crate::ui::native::cards::card::WELL_RADIUS
+                - crate::ui::native::tokens::metrics::HAIRLINE;
             div()
                 .w_full()
                 .h(t::PREVIEW)
                 .bg(k.sunken)
+                .rounded_t(curve)
                 .flex()
                 .items_center()
                 .justify_center()
                 .overflow_hidden()
                 .map(|el| match path {
-                    Some(p) => el.child(img(p).size_full().object_fit(ObjectFit::Cover)),
+                    Some(p) => el.child(
+                        img(p)
+                            .size_full()
+                            .rounded_t(curve)
+                            .object_fit(ObjectFit::Cover),
+                    ),
                     None => el.child(ui::icon(Sym::Image, px(20.), k.ink_3)),
                 })
                 .into_any_element()
@@ -1566,8 +1740,8 @@ pub fn compare(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) 
             .collect();
         let (form, block, option, target2) =
             (ctx.form.clone(), id.clone(), o.id.clone(), target.clone());
-        // A Regular push button (NATIVE.md §5.2): the recommended column's is the
-        // Default button; the chosen one says 已选 after a checkmark. No letters.
+        // A Regular outline push button (NATIVE.md §5.2): the 推荐 tag carries the
+        // recommendation; the chosen one says 已选 after a checkmark. No letters.
         let rec = o.recommended.unwrap_or(false);
         let pick = b20::option_button(
             eid(node, format!("cmp-{id}-{}", o.id)),
@@ -1576,7 +1750,6 @@ pub fn compare(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) 
             } else {
                 c::COMPARE_CHOOSE
             },
-            rec,
             on,
             live,
             cx,
@@ -1662,7 +1835,13 @@ pub fn buttons(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App)
         return div().into_any_element();
     };
     let ctx = node.ctx;
-    let live = live(node, b);
+    // A block that declares no `button.press` sends nothing (the server refuses the press):
+    // its buttons draw as what they are, not as controls that do nothing.
+    let pressable = super::interact::sends(ctx.card, b, "button.press");
+    if !pressable {
+        crate::selftest::drawn::mark("card-buttons-inert", id.clone());
+    }
+    let live = pressable && live(node, b);
     let armed = node.ui.block(id).focus.clone();
     let row = div()
         .flex()
@@ -1692,7 +1871,7 @@ pub fn buttons(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App)
                 },
                 cx,
             )
-            .disabled(!live)
+            .map(|el| ui::native::buttons::disabled_push(el, !live, cx))
             .on_click(move |_, _, cx| {
                 // A confirm asks once in place: the button says the confirm title, a second
                 // press sends.
@@ -1710,7 +1889,17 @@ pub fn buttons(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App)
                 emit.send(&block, "button.press", json!({ "buttonId": bid }), None, cx);
             })
         }));
-    row.into_any_element()
+    if pressable {
+        return row.into_any_element();
+    }
+    // Dimmed buttons say why, in the card itself.
+    div()
+        .flex()
+        .flex_col()
+        .gap(space::S6)
+        .child(row)
+        .child(hint(fill(c::BUTTONS_INERT, &[("name", &ctx.author)]), cx))
+        .into_any_element()
 }
 
 // ---------------------------------------------------------------------------
@@ -2023,7 +2212,65 @@ fn embed_body(state: &FolderState, has_detail: bool) -> EmbedBody {
     }
 }
 
-pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -> AnyElement {
+/// The inline preview of an embedded 产出 that is not a web page, the same one a message
+/// shows (`views/media`). `None` when its kind has no preview: the block then offers the
+/// window.
+fn embed_media(
+    ctx: &Ctx,
+    block: &str,
+    title: &str,
+    folder: &crate::data::ArtifactFolder,
+    detail: Option<&crate::data::ArtifactDetail>,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<(AnyElement, crate::views::media::inline::EmbedFacts)> {
+    use crate::views::media::{self, MediaFile, inline, state::Target, store::MediaKey};
+    // The folder is open: its entry says the kind while the 产出's record is still on its way.
+    let files: Vec<MediaFile> = detail
+        .and_then(|d| d.versions.iter().find(|v| v.version == folder.version))
+        .map(|v| {
+            v.files
+                .iter()
+                .map(|f| MediaFile {
+                    path: f.path.clone(),
+                    size: f.size,
+                    mime: f.mime.clone(),
+                })
+                .collect()
+        })
+        .unwrap_or_else(|| {
+            vec![MediaFile {
+                path: folder.entry.clone(),
+                size: 0,
+                mime: media::mime_for(&folder.entry).to_string(),
+            }]
+        });
+    let kind = ctx
+        .env
+        .provider
+        .artifact_media(&folder.artifact_id, folder.version)
+        .and_then(|m| media::poster::local_kind(m.kind))
+        .unwrap_or_else(|| media::classify(&folder.entry, &files));
+    let spec = inline::InlineSpec {
+        key: MediaKey::new(folder.artifact_id.clone(), folder.version),
+        kind,
+        title: title.to_string(),
+        bytes: files.iter().map(|f| f.size).sum(),
+        target: Target {
+            provider: Some(ctx.env.provider.clone()),
+            group_id: ctx.msg.group_id.clone(),
+            topic_id: ctx.msg.topic_id.clone(),
+        },
+        id: ctx.id(format!("embed-media-{block}")),
+        // The embed's frame is its card and its header says what the file is.
+        bare: true,
+    };
+    let el = inline::render(&spec, window, cx)?;
+    crate::selftest::drawn::mark("embed-media", block.to_string());
+    Some((el, inline::embed_facts(&spec, cx)))
+}
+
+pub fn embed(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) -> AnyElement {
     let CardV2Block::Embed {
         id,
         artifact_id,
@@ -2065,7 +2312,18 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
             file.map_or(c::EMBED_KIND, crate::views::media::MediaKind::label)
         ),
     );
+    let media = match (&state, shown) {
+        (Some(Ok(f)), EmbedBody::NotPage) => {
+            embed_media(ctx, id, &name, f, detail.as_ref(), window, cx)
+        }
+        _ => None,
+    };
+    let (media, facts) = match media {
+        Some((el, facts)) => (Some(el), facts),
+        None => (None, Default::default()),
+    };
     let body: AnyElement = match (state, shown) {
+        (_, EmbedBody::NotPage) if media.is_some() => div().children(media).into_any_element(),
         (Some(Ok(f)), EmbedBody::Page) => {
             // inc-integrate: the 产出 page host owns the bridge (capabilities by author,
             // live data, asks, refs, the pending band); the block narrows the declared
@@ -2109,7 +2367,8 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
             div()
                 .p(space::S12)
                 .child(
-                    ui::native::Alert::new(Sym::Alert, c::EMBED_FAILED)
+                    ui::native::Alert::new(Sym::Failed, c::EMBED_FAILED)
+                        .tone(ui::native::AlertTone::Destructive)
                         .description(c::EMBED_FAILED_DESC)
                         .action(
                             ui::native::push_button(
@@ -2167,6 +2426,9 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
         version: Some(*version),
     };
     let _ = (g, tp);
+    // The sandbox chip and the actions strip describe a page that is open: a file has
+    // neither, and a page that did not open has no actions to send.
+    let page = file.is_none() && shown != EmbedBody::Failed;
     div()
         .rounded(theme::radius::LG)
         .border_1()
@@ -2185,7 +2447,7 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                 .border_b_1()
                 .border_color(k.line)
                 .child(ui::icon(
-                    file.map_or(Sym::Document, crate::views::media::MediaKind::icon),
+                    file.map_or(Sym::Globe, crate::views::media::MediaKind::icon),
                     px(14.),
                     k.ink_3,
                 ))
@@ -2198,17 +2460,24 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                         .child(name),
                 )
                 .child(
+                    // One group with no gap, so the dot sits evenly between the two.
                     div()
                         .flex_none()
-                        .mono()
+                        .flex()
+                        .items_center()
                         .text_color(k.ink_3)
-                        .child(fill(c::EMBED_VERSION, &[("n", &version.to_string())])),
+                        .child(
+                            div()
+                                .mono()
+                                .child(fill(c::EMBED_VERSION, &[("n", &version.to_string())])),
+                        )
+                        .child(format!(
+                            " · {}",
+                            file.map_or(c::EMBED_KIND, crate::views::media::MediaKind::label)
+                        ))
+                        .children(facts.meta.map(|m| format!(" · {m}"))),
                 )
-                .child(div().flex_none().text_color(k.ink_3).child(format!(
-                    "· {}",
-                    file.map_or(c::EMBED_KIND, crate::views::media::MediaKind::label)
-                )))
-                .when(file.is_none(), |el| {
+                .when(page, |el| {
                     el.child(
                         div()
                             .ml_auto()
@@ -2221,10 +2490,30 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                             .child(c::EMBED_SANDBOX),
                     )
                 })
+                .children(facts.copy.clone().map(|text| {
+                    div()
+                        .id(eid(node, format!("embed-copy-{id}")))
+                        .ml_auto()
+                        .flex_none()
+                        .size(px(24.))
+                        .rounded(crate::ui::native::tokens::radius::ITEM)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .hover(|s| s.bg(k.hover))
+                        .on_click(move |_, _, cx| {
+                            crate::views::media::parts::copy_text(
+                                text.clone(),
+                                crate::copy::media::COPIED,
+                                cx,
+                            )
+                        })
+                        .child(ui::icon(Sym::Copy, px(14.), k.ink_2))
+                }))
                 .child(
                     div()
                         .id(eid(node, format!("embed-open-{id}")))
-                        .when(file.is_some(), |el| el.ml_auto())
+                        .when(!page && facts.copy.is_none(), |el| el.ml_auto())
                         .flex_none()
                         .size(px(24.))
                         .rounded(crate::ui::native::tokens::radius::ITEM)
@@ -2237,7 +2526,7 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                 ),
         )
         .child(body)
-        .when(file.is_none(), |el| {
+        .when(page, |el| {
             el.child(
                 meta(div())
                     .h(crate::ui::native::tokens::height::DEFAULT)
@@ -2305,13 +2594,12 @@ pub fn unknown(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
     let ctx = node.ctx;
     let k = theme::colors(cx);
     // CARD21 §6: the block's own fallbackText, when the sender gave one.
-    let fallback = ctx
-        .card
-        .blocks
-        .iter()
-        .position(|x| std::ptr::eq(x, b))
+    let at = ctx.card.blocks.iter().position(|x| std::ptr::eq(x, b));
+    let fallback = at
         .and_then(|i| ctx.card.unknown_fallback(i))
         .map(str::to_string);
+    let at = at.unwrap_or_default();
+    let footer_updates = only_input_unknown(ctx) && matches!(ctx.state, CardState::Pending);
     div()
         .p(space::S12)
         .rounded(theme::radius::MD)
@@ -2330,29 +2618,58 @@ pub fn unknown(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 .flex()
                 .flex_col()
                 .gap(space::S4)
+                .flex_1()
                 .min_w(px(0.))
                 .child(
-                    div()
-                        .flex()
-                        .items_baseline()
-                        .gap(space::S8)
-                        .child(
-                            b20::small(div())
-                                .font_weight(theme::MEDIUM_WEIGHT)
-                                .text_color(k.ink)
-                                .child(c::UNKNOWN_BLOCK),
-                        )
-                        .child(meta(div()).mono().text_color(k.ink_3).child(format!(
-                            "{} · {}",
-                            ctx.card.catalog(),
-                            c::UNKNOWN_KIND
-                        ))),
+                    b20::small(div())
+                        .font_weight(theme::MEDIUM_WEIGHT)
+                        .text_color(k.ink)
+                        .child(c::UNKNOWN_BLOCK),
                 )
                 .when_some(fallback, |el, t| {
                     el.child(b20::small(div()).text_color(k.ink_2).child(t))
-                }),
+                })
+                // What the block is, for whoever reports it: the card's catalog and the
+                // block's type, in mono (§7.13: `tc.card/2.2 · map`).
+                .children(unknown_type(ctx.card, at).map(|line| {
+                    meta(div())
+                        .mono()
+                        .text_color(k.ink_3)
+                        .child(crate::ui::truncate::TruncText::new(line))
+                })),
         )
+        // The next step the block names, unless the footer already offers it.
+        .when(!footer_updates, |el| {
+            el.child(
+                div().flex_none().flex().items_center().child(
+                    ui::native::push_button(
+                        eid(node, format!("unknown-update-{at}")),
+                        fill(c::UPDATE_APP, &[("product", env!("PRODUCT_NAME"))]),
+                        ui::native::PushStyle::Ghost,
+                        ui::native::PushSize::Small,
+                        cx,
+                    )
+                    .on_click(|_, _, cx| {
+                        if let Some(u) = crate::updater::global(cx) {
+                            u.update(cx, |u, cx| u.check_now(cx));
+                        }
+                    }),
+                ),
+            )
+        })
         .into_any_element()
+}
+
+/// `tc.card/2.2 · map`: the catalog of the card and the type of its unknown block at
+/// `index`. `None` when the block kept no type.
+pub(crate) fn unknown_type(card: &crate::data::cards_v2::CardV2, index: usize) -> Option<String> {
+    let kind = card.unknown.get(&index)?.type_name.trim();
+    (!kind.is_empty()).then(|| {
+        fill(
+            c::UNKNOWN_TYPE,
+            &[("catalog", card.catalog()), ("type", kind)],
+        )
+    })
 }
 
 /// The card's only input is a block this version does not know: 更新 and no submit.
@@ -2435,21 +2752,17 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
         .iter()
         .find(|b| matches!(b, CardV2Block::Poll { .. }))
     {
-        let mut items = vec![
-            meta(div())
-                .text_color(k.ink_3)
-                .child(if public.unwrap_or(false) {
-                    c::POLL_PUBLIC
-                } else {
-                    c::POLL_PRIVATE
-                })
-                .into_any_element(),
-        ];
-        // No buttons here: the rules read as one line.
+        // No buttons here: the rules read as one meta line, split by the dot.
+        let mut rules = String::from(if public.unwrap_or(false) {
+            c::POLL_PUBLIC
+        } else {
+            c::POLL_PRIVATE
+        });
         if changeable.unwrap_or(false) {
-            items.push(note(c::POLL_CHANGEABLE.into()).into_any_element());
+            rules.push_str(" · ");
+            rules.push_str(c::POLL_CHANGEABLE);
         }
-        return Some(Some(bar(items, None)));
+        return Some(Some(bar(vec![note(rules)], None)));
     }
     // Only immediate blocks (a confirm, a single pick): the press is the answer.
     let surface = ctx.card.surface_ids();
@@ -2518,6 +2831,47 @@ mod leaf_tests {
     use super::*;
     use crate::data::{ArtifactFolder, FileError};
 
+    fn matrix(required: Option<bool>, rows: &[Option<bool>]) -> CardV2Block {
+        let rows: Vec<Value> = rows
+            .iter()
+            .enumerate()
+            .map(|(i, r)| {
+                let mut row = json!({ "id": format!("r{i}"), "label": "行" });
+                if let Some(r) = r {
+                    row["required"] = json!(r);
+                }
+                row
+            })
+            .collect();
+        let mut block = json!({
+            "id": "m", "type": "matrix", "label": "矩阵", "fallbackText": "矩阵",
+            "rows": rows, "columns": [ { "id": "a", "label": "甲" } ],
+        });
+        if let Some(required) = required {
+            block["required"] = json!(required);
+        }
+        serde_json::from_value(block).expect("a matrix block")
+    }
+
+    #[test]
+    fn a_matrix_asks_for_every_row_only_when_the_submit_button_does() {
+        assert!(matrix_all_required(&matrix(Some(true), &[None, None])));
+        assert!(matrix_all_required(&matrix(
+            None,
+            &[Some(true), Some(true)]
+        )));
+        assert!(!matrix_all_required(&matrix(None, &[Some(true), None])));
+        assert!(!matrix_all_required(&matrix(None, &[None, None])));
+    }
+
+    #[test]
+    fn a_matrix_is_required_only_when_the_submit_button_waits_for_it() {
+        assert!(is_required(&matrix(Some(true), &[None, None])));
+        assert!(is_required(&matrix(None, &[Some(true), None])));
+        assert!(!is_required(&matrix(None, &[None, None])));
+        assert!(!is_required(&matrix(Some(false), &[Some(false), None])));
+    }
+
     fn folder(is_page: bool) -> FolderState {
         Some(Ok(ArtifactFolder {
             artifact_id: "a".into(),
@@ -2569,5 +2923,59 @@ mod leaf_tests {
         FOLDERS.with(|f| f.borrow_mut().insert(("a".into(), 1), failed));
         forget_folder("a", 1);
         assert!(FOLDERS.with(|f| f.borrow().get(&("a".to_string(), 1)).is_none()));
+    }
+}
+
+#[cfg(test)]
+mod schema_field_tests {
+    use super::*;
+
+    #[test]
+    fn slots_read_in_the_cards_zone_and_say_so_when_it_is_not_mine() {
+        // 2025-11-06 06:00 UTC is 15:00 in Tokyo and 14:00 in Shanghai.
+        let at: Millis = 1_762_408_800_000;
+        let tokyo = SlotZone::of("Asia/Tokyo");
+        assert_eq!(weekday(tokyo, at).1, "15:00");
+        assert_eq!(weekday(tokyo, at).2, "2025-11-06");
+        assert_eq!(weekday(SlotZone::of("Asia/Shanghai"), at).1, "14:00");
+        assert_eq!(slot_range(tokyo, at, at + 5_400_000), "15:00–16:30");
+        assert_eq!(slot_range(tokyo, at, at), "15:00", "no length: the start");
+        // A day that turns over in the zone moves to the next column.
+        assert_eq!(weekday(tokyo, at + 10 * 3_600_000).2, "2025-11-07");
+        // The hint names the zone and its offset when my clock reads another hour.
+        assert_eq!(
+            zone_hint("Asia/Tokyo", at, 8 * 3600),
+            Some("按东京时间（UTC+9）".to_string())
+        );
+        // A zone with no name here says only its offset, never the raw id.
+        assert_eq!(
+            zone_hint("Asia/Kolkata", at, 8 * 3600),
+            Some("按 UTC+5:30 的时间".to_string())
+        );
+        assert_eq!(
+            zone_hint("Asia/Tokyo", at, 9 * 3600),
+            None,
+            "the same clock"
+        );
+        assert_eq!(zone_hint("Asia/Shanghai", at, 8 * 3600), None);
+        // An id the app does not know falls back to this computer's zone, with no hint.
+        assert_eq!(zone_hint("Mars/Olympus", at, 8 * 3600), None);
+        assert_eq!(utc_offset(0), "UTC");
+        assert_eq!(utc_offset(-(3 * 3600 + 1800)), "UTC−3:30");
+        assert_eq!(utc_offset(5 * 3600 + 2700), "UTC+5:45");
+    }
+
+    #[test]
+    fn an_unknown_block_says_its_catalog_and_type() {
+        let card: crate::data::cards_v2::CardV2 = serde_json::from_value(json!({
+            "v": 2, "catalog": "tc.card/2.2", "rev": 1, "intent": "info", "title": "t", "fallback": "f",
+            "blocks": [
+                { "id": "a", "type": "text", "text": "一" },
+                { "id": "m", "type": "map", "fallbackText": "地图：三家店的位置" }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(unknown_type(&card, 1).as_deref(), Some("tc.card/2.2 · map"));
+        assert_eq!(unknown_type(&card, 0), None, "a block this version knows");
     }
 }

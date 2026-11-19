@@ -8,14 +8,18 @@ use crate::{
     data::{Member, RelayRefusal},
 };
 
-/// The separators of an order on a message's first line (the server reads the same).
-pub const ARROWS: [&str; 3] = ["→", "->", "=>"];
+/// The separators of an order on a message's first line (the server reads the same). With
+/// Chinese punctuation on, `>` types as `》`.
+pub const ARROWS: [&str; 5] = ["→", "->", "=>", "-》", "=》"];
 
-/// One line above the field, and whether it is an error (red) or a hint (muted).
+/// One line above the field, and whether it is an error (the x-circle before it) or a hint (muted).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RelayLine {
     pub text: String,
     pub error: bool,
+    /// The draft is an order Send will start: the composer's other hint about
+    /// who reads the message next does not apply.
+    pub order: bool,
 }
 
 /// The member a step names: after its `@`, the longest member name it starts with, or the
@@ -53,13 +57,32 @@ pub fn order_names(text: &str, members: &[Member]) -> Option<Vec<String>> {
     segments.iter().map(|s| step_name(s, members)).collect()
 }
 
-/// The distinct AI members a draft names: picked from the @ list or typed as `@name`.
-pub fn ai_members_named(text: &str, picked: &[String], members: &[Member]) -> usize {
-    members
+/// The names of the distinct AI members a draft names, picked from the @ list or typed as
+/// `@name`: in the order the draft writes them, the ones only picked last. The longest name
+/// wins, as on the server: `@小码2` does not name 小码.
+pub fn ai_members_named(text: &str, picked: &[String], members: &[Member]) -> Vec<String> {
+    let longer_name_at = |at: usize, name: &str| {
+        members.iter().any(|o| {
+            o.name.len() > name.len()
+                && text[at..]
+                    .strip_prefix('@')
+                    .is_some_and(|rest| rest.starts_with(&o.name))
+        })
+    };
+    let mut named: Vec<(usize, String)> = members
         .iter()
         .filter(|m| m.is_bot() && !m.name.is_empty())
-        .filter(|m| picked.contains(&m.id) || text.contains(&format!("@{}", m.name)))
-        .count()
+        .filter_map(|m| {
+            let at = text
+                .match_indices(&format!("@{}", m.name))
+                .map(|(at, _)| at)
+                .find(|&at| !longer_name_at(at, &m.name));
+            (at.is_some() || picked.contains(&m.id))
+                .then(|| (at.unwrap_or(usize::MAX), m.name.clone()))
+        })
+        .collect();
+    named.sort_by_key(|(at, _)| *at);
+    named.into_iter().map(|(_, name)| name).collect()
 }
 
 /// Why the server refused my last message as 按顺序做; `None` for a reason this version
@@ -74,7 +97,7 @@ pub fn refusal_text(r: &RelayRefusal, name: impl Fn(&str) -> String) -> Option<S
                 .filter(|n| !n.is_empty())
                 .collect();
             Some(fill(
-                c::RELAY_WHY_UNAVAILABLE,
+                c::RELAY_REFUSED_UNAVAILABLE,
                 &[("name", &names.join(c::RELAY_NAMES_SEP))],
             ))
         }
@@ -93,7 +116,13 @@ pub fn relay_line(
     in_chat: bool,
     relay_live: bool,
 ) -> Option<RelayLine> {
-    let hint = |text: String| Some(RelayLine { text, error: false });
+    let hint = |text: String| {
+        Some(RelayLine {
+            text,
+            error: false,
+            order: false,
+        })
+    };
     if let Some(names) = order_names(text, members) {
         if in_chat {
             return hint(c::RELAY_HINT_IN_TOPIC.to_string());
@@ -102,20 +131,42 @@ pub fn relay_line(
             return Some(RelayLine {
                 text: c::RELAY_HINT_RUNNING.to_string(),
                 error: true,
+                order: false,
             });
         }
         let sep = format!(" {} ", c::RELAY_ARROW);
-        return hint(fill(c::RELAY_HINT_ORDER, &[("names", &names.join(&sep))]));
+        return Some(RelayLine {
+            text: fill(c::RELAY_HINT_ORDER, &[("names", &names.join(&sep))]),
+            error: false,
+            order: true,
+        });
     }
-    if !in_chat && ai_members_named(text, picked, members) >= 2 {
-        return hint(c::RELAY_HINT_DISCOVER.to_string());
+    if !in_chat && let [first, second, ..] = &ai_members_named(text, picked, members)[..] {
+        return hint(fill(
+            c::RELAY_HINT_DISCOVER,
+            &[("first", first), ("second", second)],
+        ));
     }
     None
 }
 
+/// Which line the composer shows: the server's refusal only while the draft is empty. A new
+/// draft is the person's answer to it, so what that draft will do takes the place.
+fn line_for_draft(
+    refusal: Option<RelayLine>,
+    draft: &str,
+    line: impl FnOnce() -> Option<RelayLine>,
+) -> Option<RelayLine> {
+    if draft.trim().is_empty() {
+        refusal
+    } else {
+        line()
+    }
+}
+
 impl super::ComposerView {
-    /// The 按顺序做 line above the field now: why the server refused my last order here,
-    /// else what the draft's order will do (or a hint), none while editing.
+    /// The 按顺序做 line above the field now: on an empty draft why the server refused my
+    /// last order here, else what the draft's order will do (or a hint), none while editing.
     pub(super) fn relay_line_now(&self) -> Option<RelayLine> {
         if self.editing.is_some() {
             return None;
@@ -123,26 +174,29 @@ impl super::ComposerView {
         let key = self.key.as_ref()?;
         let p = &self.services.provider;
         let topic = key.topic_id.as_deref();
-        if let Some(t) = topic
-            && let Some(r) = p.relay_refusal(&key.group_id, t)
-            && let Some(text) = refusal_text(&r, |id| {
-                crate::copy::isolate(crate::ui::avatar::name_beside_avatar(
-                    &crate::views::shell::member_name(&self.services, id),
-                ))
+        let refusal = topic
+            .and_then(|t| p.relay_refusal(&key.group_id, t))
+            .and_then(|r| {
+                refusal_text(&r, |id| {
+                    crate::copy::isolate(crate::ui::avatar::name_beside_avatar(
+                        &crate::views::shell::member_name(&self.services, id),
+                    ))
+                })
             })
-        {
-            return Some(RelayLine { text, error: true });
-        }
-        if self.last_text.trim().is_empty() {
-            return None;
-        }
-        let in_chat = topic.is_some_and(crate::data::is_main_topic);
-        let relay_live = topic
-            .and_then(|t| p.topic(&key.group_id, t))
-            .and_then(|t| t.relay)
-            .is_some_and(|r| matches!(r.state.as_str(), "running" | "paused"));
-        let members = crate::views::topic_menu::group_members(&self.services, &key.group_id);
-        relay_line(&self.last_text, &self.picked, &members, in_chat, relay_live)
+            .map(|text| RelayLine {
+                text,
+                error: true,
+                order: false,
+            });
+        line_for_draft(refusal, &self.last_text, || {
+            let in_chat = topic.is_some_and(crate::data::is_main_topic);
+            let relay_live = topic
+                .and_then(|t| p.topic(&key.group_id, t))
+                .and_then(|t| t.relay)
+                .is_some_and(|r| matches!(r.state.as_str(), "running" | "paused"));
+            let members = crate::views::topic_menu::group_members(&self.services, &key.group_id);
+            relay_line(&self.last_text, &self.picked, &members, in_chat, relay_live)
+        })
     }
 }
 
@@ -196,6 +250,11 @@ mod tests {
             order_names("@Code Bot -> @小审 => @小码 收尾", &m),
             Some(vec!["Code Bot".into(), "小审".into(), "小码".into()])
         );
+        // `>` typed with Chinese punctuation on.
+        assert_eq!(
+            order_names("@小码 -》 @小审 =》 @小码 收尾", &m),
+            Some(vec!["小码".into(), "小审".into(), "小码".into()])
+        );
         // An unknown name is still a step (the server says who cannot take it).
         assert_eq!(
             order_names("@小码 → @路人 看看", &m),
@@ -216,7 +275,8 @@ mod tests {
             relay_line(order, &[], &m, false, false),
             Some(RelayLine {
                 text: "按顺序做：小码 → 小审 → 小码".into(),
-                error: false
+                error: false,
+                order: true,
             })
         );
         assert_eq!(
@@ -227,7 +287,8 @@ mod tests {
             relay_line(order, &[], &m, false, true),
             Some(RelayLine {
                 text: "这个话题已经在按顺序做，先停止它".into(),
-                error: true
+                error: true,
+                order: false,
             })
         );
     }
@@ -237,13 +298,52 @@ mod tests {
         let m = team();
         assert_eq!(
             relay_line("@小码 和 @小审 一起看看", &[], &m, false, false).map(|l| l.text),
-            Some("想让他们按顺序做？用 → 连起来".into())
+            Some("想让他们按顺序做？用 -> 连起来，比如 @小码 -> @小审".into())
+        );
+        // The example follows the draft's own order.
+        assert_eq!(
+            relay_line("@小审 和 @小码 一起看看", &[], &m, false, false).map(|l| l.text),
+            Some("想让他们按顺序做？用 -> 连起来，比如 @小审 -> @小码".into())
+        );
+        // A longer name is not the shorter name it starts with.
+        let mut similar = team();
+        similar.push(member("d", "小码2", true));
+        assert_eq!(relay_line("@小码2 看看", &[], &similar, false, false), None);
+        assert_eq!(
+            relay_line("@小码2 和 @小审 一起看看", &[], &similar, false, false).map(|l| l.text),
+            Some("想让他们按顺序做？用 -> 连起来，比如 @小码2 -> @小审".into())
         );
         // Picked from the @ list counts too; a person does not.
         assert!(relay_line("看看", &["a".into(), "b".into()], &m, false, false).is_some());
         assert!(relay_line("@小码 @Joye 看看", &[], &m, false, false).is_none());
         // Not in the 群聊.
         assert!(relay_line("@小码 和 @小审", &[], &m, true, false).is_none());
+    }
+
+    #[test]
+    fn a_new_draft_takes_the_place_of_the_refusal() {
+        let m = team();
+        let refusal = || {
+            Some(RelayLine {
+                text: "没能开始按顺序做".into(),
+                error: true,
+                order: false,
+            })
+        };
+        let line = |draft: &str| {
+            line_for_draft(refusal(), draft, || {
+                relay_line(draft, &[], &m, false, false)
+            })
+        };
+        // Nothing typed: the refusal stays up, and comes back when the draft is cleared.
+        assert_eq!(line(""), refusal());
+        assert_eq!(line("  \n"), refusal());
+        // The replacement order is read as an order, not as refused.
+        let order = line("@小码 -> @小审").expect("the order line");
+        assert!(order.order);
+        assert!(!order.error);
+        // A draft that is no order has no line at all.
+        assert_eq!(line("先等等"), None);
     }
 
     #[test]
@@ -259,7 +359,7 @@ mod tests {
         };
         assert_eq!(
             refusal_text(&r("relay.member_unavailable", &["a", "b"]), name).as_deref(),
-            Some("小码、小审 现在接不了这件事")
+            Some("没能开始按顺序做：小码、小审 现在接不了。换一位成员再发")
         );
         assert_eq!(
             refusal_text(&r("relay.running", &[]), name).as_deref(),

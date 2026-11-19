@@ -2162,7 +2162,7 @@ pub trait ChatProvider: Send + Sync + 'static {
         reply_now(Err(AdminError::Unsupported))
     }
 
-    /// Owners: 汇报给 and 限额 of a member (`PATCH /v1/members/:id` with `reportsTo` and
+    /// Owners: 汇报给 and 预算 of a member (`PATCH /v1/members/:id` with `reportsTo` and
     /// `weeklyBudgetCents`; `None` clears). Answers with the stored member.
     fn set_member_plan(&self, _member_id: &str, _plan: pages::MemberPlan) -> AdminReply<Member> {
         reply_now(Err(AdminError::Unsupported))
@@ -2422,6 +2422,10 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn card_image(&self, _group_id: &str, _topic_id: &str, _file_id: &str) -> Option<PathBuf> {
         None
     }
+    /// The record of a recording a card names by file id, when the 话题 does not list it.
+    fn card_recording(&self, _file_id: &str) -> Reply<FileAttachment> {
+        reply_err(FileError::NotFound)
+    }
     /// The file of a card image once [`Self::card_image`] has its local copy, for the
     /// image viewer (name, size, size in pixels). `None` before.
     fn card_image_file(&self, _file_id: &str) -> Option<FileAttachment> {
@@ -2551,7 +2555,7 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn run_usage(&self, _run_id: &str) -> Option<v2::RunUsage> {
         None
     }
-    /// 用时和成本 of a 话题. The default adds up the runs' times and usage.
+    /// 用时和花费 of a 话题. The default adds up the runs' times and usage.
     fn topic_cost(&self, group_id: &str, topic_id: &str) -> Option<v2::TopicCost> {
         let runs = self.runs(group_id, topic_id);
         if runs.is_empty() {
@@ -2775,6 +2779,15 @@ pub trait ChatProvider: Send + Sync + 'static {
     /// Takes back my answer while it is still queued (撤回), or forgets a
     /// refused one. Emits `Change::Messages` for the topic.
     fn withdraw_card_v2_answer(&self, _group_id: &str, _topic_id: &str, _message_id: &str) {}
+    /// True when my stored answer to the card can be taken back (撤回): it has an answer
+    /// id the server knows (`card.event answer.retract`).
+    fn can_retract_card_v2_answer(&self, _group_id: &str, _message_id: &str) -> bool {
+        false
+    }
+    /// Takes back my stored answer to the card (撤回). The request is one of my card
+    /// events ([`Self::card_v2_events`], event `answer.retract`): on its way, then gone
+    /// with the answer, or refused when the member has started. Emits `Change::Messages`.
+    fn retract_card_v2_answer(&self, _group_id: &str, _topic_id: &str, _message_id: &str) {}
 
     // --- inc-cards21: the interaction loop (INTERACT §3, §4.4) ---
 
@@ -3119,15 +3132,16 @@ pub trait ChatProvider: Send + Sync + 'static {
     ) -> Result<String, page_host::PageSendError> {
         Err(page_host::PageSendError::Refused)
     }
-    /// The latest data snapshot of a version (`GET …/data`): `(data, dataRev)`, `None`
-    /// when it could not be read.
+    /// The latest data snapshot of a version (`GET …/data`): `Ok(Some((data, dataRev)))`,
+    /// `Ok(None)` when the version has none (or the viewer may not read it), and `Err`
+    /// when it could not be read now (the page host tries again).
     fn fetch_page_data(
         &self,
         _artifact_id: &str,
         _version: u32,
-    ) -> futures::channel::oneshot::Receiver<Option<(serde_json::Value, u64)>> {
+    ) -> futures::channel::oneshot::Receiver<crate::data::page_host::PageData> {
         let (tx, rx) = futures::channel::oneshot::channel();
-        let _ = tx.send(None);
+        let _ = tx.send(Ok(None));
         rx
     }
     /// A new stream of page signals (acks, replies, data pushes). `None` when the provider

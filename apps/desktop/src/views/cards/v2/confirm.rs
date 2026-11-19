@@ -138,20 +138,22 @@ pub(crate) fn sheet(
     layout.buttons([cancel, ok]).into_any_element()
 }
 
-/// The type-to-confirm field: a standalone 24 pt field (NATIVE.md §5.6),
-/// as wide as a name.
+/// The type-to-confirm field: a standalone 24 pt field (NATIVE.md §5.6) on the sheet's
+/// content column, so the body keeps one right edge (COMPLETENESS 2.9).
 pub(crate) fn field_box(child: AnyElement, cx: &App) -> AnyElement {
     let n = crate::ui::native::native_colors(cx);
     let m = crate::ui::native::metrics::FIELD;
+    // The kit field recipe (`field_edge`): the fill, edge and ring of every sheet field.
+    let (edge, shadows) = crate::ui::native::field_edge(&n, true, false);
     div()
-        .w(crate::ui::native::metrics::FIELD_NAME_WIDTH)
+        .w_full()
         .h(m)
         .px(crate::ui::native::metrics::FIELD_PAD)
         .rounded(crate::ui::native::metrics::FIELD_RADIUS)
         .border_1()
-        .border_color(n.separator)
-        .bg(n.content)
-        .shadow(n.focus_ring())
+        .border_color(edge)
+        .bg(n.control)
+        .shadow(shadows)
         .flex()
         .items_center()
         .text_size(crate::ui::native::tokens::text::UI.0)

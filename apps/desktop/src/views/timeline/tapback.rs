@@ -18,8 +18,6 @@ pub const BUBBLE: gpui::Pixels = crate::ui::native::tokens::height::SM;
 const EMOJI: gpui::Pixels = px(14.);
 /// The accent tint of my own reaction.
 const MINE_TINT: f32 = 0.28;
-/// Where the popover arrow points: the middle of a one-emoji bubble.
-const ARROW_X: gpui::Pixels = px(16.);
 
 /// One tapback bubble. `count` shows only when more than one member
 /// reacted (as in Messages).

@@ -102,6 +102,40 @@ impl ExpectMode {
     }
 }
 
+/// Why nobody will respond to an event (`expect.reason` with `expect.mode: none`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoneReason {
+    /// The member was removed or turned off.
+    MemberInactive,
+    /// The member's runner is off.
+    RunnerOff,
+    /// The member's run in the 话题 takes no events.
+    RunExternal,
+    /// Too many short runs for now.
+    RunLimit,
+    /// A run could not start, or its computer no longer has it.
+    RunFailed,
+}
+
+impl NoneReason {
+    /// The reason the server named; `None` for a value this version does not know.
+    pub fn parse(reason: Option<&str>) -> Option<Self> {
+        Some(match reason? {
+            "member.inactive" => Self::MemberInactive,
+            "runner.off" => Self::RunnerOff,
+            "run.external" => Self::RunExternal,
+            "run.limit" => Self::RunLimit,
+            "run.failed" => Self::RunFailed,
+            _ => return None,
+        })
+    }
+
+    /// True when the same step can work again soon: the control stays usable.
+    pub fn retryable(self) -> bool {
+        matches!(self, Self::RunLimit | Self::RunFailed)
+    }
+}
+
 /// Why a page event did not go out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PageSendError {
@@ -117,7 +151,7 @@ pub enum PageSignal {
     /// The server answered one of my page events.
     Acked {
         client_event_id: String,
-        result: Result<PageAck, String>,
+        result: Result<PageAck, PageRefusal>,
     },
     /// The member's reply to one of my page asks.
     Reply {
@@ -126,6 +160,9 @@ pub enum PageSignal {
         payload: Option<Value>,
         /// `ok: false`: true for `declined`, false for `failed`.
         declined: bool,
+        /// `ok: false`: the member's own words (why it declined, what failed), for the
+        /// page's `Error.message`.
+        message: Option<String>,
     },
     /// A new data snapshot of a version (`data: None` when it is over 64 KiB: GET it).
     Data {
@@ -140,9 +177,36 @@ pub enum PageSignal {
     Resolved { event_id: String },
 }
 
+/// Why the server refused a page event: its reason id (`artifact.bad_payload`,
+/// `client.offline`, …) and its words (for a bad payload, which field broke the schema).
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct PageRefusal {
+    pub reason: String,
+    pub message: String,
+}
+
+impl From<&str> for PageRefusal {
+    fn from(reason: &str) -> Self {
+        Self {
+            reason: reason.to_string(),
+            message: String::new(),
+        }
+    }
+}
+
+/// A version's data could not be read now (no network, a server fault): try again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PageDataError;
+
+/// What [`ChatProvider::fetch_page_data`] answers: `(data, dataRev)`, `None` when the
+/// version has no data the viewer can read, or an error worth another try.
+pub type PageData = Result<Option<(Value, u64)>, PageDataError>;
+
 /// The ack of a page event.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PageAck {
     pub event_id: String,
     pub mode: ExpectMode,
+    /// With [`ExpectMode::None`]: why, when the server said.
+    pub reason: Option<NoneReason>,
 }

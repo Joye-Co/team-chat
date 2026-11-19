@@ -637,7 +637,7 @@ impl ChatProvider for MediaThread {
         &self,
         artifact_id: &str,
         version: u32,
-    ) -> futures::channel::oneshot::Receiver<Option<(serde_json::Value, u64)>> {
+    ) -> futures::channel::oneshot::Receiver<crate::data::page_host::PageData> {
         self.inner.fetch_page_data(artifact_id, version)
     }
     fn send_page_event(
@@ -885,6 +885,18 @@ pub fn open(
     sample: Sample,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
+    open_finding(services, content, sample, None, cx)
+}
+
+/// [`open`] with the viewer's find bar open and `find` typed in it
+/// (`media-markdown-find`, `media-code-find`).
+pub fn open_finding(
+    services: Services,
+    content: gpui::Size<Pixels>,
+    sample: Sample,
+    find: Option<&'static str>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
     if sample == Sample::States {
         return open_states(services, content, cx);
     }
@@ -932,7 +944,11 @@ pub fn open(
         };
         handle
             .update(cx, |_, window, cx| {
-                viewer::open_in(window, v.key(), name.to_string(), target, opening, cx);
+                let viewer =
+                    viewer::open_in(window, v.key(), name.to_string(), target, opening, cx);
+                if let Some(query) = find {
+                    viewer.update(cx, |v, cx| v.preview_find(query, window, cx));
+                }
             })
             .map_err(|e| e.to_string())?;
     }
@@ -1456,6 +1472,18 @@ const REVIEW_MD: &str = r#"# 重连重复问题复盘
 export function resumeFrom(s: SyncState) {
   return s.lastAckedSeq + 1;
 }
+```
+
+## 流程
+
+```mermaid
+flowchart LR
+  A[连接断开] --> B[指数退避重连]
+  B --> C{有确认过的 seq?}
+  C -- 有 --> D[从 seq + 1 继续]
+  C -- 没有 --> E[拉最近一页]
+  D --> F[按 seq 去重]
+  E --> F
 ```
 
 ## 验证

@@ -240,7 +240,11 @@ impl TimelineView {
             me: self.me.as_deref(),
         };
         let above = extras::render(extras::Placement::AboveBody, message, &ctx, window, cx);
-        let v2_files = if v2 { self.v2_files(message, cx) } else { None };
+        let v2_files = if v2 {
+            self.v2_files(message, window, cx)
+        } else {
+            None
+        };
         let below = if v2_files.is_some() {
             let mut out = vec![];
             out.extend(v2_files);
@@ -283,14 +287,16 @@ impl TimelineView {
         let find_marks = (!deleted)
             .then(|| self.find_marked_body(key, shown_body, cx))
             .flatten();
-        let find_band = find_marks.as_ref().is_some_and(|(_, unmarked)| *unmarked)
+        let find_band = find_marks
+            .as_ref()
+            .is_some_and(|(_, _, unmarked)| *unmarked)
             || (model::is_jumbo(shown_body) && self.is_find_current_row(key));
         // The mark follows the last line (§7.5, U12): inside the body text
         // when it can, on its own line only after a code block or a table.
         let mut mark_inline = false;
         let body: Option<AnyElement> = if deleted {
-            // A recalled message: 14 muted text, no icon (a recall is not a
-            // trash can).
+            // A recalled message (§2.7 tombstone): a 16 muted icon and 14
+            // muted text. The icon is the recall arrow, not a trash can.
             // Mine, recalled in this run: 重新编辑 puts the text back in the
             // composer.
             let reedit = self.can_reedit(message).then(|| {
@@ -311,6 +317,11 @@ impl TimelineView {
                     .gap(space::S8)
                     .t_body()
                     .text_color(colors.text_3)
+                    .child(ui::icons::icon(
+                        Sym::Undo,
+                        ui::native::tokens::icon::MD,
+                        colors.text_3,
+                    ))
                     .child(t::RECALLED)
                     .children(reedit)
                     .into_any_element(),
@@ -365,12 +376,85 @@ impl TimelineView {
             });
             // The message a search opened at: its matched words in bold
             // and underlined while the search bar shows (§2.17).
-            let body_source = match (self.search_query_for(&message.id), find_marks) {
-                (Some(query), _) => markdown::mark_query(shown_body, &query),
-                (None, Some((marked, _))) => marked,
-                (None, None) => shown_body.to_string(),
+            // A long finished answer of an AI member shows its first blocks and a
+            // 展开全文 row. It is decided from the text, before layout; my own
+            // messages, a streaming body and a row a search, a reference jump or
+            // ⌘F points into are never folded.
+            let fold_at = (!message.streaming
+                && author.as_ref().is_some_and(Member::is_bot)
+                && self.me.as_deref() != Some(message.author_id.as_str()))
+            .then(|| markdown::fold::body_fold_at(shown_body))
+            .flatten();
+            let search_query = self.search_query_for(&message.id);
+            let pointed_at =
+                search_query.is_some() || find_marks.is_some() || self.highlight_alpha(key) > 0.;
+            // What was pointed at stays readable after the highlight fades: this row's
+            // long code fences stay open (and only this row's).
+            if pointed_at {
+                if self.code_open.insert(key.to_string(), true) != Some(true) {
+                    markdown::fold::reopen_code(shown_body);
+                }
+            } else if let Some(now) = self.code_open.get_mut(key) {
+                *now = false;
+            }
+            if fold_at.is_some() && !self.unfolded.contains(key) && pointed_at {
+                self.unfolded.insert(key.to_string());
+            }
+            let folded = fold_at.filter(|_| !self.unfolded.contains(key));
+            let find_code = find_marks
+                .as_ref()
+                .map(|(_, code, _)| code.clone())
+                .unwrap_or_default();
+            let body_source = match (search_query, find_marks, folded) {
+                (Some(query), _, _) => markdown::mark_query(shown_body, &query),
+                (None, Some((marked, _, _)), _) => marked,
+                (None, None, Some(at)) => shown_body[..at].to_string(),
+                (None, None, None) => shown_body.to_string(),
             };
-            let (view, inline) = markdown::message_body_refs(
+            let fold_row = fold_at.map(|at| {
+                let label = match folded {
+                    Some(_) => crate::copy::fill(
+                        t::BODY_EXPAND,
+                        &[(
+                            "m",
+                            &markdown::fold::reading_minutes(&shown_body[at..]).to_string(),
+                        )],
+                    ),
+                    None => t::BODY_COLLAPSE.to_string(),
+                };
+                let open = folded.is_some();
+                let row_key = key.to_string();
+                div().pt(space::S4).flex().child(
+                    ui::native::push_button(
+                        ElementId::Name(format!("fold-body-{key}").into()),
+                        label,
+                        ui::native::PushStyle::Ghost,
+                        ui::native::PushSize::Small,
+                        cx,
+                    )
+                    // The text lines up with the body: the button's padding hangs
+                    // into the gutter.
+                    .ml(-space::S12)
+                    .icon(ui::icons::labeled_button_sym(
+                        if open {
+                            Sym::ChevronDown
+                        } else {
+                            Sym::ChevronUp
+                        },
+                        ui::SymSize::INLINE,
+                    ))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if open {
+                            this.unfolded.insert(row_key.clone());
+                        } else {
+                            this.unfolded.remove(&row_key);
+                        }
+                        this.remeasure_key(&row_key);
+                        cx.notify();
+                    })),
+                )
+            });
+            let (view, inline) = markdown::message_body_found(
                 ElementId::Name(format!("body-{key}").into()),
                 body_source,
                 &markdown::mention_targets(&self.members, self.me.as_deref()),
@@ -383,17 +467,29 @@ impl TimelineView {
                     },
                     topic_id: message.topic_id.clone(),
                     streaming: message.streaming,
+                    open_code: self.code_open.contains_key(key),
                 }),
                 refs_body.as_ref(),
+                find_code,
             );
             mark_inline = inline;
             // F15 dir auto: a body whose first strong letter is right to
             // left (Arabic, Hebrew) aligns to the right.
             let view = view.w_full().text_color(colors.text_1);
-            Some(if crate::markdown::starts_rtl(&message.body) {
+            let view = if crate::markdown::starts_rtl(&message.body) {
                 view.text_right().into_any_element()
             } else {
                 view.into_any_element()
+            };
+            Some(match fold_row {
+                Some(row) => div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .child(view)
+                    .child(row)
+                    .into_any_element(),
+                None => view,
             })
         };
         // Sending (§7.5, §12): after 400 ms the body dims to 60 % with a
@@ -402,6 +498,13 @@ impl TimelineView {
         let body = body.map(|b| {
             let pending = message.send_state == SendState::Pending;
             let spinner_color = colors.text_3;
+            // §2.12: with no connection nothing is in flight: the message
+            // waits, a still clock, until it can go.
+            let queued = !matches!(
+                self.services.provider.connection(),
+                crate::data::ConnectionState::Online
+            );
+            let queued_id = ElementId::Name(format!("queued-{key}").into());
             ui::motion::busy_gate(
                 ElementId::Name(format!("sending-{key}").into()),
                 pending,
@@ -419,13 +522,27 @@ impl TimelineView {
                                 .child(b),
                         )
                         .when(shown, |el| {
-                            el.child(
-                                div().flex_none().pb(px(3.)).child(
-                                    ui::spinner()
-                                        .with_size(theme::icon::CHIP)
-                                        .color(spinner_color),
-                                ),
-                            )
+                            el.child(div().flex_none().pb(px(3.)).child(if queued {
+                                div()
+                                    .id(queued_id.clone())
+                                    .child(
+                                        ui::Sym::Waiting
+                                            .icon(ui::SymSize::for_slot(theme::icon::CHIP))
+                                            .text_color(spinner_color),
+                                    )
+                                    .tooltip(|window, cx| {
+                                        gpui_component::tooltip::Tooltip::new(
+                                            crate::copy::composer::QUEUED_WHEN_ONLINE,
+                                        )
+                                        .build(window, cx)
+                                    })
+                                    .into_any_element()
+                            } else {
+                                ui::spinner()
+                                    .with_size(theme::icon::CHIP)
+                                    .color(spinner_color)
+                                    .into_any_element()
+                            }))
                         })
                         .into_any_element()
                 },
@@ -652,7 +769,9 @@ impl TimelineView {
             .gap(space::S12)
             // §2.6, T2-29: the hovered row gets the muted band at 50 %, so the
             // hover toolbar belongs to a row.
-            .when(v2 && hovered && !deleted, |el| {
+            // The band stays while the row's emoji picker is open: the
+            // toolbar stays too, and it must still belong to a row.
+            .when(v2 && (hovered || picking) && !deleted, |el| {
                 el.bg(crate::ui::native::native_colors(cx).fill.opacity(0.5))
             })
             // R2-12, E3: the row the arrow keys reached shows the kit's
@@ -768,7 +887,9 @@ impl TimelineView {
         ui::capsule(cx)
             .id(ElementId::Name(format!("hover-bar-{key}").into()))
             .absolute()
-            .top(px(-18.))
+            // It overlaps the row's top edge by 12, so most of it sits on
+            // its own row's name line, not on the row above.
+            .top(-space::S12)
             .right(ROW_INSET)
             .gap(space::S2)
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -1214,17 +1335,7 @@ impl TimelineView {
         let media: AnyElement = match &peer {
             Some(m) => ui::MemberAvatar::new(Some(m), crate::ui::native::tokens::avatar::LG)
                 .into_any_element(),
-            None => div()
-                .size(crate::ui::native::tokens::avatar::LG)
-                .rounded(theme::radius::FIELD)
-                .border_1()
-                .border_color(n.separator)
-                .bg(n.fill)
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(ui::sym(Sym::Topic, ui::SymSize::TOOLBAR, n.secondary))
-                .into_any_element(),
+            None => crate::ui::native::icon_box(Sym::Topic, cx).into_any_element(),
         };
         let actions = self.start_actions(topic, peer.is_none(), cx);
         div()
@@ -1268,23 +1379,27 @@ impl TimelineView {
     /// decision v14): one row of outline sm buttons, so a short thread
     /// that stays top-anchored opens with what to do next instead of a
     /// blank column. 交代给成员 puts `@` in the composer; 添加成员… opens the
-    /// 群's add-members sheet (not in a DM); 话题信息 opens the inspector.
+    /// 群's add-members sheet; neither shows in a 私聊 (its one peer is the
+    /// member you already talk to); a 话题 there offers 添加文件, the
+    /// composer's file picker, so its block is never a bare title (A1).
     fn start_actions(&self, topic: &Topic, in_group: bool, cx: &mut Context<Self>) -> AnyElement {
         use crate::ui::native::{PushSize, PushStyle, push_button};
-        let assign = push_button(
-            "start-assign",
-            t::START_ASSIGN,
-            PushStyle::Outline,
-            PushSize::Small,
-            cx,
-        )
-        .icon(ui::sym(
-            Sym::Mention,
-            ui::SymSize::INLINE,
-            theme::colors(cx).ink,
-        ))
-        .on_click(|_, window, cx| {
-            window.dispatch_action(Box::new(crate::app::MentionInComposer), cx)
+        let assign = in_group.then(|| {
+            push_button(
+                "start-assign",
+                t::START_ASSIGN,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            )
+            .icon(ui::sym(
+                Sym::Mention,
+                ui::SymSize::INLINE,
+                theme::colors(cx).ink,
+            ))
+            .on_click(|_, window, cx| {
+                window.dispatch_action(Box::new(crate::app::MentionInComposer), cx)
+            })
         });
         let add = in_group.then(|| {
             let services = self.services.clone();
@@ -1318,12 +1433,6 @@ impl TimelineView {
                 )
             })
         });
-        // A5: no 话题信息 while the inspector already shows.
-        let rail_open = matches!(
-            self.services.nav.read(cx).visible_pane(),
-            crate::app::RightPane::TopicRail
-        );
-        let nav = self.services.nav.clone();
         // The 群聊 has no inspector; its start block offers 新话题 instead.
         let chat = crate::data::is_main_topic(&topic.id);
         let new_topic = chat.then(|| {
@@ -1341,23 +1450,21 @@ impl TimelineView {
             ))
             .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::app::NewTopic), cx))
         });
-        let info = (!rail_open && !chat).then(|| {
+        let attach = (!in_group && !chat).then(|| {
             push_button(
-                "start-topic-info",
-                t::START_TOPIC_INFO,
+                "start-attach",
+                crate::copy::composer::ATTACH,
                 PushStyle::Outline,
                 PushSize::Small,
                 cx,
             )
             .icon(ui::sym(
-                Sym::Inspector,
+                Sym::Attach,
                 ui::SymSize::INLINE,
                 theme::colors(cx).ink,
             ))
-            .on_click(move |_, _, cx| {
-                nav.update(cx, |nav, cx| {
-                    nav.set_right_pane(crate::app::RightPane::TopicRail, cx)
-                })
+            .on_click(|_, window, cx| {
+                window.dispatch_action(Box::new(crate::app::AttachInComposer), cx)
             })
         });
         div()
@@ -1365,10 +1472,10 @@ impl TimelineView {
             .flex()
             .flex_wrap()
             .gap(space::S8)
-            .child(assign)
+            .children(assign)
             .children(add)
             .children(new_topic)
-            .children(info)
+            .children(attach)
             .into_any_element()
     }
 
@@ -1561,6 +1668,16 @@ impl TimelineView {
     }
 
     /// Shows the hover toolbar on row `ix` (screenshot scenes).
+    /// Scene: the long answer of message `ix` shown whole.
+    pub fn preview_unfold(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if let Some(m) = self.messages.get(ix) {
+            let key = model::key(m).to_string();
+            self.unfolded.insert(key.clone());
+            self.remeasure_key(&key);
+            cx.notify();
+        }
+    }
+
     pub fn preview_hover(&mut self, ix: usize, cx: &mut Context<Self>) {
         self.hovered = self.messages.get(ix).map(|m| model::key(m).to_string());
         cx.notify();

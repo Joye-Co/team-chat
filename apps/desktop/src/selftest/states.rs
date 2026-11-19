@@ -275,7 +275,7 @@ pub const SCENES: &[Scene] = &[
         about: "settings-notifications-end after ⇧Tab: the focus ring on the pane's last row (the Settings window takes Tab)",
         start: Start::SignedIn,
         setup: |s, cx| (like("settings-notifications-end").setup)(s, cx),
-        open: |s, c, cx| (like("settings-notifications-end").open)(s, c, cx),
+        open: crate::views::settings::selftest::open_notifications_focus_last,
     },
     // --- end v16/tail2 ---
 ];

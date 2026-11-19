@@ -11,7 +11,8 @@ use super::CoreProvider;
 use crate::data::{
     ChatProvider as _,
     page_host::{
-        ExpectMode, PageAck, PageBridge, PageEventDecl, PageEventKind, PageSendError, PageSignal,
+        ExpectMode, NoneReason, PageAck, PageBridge, PageDataError, PageEventDecl, PageEventKind,
+        PageRefusal, PageSendError, PageSignal,
     },
 };
 
@@ -47,6 +48,22 @@ fn mode(m: chat_core::proto::ExpectMode) -> ExpectMode {
     }
 }
 
+/// True when the server said the viewer will never read this version's data (the 产出 or
+/// the version is gone, the viewer left the 群, the request is not valid): the page gets
+/// `null` and nothing is tried again. Everything else (no network, a server fault, a rate
+/// limit, a body that did not parse) is worth another try.
+fn data_is_gone(e: &chat_core::ClientError) -> bool {
+    use chat_core::{ApiError, ClientError, proto::ErrorCode as C};
+    match e {
+        ClientError::NotFound | ClientError::Invalid(_) => true,
+        ClientError::Api(ApiError::Server { code, .. }) => {
+            matches!(code, C::NotFound | C::Forbidden | C::Invalid)
+        }
+        ClientError::Api(ApiError::Invalid(_) | ApiError::BadUrl) => true,
+        _ => false,
+    }
+}
+
 /// The page signal of a client update, if it is one.
 pub(super) fn signal(u: &ClientUpdate) -> Option<PageSignal> {
     match u {
@@ -60,8 +77,12 @@ pub(super) fn signal(u: &ClientUpdate) -> Option<PageSignal> {
                 Ok(a) => Ok(PageAck {
                     event_id: a.event_id.clone(),
                     mode: mode(a.expect.mode),
+                    reason: NoneReason::parse(a.expect.reason.as_deref()),
                 }),
-                Err(e) => Err(e.reason.clone().unwrap_or_default()),
+                Err(e) => Err(PageRefusal {
+                    reason: e.reason.clone().unwrap_or_default(),
+                    message: e.message.clone(),
+                }),
             },
         }),
         ClientUpdate::ArtifactReply(r) => Some(PageSignal::Reply {
@@ -72,6 +93,11 @@ pub(super) fn signal(u: &ClientUpdate) -> Option<PageSignal> {
                 .error
                 .as_ref()
                 .is_some_and(|e| e.code == chat_core::proto::ArtifactReplyCode::Declined),
+            message: r
+                .error
+                .as_ref()
+                .map(|e| e.message.trim().to_string())
+                .filter(|m| !m.is_empty()),
         }),
         ClientUpdate::ArtifactData(d) => Some(PageSignal::Data {
             artifact_id: d.artifact_id.clone(),
@@ -169,21 +195,25 @@ impl CoreProvider {
         &self,
         artifact_id: &str,
         version: u32,
-    ) -> futures::channel::oneshot::Receiver<Option<(serde_json::Value, u64)>> {
+    ) -> futures::channel::oneshot::Receiver<crate::data::page_host::PageData> {
         let (tx, rx) = futures::channel::oneshot::channel();
         let Some(a) = self.account() else {
-            let _ = tx.send(None);
+            let _ = tx.send(Err(PageDataError));
             return rx;
         };
         let handle = a.client.artifact_data(artifact_id, version);
         a.client.spawn(async move {
             let out = match handle.await {
-                Ok(Ok(r)) => Some((r.data, r.data_rev)),
+                Ok(Ok(r)) => Ok(Some((r.data, r.data_rev))),
                 Ok(Err(e)) => {
                     tracing::warn!(error = %e, "产出 data snapshot: fetch failed");
-                    None
+                    if data_is_gone(&e) {
+                        Ok(None)
+                    } else {
+                        Err(PageDataError)
+                    }
                 }
-                Err(_) => None,
+                Err(_) => Err(PageDataError),
             };
             let _ = tx.send(out);
         });

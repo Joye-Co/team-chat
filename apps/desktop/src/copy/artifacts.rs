@@ -1,16 +1,15 @@
 //! 产出: cards in the timeline, the 产出 window, and uploads from the app.
 
+// One word per kind everywhere: 网页, 文件, 图片 (a card's own kind line adds 产出, since
+// nothing else on the card says what it is). A version is 「v3」 in a compact line of
+// facts and 「第 3 版」 in a sentence or a menu item.
 crate::copy! {
-    CARD_META = "{name} · 第 {n} 版",
-    CARD_VERSION = "第 {n} 版",
     CARD_LOADING = "正在读取产出…",
-    CARD_LATEST = "最新是第 {n} 版",
     CARD_KIND_PAGE = "网页产出",
     CARD_KIND_FILE = "文件产出",
     VERSION_SHORT = "v{n}",
     LATEST_SHORT = "最新 v{n}",
     PANEL_KIND_PAGE = "网页",
-    KIND_PAGE = "页面",
     KIND_FILE = "文件",
     OPEN = "打开",
     OPENING = "正在打开…",

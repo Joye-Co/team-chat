@@ -52,7 +52,18 @@ pub fn sorted(rows: &[Vec<String>], col: usize, asc: bool) -> Vec<usize> {
     ix
 }
 
-pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) -> AnyElement {
+/// A keyed focus handle of a control the keyboard reaches, so its render can ask whether it
+/// has the focus.
+fn tab_stop(key: gpui::SharedString, window: &mut gpui::Window, cx: &mut App) -> gpui::FocusHandle {
+    window
+        .use_keyed_state(key, cx, |_, cx| {
+            cx.focus_handle().tab_index(0).tab_stop(true)
+        })
+        .read(cx)
+        .clone()
+}
+
+pub fn table(node: &Node, b: &CardV2Block, window: &mut gpui::Window, cx: &mut App) -> AnyElement {
     let CardV2Block::Table {
         id,
         columns,
@@ -72,7 +83,16 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
     if plain {
         // inc-integrate: cell, row and column parts for 引用提问 (REFS §A2.2, R4).
         let refs = super::parts::table_refs(node, b, cx);
-        let t = b20::table_with_refs(columns, rows, refs.as_ref(), Some(window), cx);
+        let fold = ctx.id(format!("table-{id}"));
+        let t = b20::table_with_refs(
+            Some(fold.as_ref()),
+            &|_| false,
+            columns,
+            rows,
+            refs.as_ref(),
+            Some(window),
+            cx,
+        );
         return match title {
             Some(tt) => div()
                 .flex()
@@ -119,6 +139,14 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
         Some(w) => el.flex_none().w(w),
         None => el.flex_1(),
     };
+    // A sort header knows its focus: the keyboard sees the sort glyph the pointer does.
+    let sort_focus: Vec<Option<gpui::FocusHandle>> = (0..columns.len())
+        .map(|ci| {
+            sortable
+                .unwrap_or(false)
+                .then(|| tab_stop(eid(node, format!("th-focus-{id}-{ci}")), window, cx))
+        })
+        .collect();
     let head = meta(div())
         .flex()
         .items_center()
@@ -132,39 +160,89 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
             let sorted_here = ui.sort.filter(|(c, _)| *c == ci);
             let emit = Emitter::of(ctx);
             let (uie, block, col_label) = (ctx.ui.clone(), id.clone(), label.clone());
+            let group = gpui::SharedString::from(format!("th-{id}-{ci}"));
+            // The sort glyph shows on a header the table is not sorted by yet, under the
+            // pointer or the keyboard focus. A number column has it before the label: the
+            // label ends on the numbers' right edge.
+            let focused = window.last_input_was_keyboard()
+                && sort_focus[ci]
+                    .as_ref()
+                    .is_some_and(|h| h.is_focused(window));
+            let glyph = match sorted_here {
+                Some((_, asc)) => Some(
+                    ui::icon(
+                        if asc { Sym::ArrowUp } else { Sym::ArrowDown },
+                        px(12.),
+                        k.ink_2,
+                    )
+                    .into_any_element(),
+                ),
+                None if sortable.unwrap_or(false) => Some(
+                    div()
+                        .flex_none()
+                        .when(!focused, |el| {
+                            el.invisible().group_hover(group.clone(), |s| s.visible())
+                        })
+                        .child(ui::icon(Sym::Sort, px(12.), k.ink_3))
+                        .into_any_element(),
+                ),
+                None => None,
+            };
+            let (before, after) = if numeric[ci] {
+                (glyph, None)
+            } else {
+                (None, glyph)
+            };
             sized(div().id(eid(node, format!("th-{id}-{ci}"))), ci)
-                .when(ci == 0, |el| el.min_w(px(96.)))
-                .min_w(px(0.))
+                .when(ci == 0, |el| el.min_w(m::TABLE_COL_FIRST))
+                .when(ci > 0 && widths[ci].is_none(), |el| el.min_w(px(0.)))
+                .h_full()
                 .flex()
                 .items_center()
                 .gap(space::S4)
                 .when(numeric[ci], |el| el.justify_end())
+                // The focus ring keeps air after a label that ends on the cell's edge.
+                .when(sortable.unwrap_or(false) && numeric[ci], |el| {
+                    el.relative().left(space::S4).pr(space::S4)
+                })
+                .when_some(sort_focus[ci].as_ref(), |el, h| el.track_focus(h))
                 .when(sortable.unwrap_or(false), |el| {
-                    el.hover(|s| s.text_color(k.ink)).on_click(move |_, _, cx| {
-                        let asc = !matches!(sorted_here, Some((_, true)));
-                        uie.update(cx, |u, cx| {
-                            u.block_mut(&block).sort = Some((ci, asc));
-                            cx.notify();
-                        });
-                        // The bot gets `table.sort` only when it is declared.
-                        emit.send(
+                    // A sort header is a control: a tab stop with Enter / Space, the row
+                    // hover, the pointer, and the sort glyph while it is not sorted by.
+                    el.group(group.clone())
+                        .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
+                        .rounded(crate::ui::native::tokens::radius::ITEM)
+                        .cursor_pointer()
+                        .on_click(move |_, _, cx| {
+                            let asc = !matches!(sorted_here, Some((_, true)));
+                            uie.update(cx, |u, cx| {
+                                u.block_mut(&block).sort = Some((ci, asc));
+                                cx.notify();
+                            });
+                            // The bot gets `table.sort` only when it is declared.
+                            emit.send(
                             &block,
                             "table.sort",
                             json!({ "column": col_label, "dir": if asc { "asc" } else { "desc" } }),
                             None,
                             cx,
                         );
-                    })
+                        })
                 })
-                .child(div().one_line().child(label.clone()))
-                .when_some(sorted_here, |el, (_, asc)| {
-                    el.child(ui::icon(
-                        if asc { Sym::ArrowUp } else { Sym::ArrowDown },
-                        px(12.),
-                        k.ink_2,
-                    ))
-                })
+                .children(before)
+                .child(
+                    div()
+                        .min_w(px(0.))
+                        .child(crate::ui::truncate::TruncText::new(label.clone())),
+                )
+                .children(after)
         }));
+    // The fold of every card table: ten rows, then 展开其余 n 行; a picked row never hides.
+    let fold_key = ctx.id(format!("table-{id}"));
+    let expanded = crate::views::cards::is_expanded(fold_key.as_ref(), cx);
+    let (order, hidden) = b20::table_fold(rows, &order, expanded, &|ri| picked.contains(&keys[ri]));
+    let more = b20::table_folds(rows.len())
+        .then(|| b20::flush_fold_row(fold_key.as_ref(), hidden, expanded, cx));
     let last = order.len().saturating_sub(1);
     let body = order.iter().enumerate().map(|(pos, ri)| {
         let r = &rows[*ri];
@@ -176,16 +254,17 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
             super::leaves::PickTarget::of(node),
         );
         let mark_id = eid(node, format!("tr-{id}-{key}-mark"));
-        div()
+        // The hover and the selection reach past the content edge, rounded; the row's rule
+        // stays on the content width, straight, in line with the header's.
+        let line = div()
             .id(eid(node, format!("tr-{id}-{key}")))
             .flex()
             .items_center()
             .gap(space::S12)
-            .h(m::TABLE_ROW)
+            .flex_1()
             .mx(px(-6.))
             .px(px(6.))
             .rounded(crate::ui::native::tokens::radius::ITEM)
-            .when(pos < last, |el| el.border_b_1().border_color(k.line))
             .when(on, |el| el.bg(k.sunken))
             .text_color(k.ink)
             .when(can_pick, |el| {
@@ -222,29 +301,45 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
                         Some(w) => el.flex_none().w(w),
                         None => el.flex_1(),
                     })
-                    .when(ci == 0, |el| el.min_w(px(96.)))
-                    .min_w(px(0.))
+                    .when(ci == 0, |el| el.min_w(m::TABLE_COL_FIRST))
+                    .when(ci > 0 && widths[ci].is_none(), |el| el.min_w(px(0.)))
                     .flex()
                     .when(numeric[ci], |el| el.justify_end())
-                    .child(
+                    .child(if numeric[ci] {
+                        // Numbers never truncate (§2.7).
                         div()
-                            .one_line()
-                            .when(numeric[ci], |el| el.mono())
-                            .when(on && ci == 0, |el| el.font_weight(theme::MEDIUM_WEIGHT))
-                            .child(text),
-                    );
+                            .whitespace_nowrap()
+                            .mono()
+                            .child(text)
+                            .into_any_element()
+                    } else {
+                        // A text cell cuts at the end with the full text in a tooltip.
+                        div()
+                            .min_w(px(0.))
+                            .child(
+                                crate::ui::truncate::TruncText::new(text)
+                                    .when(on && ci == 0, |el| el.font_weight(theme::MEDIUM_WEIGHT)),
+                            )
+                            .into_any_element()
+                    });
                 // The source row index, so a sorted table references the same row.
                 match &cell_refs {
                     Some(r) => r.cell(cell, *ri, ci, window, cx),
                     None => cell.into_any_element(),
                 }
-            }))
+            }));
+        div()
+            .h(m::TABLE_ROW)
+            .flex()
+            .flex_col()
+            .when(pos < last, |el| el.border_b_1().border_color(k.line))
+            .child(line)
     });
     let mut col = b20::small(div()).flex().flex_col();
     if let Some(tt) = title {
         col = col.child(div().mb(space::S8).child(super::question(tt, cx)));
     }
-    col = col.child(head).children(body);
+    col = col.child(head).children(body).children(more);
     if can_pick && multiple && !picked.is_empty() {
         col = col.child(
             meta(div())
@@ -256,7 +351,7 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
     col.into_any_element()
 }
 
-pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) -> AnyElement {
+pub fn chart(node: &Node, b: &CardV2Block, window: &mut gpui::Window, cx: &mut App) -> AnyElement {
     let CardV2Block::Chart {
         id,
         kind,
@@ -275,15 +370,6 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
     // 引用提问: the points (bars) of the main series are parts (REFS §A2.2).
     let parts = b20::block_parts(ctx, b, cx);
     let xs = x.clone().unwrap_or_default();
-    let drawn = super::super::v2::chart_el(
-        ctx.id(format!("chart-{id}")),
-        *kind,
-        label.as_deref(),
-        unit.as_deref(),
-        &xs,
-        series,
-        cx,
-    );
     let selectable = super::interact::sends(ctx.card, b, "chart.select")
         && super::interact::may_emit(ctx, b)
         && !xs.is_empty()
@@ -353,22 +439,75 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
         .gap(space::S6)
         .min_w(px(0.));
     let main = series.first();
-    // The chosen point: its x and value, in the label row.
-    let tip = point.as_ref().and_then(|(skey, i)| {
-        let s = series.iter().find(|s| s.key() == skey)?;
-        let v = s.values.get(*i)?.as_f64()?;
-        let shown = match unit {
+    // A point's value, with its unit.
+    let value_text = |s: &crate::data::cards_v2::ChartSeries, i: usize| {
+        let v = s.values.get(i)?.as_f64()?;
+        Some(match unit {
             Some(u) => format!("{} {u}", b20::fmt_number(v)),
             None => b20::fmt_number(v),
-        };
-        Some(fill(
-            c::CHART_POINT,
-            &[
-                ("x", xs.get(*i).map(String::as_str).unwrap_or("")),
-                ("value", &shown),
-            ],
-        ))
+        })
+    };
+    // Several series: the label says the x and the legend says each series' value after its
+    // name. One series: the label says both.
+    let several = series.len() > 1;
+    let point_text = |i: usize| {
+        if several {
+            series
+                .iter()
+                .any(|s| value_text(s, i).is_some())
+                .then(|| xs.get(i).cloned())
+                .flatten()
+        } else {
+            Some(fill(
+                c::CHART_POINT,
+                &[
+                    ("x", xs.get(i).map(String::as_str).unwrap_or("")),
+                    ("value", &value_text(main?, i)?),
+                ],
+            ))
+        }
+    };
+    let legend_values: Vec<Vec<Option<String>>> = series
+        .iter()
+        .filter(|_| several && selectable)
+        .map(|s| (0..xs.len()).map(|i| value_text(s, i)).collect())
+        .collect();
+    // Walking the points reads them: the focused or hovered one says its value in the label
+    // row and takes the marker. Only Enter or a click picks it.
+    let point_focus: Vec<gpui::FocusHandle> = (0..xs.len())
+        .filter(|_| selectable)
+        .map(|i| tab_stop(eid(node, format!("pt-focus-{id}-{i}")), window, cx))
+        .collect();
+    // A click leaves the focus on its point: only the keyboard's focus outranks the pointer.
+    let at = point_focus
+        .iter()
+        .position(|h| h.is_focused(window))
+        .filter(|_| window.last_input_was_keyboard())
+        .or(node.ui.block(id).hot)
+        .filter(|i| selectable && point.as_ref().is_none_or(|(_, p)| p != i));
+    let picked = point.as_ref().map(|(_, i)| *i);
+    // The chosen point, under the plot. The legend above it says the values of the point being
+    // read, so with several series this line names that point and the label row stays empty.
+    let date_below = several && picked.is_some();
+    let tip = picked.and_then(|i| point_text(if several { at.unwrap_or(i) } else { i }));
+    let peek = selectable.then(|| super::super::v2::ChartPeek {
+        point: at.and_then(|i| {
+            let text = point_text(i)?;
+            Some((i, if date_below { String::new() } else { text }))
+        }),
+        read: at.or(picked),
+        values: legend_values.clone(),
     });
+    let drawn = super::super::v2::chart_el(
+        ctx.id(format!("chart-{id}")),
+        *kind,
+        label.as_deref(),
+        unit.as_deref(),
+        &xs,
+        series,
+        peek,
+        cx,
+    );
     let overlay = parts.as_ref().filter(|_| !selectable).and_then(|p| {
         crate::views::refs::cards::chart_overlay(
             p,
@@ -384,10 +523,17 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
     let n = xs.len();
     // The columns start where the plot does (after the y-axis labels).
     let left = super::super::v2::chart_plot_left(*kind, series);
+    // They end above the legend, which belongs to no column.
+    let legend = if selectable {
+        let chart = ctx.id(format!("chart-{id}"));
+        super::super::v2::chart_pick_legend_room(&chart, *kind, series, &legend_values, cx)
+    } else {
+        super::super::v2::chart_legend_room(series.len())
+    };
     let tint = div()
         .absolute()
         .top_0()
-        .bottom_0()
+        .bottom(legend)
         .right_0()
         .left(left)
         .flex()
@@ -426,7 +572,8 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
                     div()
                         .absolute()
                         .top_0()
-                        .bottom_0()
+                        // Above the legend; the focus ring clears the x label under the point.
+                        .bottom(legend - space::S4)
                         .right_0()
                         .left(left)
                         .flex()
@@ -469,6 +616,12 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
                                 .relative()
                                 .flex_1()
                                 .h_full()
+                                .track_focus(&point_focus[i])
+                                // Each point is a tab stop: ← → walk them, Enter or
+                                // Space picks (the click). The tint is the column's own.
+                                .focus_row_with(true, crate::ui::native::Arrows::Grid, cx)
+                                .rounded(theme::radius::SM)
+                                .cursor_pointer()
                                 .child(hot)
                                 .on_click(move |_, _, cx| {
                                     if on {
@@ -591,7 +744,16 @@ fn bar_rows(
         .flex_col()
         .gap(crate::ui::native::tokens::space::S2)
         .min_w(px(0.));
+    // A chart of many bars shows its first rows and opens the rest in place: 200 rows of
+    // 32 would be a 6,400 pt card. The picked bar never hides.
+    let fold_key = ctx.id(format!("bars-{id}"));
+    let expanded = crate::views::cards::is_expanded(fold_key.as_ref(), cx);
+    let shown = bar_rows_shown(xs.len(), picked, expanded);
+    let hidden = xs.len() - shown.len();
     for (i, xv) in xs.iter().enumerate() {
+        if !shown.contains(&i) {
+            continue;
+        }
         let on = picked == Some(i);
         // Every value is primary on a primary 20% track (D12, §2.22); the picked
         // bar says so by its weight, never by fading the others under their track.
@@ -622,6 +784,9 @@ fn bar_rows(
             .mx(-space::S6)
             .rounded(t::BAR_ROW_RADIUS)
             .when(hot == Some(i), |el| el.bg(k.hover))
+            // A bar that answers is a row control: a tab stop, ↑ ↓, Enter / Space.
+            .focus_row(true, cx)
+            .cursor_pointer()
             .text_size(crate::ui::native::tokens::text::UI.0)
             .relative()
             .child(
@@ -747,6 +912,9 @@ fn bar_rows(
             )
         })
         .child(list)
+        .when(xs.len() > t::BAR_ROWS_FOLD + 1, |el| {
+            el.child(b20::flush_more(fold_key.as_ref(), hidden, expanded))
+        })
         // The picked bar, as the column chart says it (`● B 站 · 9`).
         .when_some(
             picked.filter(|_| tip).and_then(|i| {
@@ -782,6 +950,17 @@ fn bar_rows(
         .into_any_element()
 }
 
+/// The bar rows a pickable bar chart of `n` bars shows: the first [`t::BAR_ROWS_FOLD`] and
+/// the picked one while folded; all of them when expanded or one over the fold.
+pub fn bar_rows_shown(n: usize, picked: Option<usize>, expanded: bool) -> Vec<usize> {
+    if expanded || n <= t::BAR_ROWS_FOLD + 1 {
+        return (0..n).collect();
+    }
+    (0..n)
+        .filter(|i| *i < t::BAR_ROWS_FOLD || picked == Some(*i))
+        .collect()
+}
+
 pub fn metric(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) -> AnyElement {
     let ctx = node.ctx;
     let parts = crate::views::refs::cards::CardParts::of(ctx, cx);
@@ -796,9 +975,13 @@ pub fn metric(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App)
         .id(eid(node, format!("metric-{id}")))
         .mx(px(-8.))
         .px(px(8.))
-        .py(px(4.))
-        .my(px(-4.))
+        .py(crate::ui::native::tokens::space::S6)
+        .my(-crate::ui::native::tokens::space::S6)
         .rounded(theme::radius::MD)
+        // A metric that answers a press looks and works like one: the row hover, the
+        // pointer, a tab stop with the focus ring and Enter / Space.
+        .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
+        .cursor_pointer()
         .on_click(move |_, _, cx| {
             emit.send(
                 &block,
@@ -825,6 +1008,17 @@ mod tests {
         assert_eq!(row_keys(&rows, None), ["0", "1"]);
         let keys = vec!["weibo".to_string(), "bili".to_string()];
         assert_eq!(row_keys(&rows, Some(&keys)), ["weibo", "bili"]);
+    }
+
+    #[test]
+    fn a_chart_of_many_bars_folds_and_keeps_the_picked_one() {
+        assert_eq!(bar_rows_shown(7, None, false).len(), 7);
+        assert_eq!(bar_rows_shown(13, None, false).len(), 13, "one over: whole");
+        let folded = bar_rows_shown(200, Some(150), false);
+        assert_eq!(folded.len(), t::BAR_ROWS_FOLD + 1);
+        assert_eq!(folded.last(), Some(&150));
+        assert_eq!(bar_rows_shown(200, Some(3), false).len(), t::BAR_ROWS_FOLD);
+        assert_eq!(bar_rows_shown(200, None, true).len(), 200);
     }
 
     #[test]

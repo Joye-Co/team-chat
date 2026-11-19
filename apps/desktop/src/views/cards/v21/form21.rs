@@ -228,11 +228,18 @@ pub fn value_of(card: &CardV2, b: &CardV2Block, values: &Values) -> Option<Value
                 json!({ "value": c })
             })
         }
-        CardV2Block::Rank { items, .. } => {
-            let order = match values.get(id) {
+        CardV2Block::Rank {
+            items, rank_top, ..
+        } => {
+            let mut order: Vec<String> = match values.get(id) {
                 Some(Val::Order(o)) => o.clone(),
                 _ => items.iter().map(|i| i.id.clone()).collect(),
             };
+            // `rankTop`: only the first n count, so only they go (the server takes an
+            // order of that length).
+            if let Some(n) = rank_top.map(|n| n as usize).filter(|n| *n > 0) {
+                order.truncate(n);
+            }
             Some(json!({ "order": order }))
         }
         CardV2Block::Rating { .. } | CardV2Block::Scale { .. } => {
@@ -401,5 +408,38 @@ mod tests {
         };
         let inputs = to_inputs(&c, &v, Some(&only)).unwrap();
         assert_eq!(inputs.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod rank_top_tests {
+    use super::*;
+
+    #[test]
+    fn a_rank_with_rank_top_sends_only_the_first_n() {
+        let card: CardV2 = serde_json::from_value(json!({
+            "v": 2, "catalog": "tc.card/2.1", "rev": 1, "intent": "ask", "title": "t", "fallback": "f",
+            "ask": { "from": ["me"] },
+            "blocks": [
+                { "id": "top", "type": "rank", "label": "先做哪三件", "rankTop": 3, "fallbackText": "排序",
+                  "items": [ { "id": "a", "label": "A" }, { "id": "b", "label": "B" }, { "id": "c", "label": "C" },
+                             { "id": "d", "label": "D" }, { "id": "e", "label": "E" } ] },
+                { "id": "all", "type": "rank", "label": "全排", "fallbackText": "排序",
+                  "items": [ { "id": "a", "label": "A" }, { "id": "b", "label": "B" } ] }
+            ]
+        }))
+        .unwrap();
+        let mut values = Values::new();
+        values.insert(
+            "top".into(),
+            Val::Order(["e", "d", "c", "b", "a"].map(String::from).to_vec()),
+        );
+        let top = value_of(&card, card.block("top").unwrap(), &values).unwrap();
+        assert_eq!(top, json!({ "order": ["e", "d", "c"] }));
+        // Untouched: the author's order, cut the same way; no rankTop: all of them.
+        let untouched = value_of(&card, card.block("top").unwrap(), &Values::new()).unwrap();
+        assert_eq!(untouched, json!({ "order": ["a", "b", "c"] }));
+        let all = value_of(&card, card.block("all").unwrap(), &Values::new()).unwrap();
+        assert_eq!(all, json!({ "order": ["a", "b"] }));
     }
 }

@@ -194,42 +194,30 @@ fn small_button(
 }
 
 /// The preview could not load (download failed): the inline Alert (§2.15) in the
-/// preview's place, with `重试` (reads the version again) and `打开`.
+/// preview's place. Its title names the 产出, as every other state of the row does,
+/// and `重试` (reads the version again) is its one action: opening the viewer on a
+/// version that was not read lands on the same failure.
 pub fn failed_row(spec: &InlineSpec, cx: &App) -> gpui::Stateful<Div> {
     use crate::ui::native::page::{AlertKind, page_alert};
-    let (s, again) = (spec.clone(), spec.clone());
-    let actions = div()
-        .flex()
-        .items_center()
-        .gap(space::S8)
-        .child(
-            small_button(format!("{}-sys", spec.id), cm::OPEN, None, cx).on_click(
-                move |_, _, cx| {
-                    viewer::open(
-                        s.key.clone(),
-                        s.title.clone(),
-                        s.target.clone(),
-                        Opening::default(),
-                        cx,
-                    )
-                },
-            ),
-        )
-        .child(
-            small_button(format!("{}-retry", spec.id), cm::RETRY, None, cx).on_click(
-                move |_, _, cx| {
-                    super::store::forget(&again.key, cx);
-                    if let Some(p) = again.target.provider.clone() {
-                        super::store::request_artifact(&p, &again.key, &again.title, cx);
-                    }
-                    cx.refresh_windows();
-                },
-            ),
-        );
+    let again = spec.clone();
+    let actions = small_button(format!("{}-retry", spec.id), cm::RETRY, None, cx).on_click(
+        move |_, _, cx| {
+            super::store::forget(&again.key, cx);
+            if let Some(p) = again.target.provider.clone() {
+                super::store::request_artifact(&p, &again.key, &again.title, cx);
+            }
+            cx.refresh_windows();
+        },
+    );
+    let title = if spec.title.trim().is_empty() {
+        cm::STATE_FAILED.to_string()
+    } else {
+        fill(cm::STATE_FAILED_NAMED, &[("name", spec.title.trim())])
+    };
     page_alert(
         ElementId::Name(format!("{}-failed", spec.id).into()),
         AlertKind::Error,
-        cm::STATE_FAILED,
+        title,
         Some(cm::STATE_FAILED_RETRY.into()),
         Some(actions.into_any_element()),
         cx,

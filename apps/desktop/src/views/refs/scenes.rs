@@ -59,11 +59,14 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "refs-sent",
-        about: "引用提问: my question with one reference above its body, Ledger's answer, and a message with three references (one source deleted: 原消息已撤回)",
+        about: "引用提问: my question with one reference above its body, Ledger's answer, and a message with three references opened (one source deleted: 原消息已撤回)",
         start: Start::V2Refs,
         setup: |s, cx| {
             reset(cx);
             open_report(s, cx);
+            hub(cx).update(cx, |h, _| {
+                h.open_sent_refs.insert(r::THREE_MESSAGE.into());
+            });
         },
         open: open_main,
     },

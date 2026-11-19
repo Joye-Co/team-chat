@@ -44,6 +44,23 @@ pub fn open_failed(services: &Services, cx: &mut App) {
     open_run(services, FAILED_TOPIC, FAILED_RUN, cx);
 }
 
+/// The failed run after 查看日志: the developer view, at the raw events.
+pub fn open_failed_log(services: &Services, cx: &mut App) {
+    open_failed(services, cx);
+    REVEAL_LOG.store(true, std::sync::atomic::Ordering::Relaxed);
+    services
+        .nav
+        .update(cx, |nav, cx| nav.set_developer_view(true, cx));
+}
+
+/// The scene's stand-in for the press of 查看日志: the view opens as if pressed.
+static REVEAL_LOG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether a new view starts as if 查看日志 was pressed (once).
+pub(super) fn take_reveal_log() -> bool {
+    REVEAL_LOG.swap(false, std::sync::atomic::Ordering::Relaxed)
+}
+
 /// The inspector of the topic where a bot member works.
 pub fn open_running_details(services: &Services, cx: &mut App) {
     open_details(services, TOPIC, cx);
@@ -54,9 +71,14 @@ pub fn open_failed_details(services: &Services, cx: &mut App) {
     open_details(services, FAILED_TOPIC, cx);
 }
 
-/// The inspector of the sample-card topic: a plan from a card.
+/// The inspector of a 话题 whose run carries a plan (the v2 sample team: Forge on
+/// 话题列表虚拟滚动), so the 计划 section shows: progress, steps and their times.
 pub fn open_plan_details(services: &Services, cx: &mut App) {
-    open_details(services, crate::views::cards::samples::TOPIC, cx);
+    use crate::fake::v2 as d;
+    crate::selftest::scenes::v2_open_topic(services, d::DEV, d::T_VIRTUAL, cx);
+    services
+        .nav
+        .update(cx, |nav, cx| nav.set_right_pane(RightPane::TopicRail, cx));
 }
 
 fn open_details(services: &Services, topic: &str, cx: &mut App) {

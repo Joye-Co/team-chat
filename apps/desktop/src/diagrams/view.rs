@@ -91,11 +91,13 @@ pub fn hit_rect(node: &Node, scale: f32) -> (f32, f32, f32, f32) {
 
 /// The box a hover or focus outline draws around: a sequence participant's hit area
 /// runs down its whole lifeline, so its outline keeps to the head box at the top
-/// (E3: one outline around the box only).
+/// (E3: one outline around the box only). A diagram cached without the box's height
+/// falls back to an estimate.
 pub fn outline_rect(node: &Node, scale: f32) -> (f32, f32, f32, f32) {
     let (x, y, w, h) = hit_rect(node, scale);
     if node.kind == "participant" {
-        (x, y, w, h.min(w * 0.6))
+        let head = node.head.map_or(h.min(w * 0.6), |head| head * scale);
+        (x, y, w, head)
     } else {
         (x, y, w, h)
     }
@@ -431,7 +433,9 @@ fn dense_alert(spec: &InlineSpec, ready: &Ready, ui: &gpui::Entity<Ui>, cx: &App
     let viewer = normalize::normalize(&spec.source)
         .ok()
         .map(|nz| (spec.clone(), nz, ui.read(cx).focus.clone()));
-    let alert = ui::native::Alert::new(Sym::Diagram, c::TOO_DENSE)
+    // The neutral notices take the 16 info circle, the same ink box as the red
+    // x-circle of a failure, so sibling Alerts weigh the same.
+    let alert = ui::native::Alert::new(Sym::Info, c::TOO_DENSE)
         .icon_color(n.secondary)
         .description(crate::copy::fill(
             c::ERROR_NODES,
@@ -479,7 +483,7 @@ fn image_with_hits(
             .w(px(fit.w))
             .h(px(full_h)),
     );
-    let refs_on = crate::views::refs::enabled(cx);
+    let refs_on = crate::views::refs::enabled(cx) && spec.origin.can_ref();
     for (i, node) in ready.meta.nodes.iter().enumerate() {
         let (x, y, w, h) = hit_rect(node, fit.scale);
         let (_, _, _, oh) = outline_rect(node, fit.scale);
@@ -586,12 +590,15 @@ fn image_with_hits(
                 .child(
                     div()
                         .id(ElementId::Name(format!("dscroll-{id}").into()))
-                        .w_full()
+                        .when(!scrolls, |d| d.w_full().justify_center())
                         .flex()
-                        .when(!scrolls, |d| d.justify_center())
                         // Room under the drawing for the scrollbar, so it never covers it.
+                        // The scroller runs out to the frame, so the drawing is cut by the
+                        // frame's edge and not in open space; it still rests 16 inside it.
                         .when(scrolls, |d| {
-                            d.overflow_x_scroll()
+                            d.w(px(avail + 2. * PAD))
+                                .ml(px(-PAD))
+                                .overflow_x_scroll()
                                 .restrict_scroll_to_axis()
                                 .track_scroll(&scroll)
                                 .pb(space::S16)
@@ -599,21 +606,39 @@ fn image_with_hits(
                         .child(
                             div()
                                 .flex_none()
-                                .relative()
-                                .w(px(fit.w))
-                                .h(px(fit.h))
-                                .when(fit.clipped, |el| el.overflow_hidden())
-                                .child(layer),
+                                // The trailing inset counts in the scroll width.
+                                .when(scrolls, |d| d.w(px(fit.w + 2. * PAD)).px(px(PAD)))
+                                .child(
+                                    div()
+                                        .relative()
+                                        .w(px(fit.w))
+                                        .h(px(fit.h))
+                                        .when(fit.clipped, |el| el.overflow_hidden())
+                                        .child(layer),
+                                ),
                         ),
                 )
                 // A wider diagram scrolls sideways with a scrollbar that always shows
                 // (C-05): no fade over the drawing, and the cut edge reads as "more".
+                // It sits on the box's bottom edge (D13): out to the card's inner
+                // edges and down to the footer's line, not afloat in the canvas.
                 .when(scrolls, |d| {
                     d.child(
-                        div().absolute().inset_0().child(
-                            gpui_component::scroll::Scrollbar::horizontal(&scroll)
-                                .mode(gpui_component::scroll::ScrollbarMode::Always),
-                        ),
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left(px(-PAD))
+                            .right(px(-PAD))
+                            .bottom(-space::S12)
+                            .child(
+                                gpui_component::scroll::Scrollbar::horizontal(&scroll)
+                                    // Drawn in a box wider than the canvas by the
+                                    // card's padding: the content counts as much
+                                    // wider, so the thumb keeps its true share.
+                                    .viewport_from_layout()
+                                    .scroll_size(gpui::size(px(fit.w + 2. * PAD), px(fit.h)))
+                                    .mode(gpui_component::scroll::ScrollbarMode::Always),
+                            ),
                     )
                 }),
         )
@@ -758,9 +783,9 @@ fn error_frame(
     let source = spec.source.clone();
     let (icon, icon_color, fallback) = match error {
         ErrorKind::Failed => (Sym::Failed, n.red, c::ERROR_FAILED_DESC),
-        ErrorKind::TooBig => (Sym::Diagram, n.secondary, c::ERROR_TOO_BIG_DESC),
-        ErrorKind::Unsupported => (Sym::Diagram, n.secondary, c::ERROR_UNSUPPORTED_DESC),
-        ErrorKind::Forbidden => (Sym::Diagram, n.secondary, c::ERROR_FORBIDDEN_DESC),
+        ErrorKind::TooBig => (Sym::Info, n.secondary, c::ERROR_TOO_BIG_DESC),
+        ErrorKind::Unsupported => (Sym::Info, n.secondary, c::ERROR_UNSUPPORTED_DESC),
+        ErrorKind::Forbidden => (Sym::Info, n.secondary, c::ERROR_FORBIDDEN_DESC),
     };
     let hint_text = hint.and_then(|h| match h {
         Hint::Line(n) => super::normalize::original_line(&spec.source, n)
@@ -835,6 +860,7 @@ mod tests {
             y,
             w,
             h,
+            head: None,
         }
     }
 

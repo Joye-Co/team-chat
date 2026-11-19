@@ -81,6 +81,12 @@ impl MediaViewer {
         }
     }
 
+    /// Scene: the find bar open with `query` typed.
+    pub fn preview_find(&mut self, query: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.state
+            .update(cx, |s, cx| s.find_with(query, window, cx));
+    }
+
     fn versions(&self) -> Vec<VersionRow> {
         let Some(p) = &self.target.provider else {
             return Vec::new();
@@ -172,11 +178,14 @@ impl Render for MediaViewer {
                     id: SharedString::from(format!("viewer-{}", self.key.artifact_id)),
                     autoplay: self.opening.autoplay,
                 };
-                // The frame the view opened at: seek once the player is there.
+                // The frame the view opened at: the player moves there once it reports in.
                 if let (Data::Video(v), Some(f)) = (&media.data, self.opening.frame.take())
                     && let Some(fr) = v.frames.get(f)
                 {
-                    self.state.update(cx, |s, _| s.position = fr.t);
+                    self.state.update(cx, |s, _| {
+                        s.position = fr.t;
+                        s.pending_seek = Some(fr.t);
+                    });
                 }
                 full::render(&spec, &self.state, window, cx)
             }
@@ -191,10 +200,35 @@ impl Render for MediaViewer {
             ),
             _ => full::loading(&self.title, close_sheet(), cx),
         };
+        // The sheet's own height inside its 1 px line, as a length: the dialog lays its
+        // content out at the content's height, so "100 %" here would let a long
+        // document grow past the sheet (cut square at its bottom corners, and
+        // scrolled by nothing).
+        let height = self.height(window, cx) - crate::ui::native::tokens::layout::BORDER * 2.;
+        // ⌘F, ⌘G and ⇧⌘G find in the document of the sheet (Markdown, code,
+        // table); the 话题 under the sheet keeps its own find bar closed.
+        use crate::views::timeline::find::{FindInTopic, FindNext, FindPrevious};
+        use gpui::prelude::FluentBuilder as _;
+        let searchable = matches!(
+            store::ready(&self.key, cx).as_deref().map(|m| &m.data),
+            Some(Data::Markdown(_) | Data::Code(_) | Data::Table(_))
+        );
         div()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key))
-            .size_full()
+            .when(searchable, |el| {
+                el.on_action(cx.listener(|this, _: &FindInTopic, window, cx| {
+                    this.state.update(cx, |s, cx| s.open_find(window, cx))
+                }))
+                .on_action(cx.listener(|this, _: &FindNext, _, cx| {
+                    this.state.update(cx, |s, cx| s.step_find(true, cx))
+                }))
+                .on_action(cx.listener(|this, _: &FindPrevious, _, cx| {
+                    this.state.update(cx, |s, cx| s.step_find(false, cx))
+                }))
+            })
+            .w_full()
+            .h(height)
             .flex()
             .flex_col()
             .rounded(metrics::SHEET_RADIUS)
@@ -224,7 +258,13 @@ impl MediaViewer {
                     Some(head + space::S8 + space::S12 + px(20.) * c.lines.len() as f32)
                 }
                 Data::Table(t) => {
-                    Some(head + full::TABLE_ROW * (t.rows.len() as f32 + 1.) + full::FOOT_HEIGHT)
+                    let fixed = head + full::TABLE_ROW + full::FOOT_HEIGHT;
+                    let all = fixed + full::TABLE_ROW * t.rows.len() as f32;
+                    // A table longer than the room ends on half a row: a clear cue
+                    // that it scrolls, never a sliver of the next row that reads as
+                    // a second line above the footer.
+                    let shown = ((room - fixed) / full::TABLE_ROW - 0.5).floor().max(1.) + 0.5;
+                    Some(all.min(fixed + full::TABLE_ROW * shown))
                 }
                 // A short transcript: the sheet hugs it (A1): the player block,
                 // the transcript label, then one row per cue.
@@ -234,10 +274,26 @@ impl MediaViewer {
                         + space::S32
                         + AUDIO_CUE * a.transcript.len().max(1) as f32,
                 ),
+                Data::Video(v) => Some(head + full::video_body_height(v)),
+                // A picture shorter than the room: the sheet ends under it, with no
+                // blank band above and below. Several pictures take the tallest, so
+                // the sheet does not jump from one to the next.
+                Data::Images(pics) => pics
+                    .iter()
+                    .map(|p| full::pics_body_height(p, pics.len() > 1))
+                    .try_fold(px(0.), |tall, h| h.map(|h| tall.max(h)))
+                    .filter(|h| *h > px(0.))
+                    .map(|h| head + h),
                 _ => None,
             },
         };
-        natural.map_or(room, |n| n.min(room))
+        // The find bar takes a row of a sheet that hugs its content.
+        let bar = if self.state.read(cx).find.is_some() {
+            crate::ui::native::tokens::height::FOOTER_ROW
+        } else {
+            px(0.)
+        };
+        natural.map_or(room, |n| (n + bar).min(room))
     }
 }
 

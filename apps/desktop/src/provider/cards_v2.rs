@@ -37,6 +37,9 @@ pub struct CardV2Cache {
 struct Inner {
     cards: HashMap<String, Option<CardV2Message>>,
     answers: HashMap<String, Arc<Vec<CardV2Answer>>>,
+    /// The answer ids of the cached answers, per message: `(actor, rev, answer id)`. A
+    /// 2.0 answer has none and cannot be taken back.
+    answer_ids: HashMap<String, Vec<(String, u32, String)>>,
     mine: HashMap<String, Mine>,
     /// Messages whose queued answer was looked up in the outbox (after a restart `mine` is
     /// empty while the outbox still holds my answer).
@@ -145,7 +148,17 @@ impl CardV2Cache {
         if let Some(a) = self.lock().answers.get(message_id) {
             return a.as_ref().clone();
         }
-        let rows = client.card_answers(message_id).unwrap_or_default();
+        // An answer that was taken back (`card.retracted`) is no answer any more.
+        let rows: Vec<_> = client
+            .card_answers(message_id)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|r| r.retracted_at.is_none())
+            .collect();
+        let ids: Vec<(String, u32, String)> = rows
+            .iter()
+            .filter_map(|r| Some((r.actor_id.clone(), r.rev, r.answer_id.clone()?)))
+            .collect();
         let list: Vec<CardV2Answer> = rows
             .into_iter()
             .map(|r| CardV2Answer {
@@ -159,10 +172,40 @@ impl CardV2Cache {
             .collect();
         let mut inner = self.lock();
         bound(&mut inner.answers);
+        bound(&mut inner.answer_ids);
         inner
             .answers
             .insert(message_id.to_string(), Arc::new(list.clone()));
+        inner.answer_ids.insert(message_id.to_string(), ids);
         list
+    }
+
+    /// The id of `me`'s newest stored answer to rev `rev` of the card, for 撤回. `None`:
+    /// no such answer, or one the server gave no id (a 2.0 answer).
+    pub fn my_answer_id(
+        &self,
+        client: &Client,
+        message_id: &str,
+        me: &str,
+        rev: u32,
+    ) -> Option<String> {
+        if !self.lock().answer_ids.contains_key(message_id) {
+            self.answers(client, message_id);
+        }
+        self.lock()
+            .answer_ids
+            .get(message_id)?
+            .iter()
+            .rev()
+            .find(|(actor, r, _)| actor == me && *r == rev)
+            .map(|(_, _, id)| id.clone())
+    }
+
+    /// A `card.retracted` arrived: the answers are read again.
+    pub fn on_retracted(&self, message_id: &str) {
+        let mut inner = self.lock();
+        inner.answers.remove(message_id);
+        inner.answer_ids.remove(message_id);
     }
 
     /// A `card.answered` arrived: answers are read again. My answer to that
@@ -172,6 +215,7 @@ impl CardV2Cache {
     pub fn on_answered(&self, message_id: &str, mine: bool, rev: u32) {
         let mut inner = self.lock();
         inner.answers.remove(message_id);
+        inner.answer_ids.remove(message_id);
         if inner
             .mine
             .get(message_id)

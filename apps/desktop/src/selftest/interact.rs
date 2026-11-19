@@ -40,12 +40,14 @@ const fn keys(keys: &'static [&'static str]) -> Steps {
     }
 }
 
+const BACK: &str = "shift-tab";
+
 /// One line per scene.
 const STEPS: &[(&str, Steps)] = &[
     // --- t5 ---
     ("state-hover-message", hover(600., 315., 600)),
-    // The 问这里 slot left of the copy button in the code block's top strip.
-    ("state-hover-code", hover(905., 410., 400)),
+    // The 问这里 slot left of the language label in the code block's top strip.
+    ("state-hover-code", hover(861., 422., 400)),
     // --- end t5 ---
     // --- t5-cards ---
     ("state-card-option-hover", hover(1011., 290., 400)),
@@ -53,7 +55,8 @@ const STEPS: &[(&str, Steps)] = &[
     ("state-card-tooltip", hover(900., 530., 1200)),
     // --- end t5-cards ---
     // --- r1-kit ---
-    ("state-hover-sidebar", hover(120., 225., 300)),
+    // On a 话题 row (the 群 header above it has no hover fill).
+    ("state-hover-sidebar", hover(120., 243., 300)),
     (
         "state-key-sidebar",
         Steps {
@@ -74,25 +77,51 @@ const STEPS: &[(&str, Steps)] = &[
         ]),
     ),
     ("state-focus-card-option", keys(&["tab", "down"])),
+    // --- the card controls a keyboard reaches (refs-card-keyboard-*) ---
+    // ⇧Tab from the window root: the pane and the composer take the first eight, then the
+    // card from its end.
+    ("refs-card-keyboard-bar", keys(&[BACK; 11])),
+    ("refs-card-keyboard-tabs", keys(&[BACK; 27])),
+    ("refs-card-keyboard-metric", keys(&[BACK; 28])),
+    ("refs-card-keyboard-point", keys(&[BACK; 14])),
+    ("refs-card-keyboard-sort", keys(&[BACK; 9])),
+    ("refs-card-keyboard-group", keys(&[BACK; 14])),
+    // Enter opens the calendar.
+    (
+        "refs-card-keyboard-date",
+        keys(&[
+            BACK, BACK, BACK, BACK, BACK, BACK, BACK, BACK, BACK, "enter",
+        ]),
+    ),
     ("state-focus-picker", keys(&["tab", "tab", "down"])),
     // --- end v15/r5-cards ---
     // --- v16/c-cards ---
     ("state-hover-page-row", hover(535., 201., 300)),
     ("state-hover-artifact-row", hover(893., 189., 300)),
-    // ⇧Tab ×2 reaches the last row's "⋯"; ↑ ×3 walks to the first row and
+    // ⇧Tab ×3 goes back over the footer (the pager, the 每页 select) to the
+    // last row's "⋯"; ↑ ×3 walks to the first row and
     // ↓ to the second. The arrows step row to row, never to a "⋯" (K-14):
     // with a "⋯" in the arrow order the ring would land on row 2's "⋯".
     (
         "state-focus-artifact-row",
-        keys(&["shift-tab", "shift-tab", "up", "up", "up", "down"]),
+        keys(&[
+            "shift-tab",
+            "shift-tab",
+            "shift-tab",
+            "up",
+            "up",
+            "up",
+            "down",
+        ]),
     ),
     // (The 通知 pane lost its 按群设置 navigation row when 群 and 话题 got their own
     // notification settings; its rows are switches and pop-ups now, with no row hover.)
     ("state-focus-diagram-node", keys(&["tab", "tab"])),
     // --- end v16/c-cards ---
     // --- v16/tail2 ---
-    // ⇧Tab from the window root: the last tab stop of the pane.
-    ("state-focus-settings-row", keys(&["shift-tab"])),
+    // ⇧Tab from the window root: the last tab stop of the pane. The scene presses it
+    // itself, once 勿扰 is on and 从 and 到 are tab stops.
+    ("state-focus-settings-row", keys(&[])),
     // The scene clicks on its own; wait for the menu it opens.
     (
         "bot-quick-avatar-menu",

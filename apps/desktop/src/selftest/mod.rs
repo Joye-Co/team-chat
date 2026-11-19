@@ -123,6 +123,33 @@ async fn wait_for_first_paint(cx: &mut AsyncApp) {
     eprintln!("an embedded page did not paint within 15 s");
 }
 
+/// Waits until every inline page on screen has said where it ends: its frame shrinks
+/// to that, and a capture before the read shows the taller declared height.
+async fn wait_for_inline_ends(handle: AnyWindowHandle, cx: &mut AsyncApp) {
+    let waiting = Instant::now();
+    while waiting.elapsed() < Duration::from_secs(3) {
+        let pending = cx.update(|cx| {
+            crate::ui::web_embed::live(cx).into_iter().any(|page| {
+                let page = page.read(cx);
+                page.shown() && page.end_pending()
+            })
+        });
+        if !pending {
+            if waiting.elapsed() > Duration::from_millis(50) {
+                // The frame with the fitted height still has to be drawn.
+                for _ in 0..2 {
+                    let _ = next_frame(handle, cx).await;
+                }
+            }
+            return;
+        }
+        cx.background_executor()
+            .timer(Duration::from_millis(50))
+            .await;
+        let _ = next_frame(handle, cx).await;
+    }
+}
+
 /// How long a scene's native content (a web page) may take to draw.
 const NATIVE_READY: Duration = Duration::from_secs(60);
 
@@ -253,6 +280,7 @@ fn provider(start: Start, worst_case: bool) -> Arc<dyn ChatProvider> {
         Start::V2TwoRuns => fake::v2::V2Samples::with_second_run(),
         Start::V2Relay(shape) => fake::v2::V2Samples::with_relay(shape),
         Start::V2Gallery => fake::v2::V2Samples::with_release_run(),
+        Start::V2Files => fake::v2::V2Samples::with_file_artifacts(),
         // --- v13/ux-pages ---
         Start::V2Unsynced => page_states::Unsynced::new(
             fake::v2::V2Samples::new(),
@@ -559,6 +587,31 @@ async fn shoot(
             if frames == 3 && !settled {
                 cx.background_executor().timer(options.settle).await;
                 settled = true;
+                // A sheet or alert that the scene opens from a timer (the
+                // settings window fits its size first) can start its
+                // entrance late in the settle pause. Draw it and let the
+                // entrance run out, so no capture shows a half-faded sheet
+                // with the page reading through it.
+                let dialog = cx.update(|cx| {
+                    handle
+                        .update(cx, |_, window, cx| {
+                            gpui_component::WindowExt::has_active_dialog(window, cx)
+                        })
+                        .unwrap_or(false)
+                });
+                if dialog {
+                    let _ = next_frame(handle, cx).await;
+                    cx.background_executor()
+                        .timer(crate::theme::motion::SLOW * 2)
+                        .await;
+                }
+            }
+            // The window of the scene before took its pointer with it: a part it rested
+            // on is not hovered here.
+            if frames == 0 {
+                let _ = cx.update(|cx| {
+                    crate::views::refs::hub(cx).update(cx, |hub, _| hub.hover = None);
+                });
             }
             // A key scene parks the pointer once, before its keys.
             if frames == 0 || !interact::keys_only(scene.name) {
@@ -570,7 +623,12 @@ async fn shoot(
                     // A scene with native or async content presses its keys once
                     // that content is ready (below), so a key reaches it.
                     if frames == 1 && scenes::ready_check(scene.name).is_none() {
-                        press_keys(handle, scene.name, cx);
+                        press_keys(handle, scene.name, cx).await;
+                    }
+                    // Enter runs an action of the focused control: it goes once a frame
+                    // has drawn the focus the keys before it moved.
+                    if frames == 3 {
+                        press_enter(handle, scene.name, cx);
                     }
                 }
                 Err(_) => {
@@ -607,7 +665,7 @@ async fn shoot(
             for _ in 0..2 {
                 let _ = next_frame(handle, cx).await;
             }
-            press_keys(handle, scene.name, cx);
+            press_keys(handle, scene.name, cx).await;
             let _ = next_frame(handle, cx).await;
             cx.background_executor().timer(options.settle).await;
         }
@@ -624,6 +682,7 @@ async fn shoot(
         }
         // Also for a scene without a readiness check of its own (a page in a card).
         wait_for_first_paint(cx).await;
+        wait_for_inline_ends(handle, cx).await;
         let number = cx
             .update(|cx| handle.update(cx, |_, window, _| capture::window_number(window)))
             .map_err(|e| e.to_string())??;
@@ -702,8 +761,14 @@ fn park_pointer(handle: AnyWindowHandle, at: gpui::Point<Pixels>, cx: &mut Async
     });
 }
 
-/// Presses the keys of a focus scene ([`interact`]) once.
-fn press_keys(handle: AnyWindowHandle, name: &str, cx: &mut AsyncApp) {
+/// How many times a Tab that moved no focus is pressed again.
+const TAB_RETRIES: usize = 3;
+
+/// Presses the keys of a focus scene ([`interact`]) once, a frame apart: Tab walks the
+/// tab stops of the last drawn frame, so a capture must not outrun the drawing. A Tab
+/// that moved no focus is pressed again, so a count of Tabs lands on the same control
+/// in every run.
+async fn press_keys(handle: AnyWindowHandle, name: &str, cx: &mut AsyncApp) {
     let Some(steps) = interact::steps(name) else {
         return;
     };
@@ -718,14 +783,43 @@ fn press_keys(handle: AnyWindowHandle, name: &str, cx: &mut AsyncApp) {
             .collect(),
         Err(_) => steps.keys.to_vec(),
     };
+    for key in keys.iter().copied() {
+        // The app root holds the focus in a fresh window, so the
+        // first Tab reaches the app's `FocusNext` like a real one.
+        if key == "enter" {
+            break;
+        }
+        let Ok(stroke) = gpui::Keystroke::parse(key) else {
+            continue;
+        };
+        let tries = if key.ends_with("tab") { TAB_RETRIES } else { 0 };
+        for _ in 0..=tries {
+            let moved = cx
+                .update(|cx| {
+                    handle.update(cx, |_, window, cx| {
+                        let before = window.focused(cx);
+                        window.dispatch_keystroke(stroke.clone(), cx);
+                        window.focused(cx) != before
+                    })
+                })
+                .unwrap_or(true);
+            let _ = next_frame(handle, cx).await;
+            if moved {
+                break;
+            }
+        }
+    }
+}
+
+/// Presses the Enter that ends the keys of a focus scene, if they have one.
+fn press_enter(handle: AnyWindowHandle, name: &str, cx: &mut AsyncApp) {
+    if !interact::steps(name).is_some_and(|s| s.keys.last() == Some(&"enter")) {
+        return;
+    }
     let _ = cx.update(|cx| {
         handle.update(cx, |_, window, cx| {
-            for key in keys.iter().copied() {
-                // The app root holds the focus in a fresh window, so the
-                // first Tab reaches the app's `FocusNext` like a real one.
-                if let Ok(stroke) = gpui::Keystroke::parse(key) {
-                    window.dispatch_keystroke(stroke, cx);
-                }
+            if let Ok(stroke) = gpui::Keystroke::parse("enter") {
+                window.dispatch_keystroke(stroke, cx);
             }
         })
     });

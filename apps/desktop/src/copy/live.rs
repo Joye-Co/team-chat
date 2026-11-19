@@ -14,17 +14,12 @@ crate::copy! {
     LIVE_MENU_WINDOW = "窗口",
     LIVE_TERMINAL_TITLE = "{machine} — {step}",
     LIVE_NO_LINES = "这一步还没有用到终端",
-    LIVE_HELD_TITLE = "你在操作 {name} 的电脑",
-    LIVE_HELD_OTHER = "{who} 在操作 {name} 的电脑",
-    LIVE_HELD_PAUSED = "· {name} 已暂停",
     LIVE_OPEN_SCREEN_SHARE = "在屏幕共享里打开",
     LIVE_TAKE_OVER = "接管",
     LIVE_HAND_BACK = "交还",
     LIVE_STOP = "停止…",
     LIVE_STOPPING = "停止中",
     LIVE_TAKE_OVER_HINT = "接管时 {name} 先停下；交还后，它从这一步接着做。",
-    LIVE_TAKE_OVER_FAILED = "没能接管：{reason}",
-    LIVE_HAND_BACK_FAILED = "没能交还：{reason}",
     LIVE_DEVELOPER = "开发者视图",
     LIVE_BACK_TO_SCREEN = "回到画面",
     LIVE_REPLAY = "回放",
@@ -94,9 +89,9 @@ crate::copy! {
     LIVE_MEMBER_STOPPED = "{member} 已停下",
     LIVE_PAUSE = "暂停",
     LIVE_CONTINUE = "继续",
-    LIVE_HAND_BACK_FOR = "替 {who} 交还",
+    LIVE_HAND_BACK_FOR = "替 {who} 交还…",
     LIVE_GO_REPLY = "去回复",
-    LIVE_OPEN_FOLDER = crate::copy::per_system("在访达中打开", "在资源管理器中打开"),
+    LIVE_OPEN_FOLDER = crate::copy::per_system("在访达中打开", "在文件资源管理器中打开"),
     LIVE_CMD_PLACEHOLDER = "在 {member} 的工作目录里运行一条命令",
     LIVE_CMD_RUN = "运行",
     LIVE_CMD_ABORT = "中止",
@@ -110,11 +105,10 @@ crate::copy! {
     LIVE_CMD_OFFLINE = "电脑不在线，回来后才能运行",
     LIVE_CMD_BUSY = "已有一条命令在运行",
     LIVE_CMD_UNSUPPORTED = "这台电脑不支持在接管时运行命令",
-    LIVE_NOTE_PLACEHOLDER = "留句话给 {member}（可不填）",
+    LIVE_NOTE_PLACEHOLDER = "交还时留句话给 {member}（可不填）",
     LIVE_NOTE_COMMANDS = "你跑过的 {n} 条命令会一起告诉 {member}",
     LIVE_NOT_READY = "电脑还没准备好",
     LIVE_DAEMON_OLD = "这台电脑的后台服务太旧，更新后才能接管",
-    LIVE_HELD_STOPPED = "{member} 已停下，你在操作",
     // The two lines of the 话题 (design-takeover 3.5).
     LIVE_TOPIC_TOOK_OVER = "{who} 接管了 {member}",
     LIVE_TOPIC_TOOK_OVER_YOU = "你接管了 {member}",
@@ -124,4 +118,34 @@ crate::copy! {
     LIVE_TOPIC_COMMANDS = "跑了 {k} 条命令",
     LIVE_TOPIC_FILES = "改了 {files}",
     LIVE_TOPIC_FILES_MORE = "{files} 等 {n} 个文件",
+    // The first minute of a phase, in the shape of LIVE_PHASE_FOR.
+    LIVE_PHASE_JUST_NOW = "· 刚刚",
+    // The empty screen of a run that still waits for a computer.
+    LIVE_NO_LINES_QUEUED = "排到电脑后，这里会显示它的屏幕",
+    // The failed badge: the status word of §2.12 (the banner keeps 没做完).
+    LIVE_SHORT_FAILED = "失败",
+    // Under 在等电脑：电脑不在线: which computer, and what happens next.
+    LIVE_PHASE_OFFLINE_HINT = "{computer} 回来后会接着做",
+    // Held by a person while the computer is away: the banner says so at the top.
+    LIVE_HELD_OFFLINE_HINT = "你还在接管，它回来后才能继续操作",
+    // The replay's end label while the computer is away: the frame is not live.
+    LIVE_LAST_FRAME_AT = "最后画面",
+    // The note on a paused run goes with 继续 (LIVE_NOTE_PLACEHOLDER: with 交还).
+    LIVE_NOTE_PLACEHOLDER_RESUME = "继续时留句话给 {member}（可不填）",
+    // A stopped run starts again with the same request.
+    LIVE_RESTART = "重新开始",
+    // The banner of a held run whose computer is away leads with that condition.
+    LIVE_PHASE_HELD_AWAY = "{computer} 不在线",
+    LIVE_HELD_OFFLINE_HINT_OTHER = "{who} 还在接管，它回来后才能继续操作",
+    // A stopped run is over; LIVE_MEMBER_STOPPED is the hold of a take-over.
+    LIVE_MEMBER_ENDED = "{member} 已停止",
+    // A stuck run names the step it stopped on.
+    LIVE_STUCK_AT = "停在：{step}",
+    // The banner's way to the approval card a run waits on.
+    LIVE_GO_APPROVE = "去批准",
+    // 替 {who} 交还 asks first: it ends a colleague's hold of the computer.
+    LIVE_HAND_BACK_FOR_ASK_TITLE = "替 {who} 交还？",
+    LIVE_HAND_BACK_FOR_ASK_BODY = "{who} 将不能再操作这台电脑，\n运行中的命令会中止。\n{member} 会接着做。",
+    // Under the note while the person's own command still runs: 交还 aborts it.
+    LIVE_NOTE_COMMAND_RUNNING = "交还后，运行中的命令会中止",
 }

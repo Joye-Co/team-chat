@@ -50,13 +50,14 @@ impl RefsBody {
 // Table affordances (v1 card tables and Markdown tables)
 // ---------------------------------------------------------------------------------------
 
-/// Width of the slot at the end of each row that holds 问这里.
-pub const ROW_BUTTON_SLOT: f32 = 76.;
+/// Width of the slot at the end of a row that holds 问这里: the button (about 91 at the
+/// small size) and the 4 after it.
+pub const ROW_BUTTON_SLOT: f32 = 96.;
 
 /// The gap between a row's name and its 问这里 (Refs.dc.html).
 const NAME_GAP: f32 = 10.;
-/// The width of the 问这里 button (icon, label and padding at the extra-small size).
-const ASK_PILL: f32 = 68.;
+/// The width of the 问这里 button (icon, label and padding at the small size).
+const ASK_PILL: f32 = 92.;
 /// The room a table with references adds to its first column, so 问这里 fits after a
 /// row's name.
 pub const NAME_ROOM: f32 = NAME_GAP + ASK_PILL;
@@ -118,12 +119,33 @@ impl TableRefs {
             })
     }
 
-    /// True when 问这里 of a row sits right after its name. It never does now: the
-    /// row's action has one place, the row end (§2.6, E3), so it does not land over
-    /// the data column next to the name. Kept as the one switch the table renderers
-    /// ask.
-    pub fn beside(&self, _name: &str, _inner: Option<f32>, _window: &Window) -> bool {
-        false
+    /// True when 问这里 of a row sits right after its name (DESIGN.md: the row end is only
+    /// for a name that leaves no room), so it covers none of the row's values. `inner` is the
+    /// first column's width inside its padding; `None` takes the width the column had at its
+    /// last paint ([`TableRefs::measure`]).
+    pub fn beside(&self, name: &str, inner: Option<f32>, window: &Window) -> bool {
+        let Some(inner) = inner.or_else(|| self.measured_first()) else {
+            return false;
+        };
+        let style = window.text_style();
+        let run = gpui::TextRun {
+            len: name.len(),
+            font: style.font(),
+            color: style.color,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        let w = window
+            .text_system()
+            .shape_line(
+                gpui::SharedString::from(name.to_string()),
+                theme::type_scale::SMALL.0,
+                &[run],
+                None,
+            )
+            .width;
+        f32::from(w) + NAME_GAP + ASK_PILL <= inner
     }
 
     /// 问这里 after the row's name, for the hovered cell of `row` (see [`TableRefs::beside`]).
@@ -142,7 +164,7 @@ impl TableRefs {
                 .h(px(0.))
                 .flex()
                 .items_center()
-                .child(super::affordance::inline_button(
+                .child(super::affordance::inline_button_flat(
                     &id,
                     Rc::new(move |_: &App| {
                         target(TablePick::Cell { row, col }).unwrap_or_else(super::empty_target)
@@ -171,47 +193,50 @@ impl TableRefs {
         .into_any_element()
     }
 
-    /// The slot at the end of a row: 问这里 for the hovered cell, at the row's right end
-    /// and centered on its height (REFS §A3), when it does not sit after the row's name.
-    pub fn row_end_unless(&self, row: usize, beside: bool, cx: &App) -> AnyElement {
-        if beside {
-            return div()
-                .ml_auto()
-                .w(px(ROW_BUTTON_SLOT))
-                .flex_none()
-                .into_any_element();
-        }
-        self.row_end(row, cx)
+    /// The first column's width at its last paint ([`TableRefs::measure`]).
+    pub fn measured_first(&self) -> Option<f32> {
+        FIRST_COL.with(|m| m.borrow().get(&self.prefix).copied())
     }
 
-    /// 问这里 for the hovered cell over the row's right end (16 in, centered on the h40
-    /// row, 6 px clear above and below): the columns keep the whole frame width.
-    pub fn row_end_overlay(&self, row: usize, beside: bool, cx: &App) -> Option<AnyElement> {
-        if beside {
-            return None;
+    /// How many cells at the end of `row` make way while [`Self::row_end_over`] shows its
+    /// button: whole cells, last first, until the button has room, so no value is left cut
+    /// beside it. `trailing` is their widths from the row's end; `inset` the button's distance
+    /// from that end.
+    pub fn row_end_hides(
+        &self,
+        row: usize,
+        trailing: impl IntoIterator<Item = f32>,
+        inset: f32,
+        cx: &App,
+    ) -> usize {
+        if !matches!(self.hovered_in(row, cx), Some((_, true))) {
+            return 0;
         }
-        let Some((col, true)) = self.hovered_in(row, cx) else {
-            return None;
-        };
-        let target = self.target.clone();
-        let id = self.cell_id(row, col);
-        Some(
-            div()
-                .absolute()
-                .top_0()
-                .bottom_0()
-                .right(space::S16)
-                .flex()
-                .items_center()
-                .child(super::affordance::inline_button(
-                    &id,
-                    Rc::new(move |_: &App| {
-                        target(TablePick::Cell { row, col }).unwrap_or_else(super::empty_target)
-                    }),
-                    cx,
-                ))
-                .into_any_element(),
-        )
+        let mut room = 0.;
+        let mut cells = 0;
+        for width in trailing {
+            if room >= ROW_BUTTON_SLOT + inset {
+                break;
+            }
+            room += width;
+            cells += 1;
+        }
+        cells
+    }
+
+    /// [`Self::row_end`] floating over the row at the frame's right inset, for a name that
+    /// leaves no room beside it: the last column reaches that inset at rest (§2.7), and the
+    /// cells under the button make way while it shows ([`Self::row_end_hides`]). Put it in a
+    /// row that is `relative`.
+    pub fn row_end_over(&self, row: usize, cx: &App) -> AnyElement {
+        div()
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .right(space::S12)
+            .flex()
+            .child(self.row_end(row, cx))
+            .into_any_element()
     }
 
     /// The slot at the end of a row: 问这里 for the hovered cell, at the row's right end
@@ -474,9 +499,9 @@ impl MarkdownPlugin for TablePlugin {
     }
 }
 
-/// Column width from its longest cell, in points.
-fn column_width(columns: &[String], rows: &[Vec<String>], col: usize) -> f32 {
-    let longest = std::iter::once(columns.get(col).map(String::as_str).unwrap_or(""))
+/// The length of a column's longest cell, in Latin letters (a CJK character is 1.8).
+fn column_length(columns: &[String], rows: &[Vec<String>], col: usize) -> f32 {
+    std::iter::once(columns.get(col).map(String::as_str).unwrap_or(""))
         .chain(
             rows.iter()
                 .map(|r| r.get(col).map(String::as_str).unwrap_or("")),
@@ -486,15 +511,31 @@ fn column_width(columns: &[String], rows: &[Vec<String>], col: usize) -> f32 {
                 .map(|ch| if ch.is_ascii() { 1.0 } else { 1.8 })
                 .sum::<f32>()
         })
-        .fold(0.0_f32, f32::max);
-    (longest * 7.0 + 24.0).clamp(64.0, 280.0)
+        .fold(0.0_f32, f32::max)
+}
+
+/// Column width from its longest cell, in points.
+fn column_width(columns: &[String], rows: &[Vec<String>], col: usize) -> f32 {
+    (column_length(columns, rows, col) * 7.0 + 24.0).clamp(64.0, 280.0)
+}
+
+/// The column that takes a table's free width: the text column with the longest content,
+/// the first of equals; with only number columns, the first.
+fn growing_column(columns: &[String], rows: &[Vec<String>], right: &[bool]) -> usize {
+    (0..columns.len())
+        .filter(|i| !right.get(*i).copied().unwrap_or(false))
+        .rev()
+        .max_by(|a, b| {
+            column_length(columns, rows, *a).total_cmp(&column_length(columns, rows, *b))
+        })
+        .unwrap_or(0)
 }
 
 /// A table (§2.7): a frame (radius 10, 1 px border), a header row h40 on the muted fill
 /// (12 medium muted, compact in a thread), rows h40 with a line between them, cells px 12
-/// (16 at the frame's edges). The first text column takes the free width, so the columns
-/// fill the frame; number columns keep the width of their longest value and never
-/// truncate. A table wider than the frame scrolls sideways inside it.
+/// (16 at the frame's edges). The text column with the longest content takes the free
+/// width, so the columns fill the frame; number columns keep the width of their longest
+/// value and never truncate. A table wider than the frame scrolls sideways inside it.
 pub fn table(
     key: &str,
     columns: &[String],
@@ -514,10 +555,7 @@ pub fn table(
         *w += NAME_ROOM;
     }
     let last = columns.len().saturating_sub(1);
-    // The column that takes the free width: the first one that is not a number column.
-    let grow = (0..columns.len())
-        .find(|i| !right.get(*i).copied().unwrap_or(false))
-        .unwrap_or(0);
+    let grow = growing_column(columns, rows, right);
     let cell = |text: String, i: usize, width: f32, right: bool| -> Div {
         div()
             .when(i == grow, |d| d.flex_1().min_w(px(width)))
@@ -534,11 +572,12 @@ pub fn table(
             .child(text)
     };
     let row_h = crate::ui::native::tokens::height::TABLE_ROW_COMPACT;
+    // The header's muted fill is a layer of the frame (below), not of this row: the row
+    // scrolls sideways with the table, and a clip does not follow the frame's radius.
     let mut header = div()
         .h(row_h)
         .flex()
         .items_center()
-        .bg(n.fill)
         .border_b_1()
         .border_color(n.separator)
         .t_meta_medium()
@@ -550,6 +589,9 @@ pub fn table(
             None => el.into_any_element(),
         });
     }
+    let frame_radius = crate::ui::native::tokens::radius::CONTAINER;
+    // The frame's radius less its 1 px border: what a fill inside it rounds to.
+    let inner_radius = frame_radius - px(1.);
     let count = rows.len();
     let body = rows.iter().enumerate().map(|(ri, row)| {
         let mut line = div()
@@ -557,6 +599,8 @@ pub fn table(
             .flex()
             .items_center()
             .when(ri + 1 < count, |d| d.border_b_1().border_color(n.separator))
+            // The last row's hover fill follows the frame's bottom corners.
+            .when(ri + 1 == count, |d| d.rounded_b(inner_radius))
             .t_small()
             .tnum()
             .text_color(n.label);
@@ -571,13 +615,18 @@ pub fn table(
                 .map(|w| w - f32::from(space::S16) - f32::from(space::S12));
             !right.first().copied().unwrap_or(false) && r.beside(&name, inner, window)
         });
+        let hides = refs.filter(|_| !beside).map_or(0, |r| {
+            let trailing = widths.iter().skip(1).rev().copied();
+            r.row_end_hides(ri, trailing, f32::from(space::S12), cx)
+        });
         for (ci, w) in widths.iter().enumerate() {
             let mut el = cell(
                 row.get(ci).cloned().unwrap_or_default(),
                 ci,
                 *w,
                 right.get(ci).copied().unwrap_or(false),
-            );
+            )
+            .when(ci + hides >= widths.len(), |d| d.opacity(0.));
             if ci == 0 && beside {
                 el = el.children(refs.and_then(|r| r.name_button(ri, 0., cx)));
             }
@@ -586,18 +635,29 @@ pub fn table(
                 None => el.into_any_element(),
             });
         }
-        if let Some(r) = refs {
-            line = line.children(r.row_end_overlay(ri, beside, cx));
+        if let Some(r) = refs.filter(|_| !beside) {
+            line = line.child(r.row_end_over(ri, cx));
         }
         line
     });
     div()
         .w_full()
         .my(space::S4)
-        .rounded(crate::ui::native::tokens::radius::CONTAINER)
+        .relative()
+        .rounded(frame_radius)
         .border_1()
         .border_color(n.separator)
         .overflow_hidden()
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .h(row_h)
+                .rounded_t(inner_radius)
+                .bg(n.fill),
+        )
         .child(
             div()
                 .id(ElementId::Name(format!("{key}-scroll").into()))

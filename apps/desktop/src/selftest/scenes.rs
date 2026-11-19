@@ -55,6 +55,9 @@ pub enum Start {
     /// The v2 sample team with a second member at work in 开发 / 虚拟列表
     /// (`fake::v2::V2Samples::with_second_run`).
     V2TwoRuns,
+    /// The v2 sample team with 产出 that are files of many kinds: a PDF, a video,
+    /// a table, a Markdown document, code (`fake::v2::V2Samples::with_file_artifacts`).
+    V2Files,
     // --- v13/ux-pages ---
     /// The v2 sample team's 群 with nothing synced yet, still connecting:
     /// the pages draw their skeletons (`selftest::page_states`).
@@ -273,6 +276,13 @@ pub const SCENES: &[Scene] = &[
         open: |services, content, cx| {
             open_login(services, content, "#joye@example.com 000000", false, cx)
         },
+    },
+    Scene {
+        name: "login-email-resent",
+        about: "The login view just after 重新发送: the line under the slots says so and the link counts down",
+        start: Start::SignedOut,
+        setup: |_, _| {},
+        open: |services, content, cx| open_login(services, content, "%joye@example.com", false, cx),
     },
     Scene {
         name: "offline",
@@ -517,6 +527,13 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::files::preview::open,
     },
     Scene {
+        name: "files-inline",
+        about: "A message with an attached table and Markdown notes: each shows in the viewer a 产出 of its kind gets, not a bare file row",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::files::preview::open_inline,
+    },
+    Scene {
         name: "files-menu",
         about: "The files scene with the image's context menu: 打开, 在访达中显示, 快速查看, 共享…, 存储为…",
         start: Start::SignedIn,
@@ -617,7 +634,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "group-menu",
-        about: "The menu of a 群 row in the sidebar (right-click): 静音, 提醒 ▸, 重命名群…, 添加成员, 离开群",
+        about: "The menu of a 群 row in the sidebar (right-click): 静音, 提醒 ▸, 重命名…, 添加成员, 离开群",
         start: Start::SignedIn,
         setup: open_first_topic,
         open: crate::views::nav::selftest::scenes::group_menu,
@@ -693,6 +710,13 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::search::preview::open_dialog,
     },
     Scene {
+        name: "search-artifact",
+        about: "⇧⌘F with 月报 typed on the v2 team: the 产出 section finds 10 月数据月报 by name, with its kind's symbol, version, 话题 and time",
+        start: Start::V2Files,
+        setup: |s, cx| s.nav.update(cx, |nav, cx| nav.open_desk(cx)),
+        open: crate::views::search::preview::open_artifact_dialog,
+    },
+    Scene {
         name: "search-hit",
         about: "A search hit 5,000 messages up opened in its 话题 and highlighted",
         start: Start::SignedIn,
@@ -742,6 +766,13 @@ pub const SCENES: &[Scene] = &[
         open: open_main,
     },
     Scene {
+        name: "process-failed-log",
+        about: "The 过程 tab of a failed bot run after 查看日志: the developer view, at the raw events",
+        start: Start::SignedIn,
+        setup: crate::views::process::preview::open_failed_log,
+        open: open_main,
+    },
+    Scene {
         name: "process-dev",
         about: "The 过程 tab with the developer view on: ids and raw events",
         start: Start::SignedIn,
@@ -764,8 +795,8 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "panel-plan",
-        about: "The side panel of the sample-card 话题: a plan list from a card",
-        start: Start::SignedIn,
+        about: "The side panel of a 话题 whose run works on a plan: the thread's working card carries the steps, the panel does not repeat them",
+        start: Start::V2,
         setup: crate::views::process::preview::open_plan_details,
         open: open_main,
     },
@@ -807,6 +838,41 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::timeline::preview::open_worst,
     },
     Scene {
+        name: "topic-code",
+        about: "An answer with rust, ts and diff fences: each names its language in the strip and is highlighted (keywords 600, strings text-2, comments text-3 italic, diff fills)",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::timeline::preview::open_code,
+    },
+    Scene {
+        name: "topic-code-fold",
+        about: "A 49-line code fence in an answer: its first 24 lines, the cut mark and 展开全部 49 行",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::timeline::preview::open_code_fold,
+    },
+    Scene {
+        name: "topic-code-fold-find",
+        about: "⌘F on a word past the cut of a folded code fence: the fence is shown whole, with 收起 in its strip",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::timeline::preview::open_code_fold_find,
+    },
+    Scene {
+        name: "topic-long-answer",
+        about: "A long answer of an AI member folded to its first blocks, with 展开全文 and the reading time",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::timeline::preview::open_long_answer,
+    },
+    Scene {
+        name: "topic-long-answer-open",
+        about: "The same answer opened: its end, with 收起",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::timeline::preview::open_long_answer_open,
+    },
+    Scene {
         name: "topic-react",
         about: "short-topic-* with the hover toolbar's emoji picker open (add reaction)",
         start: Start::SignedIn,
@@ -842,6 +908,20 @@ pub const SCENES: &[Scene] = &[
         setup: |_, _| {},
         open: |s, c, cx| embed_preview::open(s, c, EmbedMode::Covered, cx),
     },
+    Scene {
+        name: "web-embed-controls",
+        about: "产出 pages that set no style (a checklist inline, a form in the pane): the host base stylesheet draws their buttons, fields, checkboxes and progress",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| embed_preview::open(s, c, EmbedMode::Controls, cx),
+    },
+    Scene {
+        name: "web-embed-failed",
+        about: "web-embed with the inline page's load failed: the alert with 重试 in the page's place",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| embed_preview::open(s, c, EmbedMode::Failed, cx),
+    },
     // --- end web-embed ---
     // --- v11/media: 产出 media previews (v11/media) ---
     Scene {
@@ -868,6 +948,51 @@ pub const SCENES: &[Scene] = &[
                 s,
                 c,
                 MediaSample::from_name("media-markdown").expect("sample"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-markdown-find",
+        about: "⌘F in the Markdown reader: the find bar with seq typed, every match marked, the current one stronger, n / m",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open_finding(
+                s,
+                c,
+                MediaSample::from_name("media-markdown").expect("sample"),
+                Some("seq"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-markdown-find-code",
+        about: "⌘F in the Markdown reader on a word that is only in a code block: a band behind the part that holds the current match",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open_finding(
+                s,
+                c,
+                MediaSample::from_name("media-markdown").expect("sample"),
+                Some("lastAckedSeq"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-code-find",
+        about: "⌘F in the code viewer: the find bar with seq typed, the lines that hold a match filled, the current one stronger",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open_finding(
+                s,
+                c,
+                MediaSample::from_name("media-code").expect("sample"),
+                Some("seq"),
                 cx,
             )
         },
@@ -1021,6 +1146,7 @@ pub fn all() -> Vec<&'static Scene> {
         // --- end cards v2 track ---
         // --- inc-cards21 ---
         crate::views::cards::v21::scenes::SCENES,
+        crate::views::cards::v21::scenes::KEY_SCENES,
         // --- end inc-cards21 ---
         // --- inc-host track ---
         HOST_SCENES,
@@ -1060,7 +1186,7 @@ pub fn all() -> Vec<&'static Scene> {
 const CORE_SCENES: &[Scene] = &[
     Scene {
         name: "topic-core",
-        about: "话题 page on the real provider and a seeded cache: 改动 from the PR link, the pinned review, 产出 with its preview, 用到的决定 and 用时和成本",
+        about: "话题 page on the real provider and a seeded cache: 改动 from the PR link, the pinned review, 产出 with its preview, 用到的决定 and 用时和花费",
         start: Start::Core,
         setup: |s, cx| {
             v2_open_topic(
@@ -1350,10 +1476,13 @@ pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
     // --- end inc-refs ---
     match name {
         "files-quick-look-page" => Some(crate::views::files::preview::quick_look_settled),
+        "files-inline" => Some(crate::views::files::preview::inline_ready),
         "artifact-v2-leave" => Some(crate::views::artifact_page::scenes::left),
         "web-embed" => Some(|cx| embed_preview::ready(EmbedMode::Topic, cx)),
         "web-embed-scrolled" => Some(|cx| embed_preview::ready(EmbedMode::Scrolled, cx)),
         "web-embed-covered" => Some(|cx| embed_preview::ready(EmbedMode::Covered, cx)),
+        "web-embed-controls" => Some(|cx| embed_preview::ready(EmbedMode::Controls, cx)),
+        "web-embed-failed" => Some(|cx| embed_preview::ready(EmbedMode::Failed, cx)),
         // pages track: the 产出 page shows its live page.
         "artifact-v2" | "artifact-v2-old" | "artifact-pane-v2" => {
             Some(crate::views::artifact_page::scenes::ready)
@@ -1389,6 +1518,8 @@ pub fn verify_check(name: &str) -> Option<Verify> {
         "web-embed" => Some(|png, cx| embed_preview::verify(EmbedMode::Topic, png, cx)),
         "web-embed-scrolled" => Some(|png, cx| embed_preview::verify(EmbedMode::Scrolled, png, cx)),
         "web-embed-covered" => Some(|png, cx| embed_preview::verify(EmbedMode::Covered, png, cx)),
+        "web-embed-controls" => Some(|png, cx| embed_preview::verify(EmbedMode::Controls, png, cx)),
+        "web-embed-failed" => Some(|png, cx| embed_preview::verify(EmbedMode::Failed, png, cx)),
         // --- r2-trust ---
         "artifact-v2-choose" | "artifact-quiet-page" => {
             Some(crate::views::artifact_page::gate_check::verify)
@@ -1429,7 +1560,7 @@ fn media_ready(name: &str) -> Option<fn(&App) -> bool> {
         "media-html" => Some(|cx| {
             media_preview::ready(MediaSample::from_name("media-html").expect("sample"), cx)
         }),
-        "media-markdown" => Some(|cx| {
+        "media-markdown" | "media-markdown-find" | "media-markdown-find-code" => Some(|cx| {
             media_preview::ready(
                 MediaSample::from_name("media-markdown").expect("sample"),
                 cx,
@@ -1447,7 +1578,7 @@ fn media_ready(name: &str) -> Option<fn(&App) -> bool> {
         "media-pdf" => Some(|cx| {
             media_preview::ready(MediaSample::from_name("media-pdf").expect("sample"), cx)
         }),
-        "media-code" => Some(|cx| {
+        "media-code" | "media-code-find" => Some(|cx| {
             media_preview::ready(MediaSample::from_name("media-code").expect("sample"), cx)
         }),
         "media-table" => Some(|cx| {
@@ -1715,9 +1846,12 @@ pub fn open_login(
                 l.preview_server(WORST_SERVER, window, cx);
             }
             // `=` shows 用邮箱登录 with that address; `#address digits` the
-            // code step with those digits typed.
+            // code step with those digits typed; `%address` that step just
+            // after 重新发送.
             if let Some(email) = code.strip_prefix('=') {
                 l.preview_email(email, None, window, cx)
+            } else if let Some(email) = code.strip_prefix('%') {
+                l.preview_email_resent(email, window, cx)
             } else if let Some(rest) = code.strip_prefix('#') {
                 let (email, digits) = rest.split_once(' ').unwrap_or((rest, ""));
                 l.preview_email(email, Some(digits), window, cx)
@@ -1769,6 +1903,9 @@ fn worst_login_code(code: &'static str) -> &'static str {
         }
         "#joye@example.com 042" => {
             "#huang.deshiou.product-design-and-frontend@northwind-industries-holdings.example.com 042"
+        }
+        "%joye@example.com" => {
+            "%huang.deshiou.product-design-and-frontend@northwind-industries-holdings.example.com"
         }
         // A long code against a long host that cannot be reached.
         "@K7QM2X9A" => "@K7QM2X9ABC3D",

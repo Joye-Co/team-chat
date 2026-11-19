@@ -56,13 +56,16 @@ impl MessageExtra for ArtifactRefsExtra {
                         .member(author)
                         .map(|m| m.name.clone())
                         .unwrap_or_else(|| crate::copy::composer::UNKNOWN_MEMBER.to_string());
-                    let (kind, icon) = match d.summary.kind {
-                        // The kind symbol (NATIVE.md §6): a page is `doc.text`, an
-                        // image `photo`, any other file `doc`.
-                        ArtifactKind::Page => (ca::CARD_KIND_PAGE, Sym::Document),
-                        ArtifactKind::Image => (ca::CARD_KIND_FILE, Sym::Image),
-                        _ => (ca::CARD_KIND_FILE, Sym::File),
+                    let kind = match d.summary.kind {
+                        ArtifactKind::Page => ca::CARD_KIND_PAGE,
+                        _ => ca::CARD_KIND_FILE,
                     };
+                    // The symbol of the kind, the same on every screen.
+                    let icon = crate::views::artifact_page::list::ListKind::of(
+                        ctx.provider.as_ref(),
+                        &d.summary,
+                    )
+                    .sym();
                     let mut meta = format!(
                         "{kind} · {} · {name}",
                         fill(ca::VERSION_SHORT, &[("n", &r.version.to_string())])
@@ -202,6 +205,7 @@ fn media_preview(
         &message.id
     };
     let spec = inline::InlineSpec {
+        bare: false,
         key: MediaKey::new(r.artifact_id.clone(), r.version),
         kind,
         title: d.summary.title.clone(),

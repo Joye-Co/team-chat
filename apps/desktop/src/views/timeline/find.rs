@@ -61,15 +61,25 @@ pub fn install(cx: &mut App) {
         KeyBinding::new("shift-f3", FindPrevious, None),
     ]);
     cx.on_action(|_: &FindInTopic, cx| {
-        crate::views::nav::in_main_window(cx, |window, cx| {
+        crate::views::nav::in_shown_main_window(cx, |window, cx| {
             use gpui_component::WindowExt as _;
             if window.has_active_dialog(cx) {
                 return;
             }
             let services = crate::views::nav::services_of(cx);
-            let on_topic = services.nav.read(cx).page() == crate::app::Page::Topic;
+            let page = services.nav.read(cx).page();
+            // The 产出 list has its own search field in the toolbar: ⌘F
+            // goes there, as it goes to the find bar in a 话题.
+            if page == crate::app::Page::Artifacts
+                && let Some(root) = crate::app::root_view(window, cx)
+            {
+                let artifacts = root.read(cx).pages().artifact.clone();
+                if artifacts.update(cx, |list, cx| list.focus_search(window, cx)) {
+                    return;
+                }
+            }
             match timeline_of(window, cx) {
-                Some(timeline) if on_topic => {
+                Some(timeline) if page == crate::app::Page::Topic => {
                     timeline.update(cx, |this, cx| this.open_find(window, cx))
                 }
                 _ => crate::views::search::open(services, false, "", window, cx),
@@ -183,7 +193,15 @@ pub fn start_index(matches: &[FindMatch], top_row: usize) -> Option<usize> {
 /// The byte ranges of `source` that are code: fenced blocks (with their
 /// fence lines) and inline code spans (with their backticks).
 fn code_ranges(source: &str) -> Vec<Range<usize>> {
+    let (mut out, spans) = code_parts(source);
+    out.extend(spans);
+    out
+}
+
+/// The fenced lines of `source`, and its inline code spans with their backticks.
+fn code_parts(source: &str) -> (Vec<Range<usize>>, Vec<Range<usize>>) {
     let mut out = Vec::new();
+    let mut spans = Vec::new();
     let mut fenced = false;
     let mut at = 0;
     for line in source.split_inclusive('\n') {
@@ -202,12 +220,58 @@ fn code_ranges(source: &str) -> Vec<Range<usize>> {
         let mut open: Option<usize> = None;
         for (i, _) in line.match_indices('`') {
             match open.take() {
-                Some(o) => out.push(start + o..start + i + 1),
+                Some(o) => spans.push(start + o..start + i + 1),
                 None => open = Some(i),
             }
         }
     }
-    out
+    (out, spans)
+}
+
+/// The inline code span of `source` that holds `r` inside its backticks.
+fn span_of(spans: &[Range<usize>], r: &Range<usize>) -> Option<Range<usize>> {
+    spans
+        .iter()
+        .find(|s| s.start < r.start && r.end < s.end)
+        .cloned()
+}
+
+/// Inline code span `span` cut at its matches `hits`: the rest stays code and each match
+/// becomes a `<mark>` of plain text, since the code's own fill paints over a mark. Only
+/// the matched characters are marked. `None` when a piece could not stand on its own
+/// (blank, or spaces a span would strip).
+fn marked_span(source: &str, span: &Range<usize>, hits: &[(Range<usize>, Hsla)]) -> Option<String> {
+    let piece = |r: Range<usize>| -> Option<String> {
+        let text = &source[r];
+        (!text.trim().is_empty() && !(text.starts_with(' ') && text.ends_with(' ')))
+            .then(|| format!("`{text}`"))
+    };
+    let mut out = String::new();
+    let mut at = span.start + 1;
+    for (hit, color) in hits {
+        if hit.start > at {
+            out.push_str(&piece(at..hit.start)?);
+        }
+        let text = &source[hit.clone()];
+        if text.trim().is_empty() {
+            return None;
+        }
+        let escaped: String = text
+            .chars()
+            .flat_map(|c| {
+                c.is_ascii_punctuation()
+                    .then_some('\\')
+                    .into_iter()
+                    .chain([c])
+            })
+            .collect();
+        out.push_str(&format!("<mark color=\"{}\">{escaped}</mark>", hex(*color)));
+        at = hit.end;
+    }
+    if at < span.end - 1 {
+        out.push_str(&piece(at..span.end - 1)?);
+    }
+    Some(out)
 }
 
 /// Text a mark must not wrap: Markdown and HTML syntax, and line breaks.
@@ -252,11 +316,35 @@ pub fn mark_matches(
     strong: Hsla,
 ) -> (String, bool) {
     let code = code_ranges(source);
+    let (_, spans) = code_parts(source);
+    let color = |i: usize| if current == Some(i) { strong } else { other };
     let mut out = String::with_capacity(source.len() + ranges.len() * 32);
     let mut at = 0;
     let mut current_marked = false;
     for (i, r) in ranges.iter().enumerate() {
-        if r.start < at || r.end > source.len() || !markable(source, r, &code) {
+        if r.start < at || r.end > source.len() {
+            continue;
+        }
+        // Inline code: every match of the span is drawn with its first one.
+        if let Some(span) = span_of(&spans, r) {
+            let hits: Vec<(usize, Range<usize>)> = ranges
+                .iter()
+                .enumerate()
+                .skip(i)
+                .take_while(|(_, x)| x.end < span.end)
+                .map(|(j, x)| (j, x.clone()))
+                .collect();
+            let colored: Vec<(Range<usize>, Hsla)> =
+                hits.iter().map(|(j, x)| (x.clone(), color(*j))).collect();
+            if let Some(marked) = marked_span(source, &span, &colored) {
+                current_marked |= hits.iter().any(|(j, _)| current == Some(*j));
+                out.push_str(&source[at..span.start]);
+                out.push_str(&marked);
+                at = span.end;
+            }
+            continue;
+        }
+        if !markable(source, r, &code) {
             continue;
         }
         let is_current = current == Some(i);
@@ -271,6 +359,113 @@ pub fn mark_matches(
     }
     out.push_str(&source[at..]);
     (out, current_marked)
+}
+
+/// A code fence of a body.
+struct Fence {
+    /// Its code, as a byte range of the body, without the line break before the closing
+    /// fence. A fence that is not closed runs to the end of the body.
+    code: Range<usize>,
+    /// A diagram fence is drawn, not listed.
+    diagram: bool,
+}
+
+/// The code fences of `source`, by the rules the fold of a long fence goes by.
+fn fences(source: &str) -> Vec<Fence> {
+    let fence = |code: Range<usize>, diagram: bool| Fence {
+        code: code.start..code.start + source[code].trim_end_matches(['\n', '\r']).len(),
+        diagram,
+    };
+    let mut out = Vec::new();
+    let mut open = None;
+    let mut at = 0;
+    for line in source.split_inclusive('\n') {
+        let start = at;
+        at += line.len();
+        match open {
+            Some((ch, run, from, diagram)) if crate::markdown::fold::fence_close(line, ch, run) => {
+                out.push(fence(from..start, diagram));
+                open = None;
+            }
+            Some(_) => {}
+            None => {
+                open = crate::markdown::fold::fence_open(line)
+                    .map(|(ch, run, info)| (ch, run, at, crate::diagrams::is_diagram_info(info)));
+            }
+        }
+    }
+    out.extend(open.map(|(_, _, from, diagram)| fence(from..source.len(), diagram)));
+    out
+}
+
+/// The matches of `ranges` inside the code fences of `source`, for the code highlighter
+/// (a `<mark>` cannot go inside a fence; a diagram fence is drawn, so its matches are left
+/// out), and whether the current match is among them.
+pub fn fence_marks(
+    source: &str,
+    ranges: &[Range<usize>],
+    current: Option<usize>,
+    other: Hsla,
+    strong: Hsla,
+) -> (Vec<crate::markdown::CodeMark>, bool) {
+    let mut current_marked = false;
+    let marks = fences(source)
+        .into_iter()
+        .filter(|fence| !fence.diagram)
+        .filter_map(|Fence { code, .. }| {
+            let spans: Vec<(Range<usize>, Hsla)> = ranges
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| code.start <= r.start && r.end <= code.end)
+                .map(|(i, r)| {
+                    current_marked |= current == Some(i);
+                    let color = if current == Some(i) { strong } else { other };
+                    (r.start - code.start..r.end - code.start, color)
+                })
+                .collect();
+            (!spans.is_empty()).then(|| crate::markdown::CodeMark {
+                code: source[code].to_string(),
+                spans,
+            })
+        })
+        .collect();
+    (marks, current_marked)
+}
+
+/// How far down its row's body the code line at byte `at` of `source` lies, when `at` is
+/// in a listed code fence: text lines wrapped at the text column, then the code lines. An
+/// estimate, good enough to bring the line near the middle of the list.
+fn fence_line_top(source: &str, at: usize) -> Option<gpui::Pixels> {
+    use crate::{
+        theme::type_scale::MESSAGE,
+        ui::native::{
+            metrics::{CODE_BLOCK_ONE_LINE_PAD, CODE_BLOCK_STRIP},
+            tokens::text,
+        },
+    };
+    let code = fences(source)
+        .into_iter()
+        .find(|f| !f.diagram && f.code.contains(&at))?
+        .code;
+    let column = f32::from(v2::TEXT_MAX);
+    let text_lines: f32 = source[..code.start]
+        .lines()
+        .map(|line| {
+            let width: f32 = line
+                .chars()
+                .map(|c| if c.is_ascii() { 0.55 } else { 1. })
+                .sum::<f32>()
+                * f32::from(MESSAGE.0);
+            (width / column).ceil().max(1.)
+        })
+        .sum();
+    let code_lines = source[code.start..at].matches('\n').count() as f32;
+    let first_line = if crate::markdown::code_is_one_line(&source[code.clone()]) {
+        CODE_BLOCK_ONE_LINE_PAD
+    } else {
+        CODE_BLOCK_STRIP
+    };
+    Some(MESSAGE.1 * text_lines + first_line + text::MONO.1 * code_lines)
 }
 
 /// `#RRGGBBAA` of a color, for a `<mark color>`.
@@ -436,9 +631,10 @@ impl TimelineView {
         }
     }
 
-    /// Every match of `query` in the loaded messages, oldest first. Recalled
-    /// messages and rows drawn in place of their body (cards, special rows)
-    /// are left out: their body text is not on screen.
+    /// Every match of `query` in the bodies of the loaded messages, oldest
+    /// first. Recalled messages, rows drawn in place of their body (cards,
+    /// special rows) and file names are not searched: the bar says so
+    /// ([`t::FIND_SCOPE`]).
     fn collect_matches(&self, query: &str) -> Vec<FindMatch> {
         let ctx = extras::ExtrasContext {
             provider: &self.services.provider,
@@ -489,20 +685,33 @@ impl TimelineView {
         }
     }
 
-    /// Scrolls the current match's row into view.
+    /// Scrolls the current match's row into view and, for a match down a
+    /// long code fence, that line to the middle of the list: the row alone
+    /// can be taller than the list.
     fn reveal_find(&mut self) {
-        let Some(row) = self
+        let Some(found) = self
             .find
             .as_ref()
             .and_then(|f| f.current.and_then(|i| f.matches.get(i)))
-            .map(|m| m.row)
+            .cloned()
         else {
             return;
         };
         // Freeze the tail: the list follows the newest message again once
         // the person scrolls back down.
         self.list.pause_following_tail();
-        self.list.scroll_to_reveal_item(row);
+        self.list.scroll_to_reveal_item(found.row);
+        let middle = self.list.viewport_bounds().size.height / 2.;
+        let top = self.messages.get(found.row).and_then(|m| {
+            let body = crate::views::refs::chips::shown_body(m, &self.services.provider);
+            fence_line_top(body, found.range.start)
+        });
+        if let Some(top) = top.filter(|top| *top > middle) {
+            self.list.scroll_to(gpui::ListOffset {
+                item_ix: found.row,
+                offset_in_item: top - middle,
+            });
+        }
     }
 
     /// The matches on row `key`, for its body marks.
@@ -521,25 +730,22 @@ impl TimelineView {
         (!ranges.is_empty()).then_some(RowFind { ranges, current })
     }
 
-    /// `body` with the find marks of row `key`, and whether the row holds
-    /// the current match that could not be marked in the text (in code, a
-    /// link): the row then shows the current match with a band.
+    /// `body` with the find marks of row `key`, the marks of its code
+    /// fences, and whether the row holds the current match that could not be
+    /// marked (a link): the row then shows the current match with a band.
     pub(super) fn find_marked_body(
         &self,
         key: &str,
         body: &str,
         cx: &App,
-    ) -> Option<(String, bool)> {
+    ) -> Option<(String, Vec<crate::markdown::CodeMark>, bool)> {
         let row = self.row_find(key)?;
         let palette = theme::colors(cx).palette;
-        let (marked, current_marked) = mark_matches(
-            body,
-            &row.ranges,
-            row.current,
-            crate::ui::native::tokens::find::match_fill(&palette),
-            crate::ui::native::tokens::find::current_fill(&palette),
-        );
-        Some((marked, row.current.is_some() && !current_marked))
+        let other = crate::ui::native::tokens::find::match_fill(&palette);
+        let strong = crate::ui::native::tokens::find::current_fill(&palette);
+        let (marked, in_text) = mark_matches(body, &row.ranges, row.current, other, strong);
+        let (code, in_code) = fence_marks(body, &row.ranges, row.current, other, strong);
+        Some((marked, code, row.current.is_some() && !in_text && !in_code))
     }
 
     /// The row holds the current match.
@@ -552,8 +758,8 @@ impl TimelineView {
     /// count, the previous and next match and 完成 on one center line.
     pub(super) fn render_find_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         use crate::ui::native::{
-            IconSize, NativeType as _, PushSize, PushStyle, SearchField, disabled_push,
-            icon_button_sym, native_colors, push_button, tokens,
+            IconSize, NativeType as _, SearchField, disabled_push, icon_button_sym, native_colors,
+            tokens,
         };
         let find = self.find.as_ref()?;
         let n = native_colors(cx);
@@ -604,16 +810,30 @@ impl TimelineView {
                     }
                 }))
                 .child(
+                    // The sm field: the bar is h40 (§2.17), and the h32 field's
+                    // focus ring would touch the lines above and below it.
                     SearchField::new("find-field", &find.input)
+                        .small()
                         .width(tokens::size::FIND_FIELD_WIDTH),
                 )
                 .children(count.map(|count| {
                     div()
                         .flex_none()
-                        .n_body()
+                        .n_footnote()
                         .tnum()
                         .text_color(n.secondary)
                         .child(count)
+                }))
+                // A word on screen in a card or a file name is not a match:
+                // the count must not read as the whole 话题. It gives way
+                // first in a narrow window: the step buttons stay.
+                .children((!find.query.is_empty()).then(|| {
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .n_footnote()
+                        .text_color(n.tertiary)
+                        .child(t::FIND_SCOPE)
                 }))
                 .child(div().flex_1())
                 .child(
@@ -624,12 +844,14 @@ impl TimelineView {
                     step("find-next", Sym::ChevronDown, t::FIND_NEXT, cx)
                         .on_click(cx.listener(|this, _, _, cx| this.step_find(true, cx))),
                 )
+                // §2.17: close is the 28 ghost icon button; 完成 is the word of
+                // a done 话题 and never a button of this bar.
                 .child(
-                    push_button(
+                    icon_button_sym(
                         "find-done",
-                        t::FIND_DONE,
-                        PushStyle::Outline,
-                        PushSize::Regular,
+                        Sym::Close,
+                        crate::copy::common::CLOSE,
+                        IconSize::Regular,
                         cx,
                     )
                     .on_click(cx.listener(|this, _, window, cx| this.close_find(window, cx))),
@@ -763,9 +985,15 @@ mod tests {
     fn code_links_and_mentions_stay_unmarked() {
         let src = "seq in `seq` and\n```\nseq\n```\n[seq](https://x/seq) @seq";
         let (out, current) = marks(src, "seq", Some(1));
-        // Only the first, plain match is marked; the current one is in code.
-        assert_eq!(out.matches("<mark").count(), 1);
-        assert!(out.starts_with("<mark color=\"#0000001A\">seq</mark> in `seq`"));
+        // The plain match and the inline code are marked, the current one in code.
+        assert_eq!(out.matches("<mark").count(), 2);
+        assert!(out.starts_with(
+            "<mark color=\"#0000001A\">seq</mark> in <mark color=\"#00000047\">seq</mark> and"
+        ));
+        assert!(current);
+        // A match in a fence is left to the code highlighter.
+        let (out, current) = marks(src, "seq", Some(2));
+        assert!(out.contains("```\nseq\n```"));
         assert!(!current);
         // A match at the start of a list or heading line keeps its marker.
         let (out, _) = marks("1. one\n# two", "1.", None);
@@ -773,6 +1001,61 @@ mod tests {
         // Text across Markdown syntax is not wrapped.
         let (out, _) = marks("a **bold** b", "a **b", None);
         assert!(!out.contains("<mark"));
+    }
+
+    #[test]
+    fn inline_code_marks_only_the_matched_characters() {
+        let (out, current) = marks("按 `seq_no` 去重", "seq", Some(0));
+        assert_eq!(out, "按 <mark color=\"#00000047\">seq</mark>`_no` 去重");
+        assert!(current);
+        // Two matches of one span keep their own colors.
+        let (out, _) = marks("`a-a`", "a", Some(1));
+        assert_eq!(
+            out,
+            "<mark color=\"#0000001A\">a</mark>`-`<mark color=\"#00000047\">a</mark>"
+        );
+    }
+
+    #[test]
+    fn fence_matches_are_found_inside_the_code() {
+        let other: Hsla = gpui::rgba(0x0000001A).into();
+        let strong: Hsla = gpui::rgba(0x00000047).into();
+        let src = "seq\n```rust\nlet seq = 1;\n```\n";
+        let ranges = match_ranges(src, "seq");
+        let (code, current) = fence_marks(src, &ranges, Some(1), other, strong);
+        assert!(current);
+        assert_eq!(code.len(), 1);
+        assert_eq!(code[0].code, "let seq = 1;");
+        assert_eq!(code[0].spans, vec![(4..7, strong)]);
+        assert!(fence_line_top(src, ranges[1].start).is_some());
+        assert!(fence_line_top(src, ranges[0].start).is_none());
+    }
+
+    #[test]
+    fn a_diagram_fence_holds_no_marks_and_an_open_fence_does() {
+        let other: Hsla = gpui::rgba(0x0000001A).into();
+        let strong: Hsla = gpui::rgba(0x00000047).into();
+        let src = "```mermaid\ngraph seq\n```\n\n```\nseq\n";
+        let ranges = match_ranges(src, "seq");
+        // The current match is the diagram's: it is not painted, so the row gets a band.
+        let (code, current) = fence_marks(src, &ranges, Some(0), other, strong);
+        assert!(!current);
+        assert_eq!(code.len(), 1);
+        assert_eq!(code[0].code, "seq");
+        assert_eq!(code[0].spans, vec![(0..3, other)]);
+        assert!(fence_line_top(src, ranges[0].start).is_none());
+        assert!(fence_line_top(src, ranges[1].start).is_some());
+    }
+
+    #[test]
+    fn a_longer_fence_keeps_a_shorter_fence_line_as_its_code() {
+        let other: Hsla = gpui::rgba(0x0000001A).into();
+        let strong: Hsla = gpui::rgba(0x00000047).into();
+        let src = "````md\n```\nseq\n```\n````\n";
+        let ranges = match_ranges(src, "seq");
+        let (code, _) = fence_marks(src, &ranges, None, other, strong);
+        assert_eq!(code[0].code, "```\nseq\n```");
+        assert_eq!(code[0].spans, vec![(4..7, other)]);
     }
 
     /// ⌘F in the sample 话题: 重连 is found in the loaded messages, Return

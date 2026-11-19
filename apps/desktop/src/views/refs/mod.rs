@@ -264,6 +264,8 @@ pub struct RefsHub {
     pub part_focus: Option<(String, String)>,
     /// Scenes: the block that shows keyboard focus without a key press.
     pub forced_focus: Option<String>,
+    /// The sent messages (timeline row keys) whose `引用了 n 处` list is open.
+    pub open_sent_refs: std::collections::HashSet<String>,
 }
 
 /// What views listen to.
@@ -274,6 +276,8 @@ pub enum RefsEvent {
     Added(DraftKey),
     /// The chips of a 单独问 composer changed.
     SideChanged(SideKey),
+    /// The `引用了 n 处` list of this timeline row opened or folded: its height changed.
+    SentRefsToggled(String),
 }
 
 impl EventEmitter<RefsEvent> for RefsHub {}
@@ -292,6 +296,15 @@ pub fn hub(cx: &mut App) -> Entity<RefsHub> {
 }
 
 impl RefsHub {
+    /// Opens or folds the `引用了 n 处` list of the timeline row `key`.
+    pub fn toggle_sent_refs(&mut self, key: String, cx: &mut Context<Self>) {
+        if !self.open_sent_refs.remove(&key) {
+            self.open_sent_refs.insert(key.clone());
+        }
+        cx.emit(RefsEvent::SentRefsToggled(key));
+        cx.notify();
+    }
+
     /// The address flashes now (and for [`FLASH`]).
     pub fn flash(&mut self, address: String, cx: &mut Context<Self>) {
         self.flash = Some((address, Instant::now()));

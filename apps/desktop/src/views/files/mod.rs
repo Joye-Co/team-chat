@@ -315,6 +315,32 @@ pub enum OpenAction {
     RevealInFinder,
 }
 
+/// Downloads the picture when needed, then copies it (拷贝图片 of its context menu).
+pub fn copy_picture(
+    provider: &Arc<dyn ChatProvider>,
+    group_id: &str,
+    topic_id: &str,
+    file: &FileAttachment,
+    cx: &mut App,
+) {
+    let rx = provider.fetch_file(group_id, topic_id, file);
+    let file = file.clone();
+    cx.spawn(async move |cx: &mut AsyncApp| {
+        let result = rx.await.unwrap_or(Err(FileError::Other));
+        cx.update(|cx| match result {
+            Ok(path) => crate::views::media::parts::copy_image_file(&path, cx),
+            Err(error) => notify_error(
+                fill(
+                    f::OPEN_FAILED,
+                    &[("name", &file.name), ("reason", error_text(error))],
+                ),
+                cx,
+            ),
+        })
+    })
+    .detach();
+}
+
 /// Downloads the file when needed, then opens it or shows it in Finder.
 pub fn open_file(
     provider: &Arc<dyn ChatProvider>,

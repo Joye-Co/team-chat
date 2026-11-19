@@ -55,20 +55,12 @@ pub const LEADING: Pixels = crate::ui::native::tokens::space::S24;
 /// attachments, plan cards and embeds are min(640, text column).
 pub const TEXT_MAX: Pixels = crate::ui::native::tokens::layout::IN_THREAD;
 
-/// The date divider label: `11 月 3 日 周一`.
+/// The date divider label: `11月3日 周一`.
 pub fn date_label(at: crate::data::Millis) -> String {
     let Some(day) = model::local_day(at) else {
         return String::new();
     };
-    let w = match day.weekday() {
-        chrono::Weekday::Mon => c::WEEKDAY_1,
-        chrono::Weekday::Tue => c::WEEKDAY_2,
-        chrono::Weekday::Wed => c::WEEKDAY_3,
-        chrono::Weekday::Thu => c::WEEKDAY_4,
-        chrono::Weekday::Fri => c::WEEKDAY_5,
-        chrono::Weekday::Sat => c::WEEKDAY_6,
-        chrono::Weekday::Sun => c::WEEKDAY_7,
-    };
+    let w = crate::copy::weekday(day.weekday());
     fill(
         c::DATE_FULL,
         &[
@@ -601,12 +593,20 @@ impl TimelineView {
             else {
                 continue;
             };
-            let kind = p
+            let listed = p
                 .artifacts(&message.group_id, &message.topic_id)
                 .into_iter()
-                .find(|a| a.id == *artifact_id)
-                .map(|a| kind_text(a.kind))
-                .unwrap_or(c::KIND_PAGE);
+                .find(|a| a.id == *artifact_id);
+            let in_pane = crate::views::artifacts::host::version_in_pane(
+                artifact_id,
+                Some(*version),
+                listed.as_ref().map_or(*version, |a| a.version),
+                cx,
+            );
+            let glyph = listed.as_ref().map_or(Sym::Document, |a| {
+                crate::views::artifact_page::list::ListKind::of(p.as_ref(), a).sym()
+            });
+            let kind = listed.map(|a| kind_text(a.kind)).unwrap_or(c::KIND_PAGE);
             let pane = RightPane::Artifact {
                 id: artifact_id.clone(),
                 version: Some(*version),
@@ -616,7 +616,7 @@ impl TimelineView {
                     ElementId::Name(format!("v2-out-{key}-{artifact_id}").into()),
                     cx,
                 )
-                .child(ui::sym(Sym::Document, ui::SymSize::INLINE, n.secondary))
+                .child(ui::sym(glyph, ui::SymSize::INLINE, n.secondary))
                 .child(
                     div()
                         .min_w_0()
@@ -636,11 +636,15 @@ impl TimelineView {
                         )),
                 )
                 .child(div().flex_1())
-                .child(open_arrow(
-                    ElementId::Name(format!("v2-out-open-{key}-{artifact_id}").into()),
-                    c::OPEN_OUTPUT,
-                    cx,
-                ))
+                .child(if in_pane {
+                    crate::views::artifacts::host::in_pane_label(cx).into_any_element()
+                } else {
+                    open_arrow(
+                        ElementId::Name(format!("v2-out-open-{key}-{artifact_id}").into()),
+                        c::OPEN_OUTPUT,
+                        cx,
+                    )
+                })
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     let pane = pane.clone();
                     this.services
@@ -667,16 +671,13 @@ impl TimelineView {
             crate::ui::native::BadgeState::Done,
             crate::copy::common::STATUS_DELIVERED,
         ));
-        // §2.4 compact in-thread card: the one width, radius 14, a 1 px
-        // border, the card fill, shadow-sm, p 16.
-        let card = div()
+        // §2.4 compact in-thread card on the one card surface (v18: radius
+        // 14, the card fill, shadow sm and the 6 % ring, no 1 px border),
+        // the one width, p 16. In dark its ring is the border color, as on every other
+        // card of the thread.
+        let card = crate::ui::native::blocks::panel_card_surface(cx)
             .w_full()
             .max_w(TEXT_MAX)
-            .rounded(crate::ui::native::tokens::radius::CARD)
-            .border_1()
-            .border_color(n.separator)
-            .bg(n.sheet)
-            .shadow(crate::ui::native::tokens::shadow::sm())
             .overflow_hidden()
             .p(space::S16)
             .flex()
@@ -685,7 +686,8 @@ impl TimelineView {
             .child(
                 div()
                     .mt(space::S4)
-                    .n_title3()
+                    .n_headline()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(n.label)
                     .child(title),
             )
@@ -737,7 +739,12 @@ impl TimelineView {
     /// The v2 file cards of a message whose files are not images: a 72x44
     /// thumbnail (a dark screen with a play mark for a video), the name and
     /// the mono length and size.
-    pub(super) fn v2_files(&self, message: &Message, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn v2_files(
+        &self,
+        message: &Message,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         if message.attachments.is_empty()
             || message
                 .attachments
@@ -748,6 +755,23 @@ impl TimelineView {
         }
         let n = native_colors(cx);
         let p = self.services.provider.clone();
+        // A file the app can show (a table, a document, code, a PDF, a video,
+        // audio) gets the viewer a 产出 of its kind gets (`files::extra`).
+        let mut previews: Vec<Option<AnyElement>> = message
+            .attachments
+            .iter()
+            .enumerate()
+            .map(|(i, file)| {
+                crate::views::files::extra::inline_viewer(
+                    message,
+                    file,
+                    &p,
+                    format!("v2-file-media-{}-{i}", message.id),
+                    window,
+                    cx,
+                )
+            })
+            .collect();
         Some(
             div()
                 .mt(space::S6)
@@ -755,6 +779,9 @@ impl TimelineView {
                 .flex_col()
                 .gap(space::S8)
                 .children(message.attachments.iter().enumerate().map(|(i, file)| {
+                    if let Some(preview) = previews[i].take() {
+                        return preview;
+                    }
                     let video = file.mime.starts_with("video/") || file.mime.starts_with("audio/");
                     // T-20, §2.17: one meta recipe for every file item,
                     // `<kind> · <size>` (a transfer adds its state).
@@ -834,6 +861,7 @@ impl TimelineView {
                                 cx,
                             );
                         }))
+                        .into_any_element()
                 }))
                 .into_any_element(),
         )
