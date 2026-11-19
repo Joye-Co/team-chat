@@ -55,6 +55,9 @@ pub enum Start {
     /// The v2 sample team with a second member at work in 开发 / 虚拟列表
     /// (`fake::v2::V2Samples::with_second_run`).
     V2TwoRuns,
+    /// The v2 sample team with 产出 that are files of many kinds: a PDF, a video,
+    /// a table, a Markdown document, code (`fake::v2::V2Samples::with_file_artifacts`).
+    V2Files,
     // --- v13/ux-pages ---
     /// The v2 sample team's 群 with nothing synced yet, still connecting:
     /// the pages draw their skeletons (`selftest::page_states`).
@@ -877,6 +880,20 @@ pub const SCENES: &[Scene] = &[
         setup: |_, _| {},
         open: |s, c, cx| embed_preview::open(s, c, EmbedMode::Covered, cx),
     },
+    Scene {
+        name: "web-embed-controls",
+        about: "产出 pages that set no style (a checklist inline, a form in the pane): the host base stylesheet draws their buttons, fields, checkboxes and progress",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| embed_preview::open(s, c, EmbedMode::Controls, cx),
+    },
+    Scene {
+        name: "web-embed-failed",
+        about: "web-embed with the inline page's load failed: the alert with 重试 in the page's place",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| embed_preview::open(s, c, EmbedMode::Failed, cx),
+    },
     // --- end web-embed ---
     // --- v11/media: 产出 media previews (v11/media) ---
     Scene {
@@ -1386,6 +1403,8 @@ pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
         "web-embed" => Some(|cx| embed_preview::ready(EmbedMode::Topic, cx)),
         "web-embed-scrolled" => Some(|cx| embed_preview::ready(EmbedMode::Scrolled, cx)),
         "web-embed-covered" => Some(|cx| embed_preview::ready(EmbedMode::Covered, cx)),
+        "web-embed-controls" => Some(|cx| embed_preview::ready(EmbedMode::Controls, cx)),
+        "web-embed-failed" => Some(|cx| embed_preview::ready(EmbedMode::Failed, cx)),
         // pages track: the 产出 page shows its live page.
         "artifact-v2" | "artifact-v2-old" | "artifact-pane-v2" => {
             Some(crate::views::artifact_page::scenes::ready)
@@ -1421,6 +1440,8 @@ pub fn verify_check(name: &str) -> Option<Verify> {
         "web-embed" => Some(|png, cx| embed_preview::verify(EmbedMode::Topic, png, cx)),
         "web-embed-scrolled" => Some(|png, cx| embed_preview::verify(EmbedMode::Scrolled, png, cx)),
         "web-embed-covered" => Some(|png, cx| embed_preview::verify(EmbedMode::Covered, png, cx)),
+        "web-embed-controls" => Some(|png, cx| embed_preview::verify(EmbedMode::Controls, png, cx)),
+        "web-embed-failed" => Some(|png, cx| embed_preview::verify(EmbedMode::Failed, png, cx)),
         // --- r2-trust ---
         "artifact-v2-choose" | "artifact-quiet-page" => {
             Some(crate::views::artifact_page::gate_check::verify)

@@ -2946,8 +2946,13 @@ impl ChatProvider for V2Samples {
         &self,
         artifact_id: &str,
         _version: u32,
-    ) -> futures::channel::oneshot::Receiver<Option<(serde_json::Value, u64)>> {
+    ) -> futures::channel::oneshot::Receiver<crate::data::page_host::PageData> {
         let (tx, rx) = futures::channel::oneshot::channel();
+        #[cfg(test)]
+        if page_data_reads::fails() {
+            let _ = tx.send(Err(crate::data::page_host::PageDataError));
+            return rx;
+        }
         let data = (artifact_id == ART_REPORT).then(|| {
             (
                 serde_json::json!({
@@ -2960,7 +2965,7 @@ impl ChatProvider for V2Samples {
                 1,
             )
         });
-        let _ = tx.send(data);
+        let _ = tx.send(Ok(data));
         rx
     }
     fn file_poster(
@@ -3185,6 +3190,37 @@ impl ChatProvider for V2Samples {
             .unwrap_or_else(|e| e.into_inner())
             .push(tx);
         rx
+    }
+}
+
+/// Unit tests of the page host: how many of the next data reads fail (no network).
+#[cfg(test)]
+pub mod page_data_reads {
+    use std::cell::Cell;
+
+    thread_local! {
+        static FAILING: Cell<u32> = const { Cell::new(0) };
+        static READS: Cell<u32> = const { Cell::new(0) };
+    }
+
+    /// The next `n` reads on this thread fail.
+    pub fn fail_next(n: u32) {
+        FAILING.with(|f| f.set(n));
+        READS.with(|r| r.set(0));
+    }
+
+    /// Reads asked for on this thread since [`fail_next`].
+    pub fn count() -> u32 {
+        READS.with(|r| r.get())
+    }
+
+    pub(super) fn fails() -> bool {
+        READS.with(|r| r.set(r.get() + 1));
+        FAILING.with(|f| {
+            let left = f.get();
+            f.set(left.saturating_sub(1));
+            left > 0
+        })
     }
 }
 
