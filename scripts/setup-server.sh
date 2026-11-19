@@ -46,7 +46,7 @@ while [ $# -gt 0 ]; do
     --worker) WORKER="${2:-}"; [ -n "$WORKER" ] || die "--worker needs a name"; shift 2 ;;
     --d1) D1_NAME="${2:-}"; [ -n "$D1_NAME" ] || die "--d1 needs a name"; shift 2 ;;
     --bucket) BUCKET="${2:-}"; [ -n "$BUCKET" ] || die "--bucket needs a name"; shift 2 ;;
-    -h | --help) sed -n '2,29p' "$0"; exit 0 ;;
+    -h | --help) usage; exit 0 ;;
     -*) die "unknown option $1 (see scripts/setup-server.sh --help)" ;;
     *) [ -z "$ENV_NAME" ] || die "more than one env given"; ENV_NAME="$1"; shift ;;
   esac
@@ -97,7 +97,7 @@ fi
 cd "$ROOT/server"
 whoami_json="$(wrangler whoami --json 2>/dev/null | json_part || true)"
 if [ "$(printf '%s' "$whoami_json" | jq -r '.loggedIn // false' 2>/dev/null)" != true ]; then
-  die "wrangler is not signed in to Cloudflare: run 'cd server && bunx wrangler login --device' (or set CLOUDFLARE_API_TOKEN, see docs/SELF-HOSTING.md step 2), then run this again"
+  die "wrangler is not signed in to Cloudflare: run 'cd server && bunx wrangler login --device' (or set CLOUDFLARE_API_TOKEN, see docs/SELF-HOSTING.md step 3.4), then run this again"
 fi
 accounts="$(printf '%s' "$whoami_json" | jq -r '.accounts | length' 2>/dev/null || echo 0)"
 if [ "${accounts:-0}" -gt 1 ] && [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
@@ -282,5 +282,5 @@ step "9. next step"
   printf '  1. install the app from the GitHub releases page\n'
   printf '  2. at sign-in, choose 使用其他服务器… and enter %s\n' "$BASE"
   printf '  3. enter the sign-in code\n'
-  printf '  4. 设置 › 机器 › 用这台电脑\n'
+  printf '  4. 设置 › 电脑 › 用这台电脑\n'
 } >&2
