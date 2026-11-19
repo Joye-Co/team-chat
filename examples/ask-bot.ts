@@ -8,15 +8,10 @@
 //   bun examples/ask-bot.ts
 //
 // Optional: CHAT_STATE_FILE (default: <token file>.state.json), LOG_LEVEL (debug|info|warn|error).
-import { homedir } from "node:os";
 import { Bot, decisionCard, type LogLevel } from "../packages/bot-sdk/src/index.ts";
 
-function expand(path: string): string {
-  return path.startsWith("~/") ? `${homedir()}${path.slice(1)}` : path;
-}
-
 const url = process.env.CHAT_URL;
-const tokenFile = process.env.CHAT_TOKEN_FILE && expand(process.env.CHAT_TOKEN_FILE);
+const tokenFile = process.env.CHAT_TOKEN_FILE;
 if (!url || !tokenFile) {
   console.error("set CHAT_URL and CHAT_TOKEN_FILE");
   process.exit(2);
@@ -24,8 +19,8 @@ if (!url || !tokenFile) {
 
 const bot = new Bot({
   url,
-  tokenFile,
-  stateFile: expand(process.env.CHAT_STATE_FILE ?? `${tokenFile}.state.json`),
+  tokenFile, // the SDK reads a leading ~ as the home folder, here and in stateFile
+  stateFile: process.env.CHAT_STATE_FILE ?? `${tokenFile}.state.json`,
   client: { name: "ask-bot", version: "1.1.0" },
   logLevel: (process.env.LOG_LEVEL as LogLevel | undefined) ?? "info",
 });
@@ -55,21 +50,21 @@ bot.onMention(async (ctx) => {
 
 bot.onCardAnswer<{ choice: string }>(async (ctx) => {
   await ctx.markAnswered(); // the card shows as answered: a higher rev and no buttons
-  const target = { groupId: ctx.groupId, topicId: ctx.topicId };
   if (ctx.cancelled) {
-    await bot.done(target, { title: "不做了", summary: "按你的意思,先不做。" });
+    await ctx.done({ title: "不做了", summary: "按你的意思,先不做。" });
     await ctx.updateTopic({ status: "done", waitingOn: [] });
     return;
   }
   const plan = ctx.choice() === "full" ? "完整版" : "简单版";
   await ctx.updateTopic({ status: "in_progress", waitingOn: [] });
-  await bot.setPlan(target, [
+  await ctx.setPlan([
     { text: "读需求", state: "done" },
     { text: "等你选方案", state: "done" },
     { text: `做${plan}`, state: "current" },
   ]);
   // ... do the work here ...
-  await bot.done(target, {
+  // ctx.done has a stable id: when this handler runs again after a crash, the card is not posted twice.
+  await ctx.done({
     title: "做完了",
     summary: `${plan}做好了。`,
     evidence: [{ label: "测试全部通过", state: "pass" }],

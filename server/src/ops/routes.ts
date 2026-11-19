@@ -17,10 +17,10 @@
 //   POST /v1/admin/revocations                 apply such a list again (after a D1 restore)
 import { z } from "zod";
 import { audit } from "../core/audit";
-import { timingSafeEqualString } from "../core/crypto";
+import { requireAdmin } from "../core/auth";
 import { type Env, gatewayStub, roomStub } from "../core/env";
 import { ApiError, unwrap } from "../core/errors";
-import { readText } from "../core/http";
+import { issueText, readText } from "../core/http";
 import { type ArchivedEvent, registerRoute } from "../core/registry";
 import { archiveStatus, runArchive, supersedeAfter } from "./archive";
 import { gunzip } from "./gzip";
@@ -70,13 +70,6 @@ type FileRecordD1 = {
   created_by: string;
   created_at: number;
 };
-
-export async function requireAdmin(request: Request, env: Env): Promise<void> {
-  const given = request.headers.get("x-admin-secret") ?? "";
-  const expected = env.ADMIN_SECRET ?? "";
-  const ok = await timingSafeEqualString(given, expected);
-  if (!expected || !ok) throw new ApiError("unauthorized", "invalid admin secret");
-}
 
 const ArchivedEventSchema = z.object({
   seq: z.int().positive(),
@@ -259,7 +252,7 @@ export function registerOpsRoutes(): void {
         throw new ApiError("invalid", "body is not a gzip JSON state snapshot");
       }
       const parsed = StateSnapshot.safeParse(snap);
-      if (!parsed.success) throw new ApiError("invalid", "invalid state snapshot");
+      if (!parsed.success) throw new ApiError("invalid", `invalid state snapshot: ${issueText(parsed.error)}`);
       const r = unwrap(await roomStub(env, params.id).rpc(params.id, "ops.importState", null, parsed.data)) as { rows: number };
       await audit(env.DB, null, { action: "admin.import.groupState", target: params.id, details: { rows: r.rows } });
       return { groupId: params.id, rows: r.rows };
@@ -281,7 +274,7 @@ export function registerOpsRoutes(): void {
         throw new ApiError("invalid", "body is not a gzip JSON gateway snapshot");
       }
       const parsed = GatewaySnapshot.safeParse(snap);
-      if (!parsed.success) throw new ApiError("invalid", "invalid gateway snapshot");
+      if (!parsed.success) throw new ApiError("invalid", `invalid gateway snapshot: ${issueText(parsed.error)}`);
       const member = await env.DB.prepare("SELECT id FROM members WHERE id = ?").bind(params.id).first<{ id: string }>();
       if (!member) throw new ApiError("not_found", "no such member");
       const r = (await gatewayStub(env, params.id).rpc("ops.importGateway", parsed.data)) as { rows: number };
@@ -524,7 +517,7 @@ export function registerOpsRoutes(): void {
         throw new ApiError("invalid", "body is not valid JSON");
       }
       const parsed = D1Chunk.safeParse(raw);
-      if (!parsed.success) throw new ApiError("invalid", "invalid D1 chunk");
+      if (!parsed.success) throw new ApiError("invalid", `invalid D1 chunk: ${issueText(parsed.error)}`);
       const { table, columns, rows } = parsed.data;
       if (table === "d1_migrations" || table.startsWith("ops_")) throw new ApiError("invalid", "table is not restorable");
       if (!(await tableNames(env)).includes(table)) throw new ApiError("not_found", `no table ${table} in target`);

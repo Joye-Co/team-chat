@@ -94,33 +94,33 @@ LINUX_DAEMON=""
 ALLOW_MISSING_ROUTE=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --env) ENV_NAME="${2:-}"; shift 2 ;;
+    --env) ENV_NAME="$(opt_value "$@")"; shift 2 ;;
     --env=*) ENV_NAME="${1#*=}"; shift ;;
-    --notes) NOTES="${2:-}"; shift 2 ;;
+    --notes) NOTES="$(opt_value "$@")"; shift 2 ;;
     --notes=*) NOTES="${1#*=}"; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     --upload-only) UPLOAD_ONLY=1; shift ;;
-    --platform) PLATFORM="${2:-}"; shift 2 ;;
+    --platform) PLATFORM="$(opt_value "$@")"; shift 2 ;;
     --platform=*) PLATFORM="${1#*=}"; shift ;;
     --build) BUILD=1; shift ;;
-    --windows-installer) WINDOWS_INSTALLER="${2:-}"; shift 2 ;;
+    --windows-installer) WINDOWS_INSTALLER="$(opt_value "$@")"; shift 2 ;;
     --windows-installer=*) WINDOWS_INSTALLER="${1#*=}"; shift ;;
     --without-windows) WITHOUT_WINDOWS=1; shift ;;
     --resume) RESUME=1; shift ;;
     --build-only) BUILD_ONLY=1; shift ;;
-    --prebuilt) PREBUILT="${2:-}"; shift 2 ;;
+    --prebuilt) PREBUILT="$(opt_value "$@")"; shift 2 ;;
     --prebuilt=*) PREBUILT="${1#*=}"; shift ;;
-    --linux-daemon) LINUX_DAEMON="${2:-}"; shift 2 ;;
+    --linux-daemon) LINUX_DAEMON="$(opt_value "$@")"; shift 2 ;;
     --linux-daemon=*) LINUX_DAEMON="${1#*=}"; shift ;;
     --reupload) REUPLOAD=1; shift ;;
     --allow-missing-route) ALLOW_MISSING_ROUTE=1; shift ;;
-    --add-windows) ADD_WINDOWS="${2:-}"; shift 2 ;;
+    --add-windows) ADD_WINDOWS="$(opt_value "$@")"; shift 2 ;;
     --add-windows=*) ADD_WINDOWS="${1#*=}"; shift ;;
-    --asset) ASSETS+=("${2:-}"); shift 2 ;;
+    --asset) ASSETS+=("$(opt_value "$@")"); shift 2 ;;
     --asset=*) ASSETS+=("${1#*=}"); shift ;;
-    --same-as) SAME_AS="${2:-}"; shift 2 ;;
+    --same-as) SAME_AS="$(opt_value "$@")"; shift 2 ;;
     --same-as=*) SAME_AS="${1#*=}"; shift ;;
-    -h | --help) sed -n '2,71p' "$0"; exit 0 ;;
+    -h | --help) usage; exit 0 ;;
     -*) die "unknown option: $1" ;;
     *) [ -z "$VERSION" ] || die "more than one version given"; VERSION="$1"; shift ;;
   esac

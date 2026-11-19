@@ -12,7 +12,7 @@ process group);
 "chatrun" runs `chat-run card patch` from PATH and writes its exit code, output and the socket's
 mode to chatrun-<n>.json; "artifact" writes page/index.html and page/app.js and runs
 `chat-run artifact create --title 看板 --dir page`, writing its result to chatrun-<n>.json;
-"chatcard" reads `chat-run card schema`, posts a card built from it with `chat-run card post`,
+"chatcard" reads `chat-run card schema --full`, posts a card built from it with `chat-run card post`,
 posts it again (a retry: the idempotency key gives the same message), patches the posted card
 with `chat-run card patch` at its rev and writes each answer to chatcard-<n>.json;
 "gated" calls the Bash tool with `gh pr merge 12 --squash` and `ls` ("gated twice": and
@@ -32,6 +32,8 @@ working folder (relayfail-<k>.done marks it); "relaystall:<k>" sleeps like "hang
 "readback" runs the read commands `chat-run member list`, `topic state` and `artifact list`
 (with "topic:<id>", of that topic), `artifact get --id <first listed>`, `decisions list` and, with "card:<message id>", `card get`,
 and writes each answer to readback.json.
+"pagedata" makes a page with data, pushes on, off and on again, adds a version with --keep-data
+and one without, reads each and writes the answers to pagedata.json.
 "groupsread find:<word>" runs `chat-run group list` and `chat-run search --query <word> --all`
 (every group the run may read) and writes both answers to groupsread.json.
 "stalenote" first clears a notification left from the session before like Claude Code after a
@@ -181,6 +183,9 @@ while True:
     # The daemon's hand-back note after a take-over is no request ("changes" has "hang").
     if text.startswith("[team-chat] A person held"):
         cue = ""
+    # The line after an event envelope says how to answer it; it is no request either
+    # ("Nothing to change" has "hang", "artifact data" has "artifact").
+    cue = re.split(r"</[a-z]+-event>\n", cue, maxsplit=1)[0]
     session.write(json.dumps({"type": "user", "text": text}) + "\n"); session.flush()
     with open(os.path.join(rec, "prompts.jsonl"), "a") as pf:
         pf.write(json.dumps({"pid": os.getpid(), "sid": sid, "n": n + 1, "text": text}) + "\n")
@@ -214,6 +219,25 @@ while True:
         if card:
             got["card"] = chat_run("card", "get", "--message", card.group(1))
         open("readback.json", "w").write(json.dumps(got))
+    if "pagedata" in cue:
+        os.makedirs("datapage", exist_ok=True)
+        open("datapage/index.html", "w").write("<!doctype html><p>data</p>")
+        open("on.json", "w").write('{"done": true}')
+        open("off.json", "w").write('{"done": false}')
+        made = chat_run("artifact", "create", "--title", "数据页", "--dir", "datapage", "--data", "on.json")
+        aid = ((made["out"] or {}).get("artifact") or {}).get("id", "none")
+        at = ["--artifact", aid]
+        push = lambda f: chat_run("artifact", "data", *at, "--version", "1", "--file", f)
+        got = {"create": made, "on": push("on.json"), "off": push("off.json")}
+        time.sleep(1.1)
+        got["onAgain"] = push("on.json")
+        got["read"] = chat_run("artifact", "data", *at, "--version", "1")
+        got["both"] = chat_run("artifact", "version", *at, "--dir", "datapage", "--keep-data", "--data", "on.json")
+        got["keep"] = chat_run("artifact", "version", *at, "--dir", "datapage", "--keep-data")
+        got["kept"] = chat_run("artifact", "data", *at, "--version", "2")
+        got["plain"] = chat_run("artifact", "version", *at, "--dir", "datapage")
+        got["empty"] = chat_run("artifact", "data", *at, "--version", "3")
+        open("pagedata.json", "w").write(json.dumps(got))
     if "groupsread" in cue:
         word = re.search(r"find:(\S+)", cue)
         got = {"groups": chat_run("group", "list"),
@@ -304,8 +328,8 @@ while True:
             except ValueError:
                 v = None
             return {"code": r.returncode, "out": v, "err": r.stderr[-400:]}
-        schema = run("card", "schema")["out"] or {}
-        kinds = [b["properties"]["type"]["const"] for b in schema.get("properties", {}).get("blocks", {}).get("items", {}).get("oneOf", [])]
+        schema = run("card", "schema", "--full")["out"] or {}
+        kinds = [b["$ref"].rsplit("/", 1)[-1] for b in schema.get("$defs", {}).get("block", {}).get("oneOf", [])]
         card = {"v": 2, "rev": 1, "title": "chat-run card", "fallback": "chat-run card", "intent": "working", "blocks": [{"type": kinds[0], "id": "note", "text": "working"}]}
         card = {k: v for k, v in card.items() if k in schema.get("properties", {})}
         assert all(k in card for k in schema.get("required", [])), schema.get("required")

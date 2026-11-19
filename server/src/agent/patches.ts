@@ -46,4 +46,13 @@ export const PATCHES: PromptPatch[] = [
     addedWith: "claude-opus-5-5 / gpt-6",
     added: "M3",
   },
+  {
+    id: "P5-result-form",
+    where:
+      "server/src/bots/dispatch.ts RESULT_FORM_RULE and ACCEPTANCE_RULE (a `pass` needs a url, a fileId or an artifact); server/src/agent/frontdesk.ts brief.notes (the form of the result) and systemPrompt (a `mermaid` fence is drawn); apps/daemon/src/chat_run.rs note() (\"Choose the form before you answer\")",
+    why: "Members answered with long text where the product has cards and 产出; the work order never named the form, and the acceptance example taught evidence that is shown as a claim.",
+    failure: "a comparison, a plan or a report posted as a wall of text; `pass` items with text evidence shown as 声称",
+    addedWith: "claude-opus-5-5 / gpt-6",
+    added: "1.3",
+  },
 ];

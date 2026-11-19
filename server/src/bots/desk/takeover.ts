@@ -79,7 +79,7 @@ export abstract class DeskTakeover extends DeskInput {
         if (r.paused_by) throw new ApiError("conflict", "the run is paused", "run.held");
         if (!m || !hasFeature(m, "pause")) throw new ApiError("conflict", "the run's machine cannot pause runs", "run.no_pause");
         const sent = await linkStub(this.env, r.machine_id as string).toRun({ t: "run.pause", runId, by: actor.id } as never);
-        if (!sent.ok) throw new ApiError("conflict", "the run is not open on its machine");
+        if (!sent.ok) throw new ApiError("conflict", "the run is not open on its machine", "run.no_machine");
         const now = Date.now();
         // A new pause generation: a `paused: false` sent before the daemon took this pause does
         // not clear it (events.ts).
@@ -122,7 +122,7 @@ export abstract class DeskTakeover extends DeskInput {
           throw new ApiError("forbidden", "only the owner of a personal machine, the requester on an isolated team machine, or a person alone in the team takes over a run");
         }
         const sent = await linkStub(this.env, r.machine_id as string).toRun({ t: "run.pause", runId, by: actor.id, hold: "takeover" } as never);
-        if (!sent.ok) throw new ApiError("conflict", "the run is not open on its machine");
+        if (!sent.ok) throw new ApiError("conflict", "the run is not open on its machine", "run.no_machine");
         const now = Date.now();
         // From a pause the CLI has been stopped since then: the hold keeps its start and reminders.
         const upgrade = r.paused_by !== null;
@@ -375,7 +375,7 @@ export abstract class DeskTakeover extends DeskInput {
         bucket = new TokenBucket(PLAN_RATE.rate, PLAN_RATE.burst);
         this.acceptanceBuckets.set(runId, bucket);
       }
-      if (!bucket.take()) throw new ApiError("rate_limited", "too many acceptance updates for this run");
+      if (!bucket.take()) throw new ApiError("rate_limited", "too many acceptance updates for this run", undefined, bucket.waitMs());
       return this.serial(runId, async () => {
         const r = this.run(runId);
         if (!r) throw new ApiError("not_found", "run not found");

@@ -374,6 +374,8 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
     let mut session_file: Option<PathBuf> = None;
     // `thread/resume` failed and the first turn got `spec.full_prompt`.
     let mut resume_missed = false;
+    // `thread/resume` failed: the thread of the first turn is a new one.
+    let mut lost = false;
     let mut turn_running = false;
     let mut active_turn: Option<String> = None;
     let mut queued: VecDeque<String> = VecDeque::new();
@@ -451,6 +453,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                                 // The thread is gone (another CODEX_HOME, removed): a new one.
                                 Pending::ThreadResume { params } => {
                                     resume_missed = spec.full_prompt.is_some();
+                                    lost = true;
                                     let id = ids.next_id();
                                     pending.insert(id, Pending::ThreadStart);
                                     let _ = p.write_json(&json!({ "id": id, "method": "thread/start", "params": params })).await;
@@ -512,11 +515,14 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                                 let id = ids.next_id();
                                 pending.insert(id, Pending::TurnStart);
                                 turn_running = true;
+                                // A new thread instead of the old one: the whole prompt, or
+                                // the short one with the word that the rest is not remembered.
                                 let text = match &spec.full_prompt {
-                                    Some(full) if resume_missed => full,
-                                    _ => &spec.prompt,
+                                    Some(full) if lost => full.clone(),
+                                    None if lost => super::lost_session_prompt(&spec.prompt),
+                                    _ => spec.prompt.clone(),
                                 };
-                                let params = turn_start_params(&tid, text, spec.effort.as_deref());
+                                let params = turn_start_params(&tid, &text, spec.effort.as_deref());
                                 let _ = p.write_json(&json!({ "id": id, "method": "turn/start", "params": params })).await;
                             }
                             Pending::TurnStart => {

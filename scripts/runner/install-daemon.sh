@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Installs the machine daemon of a Linux host from a GitHub release: the asset
 # <slug>-daemon-<version>-x86_64-unknown-linux-gnu, checked against the SHA-256 digest GitHub
-# keeps for it. Only when the release has no Linux daemon (or this is not x86_64) it builds the
-# daemon from this checkout with scripts/build-daemon.sh, which needs cargo.
+# keeps for it. Only when the release has no Linux daemon, the repository has no release yet
+# (with --version latest) or this is not x86_64, it builds the daemon from this checkout with
+# scripts/build-daemon.sh, which needs cargo. A release that was named and is not there, and
+# a GitHub that cannot be reached or answers anything else, stop the script: it never installs
+# another version than the one asked for.
 #
 # The new file is written next to the old one and renamed over it, so a running daemon keeps
 # its runs: it sees the new file and restarts on it once no run is active. Afterwards the
@@ -30,10 +33,16 @@ dest=""
 owner="$(id -un)"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --version) version="${2:-}"; shift 2 ;;
-    --dest) dest="${2:-}"; shift 2 ;;
-    --owner) owner="${2:-}"; shift 2 ;;
-    -h | --help) sed -n '2,20p' "$0"; exit 0 ;;
+    --version | --dest | --owner)
+      [ $# -ge 2 ] && [ -n "$2" ] || die "$1 needs a value"
+      case "$1" in
+        --version) version="$2" ;;
+        --dest) dest="$2" ;;
+        --owner) owner="$2" ;;
+      esac
+      shift 2
+      ;;
+    -h | --help) sed -n '2,23p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -114,14 +123,24 @@ service_hint() {
 url="" digest=""
 if [ "${DAEMON_ARCH:-$(uname -m)}" = x86_64 ] && [ -n "$repo" ]; then
   if [ "$version" = latest ]; then what="releases/latest"; else what="releases/tags/v$version"; fi
-  if curl -fsSL --max-time 60 -H 'Accept: application/vnd.github+json' -o "$tmp/release.json" "$api/repos/$repo/$what"; then
-    pattern="^${slug//./\\.}-daemon-[0-9]+\\.[0-9]+\\.[0-9]+-x86_64-unknown-linux-gnu\$"
-    url="$(jq -r --arg p "$pattern" 'first(.assets[]? | select(.name | test($p))) | .browser_download_url // empty' "$tmp/release.json")"
-    digest="$(jq -r --arg p "$pattern" 'first(.assets[]? | select(.name | test($p))) | .digest // empty' "$tmp/release.json")"
-    tag="$(jq -r '.tag_name // empty' "$tmp/release.json")"
-  else
-    log "no release $version in $repo"
-  fi
+  # The HTTP status says why there is no release to read: 000 is curl's own failure.
+  status="$(curl -sSL --max-time 60 -H 'Accept: application/vnd.github+json' -o "$tmp/release.json" \
+    -w '%{http_code}' "$api/repos/$repo/$what" 2>"$tmp/curl.err")" || status=000
+  case "$status" in
+    200)
+      pattern="^${slug//./\\.}-daemon-[0-9]+\\.[0-9]+\\.[0-9]+-x86_64-unknown-linux-gnu\$"
+      url="$(jq -r --arg p "$pattern" 'first(.assets[]? | select(.name | test($p))) | .browser_download_url // empty' "$tmp/release.json")"
+      digest="$(jq -r --arg p "$pattern" 'first(.assets[]? | select(.name | test($p))) | .digest // empty' "$tmp/release.json")"
+      tag="$(jq -r '.tag_name // empty' "$tmp/release.json")"
+      ;;
+    404)
+      [ "$version" = latest ] || die "no release v$version in $repo"
+      log "no release yet in $repo"
+      ;;
+    000) die "cannot reach $api: $(sed -n '1p' "$tmp/curl.err")" ;;
+    403 | 429) die "GitHub answered HTTP $status for $repo (its rate limit, most likely: try again later)" ;;
+    *) die "GitHub answered HTTP $status for $api/repos/$repo/$what" ;;
+  esac
 fi
 
 if [ -n "$url" ]; then
@@ -148,7 +167,7 @@ command -v cargo >/dev/null 2>&1 || [ -x "$HOME/.cargo/bin/cargo" ] ||
   die "no released Linux daemon${repo:+ in $repo} and no cargo to build one; install Rust (rustup) or name a release with --version"
 log "no released Linux daemon; building it from $root"
 built="$(DIST="$tmp/dist" "$root/scripts/build-daemon.sh" | tail -n 1)"
-(cd "$(dirname "$built")" && shasum -a 256 -c "$(basename "$built").sha256" >/dev/null) || die "the built daemon does not match its .sha256"
+(cd "$(dirname "$built")" && sha256sum -c "$(basename "$built").sha256" >/dev/null) || die "the built daemon does not match its .sha256"
 put "$built"
 log "installed the daemon built from this checkout at $dest"
 service_hint

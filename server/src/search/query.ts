@@ -3,6 +3,7 @@ import { MAX_SEARCH_LIMIT, MAX_QUERY_CHARS, MAX_SNIPPET_CHARS, type SearchHit } 
 import { makeSnippet } from "@chat/search";
 import { z } from "zod";
 import { ApiError } from "../core/errors";
+import { issueText } from "../core/http";
 import type { RoomContext } from "../core/registry";
 import { TITLE_PREFIX, ensureBackfilled, searchIndex } from "./indexer";
 
@@ -40,7 +41,7 @@ type TopicRow = { id: string; title: string; created_by: string; created_at: num
 /** Newest first. Deleted messages are never returned; a title match points at the root message. */
 export async function searchRoom(room: RoomContext, rawArgs: unknown): Promise<SearchHit[]> {
   const parsed = RoomSearchArgs.safeParse(rawArgs);
-  if (!parsed.success) throw new ApiError("invalid", "invalid search arguments");
+  if (!parsed.success) throw new ApiError("invalid", `invalid search arguments: ${issueText(parsed.error)}`);
   const args = parsed.data;
   const limit = args.limit ?? DEFAULT_LIMIT;
   await ensureBackfilled(room);

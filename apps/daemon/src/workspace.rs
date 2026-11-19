@@ -395,20 +395,18 @@ fn move_aside(kept: &Path, src: &Path, label: &str) -> bool {
     let to = kept.join(format!("{label}-{}", now_ms()));
     match crate::sys::create_private_dir(kept).and_then(|_| std::fs::rename(src, &to)) {
         Ok(()) => {
-            eprintln!(
-                "{} cleanup: moved {} to {} to keep its files",
-                now_ms(),
+            crate::problems::log(format_args!(
+                "cleanup: moved {} to {} to keep its files",
                 src.display(),
                 to.display()
-            );
+            ));
             true
         }
         Err(e) => {
-            eprintln!(
-                "{} cleanup: {} not moved aside: {e}",
-                now_ms(),
+            crate::problems::log(format_args!(
+                "cleanup: {} not moved aside: {e}",
                 src.display()
-            );
+            ));
             false
         }
     }
@@ -635,7 +633,7 @@ async fn remove_stale_index_lock(work: &Path) {
         let p = PathBuf::from(p);
         let p = if p.is_absolute() { p } else { work.join(p) };
         if std::fs::remove_file(&p).is_ok() {
-            eprintln!("{} cleanup: removed a stale {}", now_ms(), p.display());
+            crate::problems::log(format_args!("cleanup: removed a stale {}", p.display()));
         }
     }
 }
@@ -659,17 +657,15 @@ async fn remove_worktree(
             res = keep_uncommitted(work, branch).await;
         }
         match res {
-            Ok(true) => eprintln!(
-                "{} cleanup: {what} had uncommitted changes; committed them to {}",
-                now_ms(),
+            Ok(true) => crate::problems::log(format_args!(
+                "cleanup: {what} had uncommitted changes; committed them to {}",
                 branch.unwrap_or("its branch")
-            ),
+            )),
             Ok(false) => {}
             Err(e) => {
-                eprintln!(
-                    "{} cleanup: {what}: its uncommitted changes could not be committed ({e})",
-                    now_ms()
-                );
+                crate::problems::log(format_args!(
+                    "cleanup: {what}: its uncommitted changes could not be committed ({e})"
+                ));
                 if !move_aside(kept, work, label) {
                     return false;
                 }
@@ -683,16 +679,14 @@ async fn remove_worktree(
             Ok(0) => {
                 let _ = git(Some(git_dir), &["branch", "-D", b]).await;
             }
-            Ok(n) => eprintln!(
-                "{} cleanup: kept branch {b} in {} ({n} commits not pushed)",
-                now_ms(),
+            Ok(n) => crate::problems::log(format_args!(
+                "cleanup: kept branch {b} in {} ({n} commits not pushed)",
                 git_dir.display()
-            ),
-            Err(e) => eprintln!(
-                "{} cleanup: kept branch {b} in {} ({e})",
-                now_ms(),
+            )),
+            Err(e) => crate::problems::log(format_args!(
+                "cleanup: kept branch {b} in {} ({e})",
                 git_dir.display()
-            ),
+            )),
         }
     }
     let _ = git(Some(git_dir), &["worktree", "prune"]).await;
@@ -805,12 +799,11 @@ pub fn set_read_only(dir: &Path, read_only: bool) {
         if dir.is_dir()
             && let Err(e) = crate::winacl::set_read_only(dir, read_only)
         {
-            eprintln!(
-                "{} {} not made {}: {e}",
-                now_ms(),
+            crate::problems::log(format_args!(
+                "{} not made {}: {e}",
                 dir.display(),
                 if read_only { "read-only" } else { "writable" }
-            );
+            ));
         }
     }
     #[cfg(not(windows))]
@@ -956,11 +949,10 @@ async fn remove_dir(dir: &Path) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
             Err(e) if n == tries => {
                 if cfg!(windows) {
-                    eprintln!(
-                        "{} cleanup: {} not removed yet: {e}",
-                        now_ms(),
+                    crate::problems::log(format_args!(
+                        "cleanup: {} not removed yet: {e}",
                         dir.display()
-                    );
+                    ));
                 }
             }
             Err(_) => tokio::time::sleep(Duration::from_millis(300)).await,
@@ -1095,11 +1087,10 @@ async fn cleanup_legacy_at(cfg: &Config, cutoff: u64, dev: fn(&Path) -> Option<u
             }
             remove_dir(&p).await;
             if !p.exists() {
-                eprintln!(
-                    "{} cleanup: removed the old folder {}",
-                    now_ms(),
+                crate::problems::log(format_args!(
+                    "cleanup: removed the old folder {}",
                     p.display()
-                );
+                ));
                 removed += 1;
             }
         }
@@ -1154,7 +1145,10 @@ async fn cleanup_kept(cfg: &Config) -> usize {
         }
         set_read_only(&path, false);
         remove_dir(&path).await;
-        eprintln!("{} cleanup: disk low, removed {}", now_ms(), path.display());
+        crate::problems::log(format_args!(
+            "cleanup: disk low, removed {}",
+            path.display()
+        ));
         removed += 1;
     }
     removed

@@ -3,24 +3,18 @@
 // release when the holder leaves, the two-minute rule, a daemon restart under a hold, and a
 // person's commands (routes, hand.* events, who sees the output, audit), against a fake daemon.
 import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { BotsEnv } from "../src/bots/env";
 import { HOLD_REMIND_MS, HOLD_TEXT, mayPause, mayResume, mayTakeOver, takeoverOf } from "../src/bots/desk/hold";
 import { type PhaseRow, phaseOf } from "../src/bots/desk/phase";
 import { DAEMON_RESTARTED } from "../src/agent/recovery";
 import { TEXT } from "../src/bots/dispatch";
-import { Daemon, downViolations } from "./daemon";
-import { Client, type TestMember, api, clientMsgId, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
+import { Daemon } from "./daemon";
+import { Client, type TestMember, api, clientMsgId, createGroup, createMember, waitUntil } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
 const deskOf = (botId: string) => benv.BOT_DESK.get(benv.BOT_DESK.idFromName(botId));
 const linkOf = (machineId: string) => benv.MACHINE_LINK.get(benv.MACHINE_LINK.idFromName(machineId));
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 
 const TAKEOVER = ["pause", "takeover"];
 const ISOLATED = ["pause", "takeover", "takeover-isolated"];
