@@ -4,6 +4,7 @@
 // docs/plans/usable/design-visibility.zh.md 3.3).
 import {
   type Artifact,
+  type ArtifactDataResponse,
   type ArtifactResponse,
   type ContextHit,
   type ContextMessage,
@@ -27,6 +28,7 @@ import { machineRun } from "../bots/routes";
 import { memberInfo } from "../bots/room";
 import { deskStub } from "../bots/env";
 import { runIndex } from "../bots/store";
+import { ARTIFACT_GET_DATA_RPC } from "../files/bridge";
 import { fileKey } from "../files/routes";
 import { serveObject } from "../files/store";
 import { newestFirst, ROOM_SEARCH_RPC } from "../search/frame";
@@ -356,6 +358,24 @@ export function registerContextRoutes(): void {
         }
       }
       return out;
+    },
+  });
+
+  // `chat-run artifact data` without `--file`: the current data of a 产出 version and its rev,
+  // so a run can change a shared page's state without remembering it from an earlier turn.
+  registerRoute({
+    method: "GET",
+    path: "/v1/machine/runs/:id/artifacts/:artifactId/data",
+    auth: "none",
+    async handler({ request, env, params, url }) {
+      const rd = await reader(request, env, params.id);
+      if (!ID_RE.test(params.artifactId)) throw new ApiError("invalid", "artifactId must be an id");
+      const version = intParam(url, "version", 1, 1_000_000_000, undefined);
+      if (version === undefined) throw new ApiError("invalid", "version is required");
+      // Page data is the state of a page the run's member works on: its own group only.
+      const ix = await env.DB.prepare("SELECT group_id FROM artifacts WHERE id = ?").bind(params.artifactId).first<{ group_id: string }>();
+      if (ix && ix.group_id !== rd.run.group_id) throw new ApiError("forbidden", "page data is read in the run's own group");
+      return (await readRoom(env, rd, rd.run.group_id, ARTIFACT_GET_DATA_RPC, { artifactId: params.artifactId, version })) as ArtifactDataResponse;
     },
   });
 

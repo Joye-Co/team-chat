@@ -51,7 +51,7 @@ export function buildMonitor(input: {
   const health = status?.health;
   const info = status?.info;
   const botOf = new Map<string, string>((link?.runBots ?? []).map((r) => [r.runId, r.botId]));
-  const deskRun = new Map<string, { status: string; paused: boolean; startedAt: number | null; botId: string }>();
+  const deskRun = new Map<string, { status: string; paused: boolean; startedAt: number | null; botId: string; groupId?: string; topicId?: string }>();
   for (const d of desks) for (const a of d.rollup.active) deskRun.set(a.runId, { ...a, botId: d.botId });
 
   // Runs on the machine: the daemon's VMs when it reports them, else the server's open runs.
@@ -64,12 +64,17 @@ export function buildMonitor(input: {
     if (d?.status === "waiting") return "waiting";
     return "running";
   };
+  const topicOf = (runId: string) => {
+    const d = deskRun.get(runId);
+    return d?.groupId && d.topicId ? { groupId: d.groupId, topicId: d.topicId } : {};
+  };
   for (const v of metrics?.runs ?? []) {
     seen.add(v.runId);
     const memberId = botOf.get(v.runId) ?? deskRun.get(v.runId)?.botId;
     runs.push({
       runId: v.runId,
       ...(memberId ? { memberId } : {}),
+      ...topicOf(v.runId),
       state: stateOf(v.runId, v.phase),
       startedAt: v.startedAt,
       ...(v.bootMs !== undefined ? { bootMs: v.bootMs } : {}),
@@ -83,7 +88,7 @@ export function buildMonitor(input: {
   for (const [runId, d] of deskRun) {
     if (seen.has(runId)) continue;
     seen.add(runId);
-    runs.push({ runId, memberId: d.botId, state: stateOf(runId, metrics ? "booting" : undefined), ...(d.startedAt ? { startedAt: d.startedAt } : {}) });
+    runs.push({ runId, memberId: d.botId, ...topicOf(runId), state: stateOf(runId, metrics ? "booting" : undefined), ...(d.startedAt ? { startedAt: d.startedAt } : {}) });
   }
   let queueOldest: number | undefined;
   let queueCount = 0;

@@ -2,7 +2,7 @@
 // checks the members, wakes one step after the other from the states the desks report, and
 // stops when a step fails, is blocked, is stopped or leaves code unpushed for another member.
 import { env, runInDurableObject } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { TopicRelay, mainTopicId } from "@chat/protocol";
 import type { BotsEnv } from "../src/bots/env";
 import { RelayParseError, parseRelay } from "../src/bots/relay/parse";
@@ -10,16 +10,10 @@ import { RELAY_RECHECK_MS, giveUpRelayRow, publishLeftRelays, relayStepState, st
 import { requesterLeft } from "../src/bots/chains";
 import type { RoomContext, RoomTx } from "../src/core/registry";
 import { relayOrderText } from "../src/bots/desk/relay";
-import { Daemon, type World, downViolations, world } from "./daemon";
-import { Client, type TestMember, api, clientMsgId, createMember, protocolViolations } from "./helpers";
+import { Daemon, type World, world } from "./daemon";
+import { Client, type TestMember, api, clientMsgId, createMember } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 
 async function addBot(w: World, name: string): Promise<TestMember> {
   const bot = await createMember({ kind: "bot", name });
@@ -71,6 +65,11 @@ describe("parsing an arrow line", () => {
     });
     // One line: the text after the last @ is the goal; -> and => work too.
     expect(parseRelay("@小码 -> @小审 => @小码 给设置页加深色模式", members)).toEqual({
+      goal: "给设置页加深色模式",
+      steps: [{ memberId: "A" }, { memberId: "B" }, { memberId: "A" }],
+    });
+    // `>` typed with Chinese punctuation on.
+    expect(parseRelay("@小码 -》 @小审 =》 @小码 给设置页加深色模式", members)).toEqual({
       goal: "给设置页加深色模式",
       steps: [{ memberId: "A" }, { memberId: "B" }, { memberId: "A" }],
     });

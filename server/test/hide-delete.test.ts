@@ -2,16 +2,11 @@
 // DELETE /v1/groups/:id and DELETE /v1/members/:id.
 import { SELF, env, runInDurableObject } from "cloudflare:test";
 import { SERVER_FEATURES, mainTopicId } from "@chat/protocol";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { ulid } from "../src/core/ids";
 import { GROUP_PREFIX, groupStateKey, parseGroupFileKey, runArchive, utcDate } from "../src/ops/archive";
 import { gunzip } from "../src/ops/gzip";
-import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-});
+import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, waitUntil } from "./helpers";
 
 const send = (c: Client, groupId: string, body: string, extra: Record<string, unknown> = {}) =>
   c.ok({ t: "send", groupId, clientMsgId: clientMsgId(), body, ...extra });

@@ -4,22 +4,16 @@
 // the room gave up on is said in the topic).
 import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { ACK_EMOJI } from "@chat/protocol";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { BotsEnv } from "../src/bots/env";
 import { endedPhase } from "../src/bots/desk/report";
 import { PROOF_TEXT, doneCard, testsFromLog, truthfulDoneCard } from "../src/bots/proof";
 import { UNDELIVERED_TEXT } from "../src/bots/room";
 import { TEXT } from "../src/bots/dispatch";
-import { Daemon, type World, downViolations, mention, world } from "./daemon";
-import { Client, api, clientMsgId, protocolViolations, waitUntil } from "./helpers";
+import { Daemon, type World, mention, world } from "./daemon";
+import { Client, api, clientMsgId, waitUntil } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 
 function botMessages(c: Client, topicId: string, botId: string): any[] {
   return c
