@@ -23,6 +23,12 @@ pub fn slug() -> &'static str {
     product()["slug"].as_str().unwrap_or("chat")
 }
 
+/// What a line that the system writes to a CLI starts with (`[<slug>]`, as the server's own
+/// lines do): the model tells it from a person's message by it.
+pub fn auto_prefix() -> String {
+    format!("[{}]", slug())
+}
+
 pub fn bundle_id() -> &'static str {
     product()["bundleId"].as_str().unwrap_or("chat")
 }

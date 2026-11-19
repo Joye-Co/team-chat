@@ -1,10 +1,10 @@
 # Design checklist (GPUI)
 
-> Design v2.1: the checklist in [DESIGN.md §17](../DESIGN.md#17-checklist) wins where this file differs. Values here that cite v1 tokens are out of date.
+> [COMPLETENESS.md §4](COMPLETENESS.md#4-completeness-checklist) is the binding checklist: a screen is done when it passes that one. This file is the how-to for the vendored skills. Where a value here differs from COMPLETENESS.md or `apps/desktop/src/ui/native/tokens.rs`, those win.
 
 Check every UI change against this list before merging. It distills the vendored skills in
 [skills/emilkowalski](skills/emilkowalski/) (written for the web) into checks for this native
-macOS app. Each item says **what** to check in this app, **how** in GPUI / gpui-component, and the
+app (macOS and Windows). Each item says **what** to check in this app, **how** in GPUI / gpui-component, and the
 **source** section. What GPUI can and cannot do is in [GPUI-CAPABILITIES.md](GPUI-CAPABILITIES.md).
 
 Paths: `EDE` = `skills/emil-design-eng/SKILL.md`, `AD` = `skills/apple-design/SKILL.md`,
@@ -20,7 +20,7 @@ Paths: `EDE` = `skills/emil-design-eng/SKILL.md`, `AD` = `skills/apple-design/SK
 | --- | --- | --- | --- |
 | 0.1 | Every changed screen captured in light **and** dark | `desktop --screenshot <dir> --theme both --scenes <yours>`; read every PNG. Add a scene in `apps/desktop/src/selftest/scenes.rs` when your screen has none | AGENTS.md design bar; `BU` Phase 4 |
 | 0.2 | Same screens with worst-case data | `desktop --screenshot <dir> --worst-case`; data changes at the provider, never in the view (`selftest/worst_case.rs`) | `BU` Hard Rules 2-3 |
-| 0.3 | Compare with the baseline | Baseline PNGs in `~/.cache/team-chat/design/baseline/` (same names); open both side by side | `EDE` "Review your work the next day" |
+| 0.3 | Compare with a baseline (optional) | Capture the same scenes from `main` into a folder of your own (same names), for example under your worktree's `.tmp/`; open both side by side | `EDE` "Review your work the next day" |
 | 0.4 | Narrow and wide windows | `--size 900x560` (the window minimum) and `--size 1440x900`; the side panel and topic list must not squeeze the timeline below `min_w` | `CAT` Environment |
 | 0.5 | Review fresh, at 1x and 2x zoom of the PNG | Read the PNG again the next session; look at edges, baselines and spacing, not only "does it render" | `EDE` Core Philosophy ("Unseen details compound") |
 

@@ -10,7 +10,8 @@ import { MAX_RELAY_STEPS, MIN_RELAY_STEPS } from "@chat/protocol";
 export const MAX_RELAY_NOTE = 100;
 export const MAX_RELAY_GOAL = 1000;
 
-const ARROW = /\s*(?:→|->|=>)\s*/;
+// `-》` and `=》`: `>` typed with Chinese punctuation on.
+const ARROW = /\s*(?:→|->|=>|-》|=》)\s*/;
 
 export interface RelayDraft {
   steps: { memberId: string; note?: string }[];

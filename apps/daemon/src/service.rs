@@ -84,8 +84,86 @@ fn launchctl(args: &[&str]) -> Result<(), String> {
     if out.status.success() {
         Ok(())
     } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+        Err(tool_failed(
+            "launchctl",
+            args.first().copied().unwrap_or_default(),
+            &out,
+        ))
     }
+}
+
+/// What a failed `launchctl` or `systemctl --user` says: the command, how it ended, its own
+/// words, and for a systemd without a user session what to do.
+fn tool_failed(tool: &str, verb: &str, out: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stderr = stderr.trim();
+    let mut said = format!("{tool} {verb} failed ({}): {stderr}", out.status);
+    if tool.starts_with("systemctl") && stderr.to_lowercase().contains("bus") {
+        said.push_str(
+            "\nthere is no systemd user session here: log in as the daemon's user (ssh <user>@<host>, not su), or set XDG_RUNTIME_DIR=/run/user/$(id -u)",
+        );
+    }
+    said
+}
+
+/// The file the daemon's log goes to when a service manager started it.
+pub fn service_log() -> PathBuf {
+    if cfg!(windows) {
+        task_log(&task_dir())
+    } else if cfg!(target_os = "linux") {
+        systemd_log_dir().join("daemon.log")
+    } else {
+        log_dir().join("daemon.log")
+    }
+}
+
+/// The command that starts the installed daemon again, for the text `install-service` and
+/// `restart-service` print. `program` is how this program was started.
+pub fn restart_command(program: &str) -> String {
+    if cfg!(windows) {
+        format!("{program} restart-service")
+    } else if cfg!(target_os = "linux") {
+        format!(
+            "systemctl --user restart {}",
+            crate::product::systemd_unit()
+        )
+    } else {
+        format!(
+            "launchctl kickstart -k gui/{}/{}",
+            uid(),
+            crate::product::service_label()
+        )
+    }
+}
+
+/// The file whose presence says the service is installed (what `uninstall-service` removes).
+pub fn service_file() -> PathBuf {
+    if cfg!(windows) {
+        task_file(&task_dir())
+    } else if cfg!(target_os = "linux") {
+        unit_path(&units_dir())
+    } else {
+        plist_path(&agents_dir())
+    }
+}
+
+/// The paths every unix install needs: this program and the config, both as the service
+/// manager will open them, with the two folders made.
+fn install_paths(config: &Path, log_dir: &Path, dir: &Path) -> Result<(PathBuf, PathBuf), String> {
+    let exe = std::env::current_exe()
+        .map_err(|e| format!("cannot find the daemon's own program file: {e}"))?;
+    let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
+    let config = std::fs::canonicalize(config).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            format!("config {} does not exist", config.display())
+        } else {
+            format!("cannot read config {}: {e}", config.display())
+        }
+    })?;
+    for d in [log_dir, dir] {
+        std::fs::create_dir_all(d).map_err(|e| format!("cannot make {}: {e}", d.display()))?;
+    }
+    Ok((exe, config))
 }
 
 /// Writes the plist into `dir` and, when `load`, (re)loads it with launchctl.
@@ -96,12 +174,7 @@ pub fn log_dir() -> PathBuf {
 }
 
 pub fn install(dir: &Path, config: &Path, log_dir: &Path, load: bool) -> Result<PathBuf, String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
-    let config = std::fs::canonicalize(config)
-        .map_err(|_| format!("config {} does not exist", config.display()))?;
-    std::fs::create_dir_all(log_dir).map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let (exe, config) = install_paths(config, log_dir, dir)?;
     let path_env = std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin:/usr/sbin:/sbin".into());
     let label = crate::product::service_label();
     let file = plist_path(dir);
@@ -188,7 +261,11 @@ fn systemctl(args: &[&str]) -> Result<(), String> {
     if out.status.success() {
         Ok(())
     } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+        Err(tool_failed(
+            "systemctl --user",
+            args.first().copied().unwrap_or_default(),
+            &out,
+        ))
     }
 }
 
@@ -200,12 +277,7 @@ pub fn install_systemd(
     log_dir: &Path,
     load: bool,
 ) -> Result<PathBuf, String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
-    let config = std::fs::canonicalize(config)
-        .map_err(|_| format!("config {} does not exist", config.display()))?;
-    std::fs::create_dir_all(log_dir).map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let (exe, config) = install_paths(config, log_dir, dir)?;
     let path_env = std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin:/usr/sbin:/sbin".into());
     let file = unit_path(dir);
     std::fs::write(&file, unit(&exe, &config, &path_env, log_dir)?)
@@ -477,11 +549,13 @@ pub fn install_task(
     dir: &Path,
     load: bool,
 ) -> Result<PathBuf, String> {
-    let exe = std::path::absolute(exe).map_err(|e| e.to_string())?;
+    let exe = std::path::absolute(exe)
+        .map_err(|e| format!("cannot use the program path {}: {e}", exe.display()))?;
     if !config.is_file() {
         return Err(format!("config {} does not exist", config.display()));
     }
-    let config = std::path::absolute(config).map_err(|e| e.to_string())?;
+    let config = std::path::absolute(config)
+        .map_err(|e| format!("cannot use the config path {}: {e}", config.display()))?;
     for p in [&exe, &config, &dir.to_path_buf()] {
         if p.to_string_lossy().contains('"') {
             return Err(format!("{} must not contain a quote", p.display()));
@@ -582,6 +656,81 @@ pub fn uninstall_task(name: &str, dir: &Path, unload: bool) -> Result<PathBuf, S
 
 /// Logs larger than this are moved to `daemon.log.1` when the daemon starts.
 const LOG_KEEP_BYTES: u64 = 10 * 1024 * 1024;
+
+/// Copies a `log` larger than `keep` to `<log>.1` and empties it; true when it did. The file is
+/// emptied, not renamed: the service manager holds it open in append mode (launchd
+/// `StandardErrorPath`, systemd `append:`), so what the daemon prints next starts the file again.
+#[cfg(any(unix, test))]
+fn rotate_log(log: &Path, keep: u64) -> std::io::Result<bool> {
+    if std::fs::metadata(log)?.len() <= keep {
+        return Ok(false);
+    }
+    let mut old = log.as_os_str().to_owned();
+    old.push(".1");
+    std::fs::copy(log, &old)?;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(log)?
+        .set_len(0)?;
+    Ok(true)
+}
+
+/// The file this process's stderr is, when it is a plain file opened in append mode (a service
+/// manager's log). A file opened without append (`run > file 2>&1`) is left alone: its writer
+/// keeps its position, so after emptying the file it would write far past the new end.
+// The casts: `st_dev` and `st_ino` are `u64` on Linux and narrower on macOS.
+#[cfg(unix)]
+#[allow(clippy::unnecessary_cast)]
+fn stderr_file() -> Option<PathBuf> {
+    use std::os::unix::fs::MetadataExt as _;
+    // SAFETY: fstat fills the zeroed struct for an open descriptor and fails for a closed one.
+    let st = unsafe {
+        let mut st: libc::stat = std::mem::zeroed();
+        (libc::fstat(2, &mut st) == 0).then_some(st)?
+    };
+    if st.st_mode & libc::S_IFMT != libc::S_IFREG {
+        return None;
+    }
+    // SAFETY: F_GETFL only reads the flags of the descriptor.
+    let flags = unsafe { libc::fcntl(2, libc::F_GETFL) };
+    if flags < 0 || flags & libc::O_APPEND == 0 {
+        return None;
+    }
+    #[cfg(target_os = "linux")]
+    let path = std::fs::read_link("/proc/self/fd/2").ok()?;
+    #[cfg(target_os = "macos")]
+    let path = {
+        use std::os::unix::ffi::OsStringExt as _;
+        let mut buf = vec![0u8; libc::PATH_MAX as usize];
+        // SAFETY: F_GETPATH writes at most PATH_MAX bytes, NUL-terminated, into the buffer.
+        if unsafe { libc::fcntl(2, libc::F_GETPATH, buf.as_mut_ptr()) } != 0 {
+            return None;
+        }
+        let end = buf.iter().position(|b| *b == 0)?;
+        buf.truncate(end);
+        PathBuf::from(std::ffi::OsString::from_vec(buf))
+    };
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    let path: PathBuf = return None;
+    // The name must still be this very file (not one that replaced it).
+    let m = std::fs::metadata(&path).ok()?;
+    (m.dev() == st.st_dev as u64 && m.ino() == st.st_ino as u64).then_some(path)
+}
+
+/// `run` on macOS and Linux: the service manager appends to the log for ever, so a log that
+/// grew past the limit is moved to `daemon.log.1` here, as [`log_to`] does on Windows. Nothing
+/// happens when the output is a terminal, a pipe, or a file not opened in append mode.
+pub fn rotate_own_log() {
+    #[cfg(unix)]
+    if let Some(log) = stderr_file()
+        && let Err(e) = rotate_log(&log, LOG_KEEP_BYTES)
+    {
+        crate::problems::warn(format_args!(
+            "the log {} is large and could not be moved aside: {e}",
+            log.display()
+        ));
+    }
+}
 
 /// The name of the lock that makes a daemon the only one of its user and config
 /// ([`single_instance`]): the same for every way of writing the same config path.
@@ -730,7 +879,6 @@ pub fn stoppable(path: &Path) -> Result<(), String> {
 /// `StandardOutput`) and stop the daemon with SIGTERM.
 #[cfg(not(windows))]
 pub fn log_to(_path: &Path) -> Result<(), String> {
-    let _ = LOG_KEEP_BYTES;
     Err("--log-file is for the Windows scheduled task: redirect the output yourself".into())
 }
 
@@ -885,6 +1033,83 @@ mod tests {
     use super::*;
 
     const ME: &str = "S-1-5-21-1004336348-1177238915-682003330-1001";
+
+    #[test]
+    fn a_large_log_is_copied_aside_and_emptied_under_its_open_writer() {
+        use std::io::Write as _;
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("daemon.log");
+        // The service manager's handle: append mode, open across the rotation.
+        let mut writer = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log)
+            .unwrap();
+        writer.write_all(b"old line\n").unwrap();
+        assert!(!rotate_log(&log, 100).unwrap(), "small: left alone");
+        assert!(!dir.path().join("daemon.log.1").exists());
+        writer.write_all(&[b'x'; 200]).unwrap();
+        assert!(rotate_log(&log, 100).unwrap());
+        let old = std::fs::read(dir.path().join("daemon.log.1")).unwrap();
+        assert!(old.starts_with(b"old line\n") && old.len() == 209);
+        assert_eq!(std::fs::metadata(&log).unwrap().len(), 0);
+        writer.write_all(b"new line\n").unwrap();
+        assert_eq!(std::fs::read(&log).unwrap(), b"new line\n");
+        assert!(rotate_log(&dir.path().join("none.log"), 100).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_service_command_says_which_one_and_what_to_do() {
+        use std::os::unix::process::ExitStatusExt as _;
+        let out = |stderr: &str| std::process::Output {
+            status: std::process::ExitStatus::from_raw(5 << 8),
+            stdout: vec![],
+            stderr: stderr.as_bytes().to_vec(),
+        };
+        let said = tool_failed(
+            "launchctl",
+            "bootstrap",
+            &out("Bootstrap failed: 5: Input/output error\n"),
+        );
+        assert!(
+            said.starts_with("launchctl bootstrap failed (")
+                && said.ends_with("Input/output error"),
+            "{said}"
+        );
+        let bus = "Failed to connect to bus: No medium found";
+        let said = tool_failed("systemctl --user", "daemon-reload", &out(bus));
+        assert!(
+            said.starts_with("systemctl --user daemon-reload failed ("),
+            "{said}"
+        );
+        assert!(
+            said.contains(bus) && said.contains("XDG_RUNTIME_DIR"),
+            "{said}"
+        );
+        // The hint is for the bus only.
+        let said = tool_failed("systemctl --user", "enable", &out("Unit not found"));
+        assert!(!said.contains("XDG_RUNTIME_DIR"), "{said}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_install_names_the_path_that_failed() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("daemon.toml");
+        let e = install(&dir.path().join("a"), &cfg, &dir.path().join("l"), false).unwrap_err();
+        assert_eq!(e, format!("config {} does not exist", cfg.display()));
+        std::fs::write(&cfg, "").unwrap();
+        // A file where the log folder should be.
+        let blocked = dir.path().join("file");
+        std::fs::write(&blocked, "").unwrap();
+        let logs = blocked.join("logs");
+        let e = install_systemd(&dir.path().join("u"), &cfg, &logs, false).unwrap_err();
+        assert!(
+            e.starts_with(&format!("cannot make {}: ", logs.display())),
+            "{e}"
+        );
+    }
 
     fn sample(at_logon: bool) -> String {
         task_xml(&Task {

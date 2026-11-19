@@ -5,8 +5,8 @@ import { z } from "zod";
 import { auditStatement } from "../core/audit";
 import type { AuthContext } from "../core/auth";
 import { getGroup, isGroupMember } from "../core/db";
-import { gatewayStub, roomStub } from "../core/env";
-import { ApiError, schemaReason, unwrap } from "../core/errors";
+import { type Env, gatewayStub, roomStub } from "../core/env";
+import { ApiError, issuesText, schemaReason, unwrap } from "../core/errors";
 import { LIMITS, TokenBucket } from "../core/ratelimit";
 import { type Actor, type FrameContext, frameValidators, registerGatewayRpc, registerRoute } from "../core/registry";
 
@@ -28,15 +28,24 @@ export function checkCardSize(raw: unknown): void {
 // Per-credential HTTP post limit. The bucket lives in the member's gateway (one object per
 // member), so all Worker isolates share it.
 const httpBuckets = new Map<string, TokenBucket>();
-registerGatewayRpc("http.post.take", (_gw, args) => {
+/** Takes one HTTP post of the token's bucket: `null`, or the milliseconds to wait when it is empty. */
+// `true` stays "taken" (its released meaning): a Worker and a gateway of different versions
+// can meet during a deploy. A number is the wait in ms.
+registerGatewayRpc("http.post.take", (_gw, args): true | number => {
   const { tokenId } = args as { tokenId: string };
   let b = httpBuckets.get(tokenId);
   if (!b) {
     b = new TokenBucket(LIMITS.write.rate, LIMITS.write.burst);
     httpBuckets.set(tokenId, b);
   }
-  return b.take();
+  return b.take() ? true : Math.max(1, Math.ceil(b.waitMs()));
 });
+
+/** Counts one HTTP post of this token; throws `rate_limited` with the wait when the bucket is empty. */
+export async function takeHttpPost(env: Env, a: AuthContext): Promise<void> {
+  const taken = (await gatewayStub(env, a.memberId).rpc("http.post.take", { tokenId: a.tokenId })) as boolean | number;
+  if (taken !== true) throw new ApiError("rate_limited", "too many posts", undefined, typeof taken === "number" ? taken : undefined);
+}
 
 registerRoute({
   method: "POST",
@@ -45,9 +54,7 @@ registerRoute({
   bodyLimit: POST_BODY_LIMIT,
   async handler({ env, auth, params, body, log }) {
     const a = auth as AuthContext;
-    if (!(await gatewayStub(env, a.memberId).rpc("http.post.take", { tokenId: a.tokenId }))) {
-      throw new ApiError("rate_limited", "too many posts");
-    }
+    await takeHttpPost(env, a);
     const group = await getGroup(env.DB, params.id);
     if (!group) throw new ApiError("not_found", "group not found");
     if (!(await isGroupMember(env.DB, group.id, a.memberId))) throw new ApiError("forbidden", "not a member of this group");
@@ -57,7 +64,7 @@ registerRoute({
     const parsed = PostMessageRequest.safeParse(raw);
     if (!parsed.success) {
       const first = parsed.error.issues.find((i) => schemaReason({}, i.message)) ?? parsed.error.issues[0];
-      throw new ApiError("invalid", `invalid body: ${first?.path.join(".") || "(root)"} ${first?.message ?? ""}`.trim(), schemaReason(raw, first?.message, first?.path));
+      throw new ApiError("invalid", `invalid body: ${issuesText(parsed.error.issues)}`, schemaReason(raw, first?.message, first?.path));
     }
     const frame = { ...parsed.data, t: "send" as const, rid: "http", groupId: group.id };
     const actor: Actor = { id: a.memberId, level: a.member.level, kind: a.member.kind, tokenId: a.tokenId };

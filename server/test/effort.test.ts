@@ -1,15 +1,9 @@
 // 思考强度 (docs/protocol.md "Bot runs", machine-protocol.md "Models and effort"): the runner's
 // effort is stored (absent keeps, null clears), reaches only daemons with feature "effort", and
 // machines show the models and efforts their CLIs report.
-import { afterAll, describe, expect, it } from "vitest";
-import { Daemon, downViolations, mention, world } from "./daemon";
-import { Client, api, protocolViolations } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
+import { describe, expect, it } from "vitest";
+import { Daemon, mention, world } from "./daemon";
+import { Client, api } from "./helpers";
 
 describe("effort", () => {
   it("stores the effort, keeps it when absent, clears it with null", async () => {

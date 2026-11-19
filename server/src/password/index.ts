@@ -54,7 +54,7 @@ async function checkCurrent(env: Env, request: Request, a: AuthContext, current:
   if (token && Date.now() - token.created_at < FRESH_SIGN_IN_MS) return;
   const refused = new ApiError("invalid", "the current password is missing or wrong", "password.current");
   if (current === undefined) throw refused;
-  const attempt = await takeAttempt(env.DB, `password-ip:${await ipKey(request)}`, CHECK_PER_IP);
+  const attempt = await takeAttempt(env.DB, `password-ip:${await ipKey(request)}`, CHECK_PER_IP, "password attempts");
   if (!(await verifyPassword(current, row.hash))) throw refused;
   await refundAttempt(env.DB, attempt);
 }
@@ -112,9 +112,9 @@ registerRoute({
   path: "/v1/auth/password/sign-in",
   auth: "none",
   async handler({ env, body, request }): Promise<RedeemResponse> {
-    const ipAttempt = await takeAttempt(env.DB, `password-ip:${await ipKey(request)}`, CHECK_PER_IP);
+    const ipAttempt = await takeAttempt(env.DB, `password-ip:${await ipKey(request)}`, CHECK_PER_IP, "password attempts");
     const { email, password, deviceName } = await body(PasswordSignInRequest);
-    const addressAttempt = await takeAttempt(env.DB, `password-address:${await sha256Hex(email)}`, WRONG_PER_ADDRESS);
+    const addressAttempt = await takeAttempt(env.DB, `password-address:${await sha256Hex(email)}`, WRONG_PER_ADDRESS, "password attempts");
     const owner = await env.DB.prepare(
       `SELECT e.member_id, p.hash FROM member_emails e
        JOIN members m ON m.id = e.member_id

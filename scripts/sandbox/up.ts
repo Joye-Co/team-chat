@@ -201,7 +201,17 @@ async function start(): Promise<string> {
 /** The app's data roots, one per 身份 (`provider/sandbox.rs`): each keeps a saved session and a cache. */
 const APP_ROOTS = ["app", "app-admin", "app-member"];
 
+const USAGE = [
+  "bun scripts/sandbox/up.ts            start the server (or reuse it), migrate, seed once",
+  "bun scripts/sandbox/up.ts --reset    throw the data away and seed again",
+  "bun scripts/sandbox/up.ts --stop     stop this worktree's server",
+].join("\n");
+
 async function main() {
+  if (args.includes("--help") || args.includes("-h")) return console.log(USAGE);
+  const unknown = args.filter((a) => a !== "--reset" && a !== "--stop");
+  if (unknown.length > 0) throw new Error(`unknown argument: ${unknown.join(" ")}\n${USAGE}`);
+  if (args.includes("--reset") && args.includes("--stop")) throw new Error(`--reset and --stop do not go together\n${USAGE}`);
   mkdirSync(DIR, { recursive: true });
   if (!existsSync(WRANGLER)) throw new Error("wrangler is missing: run `bun install --frozen-lockfile` first");
   if (args.includes("--stop")) return stop();
