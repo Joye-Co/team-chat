@@ -183,8 +183,16 @@ pub struct LoginView {
     sending: bool,
     /// The last refusal of an email request (sending a code).
     email_error: Option<EmailError>,
+    /// A code just went out again: the line under the slots says so.
+    email_resent: bool,
+    /// Seconds until `重新发送` comes back.
+    email_resend_wait: u32,
+    /// Counts [`Self::email_resend_wait`] down.
+    email_resend_timer: Option<gpui::Task<()>>,
     /// The server field is open (`更改`, or after an unreachable server).
     server_open: bool,
+    /// The URL when the server field opened: 取消 and Esc put it back.
+    server_before: Option<String>,
     /// Drawn inside a main window (signed out there): a sign-out moves to
     /// the login window.
     embedded: bool,
@@ -256,6 +264,11 @@ impl LoginView {
                         CodeInputEvent::Change => {
                             this.clear_stale_error(cx);
                             this.email_error = None;
+                            // The first digit typed answers the 已重新发送 line. The slots
+                            // emptied by the resend itself do not.
+                            if !this.email_code_digits(cx).is_empty() {
+                                this.email_resent = false;
+                            }
                             this.sync_code(cx);
                             // All six digits: sign in at once, as a one-time code does.
                             if this.email_code_digits(cx).len() == EMAIL_CODE_LEN
@@ -300,6 +313,7 @@ impl LoginView {
                             SessionState::SignedOut {
                                 last_error: Some(LoginError::ServerUnreachable),
                             } => {
+                                this.remember_server(cx);
                                 this.server_open = true;
                                 this.server.read(cx).focus_handle(cx).focus(window, cx);
                             }
@@ -342,7 +356,11 @@ impl LoginView {
             sent_to: String::new(),
             sending: false,
             email_error: None,
+            email_resent: false,
+            email_resend_wait: 0,
+            email_resend_timer: None,
             server_open: false,
+            server_before: None,
             embedded: true,
             error: None,
             error_for: String::new(),
@@ -354,6 +372,10 @@ impl LoginView {
     /// Opens the server field and moves the focus into it with the whole
     /// URL selected, as a macOS field does when it takes the focus.
     fn open_server_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy() {
+            return;
+        }
+        self.remember_server(cx);
         self.server_open = true;
         self.server.update(cx, |st, cx| {
             let end = st.value().len();
@@ -362,6 +384,13 @@ impl LoginView {
         });
         self.sync_code(cx);
         cx.notify();
+    }
+
+    /// Keeps the URL the server step started from (once per visit of the step).
+    fn remember_server(&mut self, cx: &mut Context<Self>) {
+        if !self.server_open || self.server_before.is_none() {
+            self.server_before = Some(self.server.read(cx).value().to_string());
+        }
     }
 
     /// The text of the field that is up: the server, the code, or the email code.
@@ -391,13 +420,36 @@ impl LoginView {
         self.email.read(cx).value().trim().to_lowercase()
     }
 
+    /// A request is out: the code is being checked or sent. The step stays
+    /// until the answer lands, so a refusal shows on the screen it belongs to.
+    fn busy(&self) -> bool {
+        self.preview_busy
+            || self.sending
+            || matches!(self.services.provider.session(), SessionState::SigningIn)
+    }
+
     /// Shows `step` with the focus in its field.
     pub fn go_to(&mut self, step: Step, window: &mut Window, cx: &mut Context<Self>) {
         self.step = step;
         self.server_open = false;
+        self.server_before = None;
         self.error = None;
         self.email_error = None;
-        match step {
+        if step == Step::EmailCode {
+            self.email_code
+                .update(cx, |c, cx| c.set_value("", window, cx));
+        } else {
+            // Another address does not inherit the wait.
+            self.clear_email_resend();
+        }
+        self.focus_step_field(window, cx);
+        self.sync_code(cx);
+        cx.notify();
+    }
+
+    /// Moves the focus into the field of the step that is up.
+    fn focus_step_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.step {
             Step::Invite => self.code.read(cx).focus_handle(cx).focus(window, cx),
             Step::Email => self.email.update(cx, |st, cx| {
                 let end = st.value().len();
@@ -405,19 +457,49 @@ impl LoginView {
                 st.set_selected_range(0..end, cx);
             }),
             Step::EmailCode => {
-                self.email_code
-                    .update(cx, |c, cx| c.set_value("", window, cx));
                 let code = self.email_code.clone();
                 code.read(cx).focus_handle(cx).focus(window, cx);
             }
         }
-        self.sync_code(cx);
-        cx.notify();
+    }
+
+    /// Forgets a resend: the person went back to the address.
+    fn clear_email_resend(&mut self) {
+        self.email_resent = false;
+        self.email_resend_wait = 0;
+        self.email_resend_timer = None;
+    }
+
+    /// A code went out again: say so and rest `重新发送` for a moment, since
+    /// each new code replaces the one before it.
+    fn start_email_resend_wait(&mut self, cx: &mut Context<Self>) {
+        use crate::ui::native::tokens::email_sheet;
+        self.email_resent = true;
+        self.email_resend_wait = email_sheet::RESEND_WAIT_SECS;
+        self.email_resend_timer = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(email_sheet::RESEND_TICK)
+                    .await;
+                let waiting = this.update(cx, |this, cx| {
+                    this.email_resend_wait = this.email_resend_wait.saturating_sub(1);
+                    if this.email_resend_wait == 0 {
+                        this.email_resent = false;
+                    }
+                    cx.notify();
+                    this.email_resend_wait > 0
+                });
+                if !waiting.unwrap_or(false) {
+                    break;
+                }
+            }
+        }));
     }
 
     /// `发送验证码` (and `重新发送`): asks the server for a code at the address.
     fn send_email_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.sending {
+        let resend = self.step == Step::EmailCode;
+        if self.sending || (resend && self.email_resend_wait > 0) {
             return;
         }
         let email = self.email_text(cx);
@@ -445,6 +527,9 @@ impl LoginView {
                     Ok(()) => {
                         this.sent_to = email;
                         this.go_to(Step::EmailCode, window, cx);
+                        if resend {
+                            this.start_email_resend_wait(cx);
+                        }
                     }
                     Err(e) => this.email_error = Some(e),
                 }
@@ -578,6 +663,18 @@ impl LoginView {
         cx.notify();
     }
 
+    /// The code step just after `重新发送` went through, for a screenshot scene.
+    pub fn preview_email_resent(
+        &mut self,
+        email: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.preview_email(email, Some(""), window, cx);
+        self.start_email_resend_wait(cx);
+        cx.notify();
+    }
+
     /// Sets a custom server, for a screenshot scene.
     pub fn preview_server(&mut self, url: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.server
@@ -596,15 +693,27 @@ impl LoginView {
     fn continue_(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.server_open && (self.step != Step::Invite || self.input(cx).credential().is_none())
         {
-            self.close_server_field(window, cx);
+            self.close_server_field(true, window, cx);
         } else {
             self.submit(window, cx);
         }
     }
 
-    fn close_server_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let step = self.step;
-        self.go_to(step, window, cx);
+    /// Leaves the server step for the step under it, which keeps what was
+    /// typed there. `keep` (继续, Return, a named server) keeps the URL in
+    /// the field; without it (取消, Esc) the URL the step opened with is back.
+    fn close_server_field(&mut self, keep: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let before = self.server_before.take();
+        if !keep && let Some(url) = before {
+            self.server
+                .update(cx, |st, cx| st.set_value(url, window, cx));
+        }
+        self.server_open = false;
+        self.error = None;
+        self.email_error = None;
+        self.focus_step_field(window, cx);
+        self.sync_code(cx);
+        cx.notify();
     }
 
     /// The link row under 继续: on the code step `使用其他服务器…`, or a
@@ -617,14 +726,21 @@ impl LoginView {
     ) -> gpui::AnyElement {
         use crate::ui::native::tokens::space;
         let k = native_colors(cx);
-        let link = |id: &'static str, label: &'static str, cx: &mut Context<Self>| {
+        let quiet = |id: &'static str, label: SharedString, cx: &mut Context<Self>| {
             borderless_text(id, label, cx)
                 .text_color(k.secondary)
                 .font_weight(gpui::FontWeight::NORMAL)
         };
+        // No link changes the step while a request is out.
+        let busy = self.busy();
+        let link = |id: &'static str, label: &'static str, cx: &mut Context<Self>| {
+            let b = quiet(id, label.into(), cx);
+            crate::ui::native::disabled_push(b, busy, cx)
+        };
         if server_step {
-            let cancel = link("login-server-cancel", common::CANCEL, cx)
-                .on_click(cx.listener(|this, _, window, cx| this.close_server_field(window, cx)));
+            let cancel = link("login-server-cancel", common::CANCEL, cx).on_click(
+                cx.listener(|this, _, window, cx| this.close_server_field(false, window, cx)),
+            );
             // The servers this build knows by name. On the Mac they are in the app menu's
             // 服务器 submenu, which the menu bar shows at the login window too; off the Mac
             // the login window has no menu bar, so they are links here, next to 取消.
@@ -645,7 +761,7 @@ impl LoginView {
                     link(id, label, cx).on_click(cx.listener(move |this, _, window, cx| {
                         this.server
                             .update(cx, |st, cx| st.set_value(url.to_string(), window, cx));
-                        this.close_server_field(window, cx);
+                        this.close_server_field(true, window, cx);
                     }))
                 }))
                 .child(cancel)
@@ -663,17 +779,46 @@ impl LoginView {
                     .into_any_element();
             }
             Step::EmailCode => {
+                // Just sent again: the link counts down to when it is back.
+                // The wait is news to read, not a control that is off: plain muted text
+                // with the link's inset.
+                let resend = if self.email_resend_wait > 0 {
+                    let n = self.email_resend_wait.to_string();
+                    div()
+                        .px(space::S12)
+                        .n_body()
+                        .text_color(k.secondary)
+                        .child(crate::copy::fill(l::EMAIL_RESEND_WAIT, &[("n", &n)]))
+                        .into_any_element()
+                } else {
+                    let resend = quiet("login-email-resend", l::EMAIL_RESEND.into(), cx)
+                        .min_w(crate::ui::native::metrics::LOGIN_LINK_MIN);
+                    crate::ui::native::disabled_push(resend, busy, cx)
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.send_email_code(window, cx)),
+                        )
+                        .into_any_element()
+                };
+                let change = link("login-email-change", l::EMAIL_CHANGE, cx).on_click(
+                    cx.listener(|this, _, window, cx| this.go_to(Step::Email, window, cx)),
+                );
+                // Two even halves meeting at the middle, the links one width at rest: the
+                // longer countdown grows away from 换一个邮箱, which stays where it is.
                 return div()
+                    .w_full()
                     .flex()
                     .items_center()
-                    .justify_center()
                     .gap(space::S16)
-                    .child(link("login-email-resend", l::EMAIL_RESEND, cx).on_click(
-                        cx.listener(|this, _, window, cx| this.send_email_code(window, cx)),
-                    ))
-                    .child(link("login-email-change", l::EMAIL_CHANGE, cx).on_click(
-                        cx.listener(|this, _, window, cx| this.go_to(Step::Email, window, cx)),
-                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .justify_end()
+                            .n_figures()
+                            .child(resend),
+                    )
+                    .child(div().flex_1().min_w_0().flex().child(change))
                     .into_any_element();
             }
         }
@@ -691,32 +836,34 @@ impl LoginView {
                 .into_any_element(),
             // A long host is cut in the middle (both ends name it), with the
             // full host in a tooltip (2.21).
+            // The email link stays first, as without a custom server. Both
+            // ends of the row are links with the same padding, so its ink
+            // is centered on the column.
             Some(host) => div()
                 .max_w_full()
                 .min_w_0()
                 .flex()
                 .items_center()
                 .justify_center()
-                .gap(space::S4)
-                .n_body()
-                .text_color(k.secondary)
+                .gap(space::S16)
+                .child(email)
                 .child(
-                    Sym::MacMini
-                        .icon(SymSize::INLINE_SMALL)
-                        .text_color(k.secondary),
+                    div()
+                        .min_w_0()
+                        .flex()
+                        .items_center()
+                        .gap(space::S4)
+                        .n_body()
+                        .text_color(k.secondary)
+                        .child(Sym::Server.icon(SymSize::INLINE).text_color(k.secondary))
+                        .child(
+                            crate::ui::truncate::TruncText::new(host)
+                                .id("login-host")
+                                .middle()
+                                .min_w_0(),
+                        )
+                        .child(link("login-server-change", l::CHANGE_SERVER, cx).on_click(open)),
                 )
-                .child(
-                    crate::ui::truncate::TruncText::new(host)
-                        .id("login-host")
-                        .middle()
-                        .min_w_0(),
-                )
-                .child(
-                    link("login-server-change", l::CHANGE_SERVER, cx)
-                        .text_color(k.label)
-                        .on_click(open),
-                )
-                .child(div().ml(space::S12).child(email))
                 .into_any_element(),
         };
         // 添加账号…: 取消 goes back to the account that stays signed in.
@@ -733,7 +880,7 @@ impl LoginView {
             .gap(space::S16)
             .child(row)
             .child(
-                link("login-add-cancel", common::CANCEL, cx)
+                quiet("login-add-cancel", common::CANCEL.into(), cx)
                     .on_click(move |_, _, _| services.provider.cancel_add_account()),
             )
             .into_any_element()
@@ -744,9 +891,10 @@ impl Render for LoginView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         use crate::ui::native::tokens::space;
         let k = native_colors(cx);
-        let session = self.services.provider.session();
-        let signing_in =
-            self.preview_busy || self.sending || matches!(session, SessionState::SigningIn);
+        let signing_in = self.busy();
+        for code in [&self.code, &self.email_code] {
+            code.update(cx, |c, cx| c.set_busy(signing_in, cx));
+        }
         let step = self.step;
         let complete = match step {
             Step::Invite => self.input(cx).credential().is_some(),
@@ -774,6 +922,7 @@ impl Render for LoginView {
             NativeTextField::new("login-server", &self.server)
                 .size(FieldSize::Large)
                 .full_width()
+                .disabled(signing_in)
                 .error(error.is_some())
                 .into_any_element()
         } else {
@@ -782,6 +931,7 @@ impl Render for LoginView {
                 Step::Email => NativeTextField::new("login-email-field", &self.email)
                     .size(FieldSize::Large)
                     .full_width()
+                    .disabled(signing_in)
                     .error(error.is_some())
                     .into_any_element(),
                 Step::EmailCode => self.email_code.clone().into_any_element(),
@@ -790,11 +940,26 @@ impl Render for LoginView {
         // Under the field: the error (owner decision v15: neutral 12 text
         // after a 16 destructive icon, as in every sheet footer). The slot
         // keeps its height, so nothing moves.
-        let under = error.map(|text| {
-            crate::ui::native::sheet::sheet_status_error(text, cx)
-                .id("login-error")
-                .max_w_full()
-        });
+        // After 重新发送 the same slot says a new code went out; an error goes first.
+        let resent = (self.email_resent && step == Step::EmailCode && !server_step && !signing_in)
+            .then(|| {
+                div()
+                    .id("login-resent")
+                    .max_w_full()
+                    .min_w_0()
+                    .n_footnote()
+                    .text_color(k.secondary)
+                    .child(crate::ui::truncate::TruncText::new(l::EMAIL_RESENT))
+                    .into_any_element()
+            });
+        let under = error
+            .map(|text| {
+                crate::ui::native::sheet::sheet_status_error(text, cx)
+                    .id("login-error")
+                    .max_w_full()
+                    .into_any_element()
+            })
+            .or(resent);
         let ready = if server_step {
             !server_url.trim().is_empty()
         } else {
@@ -821,23 +986,16 @@ impl Render for LoginView {
         )
         .on_click(cx.listener(|this, _, window, cx| this.continue_(window, cx)));
         let link = self.render_link_row(server_step, custom.filter(|_| !server_step), cx);
-        let (title, description): (&'static str, SharedString) = if server_step {
-            (l::SERVER_TITLE, l::SERVER_LEAD.into())
+        let (title, description): (&'static str, gpui::AnyElement) = if server_step {
+            (l::SERVER_TITLE, l::SERVER_LEAD.into_any_element())
         } else {
             match step {
                 Step::Invite if self.services.provider.adding_account() => {
-                    (l::ADD_TITLE, l::ADD_LEAD.into())
+                    (l::ADD_TITLE, l::ADD_LEAD.into_any_element())
                 }
-                Step::Invite => (l::WELCOME, l::LEAD.into()),
-                Step::Email => (l::EMAIL_SIGN_IN, l::EMAIL_LEAD.into()),
-                Step::EmailCode => (
-                    l::EMAIL_CODE_TITLE,
-                    crate::copy::fill(
-                        l::EMAIL_CODE_LEAD,
-                        &[("email", &short_email(&self.sent_to))],
-                    )
-                    .into(),
-                ),
+                Step::Invite => (l::WELCOME, l::LEAD.into_any_element()),
+                Step::Email => (l::EMAIL_SIGN_IN, l::EMAIL_LEAD.into_any_element()),
+                Step::EmailCode => (l::EMAIL_CODE_TITLE, code_lead(&self.sent_to)),
             }
         };
         let column = div()
@@ -857,16 +1015,22 @@ impl Render for LoginView {
             .child(
                 div()
                     .mt(space::S4)
+                    .w_full()
                     .n_body()
                     .text_color(k.secondary)
                     .text_center()
                     .child(description),
             )
+            // Every step keeps the slot of the tallest field (the code
+            // cells), so the column has one height and only the field
+            // changes from step to step.
             .child(
                 div()
                     .mt(space::S24)
                     .w_full()
+                    .h(crate::ui::native::metrics::CODE_SLOT.1)
                     .flex()
+                    .items_center()
                     .justify_center()
                     .child(field),
             )
@@ -902,8 +1066,23 @@ impl Render for LoginView {
                 if e.keystroke.key != "escape" {
                     return;
                 }
+                // While a request is out the step stays; 添加账号 still cancels.
+                if this.busy() {
+                    if this.step == Step::Invite && this.services.provider.adding_account() {
+                        this.services.provider.cancel_add_account();
+                        cx.stop_propagation();
+                    }
+                    return;
+                }
+                // Esc goes one step back: out of the server step (the URL
+                // as it was), from the email code to the address, from the
+                // address to the invite code; then it cancels 添加账号.
                 if this.server_open {
-                    this.close_server_field(window, cx);
+                    this.close_server_field(false, window, cx);
+                } else if this.step == Step::EmailCode {
+                    this.go_to(Step::Email, window, cx);
+                } else if this.step == Step::Email {
+                    this.go_to(Step::Invite, window, cx);
                 } else if this.services.provider.adding_account() {
                     this.services.provider.cancel_add_account();
                 } else {
@@ -929,8 +1108,33 @@ impl Render for LoginView {
     }
 }
 
-/// A long address cut in the middle (both ends name it), so the lead stays
-/// at two lines.
+/// The lead of the code step on one line (§2.20): the words keep their
+/// width and the address between them is cut in the middle when it is long,
+/// with the whole address in a tooltip.
+fn code_lead(email: &str) -> gpui::AnyElement {
+    let (before, after) = l::EMAIL_CODE_LEAD
+        .split_once("{email}")
+        .unwrap_or((l::EMAIL_CODE_LEAD, ""));
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .justify_center()
+        .whitespace_nowrap()
+        .child(div().flex_none().child(before))
+        .child(
+            crate::ui::truncate::TruncText::new(short_email(email))
+                .id("login-sent-to")
+                .middle()
+                .tip(email.to_string())
+                .min_w_0(),
+        )
+        .child(div().flex_none().child(after))
+        .into_any_element()
+}
+
+/// A long address cut in the middle (both ends name it), so it never
+/// takes the whole line.
 fn short_email(email: &str) -> String {
     const MAX: usize = 32;
     let chars: Vec<char> = email.chars().collect();
@@ -1181,5 +1385,107 @@ mod tests {
     fn server_line_shows_the_host() {
         assert_eq!(server_host("https://team.joye.co/"), "team.joye.co");
         assert_eq!(server_host("http://127.0.0.1:8787"), "127.0.0.1:8787");
+    }
+}
+
+#[cfg(test)]
+mod flow_tests {
+    use std::sync::Arc;
+
+    use gpui::{TestAppContext, VisualTestContext};
+
+    use super::*;
+    use crate::{data::ChatProvider, fake::FakeProvider};
+
+    fn open(cx: &mut TestAppContext) -> (Entity<LoginView>, &mut VisualTestContext) {
+        cx.update(gpui_component::init);
+        let provider: Arc<dyn ChatProvider> = FakeProvider::new();
+        let (view, cx) = cx.add_window_view(move |window, cx| {
+            LoginView::new(Services::new(provider, cx), window, cx)
+        });
+        cx.run_until_parked();
+        (view, cx)
+    }
+
+    fn server(view: &Entity<LoginView>, cx: &mut VisualTestContext) -> String {
+        view.update(cx, |v, cx| v.server.read(cx).value().to_string())
+    }
+
+    fn type_server(view: &Entity<LoginView>, url: &str, cx: &mut VisualTestContext) {
+        view.update_in(cx, |v, window, cx| {
+            v.open_server_field(window, cx);
+            v.server
+                .update(cx, |st, cx| st.set_value(url.to_string(), window, cx));
+        });
+    }
+
+    /// 取消 and Esc put the URL back as it was; 继续 keeps the edit.
+    #[gpui::test]
+    fn cancel_on_the_server_step_restores_the_url(cx: &mut TestAppContext) {
+        let (view, cx) = open(cx);
+        let before = server(&view, cx);
+
+        type_server(&view, "https://half-typed", cx);
+        view.update_in(cx, |v, window, cx| v.close_server_field(false, window, cx));
+        assert_eq!(server(&view, cx), before);
+        assert!(!view.update(cx, |v, _| v.server_open));
+
+        type_server(&view, "", cx);
+        cx.run_until_parked();
+        cx.simulate_keystrokes("escape");
+        assert_eq!(server(&view, cx), before);
+        assert!(!view.update(cx, |v, _| v.server_open));
+
+        type_server(&view, "https://other.example", cx);
+        view.update_in(cx, |v, window, cx| v.continue_(window, cx));
+        assert_eq!(server(&view, cx), "https://other.example");
+        assert!(!view.update(cx, |v, _| v.server_open));
+    }
+
+    /// Leaving the server step keeps the digits typed on the email code step.
+    #[gpui::test]
+    fn the_server_step_keeps_the_email_code_typed(cx: &mut TestAppContext) {
+        let (view, cx) = open(cx);
+        view.update_in(cx, |v, window, cx| {
+            v.preview_email("a@example.com", Some("123"), window, cx)
+        });
+        type_server(&view, "https://half-typed", cx);
+        view.update_in(cx, |v, window, cx| v.close_server_field(false, window, cx));
+        assert_eq!(view.update(cx, |v, cx| v.email_code_digits(cx)), "123");
+        assert_eq!(view.update(cx, |v, _| v.step), Step::EmailCode);
+    }
+
+    /// 重新发送 says it went out and rests; a typed digit takes the line away, and another
+    /// address does not inherit the wait.
+    #[gpui::test]
+    fn a_resend_is_confirmed_and_rests(cx: &mut TestAppContext) {
+        let (view, cx) = open(cx);
+        view.update_in(cx, |v, window, cx| {
+            v.preview_email_resent("a@example.com", window, cx)
+        });
+        cx.run_until_parked();
+        assert!(view.update(cx, |v, _| v.email_resent));
+        assert!(view.update(cx, |v, _| v.email_resend_wait > 0));
+        cx.simulate_input("1");
+        cx.run_until_parked();
+        assert_eq!(view.update(cx, |v, cx| v.email_code_digits(cx)), "1");
+        assert!(!view.update(cx, |v, _| v.email_resent));
+        assert!(view.update(cx, |v, _| v.email_resend_wait > 0));
+        view.update_in(cx, |v, window, cx| v.go_to(Step::Email, window, cx));
+        assert_eq!(view.update(cx, |v, _| v.email_resend_wait), 0);
+    }
+
+    /// Esc on the email steps goes one step back.
+    #[gpui::test]
+    fn escape_goes_back_from_the_email_steps(cx: &mut TestAppContext) {
+        let (view, cx) = open(cx);
+        view.update_in(cx, |v, window, cx| {
+            v.preview_email("a@example.com", Some("123"), window, cx)
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes("escape");
+        assert_eq!(view.update(cx, |v, _| v.step), Step::Email);
+        cx.simulate_keystrokes("escape");
+        assert_eq!(view.update(cx, |v, _| v.step), Step::Invite);
     }
 }
