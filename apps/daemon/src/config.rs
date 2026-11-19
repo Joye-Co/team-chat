@@ -290,9 +290,37 @@ pub fn default_config_path() -> PathBuf {
 
 impl Config {
     pub fn load(path: &Path) -> Result<Config, String> {
-        let text = std::fs::read_to_string(path)
-            .map_err(|e| format!("cannot read config {}: {e}", path.display()))?;
-        Self::parse(&text)
+        let text = std::fs::read_to_string(path).map_err(|e| {
+            let said = format!("cannot read config {}: {e}", path.display());
+            if e.kind() == std::io::ErrorKind::NotFound {
+                // Operator text of the CLI, not interface text.
+                format!(
+                    "{said} (write one from `{}-daemon example-config`, or add this computer in the app)",
+                    crate::product::slug()
+                )
+            } else {
+                said
+            }
+        })?;
+        // `parse` says "config: ..."; here the file is known.
+        Self::parse(&text).map_err(|e| match e.strip_prefix("config: ") {
+            Some(rest) => format!("config {}: {rest}", path.display()),
+            None => format!("config {}: {e}", path.display()),
+        })
+    }
+
+    /// Why the daemon would not start with this config read from `path`: [`Config::problems`],
+    /// and on Windows a config file that other users can read (it can hold a runtime's keys in
+    /// `env`). `run`, `install-service` and `doctor` all ask here, so they agree.
+    pub fn problems_at(&self, path: &Path) -> Vec<String> {
+        let mut out = self.problems();
+        if let Some(why) = crate::sys::acl_problem(path) {
+            out.push(format!(
+                "config {} must be private to this user: {why}",
+                path.display()
+            ));
+        }
+        out
     }
 
     pub fn parse(text: &str) -> Result<Config, String> {
@@ -419,7 +447,7 @@ impl Config {
             .map_err(|e| format!("cannot read token file {}: {e}", self.token_file.display()))?;
         let t = t.trim().to_string();
         if t.is_empty() {
-            return Err("token file is empty".into());
+            return Err(format!("token file {} is empty", self.token_file.display()));
         }
         Ok(t)
     }
@@ -485,6 +513,47 @@ kind = "claude"
 #[cfg(test)]
 mod tests {
     use super::takeover_url_problem as p;
+
+    #[test]
+    fn load_and_token_errors_name_their_file_and_the_next_step() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("daemon.toml");
+        let at = file.display().to_string();
+        let e = super::Config::load(&file).unwrap_err();
+        assert!(e.starts_with(&format!("cannot read config {at}: ")), "{e}");
+        assert!(
+            e.contains(&format!("{}-daemon example-config", crate::product::slug())),
+            "{e}"
+        );
+        std::fs::write(&file, "server_url = 1\n").unwrap();
+        let e = super::Config::load(&file).unwrap_err();
+        assert!(e.starts_with(&format!("config {at}: ")), "{e}");
+        assert!(!e.contains("config: "), "{e}");
+        // The text alone still says "config: ...".
+        assert!(
+            super::Config::parse("server_url = 1\n")
+                .unwrap_err()
+                .starts_with("config: ")
+        );
+        let token = dir.path().join("token");
+        std::fs::write(&token, " \n").unwrap();
+        std::fs::write(
+            &file,
+            format!(
+                "server_url = \"http://127.0.0.1:1\"\ntoken_file = '{}'\n[runtimes.claude]\nkind = \"claude\"\n",
+                token.display()
+            ),
+        )
+        .unwrap();
+        let c = super::Config::load(&file).unwrap();
+        assert_eq!(
+            c.read_token().unwrap_err(),
+            format!("token file {} is empty", token.display())
+        );
+        // On unix the config file's own mode is not part of the start-up problems.
+        #[cfg(unix)]
+        assert_eq!(c.problems_at(&file), c.problems());
+    }
 
     /// A config written for the per-member homes still parses; the settings do nothing.
     #[test]

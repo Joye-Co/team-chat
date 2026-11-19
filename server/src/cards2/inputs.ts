@@ -1,7 +1,7 @@
 // Declarative checks of answer inputs and live event values against the block definitions
 // (CARD21 §4, INTERACT §3.2). Only shapes, closed id sets, required, min/max and lengths: a
 // value is data a person typed, never interpreted.
-import type { CardV2Block } from "@chat/protocol";
+import { type CardV2Block, cardBlockEvents } from "@chat/protocol";
 
 type Block = CardV2Block;
 type Obj = Record<string, unknown>;
@@ -193,38 +193,4 @@ export function eventValueProblem(b: Block, event: string, value: unknown): stri
 }
 
 /** The events a block type can send. */
-export function eventsOf(b: Block): string[] {
-  switch (b.type) {
-    case "decision":
-    case "imageChoice":
-    case "slots":
-    case "poll":
-    case "confirm":
-      return ["choice.change", "choice.submit"];
-    case "rank":
-    case "matrix":
-    case "rating":
-    case "scale":
-      return ["input.change"];
-    case "input":
-      return b.kind === "text" || b.kind === "number" ? ["input.change", "input.submit"] : ["input.change"];
-    case "chart":
-      return ["chart.select", "chart.clear"];
-    case "metric":
-      return ["metric.press"];
-    case "table":
-      return ["table.rowSelect", "table.sort"];
-    case "buttons":
-      return ["button.press"];
-    case "draft":
-      return ["draft.edit"];
-    case "compare":
-      return ["compare.pick"];
-    case "tabs":
-      return ["tab.open"];
-    case "questionnaire":
-      return ["action.press"];
-    default:
-      return [];
-  }
-}
+export const eventsOf = cardBlockEvents;

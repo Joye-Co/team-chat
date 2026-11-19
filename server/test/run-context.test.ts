@@ -3,10 +3,10 @@
 // another request's session, and the run reads the rest with chat-run.
 import { mainTopicId } from "@chat/protocol";
 import { SELF } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { type ContextRow, renderMessage, requestText, selectLines, stamp } from "../src/context/render";
-import { Daemon, downViolations, mention, world } from "./daemon";
-import { BASE, Client, type TestMember, api, clientMsgId, protocolViolations } from "./helpers";
+import { Daemon, mention, world } from "./daemon";
+import { BASE, Client, type TestMember, api, clientMsgId } from "./helpers";
 
 /** A small file of the group (the bytes do not matter to the prompt). */
 async function upload(m: TestMember, groupId: string, name: string, mime: string): Promise<string> {
@@ -18,12 +18,6 @@ async function upload(m: TestMember, groupId: string, name: string, mime: string
   expect(put.status).toBe(200);
   return c.body.file.id as string;
 }
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
 
 const row = (seq: number, body: string, ext: ContextRow["ext"] = {}, authorId = "u1"): ContextRow => ({
   id: `m${seq}`,

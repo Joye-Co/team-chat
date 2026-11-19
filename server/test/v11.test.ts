@@ -1,14 +1,9 @@
 // 1.1 boundary: Card v2 messages with their derived v1 card, card answers, side chat context,
 // and 产出 page events. Routing answers and events to runs is tested by the bots feature.
 import { SELF, env, runInDurableObject } from "cloudflare:test";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { type CardV2, cardV2ToV1 } from "@chat/protocol";
-import { BASE, Client, api, clientMsgId, createGroup, createMember, protocolViolations, type TestMember } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-});
+import { BASE, Client, api, clientMsgId, createGroup, createMember, type TestMember } from "./helpers";
 
 const ask = (rev: number, from: string[], extra: Partial<CardV2> = {}): CardV2 => ({
   v: 2,

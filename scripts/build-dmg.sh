@@ -26,14 +26,21 @@ skip_build=0
 for arg in "$@"; do
   case "$arg" in
     --skip-build) skip_build=1 ;;
-    -h | --help) sed -n '2,17p' "$0"; exit 0 ;;
+    -h | --help) usage; exit 0 ;;
     *) die "unknown argument: $arg" ;;
   esac
 done
 
 [ "$(uname -s)" = Darwin ] || die "build-dmg.sh runs on macOS only"
 need jq codesign hdiutil python3 shasum plutil xattr
+# The signing tools are checked here, before the build that takes minutes.
+if [ "$(signing_mode)" = cert ]; then
+  command -v rcodesign >/dev/null 2>&1 ||
+    die "missing tool: rcodesign, which signs with the files in $(signing_dir) (cargo install apple-codesign; SIGNING=adhoc builds without it)"
+  need csreq openssl
+fi
 cargo_env
+[ "$skip_build" = 1 ] || warn_low_disk
 
 NAME="$(product name)"
 BUNDLE_ID="$(product bundleId)"
@@ -122,7 +129,6 @@ fi
 xattr -cr "$APP"
 DAEMON_ID="$BUNDLE_ID.daemon"
 if [ "$(signing_mode)" = cert ]; then
-  need rcodesign csreq openssl
   fp="$(signing_cert_sha1)"
   log "signing with the self-signed certificate (leaf $fp)"
   csreq -r="identifier \"$BUNDLE_ID\" and certificate leaf = H\"$fp\"" -b "$WORK/app.req"

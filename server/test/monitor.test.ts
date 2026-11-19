@@ -174,7 +174,7 @@ describe("monitor math", () => {
           botId: "01JBX0B0T0000000000000000A",
           rollup: rollup({
             active: [
-              { runId: "r1", status: "waiting", startedAt: 1, runtime: "codex", paused: false },
+              { runId: "r1", status: "waiting", startedAt: 1, runtime: "codex", paused: false, groupId: "g1", topicId: "t1" },
               { runId: "r2", status: "running", startedAt: 2, runtime: "codex", paused: true },
             ],
             queued: [{ runId: "q1", queuedAt: 50 }],
@@ -196,6 +196,9 @@ describe("monitor math", () => {
       ["q1", "queued"],
       ["q2", "queued"],
     ]);
+    // 等你 leads to the 话题 the reply goes to; a queued run has none yet.
+    expect(m.runs.find((r) => r.runId === "r1")).toMatchObject({ groupId: "g1", topicId: "t1" });
+    expect(m.runs.find((r) => r.runId === "q1")?.topicId).toBeUndefined();
     expect(m.queue).toEqual({ count: 2, oldestAt: 40 });
     expect(m.today).toMatchObject({ finished: 3, succeeded: 2, failed: 1 });
     expect(m.lastFailure).toEqual({ runId: "r0", memberId: "01JBX0B0T0000000000000000A", at: 100, title: "对一下十月的账单" });

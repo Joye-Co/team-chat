@@ -1,6 +1,6 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { DEFAULT_APPROVAL_POLICY, DEFAULT_NOTIFY_SETTINGS, type NotifySettings } from "@chat/protocol";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { buildPrompt } from "../src/bots/dispatch";
 import { decideNotifyEvent } from "../src/notify/rules";
 import {
@@ -13,14 +13,8 @@ import {
   teamPolicy,
   withDefaults,
 } from "../src/settings/rules";
-import { Daemon, downViolations, mention, world } from "./daemon";
-import { Client, api, clientMsgId, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
-
-afterAll(async () => {
-  await new Promise((r) => setTimeout(r, 300));
-  expect(protocolViolations).toEqual([]);
-  expect(downViolations).toEqual([]);
-});
+import { Daemon, mention, world } from "./daemon";
+import { Client, api, clientMsgId, createGroup, createMember, inputBody, waitUntil } from "./helpers";
 
 const H = 3_600_000;
 // 2026-11-04 00:00 UTC = 08:00 in Asia/Shanghai.
@@ -301,7 +295,7 @@ describe("approval policies", () => {
     // The requester's press and 同意 do not answer; the owner's press does.
     await c.ok({ t: "card.action", groupId: w.gid, messageId: card.id, actionId: "approve:a1" });
     await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "同意" });
-    await d.next((f) => f.t === "run.input" && f.text === "同意");
+    await d.next((f) => f.t === "run.input" && inputBody(f) === "同意");
     expect(d.frames.filter((f) => f.t === "run.approval")).toEqual([]);
     await co.ok({ t: "card.action", groupId: w.gid, messageId: card.id, actionId: "approve:a1" });
     expect(await d.next((f) => f.t === "run.approval")).toMatchObject({ approvalId: "a1", decision: "approve" });

@@ -125,7 +125,7 @@ END;
 **谁能加**
 - `POST /v1/machines` 从 `auth:"owner"` 改成 `auth:"member"`，请求体加可选 `personal?: boolean`。
 - 普通成员加的一律是个人的电脑，传 `personal:false` 得 403 `machine.team_admin_only`。管理员不传时是团队的电脑（旧客户端行为不变）。
-- 新客户端：「用这台电脑」总是传 `personal:true`。「添加电脑」（装 daemon 的命令，机 1.8 / 线 10）普通成员也有，一律建个人的电脑；管理员的表单多一项「谁用这台电脑：团队 / 只有我」，默认团队，只在团队里有不止一位在用的人时显示。
+- 新客户端：「用这台电脑」总是传 `personal:true`。「添加电脑」（装 daemon 的命令，机 1.8 / 线 10）普通成员也有，一律建个人的电脑；管理员的表单多一项「谁用这台电脑：团队 / 只有我」，从「我的电脑」标题进来时默认只有我，其他入口默认团队，只在团队里有不止一位在用的人时显示。
 
 **谁算交代人**（新函数 `requesterOf`，放 `server/src/bots/desk/runs.ts`；种类判断 `requesterKind(db, id)` 放 `server/src/bots/store.ts`，返回 `human` / `hook`（在 `hooks` 表里有行的成员）/ `bot`）。每次运行在 desk 的 `runs` 表新列 `requested_for`（DO 迁移 `roles-1`）里存「替哪个人做」：
 
@@ -250,7 +250,7 @@ END;
 | `LEVEL_OWNER` / `LEVEL_MEMBER`（settings，不变） | 管理员 / 普通成员 |
 | admin.rs 的 `LEVEL_OWNER` / `LEVEL_MEMBER` / `ROLE_OWNER` | 管理员 / 普通成员 / 所有者（原来是「负责人」，和话题负责成员撞词） |
 | `HEADER_DESC` / `SETTINGS_CARD_DESC`（admin） | 所有者和管理员能打开 / 成员、用量、电脑、订阅账号和密钥都在这里。只有所有者和管理员能看到。 |
-| `SET_ROLE_OWNER` / `SET_ROLE_ADMIN` / `SET_ROLE_MEMBER` | 设为所有者 / 设为管理员 / 设为普通成员 |
+| `SET_ROLE_OWNER` / `SET_ROLE_ADMIN` / `SET_ROLE_MEMBER` | 设为所有者… / 设为管理员 / 设为普通成员 |
 | `ERR_ADMIN_ONLY` | 只有管理员能改这一项。 |
 | `ERR_OWNER_ONLY` | 只有所有者能改身份。 |
 | `ERR_LAST_OWNER` | 团队至少要有一位所有者。 |
@@ -260,7 +260,7 @@ END;
 | `MACHINE_PERSONAL_NOTE` | 只做你交代的事。 |
 | `MACHINE_TO_TEAM` / `MACHINE_TO_MINE` | 交给团队 / 改成我的电脑 |
 | `MACHINE_TO_MINE_CONFIRM` | 改成你的电脑后，其他管理员就管不了它了。 |
-| `MACHINE_MY_BOTS` | 我交代给这些成员的事，在这台电脑上做 |
+| `MACHINE_MY_BOTS_HINT` | 你交代给这些成员的事在这台电脑上做，别人交代的照旧在团队的电脑上做。 |
 | `MACHINE_MY_BOTS_REPO` | 这台电脑上的代码仓库 |
 | `BOT_PLACE_ANY` / `BOT_PLACE_ANY_TEAM` | 任意一台电脑 / 任意一台团队的电脑 |
 | `BOT_PLACE_TEAM_SUFFIX` / `BOT_PLACE_MINE_SUFFIX` | {name}（团队） / {name}（我的） |
@@ -274,7 +274,7 @@ END;
 **界面改动**
 - 判断函数保留 `i_am_owner` 的名字（加注释：表示管理员或所有者），新增 `i_am_team_owner`。服务端还没发 `teamOwner` 时（R1 之前），客户端把人类管理员都当所有者，和 0017_roles 的迁移结果一致（`TeamRole::of`）。原因：23 处改名会和线 8、10 的桌面 PR 互相 rebase，条件又没变。`data::Member` 加 `team_owner`，`provider/convert.rs` 读 `teamOwner`。
 - 成员列表（设置和团队管理两处）：身份一列显示所有者 / 管理员 / 普通成员；⋯ 菜单的「设为…」只在我是所有者、对象不是我时出现（对象是 AI 成员时只有设为管理员 / 普通成员）。邀请表单不加身份选项，原有的「级别」选项也去掉：邀请来的都是普通成员，之后再「设为…」。
-- 电脑页（设置 › 电脑；团队管理 › 电脑）：普通成员也能打开设置 › 电脑，分「我的电脑」「团队的电脑」两组，团队那组只有名字和在不在线；每台的副标题写团队的电脑或 {name}的电脑；有「添加电脑」。（R5 实现时定：别人的个人电脑单独成第三组「同事的电脑」，副标题写 {name}的电脑；团队管理 › 电脑只放团队的和我的，别人的个人电脑没有监控可看。「交给团队」「改成我的电脑」在一个人用时也在 ⋯ 菜单里，它们不是分组，是 3.10 旧数据和 3.11 邀请时要用的入口。）个人电脑详情里有 `MACHINE_MY_BOTS`：gpui-component 的 list 加 switch，只列这台电脑有运行方式的 AI 成员，每行可展开填代码仓库。⋯ 菜单按 3.5 显示「交给团队」或「改成我的电脑」（后者用 dialog 确认）。
+- 电脑页（设置 › 电脑；团队管理 › 电脑）：普通成员也能打开设置 › 电脑，分「我的电脑」「团队的电脑」两组，团队那组只有名字和在不在线；每台的副标题写团队的电脑或 {name}的电脑；有「添加电脑」。（R5 实现时定：别人的个人电脑单独成第三组「同事的电脑」，副标题写 {name}的电脑；团队管理 › 电脑只放团队的和我的，别人的个人电脑没有监控可看。「交给团队」「改成我的电脑」在一个人用时也在 ⋯ 菜单里，它们不是分组，是 3.10 旧数据和 3.11 邀请时要用的入口。）个人电脑详情里有 `MACHINE_MY_BOTS_HINT`：gpui-component 的 list 加 switch，只列这台电脑有运行方式的 AI 成员，每行可展开填代码仓库。⋯ 菜单按 3.5 显示「交给团队」或「改成我的电脑」（后者用 dialog 确认）。
 - 「用这台电脑」：请求带 `personal:true`，完成那一屏多一行 `MACHINE_PERSONAL_NOTE`（团队时才显示；那一屏的其余说明是线 8 机 3.1 a）。
 - AI 成员的电脑选择（成员页表单，以及线 10 日常界面里改电脑的弹窗）：管理员看到任意一台（团队的）电脑 / 各台团队电脑 / 自己的个人电脑；指定在别人个人电脑上的 AI 成员，这一项只读并显示 `BOT_PINNED_OTHER_HINT`。普通成员只看到「我交代的事：用团队安排的电脑 / 用我的电脑 {name}」，写的是 `machine_bots`。添加 AI 成员时，如果「用这台电脑」已做过，默认选这台电脑。
 - 邀请表单：我在 `solo()` 状态、而且有指定在我个人电脑上的 AI 成员时，显示 `INVITE_SOLO_NOTE` 和「交给团队」按钮（我不是管理员时不会走到这里，邀请本来就要管理员）。

@@ -419,13 +419,12 @@ pub fn remove_lru(work_root: &Path, min_free: u64, free: impl Fn() -> u64) -> us
             break;
         }
         if remove(work_root, &e.key).is_ok() {
-            eprintln!(
-                "{} cache {} removed (last used {}, {})",
-                now_ms(),
+            crate::problems::log(format_args!(
+                "cache {} removed (last used {}, {} bytes)",
                 e.key,
-                e.last_used_at,
+                crate::problems::stamp(e.last_used_at),
                 e.bytes
-            );
+            ));
             removed += 1;
         }
     }
