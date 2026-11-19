@@ -3,9 +3,9 @@
 Each release is tagged `v<version>` and has a GitHub Release with the DMG, the machine daemon
 and the Windows installer; GitHub shows each file's SHA-256. Release notes for the team are in Chinese in `docs/releases/`.
 
-## 1.3.1 (unreleased)
+## 1.4.0 (unreleased)
 
-Notes: [docs/releases/1.3.1.md](docs/releases/1.3.1.md). D1 migrations `0020_hide_delete` and
+Notes: [docs/releases/1.4.0.md](docs/releases/1.4.0.md). D1 migrations `0020_hide_delete` and
 `0021_machine_limits` (new columns only). Protocol: additive (hide and delete, `hide-delete/1`;
 `Machine.parallelRuns` and the `machine.limits` frame; `run.done.prs` with state, title, size and
 diff; `TopicLink.diff`). The server is redeployed before the release. 1.3.0 clients and daemons
@@ -20,6 +20,13 @@ keep working.
 - Set how many runs a computer does at once from Settings › 电脑.
 - Redesigned run details pane; a 从这里开始 checklist on 首页 for new members.
 - Fixes: AI member avatar tint, tall pictures in composer thumbnails.
+- AI members answer with cards and 产出 pages: the run note says when to use which; `chat-run card example|check|schema --block`, `artifact guide|example`, `artifact data` reads and `--keep-data`.
+- Card v2/2.1 renderer finished: metrics past four, folded long tables and diffs, multi-series charts, evidence with tests, recordings and 产出, keyboard on sorts, points and tabs.
+- Two-way pages: the bridge survives reloads and reconnects, every page gets the app's theme and control styles, and a refused call says why (`no_user_action`, `bad_payload`, the member's decline text).
+- Every screen reviewed in light and dark: the findings that let a person misread a screen or take a wrong step were fixed, and wording is one word per concept.
+- Server: errors name the field and the wait (`retryAfterMs`), the card and page event loop no longer drops or overwrites events.
+- Windows: the in-window menu bar opens from the keyboard (Alt, F10).
+- Developer: docs match the code, scripts have help and prerequisite checks, CI covers the bot SDK, chat-ffi, the iOS copy and the website; gpui-base is vendored with seven fixes.
 - CI: release builds for every system run at the same time with a rehearsal twice a week; main
   runs no longer queue; a pre-commit hook formats staged Rust files.
 
