@@ -116,6 +116,7 @@ async fn ask_once(
         label: "B 站 · 10-06".into(),
         value: Some(serde_json::json!(3)),
         selector: Some("#bars .col:nth-child(1)".into()),
+        user_action: true,
     };
     {
         cx.update(|cx| {

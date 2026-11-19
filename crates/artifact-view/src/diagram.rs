@@ -14,9 +14,11 @@ use crate::{Capabilities, OpenOptions, Presentation, VersionSpec};
 /// Bump when the page, the config, the sanitizer or the bridge limits change: every cache
 /// key changes, so failures cached by an older renderer (such as the timeouts of a bridge
 /// that dropped large `rendered` events) are not shown again.
-pub const RENDERER_VERSION: u32 = 3;
+pub const RENDERER_VERSION: u32 = 7;
 /// The width of a Gantt chart: the content width of a card (D2-30).
 const GANTT_WIDTH: u32 = 600;
+/// The left gutter of a Gantt chart with no section names: room for half of the first tick.
+const GANTT_LEFT_NO_SECTIONS: u32 = 24;
 /// The artifact id of the reserved origin (`teamchat-diagram-v<RENDERER_VERSION>`).
 pub const ARTIFACT_ID: &str = "teamchat-diagram";
 /// The bundled library: `mermaid` 12.2.0 from npm, `dist/mermaid.min.js`, MIT
@@ -188,6 +190,8 @@ pub fn mermaid_config(t: &ThemeVars) -> Value {
         },
         "sequence": {
             "useMaxWidth": false, "mirrorActors": false, "height": 40,
+            // The viewer and the card keep their own side inset.
+            "diagramMarginX": 8,
             "width": 132, "boxMargin": 8, "noteMargin": 8, "messageMargin": 32,
             "actorFontFamily": t.font_family, "noteFontFamily": t.font_family,
             "messageFontFamily": t.font_family
@@ -223,7 +227,9 @@ pub fn mermaid_config(t: &ThemeVars) -> Value {
 }
 
 /// Shape details the theme variables do not cover: no drop shadows, rounded boxes (the
-/// artboard's 6 px), hairline grid, no "today" line, labels in the UI font.
+/// artboard's 6 px), hairline grid, no "today" line, labels in the UI font, and a halo
+/// in the surface color behind the text of a sequence diagram (a message's words, a
+/// loop's condition), which the library draws straight over the lifelines.
 fn theme_css(t: &ThemeVars) -> String {
     format!(
         "* {{ filter: none !important; }}\
@@ -231,7 +237,10 @@ fn theme_css(t: &ThemeVars) -> String {
          .node rect, .node polygon, .node circle, rect.actor, rect.task {{ stroke-width: 1px; }}\
          .grid .tick line {{ stroke: {line}; opacity: 1; }} .grid path {{ stroke-width: 0; }}\
          .grid .tick text {{ fill: {ink3}; font-size: 12px; }} .today {{ display: none; }}\
-         text, tspan {{ font-family: {font}; }}",
+         text, tspan {{ font-family: {font}; }}\
+         .messageText, .loopText, .loopText tspan {{ paint-order: stroke; stroke: {surface}; \
+         stroke-width: 4px; stroke-linejoin: round; }}",
+        surface = t.raised,
         line = t.line,
         ink3 = t.ink_3,
         font = t.font_family
@@ -244,15 +253,33 @@ pub struct RenderRequest {
     pub req_id: u64,
     pub source: String,
     pub theme: ThemeVars,
+    /// The words a sequence diagram's block frames show, by the keyword of the source
+    /// (`loop`, `alt`, ...). A keyword with no entry stays as the library draws it.
+    pub block_labels: Vec<(String, String)>,
 }
 
 /// The script that starts a render. serde_json yields a valid JavaScript literal, so the
 /// source cannot break out of the expression.
 pub fn render_script(req: &RenderRequest) -> String {
+    let labels: serde_json::Map<String, Value> = req
+        .block_labels
+        .iter()
+        .map(|(k, v)| (k.clone(), Value::String(v.clone())))
+        .collect();
+    let mut config = mermaid_config(&req.theme);
+    // Without sections the left gutter would hold no names: the bars start at the card's inset.
+    if !req
+        .source
+        .lines()
+        .any(|line| line.trim_start().starts_with("section"))
+    {
+        config["gantt"]["leftPadding"] = json!(GANTT_LEFT_NO_SECTIONS);
+    }
     let arg = json!({
         "reqId": req.req_id,
         "source": req.source,
-        "config": mermaid_config(&req.theme),
+        "config": config,
+        "blockLabels": labels,
         "limits": { "maxNodes": MAX_NODES, "maxEdges": MAX_EDGES, "maxSide": MAX_SIDE },
     });
     format!("window.tcRender({arg});void 0")
@@ -301,6 +328,8 @@ pub struct DiagramNode {
     pub y: f64,
     pub w: f64,
     pub h: f64,
+    /// A sequence participant: the height of its head box (`h` runs down the lifeline).
+    pub head: Option<f64>,
 }
 
 /// A rendered diagram before its raster.
@@ -373,6 +402,7 @@ pub fn parse_event(name: &str, payload: &Value) -> Option<RenderOutcome> {
                                 y: num(n, "y")?,
                                 w: num(n, "w")?.max(0.0),
                                 h: num(n, "h")?.max(0.0),
+                                head: num(n, "head").map(|h| h.max(0.0)),
                             })
                         })
                         .filter(|n| !n.id.is_empty())
@@ -866,6 +896,7 @@ mod tests {
             req_id: 7,
             source: "graph TD\nA[\"</script>\"]-->B');alert(1);//".into(),
             theme: theme(),
+            block_labels: Vec::new(),
         });
         assert!(s.starts_with("window.tcRender({"));
         assert!(s.ends_with("});void 0"));

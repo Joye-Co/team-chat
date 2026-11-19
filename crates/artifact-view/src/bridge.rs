@@ -154,6 +154,43 @@ pub enum Reject {
 }
 
 impl Reject {
+    /// Every code a page can get, for the author guide and tests.
+    pub const ALL: [Reject; 12] = [
+        Reject::NotAllowed,
+        Reject::BadRequest,
+        Reject::TooLarge,
+        Reject::RateLimited,
+        Reject::Offline,
+        Reject::Timeout,
+        Reject::Declined,
+        Reject::Failed,
+        Reject::Reloaded,
+        Reject::UnknownMethod,
+        Reject::NoUserAction,
+        Reject::BadPayload,
+    ];
+
+    /// What `Error.message` says when the host has nothing more specific (the member's
+    /// own reason, the server's payload problem). Written for the page's author.
+    pub fn message(self) -> &'static str {
+        match self {
+            Reject::NotAllowed => "this page may not do that",
+            Reject::BadRequest => "the request is not valid",
+            Reject::TooLarge => "the message is too large",
+            Reject::RateLimited => "too many requests, or the member takes no more now",
+            Reject::Offline => "offline: nothing was sent",
+            Reject::Timeout => "no reply in time",
+            Reject::Declined => "the member declined",
+            Reject::Failed => "the request failed",
+            Reject::Reloaded => "the page was reloaded or replaced by a new version",
+            Reject::UnknownMethod => "unknown method",
+            Reject::NoUserAction => {
+                "emit and ask must follow the viewer's click or key press within 2 s"
+            }
+            Reject::BadPayload => "the payload does not fit the event's schema",
+        }
+    }
+
     pub fn code(self) -> &'static str {
         match self {
             Reject::NotAllowed => "not_allowed",
@@ -174,6 +211,50 @@ impl Reject {
 
 /// Longest `Error.message` a page gets from outside the bridge.
 pub const MAX_ERROR_MESSAGE_CHARS: usize = 300;
+
+/// Why an open request ends: the code, and words for `Error.message` when the host has
+/// them (the member's decline reason, the server's payload problem).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Failure {
+    pub reject: Reject,
+    pub message: Option<String>,
+}
+
+impl Failure {
+    pub fn new(reject: Reject, message: impl Into<String>) -> Self {
+        Self {
+            reject,
+            message: Some(message.into()),
+        }
+    }
+
+    /// The text the page gets: the given message without control characters, cut at
+    /// [`MAX_ERROR_MESSAGE_CHARS`], or the code's own words.
+    pub fn text(&self) -> String {
+        let given: String = self
+            .message
+            .iter()
+            .flat_map(|m| m.chars())
+            .filter(|c| !c.is_control())
+            .take(MAX_ERROR_MESSAGE_CHARS)
+            .collect();
+        let given = given.trim();
+        if given.is_empty() {
+            self.reject.message().to_string()
+        } else {
+            given.to_string()
+        }
+    }
+}
+
+impl From<Reject> for Failure {
+    fn from(reject: Reject) -> Self {
+        Self {
+            reject,
+            message: None,
+        }
+    }
+}
 
 /// Largest accepted bridge message (serialized JSON).
 pub const MAX_MESSAGE_BYTES: usize = 256 * 1024;
@@ -584,18 +665,23 @@ impl Bridge {
     /// Finishes an open `emit` or `ask`: `Ok(result)` resolves the page's promise, `Err`
     /// rejects it with that code. `None` when the request is no longer open (a late reply
     /// after a timeout or a reload), so the host drops it.
-    pub fn finish(&mut self, reply_id: &Value, result: Result<Value, Reject>) -> Option<String> {
+    ///
+    /// The error is a [`Failure`]: a [`Reject`] (`Reject::Timeout.into()`), with words for
+    /// the page's `Error.message` when the host has them. They reach the page only as a
+    /// serialized string.
+    pub fn finish(&mut self, reply_id: &Value, result: Result<Value, Failure>) -> Option<String> {
         let (id, _) = self.open.remove(&key(reply_id))?;
         let reply = match result {
             Ok(v) => json!({ "id": id, "result": v }),
-            Err(r) => err_value(&id, r.code(), r.code()),
+            Err(f) => err_value(&id, f.reject.code(), &f.text()),
         };
         Some(reply_script(&reply))
     }
 
-    /// The page goes away (a reload, another version, or close): every open request ends.
-    /// Returns their ids so the host can drop its timers; the page itself is gone, so no
-    /// script runs.
+    /// The page goes away (a reload, a navigation inside the origin, another version, or
+    /// close): every open request ends. Returns their ids so the host can drop its timers.
+    /// The snapshot, the capabilities and the declarations stay: the next document of the
+    /// same version reads its data at once.
     pub fn reset(&mut self) -> Vec<Value> {
         self.waiting.clear();
         self.subscribed = false;
@@ -661,7 +747,10 @@ const PAGE_TEMPLATE: &str = r#"(function(){
       } });
     } catch (e) {}
   });
-  var n = 0, pending = new Map(), subs = [], last = null, asking = false;
+  // Request ids are unique to this document: a reply to a document that is gone (a
+  // reload, a link inside the page) never settles a request of this one.
+  var doc = Math.random().toString(36).slice(2, 10);
+  var n = 0, pending = new Map(), subs = [], last = null, asking = false, retried = false;
   window.addEventListener('artifactbridgereply', function (e) {
     var d = e.detail || {}, p = pending.get(d.id);
     if (!p) return;
@@ -680,10 +769,22 @@ const PAGE_TEMPLATE: &str = r#"(function(){
   });
   function call(method, params) {
     return new Promise(function (resolve, reject) {
-      var id = '__ab' + (++n);
+      var id = '__ab' + doc + '_' + (++n);
       pending.set(id, { resolve: resolve, reject: reject });
       try { h.postMessage({ id: id, method: method, params: params === undefined ? null : params }); }
       catch (e) { pending.delete(id); reject(e); }
+    });
+  }
+  function subscribe() {
+    if (asking || last) return;
+    asking = true;
+    call('subscribe').then(function (s) {
+      if (!last) { last = { data: s.data === undefined ? null : s.data, meta: s.cause ? { rev: s.rev, cause: s.cause } : { rev: s.rev } }; deliver(); }
+    }, function () {
+      asking = false;
+      // Once more after a second while someone still listens (the host was between two
+      // documents); a page that may not read data stays without.
+      if (!retried && subs.length) { retried = true; setTimeout(function () { if (subs.length) subscribe(); }, 1000); }
     });
   }
   function onData(cb) {
@@ -692,12 +793,7 @@ const PAGE_TEMPLATE: &str = r#"(function(){
     if (last) {
       var l = last;
       Promise.resolve().then(function () { if (subs.indexOf(cb) >= 0) { try { cb(l.data, l.meta); } catch (e) {} } });
-    } else if (!asking) {
-      asking = true;
-      call('subscribe').then(function (s) {
-        if (!last) { last = { data: s.data === undefined ? null : s.data, meta: s.cause ? { rev: s.rev, cause: s.cause } : { rev: s.rev } }; deliver(); }
-      }, function () { asking = false; });
-    }
+    } else subscribe();
     return function () { var i = subs.indexOf(cb); if (i >= 0) subs.splice(i, 1); };
   }
   function ref(o) { o = o || {}; return call('ref', { label: o.label, value: o.value, selector: o.selector }); }
@@ -731,6 +827,15 @@ pub fn page_script(init: &Value) -> String {
 const REF_TEMPLATE: &str = r#"(function(){
   var m = __MENU__;
   if (!m || !window.artifact || !window.artifact.ref) return;
+  // The host follows its theme (`ref_menu_script`). Only colours and the label change,
+  // and only as `#rrggbb` and a short text: they go into a style string below.
+  window.addEventListener('teamchatrefmenu', function (e) {
+    var d = e.detail || {};
+    ['bg', 'ink', 'line', 'accent'].forEach(function (k) { if (typeof d[k] === 'string' && /^#[0-9a-fA-F]{6}$/.test(d[k])) m[k] = d[k]; });
+    if (typeof d.label === 'string' && d.label.length > 0 && d.label.length <= 80) m.label = d.label;
+    if (lit) lit.style.outline = '2px solid ' + m.accent;
+    close();
+  });
   function target(el) {
     while (el && el.nodeType === 1) { if (el.hasAttribute('data-ref-label')) return el; el = el.parentElement; }
     return null;
@@ -793,6 +898,13 @@ const REF_TEMPLATE: &str = r#"(function(){
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); }, true);
   window.addEventListener('scroll', close, true);
 })();"#;
+
+/// The script that gives a loaded page the menu's colours and words again (the app's theme
+/// changed). The page's listener takes only `#rrggbb` colours and a short label.
+pub fn ref_menu_script(menu: &RefMenu) -> String {
+    let m = serde_json::to_string(menu).unwrap_or_else(|_| "null".into());
+    format!("window.dispatchEvent(new CustomEvent('teamchatrefmenu',{{detail:{m}}}));void 0")
+}
 
 /// The declarative 引用提问 path (REFS §A7), injected after [`page_script`] when the page
 /// may `ref`: ⌥-hover outlines an element with `data-ref-label`, ⌥-click sends it, and its
@@ -959,16 +1071,112 @@ mod tests {
         let o = b.handle(ask(4, "").as_bytes(), now());
         assert_eq!(reply_of(&o.reply.unwrap())["error"]["code"], "bad_request");
         // Timeout, then the late reply is dropped.
-        let s = b.finish(&json!(1), Err(Reject::Timeout)).unwrap();
+        let s = b.finish(&json!(1), Err(Reject::Timeout.into())).unwrap();
         assert_eq!(reply_of(&s)["error"]["code"], "timeout");
         assert_eq!(b.finish(&json!(1), Ok(json!("late"))), None);
-        let s = b.finish(&json!(2), Err(Reject::Declined)).unwrap();
+        let s = b.finish(&json!(2), Err(Reject::Declined.into())).unwrap();
         assert_eq!(reply_of(&s)["error"]["code"], "declined");
         // A reload ends the rest.
         let mut ended = b.reset();
         ended.sort_by_key(|v| v.as_u64());
         assert_eq!(ended, vec![json!(3), json!(4)]);
         assert_eq!(b.open_requests(), 0);
+    }
+
+    #[test]
+    fn failures_carry_words_for_the_page() {
+        let mut b = bot_page();
+        let ask =
+            |id: u32| format!(r#"{{"id":{id},"method":"ask","params":{{"name":"question"}}}}"#);
+        for id in 1..=4 {
+            b.handle(ask(id).as_bytes(), now());
+        }
+        // The member's own reason is the message; the code stays the code.
+        let s = b
+            .finish(
+                &json!(1),
+                Err(Failure::new(Reject::Declined, "预算还没批，下周再问")),
+            )
+            .unwrap();
+        assert_eq!(
+            reply_of(&s)["error"],
+            json!({"code":"declined","message":"预算还没批，下周再问"})
+        );
+        // Without words the code explains itself, never just repeats.
+        let s = b
+            .finish(&json!(2), Err(Reject::NoUserAction.into()))
+            .unwrap();
+        assert_eq!(reply_of(&s)["error"]["code"], "no_user_action");
+        // The words name the window the gate really uses.
+        assert_eq!(crate::gate::USER_ACTION_WINDOW.as_secs(), 2);
+        assert!(
+            reply_of(&s)["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("2 s")
+        );
+        // Text from outside cannot break out of the script, is cut, and loses control
+        // characters; an empty one falls back to the code's words.
+        let evil = format!("\"}}));alert(1);//\u{7}\n{}", "长".repeat(400));
+        let s = b
+            .finish(&json!(3), Err(Failure::new(Reject::BadPayload, evil)))
+            .unwrap();
+        let e = &reply_of(&s)["error"];
+        assert_eq!(e["code"], "bad_payload");
+        let m = e["message"].as_str().unwrap();
+        assert!(
+            m.starts_with("\"}));alert(1);//长") && m.chars().count() == MAX_ERROR_MESSAGE_CHARS
+        );
+        let s = b
+            .finish(&json!(4), Err(Failure::new(Reject::Failed, " \n ")))
+            .unwrap();
+        assert_eq!(reply_of(&s)["error"]["message"], Reject::Failed.message());
+        // Every code has its own id and words.
+        let codes: std::collections::HashSet<_> = Reject::ALL.iter().map(|r| r.code()).collect();
+        assert_eq!(codes.len(), Reject::ALL.len());
+        assert!(
+            Reject::ALL
+                .iter()
+                .all(|r| !r.message().is_empty() && r.message() != r.code())
+        );
+    }
+
+    #[test]
+    fn a_new_document_starts_clean_and_keeps_the_data() {
+        let mut b = bot_page();
+        // The old document waits for data and for a reply.
+        assert_eq!(
+            b.handle(br#"{"id":"__ab1","method":"subscribe"}"#, now())
+                .reply,
+            None
+        );
+        b.handle(
+            br#"{"id":"__ab2","method":"ask","params":{"name":"question"}}"#,
+            now(),
+        );
+        assert_eq!(b.reset(), vec![json!("__ab2")]);
+        // The new document may use the same ids, and its subscribe waits like the first.
+        assert_eq!(
+            b.handle(br#"{"id":"__ab1","method":"subscribe"}"#, now())
+                .reply,
+            None
+        );
+        let out = b.push_data(Snapshot::new(json!({"n":1}), 1));
+        assert_eq!(
+            out.len(),
+            1,
+            "only the new document's subscribe is answered"
+        );
+        let o = b.handle(
+            br#"{"id":"__ab2","method":"ask","params":{"name":"question"}}"#,
+            now(),
+        );
+        assert!(o.request.is_some());
+        // The late reply to the old ask finds the new one only by its own id; the host
+        // dropped the old request when the document started.
+        b.reset();
+        let o = b.handle(br#"{"id":"g","method":"getData"}"#, now());
+        assert_eq!(reply_of(&o.reply.unwrap())["result"], json!({"n":1}));
     }
 
     #[test]
@@ -1114,5 +1322,18 @@ mod tests {
         };
         let r = ref_listener_script(&menu);
         assert!(r.contains("\"label\":\"就这里提问\"") && !r.contains("__MENU__"));
+        // A theme change reaches the loaded page as data; its listener takes only
+        // `#rrggbb` colours, which is all that goes into the menu's style string.
+        let again = ref_menu_script(&RefMenu {
+            bg: "red;background:url(x)".into(),
+            ..menu
+        });
+        assert!(
+            again.starts_with("window.dispatchEvent(new CustomEvent('teamchatrefmenu',{detail:{")
+        );
+        assert!(r.contains("/^#[0-9a-fA-F]{6}$/.test(d[k])"));
+        // Request ids differ per document, and the dialogs say why they do nothing.
+        assert!(p.contains("'__ab' + doc + '_' + (++n)"));
+        assert!(p.contains("confirm") && p.contains("is not available in a page"));
     }
 }
