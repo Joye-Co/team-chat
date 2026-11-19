@@ -33,6 +33,13 @@ fn tile_box() -> (Pixels, Pixels) {
     (TILE.0 + around, TILE.1 + around + space::S8 + text::UI.1)
 }
 
+/// What lies around a tile's picture on its leading side: the button's p 4,
+/// the ring space and the 2 px ring.
+fn tile_lead() -> Pixels {
+    use crate::ui::native::tokens::space;
+    space::S4 + RING + space::S2
+}
+
 pub struct AppearancePage {
     size: Entity<SliderState>,
     _subscriptions: Vec<Subscription>,
@@ -191,7 +198,7 @@ impl Render for AppearancePage {
                         .child(
                             div()
                                 .n_body()
-                                .when(on, |d| d.font_weight(gpui::FontWeight::MEDIUM))
+                                .when(on, |d| d.font_weight(crate::theme::MEDIUM_WEIGHT))
                                 .text_color(if on { k.label } else { k.secondary })
                                 .child(title),
                         ),
@@ -221,7 +228,10 @@ impl Render for AppearancePage {
             GroupedForm::new().row(
                 div()
                     .w_full()
-                    .p(crate::ui::native::metrics::FORM_ROW_INSET)
+                    // The picture, not its hover box, sits on the form inset.
+                    .pl(crate::ui::native::metrics::FORM_ROW_INSET - tile_lead())
+                    .pr(crate::ui::native::metrics::FORM_ROW_INSET)
+                    .py(crate::ui::native::metrics::FORM_ROW_INSET)
                     .flex()
                     .gap(space::S24)
                     .children(tiles),

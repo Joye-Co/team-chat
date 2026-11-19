@@ -24,8 +24,11 @@ use crate::{
     data::{AdminError, MachineInfo, Member, Ownership, PersonalBot},
     ui::native::{
         AlertLayout, NativeSwitch, NativeTextField, NativeType as _, PushSize, PushStyle,
-        SheetLayout, SheetWidth, alert_button, disabled_push, native_colors, push_button,
-        sheet::sheet_status_error, tokens,
+        SheetLayout, SheetWidth, alert_button, disabled_push, native_colors,
+        page::{AlertKind, page_alert},
+        push_button,
+        sheet::sheet_status_error,
+        tokens,
     },
 };
 
@@ -139,7 +142,7 @@ fn finish<T: 'static>(reply: crate::data::AdminReply<T>, after: After, cx: &mut 
 fn ask(
     id: &'static str,
     title: String,
-    message: &'static str,
+    message: String,
     action: &'static str,
     destructive: bool,
     run: impl Fn(&mut App) + 'static,
@@ -151,7 +154,7 @@ fn ask(
         let run = run.clone();
         AlertLayout::new(title.clone())
             .icon(widgets::app_icon(cx))
-            .message(message)
+            .message(message.clone())
             .buttons([
                 alert_button((id, 0usize), action, PushStyle::Default, destructive, cx).on_click(
                     move |_, window, cx| {
@@ -177,8 +180,9 @@ pub fn confirm_remove(
     let id = m.id.clone();
     ask(
         "machine-remove",
-        fill(s::MACHINE_REMOVE_TITLE, &[("name", &m.name)]),
-        s::MACHINE_REMOVE_BODY,
+        // The name is in the body: a title with it wraps to an orphan.
+        s::MACHINE_REMOVE_TITLE.to_string(),
+        fill(s::MACHINE_REMOVE_BODY, &[("name", &m.name)]),
         s::MACHINE_REMOVE_CONFIRM,
         true,
         move |cx| finish(services.provider.remove_machine(&id), after.clone(), cx),
@@ -214,8 +218,8 @@ pub fn confirm_owner(
     };
     ask(
         key,
-        fill(title, &[("name", &m.name)]),
-        body,
+        title.to_string(),
+        fill(body, &[("name", &m.name)]),
         action,
         false,
         move |cx| {
@@ -236,7 +240,7 @@ pub fn confirm_stop_this(services: Services, after: After, window: &mut Window, 
     ask(
         "machine-stop-this",
         s::THIS_STOP_TITLE.to_string(),
-        s::THIS_STOP_BODY,
+        s::THIS_STOP_BODY.to_string(),
         s::THIS_STOP_CONFIRM,
         true,
         move |cx| {
@@ -375,7 +379,7 @@ impl Render for RenameForm {
         let problem = (!typed.is_empty())
             .then(|| widgets::check_len(&typed, 64).err())
             .flatten();
-        let off = busy || typed.is_empty() || problem.is_some();
+        let off = busy || typed.is_empty() || typed == self.before || problem.is_some();
         let save = cx.entity();
         let status = match (&problem, &self.status) {
             (Some(p), _) => Some(sheet_status_error(p.clone(), cx)),
@@ -386,6 +390,7 @@ impl Render for RenameForm {
             _ => None,
         };
         SheetLayout::new(fill(s::MACHINE_RENAME_TITLE, &[("name", &self.before)]))
+            .explanation(s::MACHINE_RENAME_HINT)
             .body(
                 sheet_form().child(sheet_form_row(
                     s::MACHINE_NAME,
@@ -465,12 +470,10 @@ pub fn open_rename(
         px(300.),
         move |dialog, window, cx| {
             if first.replace(false) {
-                shown
-                    .read(cx)
-                    .name
-                    .read(cx)
-                    .focus_handle(cx)
-                    .focus(window, cx);
+                // The old name is selected, so typing replaces it.
+                let name = shown.read(cx).name.clone();
+                name.read(cx).focus_handle(cx).focus(window, cx);
+                name.update(cx, |state, cx| state.select_all(window, cx));
             }
             dialog.child(shown.clone())
         },
@@ -569,6 +572,7 @@ impl Render for ParallelForm {
             .filter(|cap| value.is_some_and(|v| v > *cap))
             .map(|cap| fill(s::MACHINE_PARALLEL_OLD, &[("n", &cap.to_string())]));
         SheetLayout::new(fill(s::MACHINE_PARALLEL_TITLE, &[("name", &self.name)]))
+            .explanation(s::MACHINE_PARALLEL_HINT)
             .body(
                 div()
                     .w_full()
@@ -597,14 +601,19 @@ impl Render for ParallelForm {
                             cx,
                         )),
                     )
-                    .child(
-                        div()
-                            .n_footnote()
-                            .text_color(k.secondary)
-                            .child(s::MACHINE_PARALLEL_HINT),
-                    )
+                    // The old service overrides the number: a warning, not fine print.
                     .when_some(old, |d, t| {
-                        d.child(div().n_footnote().text_color(k.secondary).child(t))
+                        d.child(crate::ui::native::page::on_card(
+                            page_alert(
+                                "machine-parallel-old",
+                                AlertKind::Warning,
+                                t,
+                                None,
+                                None,
+                                cx,
+                            ),
+                            cx,
+                        ))
                     }),
             )
             .when_some(status, |l, st| l.status(st))
@@ -691,12 +700,10 @@ pub fn open_parallel(
         px(320.),
         move |dialog, window, cx| {
             if first.replace(false) {
-                shown
-                    .read(cx)
-                    .count
-                    .read(cx)
-                    .focus_handle(cx)
-                    .focus(window, cx);
+                // The old number is selected, so typing replaces it.
+                let count = shown.read(cx).count.clone();
+                count.read(cx).focus_handle(cx).focus(window, cx);
+                count.update(cx, |state, cx| state.select_all(window, cx));
             }
             dialog.child(shown.clone())
         },
@@ -881,10 +888,10 @@ impl Render for MyBotsForm {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = native_colors(cx);
         let page = cx.entity();
-        let rows: Vec<gpui::AnyElement> = self
+        let rows: Vec<(gpui::AnyElement, gpui::Pixels)> = self
             .rows
             .iter()
-            .map(|r| {
+            .flat_map(|r| {
                 let (id, page) = (r.member.id.clone(), page.clone());
                 let switch = NativeSwitch::new(
                     gpui::ElementId::Name(format!("my-bot-{}", r.member.id).into()),
@@ -895,53 +902,58 @@ impl Render for MyBotsForm {
                     let id = id.clone();
                     page.update(cx, |f, cx| f.toggle(&id, on, cx));
                 });
-                div()
+                // A form row like any other (2.8): h44, the row inset, a 24
+                // avatar; the folder it works in is its own row under it.
+                let member = div()
                     .w_full()
+                    .h(tokens::metrics::FORM_ROW)
+                    .px(tokens::metrics::FORM_ROW_INSET)
                     .flex()
-                    .flex_col()
-                    .gap(tokens::space::S6)
-                    .px(tokens::space::S12)
-                    .py(tokens::space::S8)
+                    .items_center()
+                    .gap(tokens::space::S12)
+                    .child(crate::ui::MemberAvatar::new(
+                        Some(&r.member),
+                        tokens::avatar::SM,
+                    ))
                     .child(
                         div()
-                            .w_full()
-                            .flex()
-                            .items_center()
-                            .gap(tokens::space::S8)
-                            .child(crate::ui::MemberAvatar::new(
-                                Some(&r.member),
-                                tokens::avatar::XS,
-                            ))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w(px(0.))
-                                    .n_body()
-                                    .text_color(k.label)
-                                    .child(r.member.name.clone()),
-                            )
-                            .child(switch),
+                            .flex_1()
+                            .min_w(px(0.))
+                            .n_body()
+                            .text_color(k.label)
+                            .child(r.member.name.clone()),
                     )
-                    .when(r.on, |d| {
-                        d.child(sheet_form_row(
-                            s::RUNNER_REPO,
-                            NativeTextField::new(
-                                gpui::ElementId::Name(
-                                    format!("my-bot-repo-{}", r.member.id).into(),
-                                ),
-                                &r.repo,
-                            )
-                            .full_width(),
-                            cx,
-                        ))
-                    })
+                    .child(switch)
+                    .into_any_element();
+                // The line under a member starts at its name (2.8).
+                let member = (
+                    member,
+                    tokens::metrics::FORM_ROW_INSET + tokens::avatar::SM + tokens::space::S12,
+                );
+                let repo = r.on.then(|| {
+                    sheet_form_row(
+                        s::RUNNER_REPO,
+                        NativeTextField::new(
+                            gpui::ElementId::Name(format!("my-bot-repo-{}", r.member.id).into()),
+                            &r.repo,
+                        )
+                        .full_width(),
+                        cx,
+                    )
                     .into_any_element()
+                });
+                std::iter::once(member)
+                    .chain(repo.map(|row| (row, tokens::metrics::FORM_ROW_INSET)))
             })
             .collect();
         let list = if rows.is_empty() {
             widgets::quiet(s::MACHINE_MY_BOTS_EMPTY, cx).into_any_element()
         } else {
-            sheet_form().children(rows).into_any_element()
+            rows.into_iter()
+                .fold(sheet_form(), |form, (row, inset)| {
+                    form.child_with_inset(row, inset)
+                })
+                .into_any_element()
         };
         let status = match &self.status {
             Status::Failed(t) => Some(
@@ -958,15 +970,7 @@ impl Render for MyBotsForm {
             &[("name", &self.machine.name)],
         ))
         .explanation(s::MACHINE_MY_BOTS_HINT)
-        .body(
-            div()
-                .w_full()
-                .flex()
-                .flex_col()
-                .gap(tokens::space::S6)
-                .child(div().n_headline().child(s::MACHINE_MY_BOTS))
-                .child(list),
-        )
+        .body(list)
         .when_some(status, |l, st| l.status(st))
         .buttons([push_button(
             "my-bots-done",

@@ -11,11 +11,7 @@ use gpui::{
     ParentElement, Render, Styled, Subscription, Window, canvas, div, prelude::FluentBuilder as _,
     px, rgba,
 };
-use gpui_component::{
-    WindowExt as _,
-    button::Button,
-    input::{InputEvent, InputState},
-};
+use gpui_component::{WindowExt as _, button::Button};
 
 use super::widgets::{self};
 use crate::{
@@ -25,12 +21,16 @@ use crate::{
     ui::{
         Sym,
         native::{
-            GroupedForm, NativeTextField, NativeType as _, PushSize, PushStyle, SectionTitle,
-            SheetWidth, disabled_push, loading_push, metrics, native_colors, push_button,
-            sheet::sheet_status_error, tokens,
+            CodeInput, CodeInputEvent, GroupedForm, NativeType as _, PushSize, PushStyle,
+            SectionTitle, SheetWidth, code_input_width, disabled_push, loading_push, metrics,
+            native_colors, push_button, sheet::sheet_status_error, tokens,
         },
     },
 };
+
+/// The code a phone shows: eight characters in two groups of four.
+const PHONE_CODE_LEN: usize = 8;
+const PHONE_CODE_GROUP: usize = 4;
 
 /// How often the sheet asks whether the phone used the code.
 const POLL: Duration = Duration::from_secs(2);
@@ -68,7 +68,7 @@ pub struct PhoneSignIn {
     offer_run: u64,
     approve: Approve,
     approve_error: Option<EmailError>,
-    code: Entity<InputState>,
+    code: Entity<CodeInput>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -131,18 +131,20 @@ fn qr_image(text: &str) -> gpui::AnyElement {
 
 impl PhoneSignIn {
     pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let code = cx.new(|cx| InputState::new(window, cx).placeholder(s::PHONE_CODE_PLACEHOLDER));
-        let subscriptions =
-            vec![
-                cx.subscribe_in(&code, window, |this, _, e: &InputEvent, _, cx| match e {
-                    InputEvent::PressEnter { .. } => this.check_code(cx),
-                    InputEvent::Change => {
-                        this.approve_error = None;
-                        cx.notify();
-                    }
-                    _ => {}
-                }),
-            ];
+        // The same eight slots (4 – 4) the login asks this kind of code in.
+        let code = cx.new(|cx| CodeInput::new(PHONE_CODE_LEN, PHONE_CODE_GROUP, window, cx));
+        let subscriptions = vec![cx.subscribe_in(
+            &code,
+            window,
+            |this, code, e: &CodeInputEvent, _, cx| match e {
+                CodeInputEvent::Submit => this.check_code(cx),
+                CodeInputEvent::Change => {
+                    this.approve_error = None;
+                    code.update(cx, |c, cx| c.set_error(false, cx));
+                    cx.notify();
+                }
+            },
+        )];
         Self {
             services,
             offer: Offer::Loading,
@@ -223,7 +225,7 @@ impl PhoneSignIn {
     }
 
     fn typed_code(&self, cx: &App) -> String {
-        self.code.read(cx).value().trim().to_string()
+        self.code.read(cx).value(cx).trim().to_string()
     }
 
     /// 下一步: which device shows this code.
@@ -232,7 +234,7 @@ impl PhoneSignIn {
             return;
         }
         let code = self.typed_code(cx);
-        if code.is_empty() {
+        if code.chars().count() < PHONE_CODE_LEN {
             return;
         }
         self.approve = Approve::Checking;
@@ -247,6 +249,7 @@ impl PhoneSignIn {
                     Err(e) => {
                         this.approve = Approve::Code;
                         this.approve_error = Some(e);
+                        this.code.update(cx, |c, cx| c.set_error(true, cx));
                     }
                 }
                 cx.notify();
@@ -304,7 +307,7 @@ impl PhoneSignIn {
             cx,
             SheetWidth::Form,
             px(500.),
-            move |dialog, window, cx| {
+            move |dialog, _, cx| {
                 let page = this.read(cx);
                 let k = native_colors(cx);
                 let status_line = |text: String, color: Hsla| {
@@ -347,19 +350,33 @@ impl PhoneSignIn {
                                     .when(expired || used, |d| d.opacity(0.2))
                                     .child(qr_image(&offer.qr_text)),
                             )
+                            // What the code under the QR is for.
                             .child(
                                 div()
                                     .pt(tokens::space::S12)
+                                    .n_subheadline()
+                                    .text_color(k.secondary)
+                                    .child(s::PHONE_QR_CODE_LABEL),
+                            )
+                            .child(
+                                div()
+                                    .pt(tokens::space::S4)
                                     .n_title3()
                                     .font_family(crate::theme::mono_font_family())
                                     .text_color(if expired { k.tertiary } else { k.label })
                                     .child(offer.code.clone()),
                             )
                             .child(match state {
-                                PhoneOfferState::Waiting => {
-                                    status_line(s::PHONE_QR_WAITING.into(), k.secondary)
-                                        .into_any_element()
-                                }
+                                PhoneOfferState::Waiting => div()
+                                    .pt(tokens::space::S16)
+                                    .flex()
+                                    .items_center()
+                                    .gap(tokens::space::S6)
+                                    .n_body()
+                                    .text_color(k.secondary)
+                                    .child(crate::ui::motion::spinner().color(k.secondary))
+                                    .child(s::PHONE_QR_WAITING)
+                                    .into_any_element(),
                                 PhoneOfferState::Used { device_name } => div()
                                     .pt(tokens::space::S16)
                                     .flex()
@@ -390,18 +407,26 @@ impl PhoneSignIn {
                     }
                 };
                 let close_this = this.clone();
-                let close = crate::ui::native::icon_button(
-                    "phone-qr-close",
-                    crate::ui::sf_symbols::Sf::Close,
-                    common::CLOSE,
-                    crate::ui::native::IconSize::Small,
-                    window,
-                    cx,
-                )
-                .on_click(move |_, window, cx| {
-                    close_this.update(cx, |p, _| p.stop_offer());
-                    window.close_dialog(cx)
-                });
+                // The only button while the phone is awaited (outline), and
+                // 关闭 once it has signed in; quiet under 换一个.
+                let (label, style) = match &page.offer {
+                    Offer::Ready {
+                        state: PhoneOfferState::Used { .. },
+                        ..
+                    } => (common::CLOSE, PushStyle::Outline),
+                    Offer::Ready {
+                        state: PhoneOfferState::Waiting,
+                        ..
+                    }
+                    | Offer::Loading => (common::CANCEL, PushStyle::Outline),
+                    _ => (common::CANCEL, PushStyle::Ghost),
+                };
+                let close = push_button("phone-qr-close", label, style, PushSize::Large, cx)
+                    .w_full()
+                    .on_click(move |_, window, cx| {
+                        close_this.update(cx, |p, _| p.stop_offer());
+                        window.close_dialog(cx)
+                    });
                 let cancel_this = this.clone();
                 dialog
                     .on_cancel(move |_, _, cx| {
@@ -409,7 +434,7 @@ impl PhoneSignIn {
                         true
                     })
                     .child(sheet_column(
-                        close,
+                        Some(close),
                         Sym::Phone,
                         s::PHONE_QR_TITLE,
                         s::PHONE_QR_HINT.to_string(),
@@ -426,9 +451,11 @@ impl PhoneSignIn {
             "phone-qr-renew",
             s::PHONE_QR_RENEW,
             PushStyle::Outline,
-            PushSize::Regular,
+            PushSize::Large,
             cx,
         )
+        .w(code_input_width(PHONE_CODE_LEN, PHONE_CODE_GROUP))
+        .max_w_full()
         .on_click(move |_, _, cx| this.update(cx, |p, cx| p.start_offer(cx)))
     }
 
@@ -460,82 +487,98 @@ impl PhoneSignIn {
                         PushSize::Large,
                     )
                     .w_full()
-                    .h(metrics::CODE_SLOT.1)
-                    .rounded(metrics::FIELD_RADIUS)
                 };
-                let (title, hint, content): (&'static str, String, gpui::AnyElement) =
-                    match &page.approve {
-                        Approve::Code | Approve::Checking => {
-                            let busy = page.approve == Approve::Checking;
-                            let next = this.clone();
-                            (
-                                s::PHONE_CODE_TITLE,
-                                s::PHONE_CODE_HINT.to_string(),
-                                div()
-                                    .w_full()
-                                    .flex()
-                                    .flex_col()
-                                    .child(
-                                        NativeTextField::new("phone-code-field", &page.code)
-                                            .full_width()
-                                            .error(error.is_some()),
-                                    )
-                                    .child(
-                                        div().pt(tokens::space::S24).child(
-                                            disabled_push(
-                                                full_button(
-                                                    "phone-code-next",
-                                                    if busy {
-                                                        s::PHONE_CODE_CHECKING
-                                                    } else {
-                                                        s::PHONE_CODE_NEXT
-                                                    },
-                                                    busy,
-                                                    cx,
-                                                ),
-                                                page.typed_code(cx).is_empty() && !busy,
-                                                cx,
-                                            )
-                                            .on_click(
-                                                move |_, _, cx| {
-                                                    next.update(cx, |p, cx| p.check_code(cx))
+                let (title, hint, content): (&'static str, String, gpui::AnyElement) = match &page
+                    .approve
+                {
+                    Approve::Code | Approve::Checking => {
+                        let busy = page.approve == Approve::Checking;
+                        let next = this.clone();
+                        (
+                            s::PHONE_CODE_TITLE,
+                            s::PHONE_CODE_HINT.to_string(),
+                            div()
+                                .w_full()
+                                .flex()
+                                .flex_col()
+                                .items_center()
+                                .child(page.code.clone())
+                                .child(
+                                    div().w_full().pt(tokens::space::S24).child(
+                                        disabled_push(
+                                            full_button(
+                                                "phone-code-next",
+                                                if busy {
+                                                    s::PHONE_CODE_CHECKING
+                                                } else {
+                                                    s::PHONE_CODE_NEXT
                                                 },
+                                                busy,
+                                                cx,
                                             ),
+                                            page.typed_code(cx).chars().count() < PHONE_CODE_LEN
+                                                && !busy,
+                                            cx,
+                                        )
+                                        .on_click(
+                                            move |_, _, cx| {
+                                                next.update(cx, |p, cx| p.check_code(cx))
+                                            },
                                         ),
-                                    )
-                                    .into_any_element(),
-                            )
-                        }
-                        Approve::Confirm { device, .. } | Approve::Approving { device, .. } => {
-                            let busy = matches!(page.approve, Approve::Approving { .. });
-                            let go = this.clone();
-                            (
-                                s::PHONE_APPROVE_TITLE,
-                                fill(s::PHONE_APPROVE_BODY, &[("name", device)]),
-                                full_button(
-                                    "phone-approve",
-                                    if busy {
-                                        s::PHONE_APPROVING
-                                    } else {
-                                        s::PHONE_APPROVE
-                                    },
-                                    busy,
-                                    cx,
+                                    ),
                                 )
-                                .on_click(move |_, _, cx| go.update(cx, |p, cx| p.approve(cx)))
                                 .into_any_element(),
+                        )
+                    }
+                    Approve::Confirm { device, .. } | Approve::Approving { device, .. } => {
+                        let busy = matches!(page.approve, Approve::Approving { .. });
+                        let go = this.clone();
+                        (
+                            s::PHONE_APPROVE_TITLE,
+                            fill(s::PHONE_APPROVE_BODY, &[("name", device)]),
+                            full_button(
+                                "phone-approve",
+                                if busy {
+                                    s::PHONE_APPROVING
+                                } else {
+                                    s::PHONE_APPROVE
+                                },
+                                busy,
+                                cx,
                             )
-                        }
-                        Approve::Done { device } => (
-                            s::PHONE_DONE,
-                            fill(s::PHONE_APPROVED, &[("name", device)]),
-                            full_button("phone-done", s::PHONE_DONE, false, cx)
-                                .on_click(|_, window, cx| window.close_dialog(cx))
-                                .into_any_element(),
-                        ),
-                    };
-                let body = div()
+                            .on_click(move |_, _, cx| go.update(cx, |p, cx| p.approve(cx)))
+                            .into_any_element(),
+                        )
+                    }
+                    Approve::Done { device } => (
+                        s::PHONE_DONE,
+                        fill(s::PHONE_APPROVED, &[("name", device)]),
+                        full_button("phone-done", s::PHONE_DONE, false, cx)
+                            .on_click(|_, window, cx| window.close_dialog(cx))
+                            .into_any_element(),
+                    ),
+                };
+                // 完成 closes the last step; before it, 取消 under the button,
+                // as wide and as tall as it (the email sheet's pair).
+                let cancel = (!matches!(page.approve, Approve::Done { .. })).then(|| {
+                    push_button(
+                        "phone-code-close",
+                        common::CANCEL,
+                        PushStyle::Outline,
+                        PushSize::Large,
+                        cx,
+                    )
                     .w_full()
+                    .on_click(|_, window, cx| window.close_dialog(cx))
+                });
+                // One column as wide as the code slots (2.20): the buttons of
+                // every step have their left and right edge.
+                let body = div()
+                    .w(crate::ui::native::code_input::code_input_width(
+                        PHONE_CODE_LEN,
+                        PHONE_CODE_GROUP,
+                    ))
+                    .max_w_full()
                     .flex()
                     .flex_col()
                     .items_center()
@@ -546,16 +589,8 @@ impl PhoneSignIn {
                                 .child(sheet_status_error(e, cx)),
                         )
                     })
-                    .child(content);
-                let close = crate::ui::native::icon_button(
-                    "phone-code-close",
-                    crate::ui::sf_symbols::Sf::Close,
-                    common::CLOSE,
-                    crate::ui::native::IconSize::Small,
-                    window,
-                    cx,
-                )
-                .on_click(|_, window, cx| window.close_dialog(cx));
+                    .child(content)
+                    .children(cancel.map(|b| div().w_full().pt(tokens::space::S8).child(b)));
                 let _ = k;
                 let ok = this.clone();
                 dialog
@@ -569,7 +604,7 @@ impl PhoneSignIn {
                     })
                     .on_cancel(|_, _, _| true)
                     .child(sheet_column(
-                        close,
+                        None,
                         Sym::Phone,
                         title,
                         hint,
@@ -581,10 +616,11 @@ impl PhoneSignIn {
     }
 }
 
-/// One centered column like the email sheet: ✕ in the corner, the icon, the
-/// title, one line, then the content.
+/// One centered column like the email sheet (2.20): the icon, the title,
+/// one line, then the content, with the sheet's 24 on all four sides. The
+/// way out is `cancel` under the content, never a control in the corner.
 fn sheet_column(
-    close: Button,
+    cancel: Option<Button>,
     sym: Sym,
     title: &'static str,
     hint: String,
@@ -593,21 +629,11 @@ fn sheet_column(
 ) -> gpui::Div {
     let k = native_colors(cx);
     div()
-        .relative()
         .w_full()
-        .px(tokens::space::S32)
-        .pt(tokens::space::S32)
-        .pb(tokens::space::S24)
+        .p(metrics::SHEET_PAD)
         .flex()
         .flex_col()
         .items_center()
-        .child(
-            div()
-                .absolute()
-                .top(tokens::space::S12)
-                .right(tokens::space::S12)
-                .child(close),
-        )
         .child(crate::ui::native::feedback::icon_box(sym, cx))
         .child(
             div()
@@ -632,6 +658,14 @@ fn sheet_column(
                 .justify_center()
                 .child(content),
         )
+        // The footer: 24 under the body, one shape with the code sheet's button.
+        .children(cancel.map(|b| {
+            div()
+                .w(code_input_width(PHONE_CODE_LEN, PHONE_CODE_GROUP))
+                .max_w_full()
+                .pt(tokens::space::S24)
+                .child(b)
+        }))
 }
 
 impl Render for PhoneSignIn {
@@ -658,18 +692,22 @@ impl Render for PhoneSignIn {
         )
         .on_click(move |_, window, cx| Self::open_code_sheet(page.clone(), window, cx));
         widgets::section(
-            SectionTitle::new(s::PHONE).description(s::PHONE_HINT),
-            GroupedForm::new()
-                .row(
+            SectionTitle::new(s::PHONE),
+            // The one separator of a list with media (2.8): from the title x.
+            GroupedForm::new().row(widgets::item_rows(
+                vec![
                     widgets::ItemRow::new("phone-show-row", s::PHONE_SHOW_ROW)
                         .media(widgets::icon_box_28(Sym::Phone, cx))
-                        .value(show),
-                )
-                .row(
+                        .value(show)
+                        .into_any_element(),
                     widgets::ItemRow::new("phone-enter-row", s::PHONE_ENTER_ROW)
                         .media(widgets::icon_box_28(Sym::Keyboard, cx))
-                        .value(enter),
-                ),
+                        .value(enter)
+                        .into_any_element(),
+                ],
+                tokens::height::SM,
+                cx,
+            )),
         )
     }
 }
