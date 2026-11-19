@@ -17,9 +17,7 @@ import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   approvalCard,
-  blocks,
   Bot,
-  composeCard,
   decisionCard,
   draftCard,
   formCard,
@@ -153,83 +151,6 @@ const html = (title: string, body: string) =>
   `<h1>${title}</h1>${body}</html>`;
 
 /** Forge's Markdown 产出 in 断线重连后消息重复: every block a document uses, a long code line and a long link. */
-/** An answer with code: fences with their language, a diff, and one long enough to fold. */
-const DEDUP_ANSWER = `去重放在收消息的入口。关键的改动：
-
-\`\`\`diff
---- a/crates/chat-core/src/engine.rs
-+++ b/crates/chat-core/src/engine.rs
-@@ -41,3 +41,4 @@
- let events = fetch_since(last).await?;
--self.apply(events);
-+let fresh = self.dedup.filter(events);
-+self.apply(fresh);
-\`\`\`
-
-完整的去重模块，测试也一起补了：
-
-\`\`\`rust
-use std::collections::HashMap;
-
-/// 每个话题记住见过的最大 seq。
-#[derive(Default)]
-pub struct Dedup {
-    last_seq: HashMap<String, u64>,
-    dropped: u64,
-}
-
-impl Dedup {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// 同一个话题里 seq 只增不减：见过的直接丢掉。
-    pub fn accept(&mut self, topic: &str, seq: u64) -> bool {
-        let last = self.last_seq.entry(topic.to_string()).or_insert(0);
-        if seq <= *last {
-            self.dropped += 1;
-            return false;
-        }
-        *last = seq;
-        true
-    }
-
-    /// 重连时告诉服务端从哪里开始补。
-    pub fn since(&self, topic: &str) -> u64 {
-        self.last_seq.get(topic).copied().unwrap_or(0)
-    }
-
-    pub fn dropped(&self) -> u64 {
-        self.dropped
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_replayed_message_is_dropped() {
-        let mut d = Dedup::new();
-        assert!(d.accept("t1", 1));
-        assert!(d.accept("t1", 2));
-        assert!(!d.accept("t1", 2));
-        assert_eq!(d.since("t1"), 2);
-        assert_eq!(d.dropped(), 1);
-    }
-}
-\`\`\`
-`;
-
-/** A table a person attaches to a message: the timeline shows it in the table viewer. */
-const REPRO_CSV = `次数,断线秒数,补拉条数,重复条数
-1,12,3,0
-2,35,8,1
-3,41,11,1
-4,60,20,2
-5,90,34,3
-`;
-
 const RECONNECT_REVIEW_MD = `# 重连重复问题复盘
 
 日期 2026-11-03。**结论：**重连后补拉的事件没有按 \`seq\` 去重，同一条消息会画两次。*修复已在 PR #61。*
@@ -264,80 +185,12 @@ fn merge(events: Vec<Event>, seen: &mut HashSet<String>) -> Vec<Event> {
 2. 跳过已经画过的 \`seq\`
 3. 加断线重放的测试
 
-\`\`\`mermaid
-flowchart LR
-  A[连接断开] --> B[重连]
-  B --> C{见过这个 seq?}
-  C -- 见过 --> D[丢掉]
-  C -- 没见过 --> E[画出来]
-\`\`\`
-
 参考：[重连协议](https://example.com/docs/protocol#reconnect)，以及完整日志 https://example.com/logs/2026-11-03/reconnect-duplicate-messages-desktop-client-trace-0b7c9e2f4a1d8e6b3c5f7a9d1e2b4c6d8f0a.txt
 
 ## 4. 后续
 
 - [x] 合并 PR #61
 - [ ] 下个版本发出后再观察一周
-`;
-
-/** Ledger's two-way 产出: the page reads its data snapshot and sends each change back as an event. */
-const BUDGET_PAGE = `<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>11 月投放预算</title>
-<style>
-  ul { list-style: none; margin: 0 0 12px; padding: 0; }
-  li { display: flex; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--tc-border, #8884); }
-  li span:first-child { flex: 1; min-width: 0; }
-  li b { min-width: 72px; text-align: right; font-variant-numeric: tabular-nums; }
-  button { font: inherit; color: inherit; background: var(--tc-fill, #8882); border: 1px solid var(--tc-border, #8884);
-    border-radius: 8px; padding: 2px 10px; }
-  #total, #note { color: var(--tc-muted, #888); }
-  #note { font-size: 12px; min-height: 18px; margin: 8px 0 0; }
-</style>
-</head>
-<body>
-<h2>11 月投放预算</h2>
-<ul id="list"></ul>
-<p id="total"></p>
-<p id="note"></p>
-<script>
-  const tc = window.teamchat;
-  const canEmit = !!(tc && tc.can.emit);
-  const list = document.getElementById('list'), note = document.getElementById('note');
-  const STEP = 5000;
-  let channels = [], sending = false;
-  const money = (n) => '¥' + n.toLocaleString('zh-CN');
-
-  function draw() {
-    list.replaceChildren(...channels.map((c) => {
-      const li = document.createElement('li'), name = document.createElement('span'), value = document.createElement('b');
-      name.textContent = c.name; value.textContent = money(c.amount);
-      const step = (delta, label) => {
-        const b = document.createElement('button');
-        b.textContent = label; b.disabled = !canEmit || sending || c.amount + delta < 0;
-        b.onclick = () => {
-          const before = c.amount;
-          c.amount += delta; sending = true; draw(); note.textContent = '';
-          tc.emit('budget.set', { channel: c.id, amount: c.amount })
-            .then(() => { note.textContent = '已提交，等 Ledger 确认。'; })
-            .catch(() => { c.amount = before; note.textContent = '没有提交成功，再试一次。'; })
-            .finally(() => { sending = false; draw(); });
-        };
-        return b;
-      };
-      li.append(name, step(-STEP, '−'), value, step(STEP, '+'));
-      return li;
-    }));
-    document.getElementById('total').textContent = '合计 ' + money(channels.reduce((n, c) => n + c.amount, 0));
-  }
-
-  if (tc) tc.onData((data) => { channels = (data && data.channels) || []; draw(); });
-</script>
-</body>
-</html>
 `;
 
 export async function seed(o: SeedOptions): Promise<Json> {
@@ -453,12 +306,6 @@ export async function seed(o: SeedOptions): Promise<Json> {
       await forge.ack(reconnect.groupId, (await forge.history(reconnect.groupId, reconnect.topicId)).messages[0]?.id ?? "");
       await forge.setPlan(reconnect, plan(["复现问题", "定位重复原因", "写修复和测试", "开 PR"], 4));
       await say("forge", reconnect, "**原因：**重连后补拉的事件没有按 `seq` 去重。修复在 PR #61，加了断线重放的测试。");
-      // Code in an answer (language names, highlighting, a long fence folded) and a table a
-      // person attaches (shown in its viewer, like a 产出 of that kind).
-      await say("forge", reconnect, DEDUP_ANSWER);
-      const me = await as("joye");
-      const repro = await me.uploadFile({ ...reconnect, name: "复现记录.csv", mime: "text/csv", data: new TextEncoder().encode(REPRO_CSV) });
-      await me.send(reconnect, { body: "我这边复现的记录，断得越久重复越多。", attachments: [repro] });
       // A Markdown 产出 (a file, not a page): the 产出 pane and page read it in place.
       const md = new TextEncoder().encode(RECONNECT_REVIEW_MD);
       const review = await forge.http.uploadFile({ ...reconnect, name: "重连重复问题复盘.md", mime: "text/markdown", data: md });
@@ -629,84 +476,6 @@ export async function seed(o: SeedOptions): Promise<Json> {
       await ledger.updateTopic(report.groupId, report.topicId, { status: "done" });
     }
 
-    // 夹夹增长 / 11 月投放预算: a Card v2.1 (a row of metrics, a chart, a decision) and a two-way
-    // page with its declared events and a first data snapshot.
-    const budget = await topic("joye", growth, "11 月投放预算", "@Ledger 看下 10 月各渠道的效果，11 月预算怎么分", ["ledger"]);
-    {
-      const ledger = await as("ledger");
-      await ledger.setPlan(budget, plan(["拉各渠道数据", "做预算试算", "等 Joye 定方案"], 2, true));
-      const page = await ledger.http.publishHtml({
-        ...budget,
-        title: "11 月投放预算",
-        html: BUDGET_PAGE,
-        note: "第一版",
-        events: [
-          {
-            name: "budget.set",
-            kind: "emit",
-            label: "调整渠道预算",
-            schema: { type: "object", properties: { channel: { type: "string", maxLength: 32 }, amount: { type: "number" } }, required: ["channel", "amount"] },
-          },
-        ],
-        data: {
-          channels: [
-            { id: "weibo", name: "微博", amount: 40000 },
-            { id: "xhs", name: "小红书", amount: 45000 },
-            { id: "search", name: "搜索广告", amount: 15000 },
-          ],
-        },
-        preview: {
-          title: "11 月投放预算",
-          summary: "按渠道调整预算，改动提交给 Ledger 确认。",
-          metrics: [
-            { label: "总预算", value: "¥100,000" },
-            { label: "渠道", value: "3 个" },
-          ],
-        },
-      });
-      await ledger.send(budget, {
-        cardV2: composeCard({
-          intent: "ask",
-          title: "11 月预算怎么分？",
-          summary: "小红书的获客成本最低，建议把预算往那边挪。",
-          ask: { from: [ids.joye], promise: "你定之前，我不会改投放计划。" },
-          blocks: [
-            blocks.row("numbers", [
-              blocks.metric({ id: "spend", label: "10 月花费", value: 92000, unit: "元", delta: 8, better: "down" }),
-              blocks.metric({ id: "signups", label: "新增用户", value: 6400, delta: 21, better: "up" }),
-              blocks.metric({ id: "cost", label: "获客成本", value: 14.4, unit: "元", delta: -11, better: "down" }),
-            ]),
-            blocks.chart({
-              id: "trend",
-              kind: "line",
-              label: "各渠道每周新增",
-              x: ["第 1 周", "第 2 周", "第 3 周", "第 4 周"],
-              series: [
-                { id: "weibo", name: "微博", values: [480, 520, 570, 540] },
-                { id: "xhs", name: "小红书", values: [560, 700, 860, 980] },
-                { id: "search", name: "搜索广告", values: [290, 300, 300, 300] },
-              ],
-              summary: "小红书四周一直在涨，微博和搜索广告基本持平。",
-              events: ["chart.select"],
-            }),
-            blocks.decision({
-              id: "plan",
-              label: "选一个方案",
-              required: true,
-              default: ["shift"],
-              options: [
-                { id: "shift", label: "往小红书挪 2 万", detail: "微博 4 万，小红书 4.5 万，搜索 1.5 万", recommended: true },
-                { id: "keep", label: "保持 10 月的分配" },
-              ],
-            }),
-            blocks.ref({ id: "sheet", label: "11 月投放预算", target: { kind: "artifact", artifactId: page.artifact.id, version: page.version.version } }),
-          ],
-          actions: [{ id: "confirm", label: "就这样", style: "primary", kind: "submit", inputs: ["plan"] }],
-        }),
-      });
-      await ledger.updateTopic(budget.groupId, budget.topicId, { status: "waiting_answer", waitingOn: [ids.joye] });
-    }
-
     // 夹夹增长 / 夹夹 4.0 需求: Tata asks 李雪 to fill a form (waits on someone else).
     const needs = await topic("tata", growth, "夹夹 4.0 需求", "收集一下用户最想要的功能。");
     await (await as("tata")).send(needs, {
@@ -794,7 +563,7 @@ export async function seed(o: SeedOptions): Promise<Json> {
       log(`order refused (${e instanceof Error ? e.message.slice(0, 80) : "error"}), sent as one request`);
       await topic("joye", dev, "设置页深色模式", "@Forge 给设置页加深色模式，做完请 @Scout 审一下", ["forge", "scout"]);
     }
-    log("topics: 17");
+    log("topics: 16");
 
     const machineId = await seedMachine(o, owner, ids, { dev, growth });
     // 电脑 with ownership (design-roles 3.3): 小王 (a 普通成员) adds his own computer, and his
